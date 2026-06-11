@@ -21,8 +21,8 @@ import (
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/home"
-	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/mock"
+	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store/sqlitestore"
 )
 
@@ -60,16 +60,18 @@ func run() error {
 	}
 	defer st.Close()
 
-	var client provider.Client
+	// provider 解析走 registry:profile 表 → legacy settings 键 → env。
+	// 未配置也允许启动,submit 会以 turn.failed 提示去 /providers 配置。
+	var resolver engine.Resolver
+	providerLabel := "registry"
 	if *flagMock {
-		client = mock.New()
+		resolver = registry.Static(mock.New())
+		providerLabel = "mock"
 	} else {
-		// 配置从 settings 解析(env 兜底),未配置也允许启动:
-		// submit 会以 turn.failed 提示去 settings 配置
-		client = &settingsProvider{store: st}
+		resolver = registry.New(st)
 	}
 	hub := event.NewHub()
-	eng := engine.New(st, hub, client, *flagModel)
+	eng := engine.New(st, hub, resolver, *flagModel)
 	if err := eng.Recover(context.Background()); err != nil {
 		return fmt.Errorf("recover interrupted turns: %w", err)
 	}
@@ -89,7 +91,7 @@ func run() error {
 		"channel", buildinfo.Channel(),
 		"home", dir,
 		"addr", *flagAddr,
-		"provider", client.Name(),
+		"provider", providerLabel,
 		"store", "sqlite")
 
 	errCh := make(chan error, 1)
