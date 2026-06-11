@@ -1,6 +1,6 @@
 // Package home 解析数据目录与通道默认值。
-// 隔离规则见 docs/technology-decisions.md 第 10 节:dev 一律 ~/.pudding-core-dev,
-// 旧版的 ~/.pudding 与 ~/.pudding-dev 一律不接触。
+// 隔离规则见 docs/technology-decisions.md 第 10 节:dev 一律 ~/.pudding-dev,
+// release 一律 ~/.pudding。
 package home
 
 import (
@@ -26,7 +26,7 @@ func Resolve(flagValue string) (string, error) {
 	if buildinfo.IsRelease() {
 		return filepath.Join(usr, ".pudding"), nil
 	}
-	return filepath.Join(usr, ".pudding-core-dev"), nil
+	return filepath.Join(usr, ".pudding-dev"), nil
 }
 
 // Prepare 创建 home 目录结构(第一阶段只有根目录与 logs/)。

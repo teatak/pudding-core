@@ -41,7 +41,7 @@
 15. turn 收尾的 canonical message、`turns` 状态、lifecycle events 同一事务写入。
 16. daemon 只 bind loopback,所有请求带启动 token。
 17. provider 只产出模型流(delta / finish / error);turn lifecycle 事件由 engine 生成。
-18. dev 与 release 数据目录严格隔离:dev 用 `~/.pudding-core-dev`,release 用 `~/.pudding`(仅发布构建);旧版的 `~/.pudding` 与 `~/.pudding-dev` 一律不接触;本地构建默认 dev 通道;测试只用临时目录。
+18. dev 与 release 数据目录严格隔离:dev 用 `~/.pudding-dev`,release 用 `~/.pudding`(仅发布构建);本地构建默认 dev 通道;测试只用临时目录。
 
 ## 后端技术约束
 
@@ -132,5 +132,4 @@ Wails bindings 不承载核心 session runtime。
 shadcn 规则:
 
 - Web UI 使用 shadcn 时,如果官方有组件,必须通过 `npx shadcn@latest add <component>` 引入官方组件。
-- 禁止自定义 shadcn 替代组件;业务代码只能直接组合官方组件。
-- 禁止直接修改 shadcn 官方组件源码。
+- Web UI 需要扩展 shadcn 官方组件能力时,必须新增业务包裹组件承载扩展,禁止直接修改官方组件源码。

@@ -62,7 +62,7 @@ shadcn 官方组件一律 `npx shadcn@latest add <component>` 引入;
 4. **cancel**:streaming 中显示停止按钮 → `POST /sessions/{id}/cancel`;
    半截输出会以 `interrupted: true` 的 message 落库,气泡上给出"已中断"标记。
 5. **token**:dev 模式从 `VITE_PUDDING_TOKEN` 环境变量注入(值在
-   `~/.pudding-core-dev/daemon.token`),或启动页手动粘贴存 sessionStorage。
+   `~/.pudding-dev/daemon.token`),或启动页手动粘贴存 sessionStorage。
    REST 走 `Authorization: Bearer`;SSE 走 `?token=`(EventSource 加不了 header)。
 6. Vite dev proxy:`/sessions`、`/settings` → `http://127.0.0.1:9670`。
 7. settings 页:`GET /settings` 展示 + `PUT /settings` 保存(RHF + zod),
