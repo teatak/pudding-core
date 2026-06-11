@@ -26,6 +26,7 @@ export function Composer({ token, sessionID }: ComposerProps) {
   const addPendingUser = useOverlayStore((state) => state.addPendingUser);
   const removePendingUser = useOverlayStore((state) => state.removePendingUser);
   const runningTurnID = useOverlayStore((state) => state.runningTurns[sessionID]);
+  const lastSubmitAtRef = useRef(0);
   // clientMessageID 按"草稿"生成而不是按请求生成:失败重试和快速双击
   // 复用同一个 ID,服务端幂等去重才生效;成功后才轮换到下一个草稿 ID。
   const draftIDRef = useRef<string>(crypto.randomUUID());
@@ -67,10 +68,22 @@ export function Composer({ token, sessionID }: ComposerProps) {
     mutationFn: () => cancelTurn(token, sessionID),
   });
 
+  const submitDraft = (value: z.infer<typeof composerSchema>) => {
+    lastSubmitAtRef.current = Date.now();
+    submitMutation.mutate(value);
+  };
+
+  const cancelTurnIfIntentional = () => {
+    if (Date.now() - lastSubmitAtRef.current < 500) {
+      return;
+    }
+    cancelMutation.mutate();
+  };
+
   return (
     <form
       className="border-t bg-card p-3"
-      onSubmit={form.handleSubmit((value) => submitMutation.mutate(value))}
+      onSubmit={form.handleSubmit(submitDraft)}
     >
       <div className="flex items-end gap-2">
         <Textarea
@@ -79,7 +92,7 @@ export function Composer({ token, sessionID }: ComposerProps) {
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
-              void form.handleSubmit((value) => submitMutation.mutate(value))();
+              void form.handleSubmit(submitDraft)();
             }
           }}
           {...form.register("text")}
@@ -91,8 +104,9 @@ export function Composer({ token, sessionID }: ComposerProps) {
                 aria-label="Stop"
                 disabled={cancelMutation.isPending}
                 size="icon"
+                type="button"
                 variant="outline"
-                onClick={() => cancelMutation.mutate()}
+                onClick={cancelTurnIfIntentional}
               >
                 {cancelMutation.isPending ? <Loader2 className="animate-spin" /> : <Square />}
               </Button>
