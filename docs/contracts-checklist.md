@@ -19,6 +19,7 @@
 
 SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON>`。
 续传:`Last-Event-ID` header 或 `?after=<seq>`,服务端从 events 表补发缺口。
+无位点的全新连接从尾部开始(tail),历史靠 messages 快照,不回放 lifecycle。
 
 ## 实体
 

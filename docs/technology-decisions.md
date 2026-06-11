@@ -318,6 +318,8 @@ turn.started → turn.delta* → turn.completed | turn.failed | turn.cancelled
 
 - 每个 session 的事件带单调递增 `seq`,作为 SSE `id` 字段。
 - SSE 支持 `Last-Event-ID` 续传;断线重连后从 `events` 表补发缺口。
+- 无续传位点的全新连接从尾部开始(tail),不回放历史:历史 canonical 由
+  `GET /sessions/{id}/messages` 承载;需要显式回放时用 `?after=<seq>`。
 - `turn.delta` 只走 SSE,不落库;其余 lifecycle 事件落 `events` 表。
 - UI overlay 的丢弃时机:收到 `turn.completed`(或 failed / cancelled)且对应 canonical message 可见后,删除该 turn 的 overlay。
 - 同一 session 的 events 对所有订阅者广播;daemon 不跟踪"哪个客户端在看"。多客户端同时打开同一 session 是显式支持的能力。

@@ -17,13 +17,22 @@ const pingInterval = 15 * time.Second
 // (docs/technology-decisions.md 第 8 节):
 //   - lifecycle 事件带 seq 作为 SSE id,承载 Last-Event-ID 续传;
 //   - 断线重连先从 events 表补发缺口,再接 live 流;
+//   - 无续传位点的全新连接从尾部开始(tail):历史 canonical 由 messages
+//     快照承载,全量回放 lifecycle 只会让客户端凭空重建已结束 turn 的 overlay;
 //   - turn.delta 只在 live 流里出现,丢失由 turn.completed 后 refetch 兜底。
 func (s *Server) sessionEvents(c *cart.Context) error {
 	id, _ := c.Param("id")
 	if _, err := s.store.GetSession(c.Request.Context(), id); err != nil {
 		return s.fail(c, err)
 	}
-	after := lastEventID(c.Request)
+	after, ok := lastEventID(c.Request)
+	if !ok {
+		latest, err := s.store.LatestSeq(c.Request.Context(), id)
+		if err != nil {
+			return s.fail(c, err)
+		}
+		after = latest
+	}
 
 	w := c.Response
 	h := w.Header()
@@ -89,16 +98,19 @@ func writeSSE(w flushWriter, ev event.Event) {
 	w.Flush()
 }
 
-// lastEventID 解析续传起点:标准 Last-Event-ID header 优先,
-// ?after= 供手动调试。
-func lastEventID(r *http.Request) int64 {
+// lastEventID 解析续传起点:标准 Last-Event-ID header 优先,?after= 供调试;
+// ok=false 表示请求没有携带位点(全新连接)。
+func lastEventID(r *http.Request) (int64, bool) {
 	v := r.Header.Get("Last-Event-ID")
 	if v == "" {
 		v = r.URL.Query().Get("after")
 	}
+	if v == "" {
+		return 0, false
+	}
 	n, err := strconv.ParseInt(v, 10, 64)
 	if err != nil || n < 0 {
-		return 0
+		return 0, false
 	}
-	return n
+	return n, true
 }

@@ -128,6 +128,9 @@ type Store interface {
 	// EventsAfter 返回 seq > afterSeq 的 lifecycle 事件,按 seq 升序,
 	// 承载 SSE Last-Event-ID 续传;limit <= 0 表示全部。
 	EventsAfter(ctx context.Context, sessionID string, afterSeq int64, limit int) ([]event.Event, error)
+	// LatestSeq 返回 session 当前最大事件 seq(无事件为 0),
+	// 服务无续传位点的全新 SSE 连接从尾部开始(tail)。
+	LatestSeq(ctx context.Context, sessionID string) (int64, error)
 
 	Settings(ctx context.Context) (map[string]string, error)
 	SetSettings(ctx context.Context, kv map[string]string) error

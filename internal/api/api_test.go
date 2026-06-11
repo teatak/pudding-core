@@ -163,4 +163,17 @@ func TestSubmitStreamAndResume(t *testing.T) {
 	if len(frames) != 1 || frames[0].event != "turn.completed" || frames[0].id != "2" {
 		t.Fatalf("resume after=1 must replay exactly seq 2, got %+v", frames)
 	}
+
+	// tail:无位点的全新连接不回放历史,只看到连接后的新 turn
+	done2 := make(chan []sseFrame, 1)
+	go func() { done2 <- readSSE(t, eventsURL, "turn.completed", 5*time.Second) }()
+	time.Sleep(100 * time.Millisecond)
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/"+sess.ID+"/submit",
+		map[string]string{"clientMessageID": "c2", "text": "again"})
+	resp.Body.Close()
+	for _, f := range <-done2 {
+		if f.id == "1" || f.id == "2" {
+			t.Fatalf("fresh connection must tail, replayed old seq %s", f.id)
+		}
+	}
 }

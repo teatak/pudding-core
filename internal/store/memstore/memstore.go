@@ -276,6 +276,15 @@ func (m *Memstore) EventsAfter(_ context.Context, sessionID string, afterSeq int
 	return out, nil
 }
 
+func (m *Memstore) LatestSeq(_ context.Context, sessionID string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[sessionID]; !ok {
+		return 0, store.ErrNotFound
+	}
+	return m.seq[sessionID], nil
+}
+
 func (m *Memstore) Settings(_ context.Context) (map[string]string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

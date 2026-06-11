@@ -427,6 +427,38 @@ func (s *Store) EventsAfter(ctx context.Context, sessionID string, afterSeq int6
 	return out, rows.Err()
 }
 
+func (s *Store) LatestSeq(ctx context.Context, sessionID string) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.getSessionDB(ctx, sessionID); err != nil {
+		return 0, err
+	}
+	var seq int64
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(seq),0) FROM events WHERE session_id=?`, sessionID,
+	).Scan(&seq); err != nil {
+		return 0, err
+	}
+	return seq, nil
+}
+
+// getSessionDB 是 getSessionTx 的免事务版本,服务只读单查。
+func (s *Store) getSessionDB(ctx context.Context, id string) (*store.Session, error) {
+	var sess store.Session
+	var created, updated int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id,title,model,created_at,updated_at FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Model, &created, &updated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	sess.CreatedAt, sess.UpdatedAt = timeFromMS(created), timeFromMS(updated)
+	return &sess, nil
+}
+
 func (s *Store) Settings(ctx context.Context) (map[string]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
