@@ -178,5 +178,10 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID, model string
 			})
 		}
 	}
+	// provider 违反契约提前关 channel:cancel 中的截断仍按 cancelled 收尾,
+	// 避免用户主动停止被记成 failed。
+	if ctx.Err() != nil {
+		return store.TurnCancelled, ""
+	}
 	return store.TurnFailed, "provider stream ended without terminal chunk"
 }
