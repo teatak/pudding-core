@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,7 +23,8 @@ import (
 	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/mock"
-	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/provider/openai"
+	"github.com/teatak/pudding-core/internal/store/sqlitestore"
 )
 
 func main() {
@@ -57,12 +59,18 @@ func run() error {
 	if *flagMock {
 		client = mock.New()
 	} else {
-		// OpenAI provider 由轨道 B 交付(docs/phase-1-plan.md 第 3 节)
-		return errors.New("only --mock is available in M0")
+		baseURL := strings.TrimRight(os.Getenv("PUDDING_OPENAI_BASE_URL"), "/")
+		apiKey := os.Getenv("PUDDING_OPENAI_API_KEY")
+		if baseURL == "" || apiKey == "" {
+			return errors.New("PUDDING_OPENAI_BASE_URL and PUDDING_OPENAI_API_KEY are required unless --mock is set")
+		}
+		client = openai.New(openai.Config{BaseURL: baseURL, APIKey: apiKey})
 	}
 
-	// SQLite store 由轨道 A 交付后替换;memstore 重启即清空
-	st := memstore.New()
+	st, err := sqlitestore.Open(home.DBPath(dir))
+	if err != nil {
+		return err
+	}
 	defer st.Close()
 	hub := event.NewHub()
 	eng := engine.New(st, hub, client, *flagModel)
@@ -76,7 +84,7 @@ func run() error {
 		"home", dir,
 		"addr", *flagAddr,
 		"provider", client.Name(),
-		"store", "memory")
+		"store", "sqlite")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -94,7 +102,13 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		return err
+		if !errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		slog.Warn("puddingd shutdown timeout, closing active connections")
+		if err := server.Close(); err != nil {
+			return err
+		}
 	}
 	eng.Wait()
 	return nil
