@@ -129,20 +129,22 @@ function SessionProviderControls({ token, session }: { token: string; session: S
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
     },
   });
-  const defaultProvider = settingsQuery.data?.settings["provider.default"] || "";
+  const defaultProvider = settingsQuery.data?.settings["provider.default"] || "default";
   const providerName = session.provider || defaultProvider;
+  const activeProfile = providersQuery.data?.providers.find((profile) => profile.name === providerName);
   const modelOptions = useMemo(() => {
     const preset = PROVIDER_PRESETS.find((item) => item.id === providerName || item.name === providerName);
     const options = new Set<string>();
     if (session.model) {
       options.add(session.model);
     }
-    if (settingsQuery.data?.settings["model.default"]) {
-      options.add(settingsQuery.data.settings["model.default"]);
+    // 默认模型是 profile 属性,不存在全局默认模型
+    if (activeProfile?.defaultModel) {
+      options.add(activeProfile.defaultModel);
     }
     preset?.models.forEach((model) => options.add(model));
     return Array.from(options);
-  }, [providerName, session.model, settingsQuery.data?.settings]);
+  }, [activeProfile?.defaultModel, providerName, session.model]);
 
   return (
     <div className="hidden items-center gap-2 md:flex">

@@ -57,12 +57,10 @@ const providerFormSchema = createProviderRequest.extend({
   name: z.string().trim().min(1),
   baseURL: z.string().trim().optional(),
   apiKey: z.string().optional(),
-  suggestedModel: z.string().optional(),
 });
 
 const defaultsFormSchema = z.object({
   providerDefault: z.string(),
-  modelDefault: z.string(),
   systemPrompt: z.string(),
 });
 
@@ -190,7 +188,7 @@ function ProviderSettings({ token }: { token: string }) {
       baseURL: preset.baseURL,
       apiKey: "",
       extra: "",
-      suggestedModel: preset.defaultModel,
+      defaultModel: preset.defaultModel,
     });
   }
 
@@ -311,8 +309,8 @@ function ProviderSettings({ token }: { token: string }) {
           <Input id="provider-api-key" type="password" placeholder={editingName ? t("provider.apiKeyKeep") : "sk-..."} {...providerForm.register("apiKey")} />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="provider-suggested-model">{t("provider.suggestedModel")}</Label>
-          <Input id="provider-suggested-model" readOnly {...providerForm.register("suggestedModel")} />
+          <Label htmlFor="provider-default-model">{t("settings.defaultModel")}</Label>
+          <Input id="provider-default-model" placeholder="gpt-5.5" {...providerForm.register("defaultModel")} />
         </div>
         <DialogFooter>
           {editingName ? (
@@ -364,7 +362,6 @@ function DefaultSettings({ token }: { token: string }) {
     resolver: zodResolver(defaultsFormSchema),
     defaultValues: {
       providerDefault: DEFAULT_PROVIDER,
-      modelDefault: "",
       systemPrompt: "",
     },
   });
@@ -376,7 +373,6 @@ function DefaultSettings({ token }: { token: string }) {
     const settings = settingsQuery.data.settings;
     defaultsForm.reset({
       providerDefault: settings["provider.default"] || DEFAULT_PROVIDER,
-      modelDefault: settings["model.default"] || "",
       systemPrompt: settings.system_prompt || "",
     });
   }, [defaultsForm, settingsQuery.data]);
@@ -425,10 +421,6 @@ function DefaultSettings({ token }: { token: string }) {
         </Select>
       </div>
       <div className="grid gap-2">
-        <Label htmlFor="model-default">{t("settings.defaultModel")}</Label>
-        <Input id="model-default" placeholder="gpt-5.5" {...defaultsForm.register("modelDefault")} />
-      </div>
-      <div className="grid gap-2">
         <Label htmlFor="system-prompt">system_prompt</Label>
         <Textarea id="system-prompt" className="min-h-32" {...defaultsForm.register("systemPrompt")} />
       </div>
@@ -458,7 +450,7 @@ function emptyProviderForm(): ProviderFormValue {
     baseURL: "",
     apiKey: "",
     extra: "",
-    suggestedModel: "",
+    defaultModel: "",
   };
 }
 
@@ -469,7 +461,7 @@ function providerToForm(profile: ProviderProfile): ProviderFormValue {
     baseURL: profile.baseURL,
     apiKey: "",
     extra: profile.extra || "",
-    suggestedModel: "",
+    defaultModel: profile.defaultModel || "",
   };
 }
 
@@ -479,6 +471,7 @@ function cleanCreateProvider(value: ProviderFormValue) {
     type: value.type,
     baseURL: value.baseURL?.trim(),
     apiKey: value.apiKey?.trim(),
+    defaultModel: value.defaultModel?.trim(),
     extra: value.extra?.trim(),
   });
   return parsed;
@@ -489,18 +482,21 @@ function cleanPatchProvider(value: ProviderFormValue) {
     type: value.type,
     baseURL: value.baseURL?.trim(),
     apiKey: value.apiKey?.trim() || undefined,
+    defaultModel: value.defaultModel?.trim(),
     extra: value.extra?.trim(),
   });
   return parsed;
 }
 
 function defaultsPayload(value: DefaultsFormValue) {
-  const payload: Record<string, string> = {};
+  const payload: Record<string, string> = {
+    // 旧全局键随本次重构清空:默认模型已是 profile 属性
+    "model.default": "",
+  };
   if (value.providerDefault !== DEFAULT_PROVIDER) {
     payload["provider.default"] = value.providerDefault;
-  }
-  if (value.modelDefault.trim()) {
-    payload["model.default"] = value.modelDefault.trim();
+  } else {
+    payload["provider.default"] = "";
   }
   if (value.systemPrompt.trim()) {
     payload.system_prompt = value.systemPrompt;
