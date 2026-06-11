@@ -5,6 +5,7 @@
 CREATE TABLE IF NOT EXISTS sessions (
     id         TEXT PRIMARY KEY,
     title      TEXT    NOT NULL DEFAULT '',
+    provider   TEXT    NOT NULL DEFAULT '', -- provider profile 名,空 = 默认
     model      TEXT    NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL, -- unix ms
     updated_at INTEGER NOT NULL
@@ -15,6 +16,8 @@ CREATE TABLE IF NOT EXISTS turns (
     session_id        TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     client_message_id TEXT    NOT NULL,
     status            TEXT    NOT NULL CHECK (status IN ('running','completed','failed','cancelled')),
+    provider          TEXT    NOT NULL DEFAULT '', -- BeginTurn 时刻快照
+    model             TEXT    NOT NULL DEFAULT '',
     error             TEXT    NOT NULL DEFAULT '',
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL,
@@ -56,4 +59,15 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
+);
+
+-- provider profile:命名的 LLM 端点实例(technology-decisions 第 5 节)
+CREATE TABLE IF NOT EXISTS provider_profiles (
+    name       TEXT PRIMARY KEY,
+    type       TEXT    NOT NULL,            -- 决定用哪个 Client 实现
+    base_url   TEXT    NOT NULL DEFAULT '',
+    api_key    TEXT    NOT NULL DEFAULT '', -- 明文,安全性同第 9 节;API 层只进不出
+    extra      TEXT    NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
 );

@@ -11,4 +11,10 @@ const (
 	SettingOpenAIAPIKey = "provider.openai.api_key"
 	// SettingDefaultModel:session.model 为空时的默认模型,优先于 --model flag。
 	SettingDefaultModel = "model.default"
+	// SettingDefaultProvider:session.provider 为空时的默认 profile 名,
+	// 再为空回落内置 "default"。
+	SettingDefaultProvider = "provider.default"
 )
+
+// DefaultProviderProfile 是内置默认 profile 名。
+const DefaultProviderProfile = "default"

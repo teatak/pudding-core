@@ -23,16 +23,31 @@ var (
 const EventsRetainPerSession = 1000
 
 type Session struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title"`
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	// Provider 是 provider profile 名,空 = 默认 profile(settings provider.default)。
+	Provider  string    `json:"provider"`
 	Model     string    `json:"model"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 type SessionUpdate struct {
-	Title *string `json:"title"`
-	Model *string `json:"model"`
+	Title    *string `json:"title"`
+	Provider *string `json:"provider"`
+	Model    *string `json:"model"`
+}
+
+// ProviderProfile 描述一个 LLM 端点实例(docs/technology-decisions.md 第 5 节)。
+// APIKey 只进不出:API 层读端点一律脱敏。
+type ProviderProfile struct {
+	Name      string    `json:"name"`
+	Type      string    `json:"type"` // openai-compatible | google | ...
+	BaseURL   string    `json:"baseURL"`
+	APIKey    string    `json:"-"`
+	Extra     string    `json:"extra,omitempty"` // type 特有参数,JSON
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 type Role string
@@ -70,9 +85,12 @@ type Turn struct {
 	SessionID       string     `json:"sessionID"`
 	ClientMessageID string     `json:"clientMessageID"`
 	Status          TurnStatus `json:"status"`
-	Error           string     `json:"error,omitempty"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	UpdatedAt       time.Time  `json:"updatedAt"`
+	// Provider / Model 是 BeginTurn 时刻的解析快照,审计与 UI 标注用。
+	Provider  string    `json:"provider,omitempty"`
+	Model     string    `json:"model,omitempty"`
+	Error     string    `json:"error,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 type BeginTurnInput struct {
@@ -81,6 +99,9 @@ type BeginTurnInput struct {
 	UserMessageID   string
 	ClientMessageID string
 	UserText        string
+	// Provider / Model 由 engine 在提交时刻解析后传入,随 turn 落库。
+	Provider string
+	Model    string
 }
 
 type BeginTurnResult struct {
@@ -139,6 +160,12 @@ type Store interface {
 
 	Settings(ctx context.Context) (map[string]string, error)
 	SetSettings(ctx context.Context, kv map[string]string) error
+
+	// provider profiles:PutProviderProfile 为按 Name upsert。
+	ListProviderProfiles(ctx context.Context) ([]*ProviderProfile, error)
+	GetProviderProfile(ctx context.Context, name string) (*ProviderProfile, error)
+	PutProviderProfile(ctx context.Context, p *ProviderProfile) error
+	DeleteProviderProfile(ctx context.Context, name string) error
 
 	Close() error
 }

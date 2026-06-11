@@ -21,6 +21,7 @@ type Memstore struct {
 	events   map[string][]event.Event    // sessionID → seq 升序
 	seq      map[string]int64
 	settings map[string]string
+	profiles map[string]*store.ProviderProfile
 }
 
 func New() *Memstore {
@@ -31,6 +32,7 @@ func New() *Memstore {
 		events:   make(map[string][]event.Event),
 		seq:      make(map[string]int64),
 		settings: make(map[string]string),
+		profiles: make(map[string]*store.ProviderProfile),
 	}
 }
 
@@ -78,6 +80,9 @@ func (m *Memstore) UpdateSession(_ context.Context, id string, upd store.Session
 	}
 	if upd.Title != nil {
 		s.Title = *upd.Title
+	}
+	if upd.Provider != nil {
+		s.Provider = *upd.Provider
 	}
 	if upd.Model != nil {
 		s.Model = *upd.Model
@@ -135,6 +140,8 @@ func (m *Memstore) BeginTurn(_ context.Context, in store.BeginTurnInput) (*store
 		SessionID:       in.SessionID,
 		ClientMessageID: in.ClientMessageID,
 		Status:          store.TurnRunning,
+		Provider:        in.Provider,
+		Model:           in.Model,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
@@ -310,6 +317,54 @@ func (m *Memstore) SetSettings(_ context.Context, kv map[string]string) error {
 	for k, v := range kv {
 		m.settings[k] = v
 	}
+	return nil
+}
+
+func (m *Memstore) ListProviderProfiles(_ context.Context) ([]*store.ProviderProfile, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]*store.ProviderProfile, 0, len(m.profiles))
+	for _, p := range m.profiles {
+		cp := *p
+		out = append(out, &cp)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+func (m *Memstore) GetProviderProfile(_ context.Context, name string) (*store.ProviderProfile, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.profiles[name]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	cp := *p
+	return &cp, nil
+}
+
+func (m *Memstore) PutProviderProfile(_ context.Context, p *store.ProviderProfile) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	if existing, ok := m.profiles[p.Name]; ok {
+		p.CreatedAt = existing.CreatedAt
+	} else {
+		p.CreatedAt = now
+	}
+	p.UpdatedAt = now
+	cp := *p
+	m.profiles[p.Name] = &cp
+	return nil
+}
+
+func (m *Memstore) DeleteProviderProfile(_ context.Context, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.profiles[name]; !ok {
+		return store.ErrNotFound
+	}
+	delete(m.profiles, name)
 	return nil
 }
 

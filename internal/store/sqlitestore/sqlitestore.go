@@ -77,8 +77,8 @@ func (s *Store) CreateSession(ctx context.Context, sess *store.Session) error {
 		now := time.Now()
 		sess.CreatedAt, sess.UpdatedAt = now, now
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO sessions(id,title,model,created_at,updated_at) VALUES(?,?,?,?,?)`,
-			sess.ID, sess.Title, sess.Model, unixMS(now), unixMS(now),
+			`INSERT INTO sessions(id,title,provider,model,created_at,updated_at) VALUES(?,?,?,?,?,?)`,
+			sess.ID, sess.Title, sess.Provider, sess.Model, unixMS(now), unixMS(now),
 		)
 		return err
 	})
@@ -91,8 +91,8 @@ func (s *Store) GetSession(ctx context.Context, id string) (*store.Session, erro
 	var sess store.Session
 	var created, updated int64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id,title,model,created_at,updated_at FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Model, &created, &updated)
+		`SELECT id,title,provider,model,created_at,updated_at FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -107,7 +107,7 @@ func (s *Store) ListSessions(ctx context.Context) ([]*store.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.QueryContext(ctx, `SELECT id,title,model,created_at,updated_at FROM sessions ORDER BY updated_at DESC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,title,provider,model,created_at,updated_at FROM sessions ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +117,7 @@ func (s *Store) ListSessions(ctx context.Context) ([]*store.Session, error) {
 	for rows.Next() {
 		var sess store.Session
 		var created, updated int64
-		if err := rows.Scan(&sess.ID, &sess.Title, &sess.Model, &created, &updated); err != nil {
+		if err := rows.Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated); err != nil {
 			return nil, err
 		}
 		sess.CreatedAt, sess.UpdatedAt = timeFromMS(created), timeFromMS(updated)
@@ -136,13 +136,16 @@ func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionU
 		if upd.Title != nil {
 			sess.Title = *upd.Title
 		}
+		if upd.Provider != nil {
+			sess.Provider = *upd.Provider
+		}
 		if upd.Model != nil {
 			sess.Model = *upd.Model
 		}
 		sess.UpdatedAt = time.Now()
 		_, err = tx.ExecContext(ctx,
-			`UPDATE sessions SET title=?, model=?, updated_at=? WHERE id=?`,
-			sess.Title, sess.Model, unixMS(sess.UpdatedAt), id,
+			`UPDATE sessions SET title=?, provider=?, model=?, updated_at=? WHERE id=?`,
+			sess.Title, sess.Provider, sess.Model, unixMS(sess.UpdatedAt), id,
 		)
 		if err != nil {
 			return err
@@ -202,6 +205,8 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 			SessionID:       in.SessionID,
 			ClientMessageID: in.ClientMessageID,
 			Status:          store.TurnRunning,
+			Provider:        in.Provider,
+			Model:           in.Model,
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
@@ -215,8 +220,8 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 			CreatedAt:       now,
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO turns(id,session_id,client_message_id,status,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`,
-			turn.ID, turn.SessionID, turn.ClientMessageID, turn.Status, turn.Error, unixMS(now), unixMS(now),
+			`INSERT INTO turns(id,session_id,client_message_id,status,provider,model,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`,
+			turn.ID, turn.SessionID, turn.ClientMessageID, turn.Status, turn.Provider, turn.Model, turn.Error, unixMS(now), unixMS(now),
 		); err != nil {
 			return err
 		}
@@ -330,7 +335,7 @@ func (s *Store) RunningTurns(ctx context.Context) ([]*store.Turn, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id,session_id,client_message_id,status,error,created_at,updated_at
+		`SELECT id,session_id,client_message_id,status,provider,model,error,created_at,updated_at
 		FROM turns WHERE status=?`, store.TurnRunning)
 	if err != nil {
 		return nil, err
@@ -341,7 +346,7 @@ func (s *Store) RunningTurns(ctx context.Context) ([]*store.Turn, error) {
 	for rows.Next() {
 		var turn store.Turn
 		var created, updated int64
-		if err := rows.Scan(&turn.ID, &turn.SessionID, &turn.ClientMessageID, &turn.Status, &turn.Error, &created, &updated); err != nil {
+		if err := rows.Scan(&turn.ID, &turn.SessionID, &turn.ClientMessageID, &turn.Status, &turn.Provider, &turn.Model, &turn.Error, &created, &updated); err != nil {
 			return nil, err
 		}
 		turn.CreatedAt, turn.UpdatedAt = timeFromMS(created), timeFromMS(updated)
@@ -447,8 +452,8 @@ func (s *Store) getSessionDB(ctx context.Context, id string) (*store.Session, er
 	var sess store.Session
 	var created, updated int64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id,title,model,created_at,updated_at FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Model, &created, &updated)
+		`SELECT id,title,provider,model,created_at,updated_at FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -493,6 +498,83 @@ func (s *Store) SetSettings(ctx context.Context, kv map[string]string) error {
 	})
 }
 
+func (s *Store) ListProviderProfiles(ctx context.Context) ([]*store.ProviderProfile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT name,type,base_url,api_key,extra,created_at,updated_at FROM provider_profiles ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*store.ProviderProfile
+	for rows.Next() {
+		p, err := scanProfile(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetProviderProfile(ctx context.Context, name string) (*store.ProviderProfile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, err := scanProfile(s.db.QueryRowContext(ctx,
+		`SELECT name,type,base_url,api_key,extra,created_at,updated_at FROM provider_profiles WHERE name=?`, name))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	return p, err
+}
+
+func (s *Store) PutProviderProfile(ctx context.Context, p *store.ProviderProfile) error {
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		now := time.Now()
+		p.UpdatedAt = now
+		if p.CreatedAt.IsZero() {
+			p.CreatedAt = now
+		}
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO provider_profiles(name,type,base_url,api_key,extra,created_at,updated_at)
+			VALUES(?,?,?,?,?,?,?)
+			ON CONFLICT(name) DO UPDATE SET
+				type=excluded.type, base_url=excluded.base_url, api_key=excluded.api_key,
+				extra=excluded.extra, updated_at=excluded.updated_at`,
+			p.Name, p.Type, p.BaseURL, p.APIKey, p.Extra, unixMS(p.CreatedAt), unixMS(now),
+		)
+		return err
+	})
+}
+
+func (s *Store) DeleteProviderProfile(ctx context.Context, name string) error {
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `DELETE FROM provider_profiles WHERE name=?`, name)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return store.ErrNotFound
+		}
+		return nil
+	})
+}
+
+func scanProfile(row messageScanner) (*store.ProviderProfile, error) {
+	var p store.ProviderProfile
+	var created, updated int64
+	if err := row.Scan(&p.Name, &p.Type, &p.BaseURL, &p.APIKey, &p.Extra, &created, &updated); err != nil {
+		return nil, err
+	}
+	p.CreatedAt, p.UpdatedAt = timeFromMS(created), timeFromMS(updated)
+	return &p, nil
+}
+
 func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -511,8 +593,8 @@ func getSessionTx(ctx context.Context, tx *sql.Tx, id string) (*store.Session, e
 	var sess store.Session
 	var created, updated int64
 	err := tx.QueryRowContext(ctx,
-		`SELECT id,title,model,created_at,updated_at FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Model, &created, &updated)
+		`SELECT id,title,provider,model,created_at,updated_at FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -527,8 +609,8 @@ func getTurnTx(ctx context.Context, tx *sql.Tx, id string) (*store.Turn, error) 
 	var turn store.Turn
 	var created, updated int64
 	err := tx.QueryRowContext(ctx,
-		`SELECT id,session_id,client_message_id,status,error,created_at,updated_at FROM turns WHERE id=?`, id,
-	).Scan(&turn.ID, &turn.SessionID, &turn.ClientMessageID, &turn.Status, &turn.Error, &created, &updated)
+		`SELECT id,session_id,client_message_id,status,provider,model,error,created_at,updated_at FROM turns WHERE id=?`, id,
+	).Scan(&turn.ID, &turn.SessionID, &turn.ClientMessageID, &turn.Status, &turn.Provider, &turn.Model, &turn.Error, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -543,10 +625,10 @@ func getTurnByClientMessageIDTx(ctx context.Context, tx *sql.Tx, sessionID, clie
 	var turn store.Turn
 	var created, updated int64
 	err := tx.QueryRowContext(ctx,
-		`SELECT id,session_id,client_message_id,status,error,created_at,updated_at
+		`SELECT id,session_id,client_message_id,status,provider,model,error,created_at,updated_at
 		FROM turns WHERE session_id=? AND client_message_id=?`,
 		sessionID, clientMessageID,
-	).Scan(&turn.ID, &turn.SessionID, &turn.ClientMessageID, &turn.Status, &turn.Error, &created, &updated)
+	).Scan(&turn.ID, &turn.SessionID, &turn.ClientMessageID, &turn.Status, &turn.Provider, &turn.Model, &turn.Error, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -561,10 +643,10 @@ func runningTurnTx(ctx context.Context, tx *sql.Tx, sessionID string) (*store.Tu
 	var turn store.Turn
 	var created, updated int64
 	err := tx.QueryRowContext(ctx,
-		`SELECT id,session_id,client_message_id,status,error,created_at,updated_at
+		`SELECT id,session_id,client_message_id,status,provider,model,error,created_at,updated_at
 		FROM turns WHERE session_id=? AND status=?`,
 		sessionID, store.TurnRunning,
-	).Scan(&turn.ID, &turn.SessionID, &turn.ClientMessageID, &turn.Status, &turn.Error, &created, &updated)
+	).Scan(&turn.ID, &turn.SessionID, &turn.ClientMessageID, &turn.Status, &turn.Provider, &turn.Model, &turn.Error, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
