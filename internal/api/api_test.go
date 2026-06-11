@@ -1,0 +1,166 @@
+package api
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/teatak/pudding-core/internal/engine"
+	"github.com/teatak/pudding-core/internal/event"
+	"github.com/teatak/pudding-core/internal/provider/mock"
+	"github.com/teatak/pudding-core/internal/store"
+	"github.com/teatak/pudding-core/internal/store/memstore"
+)
+
+const testToken = "test-token"
+
+func newTestServer(t *testing.T) (*httptest.Server, store.Store) {
+	t.Helper()
+	ms := memstore.New()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, mock.New(mock.WithScript([]string{"你好", "世界"}), mock.WithDelay(5*time.Millisecond)), "m")
+	srv := httptest.NewServer(New(eng, ms, hub).Handler(testToken))
+	t.Cleanup(srv.Close)
+	return srv, ms
+}
+
+func req(t *testing.T, method, url string, body any) *http.Response {
+	t.Helper()
+	var buf bytes.Buffer
+	if body != nil {
+		if err := json.NewEncoder(&buf).Encode(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r, err := http.NewRequest(method, url, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Header.Set("Authorization", "Bearer "+testToken)
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+func decodeJSON[T any](t *testing.T, resp *http.Response) T {
+	t.Helper()
+	defer resp.Body.Close()
+	var v T
+	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+func TestAuthRequired(t *testing.T) {
+	srv, _ := newTestServer(t)
+	resp, err := http.Get(srv.URL + "/sessions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("want 401, got %d", resp.StatusCode)
+	}
+}
+
+type sseFrame struct {
+	id    string
+	event string
+}
+
+// readSSE 读取 SSE 流直到看到 stopKind 事件或超时,返回收到的帧序列。
+func readSSE(t *testing.T, url string, stopKind string, timeout time.Duration) []sseFrame {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("want text/event-stream, got %q", ct)
+	}
+
+	var frames []sseFrame
+	var cur sseFrame
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case strings.HasPrefix(line, "id: "):
+			cur.id = strings.TrimPrefix(line, "id: ")
+		case strings.HasPrefix(line, "event: "):
+			cur.event = strings.TrimPrefix(line, "event: ")
+		case line == "":
+			if cur.event != "" {
+				frames = append(frames, cur)
+				if cur.event == stopKind {
+					return frames
+				}
+			}
+			cur = sseFrame{}
+		}
+	}
+	t.Fatalf("stream ended before %s, frames: %+v", stopKind, frames)
+	return nil
+}
+
+func TestSubmitStreamAndResume(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	sess := decodeJSON[store.Session](t, req(t, http.MethodPost, srv.URL+"/sessions", map[string]string{"title": "demo"}))
+	eventsURL := fmt.Sprintf("%s/sessions/%s/events?token=%s", srv.URL, sess.ID, testToken)
+
+	// live 流:先订阅再 submit
+	done := make(chan []sseFrame, 1)
+	go func() { done <- readSSE(t, eventsURL, "turn.completed", 5*time.Second) }()
+	time.Sleep(100 * time.Millisecond)
+
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/"+sess.ID+"/submit",
+		map[string]string{"clientMessageID": "c1", "text": "hi"})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("want 202, got %d", resp.StatusCode)
+	}
+
+	frames := <-done
+	var kinds []string
+	seqs := map[string]bool{}
+	for _, f := range frames {
+		kinds = append(kinds, f.event)
+		if f.id != "" {
+			if seqs[f.id] {
+				t.Fatalf("duplicate seq %s in live stream: %+v", f.id, frames)
+			}
+			seqs[f.id] = true
+		}
+		if f.event == "turn.delta" && f.id != "" {
+			t.Fatalf("delta must not carry id: %+v", f)
+		}
+	}
+	got := strings.Join(kinds, ",")
+	if !strings.HasPrefix(got, "turn.started,turn.delta") || !strings.HasSuffix(got, "turn.completed") {
+		t.Fatalf("unexpected live sequence: %s", got)
+	}
+
+	// 续传:after=1 只应补发 seq>1 的 lifecycle,不丢不重
+	frames = readSSE(t, eventsURL+"&after=1", "turn.completed", 5*time.Second)
+	if len(frames) != 1 || frames[0].event != "turn.completed" || frames[0].id != "2" {
+		t.Fatalf("resume after=1 must replay exactly seq 2, got %+v", frames)
+	}
+}
