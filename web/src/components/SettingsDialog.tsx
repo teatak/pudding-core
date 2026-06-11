@@ -76,7 +76,9 @@ export function SettingsDialog({ token }: SettingsDialogProps) {
             <Textarea
               id="settings-text"
               className="min-h-56 font-mono text-sm"
-              placeholder={"provider.baseURL=https://...\nprovider.apiKey=..."}
+              placeholder={
+                "provider.openai.base_url=https://api.openai.com/v1\nprovider.openai.api_key=sk-...\nmodel.default=gpt-5-mini\nsystem_prompt=You are..."
+              }
               {...form.register("text")}
             />
           </div>
