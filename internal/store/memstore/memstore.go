@@ -227,6 +227,19 @@ func (m *Memstore) RunningTurn(_ context.Context, sessionID string) (*store.Turn
 	return nil, store.ErrNotFound
 }
 
+func (m *Memstore) RunningTurns(_ context.Context) ([]*store.Turn, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]*store.Turn, 0)
+	for _, t := range m.turns {
+		if t.Status == store.TurnRunning {
+			cp := *t
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
 func (m *Memstore) ListMessages(_ context.Context, sessionID string, limit int) ([]*store.Message, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -251,7 +264,7 @@ func (m *Memstore) EventsAfter(_ context.Context, sessionID string, afterSeq int
 	if _, ok := m.sessions[sessionID]; !ok {
 		return nil, store.ErrNotFound
 	}
-	var out []event.Event
+	out := make([]event.Event, 0)
 	for _, ev := range m.events[sessionID] {
 		if ev.Seq > afterSeq {
 			out = append(out, ev)

@@ -105,6 +105,31 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	return &SubmitResult{TurnID: res.Turn.ID, UserMessageID: res.UserMessage.ID}, nil
 }
 
+// Recover 把上次进程退出时残留的 running turn 收尾为 failed,在 daemon
+// 启动、开始服务之前调用一次。delta 不落库,半截输出已随进程丢失,只能
+// 如实标记失败;落库的 turn.failed 事件让重连客户端续传后 refetch 对齐。
+func (e *Engine) Recover(ctx context.Context) error {
+	turns, err := e.store.RunningTurns(ctx)
+	if err != nil {
+		return err
+	}
+	for _, t := range turns {
+		res, err := e.store.FinishTurn(ctx, store.FinishTurnInput{
+			TurnID: t.ID,
+			Status: store.TurnFailed,
+			Error:  "interrupted by daemon restart",
+		})
+		if err != nil {
+			return fmt.Errorf("recover turn %s: %w", t.ID, err)
+		}
+		e.hub.Publish(*res.FinalEvent)
+	}
+	if len(turns) > 0 {
+		slog.Info("engine: recovered interrupted turns", "count", len(turns))
+	}
+	return nil
+}
+
 // Cancel 中断 session 当前 turn;收尾(落库 + final 事件)由 runTurn 完成。
 func (e *Engine) Cancel(sessionID string) error {
 	e.mu.Lock()

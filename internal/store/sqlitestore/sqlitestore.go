@@ -113,7 +113,7 @@ func (s *Store) ListSessions(ctx context.Context) ([]*store.Session, error) {
 	}
 	defer rows.Close()
 
-	var out []*store.Session
+	out := make([]*store.Session, 0)
 	for rows.Next() {
 		var sess store.Session
 		var created, updated int64
@@ -326,6 +326,30 @@ func (s *Store) RunningTurn(ctx context.Context, sessionID string) (*store.Turn,
 	return runningTurnTx(ctx, tx, sessionID)
 }
 
+func (s *Store) RunningTurns(ctx context.Context) ([]*store.Turn, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id,session_id,client_message_id,status,error,created_at,updated_at
+		FROM turns WHERE status=?`, store.TurnRunning)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]*store.Turn, 0)
+	for rows.Next() {
+		var turn store.Turn
+		var created, updated int64
+		if err := rows.Scan(&turn.ID, &turn.SessionID, &turn.ClientMessageID, &turn.Status, &turn.Error, &created, &updated); err != nil {
+			return nil, err
+		}
+		turn.CreatedAt, turn.UpdatedAt = timeFromMS(created), timeFromMS(updated)
+		out = append(out, &turn)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) ListMessages(ctx context.Context, sessionID string, limit int) ([]*store.Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -353,7 +377,7 @@ func (s *Store) ListMessages(ctx context.Context, sessionID string, limit int) (
 	}
 	defer rows.Close()
 
-	var out []*store.Message
+	out := make([]*store.Message, 0)
 	for rows.Next() {
 		msg, err := scanMessage(rows)
 		if err != nil {
@@ -388,7 +412,7 @@ func (s *Store) EventsAfter(ctx context.Context, sessionID string, afterSeq int6
 	}
 	defer rows.Close()
 
-	var out []event.Event
+	out := make([]event.Event, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {

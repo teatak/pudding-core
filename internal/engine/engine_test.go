@@ -186,6 +186,35 @@ func TestProviderErrorFailsTurn(t *testing.T) {
 	}
 }
 
+func TestRecoverFinalizesResidualRunningTurns(t *testing.T) {
+	eng, ms, _, sid := newTestEngine(t, mock.WithDelay(time.Millisecond))
+	// 直接在 store 造一个 running turn,模拟 daemon 在 turn 进行中被 kill
+	if _, err := ms.BeginTurn(context.Background(), store.BeginTurnInput{
+		SessionID: sid, TurnID: "turn_stale", UserMessageID: "msg_stale",
+		ClientMessageID: "stale1", UserText: "killed mid-turn",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := eng.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ms.RunningTurn(context.Background(), sid); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("running turn must be finalized, got %v", err)
+	}
+	evs, _ := ms.EventsAfter(context.Background(), sid, 0, 0)
+	last := evs[len(evs)-1]
+	if last.Kind != event.TurnFailed || last.TurnID != "turn_stale" || last.Error == "" {
+		t.Fatalf("want turn.failed for stale turn, got %+v", last)
+	}
+	// 恢复后 session 必须立即可用
+	if _, err := eng.Submit(context.Background(), SubmitInput{SessionID: sid, ClientMessageID: "c-new", Text: "hi"}); err != nil {
+		t.Fatalf("submit after recover must work: %v", err)
+	}
+	eng.Wait()
+}
+
 func TestSessionsAreIsolated(t *testing.T) {
 	eng, ms, _, sidA := newTestEngine(t, mock.WithDelay(40*time.Millisecond))
 	sessB := &store.Session{ID: "sess_2"}

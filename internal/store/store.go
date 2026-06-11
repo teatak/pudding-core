@@ -120,6 +120,8 @@ type Store interface {
 	FinishTurn(ctx context.Context, in FinishTurnInput) (*FinishTurnResult, error)
 	// RunningTurn 返回 session 当前 running 的 turn,无则 ErrNotFound。
 	RunningTurn(ctx context.Context, sessionID string) (*Turn, error)
+	// RunningTurns 返回所有 session 的 running turn,服务 daemon 启动恢复。
+	RunningTurns(ctx context.Context) ([]*Turn, error)
 
 	// ListMessages 按时间升序返回最近 limit 条;limit <= 0 表示全部。
 	ListMessages(ctx context.Context, sessionID string, limit int) ([]*Message, error)
