@@ -1,0 +1,59 @@
+-- schema 契约(docs/technology-decisions.md 第 6 节)。
+-- SQLite 实现(轨道 A)嵌入本文件执行;memstore 以此为语义参照。
+-- 运行参数由实现负责:PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; 单 writer。
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id         TEXT PRIMARY KEY,
+    title      TEXT    NOT NULL DEFAULT '',
+    model      TEXT    NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL, -- unix ms
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS turns (
+    id                TEXT PRIMARY KEY,
+    session_id        TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    client_message_id TEXT    NOT NULL,
+    status            TEXT    NOT NULL CHECK (status IN ('running','completed','failed','cancelled')),
+    error             TEXT    NOT NULL DEFAULT '',
+    created_at        INTEGER NOT NULL,
+    updated_at        INTEGER NOT NULL,
+    -- submit 幂等键:同 session 内 clientMessageID 唯一
+    UNIQUE (session_id, client_message_id)
+);
+
+-- 第一阶段不允许并发 turn:每个 session 至多一个 running(开放问题第 14 节)
+CREATE UNIQUE INDEX IF NOT EXISTS turns_one_running
+    ON turns(session_id) WHERE status = 'running';
+
+CREATE TABLE IF NOT EXISTS messages (
+    id                TEXT PRIMARY KEY,
+    session_id        TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    turn_id           TEXT    NOT NULL DEFAULT '',
+    role              TEXT    NOT NULL CHECK (role IN ('user','assistant')),
+    text              TEXT    NOT NULL,
+    client_message_id TEXT    NOT NULL DEFAULT '', -- 仅 user message
+    interrupted       INTEGER NOT NULL DEFAULT 0,  -- cancel/failed 保留的半截输出
+    created_at        INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS messages_session_created
+    ON messages(session_id, created_at);
+
+-- events 只存 lifecycle 事件(turn.delta / ping 不落库);
+-- seq 为 per-session 单调递增,在写入事务内分配。
+-- retention:按条数或天数滚动清理,只需保住 SSE 续传窗口(第 6 节)。
+CREATE TABLE IF NOT EXISTS events (
+    session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    seq        INTEGER NOT NULL,
+    kind       TEXT    NOT NULL,
+    turn_id    TEXT    NOT NULL DEFAULT '',
+    payload    TEXT    NOT NULL, -- 完整 Event JSON
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (session_id, seq)
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);

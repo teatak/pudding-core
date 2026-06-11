@@ -1,0 +1,65 @@
+// 事件协议的 web 侧镜像。Go 侧唯一来源:internal/event/types.go;
+// 字段名一一对应,改动必须两边同步并更新 docs/contracts-checklist.md。
+// 本目录在轨道 E 脚手架落地后由前端直接 import。
+import { z } from "zod";
+
+export const turnStartedEvent = z.object({
+  kind: z.literal("turn.started"),
+  seq: z.number().int().positive(),
+  sessionID: z.string(),
+  turnID: z.string(),
+  clientMessageID: z.string(),
+  userMessageID: z.string(),
+});
+
+// turn.delta 不落库、无 seq;丢失由 turn.completed 后 refetch 兜底
+export const turnDeltaEvent = z.object({
+  kind: z.literal("turn.delta"),
+  sessionID: z.string(),
+  turnID: z.string(),
+  delta: z.string(),
+});
+
+export const turnCompletedEvent = z.object({
+  kind: z.literal("turn.completed"),
+  seq: z.number().int().positive(),
+  sessionID: z.string(),
+  turnID: z.string(),
+  assistantMessageID: z.string(),
+});
+
+export const turnFailedEvent = z.object({
+  kind: z.literal("turn.failed"),
+  seq: z.number().int().positive(),
+  sessionID: z.string(),
+  turnID: z.string(),
+  error: z.string(),
+  // 失败前已有部分输出时,半截 message 保留并标记 interrupted
+  assistantMessageID: z.string().optional(),
+  interrupted: z.boolean().optional(),
+});
+
+export const turnCancelledEvent = z.object({
+  kind: z.literal("turn.cancelled"),
+  seq: z.number().int().positive(),
+  sessionID: z.string(),
+  turnID: z.string(),
+  assistantMessageID: z.string().optional(),
+  interrupted: z.boolean().optional(),
+});
+
+export const pingEvent = z.object({
+  kind: z.literal("ping"),
+  sessionID: z.string(),
+});
+
+export const sessionEvent = z.discriminatedUnion("kind", [
+  turnStartedEvent,
+  turnDeltaEvent,
+  turnCompletedEvent,
+  turnFailedEvent,
+  turnCancelledEvent,
+  pingEvent,
+]);
+
+export type SessionEvent = z.infer<typeof sessionEvent>;

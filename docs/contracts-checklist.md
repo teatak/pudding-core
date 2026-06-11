@@ -1,0 +1,48 @@
+# 契约字段对照 checklist
+
+> 用途:事件协议与 REST payload 的 Go ↔ TS 字段对照(docs/phase-1-plan.md 第 2 节)。  
+> 来源:Go = `internal/event/types.go` / `internal/store/store.go`;TS = `web/contracts/`。  
+> 规则:改任何一边必须同步另一边并更新本表,契约改动单独提交。
+
+## 事件协议
+
+| kind | seq | 落库 | 专属字段 |
+| --- | --- | --- | --- |
+| `turn.started` | ✓ | ✓ | `clientMessageID`, `userMessageID` |
+| `turn.delta` | — | — | `delta` |
+| `turn.completed` | ✓ | ✓ | `assistantMessageID` |
+| `turn.failed` | ✓ | ✓ | `error`;有半截输出时 `assistantMessageID` + `interrupted` |
+| `turn.cancelled` | ✓ | ✓ | 有半截输出时 `assistantMessageID` + `interrupted` |
+| `ping` | — | — | — |
+
+公共字段:`sessionID`(全部)、`turnID`(除 ping)。
+
+SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON>`。
+续传:`Last-Event-ID` header 或 `?after=<seq>`,服务端从 events 表补发缺口。
+
+## 实体
+
+| 实体 | Go | TS | 字段 |
+| --- | --- | --- | --- |
+| Session | `store.Session` | `session` | id, title, model, createdAt, updatedAt |
+| Message | `store.Message` | `message` | id, sessionID, turnID, role, text, clientMessageID?, interrupted?, createdAt |
+
+时间一律 RFC3339 字符串(Go `time.Time` 默认 JSON 编码)。
+
+## REST 请求/响应
+
+| 端点 | 请求 | 响应 | 错误 |
+| --- | --- | --- | --- |
+| `POST /sessions` | `{title?, model?}` | 201 Session | — |
+| `GET /sessions` | — | `{sessions: []}` | — |
+| `GET /sessions/{id}` | — | Session | 404 |
+| `PATCH /sessions/{id}` | `{title?, model?}` | Session | 404 |
+| `DELETE /sessions/{id}` | — | 204 | 404 |
+| `POST /sessions/{id}/submit` | `{clientMessageID, text}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_running` |
+| `POST /sessions/{id}/cancel` | — | 202 `{status}` | 404 / 409 `no_running_turn` |
+| `GET /sessions/{id}/events` | SSE | event stream | 404 |
+| `GET /sessions/{id}/messages` | — | `{messages: []}` | 404 |
+| `GET /settings` | — | `{settings: {}}` | — |
+| `PUT /settings` | `{k: v}` | 204 | 400 |
+
+鉴权:`Authorization: Bearer <token>` 或 `?token=`(EventSource 用),401 统一 `{"error":"unauthorized"}`。
