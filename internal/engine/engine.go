@@ -25,10 +25,16 @@ var (
 	ErrEmptyInput    = errors.New("engine: empty text or clientMessageID")
 )
 
+// Resolver 把 provider profile 名解析为 client 实例;
+// 生产实现是 provider/registry,--mock 与测试用 registry.Static。
+type Resolver interface {
+	Resolve(ctx context.Context, name string) (provider.Client, error)
+}
+
 type Engine struct {
 	store        store.Store
 	hub          *event.Hub
-	client       provider.Client
+	resolver     Resolver
 	builder      *contextbuilder.Builder
 	defaultModel string
 
@@ -37,11 +43,11 @@ type Engine struct {
 	wg      sync.WaitGroup
 }
 
-func New(s store.Store, hub *event.Hub, client provider.Client, defaultModel string) *Engine {
+func New(s store.Store, hub *event.Hub, resolver Resolver, defaultModel string) *Engine {
 	return &Engine{
 		store:        s,
 		hub:          hub,
-		client:       client,
+		resolver:     resolver,
 		builder:      contextbuilder.New(s),
 		defaultModel: defaultModel,
 		running:      make(map[string]context.CancelFunc),
@@ -70,12 +76,35 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 		return nil, err
 	}
 
+	// provider / model 在提交时刻解析并随 turn 快照,改配置不影响进行中的 turn。
+	// 解析顺序:session 字段 > settings 默认键 > 内置兜底(第 5 节)。
+	var settings map[string]string
+	if sess.Provider == "" || sess.Model == "" {
+		settings, _ = e.store.Settings(ctx)
+	}
+	providerName := sess.Provider
+	if providerName == "" {
+		providerName = settings[store.SettingDefaultProvider]
+	}
+	if providerName == "" {
+		providerName = store.DefaultProviderProfile
+	}
+	model := sess.Model
+	if model == "" {
+		model = settings[store.SettingDefaultModel]
+	}
+	if model == "" {
+		model = e.defaultModel
+	}
+
 	res, err := e.store.BeginTurn(ctx, store.BeginTurnInput{
 		SessionID:       in.SessionID,
 		TurnID:          store.NewID("turn"),
 		UserMessageID:   store.NewID("msg"),
 		ClientMessageID: in.ClientMessageID,
 		UserText:        in.Text,
+		Provider:        providerName,
+		Model:           model,
 	})
 	if err != nil {
 		return nil, err
@@ -89,16 +118,6 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	}
 	e.hub.Publish(*res.StartedEvent)
 
-	// 模型解析:session.model > settings model.default > --model flag
-	model := sess.Model
-	if model == "" {
-		if kv, err := e.store.Settings(ctx); err == nil {
-			model = kv[store.SettingDefaultModel]
-		}
-	}
-	if model == "" {
-		model = e.defaultModel
-	}
 	// turn 的生命周期长于 HTTP 请求,不继承请求 ctx;取消只走 Cancel()。
 	turnCtx, cancel := context.WithCancel(context.Background())
 	e.mu.Lock()
@@ -106,7 +125,7 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	e.mu.Unlock()
 
 	e.wg.Add(1)
-	go e.runTurn(turnCtx, in.SessionID, res.Turn.ID, model)
+	go e.runTurn(turnCtx, in.SessionID, res.Turn.ID, providerName, model)
 
 	return &SubmitResult{TurnID: res.Turn.ID, UserMessageID: res.UserMessage.ID}, nil
 }
@@ -151,7 +170,7 @@ func (e *Engine) Cancel(sessionID string) error {
 // Wait 等待所有进行中的 turn 收尾,服务优雅退出。
 func (e *Engine) Wait() { e.wg.Wait() }
 
-func (e *Engine) runTurn(ctx context.Context, sessionID, turnID, model string) {
+func (e *Engine) runTurn(ctx context.Context, sessionID, turnID, providerName, model string) {
 	defer e.wg.Done()
 	defer func() {
 		e.mu.Lock()
@@ -160,7 +179,7 @@ func (e *Engine) runTurn(ctx context.Context, sessionID, turnID, model string) {
 	}()
 
 	var buf strings.Builder
-	status, errMsg := e.streamTurn(ctx, sessionID, turnID, model, &buf)
+	status, errMsg := e.streamTurn(ctx, sessionID, turnID, providerName, model, &buf)
 
 	in := store.FinishTurnInput{TurnID: turnID, Status: status, Error: errMsg}
 	if status == store.TurnCompleted {
@@ -181,12 +200,16 @@ func (e *Engine) runTurn(ctx context.Context, sessionID, turnID, model string) {
 	e.hub.Publish(*res.FinalEvent)
 }
 
-func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID, model string, buf *strings.Builder) (store.TurnStatus, string) {
+func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID, providerName, model string, buf *strings.Builder) (store.TurnStatus, string) {
 	req, err := e.builder.Build(ctx, sessionID, model)
 	if err != nil {
 		return store.TurnFailed, fmt.Sprintf("build context: %v", err)
 	}
-	ch, err := e.client.Stream(ctx, req)
+	client, err := e.resolver.Resolve(ctx, providerName)
+	if err != nil {
+		return store.TurnFailed, fmt.Sprintf("provider: %v", err)
+	}
+	ch, err := client.Stream(ctx, req)
 	if err != nil {
 		return store.TurnFailed, fmt.Sprintf("provider: %v", err)
 	}

@@ -3,11 +3,14 @@ package engine
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/teatak/pudding-core/internal/event"
+	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/mock"
+	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/memstore"
 )
@@ -16,12 +19,23 @@ func newTestEngine(t *testing.T, opts ...mock.Option) (*Engine, store.Store, *ev
 	t.Helper()
 	ms := memstore.New()
 	hub := event.NewHub()
-	eng := New(ms, hub, mock.New(opts...), "mock-model")
+	eng := New(ms, hub, registry.Static(mock.New(opts...)), "mock-model")
 	sess := &store.Session{ID: "sess_1"}
 	if err := ms.CreateSession(context.Background(), sess); err != nil {
 		t.Fatal(err)
 	}
 	return eng, ms, hub, sess.ID
+}
+
+// mapResolver 按 profile 名路由到不同 client,服务多 provider 路由测试。
+type mapResolver map[string]provider.Client
+
+func (m mapResolver) Resolve(_ context.Context, name string) (provider.Client, error) {
+	c, ok := m[name]
+	if !ok {
+		return nil, errors.New("no such profile: " + name)
+	}
+	return c, nil
 }
 
 func waitTurnDone(t *testing.T, s store.Store, sessionID string) *store.Turn {
@@ -184,6 +198,101 @@ func TestProviderErrorFailsTurn(t *testing.T) {
 	if len(msgs) != 2 || !msgs[1].Interrupted {
 		t.Fatalf("partial output before failure must be kept: %+v", msgs)
 	}
+}
+
+func TestPerSessionProviderRouting(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	resolver := mapResolver{
+		"alpha": mock.New(mock.WithScript([]string{"from-alpha"}), mock.WithDelay(time.Millisecond)),
+		"beta":  mock.New(mock.WithScript([]string{"from-beta"}), mock.WithDelay(time.Millisecond)),
+	}
+	eng := New(ms, hub, resolver, "mock-model")
+	ctx := context.Background()
+
+	sessA := &store.Session{ID: "sa", Provider: "alpha"}
+	sessB := &store.Session{ID: "sb"} // 走 settings 默认
+	if err := ms.CreateSession(ctx, sessA); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.CreateSession(ctx, sessB); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.SetSettings(ctx, map[string]string{store.SettingDefaultProvider: "beta"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: "sa", ClientMessageID: "a1", Text: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: "sb", ClientMessageID: "b1", Text: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	eng.Wait()
+
+	msgsA, _ := ms.ListMessages(ctx, "sa", 0)
+	msgsB, _ := ms.ListMessages(ctx, "sb", 0)
+	if !strings.Contains(msgsA[1].Text, "from-alpha") {
+		t.Fatalf("session A must use alpha provider: %q", msgsA[1].Text)
+	}
+	if !strings.Contains(msgsB[1].Text, "from-beta") {
+		t.Fatalf("session B must use settings default provider: %q", msgsB[1].Text)
+	}
+
+	// turns 快照:provider/model 落库
+	turnsA, err := ms.RunningTurns(ctx)
+	if err != nil || len(turnsA) != 0 {
+		t.Fatalf("no running turns expected: %v %v", turnsA, err)
+	}
+	evsA, _ := ms.EventsAfter(ctx, "sa", 0, 0)
+	if len(evsA) != 2 {
+		t.Fatalf("want 2 lifecycle events for A, got %d", len(evsA))
+	}
+	if _, err := ms.GetSession(ctx, "sa"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTurnSnapshotsProviderAndModel(t *testing.T) {
+	eng, ms, _, sid := newTestEngine(t, mock.WithScript([]string{"ok"}), mock.WithDelay(time.Millisecond))
+	ctx := context.Background()
+	if err := ms.SetSettings(ctx, map[string]string{
+		store.SettingDefaultProvider: "default",
+		store.SettingDefaultModel:    "snap-model",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+
+	again, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "hi"})
+	if err != nil || !again.Duplicate {
+		t.Fatalf("duplicate expected: %+v %v", again, err)
+	}
+	if again.TurnID != res.TurnID {
+		t.Fatal("duplicate must return original turn")
+	}
+	turn, err := findTurn(ms, sid, "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn.Provider != "default" || turn.Model != "snap-model" {
+		t.Fatalf("turn snapshot wrong: provider=%q model=%q", turn.Provider, turn.Model)
+	}
+}
+
+func findTurn(ms store.Store, sessionID, clientMessageID string) (*store.Turn, error) {
+	res, err := ms.BeginTurn(context.Background(), store.BeginTurnInput{
+		SessionID: sessionID, TurnID: "probe", UserMessageID: "probe",
+		ClientMessageID: clientMessageID, UserText: "probe",
+	})
+	if err != nil {
+		return nil, err
+	}
+	return res.Turn, nil
 }
 
 func TestRecoverFinalizesResidualRunningTurns(t *testing.T) {
