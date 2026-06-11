@@ -1,1 +1,7 @@
 .DS_Store
+bin/
+node_modules/
+dist/
+*.db
+*.db-wal
+*.db-shm
