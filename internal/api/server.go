@@ -56,14 +56,15 @@ func withAuth(token string, next http.Handler) http.Handler {
 }
 
 type createSessionReq struct {
-	Title string `json:"title"`
-	Model string `json:"model"`
+	Title    string `json:"title"`
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
 }
 
 func (s *Server) createSession(c *cart.Context) error {
 	var req createSessionReq
 	_ = decode(c, &req) // body 可为空
-	sess := &store.Session{ID: store.NewID("sess"), Title: req.Title, Model: req.Model}
+	sess := &store.Session{ID: store.NewID("sess"), Title: req.Title, Provider: req.Provider, Model: req.Model}
 	if err := s.store.CreateSession(c.Request.Context(), sess); err != nil {
 		return s.fail(c, err)
 	}

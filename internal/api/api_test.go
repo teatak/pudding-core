@@ -192,6 +192,19 @@ func TestProvidersCRUDRedactsAPIKey(t *testing.T) {
 	}
 }
 
+func TestCreateSessionCarriesProviderAndModel(t *testing.T) {
+	srv, _ := newTestServer(t)
+	sess := decodeJSON[store.Session](t, req(t, http.MethodPost, srv.URL+"/sessions",
+		map[string]string{"title": "x", "provider": "gem", "model": "m1"}))
+	if sess.Provider != "gem" || sess.Model != "m1" {
+		t.Fatalf("create must persist provider/model: %+v", sess)
+	}
+	got := decodeJSON[store.Session](t, req(t, http.MethodGet, srv.URL+"/sessions/"+sess.ID, nil))
+	if got.Provider != "gem" {
+		t.Fatalf("provider lost on read: %+v", got)
+	}
+}
+
 func TestSubmitStreamAndResume(t *testing.T) {
 	srv, _ := newTestServer(t)
 

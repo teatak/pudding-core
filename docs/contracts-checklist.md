@@ -35,7 +35,7 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 
 | 端点 | 请求 | 响应 | 错误 |
 | --- | --- | --- | --- |
-| `POST /sessions` | `{title?, model?}` | 201 Session | — |
+| `POST /sessions` | `{title?, provider?, model?}` | 201 Session | — |
 | `GET /sessions` | — | `{sessions: []}` | — |
 | `GET /sessions/{id}` | — | Session | 404 |
 | `PATCH /sessions/{id}` | `{title?, model?}` | Session | 404 |
