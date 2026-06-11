@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -24,7 +23,6 @@ import (
 	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/mock"
-	"github.com/teatak/pudding-core/internal/provider/openai"
 	"github.com/teatak/pudding-core/internal/store/sqlitestore"
 )
 
@@ -56,23 +54,20 @@ func run() error {
 		return err
 	}
 
-	var client provider.Client
-	if *flagMock {
-		client = mock.New()
-	} else {
-		baseURL := strings.TrimRight(os.Getenv("PUDDING_OPENAI_BASE_URL"), "/")
-		apiKey := os.Getenv("PUDDING_OPENAI_API_KEY")
-		if baseURL == "" || apiKey == "" {
-			return errors.New("PUDDING_OPENAI_BASE_URL and PUDDING_OPENAI_API_KEY are required unless --mock is set")
-		}
-		client = openai.New(openai.Config{BaseURL: baseURL, APIKey: apiKey})
-	}
-
 	st, err := sqlitestore.Open(home.DBPath(dir))
 	if err != nil {
 		return err
 	}
 	defer st.Close()
+
+	var client provider.Client
+	if *flagMock {
+		client = mock.New()
+	} else {
+		// 配置从 settings 解析(env 兜底),未配置也允许启动:
+		// submit 会以 turn.failed 提示去 settings 配置
+		client = &settingsProvider{store: st}
+	}
 	hub := event.NewHub()
 	eng := engine.New(st, hub, client, *flagModel)
 	if err := eng.Recover(context.Background()); err != nil {

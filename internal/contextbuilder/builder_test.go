@@ -30,7 +30,7 @@ func TestBuildUsesSettingsSystemPrompt(t *testing.T) {
 		t.Fatalf("want default system prompt, got %q", req.System)
 	}
 
-	if err := ms.SetSettings(ctx, map[string]string{SettingSystemPrompt: "你是布丁"}); err != nil {
+	if err := ms.SetSettings(ctx, map[string]string{store.SettingSystemPrompt: "你是布丁"}); err != nil {
 		t.Fatal(err)
 	}
 	req, err = b.Build(ctx, "s1", "m")

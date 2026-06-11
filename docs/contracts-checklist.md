@@ -47,3 +47,17 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 | `PUT /settings` | `{k: v}` | 204 | 400 |
 
 鉴权:`Authorization: Bearer <token>` 或 `?token=`(EventSource 用),401 统一 `{"error":"unauthorized"}`。
+
+## settings 约定键
+
+> Go 侧常量:`internal/store/settings_keys.go`。改键名两边同步。
+
+| key | 用途 |
+| --- | --- |
+| `system_prompt` | system instruction,空则用内置默认值 |
+| `provider.openai.base_url` | OpenAI-compatible 端点;settings 优先,env `PUDDING_OPENAI_BASE_URL` 兜底 |
+| `provider.openai.api_key` | 可为空(本地端点如 Ollama 不需要) |
+| `model.default` | 模型解析:`session.model` > 此键 > `--model` flag |
+
+改 settings 即时生效,不需要重启 daemon;provider 未配置时 submit 会以
+`turn.failed` 提示。events 表每 session 保留最近 1000 条 lifecycle 事件。

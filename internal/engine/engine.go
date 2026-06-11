@@ -89,7 +89,13 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	}
 	e.hub.Publish(*res.StartedEvent)
 
+	// 模型解析:session.model > settings model.default > --model flag
 	model := sess.Model
+	if model == "" {
+		if kv, err := e.store.Settings(ctx); err == nil {
+			model = kv[store.SettingDefaultModel]
+		}
+	}
 	if model == "" {
 		model = e.defaultModel
 	}

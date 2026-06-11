@@ -603,11 +603,21 @@ func insertEventTx(ctx context.Context, tx *sql.Tx, ev *event.Event) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx,
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO events(session_id,seq,kind,turn_id,payload,created_at) VALUES(?,?,?,?,?,?)`,
 		ev.SessionID, ev.Seq, ev.Kind, ev.TurnID, string(payload), unixMS(time.Now()),
-	)
-	return err
+	); err != nil {
+		return err
+	}
+	if ev.Seq > store.EventsRetainPerSession {
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM events WHERE session_id=? AND seq<=?`,
+			ev.SessionID, ev.Seq-store.EventsRetainPerSession,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type messageScanner interface {

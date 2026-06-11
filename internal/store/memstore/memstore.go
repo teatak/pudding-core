@@ -157,7 +157,7 @@ func (m *Memstore) BeginTurn(_ context.Context, in store.BeginTurnInput) (*store
 	}
 	m.turns[turn.ID] = turn
 	m.messages[in.SessionID] = append(m.messages[in.SessionID], msg)
-	m.events[in.SessionID] = append(m.events[in.SessionID], ev)
+	m.appendEventLocked(in.SessionID, ev)
 	m.sessions[in.SessionID].UpdatedAt = now
 
 	tc, mc, ec := *turn, *msg, ev
@@ -209,10 +209,19 @@ func (m *Memstore) FinishTurn(_ context.Context, in store.FinishTurnInput) (*sto
 		mc := *msg
 		res.AssistantMessage = &mc
 	}
-	m.events[turn.SessionID] = append(m.events[turn.SessionID], ev)
+	m.appendEventLocked(turn.SessionID, ev)
 	m.sessions[turn.SessionID].UpdatedAt = now
 	res.FinalEvent = &ev
 	return res, nil
+}
+
+// appendEventLocked 追加事件并按保留窗口滚动清理;调用方必须已持锁。
+func (m *Memstore) appendEventLocked(sessionID string, ev event.Event) {
+	evs := append(m.events[sessionID], ev)
+	if len(evs) > store.EventsRetainPerSession {
+		evs = evs[len(evs)-store.EventsRetainPerSession:]
+	}
+	m.events[sessionID] = evs
 }
 
 func (m *Memstore) RunningTurn(_ context.Context, sessionID string) (*store.Turn, error) {

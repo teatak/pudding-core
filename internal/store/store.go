@@ -17,6 +17,11 @@ var (
 	ErrTurnRunning = errors.New("store: session has a running turn")
 )
 
+// EventsRetainPerSession 是每个 session 的 lifecycle 事件保留条数。
+// 窗口只需覆盖 SSE 断线续传;更早的事件随写入事务滚动清理,
+// 超窗的缺口由客户端收到 lifecycle 后 refetch messages 兜底。
+const EventsRetainPerSession = 1000
+
 type Session struct {
 	ID        string    `json:"id"`
 	Title     string    `json:"title"`
