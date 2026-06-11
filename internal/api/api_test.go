@@ -27,7 +27,7 @@ func newTestServer(t *testing.T) (*httptest.Server, store.Store) {
 	ms := memstore.New()
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好", "世界"}), mock.WithDelay(5*time.Millisecond))), "m")
-	srv := httptest.NewServer(New(eng, ms, hub).Handler(testToken))
+	srv := httptest.NewServer(New(eng, ms, hub).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 	return srv, ms
 }

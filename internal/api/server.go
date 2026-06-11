@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/teatak/cart/v3"
 	"github.com/teatak/pudding-core/internal/engine"
@@ -24,10 +25,15 @@ func New(eng *engine.Engine, s store.Store, hub *event.Hub) *Server {
 	return &Server{engine: eng, store: s, hub: hub}
 }
 
-// Handler 返回带 token 鉴权的根 handler。
+// apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
+var apiPrefixes = []string{"/sessions", "/settings", "/providers"}
+
+// Handler 返回根 handler:API 前缀走 token 鉴权 + cart 路由,
+// 其余路径 serve 静态 web UI(HTML/JS 非敏感,数据全在 API 后面;
+// static 为 nil 时只有 API)。
 // token 经 Authorization: Bearer 或 ?token= 传递;后者服务 EventSource
 // (浏览器 SSE 无法自定义 header)。
-func (s *Server) Handler(token string) http.Handler {
+func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app := cart.New()
 
 	app.Route("/sessions").POST(s.createSession).GET(s.listSessions)
@@ -40,7 +46,20 @@ func (s *Server) Handler(token string) http.Handler {
 	app.Route("/providers").GET(s.listProviders).POST(s.createProvider)
 	app.Route("/providers/:name").GET(s.getProvider).PATCH(s.patchProvider).DELETE(s.deleteProvider)
 
-	return withAuth(token, app)
+	authed := withAuth(token, app)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, prefix := range apiPrefixes {
+			if r.URL.Path == prefix || strings.HasPrefix(r.URL.Path, prefix+"/") {
+				authed.ServeHTTP(w, r)
+				return
+			}
+		}
+		if static == nil {
+			http.NotFound(w, r)
+			return
+		}
+		static.ServeHTTP(w, r)
+	})
 }
 
 func withAuth(token string, next http.Handler) http.Handler {

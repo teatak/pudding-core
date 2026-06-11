@@ -24,6 +24,7 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store/sqlitestore"
+	"github.com/teatak/pudding-core/internal/webui"
 )
 
 func main() {
@@ -81,7 +82,7 @@ func run() error {
 
 	server := &http.Server{
 		Addr:    *flagAddr,
-		Handler: api.New(eng, st, hub).Handler(token),
+		Handler: api.New(eng, st, hub).Handler(token, webui.Handler()),
 		// request ctx 派生自 signal ctx:收到信号后 SSE 长连接立即退出,
 		// Shutdown 不再被流式请求拖满超时。
 		BaseContext: func(net.Listener) context.Context { return ctx },
@@ -93,6 +94,8 @@ func run() error {
 		"addr", *flagAddr,
 		"provider", providerLabel,
 		"store", "sqlite")
+	// 浏览器一键入口:URL 带 token,前端读取后存 sessionStorage 并清掉地址栏
+	slog.Info("open", "url", fmt.Sprintf("http://%s/?token=%s", *flagAddr, token))
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- server.ListenAndServe() }()
