@@ -37,6 +37,8 @@ func (s *Server) Handler(token string) http.Handler {
 	app.Route("/sessions/:id/events").GET(s.sessionEvents)
 	app.Route("/sessions/:id/messages").GET(s.listMessages)
 	app.Route("/settings").GET(s.getSettings).PUT(s.putSettings)
+	app.Route("/providers").GET(s.listProviders).POST(s.createProvider)
+	app.Route("/providers/:name").GET(s.getProvider).PATCH(s.patchProvider).DELETE(s.deleteProvider)
 
 	return withAuth(token, app)
 }

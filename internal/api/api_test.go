@@ -15,6 +15,7 @@ import (
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider/mock"
+	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/memstore"
 )
@@ -25,7 +26,7 @@ func newTestServer(t *testing.T) (*httptest.Server, store.Store) {
 	t.Helper()
 	ms := memstore.New()
 	hub := event.NewHub()
-	eng := engine.New(ms, hub, mock.New(mock.WithScript([]string{"你好", "世界"}), mock.WithDelay(5*time.Millisecond)), "m")
+	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好", "世界"}), mock.WithDelay(5*time.Millisecond))), "m")
 	srv := httptest.NewServer(New(eng, ms, hub).Handler(testToken))
 	t.Cleanup(srv.Close)
 	return srv, ms
@@ -118,6 +119,77 @@ func readSSE(t *testing.T, url string, stopKind string, timeout time.Duration) [
 	}
 	t.Fatalf("stream ended before %s, frames: %+v", stopKind, frames)
 	return nil
+}
+
+func TestProvidersCRUDRedactsAPIKey(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	resp := req(t, http.MethodPost, srv.URL+"/providers", map[string]string{
+		"name": "work", "type": "openai-compatible",
+		"baseURL": "https://example.com/v1/", "apiKey": "sk-secret",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("want 201, got %d", resp.StatusCode)
+	}
+	created := decodeJSON[map[string]any](t, resp)
+	if created["apiKeySet"] != true {
+		t.Fatalf("want apiKeySet true, got %+v", created)
+	}
+	if created["baseURL"] != "https://example.com/v1" {
+		t.Fatalf("baseURL must be trimmed: %+v", created)
+	}
+	for k := range created {
+		if k == "apiKey" {
+			t.Fatal("api key must never appear in responses")
+		}
+	}
+
+	// 重名 409
+	resp = req(t, http.MethodPost, srv.URL+"/providers", map[string]string{
+		"name": "work", "type": "openai-compatible", "baseURL": "https://x.com",
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("duplicate name must 409, got %d", resp.StatusCode)
+	}
+
+	// 非法 type 400
+	resp = req(t, http.MethodPost, srv.URL+"/providers", map[string]string{
+		"name": "bad", "type": "nope",
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unsupported type must 400, got %d", resp.StatusCode)
+	}
+
+	// PATCH:空 apiKey 不覆盖,非空覆盖
+	resp = req(t, http.MethodPatch, srv.URL+"/providers/work", map[string]any{"apiKey": ""})
+	patched := decodeJSON[map[string]any](t, resp)
+	if patched["apiKeySet"] != true {
+		t.Fatalf("empty apiKey must not clear stored key: %+v", patched)
+	}
+	resp = req(t, http.MethodPatch, srv.URL+"/providers/work", map[string]any{"type": "google", "apiKey": "g-key"})
+	patched = decodeJSON[map[string]any](t, resp)
+	if patched["type"] != "google" {
+		t.Fatalf("type patch failed: %+v", patched)
+	}
+
+	// 列表 + 删除
+	resp = req(t, http.MethodGet, srv.URL+"/providers", nil)
+	list := decodeJSON[map[string][]map[string]any](t, resp)
+	if len(list["providers"]) != 1 {
+		t.Fatalf("want 1 profile, got %+v", list)
+	}
+	resp = req(t, http.MethodDelete, srv.URL+"/providers/work", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("want 204, got %d", resp.StatusCode)
+	}
+	resp = req(t, http.MethodGet, srv.URL+"/providers/work", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("want 404 after delete, got %d", resp.StatusCode)
+	}
 }
 
 func TestSubmitStreamAndResume(t *testing.T) {
