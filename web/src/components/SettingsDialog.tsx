@@ -20,6 +20,8 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useI18n } from "@/i18n";
+import { applyProviderPreset, getOrderedProviderPresets } from "@/provider/presets";
 
 const settingsFormSchema = z.object({
   text: z.string(),
@@ -31,6 +33,8 @@ type SettingsDialogProps = {
 
 export function SettingsDialog({ token }: SettingsDialogProps) {
   const queryClient = useQueryClient();
+  const { locale, t } = useI18n();
+  const providerPresets = getOrderedProviderPresets(locale);
   const settingsQuery = useQuery({
     queryKey: queryKeys.settings(),
     queryFn: () => getSettings(token),
@@ -53,38 +57,63 @@ export function SettingsDialog({ token }: SettingsDialogProps) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.settings() }),
   });
 
+  function applyPreset(preset: (typeof providerPresets)[number]) {
+    const currentSettings = parseSettings(form.getValues("text"));
+    form.setValue("text", stringifySettings(applyProviderPreset(currentSettings, preset)), {
+      shouldDirty: true,
+      shouldTouch: true,
+    });
+  }
+
   return (
     <Dialog>
       <Tooltip>
         <TooltipTrigger asChild>
           <DialogTrigger asChild>
-            <Button aria-label="Settings" size="icon" variant="ghost">
+            <Button aria-label={t("settings.title")} size="icon" variant="ghost">
               <Settings />
             </Button>
           </DialogTrigger>
         </TooltipTrigger>
-        <TooltipContent>Settings</TooltipContent>
+        <TooltipContent>{t("settings.title")}</TooltipContent>
       </Tooltip>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Settings</DialogTitle>
-          <DialogDescription>Key-value settings</DialogDescription>
+          <DialogTitle>{t("settings.title")}</DialogTitle>
+          <DialogDescription>{t("settings.description")}</DialogDescription>
         </DialogHeader>
         <form className="grid gap-4" onSubmit={form.handleSubmit((value) => saveMutation.mutate(value))}>
           <div className="grid gap-2">
-            <Label htmlFor="settings-text">Entries</Label>
+            <Label>{t("settings.providerPresets")}</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {providerPresets.map((preset) => (
+                <Button
+                  key={preset.id}
+                  className="h-auto min-h-12 flex-col items-start gap-1 px-3 py-2 text-left"
+                  type="button"
+                  variant="outline"
+                  onClick={() => applyPreset(preset)}
+                >
+                  <span>{preset.name}</span>
+                  <span className="max-w-full truncate text-xs font-normal text-muted-foreground">
+                    {preset.defaultModel}
+                  </span>
+                </Button>
+              ))}
+            </div>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="settings-text">{t("settings.entries")}</Label>
             <Textarea
               id="settings-text"
               className="min-h-56 font-mono text-sm"
-              placeholder={
-                "provider.openai.base_url=https://api.openai.com/v1\nprovider.openai.api_key=sk-...\nmodel.default=gpt-5-mini\nsystem_prompt=You are..."
-              }
+              placeholder={t("settings.placeholder")}
               {...form.register("text")}
             />
           </div>
           <DialogFooter>
             <Button type="submit" disabled={saveMutation.isPending}>
-              Save
+              {t("common.save")}
             </Button>
           </DialogFooter>
         </form>
