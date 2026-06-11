@@ -112,8 +112,8 @@ type Store interface {
 	UpdateSession(ctx context.Context, id string, upd SessionUpdate) (*Session, error)
 	DeleteSession(ctx context.Context, id string) error
 
-	// BeginTurn:校验无 running turn(否则 ErrTurnRunning)→ 幂等检查
-	// (clientMessageID 重复则返回 Duplicate)→ 落 user message + running turn
+	// BeginTurn:幂等检查(clientMessageID 重复则返回 Duplicate)→ 校验无
+	// running turn(否则 ErrTurnRunning)→ 落 user message + running turn
 	// + turn.started 事件。
 	BeginTurn(ctx context.Context, in BeginTurnInput) (*BeginTurnResult, error)
 	// FinishTurn:更新 turn 状态 + 落 assistant message(如有)+ 落 final 事件。
