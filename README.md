@@ -12,3 +12,4 @@ This repo starts from a clean architecture:
 - session-owned transports and context
 
 Initial design notes live in [docs/technology-decisions.md](docs/technology-decisions.md).
+Phase 1 development plan lives in [docs/phase-1-plan.md](docs/phase-1-plan.md).
