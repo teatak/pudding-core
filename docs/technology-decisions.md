@@ -199,6 +199,7 @@ system instruction
 - Google Gemini
 - Anthropic
 - Ollama
+- OpenAI Responses API:只允许无状态模式(`store: false`、每轮全量 input);禁用 `previous_response_id` 等服务端会话状态。reasoning 连续性走 encrypted reasoning items 落 canonical message metadata。
 - multimodal input
 - realtime/live transport
 
@@ -327,7 +328,47 @@ turn.started → turn.delta* → turn.completed | turn.failed | turn.cancelled
 - daemon 启动时生成 token,所有 HTTP/SSE/WS 请求必须带 token;Wails 启动 daemon 时注入,Web UI 通过启动页握手获取。
 - 第一阶段 provider API key 存 SQLite 明文,数据库文件权限 0600;后续评估走 Wails bindings 接系统 keychain。
 
-## 10. Audio
+## 10. 数据目录与通道隔离
+
+两个运行通道,数据目录完全隔离:
+
+| 通道 | home | 默认端口 |
+| --- | --- | --- |
+| release | `~/.pudding` | `127.0.0.1:9669` |
+| dev | `~/.pudding-core-dev` | `127.0.0.1:9670` |
+
+与旧版的关系:
+
+- 旧版已占用 `~/.pudding`(正式)和 `~/.pudding-dev`(旧 dev),新项目对这两个目录**只读都不允许**,完全不接触。
+- 新项目开发期一律落在 `~/.pudding-core-dev`,与旧版可并行使用、互不影响。
+- release 通道的 `~/.pudding` 只在新版正式替换旧版时启用;届时旧数据按 pre-launch 策略处理(不做迁移,显式切换)。
+
+home 解析顺序:
+
+1. `--home` flag
+2. `PUDDING_HOME` 环境变量
+3. 构建通道默认值
+
+通道由 ldflags 在构建时注入;**本地 `go build` / `go run` 默认 dev**,release 通道只由发布构建注入。这样开发期误操作永远落在 `~/.pudding-dev`,碰不到正式数据。
+
+home 内容(第一阶段):
+
+```text
+<home>/
+  pudding.db      # SQLite(含 WAL/SHM)
+  daemon.token    # 启动 token
+  logs/
+```
+
+规则:
+
+- 隔离是绝对的:dev 进程不读写 `~/.pudding` / `~/.pudding-dev`(旧版目录),release 进程不读写 `~/.pudding-core-dev`;不做自动迁移或同步。
+- 默认端口按通道错开,两个通道的 daemon 可同时运行,token 各自独立。
+- 第一阶段不引入 `config.yaml` / `configs/` 分层文件:bootstrap 参数走 flag/env,业务 settings 走 SQLite `settings` 表。旧仓库的 yaml fragments + legacy override 分层是模板漂移的源头,不再重演。
+- 测试一律用临时目录(`t.TempDir()`),禁止触碰任何真实 home。
+- dev home 的数据可随时整目录删除重建,不承诺任何保留。
+
+## 11. Audio
 
 第一阶段不做音频。
 
@@ -347,7 +388,7 @@ turn.started → turn.delta* → turn.completed | turn.failed | turn.cancelled
 
 音频必须在文本多会话架构稳定后再接。
 
-## 11. 第一阶段验收
+## 12. 第一阶段验收
 
 第一阶段只验收文本多会话:
 
@@ -362,7 +403,7 @@ turn.started → turn.delta* → turn.completed | turn.failed | turn.cancelled
 - SSE 断线重连后 transcript 不丢事件、不重复渲染。
 - 同一 clientMessageID 重复 submit 不产生重复 message / 重复 turn。
 
-## 12. 暂缓事项
+## 13. 暂缓事项
 
 暂缓:
 
@@ -378,7 +419,7 @@ turn.started → turn.delta* → turn.completed | turn.failed | turn.cancelled
 
 这些能力可以参考 `pudding-core-old`,但不能直接搬旧 `Runtime` 结构。
 
-## 13. 开放问题
+## 14. 开放问题
 
 - cancel / failed 时的半截 assistant 输出怎么处理:倾向保留为 canonical message 并标记 `interrupted`(进入后续 context),而不是丢弃;待第一阶段实测再定。
 - 同一 session 是否允许并发 turn:第一阶段不允许,streaming 中再 submit 返回 409;后续是否放开排队待定。

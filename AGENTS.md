@@ -41,6 +41,7 @@
 15. turn 收尾的 canonical message、`turns` 状态、lifecycle events 同一事务写入。
 16. daemon 只 bind loopback,所有请求带启动 token。
 17. provider 只产出模型流(delta / finish / error);turn lifecycle 事件由 engine 生成。
+18. dev 与 release 数据目录严格隔离:dev 用 `~/.pudding-core-dev`,release 用 `~/.pudding`(仅发布构建);旧版的 `~/.pudding` 与 `~/.pudding-dev` 一律不接触;本地构建默认 dev 通道;测试只用临时目录。
 
 ## 后端技术约束
 

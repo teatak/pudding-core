@@ -1,7 +1,7 @@
 # 第一阶段开发规划
 
 > 范围:[technology-decisions.md](technology-decisions.md) 第一阶段(文本多会话)。  
-> 验收:technology-decisions.md 第 11 节全部通过。
+> 验收:technology-decisions.md 第 12 节全部通过。
 
 ## 1. 模块拆分
 
@@ -65,9 +65,9 @@ api → event ← engine
 | --- | --- | --- |
 | M0(d1–2) | 契约冻结:四份契约 + mock provider 骨架 | 接口编译通过,事件协议两端同源 |
 | M1(week 1 末) | 垂直切片:单 session `submit → OpenAI → SSE → 落库` | curl 全流程可验证 |
-| M2(week 2) | 多会话核心:并行 turn、cancel、幂等、seq 续传、重启恢复 | 验收第 11 节后端项全过(集成测试钉死) |
+| M2(week 2) | 多会话核心:并行 turn、cancel、幂等、seq 续传、重启恢复 | 验收第 12 节后端项全过(集成测试钉死) |
 | M3(week 3) | web 主体对真 daemon 联调:列表 / transcript / composer / cancel | 双 session 并行 streaming 页面可演示 |
-| M4(week 4) | settings 页、token 握手、回归 | 验收第 11 节全过 |
+| M4(week 4) | settings 页、token 握手、回归 | 验收第 12 节全过 |
 
 工期:总量 30–40 人日;契约先行 + 轨道并行后,关键路径 ≈ M0(1.5d)+ engine(4–5d)+ 集成(2–3d)与 web 轨道(13–17d)取大者,日历约 3–4 周;并行 agent 开发可再压缩。
 
