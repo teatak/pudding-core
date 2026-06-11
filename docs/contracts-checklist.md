@@ -51,6 +51,10 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 ## settings 约定键
 
 > Go 侧常量:`internal/store/settings_keys.go`。改键名两边同步。
+> settings 是扁平 k=v,一键一行,value 一律纯字符串(非 JSON/YAML 文档);
+> 键名里的点号只是命名约定,不是嵌套结构。`PUT /settings` 按键 merge,不整体覆盖。
+> **只放标量偏好**;结构化实体(如 provider profiles)走独立表 + 独立 REST 资源,
+> 不进 settings(technology-decisions 第 5 节)。
 
 | key | 用途 |
 | --- | --- |

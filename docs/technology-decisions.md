@@ -203,6 +203,68 @@ system instruction
 - multimodal input
 - realtime/live transport
 
+Provider 路由(后续,先定形不实现):
+
+- session 选择 LLM 的形状是 `session.provider + session.model`:
+  - `provider` 指向一个命名的 **provider profile**(如 `default` / `work` / `local`);
+  - `model` 是该 profile 下的模型名。
+- profile 描述一个端点实例:`type`(openai-compatible / google / anthropic / …)
+  + `base_url` + `api_key` 等。同一 type 允许多个 profile
+  (OpenRouter 与本机 Ollama 都是 openai-compatible,但是两个 profile)。
+- profile 是实体(有身份与生命周期),不进 settings:直接落
+  `provider_profiles` 表 + 独立 REST 资源。settings 只放标量偏好
+  (`system_prompt` / `provider.default` / `model.default`),
+  k=v 不承载结构化实体。
+- engine 不持有单一 client,改持 **ProviderRegistry**:按 profile 名解析并缓存
+  client 实例;`provider.Client` 接口与 contextbuilder 的中立输出不变。
+  现有 settingsProvider 就是只有一个匿名 profile 的退化 registry,演进路径平滑。
+- 解析顺序:`session.provider` > settings `provider.default` > 内置默认 profile;
+  model 解析不变(session > settings > flag)。
+- provider/model 都是 BeginTurn 时刻快照,改配置不影响进行中的 turn。
+- 存储落点:
+  - `session.provider` 存 `sessions` 表,与 `model` 并列,`PATCH /sessions/{id}` 可改;
+  - profile 存 `provider_profiles` 表;api_key 安全性同第 9 节
+    (SQLite 明文 + home 0600,桌面阶段评估 keychain);
+  - turn 实际使用的 provider/model 在 `turns` 表落快照列,
+    审计与 UI"由哪个模型生成"标注用;messages 不存 provider 信息。
+- 触发时机:接入第二个 provider 类型(Gemini)时一并落地,避免单 provider
+  阶段过度设计。
+
+表结构与 API 定形(随 registry 落地,pre-launch 直接改 schema 不留迁移):
+
+```sql
+CREATE TABLE provider_profiles (
+    name       TEXT PRIMARY KEY,           -- session.provider 引用此名
+    type       TEXT NOT NULL,              -- 决定用哪个 Client 实现
+    base_url   TEXT NOT NULL DEFAULT '',
+    api_key    TEXT NOT NULL DEFAULT '',   -- 明文,安全性同第 9 节
+    extra      TEXT NOT NULL DEFAULT '{}', -- type 特有参数,JSON
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+-- 既有表加列
+ALTER TABLE sessions ADD COLUMN provider TEXT NOT NULL DEFAULT ''; -- 空 = 默认 profile
+ALTER TABLE turns    ADD COLUMN provider TEXT NOT NULL DEFAULT ''; -- BeginTurn 快照
+ALTER TABLE turns    ADD COLUMN model    TEXT NOT NULL DEFAULT '';
+```
+
+```text
+GET    /providers            # 列表,api_key 脱敏(只回 api_key_set: true/false)
+POST   /providers
+GET    /providers/{name}     # 同样脱敏
+PATCH  /providers/{name}     # api_key 传非空才覆盖
+DELETE /providers/{name}
+```
+
+- api_key 只进不出:任何读端点不回明文,UI 只显示"已设置"。
+- `sessions.provider` 不设外键:profile 被删后悬空引用按
+  "provider not configured" 落 turn.failed,与未配置行为一致,不级联改 session。
+- 默认 profile 用 settings `provider.default` 键表达,不在表里放 is_default 列,
+  避免双事实源。
+- 现有 settings 里的 `provider.openai.*` 两键是单 provider 阶段的临时形态,
+  registry 落地时迁为 `provider_profiles` 的 `default` 行并删除。
+
 ## 6. 存储
 
 选择:
@@ -224,6 +286,7 @@ system instruction
 - `skills`
 - `audio_assets`
 - `speaker_profiles`
+- `provider_profiles`(随 provider registry 落地)
 
 规则:
 
@@ -337,12 +400,11 @@ turn.started → turn.delta* → turn.completed | turn.failed | turn.cancelled
 | 通道 | home | 默认端口 |
 | --- | --- | --- |
 | release | `~/.pudding` | `127.0.0.1:9669` |
-| dev | `~/.pudding-core-dev` | `127.0.0.1:9670` |
+| dev | `~/.pudding-dev` | `127.0.0.1:9670` |
 
 与旧版的关系:
 
-- 旧版已占用 `~/.pudding`(正式)和 `~/.pudding-dev`(旧 dev),新项目对这两个目录**只读都不允许**,完全不接触。
-- 新项目开发期一律落在 `~/.pudding-core-dev`,与旧版可并行使用、互不影响。
+- 旧版 dev 目录已改名为 `~/.pudding-dev-old`;新项目开发期一律落在 `~/.pudding-dev`。
 - release 通道的 `~/.pudding` 只在新版正式替换旧版时启用;届时旧数据按 pre-launch 策略处理(不做迁移,显式切换)。
 
 home 解析顺序:
@@ -364,7 +426,7 @@ home 内容(第一阶段):
 
 规则:
 
-- 隔离是绝对的:dev 进程不读写 `~/.pudding` / `~/.pudding-dev`(旧版目录),release 进程不读写 `~/.pudding-core-dev`;不做自动迁移或同步。
+- 隔离是绝对的:dev 进程不读写 `~/.pudding`,release 进程不读写 `~/.pudding-dev`;不做自动迁移或同步。
 - 默认端口按通道错开,两个通道的 daemon 可同时运行,token 各自独立。
 - 第一阶段不引入 `config.yaml` / `configs/` 分层文件:bootstrap 参数走 flag/env,业务 settings 走 SQLite `settings` 表。旧仓库的 yaml fragments + legacy override 分层是模板漂移的源头,不再重演。
 - 测试一律用临时目录(`t.TempDir()`),禁止触碰任何真实 home。
