@@ -1,12 +1,17 @@
 import {
   conflictResponse,
+  createProviderRequest,
   listMessagesResponse,
+  listProvidersResponse,
   listSessionsResponse,
   message,
+  patchProviderRequest,
+  providerProfile,
   session,
   settingsResponse,
   submitResponse,
   type Message,
+  type ProviderProfile,
   type Session,
 } from "@/contracts/api";
 import { z } from "zod";
@@ -22,6 +27,7 @@ export class APIError extends Error {
 
 const sessionRequest = z.object({
   title: z.string().optional(),
+  provider: z.string().optional(),
   model: z.string().optional(),
 });
 
@@ -130,5 +136,36 @@ export async function putSettings(token: string, settings: Record<string, string
   });
 }
 
-export type { Message, Session };
-export { message, session };
+export function listProviders(token: string): Promise<{ providers: ProviderProfile[] }> {
+  return request(token, "/providers", listProvidersResponse);
+}
+
+export function createProvider(
+  token: string,
+  body: z.infer<typeof createProviderRequest>,
+): Promise<ProviderProfile> {
+  return request(token, "/providers", providerProfile, {
+    method: "POST",
+    body: JSON.stringify(createProviderRequest.parse(body)),
+  });
+}
+
+export function patchProvider(
+  token: string,
+  name: string,
+  body: z.infer<typeof patchProviderRequest>,
+): Promise<ProviderProfile> {
+  return request(token, `/providers/${encodeURIComponent(name)}`, providerProfile, {
+    method: "PATCH",
+    body: JSON.stringify(patchProviderRequest.parse(body)),
+  });
+}
+
+export async function deleteProvider(token: string, name: string): Promise<void> {
+  await request(token, `/providers/${encodeURIComponent(name)}`, z.null(), {
+    method: "DELETE",
+  });
+}
+
+export type { Message, ProviderProfile, Session };
+export { createProviderRequest, message, patchProviderRequest, providerProfile, session };

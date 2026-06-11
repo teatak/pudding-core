@@ -11,6 +11,7 @@ export type ProviderPresetId =
 export type ProviderPreset = {
   id: ProviderPresetId;
   name: string;
+  type: "openai-compatible" | "google";
   baseURL: string;
   defaultModel: string;
   models: string[];
@@ -22,6 +23,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "deepseek",
     name: "DeepSeek",
+    type: "openai-compatible",
     baseURL: "https://api.deepseek.com",
     defaultModel: "deepseek-v4-flash",
     models: ["deepseek-v4-flash", "deepseek-v4-pro"],
@@ -30,6 +32,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "qwen",
     name: "Qwen",
+    type: "openai-compatible",
     baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     defaultModel: "qwen3.6-flash",
     models: ["qwen3.6-flash", "qwen3.7-max", "qwen3.6-plus", "qwen3-max"],
@@ -38,6 +41,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "mimo",
     name: "MiMo",
+    type: "openai-compatible",
     baseURL: "https://api.xiaomimimo.com/v1",
     defaultModel: "mimo-v2.5",
     models: ["mimo-v2.5", "mimo-v2.5-pro"],
@@ -46,6 +50,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "openai",
     name: "OpenAI",
+    type: "openai-compatible",
     baseURL: "https://api.openai.com/v1",
     defaultModel: "gpt-5.5",
     models: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
@@ -54,6 +59,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "moonshot",
     name: "Moonshot",
+    type: "openai-compatible",
     baseURL: "https://api.moonshot.cn/v1",
     defaultModel: "kimi-k2.6",
     models: ["kimi-k2.6", "kimi-k2.5"],
@@ -62,6 +68,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "zhipu",
     name: "Zhipu GLM",
+    type: "openai-compatible",
     baseURL: "https://open.bigmodel.cn/api/paas/v4",
     defaultModel: "glm-5.1",
     models: ["glm-5.1", "glm-5"],
@@ -70,6 +77,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "openrouter",
     name: "OpenRouter",
+    type: "openai-compatible",
     baseURL: "https://openrouter.ai/api/v1",
     defaultModel: "openrouter/free",
     models: [
@@ -85,6 +93,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "ollama",
     name: "Ollama",
+    type: "openai-compatible",
     baseURL: "http://localhost:11434/v1",
     defaultModel: "llama3.3",
     models: ["llama3.3", "qwen3", "gemma3", "gpt-oss:120b-cloud", "qwen3-coder:480b-cloud"],
@@ -122,13 +131,6 @@ export function getOrderedProviderPresets(locale: string) {
     .filter((preset): preset is ProviderPreset => preset !== undefined);
 }
 
-export function applyProviderPreset(settings: Record<string, string>, preset: ProviderPreset) {
-  return {
-    ...settings,
-    "provider.openai.base_url": preset.baseURL,
-    "provider.openai.api_key": settings["provider.openai.api_key"] ?? "",
-    "model.default": settings["model.default"] && preset.models.includes(settings["model.default"])
-      ? settings["model.default"]
-      : preset.defaultModel,
-  };
+export function providerPresetName(preset: ProviderPreset) {
+  return preset.id;
 }

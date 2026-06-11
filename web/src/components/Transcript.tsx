@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Bot, CircleAlert, User } from "lucide-react";
+import { Bot, CircleAlert, Copy, MessageSquareText, User } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { listMessages, type Message } from "@/api/client";
@@ -9,6 +9,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n } from "@/i18n";
 import { renderMarkdown } from "@/lib/markdown";
 import { cn } from "@/lib/utils";
@@ -110,10 +111,18 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
   return (
     <div ref={scrollAreaRef} className="relative min-h-0 flex-1">
       <ScrollArea className="h-full">
-        <div className="mx-auto grid w-full max-w-4xl gap-3 px-5 py-5">
-          {items.length === 0 ? (
-            <div className="flex min-h-80 items-center justify-center text-sm text-muted-foreground">
-              {t("session.start")}
+        <div className="mx-auto grid w-full max-w-3xl gap-4 px-5 py-5">
+          {messagesQuery.isLoading ? <TranscriptSkeleton /> : null}
+          {messagesQuery.isError ? (
+            <Alert variant="destructive">
+              <CircleAlert className="h-3.5 w-3.5" />
+              <AlertDescription>{t("transcript.loadFailed")}</AlertDescription>
+            </Alert>
+          ) : null}
+          {!messagesQuery.isLoading && !messagesQuery.isError && items.length === 0 ? (
+            <div className="flex min-h-80 flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
+              <MessageSquareText className="h-8 w-8" />
+              <div>{t("session.start")}</div>
             </div>
           ) : null}
           {items.map((item) => {
@@ -139,17 +148,18 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
 function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === "user";
   return (
-    <div className={cn("flex gap-3", isUser && "justify-end")}>
+    <div className={cn("group flex gap-3", isUser && "justify-end")}>
       {!isUser ? <AvatarIcon assistant /> : null}
       <div
         className={cn(
-          "max-w-[78%] rounded-lg border px-3 py-2 text-sm leading-6 shadow-sm",
-          isUser ? "bg-primary text-primary-foreground" : "bg-card",
+          "grid gap-1 text-sm leading-6",
+          isUser ? "max-w-[78%] rounded-xl bg-primary px-3 py-2 text-primary-foreground shadow-sm" : "min-w-0 flex-1",
           isUser ? "whitespace-pre-wrap" : "whitespace-normal",
         )}
       >
         {isUser ? message.text : <MarkdownBody text={message.text} />}
         {message.interrupted ? <InterruptedBadge /> : null}
+        <MessageMeta createdAt={message.createdAt} text={message.text} />
       </div>
       {isUser ? <AvatarIcon /> : null}
     </div>
@@ -159,7 +169,7 @@ function MessageBubble({ message }: { message: Message }) {
 function PendingBubble({ text }: { text: string }) {
   return (
     <div className="flex justify-end gap-3 opacity-70">
-      <div className="max-w-[78%] whitespace-pre-wrap rounded-lg border bg-primary px-3 py-2 text-sm leading-6 text-primary-foreground shadow-sm">
+      <div className="max-w-[78%] whitespace-pre-wrap rounded-xl bg-primary px-3 py-2 text-sm leading-6 text-primary-foreground shadow-sm">
         {text}
       </div>
       <AvatarIcon />
@@ -171,8 +181,9 @@ function AssistantOverlayBubble({ overlay }: { overlay: AssistantOverlay }) {
   return (
     <div className="flex gap-3">
       <AvatarIcon assistant />
-      <div className="max-w-[78%] whitespace-pre-wrap rounded-lg border bg-card px-3 py-2 text-sm leading-6 shadow-sm">
-        {overlay.text ? <MarkdownBody text={overlay.text} /> : "…"}
+      <div className="min-w-0 flex-1 whitespace-pre-wrap text-sm leading-6">
+        {overlay.text ? <MarkdownBody text={overlay.text} /> : null}
+        {overlay.status === "streaming" ? <span className="ml-1 animate-pulse">▍</span> : null}
         {overlay.status === "failed" && overlay.error ? (
           <Alert className="mt-2" variant="destructive">
             <CircleAlert className="h-3.5 w-3.5" />
@@ -204,4 +215,47 @@ function InterruptedBadge() {
 
 function MarkdownBody({ text }: { text: string }) {
   return <div className="pudding-markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />;
+}
+
+function MessageMeta({ createdAt, text }: { createdAt: string; text: string }) {
+  const { t } = useI18n();
+  return (
+    <div className="flex items-center gap-2 text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+      <span>{formatTime(createdAt)}</span>
+      <Button
+        aria-label={t("common.copy")}
+        size="icon-xs"
+        type="button"
+        variant="ghost"
+        onClick={() => void navigator.clipboard.writeText(text)}
+      >
+        <Copy />
+      </Button>
+    </div>
+  );
+}
+
+function TranscriptSkeleton() {
+  return (
+    <div className="grid gap-4">
+      <div className="flex gap-3">
+        <Skeleton className="h-8 w-8 rounded-full" />
+        <div className="grid flex-1 gap-2">
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="h-4 w-1/2" />
+        </div>
+      </div>
+      <div className="flex justify-end">
+        <Skeleton className="h-10 w-2/3 rounded-xl" />
+      </div>
+    </div>
+  );
+}
+
+function formatTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) {
+    return "";
+  }
+  return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(date);
 }

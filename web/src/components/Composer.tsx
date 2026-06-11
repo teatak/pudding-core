@@ -85,10 +85,10 @@ export function Composer({ token, sessionID }: ComposerProps) {
 
   return (
     <form
-      className="border-t bg-card p-3"
+      className="border-t bg-background p-3"
       onSubmit={form.handleSubmit(submitDraft)}
     >
-      <div className="flex items-end gap-2">
+      <div className="mx-auto flex max-w-3xl items-end gap-2">
         <Textarea
           className="max-h-40 min-h-20 resize-none"
           placeholder={t("composer.messagePlaceholder")}
@@ -128,7 +128,7 @@ export function Composer({ token, sessionID }: ComposerProps) {
         )}
       </div>
       {form.formState.errors.text ? (
-        <div className="mt-2 text-xs text-destructive">{form.formState.errors.text.message}</div>
+        <div className="mx-auto mt-2 max-w-3xl text-xs text-destructive">{form.formState.errors.text.message}</div>
       ) : null}
     </form>
   );

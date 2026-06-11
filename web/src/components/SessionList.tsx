@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Loader2, MessageSquarePlus, Trash2 } from "lucide-react";
+import { CircleAlert, Loader2, MessageSquarePlus, MessageSquareText, Trash2 } from "lucide-react";
 
 import { createSession, deleteSession, listSessions } from "@/api/client";
 import type { Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,6 +18,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Sidebar,
   SidebarContent,
@@ -50,7 +52,7 @@ export function SessionList({ token, selectedSessionID }: SessionListProps) {
   });
 
   const createMutation = useMutation({
-    mutationFn: () => createSession(token, { title: t("session.untitled"), model: t("session.model") }),
+    mutationFn: () => createSession(token, { title: t("session.untitled") }),
     onSuccess: async (session) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
       await navigate({ to: "/", search: { session: session.id } });
@@ -149,13 +151,31 @@ export function SessionList({ token, selectedSessionID }: SessionListProps) {
             </SidebarMenu>
           </SidebarGroupContent>
           {sessionsQuery.isLoading ? (
-            <div className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              {t("common.loading")}
+            <div className="grid gap-2 px-3 py-2">
+              <Skeleton className="h-10" />
+              <Skeleton className="h-10" />
+              <Skeleton className="h-10" />
             </div>
           ) : null}
+          {sessionsQuery.isError ? (
+            <Alert className="mx-3 mt-2" variant="destructive">
+              <CircleAlert className="h-3.5 w-3.5" />
+              <AlertDescription className="grid gap-2">
+                <span>{t("session.loadFailed")}</span>
+                <Button size="sm" type="button" variant="outline" onClick={() => void sessionsQuery.refetch()}>
+                  {t("common.refresh")}
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ) : null}
           {!sessionsQuery.isLoading && sessions.length === 0 ? (
-            <div className="px-3 py-6 text-sm text-muted-foreground">{t("session.empty")}</div>
+            <div className="grid gap-3 px-3 py-6 text-sm text-muted-foreground">
+              <MessageSquareText className="h-5 w-5" />
+              <div>{t("session.empty")}</div>
+              <Button disabled={createMutation.isPending} size="sm" type="button" onClick={() => createMutation.mutate()}>
+                {t("session.create")}
+              </Button>
+            </div>
           ) : null}
         </SidebarGroup>
       </SidebarContent>

@@ -19,6 +19,7 @@ export default defineConfig(({ mode }) => {
       proxy: {
         "/sessions": daemon,
         "/settings": daemon,
+        "/providers": daemon,
       },
     },
   };

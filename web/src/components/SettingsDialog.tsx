@@ -1,12 +1,35 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Settings } from "lucide-react";
-import { useEffect } from "react";
+import { KeyRound, Loader2, Plus, Settings, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-import { getSettings, putSettings } from "@/api/client";
+import {
+  APIError,
+  createProvider,
+  createProviderRequest,
+  deleteProvider,
+  getSettings,
+  listProviders,
+  patchProvider,
+  patchProviderRequest,
+  putSettings,
+  type ProviderProfile,
+} from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -17,53 +40,41 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
-import { applyProviderPreset, getOrderedProviderPresets } from "@/provider/presets";
+import { getOrderedProviderPresets, providerPresetName } from "@/provider/presets";
+import { cn } from "@/lib/utils";
 
-const settingsFormSchema = z.object({
-  text: z.string(),
+const DEFAULT_PROVIDER = "__default__";
+
+const providerFormSchema = createProviderRequest.extend({
+  name: z.string().trim().min(1),
+  baseURL: z.string().trim().optional(),
+  apiKey: z.string().optional(),
+  suggestedModel: z.string().optional(),
 });
+
+const defaultsFormSchema = z.object({
+  providerDefault: z.string(),
+  modelDefault: z.string(),
+  systemPrompt: z.string(),
+});
+
+type ProviderFormValue = z.infer<typeof providerFormSchema>;
+type DefaultsFormValue = z.infer<typeof defaultsFormSchema>;
 
 type SettingsDialogProps = {
   token: string;
 };
 
 export function SettingsDialog({ token }: SettingsDialogProps) {
-  const queryClient = useQueryClient();
-  const { locale, t } = useI18n();
-  const providerPresets = getOrderedProviderPresets(locale);
-  const settingsQuery = useQuery({
-    queryKey: queryKeys.settings(),
-    queryFn: () => getSettings(token),
-    enabled: Boolean(token),
-  });
-
-  const form = useForm<z.infer<typeof settingsFormSchema>>({
-    resolver: zodResolver(settingsFormSchema),
-    defaultValues: { text: "" },
-  });
-
-  useEffect(() => {
-    if (settingsQuery.data) {
-      form.reset({ text: stringifySettings(settingsQuery.data.settings) });
-    }
-  }, [form, settingsQuery.data]);
-
-  const saveMutation = useMutation({
-    mutationFn: (value: z.infer<typeof settingsFormSchema>) => putSettings(token, parseSettings(value.text)),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.settings() }),
-  });
-
-  function applyPreset(preset: (typeof providerPresets)[number]) {
-    const currentSettings = parseSettings(form.getValues("text"));
-    form.setValue("text", stringifySettings(applyProviderPreset(currentSettings, preset)), {
-      shouldDirty: true,
-      shouldTouch: true,
-    });
-  }
+  const { t } = useI18n();
 
   return (
     <Dialog>
@@ -77,70 +88,422 @@ export function SettingsDialog({ token }: SettingsDialogProps) {
         </TooltipTrigger>
         <TooltipContent>{t("settings.title")}</TooltipContent>
       </Tooltip>
-      <DialogContent>
+      <DialogContent className="max-h-svh overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{t("settings.title")}</DialogTitle>
           <DialogDescription>{t("settings.description")}</DialogDescription>
         </DialogHeader>
-        <form className="grid gap-4" onSubmit={form.handleSubmit((value) => saveMutation.mutate(value))}>
-          <div className="grid gap-2">
-            <Label>{t("settings.providerPresets")}</Label>
-            <div className="grid grid-cols-2 gap-2">
-              {providerPresets.map((preset) => (
-                <Button
-                  key={preset.id}
-                  className="h-auto min-h-12 flex-col items-start gap-1 px-3 py-2 text-left"
-                  type="button"
-                  variant="outline"
-                  onClick={() => applyPreset(preset)}
-                >
-                  <span>{preset.name}</span>
-                  <span className="max-w-full truncate text-xs font-normal text-muted-foreground">
-                    {preset.defaultModel}
-                  </span>
-                </Button>
-              ))}
-            </div>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="settings-text">{t("settings.entries")}</Label>
-            <Textarea
-              id="settings-text"
-              className="min-h-56 font-mono text-sm"
-              placeholder={t("settings.placeholder")}
-              {...form.register("text")}
-            />
-          </div>
-          <DialogFooter>
-            <Button type="submit" disabled={saveMutation.isPending}>
-              {t("common.save")}
-            </Button>
-          </DialogFooter>
-        </form>
+        <Tabs defaultValue="providers">
+          <TabsList>
+            <TabsTrigger value="providers">{t("settings.providers")}</TabsTrigger>
+            <TabsTrigger value="defaults">{t("settings.defaults")}</TabsTrigger>
+          </TabsList>
+          <TabsContent value="providers">
+            <ProviderSettings token={token} />
+          </TabsContent>
+          <TabsContent value="defaults">
+            <DefaultSettings token={token} />
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   );
 }
 
-function stringifySettings(settings: Record<string, string>) {
-  return Object.entries(settings)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => `${key}=${value}`)
-    .join("\n");
+function ProviderSettings({ token }: { token: string }) {
+  const queryClient = useQueryClient();
+  const { locale, t } = useI18n();
+  const [editingName, setEditingName] = useState<string | null>(null);
+  const providerPresets = getOrderedProviderPresets(locale);
+  const providersQuery = useQuery({
+    queryKey: queryKeys.providers(),
+    queryFn: () => listProviders(token),
+    enabled: Boolean(token),
+  });
+
+  const providerForm = useForm<ProviderFormValue>({
+    resolver: zodResolver(providerFormSchema),
+    defaultValues: emptyProviderForm(),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (value: ProviderFormValue) => createProvider(token, cleanCreateProvider(value)),
+    onSuccess: async (profile) => {
+      setEditingName(profile.name);
+      providerForm.reset(providerToForm(profile));
+      await queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
+    },
+    onError: (error) => {
+      if (error instanceof APIError && error.code === "profile_exists") {
+        providerForm.setError("name", { message: t("provider.profileExists") });
+        return;
+      }
+      providerForm.setError("root", { message: error instanceof Error ? error.message : t("provider.saveFailed") });
+    },
+  });
+
+  const patchMutation = useMutation({
+    mutationFn: (value: ProviderFormValue) => {
+      if (!editingName) {
+        throw new Error("missing provider name");
+      }
+      return patchProvider(token, editingName, cleanPatchProvider(value));
+    },
+    onSuccess: async (profile) => {
+      providerForm.reset(providerToForm(profile));
+      await queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
+    },
+    onError: (error) => {
+      providerForm.setError("root", { message: error instanceof Error ? error.message : t("provider.saveFailed") });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (name: string) => deleteProvider(token, name),
+    onSuccess: async (_, name) => {
+      if (editingName === name) {
+        setEditingName(null);
+        providerForm.reset(emptyProviderForm());
+      }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
+    },
+  });
+
+  const profiles = providersQuery.data?.providers || [];
+  const saving = createMutation.isPending || patchMutation.isPending;
+
+  function startCreate() {
+    setEditingName(null);
+    providerForm.reset(emptyProviderForm());
+  }
+
+  function editProfile(profile: ProviderProfile) {
+    setEditingName(profile.name);
+    providerForm.reset(providerToForm(profile));
+  }
+
+  function applyPreset(preset: (typeof providerPresets)[number]) {
+    setEditingName(null);
+    providerForm.reset({
+      name: providerPresetName(preset),
+      type: preset.type,
+      baseURL: preset.baseURL,
+      apiKey: "",
+      extra: "",
+      suggestedModel: preset.defaultModel,
+    });
+  }
+
+  function submitProvider(value: ProviderFormValue) {
+    if (editingName) {
+      patchMutation.mutate(value);
+      return;
+    }
+    createMutation.mutate(value);
+  }
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,0.9fr)]">
+      <div className="grid gap-3">
+        <div className="flex items-center justify-between gap-2">
+          <Label>{t("settings.providerPresets")}</Label>
+          <Button size="sm" type="button" variant="outline" onClick={startCreate}>
+            <Plus />
+            {t("provider.new")}
+          </Button>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {providerPresets.map((preset) => (
+            <Button
+              key={preset.id}
+              className="h-auto min-h-12 flex-col items-start gap-1 px-3 py-2 text-left"
+              type="button"
+              variant="outline"
+              onClick={() => applyPreset(preset)}
+            >
+              <span>{preset.name}</span>
+              <span className="max-w-full truncate text-xs font-normal text-muted-foreground">
+                {preset.defaultModel}
+              </span>
+            </Button>
+          ))}
+        </div>
+        <div className="grid gap-2">
+          <Label>{t("provider.list")}</Label>
+          {providersQuery.isLoading ? <ProviderSkeleton /> : null}
+          {providersQuery.isError ? (
+            <Alert variant="destructive">
+              <AlertDescription className="grid gap-2">
+                <span>{t("provider.loadFailed")}</span>
+                <Button size="sm" type="button" variant="outline" onClick={() => void providersQuery.refetch()}>
+                  {t("common.refresh")}
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {!providersQuery.isLoading && profiles.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+              {t("provider.empty")}
+            </div>
+          ) : null}
+          <div className="grid gap-2">
+            {profiles.map((profile) => (
+              <button
+                key={profile.name}
+                className={cn(
+                  "grid gap-1 rounded-lg border bg-card p-3 text-left text-sm transition-colors hover:bg-muted",
+                  editingName === profile.name && "border-primary",
+                )}
+                type="button"
+                onClick={() => editProfile(profile)}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium">{profile.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {profile.apiKeySet ? t("provider.keySet") : t("provider.keyMissing")}
+                  </span>
+                </div>
+                <div className="truncate text-xs text-muted-foreground">{profile.type}</div>
+                <div className="truncate text-xs text-muted-foreground">{profile.baseURL || t("provider.defaultEndpoint")}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <form className="grid content-start gap-3" onSubmit={providerForm.handleSubmit(submitProvider)}>
+        <div className="grid gap-1">
+          <div className="text-sm font-medium">{editingName ? t("provider.edit") : t("provider.create")}</div>
+          <div className="text-xs text-muted-foreground">{t("provider.keyHint")}</div>
+        </div>
+        {providerForm.formState.errors.root?.message ? (
+          <Alert variant="destructive">
+            <AlertDescription>{providerForm.formState.errors.root.message}</AlertDescription>
+          </Alert>
+        ) : null}
+        <div className="grid gap-2">
+          <Label htmlFor="provider-name">{t("provider.name")}</Label>
+          <Input id="provider-name" disabled={Boolean(editingName)} {...providerForm.register("name")} />
+          {providerForm.formState.errors.name?.message ? (
+            <div className="text-xs text-destructive">{providerForm.formState.errors.name.message}</div>
+          ) : null}
+        </div>
+        <div className="grid gap-2">
+          <Label>{t("provider.type")}</Label>
+          <Select
+            value={providerForm.watch("type")}
+            onValueChange={(value) => providerForm.setValue("type", value as ProviderFormValue["type"], { shouldDirty: true })}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="openai-compatible">openai-compatible</SelectItem>
+              <SelectItem value="google">google</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="provider-base-url">Base URL</Label>
+          <Input id="provider-base-url" placeholder="https://api.openai.com/v1" {...providerForm.register("baseURL")} />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="provider-api-key">API Key</Label>
+          <Input id="provider-api-key" type="password" placeholder={editingName ? t("provider.apiKeyKeep") : "sk-..."} {...providerForm.register("apiKey")} />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="provider-suggested-model">{t("provider.suggestedModel")}</Label>
+          <Input id="provider-suggested-model" readOnly {...providerForm.register("suggestedModel")} />
+        </div>
+        <DialogFooter>
+          {editingName ? (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button disabled={deleteMutation.isPending} type="button" variant="destructive">
+                  <Trash2 />
+                  {t("common.delete")}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>{t("provider.deleteTitle")}</AlertDialogTitle>
+                  <AlertDialogDescription>{t("provider.deleteDescription")}</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+                  <AlertDialogAction variant="destructive" onClick={() => deleteMutation.mutate(editingName)}>
+                    {t("common.delete")}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          ) : null}
+          <Button disabled={saving} type="submit">
+            {saving ? <Loader2 className="animate-spin" /> : <KeyRound />}
+            {t("common.save")}
+          </Button>
+        </DialogFooter>
+      </form>
+    </div>
+  );
 }
 
-function parseSettings(text: string) {
-  const out: Record<string, string> = {};
-  for (const rawLine of text.split("\n")) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) {
-      continue;
+function DefaultSettings({ token }: { token: string }) {
+  const queryClient = useQueryClient();
+  const { t } = useI18n();
+  const providersQuery = useQuery({
+    queryKey: queryKeys.providers(),
+    queryFn: () => listProviders(token),
+    enabled: Boolean(token),
+  });
+  const settingsQuery = useQuery({
+    queryKey: queryKeys.settings(),
+    queryFn: () => getSettings(token),
+    enabled: Boolean(token),
+  });
+  const defaultsForm = useForm<DefaultsFormValue>({
+    resolver: zodResolver(defaultsFormSchema),
+    defaultValues: {
+      providerDefault: DEFAULT_PROVIDER,
+      modelDefault: "",
+      systemPrompt: "",
+    },
+  });
+
+  useEffect(() => {
+    if (!settingsQuery.data) {
+      return;
     }
-    const eq = line.indexOf("=");
-    if (eq <= 0) {
-      continue;
-    }
-    out[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+    const settings = settingsQuery.data.settings;
+    defaultsForm.reset({
+      providerDefault: settings["provider.default"] || DEFAULT_PROVIDER,
+      modelDefault: settings["model.default"] || "",
+      systemPrompt: settings.system_prompt || "",
+    });
+  }, [defaultsForm, settingsQuery.data]);
+
+  const saveMutation = useMutation({
+    mutationFn: (value: DefaultsFormValue) => putSettings(token, defaultsPayload(value)),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.settings() }),
+  });
+
+  return (
+    <form className="grid gap-4" onSubmit={defaultsForm.handleSubmit((value) => saveMutation.mutate(value))}>
+      {settingsQuery.isLoading ? (
+        <div className="grid gap-2">
+          <Skeleton className="h-8" />
+          <Skeleton className="h-8" />
+          <Skeleton className="h-24" />
+        </div>
+      ) : null}
+      {settingsQuery.isError ? (
+        <Alert variant="destructive">
+          <AlertDescription className="grid gap-2">
+            <span>{t("settings.loadFailed")}</span>
+            <Button size="sm" type="button" variant="outline" onClick={() => void settingsQuery.refetch()}>
+              {t("common.refresh")}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      <div className="grid gap-2">
+        <Label>{t("settings.defaultProvider")}</Label>
+        <Select
+          value={defaultsForm.watch("providerDefault")}
+          onValueChange={(value) => defaultsForm.setValue("providerDefault", value, { shouldDirty: true })}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={DEFAULT_PROVIDER}>{t("session.providerDefault")}</SelectItem>
+            {(providersQuery.data?.providers || []).map((profile) => (
+              <SelectItem key={profile.name} value={profile.name}>
+                {profile.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="model-default">{t("settings.defaultModel")}</Label>
+        <Input id="model-default" placeholder="gpt-5.5" {...defaultsForm.register("modelDefault")} />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="system-prompt">system_prompt</Label>
+        <Textarea id="system-prompt" className="min-h-32" {...defaultsForm.register("systemPrompt")} />
+      </div>
+      <DialogFooter>
+        <Button disabled={saveMutation.isPending} type="submit">
+          {saveMutation.isPending ? <Loader2 className="animate-spin" /> : null}
+          {t("common.save")}
+        </Button>
+      </DialogFooter>
+    </form>
+  );
+}
+
+function ProviderSkeleton() {
+  return (
+    <div className="grid gap-2">
+      <Skeleton className="h-16" />
+      <Skeleton className="h-16" />
+    </div>
+  );
+}
+
+function emptyProviderForm(): ProviderFormValue {
+  return {
+    name: "",
+    type: "openai-compatible",
+    baseURL: "",
+    apiKey: "",
+    extra: "",
+    suggestedModel: "",
+  };
+}
+
+function providerToForm(profile: ProviderProfile): ProviderFormValue {
+  return {
+    name: profile.name,
+    type: profile.type,
+    baseURL: profile.baseURL,
+    apiKey: "",
+    extra: profile.extra || "",
+    suggestedModel: "",
+  };
+}
+
+function cleanCreateProvider(value: ProviderFormValue) {
+  const parsed = createProviderRequest.parse({
+    name: value.name.trim(),
+    type: value.type,
+    baseURL: value.baseURL?.trim(),
+    apiKey: value.apiKey?.trim(),
+    extra: value.extra?.trim(),
+  });
+  return parsed;
+}
+
+function cleanPatchProvider(value: ProviderFormValue) {
+  const parsed = patchProviderRequest.parse({
+    type: value.type,
+    baseURL: value.baseURL?.trim(),
+    apiKey: value.apiKey?.trim() || undefined,
+    extra: value.extra?.trim(),
+  });
+  return parsed;
+}
+
+function defaultsPayload(value: DefaultsFormValue) {
+  const payload: Record<string, string> = {};
+  if (value.providerDefault !== DEFAULT_PROVIDER) {
+    payload["provider.default"] = value.providerDefault;
   }
-  return out;
+  if (value.modelDefault.trim()) {
+    payload["model.default"] = value.modelDefault.trim();
+  }
+  if (value.systemPrompt.trim()) {
+    payload.system_prompt = value.systemPrompt;
+  }
+  return payload;
 }
