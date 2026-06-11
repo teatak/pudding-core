@@ -1,7 +1,11 @@
 MODULE := github.com/teatak/pudding-core
 LDFLAGS_RELEASE := -X $(MODULE)/internal/buildinfo.channel=release
 
-.PHONY: dev release run test tidy clean web
+.PHONY: dev release run test tidy clean web desktop
+
+# 桌面壳(开发态二进制;.app 打包/签名后续里程碑)
+desktop: web
+	go build -o bin/pudding-desktop ./cmd/pudding-desktop
 
 # 构建前端并装填进 daemon 的 embed 目录(产物不进 git)
 web:
