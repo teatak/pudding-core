@@ -12,43 +12,47 @@ import (
 // providerProfileView 是 profile 的脱敏响应形状:api_key 只进不出
 // (docs/technology-decisions.md 第 5 节),读端点只回 apiKeySet。
 type providerProfileView struct {
-	Name      string `json:"name"`
-	Type      string `json:"type"`
-	BaseURL   string `json:"baseURL"`
-	APIKeySet bool   `json:"apiKeySet"`
-	Extra     string `json:"extra,omitempty"`
-	CreatedAt string `json:"createdAt"`
-	UpdatedAt string `json:"updatedAt"`
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	BaseURL      string `json:"baseURL"`
+	APIKeySet    bool   `json:"apiKeySet"`
+	DefaultModel string `json:"defaultModel"`
+	Extra        string `json:"extra,omitempty"`
+	CreatedAt    string `json:"createdAt"`
+	UpdatedAt    string `json:"updatedAt"`
 }
 
 func viewProfile(p *store.ProviderProfile) providerProfileView {
 	return providerProfileView{
-		Name:      p.Name,
-		Type:      p.Type,
-		BaseURL:   p.BaseURL,
-		APIKeySet: p.APIKey != "",
-		Extra:     p.Extra,
-		CreatedAt: p.CreatedAt.Format(timeRFC3339),
-		UpdatedAt: p.UpdatedAt.Format(timeRFC3339),
+		Name:         p.Name,
+		Type:         p.Type,
+		BaseURL:      p.BaseURL,
+		APIKeySet:    p.APIKey != "",
+		DefaultModel: p.DefaultModel,
+		Extra:        p.Extra,
+		CreatedAt:    p.CreatedAt.Format(timeRFC3339),
+		UpdatedAt:    p.UpdatedAt.Format(timeRFC3339),
 	}
 }
 
 const timeRFC3339 = "2006-01-02T15:04:05.999999999Z07:00"
 
 type createProfileReq struct {
-	Name    string `json:"name"`
-	Type    string `json:"type"`
-	BaseURL string `json:"baseURL"`
-	APIKey  string `json:"apiKey"`
-	Extra   string `json:"extra"`
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	BaseURL      string `json:"baseURL"`
+	APIKey       string `json:"apiKey"`
+	DefaultModel string `json:"defaultModel"`
+	Extra        string `json:"extra"`
 }
 
 type patchProfileReq struct {
 	Type    *string `json:"type"`
 	BaseURL *string `json:"baseURL"`
 	// APIKey 传非空才覆盖;清除 key 走 DELETE 后重建。
-	APIKey *string `json:"apiKey"`
-	Extra  *string `json:"extra"`
+	APIKey       *string `json:"apiKey"`
+	DefaultModel *string `json:"defaultModel"`
+	Extra        *string `json:"extra"`
 }
 
 func (s *Server) listProviders(c *cart.Context) error {
@@ -82,11 +86,12 @@ func (s *Server) createProvider(c *cart.Context) error {
 		return nil
 	}
 	p := &store.ProviderProfile{
-		Name:    req.Name,
-		Type:    req.Type,
-		BaseURL: strings.TrimRight(req.BaseURL, "/"),
-		APIKey:  req.APIKey,
-		Extra:   defaultExtra(req.Extra),
+		Name:         req.Name,
+		Type:         req.Type,
+		BaseURL:      strings.TrimRight(req.BaseURL, "/"),
+		APIKey:       req.APIKey,
+		DefaultModel: req.DefaultModel,
+		Extra:        defaultExtra(req.Extra),
 	}
 	if err := s.store.PutProviderProfile(ctx, p); err != nil {
 		return s.fail(c, err)
@@ -127,6 +132,9 @@ func (s *Server) patchProvider(c *cart.Context) error {
 	}
 	if req.APIKey != nil && *req.APIKey != "" {
 		p.APIKey = *req.APIKey
+	}
+	if req.DefaultModel != nil {
+		p.DefaultModel = *req.DefaultModel
 	}
 	if req.Extra != nil {
 		p.Extra = defaultExtra(*req.Extra)

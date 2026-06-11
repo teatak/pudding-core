@@ -63,11 +63,12 @@ CREATE TABLE IF NOT EXISTS settings (
 
 -- provider profile:命名的 LLM 端点实例(technology-decisions 第 5 节)
 CREATE TABLE IF NOT EXISTS provider_profiles (
-    name       TEXT PRIMARY KEY,
-    type       TEXT    NOT NULL,            -- 决定用哪个 Client 实现
-    base_url   TEXT    NOT NULL DEFAULT '',
-    api_key    TEXT    NOT NULL DEFAULT '', -- 明文,安全性同第 9 节;API 层只进不出
-    extra      TEXT    NOT NULL DEFAULT '{}',
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    name          TEXT PRIMARY KEY,
+    type          TEXT    NOT NULL,            -- 决定用哪个 Client 实现
+    base_url      TEXT    NOT NULL DEFAULT '',
+    api_key       TEXT    NOT NULL DEFAULT '', -- 明文,安全性同第 9 节;API 层只进不出
+    default_model TEXT    NOT NULL DEFAULT '', -- session.model 为空时用;模型名只在本 profile 下有意义
+    extra         TEXT    NOT NULL DEFAULT '{}',
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL
 );

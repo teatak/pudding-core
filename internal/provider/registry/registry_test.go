@@ -59,7 +59,7 @@ func TestResolveProfileTypesAndCache(t *testing.T) {
 	}
 }
 
-func TestLegacyDefaultFallbackStreams(t *testing.T) {
+func TestEmptyNameResolvesToDefaultProfile(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
@@ -70,13 +70,14 @@ func TestLegacyDefaultFallbackStreams(t *testing.T) {
 	r := New(ms)
 	ctx := context.Background()
 
-	// 没有 profile、没有 legacy 键 → 失败且报 profile 名
+	// 没有 default profile → 失败且报 profile 名,不存在任何隐式回落
 	if _, err := r.Resolve(ctx, ""); err == nil || !strings.Contains(err.Error(), "default") {
 		t.Fatalf("want default-not-found error, got %v", err)
 	}
 
-	// legacy settings 键兜底,空 name 解析到 default
-	if err := ms.SetSettings(ctx, map[string]string{store.SettingOpenAIBaseURL: srv.URL}); err != nil {
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		Name: store.DefaultProviderProfile, Type: TypeOpenAICompatible, BaseURL: srv.URL,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	client, err := r.Resolve(ctx, "")
@@ -96,16 +97,5 @@ func TestLegacyDefaultFallbackStreams(t *testing.T) {
 	}
 	if text != "ok" {
 		t.Fatalf("want ok, got %q", text)
-	}
-
-	// 正式 profile 存在时优先于 legacy
-	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
-		Name: store.DefaultProviderProfile, Type: TypeGoogle, APIKey: "k",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	client, err = r.Resolve(ctx, "")
-	if err != nil || client.Name() != "google" {
-		t.Fatalf("profile must take precedence over legacy keys: %v %v", client, err)
 	}
 }

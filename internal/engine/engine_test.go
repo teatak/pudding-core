@@ -256,9 +256,10 @@ func TestPerSessionProviderRouting(t *testing.T) {
 func TestTurnSnapshotsProviderAndModel(t *testing.T) {
 	eng, ms, _, sid := newTestEngine(t, mock.WithScript([]string{"ok"}), mock.WithDelay(time.Millisecond))
 	ctx := context.Background()
-	if err := ms.SetSettings(ctx, map[string]string{
-		store.SettingDefaultProvider: "default",
-		store.SettingDefaultModel:    "snap-model",
+	// 默认模型是 profile 属性:session 不指 model 时回落所解析 profile 的 default_model
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		Name: store.DefaultProviderProfile, Type: "openai-compatible",
+		BaseURL: "http://unused", DefaultModel: "snap-model",
 	}); err != nil {
 		t.Fatal(err)
 	}

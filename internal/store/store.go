@@ -41,13 +41,16 @@ type SessionUpdate struct {
 // ProviderProfile 描述一个 LLM 端点实例(docs/technology-decisions.md 第 5 节)。
 // APIKey 只进不出:API 层读端点一律脱敏。
 type ProviderProfile struct {
-	Name      string    `json:"name"`
-	Type      string    `json:"type"` // openai-compatible | google | ...
-	BaseURL   string    `json:"baseURL"`
-	APIKey    string    `json:"-"`
-	Extra     string    `json:"extra,omitempty"` // type 特有参数,JSON
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	Name    string `json:"name"`
+	Type    string `json:"type"` // openai-compatible | google | ...
+	BaseURL string `json:"baseURL"`
+	APIKey  string `json:"-"`
+	// DefaultModel:session.model 为空时的回落。模型名只在所属 profile 下
+	// 有意义,因此默认模型是 profile 属性,不存在全局默认模型。
+	DefaultModel string    `json:"defaultModel"`
+	Extra        string    `json:"extra,omitempty"` // type 特有参数,JSON
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 type Role string

@@ -7,8 +7,6 @@ package registry
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 	"sync"
 
 	"github.com/teatak/pudding-core/internal/provider"
@@ -53,10 +51,7 @@ func (r *Registry) Resolve(ctx context.Context, name string) (provider.Client, e
 	}
 	p, err := r.store.GetProviderProfile(ctx, name)
 	if err != nil {
-		p = r.legacyDefault(ctx, name)
-		if p == nil {
-			return nil, fmt.Errorf("provider profile %q not found: configure it via POST /providers", name)
-		}
+		return nil, fmt.Errorf("provider profile %q not found: configure it via POST /providers", name)
 	}
 
 	fingerprint := p.Type + "\x00" + p.BaseURL + "\x00" + p.APIKey + "\x00" + p.Extra
@@ -87,35 +82,6 @@ func build(p *store.ProviderProfile) (provider.Client, error) {
 		return google.New(google.Config{BaseURL: p.BaseURL, APIKey: p.APIKey}), nil
 	default:
 		return nil, fmt.Errorf("provider profile %q: unsupported type %q", p.Name, p.Type)
-	}
-}
-
-// legacyDefault 是 default profile 的过渡回落:settings 的 provider.openai.* 键
-// → 环境变量。web 的 provider 管理 UI(轨道 E3)落地后删除这两级,
-// 届时 default 只认 provider_profiles 表。
-func (r *Registry) legacyDefault(ctx context.Context, name string) *store.ProviderProfile {
-	if name != store.DefaultProviderProfile {
-		return nil
-	}
-	baseURL, apiKey := "", ""
-	if kv, err := r.store.Settings(ctx); err == nil {
-		baseURL = kv[store.SettingOpenAIBaseURL]
-		apiKey = kv[store.SettingOpenAIAPIKey]
-	}
-	if baseURL == "" {
-		baseURL = os.Getenv("PUDDING_OPENAI_BASE_URL")
-	}
-	if apiKey == "" {
-		apiKey = os.Getenv("PUDDING_OPENAI_API_KEY")
-	}
-	if baseURL == "" {
-		return nil
-	}
-	return &store.ProviderProfile{
-		Name:    store.DefaultProviderProfile,
-		Type:    TypeOpenAICompatible,
-		BaseURL: strings.TrimRight(baseURL, "/"),
-		APIKey:  apiKey,
 	}
 }
 

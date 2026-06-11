@@ -27,7 +27,7 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 | --- | --- | --- | --- |
 | Session | `store.Session` | `session` | id, title, provider, model, createdAt, updatedAt |
 | Message | `store.Message` | `message` | id, sessionID, turnID, role, text, clientMessageID?, interrupted?, createdAt |
-| ProviderProfile(脱敏视图) | `api.providerProfileView` | `providerProfile` | name, type, baseURL, apiKeySet, extra?, createdAt, updatedAt |
+| ProviderProfile(脱敏视图) | `api.providerProfileView` | `providerProfile` | name, type, baseURL, apiKeySet, defaultModel, extra?, createdAt, updatedAt |
 
 时间一律 RFC3339 字符串(Go `time.Time` 默认 JSON 编码)。
 
@@ -47,9 +47,9 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 | `GET /settings` | — | `{settings: {}}` | — |
 | `PUT /settings` | `{k: v}` | 204 | 400 |
 | `GET /providers` | — | `{providers: []}`(脱敏) | — |
-| `POST /providers` | `{name, type, baseURL?, apiKey?, extra?}` | 201 profile | 400 / 409 `profile_exists` |
+| `POST /providers` | `{name, type, baseURL?, apiKey?, defaultModel?, extra?}` | 201 profile | 400 / 409 `profile_exists` |
 | `GET /providers/{name}` | — | profile(脱敏) | 404 |
-| `PATCH /providers/{name}` | `{type?, baseURL?, apiKey?, extra?}`,apiKey 非空才覆盖 | 200 profile | 400 / 404 |
+| `PATCH /providers/{name}` | `{type?, baseURL?, apiKey?, defaultModel?, extra?}`,apiKey 非空才覆盖 | 200 profile | 400 / 404 |
 | `DELETE /providers/{name}` | — | 204 | 404 |
 
 鉴权:`Authorization: Bearer <token>` 或 `?token=`(EventSource 用),401 统一 `{"error":"unauthorized"}`。
@@ -66,9 +66,11 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 | --- | --- |
 | `system_prompt` | system instruction,空则用内置默认值 |
 | `provider.default` | session.provider 为空时的默认 profile 名,再空回落 `default` |
-| `model.default` | 模型解析:`session.model` > 此键 > `--model` flag |
-| `provider.openai.base_url` | **过渡键**:`default` profile 不存在时的兜底(env `PUDDING_OPENAI_BASE_URL` 再兜底);轨道 E3 落地后删除 |
-| `provider.openai.api_key` | 同上,过渡键 |
+
+**不存在全局默认模型键**:模型名只在所属 profile 下有意义,默认模型是
+`provider_profiles.default_model`。模型解析:`session.model` > 所解析 profile
+的 `default_model` > `--model` flag(mock/dev 兜底)。
+历史上的 `model.default` 与 `provider.openai.*` 过渡键已随 registry 收口删除。
 
 改 settings 即时生效,不需要重启 daemon;provider 未配置时 submit 会以
 `turn.failed` 提示。events 表每 session 保留最近 1000 条 lifecycle 事件。

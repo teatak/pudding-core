@@ -213,13 +213,14 @@ Provider 路由(后续,先定形不实现):
   (OpenRouter 与本机 Ollama 都是 openai-compatible,但是两个 profile)。
 - profile 是实体(有身份与生命周期),不进 settings:直接落
   `provider_profiles` 表 + 独立 REST 资源。settings 只放标量偏好
-  (`system_prompt` / `provider.default` / `model.default`),
-  k=v 不承载结构化实体。
+  (`system_prompt` / `provider.default`),k=v 不承载结构化实体。
+- **默认模型是 profile 属性**(`default_model` 列):模型名只在所属 profile
+  下有意义,不存在全局默认模型键。
 - engine 不持有单一 client,改持 **ProviderRegistry**:按 profile 名解析并缓存
   client 实例;`provider.Client` 接口与 contextbuilder 的中立输出不变。
   现有 settingsProvider 就是只有一个匿名 profile 的退化 registry,演进路径平滑。
 - 解析顺序:`session.provider` > settings `provider.default` > 内置默认 profile;
-  model 解析不变(session > settings > flag)。
+  model:`session.model` > 所解析 profile 的 `default_model` > `--model` flag。
 - provider/model 都是 BeginTurn 时刻快照,改配置不影响进行中的 turn。
 - 存储落点:
   - `session.provider` 存 `sessions` 表,与 `model` 并列,`PATCH /sessions/{id}` 可改;
@@ -234,13 +235,14 @@ Provider 路由(后续,先定形不实现):
 
 ```sql
 CREATE TABLE provider_profiles (
-    name       TEXT PRIMARY KEY,           -- session.provider 引用此名
-    type       TEXT NOT NULL,              -- 决定用哪个 Client 实现
-    base_url   TEXT NOT NULL DEFAULT '',
-    api_key    TEXT NOT NULL DEFAULT '',   -- 明文,安全性同第 9 节
-    extra      TEXT NOT NULL DEFAULT '{}', -- type 特有参数,JSON
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    name          TEXT PRIMARY KEY,           -- session.provider 引用此名
+    type          TEXT NOT NULL,              -- 决定用哪个 Client 实现
+    base_url      TEXT NOT NULL DEFAULT '',
+    api_key       TEXT NOT NULL DEFAULT '',   -- 明文,安全性同第 9 节
+    default_model TEXT NOT NULL DEFAULT '',   -- session.model 为空时的回落
+    extra         TEXT NOT NULL DEFAULT '{}', -- type 特有参数,JSON
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL
 );
 
 -- 既有表加列
@@ -262,8 +264,8 @@ DELETE /providers/{name}
   "provider not configured" 落 turn.failed,与未配置行为一致,不级联改 session。
 - 默认 profile 用 settings `provider.default` 键表达,不在表里放 is_default 列,
   避免双事实源。
-- 现有 settings 里的 `provider.openai.*` 两键是单 provider 阶段的临时形态,
-  registry 落地时迁为 `provider_profiles` 的 `default` 行并删除。
+- (已完成)单 provider 阶段的 `provider.openai.*` 与全局 `model.default`
+  过渡键已随 registry 收口删除,registry 不再有任何隐式回落。
 
 ## 6. 存储
 

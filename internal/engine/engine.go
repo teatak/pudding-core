@@ -77,21 +77,23 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	}
 
 	// provider / model 在提交时刻解析并随 turn 快照,改配置不影响进行中的 turn。
-	// 解析顺序:session 字段 > settings 默认键 > 内置兜底(第 5 节)。
-	var settings map[string]string
-	if sess.Provider == "" || sess.Model == "" {
-		settings, _ = e.store.Settings(ctx)
-	}
+	// provider:session 字段 > settings provider.default > 内置 "default";
+	// model:session 字段 > 所解析 profile 的 default_model > --model flag(mock/dev 兜底)。
+	// 模型名只在 profile 下有意义,不存在全局默认模型。
 	providerName := sess.Provider
 	if providerName == "" {
-		providerName = settings[store.SettingDefaultProvider]
+		if settings, err := e.store.Settings(ctx); err == nil {
+			providerName = settings[store.SettingDefaultProvider]
+		}
 	}
 	if providerName == "" {
 		providerName = store.DefaultProviderProfile
 	}
 	model := sess.Model
 	if model == "" {
-		model = settings[store.SettingDefaultModel]
+		if p, err := e.store.GetProviderProfile(ctx, providerName); err == nil {
+			model = p.DefaultModel
+		}
 	}
 	if model == "" {
 		model = e.defaultModel
