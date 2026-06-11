@@ -92,6 +92,10 @@ type content struct {
 
 type part struct {
 	Text string `json:"text"`
+	// Thought 标记 3.x thinking 摘要帧,不属于答案正文,解析时跳过。
+	// 同帧可能携带 thoughtSignature(加密推理签名,多轮工具调用才需要回传,
+	// text-only 阶段忽略);字段缺省序列化时不发出,新老协议同一形状。
+	Thought bool `json:"thought,omitempty"`
 }
 
 func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Request, error) {
@@ -158,6 +162,9 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 		}
 		for _, cand := range frame.Candidates {
 			for _, p := range cand.Content.Parts {
+				if p.Thought {
+					continue // thinking 摘要不进正文
+				}
 				if p.Text != "" {
 					if !emitDelta(ctx, out, p.Text) {
 						return ctx.Err()

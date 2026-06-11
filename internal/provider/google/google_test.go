@@ -97,6 +97,28 @@ func TestStreamHappyPath(t *testing.T) {
 	}
 }
 
+// gemini-3.5-flash 实测帧形状(2026-06):thought 摘要帧、
+// 空 text + thoughtSignature 的收尾帧,均不得进入正文。
+func TestThinkingProtocolFramesCompatible(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"candidates":[{"content":{"parts":[{"text":"推理摘要...","thought":true}]},"index":0}]}`+"\n\n")
+		_, _ = io.WriteString(w, `data: {"candidates":[{"content":{"parts":[{"text":"答案"}]},"index":0}]}`+"\n\n")
+		_, _ = io.WriteString(w, `data: {"candidates":[{"content":{"parts":[{"text":"","thoughtSignature":"AbCd=="}]},"finishReason":"STOP","index":0}],"usageMetadata":{"thoughtsTokenCount":286}}`+"\n\n")
+	}))
+	defer srv.Close()
+
+	client := New(Config{BaseURL: srv.URL, HTTPClient: srv.Client()})
+	ch, _ := client.Stream(context.Background(), provider.Request{Model: "gemini-3.5-flash"})
+	text, done, err := collect(t, ch)
+	if err != nil || !done {
+		t.Fatalf("done=%v err=%v", done, err)
+	}
+	if text != "答案" {
+		t.Fatalf("thought frames must not leak into answer, got %q", text)
+	}
+}
+
 func TestNon2xxEmitsErrWithRedactedKey(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
