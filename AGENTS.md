@@ -34,6 +34,13 @@
 8. context 只来自 canonical messages。
 9. provider client 不保存跨 turn 事实源。
 10. 不做旧接口兼容层。若旧调用方与新结构冲突,迁移调用方后删除旧路径。
+11. streaming 必须可中断:`POST /sessions/{id}/cancel` 与 submit 同批交付。
+12. session 事件带单调递增 seq;SSE 必须支持 `Last-Event-ID` 续传。
+13. submit 必须带 `clientMessageID`,作为幂等键和 overlay 对账键。
+14. assistant 输出 turn 结束才落 canonical message;token delta 不落库。
+15. turn 收尾的 canonical message、`turns` 状态、lifecycle events 同一事务写入。
+16. daemon 只 bind loopback,所有请求带启动 token。
+17. provider 只产出模型流(delta / finish / error);turn lifecycle 事件由 engine 生成。
 
 ## 后端技术约束
 
@@ -118,6 +125,7 @@ Wails bindings 不承载核心 session runtime。
 - canonical messages 不长期存 Zustand。
 - transcript 渲染 = `messages query` + `live event overlay`。
 - submit 不直接写 canonical messages;只允许 pending overlay,最终以 SSE / refetch 为准。
+- pending overlay 与 canonical message 用 `clientMessageID` 对账替换。
 - localStorage 只持久化 UI 偏好,不存 messages。
 
 shadcn 规则:

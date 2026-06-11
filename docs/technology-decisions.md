@@ -41,6 +41,7 @@ Pudding Core = local-first multi-session AI daemon + app core.
 
 - session lifecycle
 - text submit
+- turn cancel
 - streaming events
 - canonical messages
 - OpenAI-compatible text provider
@@ -110,6 +111,7 @@ Pudding Core = local-first multi-session AI daemon + app core.
 - canonical messages 不长期存 Zustand。
 - transcript 渲染 = `messages query` + `live event overlay`。
 - submit 不直接写 canonical messages;只允许 pending overlay,最终以 SSE / refetch 为准。
+- submit 必须带客户端生成的 `clientMessageID`;pending overlay 与 canonical message 用 `clientMessageID` 对账替换。
 - 所有 query key 必须显式带作用域:
 
 ```ts
@@ -165,6 +167,10 @@ Pudding Core = local-first multi-session AI daemon + app core.
 - Electron:太重。
 - Tauri:当前 Go daemon + Wails 更贴合。
 
+风险:
+
+- Wails v3 仍处 alpha,API 可能变动。第一阶段不做 desktop packaging,升级风险后置;引入时锁定版本,升级单独走 PR。
+
 ## 5. LLM Provider
 
 第一阶段只做:
@@ -174,6 +180,7 @@ Pudding Core = local-first multi-session AI daemon + app core.
 Provider 规则:
 
 - provider client 不保存跨 turn 事实源。
+- provider 只产出模型流(`delta / finish / error`);turn lifecycle 事件由 engine 生成,provider 不拥有业务生命周期。
 - 每次请求都由 canonical messages + current input 构造。
 - 不做 provider-local history handoff。
 - 不做旧接口兼容层。
@@ -204,6 +211,7 @@ system instruction
 第一批表:
 
 - `sessions`
+- `turns`
 - `messages`
 - `events`
 - `settings`
@@ -219,23 +227,52 @@ system instruction
 规则:
 
 - `messages` 是 LLM context 的事实源。
+- `turns` 承载 turn 状态(`running / completed / failed / cancelled`);cancel、并发 409、幂等判断都查 `turns`,turn 状态不塞进 messages / events。
 - `events` 是 UI replay / debug event log。
 - context builder 只读 canonical messages。
 - clear / compact / retention 都必须能从 canonical messages 解释。
+
+写入规则:
+
+- `messages` 存 `clientMessageID`(per-session 唯一索引),承载 submit 幂等。
+- assistant 输出进行中只走 SSE + 内存 buffer,不逐 delta 写库;turn 结束一次性写一条 canonical message。
+- token delta 不落 `events` 表;`events` 只存粗粒度 lifecycle 事件。
+- turn 收尾时 canonical message、`turns` 状态、lifecycle events 在同一事务写入,不允许三者状态不一致。
+- SQLite 开 WAL;写入走单 writer,避免并发写冲突。
+
+retention:
+
+- `messages` 不自动清理,只能由显式 clear / compact 改变。
+- `events` 按条数或天数滚动清理;只需保住 SSE 断线续传窗口 + 近期 debug 回放。
+
+compaction 形状(后续,先定形不实现):
+
+- compact / summarize 的产物必须落为 canonical message(独立 role,如 `summary`)。
+- 不允许 context builder 读 canonical messages 之外的事实源,compaction 也不例外。
 
 ## 7. API 形状
 
 第一批 API:
 
 ```text
-POST /sessions
-GET  /sessions
-GET  /sessions/{id}
-POST /sessions/{id}/submit
-GET  /sessions/{id}/events
-GET  /sessions/{id}/messages
-POST /sessions/{id}/model
+POST   /sessions
+GET    /sessions
+GET    /sessions/{id}
+PATCH  /sessions/{id}          # session 属性:title / model 等
+DELETE /sessions/{id}
+POST   /sessions/{id}/submit   # body 必须带 clientMessageID
+POST   /sessions/{id}/cancel   # 中断当前 turn
+GET    /sessions/{id}/events   # SSE,支持 Last-Event-ID 续传
+GET    /sessions/{id}/messages
+GET    /settings
+PUT    /settings
 ```
+
+说明:
+
+- model 是 session 属性,走 `PATCH /sessions/{id}`,不单设 `POST /sessions/{id}/model`。
+- submit 的 `clientMessageID` 同时是 idempotency key:重复提交返回已有 message,不重复触发 turn。
+- streaming 必须可中断,`cancel` 与 submit 同批交付,不后补。
 
 禁止第一阶段出现:
 
@@ -268,7 +305,29 @@ Router 规则:
 /files/:name.json
 ```
 
-## 8. Audio
+## 8. 事件协议
+
+turn 状态机:
+
+```text
+turn.started → turn.delta* → turn.completed | turn.failed | turn.cancelled
+```
+
+规则:
+
+- 每个 session 的事件带单调递增 `seq`,作为 SSE `id` 字段。
+- SSE 支持 `Last-Event-ID` 续传;断线重连后从 `events` 表补发缺口。
+- `turn.delta` 只走 SSE,不落库;其余 lifecycle 事件落 `events` 表。
+- UI overlay 的丢弃时机:收到 `turn.completed`(或 failed / cancelled)且对应 canonical message 可见后,删除该 turn 的 overlay。
+- 同一 session 的 events 对所有订阅者广播;daemon 不跟踪"哪个客户端在看"。多客户端同时打开同一 session 是显式支持的能力。
+
+## 9. 安全
+
+- daemon 只 bind loopback。
+- daemon 启动时生成 token,所有 HTTP/SSE/WS 请求必须带 token;Wails 启动 daemon 时注入,Web UI 通过启动页握手获取。
+- 第一阶段 provider API key 存 SQLite 明文,数据库文件权限 0600;后续评估走 Wails bindings 接系统 keychain。
+
+## 10. Audio
 
 第一阶段不做音频。
 
@@ -288,7 +347,7 @@ Router 规则:
 
 音频必须在文本多会话架构稳定后再接。
 
-## 9. 第一阶段验收
+## 11. 第一阶段验收
 
 第一阶段只验收文本多会话:
 
@@ -298,8 +357,12 @@ Router 规则:
 - A/B context 不串。
 - 前端切 selected session 没有任何后端 runtime side effect。
 - provider 请求不依赖 provider-local history。
+- streaming 中可以 cancel,session 立即可再次 submit。
+- daemon 重启后 session 列表 / messages / context 完整恢复,不依赖丢失的内存态。
+- SSE 断线重连后 transcript 不丢事件、不重复渲染。
+- 同一 clientMessageID 重复 submit 不产生重复 message / 重复 turn。
 
-## 10. 暂缓事项
+## 12. 暂缓事项
 
 暂缓:
 
@@ -314,3 +377,8 @@ Router 规则:
 - public website
 
 这些能力可以参考 `pudding-core-old`,但不能直接搬旧 `Runtime` 结构。
+
+## 13. 开放问题
+
+- cancel / failed 时的半截 assistant 输出怎么处理:倾向保留为 canonical message 并标记 `interrupted`(进入后续 context),而不是丢弃;待第一阶段实测再定。
+- 同一 session 是否允许并发 turn:第一阶段不允许,streaming 中再 submit 返回 409;后续是否放开排队待定。
