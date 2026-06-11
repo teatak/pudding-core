@@ -78,6 +78,19 @@ shadcn 官方组件一律 `npx shadcn@latest add <component>` 引入;
 - 同一条消息快速双击发送:只出现一个气泡(duplicate 吸收)。
 - `npm run build` 通过;基础组件来自 shadcn 官方安装。
 
+## 旧项目可参考资产(可选)
+
+旧仓库 `../pudding-core-old/web/apps/pudding-web/src/` 下有几个**纯展示**资产可搬或参考:
+
+- `transcript/TranscriptTurn.tsx` —— 消息气泡样式(user/assistant/折叠/复制按钮)
+- `canvas/markdown.ts` —— 自研 markdown → HTML 渲染(无代码高亮,够第一版)
+- `theme/theme.ts` —— Light/Dark/System 三态切换
+- `transcript/MascotHint.tsx` —— 状态驱动的吉祥物动画(可选,锦上添花)
+
+**只搬展示层**:旧项目的 store / hook / fetch / 路由(`useSessionTranscript`、
+`sessionListStore`、`useRoute` 等)是单会话 focus 形状,一行都不要搬,
+那正是本仓库要消灭的架构。
+
 ## 禁区
 
 - 不改 `web/contracts/`、不改任何 Go 代码。契约问题 PR 里提,主线改完你 rebase。
