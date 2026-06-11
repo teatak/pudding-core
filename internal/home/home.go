@@ -29,9 +29,9 @@ func Resolve(flagValue string) (string, error) {
 	return filepath.Join(usr, ".pudding-dev"), nil
 }
 
-// Prepare 创建 home 目录结构(第一阶段只有根目录与 logs/)。
+// Prepare 创建 home 目录结构。
 func Prepare(dir string) error {
-	for _, d := range []string{dir, filepath.Join(dir, "logs")} {
+	for _, d := range []string{dir, filepath.Join(dir, "data"), filepath.Join(dir, "logs")} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return fmt.Errorf("home: mkdir %s: %w", d, err)
 		}
@@ -47,6 +47,6 @@ func DefaultAddr() string {
 	return "127.0.0.1:9670"
 }
 
-func DBPath(dir string) string { return filepath.Join(dir, "pudding.db") }
+func DBPath(dir string) string { return filepath.Join(dir, "data", "pudding.db") }
 
 func TokenPath(dir string) string { return filepath.Join(dir, "daemon.token") }

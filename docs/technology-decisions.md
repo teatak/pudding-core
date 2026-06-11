@@ -419,7 +419,8 @@ home 内容(第一阶段):
 
 ```text
 <home>/
-  pudding.db      # SQLite(含 WAL/SHM)
+  data/
+    pudding.db    # SQLite(含 WAL/SHM)
   daemon.token    # 启动 token
   logs/
 ```
