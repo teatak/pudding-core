@@ -132,4 +132,5 @@ Wails bindings 不承载核心 session runtime。
 shadcn 规则:
 
 - Web UI 使用 shadcn 时,如果官方有组件,必须通过 `npx shadcn@latest add <component>` 引入官方组件。
-- Web UI 需要扩展 shadcn 官方组件能力时,必须新增业务包裹组件承载扩展,禁止直接修改官方组件源码。
+- 禁止自定义 shadcn 替代组件;业务代码只能直接组合官方组件。
+- 禁止直接修改 shadcn 官方组件源码。

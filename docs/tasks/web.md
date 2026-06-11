@@ -76,7 +76,7 @@ shadcn 官方组件一律 `npx shadcn@latest add <component>` 引入;
 - devtools offline 几秒再恢复:transcript 不丢条目、不重复渲染。
 - streaming 中 cancel:气泡停住并带"已中断"标记,马上可再次 submit。
 - 同一条消息快速双击发送:只出现一个气泡(duplicate 吸收)。
-- `npm run build` 通过;基础组件来自 shadcn 官方安装。
+- `cd web && npm run build` 通过;基础组件来自 shadcn 官方安装。
 
 ## 旧项目可参考资产(可选)
 
