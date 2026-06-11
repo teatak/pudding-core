@@ -21,7 +21,14 @@ export function useSessionEvents(sessionID: string | undefined, token: string) {
     };
 
     const handleMessage = (event: MessageEvent<string>) => {
-      const parsed = sessionEvent.safeParse(JSON.parse(event.data));
+      let payload: unknown;
+      try {
+        payload = JSON.parse(event.data);
+      } catch {
+        console.warn("malformed session event payload", event.data);
+        return;
+      }
+      const parsed = sessionEvent.safeParse(payload);
       if (!parsed.success) {
         console.warn("invalid session event", parsed.error);
         return;

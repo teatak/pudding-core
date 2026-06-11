@@ -1,6 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Send, Square } from "lucide-react";
+import { useRef } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -23,7 +24,11 @@ type ComposerProps = {
 export function Composer({ token, sessionID }: ComposerProps) {
   const queryClient = useQueryClient();
   const addPendingUser = useOverlayStore((state) => state.addPendingUser);
+  const removePendingUser = useOverlayStore((state) => state.removePendingUser);
   const runningTurnID = useOverlayStore((state) => state.runningTurns[sessionID]);
+  // clientMessageID 按"草稿"生成而不是按请求生成:失败重试和快速双击
+  // 复用同一个 ID,服务端幂等去重才生效;成功后才轮换到下一个草稿 ID。
+  const draftIDRef = useRef<string>(crypto.randomUUID());
   const form = useForm<z.infer<typeof composerSchema>>({
     resolver: zodResolver(composerSchema),
     defaultValues: { text: "" },
@@ -31,7 +36,7 @@ export function Composer({ token, sessionID }: ComposerProps) {
 
   const submitMutation = useMutation({
     mutationFn: async (value: z.infer<typeof composerSchema>) => {
-      const clientMessageID = crypto.randomUUID();
+      const clientMessageID = draftIDRef.current;
       addPendingUser({
         sessionID,
         clientMessageID,
@@ -41,11 +46,15 @@ export function Composer({ token, sessionID }: ComposerProps) {
       return submitMessage(token, sessionID, { clientMessageID, text: value.text });
     },
     onSuccess: async () => {
+      draftIDRef.current = crypto.randomUUID();
       form.reset({ text: "" });
       await queryClient.invalidateQueries({ queryKey: queryKeys.messages(sessionID) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
     },
     onError: (error) => {
+      // 提交未被接受,canonical 不会出现这条消息:pending 气泡必须撤掉,
+      // 文本留在 composer 里供重试(同一 draft ID)
+      removePendingUser(sessionID, draftIDRef.current);
       if (error instanceof APIError && error.code === "turn_running") {
         form.setError("text", { message: "The session is already streaming." });
         return;

@@ -25,6 +25,7 @@ type OverlayState = {
   assistants: Record<string, AssistantOverlay>;
   runningTurns: Record<string, string | undefined>;
   addPendingUser: (message: PendingUserMessage) => void;
+  removePendingUser: (sessionID: string, clientMessageID: string) => void;
   applyEvent: (event: SessionEvent) => void;
   reconcileMessages: (sessionID: string, messages: Message[]) => void;
   clearSession: (sessionID: string) => void;
@@ -46,13 +47,30 @@ export const useOverlayStore = create<OverlayState>((set) => ({
         ],
       },
     })),
+  removePendingUser: (sessionID, clientMessageID) =>
+    set((state) => ({
+      pendingUsers: {
+        ...state.pendingUsers,
+        [sessionID]: (state.pendingUsers[sessionID] || []).filter(
+          (item) => item.clientMessageID !== clientMessageID,
+        ),
+      },
+    })),
   applyEvent: (event) =>
     set((state) => {
       if (event.kind === "ping") {
         return state;
       }
       if (event.kind === "turn.started") {
+        // 新 turn 开始时清掉该 session 已终结的 overlay:
+        // 无 canonical 产物的 failed 气泡(reconcile 清不到)在用户重试时让位
+        const assistants = Object.fromEntries(
+          Object.entries(state.assistants).filter(
+            ([, overlay]) => overlay.sessionID !== event.sessionID || overlay.status === "streaming",
+          ),
+        );
         return {
+          assistants,
           runningTurns: { ...state.runningTurns, [event.sessionID]: event.turnID },
         };
       }
