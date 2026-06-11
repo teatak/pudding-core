@@ -159,7 +159,11 @@ function MessageBubble({ message }: { message: Message }) {
       >
         {isUser ? message.text : <MarkdownBody text={message.text} />}
         {message.interrupted ? <InterruptedBadge /> : null}
-        <MessageMeta createdAt={message.createdAt} text={message.text} />
+        <MessageMeta
+          className={isUser ? "text-primary-foreground/70" : undefined}
+          createdAt={message.createdAt}
+          text={message.text}
+        />
       </div>
       {isUser ? <AvatarIcon /> : null}
     </div>
@@ -217,10 +221,15 @@ function MarkdownBody({ text }: { text: string }) {
   return <div className="pudding-markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />;
 }
 
-function MessageMeta({ createdAt, text }: { createdAt: string; text: string }) {
+function MessageMeta({ createdAt, text, className }: { createdAt: string; text: string; className?: string }) {
   const { t } = useI18n();
   return (
-    <div className="flex items-center gap-2 text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+    <div
+      className={cn(
+        "flex items-center gap-2 text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100",
+        className,
+      )}
+    >
       <span>{formatTime(createdAt)}</span>
       <Button
         aria-label={t("common.copy")}

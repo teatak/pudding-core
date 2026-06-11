@@ -85,51 +85,56 @@ export function Composer({ token, sessionID }: ComposerProps) {
 
   return (
     <form
-      className="border-t bg-background p-3"
+      className="border-t bg-background px-5 pt-3 pb-4"
       onSubmit={form.handleSubmit(submitDraft)}
     >
-      <div className="mx-auto flex max-w-3xl items-end gap-2">
-        <Textarea
-          className="max-h-40 min-h-20 resize-none"
-          placeholder={t("composer.messagePlaceholder")}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              void form.handleSubmit(submitDraft)();
-            }
-          }}
-          {...form.register("text")}
-        />
-        {runningTurnID ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                aria-label={t("composer.stop")}
-                disabled={cancelMutation.isPending || cancelLocked}
-                size="icon"
-                type="button"
-                variant="outline"
-                onClick={() => cancelMutation.mutate()}
-              >
-                {cancelMutation.isPending ? <Loader2 className="animate-spin" /> : <Square />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{cancelLocked ? t("composer.stopPending") : t("composer.stop")}</TooltipContent>
-          </Tooltip>
-        ) : (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button aria-label={t("composer.send")} disabled={submitMutation.isPending} size="icon" type="submit">
-                {submitMutation.isPending ? <Loader2 className="animate-spin" /> : <Send />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("composer.send")}</TooltipContent>
-          </Tooltip>
-        )}
+      <div className="mx-auto w-full max-w-3xl">
+        <div className="rounded-xl border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/25">
+          <Textarea
+            className="max-h-40 min-h-16 resize-none rounded-xl border-0 bg-transparent shadow-none focus-visible:ring-0 dark:bg-transparent"
+            placeholder={t("composer.messagePlaceholder")}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                void form.handleSubmit(submitDraft)();
+              }
+            }}
+            {...form.register("text")}
+          />
+          <div className="flex items-center justify-between gap-2 px-3 pb-2">
+            <span className="select-none text-xs text-muted-foreground">{t("composer.hint")}</span>
+            {runningTurnID ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    aria-label={t("composer.stop")}
+                    disabled={cancelMutation.isPending || cancelLocked}
+                    size="icon"
+                    type="button"
+                    variant="outline"
+                    onClick={() => cancelMutation.mutate()}
+                  >
+                    {cancelMutation.isPending ? <Loader2 className="animate-spin" /> : <Square />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{cancelLocked ? t("composer.stopPending") : t("composer.stop")}</TooltipContent>
+              </Tooltip>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button aria-label={t("composer.send")} disabled={submitMutation.isPending} size="icon" type="submit">
+                    {submitMutation.isPending ? <Loader2 className="animate-spin" /> : <Send />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t("composer.send")}</TooltipContent>
+              </Tooltip>
+            )}
+          </div>
+        </div>
+        {form.formState.errors.text ? (
+          <div className="mt-2 text-xs text-destructive">{form.formState.errors.text.message}</div>
+        ) : null}
       </div>
-      {form.formState.errors.text ? (
-        <div className="mx-auto mt-2 max-w-3xl text-xs text-destructive">{form.formState.errors.text.message}</div>
-      ) : null}
     </form>
   );
 }

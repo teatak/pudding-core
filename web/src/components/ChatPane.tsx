@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { PanelLeft, RefreshCw } from "lucide-react";
 import { useEffect, useMemo } from "react";
 
 import { getSettings, listProviders, listSessions, updateSession, type Session } from "@/api/client";
@@ -11,10 +10,7 @@ import { LanguageToggle } from "@/components/LanguageToggle";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Transcript } from "@/components/Transcript";
-import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
 import { PROVIDER_PRESETS } from "@/provider/presets";
@@ -61,41 +57,15 @@ export function ChatPane({ token, selectedSessionID }: ChatPaneProps) {
 
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
-      <header className="flex h-14 items-center justify-between border-b bg-background px-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <PanelLeft className="h-4 w-4 text-muted-foreground" />
-          <div className="min-w-0">
-            <div className="truncate text-sm font-medium">{selectedSession?.title || t("session.noSelected")}</div>
-            {selectedSession ? (
-              <div className="truncate text-xs text-muted-foreground">
-                {selectedSession.provider || t("session.providerDefault")} · {selectedSession.model || t("session.modelDefault")}
-              </div>
-            ) : null}
-          </div>
-        </div>
-        <div className="flex items-center gap-1">
+      <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b bg-background px-4">
+        <div className="truncate text-sm font-medium">{selectedSession?.title || t("session.noSelected")}</div>
+        <div className="flex items-center gap-1.5">
           {selectedSession ? <SessionProviderControls token={token} session={selectedSession} /> : null}
           <ThemeToggle />
           <LanguageToggle />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                aria-label={t("common.refresh")}
-                size="icon"
-                variant="ghost"
-                onClick={() => {
-                  void sessionsQuery.refetch();
-                }}
-              >
-                <RefreshCw />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("common.refresh")}</TooltipContent>
-          </Tooltip>
           <SettingsDialog token={token} />
         </div>
       </header>
-      <Separator />
       {activeSessionID ? (
         <>
           <Transcript token={token} sessionID={activeSessionID} />
