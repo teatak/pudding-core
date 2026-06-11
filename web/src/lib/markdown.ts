@@ -18,24 +18,31 @@ function safeHref(raw: string) {
   return "";
 }
 
+// code span 与链接先从原文提取进槽位、再对剩余文本整体转义,
+// 避免对捕获的已转义文本二次转义(`Vec<T>` 显示成 Vec&lt;T&gt; 那类 bug)。
 function inline(value: string) {
-  const codes: string[] = [];
-  let out = escapeHTML(value);
-  out = out.replace(/`([^`]+)`/g, (_match, code: string) => {
-    const index = codes.length;
-    codes.push(`<code>${escapeHTML(code)}</code>`);
-    return `\u0000CODE${index}\u0000`;
-  });
+  const slots: string[] = [];
+  const stash = (html: string) => {
+    const index = slots.length;
+    slots.push(html);
+    return `\u0000SLOT${index}\u0000`;
+  };
+  let out = value.replace(/`([^`]+)`/g, (_match, code: string) => stash(`<code>${escapeHTML(code)}</code>`));
   out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, text: string, href: string) => {
     const safe = safeHref(href);
     if (!safe) {
-      return escapeHTML(text);
+      return text; // 留在原文里走统一转义
     }
-    return `<a href="${escapeAttr(safe)}" target="_blank" rel="noreferrer noopener">${escapeHTML(text)}</a>`;
+    return stash(`<a href="${escapeAttr(safe)}" target="_blank" rel="noreferrer noopener">${escapeHTML(text)}</a>`);
   });
+  out = escapeHTML(out);
   out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   out = out.replace(/\*([^*]+)\*/g, "<em>$1</em>");
-  return out.replace(/\u0000CODE(\d+)\u0000/g, (_match, index: string) => codes[Number(index)] ?? "");
+  // 槽位回填跑两遍:链接文本里可嵌 code span(嵌套深度至多 2)
+  for (let pass = 0; pass < 2; pass++) {
+    out = out.replace(/\u0000SLOT(\d+)\u0000/g, (_match, index: string) => slots[Number(index)] ?? "");
+  }
+  return out;
 }
 
 function isTableSeparator(line: string) {
