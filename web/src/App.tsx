@@ -1,4 +1,4 @@
-import { useLocation } from "@tanstack/react-router";
+import { useSearch } from "@tanstack/react-router";
 
 import { ChatPane } from "@/components/ChatPane";
 import { SessionList } from "@/components/SessionList";
@@ -9,9 +9,7 @@ import { useToken } from "@/state/tokenStore";
 
 export function App() {
   const token = useToken();
-  useLocation({ select: (location) => location.href });
-  const selectedSessionID =
-    typeof window === "undefined" ? undefined : new URLSearchParams(window.location.search).get("session") || undefined;
+  const selectedSessionID = useSearch({ from: "/" }).session;
 
   if (!token) {
     return <TokenGate />;
@@ -19,12 +17,14 @@ export function App() {
 
   return (
     <TooltipProvider delayDuration={250}>
-      <SidebarProvider>
-        <SessionList token={token} selectedSessionID={selectedSessionID} />
-        <SidebarInset>
-          <ChatPane token={token} selectedSessionID={selectedSessionID} />
-        </SidebarInset>
-      </SidebarProvider>
+      <div className="h-[100svh] overflow-hidden">
+        <SidebarProvider className="h-full min-h-0 overflow-hidden">
+          <SessionList token={token} selectedSessionID={selectedSessionID} />
+          <SidebarInset className="h-full min-h-0 overflow-hidden">
+            <ChatPane token={token} selectedSessionID={selectedSessionID} />
+          </SidebarInset>
+        </SidebarProvider>
+      </div>
     </TooltipProvider>
   );
 }

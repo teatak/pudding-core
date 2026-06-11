@@ -6,6 +6,9 @@ import { z } from "zod";
 
 import { App } from "@/App";
 import "@/styles.css";
+import { applyTheme, readStoredTheme } from "@/theme/theme";
+
+applyTheme(readStoredTheme());
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -27,6 +30,8 @@ const indexRoute = createRoute({
     session: z.string().optional(),
   }),
 });
+
+export { indexRoute };
 
 const routeTree = rootRoute.addChildren([indexRoute]);
 

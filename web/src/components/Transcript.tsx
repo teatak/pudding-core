@@ -1,13 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 import { Bot, CircleAlert, User } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { listMessages, type Message } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useI18n } from "@/i18n";
+import { renderMarkdown } from "@/lib/markdown";
 import { cn } from "@/lib/utils";
 import { type AssistantOverlay, useOverlayStore } from "@/state/overlayStore";
 
@@ -25,6 +28,9 @@ type TranscriptItem =
   | { kind: "assistant"; overlay: AssistantOverlay };
 
 export function Transcript({ token, sessionID }: TranscriptProps) {
+  const { t } = useI18n();
+  const scrollAreaRef = useRef<HTMLDivElement | null>(null);
+  const [followingBottom, setFollowingBottom] = useState(true);
   const reconcileMessages = useOverlayStore((state) => state.reconcileMessages);
   const pendingUsersBySession = useOverlayStore((state) => state.pendingUsers);
   const assistantsByID = useOverlayStore((state) => state.assistants);
@@ -44,6 +50,26 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
     reconcileMessages(sessionID, messages);
   }, [messages, reconcileMessages, sessionID]);
 
+  const viewport = useCallback(() => {
+    return scrollAreaRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null;
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      const node = viewport();
+      if (!node) {
+        return;
+      }
+      node.scrollTop = node.scrollHeight;
+      setFollowingBottom(true);
+    });
+  }, [viewport]);
+
+  useEffect(() => {
+    setFollowingBottom(true);
+    scrollToBottom();
+  }, [scrollToBottom, sessionID]);
+
   const items = useMemo<TranscriptItem[]>(() => {
     const canonicalIDs = new Set(messages.map((message) => message.id));
     const finalAssistantIDs = new Set(messages.map((message) => message.id));
@@ -61,25 +87,52 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
     ].filter((item) => item.kind !== "message" || canonicalIDs.has(item.message.id));
   }, [assistantOverlays, messages, pendingUsers]);
 
+  useEffect(() => {
+    const node = viewport();
+    if (!node) {
+      return;
+    }
+    const onScroll = () => {
+      const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
+      setFollowingBottom(distance < 48);
+    };
+    node.addEventListener("scroll", onScroll);
+    onScroll();
+    return () => node.removeEventListener("scroll", onScroll);
+  }, [viewport, sessionID]);
+
+  useEffect(() => {
+    if (followingBottom) {
+      scrollToBottom();
+    }
+  }, [followingBottom, items, scrollToBottom]);
+
   return (
-    <ScrollArea className="min-h-0 flex-1">
-      <div className="mx-auto grid w-full max-w-4xl gap-3 px-5 py-5">
-        {items.length === 0 ? (
-          <div className="flex min-h-80 items-center justify-center text-sm text-muted-foreground">
-            Start a conversation
-          </div>
-        ) : null}
-        {items.map((item) => {
-          if (item.kind === "message") {
-            return <MessageBubble key={item.message.id} message={item.message} />;
-          }
-          if (item.kind === "pending") {
-            return <PendingBubble key={item.id} text={item.text} />;
-          }
-          return <AssistantOverlayBubble key={item.overlay.turnID} overlay={item.overlay} />;
-        })}
-      </div>
-    </ScrollArea>
+    <div ref={scrollAreaRef} className="relative min-h-0 flex-1">
+      <ScrollArea className="h-full">
+        <div className="mx-auto grid w-full max-w-4xl gap-3 px-5 py-5">
+          {items.length === 0 ? (
+            <div className="flex min-h-80 items-center justify-center text-sm text-muted-foreground">
+              {t("session.start")}
+            </div>
+          ) : null}
+          {items.map((item) => {
+            if (item.kind === "message") {
+              return <MessageBubble key={item.message.id} message={item.message} />;
+            }
+            if (item.kind === "pending") {
+              return <PendingBubble key={item.id} text={item.text} />;
+            }
+            return <AssistantOverlayBubble key={item.overlay.turnID} overlay={item.overlay} />;
+          })}
+        </div>
+      </ScrollArea>
+      {!followingBottom && items.length > 0 ? (
+        <Button className="absolute right-5 bottom-5 shadow-md" size="sm" type="button" onClick={scrollToBottom}>
+          {t("transcript.jumpLatest")}
+        </Button>
+      ) : null}
+    </div>
   );
 }
 
@@ -90,11 +143,12 @@ function MessageBubble({ message }: { message: Message }) {
       {!isUser ? <AvatarIcon assistant /> : null}
       <div
         className={cn(
-          "max-w-[78%] whitespace-pre-wrap rounded-lg border px-3 py-2 text-sm leading-6 shadow-sm",
+          "max-w-[78%] rounded-lg border px-3 py-2 text-sm leading-6 shadow-sm",
           isUser ? "bg-primary text-primary-foreground" : "bg-card",
+          isUser ? "whitespace-pre-wrap" : "whitespace-normal",
         )}
       >
-        {message.text}
+        {isUser ? message.text : <MarkdownBody text={message.text} />}
         {message.interrupted ? <InterruptedBadge /> : null}
       </div>
       {isUser ? <AvatarIcon /> : null}
@@ -118,7 +172,7 @@ function AssistantOverlayBubble({ overlay }: { overlay: AssistantOverlay }) {
     <div className="flex gap-3">
       <AvatarIcon assistant />
       <div className="max-w-[78%] whitespace-pre-wrap rounded-lg border bg-card px-3 py-2 text-sm leading-6 shadow-sm">
-        {overlay.text || "…"}
+        {overlay.text ? <MarkdownBody text={overlay.text} /> : "…"}
         {overlay.status === "failed" && overlay.error ? (
           <Alert className="mt-2" variant="destructive">
             <CircleAlert className="h-3.5 w-3.5" />
@@ -140,9 +194,14 @@ function AvatarIcon({ assistant = false }: { assistant?: boolean }) {
 }
 
 function InterruptedBadge() {
+  const { t } = useI18n();
   return (
     <div className="mt-2">
-      <Badge variant="outline">interrupted</Badge>
+      <Badge variant="outline">{t("transcript.interrupted")}</Badge>
     </div>
   );
+}
+
+function MarkdownBody({ text }: { text: string }) {
+  return <div className="pudding-markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />;
 }

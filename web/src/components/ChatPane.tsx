@@ -6,13 +6,15 @@ import { useEffect } from "react";
 import { listSessions } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { Composer } from "@/components/Composer";
+import { LanguageToggle } from "@/components/LanguageToggle";
 import { SettingsDialog } from "@/components/SettingsDialog";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Transcript } from "@/components/Transcript";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSessionEvents } from "@/hooks/useSessionEvents";
-import { replaceSessionSearch } from "@/routes/sessionSearch";
+import { useI18n } from "@/i18n";
 
 type ChatPaneProps = {
   token: string;
@@ -21,6 +23,7 @@ type ChatPaneProps = {
 
 export function ChatPane({ token, selectedSessionID }: ChatPaneProps) {
   const navigate = useNavigate({ from: "/" });
+  const { t } = useI18n();
   const sessionsQuery = useQuery({
     queryKey: queryKeys.sessions(),
     queryFn: () => listSessions(token),
@@ -43,7 +46,7 @@ export function ChatPane({ token, selectedSessionID }: ChatPaneProps) {
       if (nextSessionID) {
         void navigate({ to: "/", search: { session: nextSessionID } });
       } else {
-        replaceSessionSearch(undefined);
+        void navigate({ to: "/", search: {}, replace: true });
       }
     }
   }, [navigate, selectedSession, selectedSessionID, sessions, sessionsQuery.isSuccess]);
@@ -51,20 +54,22 @@ export function ChatPane({ token, selectedSessionID }: ChatPaneProps) {
   useSessionEvents(activeSessionID, token);
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col">
+    <section className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
       <header className="flex h-14 items-center justify-between border-b bg-background px-4">
         <div className="flex min-w-0 items-center gap-2">
           <PanelLeft className="h-4 w-4 text-muted-foreground" />
           <div className="min-w-0">
-            <div className="truncate text-sm font-medium">{selectedSession?.title || "No session selected"}</div>
+            <div className="truncate text-sm font-medium">{selectedSession?.title || t("session.noSelected")}</div>
             {selectedSession ? <div className="truncate text-xs text-muted-foreground">{selectedSession.model}</div> : null}
           </div>
         </div>
         <div className="flex items-center gap-1">
+          <ThemeToggle />
+          <LanguageToggle />
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                aria-label="Refresh"
+                aria-label={t("common.refresh")}
                 size="icon"
                 variant="ghost"
                 onClick={() => {
@@ -74,7 +79,7 @@ export function ChatPane({ token, selectedSessionID }: ChatPaneProps) {
                 <RefreshCw />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Refresh</TooltipContent>
+            <TooltipContent>{t("common.refresh")}</TooltipContent>
           </Tooltip>
           <SettingsDialog token={token} />
         </div>
@@ -87,7 +92,7 @@ export function ChatPane({ token, selectedSessionID }: ChatPaneProps) {
         </>
       ) : (
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-          Create or select a session
+          {t("session.selectOrCreate")}
         </div>
       )}
     </section>

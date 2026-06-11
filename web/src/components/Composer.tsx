@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Send, Square } from "lucide-react";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -10,6 +10,7 @@ import { queryKeys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useI18n } from "@/i18n";
 import { useOverlayStore } from "@/state/overlayStore";
 
 const composerSchema = z.object({
@@ -23,10 +24,11 @@ type ComposerProps = {
 
 export function Composer({ token, sessionID }: ComposerProps) {
   const queryClient = useQueryClient();
+  const { t } = useI18n();
   const addPendingUser = useOverlayStore((state) => state.addPendingUser);
   const removePendingUser = useOverlayStore((state) => state.removePendingUser);
   const runningTurnID = useOverlayStore((state) => state.runningTurns[sessionID]);
-  const lastSubmitAtRef = useRef(0);
+  const [cancelLocked, setCancelLocked] = useState(false);
   // clientMessageID 按"草稿"生成而不是按请求生成:失败重试和快速双击
   // 复用同一个 ID,服务端幂等去重才生效;成功后才轮换到下一个草稿 ID。
   const draftIDRef = useRef<string>(crypto.randomUUID());
@@ -57,10 +59,10 @@ export function Composer({ token, sessionID }: ComposerProps) {
       // 文本留在 composer 里供重试(同一 draft ID)
       removePendingUser(sessionID, draftIDRef.current);
       if (error instanceof APIError && error.code === "turn_running") {
-        form.setError("text", { message: "The session is already streaming." });
+        form.setError("text", { message: t("composer.turnRunning") });
         return;
       }
-      form.setError("text", { message: error instanceof Error ? error.message : "Submit failed" });
+      form.setError("text", { message: error instanceof Error ? error.message : t("composer.submitFailed") });
     },
   });
 
@@ -69,16 +71,17 @@ export function Composer({ token, sessionID }: ComposerProps) {
   });
 
   const submitDraft = (value: z.infer<typeof composerSchema>) => {
-    lastSubmitAtRef.current = Date.now();
+    setCancelLocked(true);
     submitMutation.mutate(value);
   };
 
-  const cancelTurnIfIntentional = () => {
-    if (Date.now() - lastSubmitAtRef.current < 500) {
+  useEffect(() => {
+    if (!cancelLocked) {
       return;
     }
-    cancelMutation.mutate();
-  };
+    const timer = window.setTimeout(() => setCancelLocked(false), 500);
+    return () => window.clearTimeout(timer);
+  }, [cancelLocked]);
 
   return (
     <form
@@ -88,7 +91,7 @@ export function Composer({ token, sessionID }: ComposerProps) {
       <div className="flex items-end gap-2">
         <Textarea
           className="max-h-40 min-h-20 resize-none"
-          placeholder="Message"
+          placeholder={t("composer.messagePlaceholder")}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
@@ -101,26 +104,26 @@ export function Composer({ token, sessionID }: ComposerProps) {
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                aria-label="Stop"
-                disabled={cancelMutation.isPending}
+                aria-label={t("composer.stop")}
+                disabled={cancelMutation.isPending || cancelLocked}
                 size="icon"
                 type="button"
                 variant="outline"
-                onClick={cancelTurnIfIntentional}
+                onClick={() => cancelMutation.mutate()}
               >
                 {cancelMutation.isPending ? <Loader2 className="animate-spin" /> : <Square />}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Stop</TooltipContent>
+            <TooltipContent>{cancelLocked ? t("composer.stopPending") : t("composer.stop")}</TooltipContent>
           </Tooltip>
         ) : (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button aria-label="Send" disabled={submitMutation.isPending} size="icon" type="submit">
+              <Button aria-label={t("composer.send")} disabled={submitMutation.isPending} size="icon" type="submit">
                 {submitMutation.isPending ? <Loader2 className="animate-spin" /> : <Send />}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Send</TooltipContent>
+            <TooltipContent>{t("composer.send")}</TooltipContent>
           </Tooltip>
         )}
       </div>

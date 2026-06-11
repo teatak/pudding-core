@@ -128,3 +128,65 @@
     @apply font-sans;
     }
 }
+
+.pudding-markdown {
+  @apply grid gap-2 whitespace-normal break-words;
+}
+
+.pudding-markdown :where(h1, h2, h3, h4) {
+  @apply mt-1 font-medium leading-snug;
+}
+
+.pudding-markdown h1 {
+  @apply text-lg;
+}
+
+.pudding-markdown h2 {
+  @apply text-base;
+}
+
+.pudding-markdown h3,
+.pudding-markdown h4 {
+  @apply text-sm;
+}
+
+.pudding-markdown :where(ul, ol) {
+  @apply grid gap-1 pl-5;
+}
+
+.pudding-markdown ul {
+  @apply list-disc;
+}
+
+.pudding-markdown ol {
+  @apply list-decimal;
+}
+
+.pudding-markdown a {
+  @apply text-primary underline underline-offset-4;
+}
+
+.pudding-markdown code {
+  @apply rounded bg-muted px-1 py-0.5 font-mono text-[0.85em];
+}
+
+.pudding-markdown pre {
+  @apply overflow-auto rounded-lg border bg-muted p-3;
+}
+
+.pudding-markdown pre code {
+  @apply bg-transparent p-0 text-sm;
+}
+
+.pudding-markdown table {
+  @apply block max-w-full overflow-auto rounded-lg border text-sm;
+}
+
+.pudding-markdown th,
+.pudding-markdown td {
+  @apply border-b px-3 py-2 text-left align-top;
+}
+
+.pudding-markdown th {
+  @apply bg-muted font-medium;
+}
