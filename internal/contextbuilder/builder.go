@@ -12,6 +12,9 @@ import (
 
 const defaultSystemPrompt = "You are Pudding, a helpful local-first assistant."
 
+// SettingSystemPrompt 是 settings 表里自定义 system prompt 的 key。
+const SettingSystemPrompt = "system_prompt"
+
 type Builder struct {
 	store store.Store
 }
@@ -25,9 +28,17 @@ func (b *Builder) Build(ctx context.Context, sessionID, model string) (provider.
 	if err != nil {
 		return provider.Request{}, err
 	}
+	settings, err := b.store.Settings(ctx)
+	if err != nil {
+		return provider.Request{}, err
+	}
+	system := settings[SettingSystemPrompt]
+	if system == "" {
+		system = defaultSystemPrompt
+	}
 	req := provider.Request{
 		Model:    model,
-		System:   defaultSystemPrompt,
+		System:   system,
 		Messages: make([]provider.Message, 0, len(msgs)),
 	}
 	for _, m := range msgs {
