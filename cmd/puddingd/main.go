@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -74,9 +75,19 @@ func run() error {
 	defer st.Close()
 	hub := event.NewHub()
 	eng := engine.New(st, hub, client, *flagModel)
+	if err := eng.Recover(context.Background()); err != nil {
+		return fmt.Errorf("recover interrupted turns: %w", err)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	server := &http.Server{
 		Addr:    *flagAddr,
 		Handler: api.New(eng, st, hub).Handler(token),
+		// request ctx 派生自 signal ctx:收到信号后 SSE 长连接立即退出,
+		// Shutdown 不再被流式请求拖满超时。
+		BaseContext: func(net.Listener) context.Context { return ctx },
 	}
 
 	slog.Info("puddingd starting",
@@ -85,9 +96,6 @@ func run() error {
 		"addr", *flagAddr,
 		"provider", client.Name(),
 		"store", "sqlite")
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- server.ListenAndServe() }()
