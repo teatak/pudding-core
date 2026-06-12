@@ -18,14 +18,16 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 
 	"github.com/teatak/pudding-core/internal/daemon"
+	"github.com/teatak/pudding-core/internal/home"
 )
 
 func main() {
-	// 壳用独立固定端口(与 CLI daemon 的默认 9670 分开):loopback 页面的
-	// localStorage 按 origin(含端口)隔离,端口漂移会让 UI 偏好整体"丢失"。
-	// AutoPort 仅在 9671 也被占时兜底(此时偏好会暂存到新 origin,可接受)。
+	// 壳用独立固定端口(与 CLI daemon 分开,按通道取值,见
+	// home.DefaultDesktopAddr):loopback 页面的 localStorage 按 origin
+	// (含端口)隔离,端口漂移会让 UI 偏好整体"丢失"。
+	// AutoPort 仅在该端口也被占时兜底(此时偏好暂存到新 origin,可接受)。
 	d, err := daemon.Start(daemon.Options{
-		Addr:         "127.0.0.1:9671",
+		Addr:         home.DefaultDesktopAddr(),
 		AutoPort:     true,
 		DefaultModel: "mock-model",
 	})
@@ -72,12 +74,27 @@ func main() {
 	}
 	window := app.Window.NewWithOptions(windowOpts)
 
+	// 窗口底色跟随系统外观(深 #212121 / 浅 #f9fafb,即两套主题的
+	// --background 等值):失焦合成降级透底时与页面同色,不反差。
+	// options 里的初值只覆盖首帧,这里在运行期持续校正。
+	applyWindowBase := func() {
+		if app.Env.IsDarkMode() {
+			window.SetBackgroundColour(application.NewRGB(33, 33, 33))
+		} else {
+			window.SetBackgroundColour(application.NewRGB(249, 250, 251))
+		}
+	}
+	app.Event.OnApplicationEvent(events.Common.ThemeChanged, func(*application.ApplicationEvent) {
+		applyWindowBase()
+	})
+
 	var hideAfterFullscreenExit atomic.Bool
 	if runtime.GOOS == "darwin" {
 		// NSWindow 在 NewWithOptions 后异步创建,这里直接调 NativeWindow()
 		// 还是 nil;WindowFocus 首次 fire 时已就绪,attach 内部去重。
 		window.RegisterHook(events.Common.WindowFocus, func(*application.WindowEvent) {
 			attachDoubleClickToZoom(window)
+			applyWindowBase()
 		})
 		// 监听 Mac native 事件而非 Common alias:Common 走 setupEventMapping
 		// 的异步 forwarding,fullscreen transition 期间会 race(旧项目结论)

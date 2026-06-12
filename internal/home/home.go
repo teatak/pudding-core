@@ -47,6 +47,17 @@ func DefaultAddr() string {
 	return "127.0.0.1:9670"
 }
 
+// DefaultDesktopAddr 返回桌面壳的通道默认地址。壳与 CLI daemon 分端口
+// (四个端口一段连续区间:9668 release 壳 / 9669 release CLI /
+// 9670 dev CLI / 9671 dev 壳):loopback 页面的 localStorage 按
+// origin(含端口)隔离,壳端口必须稳定,否则 UI 偏好随端口漂移丢失。
+func DefaultDesktopAddr() string {
+	if buildinfo.IsRelease() {
+		return "127.0.0.1:9668"
+	}
+	return "127.0.0.1:9671"
+}
+
 func DBPath(dir string) string { return filepath.Join(dir, "data", "pudding.db") }
 
 func TokenPath(dir string) string { return filepath.Join(dir, "daemon.token") }

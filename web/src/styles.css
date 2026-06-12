@@ -51,24 +51,27 @@
 
 :root {
     /* 中性表面 + indigo 强调(docs/design.md v2 第 1 节)。
-       层级:chat 区 = 最暗底层,sidebar / card / popover = 逐级提亮 */
-    --background: oklch(0.985 0.002 250);
-    --foreground: oklch(0.24 0.012 255);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.24 0.012 255);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.24 0.012 255);
+       层级:chat 区 = 最暗底层,sidebar / card / popover = 逐级提亮。
+       表面色用 sRGB hex(oklch 等值换算,微冷调保留在 RGB 里):
+       规避 WKWebView 对大面积 oklch 纯色的宽色域合成伪影(见 .dark 注),
+       品牌色保留 oklch */
+    --background: #f9fafb;
+    --foreground: #1b2025;
+    --card: #ffffff;
+    --card-foreground: #1b2025;
+    --popover: #ffffff;
+    --popover-foreground: #1b2025;
     --primary: oklch(0.511 0.262 277);
     --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.965 0.004 250);
-    --secondary-foreground: oklch(0.28 0.012 255);
-    --muted: oklch(0.965 0.004 250);
-    --muted-foreground: oklch(0.50 0.015 255);
-    --accent: oklch(0.955 0.005 250);
-    --accent-foreground: oklch(0.26 0.012 255);
+    --secondary: #f1f4f6;
+    --secondary-foreground: #25292f;
+    --muted: #f1f4f6;
+    --muted-foreground: #5e646c;
+    --accent: #eef0f3;
+    --accent-foreground: #20242a;
     --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0.005 250);
-    --input: oklch(0.922 0.005 250);
+    --border: #e3e5e8;
+    --input: #e3e5e8;
     --ring: oklch(0.511 0.262 277);
     --chart-1: oklch(0.837 0.128 66.29);
     --chart-2: oklch(0.705 0.213 47.604);
@@ -76,13 +79,13 @@
     --chart-4: oklch(0.553 0.195 38.402);
     --chart-5: oklch(0.47 0.157 37.304);
     --radius: 0.625rem;
-    --sidebar: oklch(1 0 0);
-    --sidebar-foreground: oklch(0.24 0.012 255);
+    --sidebar: #ffffff;
+    --sidebar-foreground: #1b2025;
     --sidebar-primary: oklch(0.511 0.262 277);
     --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.945 0.005 250);
-    --sidebar-accent-foreground: oklch(0.26 0.012 255);
-    --sidebar-border: oklch(0.922 0.005 250);
+    --sidebar-accent: #eaedf0;
+    --sidebar-accent-foreground: #20242a;
+    --sidebar-border: #e3e5e8;
     --sidebar-ring: oklch(0.511 0.262 277);
     /* macOS 红绿灯横向让位:浏览器 0;壳模式由 data-shell 切换,
        全屏时红绿灯隐藏、让位归零(design.md 2.3)。
