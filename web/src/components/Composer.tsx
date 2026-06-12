@@ -90,8 +90,9 @@ export function Composer({ token, session }: ComposerProps) {
       className="relative px-5 pt-2 pb-4"
       onSubmit={form.handleSubmit(submitDraft)}
     >
-      {/* 与对话区同底无分割线,衔接用渐变遮罩:滚动内容在贴近输入区时淡出 */}
-      <div className="pointer-events-none absolute inset-x-0 -top-10 h-10 bg-gradient-to-t from-background to-transparent" />
+      {/* 与对话区同底无分割线,衔接用渐变遮罩:下段全实色盖住被视口裁切的
+          半行文字,上段再渐隐(此前 40px 纯渐变会漏出文字边缘) */}
+      <div className="pointer-events-none absolute inset-x-0 -top-14 h-14 bg-gradient-to-t from-background from-35% to-transparent" />
       <div className="mx-auto w-full max-w-3xl">
         <div className="relative rounded-3xl border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/25">
           <Textarea
