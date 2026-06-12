@@ -6,29 +6,36 @@
 > 纪律:新组件一律消费本文 token,硬编码色值 / 任意间距是 review 驳回项;
 > 亮暗双套同一 PR 交付;每个轨道验收自带第 9 节 checklist。
 
-## 1. 色调:冷中性 + 焦糖强调
+## 1. 色调:中性表面 + 焦糖强调,sidebar 是提亮的卡片层
 
-整体转**冷色调**:中性色 hue 250–255(蓝灰系);焦糖琥珀只作为品牌强调色
-(运行态、主按钮、用户消息条),在冷底上更突出。
+表面色走**中性灰**:亮色套保留极淡冷调(chroma ≤0.005),暗色套纯中性
+(chroma 0,不偏冷不偏暖)。焦糖琥珀只作为品牌强调色(运行态、主按钮、
+用户消息条),在中性底上突出。
+
+**层级方向(两套一致)**:chat 区(`--background`)是最暗的底层;
+sidebar / card / popover 是逐级**提亮**的卡片层——不是反过来。
+暗色套整体亮度抬高(chat 区 ≈ `#212121` 量级),避免发闷;
+border 在暗色套用白色 alpha,跨不同亮度表面观感一致。
 
 ```css
 :root {
   --radius: 0.625rem;
-  --background: oklch(0.985 0.003 250);   /* 冷白 */
+  --background: oklch(0.985 0.002 250);   /* chat 区:微灰底层 */
   --foreground: oklch(0.24 0.012 255);
   --primary: oklch(0.66 0.13 65);          /* 焦糖,品牌强调 */
   --primary-foreground: oklch(0.99 0.01 85);
   --muted-foreground: oklch(0.50 0.015 255);
-  --border: oklch(0.91 0.008 250);
-  --sidebar: oklch(0.955 0.005 250);
+  --border: oklch(0.922 0.005 250);
+  --sidebar: oklch(1 0 0);                 /* 白色卡片,浮于底层之上 */
 }
 .dark {
-  --background: oklch(0.21 0.012 255);     /* 冷深灰 */
-  --foreground: oklch(0.93 0.008 250);
+  --background: oklch(0.25 0 0);           /* chat 区:最暗层 ≈ #212121 */
+  --foreground: oklch(0.93 0 0);
   --primary: oklch(0.75 0.12 70);
   --primary-foreground: oklch(0.22 0.03 60);
-  --border: oklch(0.30 0.01 255);
-  --sidebar: oklch(0.165 0.012 255);
+  --border: oklch(1 0 0 / 12%);            /* 白 alpha,跨表面一致 */
+  --sidebar: oklch(0.30 0 0);              /* 提亮卡片层 ≈ #2e2e2e */
+  /* card 0.30 / popover 0.32:浮层逐级再亮 */
 }
 ```
 
@@ -179,7 +186,7 @@ text:      markdown 正文(无气泡直接排版)…▍    ← streaming 光标
 
 ## 9. 底座合规 checklist(轨道验收用)
 
-- [ ] 无硬编码色值 / 任意间距,全部走 token;冷中性 + 焦糖强调
+- [ ] 无硬编码色值 / 任意间距,全部走 token;中性表面 + 焦糖强调
 - [ ] 暗色逐界面检查,无漏光、对比度达标
 - [ ] 空态 / 加载 / 错误 / streaming 四态齐全
 - [ ] 中英文案齐全,无 key 裸奔

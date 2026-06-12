@@ -50,8 +50,9 @@
 }
 
 :root {
-    /* 冷中性(hue 250-255)+ 焦糖强调(docs/design.md v2 第 1 节) */
-    --background: oklch(0.995 0.002 250);
+    /* 中性表面 + 焦糖强调(docs/design.md v2 第 1 节)。
+       层级:chat 区 = 最暗底层,sidebar / card / popover = 逐级提亮 */
+    --background: oklch(0.985 0.002 250);
     --foreground: oklch(0.24 0.012 255);
     --card: oklch(1 0 0);
     --card-foreground: oklch(0.24 0.012 255);
@@ -75,7 +76,7 @@
     --chart-4: oklch(0.553 0.195 38.402);
     --chart-5: oklch(0.47 0.157 37.304);
     --radius: 0.625rem;
-    --sidebar: oklch(0.985 0.002 250);
+    --sidebar: oklch(1 0 0);
     --sidebar-foreground: oklch(0.24 0.012 255);
     --sidebar-primary: oklch(0.66 0.13 65);
     --sidebar-primary-foreground: oklch(0.99 0.01 85);
@@ -101,36 +102,39 @@ html[data-shell="mac"][data-fullscreen] {
 }
 
 .dark {
-    --background: oklch(0.21 0.012 255);
-    --foreground: oklch(0.93 0.008 250);
-    --card: oklch(0.245 0.012 255);
-    --card-foreground: oklch(0.93 0.008 250);
-    --popover: oklch(0.245 0.012 255);
-    --popover-foreground: oklch(0.93 0.008 250);
+    /* 纯中性灰(chroma 0,不偏冷不偏暖)。chat 区最暗,
+       sidebar / card / popover 作为提亮的卡片层;border 用白色
+       alpha,跨不同亮度表面保持一致观感 */
+    --background: oklch(0.25 0 0);
+    --foreground: oklch(0.93 0 0);
+    --card: oklch(0.30 0 0);
+    --card-foreground: oklch(0.93 0 0);
+    --popover: oklch(0.32 0 0);
+    --popover-foreground: oklch(0.93 0 0);
     --primary: oklch(0.75 0.12 70);
     --primary-foreground: oklch(0.22 0.03 60);
-    --secondary: oklch(0.29 0.012 255);
-    --secondary-foreground: oklch(0.93 0.008 250);
-    --muted: oklch(0.29 0.012 255);
-    --muted-foreground: oklch(0.71 0.01 250);
-    --accent: oklch(0.32 0.012 255);
-    --accent-foreground: oklch(0.93 0.008 250);
+    --secondary: oklch(0.345 0 0);
+    --secondary-foreground: oklch(0.93 0 0);
+    --muted: oklch(0.325 0 0);
+    --muted-foreground: oklch(0.72 0 0);
+    --accent: oklch(0.365 0 0);
+    --accent-foreground: oklch(0.95 0 0);
     --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(0.30 0.012 255);
-    --input: oklch(0.30 0.012 255);
+    --border: oklch(1 0 0 / 12%);
+    --input: oklch(1 0 0 / 16%);
     --ring: oklch(0.75 0.12 70);
     --chart-1: oklch(0.837 0.128 66.29);
     --chart-2: oklch(0.705 0.213 47.604);
     --chart-3: oklch(0.646 0.222 41.116);
     --chart-4: oklch(0.553 0.195 38.402);
     --chart-5: oklch(0.47 0.157 37.304);
-    --sidebar: oklch(0.165 0.012 255);
-    --sidebar-foreground: oklch(0.93 0.008 250);
+    --sidebar: oklch(0.30 0 0);
+    --sidebar-foreground: oklch(0.93 0 0);
     --sidebar-primary: oklch(0.75 0.12 70);
     --sidebar-primary-foreground: oklch(0.22 0.03 60);
-    --sidebar-accent: oklch(0.29 0.012 255);
-    --sidebar-accent-foreground: oklch(0.93 0.008 250);
-    --sidebar-border: oklch(0.30 0.012 255);
+    --sidebar-accent: oklch(0.36 0 0);
+    --sidebar-accent-foreground: oklch(0.95 0 0);
+    --sidebar-border: oklch(1 0 0 / 12%);
     --sidebar-ring: oklch(0.75 0.12 70);
     --success: oklch(0.7 0.11 175);
 }
