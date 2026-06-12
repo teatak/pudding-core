@@ -156,7 +156,7 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
   return (
     <aside className="flex h-full w-[268px] shrink-0 flex-col gap-2 bg-sidebar p-2 text-sidebar-foreground">
       <div
-        className="flex items-center transition-[padding] duration-200"
+        className="drag-region flex items-center transition-[padding] duration-200"
         style={{ paddingLeft: "var(--traffic-inset)" }}
       >
         <Tooltip>

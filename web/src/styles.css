@@ -84,21 +84,29 @@
     --sidebar-accent-foreground: oklch(0.26 0.012 255);
     --sidebar-border: oklch(0.922 0.005 250);
     --sidebar-ring: oklch(0.66 0.13 65);
-    /* macOS 红绿灯 inset:浏览器 0;壳模式由 data-shell 切换(design.md 2.3)。
-       -x 作用于展开 rail 顶行(左移空间),-y 作用于收起窄条顶部 */
+    /* macOS 红绿灯横向让位:浏览器 0;壳模式由 data-shell 切换,
+       全屏时红绿灯隐藏、让位归零(design.md 2.3) */
     --traffic-inset: 0px;
-    --traffic-inset-y: 0px;
     --success: oklch(0.62 0.12 175);
 }
 
 html[data-shell="mac"] {
     --traffic-inset: 78px;
-    --traffic-inset-y: 38px;
 }
 
 html[data-shell="mac"][data-fullscreen] {
     --traffic-inset: 0px;
-    --traffic-inset-y: 0px;
+}
+
+/* 壳模式窗口拖拽区:Wails 按命中元素的 --wails-draggable 判定,
+   自定义属性会被子元素继承,交互控件显式标回 no-drag;
+   仅 data-shell 下生效,纯浏览器访问无副作用 */
+html[data-shell] .drag-region {
+    --wails-draggable: drag;
+}
+
+html[data-shell] .drag-region :where(button, a, input, textarea, select, [role="button"]) {
+    --wails-draggable: no-drag;
 }
 
 .dark {

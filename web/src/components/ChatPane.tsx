@@ -8,7 +8,6 @@ import { Composer } from "@/components/Composer";
 import { Transcript } from "@/components/Transcript";
 import { useSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
-import { cn } from "@/lib/utils";
 import { useOverlayStore } from "@/state/overlayStore";
 import { useRailCollapsed } from "@/state/railStore";
 
@@ -53,10 +52,9 @@ export function ChatPane({ token, selectedSessionID }: ChatPaneProps) {
   return (
     <section className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
       <header
-        className={cn(
-          "flex h-12 shrink-0 items-center justify-between gap-3 px-5",
-          railCollapsed && "pl-13",
-        )}
+        className="drag-region flex h-12 shrink-0 items-center justify-between gap-3 px-5"
+        // 折叠态给悬浮触发器让位;壳模式下触发器随红绿灯右移,让位同步加宽
+        style={railCollapsed ? { paddingLeft: "calc(var(--traffic-inset) + 3.25rem)" } : undefined}
       >
         <div className="truncate text-sm font-medium">
           {selectedSession?.title || t("session.noSelected")}

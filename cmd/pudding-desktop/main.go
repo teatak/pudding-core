@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -30,19 +31,38 @@ func main() {
 		Name: "Pudding",
 	})
 
-	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
+	// 窗口 chrome(docs/design.md 2.3):macOS 用 HiddenInset 隐藏标题栏,
+	// 红绿灯悬浮在页面上;URL 附 ?shell=mac 让页面启用 --traffic-inset 让位,
+	// 拖拽区由页面侧 --wails-draggable 标注,这里只留兜底的隐形标题栏高度。
+	windowOpts := application.WebviewWindowOptions{
 		Title:     "Pudding",
 		URL:       d.OpenURL(),
 		Width:     1200,
 		Height:    800,
 		MinWidth:  760,
 		MinHeight: 520,
-	})
+	}
+	if runtime.GOOS == "darwin" {
+		windowOpts.URL += "&shell=mac"
+		windowOpts.Mac = application.MacWindow{
+			TitleBar:                application.MacTitleBarHiddenInset,
+			InvisibleTitleBarHeight: 28,
+		}
+	}
+	window := app.Window.NewWithOptions(windowOpts)
 
 	// 关窗 = 隐藏:daemon 常驻后台,tray 可唤回;退出只走 tray 菜单
 	window.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		e.Cancel()
 		window.Hide()
+	})
+
+	// 全屏时红绿灯随系统标题栏隐藏,页面经 data-fullscreen 取消 inset 让位
+	window.OnWindowEvent(events.Common.WindowFullscreen, func(*application.WindowEvent) {
+		window.ExecJS(`document.documentElement.setAttribute("data-fullscreen", "")`)
+	})
+	window.OnWindowEvent(events.Common.WindowUnFullscreen, func(*application.WindowEvent) {
+		window.ExecJS(`document.documentElement.removeAttribute("data-fullscreen")`)
 	})
 
 	tray := app.SystemTray.New()
