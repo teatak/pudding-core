@@ -93,9 +93,9 @@ export function Composer({ token, session }: ComposerProps) {
       {/* 与对话区同底无分割线,衔接用渐变遮罩:滚动内容在贴近输入区时淡出 */}
       <div className="pointer-events-none absolute inset-x-0 -top-10 h-10 bg-gradient-to-t from-background to-transparent" />
       <div className="mx-auto w-full max-w-3xl">
-        <div className="relative rounded-xl border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/25">
+        <div className="relative rounded-2xl border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/25">
           <Textarea
-            className="max-h-40 min-h-16 resize-none rounded-xl border-0 bg-transparent text-sm leading-6 shadow-none focus-visible:ring-0 md:text-sm dark:bg-transparent"
+            className="max-h-40 min-h-16 resize-none rounded-2xl border-0 bg-transparent text-sm leading-6 shadow-none focus-visible:ring-0 md:text-sm dark:bg-transparent"
             placeholder={t("composer.messagePlaceholder")}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
@@ -127,13 +127,13 @@ export function Composer({ token, session }: ComposerProps) {
             ) : (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  {/* 发送用中性高对比圆钮(前景色反白),强调色留给运行态 */}
                   <Button
                     aria-label={t("composer.send")}
-                    className="rounded-full bg-foreground text-background hover:bg-foreground/85"
+                    className="rounded-full"
                     disabled={submitMutation.isPending}
                     size="icon"
                     type="submit"
+                    variant="secondary"
                   >
                     {submitMutation.isPending ? <Loader2 className="animate-spin" /> : <Send />}
                   </Button>

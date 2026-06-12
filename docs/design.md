@@ -6,11 +6,12 @@
 > 纪律:新组件一律消费本文 token,硬编码色值 / 任意间距是 review 驳回项;
 > 亮暗双套同一 PR 交付;每个轨道验收自带第 9 节 checklist。
 
-## 1. 色调:中性表面 + 焦糖强调,sidebar 是提亮的卡片层
+## 1. 色调:中性表面 + indigo 强调,sidebar 是提亮的卡片层
 
 表面色走**中性灰**:亮色套保留极淡冷调(chroma ≤0.005),暗色套纯中性
-(chroma 0,不偏冷不偏暖)。焦糖琥珀只作为品牌强调色(运行态、主按钮、
-用户消息条),在中性底上突出。
+(chroma 0,不偏冷不偏暖)。indigo 只作为品牌强调色(运行态、主按钮、
+用户消息条),在中性底上突出;composer 发送等常驻操作用中性
+secondary,强调色留给状态表达。
 
 **层级方向(两套一致)**:chat 区(`--background`)是最暗的底层;
 sidebar / card / popover 是逐级**提亮**的卡片层——不是反过来。
@@ -22,8 +23,8 @@ border 在暗色套用白色 alpha,跨不同亮度表面观感一致。
   --radius: 0.625rem;
   --background: oklch(0.985 0.002 250);   /* chat 区:微灰底层 */
   --foreground: oklch(0.24 0.012 255);
-  --primary: oklch(0.66 0.13 65);          /* 焦糖,品牌强调 */
-  --primary-foreground: oklch(0.99 0.01 85);
+  --primary: oklch(0.511 0.262 277);       /* indigo,品牌强调 */
+  --primary-foreground: oklch(0.985 0 0);
   --muted-foreground: oklch(0.50 0.015 255);
   --border: oklch(0.922 0.005 250);
   --sidebar: oklch(1 0 0);                 /* 白色卡片,浮于底层之上 */
@@ -31,15 +32,15 @@ border 在暗色套用白色 alpha,跨不同亮度表面观感一致。
 .dark {
   --background: oklch(0.25 0 0);           /* chat 区:最暗层 ≈ #212121 */
   --foreground: oklch(0.93 0 0);
-  --primary: oklch(0.75 0.12 70);
-  --primary-foreground: oklch(0.22 0.03 60);
+  --primary: oklch(0.585 0.233 277);       /* indigo,暗色套提亮一档 */
+  --primary-foreground: oklch(0.985 0 0);
   --border: oklch(1 0 0 / 12%);            /* 白 alpha,跨表面一致 */
   --sidebar: oklch(0.30 0 0);              /* 提亮卡片层 ≈ #2e2e2e */
   /* card 0.30 / popover 0.32:浮层逐级再亮 */
 }
 ```
 
-- 状态色:running = `--primary`(琥珀脉冲),done = teal/green 系,
+- 状态色:running = `--primary`(indigo 脉冲),done = teal/green 系,
   failed = destructive;运行态是品牌强调色的主要使用场景。
 - 对比度 WCAG AA(正文 4.5:1,辅助 3:1),亮暗都查。
 - 字体:`"Inter Variable", "PingFang SC", "Noto Sans SC", system-ui`;
@@ -61,7 +62,7 @@ border 在暗色套用白色 alpha,跨不同亮度表面观感一致。
 - **不放 "Pudding" 字标**,品牌走窗口标题/图标。
 - 顶部第一行:折叠按钮 + 新建会话。
 - 列表项两行:第一行 状态点 + 标题;第二行 状态文案 · 相对时间(muted)。
-  - 状态点:琥珀脉冲 = 正在生成;teal 实心 = 近期完成(自上次查看后,本地态);
+  - 状态点:indigo 脉冲 = 正在生成;teal 实心 = 近期完成(自上次查看后,本地态);
     无点 = 空闲。
 - **可收起**:收起后整栏缩为窄条(仅图标);hover 折叠图标时以
   **popover 浮出完整面板**(参照 Claude Code 桌面端):新建、列表、脚部入口。
@@ -138,13 +139,16 @@ text:      markdown 正文(无气泡直接排版)…▍    ← streaming 光标
 
 ## 4. 模型选择器:两层 Accordion
 
-- composer 底排的单一触发器,显示当前 `profile · model`。
+- composer 底排的单一触发器,显示当前生效的 `[品牌图标] 模型名`。
+  session 未显式指定时,前端按 settings 默认 provider → profile 的
+  `default_model` 解析出实际值直接显示——**不暴露"跟随设置"类中间概念**。
+- 模型 id 一律格式化展示(`deepseek-v4-flash` → `Deepseek V4 Flash`,
+  `lib/model.ts`);API 提交仍是原始 id。
 - 点击展开 popover,内容是 **Accordion**:
   - 第一层 = provider profile(名称 + 类型徽标 + apiKeySet 状态);
   - 展开第二层 = 该 profile 的模型列表(default_model 置顶标注,
     preset 目录 + 当前值合并);
-  - **默认展开当前 session 所用 profile**;
-  - 顶部固定项"默认(跟随设置)"。
+  - **默认展开当前 session 所用 profile**。
 - 选中模型 = 一次 `PATCH /sessions/{id}` 同时写 provider + model。
 - **模型目录数据源**:`GET /providers/{name}/models`(daemon 按 type 代理真实端点
   的模型列表 API,短缓存)为主;请求失败回落前端 presets 静态清单;
@@ -163,7 +167,7 @@ text:      markdown 正文(无气泡直接排版)…▍    ← streaming 光标
 
 ## 6. composer
 
-- 卡片容器 + focus-within 焦糖 ring;placeholder "消息"。
+- 卡片容器 + focus-within indigo ring;placeholder "消息"。
 - 底排:左 = [+ 附件(占位 disabled)] [模型选择器(第 4 节)];
   右 = 发送 / 停止(同位切换,500ms 锁定窗口期渲染 disabled)。
 - 斜杠命令、@引用是将来的左排扩展,不实现只留位。
@@ -186,7 +190,7 @@ text:      markdown 正文(无气泡直接排版)…▍    ← streaming 光标
 
 ## 9. 底座合规 checklist(轨道验收用)
 
-- [ ] 无硬编码色值 / 任意间距,全部走 token;中性表面 + 焦糖强调
+- [ ] 无硬编码色值 / 任意间距,全部走 token;中性表面 + indigo 强调
 - [ ] 暗色逐界面检查,无漏光、对比度达标
 - [ ] 空态 / 加载 / 错误 / streaming 四态齐全
 - [ ] 中英文案齐全,无 key 裸奔
