@@ -22,6 +22,7 @@
     --color-chart-2: var(--chart-2);
     --color-chart-1: var(--chart-1);
     --color-ring: var(--ring);
+    --color-success: var(--success);
     --color-input: var(--input);
     --color-border: var(--border);
     --color-destructive: var(--destructive);
@@ -82,16 +83,21 @@
     --sidebar-accent-foreground: oklch(0.26 0.012 255);
     --sidebar-border: oklch(0.905 0.008 250);
     --sidebar-ring: oklch(0.66 0.13 65);
-    /* macOS 红绿灯 inset:浏览器 0;壳模式由 data-shell 切换(design.md 2.3) */
+    /* macOS 红绿灯 inset:浏览器 0;壳模式由 data-shell 切换(design.md 2.3)。
+       -x 作用于展开 rail 顶行(左移空间),-y 作用于收起窄条顶部 */
     --traffic-inset: 0px;
+    --traffic-inset-y: 0px;
+    --success: oklch(0.62 0.12 175);
 }
 
 html[data-shell="mac"] {
     --traffic-inset: 78px;
+    --traffic-inset-y: 38px;
 }
 
 html[data-shell="mac"][data-fullscreen] {
     --traffic-inset: 0px;
+    --traffic-inset-y: 0px;
 }
 
 .dark {
@@ -126,6 +132,7 @@ html[data-shell="mac"][data-fullscreen] {
     --sidebar-accent-foreground: oklch(0.93 0.008 250);
     --sidebar-border: oklch(0.30 0.012 255);
     --sidebar-ring: oklch(0.75 0.12 70);
+    --success: oklch(0.7 0.11 175);
 }
 
 @layer base {

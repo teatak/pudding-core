@@ -6,6 +6,9 @@ import { z } from "zod";
 
 import { App } from "@/App";
 import "@/styles.css";
+import { initShellMode } from "@/state/shell";
+
+initShellMode();
 import { applyTheme, readStoredTheme } from "@/theme/theme";
 
 applyTheme(readStoredTheme());
