@@ -46,6 +46,8 @@ export function SessionList({ token, selectedSessionID }: SessionListProps) {
   const forcedCollapsed = useRailForcedCollapsed();
   const [hoverOpen, setHoverOpen] = useState(false);
   const closeTimer = useRef<number | null>(null);
+  // 用户在面板内点击过(如打开主题/语言下拉)即"钉住":hover 离开不再自动关
+  const pinnedRef = useRef(false);
 
   const sessionsQuery = useQuery({
     queryKey: queryKeys.sessions(),
@@ -90,10 +92,20 @@ export function SessionList({ token, selectedSessionID }: SessionListProps) {
   }
 
   function scheduleClose() {
+    if (pinnedRef.current) {
+      return;
+    }
     if (closeTimer.current) {
       window.clearTimeout(closeTimer.current);
     }
     closeTimer.current = window.setTimeout(() => setHoverOpen(false), 160);
+  }
+
+  function handleOpenChange(open: boolean) {
+    setHoverOpen(open);
+    if (!open) {
+      pinnedRef.current = false;
+    }
   }
 
   function cancelClose() {
@@ -144,7 +156,7 @@ export function SessionList({ token, selectedSessionID }: SessionListProps) {
   if (collapsed) {
     return (
       <div className="absolute top-2 left-2 z-30" style={{ marginLeft: "var(--traffic-inset)" }}>
-        <Popover open={hoverOpen} onOpenChange={setHoverOpen}>
+        <Popover open={hoverOpen} onOpenChange={handleOpenChange}>
           <PopoverTrigger asChild>
             <Button
               aria-label={t("rail.expand")}
@@ -174,6 +186,19 @@ export function SessionList({ token, selectedSessionID }: SessionListProps) {
             sideOffset={6}
             onMouseEnter={cancelClose}
             onMouseLeave={scheduleClose}
+            onPointerDownCapture={() => {
+              pinnedRef.current = true;
+              cancelClose();
+            }}
+            onFocusOutside={(event) => event.preventDefault()}
+            onInteractOutside={(event) => {
+              // 主题/语言下拉的菜单内容 portal 在 popover DOM 之外,
+              // Radix 会误判为"点击外部";命中 popper 容器时拦下关闭
+              const target = event.target as HTMLElement | null;
+              if (target?.closest("[data-radix-popper-content-wrapper]")) {
+                event.preventDefault();
+              }
+            }}
           >
             {panel}
           </PopoverContent>
