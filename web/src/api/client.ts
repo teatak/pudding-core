@@ -173,4 +173,4 @@ export async function deleteProvider(token: string, name: string): Promise<void>
 }
 
 export type { Message, ProviderProfile, Session };
-export { createProviderRequest, message, patchProviderRequest, providerProfile, session };
+export { createProviderRequest, patchProviderRequest };

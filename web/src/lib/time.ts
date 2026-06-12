@@ -18,3 +18,12 @@ export function formatRelative(iso: string, locale: string) {
   }
   return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" }).format(then);
 }
+
+// 时钟时间(HH:mm),消息 meta 用
+export function formatClock(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.valueOf())) {
+    return "";
+  }
+  return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(date);
+}

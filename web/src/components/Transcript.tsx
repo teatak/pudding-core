@@ -11,10 +11,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n } from "@/i18n";
 import { renderMarkdown } from "@/lib/markdown";
+import { formatClock } from "@/lib/time";
 import { cn } from "@/lib/utils";
-import { type AssistantOverlay, useOverlayStore } from "@/state/overlayStore";
+import { type AssistantOverlay, type PendingUserMessage, useOverlayStore } from "@/state/overlayStore";
 
-const EMPTY_PENDING: [] = [];
+const EMPTY_PENDING: PendingUserMessage[] = [];
 const EMPTY_MESSAGES: Message[] = [];
 
 type TranscriptProps = {
@@ -71,8 +72,9 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
   }, [scrollToBottom, sessionID]);
 
   const items = useMemo<TranscriptItem[]>(() => {
+    // overlay 在对应 canonical message 出现后退场("等数据到达再清"由 store 对账,
+    // 这里只做渲染期过滤,避免短暂双显)
     const canonicalIDs = new Set(messages.map((message) => message.id));
-    const finalAssistantIDs = new Set(messages.map((message) => message.id));
     return [
       ...messages.map((message) => ({ kind: "message" as const, message })),
       ...pendingUsers.map((message) => ({
@@ -82,9 +84,9 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
         createdAt: message.createdAt,
       })),
       ...assistantOverlays
-        .filter((overlay) => !overlay.assistantMessageID || !finalAssistantIDs.has(overlay.assistantMessageID))
+        .filter((overlay) => !overlay.assistantMessageID || !canonicalIDs.has(overlay.assistantMessageID))
         .map((overlay) => ({ kind: "assistant" as const, overlay })),
-    ].filter((item) => item.kind !== "message" || canonicalIDs.has(item.message.id));
+    ];
   }, [assistantOverlays, messages, pendingUsers]);
 
   useEffect(() => {
@@ -126,12 +128,12 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
           ) : null}
           {items.map((item) => {
             if (item.kind === "message") {
-              return <MessageBubble key={item.message.id} message={item.message} />;
+              return <MessageItem key={item.message.id} message={item.message} />;
             }
             if (item.kind === "pending") {
-              return <PendingBubble key={item.id} text={item.text} />;
+              return <PendingUserItem key={item.id} text={item.text} />;
             }
-            return <AssistantOverlayBubble key={item.overlay.turnID} overlay={item.overlay} />;
+            return <AssistantOverlayItem key={item.overlay.turnID} overlay={item.overlay} />;
           })}
         </div>
       </ScrollArea>
@@ -166,7 +168,7 @@ function TurnParts({ parts }: { parts: TurnPart[] }) {
   );
 }
 
-function MessageBubble({ message }: { message: Message }) {
+function MessageItem({ message }: { message: Message }) {
   if (message.role === "user") {
     return <UserMessageBlock createdAt={message.createdAt} interrupted={message.interrupted} text={message.text} />;
   }
@@ -204,11 +206,11 @@ function UserMessageBlock({
   );
 }
 
-function PendingBubble({ text }: { text: string }) {
+function PendingUserItem({ text }: { text: string }) {
   return <UserMessageBlock pending text={text} />;
 }
 
-function AssistantOverlayBubble({ overlay }: { overlay: AssistantOverlay }) {
+function AssistantOverlayItem({ overlay }: { overlay: AssistantOverlay }) {
   return (
     <div className="min-w-0 text-sm leading-6">
       {overlay.text ? <TurnParts parts={partsFromText(overlay.text)} /> : null}
@@ -248,7 +250,7 @@ function MessageMeta({ createdAt, text, className }: { createdAt: string; text: 
         className,
       )}
     >
-      <span>{formatTime(createdAt)}</span>
+      <span>{formatClock(createdAt)}</span>
       <Button
         aria-label={t("common.copy")}
         size="icon-xs"
@@ -262,27 +264,16 @@ function MessageMeta({ createdAt, text, className }: { createdAt: string; text: 
   );
 }
 
+// 骨架贴任务流版式:用户指令块 + 文本行,不再是聊天气泡形状
 function TranscriptSkeleton() {
   return (
     <div className="grid gap-4">
-      <div className="flex gap-3">
-        <Skeleton className="h-8 w-8 rounded-full" />
-        <div className="grid flex-1 gap-2">
-          <Skeleton className="h-4 w-3/4" />
-          <Skeleton className="h-4 w-1/2" />
-        </div>
-      </div>
-      <div className="flex justify-end">
-        <Skeleton className="h-10 w-2/3 rounded-xl" />
+      <Skeleton className="h-12 w-full rounded-r-lg" />
+      <div className="grid gap-2">
+        <Skeleton className="h-4 w-3/4" />
+        <Skeleton className="h-4 w-1/2" />
+        <Skeleton className="h-4 w-2/3" />
       </div>
     </div>
   );
-}
-
-function formatTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.valueOf())) {
-    return "";
-  }
-  return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(date);
 }
