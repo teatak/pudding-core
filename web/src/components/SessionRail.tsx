@@ -140,6 +140,13 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
   // 折叠态:整栏收进 popover(参照 Claude Code 桌面端)。
   // marginLeft 让位 macOS 红绿灯(design.md 2.3)。
   if (collapsed) {
+    // popover 面板贴窗口左缘弹出(与展开态 rail 的 8px 内边距对位),
+    // 用 alignOffset 抵消触发器被红绿灯 inset 推出去的横向偏移;
+    // 浏览器模式 inset=0,无副作用
+    const trafficInsetPx =
+      Number.parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue("--traffic-inset"),
+      ) || 0;
     return (
       // 触发器在 --toolbar-h 工具条带内垂直居中:wrapper 撑满带高 +
       // items-center,与展开态顶行同构 — 不按按钮尺寸硬算偏移
@@ -173,6 +180,7 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
           </PopoverTrigger>
           <PopoverContent
             align="start"
+            alignOffset={-trafficInsetPx}
             className="flex h-[26rem] max-h-[80vh] w-72 flex-col p-2"
             side="bottom"
             sideOffset={6}
