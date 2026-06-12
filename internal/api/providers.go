@@ -1,10 +1,15 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/teatak/cart/v3"
+	"github.com/teatak/pudding-core/internal/provider/google"
+	"github.com/teatak/pudding-core/internal/provider/openai"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
 )
@@ -160,4 +165,60 @@ func defaultExtra(extra string) string {
 		return "{}"
 	}
 	return extra
+}
+
+// 模型目录代理:按 profile type 转发真实端点的模型列表,短缓存。
+// 上游失败回 502,前端回落 presets 静态清单(docs/design.md 第 4 节)。
+const modelsCacheTTL = 60 * time.Second
+
+type modelsCacheEntry struct {
+	at     time.Time
+	models []string
+}
+
+var (
+	modelsCacheMu sync.Mutex
+	modelsCache   = map[string]modelsCacheEntry{}
+)
+
+func (s *Server) listProviderModels(c *cart.Context) error {
+	name, _ := c.Param("name")
+	p, err := s.store.GetProviderProfile(c.Request.Context(), name)
+	if err != nil {
+		return s.fail(c, err)
+	}
+
+	cacheKey := p.Name + "\x00" + p.Type + "\x00" + p.BaseURL + "\x00" + p.APIKey
+	modelsCacheMu.Lock()
+	if entry, ok := modelsCache[cacheKey]; ok && time.Since(entry.at) < modelsCacheTTL {
+		modelsCacheMu.Unlock()
+		c.JSON(http.StatusOK, map[string]any{"models": entry.models})
+		return nil
+	}
+	modelsCacheMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+	var models []string
+	switch p.Type {
+	case registry.TypeOpenAICompatible:
+		models, err = openai.ListModels(ctx, openai.Config{BaseURL: p.BaseURL, APIKey: p.APIKey})
+	case registry.TypeGoogle:
+		models, err = google.ListModels(ctx, google.Config{BaseURL: p.BaseURL, APIKey: p.APIKey})
+	default:
+		return badRequest(c, "unsupported type: "+p.Type)
+	}
+	if err != nil {
+		c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return nil
+	}
+	if models == nil {
+		models = []string{}
+	}
+
+	modelsCacheMu.Lock()
+	modelsCache[cacheKey] = modelsCacheEntry{at: time.Now(), models: models}
+	modelsCacheMu.Unlock()
+	c.JSON(http.StatusOK, map[string]any{"models": models})
+	return nil
 }

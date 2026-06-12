@@ -204,6 +204,53 @@ func emitDelta(ctx context.Context, out chan<- provider.Chunk, delta string) boo
 	}
 }
 
+// ListModels 拉取支持 generateContent 的模型目录。包级函数,
+// 不进 provider.Client 流式契约(与 openai.ListModels 同理)。
+func ListModels(ctx context.Context, cfg Config) ([]string, error) {
+	base := strings.TrimRight(cfg.BaseURL, "/")
+	if base == "" {
+		base = defaultBaseURL
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/v1beta/models?pageSize=200", nil)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.APIKey != "" {
+		req.Header.Set("x-goog-api-key", cfg.APIKey)
+	}
+	resp, err := httpClient(cfg.HTTPClient).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("google: status %d: %s", resp.StatusCode, redact(bodySummary(resp.Body), cfg.APIKey))
+	}
+	var payload struct {
+		Models []struct {
+			Name    string   `json:"name"`
+			Methods []string `json:"supportedGenerationMethods"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("google: parse models: %w", err)
+	}
+	var models []string
+	for _, m := range payload.Models {
+		supported := false
+		for _, method := range m.Methods {
+			if method == "generateContent" {
+				supported = true
+				break
+			}
+		}
+		if supported {
+			models = append(models, strings.TrimPrefix(m.Name, "models/"))
+		}
+	}
+	return models, nil
+}
+
 func bodySummary(r io.Reader) string {
 	b, err := io.ReadAll(io.LimitReader(r, 2048))
 	if err != nil {

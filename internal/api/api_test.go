@@ -192,6 +192,34 @@ func TestProvidersCRUDRedactsAPIKey(t *testing.T) {
 	}
 }
 
+func TestProviderModelsProxy(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"m-alpha"},{"id":"m-beta"}]}`))
+	}))
+	defer upstream.Close()
+
+	srv, _ := newTestServer(t)
+	resp := req(t, http.MethodPost, srv.URL+"/providers", map[string]string{
+		"name": "up", "type": "openai-compatible", "baseURL": upstream.URL,
+	})
+	resp.Body.Close()
+
+	got := decodeJSON[map[string][]string](t, req(t, http.MethodGet, srv.URL+"/providers/up/models", nil))
+	if len(got["models"]) != 2 || got["models"][0] != "m-alpha" {
+		t.Fatalf("unexpected models: %+v", got)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/providers/nope/models", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("missing profile must 404, got %d", resp.StatusCode)
+	}
+}
+
 func TestCreateSessionCarriesProviderAndModel(t *testing.T) {
 	srv, _ := newTestServer(t)
 	sess := decodeJSON[store.Session](t, req(t, http.MethodPost, srv.URL+"/sessions",

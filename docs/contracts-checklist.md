@@ -51,6 +51,7 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 | `GET /providers/{name}` | — | profile(脱敏) | 404 |
 | `PATCH /providers/{name}` | `{type?, baseURL?, apiKey?, defaultModel?, extra?}`,apiKey 非空才覆盖 | 200 profile | 400 / 404 |
 | `DELETE /providers/{name}` | — | 204 | 404 |
+| `GET /providers/{name}/models` | — | `{models: []}`(代理真实端点,60s 缓存) | 404 / 502(前端回落 presets) |
 
 鉴权:`Authorization: Bearer <token>` 或 `?token=`(EventSource 用),401 统一 `{"error":"unauthorized"}`。
 

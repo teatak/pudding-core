@@ -158,6 +158,45 @@ func emit(ctx context.Context, out chan<- provider.Chunk, chunk provider.Chunk) 
 	}
 }
 
+// ListModels 拉取端点的模型目录(GET /models)。包级函数而非 Client 方法:
+// 模型目录是配置面能力,不进 provider.Client 流式契约。
+func ListModels(ctx context.Context, cfg Config) ([]string, error) {
+	base := strings.TrimRight(cfg.BaseURL, "/")
+	if base == "" {
+		return nil, errors.New("openai: base url is required")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	}
+	resp, err := httpClient(cfg.HTTPClient).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("openai: status %d: %s", resp.StatusCode, redact(bodySummary(resp.Body), cfg.APIKey))
+	}
+	var payload struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("openai: parse models: %w", err)
+	}
+	models := make([]string, 0, len(payload.Data))
+	for _, m := range payload.Data {
+		if m.ID != "" {
+			models = append(models, m.ID)
+		}
+	}
+	return models, nil
+}
+
 func bodySummary(r io.Reader) string {
 	b, err := io.ReadAll(io.LimitReader(r, 2048))
 	if err != nil {

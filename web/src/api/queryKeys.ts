@@ -4,5 +4,6 @@ export const queryKeys = {
   messages: (sessionID: string) => ["session", sessionID, "messages"] as const,
   settings: () => ["settings"] as const,
   providers: () => ["providers"] as const,
+  providerModels: (name: string) => ["providers", name, "models"] as const,
   provider: (name: string) => ["providers", name] as const,
 };

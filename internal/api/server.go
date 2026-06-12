@@ -45,6 +45,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/settings").GET(s.getSettings).PUT(s.putSettings)
 	app.Route("/providers").GET(s.listProviders).POST(s.createProvider)
 	app.Route("/providers/:name").GET(s.getProvider).PATCH(s.patchProvider).DELETE(s.deleteProvider)
+	app.Route("/providers/:name/models").GET(s.listProviderModels)
 
 	authed := withAuth(token, app)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

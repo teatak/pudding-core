@@ -47,6 +47,8 @@ export const patchProviderRequest = z.object({
 
 export const listProvidersResponse = z.object({ providers: z.array(providerProfile) });
 
+export const listModelsResponse = z.object({ models: z.array(z.string()) });
+
 export const message = z.object({
   id: z.string(),
   sessionID: z.string(),

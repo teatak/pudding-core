@@ -1,25 +1,32 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { Check, ChevronDown } from "lucide-react";
+import { useEffect, useState } from "react";
 
-import { getSettings, listProviders, updateSession, type Session } from "@/api/client";
+import {
+  getSettings,
+  listProviderModels,
+  listProviders,
+  updateSession,
+  type ProviderProfile,
+  type Session,
+} from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n } from "@/i18n";
+import { cn } from "@/lib/utils";
 import { PROVIDER_PRESETS } from "@/provider/presets";
 
-const DEFAULT_PROVIDER = "__default__";
-const DEFAULT_MODEL = "__default_model__";
-
-// 选择器刻意做"安静"样式:无边框、低对比,hover 才浮现交互感
-const quietTrigger =
-  "h-7 max-w-44 gap-1 rounded-md border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none " +
-  "hover:bg-accent hover:text-foreground focus-visible:ring-0 dark:bg-transparent dark:hover:bg-accent";
-
-// ModelPicker 住在 composer 底排:模型跟随输入,不进 header。
-// provider/model 是 session 属性,改动走 PATCH,只影响后续 turn(后端快照语义)。
+// 两层模型选择(docs/design.md 第 4 节):第一层 profile,第二层模型,
+// 默认展开当前 session 所用 profile;选中一次 PATCH 同写 provider + model。
 export function ModelPicker({ token, session }: { token: string; session: Session }) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+
   const providersQuery = useQuery({
     queryKey: queryKeys.providers(),
     queryFn: () => listProviders(token),
@@ -33,60 +40,145 @@ export function ModelPicker({ token, session }: { token: string; session: Sessio
   const patchMutation = useMutation({
     mutationFn: (body: { provider?: string; model?: string }) => updateSession(token, session.id, body),
     onSuccess: async () => {
+      setOpen(false);
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
     },
   });
+
+  const profiles = providersQuery.data?.providers || [];
   const defaultProvider = settingsQuery.data?.settings["provider.default"] || "default";
-  const providerName = session.provider || defaultProvider;
-  const activeProfile = providersQuery.data?.providers.find((profile) => profile.name === providerName);
-  const modelOptions = useMemo(() => {
-    const preset = PROVIDER_PRESETS.find((item) => item.id === providerName || item.name === providerName);
-    const options = new Set<string>();
-    if (session.model) {
-      options.add(session.model);
+  const currentProfileName = session.provider || defaultProvider;
+  const activeProfile = profiles.find((p) => p.name === currentProfileName);
+  const followingDefault = !session.provider && !session.model;
+
+  const [expanded, setExpanded] = useState(currentProfileName);
+  useEffect(() => {
+    if (open) {
+      setExpanded(currentProfileName);
     }
-    // 默认模型是 profile 属性,不存在全局默认模型
-    if (activeProfile?.defaultModel) {
-      options.add(activeProfile.defaultModel);
-    }
-    preset?.models.forEach((model) => options.add(model));
-    return Array.from(options);
-  }, [activeProfile?.defaultModel, providerName, session.model]);
+  }, [open, currentProfileName]);
+
+  const triggerLabel = followingDefault
+    ? t("session.providerDefault")
+    : `${currentProfileName} · ${session.model || activeProfile?.defaultModel || t("common.default")}`;
 
   return (
-    <div className="flex min-w-0 items-center">
-      <Select
-        value={session.provider || DEFAULT_PROVIDER}
-        onValueChange={(value) => patchMutation.mutate({ provider: value === DEFAULT_PROVIDER ? "" : value })}
-      >
-        <SelectTrigger aria-label={t("session.provider")} className={quietTrigger} size="sm">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={DEFAULT_PROVIDER}>{t("session.providerDefault")}</SelectItem>
-          {(providersQuery.data?.providers || []).map((profile) => (
-            <SelectItem key={profile.name} value={profile.name}>
-              {profile.name}
-            </SelectItem>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          aria-label={t("session.model")}
+          className="h-7 max-w-60 gap-1 px-2 text-xs font-normal text-muted-foreground hover:text-foreground"
+          size="sm"
+          variant="ghost"
+        >
+          <span className="truncate">{triggerLabel}</span>
+          <ChevronDown className="size-3 shrink-0" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 p-2" side="top" sideOffset={8}>
+        <button
+          className={cn(
+            "flex w-full items-center justify-between rounded-md px-2.5 py-2 text-sm hover:bg-accent",
+            followingDefault && "text-foreground",
+          )}
+          type="button"
+          onClick={() => patchMutation.mutate({ provider: "", model: "" })}
+        >
+          {t("session.providerDefault")}
+          {followingDefault ? <Check className="size-3.5 text-primary" /> : null}
+        </button>
+        <Accordion collapsible className="mt-1" type="single" value={expanded} onValueChange={setExpanded}>
+          {profiles.map((profile) => (
+            <AccordionItem key={profile.name} className="border-b-0" value={profile.name}>
+              <AccordionTrigger className="rounded-md px-2.5 py-2 text-sm hover:bg-accent hover:no-underline">
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="truncate">{profile.name}</span>
+                  <Badge className="text-[10px] font-normal" variant="outline">
+                    {profile.type}
+                  </Badge>
+                </span>
+              </AccordionTrigger>
+              <AccordionContent className="pb-1">
+                <ProfileModels
+                  currentModel={session.provider === profile.name ? session.model : ""}
+                  isCurrentProfile={currentProfileName === profile.name && Boolean(session.provider)}
+                  profile={profile}
+                  token={token}
+                  onPick={(model) => patchMutation.mutate({ provider: profile.name, model })}
+                />
+              </AccordionContent>
+            </AccordionItem>
           ))}
-        </SelectContent>
-      </Select>
-      <Select
-        value={session.model || DEFAULT_MODEL}
-        onValueChange={(value) => patchMutation.mutate({ model: value === DEFAULT_MODEL ? "" : value })}
-      >
-        <SelectTrigger aria-label={t("session.model")} className={quietTrigger} size="sm">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={DEFAULT_MODEL}>{t("session.modelDefault")}</SelectItem>
-          {modelOptions.map((model) => (
-            <SelectItem key={model} value={model}>
-              {model}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        </Accordion>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function ProfileModels({
+  token,
+  profile,
+  currentModel,
+  isCurrentProfile,
+  onPick,
+}: {
+  token: string;
+  profile: ProviderProfile;
+  currentModel: string;
+  isCurrentProfile: boolean;
+  onPick: (model: string) => void;
+}) {
+  const { t } = useI18n();
+  // 展开才挂载(Radix 卸载折叠内容),首次展开触发拉取;60s 与服务端缓存同步
+  const modelsQuery = useQuery({
+    queryKey: queryKeys.providerModels(profile.name),
+    queryFn: () => listProviderModels(token, profile.name),
+    staleTime: 60_000,
+    retry: 0,
+  });
+
+  if (modelsQuery.isLoading) {
+    return (
+      <div className="grid gap-1 px-2.5">
+        <Skeleton className="h-7" />
+        <Skeleton className="h-7" />
+      </div>
+    );
+  }
+
+  // 上游失败回落 presets 静态清单(docs/design.md 第 4 节)
+  const fetched = modelsQuery.data?.models;
+  const preset = PROVIDER_PRESETS.find((item) => item.id === profile.name || item.name === profile.name);
+  const base = fetched && fetched.length > 0 ? fetched : preset?.models || [];
+  const models = Array.from(new Set([profile.defaultModel, ...base, currentModel].filter(Boolean)));
+
+  if (models.length === 0) {
+    return <div className="px-2.5 py-1 text-xs text-muted-foreground">{t("picker.noModels")}</div>;
+  }
+
+  return (
+    <div className="grid max-h-56 gap-0.5 overflow-y-auto px-1">
+      {models.map((model) => {
+        const selected = isCurrentProfile && (currentModel ? currentModel === model : profile.defaultModel === model);
+        return (
+          <button
+            key={model}
+            className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-accent"
+            type="button"
+            onClick={() => onPick(model)}
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="truncate font-mono text-xs">{model}</span>
+              {model === profile.defaultModel ? (
+                <Badge className="text-[10px] font-normal" variant="secondary">
+                  {t("common.default")}
+                </Badge>
+              ) : null}
+            </span>
+            {selected ? <Check className="size-3.5 shrink-0 text-primary" /> : null}
+          </button>
+        );
+      })}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import {
   conflictResponse,
+  listModelsResponse,
   createProviderRequest,
   listMessagesResponse,
   listProvidersResponse,
@@ -123,6 +124,10 @@ export async function cancelTurn(token: string, sessionID: string): Promise<void
   await request(token, `/sessions/${encodeURIComponent(sessionID)}/cancel`, z.object({ status: z.string() }), {
     method: "POST",
   });
+}
+
+export function listProviderModels(token: string, name: string): Promise<{ models: string[] }> {
+  return request(token, `/providers/${encodeURIComponent(name)}/models`, listModelsResponse);
 }
 
 export function getSettings(token: string): Promise<{ settings: Record<string, string> }> {
