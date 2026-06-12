@@ -112,6 +112,7 @@ export function Composer({ token, session }: ComposerProps) {
                 <TooltipTrigger asChild>
                   <Button
                     aria-label={t("composer.stop")}
+                    className="rounded-full"
                     disabled={cancelMutation.isPending || cancelLocked}
                     size="icon"
                     type="button"
@@ -126,7 +127,14 @@ export function Composer({ token, session }: ComposerProps) {
             ) : (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button aria-label={t("composer.send")} disabled={submitMutation.isPending} size="icon" type="submit">
+                  {/* 发送用中性高对比圆钮(前景色反白),强调色留给运行态 */}
+                  <Button
+                    aria-label={t("composer.send")}
+                    className="rounded-full bg-foreground text-background hover:bg-foreground/85"
+                    disabled={submitMutation.isPending}
+                    size="icon"
+                    type="submit"
+                  >
                     {submitMutation.isPending ? <Loader2 className="animate-spin" /> : <Send />}
                   </Button>
                 </TooltipTrigger>

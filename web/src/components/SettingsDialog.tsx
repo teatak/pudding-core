@@ -53,7 +53,8 @@ import { BrandIcon } from "@/components/BrandIcons";
 import { getOrderedProviderPresets, providerPresetName } from "@/provider/presets";
 import { cn } from "@/lib/utils";
 
-const DEFAULT_PROVIDER = "__default__";
+// 未显式设置时后端回落到名为 "default" 的 profile,表单直接以它为初值
+const DEFAULT_PROVIDER = "default";
 
 const providerFormSchema = createProviderRequest.extend({
   name: z.string().trim().min(1),
@@ -465,7 +466,6 @@ function DefaultSettings({ token }: { token: string }) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={DEFAULT_PROVIDER}>{t("session.providerDefault")}</SelectItem>
             {(providersQuery.data?.providers || []).map((profile) => (
               <SelectItem key={profile.name} value={profile.name}>
                 {profile.name}
@@ -550,12 +550,8 @@ function defaultsPayload(value: DefaultsFormValue) {
   const payload: Record<string, string> = {
     // 旧全局键随本次重构清空:默认模型已是 profile 属性
     "model.default": "",
+    "provider.default": value.providerDefault,
   };
-  if (value.providerDefault !== DEFAULT_PROVIDER) {
-    payload["provider.default"] = value.providerDefault;
-  } else {
-    payload["provider.default"] = "";
-  }
   if (value.systemPrompt.trim()) {
     payload.system_prompt = value.systemPrompt;
   }

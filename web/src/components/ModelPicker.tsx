@@ -16,10 +16,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useI18n } from "@/i18n";
-import { cn } from "@/lib/utils";
+import { formatModelLabel } from "@/lib/model";
 
 // 两层模型选择(docs/design.md 第 4 节):第一层 profile,第二层模型,
 // 默认展开当前 session 所用 profile;选中一次 PATCH 同写 provider + model。
+// session 未显式指定时直接解析出实际生效的 profile/模型来显示,
+// 不暴露"跟随设置"这类用户不可理解的中间概念。
 export function ModelPicker({ token, session }: { token: string; session: Session }) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
@@ -47,7 +49,7 @@ export function ModelPicker({ token, session }: { token: string; session: Sessio
   const defaultProvider = settingsQuery.data?.settings["provider.default"] || "default";
   const currentProfileName = session.provider || defaultProvider;
   const activeProfile = profiles.find((p) => p.name === currentProfileName);
-  const followingDefault = !session.provider && !session.model;
+  const currentModel = session.model || activeProfile?.defaultModel || "";
 
   const [expanded, setExpanded] = useState(currentProfileName);
   useEffect(() => {
@@ -56,7 +58,6 @@ export function ModelPicker({ token, session }: { token: string; session: Sessio
     }
   }, [open, currentProfileName]);
 
-  const modelLabel = session.model || activeProfile?.defaultModel || t("common.default");
   // 品牌图标代替 provider 名;未命中图标的 profile 回落为文字名
   const brandIcon = BrandIcon({ name: currentProfileName, className: "size-4 shrink-0" });
 
@@ -69,30 +70,13 @@ export function ModelPicker({ token, session }: { token: string; session: Sessio
           size="sm"
           variant="ghost"
         >
-          {followingDefault ? (
-            <span className="truncate">{t("session.providerDefault")}</span>
-          ) : (
-            <>
-              {brandIcon ?? <span className="truncate">{currentProfileName} ·</span>}
-              <span className="truncate">{modelLabel}</span>
-            </>
-          )}
+          {brandIcon ?? <span className="truncate">{currentProfileName} ·</span>}
+          <span className="truncate">{currentModel ? formatModelLabel(currentModel) : t("common.default")}</span>
           <ChevronDown className="size-3 shrink-0" />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-80 p-2" side="top" sideOffset={8}>
-        <button
-          className={cn(
-            "flex w-full items-center justify-between rounded-md px-2.5 py-2 text-sm hover:bg-accent",
-            followingDefault && "text-foreground",
-          )}
-          type="button"
-          onClick={() => patchMutation.mutate({ provider: "", model: "" })}
-        >
-          {t("session.providerDefault")}
-          {followingDefault ? <Check className="size-3.5 text-primary" /> : null}
-        </button>
-        <Accordion collapsible className="mt-1" type="single" value={expanded} onValueChange={setExpanded}>
+        <Accordion collapsible type="single" value={expanded} onValueChange={setExpanded}>
           {profiles.map((profile) => (
             <AccordionItem key={profile.name} className="border-b-0" value={profile.name}>
               <AccordionTrigger className="rounded-md px-2.5 py-2 text-sm hover:bg-accent hover:no-underline">
@@ -107,7 +91,7 @@ export function ModelPicker({ token, session }: { token: string; session: Sessio
               <AccordionContent className="pb-1">
                 <ProfileModels
                   currentModel={session.provider === profile.name ? session.model : ""}
-                  isCurrentProfile={currentProfileName === profile.name && Boolean(session.provider)}
+                  isCurrentProfile={currentProfileName === profile.name}
                   profile={profile}
                   onPick={(model) => patchMutation.mutate({ provider: profile.name, model })}
                 />
@@ -152,7 +136,9 @@ function ProfileModels({
             onClick={() => onPick(model)}
           >
             <span className="flex min-w-0 items-center gap-2">
-              <span className="truncate font-mono text-xs">{model}</span>
+              <span className="truncate" title={model}>
+                {formatModelLabel(model)}
+              </span>
               {model === profile.defaultModel ? (
                 <Badge className="text-[10px] font-normal" variant="secondary">
                   {t("common.default")}

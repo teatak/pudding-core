@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { CircleAlert, Copy, MessageSquareText } from "lucide-react";
+import { ArrowDown, CircleAlert, Copy, MessageSquareText } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { listMessages, type Message } from "@/api/client";
@@ -138,8 +138,15 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
         </div>
       </ScrollArea>
       {!followingBottom && items.length > 0 ? (
-        <Button className="absolute right-5 bottom-5 shadow-md" size="sm" type="button" onClick={scrollToBottom}>
-          {t("transcript.jumpLatest")}
+        <Button
+          aria-label={t("transcript.jumpLatest")}
+          className="absolute right-5 bottom-5 rounded-full shadow-md"
+          size="icon"
+          type="button"
+          variant="outline"
+          onClick={scrollToBottom}
+        >
+          <ArrowDown />
         </Button>
       ) : null}
     </div>
