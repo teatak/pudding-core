@@ -1,11 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { Bot, CircleAlert, Copy, MessageSquareText, User } from "lucide-react";
+import { CircleAlert, Copy, MessageSquareText } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { listMessages, type Message } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -145,66 +144,85 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
   );
 }
 
-function MessageBubble({ message }: { message: Message }) {
-  const isUser = message.role === "user";
+// 任务流的渲染单位是 turn parts(docs/design.md 3.2):text-only 阶段只有
+// text part,thought / tool 随事件协议 part 维度落地后在此 switch 扩展,
+// 不改动任务流骨架。
+type TurnPart = { type: "text"; text: string };
+
+function partsFromText(text: string): TurnPart[] {
+  return [{ type: "text", text }];
+}
+
+function TurnParts({ parts }: { parts: TurnPart[] }) {
   return (
-    <div className={cn("group flex flex-col", isUser && "items-end")}>
-      <div className={cn("flex w-full gap-3", isUser && "justify-end")}>
-        {!isUser ? <AvatarIcon assistant /> : null}
-        <div
-          className={cn(
-            "text-sm leading-6",
-            isUser
-              ? "max-w-[78%] rounded-xl bg-primary px-3.5 py-2 whitespace-pre-wrap text-primary-foreground shadow-sm"
-              : "min-w-0 flex-1 whitespace-normal",
-          )}
-        >
-          {isUser ? message.text : <MarkdownBody text={message.text} />}
-          {message.interrupted ? <InterruptedBadge /> : null}
-        </div>
-        {isUser ? <AvatarIcon /> : null}
+    <>
+      {parts.map((part, index) => {
+        switch (part.type) {
+          case "text":
+            return <MarkdownBody key={index} text={part.text} />;
+        }
+      })}
+    </>
+  );
+}
+
+function MessageBubble({ message }: { message: Message }) {
+  if (message.role === "user") {
+    return <UserMessageBlock createdAt={message.createdAt} interrupted={message.interrupted} text={message.text} />;
+  }
+  return (
+    <div className="group flex flex-col">
+      <div className="min-w-0 text-sm leading-6">
+        <TurnParts parts={partsFromText(message.text)} />
+        {message.interrupted ? <InterruptedBadge /> : null}
       </div>
-      {/* meta 在气泡外侧,不撑高气泡;hover 整组浮现 */}
-      <MessageMeta className={isUser ? "pr-11" : "pl-11"} createdAt={message.createdAt} text={message.text} />
+      <MessageMeta createdAt={message.createdAt} text={message.text} />
+    </div>
+  );
+}
+
+// 用户消息是"任务指令":全宽块 + 左侧主色细条,不做聊天气泡
+function UserMessageBlock({
+  text,
+  createdAt,
+  interrupted,
+  pending,
+}: {
+  text: string;
+  createdAt?: string;
+  interrupted?: boolean;
+  pending?: boolean;
+}) {
+  return (
+    <div className={cn("group flex flex-col", pending && "opacity-70")}>
+      <div className="rounded-r-lg border-l-2 border-primary bg-secondary/60 px-3.5 py-2 text-sm leading-6 whitespace-pre-wrap">
+        {text}
+        {interrupted ? <InterruptedBadge /> : null}
+      </div>
+      {createdAt ? <MessageMeta className="pl-3.5" createdAt={createdAt} text={text} /> : null}
     </div>
   );
 }
 
 function PendingBubble({ text }: { text: string }) {
-  return (
-    <div className="flex justify-end gap-3 opacity-70">
-      <div className="max-w-[78%] whitespace-pre-wrap rounded-xl bg-primary px-3 py-2 text-sm leading-6 text-primary-foreground shadow-sm">
-        {text}
-      </div>
-      <AvatarIcon />
-    </div>
-  );
+  return <UserMessageBlock pending text={text} />;
 }
 
 function AssistantOverlayBubble({ overlay }: { overlay: AssistantOverlay }) {
   return (
-    <div className="flex gap-3">
-      <AvatarIcon assistant />
-      <div className="min-w-0 flex-1 whitespace-pre-wrap text-sm leading-6">
-        {overlay.text ? <MarkdownBody text={overlay.text} /> : null}
-        {overlay.status === "streaming" ? <span className="ml-1 animate-pulse">▍</span> : null}
-        {overlay.status === "failed" && overlay.error ? (
-          <Alert className="mt-2" variant="destructive">
-            <CircleAlert className="h-3.5 w-3.5" />
-            <AlertDescription>{overlay.error}</AlertDescription>
-          </Alert>
-        ) : null}
-        {overlay.status === "cancelled" || overlay.interrupted ? <InterruptedBadge /> : null}
-      </div>
+    <div className="min-w-0 text-sm leading-6">
+      {overlay.text ? <TurnParts parts={partsFromText(overlay.text)} /> : null}
+      {overlay.status === "streaming" ? (
+        <span className="ml-1 inline-block animate-pulse text-primary">▍</span>
+      ) : null}
+      {overlay.status === "failed" && overlay.error ? (
+        <Alert className="mt-2" variant="destructive">
+          <CircleAlert className="h-3.5 w-3.5" />
+          <AlertDescription>{overlay.error}</AlertDescription>
+        </Alert>
+      ) : null}
+      {overlay.status === "cancelled" || overlay.interrupted ? <InterruptedBadge /> : null}
     </div>
-  );
-}
-
-function AvatarIcon({ assistant = false }: { assistant?: boolean }) {
-  return (
-    <Avatar className="mt-1" size="sm">
-      <AvatarFallback>{assistant ? <Bot className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}</AvatarFallback>
-    </Avatar>
   );
 }
 

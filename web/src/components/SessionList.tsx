@@ -258,6 +258,8 @@ function SessionItems({
 }) {
   const { t, locale } = useI18n();
   const lastSeen = readLastSeen();
+  // 实时运行态:sessions 快照(15s 兜底)与 SSE overlay 双源取或
+  const runningTurns = useOverlayStore((state) => state.runningTurns);
 
   if (isLoading) {
     return (
@@ -294,8 +296,9 @@ function SessionItems({
     <div className="grid gap-0.5 py-1">
       {sessions.map((session) => {
         const selected = session.id === selectedSessionID;
+        const running = session.running || Boolean(runningTurns[session.id]);
         const seenAt = lastSeen[session.id];
-        const unseenDone = !selected && !session.running && Boolean(seenAt) && session.updatedAt > seenAt;
+        const unseenDone = !selected && !running && Boolean(seenAt) && session.updatedAt > seenAt;
         return (
           <div
             key={session.id}
@@ -306,11 +309,11 @@ function SessionItems({
           >
             <button className="min-w-0 flex-1 text-left" type="button" onClick={() => onSelect(session.id)}>
               <span className="flex items-center gap-2">
-                <StatusDot running={session.running} unseenDone={unseenDone} />
+                <StatusDot running={running} unseenDone={unseenDone} />
                 <span className="truncate text-[13px] leading-5 font-medium">{session.title || session.id}</span>
               </span>
               <span className="block truncate pl-4 text-xs leading-5 text-muted-foreground">
-                {session.running ? t("session.generating") : formatRelative(session.updatedAt, locale)}
+                {running ? t("session.generating") : formatRelative(session.updatedAt, locale)}
               </span>
             </button>
             <AlertDialog>
