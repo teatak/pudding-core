@@ -148,24 +148,24 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
 function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === "user";
   return (
-    <div className={cn("group flex gap-3", isUser && "justify-end")}>
-      {!isUser ? <AvatarIcon assistant /> : null}
-      <div
-        className={cn(
-          "grid gap-1 text-sm leading-6",
-          isUser ? "max-w-[78%] rounded-xl bg-primary px-3 py-2 text-primary-foreground shadow-sm" : "min-w-0 flex-1",
-          isUser ? "whitespace-pre-wrap" : "whitespace-normal",
-        )}
-      >
-        {isUser ? message.text : <MarkdownBody text={message.text} />}
-        {message.interrupted ? <InterruptedBadge /> : null}
-        <MessageMeta
-          className={isUser ? "text-primary-foreground/70" : undefined}
-          createdAt={message.createdAt}
-          text={message.text}
-        />
+    <div className={cn("group flex flex-col", isUser && "items-end")}>
+      <div className={cn("flex w-full gap-3", isUser && "justify-end")}>
+        {!isUser ? <AvatarIcon assistant /> : null}
+        <div
+          className={cn(
+            "text-sm leading-6",
+            isUser
+              ? "max-w-[78%] rounded-xl bg-primary px-3.5 py-2 whitespace-pre-wrap text-primary-foreground shadow-sm"
+              : "min-w-0 flex-1 whitespace-normal",
+          )}
+        >
+          {isUser ? message.text : <MarkdownBody text={message.text} />}
+          {message.interrupted ? <InterruptedBadge /> : null}
+        </div>
+        {isUser ? <AvatarIcon /> : null}
       </div>
-      {isUser ? <AvatarIcon /> : null}
+      {/* meta 在气泡外侧,不撑高气泡;hover 整组浮现 */}
+      <MessageMeta className={isUser ? "pr-11" : "pl-11"} createdAt={message.createdAt} text={message.text} />
     </div>
   );
 }

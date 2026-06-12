@@ -1,10 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { CircleAlert, Loader2, MessageSquarePlus, MessageSquareText, Trash2 } from "lucide-react";
+import { CircleAlert, Loader2, MessageSquareText, Plus, Trash2 } from "lucide-react";
 
 import { createSession, deleteSession, listSessions } from "@/api/client";
 import type { Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { LanguageToggle } from "@/components/LanguageToggle";
+import { SettingsDialog } from "@/components/SettingsDialog";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -22,6 +25,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarHeader,
@@ -29,7 +33,6 @@ import {
   SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarSeparator,
 } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
@@ -84,21 +87,20 @@ export function SessionList({ token, selectedSessionID }: SessionListProps) {
   const sessions = sessionsQuery.data?.sessions || [];
 
   return (
-    <Sidebar collapsible="none">
-      <SidebarHeader>
-        <div className="flex h-10 items-center justify-between px-2">
-          <div className="font-semibold">{t("app.name")}</div>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button aria-label={t("session.create")} size="icon" variant="ghost" onClick={() => createMutation.mutate()}>
-                {createMutation.isPending ? <Loader2 className="animate-spin" /> : <MessageSquarePlus />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("session.create")}</TooltipContent>
-          </Tooltip>
-        </div>
+    <Sidebar className="border-r-0" collapsible="none">
+      <SidebarHeader className="gap-3 px-3 pt-4 pb-1">
+        <div className="px-1 text-base font-semibold tracking-tight">{t("app.name")}</div>
+        <Button
+          className="w-full justify-start gap-2 rounded-lg"
+          disabled={createMutation.isPending}
+          size="sm"
+          variant="outline"
+          onClick={() => createMutation.mutate()}
+        >
+          {createMutation.isPending ? <Loader2 className="animate-spin" /> : <Plus />}
+          {t("session.create")}
+        </Button>
       </SidebarHeader>
-      <SidebarSeparator />
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupContent>
@@ -169,16 +171,21 @@ export function SessionList({ token, selectedSessionID }: SessionListProps) {
             </Alert>
           ) : null}
           {!sessionsQuery.isLoading && sessions.length === 0 ? (
-            <div className="grid gap-3 px-3 py-6 text-sm text-muted-foreground">
+            <div className="grid justify-items-center gap-2 px-3 py-10 text-center text-sm text-muted-foreground">
               <MessageSquareText className="h-5 w-5" />
               <div>{t("session.empty")}</div>
-              <Button disabled={createMutation.isPending} size="sm" type="button" onClick={() => createMutation.mutate()}>
-                {t("session.create")}
-              </Button>
             </div>
           ) : null}
         </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter className="px-3 pb-3">
+        <div className="flex items-center gap-1">
+          <ThemeToggle />
+          <LanguageToggle />
+          <div className="flex-1" />
+          <SettingsDialog token={token} />
+        </div>
+      </SidebarFooter>
     </Sidebar>
   );
 }

@@ -5,8 +5,9 @@ import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-import { APIError, cancelTurn, submitMessage } from "@/api/client";
+import { APIError, cancelTurn, submitMessage, type Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { ModelPicker } from "@/components/ModelPicker";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -19,10 +20,11 @@ const composerSchema = z.object({
 
 type ComposerProps = {
   token: string;
-  sessionID: string;
+  session: Session;
 };
 
-export function Composer({ token, sessionID }: ComposerProps) {
+export function Composer({ token, session }: ComposerProps) {
+  const sessionID = session.id;
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const addPendingUser = useOverlayStore((state) => state.addPendingUser);
@@ -101,8 +103,8 @@ export function Composer({ token, sessionID }: ComposerProps) {
             }}
             {...form.register("text")}
           />
-          <div className="flex items-center justify-between gap-2 px-3 pb-2">
-            <span className="select-none text-xs text-muted-foreground">{t("composer.hint")}</span>
+          <div className="flex items-center justify-between gap-2 px-2 pb-2">
+            <ModelPicker token={token} session={session} />
             {runningTurnID ? (
               <Tooltip>
                 <TooltipTrigger asChild>
