@@ -73,7 +73,33 @@
 - 分隔条可拖动调整比例(初版可固定 50/50,拖动后续)。
 - 左右分屏、更多 pane 不在本版范围,但 pane 容器抽象要支持方向参数。
 
-### 2.3 canvas 栏(预留)
+### 2.3 macOS 窗口 chrome(红绿灯 inset 与拖拽区)
+
+桌面壳的窗口用 **HiddenInset 标题栏**(无系统标题栏,红绿灯悬浮在内容上),
+应用顶部一行自兼标题栏职责。规则:
+
+- **inset 变量单点控制**:组件不感知平台,只消费 CSS 变量。
+
+```css
+:root { --traffic-inset: 0px; }                 /* 浏览器:无 inset */
+:root[data-shell="mac"] { --traffic-inset: 78px; }            /* 红绿灯区宽 */
+:root[data-shell="mac"][data-fullscreen] { --traffic-inset: 0px; }  /* 全屏隐藏 */
+```
+
+- **占位落点**:rail 展开时,inset 作用于 rail 顶行(折叠/新建按钮右移);
+  rail 收起时作用于窄条顶部;inset 变化带 200ms 过渡,
+  进出全屏不跳动。
+- **运行模式识别**:壳加载 URL 附 `?shell=mac`,前端写入
+  `<html data-shell="mac">`(与 token 一样进 sessionStorage,刷新保持);
+  浏览器访问无此参数,零 inset。
+- **全屏事件**:壳监听 macOS 进/出全屏(Wails window 事件),
+  `ExecJS` 切换 `data-fullscreen` 属性——页面不引入 wails runtime JS,
+  保持"壳只是浏览器"的边界。
+- **拖拽区**:rail 顶行与 pane header 的空白区设 `--wails-draggable: drag`,
+  其中的按钮/输入显式 no-drag;浏览器模式下该样式无效且无害。
+- Windows/Linux 后续按同机制扩展(`data-shell="win"` 走右上控件,无左上 inset)。
+
+### 2.4 canvas 栏(预留)
 
 - 第三栏,默认收起为窄条 + 图标;是将来 canvas / 小组件 / 工具大块输出 /
   artifacts 的展示位(暂缓清单里的 canvas/widgets 解封时落位)。
@@ -167,6 +193,7 @@ text:      markdown 正文(无气泡直接排版)…▍    ← streaming 光标
 | S5 选择器 | 两层 Accordion 模型选择 | — |
 | S6 分屏 | pane 容器抽象、`?split=`、上下分屏 | S3 S4 |
 | S7 canvas 栏 | 插槽 + 收起/展开 + 空态 | S3 |
+| S8 窗口 chrome | 壳 HiddenInset + `?shell=mac` + 全屏事件 ExecJS + 拖拽区 | S3 |
 
 S1–S5 为一批(核心形态),S6–S7 紧随;细碎(mascot、动效细节、
 标题自动生成)在形态稳定后移交 Codex。
