@@ -56,20 +56,27 @@ export function ModelPicker({ token, session }: { token: string; session: Sessio
     }
   }, [open, currentProfileName]);
 
-  const triggerLabel = followingDefault
-    ? t("session.providerDefault")
-    : `${currentProfileName} · ${session.model || activeProfile?.defaultModel || t("common.default")}`;
+  const modelLabel = session.model || activeProfile?.defaultModel || t("common.default");
+  // 品牌图标代替 provider 名;未命中图标的 profile 回落为文字名
+  const brandIcon = BrandIcon({ name: currentProfileName, className: "size-4 shrink-0" });
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
           aria-label={t("session.model")}
-          className="h-7 max-w-60 gap-1 px-2 text-xs font-normal text-muted-foreground hover:text-foreground"
+          className="h-7 max-w-60 gap-1.5 px-2 text-xs font-normal text-muted-foreground hover:text-foreground"
           size="sm"
           variant="ghost"
         >
-          <span className="truncate">{triggerLabel}</span>
+          {followingDefault ? (
+            <span className="truncate">{t("session.providerDefault")}</span>
+          ) : (
+            <>
+              {brandIcon ?? <span className="truncate">{currentProfileName} ·</span>}
+              <span className="truncate">{modelLabel}</span>
+            </>
+          )}
           <ChevronDown className="size-3 shrink-0" />
         </Button>
       </PopoverTrigger>

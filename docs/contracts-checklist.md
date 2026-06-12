@@ -38,7 +38,7 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 | `POST /sessions` | `{title?, provider?, model?}` | 201 Session | — |
 | `GET /sessions` | — | `{sessions: []}` | — |
 | `GET /sessions/{id}` | — | Session | 404 |
-| `PATCH /sessions/{id}` | `{title?, model?}` | Session | 404 |
+| `PATCH /sessions/{id}` | `{title?, provider?, model?}` | Session | 404 |
 | `DELETE /sessions/{id}` | — | 204 | 404 |
 | `POST /sessions/{id}/submit` | `{clientMessageID, text}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_running` |
 | `POST /sessions/{id}/cancel` | — | 202 `{status}` | 404 / 409 `no_running_turn` |
