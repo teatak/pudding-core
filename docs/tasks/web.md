@@ -1,7 +1,7 @@
 # 轨道 E:Web UI
 
 > 背景:daemon 已可运行(`make dev && ./bin/puddingd --mock`,默认
-> `127.0.0.1:9670`),REST + SSE 契约已冻结。你的任务是交付第一版多 session
+> `127.0.0.1:9679`),REST + SSE 契约已冻结。你的任务是交付第一版多 session
 > 文本聊天 UI。通用纪律见 docs/phase-1-plan.md 第 6 节;硬约束见 AGENTS.md
 > (前端技术约束一节务必通读)。
 
@@ -64,7 +64,7 @@ shadcn 官方组件一律 `npx shadcn@latest add <component>` 引入;
 5. **token**:dev 模式从 `VITE_PUDDING_TOKEN` 环境变量注入(值在
    `~/.pudding-dev/daemon.token`),或启动页手动粘贴存 sessionStorage。
    REST 走 `Authorization: Bearer`;SSE 走 `?token=`(EventSource 加不了 header)。
-6. Vite dev proxy:`/sessions`、`/settings` → `http://127.0.0.1:9670`。
+6. Vite dev proxy:`/sessions`、`/settings` → `http://127.0.0.1:9679`。
 7. settings 页:`GET /settings` 展示 + `PUT /settings` 保存(RHF + zod),
    第一版就是 key-value 编辑,不做分类导航。
 

@@ -5,7 +5,7 @@ import { defineConfig, loadEnv } from "vite";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const daemon = env.PUDDING_DAEMON_URL || "http://127.0.0.1:9670";
+  const daemon = env.PUDDING_DAEMON_URL || "http://127.0.0.1:9679";
 
   return {
     plugins: [react(), tailwindcss()],

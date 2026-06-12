@@ -412,8 +412,8 @@ turn.started → turn.delta* → turn.completed | turn.failed | turn.cancelled
 
 | 通道 | home | 默认端口 |
 | --- | --- | --- |
-| release | `~/.pudding` | CLI `127.0.0.1:9669` · 壳 `127.0.0.1:9668` |
-| dev | `~/.pudding-dev` | CLI `127.0.0.1:9670` · 壳 `127.0.0.1:9671` |
+| release | `~/.pudding` | CLI `127.0.0.1:9669` · 壳 `127.0.0.1:9670` |
+| dev | `~/.pudding-dev` | CLI `127.0.0.1:9679` · 壳 `127.0.0.1:9680` |
 
 与旧版的关系:
 
