@@ -31,6 +31,7 @@ const indexRoute = createRoute({
   path: "/",
   validateSearch: z.object({
     session: z.string().optional(),
+    split: z.string().optional(), // 上下分屏的第二个会话(docs/design.md 2.2)
   }),
 });
 

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { CircleAlert, Loader2, MessageSquareText, PanelLeft, Plus, Trash2 } from "lucide-react";
+import { CircleAlert, Loader2, MessageSquareText, PanelLeft, Plus, SquareSplitVertical, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 
 import { createSession, deleteSession, listSessions } from "@/api/client";
@@ -27,6 +27,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
+import type { AppSearch } from "@/lib/route";
 import { formatRelative } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { useOverlayStore } from "@/state/overlayStore";
@@ -54,7 +55,7 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
     mutationFn: () => createSession(token, { title: t("session.untitled") }),
     onSuccess: async (session) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
-      await navigate({ to: "/", search: { session: session.id } });
+      await navigate({ to: "/", search: (prev) => ({ ...(prev as AppSearch), session: session.id }) });
     },
   });
 
@@ -67,14 +68,26 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
         queryClient.setQueryData(queryKeys.sessions(), { sessions: remaining });
       }
       clearSession(sessionID);
-      if (selectedSessionID === sessionID) {
-        const nextSessionID = remaining[0]?.id;
-        if (nextSessionID) {
-          await navigate({ to: "/", search: { session: nextSessionID } });
-        } else {
-          await navigate({ to: "/", search: {}, replace: true });
-        }
-      }
+      // 被删会话占用的路由槽位(主 pane / 分屏)就地清理
+      await navigate({
+        to: "/",
+        search: (prev) => {
+          const next = { ...(prev as AppSearch) };
+          if (next.split === sessionID) {
+            delete next.split;
+          }
+          if (next.session === sessionID) {
+            const fallback = remaining.find((session) => session.id !== next.split)?.id || remaining[0]?.id;
+            if (fallback) {
+              next.session = fallback;
+            } else {
+              delete next.session;
+            }
+          }
+          return next;
+        },
+        replace: true,
+      });
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
     },
   });
@@ -95,10 +108,31 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
       token={token}
       onCreate={() => createMutation.mutate()}
       onDelete={(id) => deleteMutation.mutate(id)}
+      onOpenSplit={(id) => {
+        hover.close();
+        // 当前主 pane 的会话不重复开分屏
+        void navigate({
+          to: "/",
+          search: (prev) => {
+            const search = prev as AppSearch;
+            return search.session === id ? search : { ...search, split: id };
+          },
+        });
+      }}
       onRefetch={() => void sessionsQuery.refetch()}
       onSelect={(id) => {
         hover.close();
-        void navigate({ to: "/", search: { session: id } });
+        void navigate({
+          to: "/",
+          search: (prev) => {
+            const search = prev as AppSearch;
+            // 点中已在分屏里的会话:与主 pane 交换,两个都保持可见
+            if (search.split === id && search.session) {
+              return { ...search, session: id, split: search.session };
+            }
+            return { ...search, session: id };
+          },
+        });
       }}
     />
   );
@@ -231,6 +265,7 @@ type RailPanelProps = {
   deletePending: boolean;
   onCreate: () => void;
   onSelect: (id: string) => void;
+  onOpenSplit: (id: string) => void;
   onDelete: (id: string) => void;
   onRefetch: () => void;
 };
@@ -247,6 +282,7 @@ function RailPanel({
   deletePending,
   onCreate,
   onSelect,
+  onOpenSplit,
   onDelete,
   onRefetch,
 }: RailPanelProps) {
@@ -271,6 +307,7 @@ function RailPanel({
           selectedSessionID={selectedSessionID}
           sessions={sessions}
           onDelete={onDelete}
+          onOpenSplit={onOpenSplit}
           onRefetch={onRefetch}
           onSelect={onSelect}
         />
@@ -292,6 +329,7 @@ type SessionItemsProps = {
   isError: boolean;
   deletePending: boolean;
   onSelect: (id: string) => void;
+  onOpenSplit: (id: string) => void;
   onDelete: (id: string) => void;
   onRefetch: () => void;
 };
@@ -303,6 +341,7 @@ function SessionItems({
   isError,
   deletePending,
   onSelect,
+  onOpenSplit,
   onDelete,
   onRefetch,
 }: SessionItemsProps) {
@@ -351,6 +390,7 @@ function SessionItems({
           selected={session.id === selectedSessionID}
           session={session}
           onDelete={() => onDelete(session.id)}
+          onOpenSplit={() => onOpenSplit(session.id)}
           onSelect={() => onSelect(session.id)}
         />
       ))}
@@ -364,54 +404,63 @@ type SessionItemProps = {
   running: boolean;
   deletePending: boolean;
   onSelect: () => void;
+  onOpenSplit: () => void;
   onDelete: () => void;
 };
 
-function SessionItem({ session, selected, running, deletePending, onSelect, onDelete }: SessionItemProps) {
+function SessionItem({ session, selected, running, deletePending, onSelect, onOpenSplit, onDelete }: SessionItemProps) {
   const { t, locale } = useI18n();
   return (
     <div
       className={cn(
-        "group/item relative flex items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors",
+        "group/item relative flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors",
         selected ? "bg-sidebar-accent" : "hover:bg-sidebar-accent/60",
       )}
     >
-      <button className="min-w-0 flex-1 text-left" type="button" onClick={onSelect}>
-        <span className="flex items-center gap-2">
-          <span
-            className={cn("size-2 shrink-0 rounded-full", running ? "animate-pulse bg-primary" : "bg-transparent")}
-          />
-          <span className="truncate text-[13px] leading-5 font-medium">{session.title || session.id}</span>
-        </span>
-        <span className="block truncate pl-4 text-xs leading-5 text-muted-foreground">
+      <button className="flex min-w-0 flex-1 items-center gap-2 text-left" type="button" onClick={onSelect}>
+        {running ? <span className="size-2 shrink-0 animate-pulse rounded-full bg-primary" /> : null}
+        <span className="truncate text-[13px] leading-6 font-medium">{session.title || session.id}</span>
+        <span className="ml-auto shrink-0 pl-2 text-xs text-muted-foreground transition-opacity group-hover/item:opacity-0">
           {running ? t("session.generating") : formatRelative(session.updatedAt, locale)}
         </span>
       </button>
-      <AlertDialog>
-        <AlertDialogTrigger asChild>
-          <Button
-            aria-label={t("session.delete")}
-            className="absolute top-1.5 right-1.5 size-6 opacity-0 transition-opacity group-hover/item:opacity-100 focus-visible:opacity-100"
-            disabled={deletePending}
-            size="icon"
-            variant="ghost"
-          >
-            <Trash2 className="size-3.5" />
-          </Button>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("deleteSession.title")}</AlertDialogTitle>
-            <AlertDialogDescription>{t("deleteSession.description")}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={onDelete}>
-              {t("common.delete")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* hover 操作区盖在时间文字位置上 */}
+      <div className="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover/item:opacity-100 has-focus-visible:opacity-100">
+        <Button
+          aria-label={t("session.openSplit")}
+          className="size-6"
+          size="icon"
+          variant="ghost"
+          onClick={onOpenSplit}
+        >
+          <SquareSplitVertical className="size-3.5" />
+        </Button>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button
+              aria-label={t("session.delete")}
+              className="size-6"
+              disabled={deletePending}
+              size="icon"
+              variant="ghost"
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("deleteSession.title")}</AlertDialogTitle>
+              <AlertDialogDescription>{t("deleteSession.description")}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+              <AlertDialogAction variant="destructive" onClick={onDelete}>
+                {t("common.delete")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
     </div>
   );
 }
