@@ -39,26 +39,16 @@ func Prepare(dir string) error {
 	return nil
 }
 
-// 端口规划:release 占紧凑主段(9669 CLI / 9670 壳),dev 挪远避让
-// (9679 CLI / 9680 壳)。同一通道的 CLI 与壳是同一 daemon 的两种宿主,
-// 正常使用不并存(同 home 同库);分端口只为开发期偶发并行不打架,
-// 以及壳的 loopback origin 稳定(localStorage 按 origin 含端口隔离,
-// 端口漂移会让 UI 偏好整体丢失)。
-
-// DefaultAddr 返回 CLI daemon 的通道默认监听地址。
+// DefaultAddr 返回通道默认监听地址(release 9669 / dev 9679)。
+// 每通道**只有一个端口**:CLI 与桌面壳是同一 daemon 的两种宿主
+// (同 home 同库,单写者),绝不并存双跑;壳启动时端口被活的
+// pudding daemon 占用则 attach(直连 + 读 daemon.token),保证
+// loopback origin 稳定(localStorage 按 origin 含端口隔离)。
 func DefaultAddr() string {
 	if buildinfo.IsRelease() {
 		return "127.0.0.1:9669"
 	}
 	return "127.0.0.1:9679"
-}
-
-// DefaultDesktopAddr 返回桌面壳的通道默认地址。
-func DefaultDesktopAddr() string {
-	if buildinfo.IsRelease() {
-		return "127.0.0.1:9670"
-	}
-	return "127.0.0.1:9680"
 }
 
 func DBPath(dir string) string { return filepath.Join(dir, "data", "pudding.db") }

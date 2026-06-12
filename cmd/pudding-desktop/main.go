@@ -1,5 +1,7 @@
 // pudding-desktop 是 Pudding 的桌面壳:daemon 同进程内嵌(单二进制),
 // 窗口加载带 token 的本地 URL(内存直传,无手贴),tray 常驻。
+// 通道单端口,attach-or-start:端口空闲则内嵌启动 daemon;被活的
+// pudding daemon 占用(如 CLI 先起)则直接挂上去,壳退化为纯视图。
 // 边界:壳只做启动与系统集成,不碰 session runtime
 // (docs/technology-decisions.md 第 4 节)。
 package main
@@ -7,10 +9,12 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -21,19 +25,58 @@ import (
 	"github.com/teatak/pudding-core/internal/home"
 )
 
-func main() {
-	// 壳用独立固定端口(与 CLI daemon 分开,按通道取值,见
-	// home.DefaultDesktopAddr):loopback 页面的 localStorage 按 origin
-	// (含端口)隔离,端口漂移会让 UI 偏好整体"丢失"。
-	// AutoPort 仅在该端口也被占时兜底(此时偏好暂存到新 origin,可接受)。
-	d, err := daemon.Start(daemon.Options{
-		Addr:         home.DefaultDesktopAddr(),
-		AutoPort:     true,
-		DefaultModel: "mock-model",
-	})
+// attachExisting 在通道端口被占时探测占用者:用 home 下持久化的
+// daemon.token 鉴权访问 /sessions,通了说明是同通道的活 pudding
+// daemon(token 是 load-or-create 的,跨宿主同一把),返回直连 URL。
+func attachExisting(addr string) (string, bool) {
+	dir, err := home.Resolve("")
 	if err != nil {
-		slog.Error("pudding-desktop: start daemon", "err", err)
-		os.Exit(1)
+		return "", false
+	}
+	raw, err := os.ReadFile(home.TokenPath(dir))
+	if err != nil {
+		return "", false
+	}
+	token := strings.TrimSpace(string(raw))
+	if token == "" {
+		return "", false
+	}
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/sessions", addr), nil)
+	if err != nil {
+		return "", false
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", false
+	}
+	return fmt.Sprintf("http://%s/?token=%s", addr, token), true
+}
+
+func main() {
+	addr := home.DefaultAddr()
+	// d 为 nil 表示 attach 模式:daemon 归别的进程管,壳只是视图,
+	// 退出时不做 Shutdown,也没有 serve 错误可监听。
+	var openURL string
+	d, err := daemon.Start(daemon.Options{Addr: addr, DefaultModel: "mock-model"})
+	switch {
+	case err == nil:
+		openURL = d.OpenURL()
+	default:
+		url, ok := attachExisting(addr)
+		if !ok {
+			slog.Error("pudding-desktop: start daemon failed and no live pudding daemon to attach",
+				"addr", addr, "err", err)
+			os.Exit(1)
+		}
+		slog.Info("pudding-desktop: attached to existing daemon", "addr", addr)
+		openURL = url
+		d = nil
 	}
 
 	app := application.New(application.Options{
@@ -54,7 +97,7 @@ func main() {
 	installZoomSwizzle()
 	windowOpts := application.WebviewWindowOptions{
 		Title:     "Pudding",
-		URL:       d.OpenURL(),
+		URL:       openURL,
 		Width:     1200,
 		Height:    800,
 		MinWidth:  760,
@@ -149,21 +192,27 @@ func main() {
 	})
 	tray.SetMenu(menu)
 
-	// daemon serve 异常退出时带走壳,避免空窗口假活
-	go func() {
-		if err := <-d.ServeErr(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("pudding-desktop: daemon serve", "err", err)
-			app.Quit()
-		}
-	}()
+	// 内嵌模式才有 serve 生命周期要管;attach 模式 daemon 归外部进程,
+	// 它退出后页面自然断连,壳不代管。
+	if d != nil {
+		// daemon serve 异常退出时带走壳,避免空窗口假活
+		go func() {
+			if err := <-d.ServeErr(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				slog.Error("pudding-desktop: daemon serve", "err", err)
+				app.Quit()
+			}
+		}()
+	}
 
 	if err := app.Run(); err != nil {
 		slog.Error("pudding-desktop: run", "err", err)
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := d.Shutdown(shutdownCtx); err != nil {
-		slog.Error("pudding-desktop: shutdown daemon", "err", err)
+	if d != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := d.Shutdown(shutdownCtx); err != nil {
+			slog.Error("pudding-desktop: shutdown daemon", "err", err)
+		}
 	}
 }

@@ -26,10 +26,8 @@ import (
 )
 
 type Options struct {
-	Home string // 空 = 通道默认目录
-	Addr string // 空 = 通道默认地址
-	// AutoPort:Addr 被占用时回落随机空闲端口(桌面壳用;CLI 保持直接报错)。
-	AutoPort     bool
+	Home         string // 空 = 通道默认目录
+	Addr         string // 空 = 通道默认地址
 	Mock         bool
 	DefaultModel string
 }
@@ -84,10 +82,6 @@ func Start(opts Options) (*Daemon, error) {
 		addr = home.DefaultAddr()
 	}
 	ln, err := net.Listen("tcp", addr)
-	if err != nil && opts.AutoPort {
-		slog.Warn("daemon: default addr busy, falling back to random port", "addr", addr)
-		ln, err = net.Listen("tcp", "127.0.0.1:0")
-	}
 	if err != nil {
 		_ = st.Close()
 		return nil, err
