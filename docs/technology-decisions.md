@@ -389,6 +389,17 @@ turn.started → turn.delta* → turn.completed | turn.failed | turn.cancelled
 - UI overlay 的丢弃时机:收到 `turn.completed`(或 failed / cancelled)且对应 canonical message 可见后,删除该 turn 的 overlay。
 - 同一 session 的 events 对所有订阅者广播;daemon 不跟踪"哪个客户端在看"。多客户端同时打开同一 session 是显式支持的能力。
 
+协议演进预留(先定形不实现,避免将来破坏契约):
+
+- `turn.delta` 将增加 part 维度:`partType: text | thought | tool`。
+  text-only 阶段恒为 text;**字段缺省视为 text**,老客户端无感。
+  UI 的任务流渲染器按 parts 模型实现(docs/design.md 第 3 节)。
+- turn 步数进度:将来由工具让 LLM 每 turn 预估步数——`turn.started` 附
+  `estimatedSteps`,新增 `turn.progress` 事件携带 `currentStep`;
+  均为可选字段,缺省时 UI 退化为纯状态点,header 进度条不渲染。
+- `GET /sessions` 列表项带 `running: bool`(随 agent shell S1 实现),
+  服务会话栏运行态指示;由 turns 表 running 状态 join 得出,不引入新事实源。
+
 ## 9. 安全
 
 - daemon 只 bind loopback。
