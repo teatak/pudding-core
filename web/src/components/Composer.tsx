@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-import { APIError, cancelTurn, submitMessage, type Session } from "@/api/client";
+import { APIError, cancelTurn, submitMessage, updateSession, type Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ModelPicker } from "@/components/ModelPicker";
 import { Button } from "@/components/ui/button";
@@ -50,9 +50,17 @@ export function Composer({ token, session }: ComposerProps) {
       });
       return submitMessage(token, sessionID, { clientMessageID, text: value.text });
     },
-    onSuccess: async () => {
+    onSuccess: async (_, value) => {
       draftIDRef.current = crypto.randomUUID();
       form.reset({ text: "" });
+      // 标题自动生成:title 为空(未命名且未手动改名)时,用首条消息
+      // 摘要回填;fire-and-forget,失败不影响对话
+      if (!session.title) {
+        const title = value.text.replace(/\s+/g, " ").trim().slice(0, 24);
+        if (title) {
+          void updateSession(token, sessionID, { title }).catch(() => undefined);
+        }
+      }
       await queryClient.invalidateQueries({ queryKey: queryKeys.messages(sessionID) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
     },

@@ -1,14 +1,18 @@
 import { useSearch } from "@tanstack/react-router";
 
+import { CanvasPane } from "@/components/CanvasPane";
 import { ChatPane } from "@/components/ChatPane";
 import { SessionRail } from "@/components/SessionRail";
 import { TokenGate } from "@/components/TokenGate";
+import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useCanvasOpen } from "@/state/canvasStore";
 import { useToken } from "@/state/tokenStore";
 
 export function App() {
   const token = useToken();
   const { session: selectedSessionID, split: splitSessionID } = useSearch({ from: "/" });
+  const canvasOpen = useCanvasOpen();
 
   if (!token) {
     return <TokenGate />;
@@ -32,7 +36,9 @@ export function App() {
             </>
           ) : null}
         </main>
+        {canvasOpen ? <CanvasPane /> : null}
       </div>
+      <Toaster />
     </TooltipProvider>
   );
 }

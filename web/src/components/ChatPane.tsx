@@ -1,11 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { X } from "lucide-react";
+import { Loader2, PanelRight, Plus, X } from "lucide-react";
 import { useEffect } from "react";
 
-import { listSessions, type Session } from "@/api/client";
+import { createSession, listSessions, type Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { Composer } from "@/components/Composer";
+import { Mascot } from "@/components/Mascot";
 import { Transcript } from "@/components/Transcript";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -13,6 +14,7 @@ import { useSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
 import type { AppSearch } from "@/lib/route";
 import { cn } from "@/lib/utils";
+import { setCanvasOpen, useCanvasOpen } from "@/state/canvasStore";
 import { useOverlayStore } from "@/state/overlayStore";
 import { useRailCollapsed } from "@/state/railStore";
 
@@ -26,12 +28,22 @@ type ChatPaneProps = {
 
 export function ChatPane({ token, sessionID, role }: ChatPaneProps) {
   const navigate = useNavigate({ from: "/" });
+  const queryClient = useQueryClient();
   const { t } = useI18n();
   const railCollapsed = useRailCollapsed();
+  const canvasOpen = useCanvasOpen();
   const sessionsQuery = useQuery({
     queryKey: queryKeys.sessions(),
     queryFn: () => listSessions(token),
     enabled: Boolean(token),
+  });
+  // 全空库的欢迎空态用:与 rail 的新建语义一致
+  const createMutation = useMutation({
+    mutationFn: () => createSession(token, { title: "" }),
+    onSuccess: async (created) => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      await navigate({ to: "/", search: (prev) => ({ ...prev, session: created.id }) });
+    },
   });
   const sessions = sessionsQuery.data?.sessions || [];
   const selectedSession = sessions.find((session) => session.id === sessionID);
@@ -94,10 +106,28 @@ export function ChatPane({ token, sessionID, role }: ChatPaneProps) {
         }
       >
         <div className="truncate text-sm font-medium">
-          {selectedSession?.title || t("session.noSelected")}
+          {selectedSession
+            ? selectedSession.title || t("session.untitled")
+            : t("session.noSelected")}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <HeaderStatus session={selectedSession} />
+          {isPrimary ? (
+            // canvas 栏开关在 header 最右(docs/design.md 第 5 节)
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  aria-label={t("canvas.toggle")}
+                  size="icon-sm"
+                  variant="ghost"
+                  onClick={() => setCanvasOpen(!canvasOpen)}
+                >
+                  <PanelRight />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t("canvas.toggle")}</TooltipContent>
+            </Tooltip>
+          ) : null}
           {!isPrimary ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -131,8 +161,14 @@ export function ChatPane({ token, sessionID, role }: ChatPaneProps) {
           <Composer token={token} session={selectedSession} />
         </>
       ) : (
-        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-          {t("session.selectOrCreate")}
+        // 欢迎空态(全空库 / 无选中):mascot + 一句话 + 主操作
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
+          <Mascot className="w-20" />
+          <div className="text-sm text-muted-foreground">{t("session.selectOrCreate")}</div>
+          <Button disabled={createMutation.isPending} type="button" onClick={() => createMutation.mutate()}>
+            {createMutation.isPending ? <Loader2 className="animate-spin" /> : <Plus />}
+            {t("session.startFirst")}
+          </Button>
         </div>
       )}
     </section>

@@ -52,7 +52,9 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
   });
 
   const createMutation = useMutation({
-    mutationFn: () => createSession(token, { title: t("session.untitled") }),
+    // title 留空:展示侧 fallback "未命名会话",首条消息提交后由 Composer
+    // 自动回填摘要;空 = "未命名"的判据,跨语言稳定且不会覆盖手动命名
+    mutationFn: () => createSession(token, { title: "" }),
     onSuccess: async (session) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
       await navigate({ to: "/", search: (prev) => ({ ...(prev as AppSearch), session: session.id }) });
@@ -438,7 +440,7 @@ function SessionItem({ session, selected, running, deletePending, onSelect, onOp
     >
       <button className="flex min-w-0 flex-1 items-center gap-2 text-left" type="button" onClick={onSelect}>
         {running ? <span className="size-2 shrink-0 animate-pulse rounded-full bg-primary" /> : null}
-        <span className="truncate text-[13px] leading-6 font-medium">{session.title || session.id}</span>
+        <span className="truncate text-[13px] leading-6 font-medium">{session.title || t("session.untitled")}</span>
         <span className="ml-auto shrink-0 pl-2 text-xs text-muted-foreground transition-opacity group-hover/item:opacity-0">
           {running ? t("session.generating") : formatRelative(session.updatedAt, locale)}
         </span>

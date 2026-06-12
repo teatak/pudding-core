@@ -1,9 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, CircleAlert, Copy, MessageSquareText } from "lucide-react";
+import { ArrowDown, CircleAlert, Copy } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 
 import { listMessages, type Message } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { Mascot } from "@/components/Mascot";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -124,7 +126,7 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
           ) : null}
           {!messagesQuery.isLoading && !messagesQuery.isError && items.length === 0 ? (
             <div className="flex min-h-80 flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
-              <MessageSquareText className="h-8 w-8" />
+              <Mascot className="w-16" />
               <div>{t("session.start")}</div>
             </div>
           ) : null}
@@ -215,13 +217,20 @@ function UserMessageBlock({
   );
 }
 
+// 入场动效只给"新出现"的内容(pending 用户消息 / streaming overlay):
+// canonical 消息不动效,避免历史加载整页齐闪、overlay→canonical 交接重闪;
+// reduced-motion 由全局规则降级(styles.css)
 function PendingUserItem({ text }: { text: string }) {
-  return <UserMessageBlock pending text={text} />;
+  return (
+    <div className="animate-in duration-150 fade-in slide-in-from-bottom-1">
+      <UserMessageBlock pending text={text} />
+    </div>
+  );
 }
 
 function AssistantOverlayItem({ overlay }: { overlay: AssistantOverlay }) {
   return (
-    <div className="min-w-0 text-sm leading-6">
+    <div className="animate-in min-w-0 text-sm leading-6 duration-150 fade-in slide-in-from-bottom-1">
       {overlay.text ? <TurnParts parts={partsFromText(overlay.text)} /> : null}
       {overlay.status === "streaming" ? (
         <span className="ml-1 inline-block animate-pulse text-primary">▍</span>
@@ -265,7 +274,9 @@ function MessageMeta({ createdAt, text, className }: { createdAt: string; text: 
         size="icon-xs"
         type="button"
         variant="ghost"
-        onClick={() => void navigator.clipboard.writeText(text)}
+        onClick={() => {
+          void navigator.clipboard.writeText(text).then(() => toast(t("common.copied")));
+        }}
       >
         <Copy />
       </Button>
