@@ -8,7 +8,9 @@ import { Composer } from "@/components/Composer";
 import { Transcript } from "@/components/Transcript";
 import { useSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
+import { cn } from "@/lib/utils";
 import { useOverlayStore } from "@/state/overlayStore";
+import { useRailCollapsed } from "@/state/railStore";
 
 type ChatPaneProps = {
   token: string;
@@ -18,6 +20,7 @@ type ChatPaneProps = {
 export function ChatPane({ token, selectedSessionID }: ChatPaneProps) {
   const navigate = useNavigate({ from: "/" });
   const { t } = useI18n();
+  const railCollapsed = useRailCollapsed();
   const sessionsQuery = useQuery({
     queryKey: queryKeys.sessions(),
     queryFn: () => listSessions(token),
@@ -49,7 +52,12 @@ export function ChatPane({ token, selectedSessionID }: ChatPaneProps) {
 
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
-      <header className="flex h-12 shrink-0 items-center justify-between gap-3 px-5">
+      <header
+        className={cn(
+          "flex h-12 shrink-0 items-center justify-between gap-3 px-5 transition-[padding] duration-200",
+          railCollapsed && "pl-13",
+        )}
+      >
         <div className="truncate text-sm font-medium">
           {selectedSession?.title || t("session.noSelected")}
         </div>

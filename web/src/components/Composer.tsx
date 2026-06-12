@@ -87,9 +87,11 @@ export function Composer({ token, session }: ComposerProps) {
 
   return (
     <form
-      className="border-t bg-background px-5 pt-3 pb-4"
+      className="relative px-5 pb-4"
       onSubmit={form.handleSubmit(submitDraft)}
     >
+      {/* 与对话区同底无分割线,衔接用渐变遮罩:滚动内容在贴近输入区时淡出 */}
+      <div className="pointer-events-none absolute inset-x-0 -top-10 h-10 bg-gradient-to-t from-background to-transparent" />
       <div className="mx-auto w-full max-w-3xl">
         <div className="rounded-xl border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/25">
           <Textarea

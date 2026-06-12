@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { CircleAlert, Loader2, MessageSquareText, PanelLeftClose, PanelLeftOpen, Plus, Trash2 } from "lucide-react";
+import { CircleAlert, Loader2, MessageSquareText, PanelLeft, Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { createSession, deleteSession, listSessions } from "@/api/client";
@@ -30,8 +30,8 @@ import { useI18n } from "@/i18n";
 import { formatRelative } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { useOverlayStore } from "@/state/overlayStore";
+import { setRailCollapsed, useRailCollapsed } from "@/state/railStore";
 
-const COLLAPSED_KEY = "pudding.railCollapsed";
 const LAST_SEEN_KEY = "pudding.lastSeen";
 
 function readLastSeen(): Record<string, string> {
@@ -58,7 +58,7 @@ export function SessionList({ token, selectedSessionID }: SessionListProps) {
   const navigate = useNavigate({ from: "/" });
   const { t } = useI18n();
   const clearSession = useOverlayStore((state) => state.clearSession);
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSED_KEY) === "1");
+  const collapsed = useRailCollapsed();
   const [hoverOpen, setHoverOpen] = useState(false);
   const closeTimer = useRef<number | null>(null);
 
@@ -108,8 +108,7 @@ export function SessionList({ token, selectedSessionID }: SessionListProps) {
   });
 
   function toggleCollapsed(next: boolean) {
-    setCollapsed(next);
-    localStorage.setItem(COLLAPSED_KEY, next ? "1" : "0");
+    setRailCollapsed(next);
     setHoverOpen(false);
   }
 
@@ -163,12 +162,11 @@ export function SessionList({ token, selectedSessionID }: SessionListProps) {
     </div>
   );
 
+  // 折叠 = 整栏收进 popover:页面上只剩悬浮触发器,hover 浮出完整面板,
+  // 点击展开(参照 Claude Code 桌面端)。
   if (collapsed) {
     return (
-      <div
-        className="flex h-full w-12 shrink-0 flex-col items-center gap-1 bg-sidebar pb-3 transition-[padding] duration-200"
-        style={{ paddingTop: "calc(var(--traffic-inset-y) + 8px)" }}
-      >
+      <div className="absolute top-2 left-2.5 z-30" style={{ marginLeft: "var(--traffic-inset)" }}>
         <Popover open={hoverOpen} onOpenChange={setHoverOpen}>
           <PopoverTrigger asChild>
             <Button
@@ -182,13 +180,13 @@ export function SessionList({ token, selectedSessionID }: SessionListProps) {
               }}
               onMouseLeave={scheduleClose}
             >
-              <PanelLeftOpen />
+              <PanelLeft />
             </Button>
           </PopoverTrigger>
           <PopoverContent
             align="start"
-            className="h-105 w-72 p-0 py-2"
-            side="right"
+            className="flex h-[440px] w-72 flex-col p-0 py-2"
+            side="bottom"
             sideOffset={6}
             onMouseEnter={cancelClose}
             onMouseLeave={scheduleClose}
@@ -196,23 +194,6 @@ export function SessionList({ token, selectedSessionID }: SessionListProps) {
             {panel}
           </PopoverContent>
         </Popover>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              aria-label={t("session.create")}
-              disabled={createMutation.isPending}
-              size="icon"
-              variant="ghost"
-              onClick={() => createMutation.mutate()}
-            >
-              {createMutation.isPending ? <Loader2 className="animate-spin" /> : <Plus />}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="right">{t("session.create")}</TooltipContent>
-        </Tooltip>
-        <div className="flex-1" />
-        <ThemeToggle />
-        <SettingsDialog token={token} />
       </div>
     );
   }
@@ -226,7 +207,7 @@ export function SessionList({ token, selectedSessionID }: SessionListProps) {
         <Tooltip>
           <TooltipTrigger asChild>
             <Button aria-label={t("rail.collapse")} size="icon" variant="ghost" onClick={() => toggleCollapsed(true)}>
-              <PanelLeftClose />
+              <PanelLeft />
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">{t("rail.collapse")}</TooltipContent>

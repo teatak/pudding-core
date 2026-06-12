@@ -16,9 +16,10 @@ export function App() {
 
   return (
     <TooltipProvider delayDuration={250}>
-      <div className="flex h-[100svh] overflow-hidden bg-sidebar">
+      {/* 严格左右分割:无外层 margin/卡片化,折叠触发器以 absolute 悬浮 */}
+      <div className="relative flex h-[100svh] overflow-hidden bg-sidebar">
         <SessionList token={token} selectedSessionID={selectedSessionID} />
-        <main className="flex h-full min-w-0 flex-1 overflow-hidden bg-background md:my-2 md:mr-2 md:rounded-xl md:border">
+        <main className="flex h-full min-w-0 flex-1 overflow-hidden bg-background">
           <ChatPane token={token} selectedSessionID={selectedSessionID} />
         </main>
       </div>
