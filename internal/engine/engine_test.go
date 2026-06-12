@@ -140,11 +140,22 @@ func TestSubmitConflict409(t *testing.T) {
 	if !errors.Is(err, ErrTurnRunning) {
 		t.Fatalf("want ErrTurnRunning, got %v", err)
 	}
+
+	// streaming 中列表项必须带 running 派生态(rail 运行态指示的数据源)
+	list, err := ms.ListSessions(context.Background())
+	if err != nil || len(list) != 1 || !list[0].Running {
+		t.Fatalf("session must report running while streaming: %+v err=%v", list, err)
+	}
+
 	if err := eng.Cancel(sid); err != nil {
 		t.Fatal(err)
 	}
 	eng.Wait()
-	_ = ms
+
+	list, _ = ms.ListSessions(context.Background())
+	if list[0].Running {
+		t.Fatal("running must clear after cancel")
+	}
 }
 
 func TestCancelKeepsPartial(t *testing.T) {

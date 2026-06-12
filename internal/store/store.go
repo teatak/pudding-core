@@ -30,6 +30,9 @@ type Session struct {
 	Model     string    `json:"model"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+	// Running 是读取时从 turns 派生的运行态(不落库,turns 仍是唯一事实源),
+	// 服务会话栏"哪个 session 正在干活"的指示。
+	Running bool `json:"running"`
 }
 
 type SessionUpdate struct {

@@ -56,6 +56,7 @@ func (m *Memstore) GetSession(_ context.Context, id string) (*store.Session, err
 		return nil, store.ErrNotFound
 	}
 	cp := *s
+	cp.Running = m.runningLocked(id)
 	return &cp, nil
 }
 
@@ -65,10 +66,21 @@ func (m *Memstore) ListSessions(_ context.Context) ([]*store.Session, error) {
 	out := make([]*store.Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
 		cp := *s
+		cp.Running = m.runningLocked(s.ID)
 		out = append(out, &cp)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
 	return out, nil
+}
+
+// runningLocked 派生 session 运行态;调用方必须已持锁。turns 是唯一事实源。
+func (m *Memstore) runningLocked(sessionID string) bool {
+	for _, t := range m.turns {
+		if t.SessionID == sessionID && t.Status == store.TurnRunning {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Memstore) UpdateSession(_ context.Context, id string, upd store.SessionUpdate) (*store.Session, error) {

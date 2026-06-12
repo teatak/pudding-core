@@ -91,8 +91,8 @@ func (s *Store) GetSession(ctx context.Context, id string) (*store.Session, erro
 	var sess store.Session
 	var created, updated int64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id,title,provider,model,created_at,updated_at FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated)
+		`SELECT id,title,provider,model,created_at,updated_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated, &sess.Running)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -107,7 +107,7 @@ func (s *Store) ListSessions(ctx context.Context) ([]*store.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.QueryContext(ctx, `SELECT id,title,provider,model,created_at,updated_at FROM sessions ORDER BY updated_at DESC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,title,provider,model,created_at,updated_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +117,7 @@ func (s *Store) ListSessions(ctx context.Context) ([]*store.Session, error) {
 	for rows.Next() {
 		var sess store.Session
 		var created, updated int64
-		if err := rows.Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated); err != nil {
+		if err := rows.Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated, &sess.Running); err != nil {
 			return nil, err
 		}
 		sess.CreatedAt, sess.UpdatedAt = timeFromMS(created), timeFromMS(updated)
@@ -452,8 +452,8 @@ func (s *Store) getSessionDB(ctx context.Context, id string) (*store.Session, er
 	var sess store.Session
 	var created, updated int64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id,title,provider,model,created_at,updated_at FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated)
+		`SELECT id,title,provider,model,created_at,updated_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated, &sess.Running)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -593,8 +593,8 @@ func getSessionTx(ctx context.Context, tx *sql.Tx, id string) (*store.Session, e
 	var sess store.Session
 	var created, updated int64
 	err := tx.QueryRowContext(ctx,
-		`SELECT id,title,provider,model,created_at,updated_at FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated)
+		`SELECT id,title,provider,model,created_at,updated_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated, &sess.Running)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}

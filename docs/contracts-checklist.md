@@ -25,7 +25,7 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 
 | 实体 | Go | TS | 字段 |
 | --- | --- | --- | --- |
-| Session | `store.Session` | `session` | id, title, provider, model, createdAt, updatedAt |
+| Session | `store.Session` | `session` | id, title, provider, model, createdAt, updatedAt, running(读取时派生) |
 | Message | `store.Message` | `message` | id, sessionID, turnID, role, text, clientMessageID?, interrupted?, createdAt |
 | ProviderProfile(脱敏视图) | `api.providerProfileView` | `providerProfile` | name, type, baseURL, apiKeySet, defaultModel, extra?, createdAt, updatedAt |
 

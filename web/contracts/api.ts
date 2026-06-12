@@ -9,6 +9,7 @@ export const session = z.object({
   model: z.string(),
   createdAt: z.string(), // RFC3339
   updatedAt: z.string(),
+  running: z.boolean(), // 读取时从 turns 派生,rail 运行态指示
 });
 export type Session = z.infer<typeof session>;
 
