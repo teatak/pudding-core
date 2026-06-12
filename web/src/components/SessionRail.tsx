@@ -141,12 +141,13 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
   // marginLeft 让位 macOS 红绿灯(design.md 2.3)。
   if (collapsed) {
     return (
-      // 触发器在 --toolbar-h 工具条带内垂直居中:与展开态按钮、红绿灯同轴。
-      // 公式与展开态完全一致,两态切换图标不位移
+      // 触发器在 --toolbar-h 工具条带内垂直居中:wrapper 撑满带高 +
+      // items-center,与展开态顶行同构 — 不按按钮尺寸硬算偏移
+      // (size="icon" 是 32px,按 36px 算过一次,两态错位 2px)
       <div
-        className="absolute left-2 z-30"
+        className="absolute top-0 left-2 z-30 flex items-center"
         style={{
-          top: "calc((var(--toolbar-h) - 2.25rem) / 2)",
+          height: "var(--toolbar-h)",
           marginLeft: "var(--traffic-inset)",
         }}
       >
