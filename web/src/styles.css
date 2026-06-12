@@ -85,13 +85,19 @@
     --sidebar-border: oklch(0.922 0.005 250);
     --sidebar-ring: oklch(0.511 0.262 277);
     /* macOS 红绿灯横向让位:浏览器 0;壳模式由 data-shell 切换,
-       全屏时红绿灯隐藏、让位归零(design.md 2.3) */
+       全屏时红绿灯隐藏、让位归零(design.md 2.3)。
+       72px / 54px 来自旧项目实测的 NSToolbar inset rule 常量
+       (titlebarLeftSafeAreaPx / titlebarChromeHeightPx),
+       --toolbar-h 必须与壳侧 InvisibleTitleBarHeight 同值,
+       否则可拖区和双击 zoom 检测区跟视觉工具条割裂 */
     --traffic-inset: 0px;
+    --toolbar-h: 3rem;
     --success: oklch(0.62 0.12 175);
 }
 
 html[data-shell="mac"] {
-    --traffic-inset: 78px;
+    --traffic-inset: 72px;
+    --toolbar-h: 54px;
 }
 
 html[data-shell="mac"][data-fullscreen] {

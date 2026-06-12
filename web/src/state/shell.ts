@@ -1,17 +1,11 @@
 // 桌面壳运行模式识别(docs/design.md 2.3):壳加载 URL 附 ?shell=mac,
 // 这里写入 <html data-shell> 并持久化;浏览器访问无此参数,零 inset。
-// 壳内行为(全屏检测、双击缩放)只依赖 Wails 注入的 window.wails 全局,
-// 页面不 import wails runtime 包;浏览器模式下该全局不存在,全部静默跳过。
+//
+// **不要依赖 window.wails / ExecJS**(旧项目踩坑结论):Wails 不向跨
+// origin(loopback http)页面注入 runtime.js,ExecJS 全部滞留 pendingJS
+// 永不 flush,window.wails 全局也不存在。壳内只有两条可靠通路:
+// native cgo(壳侧)和纯 web 启发式(页面侧)。
 const SHELL_KEY = "pudding.shell";
-
-type WailsWindowAPI = {
-  IsFullscreen: () => Promise<boolean>;
-  ToggleMaximise: () => Promise<void>;
-};
-
-function wailsWindow(): WailsWindowAPI | undefined {
-  return (window as { wails?: { Window?: WailsWindowAPI } }).wails?.Window;
-}
 
 export function initShellMode() {
   const url = new URL(window.location.href);
@@ -27,44 +21,19 @@ export function initShellMode() {
   }
   document.documentElement.dataset.shell = shell;
   initFullscreenTracking();
-  initToolbarDoubleClick();
 }
 
-// 全屏时红绿灯隐藏,inset 让位要归零:进出全屏必然触发 resize,
-// 在 resize 上向壳查询真实全屏态,写回 <html data-fullscreen>
+// 全屏时红绿灯隐藏,inset 让位要归零。检测走视口启发式:macOS native
+// fullscreen 下 webview 视口恰好铺满整块屏幕(zoom 最大化只填 visibleFrame,
+// 不会同时命中宽高)。旧项目同款(useDesktopTitlebarInset),是全屏让位的
+// source of truth;进出全屏必触发 resize,无需任何壳侧通知。
 function initFullscreenTracking() {
-  let pending = false;
   const sync = () => {
-    const api = wailsWindow();
-    if (!api || pending) {
-      return;
-    }
-    pending = true;
-    void api
-      .IsFullscreen()
-      .then((fullscreen) => {
-        document.documentElement.toggleAttribute("data-fullscreen", fullscreen);
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        pending = false;
-      });
+    const fullscreen =
+      Math.abs(window.innerHeight - window.screen.height) <= 1 &&
+      Math.abs(window.innerWidth - window.screen.width) <= 1;
+    document.documentElement.toggleAttribute("data-fullscreen", fullscreen);
   };
   window.addEventListener("resize", sync);
   sync();
-}
-
-// macOS 习惯:双击标题栏 = 缩放窗口(等同 option+绿灯,非全屏)。
-// 命中拖拽区空白处才触发,交互控件上的双击不算。
-function initToolbarDoubleClick() {
-  window.addEventListener("dblclick", (event) => {
-    const target = event.target as HTMLElement | null;
-    if (!target?.closest(".drag-region")) {
-      return;
-    }
-    if (target.closest("button, a, input, textarea, select, [role='button']")) {
-      return;
-    }
-    void wailsWindow()?.ToggleMaximise();
-  });
 }

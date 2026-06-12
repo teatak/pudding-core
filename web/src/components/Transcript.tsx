@@ -110,7 +110,9 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
   }, [followingBottom, items, scrollToBottom]);
 
   return (
-    <div ref={scrollAreaRef} className="relative min-h-0 flex-1">
+    // overflow-hidden:WKWebView 下文字字形渲染会溢出滚动 viewport 边界,
+    // 在 composer 上沿漏出白色文字边缘,这里裁掉(浏览器无此问题但无害)
+    <div ref={scrollAreaRef} className="relative min-h-0 flex-1 overflow-hidden">
       <ScrollArea className="h-full">
         <div className="mx-auto grid w-full max-w-3xl gap-4 px-5 py-5">
           {messagesQuery.isLoading ? <TranscriptSkeleton /> : null}

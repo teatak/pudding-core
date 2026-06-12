@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -32,10 +33,17 @@ func main() {
 	})
 
 	// 窗口 chrome(docs/design.md 2.3):macOS 用 HiddenInset 隐藏标题栏,
-	// 红绿灯悬浮在页面上;URL 附 ?shell=mac 让页面启用 --traffic-inset 让位。
-	// 拖拽区由页面侧 --wails-draggable 标注(48px 工具条带),隐形标题栏
-	// 同高作原生兜底;全屏检测与双击缩放由页面经注入的 window.wails 自治
-	// (state/shell.ts),壳不再下发 ExecJS。
+	// 红绿灯由 NSToolbar inset rule 定位(绝不 cgo setFrame,旧项目踩坑);
+	// URL 附 ?shell=mac 让页面启用 --traffic-inset / --toolbar-h 让位。
+	//
+	// 与页面的三处同值约定:InvisibleTitleBarHeight = web 的 --toolbar-h
+	// = cgo 的 kPuddingToolbarHeight = 54(同一条"工具条带"语义:原生可
+	// 拖区 / 视觉工具条 / 双击 zoom 检测区)。
+	//
+	// **页面与壳之间没有 ExecJS / window.wails 通路**(Wails 不向跨 origin
+	// 页面注入 runtime,旧项目结论):全屏 inset 归零由页面视口启发式自理
+	// (state/shell.ts),壳只负责 native 侧 chrome(toolbar / 红绿灯 / zoom)。
+	installZoomSwizzle()
 	windowOpts := application.WebviewWindowOptions{
 		Title:     "Pudding",
 		URL:       d.OpenURL(),
@@ -48,14 +56,46 @@ func main() {
 		windowOpts.URL += "&shell=mac"
 		windowOpts.Mac = application.MacWindow{
 			TitleBar:                application.MacTitleBarHiddenInset,
-			InvisibleTitleBarHeight: 48,
+			InvisibleTitleBarHeight: 54,
 		}
 	}
 	window := app.Window.NewWithOptions(windowOpts)
 
-	// 关窗 = 隐藏:daemon 常驻后台,tray 可唤回;退出只走 tray 菜单
+	var hideAfterFullscreenExit atomic.Bool
+	if runtime.GOOS == "darwin" {
+		// NSWindow 在 NewWithOptions 后异步创建,这里直接调 NativeWindow()
+		// 还是 nil;WindowFocus 首次 fire 时已就绪,attach 内部去重。
+		window.RegisterHook(events.Common.WindowFocus, func(*application.WindowEvent) {
+			attachDoubleClickToZoom(window)
+		})
+		// 监听 Mac native 事件而非 Common alias:Common 走 setupEventMapping
+		// 的异步 forwarding,fullscreen transition 期间会 race(旧项目结论)
+		window.OnWindowEvent(events.Mac.WindowDidEnterFullScreen, func(*application.WindowEvent) {
+			setFullscreenChrome(window, true)
+		})
+		window.OnWindowEvent(events.Mac.WindowWillExitFullScreen, func(*application.WindowEvent) {
+			// 先藏红绿灯再切 styleMask:layout 重算的过渡帧不可见,
+			// DidExit 后按钮以正确 inset 位置一步到位出现
+			setTrafficLightsHidden(window, true)
+			setFullscreenChrome(window, false)
+		})
+		window.OnWindowEvent(events.Mac.WindowDidExitFullScreen, func(*application.WindowEvent) {
+			setTrafficLightsHidden(window, false)
+			if hideAfterFullscreenExit.Swap(false) {
+				window.Hide()
+			}
+		})
+	}
+
+	// 关窗 = 隐藏:daemon 常驻后台,tray 可唤回;退出只走 tray 菜单。
+	// 全屏中直接 Hide 会留下黑屏 Space,先退全屏再藏。
 	window.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		e.Cancel()
+		if runtime.GOOS == "darwin" && window.IsFullscreen() {
+			hideAfterFullscreenExit.Store(true)
+			window.UnFullscreen()
+			return
+		}
 		window.Hide()
 	})
 

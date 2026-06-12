@@ -141,8 +141,15 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
   // marginLeft 让位 macOS 红绿灯(design.md 2.3)。
   if (collapsed) {
     return (
-      // top-1.5:36px 触发器在 48px 工具条带内垂直居中,与红绿灯同轴
-      <div className="absolute top-1.5 left-2 z-30" style={{ marginLeft: "var(--traffic-inset)" }}>
+      // 触发器在 --toolbar-h 工具条带内垂直居中:与展开态按钮、红绿灯同轴。
+      // 公式与展开态完全一致,两态切换图标不位移
+      <div
+        className="absolute left-2 z-30"
+        style={{
+          top: "calc((var(--toolbar-h) - 2.25rem) / 2)",
+          marginLeft: "var(--traffic-inset)",
+        }}
+      >
         <Popover open={hover.open} onOpenChange={hover.handleOpenChange}>
           <PopoverTrigger asChild>
             <Button
@@ -190,9 +197,10 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
 
   return (
     <aside className="flex h-full w-[268px] shrink-0 flex-col gap-2 bg-sidebar px-2 pb-2 text-sidebar-foreground">
-      {/* 顶行是 48px 工具条:壳模式下整行可拖拽,按钮垂直居中对齐红绿灯 */}
+      {/* 顶行是 --toolbar-h 工具条(壳 54px,与 InvisibleTitleBarHeight 同值):
+          壳模式下整行可拖拽,按钮垂直居中对齐红绿灯 */}
       <div
-        className="drag-region flex h-12 shrink-0 items-center transition-[padding] duration-200"
+        className="drag-region flex h-(--toolbar-h) shrink-0 items-center transition-[padding] duration-200"
         style={{ paddingLeft: "var(--traffic-inset)" }}
       >
         <Tooltip>

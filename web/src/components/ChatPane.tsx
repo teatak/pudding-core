@@ -83,7 +83,7 @@ export function ChatPane({ token, sessionID, role }: ChatPaneProps) {
     <section className="relative flex min-h-0 flex-1 basis-0 flex-col overflow-hidden">
       <header
         className={cn(
-          "flex h-12 shrink-0 items-center justify-between gap-3 px-5",
+          "flex h-(--toolbar-h) shrink-0 items-center justify-between gap-3 px-5",
           isPrimary && "drag-region",
         )}
         // 折叠态给悬浮触发器让位;壳模式下触发器随红绿灯右移,让位同步加宽
@@ -124,7 +124,7 @@ export function ChatPane({ token, sessionID, role }: ChatPaneProps) {
         </div>
       </header>
       {/* 标题栏与会话区的渐变衔接,与 composer 上沿同款 */}
-      <div className="pointer-events-none absolute inset-x-0 top-12 z-10 h-6 bg-gradient-to-b from-background to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 top-(--toolbar-h) z-10 h-6 bg-gradient-to-b from-background to-transparent" />
       {selectedSession ? (
         <>
           <Transcript token={token} sessionID={selectedSession.id} />
