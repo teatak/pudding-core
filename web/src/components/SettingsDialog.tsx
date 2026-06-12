@@ -11,6 +11,7 @@ import {
   createProviderRequest,
   deleteProvider,
   getSettings,
+  listProviderModels,
   listProviders,
   patchProvider,
   patchProviderRequest,
@@ -48,6 +49,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
+import { BrandIcon } from "@/components/BrandIcons";
 import { getOrderedProviderPresets, providerPresetName } from "@/provider/presets";
 import { cn } from "@/lib/utils";
 
@@ -57,7 +59,19 @@ const providerFormSchema = createProviderRequest.extend({
   name: z.string().trim().min(1),
   baseURL: z.string().trim().optional(),
   apiKey: z.string().optional(),
+  modelsText: z.string().optional(),
 });
+
+function linesToModels(text: string | undefined) {
+  return Array.from(
+    new Set(
+      (text || "")
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean),
+    ),
+  );
+}
 
 const defaultsFormSchema = z.object({
   providerDefault: z.string(),
@@ -169,6 +183,24 @@ function ProviderSettings({ token }: { token: string }) {
 
   const profiles = providersQuery.data?.providers || [];
   const saving = createMutation.isPending || patchMutation.isPending;
+  const [candidatesLoading, setCandidatesLoading] = useState(false);
+
+  // 端点 /models 代理只在这里使用:把候选并入配置的模型清单
+  async function loadCandidates() {
+    if (!editingName) {
+      return;
+    }
+    setCandidatesLoading(true);
+    try {
+      const { models } = await listProviderModels(token, editingName);
+      const merged = Array.from(new Set([...linesToModels(providerForm.getValues("modelsText")), ...models]));
+      providerForm.setValue("modelsText", merged.join("\n"), { shouldDirty: true, shouldTouch: true });
+    } catch {
+      providerForm.setError("root", { message: t("provider.candidatesFailed") });
+    } finally {
+      setCandidatesLoading(false);
+    }
+  }
 
   function startCreate() {
     setEditingName(null);
@@ -189,6 +221,7 @@ function ProviderSettings({ token }: { token: string }) {
       apiKey: "",
       extra: "",
       defaultModel: preset.defaultModel,
+      modelsText: preset.models.join("\n"),
     });
   }
 
@@ -311,6 +344,27 @@ function ProviderSettings({ token }: { token: string }) {
         <div className="grid gap-2">
           <Label htmlFor="provider-default-model">{t("settings.defaultModel")}</Label>
           <Input id="provider-default-model" placeholder="gpt-5.5" {...providerForm.register("defaultModel")} />
+        </div>
+        <div className="grid gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <Label htmlFor="provider-models">{t("provider.models")}</Label>
+            <Button
+              disabled={!editingName || candidatesLoading}
+              size="sm"
+              type="button"
+              variant="ghost"
+              onClick={() => void loadCandidates()}
+            >
+              {candidatesLoading ? <Loader2 className="animate-spin" /> : null}
+              {t("provider.loadCandidates")}
+            </Button>
+          </div>
+          <Textarea
+            className="min-h-24 font-mono text-xs"
+            id="provider-models"
+            placeholder={"deepseek-v4-flash\ndeepseek-v4-pro"}
+            {...providerForm.register("modelsText")}
+          />
         </div>
         <DialogFooter>
           {editingName ? (
@@ -451,6 +505,7 @@ function emptyProviderForm(): ProviderFormValue {
     apiKey: "",
     extra: "",
     defaultModel: "",
+    modelsText: "",
   };
 }
 
@@ -462,6 +517,7 @@ function providerToForm(profile: ProviderProfile): ProviderFormValue {
     apiKey: "",
     extra: profile.extra || "",
     defaultModel: profile.defaultModel || "",
+    modelsText: profile.models.join("\n"),
   };
 }
 
@@ -472,6 +528,7 @@ function cleanCreateProvider(value: ProviderFormValue) {
     baseURL: value.baseURL?.trim(),
     apiKey: value.apiKey?.trim(),
     defaultModel: value.defaultModel?.trim(),
+    models: linesToModels(value.modelsText),
     extra: value.extra?.trim(),
   });
   return parsed;
@@ -483,6 +540,7 @@ function cleanPatchProvider(value: ProviderFormValue) {
     baseURL: value.baseURL?.trim(),
     apiKey: value.apiKey?.trim() || undefined,
     defaultModel: value.defaultModel?.trim(),
+    models: linesToModels(value.modelsText),
     extra: value.extra?.trim(),
   });
   return parsed;

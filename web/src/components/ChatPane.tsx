@@ -51,10 +51,10 @@ export function ChatPane({ token, selectedSessionID }: ChatPaneProps) {
   useSessionEvents(activeSessionID, token);
 
   return (
-    <section className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+    <section className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
       <header
         className={cn(
-          "flex h-12 shrink-0 items-center justify-between gap-3 px-5 transition-[padding] duration-200",
+          "flex h-12 shrink-0 items-center justify-between gap-3 px-5",
           railCollapsed && "pl-13",
         )}
       >
@@ -63,6 +63,8 @@ export function ChatPane({ token, selectedSessionID }: ChatPaneProps) {
         </div>
         <HeaderStatus session={selectedSession} />
       </header>
+      {/* 标题栏与会话区的渐变衔接,与 composer 上沿同款 */}
+      <div className="pointer-events-none absolute inset-x-0 top-12 z-10 h-6 bg-gradient-to-b from-background to-transparent" />
       {selectedSession ? (
         <>
           <Transcript token={token} sessionID={selectedSession.id} />

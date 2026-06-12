@@ -30,23 +30,7 @@ import { useI18n } from "@/i18n";
 import { formatRelative } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { useOverlayStore } from "@/state/overlayStore";
-import { setRailCollapsed, useRailCollapsed } from "@/state/railStore";
-
-const LAST_SEEN_KEY = "pudding.lastSeen";
-
-function readLastSeen(): Record<string, string> {
-  try {
-    return JSON.parse(localStorage.getItem(LAST_SEEN_KEY) || "{}");
-  } catch {
-    return {};
-  }
-}
-
-function markSeen(sessionID: string) {
-  const map = readLastSeen();
-  map[sessionID] = new Date().toISOString();
-  localStorage.setItem(LAST_SEEN_KEY, JSON.stringify(map));
-}
+import { setRailCollapsed, useRailCollapsed, useRailForcedCollapsed } from "@/state/railStore";
 
 type SessionListProps = {
   token: string;
@@ -59,6 +43,7 @@ export function SessionList({ token, selectedSessionID }: SessionListProps) {
   const { t } = useI18n();
   const clearSession = useOverlayStore((state) => state.clearSession);
   const collapsed = useRailCollapsed();
+  const forcedCollapsed = useRailForcedCollapsed();
   const [hoverOpen, setHoverOpen] = useState(false);
   const closeTimer = useRef<number | null>(null);
 
@@ -69,14 +54,6 @@ export function SessionList({ token, selectedSessionID }: SessionListProps) {
     refetchInterval: 15_000, // 非选中 session 的运行态兜底刷新
   });
   const sessions = sessionsQuery.data?.sessions || [];
-  const selectedSession = sessions.find((session) => session.id === selectedSessionID);
-
-  // 选中即视为已读:lastSeen 推进到该 session 最新一次更新之后
-  useEffect(() => {
-    if (selectedSessionID) {
-      markSeen(selectedSessionID);
-    }
-  }, [selectedSessionID, selectedSession?.updatedAt]);
 
   const createMutation = useMutation({
     mutationFn: () => createSession(token, { title: t("session.untitled") }),
@@ -166,14 +143,21 @@ export function SessionList({ token, selectedSessionID }: SessionListProps) {
   // 点击展开(参照 Claude Code 桌面端)。
   if (collapsed) {
     return (
-      <div className="absolute top-2 left-2.5 z-30" style={{ marginLeft: "var(--traffic-inset)" }}>
+      <div className="absolute top-2 left-2 z-30" style={{ marginLeft: "var(--traffic-inset)" }}>
         <Popover open={hoverOpen} onOpenChange={setHoverOpen}>
           <PopoverTrigger asChild>
             <Button
               aria-label={t("rail.expand")}
               size="icon"
               variant="ghost"
-              onClick={() => toggleCollapsed(false)}
+              onClick={() => {
+                // 窄屏强制折叠时,展开不可用,点击改为开合 popover
+                if (forcedCollapsed) {
+                  setHoverOpen((open) => !open);
+                  return;
+                }
+                toggleCollapsed(false);
+              }}
               onMouseEnter={() => {
                 cancelClose();
                 setHoverOpen(true);
@@ -238,7 +222,6 @@ function SessionItems({
   onRefetch: () => void;
 }) {
   const { t, locale } = useI18n();
-  const lastSeen = readLastSeen();
   // 实时运行态:sessions 快照(15s 兜底)与 SSE overlay 双源取或
   const runningTurns = useOverlayStore((state) => state.runningTurns);
 
@@ -278,8 +261,6 @@ function SessionItems({
       {sessions.map((session) => {
         const selected = session.id === selectedSessionID;
         const running = session.running || Boolean(runningTurns[session.id]);
-        const seenAt = lastSeen[session.id];
-        const unseenDone = !selected && !running && Boolean(seenAt) && session.updatedAt > seenAt;
         return (
           <div
             key={session.id}
@@ -290,7 +271,7 @@ function SessionItems({
           >
             <button className="min-w-0 flex-1 text-left" type="button" onClick={() => onSelect(session.id)}>
               <span className="flex items-center gap-2">
-                <StatusDot running={running} unseenDone={unseenDone} />
+                <StatusDot running={running} />
                 <span className="truncate text-[13px] leading-5 font-medium">{session.title || session.id}</span>
               </span>
               <span className="block truncate pl-4 text-xs leading-5 text-muted-foreground">
@@ -329,13 +310,8 @@ function SessionItems({
   );
 }
 
-function StatusDot({ running, unseenDone }: { running: boolean; unseenDone: boolean }) {
+function StatusDot({ running }: { running: boolean }) {
   return (
-    <span
-      className={cn(
-        "size-2 shrink-0 rounded-full",
-        running ? "animate-pulse bg-primary" : unseenDone ? "bg-success" : "bg-transparent",
-      )}
-    />
+    <span className={cn("size-2 shrink-0 rounded-full", running ? "animate-pulse bg-primary" : "bg-transparent")} />
   );
 }

@@ -4,21 +4,19 @@ import { useEffect, useState } from "react";
 
 import {
   getSettings,
-  listProviderModels,
   listProviders,
   updateSession,
   type ProviderProfile,
   type Session,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { BrandIcon } from "@/components/BrandIcons";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
-import { PROVIDER_PRESETS } from "@/provider/presets";
 
 // 两层模型选择(docs/design.md 第 4 节):第一层 profile,第二层模型,
 // 默认展开当前 session 所用 profile;选中一次 PATCH 同写 provider + model。
@@ -92,6 +90,7 @@ export function ModelPicker({ token, session }: { token: string; session: Sessio
             <AccordionItem key={profile.name} className="border-b-0" value={profile.name}>
               <AccordionTrigger className="rounded-md px-2.5 py-2 text-sm hover:bg-accent hover:no-underline">
                 <span className="flex min-w-0 items-center gap-2">
+                  <BrandIcon className="size-4 shrink-0" name={profile.name} />
                   <span className="truncate">{profile.name}</span>
                   <Badge className="text-[10px] font-normal" variant="outline">
                     {profile.type}
@@ -103,7 +102,6 @@ export function ModelPicker({ token, session }: { token: string; session: Sessio
                   currentModel={session.provider === profile.name ? session.model : ""}
                   isCurrentProfile={currentProfileName === profile.name && Boolean(session.provider)}
                   profile={profile}
-                  token={token}
                   onPick={(model) => patchMutation.mutate({ provider: profile.name, model })}
                 />
               </AccordionContent>
@@ -116,41 +114,20 @@ export function ModelPicker({ token, session }: { token: string; session: Sessio
 }
 
 function ProfileModels({
-  token,
   profile,
   currentModel,
   isCurrentProfile,
   onPick,
 }: {
-  token: string;
   profile: ProviderProfile;
   currentModel: string;
   isCurrentProfile: boolean;
   onPick: (model: string) => void;
 }) {
   const { t } = useI18n();
-  // 展开才挂载(Radix 卸载折叠内容),首次展开触发拉取;60s 与服务端缓存同步
-  const modelsQuery = useQuery({
-    queryKey: queryKeys.providerModels(profile.name),
-    queryFn: () => listProviderModels(token, profile.name),
-    staleTime: 60_000,
-    retry: 0,
-  });
-
-  if (modelsQuery.isLoading) {
-    return (
-      <div className="grid gap-1 px-2.5">
-        <Skeleton className="h-7" />
-        <Skeleton className="h-7" />
-      </div>
-    );
-  }
-
-  // 上游失败回落 presets 静态清单(docs/design.md 第 4 节)
-  const fetched = modelsQuery.data?.models;
-  const preset = PROVIDER_PRESETS.find((item) => item.id === profile.name || item.name === profile.name);
-  const base = fetched && fetched.length > 0 ? fetched : preset?.models || [];
-  const models = Array.from(new Set([profile.defaultModel, ...base, currentModel].filter(Boolean)));
+  // 只显示 profile 配置的模型清单;端点的 /models 代理仅在配置表单里
+  // 作为候选来源(用户反馈:选择器不做自动加载)
+  const models = Array.from(new Set([profile.defaultModel, ...profile.models, currentModel].filter(Boolean)));
 
   if (models.length === 0) {
     return <div className="px-2.5 py-1 text-xs text-muted-foreground">{t("picker.noModels")}</div>;

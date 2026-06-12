@@ -51,23 +51,23 @@
 
 :root {
     /* 冷中性(hue 250-255)+ 焦糖强调(docs/design.md v2 第 1 节) */
-    --background: oklch(0.985 0.003 250);
+    --background: oklch(0.995 0.002 250);
     --foreground: oklch(0.24 0.012 255);
-    --card: oklch(0.995 0.002 250);
+    --card: oklch(1 0 0);
     --card-foreground: oklch(0.24 0.012 255);
-    --popover: oklch(0.995 0.002 250);
+    --popover: oklch(1 0 0);
     --popover-foreground: oklch(0.24 0.012 255);
     --primary: oklch(0.66 0.13 65);
     --primary-foreground: oklch(0.99 0.01 85);
-    --secondary: oklch(0.952 0.006 250);
+    --secondary: oklch(0.965 0.004 250);
     --secondary-foreground: oklch(0.28 0.012 255);
-    --muted: oklch(0.952 0.006 250);
+    --muted: oklch(0.965 0.004 250);
     --muted-foreground: oklch(0.50 0.015 255);
-    --accent: oklch(0.94 0.008 250);
+    --accent: oklch(0.955 0.005 250);
     --accent-foreground: oklch(0.26 0.012 255);
     --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.91 0.008 250);
-    --input: oklch(0.91 0.008 250);
+    --border: oklch(0.922 0.005 250);
+    --input: oklch(0.922 0.005 250);
     --ring: oklch(0.66 0.13 65);
     --chart-1: oklch(0.837 0.128 66.29);
     --chart-2: oklch(0.705 0.213 47.604);
@@ -75,13 +75,13 @@
     --chart-4: oklch(0.553 0.195 38.402);
     --chart-5: oklch(0.47 0.157 37.304);
     --radius: 0.625rem;
-    --sidebar: oklch(0.955 0.005 250);
+    --sidebar: oklch(0.985 0.002 250);
     --sidebar-foreground: oklch(0.24 0.012 255);
     --sidebar-primary: oklch(0.66 0.13 65);
     --sidebar-primary-foreground: oklch(0.99 0.01 85);
-    --sidebar-accent: oklch(0.93 0.008 250);
+    --sidebar-accent: oklch(0.945 0.005 250);
     --sidebar-accent-foreground: oklch(0.26 0.012 255);
-    --sidebar-border: oklch(0.905 0.008 250);
+    --sidebar-border: oklch(0.922 0.005 250);
     --sidebar-ring: oklch(0.66 0.13 65);
     /* macOS 红绿灯 inset:浏览器 0;壳模式由 data-shell 切换(design.md 2.3)。
        -x 作用于展开 rail 顶行(左移空间),-y 作用于收起窄条顶部 */
