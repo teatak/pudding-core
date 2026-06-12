@@ -21,8 +21,14 @@ import (
 )
 
 func main() {
-	// AutoPort:默认端口被 CLI 版 daemon 等占用时回落随机端口,壳知道实际地址
-	d, err := daemon.Start(daemon.Options{AutoPort: true, DefaultModel: "mock-model"})
+	// 壳用独立固定端口(与 CLI daemon 的默认 9670 分开):loopback 页面的
+	// localStorage 按 origin(含端口)隔离,端口漂移会让 UI 偏好整体"丢失"。
+	// AutoPort 仅在 9671 也被占时兜底(此时偏好会暂存到新 origin,可接受)。
+	d, err := daemon.Start(daemon.Options{
+		Addr:         "127.0.0.1:9671",
+		AutoPort:     true,
+		DefaultModel: "mock-model",
+	})
 	if err != nil {
 		slog.Error("pudding-desktop: start daemon", "err", err)
 		os.Exit(1)
@@ -51,6 +57,11 @@ func main() {
 		Height:    800,
 		MinWidth:  760,
 		MinHeight: 520,
+		// 不透明深色窗口底:WKWebView 在窗口失焦/遮挡时合成路径降级,
+		// 默认透明底会把桌面透出来(失焦时内容区出现暗色伪影)。
+		// 取值贴近暗色主题 --background(#212121);浅色主题下 webview
+		// 不透明绘制时底色不可见,无影响。
+		BackgroundColour: application.NewRGB(33, 33, 33),
 	}
 	if runtime.GOOS == "darwin" {
 		windowOpts.URL += "&shell=mac"
@@ -98,6 +109,15 @@ func main() {
 		}
 		window.Hide()
 	})
+
+	// 关窗隐藏后点 Dock 图标要能唤回(wails 内建 reopen-show 在该 alpha
+	// 下不可靠,自己兜底);tray 菜单仍是另一入口
+	if runtime.GOOS == "darwin" {
+		app.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) {
+			window.Show()
+			window.Focus()
+		})
+	}
 
 	tray := app.SystemTray.New()
 	tray.SetLabel("Pudding")
