@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/teatak/cart/v3"
+	"github.com/teatak/pudding-core/internal/provider/anthropic"
 	"github.com/teatak/pudding-core/internal/provider/google"
 	"github.com/teatak/pudding-core/internal/provider/openai"
 	"github.com/teatak/pudding-core/internal/provider/registry"
@@ -213,6 +214,8 @@ func (s *Server) listProviderModels(c *cart.Context) error {
 		models, err = openai.ListModels(ctx, openai.Config{BaseURL: p.BaseURL, APIKey: p.APIKey})
 	case registry.TypeGoogle:
 		models, err = google.ListModels(ctx, google.Config{BaseURL: p.BaseURL, APIKey: p.APIKey})
+	case registry.TypeAnthropic:
+		models, err = anthropic.ListModels(ctx, anthropic.Config{BaseURL: p.BaseURL, APIKey: p.APIKey})
 	default:
 		return badRequest(c, "unsupported type: "+p.Type)
 	}

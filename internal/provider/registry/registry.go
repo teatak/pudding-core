@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/teatak/pudding-core/internal/provider"
+	"github.com/teatak/pudding-core/internal/provider/anthropic"
 	"github.com/teatak/pudding-core/internal/provider/google"
 	"github.com/teatak/pudding-core/internal/provider/openai"
 	"github.com/teatak/pudding-core/internal/store"
@@ -18,12 +19,13 @@ import (
 const (
 	TypeOpenAICompatible = "openai-compatible"
 	TypeGoogle           = "google"
+	TypeAnthropic        = "anthropic"
 )
 
 // SupportedType 报告 profile type 是否有对应的 Client 实现,API 校验用。
 func SupportedType(t string) bool {
 	switch t {
-	case TypeOpenAICompatible, TypeGoogle:
+	case TypeOpenAICompatible, TypeGoogle, TypeAnthropic:
 		return true
 	}
 	return false
@@ -80,6 +82,11 @@ func build(p *store.ProviderProfile) (provider.Client, error) {
 			return nil, fmt.Errorf("provider profile %q: api_key is required", p.Name)
 		}
 		return google.New(google.Config{BaseURL: p.BaseURL, APIKey: p.APIKey}), nil
+	case TypeAnthropic:
+		if p.APIKey == "" {
+			return nil, fmt.Errorf("provider profile %q: api_key is required", p.Name)
+		}
+		return anthropic.New(anthropic.Config{BaseURL: p.BaseURL, APIKey: p.APIKey}), nil
 	default:
 		return nil, fmt.Errorf("provider profile %q: unsupported type %q", p.Name, p.Type)
 	}

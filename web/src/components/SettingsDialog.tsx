@@ -331,6 +331,7 @@ function ProviderSettings({ token }: { token: string }) {
             <SelectContent>
               <SelectItem value="openai-compatible">openai-compatible</SelectItem>
               <SelectItem value="google">google</SelectItem>
+              <SelectItem value="anthropic">anthropic</SelectItem>
             </SelectContent>
           </Select>
         </div>

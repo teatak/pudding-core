@@ -16,7 +16,7 @@ export type Session = z.infer<typeof session>;
 // provider profile 的脱敏视图:api_key 只进不出,读端点只回 apiKeySet
 export const providerProfile = z.object({
   name: z.string(),
-  type: z.enum(["openai-compatible", "google"]),
+  type: z.enum(["openai-compatible", "google", "anthropic"]),
   baseURL: z.string(),
   apiKeySet: z.boolean(),
   // 默认模型是 profile 属性:模型名只在所属 profile 下有意义,无全局默认模型
@@ -31,7 +31,7 @@ export type ProviderProfile = z.infer<typeof providerProfile>;
 
 export const createProviderRequest = z.object({
   name: z.string().min(1),
-  type: z.enum(["openai-compatible", "google"]),
+  type: z.enum(["openai-compatible", "google", "anthropic"]),
   baseURL: z.string().optional(),
   apiKey: z.string().optional(),
   defaultModel: z.string().optional(),
@@ -41,7 +41,7 @@ export const createProviderRequest = z.object({
 
 // apiKey 传非空才覆盖;清除走 DELETE 后重建
 export const patchProviderRequest = z.object({
-  type: z.enum(["openai-compatible", "google"]).optional(),
+  type: z.enum(["openai-compatible", "google", "anthropic"]).optional(),
   baseURL: z.string().optional(),
   apiKey: z.string().optional(),
   defaultModel: z.string().optional(),

@@ -3,6 +3,7 @@ export type ProviderPresetId =
   | "qwen"
   | "mimo"
   | "openai"
+  | "anthropic"
   | "moonshot"
   | "zhipu"
   | "openrouter"
@@ -11,7 +12,7 @@ export type ProviderPresetId =
 export type ProviderPreset = {
   id: ProviderPresetId;
   name: string;
-  type: "openai-compatible" | "google";
+  type: "openai-compatible" | "google" | "anthropic";
   baseURL: string;
   defaultModel: string;
   models: string[];
@@ -55,6 +56,15 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     defaultModel: "gpt-5.5",
     models: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
     apiKeyURL: "https://platform.openai.com/api-keys",
+  },
+  {
+    id: "anthropic",
+    name: "Anthropic",
+    type: "anthropic",
+    baseURL: "https://api.anthropic.com",
+    defaultModel: "claude-opus-4-8",
+    models: ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"],
+    apiKeyURL: "https://platform.claude.com/settings/keys",
   },
   {
     id: "moonshot",
@@ -107,6 +117,7 @@ const ZH_ORDER: ProviderPresetId[] = [
   "qwen",
   "mimo",
   "openai",
+  "anthropic",
   "moonshot",
   "zhipu",
   "openrouter",
@@ -115,6 +126,7 @@ const ZH_ORDER: ProviderPresetId[] = [
 
 const DEFAULT_ORDER: ProviderPresetId[] = [
   "openai",
+  "anthropic",
   "deepseek",
   "qwen",
   "mimo",
