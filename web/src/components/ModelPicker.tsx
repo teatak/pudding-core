@@ -78,7 +78,12 @@ export function ModelPicker({ token, session }: { token: string; session: Sessio
       <PopoverContent align="start" className="w-80 p-2" side="top" sideOffset={8}>
         <Accordion collapsible type="single" value={expanded} onValueChange={setExpanded}>
           {profiles.map((profile) => (
-            <AccordionItem key={profile.name} className="border-b-0" value={profile.name}>
+            <AccordionItem
+              key={profile.name}
+              // ui 组件的分割线带 not-last: 变体,关掉要用同变体才能命中
+              className="not-last:border-b-0"
+              value={profile.name}
+            >
               <AccordionTrigger className="rounded-md px-2.5 py-2 text-sm hover:bg-accent hover:no-underline">
                 <span className="flex min-w-0 items-center gap-2">
                   <BrandIcon className="size-4 shrink-0" name={profile.name} />
