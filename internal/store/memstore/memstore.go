@@ -366,6 +366,7 @@ func (m *Memstore) PutProviderProfile(_ context.Context, p *store.ProviderProfil
 	}
 	p.UpdatedAt = now
 	cp := *p
+	cp.Models = append([]string(nil), p.Models...)
 	m.profiles[p.Name] = &cp
 	return nil
 }

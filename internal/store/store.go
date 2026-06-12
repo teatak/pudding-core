@@ -50,7 +50,10 @@ type ProviderProfile struct {
 	APIKey  string `json:"-"`
 	// DefaultModel:session.model 为空时的回落。模型名只在所属 profile 下
 	// 有意义,因此默认模型是 profile 属性,不存在全局默认模型。
-	DefaultModel string    `json:"defaultModel"`
+	DefaultModel string `json:"defaultModel"`
+	// Models:配置的可选模型清单。选择器只显示这里的内容;
+	// 端点的 /models 代理仅在配置表单里作为候选来源。
+	Models []string `json:"models"`
 	Extra        string    `json:"extra,omitempty"` // type 特有参数,JSON
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`

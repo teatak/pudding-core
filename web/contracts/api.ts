@@ -21,6 +21,8 @@ export const providerProfile = z.object({
   apiKeySet: z.boolean(),
   // 默认模型是 profile 属性:模型名只在所属 profile 下有意义,无全局默认模型
   defaultModel: z.string(),
+  // 配置的可选模型清单;选择器只显示这里的内容
+  models: z.array(z.string()),
   extra: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -33,6 +35,7 @@ export const createProviderRequest = z.object({
   baseURL: z.string().optional(),
   apiKey: z.string().optional(),
   defaultModel: z.string().optional(),
+  models: z.array(z.string()).optional(),
   extra: z.string().optional(),
 });
 
@@ -42,6 +45,7 @@ export const patchProviderRequest = z.object({
   baseURL: z.string().optional(),
   apiKey: z.string().optional(),
   defaultModel: z.string().optional(),
+  models: z.array(z.string()).optional(),
   extra: z.string().optional(),
 });
 

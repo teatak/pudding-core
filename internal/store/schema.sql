@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS provider_profiles (
     base_url      TEXT    NOT NULL DEFAULT '',
     api_key       TEXT    NOT NULL DEFAULT '', -- 明文,安全性同第 9 节;API 层只进不出
     default_model TEXT    NOT NULL DEFAULT '', -- session.model 为空时用;模型名只在本 profile 下有意义
+    models        TEXT    NOT NULL DEFAULT '[]', -- 配置的可选模型清单(JSON 数组);picker 只显示这里的内容
     extra         TEXT    NOT NULL DEFAULT '{}',
     created_at    INTEGER NOT NULL,
     updated_at    INTEGER NOT NULL

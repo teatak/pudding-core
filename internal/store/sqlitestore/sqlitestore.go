@@ -502,7 +502,7 @@ func (s *Store) ListProviderProfiles(ctx context.Context) ([]*store.ProviderProf
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT name,type,base_url,api_key,default_model,extra,created_at,updated_at FROM provider_profiles ORDER BY name`)
+		`SELECT name,type,base_url,api_key,default_model,models,extra,created_at,updated_at FROM provider_profiles ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -522,7 +522,7 @@ func (s *Store) GetProviderProfile(ctx context.Context, name string) (*store.Pro
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, err := scanProfile(s.db.QueryRowContext(ctx,
-		`SELECT name,type,base_url,api_key,default_model,extra,created_at,updated_at FROM provider_profiles WHERE name=?`, name))
+		`SELECT name,type,base_url,api_key,default_model,models,extra,created_at,updated_at FROM provider_profiles WHERE name=?`, name))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -536,13 +536,21 @@ func (s *Store) PutProviderProfile(ctx context.Context, p *store.ProviderProfile
 		if p.CreatedAt.IsZero() {
 			p.CreatedAt = now
 		}
-		_, err := tx.ExecContext(ctx,
-			`INSERT INTO provider_profiles(name,type,base_url,api_key,default_model,extra,created_at,updated_at)
-			VALUES(?,?,?,?,?,?,?,?)
+		modelsJSON, err := json.Marshal(p.Models)
+		if err != nil {
+			return err
+		}
+		if p.Models == nil {
+			modelsJSON = []byte("[]")
+		}
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO provider_profiles(name,type,base_url,api_key,default_model,models,extra,created_at,updated_at)
+			VALUES(?,?,?,?,?,?,?,?,?)
 			ON CONFLICT(name) DO UPDATE SET
 				type=excluded.type, base_url=excluded.base_url, api_key=excluded.api_key,
-				default_model=excluded.default_model, extra=excluded.extra, updated_at=excluded.updated_at`,
-			p.Name, p.Type, p.BaseURL, p.APIKey, p.DefaultModel, p.Extra, unixMS(p.CreatedAt), unixMS(now),
+				default_model=excluded.default_model, models=excluded.models,
+				extra=excluded.extra, updated_at=excluded.updated_at`,
+			p.Name, p.Type, p.BaseURL, p.APIKey, p.DefaultModel, string(modelsJSON), p.Extra, unixMS(p.CreatedAt), unixMS(now),
 		)
 		return err
 	})
@@ -567,9 +575,13 @@ func (s *Store) DeleteProviderProfile(ctx context.Context, name string) error {
 
 func scanProfile(row messageScanner) (*store.ProviderProfile, error) {
 	var p store.ProviderProfile
+	var modelsJSON string
 	var created, updated int64
-	if err := row.Scan(&p.Name, &p.Type, &p.BaseURL, &p.APIKey, &p.DefaultModel, &p.Extra, &created, &updated); err != nil {
+	if err := row.Scan(&p.Name, &p.Type, &p.BaseURL, &p.APIKey, &p.DefaultModel, &modelsJSON, &p.Extra, &created, &updated); err != nil {
 		return nil, err
+	}
+	if err := json.Unmarshal([]byte(modelsJSON), &p.Models); err != nil {
+		return nil, fmt.Errorf("sqlite: parse profile models: %w", err)
 	}
 	p.CreatedAt, p.UpdatedAt = timeFromMS(created), timeFromMS(updated)
 	return &p, nil

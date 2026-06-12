@@ -20,8 +20,9 @@ type providerProfileView struct {
 	Name         string `json:"name"`
 	Type         string `json:"type"`
 	BaseURL      string `json:"baseURL"`
-	APIKeySet    bool   `json:"apiKeySet"`
-	DefaultModel string `json:"defaultModel"`
+	APIKeySet    bool     `json:"apiKeySet"`
+	DefaultModel string   `json:"defaultModel"`
+	Models       []string `json:"models"`
 	Extra        string `json:"extra,omitempty"`
 	CreatedAt    string `json:"createdAt"`
 	UpdatedAt    string `json:"updatedAt"`
@@ -34,6 +35,7 @@ func viewProfile(p *store.ProviderProfile) providerProfileView {
 		BaseURL:      p.BaseURL,
 		APIKeySet:    p.APIKey != "",
 		DefaultModel: p.DefaultModel,
+		Models:       append([]string{}, p.Models...),
 		Extra:        p.Extra,
 		CreatedAt:    p.CreatedAt.Format(timeRFC3339),
 		UpdatedAt:    p.UpdatedAt.Format(timeRFC3339),
@@ -46,18 +48,20 @@ type createProfileReq struct {
 	Name         string `json:"name"`
 	Type         string `json:"type"`
 	BaseURL      string `json:"baseURL"`
-	APIKey       string `json:"apiKey"`
-	DefaultModel string `json:"defaultModel"`
-	Extra        string `json:"extra"`
+	APIKey       string   `json:"apiKey"`
+	DefaultModel string   `json:"defaultModel"`
+	Models       []string `json:"models"`
+	Extra        string   `json:"extra"`
 }
 
 type patchProfileReq struct {
 	Type    *string `json:"type"`
 	BaseURL *string `json:"baseURL"`
 	// APIKey 传非空才覆盖;清除 key 走 DELETE 后重建。
-	APIKey       *string `json:"apiKey"`
-	DefaultModel *string `json:"defaultModel"`
-	Extra        *string `json:"extra"`
+	APIKey       *string   `json:"apiKey"`
+	DefaultModel *string   `json:"defaultModel"`
+	Models       *[]string `json:"models"`
+	Extra        *string   `json:"extra"`
 }
 
 func (s *Server) listProviders(c *cart.Context) error {
@@ -96,6 +100,7 @@ func (s *Server) createProvider(c *cart.Context) error {
 		BaseURL:      strings.TrimRight(req.BaseURL, "/"),
 		APIKey:       req.APIKey,
 		DefaultModel: req.DefaultModel,
+		Models:       req.Models,
 		Extra:        defaultExtra(req.Extra),
 	}
 	if err := s.store.PutProviderProfile(ctx, p); err != nil {
@@ -140,6 +145,9 @@ func (s *Server) patchProvider(c *cart.Context) error {
 	}
 	if req.DefaultModel != nil {
 		p.DefaultModel = *req.DefaultModel
+	}
+	if req.Models != nil {
+		p.Models = *req.Models
 	}
 	if req.Extra != nil {
 		p.Extra = defaultExtra(*req.Extra)

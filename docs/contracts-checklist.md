@@ -27,7 +27,7 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 | --- | --- | --- | --- |
 | Session | `store.Session` | `session` | id, title, provider, model, createdAt, updatedAt, running(读取时派生) |
 | Message | `store.Message` | `message` | id, sessionID, turnID, role, text, clientMessageID?, interrupted?, createdAt |
-| ProviderProfile(脱敏视图) | `api.providerProfileView` | `providerProfile` | name, type, baseURL, apiKeySet, defaultModel, extra?, createdAt, updatedAt |
+| ProviderProfile(脱敏视图) | `api.providerProfileView` | `providerProfile` | name, type, baseURL, apiKeySet, defaultModel, models, extra?, createdAt, updatedAt |
 
 时间一律 RFC3339 字符串(Go `time.Time` 默认 JSON 编码)。
 
@@ -51,7 +51,7 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 | `GET /providers/{name}` | — | profile(脱敏) | 404 |
 | `PATCH /providers/{name}` | `{type?, baseURL?, apiKey?, defaultModel?, extra?}`,apiKey 非空才覆盖 | 200 profile | 400 / 404 |
 | `DELETE /providers/{name}` | — | 204 | 404 |
-| `GET /providers/{name}/models` | — | `{models: []}`(代理真实端点,60s 缓存) | 404 / 502(前端回落 presets) |
+| `GET /providers/{name}/models` | — | `{models: []}`(代理真实端点,60s 缓存)。**仅配置表单的候选来源**,选择器只显示 profile.models | 404 / 502 |
 
 鉴权:`Authorization: Bearer <token>` 或 `?token=`(EventSource 用),401 统一 `{"error":"unauthorized"}`。
 
