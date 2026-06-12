@@ -119,37 +119,41 @@ html[data-shell] .drag-region :where(button, a, input, textarea, select, [role="
 .dark {
     /* 纯中性灰(chroma 0,不偏冷不偏暖)。chat 区最暗,
        sidebar / card / popover 作为提亮的卡片层;border 用白色
-       alpha,跨不同亮度表面保持一致观感 */
-    --background: oklch(0.25 0 0);
-    --foreground: oklch(0.93 0 0);
-    --card: oklch(0.30 0 0);
-    --card-foreground: oklch(0.93 0 0);
-    --popover: oklch(0.32 0 0);
-    --popover-foreground: oklch(0.93 0 0);
+       alpha,跨不同亮度表面保持一致观感。
+       表面色用 sRGB hex 而非 oklch(等值换算):WKWebView 对大面积
+       oklch 纯色走宽色域(P3)layer 合成,与 sRGB layer 混合时出现
+       可见色差/暗斑伪影(失焦时尤其明显);hex 统一走 sRGB 路径。
+       品牌色(primary 等小面积)保留 oklch。 */
+    --background: #212121;
+    --foreground: #e8e8e8;
+    --card: #2e2e2e;
+    --card-foreground: #e8e8e8;
+    --popover: #333333;
+    --popover-foreground: #e8e8e8;
     --primary: oklch(0.585 0.233 277);
     --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.345 0 0);
-    --secondary-foreground: oklch(0.93 0 0);
-    --muted: oklch(0.325 0 0);
-    --muted-foreground: oklch(0.72 0 0);
-    --accent: oklch(0.365 0 0);
-    --accent-foreground: oklch(0.95 0 0);
+    --secondary: #393939;
+    --secondary-foreground: #e8e8e8;
+    --muted: #343434;
+    --muted-foreground: #a4a4a4;
+    --accent: #3e3e3e;
+    --accent-foreground: #eeeeee;
     --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 12%);
-    --input: oklch(1 0 0 / 16%);
+    --border: rgb(255 255 255 / 12%);
+    --input: rgb(255 255 255 / 16%);
     --ring: oklch(0.585 0.233 277);
     --chart-1: oklch(0.837 0.128 66.29);
     --chart-2: oklch(0.705 0.213 47.604);
     --chart-3: oklch(0.646 0.222 41.116);
     --chart-4: oklch(0.553 0.195 38.402);
     --chart-5: oklch(0.47 0.157 37.304);
-    --sidebar: oklch(0.30 0 0);
-    --sidebar-foreground: oklch(0.93 0 0);
+    --sidebar: #2e2e2e;
+    --sidebar-foreground: #e8e8e8;
     --sidebar-primary: oklch(0.585 0.233 277);
     --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.36 0 0);
-    --sidebar-accent-foreground: oklch(0.95 0 0);
-    --sidebar-border: oklch(1 0 0 / 12%);
+    --sidebar-accent: #3d3d3d;
+    --sidebar-accent-foreground: #eeeeee;
+    --sidebar-border: rgb(255 255 255 / 12%);
     --sidebar-ring: oklch(0.585 0.233 277);
     --success: oklch(0.7 0.11 175);
 }
@@ -162,7 +166,9 @@ html[data-shell] .drag-region :where(button, a, input, textarea, select, [role="
     @apply bg-background text-foreground text-sm leading-relaxed;
     }
   html {
-    @apply font-sans;
+    /* html 也涂背景:WKWebView 的 overscroll 回弹区 / 未绘制区域
+       露出的是 html 层,不涂会透出 webview 底色(壳模式下尤其可见) */
+    @apply bg-background font-sans;
     }
 }
 
