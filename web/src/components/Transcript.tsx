@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowDown, Check, CircleAlert, Copy } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
 
 import { listMessages, type Message } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
@@ -125,7 +124,9 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
     // overflow-hidden:WKWebView 下文字字形渲染会溢出滚动 viewport 边界,
     // 在 composer 上沿漏出白色文字边缘,这里裁掉(浏览器无此问题但无害)
     <div ref={scrollAreaRef} className="relative min-h-0 flex-1 overflow-hidden">
-      <ScrollArea className="h-full">
+      {/* type=scroll:滚动条只在滚动时浮现;默认 hover 模式会在指针进入
+          滚动区(即 hover 任意消息)时显示,观感突兀 */}
+      <ScrollArea className="h-full" type="scroll">
         <div className="mx-auto grid w-full max-w-3xl gap-4 px-5 py-5">
           {messagesQuery.isLoading ? <TranscriptSkeleton /> : null}
           {messagesQuery.isError ? (
@@ -216,7 +217,7 @@ function UserMessageBlock({
         {text}
         {interrupted ? <InterruptedBadge /> : null}
       </div>
-      {createdAt ? <MessageMeta className="pl-3.5" createdAt={createdAt} text={text} /> : null}
+      {createdAt ? <MessageMeta createdAt={createdAt} text={text} /> : null}
     </div>
   );
 }
@@ -265,7 +266,7 @@ function MarkdownBody({ text }: { text: string }) {
 
 function MessageMeta({ createdAt, text, className }: { createdAt: string; text: string; className?: string }) {
   const { t } = useI18n();
-  // 复制成功的双反馈(旧项目交互):按钮就地变绿色对勾 ~1.5s + toast 回执
+  // 复制成功反馈(旧项目交互):按钮就地变绿色对勾 ~1.5s,不弹 toast
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<number | null>(null);
   useEffect(() => {
@@ -290,7 +291,6 @@ function MessageMeta({ createdAt, text, className }: { createdAt: string; text: 
         variant="ghost"
         onClick={() => {
           void navigator.clipboard.writeText(text).then(() => {
-            toast(t("common.copied"));
             setCopied(true);
             if (resetTimer.current) {
               window.clearTimeout(resetTimer.current);

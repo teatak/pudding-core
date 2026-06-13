@@ -48,7 +48,8 @@ export function useResizableWidth(opts: {
   return { width, startDrag };
 }
 
-// 拖柄:贴栏边缘的 4px 命中带,hover/拖动时显示主题色细线
+// 拖柄:贴栏边缘的 8px 透明命中带,中间渲染小胶囊抓手
+// (shadcn resizable 的 withHandle 形态),hover/拖动只加深抓手,无大色块
 export function ResizeHandle({
   className,
   onPointerDown,
@@ -60,10 +61,12 @@ export function ResizeHandle({
     <div
       aria-hidden="true"
       className={cn(
-        "absolute top-0 z-20 h-full w-1 cursor-col-resize transition-colors hover:bg-primary/40 active:bg-primary/60",
+        "group/handle absolute top-0 z-20 flex h-full w-2 cursor-col-resize items-center justify-center",
         className,
       )}
       onPointerDown={onPointerDown}
-    />
+    >
+      <div className="h-8 w-1 rounded-full bg-border transition-colors group-hover/handle:bg-muted-foreground/40 group-active/handle:bg-muted-foreground/60" />
+    </div>
   );
 }

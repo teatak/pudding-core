@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { CircleAlert, Loader2, MessageSquareText, PanelLeft, Plus, SquareSplitVertical, Trash2 } from "lucide-react";
+import { CircleAlert, Loader2, MessageSquareText, PanelLeft, Pencil, Plus, SquareSplitVertical, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 
-import { createSession, deleteSession, listSessions } from "@/api/client";
+import { createSession, deleteSession, listSessions, updateSession } from "@/api/client";
 import type { Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { LanguageToggle } from "@/components/LanguageToggle";
@@ -23,6 +23,15 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ResizeHandle, useResizableWidth } from "@/components/ResizeHandle";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -66,6 +75,11 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
       await navigate({ to: "/", search: (prev) => ({ ...(prev as AppSearch), session: session.id }) });
     },
+  });
+
+  const renameMutation = useMutation({
+    mutationFn: ({ id, title }: { id: string; title: string }) => updateSession(token, id, { title }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
   });
 
   const deleteMutation = useMutation({
@@ -121,6 +135,7 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
       token={token}
       onCreate={() => createMutation.mutate()}
       onDelete={(id) => deleteMutation.mutate(id)}
+      onRename={(id, title) => renameMutation.mutate({ id, title })}
       onOpenSplit={(id) => {
         hover.close();
         // 当前主 pane 的会话不重复开分屏
@@ -222,7 +237,7 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
       className="relative flex h-full shrink-0 flex-col gap-2 bg-sidebar px-2 pb-2 text-sidebar-foreground"
       style={{ width: railWidth }}
     >
-      <ResizeHandle className="-right-0.5" onPointerDown={startRailDrag} />
+      <ResizeHandle className="-right-1" onPointerDown={startRailDrag} />
       {/* 顶行是 --toolbar-h 工具条(壳 54px,与 InvisibleTitleBarHeight 同值):
           壳模式下整行可拖拽,按钮垂直居中对齐红绿灯 */}
       <div
@@ -313,6 +328,7 @@ type RailPanelProps = {
   onSelect: (id: string) => void;
   onOpenSplit: (id: string) => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, title: string) => void;
   onRefetch: () => void;
 };
 
@@ -330,6 +346,7 @@ function RailPanel({
   onSelect,
   onOpenSplit,
   onDelete,
+  onRename,
   onRefetch,
 }: RailPanelProps) {
   const { t } = useI18n();
@@ -355,6 +372,7 @@ function RailPanel({
           onDelete={onDelete}
           onOpenSplit={onOpenSplit}
           onRefetch={onRefetch}
+          onRename={onRename}
           onSelect={onSelect}
         />
       </ScrollArea>
@@ -377,6 +395,7 @@ type SessionItemsProps = {
   onSelect: (id: string) => void;
   onOpenSplit: (id: string) => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, title: string) => void;
   onRefetch: () => void;
 };
 
@@ -389,6 +408,7 @@ function SessionItems({
   onSelect,
   onOpenSplit,
   onDelete,
+  onRename,
   onRefetch,
 }: SessionItemsProps) {
   const { t } = useI18n();
@@ -437,6 +457,7 @@ function SessionItems({
           session={session}
           onDelete={() => onDelete(session.id)}
           onOpenSplit={() => onOpenSplit(session.id)}
+          onRename={(title) => onRename(session.id, title)}
           onSelect={() => onSelect(session.id)}
         />
       ))}
@@ -452,9 +473,10 @@ type SessionItemProps = {
   onSelect: () => void;
   onOpenSplit: () => void;
   onDelete: () => void;
+  onRename: (title: string) => void;
 };
 
-function SessionItem({ session, selected, running, deletePending, onSelect, onOpenSplit, onDelete }: SessionItemProps) {
+function SessionItem({ session, selected, running, deletePending, onSelect, onOpenSplit, onDelete, onRename }: SessionItemProps) {
   const { t, locale } = useI18n();
   return (
     <div
@@ -481,6 +503,7 @@ function SessionItem({ session, selected, running, deletePending, onSelect, onOp
         >
           <SquareSplitVertical className="size-3.5" />
         </Button>
+        <RenameDialog currentTitle={session.title} onRename={onRename} />
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <Button
@@ -508,5 +531,61 @@ function SessionItem({ session, selected, running, deletePending, onSelect, onOp
         </AlertDialog>
       </div>
     </div>
+  );
+}
+
+// 手动命名:Pencil 弹小对话框改名。清空保存 = 恢复"未命名",
+// 下一条消息会重新触发自动标题(空标题 = 自动命名判据)。
+function RenameDialog({ currentTitle, onRename }: { currentTitle: string; onRename: (title: string) => void }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(currentTitle);
+
+  function submit() {
+    onRename(draft.trim());
+    setOpen(false);
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next) {
+          setDraft(currentTitle);
+        }
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button aria-label={t("session.rename")} className="size-6" size="icon" variant="ghost">
+          <Pencil className="size-3.5" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>{t("renameSession.title")}</DialogTitle>
+        </DialogHeader>
+        <Input
+          autoFocus
+          placeholder={t("session.untitled")}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              submit();
+            }
+          }}
+        />
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+            {t("common.cancel")}
+          </Button>
+          <Button type="button" onClick={submit}>
+            {t("common.save")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

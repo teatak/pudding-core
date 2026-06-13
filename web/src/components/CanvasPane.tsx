@@ -23,7 +23,7 @@ export function CanvasPane() {
       className="relative flex h-full shrink-0 flex-col border-l bg-sidebar text-sidebar-foreground"
       style={{ width }}
     >
-      <ResizeHandle className="-left-0.5" onPointerDown={startDrag} />
+      <ResizeHandle className="-left-1" onPointerDown={startDrag} />
       <div className="flex h-(--toolbar-h) shrink-0 items-center justify-between pr-2 pl-4">
         <div className="text-sm font-medium">{t("canvas.title")}</div>
         <Tooltip>
