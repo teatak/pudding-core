@@ -6,6 +6,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -83,7 +84,10 @@ type createSessionReq struct {
 
 func (s *Server) createSession(c *cart.Context) error {
 	var req createSessionReq
-	_ = decode(c, &req) // body 可为空
+	// body 可为空(EOF);非空但坏 JSON 必须拒绝,否则会静默建出空会话。
+	if err := decode(c, &req); err != nil && !errors.Is(err, io.EOF) {
+		return badRequest(c, "invalid json body")
+	}
 	sess := &store.Session{ID: store.NewID("sess"), Title: req.Title, Provider: req.Provider, Model: req.Model}
 	if err := s.store.CreateSession(c.Request.Context(), sess); err != nil {
 		return s.fail(c, err)
@@ -127,6 +131,12 @@ func (s *Server) patchSession(c *cart.Context) error {
 
 func (s *Server) deleteSession(c *cart.Context) error {
 	id, _ := c.Param("id")
+	// 先 cancel 进行中的 turn:否则 provider 流会继续跑到自然结束,
+	// 且收尾 FinishTurn 撞上已删除的 session。无进行中 turn 时 cancel 返回
+	// ErrNoRunningTurn,忽略即可。
+	if err := s.engine.Cancel(id); err != nil && !errors.Is(err, engine.ErrNoRunningTurn) {
+		return s.fail(c, err)
+	}
 	if err := s.store.DeleteSession(c.Request.Context(), id); err != nil {
 		return s.fail(c, err)
 	}

@@ -29,7 +29,12 @@ export function Composer({ token, session }: ComposerProps) {
   const { t } = useI18n();
   const addPendingUser = useOverlayStore((state) => state.addPendingUser);
   const removePendingUser = useOverlayStore((state) => state.removePendingUser);
-  const runningTurnID = useOverlayStore((state) => state.runningTurns[sessionID]);
+  // 停止态双源:overlay 的 runningTurns(本地实时)|| session 快照的 running
+  // (后端 turns 表派生)。中途刷新走 SSE tail 不回放 turn.started,若此时
+  // provider 暂无 delta,overlay 不知道有 turn 在跑——session.running 兜底,
+  // 保证停止按钮不丢(cancel 按 sessionID 取消,无需 turnID)。
+  const overlayRunning = useOverlayStore((state) => Boolean(state.runningTurns[sessionID]));
+  const running = overlayRunning || session.running;
   const [cancelLocked, setCancelLocked] = useState(false);
   // clientMessageID 按"草稿"生成而不是按请求生成:失败重试和快速双击
   // 复用同一个 ID,服务端幂等去重才生效;成功后才轮换到下一个草稿 ID。
@@ -111,7 +116,7 @@ export function Composer({ token, session }: ComposerProps) {
           />
           <div className="flex items-center justify-between gap-2 px-2 pb-2">
             <ModelPicker token={token} session={session} />
-            {runningTurnID ? (
+            {running ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button

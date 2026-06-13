@@ -118,6 +118,14 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 		}
 		return out, nil
 	}
+	// 先注册 cancel 再 publish started:否则收到 turn.started 立刻 cancel 的
+	// 客户端可能落在注册之前,错拿 no_running_turn。turn 生命周期长于 HTTP
+	// 请求,不继承请求 ctx;取消只走 Cancel()。
+	turnCtx, cancel := context.WithCancel(context.Background())
+	e.mu.Lock()
+	e.running[in.SessionID] = cancel
+	e.mu.Unlock()
+
 	e.hub.Publish(*res.StartedEvent)
 
 	// 空标题会话:首条消息触发自动标题(provisional + 异步 LLM),
@@ -125,12 +133,6 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	if sess.Title == "" {
 		e.autoTitle(in.SessionID, providerName, model, in.Text)
 	}
-
-	// turn 的生命周期长于 HTTP 请求,不继承请求 ctx;取消只走 Cancel()。
-	turnCtx, cancel := context.WithCancel(context.Background())
-	e.mu.Lock()
-	e.running[in.SessionID] = cancel
-	e.mu.Unlock()
 
 	e.wg.Add(1)
 	go e.runTurn(turnCtx, in.SessionID, res.Turn.ID, providerName, model)
@@ -202,6 +204,12 @@ func (e *Engine) runTurn(ctx context.Context, sessionID, turnID, providerName, m
 	}
 	res, err := e.store.FinishTurn(context.Background(), in)
 	if err != nil {
+		// session 在 turn 进行中被删除:turn 已随级联删除消失,收尾无处可写,
+		// 静默(删除路径已 cancel 本 turn,见 api deleteSession)。
+		if errors.Is(err, store.ErrNotFound) {
+			slog.Debug("engine: finish turn skipped, session/turn gone", "turnID", turnID)
+			return
+		}
 		slog.Error("engine: finish turn", "turnID", turnID, "err", err)
 		return
 	}

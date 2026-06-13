@@ -233,6 +233,78 @@ func TestCreateSessionCarriesProviderAndModel(t *testing.T) {
 	}
 }
 
+func TestCreateSessionBodyValidation(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	// 空 body 允许:建出匿名会话
+	resp, err := http.NewRequest(http.MethodPost, srv.URL+"/sessions", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Header.Set("Authorization", "Bearer "+testToken)
+	r, err := http.DefaultClient.Do(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if r.StatusCode != http.StatusCreated {
+		t.Fatalf("empty body must 201, got %d", r.StatusCode)
+	}
+
+	// 非空坏 JSON 必须 400,不能静默建空会话
+	bad, err := http.NewRequest(http.MethodPost, srv.URL+"/sessions", strings.NewReader(`{bad json`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad.Header.Set("Authorization", "Bearer "+testToken)
+	br, err := http.DefaultClient.Do(bad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	br.Body.Close()
+	if br.StatusCode != http.StatusBadRequest {
+		t.Fatalf("malformed json must 400, got %d", br.StatusCode)
+	}
+
+	// 库里只应有那 1 个空 body 会话,坏 JSON 没留垃圾
+	list := decodeJSON[map[string][]store.Session](t, req(t, http.MethodGet, srv.URL+"/sessions", nil))
+	if len(list["sessions"]) != 1 {
+		t.Fatalf("malformed body must not create a session, got %d", len(list["sessions"]))
+	}
+}
+
+func TestDeleteSessionCancelsRunningTurn(t *testing.T) {
+	// mock 慢流:submit 后 turn 持续 running,delete 必须 cancel 它而非
+	// 留 goroutine 跑到自然结束。
+	ms := memstore.New()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub,
+		registry.Static(mock.New(mock.WithScript([]string{"slow"}), mock.WithDelay(2*time.Second))), "m")
+	srv := httptest.NewServer(New(eng, ms, hub).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+
+	sess := decodeJSON[store.Session](t, req(t, http.MethodPost, srv.URL+"/sessions", map[string]string{"title": "d"}))
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/"+sess.ID+"/submit",
+		map[string]string{"clientMessageID": "c1", "text": "hi"})
+	resp.Body.Close()
+	time.Sleep(100 * time.Millisecond) // 让 turn 进入 running
+
+	resp = req(t, http.MethodDelete, srv.URL+"/sessions/"+sess.ID, nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete must 204, got %d", resp.StatusCode)
+	}
+
+	// engine.Wait 应很快返回(turn 已被 cancel),不会等满 2s 的 mock 延迟
+	waited := make(chan struct{})
+	go func() { eng.Wait(); close(waited) }()
+	select {
+	case <-waited:
+	case <-time.After(1 * time.Second):
+		t.Fatal("delete did not cancel the running turn; goroutine still streaming")
+	}
+}
+
 func TestSubmitStreamAndResume(t *testing.T) {
 	srv, _ := newTestServer(t)
 
