@@ -48,6 +48,14 @@ export const turnCancelledEvent = z.object({
   interrupted: z.boolean().optional(),
 });
 
+// session.titled 不落库、无 seq:自动标题写回(provisional / LLM 各一次),
+// 丢失由 sessions 轮询兜底
+export const sessionTitledEvent = z.object({
+  kind: z.literal("session.titled"),
+  sessionID: z.string(),
+  title: z.string(),
+});
+
 export const pingEvent = z.object({
   kind: z.literal("ping"),
   sessionID: z.string(),
@@ -59,6 +67,7 @@ export const sessionEvent = z.discriminatedUnion("kind", [
   turnCompletedEvent,
   turnFailedEvent,
   turnCancelledEvent,
+  sessionTitledEvent,
   pingEvent,
 ]);
 

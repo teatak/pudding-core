@@ -11,6 +11,10 @@ const (
 	TurnCompleted Kind = "turn.completed"
 	TurnFailed    Kind = "turn.failed"
 	TurnCancelled Kind = "turn.cancelled"
+	// SessionTitled:自动标题写回(provisional 与 LLM 正式标题各发一次),
+	// 前端据此刷新会话列表。不落库:标题事实源是 sessions 表,丢事件由
+	// sessions 轮询兜底。
+	SessionTitled Kind = "session.titled"
 	Ping          Kind = "ping"
 )
 
@@ -35,10 +39,11 @@ type Event struct {
 	AssistantMessageID string `json:"assistantMessageID,omitempty"`
 	Interrupted        bool   `json:"interrupted,omitempty"`
 	Error              string `json:"error,omitempty"`
+	Title              string `json:"title,omitempty"` // session.titled 专用
 }
 
 // Persistent 报告该事件是否属于落库的 lifecycle 事件;
-// turn.delta 与 ping 只走 SSE 不落 events 表。
+// turn.delta、session.titled 与 ping 只走 SSE 不落 events 表。
 func (e Event) Persistent() bool {
-	return e.Kind != TurnDelta && e.Kind != Ping
+	return e.Kind != TurnDelta && e.Kind != Ping && e.Kind != SessionTitled
 }

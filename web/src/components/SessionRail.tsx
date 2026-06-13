@@ -21,6 +21,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { ResizeHandle, useResizableWidth } from "@/components/ResizeHandle";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -43,6 +44,12 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
   const collapsed = useRailCollapsed();
   const forcedCollapsed = useRailForcedCollapsed();
   const hover = useHoverPopover();
+  const { width: railWidth, startDrag: startRailDrag } = useResizableWidth({
+    key: "pudding.railWidth",
+    fallback: 268,
+    min: 220,
+    max: 420,
+  });
 
   const sessionsQuery = useQuery({
     queryKey: queryKeys.sessions(),
@@ -97,6 +104,10 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
   function collapse(next: boolean) {
     setRailCollapsed(next);
     hover.close();
+    if (next) {
+      // 收起后鼠标恰好停在触发器原位:压制 hover 弹出,移开一次再恢复
+      hover.suppressUntilLeave();
+    }
   }
 
   const panel = (
@@ -207,7 +218,11 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
   }
 
   return (
-    <aside className="flex h-full w-[268px] shrink-0 flex-col gap-2 bg-sidebar px-2 pb-2 text-sidebar-foreground">
+    <aside
+      className="relative flex h-full shrink-0 flex-col gap-2 bg-sidebar px-2 pb-2 text-sidebar-foreground"
+      style={{ width: railWidth }}
+    >
+      <ResizeHandle className="-right-0.5" onPointerDown={startRailDrag} />
       {/* 顶行是 --toolbar-h 工具条(壳 54px,与 InvisibleTitleBarHeight 同值):
           壳模式下整行可拖拽,按钮垂直居中对齐红绿灯 */}
       <div
@@ -230,10 +245,13 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
 
 // hover 开合 + 点击钉住:面板内一旦发生点击(如打开主题/语言下拉),
 // 鼠标离开不再自动关闭,直到 popover 真正关闭。
+// suppress:收起边栏的动作刚结束时鼠标恰好停在触发器原位,此时不应
+// 立即 hover 弹出 — 压制到鼠标离开触发器一次后恢复。
 function useHoverPopover(closeDelay = 160) {
   const [open, setOpen] = useState(false);
   const closeTimer = useRef<number | null>(null);
   const pinnedRef = useRef(false);
+  const suppressRef = useRef(false);
 
   function cancelClose() {
     if (closeTimer.current) {
@@ -245,6 +263,9 @@ function useHoverPopover(closeDelay = 160) {
   return {
     open,
     openNow() {
+      if (suppressRef.current) {
+        return;
+      }
       cancelClose();
       setOpen(true);
     },
@@ -256,6 +277,7 @@ function useHoverPopover(closeDelay = 160) {
       setOpen((value) => !value);
     },
     scheduleClose() {
+      suppressRef.current = false; // 鼠标离开过一次,恢复 hover 弹出
       if (pinnedRef.current) {
         return;
       }
@@ -266,6 +288,9 @@ function useHoverPopover(closeDelay = 160) {
     pin() {
       pinnedRef.current = true;
       cancelClose();
+    },
+    suppressUntilLeave() {
+      suppressRef.current = true;
     },
     handleOpenChange(next: boolean) {
       setOpen(next);

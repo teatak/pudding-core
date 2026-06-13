@@ -13,9 +13,10 @@
 | `turn.completed` | ✓ | ✓ | `assistantMessageID` |
 | `turn.failed` | ✓ | ✓ | `error`;有半截输出时 `assistantMessageID` + `interrupted` |
 | `turn.cancelled` | ✓ | ✓ | 有半截输出时 `assistantMessageID` + `interrupted` |
+| `session.titled` | — | — | `title`;自动标题写回(provisional / LLM 各一次),不落库 |
 | `ping` | — | — | — |
 
-公共字段:`sessionID`(全部)、`turnID`(除 ping)。
+公共字段:`sessionID`(全部)、`turnID`(除 ping 与 session.titled)。
 
 SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON>`。
 续传:`Last-Event-ID` header 或 `?after=<seq>`,服务端从 events 表补发缺口。

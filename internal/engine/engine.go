@@ -120,6 +120,12 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	}
 	e.hub.Publish(*res.StartedEvent)
 
+	// 空标题会话:首条消息触发自动标题(provisional + 异步 LLM),
+	// 与 turn 生命周期解耦(titler.go)
+	if sess.Title == "" {
+		e.autoTitle(in.SessionID, providerName, model, in.Text)
+	}
+
 	// turn 的生命周期长于 HTTP 请求,不继承请求 ctx;取消只走 Cancel()。
 	turnCtx, cancel := context.WithCancel(context.Background())
 	e.mu.Lock()

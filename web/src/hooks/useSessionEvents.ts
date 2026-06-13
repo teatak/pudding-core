@@ -41,6 +41,10 @@ export function useSessionEvents(sessionID: string | undefined, token: string) {
       ) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.messages(sessionID) });
       }
+      if (parsed.data.kind === "session.titled") {
+        // 自动标题写回(provisional / LLM),刷新列表与 header
+        void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      }
     };
 
     source.addEventListener("turn.started", handleMessage);
@@ -48,6 +52,7 @@ export function useSessionEvents(sessionID: string | undefined, token: string) {
     source.addEventListener("turn.completed", handleMessage);
     source.addEventListener("turn.failed", handleMessage);
     source.addEventListener("turn.cancelled", handleMessage);
+    source.addEventListener("session.titled", handleMessage);
     source.addEventListener("ping", handleMessage);
 
     source.onerror = () => {

@@ -58,8 +58,8 @@ export const useOverlayStore = create<OverlayState>((set) => ({
     })),
   applyEvent: (event) =>
     set((state) => {
-      if (event.kind === "ping") {
-        return state;
+      if (event.kind === "ping" || event.kind === "session.titled") {
+        return state; // titled 只驱动 sessions refetch,不进 overlay
       }
       if (event.kind === "turn.started") {
         // 新 turn 开始时清掉该 session 已终结的 overlay:

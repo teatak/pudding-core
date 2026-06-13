@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, CircleAlert, Copy } from "lucide-react";
+import { ArrowDown, Check, CircleAlert, Copy } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -111,6 +111,16 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
     }
   }, [followingBottom, items, scrollToBottom]);
 
+  // 空消息态独立渲染:不进 ScrollArea(min-h 撑高会出滚动条),flex 居中填满
+  if (!messagesQuery.isLoading && !messagesQuery.isError && items.length === 0) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
+        <Mascot className="w-16" />
+        <div>{t("session.start")}</div>
+      </div>
+    );
+  }
+
   return (
     // overflow-hidden:WKWebView 下文字字形渲染会溢出滚动 viewport 边界,
     // 在 composer 上沿漏出白色文字边缘,这里裁掉(浏览器无此问题但无害)
@@ -123,12 +133,6 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
               <CircleAlert className="h-3.5 w-3.5" />
               <AlertDescription>{t("transcript.loadFailed")}</AlertDescription>
             </Alert>
-          ) : null}
-          {!messagesQuery.isLoading && !messagesQuery.isError && items.length === 0 ? (
-            <div className="flex min-h-80 flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
-              <Mascot className="w-16" />
-              <div>{t("session.start")}</div>
-            </div>
           ) : null}
           {items.map((item) => {
             if (item.kind === "message") {
@@ -261,6 +265,16 @@ function MarkdownBody({ text }: { text: string }) {
 
 function MessageMeta({ createdAt, text, className }: { createdAt: string; text: string; className?: string }) {
   const { t } = useI18n();
+  // 复制成功的双反馈(旧项目交互):按钮就地变绿色对勾 ~1.5s + toast 回执
+  const [copied, setCopied] = useState(false);
+  const resetTimer = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (resetTimer.current) {
+        window.clearTimeout(resetTimer.current);
+      }
+    };
+  }, []);
   return (
     <div
       className={cn(
@@ -275,10 +289,17 @@ function MessageMeta({ createdAt, text, className }: { createdAt: string; text: 
         type="button"
         variant="ghost"
         onClick={() => {
-          void navigator.clipboard.writeText(text).then(() => toast(t("common.copied")));
+          void navigator.clipboard.writeText(text).then(() => {
+            toast(t("common.copied"));
+            setCopied(true);
+            if (resetTimer.current) {
+              window.clearTimeout(resetTimer.current);
+            }
+            resetTimer.current = window.setTimeout(() => setCopied(false), 1500);
+          });
         }}
       >
-        <Copy />
+        {copied ? <Check className="text-success" /> : <Copy />}
       </Button>
     </div>
   );
