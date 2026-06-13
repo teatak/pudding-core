@@ -55,7 +55,7 @@
        表面色用 sRGB hex(oklch 等值换算,微冷调保留在 RGB 里):
        规避 WKWebView 对大面积 oklch 纯色的宽色域合成伪影(见 .dark 注),
        品牌色保留 oklch */
-    --background: #f9fafb;
+    --background: #fbfcfd;
     --foreground: #1b2025;
     --card: #ffffff;
     --card-foreground: #1b2025;
@@ -72,7 +72,7 @@
     --destructive: oklch(0.577 0.245 27.325);
     --border: #e3e5e8;
     --input: #e3e5e8;
-    --ring: oklch(0.511 0.262 277);
+    --ring: #a1a1a1;
     --chart-1: oklch(0.837 0.128 66.29);
     --chart-2: oklch(0.705 0.213 47.604);
     --chart-3: oklch(0.646 0.222 41.116);
@@ -86,7 +86,7 @@
     --sidebar-accent: #eaedf0;
     --sidebar-accent-foreground: #20242a;
     --sidebar-border: #e3e5e8;
-    --sidebar-ring: oklch(0.511 0.262 277);
+    --sidebar-ring: #a1a1a1;
     /* macOS 红绿灯横向让位:浏览器 0;壳模式由 data-shell 切换,
        全屏时红绿灯隐藏、让位归零(design.md 2.3)。
        72px / 54px 来自旧项目实测的 NSToolbar inset rule 常量
@@ -144,7 +144,7 @@ html[data-shell] .drag-region :where(button, a, input, textarea, select, [role="
     --destructive: oklch(0.704 0.191 22.216);
     --border: rgb(255 255 255 / 12%);
     --input: rgb(255 255 255 / 16%);
-    --ring: oklch(0.585 0.233 277);
+    --ring: #737373;
     --chart-1: oklch(0.837 0.128 66.29);
     --chart-2: oklch(0.705 0.213 47.604);
     --chart-3: oklch(0.646 0.222 41.116);
@@ -157,7 +157,7 @@ html[data-shell] .drag-region :where(button, a, input, textarea, select, [role="
     --sidebar-accent: #3d3d3d;
     --sidebar-accent-foreground: #eeeeee;
     --sidebar-border: rgb(255 255 255 / 12%);
-    --sidebar-ring: oklch(0.585 0.233 277);
+    --sidebar-ring: #737373;
     --success: oklch(0.7 0.11 175);
 }
 

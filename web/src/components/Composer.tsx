@@ -99,7 +99,7 @@ export function Composer({ token, session }: ComposerProps) {
       <div className="mx-auto w-full max-w-3xl">
         <div className="relative rounded-3xl border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/25">
           <Textarea
-            className="max-h-40 min-h-16 resize-none rounded-3xl border-0 bg-transparent text-sm leading-6 shadow-none focus-visible:ring-0 md:text-sm dark:bg-transparent"
+            className="max-h-40 min-h-16 resize-none rounded-3xl border-0 bg-transparent px-4 pt-4 text-sm leading-6 shadow-none focus-visible:ring-0 md:text-sm dark:bg-transparent"
             placeholder={t("composer.messagePlaceholder")}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {

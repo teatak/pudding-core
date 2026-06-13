@@ -234,7 +234,7 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
 
   return (
     <aside
-      className="relative flex h-full shrink-0 flex-col gap-2 bg-sidebar px-2 pb-2 text-sidebar-foreground"
+      className="relative flex h-full shrink-0 flex-col gap-2 border-r bg-sidebar px-2 pb-2 text-sidebar-foreground"
       style={{ width: railWidth }}
     >
       <ResizeHandle className="-right-1" onPointerDown={startRailDrag} />

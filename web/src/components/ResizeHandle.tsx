@@ -70,3 +70,58 @@ export function ResizeHandle({
     </div>
   );
 }
+
+// 上下分屏的比例拖拽:按指针位移占容器(handle 父元素)高度的比例调整,
+// 持久化到 localStorage。
+export function useResizableRatio(opts: { key: string; fallback: number; min: number; max: number }) {
+  const { key, fallback, min, max } = opts;
+  const [ratio, setRatio] = useState(() => {
+    const saved = Number(localStorage.getItem(key));
+    return Number.isFinite(saved) && saved >= min && saved <= max ? saved : fallback;
+  });
+
+  const startDrag = useCallback(
+    (event: React.PointerEvent) => {
+      event.preventDefault();
+      const container = (event.currentTarget as HTMLElement).parentElement;
+      const height = container?.getBoundingClientRect().height || 1;
+      const startY = event.clientY;
+      let startRatio = 0;
+      setRatio((current) => {
+        startRatio = current;
+        return current;
+      });
+      document.body.style.userSelect = "none";
+      document.body.style.cursor = "row-resize";
+      const onMove = (move: PointerEvent) => {
+        const next = Math.min(max, Math.max(min, startRatio + (move.clientY - startY) / height));
+        setRatio(next);
+        localStorage.setItem(key, String(next.toFixed(3)));
+      };
+      const onUp = () => {
+        document.removeEventListener("pointermove", onMove);
+        document.body.style.userSelect = "";
+        document.body.style.cursor = "";
+      };
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp, { once: true });
+    },
+    [key, max, min],
+  );
+
+  return { ratio, startDrag };
+}
+
+// 水平分隔条(上下分屏):中线 1px + 中央小胶囊抓手,与竖向拖柄同款语言
+export function SplitHandle({ onPointerDown }: { onPointerDown: (event: React.PointerEvent) => void }) {
+  return (
+    <div
+      aria-hidden="true"
+      className="group/handle relative flex h-2 w-full shrink-0 cursor-row-resize items-center justify-center"
+      onPointerDown={onPointerDown}
+    >
+      <div className="absolute inset-x-0 top-1/2 h-px bg-border" />
+      <div className="z-10 h-1 w-8 rounded-full bg-border transition-colors group-hover/handle:bg-muted-foreground/40 group-active/handle:bg-muted-foreground/60" />
+    </div>
+  );
+}
