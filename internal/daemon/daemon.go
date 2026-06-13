@@ -145,6 +145,10 @@ func (d *Daemon) Shutdown(ctx context.Context) error {
 			return cerr
 		}
 	}
+	// 先取消辅助 goroutine(自动标题等 best-effort 任务),再等所有
+	// goroutine 收尾:否则进行中的标题 LLM 调用会把 Wait() 拖到 30s。
+	// turn goroutine 仍各自收尾(写完 canonical),由 provider 超时兜底。
+	d.engine.Stop()
 	d.engine.Wait()
 	return d.store.Close()
 }

@@ -59,6 +59,28 @@ func waitTurnDone(t *testing.T, s store.Store, sessionID string) *store.Turn {
 	}
 }
 
+func TestStopCancelsAuxGoroutines(t *testing.T) {
+	// 慢 provider:turn 与自动标题的 LLM 都会卡在 delay。Cancel 让 turn
+	// 收尾,Stop 让标题 goroutine 立即退出;没有 Stop 时 Wait 会被标题
+	// LLM 拖住。sess_1 标题为空,Submit 触发 autoTitle。
+	eng, _, _, sessionID := newTestEngine(t, mock.WithScript([]string{"x"}), mock.WithDelay(3*time.Second))
+	if _, err := eng.Submit(context.Background(), SubmitInput{SessionID: sessionID, ClientMessageID: "c1", Text: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond) // 让 turn + title goroutine 起来
+
+	_ = eng.Cancel(sessionID) // turn 收尾
+	eng.Stop()                // 辅助 goroutine(标题)取消
+
+	done := make(chan struct{})
+	go func() { eng.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("Stop did not cancel aux goroutines; Wait blocked on the slow title LLM")
+	}
+}
+
 func TestSubmitHappyPath(t *testing.T) {
 	eng, ms, hub, sid := newTestEngine(t, mock.WithScript([]string{"你好", ",", "世界"}), mock.WithDelay(time.Millisecond))
 	sub, unsub := hub.Subscribe(sid)

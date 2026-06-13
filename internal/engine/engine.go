@@ -38,21 +38,35 @@ type Engine struct {
 	builder      *contextbuilder.Builder
 	defaultModel string
 
+	// auxCtx 是辅助 goroutine(自动标题,将来工具相关后台任务)的基 ctx;
+	// Stop() 取消它,优雅退出时这些 best-effort 任务立即中断,不拖住
+	// Wait()。turn goroutine 不挂在这上面——turn 要写完 canonical 才退,
+	// 由各自 turnCtx + provider 超时兜底。
+	auxCtx    context.Context
+	auxCancel context.CancelFunc
+
 	mu      sync.Mutex
 	running map[string]context.CancelFunc // sessionID → 当前 turn 的 cancel
 	wg      sync.WaitGroup
 }
 
 func New(s store.Store, hub *event.Hub, resolver Resolver, defaultModel string) *Engine {
+	auxCtx, auxCancel := context.WithCancel(context.Background())
 	return &Engine{
 		store:        s,
 		hub:          hub,
 		resolver:     resolver,
 		builder:      contextbuilder.New(s),
 		defaultModel: defaultModel,
+		auxCtx:       auxCtx,
+		auxCancel:    auxCancel,
 		running:      make(map[string]context.CancelFunc),
 	}
 }
+
+// Stop 取消辅助 goroutine 的基 ctx(幂等);在 Wait() 前调用,
+// 让 best-effort 后台任务(自动标题等)优雅退出时立即收手。
+func (e *Engine) Stop() { e.auxCancel() }
 
 type SubmitInput struct {
 	SessionID       string

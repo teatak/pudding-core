@@ -93,7 +93,9 @@ func (e *Engine) autoTitle(sessionID, providerName, model, userText string) {
 // generateTitle 起一次裸 LLM 调用(同 session 解析出的 provider/model),
 // 收集全文后清洗截断。不产 turn、不进 messages,失败只留 provisional。
 func (e *Engine) generateTitle(providerName, model, userText string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), titlerTimeout)
+	// 从 auxCtx 派生:Stop() 后(优雅退出)立即取消这次 LLM 调用,
+	// 不让 30s 超时拖住 engine.Wait()。
+	ctx, cancel := context.WithTimeout(e.auxCtx, titlerTimeout)
 	defer cancel()
 	client, err := e.resolver.Resolve(ctx, providerName)
 	if err != nil {
