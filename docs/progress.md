@@ -58,16 +58,16 @@ LLM 自动标题。
 
 ### 工具调用 / MCP —— 契约设计待评审(docs/design-tools.md)
 
-设计草案已入库,**待评审、未开工**,卡在三个待用户拍板的决策:
+设计草案已入库,**待开工**。地基决策已拍板:
 
-1. **canonical 落库形状**:一 turn 一条 assistant 消息 + `parts` 数组
-   (`tool_use/tool_result/text` 按时间序;thought 只走实时事件,不入
-   canonical parts),而非 OpenAI/Anthropic 的多消息交替格式。地基决策,
-   定了难改。倾向:一 turn 一条。
-2. **MCP 依赖**:用官方 `modelcontextprotocol/go-sdk`(引入新依赖)还是先
-   只做内置工具、MCP 后置。倾向:先内置工具(web_fetch)端到端跑通,MCP 紧随。
-3. **thought 落不落库**:当前设计不落库(只走事件实时显示,同 delta 级)。
-   备选:落进 parts 永久保留。倾向:不落库。
+1. **canonical 形状 = 已定**:一 turn 一条 assistant 消息 + `parts`
+   一等 JSON(ContentPart 语义模型,借自旧项目);`role` ∈
+   `user|assistant|tool|summary`;tool call/result 作 parts 不作宽表列;
+   event log 只做旁路审计,不反推 canonical。thought 不进 canonical(turn
+   内工具循环的 reasoning replay 是工作态例外,见 design-tools 第 1 节)。
+2. **thought 落库 = 已定**:不落 canonical(同上)。
+3. **MCP 依赖 = 待定**:先只做内置工具(web_fetch)端到端跑通、MCP 后置
+   接 `modelcontextprotocol/go-sdk`,还是一上来就接。倾向:先内置后 MCP。
 
 切片 T1–T6 见 design-tools.md 第 8 节;T1–T4 是最小垂直切片
 (内置 web_fetch 即可端到端演示工具调用)。

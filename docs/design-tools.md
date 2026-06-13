@@ -22,14 +22,22 @@ user 消息落库
 cancel 在循环任意点生效(turnCtx);崩溃恢复语义不变(running → failed,
 未落库的中间 parts 随进程丢失)。
 
-## 1. canonical 形状:一 turn 一条 assistant 消息,parts 序列
+## 1. canonical 形状:一 turn 一条 assistant 消息,ContentPart 序列
 
-messages 表加 `parts` 列(JSON 数组),text 列保留为派生纯文本(标题、
-列表预览、text-only provider 兼容):
+借鉴旧项目的**语义 ContentPart 模型**(其最有价值处),但不照搬它的
+`session_messages` 宽表与 eventHub 反推 canonical 的链路。落地更干净:
+
+- `messages.parts` 是**一等 JSON 结构**;`text` 列保留为派生纯文本(标题、
+  列表预览、text-only provider 兼容)。
+- `role` ∈ `user | assistant | tool | summary`。
+- **一个 assistant turn 最终只落一条 canonical assistant 消息**;tool
+  call / result 是它的 **parts**,不是宽表列、也不是多行。
+- compaction 产物是 `role: summary` 消息;`tool` 角色见下。
+- **event log 只做旁路审计**,不反推 canonical(硬约束 8:context 只来自
+  messages 表)。
 
 ```jsonc
-// assistant 消息的 parts:落库的 turn 过程,顺序即时间序。
-// thought 不落库(只走事件实时显示,见第 5 节),故不出现在这里。
+// role=assistant 消息的 parts:落库的 turn 过程,顺序即时间序。
 [
   { "type": "tool_use", "id": "call_1", "name": "web_fetch",
     "args": { "url": "..." } },
@@ -39,9 +47,20 @@ messages 表加 `parts` 列(JSON 数组),text 列保留为派生纯文本(标题
 ]
 ```
 
-> **thought 不落库**:思考流只在 streaming 期间经 `turn.delta(part=thought)`
-> 实时显示,turn 收尾不写进 parts(与 text delta 同级,刷新即消失)。
-> 持久化 thought 是后续可选项,届时再加 `thought` part 类型。
+**`tool` 角色的定位**:canonical 里 assistant turn 仍是单条 role=assistant
+(tool_use + tool_result 都作 parts)。`role: tool` 不产生独立 canonical 行,
+只在 **contextbuilder 翻译到 wire 时按需合成**——OpenAI 要 `role:"tool"`
+消息、Anthropic 要 user 消息里的 `tool_result` block,各家从 assistant 消息
+的 tool_result parts 现翻。(若后续确实需要独立 tool 行再升级,此处先按
+"不落独立行"实现。)
+
+> **thought 不落 canonical**:思考流只在 streaming 期间经
+> `turn.delta(part=thought)` 实时显示,turn 收尾不进 parts(刷新即消失)。
+> **但有一个 turn 内工作态例外**:工具循环里,assistant 在 tool_use 之前的
+> reasoning block,续跑那次请求可能必须原样回传(Anthropic thinking + tool
+> use 强制要求带签名的 thinking block;部分 OpenAI-compatible thinking 模型
+> 同理)。该 reasoning 保留在**循环期间发给 provider 的工作 messages**里,
+> turn 结束即丢,**不进 canonical**。持久化 thought 是后续可选项。
 
 **为什么不按 OpenAI / Anthropic 的多消息交替形状落库**:那是两套互不兼容的
 wire 格式;canonical 必须 provider 无关。一 turn 一条消息保持"turn ↔
@@ -49,6 +68,13 @@ assistant 消息 1:1"的现有不变量,前端任务流(parts 渲染模型,desig
 零转换直读。代价是 contextbuilder 的翻译层变厚——这正是它存在的意义。
 
 user 消息 parts 暂时只有 text(多模态来了再扩)。
+
+> **从旧项目存档、后续阶段再用**(本版不做,记下免得丢):
+> - **`source_event_ids` 审计链**:canonical 消息记录它从哪些原始 event
+>   蒸馏而来,调试"这条为什么长这样"很有用。
+> - **FTS5 trigram tokenizer**(历史搜索阶段):`unicode61` 把整段中文当
+>   一个 token,中文子串搜索基本废;`trigram` 才能搜任意位置子串,需
+>   `sqlite_fts5` build tag。
 
 ## 2. provider 契约扩展(internal/provider)
 
