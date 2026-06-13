@@ -497,7 +497,13 @@ home 内容(第一阶段):
 
 这些能力可以参考 `pudding-core-old`,但不能直接搬旧 `Runtime` 结构。
 
-## 14. 开放问题
+## 14. 已定论(原开放问题)
 
-- cancel / failed 时的半截 assistant 输出怎么处理:倾向保留为 canonical message 并标记 `interrupted`(进入后续 context),而不是丢弃;待第一阶段实测再定。
-- 同一 session 是否允许并发 turn:第一阶段不允许,streaming 中再 submit 返回 409;后续是否放开排队待定。
+第一阶段实测后定形,列此备查:
+
+- cancel / failed 的半截 assistant 输出:**保留**为 canonical message 并标
+  `interrupted`,进入后续 context,不丢弃(AGENTS 硬约束 7 / 14)。
+- 同一 session 并发 turn:**不允许**,streaming 中再 submit 返回 409;
+  排队放开未排期。
+
+仍开放:见 docs/progress.md 队列与 docs/design-tools.md 待决项。

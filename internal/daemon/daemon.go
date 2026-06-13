@@ -1,6 +1,6 @@
 // Package daemon 把 puddingd 的启动/关闭逻辑封装为可嵌入形态:
 // CLI(cmd/puddingd)与桌面壳(cmd/pudding-desktop)同进程复用,
-// 单二进制、token 内存直传(docs/tasks/desktop-shell.md)。
+// 单二进制、token 内存直传。
 package daemon
 
 import (
