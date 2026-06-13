@@ -148,14 +148,14 @@ text:      markdown 正文(无气泡直接排版)…▍    ← streaming 光标
   `lib/model.ts`);API 提交仍是原始 id。
 - 点击展开 popover,内容是 **Accordion**:
   - 第一层 = provider profile(名称 + 类型徽标 + apiKeySet 状态);
-  - 展开第二层 = 该 profile 的模型列表(default_model 置顶标注,
-    preset 目录 + 当前值合并);
+  - 展开第二层 = 该 profile 的模型列表;
   - **默认展开当前 session 所用 profile**。
 - 选中模型 = 一次 `PATCH /sessions/{id}` 同时写 provider + model。
-- **模型目录数据源**:`GET /providers/{name}/models`(daemon 按 type 代理真实端点
-  的模型列表 API,短缓存)为主;请求失败回落前端 presets 静态清单;
-  profile 的 `default_model` 与 session 当前值始终并入。
-  presets 从"事实源"降级为"兜底 + 创建表单预填"。
+- **模型目录唯一来源 = `profile.models`**(去重并入 `default_model` 与
+  session 当前值)。选择器**不自动请求端点**——用户反馈明确:配什么显示什么。
+- `GET /providers/{name}/models` 只用于**配置表单**的"刷新/导入模型列表"
+  按钮(daemon 按 type 代理真实端点的模型 API,短缓存),把候选并入
+  `profile.models` 后由用户保存;presets 仅作创建表单预填与兜底候选。
 
 ## 5. header:单行状态 + 进度预留
 

@@ -99,7 +99,9 @@ Pudding Core = local-first multi-session AI daemon + app core.
   - `GET /sessions/{id}`
   - `GET /sessions/{id}/messages`
   - `GET /settings`
-  - `GET /models`
+  - `GET /providers`
+  - `GET /providers/{name}/models`(仅配置表单"刷新模型列表"用;
+    模型选择器只读 `profile.models`,不请求端点)
 - Zustand 管实时和本地 UI:
   - session event stream
   - per-session runtime overlay

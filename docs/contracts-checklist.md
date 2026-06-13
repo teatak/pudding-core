@@ -32,6 +32,10 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 
 时间一律 RFC3339 字符串(Go `time.Time` 默认 JSON 编码)。
 
+`type` 是**固定枚举**:`openai-compatible | google | anthropic`。新增 type 必须
+同时落 `registry.SupportedType`(API 校验)、`registry.build`(client 构造)、
+web 契约 `providerProfile.type` 与设置表单下拉;不在枚举内的 type 返回 400。
+
 ## REST 请求/响应
 
 | 端点 | 请求 | 响应 | 错误 |

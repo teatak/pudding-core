@@ -36,14 +36,22 @@ google / anthropic / 经 registry 按 profile 路由)、agent shell UI、单二�
 - 壳与页面无 ExecJS/window.wails 桥(loopback 跨 origin),只走 native cgo
   与 web 视口启发式(见 memory: wails-no-runtime-bridge)。
 
-**Web UI(design.md v2 全部切片 S1–S8 + E4)**
+**Web UI(design.md v2 切片 S1–S8 + E4)** —— 已实现并经 preview / 真实桌面
+窗口验证:
 - 中性表面 + indigo 强调 tokens(sRGB hex,规避 WKWebView 宽色域伪影);
   中性 focus ring。
-- 可折叠 rail(hover popover)、composer 内两层模型选择器 + 品牌图标、
-  parts 任务流、单行 header 运行态、响应式。
-- 上下分屏(?split=,双 pane 独立 SSE,比例可拖拽)、canvas 栏插槽(S7,
-  空态占位)、rail/canvas 可拖拽调宽。
-- 手动重命名、复制绿对勾反馈、markdown 表格通栏、消息入场动效。
+- 可折叠 rail(hover popover,收起不误弹)、composer 内两层模型选择器
+  (只读 profile.models)+ 品牌图标、单行 header 运行态、响应式自动折叠。
+- 上下分屏(?split=,双 pane 独立 SSE,比例可拖拽)、rail/canvas 可拖拽调宽。
+- 手动重命名(铅笔弹框)、复制绿对勾反馈、markdown 表格通栏、消息入场动效。
+- 桌面 chrome:红绿灯对齐 / 双击 zoom / 全屏 inset / 拖拽区(真窗口验过)。
+
+**骨架就位、待内容**(切片交付了插槽/渲染位,内容随对应能力解封):
+- canvas 栏(S7):布局插槽 + 开合 + 空态占位,**无内容**(等 canvas/widgets)。
+- parts 任务流(S4):text part 渲染完成;**thought / tool part 渲染是
+  switch 占位**,等工具调用落地(见进行中)。
+- header 步数进度(S5):`estimatedSteps / turn.progress` 协议预留,
+  **进度条未渲染**,当前只有状态点。
 
 ## 进行中
 

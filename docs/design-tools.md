@@ -28,9 +28,9 @@ messages 表加 `parts` 列(JSON 数组),text 列保留为派生纯文本(标题
 列表预览、text-only provider 兼容):
 
 ```jsonc
-// assistant 消息的 parts:完整记录该 turn 的全过程,顺序即时间序
+// assistant 消息的 parts:落库的 turn 过程,顺序即时间序。
+// thought 不落库(只走事件实时显示,见第 5 节),故不出现在这里。
 [
-  { "type": "thought", "text": "..." },                          // 可选
   { "type": "tool_use", "id": "call_1", "name": "web_fetch",
     "args": { "url": "..." } },
   { "type": "tool_result", "id": "call_1", "ok": true,
@@ -38,6 +38,10 @@ messages 表加 `parts` 列(JSON 数组),text 列保留为派生纯文本(标题
   { "type": "text", "text": "最终回答..." }
 ]
 ```
+
+> **thought 不落库**:思考流只在 streaming 期间经 `turn.delta(part=thought)`
+> 实时显示,turn 收尾不写进 parts(与 text delta 同级,刷新即消失)。
+> 持久化 thought 是后续可选项,届时再加 `thought` part 类型。
 
 **为什么不按 OpenAI / Anthropic 的多消息交替形状落库**:那是两套互不兼容的
 wire 格式;canonical 必须 provider 无关。一 turn 一条消息保持"turn ↔
