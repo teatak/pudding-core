@@ -40,6 +40,11 @@ export function useSessionEvents(sessionID: string | undefined, token: string) {
         parsed.data.kind === "turn.cancelled"
       ) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.messages(sessionID) });
+        // 终结事件也刷 sessions:running 是 turns 表派生字段,overlay 清掉后
+        // 若不刷新,stale 的 session.running=true 会让停止按钮/生成态卡住
+        // (Composer / ChatPane 都读 overlayRunning || session.running)。
+        // FinishTurn 与终结事件同事务,收到事件时库里已非 running,refetch 得 false。
+        void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
       }
       if (parsed.data.kind === "session.titled") {
         // 自动标题写回(provisional / LLM),刷新列表与 header
