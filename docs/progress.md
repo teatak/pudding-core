@@ -8,9 +8,10 @@
 ## 现状一句话
 
 local-first 多 session AI daemon + 桌面壳,端到端可用:多会话文本对话
-(SQLite 持久化/恢复/幂等/cancel/SSE 续传)、四 provider(openai-compatible /
-google / anthropic / 经 registry 按 profile 路由)、agent shell UI、单二进制
-(embed web + token 握手)、Wails 桌面壳、LLM 自动标题。
+(SQLite 持久化/恢复/幂等/cancel/SSE 续传)、三类真实 provider
+(openai-compatible / google / anthropic)+ mock,经 registry 按 profile
+路由、agent shell UI、单二进制(embed web + token 握手)、Wails 桌面壳、
+LLM 自动标题。
 
 ## 已完成(只记结论)
 

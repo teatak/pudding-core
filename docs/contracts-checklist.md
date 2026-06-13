@@ -52,9 +52,9 @@ web 契约 `providerProfile.type` 与设置表单下拉;不在枚举内的 type 
 | `GET /settings` | — | `{settings: {}}` | — |
 | `PUT /settings` | `{k: v}` | 204 | 400 |
 | `GET /providers` | — | `{providers: []}`(脱敏) | — |
-| `POST /providers` | `{name, type, baseURL?, apiKey?, defaultModel?, extra?}` | 201 profile | 400 / 409 `profile_exists` |
+| `POST /providers` | `{name, type, baseURL?, apiKey?, defaultModel?, models?, extra?}` | 201 profile | 400 / 409 `profile_exists` |
 | `GET /providers/{name}` | — | profile(脱敏) | 404 |
-| `PATCH /providers/{name}` | `{type?, baseURL?, apiKey?, defaultModel?, extra?}`,apiKey 非空才覆盖 | 200 profile | 400 / 404 |
+| `PATCH /providers/{name}` | `{type?, baseURL?, apiKey?, defaultModel?, models?, extra?}`,apiKey 非空才覆盖 | 200 profile | 400 / 404 |
 | `DELETE /providers/{name}` | — | 204 | 404 |
 | `GET /providers/{name}/models` | — | `{models: []}`(代理真实端点,60s 缓存)。**仅配置表单的候选来源**,选择器只显示 profile.models | 404 / 502 |
 
