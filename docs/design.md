@@ -207,7 +207,7 @@ text:      markdown 正文(无气泡直接排版)…▍    ← streaming 光标
 | S2 tokens | 冷色调双套落 styles.css | — |
 | S3 shell | rail 收起 + hover popover、去字标、运行态列表项 | S1 S2 |
 | S4 任务流 | parts 渲染模型、用户消息块、header 单行状态 | S2 |
-| S5 选择器 | 两层 Accordion 模型选择 + `GET /providers/{name}/models` 代理 | — |
+| S5 选择器 | 两层 Accordion 模型选择(只读 profile.models)+ 配置表单模型导入 | — |
 | S6 分屏 | pane 容器抽象、`?split=`、上下分屏 | S3 S4 |
 | S7 canvas 栏 | 插槽 + 收起/展开 + 空态 | S3 |
 | S8 窗口 chrome | 壳 HiddenInset + `?shell=mac` + 全屏事件 ExecJS + 拖拽区 | S3 |

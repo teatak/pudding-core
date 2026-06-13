@@ -57,11 +57,12 @@ google / anthropic / 经 registry 按 profile 路由)、agent shell UI、单二�
 
 ### 工具调用 / MCP —— 契约设计待评审(docs/design-tools.md)
 
-设计草案已写,**未提交、未开工**,卡在三个待用户拍板的决策:
+设计草案已入库,**待评审、未开工**,卡在三个待用户拍板的决策:
 
 1. **canonical 落库形状**:一 turn 一条 assistant 消息 + `parts` 数组
-   (thought/tool_use/tool_result/text 按时间序),而非 OpenAI/Anthropic
-   的多消息交替格式。地基决策,定了难改。倾向:一 turn 一条。
+   (`tool_use/tool_result/text` 按时间序;thought 只走实时事件,不入
+   canonical parts),而非 OpenAI/Anthropic 的多消息交替格式。地基决策,
+   定了难改。倾向:一 turn 一条。
 2. **MCP 依赖**:用官方 `modelcontextprotocol/go-sdk`(引入新依赖)还是先
    只做内置工具、MCP 后置。倾向:先内置工具(web_fetch)端到端跑通,MCP 紧随。
 3. **thought 落不落库**:当前设计不落库(只走事件实时显示,同 delta 级)。
