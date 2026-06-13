@@ -92,10 +92,14 @@ export function renderMarkdown(source: string) {
         rows.push(tableCells(lines[index] ?? ""));
         index += 1;
       }
+      // wrapper 承担圆角边框与横向滚动,table 本体 w-full 通栏:
+      // display:block 的裸 table 在内容窄时只有外框通栏、行不跟随
       blocks.push(
-        `<table><thead><tr>${headers.map((cell) => `<th>${inline(cell)}</th>`).join("")}</tr></thead><tbody>${rows
+        `<div class="table-wrap"><table><thead><tr>${headers
+          .map((cell) => `<th>${inline(cell)}</th>`)
+          .join("")}</tr></thead><tbody>${rows
           .map((row) => `<tr>${row.map((cell) => `<td>${inline(cell)}</td>`).join("")}</tr>`)
-          .join("")}</tbody></table>`,
+          .join("")}</tbody></table></div>`,
       );
       continue;
     }

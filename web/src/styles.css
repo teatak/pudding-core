@@ -235,8 +235,14 @@ html[data-shell] .drag-region :where(button, a, input, textarea, select, [role="
   @apply bg-transparent p-0 text-sm;
 }
 
+/* wrapper 负责圆角边框与横向滚动;table 本体保持 table 布局并 w-full,
+   内容窄时行随容器通栏,内容宽时在 wrapper 内横滚 */
+.pudding-markdown .table-wrap {
+  @apply max-w-full overflow-x-auto rounded-lg border;
+}
+
 .pudding-markdown table {
-  @apply block max-w-full overflow-auto rounded-lg border text-sm;
+  @apply w-full border-collapse text-sm;
 }
 
 .pudding-markdown th,
@@ -246,4 +252,9 @@ html[data-shell] .drag-region :where(button, a, input, textarea, select, [role="
 
 .pudding-markdown th {
   @apply bg-muted font-medium;
+}
+
+/* 末行不带底边,避免与 wrapper 圆角边框叠出双线 */
+.pudding-markdown tr:last-child td {
+  @apply border-b-0;
 }
