@@ -39,6 +39,7 @@ cancel 在循环任意点生效(turnCtx);崩溃恢复语义不变(running → fa
 ```jsonc
 // role=assistant 消息的 parts:落库的 turn 过程,顺序即时间序。
 [
+  { "type": "thought", "text": "推理摘要..." },                  // 落库,供历史回看
   { "type": "tool_use", "id": "call_1", "name": "web_fetch",
     "args": { "url": "..." } },
   { "type": "tool_result", "id": "call_1", "ok": true,
@@ -54,13 +55,19 @@ cancel 在循环任意点生效(turnCtx);崩溃恢复语义不变(running → fa
 的 tool_result parts 现翻。(若后续确实需要独立 tool 行再升级,此处先按
 "不落独立行"实现。)
 
-> **thought 不落 canonical**:思考流只在 streaming 期间经
-> `turn.delta(part=thought)` 实时显示,turn 收尾不进 parts(刷新即消失)。
-> **但有一个 turn 内工作态例外**:工具循环里,assistant 在 tool_use 之前的
-> reasoning block,续跑那次请求可能必须原样回传(Anthropic thinking + tool
-> use 强制要求带签名的 thinking block;部分 OpenAI-compatible thinking 模型
-> 同理)。该 reasoning 保留在**循环期间发给 provider 的工作 messages**里,
-> turn 结束即丢,**不进 canonical**。持久化 thought 是后续可选项。
+> **thought 落 canonical(供历史回看)**:思考流 streaming 期间经
+> `turn.delta(part=thought)` 实时显示,turn 收尾**写进 parts**,刷新/重开
+> 会话仍可展开(前端任务流的折叠思考行,design.md 3.2)。但有两条边界:
+>
+> - **contextbuilder 跨 turn 组装时剥离 thought**:provider 不要陈旧推理
+>   (Anthropic 的 thinking 只在同一 turn 工具往返内有意义,跨 user turn
+>   重放既费 token 又可能干扰)。即 thought 进 canonical 是给**用户看**的,
+>   不进**后续模型上下文**。
+> - **turn 内工具循环的 replay 走工作态,不读 canonical**:循环里 tool_use
+>   之前的 reasoning,续跑那次请求可能必须原样回传(Anthropic 强制带签名的
+>   thinking block)。这用**循环期间的工作 messages**(含 provider 专属
+>   签名)完成;canonical 的 thought part 只存 provider-neutral 文本,
+>   不承载签名等 wire 细节。
 
 **为什么不按 OpenAI / Anthropic 的多消息交替形状落库**:那是两套互不兼容的
 wire 格式;canonical 必须 provider 无关。一 turn 一条消息保持"turn ↔
@@ -99,8 +106,8 @@ type Message struct {
 }
 
 type Part struct {
-    Type    PartType // text | tool_use | tool_result
-    Text    string
+    Type    PartType // text | thought | tool_use | tool_result
+    Text    string          // text / thought 文本
     CallID  string          // tool_use / tool_result
     Name    string          // tool_use
     Args    json.RawMessage // tool_use
@@ -136,8 +143,9 @@ type ToolCallChunk struct {
 | finish | `finish_reason: tool_calls` | `stop_reason: tool_use` | `functionCall` 出现即视为需调用 |
 | thought | reasoning 字段(部分实现) | thinking block(已跳过→改发 Part=thought) | thought part(同左) |
 
-thought 顺带升级:三家现在丢弃的思考流改为 `Part: thought` 发出,
-engine 透传事件但**不落库**(与 delta 同级,只供前端实时显示)。
+thought 顺带升级:三家现在丢弃的思考流改为 `Part: thought` 发出。
+engine streaming 期间透传 `turn.delta(part=thought)`,turn 收尾把累积的
+thought 写进 canonical assistant 消息的 `thought` part(第 1 节)。
 
 ## 3. 工具执行层(internal/tool)
 

@@ -63,9 +63,11 @@ LLM 自动标题。
 1. **canonical 形状 = 已定**:一 turn 一条 assistant 消息 + `parts`
    一等 JSON(ContentPart 语义模型,借自旧项目);`role` ∈
    `user|assistant|tool|summary`;tool call/result 作 parts 不作宽表列;
-   event log 只做旁路审计,不反推 canonical。thought 不进 canonical(turn
-   内工具循环的 reasoning replay 是工作态例外,见 design-tools 第 1 节)。
-2. **thought 落库 = 已定**:不落 canonical(同上)。
+   event log 只做旁路审计,不反推 canonical。
+2. **thought 落库 = 已定:落 canonical**(供历史回看)。两条边界:
+   contextbuilder 跨 turn 组装时剥离 thought(provider 不要陈旧推理);
+   turn 内工具循环的 reasoning replay 走工作态、不读 canonical(带 provider
+   专属签名)。见 design-tools 第 1 节。
 3. **MCP 依赖 = 待定**:先只做内置工具(web_fetch)端到端跑通、MCP 后置
    接 `modelcontextprotocol/go-sdk`,还是一上来就接。倾向:先内置后 MCP。
 
