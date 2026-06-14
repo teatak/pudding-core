@@ -73,6 +73,15 @@ func (c *ResponsesClient) newRequest(ctx context.Context, req provider.Request) 
 		Store:  boolPtr(false),
 		Input:  make([]responsesInputMessage, 0, len(req.Messages)),
 	}
+	if v, ok := provider.FloatOption(req.Config.OpenAI, "temperature"); ok {
+		body.Temperature = &v
+	}
+	if v, ok := provider.IntOption(req.Config.OpenAI, "max_output_tokens", "max_completion_tokens", "max_tokens"); ok {
+		body.MaxOutputTokens = &v
+	}
+	if v, ok := provider.StringOption(req.Config.OpenAI, "reasoning_effort"); ok {
+		body.Reasoning = &responsesReasoning{Effort: v}
+	}
 	if req.System != "" {
 		body.Instructions = req.System
 	}
@@ -154,11 +163,18 @@ func readResponsesSSE(ctx context.Context, body io.Reader, out chan<- provider.C
 func boolPtr(v bool) *bool { return &v }
 
 type responsesRequest struct {
-	Model        string                  `json:"model"`
-	Instructions string                  `json:"instructions,omitempty"`
-	Input        []responsesInputMessage `json:"input"`
-	Stream       bool                    `json:"stream"`
-	Store        *bool                   `json:"store,omitempty"`
+	Model           string                  `json:"model"`
+	Instructions    string                  `json:"instructions,omitempty"`
+	Input           []responsesInputMessage `json:"input"`
+	Stream          bool                    `json:"stream"`
+	Store           *bool                   `json:"store,omitempty"`
+	Temperature     *float64                `json:"temperature,omitempty"`
+	MaxOutputTokens *int                    `json:"max_output_tokens,omitempty"`
+	Reasoning       *responsesReasoning     `json:"reasoning,omitempty"`
+}
+
+type responsesReasoning struct {
+	Effort string `json:"effort,omitempty"`
 }
 
 type responsesInputMessage struct {

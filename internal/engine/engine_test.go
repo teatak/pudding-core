@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -287,12 +288,25 @@ func TestPerSessionProviderRouting(t *testing.T) {
 }
 
 func TestTurnSnapshotsProviderAndModel(t *testing.T) {
-	eng, ms, _, sid := newTestEngine(t, mock.WithScript([]string{"ok"}), mock.WithDelay(time.Millisecond))
+	ms := memstore.New()
+	hub := event.NewHub()
+	capture := &captureClient{reqCh: make(chan provider.Request, 1)}
+	eng := New(ms, hub, mapResolver{store.DefaultProviderProfile: capture}, ms, "")
 	ctx := context.Background()
+	sid := "sess_1"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "named"}); err != nil {
+		t.Fatal(err)
+	}
 	// 默认模型来自 profile.models[0]:session 不指 model 时回落第一项
 	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
 		Name: store.DefaultProviderProfile, Type: "openai-compatible",
-		BaseURL: "http://unused", Models: []store.ProviderModel{{ID: "snap-model"}},
+		BaseURL: "http://unused",
+		Models: []store.ProviderModel{{
+			ID:            "snap-model",
+			ContextWindow: 1000,
+			Capabilities:  &store.ModelCaps{Image: true, Audio: false, Tools: true},
+			OpenAI:        map[string]any{"temperature": 0.6, "max_tool_loops": 7},
+		}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -316,6 +330,49 @@ func TestTurnSnapshotsProviderAndModel(t *testing.T) {
 	if turn.Provider != "default" || turn.Model != "snap-model" {
 		t.Fatalf("turn snapshot wrong: provider=%q model=%q", turn.Provider, turn.Model)
 	}
+	var snap provider.ModelConfig
+	if err := json.Unmarshal(turn.ModelConfig, &snap); err != nil {
+		t.Fatal(err)
+	}
+	if snap.ContextWindow != 1000 || snap.Capabilities == nil || !snap.Capabilities.Image || snap.Capabilities.Audio || !snap.Capabilities.Tools {
+		t.Fatalf("turn config snapshot wrong: %+v", snap)
+	}
+	if v, ok := provider.FloatOption(snap.OpenAI, "temperature"); !ok || v != 0.6 {
+		t.Fatalf("temperature snapshot missing: %+v", snap.OpenAI)
+	}
+	if v, ok := provider.IntOption(snap.OpenAI, "max_tool_loops"); !ok || v != 7 {
+		t.Fatalf("max_tool_loops snapshot missing: %+v", snap.OpenAI)
+	}
+
+	select {
+	case req := <-capture.reqCh:
+		if req.Model != "snap-model" {
+			t.Fatalf("request model wrong: %+v", req)
+		}
+		if req.Config.ContextWindow != snap.ContextWindow {
+			t.Fatalf("request config must use resolved snapshot: %+v", req.Config)
+		}
+		if v, ok := provider.IntOption(req.Config.OpenAI, "max_tool_loops"); !ok || v != 7 {
+			t.Fatalf("request config missing max_tool_loops: %+v", req.Config.OpenAI)
+		}
+	default:
+		t.Fatal("provider request was not captured")
+	}
+}
+
+type captureClient struct {
+	reqCh chan provider.Request
+}
+
+func (c *captureClient) Name() string { return "capture" }
+
+func (c *captureClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	c.reqCh <- req
+	out := make(chan provider.Chunk, 2)
+	out <- provider.Chunk{Delta: "ok"}
+	out <- provider.Chunk{Done: true}
+	close(out)
+	return out, nil
 }
 
 func findTurn(ms store.Store, sessionID, clientMessageID string) (*store.Turn, error) {

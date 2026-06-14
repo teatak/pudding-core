@@ -65,6 +65,12 @@ func TestStreamHappyPath(t *testing.T) {
 	ch, err := client.Stream(context.Background(), provider.Request{
 		Model:  "gemini-3-flash",
 		System: "be nice",
+		Config: provider.ModelConfig{
+			Google: map[string]any{
+				"temperature":     0.5,
+				"maxOutputTokens": 2048,
+			},
+		},
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Text: "hi"},
 			{Role: provider.RoleAssistant, Text: "hello"},
@@ -87,6 +93,9 @@ func TestStreamHappyPath(t *testing.T) {
 	}
 	if gotBody.SystemInstruction == nil || gotBody.SystemInstruction.Parts[0].Text != "be nice" {
 		t.Fatalf("system_instruction not set: %+v", gotBody.SystemInstruction)
+	}
+	if gotBody.GenerationConfig == nil || gotBody.GenerationConfig.Temperature == nil || *gotBody.GenerationConfig.Temperature != 0.5 || gotBody.GenerationConfig.MaxOutputTokens == nil || *gotBody.GenerationConfig.MaxOutputTokens != 2048 {
+		t.Fatalf("model config not applied: %+v", gotBody.GenerationConfig)
 	}
 	roles := []string{}
 	for _, c := range gotBody.Contents {

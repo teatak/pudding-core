@@ -90,11 +90,12 @@ func (c *Client) stream(ctx context.Context, req provider.Request, out chan<- pr
 // Messages API 形状:system 是顶层字段,messages 角色 user / assistant,
 // content 取字符串简写(text-only 阶段;块数组形态留给多模态)。
 type messagesRequest struct {
-	Model     string    `json:"model"`
-	MaxTokens int       `json:"max_tokens"`
-	Stream    bool      `json:"stream"`
-	System    string    `json:"system,omitempty"`
-	Messages  []message `json:"messages"`
+	Model       string    `json:"model"`
+	MaxTokens   int       `json:"max_tokens"`
+	Stream      bool      `json:"stream"`
+	System      string    `json:"system,omitempty"`
+	Messages    []message `json:"messages"`
+	Temperature *float64  `json:"temperature,omitempty"`
 }
 
 type message struct {
@@ -112,6 +113,12 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 		Stream:    true,
 		System:    req.System,
 		Messages:  make([]message, 0, len(req.Messages)),
+	}
+	if v, ok := provider.IntOption(req.Config.Anthropic, "max_tokens", "max_output_tokens"); ok {
+		body.MaxTokens = v
+	}
+	if v, ok := provider.FloatOption(req.Config.Anthropic, "temperature"); ok {
+		body.Temperature = &v
 	}
 	for _, msg := range req.Messages {
 		role := "user"

@@ -77,5 +77,10 @@ web 契约 `providerProfile.type` 与设置表单下拉;不在枚举内的 type 
 `session.model` > 所解析 profile 的 `models[0].id` > `--model` flag(mock/dev 兜底)。
 历史上的 `model.default` 与 `provider.openai.*` 过渡键已随 registry 收口删除。
 
+provider model entry 形状:
+`{id, name?, contextWindow?, capabilities?, openai?, google?, anthropic?}`。
+submit 时 engine 解析成 effective model config,随 turn 写入 `turns.model_config`,
+并传入 `provider.Request.Config`;运行中的 turn 不受 profile 后续修改影响。
+
 改 settings 即时生效,不需要重启 daemon;provider 未配置时 submit 会以
 `turn.failed` 提示。events 表每 session 保留最近 1000 条 lifecycle 事件。

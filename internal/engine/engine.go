@@ -5,6 +5,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -104,6 +105,13 @@ type SubmitResult struct {
 	UserMessageID string `json:"userMessageID,omitempty"`
 }
 
+type resolvedModel struct {
+	providerName string
+	model        string
+	config       provider.ModelConfig
+	configJSON   json.RawMessage
+}
+
 func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, error) {
 	if strings.TrimSpace(in.Text) == "" || in.ClientMessageID == "" {
 		return nil, ErrEmptyInput
@@ -113,38 +121,12 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 		return nil, err
 	}
 
-	// provider / model 在提交时刻解析并随 turn 快照,改配置不影响进行中的 turn。
-	// provider:session 字段 > config default_profile > 内置 "default";
-	// model:session 字段 > profile.models[0] >(仅 dev/mock)--model。
-	// 模型名只在 profile 下有意义,不存在全局默认模型。
-	providerName := sess.Provider
-	if providerName == "" {
-		if settings, err := e.config.Settings(ctx); err == nil {
-			providerName = settings[store.SettingDefaultProvider]
-		}
+	resolved, err := e.resolveModel(ctx, sess)
+	if err != nil {
+		return nil, err
 	}
-	if providerName == "" {
-		providerName = store.DefaultProviderProfile
-	}
-	model := sess.Model
-	if p, err := e.config.GetProviderProfile(ctx, providerName); err == nil {
-		if model == "" {
-			model = p.FirstModelID()
-		} else if len(p.Models) > 0 && !p.HasModel(model) {
-			return nil, ErrNoModel
-		}
-	}
-	if model == "" {
-		model = e.defaultModel
-	}
-	// 空配置直接报错,不静默回显 mock 或抛误导性的 "profile default not found":
-	// model 解析不出,或 provider 名没有对应的可用 profile(如桌面/生产下从没配过的
-	// 内置 "default"),提交即返回 ErrNoModel。--mock 下 resolver 是 Static(任意名都
-	// 解析)、--model 给了非空 model,故此校验不影响 mock/测试。
-	if model == "" {
-		return nil, ErrNoModel
-	}
-	if _, err := e.resolver.Resolve(ctx, providerName); err != nil {
+	client, err := e.resolver.Resolve(ctx, resolved.providerName)
+	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrNoModel, err)
 	}
 
@@ -154,8 +136,9 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 		UserMessageID:   store.NewID("msg"),
 		ClientMessageID: in.ClientMessageID,
 		UserText:        in.Text,
-		Provider:        providerName,
-		Model:           model,
+		Provider:        resolved.providerName,
+		Model:           resolved.model,
+		ModelConfig:     resolved.configJSON,
 	})
 	if err != nil {
 		return nil, err
@@ -180,13 +163,90 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	// 空标题会话:首条消息触发自动标题(provisional + 异步 LLM),
 	// 与 turn 生命周期解耦(titler.go)
 	if sess.Title == "" {
-		e.autoTitle(in.SessionID, providerName, model, in.Text)
+		e.autoTitle(in.SessionID, resolved.providerName, resolved.model, in.Text)
 	}
 
 	e.wg.Add(1)
-	go e.runTurn(turnCtx, in.SessionID, res.Turn.ID, providerName, model)
+	go e.runTurn(turnCtx, in.SessionID, res.Turn.ID, resolved, client)
 
 	return &SubmitResult{TurnID: res.Turn.ID, UserMessageID: res.UserMessage.ID}, nil
+}
+
+func (e *Engine) resolveModel(ctx context.Context, sess *store.Session) (*resolvedModel, error) {
+	// provider / model 在提交时刻解析并随 turn 快照,改配置不影响进行中的 turn。
+	// provider:session 字段 > config default_profile > 内置 "default";
+	// model:session 字段 > profile.models[0] >(仅 dev/mock)--model。
+	// 模型名只在 profile 下有意义,不存在全局默认模型。
+	providerName := sess.Provider
+	if providerName == "" {
+		if settings, err := e.config.Settings(ctx); err == nil {
+			providerName = settings[store.SettingDefaultProvider]
+		}
+	}
+	if providerName == "" {
+		providerName = store.DefaultProviderProfile
+	}
+
+	model := sess.Model
+	var cfg provider.ModelConfig
+	if p, err := e.config.GetProviderProfile(ctx, providerName); err == nil {
+		if model == "" {
+			model = p.FirstModelID()
+		} else if len(p.Models) > 0 && !p.HasModel(model) {
+			return nil, ErrNoModel
+		}
+		if entry, ok := p.ModelByID(model); ok {
+			cfg = modelConfigFromEntry(entry)
+		}
+	}
+	if model == "" {
+		model = e.defaultModel
+	}
+	// 空配置直接报错,不静默回显 mock 或抛误导性的 "profile default not found":
+	// model 解析不出,或 provider 名没有对应的可用 profile(如桌面/生产下从没配过的
+	// 内置 "default"),提交即返回 ErrNoModel。--mock 下 resolver 是 Static(任意名都
+	// 解析)、--model 给了非空 model,故此校验不影响 mock/测试。
+	if model == "" {
+		return nil, ErrNoModel
+	}
+	cfgJSON, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &resolvedModel{
+		providerName: providerName,
+		model:        model,
+		config:       cfg,
+		configJSON:   cfgJSON,
+	}, nil
+}
+
+func modelConfigFromEntry(m store.ProviderModel) provider.ModelConfig {
+	cfg := provider.ModelConfig{
+		ContextWindow: m.ContextWindow,
+		OpenAI:        cloneOptions(m.OpenAI),
+		Google:        cloneOptions(m.Google),
+		Anthropic:     cloneOptions(m.Anthropic),
+	}
+	if m.Capabilities != nil {
+		cfg.Capabilities = &provider.ModelCapabilities{
+			Image: m.Capabilities.Image,
+			Audio: m.Capabilities.Audio,
+			Tools: m.Capabilities.Tools,
+		}
+	}
+	return cfg
+}
+
+func cloneOptions(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 // Recover 把上次进程退出时残留的 running turn 收尾为 failed,在 daemon
@@ -229,7 +289,7 @@ func (e *Engine) Cancel(sessionID string) error {
 // Wait 等待所有进行中的 turn 收尾,服务优雅退出。
 func (e *Engine) Wait() { e.wg.Wait() }
 
-func (e *Engine) runTurn(ctx context.Context, sessionID, turnID, providerName, model string) {
+func (e *Engine) runTurn(ctx context.Context, sessionID, turnID string, resolved *resolvedModel, client provider.Client) {
 	defer e.wg.Done()
 	defer func() {
 		e.mu.Lock()
@@ -238,7 +298,7 @@ func (e *Engine) runTurn(ctx context.Context, sessionID, turnID, providerName, m
 	}()
 
 	var buf strings.Builder
-	status, errMsg := e.streamTurn(ctx, sessionID, turnID, providerName, model, &buf)
+	status, errMsg := e.streamTurn(ctx, sessionID, turnID, resolved, client, &buf)
 
 	in := store.FinishTurnInput{TurnID: turnID, Status: status, Error: errMsg}
 	if status == store.TurnCompleted {
@@ -265,15 +325,12 @@ func (e *Engine) runTurn(ctx context.Context, sessionID, turnID, providerName, m
 	e.hub.Publish(*res.FinalEvent)
 }
 
-func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID, providerName, model string, buf *strings.Builder) (store.TurnStatus, string) {
-	req, err := e.builder.Build(ctx, sessionID, model)
+func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resolved *resolvedModel, client provider.Client, buf *strings.Builder) (store.TurnStatus, string) {
+	req, err := e.builder.Build(ctx, sessionID, resolved.model)
 	if err != nil {
 		return store.TurnFailed, fmt.Sprintf("build context: %v", err)
 	}
-	client, err := e.resolver.Resolve(ctx, providerName)
-	if err != nil {
-		return store.TurnFailed, fmt.Sprintf("provider: %v", err)
-	}
+	req.Config = resolved.config
 	ch, err := client.Stream(ctx, req)
 	if err != nil {
 		return store.TurnFailed, fmt.Sprintf("provider: %v", err)

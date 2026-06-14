@@ -52,6 +52,13 @@ func TestResponsesRequestShape(t *testing.T) {
 	ch := responsesStreamForTest(t, srv.URL, provider.Request{
 		Model:  "model-a",
 		System: "system prompt",
+		Config: provider.ModelConfig{
+			OpenAI: map[string]any{
+				"temperature":           0.3,
+				"max_completion_tokens": 456,
+				"reasoning_effort":      "medium",
+			},
+		},
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Text: "hi"},
 			{Role: provider.RoleAssistant, Text: "hello"},
@@ -61,6 +68,9 @@ func TestResponsesRequestShape(t *testing.T) {
 
 	if got.Model != "model-a" || !got.Stream || got.Store == nil || *got.Store {
 		t.Fatalf("unexpected request head: %+v", got)
+	}
+	if got.Temperature == nil || *got.Temperature != 0.3 || got.MaxOutputTokens == nil || *got.MaxOutputTokens != 456 || got.Reasoning == nil || got.Reasoning.Effort != "medium" {
+		t.Fatalf("model config not applied: %+v", got)
 	}
 	if got.Instructions != "system prompt" {
 		t.Fatalf("unexpected instructions: %q", got.Instructions)

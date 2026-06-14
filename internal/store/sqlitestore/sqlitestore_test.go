@@ -2,6 +2,7 @@ package sqlitestore
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -184,6 +185,104 @@ func TestPersistenceAndSeqContinuation(t *testing.T) {
 	if len(evs) != 1 || evs[0].Seq != 3 || evs[0].Kind != event.TurnStarted {
 		t.Fatalf("seq did not continue after reopen: %+v", evs)
 	}
+}
+
+func TestTurnModelConfigPersists(t *testing.T) {
+	st, path := openTestStore(t)
+	createTestSession(t, st, "sess_1")
+	cfg := []byte(`{"contextWindow":1000,"openai":{"temperature":0.6}}`)
+	if _, err := st.BeginTurn(context.Background(), store.BeginTurnInput{
+		SessionID:       "sess_1",
+		TurnID:          "turn_1",
+		UserMessageID:   "msg_1",
+		ClientMessageID: "client_1",
+		UserText:        "hello",
+		Provider:        "default",
+		Model:           "m1",
+		ModelConfig:     cfg,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	turn, err := reopened.RunningTurn(context.Background(), "sess_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(turn.ModelConfig) != string(cfg) {
+		t.Fatalf("model config not persisted: %s", turn.ModelConfig)
+	}
+}
+
+func TestOpenMigratesModelConfigColumn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+CREATE TABLE sessions (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT '',
+    provider TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE turns (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    client_message_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('running','completed','failed','cancelled')),
+    provider TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE (session_id, client_message_id)
+);
+`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	rows, err := st.db.Query(`PRAGMA table_info(turns)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatal(err)
+		}
+		if name == "model_config" {
+			return
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	t.Fatal("model_config column was not added")
 }
 
 func TestDeleteSessionCascades(t *testing.T) {

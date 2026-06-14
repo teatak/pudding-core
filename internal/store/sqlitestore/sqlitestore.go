@@ -48,7 +48,43 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("sqlite: apply schema: %w", err)
 	}
+	if err := s.ensureSchema(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return s, nil
+}
+
+func (s *Store) ensureSchema() error {
+	return s.ensureColumn("turns", "model_config", `ALTER TABLE turns ADD COLUMN model_config TEXT NOT NULL DEFAULT '{}'`)
+}
+
+func (s *Store) ensureColumn(table, column, alter string) error {
+	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return rows.Err()
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(alter); err != nil {
+		return fmt.Errorf("sqlite: add %s.%s: %w", table, column, err)
+	}
+	return nil
 }
 
 func ensureDBFile(path string) error {
@@ -207,6 +243,7 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 			Status:          store.TurnRunning,
 			Provider:        in.Provider,
 			Model:           in.Model,
+			ModelConfig:     normalizeJSON(in.ModelConfig),
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
@@ -220,8 +257,8 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 			CreatedAt:       now,
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO turns(id,session_id,client_message_id,status,provider,model,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`,
-			turn.ID, turn.SessionID, turn.ClientMessageID, turn.Status, turn.Provider, turn.Model, turn.Error, unixMS(now), unixMS(now),
+			`INSERT INTO turns(id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+			turn.ID, turn.SessionID, turn.ClientMessageID, turn.Status, turn.Provider, turn.Model, string(turn.ModelConfig), turn.Error, unixMS(now), unixMS(now),
 		); err != nil {
 			return err
 		}
@@ -335,7 +372,7 @@ func (s *Store) RunningTurns(ctx context.Context) ([]*store.Turn, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id,session_id,client_message_id,status,provider,model,error,created_at,updated_at
+		`SELECT id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at
 		FROM turns WHERE status=?`, store.TurnRunning)
 	if err != nil {
 		return nil, err
@@ -344,13 +381,11 @@ func (s *Store) RunningTurns(ctx context.Context) ([]*store.Turn, error) {
 
 	out := make([]*store.Turn, 0)
 	for rows.Next() {
-		var turn store.Turn
-		var created, updated int64
-		if err := rows.Scan(&turn.ID, &turn.SessionID, &turn.ClientMessageID, &turn.Status, &turn.Provider, &turn.Model, &turn.Error, &created, &updated); err != nil {
+		turn, err := scanTurn(rows)
+		if err != nil {
 			return nil, err
 		}
-		turn.CreatedAt, turn.UpdatedAt = timeFromMS(created), timeFromMS(updated)
-		out = append(out, &turn)
+		out = append(out, turn)
 	}
 	return out, rows.Err()
 }
@@ -495,55 +530,49 @@ func getSessionTx(ctx context.Context, tx *sql.Tx, id string) (*store.Session, e
 }
 
 func getTurnTx(ctx context.Context, tx *sql.Tx, id string) (*store.Turn, error) {
-	var turn store.Turn
-	var created, updated int64
-	err := tx.QueryRowContext(ctx,
-		`SELECT id,session_id,client_message_id,status,provider,model,error,created_at,updated_at FROM turns WHERE id=?`, id,
-	).Scan(&turn.ID, &turn.SessionID, &turn.ClientMessageID, &turn.Status, &turn.Provider, &turn.Model, &turn.Error, &created, &updated)
+	row := tx.QueryRowContext(ctx,
+		`SELECT id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at FROM turns WHERE id=?`, id,
+	)
+	turn, err := scanTurn(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	turn.CreatedAt, turn.UpdatedAt = timeFromMS(created), timeFromMS(updated)
-	return &turn, nil
+	return turn, nil
 }
 
 func getTurnByClientMessageIDTx(ctx context.Context, tx *sql.Tx, sessionID, clientMessageID string) (*store.Turn, error) {
-	var turn store.Turn
-	var created, updated int64
-	err := tx.QueryRowContext(ctx,
-		`SELECT id,session_id,client_message_id,status,provider,model,error,created_at,updated_at
+	row := tx.QueryRowContext(ctx,
+		`SELECT id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at
 		FROM turns WHERE session_id=? AND client_message_id=?`,
 		sessionID, clientMessageID,
-	).Scan(&turn.ID, &turn.SessionID, &turn.ClientMessageID, &turn.Status, &turn.Provider, &turn.Model, &turn.Error, &created, &updated)
+	)
+	turn, err := scanTurn(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	turn.CreatedAt, turn.UpdatedAt = timeFromMS(created), timeFromMS(updated)
-	return &turn, nil
+	return turn, nil
 }
 
 func runningTurnTx(ctx context.Context, tx *sql.Tx, sessionID string) (*store.Turn, error) {
-	var turn store.Turn
-	var created, updated int64
-	err := tx.QueryRowContext(ctx,
-		`SELECT id,session_id,client_message_id,status,provider,model,error,created_at,updated_at
+	row := tx.QueryRowContext(ctx,
+		`SELECT id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at
 		FROM turns WHERE session_id=? AND status=?`,
 		sessionID, store.TurnRunning,
-	).Scan(&turn.ID, &turn.SessionID, &turn.ClientMessageID, &turn.Status, &turn.Provider, &turn.Model, &turn.Error, &created, &updated)
+	)
+	turn, err := scanTurn(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	turn.CreatedAt, turn.UpdatedAt = timeFromMS(created), timeFromMS(updated)
-	return &turn, nil
+	return turn, nil
 }
 
 func getUserMessageByClientMessageIDTx(ctx context.Context, tx *sql.Tx, sessionID, clientMessageID string) (*store.Message, error) {
@@ -595,6 +624,30 @@ type messageScanner interface {
 	Scan(dest ...any) error
 }
 
+func scanTurn(row messageScanner) (*store.Turn, error) {
+	var turn store.Turn
+	var modelConfig string
+	var created, updated int64
+	err := row.Scan(
+		&turn.ID,
+		&turn.SessionID,
+		&turn.ClientMessageID,
+		&turn.Status,
+		&turn.Provider,
+		&turn.Model,
+		&modelConfig,
+		&turn.Error,
+		&created,
+		&updated,
+	)
+	if err != nil {
+		return nil, err
+	}
+	turn.ModelConfig = normalizeJSON(json.RawMessage(modelConfig))
+	turn.CreatedAt, turn.UpdatedAt = timeFromMS(created), timeFromMS(updated)
+	return &turn, nil
+}
+
 func scanMessage(row messageScanner) (*store.Message, error) {
 	var msg store.Message
 	var interrupted int
@@ -606,6 +659,16 @@ func scanMessage(row messageScanner) (*store.Message, error) {
 	msg.Interrupted = interrupted != 0
 	msg.CreatedAt = timeFromMS(created)
 	return &msg, nil
+}
+
+func normalizeJSON(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return json.RawMessage(`{}`)
+	}
+	if !json.Valid(raw) {
+		return json.RawMessage(`{}`)
+	}
+	return append(json.RawMessage(nil), raw...)
 }
 
 func unixMS(t time.Time) int64 { return t.UnixNano() / int64(time.Millisecond) }

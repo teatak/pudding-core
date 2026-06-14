@@ -75,6 +75,12 @@ func TestStreamHappyPath(t *testing.T) {
 	ch, err := client.Stream(context.Background(), provider.Request{
 		Model:  "claude-opus-4-8",
 		System: "be nice",
+		Config: provider.ModelConfig{
+			Anthropic: map[string]any{
+				"max_tokens":  1234,
+				"temperature": 0.4,
+			},
+		},
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Text: "hi"},
 			{Role: provider.RoleAssistant, Text: "hello"},
@@ -95,8 +101,11 @@ func TestStreamHappyPath(t *testing.T) {
 	if gotKey != "test-key" || gotVersion != anthropicVersion {
 		t.Fatalf("headers wrong: key=%q version=%q", gotKey, gotVersion)
 	}
-	if !gotBody.Stream || gotBody.MaxTokens != defaultMaxTokens || gotBody.System != "be nice" {
+	if !gotBody.Stream || gotBody.MaxTokens != 1234 || gotBody.System != "be nice" {
 		t.Fatalf("body wrong: %+v", gotBody)
+	}
+	if gotBody.Temperature == nil || *gotBody.Temperature != 0.4 {
+		t.Fatalf("model config not applied: %+v", gotBody)
 	}
 	roles := []string{}
 	for _, m := range gotBody.Messages {

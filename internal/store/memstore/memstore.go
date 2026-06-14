@@ -132,10 +132,9 @@ func (m *Memstore) BeginTurn(_ context.Context, in store.BeginTurnInput) (*store
 	// 即使该 turn 仍在 running。
 	for _, t := range m.turns {
 		if t.SessionID == in.SessionID && t.ClientMessageID == in.ClientMessageID {
-			cp := *t
 			return &store.BeginTurnResult{
 				Duplicate:   true,
-				Turn:        &cp,
+				Turn:        cloneTurn(t),
 				UserMessage: m.findUserMessage(in.SessionID, in.ClientMessageID),
 			}, nil
 		}
@@ -154,6 +153,7 @@ func (m *Memstore) BeginTurn(_ context.Context, in store.BeginTurnInput) (*store
 		Status:          store.TurnRunning,
 		Provider:        in.Provider,
 		Model:           in.Model,
+		ModelConfig:     append([]byte(nil), in.ModelConfig...),
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
@@ -179,8 +179,8 @@ func (m *Memstore) BeginTurn(_ context.Context, in store.BeginTurnInput) (*store
 	m.appendEventLocked(in.SessionID, ev)
 	m.sessions[in.SessionID].UpdatedAt = now
 
-	tc, mc, ec := *turn, *msg, ev
-	return &store.BeginTurnResult{Turn: &tc, UserMessage: &mc, StartedEvent: &ec}, nil
+	mc, ec := *msg, ev
+	return &store.BeginTurnResult{Turn: cloneTurn(turn), UserMessage: &mc, StartedEvent: &ec}, nil
 }
 
 func (m *Memstore) FinishTurn(_ context.Context, in store.FinishTurnInput) (*store.FinishTurnResult, error) {
@@ -248,8 +248,7 @@ func (m *Memstore) RunningTurn(_ context.Context, sessionID string) (*store.Turn
 	defer m.mu.Unlock()
 	for _, t := range m.turns {
 		if t.SessionID == sessionID && t.Status == store.TurnRunning {
-			cp := *t
-			return &cp, nil
+			return cloneTurn(t), nil
 		}
 	}
 	return nil, store.ErrNotFound
@@ -261,8 +260,7 @@ func (m *Memstore) RunningTurns(_ context.Context) ([]*store.Turn, error) {
 	out := make([]*store.Turn, 0)
 	for _, t := range m.turns {
 		if t.Status == store.TurnRunning {
-			cp := *t
-			out = append(out, &cp)
+			out = append(out, cloneTurn(t))
 		}
 	}
 	return out, nil
@@ -403,4 +401,13 @@ func (m *Memstore) findUserMessage(sessionID, clientMessageID string) *store.Mes
 		}
 	}
 	return nil
+}
+
+func cloneTurn(t *store.Turn) *store.Turn {
+	if t == nil {
+		return nil
+	}
+	cp := *t
+	cp.ModelConfig = append([]byte(nil), t.ModelConfig...)
+	return &cp
 }

@@ -83,6 +83,15 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 		Stream:   true,
 		Messages: make([]chatMessage, 0, len(req.Messages)+1),
 	}
+	if v, ok := provider.FloatOption(req.Config.OpenAI, "temperature"); ok {
+		body.Temperature = &v
+	}
+	if v, ok := provider.IntOption(req.Config.OpenAI, "max_completion_tokens", "max_tokens"); ok {
+		body.MaxCompletionTokens = &v
+	}
+	if v, ok := provider.StringOption(req.Config.OpenAI, "reasoning_effort"); ok {
+		body.ReasoningEffort = v
+	}
 	if req.System != "" {
 		body.Messages = append(body.Messages, chatMessage{Role: "system", Content: req.System})
 	}
@@ -232,9 +241,12 @@ func httpClient(client *http.Client) *http.Client {
 }
 
 type chatRequest struct {
-	Model    string        `json:"model"`
-	Stream   bool          `json:"stream"`
-	Messages []chatMessage `json:"messages"`
+	Model               string        `json:"model"`
+	Stream              bool          `json:"stream"`
+	Messages            []chatMessage `json:"messages"`
+	Temperature         *float64      `json:"temperature,omitempty"`
+	MaxCompletionTokens *int          `json:"max_completion_tokens,omitempty"`
+	ReasoningEffort     string        `json:"reasoning_effort,omitempty"`
 }
 
 type chatMessage struct {

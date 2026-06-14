@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS turns (
     status            TEXT    NOT NULL CHECK (status IN ('running','completed','failed','cancelled')),
     provider          TEXT    NOT NULL DEFAULT '', -- BeginTurn 时刻快照
     model             TEXT    NOT NULL DEFAULT '',
+    model_config      TEXT    NOT NULL DEFAULT '{}',
     error             TEXT    NOT NULL DEFAULT '',
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL,

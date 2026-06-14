@@ -4,6 +4,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -77,15 +78,8 @@ func (p *ProviderProfile) DisplayName() string {
 }
 
 func (p *ProviderProfile) HasModel(id string) bool {
-	if p == nil || id == "" {
-		return false
-	}
-	for _, m := range p.Models {
-		if m.ID == id {
-			return true
-		}
-	}
-	return false
+	_, ok := p.ModelByID(id)
+	return ok
 }
 
 func (p *ProviderProfile) FirstModelID() string {
@@ -93,6 +87,18 @@ func (p *ProviderProfile) FirstModelID() string {
 		return ""
 	}
 	return p.Models[0].ID
+}
+
+func (p *ProviderProfile) ModelByID(id string) (ProviderModel, bool) {
+	if p == nil || id == "" {
+		return ProviderModel{}, false
+	}
+	for _, m := range p.Models {
+		if m.ID == id {
+			return m, true
+		}
+	}
+	return ProviderModel{}, false
 }
 
 type ProviderModel struct {
@@ -146,12 +152,14 @@ type Turn struct {
 	SessionID       string     `json:"sessionID"`
 	ClientMessageID string     `json:"clientMessageID"`
 	Status          TurnStatus `json:"status"`
-	// Provider / Model 是 BeginTurn 时刻的解析快照,审计与 UI 标注用。
-	Provider  string    `json:"provider,omitempty"`
-	Model     string    `json:"model,omitempty"`
-	Error     string    `json:"error,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	// Provider / Model / ModelConfig 是 BeginTurn 时刻的解析快照,审计与
+	// 进行中 turn 稳定性用;用户改 profile 不影响已开始的 turn。
+	Provider    string          `json:"provider,omitempty"`
+	Model       string          `json:"model,omitempty"`
+	ModelConfig json.RawMessage `json:"modelConfig,omitempty"`
+	Error       string          `json:"error,omitempty"`
+	CreatedAt   time.Time       `json:"createdAt"`
+	UpdatedAt   time.Time       `json:"updatedAt"`
 }
 
 type BeginTurnInput struct {
@@ -161,8 +169,9 @@ type BeginTurnInput struct {
 	ClientMessageID string
 	UserText        string
 	// Provider / Model 由 engine 在提交时刻解析后传入,随 turn 落库。
-	Provider string
-	Model    string
+	Provider    string
+	Model       string
+	ModelConfig json.RawMessage
 }
 
 type BeginTurnResult struct {

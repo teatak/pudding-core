@@ -20,7 +20,7 @@ LLM 自动标题。
   provider profiles 与模型元数据事实源为 `<home>/config/profiles.yaml`,
   settings 标量事实源为 `<home>/config/settings.yaml`。
 - engine:per-session turn 状态机(begin/finish/recover、幂等、并发 409、
-  cancel 保留 partial);provider/model 提交时刻快照进 turns。
+  cancel 保留 partial);provider/model/effective model config 提交时刻快照进 turns。
 - provider:registry 按 YAML profile 路由 + 指纹缓存;五实现
   openai-responses(Responses API)/ openai-compatible(手写 SSE)/ google(Gemini 原生)/
   anthropic(Messages API)/ mock。

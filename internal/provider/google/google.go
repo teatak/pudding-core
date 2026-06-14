@@ -81,8 +81,14 @@ func (c *Client) stream(ctx context.Context, req provider.Request, out chan<- pr
 
 // Gemini 协议形状:system_instruction 独立字段,对话角色为 user / model。
 type generateRequest struct {
-	SystemInstruction *content  `json:"system_instruction,omitempty"`
-	Contents          []content `json:"contents"`
+	SystemInstruction *content          `json:"system_instruction,omitempty"`
+	Contents          []content         `json:"contents"`
+	GenerationConfig  *generationConfig `json:"generationConfig,omitempty"`
+}
+
+type generationConfig struct {
+	Temperature     *float64 `json:"temperature,omitempty"`
+	MaxOutputTokens *int     `json:"maxOutputTokens,omitempty"`
 }
 
 type content struct {
@@ -103,6 +109,16 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 		return nil, errors.New("google: model is required")
 	}
 	body := generateRequest{Contents: make([]content, 0, len(req.Messages))}
+	var gen generationConfig
+	if v, ok := provider.FloatOption(req.Config.Google, "temperature"); ok {
+		gen.Temperature = &v
+	}
+	if v, ok := provider.IntOption(req.Config.Google, "maxOutputTokens", "max_output_tokens", "max_tokens"); ok {
+		gen.MaxOutputTokens = &v
+	}
+	if gen.Temperature != nil || gen.MaxOutputTokens != nil {
+		body.GenerationConfig = &gen
+	}
 	if req.System != "" {
 		body.SystemInstruction = &content{Parts: []part{{Text: req.System}}}
 	}

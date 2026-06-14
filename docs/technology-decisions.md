@@ -205,7 +205,7 @@ system instruction
 - multimodal input
 - realtime/live transport
 
-Provider 路由(后续,先定形不实现):
+Provider 路由:
 
 - session 选择 LLM 的形状是 `session.provider + session.model`:
   - `provider` 指向一个命名的 **provider profile**(如 `default` / `work` / `local`);
@@ -225,15 +225,17 @@ Provider 路由(后续,先定形不实现):
   现有 settingsProvider 就是只有一个匿名 profile 的退化 registry,演进路径平滑。
 - 解析顺序:`session.provider` > settings `provider.default` > 内置默认 profile;
   model:`session.model` > 所解析 profile 的 `models[0].id` > `--model` flag(mock/dev only)。
-- provider/model 都是 BeginTurn 时刻快照,改配置不影响进行中的 turn。
+- provider/model/effective model config 都是 BeginTurn 时刻快照,改配置不影响
+  进行中的 turn。
 - 存储落点:
   - `session.provider` 存 `sessions` 表,与 `model` 并列,`PATCH /sessions/{id}` 可改;
   - profile 存 `<home>/config/profiles.yaml`;api_key 安全性同第 9 节
     (home 0600,桌面阶段评估 keychain;优先支持 `api_key_env`);
-  - turn 实际使用的 provider/model 在 `turns` 表落快照列,
-    审计与 UI"由哪个模型生成"标注用;messages 不存 provider 信息。
-- 触发时机:接入第二个 provider 类型(Gemini)时一并落地,避免单 provider
-  阶段过度设计。
+  - turn 实际使用的 provider/model/model_config 在 `turns` 表落快照列,
+    审计、重放与后续工具循环稳定性用;messages 不存 provider 信息。
+- `provider.Request.Config` 是 provider-neutral 的 effective config:
+  `contextWindow/capabilities/openai/google/anthropic`。各 provider 只消费
+  自己支持的字段;未知字段保留在 turn snapshot 中。
 
 表结构与 API 定形(随 registry 落地,pre-launch 直接改 schema 不留迁移):
 
