@@ -3,25 +3,27 @@
 > 单一现状文档:给接手的 agent / 上下文压缩后的自己看,避免重新推导。
 > 已完成只记结论(细节在 git 历史与 commit message);重点是**进行中**与
 > **待决项**。改动时同步更新本文,不积压。
-> 最近更新:2026-06-13。
+> 最近更新:2026-06-14。
 
 ## 现状一句话
 
 local-first 多 session AI daemon + 桌面壳,端到端可用:多会话文本对话
-(SQLite 持久化/恢复/幂等/cancel/SSE 续传)、三类真实 provider
-(openai-compatible / google / anthropic)+ mock,经 registry 按 profile
+(SQLite 持久化/恢复/幂等/cancel/SSE 续传)、四类真实 provider
+(openai-responses / openai-compatible / google / anthropic)+ mock,经 registry 按 profile
 路由、agent shell UI、单二进制(embed web + token 握手)、Wails 桌面壳、
 LLM 自动标题。
 
 ## 已完成(只记结论)
 
 **后端**
-- store:SQLite 单 writer,sessions/messages/turns/events/settings/provider_profiles;
-  schema 直改无迁移(pre-launch)。
+- store/config:SQLite 单 writer 只管 sessions/messages/turns/events;
+  provider profiles 与模型元数据事实源为 `<home>/config/profiles.yaml`,
+  settings 标量事实源为 `<home>/config/settings.yaml`。
 - engine:per-session turn 状态机(begin/finish/recover、幂等、并发 409、
   cancel 保留 partial);provider/model 提交时刻快照进 turns。
-- provider:registry 按 profile 路由 + 指纹缓存;四实现
-  openai-compatible(手写 SSE)/ google(Gemini 原生)/ anthropic(Messages API)/ mock。
+- provider:registry 按 YAML profile 路由 + 指纹缓存;五实现
+  openai-responses(Responses API)/ openai-compatible(手写 SSE)/ google(Gemini 原生)/
+  anthropic(Messages API)/ mock。
   各家流解析有固化帧单测。provider 只产模型流,turn lifecycle 归 engine。
 - 自动标题:空标题会话首条消息后 engine 写 provisional + 异步裸 LLM 调用
   生成正式标题,手动改名优先;session.titled 事件(不落库)推前端刷新。

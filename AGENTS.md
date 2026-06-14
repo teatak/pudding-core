@@ -42,6 +42,7 @@
 16. daemon 只 bind loopback,所有请求带启动 token。
 17. provider 只产出模型流(delta / finish / error);turn lifecycle 事件由 engine 生成。
 18. dev 与 release 数据目录严格隔离:dev 用 `~/.pudding-dev`,release 用 `~/.pudding`(仅发布构建);本地构建默认 dev 通道;测试只用临时目录。
+19. provider profiles / model metadata / default profile 的事实源是 `<home>/config/*.yaml`,不是 SQLite;SQLite 只承载运行数据。
 
 ## 后端技术约束
 

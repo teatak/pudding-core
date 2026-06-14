@@ -16,6 +16,7 @@ import (
 
 	"github.com/teatak/pudding-core/internal/api"
 	"github.com/teatak/pudding-core/internal/buildinfo"
+	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/home"
@@ -61,6 +62,11 @@ func Start(opts Options) (*Daemon, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg := config.NewManager(dir)
+	if err := cfg.Prepare(); err != nil {
+		_ = st.Close()
+		return nil, err
+	}
 
 	var resolver engine.Resolver
 	providerLabel := "registry"
@@ -68,10 +74,14 @@ func Start(opts Options) (*Daemon, error) {
 		resolver = registry.Static(mock.New())
 		providerLabel = "mock"
 	} else {
-		resolver = registry.New(st)
+		resolver = registry.New(cfg)
 	}
 	hub := event.NewHub()
-	eng := engine.New(st, hub, resolver, opts.DefaultModel)
+	engineDefaultModel := ""
+	if opts.Mock {
+		engineDefaultModel = opts.DefaultModel
+	}
+	eng := engine.New(st, hub, resolver, cfg, engineDefaultModel)
 	if err := eng.Recover(context.Background()); err != nil {
 		_ = st.Close()
 		return nil, fmt.Errorf("recover interrupted turns: %w", err)
@@ -90,7 +100,7 @@ func Start(opts Options) (*Daemon, error) {
 	// request ctx 派生自此:Shutdown 时 SSE 长连接立即退出,不拖优雅关闭
 	sseCtx, stopSSE := context.WithCancel(context.Background())
 	server := &http.Server{
-		Handler:     api.New(eng, st, hub).Handler(token, webui.Handler()),
+		Handler:     api.New(eng, st, cfg, hub).Handler(token, webui.Handler()),
 		BaseContext: func(net.Listener) context.Context { return sseCtx },
 	}
 

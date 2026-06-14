@@ -15,11 +15,11 @@ import (
 	"github.com/teatak/pudding-core/internal/store/memstore"
 )
 
-func newTestEngine(t *testing.T, opts ...mock.Option) (*Engine, store.Store, *event.Hub, string) {
+func newTestEngine(t *testing.T, opts ...mock.Option) (*Engine, *memstore.Memstore, *event.Hub, string) {
 	t.Helper()
 	ms := memstore.New()
 	hub := event.NewHub()
-	eng := New(ms, hub, registry.Static(mock.New(opts...)), "mock-model")
+	eng := New(ms, hub, registry.Static(mock.New(opts...)), ms, "mock-model")
 	sess := &store.Session{ID: "sess_1"}
 	if err := ms.CreateSession(context.Background(), sess); err != nil {
 		t.Fatal(err)
@@ -240,7 +240,7 @@ func TestPerSessionProviderRouting(t *testing.T) {
 		"alpha": mock.New(mock.WithScript([]string{"from-alpha"}), mock.WithDelay(time.Millisecond)),
 		"beta":  mock.New(mock.WithScript([]string{"from-beta"}), mock.WithDelay(time.Millisecond)),
 	}
-	eng := New(ms, hub, resolver, "mock-model")
+	eng := New(ms, hub, resolver, ms, "mock-model")
 	ctx := context.Background()
 
 	sessA := &store.Session{ID: "sa", Provider: "alpha"}
@@ -289,10 +289,10 @@ func TestPerSessionProviderRouting(t *testing.T) {
 func TestTurnSnapshotsProviderAndModel(t *testing.T) {
 	eng, ms, _, sid := newTestEngine(t, mock.WithScript([]string{"ok"}), mock.WithDelay(time.Millisecond))
 	ctx := context.Background()
-	// 默认模型是 profile 属性:session 不指 model 时回落所解析 profile 的 default_model
+	// 默认模型来自 profile.models[0]:session 不指 model 时回落第一项
 	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
 		Name: store.DefaultProviderProfile, Type: "openai-compatible",
-		BaseURL: "http://unused", DefaultModel: "snap-model",
+		BaseURL: "http://unused", Models: []store.ProviderModel{{ID: "snap-model"}},
 	}); err != nil {
 		t.Fatal(err)
 	}

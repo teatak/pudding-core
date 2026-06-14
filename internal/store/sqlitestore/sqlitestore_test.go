@@ -213,4 +213,26 @@ func TestDeleteSessionCascades(t *testing.T) {
 	}
 }
 
+func TestSchemaDoesNotStoreConfigTables(t *testing.T) {
+	st, _ := openTestStore(t)
+	rows, err := st.db.Query(`SELECT name FROM sqlite_master WHERE type='table'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		if name == "settings" || name == "provider_profiles" {
+			t.Fatalf("config table %q must not be in SQLite runtime store", name)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func strptr(s string) *string { return &s }

@@ -1,3 +1,5 @@
+import type { ProviderModel } from "@/api/client";
+
 export type ProviderPresetId =
   | "deepseek"
   | "qwen"
@@ -12,10 +14,9 @@ export type ProviderPresetId =
 export type ProviderPreset = {
   id: ProviderPresetId;
   name: string;
-  type: "openai-compatible" | "google" | "anthropic";
+  type: "openai-compatible" | "openai-responses" | "google" | "anthropic";
   baseURL: string;
-  defaultModel: string;
-  models: string[];
+  models: ProviderModel[];
   apiKeyURL?: string;
   apiKeyOptional?: boolean;
 };
@@ -26,8 +27,10 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     name: "DeepSeek",
     type: "openai-compatible",
     baseURL: "https://api.deepseek.com",
-    defaultModel: "deepseek-v4-flash",
-    models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+    models: [
+      model("deepseek-v4-flash", { contextWindow: 1_050_000, capabilities: { tools: true }, openai: { temperature: 0.7, max_completion_tokens: 384_000, max_tool_loops: 64 } }),
+      model("deepseek-v4-pro", { contextWindow: 1_050_000, capabilities: { tools: true }, openai: { temperature: 0.7, max_completion_tokens: 384_000, max_tool_loops: 64 } }),
+    ],
     apiKeyURL: "https://platform.deepseek.com/api_keys",
   },
   {
@@ -35,8 +38,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     name: "Qwen",
     type: "openai-compatible",
     baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    defaultModel: "qwen3.6-flash",
-    models: ["qwen3.6-flash", "qwen3.7-max", "qwen3.6-plus", "qwen3-max"],
+    models: ["qwen3.6-flash", "qwen3.7-max", "qwen3.6-plus", "qwen3-max"].map((id) => model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: 0.7 } })),
     apiKeyURL: "https://bailian.console.aliyun.com/?apiKey=1",
   },
   {
@@ -44,17 +46,19 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     name: "MiMo",
     type: "openai-compatible",
     baseURL: "https://api.xiaomimimo.com/v1",
-    defaultModel: "mimo-v2.5",
-    models: ["mimo-v2.5", "mimo-v2.5-pro"],
+    models: ["mimo-v2.5", "mimo-v2.5-pro"].map((id) => model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: 0.7 } })),
     apiKeyURL: "https://platform.xiaomimimo.com/",
   },
   {
     id: "openai",
     name: "OpenAI",
-    type: "openai-compatible",
+    type: "openai-responses",
     baseURL: "https://api.openai.com/v1",
-    defaultModel: "gpt-5.5",
-    models: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
+    models: [
+      model("gpt-5.5", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: 0.7, reasoning_effort: "medium" } }),
+      model("gpt-5.4", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: 0.7, reasoning_effort: "medium" } }),
+      model("gpt-5.4-mini", { contextWindow: 400_000, capabilities: { image: true, tools: true }, openai: { temperature: 0.7, reasoning_effort: "low" } }),
+    ],
     apiKeyURL: "https://platform.openai.com/api-keys",
   },
   {
@@ -62,8 +66,11 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     name: "Anthropic",
     type: "anthropic",
     baseURL: "https://api.anthropic.com",
-    defaultModel: "claude-opus-4-8",
-    models: ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"],
+    models: [
+      model("claude-opus-4-8", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 128_000, temperature: 0.7 } }),
+      model("claude-sonnet-4-6", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 128_000, temperature: 0.7 } }),
+      model("claude-haiku-4-5", { contextWindow: 200_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 64_000, temperature: 0.7 } }),
+    ],
     apiKeyURL: "https://platform.claude.com/settings/keys",
   },
   {
@@ -71,8 +78,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     name: "Moonshot",
     type: "openai-compatible",
     baseURL: "https://api.moonshot.cn/v1",
-    defaultModel: "kimi-k2.6",
-    models: ["kimi-k2.6", "kimi-k2.5"],
+    models: ["kimi-k2.6", "kimi-k2.5"].map((id) => model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: 0.7 } })),
     apiKeyURL: "https://platform.moonshot.cn/console/api-keys",
   },
   {
@@ -80,8 +86,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     name: "Zhipu GLM",
     type: "openai-compatible",
     baseURL: "https://open.bigmodel.cn/api/paas/v4",
-    defaultModel: "glm-5.1",
-    models: ["glm-5.1", "glm-5"],
+    models: ["glm-5.1", "glm-5"].map((id) => model(id, { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, openai: { temperature: 0.7 } })),
     apiKeyURL: "https://open.bigmodel.cn/usercenter/apikeys",
   },
   {
@@ -89,7 +94,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     name: "OpenRouter",
     type: "openai-compatible",
     baseURL: "https://openrouter.ai/api/v1",
-    defaultModel: "openrouter/free",
     models: [
       "openrouter/free",
       "openrouter/owl-alpha",
@@ -97,7 +101,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       "poolside/laguna-m.1:free",
       "openai/gpt-oss-120b:free",
       "z-ai/glm-4.5-air:free",
-    ],
+    ].map((id) => model(id, { capabilities: { tools: true }, openai: { temperature: 0.7 } })),
     apiKeyURL: "https://openrouter.ai/keys",
   },
   {
@@ -105,8 +109,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     name: "Ollama",
     type: "openai-compatible",
     baseURL: "http://localhost:11434/v1",
-    defaultModel: "llama3.3",
-    models: ["llama3.3", "qwen3", "gemma3", "gpt-oss:120b-cloud", "qwen3-coder:480b-cloud"],
+    models: ["llama3.3", "qwen3", "gemma3", "gpt-oss:120b-cloud", "qwen3-coder:480b-cloud"].map((id) => model(id, { capabilities: { tools: true }, openai: { temperature: 0.7 } })),
     apiKeyOptional: true,
     apiKeyURL: "https://ollama.com/download",
   },
@@ -145,4 +148,8 @@ export function getOrderedProviderPresets(locale: string) {
 
 export function providerPresetName(preset: ProviderPreset) {
   return preset.id;
+}
+
+function model(id: string, patch: Omit<ProviderModel, "id"> = {}): ProviderModel {
+  return { id, ...patch };
 }

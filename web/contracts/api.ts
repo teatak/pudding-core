@@ -14,39 +14,55 @@ export const session = z.object({
 export type Session = z.infer<typeof session>;
 
 // provider profile 的脱敏视图:api_key 只进不出,读端点只回 apiKeySet
+export const providerType = z.enum(["openai-compatible", "openai-responses", "google", "anthropic"]);
+
+export const providerModel = z.object({
+  id: z.string(),
+  name: z.string().optional(),
+  contextWindow: z.number().optional(),
+  capabilities: z
+    .object({
+      image: z.boolean().optional(),
+      audio: z.boolean().optional(),
+      tools: z.boolean().optional(),
+    })
+    .optional(),
+  openai: z.record(z.string(), z.unknown()).optional(),
+  google: z.record(z.string(), z.unknown()).optional(),
+  anthropic: z.record(z.string(), z.unknown()).optional(),
+});
+export type ProviderModel = z.infer<typeof providerModel>;
+
 export const providerProfile = z.object({
+  id: z.string(),
   name: z.string(),
-  type: z.enum(["openai-compatible", "google", "anthropic"]),
+  type: providerType,
   baseURL: z.string(),
   apiKeySet: z.boolean(),
-  // 默认模型是 profile 属性:模型名只在所属 profile 下有意义,无全局默认模型
-  defaultModel: z.string(),
-  // 配置的可选模型清单;选择器只显示这里的内容
-  models: z.array(z.string()),
-  extra: z.string().optional(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
+  apiKeyEnv: z.string().optional(),
+  // 配置的可选模型清单;选择器只显示这里的内容。models[0] 是自然默认模型。
+  models: z.array(providerModel),
 });
 export type ProviderProfile = z.infer<typeof providerProfile>;
 
 export const createProviderRequest = z.object({
+  id: z.string().min(1),
   name: z.string().min(1),
-  type: z.enum(["openai-compatible", "google", "anthropic"]),
+  type: providerType,
   baseURL: z.string().optional(),
   apiKey: z.string().optional(),
-  defaultModel: z.string().optional(),
-  models: z.array(z.string()).optional(),
-  extra: z.string().optional(),
+  apiKeyEnv: z.string().optional(),
+  models: z.array(providerModel).optional(),
 });
 
 // apiKey 传非空才覆盖;清除走 DELETE 后重建
 export const patchProviderRequest = z.object({
-  type: z.enum(["openai-compatible", "google", "anthropic"]).optional(),
+  name: z.string().optional(),
+  type: providerType.optional(),
   baseURL: z.string().optional(),
   apiKey: z.string().optional(),
-  defaultModel: z.string().optional(),
-  models: z.array(z.string()).optional(),
-  extra: z.string().optional(),
+  apiKeyEnv: z.string().optional(),
+  models: z.array(providerModel).optional(),
 });
 
 export const listProvidersResponse = z.object({ providers: z.array(providerProfile) });

@@ -23,6 +23,7 @@ func TestResolveProfileTypesAndCache(t *testing.T) {
 
 	for _, p := range []*store.ProviderProfile{
 		{Name: "work", Type: TypeOpenAICompatible, BaseURL: "https://example.com/v1", APIKey: "k1"},
+		{Name: "responses", Type: TypeOpenAIResponses, BaseURL: "https://api.openai.com/v1", APIKey: "k1"},
 		{Name: "gem", Type: TypeGoogle, APIKey: "k2"},
 		{Name: "bad", Type: "unknown"},
 	} {
@@ -34,6 +35,10 @@ func TestResolveProfileTypesAndCache(t *testing.T) {
 	work1, err := r.Resolve(ctx, "work")
 	if err != nil || work1.Name() != "openai-compatible" {
 		t.Fatalf("work: %v %v", work1, err)
+	}
+	responses, err := r.Resolve(ctx, "responses")
+	if err != nil || responses.Name() != "openai-responses" {
+		t.Fatalf("responses: %v %v", responses, err)
 	}
 	gem, err := r.Resolve(ctx, "gem")
 	if err != nil || gem.Name() != "google" {

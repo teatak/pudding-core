@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -17,13 +18,16 @@ import (
 )
 
 type Server struct {
-	engine *engine.Engine
-	store  store.Store
-	hub    *event.Hub
+	engine    *engine.Engine
+	store     store.Store
+	config    engine.ConfigSource
+	providers providerWriter
+	hub       *event.Hub
 }
 
-func New(eng *engine.Engine, s store.Store, hub *event.Hub) *Server {
-	return &Server{engine: eng, store: s, hub: hub}
+func New(eng *engine.Engine, s store.Store, cfg engine.ConfigSource, hub *event.Hub) *Server {
+	providers, _ := cfg.(providerWriter)
+	return &Server{engine: eng, store: s, config: cfg, providers: providers, hub: hub}
 }
 
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
@@ -204,7 +208,7 @@ func (s *Server) listMessages(c *cart.Context) error {
 }
 
 func (s *Server) getSettings(c *cart.Context) error {
-	kv, err := s.store.Settings(c.Request.Context())
+	kv, err := s.config.Settings(c.Request.Context())
 	if err != nil {
 		return s.fail(c, err)
 	}
@@ -217,7 +221,13 @@ func (s *Server) putSettings(c *cart.Context) error {
 	if err := decode(c, &kv); err != nil {
 		return badRequest(c, "invalid json body")
 	}
-	if err := s.store.SetSettings(c.Request.Context(), kv); err != nil {
+	settings, ok := s.config.(interface {
+		SetSettings(context.Context, map[string]string) error
+	})
+	if !ok {
+		return badRequest(c, "settings are read-only")
+	}
+	if err := settings.SetSettings(c.Request.Context(), kv); err != nil {
 		return s.fail(c, err)
 	}
 	c.String(http.StatusNoContent, "")

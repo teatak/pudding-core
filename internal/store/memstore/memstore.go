@@ -338,9 +338,10 @@ func (m *Memstore) ListProviderProfiles(_ context.Context) ([]*store.ProviderPro
 	out := make([]*store.ProviderProfile, 0, len(m.profiles))
 	for _, p := range m.profiles {
 		cp := *p
+		cp.Models = append([]store.ProviderModel(nil), p.Models...)
 		out = append(out, &cp)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	sort.Slice(out, func(i, j int) bool { return out[i].ProfileID() < out[j].ProfileID() })
 	return out, nil
 }
 
@@ -352,22 +353,28 @@ func (m *Memstore) GetProviderProfile(_ context.Context, name string) (*store.Pr
 		return nil, store.ErrNotFound
 	}
 	cp := *p
+	cp.Models = append([]store.ProviderModel(nil), p.Models...)
 	return &cp, nil
 }
 
 func (m *Memstore) PutProviderProfile(_ context.Context, p *store.ProviderProfile) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	id := p.ProfileID()
+	if id == "" {
+		return store.ErrNotFound
+	}
 	now := time.Now()
-	if existing, ok := m.profiles[p.Name]; ok {
+	if existing, ok := m.profiles[id]; ok {
 		p.CreatedAt = existing.CreatedAt
 	} else {
 		p.CreatedAt = now
 	}
+	p.ID = id
 	p.UpdatedAt = now
 	cp := *p
-	cp.Models = append([]string(nil), p.Models...)
-	m.profiles[p.Name] = &cp
+	cp.Models = append([]store.ProviderModel(nil), p.Models...)
+	m.profiles[id] = &cp
 	return nil
 }
 

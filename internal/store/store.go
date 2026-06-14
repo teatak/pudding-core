@@ -41,22 +41,74 @@ type SessionUpdate struct {
 	Model    *string `json:"model"`
 }
 
-// ProviderProfile 描述一个 LLM 端点实例(docs/technology-decisions.md 第 5 节)。
+// ProviderProfile 描述一个 LLM 端点实例。新的事实源是 config/profiles.yaml;
+// store 里保留类型是为了让 registry / API / 测试共用契约。
 // APIKey 只进不出:API 层读端点一律脱敏。
 type ProviderProfile struct {
-	Name    string `json:"name"`
-	Type    string `json:"type"` // openai-compatible | google | ...
-	BaseURL string `json:"baseURL"`
-	APIKey  string `json:"-"`
-	// DefaultModel:session.model 为空时的回落。模型名只在所属 profile 下
-	// 有意义,因此默认模型是 profile 属性,不存在全局默认模型。
-	DefaultModel string `json:"defaultModel"`
-	// Models:配置的可选模型清单。选择器只显示这里的内容;
-	// 端点的 /models 代理仅在配置表单里作为候选来源。
-	Models []string `json:"models"`
-	Extra        string    `json:"extra,omitempty"` // type 特有参数,JSON
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID        string          `json:"id" yaml:"-"`
+	Name      string          `json:"name" yaml:"name,omitempty"`
+	Type      string          `json:"type" yaml:"type"` // openai-compatible | openai-responses | google | ...
+	BaseURL   string          `json:"baseURL" yaml:"base_url,omitempty"`
+	APIKey    string          `json:"-" yaml:"api_key,omitempty"`
+	APIKeyEnv string          `json:"apiKeyEnv,omitempty" yaml:"api_key_env,omitempty"`
+	Models    []ProviderModel `json:"models" yaml:"models"`
+	CreatedAt time.Time       `json:"createdAt,omitempty" yaml:"-"`
+	UpdatedAt time.Time       `json:"updatedAt,omitempty" yaml:"-"`
+}
+
+func (p *ProviderProfile) ProfileID() string {
+	if p == nil {
+		return ""
+	}
+	if p.ID != "" {
+		return p.ID
+	}
+	return p.Name
+}
+
+func (p *ProviderProfile) DisplayName() string {
+	if p == nil {
+		return ""
+	}
+	if p.Name != "" {
+		return p.Name
+	}
+	return p.ProfileID()
+}
+
+func (p *ProviderProfile) HasModel(id string) bool {
+	if p == nil || id == "" {
+		return false
+	}
+	for _, m := range p.Models {
+		if m.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *ProviderProfile) FirstModelID() string {
+	if p == nil || len(p.Models) == 0 {
+		return ""
+	}
+	return p.Models[0].ID
+}
+
+type ProviderModel struct {
+	ID            string         `json:"id" yaml:"id"`
+	Name          string         `json:"name,omitempty" yaml:"name,omitempty"`
+	ContextWindow int            `json:"contextWindow,omitempty" yaml:"context_window,omitempty"`
+	Capabilities  *ModelCaps     `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
+	OpenAI        map[string]any `json:"openai,omitempty" yaml:"openai,omitempty"`
+	Google        map[string]any `json:"google,omitempty" yaml:"google,omitempty"`
+	Anthropic     map[string]any `json:"anthropic,omitempty" yaml:"anthropic,omitempty"`
+}
+
+type ModelCaps struct {
+	Image bool `json:"image" yaml:"image"`
+	Audio bool `json:"audio" yaml:"audio"`
+	Tools bool `json:"tools" yaml:"tools"`
 }
 
 type Role string
@@ -166,15 +218,6 @@ type Store interface {
 	// LatestSeq 返回 session 当前最大事件 seq(无事件为 0),
 	// 服务无续传位点的全新 SSE 连接从尾部开始(tail)。
 	LatestSeq(ctx context.Context, sessionID string) (int64, error)
-
-	Settings(ctx context.Context) (map[string]string, error)
-	SetSettings(ctx context.Context, kv map[string]string) error
-
-	// provider profiles:PutProviderProfile 为按 Name upsert。
-	ListProviderProfiles(ctx context.Context) ([]*ProviderProfile, error)
-	GetProviderProfile(ctx context.Context, name string) (*ProviderProfile, error)
-	PutProviderProfile(ctx context.Context, p *ProviderProfile) error
-	DeleteProviderProfile(ctx context.Context, name string) error
 
 	Close() error
 }

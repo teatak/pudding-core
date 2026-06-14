@@ -31,7 +31,7 @@ func Resolve(flagValue string) (string, error) {
 
 // Prepare 创建 home 目录结构。
 func Prepare(dir string) error {
-	for _, d := range []string{dir, filepath.Join(dir, "data"), filepath.Join(dir, "logs")} {
+	for _, d := range []string{dir, filepath.Join(dir, "data"), filepath.Join(dir, "config"), filepath.Join(dir, "logs")} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return fmt.Errorf("home: mkdir %s: %w", d, err)
 		}

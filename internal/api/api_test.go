@@ -26,8 +26,8 @@ func newTestServer(t *testing.T) (*httptest.Server, store.Store) {
 	t.Helper()
 	ms := memstore.New()
 	hub := event.NewHub()
-	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好", "世界"}), mock.WithDelay(5*time.Millisecond))), "m")
-	srv := httptest.NewServer(New(eng, ms, hub).Handler(testToken, nil))
+	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好", "世界"}), mock.WithDelay(5*time.Millisecond))), ms, "m")
+	srv := httptest.NewServer(New(eng, ms, ms, hub).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 	return srv, ms
 }
@@ -125,7 +125,7 @@ func TestProvidersCRUDRedactsAPIKey(t *testing.T) {
 	srv, _ := newTestServer(t)
 
 	resp := req(t, http.MethodPost, srv.URL+"/providers", map[string]string{
-		"name": "work", "type": "openai-compatible",
+		"id": "work", "name": "Work", "type": "openai-compatible",
 		"baseURL": "https://example.com/v1/", "apiKey": "sk-secret",
 	})
 	if resp.StatusCode != http.StatusCreated {
@@ -146,7 +146,7 @@ func TestProvidersCRUDRedactsAPIKey(t *testing.T) {
 
 	// 重名 409
 	resp = req(t, http.MethodPost, srv.URL+"/providers", map[string]string{
-		"name": "work", "type": "openai-compatible", "baseURL": "https://x.com",
+		"id": "work", "name": "Work 2", "type": "openai-compatible", "baseURL": "https://x.com",
 	})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusConflict {
@@ -155,7 +155,7 @@ func TestProvidersCRUDRedactsAPIKey(t *testing.T) {
 
 	// 非法 type 400
 	resp = req(t, http.MethodPost, srv.URL+"/providers", map[string]string{
-		"name": "bad", "type": "nope",
+		"id": "bad", "name": "Bad", "type": "nope",
 	})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
@@ -204,7 +204,7 @@ func TestProviderModelsProxy(t *testing.T) {
 
 	srv, _ := newTestServer(t)
 	resp := req(t, http.MethodPost, srv.URL+"/providers", map[string]string{
-		"name": "up", "type": "openai-compatible", "baseURL": upstream.URL,
+		"id": "up", "name": "Upstream", "type": "openai-compatible", "baseURL": upstream.URL,
 	})
 	resp.Body.Close()
 
@@ -279,8 +279,8 @@ func TestDeleteSessionCancelsRunningTurn(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
 	eng := engine.New(ms, hub,
-		registry.Static(mock.New(mock.WithScript([]string{"slow"}), mock.WithDelay(2*time.Second))), "m")
-	srv := httptest.NewServer(New(eng, ms, hub).Handler(testToken, nil))
+		registry.Static(mock.New(mock.WithScript([]string{"slow"}), mock.WithDelay(2*time.Second))), ms, "m")
+	srv := httptest.NewServer(New(eng, ms, ms, hub).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 
 	sess := decodeJSON[store.Session](t, req(t, http.MethodPost, srv.URL+"/sessions", map[string]string{"title": "d"}))

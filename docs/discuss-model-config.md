@@ -4,6 +4,10 @@
 > 配置存放位置、preset 升级。结论会并入 docs/design-tools.md 并落一个前置切片 T0。
 > 背景文档:docs/technology-decisions.md 第 5 节(provider 路由)、
 > docs/design.md 第 4 节(模型选择器)、docs/design-tools.md(工具调用)。
+>
+> 2026-06-14 更新:已落地为 `<home>/config/settings.yaml` +
+> `<home>/config/profiles.yaml`;不再使用 SQLite `provider_profiles` 作为事实源,
+> 不设 `defaultModel`,默认模型为 `models[0]`。
 
 ## 0. 给评审的一句话
 

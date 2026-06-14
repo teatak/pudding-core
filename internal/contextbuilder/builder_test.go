@@ -20,7 +20,7 @@ func TestBuildUsesSettingsSystemPrompt(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	b := New(ms)
+	b := New(ms, ms)
 
 	req, err := b.Build(ctx, "s1", "m")
 	if err != nil {

@@ -12,6 +12,7 @@ import {
   settingsResponse,
   submitResponse,
   type Message,
+  type ProviderModel,
   type ProviderProfile,
   type Session,
 } from "@/contracts/api";
@@ -172,5 +173,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { Message, ProviderProfile, Session };
+export type { Message, ProviderModel, ProviderProfile, Session };
 export { createProviderRequest, patchProviderRequest };

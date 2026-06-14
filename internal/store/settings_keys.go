@@ -1,8 +1,8 @@
 package store
 
-// settings 表的约定键,集中定义避免散落;对照表见 docs/contracts-checklist.md。
+// settings 约定键,集中定义避免散落;对照表见 docs/contracts-checklist.md。
 // 注意:不存在全局默认模型键——模型名只在 profile 下有意义,
-// 默认模型是 provider_profiles.default_model。
+// 默认模型是 profiles.yaml 里对应 profile 的 models[0]。
 const (
 	// SettingSystemPrompt:contextbuilder 的 system instruction,空则用默认值。
 	SettingSystemPrompt = "system_prompt"

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/anthropic"
 	"github.com/teatak/pudding-core/internal/provider/google"
@@ -18,6 +19,7 @@ import (
 
 const (
 	TypeOpenAICompatible = "openai-compatible"
+	TypeOpenAIResponses  = "openai-responses"
 	TypeGoogle           = "google"
 	TypeAnthropic        = "anthropic"
 )
@@ -25,17 +27,21 @@ const (
 // SupportedType 报告 profile type 是否有对应的 Client 实现,API 校验用。
 func SupportedType(t string) bool {
 	switch t {
-	case TypeOpenAICompatible, TypeGoogle, TypeAnthropic:
+	case TypeOpenAICompatible, TypeOpenAIResponses, TypeGoogle, TypeAnthropic:
 		return true
 	}
 	return false
 }
 
 type Registry struct {
-	store store.Store
+	profiles ProfileSource
 
 	mu    sync.Mutex
 	cache map[string]cached // profile 名 → 实例;配置指纹变化即重建
+}
+
+type ProfileSource interface {
+	GetProviderProfile(ctx context.Context, name string) (*store.ProviderProfile, error)
 }
 
 type cached struct {
@@ -43,20 +49,21 @@ type cached struct {
 	client      provider.Client
 }
 
-func New(s store.Store) *Registry {
-	return &Registry{store: s, cache: make(map[string]cached)}
+func New(profiles ProfileSource) *Registry {
+	return &Registry{profiles: profiles, cache: make(map[string]cached)}
 }
 
 func (r *Registry) Resolve(ctx context.Context, name string) (provider.Client, error) {
 	if name == "" {
 		name = store.DefaultProviderProfile
 	}
-	p, err := r.store.GetProviderProfile(ctx, name)
+	p, err := r.profiles.GetProviderProfile(ctx, name)
 	if err != nil {
 		return nil, fmt.Errorf("provider profile %q not found: configure it via POST /providers", name)
 	}
 
-	fingerprint := p.Type + "\x00" + p.BaseURL + "\x00" + p.APIKey + "\x00" + p.Extra
+	apiKey := config.EffectiveAPIKey(p)
+	fingerprint := p.Type + "\x00" + p.BaseURL + "\x00" + apiKey + "\x00" + p.APIKeyEnv
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if c, ok := r.cache[name]; ok && c.fingerprint == fingerprint {
@@ -71,24 +78,30 @@ func (r *Registry) Resolve(ctx context.Context, name string) (provider.Client, e
 }
 
 func build(p *store.ProviderProfile) (provider.Client, error) {
+	apiKey := config.EffectiveAPIKey(p)
 	switch p.Type {
 	case TypeOpenAICompatible:
 		if p.BaseURL == "" {
-			return nil, fmt.Errorf("provider profile %q: base_url is required", p.Name)
+			return nil, fmt.Errorf("provider profile %q: base_url is required", p.ProfileID())
 		}
-		return openai.New(openai.Config{BaseURL: p.BaseURL, APIKey: p.APIKey}), nil
+		return openai.New(openai.Config{BaseURL: p.BaseURL, APIKey: apiKey}), nil
+	case TypeOpenAIResponses:
+		if p.BaseURL == "" {
+			return nil, fmt.Errorf("provider profile %q: base_url is required", p.ProfileID())
+		}
+		return openai.NewResponses(openai.Config{BaseURL: p.BaseURL, APIKey: apiKey}), nil
 	case TypeGoogle:
-		if p.APIKey == "" {
-			return nil, fmt.Errorf("provider profile %q: api_key is required", p.Name)
+		if apiKey == "" {
+			return nil, fmt.Errorf("provider profile %q: api_key is required", p.ProfileID())
 		}
-		return google.New(google.Config{BaseURL: p.BaseURL, APIKey: p.APIKey}), nil
+		return google.New(google.Config{BaseURL: p.BaseURL, APIKey: apiKey}), nil
 	case TypeAnthropic:
-		if p.APIKey == "" {
-			return nil, fmt.Errorf("provider profile %q: api_key is required", p.Name)
+		if apiKey == "" {
+			return nil, fmt.Errorf("provider profile %q: api_key is required", p.ProfileID())
 		}
-		return anthropic.New(anthropic.Config{BaseURL: p.BaseURL, APIKey: p.APIKey}), nil
+		return anthropic.New(anthropic.Config{BaseURL: p.BaseURL, APIKey: apiKey}), nil
 	default:
-		return nil, fmt.Errorf("provider profile %q: unsupported type %q", p.Name, p.Type)
+		return nil, fmt.Errorf("provider profile %q: unsupported type %q", p.ProfileID(), p.Type)
 	}
 }
 

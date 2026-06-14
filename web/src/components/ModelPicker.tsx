@@ -47,19 +47,19 @@ export function ModelPicker({ token, session }: { token: string; session: Sessio
 
   const profiles = providersQuery.data?.providers || [];
   const defaultProvider = settingsQuery.data?.settings["provider.default"] || "default";
-  const currentProfileName = session.provider || defaultProvider;
-  const activeProfile = profiles.find((p) => p.name === currentProfileName);
-  const currentModel = session.model || activeProfile?.defaultModel || "";
+  const currentProfileID = session.provider || defaultProvider;
+  const activeProfile = profiles.find((p) => p.id === currentProfileID);
+  const currentModel = session.model || activeProfile?.models[0]?.id || "";
 
-  const [expanded, setExpanded] = useState(currentProfileName);
+  const [expanded, setExpanded] = useState(currentProfileID);
   useEffect(() => {
     if (open) {
-      setExpanded(currentProfileName);
+      setExpanded(currentProfileID);
     }
-  }, [open, currentProfileName]);
+  }, [open, currentProfileID]);
 
   // 品牌图标代替 provider 名;未命中图标的 profile 回落为文字名
-  const brandIcon = BrandIcon({ name: currentProfileName, className: "size-4 shrink-0" });
+  const brandIcon = BrandIcon({ name: activeProfile?.id || currentProfileID, className: "size-4 shrink-0" });
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -70,7 +70,7 @@ export function ModelPicker({ token, session }: { token: string; session: Sessio
           size="sm"
           variant="ghost"
         >
-          {brandIcon ?? <span className="truncate">{currentProfileName} ·</span>}
+          {brandIcon ?? <span className="truncate">{activeProfile?.name || currentProfileID} ·</span>}
           <span className="truncate">{currentModel ? formatModelLabel(currentModel) : t("common.default")}</span>
           <ChevronDown className="size-3 shrink-0" />
         </Button>
@@ -79,14 +79,14 @@ export function ModelPicker({ token, session }: { token: string; session: Sessio
         <Accordion collapsible type="single" value={expanded} onValueChange={setExpanded}>
           {profiles.map((profile) => (
             <AccordionItem
-              key={profile.name}
+              key={profile.id}
               // ui 组件的分割线带 not-last: 变体,关掉要用同变体才能命中
               className="not-last:border-b-0"
-              value={profile.name}
+              value={profile.id}
             >
               <AccordionTrigger className="rounded-md px-2.5 py-2 text-sm hover:bg-accent hover:no-underline">
                 <span className="flex min-w-0 items-center gap-2">
-                  <BrandIcon className="size-4 shrink-0" name={profile.name} />
+                  <BrandIcon className="size-4 shrink-0" name={profile.id} />
                   <span className="truncate">{profile.name}</span>
                   <Badge className="text-[10px] font-normal" variant="outline">
                     {profile.type}
@@ -95,10 +95,10 @@ export function ModelPicker({ token, session }: { token: string; session: Sessio
               </AccordionTrigger>
               <AccordionContent className="pb-1">
                 <ProfileModels
-                  currentModel={session.provider === profile.name ? session.model : ""}
-                  isCurrentProfile={currentProfileName === profile.name}
+                  currentModel={session.provider === profile.id ? session.model : ""}
+                  isCurrentProfile={currentProfileID === profile.id}
                   profile={profile}
-                  onPick={(model) => patchMutation.mutate({ provider: profile.name, model })}
+                  onPick={(model) => patchMutation.mutate({ provider: profile.id, model })}
                 />
               </AccordionContent>
             </AccordionItem>
@@ -123,7 +123,11 @@ function ProfileModels({
   const { t } = useI18n();
   // 只显示 profile 配置的模型清单;端点的 /models 代理仅在配置表单里
   // 作为候选来源(用户反馈:选择器不做自动加载)
-  const models = Array.from(new Set([profile.defaultModel, ...profile.models, currentModel].filter(Boolean)));
+  const models = profile.models.map((model) => model.id).filter(Boolean);
+  if (currentModel && !models.includes(currentModel)) {
+    models.unshift(currentModel);
+  }
+  const defaultModel = profile.models[0]?.id || "";
 
   if (models.length === 0) {
     return <div className="px-2.5 py-1 text-xs text-muted-foreground">{t("picker.noModels")}</div>;
@@ -132,7 +136,7 @@ function ProfileModels({
   return (
     <div className="grid max-h-56 gap-0.5 overflow-y-auto px-1">
       {models.map((model) => {
-        const selected = isCurrentProfile && (currentModel ? currentModel === model : profile.defaultModel === model);
+        const selected = isCurrentProfile && (currentModel ? currentModel === model : defaultModel === model);
         return (
           <button
             key={model}
@@ -144,7 +148,7 @@ function ProfileModels({
               <span className="truncate" title={model}>
                 {formatModelLabel(model)}
               </span>
-              {model === profile.defaultModel ? (
+              {model === defaultModel ? (
                 <Badge className="text-[10px] font-normal" variant="secondary">
                   {t("common.default")}
                 </Badge>

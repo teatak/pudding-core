@@ -13,10 +13,17 @@ import (
 const defaultSystemPrompt = "You are Pudding, a helpful local-first assistant."
 
 type Builder struct {
-	store store.Store
+	store    store.Store
+	settings SettingsSource
 }
 
-func New(s store.Store) *Builder { return &Builder{store: s} }
+type SettingsSource interface {
+	Settings(ctx context.Context) (map[string]string, error)
+}
+
+func New(s store.Store, settings SettingsSource) *Builder {
+	return &Builder{store: s, settings: settings}
+}
 
 // Build 在 user message 已落库之后调用,因此 current input 已包含在
 // canonical messages 里,不需要单独拼接。
@@ -25,7 +32,7 @@ func (b *Builder) Build(ctx context.Context, sessionID, model string) (provider.
 	if err != nil {
 		return provider.Request{}, err
 	}
-	settings, err := b.store.Settings(ctx)
+	settings, err := b.settings.Settings(ctx)
 	if err != nil {
 		return provider.Request{}, err
 	}

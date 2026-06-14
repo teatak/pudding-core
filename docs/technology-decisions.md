@@ -210,24 +210,26 @@ Provider 路由(后续,先定形不实现):
 - session 选择 LLM 的形状是 `session.provider + session.model`:
   - `provider` 指向一个命名的 **provider profile**(如 `default` / `work` / `local`);
   - `model` 是该 profile 下的模型名。
-- profile 描述一个端点实例:`type`(openai-compatible / google / anthropic / …)
+- profile 描述一个端点实例:`type`(openai-responses / openai-compatible / google / anthropic / …)
   + `base_url` + `api_key` 等。同一 type 允许多个 profile
-  (OpenRouter 与本机 Ollama 都是 openai-compatible,但是两个 profile)。
-- profile 是实体(有身份与生命周期),不进 settings:直接落
-  `provider_profiles` 表 + 独立 REST 资源。settings 只放标量偏好
-  (`system_prompt` / `provider.default`),k=v 不承载结构化实体。
-- **默认模型是 profile 属性**(`default_model` 列):模型名只在所属 profile
-  下有意义,不存在全局默认模型键。
+  (OpenAI 官方走 openai-responses;OpenRouter 与本机 Ollama 都是 openai-compatible,
+  但是两个 profile)。
+- profile 是实体(有身份与生命周期),不进 SQLite:直接落
+  `<home>/config/profiles.yaml` + 独立 REST 资源。settings 只放标量偏好
+  (`system_prompt` / `provider.default`),磁盘事实源是
+  `<home>/config/settings.yaml`。
+- 不设 `defaultModel` 字段:模型名只在所属 profile 下有意义,`models[0]`
+  是自然默认模型,不存在全局默认模型键。
 - engine 不持有单一 client,改持 **ProviderRegistry**:按 profile 名解析并缓存
   client 实例;`provider.Client` 接口与 contextbuilder 的中立输出不变。
   现有 settingsProvider 就是只有一个匿名 profile 的退化 registry,演进路径平滑。
 - 解析顺序:`session.provider` > settings `provider.default` > 内置默认 profile;
-  model:`session.model` > 所解析 profile 的 `default_model` > `--model` flag。
+  model:`session.model` > 所解析 profile 的 `models[0].id` > `--model` flag(mock/dev only)。
 - provider/model 都是 BeginTurn 时刻快照,改配置不影响进行中的 turn。
 - 存储落点:
   - `session.provider` 存 `sessions` 表,与 `model` 并列,`PATCH /sessions/{id}` 可改;
-  - profile 存 `provider_profiles` 表;api_key 安全性同第 9 节
-    (SQLite 明文 + home 0600,桌面阶段评估 keychain);
+  - profile 存 `<home>/config/profiles.yaml`;api_key 安全性同第 9 节
+    (home 0600,桌面阶段评估 keychain;优先支持 `api_key_env`);
   - turn 实际使用的 provider/model 在 `turns` 表落快照列,
     审计与 UI"由哪个模型生成"标注用;messages 不存 provider 信息。
 - 触发时机:接入第二个 provider 类型(Gemini)时一并落地,避免单 provider
@@ -236,25 +238,14 @@ Provider 路由(后续,先定形不实现):
 表结构与 API 定形(随 registry 落地,pre-launch 直接改 schema 不留迁移):
 
 ```sql
-CREATE TABLE provider_profiles (
-    name          TEXT PRIMARY KEY,           -- session.provider 引用此名
-    type          TEXT NOT NULL,              -- 决定用哪个 Client 实现
-    base_url      TEXT NOT NULL DEFAULT '',
-    api_key       TEXT NOT NULL DEFAULT '',   -- 明文,安全性同第 9 节
-    default_model TEXT NOT NULL DEFAULT '',   -- session.model 为空时的回落
-    extra         TEXT NOT NULL DEFAULT '{}', -- type 特有参数,JSON
-    created_at    INTEGER NOT NULL,
-    updated_at    INTEGER NOT NULL
-);
-
--- 既有表加列
+-- 既有表加列;provider profile 不再进 SQLite
 ALTER TABLE sessions ADD COLUMN provider TEXT NOT NULL DEFAULT ''; -- 空 = 默认 profile
 ALTER TABLE turns    ADD COLUMN provider TEXT NOT NULL DEFAULT ''; -- BeginTurn 快照
 ALTER TABLE turns    ADD COLUMN model    TEXT NOT NULL DEFAULT '';
 ```
 
 ```text
-GET    /providers            # 列表,api_key 脱敏(只回 api_key_set: true/false)
+GET    /providers            # 列表,api_key 脱敏(只回 apiKeySet/apiKeyEnv)
 POST   /providers
 GET    /providers/{name}     # 同样脱敏
 PATCH  /providers/{name}     # api_key 传非空才覆盖
@@ -264,7 +255,7 @@ DELETE /providers/{name}
 - api_key 只进不出:任何读端点不回明文,UI 只显示"已设置"。
 - `sessions.provider` 不设外键:profile 被删后悬空引用按
   "provider not configured" 落 turn.failed,与未配置行为一致,不级联改 session。
-- 默认 profile 用 settings `provider.default` 键表达,不在表里放 is_default 列,
+- 默认 profile 用 settings `provider.default` 键表达,不在 profile 里放 is_default 字段,
   避免双事实源。
 - (已完成)单 provider 阶段的 `provider.openai.*` 与全局 `model.default`
   过渡键已随 registry 收口删除,registry 不再有任何隐式回落。
@@ -290,7 +281,6 @@ DELETE /providers/{name}
 - `skills`
 - `audio_assets`
 - `speaker_profiles`
-- `provider_profiles`(随 provider registry 落地)
 
 规则:
 
@@ -436,6 +426,9 @@ home 内容(第一阶段):
 <home>/
   data/
     pudding.db    # SQLite(含 WAL/SHM)
+  config/
+    settings.yaml # default_profile/system_prompt
+    profiles.yaml # provider profiles + model metadata
   daemon.token    # 启动 token
   logs/
 ```
@@ -444,7 +437,8 @@ home 内容(第一阶段):
 
 - 隔离是绝对的:dev 进程不读写 `~/.pudding`,release 进程不读写 `~/.pudding-dev`;不做自动迁移或同步。
 - 默认端口按通道错开,两个通道的 daemon 可同时运行,token 各自独立。
-- 第一阶段不引入 `config.yaml` / `configs/` 分层文件:bootstrap 参数走 flag/env,业务 settings 走 SQLite `settings` 表。旧仓库的 yaml fragments + legacy override 分层是模板漂移的源头,不再重演。
+- profile/model/settings 配置文件固定下沉到 `config/` 目录;不做旧仓库多 fragment
+  merge 体系。DB 只承载运行数据(sessions/messages/turns/events)。
 - 测试一律用临时目录(`t.TempDir()`),禁止触碰任何真实 home。
 - dev home 的数据可随时整目录删除重建,不承诺任何保留。
 

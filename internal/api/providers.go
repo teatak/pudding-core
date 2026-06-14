@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/teatak/cart/v3"
+	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/provider/anthropic"
 	"github.com/teatak/pudding-core/internal/provider/google"
 	"github.com/teatak/pudding-core/internal/provider/openai"
@@ -18,55 +19,60 @@ import (
 // providerProfileView 是 profile 的脱敏响应形状:api_key 只进不出
 // (docs/technology-decisions.md 第 5 节),读端点只回 apiKeySet。
 type providerProfileView struct {
-	Name         string `json:"name"`
-	Type         string `json:"type"`
-	BaseURL      string `json:"baseURL"`
-	APIKeySet    bool     `json:"apiKeySet"`
-	DefaultModel string   `json:"defaultModel"`
-	Models       []string `json:"models"`
-	Extra        string `json:"extra,omitempty"`
-	CreatedAt    string `json:"createdAt"`
-	UpdatedAt    string `json:"updatedAt"`
+	ID        string                `json:"id"`
+	Name      string                `json:"name"`
+	Type      string                `json:"type"`
+	BaseURL   string                `json:"baseURL"`
+	APIKeySet bool                  `json:"apiKeySet"`
+	APIKeyEnv string                `json:"apiKeyEnv,omitempty"`
+	Models    []store.ProviderModel `json:"models"`
 }
 
 func viewProfile(p *store.ProviderProfile) providerProfileView {
 	return providerProfileView{
-		Name:         p.Name,
-		Type:         p.Type,
-		BaseURL:      p.BaseURL,
-		APIKeySet:    p.APIKey != "",
-		DefaultModel: p.DefaultModel,
-		Models:       append([]string{}, p.Models...),
-		Extra:        p.Extra,
-		CreatedAt:    p.CreatedAt.Format(timeRFC3339),
-		UpdatedAt:    p.UpdatedAt.Format(timeRFC3339),
+		ID:        p.ProfileID(),
+		Name:      p.DisplayName(),
+		Type:      p.Type,
+		BaseURL:   p.BaseURL,
+		APIKeySet: config.EffectiveAPIKey(p) != "",
+		APIKeyEnv: p.APIKeyEnv,
+		Models:    append([]store.ProviderModel{}, p.Models...),
 	}
 }
 
-const timeRFC3339 = "2006-01-02T15:04:05.999999999Z07:00"
-
 type createProfileReq struct {
-	Name         string `json:"name"`
-	Type         string `json:"type"`
-	BaseURL      string `json:"baseURL"`
-	APIKey       string   `json:"apiKey"`
-	DefaultModel string   `json:"defaultModel"`
-	Models       []string `json:"models"`
-	Extra        string   `json:"extra"`
+	ID        string                `json:"id"`
+	Name      string                `json:"name"`
+	Type      string                `json:"type"`
+	BaseURL   string                `json:"baseURL"`
+	APIKey    string                `json:"apiKey"`
+	APIKeyEnv string                `json:"apiKeyEnv"`
+	Models    []store.ProviderModel `json:"models"`
 }
 
 type patchProfileReq struct {
+	Name    *string `json:"name"`
 	Type    *string `json:"type"`
 	BaseURL *string `json:"baseURL"`
 	// APIKey 传非空才覆盖;清除 key 走 DELETE 后重建。
-	APIKey       *string   `json:"apiKey"`
-	DefaultModel *string   `json:"defaultModel"`
-	Models       *[]string `json:"models"`
-	Extra        *string   `json:"extra"`
+	APIKey    *string                `json:"apiKey"`
+	APIKeyEnv *string                `json:"apiKeyEnv"`
+	Models    *[]store.ProviderModel `json:"models"`
+}
+
+type providerWriter interface {
+	ListProviderProfiles(ctx context.Context) ([]*store.ProviderProfile, error)
+	GetProviderProfile(ctx context.Context, name string) (*store.ProviderProfile, error)
+	PutProviderProfile(ctx context.Context, p *store.ProviderProfile) error
+	DeleteProviderProfile(ctx context.Context, name string) error
 }
 
 func (s *Server) listProviders(c *cart.Context) error {
-	profiles, err := s.store.ListProviderProfiles(c.Request.Context())
+	cfg, ok := s.providerConfig(c)
+	if !ok {
+		return nil
+	}
+	profiles, err := cfg.ListProviderProfiles(c.Request.Context())
 	if err != nil {
 		return s.fail(c, err)
 	}
@@ -83,28 +89,35 @@ func (s *Server) createProvider(c *cart.Context) error {
 	if err := decode(c, &req); err != nil {
 		return badRequest(c, "invalid json body")
 	}
-	req.Name = strings.TrimSpace(req.Name)
-	if req.Name == "" || strings.ContainsAny(req.Name, "/ ") {
-		return badRequest(c, "name is required and must not contain '/' or spaces")
+	req.ID = strings.TrimSpace(req.ID)
+	if req.ID == "" || strings.ContainsAny(req.ID, "/ ") {
+		return badRequest(c, "id is required and must not contain '/' or spaces")
 	}
 	if !registry.SupportedType(req.Type) {
 		return badRequest(c, "unsupported type: "+req.Type)
 	}
 	ctx := c.Request.Context()
-	if _, err := s.store.GetProviderProfile(ctx, req.Name); err == nil {
+	cfg, ok := s.providerConfig(c)
+	if !ok {
+		return nil
+	}
+	if _, err := cfg.GetProviderProfile(ctx, req.ID); err == nil {
 		c.JSON(http.StatusConflict, map[string]string{"error": "profile_exists"})
 		return nil
 	}
 	p := &store.ProviderProfile{
-		Name:         req.Name,
-		Type:         req.Type,
-		BaseURL:      strings.TrimRight(req.BaseURL, "/"),
-		APIKey:       req.APIKey,
-		DefaultModel: req.DefaultModel,
-		Models:       req.Models,
-		Extra:        defaultExtra(req.Extra),
+		ID:        req.ID,
+		Name:      strings.TrimSpace(req.Name),
+		Type:      req.Type,
+		BaseURL:   strings.TrimRight(req.BaseURL, "/"),
+		APIKey:    req.APIKey,
+		APIKeyEnv: strings.TrimSpace(req.APIKeyEnv),
+		Models:    cleanModels(req.Models),
 	}
-	if err := s.store.PutProviderProfile(ctx, p); err != nil {
+	if p.Name == "" {
+		p.Name = p.ID
+	}
+	if err := cfg.PutProviderProfile(ctx, p); err != nil {
 		return s.fail(c, err)
 	}
 	c.JSON(http.StatusCreated, viewProfile(p))
@@ -113,7 +126,11 @@ func (s *Server) createProvider(c *cart.Context) error {
 
 func (s *Server) getProvider(c *cart.Context) error {
 	name, _ := c.Param("name")
-	p, err := s.store.GetProviderProfile(c.Request.Context(), name)
+	cfg, ok := s.providerConfig(c)
+	if !ok {
+		return nil
+	}
+	p, err := cfg.GetProviderProfile(c.Request.Context(), name)
 	if err != nil {
 		return s.fail(c, err)
 	}
@@ -128,9 +145,19 @@ func (s *Server) patchProvider(c *cart.Context) error {
 		return badRequest(c, "invalid json body")
 	}
 	ctx := c.Request.Context()
-	p, err := s.store.GetProviderProfile(ctx, name)
+	cfg, ok := s.providerConfig(c)
+	if !ok {
+		return nil
+	}
+	p, err := cfg.GetProviderProfile(ctx, name)
 	if err != nil {
 		return s.fail(c, err)
+	}
+	if req.Name != nil {
+		p.Name = strings.TrimSpace(*req.Name)
+		if p.Name == "" {
+			p.Name = p.ProfileID()
+		}
 	}
 	if req.Type != nil {
 		if !registry.SupportedType(*req.Type) {
@@ -144,16 +171,13 @@ func (s *Server) patchProvider(c *cart.Context) error {
 	if req.APIKey != nil && *req.APIKey != "" {
 		p.APIKey = *req.APIKey
 	}
-	if req.DefaultModel != nil {
-		p.DefaultModel = *req.DefaultModel
+	if req.APIKeyEnv != nil {
+		p.APIKeyEnv = strings.TrimSpace(*req.APIKeyEnv)
 	}
 	if req.Models != nil {
-		p.Models = *req.Models
+		p.Models = cleanModels(*req.Models)
 	}
-	if req.Extra != nil {
-		p.Extra = defaultExtra(*req.Extra)
-	}
-	if err := s.store.PutProviderProfile(ctx, p); err != nil {
+	if err := cfg.PutProviderProfile(ctx, p); err != nil {
 		return s.fail(c, err)
 	}
 	c.JSON(http.StatusOK, viewProfile(p))
@@ -162,18 +186,38 @@ func (s *Server) patchProvider(c *cart.Context) error {
 
 func (s *Server) deleteProvider(c *cart.Context) error {
 	name, _ := c.Param("name")
-	if err := s.store.DeleteProviderProfile(c.Request.Context(), name); err != nil {
+	cfg, ok := s.providerConfig(c)
+	if !ok {
+		return nil
+	}
+	if err := cfg.DeleteProviderProfile(c.Request.Context(), name); err != nil {
 		return s.fail(c, err)
 	}
 	c.String(http.StatusNoContent, "")
 	return nil
 }
 
-func defaultExtra(extra string) string {
-	if strings.TrimSpace(extra) == "" {
-		return "{}"
+func (s *Server) providerConfig(c *cart.Context) (providerWriter, bool) {
+	if s.providers == nil {
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "provider_config_unavailable"})
+		return nil, false
 	}
-	return extra
+	return s.providers, true
+}
+
+func cleanModels(models []store.ProviderModel) []store.ProviderModel {
+	out := make([]store.ProviderModel, 0, len(models))
+	seen := map[string]bool{}
+	for _, m := range models {
+		m.ID = strings.TrimSpace(m.ID)
+		m.Name = strings.TrimSpace(m.Name)
+		if m.ID == "" || seen[m.ID] {
+			continue
+		}
+		seen[m.ID] = true
+		out = append(out, m)
+	}
+	return out
 }
 
 // 模型目录代理:按 profile type 转发真实端点的模型列表,短缓存。
@@ -192,12 +236,17 @@ var (
 
 func (s *Server) listProviderModels(c *cart.Context) error {
 	name, _ := c.Param("name")
-	p, err := s.store.GetProviderProfile(c.Request.Context(), name)
+	cfg, ok := s.providerConfig(c)
+	if !ok {
+		return nil
+	}
+	p, err := cfg.GetProviderProfile(c.Request.Context(), name)
 	if err != nil {
 		return s.fail(c, err)
 	}
 
-	cacheKey := p.Name + "\x00" + p.Type + "\x00" + p.BaseURL + "\x00" + p.APIKey
+	apiKey := config.EffectiveAPIKey(p)
+	cacheKey := p.ProfileID() + "\x00" + p.Type + "\x00" + p.BaseURL + "\x00" + apiKey
 	modelsCacheMu.Lock()
 	if entry, ok := modelsCache[cacheKey]; ok && time.Since(entry.at) < modelsCacheTTL {
 		modelsCacheMu.Unlock()
@@ -210,12 +259,12 @@ func (s *Server) listProviderModels(c *cart.Context) error {
 	defer cancel()
 	var models []string
 	switch p.Type {
-	case registry.TypeOpenAICompatible:
-		models, err = openai.ListModels(ctx, openai.Config{BaseURL: p.BaseURL, APIKey: p.APIKey})
+	case registry.TypeOpenAICompatible, registry.TypeOpenAIResponses:
+		models, err = openai.ListModels(ctx, openai.Config{BaseURL: p.BaseURL, APIKey: apiKey})
 	case registry.TypeGoogle:
-		models, err = google.ListModels(ctx, google.Config{BaseURL: p.BaseURL, APIKey: p.APIKey})
+		models, err = google.ListModels(ctx, google.Config{BaseURL: p.BaseURL, APIKey: apiKey})
 	case registry.TypeAnthropic:
-		models, err = anthropic.ListModels(ctx, anthropic.Config{BaseURL: p.BaseURL, APIKey: p.APIKey})
+		models, err = anthropic.ListModels(ctx, anthropic.Config{BaseURL: p.BaseURL, APIKey: apiKey})
 	default:
 		return badRequest(c, "unsupported type: "+p.Type)
 	}

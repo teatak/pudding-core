@@ -34,8 +34,24 @@ type Resolver interface {
 	Resolve(ctx context.Context, name string) (provider.Client, error)
 }
 
+type ConfigSource interface {
+	Settings(ctx context.Context) (map[string]string, error)
+	GetProviderProfile(ctx context.Context, name string) (*store.ProviderProfile, error)
+}
+
+type emptyConfig struct{}
+
+func (emptyConfig) Settings(context.Context) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
+func (emptyConfig) GetProviderProfile(context.Context, string) (*store.ProviderProfile, error) {
+	return nil, store.ErrNotFound
+}
+
 type Engine struct {
 	store        store.Store
+	config       ConfigSource
 	hub          *event.Hub
 	resolver     Resolver
 	builder      *contextbuilder.Builder
@@ -53,13 +69,17 @@ type Engine struct {
 	wg      sync.WaitGroup
 }
 
-func New(s store.Store, hub *event.Hub, resolver Resolver, defaultModel string) *Engine {
+func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, defaultModel string) *Engine {
+	if cfg == nil {
+		cfg = emptyConfig{}
+	}
 	auxCtx, auxCancel := context.WithCancel(context.Background())
 	return &Engine{
 		store:        s,
+		config:       cfg,
 		hub:          hub,
 		resolver:     resolver,
-		builder:      contextbuilder.New(s),
+		builder:      contextbuilder.New(s, cfg),
 		defaultModel: defaultModel,
 		auxCtx:       auxCtx,
 		auxCancel:    auxCancel,
@@ -94,12 +114,12 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	}
 
 	// provider / model 在提交时刻解析并随 turn 快照,改配置不影响进行中的 turn。
-	// provider:session 字段 > settings provider.default > 内置 "default";
-	// model:session 字段 > 所解析 profile 的 default_model >(仅 dev/mock)--model。
+	// provider:session 字段 > config default_profile > 内置 "default";
+	// model:session 字段 > profile.models[0] >(仅 dev/mock)--model。
 	// 模型名只在 profile 下有意义,不存在全局默认模型。
 	providerName := sess.Provider
 	if providerName == "" {
-		if settings, err := e.store.Settings(ctx); err == nil {
+		if settings, err := e.config.Settings(ctx); err == nil {
 			providerName = settings[store.SettingDefaultProvider]
 		}
 	}
@@ -107,9 +127,11 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 		providerName = store.DefaultProviderProfile
 	}
 	model := sess.Model
-	if model == "" {
-		if p, err := e.store.GetProviderProfile(ctx, providerName); err == nil {
-			model = p.DefaultModel
+	if p, err := e.config.GetProviderProfile(ctx, providerName); err == nil {
+		if model == "" {
+			model = p.FirstModelID()
+		} else if len(p.Models) > 0 && !p.HasModel(model) {
+			return nil, ErrNoModel
 		}
 	}
 	if model == "" {
