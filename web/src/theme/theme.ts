@@ -1,9 +1,12 @@
 import { useSyncExternalStore } from "react";
 
 export type Theme = "light" | "dark" | "system";
+type ResolvedTheme = "light" | "dark";
+type ThemeSnapshot = `${Theme}:${ResolvedTheme}`;
 
 const STORAGE_KEY = "pudding.theme";
 const listeners = new Set<() => void>();
+let themeSyncStarted = false;
 
 export function readStoredTheme(): Theme {
   if (typeof window === "undefined") {
@@ -13,7 +16,7 @@ export function readStoredTheme(): Theme {
   return value === "light" || value === "dark" || value === "system" ? value : "system";
 }
 
-export function resolveTheme(theme: Theme): "light" | "dark" {
+export function resolveTheme(theme: Theme): ResolvedTheme {
   if (theme !== "system") {
     return theme;
   }
@@ -32,33 +35,41 @@ export function applyTheme(theme: Theme) {
   document.documentElement.style.colorScheme = resolved;
 }
 
-export function setTheme(theme: Theme) {
-  window.localStorage.setItem(STORAGE_KEY, theme);
-  applyTheme(theme);
+function notifyThemeChange() {
+  applyTheme(readStoredTheme());
   listeners.forEach((listener) => listener());
 }
 
-function subscribe(listener: () => void) {
-  listeners.add(listener);
+export function startThemeSync() {
+  if (typeof window === "undefined" || themeSyncStarted) {
+    return;
+  }
+  themeSyncStarted = true;
   const media = window.matchMedia("(prefers-color-scheme: dark)");
-  const notify = () => {
-    applyTheme(readStoredTheme());
-    listener();
-  };
-  media.addEventListener("change", notify);
-  window.addEventListener("storage", notify);
+  media.addEventListener("change", notifyThemeChange);
+  window.addEventListener("storage", notifyThemeChange);
+}
+
+export function setTheme(theme: Theme) {
+  window.localStorage.setItem(STORAGE_KEY, theme);
+  notifyThemeChange();
+}
+
+function subscribe(listener: () => void) {
+  startThemeSync();
+  listeners.add(listener);
   return () => {
     listeners.delete(listener);
-    media.removeEventListener("change", notify);
-    window.removeEventListener("storage", notify);
   };
 }
 
-function snapshot() {
-  return readStoredTheme();
+function snapshot(): ThemeSnapshot {
+  const theme = readStoredTheme();
+  return `${theme}:${resolveTheme(theme)}`;
 }
 
 export function useTheme() {
-  const theme = useSyncExternalStore(subscribe, snapshot, snapshot);
-  return { theme, resolved: resolveTheme(theme) };
+  const value = useSyncExternalStore(subscribe, snapshot, snapshot);
+  const [theme, resolved] = value.split(":") as [Theme, ResolvedTheme];
+  return { theme, resolved };
 }

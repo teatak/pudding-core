@@ -9,9 +9,10 @@ import "@/styles.css";
 import { initShellMode } from "@/state/shell";
 
 initShellMode();
-import { applyTheme, readStoredTheme } from "@/theme/theme";
+import { applyTheme, readStoredTheme, startThemeSync } from "@/theme/theme";
 
 applyTheme(readStoredTheme());
+startThemeSync();
 
 const queryClient = new QueryClient({
   defaultOptions: {
