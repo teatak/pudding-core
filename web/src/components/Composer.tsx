@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { APIError, cancelTurn, submitMessage, type Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { ChatColumn } from "@/components/ChatColumn";
 import { ModelPicker } from "@/components/ModelPicker";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -43,6 +44,9 @@ export function Composer({ token, session }: ComposerProps) {
     resolver: zodResolver(composerSchema),
     defaultValues: { text: "" },
   });
+  // 空消息(含纯空白)不可发:禁用发送按钮 + Enter 不触发提交,从源头避免
+  // 弹出 zod min(1) 的校验错误。watch 让按钮态随输入实时更新。
+  const canSend = Boolean(form.watch("text").trim());
 
   const submitMutation = useMutation({
     mutationFn: async (value: z.infer<typeof composerSchema>) => {
@@ -71,6 +75,10 @@ export function Composer({ token, session }: ComposerProps) {
         form.setError("text", { message: t("composer.turnRunning") });
         return;
       }
+      if (error instanceof APIError && error.code === "no_model") {
+        form.setError("text", { message: t("composer.noModel") });
+        return;
+      }
       form.setError("text", { message: error instanceof Error ? error.message : t("composer.submitFailed") });
     },
   });
@@ -94,14 +102,17 @@ export function Composer({ token, session }: ComposerProps) {
 
   return (
     <form
-      className="relative px-5 pt-2 pb-4"
+      className="relative shrink-0 pt-2 pb-4"
       onSubmit={form.handleSubmit(submitDraft)}
     >
-      {/* 与对话区同底无分割线,衔接用渐变遮罩:滚动内容在贴近输入区时淡出。
-          文字边缘外漏不归遮罩管 — 那是 WKWebView 字形渲染溢出 viewport,
-          由 Transcript 根容器 overflow-hidden 裁掉 */}
-      <div className="pointer-events-none absolute inset-x-0 -top-10 h-10 bg-gradient-to-t from-background to-transparent" />
-      <div className="mx-auto w-full max-w-3xl">
+      {/* 底部遮罩:滚动内容贴近输入区时淡出,随 composer 定位、宽度走 ChatColumn。
+          文字边缘外漏不归遮罩管——那是 WKWebView 字形渲染溢出,Transcript overflow-hidden 裁掉 */}
+      <div className="pointer-events-none absolute inset-x-0 -top-10">
+        <ChatColumn>
+          <div className="h-10 bg-gradient-to-t from-background to-transparent" />
+        </ChatColumn>
+      </div>
+      <ChatColumn>
         <div className="relative rounded-3xl border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/25">
           <Textarea
             className="max-h-40 min-h-16 resize-none rounded-3xl border-0 bg-transparent px-4 pt-4 text-sm leading-6 shadow-none focus-visible:ring-0 md:text-sm dark:bg-transparent"
@@ -109,7 +120,9 @@ export function Composer({ token, session }: ComposerProps) {
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
-                void form.handleSubmit(submitDraft)();
+                if (canSend) {
+                  void form.handleSubmit(submitDraft)();
+                }
               }
             }}
             {...form.register("text")}
@@ -139,7 +152,7 @@ export function Composer({ token, session }: ComposerProps) {
                   <Button
                     aria-label={t("composer.send")}
                     className="rounded-full"
-                    disabled={submitMutation.isPending}
+                    disabled={submitMutation.isPending || !canSend}
                     size="icon"
                     type="submit"
                     variant="secondary"
@@ -155,7 +168,7 @@ export function Composer({ token, session }: ComposerProps) {
         {form.formState.errors.text ? (
           <div className="mt-2 text-xs text-destructive">{form.formState.errors.text.message}</div>
         ) : null}
-      </div>
+      </ChatColumn>
     </form>
   );
 }

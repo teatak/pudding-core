@@ -166,6 +166,9 @@ func (s *Server) submit(c *cart.Context) error {
 	case errors.Is(err, engine.ErrTurnRunning):
 		c.JSON(http.StatusConflict, map[string]string{"error": "turn_running"})
 		return nil
+	case errors.Is(err, engine.ErrNoModel):
+		c.JSON(http.StatusBadRequest, map[string]string{"error": "no_model"})
+		return nil
 	case err != nil:
 		return s.fail(c, err)
 	}

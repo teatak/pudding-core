@@ -4,12 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { listMessages, type Message } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { ChatColumn } from "@/components/ChatColumn";
 import { Mascot } from "@/components/Mascot";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useStreamedText } from "@/hooks/useStreamedText";
 import { useI18n } from "@/i18n";
 import { renderMarkdown } from "@/lib/markdown";
 import { formatClock } from "@/lib/time";
@@ -67,6 +69,21 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
     });
   }, [viewport]);
 
+  // followingBottom 的 ref 镜像:供 pinToBottom 在帧回调里读最新值,不吃闭包陈旧。
+  const followingBottomRef = useRef(followingBottom);
+  followingBottomRef.current = followingBottom;
+  // 平滑揭示是逐帧增高的(非逐 delta),贴底跟随必须跟着帧走,否则大 chunk
+  // ease-in 的那段会长在视口外。轻量直写 scrollTop,不重置 followingBottom。
+  const pinToBottom = useCallback(() => {
+    if (!followingBottomRef.current) {
+      return;
+    }
+    const node = viewport();
+    if (node) {
+      node.scrollTop = node.scrollHeight;
+    }
+  }, [viewport]);
+
   useEffect(() => {
     setFollowingBottom(true);
     scrollToBottom();
@@ -104,6 +121,25 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
     return () => node.removeEventListener("scroll", onScroll);
   }, [viewport, sessionID]);
 
+  // 窗口/分栏 resize 时内容重排,scrollTop 相对新高度会偏离底部;贴底态下重新滚到底。
+  // ResizeObserver 在 layout 之后回调,scrollHeight 已是重排后新值。
+  // 注:WebKit 下横向 / 快速 resize 的 reflow 可能晚于回调,偶有粘不住——属已知遗留,
+  // 留待后续单独根治。不再堆 rAF / setTimeout 兜底(只会换来肉眼可见的二次跳动 jank);
+  // column-reverse 那条路坑更多(scrollTop 符号、从底锚定漂移),已排除。
+  useEffect(() => {
+    const node = viewport();
+    if (!node) {
+      return;
+    }
+    const ro = new ResizeObserver(() => {
+      if (followingBottomRef.current) {
+        node.scrollTop = node.scrollHeight;
+      }
+    });
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, [viewport, sessionID]);
+
   useEffect(() => {
     if (followingBottom) {
       scrollToBottom();
@@ -127,7 +163,7 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
       {/* type=scroll:滚动条只在滚动时浮现;默认 hover 模式会在指针进入
           滚动区(即 hover 任意消息)时显示,观感突兀 */}
       <ScrollArea className="h-full" type="scroll">
-        <div className="mx-auto grid w-full max-w-3xl gap-4 px-5 py-5">
+        <ChatColumn className="grid gap-4 py-4">
           {messagesQuery.isLoading ? <TranscriptSkeleton /> : null}
           {messagesQuery.isError ? (
             <Alert variant="destructive">
@@ -142,9 +178,11 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
             if (item.kind === "pending") {
               return <PendingUserItem key={item.id} text={item.text} />;
             }
-            return <AssistantOverlayItem key={item.overlay.turnID} overlay={item.overlay} />;
+            return (
+              <AssistantOverlayItem key={item.overlay.turnID} overlay={item.overlay} onContentGrow={pinToBottom} />
+            );
           })}
-        </div>
+        </ChatColumn>
       </ScrollArea>
       {!followingBottom && items.length > 0 ? (
         <Button
@@ -233,13 +271,33 @@ function PendingUserItem({ text }: { text: string }) {
   );
 }
 
-function AssistantOverlayItem({ overlay }: { overlay: AssistantOverlay }) {
+function AssistantOverlayItem({
+  overlay,
+  onContentGrow,
+}: {
+  overlay: AssistantOverlay;
+  onContentGrow?: () => void;
+}) {
+  const streaming = overlay.status === "streaming";
+  // 平滑揭示:把 store 里逐 delta 累积的全量 overlay.text 按 rAF 匀速放出,
+  // 抹平 provider/proxy 的 chunk 粗细;非 streaming 立即 snap 到全量。
+  const text = useStreamedText(overlay.text, streaming);
+  const cursorVisible = streaming;
+
+  // 每帧揭示后贴底跟随(仅在用户处于贴底态时,由 pinToBottom 内部判定)
+  useEffect(() => {
+    onContentGrow?.();
+  }, [text, onContentGrow]);
+
   return (
     <div className="animate-in min-w-0 text-sm leading-6 duration-150 fade-in slide-in-from-bottom-1">
-      {overlay.text ? <TurnParts parts={partsFromText(overlay.text)} /> : null}
-      {overlay.status === "streaming" ? (
-        <span className="ml-1 inline-block animate-pulse text-primary">▍</span>
-      ) : null}
+      {text ? <TurnParts parts={partsFromText(text)} /> : null}
+      <span
+        aria-hidden="true"
+        className={cn("ml-1 inline-block text-primary", cursorVisible ? "animate-pulse opacity-100" : "opacity-0")}
+      >
+        ▍
+      </span>
       {overlay.status === "failed" && overlay.error ? (
         <Alert className="mt-2" variant="destructive">
           <CircleAlert className="h-3.5 w-3.5" />

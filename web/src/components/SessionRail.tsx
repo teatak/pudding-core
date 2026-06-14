@@ -21,7 +21,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { ResizeHandle, useResizableWidth } from "@/components/ResizeHandle";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -53,12 +52,6 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
   const collapsed = useRailCollapsed();
   const forcedCollapsed = useRailForcedCollapsed();
   const hover = useHoverPopover();
-  const { width: railWidth, startDrag: startRailDrag } = useResizableWidth({
-    key: "pudding.railWidth",
-    fallback: 268,
-    min: 220,
-    max: 420,
-  });
 
   const sessionsQuery = useQuery({
     queryKey: queryKeys.sessions(),
@@ -234,10 +227,8 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
 
   return (
     <aside
-      className="relative flex h-full shrink-0 flex-col gap-2 border-r bg-sidebar px-2 pb-2 text-sidebar-foreground"
-      style={{ width: railWidth }}
+      className="flex h-full shrink-0 flex-col gap-2 bg-sidebar px-2 pb-2 text-sidebar-foreground"
     >
-      <ResizeHandle className="-right-1" onPointerDown={startRailDrag} />
       {/* 顶行是 --toolbar-h 工具条(壳 54px,与 InvisibleTitleBarHeight 同值):
           壳模式下整行可拖拽,按钮垂直居中对齐红绿灯 */}
       <div

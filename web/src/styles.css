@@ -7,7 +7,7 @@
 
 @theme inline {
     --font-heading: var(--font-sans);
-    --font-sans: "Inter Variable", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+    --font-sans: 'Inter Variable', sans-serif;
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -50,43 +50,38 @@
 }
 
 :root {
-    /* 中性表面 + indigo 强调(docs/design.md v2 第 1 节)。
-       层级:chat 区 = 最暗底层,sidebar / card / popover = 逐级提亮。
-       表面色用 sRGB hex(oklch 等值换算,微冷调保留在 RGB 里):
-       规避 WKWebView 对大面积 oklch 纯色的宽色域合成伪影(见 .dark 注),
-       品牌色保留 oklch */
-    --background: #fbfcfd;
-    --foreground: #1b2025;
-    --card: #ffffff;
-    --card-foreground: #1b2025;
-    --popover: #ffffff;
-    --popover-foreground: #1b2025;
-    --primary: oklch(0.511 0.262 277);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: #f1f4f6;
-    --secondary-foreground: #25292f;
-    --muted: #f1f4f6;
-    --muted-foreground: #5e646c;
-    --accent: #eef0f3;
-    --accent-foreground: #20242a;
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.457 0.24 277.023);
+    --primary-foreground: oklch(0.962 0.018 272.314);
+    --secondary: oklch(0.967 0.001 286.375);
+    --secondary-foreground: oklch(0.21 0.006 285.885);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --accent: oklch(0.97 0 0);
+    --accent-foreground: oklch(0.205 0 0);
     --destructive: oklch(0.577 0.245 27.325);
-    --border: #e3e5e8;
-    --input: #e3e5e8;
-    --ring: #a1a1a1;
-    --chart-1: oklch(0.837 0.128 66.29);
-    --chart-2: oklch(0.705 0.213 47.604);
-    --chart-3: oklch(0.646 0.222 41.116);
-    --chart-4: oklch(0.553 0.195 38.402);
-    --chart-5: oklch(0.47 0.157 37.304);
+    --border: oklch(0.922 0 0);
+    --input: oklch(0.922 0 0);
+    --ring: oklch(0.708 0 0);
+    --chart-1: oklch(0.785 0.115 274.713);
+    --chart-2: oklch(0.585 0.233 277.117);
+    --chart-3: oklch(0.511 0.262 276.966);
+    --chart-4: oklch(0.457 0.24 277.023);
+    --chart-5: oklch(0.398 0.195 277.366);
     --radius: 0.625rem;
-    --sidebar: #ffffff;
-    --sidebar-foreground: #1b2025;
-    --sidebar-primary: oklch(0.511 0.262 277);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: #eaedf0;
-    --sidebar-accent-foreground: #20242a;
-    --sidebar-border: #e3e5e8;
-    --sidebar-ring: #a1a1a1;
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-primary: oklch(0.511 0.262 276.966);
+    --sidebar-primary-foreground: oklch(0.962 0.018 272.314);
+    --sidebar-accent: oklch(0.97 0 0);
+    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: oklch(0.708 0 0);
     /* macOS 红绿灯横向让位:浏览器 0;壳模式由 data-shell 切换,
        全屏时红绿灯隐藏、让位归零(design.md 2.3)。
        72px / 54px 来自旧项目实测的 NSToolbar inset rule 常量
@@ -120,44 +115,37 @@ html[data-shell] .drag-region :where(button, a, input, textarea, select, [role="
 }
 
 .dark {
-    /* 纯中性灰(chroma 0,不偏冷不偏暖)。chat 区最暗,
-       sidebar / card / popover 作为提亮的卡片层;border 用白色
-       alpha,跨不同亮度表面保持一致观感。
-       表面色用 sRGB hex 而非 oklch(等值换算):WKWebView 对大面积
-       oklch 纯色走宽色域(P3)layer 合成,与 sRGB layer 混合时出现
-       可见色差/暗斑伪影(失焦时尤其明显);hex 统一走 sRGB 路径。
-       品牌色(primary 等小面积)保留 oklch。 */
-    --background: #212121;
-    --foreground: #e8e8e8;
-    --card: #2e2e2e;
-    --card-foreground: #e8e8e8;
-    --popover: #333333;
-    --popover-foreground: #e8e8e8;
-    --primary: oklch(0.585 0.233 277);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: #393939;
-    --secondary-foreground: #e8e8e8;
-    --muted: #343434;
-    --muted-foreground: #a4a4a4;
-    --accent: #3e3e3e;
-    --accent-foreground: #eeeeee;
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.398 0.195 277.366);
+    --primary-foreground: oklch(0.962 0.018 272.314);
+    --secondary: oklch(0.274 0.006 286.033);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.704 0.191 22.216);
-    --border: rgb(255 255 255 / 12%);
-    --input: rgb(255 255 255 / 16%);
-    --ring: #737373;
-    --chart-1: oklch(0.837 0.128 66.29);
-    --chart-2: oklch(0.705 0.213 47.604);
-    --chart-3: oklch(0.646 0.222 41.116);
-    --chart-4: oklch(0.553 0.195 38.402);
-    --chart-5: oklch(0.47 0.157 37.304);
-    --sidebar: #2e2e2e;
-    --sidebar-foreground: #e8e8e8;
-    --sidebar-primary: oklch(0.585 0.233 277);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: #3d3d3d;
-    --sidebar-accent-foreground: #eeeeee;
-    --sidebar-border: rgb(255 255 255 / 12%);
-    --sidebar-ring: #737373;
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.556 0 0);
+    --chart-1: oklch(0.785 0.115 274.713);
+    --chart-2: oklch(0.585 0.233 277.117);
+    --chart-3: oklch(0.511 0.262 276.966);
+    --chart-4: oklch(0.457 0.24 277.023);
+    --chart-5: oklch(0.398 0.195 277.366);
+    --sidebar: oklch(0.205 0 0);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.585 0.233 277.117);
+    --sidebar-primary-foreground: oklch(0.962 0.018 272.314);
+    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.556 0 0);
     --success: oklch(0.7 0.11 175);
 }
 
@@ -166,13 +154,32 @@ html[data-shell] .drag-region :where(button, a, input, textarea, select, [role="
     @apply border-border outline-ring/50;
     }
   body {
-    @apply bg-background text-foreground text-sm leading-relaxed;
+    @apply text-sm leading-relaxed bg-background text-foreground;
     }
   html {
-    /* html 也涂背景:WKWebView 的 overscroll 回弹区 / 未绘制区域
-       露出的是 html 层,不涂会透出 webview 底色(壳模式下尤其可见) */
-    @apply bg-background font-sans;
+    /* html 涂背景 + 关回弹:overscroll 回弹区露出的是 html 层,不涂会透出
+       webview 底色(壳模式下尤其可见);overscroll-none 关掉整页橡皮筋——
+       trackpad 划到边界整页弹性回弹,会和 absolute/fixed 的 rail 触发器、
+       composer 渐变错位撕裂——同时阻断 scroll chaining 传到文档层。
+       macOS WKWebView 无公开 scrollView,native 禁用走不通(iOS/Android 才有),
+       CSS 是正解:Wails 自带 mobile 模板与旧项目同栈实测均如此。 */
+    @apply overscroll-none bg-background font-sans;
     }
+}
+
+/* Radix ScrollArea 真正滚动的是内部 viewport(非 root),回弹与 scroll chaining
+   的治理点在这一层。全局命中所有 shadcn ScrollArea(transcript / rail / 设置),
+   不 fork 官方组件;内层用 none 连自身过冲也消,与 html 层一致彻底无回弹。 */
+[data-slot="scroll-area-viewport"] {
+  overscroll-behavior: none;
+}
+
+/* Radix viewport 内部包了一层 display:table;min-width:100%(横向滚动探测用),会让
+   子元素的 max-width 居中失效——内容被撑满整宽(宽屏正文拉伸)。transcript 只纵向
+   滚动,强制这层为 block,让 max-w-3xl mx-auto 内容列正常居中、不拉伸。
+   覆盖 Radix 的 inline display:table 需 !important。 */
+[data-slot="scroll-area-viewport"] > div {
+  display: block !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,13 +1,14 @@
 // pudding-desktop 是 Pudding 的桌面壳:daemon 同进程内嵌(单二进制),
 // 窗口加载带 token 的本地 URL(内存直传,无手贴),tray 常驻。
-// 通道单端口,attach-or-start:端口空闲则内嵌启动 daemon;被活的
-// pudding daemon 占用(如 CLI 先起)则直接挂上去,壳退化为纯视图。
+// 通道单端口:端口被占即报错退出——不 attach 既有实例,因为 attach 会让壳加载
+// 旧实例 serve 的旧 web,改了代码却看不到,极易踩坑。
 // 边界:壳只做启动与系统集成,不碰 session runtime
 // (docs/technology-decisions.md 第 4 节)。
 package main
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -16,6 +17,7 @@ import (
 	"runtime"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -25,58 +27,32 @@ import (
 	"github.com/teatak/pudding-core/internal/home"
 )
 
-// attachExisting 在通道端口被占时探测占用者:用 home 下持久化的
-// daemon.token 鉴权访问 /sessions,通了说明是同通道的活 pudding
-// daemon(token 是 load-or-create 的,跨宿主同一把),返回直连 URL。
-func attachExisting(addr string) (string, bool) {
-	dir, err := home.Resolve("")
-	if err != nil {
-		return "", false
-	}
-	raw, err := os.ReadFile(home.TokenPath(dir))
-	if err != nil {
-		return "", false
-	}
-	token := strings.TrimSpace(string(raw))
-	if token == "" {
-		return "", false
-	}
-	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/sessions", addr), nil)
-	if err != nil {
-		return "", false
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", false
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", false
-	}
-	return fmt.Sprintf("http://%s/?token=%s", addr, token), true
-}
+//go:embed tray_icon.png
+var trayIcon []byte // macOS menubar template icon(黑 + alpha 剪影)
 
 func main() {
 	addr := home.DefaultAddr()
-	// d 为 nil 表示 attach 模式:daemon 归别的进程管,壳只是视图,
-	// 退出时不做 Shutdown,也没有 serve 错误可监听。
-	var openURL string
-	d, err := daemon.Start(daemon.Options{Addr: addr, DefaultModel: "mock-model"})
-	switch {
-	case err == nil:
-		openURL = d.OpenURL()
-	default:
-		url, ok := attachExisting(addr)
-		if !ok {
-			slog.Error("pudding-desktop: start daemon failed and no live pudding daemon to attach",
-				"addr", addr, "err", err)
-			os.Exit(1)
+	d, err := daemon.Start(daemon.Options{Addr: addr})
+	if err != nil {
+		// 通道单端口:端口被占说明已有实例在跑。不再 attach(壳会加载旧实例 serve
+		// 的旧 web,改了代码却看不到),直接报错退出,让用户先停掉旧实例
+		// (或用 make desktop-dev / web-dev,它们会先停旧实例再起)。
+		if errors.Is(err, syscall.EADDRINUSE) {
+			slog.Error("pudding-desktop: channel port already in use — another instance is running; quit it first (or use `make desktop-dev`)",
+				"addr", addr)
+		} else {
+			slog.Error("pudding-desktop: start daemon failed", "addr", addr, "err", err)
 		}
-		slog.Info("pudding-desktop: attached to existing daemon", "addr", addr)
-		openURL = url
-		d = nil
+		os.Exit(1)
+	}
+	openURL := d.OpenURL()
+
+	// 开发态热更:PUDDING_DEV_URL 指向 Vite dev server(:5174,HMR),壳窗口从那
+	// 加载,改 web/src 即时生效、免 make desktop 重建;daemon 仍在本进程跑,Vite
+	// 反代 API 回本 daemon(token 内存直传)。
+	if dev := strings.TrimSpace(os.Getenv("PUDDING_DEV_URL")); dev != "" {
+		openURL = fmt.Sprintf("%s/?token=%s", strings.TrimRight(dev, "/"), d.Token())
+		slog.Info("pudding-desktop: dev url override", "dev", dev)
 	}
 
 	app := application.New(application.Options{
@@ -110,6 +86,9 @@ func main() {
 	}
 	if runtime.GOOS == "darwin" {
 		windowOpts.URL += "&shell=mac"
+		// 启动白闪修复:先隐藏窗口,等 web 首帧导航完成再显示(见下方 darwin hook)。
+		// 内容就绪前 WKWebView 是白底,window 深色底兜不住那一帧——只能不显示。
+		windowOpts.Hidden = true
 		windowOpts.Mac = application.MacWindow{
 			TitleBar:                application.MacTitleBarHiddenInset,
 			InvisibleTitleBarHeight: 54,
@@ -133,6 +112,24 @@ func main() {
 
 	var hideAfterFullscreenExit atomic.Bool
 	if runtime.GOOS == "darwin" {
+		// 启动白闪修复:窗口 Hidden 创建,web 首次导航完成(内容已加载)再显示。
+		// 只显示一次——用户之后手动隐藏,dev 的 HMR reload 再触发导航也不弹回。
+		var windowShown atomic.Bool
+		showOnce := func() {
+			if !windowShown.Swap(true) {
+				window.Show()
+				window.Focus()
+			}
+		}
+		// 启动白闪缓解(非根治):WKWebView 内容在独立 web 进程渲染,didFinishNavigation
+		// (加载完成)≠ web 进程首次合成帧;直接 Show 会露合成前的默认白底。等一拍让首帧
+		// 画出(已深色,因 index.html inline 脚本 + CSS)再 Show。固定延迟是赛跑,偶尔首帧
+		// 更慢仍会闪——根治需前端"已绘制"信号回推 native(经 daemon HTTP,见讨论)。
+		window.OnWindowEvent(events.Mac.WebViewDidFinishNavigation, func(*application.WindowEvent) {
+			time.AfterFunc(200*time.Millisecond, showOnce)
+		})
+		// 兜底:导航事件万一不来(加载失败等),也别让窗口永久隐藏
+		time.AfterFunc(3*time.Second, showOnce)
 		// NSWindow 在 NewWithOptions 后异步创建,这里直接调 NativeWindow()
 		// 还是 nil;WindowFocus 首次 fire 时已就绪,attach 内部去重。
 		window.RegisterHook(events.Common.WindowFocus, func(*application.WindowEvent) {
@@ -180,7 +177,13 @@ func main() {
 	}
 
 	tray := app.SystemTray.New()
-	tray.SetLabel("Pudding")
+	// macOS 用 template icon(单色,自动适配明暗菜单栏);其它平台用普通 icon
+	if runtime.GOOS == "darwin" {
+		tray.SetTemplateIcon(trayIcon)
+	} else {
+		tray.SetIcon(trayIcon)
+	}
+	tray.SetTooltip("Pudding")
 	menu := app.NewMenu()
 	menu.Add("显示 Pudding").OnClick(func(*application.Context) {
 		window.Show()
@@ -192,27 +195,21 @@ func main() {
 	})
 	tray.SetMenu(menu)
 
-	// 内嵌模式才有 serve 生命周期要管;attach 模式 daemon 归外部进程,
-	// 它退出后页面自然断连,壳不代管。
-	if d != nil {
-		// daemon serve 异常退出时带走壳,避免空窗口假活
-		go func() {
-			if err := <-d.ServeErr(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				slog.Error("pudding-desktop: daemon serve", "err", err)
-				app.Quit()
-			}
-		}()
-	}
+	// daemon serve 异常退出时带走壳,避免空窗口假活
+	go func() {
+		if err := <-d.ServeErr(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("pudding-desktop: daemon serve", "err", err)
+			app.Quit()
+		}
+	}()
 
 	if err := app.Run(); err != nil {
 		slog.Error("pudding-desktop: run", "err", err)
 	}
 
-	if d != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := d.Shutdown(shutdownCtx); err != nil {
-			slog.Error("pudding-desktop: shutdown daemon", "err", err)
-		}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := d.Shutdown(shutdownCtx); err != nil {
+		slog.Error("pudding-desktop: shutdown daemon", "err", err)
 	}
 }

@@ -112,3 +112,138 @@ YAML 存储 + 保序重写的 save.go + 8 字段 context_policy + live/composed 
 3. Q3:temperature 丢弃兜底(我倾向)还是别的?
 4. Q4:params 随 turn 快照(我倾向)还是不快照 / 部分快照?
 5. 有没有遗漏的形状风险(尤其 pre-launch 之后改 schema 会变贵的地方)?
+
+## 6. Codex 评审意见
+
+### 6.1 先给结论
+
+我同意把这件事作为 tools 前置 T0,也同意 preset 升级成完整 `ModelEntry`。
+但有两个地方建议不要过早拍死:
+
+1. **不建议现在把"文件配置方向"完全否掉**。DB 可以做运行态存储和 UI CRUD,
+   但 provider/profile 是用户会手工调的本地配置,至少要保留无损 export/import,
+   或者后续切到 file-first 仍不破坏 schema。
+2. **不建议用"扁平中立集 + extra"承载主要 provider 差异**。`extra` 适合兜底,
+   不适合变成高级配置的事实来源;否则 UI 校验、preset diff、provider 兼容性都会变弱。
+
+### 6.2 对 Q1:ModelEntry 形状
+
+建议用"中立核心 + provider typed options"的混合结构:
+
+```jsonc
+{
+  "id": "deepseek-v4-flash",
+  "label": "DeepSeek V4 Flash",
+  "contextWindow": 1050000,
+  "capabilities": { "image": false, "audio": false },
+  "limits": {
+    "maxOutputTokens": 8192,
+    "maxToolLoops": 64
+  },
+  "providerOptions": {
+    "openai": {
+      "temperature": 0.7,
+      "reasoningEffort": "medium",
+      "enableThinking": false
+    }
+  },
+  "extra": {}
+}
+```
+
+原则:
+
+- `contextWindow`、`capabilities`、`limits.maxOutputTokens`、`limits.maxToolLoops`
+  是跨 provider 的一等字段。
+- `temperature`、`thinking`、`reasoningEffort`、`anthropicVersion`、
+  `googleThinking` 这类放 `providerOptions.<type>`。
+- `extra` 只做临时逃生口,不能作为 preset 的主路径字段。
+
+理由:canonical/contextbuilder 只读中立核心;provider 读自己的 typed options。
+这样不会把不同厂商的语义硬压成一个假中立字段,也不会回到老项目那种大 Runtime。
+
+### 6.3 对 Q2:文本 + tools 阶段最小集
+
+T0 最小集建议:
+
+- `id`
+- `label`
+- `contextWindow`
+- `capabilities`
+- `limits.maxOutputTokens`
+- `limits.maxToolLoops`
+- `providerOptions`
+
+`temperature` 不进中立核心。需要时只进入对应 provider options。
+
+### 6.4 对 Q3:拒收参数怎么处理
+
+不建议静默丢弃。
+
+建议 provider 做三层处理:
+
+1. preset 默认不填高风险参数。
+2. provider adapter 只发送当前 provider/model 明确允许的参数。
+3. 被过滤的参数写 debug log 或 diagnostic event,不要直接 400,但也不要完全无声。
+
+这样用户高级配置写错时能查到原因,不会误以为参数生效了。
+
+### 6.5 对 Q4:turn 快照
+
+同意快照,但快照的应该是**resolved effective model config**,不是整份 profile。
+
+建议 turns 表加 JSON 列,例如 `model_config_json`:
+
+```jsonc
+{
+  "profile": "openai-main",
+  "providerType": "openai",
+  "model": "gpt-5.4",
+  "contextWindow": 128000,
+  "limits": {
+    "maxOutputTokens": 8192,
+    "maxToolLoops": 32
+  },
+  "providerOptions": {
+    "openai": {
+      "reasoningEffort": "medium"
+    }
+  }
+}
+```
+
+不要快照 API key。turn 内所有 engine/provider/contextbuilder 决策只读这份 resolved config,
+避免用户中途改 profile 导致 turn 行为漂移。
+
+### 6.6 preset 与 profile 的边界
+
+建议把 preset 定义成"模板/catalog",不是用户配置本身:
+
+- bundled preset 版本化,可随 app 更新。
+- 用户点击 preset 后生成自己的 provider profile。
+- 生成后的 profile 不被 preset 自动覆盖。
+- 后续可以做"从 preset 刷新/对比 diff",但必须显式确认。
+
+这能保留老项目 preset 的价值,同时避免 app 升级悄悄改用户配置。
+
+### 6.7 存储建议
+
+短期可以继续 SQLite,但 schema 要按"可导出配置"设计:
+
+- DB 存 user profiles 和 sessions 引用。
+- preset catalog 不进 DB,放代码/资源文件。
+- 提供无损 export/import 或后续 file-first 的迁移空间。
+- API key 后续应能迁到 Keychain/native secret,不要和 preset/model schema 绑定死。
+
+如果必须现在拍板,我的偏好是:
+
+> SQLite 作为产品内编辑与运行态存储;profile schema 必须保持可序列化、可导入导出,
+> 不把手工编辑能力押死在 sqlite3 里。
+
+### 6.8 建议拍板版
+
+1. Q1:采用"中立核心 + provider typed options + extra 兜底"。
+2. Q2:T0 上 `contextWindow/capabilities/maxOutputTokens/maxToolLoops/providerOptions`。
+3. Q3:`temperature` 不进中立核心;provider 过滤拒收参数并留下诊断。
+4. Q4:turn 快照 resolved effective model config,不快照 secret。
+5. storage:SQLite 可继续,但必须保留无损 export/import/file-first 迁移余地。

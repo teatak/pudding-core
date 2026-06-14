@@ -1,6 +1,5 @@
 import { Shapes, X } from "lucide-react";
 
-import { ResizeHandle, useResizableWidth } from "@/components/ResizeHandle";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
@@ -11,19 +10,8 @@ import { setCanvasOpen } from "@/state/canvasStore";
 // 在能力解封后落位,不改此骨架。
 export function CanvasPane() {
   const { t } = useI18n();
-  const { width, startDrag } = useResizableWidth({
-    key: "pudding.canvasWidth",
-    fallback: 320,
-    min: 240,
-    max: 560,
-    invert: true, // 右侧栏:向左拖 = 加宽
-  });
   return (
-    <aside
-      className="relative flex h-full shrink-0 flex-col border-l bg-sidebar text-sidebar-foreground"
-      style={{ width }}
-    >
-      <ResizeHandle className="-left-1" onPointerDown={startDrag} />
+    <aside className="flex h-full shrink-0 flex-col bg-sidebar text-sidebar-foreground">
       <div className="flex h-(--toolbar-h) shrink-0 items-center justify-between pr-2 pl-4">
         <div className="text-sm font-medium">{t("canvas.title")}</div>
         <Tooltip>

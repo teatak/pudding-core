@@ -23,6 +23,9 @@ var (
 	// ErrNoRunningTurn:cancel 时没有进行中的 turn,API 映射 409。
 	ErrNoRunningTurn = errors.New("engine: no running turn")
 	ErrEmptyInput    = errors.New("engine: empty text or clientMessageID")
+	// ErrNoModel:会话未解析出可用 provider/model(空配置),提交时直接报错,
+	// 不静默落内置 default profile / mock 兜底。API 映射 400 "no_model"。
+	ErrNoModel = errors.New("engine: no model configured for session")
 )
 
 // Resolver 把 provider profile 名解析为 client 实例;
@@ -92,7 +95,7 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 
 	// provider / model 在提交时刻解析并随 turn 快照,改配置不影响进行中的 turn。
 	// provider:session 字段 > settings provider.default > 内置 "default";
-	// model:session 字段 > 所解析 profile 的 default_model > --model flag(mock/dev 兜底)。
+	// model:session 字段 > 所解析 profile 的 default_model >(仅 dev/mock)--model。
 	// 模型名只在 profile 下有意义,不存在全局默认模型。
 	providerName := sess.Provider
 	if providerName == "" {
@@ -111,6 +114,16 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	}
 	if model == "" {
 		model = e.defaultModel
+	}
+	// 空配置直接报错,不静默回显 mock 或抛误导性的 "profile default not found":
+	// model 解析不出,或 provider 名没有对应的可用 profile(如桌面/生产下从没配过的
+	// 内置 "default"),提交即返回 ErrNoModel。--mock 下 resolver 是 Static(任意名都
+	// 解析)、--model 给了非空 model,故此校验不影响 mock/测试。
+	if model == "" {
+		return nil, ErrNoModel
+	}
+	if _, err := e.resolver.Resolve(ctx, providerName); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrNoModel, err)
 	}
 
 	res, err := e.store.BeginTurn(ctx, store.BeginTurnInput{

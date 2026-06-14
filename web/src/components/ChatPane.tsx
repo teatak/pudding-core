@@ -5,9 +5,8 @@ import { useEffect } from "react";
 
 import { createSession, listSessions, type Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
-import { Composer } from "@/components/Composer";
+import { Conversation } from "@/components/Conversation";
 import { Mascot } from "@/components/Mascot";
-import { Transcript } from "@/components/Transcript";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSessionEvents } from "@/hooks/useSessionEvents";
@@ -92,7 +91,7 @@ export function ChatPane({ token, sessionID, role }: ChatPaneProps) {
   useSessionEvents(selectedSession?.id, token);
 
   return (
-    <section className="relative flex min-h-0 flex-1 basis-0 flex-col overflow-hidden">
+    <section className="relative flex h-full min-h-0 flex-1 basis-0 flex-col overflow-hidden">
       <header
         className={cn(
           "flex h-(--toolbar-h) shrink-0 items-center justify-between gap-3 px-5",
@@ -153,13 +152,8 @@ export function ChatPane({ token, sessionID, role }: ChatPaneProps) {
           ) : null}
         </div>
       </header>
-      {/* 标题栏与会话区的渐变衔接,与 composer 上沿同款 */}
-      <div className="pointer-events-none absolute inset-x-0 top-(--toolbar-h) z-10 h-6 bg-gradient-to-b from-background to-transparent" />
       {selectedSession ? (
-        <>
-          <Transcript token={token} sessionID={selectedSession.id} />
-          <Composer token={token} session={selectedSession} />
-        </>
+        <Conversation token={token} session={selectedSession} />
       ) : (
         // 欢迎空态(全空库 / 无选中):mascot + 一句话 + 主操作
         <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
