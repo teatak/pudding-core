@@ -59,6 +59,11 @@ func TestRequestShape(t *testing.T) {
 				"reasoning_effort":      "low",
 			},
 		},
+		Tools: []provider.ToolDef{{
+			Name:        "web_fetch",
+			Description: "Fetch a URL",
+			InputSchema: json.RawMessage(`{"type":"object"}`),
+		}},
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Text: "hi"},
 			{Role: provider.RoleAssistant, Text: "hello"},
@@ -72,6 +77,9 @@ func TestRequestShape(t *testing.T) {
 	if got.Temperature == nil || *got.Temperature != 0.2 || got.MaxCompletionTokens == nil || *got.MaxCompletionTokens != 123 || got.ReasoningEffort != "low" {
 		t.Fatalf("model config not applied: %+v", got)
 	}
+	if len(got.Tools) != 1 || got.Tools[0].Function.Name != "web_fetch" || string(got.Tools[0].Function.Parameters) != `{"type":"object"}` {
+		t.Fatalf("tools not applied: %+v", got.Tools)
+	}
 	want := []chatMessage{
 		{Role: "system", Content: "system prompt"},
 		{Role: "user", Content: "hi"},
@@ -84,6 +92,30 @@ func TestRequestShape(t *testing.T) {
 		if got.Messages[i] != want[i] {
 			t.Fatalf("message %d: got %+v want %+v", i, got.Messages[i], want[i])
 		}
+	}
+}
+
+func TestToolCallChunks(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"web_fetch","arguments":"{\"url\""}}]}}]}`+"\n\n")
+		fmt.Fprint(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"https://example.com\"}"}}]}}]}`+"\n\n")
+		fmt.Fprint(w, `data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`+"\n\n")
+	}))
+	defer srv.Close()
+
+	chunks := collect(t, streamForTest(t, srv.URL, provider.Request{Model: "m"}))
+	if len(chunks) != 3 {
+		t.Fatalf("unexpected chunks: %+v", chunks)
+	}
+	if chunks[0].Tool == nil || chunks[0].Tool.CallID != "call_1" || chunks[0].Tool.Name != "web_fetch" || chunks[0].Tool.ArgsDelta != `{"url"` {
+		t.Fatalf("first tool chunk wrong: %+v", chunks[0])
+	}
+	if chunks[1].Tool == nil || chunks[1].Tool.ArgsDelta != `:"https://example.com"}` {
+		t.Fatalf("second tool chunk wrong: %+v", chunks[1])
+	}
+	if !chunks[2].Done || chunks[2].Finish != provider.FinishToolCalls {
+		t.Fatalf("finish chunk wrong: %+v", chunks[2])
 	}
 }
 

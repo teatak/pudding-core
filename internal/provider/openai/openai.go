@@ -96,7 +96,20 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 		body.Messages = append(body.Messages, chatMessage{Role: "system", Content: req.System})
 	}
 	for _, msg := range req.Messages {
-		body.Messages = append(body.Messages, chatMessage{Role: string(msg.Role), Content: msg.Text})
+		body.Messages = append(body.Messages, chatMessage{Role: string(msg.Role), Content: messageText(msg)})
+	}
+	if len(req.Tools) > 0 {
+		body.Tools = make([]chatTool, 0, len(req.Tools))
+		for _, tool := range req.Tools {
+			body.Tools = append(body.Tools, chatTool{
+				Type: "function",
+				Function: chatToolFunction{
+					Name:        tool.Name,
+					Description: tool.Description,
+					Parameters:  tool.InputSchema,
+				},
+			})
+		}
 	}
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(body); err != nil {
@@ -133,9 +146,32 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 		}
 		for _, choice := range frame.Choices {
 			if choice.Delta.Content != "" {
-				if !emit(ctx, out, provider.Chunk{Delta: choice.Delta.Content}) {
+				if !emit(ctx, out, provider.Chunk{Part: provider.PartText, Delta: choice.Delta.Content}) {
 					return ctx.Err()
 				}
+			}
+			if choice.Delta.ReasoningContent != "" {
+				if !emit(ctx, out, provider.Chunk{Part: provider.PartThought, Delta: choice.Delta.ReasoningContent}) {
+					return ctx.Err()
+				}
+			}
+			for _, call := range choice.Delta.ToolCalls {
+				if !emit(ctx, out, provider.Chunk{Tool: &provider.ToolCallChunk{
+					Index:     call.Index,
+					CallID:    call.ID,
+					Name:      call.Function.Name,
+					ArgsDelta: call.Function.Arguments,
+				}}) {
+					return ctx.Err()
+				}
+			}
+			if choice.FinishReason != "" {
+				finish := provider.FinishStop
+				if choice.FinishReason == "tool_calls" {
+					finish = provider.FinishToolCalls
+				}
+				emit(ctx, out, provider.Chunk{Done: true, Finish: finish})
+				return nil
 			}
 		}
 	}
@@ -244,6 +280,7 @@ type chatRequest struct {
 	Model               string        `json:"model"`
 	Stream              bool          `json:"stream"`
 	Messages            []chatMessage `json:"messages"`
+	Tools               []chatTool    `json:"tools,omitempty"`
 	Temperature         *float64      `json:"temperature,omitempty"`
 	MaxCompletionTokens *int          `json:"max_completion_tokens,omitempty"`
 	ReasoningEffort     string        `json:"reasoning_effort,omitempty"`
@@ -254,10 +291,47 @@ type chatMessage struct {
 	Content string `json:"content"`
 }
 
+type chatTool struct {
+	Type     string           `json:"type"`
+	Function chatToolFunction `json:"function"`
+}
+
+type chatToolFunction struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
+}
+
 type chatStreamFrame struct {
 	Choices []struct {
 		Delta struct {
-			Content string `json:"content"`
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+			ToolCalls        []struct {
+				Index    int    `json:"index"`
+				ID       string `json:"id"`
+				Function struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
 		} `json:"delta"`
+		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
+}
+
+func messageText(msg provider.Message) string {
+	if len(msg.Parts) == 0 {
+		return msg.Text
+	}
+	var b strings.Builder
+	for _, part := range msg.Parts {
+		if part.Type == "" || part.Type == provider.PartText {
+			b.WriteString(part.Text)
+		}
+	}
+	if b.Len() == 0 {
+		return msg.Text
+	}
+	return b.String()
 }

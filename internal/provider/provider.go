@@ -25,6 +25,7 @@ type Request struct {
 	System   string
 	Messages []Message
 	Config   ModelConfig
+	Tools    []ToolDef
 }
 
 // ModelConfig 是 provider-neutral 的 resolved model 配置快照。各 provider
@@ -51,16 +52,59 @@ const (
 )
 
 type Message struct {
-	Role Role
-	Text string
+	Role  Role
+	Text  string
+	Parts []Part
+}
+
+type ToolDef struct {
+	Name        string
+	Description string
+	InputSchema json.RawMessage
+}
+
+type PartType string
+
+const (
+	PartText       PartType = "text"
+	PartThought    PartType = "thought"
+	PartToolUse    PartType = "tool_use"
+	PartToolResult PartType = "tool_result"
+)
+
+type Part struct {
+	Type    PartType        `json:"type"`
+	Text    string          `json:"text,omitempty"`
+	CallID  string          `json:"id,omitempty"`
+	Name    string          `json:"name,omitempty"`
+	Args    json.RawMessage `json:"args,omitempty"`
+	Ok      bool            `json:"ok,omitempty"`
+	Content string          `json:"content,omitempty"`
+}
+
+type FinishReason string
+
+const (
+	FinishStop      FinishReason = "stop"
+	FinishToolCalls FinishReason = "tool_calls"
+)
+
+type ToolCallChunk struct {
+	Index     int
+	CallID    string
+	Name      string
+	ArgsDelta string
 }
 
 // Chunk 是模型流的最小单元:Delta 增量文本;Done 正常收尾;Err 异常终止。
 // Done 与 Err 之后不得再有 chunk。
 type Chunk struct {
-	Delta string
-	Done  bool
-	Err   error
+	Part   PartType
+	Delta  string
+	Tool   *ToolCallChunk
+	Done   bool
+	Finish FinishReason
+	Err    error
 }
 
 func FloatOption(opts map[string]any, names ...string) (float64, bool) {

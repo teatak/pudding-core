@@ -58,9 +58,9 @@ LLM 自动标题。
 
 ## 进行中
 
-### 工具调用 / MCP —— 契约设计待评审(docs/design-tools.md)
+### 工具调用 / MCP —— T2 待开工(docs/design-tools.md)
 
-设计草案已入库,**待开工**。地基决策已拍板:
+设计草案已入库,T1 provider 协议扩展已落地。地基决策已拍板:
 
 1. **canonical 形状 = 已定**:一 turn 一条 assistant 消息 + `parts`
    一等 JSON(ContentPart 语义模型,借自旧项目);`role` ∈
@@ -73,8 +73,11 @@ LLM 自动标题。
 3. **MCP 依赖 = 待定**:先只做内置工具(web_fetch)端到端跑通、MCP 后置
    接 `modelcontextprotocol/go-sdk`,还是一上来就接。倾向:先内置后 MCP。
 
-切片 T1–T6 见 design-tools.md 第 8 节;T1–T4 是最小垂直切片
-(内置 web_fetch 即可端到端演示工具调用)。
+切片 T1–T6 见 design-tools.md 第 8 节;T1 已完成:
+`Request.Tools/Message.Parts/Chunk.Part/Chunk.Tool/Chunk.Finish` + 四家
+provider 的 text/thought/tool_use 解析测试。下一步 T2:messages.parts 列
+与 contextbuilder 双向翻译。T1–T4 是最小垂直切片(内置 web_fetch 即可端到端
+演示工具调用)。
 
 ## 队列(未开工,按优先级)
 

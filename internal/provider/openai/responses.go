@@ -86,7 +86,18 @@ func (c *ResponsesClient) newRequest(ctx context.Context, req provider.Request) 
 		body.Instructions = req.System
 	}
 	for _, msg := range req.Messages {
-		body.Input = append(body.Input, responsesInputMessage{Role: string(msg.Role), Content: msg.Text})
+		body.Input = append(body.Input, responsesInputMessage{Role: string(msg.Role), Content: messageText(msg)})
+	}
+	if len(req.Tools) > 0 {
+		body.Tools = make([]responsesTool, 0, len(req.Tools))
+		for _, tool := range req.Tools {
+			body.Tools = append(body.Tools, responsesTool{
+				Type:        "function",
+				Name:        tool.Name,
+				Description: tool.Description,
+				Parameters:  tool.InputSchema,
+			})
+		}
 	}
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(body); err != nil {
@@ -107,6 +118,7 @@ func (c *ResponsesClient) newRequest(ctx context.Context, req provider.Request) 
 func readResponsesSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) error {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	sawTool := false
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, ":") || !strings.HasPrefix(line, "data:") {
@@ -124,12 +136,42 @@ func readResponsesSSE(ctx context.Context, body io.Reader, out chan<- provider.C
 		switch frame.Type {
 		case "response.output_text.delta":
 			if frame.Delta != "" {
-				if !emit(ctx, out, provider.Chunk{Delta: frame.Delta}) {
+				if !emit(ctx, out, provider.Chunk{Part: provider.PartText, Delta: frame.Delta}) {
+					return ctx.Err()
+				}
+			}
+		case "response.reasoning_text.delta", "response.reasoning_summary_text.delta":
+			if frame.Delta != "" {
+				if !emit(ctx, out, provider.Chunk{Part: provider.PartThought, Delta: frame.Delta}) {
+					return ctx.Err()
+				}
+			}
+		case "response.output_item.added":
+			if frame.Item.Type == "function_call" {
+				sawTool = true
+				if !emit(ctx, out, provider.Chunk{Tool: &provider.ToolCallChunk{
+					CallID: frame.Item.ID,
+					Name:   frame.Item.Name,
+				}}) {
+					return ctx.Err()
+				}
+			}
+		case "response.function_call_arguments.delta":
+			sawTool = true
+			if frame.Delta != "" {
+				if !emit(ctx, out, provider.Chunk{Tool: &provider.ToolCallChunk{
+					CallID:    frame.ItemID,
+					ArgsDelta: frame.Delta,
+				}}) {
 					return ctx.Err()
 				}
 			}
 		case "response.completed":
-			emit(ctx, out, provider.Chunk{Done: true})
+			finish := provider.FinishStop
+			if sawTool {
+				finish = provider.FinishToolCalls
+			}
+			emit(ctx, out, provider.Chunk{Done: true, Finish: finish})
 			return nil
 		case "response.failed":
 			if frame.Response.Error.Message != "" {
@@ -168,6 +210,7 @@ type responsesRequest struct {
 	Input           []responsesInputMessage `json:"input"`
 	Stream          bool                    `json:"stream"`
 	Store           *bool                   `json:"store,omitempty"`
+	Tools           []responsesTool         `json:"tools,omitempty"`
 	Temperature     *float64                `json:"temperature,omitempty"`
 	MaxOutputTokens *int                    `json:"max_output_tokens,omitempty"`
 	Reasoning       *responsesReasoning     `json:"reasoning,omitempty"`
@@ -182,9 +225,22 @@ type responsesInputMessage struct {
 	Content string `json:"content"`
 }
 
+type responsesTool struct {
+	Type        string          `json:"type"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
+}
+
 type responsesStreamFrame struct {
-	Type     string `json:"type"`
-	Delta    string `json:"delta"`
+	Type   string `json:"type"`
+	Delta  string `json:"delta"`
+	ItemID string `json:"item_id"`
+	Item   struct {
+		ID   string `json:"id"`
+		Type string `json:"type"`
+		Name string `json:"name"`
+	} `json:"item"`
 	Response struct {
 		Error struct {
 			Message string `json:"message"`

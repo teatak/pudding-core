@@ -18,6 +18,10 @@ func WithScript(deltas []string) Option {
 	return func(c *Client) { c.script = deltas }
 }
 
+func WithChunks(chunks []provider.Chunk) Option {
+	return func(c *Client) { c.chunks = chunks }
+}
+
 // WithDelay 设置相邻 chunk 之间的间隔,用于模拟流式节奏与测试 cancel 时序。
 func WithDelay(d time.Duration) Option {
 	return func(c *Client) { c.delay = d }
@@ -30,6 +34,7 @@ func WithError(afterDeltas int, err error) Option {
 
 type Client struct {
 	script    []string
+	chunks    []provider.Chunk
 	delay     time.Duration
 	failAfter int
 	failErr   error
@@ -48,14 +53,21 @@ var _ provider.Client = (*Client)(nil)
 func (c *Client) Name() string { return "mock" }
 
 func (c *Client) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
-	deltas := c.script
-	if deltas == nil {
-		deltas = echoDeltas(req)
+	chunks := c.chunks
+	if chunks == nil {
+		deltas := c.script
+		if deltas == nil {
+			deltas = echoDeltas(req)
+		}
+		chunks = make([]provider.Chunk, 0, len(deltas))
+		for _, d := range deltas {
+			chunks = append(chunks, provider.Chunk{Delta: d})
+		}
 	}
 	out := make(chan provider.Chunk)
 	go func() {
 		defer close(out)
-		for i, d := range deltas {
+		for i, chunk := range chunks {
 			if c.failAfter >= 0 && i >= c.failAfter {
 				out <- provider.Chunk{Err: c.failErr}
 				return
@@ -67,17 +79,19 @@ func (c *Client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 			case <-time.After(c.delay):
 			}
 			select {
-			case out <- provider.Chunk{Delta: d}:
+			case out <- chunk:
 			case <-ctx.Done():
 				out <- provider.Chunk{Err: ctx.Err()}
 				return
 			}
 		}
-		if c.failAfter >= 0 && c.failAfter >= len(deltas) {
+		if c.failAfter >= 0 && c.failAfter >= len(chunks) {
 			out <- provider.Chunk{Err: c.failErr}
 			return
 		}
-		out <- provider.Chunk{Done: true}
+		if len(chunks) == 0 || !chunks[len(chunks)-1].Done {
+			out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
+		}
 	}()
 	return out, nil
 }

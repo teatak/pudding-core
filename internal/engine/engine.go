@@ -345,6 +345,9 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 		case chunk.Done:
 			return store.TurnCompleted, ""
 		case chunk.Delta != "":
+			if chunk.Part != "" && chunk.Part != provider.PartText {
+				continue
+			}
 			buf.WriteString(chunk.Delta)
 			e.hub.Publish(event.Event{
 				SessionID: sessionID,

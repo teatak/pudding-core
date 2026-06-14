@@ -84,6 +84,17 @@ type generateRequest struct {
 	SystemInstruction *content          `json:"system_instruction,omitempty"`
 	Contents          []content         `json:"contents"`
 	GenerationConfig  *generationConfig `json:"generationConfig,omitempty"`
+	Tools             []tool            `json:"tools,omitempty"`
+}
+
+type tool struct {
+	FunctionDeclarations []functionDeclaration `json:"functionDeclarations,omitempty"`
+}
+
+type functionDeclaration struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
 }
 
 type generationConfig struct {
@@ -97,11 +108,17 @@ type content struct {
 }
 
 type part struct {
-	Text string `json:"text"`
+	Text string `json:"text,omitempty"`
 	// Thought 标记 3.x thinking 摘要帧,不属于答案正文,解析时跳过。
 	// 同帧可能携带 thoughtSignature(加密推理签名,多轮工具调用才需要回传,
 	// text-only 阶段忽略);字段缺省序列化时不发出,新老协议同一形状。
-	Thought bool `json:"thought,omitempty"`
+	Thought      bool          `json:"thought,omitempty"`
+	FunctionCall *functionCall `json:"functionCall,omitempty"`
+}
+
+type functionCall struct {
+	Name string          `json:"name"`
+	Args json.RawMessage `json:"args,omitempty"`
 }
 
 func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Request, error) {
@@ -122,12 +139,23 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 	if req.System != "" {
 		body.SystemInstruction = &content{Parts: []part{{Text: req.System}}}
 	}
+	if len(req.Tools) > 0 {
+		declarations := make([]functionDeclaration, 0, len(req.Tools))
+		for _, t := range req.Tools {
+			declarations = append(declarations, functionDeclaration{
+				Name:        t.Name,
+				Description: t.Description,
+				Parameters:  t.InputSchema,
+			})
+		}
+		body.Tools = []tool{{FunctionDeclarations: declarations}}
+	}
 	for _, msg := range req.Messages {
 		role := "user"
 		if msg.Role == provider.RoleAssistant {
 			role = "model"
 		}
-		body.Contents = append(body.Contents, content{Role: role, Parts: []part{{Text: msg.Text}}})
+		body.Contents = append(body.Contents, content{Role: role, Parts: []part{{Text: messageText(msg)}}})
 	}
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(body); err != nil {
@@ -163,6 +191,7 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	sawFinish := false
+	finish := provider.FinishStop
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || !strings.HasPrefix(line, "data:") {
@@ -179,10 +208,22 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 		for _, cand := range frame.Candidates {
 			for _, p := range cand.Content.Parts {
 				if p.Thought {
-					continue // thinking 摘要不进正文
+					if p.Text != "" && !emitChunk(ctx, out, provider.Chunk{Part: provider.PartThought, Delta: p.Text}) {
+						return ctx.Err()
+					}
+					continue
 				}
 				if p.Text != "" {
-					if !emitDelta(ctx, out, p.Text) {
+					if !emitChunk(ctx, out, provider.Chunk{Part: provider.PartText, Delta: p.Text}) {
+						return ctx.Err()
+					}
+				}
+				if p.FunctionCall != nil {
+					finish = provider.FinishToolCalls
+					if !emitChunk(ctx, out, provider.Chunk{Tool: &provider.ToolCallChunk{
+						Name:      p.FunctionCall.Name,
+						ArgsDelta: string(p.FunctionCall.Args),
+					}}) {
 						return ctx.Err()
 					}
 				}
@@ -207,17 +248,33 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 	if !sawFinish {
 		return errors.New("google: stream ended without finish reason")
 	}
-	out <- provider.Chunk{Done: true} // 终止 chunk 阻塞发送,消费方 drain 到 close
+	out <- provider.Chunk{Done: true, Finish: finish} // 终止 chunk 阻塞发送,消费方 drain 到 close
 	return nil
 }
 
-func emitDelta(ctx context.Context, out chan<- provider.Chunk, delta string) bool {
+func emitChunk(ctx context.Context, out chan<- provider.Chunk, chunk provider.Chunk) bool {
 	select {
-	case out <- provider.Chunk{Delta: delta}:
+	case out <- chunk:
 		return true
 	case <-ctx.Done():
 		return false
 	}
+}
+
+func messageText(msg provider.Message) string {
+	if len(msg.Parts) == 0 {
+		return msg.Text
+	}
+	var b strings.Builder
+	for _, part := range msg.Parts {
+		if part.Type == "" || part.Type == provider.PartText {
+			b.WriteString(part.Text)
+		}
+	}
+	if b.Len() == 0 {
+		return msg.Text
+	}
+	return b.String()
 }
 
 // ListModels 拉取支持 generateContent 的模型目录。包级函数,

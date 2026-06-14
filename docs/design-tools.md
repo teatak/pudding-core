@@ -1,6 +1,6 @@
 # 工具调用 / MCP 契约设计 v1
 
-> 状态:草案,待评审。范围:工具调用全链路(provider 流 → engine 循环 →
+> 状态:草案,T1 provider 协议扩展已落地。范围:工具调用全链路(provider 流 → engine 循环 →
 > canonical 落库 → 事件协议 → 前端任务流)与 MCP 接入。
 > 纪律延续:provider 只产模型流(AGENTS.md 硬约束 17),工具执行、turn
 > 生命周期、落库全部归 engine;context 只来自 canonical messages(硬约束 8)。
@@ -202,7 +202,7 @@ turn.tool       新 kind,落库:{turnID, callID, name, phase, summary?}
 
 | 切片 | 内容 | 依赖 |
 | --- | --- | --- |
-| T1 provider | Chunk/Request 扩展 + 三家 tool/thought 流解析(固化帧单测) | — |
+| T1 provider | **已完成**:Chunk/Request 扩展 + 四家 tool/thought 流解析(固化帧单测) | — |
 | T2 store | messages.parts 列 + contextbuilder 双向翻译 | T1 形状 |
 | T3 engine | 工具循环 + turn.tool 事件 + 内置 Runner(web_fetch) | T1 T2 |
 | T4 web | overlay parts 化 + thought 折叠行 + tool 卡片 | T3 |

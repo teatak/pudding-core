@@ -24,7 +24,9 @@ func collect(t *testing.T, ch <-chan provider.Chunk) (string, bool, error) {
 		if chunk.Done {
 			return text.String(), true, nil
 		}
-		text.WriteString(chunk.Delta)
+		if chunk.Part == "" || chunk.Part == provider.PartText {
+			text.WriteString(chunk.Delta)
+		}
 	}
 	return text.String(), false, nil
 }
@@ -71,6 +73,11 @@ func TestStreamHappyPath(t *testing.T) {
 				"maxOutputTokens": 2048,
 			},
 		},
+		Tools: []provider.ToolDef{{
+			Name:        "web_fetch",
+			Description: "Fetch a URL",
+			InputSchema: json.RawMessage(`{"type":"object"}`),
+		}},
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Text: "hi"},
 			{Role: provider.RoleAssistant, Text: "hello"},
@@ -97,12 +104,39 @@ func TestStreamHappyPath(t *testing.T) {
 	if gotBody.GenerationConfig == nil || gotBody.GenerationConfig.Temperature == nil || *gotBody.GenerationConfig.Temperature != 0.5 || gotBody.GenerationConfig.MaxOutputTokens == nil || *gotBody.GenerationConfig.MaxOutputTokens != 2048 {
 		t.Fatalf("model config not applied: %+v", gotBody.GenerationConfig)
 	}
+	if len(gotBody.Tools) != 1 || len(gotBody.Tools[0].FunctionDeclarations) != 1 || gotBody.Tools[0].FunctionDeclarations[0].Name != "web_fetch" || string(gotBody.Tools[0].FunctionDeclarations[0].Parameters) != `{"type":"object"}` {
+		t.Fatalf("tools not applied: %+v", gotBody.Tools)
+	}
 	roles := []string{}
 	for _, c := range gotBody.Contents {
 		roles = append(roles, c.Role)
 	}
 	if strings.Join(roles, ",") != "user,model,user" {
 		t.Fatalf("role mapping wrong: %v", roles)
+	}
+}
+
+func TestFunctionCallChunks(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"web_fetch","args":{"url":"https://example.com"}}}]},"finishReason":"STOP"}]}`+"\n\n")
+	}))
+	defer srv.Close()
+
+	client := New(Config{BaseURL: srv.URL, HTTPClient: srv.Client()})
+	ch, _ := client.Stream(context.Background(), provider.Request{Model: "m"})
+	var chunks []provider.Chunk
+	for chunk := range ch {
+		chunks = append(chunks, chunk)
+	}
+	if len(chunks) != 2 {
+		t.Fatalf("unexpected chunks: %+v", chunks)
+	}
+	if chunks[0].Tool == nil || chunks[0].Tool.Name != "web_fetch" || chunks[0].Tool.ArgsDelta != `{"url":"https://example.com"}` {
+		t.Fatalf("tool chunk wrong: %+v", chunks[0])
+	}
+	if !chunks[1].Done || chunks[1].Finish != provider.FinishToolCalls {
+		t.Fatalf("finish chunk wrong: %+v", chunks[1])
 	}
 }
 
@@ -119,12 +153,28 @@ func TestThinkingProtocolFramesCompatible(t *testing.T) {
 
 	client := New(Config{BaseURL: srv.URL, HTTPClient: srv.Client()})
 	ch, _ := client.Stream(context.Background(), provider.Request{Model: "gemini-3.5-flash"})
-	text, done, err := collect(t, ch)
-	if err != nil || !done {
-		t.Fatalf("done=%v err=%v", done, err)
+	var text, thought strings.Builder
+	done := false
+	for chunk := range ch {
+		if chunk.Err != nil {
+			t.Fatal(chunk.Err)
+		}
+		if chunk.Done {
+			done = true
+			break
+		}
+		switch chunk.Part {
+		case provider.PartThought:
+			thought.WriteString(chunk.Delta)
+		case "", provider.PartText:
+			text.WriteString(chunk.Delta)
+		}
 	}
-	if text != "答案" {
-		t.Fatalf("thought frames must not leak into answer, got %q", text)
+	if !done {
+		t.Fatal("stream did not finish")
+	}
+	if text.String() != "答案" || thought.String() != "推理摘要..." {
+		t.Fatalf("unexpected parts: text=%q thought=%q", text.String(), thought.String())
 	}
 }
 

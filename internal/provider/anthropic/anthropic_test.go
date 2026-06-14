@@ -24,7 +24,9 @@ func collect(t *testing.T, ch <-chan provider.Chunk) (string, bool, error) {
 		if chunk.Done {
 			return text.String(), true, nil
 		}
-		text.WriteString(chunk.Delta)
+		if chunk.Part == "" || chunk.Part == provider.PartText {
+			text.WriteString(chunk.Delta)
+		}
 	}
 	return text.String(), false, nil
 }
@@ -81,6 +83,11 @@ func TestStreamHappyPath(t *testing.T) {
 				"temperature": 0.4,
 			},
 		},
+		Tools: []provider.ToolDef{{
+			Name:        "web_fetch",
+			Description: "Fetch a URL",
+			InputSchema: json.RawMessage(`{"type":"object"}`),
+		}},
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Text: "hi"},
 			{Role: provider.RoleAssistant, Text: "hello"},
@@ -107,12 +114,46 @@ func TestStreamHappyPath(t *testing.T) {
 	if gotBody.Temperature == nil || *gotBody.Temperature != 0.4 {
 		t.Fatalf("model config not applied: %+v", gotBody)
 	}
+	if len(gotBody.Tools) != 1 || gotBody.Tools[0].Name != "web_fetch" || string(gotBody.Tools[0].InputSchema) != `{"type":"object"}` {
+		t.Fatalf("tools not applied: %+v", gotBody.Tools)
+	}
 	roles := []string{}
 	for _, m := range gotBody.Messages {
 		roles = append(roles, m.Role)
 	}
 	if strings.Join(roles, ",") != "user,assistant,user" {
 		t.Fatalf("role mapping wrong: %v", roles)
+	}
+}
+
+func TestToolUseChunks(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call_1","name":"web_fetch","input":{}}}`+"\n\n")
+		_, _ = io.WriteString(w, `data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"url\""}}`+"\n\n")
+		_, _ = io.WriteString(w, `data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":":\"https://example.com\"}"}}`+"\n\n")
+		_, _ = io.WriteString(w, `data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}`+"\n\n")
+		_, _ = io.WriteString(w, `data: {"type":"message_stop"}`+"\n\n")
+	}))
+	defer srv.Close()
+
+	client := New(Config{BaseURL: srv.URL, HTTPClient: srv.Client()})
+	ch, _ := client.Stream(context.Background(), provider.Request{Model: "m"})
+	var chunks []provider.Chunk
+	for chunk := range ch {
+		chunks = append(chunks, chunk)
+	}
+	if len(chunks) != 4 {
+		t.Fatalf("unexpected chunks: %+v", chunks)
+	}
+	if chunks[0].Tool == nil || chunks[0].Tool.CallID != "call_1" || chunks[0].Tool.Name != "web_fetch" {
+		t.Fatalf("tool start wrong: %+v", chunks[0])
+	}
+	if chunks[1].Tool == nil || chunks[1].Tool.ArgsDelta != `{"url"` {
+		t.Fatalf("first args chunk wrong: %+v", chunks[1])
+	}
+	if !chunks[3].Done || chunks[3].Finish != provider.FinishToolCalls {
+		t.Fatalf("finish chunk wrong: %+v", chunks[3])
 	}
 }
 
@@ -132,12 +173,28 @@ func TestThinkingBlockSkipped(t *testing.T) {
 
 	client := New(Config{BaseURL: srv.URL, HTTPClient: srv.Client()})
 	ch, _ := client.Stream(context.Background(), provider.Request{Model: "m"})
-	text, done, err := collect(t, ch)
-	if err != nil || !done {
-		t.Fatalf("done=%v err=%v", done, err)
+	var text, thought strings.Builder
+	done := false
+	for chunk := range ch {
+		if chunk.Err != nil {
+			t.Fatal(chunk.Err)
+		}
+		if chunk.Done {
+			done = true
+			break
+		}
+		switch chunk.Part {
+		case provider.PartThought:
+			thought.WriteString(chunk.Delta)
+		case "", provider.PartText:
+			text.WriteString(chunk.Delta)
+		}
 	}
-	if text != "答案" {
-		t.Fatalf("thinking deltas must not leak into answer, got %q", text)
+	if !done {
+		t.Fatal("stream did not finish")
+	}
+	if text.String() != "答案" || thought.String() != "推理..." {
+		t.Fatalf("unexpected parts: text=%q thought=%q", text.String(), thought.String())
 	}
 }
 

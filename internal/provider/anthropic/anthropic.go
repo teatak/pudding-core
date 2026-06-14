@@ -95,7 +95,14 @@ type messagesRequest struct {
 	Stream      bool      `json:"stream"`
 	System      string    `json:"system,omitempty"`
 	Messages    []message `json:"messages"`
+	Tools       []tool    `json:"tools,omitempty"`
 	Temperature *float64  `json:"temperature,omitempty"`
+}
+
+type tool struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	InputSchema json.RawMessage `json:"input_schema"`
 }
 
 type message struct {
@@ -120,12 +127,22 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 	if v, ok := provider.FloatOption(req.Config.Anthropic, "temperature"); ok {
 		body.Temperature = &v
 	}
+	if len(req.Tools) > 0 {
+		body.Tools = make([]tool, 0, len(req.Tools))
+		for _, t := range req.Tools {
+			body.Tools = append(body.Tools, tool{
+				Name:        t.Name,
+				Description: t.Description,
+				InputSchema: t.InputSchema,
+			})
+		}
+	}
 	for _, msg := range req.Messages {
 		role := "user"
 		if msg.Role == provider.RoleAssistant {
 			role = "assistant"
 		}
-		body.Messages = append(body.Messages, message{Role: role, Content: msg.Text})
+		body.Messages = append(body.Messages, message{Role: role, Content: messageText(msg)})
 	}
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(body); err != nil {
@@ -151,13 +168,18 @@ type streamEvent struct {
 	Index int    `json:"index"`
 
 	ContentBlock *struct {
-		Type string `json:"type"`
+		Type  string          `json:"type"`
+		ID    string          `json:"id"`
+		Name  string          `json:"name"`
+		Input json.RawMessage `json:"input"`
 	} `json:"content_block"`
 
 	Delta *struct {
-		Type       string `json:"type"`
-		Text       string `json:"text"`
-		StopReason string `json:"stop_reason"`
+		Type        string `json:"type"`
+		Text        string `json:"text"`
+		Thinking    string `json:"thinking"`
+		PartialJSON string `json:"partial_json"`
+		StopReason  string `json:"stop_reason"`
 	} `json:"delta"`
 
 	Error *struct {
@@ -171,8 +193,9 @@ type streamEvent struct {
 func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) error {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	skippedBlocks := map[int]bool{} // 非 text 块(thinking 等)的 index
+	blockCalls := map[int]string{}
 	sawStop := false
+	finish := provider.FinishStop
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || !strings.HasPrefix(line, "data:") {
@@ -185,15 +208,35 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 		}
 		switch event.Type {
 		case "content_block_start":
-			if event.ContentBlock != nil && event.ContentBlock.Type != "text" {
-				skippedBlocks[event.Index] = true
+			if event.ContentBlock != nil {
+				if event.ContentBlock.Type == "tool_use" {
+					blockCalls[event.Index] = event.ContentBlock.ID
+					if !emitChunk(ctx, out, provider.Chunk{Tool: &provider.ToolCallChunk{
+						CallID: event.ContentBlock.ID,
+						Name:   event.ContentBlock.Name,
+					}}) {
+						return ctx.Err()
+					}
+				}
 			}
 		case "content_block_delta":
-			if skippedBlocks[event.Index] {
+			if event.Delta == nil {
 				continue
 			}
-			if event.Delta != nil && event.Delta.Type == "text_delta" && event.Delta.Text != "" {
-				if !emitDelta(ctx, out, event.Delta.Text) {
+			switch event.Delta.Type {
+			case "text_delta":
+				if event.Delta.Text != "" && !emitChunk(ctx, out, provider.Chunk{Part: provider.PartText, Delta: event.Delta.Text}) {
+					return ctx.Err()
+				}
+			case "thinking_delta":
+				if event.Delta.Thinking != "" && !emitChunk(ctx, out, provider.Chunk{Part: provider.PartThought, Delta: event.Delta.Thinking}) {
+					return ctx.Err()
+				}
+			case "input_json_delta":
+				if event.Delta.PartialJSON != "" && !emitChunk(ctx, out, provider.Chunk{Tool: &provider.ToolCallChunk{
+					CallID:    blockCalls[event.Index],
+					ArgsDelta: event.Delta.PartialJSON,
+				}}) {
 					return ctx.Err()
 				}
 			}
@@ -201,6 +244,9 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 			if event.Delta != nil && event.Delta.StopReason != "" {
 				switch event.Delta.StopReason {
 				case "end_turn", "max_tokens", "stop_sequence":
+					finish = provider.FinishStop
+				case "tool_use":
+					finish = provider.FinishToolCalls
 				default:
 					return fmt.Errorf("anthropic: finished with stop reason %s", event.Delta.StopReason)
 				}
@@ -227,17 +273,33 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 	if !sawStop {
 		return errors.New("anthropic: stream ended without message_stop")
 	}
-	out <- provider.Chunk{Done: true} // 终止 chunk 阻塞发送,消费方 drain 到 close
+	out <- provider.Chunk{Done: true, Finish: finish} // 终止 chunk 阻塞发送,消费方 drain 到 close
 	return nil
 }
 
-func emitDelta(ctx context.Context, out chan<- provider.Chunk, delta string) bool {
+func emitChunk(ctx context.Context, out chan<- provider.Chunk, chunk provider.Chunk) bool {
 	select {
-	case out <- provider.Chunk{Delta: delta}:
+	case out <- chunk:
 		return true
 	case <-ctx.Done():
 		return false
 	}
+}
+
+func messageText(msg provider.Message) string {
+	if len(msg.Parts) == 0 {
+		return msg.Text
+	}
+	var b strings.Builder
+	for _, part := range msg.Parts {
+		if part.Type == "" || part.Type == provider.PartText {
+			b.WriteString(part.Text)
+		}
+	}
+	if b.Len() == 0 {
+		return msg.Text
+	}
+	return b.String()
 }
 
 // ListModels 拉取模型目录(GET /v1/models)。包级函数,
