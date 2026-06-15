@@ -1,6 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { CircleAlert, Loader2, MessageSquareText, PanelLeft, Pencil, Plus, SquareSplitVertical, Trash2 } from "lucide-react";
+import {
+  CircleAlert,
+  Loader2,
+  MessageSquareText,
+  PanelLeft,
+  Pencil,
+  Plus,
+  SquareSplitVertical,
+  Trash2,
+} from "lucide-react";
 import { useRef, useState } from "react";
 
 import { createSession, deleteSession, listSessions, updateSession } from "@/api/client";
@@ -32,7 +41,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
@@ -41,6 +49,8 @@ import { formatRelative } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { useOverlayStore } from "@/state/overlayStore";
 import { setRailCollapsed, useRailCollapsed, useRailForcedCollapsed } from "@/state/railStore";
+
+const popoverAlignNudgePx = 3;
 
 // 会话栏(rail):展开 = 左侧整栏;折叠 = 悬浮触发器 + hover 浮出 popover 面板。
 // 面板内容(RailPanel)两种形态完全复用。
@@ -158,31 +168,22 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
     />
   );
 
-  // 折叠态:整栏收进 popover(参照 Claude Code 桌面端)。
-  // marginLeft 让位 macOS 红绿灯(design.md 2.3)。
-  if (collapsed) {
-    // popover 面板贴窗口左缘弹出(与展开态 rail 的 8px 内边距对位),
-    // 用 alignOffset 抵消触发器被红绿灯 inset 推出去的横向偏移;
-    // 浏览器模式 inset=0,无副作用
-    const trafficInsetPx =
-      Number.parseFloat(
-        getComputedStyle(document.documentElement).getPropertyValue("--traffic-inset"),
-      ) || 0;
-    return (
-      // 触发器在 --toolbar-h 工具条带内垂直居中:wrapper 撑满带高 +
-      // items-center,与展开态顶行同构 — 不按按钮尺寸硬算偏移
-      // (size="icon" 是 32px,按 36px 算过一次,两态错位 2px)
-      <div
-        className="absolute top-0 left-2 z-30 flex items-center"
-        style={{
-          height: "var(--toolbar-h)",
-          marginLeft: "var(--traffic-inset)",
-        }}
-      >
+  // 统一侧栏按钮:展开/收起都固定在同一个窗口位置。展开态 rail 自身不再放第二个按钮。
+  const popoverAlignOffset = collapsed ? -(readTrafficInsetPx() + popoverAlignNudgePx) : 0;
+  const railButton = (
+    <div
+      className="absolute top-0 left-[11px] z-30 flex items-center"
+      style={{
+        height: "var(--toolbar-h)",
+        marginLeft: "var(--traffic-inset)",
+      }}
+    >
+      {collapsed ? (
         <Popover open={hover.open} onOpenChange={hover.handleOpenChange}>
           <PopoverTrigger asChild>
             <Button
               aria-label={t("rail.expand")}
+              className="text-muted-foreground hover:text-muted-foreground aria-expanded:text-muted-foreground"
               size="icon"
               variant="ghost"
               onClick={() => {
@@ -201,10 +202,10 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
           </PopoverTrigger>
           <PopoverContent
             align="start"
-            alignOffset={-trafficInsetPx}
-            className="flex h-[26rem] max-h-[80vh] w-72 flex-col p-2"
+            alignOffset={popoverAlignOffset}
+            className="flex h-[26rem] max-h-[80vh] w-[260px] flex-col p-2"
             side="bottom"
-            sideOffset={6}
+            sideOffset={8}
             onMouseEnter={hover.cancelClose}
             onMouseLeave={hover.scheduleClose}
             onPointerDownCapture={hover.pin}
@@ -221,32 +222,56 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
             {panel}
           </PopoverContent>
         </Popover>
-      </div>
-    );
-  }
-
-  return (
-    <aside
-      className="flex h-full shrink-0 flex-col gap-2 bg-sidebar px-2 pb-2 text-sidebar-foreground"
-    >
-      {/* 顶行是 --toolbar-h 工具条(壳 54px,与 InvisibleTitleBarHeight 同值):
-          壳模式下整行可拖拽,按钮垂直居中对齐红绿灯 */}
-      <div
-        className="drag-region flex h-(--toolbar-h) shrink-0 items-center transition-[padding] duration-200"
-        style={{ paddingLeft: "var(--traffic-inset)" }}
-      >
+      ) : (
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button aria-label={t("rail.collapse")} size="icon" variant="ghost" onClick={() => collapse(true)}>
+            <Button
+              aria-label={t("rail.collapse")}
+              className="text-muted-foreground hover:text-muted-foreground"
+              size="icon"
+              variant="ghost"
+              onClick={() => collapse(true)}
+            >
               <PanelLeft />
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">{t("rail.collapse")}</TooltipContent>
         </Tooltip>
-      </div>
-      {panel}
-    </aside>
+      )}
+    </div>
   );
+
+  if (collapsed) {
+    return railButton;
+  }
+
+  return (
+    <>
+      {railButton}
+      <aside className="relative h-full w-[268px] shrink-0 bg-background text-sidebar-foreground">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute top-2 right-0 bottom-2 left-2 z-0 rounded-[var(--rail-radius)] rounded-tl-[var(--rail-left-radius)] rounded-bl-[var(--rail-left-radius)] border border-sidebar-border bg-sidebar"
+        />
+        <div className="absolute top-0 right-0 bottom-2 left-2 z-10 flex min-h-0 flex-col gap-(--rail-content-align-gap) px-2 pb-2">
+          {/* 顶行是 --toolbar-h 工具条(壳 54px,与 InvisibleTitleBarHeight 同值):
+              壳模式下整行可拖拽;按钮由上方统一入口渲染 */}
+          <div
+            className="drag-region h-(--toolbar-h) shrink-0 transition-[padding] duration-200"
+            style={{ paddingLeft: "var(--traffic-inset)" }}
+          />
+          {panel}
+        </div>
+      </aside>
+    </>
+  );
+}
+
+function readTrafficInsetPx() {
+  if (typeof document === "undefined") {
+    return 0;
+  }
+  return Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--traffic-inset")) || 0;
 }
 
 // hover 开合 + 点击钉住:面板内一旦发生点击(如打开主题/语言下拉),
@@ -353,7 +378,7 @@ function RailPanel({
         {createPending ? <Loader2 className="animate-spin" /> : <Plus />}
         {t("session.create")}
       </Button>
-      <ScrollArea className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <SessionItems
           deletePending={deletePending}
           isError={isError}
@@ -366,7 +391,7 @@ function RailPanel({
           onRename={onRename}
           onSelect={onSelect}
         />
-      </ScrollArea>
+      </div>
       <div className="flex items-center gap-1">
         <ThemeToggle />
         <LanguageToggle />
@@ -467,18 +492,34 @@ type SessionItemProps = {
   onRename: (title: string) => void;
 };
 
-function SessionItem({ session, selected, running, deletePending, onSelect, onOpenSplit, onDelete, onRename }: SessionItemProps) {
+function SessionItem({
+  session,
+  selected,
+  running,
+  deletePending,
+  onSelect,
+  onOpenSplit,
+  onDelete,
+  onRename,
+}: SessionItemProps) {
   const { t, locale } = useI18n();
+  const title = session.title || t("session.untitled");
   return (
     <div
       className={cn(
-        "group/item relative flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors",
+        "group/item relative flex items-center gap-2 overflow-hidden rounded-lg px-2.5 py-1.5 text-left transition-colors",
         selected ? "bg-sidebar-accent" : "hover:bg-sidebar-accent/60",
       )}
     >
-      <button className="flex min-w-0 flex-1 items-center gap-2 text-left" type="button" onClick={onSelect}>
+      <button
+        className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left"
+        type="button"
+        onClick={onSelect}
+      >
         {running ? <span className="size-2 shrink-0 animate-pulse rounded-full bg-primary" /> : null}
-        <span className="truncate text-[13px] leading-6 font-medium">{session.title || t("session.untitled")}</span>
+        <span className="min-w-0 flex-1 truncate text-[13px] leading-6 font-medium" title={session.title || undefined}>
+          {title}
+        </span>
         <span className="ml-auto shrink-0 pl-2 text-xs text-muted-foreground transition-opacity group-hover/item:opacity-0">
           {running ? t("session.generating") : formatRelative(session.updatedAt, locale)}
         </span>

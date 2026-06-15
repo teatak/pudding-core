@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Loader2, PanelRight, Plus, X } from "lucide-react";
+import { Loader2, Plus, X } from "lucide-react";
 import { useEffect } from "react";
 
 import { createSession, listSessions, type Session } from "@/api/client";
@@ -13,7 +13,6 @@ import { useSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
 import type { AppSearch } from "@/lib/route";
 import { cn } from "@/lib/utils";
-import { setCanvasOpen, useCanvasOpen } from "@/state/canvasStore";
 import { useOverlayStore } from "@/state/overlayStore";
 import { useRailCollapsed } from "@/state/railStore";
 
@@ -30,7 +29,6 @@ export function ChatPane({ token, sessionID, role }: ChatPaneProps) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const railCollapsed = useRailCollapsed();
-  const canvasOpen = useCanvasOpen();
   const sessionsQuery = useQuery({
     queryKey: queryKeys.sessions(),
     queryFn: () => listSessions(token),
@@ -47,6 +45,12 @@ export function ChatPane({ token, sessionID, role }: ChatPaneProps) {
   const sessions = sessionsQuery.data?.sessions || [];
   const selectedSession = sessions.find((session) => session.id === sessionID);
   const isPrimary = role === "primary";
+  const sessionsPending = sessionsQuery.isPending;
+  const headerTitle = selectedSession
+    ? selectedSession.title || t("session.untitled")
+    : sessionsPending
+      ? ""
+      : t("session.noSelected");
 
   useEffect(() => {
     if (!sessionsQuery.isSuccess) {
@@ -91,10 +95,10 @@ export function ChatPane({ token, sessionID, role }: ChatPaneProps) {
   useSessionEvents(selectedSession?.id, token);
 
   return (
-    <section className="relative flex h-full min-h-0 flex-1 basis-0 flex-col overflow-hidden">
+    <section className="relative flex h-full min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden">
       <header
         className={cn(
-          "flex h-(--toolbar-h) shrink-0 items-center justify-between gap-3 px-5",
+          "flex h-(--toolbar-h) min-w-0 shrink-0 items-center justify-between gap-3 overflow-hidden px-5",
           isPrimary && "drag-region",
         )}
         // 折叠态给悬浮触发器让位;壳模式下触发器随红绿灯右移,让位同步加宽
@@ -104,29 +108,14 @@ export function ChatPane({ token, sessionID, role }: ChatPaneProps) {
             : undefined
         }
       >
-        <div className="truncate text-sm font-medium">
-          {selectedSession
-            ? selectedSession.title || t("session.untitled")
-            : t("session.noSelected")}
+        <div
+          className="min-w-0 max-w-(--chat-title-max-w) flex-1 overflow-hidden truncate text-sm font-medium"
+          title={selectedSession?.title || undefined}
+        >
+          {headerTitle}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <HeaderStatus session={selectedSession} />
-          {isPrimary ? (
-            // canvas 栏开关在 header 最右(docs/design.md 第 5 节)
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  aria-label={t("canvas.toggle")}
-                  size="icon-sm"
-                  variant="ghost"
-                  onClick={() => setCanvasOpen(!canvasOpen)}
-                >
-                  <PanelRight />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">{t("canvas.toggle")}</TooltipContent>
-            </Tooltip>
-          ) : null}
           {!isPrimary ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -154,6 +143,8 @@ export function ChatPane({ token, sessionID, role }: ChatPaneProps) {
       </header>
       {selectedSession ? (
         <Conversation token={token} session={selectedSession} />
+      ) : sessionsPending ? (
+        <LoadingState />
       ) : (
         // 欢迎空态(全空库 / 无选中):mascot + 一句话 + 主操作
         <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
@@ -166,6 +157,15 @@ export function ChatPane({ token, sessionID, role }: ChatPaneProps) {
         </div>
       )}
     </section>
+  );
+}
+
+function LoadingState() {
+  const { t } = useI18n();
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
+      <Loader2 className="size-5 animate-spin" aria-label={t("common.loading")} />
+    </div>
   );
 }
 

@@ -51,19 +51,19 @@
 
 :root {
     --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
+    --foreground: oklch(0.22 0 0);
     --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
+    --card-foreground: oklch(0.22 0 0);
     --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
+    --popover-foreground: oklch(0.22 0 0);
     --primary: oklch(0.457 0.24 277.023);
     --primary-foreground: oklch(0.962 0.018 272.314);
     --secondary: oklch(0.967 0.001 286.375);
-    --secondary-foreground: oklch(0.21 0.006 285.885);
+    --secondary-foreground: oklch(0.24 0 0);
     --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
+    --muted-foreground: oklch(0.58 0 0);
     --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
+    --accent-foreground: oklch(0.24 0 0);
     --destructive: oklch(0.577 0.245 27.325);
     --border: oklch(0.922 0 0);
     --input: oklch(0.922 0 0);
@@ -75,11 +75,11 @@
     --chart-5: oklch(0.398 0.195 277.366);
     --radius: 0.625rem;
     --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-foreground: oklch(0.22 0 0);
     --sidebar-primary: oklch(0.511 0.262 276.966);
     --sidebar-primary-foreground: oklch(0.962 0.018 272.314);
     --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-accent-foreground: oklch(0.24 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
     /* macOS 红绿灯横向让位:浏览器 0;壳模式由 data-shell 切换,
@@ -89,14 +89,21 @@
        --toolbar-h 必须与壳侧 InvisibleTitleBarHeight 同值,
        否则可拖区和双击 zoom 检测区跟视觉工具条割裂 */
     --traffic-inset: 0px;
-    --toolbar-h: 3rem;
+    --toolbar-h: 54px;
+    /* 展开态 rail 首项对齐折叠态 popover 首项:
+       toolbar 内居中的 icon button 底部 + popover sideOffset + content padding。 */
+    --rail-content-align-gap: 5px;
+    --rail-radius: 12px;
+    --rail-left-radius: var(--rail-radius);
+    --chat-title-max-w: min(42rem, 100%);
     --success: oklch(0.62 0.12 175);
 }
 
 html[data-shell="mac"] {
-    /* 红绿灯本体占位 ~52px,84px 给折叠按钮留出呼吸间距 */
-    --traffic-inset: 84px;
+    /* 红绿灯本体占位 ~52px,81px 给折叠按钮留出呼吸间距 */
+    --traffic-inset: 81px;
     --toolbar-h: 54px;
+    --rail-left-radius: 18px;
 }
 
 html[data-shell="mac"][data-fullscreen] {
@@ -114,21 +121,28 @@ html[data-shell] .drag-region :where(button, a, input, textarea, select, [role="
     --wails-draggable: no-drag;
 }
 
+@layer utilities {
+  html [data-slot="button"]:active:not([aria-haspopup]) {
+    --tw-translate-y: 0px;
+    translate: var(--tw-translate-x, 0) var(--tw-translate-y, 0);
+  }
+}
+
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
+    --background: oklch(0.205 0 0);
+    --foreground: oklch(0.92 0 0);
+    --card: oklch(0.225 0 0);
+    --card-foreground: oklch(0.92 0 0);
+    --popover: oklch(0.225 0 0);
+    --popover-foreground: oklch(0.92 0 0);
     --primary: oklch(0.398 0.195 277.366);
     --primary-foreground: oklch(0.962 0.018 272.314);
-    --secondary: oklch(0.274 0.006 286.033);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.295 0.006 286.033);
+    --secondary-foreground: oklch(0.92 0 0);
+    --muted: oklch(0.295 0 0);
+    --muted-foreground: oklch(0.68 0 0);
+    --accent: oklch(0.295 0 0);
+    --accent-foreground: oklch(0.92 0 0);
     --destructive: oklch(0.704 0.191 22.216);
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
@@ -138,12 +152,12 @@ html[data-shell] .drag-region :where(button, a, input, textarea, select, [role="
     --chart-3: oklch(0.511 0.262 276.966);
     --chart-4: oklch(0.457 0.24 277.023);
     --chart-5: oklch(0.398 0.195 277.366);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar: oklch(0.225 0 0);
+    --sidebar-foreground: oklch(0.92 0 0);
     --sidebar-primary: oklch(0.585 0.233 277.117);
     --sidebar-primary-foreground: oklch(0.962 0.018 272.314);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.295 0 0);
+    --sidebar-accent-foreground: oklch(0.92 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
     --success: oklch(0.7 0.11 175);
@@ -154,7 +168,7 @@ html[data-shell] .drag-region :where(button, a, input, textarea, select, [role="
     @apply border-border outline-ring/50;
     }
   body {
-    @apply text-sm leading-relaxed bg-background text-foreground;
+    @apply h-full w-full overflow-hidden text-sm leading-relaxed bg-background text-foreground;
     }
   html {
     /* html 涂背景 + 关回弹:overscroll 回弹区露出的是 html 层,不涂会透出
@@ -163,23 +177,11 @@ html[data-shell] .drag-region :where(button, a, input, textarea, select, [role="
        composer 渐变错位撕裂——同时阻断 scroll chaining 传到文档层。
        macOS WKWebView 无公开 scrollView,native 禁用走不通(iOS/Android 才有),
        CSS 是正解:Wails 自带 mobile 模板与旧项目同栈实测均如此。 */
-    @apply overscroll-none bg-background font-sans;
+    @apply h-full w-full overflow-hidden overscroll-none bg-background font-sans;
     }
-}
-
-/* Radix ScrollArea 真正滚动的是内部 viewport(非 root),回弹与 scroll chaining
-   的治理点在这一层。全局命中所有 shadcn ScrollArea(transcript / rail / 设置),
-   不 fork 官方组件;内层用 none 连自身过冲也消,与 html 层一致彻底无回弹。 */
-[data-slot="scroll-area-viewport"] {
-  overscroll-behavior: none;
-}
-
-/* Radix viewport 内部包了一层 display:table;min-width:100%(横向滚动探测用),会让
-   子元素的 max-width 居中失效——内容被撑满整宽(宽屏正文拉伸)。transcript 只纵向
-   滚动,强制这层为 block,让 max-w-3xl mx-auto 内容列正常居中、不拉伸。
-   覆盖 Radix 的 inline display:table 需 !important。 */
-[data-slot="scroll-area-viewport"] > div {
-  display: block !important;
+  #root {
+    @apply h-full w-full overflow-hidden;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

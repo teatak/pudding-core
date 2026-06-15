@@ -1,22 +1,15 @@
 export const layoutStorageKeys = {
-  railWidth: "pudding.railWidth",
   splitRatio: "pudding.splitRatio",
   workspaceRatio: "pudding.workspaceRatio",
 } as const;
 
-export const railLayout = {
-  defaultPx: 268,
-  minPx: 220,
-  maxPx: 420,
-} as const;
-
 export const workspaceLayout = {
   fallback: { chat: 70, canvas: 30 },
+  closed: { chat: 100, canvas: 0 },
   minPercent: 1,
   maxPercent: 99,
   minChatPx: 360,
   minCanvasPx: 240,
-  persistGuardPx: 362,
 } as const;
 
 export const resizeTargetMinimumSize = {

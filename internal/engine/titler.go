@@ -24,35 +24,41 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-// titlerSystemPrompt 沿用旧项目:简短、跟随对话主导语言、无引号标点 emoji。
-const titlerSystemPrompt = `Generate a concise title for the conversation.
+// titlerSystemPrompt 沿用旧项目的短标题原则:只描述任务,不做输出纠偏。
+const titlerSystemPrompt = `You write only a short session-list title.
 
 Requirements:
 
 - Make it specific to the concrete task, question, or topic.
 - Use the conversation's dominant user language. If no dominant language is clear, use English.
-- Keep it short enough for a session list.
+- Chinese titles must be 2-8 Chinese characters. English titles must be 2-5 words.
 - Avoid filler such as "about", "discussion", or "chat".
 - Do not mention "user" or "assistant".
 - Do not include quotes, trailing punctuation, or emoji.
 - Output only the title.`
 
-const titlerUserTemplate = `Generate a title for this conversation:
+const titlerUserTemplate = `<conversation>
+user: %s
+</conversation>
 
-%s`
+Return only the title.`
 
 // titlerTimeout:LLM 通常 1-3s 出标题,30s 是含 thinking 模型预热的冗余上限。
 const titlerTimeout = 30 * time.Second
 
 const (
 	provisionalTitleRunes = 24
-	finalTitleRunes       = 64
+	finalTitleRunes       = 20
+	titlerMaxOutputTokens = 64
+
+	titleQuoteChars          = "\"'`“”‘’「」《》"
+	titleTrailingPunctuation = ".,:;!?。，：；！？…"
 )
 
 // autoTitle 在 Submit 接受首条消息后调用(sess.Title == "" 时)。
 // provisional 同步写(本地 SQLite,纳秒级),LLM 调用异步。
-func (e *Engine) autoTitle(sessionID, providerName, model, userText string) {
-	provisional := truncateRunes(sanitizeTitle(userText), provisionalTitleRunes)
+func (e *Engine) autoTitle(sessionID, providerName, model string, modelConfig provider.ModelConfig, userText string) {
+	provisional := provisionalTitleFromText(userText)
 	if provisional == "" {
 		return
 	}
@@ -70,7 +76,7 @@ func (e *Engine) autoTitle(sessionID, providerName, model, userText string) {
 	e.wg.Add(1)
 	go func() {
 		defer e.wg.Done()
-		title, err := e.generateTitle(providerName, model, userText)
+		title, err := e.generateTitle(providerName, model, modelConfig, userText)
 		if err != nil {
 			slog.Warn("titler: generate failed, keeping provisional", "session", sessionID, "err", err)
 			return
@@ -92,7 +98,7 @@ func (e *Engine) autoTitle(sessionID, providerName, model, userText string) {
 
 // generateTitle 起一次裸 LLM 调用(同 session 解析出的 provider/model),
 // 收集全文后清洗截断。不产 turn、不进 messages,失败只留 provisional。
-func (e *Engine) generateTitle(providerName, model, userText string) (string, error) {
+func (e *Engine) generateTitle(providerName, model string, modelConfig provider.ModelConfig, userText string) (string, error) {
 	// 从 auxCtx 派生:Stop() 后(优雅退出)立即取消这次 LLM 调用,
 	// 不让 30s 超时拖住 engine.Wait()。
 	ctx, cancel := context.WithTimeout(e.auxCtx, titlerTimeout)
@@ -107,6 +113,7 @@ func (e *Engine) generateTitle(providerName, model, userText string) (string, er
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Text: fmt.Sprintf(titlerUserTemplate, userText)},
 		},
+		Config: titlerConfig(modelConfig),
 	})
 	if err != nil {
 		return "", err
@@ -116,40 +123,94 @@ func (e *Engine) generateTitle(providerName, model, userText string) (string, er
 		if chunk.Err != nil {
 			return "", chunk.Err
 		}
-		buf.WriteString(chunk.Delta)
+		if chunk.Part == "" || chunk.Part == provider.PartText {
+			buf.WriteString(chunk.Delta)
+		}
 	}
 	return truncateRunes(sanitizeTitle(buf.String()), finalTitleRunes), nil
 }
 
 // sanitizeTitle 沿用旧项目:取首行、剥首尾引号/书名号、去末尾标点。
 func sanitizeTitle(s string) string {
-	s = strings.TrimSpace(s)
+	s = firstLine(strings.TrimSpace(s))
 	if s == "" {
 		return ""
 	}
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = strings.TrimSpace(s[:i])
+	s = strings.Trim(s, titleQuoteChars)
+	s = strings.TrimRight(s, titleTrailingPunctuation)
+	return strings.TrimSpace(s)
+}
+
+func provisionalTitleFromText(text string) string {
+	s := firstSentence(firstLine(strings.TrimSpace(text)))
+	if s == "" {
+		return ""
 	}
-	quotes := []string{
-		`"`, `'`, "`",
-		"“", "”", // “ ”
-		"‘", "’", // ‘ ’
-		"「", "」", // 「 」
-		"《", "》", // 《 》
-	}
-	for _, q := range quotes {
-		s = strings.TrimPrefix(s, q)
-		s = strings.TrimSuffix(s, q)
-	}
-	s = strings.TrimSpace(s)
-	puncts := []string{
-		".", ",", ":", ";", "!", "?",
-		"。", "，", "：", "；", "！", "？", "…", // 。,:;!?…
-	}
-	for _, p := range puncts {
-		s = strings.TrimSuffix(s, p)
+	s = sanitizeTitle(strings.Join(strings.Fields(s), " "))
+	return truncateRunesWithEllipsis(s, provisionalTitleRunes)
+}
+
+func firstLine(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	if i := strings.IndexAny(s, "\n\r"); i >= 0 {
+		return strings.TrimSpace(s[:i])
 	}
 	return strings.TrimSpace(s)
+}
+
+func firstSentence(s string) string {
+	for i, r := range s {
+		switch r {
+		case '。', '！', '？', '.', '!', '?':
+			if i > 0 {
+				return strings.TrimSpace(s[:i])
+			}
+			return strings.TrimSpace(s)
+		}
+	}
+	return strings.TrimSpace(s)
+}
+
+func titlerConfig(base provider.ModelConfig) provider.ModelConfig {
+	cfg := provider.ModelConfig{
+		ContextWindow: base.ContextWindow,
+		OpenAI:        cloneAnyMap(base.OpenAI),
+		Google:        cloneAnyMap(base.Google),
+		Anthropic:     cloneAnyMap(base.Anthropic),
+	}
+	if base.Capabilities != nil {
+		cfg.Capabilities = &provider.ModelCapabilities{
+			Image: base.Capabilities.Image,
+			Audio: base.Capabilities.Audio,
+			Tools: false,
+		}
+	}
+	if cfg.OpenAI == nil {
+		cfg.OpenAI = map[string]any{}
+	}
+	if cfg.Google == nil {
+		cfg.Google = map[string]any{}
+	}
+	if cfg.Anthropic == nil {
+		cfg.Anthropic = map[string]any{}
+	}
+	cfg.OpenAI["max_completion_tokens"] = titlerMaxOutputTokens
+	cfg.OpenAI["max_output_tokens"] = titlerMaxOutputTokens
+	cfg.OpenAI["reasoning_effort"] = "low"
+	cfg.Google["maxOutputTokens"] = titlerMaxOutputTokens
+	cfg.Anthropic["max_tokens"] = titlerMaxOutputTokens
+	return cfg
+}
+
+func cloneAnyMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func truncateRunes(s string, n int) string {
@@ -158,4 +219,12 @@ func truncateRunes(s string, n int) string {
 		return s
 	}
 	return strings.TrimSpace(string(runes[:n]))
+}
+
+func truncateRunesWithEllipsis(s string, n int) string {
+	runes := []rune(strings.TrimSpace(s))
+	if len(runes) <= n {
+		return string(runes)
+	}
+	return strings.TrimSpace(string(runes[:n])) + "…"
 }

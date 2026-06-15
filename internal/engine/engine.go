@@ -163,7 +163,7 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	// 空标题会话:首条消息触发自动标题(provisional + 异步 LLM),
 	// 与 turn 生命周期解耦(titler.go)
 	if sess.Title == "" {
-		e.autoTitle(in.SessionID, resolved.providerName, resolved.model, in.Text)
+		e.autoTitle(in.SessionID, resolved.providerName, resolved.model, resolved.config, in.Text)
 	}
 
 	e.wg.Add(1)

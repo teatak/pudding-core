@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, Loader2, Plus, Settings, Trash2 } from "lucide-react";
+import { Copy, KeyRound, Loader2, Pencil, Plus, Settings, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { z } from "zod";
@@ -112,7 +112,7 @@ export function SettingsDialog({ token }: SettingsDialogProps) {
         </TooltipTrigger>
         <TooltipContent>{t("settings.title")}</TooltipContent>
       </Tooltip>
-      <DialogContent className="max-h-svh overflow-y-auto sm:max-w-5xl">
+      <DialogContent className="max-h-svh overflow-y-auto sm:max-w-6xl">
         <DialogHeader>
           <DialogTitle>{t("settings.title")}</DialogTitle>
           <DialogDescription>{t("settings.description")}</DialogDescription>
@@ -230,6 +230,17 @@ function ProviderSettings({ token }: { token: string }) {
     providerForm.reset(providerToForm(profile));
   }
 
+  function cloneProfile(profile: ProviderProfile) {
+    const nextID = uniqueProfileID(profile.id, profiles.map((item) => item.id));
+    setEditingID(null);
+    providerForm.reset({
+      ...providerToForm(profile),
+      id: nextID,
+      name: `${profile.name} ${t("provider.copySuffix")}`,
+      apiKey: "",
+    });
+  }
+
   function applyPreset(preset: (typeof providerPresets)[number]) {
     setEditingID(null);
     providerForm.reset({
@@ -282,7 +293,10 @@ function ProviderSettings({ token }: { token: string }) {
         </div>
 
         <div className="grid gap-2">
-          <Label>{t("provider.list")}</Label>
+          <div className="grid gap-0.5">
+            <Label>{t("provider.list")}</Label>
+            <div className="text-xs text-muted-foreground">{t("provider.listHint")}</div>
+          </div>
           {providersQuery.isLoading ? <ProviderSkeleton /> : null}
           {providersQuery.isError ? (
             <Alert variant="destructive">
@@ -299,126 +313,140 @@ function ProviderSettings({ token }: { token: string }) {
           ) : null}
           <div className="grid gap-2">
             {profiles.map((profile) => (
-              <button
+              <div
                 key={profile.id}
                 className={cn(
-                  "grid gap-1 rounded-lg border bg-card p-3 text-left text-sm transition-colors hover:bg-muted",
+                  "grid gap-2 rounded-lg border bg-card p-3 text-sm transition-colors",
+                  "hover:bg-muted/60",
                   editingID === profile.id && "border-primary",
                 )}
-                type="button"
-                onClick={() => editProfile(profile)}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <BrandIcon className="size-4 shrink-0" name={profile.id} />
-                    <span className="truncate font-medium">{profile.name}</span>
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {profile.apiKeySet ? t("provider.keySet") : t("provider.keyMissing")}
-                  </span>
+                <button className="grid min-w-0 gap-1 text-left" type="button" onClick={() => editProfile(profile)}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <BrandIcon className="size-4 shrink-0" name={profile.id} />
+                      <span className="truncate font-medium">{profile.name}</span>
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {profile.apiKeySet ? t("provider.keySet") : t("provider.keyMissing")}
+                    </span>
+                  </div>
+                  <div className="flex min-w-0 items-center gap-1">
+                    <Badge className="text-[10px] font-normal" variant="outline">
+                      {profile.type}
+                    </Badge>
+                    <span className="truncate text-xs text-muted-foreground">{profile.models[0]?.id || t("picker.noModels")}</span>
+                  </div>
+                </button>
+                <div className="flex items-center gap-1 border-t pt-2">
+                  <Button className="h-7 px-2" size="sm" type="button" variant="ghost" onClick={() => editProfile(profile)}>
+                    <Pencil />
+                    {t("provider.editShort")}
+                  </Button>
+                  <Button className="h-7 px-2" size="sm" type="button" variant="ghost" onClick={() => cloneProfile(profile)}>
+                    <Copy />
+                    {t("common.copy")}
+                  </Button>
                 </div>
-                <div className="flex min-w-0 items-center gap-1">
-                  <Badge className="text-[10px] font-normal" variant="outline">
-                    {profile.type}
-                  </Badge>
-                  <span className="truncate text-xs text-muted-foreground">{profile.models[0]?.id || t("picker.noModels")}</span>
-                </div>
-              </button>
+              </div>
             ))}
           </div>
         </div>
       </div>
 
-      <form className="grid content-start gap-4" onSubmit={providerForm.handleSubmit(submitProvider)}>
-        <div className="grid gap-1">
+      <form className="overflow-hidden rounded-lg border bg-card" onSubmit={providerForm.handleSubmit(submitProvider)}>
+        <div className="grid gap-1 border-b bg-muted/30 px-4 py-3">
           <div className="text-sm font-medium">{editingID ? t("provider.edit") : t("provider.create")}</div>
           <div className="text-xs text-muted-foreground">{t("provider.keyHint")}</div>
         </div>
-        {providerForm.formState.errors.root?.message ? (
-          <Alert variant="destructive">
-            <AlertDescription>{providerForm.formState.errors.root.message}</AlertDescription>
-          </Alert>
-        ) : null}
+        <div className="grid gap-4 p-4">
+          {providerForm.formState.errors.root?.message ? (
+            <Alert variant="destructive">
+              <AlertDescription>{providerForm.formState.errors.root.message}</AlertDescription>
+            </Alert>
+          ) : null}
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="grid gap-2">
-            <Label htmlFor="provider-id">{t("provider.id")}</Label>
-            <Input id="provider-id" disabled={Boolean(editingID)} {...providerForm.register("id")} />
-            {providerForm.formState.errors.id?.message ? (
-              <div className="text-xs text-destructive">{providerForm.formState.errors.id.message}</div>
-            ) : null}
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="provider-name">{t("provider.name")}</Label>
-            <Input id="provider-name" {...providerForm.register("name")} />
-          </div>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="grid gap-2">
-            <Label>{t("provider.type")}</Label>
-            <Select
-              value={providerType}
-              onValueChange={(value) => providerForm.setValue("type", value as ProviderFormValue["type"], { shouldDirty: true })}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="openai-responses">openai-responses</SelectItem>
-                <SelectItem value="openai-compatible">openai-compatible</SelectItem>
-                <SelectItem value="google">google</SelectItem>
-                <SelectItem value="anthropic">anthropic</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="provider-base-url">Base URL</Label>
-            <Input id="provider-base-url" placeholder="https://api.openai.com/v1" {...providerForm.register("baseURL")} />
-          </div>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="grid gap-2">
-            <Label htmlFor="provider-api-key">API Key</Label>
-            <Input id="provider-api-key" type="password" placeholder={editingID ? t("provider.apiKeyKeep") : "sk-..."} {...providerForm.register("apiKey")} />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="provider-api-key-env">{t("provider.apiKeyEnv")}</Label>
-            <Input id="provider-api-key-env" placeholder="OPENAI_API_KEY" {...providerForm.register("apiKeyEnv")} />
-          </div>
-        </div>
-
-        <div className="grid gap-2">
-          <div className="flex items-center justify-between gap-2">
-            <Label>{t("provider.models")}</Label>
-            <div className="flex gap-2">
-              <Button disabled={!editingID || candidatesLoading} size="sm" type="button" variant="ghost" onClick={() => void loadCandidates()}>
-                {candidatesLoading ? <Loader2 className="animate-spin" /> : null}
-                {t("provider.loadCandidates")}
-              </Button>
-              <Button size="sm" type="button" variant="outline" onClick={() => modelFields.append(emptyModel())}>
-                <Plus />
-                {t("provider.addModel")}
-              </Button>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="provider-id">{t("provider.id")}</Label>
+              <Input id="provider-id" disabled={Boolean(editingID)} {...providerForm.register("id")} />
+              {providerForm.formState.errors.id?.message ? (
+                <div className="text-xs text-destructive">{providerForm.formState.errors.id.message}</div>
+              ) : null}
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="provider-name">{t("provider.name")}</Label>
+              <Input id="provider-name" {...providerForm.register("name")} />
             </div>
           </div>
-          <div className="grid gap-3">
-            {modelFields.fields.map((field, index) => (
-              <ModelEditor
-                key={field.id}
-                index={index}
-                providerType={providerType}
-                canRemove={modelFields.fields.length > 1}
-                form={providerForm}
-                onRemove={() => modelFields.remove(index)}
-              />
-            ))}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label>{t("provider.type")}</Label>
+              <Select
+                value={providerType}
+                onValueChange={(value) => providerForm.setValue("type", value as ProviderFormValue["type"], { shouldDirty: true })}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="openai-responses">openai-responses</SelectItem>
+                  <SelectItem value="openai-compatible">openai-compatible</SelectItem>
+                  <SelectItem value="google">google</SelectItem>
+                  <SelectItem value="anthropic">anthropic</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="provider-base-url">Base URL</Label>
+              <Input id="provider-base-url" placeholder="https://api.openai.com/v1" {...providerForm.register("baseURL")} />
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="provider-api-key">API Key</Label>
+              <Input id="provider-api-key" type="password" placeholder={editingID ? t("provider.apiKeyKeep") : "sk-..."} {...providerForm.register("apiKey")} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="provider-api-key-env">{t("provider.apiKeyEnv")}</Label>
+              <Input id="provider-api-key-env" placeholder="OPENAI_API_KEY" {...providerForm.register("apiKeyEnv")} />
+            </div>
+          </div>
+
+          <div className="grid gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <Label>{t("provider.models")}</Label>
+              <div className="flex gap-2">
+                <Button disabled={!editingID || candidatesLoading} size="sm" type="button" variant="ghost" onClick={() => void loadCandidates()}>
+                  {candidatesLoading ? <Loader2 className="animate-spin" /> : null}
+                  {t("provider.loadCandidates")}
+                </Button>
+                <Button size="sm" type="button" variant="outline" onClick={() => modelFields.append(emptyModel())}>
+                  <Plus />
+                  {t("provider.addModel")}
+                </Button>
+              </div>
+            </div>
+            <div className="grid gap-3">
+              {modelFields.fields.map((field, index) => (
+                <ModelEditor
+                  key={field.id}
+                  index={index}
+                  providerType={providerType}
+                  canRemove={modelFields.fields.length > 1}
+                  form={providerForm}
+                  onRemove={() => modelFields.remove(index)}
+                />
+              ))}
+            </div>
           </div>
         </div>
 
-        <DialogFooter>
-          {editingID ? (
+        <div className="flex items-center justify-between gap-2 border-t bg-muted/30 p-3">
+          <div>
+            {editingID ? (
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button disabled={deleteMutation.isPending} type="button" variant="destructive">
@@ -439,12 +467,13 @@ function ProviderSettings({ token }: { token: string }) {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
-          ) : null}
+            ) : null}
+          </div>
           <Button disabled={saving} type="submit">
             {saving ? <Loader2 className="animate-spin" /> : <KeyRound />}
             {t("common.save")}
           </Button>
-        </DialogFooter>
+        </div>
       </form>
     </div>
   );
@@ -793,4 +822,19 @@ function numberValue(value: string | undefined) {
 
 function compactOptions(options: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined && value !== ""));
+}
+
+function uniqueProfileID(baseID: string, existingIDs: string[]) {
+  const existing = new Set(existingIDs);
+  const base = `${baseID || "profile"}-copy`;
+  if (!existing.has(base)) {
+    return base;
+  }
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${base}-${index}`;
+    if (!existing.has(candidate)) {
+      return candidate;
+    }
+  }
+  return `${base}-${Date.now()}`;
 }

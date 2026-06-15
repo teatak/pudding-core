@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, Check, CircleAlert, Copy } from "lucide-react";
+import { ArrowDown, Check, CircleAlert, Copy, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { listMessages, type Message } from "@/api/client";
@@ -9,8 +9,6 @@ import { Mascot } from "@/components/Mascot";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Skeleton } from "@/components/ui/skeleton";
 import { useStreamedText } from "@/hooks/useStreamedText";
 import { useI18n } from "@/i18n";
 import { renderMarkdown } from "@/lib/markdown";
@@ -33,7 +31,7 @@ type TranscriptItem =
 
 export function Transcript({ token, sessionID }: TranscriptProps) {
   const { t } = useI18n();
-  const scrollAreaRef = useRef<HTMLDivElement | null>(null);
+  const scrollViewportRef = useRef<HTMLDivElement | null>(null);
   const [followingBottom, setFollowingBottom] = useState(true);
   const reconcileMessages = useOverlayStore((state) => state.reconcileMessages);
   const pendingUsersBySession = useOverlayStore((state) => state.pendingUsers);
@@ -51,11 +49,14 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
   );
 
   useEffect(() => {
+    if (!messagesQuery.isSuccess) {
+      return;
+    }
     reconcileMessages(sessionID, messages);
-  }, [messages, reconcileMessages, sessionID]);
+  }, [messages, messagesQuery.isSuccess, reconcileMessages, sessionID]);
 
   const viewport = useCallback(() => {
-    return scrollAreaRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null;
+    return scrollViewportRef.current;
   }, []);
 
   const scrollToBottom = useCallback(() => {
@@ -146,7 +147,15 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
     }
   }, [followingBottom, items, scrollToBottom]);
 
-  // 空消息态独立渲染:不进 ScrollArea(min-h 撑高会出滚动条),flex 居中填满
+  if (messagesQuery.isPending) {
+    return (
+      <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
+        <Loader2 className="size-5 animate-spin" aria-label={t("common.loading")} />
+      </div>
+    );
+  }
+
+  // 空消息态独立渲染:不进滚动容器(min-h 撑高会出滚动条),flex 居中填满
   if (!messagesQuery.isLoading && !messagesQuery.isError && items.length === 0) {
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
@@ -159,12 +168,9 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
   return (
     // overflow-hidden:WKWebView 下文字字形渲染会溢出滚动 viewport 边界,
     // 在 composer 上沿漏出白色文字边缘,这里裁掉(浏览器无此问题但无害)
-    <div ref={scrollAreaRef} className="relative min-h-0 flex-1 overflow-hidden">
-      {/* type=scroll:滚动条只在滚动时浮现;默认 hover 模式会在指针进入
-          滚动区(即 hover 任意消息)时显示,观感突兀 */}
-      <ScrollArea className="h-full" type="scroll">
+    <div className="relative min-h-0 flex-1 overflow-hidden">
+      <div ref={scrollViewportRef} className="h-full overflow-y-auto overscroll-contain">
         <ChatColumn className="grid gap-4 py-4">
-          {messagesQuery.isLoading ? <TranscriptSkeleton /> : null}
           {messagesQuery.isError ? (
             <Alert variant="destructive">
               <CircleAlert className="h-3.5 w-3.5" />
@@ -183,7 +189,7 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
             );
           })}
         </ChatColumn>
-      </ScrollArea>
+      </div>
       {!followingBottom && items.length > 0 ? (
         <Button
           aria-label={t("transcript.jumpLatest")}
@@ -237,7 +243,7 @@ function MessageItem({ message }: { message: Message }) {
   );
 }
 
-// 用户消息是"任务指令":全宽块 + 左侧主色细条,不做聊天气泡
+// 用户消息沿用聊天气泡:靠右,meta 也贴右侧;助手消息保持正文流。
 function UserMessageBlock({
   text,
   createdAt,
@@ -250,12 +256,12 @@ function UserMessageBlock({
   pending?: boolean;
 }) {
   return (
-    <div className={cn("group flex flex-col", pending && "opacity-70")}>
-      <div className="rounded-r-lg border-l-2 border-primary bg-secondary/60 px-3.5 py-2 text-sm leading-6 whitespace-pre-wrap">
+    <div className={cn("group flex flex-col items-end", pending && "opacity-70")}>
+      <div className="min-w-0 max-w-[min(82%,42rem)] rounded-3xl rounded-br-lg border bg-secondary/60 px-4 py-2 text-left text-sm leading-6 break-words whitespace-pre-wrap">
         {text}
         {interrupted ? <InterruptedBadge /> : null}
       </div>
-      {createdAt ? <MessageMeta createdAt={createdAt} text={text} /> : null}
+      {createdAt ? <MessageMeta className="justify-end" createdAt={createdAt} text={text} /> : null}
     </div>
   );
 }
@@ -359,20 +365,6 @@ function MessageMeta({ createdAt, text, className }: { createdAt: string; text: 
       >
         {copied ? <Check className="text-success" /> : <Copy />}
       </Button>
-    </div>
-  );
-}
-
-// 骨架贴任务流版式:用户指令块 + 文本行,不再是聊天气泡形状
-function TranscriptSkeleton() {
-  return (
-    <div className="grid gap-4">
-      <Skeleton className="h-12 w-full rounded-r-lg" />
-      <div className="grid gap-2">
-        <Skeleton className="h-4 w-3/4" />
-        <Skeleton className="h-4 w-1/2" />
-        <Skeleton className="h-4 w-2/3" />
-      </div>
     </div>
   );
 }

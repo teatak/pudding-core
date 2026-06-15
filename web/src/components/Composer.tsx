@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Send, Square } from "lucide-react";
+import { ArrowUp, Loader2, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -82,6 +82,7 @@ export function Composer({ token, session }: ComposerProps) {
       form.setError("text", { message: error instanceof Error ? error.message : t("composer.submitFailed") });
     },
   });
+  const sendEnabled = canSend && !submitMutation.isPending;
 
   const cancelMutation = useMutation({
     mutationFn: () => cancelTurn(token, sessionID),
@@ -120,7 +121,7 @@ export function Composer({ token, session }: ComposerProps) {
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
-                if (canSend) {
+                if (sendEnabled) {
                   void form.handleSubmit(submitDraft)();
                 }
               }
@@ -134,14 +135,18 @@ export function Composer({ token, session }: ComposerProps) {
                 <TooltipTrigger asChild>
                   <Button
                     aria-label={t("composer.stop")}
-                    className="rounded-full"
+                    className="rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
                     disabled={cancelMutation.isPending || cancelLocked}
                     size="icon"
                     type="button"
-                    variant="outline"
+                    variant="ghost"
                     onClick={() => cancelMutation.mutate()}
                   >
-                    {cancelMutation.isPending ? <Loader2 className="animate-spin" /> : <Square />}
+                    {cancelMutation.isPending ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <Square className="size-3 fill-current stroke-current" />
+                    )}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>{cancelLocked ? t("composer.stopPending") : t("composer.stop")}</TooltipContent>
@@ -152,12 +157,12 @@ export function Composer({ token, session }: ComposerProps) {
                   <Button
                     aria-label={t("composer.send")}
                     className="rounded-full"
-                    disabled={submitMutation.isPending || !canSend}
+                    disabled={!sendEnabled}
                     size="icon"
                     type="submit"
-                    variant="secondary"
+                    variant={sendEnabled ? "default" : "secondary"}
                   >
-                    {submitMutation.isPending ? <Loader2 className="animate-spin" /> : <Send />}
+                    {submitMutation.isPending ? <Loader2 className="animate-spin" /> : <ArrowUp />}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>{t("composer.send")}</TooltipContent>
