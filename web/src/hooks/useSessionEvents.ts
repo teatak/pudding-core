@@ -3,6 +3,7 @@ import { useEffect } from "react";
 
 import { queryKeys } from "@/api/queryKeys";
 import { sessionEvent } from "@/contracts/events";
+import { apiURL } from "@/state/apiBase";
 import { useOverlayStore } from "@/state/overlayStore";
 
 export function useSessionEvents(sessionID: string | undefined, token: string) {
@@ -14,7 +15,7 @@ export function useSessionEvents(sessionID: string | undefined, token: string) {
       return;
     }
     const params = new URLSearchParams({ token });
-    const source = new EventSource(`/sessions/${encodeURIComponent(sessionID)}/events?${params.toString()}`);
+    const source = new EventSource(apiURL(`/sessions/${encodeURIComponent(sessionID)}/events?${params.toString()}`));
 
     source.onopen = () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.messages(sessionID) });

@@ -142,32 +142,36 @@ Pudding Core = local-first multi-session AI daemon + app core.
 边界:
 
 - Desktop shell 负责启动 daemon、承载 Web UI、提供系统集成。
-- daemon 核心业务协议仍然是 HTTP/SSE/WebSocket。
+- daemon 核心业务协议仍然是 loopback HTTP/SSE/WebSocket。
 - desktop native/system capabilities 必须走 Wails bindings。
 - Desktop 不拥有 session runtime。
+- Wails AssetServer 只托管 Web UI 资源和开发态 Vite/HMR,不充当业务 API 网关。
 
 通讯边界:
 
 | 通道 | 用途 |
 | --- | --- |
-| HTTP REST | 业务请求和快照,如 sessions/messages/settings/model |
-| SSE | session-scoped event stream |
-| WebSocket | MCP / browser tools / realtime bridge |
+| daemon HTTP REST | 业务请求和快照,如 sessions/messages/settings/model |
+| daemon SSE | session-scoped event stream |
+| daemon WebSocket | MCP / browser tools / realtime bridge |
 | Wails bindings/events | desktop native/system capabilities |
+| Wails AssetServer | Web UI assets / Vite HMR 资源 |
 
 规则:
 
-- session / submit / messages / settings / provider config 走 HTTP REST。
-- `/sessions/{id}/events` 走 SSE。
-- MCP / browser tools / 需要双向长连接的能力走 WebSocket。
+- session / submit / messages / settings / provider config 由前端直连 daemon HTTP REST。
+- `/sessions/{id}/events` 由前端直连 daemon SSE。
+- MCP / browser tools / 需要双向长连接的能力由前端直连 daemon WebSocket。
 - 文件选择、保存文件、Reveal in Finder/Explorer、外链打开、窗口状态、全屏/titlebar、tray、系统通知、更新安装、native dialogs 走 Wails bindings。
 - Wails bindings 不承载核心 session runtime。
+- Wails AssetServer / Middleware 不反代 `/sessions`、`/settings`、`/providers` 等业务路径。
 - HTTP/SSE/WS 不硬凹 desktop native 能力。
 
 不选择:
 
 - Electron:太重。
 - Tauri:当前 Go daemon + Wails 更贴合。
+- Wails AssetServer 反代业务 API:会混淆 UI 资源通道与业务通道,且桌面 WebView 链路可能丢失 mutating request body。
 
 风险:
 
@@ -397,7 +401,7 @@ turn.started → turn.delta* → turn.completed | turn.failed | turn.cancelled
 ## 9. 安全
 
 - daemon 只 bind loopback。
-- daemon 启动时生成 token,所有 HTTP/SSE/WS 请求必须带 token;Wails 启动 daemon 时注入,Web UI 通过启动页握手获取。
+- daemon 启动时生成 token,所有 HTTP/SSE/WS 请求必须带 token;Wails 壳启动 daemon 后通过启动 URL 注入 token 与 daemon API base,前端读取后从地址栏清掉。
 - 第一阶段 provider API key 存 SQLite 明文,数据库文件权限 0600;后续评估走 Wails bindings 接系统 keychain。
 
 ## 10. 数据目录与通道隔离
@@ -406,8 +410,8 @@ turn.started → turn.delta* → turn.completed | turn.failed | turn.cancelled
 
 | 通道 | home | 默认端口 |
 | --- | --- | --- |
-| release | `~/.pudding` | `127.0.0.1:9669`(CLI 与壳同端口,attach-or-start) |
-| dev | `~/.pudding-dev` | `127.0.0.1:9679`(CLI 与壳同端口,attach-or-start) |
+| release | `~/.pudding` | `127.0.0.1:9669`(CLI 与壳同端口;壳不 attach 旧实例) |
+| dev | `~/.pudding-dev` | `127.0.0.1:9679`(CLI 与壳同端口;壳不 attach 旧实例) |
 
 与旧版的关系:
 

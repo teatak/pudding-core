@@ -53,7 +53,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/providers/:name/models").GET(s.listProviderModels)
 
 	authed := withAuth(token, app)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for _, prefix := range apiPrefixes {
 			if r.URL.Path == prefix || strings.HasPrefix(r.URL.Path, prefix+"/") {
 				authed.ServeHTTP(w, r)
@@ -66,6 +66,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 		}
 		static.ServeHTTP(w, r)
 	})
+	return withCORS(handler)
 }
 
 func withAuth(token string, next http.Handler) http.Handler {

@@ -55,16 +55,6 @@
 - SSE
 - WebSocket
 
-`cart v3` 路由规则:
-
-- 只支持整段参数: `/sessions/:id`
-- catch-all 只能是最后一段: `/files/*path`
-- 匹配优先级: `static > parameter > catch-all`
-- 禁止中段参数:
-  - `/user_:name`
-  - `/con:tact`
-  - `/files/:name.json`
-
 HTTP/SSE/WS 分工:
 
 - REST:业务请求和快照。
@@ -79,23 +69,8 @@ HTTP/SSE/WS 分工:
 
 通讯边界:
 
-- 核心业务协议走 HTTP REST / SSE / WebSocket。
+- 核心业务协议走 daemon loopback HTTP REST / SSE / WebSocket。
 - desktop native/system capabilities 走 Wails bindings/events。
-
-Wails bindings 负责:
-
-- file picker
-- save file
-- reveal file
-- external URL open
-- window state
-- fullscreen / titlebar
-- tray
-- system notification
-- updater / install
-- native dialogs
-
-Wails bindings 不承载核心 session runtime。
 
 ## 前端技术约束
 

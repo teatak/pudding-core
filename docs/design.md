@@ -100,9 +100,11 @@ border 在暗色套用白色 alpha,跨不同亮度表面观感一致。
 - **运行模式识别**:壳加载 URL 附 `?shell=mac`,前端写入
   `<html data-shell="mac">`(与 token 一样进 sessionStorage,刷新保持);
   浏览器访问无此参数,零 inset。
+- **业务 API 路线**:壳加载 URL 注入 daemon API base;前端业务 REST/SSE/WS
+  直连 loopback daemon。Wails 只托管 UI/runtime,不反代业务 API。
 - **全屏事件**:壳监听 macOS 进/出全屏(Wails window 事件),
-  `ExecJS` 切换 `data-fullscreen` 属性——页面不引入 wails runtime JS,
-  保持"壳只是浏览器"的边界。
+  通过 Wails runtime event 切换 `data-fullscreen`;业务 API 仍走 daemon
+  HTTP,desktop native 状态走 Wails 事件。
 - **拖拽区**:rail 顶行与 pane header 的空白区设 `--wails-draggable: drag`,
   其中的按钮/输入显式 no-drag;浏览器模式下该样式无效且无害。
 - Windows/Linux 后续按同机制扩展(`data-shell="win"` 走右上控件,无左上 inset)。
@@ -210,7 +212,7 @@ text:      markdown 正文(无气泡直接排版)…▍    ← streaming 光标
 | S5 选择器 | 两层 Accordion 模型选择(只读 profile.models)+ 配置表单模型导入 | — |
 | S6 分屏 | pane 容器抽象、`?split=`、上下分屏 | S3 S4 |
 | S7 canvas 栏 | 插槽 + 收起/展开 + 空态 | S3 |
-| S8 窗口 chrome | 壳 HiddenInset + `?shell=mac` + 全屏事件 ExecJS + 拖拽区 | S3 |
+| S8 窗口 chrome | 壳 HiddenInset + `?shell=mac`/`?api=` + Wails 全屏事件 + 拖拽区 | S3 |
 
 S1–S5 为一批(核心形态),S6–S7 紧随;细碎(mascot、动效细节、
 标题自动生成)在形态稳定后移交 Codex。

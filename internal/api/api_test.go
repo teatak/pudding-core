@@ -74,6 +74,49 @@ func TestAuthRequired(t *testing.T) {
 	}
 }
 
+func TestCORSPreflightAllowsWailsLoopback(t *testing.T) {
+	srv, _ := newTestServer(t)
+	r, err := http.NewRequest(http.MethodOptions, srv.URL+"/sessions/s1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Header.Set("Origin", "wails://localhost:5174")
+	r.Header.Set("Access-Control-Request-Method", "PATCH")
+	r.Header.Set("Access-Control-Request-Headers", "Authorization, Content-Type")
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("want 204, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "wails://localhost:5174" {
+		t.Fatalf("unexpected allow origin %q", got)
+	}
+	if !strings.Contains(resp.Header.Get("Access-Control-Allow-Methods"), "PATCH") {
+		t.Fatalf("PATCH must be allowed, got %q", resp.Header.Get("Access-Control-Allow-Methods"))
+	}
+}
+
+func TestCORSRejectsNonLoopbackOrigin(t *testing.T) {
+	srv, _ := newTestServer(t)
+	r, err := http.NewRequest(http.MethodOptions, srv.URL+"/sessions", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Header.Set("Origin", "https://example.com")
+	r.Header.Set("Access-Control-Request-Method", "GET")
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("want 403, got %d", resp.StatusCode)
+	}
+}
+
 type sseFrame struct {
 	id    string
 	event string

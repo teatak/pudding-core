@@ -18,6 +18,8 @@ import {
 } from "@/contracts/api";
 import { z } from "zod";
 
+import { apiURL } from "@/state/apiBase";
+
 export class APIError extends Error {
   constructor(
     public readonly status: number,
@@ -54,7 +56,7 @@ async function request<T>(
   schema: z.ZodType<T>,
   init?: RequestInit,
 ): Promise<T> {
-  const response = await fetch(path, {
+  const response = await fetch(apiURL(path), {
     ...init,
     headers: {
       ...authHeaders(token),

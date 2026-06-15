@@ -2,7 +2,7 @@
 # 开发循环。两种模式,都先停掉占 dev 端口的旧实例(壳或 daemon),
 # 启动用 perl setsid 进新会话彻底 detached(关终端/CI 也不被带走):
 #
-#   scripts/dev.sh desktop   壳直连 Vite(HMR):壳内嵌 daemon,改 web/src 即时生效
+#   scripts/dev.sh desktop   Wails 托管壳 + Vite(HMR):壳内嵌 daemon,业务 API 直连 daemon HTTP
 #   scripts/dev.sh daemon     headless:起 puddingd + Vite,浏览器开脚本打印的带 token URL
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -35,7 +35,7 @@ case "$MODE" in
     go build -o bin/pudding-desktop ./cmd/pudding-desktop || exit 1
     ensure_vite
     stop_old
-    echo ">> launching pudding-desktop against Vite :$VITE_PORT (HMR; log /tmp/pudding-desktop.log)"
+    echo ">> launching pudding-desktop with Wails/Vite :$VITE_PORT (HMR; API :$DEV_PORT; log /tmp/pudding-desktop.log)"
     PUDDING_DEV_URL="http://127.0.0.1:$VITE_PORT" \
       nohup perl -e 'use POSIX qw(setsid); setsid(); exec @ARGV' ./bin/pudding-desktop \
       >/tmp/pudding-desktop.log 2>&1 &

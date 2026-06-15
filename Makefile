@@ -16,7 +16,7 @@ embed:
 desktop: embed
 	go build -o bin/pudding-desktop ./cmd/pudding-desktop
 
-# 热更循环:壳直连 Vite(HMR),改 web/src 即时生效;停旧实例后 detached 拉起
+# 热更循环:Wails AssetServer 托管 Vite(HMR),业务 API 直连 daemon;停旧实例后 detached 拉起
 desktop-dev:
 	@bash scripts/dev.sh desktop
 

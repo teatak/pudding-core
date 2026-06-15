@@ -3,7 +3,7 @@
 > 单一现状文档:给接手的 agent / 上下文压缩后的自己看,避免重新推导。
 > 已完成只记结论(细节在 git 历史与 commit message);重点是**进行中**与
 > **待决项**。改动时同步更新本文,不积压。
-> 最近更新:2026-06-14。
+> 最近更新:2026-06-15。
 
 ## 现状一句话
 
@@ -31,13 +31,14 @@ LLM 自动标题。
 - 事件协议:per-session seq、SSE tail 语义、Last-Event-ID 续传、events
   retention 1000/session。
 - daemon:internal/daemon 可嵌入启动包;单端口/通道(release 9669 / dev 9679),
-  CLI 与桌面壳 attach-or-start 共用(见 home.DefaultAddr,无 AutoPort)。
+  CLI 与桌面壳共用端口;桌面壳启动时端口被占则退出,不 attach 旧实例。
 
 **桌面壳(cmd/pudding-desktop)**
 - Wails v3 alpha;HiddenInset 标题栏 + 红绿灯 inset 让位 + 双击 zoom +
-  全屏检测,解法移植自老项目 chrome_darwin.go。
-- 壳与页面无 ExecJS/window.wails 桥(loopback 跨 origin),只走 native cgo
-  与 web 视口启发式(见 memory: wails-no-runtime-bridge)。
+  全屏检测已接入。
+- 桌面壳由 Wails 托管前端(runtime 可用),业务 API 直连内嵌 daemon
+  HTTP;fullscreen/titlebar 等 desktop 状态走 Wails events。
+- 已定规则:Wails AssetServer 只托管 UI 资源/Vite HMR,不反代业务 API。
 
 **Web UI(design.md v2 切片 S1–S8 + E4)** —— 已实现并经 preview / 真实桌面
 窗口验证:

@@ -6,10 +6,12 @@ import { z } from "zod";
 
 import { App } from "@/App";
 import "@/styles.css";
+import { initAPIBase } from "@/state/apiBase";
 import { initShellMode } from "@/state/shell";
-
-initShellMode();
 import { applyTheme, readStoredTheme, startThemeSync } from "@/theme/theme";
+
+initAPIBase();
+initShellMode();
 
 applyTheme(readStoredTheme());
 startThemeSync();
