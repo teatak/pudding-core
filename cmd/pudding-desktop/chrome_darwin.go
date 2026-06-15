@@ -90,6 +90,10 @@ static void puddingSetTrafficLightsHidden(void *nsWindowPtr, bool hidden) {
 // 默认尺寸居中);未 zoom → 缓存当前,切到 standard frame。动画走
 // animator proxy,时长压到 80ms,webview reflow 滞后肉眼无感。
 // 兜底:PUDDING_NO_ZOOM_SWIZZLE=1 跳过;异常 fallback 原实现。
+//
+// 临时停用(#5):这是自定义 NSWindow swizzle,不是 Wails 正统窗口能力。
+// 先保留原实现作为踩坑记录,但不编译、不安装,避免影响后续 chrome 归正。
+#if 0
 static NSMutableDictionary *gPuddingZoomFrames = nil;
 static IMP gPuddingOriginalZoomIMP = NULL;
 
@@ -167,6 +171,7 @@ static void puddingInstallZoomSwizzle(void) {
 	}
 	gPuddingOriginalZoomIMP = method_setImplementation(method, (IMP)puddingZoomReplacement);
 }
+#endif
 
 // === 双击 toolbar → zoom 的 NSEvent local monitor ===
 static id gPuddingDoubleClickMonitor = nil;
@@ -214,7 +219,10 @@ import "C"
 import "github.com/wailsapp/wails/v3/pkg/application"
 
 func installZoomSwizzle() {
-	C.puddingInstallZoomSwizzle()
+	// Custom workaround #5 is intentionally disabled. Do not call the ObjC
+	// swizzle while desktop window behavior is being moved back to Wails-native
+	// APIs/events.
+	// C.puddingInstallZoomSwizzle()
 }
 
 func attachDoubleClickToZoom(w *application.WebviewWindow) {

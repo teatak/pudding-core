@@ -65,7 +65,10 @@ func main() {
 	//
 	// 页面由 Wails AssetServer 托管,window.wails runtime 可用;核心业务 API
 	// 显式走 daemon HTTP,desktop native 状态走 Wails events。
-	installZoomSwizzle()
+	// Custom workaround #5: NSWindow zoom: swizzle is temporarily disabled.
+	// Keep the implementation for reference, but do not install it while the
+	// desktop chrome path is being aligned with Wails-native behavior.
+	// installZoomSwizzle()
 	windowOpts := application.WebviewWindowOptions{
 		Title:     "Pudding",
 		URL:       launchURL(d.Token(), "http://"+d.Addr(), desktopShell()),
