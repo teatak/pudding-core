@@ -35,6 +35,7 @@ package main
 #import <objc/runtime.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 
 // kPuddingToolbarHeight 与 web 侧 --toolbar-h(html[data-shell="mac"])同值:
 // 同一条"工具条带"语义,不同步会让双击区与视觉工具条割裂。
@@ -170,6 +171,65 @@ static void puddingInstallZoomSwizzle(void) {
 // === 双击 toolbar → zoom 的 NSEvent local monitor ===
 static id gPuddingDoubleClickMonitor = nil;
 static NSMutableSet *gPuddingAttachedWindows = nil;
+static NSRect *gPuddingNoZoomRects = NULL;
+static int gPuddingNoZoomCount = 0;
+
+static void puddingReplaceNoZoomRects(double *flat, int count) {
+	if (gPuddingNoZoomRects != NULL) {
+		free(gPuddingNoZoomRects);
+		gPuddingNoZoomRects = NULL;
+	}
+	gPuddingNoZoomCount = 0;
+	if (flat == NULL || count <= 0) return;
+
+	gPuddingNoZoomRects = (NSRect *)calloc((size_t)count, sizeof(NSRect));
+	if (gPuddingNoZoomRects == NULL) return;
+
+	for (int i = 0; i < count; i++) {
+		int offset = i * 4;
+		gPuddingNoZoomRects[i] = NSMakeRect(flat[offset],
+		                                    flat[offset + 1],
+		                                    flat[offset + 2],
+		                                    flat[offset + 3]);
+	}
+	gPuddingNoZoomCount = count;
+}
+
+static void puddingSetNoZoomRects(double *flat, int count) {
+	int safeCount = count > 0 ? count : 0;
+	int flatLength = safeCount * 4;
+	double *copy = NULL;
+	if (flat != NULL && flatLength > 0) {
+		copy = (double *)malloc(sizeof(double) * (size_t)flatLength);
+		if (copy == NULL) return;
+		memcpy(copy, flat, sizeof(double) * (size_t)flatLength);
+	}
+
+	dispatch_async(dispatch_get_main_queue(), ^{
+		puddingReplaceNoZoomRects(copy, safeCount);
+		if (copy != NULL) {
+			free(copy);
+		}
+	});
+}
+
+static bool puddingPointInNoZoomRect(NSPoint loc, NSWindow *w) {
+	if (gPuddingNoZoomRects == NULL || gPuddingNoZoomCount <= 0 || w == nil) return false;
+	NSView *contentView = [w contentView];
+	if (contentView == nil) return false;
+
+	NSPoint contentPoint = [contentView convertPoint:loc fromView:nil];
+	CGFloat contentHeight = [contentView bounds].size.height;
+	for (int i = 0; i < gPuddingNoZoomCount; i++) {
+		NSRect rect = gPuddingNoZoomRects[i];
+		NSRect appkitRect = NSMakeRect(rect.origin.x,
+		                               contentHeight - rect.origin.y - rect.size.height,
+		                               rect.size.width,
+		                               rect.size.height);
+		if (NSPointInRect(contentPoint, appkitRect)) return true;
+	}
+	return false;
+}
 
 static void puddingAttachDoubleClickToZoom(void *nsWindowPtr) {
 	NSWindow *window = (NSWindow *)nsWindowPtr;
@@ -200,6 +260,7 @@ static void puddingAttachDoubleClickToZoom(void *nsWindowPtr) {
 			NSButton *btn = [w standardWindowButton:kind.integerValue];
 			if (btn && NSPointInRect(loc, [btn frame])) return event;
 		}
+		if (puddingPointInNoZoomRect(loc, w)) return event;
 		[w zoom:nil];
 		return nil; // 吞事件,避免 webview 同时响应
 	}];
@@ -208,7 +269,11 @@ static void puddingAttachDoubleClickToZoom(void *nsWindowPtr) {
 */
 import "C"
 
-import "github.com/wailsapp/wails/v3/pkg/application"
+import (
+	"unsafe"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
+)
 
 func installZoomSwizzle() {
 	// Custom workaround #5 is intentionally disabled. Do not call the ObjC
@@ -226,6 +291,22 @@ func attachDoubleClickToZoom(w *application.WebviewWindow) {
 		return
 	}
 	C.puddingAttachDoubleClickToZoom(nsWindow)
+}
+
+func setNoZoomRects(rects []noZoomRect) {
+	if len(rects) == 0 {
+		C.puddingSetNoZoomRects((*C.double)(nil), 0)
+		return
+	}
+	flat := make([]C.double, len(rects)*4)
+	for i, rect := range rects {
+		offset := i * 4
+		flat[offset] = C.double(rect.X)
+		flat[offset+1] = C.double(rect.Y)
+		flat[offset+2] = C.double(rect.W)
+		flat[offset+3] = C.double(rect.H)
+	}
+	C.puddingSetNoZoomRects((*C.double)(unsafe.Pointer(&flat[0])), C.int(len(rects)))
 }
 
 func setTrafficLightsHidden(w *application.WebviewWindow, hidden bool) {

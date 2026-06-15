@@ -234,7 +234,7 @@ function MessageItem({ message }: { message: Message }) {
   }
   return (
     <div className="group flex flex-col">
-      <div className="min-w-0 text-sm leading-6">
+      <div className="selectable-text min-w-0 text-sm leading-6">
         <TurnParts parts={partsFromText(message.text)} />
         {message.interrupted ? <InterruptedBadge /> : null}
       </div>
@@ -257,7 +257,7 @@ function UserMessageBlock({
 }) {
   return (
     <div className={cn("group flex flex-col items-end", pending && "opacity-70")}>
-      <div className="min-w-0 max-w-[min(82%,42rem)] rounded-3xl rounded-br-lg border bg-secondary/60 px-4 py-2 text-left text-sm leading-6 break-words whitespace-pre-wrap">
+      <div className="selectable-text min-w-0 max-w-[min(82%,42rem)] rounded-3xl rounded-br-lg border bg-secondary/60 px-4 py-2 text-left text-sm leading-6 break-words whitespace-pre-wrap">
         {text}
         {interrupted ? <InterruptedBadge /> : null}
       </div>
@@ -296,7 +296,7 @@ function AssistantOverlayItem({
   }, [text, onContentGrow]);
 
   return (
-    <div className="animate-in min-w-0 text-sm leading-6 duration-150 fade-in slide-in-from-bottom-1">
+    <div className="selectable-text animate-in min-w-0 text-sm leading-6 duration-150 fade-in slide-in-from-bottom-1">
       {text ? <TurnParts parts={partsFromText(text)} /> : null}
       <span
         aria-hidden="true"

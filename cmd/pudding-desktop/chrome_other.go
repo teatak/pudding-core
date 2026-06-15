@@ -11,6 +11,8 @@ func installZoomSwizzle() {}
 
 func attachDoubleClickToZoom(*application.WebviewWindow) {}
 
+func setNoZoomRects([]noZoomRect) {}
+
 func setTrafficLightsHidden(*application.WebviewWindow, bool) {}
 
 func hideTrafficLightsForFullscreenExit(*application.WebviewWindow) {}

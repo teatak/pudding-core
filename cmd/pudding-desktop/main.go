@@ -54,6 +54,9 @@ func main() {
 			Handler: application.BundledAssetFileServer(webui.FS()),
 		},
 	})
+	if runtime.GOOS == "darwin" {
+		bindDesktopNoZoomRects(app)
+	}
 
 	// 窗口 chrome(docs/design.md 2.3):macOS 用 HiddenInset 隐藏标题栏,
 	// 红绿灯由 NSToolbar inset rule 定位(绝不 cgo setFrame,旧项目踩坑);
@@ -76,11 +79,9 @@ func main() {
 		Height:    800,
 		MinWidth:  760,
 		MinHeight: 520,
-		// 不透明深色窗口底:WKWebView 在窗口失焦/遮挡时合成路径降级,
-		// 默认透明底会把桌面透出来(失焦时内容区出现暗色伪影)。
-		// 取值贴近暗色主题 --background(#212121);浅色主题下 webview
-		// 不透明绘制时底色不可见,无影响。
-		BackgroundColour: application.NewRGB(33, 33, 33),
+		// 不透明窗口底:WKWebView 在 zoom/失焦/遮挡等合成空档会先露出
+		// 自己的默认 canvas。这里按实测 canvas 色对齐,避免层间跳色。
+		BackgroundColour: application.NewRGB(30, 30, 30),
 	}
 	if runtime.GOOS == "darwin" {
 		// 启动白闪修复:先隐藏窗口,等 web 首帧导航完成再显示(见下方 darwin hook)。
@@ -92,14 +93,14 @@ func main() {
 	}
 	window := app.Window.NewWithOptions(windowOpts)
 
-	// 窗口底色跟随系统外观(深 #212121 / 浅 #f9fafb,即两套主题的
-	// --background 等值):失焦合成降级透底时与页面同色,不反差。
-	// options 里的初值只覆盖首帧,这里在运行期持续校正。
+	// 窗口底色跟随系统外观,对齐 WKWebView 默认 canvas:
+	// dark #1E1E1E / light #FFFFFF。options 里的初值只覆盖首帧,
+	// 这里在运行期持续校正。
 	applyWindowBase := func() {
 		if app.Env.IsDarkMode() {
-			window.SetBackgroundColour(application.NewRGB(33, 33, 33))
+			window.SetBackgroundColour(application.NewRGB(30, 30, 30))
 		} else {
-			window.SetBackgroundColour(application.NewRGB(249, 250, 251))
+			window.SetBackgroundColour(application.NewRGB(255, 255, 255))
 		}
 	}
 	app.Event.OnApplicationEvent(events.Common.ThemeChanged, func(*application.ApplicationEvent) {

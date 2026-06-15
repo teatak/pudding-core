@@ -104,11 +104,13 @@ export function ChatPane({ token, sessionID, role }: ChatPaneProps) {
             : undefined
         }
       >
-        <div
-          className="min-w-0 max-w-(--chat-title-max-w) flex-1 overflow-hidden truncate text-sm font-medium"
-          title={selectedSession?.title || undefined}
-        >
-          {headerTitle}
+        <div className="min-w-0 max-w-(--chat-title-max-w) flex-1 overflow-hidden truncate text-sm font-medium">
+          <span
+            className="no-drag-region relative z-30 inline-block max-w-full cursor-default select-none truncate"
+            title={selectedSession?.title || undefined}
+          >
+            {headerTitle}
+          </span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <HeaderStatus session={selectedSession} />

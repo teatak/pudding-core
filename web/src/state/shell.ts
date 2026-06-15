@@ -18,6 +18,7 @@ export function initShellMode() {
   document.documentElement.dataset.shell = shell;
   if (shell === "mac") {
     void initMacFullscreenTracking();
+    void initNoZoomRectsTracking();
   }
 }
 
@@ -47,4 +48,90 @@ async function initMacFullscreenTracking() {
     // Runtime may be unavailable in pure browser mode; shell layout still works
     // from subsequent Wails window events.
   }
+}
+
+let noZoomRectsTrackingStarted = false;
+
+type NoZoomRect = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
+
+async function initNoZoomRectsTracking() {
+  if (noZoomRectsTrackingStarted) {
+    return;
+  }
+  noZoomRectsTrackingStarted = true;
+
+  let runtime: WailsRuntime;
+  try {
+    runtime = await import("@wailsio/runtime");
+  } catch {
+    return;
+  }
+
+  const { Events } = runtime;
+  let lastPayload = "";
+  let timer: number | undefined;
+  let observed = new Set<Element>();
+  const resizeObserver = new ResizeObserver(() => schedule());
+
+  const readRects = (): NoZoomRect[] =>
+    Array.from(document.querySelectorAll<HTMLElement>(".no-drag-region"))
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          x: rect.left,
+          y: rect.top,
+          w: rect.width,
+          h: rect.height,
+        };
+      })
+      .filter((rect) => rect.w > 0 && rect.h > 0);
+
+  const syncObservedElements = () => {
+    const next = new Set<Element>(document.querySelectorAll(".no-drag-region"));
+    if (next.size === observed.size && Array.from(next).every((element) => observed.has(element))) {
+      return;
+    }
+    resizeObserver.disconnect();
+    observed = next;
+    observed.forEach((element) => resizeObserver.observe(element));
+  };
+
+  const emit = () => {
+    syncObservedElements();
+    const rects = readRects();
+    const payload = JSON.stringify(rects);
+    if (payload === lastPayload) {
+      return;
+    }
+    lastPayload = payload;
+    void Events.Emit("desktop:no-zoom-rects", rects).catch(() => {});
+  };
+
+  function schedule() {
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+    }
+    timer = window.setTimeout(emit, 80);
+  }
+
+  new MutationObserver(() => {
+    syncObservedElements();
+    schedule();
+  }).observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["class", "style", "hidden"],
+    childList: true,
+    subtree: true,
+  });
+  window.addEventListener("resize", schedule);
+  window.addEventListener("scroll", schedule, true);
+  window.visualViewport?.addEventListener("resize", schedule);
+  window.visualViewport?.addEventListener("scroll", schedule);
+  syncObservedElements();
+  schedule();
 }

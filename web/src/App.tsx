@@ -104,7 +104,7 @@ export function App() {
 
   return (
     <TooltipProvider delayDuration={250}>
-      <div className="relative flex h-[100svh] overflow-hidden bg-sidebar">
+      <div className="relative flex h-[100svh] overflow-hidden">
         <div aria-hidden="true" className="drag-region absolute inset-x-0 top-0 z-20 h-(--toolbar-h)" />
         <SessionRail token={token} selectedSessionID={selectedSessionID} />
         {/* rail 固定宽度,不参与 resize。核心工作区只在 chat/canvas 之间分配空间。 */}

@@ -115,6 +115,14 @@ html[data-shell="mac"][data-fullscreen] {
    仅 data-shell 下生效,纯浏览器访问无副作用 */
 html[data-shell] .drag-region {
     --wails-draggable: drag;
+    cursor: default;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+html[data-shell] body {
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 html[data-shell] .no-drag-region,
@@ -122,10 +130,27 @@ html[data-shell] .drag-region :where(button, a, input, textarea, select, [role="
     --wails-draggable: no-drag;
 }
 
+html[data-shell] .no-drag-region {
+    cursor: default;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+html[data-shell] input,
+html[data-shell] textarea,
+html[data-shell] [contenteditable="true"],
+html[data-shell] .selectable-text,
+html[data-shell] .selectable-text *,
+html[data-shell] .pudding-markdown,
+html[data-shell] .pudding-markdown * {
+    user-select: text;
+    -webkit-user-select: text;
+}
+
 @layer utilities {
-  html [data-slot="button"]:active:not([aria-haspopup]) {
+  .active\:not-aria-\[haspopup\]\:translate-y-px:active:not([aria-haspopup]) {
     --tw-translate-y: 0px;
-    translate: var(--tw-translate-x, 0) var(--tw-translate-y, 0);
+    translate: none;
   }
 }
 
