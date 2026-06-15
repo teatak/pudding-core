@@ -7,7 +7,8 @@ package main
 //  1. 双击 toolbar → zoom(填屏,非 fullscreen):FullSizeContentView 下
 //     webview 吃掉全部鼠标事件,macOS 自带的双击 titlebar→zoom 收不到,
 //     必须用 NSEvent local monitor 在 native 层拦截。
-//  2. zoom 动画 swizzle 已临时停用(#5),仅作为踩坑记录保留。
+//  2. 退出 fullscreen 动画期间临时隐藏标准红绿灯,did-exit 后恢复。
+//  3. zoom 动画 swizzle 已临时停用(#5),仅作为踩坑记录保留。
 //
 // 已移除:
 //
@@ -32,6 +33,7 @@ package main
 
 #import <AppKit/AppKit.h>
 #import <objc/runtime.h>
+#include <stdbool.h>
 #include <stdlib.h>
 
 // kPuddingToolbarHeight 与 main.go 的 InvisibleTitleBarHeight、web 侧
@@ -44,6 +46,44 @@ static const CGFloat kPuddingToolbarHeight = 54;
 // rects 做精确判定;新壳顶部交互件只有这一处,先用固定带,将来工具条
 // 加 tabs 之类再升级上报机制。
 static const CGFloat kPuddingNoZoomLeftWidth = 130;
+
+static void puddingApplyTrafficLightsHidden(NSWindow *window, bool hidden) {
+	NSArray *btnKinds = @[@(NSWindowCloseButton),
+	                      @(NSWindowMiniaturizeButton),
+	                      @(NSWindowZoomButton)];
+	for (NSNumber *kind in btnKinds) {
+		NSButton *btn = [window standardWindowButton:kind.integerValue];
+		if (btn) {
+			[btn setHidden:hidden];
+		}
+	}
+}
+
+static void puddingSetTrafficLightsHidden(void *nsWindowPtr, bool hidden) {
+	NSWindow *window = (NSWindow *)nsWindowPtr;
+	if (!window) return;
+	dispatch_async(dispatch_get_main_queue(), ^{
+		puddingApplyTrafficLightsHidden(window, hidden);
+	});
+}
+
+// WillExitFullScreen 比 did 更早,用来遮掉退出动画中的红绿灯闪现。
+// did-exit 会正常恢复;这里再加延迟兜底,避免 did 偶发未到时按钮卡隐藏。
+static void puddingHideTrafficLightsForFullscreenExit(void *nsWindowPtr) {
+	NSWindow *window = (NSWindow *)nsWindowPtr;
+	if (!window) return;
+	[window retain];
+	dispatch_async(dispatch_get_main_queue(), ^{
+		puddingApplyTrafficLightsHidden(window, true);
+		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)),
+		               dispatch_get_main_queue(), ^{
+			if (([window styleMask] & NSWindowStyleMaskFullScreen) == 0) {
+				puddingApplyTrafficLightsHidden(window, false);
+			}
+			[window release];
+		});
+	});
+}
 
 // === zoom: 的 80ms 动画替换(method swizzle)===
 //
@@ -195,4 +235,26 @@ func attachDoubleClickToZoom(w *application.WebviewWindow) {
 		return
 	}
 	C.puddingAttachDoubleClickToZoom(nsWindow)
+}
+
+func setTrafficLightsHidden(w *application.WebviewWindow, hidden bool) {
+	if w == nil {
+		return
+	}
+	nsWindow := w.NativeWindow()
+	if nsWindow == nil {
+		return
+	}
+	C.puddingSetTrafficLightsHidden(nsWindow, C.bool(hidden))
+}
+
+func hideTrafficLightsForFullscreenExit(w *application.WebviewWindow) {
+	if w == nil {
+		return
+	}
+	nsWindow := w.NativeWindow()
+	if nsWindow == nil {
+		return
+	}
+	C.puddingHideTrafficLightsForFullscreenExit(nsWindow)
 }

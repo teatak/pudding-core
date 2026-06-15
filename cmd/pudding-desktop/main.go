@@ -218,6 +218,15 @@ func bindMacWindowEvents(window *application.WebviewWindow, hideAfterFullscreenE
 		applyWindowBase()
 	})
 
+	window.RegisterHook(events.Mac.WindowWillExitFullScreen, func(*application.WindowEvent) {
+		hideTrafficLightsForFullscreenExit(window)
+	})
+	window.RegisterHook(events.Mac.WindowDidExitFullScreen, func(*application.WindowEvent) {
+		setTrafficLightsHidden(window, false)
+	})
+	// RegisterHook 不会打开原生事件监听;这里显式订阅 will-exit。
+	window.OnWindowEvent(events.Mac.WindowWillExitFullScreen, func(*application.WindowEvent) {})
+
 	window.OnWindowEvent(events.Mac.WindowDidExitFullScreen, func(*application.WindowEvent) {
 		if hideAfterFullscreenExit.Swap(false) {
 			window.Hide()
