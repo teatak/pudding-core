@@ -4,19 +4,7 @@ import { consumeLaunchParam } from "@/state/launchParams";
 // 这里写入 <html data-shell> 并持久化;浏览器访问无此参数,零 inset。
 const SHELL_KEY = "pudding.shell";
 
-type WailsEvent = { data?: unknown };
-type WailsEvents = {
-  On?: (name: string, callback: (event: WailsEvent) => void) => void | (() => void);
-  Emit?: (name: string, data?: unknown) => void | Promise<void>;
-};
-
-declare global {
-  interface Window {
-    wails?: {
-      Events?: WailsEvents;
-    };
-  }
-}
+type WailsRuntime = typeof import("@wailsio/runtime");
 
 export function initShellMode() {
   const fromURL = consumeLaunchParam("shell");
@@ -33,27 +21,30 @@ export function initShellMode() {
   }
 }
 
-// 全屏时红绿灯隐藏,inset 让位要归零。只认 Wails native fullscreen 事件,
-// 不再保留视口尺寸启发式。
+// 全屏时红绿灯由系统隐藏,inset 让位归零。退出全屏用 will 事件提前
+// 建立红绿灯安全区,did 事件只兜底最终状态。
 async function initMacFullscreenTracking() {
-  const runtimeURL = "/wails/runtime.js";
+  let runtime: WailsRuntime;
   try {
-    await import(/* @vite-ignore */ runtimeURL);
+    runtime = await import("@wailsio/runtime");
   } catch {
     return;
   }
 
-  const events = window.wails?.Events;
-  if (!events?.On) {
-    return;
-  }
+  const { Events, Window: WailsWindow } = runtime;
 
-  const apply = (value: unknown) => {
-    if (typeof value === "boolean") {
-      document.documentElement.toggleAttribute("data-fullscreen", value);
-    }
+  const apply = (fullscreen: boolean) => {
+    document.documentElement.toggleAttribute("data-fullscreen", fullscreen);
   };
 
-  events.On("desktop:fullscreen", (event) => apply(event.data));
-  await events.Emit?.("desktop:fullscreen:request");
+  Events.On(Events.Types.Common.WindowFullscreen, () => apply(true));
+  Events.On(Events.Types.Mac.WindowWillExitFullScreen, () => apply(false));
+  Events.On(Events.Types.Common.WindowUnFullscreen, () => apply(false));
+
+  try {
+    apply(await WailsWindow.IsFullscreen());
+  } catch {
+    // Runtime may be unavailable in pure browser mode; shell layout still works
+    // from subsequent Wails window events.
+  }
 }

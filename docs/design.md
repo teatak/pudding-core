@@ -102,9 +102,11 @@ border 在暗色套用白色 alpha,跨不同亮度表面观感一致。
   浏览器访问无此参数,零 inset。
 - **业务 API 路线**:壳加载 URL 注入 daemon API base;前端业务 REST/SSE/WS
   直连 loopback daemon。Wails 只托管 UI/runtime,不反代业务 API。
-- **全屏事件**:壳监听 macOS 进/出全屏(Wails window 事件),
-  通过 Wails runtime event 切换 `data-fullscreen`;业务 API 仍走 daemon
-  HTTP,desktop native 状态走 Wails 事件。
+- **全屏事件**:前端通过官方 `@wailsio/runtime` 订阅 Wails window
+  事件切换 `data-fullscreen`:`common:WindowFullscreen` 进入全屏后归零
+  inset,`mac:WindowWillExitFullScreen` 在退出动画开始时恢复红绿灯安全区,
+  `common:WindowUnFullscreen` 做最终兜底;业务 API 仍走 daemon HTTP,
+  desktop native 状态走 Wails runtime/events。
 - **拖拽区**:rail 顶行与 pane header 的空白区设 `--wails-draggable: drag`,
   其中的按钮/输入显式 no-drag;浏览器模式下该样式无效且无害。
 - Windows/Linux 后续按同机制扩展(`data-shell="win"` 走右上控件,无左上 inset)。

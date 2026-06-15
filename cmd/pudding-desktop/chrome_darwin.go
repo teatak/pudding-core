@@ -2,19 +2,25 @@
 
 package main
 
-// chrome_darwin.go 移植自旧项目 desktop_fullscreen_darwin.go(逐坑验证过的
-// macOS 窗口 chrome 处理),裁剪为新壳需要的三件事:
+// chrome_darwin.go 只保留 Wails 暂无等价入口的 macOS 窗口补充逻辑:
 //
 //  1. 双击 toolbar → zoom(填屏,非 fullscreen):FullSizeContentView 下
 //     webview 吃掉全部鼠标事件,macOS 自带的双击 titlebar→zoom 收不到,
 //     必须用 NSEvent local monitor 在 native 层拦截。
-//  2. zoom 动画 swizzle:原版 [NSWindow zoom:] 动画 200-300ms,webview
+//  2. zoom 动画 swizzle 已临时停用(#5),仅作为踩坑记录保留。
+//
+// 已移除:
+//
+//  6. fullscreen 进出时手改 styleMask / titlebar / toolbar。
+//  7. 退出 fullscreen 时手动隐藏红绿灯。
+//
+// 这两项改由 Wails 系统窗口事件驱动前端安全区布局:
+// common:WindowFullscreen / mac:WindowWillExitFullScreen /
+// common:WindowUnFullscreen。
+//
+// 历史背景:原版 [NSWindow zoom:] 动画 200-300ms,webview
 //     reflow 总在动画后触发,内容滞后窗框明显;swizzle 成 80ms animator
 //     版本,所有 zoom 入口(双击 / 菜单缩放 / Option+绿灯)统一收益。
-//  3. fullscreen 进出时的 toolbar / 红绿灯处理:HiddenInset preset 带一条
-//     隐形 NSToolbar(红绿灯 inset 定位的前提),fullscreen 时 menu bar
-//     hover 会把它一起带出来(一条空白带);退出动画期间红绿灯会先大后小
-//     跳变。进/出全屏时切 styleMask + titlebar 外观,退出期间临时藏红绿灯。
 //
 // 红绿灯定位本身**只用 MacTitleBarHiddenInset preset**,绝不 cgo setFrame
 // standardWindowButton(旧项目踩坑:reposition 多事件源累加漂移,159 行
@@ -38,51 +44,6 @@ static const CGFloat kPuddingToolbarHeight = 54;
 // rects 做精确判定;新壳顶部交互件只有这一处,先用固定带,将来工具条
 // 加 tabs 之类再升级上报机制。
 static const CGFloat kPuddingNoZoomLeftWidth = 130;
-
-// === fullscreen 进出的 toolbar / titlebar 外观切换 ===
-//
-// fullscreen 下保留 NSToolbar attach(inset rule 始终生效,红绿灯位置
-// 不动),让 AppKit 自己 auto-hide/reveal;reveal 时显示窗口标题避免
-// 出现只有红绿灯的空白条。styleMask 的 FullSizeContentView 在 fullscreen
-// 时去掉(内容不再垫到 toolbar 下),退出时恢复。
-static void puddingSetFullscreenChrome(void *nsWindowPtr, bool fullscreen) {
-	NSWindow *window = (NSWindow *)nsWindowPtr;
-	if (!window) return;
-	dispatch_async(dispatch_get_main_queue(), ^{
-		NSToolbar *toolbar = [window toolbar];
-		if (toolbar) {
-			[toolbar setVisible:YES];
-			// baseline separator 永远关:跟 titlebarSeparatorStyle 同开会双底线
-			[toolbar setShowsBaselineSeparator:NO];
-		}
-		[window setTitleVisibility:fullscreen ? NSWindowTitleVisible : NSWindowTitleHidden];
-		[window setTitlebarAppearsTransparent:fullscreen ? NO : YES];
-		if (fullscreen) {
-			[window setStyleMask:[window styleMask] & ~NSWindowStyleMaskFullSizeContentView];
-		} else {
-			[window setStyleMask:[window styleMask] | NSWindowStyleMaskFullSizeContentView];
-		}
-#if MAC_OS_X_VERSION_MAX_ALLOWED >= 110000
-		if (@available(macOS 11.0, *)) {
-			[window setToolbarStyle:fullscreen ? NSWindowToolbarStyleUnifiedCompact : NSWindowToolbarStyleAutomatic];
-			[window setTitlebarSeparatorStyle:fullscreen ? NSTitlebarSeparatorStyleLine : NSTitlebarSeparatorStyleNone];
-		}
-#endif
-	});
-}
-
-// 退出 fullscreen 期间(WillExit → DidExit ~250ms)藏红绿灯:macOS 缩放
-// 动画与 inset rule re-layout 错位会产生"先大后小"的视觉跳变,藏过这段
-// 动画,DidExit 后 unhide 一步到位。
-static void puddingSetTrafficLightsHidden(void *nsWindowPtr, bool hidden) {
-	NSWindow *window = (NSWindow *)nsWindowPtr;
-	if (!window) return;
-	dispatch_async(dispatch_get_main_queue(), ^{
-		[[window standardWindowButton:NSWindowCloseButton] setHidden:hidden];
-		[[window standardWindowButton:NSWindowMiniaturizeButton] setHidden:hidden];
-		[[window standardWindowButton:NSWindowZoomButton] setHidden:hidden];
-	});
-}
 
 // === zoom: 的 80ms 动画替换(method swizzle)===
 //
@@ -234,26 +195,4 @@ func attachDoubleClickToZoom(w *application.WebviewWindow) {
 		return
 	}
 	C.puddingAttachDoubleClickToZoom(nsWindow)
-}
-
-func setFullscreenChrome(w *application.WebviewWindow, fullscreen bool) {
-	if w == nil {
-		return
-	}
-	nsWindow := w.NativeWindow()
-	if nsWindow == nil {
-		return
-	}
-	C.puddingSetFullscreenChrome(nsWindow, C.bool(fullscreen))
-}
-
-func setTrafficLightsHidden(w *application.WebviewWindow, hidden bool) {
-	if w == nil {
-		return
-	}
-	nsWindow := w.NativeWindow()
-	if nsWindow == nil {
-		return
-	}
-	C.puddingSetTrafficLightsHidden(nsWindow, C.bool(hidden))
 }

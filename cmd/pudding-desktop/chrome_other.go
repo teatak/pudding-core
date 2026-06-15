@@ -10,7 +10,3 @@ import "github.com/wailsapp/wails/v3/pkg/application"
 func installZoomSwizzle() {}
 
 func attachDoubleClickToZoom(*application.WebviewWindow) {}
-
-func setFullscreenChrome(*application.WebviewWindow, bool) {}
-
-func setTrafficLightsHidden(*application.WebviewWindow, bool) {}

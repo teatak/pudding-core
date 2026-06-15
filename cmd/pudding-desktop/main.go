@@ -63,8 +63,8 @@ func main() {
 	// = cgo 的 kPuddingToolbarHeight = 54(同一条"工具条带"语义:原生可
 	// 拖区 / 视觉工具条 / 双击 zoom 检测区)。
 	//
-	// 页面由 Wails AssetServer 托管,window.wails runtime 可用;核心业务 API
-	// 显式走 daemon HTTP,desktop native 状态走 Wails events。
+	// 页面由 Wails AssetServer 托管,Wails runtime 可用;核心业务 API
+	// 显式走 daemon HTTP,desktop native 状态走 @wailsio/runtime events。
 	// Custom workaround #5: NSWindow zoom: swizzle is temporarily disabled.
 	// Keep the implementation for reference, but do not install it while the
 	// desktop chrome path is being aligned with Wails-native behavior.
@@ -109,7 +109,7 @@ func main() {
 
 	var hideAfterFullscreenExit atomic.Bool
 	if runtime.GOOS == "darwin" {
-		bindMacWindowEvents(app, window, &hideAfterFullscreenExit, applyWindowBase)
+		bindMacWindowEvents(window, &hideAfterFullscreenExit, applyWindowBase)
 	}
 
 	// 关窗 = 隐藏:daemon 常驻后台,tray 可唤回;退出只走 tray 菜单。
@@ -199,7 +199,7 @@ func launchURL(token, apiBase, shell string) string {
 	return u.String()
 }
 
-func bindMacWindowEvents(app *application.App, window *application.WebviewWindow, hideAfterFullscreenExit *atomic.Bool, applyWindowBase func()) {
+func bindMacWindowEvents(window *application.WebviewWindow, hideAfterFullscreenExit *atomic.Bool, applyWindowBase func()) {
 	var windowShown atomic.Bool
 	showOnce := func() {
 		if !windowShown.Swap(true) {
@@ -218,24 +218,7 @@ func bindMacWindowEvents(app *application.App, window *application.WebviewWindow
 		applyWindowBase()
 	})
 
-	emitFullscreen := func(fullscreen bool) {
-		app.Event.Emit("desktop:fullscreen", fullscreen)
-	}
-	app.Event.On("desktop:fullscreen:request", func(*application.CustomEvent) {
-		emitFullscreen(window.IsFullscreen())
-	})
-	window.OnWindowEvent(events.Mac.WindowDidEnterFullScreen, func(*application.WindowEvent) {
-		emitFullscreen(true)
-		setFullscreenChrome(window, true)
-	})
-	window.OnWindowEvent(events.Mac.WindowWillExitFullScreen, func(*application.WindowEvent) {
-		emitFullscreen(false)
-		setTrafficLightsHidden(window, true)
-		setFullscreenChrome(window, false)
-	})
 	window.OnWindowEvent(events.Mac.WindowDidExitFullScreen, func(*application.WindowEvent) {
-		emitFullscreen(false)
-		setTrafficLightsHidden(window, false)
 		if hideAfterFullscreenExit.Swap(false) {
 			window.Hide()
 		}
