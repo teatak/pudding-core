@@ -127,7 +127,9 @@ export function App() {
                   <PanelRight />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="bottom">{t("canvas.toggle")}</TooltipContent>
+              <TooltipContent align="end" side="bottom">
+                {t("canvas.toggle")}
+              </TooltipContent>
             </Tooltip>
           </div>
           <ResizablePanelGroup

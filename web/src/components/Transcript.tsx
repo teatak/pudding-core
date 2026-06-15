@@ -193,10 +193,10 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
       {!followingBottom && items.length > 0 ? (
         <Button
           aria-label={t("transcript.jumpLatest")}
-          className="absolute right-5 bottom-5 rounded-full shadow-md"
+          className="absolute right-5 bottom-5 rounded-full border border-border bg-card shadow-md hover:bg-muted"
           size="icon"
           type="button"
-          variant="outline"
+          variant="ghost"
           onClick={scrollToBottom}
         >
           <ArrowDown />
@@ -347,7 +347,6 @@ function MessageMeta({ createdAt, text, className }: { createdAt: string; text: 
         className,
       )}
     >
-      <span>{formatClock(createdAt)}</span>
       <Button
         aria-label={t("common.copy")}
         size="icon-xs"
@@ -365,6 +364,7 @@ function MessageMeta({ createdAt, text, className }: { createdAt: string; text: 
       >
         {copied ? <Check className="text-success" /> : <Copy />}
       </Button>
+      <span>{formatClock(createdAt)}</span>
     </div>
   );
 }

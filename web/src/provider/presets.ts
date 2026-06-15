@@ -4,6 +4,7 @@ export type ProviderPresetId =
   | "deepseek"
   | "qwen"
   | "mimo"
+  | "gemini"
   | "openai"
   | "anthropic"
   | "moonshot"
@@ -48,6 +49,18 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseURL: "https://api.xiaomimimo.com/v1",
     models: ["mimo-v2.5", "mimo-v2.5-pro"].map((id) => model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: 0.7 } })),
     apiKeyURL: "https://platform.xiaomimimo.com/",
+  },
+  {
+    id: "gemini",
+    name: "Google Gemini",
+    type: "google",
+    baseURL: "",
+    models: [
+      model("gemini-3.5-flash", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: 0.7, maxOutputTokens: 64_000 } }),
+      model("gemini-3.5-pro", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: 0.7, maxOutputTokens: 64_000 } }),
+      model("gemini-2.5-flash", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: 0.7, maxOutputTokens: 64_000 } }),
+    ],
+    apiKeyURL: "https://aistudio.google.com/app/apikey",
   },
   {
     id: "openai",
@@ -119,6 +132,7 @@ const ZH_ORDER: ProviderPresetId[] = [
   "deepseek",
   "qwen",
   "mimo",
+  "gemini",
   "openai",
   "anthropic",
   "moonshot",
@@ -130,6 +144,7 @@ const ZH_ORDER: ProviderPresetId[] = [
 const DEFAULT_ORDER: ProviderPresetId[] = [
   "openai",
   "anthropic",
+  "gemini",
   "deepseek",
   "qwen",
   "mimo",

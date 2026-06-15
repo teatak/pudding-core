@@ -155,38 +155,63 @@ html[data-shell] .pudding-markdown * {
 }
 
 .dark {
-    --background: oklch(0.205 0 0);
-    --foreground: oklch(0.92 0 0);
-    --card: oklch(0.225 0 0);
-    --card-foreground: oklch(0.92 0 0);
-    --popover: oklch(0.225 0 0);
-    --popover-foreground: oklch(0.92 0 0);
+    --background: oklch(0.225 0 0);
+    --foreground: oklch(0.93 0 0);
+    --card: oklch(0.275 0 0);
+    --card-foreground: oklch(0.93 0 0);
+    --popover: oklch(0.275 0 0);
+    --popover-foreground: oklch(0.93 0 0);
     --primary: oklch(0.398 0.195 277.366);
     --primary-foreground: oklch(0.962 0.018 272.314);
-    --secondary: oklch(0.295 0.006 286.033);
-    --secondary-foreground: oklch(0.92 0 0);
-    --muted: oklch(0.295 0 0);
-    --muted-foreground: oklch(0.68 0 0);
-    --accent: oklch(0.295 0 0);
-    --accent-foreground: oklch(0.92 0 0);
+    --secondary: oklch(0.305 0.006 286.033);
+    --secondary-foreground: oklch(0.93 0 0);
+    --muted: oklch(0.325 0 0);
+    --muted-foreground: oklch(0.72 0 0);
+    --accent: oklch(0.305 0 0);
+    --accent-foreground: oklch(0.93 0 0);
     --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
+    --border: oklch(1 0 0 / 12%);
+    --input: oklch(1 0 0 / 18%);
+    --ring: oklch(0.6 0 0);
     --chart-1: oklch(0.785 0.115 274.713);
     --chart-2: oklch(0.585 0.233 277.117);
     --chart-3: oklch(0.511 0.262 276.966);
     --chart-4: oklch(0.457 0.24 277.023);
     --chart-5: oklch(0.398 0.195 277.366);
-    --sidebar: oklch(0.225 0 0);
-    --sidebar-foreground: oklch(0.92 0 0);
+    --sidebar: oklch(0.255 0 0);
+    --sidebar-foreground: oklch(0.93 0 0);
     --sidebar-primary: oklch(0.585 0.233 277.117);
     --sidebar-primary-foreground: oklch(0.962 0.018 272.314);
-    --sidebar-accent: oklch(0.295 0 0);
-    --sidebar-accent-foreground: oklch(0.92 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    --sidebar-accent: oklch(0.335 0 0);
+    --sidebar-accent-foreground: oklch(0.93 0 0);
+    --sidebar-border: oklch(1 0 0 / 12%);
+    --sidebar-ring: oklch(0.6 0 0);
     --success: oklch(0.7 0.11 175);
+    --button-hover: oklch(0.34 0 0);
+    --button-active: oklch(0.39 0 0);
+}
+
+.dark [data-slot="button"][data-variant="ghost"]:hover:not(:disabled),
+.dark [data-slot="button"][data-variant="outline"]:hover:not(:disabled),
+.dark [data-slot="button"][data-variant="secondary"]:hover:not(:disabled) {
+    background-color: var(--button-hover);
+}
+
+.dark [data-slot="button"][data-variant="default"]:hover:not(:disabled) {
+    background-color: color-mix(in oklch, var(--primary), white 8%);
+}
+
+.dark [data-slot="button"][data-variant="ghost"]:active:not(:disabled),
+.dark [data-slot="button"][data-variant="outline"]:active:not(:disabled),
+.dark [data-slot="button"][data-variant="secondary"]:active:not(:disabled),
+.dark [data-slot="button"][data-variant="ghost"][aria-expanded="true"],
+.dark [data-slot="button"][data-variant="outline"][aria-expanded="true"],
+.dark [data-slot="button"][data-variant="secondary"][aria-expanded="true"] {
+    background-color: var(--button-active);
+}
+
+.dark [data-slot="button"][data-variant="default"]:active:not(:disabled) {
+    background-color: color-mix(in oklch, var(--primary), black 8%);
 }
 
 @layer base {

@@ -235,7 +235,9 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
               <PanelLeft />
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">{t("rail.collapse")}</TooltipContent>
+          <TooltipContent align="start" side="bottom">
+            {t("rail.collapse")}
+          </TooltipContent>
         </Tooltip>
       )}
     </div>

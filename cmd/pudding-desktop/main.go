@@ -80,8 +80,8 @@ func main() {
 		MinWidth:  760,
 		MinHeight: 520,
 		// 不透明窗口底:WKWebView 在 zoom/失焦/遮挡等合成空档会先露出
-		// 自己的默认 canvas。这里按实测 canvas 色对齐,避免层间跳色。
-		BackgroundColour: application.NewRGB(30, 30, 30),
+		// 自己的默认 canvas。这里对齐暗色主题底色,避免层间跳色。
+		BackgroundColour: application.NewRGB(28, 28, 28),
 	}
 	if runtime.GOOS == "darwin" {
 		// 启动白闪修复:先隐藏窗口,等 web 首帧导航完成再显示(见下方 darwin hook)。
@@ -93,12 +93,12 @@ func main() {
 	}
 	window := app.Window.NewWithOptions(windowOpts)
 
-	// 窗口底色跟随系统外观,对齐 WKWebView 默认 canvas:
-	// dark #1E1E1E / light #FFFFFF。options 里的初值只覆盖首帧,
+	// 窗口底色跟随系统外观,对齐页面主题底色:
+	// dark #1C1C1C / light #FFFFFF。options 里的初值只覆盖首帧,
 	// 这里在运行期持续校正。
 	applyWindowBase := func() {
 		if app.Env.IsDarkMode() {
-			window.SetBackgroundColour(application.NewRGB(30, 30, 30))
+			window.SetBackgroundColour(application.NewRGB(28, 28, 28))
 		} else {
 			window.SetBackgroundColour(application.NewRGB(255, 255, 255))
 		}
