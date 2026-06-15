@@ -172,7 +172,7 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
   const popoverAlignOffset = collapsed ? -(readTrafficInsetPx() + popoverAlignNudgePx) : 0;
   const railButton = (
     <div
-      className="absolute top-0 left-[11px] z-30 flex items-center"
+      className="no-drag-region absolute top-0 left-[11px] z-30 flex items-center"
       style={{
         height: "var(--toolbar-h)",
         marginLeft: "var(--traffic-inset)",
@@ -254,10 +254,9 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
           className="pointer-events-none absolute top-2 right-0 bottom-2 left-2 z-0 rounded-[var(--rail-radius)] rounded-tl-[var(--rail-left-radius)] rounded-bl-[var(--rail-left-radius)] border border-sidebar-border bg-sidebar"
         />
         <div className="absolute top-0 right-0 bottom-2 left-2 z-10 flex min-h-0 flex-col gap-(--rail-content-align-gap) px-2 pb-2">
-          {/* 顶行是 --toolbar-h 工具条(壳 54px,与 InvisibleTitleBarHeight 同值):
-              壳模式下整行可拖拽;按钮由上方统一入口渲染 */}
+          {/* 顶行是 --toolbar-h 工具条占位;窗口拖拽由 App 根部统一透明拖拽带承载 */}
           <div
-            className="drag-region h-(--toolbar-h) shrink-0 transition-[padding] duration-200"
+            className="h-(--toolbar-h) shrink-0 transition-[padding] duration-200"
             style={{ paddingLeft: "var(--traffic-inset)" }}
           />
           {panel}

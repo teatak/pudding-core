@@ -36,16 +36,9 @@ package main
 #include <stdbool.h>
 #include <stdlib.h>
 
-// kPuddingToolbarHeight 与 main.go 的 InvisibleTitleBarHeight、web 侧
-// --toolbar-h(html[data-shell="mac"])三处同值:同一条"工具条带"语义,
-// 不同步会让可拖区 / 双击区 / 视觉工具条割裂。
+// kPuddingToolbarHeight 与 web 侧 --toolbar-h(html[data-shell="mac"])同值:
+// 同一条"工具条带"语义,不同步会让双击区与视觉工具条割裂。
 static const CGFloat kPuddingToolbarHeight = 54;
-
-// 左上角保护带:红绿灯(inset 72px)+ rail 折叠/展开按钮(x≈80..116)。
-// 这一带内的双击放行给按钮自身,不触发 zoom。旧项目用前端上报 no-zoom
-// rects 做精确判定;新壳顶部交互件只有这一处,先用固定带,将来工具条
-// 加 tabs 之类再升级上报机制。
-static const CGFloat kPuddingNoZoomLeftWidth = 130;
 
 static void puddingApplyTrafficLightsHidden(NSWindow *window, bool hidden) {
 	NSArray *btnKinds = @[@(NSWindowCloseButton),
@@ -202,8 +195,6 @@ static void puddingAttachDoubleClickToZoom(void *nsWindowPtr) {
 		NSRect frame = [w frame];
 		// 顶部 toolbar 带之外放行
 		if (loc.y < frame.size.height - kPuddingToolbarHeight) return event;
-		// 左上保护带(红绿灯 + rail 折叠按钮)放行
-		if (loc.x < kPuddingNoZoomLeftWidth) return event;
 		// 红绿灯 hit 区放行(双保险)
 		for (NSNumber *kind in btnKinds) {
 			NSButton *btn = [w standardWindowButton:kind.integerValue];

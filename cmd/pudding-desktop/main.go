@@ -59,9 +59,9 @@ func main() {
 	// 红绿灯由 NSToolbar inset rule 定位(绝不 cgo setFrame,旧项目踩坑);
 	// URL 附 ?shell=mac 让页面启用 --traffic-inset / --toolbar-h 让位。
 	//
-	// 与页面的三处同值约定:InvisibleTitleBarHeight = web 的 --toolbar-h
-	// = cgo 的 kPuddingToolbarHeight = 54(同一条"工具条带"语义:原生可
-	// 拖区 / 视觉工具条 / 双击 zoom 检测区)。
+	// 页面 --toolbar-h 与 cgo 的 kPuddingToolbarHeight 同值:视觉工具条
+	// 与双击 zoom 检测区对齐。拖窗只走前端 .drag-region,避免 native
+	// invisible titlebar 抢掉按钮区域的 no-drag。
 	//
 	// 页面由 Wails AssetServer 托管,Wails runtime 可用;核心业务 API
 	// 显式走 daemon HTTP,desktop native 状态走 @wailsio/runtime events。
@@ -87,8 +87,7 @@ func main() {
 		// 内容就绪前 WKWebView 是白底,window 深色底兜不住那一帧——只能不显示。
 		windowOpts.Hidden = true
 		windowOpts.Mac = application.MacWindow{
-			TitleBar:                application.MacTitleBarHiddenInset,
-			InvisibleTitleBarHeight: 54,
+			TitleBar: application.MacTitleBarHiddenInset,
 		}
 	}
 	window := app.Window.NewWithOptions(windowOpts)

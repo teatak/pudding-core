@@ -86,8 +86,8 @@
        全屏时红绿灯隐藏、让位归零(design.md 2.3)。
        72px / 54px 来自旧项目实测的 NSToolbar inset rule 常量
        (titlebarLeftSafeAreaPx / titlebarChromeHeightPx),
-       --toolbar-h 必须与壳侧 InvisibleTitleBarHeight 同值,
-       否则可拖区和双击 zoom 检测区跟视觉工具条割裂 */
+       --toolbar-h 必须与壳侧双击 zoom 检测高度同值,
+       否则双击区跟视觉工具条割裂 */
     --traffic-inset: 0px;
     --toolbar-h: 54px;
     /* 展开态 rail 首项对齐折叠态 popover 首项:
@@ -117,6 +117,7 @@ html[data-shell] .drag-region {
     --wails-draggable: drag;
 }
 
+html[data-shell] .no-drag-region,
 html[data-shell] .drag-region :where(button, a, input, textarea, select, [role="button"]) {
     --wails-draggable: no-drag;
 }

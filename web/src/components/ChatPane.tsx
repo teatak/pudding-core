@@ -12,7 +12,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
 import type { AppSearch } from "@/lib/route";
-import { cn } from "@/lib/utils";
 import { useOverlayStore } from "@/state/overlayStore";
 import { useRailCollapsed } from "@/state/railStore";
 
@@ -97,10 +96,7 @@ export function ChatPane({ token, sessionID, role }: ChatPaneProps) {
   return (
     <section className="relative flex h-full min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden">
       <header
-        className={cn(
-          "flex h-(--toolbar-h) min-w-0 shrink-0 items-center justify-between gap-3 overflow-hidden px-5",
-          isPrimary && "drag-region",
-        )}
+        className="flex h-(--toolbar-h) min-w-0 shrink-0 items-center justify-between gap-3 overflow-hidden px-5"
         // 折叠态给悬浮触发器让位;壳模式下触发器随红绿灯右移,让位同步加宽
         style={
           isPrimary && railCollapsed
