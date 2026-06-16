@@ -257,7 +257,7 @@ function UserMessageBlock({
 }) {
   return (
     <div className={cn("group flex flex-col items-end", pending && "opacity-70")}>
-      <div className="selectable-text min-w-0 max-w-[min(82%,42rem)] rounded-3xl rounded-br-lg border bg-secondary/60 px-4 py-2 text-left text-sm leading-6 break-words whitespace-pre-wrap">
+      <div className="selectable-text min-w-0 max-w-[min(82%,42rem)] rounded-2xl rounded-br-md border border-border/60 bg-muted px-3 py-2 text-left text-sm leading-6 break-words whitespace-pre-wrap shadow-sm dark:bg-muted/45">
         {text}
         {interrupted ? <InterruptedBadge /> : null}
       </div>
