@@ -60,9 +60,9 @@
     --primary-foreground: oklch(0.962 0.018 272.314);
     --secondary: oklch(0.967 0.001 286.375);
     --secondary-foreground: oklch(0.24 0 0);
-    --muted: oklch(0.97 0 0);
+    --muted: oklch(0.955 0 0);
     --muted-foreground: oklch(0.58 0 0);
-    --accent: oklch(0.97 0 0);
+    --accent: oklch(0.94 0 0);
     --accent-foreground: oklch(0.24 0 0);
     --destructive: oklch(0.577 0.245 27.325);
     --border: oklch(0.922 0 0);
@@ -97,6 +97,10 @@
     --rail-left-radius: var(--rail-radius);
     --chat-title-max-w: min(42rem, 100%);
     --success: oklch(0.62 0.12 175);
+    --dropdown-destructive: var(--destructive);
+    --dropdown-destructive-hover: var(--destructive);
+    --confirm-destructive: var(--destructive);
+    --confirm-destructive-hover: color-mix(in oklch, var(--destructive), black 8%);
 }
 
 html[data-shell="mac"] {
@@ -165,9 +169,9 @@ html[data-shell] .pudding-markdown * {
     --primary-foreground: oklch(0.962 0.018 272.314);
     --secondary: oklch(0.305 0.006 286.033);
     --secondary-foreground: oklch(0.93 0 0);
-    --muted: oklch(0.325 0 0);
+    --muted: oklch(0.37 0 0);
     --muted-foreground: oklch(0.72 0 0);
-    --accent: oklch(0.305 0 0);
+    --accent: oklch(0.36 0 0);
     --accent-foreground: oklch(0.93 0 0);
     --destructive: oklch(0.704 0.191 22.216);
     --border: oklch(1 0 0 / 12%);
@@ -187,31 +191,50 @@ html[data-shell] .pudding-markdown * {
     --sidebar-border: oklch(1 0 0 / 12%);
     --sidebar-ring: oklch(0.6 0 0);
     --success: oklch(0.7 0.11 175);
-    --button-hover: oklch(0.34 0 0);
-    --button-active: oklch(0.39 0 0);
-}
-
-.dark [data-slot="button"][data-variant="ghost"]:hover:not(:disabled),
-.dark [data-slot="button"][data-variant="outline"]:hover:not(:disabled),
-.dark [data-slot="button"][data-variant="secondary"]:hover:not(:disabled) {
-    background-color: var(--button-hover);
+    --dropdown-destructive: var(--destructive);
+    --dropdown-destructive-hover: color-mix(in oklch, var(--destructive), black 18%);
+    --confirm-destructive: color-mix(in oklch, var(--destructive), black 22%);
+    --confirm-destructive-hover: color-mix(in oklch, var(--destructive), black 32%);
 }
 
 .dark [data-slot="button"][data-variant="default"]:hover:not(:disabled) {
     background-color: color-mix(in oklch, var(--primary), white 8%);
 }
 
-.dark [data-slot="button"][data-variant="ghost"]:active:not(:disabled),
-.dark [data-slot="button"][data-variant="outline"]:active:not(:disabled),
-.dark [data-slot="button"][data-variant="secondary"]:active:not(:disabled),
-.dark [data-slot="button"][data-variant="ghost"][aria-expanded="true"],
-.dark [data-slot="button"][data-variant="outline"][aria-expanded="true"],
-.dark [data-slot="button"][data-variant="secondary"][aria-expanded="true"] {
-    background-color: var(--button-active);
-}
-
 .dark [data-slot="button"][data-variant="default"]:active:not(:disabled) {
     background-color: color-mix(in oklch, var(--primary), black 8%);
+}
+
+[data-slot="dropdown-menu-item"],
+[data-slot="dropdown-menu-checkbox-item"],
+[data-slot="dropdown-menu-radio-item"],
+[data-slot="dropdown-menu-sub-trigger"] {
+    font-size: 13px;
+    line-height: 20px;
+    font-weight: 400;
+}
+
+[data-slot="dropdown-menu-item"][data-variant="destructive"] {
+    color: var(--dropdown-destructive);
+}
+
+[data-slot="dropdown-menu-item"][data-variant="destructive"] svg {
+    color: currentColor;
+}
+
+[data-slot="dropdown-menu-item"][data-variant="destructive"]:is(:hover, :focus, [data-highlighted]) {
+    background-color: var(--dropdown-destructive-hover);
+    color: white;
+}
+
+[data-slot="alert-dialog-action"][data-variant="destructive"] {
+    background-color: var(--confirm-destructive);
+    color: white;
+}
+
+[data-slot="alert-dialog-action"][data-variant="destructive"]:is(:hover, :focus-visible) {
+    background-color: var(--confirm-destructive-hover);
+    color: white;
 }
 
 @layer base {

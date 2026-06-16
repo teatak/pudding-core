@@ -22,6 +22,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -342,7 +343,7 @@ function HeaderSessionTitle({
             <Input
               ref={inputRef}
               aria-label={t("session.rename")}
-              className="relative z-10 col-start-1 row-start-1 h-8 min-w-0 cursor-text rounded-none border-0 bg-transparent px-0 py-0 text-sm font-normal leading-6 shadow-none ring-0 caret-foreground focus-visible:border-transparent focus-visible:ring-0 md:text-sm dark:bg-transparent"
+              className="relative z-10 col-start-1 row-start-1 h-8 min-w-0 mt-[-1px] appearance-none cursor-text rounded-none border-0 bg-transparent px-0 py-0 text-sm font-normal leading-8 shadow-none ring-0 caret-foreground focus-visible:border-transparent focus-visible:ring-0 md:text-sm dark:bg-transparent"
               disabled={renamePending}
               placeholder={t("session.untitled")}
               value={draft}
@@ -401,6 +402,7 @@ function HeaderSessionTitle({
                 <Pencil />
                 {t("session.rename")}
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem
                 disabled={deletePending}
                 variant="destructive"

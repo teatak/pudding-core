@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   CircleAlert,
+  Ellipsis,
   Loader2,
   MessageSquareText,
   PanelLeft,
@@ -28,7 +29,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,10 +37,16 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
@@ -178,28 +184,45 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
         marginLeft: "var(--traffic-inset)",
       }}
     >
-      {collapsed ? (
-        <Popover open={hover.open} onOpenChange={hover.handleOpenChange}>
-          <PopoverTrigger asChild>
-            <Button
-              aria-label={t("rail.expand")}
-              className="text-muted-foreground hover:text-muted-foreground aria-expanded:text-muted-foreground"
-              size="icon"
-              variant="ghost"
-              onClick={() => {
-                // 窄屏强制折叠时展开不可用,点击退化为开合 popover
-                if (forcedCollapsed) {
-                  hover.toggle();
-                  return;
-                }
-                collapse(false);
-              }}
-              onMouseEnter={hover.openNow}
-              onMouseLeave={hover.scheduleClose}
-            >
-              <PanelLeft />
-            </Button>
-          </PopoverTrigger>
+      <Popover open={collapsed && hover.open} onOpenChange={hover.handleOpenChange}>
+        <Tooltip>
+          <PopoverAnchor asChild>
+            <TooltipTrigger asChild>
+              <Button
+                aria-label={collapsed ? t("rail.expand") : t("rail.collapse")}
+                className="text-muted-foreground hover:bg-muted hover:text-muted-foreground aria-expanded:bg-muted aria-expanded:text-muted-foreground dark:hover:bg-muted dark:aria-expanded:bg-muted"
+                size="icon"
+                variant="ghost"
+                onClick={() => {
+                  if (!collapsed) {
+                    collapse(true);
+                    return;
+                  }
+                  // 窄屏强制折叠时展开不可用,点击退化为开合 popover
+                  if (forcedCollapsed) {
+                    hover.toggle();
+                    return;
+                  }
+                  collapse(false);
+                }}
+                onMouseEnter={() => {
+                  if (collapsed) {
+                    hover.openNow();
+                  }
+                }}
+                onMouseLeave={() => {
+                  if (collapsed) {
+                    hover.scheduleClose();
+                  }
+                }}
+              >
+                <PanelLeft />
+              </Button>
+            </TooltipTrigger>
+          </PopoverAnchor>
+          {!collapsed ? <TooltipContent side="bottom">{t("rail.collapse")}</TooltipContent> : null}
+        </Tooltip>
+        {collapsed ? (
           <PopoverContent
             align="start"
             alignOffset={popoverAlignOffset}
@@ -221,25 +244,8 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
           >
             {panel}
           </PopoverContent>
-        </Popover>
-      ) : (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              aria-label={t("rail.collapse")}
-              className="text-muted-foreground hover:text-muted-foreground"
-              size="icon"
-              variant="ghost"
-              onClick={() => collapse(true)}
-            >
-              <PanelLeft />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent align="start" side="bottom">
-            {t("rail.collapse")}
-          </TooltipContent>
-        </Tooltip>
-      )}
+        ) : null}
+      </Popover>
     </div>
   );
 
@@ -505,11 +511,14 @@ function SessionItem({
 }: SessionItemProps) {
   const { t, locale } = useI18n();
   const title = session.title || t("session.untitled");
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   return (
     <div
       className={cn(
-        "group/item relative flex items-center gap-2 overflow-hidden rounded-lg px-2.5 py-1.5 text-left transition-colors",
-        selected ? "bg-sidebar-accent" : "hover:bg-sidebar-accent/60",
+        "group/item relative flex items-center gap-2 overflow-hidden rounded-lg px-1.5 py-1 text-left transition-colors",
+        selected ? "bg-sidebar-accent" : actionsOpen ? "bg-sidebar-accent/60" : "hover:bg-sidebar-accent/60",
       )}
     >
       <button
@@ -521,34 +530,61 @@ function SessionItem({
         <span className="min-w-0 flex-1 truncate text-[13px] leading-6 font-normal" title={session.title || undefined}>
           {title}
         </span>
-        <span className="ml-auto shrink-0 pl-2 text-xs text-muted-foreground transition-opacity group-hover/item:opacity-0">
+        <span
+          className={cn(
+            "ml-auto shrink-0 pl-2 text-xs text-muted-foreground transition-opacity group-hover/item:opacity-0",
+            actionsOpen && "opacity-0",
+          )}
+        >
           {running ? t("session.generating") : formatRelative(session.updatedAt, locale)}
         </span>
       </button>
       {/* hover 操作区盖在时间文字位置上 */}
-      <div className="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover/item:opacity-100 has-focus-visible:opacity-100">
-        <Button
-          aria-label={t("session.openSplit")}
-          className="size-6"
-          size="icon"
-          variant="ghost"
-          onClick={onOpenSplit}
-        >
-          <SquareSplitVertical className="size-3.5" />
-        </Button>
-        <RenameDialog currentTitle={session.title} onRename={onRename} />
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
+      <div
+        className={cn(
+          "absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover/item:opacity-100 has-focus-visible:opacity-100",
+          actionsOpen && "opacity-100",
+        )}
+      >
+        <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen}>
+          <DropdownMenuTrigger asChild>
             <Button
-              aria-label={t("session.delete")}
-              className="size-6"
-              disabled={deletePending}
+              aria-label={t("session.actions")}
+              className="size-5 rounded-sm bg-transparent p-0 text-muted-foreground shadow-none hover:bg-foreground/8 hover:text-foreground data-[state=open]:bg-foreground/8 data-[state=open]:text-foreground dark:hover:bg-foreground/12 dark:data-[state=open]:bg-foreground/12"
               size="icon"
               variant="ghost"
             >
-              <Trash2 className="size-3.5" />
+              <Ellipsis className="size-3.5" />
             </Button>
-          </AlertDialogTrigger>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-36 w-max">
+            <DropdownMenuItem className="whitespace-nowrap" onSelect={onOpenSplit}>
+              <SquareSplitVertical />
+              {t("session.openSplit")}
+            </DropdownMenuItem>
+            <DropdownMenuItem className="whitespace-nowrap" onSelect={() => setRenameOpen(true)}>
+              <Pencil />
+              {t("session.rename")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="whitespace-nowrap"
+              disabled={deletePending}
+              variant="destructive"
+              onSelect={() => setDeleteOpen(true)}
+            >
+              <Trash2 />
+              {t("session.delete")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <RenameDialog
+          currentTitle={session.title}
+          open={renameOpen}
+          onOpenChange={setRenameOpen}
+          onRename={onRename}
+        />
+        <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>{t("deleteSession.title")}</AlertDialogTitle>
@@ -569,31 +605,35 @@ function SessionItem({
 
 // 手动命名:Pencil 弹小对话框改名。清空保存 = 恢复"未命名",
 // 下一条消息会重新触发自动标题(空标题 = 自动命名判据)。
-function RenameDialog({ currentTitle, onRename }: { currentTitle: string; onRename: (title: string) => void }) {
+function RenameDialog({
+  currentTitle,
+  open,
+  onOpenChange,
+  onRename,
+}: {
+  currentTitle: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onRename: (title: string) => void;
+}) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(currentTitle);
 
   function submit() {
     onRename(draft.trim());
-    setOpen(false);
+    onOpenChange(false);
   }
 
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        setOpen(next);
+        onOpenChange(next);
         if (next) {
           setDraft(currentTitle);
         }
       }}
     >
-      <DialogTrigger asChild>
-        <Button aria-label={t("session.rename")} className="size-6" size="icon" variant="ghost">
-          <Pencil className="size-3.5" />
-        </Button>
-      </DialogTrigger>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>{t("renameSession.title")}</DialogTitle>
@@ -611,7 +651,7 @@ function RenameDialog({ currentTitle, onRename }: { currentTitle: string; onRena
           }}
         />
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             {t("common.cancel")}
           </Button>
           <Button type="button" onClick={submit}>

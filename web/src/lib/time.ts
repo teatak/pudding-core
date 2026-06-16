@@ -1,22 +1,38 @@
-// 相对时间:Intl.RelativeTimeFormat 原生承担多语言,组件不维护文案。
+// Session 列表要极短:中文 1分/1时/1天/1周,英文 now/1m/1h/1d/1w。
 export function formatRelative(iso: string, locale: string) {
   const then = new Date(iso).getTime();
-  const diffSec = Math.round((then - Date.now()) / 1000);
-  const abs = Math.abs(diffSec);
-  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
-  if (abs < 60) {
-    return rtf.format(0, "second"); // "现在 / now"
+  if (Number.isNaN(then)) {
+    return "";
   }
-  if (abs < 3600) {
-    return rtf.format(Math.trunc(diffSec / 60), "minute");
+
+  const elapsedSec = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  const units = getShortRelativeUnits(locale);
+  if (elapsedSec < 60) {
+    return units.now;
   }
-  if (abs < 86400) {
-    return rtf.format(Math.trunc(diffSec / 3600), "hour");
+  if (elapsedSec < 3600) {
+    return `${Math.max(1, Math.floor(elapsedSec / 60))}${units.minute}`;
   }
-  if (abs < 86400 * 7) {
-    return rtf.format(Math.trunc(diffSec / 86400), "day");
+  if (elapsedSec < 86400) {
+    return `${Math.floor(elapsedSec / 3600)}${units.hour}`;
+  }
+  if (elapsedSec < 86400 * 7) {
+    return `${Math.floor(elapsedSec / 86400)}${units.day}`;
+  }
+  if (elapsedSec < 86400 * 28) {
+    return `${Math.floor(elapsedSec / (86400 * 7))}${units.week}`;
   }
   return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" }).format(then);
+}
+
+function getShortRelativeUnits(locale: string) {
+  if (locale.startsWith("zh-TW")) {
+    return { now: "現在", minute: "分", hour: "時", day: "天", week: "週" };
+  }
+  if (locale.startsWith("zh")) {
+    return { now: "现在", minute: "分", hour: "时", day: "天", week: "周" };
+  }
+  return { now: "now", minute: "m", hour: "h", day: "d", week: "w" };
 }
 
 // 时钟时间(HH:mm),消息 meta 用
