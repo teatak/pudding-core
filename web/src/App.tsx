@@ -109,7 +109,12 @@ export function App() {
           className="min-h-0"
           minSize={splitLayout.minPanePx}
         >
-          <ChatPane token={token} sessionID={selectedSessionID} role="primary" />
+          <ChatPane
+            reserveTopRightAction={!canvasOpen}
+            token={token}
+            sessionID={selectedSessionID}
+            role="primary"
+          />
         </ResizablePanel>
         <WorkspaceResizableHandle
           aria-label={t("layout.resizeHint")}

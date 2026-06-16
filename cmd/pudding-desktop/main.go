@@ -228,10 +228,12 @@ func bindMacWindowEvents(window *application.WebviewWindow, hideAfterFullscreenE
 
 	window.RegisterHook(events.Mac.WindowWillEnterFullScreen, func(*application.WindowEvent) {
 		setHideTitle(window, false)
+		setUseToolbar(window, false)
 		setToolbarStyle(window, application.MacToolbarStyleUnifiedCompact)
 	})
 	window.RegisterHook(events.Mac.WindowWillExitFullScreen, func(*application.WindowEvent) {
 		setHideTitle(window, true)
+		setUseToolbar(window, true)
 		setToolbarStyle(window, application.MacToolbarStyleUnified)
 		setTrafficLightsHidden(window, true)
 	})

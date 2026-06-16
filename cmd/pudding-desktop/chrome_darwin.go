@@ -59,8 +59,19 @@ static void puddingSetTrafficLightsHidden(void *nsWindowPtr, bool hidden) {
 	dispatch_async(dispatch_get_main_queue(), ^{
 		puddingApplyTrafficLightsHidden(window, hidden);
 	});
+}static void puddingSetUseToolbar(void *nsWindowPtr, bool useToolbar) {
+	NSWindow *window = (NSWindow *)nsWindowPtr;
+	if (!window) return;
+	dispatch_async(dispatch_get_main_queue(), ^{
+		if (useToolbar) {
+			NSToolbar *toolbar = [[NSToolbar alloc] initWithIdentifier:@"wails.toolbar"];
+			[toolbar autorelease];
+			[window setToolbar:toolbar];
+		} else {
+			[window setToolbar:nil];
+		}
+	});
 }
-
 
 
 static void puddingSetHideTitle(void *nsWindowPtr, bool hideTitle) {
@@ -339,6 +350,17 @@ func setHideTitle(w *application.WebviewWindow, hide bool) {
 		return
 	}
 	C.puddingSetHideTitle(nsWindow, C.bool(hide))
+}
+
+func setUseToolbar(w *application.WebviewWindow, use bool) {
+	if w == nil {
+		return
+	}
+	nsWindow := w.NativeWindow()
+	if nsWindow == nil {
+		return
+	}
+	C.puddingSetUseToolbar(nsWindow, C.bool(use))
 }
 
 func setToolbarStyle(w *application.WebviewWindow, style application.MacToolbarStyle) {

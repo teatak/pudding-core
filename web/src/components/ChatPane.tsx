@@ -37,12 +37,13 @@ import { useRailCollapsed } from "@/state/railStore";
 type ChatPaneProps = {
   token: string;
   sessionID: string | undefined;
+  reserveTopRightAction?: boolean;
   // primary = 主 pane(承担会话自动跳转、rail 触发器让位);
   // split = 分屏 pane(会话失效时自动收屏,header 带关闭钮)
   role: "primary" | "split";
 };
 
-export function ChatPane({ token, sessionID, role }: ChatPaneProps) {
+export function ChatPane({ token, sessionID, reserveTopRightAction = false, role }: ChatPaneProps) {
   const navigate = useNavigate({ from: "/" });
   const queryClient = useQueryClient();
   const { t } = useI18n();
@@ -120,6 +121,10 @@ export function ChatPane({ token, sessionID, role }: ChatPaneProps) {
     : sessionsPending
       ? ""
       : t("session.noSelected");
+  const headerStyle = {
+    ...(isPrimary && railCollapsed ? { paddingLeft: "calc(var(--traffic-inset) + 3.25rem)" } : {}),
+    ...(reserveTopRightAction ? { paddingRight: "calc(13px + 2.75rem)" } : {}),
+  };
 
   useEffect(() => {
     if (!sessionsQuery.isSuccess) {
@@ -168,11 +173,7 @@ export function ChatPane({ token, sessionID, role }: ChatPaneProps) {
       <header
         className="flex h-(--toolbar-h) min-w-0 shrink-0 items-center justify-between gap-3 overflow-hidden px-5"
         // 折叠态给悬浮触发器让位;壳模式下触发器随红绿灯右移,让位同步加宽
-        style={
-          isPrimary && railCollapsed
-            ? { paddingLeft: "calc(var(--traffic-inset) + 3.25rem)" }
-            : undefined
-        }
+        style={Object.keys(headerStyle).length ? headerStyle : undefined}
       >
         <div className="flex h-8 min-w-0 max-w-(--chat-title-max-w) flex-1 items-center overflow-visible text-sm font-normal">
           {selectedSession ? (
@@ -332,14 +333,14 @@ function HeaderSessionTitle({
             <span
               ref={measureRef}
               aria-hidden="true"
-              className="pointer-events-none absolute top-0 left-0 h-7 whitespace-pre rounded-md border border-transparent px-2 text-sm font-normal leading-6 opacity-0"
+              className="pointer-events-none absolute top-0 left-0 h-7 whitespace-pre rounded-md border border-transparent px-2 font-normal leading-6 opacity-0"
             >
               {draft || t("session.untitled")}
             </span>
             <Input
               ref={inputRef}
               aria-label={t("session.rename")}
-              className="relative z-10 col-start-1 row-start-1 mt-[-1px] h-7 min-w-0 appearance-none rounded-md border-input bg-background/90 px-2 py-0 text-sm font-normal leading-6 shadow-xs ring-0 caret-foreground focus-visible:ring-0 md:text-sm dark:bg-background/90"
+              className="mt-[-1px] relative z-10 col-start-1 row-start-1 h-7 min-w-0 appearance-none rounded-md border-input bg-background/90 px-2 py-0  font-normal leading-6 shadow-xs ring-0 caret-foreground focus-visible:ring-0 dark:bg-background/90"
               disabled={renamePending}
               placeholder={t("session.untitled")}
               value={draft}
@@ -361,7 +362,7 @@ function HeaderSessionTitle({
           <button
             type="button"
             aria-label={t("session.rename")}
-            className="col-start-1 row-start-1 inline-flex h-7 w-full min-w-0 cursor-default items-center rounded-md border border-transparent px-2 text-left text-sm font-normal leading-6 transition-colors select-none hover:bg-muted focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+            className="col-start-1 row-start-1 inline-flex h-7 w-full min-w-0 cursor-default items-center rounded-md border border-transparent px-2 text-left font-normal leading-6 transition-colors select-none hover:bg-muted focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
             title={rawTitle || undefined}
             onDoubleClick={startEditing}
           >
