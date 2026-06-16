@@ -88,7 +88,14 @@ func main() {
 		// 内容就绪前 WKWebView 是白底,window 深色底兜不住那一帧——只能不显示。
 		windowOpts.Hidden = true
 		windowOpts.Mac = application.MacWindow{
-			TitleBar: application.MacTitleBarHiddenInset,
+			TitleBar: application.MacTitleBar{
+				AppearsTransparent:   true,
+				Hide:                 false,
+				HideTitle:            true,
+				FullSizeContent:      true,
+				UseToolbar:           true,
+				HideToolbarSeparator: true,
+			},
 		}
 	}
 	window := app.Window.NewWithOptions(windowOpts)
@@ -218,13 +225,20 @@ func bindMacWindowEvents(window *application.WebviewWindow, hideAfterFullscreenE
 		applyWindowBase()
 	})
 
+	window.RegisterHook(events.Mac.WindowWillEnterFullScreen, func(*application.WindowEvent) {
+		setUseToolbar(window, false)
+		setHideTitle(window, false)
+	})
 	window.RegisterHook(events.Mac.WindowWillExitFullScreen, func(*application.WindowEvent) {
 		hideTrafficLightsForFullscreenExit(window)
+		setUseToolbar(window, true)
+		setHideTitle(window, true)
 	})
 	window.RegisterHook(events.Mac.WindowDidExitFullScreen, func(*application.WindowEvent) {
 		setTrafficLightsHidden(window, false)
 	})
-	// RegisterHook 不会打开原生事件监听;这里显式订阅 will-exit。
+	// RegisterHook 不会打开原生事件监听;这里显式订阅。
+	window.OnWindowEvent(events.Mac.WindowWillEnterFullScreen, func(*application.WindowEvent) {})
 	window.OnWindowEvent(events.Mac.WindowWillExitFullScreen, func(*application.WindowEvent) {})
 
 	window.OnWindowEvent(events.Mac.WindowDidExitFullScreen, func(*application.WindowEvent) {

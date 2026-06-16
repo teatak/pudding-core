@@ -79,6 +79,44 @@ static void puddingHideTrafficLightsForFullscreenExit(void *nsWindowPtr) {
 	});
 }
 
+static void puddingSetUseToolbar(void *nsWindowPtr, bool useToolbar) {
+	NSWindow *window = (NSWindow *)nsWindowPtr;
+	if (!window) return;
+	dispatch_async(dispatch_get_main_queue(), ^{
+		if (useToolbar) {
+			NSToolbar *toolbar = [[NSToolbar alloc] initWithIdentifier:@"wails.toolbar"];
+			[toolbar autorelease];
+			[window setToolbar:toolbar];
+		} else {
+			[window setToolbar:nil];
+		}
+	});
+}
+
+static void puddingSetHideTitleBar(void *nsWindowPtr, bool hideTitlebar) {
+	NSWindow *window = (NSWindow *)nsWindowPtr;
+	if (!window) return;
+	dispatch_async(dispatch_get_main_queue(), ^{
+		if (hideTitlebar) {
+			[window setStyleMask:[window styleMask] & ~NSWindowStyleMaskTitled];
+		} else {
+			[window setStyleMask:[window styleMask] | NSWindowStyleMaskTitled];
+		}
+	});
+}
+
+static void puddingSetHideTitle(void *nsWindowPtr, bool hideTitle) {
+	NSWindow *window = (NSWindow *)nsWindowPtr;
+	if (!window) return;
+	dispatch_async(dispatch_get_main_queue(), ^{
+		if (hideTitle) {
+			[window setTitleVisibility:NSWindowTitleHidden];
+		} else {
+			[window setTitleVisibility:NSWindowTitleVisible];
+		}
+	});
+}
+
 // === zoom: 的 80ms 动画替换(method swizzle)===
 //
 // 复制 [zoom:] 的 toggle 语义:已 zoom → 还原缓存 frame(缓存失效退到
@@ -329,4 +367,37 @@ func hideTrafficLightsForFullscreenExit(w *application.WebviewWindow) {
 		return
 	}
 	C.puddingHideTrafficLightsForFullscreenExit(nsWindow)
+}
+
+func setUseToolbar(w *application.WebviewWindow, use bool) {
+	if w == nil {
+		return
+	}
+	nsWindow := w.NativeWindow()
+	if nsWindow == nil {
+		return
+	}
+	C.puddingSetUseToolbar(nsWindow, C.bool(use))
+}
+
+func setHideTitleBar(w *application.WebviewWindow, hide bool) {
+	if w == nil {
+		return
+	}
+	nsWindow := w.NativeWindow()
+	if nsWindow == nil {
+		return
+	}
+	C.puddingSetHideTitleBar(nsWindow, C.bool(hide))
+}
+
+func setHideTitle(w *application.WebviewWindow, hide bool) {
+	if w == nil {
+		return
+	}
+	nsWindow := w.NativeWindow()
+	if nsWindow == nil {
+		return
+	}
+	C.puddingSetHideTitle(nsWindow, C.bool(hide))
 }
