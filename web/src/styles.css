@@ -251,7 +251,7 @@ html[data-shell] .pudding-markdown * {
 }
 
 .pudding-markdown :where(h1, h2, h3, h4) {
-  @apply mt-1 font-medium leading-snug;
+  @apply mt-1 font-normal leading-snug;
 }
 
 .pudding-markdown h1 {
@@ -311,7 +311,7 @@ html[data-shell] .pudding-markdown * {
 }
 
 .pudding-markdown th {
-  @apply bg-muted font-medium;
+  @apply bg-muted font-normal;
 }
 
 /* 末行不带底边,避免与 wrapper 圆角边框叠出双线 */

@@ -370,7 +370,7 @@ function RailPanel({
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <Button
-        className="w-full justify-start gap-2 rounded-lg"
+        className="w-full justify-start gap-2 rounded-lg font-normal"
         disabled={createPending}
         size="sm"
         variant="outline"
@@ -518,7 +518,7 @@ function SessionItem({
         onClick={onSelect}
       >
         {running ? <span className="size-2 shrink-0 animate-pulse rounded-full bg-primary" /> : null}
-        <span className="min-w-0 flex-1 truncate text-[13px] leading-6 font-medium" title={session.title || undefined}>
+        <span className="min-w-0 flex-1 truncate text-[13px] leading-6 font-normal" title={session.title || undefined}>
           {title}
         </span>
         <span className="ml-auto shrink-0 pl-2 text-xs text-muted-foreground transition-opacity group-hover/item:opacity-0">

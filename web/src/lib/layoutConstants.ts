@@ -19,6 +19,7 @@ export const resizeTargetMinimumSize = {
 
 export const splitLayout = {
   fallback: { primary: 50, split: 50 },
+  closed: { primary: 100, split: 0 },
   minPercent: 20,
   maxPercent: 80,
   minPanePx: 280,

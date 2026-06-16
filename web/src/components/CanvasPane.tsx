@@ -10,7 +10,7 @@ export function CanvasPane() {
   return (
     <aside className="flex h-full shrink-0 flex-col bg-sidebar text-sidebar-foreground">
       <div className="flex h-(--toolbar-h) shrink-0 items-center pr-12 pl-4">
-        <div className="text-sm font-medium">{t("canvas.title")}</div>
+        <div className="text-sm font-normal">{t("canvas.title")}</div>
       </div>
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
         <Shapes className="h-8 w-8 text-muted-foreground/60" />

@@ -405,7 +405,7 @@ function ProviderSettings({ token }: { token: string }) {
             >
               <BrandIcon className="size-6 shrink-0" name={preset.id} />
               <span className="grid min-w-0 gap-0.5">
-                <span className="truncate text-sm font-medium">{preset.name}</span>
+                <span className="truncate text-sm font-normal">{preset.name}</span>
                 <span className="truncate text-xs text-muted-foreground">{preset.models[0]?.id || preset.type}</span>
               </span>
             </button>
@@ -419,7 +419,7 @@ function ProviderSettings({ token }: { token: string }) {
               <Plus className="size-4" />
             </span>
             <span className="grid min-w-0 gap-0.5">
-              <span className="truncate text-sm font-medium">{t("provider.custom")}</span>
+              <span className="truncate text-sm font-normal">{t("provider.custom")}</span>
               <span className="truncate text-xs text-muted-foreground">{t("provider.customHint")}</span>
             </span>
           </button>
@@ -469,7 +469,7 @@ function ProviderSettings({ token }: { token: string }) {
                   <BrandIcon className="size-6 shrink-0" name={profile.id} />
                   <span className="grid min-w-0 gap-1">
                     <span className="flex min-w-0 items-center gap-2">
-                      <span className="truncate text-sm font-medium">{profile.name}</span>
+                      <span className="truncate text-sm font-normal">{profile.name}</span>
                       {isDefault ? (
                         <Badge className="shrink-0 text-[10px] font-normal" variant="secondary">
                           {t("common.default")}
@@ -861,7 +861,7 @@ function ModelEditor({
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <Badge variant={index === 0 ? "default" : "outline"}>{index === 0 ? t("common.default") : index + 1}</Badge>
-          <span className="truncate text-sm font-medium">{watch(`${prefix}.id`) || t("session.model")}</span>
+          <span className="truncate text-sm font-normal">{watch(`${prefix}.id`) || t("session.model")}</span>
         </div>
         <Button disabled={!canRemove} size="icon" type="button" variant="ghost" onClick={onRemove}>
           <Trash2 />
@@ -968,7 +968,7 @@ function SettingsPanel({
   return (
     <section className="overflow-hidden rounded-xl border bg-card shadow-sm">
       <div className="flex min-h-11 items-center justify-between gap-3 border-b bg-muted/20 px-4 py-2">
-        <h3 className="text-sm font-medium">{title}</h3>
+        <h3 className="text-sm font-normal">{title}</h3>
         {action}
       </div>
       <div className="grid gap-3 p-4">{children}</div>

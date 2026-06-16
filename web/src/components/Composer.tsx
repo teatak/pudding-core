@@ -139,11 +139,15 @@ export function Composer({ token, session }: ComposerProps) {
                   <Button
                     aria-label={t("composer.stop")}
                     className="rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
-                    disabled={cancelMutation.isPending || cancelLocked}
                     size="icon"
                     type="button"
                     variant="ghost"
-                    onClick={() => cancelMutation.mutate()}
+                    onClick={() => {
+                      if (cancelLocked) {
+                        return;
+                      }
+                      cancelMutation.mutate();
+                    }}
                   >
                     {cancelMutation.isPending ? (
                       <Loader2 className="animate-spin" />
@@ -152,14 +156,14 @@ export function Composer({ token, session }: ComposerProps) {
                     )}
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>{cancelLocked ? t("composer.stopPending") : t("composer.stop")}</TooltipContent>
+                <TooltipContent>{t("composer.stop")}</TooltipContent>
               </Tooltip>
             ) : (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     aria-label={t("composer.send")}
-                    className="rounded-full"
+                    className="rounded-full disabled:bg-[color-mix(in_oklch,var(--foreground)_7%,var(--background))] disabled:text-[color-mix(in_oklch,var(--foreground)_58%,var(--background))] disabled:opacity-100 disabled:shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--foreground),transparent_94%)]"
                     disabled={!sendEnabled}
                     size="icon"
                     type="submit"

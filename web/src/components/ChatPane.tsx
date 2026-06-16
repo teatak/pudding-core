@@ -173,7 +173,7 @@ export function ChatPane({ token, sessionID, role }: ChatPaneProps) {
             : undefined
         }
       >
-        <div className="flex h-8 min-w-0 max-w-(--chat-title-max-w) flex-1 items-center overflow-visible text-sm font-medium">
+        <div className="flex h-8 min-w-0 max-w-(--chat-title-max-w) flex-1 items-center overflow-visible text-sm font-normal">
           {selectedSession ? (
             <HeaderSessionTitle
               key={selectedSession.id}
@@ -184,7 +184,7 @@ export function ChatPane({ token, sessionID, role }: ChatPaneProps) {
               onRename={(title) => renameMutation.mutate({ id: selectedSession.id, title })}
             />
           ) : (
-            <span className="flex h-8 min-w-0 max-w-full items-center truncate text-sm font-medium leading-6">
+            <span className="flex h-8 min-w-0 max-w-full items-center truncate text-sm font-normal leading-6">
               {headerTitle}
             </span>
           )}
@@ -331,7 +331,7 @@ function HeaderSessionTitle({
             <span
               ref={measureRef}
               aria-hidden="true"
-              className="pointer-events-none absolute top-0 left-0 h-8 whitespace-pre text-sm font-medium leading-8 opacity-0"
+              className="pointer-events-none absolute top-0 left-0 h-8 whitespace-pre text-sm font-normal leading-8 opacity-0"
             >
               {draft || t("session.untitled")}
             </span>
@@ -342,7 +342,7 @@ function HeaderSessionTitle({
             <Input
               ref={inputRef}
               aria-label={t("session.rename")}
-              className="relative z-10 col-start-1 row-start-1 h-8 min-w-0 cursor-text rounded-none border-0 bg-transparent px-0 py-0 text-sm font-medium leading-6 shadow-none ring-0 caret-foreground focus-visible:border-transparent focus-visible:ring-0 md:text-sm dark:bg-transparent"
+              className="relative z-10 col-start-1 row-start-1 h-8 min-w-0 cursor-text rounded-none border-0 bg-transparent px-0 py-0 text-sm font-normal leading-6 shadow-none ring-0 caret-foreground focus-visible:border-transparent focus-visible:ring-0 md:text-sm dark:bg-transparent"
               disabled={renamePending}
               placeholder={t("session.untitled")}
               value={draft}
@@ -362,7 +362,7 @@ function HeaderSessionTitle({
           </>
         ) : (
           <span
-            className="col-start-1 row-start-1 block h-8 w-full min-w-0 cursor-default truncate text-sm font-medium leading-8 select-none"
+            className="col-start-1 row-start-1 block h-8 w-full min-w-0 cursor-default truncate text-sm font-normal leading-8 select-none"
             title={rawTitle || undefined}
             onDoubleClick={startEditing}
           >

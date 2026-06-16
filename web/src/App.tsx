@@ -29,6 +29,7 @@ export function App() {
   const { t } = useI18n();
   const canvasOpen = useCanvasOpen();
   const workspaceGroupRef = useGroupRef();
+  const splitGroupRef = useGroupRef();
   const savedSplitLayout = useMemo(
     () =>
       readPanelLayout(layoutStorageKeys.splitRatio, splitLayout.fallback, {
@@ -63,6 +64,24 @@ export function App() {
     );
   }, [canvasOpen, workspaceGroupRef]);
 
+  useEffect(() => {
+    const group = splitGroupRef.current;
+    if (!group) {
+      return;
+    }
+    const showSplit = Boolean(splitSessionID && splitSessionID !== selectedSessionID);
+    if (!showSplit) {
+      group.setLayout(splitLayout.closed);
+      return;
+    }
+    group.setLayout(
+      readPanelLayout(layoutStorageKeys.splitRatio, splitLayout.fallback, {
+        minPercent: splitLayout.minPercent,
+        maxPercent: splitLayout.maxPercent,
+      }),
+    );
+  }, [selectedSessionID, splitGroupRef, splitSessionID]);
+
   if (!token) {
     return <TokenGate />;
   }
@@ -72,33 +91,41 @@ export function App() {
   const showSplit = Boolean(splitSessionID && splitSessionID !== selectedSessionID);
   const chatArea = (
     <main className="flex h-full min-w-0 flex-col overflow-hidden bg-background">
-      {showSplit ? (
-        <ResizablePanelGroup
-          className="min-h-0 flex-1"
-          defaultLayout={savedSplitLayout}
-          orientation="vertical"
-          resizeTargetMinimumSize={resizeTargetMinimumSize}
-          onLayoutChanged={(layout) => savePanelLayout(layoutStorageKeys.splitRatio, layout)}
+      <ResizablePanelGroup
+        className="min-h-0 flex-1"
+        defaultLayout={showSplit ? savedSplitLayout : splitLayout.closed}
+        groupRef={splitGroupRef}
+        id="split-workspace"
+        orientation="vertical"
+        resizeTargetMinimumSize={resizeTargetMinimumSize}
+        onLayoutChanged={(layout) => {
+          if (showSplit && typeof layout.split === "number" && layout.split > 0) {
+            savePanelLayout(layoutStorageKeys.splitRatio, layout);
+          }
+        }}
+      >
+        <ResizablePanel
+          id="primary"
+          className="min-h-0"
+          minSize={splitLayout.minPanePx}
         >
-          <ResizablePanel
-            id="primary"
-            className="min-h-0"
-            minSize={splitLayout.minPanePx}
-          >
-            <ChatPane token={token} sessionID={selectedSessionID} role="primary" />
-          </ResizablePanel>
-          <WorkspaceResizableHandle aria-label={t("layout.resizeHint")} />
-          <ResizablePanel
-            id="split"
-            className="min-h-0"
-            minSize={splitLayout.minPanePx}
-          >
-            <ChatPane token={token} sessionID={splitSessionID} role="split" />
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      ) : (
-        <ChatPane token={token} sessionID={selectedSessionID} role="primary" />
-      )}
+          <ChatPane token={token} sessionID={selectedSessionID} role="primary" />
+        </ResizablePanel>
+        <WorkspaceResizableHandle
+          aria-label={t("layout.resizeHint")}
+          className={showSplit ? undefined : "hidden"}
+          disabled={!showSplit}
+        />
+        <ResizablePanel
+          id="split"
+          className="min-h-0"
+          collapsedSize="0%"
+          collapsible
+          minSize={splitLayout.minPanePx}
+        >
+          {showSplit ? <ChatPane token={token} sessionID={splitSessionID} role="split" /> : null}
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </main>
   );
 
