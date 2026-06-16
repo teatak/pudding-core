@@ -86,6 +86,23 @@ static void puddingSetHideTitle(void *nsWindowPtr, bool hideTitle) {
 	});
 }
 
+static void puddingSetWindowAppearance(void *nsWindowPtr, const char* theme) {
+	NSWindow *window = (NSWindow *)nsWindowPtr;
+	if (!window) return;
+	// 必须复制字符串！Go 的 defer C.free 会在 dispatch_async 执行前释放原指针
+	char *themeCopy = theme ? strdup(theme) : NULL;
+	dispatch_async(dispatch_get_main_queue(), ^{
+		if (themeCopy == NULL || strcmp(themeCopy, "system") == 0) {
+			window.appearance = nil;
+		} else if (strcmp(themeCopy, "dark") == 0) {
+			window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+		} else {
+			window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameAqua];
+		}
+		free(themeCopy);
+	});
+}
+
 static void puddingSetToolbarStyle(void *nsWindowPtr, int style) {
 	NSWindow *window = (NSWindow *)nsWindowPtr;
 	if (!window) return;
@@ -350,6 +367,19 @@ func setHideTitle(w *application.WebviewWindow, hide bool) {
 		return
 	}
 	C.puddingSetHideTitle(nsWindow, C.bool(hide))
+}
+
+func setWindowAppearance(w *application.WebviewWindow, theme string) {
+	if w == nil {
+		return
+	}
+	nsWindow := w.NativeWindow()
+	if nsWindow == nil {
+		return
+	}
+	cTheme := C.CString(theme)
+	defer C.free(unsafe.Pointer(cTheme))
+	C.puddingSetWindowAppearance(nsWindow, cTheme)
 }
 
 func setUseToolbar(w *application.WebviewWindow, use bool) {

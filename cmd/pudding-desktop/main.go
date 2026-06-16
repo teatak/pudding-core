@@ -10,10 +10,12 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -101,16 +103,79 @@ func main() {
 	}
 	window := app.Window.NewWithOptions(windowOpts)
 
-	// 窗口底色跟随系统外观,对齐页面主题底色:
-	// dark #1C1C1C / light #FFFFFF。options 里的初值只覆盖首帧,
-	// 这里在运行期持续校正。
-	applyWindowBase := func() {
+	// 获取系统真正的深浅模式
+	getSystemIsDark := func() bool {
+		// 打包后正常的情况
 		if app.Env.IsDarkMode() {
+			return true
+		}
+		// 裸二进制下的临时兜底：查系统全局配置
+		if runtime.GOOS == "darwin" {
+			out, err := exec.Command("defaults", "read", "-g", "AppleInterfaceStyle").Output()
+			if err == nil && strings.TrimSpace(string(out)) == "Dark" {
+				return true
+			}
+		}
+		return false
+	}
+
+	var currentTheme atomic.Pointer[string]
+	defaultTheme := "system"
+	currentTheme.Store(&defaultTheme)
+
+	var lastEmittedResolved atomic.Pointer[string]
+
+	applyWindowBase := func() {
+		theme := "system"
+		if t := currentTheme.Load(); t != nil {
+			theme = *t
+		}
+
+		isDark := getSystemIsDark()
+		if theme == "dark" {
+			isDark = true
+		} else if theme == "light" {
+			isDark = false
+		}
+
+		if isDark {
 			window.SetBackgroundColour(application.NewRGB(28, 28, 28))
+			if runtime.GOOS == "darwin" {
+				// 黑底配浅色红绿灯（极强反差的亮灰色），彻底告别隐形！
+				setWindowAppearance(window, "dark")
+			}
 		} else {
 			window.SetBackgroundColour(application.NewRGB(255, 255, 255))
+			if runtime.GOOS == "darwin" {
+				// 白底配深色红绿灯（极强反差的死黑色），彻底告别隐形！
+				setWindowAppearance(window, "light")
+			}
+		}
+
+		resolvedStr := "light"
+		if isDark {
+			resolvedStr = "dark"
+		}
+		// 只在 resolved 真正变化时才通知前端
+		prev := lastEmittedResolved.Swap(&resolvedStr)
+		if prev == nil || *prev != resolvedStr {
+			app.Logger.Info("ExecJS __puddingSetResolvedTheme: " + resolvedStr)
+			window.ExecJS(fmt.Sprintf(`window.__puddingSetResolvedTheme && window.__puddingSetResolvedTheme("%s")`, resolvedStr))
 		}
 	}
+	// 初始状态
+	applyWindowBase()
+
+	app.Event.On("desktop:theme-changed", func(e *application.CustomEvent) {
+		if themeStr, ok := e.Data.(string); ok {
+			currentTheme.Store(&themeStr)
+			// 前端主动发来的请求，必须强制回复（清除去重缓存）
+			lastEmittedResolved.Store(nil)
+			applyWindowBase()
+		}
+	})
+
+	// 监听系统主题变化(当为 system 时需要重新评估背景色)
 	app.Event.OnApplicationEvent(events.Common.ThemeChanged, func(*application.ApplicationEvent) {
 		applyWindowBase()
 	})

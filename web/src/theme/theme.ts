@@ -16,9 +16,35 @@ export function readStoredTheme(): Theme {
   return value === "light" || value === "dark" || value === "system" ? value : "system";
 }
 
+let goResolvedSystemTheme: ResolvedTheme | null = null;
+
+// Go 通过 window.ExecJS 直接调用此全局函数，绕过 Wails 事件系统
+// 彻底避免事件监听器注册时机和 HMR 重复注册的问题
+declare global {
+  interface Window {
+    __puddingSetResolvedTheme?: (resolved: string) => void;
+  }
+}
+if (typeof window !== "undefined") {
+  window.__puddingSetResolvedTheme = (resolved: string) => {
+    if (resolved !== "dark" && resolved !== "light") return;
+    const old = goResolvedSystemTheme;
+    goResolvedSystemTheme = resolved as ResolvedTheme;
+    if (readStoredTheme() === "system" && old !== goResolvedSystemTheme) {
+      // 直接操作 DOM，绝不调 applyTheme（避免发事件回 Go）
+      document.documentElement.classList.toggle("dark", resolved === "dark");
+      document.documentElement.style.colorScheme = resolved;
+      listeners.forEach((l) => l());
+    }
+  };
+}
+
 export function resolveTheme(theme: Theme): ResolvedTheme {
   if (theme !== "system") {
     return theme;
+  }
+  if (goResolvedSystemTheme) {
+    return goResolvedSystemTheme;
   }
   if (typeof window === "undefined") {
     return "light";
@@ -33,6 +59,10 @@ export function applyTheme(theme: Theme) {
   const resolved = resolveTheme(theme);
   document.documentElement.classList.toggle("dark", resolved === "dark");
   document.documentElement.style.colorScheme = resolved;
+  
+  import("@wailsio/runtime").then(({ Events }) => {
+    Events.Emit("desktop:theme-changed", theme).catch(() => {});
+  }).catch(() => {});
 }
 
 function notifyThemeChange() {
