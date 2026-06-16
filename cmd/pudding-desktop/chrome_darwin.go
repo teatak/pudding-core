@@ -61,49 +61,7 @@ static void puddingSetTrafficLightsHidden(void *nsWindowPtr, bool hidden) {
 	});
 }
 
-// WillExitFullScreen 比 did 更早,用来遮掉退出动画中的红绿灯闪现。
-// did-exit 会正常恢复;这里再加延迟兜底,避免 did 偶发未到时按钮卡隐藏。
-static void puddingHideTrafficLightsForFullscreenExit(void *nsWindowPtr) {
-	NSWindow *window = (NSWindow *)nsWindowPtr;
-	if (!window) return;
-	[window retain];
-	dispatch_async(dispatch_get_main_queue(), ^{
-		puddingApplyTrafficLightsHidden(window, true);
-		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)),
-		               dispatch_get_main_queue(), ^{
-			if (([window styleMask] & NSWindowStyleMaskFullScreen) == 0) {
-				puddingApplyTrafficLightsHidden(window, false);
-			}
-			[window release];
-		});
-	});
-}
 
-static void puddingSetUseToolbar(void *nsWindowPtr, bool useToolbar) {
-	NSWindow *window = (NSWindow *)nsWindowPtr;
-	if (!window) return;
-	dispatch_async(dispatch_get_main_queue(), ^{
-		if (useToolbar) {
-			NSToolbar *toolbar = [[NSToolbar alloc] initWithIdentifier:@"wails.toolbar"];
-			[toolbar autorelease];
-			[window setToolbar:toolbar];
-		} else {
-			[window setToolbar:nil];
-		}
-	});
-}
-
-static void puddingSetHideTitleBar(void *nsWindowPtr, bool hideTitlebar) {
-	NSWindow *window = (NSWindow *)nsWindowPtr;
-	if (!window) return;
-	dispatch_async(dispatch_get_main_queue(), ^{
-		if (hideTitlebar) {
-			[window setStyleMask:[window styleMask] & ~NSWindowStyleMaskTitled];
-		} else {
-			[window setStyleMask:[window styleMask] | NSWindowStyleMaskTitled];
-		}
-	});
-}
 
 static void puddingSetHideTitle(void *nsWindowPtr, bool hideTitle) {
 	NSWindow *window = (NSWindow *)nsWindowPtr;
@@ -115,6 +73,18 @@ static void puddingSetHideTitle(void *nsWindowPtr, bool hideTitle) {
 			[window setTitleVisibility:NSWindowTitleVisible];
 		}
 	});
+}
+
+static void puddingSetToolbarStyle(void *nsWindowPtr, int style) {
+	NSWindow *window = (NSWindow *)nsWindowPtr;
+	if (!window) return;
+#if MAC_OS_X_VERSION_MAX_ALLOWED >= 110000
+	if (@available(macOS 11.0, *)) {
+		dispatch_async(dispatch_get_main_queue(), ^{
+			[window setToolbarStyle:style];
+		});
+	}
+#endif
 }
 
 // === zoom: 的 80ms 动画替换(method swizzle)===
@@ -358,38 +328,7 @@ func setTrafficLightsHidden(w *application.WebviewWindow, hidden bool) {
 	C.puddingSetTrafficLightsHidden(nsWindow, C.bool(hidden))
 }
 
-func hideTrafficLightsForFullscreenExit(w *application.WebviewWindow) {
-	if w == nil {
-		return
-	}
-	nsWindow := w.NativeWindow()
-	if nsWindow == nil {
-		return
-	}
-	C.puddingHideTrafficLightsForFullscreenExit(nsWindow)
-}
 
-func setUseToolbar(w *application.WebviewWindow, use bool) {
-	if w == nil {
-		return
-	}
-	nsWindow := w.NativeWindow()
-	if nsWindow == nil {
-		return
-	}
-	C.puddingSetUseToolbar(nsWindow, C.bool(use))
-}
-
-func setHideTitleBar(w *application.WebviewWindow, hide bool) {
-	if w == nil {
-		return
-	}
-	nsWindow := w.NativeWindow()
-	if nsWindow == nil {
-		return
-	}
-	C.puddingSetHideTitleBar(nsWindow, C.bool(hide))
-}
 
 func setHideTitle(w *application.WebviewWindow, hide bool) {
 	if w == nil {
@@ -400,4 +339,15 @@ func setHideTitle(w *application.WebviewWindow, hide bool) {
 		return
 	}
 	C.puddingSetHideTitle(nsWindow, C.bool(hide))
+}
+
+func setToolbarStyle(w *application.WebviewWindow, style application.MacToolbarStyle) {
+	if w == nil {
+		return
+	}
+	nsWindow := w.NativeWindow()
+	if nsWindow == nil {
+		return
+	}
+	C.puddingSetToolbarStyle(nsWindow, C.int(style))
 }

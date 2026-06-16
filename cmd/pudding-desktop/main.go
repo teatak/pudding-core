@@ -95,6 +95,7 @@ func main() {
 				FullSizeContent:      true,
 				UseToolbar:           true,
 				HideToolbarSeparator: true,
+				ToolbarStyle:         application.MacToolbarStyleUnified, // 设为紧凑型
 			},
 		}
 	}
@@ -226,13 +227,13 @@ func bindMacWindowEvents(window *application.WebviewWindow, hideAfterFullscreenE
 	})
 
 	window.RegisterHook(events.Mac.WindowWillEnterFullScreen, func(*application.WindowEvent) {
-		setUseToolbar(window, false)
 		setHideTitle(window, false)
+		setToolbarStyle(window, application.MacToolbarStyleUnifiedCompact)
 	})
 	window.RegisterHook(events.Mac.WindowWillExitFullScreen, func(*application.WindowEvent) {
-		hideTrafficLightsForFullscreenExit(window)
-		setUseToolbar(window, true)
 		setHideTitle(window, true)
+		setToolbarStyle(window, application.MacToolbarStyleUnified)
+		setTrafficLightsHidden(window, true)
 	})
 	window.RegisterHook(events.Mac.WindowDidExitFullScreen, func(*application.WindowEvent) {
 		setTrafficLightsHidden(window, false)
