@@ -322,7 +322,7 @@ function HeaderSessionTitle({
     >
       <div
         className={cn(
-          "relative grid h-8 min-w-0 max-w-full items-center",
+          "relative grid h-7 min-w-0 max-w-full items-center",
           editing ? "shrink" : "overflow-hidden",
         )}
         style={editing && editWidth ? { width: `min(${editWidth}px, 100%)` } : undefined}
@@ -332,18 +332,14 @@ function HeaderSessionTitle({
             <span
               ref={measureRef}
               aria-hidden="true"
-              className="pointer-events-none absolute top-0 left-0 h-8 whitespace-pre text-sm font-normal leading-8 opacity-0"
+              className="pointer-events-none absolute top-0 left-0 h-7 whitespace-pre rounded-md border border-transparent px-2 text-sm font-normal leading-6 opacity-0"
             >
               {draft || t("session.untitled")}
             </span>
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute -inset-x-1.5 top-1/2 h-7 -translate-y-1/2 rounded-md border border-input bg-background/90 shadow-xs"
-            />
             <Input
               ref={inputRef}
               aria-label={t("session.rename")}
-              className="relative z-10 col-start-1 row-start-1 h-8 min-w-0 mt-[-1px] appearance-none cursor-text rounded-none border-0 bg-transparent px-0 py-0 text-sm font-normal leading-8 shadow-none ring-0 caret-foreground focus-visible:border-transparent focus-visible:ring-0 md:text-sm dark:bg-transparent"
+              className="relative z-10 col-start-1 row-start-1 mt-[-1px] h-7 min-w-0 appearance-none rounded-md border-input bg-background/90 px-2 py-0 text-sm font-normal leading-6 shadow-xs ring-0 caret-foreground focus-visible:ring-0 md:text-sm dark:bg-background/90"
               disabled={renamePending}
               placeholder={t("session.untitled")}
               value={draft}
@@ -362,13 +358,15 @@ function HeaderSessionTitle({
             />
           </>
         ) : (
-          <span
-            className="col-start-1 row-start-1 block h-8 w-full min-w-0 cursor-default truncate text-sm font-normal leading-8 select-none"
+          <button
+            type="button"
+            aria-label={t("session.rename")}
+            className="col-start-1 row-start-1 inline-flex h-7 w-full min-w-0 cursor-default items-center rounded-md border border-transparent px-2 text-left text-sm font-normal leading-6 transition-colors select-none hover:bg-muted focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
             title={rawTitle || undefined}
             onDoubleClick={startEditing}
           >
-            {displayTitle}
-          </span>
+            <span className="min-w-0 truncate">{displayTitle}</span>
+          </button>
         )}
       </div>
       {editing ? null : (

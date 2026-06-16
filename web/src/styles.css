@@ -64,7 +64,7 @@
     --muted-foreground: oklch(0.58 0 0);
     --accent: oklch(0.94 0 0);
     --accent-foreground: oklch(0.24 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
+    --destructive: oklch(0.535 0.195 27.5);
     --border: oklch(0.922 0 0);
     --input: oklch(0.922 0 0);
     --ring: oklch(0.708 0 0);
@@ -98,9 +98,9 @@
     --chat-title-max-w: min(42rem, 100%);
     --success: oklch(0.62 0.12 175);
     --dropdown-destructive: var(--destructive);
-    --dropdown-destructive-hover: var(--destructive);
+    --dropdown-destructive-hover: color-mix(in oklch, var(--destructive), black 8%);
     --confirm-destructive: var(--destructive);
-    --confirm-destructive-hover: color-mix(in oklch, var(--destructive), black 8%);
+    --confirm-destructive-hover: color-mix(in oklch, var(--destructive), black 14%);
 }
 
 html[data-shell="mac"] {
@@ -173,7 +173,7 @@ html[data-shell] .pudding-markdown * {
     --muted-foreground: oklch(0.72 0 0);
     --accent: oklch(0.36 0 0);
     --accent-foreground: oklch(0.93 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
+    --destructive: oklch(0.61 0.14 24);
     --border: oklch(1 0 0 / 12%);
     --input: oklch(1 0 0 / 18%);
     --ring: oklch(0.6 0 0);
