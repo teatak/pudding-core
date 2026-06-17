@@ -102,13 +102,16 @@ static void puddingSetWindowAppearance(void *nsWindowPtr, const char* theme) {
 	// 必须复制字符串！Go 的 defer C.free 会在 dispatch_async 执行前释放原指针
 	char *themeCopy = theme ? strdup(theme) : NULL;
 	dispatch_async(dispatch_get_main_queue(), ^{
+		NSAppearance *appearance = nil;
 		if (themeCopy == NULL || strcmp(themeCopy, "system") == 0) {
-			window.appearance = nil;
+			appearance = nil;
 		} else if (strcmp(themeCopy, "dark") == 0) {
-			window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+			appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
 		} else {
-			window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameAqua];
+			appearance = [NSAppearance appearanceNamed:NSAppearanceNameAqua];
 		}
+		NSApp.appearance = appearance;
+		window.appearance = appearance;
 		free(themeCopy);
 	});
 }
