@@ -183,7 +183,7 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
             <TooltipTrigger asChild>
               <Button
                 aria-label={collapsed ? t("rail.expand") : t("rail.collapse")}
-                className="text-muted-foreground hover:bg-muted hover:text-muted-foreground aria-expanded:bg-muted aria-expanded:text-muted-foreground dark:hover:bg-muted dark:aria-expanded:bg-muted"
+                className="text-muted-foreground hover:text-muted-foreground aria-expanded:bg-muted aria-expanded:text-muted-foreground dark:aria-expanded:bg-muted/50"
                 size="icon"
                 variant="ghost"
                 onClick={() => {

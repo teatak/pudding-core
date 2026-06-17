@@ -147,11 +147,7 @@ export function App() {
                 <Button
                   aria-label={t("canvas.toggle")}
                   aria-pressed={canvasOpen}
-                  className={
-                    canvasOpen
-                      ? "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-muted-foreground"
-                      : "text-muted-foreground hover:text-muted-foreground"
-                  }
+                  className="text-muted-foreground hover:text-muted-foreground"
                   size="icon-sm"
                   variant="ghost"
                   onClick={() => setCanvasOpen(!canvasOpen)}
