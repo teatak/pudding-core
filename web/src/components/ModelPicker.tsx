@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown } from "lucide-react";
+import { ChevronDown, MessageCircleCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import {
@@ -17,12 +17,18 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useI18n } from "@/i18n";
 import { formatModelLabel } from "@/lib/model";
+import { cn } from "@/lib/utils";
 
-// 两层模型选择(docs/design.md 第 4 节):第一层 profile,第二层模型,
-// 默认展开当前 session 所用 profile;选中一次 PATCH 同写 provider + model。
-// session 未显式指定时直接解析出实际生效的 profile/模型来显示,
-// 不暴露"跟随设置"这类用户不可理解的中间概念。
-export function ModelPicker({ token, session }: { token: string; session: Session }) {
+type ModelPickerProps = {
+  token: string;
+  session?: Session;
+  value?: { provider?: string; model?: string };
+  onChange?: (value: { provider: string; model: string }) => void;
+};
+
+// 两层模型选择(docs/design.md 第 4 节):第一层 profile,第二层模型。
+// 真实 session 下选中后 PATCH;draft 下只更新本地 value,首条发送时随 createSession 落库。
+export function ModelPicker({ token, session, value, onChange }: ModelPickerProps) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -38,7 +44,12 @@ export function ModelPicker({ token, session }: { token: string; session: Sessio
     enabled: Boolean(token),
   });
   const patchMutation = useMutation({
-    mutationFn: (body: { provider?: string; model?: string }) => updateSession(token, session.id, body),
+    mutationFn: (body: { provider?: string; model?: string }) => {
+      if (!session) {
+        throw new Error("missing session");
+      }
+      return updateSession(token, session.id, body);
+    },
     onSuccess: async () => {
       setOpen(false);
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
@@ -47,9 +58,11 @@ export function ModelPicker({ token, session }: { token: string; session: Sessio
 
   const profiles = providersQuery.data?.providers || [];
   const defaultProvider = settingsQuery.data?.settings["provider.default"] || "default";
-  const currentProfileID = session.provider || defaultProvider;
+  const selectedProvider = session?.provider || value?.provider || "";
+  const selectedModel = session?.model || value?.model || "";
+  const currentProfileID = selectedProvider || defaultProvider;
   const activeProfile = profiles.find((p) => p.id === currentProfileID);
-  const currentModel = session.model || activeProfile?.models[0]?.id || "";
+  const currentModel = selectedModel || activeProfile?.models[0]?.id || "";
 
   const [expanded, setExpanded] = useState(currentProfileID);
   useEffect(() => {
@@ -66,7 +79,7 @@ export function ModelPicker({ token, session }: { token: string; session: Sessio
       <PopoverTrigger asChild>
         <Button
           aria-label={t("session.model")}
-          className="h-7 max-w-60 gap-1.5 px-2 text-xs font-normal text-muted-foreground hover:text-foreground"
+          className="h-7 max-w-60 gap-1.5 px-2 text-xs font-normal text-muted-foreground"
           size="sm"
           variant="ghost"
         >
@@ -84,21 +97,28 @@ export function ModelPicker({ token, session }: { token: string; session: Sessio
               className="not-last:border-b-0"
               value={profile.id}
             >
-              <AccordionTrigger className="rounded-md px-2.5 py-2 text-sm hover:bg-accent hover:no-underline">
+              <AccordionTrigger className="rounded-md px-2.5 py-2 text-sm font-normal text-muted-foreground hover:no-underline [&_[data-slot=accordion-trigger-icon]]:text-muted-foreground/70">
                 <span className="flex min-w-0 items-center gap-2">
                   <BrandIcon className="size-4 shrink-0" name={profile.id} />
                   <span className="truncate">{profile.name}</span>
-                  <Badge className="text-[10px] font-normal" variant="outline">
+                  <Badge className="border-muted-foreground/20 bg-transparent text-[10px] font-normal text-muted-foreground/70" variant="outline">
                     {profile.type}
                   </Badge>
                 </span>
               </AccordionTrigger>
               <AccordionContent className="pb-1">
                 <ProfileModels
-                  currentModel={session.provider === profile.id ? session.model : ""}
+                  currentModel={selectedProvider === profile.id ? selectedModel : ""}
                   isCurrentProfile={currentProfileID === profile.id}
                   profile={profile}
-                  onPick={(model) => patchMutation.mutate({ provider: profile.id, model })}
+                  onPick={(model) => {
+                    if (session) {
+                      patchMutation.mutate({ provider: profile.id, model });
+                      return;
+                    }
+                    onChange?.({ provider: profile.id, model });
+                    setOpen(false);
+                  }}
                 />
               </AccordionContent>
             </AccordionItem>
@@ -140,10 +160,18 @@ function ProfileModels({
         return (
           <button
             key={model}
-            className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-accent"
+            className={cn(
+              "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-accent",
+              selected && "bg-accent",
+            )}
             type="button"
             onClick={() => onPick(model)}
           >
+            {selected ? (
+              <MessageCircleCheck className="size-4 shrink-0 text-emerald-500" />
+            ) : (
+              <span className="size-4 shrink-0" />
+            )}
             <span className="flex min-w-0 items-center gap-2">
               <span className="truncate" title={model}>
                 {formatModelLabel(model)}
@@ -154,7 +182,6 @@ function ProfileModels({
                 </Badge>
               ) : null}
             </span>
-            {selected ? <Check className="size-3.5 shrink-0 text-primary" /> : null}
           </button>
         );
       })}

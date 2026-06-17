@@ -1,19 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
+  Blocks,
   CircleAlert,
   Ellipsis,
-  Loader2,
   MessageSquareText,
   PanelLeft,
-  Pencil,
-  Plus,
-  SquareSplitVertical,
-  Trash2,
+  TextCursorInput,
+  MessageCirclePlus,
+  Search,
+  Rows2,
+  Trash,
+  Workflow,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { createSession, deleteSession, listSessions, updateSession } from "@/api/client";
+import { deleteSession, listSessions, updateSession } from "@/api/client";
 import type { Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { LanguageToggle } from "@/components/LanguageToggle";
@@ -40,8 +42,24 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuAction,
+  SidebarMenuBadge,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+} from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useBackgroundSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
 import type { AppSearch } from "@/lib/route";
 import { formatRelative } from "@/lib/time";
@@ -53,11 +71,22 @@ const popoverAlignNudgePx = 3;
 
 // 会话栏(rail):展开 = 左侧整栏;折叠 = 悬浮触发器 + hover 浮出 popover 面板。
 // 面板内容(RailPanel)两种形态完全复用。
-export function SessionRail({ token, selectedSessionID }: { token: string; selectedSessionID: string | undefined }) {
+export function SessionRail({
+  token,
+  selectedSessionID,
+  activeSessionIDs = [],
+  draftActive,
+}: {
+  token: string;
+  selectedSessionID: string | undefined;
+  activeSessionIDs?: string[];
+  draftActive: boolean;
+}) {
   const queryClient = useQueryClient();
   const navigate = useNavigate({ from: "/" });
   const { t } = useI18n();
   const clearSession = useOverlayStore((state) => state.clearSession);
+  const runningTurns = useOverlayStore((state) => state.runningTurns);
   const collapsed = useRailCollapsed();
   const forcedCollapsed = useRailForcedCollapsed();
   const hover = useHoverPopover();
@@ -66,18 +95,16 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
     queryKey: queryKeys.sessions(),
     queryFn: () => listSessions(token),
     enabled: Boolean(token),
-    refetchInterval: 15_000, // 非选中 session 的运行态兜底刷新
   });
-
-  const createMutation = useMutation({
-    // title 留空:展示侧 fallback "未命名会话",首条消息提交后由 Composer
-    // 自动回填摘要;空 = "未命名"的判据,跨语言稳定且不会覆盖手动命名
-    mutationFn: () => createSession(token, { title: "" }),
-    onSuccess: async (session) => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
-      await navigate({ to: "/", search: (prev) => ({ ...(prev as AppSearch), session: session.id }) });
-    },
-  });
+  const sessions = sessionsQuery.data?.sessions || [];
+  const activeSessionIDSet = new Set([selectedSessionID, ...activeSessionIDs].filter(Boolean));
+  const backgroundSessionIDs = [
+    ...sessions.filter((session) => session.running).map((session) => session.id),
+    ...Object.entries(runningTurns)
+      .filter(([, turnID]) => Boolean(turnID))
+      .map(([sessionID]) => sessionID),
+  ].filter((sessionID, index, all) => !activeSessionIDSet.has(sessionID) && all.indexOf(sessionID) === index);
+  useBackgroundSessionEvents(backgroundSessionIDs, token);
 
   const renameMutation = useMutation({
     mutationFn: ({ id, title }: { id: string; title: string }) => updateSession(token, id, { title }),
@@ -105,8 +132,10 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
             const fallback = remaining.find((session) => session.id !== next.split)?.id || remaining[0]?.id;
             if (fallback) {
               next.session = fallback;
+              delete next.draft;
             } else {
               delete next.session;
+              next.draft = "1";
             }
           }
           return next;
@@ -128,14 +157,24 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
 
   const panel = (
     <RailPanel
-      createPending={createMutation.isPending}
+      draftActive={draftActive}
       deletePending={deleteMutation.isPending}
       isError={sessionsQuery.isError}
       isLoading={sessionsQuery.isLoading}
       selectedSessionID={selectedSessionID}
-      sessions={sessionsQuery.data?.sessions || []}
+      sessions={sessions}
       token={token}
-      onCreate={() => createMutation.mutate()}
+      onCreate={() => {
+        hover.close();
+        void navigate({
+          to: "/",
+          search: (prev) => {
+            const next = { ...(prev as AppSearch), draft: "1" };
+            delete next.session;
+            return next;
+          },
+        });
+      }}
       onDelete={(id) => deleteMutation.mutate(id)}
       onRename={(id, title) => renameMutation.mutate({ id, title })}
       onOpenSplit={(id) => {
@@ -158,9 +197,13 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
             const search = prev as AppSearch;
             // 点中已在分屏里的会话:与主 pane 交换,两个都保持可见
             if (search.split === id && search.session) {
-              return { ...search, session: id, split: search.session };
+              const next = { ...search, session: id, split: search.session };
+              delete next.draft;
+              return next;
             }
-            return { ...search, session: id };
+            const next = { ...search, session: id };
+            delete next.draft;
+            return next;
           },
         });
       }}
@@ -183,8 +226,9 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
             <TooltipTrigger asChild>
               <Button
                 aria-label={collapsed ? t("rail.expand") : t("rail.collapse")}
-                className="text-muted-foreground hover:text-muted-foreground aria-expanded:bg-muted aria-expanded:text-muted-foreground dark:aria-expanded:bg-muted/50"
+                className="text-muted-foreground"
                 size="icon"
+                tabIndex={-1}
                 variant="ghost"
                 onClick={() => {
                   if (!collapsed) {
@@ -219,9 +263,9 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
           <PopoverContent
             align="start"
             alignOffset={popoverAlignOffset}
-            className="flex h-[26rem] max-h-[80vh] w-[260px] flex-col p-2"
+            className="flex h-[26rem] max-h-[80vh] w-[260px] flex-col p-0"
             side="bottom"
-            sideOffset={8}
+            sideOffset={11}
             onMouseEnter={hover.cancelClose}
             onMouseLeave={hover.scheduleClose}
             onPointerDownCapture={hover.pin}
@@ -254,7 +298,7 @@ export function SessionRail({ token, selectedSessionID }: { token: string; selec
           aria-hidden="true"
           className="pointer-events-none absolute top-2 right-0 bottom-2 left-2 z-0 rounded-[var(--rail-radius)] rounded-tl-[var(--rail-left-radius)] rounded-bl-[var(--rail-left-radius)] border border-sidebar-border bg-sidebar"
         />
-        <div className="absolute top-0 right-0 bottom-2 left-2 z-10 flex min-h-0 flex-col gap-(--rail-content-align-gap) px-2 pb-2">
+        <div className="absolute top-0 right-0 bottom-2 left-2 z-10 flex min-h-0 flex-col gap-(--rail-content-align-gap)">
           {/* 顶行是 --toolbar-h 工具条占位;窗口拖拽由 App 根部统一透明拖拽带承载 */}
           <div
             className="h-(--toolbar-h) shrink-0 transition-[padding] duration-200"
@@ -338,7 +382,7 @@ type RailPanelProps = {
   selectedSessionID: string | undefined;
   isLoading: boolean;
   isError: boolean;
-  createPending: boolean;
+  draftActive: boolean;
   deletePending: boolean;
   onCreate: () => void;
   onSelect: (id: string) => void;
@@ -356,7 +400,7 @@ function RailPanel({
   selectedSessionID,
   isLoading,
   isError,
-  createPending,
+  draftActive,
   deletePending,
   onCreate,
   onSelect,
@@ -367,38 +411,68 @@ function RailPanel({
 }: RailPanelProps) {
   const { t } = useI18n();
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <Button
-        className="w-full justify-start gap-2 rounded-lg font-normal"
-        disabled={createPending}
-        size="sm"
-        variant="outline"
-        onClick={onCreate}
-      >
-        {createPending ? <Loader2 className="animate-spin" /> : <Plus />}
-        {t("session.create")}
-      </Button>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-        <SessionItems
-          deletePending={deletePending}
-          isError={isError}
-          isLoading={isLoading}
-          selectedSessionID={selectedSessionID}
-          sessions={sessions}
-          onDelete={onDelete}
-          onOpenSplit={onOpenSplit}
-          onRefetch={onRefetch}
-          onRename={onRename}
-          onSelect={onSelect}
-        />
-      </div>
-      <div className="flex items-center gap-1">
-        <ThemeToggle />
-        <LanguageToggle />
-        <div className="flex-1" />
-        <SettingsDialog token={token} />
-      </div>
-    </div>
+    <SidebarProvider className="!contents">
+      <Sidebar className="min-h-0 w-full flex-1 bg-transparent" collapsible="none">
+        <SidebarHeader>
+          <SidebarMenu className="gap-1">
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                isActive={draftActive}
+                onClick={onCreate}
+              >
+                <MessageCirclePlus />
+                <span>{t("session.create")}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton>
+                <Search />
+                <span>{t("rail.search")}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton>
+                <Blocks />
+                <span>{t("rail.widgets")}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton>
+                <Workflow />
+                <span>{t("rail.automations")}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarHeader>
+        <SidebarContent className="py-2 overscroll-contain">
+          <SidebarGroup>
+            <SidebarGroupLabel>{t("session.recents")}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SessionItems
+                deletePending={deletePending}
+                isError={isError}
+                isLoading={isLoading}
+                selectedSessionID={selectedSessionID}
+                sessions={sessions}
+                onDelete={onDelete}
+                onOpenSplit={onOpenSplit}
+                onRefetch={onRefetch}
+                onRename={onRename}
+                onSelect={onSelect}
+              />
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </SidebarContent>
+        <SidebarFooter>
+          <div className="flex items-center gap-1">
+            <ThemeToggle />
+            <LanguageToggle />
+            <div className="flex-1" />
+            <SettingsDialog token={token} />
+          </div>
+        </SidebarFooter>
+      </Sidebar>
+    </SidebarProvider>
   );
 }
 
@@ -463,7 +537,7 @@ function SessionItems({
   }
 
   return (
-    <div className="grid gap-0.5">
+    <SidebarMenu className="gap-1">
       {sessions.map((session) => (
         <SessionItem
           key={session.id}
@@ -477,7 +551,7 @@ function SessionItems({
           onSelect={() => onSelect(session.id)}
         />
       ))}
-    </div>
+    </SidebarMenu>
   );
 }
 
@@ -548,92 +622,94 @@ function SessionItem({
   }
 
   return (
-    <div
-      className={cn(
-        "group/item relative flex items-center gap-2 overflow-hidden rounded-lg px-1.5 py-1 text-left transition-colors",
-        selected ? "bg-sidebar-accent" : actionsOpen ? "bg-sidebar-accent/60" : "hover:bg-sidebar-accent/60",
-      )}
-    >
+    <SidebarMenuItem>
       {editing ? (
-        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left">
-          {running ? <span className="size-2 shrink-0 animate-pulse rounded-full bg-primary" /> : null}
-          <Input
-            ref={inputRef}
-            aria-label={t("session.rename")}
-            className="h-6 min-w-0 flex-1 rounded-none border-0 bg-transparent px-0 py-0 text-[13px] font-normal leading-6 shadow-none ring-0 focus-visible:border-0 focus-visible:ring-0 md:text-[13px] dark:bg-transparent"
-            placeholder={t("session.untitled")}
-            value={draft}
-            onBlur={saveEditing}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                event.currentTarget.blur();
-              }
-              if (event.key === "Escape") {
-                event.preventDefault();
-                cancelEditing();
-              }
-            }}
-          />
-        </div>
-      ) : (
-        <button
-          className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left"
-          type="button"
-          onClick={onSelect}
-          onDoubleClick={(event) => {
-            event.preventDefault();
-            startEditing();
-          }}
+        <SidebarMenuButton
+          asChild
+          isActive
         >
-          {running ? <span className="size-2 shrink-0 animate-pulse rounded-full bg-primary" /> : null}
-          <span className="min-w-0 flex-1 truncate text-[13px] leading-6 font-normal" title={session.title || undefined}>
-            {title}
-          </span>
-          <span
+          <div className="cursor-text">
+            <SessionRunningSlot running={running} />
+            <Input
+              ref={inputRef}
+              aria-label={t("session.rename")}
+              className="h-5 min-w-0 flex-1 rounded-none border-0 bg-transparent px-0 py-0 text-sm shadow-none ring-0 focus-visible:border-0 focus-visible:ring-0 md:text-sm dark:bg-transparent"
+              placeholder={t("session.untitled")}
+              value={draft}
+              onBlur={saveEditing}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  event.currentTarget.blur();
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  cancelEditing();
+                }
+              }}
+            />
+          </div>
+        </SidebarMenuButton>
+      ) : (
+        <SidebarMenuButton
+          asChild
+          className="pr-11 data-active:font-normal group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-has-data-[sidebar=menu-action]/menu-item:pr-11"
+          isActive={selected || actionsOpen}
+        >
+          <button
+            type="button"
+            onClick={onSelect}
+            onDoubleClick={(event) => {
+              event.preventDefault();
+              startEditing();
+            }}
+          >
+            <SessionRunningSlot running={running} />
+            <span className="min-w-0 flex-1 truncate" title={session.title || undefined}>
+              {title}
+            </span>
+          </button>
+        </SidebarMenuButton>
+      )}
+      {!editing ? (
+        <>
+          <SidebarMenuBadge
             className={cn(
-              "ml-auto shrink-0 pl-2 text-xs text-muted-foreground transition-opacity group-hover/item:opacity-0",
+              "right-2 min-w-0 px-0 font-normal text-muted-foreground transition-opacity group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0",
               actionsOpen && "opacity-0",
             )}
           >
-            {running ? t("session.generating") : formatRelative(session.updatedAt, locale)}
-          </span>
-        </button>
-      )}
-      {/* hover 操作区盖在时间文字位置上 */}
-      {!editing ? (
-        <div
-          className={cn(
-            "absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover/item:opacity-100 has-focus-visible:opacity-100",
-            actionsOpen && "opacity-100",
-          )}
-        >
+            {running ? t("session.generating") : formatRelative(session.lastActivityAt || session.createdAt, locale)}
+          </SidebarMenuBadge>
           <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen}>
             <DropdownMenuTrigger asChild>
-              <Button
+              <SidebarMenuAction
                 aria-label={t("session.actions")}
-                className="size-5 rounded-sm bg-transparent p-0 text-muted-foreground shadow-none hover:bg-foreground/8 hover:text-foreground data-[state=open]:bg-foreground/8 data-[state=open]:text-foreground dark:hover:bg-foreground/12 dark:data-[state=open]:bg-foreground/12"
-                size="icon"
-                variant="ghost"
+                className={cn(
+                  "right-1.5 rounded-sm bg-transparent text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-0",
+                  actionsOpen && "opacity-100 md:opacity-100",
+                )}
+                showOnHover
+                tabIndex={-1}
               >
-                <Ellipsis className="size-3.5" />
-              </Button>
+                <Ellipsis />
+              </SidebarMenuAction>
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
               className="min-w-36 w-max"
               onCloseAutoFocus={(event) => {
+                event.preventDefault();
                 if (!editAfterMenuCloseRef.current) {
                   return;
                 }
-                event.preventDefault();
                 editAfterMenuCloseRef.current = false;
                 startEditing();
               }}
             >
               <DropdownMenuItem className="whitespace-nowrap" onSelect={onOpenSplit}>
-                <SquareSplitVertical />
+                <Rows2 />
                 {t("session.openSplit")}
               </DropdownMenuItem>
               <DropdownMenuItem
@@ -642,7 +718,7 @@ function SessionItem({
                   editAfterMenuCloseRef.current = true;
                 }}
               >
-                <Pencil />
+                <TextCursorInput />
                 {t("session.rename")}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
@@ -652,7 +728,7 @@ function SessionItem({
                 variant="destructive"
                 onSelect={() => setDeleteOpen(true)}
               >
-                <Trash2 />
+                <Trash />
                 {t("session.delete")}
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -671,8 +747,16 @@ function SessionItem({
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-        </div>
+        </>
       ) : null}
-    </div>
+    </SidebarMenuItem>
+  );
+}
+
+function SessionRunningSlot({ running }: { running: boolean }) {
+  return (
+    <span aria-hidden="true" className="flex size-3 shrink-0 items-center justify-center">
+      {running ? <span className="size-2 animate-pulse rounded-full bg-primary" /> : null}
+    </span>
   );
 }

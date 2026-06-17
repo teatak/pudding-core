@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/store"
@@ -26,6 +27,26 @@ func createTestSession(t *testing.T, st store.Store, id string) {
 	t.Helper()
 	if err := st.CreateSession(context.Background(), &store.Session{ID: id, Title: id, Model: "mock"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRenameDoesNotAffectRecentOrdering(t *testing.T) {
+	st, _ := openTestStore(t)
+	createTestSession(t, st, "older")
+	time.Sleep(2 * time.Millisecond)
+	createTestSession(t, st, "newer")
+	time.Sleep(2 * time.Millisecond)
+
+	title := "renamed older"
+	if _, err := st.UpdateSession(context.Background(), "older", store.SessionUpdate{Title: &title}); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := st.ListSessions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 2 || sessions[0].ID != "newer" || sessions[1].ID != "older" {
+		t.Fatalf("rename must not affect recent ordering: %+v", sessions)
 	}
 }
 
@@ -221,7 +242,7 @@ func TestTurnModelConfigPersists(t *testing.T) {
 	}
 }
 
-func TestOpenMigratesModelConfigColumn(t *testing.T) {
+func TestOpenMigratesAddedColumns(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.db")
 	db, err := sql.Open("sqlite3", path)
 	if err != nil {
@@ -261,7 +282,17 @@ CREATE TABLE turns (
 	}
 	defer st.Close()
 
-	rows, err := st.db.Query(`PRAGMA table_info(turns)`)
+	if !hasColumn(t, st.db, "turns", "model_config") {
+		t.Fatal("model_config column was not added")
+	}
+	if !hasColumn(t, st.db, "sessions", "last_activity_at") {
+		t.Fatal("last_activity_at column was not added")
+	}
+}
+
+func hasColumn(t *testing.T, db *sql.DB, table, column string) bool {
+	t.Helper()
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,14 +306,14 @@ CREATE TABLE turns (
 		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
 			t.Fatal(err)
 		}
-		if name == "model_config" {
-			return
+		if name == column {
+			return true
 		}
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	t.Fatal("model_config column was not added")
+	return false
 }
 
 func TestDeleteSessionCascades(t *testing.T) {

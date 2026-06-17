@@ -25,7 +25,7 @@ import { useToken } from "@/state/tokenStore";
 
 export function App() {
   const token = useToken();
-  const { session: selectedSessionID, split: splitSessionID } = useSearch({ from: "/" });
+  const { session: selectedSessionID, draft, split: splitSessionID } = useSearch({ from: "/" });
   const { t } = useI18n();
   const canvasOpen = useCanvasOpen();
   const workspaceGroupRef = useGroupRef();
@@ -89,6 +89,10 @@ export function App() {
   // 上下分屏(docs/design.md 2.2):pane 三件套整体复用,路由是唯一事实源;
   // split 与主 pane 相同的会话不重复渲染
   const showSplit = Boolean(splitSessionID && splitSessionID !== selectedSessionID);
+  const draftActive = draft === "1" && !selectedSessionID;
+  const activeSessionIDs = [selectedSessionID, showSplit ? splitSessionID : undefined].filter(
+    (sessionID): sessionID is string => Boolean(sessionID),
+  );
   const chatArea = (
     <main className="flex h-full min-w-0 flex-col overflow-hidden bg-background">
       <ResizablePanelGroup
@@ -113,6 +117,7 @@ export function App() {
             reserveTopRightAction={!canvasOpen}
             token={token}
             sessionID={selectedSessionID}
+            draftActive={draftActive}
             role="primary"
           />
         </ResizablePanel>
@@ -138,7 +143,12 @@ export function App() {
     <TooltipProvider delayDuration={250}>
       <div className="relative flex h-[100svh] overflow-hidden">
         <div aria-hidden="true" className="drag-region absolute inset-x-0 top-0 z-20 h-(--toolbar-h)" />
-        <SessionRail token={token} selectedSessionID={selectedSessionID} />
+        <SessionRail
+          activeSessionIDs={activeSessionIDs}
+          draftActive={draftActive}
+          selectedSessionID={selectedSessionID}
+          token={token}
+        />
         {/* rail 固定宽度,不参与 resize。核心工作区只在 chat/canvas 之间分配空间。 */}
         <div className="relative h-full min-w-0 flex-1 bg-background">
           <div className="no-drag-region absolute top-0 right-[13px] z-30 flex h-(--toolbar-h) items-center">
@@ -147,8 +157,9 @@ export function App() {
                 <Button
                   aria-label={t("canvas.toggle")}
                   aria-pressed={canvasOpen}
-                  className="text-muted-foreground hover:text-muted-foreground"
+                  className="text-muted-foreground"
                   size="icon-sm"
+                  tabIndex={-1}
                   variant="ghost"
                   onClick={() => setCanvasOpen(!canvasOpen)}
                 >

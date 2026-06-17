@@ -3,5 +3,6 @@
 // 联合类型,各更新器先用此类型收窄再操作。
 export type AppSearch = {
   session?: string;
+  draft?: string;
   split?: string;
 };

@@ -78,7 +78,7 @@
     --sidebar-foreground: oklch(0.22 0 0);
     --sidebar-primary: oklch(0.511 0.262 276.966);
     --sidebar-primary-foreground: oklch(0.962 0.018 272.314);
-    --sidebar-accent: oklch(0.925 0 0);
+    --sidebar-accent: oklch(0.945 0 0);
     --sidebar-accent-foreground: oklch(0.24 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
@@ -90,9 +90,7 @@
        否则双击区跟视觉工具条割裂 */
     --traffic-inset: 0px;
     --toolbar-h: 54px;
-    /* 展开态 rail 首项对齐折叠态 popover 首项:
-       toolbar 内居中的 icon button 底部 + popover sideOffset + content padding。 */
-    --rail-content-align-gap: 5px;
+    --rail-content-align-gap: 0px;
     --rail-radius: 12px;
     --rail-left-radius: var(--rail-radius);
     --chat-title-max-w: min(42rem, 100%);
@@ -186,7 +184,7 @@ html[data-shell] .pudding-markdown * {
     --sidebar-foreground: oklch(0.93 0 0);
     --sidebar-primary: oklch(0.585 0.233 277.117);
     --sidebar-primary-foreground: oklch(0.962 0.018 272.314);
-    --sidebar-accent: oklch(0.385 0 0);
+    --sidebar-accent: oklch(0.34 0 0);
     --sidebar-accent-foreground: oklch(0.93 0 0);
     --sidebar-border: oklch(1 0 0 / 12%);
     --sidebar-ring: oklch(0.6 0 0);
@@ -212,6 +210,14 @@ html[data-shell] .pudding-markdown * {
     font-size: 13px;
     line-height: 20px;
     font-weight: 400;
+}
+
+[data-slot="dropdown-menu-item"] svg:not([class*="size-"]),
+[data-slot="dropdown-menu-checkbox-item"] svg:not([class*="size-"]),
+[data-slot="dropdown-menu-radio-item"] svg:not([class*="size-"]),
+[data-slot="dropdown-menu-sub-trigger"] svg:not([class*="size-"]) {
+    width: 14px;
+    height: 14px;
 }
 
 [data-slot="dropdown-menu-item"][data-variant="destructive"] {

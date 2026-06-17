@@ -11,7 +11,7 @@ import {
   Plus,
   Settings,
   Sparkles,
-  Trash2,
+  Trash,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
@@ -140,7 +140,7 @@ export function SettingsDialog({ token }: SettingsDialogProps) {
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button aria-label={t("settings.title")} size="icon" variant="ghost">
+        <Button aria-label={t("settings.title")} size="icon" tabIndex={-1} variant="ghost">
           <Settings />
         </Button>
       </DialogTrigger>
@@ -487,7 +487,7 @@ function ProviderSettings({ token }: { token: string }) {
                             type="button"
                             variant="ghost"
                           >
-                            <Trash2 className="text-destructive" />
+                            <Trash className="text-destructive" />
                           </Button>
                         </AlertDialogTrigger>
                       </TooltipTrigger>
@@ -844,7 +844,7 @@ function ModelEditor({
           <span className="truncate text-sm font-normal">{watch(`${prefix}.id`) || t("session.model")}</span>
         </div>
         <Button disabled={!canRemove} size="icon" type="button" variant="ghost" onClick={onRemove}>
-          <Trash2 />
+          <Trash />
         </Button>
       </div>
 

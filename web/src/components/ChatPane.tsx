@@ -1,12 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronDown, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
+import { ChevronDown, Loader2, TextCursorInput, Trash, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { createSession, deleteSession, listSessions, updateSession, type Session } from "@/api/client";
+import { deleteSession, listSessions, updateSession, type Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { Conversation } from "@/components/Conversation";
-import { Mascot } from "@/components/Mascot";
+import { DraftConversation } from "@/components/DraftConversation";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,13 +37,14 @@ import { useRailCollapsed } from "@/state/railStore";
 type ChatPaneProps = {
   token: string;
   sessionID: string | undefined;
+  draftActive?: boolean;
   reserveTopRightAction?: boolean;
   // primary = 主 pane(承担会话自动跳转、rail 触发器让位);
   // split = 分屏 pane(会话失效时自动收屏,header 带关闭钮)
   role: "primary" | "split";
 };
 
-export function ChatPane({ token, sessionID, reserveTopRightAction = false, role }: ChatPaneProps) {
+export function ChatPane({ token, sessionID, draftActive = false, reserveTopRightAction = false, role }: ChatPaneProps) {
   const navigate = useNavigate({ from: "/" });
   const queryClient = useQueryClient();
   const { t } = useI18n();
@@ -53,14 +54,6 @@ export function ChatPane({ token, sessionID, reserveTopRightAction = false, role
     queryKey: queryKeys.sessions(),
     queryFn: () => listSessions(token),
     enabled: Boolean(token),
-  });
-  // 全空库的欢迎空态用:与 rail 的新建语义一致
-  const createMutation = useMutation({
-    mutationFn: () => createSession(token, { title: "" }),
-    onSuccess: async (created) => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
-      await navigate({ to: "/", search: (prev) => ({ ...prev, session: created.id }) });
-    },
   });
   const renameMutation = useMutation({
     mutationFn: ({ id, title }: { id: string; title: string }) => updateSession(token, id, { title }),
@@ -115,8 +108,11 @@ export function ChatPane({ token, sessionID, reserveTopRightAction = false, role
   const sessions = sessionsQuery.data?.sessions || [];
   const selectedSession = sessions.find((session) => session.id === sessionID);
   const isPrimary = role === "primary";
+  const showDraft = isPrimary && !sessionID;
   const sessionsPending = sessionsQuery.isPending;
-  const headerTitle = selectedSession
+  const headerTitle = showDraft
+    ? t("session.create")
+    : selectedSession
     ? selectedSession.title || t("session.untitled")
     : sessionsPending
       ? ""
@@ -144,8 +140,18 @@ export function ChatPane({ token, sessionID, reserveTopRightAction = false, role
       }
       return;
     }
-    if (!sessionID && sessions[0]) {
-      void navigate({ to: "/", search: (prev) => ({ ...(prev as AppSearch), session: sessions[0].id }) });
+    if (!sessionID) {
+      if (!draftActive) {
+        void navigate({
+          to: "/",
+          search: (prev) => {
+            const next = { ...(prev as AppSearch), draft: "1" };
+            delete next.session;
+            return next;
+          },
+          replace: true,
+        });
+      }
       return;
     }
     if (sessionID && !selectedSession) {
@@ -156,15 +162,17 @@ export function ChatPane({ token, sessionID, reserveTopRightAction = false, role
           const next = { ...(prev as AppSearch) };
           if (nextSessionID) {
             next.session = nextSessionID;
+            delete next.draft;
           } else {
             delete next.session;
+            next.draft = "1";
           }
           return next;
         },
         replace: true,
       });
     }
-  }, [isPrimary, navigate, selectedSession, sessionID, sessions, sessionsQuery.isSuccess]);
+  }, [draftActive, isPrimary, navigate, selectedSession, sessionID, sessions, sessionsQuery.isSuccess]);
 
   useSessionEvents(selectedSession?.id, token);
 
@@ -218,20 +226,14 @@ export function ChatPane({ token, sessionID, reserveTopRightAction = false, role
           ) : null}
         </div>
       </header>
-      {selectedSession ? (
+      {showDraft ? (
+        <DraftConversation token={token} />
+      ) : selectedSession ? (
         <Conversation token={token} session={selectedSession} />
       ) : sessionsPending ? (
         <LoadingState />
       ) : (
-        // 欢迎空态(全空库 / 无选中):mascot + 一句话 + 主操作
-        <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
-          <Mascot className="w-20" />
-          <div className="text-sm text-muted-foreground">{t("session.selectOrCreate")}</div>
-          <Button disabled={createMutation.isPending} type="button" onClick={() => createMutation.mutate()}>
-            {createMutation.isPending ? <Loader2 className="animate-spin" /> : <Plus />}
-            {t("session.startFirst")}
-          </Button>
-        </div>
+        <DraftConversation token={token} />
       )}
     </section>
   );
@@ -376,8 +378,9 @@ function HeaderSessionTitle({
             <DropdownMenuTrigger asChild>
               <Button
                 aria-label={t("session.actions")}
-                className="size-7 text-muted-foreground hover:text-foreground"
+                className="size-7 text-muted-foreground"
                 size="icon-sm"
+                tabIndex={-1}
                 variant="ghost"
               >
                 <ChevronDown className="size-4" />
@@ -398,7 +401,7 @@ function HeaderSessionTitle({
               <DropdownMenuItem onSelect={() => {
                 editAfterMenuCloseRef.current = true;
               }}>
-                <Pencil />
+                <TextCursorInput />
                 {t("session.rename")}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
@@ -407,7 +410,7 @@ function HeaderSessionTitle({
                 variant="destructive"
                 onSelect={() => setDeleteOpen(true)}
               >
-                <Trash2 />
+                <Trash />
                 {t("session.delete")}
               </DropdownMenuItem>
             </DropdownMenuContent>

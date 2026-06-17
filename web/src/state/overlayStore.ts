@@ -24,6 +24,7 @@ type OverlayState = {
   pendingUsers: Record<string, PendingUserMessage[]>;
   assistants: Record<string, AssistantOverlay>;
   runningTurns: Record<string, string | undefined>;
+  lastEventSeqs: Record<string, number | undefined>;
   addPendingUser: (message: PendingUserMessage) => void;
   removePendingUser: (sessionID: string, clientMessageID: string) => void;
   applyEvent: (event: SessionEvent) => void;
@@ -31,10 +32,22 @@ type OverlayState = {
   clearSession: (sessionID: string) => void;
 };
 
+function recordEventSeq(lastEventSeqs: Record<string, number | undefined>, event: SessionEvent) {
+  if (!("seq" in event)) {
+    return lastEventSeqs;
+  }
+  const previous = lastEventSeqs[event.sessionID] || 0;
+  if (event.seq <= previous) {
+    return lastEventSeqs;
+  }
+  return { ...lastEventSeqs, [event.sessionID]: event.seq };
+}
+
 export const useOverlayStore = create<OverlayState>((set) => ({
   pendingUsers: {},
   assistants: {},
   runningTurns: {},
+  lastEventSeqs: {},
   addPendingUser: (message) =>
     set((state) => ({
       pendingUsers: {
@@ -71,6 +84,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
         );
         return {
           assistants,
+          lastEventSeqs: recordEventSeq(state.lastEventSeqs, event),
           runningTurns: { ...state.runningTurns, [event.sessionID]: event.turnID },
         };
       }
@@ -112,6 +126,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
             error: "error" in event ? event.error : undefined,
           },
         },
+        lastEventSeqs: recordEventSeq(state.lastEventSeqs, event),
         runningTurns: { ...state.runningTurns, [event.sessionID]: undefined },
       };
     }),
@@ -147,9 +162,11 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       delete pendingUsers[sessionID];
       const runningTurns = { ...state.runningTurns };
       delete runningTurns[sessionID];
+      const lastEventSeqs = { ...state.lastEventSeqs };
+      delete lastEventSeqs[sessionID];
       const assistants = Object.fromEntries(
         Object.entries(state.assistants).filter(([, overlay]) => overlay.sessionID !== sessionID),
       );
-      return { pendingUsers, runningTurns, assistants };
+      return { pendingUsers, runningTurns, lastEventSeqs, assistants };
     }),
 }));

@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listMessages, type Message } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
-import { Mascot } from "@/components/Mascot";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -155,14 +154,8 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
     );
   }
 
-  // 空消息态独立渲染:不进滚动容器(min-h 撑高会出滚动条),flex 居中填满
   if (!messagesQuery.isLoading && !messagesQuery.isError && items.length === 0) {
-    return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
-        <Mascot className="w-16" />
-        <div>{t("session.start")}</div>
-      </div>
-    );
+    return <div className="min-h-0 flex-1" />;
   }
 
   return (

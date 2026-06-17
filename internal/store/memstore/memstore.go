@@ -42,7 +42,7 @@ func (m *Memstore) CreateSession(_ context.Context, s *store.Session) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := time.Now()
-	s.CreatedAt, s.UpdatedAt = now, now
+	s.CreatedAt, s.UpdatedAt, s.LastActivityAt = now, now, now
 	cp := *s
 	m.sessions[s.ID] = &cp
 	return nil
@@ -69,7 +69,12 @@ func (m *Memstore) ListSessions(_ context.Context) ([]*store.Session, error) {
 		cp.Running = m.runningLocked(s.ID)
 		out = append(out, &cp)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].LastActivityAt.Equal(out[j].LastActivityAt) {
+			return out[i].LastActivityAt.After(out[j].LastActivityAt)
+		}
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
 	return out, nil
 }
 
@@ -177,7 +182,7 @@ func (m *Memstore) BeginTurn(_ context.Context, in store.BeginTurnInput) (*store
 	m.turns[turn.ID] = turn
 	m.messages[in.SessionID] = append(m.messages[in.SessionID], msg)
 	m.appendEventLocked(in.SessionID, ev)
-	m.sessions[in.SessionID].UpdatedAt = now
+	m.sessions[in.SessionID].LastActivityAt = now
 
 	mc, ec := *msg, ev
 	return &store.BeginTurnResult{Turn: cloneTurn(turn), UserMessage: &mc, StartedEvent: &ec}, nil
@@ -229,7 +234,7 @@ func (m *Memstore) FinishTurn(_ context.Context, in store.FinishTurnInput) (*sto
 		res.AssistantMessage = &mc
 	}
 	m.appendEventLocked(turn.SessionID, ev)
-	m.sessions[turn.SessionID].UpdatedAt = now
+	m.sessions[turn.SessionID].LastActivityAt = now
 	res.FinalEvent = &ev
 	return res, nil
 }

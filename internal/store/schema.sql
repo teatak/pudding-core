@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     provider   TEXT    NOT NULL DEFAULT '', -- provider profile 名,空 = 默认
     model      TEXT    NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL, -- unix ms
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    last_activity_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS turns (

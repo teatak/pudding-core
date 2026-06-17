@@ -31,6 +31,9 @@ type Session struct {
 	Model     string    `json:"model"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+	// LastActivityAt 只描述会话内容活动时间:用户提交 / assistant 收尾推进。
+	// 列表排序和"最近"时间显示使用它,避免 rename / 改模型把会话顶到最上面。
+	LastActivityAt time.Time `json:"lastActivityAt"`
 	// Running 是读取时从 turns 派生的运行态(不落库,turns 仍是唯一事实源),
 	// 服务会话栏"哪个 session 正在干活"的指示。
 	Running bool `json:"running"`

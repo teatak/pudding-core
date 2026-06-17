@@ -56,7 +56,16 @@ func Open(path string) (*Store, error) {
 }
 
 func (s *Store) ensureSchema() error {
-	return s.ensureColumn("turns", "model_config", `ALTER TABLE turns ADD COLUMN model_config TEXT NOT NULL DEFAULT '{}'`)
+	if err := s.ensureColumn("turns", "model_config", `ALTER TABLE turns ADD COLUMN model_config TEXT NOT NULL DEFAULT '{}'`); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("sessions", "last_activity_at", `ALTER TABLE sessions ADD COLUMN last_activity_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`UPDATE sessions SET last_activity_at=updated_at WHERE last_activity_at=0`); err != nil {
+		return fmt.Errorf("sqlite: backfill sessions.last_activity_at: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) ensureColumn(table, column, alter string) error {
@@ -111,10 +120,10 @@ func (s *Store) Close() error { return s.db.Close() }
 func (s *Store) CreateSession(ctx context.Context, sess *store.Session) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		now := time.Now()
-		sess.CreatedAt, sess.UpdatedAt = now, now
+		sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = now, now, now
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO sessions(id,title,provider,model,created_at,updated_at) VALUES(?,?,?,?,?,?)`,
-			sess.ID, sess.Title, sess.Provider, sess.Model, unixMS(now), unixMS(now),
+			`INSERT INTO sessions(id,title,provider,model,created_at,updated_at,last_activity_at) VALUES(?,?,?,?,?,?,?)`,
+			sess.ID, sess.Title, sess.Provider, sess.Model, unixMS(now), unixMS(now), unixMS(now),
 		)
 		return err
 	})
@@ -125,17 +134,17 @@ func (s *Store) GetSession(ctx context.Context, id string) (*store.Session, erro
 	defer s.mu.Unlock()
 
 	var sess store.Session
-	var created, updated int64
+	var created, updated, lastActivity int64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id,title,provider,model,created_at,updated_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated, &sess.Running)
+		`SELECT id,title,provider,model,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated, &lastActivity, &sess.Running)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	sess.CreatedAt, sess.UpdatedAt = timeFromMS(created), timeFromMS(updated)
+	sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = timeFromMS(created), timeFromMS(updated), timeFromMS(lastActivity)
 	return &sess, nil
 }
 
@@ -143,7 +152,7 @@ func (s *Store) ListSessions(ctx context.Context) ([]*store.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.QueryContext(ctx, `SELECT id,title,provider,model,created_at,updated_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions ORDER BY updated_at DESC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,title,provider,model,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions ORDER BY last_activity_at DESC, created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -152,11 +161,11 @@ func (s *Store) ListSessions(ctx context.Context) ([]*store.Session, error) {
 	out := make([]*store.Session, 0)
 	for rows.Next() {
 		var sess store.Session
-		var created, updated int64
-		if err := rows.Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated, &sess.Running); err != nil {
+		var created, updated, lastActivity int64
+		if err := rows.Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated, &lastActivity, &sess.Running); err != nil {
 			return nil, err
 		}
-		sess.CreatedAt, sess.UpdatedAt = timeFromMS(created), timeFromMS(updated)
+		sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = timeFromMS(created), timeFromMS(updated), timeFromMS(lastActivity)
 		out = append(out, &sess)
 	}
 	return out, rows.Err()
@@ -279,7 +288,7 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 		if err := insertEventTx(ctx, tx, &ev); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET updated_at=? WHERE id=?`, unixMS(now), in.SessionID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(now), in.SessionID); err != nil {
 			return err
 		}
 		out = &store.BeginTurnResult{Turn: turn, UserMessage: msg, StartedEvent: &ev}
@@ -347,7 +356,7 @@ func (s *Store) FinishTurn(ctx context.Context, in store.FinishTurnInput) (*stor
 		if err := insertEventTx(ctx, tx, &ev); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET updated_at=? WHERE id=?`, unixMS(now), turn.SessionID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(now), turn.SessionID); err != nil {
 			return err
 		}
 		res.FinalEvent = &ev
@@ -485,17 +494,17 @@ func (s *Store) LatestSeq(ctx context.Context, sessionID string) (int64, error) 
 // getSessionDB 是 getSessionTx 的免事务版本,服务只读单查。
 func (s *Store) getSessionDB(ctx context.Context, id string) (*store.Session, error) {
 	var sess store.Session
-	var created, updated int64
+	var created, updated, lastActivity int64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id,title,provider,model,created_at,updated_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated, &sess.Running)
+		`SELECT id,title,provider,model,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated, &lastActivity, &sess.Running)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	sess.CreatedAt, sess.UpdatedAt = timeFromMS(created), timeFromMS(updated)
+	sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = timeFromMS(created), timeFromMS(updated), timeFromMS(lastActivity)
 	return &sess, nil
 }
 
@@ -515,17 +524,17 @@ func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 
 func getSessionTx(ctx context.Context, tx *sql.Tx, id string) (*store.Session, error) {
 	var sess store.Session
-	var created, updated int64
+	var created, updated, lastActivity int64
 	err := tx.QueryRowContext(ctx,
-		`SELECT id,title,provider,model,created_at,updated_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated, &sess.Running)
+		`SELECT id,title,provider,model,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated, &lastActivity, &sess.Running)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	sess.CreatedAt, sess.UpdatedAt = timeFromMS(created), timeFromMS(updated)
+	sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = timeFromMS(created), timeFromMS(updated), timeFromMS(lastActivity)
 	return &sess, nil
 }
 
