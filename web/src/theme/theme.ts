@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from "react";
 
+import { consumeLaunchParam } from "@/state/launchParams";
+
 export type Theme = "light" | "dark" | "system";
 type ResolvedTheme = "light" | "dark";
 type ThemeSnapshot = `${Theme}:${ResolvedTheme}`;
@@ -7,6 +9,8 @@ type ThemeSnapshot = `${Theme}:${ResolvedTheme}`;
 const STORAGE_KEY = "pudding.theme";
 const listeners = new Set<() => void>();
 let themeSyncStarted = false;
+let nativeTheme: Theme | null = null;
+let nativeResolvedTheme: ResolvedTheme | null = null;
 
 export function readStoredTheme(): Theme {
   if (typeof window === "undefined") {
@@ -16,35 +20,38 @@ export function readStoredTheme(): Theme {
   return value === "light" || value === "dark" || value === "system" ? value : "system";
 }
 
-let goResolvedSystemTheme: ResolvedTheme | null = null;
-
-// Go 通过 window.ExecJS 直接调用此全局函数，绕过 Wails 事件系统
-// 彻底避免事件监听器注册时机和 HMR 重复注册的问题
 declare global {
   interface Window {
-    __puddingSetResolvedTheme?: (resolved: string) => void;
+    __puddingSetThemeState?: (state: unknown) => void;
   }
 }
+
 if (typeof window !== "undefined") {
-  window.__puddingSetResolvedTheme = (resolved: string) => {
-    if (resolved !== "dark" && resolved !== "light") return;
-    const old = goResolvedSystemTheme;
-    goResolvedSystemTheme = resolved as ResolvedTheme;
-    if (readStoredTheme() === "system" && old !== goResolvedSystemTheme) {
-      // 直接操作 DOM，绝不调 applyTheme（避免发事件回 Go）
-      document.documentElement.classList.toggle("dark", resolved === "dark");
-      document.documentElement.style.colorScheme = resolved;
-      listeners.forEach((l) => l());
-    }
+  window.__puddingSetThemeState = (state: unknown) => {
+    const next = normalizeThemeState(state);
+    if (!next) return;
+    applyNativeThemeState(next.theme, next.resolved);
   };
+}
+
+export function initThemeFromLaunch() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const theme = consumeLaunchParam("theme");
+  const resolved = consumeLaunchParam("resolved");
+  const next = normalizeThemeState({ theme, resolved });
+  if (next) {
+    applyNativeThemeState(next.theme, next.resolved);
+  }
 }
 
 export function resolveTheme(theme: Theme): ResolvedTheme {
   if (theme !== "system") {
     return theme;
   }
-  if (goResolvedSystemTheme) {
-    return goResolvedSystemTheme;
+  if (nativeResolvedTheme) {
+    return nativeResolvedTheme;
   }
   if (typeof window === "undefined") {
     return "light";
@@ -59,12 +66,6 @@ export function applyTheme(theme: Theme) {
   const resolved = resolveTheme(theme);
   document.documentElement.classList.toggle("dark", resolved === "dark");
   document.documentElement.style.colorScheme = resolved;
-
-  // 暂停页面主题偏好同步到 Wails/native appearance。
-  // 先只调通 app/system 跟随系统,确认 macOS titlebar / toolbar 稳定后再恢复。
-  // import("@wailsio/runtime").then(({ Events }) => {
-  //   Events.Emit("desktop:theme-changed", theme).catch(() => {});
-  // }).catch(() => {});
 }
 
 function notifyThemeChange() {
@@ -77,14 +78,22 @@ export function startThemeSync() {
     return;
   }
   themeSyncStarted = true;
+  if (isDesktopThemeControlled()) {
+    return;
+  }
   const media = window.matchMedia("(prefers-color-scheme: dark)");
   media.addEventListener("change", notifyThemeChange);
   window.addEventListener("storage", notifyThemeChange);
 }
 
 export function setTheme(theme: Theme) {
-  window.localStorage.setItem(STORAGE_KEY, theme);
-  notifyThemeChange();
+  if (isDesktopThemeControlled()) {
+    import("@wailsio/runtime")
+      .then(({ Events }) => Events.Emit("desktop:theme-set", theme))
+      .catch(() => setLocalTheme(theme));
+    return;
+  }
+  setLocalTheme(theme);
 }
 
 function subscribe(listener: () => void) {
@@ -96,7 +105,7 @@ function subscribe(listener: () => void) {
 }
 
 function snapshot(): ThemeSnapshot {
-  const theme = readStoredTheme();
+  const theme = nativeTheme ?? readStoredTheme();
   return `${theme}:${resolveTheme(theme)}`;
 }
 
@@ -104,4 +113,44 @@ export function useTheme() {
   const value = useSyncExternalStore(subscribe, snapshot, snapshot);
   const [theme, resolved] = value.split(":") as [Theme, ResolvedTheme];
   return { theme, resolved };
+}
+
+function setLocalTheme(theme: Theme) {
+  window.localStorage.setItem(STORAGE_KEY, theme);
+  notifyThemeChange();
+}
+
+function applyNativeThemeState(theme: Theme, resolved: ResolvedTheme) {
+  const oldSnapshot = snapshot();
+  nativeTheme = theme;
+  nativeResolvedTheme = resolved;
+  window.localStorage.setItem(STORAGE_KEY, theme);
+  document.documentElement.classList.toggle("dark", resolved === "dark");
+  document.documentElement.style.colorScheme = resolved;
+  if (snapshot() !== oldSnapshot) {
+    listeners.forEach((listener) => listener());
+  }
+}
+
+function normalizeThemeState(state: unknown): { theme: Theme; resolved: ResolvedTheme } | null {
+  if (!state || typeof state !== "object") {
+    return null;
+  }
+  const record = state as Record<string, unknown>;
+  if (!isTheme(record.theme) || !isResolvedTheme(record.resolved)) {
+    return null;
+  }
+  return { theme: record.theme, resolved: record.resolved };
+}
+
+function isTheme(value: unknown): value is Theme {
+  return value === "light" || value === "dark" || value === "system";
+}
+
+function isResolvedTheme(value: unknown): value is ResolvedTheme {
+  return value === "light" || value === "dark";
+}
+
+function isDesktopThemeControlled() {
+  return typeof document !== "undefined" && Boolean(document.documentElement.dataset.shell);
 }

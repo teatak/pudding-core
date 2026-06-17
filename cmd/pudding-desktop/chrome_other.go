@@ -17,4 +17,6 @@ func setTrafficLightsHidden(*application.WebviewWindow, bool) {}
 
 func setTitlebarAppearsTransparent(*application.WebviewWindow, bool) {}
 
+func setWindowAppearance(*application.WebviewWindow, string) {}
+
 func hideTrafficLightsForFullscreenExit(*application.WebviewWindow) {}

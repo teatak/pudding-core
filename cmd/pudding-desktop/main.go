@@ -57,6 +57,15 @@ func main() {
 	if runtime.GOOS == "darwin" {
 		bindDesktopNoZoomRects(app)
 	}
+	themePath := desktopPreferencesPath(d.Home())
+	themePreference, err := loadDesktopThemePreference(themePath)
+	if err != nil {
+		slog.Warn("pudding-desktop: load desktop theme preference", "path", themePath, "err", err)
+	}
+	initialThemeState := desktopThemeState{
+		Theme:    themePreference,
+		Resolved: resolveDesktopTheme(themePreference, app.Env.IsDarkMode()),
+	}
 
 	// 窗口 chrome(docs/design.md 2.3):macOS 用 HiddenInset 隐藏标题栏,
 	// 红绿灯由 NSToolbar inset rule 定位(绝不 cgo setFrame,旧项目踩坑);
@@ -74,7 +83,7 @@ func main() {
 	// installZoomSwizzle()
 	windowOpts := application.WebviewWindowOptions{
 		Title:     "Pudding",
-		URL:       launchURL(d.Token(), "http://"+d.Addr(), desktopShell()),
+		URL:       launchURL(d.Token(), "http://"+d.Addr(), desktopShell(), initialThemeState),
 		Width:     1200,
 		Height:    800,
 		MinWidth:  760,
@@ -97,39 +106,20 @@ func main() {
 				HideToolbarSeparator: true,
 				ToolbarStyle:         application.MacToolbarStyleUnified,
 			},
+			Appearance: macAppearanceForTheme(themePreference),
 		}
 	}
 	window := app.Window.NewWithOptions(windowOpts)
 
-	syncSystemAppearance := func() {
-		isDark := app.Env.IsDarkMode()
-		if isDark {
-			window.SetBackgroundColour(application.NewRGB(28, 28, 28))
-		} else {
-			window.SetBackgroundColour(application.NewRGB(255, 255, 255))
-		}
-	}
-	// 初始状态
-	syncSystemAppearance()
-
-	// 暂停页面主题偏好同步到 Wails/native appearance。
-	// 先只调通 app/system 跟随系统,确认 macOS titlebar / toolbar 稳定后再恢复。
-	// app.Event.On("desktop:theme-changed", func(e *application.CustomEvent) {
-	// 	if themeStr, ok := e.Data.(string); ok {
-	// 		// 前端主动发来的请求，必须强制回复（清除去重缓存）
-	// 		lastEmittedResolved.Store(nil)
-	// 		syncSystemAppearance()
-	// 	}
-	// })
-
-	// 监听系统主题变化(当为 system 时需要重新评估背景色)
-	app.Event.OnApplicationEvent(events.Common.ThemeChanged, func(*application.ApplicationEvent) {
-		syncSystemAppearance()
-	})
+	themeManager := newDesktopThemeManager(app, window, themePath, themePreference)
+	themeManager.bind()
+	themeManager.apply(false)
 
 	var hideAfterFullscreenExit atomic.Bool
 	if runtime.GOOS == "darwin" {
-		bindMacWindowEvents(window, &hideAfterFullscreenExit, syncSystemAppearance)
+		bindMacWindowEvents(window, &hideAfterFullscreenExit, func() {
+			themeManager.apply(true)
+		})
 	}
 
 	// 关窗 = 隐藏:daemon 常驻后台,tray 可唤回;退出只走 tray 菜单。
@@ -207,11 +197,13 @@ func desktopShell() string {
 	return ""
 }
 
-func launchURL(token, apiBase, shell string) string {
+func launchURL(token, apiBase, shell string, theme desktopThemeState) string {
 	u := url.URL{Path: "/"}
 	q := u.Query()
 	q.Set("token", token)
 	q.Set("api", apiBase)
+	q.Set("theme", string(theme.Theme))
+	q.Set("resolved", string(theme.Resolved))
 	if shell != "" {
 		q.Set("shell", shell)
 	}

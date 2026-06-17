@@ -8,10 +8,11 @@ import { App } from "@/App";
 import "@/styles.css";
 import { initAPIBase } from "@/state/apiBase";
 import { initShellMode } from "@/state/shell";
-import { applyTheme, readStoredTheme, startThemeSync } from "@/theme/theme";
+import { applyTheme, initThemeFromLaunch, readStoredTheme, startThemeSync } from "@/theme/theme";
 
 initAPIBase();
 initShellMode();
+initThemeFromLaunch();
 
 applyTheme(readStoredTheme());
 startThemeSync();
