@@ -95,7 +95,7 @@ func main() {
 				FullSizeContent:      true,
 				UseToolbar:           true,
 				HideToolbarSeparator: true,
-				ToolbarStyle:         application.MacToolbarStyleUnified, // 设为紧凑型
+				ToolbarStyle:         application.MacToolbarStyleUnified,
 			},
 		}
 	}
