@@ -59,10 +59,12 @@ export function applyTheme(theme: Theme) {
   const resolved = resolveTheme(theme);
   document.documentElement.classList.toggle("dark", resolved === "dark");
   document.documentElement.style.colorScheme = resolved;
-  
-  import("@wailsio/runtime").then(({ Events }) => {
-    Events.Emit("desktop:theme-changed", theme).catch(() => {});
-  }).catch(() => {});
+
+  // 暂停页面主题偏好同步到 Wails/native appearance。
+  // 先只调通 app/system 跟随系统,确认 macOS titlebar / toolbar 稳定后再恢复。
+  // import("@wailsio/runtime").then(({ Events }) => {
+  //   Events.Emit("desktop:theme-changed", theme).catch(() => {});
+  // }).catch(() => {});
 }
 
 function notifyThemeChange() {

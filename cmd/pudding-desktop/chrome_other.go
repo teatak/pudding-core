@@ -15,4 +15,6 @@ func setNoZoomRects([]noZoomRect) {}
 
 func setTrafficLightsHidden(*application.WebviewWindow, bool) {}
 
+func setTitlebarAppearsTransparent(*application.WebviewWindow, bool) {}
+
 func hideTrafficLightsForFullscreenExit(*application.WebviewWindow) {}

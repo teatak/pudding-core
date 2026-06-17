@@ -10,12 +10,10 @@ import (
 	"context"
 	_ "embed"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -83,7 +81,7 @@ func main() {
 		MinHeight: 520,
 		// 不透明窗口底:WKWebView 在 zoom/失焦/遮挡等合成空档会先露出
 		// 自己的默认 canvas。这里对齐暗色主题底色,避免层间跳色。
-		BackgroundColour: application.NewRGB(28, 28, 28),
+		// BackgroundColour: application.NewRGB(28, 28, 28),
 	}
 	if runtime.GOOS == "darwin" {
 		// 启动白闪修复:先隐藏窗口,等 web 首帧导航完成再显示(见下方 darwin hook)。
@@ -103,86 +101,35 @@ func main() {
 	}
 	window := app.Window.NewWithOptions(windowOpts)
 
-	// 获取系统真正的深浅模式
-	getSystemIsDark := func() bool {
-		// 打包后正常的情况
-		if app.Env.IsDarkMode() {
-			return true
-		}
-		// 裸二进制下的临时兜底：查系统全局配置
-		if runtime.GOOS == "darwin" {
-			out, err := exec.Command("defaults", "read", "-g", "AppleInterfaceStyle").Output()
-			if err == nil && strings.TrimSpace(string(out)) == "Dark" {
-				return true
-			}
-		}
-		return false
-	}
-
-	var currentTheme atomic.Pointer[string]
-	defaultTheme := "system"
-	currentTheme.Store(&defaultTheme)
-
-	var lastEmittedResolved atomic.Pointer[string]
-
-	applyWindowBase := func() {
-		theme := "system"
-		if t := currentTheme.Load(); t != nil {
-			theme = *t
-		}
-
-		isDark := getSystemIsDark()
-		if theme == "dark" {
-			isDark = true
-		} else if theme == "light" {
-			isDark = false
-		}
-
+	syncSystemAppearance := func() {
+		isDark := app.Env.IsDarkMode()
 		if isDark {
 			window.SetBackgroundColour(application.NewRGB(28, 28, 28))
-			if runtime.GOOS == "darwin" {
-				// 黑底配浅色红绿灯（极强反差的亮灰色），彻底告别隐形！
-				setWindowAppearance(window, "dark")
-			}
 		} else {
 			window.SetBackgroundColour(application.NewRGB(255, 255, 255))
-			if runtime.GOOS == "darwin" {
-				// 白底配深色红绿灯（极强反差的死黑色），彻底告别隐形！
-				setWindowAppearance(window, "light")
-			}
-		}
-
-		resolvedStr := "light"
-		if isDark {
-			resolvedStr = "dark"
-		}
-		// 只在 resolved 真正变化时才通知前端
-		prev := lastEmittedResolved.Swap(&resolvedStr)
-		if prev == nil || *prev != resolvedStr {
-			app.Logger.Info("ExecJS __puddingSetResolvedTheme: " + resolvedStr)
-			window.ExecJS(fmt.Sprintf(`window.__puddingSetResolvedTheme && window.__puddingSetResolvedTheme("%s")`, resolvedStr))
 		}
 	}
 	// 初始状态
-	applyWindowBase()
+	syncSystemAppearance()
 
-	app.Event.On("desktop:theme-changed", func(e *application.CustomEvent) {
-		if themeStr, ok := e.Data.(string); ok {
-			currentTheme.Store(&themeStr)
-			// 前端主动发来的请求，必须强制回复（清除去重缓存）
-			lastEmittedResolved.Store(nil)
-			applyWindowBase()
-		}
-	})
+	// 暂停页面主题偏好同步到 Wails/native appearance。
+	// 先只调通 app/system 跟随系统,确认 macOS titlebar / toolbar 稳定后再恢复。
+	// app.Event.On("desktop:theme-changed", func(e *application.CustomEvent) {
+	// 	if themeStr, ok := e.Data.(string); ok {
+	// 		// 前端主动发来的请求，必须强制回复（清除去重缓存）
+	// 		lastEmittedResolved.Store(nil)
+	// 		syncSystemAppearance()
+	// 	}
+	// })
 
 	// 监听系统主题变化(当为 system 时需要重新评估背景色)
 	app.Event.OnApplicationEvent(events.Common.ThemeChanged, func(*application.ApplicationEvent) {
-		applyWindowBase()
+		syncSystemAppearance()
 	})
 
 	var hideAfterFullscreenExit atomic.Bool
 	if runtime.GOOS == "darwin" {
-		bindMacWindowEvents(window, &hideAfterFullscreenExit, applyWindowBase)
+		bindMacWindowEvents(window, &hideAfterFullscreenExit, syncSystemAppearance)
 	}
 
 	// 关窗 = 隐藏:daemon 常驻后台,tray 可唤回;退出只走 tray 菜单。
@@ -292,19 +239,23 @@ func bindMacWindowEvents(window *application.WebviewWindow, hideAfterFullscreenE
 	})
 
 	window.RegisterHook(events.Mac.WindowWillEnterFullScreen, func(*application.WindowEvent) {
+		setTitlebarAppearsTransparent(window, false)
 		setHideTitle(window, false)
 		setUseToolbar(window, false)
 		setToolbarStyle(window, application.MacToolbarStyleUnifiedCompact)
 	})
 	window.RegisterHook(events.Mac.WindowWillExitFullScreen, func(*application.WindowEvent) {
+		setTitlebarAppearsTransparent(window, true)
 		setHideTitle(window, true)
 		setUseToolbar(window, true)
 		setToolbarStyle(window, application.MacToolbarStyleUnified)
 		setTrafficLightsHidden(window, true)
 	})
 	window.RegisterHook(events.Mac.WindowDidExitFullScreen, func(*application.WindowEvent) {
+		setTitlebarAppearsTransparent(window, true)
 		setTrafficLightsHidden(window, false)
 	})
+
 	// RegisterHook 不会打开原生事件监听;这里显式订阅。
 	window.OnWindowEvent(events.Mac.WindowWillEnterFullScreen, func(*application.WindowEvent) {})
 	window.OnWindowEvent(events.Mac.WindowWillExitFullScreen, func(*application.WindowEvent) {})

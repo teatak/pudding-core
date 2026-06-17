@@ -59,7 +59,17 @@ static void puddingSetTrafficLightsHidden(void *nsWindowPtr, bool hidden) {
 	dispatch_async(dispatch_get_main_queue(), ^{
 		puddingApplyTrafficLightsHidden(window, hidden);
 	});
-}static void puddingSetUseToolbar(void *nsWindowPtr, bool useToolbar) {
+}
+
+static void puddingSetTitlebarAppearsTransparent(void *nsWindowPtr, bool transparent) {
+	NSWindow *window = (NSWindow *)nsWindowPtr;
+	if (!window) return;
+	dispatch_async(dispatch_get_main_queue(), ^{
+		[window setTitlebarAppearsTransparent:transparent];
+	});
+}
+
+static void puddingSetUseToolbar(void *nsWindowPtr, bool useToolbar) {
 	NSWindow *window = (NSWindow *)nsWindowPtr;
 	if (!window) return;
 	dispatch_async(dispatch_get_main_queue(), ^{
@@ -356,7 +366,16 @@ func setTrafficLightsHidden(w *application.WebviewWindow, hidden bool) {
 	C.puddingSetTrafficLightsHidden(nsWindow, C.bool(hidden))
 }
 
-
+func setTitlebarAppearsTransparent(w *application.WebviewWindow, transparent bool) {
+	if w == nil {
+		return
+	}
+	nsWindow := w.NativeWindow()
+	if nsWindow == nil {
+		return
+	}
+	C.puddingSetTitlebarAppearsTransparent(nsWindow, C.bool(transparent))
+}
 
 func setHideTitle(w *application.WebviewWindow, hide bool) {
 	if w == nil {
