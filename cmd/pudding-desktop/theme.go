@@ -102,13 +102,16 @@ func (m *desktopThemeManager) bind() {
 	m.app.Event.On(desktopThemeSetEvent, func(event *application.CustomEvent) {
 		theme, ok := decodeDesktopThemePreference(event.Data)
 		if !ok {
+			slog.Warn("pudding-desktop: ignore invalid theme request", "payload", event.Data)
 			return
 		}
+		slog.Info("pudding-desktop: theme request", "theme", theme)
 		if err := m.setTheme(theme); err != nil {
 			slog.Warn("pudding-desktop: set theme preference", "theme", theme, "err", err)
 		}
 	})
 	m.app.Event.OnApplicationEvent(events.Common.ThemeChanged, func(*application.ApplicationEvent) {
+		slog.Info("pudding-desktop: system theme changed", "preference", m.theme, "systemDark", m.systemIsDark())
 		if m.theme == desktopThemeSystem {
 			m.apply(true)
 		}
@@ -153,6 +156,7 @@ func (m *desktopThemeManager) setTheme(theme desktopThemePreference) error {
 	if err := saveDesktopThemePreference(m.path, theme); err != nil {
 		return err
 	}
+	slog.Info("pudding-desktop: theme preference saved", "theme", theme, "path", m.path)
 	m.apply(true)
 	return nil
 }
@@ -162,6 +166,7 @@ func (m *desktopThemeManager) apply(notifyPage bool) {
 		return
 	}
 	state := m.state()
+	slog.Info("pudding-desktop: theme apply", "theme", state.Theme, "resolved", state.Resolved, "notifyPage", notifyPage)
 	if state.Resolved == desktopThemeResolvedDark {
 		m.window.SetBackgroundColour(application.NewRGB(28, 28, 28))
 	} else {
@@ -183,6 +188,7 @@ func (m *desktopThemeManager) notifyPage(state desktopThemeState) {
 	if err != nil {
 		return
 	}
+	slog.Info("pudding-desktop: theme notify page", "theme", state.Theme, "resolved", state.Resolved)
 	m.window.ExecJS(fmt.Sprintf("window.__puddingSetThemeState && window.__puddingSetThemeState(%s)", payload))
 }
 
