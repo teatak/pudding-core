@@ -151,13 +151,12 @@ export function App() {
         />
         {/* rail 固定宽度,不参与 resize。核心工作区只在 chat/canvas 之间分配空间。 */}
         <div className="relative h-full min-w-0 flex-1 bg-background">
-          <div className="no-drag-region absolute top-0 right-[13px] z-30 flex h-(--toolbar-h) items-center">
+          <div className="pudding-canvas-toggle no-drag-region absolute top-0 right-[13px] z-30 flex h-(--toolbar-h) items-center">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   aria-label={t("canvas.toggle")}
                   aria-pressed={canvasOpen}
-                  className="text-muted-foreground"
                   size="icon-sm"
                   tabIndex={-1}
                   variant="ghost"

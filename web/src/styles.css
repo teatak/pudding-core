@@ -104,6 +104,9 @@
     --rail-content-align-gap: 0px;
     --rail-radius: 12px;
     --rail-left-radius: var(--rail-radius);
+    --rail-item-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 22%);
+    --chrome-icon-button-foreground: var(--rail-item-foreground);
+    --rail-icon-button-foreground: var(--chrome-icon-button-foreground);
     --chat-title-max-w: min(42rem, 100%);
     --success: oklch(0.62 0.12 175);
     --warning: oklch(0.72 0.14 75);
@@ -293,6 +296,83 @@ html[data-shell] .pudding-markdown * {
 [data-slot="alert-dialog-action"][data-variant="destructive"]:is(:hover, :focus-visible) {
     background-color: var(--confirm-destructive-hover);
     color: var(--destructive-foreground);
+}
+
+.pudding-rail-toggle [data-slot="button"],
+.pudding-canvas-toggle [data-slot="button"],
+.pudding-session-rail [data-slot="sidebar-footer"] [data-slot="button"] {
+    font-weight: 400;
+}
+
+.pudding-rail-toggle,
+.pudding-canvas-toggle {
+    color: var(--rail-icon-button-foreground);
+}
+
+.pudding-session-rail [data-slot="sidebar-header"],
+.pudding-session-rail [data-slot="sidebar-content"] {
+    color: var(--rail-item-foreground);
+}
+
+.pudding-session-rail [data-slot="sidebar-footer"] {
+    color: var(--rail-icon-button-foreground);
+}
+
+.pudding-rail-toggle [data-slot="button"]:is(:hover, :focus-visible),
+.pudding-canvas-toggle [data-slot="button"]:is(:hover, :focus-visible),
+.pudding-session-rail [data-slot="sidebar-footer"] [data-slot="button"]:is(:hover, :focus-visible) {
+    background-color: var(--accent);
+    color: var(--foreground);
+    font-weight: 400;
+}
+
+.pudding-chat-title-action {
+    color: var(--chrome-icon-button-foreground);
+    font-weight: 400;
+}
+
+.pudding-chat-title-action:is(:hover, :focus-visible, [aria-expanded="true"]) {
+    background-color: var(--accent);
+    color: var(--foreground);
+    font-weight: 400;
+}
+
+.pudding-session-rail [data-slot="sidebar-header"] [data-slot="sidebar-menu-button"] {
+    font-weight: 400;
+}
+
+.pudding-session-rail [data-slot="sidebar-header"] [data-slot="sidebar-menu-button"]:is(:hover, :focus-visible) {
+    background-color: var(--accent);
+    color: var(--foreground);
+    font-weight: 400;
+}
+
+.pudding-session-rail [data-slot="sidebar-header"] [data-slot="sidebar-menu-button"][data-active="true"] {
+    background-color: var(--accent);
+    color: var(--foreground);
+    font-weight: 400;
+}
+
+.pudding-session-rail [data-slot="sidebar-content"] [data-slot="sidebar-menu-button"] {
+    font-weight: 400;
+}
+
+.pudding-session-rail [data-slot="sidebar-content"] [data-slot="sidebar-menu-button"]:is(:hover, :focus-visible),
+.pudding-session-rail [data-slot="sidebar-content"] [data-slot="sidebar-menu-button"][data-active="true"] {
+    color: var(--foreground);
+    font-weight: 400;
+}
+
+.pudding-session-rail [data-slot="sidebar-content"] [data-slot="sidebar-menu-badge"] {
+    color: var(--muted-foreground);
+    font-size: 12px;
+    font-weight: 400;
+}
+
+.pudding-session-rail [data-slot="sidebar-group-label"] {
+    color: color-mix(in oklch, var(--muted-foreground), var(--background) 18%);
+    font-size: 12px;
+    font-weight: 500;
 }
 
 @layer base {

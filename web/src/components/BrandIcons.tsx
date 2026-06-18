@@ -1,5 +1,5 @@
 // 品牌 logo SVG 集合。
-// BrandIcon 统一负责背景、圆角和尺寸;单个 SVG 只作为白色 mark 使用。
+// BrandIcon 统一负责多数品牌的背景、圆角和尺寸;Gemini/Ollama 保留原 SVG 特例。
 //
 // 数据来源:simple-icons.org (gemini / openai / claude) + 文字 fallback (mimo)。
 // 各厂商品牌 / 商标 © 各自所有,这里只用于 UI 标识用途,不做商品化。
@@ -7,8 +7,7 @@
 // app icon 设计原则:
 //   1. 背景由 BrandIcon 自己画,调用方可选择圆形或 rx=4 圆角方形
 //   2. logo path 居中缩到 60%(translate 4.8 + scale 0.6),四周留 20% padding
-//   3. mark 统一强制为白色/currentColor;Gemini/Ollama 也只保留轮廓 mark,
-//      由 BrandIcon 给它们单独配置合适的底色
+//   3. 大多数 mark 统一强制为白色/currentColor;Gemini/Ollama 保留原 SVG 配色
 
 import type { CSSProperties } from "react";
 import { useId } from "react";
@@ -362,6 +361,27 @@ export function BrandIcon({
   const normalizedName = normalizeBrandName(name);
   if (!brandBackgrounds[normalizedName]) {
     return null;
+  }
+
+  if (normalizedName === "gemini" || normalizedName === "ollama") {
+    const SpecialIcon = normalizedName === "gemini" ? GeminiIcon : OllamaIcon;
+    return (
+      <span
+        className={cn(
+          "relative inline-grid shrink-0 place-items-center",
+          className,
+        )}
+      >
+        <svg aria-hidden className="absolute inset-0 size-full" viewBox="0 0 24 24">
+          {shape === "circle" ? (
+            <circle cx="12" cy="12" fill="#ffffff" r="11.5" stroke="var(--border)" />
+          ) : (
+            <rect fill="#ffffff" height="23" rx="4" stroke="var(--border)" width="23" x="0.5" y="0.5" />
+          )}
+        </svg>
+        <SpecialIcon className={cn("relative size-full [&>rect]:hidden", iconClassName)} />
+      </span>
+    );
   }
 
   return (

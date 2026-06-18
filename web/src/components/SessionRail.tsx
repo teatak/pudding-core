@@ -257,7 +257,7 @@ export function SessionRail({
   const popoverAlignOffset = collapsed ? -(readTrafficInsetPx() + popoverAlignNudgePx) : 0;
   const railButton = (
     <div
-      className="no-drag-region absolute top-0 left-[11px] z-30 flex items-center"
+      className="pudding-rail-toggle no-drag-region absolute top-0 left-[11px] z-30 flex items-center"
       style={{
         height: "var(--toolbar-h)",
         marginLeft: "var(--traffic-inset)",
@@ -269,7 +269,6 @@ export function SessionRail({
             <TooltipTrigger asChild>
               <Button
                 aria-label={collapsed ? t("rail.expand") : t("rail.collapse")}
-                className="text-muted-foreground"
                 size="icon"
                 tabIndex={-1}
                 variant="ghost"
@@ -306,7 +305,7 @@ export function SessionRail({
           <PopoverContent
             align="start"
             alignOffset={popoverAlignOffset}
-            className="flex h-[26rem] max-h-[80vh] w-[260px] flex-col p-0"
+            className="flex h-[min(34rem,calc(100vh-var(--toolbar-h)-1.5rem))] max-h-[calc(100vh-var(--toolbar-h)-1.5rem)] w-[260px] flex-col p-0"
             side="bottom"
             sideOffset={11}
             onMouseEnter={hover.cancelClose}
@@ -604,7 +603,7 @@ function RailPanel({
   }
 
   return (
-    <SidebarProvider className="!contents">
+    <SidebarProvider className="pudding-session-rail !contents">
       <Sidebar className="min-h-0 w-full flex-1 bg-transparent" collapsible="none">
         <SidebarHeader>
           <SidebarMenu className="gap-1">

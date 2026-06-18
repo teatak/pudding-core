@@ -378,7 +378,7 @@ function HeaderSessionTitle({
             <DropdownMenuTrigger asChild>
               <Button
                 aria-label={t("session.actions")}
-                className="size-7 text-muted-foreground"
+                className="pudding-chat-title-action size-7"
                 size="icon-sm"
                 tabIndex={-1}
                 variant="ghost"
