@@ -36,7 +36,7 @@ export function DraftConversation({ token }: { token: string }) {
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex min-h-0 flex-1 flex-col justify-center px-4 pb-20">
         <div className="flex flex-col items-center justify-center">
-          <Mascot showFaceDebugFrame className="size-32 overflow-visible" />
+          <Mascot className="size-32 overflow-visible" />
           <h1 className="mt-4 text-3xl font-medium text-foreground">{t("draft.title")}</h1>
         </div>
         <div className="mt-14 flex flex-col">
