@@ -676,7 +676,7 @@ function SessionItem({
         <>
           <SidebarMenuBadge
             className={cn(
-              "right-2 min-w-0 px-0 font-normal text-muted-foreground transition-opacity group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0",
+              "right-2 min-w-0 px-0 font-normal text-muted-foreground group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0",
               actionsOpen && "opacity-0",
             )}
           >
@@ -698,6 +698,7 @@ function SessionItem({
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
+              collisionPadding={8}
               className="min-w-36 w-max"
               onCloseAutoFocus={(event) => {
                 event.preventDefault();

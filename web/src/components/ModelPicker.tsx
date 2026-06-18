@@ -168,7 +168,7 @@ function ProfileModels({
             onClick={() => onPick(model)}
           >
             {selected ? (
-              <MessageCircleCheck className="size-4 shrink-0 text-emerald-500" />
+              <MessageCircleCheck className="size-4 shrink-0 text-success" />
             ) : (
               <span className="size-4 shrink-0" />
             )}

@@ -163,7 +163,7 @@ export function Composer({ token, session }: ComposerProps) {
                 <TooltipTrigger asChild>
                   <Button
                     aria-label={t("composer.send")}
-                    className="rounded-full disabled:bg-ring disabled:text-background disabled:opacity-100 disabled:shadow-none dark:disabled:bg-[color-mix(in_oklch,var(--foreground)_48%,var(--background))] dark:disabled:text-background"
+                    className="rounded-full disabled:bg-control-disabled disabled:text-background disabled:opacity-100 disabled:shadow-none"
                     disabled={!sendEnabled}
                     size="icon"
                     type="submit"

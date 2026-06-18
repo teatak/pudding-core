@@ -28,7 +28,7 @@ export function ThemeToggle() {
           <Icon />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-36">
+      <DropdownMenuContent align="end" collisionPadding={8} className="w-36">
         <DropdownMenuRadioGroup value={theme} onValueChange={(value) => setTheme(value as Theme)}>
           {options.map(({ value, label, icon: OptionIcon }) => (
             <DropdownMenuRadioItem key={value} value={value}>

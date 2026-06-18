@@ -458,7 +458,7 @@ function ProviderSettings({ token }: { token: string }) {
                       <span
                         className={cn(
                           "size-2 shrink-0 rounded-full",
-                          profile.apiKeySet || profile.apiKeyEnv ? "bg-emerald-500" : "bg-amber-500",
+                          profile.apiKeySet || profile.apiKeyEnv ? "bg-success" : "bg-warning",
                         )}
                         title={profile.apiKeySet || profile.apiKeyEnv ? t("provider.keySet") : t("provider.keyMissing")}
                       />

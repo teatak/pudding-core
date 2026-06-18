@@ -9,6 +9,7 @@ import { z } from "zod";
 import { APIError, createSession, deleteSession, submitMessage, type Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
+import { Mascot } from "@/components/Mascot";
 import { ModelPicker } from "@/components/ModelPicker";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,10 +35,11 @@ export function DraftConversation({ token }: { token: string }) {
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex min-h-0 flex-1 flex-col justify-center px-4 pb-20">
-        <div className="flex items-center justify-center">
-          <h1 className="text-3xl font-medium text-foreground">{t("draft.title")}</h1>
+        <div className="flex flex-col items-center justify-center">
+          <Mascot showFaceDebugFrame className="size-32 overflow-visible" />
+          <h1 className="mt-4 text-3xl font-medium text-foreground">{t("draft.title")}</h1>
         </div>
-        <div className="mt-20 flex flex-col">
+        <div className="mt-14 flex flex-col">
           <DraftComposer quickSubmit={quickSubmit} token={token} />
           <ChatColumn className="mt-8 flex flex-wrap items-center justify-center gap-2 px-2">
             {suggestionKeys.map((key, index) => {
@@ -190,7 +192,7 @@ function DraftComposer({ token, quickSubmit }: { token: string; quickSubmit: Qui
               <TooltipTrigger asChild>
                 <Button
                   aria-label={t("composer.send")}
-                  className="rounded-full disabled:bg-ring disabled:text-background disabled:opacity-100 disabled:shadow-none dark:disabled:bg-[color-mix(in_oklch,var(--foreground)_48%,var(--background))] dark:disabled:text-background"
+                  className="rounded-full disabled:bg-control-disabled disabled:text-background disabled:opacity-100 disabled:shadow-none"
                   disabled={!canSend || submitMutation.isPending}
                   size="icon"
                   type="submit"

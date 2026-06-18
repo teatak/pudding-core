@@ -25,7 +25,7 @@ export function LanguageToggle() {
           <Languages />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-32">
+      <DropdownMenuContent align="end" collisionPadding={8} className="w-32">
         <DropdownMenuRadioGroup value={locale} onValueChange={(value) => setLocale(value as Locale)}>
           {options.map((option) => (
             <DropdownMenuRadioItem key={option.value} value={option.value}>

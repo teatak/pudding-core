@@ -388,6 +388,7 @@ function HeaderSessionTitle({
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="start"
+              collisionPadding={8}
               className="w-36"
               onCloseAutoFocus={(event) => {
                 if (!editAfterMenuCloseRef.current) {
