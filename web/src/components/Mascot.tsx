@@ -102,7 +102,7 @@ export function Mascot({ className, onPointerFollow, showFaceDebugFrame = false,
   const targetXRef = useRef(0);
   const targetYRef = useRef(0);
   const rafRef = useRef(0);
-  const textFocusRef = useRef<MascotTextFocus | null>(null);
+  const pressAnimationRef = useRef<Animation | null>(null);
   const onPointerFollowRef = useRef(onPointerFollow);
   const id = useId().replace(/:/g, "");
   const faceID = `mascot-face-${id}`;
@@ -172,9 +172,15 @@ export function Mascot({ className, onPointerFollow, showFaceDebugFrame = false,
     rafRef.current = 0;
   };
 
+  const setTarget = (x: number, y: number) => {
+    targetXRef.current = clamp(x, -EYE_MAX_X, EYE_MAX_X);
+    targetYRef.current = clamp(y, -EYE_MAX_Y, EYE_MAX_Y);
+    startTick();
+  };
+
   const setTargetFromPoint = (clientX: number, clientY: number) => {
     const rect = rootRef.current?.getBoundingClientRect();
-    if (!rect) return false;
+    if (!rect) return;
 
     const cx = rect.left + rect.width / 2;
     const cy = rect.top + rect.height / 2;
@@ -182,28 +188,20 @@ export function Mascot({ className, onPointerFollow, showFaceDebugFrame = false,
     const dy = clientY - cy;
     const distance = Math.hypot(dx, dy);
     if (distance < 1) {
-      targetXRef.current = 0;
-      targetYRef.current = 0;
-      startTick();
-      return true;
+      setTarget(0, 0);
+      return;
     }
 
     const sat = Math.max(rect.width, rect.height) * SAT_RATIO;
     const k = Math.min(distance / sat, 1);
-    targetXRef.current = (dx / distance) * k * EYE_MAX_X;
-    targetYRef.current = (dy / distance) * k * EYE_MAX_Y;
-    startTick();
-    return true;
+    setTarget((dx / distance) * k * EYE_MAX_X, (dy / distance) * k * EYE_MAX_Y);
   };
 
   const setTargetFromTextFocus = (focus: MascotTextFocus) => {
-    targetXRef.current = clamp(focus.xRatio * TEXT_ENTRY_X_BOOST * EYE_MAX_X, -EYE_MAX_X, EYE_MAX_X);
-    targetYRef.current = clamp(EYE_MAX_Y * TEXT_ENTRY_Y_FOCUS + focus.lineRatio * TEXT_ENTRY_LINE_Y, -EYE_MAX_Y, EYE_MAX_Y);
-    startTick();
+    setTarget(focus.xRatio * TEXT_ENTRY_X_BOOST * EYE_MAX_X, EYE_MAX_Y * TEXT_ENTRY_Y_FOCUS + focus.lineRatio * TEXT_ENTRY_LINE_Y);
   };
 
   useEffect(() => {
-    textFocusRef.current = textFocus;
     if (textFocus) {
       setTargetFromTextFocus(textFocus);
     }
@@ -216,7 +214,6 @@ export function Mascot({ className, onPointerFollow, showFaceDebugFrame = false,
   useEffect(() => {
     const onMove = (event: MouseEvent) => {
       onPointerFollowRef.current?.();
-      textFocusRef.current = null;
       setTargetFromPoint(event.clientX, event.clientY);
     };
 
@@ -228,8 +225,27 @@ export function Mascot({ className, onPointerFollow, showFaceDebugFrame = false,
     };
   }, []);
 
+  const bounce = () => {
+    const root = rootRef.current;
+    if (!root) return;
+    pressAnimationRef.current?.cancel();
+    pressAnimationRef.current = root.animate(
+      [
+        { transform: "scale(1, 1)" },
+        { transform: "scale(1.08, 0.92)" },
+        { transform: "scale(0.96, 1.06)" },
+        { transform: "scale(1.02, 0.98)" },
+        { transform: "scale(1, 1)" },
+      ],
+      {
+        duration: 360,
+        easing: "cubic-bezier(0.2, 0.9, 0.2, 1)",
+      },
+    );
+  };
+
   return (
-    <span ref={rootRef} aria-hidden="true" className={className} style={rootStyle}>
+    <span ref={rootRef} aria-hidden="true" className={className} style={rootStyle} onPointerDown={bounce}>
       <svg data-slot="mascot-base" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
         <g data-slot="shadow">
           <ellipse ref={shadowRef} cx="64" cy="113" fill="color-mix(in oklab, var(--primary) 18%, transparent)" rx="34" ry="7" />

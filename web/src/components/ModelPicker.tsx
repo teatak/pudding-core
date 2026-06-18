@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, MessageCircleCheck } from "lucide-react";
+import { ChevronDown, CircleCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import {
@@ -72,23 +72,29 @@ export function ModelPicker({ token, session, value, onChange }: ModelPickerProp
   }, [open, currentProfileID]);
 
   // 品牌图标代替 provider 名;未命中图标的 profile 回落为文字名
-  const brandIcon = BrandIcon({ name: activeProfile?.id || currentProfileID, className: "size-4 shrink-0" });
+  const brandIcon = <RoundBrandIcon iconClassName="size-6" name={activeProfile?.id || currentProfileID} sizeClassName="size-6" />;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
           aria-label={t("session.model")}
-          className="h-7 max-w-60 gap-1.5 px-2 text-xs font-normal text-muted-foreground"
+          className="group/model-picker ml-1 h-6 max-w-64 gap-0 bg-transparent p-0 text-xs font-normal text-foreground hover:bg-transparent aria-expanded:bg-transparent"
           size="sm"
           variant="ghost"
         >
-          {brandIcon ?? <span className="truncate">{activeProfile?.name || currentProfileID} ·</span>}
-          <span className="truncate">{currentModel ? formatModelLabel(currentModel) : t("common.default")}</span>
-          <ChevronDown className="size-3 shrink-0" />
+          <span className="relative z-10 grid size-6 shrink-0 place-items-center overflow-hidden rounded-full">
+            {BrandIcon({ name: activeProfile?.id || currentProfileID })
+              ? brandIcon
+              : <span className="grid size-6 place-items-center rounded-full bg-muted text-[10px] text-foreground transition-colors group-hover/model-picker:bg-accent group-aria-expanded/model-picker:bg-accent group-data-[state=open]/model-picker:bg-accent">{(activeProfile?.name || currentProfileID).slice(0, 1).toUpperCase()}</span>}
+          </span>
+          <span className="-ml-3 flex h-5.5 min-w-0 items-center gap-1 rounded-r-lg bg-muted pr-2 pl-4.5 text-foreground/75 transition-colors group-hover/model-picker:bg-accent group-aria-expanded/model-picker:bg-accent group-data-[state=open]/model-picker:bg-accent">
+            <span className="truncate">{currentModel ? formatModelLabel(currentModel) : t("common.default")}</span>
+            <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+          </span>
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-80 p-2" side="top" sideOffset={8}>
+      <PopoverContent align="start" alignOffset={-16} className="w-80 p-2" side="top" sideOffset={8}>
         <Accordion collapsible type="single" value={expanded} onValueChange={setExpanded}>
           {profiles.map((profile) => (
             <AccordionItem
@@ -97,16 +103,16 @@ export function ModelPicker({ token, session, value, onChange }: ModelPickerProp
               className="not-last:border-b-0"
               value={profile.id}
             >
-              <AccordionTrigger className="rounded-md px-2.5 py-2 text-sm font-normal text-muted-foreground hover:no-underline [&_[data-slot=accordion-trigger-icon]]:text-muted-foreground/70">
+              <AccordionTrigger className="items-center rounded-md px-2.5 py-1.5 text-sm font-normal text-muted-foreground hover:bg-accent hover:text-foreground hover:no-underline [&_[data-slot=accordion-trigger-icon]]:text-muted-foreground/70">
                 <span className="flex min-w-0 items-center gap-2">
-                  <BrandIcon className="size-4 shrink-0" name={profile.id} />
+                  <RoundBrandIcon name={profile.id} />
                   <span className="truncate">{profile.name}</span>
-                  <Badge className="border-muted-foreground/20 bg-transparent text-[10px] font-normal text-muted-foreground/70" variant="outline">
+                  <Badge className="h-4 border-muted-foreground/20 bg-transparent px-1.5 text-[9px] font-normal text-muted-foreground/70" variant="outline">
                     {profile.type}
                   </Badge>
                 </span>
               </AccordionTrigger>
-              <AccordionContent className="pb-1">
+              <AccordionContent className="pb-0">
                 <ProfileModels
                   currentModel={selectedProvider === profile.id ? selectedModel : ""}
                   isCurrentProfile={currentProfileID === profile.id}
@@ -126,6 +132,26 @@ export function ModelPicker({ token, session, value, onChange }: ModelPickerProp
         </Accordion>
       </PopoverContent>
     </Popover>
+  );
+}
+
+function RoundBrandIcon({
+  name,
+  sizeClassName = "size-5",
+  iconClassName = sizeClassName,
+}: {
+  name: string;
+  sizeClassName?: string;
+  iconClassName?: string;
+}) {
+  const icon = BrandIcon({ name, className: iconClassName });
+  if (!icon) {
+    return null;
+  }
+  return (
+    <span className={cn("grid shrink-0 place-items-center overflow-hidden rounded-full", sizeClassName)}>
+      {icon}
+    </span>
   );
 }
 
@@ -154,23 +180,25 @@ function ProfileModels({
   }
 
   return (
-    <div className="grid max-h-56 gap-0.5 overflow-y-auto px-1">
+    <div className="grid max-h-56 gap-0.5 overflow-y-auto py-0.5">
       {models.map((model) => {
         const selected = isCurrentProfile && (currentModel ? currentModel === model : defaultModel === model);
         return (
           <button
             key={model}
             className={cn(
-              "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-accent",
+              "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-accent",
               selected && "bg-accent",
             )}
             type="button"
             onClick={() => onPick(model)}
           >
             {selected ? (
-              <MessageCircleCheck className="size-4 shrink-0 text-success" />
+              <span className="grid size-5 shrink-0 place-items-center">
+                <CircleCheck className="size-4 text-success/85" />
+              </span>
             ) : (
-              <span className="size-4 shrink-0" />
+              <span className="size-5 shrink-0" />
             )}
             <span className="flex min-w-0 items-center gap-2">
               <span className="truncate" title={model}>

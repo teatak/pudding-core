@@ -2,7 +2,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowUp, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FocusEvent, type KeyboardEvent } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
 import type { AppSearch } from "@/lib/route";
+import { useDraftStore } from "@/state/draftStore";
 import { useOverlayStore } from "@/state/overlayStore";
 
 const draftSchema = z.object({
@@ -24,7 +25,6 @@ const draftSchema = z.object({
 
 type DraftValue = z.infer<typeof draftSchema>;
 type QuickSubmit = { id: number; text: string };
-type DraftModelValue = { provider?: string; model?: string };
 
 const suggestionKeys = ["draft.suggest.1", "draft.suggest.2", "draft.suggest.3"] as const;
 
@@ -33,7 +33,7 @@ export function DraftConversation({ token }: { token: string }) {
   const [quickSubmit, setQuickSubmit] = useState<QuickSubmit | null>(null);
   const [mascotTextFocus, setMascotTextFocus] = useState<MascotTextFocus | null>(null);
   const clearMascotTextFocus = useCallback(() => {
-    setMascotTextFocus((current) => (current ? null : current));
+    setMascotTextFocus(null);
   }, []);
 
   return (
@@ -85,14 +85,18 @@ function DraftComposer({
   const { t } = useI18n();
   const addPendingUser = useOverlayStore((state) => state.addPendingUser);
   const removePendingUser = useOverlayStore((state) => state.removePendingUser);
-  const [modelValue, setModelValue] = useState<DraftModelValue>({});
+  const draftText = useDraftStore((state) => state.text);
+  const modelValue = useDraftStore((state) => state.model);
+  const setDraftText = useDraftStore((state) => state.setText);
+  const setModelValue = useDraftStore((state) => state.setModel);
+  const clearDraft = useDraftStore((state) => state.clear);
   const draftIDRef = useRef<string>(crypto.randomUUID());
   const quickSubmitIDRef = useRef<number | null>(null);
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
   const mascotFocusRafRef = useRef(0);
   const form = useForm<DraftValue>({
     resolver: zodResolver(draftSchema),
-    defaultValues: { text: "" },
+    defaultValues: { text: draftText },
   });
   const canSend = Boolean(form.watch("text").trim());
   const textField = form.register("text");
@@ -173,6 +177,7 @@ function DraftComposer({
       }
       await queryClient.invalidateQueries({ queryKey: queryKeys.messages(created.id) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      clearDraft();
       return created;
     },
     onSuccess: () => {
@@ -208,10 +213,33 @@ function DraftComposer({
     }
     quickSubmitIDRef.current = quickSubmit.id;
     form.setValue("text", quickSubmit.text);
+    setDraftText(quickSubmit.text);
     submitText(quickSubmit.text);
-  }, [form, quickSubmit, submitText]);
+  }, [form, quickSubmit, setDraftText, submitText]);
 
   const submitDraft = (value: DraftValue) => submitText(value.text);
+  const setTextAreaRef = (node: HTMLTextAreaElement | null) => {
+    textAreaRef.current = node;
+    textField.ref(node);
+  };
+  const handleTextBlur = (event: FocusEvent<HTMLTextAreaElement>) => {
+    textField.onBlur(event);
+    onMascotTextFocusChange(null);
+  };
+  const handleTextChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    void textField.onChange(event);
+    setDraftText(event.currentTarget.value);
+    scheduleMascotTextFocus();
+  };
+  const handleTextKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      if (canSend && !submitMutation.isPending) {
+        void form.handleSubmit(submitDraft)();
+      }
+    }
+    scheduleMascotTextFocus();
+  };
 
   return (
     <form className="relative shrink-0" onSubmit={form.handleSubmit(submitDraft)}>
@@ -223,29 +251,12 @@ function DraftComposer({
               placeholder={t("composer.messagePlaceholder")}
               rows={1}
               name={textField.name}
-              ref={(node) => {
-                textAreaRef.current = node;
-                textField.ref(node);
-              }}
-              onBlur={(event) => {
-                textField.onBlur(event);
-                onMascotTextFocusChange(null);
-              }}
-              onChange={(event) => {
-                void textField.onChange(event);
-                scheduleMascotTextFocus();
-              }}
+              ref={setTextAreaRef}
+              onBlur={handleTextBlur}
+              onChange={handleTextChange}
               onClick={scheduleMascotTextFocus}
               onFocus={scheduleMascotTextFocus}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  if (canSend && !submitMutation.isPending) {
-                    void form.handleSubmit(submitDraft)();
-                  }
-                }
-                scheduleMascotTextFocus();
-              }}
+              onKeyDown={handleTextKeyDown}
               onKeyUp={scheduleMascotTextFocus}
               onMouseUp={scheduleMascotTextFocus}
               onSelect={scheduleMascotTextFocus}
