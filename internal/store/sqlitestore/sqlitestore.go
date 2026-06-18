@@ -62,6 +62,12 @@ func (s *Store) ensureSchema() error {
 	if err := s.ensureColumn("sessions", "last_activity_at", `ALTER TABLE sessions ADD COLUMN last_activity_at INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("sessions", "pinned", `ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("sessions", "pinned_order", `ALTER TABLE sessions ADD COLUMN pinned_order INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
 	if _, err := s.db.Exec(`UPDATE sessions SET last_activity_at=updated_at WHERE last_activity_at=0`); err != nil {
 		return fmt.Errorf("sqlite: backfill sessions.last_activity_at: %w", err)
 	}
@@ -122,8 +128,8 @@ func (s *Store) CreateSession(ctx context.Context, sess *store.Session) error {
 		now := time.Now()
 		sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = now, now, now
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO sessions(id,title,provider,model,created_at,updated_at,last_activity_at) VALUES(?,?,?,?,?,?,?)`,
-			sess.ID, sess.Title, sess.Provider, sess.Model, unixMS(now), unixMS(now), unixMS(now),
+			`INSERT INTO sessions(id,title,provider,model,pinned,pinned_order,created_at,updated_at,last_activity_at) VALUES(?,?,?,?,?,?,?,?,?)`,
+			sess.ID, sess.Title, sess.Provider, sess.Model, boolInt(sess.Pinned), sess.PinnedOrder, unixMS(now), unixMS(now), unixMS(now),
 		)
 		return err
 	})
@@ -136,8 +142,8 @@ func (s *Store) GetSession(ctx context.Context, id string) (*store.Session, erro
 	var sess store.Session
 	var created, updated, lastActivity int64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id,title,provider,model,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated, &lastActivity, &sess.Running)
+		`SELECT id,title,provider,model,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -152,7 +158,7 @@ func (s *Store) ListSessions(ctx context.Context) ([]*store.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.QueryContext(ctx, `SELECT id,title,provider,model,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions ORDER BY last_activity_at DESC, created_at DESC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,title,provider,model,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions ORDER BY last_activity_at DESC, created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +168,7 @@ func (s *Store) ListSessions(ctx context.Context) ([]*store.Session, error) {
 	for rows.Next() {
 		var sess store.Session
 		var created, updated, lastActivity int64
-		if err := rows.Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated, &lastActivity, &sess.Running); err != nil {
+		if err := rows.Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running); err != nil {
 			return nil, err
 		}
 		sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = timeFromMS(created), timeFromMS(updated), timeFromMS(lastActivity)
@@ -187,10 +193,16 @@ func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionU
 		if upd.Model != nil {
 			sess.Model = *upd.Model
 		}
+		if upd.Pinned != nil {
+			sess.Pinned = *upd.Pinned
+		}
+		if upd.PinnedOrder != nil {
+			sess.PinnedOrder = *upd.PinnedOrder
+		}
 		sess.UpdatedAt = time.Now()
 		_, err = tx.ExecContext(ctx,
-			`UPDATE sessions SET title=?, provider=?, model=?, updated_at=? WHERE id=?`,
-			sess.Title, sess.Provider, sess.Model, unixMS(sess.UpdatedAt), id,
+			`UPDATE sessions SET title=?, provider=?, model=?, pinned=?, pinned_order=?, updated_at=? WHERE id=?`,
+			sess.Title, sess.Provider, sess.Model, boolInt(sess.Pinned), sess.PinnedOrder, unixMS(sess.UpdatedAt), id,
 		)
 		if err != nil {
 			return err
@@ -496,8 +508,8 @@ func (s *Store) getSessionDB(ctx context.Context, id string) (*store.Session, er
 	var sess store.Session
 	var created, updated, lastActivity int64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id,title,provider,model,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated, &lastActivity, &sess.Running)
+		`SELECT id,title,provider,model,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -526,8 +538,8 @@ func getSessionTx(ctx context.Context, tx *sql.Tx, id string) (*store.Session, e
 	var sess store.Session
 	var created, updated, lastActivity int64
 	err := tx.QueryRowContext(ctx,
-		`SELECT id,title,provider,model,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &created, &updated, &lastActivity, &sess.Running)
+		`SELECT id,title,provider,model,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}

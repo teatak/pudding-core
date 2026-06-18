@@ -2,14 +2,23 @@ import { useEffect, useId, useRef, type CSSProperties } from "react";
 
 type MascotProps = {
   className?: string;
-  onPointerFollow?: () => void;
+  gaze?: MascotGaze;
+  mood?: MascotMood;
+  onPointerGaze?: () => void;
   showFaceDebugFrame?: boolean;
-  textFocus?: MascotTextFocus | null;
+  showHeadDebugFrame?: boolean;
 };
 
-export type MascotTextFocus = {
-  lineRatio: number;
-  xRatio: number;
+export type MascotMood = "idle" | "thinking" | "ready" | "error";
+
+export type MascotGaze =
+  | { type: "pointer" }
+  | { type: "input"; target: MascotGazePoint }
+  | { type: "center" };
+
+export type MascotGazePoint = {
+  clientX: number;
+  clientY: number;
 };
 
 const EYE_MAX_X = 5;
@@ -18,10 +27,11 @@ const HEAD_YAW_MAX_DEG = 20;
 const HEAD_PITCH_MAX_DEG = 16;
 const HEAD_ROLL_MAX_DEG = 4;
 const SAT_RATIO = 1.15;
+const POINTER_SAT_MIN_PX = 128;
 const FOLLOW_EASE = 0.22;
 const FOLLOW_EPSILON = 0.01;
 const HEAD_ORIGIN_Y_PERCENT = (77 / 128) * 100;
-const HEAD_PERSPECTIVE_PX = 220;
+const HEAD_PERSPECTIVE_PX = 170;
 const HEAD_SHIFT_X = 1.5;
 const HEAD_SHIFT_Y = 0.75;
 const FACE_SHIFT_X = 14;
@@ -37,13 +47,10 @@ const FACE_Z_OFFSET_PX = 4;
 const SHADOW_SHIFT_X = 0.7;
 const SHADOW_SQUEEZE_X = 0.45;
 const SHADOW_SCALE_Y = 0.2;
-const SHADE_BASE_OPACITY = 0.04;
-const SHADE_TURN_OPACITY = 0.16;
+const SHADE_BASE_OPACITY = 0.03;
+const SHADE_TURN_OPACITY = 0.11;
 const HIGHLIGHT_SHIFT_X = 2;
 const HIGHLIGHT_SHIFT_Y = 1;
-const TEXT_ENTRY_X_BOOST = 2.6;
-const TEXT_ENTRY_Y_FOCUS = 0.9;
-const TEXT_ENTRY_LINE_Y = 0.25;
 const BLINK_DUR = "6s";
 const BLINK_KEY_TIMES = "0;0.3;0.38;0.6;0.64;0.7;0.84;0.87;0.89;0.91;0.94;1";
 const BLINK_HEIGHT_VALUES = "9;9;9;9;3.1;9;9;1.2;9;1.2;9;9";
@@ -54,6 +61,7 @@ const MOUTH_BLINK_KEY_TIMES = "0;0.2;0.23;0.255;0.62;0.635;0.65;1";
 const MOUTH_BLINK_D_VALUES =
   "M57 88.7 Q64 90.1 71 88.7;M57 88.7 Q64 90.1 71 88.7;M60 88.9 Q64 89.5 68 88.9;M57 88.7 Q64 90.1 71 88.7;M57 88.7 Q64 90.1 71 88.7;M58.5 88.8 Q64 90.3 69.5 88.8;M57 88.7 Q64 90.1 71 88.7;M57 88.7 Q64 90.1 71 88.7";
 const MOUTH_BLINK_WIDTH_VALUES = "3.5;3.5;3;3.5;3.5;3.3;3.5;3.5";
+const DEFAULT_GAZE: MascotGaze = { type: "pointer" };
 
 const absoluteLayerStyle: CSSProperties = {
   height: "100%",
@@ -88,7 +96,14 @@ const faceLayerStyle: CSSProperties = {
   zIndex: 1,
 };
 
-export function Mascot({ className, onPointerFollow, showFaceDebugFrame = false, textFocus = null }: MascotProps) {
+export function Mascot({
+  className,
+  gaze = DEFAULT_GAZE,
+  mood = "idle",
+  onPointerGaze,
+  showFaceDebugFrame = false,
+  showHeadDebugFrame = false,
+}: MascotProps) {
   const rootRef = useRef<HTMLSpanElement>(null);
   const headRef = useRef<HTMLSpanElement>(null);
   const faceLayerRef = useRef<HTMLSpanElement>(null);
@@ -103,7 +118,7 @@ export function Mascot({ className, onPointerFollow, showFaceDebugFrame = false,
   const targetYRef = useRef(0);
   const rafRef = useRef(0);
   const pressAnimationRef = useRef<Animation | null>(null);
-  const onPointerFollowRef = useRef(onPointerFollow);
+  const onPointerGazeRef = useRef(onPointerGaze);
   const id = useId().replace(/:/g, "");
   const faceID = `mascot-face-${id}`;
   const highlightID = `mascot-highlight-${id}`;
@@ -123,7 +138,7 @@ export function Mascot({ className, onPointerFollow, showFaceDebugFrame = false,
       head.style.transform = `translate(${turnX * HEAD_SHIFT_X}px, ${turnY * HEAD_SHIFT_Y}px) rotateY(${turnX * HEAD_YAW_MAX_DEG}deg) rotateX(${-turnY * HEAD_PITCH_MAX_DEG}deg) rotateZ(${turnX * turnY * HEAD_ROLL_MAX_DEG}deg)`;
     }
     if (faceLayer) {
-      faceLayer.style.transform = `translate3d(${turnX * FACE_SHIFT_X}px, ${turnY * FACE_SHIFT_Y}px, ${FACE_Z_OFFSET_PX}px) rotateY(${turnX * FACE_EXTRA_YAW_DEG}deg) rotateX(${-turnY * FACE_EXTRA_PITCH_DEG}deg)`;
+      faceLayer.style.transform = `translate3d(0px, 0px, ${FACE_Z_OFFSET_PX}px) rotateY(${turnX * FACE_EXTRA_YAW_DEG}deg) rotateX(${-turnY * FACE_EXTRA_PITCH_DEG}deg)`;
     }
     if (face) {
       face.setAttribute("transform", faceTransform(turnX, turnY));
@@ -192,28 +207,28 @@ export function Mascot({ className, onPointerFollow, showFaceDebugFrame = false,
       return;
     }
 
-    const sat = Math.max(rect.width, rect.height) * SAT_RATIO;
+    const sat = Math.max(rect.width, rect.height, POINTER_SAT_MIN_PX) * SAT_RATIO;
     const k = Math.min(distance / sat, 1);
     setTarget((dx / distance) * k * EYE_MAX_X, (dy / distance) * k * EYE_MAX_Y);
   };
 
-  const setTargetFromTextFocus = (focus: MascotTextFocus) => {
-    setTarget(focus.xRatio * TEXT_ENTRY_X_BOOST * EYE_MAX_X, EYE_MAX_Y * TEXT_ENTRY_Y_FOCUS + focus.lineRatio * TEXT_ENTRY_LINE_Y);
-  };
-
   useEffect(() => {
-    if (textFocus) {
-      setTargetFromTextFocus(textFocus);
+    if (gaze.type === "input") {
+      setTargetFromPoint(gaze.target.clientX, gaze.target.clientY);
+      return;
     }
-  }, [textFocus]);
+    if (gaze.type === "center") {
+      setTarget(0, 0);
+    }
+  }, [gaze]);
 
   useEffect(() => {
-    onPointerFollowRef.current = onPointerFollow;
-  }, [onPointerFollow]);
+    onPointerGazeRef.current = onPointerGaze;
+  }, [onPointerGaze]);
 
   useEffect(() => {
     const onMove = (event: MouseEvent) => {
-      onPointerFollowRef.current?.();
+      onPointerGazeRef.current?.();
       setTargetFromPoint(event.clientX, event.clientY);
     };
 
@@ -231,24 +246,33 @@ export function Mascot({ className, onPointerFollow, showFaceDebugFrame = false,
     pressAnimationRef.current?.cancel();
     pressAnimationRef.current = root.animate(
       [
-        { transform: "scale(1, 1)" },
-        { transform: "scale(1.08, 0.92)" },
-        { transform: "scale(0.96, 1.06)" },
-        { transform: "scale(1.02, 0.98)" },
-        { transform: "scale(1, 1)" },
+        { offset: 0, transform: "translateY(0) rotateZ(0deg) scale(1, 1)" },
+        { offset: 0.2, transform: "translateY(1.45px) rotateZ(-0.7deg) scale(1.04, 0.975)" },
+        { offset: 0.43, transform: "translateY(-0.75px) rotateZ(0.55deg) scale(0.987, 1.012)" },
+        { offset: 0.64, transform: "translateY(0.38px) rotateZ(-0.28deg) scale(1.008, 0.997)" },
+        { offset: 0.82, transform: "translateY(-0.13px) rotateZ(0.12deg) scale(0.998, 1.001)" },
+        { offset: 1, transform: "translateY(0) rotateZ(0deg) scale(1, 1)" },
       ],
       {
-        duration: 360,
-        easing: "cubic-bezier(0.2, 0.9, 0.2, 1)",
+        duration: 1550,
+        easing: "cubic-bezier(0.2, 0.85, 0.18, 1)",
       },
     );
   };
 
   return (
-    <span ref={rootRef} aria-hidden="true" className={className} style={rootStyle} onPointerDown={bounce}>
+    <span
+      ref={rootRef}
+      aria-hidden="true"
+      className={className}
+      data-gaze={gaze.type}
+      data-mood={mood}
+      style={rootStyle}
+      onPointerDown={bounce}
+    >
       <svg data-slot="mascot-base" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
         <g data-slot="shadow">
-          <ellipse ref={shadowRef} cx="64" cy="113" fill="color-mix(in oklab, var(--primary) 18%, transparent)" rx="34" ry="7" />
+          <ellipse ref={shadowRef} cx="64" cy="113" fill="var(--mascot-shadow)" rx="34" ry="7" />
         </g>
       </svg>
 
@@ -256,12 +280,12 @@ export function Mascot({ className, onPointerFollow, showFaceDebugFrame = false,
         <svg data-slot="head-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
           <defs>
             <linearGradient id={faceID} x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="color-mix(in oklab, var(--primary) 78%, white 22%)" />
-              <stop offset="55%" stopColor="var(--primary)" />
-              <stop offset="100%" stopColor="color-mix(in oklab, var(--primary) 86%, black 14%)" />
+              <stop offset="0%" stopColor="var(--mascot-body-top)" />
+              <stop offset="55%" stopColor="var(--mascot-body-mid)" />
+              <stop offset="100%" stopColor="var(--mascot-body-bottom)" />
             </linearGradient>
             <linearGradient id={highlightID} x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="#ffffff" stopOpacity="0.26" />
+              <stop offset="0%" stopColor="var(--mascot-highlight)" />
               <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
             </linearGradient>
           </defs>
@@ -282,7 +306,7 @@ export function Mascot({ className, onPointerFollow, showFaceDebugFrame = false,
                 data-slot="arm-left-limb"
                 d="M30 85 C21 90 16 98 16 105"
                 fill="none"
-                stroke="color-mix(in oklab, var(--primary) 86%, black 14%)"
+                stroke="var(--mascot-limb)"
                 strokeLinecap="round"
                 strokeWidth="5.5"
               />
@@ -290,7 +314,7 @@ export function Mascot({ className, onPointerFollow, showFaceDebugFrame = false,
                 data-slot="arm-left-palm"
                 cx="16"
                 cy="106"
-                fill="color-mix(in oklab, var(--primary) 86%, black 14%)"
+                fill="var(--mascot-limb)"
                 r="7"
               />
             </g>
@@ -310,7 +334,7 @@ export function Mascot({ className, onPointerFollow, showFaceDebugFrame = false,
                 data-slot="arm-right-limb"
                 d="M98 85 C107 90 112 98 112 105"
                 fill="none"
-                stroke="color-mix(in oklab, var(--primary) 86%, black 14%)"
+                stroke="var(--mascot-limb)"
                 strokeLinecap="round"
                 strokeWidth="5.5"
               />
@@ -318,7 +342,7 @@ export function Mascot({ className, onPointerFollow, showFaceDebugFrame = false,
                 data-slot="arm-right-palm"
                 cx="112"
                 cy="106"
-                fill="color-mix(in oklab, var(--primary) 86%, black 14%)"
+                fill="var(--mascot-limb)"
                 r="7"
               />
             </g>
@@ -339,16 +363,16 @@ export function Mascot({ className, onPointerFollow, showFaceDebugFrame = false,
             <path
               d="M64 34 C65 28 63 23 60 18"
               fill="none"
-              stroke="color-mix(in oklab, var(--primary) 86%, white 14%)"
+              stroke="var(--mascot-antenna-stroke)"
               strokeLinecap="round"
               strokeWidth="4"
             />
             <circle
               cx="59"
               cy="16"
-              fill="var(--primary)"
+              fill="var(--mascot-antenna)"
               r="6"
-              stroke="color-mix(in oklab, var(--primary) 62%, white 38%)"
+              stroke="var(--mascot-antenna-stroke)"
               strokeWidth="2"
             />
           </g>
@@ -359,16 +383,32 @@ export function Mascot({ className, onPointerFollow, showFaceDebugFrame = false,
             <path
               ref={leftShadeRef}
               d="M31 45 C26 51 24 59 24 70 V86 C24 98 35 108 48 110 C36 103 31 93 31 79 Z"
-              fill="color-mix(in oklab, var(--primary) 76%, black 24%)"
+              fill="var(--mascot-side-shade)"
               opacity={SHADE_BASE_OPACITY}
             />
             <path
               ref={rightShadeRef}
               d="M97 45 C102 51 104 59 104 70 V86 C104 98 93 108 80 110 C92 103 97 93 97 79 Z"
-              fill="color-mix(in oklab, var(--primary) 76%, black 24%)"
+              fill="var(--mascot-side-shade)"
               opacity={SHADE_BASE_OPACITY}
             />
           </g>
+
+          {showHeadDebugFrame ? (
+            <rect
+              data-slot="head-debug-frame"
+              fill="none"
+              height="76"
+              rx="24"
+              stroke="#00d5ff"
+              strokeDasharray="3 3"
+              strokeWidth="2"
+              vectorEffect="non-scaling-stroke"
+              width="86"
+              x="21"
+              y="34"
+            />
+          ) : null}
         </svg>
 
         <span data-slot="face-layer" ref={faceLayerRef} style={faceLayerStyle}>
@@ -382,7 +422,8 @@ export function Mascot({ className, onPointerFollow, showFaceDebugFrame = false,
                   rx="6"
                   stroke="#ff7a00"
                   strokeDasharray="3 3"
-                  strokeWidth="1.5"
+                  strokeWidth="2"
+                  vectorEffect="non-scaling-stroke"
                   width="52"
                   x="38"
                   y="58"
@@ -442,6 +483,7 @@ function faceTransform(turnX: number, turnY: number): string {
   const skewX = -turnX * FACE_EXTRA_SKEW_DEG;
 
   return [
+    `translate(${turnX * FACE_SHIFT_X} ${turnY * FACE_SHIFT_Y})`,
     `translate(${FACE_CENTER_X} ${FACE_CENTER_Y})`,
     `skewX(${skewX})`,
     `scale(${scaleX} ${scaleY})`,

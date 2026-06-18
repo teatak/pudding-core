@@ -41,6 +41,21 @@ func TestRenameDoesNotAffectRecentOrdering(t *testing.T) {
 	if _, err := st.UpdateSession(context.Background(), "older", store.SessionUpdate{Title: &title}); err != nil {
 		t.Fatal(err)
 	}
+	pinned := true
+	pinnedOrder := int64(7)
+	updated, err := st.UpdateSession(context.Background(), "older", store.SessionUpdate{
+		Pinned:      &pinned,
+		PinnedOrder: &pinnedOrder,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated.Pinned {
+		t.Fatal("pinned flag was not persisted")
+	}
+	if updated.PinnedOrder != pinnedOrder {
+		t.Fatalf("pinned order was not persisted: %d", updated.PinnedOrder)
+	}
 	sessions, err := st.ListSessions(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -287,6 +302,12 @@ CREATE TABLE turns (
 	}
 	if !hasColumn(t, st.db, "sessions", "last_activity_at") {
 		t.Fatal("last_activity_at column was not added")
+	}
+	if !hasColumn(t, st.db, "sessions", "pinned") {
+		t.Fatal("pinned column was not added")
+	}
+	if !hasColumn(t, st.db, "sessions", "pinned_order") {
+		t.Fatal("pinned_order column was not added")
 	}
 }
 

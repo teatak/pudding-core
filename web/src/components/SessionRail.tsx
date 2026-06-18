@@ -2,10 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   Blocks,
-  CircleAlert,
   Ellipsis,
   MessageSquareText,
   PanelLeft,
+  Pin,
   TextCursorInput,
   MessageCirclePlus,
   Search,
@@ -13,7 +13,15 @@ import {
   Trash,
   Workflow,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  type PointerEvent as ReactPointerEvent,
+  type RefObject,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 
 import { deleteSession, listSessions, updateSession } from "@/api/client";
 import type { Session } from "@/api/client";
@@ -21,7 +29,6 @@ import { queryKeys } from "@/api/queryKeys";
 import { LanguageToggle } from "@/components/LanguageToggle";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -111,6 +118,41 @@ export function SessionRail({
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
   });
 
+  const pinMutation = useMutation({
+    mutationFn: ({ id, pinned, pinnedOrder }: { id: string; pinned: boolean; pinnedOrder: number }) =>
+      updateSession(token, id, { pinned, pinnedOrder }),
+    onMutate: async ({ id, pinned, pinnedOrder }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.sessions() });
+      const previous = queryClient.getQueryData<{ sessions: Session[] }>(queryKeys.sessions());
+      if (previous) {
+        queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), {
+          sessions: previous.sessions.map((session) =>
+            session.id === id ? { ...session, pinned, pinnedOrder } : session,
+          ),
+        });
+      }
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.sessions(), context.previous);
+      }
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
+  });
+
+  function nextPinnedOrder(sessionID: string) {
+    return Math.max(0, ...sessions.filter((session) => session.id !== sessionID).map((session) => session.pinnedOrder)) + 1;
+  }
+
+  function changePinned(id: string, pinned: boolean, pinnedOrder?: number) {
+    pinMutation.mutate({
+      id,
+      pinned,
+      pinnedOrder: pinned ? pinnedOrder ?? nextPinnedOrder(id) : 0,
+    });
+  }
+
   const deleteMutation = useMutation({
     mutationFn: (sessionID: string) => deleteSession(token, sessionID),
     onSuccess: async (_, sessionID) => {
@@ -188,6 +230,7 @@ export function SessionRail({
           },
         });
       }}
+      onPinChange={changePinned}
       onRefetch={() => void sessionsQuery.refetch()}
       onSelect={(id) => {
         hover.close();
@@ -318,6 +361,21 @@ function readTrafficInsetPx() {
   return Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--traffic-inset")) || 0;
 }
 
+function sortPinnedSessions(sessions: Session[]) {
+  return [...sessions].sort((left, right) => {
+    const leftOrder = left.pinnedOrder || Number.MAX_SAFE_INTEGER;
+    const rightOrder = right.pinnedOrder || Number.MAX_SAFE_INTEGER;
+    if (leftOrder !== rightOrder) {
+      return leftOrder - rightOrder;
+    }
+    return sessionActivityTime(right) - sessionActivityTime(left);
+  });
+}
+
+function sessionActivityTime(session: Session) {
+  return new Date(session.lastActivityAt || session.createdAt).getTime();
+}
+
 // hover 开合 + 点击钉住:面板内一旦发生点击(如打开主题/语言下拉),
 // 鼠标离开不再自动关闭,直到 popover 真正关闭。
 // suppress:收起边栏的动作刚结束时鼠标恰好停在触发器原位,此时不应
@@ -388,8 +446,16 @@ type RailPanelProps = {
   onSelect: (id: string) => void;
   onOpenSplit: (id: string) => void;
   onDelete: (id: string) => void;
+  onPinChange: (id: string, pinned: boolean, pinnedOrder?: number) => void;
   onRename: (id: string, title: string) => void;
   onRefetch: () => void;
+};
+
+type SessionDropGroup = "pinned" | "recents";
+
+type SessionDropTarget = {
+  group: SessionDropGroup;
+  index: number;
 };
 
 // 面板三段:新建 / 列表 / 脚部。四边间距由外层容器(aside / popover)统一给 8px,
@@ -406,10 +472,137 @@ function RailPanel({
   onSelect,
   onOpenSplit,
   onDelete,
+  onPinChange,
   onRename,
   onRefetch,
 }: RailPanelProps) {
   const { t } = useI18n();
+  const [draggingSessionID, setDraggingSessionID] = useState<string | null>(null);
+  const [dragTarget, setDragTarget] = useState<SessionDropTarget | null>(null);
+  const [dragPreview, setDragPreview] = useState<{
+    id: string;
+    title: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const dragPreviewRef = useRef<HTMLDivElement | null>(null);
+  const dragPreviewPointRef = useRef({ x: 0, y: 0 });
+  const dragPreviewFrameRef = useRef<number | null>(null);
+  const pinnedSessions = sortPinnedSessions(sessions.filter((session) => session.pinned));
+  const recentSessions = sessions.filter((session) => !session.pinned);
+  const showPinnedGroup = pinnedSessions.length > 0 || Boolean(draggingSessionID);
+
+  useEffect(() => {
+    if (!draggingSessionID) {
+      return;
+    }
+    const cursorLock = document.createElement("style");
+    cursorLock.textContent = "* { cursor: grabbing !important; }";
+    document.head.append(cursorLock);
+    return () => {
+      cursorLock.remove();
+    };
+  }, [draggingSessionID]);
+
+  useEffect(() => {
+    return () => {
+      if (dragPreviewFrameRef.current !== null) {
+        window.cancelAnimationFrame(dragPreviewFrameRef.current);
+      }
+    };
+  }, []);
+
+  function clearDragState() {
+    if (dragPreviewFrameRef.current !== null) {
+      window.cancelAnimationFrame(dragPreviewFrameRef.current);
+      dragPreviewFrameRef.current = null;
+    }
+    setDraggingSessionID(null);
+    setDragTarget(null);
+    setDragPreview(null);
+  }
+
+  function moveDragPreview(clientX: number, clientY: number) {
+    dragPreviewPointRef.current = { x: clientX, y: clientY };
+    if (dragPreviewFrameRef.current !== null) {
+      window.cancelAnimationFrame(dragPreviewFrameRef.current);
+    }
+    dragPreviewFrameRef.current = window.requestAnimationFrame(() => {
+      dragPreviewFrameRef.current = null;
+      if (dragPreviewRef.current) {
+        dragPreviewRef.current.style.transform = dragPreviewTransform(clientX, clientY);
+      }
+    });
+  }
+
+  function findDropTarget(clientX: number, clientY: number): SessionDropTarget | null {
+    const target = document.elementFromPoint(clientX, clientY);
+    const group = target?.closest<HTMLElement>("[data-session-drop-group]");
+    const value = group?.dataset.sessionDropGroup;
+    if (!group || (value !== "pinned" && value !== "recents")) {
+      return null;
+    }
+    const itemElements = Array.from(group.querySelectorAll<HTMLElement>("[data-session-item-id]")).filter(
+      (item) => item.dataset.sessionItemId !== draggingSessionID,
+    );
+    const index = itemElements.findIndex((item) => {
+      const rect = item.getBoundingClientRect();
+      return clientY < rect.top + rect.height / 2;
+    });
+    return {
+      group: value,
+      index: index === -1 ? itemElements.length : index,
+    };
+  }
+
+  function handlePointerDragStart(sessionID: string, clientX: number, clientY: number) {
+    const session = sessions.find((item) => item.id === sessionID);
+    dragPreviewPointRef.current = { x: clientX, y: clientY };
+    setDraggingSessionID(sessionID);
+    setDragPreview({
+      id: sessionID,
+      title: session?.title || t("session.untitled"),
+      x: clientX,
+      y: clientY,
+    });
+  }
+
+  function handlePointerDragMove(clientX: number, clientY: number) {
+    moveDragPreview(clientX, clientY);
+    setDragTarget(findDropTarget(clientX, clientY));
+  }
+
+  function handlePointerDrop(sessionID: string, clientX: number, clientY: number) {
+    const target = findDropTarget(clientX, clientY);
+    const session = sessions.find((item) => item.id === sessionID);
+    if (!session || !target) {
+      clearDragState();
+      return;
+    }
+    if (target.group === "recents") {
+      if (session.pinned) {
+        onPinChange(session.id, false, 0);
+      }
+      clearDragState();
+      return;
+    }
+
+    const pinnedWithoutDragged = pinnedSessions.filter((item) => item.id !== sessionID);
+    const insertIndex = Math.max(0, Math.min(target.index, pinnedWithoutDragged.length));
+    const nextPinned = [
+      ...pinnedWithoutDragged.slice(0, insertIndex),
+      { ...session, pinned: true },
+      ...pinnedWithoutDragged.slice(insertIndex),
+    ];
+    nextPinned.forEach((item, index) => {
+      const pinnedOrder = index + 1;
+      if (!item.pinned || item.pinnedOrder !== pinnedOrder || item.id === sessionID) {
+        onPinChange(item.id, true, pinnedOrder);
+      }
+    });
+    clearDragState();
+  }
+
   return (
     <SidebarProvider className="!contents">
       <Sidebar className="min-h-0 w-full flex-1 bg-transparent" collapsible="none">
@@ -445,23 +638,78 @@ function RailPanel({
           </SidebarMenu>
         </SidebarHeader>
         <SidebarContent className="py-2 overscroll-contain">
-          <SidebarGroup>
-            <SidebarGroupLabel>{t("session.recents")}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SessionItems
-                deletePending={deletePending}
-                isError={isError}
-                isLoading={isLoading}
-                selectedSessionID={selectedSessionID}
-                sessions={sessions}
-                onDelete={onDelete}
-                onOpenSplit={onOpenSplit}
-                onRefetch={onRefetch}
-                onRename={onRename}
-                onSelect={onSelect}
-              />
-            </SidebarGroupContent>
-          </SidebarGroup>
+          {isLoading ? (
+            <SessionListSkeleton />
+          ) : isError ? (
+            <SessionListError onRefetch={onRefetch} />
+          ) : (
+            <>
+              {showPinnedGroup ? (
+                <SidebarGroup
+                  data-session-drop-group="pinned"
+                >
+                  <SidebarGroupLabel>{t("session.pinned")}</SidebarGroupLabel>
+                  <SidebarGroupContent>
+                    <SessionItems
+                      deletePending={deletePending}
+                      selectedSessionID={selectedSessionID}
+                      sessions={pinnedSessions}
+                      showEmptyState={false}
+                      draggingSessionID={draggingSessionID}
+                      dropIndex={dragTarget?.group === "pinned" ? dragTarget.index : null}
+                      showEmptyDropTarget={Boolean(draggingSessionID && pinnedSessions.length === 0)}
+                      onDelete={onDelete}
+                      onOpenSplit={onOpenSplit}
+                      onPinChange={onPinChange}
+                      onPointerDragCancel={clearDragState}
+                      onPointerDragEnd={handlePointerDrop}
+                      onPointerDragMove={handlePointerDragMove}
+                      onPointerDragStart={handlePointerDragStart}
+                      onRename={onRename}
+                      onSelect={onSelect}
+                    />
+                  </SidebarGroupContent>
+                </SidebarGroup>
+              ) : null}
+              <SidebarGroup>
+                <SidebarGroupLabel>{t("session.recents")}</SidebarGroupLabel>
+                <SidebarGroupContent
+                  className={cn(
+                    draggingSessionID && "min-h-8",
+                    dragTarget?.group === "recents" &&
+                      "rounded-md outline outline-1 outline-dashed outline-sidebar-ring/70",
+                  )}
+                  data-session-drop-group="recents"
+                >
+                  <SessionItems
+                    deletePending={deletePending}
+                    selectedSessionID={selectedSessionID}
+                    sessions={recentSessions}
+                    showEmptyState={sessions.length === 0}
+                    draggingSessionID={draggingSessionID}
+                    dropIndex={null}
+                    showEmptyDropTarget={false}
+                    onDelete={onDelete}
+                    onOpenSplit={onOpenSplit}
+                    onPinChange={onPinChange}
+                    onPointerDragCancel={clearDragState}
+                    onPointerDragEnd={handlePointerDrop}
+                    onPointerDragMove={handlePointerDragMove}
+                    onPointerDragStart={handlePointerDragStart}
+                    onRename={onRename}
+                    onSelect={onSelect}
+                  />
+                </SidebarGroupContent>
+              </SidebarGroup>
+            </>
+          )}
+          {dragPreview ? (
+            <SessionDragPreview
+              point={dragPreviewPointRef.current}
+              preview={dragPreview}
+              previewRef={dragPreviewRef}
+            />
+          ) : null}
         </SidebarContent>
         <SidebarFooter>
           <div className="flex items-center gap-1">
@@ -476,58 +724,108 @@ function RailPanel({
   );
 }
 
+function dragPreviewTransform(clientX: number, clientY: number) {
+  return `translate3d(${clientX + 12}px, ${clientY}px, 0) translateY(-50%)`;
+}
+
+function SessionDragPreview({
+  point,
+  preview,
+  previewRef,
+}: {
+  point: {
+    x: number;
+    y: number;
+  };
+  preview: {
+    title: string;
+    x: number;
+    y: number;
+  };
+  previewRef: RefObject<HTMLDivElement | null>;
+}) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+  return createPortal(
+    <div
+      ref={previewRef}
+      aria-hidden="true"
+      className="pointer-events-none fixed top-0 left-0 z-50 max-w-[220px] select-none rounded-md bg-popover px-3 py-2 text-sm text-popover-foreground shadow-lg ring-1 ring-border/70 will-change-transform"
+      style={{
+        transform: dragPreviewTransform(point.x || preview.x, point.y || preview.y),
+      }}
+    >
+      <div className="truncate">{preview.title}</div>
+    </div>,
+    document.body,
+  );
+}
+
 type SessionItemsProps = {
   sessions: Session[];
   selectedSessionID: string | undefined;
-  isLoading: boolean;
-  isError: boolean;
   deletePending: boolean;
+  showEmptyState?: boolean;
+  draggingSessionID: string | null;
+  dropIndex: number | null;
+  showEmptyDropTarget: boolean;
   onSelect: (id: string) => void;
   onOpenSplit: (id: string) => void;
+  onPinChange: (id: string, pinned: boolean, pinnedOrder?: number) => void;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
-  onRefetch: () => void;
+  onPointerDragStart: (id: string, clientX: number, clientY: number) => void;
+  onPointerDragMove: (clientX: number, clientY: number) => void;
+  onPointerDragEnd: (id: string, clientX: number, clientY: number) => void;
+  onPointerDragCancel: () => void;
 };
+
+function SessionListSkeleton() {
+  return (
+    <div className="grid gap-1">
+      <Skeleton className="h-8 rounded-md" />
+      <Skeleton className="h-8 rounded-md" />
+      <Skeleton className="h-8 rounded-md" />
+    </div>
+  );
+}
+
+function SessionListError({ onRefetch }: { onRefetch: () => void }) {
+  const { t } = useI18n();
+  return (
+    <div className="grid justify-items-center gap-2 px-3 py-6 text-center text-xs text-muted-foreground">
+      <div>{t("session.loadFailed")}</div>
+      <Button className="h-7 px-2 text-xs" size="sm" type="button" variant="outline" onClick={onRefetch}>
+        {t("common.refresh")}
+      </Button>
+    </div>
+  );
+}
 
 function SessionItems({
   sessions,
   selectedSessionID,
-  isLoading,
-  isError,
   deletePending,
+  showEmptyState = true,
+  draggingSessionID,
+  dropIndex,
+  showEmptyDropTarget,
   onSelect,
   onOpenSplit,
+  onPinChange,
   onDelete,
   onRename,
-  onRefetch,
+  onPointerDragStart,
+  onPointerDragMove,
+  onPointerDragEnd,
+  onPointerDragCancel,
 }: SessionItemsProps) {
   const { t } = useI18n();
   // 实时运行态:sessions 快照(15s 兜底)与 SSE overlay 双源取或
   const runningTurns = useOverlayStore((state) => state.runningTurns);
 
-  if (isLoading) {
-    return (
-      <div className="grid gap-2">
-        <Skeleton className="h-12" />
-        <Skeleton className="h-12" />
-        <Skeleton className="h-12" />
-      </div>
-    );
-  }
-  if (isError) {
-    return (
-      <Alert variant="destructive">
-        <CircleAlert className="h-3.5 w-3.5" />
-        <AlertDescription className="grid gap-2">
-          <span>{t("session.loadFailed")}</span>
-          <Button size="sm" type="button" variant="outline" onClick={onRefetch}>
-            {t("common.refresh")}
-          </Button>
-        </AlertDescription>
-      </Alert>
-    );
-  }
-  if (sessions.length === 0) {
+  if (sessions.length === 0 && showEmptyState) {
     return (
       <div className="grid justify-items-center gap-2 px-2 py-10 text-center text-sm text-muted-foreground">
         <MessageSquareText className="h-5 w-5" />
@@ -535,23 +833,54 @@ function SessionItems({
       </div>
     );
   }
+  const visibleSessions = sessions.filter((session) => session.id !== draggingSessionID);
+  if (visibleSessions.length === 0 && (dropIndex !== null || showEmptyDropTarget)) {
+    return (
+      <SidebarMenu className="gap-1">
+        <SessionDropIndicator active={dropIndex !== null} />
+      </SidebarMenu>
+    );
+  }
+  if (visibleSessions.length === 0) {
+    return null;
+  }
 
   return (
     <SidebarMenu className="gap-1">
-      {sessions.map((session) => (
-        <SessionItem
-          key={session.id}
-          deletePending={deletePending}
-          running={session.running || Boolean(runningTurns[session.id])}
-          selected={session.id === selectedSessionID}
-          session={session}
-          onDelete={() => onDelete(session.id)}
-          onOpenSplit={() => onOpenSplit(session.id)}
-          onRename={(title) => onRename(session.id, title)}
-          onSelect={() => onSelect(session.id)}
-        />
+      {visibleSessions.map((session, index) => (
+        <Fragment key={session.id}>
+          {dropIndex === index ? <SessionDropIndicator active /> : null}
+          <SessionItem
+            deletePending={deletePending}
+            running={session.running || Boolean(runningTurns[session.id])}
+            selected={session.id === selectedSessionID}
+            session={session}
+            onDelete={() => onDelete(session.id)}
+            onOpenSplit={() => onOpenSplit(session.id)}
+            onPinChange={(pinned) => onPinChange(session.id, pinned)}
+            onPointerDragCancel={onPointerDragCancel}
+            onPointerDragEnd={(clientX, clientY) => onPointerDragEnd(session.id, clientX, clientY)}
+            onPointerDragMove={onPointerDragMove}
+            onPointerDragStart={(clientX, clientY) => onPointerDragStart(session.id, clientX, clientY)}
+            onRename={(title) => onRename(session.id, title)}
+            onSelect={() => onSelect(session.id)}
+          />
+        </Fragment>
       ))}
+      {dropIndex === visibleSessions.length ? <SessionDropIndicator active /> : null}
     </SidebarMenu>
+  );
+}
+
+function SessionDropIndicator({ active }: { active: boolean }) {
+  return (
+    <li
+      aria-hidden="true"
+      className={cn(
+        "h-8 rounded-md border border-dashed transition-colors",
+        active ? "border-sidebar-ring/70 bg-sidebar-accent/20" : "border-sidebar-border/70",
+      )}
+    />
   );
 }
 
@@ -562,8 +891,13 @@ type SessionItemProps = {
   deletePending: boolean;
   onSelect: () => void;
   onOpenSplit: () => void;
+  onPinChange: (pinned: boolean) => void;
   onDelete: () => void;
   onRename: (title: string) => void;
+  onPointerDragStart: (clientX: number, clientY: number) => void;
+  onPointerDragMove: (clientX: number, clientY: number) => void;
+  onPointerDragEnd: (clientX: number, clientY: number) => void;
+  onPointerDragCancel: () => void;
 };
 
 function SessionItem({
@@ -573,8 +907,13 @@ function SessionItem({
   deletePending,
   onSelect,
   onOpenSplit,
+  onPinChange,
   onDelete,
   onRename,
+  onPointerDragStart,
+  onPointerDragMove,
+  onPointerDragEnd,
+  onPointerDragCancel,
 }: SessionItemProps) {
   const { t, locale } = useI18n();
   const title = session.title || t("session.untitled");
@@ -584,6 +923,14 @@ function SessionItem({
   const [draft, setDraft] = useState(session.title);
   const inputRef = useRef<HTMLInputElement>(null);
   const editAfterMenuCloseRef = useRef(false);
+  const pointerDragRef = useRef<{
+    pointerID: number;
+    startX: number;
+    startY: number;
+    dragging: boolean;
+    cleanup?: () => void;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
 
   useEffect(() => {
     if (!editing) {
@@ -619,6 +966,112 @@ function SessionItem({
       onRename(nextTitle);
     }
     setEditing(false);
+  }
+
+  function handlePointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) {
+      return;
+    }
+    event.currentTarget.setPointerCapture(event.pointerId);
+    pointerDragRef.current = {
+      pointerID: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      dragging: false,
+    };
+  }
+
+  function handlePointerMove(event: ReactPointerEvent<HTMLButtonElement>) {
+    const drag = pointerDragRef.current;
+    if (!drag || drag.pointerID !== event.pointerId) {
+      return;
+    }
+    const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+    if (!drag.dragging && distance < 6) {
+      return;
+    }
+    if (!drag.dragging) {
+      drag.dragging = true;
+      bindWindowPointerDrag(event.pointerId);
+      event.currentTarget.setPointerCapture(event.pointerId);
+      onPointerDragStart(event.clientX, event.clientY);
+    }
+    event.preventDefault();
+    onPointerDragMove(event.clientX, event.clientY);
+  }
+
+  function finishPointerDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    const drag = pointerDragRef.current;
+    if (!drag || drag.pointerID !== event.pointerId) {
+      return;
+    }
+    pointerDragRef.current = null;
+    drag.cleanup?.();
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (!drag.dragging) {
+      return;
+    }
+    event.preventDefault();
+    suppressClickRef.current = true;
+    onPointerDragEnd(event.clientX, event.clientY);
+    window.setTimeout(() => {
+      suppressClickRef.current = false;
+    }, 0);
+  }
+
+  function cancelPointerDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    const drag = pointerDragRef.current;
+    if (!drag || drag.pointerID !== event.pointerId) {
+      return;
+    }
+    pointerDragRef.current = null;
+    drag.cleanup?.();
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    onPointerDragCancel();
+  }
+
+  function bindWindowPointerDrag(pointerID: number) {
+    const drag = pointerDragRef.current;
+    if (!drag || drag.cleanup) {
+      return;
+    }
+    const handleMove = (event: PointerEvent) => {
+      if (event.pointerId !== pointerID || !pointerDragRef.current?.dragging) {
+        return;
+      }
+      event.preventDefault();
+      onPointerDragMove(event.clientX, event.clientY);
+    };
+    const handleEnd = (event: PointerEvent) => {
+      const current = pointerDragRef.current;
+      if (event.pointerId !== pointerID || !current) {
+        return;
+      }
+      pointerDragRef.current = null;
+      current.cleanup?.();
+      if (current.dragging) {
+        event.preventDefault();
+        suppressClickRef.current = true;
+        onPointerDragEnd(event.clientX, event.clientY);
+        window.setTimeout(() => {
+          suppressClickRef.current = false;
+        }, 0);
+      } else {
+        onPointerDragCancel();
+      }
+    };
+    drag.cleanup = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      window.removeEventListener("pointercancel", handleEnd);
+    };
+    window.addEventListener("pointermove", handleMove, { passive: false });
+    window.addEventListener("pointerup", handleEnd);
+    window.addEventListener("pointercancel", handleEnd);
   }
 
   return (
@@ -658,12 +1111,25 @@ function SessionItem({
           isActive={selected || actionsOpen}
         >
           <button
+            className="cursor-grab active:cursor-grabbing"
+            data-session-item-id={session.id}
             type="button"
-            onClick={onSelect}
+            onClick={(event) => {
+              if (suppressClickRef.current) {
+                event.preventDefault();
+                event.stopPropagation();
+                return;
+              }
+              onSelect();
+            }}
             onDoubleClick={(event) => {
               event.preventDefault();
               startEditing();
             }}
+            onPointerCancel={cancelPointerDrag}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={finishPointerDrag}
           >
             <SessionRunningSlot running={running} />
             <span className="min-w-0 flex-1 truncate" title={session.title || undefined}>
@@ -709,6 +1175,10 @@ function SessionItem({
                 startEditing();
               }}
             >
+              <DropdownMenuItem className="whitespace-nowrap" onSelect={() => onPinChange(!session.pinned)}>
+                <Pin />
+                {session.pinned ? t("session.unpin") : t("session.pin")}
+              </DropdownMenuItem>
               <DropdownMenuItem className="whitespace-nowrap" onSelect={onOpenSplit}>
                 <Rows2 />
                 {t("session.openSplit")}

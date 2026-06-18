@@ -33,6 +33,8 @@ const sessionRequest = z.object({
   title: z.string().optional(),
   provider: z.string().optional(),
   model: z.string().optional(),
+  pinned: z.boolean().optional(),
+  pinnedOrder: z.number().optional(),
 });
 
 export type SubmitResult = z.infer<typeof submitResponse>;

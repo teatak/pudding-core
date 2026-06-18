@@ -115,6 +115,15 @@
     --dropdown-destructive-hover: var(--destructive-hover);
     --confirm-destructive: var(--destructive);
     --confirm-destructive-hover: color-mix(in oklch, var(--destructive-hover), black 6%);
+    --mascot-body-top: oklch(0.68 0.19 277);
+    --mascot-body-mid: oklch(0.52 0.25 277);
+    --mascot-body-bottom: oklch(0.39 0.22 277);
+    --mascot-highlight: oklch(1 0 0 / 26%);
+    --mascot-limb: oklch(0.44 0.23 277);
+    --mascot-antenna: oklch(0.55 0.22 277);
+    --mascot-antenna-stroke: oklch(0.74 0.13 277);
+    --mascot-side-shade: oklch(0.3 0.18 277);
+    --mascot-shadow: oklch(0.52 0.18 277 / 18%);
 }
 
 html[data-shell="mac"] {
@@ -217,6 +226,15 @@ html[data-shell] .pudding-markdown * {
     --dropdown-destructive-hover: var(--destructive-hover);
     --confirm-destructive: color-mix(in oklch, var(--destructive), black 22%);
     --confirm-destructive-hover: color-mix(in oklch, var(--destructive-hover), black 14%);
+    --mascot-body-top: oklch(0.72 0.16 277);
+    --mascot-body-mid: oklch(0.56 0.21 277);
+    --mascot-body-bottom: oklch(0.44 0.2 277);
+    --mascot-highlight: oklch(1 0 0 / 32%);
+    --mascot-limb: oklch(0.5 0.2 277);
+    --mascot-antenna: oklch(0.6 0.2 277);
+    --mascot-antenna-stroke: oklch(0.77 0.11 277);
+    --mascot-side-shade: oklch(0.34 0.16 277);
+    --mascot-shadow: oklch(0.68 0.12 277 / 20%);
 }
 
 [data-slot="dialog-overlay"],

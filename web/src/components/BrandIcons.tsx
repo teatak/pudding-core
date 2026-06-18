@@ -1,20 +1,19 @@
-// 品牌 logo SVG 集合 — app icon 风格(实色圆角方块底 + 内嵌品牌 logo)。
-// 不依赖网络资源,纯 path d 内嵌。所有 viewBox 统一 24×24,调用方用
-// className 控制外框尺寸(h-10 w-10 等)。
+// 品牌 logo SVG 集合。
+// BrandIcon 统一负责背景、圆角和尺寸;单个 SVG 只作为白色 mark 使用。
 //
 // 数据来源:simple-icons.org (gemini / openai / claude) + 文字 fallback (mimo)。
 // 各厂商品牌 / 商标 © 各自所有,这里只用于 UI 标识用途,不做商品化。
 //
 // app icon 设计原则:
-//   1. 全图填充 24×24 viewBox,外层不再需要 bg 容器,直接套尺寸即可
+//   1. 背景由 BrandIcon 自己画,调用方可选择圆形或 rx=4 圆角方形
 //   2. logo path 居中缩到 60%(translate 4.8 + scale 0.6),四周留 20% padding
-//      避免 logo 顶到方块边沿(参考 iOS Human Interface Guidelines)
-//   3. logo 一律白色 fill — 跟实色底形成最高对比,品牌色由底色承载
-//      唯一例外:Gemini 用 Google 官方 brand gradient,在白底反衬不出渐变,
-//      所以保留渐变 logo + 白底(跟 Google AI Studio 风格一致)
-//   4. rx=4 圆角等比 app icon 风格;白底图标带轻描边避免浅色背景丢边界
+//   3. mark 统一强制为白色/currentColor;Gemini/Ollama 也只保留轮廓 mark,
+//      由 BrandIcon 给它们单独配置合适的底色
 
+import type { CSSProperties } from "react";
 import { useId } from "react";
+
+import { cn } from "@/lib/utils";
 
 export function GeminiIcon({ className }: { className?: string }) {
   // useId 防止同页面多次渲染时 gradient id 冲突(SSR / list 渲染都安全)
@@ -288,13 +287,42 @@ export function OllamaIcon({ className }: { className?: string }) {
   );
 }
 
-// 名称 → 品牌图标映射:profile 名或 preset id 命中即显示,未命中返回 null
-export function BrandIcon({ name, className }: { name: string; className?: string }) {
+const brandBackgrounds: Record<string, string> = {
+  deepseek: "#4D6BFE",
+  gemini: "#3186FF",
+  openai: "#0D0D0D",
+  qwen: "#615CED",
+  mimo: "#FF6900",
+  moonshot: "#1A237E",
+  zhipu: "#3859FF",
+  openrouter: "#000000",
+  ollama: "#111111",
+  claude: "#D97757",
+  grok: "#000000",
+};
+
+function normalizeBrandName(name: string) {
   switch (name.toLowerCase()) {
+    case "google":
+      return "gemini";
+    case "kimi":
+      return "moonshot";
+    case "glm":
+      return "zhipu";
+    case "local":
+      return "ollama";
+    case "anthropic":
+      return "claude";
+    default:
+      return name.toLowerCase();
+  }
+}
+
+function BrandMark({ name, className }: { name: string; className?: string }) {
+  switch (normalizeBrandName(name)) {
     case "deepseek":
       return <DeepSeekIcon className={className} />;
     case "gemini":
-    case "google":
       return <GeminiIcon className={className} />;
     case "openai":
       return <OpenAIIcon className={className} />;
@@ -303,22 +331,58 @@ export function BrandIcon({ name, className }: { name: string; className?: strin
     case "mimo":
       return <MimoIcon className={className} />;
     case "moonshot":
-    case "kimi":
       return <MoonshotIcon className={className} />;
     case "zhipu":
-    case "glm":
       return <ZhipuIcon className={className} />;
     case "openrouter":
       return <OpenRouterIcon className={className} />;
     case "ollama":
-    case "local":
       return <OllamaIcon className={className} />;
     case "claude":
-    case "anthropic":
       return <ClaudeIcon className={className} />;
     case "grok":
       return <GrokIcon className={className} />;
     default:
       return null;
   }
+}
+
+// 名称 → 品牌图标映射:profile 名或 preset id 命中即显示,未命中返回 null
+export function BrandIcon({
+  name,
+  className,
+  iconClassName,
+  shape = "rounded",
+}: {
+  name: string;
+  className?: string;
+  iconClassName?: string;
+  shape?: "rounded" | "circle";
+}) {
+  const normalizedName = normalizeBrandName(name);
+  if (!brandBackgrounds[normalizedName]) {
+    return null;
+  }
+
+  return (
+    <span
+      className={cn(
+        "relative inline-grid shrink-0 place-items-center text-white",
+        className,
+      )}
+      style={{ "--brand-bg": brandBackgrounds[normalizedName] } as CSSProperties}
+    >
+      <svg aria-hidden className="absolute inset-0 size-full" viewBox="0 0 24 24">
+        {shape === "circle" ? (
+          <circle cx="12" cy="12" fill="var(--brand-bg)" r="11.75" />
+        ) : (
+          <rect fill="var(--brand-bg)" height="24" rx="4" width="24" />
+        )}
+      </svg>
+      <BrandMark
+        className={cn("relative size-full [&>rect]:hidden [&_path]:fill-current [&_text]:fill-current", iconClassName)}
+        name={normalizedName}
+      />
+    </span>
+  );
 }

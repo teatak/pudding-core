@@ -104,6 +104,12 @@ func (m *Memstore) UpdateSession(_ context.Context, id string, upd store.Session
 	if upd.Model != nil {
 		s.Model = *upd.Model
 	}
+	if upd.Pinned != nil {
+		s.Pinned = *upd.Pinned
+	}
+	if upd.PinnedOrder != nil {
+		s.PinnedOrder = *upd.PinnedOrder
+	}
 	s.UpdatedAt = time.Now()
 	cp := *s
 	return &cp, nil

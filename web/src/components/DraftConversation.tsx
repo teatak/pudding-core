@@ -9,7 +9,7 @@ import { z } from "zod";
 import { APIError, createSession, deleteSession, submitMessage, type Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
-import { Mascot, type MascotTextFocus } from "@/components/Mascot";
+import { Mascot, type MascotGaze, type MascotGazePoint } from "@/components/Mascot";
 import { ModelPicker } from "@/components/ModelPicker";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,25 +31,28 @@ const suggestionKeys = ["draft.suggest.1", "draft.suggest.2", "draft.suggest.3"]
 export function DraftConversation({ token }: { token: string }) {
   const { t } = useI18n();
   const [quickSubmit, setQuickSubmit] = useState<QuickSubmit | null>(null);
-  const [mascotTextFocus, setMascotTextFocus] = useState<MascotTextFocus | null>(null);
-  const clearMascotTextFocus = useCallback(() => {
-    setMascotTextFocus(null);
+  const [mascotGaze, setMascotGaze] = useState<MascotGaze>({ type: "pointer" });
+  const setMascotPointerGaze = useCallback(() => {
+    setMascotGaze((current) => (current.type === "pointer" ? current : { type: "pointer" }));
+  }, []);
+  const setMascotInputGaze = useCallback((target: MascotGazePoint | null) => {
+    setMascotGaze(target ? { type: "input", target } : { type: "pointer" });
   }, []);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex min-h-0 flex-1 flex-col justify-center px-4 pb-20">
-        <div className="flex flex-col items-center justify-center">
+        <div className="flex items-center justify-center gap-3">
           <Mascot
-            showFaceDebugFrame
-            className="size-32 overflow-visible"
-            textFocus={mascotTextFocus}
-            onPointerFollow={clearMascotTextFocus}
+            className="size-14 overflow-visible"
+            gaze={mascotGaze}
+            mood="idle"
+            onPointerGaze={setMascotPointerGaze}
           />
-          <h1 className="mt-4 text-3xl font-medium text-foreground">{t("draft.title")}</h1>
+          <h1 className="text-3xl font-medium text-foreground">{t("draft.title")}</h1>
         </div>
         <div className="mt-14 flex flex-col">
-          <DraftComposer quickSubmit={quickSubmit} token={token} onMascotTextFocusChange={setMascotTextFocus} />
+          <DraftComposer quickSubmit={quickSubmit} token={token} onMascotInputGazeChange={setMascotInputGaze} />
           <ChatColumn className="mt-8 flex flex-wrap items-center justify-center gap-2 px-2">
             {suggestionKeys.map((key, index) => {
               const text = t(key);
@@ -74,11 +77,11 @@ export function DraftConversation({ token }: { token: string }) {
 function DraftComposer({
   token,
   quickSubmit,
-  onMascotTextFocusChange,
+  onMascotInputGazeChange,
 }: {
   token: string;
   quickSubmit: QuickSubmit | null;
-  onMascotTextFocusChange: (focus: MascotTextFocus | null) => void;
+  onMascotInputGazeChange: (target: MascotGazePoint | null) => void;
 }) {
   const navigate = useNavigate({ from: "/" });
   const queryClient = useQueryClient();
@@ -93,7 +96,7 @@ function DraftComposer({
   const draftIDRef = useRef<string>(crypto.randomUUID());
   const quickSubmitIDRef = useRef<number | null>(null);
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
-  const mascotFocusRafRef = useRef(0);
+  const mascotGazeRafRef = useRef(0);
   const form = useForm<DraftValue>({
     resolver: zodResolver(draftSchema),
     defaultValues: { text: draftText },
@@ -101,32 +104,32 @@ function DraftComposer({
   const canSend = Boolean(form.watch("text").trim());
   const textField = form.register("text");
 
-  const updateMascotTextFocus = useCallback(() => {
+  const updateMascotInputGaze = useCallback(() => {
     const textArea = textAreaRef.current;
     if (!textArea || document.activeElement !== textArea) {
       return;
     }
-    onMascotTextFocusChange(mascotTextFocusFromCaret(textArea));
-  }, [onMascotTextFocusChange]);
+    onMascotInputGazeChange(mascotGazePointFromCaret(textArea));
+  }, [onMascotInputGazeChange]);
 
-  const scheduleMascotTextFocus = useCallback(() => {
-    if (mascotFocusRafRef.current) {
-      window.cancelAnimationFrame(mascotFocusRafRef.current);
+  const scheduleMascotInputGaze = useCallback(() => {
+    if (mascotGazeRafRef.current) {
+      window.cancelAnimationFrame(mascotGazeRafRef.current);
     }
-    mascotFocusRafRef.current = window.requestAnimationFrame(() => {
-      mascotFocusRafRef.current = 0;
-      updateMascotTextFocus();
+    mascotGazeRafRef.current = window.requestAnimationFrame(() => {
+      mascotGazeRafRef.current = 0;
+      updateMascotInputGaze();
     });
-  }, [updateMascotTextFocus]);
+  }, [updateMascotInputGaze]);
 
   useEffect(() => {
     return () => {
-      if (mascotFocusRafRef.current) {
-        window.cancelAnimationFrame(mascotFocusRafRef.current);
+      if (mascotGazeRafRef.current) {
+        window.cancelAnimationFrame(mascotGazeRafRef.current);
       }
-      onMascotTextFocusChange(null);
+      onMascotInputGazeChange(null);
     };
-  }, [onMascotTextFocusChange]);
+  }, [onMascotInputGazeChange]);
 
   const submitMutation = useMutation({
     mutationFn: async (value: DraftValue) => {
@@ -224,12 +227,12 @@ function DraftComposer({
   };
   const handleTextBlur = (event: FocusEvent<HTMLTextAreaElement>) => {
     textField.onBlur(event);
-    onMascotTextFocusChange(null);
+    onMascotInputGazeChange(null);
   };
   const handleTextChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     void textField.onChange(event);
     setDraftText(event.currentTarget.value);
-    scheduleMascotTextFocus();
+    scheduleMascotInputGaze();
   };
   const handleTextKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -238,7 +241,7 @@ function DraftComposer({
         void form.handleSubmit(submitDraft)();
       }
     }
-    scheduleMascotTextFocus();
+    scheduleMascotInputGaze();
   };
 
   return (
@@ -254,12 +257,12 @@ function DraftComposer({
               ref={setTextAreaRef}
               onBlur={handleTextBlur}
               onChange={handleTextChange}
-              onClick={scheduleMascotTextFocus}
-              onFocus={scheduleMascotTextFocus}
+              onClick={scheduleMascotInputGaze}
+              onFocus={scheduleMascotInputGaze}
               onKeyDown={handleTextKeyDown}
-              onKeyUp={scheduleMascotTextFocus}
-              onMouseUp={scheduleMascotTextFocus}
-              onSelect={scheduleMascotTextFocus}
+              onKeyUp={scheduleMascotInputGaze}
+              onMouseUp={scheduleMascotInputGaze}
+              onSelect={scheduleMascotInputGaze}
             />
           </div>
           <div className="flex items-center justify-between gap-2 px-2 pb-2">
@@ -307,16 +310,9 @@ function removeCachedSession(queryClient: ReturnType<typeof useQueryClient>, ses
   });
 }
 
-function mascotTextFocusFromCaret(textArea: HTMLTextAreaElement): MascotTextFocus {
-  const rect = textArea.getBoundingClientRect();
+function mascotGazePointFromCaret(textArea: HTMLTextAreaElement): MascotGazePoint {
   const point = caretClientPoint(textArea);
-  const centerX = rect.left + rect.width / 2;
-  const centerY = rect.top + rect.height / 2;
-
-  return {
-    xRatio: clamp((point.x - centerX) / Math.max(rect.width / 2, 1), -1, 1),
-    lineRatio: clamp((point.y - centerY) / Math.max(rect.height / 2, 1), -1, 1),
-  };
+  return { clientX: point.x, clientY: point.y };
 }
 
 function caretClientPoint(textArea: HTMLTextAreaElement): { x: number; y: number } {

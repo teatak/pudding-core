@@ -7,6 +7,8 @@ export const session = z.object({
   title: z.string(),
   provider: z.string(), // provider profile 名,空 = 默认
   model: z.string(),
+  pinned: z.boolean(),
+  pinnedOrder: z.number(),
   createdAt: z.string(), // RFC3339
   updatedAt: z.string(),
   lastActivityAt: z.string(),

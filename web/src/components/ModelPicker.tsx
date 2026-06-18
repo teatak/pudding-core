@@ -72,14 +72,14 @@ export function ModelPicker({ token, session, value, onChange }: ModelPickerProp
   }, [open, currentProfileID]);
 
   // 品牌图标代替 provider 名;未命中图标的 profile 回落为文字名
-  const brandIcon = <RoundBrandIcon iconClassName="size-6" name={activeProfile?.id || currentProfileID} sizeClassName="size-6" />;
+  const brandIcon = <RoundBrandIcon name={activeProfile?.id || currentProfileID} sizeClassName="size-6" />;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
           aria-label={t("session.model")}
-          className="group/model-picker ml-1 h-6 max-w-64 gap-0 bg-transparent p-0 text-xs font-normal text-foreground hover:bg-transparent aria-expanded:bg-transparent"
+          className="group/model-picker ml-1 h-6 max-w-64 gap-0 bg-transparent p-0 text-xs font-normal text-foreground hover:bg-transparent aria-expanded:bg-transparent dark:hover:bg-transparent dark:aria-expanded:bg-transparent"
           size="sm"
           variant="ghost"
         >
@@ -88,7 +88,7 @@ export function ModelPicker({ token, session, value, onChange }: ModelPickerProp
               ? brandIcon
               : <span className="grid size-6 place-items-center rounded-full bg-muted text-[10px] text-foreground transition-colors group-hover/model-picker:bg-accent group-aria-expanded/model-picker:bg-accent group-data-[state=open]/model-picker:bg-accent">{(activeProfile?.name || currentProfileID).slice(0, 1).toUpperCase()}</span>}
           </span>
-          <span className="-ml-3 flex h-5.5 min-w-0 items-center gap-1 rounded-r-lg bg-muted pr-2 pl-4.5 text-foreground/75 transition-colors group-hover/model-picker:bg-accent group-aria-expanded/model-picker:bg-accent group-data-[state=open]/model-picker:bg-accent">
+          <span className="-ml-3 flex h-4.5 min-w-0 items-center gap-1 rounded-r-lg bg-muted pr-2 pl-4.5 text-foreground/75 transition-colors group-hover/model-picker:bg-accent group-aria-expanded/model-picker:bg-accent group-data-[state=open]/model-picker:bg-accent">
             <span className="truncate">{currentModel ? formatModelLabel(currentModel) : t("common.default")}</span>
             <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
           </span>
@@ -138,21 +138,13 @@ export function ModelPicker({ token, session, value, onChange }: ModelPickerProp
 function RoundBrandIcon({
   name,
   sizeClassName = "size-5",
-  iconClassName = sizeClassName,
+  iconClassName,
 }: {
   name: string;
   sizeClassName?: string;
   iconClassName?: string;
 }) {
-  const icon = BrandIcon({ name, className: iconClassName });
-  if (!icon) {
-    return null;
-  }
-  return (
-    <span className={cn("grid shrink-0 place-items-center overflow-hidden rounded-full", sizeClassName)}>
-      {icon}
-    </span>
-  );
+  return <BrandIcon className={sizeClassName} iconClassName={iconClassName} name={name} shape="circle" />;
 }
 
 function ProfileModels({

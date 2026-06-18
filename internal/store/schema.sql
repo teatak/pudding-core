@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     title      TEXT    NOT NULL DEFAULT '',
     provider   TEXT    NOT NULL DEFAULT '', -- provider profile 名,空 = 默认
     model      TEXT    NOT NULL DEFAULT '',
+    pinned     INTEGER NOT NULL DEFAULT 0,
+    pinned_order INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL, -- unix ms
     updated_at INTEGER NOT NULL,
     last_activity_at INTEGER NOT NULL
