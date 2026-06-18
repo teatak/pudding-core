@@ -9,7 +9,7 @@ import { z } from "zod";
 import { APIError, createSession, deleteSession, submitMessage, type Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
-import { Mascot } from "@/components/Mascot";
+import { Mascot, type MascotTextFocus } from "@/components/Mascot";
 import { ModelPicker } from "@/components/ModelPicker";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,16 +31,25 @@ const suggestionKeys = ["draft.suggest.1", "draft.suggest.2", "draft.suggest.3"]
 export function DraftConversation({ token }: { token: string }) {
   const { t } = useI18n();
   const [quickSubmit, setQuickSubmit] = useState<QuickSubmit | null>(null);
+  const [mascotTextFocus, setMascotTextFocus] = useState<MascotTextFocus | null>(null);
+  const clearMascotTextFocus = useCallback(() => {
+    setMascotTextFocus((current) => (current ? null : current));
+  }, []);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex min-h-0 flex-1 flex-col justify-center px-4 pb-20">
         <div className="flex flex-col items-center justify-center">
-          <Mascot showFaceDebugFrame className="size-32 overflow-visible" />
+          <Mascot
+            showFaceDebugFrame
+            className="size-32 overflow-visible"
+            textFocus={mascotTextFocus}
+            onPointerFollow={clearMascotTextFocus}
+          />
           <h1 className="mt-4 text-3xl font-medium text-foreground">{t("draft.title")}</h1>
         </div>
         <div className="mt-14 flex flex-col">
-          <DraftComposer quickSubmit={quickSubmit} token={token} />
+          <DraftComposer quickSubmit={quickSubmit} token={token} onMascotTextFocusChange={setMascotTextFocus} />
           <ChatColumn className="mt-8 flex flex-wrap items-center justify-center gap-2 px-2">
             {suggestionKeys.map((key, index) => {
               const text = t(key);
@@ -62,7 +71,15 @@ export function DraftConversation({ token }: { token: string }) {
   );
 }
 
-function DraftComposer({ token, quickSubmit }: { token: string; quickSubmit: QuickSubmit | null }) {
+function DraftComposer({
+  token,
+  quickSubmit,
+  onMascotTextFocusChange,
+}: {
+  token: string;
+  quickSubmit: QuickSubmit | null;
+  onMascotTextFocusChange: (focus: MascotTextFocus | null) => void;
+}) {
   const navigate = useNavigate({ from: "/" });
   const queryClient = useQueryClient();
   const { t } = useI18n();
@@ -71,11 +88,41 @@ function DraftComposer({ token, quickSubmit }: { token: string; quickSubmit: Qui
   const [modelValue, setModelValue] = useState<DraftModelValue>({});
   const draftIDRef = useRef<string>(crypto.randomUUID());
   const quickSubmitIDRef = useRef<number | null>(null);
+  const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
+  const mascotFocusRafRef = useRef(0);
   const form = useForm<DraftValue>({
     resolver: zodResolver(draftSchema),
     defaultValues: { text: "" },
   });
   const canSend = Boolean(form.watch("text").trim());
+  const textField = form.register("text");
+
+  const updateMascotTextFocus = useCallback(() => {
+    const textArea = textAreaRef.current;
+    if (!textArea || document.activeElement !== textArea) {
+      return;
+    }
+    onMascotTextFocusChange(mascotTextFocusFromCaret(textArea));
+  }, [onMascotTextFocusChange]);
+
+  const scheduleMascotTextFocus = useCallback(() => {
+    if (mascotFocusRafRef.current) {
+      window.cancelAnimationFrame(mascotFocusRafRef.current);
+    }
+    mascotFocusRafRef.current = window.requestAnimationFrame(() => {
+      mascotFocusRafRef.current = 0;
+      updateMascotTextFocus();
+    });
+  }, [updateMascotTextFocus]);
+
+  useEffect(() => {
+    return () => {
+      if (mascotFocusRafRef.current) {
+        window.cancelAnimationFrame(mascotFocusRafRef.current);
+      }
+      onMascotTextFocusChange(null);
+    };
+  }, [onMascotTextFocusChange]);
 
   const submitMutation = useMutation({
     mutationFn: async (value: DraftValue) => {
@@ -175,6 +222,21 @@ function DraftComposer({ token, quickSubmit }: { token: string; quickSubmit: Qui
               className="block max-h-36 min-h-6 resize-none overflow-y-auto rounded-none border-0 bg-transparent p-0 text-sm leading-6 shadow-none focus-visible:ring-0 md:text-sm dark:bg-transparent"
               placeholder={t("composer.messagePlaceholder")}
               rows={1}
+              name={textField.name}
+              ref={(node) => {
+                textAreaRef.current = node;
+                textField.ref(node);
+              }}
+              onBlur={(event) => {
+                textField.onBlur(event);
+                onMascotTextFocusChange(null);
+              }}
+              onChange={(event) => {
+                void textField.onChange(event);
+                scheduleMascotTextFocus();
+              }}
+              onClick={scheduleMascotTextFocus}
+              onFocus={scheduleMascotTextFocus}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
@@ -182,8 +244,11 @@ function DraftComposer({ token, quickSubmit }: { token: string; quickSubmit: Qui
                     void form.handleSubmit(submitDraft)();
                   }
                 }
+                scheduleMascotTextFocus();
               }}
-              {...form.register("text")}
+              onKeyUp={scheduleMascotTextFocus}
+              onMouseUp={scheduleMascotTextFocus}
+              onSelect={scheduleMascotTextFocus}
             />
           </div>
           <div className="flex items-center justify-between gap-2 px-2 pb-2">
@@ -230,3 +295,82 @@ function removeCachedSession(queryClient: ReturnType<typeof useQueryClient>, ses
     return { sessions: previous.sessions.filter((session) => session.id !== sessionID) };
   });
 }
+
+function mascotTextFocusFromCaret(textArea: HTMLTextAreaElement): MascotTextFocus {
+  const rect = textArea.getBoundingClientRect();
+  const point = caretClientPoint(textArea);
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+
+  return {
+    xRatio: clamp((point.x - centerX) / Math.max(rect.width / 2, 1), -1, 1),
+    lineRatio: clamp((point.y - centerY) / Math.max(rect.height / 2, 1), -1, 1),
+  };
+}
+
+function caretClientPoint(textArea: HTMLTextAreaElement): { x: number; y: number } {
+  const selectionEnd = textArea.selectionEnd ?? textArea.value.length;
+  const doc = textArea.ownerDocument;
+  const win = doc.defaultView;
+  const rect = textArea.getBoundingClientRect();
+  if (!win) {
+    return { x: rect.left, y: rect.top + rect.height / 2 };
+  }
+
+  const style = win.getComputedStyle(textArea);
+  const mirror = doc.createElement("div");
+  mirror.style.position = "fixed";
+  mirror.style.visibility = "hidden";
+  mirror.style.pointerEvents = "none";
+  mirror.style.left = `${rect.left}px`;
+  mirror.style.top = `${rect.top}px`;
+  mirror.style.width = `${rect.width}px`;
+  mirror.style.minHeight = `${rect.height}px`;
+  mirror.style.boxSizing = style.boxSizing;
+  mirror.style.whiteSpace = "pre-wrap";
+  mirror.style.overflowWrap = "break-word";
+  mirror.style.wordBreak = style.wordBreak;
+  mirror.style.overflow = "hidden";
+
+  for (const prop of caretMirrorStyleProps) {
+    mirror.style.setProperty(prop, style.getPropertyValue(prop));
+  }
+
+  mirror.textContent = textArea.value.slice(0, selectionEnd);
+  const marker = doc.createElement("span");
+  marker.textContent = "\u200b";
+  mirror.appendChild(marker);
+  doc.body.appendChild(mirror);
+
+  const mark = marker.getBoundingClientRect();
+  mirror.remove();
+
+  return {
+    x: clamp(mark.left - textArea.scrollLeft, rect.left, rect.right),
+    y: clamp(mark.top + mark.height / 2 - textArea.scrollTop, rect.top, rect.bottom),
+  };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+const caretMirrorStyleProps = [
+  "border-top-width",
+  "border-right-width",
+  "border-bottom-width",
+  "border-left-width",
+  "font-family",
+  "font-size",
+  "font-style",
+  "font-weight",
+  "letter-spacing",
+  "line-height",
+  "padding-top",
+  "padding-right",
+  "padding-bottom",
+  "padding-left",
+  "tab-size",
+  "text-indent",
+  "text-transform",
+] as const;

@@ -2,7 +2,14 @@ import { useEffect, useId, useRef, type CSSProperties } from "react";
 
 type MascotProps = {
   className?: string;
+  onPointerFollow?: () => void;
   showFaceDebugFrame?: boolean;
+  textFocus?: MascotTextFocus | null;
+};
+
+export type MascotTextFocus = {
+  lineRatio: number;
+  xRatio: number;
 };
 
 const EYE_MAX_X = 5;
@@ -34,11 +41,19 @@ const SHADE_BASE_OPACITY = 0.04;
 const SHADE_TURN_OPACITY = 0.16;
 const HIGHLIGHT_SHIFT_X = 2;
 const HIGHLIGHT_SHIFT_Y = 1;
+const TEXT_ENTRY_X_BOOST = 2.6;
+const TEXT_ENTRY_Y_FOCUS = 0.9;
+const TEXT_ENTRY_LINE_Y = 0.25;
 const BLINK_DUR = "6s";
 const BLINK_KEY_TIMES = "0;0.3;0.38;0.6;0.64;0.7;0.84;0.87;0.89;0.91;0.94;1";
 const BLINK_HEIGHT_VALUES = "9;9;9;9;3.1;9;9;1.2;9;1.2;9;9";
 const BLINK_Y_VALUES = "65;65;65;65;68;65;65;68.9;65;68.9;65;65";
 const BLINK_GLINT_VALUES = "0.28;0.28;0.28;0.28;0.12;0.28;0.28;0;0.28;0;0.28;0.28";
+const MOUTH_BLINK_DUR = "7.2s";
+const MOUTH_BLINK_KEY_TIMES = "0;0.2;0.23;0.255;0.62;0.635;0.65;1";
+const MOUTH_BLINK_D_VALUES =
+  "M57 88.7 Q64 90.1 71 88.7;M57 88.7 Q64 90.1 71 88.7;M60 88.9 Q64 89.5 68 88.9;M57 88.7 Q64 90.1 71 88.7;M57 88.7 Q64 90.1 71 88.7;M58.5 88.8 Q64 90.3 69.5 88.8;M57 88.7 Q64 90.1 71 88.7;M57 88.7 Q64 90.1 71 88.7";
+const MOUTH_BLINK_WIDTH_VALUES = "3.5;3.5;3;3.5;3.5;3.3;3.5;3.5";
 
 const absoluteLayerStyle: CSSProperties = {
   height: "100%",
@@ -73,7 +88,7 @@ const faceLayerStyle: CSSProperties = {
   zIndex: 1,
 };
 
-export function Mascot({ className, showFaceDebugFrame = false }: MascotProps) {
+export function Mascot({ className, onPointerFollow, showFaceDebugFrame = false, textFocus = null }: MascotProps) {
   const rootRef = useRef<HTMLSpanElement>(null);
   const headRef = useRef<HTMLSpanElement>(null);
   const faceLayerRef = useRef<HTMLSpanElement>(null);
@@ -87,96 +102,122 @@ export function Mascot({ className, showFaceDebugFrame = false }: MascotProps) {
   const targetXRef = useRef(0);
   const targetYRef = useRef(0);
   const rafRef = useRef(0);
+  const textFocusRef = useRef<MascotTextFocus | null>(null);
+  const onPointerFollowRef = useRef(onPointerFollow);
   const id = useId().replace(/:/g, "");
   const faceID = `mascot-face-${id}`;
   const highlightID = `mascot-highlight-${id}`;
 
-  useEffect(() => {
-    const applyPose = (x: number, y: number) => {
-      const turnX = x / EYE_MAX_X;
-      const turnY = y / EYE_MAX_Y;
-      const head = headRef.current;
-      const faceLayer = faceLayerRef.current;
-      const face = faceRef.current;
-      const shadow = shadowRef.current;
-      const highlight = highlightRef.current;
-      const leftShade = leftShadeRef.current;
-      const rightShade = rightShadeRef.current;
+  const applyPose = (x: number, y: number) => {
+    const turnX = x / EYE_MAX_X;
+    const turnY = y / EYE_MAX_Y;
+    const head = headRef.current;
+    const faceLayer = faceLayerRef.current;
+    const face = faceRef.current;
+    const shadow = shadowRef.current;
+    const highlight = highlightRef.current;
+    const leftShade = leftShadeRef.current;
+    const rightShade = rightShadeRef.current;
 
-      if (head) {
-        head.style.transform = `translate(${turnX * HEAD_SHIFT_X}px, ${turnY * HEAD_SHIFT_Y}px) rotateY(${turnX * HEAD_YAW_MAX_DEG}deg) rotateX(${-turnY * HEAD_PITCH_MAX_DEG}deg) rotateZ(${turnX * turnY * HEAD_ROLL_MAX_DEG}deg)`;
-      }
-      if (faceLayer) {
-        faceLayer.style.transform = `translate3d(${turnX * FACE_SHIFT_X}px, ${turnY * FACE_SHIFT_Y}px, ${FACE_Z_OFFSET_PX}px) rotateY(${turnX * FACE_EXTRA_YAW_DEG}deg) rotateX(${-turnY * FACE_EXTRA_PITCH_DEG}deg)`;
-      }
-      if (face) {
-        face.setAttribute("transform", faceTransform(turnX, turnY));
-      }
-      if (shadow) {
-        shadow.setAttribute("cx", `${64 + turnX * SHADOW_SHIFT_X}`);
-        shadow.setAttribute("rx", `${34 - Math.abs(turnX) * SHADOW_SQUEEZE_X}`);
-        shadow.setAttribute("ry", `${7 + Math.max(turnY, 0) * SHADOW_SCALE_Y}`);
-      }
-      if (highlight) {
-        highlight.setAttribute("transform", `translate(${turnX * HIGHLIGHT_SHIFT_X} ${turnY * HIGHLIGHT_SHIFT_Y})`);
-        highlight.setAttribute("opacity", `${1 - Math.max(turnY, 0) * 0.14}`);
-      }
-      if (leftShade) {
-        leftShade.setAttribute("opacity", `${SHADE_BASE_OPACITY + Math.max(-turnX, 0) * SHADE_TURN_OPACITY}`);
-      }
-      if (rightShade) {
-        rightShade.setAttribute("opacity", `${SHADE_BASE_OPACITY + Math.max(turnX, 0) * SHADE_TURN_OPACITY}`);
-      }
-    };
+    if (head) {
+      head.style.transform = `translate(${turnX * HEAD_SHIFT_X}px, ${turnY * HEAD_SHIFT_Y}px) rotateY(${turnX * HEAD_YAW_MAX_DEG}deg) rotateX(${-turnY * HEAD_PITCH_MAX_DEG}deg) rotateZ(${turnX * turnY * HEAD_ROLL_MAX_DEG}deg)`;
+    }
+    if (faceLayer) {
+      faceLayer.style.transform = `translate3d(${turnX * FACE_SHIFT_X}px, ${turnY * FACE_SHIFT_Y}px, ${FACE_Z_OFFSET_PX}px) rotateY(${turnX * FACE_EXTRA_YAW_DEG}deg) rotateX(${-turnY * FACE_EXTRA_PITCH_DEG}deg)`;
+    }
+    if (face) {
+      face.setAttribute("transform", faceTransform(turnX, turnY));
+    }
+    if (shadow) {
+      shadow.setAttribute("cx", `${64 + turnX * SHADOW_SHIFT_X}`);
+      shadow.setAttribute("rx", `${34 - Math.abs(turnX) * SHADOW_SQUEEZE_X}`);
+      shadow.setAttribute("ry", `${7 + Math.max(turnY, 0) * SHADOW_SCALE_Y}`);
+    }
+    if (highlight) {
+      highlight.setAttribute("transform", `translate(${turnX * HIGHLIGHT_SHIFT_X} ${turnY * HIGHLIGHT_SHIFT_Y})`);
+      highlight.setAttribute("opacity", `${1 - Math.max(turnY, 0) * 0.14}`);
+    }
+    if (leftShade) {
+      leftShade.setAttribute("opacity", `${SHADE_BASE_OPACITY + Math.max(-turnX, 0) * SHADE_TURN_OPACITY}`);
+    }
+    if (rightShade) {
+      rightShade.setAttribute("opacity", `${SHADE_BASE_OPACITY + Math.max(turnX, 0) * SHADE_TURN_OPACITY}`);
+    }
+  };
 
-    const tick = () => {
-      const currentX = currentXRef.current;
-      const currentY = currentYRef.current;
-      const targetX = targetXRef.current;
-      const targetY = targetYRef.current;
-      const nextX = currentX + (targetX - currentX) * FOLLOW_EASE;
-      const nextY = currentY + (targetY - currentY) * FOLLOW_EASE;
-      currentXRef.current = Math.abs(nextX - targetX) < FOLLOW_EPSILON ? targetX : nextX;
-      currentYRef.current = Math.abs(nextY - targetY) < FOLLOW_EPSILON ? targetY : nextY;
-      applyPose(currentXRef.current, currentYRef.current);
+  const startTick = () => {
+    if (!rafRef.current) {
+      rafRef.current = window.requestAnimationFrame(tick);
+    }
+  };
 
-      if (
-        Math.abs(currentXRef.current - targetX) > FOLLOW_EPSILON ||
-        Math.abs(currentYRef.current - targetY) > FOLLOW_EPSILON
-      ) {
-        rafRef.current = window.requestAnimationFrame(tick);
-        return;
-      }
-      rafRef.current = 0;
-    };
+  const tick = () => {
+    const currentX = currentXRef.current;
+    const currentY = currentYRef.current;
+    const targetX = targetXRef.current;
+    const targetY = targetYRef.current;
+    const nextX = currentX + (targetX - currentX) * FOLLOW_EASE;
+    const nextY = currentY + (targetY - currentY) * FOLLOW_EASE;
+    currentXRef.current = Math.abs(nextX - targetX) < FOLLOW_EPSILON ? targetX : nextX;
+    currentYRef.current = Math.abs(nextY - targetY) < FOLLOW_EPSILON ? targetY : nextY;
+    applyPose(currentXRef.current, currentYRef.current);
 
-    const startTick = () => {
-      if (!rafRef.current) {
-        rafRef.current = window.requestAnimationFrame(tick);
-      }
-    };
+    if (
+      Math.abs(currentXRef.current - targetX) > FOLLOW_EPSILON ||
+      Math.abs(currentYRef.current - targetY) > FOLLOW_EPSILON
+    ) {
+      rafRef.current = window.requestAnimationFrame(tick);
+      return;
+    }
+    rafRef.current = 0;
+  };
 
-    const onMove = (event: MouseEvent) => {
-      const rect = rootRef.current?.getBoundingClientRect();
-      if (!rect) return;
+  const setTargetFromPoint = (clientX: number, clientY: number) => {
+    const rect = rootRef.current?.getBoundingClientRect();
+    if (!rect) return false;
 
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
-      const dx = event.clientX - cx;
-      const dy = event.clientY - cy;
-      const distance = Math.hypot(dx, dy);
-      if (distance < 1) {
-        targetXRef.current = 0;
-        targetYRef.current = 0;
-        startTick();
-        return;
-      }
-
-      const sat = Math.max(rect.width, rect.height) * SAT_RATIO;
-      const k = Math.min(distance / sat, 1);
-      targetXRef.current = (dx / distance) * k * EYE_MAX_X;
-      targetYRef.current = (dy / distance) * k * EYE_MAX_Y;
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const dx = clientX - cx;
+    const dy = clientY - cy;
+    const distance = Math.hypot(dx, dy);
+    if (distance < 1) {
+      targetXRef.current = 0;
+      targetYRef.current = 0;
       startTick();
+      return true;
+    }
+
+    const sat = Math.max(rect.width, rect.height) * SAT_RATIO;
+    const k = Math.min(distance / sat, 1);
+    targetXRef.current = (dx / distance) * k * EYE_MAX_X;
+    targetYRef.current = (dy / distance) * k * EYE_MAX_Y;
+    startTick();
+    return true;
+  };
+
+  const setTargetFromTextFocus = (focus: MascotTextFocus) => {
+    targetXRef.current = clamp(focus.xRatio * TEXT_ENTRY_X_BOOST * EYE_MAX_X, -EYE_MAX_X, EYE_MAX_X);
+    targetYRef.current = clamp(EYE_MAX_Y * TEXT_ENTRY_Y_FOCUS + focus.lineRatio * TEXT_ENTRY_LINE_Y, -EYE_MAX_Y, EYE_MAX_Y);
+    startTick();
+  };
+
+  useEffect(() => {
+    textFocusRef.current = textFocus;
+    if (textFocus) {
+      setTargetFromTextFocus(textFocus);
+    }
+  }, [textFocus]);
+
+  useEffect(() => {
+    onPointerFollowRef.current = onPointerFollow;
+  }, [onPointerFollow]);
+
+  useEffect(() => {
+    const onMove = (event: MouseEvent) => {
+      onPointerFollowRef.current?.();
+      textFocusRef.current = null;
+      setTargetFromPoint(event.clientX, event.clientY);
     };
 
     applyPose(0, 0);
@@ -348,12 +389,29 @@ export function Mascot({ className, showFaceDebugFrame = false }: MascotProps) {
               </g>
               <path
                 data-slot="mouth"
-                d="M57 88.5 Q64 91.2 71 88.5"
+                d="M57 88.7 Q64 90.1 71 88.7"
                 fill="none"
                 stroke="#ffffff"
                 strokeLinecap="round"
                 strokeWidth="3.5"
-              />
+              >
+                <animate
+                  attributeName="d"
+                  begin="1.1s"
+                  dur={MOUTH_BLINK_DUR}
+                  keyTimes={MOUTH_BLINK_KEY_TIMES}
+                  repeatCount="indefinite"
+                  values={MOUTH_BLINK_D_VALUES}
+                />
+                <animate
+                  attributeName="stroke-width"
+                  begin="1.1s"
+                  dur={MOUTH_BLINK_DUR}
+                  keyTimes={MOUTH_BLINK_KEY_TIMES}
+                  repeatCount="indefinite"
+                  values={MOUTH_BLINK_WIDTH_VALUES}
+                />
+              </path>
             </g>
           </svg>
         </span>
@@ -373,4 +431,8 @@ function faceTransform(turnX: number, turnY: number): string {
     `scale(${scaleX} ${scaleY})`,
     `translate(${-FACE_CENTER_X} ${-FACE_CENTER_Y})`,
   ].join(" ");
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
