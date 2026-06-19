@@ -459,8 +459,21 @@ html[data-shell] .pudding-markdown * {
     @apply flex min-h-10 items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-left transition-colors hover:bg-accent;
 }
 
-.pudding-provider-preset-icon {
+.pudding-provider-preset-surface-dark .pudding-provider-preset-card {
+    @apply bg-background;
+}
+
+.pudding-provider-preset-surface-dark .pudding-provider-preset-card:hover {
+    @apply bg-accent;
+}
+
+.pudding-provider-preset-icon,
+.pudding-provider-preset-custom-icon {
     @apply size-5 shrink-0;
+}
+
+.pudding-provider-preset-custom-icon-mark {
+    @apply size-4;
 }
 
 .pudding-provider-preset-text {
@@ -484,8 +497,13 @@ html[data-shell] .pudding-markdown * {
         @apply min-h-14 gap-3 px-3 py-2;
     }
 
-    .pudding-provider-preset-icon {
-        @apply size-6;
+    .pudding-provider-preset-icon,
+    .pudding-provider-preset-custom-icon {
+        @apply size-7;
+    }
+
+    .pudding-provider-preset-custom-icon-mark {
+        @apply size-5;
     }
 
     .pudding-provider-preset-text {
@@ -512,6 +530,11 @@ html[data-shell] .pudding-markdown * {
 
     .pudding-provider-preset-grid {
         grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .pudding-provider-preset-icon,
+    .pudding-provider-preset-custom-icon {
+        @apply size-8;
     }
 }
 

@@ -21,6 +21,7 @@ import (
 type providerProfileView struct {
 	ID        string                `json:"id"`
 	Name      string                `json:"name"`
+	Brand     string                `json:"brand,omitempty"`
 	Type      string                `json:"type"`
 	BaseURL   string                `json:"baseURL"`
 	APIKeySet bool                  `json:"apiKeySet"`
@@ -32,6 +33,7 @@ func viewProfile(p *store.ProviderProfile) providerProfileView {
 	return providerProfileView{
 		ID:        p.ProfileID(),
 		Name:      p.DisplayName(),
+		Brand:     strings.TrimSpace(p.Brand),
 		Type:      p.Type,
 		BaseURL:   p.BaseURL,
 		APIKeySet: config.EffectiveAPIKey(p) != "",
@@ -43,6 +45,7 @@ func viewProfile(p *store.ProviderProfile) providerProfileView {
 type createProfileReq struct {
 	ID        string                `json:"id"`
 	Name      string                `json:"name"`
+	Brand     string                `json:"brand"`
 	Type      string                `json:"type"`
 	BaseURL   string                `json:"baseURL"`
 	APIKey    string                `json:"apiKey"`
@@ -52,6 +55,7 @@ type createProfileReq struct {
 
 type patchProfileReq struct {
 	Name    *string `json:"name"`
+	Brand   *string `json:"brand"`
 	Type    *string `json:"type"`
 	BaseURL *string `json:"baseURL"`
 	// APIKey 传非空才覆盖;清除 key 走 DELETE 后重建。
@@ -108,6 +112,7 @@ func (s *Server) createProvider(c *cart.Context) error {
 	p := &store.ProviderProfile{
 		ID:        req.ID,
 		Name:      strings.TrimSpace(req.Name),
+		Brand:     strings.TrimSpace(req.Brand),
 		Type:      req.Type,
 		BaseURL:   strings.TrimRight(req.BaseURL, "/"),
 		APIKey:    req.APIKey,
@@ -158,6 +163,9 @@ func (s *Server) patchProvider(c *cart.Context) error {
 		if p.Name == "" {
 			p.Name = p.ProfileID()
 		}
+	}
+	if req.Brand != nil {
+		p.Brand = strings.TrimSpace(*req.Brand)
 	}
 	if req.Type != nil {
 		if !registry.SupportedType(*req.Type) {

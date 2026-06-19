@@ -6,6 +6,7 @@ import { useGroupRef } from "react-resizable-panels";
 import { CanvasPane } from "@/components/CanvasPane";
 import { ChatPane } from "@/components/ChatPane";
 import { SessionRail } from "@/components/SessionRail";
+import { SettingsDialog } from "@/components/SettingsDialog";
 import { TokenGate } from "@/components/TokenGate";
 import { Button } from "@/components/ui/button";
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -208,6 +209,7 @@ export function App() {
           </ResizablePanelGroup>
         </div>
       </div>
+      <SettingsDialog token={token} showTrigger={false} />
       <Toaster />
     </TooltipProvider>
   );

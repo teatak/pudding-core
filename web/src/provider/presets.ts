@@ -52,6 +52,30 @@ const MIMO_ANTHROPIC_MODELS = ["mimo-v2.5", "mimo-v2.5-pro"].map((id) =>
   model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, anthropic: { temperature: 0.7, max_tokens: 131_072 } }),
 );
 
+const QWEN_MODEL_IDS = ["qwen3.6-flash", "qwen3.7-max", "qwen3.6-plus", "qwen3-max"];
+const QWEN_OPENAI_MODELS = QWEN_MODEL_IDS.map((id) =>
+  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: 0.7 } }),
+);
+const QWEN_ANTHROPIC_MODELS = QWEN_MODEL_IDS.map((id) =>
+  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, anthropic: { temperature: 0.7, max_tokens: 131_072 } }),
+);
+
+const MOONSHOT_MODEL_IDS = ["kimi-k2.6", "kimi-k2.5"];
+const MOONSHOT_OPENAI_MODELS = MOONSHOT_MODEL_IDS.map((id) =>
+  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: 0.7 } }),
+);
+const MOONSHOT_ANTHROPIC_MODELS = MOONSHOT_MODEL_IDS.map((id) =>
+  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, anthropic: { temperature: 0.7, max_tokens: 131_072 } }),
+);
+
+const ZHIPU_MODEL_IDS = ["glm-5.1", "glm-5"];
+const ZHIPU_OPENAI_MODELS = ZHIPU_MODEL_IDS.map((id) =>
+  model(id, { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, openai: { temperature: 0.7 } }),
+);
+const ZHIPU_ANTHROPIC_MODELS = ZHIPU_MODEL_IDS.map((id) =>
+  model(id, { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, anthropic: { temperature: 0.7, max_tokens: 131_072 } }),
+);
+
 const OPENAI_MODELS = [
   model("gpt-5.5", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: 0.7, reasoning_effort: "medium" } }),
   model("gpt-5.4", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: 0.7, reasoning_effort: "medium" } }),
@@ -88,7 +112,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "qwen",
     name: "Qwen",
-    description: "Alibaba Qwen via DashScope OpenAI-compatible endpoint.",
+    description: "Alibaba Qwen via DashScope OpenAI-compatible or Anthropic-compatible endpoints.",
     defaultVariantId: "default",
     apiKeyURL: "https://bailian.console.aliyun.com/?apiKey=1",
     variants: [
@@ -98,7 +122,16 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         description: "https://dashscope.aliyuncs.com/compatible-mode/v1",
         type: "openai-compatible",
         baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        models: ["qwen3.6-flash", "qwen3.7-max", "qwen3.6-plus", "qwen3-max"].map((id) => model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: 0.7 } })),
+        models: QWEN_OPENAI_MODELS,
+      },
+      {
+        id: "anthropic",
+        label: "Anthropic Compatible",
+        description: "https://dashscope.aliyuncs.com/apps/anthropic",
+        type: "anthropic",
+        baseURL: "https://dashscope.aliyuncs.com/apps/anthropic",
+        models: QWEN_ANTHROPIC_MODELS,
+        profileName: "Qwen Anthropic",
       },
     ],
   },
@@ -217,7 +250,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "moonshot",
     name: "Moonshot",
-    description: "Moonshot Kimi OpenAI-compatible endpoint.",
+    description: "Moonshot Kimi OpenAI-compatible or Anthropic-compatible endpoints.",
     defaultVariantId: "default",
     apiKeyURL: "https://platform.moonshot.cn/console/api-keys",
     variants: [
@@ -227,14 +260,23 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         description: "https://api.moonshot.cn/v1",
         type: "openai-compatible",
         baseURL: "https://api.moonshot.cn/v1",
-        models: ["kimi-k2.6", "kimi-k2.5"].map((id) => model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: 0.7 } })),
+        models: MOONSHOT_OPENAI_MODELS,
+      },
+      {
+        id: "anthropic",
+        label: "Anthropic Compatible",
+        description: "https://api.moonshot.ai/anthropic",
+        type: "anthropic",
+        baseURL: "https://api.moonshot.ai/anthropic",
+        models: MOONSHOT_ANTHROPIC_MODELS,
+        profileName: "Moonshot Anthropic",
       },
     ],
   },
   {
     id: "zhipu",
     name: "Zhipu GLM",
-    description: "Zhipu GLM OpenAI-compatible endpoint.",
+    description: "Zhipu GLM OpenAI-compatible or Anthropic-compatible endpoints.",
     defaultVariantId: "default",
     apiKeyURL: "https://open.bigmodel.cn/usercenter/apikeys",
     variants: [
@@ -244,7 +286,16 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         description: "https://open.bigmodel.cn/api/paas/v4",
         type: "openai-compatible",
         baseURL: "https://open.bigmodel.cn/api/paas/v4",
-        models: ["glm-5.1", "glm-5"].map((id) => model(id, { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, openai: { temperature: 0.7 } })),
+        models: ZHIPU_OPENAI_MODELS,
+      },
+      {
+        id: "anthropic",
+        label: "Anthropic Compatible",
+        description: "https://open.bigmodel.cn/api/anthropic",
+        type: "anthropic",
+        baseURL: "https://open.bigmodel.cn/api/anthropic",
+        models: ZHIPU_ANTHROPIC_MODELS,
+        profileName: "Zhipu GLM Anthropic",
       },
     ],
   },

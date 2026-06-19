@@ -22,7 +22,6 @@ import {
 import {
   Field,
   FieldContent,
-  FieldDescription,
   FieldLabel,
   FieldTitle,
 } from "@/components/ui/field";
@@ -91,8 +90,8 @@ export function ProviderCustomCard({
       type="button"
       onClick={onSelect}
     >
-      <span className="pudding-provider-preset-icon flex items-center justify-center rounded-md bg-muted text-muted-foreground">
-        <Plus className="size-4" />
+      <span className="pudding-provider-preset-custom-icon flex items-center justify-center rounded-md bg-muted text-muted-foreground">
+        <Plus className="pudding-provider-preset-custom-icon-mark" />
       </span>
       <span className="pudding-provider-preset-text">
         <span className="pudding-provider-preset-title">{t("provider.custom")}</span>
@@ -173,6 +172,7 @@ export function ProviderPresetCreateDialog({
         createProviderRequest.parse({
           id: profileID,
           name: providerPresetProfileName(preset, variant),
+          brand: preset.id,
           type: variant.type,
           baseURL: variant.baseURL,
           apiKey: apiKey.trim(),
@@ -299,8 +299,7 @@ function VariantListPicker({
             <FieldLabel key={item.id} htmlFor={id}>
               <Field className={cn(active && "border-ring bg-accent")} orientation="horizontal">
                 <FieldContent>
-                  <FieldTitle>{providerPresetVariantLabel(preset, item, t)}</FieldTitle>
-                  <FieldDescription>{providerPresetVariantDescription(preset, item, t)}</FieldDescription>
+                  <FieldTitle>{providerPresetAccessMethodLabel(preset, item, t)}</FieldTitle>
                 </FieldContent>
                 <RadioGroupItem id={id} value={item.id} />
               </Field>
@@ -324,28 +323,24 @@ function MiMoVariantPicker({
   t: (key: string) => string;
 }) {
   const current = parseMiMoVariantID(variantID);
-  const protocolOptions: Array<{ id: MiMoProtocol; label: string; description: string }> = [
+  const protocolOptions: Array<{ id: MiMoProtocol; label: string }> = [
     {
       id: "openai",
       label: translatePresetText(t, "providerPreset.mimo.protocol.openai.label", "OpenAI"),
-      description: translatePresetText(t, "providerPreset.mimo.protocol.openai.description", "OpenAI Compatible"),
     },
     {
       id: "anthropic",
       label: translatePresetText(t, "providerPreset.mimo.protocol.anthropic.label", "Anthropic"),
-      description: translatePresetText(t, "providerPreset.mimo.protocol.anthropic.description", "Anthropic Compatible"),
     },
   ];
-  const planOptions: Array<{ id: MiMoPlan; label: string; description: string }> = [
+  const planOptions: Array<{ id: MiMoPlan; label: string }> = [
     {
       id: "standard",
       label: translatePresetText(t, "providerPreset.mimo.plan.standard.label", "Standard API"),
-      description: translatePresetText(t, "providerPreset.mimo.plan.standard.description", "Token-based billing"),
     },
     {
       id: "plan",
       label: translatePresetText(t, "providerPreset.mimo.plan.plan.label", "Plan"),
-      description: translatePresetText(t, "providerPreset.mimo.plan.plan.description", "Subscription endpoint"),
     },
   ];
 
@@ -366,7 +361,6 @@ function MiMoVariantPicker({
                 <Field className={cn("h-full", active && "border-ring bg-accent")} orientation="horizontal">
                   <FieldContent>
                     <FieldTitle>{item.label}</FieldTitle>
-                    <FieldDescription>{item.description}</FieldDescription>
                   </FieldContent>
                   <RadioGroupItem id={id} value={item.id} />
                 </Field>
@@ -379,7 +373,7 @@ function MiMoVariantPicker({
       <div className="grid gap-2">
         <Label>{t("provider.endpointMode")}</Label>
         <RadioGroup
-          className="grid gap-2"
+          className="grid grid-cols-2 gap-2"
           value={current.plan}
           onValueChange={(value) => onVariantChange(miMoVariantID(value as MiMoPlan, current.protocol))}
         >
@@ -391,7 +385,6 @@ function MiMoVariantPicker({
                 <Field className={cn("h-full", active && "border-ring bg-accent")} orientation="horizontal">
                   <FieldContent>
                     <FieldTitle>{item.label}</FieldTitle>
-                    <FieldDescription>{item.description}</FieldDescription>
                   </FieldContent>
                   <RadioGroupItem id={id} value={item.id} />
                 </Field>
@@ -418,13 +411,6 @@ function miMoVariantID(plan: MiMoPlan, protocol: MiMoProtocol) {
   return `${plan}-${protocol}`;
 }
 
-function modelCountLabel(count: number, t: (key: string) => string) {
-  if (count <= 0) {
-    return t("picker.noModels");
-  }
-  return `${count}${t("provider.modelCountSuffix")}`;
-}
-
 function providerPresetDisplayName(preset: ProviderPreset, t: (key: string) => string) {
   return translatePresetText(t, `providerPreset.${preset.id}.name`, preset.name);
 }
@@ -433,20 +419,33 @@ function providerPresetDescription(preset: ProviderPreset, t: (key: string) => s
   return translatePresetText(t, `providerPreset.${preset.id}.description`, preset.description);
 }
 
+function modelCountLabel(count: number, t: (key: string) => string) {
+  if (count <= 0) {
+    return t("picker.noModels");
+  }
+  return `${count}${t("provider.modelCountSuffix")}`;
+}
+
+function providerPresetAccessMethodLabel(
+  preset: ProviderPreset,
+  variant: ProviderPresetVariant,
+  t: (key: string) => string,
+) {
+  if (variant.type === "openai-compatible") {
+    return translatePresetText(t, "providerPreset.mimo.protocol.openai.label", "OpenAI");
+  }
+  if (variant.type === "anthropic") {
+    return translatePresetText(t, "providerPreset.mimo.protocol.anthropic.label", "Anthropic");
+  }
+  return providerPresetVariantLabel(preset, variant, t);
+}
+
 function providerPresetVariantLabel(
   preset: ProviderPreset,
   variant: ProviderPresetVariant,
   t: (key: string) => string,
 ) {
   return translatePresetText(t, `providerPreset.${preset.id}.variant.${variant.id}.label`, variant.label);
-}
-
-function providerPresetVariantDescription(
-  preset: ProviderPreset,
-  variant: ProviderPresetVariant,
-  t: (key: string) => string,
-) {
-  return translatePresetText(t, `providerPreset.${preset.id}.variant.${variant.id}.description`, variant.description);
 }
 
 function translatePresetText(t: (key: string) => string, key: string, fallback: string) {

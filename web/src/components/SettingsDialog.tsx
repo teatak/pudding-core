@@ -29,7 +29,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -37,9 +36,19 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
 import {
   Sidebar,
   SidebarContent,
@@ -54,14 +63,13 @@ import {
   SidebarProvider,
 } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { BrandIcon } from "@/components/BrandIcons";
 import {
   cloneProviderProfileForm,
   ProviderProfileEditorDialog,
   type ProviderProfileEditorValue,
 } from "@/components/ProviderProfileEditorDialog";
-import { ProviderCustomCard, ProviderPresetCreateDialog, ProviderPresetGrid } from "@/components/ProviderPresetCreateDialog";
+import { ProviderPresetCreateDialog, ProviderPresetGrid } from "@/components/ProviderPresetCreateDialog";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { SETTINGS_DIALOG_OPEN_EVENT, type SettingsDialogOpenDetail, type SettingsSectionID } from "@/lib/settingsDialog";
@@ -83,9 +91,10 @@ const SETTINGS_SECTIONS: Array<{
 
 type SettingsDialogProps = {
   token: string;
+  showTrigger?: boolean;
 };
 
-export function SettingsDialog({ token }: SettingsDialogProps) {
+export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProps) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState<SettingsSectionID>("model");
@@ -109,11 +118,13 @@ export function SettingsDialog({ token }: SettingsDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button aria-label={t("settings.title")} size="icon" tabIndex={-1} variant="ghost">
-          <Settings />
-        </Button>
-      </DialogTrigger>
+      {showTrigger ? (
+        <DialogTrigger asChild>
+          <Button aria-label={t("settings.title")} size="icon" tabIndex={-1} variant="ghost">
+            <Settings />
+          </Button>
+        </DialogTrigger>
+      ) : null}
       <DialogContent className="top-[calc(var(--toolbar-h)+(100svh-var(--toolbar-h))/2)] h-[min(900px,calc(100svh-var(--toolbar-h)-1.5rem))] w-[calc(100vw-2rem)] max-w-[1180px] overflow-hidden bg-background p-0 sm:max-w-[1180px] xl:max-w-[1240px]">
         <DialogTitle className="sr-only">{t("settings.title")}</DialogTitle>
         <DialogDescription className="sr-only">{t("settings.description")}</DialogDescription>
@@ -190,6 +201,8 @@ function ProviderSettings({ createNonce = 0, token }: { createNonce?: number; to
   const [editorInitialValue, setEditorInitialValue] = useState<ProviderProfileEditorValue | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [quickPreset, setQuickPreset] = useState<ProviderPreset | null>(null);
+  const [presetPickerOpen, setPresetPickerOpen] = useState(false);
+  const [deletingProfile, setDeletingProfile] = useState<ProviderProfile | null>(null);
   const handledCreateNonceRef = useRef(0);
   const providerPresets = getOrderedProviderPresets(locale);
   const providersQuery = useQuery({
@@ -211,12 +224,14 @@ function ProviderSettings({ createNonce = 0, token }: { createNonce?: number; to
         setEditorInitialValue(null);
         setEditorOpen(false);
       }
+      setDeletingProfile(null);
       await queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
     },
   });
 
   const profiles = providersQuery.data?.providers || [];
   const sessions = sessionsQuery.data?.sessions || [];
+  const showInlinePresets = !providersQuery.isLoading && !providersQuery.isError && profiles.length === 0;
 
   const usage = useMemo(() => {
     const byProfile = new Map<string, Session[]>();
@@ -258,20 +273,33 @@ function ProviderSettings({ createNonce = 0, token }: { createNonce?: number; to
     setEditorOpen(true);
   }
 
+  function selectPreset(preset: ProviderPreset) {
+    setPresetPickerOpen(false);
+    setQuickPreset(preset);
+  }
+
   return (
     <div className="@container mx-auto grid w-full max-w-6xl gap-5">
-      <SettingsPanel title={t("settings.providerPresets")}>
-        <ProviderPresetGrid presets={providerPresets} onSelect={setQuickPreset}>
-          <ProviderCustomCard onSelect={startCreate} />
-        </ProviderPresetGrid>
-      </SettingsPanel>
+      {showInlinePresets ? (
+        <SettingsSection title={t("provider.addFromPreset")}>
+          <ProviderPresetGrid presets={providerPresets} onSelect={selectPreset} />
+        </SettingsSection>
+      ) : null}
 
-      <SettingsPanel
+      <SettingsSection
         action={
-          <Button size="sm" type="button" variant="outline" onClick={startCreate}>
-            <Plus />
-            {t("provider.new")}
-          </Button>
+          <div className="flex items-center gap-2">
+            {showInlinePresets ? null : (
+              <Button size="sm" type="button" variant="outline" onClick={() => setPresetPickerOpen(true)}>
+                <Sparkles />
+                {t("provider.addFromPreset")}
+              </Button>
+            )}
+            <Button size="sm" type="button" variant="outline" onClick={startCreate}>
+              <Plus />
+              {t("provider.new")}
+            </Button>
+          </div>
         }
         title={t("provider.list")}
       >
@@ -286,78 +314,109 @@ function ProviderSettings({ createNonce = 0, token }: { createNonce?: number; to
             </AlertDescription>
           </Alert>
         ) : null}
-        {!providersQuery.isLoading && profiles.length === 0 ? (
-          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">{t("provider.empty")}</div>
+        {showInlinePresets ? (
+          <div className="rounded-xl border border-dashed px-4 py-3 text-sm text-muted-foreground">
+            {t("provider.empty")}
+          </div>
         ) : null}
-        <div className="overflow-hidden rounded-lg border">
-          {profiles.map((profile) => {
-            const usedBy = usage.get(profile.id) || [];
-            const deleteBlocked = usedBy.length > 0;
-            return (
-              <div key={profile.id} className="flex items-center gap-4 border-b px-4 py-3 last:border-b-0">
-                <button className="flex min-w-0 flex-1 items-center gap-3 text-left" type="button" onClick={() => editProfile(profile)}>
-                  <BrandIcon className="size-6 shrink-0" name={profile.id} />
-                  <span className="grid min-w-0 gap-1">
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="truncate text-sm font-normal">{profile.name}</span>
-                      <span
-                        className={cn(
-                          "size-2 shrink-0 rounded-full",
-                          profile.apiKeySet || profile.apiKeyEnv ? "bg-success" : "bg-warning",
-                        )}
-                        title={profile.apiKeySet || profile.apiKeyEnv ? t("provider.keySet") : t("provider.keyMissing")}
-                      />
-                    </span>
-                    <span className="truncate text-xs text-muted-foreground">
-                      {profile.type} · {modelCountLabel(profile.models.length, t)}
-                    </span>
-                  </span>
-                </button>
-                <div className="flex shrink-0 items-center gap-1">
-                  <IconButton label={t("provider.editShort")} onClick={() => editProfile(profile)}>
-                    <Pencil />
-                  </IconButton>
-                  <IconButton label={t("common.copy")} onClick={() => cloneProfile(profile)}>
-                    <Copy />
-                  </IconButton>
-                  <AlertDialog>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <AlertDialogTrigger asChild>
-                          <Button
-                            aria-label={t("common.delete")}
-                            disabled={deleteBlocked || deleteMutation.isPending}
-                            size="icon-sm"
-                            type="button"
-                            variant="ghost"
-                          >
-                            <Trash className="text-destructive" />
-                          </Button>
-                        </AlertDialogTrigger>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        {deleteBlocked ? t("provider.deleteBlockedSessions") : t("common.delete")}
-                      </TooltipContent>
-                    </Tooltip>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>{t("provider.deleteTitle")}</AlertDialogTitle>
-                        <AlertDialogDescription>{t("provider.deleteDescription")}</AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-                        <AlertDialogAction variant="destructive" onClick={() => deleteMutation.mutate(profile.id)}>
-                          {t("common.delete")}
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </SettingsPanel>
+        {profiles.length > 0 ? (
+          <ItemGroup className="gap-2">
+            {profiles.map((profile) => {
+              const usedBy = usage.get(profile.id) || [];
+              const deleteBlocked = usedBy.length > 0;
+              return (
+                <Item
+                  key={profile.id}
+                  className="group min-h-16 flex-nowrap rounded-xl bg-card px-4 py-3 hover:bg-accent/50"
+                  role="listitem"
+                  variant="outline"
+                >
+                  <div className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                    <ItemMedia>
+                      <BrandIcon className="size-9 shrink-0" name={profile.brand || profile.name || profile.id} />
+                    </ItemMedia>
+                    <ItemContent className="min-w-0 gap-0.5">
+                      <ItemTitle className="w-full min-w-0 font-normal">
+                        <span className="truncate text-base font-normal">{profile.name}</span>
+                        <span
+                          className={cn(
+                            "size-2 shrink-0 rounded-full",
+                            profile.apiKeySet || profile.apiKeyEnv ? "bg-success" : "bg-warning",
+                          )}
+                          title={profile.apiKeySet || profile.apiKeyEnv ? t("provider.keySet") : t("provider.keyMissing")}
+                        />
+                      </ItemTitle>
+                      <ItemDescription className="truncate text-xs">
+                        {profile.type} · {modelCountLabel(profile.models.length, t)}
+                      </ItemDescription>
+                    </ItemContent>
+                  </div>
+                  <ItemActions className="ml-auto shrink-0 gap-1">
+                    <Button aria-label={t("provider.editShort")} size="icon-sm" type="button" variant="ghost" onClick={() => editProfile(profile)}>
+                      <Pencil />
+                    </Button>
+                    <Button aria-label={t("common.copy")} size="icon-sm" type="button" variant="ghost" onClick={() => cloneProfile(profile)}>
+                      <Copy />
+                    </Button>
+                    <Button
+                      aria-label={t("common.delete")}
+                      disabled={deleteBlocked || deleteMutation.isPending}
+                      size="icon-sm"
+                      title={deleteBlocked ? t("provider.deleteBlockedSessions") : undefined}
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setDeletingProfile(profile)}
+                    >
+                      <Trash className="text-destructive" />
+                    </Button>
+                  </ItemActions>
+                </Item>
+              );
+            })}
+          </ItemGroup>
+        ) : null}
+      </SettingsSection>
+
+      <AlertDialog open={Boolean(deletingProfile)} onOpenChange={(open) => {
+        if (!open) {
+          setDeletingProfile(null);
+        }
+      }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("provider.deleteTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("provider.deleteDescription")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!deletingProfile || deleteMutation.isPending}
+              variant="destructive"
+              onClick={() => {
+                if (deletingProfile) {
+                  deleteMutation.mutate(deletingProfile.id);
+                }
+              }}
+            >
+              {t("common.delete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={presetPickerOpen} onOpenChange={setPresetPickerOpen}>
+        <DialogContent className="@container w-[min(1120px,calc(100vw-2rem))] max-w-none sm:max-w-none">
+          <DialogHeader>
+            <DialogTitle>{t("provider.addFromPreset")}</DialogTitle>
+            <DialogDescription>{t("provider.addFromPresetHint")}</DialogDescription>
+          </DialogHeader>
+          <ProviderPresetGrid
+            className="pudding-provider-preset-surface-dark"
+            presets={providerPresets}
+            onSelect={selectPreset}
+          />
+        </DialogContent>
+      </Dialog>
 
       <ProviderPresetCreateDialog
         open={Boolean(quickPreset)}
@@ -409,24 +468,23 @@ function SettingsPanel({
   );
 }
 
-function IconButton({
+function SettingsSection({
+  action,
   children,
-  label,
-  onClick,
+  title,
 }: {
+  action?: ReactNode;
   children: ReactNode;
-  label: string;
-  onClick: () => void;
+  title: string;
 }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button aria-label={label} size="icon-sm" type="button" variant="ghost" onClick={onClick}>
-          {children}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
+    <section className="grid gap-3">
+      <div className="flex min-h-8 items-center justify-between gap-3">
+        <h3 className="text-sm font-normal">{title}</h3>
+        {action}
+      </div>
+      {children}
+    </section>
   );
 }
 

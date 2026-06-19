@@ -52,6 +52,7 @@ const modelFormSchema = z.object({
 const providerFormSchema = z.object({
   id: z.string().trim().min(1),
   name: z.string().trim().min(1),
+  brand: z.string().optional(),
   type: providerTypeSchema,
   baseURL: z.string().optional(),
   apiKey: z.string().optional(),
@@ -174,6 +175,7 @@ export function ProviderProfileEditorDialog({
           <DialogDescription>{t("provider.keyHint")}</DialogDescription>
         </DialogHeader>
         <form className="contents" onSubmit={form.handleSubmit(submitProvider)}>
+          <input type="hidden" {...form.register("brand")} />
           <div className="min-h-0 overflow-y-auto border-y px-5 py-4 [mask-image:linear-gradient(to_bottom,transparent_0,black_16px,black_calc(100%-16px),transparent_100%)]">
             <div className="grid gap-4">
               {form.formState.errors.root?.message ? (
@@ -209,10 +211,10 @@ export function ProviderProfileEditorDialog({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="openai-responses">openai-responses</SelectItem>
-                      <SelectItem value="openai-compatible">openai-compatible</SelectItem>
-                      <SelectItem value="google">google</SelectItem>
-                      <SelectItem value="anthropic">anthropic</SelectItem>
+                      <SelectItem value="openai-compatible">OpenAI</SelectItem>
+                      <SelectItem value="openai-responses">OpenAI Responses</SelectItem>
+                      <SelectItem value="google">Google</SelectItem>
+                      <SelectItem value="anthropic">Anthropic</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -392,6 +394,7 @@ export function emptyProviderProfileForm(): ProviderProfileEditorValue {
   return {
     id: "",
     name: "",
+    brand: "",
     type: "openai-compatible",
     baseURL: "",
     apiKey: "",
@@ -409,6 +412,7 @@ export function cloneProviderProfileForm(
     ...providerToForm(profile),
     id: uniqueProfileID(profile.id, profiles.map((item) => item.id)),
     name: `${profile.name} ${copySuffix}`,
+    brand: profile.brand || "",
     apiKey: "",
   };
 }
@@ -433,6 +437,7 @@ function providerToForm(profile: ProviderProfile): ProviderProfileEditorValue {
   return {
     id: profile.id,
     name: profile.name,
+    brand: profile.brand || "",
     type: profile.type,
     baseURL: profile.baseURL,
     apiKey: "",
@@ -462,6 +467,7 @@ function cleanCreateProvider(value: ProviderProfileEditorValue) {
   return createProviderRequest.parse({
     id: value.id.trim(),
     name: value.name.trim(),
+    brand: value.brand?.trim() || undefined,
     type: value.type,
     baseURL: value.baseURL?.trim(),
     apiKey: value.apiKey?.trim(),
@@ -473,6 +479,7 @@ function cleanCreateProvider(value: ProviderProfileEditorValue) {
 function cleanPatchProvider(value: ProviderProfileEditorValue) {
   return patchProviderRequest.parse({
     name: value.name.trim(),
+    brand: value.brand?.trim() || undefined,
     type: value.type,
     baseURL: value.baseURL?.trim(),
     apiKey: value.apiKey?.trim() || undefined,

@@ -39,6 +39,7 @@ export type ProviderModel = z.infer<typeof providerModel>;
 export const providerProfile = z.object({
   id: z.string(),
   name: z.string(),
+  brand: z.string().optional(),
   type: providerType,
   baseURL: z.string(),
   apiKeySet: z.boolean(),
@@ -51,6 +52,7 @@ export type ProviderProfile = z.infer<typeof providerProfile>;
 export const createProviderRequest = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
+  brand: z.string().optional(),
   type: providerType,
   baseURL: z.string().optional(),
   apiKey: z.string().optional(),
@@ -61,6 +63,7 @@ export const createProviderRequest = z.object({
 // apiKey 传非空才覆盖;清除走 DELETE 后重建
 export const patchProviderRequest = z.object({
   name: z.string().optional(),
+  brand: z.string().optional(),
   type: providerType.optional(),
   baseURL: z.string().optional(),
   apiKey: z.string().optional(),

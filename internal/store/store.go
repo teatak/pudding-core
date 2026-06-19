@@ -58,6 +58,7 @@ type SessionUpdate struct {
 type ProviderProfile struct {
 	ID        string          `json:"id" yaml:"-"`
 	Name      string          `json:"name" yaml:"name,omitempty"`
+	Brand     string          `json:"brand,omitempty" yaml:"brand,omitempty"`
 	Type      string          `json:"type" yaml:"type"` // openai-compatible | openai-responses | google | ...
 	BaseURL   string          `json:"baseURL" yaml:"base_url,omitempty"`
 	APIKey    string          `json:"-" yaml:"api_key,omitempty"`

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, ChevronDown, CircleCheck } from "lucide-react";
+import { ChevronDown, CircleCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -84,7 +84,7 @@ export function ModelPicker({ token, session, value, onChange, onResolvedChange,
   }, [currentModel, currentProfileID, onResolvedChange]);
 
   // 品牌图标代替 provider 名;未命中图标的 profile 回落为文字名
-  const activeBrand = activeProfile?.id || currentProfileID;
+  const activeBrand = currentModel ? providerBrandKey(activeProfile) || currentProfileID : "";
   const brandIcon = activeBrand ? <RoundBrandIcon name={activeBrand} sizeClassName="size-5" /> : null;
   const label = currentModel ? formatModelLabel(currentModel) : t("picker.selectModel");
 
@@ -94,19 +94,20 @@ export function ModelPicker({ token, session, value, onChange, onResolvedChange,
         <Button
           aria-label={t("session.model")}
           className={cn(
-            "group/model-picker h-6 max-w-64 gap-1 rounded-full border-0 bg-muted py-0 pr-2 pl-0.5 text-xs font-normal text-foreground hover:bg-accent aria-expanded:bg-accent data-[state=open]:bg-accent dark:hover:bg-accent dark:aria-expanded:bg-accent dark:data-[state=open]:bg-accent",
+            "group/model-picker h-6 max-w-64 gap-1 rounded-full border-0 bg-muted py-0 pr-2 text-xs font-normal text-foreground hover:bg-accent aria-expanded:bg-accent data-[state=open]:bg-accent dark:hover:bg-accent dark:aria-expanded:bg-accent dark:data-[state=open]:bg-accent",
+            currentModel ? "pl-0.5" : "pl-2",
             className,
           )}
           size="sm"
           variant="ghost"
         >
-          <span className="relative z-10 grid size-5 shrink-0 place-items-center overflow-hidden rounded-full">
-            {activeBrand && BrandIcon({ name: activeBrand })
-              ? brandIcon
-              : currentModel
-                ? <span className="grid size-5 place-items-center rounded-full bg-background/60 text-[10px] text-foreground">{(activeProfile?.name || currentProfileID).slice(0, 1).toUpperCase()}</span>
-                : <span className="grid size-5 place-items-center rounded-full bg-background/60 text-muted-foreground"><Bot className="size-3.5" /></span>}
-          </span>
+          {currentModel ? (
+            <span className="relative z-10 grid size-5 shrink-0 place-items-center overflow-hidden rounded-full">
+              {activeBrand && BrandIcon({ name: activeBrand })
+                ? brandIcon
+                : <span className="grid size-5 place-items-center rounded-full bg-background/60 text-[10px] text-foreground">{(activeProfile?.name || currentProfileID).slice(0, 1).toUpperCase()}</span>}
+            </span>
+          ) : null}
           <span className="flex h-5 min-w-0 items-center gap-1 text-foreground/75">
             <span className="truncate">{label}</span>
             <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
@@ -129,7 +130,7 @@ export function ModelPicker({ token, session, value, onChange, onResolvedChange,
               >
                 <AccordionTrigger className="items-center rounded-md px-2.5 py-1.5 text-sm font-normal text-muted-foreground hover:bg-accent hover:text-foreground hover:no-underline [&_[data-slot=accordion-trigger-icon]]:text-muted-foreground/70">
                   <span className="flex min-w-0 items-center gap-2">
-                    <RoundBrandIcon name={profile.id} />
+                    <RoundBrandIcon name={providerBrandKey(profile)} />
                     <span className="truncate">{profile.name}</span>
                     <Badge className="h-4 border-muted-foreground/20 bg-transparent px-1.5 text-[9px] font-normal text-muted-foreground/70" variant="outline">
                       {profile.type}
@@ -170,6 +171,10 @@ function RoundBrandIcon({
   iconClassName?: string;
 }) {
   return <BrandIcon className={sizeClassName} iconClassName={iconClassName} name={name} shape="circle" />;
+}
+
+function providerBrandKey(profile?: ProviderProfile) {
+  return profile?.brand || profile?.name || profile?.id || "";
 }
 
 function ProfileModels({

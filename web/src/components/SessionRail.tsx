@@ -10,6 +10,7 @@ import {
   MessageCirclePlus,
   Search,
   Rows2,
+  Settings,
   Trash,
   Workflow,
 } from "lucide-react";
@@ -31,7 +32,6 @@ import { deleteSession, listSessions, updateSession } from "@/api/client";
 import type { Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { LanguageToggle } from "@/components/LanguageToggle";
-import { SettingsDialog } from "@/components/SettingsDialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   AlertDialog,
@@ -73,6 +73,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useBackgroundSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
 import type { AppSearch } from "@/lib/route";
+import { openSettingsDialog } from "@/lib/settingsDialog";
 import { formatRelative } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { useOverlayStore } from "@/state/overlayStore";
@@ -820,7 +821,15 @@ function RailPanel({
             <RailThemeToggle />
             <RailLanguageToggle />
             <div className="flex-1" />
-            <SettingsDialog token={token} />
+            <Button
+              aria-label={t("settings.title")}
+              size="icon"
+              tabIndex={-1}
+              variant="ghost"
+              onClick={() => openSettingsDialog({ section: "model" })}
+            >
+              <Settings />
+            </Button>
           </div>
         </SidebarFooter>
       </Sidebar>
