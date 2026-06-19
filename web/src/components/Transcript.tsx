@@ -21,6 +21,7 @@ const EMPTY_MESSAGES: Message[] = [];
 type TranscriptProps = {
   token: string;
   sessionID: string;
+  submitError?: string | null;
 };
 
 type TranscriptItem =
@@ -28,7 +29,7 @@ type TranscriptItem =
   | { kind: "pending"; id: string; text: string; createdAt: string }
   | { kind: "assistant"; overlay: AssistantOverlay };
 
-export function Transcript({ token, sessionID }: TranscriptProps) {
+export function Transcript({ token, sessionID, submitError }: TranscriptProps) {
   const { t } = useI18n();
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
   const [followingBottom, setFollowingBottom] = useState(true);
@@ -154,7 +155,7 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
     );
   }
 
-  if (!messagesQuery.isLoading && !messagesQuery.isError && items.length === 0) {
+  if (!messagesQuery.isLoading && !messagesQuery.isError && items.length === 0 && !submitError) {
     return <div className="min-h-0 flex-1" />;
   }
 
@@ -181,6 +182,12 @@ export function Transcript({ token, sessionID }: TranscriptProps) {
               <AssistantOverlayItem key={item.overlay.turnID} overlay={item.overlay} onContentGrow={pinToBottom} />
             );
           })}
+          {submitError ? (
+            <Alert variant="destructive">
+              <CircleAlert className="h-3.5 w-3.5" />
+              <AlertDescription>{submitError}</AlertDescription>
+            </Alert>
+          ) : null}
         </ChatColumn>
       </div>
       {!followingBottom && items.length > 0 ? (
@@ -250,7 +257,7 @@ function UserMessageBlock({
 }) {
   return (
     <div className={cn("group flex flex-col items-end", pending && "opacity-70")}>
-      <div className="selectable-text min-w-0 max-w-[min(82%,42rem)] rounded-2xl rounded-br-md border border-border/60 bg-muted px-3 py-2 text-left text-sm leading-6 break-words whitespace-pre-wrap shadow-sm dark:bg-muted/45">
+      <div className="pudding-user-message selectable-text min-w-0 max-w-[min(82%,42rem)] rounded-2xl rounded-br-md border border-border/60 px-3 py-2 text-left text-sm leading-6 break-words whitespace-pre-wrap shadow-sm">
         {text}
         {interrupted ? <InterruptedBadge /> : null}
       </div>

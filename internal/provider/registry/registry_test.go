@@ -104,3 +104,52 @@ func TestEmptyNameResolvesToDefaultProfile(t *testing.T) {
 		t.Fatalf("want ok, got %q", text)
 	}
 }
+
+func TestAPIKeyRequirementAllowsOnlyLocalOpenAICompatible(t *testing.T) {
+	ms := memstore.New()
+	r := New(ms)
+	ctx := context.Background()
+
+	cases := []struct {
+		name    string
+		profile *store.ProviderProfile
+		wantErr bool
+	}{
+		{
+			name:    "remote openai-compatible without key",
+			profile: &store.ProviderProfile{Name: "remote-compatible", Type: TypeOpenAICompatible, BaseURL: "https://example.com/v1"},
+			wantErr: true,
+		},
+		{
+			name:    "local openai-compatible without key",
+			profile: &store.ProviderProfile{Name: "local-compatible", Type: TypeOpenAICompatible, BaseURL: "http://127.0.0.1:11434/v1"},
+		},
+		{
+			name:    "localhost openai-compatible without key",
+			profile: &store.ProviderProfile{Name: "localhost-compatible", Type: TypeOpenAICompatible, BaseURL: "http://localhost:11434/v1"},
+		},
+		{
+			name:    "openai responses without key",
+			profile: &store.ProviderProfile{Name: "responses-no-key", Type: TypeOpenAIResponses, BaseURL: "https://api.openai.com/v1"},
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ms.PutProviderProfile(ctx, tc.profile); err != nil {
+				t.Fatal(err)
+			}
+			_, err := r.Resolve(ctx, tc.profile.ProfileID())
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "api_key is required") {
+					t.Fatalf("want api_key error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("want success, got %v", err)
+			}
+		})
+	}
+}

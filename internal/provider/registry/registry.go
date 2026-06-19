@@ -7,6 +7,9 @@ package registry
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/url"
+	"strings"
 	"sync"
 
 	"github.com/teatak/pudding-core/internal/config"
@@ -84,10 +87,16 @@ func build(p *store.ProviderProfile) (provider.Client, error) {
 		if p.BaseURL == "" {
 			return nil, fmt.Errorf("provider profile %q: base_url is required", p.ProfileID())
 		}
+		if apiKey == "" && !isLocalEndpoint(p.BaseURL) {
+			return nil, fmt.Errorf("provider profile %q: api_key is required", p.ProfileID())
+		}
 		return openai.New(openai.Config{BaseURL: p.BaseURL, APIKey: apiKey}), nil
 	case TypeOpenAIResponses:
 		if p.BaseURL == "" {
 			return nil, fmt.Errorf("provider profile %q: base_url is required", p.ProfileID())
+		}
+		if apiKey == "" {
+			return nil, fmt.Errorf("provider profile %q: api_key is required", p.ProfileID())
 		}
 		return openai.NewResponses(openai.Config{BaseURL: p.BaseURL, APIKey: apiKey}), nil
 	case TypeGoogle:
@@ -103,6 +112,19 @@ func build(p *store.ProviderProfile) (provider.Client, error) {
 	default:
 		return nil, fmt.Errorf("provider profile %q: unsupported type %q", p.ProfileID(), p.Type)
 	}
+}
+
+func isLocalEndpoint(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // Static 返回固定 client 的 Resolver,服务 --mock 模式与测试。

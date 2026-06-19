@@ -26,7 +26,8 @@ var (
 	ErrEmptyInput    = errors.New("engine: empty text or clientMessageID")
 	// ErrNoModel:会话未解析出可用 provider/model(空配置),提交时直接报错,
 	// 不静默落内置 default profile / mock 兜底。API 映射 400 "no_model"。
-	ErrNoModel = errors.New("engine: no model configured for session")
+	ErrNoModel        = errors.New("engine: no model configured for session")
+	ErrProviderConfig = errors.New("engine: provider config unavailable")
 )
 
 // Resolver 把 provider profile 名解析为 client 实例;
@@ -127,7 +128,7 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	}
 	client, err := e.resolver.Resolve(ctx, resolved.providerName)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrNoModel, err)
+		return nil, fmt.Errorf("%w: %v", ErrProviderConfig, err)
 	}
 
 	res, err := e.store.BeginTurn(ctx, store.BeginTurnInput{

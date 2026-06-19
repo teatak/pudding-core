@@ -107,6 +107,10 @@
     --rail-item-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 22%);
     --chrome-icon-button-foreground: var(--rail-item-foreground);
     --rail-icon-button-foreground: var(--chrome-icon-button-foreground);
+    --surface-subtle: color-mix(in oklch, var(--card), var(--muted) 32%);
+    --chrome-edit-background: color-mix(in oklch, var(--background), var(--card) 76%);
+    --message-user-background: color-mix(in oklch, var(--background), var(--muted) 70%);
+    --rail-drop-target-background: color-mix(in oklch, var(--sidebar), var(--sidebar-accent) 42%);
     --chat-title-max-w: min(42rem, 100%);
     --success: oklch(0.62 0.12 175);
     --warning: oklch(0.72 0.14 75);
@@ -185,22 +189,22 @@ html[data-shell] .pudding-markdown * {
 }
 
 .dark {
-    --background: oklch(0.18 0 0);
+    --background: oklch(0.225 0 0);
     --foreground: oklch(0.96 0 0);
-    --card: oklch(0.235 0 0);
+    --card: oklch(0.285 0 0);
     --card-foreground: oklch(0.96 0 0);
-    --popover: oklch(0.235 0 0);
+    --popover: oklch(0.285 0 0);
     --popover-foreground: oklch(0.96 0 0);
     --primary: oklch(0.398 0.195 277.366);
     --primary-foreground: oklch(0.962 0.018 272.314);
     --primary-hover: color-mix(in oklch, var(--primary), white 8%);
     --primary-active: color-mix(in oklch, var(--primary), black 8%);
-    --secondary: oklch(0.285 0.006 286.033);
+    --secondary: oklch(0.335 0.006 286.033);
     --secondary-foreground: oklch(0.96 0 0);
     --secondary-hover: color-mix(in oklch, var(--secondary), var(--foreground) 5%);
-    --muted: oklch(0.285 0 0);
+    --muted: oklch(0.335 0 0);
     --muted-foreground: oklch(0.72 0 0);
-    --accent: oklch(0.295 0 0);
+    --accent: oklch(0.355 0 0);
     --accent-foreground: oklch(0.96 0 0);
     --destructive: oklch(0.66 0.17 24);
     --border: oklch(1 0 0 / 10%);
@@ -211,11 +215,11 @@ html[data-shell] .pudding-markdown * {
     --chart-3: oklch(0.511 0.262 276.966);
     --chart-4: oklch(0.457 0.24 277.023);
     --chart-5: oklch(0.398 0.195 277.366);
-    --sidebar: oklch(0.215 0 0);
+    --sidebar: oklch(0.265 0 0);
     --sidebar-foreground: oklch(0.96 0 0);
     --sidebar-primary: oklch(0.585 0.233 277.117);
     --sidebar-primary-foreground: oklch(0.962 0.018 272.314);
-    --sidebar-accent: oklch(0.285 0 0);
+    --sidebar-accent: oklch(0.35 0 0);
     --sidebar-accent-foreground: oklch(0.96 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.56 0 0);
@@ -337,6 +341,22 @@ html[data-shell] .pudding-markdown * {
     font-weight: 400;
 }
 
+.pudding-user-message {
+    background-color: var(--message-user-background);
+}
+
+.pudding-title-edit-input {
+    background-color: var(--chrome-edit-background);
+}
+
+.pudding-settings-panel-header {
+    background-color: var(--surface-subtle);
+}
+
+.pudding-session-drop-indicator-active {
+    background-color: var(--rail-drop-target-background);
+}
+
 .pudding-session-rail [data-slot="sidebar-header"] [data-slot="sidebar-menu-button"] {
     font-weight: 400;
 }
@@ -373,6 +393,29 @@ html[data-shell] .pudding-markdown * {
     color: color-mix(in oklch, var(--muted-foreground), var(--background) 18%);
     font-size: 12px;
     font-weight: 500;
+}
+
+.pudding-provider-preset-grid {
+    @apply grid gap-2;
+    grid-template-columns: 1fr;
+}
+
+@container (min-width: 28rem) {
+    .pudding-provider-preset-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@container (min-width: 42rem) {
+    .pudding-provider-preset-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@container (min-width: 48rem) {
+    .pudding-provider-preset-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
 }
 
 @layer base {

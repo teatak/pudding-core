@@ -174,6 +174,9 @@ func (s *Server) submit(c *cart.Context) error {
 	case errors.Is(err, engine.ErrNoModel):
 		c.JSON(http.StatusBadRequest, map[string]string{"error": "no_model"})
 		return nil
+	case errors.Is(err, engine.ErrProviderConfig):
+		c.JSON(http.StatusBadRequest, map[string]string{"error": "provider_config"})
+		return nil
 	case err != nil:
 		return s.fail(c, err)
 	}

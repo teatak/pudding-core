@@ -342,7 +342,7 @@ function HeaderSessionTitle({
             <Input
               ref={inputRef}
               aria-label={t("session.rename")}
-              className="mt-[-1px] relative z-10 col-start-1 row-start-1 h-7 min-w-0 appearance-none rounded-md border-input bg-background/90 px-2 py-0  font-normal leading-6 shadow-xs ring-0 caret-foreground focus-visible:ring-0 dark:bg-background/90"
+              className="pudding-title-edit-input mt-[-1px] relative z-10 col-start-1 row-start-1 h-7 min-w-0 appearance-none rounded-md border-input px-2 py-0 font-normal leading-6 shadow-xs ring-0 caret-foreground focus-visible:ring-0"
               disabled={renamePending}
               placeholder={t("session.untitled")}
               value={draft}

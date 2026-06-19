@@ -928,7 +928,7 @@ function SessionDropIndicator({ active }: { active: boolean }) {
       aria-hidden="true"
       className={cn(
         "h-8 rounded-md border border-dashed transition-colors",
-        active ? "border-sidebar-ring/70 bg-sidebar-accent/20" : "border-sidebar-border/70",
+        active ? "pudding-session-drop-indicator-active border-sidebar-ring/70" : "border-sidebar-border/70",
       )}
     />
   );

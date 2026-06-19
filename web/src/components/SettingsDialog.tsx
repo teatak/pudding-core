@@ -144,7 +144,7 @@ export function SettingsDialog({ token }: SettingsDialogProps) {
           <Settings />
         </Button>
       </DialogTrigger>
-      <DialogContent className="h-[min(720px,calc(100svh-2rem))] overflow-hidden bg-background p-0 md:max-w-[860px] lg:max-w-[980px]">
+      <DialogContent className="top-[calc(var(--toolbar-h)+(100svh-var(--toolbar-h))/2)] h-[min(900px,calc(100svh-var(--toolbar-h)-1.5rem))] w-[calc(100vw-2rem)] max-w-[1180px] overflow-hidden bg-background p-0 sm:max-w-[1180px] xl:max-w-[1240px]">
         <DialogTitle className="sr-only">{t("settings.title")}</DialogTitle>
         <DialogDescription className="sr-only">{t("settings.description")}</DialogDescription>
         <SidebarProvider className="h-full min-h-0 items-start" style={{ "--sidebar-width": "14rem" } as CSSProperties}>
@@ -175,7 +175,7 @@ function SettingsSidebar({
   const { t } = useI18n();
 
   return (
-    <Sidebar collapsible="none" className="hidden md:flex">
+    <Sidebar collapsible="none" className="flex shrink-0 border-r">
       <SidebarHeader className="p-4 pb-0">
         <SidebarInput aria-label={t("settings.search")} placeholder={t("settings.search")} />
       </SidebarHeader>
@@ -373,9 +373,9 @@ function ProviderSettings({ token }: { token: string }) {
   }
 
   return (
-    <div className="mx-auto grid w-full max-w-5xl gap-5">
+    <div className="@container mx-auto grid w-full max-w-6xl gap-5">
       <SettingsPanel title={t("settings.providerPresets")}>
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="pudding-provider-preset-grid">
           {providerPresets.map((preset) => (
             <button
               key={preset.id}
@@ -704,7 +704,7 @@ function ProfileEditorDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="grid h-[min(820px,calc(100vh-2rem))] w-[min(920px,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-none">
+      <DialogContent className="top-[calc(var(--toolbar-h)+(100svh-var(--toolbar-h))/2)] grid h-[min(900px,calc(100svh-var(--toolbar-h)-1.5rem))] w-[min(920px,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-none">
         <DialogHeader className="px-5 py-4 pr-14">
           <DialogTitle>{editingID ? t("provider.edit") : t("provider.create")}</DialogTitle>
           <DialogDescription>{t("provider.keyHint")}</DialogDescription>
@@ -947,7 +947,7 @@ function SettingsPanel({
 }) {
   return (
     <section className="overflow-hidden rounded-xl border bg-card shadow-sm">
-      <div className="flex min-h-11 items-center justify-between gap-3 border-b bg-muted/20 px-4 py-2">
+      <div className="pudding-settings-panel-header flex min-h-11 items-center justify-between gap-3 border-b px-4 py-2">
         <h3 className="text-sm font-normal">{title}</h3>
         {action}
       </div>

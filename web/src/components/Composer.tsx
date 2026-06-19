@@ -1,11 +1,12 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, Loader2, Square } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { ArrowUp, Loader2, Plus } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
+import { toast } from "sonner";
 import { z } from "zod";
 
-import { APIError, cancelTurn, submitMessage, type Session } from "@/api/client";
+import { cancelTurn, submitMessage, updateSession, type Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
 import { ModelPicker } from "@/components/ModelPicker";
@@ -13,18 +14,20 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
+import { getSubmitFailure } from "@/lib/submitFailure";
 import { useOverlayStore } from "@/state/overlayStore";
 
 const composerSchema = z.object({
-  text: z.string().trim().min(1),
+  text: z.string(),
 });
 
 type ComposerProps = {
   token: string;
   session: Session;
+  onSubmitError?: (message: string | null) => void;
 };
 
-export function Composer({ token, session }: ComposerProps) {
+export function Composer({ token, session, onSubmitError }: ComposerProps) {
   const sessionID = session.id;
   const queryClient = useQueryClient();
   const { t } = useI18n();
@@ -37,6 +40,7 @@ export function Composer({ token, session }: ComposerProps) {
   const overlayRunning = useOverlayStore((state) => Boolean(state.runningTurns[sessionID]));
   const running = overlayRunning || session.running;
   const [cancelLocked, setCancelLocked] = useState(false);
+  const [resolvedModel, setResolvedModel] = useState<{ provider: string; model: string } | null>(null);
   // clientMessageID 按"草稿"生成而不是按请求生成:失败重试和快速双击
   // 复用同一个 ID,服务端幂等去重才生效;成功后才轮换到下一个草稿 ID。
   const draftIDRef = useRef<string>(crypto.randomUUID());
@@ -51,6 +55,11 @@ export function Composer({ token, session }: ComposerProps) {
   const submitMutation = useMutation({
     mutationFn: async (value: z.infer<typeof composerSchema>) => {
       const clientMessageID = draftIDRef.current;
+      const provider = session.provider || resolvedModel?.provider || "";
+      const model = session.model || resolvedModel?.model || "";
+      if ((!session.provider || !session.model) && model) {
+        await updateSession(token, sessionID, { provider, model });
+      }
       addPendingUser({
         sessionID,
         clientMessageID,
@@ -60,6 +69,7 @@ export function Composer({ token, session }: ComposerProps) {
       return submitMessage(token, sessionID, { clientMessageID, text: value.text });
     },
     onSuccess: async () => {
+      onSubmitError?.(null);
       draftIDRef.current = crypto.randomUUID();
       form.reset({ text: "" });
       // 标题自动生成由后端 titler 负责(provisional + LLM,session.titled
@@ -71,15 +81,18 @@ export function Composer({ token, session }: ComposerProps) {
       // 提交未被接受,canonical 不会出现这条消息:pending 气泡必须撤掉,
       // 文本留在 composer 里供重试(同一 draft ID)
       removePendingUser(sessionID, draftIDRef.current);
-      if (error instanceof APIError && error.code === "turn_running") {
-        form.setError("text", { message: t("composer.turnRunning") });
+      const failure = getSubmitFailure(error, {
+        noModel: t("composer.noModel"),
+        providerConfig: t("composer.providerConfig"),
+        submitFailed: t("composer.submitFailed"),
+        turnRunning: t("composer.turnRunning"),
+      });
+      if (failure.surface === "conversation") {
+        onSubmitError?.(failure.message);
         return;
       }
-      if (error instanceof APIError && error.code === "no_model") {
-        form.setError("text", { message: t("composer.noModel") });
-        return;
-      }
-      form.setError("text", { message: error instanceof Error ? error.message : t("composer.submitFailed") });
+      onSubmitError?.(null);
+      toast.error(failure.message);
     },
   });
   const sendEnabled = canSend && !submitMutation.isPending;
@@ -89,9 +102,23 @@ export function Composer({ token, session }: ComposerProps) {
   });
 
   const submitDraft = (value: z.infer<typeof composerSchema>) => {
+    const text = value.text.trim();
+    if (!text || submitMutation.isPending) {
+      return;
+    }
+    onSubmitError?.(null);
     setCancelLocked(true);
-    submitMutation.mutate(value);
+    submitMutation.mutate({ text });
   };
+
+  const handleResolvedModelChange = useCallback((next: { provider: string; model: string }) => {
+    setResolvedModel((current) => {
+      if (current?.provider === next.provider && current.model === next.model) {
+        return current;
+      }
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (!cancelLocked) {
@@ -131,14 +158,33 @@ export function Composer({ token, session }: ComposerProps) {
               {...form.register("text")}
             />
           </div>
-          <div className="flex items-center justify-between gap-2 px-2 pb-2">
-            <ModelPicker token={token} session={session} />
+          <div className="flex items-center gap-1 px-2 pb-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  aria-label={t("composer.attach")}
+                  className="rounded-full border-0 bg-transparent text-muted-foreground hover:text-foreground"
+                  size="icon"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Plus className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("composer.attach")}</TooltipContent>
+            </Tooltip>
+            <ModelPicker
+              className="ml-auto"
+              token={token}
+              session={session}
+              onResolvedChange={handleResolvedModelChange}
+            />
             {running ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     aria-label={t("composer.stop")}
-                    className="rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
+                    className="rounded-full !bg-foreground !text-background shadow-sm hover:!bg-foreground/90 hover:!text-background dark:hover:!bg-foreground/90"
                     size="icon"
                     type="button"
                     variant="ghost"
@@ -152,7 +198,7 @@ export function Composer({ token, session }: ComposerProps) {
                     {cancelMutation.isPending ? (
                       <Loader2 className="animate-spin" />
                     ) : (
-                      <Square className="size-3 fill-current stroke-current" />
+                      <span aria-hidden="true" className="size-2.5 rounded-[2px] bg-current" />
                     )}
                   </Button>
                 </TooltipTrigger>
@@ -177,9 +223,6 @@ export function Composer({ token, session }: ComposerProps) {
             )}
           </div>
         </div>
-        {form.formState.errors.text ? (
-          <div className="mt-2 text-xs text-destructive">{form.formState.errors.text.message}</div>
-        ) : null}
       </ChatColumn>
     </form>
   );

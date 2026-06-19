@@ -24,11 +24,13 @@ type ModelPickerProps = {
   session?: Session;
   value?: { provider?: string; model?: string };
   onChange?: (value: { provider: string; model: string }) => void;
+  onResolvedChange?: (value: { provider: string; model: string }) => void;
+  className?: string;
 };
 
 // 两层模型选择(docs/design.md 第 4 节):第一层 profile,第二层模型。
 // 真实 session 下选中后 PATCH;draft 下只更新本地 value,首条发送时随 createSession 落库。
-export function ModelPicker({ token, session, value, onChange }: ModelPickerProps) {
+export function ModelPicker({ token, session, value, onChange, onResolvedChange, className }: ModelPickerProps) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -71,24 +73,33 @@ export function ModelPicker({ token, session, value, onChange }: ModelPickerProp
     }
   }, [open, currentProfileID]);
 
+  useEffect(() => {
+    if (currentProfileID && currentModel) {
+      onResolvedChange?.({ provider: currentProfileID, model: currentModel });
+    }
+  }, [currentModel, currentProfileID, onResolvedChange]);
+
   // 品牌图标代替 provider 名;未命中图标的 profile 回落为文字名
-  const brandIcon = <RoundBrandIcon name={activeProfile?.id || currentProfileID} sizeClassName="size-6" />;
+  const brandIcon = <RoundBrandIcon name={activeProfile?.id || currentProfileID} sizeClassName="size-5" />;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
           aria-label={t("session.model")}
-          className="group/model-picker ml-1 h-6 max-w-64 gap-0 bg-transparent p-0 text-xs font-normal text-foreground hover:bg-transparent aria-expanded:bg-transparent dark:hover:bg-transparent dark:aria-expanded:bg-transparent"
+          className={cn(
+            "group/model-picker h-6 max-w-64 gap-1 rounded-full border-0 bg-muted py-0 pr-2 pl-0.5 text-xs font-normal text-foreground hover:bg-accent aria-expanded:bg-accent data-[state=open]:bg-accent dark:hover:bg-accent dark:aria-expanded:bg-accent dark:data-[state=open]:bg-accent",
+            className,
+          )}
           size="sm"
           variant="ghost"
         >
-          <span className="relative z-10 grid size-6 shrink-0 place-items-center overflow-hidden rounded-full">
+          <span className="relative z-10 grid size-5 shrink-0 place-items-center overflow-hidden rounded-full">
             {BrandIcon({ name: activeProfile?.id || currentProfileID })
               ? brandIcon
-              : <span className="grid size-6 place-items-center rounded-full bg-muted text-[10px] text-foreground transition-colors group-hover/model-picker:bg-accent group-aria-expanded/model-picker:bg-accent group-data-[state=open]/model-picker:bg-accent">{(activeProfile?.name || currentProfileID).slice(0, 1).toUpperCase()}</span>}
+              : <span className="grid size-5 place-items-center rounded-full bg-background/60 text-[10px] text-foreground">{(activeProfile?.name || currentProfileID).slice(0, 1).toUpperCase()}</span>}
           </span>
-          <span className="-ml-3 flex h-4.5 min-w-0 items-center gap-1 rounded-r-lg bg-muted pr-2 pl-4.5 text-foreground/75 transition-colors group-hover/model-picker:bg-accent group-aria-expanded/model-picker:bg-accent group-data-[state=open]/model-picker:bg-accent">
+          <span className="flex h-5 min-w-0 items-center gap-1 text-foreground/75">
             <span className="truncate">{currentModel ? formatModelLabel(currentModel) : t("common.default")}</span>
             <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
           </span>
@@ -118,6 +129,7 @@ export function ModelPicker({ token, session, value, onChange }: ModelPickerProp
                   isCurrentProfile={currentProfileID === profile.id}
                   profile={profile}
                   onPick={(model) => {
+                    onResolvedChange?.({ provider: profile.id, model });
                     if (session) {
                       patchMutation.mutate({ provider: profile.id, model });
                       return;

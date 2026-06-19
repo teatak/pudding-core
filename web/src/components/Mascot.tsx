@@ -32,8 +32,8 @@ const FOLLOW_EASE = 0.22;
 const FOLLOW_EPSILON = 0.01;
 const HEAD_ORIGIN_Y_PERCENT = (77 / 128) * 100;
 const HEAD_PERSPECTIVE_PX = 170;
-const HEAD_SHIFT_X = 1.5;
-const HEAD_SHIFT_Y = 0.75;
+const HEAD_SHIFT_X_PERCENT = 2.7;
+const HEAD_SHIFT_Y_PERCENT = 1.35;
 const FACE_SHIFT_X = 14;
 const FACE_SHIFT_Y = 5;
 const FACE_CENTER_X = 64;
@@ -61,6 +61,17 @@ const MOUTH_BLINK_KEY_TIMES = "0;0.2;0.23;0.255;0.62;0.635;0.65;1";
 const MOUTH_BLINK_D_VALUES =
   "M57 88.7 Q64 90.1 71 88.7;M57 88.7 Q64 90.1 71 88.7;M60 88.9 Q64 89.5 68 88.9;M57 88.7 Q64 90.1 71 88.7;M57 88.7 Q64 90.1 71 88.7;M58.5 88.8 Q64 90.3 69.5 88.8;M57 88.7 Q64 90.1 71 88.7;M57 88.7 Q64 90.1 71 88.7";
 const MOUTH_BLINK_WIDTH_VALUES = "3.5;3.5;3;3.5;3.5;3.3;3.5;3.5";
+const CLICK_ANIMATION_DURATION_MS = 2200;
+const CLICK_KEY_TIMES = {
+  start: 0,
+  hit: 0.16,
+  rebound: 0.32,
+  echo1: 0.48,
+  echo2: 0.62,
+  echo3: 0.76,
+  settle: 0.9,
+  end: 1,
+};
 const DEFAULT_GAZE: MascotGaze = { type: "pointer" };
 
 const absoluteLayerStyle: CSSProperties = {
@@ -77,6 +88,14 @@ const rootStyle: CSSProperties = {
   perspective: `${HEAD_PERSPECTIVE_PX}px`,
   perspectiveOrigin: `50% ${HEAD_ORIGIN_Y_PERCENT}%`,
   position: "relative",
+};
+
+const headGestureStyle: CSSProperties = {
+  ...absoluteLayerStyle,
+  transform: "translateX(0px) rotateZ(0deg)",
+  transformOrigin: `50% ${HEAD_ORIGIN_Y_PERCENT}%`,
+  transformStyle: "preserve-3d",
+  willChange: "transform",
 };
 
 const headStyle: CSSProperties = {
@@ -105,6 +124,7 @@ export function Mascot({
   showHeadDebugFrame = false,
 }: MascotProps) {
   const rootRef = useRef<HTMLSpanElement>(null);
+  const headGestureRef = useRef<HTMLSpanElement>(null);
   const headRef = useRef<HTMLSpanElement>(null);
   const faceLayerRef = useRef<HTMLSpanElement>(null);
   const faceRef = useRef<SVGGElement>(null);
@@ -135,7 +155,7 @@ export function Mascot({
     const rightShade = rightShadeRef.current;
 
     if (head) {
-      head.style.transform = `translate(${turnX * HEAD_SHIFT_X}px, ${turnY * HEAD_SHIFT_Y}px) rotateY(${turnX * HEAD_YAW_MAX_DEG}deg) rotateX(${-turnY * HEAD_PITCH_MAX_DEG}deg) rotateZ(${turnX * turnY * HEAD_ROLL_MAX_DEG}deg)`;
+      head.style.transform = `translate(${turnX * HEAD_SHIFT_X_PERCENT}%, ${turnY * HEAD_SHIFT_Y_PERCENT}%) rotateY(${turnX * HEAD_YAW_MAX_DEG}deg) rotateX(${-turnY * HEAD_PITCH_MAX_DEG}deg) rotateZ(${turnX * turnY * HEAD_ROLL_MAX_DEG}deg)`;
     }
     if (faceLayer) {
       faceLayer.style.transform = `translate3d(0px, 0px, ${FACE_Z_OFFSET_PX}px) rotateY(${turnX * FACE_EXTRA_YAW_DEG}deg) rotateX(${-turnY * FACE_EXTRA_PITCH_DEG}deg)`;
@@ -246,24 +266,59 @@ export function Mascot({
     };
   }, []);
 
-  const bounce = () => {
-    const root = rootRef.current;
-    if (!root) return;
+  const animateLayer = (element: HTMLElement | null, keyframes: Keyframe[], options: KeyframeAnimationOptions) => {
+    if (!element) return;
     pressAnimationRef.current?.cancel();
-    pressAnimationRef.current = root.animate(
+    pressAnimationRef.current = element.animate(keyframes, options);
+  };
+
+  const bounce = () => {
+    animateLayer(
+      rootRef.current,
       [
-        { offset: 0, transform: "translateY(0) rotateZ(0deg) scale(1, 1)" },
-        { offset: 0.2, transform: "translateY(1.45px) rotateZ(-0.7deg) scale(1.04, 0.975)" },
-        { offset: 0.43, transform: "translateY(-0.75px) rotateZ(0.55deg) scale(0.987, 1.012)" },
-        { offset: 0.64, transform: "translateY(0.38px) rotateZ(-0.28deg) scale(1.008, 0.997)" },
-        { offset: 0.82, transform: "translateY(-0.13px) rotateZ(0.12deg) scale(0.998, 1.001)" },
-        { offset: 1, transform: "translateY(0) rotateZ(0deg) scale(1, 1)" },
+        { offset: CLICK_KEY_TIMES.start, transform: "translateY(0%) rotateZ(0deg) scale(1, 1)" },
+        { offset: CLICK_KEY_TIMES.hit, transform: "translateY(4.5%) rotateZ(-1.1deg) scale(1.072, 0.95)" },
+        { offset: CLICK_KEY_TIMES.rebound, transform: "translateY(-2.5%) rotateZ(0.85deg) scale(0.972, 1.026)" },
+        { offset: CLICK_KEY_TIMES.echo1, transform: "translateY(1.6%) rotateZ(-0.52deg) scale(1.022, 0.988)" },
+        { offset: CLICK_KEY_TIMES.echo2, transform: "translateY(-1%) rotateZ(0.32deg) scale(0.986, 1.012)" },
+        { offset: CLICK_KEY_TIMES.echo3, transform: "translateY(0.8%) rotateZ(-0.24deg) scale(1.011, 0.993)" },
+        { offset: CLICK_KEY_TIMES.settle, transform: "translateY(-0.4%) rotateZ(0.13deg) scale(0.995, 1.005)" },
+        { offset: CLICK_KEY_TIMES.end, transform: "translateY(0%) rotateZ(0deg) scale(1, 1)" },
       ],
       {
-        duration: 1550,
+        duration: CLICK_ANIMATION_DURATION_MS,
         easing: "cubic-bezier(0.2, 0.85, 0.18, 1)",
       },
     );
+  };
+
+  const wobble = () => {
+    const direction = Math.random() < 0.5 ? -1 : 1;
+    animateLayer(
+      headGestureRef.current,
+      [
+        { offset: CLICK_KEY_TIMES.start, transform: "translateX(0%) rotateZ(0deg)" },
+        { offset: CLICK_KEY_TIMES.hit, transform: `translateX(${direction * -2.4}%) rotateZ(${direction * -9}deg)` },
+        { offset: CLICK_KEY_TIMES.rebound, transform: `translateX(${direction * 2.1}%) rotateZ(${direction * 7.5}deg)` },
+        { offset: CLICK_KEY_TIMES.echo1, transform: `translateX(${direction * -1.6}%) rotateZ(${direction * -5.6}deg)` },
+        { offset: CLICK_KEY_TIMES.echo2, transform: `translateX(${direction * 1}%) rotateZ(${direction * 3.5}deg)` },
+        { offset: CLICK_KEY_TIMES.echo3, transform: `translateX(${direction * -0.4}%) rotateZ(${direction * -1.4}deg)` },
+        { offset: CLICK_KEY_TIMES.settle, transform: `translateX(${direction * 0.15}%) rotateZ(${direction * 0.5}deg)` },
+        { offset: CLICK_KEY_TIMES.end, transform: "translateX(0%) rotateZ(0deg)" },
+      ],
+      {
+        duration: CLICK_ANIMATION_DURATION_MS,
+        easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
+      },
+    );
+  };
+
+  const playClickAnimation = () => {
+    if (Math.random() < 0.5) {
+      bounce();
+      return;
+    }
+    wobble();
   };
 
   return (
@@ -274,7 +329,7 @@ export function Mascot({
       data-gaze={gaze.type}
       data-mood={mood}
       style={rootStyle}
-      onPointerDown={bounce}
+      onPointerDown={playClickAnimation}
     >
       <svg data-slot="mascot-base" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
         <g data-slot="shadow">
@@ -282,8 +337,9 @@ export function Mascot({
         </g>
       </svg>
 
-      <span data-slot="head" ref={headRef} style={headStyle}>
-        <svg data-slot="head-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+      <span data-slot="head-gesture" ref={headGestureRef} style={headGestureStyle}>
+        <span data-slot="head" ref={headRef} style={headStyle}>
+          <svg data-slot="head-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
           <defs>
             <linearGradient id={faceID} x1="0" x2="0" y1="0" y2="1">
               <stop offset="0%" stopColor="var(--mascot-body-top)" />
@@ -415,10 +471,10 @@ export function Mascot({
               y="34"
             />
           ) : null}
-        </svg>
+          </svg>
 
-        <span data-slot="face-layer" ref={faceLayerRef} style={faceLayerStyle}>
-          <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+          <span data-slot="face-layer" ref={faceLayerRef} style={faceLayerStyle}>
+            <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
             <g ref={faceRef} data-slot="face" transform="translate(0 0)">
               {showFaceDebugFrame ? (
                 <rect
@@ -476,7 +532,8 @@ export function Mascot({
                 />
               </path>
             </g>
-          </svg>
+            </svg>
+          </span>
         </span>
       </span>
     </span>

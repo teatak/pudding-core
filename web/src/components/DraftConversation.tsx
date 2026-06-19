@@ -1,26 +1,29 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowUp, Loader2 } from "lucide-react";
+import { ArrowUp, CircleAlert, Loader2, Plus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FocusEvent, type KeyboardEvent } from "react";
 import { useForm } from "react-hook-form";
+import { toast } from "sonner";
 import { z } from "zod";
 
-import { APIError, createSession, deleteSession, submitMessage, type Session } from "@/api/client";
+import { createSession, deleteSession, submitMessage, type Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
 import { Mascot, type MascotGaze, type MascotGazePoint } from "@/components/Mascot";
 import { ModelPicker } from "@/components/ModelPicker";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
 import type { AppSearch } from "@/lib/route";
+import { getSubmitFailure } from "@/lib/submitFailure";
 import { useDraftStore } from "@/state/draftStore";
 import { useOverlayStore } from "@/state/overlayStore";
 
 const draftSchema = z.object({
-  text: z.string().trim().min(1),
+  text: z.string(),
 });
 
 type DraftValue = z.infer<typeof draftSchema>;
@@ -31,6 +34,7 @@ const suggestionKeys = ["draft.suggest.1", "draft.suggest.2", "draft.suggest.3"]
 export function DraftConversation({ token }: { token: string }) {
   const { t } = useI18n();
   const [quickSubmit, setQuickSubmit] = useState<QuickSubmit | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [mascotGaze, setMascotGaze] = useState<MascotGaze>({ type: "pointer" });
   const setMascotPointerGaze = useCallback(() => {
     setMascotGaze((current) => (current.type === "pointer" ? current : { type: "pointer" }));
@@ -52,7 +56,20 @@ export function DraftConversation({ token }: { token: string }) {
           <h1 className="text-3xl font-medium text-foreground">{t("draft.title")}</h1>
         </div>
         <div className="mt-14 flex flex-col">
-          <DraftComposer quickSubmit={quickSubmit} token={token} onMascotInputGazeChange={setMascotInputGaze} />
+          {submitError ? (
+            <ChatColumn className="mb-3">
+              <Alert variant="destructive">
+                <CircleAlert className="h-3.5 w-3.5" />
+                <AlertDescription>{submitError}</AlertDescription>
+              </Alert>
+            </ChatColumn>
+          ) : null}
+          <DraftComposer
+            quickSubmit={quickSubmit}
+            token={token}
+            onMascotInputGazeChange={setMascotInputGaze}
+            onSubmitError={setSubmitError}
+          />
           <ChatColumn className="mt-8 flex flex-wrap items-center justify-center gap-2 px-2">
             {suggestionKeys.map((key, index) => {
               const text = t(key);
@@ -78,10 +95,12 @@ function DraftComposer({
   token,
   quickSubmit,
   onMascotInputGazeChange,
+  onSubmitError,
 }: {
   token: string;
   quickSubmit: QuickSubmit | null;
   onMascotInputGazeChange: (target: MascotGazePoint | null) => void;
+  onSubmitError: (message: string | null) => void;
 }) {
   const navigate = useNavigate({ from: "/" });
   const queryClient = useQueryClient();
@@ -159,23 +178,21 @@ function DraftComposer({
         await submitMessage(token, created.id, { clientMessageID, text: value.text });
       } catch (error) {
         removePendingUser(created.id, clientMessageID);
-        if (error instanceof APIError) {
-          try {
-            await deleteSession(token, created.id);
-          } catch {
-            // 清理失败不覆盖真正的提交错误;下一次 sessions refetch 会对齐状态。
-          }
-          removeCachedSession(queryClient, created.id);
-          await navigate({
-            to: "/",
-            search: (prev) => {
-              const next = { ...(prev as AppSearch), draft: "1" };
-              delete next.session;
-              return next;
-            },
-            replace: true,
-          });
+        try {
+          await deleteSession(token, created.id);
+        } catch {
+          // 清理失败不覆盖真正的提交错误;下一次 sessions refetch 会对齐状态。
         }
+        removeCachedSession(queryClient, created.id);
+        await navigate({
+          to: "/",
+          search: (prev) => {
+            const next = { ...(prev as AppSearch), draft: "1" };
+            delete next.session;
+            return next;
+          },
+          replace: true,
+        });
         throw error;
       }
       await queryClient.invalidateQueries({ queryKey: queryKeys.messages(created.id) });
@@ -184,15 +201,23 @@ function DraftComposer({
       return created;
     },
     onSuccess: () => {
+      onSubmitError(null);
       draftIDRef.current = crypto.randomUUID();
       form.reset({ text: "" });
     },
     onError: (error) => {
-      if (error instanceof APIError && error.code === "no_model") {
-        form.setError("text", { message: t("composer.noModel") });
+      const failure = getSubmitFailure(error, {
+        noModel: t("composer.noModel"),
+        providerConfig: t("composer.providerConfig"),
+        submitFailed: t("composer.submitFailed"),
+        turnRunning: t("composer.turnRunning"),
+      });
+      if (failure.surface === "conversation") {
+        onSubmitError(failure.message);
         return;
       }
-      form.setError("text", { message: error instanceof Error ? error.message : t("composer.submitFailed") });
+      onSubmitError(null);
+      toast.error(failure.message);
     },
   });
 
@@ -202,9 +227,10 @@ function DraftComposer({
       if (!text || submitMutation.isPending) {
         return;
       }
+      onSubmitError(null);
       submitMutation.mutate({ text });
     },
-    [submitMutation],
+    [onSubmitError, submitMutation],
   );
 
   useEffect(() => {
@@ -221,6 +247,9 @@ function DraftComposer({
   }, [form, quickSubmit, setDraftText, submitText]);
 
   const submitDraft = (value: DraftValue) => submitText(value.text);
+  const handleResolvedModelChange = useCallback((next: { provider: string; model: string }) => {
+    setModelValue(next);
+  }, [setModelValue]);
   const setTextAreaRef = (node: HTMLTextAreaElement | null) => {
     textAreaRef.current = node;
     textField.ref(node);
@@ -265,8 +294,28 @@ function DraftComposer({
               onSelect={scheduleMascotInputGaze}
             />
           </div>
-          <div className="flex items-center justify-between gap-2 px-2 pb-2">
-            <ModelPicker token={token} value={modelValue} onChange={setModelValue} />
+          <div className="flex items-center gap-1 px-2 pb-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  aria-label={t("composer.attach")}
+                  className="rounded-full border-0 bg-transparent text-muted-foreground hover:text-foreground"
+                  size="icon"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Plus className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("composer.attach")}</TooltipContent>
+            </Tooltip>
+            <ModelPicker
+              className="ml-auto"
+              token={token}
+              value={modelValue}
+              onChange={setModelValue}
+              onResolvedChange={handleResolvedModelChange}
+            />
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -284,9 +333,6 @@ function DraftComposer({
             </Tooltip>
           </div>
         </div>
-        {form.formState.errors.text ? (
-          <div className="mt-2 text-xs text-destructive">{form.formState.errors.text.message}</div>
-        ) : null}
       </ChatColumn>
     </form>
   );
