@@ -64,17 +64,16 @@ web 契约 `providerProfile.type` 与设置表单下拉;不在枚举内的 type 
 
 > Go 侧常量:`internal/store/settings_keys.go`。改键名两边同步。
 > REST settings 仍是扁平 k=v,value 一律纯字符串;磁盘事实源是
-> `<home>/config/settings.yaml`。`provider.default` 对应 YAML `default_profile`。
+> `<home>/config/settings.yaml`。
 > **只放标量偏好**;provider profiles 走 `<home>/config/profiles.yaml` +
 > 独立 REST 资源,不进 settings。
 
 | key | 用途 |
 | --- | --- |
 | `system_prompt` | system instruction,空则用内置默认值 |
-| `provider.default` | session.provider 为空时的默认 profile 名,再空回落 `default` |
 
-**不存在全局默认模型键**:模型名只在所属 profile 下有意义。模型解析:
-`session.model` > 所解析 profile 的 `models[0].id` > `--model` flag(mock/dev 兜底)。
+session 创建时必须显式写入 `provider` 与 `model`。draft 页可记住"上次选用模型",
+但不影响既有 session。
 历史上的 `model.default` 与 `provider.openai.*` 过渡键已随 registry 收口删除。
 
 provider model entry 形状:

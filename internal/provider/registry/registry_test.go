@@ -64,7 +64,7 @@ func TestResolveProfileTypesAndCache(t *testing.T) {
 	}
 }
 
-func TestEmptyNameResolvesToDefaultProfile(t *testing.T) {
+func TestEmptyNameIsRejected(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
@@ -75,17 +75,16 @@ func TestEmptyNameResolvesToDefaultProfile(t *testing.T) {
 	r := New(ms)
 	ctx := context.Background()
 
-	// 没有 default profile → 失败且报 profile 名,不存在任何隐式回落
-	if _, err := r.Resolve(ctx, ""); err == nil || !strings.Contains(err.Error(), "default") {
-		t.Fatalf("want default-not-found error, got %v", err)
+	if _, err := r.Resolve(ctx, ""); err == nil || !strings.Contains(err.Error(), "profile name is required") {
+		t.Fatalf("want required profile name error, got %v", err)
 	}
 
 	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
-		Name: store.DefaultProviderProfile, Type: TypeOpenAICompatible, BaseURL: srv.URL,
+		Name: "local", Type: TypeOpenAICompatible, BaseURL: srv.URL,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	client, err := r.Resolve(ctx, "")
+	client, err := r.Resolve(ctx, "local")
 	if err != nil {
 		t.Fatal(err)
 	}

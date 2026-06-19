@@ -395,24 +395,121 @@ html[data-shell] .pudding-markdown * {
     font-weight: 500;
 }
 
-.pudding-provider-preset-grid {
-    @apply grid gap-2;
-    grid-template-columns: 1fr;
+.pudding-draft-stage {
+    container-type: inline-size;
 }
 
-@container (min-width: 28rem) {
-    .pudding-provider-preset-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+.pudding-draft-body {
+    @apply flex min-h-0 flex-1 flex-col justify-center overflow-y-auto px-4 py-8;
+}
+
+.pudding-draft-title {
+    @apply flex items-center justify-center gap-3;
+}
+
+.pudding-draft-mascot {
+    @apply size-12 shrink-0 overflow-visible;
+}
+
+.pudding-draft-heading {
+    @apply text-2xl leading-tight font-medium text-foreground;
+}
+
+.pudding-draft-stack {
+    @apply mt-8 flex flex-col;
+}
+
+.pudding-draft-stack-with-setup {
+    @apply mt-6;
+}
+
+.pudding-draft-preset-panel {
+    @apply mx-auto w-full max-w-6xl px-5;
+}
+
+.pudding-draft-preset-grid {
+    @apply min-h-0 overflow-y-auto pr-1;
+    max-height: min(26rem, calc(100vh - 20rem));
+}
+
+@container (min-width: 42rem) {
+    .pudding-draft-heading {
+        @apply text-3xl;
     }
+
+    .pudding-draft-mascot {
+        @apply size-14;
+    }
+
+    .pudding-draft-stack {
+        @apply mt-14;
+    }
+
+    .pudding-draft-stack-with-setup {
+        @apply mt-10;
+    }
+}
+
+.pudding-provider-preset-grid {
+    @apply grid gap-2;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.pudding-provider-preset-card {
+    @apply flex min-h-10 items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-left transition-colors hover:bg-accent;
+}
+
+.pudding-provider-preset-icon {
+    @apply size-5 shrink-0;
+}
+
+.pudding-provider-preset-text {
+    @apply flex min-w-0 items-baseline gap-1.5;
+}
+
+.pudding-provider-preset-title {
+    @apply min-w-0 flex-1 truncate text-sm font-normal;
+}
+
+.pudding-provider-preset-meta {
+    @apply hidden shrink-0 truncate text-xs text-muted-foreground;
 }
 
 @container (min-width: 42rem) {
     .pudding-provider-preset-grid {
         grid-template-columns: repeat(3, minmax(0, 1fr));
     }
+
+    .pudding-provider-preset-card {
+        @apply min-h-14 gap-3 px-3 py-2;
+    }
+
+    .pudding-provider-preset-icon {
+        @apply size-6;
+    }
+
+    .pudding-provider-preset-text {
+        @apply grid gap-0.5;
+    }
+
+    .pudding-provider-preset-title {
+        @apply shrink;
+    }
+
+    .pudding-provider-preset-meta {
+        @apply block;
+    }
 }
 
-@container (min-width: 48rem) {
+@container (min-width: 56rem) {
+    .pudding-draft-heading {
+        @apply text-4xl;
+    }
+
+    .pudding-draft-mascot {
+        @apply size-16;
+    }
+
     .pudding-provider-preset-grid {
         grid-template-columns: repeat(4, minmax(0, 1fr));
     }

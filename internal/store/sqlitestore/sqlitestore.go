@@ -124,6 +124,9 @@ var _ store.Store = (*Store)(nil)
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) CreateSession(ctx context.Context, sess *store.Session) error {
+	if err := store.NormalizeSessionProviderModel(sess); err != nil {
+		return err
+	}
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		now := time.Now()
 		sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = now, now, now
@@ -178,6 +181,9 @@ func (s *Store) ListSessions(ctx context.Context) ([]*store.Session, error) {
 }
 
 func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionUpdate) (*store.Session, error) {
+	if err := store.NormalizeSessionUpdate(&upd); err != nil {
+		return nil, err
+	}
 	var out *store.Session
 	err := s.tx(ctx, func(tx *sql.Tx) error {
 		sess, err := getSessionTx(ctx, tx, id)

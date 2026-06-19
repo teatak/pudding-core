@@ -26,7 +26,7 @@ func newTestServer(t *testing.T) (*httptest.Server, store.Store) {
 	t.Helper()
 	ms := memstore.New()
 	hub := event.NewHub()
-	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好", "世界"}), mock.WithDelay(5*time.Millisecond))), ms, "m")
+	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好", "世界"}), mock.WithDelay(5*time.Millisecond))), ms)
 	srv := httptest.NewServer(New(eng, ms, ms, hub).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 	return srv, ms
@@ -279,7 +279,7 @@ func TestCreateSessionCarriesProviderAndModel(t *testing.T) {
 func TestCreateSessionBodyValidation(t *testing.T) {
 	srv, _ := newTestServer(t)
 
-	// 空 body 允许:建出匿名会话
+	// 空 body 不允许:session 必须显式带 provider/model
 	resp, err := http.NewRequest(http.MethodPost, srv.URL+"/sessions", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -290,8 +290,8 @@ func TestCreateSessionBodyValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.Body.Close()
-	if r.StatusCode != http.StatusCreated {
-		t.Fatalf("empty body must 201, got %d", r.StatusCode)
+	if r.StatusCode != http.StatusBadRequest {
+		t.Fatalf("empty body must 400, got %d", r.StatusCode)
 	}
 
 	// 非空坏 JSON 必须 400,不能静默建空会话
@@ -309,10 +309,10 @@ func TestCreateSessionBodyValidation(t *testing.T) {
 		t.Fatalf("malformed json must 400, got %d", br.StatusCode)
 	}
 
-	// 库里只应有那 1 个空 body 会话,坏 JSON 没留垃圾
+	// 空 body 和坏 JSON 都不能留下垃圾 session
 	list := decodeJSON[map[string][]store.Session](t, req(t, http.MethodGet, srv.URL+"/sessions", nil))
-	if len(list["sessions"]) != 1 {
-		t.Fatalf("malformed body must not create a session, got %d", len(list["sessions"]))
+	if len(list["sessions"]) != 0 {
+		t.Fatalf("invalid create must not create a session, got %d", len(list["sessions"]))
 	}
 }
 
@@ -322,11 +322,11 @@ func TestDeleteSessionCancelsRunningTurn(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
 	eng := engine.New(ms, hub,
-		registry.Static(mock.New(mock.WithScript([]string{"slow"}), mock.WithDelay(2*time.Second))), ms, "m")
+		registry.Static(mock.New(mock.WithScript([]string{"slow"}), mock.WithDelay(2*time.Second))), ms)
 	srv := httptest.NewServer(New(eng, ms, ms, hub).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 
-	sess := decodeJSON[store.Session](t, req(t, http.MethodPost, srv.URL+"/sessions", map[string]string{"title": "d"}))
+	sess := decodeJSON[store.Session](t, req(t, http.MethodPost, srv.URL+"/sessions", map[string]string{"title": "d", "provider": "mock", "model": "m"}))
 	resp := req(t, http.MethodPost, srv.URL+"/sessions/"+sess.ID+"/submit",
 		map[string]string{"clientMessageID": "c1", "text": "hi"})
 	resp.Body.Close()
@@ -351,7 +351,7 @@ func TestDeleteSessionCancelsRunningTurn(t *testing.T) {
 func TestSubmitStreamAndResume(t *testing.T) {
 	srv, _ := newTestServer(t)
 
-	sess := decodeJSON[store.Session](t, req(t, http.MethodPost, srv.URL+"/sessions", map[string]string{"title": "demo"}))
+	sess := decodeJSON[store.Session](t, req(t, http.MethodPost, srv.URL+"/sessions", map[string]string{"title": "demo", "provider": "mock", "model": "m"}))
 	eventsURL := fmt.Sprintf("%s/sessions/%s/events?token=%s", srv.URL, sess.ID, testToken)
 
 	// live 流:先订阅再 submit

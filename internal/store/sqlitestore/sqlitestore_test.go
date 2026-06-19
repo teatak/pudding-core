@@ -25,7 +25,7 @@ func openTestStore(t *testing.T) (*Store, string) {
 
 func createTestSession(t *testing.T, st store.Store, id string) {
 	t.Helper()
-	if err := st.CreateSession(context.Background(), &store.Session{ID: id, Title: id, Model: "mock"}); err != nil {
+	if err := st.CreateSession(context.Background(), &store.Session{ID: id, Title: id, Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
 	}
 }

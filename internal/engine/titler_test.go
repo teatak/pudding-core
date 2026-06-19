@@ -46,9 +46,8 @@ func TestGenerateTitleIgnoresThoughtChunks(t *testing.T) {
 			{Done: true, Finish: provider.FinishStop},
 		}))),
 		memstore.New(),
-		"mock-model",
 	)
-	got, err := eng.generateTitle("default", "mock-model", provider.ModelConfig{}, "hi")
+	got, err := eng.generateTitle("mock", "mock-model", provider.ModelConfig{}, "hi")
 	if err != nil {
 		t.Fatal(err)
 	}

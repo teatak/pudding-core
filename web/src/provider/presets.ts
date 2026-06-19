@@ -1,4 +1,4 @@
-import type { ProviderModel } from "@/api/client";
+import type { ProviderModel, ProviderProfile } from "@/api/client";
 
 export type ProviderPresetId =
   | "deepseek"
@@ -12,119 +12,283 @@ export type ProviderPresetId =
   | "openrouter"
   | "ollama";
 
+export type ProviderPresetType = "openai-compatible" | "openai-responses" | "google" | "anthropic";
+
+export type ProviderPresetVariant = {
+  id: string;
+  label: string;
+  description: string;
+  type: ProviderPresetType;
+  baseURL: string;
+  models: ProviderModel[];
+  apiKeyOptional?: boolean;
+  profileName?: string;
+};
+
 export type ProviderPreset = {
   id: ProviderPresetId;
   name: string;
-  type: "openai-compatible" | "openai-responses" | "google" | "anthropic";
-  baseURL: string;
-  models: ProviderModel[];
+  description: string;
   apiKeyURL?: string;
-  apiKeyOptional?: boolean;
+  defaultVariantId: string;
+  variants: ProviderPresetVariant[];
 };
+
+const DEEPSEEK_OPENAI_MODELS = [
+  model("deepseek-v4-flash", { contextWindow: 1_050_000, capabilities: { tools: true }, openai: { temperature: 0.7, max_completion_tokens: 384_000, max_tool_loops: 64 } }),
+  model("deepseek-v4-pro", { contextWindow: 1_050_000, capabilities: { tools: true }, openai: { temperature: 0.7, max_completion_tokens: 384_000, max_tool_loops: 64 } }),
+];
+
+const DEEPSEEK_ANTHROPIC_MODELS = [
+  model("deepseek-v4-flash", { contextWindow: 1_050_000, capabilities: { tools: true }, anthropic: { temperature: 0.7, max_tokens: 384_000 } }),
+  model("deepseek-v4-pro", { contextWindow: 1_050_000, capabilities: { tools: true }, anthropic: { temperature: 0.7, max_tokens: 384_000 } }),
+];
+
+const MIMO_OPENAI_MODELS = ["mimo-v2.5", "mimo-v2.5-pro"].map((id) =>
+  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: 0.7, max_completion_tokens: 131_072 } }),
+);
+
+const MIMO_ANTHROPIC_MODELS = ["mimo-v2.5", "mimo-v2.5-pro"].map((id) =>
+  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, anthropic: { temperature: 0.7, max_tokens: 131_072 } }),
+);
+
+const OPENAI_MODELS = [
+  model("gpt-5.5", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: 0.7, reasoning_effort: "medium" } }),
+  model("gpt-5.4", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: 0.7, reasoning_effort: "medium" } }),
+  model("gpt-5.4-mini", { contextWindow: 400_000, capabilities: { image: true, tools: true }, openai: { temperature: 0.7, reasoning_effort: "low" } }),
+];
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "deepseek",
     name: "DeepSeek",
-    type: "openai-compatible",
-    baseURL: "https://api.deepseek.com",
-    models: [
-      model("deepseek-v4-flash", { contextWindow: 1_050_000, capabilities: { tools: true }, openai: { temperature: 0.7, max_completion_tokens: 384_000, max_tool_loops: 64 } }),
-      model("deepseek-v4-pro", { contextWindow: 1_050_000, capabilities: { tools: true }, openai: { temperature: 0.7, max_completion_tokens: 384_000, max_tool_loops: 64 } }),
-    ],
+    description: "DeepSeek V4 models with OpenAI-compatible and Anthropic-compatible protocols.",
+    defaultVariantId: "openai",
     apiKeyURL: "https://platform.deepseek.com/api_keys",
+    variants: [
+      {
+        id: "openai",
+        label: "OpenAI Compatible",
+        description: "https://api.deepseek.com",
+        type: "openai-compatible",
+        baseURL: "https://api.deepseek.com",
+        models: DEEPSEEK_OPENAI_MODELS,
+      },
+      {
+        id: "anthropic",
+        label: "Anthropic Compatible",
+        description: "https://api.deepseek.com/anthropic",
+        type: "anthropic",
+        baseURL: "https://api.deepseek.com/anthropic",
+        models: DEEPSEEK_ANTHROPIC_MODELS,
+        profileName: "DeepSeek Anthropic",
+      },
+    ],
   },
   {
     id: "qwen",
     name: "Qwen",
-    type: "openai-compatible",
-    baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    models: ["qwen3.6-flash", "qwen3.7-max", "qwen3.6-plus", "qwen3-max"].map((id) => model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: 0.7 } })),
+    description: "Alibaba Qwen via DashScope OpenAI-compatible endpoint.",
+    defaultVariantId: "default",
     apiKeyURL: "https://bailian.console.aliyun.com/?apiKey=1",
+    variants: [
+      {
+        id: "default",
+        label: "OpenAI Compatible",
+        description: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        type: "openai-compatible",
+        baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        models: ["qwen3.6-flash", "qwen3.7-max", "qwen3.6-plus", "qwen3-max"].map((id) => model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: 0.7 } })),
+      },
+    ],
   },
   {
     id: "mimo",
     name: "MiMo",
-    type: "openai-compatible",
-    baseURL: "https://api.xiaomimimo.com/v1",
-    models: ["mimo-v2.5", "mimo-v2.5-pro"].map((id) => model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: 0.7 } })),
+    description: "Xiaomi MiMo standard and plan endpoints.",
+    defaultVariantId: "standard-openai",
     apiKeyURL: "https://platform.xiaomimimo.com/",
+    variants: [
+      {
+        id: "standard-openai",
+        label: "标准 API / OpenAI",
+        description: "api.xiaomimimo.com/v1 · 按 token 计费",
+        type: "openai-compatible",
+        baseURL: "https://api.xiaomimimo.com/v1",
+        models: MIMO_OPENAI_MODELS,
+      },
+      {
+        id: "standard-anthropic",
+        label: "标准 API / Anthropic",
+        description: "api.xiaomimimo.com/anthropic · 按 token 计费",
+        type: "anthropic",
+        baseURL: "https://api.xiaomimimo.com/anthropic",
+        models: MIMO_ANTHROPIC_MODELS,
+        profileName: "MiMo Anthropic",
+      },
+      {
+        id: "plan-openai",
+        label: "Plan / OpenAI",
+        description: "token-plan-cn.xiaomimimo.com/v1 · 订阅会员",
+        type: "openai-compatible",
+        baseURL: "https://token-plan-cn.xiaomimimo.com/v1",
+        models: MIMO_OPENAI_MODELS,
+        profileName: "MiMo Plan",
+      },
+      {
+        id: "plan-anthropic",
+        label: "Plan / Anthropic",
+        description: "token-plan-cn.xiaomimimo.com/anthropic · 订阅会员",
+        type: "anthropic",
+        baseURL: "https://token-plan-cn.xiaomimimo.com/anthropic",
+        models: MIMO_ANTHROPIC_MODELS,
+        profileName: "MiMo Plan Anthropic",
+      },
+    ],
   },
   {
     id: "gemini",
     name: "Google Gemini",
-    type: "google",
-    baseURL: "",
-    models: [
-      model("gemini-3.5-flash", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: 0.7, maxOutputTokens: 64_000 } }),
-      model("gemini-3.5-pro", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: 0.7, maxOutputTokens: 64_000 } }),
-      model("gemini-2.5-flash", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: 0.7, maxOutputTokens: 64_000 } }),
-    ],
+    description: "Google Gemini API with multimodal chat models.",
+    defaultVariantId: "default",
     apiKeyURL: "https://aistudio.google.com/app/apikey",
+    variants: [
+      {
+        id: "default",
+        label: "Google API",
+        description: "Google AI Studio API",
+        type: "google",
+        baseURL: "",
+        models: [
+          model("gemini-3.5-flash", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: 0.7, maxOutputTokens: 64_000 } }),
+          model("gemini-3.5-pro", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: 0.7, maxOutputTokens: 64_000 } }),
+          model("gemini-2.5-flash", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: 0.7, maxOutputTokens: 64_000 } }),
+        ],
+      },
+    ],
   },
   {
     id: "openai",
     name: "OpenAI",
-    type: "openai-responses",
-    baseURL: "https://api.openai.com/v1",
-    models: [
-      model("gpt-5.5", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: 0.7, reasoning_effort: "medium" } }),
-      model("gpt-5.4", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: 0.7, reasoning_effort: "medium" } }),
-      model("gpt-5.4-mini", { contextWindow: 400_000, capabilities: { image: true, tools: true }, openai: { temperature: 0.7, reasoning_effort: "low" } }),
-    ],
+    description: "OpenAI official API with Responses API or OpenAI-compatible chat.",
+    defaultVariantId: "responses",
     apiKeyURL: "https://platform.openai.com/api-keys",
+    variants: [
+      {
+        id: "responses",
+        label: "Responses API",
+        description: "https://api.openai.com/v1/responses",
+        type: "openai-responses",
+        baseURL: "https://api.openai.com/v1",
+        models: OPENAI_MODELS,
+      },
+      {
+        id: "compatible",
+        label: "OpenAI Compatible",
+        description: "https://api.openai.com/v1/chat/completions",
+        type: "openai-compatible",
+        baseURL: "https://api.openai.com/v1",
+        models: OPENAI_MODELS,
+        profileName: "OpenAI Compatible",
+      },
+    ],
   },
   {
     id: "anthropic",
     name: "Anthropic",
-    type: "anthropic",
-    baseURL: "https://api.anthropic.com",
-    models: [
-      model("claude-opus-4-8", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 128_000, temperature: 0.7 } }),
-      model("claude-sonnet-4-6", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 128_000, temperature: 0.7 } }),
-      model("claude-haiku-4-5", { contextWindow: 200_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 64_000, temperature: 0.7 } }),
+    description: "Anthropic Claude native Messages API.",
+    defaultVariantId: "default",
+    apiKeyURL: "https://console.anthropic.com/settings/keys",
+    variants: [
+      {
+        id: "default",
+        label: "Messages API",
+        description: "https://api.anthropic.com",
+        type: "anthropic",
+        baseURL: "https://api.anthropic.com",
+        models: [
+          model("claude-opus-4-8", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 128_000, temperature: 0.7 } }),
+          model("claude-sonnet-4-6", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 128_000, temperature: 0.7 } }),
+          model("claude-haiku-4-5", { contextWindow: 200_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 64_000, temperature: 0.7 } }),
+        ],
+      },
     ],
-    apiKeyURL: "https://platform.claude.com/settings/keys",
   },
   {
     id: "moonshot",
     name: "Moonshot",
-    type: "openai-compatible",
-    baseURL: "https://api.moonshot.cn/v1",
-    models: ["kimi-k2.6", "kimi-k2.5"].map((id) => model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: 0.7 } })),
+    description: "Moonshot Kimi OpenAI-compatible endpoint.",
+    defaultVariantId: "default",
     apiKeyURL: "https://platform.moonshot.cn/console/api-keys",
+    variants: [
+      {
+        id: "default",
+        label: "OpenAI Compatible",
+        description: "https://api.moonshot.cn/v1",
+        type: "openai-compatible",
+        baseURL: "https://api.moonshot.cn/v1",
+        models: ["kimi-k2.6", "kimi-k2.5"].map((id) => model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: 0.7 } })),
+      },
+    ],
   },
   {
     id: "zhipu",
     name: "Zhipu GLM",
-    type: "openai-compatible",
-    baseURL: "https://open.bigmodel.cn/api/paas/v4",
-    models: ["glm-5.1", "glm-5"].map((id) => model(id, { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, openai: { temperature: 0.7 } })),
+    description: "Zhipu GLM OpenAI-compatible endpoint.",
+    defaultVariantId: "default",
     apiKeyURL: "https://open.bigmodel.cn/usercenter/apikeys",
+    variants: [
+      {
+        id: "default",
+        label: "OpenAI Compatible",
+        description: "https://open.bigmodel.cn/api/paas/v4",
+        type: "openai-compatible",
+        baseURL: "https://open.bigmodel.cn/api/paas/v4",
+        models: ["glm-5.1", "glm-5"].map((id) => model(id, { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, openai: { temperature: 0.7 } })),
+      },
+    ],
   },
   {
     id: "openrouter",
     name: "OpenRouter",
-    type: "openai-compatible",
-    baseURL: "https://openrouter.ai/api/v1",
-    models: [
-      "openrouter/free",
-      "openrouter/owl-alpha",
-      "nvidia/nemotron-3-super-120b-a12b:free",
-      "poolside/laguna-m.1:free",
-      "openai/gpt-oss-120b:free",
-      "z-ai/glm-4.5-air:free",
-    ].map((id) => model(id, { capabilities: { tools: true }, openai: { temperature: 0.7 } })),
+    description: "OpenRouter meta-router through its OpenAI-compatible endpoint.",
+    defaultVariantId: "default",
     apiKeyURL: "https://openrouter.ai/keys",
+    variants: [
+      {
+        id: "default",
+        label: "OpenAI Compatible",
+        description: "https://openrouter.ai/api/v1",
+        type: "openai-compatible",
+        baseURL: "https://openrouter.ai/api/v1",
+        models: [
+          "openrouter/free",
+          "openrouter/owl-alpha",
+          "nvidia/nemotron-3-super-120b-a12b:free",
+          "poolside/laguna-m.1:free",
+          "openai/gpt-oss-120b:free",
+          "z-ai/glm-4.5-air:free",
+        ].map((id) => model(id, { capabilities: { tools: true }, openai: { temperature: 0.7 } })),
+      },
+    ],
   },
   {
     id: "ollama",
     name: "Ollama",
-    type: "openai-compatible",
-    baseURL: "http://localhost:11434/v1",
-    models: ["llama3.3", "qwen3", "gemma3", "gpt-oss:120b-cloud", "qwen3-coder:480b-cloud"].map((id) => model(id, { capabilities: { tools: true }, openai: { temperature: 0.7 } })),
-    apiKeyOptional: true,
+    description: "Local Ollama OpenAI-compatible endpoint.",
+    defaultVariantId: "default",
     apiKeyURL: "https://ollama.com/download",
+    variants: [
+      {
+        id: "default",
+        label: "Local OpenAI Compatible",
+        description: "http://localhost:11434/v1",
+        type: "openai-compatible",
+        baseURL: "http://localhost:11434/v1",
+        models: ["llama3.3", "qwen3", "gemma3", "gpt-oss:120b-cloud", "qwen3-coder:480b-cloud"].map((id) => model(id, { capabilities: { tools: true }, openai: { temperature: 0.7 } })),
+        apiKeyOptional: true,
+      },
+    ],
   },
 ];
 
@@ -132,13 +296,13 @@ const ZH_ORDER: ProviderPresetId[] = [
   "deepseek",
   "qwen",
   "mimo",
-  "gemini",
-  "openai",
-  "anthropic",
   "moonshot",
   "zhipu",
   "openrouter",
   "ollama",
+  "openai",
+  "anthropic",
+  "gemini",
 ];
 
 const DEFAULT_ORDER: ProviderPresetId[] = [
@@ -154,6 +318,24 @@ const DEFAULT_ORDER: ProviderPresetId[] = [
   "ollama",
 ];
 
+const PROFILE_ID_PREFIX = "prof_";
+const PROFILE_ID_RANDOM_CHARS = 12;
+const PROFILE_ID_DEFAULT_BRAND = "custom";
+const PROFILE_ID_BRANDS = new Set([
+  "gemini",
+  "openai",
+  "anthropic",
+  "mimo",
+  "deepseek",
+  "qwen",
+  "ollama",
+  "kimi",
+  "grok",
+  "glm",
+  "openrouter",
+  PROFILE_ID_DEFAULT_BRAND,
+]);
+
 export function getOrderedProviderPresets(locale: string) {
   const order = locale.startsWith("zh") ? ZH_ORDER : DEFAULT_ORDER;
   return order
@@ -161,8 +343,64 @@ export function getOrderedProviderPresets(locale: string) {
     .filter((preset): preset is ProviderPreset => preset !== undefined);
 }
 
-export function providerPresetName(preset: ProviderPreset) {
-  return preset.id;
+export function defaultProviderPresetVariant(preset: ProviderPreset) {
+  return providerPresetVariant(preset, preset.defaultVariantId);
+}
+
+export function providerPresetVariant(preset: ProviderPreset, variantID: string) {
+  return preset.variants.find((variant) => variant.id === variantID) || preset.variants[0];
+}
+
+export function providerPresetProfileName(preset: ProviderPreset, variant: ProviderPresetVariant) {
+  return variant.profileName || preset.name;
+}
+
+export function generateProviderProfileID(existingProfiles: ProviderProfile[] | Iterable<string>, presetID: string) {
+  const existingIDs = Array.isArray(existingProfiles)
+    ? existingProfiles.map((profile) => typeof profile === "string" ? profile : profile.id)
+    : Array.from(existingProfiles);
+  const existing = new Set(existingIDs);
+  const brandSlug = profileBrandSlugFromPreset(presetID);
+  for (let index = 0; index < 20; index += 1) {
+    const id = `${PROFILE_ID_PREFIX}${brandSlug}_${randomToken()}`;
+    if (!existing.has(id)) {
+      return id;
+    }
+  }
+  return `${PROFILE_ID_PREFIX}${brandSlug}_${Date.now().toString(36)}`;
+}
+
+function profileBrandSlugFromPreset(presetID: string | undefined): string {
+  switch ((presetID || "").trim().toLowerCase()) {
+    case "moonshot":
+      return "kimi";
+    case "zhipu":
+      return "glm";
+    default:
+      return normalizeBrandSlug(presetID);
+  }
+}
+
+function normalizeBrandSlug(brand: string | undefined): string {
+  const slug = (brand || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return PROFILE_ID_BRANDS.has(slug) ? slug : PROFILE_ID_DEFAULT_BRAND;
+}
+
+function randomToken(): string {
+  const cryptoAPI = globalThis.crypto;
+  if (cryptoAPI?.randomUUID) {
+    return cryptoAPI.randomUUID().replaceAll("-", "").slice(0, PROFILE_ID_RANDOM_CHARS);
+  }
+  if (cryptoAPI?.getRandomValues) {
+    const bytes = new Uint8Array(9);
+    cryptoAPI.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(36).padStart(2, "0")).join("").slice(0, PROFILE_ID_RANDOM_CHARS);
+  }
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`.slice(0, PROFILE_ID_RANDOM_CHARS);
 }
 
 function model(id: string, patch: Omit<ProviderModel, "id"> = {}): ProviderModel {

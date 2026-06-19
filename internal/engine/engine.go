@@ -25,7 +25,7 @@ var (
 	ErrNoRunningTurn = errors.New("engine: no running turn")
 	ErrEmptyInput    = errors.New("engine: empty text or clientMessageID")
 	// ErrNoModel:会话未解析出可用 provider/model(空配置),提交时直接报错,
-	// 不静默落内置 default profile / mock 兜底。API 映射 400 "no_model"。
+	// 不做任何隐式 provider/model 兜底。API 映射 400 "no_model"。
 	ErrNoModel        = errors.New("engine: no model configured for session")
 	ErrProviderConfig = errors.New("engine: provider config unavailable")
 )
@@ -52,12 +52,11 @@ func (emptyConfig) GetProviderProfile(context.Context, string) (*store.ProviderP
 }
 
 type Engine struct {
-	store        store.Store
-	config       ConfigSource
-	hub          *event.Hub
-	resolver     Resolver
-	builder      *contextbuilder.Builder
-	defaultModel string
+	store    store.Store
+	config   ConfigSource
+	hub      *event.Hub
+	resolver Resolver
+	builder  *contextbuilder.Builder
 
 	// auxCtx 是辅助 goroutine(自动标题,将来工具相关后台任务)的基 ctx;
 	// Stop() 取消它,优雅退出时这些 best-effort 任务立即中断,不拖住
@@ -71,21 +70,20 @@ type Engine struct {
 	wg      sync.WaitGroup
 }
 
-func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, defaultModel string) *Engine {
+func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource) *Engine {
 	if cfg == nil {
 		cfg = emptyConfig{}
 	}
 	auxCtx, auxCancel := context.WithCancel(context.Background())
 	return &Engine{
-		store:        s,
-		config:       cfg,
-		hub:          hub,
-		resolver:     resolver,
-		builder:      contextbuilder.New(s, cfg),
-		defaultModel: defaultModel,
-		auxCtx:       auxCtx,
-		auxCancel:    auxCancel,
-		running:      make(map[string]context.CancelFunc),
+		store:     s,
+		config:    cfg,
+		hub:       hub,
+		resolver:  resolver,
+		builder:   contextbuilder.New(s, cfg),
+		auxCtx:    auxCtx,
+		auxCancel: auxCancel,
+		running:   make(map[string]context.CancelFunc),
 	}
 }
 
@@ -175,40 +173,20 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 
 func (e *Engine) resolveModel(ctx context.Context, sess *store.Session) (*resolvedModel, error) {
 	// provider / model 在提交时刻解析并随 turn 快照,改配置不影响进行中的 turn。
-	// provider:session 字段 > config default_profile > 内置 "default";
-	// model:session 字段 > profile.models[0] >(仅 dev/mock)--model。
-	// 模型名只在 profile 下有意义,不存在全局默认模型。
-	providerName := sess.Provider
-	if providerName == "" {
-		if settings, err := e.config.Settings(ctx); err == nil {
-			providerName = settings[store.SettingDefaultProvider]
-		}
-	}
-	if providerName == "" {
-		providerName = store.DefaultProviderProfile
+	providerName := strings.TrimSpace(sess.Provider)
+	model := strings.TrimSpace(sess.Model)
+	if providerName == "" || model == "" {
+		return nil, ErrNoModel
 	}
 
-	model := sess.Model
 	var cfg provider.ModelConfig
 	if p, err := e.config.GetProviderProfile(ctx, providerName); err == nil {
-		if model == "" {
-			model = p.FirstModelID()
-		} else if len(p.Models) > 0 && !p.HasModel(model) {
+		if len(p.Models) > 0 && !p.HasModel(model) {
 			return nil, ErrNoModel
 		}
 		if entry, ok := p.ModelByID(model); ok {
 			cfg = modelConfigFromEntry(entry)
 		}
-	}
-	if model == "" {
-		model = e.defaultModel
-	}
-	// 空配置直接报错,不静默回显 mock 或抛误导性的 "profile default not found":
-	// model 解析不出,或 provider 名没有对应的可用 profile(如桌面/生产下从没配过的
-	// 内置 "default"),提交即返回 ErrNoModel。--mock 下 resolver 是 Static(任意名都
-	// 解析)、--model 给了非空 model,故此校验不影响 mock/测试。
-	if model == "" {
-		return nil, ErrNoModel
 	}
 	cfgJSON, err := json.Marshal(cfg)
 	if err != nil {

@@ -1,0 +1,455 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { ExternalLink, Loader2, Plus } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+
+import {
+  createProvider,
+  createProviderRequest,
+  type ProviderProfile,
+} from "@/api/client";
+import { queryKeys } from "@/api/queryKeys";
+import { BrandIcon } from "@/components/BrandIcons";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+  FieldTitle,
+} from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { useI18n } from "@/i18n";
+import { cn } from "@/lib/utils";
+import {
+  defaultProviderPresetVariant,
+  generateProviderProfileID,
+  providerPresetProfileName,
+  providerPresetVariant,
+  type ProviderPreset,
+  type ProviderPresetVariant,
+} from "@/provider/presets";
+
+export function ProviderPresetGrid({
+  children,
+  className,
+  presets,
+  onSelect,
+}: {
+  children?: ReactNode;
+  className?: string;
+  presets: ProviderPreset[];
+  onSelect: (preset: ProviderPreset) => void;
+}) {
+  const { t } = useI18n();
+
+  return (
+    <div className={cn("pudding-provider-preset-grid", className)}>
+      {presets.map((preset) => {
+        const variant = defaultProviderPresetVariant(preset);
+        const displayName = providerPresetDisplayName(preset, t);
+        return (
+          <button
+            key={preset.id}
+            className="pudding-provider-preset-card"
+            type="button"
+            onClick={() => onSelect(preset)}
+          >
+            <BrandIcon className="pudding-provider-preset-icon" name={preset.id} />
+            <span className="pudding-provider-preset-text">
+              <span className="pudding-provider-preset-title">{displayName}</span>
+              <span className="pudding-provider-preset-meta">{modelCountLabel(variant.models.length, t)}</span>
+            </span>
+          </button>
+        );
+      })}
+      {children}
+    </div>
+  );
+}
+
+export function ProviderCustomCard({
+  onSelect,
+}: {
+  onSelect: () => void;
+}) {
+  const { t } = useI18n();
+
+  return (
+    <button
+      className="pudding-provider-preset-card border-dashed"
+      type="button"
+      onClick={onSelect}
+    >
+      <span className="pudding-provider-preset-icon flex items-center justify-center rounded-md bg-muted text-muted-foreground">
+        <Plus className="size-4" />
+      </span>
+      <span className="pudding-provider-preset-text">
+        <span className="pudding-provider-preset-title">{t("provider.custom")}</span>
+      </span>
+    </button>
+  );
+}
+
+export function ProviderPresetCreateDialog({
+  open,
+  preset,
+  profiles,
+  token,
+  onCreated,
+  onOpenChange,
+}: {
+  open: boolean;
+  preset: ProviderPreset | null;
+  profiles: ProviderProfile[];
+  token: string;
+  onCreated?: (profile: ProviderProfile, variant: ProviderPresetVariant) => void;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const queryClient = useQueryClient();
+  const { t } = useI18n();
+  const [variantID, setVariantID] = useState("");
+  const [apiKey, setAPIKey] = useState("");
+  const [profileID, setProfileID] = useState("");
+  const [localError, setLocalError] = useState("");
+  const initializedPresetIDRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!preset || !open) {
+      initializedPresetIDRef.current = null;
+      return;
+    }
+    if (initializedPresetIDRef.current === preset.id) {
+      return;
+    }
+    initializedPresetIDRef.current = preset.id;
+    setVariantID(preset.defaultVariantId);
+    setAPIKey("");
+    setProfileID(generateProviderProfileID(profiles, preset.id));
+    setLocalError("");
+  }, [open, preset, profiles]);
+
+  const variant = preset ? providerPresetVariant(preset, variantID) : null;
+  const presetTitle = preset ? providerPresetDisplayName(preset, t) : t("provider.create");
+  const presetDescription = preset
+    ? providerPresetDescription(preset, t)
+    : t("provider.quickCreateHint");
+  const apiKeyRequired = variant ? !variant.apiKeyOptional : true;
+  const canCreate = Boolean(preset && variant && profileID && (!apiKeyRequired || apiKey.trim()));
+  const handleVariantChange = (value: string) => {
+    setVariantID(value);
+    setLocalError("");
+  };
+  const openAPIKeyURL = () => {
+    const url = preset?.apiKeyURL;
+    if (!url) {
+      return;
+    }
+    void import("@wailsio/runtime").then(({ Browser }) => Browser.OpenURL(url)).catch(() => {
+      window.open(url, "_blank", "noopener,noreferrer");
+    });
+  };
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      if (!preset || !variant) {
+        throw new Error("missing preset");
+      }
+      if (apiKeyRequired && !apiKey.trim()) {
+        throw new Error(t("provider.credentialRequired"));
+      }
+      return createProvider(
+        token,
+        createProviderRequest.parse({
+          id: profileID,
+          name: providerPresetProfileName(preset, variant),
+          type: variant.type,
+          baseURL: variant.baseURL,
+          apiKey: apiKey.trim(),
+          apiKeyEnv: "",
+          models: variant.models,
+        }),
+      );
+    },
+    onSuccess: async (profile) => {
+      setLocalError("");
+      await queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
+      if (variant) {
+        onCreated?.(profile, variant);
+      }
+      onOpenChange(false);
+    },
+    onError: (error) => {
+      setLocalError(error instanceof Error ? error.message : t("provider.saveFailed"));
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => {
+      if (!mutation.isPending) {
+        onOpenChange(next);
+      }
+    }}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{presetTitle}</DialogTitle>
+          <DialogDescription>{presetDescription}</DialogDescription>
+          {preset?.apiKeyURL ? (
+            <button
+              className="mt-1 inline-flex w-fit items-center gap-1.5 text-sm font-normal text-foreground/80 underline-offset-4 hover:text-foreground hover:underline"
+              type="button"
+              onClick={openAPIKeyURL}
+            >
+              {t("provider.getAPIKey")}
+              <ExternalLink className="size-3.5" />
+            </button>
+          ) : null}
+        </DialogHeader>
+
+        <div className="grid gap-4">
+          {localError ? (
+            <Alert variant="destructive">
+              <AlertDescription>{localError}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          {preset && preset.variants.length > 1 ? (
+            preset.id === "mimo" ? (
+              <MiMoVariantPicker
+                preset={preset}
+                variantID={variantID}
+                onVariantChange={handleVariantChange}
+                t={t}
+              />
+            ) : (
+              <VariantListPicker
+                preset={preset}
+                variant={variant}
+                variantID={variantID}
+                onVariantChange={handleVariantChange}
+                t={t}
+              />
+            )
+          ) : null}
+
+          <div className="grid gap-2">
+            <Label>API Key</Label>
+            <Input
+              autoComplete="off"
+              placeholder={variant?.apiKeyOptional ? t("provider.apiKeyOptional") : "sk-..."}
+              type="password"
+              value={apiKey}
+              onChange={(event) => {
+                setAPIKey(event.target.value);
+                setLocalError("");
+              }}
+            />
+          </div>
+
+          <div className="text-xs text-muted-foreground">
+            {t("provider.profileID")}: {profileID}
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button disabled={mutation.isPending} type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+            {t("common.cancel")}
+          </Button>
+          <Button disabled={mutation.isPending || !canCreate} type="button" onClick={() => mutation.mutate()}>
+            {mutation.isPending ? <Loader2 className="animate-spin" /> : <Plus />}
+            {t("provider.create")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function VariantListPicker({
+  preset,
+  variant,
+  variantID,
+  onVariantChange,
+  t,
+}: {
+  preset: ProviderPreset;
+  variant: ProviderPresetVariant | null;
+  variantID: string;
+  onVariantChange: (value: string) => void;
+  t: (key: string) => string;
+}) {
+  return (
+    <div className="grid gap-2">
+      <Label>{t("provider.accessMethod")}</Label>
+      <RadioGroup value={variantID} onValueChange={onVariantChange}>
+        {preset.variants.map((item) => {
+          const active = item.id === variant?.id;
+          const id = `provider-preset-${preset.id}-${item.id}`;
+          return (
+            <FieldLabel key={item.id} htmlFor={id}>
+              <Field className={cn(active && "border-ring bg-accent")} orientation="horizontal">
+                <FieldContent>
+                  <FieldTitle>{providerPresetVariantLabel(preset, item, t)}</FieldTitle>
+                  <FieldDescription>{providerPresetVariantDescription(preset, item, t)}</FieldDescription>
+                </FieldContent>
+                <RadioGroupItem id={id} value={item.id} />
+              </Field>
+            </FieldLabel>
+          );
+        })}
+      </RadioGroup>
+    </div>
+  );
+}
+
+function MiMoVariantPicker({
+  preset,
+  variantID,
+  onVariantChange,
+  t,
+}: {
+  preset: ProviderPreset;
+  variantID: string;
+  onVariantChange: (value: string) => void;
+  t: (key: string) => string;
+}) {
+  const current = parseMiMoVariantID(variantID);
+  const protocolOptions: Array<{ id: MiMoProtocol; label: string; description: string }> = [
+    {
+      id: "openai",
+      label: translatePresetText(t, "providerPreset.mimo.protocol.openai.label", "OpenAI"),
+      description: translatePresetText(t, "providerPreset.mimo.protocol.openai.description", "OpenAI Compatible"),
+    },
+    {
+      id: "anthropic",
+      label: translatePresetText(t, "providerPreset.mimo.protocol.anthropic.label", "Anthropic"),
+      description: translatePresetText(t, "providerPreset.mimo.protocol.anthropic.description", "Anthropic Compatible"),
+    },
+  ];
+  const planOptions: Array<{ id: MiMoPlan; label: string; description: string }> = [
+    {
+      id: "standard",
+      label: translatePresetText(t, "providerPreset.mimo.plan.standard.label", "Standard API"),
+      description: translatePresetText(t, "providerPreset.mimo.plan.standard.description", "Token-based billing"),
+    },
+    {
+      id: "plan",
+      label: translatePresetText(t, "providerPreset.mimo.plan.plan.label", "Plan"),
+      description: translatePresetText(t, "providerPreset.mimo.plan.plan.description", "Subscription endpoint"),
+    },
+  ];
+
+  return (
+    <div className="grid gap-3">
+      <div className="grid gap-2">
+        <Label>{t("provider.accessMethod")}</Label>
+        <RadioGroup
+          className="grid gap-2"
+          value={current.protocol}
+          onValueChange={(value) => onVariantChange(miMoVariantID(current.plan, value as MiMoProtocol))}
+        >
+          {protocolOptions.map((item) => {
+            const active = item.id === current.protocol;
+            const id = `provider-preset-${preset.id}-protocol-${item.id}`;
+            return (
+              <FieldLabel key={item.id} htmlFor={id}>
+                <Field className={cn("h-full", active && "border-ring bg-accent")} orientation="horizontal">
+                  <FieldContent>
+                    <FieldTitle>{item.label}</FieldTitle>
+                    <FieldDescription>{item.description}</FieldDescription>
+                  </FieldContent>
+                  <RadioGroupItem id={id} value={item.id} />
+                </Field>
+              </FieldLabel>
+            );
+          })}
+        </RadioGroup>
+      </div>
+
+      <div className="grid gap-2">
+        <Label>{t("provider.endpointMode")}</Label>
+        <RadioGroup
+          className="grid gap-2"
+          value={current.plan}
+          onValueChange={(value) => onVariantChange(miMoVariantID(value as MiMoPlan, current.protocol))}
+        >
+          {planOptions.map((item) => {
+            const active = item.id === current.plan;
+            const id = `provider-preset-${preset.id}-plan-${item.id}`;
+            return (
+              <FieldLabel key={item.id} htmlFor={id}>
+                <Field className={cn("h-full", active && "border-ring bg-accent")} orientation="horizontal">
+                  <FieldContent>
+                    <FieldTitle>{item.label}</FieldTitle>
+                    <FieldDescription>{item.description}</FieldDescription>
+                  </FieldContent>
+                  <RadioGroupItem id={id} value={item.id} />
+                </Field>
+              </FieldLabel>
+            );
+          })}
+        </RadioGroup>
+      </div>
+    </div>
+  );
+}
+
+type MiMoPlan = "standard" | "plan";
+type MiMoProtocol = "openai" | "anthropic";
+
+function parseMiMoVariantID(variantID: string): { plan: MiMoPlan; protocol: MiMoProtocol } {
+  return {
+    plan: variantID.startsWith("plan-") ? "plan" : "standard",
+    protocol: variantID.endsWith("-anthropic") ? "anthropic" : "openai",
+  };
+}
+
+function miMoVariantID(plan: MiMoPlan, protocol: MiMoProtocol) {
+  return `${plan}-${protocol}`;
+}
+
+function modelCountLabel(count: number, t: (key: string) => string) {
+  if (count <= 0) {
+    return t("picker.noModels");
+  }
+  return `${count}${t("provider.modelCountSuffix")}`;
+}
+
+function providerPresetDisplayName(preset: ProviderPreset, t: (key: string) => string) {
+  return translatePresetText(t, `providerPreset.${preset.id}.name`, preset.name);
+}
+
+function providerPresetDescription(preset: ProviderPreset, t: (key: string) => string) {
+  return translatePresetText(t, `providerPreset.${preset.id}.description`, preset.description);
+}
+
+function providerPresetVariantLabel(
+  preset: ProviderPreset,
+  variant: ProviderPresetVariant,
+  t: (key: string) => string,
+) {
+  return translatePresetText(t, `providerPreset.${preset.id}.variant.${variant.id}.label`, variant.label);
+}
+
+function providerPresetVariantDescription(
+  preset: ProviderPreset,
+  variant: ProviderPresetVariant,
+  t: (key: string) => string,
+) {
+  return translatePresetText(t, `providerPreset.${preset.id}.variant.${variant.id}.description`, variant.description);
+}
+
+function translatePresetText(t: (key: string) => string, key: string, fallback: string) {
+  const value = t(key);
+  return value === key ? fallback : value;
+}

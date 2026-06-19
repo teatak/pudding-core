@@ -14,10 +14,14 @@ import {
   Workflow,
 } from "lucide-react";
 import {
+  createContext,
   Fragment,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
+  useCallback,
+  useContext,
   useEffect,
+  useId,
   useRef,
   useState,
 } from "react";
@@ -77,6 +81,20 @@ import { setRailCollapsed, useRailCollapsed, useRailForcedCollapsed } from "@/st
 const popoverAlignNudgePx = 3;
 const dragAutoScrollEdgePx = 44;
 const dragAutoScrollMaxStepPx = 14;
+const RailOverlayHoldContext = createContext<((id: string, open: boolean) => void) | null>(null);
+
+function useRailOverlayHold(open: boolean) {
+  const setOverlayHold = useContext(RailOverlayHoldContext);
+  const id = useId();
+
+  useEffect(() => {
+    if (!setOverlayHold) {
+      return;
+    }
+    setOverlayHold(id, open);
+    return () => setOverlayHold(id, false);
+  }, [id, open, setOverlayHold]);
+}
 
 // 会话栏(rail):展开 = 左侧整栏;折叠 = 悬浮触发器 + hover 浮出 popover 面板。
 // 面板内容(RailPanel)两种形态完全复用。
@@ -221,6 +239,7 @@ export function SessionRail({
         }}
         onDelete={(id) => deleteMutation.mutate(id)}
         onRename={(id, title) => renameMutation.mutate({ id, title })}
+        onOverlayOpenChange={hover.setClosePaused}
         onOpenSplit={(id) => {
           // 当前主 pane 的会话不重复开分屏
           void navigate({
@@ -393,6 +412,7 @@ function sessionActivityTime(session: Session) {
 function useHoverPopover(closeDelay = 160) {
   const [open, setOpen] = useState(false);
   const closeTimer = useRef<number | null>(null);
+  const closePausedRef = useRef(false);
   const suppressRef = useRef(false);
 
   function cancelClose() {
@@ -420,10 +440,19 @@ function useHoverPopover(closeDelay = 160) {
     },
     scheduleClose() {
       suppressRef.current = false; // 鼠标离开过一次,恢复 hover 弹出
+      if (closePausedRef.current) {
+        return;
+      }
       cancelClose();
       closeTimer.current = window.setTimeout(() => setOpen(false), closeDelay);
     },
     cancelClose,
+    setClosePaused(paused: boolean) {
+      closePausedRef.current = paused;
+      if (paused) {
+        cancelClose();
+      }
+    },
     suppressUntilLeave() {
       suppressRef.current = true;
     },
@@ -447,6 +476,7 @@ type RailPanelProps = {
   onDelete: (id: string) => void;
   onPinChange: (id: string, pinned: boolean, pinnedOrder?: number) => void;
   onRename: (id: string, title: string) => void;
+  onOverlayOpenChange?: (open: boolean) => void;
   onRefetch: () => void;
 };
 
@@ -473,6 +503,7 @@ function RailPanel({
   onDelete,
   onPinChange,
   onRename,
+  onOverlayOpenChange,
   onRefetch,
 }: RailPanelProps) {
   const { t } = useI18n();
@@ -493,6 +524,29 @@ function RailPanel({
   const pinnedSessions = sortPinnedSessions(sessions.filter((session) => session.pinned));
   const recentSessions = sessions.filter((session) => !session.pinned);
   const showPinnedGroup = pinnedSessions.length > 0 || Boolean(draggingSessionID);
+  const onOverlayOpenChangeRef = useRef(onOverlayOpenChange);
+  const overlayHoldIDsRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    onOverlayOpenChangeRef.current = onOverlayOpenChange;
+  });
+
+  const setOverlayHold = useCallback((id: string, open: boolean) => {
+    const holds = overlayHoldIDsRef.current;
+    if (open) {
+      holds.add(id);
+    } else {
+      holds.delete(id);
+    }
+    onOverlayOpenChangeRef.current?.(holds.size > 0);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      overlayHoldIDsRef.current.clear();
+      onOverlayOpenChangeRef.current?.(false);
+    };
+  }, []);
 
   useEffect(() => {
     if (!draggingSessionID) {
@@ -653,7 +707,8 @@ function RailPanel({
   }
 
   return (
-    <SidebarProvider className="pudding-session-rail !contents">
+    <RailOverlayHoldContext.Provider value={setOverlayHold}>
+      <SidebarProvider className="pudding-session-rail !contents">
       <Sidebar className="min-h-0 w-full flex-1 bg-transparent" collapsible="none">
         <SidebarHeader>
           <SidebarMenu className="gap-1">
@@ -762,19 +817,32 @@ function RailPanel({
         </SidebarContent>
         <SidebarFooter>
           <div className="flex items-center gap-1">
-            <ThemeToggle />
-            <LanguageToggle />
+            <RailThemeToggle />
+            <RailLanguageToggle />
             <div className="flex-1" />
             <SettingsDialog token={token} />
           </div>
         </SidebarFooter>
       </Sidebar>
-    </SidebarProvider>
+      </SidebarProvider>
+    </RailOverlayHoldContext.Provider>
   );
 }
 
 function dragPreviewTransform(clientX: number, clientY: number) {
   return `translate3d(${clientX + 12}px, ${clientY}px, 0) translateY(-50%)`;
+}
+
+function RailThemeToggle() {
+  const [open, setOpen] = useState(false);
+  useRailOverlayHold(open);
+  return <ThemeToggle onOpenChange={setOpen} />;
+}
+
+function RailLanguageToggle() {
+  const [open, setOpen] = useState(false);
+  useRailOverlayHold(open);
+  return <LanguageToggle onOpenChange={setOpen} />;
 }
 
 function SessionDragPreview({
@@ -983,6 +1051,8 @@ function SessionItem({
     cleanup?: () => void;
   } | null>(null);
   const suppressClickRef = useRef(false);
+
+  useRailOverlayHold(actionsOpen || deleteOpen);
 
   useEffect(() => {
     if (!editing) {

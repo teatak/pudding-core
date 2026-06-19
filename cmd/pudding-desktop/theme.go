@@ -31,7 +31,8 @@ const (
 )
 
 type desktopPreferences struct {
-	Theme desktopThemePreference `json:"theme"`
+	Theme  desktopThemePreference  `json:"theme"`
+	Locale desktopLocalePreference `json:"locale,omitempty"`
 }
 
 type desktopThemeState struct {
@@ -50,31 +51,59 @@ func desktopPreferencesPath(homeDir string) string {
 	return filepath.Join(homeDir, "config", "desktop.json")
 }
 
-func loadDesktopThemePreference(path string) (desktopThemePreference, error) {
+func loadDesktopPreferences(path string) (desktopPreferences, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return desktopThemeSystem, nil
+			return defaultDesktopPreferences(), nil
 		}
-		return desktopThemeSystem, err
+		return defaultDesktopPreferences(), err
 	}
 	var prefs desktopPreferences
 	if err := json.Unmarshal(b, &prefs); err != nil {
-		return desktopThemeSystem, err
+		return defaultDesktopPreferences(), err
 	}
-	return normalizeDesktopThemePreference(prefs.Theme), nil
+	return normalizeDesktopPreferences(prefs), nil
 }
 
-func saveDesktopThemePreference(path string, theme desktopThemePreference) error {
+func saveDesktopPreferences(path string, prefs desktopPreferences) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(desktopPreferences{Theme: normalizeDesktopThemePreference(theme)}, "", "  ")
+	b, err := json.MarshalIndent(normalizeDesktopPreferences(prefs), "", "  ")
 	if err != nil {
 		return err
 	}
 	b = append(b, '\n')
 	return os.WriteFile(path, b, 0o600)
+}
+
+func loadDesktopThemePreference(path string) (desktopThemePreference, error) {
+	prefs, err := loadDesktopPreferences(path)
+	return prefs.Theme, err
+}
+
+func saveDesktopThemePreference(path string, theme desktopThemePreference) error {
+	prefs, err := loadDesktopPreferences(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	prefs.Theme = normalizeDesktopThemePreference(theme)
+	return saveDesktopPreferences(path, prefs)
+}
+
+func defaultDesktopPreferences() desktopPreferences {
+	return desktopPreferences{
+		Theme:  desktopThemeSystem,
+		Locale: detectDesktopLocalePreference(),
+	}
+}
+
+func normalizeDesktopPreferences(prefs desktopPreferences) desktopPreferences {
+	return desktopPreferences{
+		Theme:  normalizeDesktopThemePreference(prefs.Theme),
+		Locale: normalizeDesktopLocalePreference(prefs.Locale),
+	}
 }
 
 func normalizeDesktopThemePreference(theme desktopThemePreference) desktopThemePreference {

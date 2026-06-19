@@ -1,9 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, CircleCheck } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Bot, ChevronDown, CircleCheck } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
-  getSettings,
   listProviders,
   updateSession,
   type ProviderProfile,
@@ -40,11 +39,6 @@ export function ModelPicker({ token, session, value, onChange, onResolvedChange,
     queryFn: () => listProviders(token),
     enabled: Boolean(token),
   });
-  const settingsQuery = useQuery({
-    queryKey: queryKeys.settings(),
-    queryFn: () => getSettings(token),
-    enabled: Boolean(token),
-  });
   const patchMutation = useMutation({
     mutationFn: (body: { provider?: string; model?: string }) => {
       if (!session) {
@@ -52,26 +46,36 @@ export function ModelPicker({ token, session, value, onChange, onResolvedChange,
       }
       return updateSession(token, session.id, body);
     },
-    onSuccess: async () => {
+    onSuccess: async (updated) => {
+      if (updated.provider && updated.model) {
+        onResolvedChange?.({ provider: updated.provider, model: updated.model });
+      }
       setOpen(false);
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
     },
   });
 
   const profiles = providersQuery.data?.providers || [];
-  const defaultProvider = settingsQuery.data?.settings["provider.default"] || "default";
+  const selectableProfiles = useMemo(
+    () => profiles.filter((profile) => profile.models.some((model) => model.id)),
+    [profiles],
+  );
+  const hasAvailableModels = selectableProfiles.length > 0;
   const selectedProvider = session?.provider || value?.provider || "";
   const selectedModel = session?.model || value?.model || "";
-  const currentProfileID = selectedProvider || defaultProvider;
+  const currentProfileID = selectedProvider;
   const activeProfile = profiles.find((p) => p.id === currentProfileID);
-  const currentModel = selectedModel || activeProfile?.models[0]?.id || "";
+  const currentModel = selectedModel;
 
   const [expanded, setExpanded] = useState(currentProfileID);
   useEffect(() => {
     if (open) {
-      setExpanded(currentProfileID);
+      const expandedProfile = selectableProfiles.some((profile) => profile.id === currentProfileID)
+        ? currentProfileID
+        : selectableProfiles[0]?.id || "";
+      setExpanded(expandedProfile);
     }
-  }, [open, currentProfileID]);
+  }, [open, currentProfileID, selectableProfiles]);
 
   useEffect(() => {
     if (currentProfileID && currentModel) {
@@ -80,7 +84,9 @@ export function ModelPicker({ token, session, value, onChange, onResolvedChange,
   }, [currentModel, currentProfileID, onResolvedChange]);
 
   // 品牌图标代替 provider 名;未命中图标的 profile 回落为文字名
-  const brandIcon = <RoundBrandIcon name={activeProfile?.id || currentProfileID} sizeClassName="size-5" />;
+  const activeBrand = activeProfile?.id || currentProfileID;
+  const brandIcon = activeBrand ? <RoundBrandIcon name={activeBrand} sizeClassName="size-5" /> : null;
+  const label = currentModel ? formatModelLabel(currentModel) : t("picker.selectModel");
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -95,53 +101,60 @@ export function ModelPicker({ token, session, value, onChange, onResolvedChange,
           variant="ghost"
         >
           <span className="relative z-10 grid size-5 shrink-0 place-items-center overflow-hidden rounded-full">
-            {BrandIcon({ name: activeProfile?.id || currentProfileID })
+            {activeBrand && BrandIcon({ name: activeBrand })
               ? brandIcon
-              : <span className="grid size-5 place-items-center rounded-full bg-background/60 text-[10px] text-foreground">{(activeProfile?.name || currentProfileID).slice(0, 1).toUpperCase()}</span>}
+              : currentModel
+                ? <span className="grid size-5 place-items-center rounded-full bg-background/60 text-[10px] text-foreground">{(activeProfile?.name || currentProfileID).slice(0, 1).toUpperCase()}</span>
+                : <span className="grid size-5 place-items-center rounded-full bg-background/60 text-muted-foreground"><Bot className="size-3.5" /></span>}
           </span>
           <span className="flex h-5 min-w-0 items-center gap-1 text-foreground/75">
-            <span className="truncate">{currentModel ? formatModelLabel(currentModel) : t("common.default")}</span>
+            <span className="truncate">{label}</span>
             <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
           </span>
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" alignOffset={-16} className="w-80 p-2" side="top" sideOffset={8}>
-        <Accordion collapsible type="single" value={expanded} onValueChange={setExpanded}>
-          {profiles.map((profile) => (
-            <AccordionItem
-              key={profile.id}
-              // ui 组件的分割线带 not-last: 变体,关掉要用同变体才能命中
-              className="not-last:border-b-0"
-              value={profile.id}
-            >
-              <AccordionTrigger className="items-center rounded-md px-2.5 py-1.5 text-sm font-normal text-muted-foreground hover:bg-accent hover:text-foreground hover:no-underline [&_[data-slot=accordion-trigger-icon]]:text-muted-foreground/70">
-                <span className="flex min-w-0 items-center gap-2">
-                  <RoundBrandIcon name={profile.id} />
-                  <span className="truncate">{profile.name}</span>
-                  <Badge className="h-4 border-muted-foreground/20 bg-transparent px-1.5 text-[9px] font-normal text-muted-foreground/70" variant="outline">
-                    {profile.type}
-                  </Badge>
-                </span>
-              </AccordionTrigger>
-              <AccordionContent className="pb-0">
-                <ProfileModels
-                  currentModel={selectedProvider === profile.id ? selectedModel : ""}
-                  isCurrentProfile={currentProfileID === profile.id}
-                  profile={profile}
-                  onPick={(model) => {
-                    onResolvedChange?.({ provider: profile.id, model });
-                    if (session) {
-                      patchMutation.mutate({ provider: profile.id, model });
-                      return;
-                    }
-                    onChange?.({ provider: profile.id, model });
-                    setOpen(false);
-                  }}
-                />
-              </AccordionContent>
-            </AccordionItem>
-          ))}
-        </Accordion>
+        {providersQuery.isLoading ? (
+          <div className="px-2.5 py-1.5 text-xs text-muted-foreground">{t("common.loading")}</div>
+        ) : !hasAvailableModels ? (
+          <div className="px-2.5 py-1.5 text-xs text-muted-foreground">{t("picker.noModels")}</div>
+        ) : (
+          <Accordion collapsible type="single" value={expanded} onValueChange={setExpanded}>
+            {selectableProfiles.map((profile) => (
+              <AccordionItem
+                key={profile.id}
+                // ui 组件的分割线带 not-last: 变体,关掉要用同变体才能命中
+                className="not-last:border-b-0"
+                value={profile.id}
+              >
+                <AccordionTrigger className="items-center rounded-md px-2.5 py-1.5 text-sm font-normal text-muted-foreground hover:bg-accent hover:text-foreground hover:no-underline [&_[data-slot=accordion-trigger-icon]]:text-muted-foreground/70">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <RoundBrandIcon name={profile.id} />
+                    <span className="truncate">{profile.name}</span>
+                    <Badge className="h-4 border-muted-foreground/20 bg-transparent px-1.5 text-[9px] font-normal text-muted-foreground/70" variant="outline">
+                      {profile.type}
+                    </Badge>
+                  </span>
+                </AccordionTrigger>
+                <AccordionContent className="pb-0">
+                  <ProfileModels
+                    currentModel={selectedProvider === profile.id ? selectedModel : ""}
+                    isCurrentProfile={currentProfileID === profile.id}
+                    profile={profile}
+                    onPick={(model) => {
+                      if (session) {
+                        patchMutation.mutate({ provider: profile.id, model });
+                        return;
+                      }
+                      onChange?.({ provider: profile.id, model });
+                      setOpen(false);
+                    }}
+                  />
+                </AccordionContent>
+              </AccordionItem>
+            ))}
+          </Accordion>
+        )}
       </PopoverContent>
     </Popover>
   );
@@ -177,8 +190,6 @@ function ProfileModels({
   if (currentModel && !models.includes(currentModel)) {
     models.unshift(currentModel);
   }
-  const defaultModel = profile.models[0]?.id || "";
-
   if (models.length === 0) {
     return <div className="px-2.5 py-1 text-xs text-muted-foreground">{t("picker.noModels")}</div>;
   }
@@ -186,7 +197,7 @@ function ProfileModels({
   return (
     <div className="grid max-h-56 gap-0.5 overflow-y-auto py-0.5">
       {models.map((model) => {
-        const selected = isCurrentProfile && (currentModel ? currentModel === model : defaultModel === model);
+        const selected = isCurrentProfile && currentModel === model;
         return (
           <button
             key={model}
@@ -208,11 +219,6 @@ function ProfileModels({
               <span className="truncate" title={model}>
                 {formatModelLabel(model)}
               </span>
-              {model === defaultModel ? (
-                <Badge className="text-[10px] font-normal" variant="secondary">
-                  {t("common.default")}
-                </Badge>
-              ) : null}
             </span>
           </button>
         );

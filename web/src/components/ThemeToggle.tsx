@@ -11,7 +11,7 @@ import {
 import { useI18n } from "@/i18n";
 import { setTheme, useTheme, type Theme } from "@/theme/theme";
 
-export function ThemeToggle() {
+export function ThemeToggle({ onOpenChange }: { onOpenChange?: (open: boolean) => void }) {
   const { t } = useI18n();
   const { theme, resolved } = useTheme();
   const Icon = resolved === "dark" ? Moon : Sun;
@@ -22,7 +22,7 @@ export function ThemeToggle() {
   ];
 
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
         <Button aria-label={t("theme.toggle")} size="icon" tabIndex={-1} variant="ghost">
           <Icon />

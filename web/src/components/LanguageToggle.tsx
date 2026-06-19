@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useI18n, type Locale } from "@/i18n";
 
-export function LanguageToggle() {
+export function LanguageToggle({ onOpenChange }: { onOpenChange?: (open: boolean) => void }) {
   const { locale, setLocale, t } = useI18n();
   const options: Array<{ value: Locale; label: string }> = [
     { value: "zh-CN", label: t("language.zhCN") },
@@ -19,7 +19,7 @@ export function LanguageToggle() {
   ];
 
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
         <Button aria-label={t("language.toggle")} size="icon" tabIndex={-1} variant="ghost">
           <Languages />

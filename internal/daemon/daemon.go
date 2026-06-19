@@ -27,10 +27,9 @@ import (
 )
 
 type Options struct {
-	Home         string // 空 = 通道默认目录
-	Addr         string // 空 = 通道默认地址
-	Mock         bool
-	DefaultModel string
+	Home string // 空 = 通道默认目录
+	Addr string // 空 = 通道默认地址
+	Mock bool
 }
 
 type Daemon struct {
@@ -77,11 +76,7 @@ func Start(opts Options) (*Daemon, error) {
 		resolver = registry.New(cfg)
 	}
 	hub := event.NewHub()
-	engineDefaultModel := ""
-	if opts.Mock {
-		engineDefaultModel = opts.DefaultModel
-	}
-	eng := engine.New(st, hub, resolver, cfg, engineDefaultModel)
+	eng := engine.New(st, hub, resolver, cfg)
 	if err := eng.Recover(context.Background()); err != nil {
 		_ = st.Close()
 		return nil, fmt.Errorf("recover interrupted turns: %w", err)

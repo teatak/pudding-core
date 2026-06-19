@@ -20,8 +20,8 @@ func newTestEngine(t *testing.T, opts ...mock.Option) (*Engine, *memstore.Memsto
 	t.Helper()
 	ms := memstore.New()
 	hub := event.NewHub()
-	eng := New(ms, hub, registry.Static(mock.New(opts...)), ms, "mock-model")
-	sess := &store.Session{ID: "sess_1"}
+	eng := New(ms, hub, registry.Static(mock.New(opts...)), ms)
+	sess := &store.Session{ID: "sess_1", Provider: "mock", Model: "mock-model"}
 	if err := ms.CreateSession(context.Background(), sess); err != nil {
 		t.Fatal(err)
 	}
@@ -241,18 +241,15 @@ func TestPerSessionProviderRouting(t *testing.T) {
 		"alpha": mock.New(mock.WithScript([]string{"from-alpha"}), mock.WithDelay(time.Millisecond)),
 		"beta":  mock.New(mock.WithScript([]string{"from-beta"}), mock.WithDelay(time.Millisecond)),
 	}
-	eng := New(ms, hub, resolver, ms, "mock-model")
+	eng := New(ms, hub, resolver, ms)
 	ctx := context.Background()
 
-	sessA := &store.Session{ID: "sa", Provider: "alpha"}
-	sessB := &store.Session{ID: "sb"} // 走 settings 默认
+	sessA := &store.Session{ID: "sa", Provider: "alpha", Model: "mock-model"}
+	sessB := &store.Session{ID: "sb", Provider: "beta", Model: "mock-model"}
 	if err := ms.CreateSession(ctx, sessA); err != nil {
 		t.Fatal(err)
 	}
 	if err := ms.CreateSession(ctx, sessB); err != nil {
-		t.Fatal(err)
-	}
-	if err := ms.SetSettings(ctx, map[string]string{store.SettingDefaultProvider: "beta"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -270,7 +267,7 @@ func TestPerSessionProviderRouting(t *testing.T) {
 		t.Fatalf("session A must use alpha provider: %q", msgsA[1].Text)
 	}
 	if !strings.Contains(msgsB[1].Text, "from-beta") {
-		t.Fatalf("session B must use settings default provider: %q", msgsB[1].Text)
+		t.Fatalf("session B must use beta provider: %q", msgsB[1].Text)
 	}
 
 	// turns 快照:provider/model 落库
@@ -291,15 +288,14 @@ func TestTurnSnapshotsProviderAndModel(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
 	capture := &captureClient{reqCh: make(chan provider.Request, 1)}
-	eng := New(ms, hub, mapResolver{store.DefaultProviderProfile: capture}, ms, "")
+	eng := New(ms, hub, mapResolver{"capture": capture}, ms)
 	ctx := context.Background()
 	sid := "sess_1"
-	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "named"}); err != nil {
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "named", Provider: "capture", Model: "snap-model"}); err != nil {
 		t.Fatal(err)
 	}
-	// 默认模型来自 profile.models[0]:session 不指 model 时回落第一项
 	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
-		Name: store.DefaultProviderProfile, Type: "openai-compatible",
+		Name: "capture", Type: "openai-compatible",
 		BaseURL: "http://unused",
 		Models: []store.ProviderModel{{
 			ID:            "snap-model",
@@ -327,7 +323,7 @@ func TestTurnSnapshotsProviderAndModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if turn.Provider != "default" || turn.Model != "snap-model" {
+	if turn.Provider != "capture" || turn.Model != "snap-model" {
 		t.Fatalf("turn snapshot wrong: provider=%q model=%q", turn.Provider, turn.Model)
 	}
 	var snap provider.ModelConfig
@@ -417,7 +413,7 @@ func TestRecoverFinalizesResidualRunningTurns(t *testing.T) {
 
 func TestSessionsAreIsolated(t *testing.T) {
 	eng, ms, _, sidA := newTestEngine(t, mock.WithDelay(40*time.Millisecond))
-	sessB := &store.Session{ID: "sess_2"}
+	sessB := &store.Session{ID: "sess_2", Provider: "mock", Model: "mock-model"}
 	if err := ms.CreateSession(context.Background(), sessB); err != nil {
 		t.Fatal(err)
 	}

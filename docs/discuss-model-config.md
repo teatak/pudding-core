@@ -7,7 +7,7 @@
 >
 > 2026-06-14 更新:已落地为 `<home>/config/settings.yaml` +
 > `<home>/config/profiles.yaml`;不再使用 SQLite `provider_profiles` 作为事实源,
-> 不设 `defaultModel`,默认模型为 `models[0]`。
+> 不设 profile 级默认模型字段;profile 内没有默认模型语义。
 
 ## 0. 给评审的一句话
 
@@ -18,10 +18,10 @@
 ## 1. 现状
 
 - **存储**:SQLite `provider_profiles { name, type, base_url, api_key,
-  default_model, models[]string, extra(JSON) }`。`models` 只是模型 id 字符串列表,
+  models[]string, extra(JSON) }`。`models` 只是模型 id 字符串列表,
   **没有 per-model 参数**。
 - **preset**(`web/src/provider/presets.ts`):选厂商 → 预填 `baseURL` +
-  `defaultModel` + `models[]string`。粘 key 即可建 profile。
+  `models[]`。粘 key 即可建 profile。
 - **provider 实现**:三家 + mock;`max_tokens` 之类目前**硬编码在 provider 包**
   (如 anthropic.go 写死 64000),不可配。
 

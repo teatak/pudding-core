@@ -57,10 +57,14 @@ func main() {
 	if runtime.GOOS == "darwin" {
 		bindDesktopNoZoomRects(app)
 	}
-	themePath := desktopPreferencesPath(d.Home())
-	themePreference, err := loadDesktopThemePreference(themePath)
+	preferencesPath := desktopPreferencesPath(d.Home())
+	themePreference, err := loadDesktopThemePreference(preferencesPath)
 	if err != nil {
-		slog.Warn("pudding-desktop: load desktop theme preference", "path", themePath, "err", err)
+		slog.Warn("pudding-desktop: load desktop theme preference", "path", preferencesPath, "err", err)
+	}
+	localePreference, err := loadDesktopLocalePreference(preferencesPath)
+	if err != nil {
+		slog.Warn("pudding-desktop: load desktop locale preference", "path", preferencesPath, "err", err)
 	}
 	initialThemeState := desktopThemeState{
 		Theme:    themePreference,
@@ -83,11 +87,11 @@ func main() {
 	// installZoomSwizzle()
 	windowOpts := application.WebviewWindowOptions{
 		Title:     "Pudding",
-		URL:       launchURL(d.Token(), "http://"+d.Addr(), desktopShell(), initialThemeState),
+		URL:       launchURL(d.Token(), "http://"+d.Addr(), desktopShell(), initialThemeState, localePreference),
 		Width:     1200,
 		Height:    800,
-		MinWidth:  760,
-		MinHeight: 520,
+		MinWidth:  520,
+		MinHeight: 600,
 		// 不透明窗口底:WKWebView 在 zoom/失焦/遮挡等合成空档会先露出
 		// 自己的默认 canvas。这里对齐暗色主题底色,避免层间跳色。
 		// BackgroundColour: application.NewRGB(28, 28, 28),
@@ -111,7 +115,7 @@ func main() {
 	}
 	window := app.Window.NewWithOptions(windowOpts)
 
-	themeManager := newDesktopThemeManager(app, window, themePath, themePreference)
+	themeManager := newDesktopThemeManager(app, window, preferencesPath, themePreference)
 	themeManager.bind()
 	themeManager.apply(false)
 
@@ -150,17 +154,9 @@ func main() {
 	} else {
 		tray.SetIcon(trayIcon)
 	}
-	tray.SetTooltip("Pudding")
-	menu := app.NewMenu()
-	menu.Add("显示 Pudding").OnClick(func(*application.Context) {
-		window.Show()
-		window.Focus()
-	})
-	menu.AddSeparator()
-	menu.Add("退出").OnClick(func(*application.Context) {
-		app.Quit()
-	})
-	tray.SetMenu(menu)
+	localeManager := newDesktopLocaleManager(app, tray, window, preferencesPath, localePreference)
+	localeManager.apply()
+	localeManager.bind()
 
 	// daemon serve 异常退出时带走壳,避免空窗口假活
 	go func() {
@@ -197,13 +193,14 @@ func desktopShell() string {
 	return ""
 }
 
-func launchURL(token, apiBase, shell string, theme desktopThemeState) string {
+func launchURL(token, apiBase, shell string, theme desktopThemeState, locale desktopLocalePreference) string {
 	u := url.URL{Path: "/"}
 	q := u.Query()
 	q.Set("token", token)
 	q.Set("api", apiBase)
 	q.Set("theme", string(theme.Theme))
 	q.Set("resolved", string(theme.Resolved))
+	q.Set("locale", string(normalizeDesktopLocalePreference(locale)))
 	if shell != "" {
 		q.Set("shell", shell)
 	}

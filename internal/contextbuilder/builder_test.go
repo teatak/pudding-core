@@ -11,7 +11,7 @@ import (
 func TestBuildUsesSettingsSystemPrompt(t *testing.T) {
 	ms := memstore.New()
 	ctx := context.Background()
-	if err := ms.CreateSession(ctx, &store.Session{ID: "s1"}); err != nil {
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{

@@ -24,18 +24,16 @@ func main() {
 
 func run() error {
 	var (
-		flagHome  = flag.String("home", "", "data home (default: channel home, see docs)")
-		flagAddr  = flag.String("addr", home.DefaultAddr(), "HTTP listen address")
-		flagMock  = flag.Bool("mock", false, "use mock provider")
-		flagModel = flag.String("model", "mock-model", "fallback model (mock/dev)")
+		flagHome = flag.String("home", "", "data home (default: channel home, see docs)")
+		flagAddr = flag.String("addr", home.DefaultAddr(), "HTTP listen address")
+		flagMock = flag.Bool("mock", false, "use mock provider")
 	)
 	flag.Parse()
 
 	d, err := daemon.Start(daemon.Options{
-		Home:         *flagHome,
-		Addr:         *flagAddr,
-		Mock:         *flagMock,
-		DefaultModel: *flagModel,
+		Home: *flagHome,
+		Addr: *flagAddr,
+		Mock: *flagMock,
 	})
 	if err != nil {
 		return err

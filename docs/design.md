@@ -145,9 +145,8 @@ text:      markdown 正文(无气泡直接排版)…▍    ← streaming 光标
 
 ## 4. 模型选择器:两层 Accordion
 
-- composer 底排的单一触发器,显示当前生效的 `[品牌图标] 模型名`。
-  session 未显式指定时,前端按 settings 默认 provider → profile 的
-  `models[0].id` 解析出实际值直接显示——**不暴露"跟随设置"类中间概念**。
+- composer 底排的单一触发器,显示当前 session 显式选择的 `[品牌图标] 模型名`。
+  draft 页可使用前端本地保存的"上次选用模型";真实 session 不做隐式解析。
 - 模型 id 一律格式化展示(`deepseek-v4-flash` → `Deepseek V4 Flash`,
   `lib/model.ts`);API 提交仍是原始 id。
 - 点击展开 popover,内容是 **Accordion**:
@@ -155,8 +154,8 @@ text:      markdown 正文(无气泡直接排版)…▍    ← streaming 光标
   - 展开第二层 = 该 profile 的模型列表;
   - **默认展开当前 session 所用 profile**。
 - 选中模型 = 一次 `PATCH /sessions/{id}` 同时写 provider + model。
-- **模型目录唯一来源 = `profile.models`**(`models[0]` 是默认模型,必要时并入
-  session 当前值)。选择器**不自动请求端点**——用户反馈明确:配什么显示什么。
+- **模型目录唯一来源 = `profile.models`**(必要时并入 session 当前值)。选择器
+  **不自动请求端点**——用户反馈明确:配什么显示什么。
 - `GET /providers/{name}/models` 只用于**配置表单**的"刷新/导入模型列表"
   按钮(daemon 按 type 代理真实端点的模型 API,短缓存),把候选并入
   `profile.models` 后由用户保存;presets 仅作创建表单预填与兜底候选。

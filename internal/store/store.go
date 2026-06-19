@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/teatak/pudding-core/internal/event"
@@ -15,7 +16,8 @@ var (
 	ErrNotFound = errors.New("store: not found")
 	// ErrTurnRunning:同一 session 已有 running turn。第一阶段不允许并发 turn,
 	// API 层映射为 409(docs/technology-decisions.md 第 14 节)。
-	ErrTurnRunning = errors.New("store: session has a running turn")
+	ErrTurnRunning    = errors.New("store: session has a running turn")
+	ErrInvalidSession = errors.New("store: session provider and model are required")
 )
 
 // EventsRetainPerSession 是每个 session 的 lifecycle 事件保留条数。
@@ -26,7 +28,7 @@ const EventsRetainPerSession = 1000
 type Session struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
-	// Provider 是 provider profile 名,空 = 默认 profile(settings provider.default)。
+	// Provider 是 provider profile 名;会话创建时必须显式写入。
 	Provider  string    `json:"provider"`
 	Model     string    `json:"model"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -90,13 +92,6 @@ func (p *ProviderProfile) HasModel(id string) bool {
 	return ok
 }
 
-func (p *ProviderProfile) FirstModelID() string {
-	if p == nil || len(p.Models) == 0 {
-		return ""
-	}
-	return p.Models[0].ID
-}
-
 func (p *ProviderProfile) ModelByID(id string) (ProviderModel, bool) {
 	if p == nil || id == "" {
 		return ProviderModel{}, false
@@ -107,6 +102,36 @@ func (p *ProviderProfile) ModelByID(id string) (ProviderModel, bool) {
 		}
 	}
 	return ProviderModel{}, false
+}
+
+func NormalizeSessionProviderModel(s *Session) error {
+	if s == nil {
+		return ErrInvalidSession
+	}
+	s.Provider = strings.TrimSpace(s.Provider)
+	s.Model = strings.TrimSpace(s.Model)
+	if s.Provider == "" || s.Model == "" {
+		return ErrInvalidSession
+	}
+	return nil
+}
+
+func NormalizeSessionUpdate(upd *SessionUpdate) error {
+	if upd.Provider != nil {
+		provider := strings.TrimSpace(*upd.Provider)
+		if provider == "" {
+			return ErrInvalidSession
+		}
+		upd.Provider = &provider
+	}
+	if upd.Model != nil {
+		model := strings.TrimSpace(*upd.Model)
+		if model == "" {
+			return ErrInvalidSession
+		}
+		upd.Model = &model
+	}
+	return nil
 }
 
 type ProviderModel struct {

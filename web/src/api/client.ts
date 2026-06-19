@@ -29,7 +29,13 @@ export class APIError extends Error {
   }
 }
 
-const sessionRequest = z.object({
+const createSessionRequest = z.object({
+  title: z.string().optional(),
+  provider: z.string().min(1),
+  model: z.string().min(1),
+});
+
+const sessionPatchRequest = z.object({
   title: z.string().optional(),
   provider: z.string().optional(),
   model: z.string().optional(),
@@ -85,22 +91,22 @@ export function listSessions(token: string): Promise<{ sessions: Session[] }> {
 
 export function createSession(
   token: string,
-  body: z.infer<typeof sessionRequest>,
+  body: z.infer<typeof createSessionRequest>,
 ): Promise<Session> {
   return request(token, "/sessions", session, {
     method: "POST",
-    body: JSON.stringify(sessionRequest.parse(body)),
+    body: JSON.stringify(createSessionRequest.parse(body)),
   });
 }
 
 export function updateSession(
   token: string,
   sessionID: string,
-  body: z.infer<typeof sessionRequest>,
+  body: z.infer<typeof sessionPatchRequest>,
 ): Promise<Session> {
   return request(token, `/sessions/${encodeURIComponent(sessionID)}`, session, {
     method: "PATCH",
-    body: JSON.stringify(sessionRequest.parse(body)),
+    body: JSON.stringify(sessionPatchRequest.parse(body)),
   });
 }
 

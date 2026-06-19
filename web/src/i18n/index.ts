@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from "react";
 
+import { consumeLaunchParam } from "@/state/launchParams";
+
 export type Locale = "zh-CN" | "zh-TW" | "en";
 
 type Messages = Record<string, string>;
@@ -14,9 +16,10 @@ const zh: Messages = {
   "common.loading": "加载中",
   "common.copy": "复制",
   "common.copied": "已复制",
-  "common.default": "默认",
-  "picker.noModels": "暂无可用模型，请检查 Provider 配置。",
+  "picker.noModels": "暂无可用模型，请先添加。",
+  "picker.selectModel": "请选择模型",
   "provider.models": "模型",
+  "provider.modelCountSuffix": " 个模型",
   "provider.loadCandidates": "从端点加载候选",
   "provider.candidatesFailed": "候选加载失败，请检查 Base URL 与 API Key。",
   "provider.addModel": "添加模型",
@@ -50,6 +53,8 @@ const zh: Messages = {
   "language.zhTW": "中文(繁體)",
   "layout.resizeHint": "拖拽调整",
   "draft.title": "嗨~ 今天想聊点什么？",
+  "draft.setupTitle": "先配置一个模型",
+  "draft.setupDesc": "选择一个预设，填写 API Key 后，就可以开始新会话。",
   "draft.suggest.1": "拍张照片展示给我",
   "draft.suggest.2": "解释量子力学",
   "draft.suggest.3": "推荐 5 本入门科幻小说",
@@ -72,13 +77,13 @@ const zh: Messages = {
   "provider.apiKeyKeep": "留空则不修改",
   "provider.copySuffix": "副本",
   "provider.create": "创建 Profile",
-  "provider.advanced": "高级编辑",
   "provider.apiKeyOptional": "可留空",
-  "provider.credentialRequired": "请填写 API Key 或环境变量。",
+  "provider.accessMethod": "接入方式",
+  "provider.protocol": "接入方式",
+  "provider.endpointMode": "端点类型",
+  "provider.credentialRequired": "请填写 API Key。",
   "provider.custom": "自定义",
   "provider.customHint": "任意兼容端点",
-  "provider.defaultEndpoint": "默认端点",
-  "provider.deleteBlockedDefault": "默认 Profile 不能删除。",
   "provider.deleteBlockedSessions": "仍有会话引用此 Profile。",
   "provider.deleteDescription": "引用该 Profile 的会话将无法发送。",
   "provider.deleteTitle": "删除这个 Profile？",
@@ -94,8 +99,45 @@ const zh: Messages = {
   "provider.name": "名称",
   "provider.new": "新建",
   "provider.profileExists": "名称已存在，请换一个名称。",
-  "provider.makeDefault": "设为默认 Profile",
-  "provider.quickCreateHint": "填写凭据后创建 Profile；需要完整参数时进入高级编辑。",
+  "provider.getAPIKey": "前往获取",
+  "provider.profileID": "Profile ID",
+  "provider.quickCreateHint": "选择接入方式并填写 API Key 后创建 Profile。",
+  "providerPreset.deepseek.description": "DeepSeek V4 模型，支持 OpenAI 兼容和 Anthropic 兼容协议。",
+  "providerPreset.deepseek.variant.anthropic.label": "Anthropic 兼容",
+  "providerPreset.deepseek.variant.openai.label": "OpenAI 兼容",
+  "providerPreset.qwen.description": "阿里通义千问，经 DashScope OpenAI 兼容端点接入。",
+  "providerPreset.qwen.variant.default.label": "OpenAI 兼容",
+  "providerPreset.mimo.description": "小米 MiMo 标准与 Plan 端点。",
+  "providerPreset.mimo.protocol.anthropic.description": "Anthropic 兼容协议",
+  "providerPreset.mimo.protocol.anthropic.label": "Anthropic",
+  "providerPreset.mimo.protocol.openai.description": "OpenAI 兼容协议",
+  "providerPreset.mimo.protocol.openai.label": "OpenAI",
+  "providerPreset.mimo.plan.plan.description": "订阅会员专用端点",
+  "providerPreset.mimo.plan.plan.label": "Plan",
+  "providerPreset.mimo.plan.standard.description": "按 token 计费",
+  "providerPreset.mimo.plan.standard.label": "标准 API",
+  "providerPreset.mimo.variant.plan-anthropic.description": "token-plan-cn.xiaomimimo.com/anthropic · 订阅会员",
+  "providerPreset.mimo.variant.plan-anthropic.label": "Plan / Anthropic",
+  "providerPreset.mimo.variant.plan-openai.description": "token-plan-cn.xiaomimimo.com/v1 · 订阅会员",
+  "providerPreset.mimo.variant.plan-openai.label": "Plan / OpenAI",
+  "providerPreset.mimo.variant.standard-anthropic.description": "api.xiaomimimo.com/anthropic · 按 token 计费",
+  "providerPreset.mimo.variant.standard-anthropic.label": "标准 API / Anthropic",
+  "providerPreset.mimo.variant.standard-openai.description": "api.xiaomimimo.com/v1 · 按 token 计费",
+  "providerPreset.mimo.variant.standard-openai.label": "标准 API / OpenAI",
+  "providerPreset.gemini.description": "Google Gemini API，支持多模态对话模型。",
+  "providerPreset.gemini.variant.default.description": "Google AI Studio API",
+  "providerPreset.openai.description": "OpenAI 官方 API，支持 Responses API 和 OpenAI 兼容 Chat。",
+  "providerPreset.openai.variant.compatible.label": "OpenAI 兼容",
+  "providerPreset.anthropic.description": "Anthropic Claude 原生 Messages API。",
+  "providerPreset.anthropic.variant.default.label": "Messages API",
+  "providerPreset.moonshot.description": "Moonshot Kimi OpenAI 兼容端点。",
+  "providerPreset.moonshot.variant.default.label": "OpenAI 兼容",
+  "providerPreset.zhipu.description": "智谱 GLM OpenAI 兼容端点。",
+  "providerPreset.zhipu.variant.default.label": "OpenAI 兼容",
+  "providerPreset.openrouter.description": "OpenRouter 模型路由，使用 OpenAI 兼容端点。",
+  "providerPreset.openrouter.variant.default.label": "OpenAI 兼容",
+  "providerPreset.ollama.description": "本地 Ollama OpenAI 兼容端点。",
+  "providerPreset.ollama.variant.default.label": "本地 OpenAI 兼容",
   "provider.saveFailed": "保存失败，请检查配置后重试。",
   "provider.suggestedModel": "建议模型",
   "provider.type": "类型",
@@ -109,13 +151,11 @@ const zh: Messages = {
   "rail.resizeCollapseHint": "拖拽调整，点击收起",
   "session.loadFailed": "会话加载失败，请刷新重试。",
   "session.model": "模型",
-  "session.modelDefault": "默认模型",
   "session.noSelected": "未选择会话",
   "session.provider": "Profile",
   "session.selectOrCreate": "创建或选择一个会话",
   "session.start": "还没有消息，从下面输入第一句话。",
   "session.untitled": "未命名会话",
-  "settings.defaultProvider": "默认 Profile",
   "settings.defaults": "默认设置",
   "settings.description": "管理 Profile 和默认对话设置。",
   "settings.loadFailed": "设置加载失败，请刷新重试。",
@@ -127,7 +167,7 @@ const zh: Messages = {
   "settings.section.appearance": "外观",
   "settings.section.appearance.desc": "调整界面语言和主题偏好。",
   "settings.section.dialogue": "对话",
-  "settings.section.dialogue.desc": "配置默认系统提示词；模型与 Profile 在模型页管理。",
+  "settings.section.dialogue.desc": "配置系统提示词；模型与 Profile 在模型页管理。",
   "settings.dialogue.behavior": "对话行为",
   "settings.dialogue.emptyFallback": "留空时使用内置默认提示词。",
   "settings.dialogue.globalDefault": "全局默认",
@@ -162,9 +202,10 @@ const zhTW: Messages = {
   "common.loading": "載入中",
   "common.copy": "複製",
   "common.copied": "已複製",
-  "common.default": "預設",
-  "picker.noModels": "暫無可用模型，請檢查 Provider 設定。",
+  "picker.noModels": "暫無可用模型，請先新增。",
+  "picker.selectModel": "請選擇模型",
   "provider.models": "模型",
+  "provider.modelCountSuffix": " 個模型",
   "provider.loadCandidates": "從端點載入候選",
   "provider.candidatesFailed": "候選載入失敗，請檢查 Base URL 與 API Key。",
   "provider.addModel": "加入模型",
@@ -198,6 +239,8 @@ const zhTW: Messages = {
   "language.zhTW": "中文(繁體)",
   "layout.resizeHint": "拖曳調整",
   "draft.title": "嗨~ 今天想聊點什麼？",
+  "draft.setupTitle": "先設定一個模型",
+  "draft.setupDesc": "選擇一個預設，填寫 API Key 後，就可以開始新會話。",
   "draft.suggest.1": "拍張照片展示給我",
   "draft.suggest.2": "解釋量子力學",
   "draft.suggest.3": "推薦 5 本入門科幻小說",
@@ -220,13 +263,13 @@ const zhTW: Messages = {
   "provider.apiKeyKeep": "留空則不修改",
   "provider.copySuffix": "副本",
   "provider.create": "建立 Profile",
-  "provider.advanced": "進階編輯",
   "provider.apiKeyOptional": "可留空",
-  "provider.credentialRequired": "請填寫 API Key 或環境變數。",
+  "provider.accessMethod": "接入方式",
+  "provider.protocol": "接入方式",
+  "provider.endpointMode": "端點類型",
+  "provider.credentialRequired": "請填寫 API Key。",
   "provider.custom": "自訂",
   "provider.customHint": "任意相容端點",
-  "provider.defaultEndpoint": "預設端點",
-  "provider.deleteBlockedDefault": "預設 Profile 不能刪除。",
   "provider.deleteBlockedSessions": "仍有會話引用此 Profile。",
   "provider.deleteDescription": "引用該 Profile 的會話將無法傳送。",
   "provider.deleteTitle": "刪除這個 Profile？",
@@ -242,28 +285,63 @@ const zhTW: Messages = {
   "provider.name": "名稱",
   "provider.new": "新增",
   "provider.profileExists": "名稱已存在，請換一個名稱。",
-  "provider.makeDefault": "設為預設 Profile",
-  "provider.quickCreateHint": "填寫憑據後建立 Profile；需要完整參數時進入進階編輯。",
+  "provider.getAPIKey": "前往獲取",
+  "provider.profileID": "Profile ID",
+  "provider.quickCreateHint": "選擇接入方式並填寫 API Key 後建立 Profile。",
+  "providerPreset.deepseek.description": "DeepSeek V4 模型，支援 OpenAI 相容和 Anthropic 相容協議。",
+  "providerPreset.deepseek.variant.anthropic.label": "Anthropic 相容",
+  "providerPreset.deepseek.variant.openai.label": "OpenAI 相容",
+  "providerPreset.qwen.description": "阿里通義千問，經 DashScope OpenAI 相容端點接入。",
+  "providerPreset.qwen.variant.default.label": "OpenAI 相容",
+  "providerPreset.mimo.description": "小米 MiMo 標準與 Plan 端點。",
+  "providerPreset.mimo.protocol.anthropic.description": "Anthropic 相容協議",
+  "providerPreset.mimo.protocol.anthropic.label": "Anthropic",
+  "providerPreset.mimo.protocol.openai.description": "OpenAI 相容協議",
+  "providerPreset.mimo.protocol.openai.label": "OpenAI",
+  "providerPreset.mimo.plan.plan.description": "訂閱會員專用端點",
+  "providerPreset.mimo.plan.plan.label": "Plan",
+  "providerPreset.mimo.plan.standard.description": "按 token 計費",
+  "providerPreset.mimo.plan.standard.label": "標準 API",
+  "providerPreset.mimo.variant.plan-anthropic.description": "token-plan-cn.xiaomimimo.com/anthropic · 訂閱會員",
+  "providerPreset.mimo.variant.plan-anthropic.label": "Plan / Anthropic",
+  "providerPreset.mimo.variant.plan-openai.description": "token-plan-cn.xiaomimimo.com/v1 · 訂閱會員",
+  "providerPreset.mimo.variant.plan-openai.label": "Plan / OpenAI",
+  "providerPreset.mimo.variant.standard-anthropic.description": "api.xiaomimimo.com/anthropic · 按 token 計費",
+  "providerPreset.mimo.variant.standard-anthropic.label": "標準 API / Anthropic",
+  "providerPreset.mimo.variant.standard-openai.description": "api.xiaomimimo.com/v1 · 按 token 計費",
+  "providerPreset.mimo.variant.standard-openai.label": "標準 API / OpenAI",
+  "providerPreset.gemini.description": "Google Gemini API，支援多模態對話模型。",
+  "providerPreset.gemini.variant.default.description": "Google AI Studio API",
+  "providerPreset.openai.description": "OpenAI 官方 API，支援 Responses API 和 OpenAI 相容 Chat。",
+  "providerPreset.openai.variant.compatible.label": "OpenAI 相容",
+  "providerPreset.anthropic.description": "Anthropic Claude 原生 Messages API。",
+  "providerPreset.anthropic.variant.default.label": "Messages API",
+  "providerPreset.moonshot.description": "Moonshot Kimi OpenAI 相容端點。",
+  "providerPreset.moonshot.variant.default.label": "OpenAI 相容",
+  "providerPreset.zhipu.description": "智譜 GLM OpenAI 相容端點。",
+  "providerPreset.zhipu.variant.default.label": "OpenAI 相容",
+  "providerPreset.openrouter.description": "OpenRouter 模型路由，使用 OpenAI 相容端點。",
+  "providerPreset.openrouter.variant.default.label": "OpenAI 相容",
+  "providerPreset.ollama.description": "本地 Ollama OpenAI 相容端點。",
+  "providerPreset.ollama.variant.default.label": "本地 OpenAI 相容",
   "provider.saveFailed": "儲存失敗，請檢查設定後重試。",
   "provider.suggestedModel": "建議模型",
   "provider.type": "類型",
   "session.empty": "還沒有會話，開始第一段對話吧。",
   "session.generating": "正在生成",
-  "rail.collapse": "收起边栏",
-  "rail.expand": "展开边栏",
+  "rail.collapse": "收起邊欄",
+  "rail.expand": "展開邊欄",
   "rail.search": "搜尋",
   "rail.widgets": "小組件",
   "rail.automations": "自動化",
   "rail.resizeCollapseHint": "拖曳調整，點擊收起",
   "session.loadFailed": "會話載入失敗，請重新整理後重試。",
   "session.model": "模型",
-  "session.modelDefault": "預設模型",
   "session.noSelected": "未選擇會話",
   "session.provider": "Profile",
   "session.selectOrCreate": "建立或選擇一個會話",
   "session.start": "還沒有訊息，從下面輸入第一句話。",
   "session.untitled": "未命名會話",
-  "settings.defaultProvider": "預設 Profile",
   "settings.defaults": "預設設定",
   "settings.description": "管理 Profile 和預設對話設定。",
   "settings.loadFailed": "設定載入失敗，請重新整理後重試。",
@@ -275,7 +353,7 @@ const zhTW: Messages = {
   "settings.section.appearance": "外觀",
   "settings.section.appearance.desc": "調整介面語言和主題偏好。",
   "settings.section.dialogue": "對話",
-  "settings.section.dialogue.desc": "設定預設系統提示詞；模型與 Profile 在模型頁管理。",
+  "settings.section.dialogue.desc": "設定系統提示詞；模型與 Profile 在模型頁管理。",
   "settings.dialogue.behavior": "對話行為",
   "settings.dialogue.emptyFallback": "留空時使用內建預設提示詞。",
   "settings.dialogue.globalDefault": "全域預設",
@@ -310,9 +388,10 @@ const en: Messages = {
   "common.loading": "Loading",
   "common.copy": "Copy",
   "common.copied": "Copied",
-  "common.default": "Default",
-  "picker.noModels": "No models available. Check the provider settings.",
+  "picker.noModels": "No models available. Add one first.",
+  "picker.selectModel": "Select a model",
   "provider.models": "Models",
+  "provider.modelCountSuffix": " models",
   "provider.loadCandidates": "Load candidates from endpoint",
   "provider.candidatesFailed": "Failed to load candidates. Check the base URL and API key.",
   "provider.addModel": "Add model",
@@ -346,6 +425,8 @@ const en: Messages = {
   "language.zhTW": "中文(繁體)",
   "layout.resizeHint": "Drag to resize",
   "draft.title": "Hey, what's on your mind today?",
+  "draft.setupTitle": "Set up a model first",
+  "draft.setupDesc": "Choose a preset, then enter an API key to start a new session.",
   "draft.suggest.1": "Take a photo and show me",
   "draft.suggest.2": "Explain quantum mechanics",
   "draft.suggest.3": "Recommend 5 sci-fi books for beginners",
@@ -368,13 +449,13 @@ const en: Messages = {
   "provider.apiKeyKeep": "Leave blank to keep unchanged",
   "provider.copySuffix": "copy",
   "provider.create": "Create profile",
-  "provider.advanced": "Advanced edit",
   "provider.apiKeyOptional": "Optional",
-  "provider.credentialRequired": "Enter an API key or environment variable.",
+  "provider.accessMethod": "Access method",
+  "provider.protocol": "Access method",
+  "provider.endpointMode": "Endpoint type",
+  "provider.credentialRequired": "Enter an API key.",
   "provider.custom": "Custom",
   "provider.customHint": "Any compatible endpoint",
-  "provider.defaultEndpoint": "Default endpoint",
-  "provider.deleteBlockedDefault": "The default profile cannot be deleted.",
   "provider.deleteBlockedSessions": "Sessions still reference this profile.",
   "provider.deleteDescription": "Sessions that reference this profile will not be able to send.",
   "provider.deleteTitle": "Delete this profile?",
@@ -390,8 +471,23 @@ const en: Messages = {
   "provider.name": "Name",
   "provider.new": "New",
   "provider.profileExists": "That name already exists. Choose another name.",
-  "provider.makeDefault": "Make default profile",
-  "provider.quickCreateHint": "Create a profile with credentials; open advanced edit for full parameters.",
+  "provider.getAPIKey": "Get API key",
+  "provider.profileID": "Profile ID",
+  "provider.quickCreateHint": "Choose an access method and enter an API key to create a profile.",
+  "providerPreset.mimo.protocol.anthropic.description": "Anthropic-compatible protocol",
+  "providerPreset.mimo.protocol.anthropic.label": "Anthropic",
+  "providerPreset.mimo.protocol.openai.description": "OpenAI-compatible protocol",
+  "providerPreset.mimo.protocol.openai.label": "OpenAI",
+  "providerPreset.mimo.plan.plan.description": "Subscription endpoint",
+  "providerPreset.mimo.plan.plan.label": "Plan",
+  "providerPreset.mimo.plan.standard.description": "Token-based billing",
+  "providerPreset.mimo.plan.standard.label": "Standard API",
+  "providerPreset.mimo.variant.plan-anthropic.description": "token-plan-cn.xiaomimimo.com/anthropic · subscription plan",
+  "providerPreset.mimo.variant.plan-openai.description": "token-plan-cn.xiaomimimo.com/v1 · subscription plan",
+  "providerPreset.mimo.variant.standard-anthropic.description": "api.xiaomimimo.com/anthropic · token-based billing",
+  "providerPreset.mimo.variant.standard-anthropic.label": "Standard API / Anthropic",
+  "providerPreset.mimo.variant.standard-openai.description": "api.xiaomimimo.com/v1 · token-based billing",
+  "providerPreset.mimo.variant.standard-openai.label": "Standard API / OpenAI",
   "provider.saveFailed": "Save failed. Check the configuration and retry.",
   "provider.suggestedModel": "Suggested model",
   "provider.type": "Type",
@@ -405,13 +501,11 @@ const en: Messages = {
   "rail.resizeCollapseHint": "Drag to resize, click to collapse",
   "session.loadFailed": "Sessions failed to load. Refresh and retry.",
   "session.model": "Model",
-  "session.modelDefault": "Default model",
   "session.noSelected": "No session selected",
   "session.provider": "Profile",
   "session.selectOrCreate": "Create or select a session",
   "session.start": "No messages yet. Type the first one below.",
   "session.untitled": "Untitled session",
-  "settings.defaultProvider": "Default profile",
   "settings.defaults": "Defaults",
   "settings.description": "Manage profiles and default chat settings.",
   "settings.loadFailed": "Settings failed to load. Refresh and retry.",
@@ -423,7 +517,7 @@ const en: Messages = {
   "settings.section.appearance": "Appearance",
   "settings.section.appearance.desc": "Adjust language and theme preferences.",
   "settings.section.dialogue": "Chat",
-  "settings.section.dialogue.desc": "Configure the default system prompt; manage models and profiles on the model page.",
+  "settings.section.dialogue.desc": "Configure the system prompt; manage models and profiles on the model page.",
   "settings.dialogue.behavior": "Chat behavior",
   "settings.dialogue.emptyFallback": "Leave blank to use the built-in default prompt.",
   "settings.dialogue.globalDefault": "Global default",
@@ -452,15 +546,20 @@ const en: Messages = {
 
 const dictionaries: Record<Locale, Messages> = { "zh-CN": zh, "zh-TW": zhTW, en };
 const listeners = new Set<() => void>();
+let localeSyncStarted = false;
 let current = detectLocale();
 
 function detectLocale(): Locale {
   if (typeof window === "undefined") {
     return "en";
   }
-  const stored = window.localStorage.getItem(STORAGE_KEY);
-  if (stored === "zh-CN" || stored === "zh-TW" || stored === "en") {
+  const launchLocale = normalizeLocale(consumeLaunchParam("locale"));
+  const stored = normalizeLocale(window.localStorage.getItem(STORAGE_KEY));
+  if (stored) {
     return stored;
+  }
+  if (launchLocale) {
+    return launchLocale;
   }
   const language = navigator.language.toLowerCase();
   if (language.startsWith("zh")) {
@@ -480,8 +579,19 @@ function snapshot() {
 
 export function setLocale(locale: Locale) {
   current = locale;
-  window.localStorage.setItem(STORAGE_KEY, locale);
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(STORAGE_KEY, locale);
+    syncDesktopLocalePreference(locale);
+  }
   listeners.forEach((listener) => listener());
+}
+
+export function startLocaleSync() {
+  if (typeof window === "undefined" || localeSyncStarted) {
+    return;
+  }
+  localeSyncStarted = true;
+  syncDesktopLocalePreference(current);
 }
 
 export function translate(key: string, locale = current) {
@@ -495,4 +605,21 @@ export function useI18n() {
     setLocale,
     t: (key: string) => translate(key, locale),
   };
+}
+
+function normalizeLocale(value: unknown): Locale | null {
+  return value === "zh-CN" || value === "zh-TW" || value === "en" ? value : null;
+}
+
+function syncDesktopLocalePreference(locale: Locale) {
+  if (!isDesktopLocaleControlled()) {
+    return;
+  }
+  import("@wailsio/runtime")
+    .then(({ Events }) => Events.Emit("desktop:locale-set", locale))
+    .catch(() => {});
+}
+
+function isDesktopLocaleControlled() {
+  return typeof document !== "undefined" && Boolean(document.documentElement.dataset.shell);
 }

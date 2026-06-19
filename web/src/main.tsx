@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { App } from "@/App";
 import "@/styles.css";
+import { startLocaleSync } from "@/i18n";
 import { initAPIBase } from "@/state/apiBase";
 import { initShellMode } from "@/state/shell";
 import { applyTheme, initThemeFromLaunch, readStoredTheme, startThemeSync } from "@/theme/theme";
@@ -16,6 +17,7 @@ initThemeFromLaunch();
 
 applyTheme(readStoredTheme());
 startThemeSync();
+startLocaleSync();
 
 const queryClient = new QueryClient({
   defaultOptions: {

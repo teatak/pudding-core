@@ -5,7 +5,7 @@ import { z } from "zod";
 export const session = z.object({
   id: z.string(),
   title: z.string(),
-  provider: z.string(), // provider profile 名,空 = 默认
+  provider: z.string(), // provider profile 名;session 创建时必须显式写入
   model: z.string(),
   pinned: z.boolean(),
   pinnedOrder: z.number(),
@@ -43,7 +43,7 @@ export const providerProfile = z.object({
   baseURL: z.string(),
   apiKeySet: z.boolean(),
   apiKeyEnv: z.string().optional(),
-  // 配置的可选模型清单;选择器只显示这里的内容。models[0] 是自然默认模型。
+  // 配置的可选模型清单;选择器只显示这里的内容,没有默认模型语义。
   models: z.array(providerModel),
 });
 export type ProviderProfile = z.infer<typeof providerProfile>;

@@ -220,15 +220,13 @@ Provider 路由:
   但是两个 profile)。
 - profile 是实体(有身份与生命周期),不进 SQLite:直接落
   `<home>/config/profiles.yaml` + 独立 REST 资源。settings 只放标量偏好
-  (`system_prompt` / `provider.default`),磁盘事实源是
-  `<home>/config/settings.yaml`。
-- 不设 `defaultModel` 字段:模型名只在所属 profile 下有意义,`models[0]`
-  是自然默认模型,不存在全局默认模型键。
+  (`system_prompt`),磁盘事实源是 `<home>/config/settings.yaml`。
+- 不设 profile 级默认模型字段:模型名只在所属 profile 下有意义,profile 内也没有
+  默认模型语义。
 - engine 不持有单一 client,改持 **ProviderRegistry**:按 profile 名解析并缓存
   client 实例;`provider.Client` 接口与 contextbuilder 的中立输出不变。
-  现有 settingsProvider 就是只有一个匿名 profile 的退化 registry,演进路径平滑。
-- 解析顺序:`session.provider` > settings `provider.default` > 内置默认 profile;
-  model:`session.model` > 所解析 profile 的 `models[0].id` > `--model` flag(mock/dev only)。
+- 解析顺序:只读取 `session.provider` + `session.model`;缺任一项提交直接
+  `no_model`,不做 settings / 内置 profile / flag 回落。
 - provider/model/effective model config 都是 BeginTurn 时刻快照,改配置不影响
   进行中的 turn。
 - 存储落点:
@@ -245,7 +243,7 @@ Provider 路由:
 
 ```sql
 -- 既有表加列;provider profile 不再进 SQLite
-ALTER TABLE sessions ADD COLUMN provider TEXT NOT NULL DEFAULT ''; -- 空 = 默认 profile
+ALTER TABLE sessions ADD COLUMN provider TEXT NOT NULL;
 ALTER TABLE turns    ADD COLUMN provider TEXT NOT NULL DEFAULT ''; -- BeginTurn 快照
 ALTER TABLE turns    ADD COLUMN model    TEXT NOT NULL DEFAULT '';
 ```
@@ -261,8 +259,7 @@ DELETE /providers/{name}
 - api_key 只进不出:任何读端点不回明文,UI 只显示"已设置"。
 - `sessions.provider` 不设外键:profile 被删后悬空引用按
   "provider not configured" 落 turn.failed,与未配置行为一致,不级联改 session。
-- 默认 profile 用 settings `provider.default` 键表达,不在 profile 里放 is_default 字段,
-  避免双事实源。
+- 不存在默认 profile 或 profile 默认模型;新建 draft 只使用前端本地的"上次选用模型"。
 - (已完成)单 provider 阶段的 `provider.openai.*` 与全局 `model.default`
   过渡键已随 registry 收口删除,registry 不再有任何隐式回落。
 
@@ -433,7 +430,7 @@ home 内容(第一阶段):
   data/
     pudding.db    # SQLite(含 WAL/SHM)
   config/
-    settings.yaml # default_profile/system_prompt
+    settings.yaml # system_prompt
     profiles.yaml # provider profiles + model metadata
   daemon.token    # 启动 token
   logs/

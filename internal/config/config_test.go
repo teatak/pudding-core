@@ -18,8 +18,7 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 	ctx := context.Background()
 
 	if err := m.SetSettings(ctx, map[string]string{
-		store.SettingDefaultProvider: "openai",
-		store.SettingSystemPrompt:    "hi",
+		store.SettingSystemPrompt: "hi",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +26,7 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings[store.SettingDefaultProvider] != "openai" || settings[store.SettingSystemPrompt] != "hi" {
+	if settings[store.SettingSystemPrompt] != "hi" {
 		t.Fatalf("unexpected settings: %+v", settings)
 	}
 
@@ -49,7 +48,7 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.DisplayName() != "OpenAI" || p.FirstModelID() != "gpt-5.5" || EffectiveAPIKey(p) != "secret" {
+	if p.DisplayName() != "OpenAI" || len(p.Models) != 1 || p.Models[0].ID != "gpt-5.5" || EffectiveAPIKey(p) != "secret" {
 		t.Fatalf("unexpected profile: %+v", p)
 	}
 	profilesPath := home + "/config/profiles.yaml"

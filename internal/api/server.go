@@ -93,6 +93,12 @@ func (s *Server) createSession(c *cart.Context) error {
 	if err := decode(c, &req); err != nil && !errors.Is(err, io.EOF) {
 		return badRequest(c, "invalid json body")
 	}
+	req.Provider = strings.TrimSpace(req.Provider)
+	req.Model = strings.TrimSpace(req.Model)
+	if req.Provider == "" || req.Model == "" {
+		c.JSON(http.StatusBadRequest, map[string]string{"error": "no_model"})
+		return nil
+	}
 	sess := &store.Session{ID: store.NewID("sess"), Title: req.Title, Provider: req.Provider, Model: req.Model}
 	if err := s.store.CreateSession(c.Request.Context(), sess); err != nil {
 		return s.fail(c, err)
@@ -125,6 +131,20 @@ func (s *Server) patchSession(c *cart.Context) error {
 	var upd store.SessionUpdate
 	if err := decode(c, &upd); err != nil {
 		return badRequest(c, "invalid json body")
+	}
+	if upd.Provider != nil {
+		provider := strings.TrimSpace(*upd.Provider)
+		if provider == "" {
+			return badRequest(c, "provider is required")
+		}
+		upd.Provider = &provider
+	}
+	if upd.Model != nil {
+		model := strings.TrimSpace(*upd.Model)
+		if model == "" {
+			return badRequest(c, "model is required")
+		}
+		upd.Model = &model
 	}
 	sess, err := s.store.UpdateSession(c.Request.Context(), id, upd)
 	if err != nil {
@@ -225,6 +245,11 @@ func (s *Server) putSettings(c *cart.Context) error {
 	if err := decode(c, &kv); err != nil {
 		return badRequest(c, "invalid json body")
 	}
+	for k := range kv {
+		if k != store.SettingSystemPrompt {
+			return badRequest(c, "unknown setting: "+k)
+		}
+	}
 	settings, ok := s.config.(interface {
 		SetSettings(context.Context, map[string]string) error
 	})
@@ -241,6 +266,10 @@ func (s *Server) putSettings(c *cart.Context) error {
 func (s *Server) fail(c *cart.Context, err error) error {
 	if errors.Is(err, store.ErrNotFound) {
 		c.JSON(http.StatusNotFound, map[string]string{"error": "not_found"})
+		return nil
+	}
+	if errors.Is(err, store.ErrInvalidSession) {
+		c.JSON(http.StatusBadRequest, map[string]string{"error": "no_model"})
 		return nil
 	}
 	c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})

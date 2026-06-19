@@ -1,6 +1,5 @@
 // Package registry 按 provider profile 名解析并缓存 provider.Client
-// (docs/technology-decisions.md 第 5 节)。profile 名的解析
-// (session.provider > settings provider.default > 内置 default)由 engine 完成,
+// (docs/technology-decisions.md 第 5 节)。provider 名由 session 显式提供,
 // 本包只负责 名字 → 客户端实例。
 package registry
 
@@ -58,7 +57,7 @@ func New(profiles ProfileSource) *Registry {
 
 func (r *Registry) Resolve(ctx context.Context, name string) (provider.Client, error) {
 	if name == "" {
-		name = store.DefaultProviderProfile
+		return nil, fmt.Errorf("provider profile name is required")
 	}
 	p, err := r.profiles.GetProviderProfile(ctx, name)
 	if err != nil {

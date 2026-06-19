@@ -68,8 +68,10 @@ func (m *Manager) SetSettings(_ context.Context, kv map[string]string) error {
 	if err != nil {
 		return err
 	}
-	if v, ok := kv[store.SettingDefaultProvider]; ok {
-		cfg.DefaultProfile = strings.TrimSpace(v)
+	for k := range kv {
+		if k != store.SettingSystemPrompt {
+			return fmt.Errorf("config: unsupported setting %q", k)
+		}
 	}
 	if v, ok := kv[store.SettingSystemPrompt]; ok {
 		cfg.SystemPrompt = v
@@ -168,16 +170,12 @@ func EffectiveAPIKey(p *store.ProviderProfile) string {
 func (m *Manager) path(name string) string { return filepath.Join(m.dir, name) }
 
 type settingsYAML struct {
-	Version        int    `yaml:"version"`
-	DefaultProfile string `yaml:"default_profile,omitempty"`
-	SystemPrompt   string `yaml:"system_prompt,omitempty"`
+	Version      int    `yaml:"version"`
+	SystemPrompt string `yaml:"system_prompt,omitempty"`
 }
 
 func (s settingsYAML) asMap() map[string]string {
 	out := map[string]string{}
-	if s.DefaultProfile != "" {
-		out[store.SettingDefaultProvider] = s.DefaultProfile
-	}
 	if s.SystemPrompt != "" {
 		out[store.SettingSystemPrompt] = s.SystemPrompt
 	}

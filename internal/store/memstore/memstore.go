@@ -39,6 +39,9 @@ func New() *Memstore {
 var _ store.Store = (*Memstore)(nil)
 
 func (m *Memstore) CreateSession(_ context.Context, s *store.Session) error {
+	if err := store.NormalizeSessionProviderModel(s); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := time.Now()
@@ -89,6 +92,9 @@ func (m *Memstore) runningLocked(sessionID string) bool {
 }
 
 func (m *Memstore) UpdateSession(_ context.Context, id string, upd store.SessionUpdate) (*store.Session, error) {
+	if err := store.NormalizeSessionUpdate(&upd); err != nil {
+		return nil, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, ok := m.sessions[id]
