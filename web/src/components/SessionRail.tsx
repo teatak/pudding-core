@@ -75,6 +75,8 @@ import { useOverlayStore } from "@/state/overlayStore";
 import { setRailCollapsed, useRailCollapsed, useRailForcedCollapsed } from "@/state/railStore";
 
 const popoverAlignNudgePx = 3;
+const dragAutoScrollEdgePx = 44;
+const dragAutoScrollMaxStepPx = 14;
 
 // 会话栏(rail):展开 = 左侧整栏;折叠 = 悬浮触发器 + hover 浮出 popover 面板。
 // 面板内容(RailPanel)两种形态完全复用。
@@ -197,61 +199,60 @@ export function SessionRail({
     }
   }
 
-  const panel = (
-    <RailPanel
-      draftActive={draftActive}
-      deletePending={deleteMutation.isPending}
-      isError={sessionsQuery.isError}
-      isLoading={sessionsQuery.isLoading}
-      selectedSessionID={selectedSessionID}
-      sessions={sessions}
-      token={token}
-      onCreate={() => {
-        hover.close();
-        void navigate({
-          to: "/",
-          search: (prev) => {
-            const next = { ...(prev as AppSearch), draft: "1" };
-            delete next.session;
-            return next;
-          },
-        });
-      }}
-      onDelete={(id) => deleteMutation.mutate(id)}
-      onRename={(id, title) => renameMutation.mutate({ id, title })}
-      onOpenSplit={(id) => {
-        hover.close();
-        // 当前主 pane 的会话不重复开分屏
-        void navigate({
-          to: "/",
-          search: (prev) => {
-            const search = prev as AppSearch;
-            return search.session === id ? search : { ...search, split: id };
-          },
-        });
-      }}
-      onPinChange={changePinned}
-      onRefetch={() => void sessionsQuery.refetch()}
-      onSelect={(id) => {
-        hover.close();
-        void navigate({
-          to: "/",
-          search: (prev) => {
-            const search = prev as AppSearch;
-            // 点中已在分屏里的会话:与主 pane 交换,两个都保持可见
-            if (search.split === id && search.session) {
-              const next = { ...search, session: id, split: search.session };
+  function renderPanel() {
+    return (
+      <RailPanel
+        draftActive={draftActive}
+        deletePending={deleteMutation.isPending}
+        isError={sessionsQuery.isError}
+        isLoading={sessionsQuery.isLoading}
+        selectedSessionID={selectedSessionID}
+        sessions={sessions}
+        token={token}
+        onCreate={() => {
+          void navigate({
+            to: "/",
+            search: (prev) => {
+              const next = { ...(prev as AppSearch), draft: "1" };
+              delete next.session;
+              return next;
+            },
+          });
+        }}
+        onDelete={(id) => deleteMutation.mutate(id)}
+        onRename={(id, title) => renameMutation.mutate({ id, title })}
+        onOpenSplit={(id) => {
+          // 当前主 pane 的会话不重复开分屏
+          void navigate({
+            to: "/",
+            search: (prev) => {
+              const search = prev as AppSearch;
+              return search.session === id ? search : { ...search, split: id };
+            },
+          });
+        }}
+        onPinChange={changePinned}
+        onRefetch={() => void sessionsQuery.refetch()}
+        onSelect={(id) => {
+          void navigate({
+            to: "/",
+            search: (prev) => {
+              const search = prev as AppSearch;
+              // 点中已在分屏里的会话:与主 pane 交换,两个都保持可见
+              if (search.split === id && search.session) {
+                const next = { ...search, session: id, split: search.session };
+                delete next.draft;
+                return next;
+              }
+              const next = { ...search, session: id };
               delete next.draft;
               return next;
-            }
-            const next = { ...search, session: id };
-            delete next.draft;
-            return next;
-          },
-        });
-      }}
-    />
-  );
+            },
+          });
+        }}
+      />
+    );
+  }
 
   // 统一侧栏按钮:展开/收起都固定在同一个窗口位置。展开态 rail 自身不再放第二个按钮。
   const popoverAlignOffset = collapsed ? -(readTrafficInsetPx() + popoverAlignNudgePx) : 0;
@@ -305,23 +306,20 @@ export function SessionRail({
           <PopoverContent
             align="start"
             alignOffset={popoverAlignOffset}
-            className="flex h-[min(34rem,calc(100vh-var(--toolbar-h)-1.5rem))] max-h-[calc(100vh-var(--toolbar-h)-1.5rem)] w-[260px] flex-col p-0"
+            className="flex h-[min(48rem,calc(100vh-var(--toolbar-h)-1.5rem))] max-h-[calc(100vh-var(--toolbar-h)-1.5rem)] w-[260px] flex-col p-0"
             side="bottom"
             sideOffset={11}
             onMouseEnter={hover.cancelClose}
             onMouseLeave={hover.scheduleClose}
-            onPointerDownCapture={hover.pin}
             onFocusOutside={(event) => event.preventDefault()}
             onInteractOutside={(event) => {
-              // 主题/语言下拉的菜单 portal 在 popover DOM 之外,
-              // Radix 会误判为"点击外部";命中 popper 容器时拦下关闭
               const target = event.target as HTMLElement | null;
-              if (target?.closest("[data-radix-popper-content-wrapper]")) {
+              if (isRailPopoverPortalTarget(target)) {
                 event.preventDefault();
               }
             }}
           >
-            {panel}
+            {renderPanel()}
           </PopoverContent>
         ) : null}
       </Popover>
@@ -346,7 +344,7 @@ export function SessionRail({
             className="h-(--toolbar-h) shrink-0 transition-[padding] duration-200"
             style={{ paddingLeft: "var(--traffic-inset)" }}
           />
-          {panel}
+          {renderPanel()}
         </div>
       </aside>
     </>
@@ -358,6 +356,19 @@ function readTrafficInsetPx() {
     return 0;
   }
   return Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--traffic-inset")) || 0;
+}
+
+function isRailPopoverPortalTarget(target: HTMLElement | null) {
+  return Boolean(
+    target?.closest(
+      [
+        "[data-radix-popper-content-wrapper]", // dropdown/select/tooltip portal
+        "[role=dialog]", // settings/delete dialogs
+        "[data-slot=dialog-content]",
+        "[data-slot=alert-dialog-content]",
+      ].join(","),
+    ),
+  );
 }
 
 function sortPinnedSessions(sessions: Session[]) {
@@ -382,7 +393,6 @@ function sessionActivityTime(session: Session) {
 function useHoverPopover(closeDelay = 160) {
   const [open, setOpen] = useState(false);
   const closeTimer = useRef<number | null>(null);
-  const pinnedRef = useRef(false);
   const suppressRef = useRef(false);
 
   function cancelClose() {
@@ -410,25 +420,15 @@ function useHoverPopover(closeDelay = 160) {
     },
     scheduleClose() {
       suppressRef.current = false; // 鼠标离开过一次,恢复 hover 弹出
-      if (pinnedRef.current) {
-        return;
-      }
       cancelClose();
       closeTimer.current = window.setTimeout(() => setOpen(false), closeDelay);
     },
     cancelClose,
-    pin() {
-      pinnedRef.current = true;
-      cancelClose();
-    },
     suppressUntilLeave() {
       suppressRef.current = true;
     },
     handleOpenChange(next: boolean) {
       setOpen(next);
-      if (!next) {
-        pinnedRef.current = false;
-      }
     },
   };
 }
@@ -487,6 +487,9 @@ function RailPanel({
   const dragPreviewRef = useRef<HTMLDivElement | null>(null);
   const dragPreviewPointRef = useRef({ x: 0, y: 0 });
   const dragPreviewFrameRef = useRef<number | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const autoScrollFrameRef = useRef<number | null>(null);
+  const autoScrollPointerRef = useRef<{ x: number; y: number } | null>(null);
   const pinnedSessions = sortPinnedSessions(sessions.filter((session) => session.pinned));
   const recentSessions = sessions.filter((session) => !session.pinned);
   const showPinnedGroup = pinnedSessions.length > 0 || Boolean(draggingSessionID);
@@ -508,6 +511,9 @@ function RailPanel({
       if (dragPreviewFrameRef.current !== null) {
         window.cancelAnimationFrame(dragPreviewFrameRef.current);
       }
+      if (autoScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(autoScrollFrameRef.current);
+      }
     };
   }, []);
 
@@ -516,6 +522,11 @@ function RailPanel({
       window.cancelAnimationFrame(dragPreviewFrameRef.current);
       dragPreviewFrameRef.current = null;
     }
+    if (autoScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(autoScrollFrameRef.current);
+      autoScrollFrameRef.current = null;
+    }
+    autoScrollPointerRef.current = null;
     setDraggingSessionID(null);
     setDragTarget(null);
     setDragPreview(null);
@@ -532,6 +543,44 @@ function RailPanel({
         dragPreviewRef.current.style.transform = dragPreviewTransform(clientX, clientY);
       }
     });
+  }
+
+  function scheduleDragAutoScroll(clientX: number, clientY: number) {
+    autoScrollPointerRef.current = { x: clientX, y: clientY };
+    if (autoScrollFrameRef.current !== null) {
+      return;
+    }
+    autoScrollFrameRef.current = window.requestAnimationFrame(runDragAutoScroll);
+  }
+
+  function runDragAutoScroll() {
+    autoScrollFrameRef.current = null;
+    const pointer = autoScrollPointerRef.current;
+    const container = scrollContainerRef.current;
+    if (!pointer || !container) {
+      return;
+    }
+    const rect = container.getBoundingClientRect();
+    if (pointer.x < rect.left - dragAutoScrollEdgePx || pointer.x > rect.right + dragAutoScrollEdgePx) {
+      return;
+    }
+    let delta = 0;
+    if (pointer.y < rect.top + dragAutoScrollEdgePx) {
+      const strength = Math.min(1, (rect.top + dragAutoScrollEdgePx - pointer.y) / dragAutoScrollEdgePx);
+      delta = -Math.ceil(strength * dragAutoScrollMaxStepPx);
+    } else if (pointer.y > rect.bottom - dragAutoScrollEdgePx) {
+      const strength = Math.min(1, (pointer.y - (rect.bottom - dragAutoScrollEdgePx)) / dragAutoScrollEdgePx);
+      delta = Math.ceil(strength * dragAutoScrollMaxStepPx);
+    }
+    if (delta === 0) {
+      return;
+    }
+    const previousScrollTop = container.scrollTop;
+    container.scrollTop += delta;
+    if (container.scrollTop !== previousScrollTop) {
+      setDragTarget(findDropTarget(pointer.x, pointer.y));
+      autoScrollFrameRef.current = window.requestAnimationFrame(runDragAutoScroll);
+    }
   }
 
   function findDropTarget(clientX: number, clientY: number): SessionDropTarget | null {
@@ -568,6 +617,7 @@ function RailPanel({
 
   function handlePointerDragMove(clientX: number, clientY: number) {
     moveDragPreview(clientX, clientY);
+    scheduleDragAutoScroll(clientX, clientY);
     setDragTarget(findDropTarget(clientX, clientY));
   }
 
@@ -636,7 +686,7 @@ function RailPanel({
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarHeader>
-        <SidebarContent className="py-2 overscroll-contain">
+        <SidebarContent ref={scrollContainerRef} className="py-2 overscroll-contain">
           {isLoading ? (
             <SessionListSkeleton />
           ) : isError ? (
@@ -854,6 +904,7 @@ function SessionItems({
             running={session.running || Boolean(runningTurns[session.id])}
             selected={session.id === selectedSessionID}
             session={session}
+            suppressInteractiveState={Boolean(draggingSessionID)}
             onDelete={() => onDelete(session.id)}
             onOpenSplit={() => onOpenSplit(session.id)}
             onPinChange={(pinned) => onPinChange(session.id, pinned)}
@@ -888,6 +939,7 @@ type SessionItemProps = {
   selected: boolean;
   running: boolean;
   deletePending: boolean;
+  suppressInteractiveState: boolean;
   onSelect: () => void;
   onOpenSplit: () => void;
   onPinChange: (pinned: boolean) => void;
@@ -904,6 +956,7 @@ function SessionItem({
   selected,
   running,
   deletePending,
+  suppressInteractiveState,
   onSelect,
   onOpenSplit,
   onPinChange,
@@ -944,6 +997,10 @@ function SessionItem({
     inputRef.current?.focus();
     inputRef.current?.select();
   }, [editing]);
+
+  function selectSession() {
+    onSelect();
+  }
 
   function startEditing() {
     setDraft(session.title);
@@ -1074,7 +1131,7 @@ function SessionItem({
   }
 
   return (
-    <SidebarMenuItem>
+    <SidebarMenuItem className={suppressInteractiveState ? "pointer-events-none" : undefined}>
       {editing ? (
         <SidebarMenuButton
           asChild
@@ -1106,11 +1163,15 @@ function SessionItem({
       ) : (
         <SidebarMenuButton
           asChild
-          className="pr-11 data-active:font-normal group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-has-data-[sidebar=menu-action]/menu-item:pr-11"
+          className={cn(
+            "pr-11 data-active:font-normal group-has-data-[sidebar=menu-action]/menu-item:pr-11",
+            suppressInteractiveState
+              ? "hover:bg-transparent hover:text-sidebar-foreground active:bg-transparent active:text-sidebar-foreground"
+              : "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground",
+          )}
           isActive={selected || actionsOpen}
         >
           <button
-            className="cursor-grab active:cursor-grabbing"
             data-session-item-id={session.id}
             type="button"
             onClick={(event) => {
@@ -1119,10 +1180,11 @@ function SessionItem({
                 event.stopPropagation();
                 return;
               }
-              onSelect();
+              selectSession();
             }}
             onDoubleClick={(event) => {
               event.preventDefault();
+              event.stopPropagation();
               startEditing();
             }}
             onPointerCancel={cancelPointerDrag}
@@ -1141,7 +1203,8 @@ function SessionItem({
         <>
           <SidebarMenuBadge
             className={cn(
-              "right-2 min-w-0 px-0 font-normal text-muted-foreground group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0",
+              "right-2 min-w-0 px-0 font-normal text-muted-foreground",
+              !suppressInteractiveState && "group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0",
               actionsOpen && "opacity-0",
             )}
           >
@@ -1153,6 +1216,8 @@ function SessionItem({
                 aria-label={t("session.actions")}
                 className={cn(
                   "right-1.5 rounded-sm bg-transparent text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-0",
+                  suppressInteractiveState &&
+                    "group-hover/menu-item:opacity-0 hover:bg-transparent hover:text-muted-foreground md:opacity-0",
                   actionsOpen && "opacity-100 md:opacity-100",
                 )}
                 showOnHover

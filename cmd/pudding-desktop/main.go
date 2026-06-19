@@ -118,7 +118,7 @@ func main() {
 	var hideAfterFullscreenExit atomic.Bool
 	if runtime.GOOS == "darwin" {
 		bindMacWindowEvents(window, &hideAfterFullscreenExit, func() {
-			themeManager.apply(true)
+			themeManager.apply(false)
 		})
 	}
 

@@ -126,7 +126,7 @@
     --mascot-antenna: oklch(0.55 0.22 277);
     --mascot-antenna-stroke: oklch(0.74 0.13 277);
     --mascot-side-shade: oklch(0.3 0.18 277);
-    --mascot-shadow: oklch(0.52 0.18 277 / 18%);
+    --mascot-shadow: oklch(0.52 0.18 277 / 13%);
 }
 
 html[data-shell="mac"] {
@@ -237,7 +237,7 @@ html[data-shell] .pudding-markdown * {
     --mascot-antenna: oklch(0.6 0.2 277);
     --mascot-antenna-stroke: oklch(0.77 0.11 277);
     --mascot-side-shade: oklch(0.34 0.16 277);
-    --mascot-shadow: oklch(0.68 0.12 277 / 20%);
+    --mascot-shadow: oklch(0.46 0.05 277 / 14%);
 }
 
 [data-slot="dialog-overlay"],

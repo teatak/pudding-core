@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type CSSProperties } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, type CSSProperties } from "react";
 
 type MascotProps = {
   className?: string;
@@ -226,17 +226,23 @@ export function Mascot({
     onPointerGazeRef.current = onPointerGaze;
   }, [onPointerGaze]);
 
-  useEffect(() => {
-    const onMove = (event: MouseEvent) => {
+  useLayoutEffect(() => {
+    const onPointerMove = (event: PointerEvent) => {
+      onPointerGazeRef.current?.();
+      setTargetFromPoint(event.clientX, event.clientY);
+    };
+    const onMouseMove = (event: MouseEvent) => {
       onPointerGazeRef.current?.();
       setTargetFromPoint(event.clientX, event.clientY);
     };
 
     applyPose(0, 0);
-    window.addEventListener("mousemove", onMove, { passive: true });
+    window.addEventListener("pointermove", onPointerMove, { capture: true, passive: true });
+    window.addEventListener("mousemove", onMouseMove, { capture: true, passive: true });
     return () => {
       if (rafRef.current) window.cancelAnimationFrame(rafRef.current);
-      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("pointermove", onPointerMove, { capture: true });
+      window.removeEventListener("mousemove", onMouseMove, { capture: true });
     };
   }, []);
 
