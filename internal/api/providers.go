@@ -19,44 +19,44 @@ import (
 // providerProfileView 是 profile 的响应形状:api_key 存在本地配置中,
 // 允许设置界面编辑时回显;apiKeySet 用于列表状态点。
 type providerProfileView struct {
-	ID        string                `json:"id"`
-	Name      string                `json:"name"`
-	Brand     string                `json:"brand,omitempty"`
-	Type      string                `json:"type"`
-	BaseURL   string                `json:"baseURL"`
-	APIKey    string                `json:"apiKey,omitempty"`
-	APIKeySet bool                  `json:"apiKeySet"`
-	Models    []store.ProviderModel `json:"models"`
+	ID          string                `json:"id"`
+	DisplayName string                `json:"displayName"`
+	Brand       string                `json:"brand,omitempty"`
+	Protocol    string                `json:"protocol"`
+	BaseURL     string                `json:"baseURL"`
+	APIKey      string                `json:"apiKey,omitempty"`
+	APIKeySet   bool                  `json:"apiKeySet"`
+	Models      []store.ProviderModel `json:"models"`
 }
 
 func viewProfile(p *store.ProviderProfile) providerProfileView {
 	return providerProfileView{
-		ID:        p.ProfileID(),
-		Name:      p.DisplayName(),
-		Brand:     strings.TrimSpace(p.Brand),
-		Type:      p.Type,
-		BaseURL:   p.BaseURL,
-		APIKey:    p.APIKey,
-		APIKeySet: config.EffectiveAPIKey(p) != "",
-		Models:    append([]store.ProviderModel{}, p.Models...),
+		ID:          p.ProfileID(),
+		DisplayName: p.DisplayLabel(),
+		Brand:       strings.TrimSpace(p.Brand),
+		Protocol:    p.Protocol,
+		BaseURL:     p.BaseURL,
+		APIKey:      p.APIKey,
+		APIKeySet:   config.EffectiveAPIKey(p) != "",
+		Models:      append([]store.ProviderModel{}, p.Models...),
 	}
 }
 
 type createProfileReq struct {
-	ID      string                `json:"id"`
-	Name    string                `json:"name"`
-	Brand   string                `json:"brand"`
-	Type    string                `json:"type"`
-	BaseURL string                `json:"baseURL"`
-	APIKey  string                `json:"apiKey"`
-	Models  []store.ProviderModel `json:"models"`
+	ID          string                `json:"id"`
+	DisplayName string                `json:"displayName"`
+	Brand       string                `json:"brand"`
+	Protocol    string                `json:"protocol"`
+	BaseURL     string                `json:"baseURL"`
+	APIKey      string                `json:"apiKey"`
+	Models      []store.ProviderModel `json:"models"`
 }
 
 type patchProfileReq struct {
-	Name    *string `json:"name"`
-	Brand   *string `json:"brand"`
-	Type    *string `json:"type"`
-	BaseURL *string `json:"baseURL"`
+	DisplayName *string `json:"displayName"`
+	Brand       *string `json:"brand"`
+	Protocol    *string `json:"protocol"`
+	BaseURL     *string `json:"baseURL"`
 	// APIKey 传非空才覆盖;清除 key 走 DELETE 后重建。
 	APIKey *string                `json:"apiKey"`
 	Models *[]store.ProviderModel `json:"models"`
@@ -95,8 +95,8 @@ func (s *Server) createProvider(c *cart.Context) error {
 	if req.ID == "" || strings.ContainsAny(req.ID, "/ ") {
 		return badRequest(c, "id is required and must not contain '/' or spaces")
 	}
-	if !registry.SupportedType(req.Type) {
-		return badRequest(c, "unsupported type: "+req.Type)
+	if !registry.SupportedProtocol(req.Protocol) {
+		return badRequest(c, "unsupported protocol: "+req.Protocol)
 	}
 	ctx := c.Request.Context()
 	cfg, ok := s.providerConfig(c)
@@ -108,16 +108,16 @@ func (s *Server) createProvider(c *cart.Context) error {
 		return nil
 	}
 	p := &store.ProviderProfile{
-		ID:      req.ID,
-		Name:    strings.TrimSpace(req.Name),
-		Brand:   strings.TrimSpace(req.Brand),
-		Type:    req.Type,
-		BaseURL: strings.TrimRight(req.BaseURL, "/"),
-		APIKey:  req.APIKey,
-		Models:  cleanModels(req.Models),
+		ID:          req.ID,
+		DisplayName: strings.TrimSpace(req.DisplayName),
+		Brand:       strings.TrimSpace(req.Brand),
+		Protocol:    req.Protocol,
+		BaseURL:     strings.TrimRight(req.BaseURL, "/"),
+		APIKey:      req.APIKey,
+		Models:      cleanModels(req.Models),
 	}
-	if p.Name == "" {
-		p.Name = p.ID
+	if p.DisplayName == "" {
+		p.DisplayName = p.ID
 	}
 	if err := cfg.PutProviderProfile(ctx, p); err != nil {
 		return s.fail(c, err)
@@ -155,20 +155,20 @@ func (s *Server) patchProvider(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
-	if req.Name != nil {
-		p.Name = strings.TrimSpace(*req.Name)
-		if p.Name == "" {
-			p.Name = p.ProfileID()
+	if req.DisplayName != nil {
+		p.DisplayName = strings.TrimSpace(*req.DisplayName)
+		if p.DisplayName == "" {
+			p.DisplayName = p.ProfileID()
 		}
 	}
 	if req.Brand != nil {
 		p.Brand = strings.TrimSpace(*req.Brand)
 	}
-	if req.Type != nil {
-		if !registry.SupportedType(*req.Type) {
-			return badRequest(c, "unsupported type: "+*req.Type)
+	if req.Protocol != nil {
+		if !registry.SupportedProtocol(*req.Protocol) {
+			return badRequest(c, "unsupported protocol: "+*req.Protocol)
 		}
-		p.Type = *req.Type
+		p.Protocol = *req.Protocol
 	}
 	if req.BaseURL != nil {
 		p.BaseURL = strings.TrimRight(*req.BaseURL, "/")
@@ -212,7 +212,7 @@ func cleanModels(models []store.ProviderModel) []store.ProviderModel {
 	seen := map[string]bool{}
 	for _, m := range models {
 		m.ID = strings.TrimSpace(m.ID)
-		m.Name = strings.TrimSpace(m.Name)
+		m.DisplayName = strings.TrimSpace(m.DisplayName)
 		if m.ID == "" || seen[m.ID] {
 			continue
 		}
@@ -222,7 +222,7 @@ func cleanModels(models []store.ProviderModel) []store.ProviderModel {
 	return out
 }
 
-// 模型目录代理:按 profile type 转发真实端点的模型列表,短缓存。
+// 模型目录代理:按 profile protocol 转发真实端点的模型列表,短缓存。
 // 上游失败回 502,前端回落 presets 静态清单(docs/design.md 第 4 节)。
 const modelsCacheTTL = 60 * time.Second
 
@@ -248,7 +248,7 @@ func (s *Server) listProviderModels(c *cart.Context) error {
 	}
 
 	apiKey := config.EffectiveAPIKey(p)
-	cacheKey := p.ProfileID() + "\x00" + p.Type + "\x00" + p.BaseURL + "\x00" + apiKey
+	cacheKey := p.ProfileID() + "\x00" + p.Protocol + "\x00" + p.BaseURL + "\x00" + apiKey
 	modelsCacheMu.Lock()
 	if entry, ok := modelsCache[cacheKey]; ok && time.Since(entry.at) < modelsCacheTTL {
 		modelsCacheMu.Unlock()
@@ -260,7 +260,7 @@ func (s *Server) listProviderModels(c *cart.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 	var models []string
-	switch p.Type {
+	switch p.Protocol {
 	case registry.TypeOpenAICompatible, registry.TypeOpenAIResponses:
 		models, err = openai.ListModels(ctx, openai.Config{BaseURL: p.BaseURL, APIKey: apiKey})
 	case registry.TypeGoogle:
@@ -268,7 +268,7 @@ func (s *Server) listProviderModels(c *cart.Context) error {
 	case registry.TypeAnthropic:
 		models, err = anthropic.ListModels(ctx, anthropic.Config{BaseURL: p.BaseURL, APIKey: apiKey})
 	default:
-		return badRequest(c, "unsupported type: "+p.Type)
+		return badRequest(c, "unsupported protocol: "+p.Protocol)
 	}
 	if err != nil {
 		c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})

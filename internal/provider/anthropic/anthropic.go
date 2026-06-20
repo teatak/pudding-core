@@ -121,10 +121,13 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 		System:    req.System,
 		Messages:  make([]message, 0, len(req.Messages)),
 	}
-	if v, ok := provider.IntOption(req.Config.Anthropic, "max_tokens", "max_output_tokens"); ok {
+	opts := req.Config.AnthropicOptions()
+	if v, ok := req.Config.MaxOutputTokens(); ok {
+		body.MaxTokens = v
+	} else if v, ok := provider.IntOption(opts, "max_tokens", "max_output_tokens"); ok {
 		body.MaxTokens = v
 	}
-	if v, ok := provider.FloatOption(req.Config.Anthropic, "temperature"); ok {
+	if v, ok := provider.FloatOption(opts, "temperature"); ok {
 		body.Temperature = &v
 	}
 	if len(req.Tools) > 0 {

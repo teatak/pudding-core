@@ -17,7 +17,7 @@
 
 ## 1. 现状
 
-- **存储**:SQLite `provider_profiles { name, type, base_url, api_key,
+- **存储**:早期讨论里是 SQLite `provider_profiles { name, type, base_url, api_key,
   models[]string, extra(JSON) }`。`models` 只是模型 id 字符串列表,
   **没有 per-model 参数**。
 - **preset**(`web/src/provider/presets.ts`):选厂商 → 预填 `baseURL` +

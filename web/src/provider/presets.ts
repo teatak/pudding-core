@@ -12,13 +12,13 @@ export type ProviderPresetId =
   | "openrouter"
   | "ollama";
 
-export type ProviderPresetType = "openai-compatible" | "openai-responses" | "google" | "anthropic";
+export type ProviderPresetProtocol = "openai-compatible" | "openai-responses" | "google" | "anthropic";
 
 export type ProviderPresetVariant = {
   id: string;
   label: string;
   description: string;
-  type: ProviderPresetType;
+  protocol: ProviderPresetProtocol;
   baseURL: string;
   models: ProviderModel[];
   apiKeyOptional?: boolean;
@@ -32,6 +32,12 @@ export type ProviderPreset = {
   apiKeyURL?: string;
   defaultVariantId: string;
   variants: ProviderPresetVariant[];
+};
+
+type ProviderModelPatch = Omit<ProviderModel, "id" | "limits" | "providerOptions"> & {
+  openai?: Record<string, unknown>;
+  google?: Record<string, unknown>;
+  anthropic?: Record<string, unknown>;
 };
 
 const DEEPSEEK_OPENAI_MODELS = [
@@ -94,7 +100,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "openai",
         label: "OpenAI Compatible",
         description: "https://api.deepseek.com",
-        type: "openai-compatible",
+        protocol: "openai-compatible",
         baseURL: "https://api.deepseek.com",
         models: DEEPSEEK_OPENAI_MODELS,
       },
@@ -102,7 +108,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "anthropic",
         label: "Anthropic Compatible",
         description: "https://api.deepseek.com/anthropic",
-        type: "anthropic",
+        protocol: "anthropic",
         baseURL: "https://api.deepseek.com/anthropic",
         models: DEEPSEEK_ANTHROPIC_MODELS,
         profileName: "DeepSeek Anthropic",
@@ -120,7 +126,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "default",
         label: "OpenAI Compatible",
         description: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        type: "openai-compatible",
+        protocol: "openai-compatible",
         baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
         models: QWEN_OPENAI_MODELS,
       },
@@ -128,7 +134,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "anthropic",
         label: "Anthropic Compatible",
         description: "https://dashscope.aliyuncs.com/apps/anthropic",
-        type: "anthropic",
+        protocol: "anthropic",
         baseURL: "https://dashscope.aliyuncs.com/apps/anthropic",
         models: QWEN_ANTHROPIC_MODELS,
         profileName: "Qwen Anthropic",
@@ -146,7 +152,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "standard-openai",
         label: "标准 API / OpenAI",
         description: "api.xiaomimimo.com/v1 · 按 token 计费",
-        type: "openai-compatible",
+        protocol: "openai-compatible",
         baseURL: "https://api.xiaomimimo.com/v1",
         models: MIMO_OPENAI_MODELS,
       },
@@ -154,7 +160,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "standard-anthropic",
         label: "标准 API / Anthropic",
         description: "api.xiaomimimo.com/anthropic · 按 token 计费",
-        type: "anthropic",
+        protocol: "anthropic",
         baseURL: "https://api.xiaomimimo.com/anthropic",
         models: MIMO_ANTHROPIC_MODELS,
         profileName: "MiMo Anthropic",
@@ -163,7 +169,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "plan-openai",
         label: "Plan / OpenAI",
         description: "token-plan-cn.xiaomimimo.com/v1 · 订阅会员",
-        type: "openai-compatible",
+        protocol: "openai-compatible",
         baseURL: "https://token-plan-cn.xiaomimimo.com/v1",
         models: MIMO_OPENAI_MODELS,
         profileName: "MiMo Plan",
@@ -172,7 +178,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "plan-anthropic",
         label: "Plan / Anthropic",
         description: "token-plan-cn.xiaomimimo.com/anthropic · 订阅会员",
-        type: "anthropic",
+        protocol: "anthropic",
         baseURL: "https://token-plan-cn.xiaomimimo.com/anthropic",
         models: MIMO_ANTHROPIC_MODELS,
         profileName: "MiMo Plan Anthropic",
@@ -190,7 +196,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "default",
         label: "Google API",
         description: "Google AI Studio API",
-        type: "google",
+        protocol: "google",
         baseURL: "",
         models: [
           model("gemini-3.5-flash", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: 0.7, maxOutputTokens: 64_000 } }),
@@ -211,7 +217,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "responses",
         label: "Responses API",
         description: "https://api.openai.com/v1/responses",
-        type: "openai-responses",
+        protocol: "openai-responses",
         baseURL: "https://api.openai.com/v1",
         models: OPENAI_MODELS,
       },
@@ -219,7 +225,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "compatible",
         label: "OpenAI Compatible",
         description: "https://api.openai.com/v1/chat/completions",
-        type: "openai-compatible",
+        protocol: "openai-compatible",
         baseURL: "https://api.openai.com/v1",
         models: OPENAI_MODELS,
         profileName: "OpenAI Compatible",
@@ -237,7 +243,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "default",
         label: "Messages API",
         description: "https://api.anthropic.com",
-        type: "anthropic",
+        protocol: "anthropic",
         baseURL: "https://api.anthropic.com",
         models: [
           model("claude-opus-4-8", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 128_000, temperature: 0.7 } }),
@@ -258,7 +264,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "default",
         label: "OpenAI Compatible",
         description: "https://api.moonshot.cn/v1",
-        type: "openai-compatible",
+        protocol: "openai-compatible",
         baseURL: "https://api.moonshot.cn/v1",
         models: MOONSHOT_OPENAI_MODELS,
       },
@@ -266,7 +272,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "anthropic",
         label: "Anthropic Compatible",
         description: "https://api.moonshot.ai/anthropic",
-        type: "anthropic",
+        protocol: "anthropic",
         baseURL: "https://api.moonshot.ai/anthropic",
         models: MOONSHOT_ANTHROPIC_MODELS,
         profileName: "Moonshot Anthropic",
@@ -284,7 +290,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "default",
         label: "OpenAI Compatible",
         description: "https://open.bigmodel.cn/api/paas/v4",
-        type: "openai-compatible",
+        protocol: "openai-compatible",
         baseURL: "https://open.bigmodel.cn/api/paas/v4",
         models: ZHIPU_OPENAI_MODELS,
       },
@@ -292,7 +298,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "anthropic",
         label: "Anthropic Compatible",
         description: "https://open.bigmodel.cn/api/anthropic",
-        type: "anthropic",
+        protocol: "anthropic",
         baseURL: "https://open.bigmodel.cn/api/anthropic",
         models: ZHIPU_ANTHROPIC_MODELS,
         profileName: "Zhipu GLM Anthropic",
@@ -310,7 +316,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "default",
         label: "OpenAI Compatible",
         description: "https://openrouter.ai/api/v1",
-        type: "openai-compatible",
+        protocol: "openai-compatible",
         baseURL: "https://openrouter.ai/api/v1",
         models: [
           "openrouter/free",
@@ -334,7 +340,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "default",
         label: "Local OpenAI Compatible",
         description: "http://localhost:11434/v1",
-        type: "openai-compatible",
+        protocol: "openai-compatible",
         baseURL: "http://localhost:11434/v1",
         models: ["llama3.3", "qwen3", "gemma3", "gpt-oss:120b-cloud", "qwen3-coder:480b-cloud"].map((id) => model(id, { capabilities: { tools: true }, openai: { temperature: 0.7 } })),
         apiKeyOptional: true,
@@ -454,6 +460,42 @@ function randomToken(): string {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`.slice(0, PROFILE_ID_RANDOM_CHARS);
 }
 
-function model(id: string, patch: Omit<ProviderModel, "id"> = {}): ProviderModel {
-  return { id, ...patch };
+function model(id: string, patch: ProviderModelPatch = {}): ProviderModel {
+  const { openai, google, anthropic, ...rest } = patch;
+  const maxOutputTokens = numericOption(openai?.max_output_tokens ?? openai?.max_completion_tokens ?? google?.maxOutputTokens ?? anthropic?.max_tokens);
+  const maxToolLoops = numericOption(openai?.max_tool_loops);
+  const cleanOpenAI = omitOptions(openai, ["max_output_tokens", "max_completion_tokens", "max_tool_loops"]);
+  const cleanGoogle = omitOptions(google, ["maxOutputTokens", "max_output_tokens", "max_tokens"]);
+  const cleanAnthropic = omitOptions(anthropic, ["max_tokens", "max_output_tokens"]);
+  return {
+    id,
+    ...rest,
+    limits: maxOutputTokens || maxToolLoops ? { maxOutputTokens, maxToolLoops } : undefined,
+    providerOptions: cleanProviderOptions({
+      openai: cleanOpenAI,
+      google: cleanGoogle,
+      anthropic: cleanAnthropic,
+    }),
+  };
+}
+
+function numericOption(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function omitOptions(options: Record<string, unknown> | undefined, keys: string[]) {
+  if (!options) {
+    return undefined;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(options)) {
+    if (!keys.includes(key) && value !== undefined) {
+      out[key] = value;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function cleanProviderOptions(options: NonNullable<ProviderModel["providerOptions"]>) {
+  return options.openai || options.google || options.anthropic ? options : undefined;
 }

@@ -174,9 +174,6 @@ func firstSentence(s string) string {
 func titlerConfig(base provider.ModelConfig) provider.ModelConfig {
 	cfg := provider.ModelConfig{
 		ContextWindow: base.ContextWindow,
-		OpenAI:        cloneAnyMap(base.OpenAI),
-		Google:        cloneAnyMap(base.Google),
-		Anthropic:     cloneAnyMap(base.Anthropic),
 	}
 	if base.Capabilities != nil {
 		cfg.Capabilities = &provider.ModelCapabilities{
@@ -185,20 +182,22 @@ func titlerConfig(base provider.ModelConfig) provider.ModelConfig {
 			Tools: false,
 		}
 	}
-	if cfg.OpenAI == nil {
-		cfg.OpenAI = map[string]any{}
+	cfg.Limits = &provider.ModelLimits{MaxOutputTokens: titlerMaxOutputTokens}
+	cfg.ProviderOptions = &provider.ModelProviderOptions{
+		OpenAI:    cloneAnyMap(base.OpenAIOptions()),
+		Google:    cloneAnyMap(base.GoogleOptions()),
+		Anthropic: cloneAnyMap(base.AnthropicOptions()),
 	}
-	if cfg.Google == nil {
-		cfg.Google = map[string]any{}
+	if cfg.ProviderOptions.OpenAI == nil {
+		cfg.ProviderOptions.OpenAI = map[string]any{}
 	}
-	if cfg.Anthropic == nil {
-		cfg.Anthropic = map[string]any{}
+	if cfg.ProviderOptions.Google == nil {
+		cfg.ProviderOptions.Google = map[string]any{}
 	}
-	cfg.OpenAI["max_completion_tokens"] = titlerMaxOutputTokens
-	cfg.OpenAI["max_output_tokens"] = titlerMaxOutputTokens
-	cfg.OpenAI["reasoning_effort"] = "low"
-	cfg.Google["maxOutputTokens"] = titlerMaxOutputTokens
-	cfg.Anthropic["max_tokens"] = titlerMaxOutputTokens
+	if cfg.ProviderOptions.Anthropic == nil {
+		cfg.ProviderOptions.Anthropic = map[string]any{}
+	}
+	cfg.ProviderOptions.OpenAI["reasoning_effort"] = "low"
 	return cfg
 }
 

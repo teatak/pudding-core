@@ -203,15 +203,25 @@ func (e *Engine) resolveModel(ctx context.Context, sess *store.Session) (*resolv
 func modelConfigFromEntry(m store.ProviderModel) provider.ModelConfig {
 	cfg := provider.ModelConfig{
 		ContextWindow: m.ContextWindow,
-		OpenAI:        cloneOptions(m.OpenAI),
-		Google:        cloneOptions(m.Google),
-		Anthropic:     cloneOptions(m.Anthropic),
 	}
 	if m.Capabilities != nil {
 		cfg.Capabilities = &provider.ModelCapabilities{
 			Image: m.Capabilities.Image,
 			Audio: m.Capabilities.Audio,
 			Tools: m.Capabilities.Tools,
+		}
+	}
+	if m.Limits != nil {
+		cfg.Limits = &provider.ModelLimits{
+			MaxOutputTokens: m.Limits.MaxOutputTokens,
+			MaxToolLoops:    m.Limits.MaxToolLoops,
+		}
+	}
+	if m.ProviderOptions != nil {
+		cfg.ProviderOptions = &provider.ModelProviderOptions{
+			OpenAI:    cloneOptions(m.ProviderOptions.OpenAI),
+			Google:    cloneOptions(m.ProviderOptions.Google),
+			Anthropic: cloneOptions(m.ProviderOptions.Anthropic),
 		}
 	}
 	return cfg

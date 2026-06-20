@@ -78,9 +78,11 @@ func TestStreamHappyPath(t *testing.T) {
 		Model:  "claude-opus-4-8",
 		System: "be nice",
 		Config: provider.ModelConfig{
-			Anthropic: map[string]any{
-				"max_tokens":  1234,
-				"temperature": 0.4,
+			Limits: &provider.ModelLimits{MaxOutputTokens: 1234},
+			ProviderOptions: &provider.ModelProviderOptions{
+				Anthropic: map[string]any{
+					"temperature": 0.4,
+				},
 			},
 		},
 		Tools: []provider.ToolDef{{

@@ -53,18 +53,18 @@ type SessionUpdate struct {
 }
 
 // ProviderProfile 描述一个 LLM 端点实例。新的事实源是 config/profiles.yaml;
-// store 里保留类型是为了让 registry / API / 测试共用契约。
+// store 里保留 provider 配置契约是为了让 registry / API / 测试共用。
 // APIKey 存在本地配置中,API 设置视图会显式映射为 apiKey 用于编辑回显。
 type ProviderProfile struct {
-	ID        string          `json:"id" yaml:"-"`
-	Name      string          `json:"name" yaml:"name,omitempty"`
-	Brand     string          `json:"brand,omitempty" yaml:"brand,omitempty"`
-	Type      string          `json:"type" yaml:"type"` // openai-compatible | openai-responses | google | ...
-	BaseURL   string          `json:"baseURL" yaml:"base_url,omitempty"`
-	APIKey    string          `json:"-" yaml:"api_key,omitempty"`
-	Models    []ProviderModel `json:"models" yaml:"models"`
-	CreatedAt time.Time       `json:"createdAt,omitempty" yaml:"-"`
-	UpdatedAt time.Time       `json:"updatedAt,omitempty" yaml:"-"`
+	ID          string          `json:"id" yaml:"-"`
+	DisplayName string          `json:"displayName" yaml:"display_name,omitempty"`
+	Brand       string          `json:"brand,omitempty" yaml:"brand,omitempty"`
+	Protocol    string          `json:"protocol" yaml:"protocol"` // openai-compatible | openai-responses | google | ...
+	BaseURL     string          `json:"baseURL" yaml:"base_url,omitempty"`
+	APIKey      string          `json:"-" yaml:"api_key,omitempty"`
+	Models      []ProviderModel `json:"models" yaml:"models"`
+	CreatedAt   time.Time       `json:"createdAt,omitempty" yaml:"-"`
+	UpdatedAt   time.Time       `json:"updatedAt,omitempty" yaml:"-"`
 }
 
 func (p *ProviderProfile) ProfileID() string {
@@ -74,15 +74,15 @@ func (p *ProviderProfile) ProfileID() string {
 	if p.ID != "" {
 		return p.ID
 	}
-	return p.Name
+	return p.DisplayName
 }
 
-func (p *ProviderProfile) DisplayName() string {
+func (p *ProviderProfile) DisplayLabel() string {
 	if p == nil {
 		return ""
 	}
-	if p.Name != "" {
-		return p.Name
+	if p.DisplayName != "" {
+		return p.DisplayName
 	}
 	return p.ProfileID()
 }
@@ -135,19 +135,29 @@ func NormalizeSessionUpdate(upd *SessionUpdate) error {
 }
 
 type ProviderModel struct {
-	ID            string         `json:"id" yaml:"id"`
-	Name          string         `json:"name,omitempty" yaml:"name,omitempty"`
-	ContextWindow int            `json:"contextWindow,omitempty" yaml:"context_window,omitempty"`
-	Capabilities  *ModelCaps     `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
-	OpenAI        map[string]any `json:"openai,omitempty" yaml:"openai,omitempty"`
-	Google        map[string]any `json:"google,omitempty" yaml:"google,omitempty"`
-	Anthropic     map[string]any `json:"anthropic,omitempty" yaml:"anthropic,omitempty"`
+	ID              string           `json:"id" yaml:"id"`
+	DisplayName     string           `json:"displayName,omitempty" yaml:"display_name,omitempty"`
+	ContextWindow   int              `json:"contextWindow,omitempty" yaml:"context_window,omitempty"`
+	Capabilities    *ModelCaps       `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
+	Limits          *ModelLimits     `json:"limits,omitempty" yaml:"limits,omitempty"`
+	ProviderOptions *ProviderOptions `json:"providerOptions,omitempty" yaml:"provider_options,omitempty"`
 }
 
 type ModelCaps struct {
 	Image bool `json:"image" yaml:"image"`
 	Audio bool `json:"audio" yaml:"audio"`
 	Tools bool `json:"tools" yaml:"tools"`
+}
+
+type ModelLimits struct {
+	MaxOutputTokens int `json:"maxOutputTokens,omitempty" yaml:"max_output_tokens,omitempty"`
+	MaxToolLoops    int `json:"maxToolLoops,omitempty" yaml:"max_tool_loops,omitempty"`
+}
+
+type ProviderOptions struct {
+	OpenAI    map[string]any `json:"openai,omitempty" yaml:"openai,omitempty"`
+	Google    map[string]any `json:"google,omitempty" yaml:"google,omitempty"`
+	Anthropic map[string]any `json:"anthropic,omitempty" yaml:"anthropic,omitempty"`
 }
 
 type Role string

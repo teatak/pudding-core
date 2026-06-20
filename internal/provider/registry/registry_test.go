@@ -22,10 +22,10 @@ func TestResolveProfileTypesAndCache(t *testing.T) {
 	}
 
 	for _, p := range []*store.ProviderProfile{
-		{Name: "work", Type: TypeOpenAICompatible, BaseURL: "https://example.com/v1", APIKey: "k1"},
-		{Name: "responses", Type: TypeOpenAIResponses, BaseURL: "https://api.openai.com/v1", APIKey: "k1"},
-		{Name: "gem", Type: TypeGoogle, APIKey: "k2"},
-		{Name: "bad", Type: "unknown"},
+		{DisplayName: "work", Protocol: TypeOpenAICompatible, BaseURL: "https://example.com/v1", APIKey: "k1"},
+		{DisplayName: "responses", Protocol: TypeOpenAIResponses, BaseURL: "https://api.openai.com/v1", APIKey: "k1"},
+		{DisplayName: "gem", Protocol: TypeGoogle, APIKey: "k2"},
+		{DisplayName: "bad", Protocol: "unknown"},
 	} {
 		if err := ms.PutProviderProfile(ctx, p); err != nil {
 			t.Fatal(err)
@@ -44,8 +44,8 @@ func TestResolveProfileTypesAndCache(t *testing.T) {
 	if err != nil || gem.Name() != "google" {
 		t.Fatalf("gem: %v %v", gem, err)
 	}
-	if _, err := r.Resolve(ctx, "bad"); err == nil || !strings.Contains(err.Error(), "unsupported type") {
-		t.Fatalf("want unsupported type error, got %v", err)
+	if _, err := r.Resolve(ctx, "bad"); err == nil || !strings.Contains(err.Error(), "unsupported protocol") {
+		t.Fatalf("want unsupported protocol error, got %v", err)
 	}
 
 	// 配置不变 → 复用实例;配置变化 → 重建
@@ -54,7 +54,7 @@ func TestResolveProfileTypesAndCache(t *testing.T) {
 		t.Fatal("unchanged profile must reuse cached client")
 	}
 	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
-		Name: "work", Type: TypeOpenAICompatible, BaseURL: "https://changed.example.com/v1", APIKey: "k1",
+		DisplayName: "work", Protocol: TypeOpenAICompatible, BaseURL: "https://changed.example.com/v1", APIKey: "k1",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestEmptyNameIsRejected(t *testing.T) {
 	}
 
 	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
-		Name: "local", Type: TypeOpenAICompatible, BaseURL: srv.URL,
+		DisplayName: "local", Protocol: TypeOpenAICompatible, BaseURL: srv.URL,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -116,20 +116,20 @@ func TestAPIKeyRequirementAllowsOnlyLocalOpenAICompatible(t *testing.T) {
 	}{
 		{
 			name:    "remote openai-compatible without key",
-			profile: &store.ProviderProfile{Name: "remote-compatible", Type: TypeOpenAICompatible, BaseURL: "https://example.com/v1"},
+			profile: &store.ProviderProfile{DisplayName: "remote-compatible", Protocol: TypeOpenAICompatible, BaseURL: "https://example.com/v1"},
 			wantErr: true,
 		},
 		{
 			name:    "local openai-compatible without key",
-			profile: &store.ProviderProfile{Name: "local-compatible", Type: TypeOpenAICompatible, BaseURL: "http://127.0.0.1:11434/v1"},
+			profile: &store.ProviderProfile{DisplayName: "local-compatible", Protocol: TypeOpenAICompatible, BaseURL: "http://127.0.0.1:11434/v1"},
 		},
 		{
 			name:    "localhost openai-compatible without key",
-			profile: &store.ProviderProfile{Name: "localhost-compatible", Type: TypeOpenAICompatible, BaseURL: "http://localhost:11434/v1"},
+			profile: &store.ProviderProfile{DisplayName: "localhost-compatible", Protocol: TypeOpenAICompatible, BaseURL: "http://localhost:11434/v1"},
 		},
 		{
 			name:    "openai responses without key",
-			profile: &store.ProviderProfile{Name: "responses-no-key", Type: TypeOpenAIResponses, BaseURL: "https://api.openai.com/v1"},
+			profile: &store.ProviderProfile{DisplayName: "responses-no-key", Protocol: TypeOpenAIResponses, BaseURL: "https://api.openai.com/v1"},
 			wantErr: true,
 		},
 	}

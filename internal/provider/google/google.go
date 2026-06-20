@@ -127,10 +127,13 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 	}
 	body := generateRequest{Contents: make([]content, 0, len(req.Messages))}
 	var gen generationConfig
-	if v, ok := provider.FloatOption(req.Config.Google, "temperature"); ok {
+	opts := req.Config.GoogleOptions()
+	if v, ok := provider.FloatOption(opts, "temperature"); ok {
 		gen.Temperature = &v
 	}
-	if v, ok := provider.IntOption(req.Config.Google, "maxOutputTokens", "max_output_tokens", "max_tokens"); ok {
+	if v, ok := req.Config.MaxOutputTokens(); ok {
+		gen.MaxOutputTokens = &v
+	} else if v, ok := provider.IntOption(opts, "maxOutputTokens", "max_output_tokens", "max_tokens"); ok {
 		gen.MaxOutputTokens = &v
 	}
 	if gen.Temperature != nil || gen.MaxOutputTokens != nil {

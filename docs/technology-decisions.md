@@ -214,8 +214,8 @@ Provider 路由:
 - session 选择 LLM 的形状是 `session.provider + session.model`:
   - `provider` 指向一个命名的 **provider profile**(如 `default` / `work` / `local`);
   - `model` 是该 profile 下的模型名。
-- profile 描述一个端点实例:`type`(openai-responses / openai-compatible / google / anthropic / …)
-  + `base_url` + `api_key` 等。同一 type 允许多个 profile
+- profile 描述一个端点实例:`protocol`(openai-responses / openai-compatible / google / anthropic / …)
+  + `base_url` + `api_key` 等。同一 protocol 允许多个 profile
   (OpenAI 官方走 openai-responses;OpenRouter 与本机 Ollama 都是 openai-compatible,
   但是两个 profile)。
 - profile 是实体(有身份与生命周期),不进 SQLite:直接落

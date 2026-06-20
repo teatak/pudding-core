@@ -168,7 +168,7 @@ func TestProvidersCRUDReturnsEditableAPIKey(t *testing.T) {
 	srv, _ := newTestServer(t)
 
 	resp := req(t, http.MethodPost, srv.URL+"/providers", map[string]string{
-		"id": "work", "name": "Work", "type": "openai-compatible",
+		"id": "work", "displayName": "Work", "protocol": "openai-compatible",
 		"baseURL": "https://example.com/v1/", "apiKey": "sk-secret",
 	})
 	if resp.StatusCode != http.StatusCreated {
@@ -187,20 +187,20 @@ func TestProvidersCRUDReturnsEditableAPIKey(t *testing.T) {
 
 	// 重名 409
 	resp = req(t, http.MethodPost, srv.URL+"/providers", map[string]string{
-		"id": "work", "name": "Work 2", "type": "openai-compatible", "baseURL": "https://x.com",
+		"id": "work", "displayName": "Work 2", "protocol": "openai-compatible", "baseURL": "https://x.com",
 	})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("duplicate name must 409, got %d", resp.StatusCode)
 	}
 
-	// 非法 type 400
+	// 非法 protocol 400
 	resp = req(t, http.MethodPost, srv.URL+"/providers", map[string]string{
-		"id": "bad", "name": "Bad", "type": "nope",
+		"id": "bad", "displayName": "Bad", "protocol": "nope",
 	})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("unsupported type must 400, got %d", resp.StatusCode)
+		t.Fatalf("unsupported protocol must 400, got %d", resp.StatusCode)
 	}
 
 	// PATCH:空 apiKey 不覆盖,非空覆盖
@@ -212,10 +212,10 @@ func TestProvidersCRUDReturnsEditableAPIKey(t *testing.T) {
 	if patched["apiKey"] != "sk-secret" {
 		t.Fatalf("empty apiKey must keep stored key: %+v", patched)
 	}
-	resp = req(t, http.MethodPatch, srv.URL+"/providers/work", map[string]any{"type": "google", "apiKey": "g-key"})
+	resp = req(t, http.MethodPatch, srv.URL+"/providers/work", map[string]any{"protocol": "google", "apiKey": "g-key"})
 	patched = decodeJSON[map[string]any](t, resp)
-	if patched["type"] != "google" {
-		t.Fatalf("type patch failed: %+v", patched)
+	if patched["protocol"] != "google" {
+		t.Fatalf("protocol patch failed: %+v", patched)
 	}
 	if patched["apiKey"] != "g-key" {
 		t.Fatalf("apiKey patch failed: %+v", patched)
@@ -254,7 +254,7 @@ func TestProviderModelsProxy(t *testing.T) {
 
 	srv, _ := newTestServer(t)
 	resp := req(t, http.MethodPost, srv.URL+"/providers", map[string]string{
-		"id": "up", "name": "Upstream", "type": "openai-compatible", "baseURL": upstream.URL,
+		"id": "up", "displayName": "Upstream", "protocol": "openai-compatible", "baseURL": upstream.URL,
 	})
 	resp.Body.Close()
 

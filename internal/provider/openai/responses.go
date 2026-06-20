@@ -73,13 +73,16 @@ func (c *ResponsesClient) newRequest(ctx context.Context, req provider.Request) 
 		Store:  boolPtr(false),
 		Input:  make([]responsesInputMessage, 0, len(req.Messages)),
 	}
-	if v, ok := provider.FloatOption(req.Config.OpenAI, "temperature"); ok {
+	opts := req.Config.OpenAIOptions()
+	if v, ok := provider.FloatOption(opts, "temperature"); ok {
 		body.Temperature = &v
 	}
-	if v, ok := provider.IntOption(req.Config.OpenAI, "max_output_tokens", "max_completion_tokens", "max_tokens"); ok {
+	if v, ok := req.Config.MaxOutputTokens(); ok {
+		body.MaxOutputTokens = &v
+	} else if v, ok := provider.IntOption(opts, "max_output_tokens", "max_completion_tokens", "max_tokens"); ok {
 		body.MaxOutputTokens = &v
 	}
-	if v, ok := provider.StringOption(req.Config.OpenAI, "reasoning_effort"); ok {
+	if v, ok := provider.StringOption(opts, "reasoning_effort"); ok {
 		body.Reasoning = &responsesReasoning{Effort: v}
 	}
 	if req.System != "" {

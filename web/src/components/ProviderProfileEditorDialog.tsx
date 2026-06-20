@@ -36,11 +36,11 @@ import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { generateProviderProfileID } from "@/provider/presets";
 
-const providerTypeSchema = z.enum(["openai-compatible", "openai-responses", "google", "anthropic"]);
+const providerProtocolSchema = z.enum(["openai-compatible", "openai-responses", "google", "anthropic"]);
 
 const modelFormSchema = z.object({
   id: z.string().trim().min(1),
-  name: z.string().optional(),
+  displayName: z.string().optional(),
   contextWindow: z.string().optional(),
   image: z.boolean(),
   audio: z.boolean(),
@@ -54,9 +54,9 @@ const modelFormSchema = z.object({
 
 const providerFormSchema = z.object({
   id: z.string().trim().min(1),
-  name: z.string().trim().min(1),
+  displayName: z.string().trim().min(1),
   brand: z.string().optional(),
-  type: providerTypeSchema,
+  protocol: providerProtocolSchema,
   baseURL: z.string().optional(),
   apiKey: z.string().optional(),
   models: z.array(modelFormSchema).min(1),
@@ -92,7 +92,7 @@ export function ProviderProfileEditorDialog({
     defaultValues: emptyProviderProfileForm(),
   });
   const fields = useFieldArray({ control: form.control, name: "models" });
-  const providerType = form.watch("type");
+  const providerProtocol = form.watch("protocol");
   const profileID = form.watch("id");
   const existingIDs = useMemo(() => profiles.map((item) => item.id), [profiles]);
   const showAPIKeyToggle = Boolean(editingID);
@@ -204,7 +204,7 @@ export function ProviderProfileEditorDialog({
                   <FieldLabel className="w-auto cursor-default text-sm font-medium" htmlFor="provider-name">
                     {t("provider.name")}
                   </FieldLabel>
-                  <Input id="provider-name" {...form.register("name")} />
+                  <Input id="provider-name" {...form.register("displayName")} />
                   {form.formState.errors.id?.message ? (
                     <div className="text-xs text-destructive">{form.formState.errors.id.message}</div>
                   ) : null}
@@ -219,11 +219,11 @@ export function ProviderProfileEditorDialog({
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field className="gap-2 rounded-none border-0 bg-transparent p-0 hover:bg-transparent">
-                  <FieldLabel className="w-auto cursor-default text-sm font-medium">{t("provider.type")}</FieldLabel>
+                  <FieldLabel className="w-auto cursor-default text-sm font-medium">{t("provider.protocol")}</FieldLabel>
                   <Select
-                    value={providerType}
+                    value={providerProtocol}
                     onValueChange={(value) =>
-                      form.setValue("type", value as ProviderProfileEditorValue["type"], { shouldDirty: true })
+                      form.setValue("protocol", value as ProviderProfileEditorValue["protocol"], { shouldDirty: true })
                     }
                   >
                     <SelectTrigger className="w-full">
@@ -292,7 +292,7 @@ export function ProviderProfileEditorDialog({
                       canRemove={fields.fields.length > 1}
                       form={form}
                       index={index}
-                      providerType={providerType}
+                      providerProtocol={providerProtocol}
                       onRemove={() => fields.remove(index)}
                     />
                   ))}
@@ -314,13 +314,13 @@ export function ProviderProfileEditorDialog({
 
 function ModelEditor({
   index,
-  providerType,
+  providerProtocol,
   canRemove,
   form,
   onRemove,
 }: {
   index: number;
-  providerType: ProviderProfileEditorValue["type"];
+  providerProtocol: ProviderProfileEditorValue["protocol"];
   canRemove: boolean;
   form: ReturnType<typeof useForm<ProviderProfileEditorValue>>;
   onRemove: () => void;
@@ -349,7 +349,7 @@ function ModelEditor({
           <Input {...form.register(`${prefix}.id`)} />
         </PlainField>
         <PlainField label={t("provider.modelName")}>
-          <Input {...form.register(`${prefix}.name`)} />
+          <Input {...form.register(`${prefix}.displayName`)} />
         </PlainField>
         <PlainField label={t("provider.contextWindow")}>
           <Input inputMode="numeric" {...form.register(`${prefix}.contextWindow`)} />
@@ -366,11 +366,11 @@ function ModelEditor({
         <PlainField label={t("provider.temperature")}>
           <Input inputMode="decimal" placeholder="0.7" {...form.register(`${prefix}.temperature`)} />
         </PlainField>
-        {providerType === "anthropic" ? (
+        {providerProtocol === "anthropic" ? (
           <PlainField label={t("provider.maxOutput")}>
             <Input inputMode="numeric" placeholder="4096" {...form.register(`${prefix}.anthropicMaxTokens`)} />
           </PlainField>
-        ) : providerType === "google" ? (
+        ) : providerProtocol === "google" ? (
           <PlainField label={t("provider.maxOutput")}>
             <Input inputMode="numeric" {...form.register(`${prefix}.maxCompletionTokens`)} />
           </PlainField>
@@ -385,7 +385,7 @@ function ModelEditor({
           </>
         )}
       </div>
-      {providerType !== "anthropic" && providerType !== "google" ? (
+      {providerProtocol !== "anthropic" && providerProtocol !== "google" ? (
         <PlainField className="sm:w-40" label={t("provider.maxToolLoops")}>
           <Input inputMode="numeric" {...form.register(`${prefix}.maxToolLoops`)} />
         </PlainField>
@@ -431,9 +431,9 @@ function CheckField({
 export function emptyProviderProfileForm(id = ""): ProviderProfileEditorValue {
   return {
     id,
-    name: "",
+    displayName: "",
     brand: "",
-    type: "openai-compatible",
+    protocol: "openai-compatible",
     baseURL: "",
     apiKey: "",
     models: [emptyModel()],
@@ -448,7 +448,7 @@ export function cloneProviderProfileForm(
   return {
     ...providerToForm(profile),
     id: generateProviderProfileID(profiles, profile.brand || profile.id || "custom"),
-    name: `${profile.name} ${copySuffix}`,
+    displayName: `${profile.displayName} ${copySuffix}`,
     brand: profile.brand || "",
     apiKey: "",
   };
@@ -457,7 +457,7 @@ export function cloneProviderProfileForm(
 function emptyModel(id = ""): ModelFormValue {
   return {
     id,
-    name: "",
+    displayName: "",
     contextWindow: "",
     image: false,
     audio: false,
@@ -473,9 +473,9 @@ function emptyModel(id = ""): ModelFormValue {
 function providerToForm(profile: ProviderProfile): ProviderProfileEditorValue {
   return {
     id: profile.id,
-    name: profile.name,
+    displayName: profile.displayName,
     brand: profile.brand || "",
-    type: profile.type,
+    protocol: profile.protocol,
     baseURL: profile.baseURL,
     apiKey: profile.apiKey || "",
     models: profile.models.length > 0 ? profile.models.map(modelToForm) : [emptyModel()],
@@ -483,46 +483,46 @@ function providerToForm(profile: ProviderProfile): ProviderProfileEditorValue {
 }
 
 function modelToForm(model: ProviderModel): ModelFormValue {
-  const options = model.openai || model.google || model.anthropic || {};
+  const options = model.providerOptions?.openai || model.providerOptions?.google || model.providerOptions?.anthropic || {};
   return {
     id: model.id,
-    name: model.name || "",
+    displayName: model.displayName || "",
     contextWindow: model.contextWindow ? String(model.contextWindow) : "",
     image: model.capabilities?.image === true,
     audio: model.capabilities?.audio === true,
     tools: model.capabilities?.tools !== false,
     temperature: stringifyOption(options.temperature),
-    reasoningEffort: stringifyOption(model.openai?.reasoning_effort),
-    maxCompletionTokens: stringifyOption(model.openai?.max_completion_tokens ?? model.google?.maxOutputTokens),
-    maxToolLoops: stringifyOption(model.openai?.max_tool_loops),
-    anthropicMaxTokens: stringifyOption(model.anthropic?.max_tokens),
+    reasoningEffort: stringifyOption(model.providerOptions?.openai?.reasoning_effort),
+    maxCompletionTokens: stringifyOption(model.limits?.maxOutputTokens),
+    maxToolLoops: stringifyOption(model.limits?.maxToolLoops),
+    anthropicMaxTokens: stringifyOption(model.limits?.maxOutputTokens),
   };
 }
 
 function cleanCreateProvider(value: ProviderProfileEditorValue) {
   return createProviderRequest.parse({
     id: value.id.trim(),
-    name: value.name.trim(),
+    displayName: value.displayName.trim(),
     brand: value.brand?.trim() || undefined,
-    type: value.type,
+    protocol: value.protocol,
     baseURL: value.baseURL?.trim(),
     apiKey: value.apiKey?.trim(),
-    models: value.models.map((model) => cleanModel(model, value.type)),
+    models: value.models.map((model) => cleanModel(model, value.protocol)),
   });
 }
 
 function cleanPatchProvider(value: ProviderProfileEditorValue) {
   return patchProviderRequest.parse({
-    name: value.name.trim(),
+    displayName: value.displayName.trim(),
     brand: value.brand?.trim() || undefined,
-    type: value.type,
+    protocol: value.protocol,
     baseURL: value.baseURL?.trim(),
     apiKey: value.apiKey?.trim() || undefined,
-    models: value.models.map((model) => cleanModel(model, value.type)),
+    models: value.models.map((model) => cleanModel(model, value.protocol)),
   });
 }
 
-function cleanModel(value: ModelFormValue, providerType: ProviderProfileEditorValue["type"]): ProviderModel {
+function cleanModel(value: ModelFormValue, providerProtocol: ProviderProfileEditorValue["protocol"]): ProviderModel {
   const out: ProviderModel = {
     id: value.id.trim(),
     capabilities: {
@@ -531,32 +531,41 @@ function cleanModel(value: ModelFormValue, providerType: ProviderProfileEditorVa
       tools: value.tools,
     },
   };
-  const name = value.name?.trim();
-  if (name) {
-    out.name = name;
+  const displayName = value.displayName?.trim();
+  if (displayName) {
+    out.displayName = displayName;
   }
   const contextWindow = positiveInt(value.contextWindow);
   if (contextWindow) {
     out.contextWindow = contextWindow;
   }
   const temperature = numberValue(value.temperature);
-  if (providerType === "anthropic") {
-    out.anthropic = compactOptions({
-      temperature,
-      max_tokens: positiveInt(value.anthropicMaxTokens),
-    });
-  } else if (providerType === "google") {
-    out.google = compactOptions({
-      temperature,
-      maxOutputTokens: positiveInt(value.maxCompletionTokens),
-    });
+  const maxOutputTokens = providerProtocol === "anthropic" ? positiveInt(value.anthropicMaxTokens) : positiveInt(value.maxCompletionTokens);
+  const maxToolLoops = providerProtocol === "anthropic" || providerProtocol === "google" ? undefined : positiveInt(value.maxToolLoops);
+  if (maxOutputTokens || maxToolLoops) {
+    out.limits = {
+      maxOutputTokens,
+      maxToolLoops,
+    };
+  }
+  if (providerProtocol === "anthropic") {
+    const anthropic = compactOptions({ temperature });
+    if (Object.keys(anthropic).length > 0) {
+      out.providerOptions = { anthropic };
+    }
+  } else if (providerProtocol === "google") {
+    const google = compactOptions({ temperature });
+    if (Object.keys(google).length > 0) {
+      out.providerOptions = { google };
+    }
   } else {
-    out.openai = compactOptions({
+    const openai = compactOptions({
       temperature,
       reasoning_effort: value.reasoningEffort?.trim() || undefined,
-      max_completion_tokens: positiveInt(value.maxCompletionTokens),
-      max_tool_loops: positiveInt(value.maxToolLoops),
     });
+    if (Object.keys(openai).length > 0) {
+      out.providerOptions = { openai };
+    }
   }
   return out;
 }

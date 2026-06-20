@@ -26,9 +26,9 @@ const (
 	TypeAnthropic        = "anthropic"
 )
 
-// SupportedType 报告 profile type 是否有对应的 Client 实现,API 校验用。
-func SupportedType(t string) bool {
-	switch t {
+// SupportedProtocol 报告 profile protocol 是否有对应的 Client 实现,API 校验用。
+func SupportedProtocol(protocol string) bool {
+	switch protocol {
 	case TypeOpenAICompatible, TypeOpenAIResponses, TypeGoogle, TypeAnthropic:
 		return true
 	}
@@ -65,7 +65,7 @@ func (r *Registry) Resolve(ctx context.Context, name string) (provider.Client, e
 	}
 
 	apiKey := config.EffectiveAPIKey(p)
-	fingerprint := p.Type + "\x00" + p.BaseURL + "\x00" + apiKey
+	fingerprint := p.Protocol + "\x00" + p.BaseURL + "\x00" + apiKey
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if c, ok := r.cache[name]; ok && c.fingerprint == fingerprint {
@@ -81,7 +81,7 @@ func (r *Registry) Resolve(ctx context.Context, name string) (provider.Client, e
 
 func build(p *store.ProviderProfile) (provider.Client, error) {
 	apiKey := config.EffectiveAPIKey(p)
-	switch p.Type {
+	switch p.Protocol {
 	case TypeOpenAICompatible:
 		if p.BaseURL == "" {
 			return nil, fmt.Errorf("provider profile %q: base_url is required", p.ProfileID())
@@ -109,7 +109,7 @@ func build(p *store.ProviderProfile) (provider.Client, error) {
 		}
 		return anthropic.New(anthropic.Config{BaseURL: p.BaseURL, APIKey: apiKey}), nil
 	default:
-		return nil, fmt.Errorf("provider profile %q: unsupported type %q", p.ProfileID(), p.Type)
+		return nil, fmt.Errorf("provider profile %q: unsupported protocol %q", p.ProfileID(), p.Protocol)
 	}
 }
 

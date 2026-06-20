@@ -53,10 +53,12 @@ func TestResponsesRequestShape(t *testing.T) {
 		Model:  "model-a",
 		System: "system prompt",
 		Config: provider.ModelConfig{
-			OpenAI: map[string]any{
-				"temperature":           0.3,
-				"max_completion_tokens": 456,
-				"reasoning_effort":      "medium",
+			Limits: &provider.ModelLimits{MaxOutputTokens: 456},
+			ProviderOptions: &provider.ModelProviderOptions{
+				OpenAI: map[string]any{
+					"temperature":      0.3,
+					"reasoning_effort": "medium",
+				},
 			},
 		},
 		Tools: []provider.ToolDef{{

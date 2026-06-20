@@ -83,13 +83,16 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 		Stream:   true,
 		Messages: make([]chatMessage, 0, len(req.Messages)+1),
 	}
-	if v, ok := provider.FloatOption(req.Config.OpenAI, "temperature"); ok {
+	opts := req.Config.OpenAIOptions()
+	if v, ok := provider.FloatOption(opts, "temperature"); ok {
 		body.Temperature = &v
 	}
-	if v, ok := provider.IntOption(req.Config.OpenAI, "max_completion_tokens", "max_tokens"); ok {
+	if v, ok := req.Config.MaxOutputTokens(); ok {
+		body.MaxCompletionTokens = &v
+	} else if v, ok := provider.IntOption(opts, "max_completion_tokens", "max_output_tokens", "max_tokens"); ok {
 		body.MaxCompletionTokens = &v
 	}
-	if v, ok := provider.StringOption(req.Config.OpenAI, "reasoning_effort"); ok {
+	if v, ok := provider.StringOption(opts, "reasoning_effort"); ok {
 		body.ReasoningEffort = v
 	}
 	if req.System != "" {

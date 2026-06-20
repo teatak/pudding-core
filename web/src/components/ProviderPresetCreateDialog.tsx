@@ -171,9 +171,9 @@ export function ProviderPresetCreateDialog({
         token,
         createProviderRequest.parse({
           id: profileID,
-          name: providerPresetProfileName(preset, variant),
+          displayName: providerPresetProfileName(preset, variant),
           brand: preset.id,
-          type: variant.type,
+          protocol: variant.protocol,
           baseURL: variant.baseURL,
           apiKey: apiKey.trim(),
           models: variant.models,
@@ -433,10 +433,10 @@ function providerPresetAccessMethodLabel(
   variant: ProviderPresetVariant,
   t: (key: string) => string,
 ) {
-  if (variant.type === "openai-compatible") {
+  if (variant.protocol === "openai-compatible") {
     return translatePresetText(t, "providerPreset.mimo.protocol.openai.label", "OpenAI");
   }
-  if (variant.type === "anthropic") {
+  if (variant.protocol === "anthropic") {
     return translatePresetText(t, "providerPreset.mimo.protocol.anthropic.label", "Anthropic");
   }
   return providerPresetVariantLabel(preset, variant, t);

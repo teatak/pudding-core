@@ -295,13 +295,16 @@ func TestTurnSnapshotsProviderAndModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
-		Name: "capture", Type: "openai-compatible",
+		DisplayName: "capture", Protocol: "openai-compatible",
 		BaseURL: "http://unused",
 		Models: []store.ProviderModel{{
 			ID:            "snap-model",
 			ContextWindow: 1000,
 			Capabilities:  &store.ModelCaps{Image: true, Audio: false, Tools: true},
-			OpenAI:        map[string]any{"temperature": 0.6, "max_tool_loops": 7},
+			Limits:        &store.ModelLimits{MaxOutputTokens: 8192, MaxToolLoops: 7},
+			ProviderOptions: &store.ProviderOptions{
+				OpenAI: map[string]any{"temperature": 0.6},
+			},
 		}},
 	}); err != nil {
 		t.Fatal(err)
@@ -333,11 +336,11 @@ func TestTurnSnapshotsProviderAndModel(t *testing.T) {
 	if snap.ContextWindow != 1000 || snap.Capabilities == nil || !snap.Capabilities.Image || snap.Capabilities.Audio || !snap.Capabilities.Tools {
 		t.Fatalf("turn config snapshot wrong: %+v", snap)
 	}
-	if v, ok := provider.FloatOption(snap.OpenAI, "temperature"); !ok || v != 0.6 {
-		t.Fatalf("temperature snapshot missing: %+v", snap.OpenAI)
+	if snap.Limits == nil || snap.Limits.MaxOutputTokens != 8192 || snap.Limits.MaxToolLoops != 7 {
+		t.Fatalf("limits snapshot missing: %+v", snap.Limits)
 	}
-	if v, ok := provider.IntOption(snap.OpenAI, "max_tool_loops"); !ok || v != 7 {
-		t.Fatalf("max_tool_loops snapshot missing: %+v", snap.OpenAI)
+	if v, ok := provider.FloatOption(snap.OpenAIOptions(), "temperature"); !ok || v != 0.6 {
+		t.Fatalf("temperature snapshot missing: %+v", snap.OpenAIOptions())
 	}
 
 	select {
@@ -348,8 +351,8 @@ func TestTurnSnapshotsProviderAndModel(t *testing.T) {
 		if req.Config.ContextWindow != snap.ContextWindow {
 			t.Fatalf("request config must use resolved snapshot: %+v", req.Config)
 		}
-		if v, ok := provider.IntOption(req.Config.OpenAI, "max_tool_loops"); !ok || v != 7 {
-			t.Fatalf("request config missing max_tool_loops: %+v", req.Config.OpenAI)
+		if v, ok := req.Config.MaxToolLoops(); !ok || v != 7 {
+			t.Fatalf("request config missing maxToolLoops: %+v", req.Config.Limits)
 		}
 	default:
 		t.Fatal("provider request was not captured")

@@ -17,11 +17,22 @@ export const session = z.object({
 export type Session = z.infer<typeof session>;
 
 // provider profile 的设置视图:apiKey 来自本地配置,编辑时可回显;apiKeySet 用于列表状态。
-export const providerType = z.enum(["openai-compatible", "openai-responses", "google", "anthropic"]);
+export const providerProtocol = z.enum(["openai-compatible", "openai-responses", "google", "anthropic"]);
+
+export const providerModelLimits = z.object({
+  maxOutputTokens: z.number().optional(),
+  maxToolLoops: z.number().optional(),
+});
+
+export const providerModelOptions = z.object({
+  openai: z.record(z.string(), z.unknown()).optional(),
+  google: z.record(z.string(), z.unknown()).optional(),
+  anthropic: z.record(z.string(), z.unknown()).optional(),
+});
 
 export const providerModel = z.object({
   id: z.string(),
-  name: z.string().optional(),
+  displayName: z.string().optional(),
   contextWindow: z.number().optional(),
   capabilities: z
     .object({
@@ -30,17 +41,16 @@ export const providerModel = z.object({
       tools: z.boolean().optional(),
     })
     .optional(),
-  openai: z.record(z.string(), z.unknown()).optional(),
-  google: z.record(z.string(), z.unknown()).optional(),
-  anthropic: z.record(z.string(), z.unknown()).optional(),
+  limits: providerModelLimits.optional(),
+  providerOptions: providerModelOptions.optional(),
 });
 export type ProviderModel = z.infer<typeof providerModel>;
 
 export const providerProfile = z.object({
   id: z.string(),
-  name: z.string(),
+  displayName: z.string(),
   brand: z.string().optional(),
-  type: providerType,
+  protocol: providerProtocol,
   baseURL: z.string(),
   apiKey: z.string().optional(),
   apiKeySet: z.boolean(),
@@ -51,9 +61,9 @@ export type ProviderProfile = z.infer<typeof providerProfile>;
 
 export const createProviderRequest = z.object({
   id: z.string().min(1),
-  name: z.string().min(1),
+  displayName: z.string().min(1),
   brand: z.string().optional(),
-  type: providerType,
+  protocol: providerProtocol,
   baseURL: z.string().optional(),
   apiKey: z.string().optional(),
   models: z.array(providerModel).optional(),
@@ -61,9 +71,9 @@ export const createProviderRequest = z.object({
 
 // apiKey 传非空才覆盖;清除走 DELETE 后重建
 export const patchProviderRequest = z.object({
-  name: z.string().optional(),
+  displayName: z.string().optional(),
   brand: z.string().optional(),
-  type: providerType.optional(),
+  protocol: providerProtocol.optional(),
   baseURL: z.string().optional(),
   apiKey: z.string().optional(),
   models: z.array(providerModel).optional(),

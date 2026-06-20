@@ -333,11 +333,11 @@ function ProviderSettings({ createNonce = 0, token }: { createNonce?: number; to
                 >
                   <div className="flex min-w-0 flex-1 items-center gap-3 text-left">
                     <ItemMedia>
-                      <BrandIcon className="size-9 shrink-0" name={profile.brand || profile.name || profile.id} />
+                      <BrandIcon className="size-9 shrink-0" name={profile.brand || profile.displayName || profile.id} />
                     </ItemMedia>
                     <ItemContent className="min-w-0 gap-0.5">
                       <ItemTitle className="w-full min-w-0 font-normal">
-                        <span className="truncate text-base font-normal">{profile.name}</span>
+                        <span className="truncate text-base font-normal">{profile.displayName}</span>
                         <span
                           className={cn(
                             "size-2 shrink-0 rounded-full",
@@ -347,7 +347,7 @@ function ProviderSettings({ createNonce = 0, token }: { createNonce?: number; to
                         />
                       </ItemTitle>
                       <ItemDescription className="truncate text-xs">
-                        {profile.type} · {modelCountLabel(profile.models.length, t)}
+                        {profile.protocol} · {modelCountLabel(profile.models.length, t)}
                       </ItemDescription>
                     </ItemContent>
                   </div>

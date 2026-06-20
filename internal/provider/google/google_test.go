@@ -68,9 +68,11 @@ func TestStreamHappyPath(t *testing.T) {
 		Model:  "gemini-3-flash",
 		System: "be nice",
 		Config: provider.ModelConfig{
-			Google: map[string]any{
-				"temperature":     0.5,
-				"maxOutputTokens": 2048,
+			Limits: &provider.ModelLimits{MaxOutputTokens: 2048},
+			ProviderOptions: &provider.ModelProviderOptions{
+				Google: map[string]any{
+					"temperature": 0.5,
+				},
 			},
 		},
 		Tools: []provider.ToolDef{{

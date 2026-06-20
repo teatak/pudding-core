@@ -28,13 +28,13 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 | --- | --- | --- | --- |
 | Session | `store.Session` | `session` | id, title, provider, model, createdAt, updatedAt, running(读取时派生) |
 | Message | `store.Message` | `message` | id, sessionID, turnID, role, text, clientMessageID?, interrupted?, createdAt |
-| ProviderProfile(设置视图) | `api.providerProfileView` | `providerProfile` | id, name, type, baseURL, apiKey?, apiKeySet, models |
+| ProviderProfile(设置视图) | `api.providerProfileView` | `providerProfile` | id, displayName, protocol, baseURL, apiKey?, apiKeySet, models |
 
 时间一律 RFC3339 字符串(Go `time.Time` 默认 JSON 编码)。
 
-`type` 是**固定枚举**:`openai-compatible | openai-responses | google | anthropic`。新增 type 必须
-同时落 `registry.SupportedType`(API 校验)、`registry.build`(client 构造)、
-web 契约 `providerProfile.type` 与设置表单下拉;不在枚举内的 type 返回 400。
+`protocol` 是**固定枚举**:`openai-compatible | openai-responses | google | anthropic`。新增 protocol 必须
+同时落 `registry.SupportedProtocol`(API 校验)、`registry.build`(client 构造)、
+web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 protocol 返回 400。
 
 ## REST 请求/响应
 
@@ -52,9 +52,9 @@ web 契约 `providerProfile.type` 与设置表单下拉;不在枚举内的 type 
 | `GET /settings` | — | `{settings: {}}` | — |
 | `PUT /settings` | `{k: v}` | 204 | 400 |
 | `GET /providers` | — | `{providers: []}` | — |
-| `POST /providers` | `{id, name, type, baseURL?, apiKey?, models?}` | 201 profile | 400 / 409 `profile_exists` |
+| `POST /providers` | `{id, displayName, protocol, baseURL?, apiKey?, models?}` | 201 profile | 400 / 409 `profile_exists` |
 | `GET /providers/{name}` | — | profile | 404 |
-| `PATCH /providers/{name}` | `{name?, type?, baseURL?, apiKey?, models?}`,apiKey 非空才覆盖 | 200 profile | 400 / 404 |
+| `PATCH /providers/{name}` | `{displayName?, protocol?, baseURL?, apiKey?, models?}`,apiKey 非空才覆盖 | 200 profile | 400 / 404 |
 | `DELETE /providers/{name}` | — | 204 | 404 |
 | `GET /providers/{name}/models` | — | `{models: []}`(代理真实端点,60s 缓存)。**仅配置表单的候选来源**,选择器只显示 profile.models | 404 / 502 |
 
@@ -77,7 +77,7 @@ session 创建时必须显式写入 `provider` 与 `model`。draft 页可记住"
 历史上的 `model.default` 与 `provider.openai.*` 过渡键已随 registry 收口删除。
 
 provider model entry 形状:
-`{id, name?, contextWindow?, capabilities?, openai?, google?, anthropic?}`。
+`{id, displayName?, contextWindow?, capabilities?, limits?, providerOptions?}`。
 submit 时 engine 解析成 effective model config,随 turn 写入 `turns.model_config`,
 并传入 `provider.Request.Config`;运行中的 turn 不受 profile 后续修改影响。
 

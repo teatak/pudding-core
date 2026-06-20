@@ -116,7 +116,7 @@ export function ModelPicker({ token, session, value, onChange, onResolvedChange,
             <span className="relative z-10 grid size-5 shrink-0 place-items-center overflow-hidden rounded-full">
               {activeBrand && BrandIcon({ name: activeBrand })
                 ? brandIcon
-                : <span className="grid size-5 place-items-center rounded-full bg-background/60 text-[10px] text-foreground">{(activeProfile?.name || currentProfileID).slice(0, 1).toUpperCase()}</span>}
+                : <span className="grid size-5 place-items-center rounded-full bg-background/60 text-[10px] text-foreground">{(activeProfile?.displayName || currentProfileID).slice(0, 1).toUpperCase()}</span>}
             </span>
           ) : null}
           <span className="flex h-5 min-w-0 items-center gap-1 text-foreground/75">
@@ -142,9 +142,9 @@ export function ModelPicker({ token, session, value, onChange, onResolvedChange,
                 <AccordionTrigger className="items-center rounded-md px-2.5 py-1.5 text-sm font-normal text-muted-foreground hover:bg-accent hover:text-foreground hover:no-underline [&_[data-slot=accordion-trigger-icon]]:text-muted-foreground/70">
                   <span className="flex min-w-0 items-center gap-2">
                     <RoundBrandIcon name={providerBrandKey(profile)} />
-                    <span className="truncate">{profile.name}</span>
+                    <span className="truncate">{profile.displayName}</span>
                     <Badge className="h-4 border-muted-foreground/20 bg-transparent px-1.5 text-[9px] font-normal text-muted-foreground/70" variant="outline">
-                      {profile.type}
+                      {profile.protocol}
                     </Badge>
                   </span>
                 </AccordionTrigger>
@@ -185,7 +185,7 @@ function RoundBrandIcon({
 }
 
 function providerBrandKey(profile?: ProviderProfile) {
-  return profile?.brand || profile?.name || profile?.id || "";
+  return profile?.brand || profile?.displayName || profile?.id || "";
 }
 
 function ProfileModels({

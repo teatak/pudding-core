@@ -31,17 +31,62 @@ type Request struct {
 // ModelConfig 是 provider-neutral 的 resolved model 配置快照。各 provider
 // 只读取自己命名空间下支持的字段;未知字段保留在 snapshot 中供后续能力使用。
 type ModelConfig struct {
-	ContextWindow int                `json:"contextWindow,omitempty"`
-	Capabilities  *ModelCapabilities `json:"capabilities,omitempty"`
-	OpenAI        map[string]any     `json:"openai,omitempty"`
-	Google        map[string]any     `json:"google,omitempty"`
-	Anthropic     map[string]any     `json:"anthropic,omitempty"`
+	ContextWindow   int                   `json:"contextWindow,omitempty"`
+	Capabilities    *ModelCapabilities    `json:"capabilities,omitempty"`
+	Limits          *ModelLimits          `json:"limits,omitempty"`
+	ProviderOptions *ModelProviderOptions `json:"providerOptions,omitempty"`
 }
 
 type ModelCapabilities struct {
 	Image bool `json:"image"`
 	Audio bool `json:"audio"`
 	Tools bool `json:"tools"`
+}
+
+type ModelLimits struct {
+	MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
+	MaxToolLoops    int `json:"maxToolLoops,omitempty"`
+}
+
+type ModelProviderOptions struct {
+	OpenAI    map[string]any `json:"openai,omitempty"`
+	Google    map[string]any `json:"google,omitempty"`
+	Anthropic map[string]any `json:"anthropic,omitempty"`
+}
+
+func (c ModelConfig) OpenAIOptions() map[string]any {
+	if c.ProviderOptions == nil {
+		return nil
+	}
+	return c.ProviderOptions.OpenAI
+}
+
+func (c ModelConfig) GoogleOptions() map[string]any {
+	if c.ProviderOptions == nil {
+		return nil
+	}
+	return c.ProviderOptions.Google
+}
+
+func (c ModelConfig) AnthropicOptions() map[string]any {
+	if c.ProviderOptions == nil {
+		return nil
+	}
+	return c.ProviderOptions.Anthropic
+}
+
+func (c ModelConfig) MaxOutputTokens() (int, bool) {
+	if c.Limits == nil || c.Limits.MaxOutputTokens <= 0 {
+		return 0, false
+	}
+	return c.Limits.MaxOutputTokens, true
+}
+
+func (c ModelConfig) MaxToolLoops() (int, bool) {
+	if c.Limits == nil || c.Limits.MaxToolLoops <= 0 {
+		return 0, false
+	}
+	return c.Limits.MaxToolLoops, true
 }
 
 type Role string
