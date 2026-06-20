@@ -108,7 +108,7 @@ export const submitResponse = z.object({
 });
 
 export const listSessionsResponse = z.object({ sessions: z.array(session) });
-export const listMessagesResponse = z.object({ messages: z.array(message) });
+export const listMessagesResponse = z.object({ messages: z.array(message), hasMore: z.boolean() });
 export const settingsResponse = z.object({ settings: z.record(z.string(), z.string()) });
 
 // 409 响应体:submit → turn_running;cancel → no_running_turn;

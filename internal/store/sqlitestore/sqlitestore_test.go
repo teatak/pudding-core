@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -80,6 +81,21 @@ func beginTestTurn(t *testing.T, st store.Store, sessionID, turnID, msgID, clien
 	return res
 }
 
+func appendCompletedTestTurn(t *testing.T, st store.Store, sessionID string, index int) {
+	t.Helper()
+	suffix := strconv.Itoa(index)
+	turnID := "turn_" + suffix
+	beginTestTurn(t, st, sessionID, turnID, "msg_"+suffix, "client_"+suffix)
+	text := "assistant " + suffix
+	if _, err := st.FinishTurn(context.Background(), store.FinishTurnInput{
+		TurnID:        turnID,
+		Status:        store.TurnCompleted,
+		AssistantText: &text,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestBeginTurnIdempotencyPrecedesRunningConflict(t *testing.T) {
 	st, _ := openTestStore(t)
 	createTestSession(t, st, "sess_1")
@@ -112,6 +128,45 @@ func TestBeginTurnIdempotencyPrecedesRunningConflict(t *testing.T) {
 	})
 	if !errors.Is(err, store.ErrTurnRunning) {
 		t.Fatalf("want ErrTurnRunning, got %v", err)
+	}
+}
+
+func TestListMessagesPageUsesStableOrder(t *testing.T) {
+	st, _ := openTestStore(t)
+	createTestSession(t, st, "sess_1")
+	for i := 1; i <= 4; i++ {
+		appendCompletedTestTurn(t, st, "sess_1", i)
+	}
+
+	first, err := st.ListMessagesPage(context.Background(), "sess_1", "", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.HasMore {
+		t.Fatal("first recent page should report older messages")
+	}
+	got := messageIDs(first.Messages)
+	want := []string{"msg_3", "msg_turn_3", "msg_4", "msg_turn_4"}
+	if !sameStrings(got, want) {
+		t.Fatalf("unexpected recent page: got %v want %v", got, want)
+	}
+
+	older, err := st.ListMessagesPage(context.Background(), "sess_1", first.Messages[0].ID, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if older.HasMore {
+		t.Fatal("older page should be exhausted")
+	}
+	got = messageIDs(older.Messages)
+	want = []string{"msg_1", "msg_turn_1", "msg_2", "msg_turn_2"}
+	if !sameStrings(got, want) {
+		t.Fatalf("unexpected older page: got %v want %v", got, want)
+	}
+
+	_, err = st.ListMessagesPage(context.Background(), "sess_1", "missing", 4)
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing before message should return ErrNotFound, got %v", err)
 	}
 }
 
@@ -387,3 +442,23 @@ func TestSchemaDoesNotStoreConfigTables(t *testing.T) {
 }
 
 func strptr(s string) *string { return &s }
+
+func messageIDs(messages []*store.Message) []string {
+	out := make([]string, 0, len(messages))
+	for _, msg := range messages {
+		out = append(out, msg.ID)
+	}
+	return out
+}
+
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

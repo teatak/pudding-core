@@ -1,6 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { ArrowDown, Check, CircleAlert, Copy, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { listMessages, type Message } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
@@ -9,12 +9,14 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useStreamedText } from "@/hooks/useStreamedText";
+import { useTranscriptScroll } from "@/hooks/useTranscriptScroll";
 import { useI18n } from "@/i18n";
 import { renderMarkdown } from "@/lib/markdown";
 import { formatClock } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { type AssistantOverlay, type PendingUserMessage, useOverlayStore } from "@/state/overlayStore";
 
+const MESSAGES_PAGE_SIZE = 50;
 const EMPTY_PENDING: PendingUserMessage[] = [];
 const EMPTY_MESSAGES: Message[] = [];
 
@@ -31,17 +33,26 @@ type TranscriptItem =
 
 export function Transcript({ token, sessionID, submitError }: TranscriptProps) {
   const { t } = useI18n();
-  const scrollViewportRef = useRef<HTMLDivElement | null>(null);
-  const [followingBottom, setFollowingBottom] = useState(true);
   const reconcileMessages = useOverlayStore((state) => state.reconcileMessages);
   const pendingUsersBySession = useOverlayStore((state) => state.pendingUsers);
   const assistantsByID = useOverlayStore((state) => state.assistants);
-  const messagesQuery = useQuery({
+  const messagesQuery = useInfiniteQuery({
     queryKey: queryKeys.messages(sessionID),
-    queryFn: () => listMessages(token, sessionID),
+    queryFn: ({ pageParam }) => listMessages(token, sessionID, { before: pageParam, limit: MESSAGES_PAGE_SIZE }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => {
+      if (!lastPage?.hasMore || !lastPage.messages?.length) {
+        return undefined;
+      }
+      return lastPage.messages[0].id;
+    },
+    getPreviousPageParam: () => undefined,
     enabled: Boolean(token && sessionID),
   });
-  const messages = messagesQuery.data?.messages || EMPTY_MESSAGES;
+  const messages = useMemo(
+    () => messagesQuery.data?.pages.slice().reverse().flatMap((page) => page.messages) || EMPTY_MESSAGES,
+    [messagesQuery.data],
+  );
   const pendingUsers = pendingUsersBySession[sessionID] || EMPTY_PENDING;
   const assistantOverlays = useMemo(
     () => Object.values(assistantsByID).filter((overlay) => overlay.sessionID === sessionID),
@@ -54,41 +65,6 @@ export function Transcript({ token, sessionID, submitError }: TranscriptProps) {
     }
     reconcileMessages(sessionID, messages);
   }, [messages, messagesQuery.isSuccess, reconcileMessages, sessionID]);
-
-  const viewport = useCallback(() => {
-    return scrollViewportRef.current;
-  }, []);
-
-  const scrollToBottom = useCallback(() => {
-    window.requestAnimationFrame(() => {
-      const node = viewport();
-      if (!node) {
-        return;
-      }
-      node.scrollTop = node.scrollHeight;
-      setFollowingBottom(true);
-    });
-  }, [viewport]);
-
-  // followingBottom 的 ref 镜像:供 pinToBottom 在帧回调里读最新值,不吃闭包陈旧。
-  const followingBottomRef = useRef(followingBottom);
-  followingBottomRef.current = followingBottom;
-  // 平滑揭示是逐帧增高的(非逐 delta),贴底跟随必须跟着帧走,否则大 chunk
-  // ease-in 的那段会长在视口外。轻量直写 scrollTop,不重置 followingBottom。
-  const pinToBottom = useCallback(() => {
-    if (!followingBottomRef.current) {
-      return;
-    }
-    const node = viewport();
-    if (node) {
-      node.scrollTop = node.scrollHeight;
-    }
-  }, [viewport]);
-
-  useEffect(() => {
-    setFollowingBottom(true);
-    scrollToBottom();
-  }, [scrollToBottom, sessionID]);
 
   const items = useMemo<TranscriptItem[]>(() => {
     // overlay 在对应 canonical message 出现后退场("等数据到达再清"由 store 对账,
@@ -107,45 +83,51 @@ export function Transcript({ token, sessionID, submitError }: TranscriptProps) {
         .map((overlay) => ({ kind: "assistant" as const, overlay })),
     ];
   }, [assistantOverlays, messages, pendingUsers]);
+  const itemKeys = useMemo(() => items.map(transcriptItemKey), [items]);
+  const scroll = useTranscriptScroll({ itemKeys, sessionID });
+  const { captureAnchor } = scroll;
+  const pendingIDsRef = useRef<Set<string>>(new Set());
+  const topSentinelRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const previous = pendingIDsRef.current;
+    const next = new Set(pendingUsers.map((message) => message.clientMessageID));
+    pendingIDsRef.current = next;
+    if (pendingUsers.some((message) => !previous.has(message.clientMessageID))) {
+      scroll.enterBottomMode({ stabilizeFrames: 1 });
+    }
+  }, [pendingUsers, scroll.enterBottomMode]);
 
   useEffect(() => {
-    const node = viewport();
-    if (!node) {
+    const sentinel = topSentinelRef.current;
+    const root = sentinel?.closest("[data-transcript-viewport]") as HTMLElement | null;
+    if (!sentinel || !messagesQuery.hasNextPage || messagesQuery.isFetchingNextPage) {
       return;
     }
-    const onScroll = () => {
-      const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
-      setFollowingBottom(distance < 48);
-    };
-    node.addEventListener("scroll", onScroll);
-    onScroll();
-    return () => node.removeEventListener("scroll", onScroll);
-  }, [viewport, sessionID]);
-
-  // 窗口/分栏 resize 时内容重排,scrollTop 相对新高度会偏离底部;贴底态下重新滚到底。
-  // ResizeObserver 在 layout 之后回调,scrollHeight 已是重排后新值。
-  // 注:WebKit 下横向 / 快速 resize 的 reflow 可能晚于回调,偶有粘不住——属已知遗留,
-  // 留待后续单独根治。不再堆 rAF / setTimeout 兜底(只会换来肉眼可见的二次跳动 jank);
-  // column-reverse 那条路坑更多(scrollTop 符号、从底锚定漂移),已排除。
-  useEffect(() => {
-    const node = viewport();
-    if (!node) {
+    if (!root) {
       return;
     }
-    const ro = new ResizeObserver(() => {
-      if (followingBottomRef.current) {
-        node.scrollTop = node.scrollHeight;
-      }
-    });
-    ro.observe(node);
-    return () => ro.disconnect();
-  }, [viewport, sessionID]);
-
-  useEffect(() => {
-    if (followingBottom) {
-      scrollToBottom();
-    }
-  }, [followingBottom, items, scrollToBottom]);
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) {
+          return;
+        }
+        if (!messagesQuery.hasNextPage || messagesQuery.isFetchingNextPage) {
+          return;
+        }
+        captureAnchor();
+        void messagesQuery.fetchNextPage();
+      },
+      { root, rootMargin: "160px 0px 0px 0px" },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [
+    captureAnchor,
+    messagesQuery.fetchNextPage,
+    messagesQuery.hasNextPage,
+    messagesQuery.isFetchingNextPage,
+  ]);
 
   if (messagesQuery.isPending) {
     return (
@@ -163,47 +145,104 @@ export function Transcript({ token, sessionID, submitError }: TranscriptProps) {
     // overflow-hidden:WKWebView 下文字字形渲染会溢出滚动 viewport 边界,
     // 在 composer 上沿漏出白色文字边缘,这里裁掉(浏览器无此问题但无害)
     <div className="relative min-h-0 flex-1 overflow-hidden">
-      <div ref={scrollViewportRef} className="h-full overflow-y-auto overscroll-contain">
-        <ChatColumn className="grid gap-4 pt-4 pb-8">
-          {messagesQuery.isError ? (
-            <Alert variant="destructive">
-              <CircleAlert className="h-3.5 w-3.5" />
-              <AlertDescription>{t("transcript.loadFailed")}</AlertDescription>
-            </Alert>
-          ) : null}
-          {items.map((item) => {
-            if (item.kind === "message") {
-              return <MessageItem key={item.message.id} message={item.message} />;
-            }
-            if (item.kind === "pending") {
-              return <PendingUserItem key={item.id} text={item.text} />;
-            }
-            return (
-              <AssistantOverlayItem key={item.overlay.turnID} overlay={item.overlay} onContentGrow={pinToBottom} />
-            );
-          })}
-          {submitError ? (
-            <Alert variant="destructive">
-              <CircleAlert className="h-3.5 w-3.5" />
-              <AlertDescription>{submitError}</AlertDescription>
-            </Alert>
-          ) : null}
-        </ChatColumn>
+      <div
+        ref={scroll.viewportRef}
+        className="h-full overflow-y-auto overscroll-contain"
+        data-transcript-viewport
+      >
+        <div ref={scroll.contentRef}>
+          <ChatColumn className="grid gap-4 pt-4 pb-8">
+            <div ref={topSentinelRef} className="h-px" aria-hidden="true" />
+            {messagesQuery.isFetchingNextPage ? (
+              <div className="flex justify-center py-2 text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" aria-label={t("common.loading")} />
+              </div>
+            ) : null}
+            {messagesQuery.isError ? (
+              <Alert variant="destructive">
+                <CircleAlert className="h-3.5 w-3.5" />
+                <AlertDescription>{t("transcript.loadFailed")}</AlertDescription>
+              </Alert>
+            ) : null}
+            {items.map((item) => {
+              const itemKey = transcriptItemKey(item);
+              if (item.kind === "message") {
+                return (
+                  <div
+                    key={itemKey}
+                    className="min-w-0"
+                    data-transcript-item-id={itemKey}
+                    data-transcript-item-role={item.message.role}
+                  >
+                    <MessageItem message={item.message} />
+                  </div>
+                );
+              }
+              if (item.kind === "pending") {
+                return (
+                  <div
+                    key={itemKey}
+                    className="min-w-0"
+                    data-transcript-item-id={itemKey}
+                    data-transcript-item-role="user"
+                  >
+                    <PendingUserItem text={item.text} />
+                  </div>
+                );
+              }
+              return (
+                <div
+                  key={itemKey}
+                  className="min-w-0"
+                  data-transcript-item-id={itemKey}
+                  data-transcript-item-role="assistant"
+                >
+                  <AssistantOverlayItem
+                    overlay={item.overlay}
+                    onContentGrow={scroll.stickToBottomIfNeeded}
+                  />
+                </div>
+              );
+            })}
+            {submitError ? (
+              <Alert variant="destructive">
+                <CircleAlert className="h-3.5 w-3.5" />
+                <AlertDescription>{submitError}</AlertDescription>
+              </Alert>
+            ) : null}
+          </ChatColumn>
+        </div>
       </div>
-      {!followingBottom && items.length > 0 ? (
+      {scroll.showJumpLatest && items.length > 0 ? (
         <Button
           aria-label={t("transcript.jumpLatest")}
           className="absolute right-5 bottom-5 rounded-full border border-border bg-card shadow-md hover:bg-muted"
           size="icon"
           type="button"
           variant="ghost"
-          onClick={scrollToBottom}
+          onClick={() => scroll.enterBottomMode({ stabilizeFrames: 1 })}
         >
           <ArrowDown />
         </Button>
       ) : null}
     </div>
   );
+}
+
+function transcriptItemKey(item: TranscriptItem) {
+  if (item.kind === "message") {
+    if (item.message.role === "user" && item.message.clientMessageID) {
+      return `user:${item.message.clientMessageID}`;
+    }
+    if (item.message.role === "assistant" && item.message.turnID) {
+      return `assistant:${item.message.turnID}`;
+    }
+    return `message:${item.message.id}`;
+  }
+  if (item.kind === "pending") {
+    return `user:${item.id}`;
+  }
+  return `assistant:${item.overlay.turnID}`;
 }
 
 // 任务流的渲染单位是 turn parts(docs/design.md 3.2):text-only 阶段只有
@@ -290,7 +329,7 @@ function AssistantOverlayItem({
   const text = useStreamedText(overlay.text, streaming);
   const cursorVisible = streaming;
 
-  // 每帧揭示后贴底跟随(仅在用户处于贴底态时,由 pinToBottom 内部判定)
+  // 每帧揭示后贴底跟随(仅在用户处于 bottom mode 时由滚动 hook 判定)
   useEffect(() => {
     onContentGrow?.();
   }, [text, onContentGrow]);

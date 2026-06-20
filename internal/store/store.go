@@ -181,6 +181,11 @@ type Message struct {
 	CreatedAt   time.Time `json:"createdAt"`
 }
 
+type MessagePage struct {
+	Messages []*Message
+	HasMore  bool
+}
+
 type TurnStatus string
 
 const (
@@ -264,6 +269,9 @@ type Store interface {
 
 	// ListMessages 按时间升序返回最近 limit 条;limit <= 0 表示全部。
 	ListMessages(ctx context.Context, sessionID string, limit int) ([]*Message, error)
+	// ListMessagesPage 按时间升序返回一页 messages。beforeMessageID 为空时返回
+	// 最近 limit 条;非空时返回该 message 之前的 limit 条。limit <= 0 表示不分页。
+	ListMessagesPage(ctx context.Context, sessionID string, beforeMessageID string, limit int) (*MessagePage, error)
 	// EventsAfter 返回 seq > afterSeq 的 lifecycle 事件,按 seq 升序,
 	// 承载 SSE Last-Event-ID 续传;limit <= 0 表示全部。
 	EventsAfter(ctx context.Context, sessionID string, afterSeq int64, limit int) ([]event.Event, error)

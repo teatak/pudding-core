@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/teatak/cart/v3"
@@ -223,12 +224,35 @@ func (s *Server) cancel(c *cart.Context) error {
 
 func (s *Server) listMessages(c *cart.Context) error {
 	id, _ := c.Param("id")
-	msgs, err := s.store.ListMessages(c.Request.Context(), id, 0)
+	before := strings.TrimSpace(c.Request.URL.Query().Get("before"))
+	limit, err := messagesLimit(c.Request.URL.Query().Get("limit"))
+	if err != nil {
+		return badRequest(c, "invalid limit")
+	}
+	page, err := s.store.ListMessagesPage(c.Request.Context(), id, before, limit)
 	if err != nil {
 		return s.fail(c, err)
 	}
-	c.JSON(http.StatusOK, map[string]any{"messages": msgs})
+	c.JSON(http.StatusOK, map[string]any{"messages": page.Messages, "hasMore": page.HasMore})
 	return nil
+}
+
+func messagesLimit(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, err
+	}
+	if limit < 0 {
+		return 0, errors.New("limit must be non-negative")
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	return limit, nil
 }
 
 func (s *Server) getSettings(c *cart.Context) error {

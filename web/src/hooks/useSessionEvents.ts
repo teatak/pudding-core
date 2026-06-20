@@ -8,25 +8,18 @@ import { apiURL } from "@/state/apiBase";
 import { useOverlayStore } from "@/state/overlayStore";
 
 export function useSessionEvents(sessionID: string | undefined, token: string) {
-  const queryClient = useQueryClient();
-  const applyEvent = useOverlayStore((state) => state.applyEvent);
+  useVisibleSessionEvents(sessionID ? [sessionID] : [], token);
+}
 
-  useEffect(() => {
-    if (!sessionID || !token) {
-      return;
-    }
-    const source = openSessionEventSource({
-      applyEvent,
-      queryClient,
-      sessionID,
-      syncMessages: true,
-      token,
-    });
-    return () => source.close();
-  }, [applyEvent, queryClient, sessionID, token]);
+export function useVisibleSessionEvents(sessionIDs: string[], token: string) {
+  useSessionEventSources(sessionIDs, token, true);
 }
 
 export function useBackgroundSessionEvents(sessionIDs: string[], token: string) {
+  useSessionEventSources(sessionIDs, token, false);
+}
+
+function useSessionEventSources(sessionIDs: string[], token: string, syncMessages: boolean) {
   const queryClient = useQueryClient();
   const applyEvent = useOverlayStore((state) => state.applyEvent);
   const sessionIDsKey = normalizeSessionIDs(sessionIDs).join("\n");
@@ -40,7 +33,7 @@ export function useBackgroundSessionEvents(sessionIDs: string[], token: string) 
         applyEvent,
         queryClient,
         sessionID,
-        syncMessages: false,
+        syncMessages,
         token,
       }),
     );
@@ -49,7 +42,7 @@ export function useBackgroundSessionEvents(sessionIDs: string[], token: string) 
         source.close();
       }
     };
-  }, [applyEvent, queryClient, sessionIDsKey, token]);
+  }, [applyEvent, queryClient, sessionIDsKey, syncMessages, token]);
 }
 
 function normalizeSessionIDs(sessionIDs: string[]) {

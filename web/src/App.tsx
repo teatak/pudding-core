@@ -13,6 +13,7 @@ import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Toaster } from "@/components/ui/sonner";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceResizableHandle } from "@/components/WorkspaceResizableHandle";
+import { useVisibleSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
 import {
   layoutStorageKeys,
@@ -47,6 +48,17 @@ export function App() {
       }),
     [],
   );
+  // 上下分屏(docs/design.md 2.2):pane 三件套整体复用,路由是唯一事实源;
+  // split 与主 pane 相同的会话不重复渲染
+  const showSplit = Boolean(splitSessionID && splitSessionID !== selectedSessionID);
+  const draftActive = draft === "1" && !selectedSessionID;
+  const activeSessionIDs = [selectedSessionID, showSplit ? splitSessionID : undefined].filter(
+    (sessionID): sessionID is string => Boolean(sessionID),
+  );
+
+  // SSE 是 session-scoped,不是 pane-scoped。visible sessions 在 App 层统一去重订阅,
+  // ChatPane 只负责 pane-local UI/滚动状态。
+  useVisibleSessionEvents(activeSessionIDs, token);
 
   useEffect(() => {
     const group = workspaceGroupRef.current;
@@ -87,13 +99,6 @@ export function App() {
     return <TokenGate />;
   }
 
-  // 上下分屏(docs/design.md 2.2):pane 三件套整体复用,路由是唯一事实源;
-  // split 与主 pane 相同的会话不重复渲染
-  const showSplit = Boolean(splitSessionID && splitSessionID !== selectedSessionID);
-  const draftActive = draft === "1" && !selectedSessionID;
-  const activeSessionIDs = [selectedSessionID, showSplit ? splitSessionID : undefined].filter(
-    (sessionID): sessionID is string => Boolean(sessionID),
-  );
   const chatArea = (
     <main className="flex h-full min-w-0 flex-col overflow-hidden bg-background">
       <ResizablePanelGroup

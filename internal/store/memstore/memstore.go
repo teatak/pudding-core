@@ -301,6 +301,40 @@ func (m *Memstore) ListMessages(_ context.Context, sessionID string, limit int) 
 	return out, nil
 }
 
+func (m *Memstore) ListMessagesPage(_ context.Context, sessionID string, beforeMessageID string, limit int) (*store.MessagePage, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[sessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	msgs := m.messages[sessionID]
+	end := len(msgs)
+	if beforeMessageID != "" {
+		end = -1
+		for i, msg := range msgs {
+			if msg.ID == beforeMessageID {
+				end = i
+				break
+			}
+		}
+		if end < 0 {
+			return nil, store.ErrNotFound
+		}
+	}
+	start := 0
+	hasMore := false
+	if limit > 0 && end > limit {
+		start = end - limit
+		hasMore = start > 0
+	}
+	out := make([]*store.Message, 0, end-start)
+	for _, msg := range msgs[start:end] {
+		cp := *msg
+		out = append(out, &cp)
+	}
+	return &store.MessagePage{Messages: out, HasMore: hasMore}, nil
+}
+
 func (m *Memstore) EventsAfter(_ context.Context, sessionID string, afterSeq int64, limit int) ([]event.Event, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

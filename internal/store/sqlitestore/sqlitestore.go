@@ -418,6 +418,14 @@ func (s *Store) RunningTurns(ctx context.Context) ([]*store.Turn, error) {
 }
 
 func (s *Store) ListMessages(ctx context.Context, sessionID string, limit int) ([]*store.Message, error) {
+	page, err := s.ListMessagesPage(ctx, sessionID, "", limit)
+	if err != nil {
+		return nil, err
+	}
+	return page.Messages, nil
+}
+
+func (s *Store) ListMessagesPage(ctx context.Context, sessionID string, beforeMessageID string, limit int) (*store.MessagePage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -432,11 +440,41 @@ func (s *Store) ListMessages(ctx context.Context, sessionID string, limit int) (
 	// rowid 作次级排序键:同毫秒落库的 user/assistant 消息顺序必须确定
 	query := `SELECT id,session_id,turn_id,role,text,client_message_id,interrupted,created_at FROM messages WHERE session_id=? ORDER BY created_at ASC, rowid ASC`
 	args := []any{sessionID}
-	if limit > 0 {
-		query = `SELECT id,session_id,turn_id,role,text,client_message_id,interrupted,created_at FROM (
-			SELECT rowid AS rid, * FROM messages WHERE session_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?
-		) ORDER BY created_at ASC, rid ASC`
-		args = append(args, limit)
+	if beforeMessageID != "" {
+		var beforeCreated int64
+		var beforeRowID int64
+		err := tx.QueryRowContext(ctx,
+			`SELECT created_at,rowid FROM messages WHERE session_id=? AND id=?`,
+			sessionID, beforeMessageID,
+		).Scan(&beforeCreated, &beforeRowID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, store.ErrNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		query = `SELECT id,session_id,turn_id,role,text,client_message_id,interrupted,created_at
+			FROM messages
+			WHERE session_id=? AND (created_at < ? OR (created_at=? AND rowid < ?))
+			ORDER BY created_at ASC, rowid ASC`
+		args = []any{sessionID, beforeCreated, beforeCreated, beforeRowID}
+	}
+	fetchLimit := limit
+	if fetchLimit > 0 {
+		fetchLimit++
+		if beforeMessageID == "" {
+			query = `SELECT id,session_id,turn_id,role,text,client_message_id,interrupted,created_at FROM (
+				SELECT rowid AS rid, * FROM messages WHERE session_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?
+			) ORDER BY created_at ASC, rid ASC`
+			args = []any{sessionID, fetchLimit}
+		} else {
+			query = `SELECT id,session_id,turn_id,role,text,client_message_id,interrupted,created_at FROM (
+				SELECT rowid AS rid, * FROM messages
+				WHERE session_id=? AND (created_at < ? OR (created_at=? AND rowid < ?))
+				ORDER BY created_at DESC, rowid DESC LIMIT ?
+			) ORDER BY created_at ASC, rid ASC`
+			args = append(args, fetchLimit)
+		}
 	}
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -452,7 +490,15 @@ func (s *Store) ListMessages(ctx context.Context, sessionID string, limit int) (
 		}
 		out = append(out, msg)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	hasMore := false
+	if limit > 0 && len(out) > limit {
+		hasMore = true
+		out = out[1:]
+	}
+	return &store.MessagePage{Messages: out, HasMore: hasMore}, nil
 }
 
 func (s *Store) EventsAfter(ctx context.Context, sessionID string, afterSeq int64, limit int) ([]event.Event, error) {

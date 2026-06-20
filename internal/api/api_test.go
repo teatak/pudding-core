@@ -117,6 +117,88 @@ func TestCORSRejectsNonLoopbackOrigin(t *testing.T) {
 	}
 }
 
+func TestListMessagesPagination(t *testing.T) {
+	srv, st := newTestServer(t)
+	if err := st.CreateSession(context.Background(), &store.Session{ID: "sess_1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 4; i++ {
+		appendAPITestTurn(t, st, "sess_1", i)
+	}
+
+	resp := req(t, http.MethodGet, srv.URL+"/sessions/sess_1/messages?limit=4", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	first := decodeJSON[messagePageResponse](t, resp)
+	if !first.HasMore {
+		t.Fatal("recent page should report older messages")
+	}
+	if got, want := messageValueIDs(first.Messages), []string{"msg_3", "msg_turn_3", "msg_4", "msg_turn_4"}; !sameStringValues(got, want) {
+		t.Fatalf("unexpected recent page: got %v want %v", got, want)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_1/messages?limit=4&before="+first.Messages[0].ID, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	older := decodeJSON[messagePageResponse](t, resp)
+	if older.HasMore {
+		t.Fatal("older page should be exhausted")
+	}
+	if got, want := messageValueIDs(older.Messages), []string{"msg_1", "msg_turn_1", "msg_2", "msg_turn_2"}; !sameStringValues(got, want) {
+		t.Fatalf("unexpected older page: got %v want %v", got, want)
+	}
+}
+
+type messagePageResponse struct {
+	Messages []store.Message `json:"messages"`
+	HasMore  bool            `json:"hasMore"`
+}
+
+func appendAPITestTurn(t *testing.T, st store.Store, sessionID string, index int) {
+	t.Helper()
+	turnID := fmt.Sprintf("turn_%d", index)
+	_, err := st.BeginTurn(context.Background(), store.BeginTurnInput{
+		SessionID:       sessionID,
+		TurnID:          turnID,
+		UserMessageID:   fmt.Sprintf("msg_%d", index),
+		ClientMessageID: fmt.Sprintf("client_%d", index),
+		UserText:        fmt.Sprintf("user %d", index),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := fmt.Sprintf("assistant %d", index)
+	if _, err := st.FinishTurn(context.Background(), store.FinishTurnInput{
+		TurnID:        turnID,
+		Status:        store.TurnCompleted,
+		AssistantText: &text,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func messageValueIDs(messages []store.Message) []string {
+	out := make([]string, 0, len(messages))
+	for _, msg := range messages {
+		out = append(out, msg.ID)
+	}
+	return out
+}
+
+func sameStringValues(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 type sseFrame struct {
 	id    string
 	event string
