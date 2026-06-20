@@ -164,7 +164,7 @@ export function Transcript({ token, sessionID, submitError }: TranscriptProps) {
     // 在 composer 上沿漏出白色文字边缘,这里裁掉(浏览器无此问题但无害)
     <div className="relative min-h-0 flex-1 overflow-hidden">
       <div ref={scrollViewportRef} className="h-full overflow-y-auto overscroll-contain">
-        <ChatColumn className="grid gap-4 py-4">
+        <ChatColumn className="grid gap-4 pt-4 pb-8">
           {messagesQuery.isError ? (
             <Alert variant="destructive">
               <CircleAlert className="h-3.5 w-3.5" />
@@ -261,7 +261,7 @@ function UserMessageBlock({
         {text}
         {interrupted ? <InterruptedBadge /> : null}
       </div>
-      {createdAt ? <MessageMeta className="justify-end" createdAt={createdAt} text={text} /> : null}
+      {createdAt ? <MessageMeta align="end" createdAt={createdAt} text={text} /> : null}
     </div>
   );
 }
@@ -328,7 +328,7 @@ function MarkdownBody({ text }: { text: string }) {
   return <div className="pudding-markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />;
 }
 
-function MessageMeta({ createdAt, text, className }: { createdAt: string; text: string; className?: string }) {
+function MessageMeta({ align = "start", createdAt, text }: { align?: "start" | "end"; createdAt: string; text: string }) {
   const { t } = useI18n();
   // 复制成功反馈(旧项目交互):按钮就地变绿色对勾 ~1.5s,不弹 toast
   const [copied, setCopied] = useState(false);
@@ -343,12 +343,16 @@ function MessageMeta({ createdAt, text, className }: { createdAt: string; text: 
   return (
     <div
       className={cn(
-        "flex items-center gap-2 text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100",
-        className,
+        "flex h-6 w-full items-center gap-2 text-xs text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+        align === "end" && "justify-end",
       )}
     >
       <Button
         aria-label={t("common.copy")}
+        className={cn(
+          "size-6 bg-transparent transition-colors hover:bg-transparent active:translate-y-0",
+          align === "start" && "-ml-1",
+        )}
         size="icon-xs"
         type="button"
         variant="ghost"

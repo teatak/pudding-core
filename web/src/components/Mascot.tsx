@@ -3,6 +3,7 @@ import { useEffect, useId, useLayoutEffect, useRef, type CSSProperties } from "r
 type MascotProps = {
   className?: string;
   gaze?: MascotGaze;
+  inputPitchBias?: number;
   mood?: MascotMood;
   onPointerGaze?: () => void;
   showFaceDebugFrame?: boolean;
@@ -118,6 +119,7 @@ const faceLayerStyle: CSSProperties = {
 export function Mascot({
   className,
   gaze = DEFAULT_GAZE,
+  inputPitchBias = 0,
   mood = "idle",
   onPointerGaze,
   showFaceDebugFrame = false,
@@ -138,6 +140,7 @@ export function Mascot({
   const targetYRef = useRef(0);
   const rafRef = useRef(0);
   const pressAnimationRef = useRef<Animation | null>(null);
+  const inputPitchBiasRef = useRef(inputPitchBias);
   const onPointerGazeRef = useRef(onPointerGaze);
   const id = useId().replace(/:/g, "");
   const faceID = `mascot-face-${id}`;
@@ -146,6 +149,7 @@ export function Mascot({
   const applyPose = (x: number, y: number) => {
     const turnX = x / EYE_MAX_X;
     const turnY = y / EYE_MAX_Y;
+    const pitchTurnY = clamp(turnY + inputPitchBiasRef.current, -1, 1);
     const head = headRef.current;
     const faceLayer = faceLayerRef.current;
     const face = faceRef.current;
@@ -155,10 +159,10 @@ export function Mascot({
     const rightShade = rightShadeRef.current;
 
     if (head) {
-      head.style.transform = `translate(${turnX * HEAD_SHIFT_X_PERCENT}%, ${turnY * HEAD_SHIFT_Y_PERCENT}%) rotateY(${turnX * HEAD_YAW_MAX_DEG}deg) rotateX(${-turnY * HEAD_PITCH_MAX_DEG}deg) rotateZ(${turnX * turnY * HEAD_ROLL_MAX_DEG}deg)`;
+      head.style.transform = `translate(${turnX * HEAD_SHIFT_X_PERCENT}%, ${pitchTurnY * HEAD_SHIFT_Y_PERCENT}%) rotateY(${turnX * HEAD_YAW_MAX_DEG}deg) rotateX(${-pitchTurnY * HEAD_PITCH_MAX_DEG}deg) rotateZ(${turnX * pitchTurnY * HEAD_ROLL_MAX_DEG}deg)`;
     }
     if (faceLayer) {
-      faceLayer.style.transform = `translate3d(0px, 0px, ${FACE_Z_OFFSET_PX}px) rotateY(${turnX * FACE_EXTRA_YAW_DEG}deg) rotateX(${-turnY * FACE_EXTRA_PITCH_DEG}deg)`;
+      faceLayer.style.transform = `translate3d(0px, 0px, ${FACE_Z_OFFSET_PX}px) rotateY(${turnX * FACE_EXTRA_YAW_DEG}deg) rotateX(${-pitchTurnY * FACE_EXTRA_PITCH_DEG}deg)`;
     }
     if (face) {
       face.setAttribute("transform", faceTransform(turnX, turnY));
@@ -241,6 +245,11 @@ export function Mascot({
       setTarget(0, 0);
     }
   }, [gaze]);
+
+  useEffect(() => {
+    inputPitchBiasRef.current = gaze.type === "input" ? inputPitchBias : 0;
+    applyPose(currentXRef.current, currentYRef.current);
+  }, [gaze.type, inputPitchBias]);
 
   useEffect(() => {
     onPointerGazeRef.current = onPointerGaze;

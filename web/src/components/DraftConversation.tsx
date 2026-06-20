@@ -29,6 +29,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useI18n } from "@/i18n";
 import type { AppSearch } from "@/lib/route";
 import { getSubmitFailure } from "@/lib/submitFailure";
+import { getTextAreaCaretClientPoint } from "@/lib/textCaret";
 import { cn } from "@/lib/utils";
 import { getOrderedProviderPresets, type ProviderPreset } from "@/provider/presets";
 import { useDraftStore, type DraftModelValue } from "@/state/draftStore";
@@ -370,8 +371,10 @@ function DraftComposer({
   }, [form, quickSubmit, setDraftText, submitText]);
 
   const submitDraft = (value: DraftValue) => submitText(value.text);
-  const handleResolvedModelChange = useCallback((next: { provider: string; model: string }) => {
-    onModelValueChange(next);
+  const handleResolvedModelChange = useCallback((next: { provider: string; model: string } | null) => {
+    if (next) {
+      onModelValueChange(next);
+    }
   }, [onModelValueChange]);
   const setTextAreaRef = (node: HTMLTextAreaElement | null) => {
     textAreaRef.current = node;
@@ -488,73 +491,5 @@ function removeCachedSession(queryClient: ReturnType<typeof useQueryClient>, ses
 }
 
 function mascotGazePointFromCaret(textArea: HTMLTextAreaElement): MascotGazePoint {
-  const point = caretClientPoint(textArea);
-  return { clientX: point.x, clientY: point.y };
+  return getTextAreaCaretClientPoint(textArea);
 }
-
-function caretClientPoint(textArea: HTMLTextAreaElement): { x: number; y: number } {
-  const selectionEnd = textArea.selectionEnd ?? textArea.value.length;
-  const doc = textArea.ownerDocument;
-  const win = doc.defaultView;
-  const rect = textArea.getBoundingClientRect();
-  if (!win) {
-    return { x: rect.left, y: rect.top + rect.height / 2 };
-  }
-
-  const style = win.getComputedStyle(textArea);
-  const mirror = doc.createElement("div");
-  mirror.style.position = "fixed";
-  mirror.style.visibility = "hidden";
-  mirror.style.pointerEvents = "none";
-  mirror.style.left = `${rect.left}px`;
-  mirror.style.top = `${rect.top}px`;
-  mirror.style.width = `${rect.width}px`;
-  mirror.style.minHeight = `${rect.height}px`;
-  mirror.style.boxSizing = style.boxSizing;
-  mirror.style.whiteSpace = "pre-wrap";
-  mirror.style.overflowWrap = "break-word";
-  mirror.style.wordBreak = style.wordBreak;
-  mirror.style.overflow = "hidden";
-
-  for (const prop of caretMirrorStyleProps) {
-    mirror.style.setProperty(prop, style.getPropertyValue(prop));
-  }
-
-  mirror.textContent = textArea.value.slice(0, selectionEnd);
-  const marker = doc.createElement("span");
-  marker.textContent = "\u200b";
-  mirror.appendChild(marker);
-  doc.body.appendChild(mirror);
-
-  const mark = marker.getBoundingClientRect();
-  mirror.remove();
-
-  return {
-    x: clamp(mark.left - textArea.scrollLeft, rect.left, rect.right),
-    y: clamp(mark.top + mark.height / 2 - textArea.scrollTop, rect.top, rect.bottom),
-  };
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-const caretMirrorStyleProps = [
-  "border-top-width",
-  "border-right-width",
-  "border-bottom-width",
-  "border-left-width",
-  "font-family",
-  "font-size",
-  "font-style",
-  "font-weight",
-  "letter-spacing",
-  "line-height",
-  "padding-top",
-  "padding-right",
-  "padding-bottom",
-  "padding-left",
-  "tab-size",
-  "text-indent",
-  "text-transform",
-] as const;

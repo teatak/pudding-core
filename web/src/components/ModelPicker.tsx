@@ -23,7 +23,7 @@ type ModelPickerProps = {
   session?: Session;
   value?: { provider?: string; model?: string };
   onChange?: (value: { provider: string; model: string }) => void;
-  onResolvedChange?: (value: { provider: string; model: string }) => void;
+  onResolvedChange?: (value: { provider: string; model: string } | null) => void;
   className?: string;
 };
 
@@ -66,6 +66,12 @@ export function ModelPicker({ token, session, value, onChange, onResolvedChange,
   const currentProfileID = selectedProvider;
   const activeProfile = profiles.find((p) => p.id === currentProfileID);
   const currentModel = selectedModel;
+  const currentModelAvailable = Boolean(
+    currentProfileID &&
+      currentModel &&
+      activeProfile?.models.some((model) => model.id === currentModel),
+  );
+  const visibleModel = currentModelAvailable ? currentModel : "";
 
   const [expanded, setExpanded] = useState(currentProfileID);
   useEffect(() => {
@@ -78,15 +84,20 @@ export function ModelPicker({ token, session, value, onChange, onResolvedChange,
   }, [open, currentProfileID, selectableProfiles]);
 
   useEffect(() => {
-    if (currentProfileID && currentModel) {
-      onResolvedChange?.({ provider: currentProfileID, model: currentModel });
+    if (!providersQuery.isSuccess) {
+      return;
     }
-  }, [currentModel, currentProfileID, onResolvedChange]);
+    onResolvedChange?.(
+      currentModelAvailable
+        ? { provider: currentProfileID, model: currentModel }
+        : null,
+    );
+  }, [currentModel, currentModelAvailable, currentProfileID, onResolvedChange, providersQuery.isSuccess]);
 
   // 品牌图标代替 provider 名;未命中图标的 profile 回落为文字名
-  const activeBrand = currentModel ? providerBrandKey(activeProfile) || currentProfileID : "";
+  const activeBrand = visibleModel ? providerBrandKey(activeProfile) || currentProfileID : "";
   const brandIcon = activeBrand ? <RoundBrandIcon name={activeBrand} sizeClassName="size-5" /> : null;
-  const label = currentModel ? formatModelLabel(currentModel) : t("picker.selectModel");
+  const label = visibleModel ? formatModelLabel(visibleModel) : t("picker.selectModel");
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -95,13 +106,13 @@ export function ModelPicker({ token, session, value, onChange, onResolvedChange,
           aria-label={t("session.model")}
           className={cn(
             "group/model-picker h-6 max-w-64 gap-1 rounded-full border-0 bg-muted py-0 pr-2 text-xs font-normal text-foreground hover:bg-accent aria-expanded:bg-accent data-[state=open]:bg-accent dark:hover:bg-accent dark:aria-expanded:bg-accent dark:data-[state=open]:bg-accent",
-            currentModel ? "pl-0.5" : "pl-2",
+            visibleModel ? "pl-0.5" : "pl-2",
             className,
           )}
           size="sm"
           variant="ghost"
         >
-          {currentModel ? (
+          {visibleModel ? (
             <span className="relative z-10 grid size-5 shrink-0 place-items-center overflow-hidden rounded-full">
               {activeBrand && BrandIcon({ name: activeBrand })
                 ? brandIcon
@@ -139,8 +150,8 @@ export function ModelPicker({ token, session, value, onChange, onResolvedChange,
                 </AccordionTrigger>
                 <AccordionContent className="pb-0">
                   <ProfileModels
-                    currentModel={selectedProvider === profile.id ? selectedModel : ""}
-                    isCurrentProfile={currentProfileID === profile.id}
+                    currentModel={currentModelAvailable && selectedProvider === profile.id ? selectedModel : ""}
+                    isCurrentProfile={currentModelAvailable && currentProfileID === profile.id}
                     profile={profile}
                     onPick={(model) => {
                       if (session) {
@@ -192,9 +203,6 @@ function ProfileModels({
   // 只显示 profile 配置的模型清单;端点的 /models 代理仅在配置表单里
   // 作为候选来源(用户反馈:选择器不做自动加载)
   const models = profile.models.map((model) => model.id).filter(Boolean);
-  if (currentModel && !models.includes(currentModel)) {
-    models.unshift(currentModel);
-  }
   if (models.length === 0) {
     return <div className="px-2.5 py-1 text-xs text-muted-foreground">{t("picker.noModels")}</div>;
   }
