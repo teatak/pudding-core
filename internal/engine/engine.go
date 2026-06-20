@@ -286,18 +286,20 @@ func (e *Engine) runTurn(ctx context.Context, sessionID, turnID string, resolved
 		e.mu.Unlock()
 	}()
 
-	var buf strings.Builder
-	status, errMsg := e.streamTurn(ctx, sessionID, turnID, resolved, client, &buf)
+	var parts turnPartAccumulator
+	status, errMsg := e.streamTurn(ctx, sessionID, turnID, resolved, client, &parts)
 
 	in := store.FinishTurnInput{TurnID: turnID, Status: status, Error: errMsg}
-	if status == store.TurnCompleted {
-		text := buf.String()
+	assistantParts := parts.Parts()
+	if len(assistantParts) > 0 {
+		in.AssistantParts = assistantParts
+	} else if status == store.TurnCompleted {
+		text := ""
 		in.AssistantText = &text
-	} else if buf.Len() > 0 {
+	}
+	if status != store.TurnCompleted && len(assistantParts) > 0 {
 		// 半截输出保留为 canonical message 并标记 interrupted
 		// (docs/technology-decisions.md 第 14 节的当前倾向)。
-		text := buf.String()
-		in.AssistantText = &text
 		in.Interrupted = true
 	}
 	res, err := e.store.FinishTurn(context.Background(), in)
@@ -314,7 +316,7 @@ func (e *Engine) runTurn(ctx context.Context, sessionID, turnID string, resolved
 	e.hub.Publish(*res.FinalEvent)
 }
 
-func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resolved *resolvedModel, client provider.Client, buf *strings.Builder) (store.TurnStatus, string) {
+func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resolved *resolvedModel, client provider.Client, parts *turnPartAccumulator) (store.TurnStatus, string) {
 	req, err := e.builder.Build(ctx, sessionID, resolved.model)
 	if err != nil {
 		return store.TurnFailed, fmt.Sprintf("build context: %v", err)
@@ -333,15 +335,31 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 			return store.TurnFailed, chunk.Err.Error()
 		case chunk.Done:
 			return store.TurnCompleted, ""
+		case chunk.Tool != nil:
+			callID, name, argsDelta := parts.AppendTool(*chunk.Tool)
+			e.hub.Publish(event.Event{
+				SessionID: sessionID,
+				Kind:      event.TurnTool,
+				TurnID:    turnID,
+				CallID:    callID,
+				Name:      name,
+				Phase:     "streaming_args",
+				ArgsDelta: argsDelta,
+			})
 		case chunk.Delta != "":
-			if chunk.Part != "" && chunk.Part != provider.PartText {
+			part := chunk.Part
+			if part == "" {
+				part = provider.PartText
+			}
+			if part != provider.PartText && part != provider.PartThought {
 				continue
 			}
-			buf.WriteString(chunk.Delta)
+			parts.AppendDelta(part, chunk.Delta)
 			e.hub.Publish(event.Event{
 				SessionID: sessionID,
 				Kind:      event.TurnDelta,
 				TurnID:    turnID,
+				Part:      string(part),
 				Delta:     chunk.Delta,
 			})
 		}
@@ -352,4 +370,89 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 		return store.TurnCancelled, ""
 	}
 	return store.TurnFailed, "provider stream ended without terminal chunk"
+}
+
+type turnPartAccumulator struct {
+	parts           []store.ContentPart
+	toolPartByIndex map[int]int
+	toolArgs        map[int]*strings.Builder
+}
+
+func (a *turnPartAccumulator) AppendDelta(part provider.PartType, delta string) {
+	if delta == "" {
+		return
+	}
+	partType := store.ContentPartText
+	if part == provider.PartThought {
+		partType = store.ContentPartThought
+	}
+	last := len(a.parts) - 1
+	if last >= 0 && a.parts[last].Type == partType {
+		a.parts[last].Text += delta
+		return
+	}
+	a.parts = append(a.parts, store.ContentPart{Type: partType, Text: delta})
+}
+
+func (a *turnPartAccumulator) AppendTool(chunk provider.ToolCallChunk) (string, string, string) {
+	if a.toolPartByIndex == nil {
+		a.toolPartByIndex = make(map[int]int)
+	}
+	if a.toolArgs == nil {
+		a.toolArgs = make(map[int]*strings.Builder)
+	}
+	partIndex, ok := a.toolPartByIndex[chunk.Index]
+	if !ok {
+		callID := chunk.CallID
+		if callID == "" {
+			callID = fmt.Sprintf("tool_%d", chunk.Index)
+		}
+		a.parts = append(a.parts, store.ContentPart{
+			Type:   store.ContentPartToolUse,
+			CallID: callID,
+			Name:   chunk.Name,
+		})
+		partIndex = len(a.parts) - 1
+		a.toolPartByIndex[chunk.Index] = partIndex
+	}
+	part := &a.parts[partIndex]
+	if chunk.CallID != "" {
+		part.CallID = chunk.CallID
+	}
+	if part.CallID == "" {
+		part.CallID = fmt.Sprintf("tool_%d", chunk.Index)
+	}
+	if chunk.Name != "" {
+		part.Name = chunk.Name
+	}
+	if chunk.ArgsDelta != "" {
+		builder := a.toolArgs[chunk.Index]
+		if builder == nil {
+			builder = &strings.Builder{}
+			a.toolArgs[chunk.Index] = builder
+		}
+		builder.WriteString(chunk.ArgsDelta)
+	}
+	return part.CallID, part.Name, chunk.ArgsDelta
+}
+
+func (a *turnPartAccumulator) Parts() []store.ContentPart {
+	out := store.CloneContentParts(a.parts)
+	for index, partIndex := range a.toolPartByIndex {
+		if partIndex < 0 || partIndex >= len(out) {
+			continue
+		}
+		raw := ""
+		if builder := a.toolArgs[index]; builder != nil {
+			raw = builder.String()
+		}
+		if raw == "" {
+			continue
+		}
+		args := json.RawMessage(raw)
+		if json.Valid(args) {
+			out[partIndex].Args = append(json.RawMessage(nil), args...)
+		}
+	}
+	return store.NormalizeContentParts(out)
 }

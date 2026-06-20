@@ -83,17 +83,48 @@ export const listProvidersResponse = z.object({ providers: z.array(providerProfi
 
 export const listModelsResponse = z.object({ models: z.array(z.string()) });
 
+export const contentPart = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("text"), text: z.string() }),
+  z.object({ type: z.literal("thought"), text: z.string() }),
+  z.object({
+    type: z.literal("tool_use"),
+    id: z.string().optional(),
+    name: z.string().optional(),
+    args: z.unknown().optional(),
+  }),
+  z.object({
+    type: z.literal("tool_result"),
+    id: z.string().optional(),
+    ok: z.boolean().optional(),
+    content: z.string().optional(),
+  }),
+]);
+export type ContentPart = z.infer<typeof contentPart>;
+
 export const message = z.object({
   id: z.string(),
   sessionID: z.string(),
   turnID: z.string(),
   role: z.enum(["user", "assistant"]),
   text: z.string(),
+  parts: z.array(contentPart).optional().default([]),
   clientMessageID: z.string().optional(), // 仅 user message,overlay 对账键
   interrupted: z.boolean().optional(),
   createdAt: z.string(),
 });
 export type Message = z.infer<typeof message>;
+
+export const conversationTurn = z.object({
+  id: z.string(),
+  sessionID: z.string(),
+  clientMessageID: z.string(),
+  status: z.enum(["running", "completed", "failed", "cancelled"]),
+  error: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  messages: z.array(message),
+});
+export type ConversationTurn = z.infer<typeof conversationTurn>;
 
 export const submitRequest = z.object({
   clientMessageID: z.string().min(1),
@@ -109,6 +140,7 @@ export const submitResponse = z.object({
 
 export const listSessionsResponse = z.object({ sessions: z.array(session) });
 export const listMessagesResponse = z.object({ messages: z.array(message), hasMore: z.boolean() });
+export const listTurnsResponse = z.object({ turns: z.array(conversationTurn), hasMore: z.boolean() });
 export const settingsResponse = z.object({ settings: z.record(z.string(), z.string()) });
 
 // 409 响应体:submit → turn_running;cancel → no_running_turn;

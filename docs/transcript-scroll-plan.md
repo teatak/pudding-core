@@ -49,14 +49,14 @@ followingBottom = distance < 48
 
 ### 2.2 没有历史锚点
 
-用户不在底部时,resize / 未来 prepend older messages 都需要保持当前阅读位置。
+用户不在底部时,resize / 未来 prepend older turns 都需要保持当前阅读位置。
 现在没有稳定的 DOM anchor:
 
 - message item 没有统一的 `data-message-id` / `data-transcript-item-id`。
 - resize 时 history mode 没有恢复当前可见 message。
-- prepend older messages 后会天然改变 `scrollHeight`,如果不恢复 anchor,视口会跳。
+- prepend older turns 后会天然改变 `scrollHeight`,如果不恢复 anchor,视口会跳。
 
-### 2.3 消息接口没有分页
+### 2.3 turn 接口没有分页
 
 当前:
 
@@ -64,13 +64,13 @@ followingBottom = distance < 48
 GET /sessions/{id}/messages
 ```
 
-后端一次返回全量 messages。store 只有:
+后端可以按 message 分页,但上滑历史需要以完整 turn 为边界。store 还缺少:
 
 ```go
-ListMessages(ctx, sessionID, limit)
+ListTurnsPage(ctx, sessionID, beforeTurnID, limit)
 ```
 
-缺少 `before` 游标,前端也还不能上滑加载更多历史。
+前端也还不能按 turn 上滑加载更多历史。
 
 ### 2.4 分屏下的状态边界必须更硬
 
@@ -316,22 +316,22 @@ P1: thought/tool parts 基础协议与渲染
 - 用户停在中间阅读时拖动分屏高度,当前阅读内容不跳。
 - canvas 开关导致宽度变化时,history mode 不跳到底。
 
-### Step 4: 后端 messages 分页契约
+### Step 4: 后端 turns 分页契约
 
 目的:支持上滑加载历史。
 
 建议接口:
 
 ```txt
-GET /sessions/{id}/messages?limit=50
-GET /sessions/{id}/messages?before=<messageID>&limit=50
+GET /sessions/{id}/turns?limit=25
+GET /sessions/{id}/turns?before=<turnID>&limit=25
 ```
 
 响应:
 
 ```json
 {
-  "messages": [],
+  "turns": [],
   "hasMore": true
 }
 ```
@@ -339,16 +339,16 @@ GET /sessions/{id}/messages?before=<messageID>&limit=50
 store 增加:
 
 ```go
-ListMessagesPage(ctx, sessionID string, beforeMessageID string, limit int)
+ListTurnsPage(ctx, sessionID string, beforeTurnID string, limit int)
 ```
 
 排序规则继续保持:
 
 ```txt
-created_at ASC, rowid ASC
+turns.created_at ASC, turns.rowid ASC
 ```
 
-`before` 查询时先查 anchor message 的 `(created_at,rowid)`,再取更早的 N 条,最后升序返回。
+`before` 查询时先查 anchor turn 的 `(created_at,rowid)`,再取更早的 N 个完整 turn,最后升序返回。
 
 验收:
 

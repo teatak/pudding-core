@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS messages (
     turn_id           TEXT    NOT NULL DEFAULT '',
     role              TEXT    NOT NULL CHECK (role IN ('user','assistant')),
     text              TEXT    NOT NULL,
+    parts             TEXT    NOT NULL DEFAULT '[]',
     client_message_id TEXT    NOT NULL DEFAULT '', -- 仅 user message
     interrupted       INTEGER NOT NULL DEFAULT 0,  -- cancel/failed 保留的半截输出
     created_at        INTEGER NOT NULL

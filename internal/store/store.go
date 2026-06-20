@@ -167,12 +167,32 @@ const (
 	RoleAssistant Role = "assistant"
 )
 
+type ContentPartType string
+
+const (
+	ContentPartText       ContentPartType = "text"
+	ContentPartThought    ContentPartType = "thought"
+	ContentPartToolUse    ContentPartType = "tool_use"
+	ContentPartToolResult ContentPartType = "tool_result"
+)
+
+type ContentPart struct {
+	Type    ContentPartType `json:"type"`
+	Text    string          `json:"text,omitempty"`
+	CallID  string          `json:"id,omitempty"`
+	Name    string          `json:"name,omitempty"`
+	Args    json.RawMessage `json:"args,omitempty"`
+	Ok      bool            `json:"ok,omitempty"`
+	Content string          `json:"content,omitempty"`
+}
+
 type Message struct {
-	ID        string `json:"id"`
-	SessionID string `json:"sessionID"`
-	TurnID    string `json:"turnID"`
-	Role      Role   `json:"role"`
-	Text      string `json:"text"`
+	ID        string        `json:"id"`
+	SessionID string        `json:"sessionID"`
+	TurnID    string        `json:"turnID"`
+	Role      Role          `json:"role"`
+	Text      string        `json:"text"`
+	Parts     []ContentPart `json:"parts,omitempty"`
 	// ClientMessageID 只在 user message 上有值,承载 submit 幂等与前端 overlay 对账。
 	ClientMessageID string `json:"clientMessageID,omitempty"`
 	// Interrupted 标记 cancel / failed 时保留的半截 assistant 输出
@@ -181,9 +201,103 @@ type Message struct {
 	CreatedAt   time.Time `json:"createdAt"`
 }
 
+func TextPart(text string) []ContentPart {
+	if text == "" {
+		return nil
+	}
+	return []ContentPart{{Type: ContentPartText, Text: text}}
+}
+
+func CloneContentParts(parts []ContentPart) []ContentPart {
+	if len(parts) == 0 {
+		return nil
+	}
+	out := make([]ContentPart, 0, len(parts))
+	for _, part := range parts {
+		cp := part
+		if part.Args != nil {
+			cp.Args = append(json.RawMessage(nil), part.Args...)
+		}
+		out = append(out, cp)
+	}
+	return out
+}
+
+func TextFromParts(parts []ContentPart) string {
+	var b strings.Builder
+	for _, part := range parts {
+		if part.Type == ContentPartText {
+			b.WriteString(part.Text)
+		}
+	}
+	return b.String()
+}
+
+func NormalizeContentParts(parts []ContentPart) []ContentPart {
+	out := make([]ContentPart, 0, len(parts))
+	for _, part := range parts {
+		if part.Type == "" {
+			part.Type = ContentPartText
+		}
+		switch part.Type {
+		case ContentPartText, ContentPartThought:
+			if part.Text == "" {
+				continue
+			}
+			part.CallID, part.Name, part.Args, part.Content = "", "", nil, ""
+			part.Ok = false
+		case ContentPartToolUse:
+			if part.CallID == "" && part.Name == "" && len(part.Args) == 0 {
+				continue
+			}
+			if len(part.Args) > 0 && !json.Valid(part.Args) {
+				part.Args = nil
+			}
+			part.Text, part.Content = "", ""
+			part.Ok = false
+		case ContentPartToolResult:
+			if part.CallID == "" && part.Content == "" {
+				continue
+			}
+			part.Text, part.Name, part.Args = "", "", nil
+		default:
+			continue
+		}
+		out = append(out, CloneContentParts([]ContentPart{part})[0])
+	}
+	return out
+}
+
+func FinishAssistantOutput(in FinishTurnInput) ([]ContentPart, string, bool) {
+	parts := NormalizeContentParts(in.AssistantParts)
+	if in.AssistantText != nil && len(parts) == 0 {
+		return TextPart(*in.AssistantText), *in.AssistantText, true
+	}
+	if len(parts) == 0 {
+		return nil, "", false
+	}
+	return parts, TextFromParts(parts), true
+}
+
 type MessagePage struct {
 	Messages []*Message
 	HasMore  bool
+}
+
+type ConversationTurn struct {
+	ID              string     `json:"id"`
+	SessionID       string     `json:"sessionID"`
+	ClientMessageID string     `json:"clientMessageID"`
+	Status          TurnStatus `json:"status"`
+	Error           string     `json:"error,omitempty"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	UpdatedAt       time.Time  `json:"updatedAt"`
+	Messages        []*Message `json:"messages"`
+}
+
+type TurnPage struct {
+	Turns   []*ConversationTurn
+	HasMore bool
 }
 
 type TurnStatus string
@@ -235,9 +349,11 @@ type FinishTurnInput struct {
 	TurnID string
 	Status TurnStatus // completed | failed | cancelled
 	// AssistantText 为 nil 表示无产出(失败/早期取消时不落 assistant message)。
-	AssistantText *string
-	Interrupted   bool
-	Error         string
+	// 新路径优先使用 AssistantParts;AssistantText 保留给旧测试/调用方自动转 text part。
+	AssistantText  *string
+	AssistantParts []ContentPart
+	Interrupted    bool
+	Error          string
 }
 
 type FinishTurnResult struct {
@@ -272,6 +388,9 @@ type Store interface {
 	// ListMessagesPage 按时间升序返回一页 messages。beforeMessageID 为空时返回
 	// 最近 limit 条;非空时返回该 message 之前的 limit 条。limit <= 0 表示不分页。
 	ListMessagesPage(ctx context.Context, sessionID string, beforeMessageID string, limit int) (*MessagePage, error)
+	// ListTurnsPage 按 turn 创建时间升序返回一页完整 turn。beforeTurnID 为空时
+	// 返回最近 limit 个 turn;非空时返回该 turn 之前的 limit 个 turn。
+	ListTurnsPage(ctx context.Context, sessionID string, beforeTurnID string, limit int) (*TurnPage, error)
 	// EventsAfter 返回 seq > afterSeq 的 lifecycle 事件,按 seq 升序,
 	// 承载 SSE Last-Event-ID 续传;limit <= 0 表示全部。
 	EventsAfter(ctx context.Context, sessionID string, afterSeq int64, limit int) ([]event.Event, error)

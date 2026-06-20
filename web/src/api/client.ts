@@ -5,13 +5,16 @@ import {
   listMessagesResponse,
   listProvidersResponse,
   listSessionsResponse,
+  listTurnsResponse,
   message,
   patchProviderRequest,
   providerProfile,
   session,
   settingsResponse,
   submitResponse,
+  type ContentPart,
   type Message,
+  type ConversationTurn,
   type ProviderModel,
   type ProviderProfile,
   type Session,
@@ -132,6 +135,22 @@ export function listMessages(
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/messages${suffix}`, listMessagesResponse);
 }
 
+export function listTurns(
+  token: string,
+  sessionID: string,
+  params: { before?: string; limit?: number } = {},
+): Promise<{ turns: ConversationTurn[]; hasMore: boolean }> {
+  const query = new URLSearchParams();
+  if (params.before) {
+    query.set("before", params.before);
+  }
+  if (params.limit) {
+    query.set("limit", String(params.limit));
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/turns${suffix}`, listTurnsResponse);
+}
+
 export function submitMessage(
   token: string,
   sessionID: string,
@@ -195,5 +214,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { Message, ProviderModel, ProviderProfile, Session };
+export type { ContentPart, Message, ConversationTurn, ProviderModel, ProviderProfile, Session };
 export { createProviderRequest, patchProviderRequest };

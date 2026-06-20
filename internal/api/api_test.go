@@ -151,9 +151,51 @@ func TestListMessagesPagination(t *testing.T) {
 	}
 }
 
+func TestListTurnsPagination(t *testing.T) {
+	srv, st := newTestServer(t)
+	if err := st.CreateSession(context.Background(), &store.Session{ID: "sess_1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 4; i++ {
+		appendAPITestTurn(t, st, "sess_1", i)
+	}
+
+	resp := req(t, http.MethodGet, srv.URL+"/sessions/sess_1/turns?limit=2", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	first := decodeJSON[turnPageResponse](t, resp)
+	if !first.HasMore {
+		t.Fatal("recent page should report older turns")
+	}
+	if got, want := turnValueIDs(first.Turns), []string{"turn_3", "turn_4"}; !sameStringValues(got, want) {
+		t.Fatalf("unexpected recent page: got %v want %v", got, want)
+	}
+	if got, want := messagePtrValueIDs(first.Turns[0].Messages), []string{"msg_3", "msg_turn_3"}; !sameStringValues(got, want) {
+		t.Fatalf("turn should include complete messages: got %v want %v", got, want)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_1/turns?limit=2&before="+first.Turns[0].ID, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	older := decodeJSON[turnPageResponse](t, resp)
+	if older.HasMore {
+		t.Fatal("older page should be exhausted")
+	}
+	if got, want := turnValueIDs(older.Turns), []string{"turn_1", "turn_2"}; !sameStringValues(got, want) {
+		t.Fatalf("unexpected older page: got %v want %v", got, want)
+	}
+}
+
 type messagePageResponse struct {
 	Messages []store.Message `json:"messages"`
 	HasMore  bool            `json:"hasMore"`
+}
+
+type turnPageResponse struct {
+	Turns   []store.ConversationTurn `json:"turns"`
+	HasMore bool                     `json:"hasMore"`
 }
 
 func appendAPITestTurn(t *testing.T, st store.Store, sessionID string, index int) {
@@ -183,6 +225,22 @@ func messageValueIDs(messages []store.Message) []string {
 	out := make([]string, 0, len(messages))
 	for _, msg := range messages {
 		out = append(out, msg.ID)
+	}
+	return out
+}
+
+func messagePtrValueIDs(messages []*store.Message) []string {
+	out := make([]string, 0, len(messages))
+	for _, msg := range messages {
+		out = append(out, msg.ID)
+	}
+	return out
+}
+
+func turnValueIDs(turns []store.ConversationTurn) []string {
+	out := make([]string, 0, len(turns))
+	for _, turn := range turns {
+		out = append(out, turn.ID)
 	}
 	return out
 }

@@ -84,12 +84,14 @@ function openSessionEventSource({
     applyEvent(parsed.data);
     syncSessionListFromEvent(queryClient, parsed.data);
     if (isTurnTerminalEvent(parsed.data) && syncMessages) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.turns(sessionID) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.messages(sessionID) });
     }
   };
 
   source.addEventListener("turn.started", handleMessage);
   source.addEventListener("turn.delta", handleMessage);
+  source.addEventListener("turn.tool", handleMessage);
   source.addEventListener("turn.completed", handleMessage);
   source.addEventListener("turn.failed", handleMessage);
   source.addEventListener("turn.cancelled", handleMessage);

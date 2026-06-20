@@ -68,6 +68,9 @@ func (s *Store) ensureSchema() error {
 	if err := s.ensureColumn("sessions", "pinned_order", `ALTER TABLE sessions ADD COLUMN pinned_order INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("messages", "parts", `ALTER TABLE messages ADD COLUMN parts TEXT NOT NULL DEFAULT '[]'`); err != nil {
+		return err
+	}
 	if _, err := s.db.Exec(`UPDATE sessions SET last_activity_at=updated_at WHERE last_activity_at=0`); err != nil {
 		return fmt.Errorf("sqlite: backfill sessions.last_activity_at: %w", err)
 	}
@@ -280,6 +283,7 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 			TurnID:          in.TurnID,
 			Role:            store.RoleUser,
 			Text:            in.UserText,
+			Parts:           store.TextPart(in.UserText),
 			ClientMessageID: in.ClientMessageID,
 			CreatedAt:       now,
 		}
@@ -290,8 +294,8 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 			return err
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO messages(id,session_id,turn_id,role,text,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?)`,
-			msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Text, msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
+			`INSERT INTO messages(id,session_id,turn_id,role,text,parts,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,
+			msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Text, encodeParts(msg.Parts), msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
 		); err != nil {
 			return err
 		}
@@ -352,19 +356,21 @@ func (s *Store) FinishTurn(ctx context.Context, in store.FinishTurnInput) (*stor
 		case store.TurnCancelled:
 			ev.Kind = event.TurnCancelled
 		}
-		if in.AssistantText != nil {
+		assistantParts, assistantText, hasAssistant := store.FinishAssistantOutput(in)
+		if hasAssistant {
 			msg := &store.Message{
 				ID:          "msg_" + turn.ID,
 				SessionID:   turn.SessionID,
 				TurnID:      turn.ID,
 				Role:        store.RoleAssistant,
-				Text:        *in.AssistantText,
+				Text:        assistantText,
+				Parts:       assistantParts,
 				Interrupted: in.Interrupted,
 				CreatedAt:   now,
 			}
 			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO messages(id,session_id,turn_id,role,text,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?)`,
-				msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Text, msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
+				`INSERT INTO messages(id,session_id,turn_id,role,text,parts,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,
+				msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Text, encodeParts(msg.Parts), msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
 			); err != nil {
 				return err
 			}
@@ -438,7 +444,7 @@ func (s *Store) ListMessagesPage(ctx context.Context, sessionID string, beforeMe
 	}
 
 	// rowid 作次级排序键:同毫秒落库的 user/assistant 消息顺序必须确定
-	query := `SELECT id,session_id,turn_id,role,text,client_message_id,interrupted,created_at FROM messages WHERE session_id=? ORDER BY created_at ASC, rowid ASC`
+	query := `SELECT id,session_id,turn_id,role,text,parts,client_message_id,interrupted,created_at FROM messages WHERE session_id=? ORDER BY created_at ASC, rowid ASC`
 	args := []any{sessionID}
 	if beforeMessageID != "" {
 		var beforeCreated int64
@@ -453,7 +459,7 @@ func (s *Store) ListMessagesPage(ctx context.Context, sessionID string, beforeMe
 		if err != nil {
 			return nil, err
 		}
-		query = `SELECT id,session_id,turn_id,role,text,client_message_id,interrupted,created_at
+		query = `SELECT id,session_id,turn_id,role,text,parts,client_message_id,interrupted,created_at
 			FROM messages
 			WHERE session_id=? AND (created_at < ? OR (created_at=? AND rowid < ?))
 			ORDER BY created_at ASC, rowid ASC`
@@ -463,12 +469,12 @@ func (s *Store) ListMessagesPage(ctx context.Context, sessionID string, beforeMe
 	if fetchLimit > 0 {
 		fetchLimit++
 		if beforeMessageID == "" {
-			query = `SELECT id,session_id,turn_id,role,text,client_message_id,interrupted,created_at FROM (
+			query = `SELECT id,session_id,turn_id,role,text,parts,client_message_id,interrupted,created_at FROM (
 				SELECT rowid AS rid, * FROM messages WHERE session_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?
 			) ORDER BY created_at ASC, rid ASC`
 			args = []any{sessionID, fetchLimit}
 		} else {
-			query = `SELECT id,session_id,turn_id,role,text,client_message_id,interrupted,created_at FROM (
+			query = `SELECT id,session_id,turn_id,role,text,parts,client_message_id,interrupted,created_at FROM (
 				SELECT rowid AS rid, * FROM messages
 				WHERE session_id=? AND (created_at < ? OR (created_at=? AND rowid < ?))
 				ORDER BY created_at DESC, rowid DESC LIMIT ?
@@ -499,6 +505,89 @@ func (s *Store) ListMessagesPage(ctx context.Context, sessionID string, beforeMe
 		out = out[1:]
 	}
 	return &store.MessagePage{Messages: out, HasMore: hasMore}, nil
+}
+
+func (s *Store) ListTurnsPage(ctx context.Context, sessionID string, beforeTurnID string, limit int) (*store.TurnPage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
+		return nil, err
+	}
+
+	query := `SELECT id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at FROM turns WHERE session_id=? ORDER BY created_at ASC, rowid ASC`
+	args := []any{sessionID}
+	if beforeTurnID != "" {
+		var beforeCreated int64
+		var beforeRowID int64
+		err := tx.QueryRowContext(ctx,
+			`SELECT created_at,rowid FROM turns WHERE session_id=? AND id=?`,
+			sessionID, beforeTurnID,
+		).Scan(&beforeCreated, &beforeRowID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, store.ErrNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		query = `SELECT id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at
+			FROM turns
+			WHERE session_id=? AND (created_at < ? OR (created_at=? AND rowid < ?))
+			ORDER BY created_at ASC, rowid ASC`
+		args = []any{sessionID, beforeCreated, beforeCreated, beforeRowID}
+	}
+	fetchLimit := limit
+	if fetchLimit > 0 {
+		fetchLimit++
+		if beforeTurnID == "" {
+			query = `SELECT id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at FROM (
+				SELECT rowid AS rid, * FROM turns WHERE session_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?
+			) ORDER BY created_at ASC, rid ASC`
+			args = []any{sessionID, fetchLimit}
+		} else {
+			query = `SELECT id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at FROM (
+				SELECT rowid AS rid, * FROM turns
+				WHERE session_id=? AND (created_at < ? OR (created_at=? AND rowid < ?))
+				ORDER BY created_at DESC, rowid DESC LIMIT ?
+			) ORDER BY created_at ASC, rid ASC`
+			args = append(args, fetchLimit)
+		}
+	}
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	turns := make([]*store.Turn, 0)
+	for rows.Next() {
+		turn, err := scanTurn(rows)
+		if err != nil {
+			return nil, err
+		}
+		turns = append(turns, turn)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	hasMore := false
+	if limit > 0 && len(turns) > limit {
+		hasMore = true
+		turns = turns[1:]
+	}
+	out := make([]*store.ConversationTurn, 0, len(turns))
+	for _, turn := range turns {
+		messages, err := messagesForTurnTx(ctx, tx, turn.SessionID, turn.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, conversationTurnFromSQL(turn, messages))
+	}
+	return &store.TurnPage{Turns: out, HasMore: hasMore}, nil
 }
 
 func (s *Store) EventsAfter(ctx context.Context, sessionID string, afterSeq int64, limit int) ([]event.Event, error) {
@@ -650,7 +739,7 @@ func runningTurnTx(ctx context.Context, tx *sql.Tx, sessionID string) (*store.Tu
 
 func getUserMessageByClientMessageIDTx(ctx context.Context, tx *sql.Tx, sessionID, clientMessageID string) (*store.Message, error) {
 	row := tx.QueryRowContext(ctx,
-		`SELECT id,session_id,turn_id,role,text,client_message_id,interrupted,created_at
+		`SELECT id,session_id,turn_id,role,text,parts,client_message_id,interrupted,created_at
 		FROM messages WHERE session_id=? AND role=? AND client_message_id=?`,
 		sessionID, store.RoleUser, clientMessageID,
 	)
@@ -659,6 +748,40 @@ func getUserMessageByClientMessageIDTx(ctx context.Context, tx *sql.Tx, sessionI
 		return nil, store.ErrNotFound
 	}
 	return msg, err
+}
+
+func messagesForTurnTx(ctx context.Context, tx *sql.Tx, sessionID, turnID string) ([]*store.Message, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id,session_id,turn_id,role,text,parts,client_message_id,interrupted,created_at
+		FROM messages WHERE session_id=? AND turn_id=? ORDER BY created_at ASC, rowid ASC`,
+		sessionID, turnID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]*store.Message, 0, 2)
+	for rows.Next() {
+		msg, err := scanMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, msg)
+	}
+	return out, rows.Err()
+}
+
+func conversationTurnFromSQL(turn *store.Turn, messages []*store.Message) *store.ConversationTurn {
+	return &store.ConversationTurn{
+		ID:              turn.ID,
+		SessionID:       turn.SessionID,
+		ClientMessageID: turn.ClientMessageID,
+		Status:          turn.Status,
+		Error:           turn.Error,
+		CreatedAt:       turn.CreatedAt,
+		UpdatedAt:       turn.UpdatedAt,
+		Messages:        messages,
+	}
 }
 
 func insertEventTx(ctx context.Context, tx *sql.Tx, ev *event.Event) error {
@@ -723,15 +846,41 @@ func scanTurn(row messageScanner) (*store.Turn, error) {
 
 func scanMessage(row messageScanner) (*store.Message, error) {
 	var msg store.Message
+	var parts string
 	var interrupted int
 	var created int64
-	err := row.Scan(&msg.ID, &msg.SessionID, &msg.TurnID, &msg.Role, &msg.Text, &msg.ClientMessageID, &interrupted, &created)
+	err := row.Scan(&msg.ID, &msg.SessionID, &msg.TurnID, &msg.Role, &msg.Text, &parts, &msg.ClientMessageID, &interrupted, &created)
 	if err != nil {
 		return nil, err
 	}
+	msg.Parts = decodeParts(parts, msg.Text)
 	msg.Interrupted = interrupted != 0
 	msg.CreatedAt = timeFromMS(created)
 	return &msg, nil
+}
+
+func encodeParts(parts []store.ContentPart) string {
+	normalized := store.NormalizeContentParts(parts)
+	if len(normalized) == 0 {
+		return "[]"
+	}
+	data, err := json.Marshal(normalized)
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
+}
+
+func decodeParts(raw string, fallbackText string) []store.ContentPart {
+	var parts []store.ContentPart
+	if raw != "" {
+		_ = json.Unmarshal([]byte(raw), &parts)
+	}
+	parts = store.NormalizeContentParts(parts)
+	if len(parts) == 0 {
+		return store.TextPart(fallbackText)
+	}
+	return parts
 }
 
 func normalizeJSON(raw json.RawMessage) json.RawMessage {

@@ -17,7 +17,19 @@ export const turnDeltaEvent = z.object({
   kind: z.literal("turn.delta"),
   sessionID: z.string(),
   turnID: z.string(),
+  part: z.enum(["text", "thought"]).optional(),
   delta: z.string(),
+});
+
+export const turnToolEvent = z.object({
+  kind: z.literal("turn.tool"),
+  sessionID: z.string(),
+  turnID: z.string(),
+  callID: z.string().optional(),
+  name: z.string().optional(),
+  phase: z.enum(["streaming_args", "running", "ok", "error"]).optional(),
+  argsDelta: z.string().optional(),
+  summary: z.string().optional(),
 });
 
 export const turnCompletedEvent = z.object({
@@ -64,6 +76,7 @@ export const pingEvent = z.object({
 export const sessionEvent = z.discriminatedUnion("kind", [
   turnStartedEvent,
   turnDeltaEvent,
+  turnToolEvent,
   turnCompletedEvent,
   turnFailedEvent,
   turnCancelledEvent,

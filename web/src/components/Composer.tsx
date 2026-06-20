@@ -98,6 +98,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
       form.reset({ text: "" });
       // 标题自动生成由后端 titler 负责(provisional + LLM,session.titled
       // 事件回推),前端不写标题
+      await queryClient.invalidateQueries({ queryKey: queryKeys.turns(sessionID) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.messages(sessionID) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
     },

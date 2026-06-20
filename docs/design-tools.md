@@ -177,12 +177,14 @@ type Runner interface {
 
 ```text
 turn.delta      + part 字段("text"|"thought";默认 text,老客户端兼容)
-turn.tool       新 kind,落库:{turnID, callID, name, phase, summary?}
-                phase: running | ok | error;summary 为结果摘要(≤200 字)
+turn.tool       新 kind,live:{turnID, callID, name, phase, argsDelta?, summary?}
+                phase: streaming_args | running | ok | error
 ```
 
-- `turn.delta` 仍不落库;`turn.tool` 落库(回放时能还原工具时间线,
-  delta 丢了由 completed 后 refetch parts 兜底)。
+- P1: `turn.delta` / `turn.tool` 都不落 events 表;刷新/重连靠
+  completed 后 refetch `message.parts` 兜底。
+- 后续工具执行循环接入后,可只把 phase=running/ok/error 的摘要事件落库,
+  argsDelta 仍保持 live-only,避免 events 表被参数流刷爆。
 - web 契约镜像同步;overlayStore 从单 text 串升级为 parts 数组
   (text 增量追加到最后一个 text part;tool 事件插入/更新 tool part)。
 

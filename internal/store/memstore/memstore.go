@@ -180,6 +180,7 @@ func (m *Memstore) BeginTurn(_ context.Context, in store.BeginTurnInput) (*store
 		TurnID:          in.TurnID,
 		Role:            store.RoleUser,
 		Text:            in.UserText,
+		Parts:           store.TextPart(in.UserText),
 		ClientMessageID: in.ClientMessageID,
 		CreatedAt:       now,
 	}
@@ -196,8 +197,8 @@ func (m *Memstore) BeginTurn(_ context.Context, in store.BeginTurnInput) (*store
 	m.appendEventLocked(in.SessionID, ev)
 	m.sessions[in.SessionID].LastActivityAt = now
 
-	mc, ec := *msg, ev
-	return &store.BeginTurnResult{Turn: cloneTurn(turn), UserMessage: &mc, StartedEvent: &ec}, nil
+	ec := ev
+	return &store.BeginTurnResult{Turn: cloneTurn(turn), UserMessage: cloneMessage(msg), StartedEvent: &ec}, nil
 }
 
 func (m *Memstore) FinishTurn(_ context.Context, in store.FinishTurnInput) (*store.FinishTurnResult, error) {
@@ -230,20 +231,21 @@ func (m *Memstore) FinishTurn(_ context.Context, in store.FinishTurnInput) (*sto
 	default:
 		return nil, store.ErrNotFound
 	}
-	if in.AssistantText != nil {
+	assistantParts, assistantText, hasAssistant := store.FinishAssistantOutput(in)
+	if hasAssistant {
 		msg := &store.Message{
 			ID:          "msg_" + turn.ID, // assistant message 与 turn 一一对应
 			SessionID:   turn.SessionID,
 			TurnID:      turn.ID,
 			Role:        store.RoleAssistant,
-			Text:        *in.AssistantText,
+			Text:        assistantText,
+			Parts:       assistantParts,
 			Interrupted: in.Interrupted,
 			CreatedAt:   now,
 		}
 		m.messages[turn.SessionID] = append(m.messages[turn.SessionID], msg)
 		ev.AssistantMessageID = msg.ID
-		mc := *msg
-		res.AssistantMessage = &mc
+		res.AssistantMessage = cloneMessage(msg)
 	}
 	m.appendEventLocked(turn.SessionID, ev)
 	m.sessions[turn.SessionID].LastActivityAt = now
@@ -295,8 +297,7 @@ func (m *Memstore) ListMessages(_ context.Context, sessionID string, limit int) 
 	}
 	out := make([]*store.Message, 0, len(msgs))
 	for _, msg := range msgs {
-		cp := *msg
-		out = append(out, &cp)
+		out = append(out, cloneMessage(msg))
 	}
 	return out, nil
 }
@@ -329,10 +330,73 @@ func (m *Memstore) ListMessagesPage(_ context.Context, sessionID string, beforeM
 	}
 	out := make([]*store.Message, 0, end-start)
 	for _, msg := range msgs[start:end] {
-		cp := *msg
-		out = append(out, &cp)
+		out = append(out, cloneMessage(msg))
 	}
 	return &store.MessagePage{Messages: out, HasMore: hasMore}, nil
+}
+
+func (m *Memstore) ListTurnsPage(_ context.Context, sessionID string, beforeTurnID string, limit int) (*store.TurnPage, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[sessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	turns := make([]*store.Turn, 0)
+	for _, turn := range m.turns {
+		if turn.SessionID == sessionID {
+			turns = append(turns, turn)
+		}
+	}
+	sort.Slice(turns, func(i, j int) bool {
+		if turns[i].CreatedAt.Equal(turns[j].CreatedAt) {
+			return turns[i].ID < turns[j].ID
+		}
+		return turns[i].CreatedAt.Before(turns[j].CreatedAt)
+	})
+	end := len(turns)
+	if beforeTurnID != "" {
+		end = -1
+		for i, turn := range turns {
+			if turn.ID == beforeTurnID {
+				end = i
+				break
+			}
+		}
+		if end < 0 {
+			return nil, store.ErrNotFound
+		}
+	}
+	start := 0
+	hasMore := false
+	if limit > 0 && end > limit {
+		start = end - limit
+		hasMore = start > 0
+	}
+	out := make([]*store.ConversationTurn, 0, end-start)
+	for _, turn := range turns[start:end] {
+		out = append(out, conversationTurnFromMem(turn, m.messages[sessionID]))
+	}
+	return &store.TurnPage{Turns: out, HasMore: hasMore}, nil
+}
+
+func conversationTurnFromMem(turn *store.Turn, messages []*store.Message) *store.ConversationTurn {
+	out := &store.ConversationTurn{
+		ID:              turn.ID,
+		SessionID:       turn.SessionID,
+		ClientMessageID: turn.ClientMessageID,
+		Status:          turn.Status,
+		Error:           turn.Error,
+		CreatedAt:       turn.CreatedAt,
+		UpdatedAt:       turn.UpdatedAt,
+		Messages:        make([]*store.Message, 0, 2),
+	}
+	for _, msg := range messages {
+		if msg.TurnID != turn.ID {
+			continue
+		}
+		out.Messages = append(out.Messages, cloneMessage(msg))
+	}
+	return out
 }
 
 func (m *Memstore) EventsAfter(_ context.Context, sessionID string, afterSeq int64, limit int) ([]event.Event, error) {
@@ -447,11 +511,19 @@ func (m *Memstore) nextSeq(sessionID string) int64 {
 func (m *Memstore) findUserMessage(sessionID, clientMessageID string) *store.Message {
 	for _, msg := range m.messages[sessionID] {
 		if msg.Role == store.RoleUser && msg.ClientMessageID == clientMessageID {
-			cp := *msg
-			return &cp
+			return cloneMessage(msg)
 		}
 	}
 	return nil
+}
+
+func cloneMessage(msg *store.Message) *store.Message {
+	if msg == nil {
+		return nil
+	}
+	cp := *msg
+	cp.Parts = store.CloneContentParts(msg.Parts)
+	return &cp
 }
 
 func cloneTurn(t *store.Turn) *store.Turn {

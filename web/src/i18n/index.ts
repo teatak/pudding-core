@@ -196,6 +196,11 @@ const zh: Messages = {
   "transcript.interrupted": "已中断",
   "transcript.jumpLatest": "跳到最新",
   "transcript.loadFailed": "消息加载失败，请刷新重试。",
+  "transcript.thought": "思考",
+  "transcript.thinking": "思考中",
+  "transcript.tool": "工具",
+  "transcript.toolArgs": "参数",
+  "transcript.toolResult": "结果",
 };
 
 const zhTW: Messages = {
@@ -386,6 +391,11 @@ const zhTW: Messages = {
   "transcript.interrupted": "已中斷",
   "transcript.jumpLatest": "跳到最新",
   "transcript.loadFailed": "訊息載入失敗，請重新整理後重試。",
+  "transcript.thought": "思考",
+  "transcript.thinking": "思考中",
+  "transcript.tool": "工具",
+  "transcript.toolArgs": "參數",
+  "transcript.toolResult": "結果",
 };
 
 const en: Messages = {
@@ -554,6 +564,11 @@ const en: Messages = {
   "transcript.interrupted": "interrupted",
   "transcript.jumpLatest": "Jump to latest",
   "transcript.loadFailed": "Messages failed to load. Refresh and retry.",
+  "transcript.thought": "Thought",
+  "transcript.thinking": "Thinking",
+  "transcript.tool": "Tool",
+  "transcript.toolArgs": "Args",
+  "transcript.toolResult": "Result",
 };
 
 const dictionaries: Record<Locale, Messages> = { "zh-CN": zh, "zh-TW": zhTW, en };

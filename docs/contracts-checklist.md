@@ -9,7 +9,8 @@
 | kind | seq | 落库 | 专属字段 |
 | --- | --- | --- | --- |
 | `turn.started` | ✓ | ✓ | `clientMessageID`, `userMessageID` |
-| `turn.delta` | — | — | `delta` |
+| `turn.delta` | — | — | `part(text/thought)`, `delta` |
+| `turn.tool` | — | — | `callID`, `name`, `phase`, `argsDelta?`, `summary?`;最终以 message.parts 兜底 |
 | `turn.completed` | ✓ | ✓ | `assistantMessageID` |
 | `turn.failed` | ✓ | ✓ | `error`;有半截输出时 `assistantMessageID` + `interrupted` |
 | `turn.cancelled` | ✓ | ✓ | 有半截输出时 `assistantMessageID` + `interrupted` |
@@ -20,14 +21,16 @@
 
 SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON>`。
 续传:`Last-Event-ID` header 或 `?after=<seq>`,服务端从 events 表补发缺口。
-无位点的全新连接从尾部开始(tail),历史靠 messages 快照,不回放 lifecycle。
+无位点的全新连接从尾部开始(tail),历史靠 turns 快照,不回放 lifecycle。
 
 ## 实体
 
 | 实体 | Go | TS | 字段 |
 | --- | --- | --- | --- |
 | Session | `store.Session` | `session` | id, title, provider, model, createdAt, updatedAt, running(读取时派生) |
-| Message | `store.Message` | `message` | id, sessionID, turnID, role, text, clientMessageID?, interrupted?, createdAt |
+| ConversationTurn | `store.ConversationTurn` | `conversationTurn` | id, sessionID, clientMessageID, status, error?, createdAt, updatedAt, messages[] |
+| ContentPart | `store.ContentPart` | `contentPart` | type(text/thought/tool_use/tool_result), text?, id?, name?, args?, ok?, content? |
+| Message | `store.Message` | `message` | id, sessionID, turnID, role, text, parts[], clientMessageID?, interrupted?, createdAt |
 | ProviderProfile(设置视图) | `api.providerProfileView` | `providerProfile` | id, displayName, protocol, baseURL, apiKey?, apiKeySet, models |
 
 时间一律 RFC3339 字符串(Go `time.Time` 默认 JSON 编码)。
@@ -48,6 +51,7 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | `POST /sessions/{id}/submit` | `{clientMessageID, text}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_running` |
 | `POST /sessions/{id}/cancel` | — | 202 `{status}` | 404 / 409 `no_running_turn` |
 | `GET /sessions/{id}/events` | SSE | event stream | 404 |
+| `GET /sessions/{id}/turns` | `before?`, `limit?` | `{turns: [], hasMore}` | 404 |
 | `GET /sessions/{id}/messages` | — | `{messages: []}` | 404 |
 | `GET /settings` | — | `{settings: {}}` | — |
 | `PUT /settings` | `{k: v}` | 204 | 400 |

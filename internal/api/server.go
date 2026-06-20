@@ -47,6 +47,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/sessions/:id/submit").POST(s.submit)
 	app.Route("/sessions/:id/cancel").POST(s.cancel)
 	app.Route("/sessions/:id/events").GET(s.sessionEvents)
+	app.Route("/sessions/:id/turns").GET(s.listTurns)
 	app.Route("/sessions/:id/messages").GET(s.listMessages)
 	app.Route("/settings").GET(s.getSettings).PUT(s.putSettings)
 	app.Route("/providers").GET(s.listProviders).POST(s.createProvider)
@@ -225,7 +226,7 @@ func (s *Server) cancel(c *cart.Context) error {
 func (s *Server) listMessages(c *cart.Context) error {
 	id, _ := c.Param("id")
 	before := strings.TrimSpace(c.Request.URL.Query().Get("before"))
-	limit, err := messagesLimit(c.Request.URL.Query().Get("limit"))
+	limit, err := pageLimit(c.Request.URL.Query().Get("limit"))
 	if err != nil {
 		return badRequest(c, "invalid limit")
 	}
@@ -237,7 +238,22 @@ func (s *Server) listMessages(c *cart.Context) error {
 	return nil
 }
 
-func messagesLimit(raw string) (int, error) {
+func (s *Server) listTurns(c *cart.Context) error {
+	id, _ := c.Param("id")
+	before := strings.TrimSpace(c.Request.URL.Query().Get("before"))
+	limit, err := pageLimit(c.Request.URL.Query().Get("limit"))
+	if err != nil {
+		return badRequest(c, "invalid limit")
+	}
+	page, err := s.store.ListTurnsPage(c.Request.Context(), id, before, limit)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, map[string]any{"turns": page.Turns, "hasMore": page.HasMore})
+	return nil
+}
+
+func pageLimit(raw string) (int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return 0, nil

@@ -325,6 +325,7 @@ function DraftComposer({
         }
         throw error;
       }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.turns(created.id) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.messages(created.id) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
       clearDraft();

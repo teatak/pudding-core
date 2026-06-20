@@ -8,6 +8,7 @@ type Kind string
 const (
 	TurnStarted   Kind = "turn.started"
 	TurnDelta     Kind = "turn.delta"
+	TurnTool      Kind = "turn.tool"
 	TurnCompleted Kind = "turn.completed"
 	TurnFailed    Kind = "turn.failed"
 	TurnCancelled Kind = "turn.cancelled"
@@ -21,7 +22,8 @@ const (
 // Event 的字段按 Kind 选填:
 //
 //	turn.started   seq, turnID, clientMessageID, userMessageID
-//	turn.delta     turnID, delta            (不落库,无 seq)
+//	turn.delta     turnID, part, delta      (不落库,无 seq)
+//	turn.tool      turnID, callID, name, phase, argsDelta/summary (不落库,无 seq)
 //	turn.completed seq, turnID, assistantMessageID
 //	turn.failed    seq, turnID, error       (有部分输出时附 assistantMessageID + interrupted)
 //	turn.cancelled seq, turnID              (有部分输出时附 assistantMessageID + interrupted)
@@ -35,7 +37,13 @@ type Event struct {
 	TurnID             string `json:"turnID,omitempty"`
 	ClientMessageID    string `json:"clientMessageID,omitempty"`
 	UserMessageID      string `json:"userMessageID,omitempty"`
+	Part               string `json:"part,omitempty"` // turn.delta:text|thought
 	Delta              string `json:"delta,omitempty"`
+	CallID             string `json:"callID,omitempty"` // turn.tool 专用
+	Name               string `json:"name,omitempty"`
+	Phase              string `json:"phase,omitempty"`
+	ArgsDelta          string `json:"argsDelta,omitempty"`
+	Summary            string `json:"summary,omitempty"`
 	AssistantMessageID string `json:"assistantMessageID,omitempty"`
 	Interrupted        bool   `json:"interrupted,omitempty"`
 	Error              string `json:"error,omitempty"`
@@ -45,5 +53,5 @@ type Event struct {
 // Persistent 报告该事件是否属于落库的 lifecycle 事件;
 // turn.delta、session.titled 与 ping 只走 SSE 不落 events 表。
 func (e Event) Persistent() bool {
-	return e.Kind != TurnDelta && e.Kind != Ping && e.Kind != SessionTitled
+	return e.Kind != TurnDelta && e.Kind != TurnTool && e.Kind != Ping && e.Kind != SessionTitled
 }

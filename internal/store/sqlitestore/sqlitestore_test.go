@@ -170,6 +170,50 @@ func TestListMessagesPageUsesStableOrder(t *testing.T) {
 	}
 }
 
+func TestListTurnsPageUsesStableOrder(t *testing.T) {
+	st, _ := openTestStore(t)
+	createTestSession(t, st, "sess_1")
+	for i := 1; i <= 4; i++ {
+		appendCompletedTestTurn(t, st, "sess_1", i)
+	}
+
+	first, err := st.ListTurnsPage(context.Background(), "sess_1", "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.HasMore {
+		t.Fatal("first recent page should report older turns")
+	}
+	got := turnIDs(first.Turns)
+	want := []string{"turn_3", "turn_4"}
+	if !sameStrings(got, want) {
+		t.Fatalf("unexpected recent page: got %v want %v", got, want)
+	}
+	gotMessages := messageIDs(first.Turns[0].Messages)
+	wantMessages := []string{"msg_3", "msg_turn_3"}
+	if !sameStrings(gotMessages, wantMessages) {
+		t.Fatalf("turn should include complete messages: got %v want %v", gotMessages, wantMessages)
+	}
+
+	older, err := st.ListTurnsPage(context.Background(), "sess_1", first.Turns[0].ID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if older.HasMore {
+		t.Fatal("older page should be exhausted")
+	}
+	got = turnIDs(older.Turns)
+	want = []string{"turn_1", "turn_2"}
+	if !sameStrings(got, want) {
+		t.Fatalf("unexpected older page: got %v want %v", got, want)
+	}
+
+	_, err = st.ListTurnsPage(context.Background(), "sess_1", "missing", 2)
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing before turn should return ErrNotFound, got %v", err)
+	}
+}
+
 func TestFinishTurnTerminalStatesAndEventsAfter(t *testing.T) {
 	st, _ := openTestStore(t)
 
@@ -278,6 +322,47 @@ func TestPersistenceAndSeqContinuation(t *testing.T) {
 	}
 }
 
+func TestMessagePartsPersist(t *testing.T) {
+	st, path := openTestStore(t)
+	createTestSession(t, st, "sess_1")
+	beginTestTurn(t, st, "sess_1", "turn_1", "msg_1", "client_1")
+	if _, err := st.FinishTurn(context.Background(), store.FinishTurnInput{
+		TurnID: "turn_1",
+		Status: store.TurnCompleted,
+		AssistantParts: []store.ContentPart{
+			{Type: store.ContentPartThought, Text: "thinking"},
+			{Type: store.ContentPartToolUse, CallID: "call_1", Name: "web_fetch", Args: []byte(`{"url":"https://example.com"}`)},
+			{Type: store.ContentPartText, Text: "done"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+
+	msgs, err := reopened.ListMessages(context.Background(), "sess_1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("unexpected messages: %+v", msgs)
+	}
+	assistant := msgs[1]
+	if assistant.Text != "done" {
+		t.Fatalf("text column should derive from text parts only: %+v", assistant)
+	}
+	if len(assistant.Parts) != 3 || assistant.Parts[0].Type != store.ContentPartThought || assistant.Parts[1].Type != store.ContentPartToolUse || assistant.Parts[2].Type != store.ContentPartText {
+		t.Fatalf("parts not persisted: %+v", assistant.Parts)
+	}
+}
+
 func TestTurnModelConfigPersists(t *testing.T) {
 	st, path := openTestStore(t)
 	createTestSession(t, st, "sess_1")
@@ -364,6 +449,9 @@ CREATE TABLE turns (
 	if !hasColumn(t, st.db, "sessions", "pinned_order") {
 		t.Fatal("pinned_order column was not added")
 	}
+	if !hasColumn(t, st.db, "messages", "parts") {
+		t.Fatal("messages.parts column was not added")
+	}
 }
 
 func hasColumn(t *testing.T, db *sql.DB, table, column string) bool {
@@ -447,6 +535,14 @@ func messageIDs(messages []*store.Message) []string {
 	out := make([]string, 0, len(messages))
 	for _, msg := range messages {
 		out = append(out, msg.ID)
+	}
+	return out
+}
+
+func turnIDs(turns []*store.ConversationTurn) []string {
+	out := make([]string, 0, len(turns))
+	for _, turn := range turns {
+		out = append(out, turn.ID)
 	}
 	return out
 }

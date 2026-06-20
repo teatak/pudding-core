@@ -133,6 +133,54 @@ func TestSubmitHappyPath(t *testing.T) {
 	}
 }
 
+func TestSubmitPersistsThoughtParts(t *testing.T) {
+	eng, ms, hub, sid := newTestEngine(t, mock.WithChunks([]provider.Chunk{
+		{Part: provider.PartThought, Delta: "thinking"},
+		{Part: provider.PartText, Delta: "answer"},
+		{Done: true, Finish: provider.FinishStop},
+	}), mock.WithDelay(time.Millisecond))
+	sub, unsub := hub.Subscribe(sid)
+	defer unsub()
+
+	if _, err := eng.Submit(context.Background(), SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+
+	msgs, err := ms.ListMessages(context.Background(), sid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("want user + assistant messages, got %+v", msgs)
+	}
+	if msgs[1].Text != "answer" {
+		t.Fatalf("text column should keep final answer only: %+v", msgs[1])
+	}
+	if got := msgs[1].Parts; len(got) != 2 || got[0].Type != store.ContentPartThought || got[0].Text != "thinking" || got[1].Type != store.ContentPartText || got[1].Text != "answer" {
+		t.Fatalf("unexpected assistant parts: %+v", got)
+	}
+
+	seenThought, seenText := false, false
+	timeout := time.After(time.Second)
+	for !seenThought || !seenText {
+		select {
+		case ev := <-sub:
+			if ev.Kind != event.TurnDelta {
+				continue
+			}
+			switch ev.Part {
+			case string(provider.PartThought):
+				seenThought = ev.Delta == "thinking"
+			case string(provider.PartText):
+				seenText = ev.Delta == "answer"
+			}
+		case <-timeout:
+			t.Fatalf("missing thought/text delta events: thought=%v text=%v", seenThought, seenText)
+		}
+	}
+}
+
 func TestSubmitIdempotent(t *testing.T) {
 	eng, ms, _, sid := newTestEngine(t, mock.WithScript([]string{"ok"}), mock.WithDelay(time.Millisecond))
 	first, err := eng.Submit(context.Background(), SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "hi"})
