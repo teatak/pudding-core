@@ -679,7 +679,14 @@ function RailPanel({
   function handlePointerDrop(sessionID: string, clientX: number, clientY: number) {
     const target = findDropTarget(clientX, clientY);
     const session = sessions.find((item) => item.id === sessionID);
-    if (!session || !target) {
+    if (!session) {
+      clearDragState();
+      return;
+    }
+    if (!target) {
+      if (session.pinned) {
+        onPinChange(session.id, false, 0);
+      }
       clearDragState();
       return;
     }
