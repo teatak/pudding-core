@@ -17,7 +17,7 @@ import { z } from "zod";
 import { APIError, cancelTurn, submitMessage, updateSession, type Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
-import { Mascot, type MascotGaze, type MascotGazePoint } from "@/components/Mascot";
+import { Mascot, type MascotGaze, type MascotGazePoint, type MascotMood } from "@/components/Mascot";
 import { ModelPicker } from "@/components/ModelPicker";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -25,7 +25,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useI18n } from "@/i18n";
 import { getSubmitFailure } from "@/lib/submitFailure";
 import { getTextAreaCaretClientPoint } from "@/lib/textCaret";
-import { useOverlayStore } from "@/state/overlayStore";
+import { useOverlayStore, type TurnPhaseState } from "@/state/overlayStore";
 
 const composerSchema = z.object({
   text: z.string(),
@@ -44,12 +44,16 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const addPendingUser = useOverlayStore((state) => state.addPendingUser);
+  const acceptSubmittingTurn = useOverlayStore((state) => state.acceptSubmittingTurn);
+  const clearSubmittingTurn = useOverlayStore((state) => state.clearSubmittingTurn);
   const removePendingUser = useOverlayStore((state) => state.removePendingUser);
+  const startSubmittingTurn = useOverlayStore((state) => state.startSubmittingTurn);
   // 停止态双源:overlay 的 runningTurns(本地实时)|| session 快照的 running
   // (后端 turns 表派生)。中途刷新走 SSE tail 不回放 turn.started,若此时
   // provider 暂无 delta,overlay 不知道有 turn 在跑——session.running 兜底,
   // 保证停止按钮不丢(cancel 按 sessionID 取消,无需 turnID)。
   const overlayRunning = useOverlayStore((state) => Boolean(state.runningTurns[sessionID]));
+  const turnPhase = useOverlayStore((state) => state.turnPhases[sessionID]);
   const running = overlayRunning || session.running;
   const [cancelLocked, setCancelLocked] = useState(false);
   const [resolvedModel, setResolvedModel] = useState<{ provider: string; model: string } | null>(null);
@@ -75,16 +79,18 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
         throw new APIError(400, "no_model");
       }
       const { provider, model } = resolvedModel;
-      if (session.provider !== provider || session.model !== model) {
-        await updateSession(token, sessionID, { provider, model });
-      }
       addPendingUser({
         sessionID,
         clientMessageID,
         text: value.text,
         createdAt: new Date().toISOString(),
       });
-      return submitMessage(token, sessionID, { clientMessageID, text: value.text });
+      if (session.provider !== provider || session.model !== model) {
+        await updateSession(token, sessionID, { provider, model });
+      }
+      const result = await submitMessage(token, sessionID, { clientMessageID, text: value.text });
+      acceptSubmittingTurn(sessionID, clientMessageID, result.turnID);
+      return result;
     },
     onSuccess: async () => {
       onSubmitError?.(null);
@@ -98,6 +104,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
     onError: (error) => {
       // 提交未被接受,canonical 不会出现这条消息:pending 气泡必须撤掉,
       // 文本留在 composer 里供重试(同一 draft ID)
+      clearSubmittingTurn(sessionID, draftIDRef.current);
       removePendingUser(sessionID, draftIDRef.current);
       const failure = getSubmitFailure(error, {
         noModel: t("composer.noModel"),
@@ -126,6 +133,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
     }
     onSubmitError?.(null);
     setCancelLocked(true);
+    startSubmittingTurn(sessionID, draftIDRef.current);
     submitMutation.mutate({ text });
   };
 
@@ -306,7 +314,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
               className="size-full overflow-visible"
               gaze={mascotGaze}
               inputPitchBias={MASCOT_INPUT_PITCH_BIAS}
-              mood={running ? "thinking" : "idle"}
+              mood={mascotMoodFromPhase(turnPhase, running)}
               onPointerGaze={setMascotPointerGaze}
             />
           </span>
@@ -314,4 +322,17 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
       </ChatColumn>
     </form>
   );
+}
+
+function mascotMoodFromPhase(phase: TurnPhaseState | undefined, running: boolean): MascotMood {
+  if (phase?.phase === "error") {
+    return "error";
+  }
+  if (phase?.phase === "streaming_text") {
+    return "ready";
+  }
+  if (running || phase?.phase === "submitting" || phase?.phase === "awaiting_model") {
+    return "thinking";
+  }
+  return "idle";
 }

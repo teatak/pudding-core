@@ -32,6 +32,7 @@ import { deleteSession, listSessions, updateSession } from "@/api/client";
 import type { Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { LanguageToggle } from "@/components/LanguageToggle";
+import { PhaseDot } from "@/components/PhaseDot";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   AlertDialog,
@@ -76,7 +77,7 @@ import type { AppSearch } from "@/lib/route";
 import { openSettingsDialog } from "@/lib/settingsDialog";
 import { formatRelative } from "@/lib/time";
 import { cn } from "@/lib/utils";
-import { useOverlayStore } from "@/state/overlayStore";
+import { isTurnPhaseActive, type TurnPhaseState, useOverlayStore } from "@/state/overlayStore";
 import { setRailCollapsed, useRailCollapsed, useRailForcedCollapsed } from "@/state/railStore";
 
 const popoverAlignNudgePx = 3;
@@ -115,6 +116,7 @@ export function SessionRail({
   const { t } = useI18n();
   const clearSession = useOverlayStore((state) => state.clearSession);
   const runningTurns = useOverlayStore((state) => state.runningTurns);
+  const turnPhases = useOverlayStore((state) => state.turnPhases);
   const collapsed = useRailCollapsed();
   const forcedCollapsed = useRailForcedCollapsed();
   const hover = useHoverPopover();
@@ -130,6 +132,9 @@ export function SessionRail({
     ...sessions.filter((session) => session.running).map((session) => session.id),
     ...Object.entries(runningTurns)
       .filter(([, turnID]) => Boolean(turnID))
+      .map(([sessionID]) => sessionID),
+    ...Object.entries(turnPhases)
+      .filter(([, phase]) => isTurnPhaseActive(phase))
       .map(([sessionID]) => sessionID),
   ].filter((sessionID, index, all) => !activeSessionIDSet.has(sessionID) && all.indexOf(sessionID) === index);
   useBackgroundSessionEvents(backgroundSessionIDs, token);
@@ -946,6 +951,7 @@ function SessionItems({
   const { t } = useI18n();
   // 实时运行态:sessions 快照(15s 兜底)与 SSE overlay 双源取或
   const runningTurns = useOverlayStore((state) => state.runningTurns);
+  const turnPhases = useOverlayStore((state) => state.turnPhases);
 
   if (sessions.length === 0 && showEmptyState) {
     return (
@@ -974,7 +980,8 @@ function SessionItems({
           {dropIndex === index ? <SessionDropIndicator active /> : null}
           <SessionItem
             deletePending={deletePending}
-            running={session.running || Boolean(runningTurns[session.id])}
+            phase={turnPhases[session.id]}
+            running={session.running || Boolean(runningTurns[session.id]) || isTurnPhaseActive(turnPhases[session.id])}
             selected={session.id === selectedSessionID}
             session={session}
             suppressInteractiveState={Boolean(draggingSessionID)}
@@ -1011,6 +1018,7 @@ type SessionItemProps = {
   session: Session;
   selected: boolean;
   running: boolean;
+  phase?: TurnPhaseState;
   deletePending: boolean;
   suppressInteractiveState: boolean;
   onSelect: () => void;
@@ -1028,6 +1036,7 @@ function SessionItem({
   session,
   selected,
   running,
+  phase,
   deletePending,
   suppressInteractiveState,
   onSelect,
@@ -1213,7 +1222,7 @@ function SessionItem({
           isActive
         >
           <div className="cursor-text">
-            <SessionRunningSlot running={running} />
+            <SessionRunningSlot phase={phase} running={running} />
             <Input
               ref={inputRef}
               aria-label={t("session.rename")}
@@ -1267,7 +1276,7 @@ function SessionItem({
             onPointerMove={handlePointerMove}
             onPointerUp={finishPointerDrag}
           >
-            <SessionRunningSlot running={running} />
+            <SessionRunningSlot phase={phase} running={running} />
             <span className="min-w-0 flex-1 truncate" title={session.title || undefined}>
               {title}
             </span>
@@ -1363,10 +1372,10 @@ function SessionItem({
   );
 }
 
-function SessionRunningSlot({ running }: { running: boolean }) {
+function SessionRunningSlot({ phase, running }: { phase?: TurnPhaseState; running: boolean }) {
   return (
     <span aria-hidden="true" className="flex size-3 shrink-0 items-center justify-center">
-      {running ? <span className="size-2 animate-pulse rounded-full bg-primary" /> : null}
+      {running ? <PhaseDot phase={phase?.phase} size="sm" /> : null}
     </span>
   );
 }

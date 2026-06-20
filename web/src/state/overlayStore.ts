@@ -20,12 +20,46 @@ export type AssistantOverlay = {
   error?: string;
 };
 
+export type TurnPhase =
+  | "submitting"
+  | "awaiting_model"
+  | "streaming_text"
+  | "thinking"
+  | "streaming_tool_args"
+  | "executing_tool"
+  | "awaiting_followup"
+  | "error"
+  | "cancelled";
+
+export type TurnPhaseState = {
+  sessionID: string;
+  phase: TurnPhase;
+  updatedAt: string;
+  turnID?: string;
+  clientMessageID?: string;
+  error?: string;
+};
+
+const activeTurnPhases = new Set<TurnPhase>([
+  "submitting",
+  "awaiting_model",
+  "streaming_text",
+  "thinking",
+  "streaming_tool_args",
+  "executing_tool",
+  "awaiting_followup",
+]);
+
 type OverlayState = {
   pendingUsers: Record<string, PendingUserMessage[]>;
   assistants: Record<string, AssistantOverlay>;
   runningTurns: Record<string, string | undefined>;
+  turnPhases: Record<string, TurnPhaseState | undefined>;
   lastEventSeqs: Record<string, number | undefined>;
   addPendingUser: (message: PendingUserMessage) => void;
+  startSubmittingTurn: (sessionID: string, clientMessageID: string) => void;
+  acceptSubmittingTurn: (sessionID: string, clientMessageID: string, turnID: string) => void;
+  clearSubmittingTurn: (sessionID: string, clientMessageID: string) => void;
   removePendingUser: (sessionID: string, clientMessageID: string) => void;
   applyEvent: (event: SessionEvent) => void;
   reconcileMessages: (sessionID: string, messages: Message[]) => void;
@@ -43,10 +77,19 @@ function recordEventSeq(lastEventSeqs: Record<string, number | undefined>, event
   return { ...lastEventSeqs, [event.sessionID]: event.seq };
 }
 
+export function isTurnPhaseActive(phase: TurnPhaseState | undefined) {
+  return Boolean(phase && activeTurnPhases.has(phase.phase));
+}
+
+function makePhase(input: Omit<TurnPhaseState, "updatedAt">): TurnPhaseState {
+  return { ...input, updatedAt: new Date().toISOString() };
+}
+
 export const useOverlayStore = create<OverlayState>((set) => ({
   pendingUsers: {},
   assistants: {},
   runningTurns: {},
+  turnPhases: {},
   lastEventSeqs: {},
   addPendingUser: (message) =>
     set((state) => ({
@@ -60,6 +103,46 @@ export const useOverlayStore = create<OverlayState>((set) => ({
         ],
       },
     })),
+  startSubmittingTurn: (sessionID, clientMessageID) =>
+    set((state) => ({
+      turnPhases: {
+        ...state.turnPhases,
+        [sessionID]: makePhase({ clientMessageID, phase: "submitting", sessionID }),
+      },
+    })),
+  acceptSubmittingTurn: (sessionID, clientMessageID, turnID) =>
+    set((state) => {
+      const current = state.assistants[turnID] || {
+        turnID,
+        sessionID,
+        text: "",
+        status: "streaming" as const,
+      };
+      return {
+        assistants: {
+          ...state.assistants,
+          [turnID]: current,
+        },
+        runningTurns: {
+          ...state.runningTurns,
+          [sessionID]: turnID,
+        },
+        turnPhases: {
+          ...state.turnPhases,
+          [sessionID]: makePhase({ clientMessageID, phase: "awaiting_model", sessionID, turnID }),
+        },
+      };
+    }),
+  clearSubmittingTurn: (sessionID, clientMessageID) =>
+    set((state) => {
+      const phase = state.turnPhases[sessionID];
+      if (phase?.phase !== "submitting" || phase.clientMessageID !== clientMessageID) {
+        return state;
+      }
+      const turnPhases = { ...state.turnPhases };
+      delete turnPhases[sessionID];
+      return { turnPhases };
+    }),
   removePendingUser: (sessionID, clientMessageID) =>
     set((state) => ({
       pendingUsers: {
@@ -82,10 +165,25 @@ export const useOverlayStore = create<OverlayState>((set) => ({
             ([, overlay]) => overlay.sessionID !== event.sessionID || overlay.status === "streaming",
           ),
         );
+        const current = assistants[event.turnID] || {
+          turnID: event.turnID,
+          sessionID: event.sessionID,
+          text: "",
+          status: "streaming" as const,
+        };
         return {
-          assistants,
+          assistants: { ...assistants, [event.turnID]: current },
           lastEventSeqs: recordEventSeq(state.lastEventSeqs, event),
           runningTurns: { ...state.runningTurns, [event.sessionID]: event.turnID },
+          turnPhases: {
+            ...state.turnPhases,
+            [event.sessionID]: makePhase({
+              clientMessageID: event.clientMessageID,
+              phase: "awaiting_model",
+              sessionID: event.sessionID,
+              turnID: event.turnID,
+            }),
+          },
         };
       }
       if (event.kind === "turn.delta") {
@@ -105,6 +203,14 @@ export const useOverlayStore = create<OverlayState>((set) => ({
             },
           },
           runningTurns: { ...state.runningTurns, [event.sessionID]: event.turnID },
+          turnPhases: {
+            ...state.turnPhases,
+            [event.sessionID]: makePhase({
+              phase: "streaming_text",
+              sessionID: event.sessionID,
+              turnID: event.turnID,
+            }),
+          },
         };
       }
       const status =
@@ -128,6 +234,18 @@ export const useOverlayStore = create<OverlayState>((set) => ({
         },
         lastEventSeqs: recordEventSeq(state.lastEventSeqs, event),
         runningTurns: { ...state.runningTurns, [event.sessionID]: undefined },
+        turnPhases:
+          event.kind === "turn.completed"
+            ? { ...state.turnPhases, [event.sessionID]: undefined }
+            : {
+                ...state.turnPhases,
+                [event.sessionID]: makePhase({
+                  error: "error" in event ? event.error : undefined,
+                  phase: event.kind === "turn.failed" ? "error" : "cancelled",
+                  sessionID: event.sessionID,
+                  turnID: event.turnID,
+                }),
+              },
       };
     }),
   reconcileMessages: (sessionID, messages) =>
@@ -162,11 +280,13 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       delete pendingUsers[sessionID];
       const runningTurns = { ...state.runningTurns };
       delete runningTurns[sessionID];
+      const turnPhases = { ...state.turnPhases };
+      delete turnPhases[sessionID];
       const lastEventSeqs = { ...state.lastEventSeqs };
       delete lastEventSeqs[sessionID];
       const assistants = Object.fromEntries(
         Object.entries(state.assistants).filter(([, overlay]) => overlay.sessionID !== sessionID),
       );
-      return { pendingUsers, runningTurns, lastEventSeqs, assistants };
+      return { pendingUsers, runningTurns, turnPhases, lastEventSeqs, assistants };
     }),
 }));

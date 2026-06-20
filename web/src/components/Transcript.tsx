@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { listMessages, type Message } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
+import { PhaseDot } from "@/components/PhaseDot";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,7 +15,13 @@ import { useI18n } from "@/i18n";
 import { renderMarkdown } from "@/lib/markdown";
 import { formatClock } from "@/lib/time";
 import { cn } from "@/lib/utils";
-import { type AssistantOverlay, type PendingUserMessage, useOverlayStore } from "@/state/overlayStore";
+import {
+  isTurnPhaseActive,
+  type AssistantOverlay,
+  type PendingUserMessage,
+  type TurnPhaseState,
+  useOverlayStore,
+} from "@/state/overlayStore";
 
 const MESSAGES_PAGE_SIZE = 50;
 const EMPTY_PENDING: PendingUserMessage[] = [];
@@ -23,19 +30,22 @@ const EMPTY_MESSAGES: Message[] = [];
 type TranscriptProps = {
   token: string;
   sessionID: string;
+  sessionRunning?: boolean;
   submitError?: string | null;
 };
 
 type TranscriptItem =
   | { kind: "message"; message: Message }
   | { kind: "pending"; id: string; text: string; createdAt: string }
-  | { kind: "assistant"; overlay: AssistantOverlay };
+  | { kind: "assistant"; overlay: AssistantOverlay; phase?: TurnPhaseState }
+  | { kind: "phase"; phase: TurnPhaseState };
 
-export function Transcript({ token, sessionID, submitError }: TranscriptProps) {
+export function Transcript({ token, sessionID, sessionRunning = false, submitError }: TranscriptProps) {
   const { t } = useI18n();
   const reconcileMessages = useOverlayStore((state) => state.reconcileMessages);
   const pendingUsersBySession = useOverlayStore((state) => state.pendingUsers);
   const assistantsByID = useOverlayStore((state) => state.assistants);
+  const turnPhase = useOverlayStore((state) => state.turnPhases[sessionID]);
   const messagesQuery = useInfiniteQuery({
     queryKey: queryKeys.messages(sessionID),
     queryFn: ({ pageParam }) => listMessages(token, sessionID, { before: pageParam, limit: MESSAGES_PAGE_SIZE }),
@@ -58,6 +68,19 @@ export function Transcript({ token, sessionID, submitError }: TranscriptProps) {
     () => Object.values(assistantsByID).filter((overlay) => overlay.sessionID === sessionID),
     [assistantsByID, sessionID],
   );
+  const displayPhase = useMemo<TurnPhaseState | undefined>(() => {
+    if (isTurnPhaseActive(turnPhase)) {
+      return turnPhase;
+    }
+    if (!sessionRunning || assistantOverlays.length > 0) {
+      return undefined;
+    }
+    return {
+      phase: "awaiting_model",
+      sessionID,
+      updatedAt: "",
+    };
+  }, [assistantOverlays.length, sessionID, sessionRunning, turnPhase]);
 
   useEffect(() => {
     if (!messagesQuery.isSuccess) {
@@ -70,6 +93,15 @@ export function Transcript({ token, sessionID, submitError }: TranscriptProps) {
     // overlay 在对应 canonical message 出现后退场("等数据到达再清"由 store 对账,
     // 这里只做渲染期过滤,避免短暂双显)
     const canonicalIDs = new Set(messages.map((message) => message.id));
+    const visibleAssistantOverlays = assistantOverlays.filter(
+      (overlay) => !overlay.assistantMessageID || !canonicalIDs.has(overlay.assistantMessageID),
+    );
+    const phaseHasOverlay = Boolean(
+      displayPhase &&
+        (displayPhase.turnID
+          ? visibleAssistantOverlays.some((overlay) => overlay.turnID === displayPhase.turnID)
+          : visibleAssistantOverlays.some((overlay) => overlay.status === "streaming")),
+    );
     return [
       ...messages.map((message) => ({ kind: "message" as const, message })),
       ...pendingUsers.map((message) => ({
@@ -78,11 +110,14 @@ export function Transcript({ token, sessionID, submitError }: TranscriptProps) {
         text: message.text,
         createdAt: message.createdAt,
       })),
-      ...assistantOverlays
-        .filter((overlay) => !overlay.assistantMessageID || !canonicalIDs.has(overlay.assistantMessageID))
-        .map((overlay) => ({ kind: "assistant" as const, overlay })),
+      ...visibleAssistantOverlays.map((overlay) => ({
+        kind: "assistant" as const,
+        overlay,
+        phase: displayPhase?.turnID === overlay.turnID ? displayPhase : undefined,
+      })),
+      ...(displayPhase && !phaseHasOverlay ? [{ kind: "phase" as const, phase: displayPhase }] : []),
     ];
-  }, [assistantOverlays, messages, pendingUsers]);
+  }, [assistantOverlays, displayPhase, messages, pendingUsers]);
   const itemKeys = useMemo(() => items.map(transcriptItemKey), [items]);
   const scroll = useTranscriptScroll({ itemKeys, sessionID });
   const { captureAnchor } = scroll;
@@ -190,6 +225,18 @@ export function Transcript({ token, sessionID, submitError }: TranscriptProps) {
                   </div>
                 );
               }
+              if (item.kind === "phase") {
+                return (
+                  <div
+                    key={itemKey}
+                    className="min-w-0"
+                    data-transcript-item-id={itemKey}
+                    data-transcript-item-role="assistant"
+                  >
+                    <AssistantPhaseItem phase={item.phase.phase} />
+                  </div>
+                );
+              }
               return (
                 <div
                   key={itemKey}
@@ -199,6 +246,7 @@ export function Transcript({ token, sessionID, submitError }: TranscriptProps) {
                 >
                   <AssistantOverlayItem
                     overlay={item.overlay}
+                    phase={item.phase}
                     onContentGrow={scroll.stickToBottomIfNeeded}
                   />
                 </div>
@@ -242,7 +290,20 @@ function transcriptItemKey(item: TranscriptItem) {
   if (item.kind === "pending") {
     return `user:${item.id}`;
   }
+  if (item.kind === "phase") {
+    return transcriptPhaseKey(item.phase);
+  }
   return `assistant:${item.overlay.turnID}`;
+}
+
+function transcriptPhaseKey(phase: TurnPhaseState) {
+  if (phase.turnID) {
+    return `assistant:${phase.turnID}`;
+  }
+  if (phase.clientMessageID) {
+    return `assistant:pending:${phase.clientMessageID}`;
+  }
+  return `assistant:phase:${phase.sessionID}`;
 }
 
 // 任务流的渲染单位是 turn parts(docs/design.md 3.2):text-only 阶段只有
@@ -318,16 +379,25 @@ function PendingUserItem({ text }: { text: string }) {
 
 function AssistantOverlayItem({
   overlay,
+  phase,
   onContentGrow,
 }: {
   overlay: AssistantOverlay;
+  phase?: TurnPhaseState;
   onContentGrow?: () => void;
 }) {
   const streaming = overlay.status === "streaming";
   // 平滑揭示:把 store 里逐 delta 累积的全量 overlay.text 按 rAF 匀速放出,
   // 抹平 provider/proxy 的 chunk 粗细;非 streaming 立即 snap 到全量。
   const text = useStreamedText(overlay.text, streaming);
-  const cursorVisible = streaming;
+  const activePhaseName: TurnPhaseState["phase"] | undefined =
+    phase && isTurnPhaseActive(phase)
+      ? phase.phase
+      : streaming
+        ? overlay.text
+          ? "streaming_text"
+          : "awaiting_model"
+        : undefined;
 
   // 每帧揭示后贴底跟随(仅在用户处于 bottom mode 时由滚动 hook 判定)
   useEffect(() => {
@@ -336,13 +406,8 @@ function AssistantOverlayItem({
 
   return (
     <div className="selectable-text animate-in min-w-0 text-sm leading-6 duration-150 fade-in slide-in-from-bottom-1">
-      {text ? <TurnParts parts={partsFromText(text)} /> : null}
-      <span
-        aria-hidden="true"
-        className={cn("ml-1 inline-block text-primary", cursorVisible ? "animate-pulse opacity-100" : "opacity-0")}
-      >
-        ▍
-      </span>
+      <div className="min-w-0">{text ? <TurnParts parts={partsFromText(text)} /> : null}</div>
+      {activePhaseName ? <AssistantPhaseItem phase={activePhaseName} /> : null}
       {overlay.status === "failed" && overlay.error ? (
         <Alert className="mt-2" variant="destructive">
           <CircleAlert className="h-3.5 w-3.5" />
@@ -350,6 +415,16 @@ function AssistantOverlayItem({
         </Alert>
       ) : null}
       {overlay.status === "cancelled" || overlay.interrupted ? <InterruptedBadge /> : null}
+    </div>
+  );
+}
+
+function AssistantPhaseItem({ phase }: { phase: TurnPhaseState["phase"] }) {
+  return (
+    <div className="flex h-6 w-full items-center gap-2 text-xs text-muted-foreground">
+      <span className="-ml-1 flex size-6 items-center justify-center">
+        <PhaseDot phase={phase} />
+      </span>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { deleteSession, listSessions, updateSession, type Session } from "@/api/
 import { queryKeys } from "@/api/queryKeys";
 import { Conversation } from "@/components/Conversation";
 import { DraftConversation } from "@/components/DraftConversation";
+import { PhaseDot } from "@/components/PhaseDot";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,7 +31,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useI18n } from "@/i18n";
 import type { AppSearch } from "@/lib/route";
 import { cn } from "@/lib/utils";
-import { useOverlayStore } from "@/state/overlayStore";
+import { isTurnPhaseActive, useOverlayStore } from "@/state/overlayStore";
 import { useRailCollapsed } from "@/state/railStore";
 
 type ChatPaneProps = {
@@ -448,16 +449,17 @@ function HeaderStatus({ session }: { session: Session | undefined }) {
   const liveRunning = useOverlayStore((state) =>
     session ? Boolean(state.runningTurns[session.id]) : false,
   );
+  const livePhase = useOverlayStore((state) => (session ? state.turnPhases[session.id] : undefined));
   if (!session) {
     return null;
   }
-  const running = session.running || liveRunning;
+  const running = session.running || liveRunning || isTurnPhaseActive(livePhase);
   if (!running) {
     return null;
   }
   return (
     <div className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-      <span className="size-2 animate-pulse rounded-full bg-primary" />
+      <PhaseDot phase={livePhase?.phase} size="sm" />
       {t("session.generating")}
     </div>
   );

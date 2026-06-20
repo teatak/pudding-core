@@ -131,6 +131,15 @@
     --mascot-antenna-stroke: oklch(0.74 0.13 277);
     --mascot-side-shade: oklch(0.3 0.18 277);
     --mascot-shadow: oklch(0.52 0.18 277 / 13%);
+    --phase-submitting: oklch(0.879 0.169 91.605);
+    --phase-awaiting-model: oklch(0.828 0.189 84.429);
+    --phase-streaming-text: oklch(0.685 0.169 237.323);
+    --phase-awaiting-followup: oklch(0.769 0.188 70.08);
+    --phase-thinking: oklch(0.606 0.25 292.717);
+    --phase-streaming-tool-args: oklch(0.723 0.219 149.579);
+    --phase-executing-tool: oklch(0.789 0.154 211.53);
+    --phase-error: var(--destructive);
+    --phase-cancelled: var(--muted-foreground);
 }
 
 html[data-shell="mac"] {
@@ -242,6 +251,15 @@ html[data-shell] .pudding-markdown * {
     --mascot-antenna-stroke: oklch(0.77 0.11 277);
     --mascot-side-shade: oklch(0.34 0.16 277);
     --mascot-shadow: oklch(0.46 0.05 277 / 14%);
+    --phase-submitting: oklch(0.879 0.169 91.605);
+    --phase-awaiting-model: oklch(0.828 0.189 84.429);
+    --phase-streaming-text: oklch(0.685 0.169 237.323);
+    --phase-awaiting-followup: oklch(0.769 0.188 70.08);
+    --phase-thinking: oklch(0.606 0.25 292.717);
+    --phase-streaming-tool-args: oklch(0.723 0.219 149.579);
+    --phase-executing-tool: oklch(0.789 0.154 211.53);
+    --phase-error: var(--destructive);
+    --phase-cancelled: var(--muted-foreground);
 }
 
 [data-slot="dialog-overlay"],
@@ -343,6 +361,44 @@ html[data-shell] .pudding-markdown * {
 
 .pudding-user-message {
     background-color: var(--message-user-background);
+}
+
+[data-mood="ready"] {
+    --mascot-body-top: color-mix(in oklch, var(--primary), white 42%);
+    --mascot-body-mid: color-mix(in oklch, var(--primary), white 18%);
+    --mascot-body-bottom: color-mix(in oklch, var(--primary), black 10%);
+}
+
+[data-mood="thinking"] [data-slot="antenna"] circle {
+    animation: pudding-mascot-thinking-glow 1.4s ease-in-out infinite;
+    transform-box: fill-box;
+    transform-origin: center;
+}
+
+[data-mood="thinking"] [data-slot="head-art"],
+[data-mood="thinking"] [data-slot="face-art"] {
+    filter: drop-shadow(0 0 6px color-mix(in oklch, var(--primary), transparent 68%));
+}
+
+[data-mood="error"] {
+    --mascot-body-top: color-mix(in oklch, var(--destructive), white 18%);
+    --mascot-body-mid: var(--destructive);
+    --mascot-body-bottom: color-mix(in oklch, var(--destructive), black 24%);
+    --mascot-limb: color-mix(in oklch, var(--destructive), black 12%);
+    --mascot-antenna: color-mix(in oklch, var(--destructive), white 10%);
+    --mascot-antenna-stroke: color-mix(in oklch, var(--destructive), white 34%);
+}
+
+@keyframes pudding-mascot-thinking-glow {
+    0%,
+    100% {
+        opacity: 0.82;
+        transform: scale(0.94);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1.12);
+    }
 }
 
 .pudding-title-edit-input {

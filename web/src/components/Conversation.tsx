@@ -24,7 +24,7 @@ export function Conversation({ token, session }: { token: string; session: Sessi
           <div className="h-6 bg-gradient-to-b from-background to-transparent" />
         </ChatColumn>
       </div>
-      <Transcript submitError={submitError} token={token} sessionID={session.id} />
+      <Transcript submitError={submitError} token={token} sessionID={session.id} sessionRunning={session.running} />
       <Composer token={token} session={session} onSubmitError={setSubmitError} />
     </div>
   );

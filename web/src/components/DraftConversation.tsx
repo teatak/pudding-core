@@ -224,7 +224,10 @@ function DraftComposer({
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const addPendingUser = useOverlayStore((state) => state.addPendingUser);
+  const acceptSubmittingTurn = useOverlayStore((state) => state.acceptSubmittingTurn);
+  const clearSubmittingTurn = useOverlayStore((state) => state.clearSubmittingTurn);
   const removePendingUser = useOverlayStore((state) => state.removePendingUser);
+  const startSubmittingTurn = useOverlayStore((state) => state.startSubmittingTurn);
   const draftText = useDraftStore((state) => state.text);
   const setDraftText = useDraftStore((state) => state.setText);
   const clearDraft = useDraftStore((state) => state.clear);
@@ -294,12 +297,15 @@ function DraftComposer({
         text: value.text,
         createdAt: new Date().toISOString(),
       });
+      startSubmittingTurn(created.id, clientMessageID);
       try {
-        await submitMessage(token, created.id, { clientMessageID, text: value.text });
+        const result = await submitMessage(token, created.id, { clientMessageID, text: value.text });
+        acceptSubmittingTurn(created.id, clientMessageID, result.turnID);
       } catch (error) {
         // 只有拿到后端明确拒绝的响应时才回滚 draft session。
         // 网络中断/响应解析失败可能发生在后端已经 accepted 之后,这类错误保留 session 交给 SSE/query 对账。
         if (isRejectedSubmit(error)) {
+          clearSubmittingTurn(created.id, clientMessageID);
           removePendingUser(created.id, clientMessageID);
           try {
             await deleteSession(token, created.id);
