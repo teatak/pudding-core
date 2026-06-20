@@ -161,9 +161,6 @@ func EffectiveAPIKey(p *store.ProviderProfile) string {
 	if p.APIKey != "" {
 		return p.APIKey
 	}
-	if p.APIKeyEnv != "" {
-		return os.Getenv(p.APIKeyEnv)
-	}
 	return ""
 }
 

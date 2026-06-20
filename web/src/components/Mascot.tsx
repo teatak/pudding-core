@@ -277,12 +277,12 @@ export function Mascot({
       rootRef.current,
       [
         { offset: CLICK_KEY_TIMES.start, transform: "translateY(0%) rotateZ(0deg) scale(1, 1)" },
-        { offset: CLICK_KEY_TIMES.hit, transform: "translateY(4.5%) rotateZ(-1.1deg) scale(1.072, 0.95)" },
-        { offset: CLICK_KEY_TIMES.rebound, transform: "translateY(-2.5%) rotateZ(0.85deg) scale(0.972, 1.026)" },
-        { offset: CLICK_KEY_TIMES.echo1, transform: "translateY(1.6%) rotateZ(-0.52deg) scale(1.022, 0.988)" },
-        { offset: CLICK_KEY_TIMES.echo2, transform: "translateY(-1%) rotateZ(0.32deg) scale(0.986, 1.012)" },
-        { offset: CLICK_KEY_TIMES.echo3, transform: "translateY(0.8%) rotateZ(-0.24deg) scale(1.011, 0.993)" },
-        { offset: CLICK_KEY_TIMES.settle, transform: "translateY(-0.4%) rotateZ(0.13deg) scale(0.995, 1.005)" },
+        { offset: CLICK_KEY_TIMES.hit, transform: "translateY(2.2%) rotateZ(-1.1deg) scale(1.13, 0.908)" },
+        { offset: CLICK_KEY_TIMES.rebound, transform: "translateY(-2.5%) rotateZ(0.85deg) scale(0.924, 1.074)" },
+        { offset: CLICK_KEY_TIMES.echo1, transform: "translateY(0.8%) rotateZ(-0.52deg) scale(1.058, 0.966)" },
+        { offset: CLICK_KEY_TIMES.echo2, transform: "translateY(-1%) rotateZ(0.32deg) scale(0.958, 1.04)" },
+        { offset: CLICK_KEY_TIMES.echo3, transform: "translateY(0.4%) rotateZ(-0.24deg) scale(1.032, 0.978)" },
+        { offset: CLICK_KEY_TIMES.settle, transform: "translateY(-0.4%) rotateZ(0.13deg) scale(0.986, 1.014)" },
         { offset: CLICK_KEY_TIMES.end, transform: "translateY(0%) rotateZ(0deg) scale(1, 1)" },
       ],
       {

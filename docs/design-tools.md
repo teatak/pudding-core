@@ -167,7 +167,7 @@ type Runner interface {
 - 官方 `modelcontextprotocol/go-sdk` 做 client;transport 支持 stdio
   (本地命令)与 streamable HTTP。
 - 新表 `mcp_servers`:name(唯一)/ transport(stdio|http)/ command / args /
-  url / env(JSON,**只进不出**,同 api_key 纪律)/ enabled / 时间戳。
+  url / env(JSON,敏感字段本地保存,设置界面可编辑回显)/ enabled / 时间戳。
 - daemon 启动与配置变更时建立连接,`tools/list` 聚合进 Runner;
   `tools/call` 透传。连接失败不阻塞 daemon,该 server 工具缺席并在
   API 状态字段中暴露原因。

@@ -232,7 +232,7 @@ Provider 路由:
 - 存储落点:
   - `session.provider` 存 `sessions` 表,与 `model` 并列,`PATCH /sessions/{id}` 可改;
   - profile 存 `<home>/config/profiles.yaml`;api_key 安全性同第 9 节
-    (home 0600,桌面阶段评估 keychain;优先支持 `api_key_env`);
+    (home 0600,桌面阶段评估 keychain);
   - turn 实际使用的 provider/model/model_config 在 `turns` 表落快照列,
     审计、重放与后续工具循环稳定性用;messages 不存 provider 信息。
 - `provider.Request.Config` 是 provider-neutral 的 effective config:
@@ -249,14 +249,14 @@ ALTER TABLE turns    ADD COLUMN model    TEXT NOT NULL DEFAULT '';
 ```
 
 ```text
-GET    /providers            # 列表,api_key 脱敏(只回 apiKeySet/apiKeyEnv)
+GET    /providers            # 列表,返回本地配置中的 apiKey 与 apiKeySet
 POST   /providers
-GET    /providers/{name}     # 同样脱敏
+GET    /providers/{name}     # 返回本地配置中的 apiKey 与 apiKeySet
 PATCH  /providers/{name}     # api_key 传非空才覆盖
 DELETE /providers/{name}
 ```
 
-- api_key 只进不出:任何读端点不回明文,UI 只显示"已设置"。
+- api_key 存在本地配置中,设置 UI 编辑时可回显;apiKeySet 仅用于列表状态。
 - `sessions.provider` 不设外键:profile 被删后悬空引用按
   "provider not configured" 落 turn.failed,与未配置行为一致,不级联改 session。
 - 不存在默认 profile 或 profile 默认模型;新建 draft 只使用前端本地的"上次选用模型"。

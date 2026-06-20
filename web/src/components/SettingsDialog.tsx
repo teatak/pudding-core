@@ -341,9 +341,9 @@ function ProviderSettings({ createNonce = 0, token }: { createNonce?: number; to
                         <span
                           className={cn(
                             "size-2 shrink-0 rounded-full",
-                            profile.apiKeySet || profile.apiKeyEnv ? "bg-success" : "bg-warning",
+                            profile.apiKeySet ? "bg-success" : "bg-warning",
                           )}
-                          title={profile.apiKeySet || profile.apiKeyEnv ? t("provider.keySet") : t("provider.keyMissing")}
+                          title={profile.apiKeySet ? t("provider.keySet") : t("provider.keyMissing")}
                         />
                       </ItemTitle>
                       <ItemDescription className="truncate text-xs">

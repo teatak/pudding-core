@@ -31,18 +31,17 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 	}
 
 	if err := m.PutProviderProfile(ctx, &store.ProviderProfile{
-		ID:        "openai",
-		Name:      "OpenAI",
-		Type:      "openai-responses",
-		BaseURL:   "https://api.openai.com/v1",
-		APIKeyEnv: "PUDDING_TEST_OPENAI_KEY",
+		ID:      "openai",
+		Name:    "OpenAI",
+		Type:    "openai-responses",
+		BaseURL: "https://api.openai.com/v1",
+		APIKey:  "secret",
 		Models: []store.ProviderModel{
 			{ID: "gpt-5.5", ContextWindow: 1050000, Capabilities: &store.ModelCaps{Image: true, Audio: false, Tools: true}},
 		},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PUDDING_TEST_OPENAI_KEY", "secret")
 
 	p, err := m.GetProviderProfile(ctx, "openai")
 	if err != nil {

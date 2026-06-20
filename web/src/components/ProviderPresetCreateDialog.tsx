@@ -176,7 +176,6 @@ export function ProviderPresetCreateDialog({
           type: variant.type,
           baseURL: variant.baseURL,
           apiKey: apiKey.trim(),
-          apiKeyEnv: "",
           models: variant.models,
         }),
       );
@@ -242,9 +241,12 @@ export function ProviderPresetCreateDialog({
             )
           ) : null}
 
-          <div className="grid gap-2">
-            <Label>API Key</Label>
+          <Field className="gap-2 rounded-none border-0 bg-transparent p-0 hover:bg-transparent">
+            <FieldLabel className="w-auto cursor-default text-sm font-medium" htmlFor="provider-preset-api-key">
+              API Key
+            </FieldLabel>
             <Input
+              id="provider-preset-api-key"
               autoComplete="off"
               placeholder={variant?.apiKeyOptional ? t("provider.apiKeyOptional") : "sk-..."}
               type="password"
@@ -254,7 +256,7 @@ export function ProviderPresetCreateDialog({
                 setLocalError("");
               }}
             />
-          </div>
+          </Field>
 
           <div className="text-xs text-muted-foreground">
             {t("provider.profileID")}: {profileID}

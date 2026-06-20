@@ -65,7 +65,7 @@ func (r *Registry) Resolve(ctx context.Context, name string) (provider.Client, e
 	}
 
 	apiKey := config.EffectiveAPIKey(p)
-	fingerprint := p.Type + "\x00" + p.BaseURL + "\x00" + apiKey + "\x00" + p.APIKeyEnv
+	fingerprint := p.Type + "\x00" + p.BaseURL + "\x00" + apiKey
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if c, ok := r.cache[name]; ok && c.fingerprint == fingerprint {

@@ -28,7 +28,7 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 | --- | --- | --- | --- |
 | Session | `store.Session` | `session` | id, title, provider, model, createdAt, updatedAt, running(读取时派生) |
 | Message | `store.Message` | `message` | id, sessionID, turnID, role, text, clientMessageID?, interrupted?, createdAt |
-| ProviderProfile(脱敏视图) | `api.providerProfileView` | `providerProfile` | id, name, type, baseURL, apiKeySet, apiKeyEnv?, models |
+| ProviderProfile(设置视图) | `api.providerProfileView` | `providerProfile` | id, name, type, baseURL, apiKey?, apiKeySet, models |
 
 时间一律 RFC3339 字符串(Go `time.Time` 默认 JSON 编码)。
 
@@ -51,10 +51,10 @@ web 契约 `providerProfile.type` 与设置表单下拉;不在枚举内的 type 
 | `GET /sessions/{id}/messages` | — | `{messages: []}` | 404 |
 | `GET /settings` | — | `{settings: {}}` | — |
 | `PUT /settings` | `{k: v}` | 204 | 400 |
-| `GET /providers` | — | `{providers: []}`(脱敏) | — |
-| `POST /providers` | `{id, name, type, baseURL?, apiKey?, apiKeyEnv?, models?}` | 201 profile | 400 / 409 `profile_exists` |
-| `GET /providers/{name}` | — | profile(脱敏) | 404 |
-| `PATCH /providers/{name}` | `{name?, type?, baseURL?, apiKey?, apiKeyEnv?, models?}`,apiKey 非空才覆盖 | 200 profile | 400 / 404 |
+| `GET /providers` | — | `{providers: []}` | — |
+| `POST /providers` | `{id, name, type, baseURL?, apiKey?, models?}` | 201 profile | 400 / 409 `profile_exists` |
+| `GET /providers/{name}` | — | profile | 404 |
+| `PATCH /providers/{name}` | `{name?, type?, baseURL?, apiKey?, models?}`,apiKey 非空才覆盖 | 200 profile | 400 / 404 |
 | `DELETE /providers/{name}` | — | 204 | 404 |
 | `GET /providers/{name}/models` | — | `{models: []}`(代理真实端点,60s 缓存)。**仅配置表单的候选来源**,选择器只显示 profile.models | 404 / 502 |
 

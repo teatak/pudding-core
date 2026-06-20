@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, Loader2, Plus, Trash } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Check, Eye, EyeOff, Loader2, Plus, Trash } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -28,10 +28,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useI18n } from "@/i18n";
+import { cn } from "@/lib/utils";
+import { generateProviderProfileID } from "@/provider/presets";
 
 const providerTypeSchema = z.enum(["openai-compatible", "openai-responses", "google", "anthropic"]);
 
@@ -56,7 +59,6 @@ const providerFormSchema = z.object({
   type: providerTypeSchema,
   baseURL: z.string().optional(),
   apiKey: z.string().optional(),
-  apiKeyEnv: z.string().optional(),
   models: z.array(modelFormSchema).min(1),
 });
 
@@ -84,20 +86,32 @@ export function ProviderProfileEditorDialog({
   const { t } = useI18n();
   const editingID = profile?.id || null;
   const [candidatesLoading, setCandidatesLoading] = useState(false);
+  const [apiKeyVisible, setAPIKeyVisible] = useState(false);
   const form = useForm<ProviderProfileEditorValue>({
     resolver: zodResolver(providerFormSchema),
     defaultValues: emptyProviderProfileForm(),
   });
   const fields = useFieldArray({ control: form.control, name: "models" });
   const providerType = form.watch("type");
+  const profileID = form.watch("id");
   const existingIDs = useMemo(() => profiles.map((item) => item.id), [profiles]);
+  const showAPIKeyToggle = Boolean(editingID);
 
   useEffect(() => {
     if (!open) {
       return;
     }
-    form.reset(profile ? providerToForm(profile) : initialValue || emptyProviderProfileForm());
-  }, [form, initialValue, open, profile]);
+    const nextValue = profile
+      ? providerToForm(profile)
+      : initialValue
+        ? {
+            ...initialValue,
+            id: initialValue.id || generateProviderProfileID(profiles, initialValue.brand || "custom"),
+          }
+        : emptyProviderProfileForm(generateProviderProfileID(profiles, "custom"));
+    form.reset(nextValue);
+    setAPIKeyVisible(false);
+  }, [form, initialValue, open, profile, profiles]);
 
   const createMutation = useMutation({
     mutationFn: (value: ProviderProfileEditorValue) => createProvider(token, cleanCreateProvider(value)),
@@ -176,6 +190,7 @@ export function ProviderProfileEditorDialog({
         </DialogHeader>
         <form className="contents" onSubmit={form.handleSubmit(submitProvider)}>
           <input type="hidden" {...form.register("brand")} />
+          <input type="hidden" {...form.register("id")} />
           <div className="min-h-0 overflow-y-auto border-y px-5 py-4 [mask-image:linear-gradient(to_bottom,transparent_0,black_16px,black_calc(100%-16px),transparent_100%)]">
             <div className="grid gap-4">
               {form.formState.errors.root?.message ? (
@@ -184,23 +199,27 @@ export function ProviderProfileEditorDialog({
                 </Alert>
               ) : null}
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="grid gap-2">
-                  <Label htmlFor="provider-id">{t("provider.id")}</Label>
-                  <Input id="provider-id" disabled={Boolean(editingID)} {...form.register("id")} />
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(15rem,22rem)]">
+                <Field className="gap-2 rounded-none border-0 bg-transparent p-0 hover:bg-transparent">
+                  <FieldLabel className="w-auto cursor-default text-sm font-medium" htmlFor="provider-name">
+                    {t("provider.name")}
+                  </FieldLabel>
+                  <Input id="provider-name" {...form.register("name")} />
                   {form.formState.errors.id?.message ? (
                     <div className="text-xs text-destructive">{form.formState.errors.id.message}</div>
                   ) : null}
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="provider-name">{t("provider.name")}</Label>
-                  <Input id="provider-name" {...form.register("name")} />
-                </div>
+                </Field>
+                <Field className="gap-2 rounded-none border-0 bg-transparent p-0 hover:bg-transparent">
+                  <FieldLabel className="w-auto cursor-default text-sm font-medium">{t("provider.profileID")}</FieldLabel>
+                  <div className="flex h-9 min-w-0 items-center rounded-md border bg-muted/30 px-3 text-sm text-muted-foreground">
+                    <span className="truncate font-mono">{profileID}</span>
+                  </div>
+                </Field>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
-                <div className="grid gap-2">
-                  <Label>{t("provider.type")}</Label>
+                <Field className="gap-2 rounded-none border-0 bg-transparent p-0 hover:bg-transparent">
+                  <FieldLabel className="w-auto cursor-default text-sm font-medium">{t("provider.type")}</FieldLabel>
                   <Select
                     value={providerType}
                     onValueChange={(value) =>
@@ -217,29 +236,40 @@ export function ProviderProfileEditorDialog({
                       <SelectItem value="anthropic">Anthropic</SelectItem>
                     </SelectContent>
                   </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="provider-base-url">Base URL</Label>
+                </Field>
+                <Field className="gap-2 rounded-none border-0 bg-transparent p-0 hover:bg-transparent">
+                  <FieldLabel className="w-auto cursor-default text-sm font-medium" htmlFor="provider-base-url">
+                    Base URL
+                  </FieldLabel>
                   <Input id="provider-base-url" placeholder="https://api.openai.com/v1" {...form.register("baseURL")} />
-                </div>
+                </Field>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="grid gap-2">
-                  <Label htmlFor="provider-api-key">API Key</Label>
+              <Field className="gap-2 rounded-none border-0 bg-transparent p-0 hover:bg-transparent">
+                <FieldLabel className="w-auto cursor-default text-sm font-medium" htmlFor="provider-api-key">
+                  API Key
+                </FieldLabel>
+                <div className="relative">
                   <Input
                     id="provider-api-key"
+                    className={showAPIKeyToggle ? "pr-9" : undefined}
                     autoComplete="off"
-                    placeholder={editingID ? t("provider.apiKeyKeep") : "sk-..."}
-                    type="password"
+                    placeholder={showAPIKeyToggle && profile?.apiKeySet ? "••••••••••••" : "sk-..."}
+                    type={showAPIKeyToggle && !apiKeyVisible ? "password" : "text"}
                     {...form.register("apiKey")}
                   />
+                  {showAPIKeyToggle ? (
+                    <button
+                      aria-label={apiKeyVisible ? "Hide API Key" : "Show API Key"}
+                      className="absolute inset-y-0 right-1 my-auto flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+                      type="button"
+                      onClick={() => setAPIKeyVisible((visible) => !visible)}
+                    >
+                      {apiKeyVisible ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                    </button>
+                  ) : null}
                 </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="provider-api-key-env">{t("provider.apiKeyEnv")}</Label>
-                  <Input id="provider-api-key-env" placeholder="OPENAI_API_KEY" {...form.register("apiKeyEnv")} />
-                </div>
-              </div>
+              </Field>
 
               <div className="grid gap-2">
                 <div className="flex items-center justify-between gap-2">
@@ -272,7 +302,7 @@ export function ProviderProfileEditorDialog({
           </div>
           <DialogFooter className="m-0 rounded-none">
             <Button disabled={saving} type="submit">
-              {saving ? <Loader2 className="animate-spin" /> : <KeyRound />}
+              {saving ? <Loader2 className="animate-spin" /> : <Check />}
               {t("common.save")}
             </Button>
           </DialogFooter>
@@ -315,18 +345,15 @@ function ModelEditor({
       </div>
 
       <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_8rem]">
-        <div className="grid gap-2">
-          <Label>{t("provider.modelID")}</Label>
+        <PlainField label={t("provider.modelID")}>
           <Input {...form.register(`${prefix}.id`)} />
-        </div>
-        <div className="grid gap-2">
-          <Label>{t("provider.modelName")}</Label>
+        </PlainField>
+        <PlainField label={t("provider.modelName")}>
           <Input {...form.register(`${prefix}.name`)} />
-        </div>
-        <div className="grid gap-2">
-          <Label>{t("provider.contextWindow")}</Label>
+        </PlainField>
+        <PlainField label={t("provider.contextWindow")}>
           <Input inputMode="numeric" {...form.register(`${prefix}.contextWindow`)} />
-        </div>
+        </PlainField>
       </div>
 
       <div className="flex flex-wrap gap-4">
@@ -336,40 +363,51 @@ function ModelEditor({
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <div className="grid gap-2">
-          <Label>{t("provider.temperature")}</Label>
+        <PlainField label={t("provider.temperature")}>
           <Input inputMode="decimal" placeholder="0.7" {...form.register(`${prefix}.temperature`)} />
-        </div>
+        </PlainField>
         {providerType === "anthropic" ? (
-          <div className="grid gap-2">
-            <Label>{t("provider.maxOutput")}</Label>
+          <PlainField label={t("provider.maxOutput")}>
             <Input inputMode="numeric" placeholder="4096" {...form.register(`${prefix}.anthropicMaxTokens`)} />
-          </div>
+          </PlainField>
         ) : providerType === "google" ? (
-          <div className="grid gap-2">
-            <Label>{t("provider.maxOutput")}</Label>
+          <PlainField label={t("provider.maxOutput")}>
             <Input inputMode="numeric" {...form.register(`${prefix}.maxCompletionTokens`)} />
-          </div>
+          </PlainField>
         ) : (
           <>
-            <div className="grid gap-2">
-              <Label>{t("provider.reasoningEffort")}</Label>
+            <PlainField label={t("provider.reasoningEffort")}>
               <Input placeholder="low / medium / high" {...form.register(`${prefix}.reasoningEffort`)} />
-            </div>
-            <div className="grid gap-2">
-              <Label>{t("provider.maxOutput")}</Label>
+            </PlainField>
+            <PlainField label={t("provider.maxOutput")}>
               <Input inputMode="numeric" {...form.register(`${prefix}.maxCompletionTokens`)} />
-            </div>
+            </PlainField>
           </>
         )}
       </div>
       {providerType !== "anthropic" && providerType !== "google" ? (
-        <div className="grid gap-2 sm:w-40">
-          <Label>{t("provider.maxToolLoops")}</Label>
+        <PlainField className="sm:w-40" label={t("provider.maxToolLoops")}>
           <Input inputMode="numeric" {...form.register(`${prefix}.maxToolLoops`)} />
-        </div>
+        </PlainField>
       ) : null}
     </div>
+  );
+}
+
+function PlainField({
+  children,
+  className,
+  label,
+}: {
+  children: ReactNode;
+  className?: string;
+  label: string;
+}) {
+  return (
+    <Field className={cn("gap-2 rounded-none border-0 bg-transparent p-0 hover:bg-transparent", className)}>
+      <FieldLabel className="w-auto cursor-default text-sm font-medium">{label}</FieldLabel>
+      {children}
+    </Field>
   );
 }
 
@@ -390,15 +428,14 @@ function CheckField({
   );
 }
 
-export function emptyProviderProfileForm(): ProviderProfileEditorValue {
+export function emptyProviderProfileForm(id = ""): ProviderProfileEditorValue {
   return {
-    id: "",
+    id,
     name: "",
     brand: "",
     type: "openai-compatible",
     baseURL: "",
     apiKey: "",
-    apiKeyEnv: "",
     models: [emptyModel()],
   };
 }
@@ -410,7 +447,7 @@ export function cloneProviderProfileForm(
 ): ProviderProfileEditorValue {
   return {
     ...providerToForm(profile),
-    id: uniqueProfileID(profile.id, profiles.map((item) => item.id)),
+    id: generateProviderProfileID(profiles, profile.brand || profile.id || "custom"),
     name: `${profile.name} ${copySuffix}`,
     brand: profile.brand || "",
     apiKey: "",
@@ -440,8 +477,7 @@ function providerToForm(profile: ProviderProfile): ProviderProfileEditorValue {
     brand: profile.brand || "",
     type: profile.type,
     baseURL: profile.baseURL,
-    apiKey: "",
-    apiKeyEnv: profile.apiKeyEnv || "",
+    apiKey: profile.apiKey || "",
     models: profile.models.length > 0 ? profile.models.map(modelToForm) : [emptyModel()],
   };
 }
@@ -471,7 +507,6 @@ function cleanCreateProvider(value: ProviderProfileEditorValue) {
     type: value.type,
     baseURL: value.baseURL?.trim(),
     apiKey: value.apiKey?.trim(),
-    apiKeyEnv: value.apiKeyEnv?.trim(),
     models: value.models.map((model) => cleanModel(model, value.type)),
   });
 }
@@ -483,7 +518,6 @@ function cleanPatchProvider(value: ProviderProfileEditorValue) {
     type: value.type,
     baseURL: value.baseURL?.trim(),
     apiKey: value.apiKey?.trim() || undefined,
-    apiKeyEnv: value.apiKeyEnv?.trim(),
     models: value.models.map((model) => cleanModel(model, value.type)),
   });
 }
@@ -546,22 +580,4 @@ function numberValue(value: string | undefined) {
 
 function compactOptions(options: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined && value !== ""));
-}
-
-function uniqueProfileID(baseID: string, existingIDs: string[]) {
-  const existing = new Set(existingIDs);
-  if (baseID && !existing.has(baseID)) {
-    return baseID;
-  }
-  const base = `${baseID || "profile"}-copy`;
-  if (!existing.has(base)) {
-    return base;
-  }
-  for (let index = 2; index < 1000; index += 1) {
-    const candidate = `${base}-${index}`;
-    if (!existing.has(candidate)) {
-      return candidate;
-    }
-  }
-  return `${base}-${Date.now()}`;
 }

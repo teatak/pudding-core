@@ -16,16 +16,16 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-// providerProfileView 是 profile 的脱敏响应形状:api_key 只进不出
-// (docs/technology-decisions.md 第 5 节),读端点只回 apiKeySet。
+// providerProfileView 是 profile 的响应形状:api_key 存在本地配置中,
+// 允许设置界面编辑时回显;apiKeySet 用于列表状态点。
 type providerProfileView struct {
 	ID        string                `json:"id"`
 	Name      string                `json:"name"`
 	Brand     string                `json:"brand,omitempty"`
 	Type      string                `json:"type"`
 	BaseURL   string                `json:"baseURL"`
+	APIKey    string                `json:"apiKey,omitempty"`
 	APIKeySet bool                  `json:"apiKeySet"`
-	APIKeyEnv string                `json:"apiKeyEnv,omitempty"`
 	Models    []store.ProviderModel `json:"models"`
 }
 
@@ -36,21 +36,20 @@ func viewProfile(p *store.ProviderProfile) providerProfileView {
 		Brand:     strings.TrimSpace(p.Brand),
 		Type:      p.Type,
 		BaseURL:   p.BaseURL,
+		APIKey:    p.APIKey,
 		APIKeySet: config.EffectiveAPIKey(p) != "",
-		APIKeyEnv: p.APIKeyEnv,
 		Models:    append([]store.ProviderModel{}, p.Models...),
 	}
 }
 
 type createProfileReq struct {
-	ID        string                `json:"id"`
-	Name      string                `json:"name"`
-	Brand     string                `json:"brand"`
-	Type      string                `json:"type"`
-	BaseURL   string                `json:"baseURL"`
-	APIKey    string                `json:"apiKey"`
-	APIKeyEnv string                `json:"apiKeyEnv"`
-	Models    []store.ProviderModel `json:"models"`
+	ID      string                `json:"id"`
+	Name    string                `json:"name"`
+	Brand   string                `json:"brand"`
+	Type    string                `json:"type"`
+	BaseURL string                `json:"baseURL"`
+	APIKey  string                `json:"apiKey"`
+	Models  []store.ProviderModel `json:"models"`
 }
 
 type patchProfileReq struct {
@@ -59,9 +58,8 @@ type patchProfileReq struct {
 	Type    *string `json:"type"`
 	BaseURL *string `json:"baseURL"`
 	// APIKey 传非空才覆盖;清除 key 走 DELETE 后重建。
-	APIKey    *string                `json:"apiKey"`
-	APIKeyEnv *string                `json:"apiKeyEnv"`
-	Models    *[]store.ProviderModel `json:"models"`
+	APIKey *string                `json:"apiKey"`
+	Models *[]store.ProviderModel `json:"models"`
 }
 
 type providerWriter interface {
@@ -110,14 +108,13 @@ func (s *Server) createProvider(c *cart.Context) error {
 		return nil
 	}
 	p := &store.ProviderProfile{
-		ID:        req.ID,
-		Name:      strings.TrimSpace(req.Name),
-		Brand:     strings.TrimSpace(req.Brand),
-		Type:      req.Type,
-		BaseURL:   strings.TrimRight(req.BaseURL, "/"),
-		APIKey:    req.APIKey,
-		APIKeyEnv: strings.TrimSpace(req.APIKeyEnv),
-		Models:    cleanModels(req.Models),
+		ID:      req.ID,
+		Name:    strings.TrimSpace(req.Name),
+		Brand:   strings.TrimSpace(req.Brand),
+		Type:    req.Type,
+		BaseURL: strings.TrimRight(req.BaseURL, "/"),
+		APIKey:  req.APIKey,
+		Models:  cleanModels(req.Models),
 	}
 	if p.Name == "" {
 		p.Name = p.ID
@@ -178,9 +175,6 @@ func (s *Server) patchProvider(c *cart.Context) error {
 	}
 	if req.APIKey != nil && *req.APIKey != "" {
 		p.APIKey = *req.APIKey
-	}
-	if req.APIKeyEnv != nil {
-		p.APIKeyEnv = strings.TrimSpace(*req.APIKeyEnv)
 	}
 	if req.Models != nil {
 		p.Models = cleanModels(*req.Models)

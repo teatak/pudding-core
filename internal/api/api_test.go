@@ -164,7 +164,7 @@ func readSSE(t *testing.T, url string, stopKind string, timeout time.Duration) [
 	return nil
 }
 
-func TestProvidersCRUDRedactsAPIKey(t *testing.T) {
+func TestProvidersCRUDReturnsEditableAPIKey(t *testing.T) {
 	srv, _ := newTestServer(t)
 
 	resp := req(t, http.MethodPost, srv.URL+"/providers", map[string]string{
@@ -178,13 +178,11 @@ func TestProvidersCRUDRedactsAPIKey(t *testing.T) {
 	if created["apiKeySet"] != true {
 		t.Fatalf("want apiKeySet true, got %+v", created)
 	}
+	if created["apiKey"] != "sk-secret" {
+		t.Fatalf("want editable apiKey in response, got %+v", created)
+	}
 	if created["baseURL"] != "https://example.com/v1" {
 		t.Fatalf("baseURL must be trimmed: %+v", created)
-	}
-	for k := range created {
-		if k == "apiKey" {
-			t.Fatal("api key must never appear in responses")
-		}
 	}
 
 	// 重名 409
@@ -211,10 +209,16 @@ func TestProvidersCRUDRedactsAPIKey(t *testing.T) {
 	if patched["apiKeySet"] != true {
 		t.Fatalf("empty apiKey must not clear stored key: %+v", patched)
 	}
+	if patched["apiKey"] != "sk-secret" {
+		t.Fatalf("empty apiKey must keep stored key: %+v", patched)
+	}
 	resp = req(t, http.MethodPatch, srv.URL+"/providers/work", map[string]any{"type": "google", "apiKey": "g-key"})
 	patched = decodeJSON[map[string]any](t, resp)
 	if patched["type"] != "google" {
 		t.Fatalf("type patch failed: %+v", patched)
+	}
+	if patched["apiKey"] != "g-key" {
+		t.Fatalf("apiKey patch failed: %+v", patched)
 	}
 
 	// 列表 + 删除
@@ -222,6 +226,9 @@ func TestProvidersCRUDRedactsAPIKey(t *testing.T) {
 	list := decodeJSON[map[string][]map[string]any](t, resp)
 	if len(list["providers"]) != 1 {
 		t.Fatalf("want 1 profile, got %+v", list)
+	}
+	if list["providers"][0]["apiKey"] != "g-key" {
+		t.Fatalf("list must return editable apiKey: %+v", list)
 	}
 	resp = req(t, http.MethodDelete, srv.URL+"/providers/work", nil)
 	resp.Body.Close()

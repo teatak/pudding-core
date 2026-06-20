@@ -16,7 +16,7 @@ export const session = z.object({
 });
 export type Session = z.infer<typeof session>;
 
-// provider profile 的脱敏视图:api_key 只进不出,读端点只回 apiKeySet
+// provider profile 的设置视图:apiKey 来自本地配置,编辑时可回显;apiKeySet 用于列表状态。
 export const providerType = z.enum(["openai-compatible", "openai-responses", "google", "anthropic"]);
 
 export const providerModel = z.object({
@@ -42,8 +42,8 @@ export const providerProfile = z.object({
   brand: z.string().optional(),
   type: providerType,
   baseURL: z.string(),
+  apiKey: z.string().optional(),
   apiKeySet: z.boolean(),
-  apiKeyEnv: z.string().optional(),
   // 配置的可选模型清单;选择器只显示这里的内容,没有默认模型语义。
   models: z.array(providerModel),
 });
@@ -56,7 +56,6 @@ export const createProviderRequest = z.object({
   type: providerType,
   baseURL: z.string().optional(),
   apiKey: z.string().optional(),
-  apiKeyEnv: z.string().optional(),
   models: z.array(providerModel).optional(),
 });
 
@@ -67,7 +66,6 @@ export const patchProviderRequest = z.object({
   type: providerType.optional(),
   baseURL: z.string().optional(),
   apiKey: z.string().optional(),
-  apiKeyEnv: z.string().optional(),
   models: z.array(providerModel).optional(),
 });
 

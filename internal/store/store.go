@@ -54,7 +54,7 @@ type SessionUpdate struct {
 
 // ProviderProfile 描述一个 LLM 端点实例。新的事实源是 config/profiles.yaml;
 // store 里保留类型是为了让 registry / API / 测试共用契约。
-// APIKey 只进不出:API 层读端点一律脱敏。
+// APIKey 存在本地配置中,API 设置视图会显式映射为 apiKey 用于编辑回显。
 type ProviderProfile struct {
 	ID        string          `json:"id" yaml:"-"`
 	Name      string          `json:"name" yaml:"name,omitempty"`
@@ -62,7 +62,6 @@ type ProviderProfile struct {
 	Type      string          `json:"type" yaml:"type"` // openai-compatible | openai-responses | google | ...
 	BaseURL   string          `json:"baseURL" yaml:"base_url,omitempty"`
 	APIKey    string          `json:"-" yaml:"api_key,omitempty"`
-	APIKeyEnv string          `json:"apiKeyEnv,omitempty" yaml:"api_key_env,omitempty"`
 	Models    []ProviderModel `json:"models" yaml:"models"`
 	CreatedAt time.Time       `json:"createdAt,omitempty" yaml:"-"`
 	UpdatedAt time.Time       `json:"updatedAt,omitempty" yaml:"-"`
