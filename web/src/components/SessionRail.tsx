@@ -683,14 +683,7 @@ function RailPanel({
       clearDragState();
       return;
     }
-    if (!target) {
-      if (session.pinned) {
-        onPinChange(session.id, false, 0);
-      }
-      clearDragState();
-      return;
-    }
-    if (target.group === "recents") {
+    if (!target || target.group !== "pinned") {
       if (session.pinned) {
         onPinChange(session.id, false, 0);
       }
@@ -786,11 +779,7 @@ function RailPanel({
               <SidebarGroup>
                 <SidebarGroupLabel>{t("session.recents")}</SidebarGroupLabel>
                 <SidebarGroupContent
-                  className={cn(
-                    draggingSessionID && "min-h-8",
-                    dragTarget?.group === "recents" &&
-                      "rounded-md outline outline-1 outline-dashed outline-sidebar-ring/70",
-                  )}
+                  className={cn(draggingSessionID && "min-h-8")}
                   data-session-drop-group="recents"
                 >
                   <SessionItems

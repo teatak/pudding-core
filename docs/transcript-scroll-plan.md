@@ -5,8 +5,8 @@
 
 ## 0. 当前进度
 
-- P0:bottom mode + 分屏 SSE 边界已实现,还需要继续手测分屏 resize / streaming 场景。
-- P2:上滑历史分页 + prepend anchor 已实现,还需要继续手测长会话 / 分屏场景。
+- P0:bottom mode + 分屏 SSE 边界已实现,desktop resize / streaming 场景已按当前策略手测稳定。
+- P2:上滑历史分页 + prepend anchor 已实现,长会话 resize 锚点策略已按当前方案收口。
 - 下一步回到 P1:thought/tool parts 基础协议与渲染。
 
 ## 1. 当前状态
@@ -172,8 +172,9 @@ bottom mode 下,需要把"贴底"当成一个短暂稳定过程:
 
 - 在 `useLayoutEffect` 里先同步贴一次,避免一帧闪动。
 - `ResizeObserver` 同时观察 viewport 和 content。
-- resize / split drag / streaming 大 chunk 时,允许在后续 1-2 个 rAF 里再次校准。
+- resize / split drag / streaming 大 chunk 时,允许在后续多帧 rAF 里再次校准;desktop 快速 resize 下以较长稳定窗口兜住 WKWebView 延迟 reflow。
 - 只在 bottom mode 做连续校准,history mode 不抢滚动。
+- 只有真实用户滚动输入(wheel / touch / pointer / 非输入框键盘滚动)才能让 bottom 退到 history;resize / programmatic scroll 不打断贴底。
 
 不要使用 smooth scroll。聊天底部跟随应该是 layout correction,不是动画。
 
@@ -196,8 +197,11 @@ type ScrollAnchor = {
 
 捕获策略:
 
-- 取 viewport 顶部下方第一个可见 item。
-- 记录它相对 viewport 的 offset。
+- history 锚点优先锚 assistant turn 顶部,且只有该顶部在 viewport 内才捕获。
+- 超长 assistant 的顶部已经滚出 viewport 时,不继续锚它,避免负 offset 过大导致 resize 乱跳。
+- 用户真实滚动导致没有可锚 assistant 顶部时,清空锚点,等待下一个 assistant 顶部进入 viewport。
+- resize / layout 导致的短暂空窗不清旧锚;若旧锚恢复失败但新 assistant 顶部进入 viewport,立刻捕获新锚。
+- 记录锚点相对 viewport 的 offset。
 
 恢复策略:
 
@@ -209,6 +213,11 @@ type ScrollAnchor = {
 - history mode resize。
 - prepend older messages。
 - terminal refetch 导致 overlay -> canonical 替换。
+
+不适用:
+
+- 不锚超长 assistant 中段。
+- 暂不做 text-node / caret 级锚点;如果后续 prepend 在无 assistant 顶部场景仍跳动,再补 `scrollHeight` delta 兜底。
 
 ### 3.5 SSE 订阅所有权
 
