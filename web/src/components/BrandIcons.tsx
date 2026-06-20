@@ -168,8 +168,8 @@ export function QwenIcon({ className }: { className?: string }) {
 }
 
 export function MoonshotIcon({ className }: { className?: string }) {
-  // Moonshot Kimi 没有官方 logo SVG(simple-icons 不收录),用品牌深蓝紫
-  // #1A237E + 白色 "K" 字样作 fallback。fontSize 13 跟 MimoIcon 一致。
+  // Kimi 24px app-icon variant. The source mark is a wordmark glyph; this keeps
+  // the recognizable K form without the tiny corner accent that reads noisy here.
   return (
     <svg
       viewBox="0 0 24 24"
@@ -177,18 +177,7 @@ export function MoonshotIcon({ className }: { className?: string }) {
       className={className}
       aria-hidden
     >
-      <rect width="24" height="24" rx="4" fill="#1A237E" />
-      <text
-        x="12"
-        y="17"
-        textAnchor="middle"
-        fontFamily="system-ui, -apple-system, 'Helvetica Neue', sans-serif"
-        fontSize="13"
-        fontWeight="700"
-        fill="#ffffff"
-      >
-        K
-      </text>
+      <path d="M6.15 5.6h1.8c.18 0 .33.15.33.34v5.03c0 .28.34.42.54.23l5.7-5.5c.06-.06.15-.1.24-.1h2.86c.29 0 .43.35.22.54l-5.24 4.96c-.17.16-.16.44.03.58l4.2 3.05c.58.42 1.2.68 1.9.78.16.02.27.16.27.32v2.36c0 .2-.17.35-.37.33a6.85 6.85 0 0 1-3.04-1.12l-4.69-3.43a.36.36 0 0 0-.47.04l-1.98 1.92a.37.37 0 0 0-.11.26v2.58c0 .18-.15.33-.33.33H6.15a.33.33 0 0 1-.33-.33V5.94c0-.19.15-.34.33-.34z" />
     </svg>
   );
 }
@@ -215,27 +204,17 @@ export function GrokIcon({ className }: { className?: string }) {
 }
 
 export function ZhipuIcon({ className }: { className?: string }) {
-  // 智谱 GLM 没有官方 logo SVG(simple-icons 不收录),用品牌蓝 #3859FF + 白
-  // "智" 字样(智谱中文 brand 强,跟 MiMo "Mi" 风格接近 — 国产厂商用中文字)。
+  // Z.ai / GLM 官方 Z 形字标。Source: https://z-cdn.chatglm.cn/z-ai/static/logo.svg
   return (
     <svg
-      viewBox="0 0 24 24"
+      viewBox="0 0 30 30"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
       aria-hidden
     >
-      <rect width="24" height="24" rx="4" fill="#3859FF" />
-      <text
-        x="12"
-        y="17.5"
-        textAnchor="middle"
-        fontFamily="system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif"
-        fontSize="14"
-        fontWeight="700"
-        fill="#ffffff"
-      >
-        智
-      </text>
+      <path d="m15.47 7.1-1.3 1.85c-.2.29-.54.47-.9.47h-7.1V7.09c-.01.01 9.3.01 9.3.01z" />
+      <path d="M24.3 7.1 13.14 22.91H5.7L16.86 7.1z" />
+      <path d="m14.53 22.91 1.31-1.86c.2-.29.54-.47.9-.47h7.09v2.33z" />
     </svg>
   );
 }
@@ -288,8 +267,8 @@ const brandBackgrounds: Record<string, string> = {
   openai: "#0D0D0D",
   qwen: "#615CED",
   mimo: "#FF6900",
-  moonshot: "#1A237E",
-  zhipu: "#3859FF",
+  moonshot: "#010103",
+  zhipu: "#2D2D2D",
   openrouter: "#000000",
   ollama: "#111111",
   claude: "#D97757",
