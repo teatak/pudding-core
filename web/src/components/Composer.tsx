@@ -14,10 +14,11 @@ import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 
-import { APIError, cancelTurn, submitMessage, updateSession, type Session } from "@/api/client";
+import { APIError, cancelTurn, getTurn, submitMessage, updateSession, type Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
 import { Mascot, type MascotGaze, type MascotGazePoint, type MascotMood } from "@/components/Mascot";
+import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { ModelPicker } from "@/components/ModelPicker";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -32,7 +33,7 @@ const composerSchema = z.object({
   text: z.string(),
 });
 
-const MASCOT_INPUT_PITCH_BIAS = 0.45;
+const MASCOT_INPUT_PITCH_BIAS = 0.65;
 
 type ComposerProps = {
   token: string;
@@ -83,6 +84,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
       addPendingUser({
         sessionID,
         clientMessageID,
+        status: "submitting",
         text: value.text,
         createdAt: new Date().toISOString(),
       });
@@ -90,17 +92,30 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
         await updateSession(token, sessionID, { provider, model });
       }
       const result = await submitMessage(token, sessionID, { clientMessageID, text: value.text });
-      acceptSubmittingTurn(sessionID, clientMessageID, result.turnID);
+      if (result.queued || !result.turnID) {
+        clearSubmittingTurn(sessionID, clientMessageID);
+      } else {
+        acceptSubmittingTurn(sessionID, clientMessageID, result.turnID);
+      }
       return result;
     },
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       onSubmitError?.(null);
       draftIDRef.current = crypto.randomUUID();
       form.reset({ text: "" });
       // 标题自动生成由后端 titler 负责(provisional + LLM,session.titled
       // 事件回推),前端不写标题
-      await queryClient.invalidateQueries({ queryKey: queryKeys.turns(sessionID) });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.messages(sessionID) });
+      if (result.duplicate && result.turnID) {
+        try {
+          const turn = await getTurn(token, sessionID, result.turnID);
+          queryClient.setQueryData<TurnsInfiniteData>(queryKeys.turns(sessionID), (previous) =>
+            upsertTurnIntoPages(previous, turn),
+          );
+        } catch (error) {
+          console.warn("failed to sync duplicate turn", error);
+        }
+      }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.queuedInputs(sessionID) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
     },
     onError: (error) => {
@@ -135,7 +150,9 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
     }
     onSubmitError?.(null);
     setCancelLocked(true);
-    startSubmittingTurn(sessionID, draftIDRef.current);
+    if (!running) {
+      startSubmittingTurn(sessionID, draftIDRef.current);
+    }
     submitMutation.mutate({ text });
   };
 
@@ -299,23 +316,22 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
                   </TooltipTrigger>
                   <TooltipContent>{t("composer.stop")}</TooltipContent>
                 </Tooltip>
-              ) : (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      aria-label={t("composer.send")}
-                      className="rounded-full disabled:bg-control-disabled disabled:text-background disabled:opacity-100 disabled:shadow-none"
-                      disabled={!sendEnabled}
-                      size="icon"
-                      type="submit"
-                      variant={sendEnabled ? "default" : "secondary"}
-                    >
-                      {submitMutation.isPending ? <Loader2 className="animate-spin" /> : <ArrowUp />}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t("composer.send")}</TooltipContent>
-                </Tooltip>
-              )}
+              ) : null}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    aria-label={t("composer.send")}
+                    className="rounded-full disabled:bg-control-disabled disabled:text-background disabled:opacity-100 disabled:shadow-none"
+                    disabled={!sendEnabled}
+                    size="icon"
+                    type="submit"
+                    variant={sendEnabled ? "default" : "secondary"}
+                  >
+                    {submitMutation.isPending ? <Loader2 className="animate-spin" /> : <ArrowUp />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t("composer.send")}</TooltipContent>
+              </Tooltip>
             </div>
           </div>
           <span className="absolute z-30 size-12 overflow-visible" style={{ left: 6, top: -36 }}>

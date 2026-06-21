@@ -12,6 +12,8 @@ const (
 	TurnCompleted Kind = "turn.completed"
 	TurnFailed    Kind = "turn.failed"
 	TurnCancelled Kind = "turn.cancelled"
+	InputQueued   Kind = "input.queued"
+	InputUpdated  Kind = "input.updated"
 	// SessionTitled:自动标题写回(provisional 与 LLM 正式标题各发一次),
 	// 前端据此刷新会话列表。不落库:标题事实源是 sessions 表,丢事件由
 	// sessions 轮询兜底。
@@ -27,6 +29,8 @@ const (
 //	turn.completed seq, turnID, assistantMessageID
 //	turn.failed    seq, turnID, error       (有部分输出时附 assistantMessageID + interrupted)
 //	turn.cancelled seq, turnID              (有部分输出时附 assistantMessageID + interrupted)
+//	input.queued   seq, clientMessageID, text, status
+//	input.updated  seq, clientMessageID, text, status
 //	ping           —                        (心跳,不落库,无 seq)
 type Event struct {
 	// Seq 是 per-session 单调递增序号,仅落库的 lifecycle 事件持有(>0),
@@ -39,6 +43,8 @@ type Event struct {
 	UserMessageID      string `json:"userMessageID,omitempty"`
 	Part               string `json:"part,omitempty"` // turn.delta:text|thought
 	Delta              string `json:"delta,omitempty"`
+	Text               string `json:"text,omitempty"`
+	Status             string `json:"status,omitempty"`
 	CallID             string `json:"callID,omitempty"` // turn.tool 专用
 	Name               string `json:"name,omitempty"`
 	Phase              string `json:"phase,omitempty"`

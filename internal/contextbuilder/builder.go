@@ -45,18 +45,37 @@ func (b *Builder) Build(ctx context.Context, sessionID, model string) (provider.
 		System:   system,
 		Messages: make([]provider.Message, 0, len(msgs)),
 	}
+	var assistantParts []provider.Part
+	flushAssistant := func() {
+		if len(assistantParts) == 0 {
+			return
+		}
+		req.Messages = append(req.Messages, provider.Message{
+			Role:  provider.RoleAssistant,
+			Text:  textFromProviderParts(assistantParts),
+			Parts: cloneProviderParts(assistantParts),
+		})
+		assistantParts = nil
+	}
 	for _, m := range msgs {
-		var role provider.Role
 		switch m.Role {
 		case store.RoleUser:
-			role = provider.RoleUser
-		case store.RoleAssistant:
-			role = provider.RoleAssistant
+			flushAssistant()
+			parts := providerParts(m.Parts)
+			req.Messages = append(req.Messages, provider.Message{Role: provider.RoleUser, Text: textFromProviderParts(parts), Parts: parts})
+		case store.RoleAssistant, store.RoleTool:
+			assistantParts = append(assistantParts, providerParts(m.Parts)...)
+		case store.RoleSummary:
+			flushAssistant()
+			parts := providerParts(m.Parts)
+			if len(parts) > 0 {
+				req.Messages = append(req.Messages, provider.Message{Role: provider.RoleAssistant, Text: textFromProviderParts(parts), Parts: parts})
+			}
 		default:
 			continue
 		}
-		req.Messages = append(req.Messages, provider.Message{Role: role, Text: m.Text, Parts: providerParts(m.Parts)})
 	}
+	flushAssistant()
 	return req, nil
 }
 
@@ -81,10 +100,36 @@ func providerParts(parts []store.ContentPart) []provider.Part {
 			out = append(out, provider.Part{
 				Type:    provider.PartToolResult,
 				CallID:  part.CallID,
+				Name:    part.Name,
 				Ok:      part.Ok,
 				Content: part.Content,
 			})
 		}
+	}
+	return out
+}
+
+func textFromProviderParts(parts []provider.Part) string {
+	var text string
+	for _, part := range parts {
+		if part.Type == provider.PartText {
+			text += part.Text
+		}
+	}
+	return text
+}
+
+func cloneProviderParts(parts []provider.Part) []provider.Part {
+	if len(parts) == 0 {
+		return nil
+	}
+	out := make([]provider.Part, 0, len(parts))
+	for _, part := range parts {
+		cp := part
+		if part.Args != nil {
+			cp.Args = append([]byte(nil), part.Args...)
+		}
+		out = append(out, cp)
 	}
 	return out
 }

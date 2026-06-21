@@ -118,6 +118,47 @@ func TestStreamHappyPath(t *testing.T) {
 	}
 }
 
+func TestRequestShapeWithToolHistory(t *testing.T) {
+	var gotBody generateRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, sseFrame([]string{"ok"}, "STOP"))
+	}))
+	defer srv.Close()
+
+	client := New(Config{BaseURL: srv.URL, HTTPClient: srv.Client()})
+	ch, _ := client.Stream(context.Background(), provider.Request{
+		Model: "gemini-3-flash",
+		Messages: []provider.Message{
+			{Role: provider.RoleAssistant, Parts: []provider.Part{
+				{Type: provider.PartToolUse, CallID: "call_1", Name: "builtin_time_get_current", Args: json.RawMessage(`{"timezone":"Asia/Singapore"}`)},
+				{Type: provider.PartToolResult, CallID: "call_1", Name: "builtin_time_get_current", Ok: true, Content: `{"iso":"now"}`},
+			}},
+		},
+	})
+	_, _, _ = collect(t, ch)
+
+	if len(gotBody.Contents) != 2 {
+		t.Fatalf("unexpected contents: %+v", gotBody.Contents)
+	}
+	if gotBody.Contents[0].Role != "model" || len(gotBody.Contents[0].Parts) != 1 || gotBody.Contents[0].Parts[0].FunctionCall == nil {
+		t.Fatalf("functionCall content wrong: %+v", gotBody.Contents[0])
+	}
+	call := gotBody.Contents[0].Parts[0].FunctionCall
+	if call.Name != "builtin_time_get_current" || string(call.Args) != `{"timezone":"Asia/Singapore"}` {
+		t.Fatalf("functionCall wrong: %+v", call)
+	}
+	if gotBody.Contents[1].Role != "user" || len(gotBody.Contents[1].Parts) != 1 || gotBody.Contents[1].Parts[0].FunctionResponse == nil {
+		t.Fatalf("functionResponse content wrong: %+v", gotBody.Contents[1])
+	}
+	resp := gotBody.Contents[1].Parts[0].FunctionResponse
+	if resp.Name != "builtin_time_get_current" || !strings.Contains(string(resp.Response), `"content":"{\"iso\":\"now\"}"`) {
+		t.Fatalf("functionResponse wrong: %+v", resp)
+	}
+}
+
 func TestFunctionCallChunks(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

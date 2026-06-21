@@ -18,6 +18,7 @@ var (
 	// API 层映射为 409(docs/technology-decisions.md 第 14 节)。
 	ErrTurnRunning    = errors.New("store: session has a running turn")
 	ErrInvalidSession = errors.New("store: session provider and model are required")
+	ErrQueueBlocked   = errors.New("store: queued input is editing")
 )
 
 // EventsRetainPerSession 是每个 session 的 lifecycle 事件保留条数。
@@ -165,6 +166,18 @@ type Role string
 const (
 	RoleUser      Role = "user"
 	RoleAssistant Role = "assistant"
+	RoleTool      Role = "tool"
+	RoleSummary   Role = "summary"
+)
+
+type MessageKind string
+
+const (
+	MessageKindText       MessageKind = "text"
+	MessageKindThought    MessageKind = "thought"
+	MessageKindToolUse    MessageKind = "tool_use"
+	MessageKindToolResult MessageKind = "tool_result"
+	MessageKindSummary    MessageKind = "summary"
 )
 
 type ContentPartType string
@@ -191,8 +204,10 @@ type Message struct {
 	SessionID string        `json:"sessionID"`
 	TurnID    string        `json:"turnID"`
 	Role      Role          `json:"role"`
+	Kind      MessageKind   `json:"kind"`
 	Text      string        `json:"text"`
-	Parts     []ContentPart `json:"parts,omitempty"`
+	Parts     []ContentPart `json:"parts"`
+	TurnIndex int           `json:"turnIndex"`
 	// ClientMessageID 只在 user message 上有值,承载 submit 幂等与前端 overlay 对账。
 	ClientMessageID string `json:"clientMessageID,omitempty"`
 	// Interrupted 标记 cancel / failed 时保留的半截 assistant 输出
@@ -209,7 +224,7 @@ func TextPart(text string) []ContentPart {
 }
 
 func CloneContentParts(parts []ContentPart) []ContentPart {
-	if len(parts) == 0 {
+	if parts == nil {
 		return nil
 	}
 	out := make([]ContentPart, 0, len(parts))
@@ -228,6 +243,31 @@ func TextFromParts(parts []ContentPart) string {
 	for _, part := range parts {
 		if part.Type == ContentPartText {
 			b.WriteString(part.Text)
+		}
+	}
+	return b.String()
+}
+
+func MessageTextFromParts(parts []ContentPart) string {
+	var b strings.Builder
+	for _, part := range parts {
+		switch part.Type {
+		case ContentPartText, ContentPartThought:
+			b.WriteString(part.Text)
+		case ContentPartToolUse:
+			if part.Name != "" {
+				if b.Len() > 0 {
+					b.WriteByte('\n')
+				}
+				b.WriteString(part.Name)
+			}
+		case ContentPartToolResult:
+			if part.Content != "" {
+				if b.Len() > 0 {
+					b.WriteByte('\n')
+				}
+				b.WriteString(part.Content)
+			}
 		}
 	}
 	return b.String()
@@ -259,7 +299,7 @@ func NormalizeContentParts(parts []ContentPart) []ContentPart {
 			if part.CallID == "" && part.Content == "" {
 				continue
 			}
-			part.Text, part.Name, part.Args = "", "", nil
+			part.Text, part.Args = "", nil
 		default:
 			continue
 		}
@@ -268,20 +308,123 @@ func NormalizeContentParts(parts []ContentPart) []ContentPart {
 	return out
 }
 
-func FinishAssistantOutput(in FinishTurnInput) ([]ContentPart, string, bool) {
+type AssistantOutputSegment struct {
+	Role  Role
+	Kind  MessageKind
+	Text  string
+	Parts []ContentPart
+}
+
+func FinishAssistantOutputSegments(in FinishTurnInput) []AssistantOutputSegment {
 	parts := NormalizeContentParts(in.AssistantParts)
-	if in.AssistantText != nil && len(parts) == 0 {
-		return TextPart(*in.AssistantText), *in.AssistantText, true
+	if len(parts) == 0 && in.Status == TurnCompleted {
+		return []AssistantOutputSegment{{
+			Role:  RoleAssistant,
+			Kind:  MessageKindText,
+			Text:  "",
+			Parts: []ContentPart{},
+		}}
 	}
 	if len(parts) == 0 {
-		return nil, "", false
+		return nil
 	}
-	return parts, TextFromParts(parts), true
+	out := make([]AssistantOutputSegment, 0, len(parts))
+	for _, part := range parts {
+		segment := AssistantOutputSegment{
+			Role:  RoleAssistant,
+			Kind:  messageKindForPart(part.Type),
+			Text:  MessageTextFromParts([]ContentPart{part}),
+			Parts: []ContentPart{part},
+		}
+		if part.Type == ContentPartToolResult {
+			segment.Role = RoleTool
+		}
+		out = append(out, segment)
+	}
+	return out
+}
+
+func messageKindForPart(part ContentPartType) MessageKind {
+	switch part {
+	case ContentPartThought:
+		return MessageKindThought
+	case ContentPartToolUse:
+		return MessageKindToolUse
+	case ContentPartToolResult:
+		return MessageKindToolResult
+	case ContentPartText:
+		fallthrough
+	default:
+		return MessageKindText
+	}
 }
 
 type MessagePage struct {
 	Messages []*Message
 	HasMore  bool
+}
+
+type QueuedInputStatus string
+
+const (
+	QueuedInputQueued    QueuedInputStatus = "queued"
+	QueuedInputEditing   QueuedInputStatus = "editing"
+	QueuedInputCancelled QueuedInputStatus = "cancelled"
+	QueuedInputPromoted  QueuedInputStatus = "promoted"
+)
+
+type QueuedInput struct {
+	SessionID       string            `json:"sessionID"`
+	ClientMessageID string            `json:"clientMessageID"`
+	Text            string            `json:"text"`
+	Status          QueuedInputStatus `json:"status"`
+	Provider        string            `json:"provider,omitempty"`
+	Model           string            `json:"model,omitempty"`
+	ModelConfig     json.RawMessage   `json:"modelConfig,omitempty"`
+	TurnID          string            `json:"turnID,omitempty"`
+	CreatedAt       time.Time         `json:"createdAt"`
+	UpdatedAt       time.Time         `json:"updatedAt"`
+}
+
+type QueueInputInput struct {
+	SessionID       string
+	ClientMessageID string
+	Text            string
+	Provider        string
+	Model           string
+	ModelConfig     json.RawMessage
+}
+
+type QueueInputResult struct {
+	Duplicate    bool
+	Input        *QueuedInput
+	ExistingTurn *Turn
+	QueuedEvent  *event.Event
+}
+
+type UpdateQueuedInputInput struct {
+	SessionID       string
+	ClientMessageID string
+	Text            *string
+	Status          *QueuedInputStatus
+}
+
+type UpdateQueuedInputResult struct {
+	Input *QueuedInput
+	Event *event.Event
+}
+
+type PromoteQueuedInputInput struct {
+	SessionID     string
+	TurnID        string
+	UserMessageID string
+}
+
+type PromoteQueuedInputResult struct {
+	Input        *QueuedInput
+	Turn         *Turn
+	UserMessage  *Message
+	StartedEvent *event.Event
 }
 
 type ConversationTurn struct {
@@ -348,17 +491,17 @@ type BeginTurnResult struct {
 type FinishTurnInput struct {
 	TurnID string
 	Status TurnStatus // completed | failed | cancelled
-	// AssistantText 为 nil 表示无产出(失败/早期取消时不落 assistant message)。
-	// 新路径优先使用 AssistantParts;AssistantText 保留给旧测试/调用方自动转 text part。
-	AssistantText  *string
+	// AssistantParts 为空时:completed 落一个空 assistant message 保持事件可定位;
+	// failed/cancelled 不落 assistant message。
 	AssistantParts []ContentPart
 	Interrupted    bool
 	Error          string
 }
 
 type FinishTurnResult struct {
-	AssistantMessage *Message // AssistantText 为 nil 时为 nil
-	FinalEvent       *event.Event
+	AssistantMessage  *Message // failed/cancelled 无产出时为 nil;多 segment 时指向第一条输出消息
+	AssistantMessages []*Message
+	FinalEvent        *event.Event
 }
 
 // Store 的每个方法是一个完整事务。BeginTurn 与 FinishTurn 内部必须把
@@ -376,6 +519,14 @@ type Store interface {
 	// running turn(否则 ErrTurnRunning)→ 落 user message + running turn
 	// + turn.started 事件。
 	BeginTurn(ctx context.Context, in BeginTurnInput) (*BeginTurnResult, error)
+	// QueueInput 持久化等待发送的用户输入。Duplicate 表示同一
+	// clientMessageID 已存在于 queued_inputs 或 turns,不重复写入。
+	QueueInput(ctx context.Context, in QueueInputInput) (*QueueInputResult, error)
+	ListQueuedInputs(ctx context.Context, sessionID string) ([]*QueuedInput, error)
+	HasQueuedInputs(ctx context.Context, sessionID string) (bool, error)
+	UpdateQueuedInput(ctx context.Context, in UpdateQueuedInputInput) (*UpdateQueuedInputResult, error)
+	PromoteNextQueuedInput(ctx context.Context, in PromoteQueuedInputInput) (*PromoteQueuedInputResult, error)
+	QueuedSessions(ctx context.Context) ([]string, error)
 	// FinishTurn:更新 turn 状态 + 落 assistant message(如有)+ 落 final 事件。
 	FinishTurn(ctx context.Context, in FinishTurnInput) (*FinishTurnResult, error)
 	// RunningTurn 返回 session 当前 running 的 turn,无则 ErrNotFound。
@@ -391,6 +542,8 @@ type Store interface {
 	// ListTurnsPage 按 turn 创建时间升序返回一页完整 turn。beforeTurnID 为空时
 	// 返回最近 limit 个 turn;非空时返回该 turn 之前的 limit 个 turn。
 	ListTurnsPage(ctx context.Context, sessionID string, beforeTurnID string, limit int) (*TurnPage, error)
+	// GetConversationTurn 返回单个完整 turn,用于 lifecycle 终态后精确对账。
+	GetConversationTurn(ctx context.Context, sessionID string, turnID string) (*ConversationTurn, error)
 	// EventsAfter 返回 seq > afterSeq 的 lifecycle 事件,按 seq 升序,
 	// 承载 SSE Last-Event-ID 续传;limit <= 0 表示全部。
 	EventsAfter(ctx context.Context, sessionID string, afterSeq int64, limit int) ([]event.Event, error)

@@ -1,8 +1,9 @@
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
-import type { Session } from "@/api/client";
+import { getTurn, type Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { sessionEvent, type SessionEvent } from "@/contracts/events";
 import { apiURL } from "@/state/apiBase";
 import { useOverlayStore } from "@/state/overlayStore";
@@ -84,8 +85,10 @@ function openSessionEventSource({
     applyEvent(parsed.data);
     syncSessionListFromEvent(queryClient, parsed.data);
     if (isTurnTerminalEvent(parsed.data) && syncMessages) {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.turns(sessionID) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.messages(sessionID) });
+      syncTerminalTurn(queryClient, token, sessionID, parsed.data.turnID);
+    }
+    if (syncMessages && (isInputEvent(parsed.data) || parsed.data.kind === "turn.started")) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.queuedInputs(sessionID) });
     }
   };
 
@@ -95,9 +98,21 @@ function openSessionEventSource({
   source.addEventListener("turn.completed", handleMessage);
   source.addEventListener("turn.failed", handleMessage);
   source.addEventListener("turn.cancelled", handleMessage);
+  source.addEventListener("input.queued", handleMessage);
+  source.addEventListener("input.updated", handleMessage);
   source.addEventListener("session.titled", handleMessage);
   source.addEventListener("ping", handleMessage);
   return source;
+}
+
+function syncTerminalTurn(queryClient: QueryClient, token: string, sessionID: string, turnID: string) {
+  void getTurn(token, sessionID, turnID)
+    .then((turn) => {
+      queryClient.setQueryData<TurnsInfiniteData>(queryKeys.turns(sessionID), (previous) => upsertTurnIntoPages(previous, turn));
+    })
+    .catch((error) => {
+      console.warn("failed to sync terminal turn", error);
+    });
 }
 
 function syncSessionListFromEvent(queryClient: QueryClient, event: SessionEvent) {
@@ -113,13 +128,23 @@ function syncSessionListFromEvent(queryClient: QueryClient, event: SessionEvent)
     patchSessionInList(queryClient, event.sessionID, { lastActivityAt: new Date().toISOString(), running: false });
     return;
   }
+  if (event.kind === "input.queued") {
+    patchSessionInList(queryClient, event.sessionID, { lastActivityAt: new Date().toISOString() });
+    return;
+  }
   if (event.kind === "session.titled") {
     patchSessionInList(queryClient, event.sessionID, { title: event.title });
   }
 }
 
-function isTurnTerminalEvent(event: SessionEvent) {
+function isTurnTerminalEvent(
+  event: SessionEvent,
+): event is Extract<SessionEvent, { kind: "turn.completed" | "turn.failed" | "turn.cancelled" }> {
   return event.kind === "turn.completed" || event.kind === "turn.failed" || event.kind === "turn.cancelled";
+}
+
+function isInputEvent(event: SessionEvent) {
+  return event.kind === "input.queued" || event.kind === "input.updated";
 }
 
 function patchSessionInList(queryClient: QueryClient, sessionID: string, patch: Partial<Session>) {

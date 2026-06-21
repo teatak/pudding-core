@@ -33,13 +33,33 @@ CREATE TABLE IF NOT EXISTS turns (
 CREATE UNIQUE INDEX IF NOT EXISTS turns_one_running
     ON turns(session_id) WHERE status = 'running';
 
+CREATE TABLE IF NOT EXISTS queued_inputs (
+    session_id        TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    client_message_id TEXT    NOT NULL,
+    text              TEXT    NOT NULL,
+    status            TEXT    NOT NULL CHECK (status IN ('queued','editing','cancelled','promoted')),
+    provider          TEXT    NOT NULL DEFAULT '',
+    model             TEXT    NOT NULL DEFAULT '',
+    model_config      TEXT    NOT NULL DEFAULT '{}',
+    turn_id           TEXT    NOT NULL DEFAULT '',
+    created_at        INTEGER NOT NULL,
+    updated_at        INTEGER NOT NULL,
+    PRIMARY KEY (session_id, client_message_id)
+);
+
+CREATE INDEX IF NOT EXISTS queued_inputs_session_active
+    ON queued_inputs(session_id, created_at)
+    WHERE status IN ('queued','editing','cancelled');
+
 CREATE TABLE IF NOT EXISTS messages (
     id                TEXT PRIMARY KEY,
     session_id        TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     turn_id           TEXT    NOT NULL DEFAULT '',
-    role              TEXT    NOT NULL CHECK (role IN ('user','assistant')),
+    role              TEXT    NOT NULL CHECK (role IN ('user','assistant','tool','summary')),
+    kind              TEXT    NOT NULL DEFAULT '',
     text              TEXT    NOT NULL,
     parts             TEXT    NOT NULL DEFAULT '[]',
+    turn_index        INTEGER NOT NULL DEFAULT 0,
     client_message_id TEXT    NOT NULL DEFAULT '', -- 仅 user message
     interrupted       INTEGER NOT NULL DEFAULT 0,  -- cancel/failed 保留的半截输出
     created_at        INTEGER NOT NULL
@@ -47,6 +67,9 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS messages_session_created
     ON messages(session_id, created_at);
+
+CREATE INDEX IF NOT EXISTS messages_turn_index
+    ON messages(session_id, turn_id, turn_index);
 
 -- events 只存 lifecycle 事件(turn.delta / ping 不落库);
 -- seq 为 per-session 单调递增,在写入事务内分配。

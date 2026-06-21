@@ -99,6 +99,38 @@ func TestResponsesRequestShape(t *testing.T) {
 	}
 }
 
+func TestResponsesRequestShapeWithToolHistory(t *testing.T) {
+	var got responsesRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprint(w, `data: {"type":"response.completed"}`+"\n\n")
+	}))
+	defer srv.Close()
+
+	ch := responsesStreamForTest(t, srv.URL, provider.Request{
+		Model: "model-a",
+		Messages: []provider.Message{
+			{Role: provider.RoleAssistant, Parts: []provider.Part{
+				{Type: provider.PartToolUse, CallID: "call_1", Name: "builtin_time_get_current", Args: json.RawMessage(`{"timezone":"Asia/Singapore"}`)},
+				{Type: provider.PartToolResult, CallID: "call_1", Name: "builtin_time_get_current", Ok: true, Content: `{"iso":"now"}`},
+			}},
+		},
+	})
+	_ = collect(t, ch)
+
+	if len(got.Input) != 2 {
+		t.Fatalf("unexpected input: %+v", got.Input)
+	}
+	if got.Input[0].Type != "function_call" || got.Input[0].CallID != "call_1" || got.Input[0].Name != "builtin_time_get_current" || got.Input[0].Arguments != `{"timezone":"Asia/Singapore"}` {
+		t.Fatalf("function_call item wrong: %+v", got.Input[0])
+	}
+	if got.Input[1].Type != "function_call_output" || got.Input[1].CallID != "call_1" || got.Input[1].Output != `{"iso":"now"}` {
+		t.Fatalf("function_call_output item wrong: %+v", got.Input[1])
+	}
+}
+
 func TestResponsesToolCallChunks(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

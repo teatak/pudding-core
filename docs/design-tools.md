@@ -22,7 +22,7 @@ user 消息落库
 cancel 在循环任意点生效(turnCtx);崩溃恢复语义不变(running → failed,
 未落库的中间 parts 随进程丢失)。
 
-## 1. canonical 形状:一 turn 一条 assistant 消息,ContentPart 序列
+## 1. canonical 形状:一 turn 多条 message,每条 message 一个语义 part
 
 借鉴旧项目的**语义 ContentPart 模型**(其最有价值处),但不照搬它的
 `session_messages` 宽表与 eventHub 反推 canonical 的链路。落地更干净:
@@ -30,34 +30,40 @@ cancel 在循环任意点生效(turnCtx);崩溃恢复语义不变(running → fa
 - `messages.parts` 是**一等 JSON 结构**;`text` 列保留为派生纯文本(标题、
   列表预览、text-only provider 兼容)。
 - `role` ∈ `user | assistant | tool | summary`。
-- **一个 assistant turn 最终只落一条 canonical assistant 消息**;tool
-  call / result 是它的 **parts**,不是宽表列、也不是多行。
+- **turn 是分页、事务和运行状态边界,不是 message 粒度边界**。一个 turn
+  可以落多条 canonical messages,按 `turn_index` 保持 turn 内顺序。
+- thought / tool_use / tool_result / text 都是独立 message。每条 message
+  通常只带一个语义 part,方便定位、引用、搜索、压缩和 retention。
 - compaction 产物是 `role: summary` 消息;`tool` 角色见下。
 - **event log 只做旁路审计**,不反推 canonical(硬约束 8:context 只来自
   messages 表)。
 
 ```jsonc
-// role=assistant 消息的 parts:落库的 turn 过程,顺序即时间序。
+// 同一 turn 下的 messages,turn_index 即时间序。
 [
-  { "type": "thought", "text": "推理摘要..." },                  // 落库,供历史回看
-  { "type": "tool_use", "id": "call_1", "name": "web_fetch",
-    "args": { "url": "..." } },
-  { "type": "tool_result", "id": "call_1", "ok": true,
-    "content": "..." },                                          // 截断存储,上限 ~32KB/条
-  { "type": "text", "text": "最终回答..." }
+  { "role": "assistant", "kind": "thought", "turn_index": 1,
+    "parts": [{ "type": "thought", "text": "推理摘要..." }] },
+  { "role": "assistant", "kind": "tool_use", "turn_index": 2,
+    "parts": [{ "type": "tool_use", "id": "call_1", "name": "web_fetch",
+      "args": { "url": "..." } }] },
+  { "role": "tool", "kind": "tool_result", "turn_index": 3,
+    "parts": [{ "type": "tool_result", "id": "call_1", "ok": true,
+      "content": "..." }] },
+  { "role": "assistant", "kind": "text", "turn_index": 4,
+    "parts": [{ "type": "text", "text": "最终回答..." }] }
 ]
 ```
 
-**`tool` 角色的定位**:canonical 里 assistant turn 仍是单条 role=assistant
-(tool_use + tool_result 都作 parts)。`role: tool` 不产生独立 canonical 行,
-只在 **contextbuilder 翻译到 wire 时按需合成**——OpenAI 要 `role:"tool"`
-消息、Anthropic 要 user 消息里的 `tool_result` block,各家从 assistant 消息
-的 tool_result parts 现翻。(若后续确实需要独立 tool 行再升级,此处先按
-"不落独立行"实现。)
+**`tool` 角色的定位**:canonical 里 tool_result 落独立 `role: tool`
+message。contextbuilder 再把 turn 内多条 canonical messages 重新组装成
+provider-neutral parts,最后由各 provider 翻译到 wire:OpenAI 需要
+`role:"tool"` 消息,Anthropic 需要 user 消息里的 `tool_result` block,Google
+需要 `functionResponse` part。
 
 > **thought 落 canonical(供历史回看)**:思考流 streaming 期间经
-> `turn.delta(part=thought)` 实时显示,turn 收尾**写进 parts**,刷新/重开
-> 会话仍可展开(前端任务流的折叠思考行,design.md 3.2)。但有两条边界:
+> `turn.delta(part=thought)` 实时显示,turn 收尾**写成独立 thought
+> message**,刷新/重开会话仍可展开(前端任务流的折叠思考行,design.md 3.2)。
+> 但有两条边界:
 >
 > - **contextbuilder 跨 turn 组装时剥离 thought**:provider 不要陈旧推理
 >   (Anthropic 的 thinking 只在同一 turn 工具往返内有意义,跨 user turn
@@ -69,10 +75,10 @@ cancel 在循环任意点生效(turnCtx);崩溃恢复语义不变(running → fa
 >   签名)完成;canonical 的 thought part 只存 provider-neutral 文本,
 >   不承载签名等 wire 细节。
 
-**为什么不按 OpenAI / Anthropic 的多消息交替形状落库**:那是两套互不兼容的
-wire 格式;canonical 必须 provider 无关。一 turn 一条消息保持"turn ↔
-assistant 消息 1:1"的现有不变量,前端任务流(parts 渲染模型,design.md 3.2)
-零转换直读。代价是 contextbuilder 的翻译层变厚——这正是它存在的意义。
+**为什么不直接按 OpenAI / Anthropic 的 wire 形状落库**:wire 形状互不兼容;
+canonical 必须 provider 无关。我们落 provider-neutral 的多 message/part
+序列,contextbuilder 负责把同一 turn 下的 thought/tool/text 重新组装为各
+provider 需要的输入形状。
 
 user 消息 parts 暂时只有 text(多模态来了再扩)。
 

@@ -5,6 +5,7 @@ package memstore
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -18,7 +19,8 @@ type Memstore struct {
 	sessions map[string]*store.Session
 	turns    map[string]*store.Turn
 	messages map[string][]*store.Message // sessionID → 时间升序
-	events   map[string][]event.Event    // sessionID → seq 升序
+	queued   map[string][]*store.QueuedInput
+	events   map[string][]event.Event // sessionID → seq 升序
 	seq      map[string]int64
 	settings map[string]string
 	profiles map[string]*store.ProviderProfile
@@ -29,6 +31,7 @@ func New() *Memstore {
 		sessions: make(map[string]*store.Session),
 		turns:    make(map[string]*store.Turn),
 		messages: make(map[string][]*store.Message),
+		queued:   make(map[string][]*store.QueuedInput),
 		events:   make(map[string][]event.Event),
 		seq:      make(map[string]int64),
 		settings: make(map[string]string),
@@ -129,6 +132,7 @@ func (m *Memstore) DeleteSession(_ context.Context, id string) error {
 	}
 	delete(m.sessions, id)
 	delete(m.messages, id)
+	delete(m.queued, id)
 	delete(m.events, id)
 	delete(m.seq, id)
 	for tid, t := range m.turns {
@@ -179,8 +183,10 @@ func (m *Memstore) BeginTurn(_ context.Context, in store.BeginTurnInput) (*store
 		SessionID:       in.SessionID,
 		TurnID:          in.TurnID,
 		Role:            store.RoleUser,
+		Kind:            store.MessageKindText,
 		Text:            in.UserText,
 		Parts:           store.TextPart(in.UserText),
+		TurnIndex:       0,
 		ClientMessageID: in.ClientMessageID,
 		CreatedAt:       now,
 	}
@@ -199,6 +205,199 @@ func (m *Memstore) BeginTurn(_ context.Context, in store.BeginTurnInput) (*store
 
 	ec := ev
 	return &store.BeginTurnResult{Turn: cloneTurn(turn), UserMessage: cloneMessage(msg), StartedEvent: &ec}, nil
+}
+
+func (m *Memstore) QueueInput(_ context.Context, in store.QueueInputInput) (*store.QueueInputResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[in.SessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	for _, t := range m.turns {
+		if t.SessionID == in.SessionID && t.ClientMessageID == in.ClientMessageID {
+			return &store.QueueInputResult{Duplicate: true, ExistingTurn: cloneTurn(t)}, nil
+		}
+	}
+	for _, input := range m.queued[in.SessionID] {
+		if input.ClientMessageID == in.ClientMessageID {
+			return &store.QueueInputResult{Duplicate: true, Input: cloneQueuedInput(input)}, nil
+		}
+	}
+	now := time.Now()
+	input := &store.QueuedInput{
+		SessionID:       in.SessionID,
+		ClientMessageID: in.ClientMessageID,
+		Text:            in.Text,
+		Status:          store.QueuedInputQueued,
+		Provider:        in.Provider,
+		Model:           in.Model,
+		ModelConfig:     append([]byte(nil), in.ModelConfig...),
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	ev := event.Event{
+		Seq:             m.nextSeq(in.SessionID),
+		SessionID:       in.SessionID,
+		Kind:            event.InputQueued,
+		ClientMessageID: input.ClientMessageID,
+		Text:            input.Text,
+		Status:          string(input.Status),
+	}
+	m.queued[in.SessionID] = append(m.queued[in.SessionID], input)
+	m.appendEventLocked(in.SessionID, ev)
+	m.sessions[in.SessionID].LastActivityAt = now
+	ec := ev
+	return &store.QueueInputResult{Input: cloneQueuedInput(input), QueuedEvent: &ec}, nil
+}
+
+func (m *Memstore) ListQueuedInputs(_ context.Context, sessionID string) ([]*store.QueuedInput, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[sessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	out := make([]*store.QueuedInput, 0)
+	for _, input := range m.queued[sessionID] {
+		if input.Status == store.QueuedInputQueued || input.Status == store.QueuedInputEditing {
+			out = append(out, cloneQueuedInput(input))
+		}
+	}
+	return out, nil
+}
+
+func (m *Memstore) HasQueuedInputs(_ context.Context, sessionID string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[sessionID]; !ok {
+		return false, store.ErrNotFound
+	}
+	for _, input := range m.queued[sessionID] {
+		if input.Status == store.QueuedInputQueued || input.Status == store.QueuedInputEditing {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (m *Memstore) UpdateQueuedInput(_ context.Context, in store.UpdateQueuedInputInput) (*store.UpdateQueuedInputResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	input := m.findQueuedInput(in.SessionID, in.ClientMessageID)
+	if input == nil || input.Status == store.QueuedInputPromoted {
+		return nil, store.ErrNotFound
+	}
+	if in.Text != nil {
+		input.Text = *in.Text
+	}
+	if in.Status != nil {
+		input.Status = *in.Status
+	}
+	if !validQueuedInputStatus(input.Status) || input.Status == store.QueuedInputPromoted {
+		return nil, store.ErrNotFound
+	}
+	input.UpdatedAt = time.Now()
+	ev := event.Event{
+		Seq:             m.nextSeq(in.SessionID),
+		SessionID:       in.SessionID,
+		Kind:            event.InputUpdated,
+		ClientMessageID: input.ClientMessageID,
+		Text:            input.Text,
+		Status:          string(input.Status),
+	}
+	m.appendEventLocked(in.SessionID, ev)
+	ec := ev
+	return &store.UpdateQueuedInputResult{Input: cloneQueuedInput(input), Event: &ec}, nil
+}
+
+func (m *Memstore) PromoteNextQueuedInput(_ context.Context, in store.PromoteQueuedInputInput) (*store.PromoteQueuedInputResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[in.SessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	if m.runningLocked(in.SessionID) {
+		return nil, store.ErrTurnRunning
+	}
+	for _, input := range m.queued[in.SessionID] {
+		switch input.Status {
+		case store.QueuedInputPromoted:
+			continue
+		case store.QueuedInputCancelled:
+			input.Status = store.QueuedInputPromoted
+			input.UpdatedAt = time.Now()
+			continue
+		case store.QueuedInputEditing:
+			return nil, store.ErrQueueBlocked
+		case store.QueuedInputQueued:
+			now := time.Now()
+			turn := &store.Turn{
+				ID:              in.TurnID,
+				SessionID:       input.SessionID,
+				ClientMessageID: input.ClientMessageID,
+				Status:          store.TurnRunning,
+				Provider:        input.Provider,
+				Model:           input.Model,
+				ModelConfig:     append([]byte(nil), input.ModelConfig...),
+				CreatedAt:       now,
+				UpdatedAt:       now,
+			}
+			msg := &store.Message{
+				ID:              in.UserMessageID,
+				SessionID:       input.SessionID,
+				TurnID:          turn.ID,
+				Role:            store.RoleUser,
+				Kind:            store.MessageKindText,
+				Text:            input.Text,
+				Parts:           store.TextPart(input.Text),
+				TurnIndex:       0,
+				ClientMessageID: input.ClientMessageID,
+				CreatedAt:       now,
+			}
+			ev := event.Event{
+				Seq:             m.nextSeq(input.SessionID),
+				SessionID:       input.SessionID,
+				Kind:            event.TurnStarted,
+				TurnID:          turn.ID,
+				ClientMessageID: input.ClientMessageID,
+				UserMessageID:   msg.ID,
+			}
+			m.turns[turn.ID] = turn
+			m.messages[input.SessionID] = append(m.messages[input.SessionID], msg)
+			input.Status = store.QueuedInputPromoted
+			input.TurnID = turn.ID
+			input.UpdatedAt = now
+			m.appendEventLocked(input.SessionID, ev)
+			m.sessions[input.SessionID].LastActivityAt = now
+			ec := ev
+			return &store.PromoteQueuedInputResult{
+				Input:        cloneQueuedInput(input),
+				Turn:         cloneTurn(turn),
+				UserMessage:  cloneMessage(msg),
+				StartedEvent: &ec,
+			}, nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
+func (m *Memstore) QueuedSessions(_ context.Context) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	seen := make(map[string]bool)
+	for sessionID, inputs := range m.queued {
+		for _, input := range inputs {
+			if input.Status == store.QueuedInputQueued {
+				seen[sessionID] = true
+				break
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for sessionID := range seen {
+		out = append(out, sessionID)
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 func (m *Memstore) FinishTurn(_ context.Context, in store.FinishTurnInput) (*store.FinishTurnResult, error) {
@@ -231,26 +430,38 @@ func (m *Memstore) FinishTurn(_ context.Context, in store.FinishTurnInput) (*sto
 	default:
 		return nil, store.ErrNotFound
 	}
-	assistantParts, assistantText, hasAssistant := store.FinishAssistantOutput(in)
-	if hasAssistant {
+	segments := store.FinishAssistantOutputSegments(in)
+	for i, segment := range segments {
 		msg := &store.Message{
-			ID:          "msg_" + turn.ID, // assistant message 与 turn 一一对应
+			ID:          assistantMessageID(turn.ID, i),
 			SessionID:   turn.SessionID,
 			TurnID:      turn.ID,
-			Role:        store.RoleAssistant,
-			Text:        assistantText,
-			Parts:       assistantParts,
-			Interrupted: in.Interrupted,
+			Role:        segment.Role,
+			Kind:        segment.Kind,
+			Text:        segment.Text,
+			Parts:       store.CloneContentParts(segment.Parts),
+			TurnIndex:   i + 1,
+			Interrupted: in.Interrupted && i == len(segments)-1,
 			CreatedAt:   now,
 		}
 		m.messages[turn.SessionID] = append(m.messages[turn.SessionID], msg)
-		ev.AssistantMessageID = msg.ID
-		res.AssistantMessage = cloneMessage(msg)
+		if i == 0 {
+			ev.AssistantMessageID = msg.ID
+			res.AssistantMessage = cloneMessage(msg)
+		}
+		res.AssistantMessages = append(res.AssistantMessages, cloneMessage(msg))
 	}
 	m.appendEventLocked(turn.SessionID, ev)
 	m.sessions[turn.SessionID].LastActivityAt = now
 	res.FinalEvent = &ev
 	return res, nil
+}
+
+func assistantMessageID(turnID string, index int) string {
+	if index == 0 {
+		return "msg_" + turnID
+	}
+	return fmt.Sprintf("msg_%s_%03d", turnID, index+1)
 }
 
 // appendEventLocked 追加事件并按保留窗口滚动清理;调用方必须已持锁。
@@ -377,6 +588,19 @@ func (m *Memstore) ListTurnsPage(_ context.Context, sessionID string, beforeTurn
 		out = append(out, conversationTurnFromMem(turn, m.messages[sessionID]))
 	}
 	return &store.TurnPage{Turns: out, HasMore: hasMore}, nil
+}
+
+func (m *Memstore) GetConversationTurn(_ context.Context, sessionID string, turnID string) (*store.ConversationTurn, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[sessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	turn, ok := m.turns[turnID]
+	if !ok || turn.SessionID != sessionID {
+		return nil, store.ErrNotFound
+	}
+	return conversationTurnFromMem(turn, m.messages[sessionID]), nil
 }
 
 func conversationTurnFromMem(turn *store.Turn, messages []*store.Message) *store.ConversationTurn {
@@ -517,12 +741,30 @@ func (m *Memstore) findUserMessage(sessionID, clientMessageID string) *store.Mes
 	return nil
 }
 
+func (m *Memstore) findQueuedInput(sessionID, clientMessageID string) *store.QueuedInput {
+	for _, input := range m.queued[sessionID] {
+		if input.ClientMessageID == clientMessageID {
+			return input
+		}
+	}
+	return nil
+}
+
 func cloneMessage(msg *store.Message) *store.Message {
 	if msg == nil {
 		return nil
 	}
 	cp := *msg
 	cp.Parts = store.CloneContentParts(msg.Parts)
+	return &cp
+}
+
+func cloneQueuedInput(input *store.QueuedInput) *store.QueuedInput {
+	if input == nil {
+		return nil
+	}
+	cp := *input
+	cp.ModelConfig = append([]byte(nil), input.ModelConfig...)
 	return &cp
 }
 
@@ -533,4 +775,13 @@ func cloneTurn(t *store.Turn) *store.Turn {
 	cp := *t
 	cp.ModelConfig = append([]byte(nil), t.ModelConfig...)
 	return &cp
+}
+
+func validQueuedInputStatus(status store.QueuedInputStatus) bool {
+	switch status {
+	case store.QueuedInputQueued, store.QueuedInputEditing, store.QueuedInputCancelled, store.QueuedInputPromoted:
+		return true
+	default:
+		return false
+	}
 }

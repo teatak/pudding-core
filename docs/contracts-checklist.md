@@ -30,7 +30,7 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 | Session | `store.Session` | `session` | id, title, provider, model, createdAt, updatedAt, running(读取时派生) |
 | ConversationTurn | `store.ConversationTurn` | `conversationTurn` | id, sessionID, clientMessageID, status, error?, createdAt, updatedAt, messages[] |
 | ContentPart | `store.ContentPart` | `contentPart` | type(text/thought/tool_use/tool_result), text?, id?, name?, args?, ok?, content? |
-| Message | `store.Message` | `message` | id, sessionID, turnID, role, text, parts[], clientMessageID?, interrupted?, createdAt |
+| Message | `store.Message` | `message` | id, sessionID, turnID, role, kind?, text, parts[], turnIndex?, clientMessageID?, interrupted?, createdAt |
 | ProviderProfile(设置视图) | `api.providerProfileView` | `providerProfile` | id, displayName, protocol, baseURL, apiKey?, apiKeySet, models |
 
 时间一律 RFC3339 字符串(Go `time.Time` 默认 JSON 编码)。

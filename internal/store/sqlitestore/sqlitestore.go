@@ -48,61 +48,7 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("sqlite: apply schema: %w", err)
 	}
-	if err := s.ensureSchema(); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
 	return s, nil
-}
-
-func (s *Store) ensureSchema() error {
-	if err := s.ensureColumn("turns", "model_config", `ALTER TABLE turns ADD COLUMN model_config TEXT NOT NULL DEFAULT '{}'`); err != nil {
-		return err
-	}
-	if err := s.ensureColumn("sessions", "last_activity_at", `ALTER TABLE sessions ADD COLUMN last_activity_at INTEGER NOT NULL DEFAULT 0`); err != nil {
-		return err
-	}
-	if err := s.ensureColumn("sessions", "pinned", `ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`); err != nil {
-		return err
-	}
-	if err := s.ensureColumn("sessions", "pinned_order", `ALTER TABLE sessions ADD COLUMN pinned_order INTEGER NOT NULL DEFAULT 0`); err != nil {
-		return err
-	}
-	if err := s.ensureColumn("messages", "parts", `ALTER TABLE messages ADD COLUMN parts TEXT NOT NULL DEFAULT '[]'`); err != nil {
-		return err
-	}
-	if _, err := s.db.Exec(`UPDATE sessions SET last_activity_at=updated_at WHERE last_activity_at=0`); err != nil {
-		return fmt.Errorf("sqlite: backfill sessions.last_activity_at: %w", err)
-	}
-	return nil
-}
-
-func (s *Store) ensureColumn(table, column, alter string) error {
-	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid int
-		var name, typ string
-		var notNull int
-		var defaultValue any
-		var pk int
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
-			return err
-		}
-		if name == column {
-			return rows.Err()
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if _, err := s.db.Exec(alter); err != nil {
-		return fmt.Errorf("sqlite: add %s.%s: %w", table, column, err)
-	}
-	return nil
 }
 
 func ensureDBFile(path string) error {
@@ -123,6 +69,8 @@ func ensureDBFile(path string) error {
 }
 
 var _ store.Store = (*Store)(nil)
+
+const messageSelectColumns = `id,session_id,turn_id,role,kind,text,parts,turn_index,client_message_id,interrupted,created_at`
 
 func (s *Store) Close() error { return s.db.Close() }
 
@@ -282,8 +230,10 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 			SessionID:       in.SessionID,
 			TurnID:          in.TurnID,
 			Role:            store.RoleUser,
+			Kind:            store.MessageKindText,
 			Text:            in.UserText,
 			Parts:           store.TextPart(in.UserText),
+			TurnIndex:       0,
 			ClientMessageID: in.ClientMessageID,
 			CreatedAt:       now,
 		}
@@ -294,8 +244,8 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 			return err
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO messages(id,session_id,turn_id,role,text,parts,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,
-			msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Text, encodeParts(msg.Parts), msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
+			`INSERT INTO messages(id,session_id,turn_id,role,kind,text,parts,turn_index,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+			msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Kind, msg.Text, encodeParts(msg.Parts), msg.TurnIndex, msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
 		); err != nil {
 			return err
 		}
@@ -317,6 +267,268 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 		return nil
 	})
 	return out, err
+}
+
+func (s *Store) QueueInput(ctx context.Context, in store.QueueInputInput) (*store.QueueInputResult, error) {
+	var out *store.QueueInputResult
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		if _, err := getSessionTx(ctx, tx, in.SessionID); err != nil {
+			return err
+		}
+		if existing, err := getTurnByClientMessageIDTx(ctx, tx, in.SessionID, in.ClientMessageID); err == nil {
+			out = &store.QueueInputResult{Duplicate: true, ExistingTurn: existing}
+			return nil
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		if existing, err := getQueuedInputTx(ctx, tx, in.SessionID, in.ClientMessageID); err == nil {
+			out = &store.QueueInputResult{Duplicate: true, Input: existing}
+			return nil
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+
+		now := time.Now()
+		input := &store.QueuedInput{
+			SessionID:       in.SessionID,
+			ClientMessageID: in.ClientMessageID,
+			Text:            in.Text,
+			Status:          store.QueuedInputQueued,
+			Provider:        in.Provider,
+			Model:           in.Model,
+			ModelConfig:     normalizeJSON(in.ModelConfig),
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO queued_inputs(session_id,client_message_id,text,status,provider,model,model_config,turn_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+			input.SessionID, input.ClientMessageID, input.Text, input.Status, input.Provider, input.Model, string(input.ModelConfig), input.TurnID, unixMS(now), unixMS(now),
+		); err != nil {
+			return err
+		}
+		ev := event.Event{
+			SessionID:       input.SessionID,
+			Kind:            event.InputQueued,
+			ClientMessageID: input.ClientMessageID,
+			Text:            input.Text,
+			Status:          string(input.Status),
+		}
+		if err := insertEventTx(ctx, tx, &ev); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(now), in.SessionID); err != nil {
+			return err
+		}
+		out = &store.QueueInputResult{Input: input, QueuedEvent: &ev}
+		return nil
+	})
+	return out, err
+}
+
+func (s *Store) ListQueuedInputs(ctx context.Context, sessionID string) ([]*store.QueuedInput, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx,
+		`SELECT session_id,client_message_id,text,status,provider,model,model_config,turn_id,created_at,updated_at
+		FROM queued_inputs
+		WHERE session_id=? AND status IN (?,?)
+		ORDER BY created_at ASC, rowid ASC`,
+		sessionID, store.QueuedInputQueued, store.QueuedInputEditing,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]*store.QueuedInput, 0)
+	for rows.Next() {
+		input, err := scanQueuedInput(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, input)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) HasQueuedInputs(ctx context.Context, sessionID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var exists bool
+	err := s.db.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM queued_inputs WHERE session_id=? AND status IN (?,?))`,
+		sessionID, store.QueuedInputQueued, store.QueuedInputEditing,
+	).Scan(&exists)
+	return exists, err
+}
+
+func (s *Store) UpdateQueuedInput(ctx context.Context, in store.UpdateQueuedInputInput) (*store.UpdateQueuedInputResult, error) {
+	var out *store.UpdateQueuedInputResult
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		input, err := getQueuedInputTx(ctx, tx, in.SessionID, in.ClientMessageID)
+		if err != nil {
+			return err
+		}
+		if input.Status == store.QueuedInputPromoted {
+			return store.ErrNotFound
+		}
+		if in.Text != nil {
+			input.Text = *in.Text
+		}
+		if in.Status != nil {
+			input.Status = *in.Status
+		}
+		if !validQueuedInputStatus(input.Status) || input.Status == store.QueuedInputPromoted {
+			return store.ErrNotFound
+		}
+		input.UpdatedAt = time.Now()
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE queued_inputs SET text=?, status=?, updated_at=? WHERE session_id=? AND client_message_id=?`,
+			input.Text, input.Status, unixMS(input.UpdatedAt), input.SessionID, input.ClientMessageID,
+		); err != nil {
+			return err
+		}
+		ev := event.Event{
+			SessionID:       input.SessionID,
+			Kind:            event.InputUpdated,
+			ClientMessageID: input.ClientMessageID,
+			Text:            input.Text,
+			Status:          string(input.Status),
+		}
+		if err := insertEventTx(ctx, tx, &ev); err != nil {
+			return err
+		}
+		out = &store.UpdateQueuedInputResult{Input: input, Event: &ev}
+		return nil
+	})
+	return out, err
+}
+
+func (s *Store) PromoteNextQueuedInput(ctx context.Context, in store.PromoteQueuedInputInput) (*store.PromoteQueuedInputResult, error) {
+	var out *store.PromoteQueuedInputResult
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		if _, err := getSessionTx(ctx, tx, in.SessionID); err != nil {
+			return err
+		}
+		if _, err := runningTurnTx(ctx, tx, in.SessionID); err == nil {
+			return store.ErrTurnRunning
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+
+		for {
+			input, err := firstQueuedInputTx(ctx, tx, in.SessionID)
+			if err != nil {
+				return err
+			}
+			switch input.Status {
+			case store.QueuedInputCancelled:
+				now := time.Now()
+				if _, err := tx.ExecContext(ctx,
+					`UPDATE queued_inputs SET status=?, updated_at=? WHERE session_id=? AND client_message_id=?`,
+					store.QueuedInputPromoted, unixMS(now), input.SessionID, input.ClientMessageID,
+				); err != nil {
+					return err
+				}
+				continue
+			case store.QueuedInputEditing:
+				return store.ErrQueueBlocked
+			case store.QueuedInputQueued:
+				now := time.Now()
+				turn := &store.Turn{
+					ID:              in.TurnID,
+					SessionID:       input.SessionID,
+					ClientMessageID: input.ClientMessageID,
+					Status:          store.TurnRunning,
+					Provider:        input.Provider,
+					Model:           input.Model,
+					ModelConfig:     normalizeJSON(input.ModelConfig),
+					CreatedAt:       now,
+					UpdatedAt:       now,
+				}
+				msg := &store.Message{
+					ID:              in.UserMessageID,
+					SessionID:       input.SessionID,
+					TurnID:          turn.ID,
+					Role:            store.RoleUser,
+					Kind:            store.MessageKindText,
+					Text:            input.Text,
+					Parts:           store.TextPart(input.Text),
+					TurnIndex:       0,
+					ClientMessageID: input.ClientMessageID,
+					CreatedAt:       now,
+				}
+				if _, err := tx.ExecContext(ctx,
+					`INSERT INTO turns(id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+					turn.ID, turn.SessionID, turn.ClientMessageID, turn.Status, turn.Provider, turn.Model, string(turn.ModelConfig), turn.Error, unixMS(now), unixMS(now),
+				); err != nil {
+					return err
+				}
+				if _, err := tx.ExecContext(ctx,
+					`INSERT INTO messages(id,session_id,turn_id,role,kind,text,parts,turn_index,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+					msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Kind, msg.Text, encodeParts(msg.Parts), msg.TurnIndex, msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
+				); err != nil {
+					return err
+				}
+				if _, err := tx.ExecContext(ctx,
+					`UPDATE queued_inputs SET status=?, turn_id=?, updated_at=? WHERE session_id=? AND client_message_id=?`,
+					store.QueuedInputPromoted, turn.ID, unixMS(now), input.SessionID, input.ClientMessageID,
+				); err != nil {
+					return err
+				}
+				input.Status = store.QueuedInputPromoted
+				input.TurnID = turn.ID
+				input.UpdatedAt = now
+				ev := event.Event{
+					SessionID:       turn.SessionID,
+					Kind:            event.TurnStarted,
+					TurnID:          turn.ID,
+					ClientMessageID: turn.ClientMessageID,
+					UserMessageID:   msg.ID,
+				}
+				if err := insertEventTx(ctx, tx, &ev); err != nil {
+					return err
+				}
+				if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(now), in.SessionID); err != nil {
+					return err
+				}
+				out = &store.PromoteQueuedInputResult{Input: input, Turn: turn, UserMessage: msg, StartedEvent: &ev}
+				return nil
+			default:
+				return store.ErrNotFound
+			}
+		}
+	})
+	return out, err
+}
+
+func (s *Store) QueuedSessions(ctx context.Context) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT DISTINCT session_id FROM queued_inputs WHERE status=? ORDER BY session_id ASC`,
+		store.QueuedInputQueued,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]string, 0)
+	for rows.Next() {
+		var sessionID string
+		if err := rows.Scan(&sessionID); err != nil {
+			return nil, err
+		}
+		out = append(out, sessionID)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) FinishTurn(ctx context.Context, in store.FinishTurnInput) (*store.FinishTurnResult, error) {
@@ -356,26 +568,31 @@ func (s *Store) FinishTurn(ctx context.Context, in store.FinishTurnInput) (*stor
 		case store.TurnCancelled:
 			ev.Kind = event.TurnCancelled
 		}
-		assistantParts, assistantText, hasAssistant := store.FinishAssistantOutput(in)
-		if hasAssistant {
+		segments := store.FinishAssistantOutputSegments(in)
+		for i, segment := range segments {
 			msg := &store.Message{
-				ID:          "msg_" + turn.ID,
+				ID:          assistantMessageID(turn.ID, i),
 				SessionID:   turn.SessionID,
 				TurnID:      turn.ID,
-				Role:        store.RoleAssistant,
-				Text:        assistantText,
-				Parts:       assistantParts,
-				Interrupted: in.Interrupted,
+				Role:        segment.Role,
+				Kind:        segment.Kind,
+				Text:        segment.Text,
+				Parts:       store.CloneContentParts(segment.Parts),
+				TurnIndex:   i + 1,
+				Interrupted: in.Interrupted && i == len(segments)-1,
 				CreatedAt:   now,
 			}
 			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO messages(id,session_id,turn_id,role,text,parts,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,
-				msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Text, encodeParts(msg.Parts), msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
+				`INSERT INTO messages(id,session_id,turn_id,role,kind,text,parts,turn_index,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+				msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Kind, msg.Text, encodeParts(msg.Parts), msg.TurnIndex, msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
 			); err != nil {
 				return err
 			}
-			ev.AssistantMessageID = msg.ID
-			res.AssistantMessage = msg
+			if i == 0 {
+				ev.AssistantMessageID = msg.ID
+				res.AssistantMessage = msg
+			}
+			res.AssistantMessages = append(res.AssistantMessages, msg)
 		}
 		if err := insertEventTx(ctx, tx, &ev); err != nil {
 			return err
@@ -443,8 +660,9 @@ func (s *Store) ListMessagesPage(ctx context.Context, sessionID string, beforeMe
 		return nil, err
 	}
 
-	// rowid 作次级排序键:同毫秒落库的 user/assistant 消息顺序必须确定
-	query := `SELECT id,session_id,turn_id,role,text,parts,client_message_id,interrupted,created_at FROM messages WHERE session_id=? ORDER BY created_at ASC, rowid ASC`
+	// rowid 作次级排序键:同毫秒落库的跨 turn 消息顺序必须按写入顺序确定。
+	// turn_index 只在同一 turn 内排序(messagesForTurnTx)使用。
+	query := `SELECT ` + messageSelectColumns + ` FROM messages WHERE session_id=? ORDER BY created_at ASC, rowid ASC`
 	args := []any{sessionID}
 	if beforeMessageID != "" {
 		var beforeCreated int64
@@ -459,7 +677,7 @@ func (s *Store) ListMessagesPage(ctx context.Context, sessionID string, beforeMe
 		if err != nil {
 			return nil, err
 		}
-		query = `SELECT id,session_id,turn_id,role,text,parts,client_message_id,interrupted,created_at
+		query = `SELECT ` + messageSelectColumns + `
 			FROM messages
 			WHERE session_id=? AND (created_at < ? OR (created_at=? AND rowid < ?))
 			ORDER BY created_at ASC, rowid ASC`
@@ -469,12 +687,12 @@ func (s *Store) ListMessagesPage(ctx context.Context, sessionID string, beforeMe
 	if fetchLimit > 0 {
 		fetchLimit++
 		if beforeMessageID == "" {
-			query = `SELECT id,session_id,turn_id,role,text,parts,client_message_id,interrupted,created_at FROM (
+			query = `SELECT ` + messageSelectColumns + ` FROM (
 				SELECT rowid AS rid, * FROM messages WHERE session_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?
 			) ORDER BY created_at ASC, rid ASC`
 			args = []any{sessionID, fetchLimit}
 		} else {
-			query = `SELECT id,session_id,turn_id,role,text,parts,client_message_id,interrupted,created_at FROM (
+			query = `SELECT ` + messageSelectColumns + ` FROM (
 				SELECT rowid AS rid, * FROM messages
 				WHERE session_id=? AND (created_at < ? OR (created_at=? AND rowid < ?))
 				ORDER BY created_at DESC, rowid DESC LIMIT ?
@@ -588,6 +806,35 @@ func (s *Store) ListTurnsPage(ctx context.Context, sessionID string, beforeTurnI
 		out = append(out, conversationTurnFromSQL(turn, messages))
 	}
 	return &store.TurnPage{Turns: out, HasMore: hasMore}, nil
+}
+
+func (s *Store) GetConversationTurn(ctx context.Context, sessionID string, turnID string) (*store.ConversationTurn, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
+		return nil, err
+	}
+	row := tx.QueryRowContext(ctx,
+		`SELECT id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at FROM turns WHERE session_id=? AND id=?`,
+		sessionID, turnID,
+	)
+	turn, err := scanTurn(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	messages, err := messagesForTurnTx(ctx, tx, turn.SessionID, turn.ID)
+	if err != nil {
+		return nil, err
+	}
+	return conversationTurnFromSQL(turn, messages), nil
 }
 
 func (s *Store) EventsAfter(ctx context.Context, sessionID string, afterSeq int64, limit int) ([]event.Event, error) {
@@ -739,7 +986,7 @@ func runningTurnTx(ctx context.Context, tx *sql.Tx, sessionID string) (*store.Tu
 
 func getUserMessageByClientMessageIDTx(ctx context.Context, tx *sql.Tx, sessionID, clientMessageID string) (*store.Message, error) {
 	row := tx.QueryRowContext(ctx,
-		`SELECT id,session_id,turn_id,role,text,parts,client_message_id,interrupted,created_at
+		`SELECT `+messageSelectColumns+`
 		FROM messages WHERE session_id=? AND role=? AND client_message_id=?`,
 		sessionID, store.RoleUser, clientMessageID,
 	)
@@ -750,10 +997,39 @@ func getUserMessageByClientMessageIDTx(ctx context.Context, tx *sql.Tx, sessionI
 	return msg, err
 }
 
+func getQueuedInputTx(ctx context.Context, tx *sql.Tx, sessionID, clientMessageID string) (*store.QueuedInput, error) {
+	row := tx.QueryRowContext(ctx,
+		`SELECT session_id,client_message_id,text,status,provider,model,model_config,turn_id,created_at,updated_at
+		FROM queued_inputs WHERE session_id=? AND client_message_id=?`,
+		sessionID, clientMessageID,
+	)
+	input, err := scanQueuedInput(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	return input, err
+}
+
+func firstQueuedInputTx(ctx context.Context, tx *sql.Tx, sessionID string) (*store.QueuedInput, error) {
+	row := tx.QueryRowContext(ctx,
+		`SELECT session_id,client_message_id,text,status,provider,model,model_config,turn_id,created_at,updated_at
+		FROM queued_inputs
+		WHERE session_id=? AND status IN (?,?,?)
+		ORDER BY created_at ASC, rowid ASC
+		LIMIT 1`,
+		sessionID, store.QueuedInputQueued, store.QueuedInputEditing, store.QueuedInputCancelled,
+	)
+	input, err := scanQueuedInput(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	return input, err
+}
+
 func messagesForTurnTx(ctx context.Context, tx *sql.Tx, sessionID, turnID string) ([]*store.Message, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id,session_id,turn_id,role,text,parts,client_message_id,interrupted,created_at
-		FROM messages WHERE session_id=? AND turn_id=? ORDER BY created_at ASC, rowid ASC`,
+		`SELECT `+messageSelectColumns+`
+		FROM messages WHERE session_id=? AND turn_id=? ORDER BY created_at ASC, turn_index ASC, rowid ASC`,
 		sessionID, turnID,
 	)
 	if err != nil {
@@ -849,14 +1125,66 @@ func scanMessage(row messageScanner) (*store.Message, error) {
 	var parts string
 	var interrupted int
 	var created int64
-	err := row.Scan(&msg.ID, &msg.SessionID, &msg.TurnID, &msg.Role, &msg.Text, &parts, &msg.ClientMessageID, &interrupted, &created)
+	err := row.Scan(
+		&msg.ID,
+		&msg.SessionID,
+		&msg.TurnID,
+		&msg.Role,
+		&msg.Kind,
+		&msg.Text,
+		&parts,
+		&msg.TurnIndex,
+		&msg.ClientMessageID,
+		&interrupted,
+		&created,
+	)
 	if err != nil {
 		return nil, err
 	}
-	msg.Parts = decodeParts(parts, msg.Text)
+	msg.Parts = decodeParts(parts)
 	msg.Interrupted = interrupted != 0
 	msg.CreatedAt = timeFromMS(created)
 	return &msg, nil
+}
+
+func scanQueuedInput(row messageScanner) (*store.QueuedInput, error) {
+	var input store.QueuedInput
+	var modelConfig string
+	var created, updated int64
+	err := row.Scan(
+		&input.SessionID,
+		&input.ClientMessageID,
+		&input.Text,
+		&input.Status,
+		&input.Provider,
+		&input.Model,
+		&modelConfig,
+		&input.TurnID,
+		&created,
+		&updated,
+	)
+	if err != nil {
+		return nil, err
+	}
+	input.ModelConfig = normalizeJSON(json.RawMessage(modelConfig))
+	input.CreatedAt, input.UpdatedAt = timeFromMS(created), timeFromMS(updated)
+	return &input, nil
+}
+
+func validQueuedInputStatus(status store.QueuedInputStatus) bool {
+	switch status {
+	case store.QueuedInputQueued, store.QueuedInputEditing, store.QueuedInputCancelled, store.QueuedInputPromoted:
+		return true
+	default:
+		return false
+	}
+}
+
+func assistantMessageID(turnID string, index int) string {
+	if index == 0 {
+		return "msg_" + turnID
+	}
+	return fmt.Sprintf("msg_%s_%03d", turnID, index+1)
 }
 
 func encodeParts(parts []store.ContentPart) string {
@@ -871,16 +1199,12 @@ func encodeParts(parts []store.ContentPart) string {
 	return string(data)
 }
 
-func decodeParts(raw string, fallbackText string) []store.ContentPart {
+func decodeParts(raw string) []store.ContentPart {
 	var parts []store.ContentPart
 	if raw != "" {
 		_ = json.Unmarshal([]byte(raw), &parts)
 	}
-	parts = store.NormalizeContentParts(parts)
-	if len(parts) == 0 {
-		return store.TextPart(fallbackText)
-	}
-	return parts
+	return store.NormalizeContentParts(parts)
 }
 
 func normalizeJSON(raw json.RawMessage) json.RawMessage {

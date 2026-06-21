@@ -296,7 +296,7 @@ DELETE /providers/{name}
 写入规则:
 
 - `messages` 存 `clientMessageID`(per-session 唯一索引),承载 submit 幂等。
-- assistant 输出进行中只走 SSE + 内存 buffer,不逐 delta 写库;turn 结束一次性写一条 canonical message。
+- assistant 输出进行中只走 SSE + 内存 buffer,不逐 delta 写库;turn 结束一次性写入本 turn 的 canonical message 序列(thought/tool/text 可拆多条)。
 - token delta 不落 `events` 表;`events` 只存粗粒度 lifecycle 事件。
 - turn 收尾时 canonical message、`turns` 状态、lifecycle events 在同一事务写入,不允许三者状态不一致。
 - SQLite 开 WAL;写入走单 writer,避免并发写冲突。

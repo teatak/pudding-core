@@ -6,6 +6,7 @@ import type { SessionEvent } from "@/contracts/events";
 export type PendingUserMessage = {
   clientMessageID: string;
   sessionID: string;
+  status?: "submitting" | "queued" | "editing";
   text: string;
   createdAt: string;
 };
@@ -14,8 +15,7 @@ export type AssistantOverlay = {
   turnID: string;
   sessionID: string;
   text: string;
-  thought: string;
-  tools: AssistantToolOverlay[];
+  parts: AssistantOverlayPart[];
   status: "streaming" | "completed" | "failed" | "cancelled";
   assistantMessageID?: string;
   interrupted?: boolean;
@@ -23,13 +23,16 @@ export type AssistantOverlay = {
   revealed?: boolean;
 };
 
-export type AssistantToolOverlay = {
-  callID: string;
-  name?: string;
-  argsText: string;
-  phase?: "streaming_args" | "running" | "ok" | "error";
-  summary?: string;
-};
+export type AssistantOverlayPart =
+  | { type: "thought"; text: string }
+  | {
+      type: "tool";
+      callID: string;
+      name?: string;
+      argsText: string;
+      phase?: "streaming_args" | "running" | "ok" | "error";
+      summary?: string;
+    };
 
 export type TurnPhase =
   | "submitting"
@@ -97,39 +100,73 @@ function makePhase(input: Omit<TurnPhaseState, "updatedAt">): TurnPhaseState {
   return { ...input, updatedAt: new Date().toISOString() };
 }
 
-function emptyAssistantOverlay(turnID: string, sessionID: string, status: AssistantOverlay["status"] = "streaming") {
+function emptyAssistantOverlay(
+  turnID: string,
+  sessionID: string,
+  status: AssistantOverlay["status"] = "streaming",
+): AssistantOverlay {
   return {
     turnID,
     sessionID,
     text: "",
-    thought: "",
-    tools: [],
+    parts: [],
     status,
     revealed: false,
   };
 }
 
-function overlayWithDefaults(overlay: AssistantOverlay | undefined, turnID: string, sessionID: string) {
-  return overlay
-    ? { ...overlay, thought: overlay.thought || "", tools: overlay.tools || [], revealed: overlay.revealed || false }
-    : emptyAssistantOverlay(turnID, sessionID);
+function overlayWithDefaults(overlay: AssistantOverlay | undefined, turnID: string, sessionID: string): AssistantOverlay {
+  if (!overlay) {
+    return emptyAssistantOverlay(turnID, sessionID);
+  }
+  return { ...overlay, revealed: overlay.revealed || false };
 }
 
-function upsertTool(tools: AssistantToolOverlay[], event: Extract<SessionEvent, { kind: "turn.tool" }>) {
-  const callID = event.callID || `tool:${tools.length}`;
-  const index = tools.findIndex((tool) => tool.callID === callID);
-  const current = index >= 0 ? tools[index] : { callID, argsText: "" };
-  const next: AssistantToolOverlay = {
+function upsertPendingUser(
+  pendingUsers: Record<string, PendingUserMessage[]>,
+  message: PendingUserMessage,
+): Record<string, PendingUserMessage[]> {
+  return {
+    ...pendingUsers,
+    [message.sessionID]: [
+      ...(pendingUsers[message.sessionID] || []).filter((item) => item.clientMessageID !== message.clientMessageID),
+      message,
+    ],
+  };
+}
+
+function appendThoughtPart(parts: AssistantOverlayPart[], delta: string): AssistantOverlayPart[] {
+  if (!delta) {
+    return parts;
+  }
+  const last = parts.length - 1;
+  if (last >= 0 && parts[last].type === "thought") {
+    return parts.map((part, index) =>
+      index === last && part.type === "thought" ? { ...part, text: part.text + delta } : part,
+    );
+  }
+  return [...parts, { type: "thought", text: delta }];
+}
+
+function upsertToolPart(
+  parts: AssistantOverlayPart[],
+  event: Extract<SessionEvent, { kind: "turn.tool" }>,
+  callID: string,
+) {
+  const index = parts.findIndex((part) => part.type === "tool" && part.callID === callID);
+  const current = index >= 0 && parts[index].type === "tool" ? parts[index] : { type: "tool" as const, callID, argsText: "" };
+  const next: AssistantOverlayPart = {
     ...current,
+    callID,
     name: event.name || current.name,
     phase: event.phase || current.phase,
     summary: event.summary || current.summary,
     argsText: current.argsText + (event.argsDelta || ""),
   };
   if (index < 0) {
-    return [...tools, next];
+    return [...parts, next];
   }
-  return tools.map((tool, i) => (i === index ? next : tool));
+  return parts.map((part, i) => (i === index ? next : part));
 }
 
 export const useOverlayStore = create<OverlayState>((set) => ({
@@ -140,15 +177,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
   lastEventSeqs: {},
   addPendingUser: (message) =>
     set((state) => ({
-      pendingUsers: {
-        ...state.pendingUsers,
-        [message.sessionID]: [
-          ...(state.pendingUsers[message.sessionID] || []).filter(
-            (item) => item.clientMessageID !== message.clientMessageID,
-          ),
-          message,
-        ],
-      },
+      pendingUsers: upsertPendingUser(state.pendingUsers, message),
     })),
   startSubmittingTurn: (sessionID, clientMessageID) =>
     set((state) => ({
@@ -199,6 +228,30 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       if (event.kind === "ping" || event.kind === "session.titled") {
         return state; // titled 只驱动 sessions refetch,不进 overlay
       }
+      if (event.kind === "input.queued" || event.kind === "input.updated") {
+        const lastEventSeqs = recordEventSeq(state.lastEventSeqs, event);
+        if (event.status === "cancelled" || event.status === "promoted") {
+          return {
+            lastEventSeqs,
+            pendingUsers: {
+              ...state.pendingUsers,
+              [event.sessionID]: (state.pendingUsers[event.sessionID] || []).filter(
+                (item) => item.clientMessageID !== event.clientMessageID,
+              ),
+            },
+          };
+        }
+        return {
+          lastEventSeqs,
+          pendingUsers: upsertPendingUser(state.pendingUsers, {
+            clientMessageID: event.clientMessageID,
+            createdAt: new Date().toISOString(),
+            sessionID: event.sessionID,
+            status: event.status,
+            text: event.text,
+          }),
+        };
+      }
       if (event.kind === "turn.started") {
         // 新 turn 开始时清掉该 session 已终结的 overlay:
         // 无 canonical 产物的 failed 气泡(reconcile 清不到)在用户重试时让位
@@ -225,14 +278,15 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       }
       if (event.kind === "turn.delta") {
         const current = overlayWithDefaults(state.assistants[event.turnID], event.turnID, event.sessionID);
-        const part = event.part || "text";
+        const part = event.part;
+        const parts = part === "thought" ? appendThoughtPart(current.parts, event.delta) : current.parts;
         return {
           assistants: {
             ...state.assistants,
             [event.turnID]: {
               ...current,
               text: part === "text" ? current.text + event.delta : current.text,
-              thought: part === "thought" ? current.thought + event.delta : current.thought,
+              parts,
               status: "streaming",
               revealed: false,
             },
@@ -250,6 +304,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       }
       if (event.kind === "turn.tool") {
         const current = overlayWithDefaults(state.assistants[event.turnID], event.turnID, event.sessionID);
+        const callID = event.callID;
         const phase =
           event.phase === "streaming_args"
             ? "streaming_tool_args"
@@ -263,7 +318,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
             ...state.assistants,
             [event.turnID]: {
               ...current,
-              tools: upsertTool(current.tools, event),
+              parts: upsertToolPart(current.parts, event, callID),
               status: "streaming",
               revealed: false,
             },

@@ -188,6 +188,26 @@ func TestListTurnsPagination(t *testing.T) {
 	}
 }
 
+func TestGetTurn(t *testing.T) {
+	srv, st := newTestServer(t)
+	if err := st.CreateSession(context.Background(), &store.Session{ID: "sess_1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	appendAPITestTurn(t, st, "sess_1", 1)
+
+	resp := req(t, http.MethodGet, srv.URL+"/sessions/sess_1/turns/turn_1", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	turn := decodeJSON[store.ConversationTurn](t, resp)
+	if turn.ID != "turn_1" {
+		t.Fatalf("unexpected turn id %q", turn.ID)
+	}
+	if got, want := messagePtrValueIDs(turn.Messages), []string{"msg_1", "msg_turn_1"}; !sameStringValues(got, want) {
+		t.Fatalf("turn should include complete messages: got %v want %v", got, want)
+	}
+}
+
 type messagePageResponse struct {
 	Messages []store.Message `json:"messages"`
 	HasMore  bool            `json:"hasMore"`
@@ -213,9 +233,9 @@ func appendAPITestTurn(t *testing.T, st store.Store, sessionID string, index int
 	}
 	text := fmt.Sprintf("assistant %d", index)
 	if _, err := st.FinishTurn(context.Background(), store.FinishTurnInput{
-		TurnID:        turnID,
-		Status:        store.TurnCompleted,
-		AssistantText: &text,
+		TurnID:         turnID,
+		Status:         store.TurnCompleted,
+		AssistantParts: store.TextPart(text),
 	}); err != nil {
 		t.Fatal(err)
 	}

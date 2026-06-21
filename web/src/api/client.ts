@@ -4,19 +4,24 @@ import {
   createProviderRequest,
   listMessagesResponse,
   listProvidersResponse,
+  listQueuedInputsResponse,
   listSessionsResponse,
   listTurnsResponse,
   message,
+  patchQueuedInputRequest,
   patchProviderRequest,
   providerProfile,
+  queuedInput,
   session,
   settingsResponse,
   submitResponse,
+  conversationTurn,
   type ContentPart,
   type Message,
   type ConversationTurn,
   type ProviderModel,
   type ProviderProfile,
+  type QueuedInput,
   type Session,
 } from "@/contracts/api";
 import { z } from "zod";
@@ -151,6 +156,30 @@ export function listTurns(
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/turns${suffix}`, listTurnsResponse);
 }
 
+export function getTurn(token: string, sessionID: string, turnID: string): Promise<ConversationTurn> {
+  return request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/turns/${encodeURIComponent(turnID)}`,
+    conversationTurn,
+  );
+}
+
+export function listQueuedInputs(token: string, sessionID: string): Promise<{ queuedInputs: QueuedInput[] }> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/queued-inputs`, listQueuedInputsResponse);
+}
+
+export function updateQueuedInput(
+  token: string,
+  sessionID: string,
+  clientMessageID: string,
+  body: z.infer<typeof patchQueuedInputRequest>,
+): Promise<QueuedInput> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/queued-inputs/${encodeURIComponent(clientMessageID)}`, queuedInput, {
+    method: "PATCH",
+    body: JSON.stringify(patchQueuedInputRequest.parse(body)),
+  });
+}
+
 export function submitMessage(
   token: string,
   sessionID: string,
@@ -214,5 +243,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { ContentPart, Message, ConversationTurn, ProviderModel, ProviderProfile, Session };
+export type { ContentPart, Message, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session };
 export { createProviderRequest, patchProviderRequest };

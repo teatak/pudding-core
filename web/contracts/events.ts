@@ -17,7 +17,7 @@ export const turnDeltaEvent = z.object({
   kind: z.literal("turn.delta"),
   sessionID: z.string(),
   turnID: z.string(),
-  part: z.enum(["text", "thought"]).optional(),
+  part: z.enum(["text", "thought"]),
   delta: z.string(),
 });
 
@@ -25,9 +25,9 @@ export const turnToolEvent = z.object({
   kind: z.literal("turn.tool"),
   sessionID: z.string(),
   turnID: z.string(),
-  callID: z.string().optional(),
+  callID: z.string(),
   name: z.string().optional(),
-  phase: z.enum(["streaming_args", "running", "ok", "error"]).optional(),
+  phase: z.enum(["streaming_args", "running", "ok", "error"]),
   argsDelta: z.string().optional(),
   summary: z.string().optional(),
 });
@@ -60,6 +60,24 @@ export const turnCancelledEvent = z.object({
   interrupted: z.boolean().optional(),
 });
 
+export const inputQueuedEvent = z.object({
+  kind: z.literal("input.queued"),
+  seq: z.number().int().positive(),
+  sessionID: z.string(),
+  clientMessageID: z.string(),
+  text: z.string(),
+  status: z.enum(["queued", "editing", "cancelled", "promoted"]),
+});
+
+export const inputUpdatedEvent = z.object({
+  kind: z.literal("input.updated"),
+  seq: z.number().int().positive(),
+  sessionID: z.string(),
+  clientMessageID: z.string(),
+  text: z.string(),
+  status: z.enum(["queued", "editing", "cancelled", "promoted"]),
+});
+
 // session.titled 不落库、无 seq:自动标题写回(provisional / LLM 各一次),
 // 丢失由 sessions 轮询兜底
 export const sessionTitledEvent = z.object({
@@ -80,6 +98,8 @@ export const sessionEvent = z.discriminatedUnion("kind", [
   turnCompletedEvent,
   turnFailedEvent,
   turnCancelledEvent,
+  inputQueuedEvent,
+  inputUpdatedEvent,
   sessionTitledEvent,
   pingEvent,
 ]);

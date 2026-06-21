@@ -14,6 +14,7 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/tool"
 )
 
 func newTestEngine(t *testing.T, opts ...mock.Option) (*Engine, *memstore.Memstore, *event.Hub, string) {
@@ -151,14 +152,14 @@ func TestSubmitPersistsThoughtParts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(msgs) != 2 {
-		t.Fatalf("want user + assistant messages, got %+v", msgs)
+	if len(msgs) != 3 {
+		t.Fatalf("want user + thought + assistant text messages, got %+v", msgs)
 	}
-	if msgs[1].Text != "answer" {
-		t.Fatalf("text column should keep final answer only: %+v", msgs[1])
+	if msgs[1].Kind != store.MessageKindThought || msgs[1].Text != "thinking" {
+		t.Fatalf("thought should be its own message: %+v", msgs[1])
 	}
-	if got := msgs[1].Parts; len(got) != 2 || got[0].Type != store.ContentPartThought || got[0].Text != "thinking" || got[1].Type != store.ContentPartText || got[1].Text != "answer" {
-		t.Fatalf("unexpected assistant parts: %+v", got)
+	if msgs[2].Kind != store.MessageKindText || msgs[2].Text != "answer" {
+		t.Fatalf("text should be its own assistant message: %+v", msgs[2])
 	}
 
 	seenThought, seenText := false, false
@@ -178,6 +179,72 @@ func TestSubmitPersistsThoughtParts(t *testing.T) {
 		case <-timeout:
 			t.Fatalf("missing thought/text delta events: thought=%v text=%v", seenThought, seenText)
 		}
+	}
+}
+
+func TestSubmitRunsToolLoop(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	client := &toolLoopClient{}
+	runner := &recordingToolRunner{
+		defs: []provider.ToolDef{{
+			Name:        tool.TimeGetCurrent,
+			Description: "Get time",
+			InputSchema: json.RawMessage(`{"type":"object"}`),
+		}},
+		result: tool.Result{Ok: true, Content: `{"iso":"2026-06-21T12:00:00+08:00"}`},
+	}
+	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithTools(runner))
+	ctx := context.Background()
+	sid := "sess_tools"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "tools", Provider: "capture", Model: "tool-model"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "capture", Protocol: "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID:           "tool-model",
+			Capabilities: &store.ModelCaps{Tools: true},
+			Limits:       &store.ModelLimits{MaxToolLoops: 3},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "现在几点"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+
+	if len(client.requests) != 2 {
+		t.Fatalf("want 2 provider calls, got %d", len(client.requests))
+	}
+	if len(client.requests[0].Tools) != 1 || client.requests[0].Tools[0].Name != tool.TimeGetCurrent {
+		t.Fatalf("tool definitions not injected: %+v", client.requests[0].Tools)
+	}
+	last := client.requests[1].Messages[len(client.requests[1].Messages)-1]
+	if !hasProviderPart(last.Parts, provider.PartToolUse) || !hasProviderPart(last.Parts, provider.PartToolResult) {
+		t.Fatalf("second provider call missing tool history: %+v", last.Parts)
+	}
+	if len(runner.calls) != 1 || runner.calls[0].Name != tool.TimeGetCurrent || string(runner.calls[0].Args) != `{"timezone":"Asia/Singapore"}` {
+		t.Fatalf("tool call not executed correctly: %+v", runner.calls)
+	}
+	msgs, err := ms.ListMessages(ctx, sid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 4 || msgs[3].Text != "工具结果已收到" {
+		t.Fatalf("unexpected messages: %+v", msgs)
+	}
+	if msgs[1].Kind != store.MessageKindToolUse || msgs[1].Role != store.RoleAssistant {
+		t.Fatalf("tool_use should be assistant message: %+v", msgs[1])
+	}
+	if msgs[2].Kind != store.MessageKindToolResult || msgs[2].Role != store.RoleTool {
+		t.Fatalf("tool_result should be tool message: %+v", msgs[2])
+	}
+	parts := msgs[2].Parts
+	if len(parts) != 1 || parts[0].Type != store.ContentPartToolResult || parts[0].Name != tool.TimeGetCurrent || !parts[0].Ok || parts[0].Content == "" {
+		t.Fatalf("tool_result part wrong: %+v", parts)
 	}
 }
 
@@ -202,14 +269,24 @@ func TestSubmitIdempotent(t *testing.T) {
 	}
 }
 
-func TestSubmitConflict409(t *testing.T) {
-	eng, ms, _, sid := newTestEngine(t, mock.WithDelay(50*time.Millisecond))
+func TestSubmitQueuesWhileRunning(t *testing.T) {
+	eng, ms, _, sid := newTestEngine(t, mock.WithDelay(20*time.Millisecond))
 	if _, err := eng.Submit(context.Background(), SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "slow"}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := eng.Submit(context.Background(), SubmitInput{SessionID: sid, ClientMessageID: "c2", Text: "again"})
-	if !errors.Is(err, ErrTurnRunning) {
-		t.Fatalf("want ErrTurnRunning, got %v", err)
+	queued, err := eng.Submit(context.Background(), SubmitInput{SessionID: sid, ClientMessageID: "c2", Text: "again"})
+	if err != nil {
+		t.Fatalf("running submit should queue, got %v", err)
+	}
+	if !queued.Queued || queued.ClientMessageID != "c2" || queued.Status != string(store.QueuedInputQueued) {
+		t.Fatalf("unexpected queued result: %+v", queued)
+	}
+	inputs, err := ms.ListQueuedInputs(context.Background(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inputs) != 1 || inputs[0].ClientMessageID != "c2" || inputs[0].Status != store.QueuedInputQueued {
+		t.Fatalf("queued input not persisted: %+v", inputs)
 	}
 
 	// streaming 中列表项必须带 running 派生态(rail 运行态指示的数据源)
@@ -218,14 +295,83 @@ func TestSubmitConflict409(t *testing.T) {
 		t.Fatalf("session must report running while streaming: %+v err=%v", list, err)
 	}
 
-	if err := eng.Cancel(sid); err != nil {
-		t.Fatal(err)
-	}
 	eng.Wait()
 
 	list, _ = ms.ListSessions(context.Background())
 	if list[0].Running {
-		t.Fatal("running must clear after cancel")
+		t.Fatal("running must clear after queued turns drain")
+	}
+	inputs, err = ms.ListQueuedInputs(context.Background(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inputs) != 0 {
+		t.Fatalf("queued input should be promoted after first turn: %+v", inputs)
+	}
+	msgs, _ := ms.ListMessages(context.Background(), sid, 0)
+	if len(msgs) != 4 || msgs[0].ClientMessageID != "c1" || msgs[2].ClientMessageID != "c2" {
+		t.Fatalf("queued turn should run after first turn, got messages: %+v", msgs)
+	}
+}
+
+func TestQueuedEditingBlocksDrain(t *testing.T) {
+	eng, ms, _, sid := newTestEngine(t, mock.WithDelay(20*time.Millisecond))
+	ctx := context.Background()
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c2", Text: "draft"}); err != nil || !res.Queued {
+		t.Fatalf("second submit should queue: %+v err=%v", res, err)
+	}
+	editing := store.QueuedInputEditing
+	if _, err := ms.UpdateQueuedInput(ctx, store.UpdateQueuedInputInput{
+		SessionID:       sid,
+		ClientMessageID: "c2",
+		Status:          &editing,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c3", Text: "third"}); err != nil || !res.Queued {
+		t.Fatalf("later submit should queue behind editing input: %+v err=%v", res, err)
+	}
+	eng.Wait()
+
+	if _, ok := turnByClientID(t, ms, sid, "c2"); ok {
+		t.Fatal("editing queued input must not be promoted")
+	}
+	if _, ok := turnByClientID(t, ms, sid, "c3"); ok {
+		t.Fatal("later queued input must not skip an editing head")
+	}
+	inputs, err := ms.ListQueuedInputs(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inputs) != 2 || inputs[0].Status != store.QueuedInputEditing || inputs[1].Status != store.QueuedInputQueued {
+		t.Fatalf("queue should remain blocked by editing input: %+v", inputs)
+	}
+
+	queued := store.QueuedInputQueued
+	text := "edited draft"
+	if _, err := ms.UpdateQueuedInput(ctx, store.UpdateQueuedInputInput{
+		SessionID:       sid,
+		ClientMessageID: "c2",
+		Text:            &text,
+		Status:          &queued,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	eng.TryDrainQueued(sid)
+	eng.Wait()
+
+	turn, ok := turnByClientID(t, ms, sid, "c2")
+	if !ok {
+		t.Fatal("queued input should be promoted once editing ends")
+	}
+	if len(turn.Messages) == 0 || turn.Messages[0].Text != text {
+		t.Fatalf("promoted turn should use edited text: %+v", turn.Messages)
+	}
+	if _, ok := turnByClientID(t, ms, sid, "c3"); !ok {
+		t.Fatal("later queued input should drain after edited head")
 	}
 }
 
@@ -422,6 +568,58 @@ func (c *captureClient) Stream(_ context.Context, req provider.Request) (<-chan 
 	return out, nil
 }
 
+type toolLoopClient struct {
+	requests []provider.Request
+}
+
+func (c *toolLoopClient) Name() string { return "tool-loop" }
+
+func (c *toolLoopClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	c.requests = append(c.requests, req)
+	out := make(chan provider.Chunk, 4)
+	if len(c.requests) == 1 {
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
+			Index:     0,
+			CallID:    "call_time",
+			Name:      tool.TimeGetCurrent,
+			ArgsDelta: `{"timezone":"Asia/Singapore"}`,
+		}}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	} else {
+		out <- provider.Chunk{Part: provider.PartText, Delta: "工具结果已收到"}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
+	}
+	close(out)
+	return out, nil
+}
+
+type recordingToolRunner struct {
+	defs   []provider.ToolDef
+	result tool.Result
+	calls  []tool.Call
+}
+
+func (r *recordingToolRunner) Definitions(context.Context, string) ([]provider.ToolDef, error) {
+	return r.defs, nil
+}
+
+func (r *recordingToolRunner) Call(_ context.Context, call tool.Call) tool.Result {
+	r.calls = append(r.calls, call)
+	result := r.result
+	result.CallID = call.CallID
+	result.Name = call.Name
+	return result
+}
+
+func hasProviderPart(parts []provider.Part, typ provider.PartType) bool {
+	for _, part := range parts {
+		if part.Type == typ {
+			return true
+		}
+	}
+	return false
+}
+
 func findTurn(ms store.Store, sessionID, clientMessageID string) (*store.Turn, error) {
 	res, err := ms.BeginTurn(context.Background(), store.BeginTurnInput{
 		SessionID: sessionID, TurnID: "probe", UserMessageID: "probe",
@@ -431,6 +629,20 @@ func findTurn(ms store.Store, sessionID, clientMessageID string) (*store.Turn, e
 		return nil, err
 	}
 	return res.Turn, nil
+}
+
+func turnByClientID(t *testing.T, ms store.Store, sessionID, clientMessageID string) (*store.ConversationTurn, bool) {
+	t.Helper()
+	page, err := ms.ListTurnsPage(context.Background(), sessionID, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, turn := range page.Turns {
+		if turn.ClientMessageID == clientMessageID {
+			return turn, true
+		}
+	}
+	return nil, false
 }
 
 func TestRecoverFinalizesResidualRunningTurns(t *testing.T) {

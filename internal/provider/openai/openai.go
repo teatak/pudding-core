@@ -99,7 +99,7 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 		body.Messages = append(body.Messages, chatMessage{Role: "system", Content: req.System})
 	}
 	for _, msg := range req.Messages {
-		body.Messages = append(body.Messages, chatMessage{Role: string(msg.Role), Content: messageText(msg)})
+		body.Messages = append(body.Messages, chatMessagesFor(msg)...)
 	}
 	if len(req.Tools) > 0 {
 		body.Tools = make([]chatTool, 0, len(req.Tools))
@@ -290,8 +290,10 @@ type chatRequest struct {
 }
 
 type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string         `json:"role"`
+	Content    string         `json:"content"`
+	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string         `json:"tool_call_id,omitempty"`
 }
 
 type chatTool struct {
@@ -303,6 +305,17 @@ type chatToolFunction struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
+}
+
+type chatToolCall struct {
+	ID       string               `json:"id"`
+	Type     string               `json:"type"`
+	Function chatToolCallFunction `json:"function"`
+}
+
+type chatToolCallFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 type chatStreamFrame struct {
@@ -337,4 +350,58 @@ func messageText(msg provider.Message) string {
 		return msg.Text
 	}
 	return b.String()
+}
+
+func chatMessagesFor(msg provider.Message) []chatMessage {
+	if len(msg.Parts) == 0 {
+		return []chatMessage{{Role: string(msg.Role), Content: msg.Text}}
+	}
+	role := string(msg.Role)
+	var out []chatMessage
+	var text strings.Builder
+	var calls []chatToolCall
+	flushToolCalls := func() {
+		if len(calls) == 0 {
+			return
+		}
+		out = append(out, chatMessage{Role: "assistant", Content: text.String(), ToolCalls: calls})
+		text.Reset()
+		calls = nil
+	}
+	flushText := func() {
+		if text.Len() == 0 {
+			return
+		}
+		out = append(out, chatMessage{Role: role, Content: text.String()})
+		text.Reset()
+	}
+	for _, part := range msg.Parts {
+		switch part.Type {
+		case "", provider.PartText:
+			text.WriteString(part.Text)
+		case provider.PartToolUse:
+			args := string(part.Args)
+			if args == "" {
+				args = "{}"
+			}
+			calls = append(calls, chatToolCall{
+				ID:   part.CallID,
+				Type: "function",
+				Function: chatToolCallFunction{
+					Name:      part.Name,
+					Arguments: args,
+				},
+			})
+		case provider.PartToolResult:
+			flushToolCalls()
+			flushText()
+			out = append(out, chatMessage{Role: "tool", Content: part.Content, ToolCallID: part.CallID})
+		}
+	}
+	flushToolCalls()
+	flushText()
+	if len(out) == 0 {
+		out = append(out, chatMessage{Role: role, Content: msg.Text})
+	}
+	return out
 }

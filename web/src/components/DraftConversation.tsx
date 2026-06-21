@@ -296,13 +296,18 @@ function DraftComposer({
       addPendingUser({
         sessionID: created.id,
         clientMessageID,
+        status: "submitting",
         text: value.text,
         createdAt: new Date().toISOString(),
       });
       startSubmittingTurn(created.id, clientMessageID);
       try {
         const result = await submitMessage(token, created.id, { clientMessageID, text: value.text });
-        acceptSubmittingTurn(created.id, clientMessageID, result.turnID);
+        if (result.queued || !result.turnID) {
+          clearSubmittingTurn(created.id, clientMessageID);
+        } else {
+          acceptSubmittingTurn(created.id, clientMessageID, result.turnID);
+        }
       } catch (error) {
         // 只有拿到后端明确拒绝的响应时才回滚 draft session。
         // 网络中断/响应解析失败可能发生在后端已经 accepted 之后,这类错误保留 session 交给 SSE/query 对账。
@@ -329,6 +334,7 @@ function DraftComposer({
       }
       await queryClient.invalidateQueries({ queryKey: queryKeys.turns(created.id) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.messages(created.id) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.queuedInputs(created.id) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
       clearDraft();
       return created;

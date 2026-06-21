@@ -128,6 +128,55 @@ func TestStreamHappyPath(t *testing.T) {
 	}
 }
 
+func TestRequestShapeWithToolHistory(t *testing.T) {
+	var gotBody messagesRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, happyStream)
+	}))
+	defer srv.Close()
+
+	client := New(Config{BaseURL: srv.URL, HTTPClient: srv.Client()})
+	ch, err := client.Stream(context.Background(), provider.Request{
+		Model: "claude-opus-4-8",
+		Messages: []provider.Message{
+			{Role: provider.RoleAssistant, Parts: []provider.Part{
+				{Type: provider.PartToolUse, CallID: "call_1", Name: "builtin_time_get_current", Args: json.RawMessage(`{"timezone":"Asia/Singapore"}`)},
+				{Type: provider.PartToolResult, CallID: "call_1", Name: "builtin_time_get_current", Ok: true, Content: `{"iso":"now"}`},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, _ = collect(t, ch)
+
+	if len(gotBody.Messages) != 2 {
+		t.Fatalf("unexpected messages: %+v", gotBody.Messages)
+	}
+	if gotBody.Messages[0].Role != "assistant" || gotBody.Messages[1].Role != "user" {
+		t.Fatalf("roles wrong: %+v", gotBody.Messages)
+	}
+	assistantBlocks, ok := gotBody.Messages[0].Content.([]any)
+	if !ok || len(assistantBlocks) != 1 {
+		t.Fatalf("assistant content wrong: %+v", gotBody.Messages[0].Content)
+	}
+	toolUse := assistantBlocks[0].(map[string]any)
+	if toolUse["type"] != "tool_use" || toolUse["id"] != "call_1" || toolUse["name"] != "builtin_time_get_current" {
+		t.Fatalf("tool_use block wrong: %+v", toolUse)
+	}
+	userBlocks, ok := gotBody.Messages[1].Content.([]any)
+	if !ok || len(userBlocks) != 1 {
+		t.Fatalf("user content wrong: %+v", gotBody.Messages[1].Content)
+	}
+	toolResult := userBlocks[0].(map[string]any)
+	if toolResult["type"] != "tool_result" || toolResult["tool_use_id"] != "call_1" || toolResult["content"] != `{"iso":"now"}` {
+		t.Fatalf("tool_result block wrong: %+v", toolResult)
+	}
+}
+
 func TestToolUseChunks(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

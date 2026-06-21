@@ -1,0 +1,643 @@
+import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
+import { Children, isValidElement, useEffect, useRef, useState, type ReactNode } from "react";
+import ReactMarkdown, { type Components, type UrlTransform } from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+import type { ContentPart, Message } from "@/api/client";
+import { PhaseDot } from "@/components/PhaseDot";
+import { Button } from "@/components/ui/button";
+import { useI18n } from "@/i18n";
+import { getShikiCodeRenderer, type CodeBlockRenderer } from "@/lib/shiki";
+import type { AssistantOverlay, AssistantOverlayPart, TurnPhaseState } from "@/state/overlayStore";
+
+import { useElapsedDuration } from "./time";
+import { textFromContentParts, type TurnDisclosureState, type TurnPartVM } from "./types";
+
+export function TurnParts({
+  disclosure,
+  parts,
+  turnID,
+}: {
+  disclosure?: TurnDisclosureState;
+  parts: TurnPartVM[];
+  turnID: string;
+}) {
+  return (
+    <>
+      {parts.map((part, index) => {
+        const partKey = part.key || `${part.type}:${index}`;
+        const disclosureKey = `${turnID}:${partKey}`;
+        switch (part.type) {
+          case "text":
+            return <MarkdownBody key={partKey} text={part.text} />;
+          case "thought":
+            return (
+              <ThoughtPart
+                key={partKey}
+                active={part.active}
+                open={disclosure?.isOpen(disclosureKey) || false}
+                text={part.text}
+                onOpenChange={(open) => disclosure?.setOpen(disclosureKey, open)}
+              />
+            );
+          case "tool_use":
+            return (
+              <ToolUsePart
+                key={partKey}
+                open={disclosure?.isOpen(disclosureKey) || false}
+                part={part}
+                onOpenChange={(open) => disclosure?.setOpen(disclosureKey, open)}
+              />
+            );
+          case "tool_result":
+            return null;
+        }
+      })}
+    </>
+  );
+}
+
+export function partsFromMessages(messages: Message[]): TurnPartVM[] {
+  return withPartKeys(mergeToolParts(messages.flatMap((message) => message.parts.map(partFromContentPart))));
+}
+
+export function assistantTextFromMessages(messages: Message[]) {
+  const textParts: string[] = [];
+  for (const message of messages) {
+    const text = textFromContentParts(message.parts);
+    if (text.trim()) {
+      textParts.push(text);
+    }
+  }
+  return textParts.join("\n\n");
+}
+
+export function partsFromOverlay(
+  overlay: AssistantOverlay,
+  streamedText: string,
+  activePhaseName: TurnPhaseState["phase"] | undefined,
+  activePhaseUpdatedAt?: string,
+): TurnPartVM[] {
+  const overlayParts = orderedOverlayParts(overlay);
+  const lastThoughtIndex = findLastOverlayPartIndex(overlayParts, "thought");
+  const lastToolIndex = findLastOverlayPartIndex(overlayParts, "tool");
+  return withPartKeys([
+    ...overlayParts.map((part, index): TurnPartVM => {
+      if (part.type === "thought") {
+        return { type: "thought", active: activePhaseName === "thinking" && index === lastThoughtIndex, text: part.text };
+      }
+      const active =
+        index === lastToolIndex &&
+        (activePhaseName === "streaming_tool_args" ||
+          activePhaseName === "executing_tool" ||
+          activePhaseName === "awaiting_followup");
+      return {
+        type: "tool_use",
+        active,
+        argsText: part.argsText,
+        dotPhase: active ? activePhaseName : toolPhaseDot(part.phase),
+        id: part.callID,
+        name: part.name,
+        phase: part.phase,
+        phaseUpdatedAt: active ? activePhaseUpdatedAt : undefined,
+        summary: part.summary,
+      };
+    }),
+    ...partsFromText(streamedText),
+  ]);
+}
+
+export function toolPhaseDot(phase: Extract<TurnPartVM, { type: "tool_use" }>["phase"]): TurnPhaseState["phase"] {
+  switch (phase) {
+    case "streaming_args":
+      return "streaming_tool_args";
+    case "running":
+      return "executing_tool";
+    case "error":
+      return "error";
+    case "ok":
+    default:
+      return "executing_tool";
+  }
+}
+
+function partsFromText(text: string): TurnPartVM[] {
+  return text ? [{ type: "text", text }] : [];
+}
+
+function partFromContentPart(part: ContentPart): TurnPartVM {
+  switch (part.type) {
+    case "text":
+      return { type: "text", text: part.text };
+    case "thought":
+      return { type: "thought", text: part.text };
+    case "tool_use":
+      return { type: "tool_use", args: part.args, id: part.id, name: part.name };
+    case "tool_result":
+      return { type: "tool_result", content: part.content, id: part.id, name: part.name, ok: part.ok };
+  }
+}
+
+function mergeToolParts(parts: TurnPartVM[]): TurnPartVM[] {
+  const out: TurnPartVM[] = [];
+  const toolIndexByID = new Map<string, number>();
+  for (const part of parts) {
+    if (part.type === "tool_use") {
+      out.push(part);
+      if (part.id) {
+        toolIndexByID.set(part.id, out.length - 1);
+      }
+      continue;
+    }
+    if (part.type === "tool_result") {
+      const index = part.id ? toolIndexByID.get(part.id) : undefined;
+      const existing = typeof index === "number" ? out[index] : undefined;
+      if (typeof index === "number" && existing?.type === "tool_use") {
+        out[index] = {
+          ...existing,
+          resultContent: part.content,
+          resultName: part.name,
+          resultOk: part.ok,
+        };
+      } else {
+        out.push({
+          type: "tool_use",
+          id: part.id,
+          name: part.name,
+          resultContent: part.content,
+          resultName: part.name,
+          resultOk: part.ok,
+        });
+      }
+      continue;
+    }
+    out.push(part);
+  }
+  return out;
+}
+
+function withPartKeys(parts: TurnPartVM[]) {
+  let textIndex = 0;
+  let thoughtIndex = 0;
+  let toolIndex = 0;
+  let resultIndex = 0;
+  return parts.map((part) => {
+    switch (part.type) {
+      case "text":
+        return { ...part, key: `text:${textIndex++}` };
+      case "thought":
+        return { ...part, key: `thought:${thoughtIndex++}` };
+      case "tool_use":
+        return { ...part, key: part.id ? `tool:${part.id}` : `tool:${toolIndex++}` };
+      case "tool_result":
+        return { ...part, key: part.id ? `tool-result:${part.id}` : `tool-result:${resultIndex++}` };
+    }
+  });
+}
+
+function orderedOverlayParts(overlay: AssistantOverlay): AssistantOverlayPart[] {
+  return overlay.parts;
+}
+
+function findLastOverlayPartIndex(parts: AssistantOverlayPart[], type: AssistantOverlayPart["type"]) {
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if (parts[i].type === type) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function ThoughtPart({
+  active = false,
+  open,
+  text,
+  onOpenChange,
+}: {
+  active?: boolean;
+  open: boolean;
+  text: string;
+  onOpenChange?: (open: boolean) => void;
+}) {
+  const { t } = useI18n();
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!active || !open || !bodyRef.current) {
+      return;
+    }
+    bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+  }, [active, open, text]);
+
+  return (
+    <details
+      className="relative text-[12px] leading-[1.5] text-muted-foreground"
+      open={open}
+      onToggle={(event) => onOpenChange?.(event.currentTarget.open)}
+    >
+      {open ? <span aria-hidden="true" className="pointer-events-none absolute top-6 bottom-0 left-[5px] border-l border-border" /> : null}
+      <summary className="inline-grid h-6 cursor-default list-none grid-cols-[0.625rem_auto] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden">
+        <span className="relative z-[1] inline-flex h-6 w-2.5 shrink-0 items-center justify-center opacity-90">
+          <PhaseDot active={active} phase="thinking" size="md" />
+        </span>
+        <span className="flex min-w-0 flex-1 items-center gap-1">
+          <span className="shrink-0 truncate">{active ? t("transcript.thinking") : t("transcript.thought")}</span>
+          <span className="shrink-0 text-muted-foreground/50">
+            {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+          </span>
+        </span>
+      </summary>
+      <div className="ml-[5px] py-1 pl-2">
+        <div
+          ref={bodyRef}
+          className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words pr-2 text-[12px] leading-6 text-muted-foreground italic"
+        >
+          {text}
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function ToolUsePart({
+  open,
+  part,
+  onOpenChange,
+}: {
+  open: boolean;
+  part: Extract<TurnPartVM, { type: "tool_use" }>;
+  onOpenChange?: (open: boolean) => void;
+}) {
+  const { t } = useI18n();
+  const args = formatToolArgs(part.argsText || part.args);
+  const result = formatToolResult(part.resultContent);
+  const liveResult = result || (part.phase === "ok" || part.phase === "error" ? formatToolResult(part.summary) : null);
+  const baseTitle = toolDisplayName(part.name || part.resultName, t("transcript.tool"), t);
+  const active = part.active || part.phase === "streaming_args" || part.phase === "running";
+  const elapsed = useElapsedDuration(active && part.phase === "running" ? part.phaseUpdatedAt : undefined);
+  const title = toolTitle(part, liveResult, baseTitle, elapsed, t);
+  const copyText = toolCopyText(part, args, liveResult, baseTitle, t);
+  return (
+    <details
+      className="relative text-[12px] leading-[1.5] text-muted-foreground"
+      open={open}
+      onToggle={(event) => onOpenChange?.(event.currentTarget.open)}
+    >
+      {open ? <span aria-hidden="true" className="pointer-events-none absolute top-6 bottom-0 left-[5px] border-l border-border" /> : null}
+      <summary className="inline-grid h-6 cursor-default list-none grid-cols-[0.625rem_auto] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden">
+        <span className="relative z-[1] inline-flex h-6 w-2.5 shrink-0 items-center justify-center opacity-90">
+          <PhaseDot active={active} phase={part.dotPhase || toolPhaseDot(part.phase)} size="md" />
+        </span>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          <span className="shrink-0 truncate">{title.label}</span>
+          {title.summary ? <span className="min-w-0 truncate text-muted-foreground/50">{title.summary}</span> : null}
+          <span className="shrink-0 text-muted-foreground/50">
+            {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+          </span>
+        </span>
+      </summary>
+      <div className="ml-[5px] py-1 pl-2">
+        <div className="relative rounded-md border border-border/50 bg-muted/20 p-2 pr-9">
+          <ToolCopyButton text={copyText} />
+          {args ? <ToolDetailBlock label={t("transcript.toolArgs")} text={args} /> : null}
+          {liveResult ? <ToolDetailBlock label={t("transcript.toolResult")} text={liveResult.text} /> : null}
+          {!args && !liveResult ? <div className="leading-5">{title.summary || title.label}</div> : null}
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function MarkdownBody({ text }: { text: string }) {
+  const { t } = useI18n();
+  const [codeRenderer, setCodeRenderer] = useState<CodeBlockRenderer | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void getShikiCodeRenderer().then((renderer) => {
+      if (!cancelled) {
+        setCodeRenderer(() => renderer);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const components: Components = {
+    a({ children, href, node: _node, ...props }) {
+      return (
+        <a {...props} href={href} target="_blank" rel="noreferrer noopener">
+          {children}
+        </a>
+      );
+    },
+    img({ alt, node: _node, src }) {
+      const label = alt || src || "";
+      if (!src) {
+        return label ? <span>{label}</span> : null;
+      }
+      return (
+        <a href={src} target="_blank" rel="noreferrer noopener">
+          {label}
+        </a>
+      );
+    },
+    pre({ children }) {
+      const block = getCodeBlock(children);
+      if (!block) {
+        return <pre>{children}</pre>;
+      }
+      return (
+        <CodeBlock
+          code={block.code}
+          codeCopiedLabel={t("common.copied")}
+          codeCopyLabel={t("common.copy")}
+          codeRenderer={codeRenderer}
+          lang={block.lang}
+        />
+      );
+    },
+    table({ children, node: _node, ...props }) {
+      return (
+        <div className="table-wrap">
+          <table {...props}>{children}</table>
+        </div>
+      );
+    },
+  };
+
+  return (
+    <div className="pudding-markdown">
+      <ReactMarkdown components={components} remarkPlugins={[remarkGfm]} urlTransform={markdownUrlTransform}>
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+const markdownUrlTransform: UrlTransform = (raw, key) => {
+  try {
+    const url = new URL(raw, window.location.origin);
+    if (key === "src") {
+      return url.protocol === "http:" || url.protocol === "https:" ? url.href : "";
+    }
+    if (key === "href" && (url.protocol === "http:" || url.protocol === "https:" || url.protocol === "mailto:")) {
+      return url.href;
+    }
+  } catch {
+    return "";
+  }
+  return "";
+};
+
+type CodeElementProps = {
+  children?: ReactNode;
+  className?: string;
+};
+
+function getCodeBlock(children: ReactNode) {
+  const child = Children.toArray(children)[0];
+  if (!isValidElement<CodeElementProps>(child) || child.type !== "code") {
+    return null;
+  }
+  const lang = /language-([^\s]+)/.exec(child.props.className || "")?.[1];
+  return {
+    code: codeText(child.props.children).replace(/\n$/, ""),
+    lang,
+  };
+}
+
+function codeText(children: ReactNode): string {
+  return Children.toArray(children)
+    .map((child) => (typeof child === "string" || typeof child === "number" ? String(child) : ""))
+    .join("");
+}
+
+function CodeBlock({
+  code,
+  codeCopiedLabel,
+  codeCopyLabel,
+  codeRenderer,
+  lang,
+}: {
+  code: string;
+  codeCopiedLabel: string;
+  codeCopyLabel: string;
+  codeRenderer: CodeBlockRenderer | null;
+  lang?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const resetTimer = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (resetTimer.current) {
+        window.clearTimeout(resetTimer.current);
+      }
+    };
+  }, []);
+  const highlighted = codeRenderer?.(code, lang);
+  return (
+    <div className="code-block-wrap">
+      <button
+        aria-label={copied ? codeCopiedLabel : codeCopyLabel}
+        className="code-copy-btn"
+        data-copied={copied ? "1" : undefined}
+        type="button"
+        onClick={() => {
+          void navigator.clipboard.writeText(code).then(() => {
+            setCopied(true);
+            if (resetTimer.current) {
+              window.clearTimeout(resetTimer.current);
+            }
+            resetTimer.current = window.setTimeout(() => setCopied(false), 1500);
+          });
+        }}
+      />
+      {highlighted ? (
+        <div dangerouslySetInnerHTML={{ __html: highlighted }} />
+      ) : (
+        <pre data-lang={lang}>
+          <code>{code}</code>
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function formatToolArgs(value: unknown) {
+  if (value == null || value === "") {
+    return "";
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return "";
+    }
+    const parsed = parseJSON(trimmed);
+    if (parsed.ok) {
+      if (isEmptyObject(parsed.value)) {
+        return "";
+      }
+      return JSON.stringify(parsed.value, null, 2);
+    }
+    return trimmed;
+  }
+  if (isEmptyObject(value)) {
+    return "";
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function formatToolResult(content: string | undefined) {
+  if (!content) {
+    return null;
+  }
+  const trimmed = content.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const parsed = parseJSON(trimmed);
+  if (parsed.ok) {
+    return {
+      fieldCount: fieldCount(parsed.value),
+      text: JSON.stringify(parsed.value, null, 2),
+    };
+  }
+  return { fieldCount: null, text: trimmed };
+}
+
+function parseJSON(value: string): { ok: true; value: unknown } | { ok: false } {
+  try {
+    return { ok: true, value: JSON.parse(value) };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function isEmptyObject(value: unknown) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0);
+}
+
+function fieldCount(value: unknown): number | null {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return Object.keys(value).length;
+  }
+  if (Array.isArray(value)) {
+    return value.length;
+  }
+  return null;
+}
+
+function toolDisplayName(name: string | undefined, fallback: string, t: (key: string) => string) {
+  if (!name) {
+    return fallback;
+  }
+  const known: Record<string, string> = {
+    builtin_time_get_current: t("transcript.toolTimeCurrent"),
+  };
+  if (known[name]) {
+    return known[name];
+  }
+  return name.replace(/^builtin_/, "").replace(/^mcp_/, "").split("_").filter(Boolean).join(" ");
+}
+
+function toolTitle(
+  part: Extract<TurnPartVM, { type: "tool_use" }>,
+  result: ReturnType<typeof formatToolResult>,
+  baseTitle: string,
+  elapsed: string,
+  t: (key: string) => string,
+) {
+  if (part.phase === "streaming_args") {
+    return { label: t("transcript.toolPreparingName").replace("{name}", baseTitle), summary: "" };
+  }
+  if (part.phase === "running") {
+    return {
+      label: t("transcript.toolRunningName").replace("{name}", baseTitle),
+      summary: elapsed,
+    };
+  }
+  if (part.resultOk === false || part.phase === "error") {
+    return { label: t("transcript.toolFailedName").replace("{name}", baseTitle), summary: "" };
+  }
+  if (result?.fieldCount != null) {
+    return {
+      label: t("transcript.toolCompletedName").replace("{name}", baseTitle),
+      summary: t("transcript.toolReturnedFields").replace("{count}", String(result.fieldCount)),
+    };
+  }
+  if (result?.text) {
+    return {
+      label: t("transcript.toolCompletedName").replace("{name}", baseTitle),
+      summary: t("transcript.toolReturnedResult"),
+    };
+  }
+  return { label: baseTitle, summary: "" };
+}
+
+function toolCopyText(
+  part: Extract<TurnPartVM, { type: "tool_use" }>,
+  args: string,
+  result: ReturnType<typeof formatToolResult>,
+  title: string,
+  t: (key: string) => string,
+) {
+  const lines = [title];
+  if (part.name) {
+    lines.push(`${t("transcript.tool")}: ${part.name}`);
+  }
+  if (args) {
+    lines.push("", `${t("transcript.toolArgs")}:`, args);
+  }
+  if (result?.text) {
+    lines.push("", `${t("transcript.toolResult")}:`, result.text);
+  }
+  return lines.join("\n");
+}
+
+function ToolDetailBlock({ label, text }: { label: string; text: string }) {
+  return (
+    <div className="mb-2 last:mb-0">
+      <div className="mb-1 text-[11px] font-medium text-muted-foreground/80">{label}</div>
+      <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-muted-foreground">
+        {text}
+      </pre>
+    </div>
+  );
+}
+
+function ToolCopyButton({ text }: { text: string }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  const resetTimer = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (resetTimer.current) {
+        window.clearTimeout(resetTimer.current);
+      }
+    };
+  }, []);
+  return (
+    <Button
+      aria-label={t("common.copy")}
+      className="absolute top-1.5 right-1.5 size-6 bg-transparent transition-colors hover:bg-muted dark:hover:bg-muted/50 active:translate-y-0"
+      size="icon-xs"
+      type="button"
+      variant="ghost"
+      onClick={() => {
+        void navigator.clipboard.writeText(text).then(() => {
+          setCopied(true);
+          if (resetTimer.current) {
+            window.clearTimeout(resetTimer.current);
+          }
+          resetTimer.current = window.setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+    >
+      {copied ? <Check className="text-success" /> : <Copy />}
+    </Button>
+  );
+}

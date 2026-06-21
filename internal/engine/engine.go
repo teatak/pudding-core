@@ -11,12 +11,17 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/teatak/pudding-core/internal/contextbuilder"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
+	"github.com/teatak/pudding-core/internal/tool"
 )
+
+const defaultMaxToolLoops = 16
+const toolCallTimeout = 60 * time.Second
 
 var (
 	// ErrTurnRunning:第一阶段同一 session 不允许并发 turn,API 映射 409。
@@ -57,6 +62,7 @@ type Engine struct {
 	hub      *event.Hub
 	resolver Resolver
 	builder  *contextbuilder.Builder
+	tools    tool.Runner
 
 	// auxCtx 是辅助 goroutine(自动标题,将来工具相关后台任务)的基 ctx;
 	// Stop() 取消它,优雅退出时这些 best-effort 任务立即中断,不拖住
@@ -70,12 +76,20 @@ type Engine struct {
 	wg      sync.WaitGroup
 }
 
-func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource) *Engine {
+type Option func(*Engine)
+
+func WithTools(runner tool.Runner) Option {
+	return func(e *Engine) {
+		e.tools = runner
+	}
+}
+
+func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opts ...Option) *Engine {
 	if cfg == nil {
 		cfg = emptyConfig{}
 	}
 	auxCtx, auxCancel := context.WithCancel(context.Background())
-	return &Engine{
+	e := &Engine{
 		store:     s,
 		config:    cfg,
 		hub:       hub,
@@ -85,6 +99,10 @@ func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource) *En
 		auxCancel: auxCancel,
 		running:   make(map[string]context.CancelFunc),
 	}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
 }
 
 // Stop 取消辅助 goroutine 的基 ctx(幂等);在 Wait() 前调用,
@@ -99,9 +117,12 @@ type SubmitInput struct {
 
 type SubmitResult struct {
 	// Duplicate:同一 clientMessageID 重复提交,返回已有 turn,不触发新 turn。
-	Duplicate     bool   `json:"duplicate,omitempty"`
-	TurnID        string `json:"turnID"`
-	UserMessageID string `json:"userMessageID,omitempty"`
+	Duplicate       bool   `json:"duplicate,omitempty"`
+	Queued          bool   `json:"queued,omitempty"`
+	TurnID          string `json:"turnID,omitempty"`
+	UserMessageID   string `json:"userMessageID,omitempty"`
+	Status          string `json:"status,omitempty"`
+	ClientMessageID string `json:"clientMessageID,omitempty"`
 }
 
 type resolvedModel struct {
@@ -129,6 +150,14 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 		return nil, fmt.Errorf("%w: %v", ErrProviderConfig, err)
 	}
 
+	queued, err := e.store.HasQueuedInputs(ctx, in.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if queued {
+		return e.queueSubmit(ctx, in, resolved)
+	}
+
 	res, err := e.store.BeginTurn(ctx, store.BeginTurnInput{
 		SessionID:       in.SessionID,
 		TurnID:          store.NewID("turn"),
@@ -139,6 +168,9 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 		Model:           resolved.model,
 		ModelConfig:     resolved.configJSON,
 	})
+	if errors.Is(err, store.ErrTurnRunning) {
+		return e.queueSubmit(ctx, in, resolved)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -169,6 +201,34 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	go e.runTurn(turnCtx, in.SessionID, res.Turn.ID, resolved, client)
 
 	return &SubmitResult{TurnID: res.Turn.ID, UserMessageID: res.UserMessage.ID}, nil
+}
+
+func (e *Engine) queueSubmit(ctx context.Context, in SubmitInput, resolved *resolvedModel) (*SubmitResult, error) {
+	res, err := e.store.QueueInput(ctx, store.QueueInputInput{
+		SessionID:       in.SessionID,
+		ClientMessageID: in.ClientMessageID,
+		Text:            strings.TrimSpace(in.Text),
+		Provider:        resolved.providerName,
+		Model:           resolved.model,
+		ModelConfig:     resolved.configJSON,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if res.ExistingTurn != nil {
+		return &SubmitResult{Duplicate: true, TurnID: res.ExistingTurn.ID}, nil
+	}
+	if res.QueuedEvent != nil {
+		e.hub.Publish(*res.QueuedEvent)
+	}
+	out := &SubmitResult{Queued: true, ClientMessageID: in.ClientMessageID, Status: string(store.QueuedInputQueued)}
+	if res.Duplicate {
+		out.Duplicate = true
+	}
+	if res.Input != nil {
+		out.Status = string(res.Input.Status)
+	}
+	return out, nil
 }
 
 func (e *Engine) resolveModel(ctx context.Context, sess *store.Session) (*resolvedModel, error) {
@@ -260,6 +320,13 @@ func (e *Engine) Recover(ctx context.Context) error {
 	if len(turns) > 0 {
 		slog.Info("engine: recovered interrupted turns", "count", len(turns))
 	}
+	sessions, err := e.store.QueuedSessions(ctx)
+	if err != nil {
+		return err
+	}
+	for _, sessionID := range sessions {
+		e.TryDrainQueued(sessionID)
+	}
 	return nil
 }
 
@@ -280,22 +347,16 @@ func (e *Engine) Wait() { e.wg.Wait() }
 
 func (e *Engine) runTurn(ctx context.Context, sessionID, turnID string, resolved *resolvedModel, client provider.Client) {
 	defer e.wg.Done()
-	defer func() {
-		e.mu.Lock()
-		delete(e.running, sessionID)
-		e.mu.Unlock()
-	}()
 
 	var parts turnPartAccumulator
 	status, errMsg := e.streamTurn(ctx, sessionID, turnID, resolved, client, &parts)
+	e.finishTurn(sessionID, turnID, status, errMsg, parts.Parts())
+}
 
+func (e *Engine) finishTurn(sessionID, turnID string, status store.TurnStatus, errMsg string, assistantParts []store.ContentPart) {
 	in := store.FinishTurnInput{TurnID: turnID, Status: status, Error: errMsg}
-	assistantParts := parts.Parts()
 	if len(assistantParts) > 0 {
 		in.AssistantParts = assistantParts
-	} else if status == store.TurnCompleted {
-		text := ""
-		in.AssistantText = &text
 	}
 	if status != store.TurnCompleted && len(assistantParts) > 0 {
 		// 半截输出保留为 canonical message 并标记 interrupted
@@ -308,33 +369,133 @@ func (e *Engine) runTurn(ctx context.Context, sessionID, turnID string, resolved
 		// 静默(删除路径已 cancel 本 turn,见 api deleteSession)。
 		if errors.Is(err, store.ErrNotFound) {
 			slog.Debug("engine: finish turn skipped, session/turn gone", "turnID", turnID)
+			e.clearRunning(sessionID)
 			return
 		}
 		slog.Error("engine: finish turn", "turnID", turnID, "err", err)
+		e.clearRunning(sessionID)
 		return
 	}
+	e.clearRunning(sessionID)
 	e.hub.Publish(*res.FinalEvent)
+	e.TryDrainQueued(sessionID)
+}
+
+func (e *Engine) clearRunning(sessionID string) {
+	e.mu.Lock()
+	delete(e.running, sessionID)
+	e.mu.Unlock()
+}
+
+func (e *Engine) TryDrainQueued(sessionID string) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
+	}
+	res, err := e.store.PromoteNextQueuedInput(context.Background(), store.PromoteQueuedInputInput{
+		SessionID:     sessionID,
+		TurnID:        store.NewID("turn"),
+		UserMessageID: store.NewID("msg"),
+	})
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrQueueBlocked) || errors.Is(err, store.ErrTurnRunning) {
+		return
+	}
+	if err != nil {
+		slog.Error("engine: drain queued input", "sessionID", sessionID, "err", err)
+		return
+	}
+	if res == nil || res.Turn == nil || res.Input == nil || res.StartedEvent == nil {
+		return
+	}
+	turnCtx, cancel := context.WithCancel(context.Background())
+	e.mu.Lock()
+	e.running[sessionID] = cancel
+	e.mu.Unlock()
+	e.hub.Publish(*res.StartedEvent)
+
+	var cfg provider.ModelConfig
+	if len(res.Input.ModelConfig) > 0 {
+		if err := json.Unmarshal(res.Input.ModelConfig, &cfg); err != nil {
+			e.finishTurn(sessionID, res.Turn.ID, store.TurnFailed, fmt.Sprintf("model config: %v", err), nil)
+			return
+		}
+	}
+	client, err := e.resolver.Resolve(turnCtx, res.Input.Provider)
+	if err != nil {
+		e.finishTurn(sessionID, res.Turn.ID, store.TurnFailed, fmt.Sprintf("%v: %v", ErrProviderConfig, err), nil)
+		return
+	}
+	resolved := &resolvedModel{
+		providerName: res.Input.Provider,
+		model:        res.Input.Model,
+		config:       cfg,
+		configJSON:   append(json.RawMessage(nil), res.Input.ModelConfig...),
+	}
+	e.wg.Add(1)
+	go e.runTurn(turnCtx, sessionID, res.Turn.ID, resolved, client)
 }
 
 func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resolved *resolvedModel, client provider.Client, parts *turnPartAccumulator) (store.TurnStatus, string) {
-	req, err := e.builder.Build(ctx, sessionID, resolved.model)
+	baseReq, err := e.builder.Build(ctx, sessionID, resolved.model)
 	if err != nil {
 		return store.TurnFailed, fmt.Sprintf("build context: %v", err)
 	}
-	req.Config = resolved.config
-	ch, err := client.Stream(ctx, req)
-	if err != nil {
-		return store.TurnFailed, fmt.Sprintf("provider: %v", err)
+	baseReq.Config = resolved.config
+	if e.tools != nil && modelSupportsTools(resolved.config) {
+		defs, err := e.tools.Definitions(ctx, sessionID)
+		if err != nil {
+			return store.TurnFailed, fmt.Sprintf("list tools: %v", err)
+		}
+		baseReq.Tools = defs
 	}
+
+	maxLoops := defaultMaxToolLoops
+	if v, ok := resolved.config.MaxToolLoops(); ok {
+		maxLoops = v
+	}
+	for loop := 0; ; loop++ {
+		req := baseReq
+		req.Messages = requestMessagesWithTurnParts(baseReq.Messages, parts.Parts())
+		ch, err := client.Stream(ctx, req)
+		if err != nil {
+			return store.TurnFailed, fmt.Sprintf("provider: %v", err)
+		}
+		finish, status, errMsg := e.consumeStream(ctx, sessionID, turnID, ch, parts)
+		if status != store.TurnRunning {
+			return status, errMsg
+		}
+		if finish == "" || finish == provider.FinishStop {
+			return store.TurnCompleted, ""
+		}
+		if finish != provider.FinishToolCalls {
+			return store.TurnFailed, fmt.Sprintf("unsupported finish reason: %s", finish)
+		}
+		if len(baseReq.Tools) == 0 {
+			return store.TurnFailed, "provider requested tool calls but no tools are available"
+		}
+		if loop >= maxLoops {
+			return store.TurnFailed, "max tool loops exceeded"
+		}
+		if status, msg := e.executePendingTools(ctx, sessionID, turnID, parts); status != store.TurnRunning {
+			return status, msg
+		}
+	}
+}
+
+func modelSupportsTools(cfg provider.ModelConfig) bool {
+	return cfg.Capabilities != nil && cfg.Capabilities.Tools
+}
+
+func (e *Engine) consumeStream(ctx context.Context, sessionID, turnID string, ch <-chan provider.Chunk, parts *turnPartAccumulator) (provider.FinishReason, store.TurnStatus, string) {
 	for chunk := range ch {
 		switch {
 		case chunk.Err != nil:
 			if errors.Is(chunk.Err, context.Canceled) {
-				return store.TurnCancelled, ""
+				return "", store.TurnCancelled, ""
 			}
-			return store.TurnFailed, chunk.Err.Error()
+			return "", store.TurnFailed, chunk.Err.Error()
 		case chunk.Done:
-			return store.TurnCompleted, ""
+			return chunk.Finish, store.TurnRunning, ""
 		case chunk.Tool != nil:
 			callID, name, argsDelta := parts.AppendTool(*chunk.Tool)
 			e.hub.Publish(event.Event{
@@ -367,15 +528,82 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 	// provider 违反契约提前关 channel:cancel 中的截断仍按 cancelled 收尾,
 	// 避免用户主动停止被记成 failed。
 	if ctx.Err() != nil {
-		return store.TurnCancelled, ""
+		return "", store.TurnCancelled, ""
 	}
-	return store.TurnFailed, "provider stream ended without terminal chunk"
+	return "", store.TurnFailed, "provider stream ended without terminal chunk"
+}
+
+func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID string, parts *turnPartAccumulator) (store.TurnStatus, string) {
+	calls := parts.PendingToolCalls()
+	if len(calls) == 0 {
+		return store.TurnFailed, "provider finished with tool_calls but emitted no complete tool call"
+	}
+	for _, call := range calls {
+		call.SessionID = sessionID
+		call.TurnID = turnID
+		e.hub.Publish(event.Event{
+			SessionID: sessionID,
+			Kind:      event.TurnTool,
+			TurnID:    turnID,
+			CallID:    call.CallID,
+			Name:      call.Name,
+			Phase:     "running",
+		})
+		toolCtx, cancel := context.WithTimeout(ctx, toolCallTimeout)
+		result := e.tools.Call(toolCtx, call)
+		cancel()
+		if ctx.Err() != nil {
+			return store.TurnCancelled, ""
+		}
+		if toolCtx.Err() != nil && result.Content == "" {
+			result = tool.Result{
+				CallID:  call.CallID,
+				Name:    call.Name,
+				Ok:      false,
+				Content: "tool timed out",
+			}
+		}
+		if result.CallID == "" {
+			result.CallID = call.CallID
+		}
+		if result.Name == "" {
+			result.Name = call.Name
+		}
+		parts.AppendToolResult(result)
+		phase := "ok"
+		if !result.Ok {
+			phase = "error"
+		}
+		e.hub.Publish(event.Event{
+			SessionID: sessionID,
+			Kind:      event.TurnTool,
+			TurnID:    turnID,
+			CallID:    result.CallID,
+			Name:      result.Name,
+			Phase:     phase,
+			Summary:   summarizeToolResult(result.Content),
+		})
+		if ctx.Err() != nil {
+			return store.TurnCancelled, ""
+		}
+	}
+	return store.TurnRunning, ""
+}
+
+func summarizeToolResult(content string) string {
+	content = strings.TrimSpace(content)
+	runes := []rune(content)
+	if len(runes) <= 240 {
+		return content
+	}
+	return string(runes[:240]) + "..."
 }
 
 type turnPartAccumulator struct {
-	parts           []store.ContentPart
-	toolPartByIndex map[int]int
-	toolArgs        map[int]*strings.Builder
+	parts          []store.ContentPart
+	toolPartByKey  map[string]int
+	toolKeyByIndex map[int]string
+	toolArgs       map[string]*strings.Builder
 }
 
 func (a *turnPartAccumulator) AppendDelta(part provider.PartType, delta string) {
@@ -395,13 +623,20 @@ func (a *turnPartAccumulator) AppendDelta(part provider.PartType, delta string) 
 }
 
 func (a *turnPartAccumulator) AppendTool(chunk provider.ToolCallChunk) (string, string, string) {
-	if a.toolPartByIndex == nil {
-		a.toolPartByIndex = make(map[int]int)
+	if a.toolPartByKey == nil {
+		a.toolPartByKey = make(map[string]int)
+	}
+	if a.toolKeyByIndex == nil {
+		a.toolKeyByIndex = make(map[int]string)
 	}
 	if a.toolArgs == nil {
-		a.toolArgs = make(map[int]*strings.Builder)
+		a.toolArgs = make(map[string]*strings.Builder)
 	}
-	partIndex, ok := a.toolPartByIndex[chunk.Index]
+	key := a.toolKey(chunk)
+	if chunk.CallID != "" {
+		a.toolKeyByIndex[chunk.Index] = key
+	}
+	partIndex, ok := a.toolPartByKey[key]
 	if !ok {
 		callID := chunk.CallID
 		if callID == "" {
@@ -413,7 +648,7 @@ func (a *turnPartAccumulator) AppendTool(chunk provider.ToolCallChunk) (string, 
 			Name:   chunk.Name,
 		})
 		partIndex = len(a.parts) - 1
-		a.toolPartByIndex[chunk.Index] = partIndex
+		a.toolPartByKey[key] = partIndex
 	}
 	part := &a.parts[partIndex]
 	if chunk.CallID != "" {
@@ -426,24 +661,84 @@ func (a *turnPartAccumulator) AppendTool(chunk provider.ToolCallChunk) (string, 
 		part.Name = chunk.Name
 	}
 	if chunk.ArgsDelta != "" {
-		builder := a.toolArgs[chunk.Index]
+		builder := a.toolArgs[key]
 		if builder == nil {
 			builder = &strings.Builder{}
-			a.toolArgs[chunk.Index] = builder
+			a.toolArgs[key] = builder
 		}
 		builder.WriteString(chunk.ArgsDelta)
 	}
 	return part.CallID, part.Name, chunk.ArgsDelta
 }
 
+func (a *turnPartAccumulator) toolKey(chunk provider.ToolCallChunk) string {
+	if chunk.CallID != "" {
+		return "id:" + chunk.CallID
+	}
+	if key := a.toolKeyByIndex[chunk.Index]; key != "" {
+		return key
+	}
+	return fmt.Sprintf("idx:%d", chunk.Index)
+}
+
+func (a *turnPartAccumulator) AppendToolResult(result tool.Result) {
+	if result.CallID == "" && result.Content == "" {
+		return
+	}
+	a.parts = append(a.parts, store.ContentPart{
+		Type:    store.ContentPartToolResult,
+		CallID:  result.CallID,
+		Name:    result.Name,
+		Ok:      result.Ok,
+		Content: result.Content,
+	})
+}
+
+func (a *turnPartAccumulator) PendingToolCalls() []tool.Call {
+	results := make(map[string]bool)
+	for _, part := range a.parts {
+		if part.Type == store.ContentPartToolResult && part.CallID != "" {
+			results[part.CallID] = true
+		}
+	}
+	var calls []tool.Call
+	for partIndex, part := range a.parts {
+		if part.Type != store.ContentPartToolUse {
+			continue
+		}
+		if part.CallID != "" && results[part.CallID] {
+			continue
+		}
+		args := a.rawToolArgs(partIndex)
+		calls = append(calls, tool.Call{
+			CallID: part.CallID,
+			Name:   part.Name,
+			Args:   append(json.RawMessage(nil), args...),
+		})
+	}
+	return calls
+}
+
+func (a *turnPartAccumulator) rawToolArgs(partIndex int) json.RawMessage {
+	for key, idx := range a.toolPartByKey {
+		if idx != partIndex {
+			continue
+		}
+		if builder := a.toolArgs[key]; builder != nil {
+			return json.RawMessage(builder.String())
+		}
+	}
+	return nil
+}
+
 func (a *turnPartAccumulator) Parts() []store.ContentPart {
 	out := store.CloneContentParts(a.parts)
-	for index, partIndex := range a.toolPartByIndex {
+	for key, partIndex := range a.toolPartByKey {
 		if partIndex < 0 || partIndex >= len(out) {
 			continue
 		}
 		raw := ""
-		if builder := a.toolArgs[index]; builder != nil {
+		if builder := a.toolArgs[key]; builder != nil {
 			raw = builder.String()
 		}
 		if raw == "" {
@@ -455,4 +750,69 @@ func (a *turnPartAccumulator) Parts() []store.ContentPart {
 		}
 	}
 	return store.NormalizeContentParts(out)
+}
+
+func requestMessagesWithTurnParts(base []provider.Message, parts []store.ContentPart) []provider.Message {
+	out := cloneProviderMessages(base)
+	providerParts := providerPartsFromStore(parts)
+	if len(providerParts) > 0 {
+		out = append(out, provider.Message{
+			Role:  provider.RoleAssistant,
+			Text:  store.TextFromParts(parts),
+			Parts: providerParts,
+		})
+	}
+	return out
+}
+
+func providerPartsFromStore(parts []store.ContentPart) []provider.Part {
+	out := make([]provider.Part, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case store.ContentPartText:
+			if part.Text != "" {
+				out = append(out, provider.Part{Type: provider.PartText, Text: part.Text})
+			}
+		case store.ContentPartThought:
+			continue
+		case store.ContentPartToolUse:
+			out = append(out, provider.Part{
+				Type:   provider.PartToolUse,
+				CallID: part.CallID,
+				Name:   part.Name,
+				Args:   append(json.RawMessage(nil), part.Args...),
+			})
+		case store.ContentPartToolResult:
+			out = append(out, provider.Part{
+				Type:    provider.PartToolResult,
+				CallID:  part.CallID,
+				Name:    part.Name,
+				Ok:      part.Ok,
+				Content: part.Content,
+			})
+		}
+	}
+	return out
+}
+
+func cloneProviderMessages(in []provider.Message) []provider.Message {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]provider.Message, 0, len(in))
+	for _, msg := range in {
+		cp := msg
+		if len(msg.Parts) > 0 {
+			cp.Parts = make([]provider.Part, 0, len(msg.Parts))
+			for _, part := range msg.Parts {
+				pp := part
+				if part.Args != nil {
+					pp.Args = append(json.RawMessage(nil), part.Args...)
+				}
+				cp.Parts = append(cp.Parts, pp)
+			}
+		}
+		out = append(out, cp)
+	}
+	return out
 }

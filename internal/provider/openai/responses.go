@@ -89,7 +89,7 @@ func (c *ResponsesClient) newRequest(ctx context.Context, req provider.Request) 
 		body.Instructions = req.System
 	}
 	for _, msg := range req.Messages {
-		body.Input = append(body.Input, responsesInputMessage{Role: string(msg.Role), Content: messageText(msg)})
+		body.Input = append(body.Input, responsesInputsFor(msg)...)
 	}
 	if len(req.Tools) > 0 {
 		body.Tools = make([]responsesTool, 0, len(req.Tools))
@@ -224,8 +224,13 @@ type responsesReasoning struct {
 }
 
 type responsesInputMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Type      string `json:"type,omitempty"`
+	Role      string `json:"role,omitempty"`
+	Content   string `json:"content,omitempty"`
+	CallID    string `json:"call_id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
+	Output    string `json:"output,omitempty"`
 }
 
 type responsesTool struct {
@@ -255,4 +260,50 @@ type responsesStreamFrame struct {
 	Error struct {
 		Message string `json:"message"`
 	} `json:"error"`
+}
+
+func responsesInputsFor(msg provider.Message) []responsesInputMessage {
+	if len(msg.Parts) == 0 {
+		return []responsesInputMessage{{Role: string(msg.Role), Content: msg.Text}}
+	}
+	role := string(msg.Role)
+	var out []responsesInputMessage
+	var text strings.Builder
+	flushText := func() {
+		if text.Len() == 0 {
+			return
+		}
+		out = append(out, responsesInputMessage{Role: role, Content: text.String()})
+		text.Reset()
+	}
+	for _, part := range msg.Parts {
+		switch part.Type {
+		case "", provider.PartText:
+			text.WriteString(part.Text)
+		case provider.PartToolUse:
+			flushText()
+			args := string(part.Args)
+			if args == "" {
+				args = "{}"
+			}
+			out = append(out, responsesInputMessage{
+				Type:      "function_call",
+				CallID:    part.CallID,
+				Name:      part.Name,
+				Arguments: args,
+			})
+		case provider.PartToolResult:
+			flushText()
+			out = append(out, responsesInputMessage{
+				Type:   "function_call_output",
+				CallID: part.CallID,
+				Output: part.Content,
+			})
+		}
+	}
+	flushText()
+	if len(out) == 0 {
+		out = append(out, responsesInputMessage{Role: role, Content: msg.Text})
+	}
+	return out
 }

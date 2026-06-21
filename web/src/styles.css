@@ -363,12 +363,6 @@ html[data-shell] .pudding-markdown * {
     background-color: var(--message-user-background);
 }
 
-[data-mood="ready"] {
-    --mascot-body-top: color-mix(in oklch, var(--primary), white 42%);
-    --mascot-body-mid: color-mix(in oklch, var(--primary), white 18%);
-    --mascot-body-bottom: color-mix(in oklch, var(--primary), black 10%);
-}
-
 [data-mood="thinking"] [data-slot="antenna"] circle {
     animation: pudding-mascot-thinking-glow 1.4s ease-in-out infinite;
     transform-box: fill-box;
@@ -676,6 +670,26 @@ html[data-shell] .pudding-markdown * {
 
 .pudding-markdown a {
   @apply text-primary underline underline-offset-4;
+}
+
+.pudding-markdown blockquote {
+  @apply border-l-2 border-border pl-3 text-muted-foreground;
+}
+
+.pudding-markdown hr {
+  @apply border-border;
+}
+
+.pudding-markdown .contains-task-list {
+  @apply list-none pl-0;
+}
+
+.pudding-markdown .task-list-item {
+  @apply flex items-start gap-2;
+}
+
+.pudding-markdown .task-list-item input {
+  @apply mt-1;
 }
 
 .pudding-markdown code {

@@ -48,7 +48,10 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/sessions/:id/cancel").POST(s.cancel)
 	app.Route("/sessions/:id/events").GET(s.sessionEvents)
 	app.Route("/sessions/:id/turns").GET(s.listTurns)
+	app.Route("/sessions/:id/turns/:turnID").GET(s.getTurn)
 	app.Route("/sessions/:id/messages").GET(s.listMessages)
+	app.Route("/sessions/:id/queued-inputs").GET(s.listQueuedInputs)
+	app.Route("/sessions/:id/queued-inputs/:clientMessageID").PATCH(s.patchQueuedInput)
 	app.Route("/settings").GET(s.getSettings).PUT(s.putSettings)
 	app.Route("/providers").GET(s.listProviders).POST(s.createProvider)
 	app.Route("/providers/:name").GET(s.getProvider).PATCH(s.patchProvider).DELETE(s.deleteProvider)
@@ -210,6 +213,68 @@ func (s *Server) submit(c *cart.Context) error {
 	return nil
 }
 
+func (s *Server) listQueuedInputs(c *cart.Context) error {
+	id, _ := c.Param("id")
+	inputs, err := s.store.ListQueuedInputs(c.Request.Context(), id)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, map[string]any{"queuedInputs": inputs})
+	return nil
+}
+
+type patchQueuedInputReq struct {
+	Text   *string `json:"text"`
+	Status *string `json:"status"`
+}
+
+func (s *Server) patchQueuedInput(c *cart.Context) error {
+	id, _ := c.Param("id")
+	clientMessageID, _ := c.Param("clientMessageID")
+	var req patchQueuedInputReq
+	if err := decode(c, &req); err != nil {
+		return badRequest(c, "invalid json body")
+	}
+	var text *string
+	if req.Text != nil {
+		next := strings.TrimSpace(*req.Text)
+		if next == "" {
+			return badRequest(c, "text is required")
+		}
+		text = &next
+	}
+	var status *store.QueuedInputStatus
+	if req.Status != nil {
+		next := store.QueuedInputStatus(strings.TrimSpace(*req.Status))
+		switch next {
+		case store.QueuedInputQueued, store.QueuedInputEditing, store.QueuedInputCancelled:
+			status = &next
+		default:
+			return badRequest(c, "invalid status")
+		}
+	}
+	if text == nil && status == nil {
+		return badRequest(c, "text or status is required")
+	}
+	res, err := s.store.UpdateQueuedInput(c.Request.Context(), store.UpdateQueuedInputInput{
+		SessionID:       id,
+		ClientMessageID: clientMessageID,
+		Text:            text,
+		Status:          status,
+	})
+	if err != nil {
+		return s.fail(c, err)
+	}
+	if res.Event != nil {
+		s.hub.Publish(*res.Event)
+	}
+	if res.Input != nil && (res.Input.Status == store.QueuedInputQueued || res.Input.Status == store.QueuedInputCancelled) {
+		s.engine.TryDrainQueued(id)
+	}
+	c.JSON(http.StatusOK, res.Input)
+	return nil
+}
+
 func (s *Server) cancel(c *cart.Context) error {
 	id, _ := c.Param("id")
 	if _, err := s.store.GetSession(c.Request.Context(), id); err != nil {
@@ -250,6 +315,17 @@ func (s *Server) listTurns(c *cart.Context) error {
 		return s.fail(c, err)
 	}
 	c.JSON(http.StatusOK, map[string]any{"turns": page.Turns, "hasMore": page.HasMore})
+	return nil
+}
+
+func (s *Server) getTurn(c *cart.Context) error {
+	id, _ := c.Param("id")
+	turnID, _ := c.Param("turnID")
+	turn, err := s.store.GetConversationTurn(c.Request.Context(), id, turnID)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, turn)
 	return nil
 }
 

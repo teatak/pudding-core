@@ -112,13 +112,19 @@ type part struct {
 	// Thought 标记 3.x thinking 摘要帧,不属于答案正文,解析时跳过。
 	// 同帧可能携带 thoughtSignature(加密推理签名,多轮工具调用才需要回传,
 	// text-only 阶段忽略);字段缺省序列化时不发出,新老协议同一形状。
-	Thought      bool          `json:"thought,omitempty"`
-	FunctionCall *functionCall `json:"functionCall,omitempty"`
+	Thought          bool              `json:"thought,omitempty"`
+	FunctionCall     *functionCall     `json:"functionCall,omitempty"`
+	FunctionResponse *functionResponse `json:"functionResponse,omitempty"`
 }
 
 type functionCall struct {
 	Name string          `json:"name"`
 	Args json.RawMessage `json:"args,omitempty"`
+}
+
+type functionResponse struct {
+	Name     string          `json:"name"`
+	Response json.RawMessage `json:"response,omitempty"`
 }
 
 func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Request, error) {
@@ -153,13 +159,7 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 		}
 		body.Tools = []tool{{FunctionDeclarations: declarations}}
 	}
-	for _, msg := range req.Messages {
-		role := "user"
-		if msg.Role == provider.RoleAssistant {
-			role = "model"
-		}
-		body.Contents = append(body.Contents, content{Role: role, Parts: []part{{Text: messageText(msg)}}})
-	}
+	body.Contents = append(body.Contents, contentsForMessages(req.Messages)...)
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(body); err != nil {
 		return nil, err
@@ -209,7 +209,7 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 			return fmt.Errorf("google: prompt blocked: %s", frame.PromptFeedback.BlockReason)
 		}
 		for _, cand := range frame.Candidates {
-			for _, p := range cand.Content.Parts {
+			for partIndex, p := range cand.Content.Parts {
 				if p.Thought {
 					if p.Text != "" && !emitChunk(ctx, out, provider.Chunk{Part: provider.PartThought, Delta: p.Text}) {
 						return ctx.Err()
@@ -224,6 +224,7 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 				if p.FunctionCall != nil {
 					finish = provider.FinishToolCalls
 					if !emitChunk(ctx, out, provider.Chunk{Tool: &provider.ToolCallChunk{
+						Index:     partIndex,
 						Name:      p.FunctionCall.Name,
 						ArgsDelta: string(p.FunctionCall.Args),
 					}}) {
@@ -278,6 +279,77 @@ func messageText(msg provider.Message) string {
 		return msg.Text
 	}
 	return b.String()
+}
+
+func contentsForMessages(messages []provider.Message) []content {
+	var out []content
+	toolNames := map[string]string{}
+	for _, msg := range messages {
+		out = append(out, contentsForMessage(msg, toolNames)...)
+	}
+	return out
+}
+
+func contentsForMessage(msg provider.Message, toolNames map[string]string) []content {
+	role := "user"
+	if msg.Role == provider.RoleAssistant {
+		role = "model"
+	}
+	if len(msg.Parts) == 0 {
+		return []content{{Role: role, Parts: []part{{Text: msg.Text}}}}
+	}
+	var out []content
+	var parts []part
+	flush := func(flushRole string) {
+		if len(parts) == 0 {
+			return
+		}
+		out = append(out, content{Role: flushRole, Parts: parts})
+		parts = nil
+	}
+	for _, p := range msg.Parts {
+		switch p.Type {
+		case "", provider.PartText:
+			if p.Text != "" {
+				parts = append(parts, part{Text: p.Text})
+			}
+		case provider.PartToolUse:
+			args := p.Args
+			if len(args) == 0 {
+				args = json.RawMessage(`{}`)
+			}
+			if p.CallID != "" && p.Name != "" {
+				toolNames[p.CallID] = p.Name
+			}
+			parts = append(parts, part{FunctionCall: &functionCall{
+				Name: p.Name,
+				Args: append(json.RawMessage(nil), args...),
+			}})
+		case provider.PartToolResult:
+			flush(role)
+			name := p.Name
+			if name == "" {
+				name = toolNames[p.CallID]
+			}
+			response, err := json.Marshal(map[string]any{
+				"ok":      p.Ok,
+				"content": p.Content,
+			})
+			if err != nil {
+				response = json.RawMessage(`{"ok":false,"content":"failed to encode tool result"}`)
+			}
+			parts = append(parts, part{FunctionResponse: &functionResponse{
+				Name:     name,
+				Response: response,
+			}})
+			flush("user")
+		}
+	}
+	flush(role)
+	if len(out) == 0 {
+		out = append(out, content{Role: role, Parts: []part{{Text: msg.Text}}})
+	}
+	return out
 }
 
 // ListModels 拉取支持 generateContent 的模型目录。包级函数,

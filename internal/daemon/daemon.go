@@ -23,6 +23,7 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store/sqlitestore"
+	"github.com/teatak/pudding-core/internal/tool"
 	"github.com/teatak/pudding-core/internal/webui"
 )
 
@@ -76,7 +77,7 @@ func Start(opts Options) (*Daemon, error) {
 		resolver = registry.New(cfg)
 	}
 	hub := event.NewHub()
-	eng := engine.New(st, hub, resolver, cfg)
+	eng := engine.New(st, hub, resolver, cfg, engine.WithTools(tool.NewBuiltinRunner()))
 	if err := eng.Recover(context.Background()); err != nil {
 		_ = st.Close()
 		return nil, fmt.Errorf("recover interrupted turns: %w", err)

@@ -2,7 +2,6 @@ package sqlitestore
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"path/filepath"
 	"strconv"
@@ -88,9 +87,9 @@ func appendCompletedTestTurn(t *testing.T, st store.Store, sessionID string, ind
 	beginTestTurn(t, st, sessionID, turnID, "msg_"+suffix, "client_"+suffix)
 	text := "assistant " + suffix
 	if _, err := st.FinishTurn(context.Background(), store.FinishTurnInput{
-		TurnID:        turnID,
-		Status:        store.TurnCompleted,
-		AssistantText: &text,
+		TurnID:         turnID,
+		Status:         store.TurnCompleted,
+		AssistantParts: store.TextPart(text),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -236,12 +235,16 @@ func TestFinishTurnTerminalStatesAndEventsAfter(t *testing.T) {
 	for _, tc := range cases {
 		createTestSession(t, st, tc.sessionID)
 		beginTestTurn(t, st, tc.sessionID, tc.turnID, tc.msgID, tc.clientID)
+		var parts []store.ContentPart
+		if tc.text != nil {
+			parts = store.TextPart(*tc.text)
+		}
 		res, err := st.FinishTurn(context.Background(), store.FinishTurnInput{
-			TurnID:        tc.turnID,
-			Status:        tc.status,
-			AssistantText: tc.text,
-			Interrupted:   tc.interrupted,
-			Error:         tc.errorText,
+			TurnID:         tc.turnID,
+			Status:         tc.status,
+			AssistantParts: parts,
+			Interrupted:    tc.interrupted,
+			Error:          tc.errorText,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -274,9 +277,9 @@ func TestPersistenceAndSeqContinuation(t *testing.T) {
 	beginTestTurn(t, st, "sess_1", "turn_1", "msg_1", "client_1")
 	text := "first"
 	if _, err := st.FinishTurn(context.Background(), store.FinishTurnInput{
-		TurnID:        "turn_1",
-		Status:        store.TurnCompleted,
-		AssistantText: &text,
+		TurnID:         "turn_1",
+		Status:         store.TurnCompleted,
+		AssistantParts: store.TextPart(text),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -332,6 +335,7 @@ func TestMessagePartsPersist(t *testing.T) {
 		AssistantParts: []store.ContentPart{
 			{Type: store.ContentPartThought, Text: "thinking"},
 			{Type: store.ContentPartToolUse, CallID: "call_1", Name: "web_fetch", Args: []byte(`{"url":"https://example.com"}`)},
+			{Type: store.ContentPartToolResult, CallID: "call_1", Name: "web_fetch", Ok: true, Content: `{"ok":true}`},
 			{Type: store.ContentPartText, Text: "done"},
 		},
 	}); err != nil {
@@ -351,15 +355,36 @@ func TestMessagePartsPersist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(msgs) != 2 {
+	if len(msgs) != 5 {
 		t.Fatalf("unexpected messages: %+v", msgs)
 	}
-	assistant := msgs[1]
-	if assistant.Text != "done" {
-		t.Fatalf("text column should derive from text parts only: %+v", assistant)
+	thought := msgs[1]
+	if thought.Role != store.RoleAssistant || thought.Kind != store.MessageKindThought || thought.Text != "thinking" {
+		t.Fatalf("thought message not persisted: %+v", thought)
 	}
-	if len(assistant.Parts) != 3 || assistant.Parts[0].Type != store.ContentPartThought || assistant.Parts[1].Type != store.ContentPartToolUse || assistant.Parts[2].Type != store.ContentPartText {
-		t.Fatalf("parts not persisted: %+v", assistant.Parts)
+	toolUse := msgs[2]
+	if toolUse.Role != store.RoleAssistant || toolUse.Kind != store.MessageKindToolUse || len(toolUse.Parts) != 1 || toolUse.Parts[0].Type != store.ContentPartToolUse {
+		t.Fatalf("tool_use message not persisted: %+v", toolUse)
+	}
+	toolResult := msgs[3]
+	if toolResult.Role != store.RoleTool || toolResult.Kind != store.MessageKindToolResult || len(toolResult.Parts) != 1 || toolResult.Parts[0].Type != store.ContentPartToolResult {
+		t.Fatalf("tool_result message not persisted: %+v", toolResult)
+	}
+	assistant := msgs[4]
+	if assistant.Role != store.RoleAssistant || assistant.Kind != store.MessageKindText || assistant.Text != "done" {
+		t.Fatalf("text message not persisted: %+v", assistant)
+	}
+	turns, err := reopened.ListTurnsPage(context.Background(), "sess_1", "", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turns.Turns) != 1 {
+		t.Fatalf("unexpected turns: %+v", turns.Turns)
+	}
+	got := messageIDs(turns.Turns[0].Messages)
+	want := []string{"msg_1", "msg_turn_1", "msg_turn_1_002", "msg_turn_1_003", "msg_turn_1_004"}
+	if !sameStrings(got, want) {
+		t.Fatalf("turn should group all messages in turn_index order: got %v want %v", got, want)
 	}
 }
 
@@ -397,98 +422,15 @@ func TestTurnModelConfigPersists(t *testing.T) {
 	}
 }
 
-func TestOpenMigratesAddedColumns(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "old.db")
-	db, err := sql.Open("sqlite3", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`
-CREATE TABLE sessions (
-    id TEXT PRIMARY KEY,
-    title TEXT NOT NULL DEFAULT '',
-    provider TEXT NOT NULL DEFAULT '',
-    model TEXT NOT NULL DEFAULT '',
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-);
-CREATE TABLE turns (
-    id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    client_message_id TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('running','completed','failed','cancelled')),
-    provider TEXT NOT NULL DEFAULT '',
-    model TEXT NOT NULL DEFAULT '',
-    error TEXT NOT NULL DEFAULT '',
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL,
-    UNIQUE (session_id, client_message_id)
-);
-`); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	st, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-
-	if !hasColumn(t, st.db, "turns", "model_config") {
-		t.Fatal("model_config column was not added")
-	}
-	if !hasColumn(t, st.db, "sessions", "last_activity_at") {
-		t.Fatal("last_activity_at column was not added")
-	}
-	if !hasColumn(t, st.db, "sessions", "pinned") {
-		t.Fatal("pinned column was not added")
-	}
-	if !hasColumn(t, st.db, "sessions", "pinned_order") {
-		t.Fatal("pinned_order column was not added")
-	}
-	if !hasColumn(t, st.db, "messages", "parts") {
-		t.Fatal("messages.parts column was not added")
-	}
-}
-
-func hasColumn(t *testing.T, db *sql.DB, table, column string) bool {
-	t.Helper()
-	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid int
-		var name, typ string
-		var notNull int
-		var defaultValue any
-		var pk int
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
-			t.Fatal(err)
-		}
-		if name == column {
-			return true
-		}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	return false
-}
-
 func TestDeleteSessionCascades(t *testing.T) {
 	st, _ := openTestStore(t)
 	createTestSession(t, st, "sess_1")
 	beginTestTurn(t, st, "sess_1", "turn_1", "msg_1", "client_1")
 	text := "done"
 	if _, err := st.FinishTurn(context.Background(), store.FinishTurnInput{
-		TurnID:        "turn_1",
-		Status:        store.TurnCompleted,
-		AssistantText: &text,
+		TurnID:         "turn_1",
+		Status:         store.TurnCompleted,
+		AssistantParts: store.TextPart(text),
 	}); err != nil {
 		t.Fatal(err)
 	}

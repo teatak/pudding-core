@@ -63,10 +63,10 @@ LLM 自动标题。
 
 设计草案已入库,T1 provider 协议扩展已落地。地基决策已拍板:
 
-1. **canonical 形状 = 已定**:一 turn 一条 assistant 消息 + `parts`
-   一等 JSON(ContentPart 语义模型,借自旧项目);`role` ∈
-   `user|assistant|tool|summary`;tool call/result 作 parts 不作宽表列;
-   event log 只做旁路审计,不反推 canonical。
+1. **canonical 形状 = 已定**:turn 是分页/事务边界,一个 turn 可包含多条
+   canonical messages。每条 assistant/tool message 通常承载一个语义
+   `part`;`role` ∈ `user|assistant|tool|summary`;`kind/turn_index` 用于
+   定位、压缩和 turn 内排序。event log 只做旁路审计,不反推 canonical。
 2. **thought 落库 = 已定:落 canonical**(供历史回看)。两条边界:
    contextbuilder 跨 turn 组装时剥离 thought(provider 不要陈旧推理);
    turn 内工具循环的 reasoning replay 走工作态、不读 canonical(带 provider

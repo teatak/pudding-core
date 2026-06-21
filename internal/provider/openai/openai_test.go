@@ -91,9 +91,50 @@ func TestRequestShape(t *testing.T) {
 		t.Fatalf("unexpected messages: %+v", got.Messages)
 	}
 	for i := range want {
-		if got.Messages[i] != want[i] {
+		if got.Messages[i].Role != want[i].Role || got.Messages[i].Content != want[i].Content {
 			t.Fatalf("message %d: got %+v want %+v", i, got.Messages[i], want[i])
 		}
+	}
+}
+
+func TestRequestShapeWithToolHistory(t *testing.T) {
+	var got chatRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	ch := streamForTest(t, srv.URL, provider.Request{
+		Model: "model-a",
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Text: "hi"},
+			{Role: provider.RoleAssistant, Parts: []provider.Part{
+				{Type: provider.PartToolUse, CallID: "call_1", Name: "builtin_time_get_current", Args: json.RawMessage(`{"timezone":"Asia/Singapore"}`)},
+				{Type: provider.PartToolResult, CallID: "call_1", Name: "builtin_time_get_current", Ok: true, Content: `{"iso":"now"}`},
+				{Type: provider.PartText, Text: "现在是中午。"},
+			}},
+		},
+	})
+	_ = collect(t, ch)
+
+	if len(got.Messages) != 4 {
+		t.Fatalf("unexpected messages: %+v", got.Messages)
+	}
+	if got.Messages[1].Role != "assistant" || len(got.Messages[1].ToolCalls) != 1 {
+		t.Fatalf("assistant tool call message wrong: %+v", got.Messages[1])
+	}
+	call := got.Messages[1].ToolCalls[0]
+	if call.ID != "call_1" || call.Type != "function" || call.Function.Name != "builtin_time_get_current" || call.Function.Arguments != `{"timezone":"Asia/Singapore"}` {
+		t.Fatalf("tool call wrong: %+v", call)
+	}
+	if got.Messages[2].Role != "tool" || got.Messages[2].ToolCallID != "call_1" || got.Messages[2].Content != `{"iso":"now"}` {
+		t.Fatalf("tool result message wrong: %+v", got.Messages[2])
+	}
+	if got.Messages[3].Role != "assistant" || got.Messages[3].Content != "现在是中午。" {
+		t.Fatalf("final assistant message wrong: %+v", got.Messages[3])
 	}
 }
 

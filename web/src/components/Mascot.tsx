@@ -29,8 +29,12 @@ const HEAD_PITCH_MAX_DEG = 16;
 const HEAD_ROLL_MAX_DEG = 4;
 const SAT_RATIO = 1.15;
 const POINTER_SAT_MIN_PX = 128;
+const INPUT_SAT_RATIO = 0.75;
+const INPUT_SAT_MIN_PX = 64;
 const FOLLOW_EASE = 0.22;
 const FOLLOW_EPSILON = 0.01;
+const INPUT_PITCH_BIAS_EASE = 0.12;
+const INPUT_PITCH_BIAS_EPSILON = 0.005;
 const HEAD_ORIGIN_Y_PERCENT = (77 / 128) * 100;
 const HEAD_PERSPECTIVE_PX = 170;
 const HEAD_SHIFT_X_PERCENT = 2.7;
@@ -140,7 +144,8 @@ export function Mascot({
   const targetYRef = useRef(0);
   const rafRef = useRef(0);
   const pressAnimationRef = useRef<Animation | null>(null);
-  const inputPitchBiasRef = useRef(inputPitchBias);
+  const currentInputPitchBiasRef = useRef(gaze.type === "input" ? inputPitchBias : 0);
+  const targetInputPitchBiasRef = useRef(gaze.type === "input" ? inputPitchBias : 0);
   const onPointerGazeRef = useRef(onPointerGaze);
   const id = useId().replace(/:/g, "");
   const faceID = `mascot-face-${id}`;
@@ -149,7 +154,7 @@ export function Mascot({
   const applyPose = (x: number, y: number) => {
     const turnX = x / EYE_MAX_X;
     const turnY = y / EYE_MAX_Y;
-    const pitchTurnY = clamp(turnY + inputPitchBiasRef.current, -1, 1);
+    const pitchTurnY = clamp(turnY + currentInputPitchBiasRef.current, -1, 1);
     const head = headRef.current;
     const faceLayer = faceLayerRef.current;
     const face = faceRef.current;
@@ -165,16 +170,16 @@ export function Mascot({
       faceLayer.style.transform = `translate3d(0px, 0px, ${FACE_Z_OFFSET_PX}px) rotateY(${turnX * FACE_EXTRA_YAW_DEG}deg) rotateX(${-pitchTurnY * FACE_EXTRA_PITCH_DEG}deg)`;
     }
     if (face) {
-      face.setAttribute("transform", faceTransform(turnX, turnY));
+      face.setAttribute("transform", faceTransform(turnX, pitchTurnY));
     }
     if (shadow) {
       shadow.setAttribute("cx", `${64 + turnX * SHADOW_SHIFT_X}`);
       shadow.setAttribute("rx", `${34 - Math.abs(turnX) * SHADOW_SQUEEZE_X}`);
-      shadow.setAttribute("ry", `${7 + Math.max(turnY, 0) * SHADOW_SCALE_Y}`);
+      shadow.setAttribute("ry", `${7 + Math.max(pitchTurnY, 0) * SHADOW_SCALE_Y}`);
     }
     if (highlight) {
-      highlight.setAttribute("transform", `translate(${turnX * HIGHLIGHT_SHIFT_X} ${turnY * HIGHLIGHT_SHIFT_Y})`);
-      highlight.setAttribute("opacity", `${1 - Math.max(turnY, 0) * 0.14}`);
+      highlight.setAttribute("transform", `translate(${turnX * HIGHLIGHT_SHIFT_X} ${pitchTurnY * HIGHLIGHT_SHIFT_Y})`);
+      highlight.setAttribute("opacity", `${1 - Math.max(pitchTurnY, 0) * 0.14}`);
     }
     if (leftShade) {
       leftShade.setAttribute("opacity", `${SHADE_BASE_OPACITY + Math.max(-turnX, 0) * SHADE_TURN_OPACITY}`);
@@ -191,24 +196,33 @@ export function Mascot({
   };
 
   const tick = () => {
+    rafRef.current = 0;
     const currentX = currentXRef.current;
     const currentY = currentYRef.current;
     const targetX = targetXRef.current;
     const targetY = targetYRef.current;
+    const currentInputPitchBias = currentInputPitchBiasRef.current;
+    const targetInputPitchBias = targetInputPitchBiasRef.current;
     const nextX = currentX + (targetX - currentX) * FOLLOW_EASE;
     const nextY = currentY + (targetY - currentY) * FOLLOW_EASE;
+    const nextInputPitchBias =
+      currentInputPitchBias + (targetInputPitchBias - currentInputPitchBias) * INPUT_PITCH_BIAS_EASE;
     currentXRef.current = Math.abs(nextX - targetX) < FOLLOW_EPSILON ? targetX : nextX;
     currentYRef.current = Math.abs(nextY - targetY) < FOLLOW_EPSILON ? targetY : nextY;
+    currentInputPitchBiasRef.current =
+      Math.abs(nextInputPitchBias - targetInputPitchBias) < INPUT_PITCH_BIAS_EPSILON
+        ? targetInputPitchBias
+        : nextInputPitchBias;
     applyPose(currentXRef.current, currentYRef.current);
 
     if (
       Math.abs(currentXRef.current - targetX) > FOLLOW_EPSILON ||
-      Math.abs(currentYRef.current - targetY) > FOLLOW_EPSILON
+      Math.abs(currentYRef.current - targetY) > FOLLOW_EPSILON ||
+      Math.abs(currentInputPitchBiasRef.current - targetInputPitchBias) > INPUT_PITCH_BIAS_EPSILON
     ) {
-      rafRef.current = window.requestAnimationFrame(tick);
+      startTick();
       return;
     }
-    rafRef.current = 0;
   };
 
   const setTarget = (x: number, y: number) => {
@@ -217,7 +231,12 @@ export function Mascot({
     startTick();
   };
 
-  const setTargetFromPoint = (clientX: number, clientY: number) => {
+  const setTargetFromPoint = (
+    clientX: number,
+    clientY: number,
+    satRatio = SAT_RATIO,
+    satMinPx = POINTER_SAT_MIN_PX,
+  ) => {
     const rect = rootRef.current?.getBoundingClientRect();
     if (!rect) return;
 
@@ -231,14 +250,14 @@ export function Mascot({
       return;
     }
 
-    const sat = Math.max(rect.width, rect.height, POINTER_SAT_MIN_PX) * SAT_RATIO;
+    const sat = Math.max(rect.width, rect.height, satMinPx) * satRatio;
     const k = Math.min(distance / sat, 1);
     setTarget((dx / distance) * k * EYE_MAX_X, (dy / distance) * k * EYE_MAX_Y);
   };
 
   useEffect(() => {
     if (gaze.type === "input") {
-      setTargetFromPoint(gaze.target.clientX, gaze.target.clientY);
+      setTargetFromPoint(gaze.target.clientX, gaze.target.clientY, INPUT_SAT_RATIO, INPUT_SAT_MIN_PX);
       return;
     }
     if (gaze.type === "center") {
@@ -247,8 +266,8 @@ export function Mascot({
   }, [gaze]);
 
   useEffect(() => {
-    inputPitchBiasRef.current = gaze.type === "input" ? inputPitchBias : 0;
-    applyPose(currentXRef.current, currentYRef.current);
+    targetInputPitchBiasRef.current = gaze.type === "input" ? inputPitchBias : 0;
+    startTick();
   }, [gaze.type, inputPitchBias]);
 
   useEffect(() => {
@@ -269,7 +288,10 @@ export function Mascot({
     window.addEventListener("pointermove", onPointerMove, { capture: true, passive: true });
     window.addEventListener("mousemove", onMouseMove, { capture: true, passive: true });
     return () => {
-      if (rafRef.current) window.cancelAnimationFrame(rafRef.current);
+      if (rafRef.current) {
+        window.cancelAnimationFrame(rafRef.current);
+        rafRef.current = 0;
+      }
       window.removeEventListener("pointermove", onPointerMove, { capture: true });
       window.removeEventListener("mousemove", onMouseMove, { capture: true });
     };

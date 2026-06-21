@@ -3,6 +3,7 @@ export const queryKeys = {
   session: (sessionID: string) => ["session", sessionID] as const,
   messages: (sessionID: string) => ["session", sessionID, "messages", "pages"] as const,
   turns: (sessionID: string) => ["session", sessionID, "turns", "pages"] as const,
+  queuedInputs: (sessionID: string) => ["session", sessionID, "queued-inputs"] as const,
   settings: () => ["settings"] as const,
   providers: () => ["providers"] as const,
   providerModels: (name: string) => ["providers", name, "models"] as const,

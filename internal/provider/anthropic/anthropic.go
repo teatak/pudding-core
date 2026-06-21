@@ -87,8 +87,8 @@ func (c *Client) stream(ctx context.Context, req provider.Request, out chan<- pr
 	return readSSE(ctx, resp.Body, out)
 }
 
-// Messages API 形状:system 是顶层字段,messages 角色 user / assistant,
-// content 取字符串简写(text-only 阶段;块数组形态留给多模态)。
+// Messages API 形状:system 是顶层字段,messages 角色 user / assistant。
+// 纯文本历史继续用 string content;工具历史用 content block 数组。
 type messagesRequest struct {
 	Model       string    `json:"model"`
 	MaxTokens   int       `json:"max_tokens"`
@@ -107,7 +107,18 @@ type tool struct {
 
 type message struct {
 	Role    string `json:"role"`
-	Content string `json:"content"`
+	Content any    `json:"content"`
+}
+
+type contentBlock struct {
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Content   string          `json:"content,omitempty"`
+	IsError   bool            `json:"is_error,omitempty"`
 }
 
 func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Request, error) {
@@ -141,11 +152,7 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 		}
 	}
 	for _, msg := range req.Messages {
-		role := "user"
-		if msg.Role == provider.RoleAssistant {
-			role = "assistant"
-		}
-		body.Messages = append(body.Messages, message{Role: role, Content: messageText(msg)})
+		body.Messages = append(body.Messages, messagesFor(msg)...)
 	}
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(body); err != nil {
@@ -215,6 +222,7 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 				if event.ContentBlock.Type == "tool_use" {
 					blockCalls[event.Index] = event.ContentBlock.ID
 					if !emitChunk(ctx, out, provider.Chunk{Tool: &provider.ToolCallChunk{
+						Index:  event.Index,
 						CallID: event.ContentBlock.ID,
 						Name:   event.ContentBlock.Name,
 					}}) {
@@ -237,6 +245,7 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 				}
 			case "input_json_delta":
 				if event.Delta.PartialJSON != "" && !emitChunk(ctx, out, provider.Chunk{Tool: &provider.ToolCallChunk{
+					Index:     event.Index,
 					CallID:    blockCalls[event.Index],
 					ArgsDelta: event.Delta.PartialJSON,
 				}}) {
@@ -303,6 +312,58 @@ func messageText(msg provider.Message) string {
 		return msg.Text
 	}
 	return b.String()
+}
+
+func messagesFor(msg provider.Message) []message {
+	role := "user"
+	if msg.Role == provider.RoleAssistant {
+		role = "assistant"
+	}
+	if len(msg.Parts) == 0 {
+		return []message{{Role: role, Content: msg.Text}}
+	}
+	var out []message
+	var blocks []contentBlock
+	flushBlocks := func(flushRole string) {
+		if len(blocks) == 0 {
+			return
+		}
+		out = append(out, message{Role: flushRole, Content: blocks})
+		blocks = nil
+	}
+	for _, part := range msg.Parts {
+		switch part.Type {
+		case "", provider.PartText:
+			if part.Text != "" {
+				blocks = append(blocks, contentBlock{Type: "text", Text: part.Text})
+			}
+		case provider.PartToolUse:
+			args := part.Args
+			if len(args) == 0 {
+				args = json.RawMessage(`{}`)
+			}
+			blocks = append(blocks, contentBlock{
+				Type:  "tool_use",
+				ID:    part.CallID,
+				Name:  part.Name,
+				Input: append(json.RawMessage(nil), args...),
+			})
+		case provider.PartToolResult:
+			flushBlocks(role)
+			blocks = append(blocks, contentBlock{
+				Type:      "tool_result",
+				ToolUseID: part.CallID,
+				Content:   part.Content,
+				IsError:   !part.Ok,
+			})
+			flushBlocks("user")
+		}
+	}
+	flushBlocks(role)
+	if len(out) == 0 {
+		out = append(out, message{Role: role, Content: msg.Text})
+	}
+	return out
 }
 
 // ListModels 拉取模型目录(GET /v1/models)。包级函数,

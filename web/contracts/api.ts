@@ -95,23 +95,36 @@ export const contentPart = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("tool_result"),
     id: z.string().optional(),
+    name: z.string().optional(),
     ok: z.boolean().optional(),
     content: z.string().optional(),
   }),
 ]);
 export type ContentPart = z.infer<typeof contentPart>;
 
-export const message = z.object({
-  id: z.string(),
-  sessionID: z.string(),
-  turnID: z.string(),
-  role: z.enum(["user", "assistant"]),
-  text: z.string(),
-  parts: z.array(contentPart).optional().default([]),
-  clientMessageID: z.string().optional(), // 仅 user message,overlay 对账键
-  interrupted: z.boolean().optional(),
-  createdAt: z.string(),
-});
+export const message = z
+  .object({
+    id: z.string(),
+    sessionID: z.string(),
+    turnID: z.string(),
+    role: z.enum(["user", "assistant", "tool", "summary"]),
+    kind: z.enum(["text", "thought", "tool_use", "tool_result", "summary"]),
+    text: z.string(),
+    parts: z.array(contentPart),
+    turnIndex: z.number().int(),
+    clientMessageID: z.string().optional(), // 仅 user message,overlay 对账键
+    interrupted: z.boolean().optional(),
+    createdAt: z.string(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.text.trim() && value.parts.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "message.parts is required when message.text is present",
+        path: ["parts"],
+      });
+    }
+  });
 export type Message = z.infer<typeof message>;
 
 export const conversationTurn = z.object({
@@ -126,21 +139,45 @@ export const conversationTurn = z.object({
 });
 export type ConversationTurn = z.infer<typeof conversationTurn>;
 
+export const queuedInputStatus = z.enum(["queued", "editing", "cancelled", "promoted"]);
+
+export const queuedInput = z.object({
+  sessionID: z.string(),
+  clientMessageID: z.string(),
+  text: z.string(),
+  status: queuedInputStatus,
+  provider: z.string().optional(),
+  model: z.string().optional(),
+  modelConfig: z.unknown().optional(),
+  turnID: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type QueuedInput = z.infer<typeof queuedInput>;
+
 export const submitRequest = z.object({
   clientMessageID: z.string().min(1),
   text: z.string().min(1),
 });
 
-// 202 新 turn;200 + duplicate=true 幂等重放
+// 202 新 turn 或 queued input;200 + duplicate=true 幂等重放
 export const submitResponse = z.object({
   duplicate: z.boolean().optional(),
-  turnID: z.string(),
+  queued: z.boolean().optional(),
+  turnID: z.string().optional(),
   userMessageID: z.string().optional(),
+  status: queuedInputStatus.optional(),
+  clientMessageID: z.string().optional(),
 });
 
 export const listSessionsResponse = z.object({ sessions: z.array(session) });
 export const listMessagesResponse = z.object({ messages: z.array(message), hasMore: z.boolean() });
 export const listTurnsResponse = z.object({ turns: z.array(conversationTurn), hasMore: z.boolean() });
+export const listQueuedInputsResponse = z.object({ queuedInputs: z.array(queuedInput) });
+export const patchQueuedInputRequest = z.object({
+  text: z.string().min(1).optional(),
+  status: z.enum(["queued", "editing", "cancelled"]).optional(),
+});
 export const settingsResponse = z.object({ settings: z.record(z.string(), z.string()) });
 
 // 409 响应体:submit → turn_running;cancel → no_running_turn;
