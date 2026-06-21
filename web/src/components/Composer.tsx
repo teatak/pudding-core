@@ -22,6 +22,7 @@ import { ModelPicker } from "@/components/ModelPicker";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useImeCompositionGuard } from "@/hooks/useImeCompositionGuard";
 import { useI18n } from "@/i18n";
 import { getSubmitFailure } from "@/lib/submitFailure";
 import { getTextAreaCaretClientPoint } from "@/lib/textCaret";
@@ -171,6 +172,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
       updateMascotInputGaze();
     });
   }, [updateMascotInputGaze]);
+  const ime = useImeCompositionGuard({ onCompositionEnd: scheduleMascotInputGaze });
   const setTextAreaRef = (node: HTMLTextAreaElement | null) => {
     textAreaRef.current = node;
     textField.ref(node);
@@ -185,6 +187,10 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
   };
   const handleTextKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
+      if (ime.isComposing(event)) {
+        scheduleMascotInputGaze();
+        return;
+      }
       event.preventDefault();
       if (sendEnabled) {
         void form.handleSubmit(submitDraft)();
@@ -237,6 +243,8 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
                 ref={setTextAreaRef}
                 onBlur={handleTextBlur}
                 onChange={handleTextChange}
+                onCompositionEnd={ime.onCompositionEnd}
+                onCompositionStart={ime.onCompositionStart}
                 onClick={scheduleMascotInputGaze}
                 onFocus={scheduleMascotInputGaze}
                 onKeyDown={handleTextKeyDown}

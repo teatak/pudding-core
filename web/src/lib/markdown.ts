@@ -18,6 +18,12 @@ function safeHref(raw: string) {
   return "";
 }
 
+type RenderMarkdownOptions = {
+  codeRenderer?: (code: string, lang?: string) => string | null;
+  codeCopyLabel?: string;
+  codeCopiedLabel?: string;
+};
+
 // code span 与链接先从原文提取进槽位、再对剩余文本整体转义,
 // 避免对捕获的已转义文本二次转义(`Vec<T>` 显示成 Vec&lt;T&gt; 那类 bug)。
 function inline(value: string) {
@@ -58,7 +64,9 @@ function tableCells(line: string) {
     .map((cell) => cell.trim());
 }
 
-export function renderMarkdown(source: string) {
+export function renderMarkdown(source: string, options: RenderMarkdownOptions = {}) {
+  const codeCopyLabel = options.codeCopyLabel || "Copy";
+  const codeCopiedLabel = options.codeCopiedLabel || "Copied";
   const lines = source.replace(/\r\n/g, "\n").split("\n");
   const blocks: string[] = [];
   let index = 0;
@@ -79,8 +87,17 @@ export function renderMarkdown(source: string) {
         index += 1;
       }
       index += 1;
-      const lang = fence[1] ? ` data-lang="${escapeAttr(fence[1])}"` : "";
-      blocks.push(`<pre${lang}><code>${escapeHTML(code.join("\n"))}</code></pre>`);
+      const rawCode = code.join("\n");
+      const renderedCode =
+        options.codeRenderer?.(rawCode, fence[1]) ||
+        `<pre${fence[1] ? ` data-lang="${escapeAttr(fence[1])}"` : ""}><code>${escapeHTML(rawCode)}</code></pre>`;
+      blocks.push(
+        `<div class="code-block-wrap"><button type="button" class="code-copy-btn" data-action="copy-code" aria-label="${escapeAttr(
+          codeCopyLabel,
+        )}" data-copy-label="${escapeAttr(codeCopyLabel)}" data-copied-label="${escapeAttr(
+          codeCopiedLabel,
+        )}"></button>${renderedCode}</div>`,
+      );
       continue;
     }
 

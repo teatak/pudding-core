@@ -1,6 +1,6 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { ArrowDown, Check, ChevronDown, ChevronRight, CircleAlert, Copy, Loader2 } from "lucide-react";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 
 import { listTurns, type ContentPart, type Message } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
@@ -13,6 +13,7 @@ import { useStreamedText } from "@/hooks/useStreamedText";
 import { useTranscriptScroll } from "@/hooks/useTranscriptScroll";
 import { useI18n } from "@/i18n";
 import { renderMarkdown } from "@/lib/markdown";
+import { getShikiCodeRenderer, type CodeBlockRenderer } from "@/lib/shiki";
 import { formatClock } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import {
@@ -580,7 +581,7 @@ function AssistantOverlayItem({
 function AssistantPhaseItem({ phase }: { phase: TurnPhaseState["phase"] }) {
   return (
     <div className="flex h-6 w-full items-center gap-2 text-xs text-muted-foreground">
-      <span className="flex h-6 w-4 items-center justify-center">
+      <span className="flex h-6 w-2.5 items-center justify-center">
         <PhaseDot phase={phase} />
       </span>
     </div>
@@ -604,9 +605,9 @@ function ThoughtPart({ active = false, text }: { active?: boolean; text: string 
       className="relative text-[12px] leading-[1.5] text-muted-foreground"
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
-      {open ? <span aria-hidden="true" className="pointer-events-none absolute top-[18px] bottom-0 left-2 border-l border-border" /> : null}
-      <summary className="grid h-6 cursor-pointer list-none grid-cols-[1rem_minmax(0,1fr)] items-center gap-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden">
-        <span className="relative z-[1] inline-flex h-6 w-4 shrink-0 items-center justify-center opacity-90">
+      {open ? <span aria-hidden="true" className="pointer-events-none absolute top-[18px] bottom-0 left-[5px] border-l border-border" /> : null}
+      <summary className="inline-grid h-6 cursor-pointer list-none grid-cols-[0.625rem_auto] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden">
+        <span className="relative z-[1] inline-flex h-6 w-2.5 shrink-0 items-center justify-center opacity-90">
           <PhaseDot active={active} phase="thinking" size="md" />
         </span>
         <span className="flex min-w-0 flex-1 items-center gap-1">
@@ -616,7 +617,7 @@ function ThoughtPart({ active = false, text }: { active?: boolean; text: string 
           </span>
         </span>
       </summary>
-      <div className="ml-2 py-1 pl-3">
+      <div className="ml-[5px] py-1 pl-2">
         <div
           ref={bodyRef}
           className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words pr-2 text-[12px] leading-6 text-muted-foreground italic"
@@ -634,7 +635,7 @@ function ToolUsePart({ part }: { part: Extract<TurnPart, { type: "tool_use" }> }
   return (
     <div className="my-2 rounded-md border border-border/60 bg-card px-3 py-2 text-xs text-muted-foreground">
       <div className="flex h-6 min-w-0 items-center gap-2">
-        <span className="inline-flex h-6 w-4 shrink-0 items-center justify-center">
+        <span className="inline-flex h-6 w-2.5 shrink-0 items-center justify-center">
           <PhaseDot active={part.active} phase={part.dotPhase || "executing_tool"} size="md" />
         </span>
         <span className="truncate font-medium text-foreground">{part.name || t("transcript.tool")}</span>
@@ -662,7 +663,7 @@ function ToolResultPart({ part }: { part: Extract<TurnPart, { type: "tool_result
   return (
     <div className="my-2 rounded-md border border-border/60 bg-muted/25 px-3 py-2 text-xs text-muted-foreground">
       <div className="mb-1 flex h-6 items-center gap-2 font-medium">
-        <span className="inline-flex h-6 w-4 shrink-0 items-center justify-center">
+        <span className="inline-flex h-6 w-2.5 shrink-0 items-center justify-center">
           <PhaseDot active={false} phase="executing_tool" size="md" />
         </span>
         <span>{t("transcript.toolResult")}</span>
@@ -696,7 +697,50 @@ function InterruptedBadge() {
 }
 
 function MarkdownBody({ text }: { text: string }) {
-  return <div className="pudding-markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />;
+  const { t } = useI18n();
+  const [codeRenderer, setCodeRenderer] = useState<CodeBlockRenderer | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void getShikiCodeRenderer().then((renderer) => {
+      if (!cancelled) {
+        setCodeRenderer(() => renderer);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const html = useMemo(
+    () =>
+      renderMarkdown(text, {
+        codeCopiedLabel: t("common.copied"),
+        codeCopyLabel: t("common.copy"),
+        codeRenderer: codeRenderer || undefined,
+      }),
+    [codeRenderer, t, text],
+  );
+  const handleClick = (event: MouseEvent<HTMLDivElement>) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-action="copy-code"]');
+    if (!button) {
+      return;
+    }
+    const code = button.closest(".code-block-wrap")?.querySelector("code");
+    if (!code) {
+      return;
+    }
+    void navigator.clipboard
+      .writeText(code.textContent || "")
+      .then(() => {
+        button.dataset.copied = "1";
+        button.setAttribute("aria-label", button.dataset.copiedLabel || t("common.copied"));
+        window.setTimeout(() => {
+          delete button.dataset.copied;
+          button.setAttribute("aria-label", button.dataset.copyLabel || t("common.copy"));
+        }, 1500);
+      })
+      .catch(() => {});
+  };
+  return <div className="pudding-markdown" dangerouslySetInnerHTML={{ __html: html }} onClick={handleClick} />;
 }
 
 function MessageMeta({ align = "start", createdAt, text }: { align?: "start" | "end"; createdAt: string; text: string }) {
@@ -721,7 +765,7 @@ function MessageMeta({ align = "start", createdAt, text }: { align?: "start" | "
       <Button
         aria-label={t("common.copy")}
         className={cn(
-          "size-6 bg-transparent transition-colors hover:bg-transparent active:translate-y-0",
+          "size-6 bg-transparent transition-colors hover:bg-muted dark:hover:bg-muted/50 active:translate-y-0",
           align === "start" && "-ml-1",
         )}
         size="icon-xs"

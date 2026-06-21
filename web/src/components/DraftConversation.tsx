@@ -26,6 +26,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useImeCompositionGuard } from "@/hooks/useImeCompositionGuard";
 import { useI18n } from "@/i18n";
 import type { AppSearch } from "@/lib/route";
 import { getSubmitFailure } from "@/lib/submitFailure";
@@ -260,6 +261,7 @@ function DraftComposer({
       updateMascotInputGaze();
     });
   }, [updateMascotInputGaze]);
+  const ime = useImeCompositionGuard({ onCompositionEnd: scheduleMascotInputGaze });
 
   useEffect(() => {
     return () => {
@@ -398,6 +400,10 @@ function DraftComposer({
   };
   const handleTextKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
+      if (ime.isComposing(event)) {
+        scheduleMascotInputGaze();
+        return;
+      }
       event.preventDefault();
       if (sendEnabled && !submitMutation.isPending) {
         void form.handleSubmit(submitDraft)();
@@ -419,6 +425,8 @@ function DraftComposer({
               ref={setTextAreaRef}
               onBlur={handleTextBlur}
               onChange={handleTextChange}
+              onCompositionEnd={ime.onCompositionEnd}
+              onCompositionStart={ime.onCompositionStart}
               onClick={scheduleMascotInputGaze}
               onFocus={scheduleMascotInputGaze}
               onKeyDown={handleTextKeyDown}

@@ -322,7 +322,7 @@ html[data-shell] .pudding-markdown * {
 
 .pudding-rail-toggle [data-slot="button"],
 .pudding-canvas-toggle [data-slot="button"],
-.pudding-session-rail [data-slot="sidebar-footer"] [data-slot="button"] {
+.pudding-session-rail [data-slot="sidebar-footer"] :where([data-slot="button"], [data-slot="dropdown-menu-trigger"]) {
     font-weight: 400;
 }
 
@@ -342,7 +342,7 @@ html[data-shell] .pudding-markdown * {
 
 .pudding-rail-toggle [data-slot="button"]:is(:hover, :focus-visible),
 .pudding-canvas-toggle [data-slot="button"]:is(:hover, :focus-visible),
-.pudding-session-rail [data-slot="sidebar-footer"] [data-slot="button"]:is(:hover, :focus-visible) {
+.pudding-session-rail [data-slot="sidebar-footer"] :where([data-slot="button"], [data-slot="dropdown-menu-trigger"]):is(:hover, :focus-visible, [aria-expanded="true"], [data-state="open"]) {
     background-color: var(--accent);
     color: var(--foreground);
     font-weight: 400;
@@ -630,6 +630,21 @@ html[data-shell] .pudding-markdown * {
   @apply grid gap-2 whitespace-normal break-words;
 }
 
+.phase-dot-breathe {
+  animation: pudding-phase-dot-breathe 1.4s ease-in-out infinite;
+}
+
+@keyframes pudding-phase-dot-breathe {
+  0%, 100% {
+    opacity: 0.14;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.24;
+    transform: scale(1.18);
+  }
+}
+
 .pudding-markdown :where(h1, h2, h3, h4) {
   @apply mt-1 font-normal leading-snug;
 }
@@ -668,11 +683,52 @@ html[data-shell] .pudding-markdown * {
 }
 
 .pudding-markdown pre {
-  @apply overflow-auto rounded-lg border bg-muted p-3;
+  @apply overflow-auto rounded-lg bg-muted p-3;
 }
 
 .pudding-markdown pre code {
   @apply bg-transparent p-0 text-sm;
+}
+
+.pudding-markdown .shiki {
+  background-color: color-mix(in oklch, var(--muted), var(--background) 18%) !important;
+}
+
+.dark .pudding-markdown .shiki {
+  background-color: color-mix(in oklch, var(--card), var(--background) 34%) !important;
+  color: var(--shiki-dark) !important;
+}
+
+.dark .pudding-markdown .shiki span {
+  color: var(--shiki-dark) !important;
+  font-style: var(--shiki-dark-font-style) !important;
+  font-weight: var(--shiki-dark-font-weight) !important;
+  text-decoration: var(--shiki-dark-text-decoration) !important;
+}
+
+.pudding-markdown .code-block-wrap {
+  @apply relative max-w-full;
+}
+
+.pudding-markdown .code-block-wrap pre {
+  padding-right: 3rem;
+}
+
+.pudding-markdown .code-copy-btn {
+  @apply absolute top-2 right-2 z-10 inline-flex size-6 items-center justify-center rounded-md bg-transparent text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground dark:hover:bg-muted/50;
+}
+
+.pudding-markdown .code-copy-btn::before {
+  content: "";
+  width: 13px;
+  height: 13px;
+  background-color: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='14' height='14' x='8' y='8' rx='2' ry='2'/%3E%3Cpath d='M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.pudding-markdown .code-copy-btn[data-copied="1"]::before {
+  background-color: var(--success);
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
 }
 
 /* wrapper 负责圆角边框与横向滚动;table 本体保持 table 布局并 w-full,
