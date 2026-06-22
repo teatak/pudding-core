@@ -12,20 +12,17 @@ export type UserInputVM = {
 
 export type AssistantOutputVM =
   | {
-      anchorID: string;
       duration?: string;
       kind: "canonical";
       messages: Message[];
     }
   | {
-      anchorID: string;
       canonicalReady: boolean;
       kind: "live";
       overlay: AssistantOverlay;
       phase?: TurnPhaseState;
     }
   | {
-      anchorID: string;
       kind: "phase";
       phase: TurnPhaseState;
     };

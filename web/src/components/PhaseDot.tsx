@@ -24,14 +24,14 @@ export function PhaseDot({ active = true, className, phase = "awaiting_model", s
   const color = phaseColors[phase];
   const dotSize = size === "sm" ? "size-1.5" : "size-2.5";
   const haloSize = size === "sm" ? "size-1.5" : "size-3";
-  const shellSize = size === "sm" ? "size-1.5" : "size-2.5";
+  const shellSize = size === "sm" ? "size-1.5" : "size-3";
 
   return (
     <span aria-hidden="true" className={cn("relative inline-flex shrink-0 items-center justify-center", shellSize, className)}>
       {active ? (
         <span className={cn("phase-dot-breathe absolute rounded-full opacity-20", haloSize)} style={{ backgroundColor: color }} />
       ) : null}
-      <span className={cn("relative rounded-full", dotSize, active && "animate-pulse")} style={{ backgroundColor: color }} />
+      <span className={cn("relative rounded-full", dotSize)} style={{ backgroundColor: color }} />
     </span>
   );
 }

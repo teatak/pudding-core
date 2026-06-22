@@ -239,7 +239,7 @@ export function ProviderProfileEditorDialog({
                 </Field>
                 <Field className="gap-2 rounded-none border-0 bg-transparent p-0 hover:bg-transparent">
                   <FieldLabel className="w-auto cursor-default text-sm font-medium" htmlFor="provider-base-url">
-                    Base URL
+                    {t("provider.baseURL")}
                   </FieldLabel>
                   <Input id="provider-base-url" placeholder="https://api.openai.com/v1" {...form.register("baseURL")} />
                 </Field>
@@ -247,7 +247,7 @@ export function ProviderProfileEditorDialog({
 
               <Field className="gap-2 rounded-none border-0 bg-transparent p-0 hover:bg-transparent">
                 <FieldLabel className="w-auto cursor-default text-sm font-medium" htmlFor="provider-api-key">
-                  API Key
+                  {t("provider.apiKey")}
                 </FieldLabel>
                 <div className="relative">
                   <Input
@@ -260,7 +260,7 @@ export function ProviderProfileEditorDialog({
                   />
                   {showAPIKeyToggle ? (
                     <button
-                      aria-label={apiKeyVisible ? "Hide API Key" : "Show API Key"}
+                      aria-label={apiKeyVisible ? t("provider.hideAPIKey") : t("provider.showAPIKey")}
                       className="absolute inset-y-0 right-1 my-auto flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
                       type="button"
                       onClick={() => setAPIKeyVisible((visible) => !visible)}
@@ -357,9 +357,9 @@ function ModelEditor({
       </div>
 
       <div className="flex flex-wrap gap-4">
-        <CheckField checked={watch(`${prefix}.image`)} label="Image" onCheckedChange={(checked) => setBoolean("image", checked)} />
-        <CheckField checked={watch(`${prefix}.audio`)} label="Audio" onCheckedChange={(checked) => setBoolean("audio", checked)} />
-        <CheckField checked={watch(`${prefix}.tools`)} label="Tools" onCheckedChange={(checked) => setBoolean("tools", checked)} />
+        <CheckField checked={watch(`${prefix}.image`)} label={t("provider.capability.image")} onCheckedChange={(checked) => setBoolean("image", checked)} />
+        <CheckField checked={watch(`${prefix}.audio`)} label={t("provider.capability.audio")} onCheckedChange={(checked) => setBoolean("audio", checked)} />
+        <CheckField checked={watch(`${prefix}.tools`)} label={t("provider.capability.tools")} onCheckedChange={(checked) => setBoolean("tools", checked)} />
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">

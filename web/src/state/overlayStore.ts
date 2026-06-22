@@ -14,6 +14,7 @@ export type PendingUserMessage = {
 export type AssistantOverlay = {
   turnID: string;
   sessionID: string;
+  clientMessageID?: string;
   text: string;
   parts: AssistantOverlayPart[];
   status: "streaming" | "completed" | "failed" | "cancelled";
@@ -98,6 +99,22 @@ export function isTurnPhaseActive(phase: TurnPhaseState | undefined) {
 
 function makePhase(input: Omit<TurnPhaseState, "updatedAt">): TurnPhaseState {
   return { ...input, updatedAt: new Date().toISOString() };
+}
+
+function phaseForTurn(
+  current: TurnPhaseState | undefined,
+  input: Omit<TurnPhaseState, "updatedAt">,
+): TurnPhaseState {
+  if (
+    current?.sessionID === input.sessionID &&
+    current.phase === input.phase &&
+    current.turnID === input.turnID &&
+    current.clientMessageID === input.clientMessageID &&
+    current.error === input.error
+  ) {
+    return current;
+  }
+  return makePhase(input);
 }
 
 function emptyAssistantOverlay(
@@ -192,7 +209,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       return {
         assistants: {
           ...state.assistants,
-          [turnID]: current,
+          [turnID]: { ...current, clientMessageID },
         },
         runningTurns: {
           ...state.runningTurns,
@@ -262,7 +279,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
         );
         const current = overlayWithDefaults(assistants[event.turnID], event.turnID, event.sessionID);
         return {
-          assistants: { ...assistants, [event.turnID]: current },
+          assistants: { ...assistants, [event.turnID]: { ...current, clientMessageID: event.clientMessageID } },
           lastEventSeqs: recordEventSeq(state.lastEventSeqs, event),
           runningTurns: { ...state.runningTurns, [event.sessionID]: event.turnID },
           turnPhases: {
@@ -278,8 +295,21 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       }
       if (event.kind === "turn.delta") {
         const current = overlayWithDefaults(state.assistants[event.turnID], event.turnID, event.sessionID);
+        const phase = state.turnPhases[event.sessionID];
         const part = event.part;
         const parts = part === "thought" ? appendThoughtPart(current.parts, event.delta) : current.parts;
+        const nextPhase = part === "thought" ? "thinking" : "streaming_text";
+        const nextRunningTurns =
+          state.runningTurns[event.sessionID] === event.turnID
+            ? state.runningTurns
+            : { ...state.runningTurns, [event.sessionID]: event.turnID };
+        const nextTurnPhase = phaseForTurn(phase, {
+          phase: nextPhase,
+          sessionID: event.sessionID,
+          turnID: event.turnID,
+        });
+        const nextTurnPhases =
+          nextTurnPhase === phase ? state.turnPhases : { ...state.turnPhases, [event.sessionID]: nextTurnPhase };
         return {
           assistants: {
             ...state.assistants,
@@ -288,31 +318,38 @@ export const useOverlayStore = create<OverlayState>((set) => ({
               text: part === "text" ? current.text + event.delta : current.text,
               parts,
               status: "streaming",
+              clientMessageID:
+                current.clientMessageID || (phase?.turnID === event.turnID ? phase.clientMessageID : undefined),
               revealed: false,
             },
           },
-          runningTurns: { ...state.runningTurns, [event.sessionID]: event.turnID },
-          turnPhases: {
-            ...state.turnPhases,
-            [event.sessionID]: makePhase({
-              phase: part === "thought" ? "thinking" : "streaming_text",
-              sessionID: event.sessionID,
-              turnID: event.turnID,
-            }),
-          },
+          runningTurns: nextRunningTurns,
+          turnPhases: nextTurnPhases,
         };
       }
       if (event.kind === "turn.tool") {
         const current = overlayWithDefaults(state.assistants[event.turnID], event.turnID, event.sessionID);
+        const currentPhase = state.turnPhases[event.sessionID];
         const callID = event.callID;
-        const phase =
-          event.phase === "streaming_args"
-            ? "streaming_tool_args"
-            : event.phase === "running"
-              ? "executing_tool"
-              : event.phase === "error"
-                ? "error"
-                : "awaiting_followup";
+        let phase: TurnPhaseState["phase"] = "awaiting_followup";
+        if (event.phase === "streaming_args") {
+          phase = "streaming_tool_args";
+        } else if (event.phase === "running") {
+          phase = "executing_tool";
+        } else if (event.phase === "error") {
+          phase = "error";
+        }
+        const nextRunningTurns =
+          state.runningTurns[event.sessionID] === event.turnID
+            ? state.runningTurns
+            : { ...state.runningTurns, [event.sessionID]: event.turnID };
+        const nextTurnPhase = phaseForTurn(currentPhase, {
+          phase,
+          sessionID: event.sessionID,
+          turnID: event.turnID,
+        });
+        const nextTurnPhases =
+          nextTurnPhase === currentPhase ? state.turnPhases : { ...state.turnPhases, [event.sessionID]: nextTurnPhase };
         return {
           assistants: {
             ...state.assistants,
@@ -320,18 +357,13 @@ export const useOverlayStore = create<OverlayState>((set) => ({
               ...current,
               parts: upsertToolPart(current.parts, event, callID),
               status: "streaming",
+              clientMessageID:
+                current.clientMessageID || (currentPhase?.turnID === event.turnID ? currentPhase.clientMessageID : undefined),
               revealed: false,
             },
           },
-          runningTurns: { ...state.runningTurns, [event.sessionID]: event.turnID },
-          turnPhases: {
-            ...state.turnPhases,
-            [event.sessionID]: makePhase({
-              phase,
-              sessionID: event.sessionID,
-              turnID: event.turnID,
-            }),
-          },
+          runningTurns: nextRunningTurns,
+          turnPhases: nextTurnPhases,
         };
       }
       const status =
@@ -371,6 +403,11 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       if (!overlay || overlay.revealed) {
         return state;
       }
+      if (overlay.assistantMessageID) {
+        const assistants = { ...state.assistants };
+        delete assistants[turnID];
+        return { assistants };
+      }
       return {
         assistants: {
           ...state.assistants,
@@ -394,7 +431,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
         if (overlay.sessionID !== sessionID || overlay.status === "streaming") {
           continue;
         }
-        if (overlay.revealed && overlay.assistantMessageID && canonicalMessageIDs.has(overlay.assistantMessageID)) {
+        if (overlay.assistantMessageID && canonicalMessageIDs.has(overlay.assistantMessageID)) {
           delete assistants[overlay.turnID];
           assistantsChanged = true;
         }

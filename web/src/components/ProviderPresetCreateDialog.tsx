@@ -243,7 +243,7 @@ export function ProviderPresetCreateDialog({
 
           <Field className="gap-2 rounded-none border-0 bg-transparent p-0 hover:bg-transparent">
             <FieldLabel className="w-auto cursor-default text-sm font-medium" htmlFor="provider-preset-api-key">
-              API Key
+              {t("provider.apiKey")}
             </FieldLabel>
             <Input
               id="provider-preset-api-key"

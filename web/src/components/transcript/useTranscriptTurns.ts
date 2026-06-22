@@ -3,14 +3,16 @@ import { useMemo } from "react";
 
 import { listTurns, type ConversationTurn } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { useI18n } from "@/i18n";
 
 import { formatDurationBetween } from "./time";
 
-const TURNS_PAGE_SIZE = 5;
+const TURNS_PAGE_SIZE = 20;
 type TurnsPage = { turns: ConversationTurn[]; hasMore: boolean };
 export type TurnsInfiniteData = InfiniteData<TurnsPage, string | undefined>;
 
 export function useTranscriptTurns(token: string, sessionID: string) {
+  const { locale } = useI18n();
   const query = useInfiniteQuery({
     queryKey: queryKeys.turns(sessionID),
     queryFn: ({ pageParam }) => listTurns(token, sessionID, { before: pageParam, limit: TURNS_PAGE_SIZE }),
@@ -31,14 +33,14 @@ export function useTranscriptTurns(token: string, sessionID: string) {
     const out = new Map<string, string>();
     for (const page of query.data?.pages || []) {
       for (const turn of page.turns) {
-        const duration = formatDurationBetween(turn.createdAt, turn.updatedAt);
+        const duration = formatDurationBetween(turn.createdAt, turn.updatedAt, locale);
         if (duration) {
           out.set(turn.id, duration);
         }
       }
     }
     return out;
-  }, [query.data]);
+  }, [locale, query.data]);
 
   return { messages, query, turnDurationByID, turns };
 }
@@ -73,9 +75,12 @@ export function upsertTurnIntoPages(previous: TurnsInfiniteData | undefined, tur
       return { ...page, turns };
     }
     if (existingPageIndex < 0 && pageIndex === 0) {
+      const turns = sortTurnsByCreatedAt([...page.turns, turn]);
+      const cappedTurns = previous.pages.length === 1 ? turns.slice(-TURNS_PAGE_SIZE) : turns;
       return {
         ...page,
-        turns: sortTurnsByCreatedAt([...page.turns, turn]),
+        hasMore: page.hasMore || cappedTurns.length < turns.length,
+        turns: cappedTurns,
       };
     }
     return page;

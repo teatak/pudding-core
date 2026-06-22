@@ -57,7 +57,6 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
   const overlayRunning = useOverlayStore((state) => Boolean(state.runningTurns[sessionID]));
   const turnPhase = useOverlayStore((state) => state.turnPhases[sessionID]);
   const running = overlayRunning || session.running;
-  const [cancelLocked, setCancelLocked] = useState(false);
   const [resolvedModel, setResolvedModel] = useState<{ provider: string; model: string } | null>(null);
   const [mascotGaze, setMascotGaze] = useState<MascotGaze>({ type: "pointer" });
   // clientMessageID 按"草稿"生成而不是按请求生成:失败重试和快速双击
@@ -137,11 +136,13 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
       toast.error(failure.message);
     },
   });
-  const sendEnabled = canSend && Boolean(resolvedModel) && !submitMutation.isPending;
-
   const cancelMutation = useMutation({
     mutationFn: () => cancelTurn(token, sessionID),
   });
+  const sendEnabled = canSend && Boolean(resolvedModel) && !submitMutation.isPending;
+  const stopEnabled = running && !cancelMutation.isPending;
+  const showStopButton = running || cancelMutation.isPending;
+  const showSendButton = !showStopButton || (canSend && !submitMutation.isPending);
 
   const submitDraft = (value: z.infer<typeof composerSchema>) => {
     const text = value.text.trim();
@@ -149,7 +150,6 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
       return;
     }
     onSubmitError?.(null);
-    setCancelLocked(true);
     if (!running) {
       startSubmittingTurn(sessionID, draftIDRef.current);
     }
@@ -215,14 +215,6 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
     }
     scheduleMascotInputGaze();
   };
-
-  useEffect(() => {
-    if (!cancelLocked) {
-      return;
-    }
-    const timer = window.setTimeout(() => setCancelLocked(false), 500);
-    return () => window.clearTimeout(timer);
-  }, [cancelLocked]);
 
   useEffect(() => {
     return () => {
@@ -291,17 +283,18 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
                 session={session}
                 onResolvedChange={handleResolvedModelChange}
               />
-              {running ? (
+              {showStopButton ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
                       aria-label={t("composer.stop")}
                       className="rounded-full !bg-foreground !text-background shadow-sm hover:!bg-foreground/90 hover:!text-background dark:hover:!bg-foreground/90"
+                      disabled={!stopEnabled}
                       size="icon"
                       type="button"
                       variant="ghost"
                       onClick={() => {
-                        if (cancelLocked) {
+                        if (!stopEnabled) {
                           return;
                         }
                         cancelMutation.mutate();
@@ -317,21 +310,23 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
                   <TooltipContent>{t("composer.stop")}</TooltipContent>
                 </Tooltip>
               ) : null}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    aria-label={t("composer.send")}
-                    className="rounded-full disabled:bg-control-disabled disabled:text-background disabled:opacity-100 disabled:shadow-none"
-                    disabled={!sendEnabled}
-                    size="icon"
-                    type="submit"
-                    variant={sendEnabled ? "default" : "secondary"}
-                  >
-                    {submitMutation.isPending ? <Loader2 className="animate-spin" /> : <ArrowUp />}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{t("composer.send")}</TooltipContent>
-              </Tooltip>
+              {showSendButton ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      aria-label={t("composer.send")}
+                      className="rounded-full disabled:bg-control-disabled disabled:text-background disabled:opacity-100 disabled:shadow-none"
+                      disabled={!sendEnabled}
+                      size="icon"
+                      type="submit"
+                      variant={sendEnabled ? "default" : "secondary"}
+                    >
+                      {submitMutation.isPending ? <Loader2 className="animate-spin" /> : <ArrowUp />}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("composer.send")}</TooltipContent>
+                </Tooltip>
+              ) : null}
             </div>
           </div>
           <span className="absolute z-30 size-12 overflow-visible" style={{ left: 6, top: -36 }}>

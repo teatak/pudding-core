@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 
 import type { ConversationTurn, Message } from "@/api/client";
 import {
@@ -9,6 +9,13 @@ import {
 } from "@/state/overlayStore";
 
 import { textFromContentParts, transcriptPhaseKey, type TranscriptTurnVM, type UserInputVM } from "./types";
+
+type CanonicalTurnCacheEntry = {
+  duration?: string;
+  item: TranscriptTurnVM;
+  phase?: TurnPhaseState;
+  turn: ConversationTurn;
+};
 
 export function useTranscriptViewModel({
   assistantOverlays,
@@ -27,6 +34,7 @@ export function useTranscriptViewModel({
   turnPhase?: TurnPhaseState;
   turns: ConversationTurn[];
 }) {
+  const canonicalTurnCacheRef = useRef(new Map<string, CanonicalTurnCacheEntry>());
   const messages = useMemo(() => turns.flatMap((turn) => turn.messages), [turns]);
   const canonicalMessageIDs = useMemo(() => new Set(messages.map((message) => message.id)), [messages]);
   const displayPhase = useMemo<TurnPhaseState | undefined>(() => {
@@ -48,10 +56,12 @@ export function useTranscriptViewModel({
   );
 
   const turnVMs = useMemo(() => {
+    const canonicalTurnCache = canonicalTurnCacheRef.current;
     const liveByTurnID = new Map(visibleAssistantOverlays.map((overlay) => [overlay.turnID, overlay]));
     const pendingByClientID = new Map(pendingUsers.map((pending) => [pending.clientMessageID, pending]));
     const usedPendingClientIDs = new Set<string>();
     const usedLiveTurnIDs = new Set<string>();
+    const seenCanonicalTurnIDs = new Set<string>();
     const items: TranscriptTurnVM[] = [];
 
     for (const turn of turns) {
@@ -64,7 +74,6 @@ export function useTranscriptViewModel({
         usedLiveTurnIDs.add(overlay.turnID);
         items.push({
           assistant: {
-            anchorID: assistantAnchorID(turn.id),
             canonicalReady: Boolean(overlay.assistantMessageID && canonicalMessageIDs.has(overlay.assistantMessageID)),
             kind: "live",
             overlay,
@@ -78,20 +87,26 @@ export function useTranscriptViewModel({
         continue;
       }
 
-      const outputMessages = turn.messages.filter(isTurnOutputMessage);
       const phaseForTurn = displayPhase?.turnID === turn.id ? displayPhase : undefined;
-      items.push({
+      const duration = turnDurationByID.get(turn.id);
+      const cached = canonicalTurnCache.get(turn.id);
+      if (cached?.turn === turn && cached.duration === duration && cached.phase === phaseForTurn) {
+        seenCanonicalTurnIDs.add(turn.id);
+        items.push(cached.item);
+        continue;
+      }
+
+      const outputMessages = turn.messages.filter(isTurnOutputMessage);
+      const item: TranscriptTurnVM = {
         assistant:
           outputMessages.length > 0
             ? {
-                anchorID: assistantAnchorID(turn.id),
-                duration: turnDurationByID.get(turn.id),
+                duration,
                 kind: "canonical",
                 messages: outputMessages,
               }
             : phaseForTurn
               ? {
-                  anchorID: assistantAnchorID(turn.id),
                   kind: "phase",
                   phase: phaseForTurn,
                 }
@@ -100,21 +115,24 @@ export function useTranscriptViewModel({
         kind: phaseForTurn && outputMessages.length === 0 ? "phase" : "canonical",
         turnID: turn.id,
         user,
-      });
+      };
+      seenCanonicalTurnIDs.add(turn.id);
+      canonicalTurnCache.set(turn.id, { duration, item, phase: phaseForTurn, turn });
+      items.push(item);
     }
 
     for (const overlay of visibleAssistantOverlays) {
       if (usedLiveTurnIDs.has(overlay.turnID)) {
         continue;
       }
-      const pendingClientID = displayPhase?.turnID === overlay.turnID ? displayPhase.clientMessageID : undefined;
+      const pendingClientID =
+        overlay.clientMessageID || (displayPhase?.turnID === overlay.turnID ? displayPhase.clientMessageID : undefined);
       const pending = pendingClientID ? pendingByClientID.get(pendingClientID) : undefined;
       if (pendingClientID) {
         usedPendingClientIDs.add(pendingClientID);
       }
       items.push({
         assistant: {
-          anchorID: assistantAnchorID(overlay.turnID),
           canonicalReady: Boolean(overlay.assistantMessageID && canonicalMessageIDs.has(overlay.assistantMessageID)),
           kind: "live",
           overlay,
@@ -124,7 +142,7 @@ export function useTranscriptViewModel({
         key: `turn:${overlay.turnID}`,
         kind: "live",
         turnID: overlay.turnID,
-        user: pending ? userFromPending(pending) : undefined,
+        user: pending ? userFromPending(pending, { pending: false }) : undefined,
       });
     }
 
@@ -140,7 +158,6 @@ export function useTranscriptViewModel({
       }
       items.push({
         assistant: {
-          anchorID: displayPhase.turnID ? assistantAnchorID(displayPhase.turnID) : transcriptPhaseKey(displayPhase),
           kind: "phase",
           phase: displayPhase,
         },
@@ -148,7 +165,7 @@ export function useTranscriptViewModel({
         key: transcriptPhaseKey(displayPhase),
         kind: "phase",
         turnID: displayPhase.turnID,
-        user: pending ? userFromPending(pending) : undefined,
+        user: pending ? userFromPending(pending, { pending: displayPhase.phase === "submitting" && !displayPhase.turnID }) : undefined,
       });
     }
 
@@ -164,6 +181,12 @@ export function useTranscriptViewModel({
       });
     }
 
+    for (const turnID of canonicalTurnCache.keys()) {
+      if (!seenCanonicalTurnIDs.has(turnID)) {
+        canonicalTurnCache.delete(turnID);
+      }
+    }
+
     return items.filter((item) => item.user || item.assistant);
   }, [canonicalMessageIDs, displayPhase, pendingUsers, turnDurationByID, turns, visibleAssistantOverlays]);
 
@@ -176,10 +199,6 @@ export function useTranscriptViewModel({
     itemKeys,
     turnVMs,
   };
-}
-
-function assistantAnchorID(turnID: string) {
-  return `assistant:${turnID}`;
 }
 
 function isTurnOutputMessage(message: Message) {
@@ -198,12 +217,12 @@ function userFromMessages(messages: Message[]): UserInputVM | undefined {
   };
 }
 
-function userFromPending(message: PendingUserMessage): UserInputVM {
+function userFromPending(message: PendingUserMessage, options: { pending?: boolean } = {}): UserInputVM {
   return {
     clientMessageID: message.clientMessageID,
     createdAt: message.createdAt,
-    pending: true,
-    status: message.status,
+    pending: options.pending ?? true,
+    status: options.pending === false ? undefined : message.status,
     text: message.text,
   };
 }

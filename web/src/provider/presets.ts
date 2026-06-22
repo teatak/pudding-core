@@ -150,16 +150,16 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     variants: [
       {
         id: "standard-openai",
-        label: "标准 API / OpenAI",
-        description: "api.xiaomimimo.com/v1 · 按 token 计费",
+        label: "Standard API / OpenAI",
+        description: "api.xiaomimimo.com/v1 · token-based billing",
         protocol: "openai-compatible",
         baseURL: "https://api.xiaomimimo.com/v1",
         models: MIMO_OPENAI_MODELS,
       },
       {
         id: "standard-anthropic",
-        label: "标准 API / Anthropic",
-        description: "api.xiaomimimo.com/anthropic · 按 token 计费",
+        label: "Standard API / Anthropic",
+        description: "api.xiaomimimo.com/anthropic · token-based billing",
         protocol: "anthropic",
         baseURL: "https://api.xiaomimimo.com/anthropic",
         models: MIMO_ANTHROPIC_MODELS,
@@ -168,7 +168,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       {
         id: "plan-openai",
         label: "Plan / OpenAI",
-        description: "token-plan-cn.xiaomimimo.com/v1 · 订阅会员",
+        description: "token-plan-cn.xiaomimimo.com/v1 · subscription plan",
         protocol: "openai-compatible",
         baseURL: "https://token-plan-cn.xiaomimimo.com/v1",
         models: MIMO_OPENAI_MODELS,
@@ -177,7 +177,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       {
         id: "plan-anthropic",
         label: "Plan / Anthropic",
-        description: "token-plan-cn.xiaomimimo.com/anthropic · 订阅会员",
+        description: "token-plan-cn.xiaomimimo.com/anthropic · subscription plan",
         protocol: "anthropic",
         baseURL: "https://token-plan-cn.xiaomimimo.com/anthropic",
         models: MIMO_ANTHROPIC_MODELS,

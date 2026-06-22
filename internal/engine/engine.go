@@ -22,6 +22,7 @@ import (
 
 const defaultMaxToolLoops = 16
 const toolCallTimeout = 60 * time.Second
+const streamEventCoalesceInterval = 30 * time.Millisecond
 
 var (
 	// ErrTurnRunning:第一阶段同一 session 不允许并发 turn,API 映射 409。
@@ -487,50 +488,155 @@ func modelSupportsTools(cfg provider.ModelConfig) bool {
 }
 
 func (e *Engine) consumeStream(ctx context.Context, sessionID, turnID string, ch <-chan provider.Chunk, parts *turnPartAccumulator) (provider.FinishReason, store.TurnStatus, string) {
-	for chunk := range ch {
-		switch {
-		case chunk.Err != nil:
-			if errors.Is(chunk.Err, context.Canceled) {
-				return "", store.TurnCancelled, ""
+	coalescer := newStreamEventCoalescer(e.hub)
+	defer coalescer.Flush()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return "", store.TurnCancelled, ""
+		case <-coalescer.C():
+			coalescer.Flush()
+		case chunk, ok := <-ch:
+			if !ok {
+				// provider 违反契约提前关 channel:cancel 中的截断仍按 cancelled 收尾,
+				// 避免用户主动停止被记成 failed。
+				if ctx.Err() != nil {
+					return "", store.TurnCancelled, ""
+				}
+				return "", store.TurnFailed, "provider stream ended without terminal chunk"
 			}
-			return "", store.TurnFailed, chunk.Err.Error()
-		case chunk.Done:
-			return chunk.Finish, store.TurnRunning, ""
-		case chunk.Tool != nil:
-			callID, name, argsDelta := parts.AppendTool(*chunk.Tool)
-			e.hub.Publish(event.Event{
-				SessionID: sessionID,
-				Kind:      event.TurnTool,
-				TurnID:    turnID,
-				CallID:    callID,
-				Name:      name,
-				Phase:     "streaming_args",
-				ArgsDelta: argsDelta,
-			})
-		case chunk.Delta != "":
-			part := chunk.Part
-			if part == "" {
-				part = provider.PartText
+			switch {
+			case chunk.Err != nil:
+				if errors.Is(chunk.Err, context.Canceled) {
+					return "", store.TurnCancelled, ""
+				}
+				return "", store.TurnFailed, chunk.Err.Error()
+			case chunk.Done:
+				return chunk.Finish, store.TurnRunning, ""
+			case chunk.Tool != nil:
+				callID, name, argsDelta := parts.AppendTool(*chunk.Tool)
+				coalescer.Push(event.Event{
+					SessionID: sessionID,
+					Kind:      event.TurnTool,
+					TurnID:    turnID,
+					CallID:    callID,
+					Name:      name,
+					Phase:     "streaming_args",
+					ArgsDelta: argsDelta,
+				})
+			case chunk.Delta != "":
+				part := chunk.Part
+				if part == "" {
+					part = provider.PartText
+				}
+				if part != provider.PartText && part != provider.PartThought {
+					continue
+				}
+				parts.AppendDelta(part, chunk.Delta)
+				coalescer.Push(event.Event{
+					SessionID: sessionID,
+					Kind:      event.TurnDelta,
+					TurnID:    turnID,
+					Part:      string(part),
+					Delta:     chunk.Delta,
+				})
 			}
-			if part != provider.PartText && part != provider.PartThought {
-				continue
-			}
-			parts.AppendDelta(part, chunk.Delta)
-			e.hub.Publish(event.Event{
-				SessionID: sessionID,
-				Kind:      event.TurnDelta,
-				TurnID:    turnID,
-				Part:      string(part),
-				Delta:     chunk.Delta,
-			})
 		}
 	}
-	// provider 违反契约提前关 channel:cancel 中的截断仍按 cancelled 收尾,
-	// 避免用户主动停止被记成 failed。
-	if ctx.Err() != nil {
-		return "", store.TurnCancelled, ""
+}
+
+type streamEventCoalescer struct {
+	hub      *event.Hub
+	pending  []event.Event
+	timer    *time.Timer
+	timerC   <-chan time.Time
+	draining bool
+}
+
+func newStreamEventCoalescer(hub *event.Hub) *streamEventCoalescer {
+	return &streamEventCoalescer{hub: hub}
+}
+
+func (c *streamEventCoalescer) C() <-chan time.Time {
+	return c.timerC
+}
+
+func (c *streamEventCoalescer) Push(ev event.Event) {
+	if len(c.pending) > 0 {
+		last := c.pending[len(c.pending)-1]
+		if merged, ok := mergeStreamEvents(last, ev); ok {
+			c.pending[len(c.pending)-1] = merged
+			c.schedule()
+			return
+		}
 	}
-	return "", store.TurnFailed, "provider stream ended without terminal chunk"
+	c.pending = append(c.pending, ev)
+	c.schedule()
+}
+
+func (c *streamEventCoalescer) Flush() {
+	c.stopTimer()
+	if c.draining || len(c.pending) == 0 {
+		return
+	}
+	c.draining = true
+	events := c.pending
+	c.pending = nil
+	for _, ev := range events {
+		c.hub.Publish(ev)
+	}
+	c.draining = false
+}
+
+func (c *streamEventCoalescer) schedule() {
+	if c.timerC != nil {
+		return
+	}
+	c.timer = time.NewTimer(streamEventCoalesceInterval)
+	c.timerC = c.timer.C
+}
+
+func (c *streamEventCoalescer) stopTimer() {
+	if c.timer == nil {
+		return
+	}
+	if !c.timer.Stop() {
+		select {
+		case <-c.timer.C:
+		default:
+		}
+	}
+	c.timer = nil
+	c.timerC = nil
+}
+
+func mergeStreamEvents(previous, next event.Event) (event.Event, bool) {
+	if previous.Kind == event.TurnDelta &&
+		next.Kind == event.TurnDelta &&
+		previous.SessionID == next.SessionID &&
+		previous.TurnID == next.TurnID &&
+		previous.Part == next.Part {
+		previous.Delta += next.Delta
+		return previous, true
+	}
+	if previous.Kind == event.TurnTool &&
+		next.Kind == event.TurnTool &&
+		previous.SessionID == next.SessionID &&
+		previous.TurnID == next.TurnID &&
+		previous.CallID == next.CallID &&
+		previous.Phase == "streaming_args" &&
+		next.Phase == "streaming_args" {
+		previous.ArgsDelta += next.ArgsDelta
+		if previous.Name == "" {
+			previous.Name = next.Name
+		}
+		if next.Summary != "" {
+			previous.Summary = next.Summary
+		}
+		return previous, true
+	}
+	return event.Event{}, false
 }
 
 func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID string, parts *turnPartAccumulator) (store.TurnStatus, string) {

@@ -3,7 +3,6 @@ import { memo, useEffect, useLayoutEffect, useMemo } from "react";
 
 import { PhaseDot } from "@/components/PhaseDot";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { useStreamedText } from "@/hooks/useStreamedText";
 import { useI18n } from "@/i18n";
 import { isTurnPhaseActive, type TurnPhaseState } from "@/state/overlayStore";
 
@@ -88,14 +87,13 @@ function LiveAssistantOutput({
 }) {
   const { overlay, phase } = assistant;
   const streaming = overlay.status === "streaming";
-  const text = useStreamedText(overlay.text, streaming);
-  const revealingText = text.length < overlay.text.length;
+  const text = overlay.text;
   const hasThoughtPart = overlay.parts.some((part) => part.type === "thought");
   const hasToolPart = overlay.parts.some((part) => part.type === "tool");
   const activePhaseName: TurnPhaseState["phase"] | undefined =
     phase && isTurnPhaseActive(phase)
       ? phase.phase
-      : streaming || revealingText
+      : streaming
         ? overlay.text
           ? "streaming_text"
           : hasThoughtPart
@@ -161,15 +159,17 @@ function LiveAssistantOutput({
 }
 
 function AssistantPhaseItem({ phase }: { phase: TurnPhaseState }) {
-  const { t } = useI18n();
-  const elapsed = useElapsedDuration(phase.updatedAt);
+  const { locale, t } = useI18n();
+  const elapsed = useElapsedDuration(phase.updatedAt, locale);
   return (
-    <div className="flex h-6 w-full items-center gap-2 text-xs text-muted-foreground">
-      <span className="flex h-6 w-2.5 items-center justify-center">
+    <div className="grid h-6 w-full grid-cols-[0.75rem_auto] items-center gap-1 text-xs text-muted-foreground">
+      <span className="relative z-[1] inline-flex h-6 w-3 shrink-0 items-center justify-center opacity-90">
         <PhaseDot phase={phase.phase} />
       </span>
-      <span className="text-muted-foreground/70">{phaseLabel(phase.phase, t)}</span>
-      {elapsed ? <span className="text-muted-foreground/50">{elapsed}</span> : null}
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className="shrink-0 text-muted-foreground/70">{phaseLabel(phase.phase, t)}</span>
+        {elapsed ? <span className="shrink-0 text-muted-foreground/50">{elapsed}</span> : null}
+      </span>
     </div>
   );
 }

@@ -116,20 +116,20 @@ func TestSubmitHappyPath(t *testing.T) {
 		t.Fatalf("completed event not linked to assistant message")
 	}
 
-	// hub 侧应能看到 delta(不带 seq)与两条 lifecycle
-	deltas := 0
+	// hub 侧应能看到 delta(不带 seq)与两条 lifecycle;连续小 chunk 可被合并。
+	deltaText := ""
 	timeout := time.After(time.Second)
-	for deltas < 3 {
+	for deltaText != "你好,世界" {
 		select {
 		case ev := <-sub:
 			if ev.Kind == event.TurnDelta {
 				if ev.Seq != 0 {
 					t.Fatalf("delta must not carry seq: %+v", ev)
 				}
-				deltas++
+				deltaText += ev.Delta
 			}
 		case <-timeout:
-			t.Fatalf("saw only %d deltas", deltas)
+			t.Fatalf("saw delta text %q", deltaText)
 		}
 	}
 }

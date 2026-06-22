@@ -219,7 +219,7 @@ function ThoughtPart({
   text: string;
   onOpenChange?: (open: boolean) => void;
 }) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -235,9 +235,9 @@ function ThoughtPart({
       open={open}
       onToggle={(event) => onOpenChange?.(event.currentTarget.open)}
     >
-      {open ? <span aria-hidden="true" className="pointer-events-none absolute top-6 bottom-0 left-[5px] border-l border-border" /> : null}
-      <summary className="inline-grid h-6 cursor-default list-none grid-cols-[0.625rem_auto] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden">
-        <span className="relative z-[1] inline-flex h-6 w-2.5 shrink-0 items-center justify-center opacity-90">
+      {open ? <span aria-hidden="true" className="pointer-events-none absolute top-6 bottom-0 left-[6px] border-l border-border" /> : null}
+      <summary className="inline-grid h-6 cursor-default list-none grid-cols-[0.75rem_auto] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden">
+        <span className="relative z-[1] inline-flex h-6 w-3 shrink-0 items-center justify-center opacity-90">
           <PhaseDot active={active} phase="thinking" size="md" />
         </span>
         <span className="flex min-w-0 flex-1 items-center gap-1">
@@ -247,14 +247,16 @@ function ThoughtPart({
           </span>
         </span>
       </summary>
-      <div className="ml-[5px] py-1 pl-2">
-        <div
-          ref={bodyRef}
-          className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words pr-2 text-[12px] leading-6 text-muted-foreground italic"
-        >
-          {text}
+      {open ? (
+        <div className="ml-[5px] py-1 pl-2">
+          <div
+            ref={bodyRef}
+            className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words pr-2 text-[12px] leading-6 text-muted-foreground italic"
+          >
+            {text}
+          </div>
         </div>
-      </div>
+      ) : null}
     </details>
   );
 }
@@ -268,13 +270,13 @@ function ToolUsePart({
   part: Extract<TurnPartVM, { type: "tool_use" }>;
   onOpenChange?: (open: boolean) => void;
 }) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const args = formatToolArgs(part.argsText || part.args);
   const result = formatToolResult(part.resultContent);
   const liveResult = result || (part.phase === "ok" || part.phase === "error" ? formatToolResult(part.summary) : null);
   const baseTitle = toolDisplayName(part.name || part.resultName, t("transcript.tool"), t);
   const active = part.active || part.phase === "streaming_args" || part.phase === "running";
-  const elapsed = useElapsedDuration(active && part.phase === "running" ? part.phaseUpdatedAt : undefined);
+  const elapsed = useElapsedDuration(active && part.phase === "running" ? part.phaseUpdatedAt : undefined, locale);
   const title = toolTitle(part, liveResult, baseTitle, elapsed, t);
   const copyText = toolCopyText(part, args, liveResult, baseTitle, t);
   return (
@@ -283,9 +285,9 @@ function ToolUsePart({
       open={open}
       onToggle={(event) => onOpenChange?.(event.currentTarget.open)}
     >
-      {open ? <span aria-hidden="true" className="pointer-events-none absolute top-6 bottom-0 left-[5px] border-l border-border" /> : null}
-      <summary className="inline-grid h-6 cursor-default list-none grid-cols-[0.625rem_auto] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden">
-        <span className="relative z-[1] inline-flex h-6 w-2.5 shrink-0 items-center justify-center opacity-90">
+      {open ? <span aria-hidden="true" className="pointer-events-none absolute top-6 bottom-0 left-[6px] border-l border-border" /> : null}
+      <summary className="inline-grid h-6 cursor-default list-none grid-cols-[0.75rem_auto] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden">
+        <span className="relative z-[1] inline-flex h-6 w-3 shrink-0 items-center justify-center opacity-90">
           <PhaseDot active={active} phase={part.dotPhase || toolPhaseDot(part.phase)} size="md" />
         </span>
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
@@ -336,7 +338,7 @@ function MarkdownBody({ text }: { text: string }) {
         return label ? <span>{label}</span> : null;
       }
       return (
-        <a href={src} target="_blank" rel="noreferrer noopener">
+        <a className="markdown-image-link" href={src} target="_blank" rel="noreferrer noopener">
           {label}
         </a>
       );

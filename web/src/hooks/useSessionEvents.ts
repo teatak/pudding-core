@@ -102,7 +102,11 @@ function openSessionEventSource({
   source.addEventListener("input.updated", handleMessage);
   source.addEventListener("session.titled", handleMessage);
   source.addEventListener("ping", handleMessage);
-  return source;
+  return {
+    close: () => {
+      source.close();
+    },
+  };
 }
 
 function syncTerminalTurn(queryClient: QueryClient, token: string, sessionID: string, turnID: string) {
@@ -118,10 +122,6 @@ function syncTerminalTurn(queryClient: QueryClient, token: string, sessionID: st
 function syncSessionListFromEvent(queryClient: QueryClient, event: SessionEvent) {
   if (event.kind === "turn.started") {
     patchSessionInList(queryClient, event.sessionID, { lastActivityAt: new Date().toISOString(), running: true });
-    return;
-  }
-  if (event.kind === "turn.delta") {
-    patchSessionInList(queryClient, event.sessionID, { running: true });
     return;
   }
   if (isTurnTerminalEvent(event)) {
