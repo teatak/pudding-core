@@ -1,23 +1,25 @@
-import { useVirtualizer } from "@tanstack/react-virtual";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 
 import { TranscriptTurn } from "./TranscriptTurn";
 import type { TranscriptTurnVM, TurnDisclosureState } from "./types";
 
-const ESTIMATED_TURN_HEIGHT = 180;
 const HISTORY_LOAD_SCROLL_TOP_PX = 120;
 const LIST_PADDING_BOTTOM_PX = 32;
 const LIST_PADDING_TOP_PX = 16;
 const TURN_GAP_PX = 16;
-const TURN_OVERSCAN = 6;
 const SCROLL_END_THRESHOLD_PX = 8;
 const ANCHOR_RESTORE_EPSILON_PX = 0.75;
 const BOTTOM_STICK_STABILIZE_FRAMES = 4;
 const CONTENT_STICK_STABILIZE_FRAMES = 8;
+const VIEWPORT_ANCHOR_MAX_TOP_RATIO = 0.7;
+const VIEWPORT_ANCHOR_MIN_TOP_RATIO = 0.3;
+const VIEWPORT_ANCHOR_TARGET_RATIO = 0.5;
 
 type HistoryLoadState = "idle" | "loading" | "settling";
 type DisclosureOpenState = { openedAtLatest: boolean; userScrollSeq: number };
-type ViewportAnchor = { top: number; turnID: string };
+type ResizeAnchor = { anchorID: string; top: number; topRatio: number };
+type HistoryAnchor = { top: number; turnID: string };
+type CapturedAnchor<T> = T & { element: HTMLElement };
 
 export const TranscriptList = memo(function TranscriptList({
   disclosure,
@@ -49,40 +51,17 @@ export const TranscriptList = memo(function TranscriptList({
   turns: TranscriptTurnVM[];
 }) {
   const autoStickRef = useRef(true);
-  const isAtLatestRef = useRef(true);
+  const disclosureOpenStateRef = useRef(new Map<string, DisclosureOpenState>());
   const initialScrollSessionRef = useRef("");
+  const isAtLatestRef = useRef(true);
+  const lastScrollTopRef = useRef(0);
+  const listElementRef = useRef<HTMLDivElement | null>(null);
+  const programmaticScrollIgnoreUntilRef = useRef(0);
   const stickRafRef = useRef<number | null>(null);
   const stickRunRef = useRef(0);
-  const lastScrollTopRef = useRef(0);
-  const programmaticScrollIgnoreUntilRef = useRef(0);
   const userScrollSeqRef = useRef(0);
-  const viewportAnchorRef = useRef<ViewportAnchor | null>(null);
-  const disclosureOpenStateRef = useRef(new Map<string, DisclosureOpenState>());
-  const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
-  const virtualizer = useVirtualizer({
-    anchorTo: "end",
-    count: turns.length,
-    directDomUpdates: true,
-    estimateSize: (index) => estimateTurnHeight(turns[index]),
-    followOnAppend: true,
-    gap: TURN_GAP_PX,
-    getItemKey: (index) => turns[index]?.key || index,
-    getScrollElement: () => scrollElement,
-    overscan: TURN_OVERSCAN,
-    paddingEnd: LIST_PADDING_BOTTOM_PX,
-    paddingStart: LIST_PADDING_TOP_PX,
-    scrollEndThreshold: SCROLL_END_THRESHOLD_PX,
-    useAnimationFrameWithResizeObserver: true,
-  });
-  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = disableVirtualizerSizeAdjustment;
-  const virtualItems = virtualizer.getVirtualItems();
-  const setVirtualizerContainer = useCallback(
-    (node: HTMLDivElement | null) => {
-      virtualizer.containerRef(node);
-      setListElement((current) => (current === node ? current : node));
-    },
-    [virtualizer],
-  );
+  const resizeAnchorRef = useRef<ResizeAnchor | null>(null);
+  const viewportResizeSettleTimerRef = useRef<number | null>(null);
 
   const setLatestState = useCallback(
     (next: boolean) => {
@@ -103,36 +82,76 @@ export const TranscriptList = memo(function TranscriptList({
     }
   }, []);
 
+  const releaseViewportResizeAnchor = useCallback(() => {
+    resizeAnchorRef.current = null;
+    if (viewportResizeSettleTimerRef.current !== null) {
+      window.clearTimeout(viewportResizeSettleTimerRef.current);
+      viewportResizeSettleTimerRef.current = null;
+    }
+  }, []);
+
+  const holdViewportResizeAnchor = useCallback(() => {
+    if (!scrollElement) {
+      return null;
+    }
+    const anchor = resizeAnchorRef.current ?? captureResizeAnchor(scrollElement);
+    resizeAnchorRef.current = anchor;
+    if (viewportResizeSettleTimerRef.current !== null) {
+      window.clearTimeout(viewportResizeSettleTimerRef.current);
+    }
+    viewportResizeSettleTimerRef.current = window.setTimeout(() => {
+      resizeAnchorRef.current = null;
+      viewportResizeSettleTimerRef.current = null;
+    }, 240);
+    return anchor;
+  }, [scrollElement]);
+
   const disableAutoStick = useCallback(() => {
     autoStickRef.current = false;
-    viewportAnchorRef.current = captureViewportAnchor(scrollElement);
     cancelScheduledStick();
-  }, [cancelScheduledStick, scrollElement]);
-
-  const updatePinned = useCallback(() => {
-    if (!scrollElement) {
-      return;
-    }
-    if (distanceFromBottom(scrollElement) <= SCROLL_END_THRESHOLD_PX) {
-      autoStickRef.current = true;
-      viewportAnchorRef.current = null;
-      setLatestState(true);
-    }
-  }, [scrollElement, setLatestState]);
+  }, [cancelScheduledStick]);
 
   const scrollToLatest = useCallback(() => {
     if (!scrollElement) {
       return;
     }
+    releaseViewportResizeAnchor();
     if (distanceFromBottom(scrollElement) > ANCHOR_RESTORE_EPSILON_PX) {
-      virtualizer.scrollToEnd();
       scrollElement.scrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
+      markProgrammaticScroll(programmaticScrollIgnoreUntilRef);
     }
     lastScrollTopRef.current = scrollElement.scrollTop;
     autoStickRef.current = true;
-    viewportAnchorRef.current = null;
     setLatestState(true);
-  }, [scrollElement, setLatestState, virtualizer]);
+  }, [releaseViewportResizeAnchor, scrollElement, setLatestState]);
+
+  const stickToLatestIfPinned = useCallback(
+    (frames = 1) => {
+      if (!autoStickRef.current) {
+        return;
+      }
+      const run = stickRunRef.current + 1;
+      stickRunRef.current = run;
+      if (stickRafRef.current !== null) {
+        window.cancelAnimationFrame(stickRafRef.current);
+        stickRafRef.current = null;
+      }
+      let remaining = frames;
+      const tick = () => {
+        stickRafRef.current = null;
+        if (!autoStickRef.current || stickRunRef.current !== run) {
+          return;
+        }
+        scrollToLatest();
+        remaining -= 1;
+        if (remaining > 0) {
+          stickRafRef.current = window.requestAnimationFrame(tick);
+        }
+      };
+      tick();
+    },
+    [scrollToLatest],
+  );
 
   const settleAfterDisclosureClose = useCallback(
     (shouldRestoreLatest: boolean) => {
@@ -143,7 +162,6 @@ export const TranscriptList = memo(function TranscriptList({
         }
         if (distanceFromBottom(scrollElement) <= SCROLL_END_THRESHOLD_PX) {
           autoStickRef.current = true;
-          viewportAnchorRef.current = null;
           setLatestState(true);
           lastScrollTopRef.current = scrollElement.scrollTop;
           return;
@@ -157,7 +175,6 @@ export const TranscriptList = memo(function TranscriptList({
           return;
         }
         autoStickRef.current = false;
-        viewportAnchorRef.current = captureViewportAnchor(scrollElement);
         setLatestState(false);
       };
       window.requestAnimationFrame(tick);
@@ -192,12 +209,7 @@ export const TranscriptList = memo(function TranscriptList({
       const userScrolledDuringDisclosure = openState ? userScrollSeqRef.current !== openState.userScrollSeq : false;
       settleAfterDisclosureClose(currentlyAtLatest || (Boolean(openState?.openedAtLatest) && !userScrolledDuringDisclosure));
     },
-    [
-      disableAutoStick,
-      disclosure,
-      scrollElement,
-      settleAfterDisclosureClose,
-    ],
+    [disableAutoStick, disclosure, scrollElement, settleAfterDisclosureClose],
   );
 
   const listDisclosure = useMemo<TurnDisclosureState | undefined>(() => {
@@ -210,38 +222,10 @@ export const TranscriptList = memo(function TranscriptList({
     };
   }, [disclosure, handleDisclosureOpenChange]);
 
-  const stickToLatestIfPinned = useCallback(
-    (frames = 1) => {
-      if (!autoStickRef.current) {
-        return;
-      }
-      const run = stickRunRef.current + 1;
-      stickRunRef.current = run;
-      if (stickRafRef.current !== null) {
-        window.cancelAnimationFrame(stickRafRef.current);
-        stickRafRef.current = null;
-      }
-      let remaining = frames;
-      const tick = () => {
-        stickRafRef.current = null;
-        if (!autoStickRef.current || stickRunRef.current !== run) {
-          return;
-        }
-        scrollToLatest();
-        remaining -= 1;
-        if (remaining > 0) {
-          stickRafRef.current = window.requestAnimationFrame(tick);
-        }
-      };
-      tick();
-    },
-    [scrollToLatest],
-  );
-
   const loadHistory = useCallback(async () => {
-    const anchor = captureViewportAnchor(scrollElement);
+    const anchor = captureHistoryViewportAnchor(scrollElement);
     const result = await onLoadHistory();
-    restoreViewportAnchorOverFrames(scrollElement, anchor);
+    restoreHistoryAnchorOverFrames(scrollElement, anchor, () => markProgrammaticScroll(programmaticScrollIgnoreUntilRef));
     return result;
   }, [onLoadHistory, scrollElement]);
 
@@ -258,16 +242,31 @@ export const TranscriptList = memo(function TranscriptList({
     stickToLatestIfPinned(CONTENT_STICK_STABILIZE_FRAMES);
   }, [stickToLatestIfPinned]);
 
+  const restoreResizeAnchorIfDetached = useCallback((anchorOverride?: ResizeAnchor | null) => {
+    if (!scrollElement || autoStickRef.current) {
+      return;
+    }
+    const anchor = anchorOverride ?? resizeAnchorRef.current ?? captureResizeAnchor(scrollElement);
+    resizeAnchorRef.current = anchor;
+    restoreResizeAnchorOverFrames(scrollElement, anchor, () => markProgrammaticScroll(programmaticScrollIgnoreUntilRef), "ratio");
+  }, [scrollElement]);
+
   const handleContentResize = useCallback(() => {
     if (autoStickRef.current) {
       stickToLatestIfPinned(CONTENT_STICK_STABILIZE_FRAMES);
       return;
     }
-    viewportAnchorRef.current = captureViewportAnchor(scrollElement);
+    if (resizeAnchorRef.current) {
+      restoreResizeAnchorIfDetached(resizeAnchorRef.current);
+      return;
+    }
+    if (performance.now() < programmaticScrollIgnoreUntilRef.current) {
+      return;
+    }
     if (scrollElement && distanceFromBottom(scrollElement) > SCROLL_END_THRESHOLD_PX) {
       setLatestState(false);
     }
-  }, [scrollElement, setLatestState, stickToLatestIfPinned]);
+  }, [restoreResizeAnchorIfDetached, scrollElement, setLatestState, stickToLatestIfPinned]);
 
   useEffect(() => {
     if (!scrollElement) {
@@ -303,29 +302,31 @@ export const TranscriptList = memo(function TranscriptList({
       const movingDown = nextScrollTop > previousScrollTop + 1;
       const nearTop = nextScrollTop < HISTORY_LOAD_SCROLL_TOP_PX;
       const bottomDistance = distanceFromBottom(node);
-      lastScrollTopRef.current = nextScrollTop;
       const isProgrammaticScroll = performance.now() < programmaticScrollIgnoreUntilRef.current;
-      if (!autoStickRef.current) {
-        viewportAnchorRef.current = captureViewportAnchor(node);
+      lastScrollTopRef.current = nextScrollTop;
+
+      if (!autoStickRef.current && !isProgrammaticScroll && (movingUp || movingDown)) {
+        releaseViewportResizeAnchor();
       }
       if (!autoStickRef.current && !isProgrammaticScroll && (movingUp || movingDown)) {
         userScrollSeqRef.current += 1;
       }
-      if (movingUp || nearTop) {
-        historyLoader.request();
-        disableAutoStick();
-      }
-      if (bottomDistance <= SCROLL_END_THRESHOLD_PX && (movingDown || autoStickRef.current)) {
-        autoStickRef.current = true;
-        viewportAnchorRef.current = null;
-        setLatestState(true);
-      } else if ((movingUp || nearTop) && bottomDistance > SCROLL_END_THRESHOLD_PX) {
+      if (!isProgrammaticScroll && movingUp) {
+      historyLoader.request();
+      disableAutoStick();
+    }
+    if (bottomDistance <= SCROLL_END_THRESHOLD_PX && (movingDown || autoStickRef.current)) {
+      releaseViewportResizeAnchor();
+      autoStickRef.current = true;
+      setLatestState(true);
+    } else if ((movingUp || nearTop) && bottomDistance > SCROLL_END_THRESHOLD_PX) {
         setLatestState(false);
       }
       historyLoader.check();
     };
     const onWheel = (event: WheelEvent) => {
       if (event.deltaY !== 0) {
+        releaseViewportResizeAnchor();
         userScrollSeqRef.current += 1;
       }
       if (event.deltaY < 0) {
@@ -334,116 +335,101 @@ export const TranscriptList = memo(function TranscriptList({
       }
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (isEditableTarget(event.target)) {
-        return;
-      }
-      if (isDisclosureToggleTarget(event.target)) {
+      if (isEditableTarget(event.target) || isDisclosureToggleTarget(event.target)) {
         return;
       }
       if (event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home") {
+        releaseViewportResizeAnchor();
         userScrollSeqRef.current += 1;
         disableAutoStick();
         historyLoader.request();
       } else if (event.key === "ArrowDown" || event.key === "PageDown" || event.key === "End" || event.key === " ") {
+        releaseViewportResizeAnchor();
         userScrollSeqRef.current += 1;
       }
     };
     node.addEventListener("scroll", onScroll, { passive: true });
     node.addEventListener("wheel", onWheel, { passive: true });
     window.addEventListener("keydown", onKeyDown);
-    updatePinned();
+    if (distanceFromBottom(node) <= SCROLL_END_THRESHOLD_PX) {
+      autoStickRef.current = true;
+      setLatestState(true);
+    }
     return () => {
       node.removeEventListener("scroll", onScroll);
       node.removeEventListener("wheel", onWheel);
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [disableAutoStick, historyLoader.check, historyLoader.request, scrollElement, setLatestState, updatePinned]);
+  }, [disableAutoStick, historyLoader.check, historyLoader.request, releaseViewportResizeAnchor, scrollElement, setLatestState]);
 
   useEffect(() => {
-    if (!scrollElement) {
-      return;
-    }
-    const stick = () => {
+    const handleViewportResize = () => {
       if (autoStickRef.current) {
         stickToLatestIfPinned(BOTTOM_STICK_STABILIZE_FRAMES);
+        return;
       }
+      restoreResizeAnchorIfDetached(holdViewportResizeAnchor());
     };
-    const observer = new ResizeObserver(stick);
-    observer.observe(scrollElement);
-    window.addEventListener("resize", stick);
+    const observer = new ResizeObserver(handleViewportResize);
+    if (scrollElement) {
+      observer.observe(scrollElement);
+    }
+    window.addEventListener("resize", handleViewportResize);
     return () => {
       observer.disconnect();
-      window.removeEventListener("resize", stick);
+      window.removeEventListener("resize", handleViewportResize);
     };
-  }, [scrollElement, stickToLatestIfPinned]);
+  }, [holdViewportResizeAnchor, restoreResizeAnchorIfDetached, scrollElement, stickToLatestIfPinned]);
 
   useEffect(() => {
-    if (!listElement) {
+    const node = listElementRef.current;
+    if (!node) {
       return;
     }
     const observer = new ResizeObserver(() => {
       handleContentResize();
     });
-    observer.observe(listElement);
+    observer.observe(node);
     return () => observer.disconnect();
-  }, [handleContentResize, listElement]);
+  }, [handleContentResize]);
 
   useEffect(() => {
     historyLoader.reset();
     disclosureOpenStateRef.current.clear();
+    releaseViewportResizeAnchor();
     autoStickRef.current = true;
-    viewportAnchorRef.current = null;
     setLatestState(true);
-  }, [historyLoader.reset, sessionID, setLatestState]);
-
-  useLayoutEffect(() => {
-    if (!scrollElement || autoStickRef.current) {
-      return;
-    }
-    const anchor = viewportAnchorRef.current ?? captureViewportAnchor(scrollElement);
-    viewportAnchorRef.current = anchor;
-    restoreViewportAnchorOverFrames(scrollElement, anchor, () => {
-      programmaticScrollIgnoreUntilRef.current = performance.now() + 120;
-    });
-  }, [scrollElement, turns]);
+  }, [historyLoader.reset, releaseViewportResizeAnchor, sessionID, setLatestState]);
 
   useEffect(() => {
     return () => {
       cancelScheduledStick();
-      virtualizer.shouldAdjustScrollPositionOnItemSizeChange = undefined;
+      releaseViewportResizeAnchor();
     };
-  }, [cancelScheduledStick, virtualizer]);
+  }, [cancelScheduledStick, releaseViewportResizeAnchor]);
 
   if (turns.length === 0) {
     return null;
   }
 
   return (
-    <div ref={setVirtualizerContainer} className="relative min-w-0">
-      {virtualItems.map((virtualItem) => {
-        const turn = turns[virtualItem.index];
-        if (!turn) {
-          return null;
-        }
-        return (
-          <div
-            key={virtualItem.key}
-            ref={virtualizer.measureElement}
-            className="absolute top-0 left-0 w-full min-w-0"
-            data-index={virtualItem.index}
-          >
-            <TranscriptTurn
-              disclosure={listDisclosure}
-              onAssistantContentGrow={handleAssistantContentGrow}
-              onAssistantRevealComplete={onAssistantRevealComplete}
-              onQueuedCancel={onQueuedCancel}
-              onQueuedEditStart={onQueuedEditStart}
-              onQueuedSave={onQueuedSave}
-              turn={turn}
-            />
-          </div>
-        );
-      })}
+    <div
+      ref={listElementRef}
+      className="grid min-w-0"
+      style={{ gap: TURN_GAP_PX, paddingBottom: LIST_PADDING_BOTTOM_PX, paddingTop: LIST_PADDING_TOP_PX }}
+    >
+      {turns.map((turn) => (
+        <TranscriptTurn
+          key={turn.key}
+          disclosure={listDisclosure}
+          onAssistantContentGrow={handleAssistantContentGrow}
+          onAssistantRevealComplete={onAssistantRevealComplete}
+          onQueuedCancel={onQueuedCancel}
+          onQueuedEditStart={onQueuedEditStart}
+          onQueuedSave={onQueuedSave}
+          turn={turn}
+        />
+      ))}
     </div>
   );
 });
@@ -511,6 +497,9 @@ function useHistoryLoadController({
 
   const request = useCallback(
     ({ force = false }: { force?: boolean } = {}) => {
+      if (stateRef.current !== "idle") {
+        return;
+      }
       pendingMoreRef.current = true;
       pendingForceRef.current ||= force;
       pump();
@@ -527,25 +516,12 @@ function useHistoryLoadController({
   return useMemo(() => ({ check, request, reset }), [check, request, reset]);
 }
 
-function estimateTurnHeight(turn: TranscriptTurnVM | undefined) {
-  if (!turn) {
-    return ESTIMATED_TURN_HEIGHT;
-  }
-  if (turn.user && !turn.assistant) {
-    return 96;
-  }
-  if (!turn.assistant) {
-    return 140;
-  }
-  return 220;
-}
-
 function distanceFromBottom(node: HTMLElement) {
   return Math.max(0, node.scrollHeight - node.clientHeight - node.scrollTop);
 }
 
-function disableVirtualizerSizeAdjustment() {
-  return false;
+function markProgrammaticScroll(ref: { current: number }) {
+  ref.current = performance.now() + 120;
 }
 
 function waitForScrollSettle(getScrollElement: () => HTMLElement | null) {
@@ -584,15 +560,46 @@ function waitForScrollSettle(getScrollElement: () => HTMLElement | null) {
   });
 }
 
-function captureViewportAnchor(node: HTMLElement | null): ViewportAnchor | null {
+function captureResizeAnchor(node: HTMLElement | null): ResizeAnchor | null {
   if (!node) {
     return null;
   }
+  return captureBestVisibleAnchor(node, "[data-transcript-ai-anchor]", (element) => {
+    const anchorID = element.dataset.transcriptAiAnchor;
+    if (!anchorID) {
+      return null;
+    }
+    return { anchorID };
+  });
+}
+
+function captureHistoryViewportAnchor(node: HTMLElement | null): HistoryAnchor | null {
+  if (!node) {
+    return null;
+  }
+  return captureBestVisibleAnchor(
+    node,
+    "[data-transcript-turn-id]",
+    (element) => {
+      const turnID = element.dataset.transcriptTurnId;
+      return turnID ? { turnID } : null;
+    },
+    0,
+  );
+}
+
+function captureBestVisibleAnchor<T extends object>(
+  node: HTMLElement,
+  selector: string,
+  getIDs: (element: HTMLElement) => T | null,
+  targetTopOverride?: number,
+): CapturedAnchor<T & { top: number; topRatio: number }> | null {
   const viewportRect = node.getBoundingClientRect();
-  let best: { element: HTMLElement; top: number } | null = null;
-  for (const element of Array.from(node.querySelectorAll<HTMLElement>("[data-transcript-turn-id]"))) {
-    const turnID = element.dataset.transcriptTurnId;
-    if (!turnID) {
+  const targetTop = targetTopOverride ?? viewportAnchorTargetTop(viewportRect.height);
+  let best: { element: HTMLElement; ids: T; top: number } | null = null;
+  for (const element of Array.from(node.querySelectorAll<HTMLElement>(selector))) {
+    const ids = getIDs(element);
+    if (!ids) {
       continue;
     }
     const rect = element.getBoundingClientRect();
@@ -600,24 +607,39 @@ function captureViewportAnchor(node: HTMLElement | null): ViewportAnchor | null 
       continue;
     }
     const top = rect.top - viewportRect.top;
-    if (!best || Math.abs(top) < Math.abs(best.top)) {
-      best = { element, top };
+    if (!best || Math.abs(top - targetTop) < Math.abs(best.top - targetTop)) {
+      best = { element, ids, top };
     }
   }
   if (!best) {
     return null;
   }
-  const turnID = best.element.dataset.transcriptTurnId;
-  return turnID ? { top: best.top, turnID } : null;
+  return {
+    ...best.ids,
+    element: best.element,
+    top: best.top,
+    topRatio: viewportRect.height > 0 ? best.top / viewportRect.height : VIEWPORT_ANCHOR_TARGET_RATIO,
+  };
 }
 
-function restoreViewportAnchorOverFrames(node: HTMLElement | null, anchor: ViewportAnchor | null, beforeScroll?: () => void) {
+function viewportAnchorTargetTop(viewportHeight: number) {
+  const minTop = Math.max(0, viewportHeight * VIEWPORT_ANCHOR_MIN_TOP_RATIO);
+  const maxTop = Math.max(minTop, viewportHeight * VIEWPORT_ANCHOR_MAX_TOP_RATIO);
+  return Math.min(Math.max(viewportHeight * VIEWPORT_ANCHOR_TARGET_RATIO, minTop), maxTop);
+}
+
+function restoreResizeAnchorOverFrames(
+  node: HTMLElement | null,
+  anchor: ResizeAnchor | null,
+  beforeScroll?: () => void,
+  restoreMode: "saved" | "ratio" = "saved",
+) {
   if (!node || !anchor) {
     return;
   }
   let remaining = 8;
   const tick = () => {
-    restoreViewportAnchor(node, anchor, beforeScroll);
+    restoreResizeAnchor(node, anchor, beforeScroll, restoreMode);
     remaining -= 1;
     if (remaining > 0) {
       window.requestAnimationFrame(tick);
@@ -626,7 +648,44 @@ function restoreViewportAnchorOverFrames(node: HTMLElement | null, anchor: Viewp
   window.requestAnimationFrame(tick);
 }
 
-function restoreViewportAnchor(node: HTMLElement, anchor: ViewportAnchor, beforeScroll?: () => void) {
+function restoreResizeAnchor(
+  node: HTMLElement,
+  anchor: ResizeAnchor,
+  beforeScroll?: () => void,
+  restoreMode: "saved" | "ratio" = "saved",
+) {
+  const element = findResizeAnchorElement(node, anchor);
+  if (!element) {
+    return false;
+  }
+  const viewportRect = node.getBoundingClientRect();
+  const top = element.getBoundingClientRect().top - viewportRect.top;
+  const targetTop = restoreMode === "ratio" ? viewportRect.height * anchor.topRatio : anchor.top;
+  const delta = top - targetTop;
+  if (Math.abs(delta) < ANCHOR_RESTORE_EPSILON_PX) {
+    return false;
+  }
+  beforeScroll?.();
+  node.scrollTop += delta;
+  return true;
+}
+
+function restoreHistoryAnchorOverFrames(node: HTMLElement | null, anchor: HistoryAnchor | null, beforeScroll?: () => void) {
+  if (!node || !anchor) {
+    return;
+  }
+  let remaining = 8;
+  const tick = () => {
+    restoreHistoryAnchor(node, anchor, beforeScroll);
+    remaining -= 1;
+    if (remaining > 0) {
+      window.requestAnimationFrame(tick);
+    }
+  };
+  window.requestAnimationFrame(tick);
+}
+
+function restoreHistoryAnchor(node: HTMLElement, anchor: HistoryAnchor, beforeScroll?: () => void) {
   const element = node.querySelector<HTMLElement>(`[data-transcript-turn-id="${CSS.escape(anchor.turnID)}"]`);
   if (!element) {
     return false;
@@ -640,6 +699,13 @@ function restoreViewportAnchor(node: HTMLElement, anchor: ViewportAnchor, before
   beforeScroll?.();
   node.scrollTop += delta;
   return true;
+}
+
+function findResizeAnchorElement(node: HTMLElement, anchor: ResizeAnchor) {
+  if (!anchor.anchorID) {
+    return null;
+  }
+  return node.querySelector<HTMLElement>(`[data-transcript-ai-anchor="${CSS.escape(anchor.anchorID)}"]`);
 }
 
 function isEditableTarget(target: EventTarget | null) {

@@ -21,22 +21,25 @@ function TranscriptTurnView({
   onQueuedSave?: (clientMessageID: string, text: string) => Promise<unknown>;
   turn: TranscriptTurnVM;
 }) {
+  const anchorTurnID = turn.turnID || turn.key;
   return (
-    <div className="grid min-w-0 gap-4" data-transcript-turn-id={turn.turnID}>
+    <div className="grid min-w-0 gap-4" data-transcript-turn-id={anchorTurnID}>
       {turn.user ? (
-        <UserInput
-          user={turn.user}
-          onQueuedCancel={onQueuedCancel}
-          onQueuedEditStart={onQueuedEditStart}
-          onQueuedSave={onQueuedSave}
-        />
+        <div>
+          <UserInput
+            user={turn.user}
+            onQueuedCancel={onQueuedCancel}
+            onQueuedEditStart={onQueuedEditStart}
+            onQueuedSave={onQueuedSave}
+          />
+        </div>
       ) : null}
       {turn.assistant ? (
-        <div className="min-w-0">
+        <div className="min-w-0" data-transcript-ai-anchor={anchorTurnID}>
           <AssistantOutput
             assistant={turn.assistant}
             disclosure={disclosure}
-            turnID={turn.turnID || turn.key}
+            turnID={anchorTurnID}
             onContentGrow={onAssistantContentGrow}
             onRevealComplete={onAssistantRevealComplete}
           />
