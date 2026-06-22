@@ -1,4 +1,4 @@
-export type SettingsSectionID = "dialogue" | "model" | "appearance" | "about";
+export type SettingsSectionID = "dialogue" | "model" | "tools" | "appearance" | "about";
 
 export type SettingsDialogOpenDetail = {
   section?: SettingsSectionID;

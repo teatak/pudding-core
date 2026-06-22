@@ -1,7 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Copy,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  Globe2,
   Info,
+  Loader2,
   MessageSquareText,
   Palette,
   Pencil,
@@ -14,12 +19,17 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 
 import {
   deleteProvider,
+  getWebTools,
+  listBuiltinTools,
   listProviders,
   listSessions,
+  patchWebTools,
+  type BuiltinTool,
   type ProviderProfile,
   type Session,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -49,6 +59,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import { Input } from "@/components/ui/input";
 import {
   Sidebar,
   SidebarContent,
@@ -77,6 +88,7 @@ import {
   getOrderedProviderPresets,
   type ProviderPreset,
 } from "@/provider/presets";
+import { toast } from "sonner";
 
 const SETTINGS_SECTIONS: Array<{
   id: SettingsSectionID;
@@ -85,6 +97,7 @@ const SETTINGS_SECTIONS: Array<{
 }> = [
   { id: "dialogue", icon: MessageSquareText, labelKey: "settings.section.dialogue" },
   { id: "model", icon: Sparkles, labelKey: "settings.section.model" },
+  { id: "tools", icon: Globe2, labelKey: "settings.section.tools" },
   { id: "appearance", icon: Palette, labelKey: "settings.section.appearance" },
   { id: "about", icon: Info, labelKey: "settings.section.about" },
 ];
@@ -138,6 +151,7 @@ export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProp
             </header>
             <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 pt-0">
               {active === "model" ? <ProviderSettings createNonce={createProviderNonce} token={token} /> : null}
+              {active === "tools" ? <ToolsSettings token={token} /> : null}
             </div>
           </main>
         </SidebarProvider>
@@ -191,6 +205,205 @@ function SettingsSidebar({
         </SidebarGroup>
       </SidebarContent>
     </Sidebar>
+  );
+}
+
+function ToolsSettings({ token }: { token: string }) {
+  const queryClient = useQueryClient();
+  const { t } = useI18n();
+  const [apiKey, setAPIKey] = useState("");
+  const [visible, setVisible] = useState(false);
+  const builtinToolsQuery = useQuery({
+    queryKey: queryKeys.builtinTools(),
+    queryFn: () => listBuiltinTools(token),
+    enabled: Boolean(token),
+    staleTime: Infinity,
+  });
+  const toolsQuery = useQuery({
+    queryKey: queryKeys.webTools(),
+    queryFn: () => getWebTools(token),
+    enabled: Boolean(token),
+  });
+  const tavily = toolsQuery.data?.providers.find((provider) => provider.name === "tavily");
+
+  useEffect(() => {
+    if (toolsQuery.isSuccess) {
+      setAPIKey(tavily?.apiKey || "");
+    }
+  }, [tavily?.apiKey, toolsQuery.isSuccess]);
+
+  const mutation = useMutation({
+    mutationFn: (nextAPIKey: string) =>
+      patchWebTools(token, {
+        fetchProvider: nextAPIKey.trim() ? "tavily" : "",
+        providers: { tavily: { apiKey: nextAPIKey } },
+        searchProvider: nextAPIKey.trim() ? "tavily" : "",
+      }),
+    onSuccess: async (_data, nextAPIKey) => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.webTools() });
+      toast.success(nextAPIKey.trim() ? t("settings.tools.web.saved") : t("settings.tools.web.cleared"));
+    },
+    onError: () => toast.error(t("settings.tools.web.saveFailed")),
+  });
+
+  const savedAPIKey = tavily?.apiKey || "";
+  const dirty = apiKey.trim() !== savedAPIKey.trim();
+  const configured = Boolean(tavily?.apiKeySet);
+  const loadingTools = toolsQuery.isLoading;
+  const saving = mutation.isPending;
+
+  return (
+    <div className="@container mx-auto grid w-full max-w-6xl gap-5">
+      <BuiltinToolsPanel
+        loading={builtinToolsQuery.isFetching}
+        error={builtinToolsQuery.isError}
+        tools={builtinToolsQuery.data?.tools || []}
+        onRetry={() => void builtinToolsQuery.refetch()}
+      />
+      <SettingsPanel
+        action={
+          <span
+            className={cn(
+              "rounded-md px-2 py-0.5 text-xs",
+              configured ? "bg-success/15 text-success" : "bg-warning/15 text-warning",
+            )}
+          >
+            {configured ? t("provider.keySet") : t("provider.keyMissing")}
+          </span>
+        }
+        title={t("settings.tools.web.title")}
+      >
+        <div className="grid gap-4">
+          <div className="grid gap-1">
+            <p className="text-sm leading-6 text-muted-foreground">{t("settings.tools.web.desc")}</p>
+            <a
+              className="inline-flex w-fit items-center gap-1 text-sm text-foreground underline-offset-4 hover:underline"
+              href={t("settings.tools.web.signupLink")}
+              rel="noreferrer"
+              target="_blank"
+            >
+              {t("settings.tools.web.signup")}
+              <ExternalLink className="size-3.5" />
+            </a>
+          </div>
+
+          {toolsQuery.isError ? (
+            <Alert variant="destructive">
+              <AlertDescription className="grid gap-2">
+                <span>{t("settings.tools.web.loadFailed")}</span>
+                <Button size="sm" type="button" variant="outline" onClick={() => void toolsQuery.refetch()}>
+                  {t("common.refresh")}
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
+          <div className="flex flex-col gap-2">
+            <label className="text-sm" htmlFor="pudding-tavily-api-key">
+              {t("settings.tools.web.apiKey")}
+            </label>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <div className="relative min-w-0 flex-1">
+                <Input
+                  autoComplete="off"
+                  className="pr-9"
+                  disabled={loadingTools}
+                  id="pudding-tavily-api-key"
+                  name="pudding-tavily-api-key"
+                  type={visible ? "text" : "password"}
+                  value={apiKey}
+                  onChange={(event) => setAPIKey(event.target.value)}
+                />
+                <button
+                  aria-label={visible ? t("provider.hideAPIKey") : t("provider.showAPIKey")}
+                  className="absolute inset-y-0 right-1 my-auto flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+                  type="button"
+                  onClick={() => setVisible((value) => !value)}
+                >
+                  {visible ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <Button disabled={saving || loadingTools || !dirty} type="button" onClick={() => mutation.mutate(apiKey.trim())}>
+                  {mutation.isPending ? <Loader2 className="animate-spin" /> : null}
+                  {t("common.save")}
+                </Button>
+                <Button disabled={saving || loadingTools || !configured} type="button" variant="outline" onClick={() => mutation.mutate("")}>
+                  {t("common.clear")}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </SettingsPanel>
+    </div>
+  );
+}
+
+function BuiltinToolsPanel({
+  error,
+  loading,
+  onRetry,
+  tools,
+}: {
+  error: boolean;
+  loading: boolean;
+  onRetry: () => void;
+  tools: BuiltinTool[];
+}) {
+  const { t } = useI18n();
+
+  return (
+    <Accordion className="overflow-hidden rounded-xl border bg-card shadow-sm" collapsible type="single">
+      <AccordionItem className="border-b-0" value="builtin-tools">
+        <AccordionTrigger className="h-14 items-center rounded-none border-0 px-4 py-0 text-sm font-normal hover:no-underline focus-visible:ring-0">
+          <span>{`${t("settings.tools.builtin.title")} (${tools.length})`}</span>
+          {loading ? <Loader2 className="mr-2 size-4 animate-spin text-muted-foreground" /> : null}
+        </AccordionTrigger>
+        <AccordionContent className="p-0">
+          {error ? (
+            <div className="border-t p-4">
+              <Alert variant="destructive">
+                <AlertDescription className="grid gap-2">
+                  <span>{t("settings.tools.builtin.loadFailed")}</span>
+                  <Button size="sm" type="button" variant="outline" onClick={onRetry}>
+                    {t("common.refresh")}
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            </div>
+          ) : (
+            <ToolList tools={tools} />
+          )}
+        </AccordionContent>
+      </AccordionItem>
+    </Accordion>
+  );
+}
+
+function ToolList({ tools }: { tools: BuiltinTool[] }) {
+  const { t } = useI18n();
+  if (tools.length === 0) {
+    return <div className="border-t px-4 py-3 text-sm text-muted-foreground">{t("settings.tools.builtin.empty")}</div>;
+  }
+  return (
+    <div className="divide-y divide-border/70 border-t">
+      {tools.map((tool) => (
+        <ToolRow key={tool.id} tool={tool} />
+      ))}
+    </div>
+  );
+}
+
+function ToolRow({ tool }: { tool: BuiltinTool }) {
+  const { t } = useI18n();
+  return (
+    <div className="grid gap-1 px-4 py-3">
+      <div className="break-all font-mono text-xs text-foreground">{tool.id}</div>
+      <div className="line-clamp-2 text-xs leading-5 text-muted-foreground">
+        {tool.description || t("settings.tools.builtin.noDescription")}
+      </div>
+    </div>
   );
 }
 
@@ -455,15 +668,15 @@ function SettingsPanel({
 }: {
   action?: ReactNode;
   children: ReactNode;
-  title: string;
+  title: ReactNode;
 }) {
   return (
     <section className="overflow-hidden rounded-xl border bg-card shadow-sm">
-      <div className="pudding-settings-panel-header flex min-h-11 items-center justify-between gap-3 border-b px-4 py-2">
+      <div className="pudding-settings-panel-header flex h-14 items-center justify-between gap-3 border-b px-4">
         <h3 className="text-sm font-normal">{title}</h3>
         {action}
       </div>
-      <div className="grid gap-3 p-4">{children}</div>
+      {children ? <div className="grid gap-3 p-4">{children}</div> : null}
     </section>
   );
 }

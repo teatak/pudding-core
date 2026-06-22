@@ -219,8 +219,10 @@ Provider 路由:
   (OpenAI 官方走 openai-responses;OpenRouter 与本机 Ollama 都是 openai-compatible,
   但是两个 profile)。
 - profile 是实体(有身份与生命周期),不进 SQLite:直接落
-  `<home>/config/profiles.yaml` + 独立 REST 资源。settings 只放标量偏好
-  (`system_prompt`),磁盘事实源是 `<home>/config/settings.yaml`。
+  `<home>/config/profiles.yaml` + 独立 REST 资源。用户补充提示词读取
+  `<home>/pudding.md`,不从 settings.yaml 读取 `system_prompt`。
+- web tools 配置不进 SQLite,直接落 `<home>/config/web.yaml` + 独立 REST
+  资源。Tavily API key 属于本机配置,设置页编辑时可回显。
 - 不设 profile 级默认模型字段:模型名只在所属 profile 下有意义,profile 内也没有
   默认模型语义。
 - engine 不持有单一 client,改持 **ProviderRegistry**:按 profile 名解析并缓存
@@ -427,11 +429,13 @@ home 内容(第一阶段):
 
 ```text
 <home>/
+  pudding.md      # user prompt supplement, optional
   data/
     pudding.db    # SQLite(含 WAL/SHM)
   config/
-    settings.yaml # system_prompt
+    settings.yaml # scalar preferences
     profiles.yaml # provider profiles + model metadata
+    web.yaml      # web tool providers, e.g. Tavily API key
   daemon.token    # 启动 token
   logs/
 ```

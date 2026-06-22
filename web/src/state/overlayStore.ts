@@ -33,6 +33,8 @@ export type AssistantOverlayPart =
       argsText: string;
       phase?: "streaming_args" | "running" | "ok" | "error";
       summary?: string;
+      summaryKind?: string;
+      summaryCount?: number;
     };
 
 export type TurnPhase =
@@ -178,6 +180,8 @@ function upsertToolPart(
     name: event.name || current.name,
     phase: event.phase || current.phase,
     summary: event.summary || current.summary,
+    summaryKind: event.summaryKind || current.summaryKind,
+    summaryCount: event.summaryCount ?? current.summaryCount,
     argsText: current.argsText + (event.argsDelta || ""),
   };
   if (index < 0) {

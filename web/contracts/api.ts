@@ -98,6 +98,8 @@ export const contentPart = z.discriminatedUnion("type", [
     name: z.string().optional(),
     ok: z.boolean().optional(),
     content: z.string().optional(),
+    summaryKind: z.string().optional(),
+    summaryCount: z.number().optional(),
   }),
 ]);
 export type ContentPart = z.infer<typeof contentPart>;
@@ -181,6 +183,42 @@ export const patchQueuedInputRequest = z.object({
   status: z.enum(["queued", "editing", "cancelled"]).optional(),
 });
 export const settingsResponse = z.object({ settings: z.record(z.string(), z.string()) });
+
+export const builtinTool = z.object({
+  id: z.string(),
+  description: z.string(),
+  inputSchema: z.unknown().optional(),
+});
+export type BuiltinTool = z.infer<typeof builtinTool>;
+
+export const listBuiltinToolsResponse = z.object({ tools: z.array(builtinTool) });
+
+export const webToolProvider = z.object({
+  name: z.string(),
+  apiKey: z.string().optional(),
+  apiKeySet: z.boolean(),
+});
+export type WebToolProvider = z.infer<typeof webToolProvider>;
+
+export const webToolsConfig = z.object({
+  searchProvider: z.string().optional(),
+  fetchProvider: z.string().optional(),
+  providers: z.array(webToolProvider),
+});
+export type WebToolsConfig = z.infer<typeof webToolsConfig>;
+
+export const patchWebToolsRequest = z.object({
+  searchProvider: z.string().optional(),
+  fetchProvider: z.string().optional(),
+  providers: z
+    .record(
+      z.string(),
+      z.object({
+        apiKey: z.string().optional(),
+      }),
+    )
+    .optional(),
+});
 
 // 409 响应体:submit → turn_running;cancel → no_running_turn;
 // POST /providers 重名 → profile_exists

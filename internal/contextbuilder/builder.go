@@ -6,23 +6,25 @@ package contextbuilder
 import (
 	"context"
 
+	"github.com/teatak/pudding-core/internal/prompt"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-const defaultSystemPrompt = "You are Pudding, a helpful local-first assistant."
-
 type Builder struct {
-	store    store.Store
-	settings SettingsSource
+	store   store.Store
+	prompts PromptSource
 }
 
-type SettingsSource interface {
-	Settings(ctx context.Context) (map[string]string, error)
+type PromptSource interface {
+	Prompt(ctx context.Context) (prompt.Output, error)
 }
 
-func New(s store.Store, settings SettingsSource) *Builder {
-	return &Builder{store: s, settings: settings}
+func New(s store.Store, prompts PromptSource) *Builder {
+	if prompts == nil {
+		prompts = staticPrompt{}
+	}
+	return &Builder{store: s, prompts: prompts}
 }
 
 // Build 在 user message 已落库之后调用,因此 current input 已包含在
@@ -32,17 +34,13 @@ func (b *Builder) Build(ctx context.Context, sessionID, model string) (provider.
 	if err != nil {
 		return provider.Request{}, err
 	}
-	settings, err := b.settings.Settings(ctx)
+	system, err := b.prompts.Prompt(ctx)
 	if err != nil {
 		return provider.Request{}, err
 	}
-	system := settings[store.SettingSystemPrompt]
-	if system == "" {
-		system = defaultSystemPrompt
-	}
 	req := provider.Request{
 		Model:    model,
-		System:   system,
+		System:   system.SystemInstruction,
 		Messages: make([]provider.Message, 0, len(msgs)),
 	}
 	var assistantParts []provider.Part
@@ -77,6 +75,12 @@ func (b *Builder) Build(ctx context.Context, sessionID, model string) (provider.
 	}
 	flushAssistant()
 	return req, nil
+}
+
+type staticPrompt struct{}
+
+func (staticPrompt) Prompt(context.Context) (prompt.Output, error) {
+	return prompt.Assemble(prompt.Input{}), nil
 }
 
 func providerParts(parts []store.ContentPart) []provider.Part {

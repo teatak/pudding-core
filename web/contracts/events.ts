@@ -30,6 +30,8 @@ export const turnToolEvent = z.object({
   phase: z.enum(["streaming_args", "running", "ok", "error"]),
   argsDelta: z.string().optional(),
   summary: z.string().optional(),
+  summaryKind: z.string().optional(),
+  summaryCount: z.number().optional(),
 });
 
 export const turnCompletedEvent = z.object({

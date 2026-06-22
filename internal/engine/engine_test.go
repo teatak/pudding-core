@@ -192,7 +192,7 @@ func TestSubmitRunsToolLoop(t *testing.T) {
 			Description: "Get time",
 			InputSchema: json.RawMessage(`{"type":"object"}`),
 		}},
-		result: tool.Result{Ok: true, Content: `{"iso":"2026-06-21T12:00:00+08:00"}`},
+		result: tool.Result{Ok: true, Content: `{"iso":"2026-06-21T12:00:00+08:00"}`, SummaryKind: tool.SummaryReturnedFields, SummaryCount: 1},
 	}
 	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithTools(runner))
 	ctx := context.Background()
@@ -243,7 +243,7 @@ func TestSubmitRunsToolLoop(t *testing.T) {
 		t.Fatalf("tool_result should be tool message: %+v", msgs[2])
 	}
 	parts := msgs[2].Parts
-	if len(parts) != 1 || parts[0].Type != store.ContentPartToolResult || parts[0].Name != tool.TimeGetCurrent || !parts[0].Ok || parts[0].Content == "" {
+	if len(parts) != 1 || parts[0].Type != store.ContentPartToolResult || parts[0].Name != tool.TimeGetCurrent || !parts[0].Ok || parts[0].Content == "" || parts[0].SummaryKind != tool.SummaryReturnedFields || parts[0].SummaryCount != 1 {
 		t.Fatalf("tool_result part wrong: %+v", parts)
 	}
 }

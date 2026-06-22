@@ -1,4 +1,5 @@
 import {
+  listBuiltinToolsResponse,
   conflictResponse,
   listModelsResponse,
   createProviderRequest,
@@ -10,12 +11,15 @@ import {
   message,
   patchQueuedInputRequest,
   patchProviderRequest,
+  patchWebToolsRequest,
   providerProfile,
   queuedInput,
   session,
   settingsResponse,
   submitResponse,
   conversationTurn,
+  webToolsConfig,
+  type BuiltinTool,
   type ContentPart,
   type Message,
   type ConversationTurn,
@@ -23,6 +27,7 @@ import {
   type ProviderProfile,
   type QueuedInput,
   type Session,
+  type WebToolsConfig,
 } from "@/contracts/api";
 import { z } from "zod";
 
@@ -205,10 +210,28 @@ export function getSettings(token: string): Promise<{ settings: Record<string, s
   return request(token, "/settings", settingsResponse);
 }
 
+export function listBuiltinTools(token: string): Promise<{ tools: BuiltinTool[] }> {
+  return request(token, "/tools/builtin", listBuiltinToolsResponse);
+}
+
 export async function putSettings(token: string, settings: Record<string, string>): Promise<void> {
   await request(token, "/settings", z.null(), {
     method: "PUT",
     body: JSON.stringify(settings),
+  });
+}
+
+export function getWebTools(token: string): Promise<WebToolsConfig> {
+  return request(token, "/tools/web", webToolsConfig);
+}
+
+export function patchWebTools(
+  token: string,
+  body: z.infer<typeof patchWebToolsRequest>,
+): Promise<WebToolsConfig> {
+  return request(token, "/tools/web", webToolsConfig, {
+    method: "PATCH",
+    body: JSON.stringify(patchWebToolsRequest.parse(body)),
   });
 }
 
@@ -243,5 +266,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { ContentPart, Message, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session };
+export type { BuiltinTool, ContentPart, Message, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, WebToolsConfig };
 export { createProviderRequest, patchProviderRequest };

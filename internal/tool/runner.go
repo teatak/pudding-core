@@ -17,11 +17,21 @@ type Call struct {
 }
 
 type Result struct {
-	CallID  string
-	Name    string
-	Ok      bool
-	Content string
+	CallID       string
+	Name         string
+	Ok           bool
+	Content      string
+	SummaryKind  string
+	SummaryCount int
 }
+
+const (
+	SummaryReturnedFields = "returned_fields"
+	SummaryReturnedItems  = "returned_items"
+	SummaryReadChars      = "read_chars"
+	SummaryReadFiles      = "read_files"
+	SummaryChangedLines   = "changed_lines"
+)
 
 type Runner interface {
 	Definitions(ctx context.Context, sessionID string) ([]provider.ToolDef, error)

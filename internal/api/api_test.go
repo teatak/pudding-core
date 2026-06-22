@@ -12,12 +12,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/tool"
 )
 
 const testToken = "test-token"
@@ -30,6 +32,20 @@ func newTestServer(t *testing.T) (*httptest.Server, store.Store) {
 	srv := httptest.NewServer(New(eng, ms, ms, hub).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 	return srv, ms
+}
+
+func newConfigTestServer(t *testing.T) (*httptest.Server, store.Store, *config.Manager) {
+	t.Helper()
+	ms := memstore.New()
+	cfg := config.NewManager(t.TempDir())
+	if err := cfg.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好", "世界"}), mock.WithDelay(5*time.Millisecond))), cfg)
+	srv := httptest.NewServer(New(eng, ms, cfg, hub).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+	return srv, ms, cfg
 }
 
 func req(t *testing.T, method, url string, body any) *http.Response {
@@ -50,6 +66,71 @@ func req(t *testing.T, method, url string, body any) *http.Response {
 		t.Fatal(err)
 	}
 	return resp
+}
+
+func TestBuiltinToolsAPI(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	resp := req(t, http.MethodGet, srv.URL+"/tools/builtin", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	got := decodeJSON[map[string][]map[string]any](t, resp)
+	tools := got["tools"]
+	if len(tools) != 3 {
+		t.Fatalf("unexpected builtin tools: %+v", got)
+	}
+	if tools[0]["id"] != tool.TimeGetCurrent {
+		t.Fatalf("unexpected builtin tool id: %+v", tools[0])
+	}
+	if tools[0]["description"] == "" || tools[0]["inputSchema"] == nil {
+		t.Fatalf("builtin tool should include description and input schema: %+v", tools[0])
+	}
+}
+
+func TestWebToolsAPI(t *testing.T) {
+	srv, _, cfg := newConfigTestServer(t)
+
+	resp := req(t, http.MethodGet, srv.URL+"/tools/web", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	got := decodeJSON[config.WebToolsView](t, resp)
+	if got.SearchProvider != "" || got.FetchProvider != "" || len(got.Providers) != 1 {
+		t.Fatalf("unexpected initial web tools: %+v", got)
+	}
+	if got.Providers[0].Name != "tavily" || got.Providers[0].APIKeySet {
+		t.Fatalf("unexpected initial tavily provider: %+v", got.Providers[0])
+	}
+
+	resp = req(t, http.MethodPatch, srv.URL+"/tools/web", map[string]any{
+		"providers": map[string]any{
+			"tavily": map[string]string{"apiKey": "tvly-http-secret"},
+		},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	got = decodeJSON[config.WebToolsView](t, resp)
+	if got.SearchProvider != "tavily" || got.FetchProvider != "tavily" {
+		t.Fatalf("patch should enable tavily providers: %+v", got)
+	}
+	if got.Providers[0].APIKey != "tvly-http-secret" || !got.Providers[0].APIKeySet {
+		t.Fatalf("patch should return editable key and status: %+v", got.Providers[0])
+	}
+	stored, ok, err := cfg.TavilyAPIKey(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || stored != "tvly-http-secret" {
+		t.Fatalf("unexpected stored tavily api key: %q %v", stored, ok)
+	}
+
+	resp = req(t, http.MethodPatch, srv.URL+"/tools/web", map[string]any{"searchProvider": "unsupported"})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unsupported web provider must 400, got %d", resp.StatusCode)
+	}
 }
 
 func decodeJSON[T any](t *testing.T, resp *http.Response) T {

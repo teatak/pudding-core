@@ -68,6 +68,8 @@
     --primary-foreground: oklch(0.962 0.018 272.314);
     --primary-hover: color-mix(in oklch, var(--primary), black 8%);
     --primary-active: color-mix(in oklch, var(--primary), black 14%);
+    --markdown-link: oklch(0.5 0.2 258);
+    --markdown-link-hover: color-mix(in oklch, var(--markdown-link), var(--foreground) 16%);
     --secondary: oklch(0.967 0.001 286.375);
     --secondary-foreground: oklch(0.2 0 0);
     --secondary-hover: color-mix(in oklch, var(--secondary), var(--foreground) 5%);
@@ -208,6 +210,8 @@ html[data-shell] .pudding-markdown * {
     --primary-foreground: oklch(0.962 0.018 272.314);
     --primary-hover: color-mix(in oklch, var(--primary), white 8%);
     --primary-active: color-mix(in oklch, var(--primary), black 8%);
+    --markdown-link: oklch(0.74 0.17 255);
+    --markdown-link-hover: oklch(0.82 0.13 250);
     --secondary: oklch(0.335 0.006 286.033);
     --secondary-foreground: oklch(0.96 0 0);
     --secondary-hover: color-mix(in oklch, var(--secondary), var(--foreground) 5%);
@@ -342,10 +346,18 @@ html[data-shell] .pudding-markdown * {
 
 .pudding-rail-toggle [data-slot="button"]:is(:hover, :focus-visible),
 .pudding-canvas-toggle [data-slot="button"]:is(:hover, :focus-visible),
-.pudding-session-rail [data-slot="sidebar-footer"] :where([data-slot="button"], [data-slot="dropdown-menu-trigger"]):is(:hover, :focus-visible, [aria-expanded="true"], [data-state="open"]) {
+.pudding-session-rail [data-slot="sidebar-footer"] :where([data-slot="button"], [data-slot="dropdown-menu-trigger"]):is(:hover, [aria-expanded="true"], [data-state="open"]) {
     background-color: var(--accent);
     color: var(--foreground);
     font-weight: 400;
+}
+
+.pudding-session-rail [data-slot="sidebar-footer"] :where([data-slot="button"], [data-slot="dropdown-menu-trigger"]):focus-visible {
+    --tw-ring-shadow: 0 0 #0000;
+    --tw-ring-offset-shadow: 0 0 #0000;
+    border-color: transparent;
+    box-shadow: none;
+    outline: none;
 }
 
 .pudding-chat-title-action {
@@ -669,7 +681,21 @@ html[data-shell] .pudding-markdown * {
 }
 
 .pudding-markdown a {
-  @apply text-primary underline underline-offset-4;
+  color: var(--markdown-link);
+  text-decoration-line: underline;
+  text-decoration-color: color-mix(in oklch, var(--markdown-link), transparent 24%);
+  text-underline-offset: 4px;
+  text-decoration-thickness: 1px;
+}
+
+.pudding-markdown a:hover {
+  color: var(--markdown-link-hover);
+  text-decoration-color: currentColor;
+}
+
+.pudding-markdown a:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--markdown-link), transparent 30%);
+  outline-offset: 2px;
 }
 
 .pudding-markdown blockquote {

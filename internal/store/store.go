@@ -190,13 +190,45 @@ const (
 )
 
 type ContentPart struct {
-	Type    ContentPartType `json:"type"`
-	Text    string          `json:"text,omitempty"`
-	CallID  string          `json:"id,omitempty"`
-	Name    string          `json:"name,omitempty"`
-	Args    json.RawMessage `json:"args,omitempty"`
-	Ok      bool            `json:"ok,omitempty"`
-	Content string          `json:"content,omitempty"`
+	Type         ContentPartType `json:"type"`
+	Text         string          `json:"text,omitempty"`
+	CallID       string          `json:"id,omitempty"`
+	Name         string          `json:"name,omitempty"`
+	Args         json.RawMessage `json:"args,omitempty"`
+	Ok           bool            `json:"ok,omitempty"`
+	Content      string          `json:"content,omitempty"`
+	SummaryKind  string          `json:"summaryKind,omitempty"`
+	SummaryCount int             `json:"summaryCount,omitempty"`
+}
+
+func (p ContentPart) MarshalJSON() ([]byte, error) {
+	type contentPartJSON struct {
+		Type         ContentPartType `json:"type"`
+		Text         string          `json:"text,omitempty"`
+		CallID       string          `json:"id,omitempty"`
+		Name         string          `json:"name,omitempty"`
+		Args         json.RawMessage `json:"args,omitempty"`
+		Ok           *bool           `json:"ok,omitempty"`
+		Content      string          `json:"content,omitempty"`
+		SummaryKind  string          `json:"summaryKind,omitempty"`
+		SummaryCount *int            `json:"summaryCount,omitempty"`
+	}
+	out := contentPartJSON{
+		Type:    p.Type,
+		Text:    p.Text,
+		CallID:  p.CallID,
+		Name:    p.Name,
+		Args:    p.Args,
+		Content: p.Content,
+	}
+	if p.Type == ContentPartToolResult {
+		out.Ok = &p.Ok
+		out.SummaryKind = p.SummaryKind
+		if p.SummaryKind != "" {
+			out.SummaryCount = &p.SummaryCount
+		}
+	}
+	return json.Marshal(out)
 }
 
 type Message struct {
@@ -286,6 +318,7 @@ func NormalizeContentParts(parts []ContentPart) []ContentPart {
 			}
 			part.CallID, part.Name, part.Args, part.Content = "", "", nil, ""
 			part.Ok = false
+			part.SummaryKind, part.SummaryCount = "", 0
 		case ContentPartToolUse:
 			if part.CallID == "" && part.Name == "" && len(part.Args) == 0 {
 				continue
@@ -295,6 +328,7 @@ func NormalizeContentParts(parts []ContentPart) []ContentPart {
 			}
 			part.Text, part.Content = "", ""
 			part.Ok = false
+			part.SummaryKind, part.SummaryCount = "", 0
 		case ContentPartToolResult:
 			if part.CallID == "" && part.Content == "" {
 				continue

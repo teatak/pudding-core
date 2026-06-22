@@ -64,9 +64,20 @@ export type TurnPartVM =
       resultName?: string;
       resultOk?: boolean;
       summary?: string;
+      summaryCount?: number;
+      summaryKind?: string;
       type: "tool_use";
     }
-  | { content?: string; id?: string; key?: string; name?: string; ok?: boolean; type: "tool_result" };
+  | {
+      content?: string;
+      id?: string;
+      key?: string;
+      name?: string;
+      ok?: boolean;
+      summaryCount?: number;
+      summaryKind?: string;
+      type: "tool_result";
+    };
 
 export function textFromContentParts(parts: ContentPart[]) {
   return parts

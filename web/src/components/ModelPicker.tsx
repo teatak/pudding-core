@@ -125,7 +125,14 @@ export function ModelPicker({ token, session, value, onChange, onResolvedChange,
           </span>
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" alignOffset={-16} className="w-80 p-2" side="top" sideOffset={8}>
+      <PopoverContent
+        align="start"
+        alignOffset={-16}
+        className="w-80 p-2"
+        side="top"
+        sideOffset={8}
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
         {providersQuery.isLoading ? (
           <div className="px-2.5 py-1.5 text-xs text-muted-foreground">{t("common.loading")}</div>
         ) : !hasAvailableModels ? (

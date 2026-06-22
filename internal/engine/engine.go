@@ -85,6 +85,12 @@ func WithTools(runner tool.Runner) Option {
 	}
 }
 
+func WithPromptSource(source contextbuilder.PromptSource) Option {
+	return func(e *Engine) {
+		e.builder = contextbuilder.New(e.store, source)
+	}
+}
+
 func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opts ...Option) *Engine {
 	if cfg == nil {
 		cfg = emptyConfig{}
@@ -95,7 +101,7 @@ func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opt
 		config:    cfg,
 		hub:       hub,
 		resolver:  resolver,
-		builder:   contextbuilder.New(s, cfg),
+		builder:   contextbuilder.New(s, nil),
 		auxCtx:    auxCtx,
 		auxCancel: auxCancel,
 		running:   make(map[string]context.CancelFunc),
@@ -681,28 +687,20 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			phase = "error"
 		}
 		e.hub.Publish(event.Event{
-			SessionID: sessionID,
-			Kind:      event.TurnTool,
-			TurnID:    turnID,
-			CallID:    result.CallID,
-			Name:      result.Name,
-			Phase:     phase,
-			Summary:   summarizeToolResult(result.Content),
+			SessionID:    sessionID,
+			Kind:         event.TurnTool,
+			TurnID:       turnID,
+			CallID:       result.CallID,
+			Name:         result.Name,
+			Phase:        phase,
+			SummaryKind:  result.SummaryKind,
+			SummaryCount: result.SummaryCount,
 		})
 		if ctx.Err() != nil {
 			return store.TurnCancelled, ""
 		}
 	}
 	return store.TurnRunning, ""
-}
-
-func summarizeToolResult(content string) string {
-	content = strings.TrimSpace(content)
-	runes := []rune(content)
-	if len(runes) <= 240 {
-		return content
-	}
-	return string(runes[:240]) + "..."
 }
 
 type turnPartAccumulator struct {
@@ -792,11 +790,13 @@ func (a *turnPartAccumulator) AppendToolResult(result tool.Result) {
 		return
 	}
 	a.parts = append(a.parts, store.ContentPart{
-		Type:    store.ContentPartToolResult,
-		CallID:  result.CallID,
-		Name:    result.Name,
-		Ok:      result.Ok,
-		Content: result.Content,
+		Type:         store.ContentPartToolResult,
+		CallID:       result.CallID,
+		Name:         result.Name,
+		Ok:           result.Ok,
+		Content:      result.Content,
+		SummaryKind:  result.SummaryKind,
+		SummaryCount: result.SummaryCount,
 	})
 }
 

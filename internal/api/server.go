@@ -32,7 +32,7 @@ func New(eng *engine.Engine, s store.Store, cfg engine.ConfigSource, hub *event.
 }
 
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
-var apiPrefixes = []string{"/sessions", "/settings", "/providers"}
+var apiPrefixes = []string{"/sessions", "/settings", "/providers", "/tools"}
 
 // Handler 返回根 handler:API 前缀走 token 鉴权 + cart 路由,
 // 其余路径 serve 静态 web UI(HTML/JS 非敏感,数据全在 API 后面;
@@ -56,6 +56,8 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/providers").GET(s.listProviders).POST(s.createProvider)
 	app.Route("/providers/:name").GET(s.getProvider).PATCH(s.patchProvider).DELETE(s.deleteProvider)
 	app.Route("/providers/:name/models").GET(s.listProviderModels)
+	app.Route("/tools/builtin").GET(s.listBuiltinTools)
+	app.Route("/tools/web").GET(s.getWebTools).PATCH(s.patchWebTools).PUT(s.patchWebTools)
 
 	authed := withAuth(token, app)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -362,9 +364,7 @@ func (s *Server) putSettings(c *cart.Context) error {
 		return badRequest(c, "invalid json body")
 	}
 	for k := range kv {
-		if k != store.SettingSystemPrompt {
-			return badRequest(c, "unknown setting: "+k)
-		}
+		return badRequest(c, "unknown setting: "+k)
 	}
 	settings, ok := s.config.(interface {
 		SetSettings(context.Context, map[string]string) error

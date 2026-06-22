@@ -111,6 +111,8 @@ export function partsFromOverlay(
         phase: part.phase,
         phaseUpdatedAt: active ? activePhaseUpdatedAt : undefined,
         summary: part.summary,
+        summaryCount: part.summaryCount,
+        summaryKind: part.summaryKind,
       };
     }),
     ...partsFromText(streamedText),
@@ -144,7 +146,15 @@ function partFromContentPart(part: ContentPart): TurnPartVM {
     case "tool_use":
       return { type: "tool_use", args: part.args, id: part.id, name: part.name };
     case "tool_result":
-      return { type: "tool_result", content: part.content, id: part.id, name: part.name, ok: part.ok };
+      return {
+        type: "tool_result",
+        content: part.content,
+        id: part.id,
+        name: part.name,
+        ok: part.ok,
+        summaryCount: part.summaryCount,
+        summaryKind: part.summaryKind,
+      };
   }
 }
 
@@ -168,6 +178,8 @@ function mergeToolParts(parts: TurnPartVM[]): TurnPartVM[] {
           resultContent: part.content,
           resultName: part.name,
           resultOk: part.ok,
+          summaryCount: part.summaryCount,
+          summaryKind: part.summaryKind,
         };
       } else {
         out.push({
@@ -177,6 +189,8 @@ function mergeToolParts(parts: TurnPartVM[]): TurnPartVM[] {
           resultContent: part.content,
           resultName: part.name,
           resultOk: part.ok,
+          summaryCount: part.summaryCount,
+          summaryKind: part.summaryKind,
         });
       }
       continue;
@@ -327,10 +341,12 @@ function ToolUsePart({
   const { handleSummaryClick, handleSummaryKeyDown, handleToggle, open } = useLocalDisclosure(defaultOpen, onOpenChange);
   const args = formatToolArgs(part.argsText || part.args);
   const result = formatToolResult(part.resultContent);
-  const liveResult = result || (part.phase === "ok" || part.phase === "error" ? formatToolResult(part.summary) : null);
+  const liveResult = result;
   const baseTitle = toolDisplayName(part.name || part.resultName, t("transcript.tool"), t);
   const active = part.active || part.phase === "streaming_args" || part.phase === "running";
   const elapsed = useElapsedDuration(active && part.phase === "running" ? part.phaseUpdatedAt : undefined, locale);
+  const failed = toolFailed(part);
+  const dotPhase = part.dotPhase || (failed ? "error" : toolPhaseDot(part.phase));
   const title = toolTitle(part, liveResult, baseTitle, elapsed, t);
   const copyText = toolCopyText(part, args, liveResult, baseTitle, t);
   return (
@@ -346,7 +362,7 @@ function ToolUsePart({
         onKeyDown={handleSummaryKeyDown}
       >
         <span className="relative z-[1] inline-flex h-6 w-3 shrink-0 items-center justify-center opacity-90">
-          <PhaseDot active={active} phase={part.dotPhase || toolPhaseDot(part.phase)} size="md" />
+          <PhaseDot active={active} phase={dotPhase} size="md" />
         </span>
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="shrink-0 truncate">{title.label}</span>
@@ -385,7 +401,7 @@ function MarkdownBody({ text }: { text: string }) {
   const components: Components = {
     a({ children, href, node: _node, ...props }) {
       return (
-        <a {...props} href={href} target="_blank" rel="noreferrer noopener">
+        <a {...props} href={href} target="_blank" rel="noreferrer noopener" onClick={handleMarkdownLinkClick}>
           {children}
         </a>
       );
@@ -396,7 +412,7 @@ function MarkdownBody({ text }: { text: string }) {
         return label ? <span>{label}</span> : null;
       }
       return (
-        <a href={src} target="_blank" rel="noreferrer noopener">
+        <a href={src} target="_blank" rel="noreferrer noopener" onClick={handleMarkdownLinkClick}>
           {label}
         </a>
       );
@@ -448,6 +464,26 @@ const markdownUrlTransform: UrlTransform = (raw, key) => {
   }
   return "";
 };
+
+function handleMarkdownLinkClick(event: MouseEvent<HTMLAnchorElement>) {
+  if (event.defaultPrevented || event.button !== 0) {
+    return;
+  }
+  const href = event.currentTarget.href;
+  if (!href) {
+    return;
+  }
+  event.preventDefault();
+  openExternalURL(href);
+}
+
+function openExternalURL(url: string) {
+  void import("@wailsio/runtime")
+    .then(({ Browser }) => Browser.OpenURL(url))
+    .catch(() => {
+      window.open(url, "_blank", "noopener,noreferrer");
+    });
+}
 
 type CodeElementProps = {
   children?: ReactNode;
@@ -564,9 +600,10 @@ function formatToolResult(content: string | undefined) {
     return {
       fieldCount: fieldCount(parsed.value),
       text: JSON.stringify(parsed.value, null, 2),
+      value: parsed.value,
     };
   }
-  return { fieldCount: null, text: trimmed };
+  return { fieldCount: null, text: trimmed, value: null };
 }
 
 function parseJSON(value: string): { ok: true; value: unknown } | { ok: false } {
@@ -597,6 +634,8 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
   }
   const known: Record<string, string> = {
     builtin_time_get_current: t("transcript.toolTimeCurrent"),
+    builtin_web_fetch: t("transcript.toolWebFetch"),
+    builtin_web_search: t("transcript.toolWebSearch"),
   };
   if (known[name]) {
     return known[name];
@@ -620,22 +659,70 @@ function toolTitle(
       summary: elapsed,
     };
   }
-  if (part.resultOk === false || part.phase === "error") {
-    return { label: t("transcript.toolFailedName").replace("{name}", baseTitle), summary: "" };
+  if (toolFailed(part)) {
+    return { label: baseTitle, summary: t("transcript.toolFailed") };
   }
-  if (result?.fieldCount != null) {
-    return {
-      label: t("transcript.toolCompletedName").replace("{name}", baseTitle),
-      summary: t("transcript.toolReturnedFields").replace("{count}", String(result.fieldCount)),
-    };
+  const summary = toolProtocolSummary(part, t);
+  if (summary) {
+    return { label: baseTitle, summary };
   }
-  if (result?.text) {
-    return {
-      label: t("transcript.toolCompletedName").replace("{name}", baseTitle),
-      summary: t("transcript.toolReturnedResult"),
-    };
+  const structuralSummary = toolStructuralSummary(result, t);
+  if (structuralSummary) {
+    return { label: baseTitle, summary: structuralSummary };
   }
   return { label: baseTitle, summary: "" };
+}
+
+function toolProtocolSummary(part: Extract<TurnPartVM, { type: "tool_use" }>, t: (key: string) => string) {
+  if (!part.summaryKind) {
+    return "";
+  }
+  const count = String(part.summaryCount ?? 0);
+  switch (part.summaryKind) {
+    case "returned_fields":
+      return t("transcript.toolReturnedFields").replace("{count}", count);
+    case "returned_items":
+      return t("transcript.toolReturnedItems").replace("{count}", count);
+    case "read_chars":
+      return t("transcript.toolReadChars").replace("{count}", count);
+    case "read_files":
+      return t("transcript.toolReadFiles").replace("{count}", count);
+    case "changed_lines":
+      return t("transcript.toolChangedLines").replace("{count}", count);
+    default:
+      return "";
+  }
+}
+
+function toolFailed(part: Extract<TurnPartVM, { type: "tool_use" }>) {
+  return part.resultOk === false || part.phase === "error";
+}
+
+function toolStructuralSummary(result: ReturnType<typeof formatToolResult>, t: (key: string) => string) {
+  const value = result?.value;
+  if (Array.isArray(value)) {
+    return t("transcript.toolReturnedItems").replace("{count}", String(value.length));
+  }
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+  const recordCount = resultRecordCount(value as Record<string, unknown>);
+  if (recordCount != null) {
+    return t("transcript.toolReturnedItems").replace("{count}", String(recordCount));
+  }
+  const count = Object.keys(value).length;
+  return count > 0 ? t("transcript.toolReturnedFields").replace("{count}", String(count)) : "";
+}
+
+function resultRecordCount(value: Record<string, unknown>) {
+  const preferredKeys = ["results", "items", "records", "data", "rows", "files", "matches"];
+  for (const key of preferredKeys) {
+    if (Array.isArray(value[key])) {
+      return value[key].length;
+    }
+  }
+  const arrays = Object.values(value).filter(Array.isArray);
+  return arrays.length === 1 ? arrays[0].length : null;
 }
 
 function toolCopyText(

@@ -2,14 +2,18 @@ package contextbuilder
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/teatak/pudding-core/internal/prompt"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/memstore"
 )
 
-func TestBuildUsesSettingsSystemPrompt(t *testing.T) {
+func TestBuildUsesCoreAndUserPrompt(t *testing.T) {
 	ms := memstore.New()
 	ctx := context.Background()
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
@@ -21,25 +25,29 @@ func TestBuildUsesSettingsSystemPrompt(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	b := New(ms, ms)
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "pudding.md"), []byte("请尽量简短。"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	b := New(ms, prompt.NewLoader(home))
 
 	req, err := b.Build(ctx, "s1", "m")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if req.System != defaultSystemPrompt {
-		t.Fatalf("want default system prompt, got %q", req.System)
+	if !strings.Contains(req.System, "You are Pudding") || !strings.Contains(req.System, "请尽量简短。") {
+		t.Fatalf("unexpected system prompt: %q", req.System)
 	}
 
-	if err := ms.SetSettings(ctx, map[string]string{store.SettingSystemPrompt: "你是布丁"}); err != nil {
+	if err := ms.SetSettings(ctx, map[string]string{"system_prompt": "你是布丁"}); err != nil {
 		t.Fatal(err)
 	}
 	req, err = b.Build(ctx, "s1", "m")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if req.System != "你是布丁" {
-		t.Fatalf("want settings system prompt, got %q", req.System)
+	if strings.Contains(req.System, "你是布丁") {
+		t.Fatalf("settings system_prompt must not affect contextbuilder prompt: %q", req.System)
 	}
 	if len(req.Messages) != 1 || req.Messages[0].Text != "hi" {
 		t.Fatalf("unexpected messages: %+v", req.Messages)
@@ -69,7 +77,7 @@ func TestBuildStripsThoughtParts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req, err := New(ms, ms).Build(ctx, "s1", "m")
+	req, err := New(ms, nil).Build(ctx, "s1", "m")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +117,7 @@ func TestBuildKeepsToolParts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req, err := New(ms, ms).Build(ctx, "s1", "m")
+	req, err := New(ms, nil).Build(ctx, "s1", "m")
 	if err != nil {
 		t.Fatal(err)
 	}

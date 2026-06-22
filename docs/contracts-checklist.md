@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | `turn.started` | ✓ | ✓ | `clientMessageID`, `userMessageID` |
 | `turn.delta` | — | — | `part(text/thought)`, `delta` |
-| `turn.tool` | — | — | `callID`, `name`, `phase`, `argsDelta?`, `summary?`;最终以 message.parts 兜底 |
+| `turn.tool` | — | — | `callID`, `name`, `phase`, `argsDelta?`, `summaryKind?`, `summaryCount?`;最终以 message.parts 兜底 |
 | `turn.completed` | ✓ | ✓ | `assistantMessageID` |
 | `turn.failed` | ✓ | ✓ | `error`;有半截输出时 `assistantMessageID` + `interrupted` |
 | `turn.cancelled` | ✓ | ✓ | 有半截输出时 `assistantMessageID` + `interrupted` |
@@ -29,7 +29,7 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 | --- | --- | --- | --- |
 | Session | `store.Session` | `session` | id, title, provider, model, createdAt, updatedAt, running(读取时派生) |
 | ConversationTurn | `store.ConversationTurn` | `conversationTurn` | id, sessionID, clientMessageID, status, error?, createdAt, updatedAt, messages[] |
-| ContentPart | `store.ContentPart` | `contentPart` | type(text/thought/tool_use/tool_result), text?, id?, name?, args?, ok?, content? |
+| ContentPart | `store.ContentPart` | `contentPart` | type(text/thought/tool_use/tool_result), text?, id?, name?, args?, ok?, content?, summaryKind?, summaryCount? |
 | Message | `store.Message` | `message` | id, sessionID, turnID, role, kind?, text, parts[], turnIndex?, clientMessageID?, interrupted?, createdAt |
 | ProviderProfile(设置视图) | `api.providerProfileView` | `providerProfile` | id, displayName, protocol, baseURL, apiKey?, apiKeySet, models |
 
@@ -66,15 +66,17 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 
 ## settings 约定键
 
-> Go 侧常量:`internal/store/settings_keys.go`。改键名两边同步。
 > REST settings 仍是扁平 k=v,value 一律纯字符串;磁盘事实源是
 > `<home>/config/settings.yaml`。
 > **只放标量偏好**;provider profiles 走 `<home>/config/profiles.yaml` +
-> 独立 REST 资源,不进 settings。
+> 独立 REST 资源,web tools 配置走 `<home>/config/web.yaml` + 独立 REST
+> 资源,都不进 settings。主对话 system instruction 由 `internal/prompt`
+> 组装,用户补充提示词读取 `<home>/pudding.md`,不读取 `settings.yaml`
+> 的 `system_prompt`。
 
 | key | 用途 |
 | --- | --- |
-| `system_prompt` | system instruction,空则用内置默认值 |
+| — | 当前无主路径设置键 |
 
 session 创建时必须显式写入 `provider` 与 `model`。draft 页可记住"上次选用模型",
 但不影响既有 session。

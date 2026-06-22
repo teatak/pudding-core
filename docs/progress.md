@@ -18,7 +18,9 @@ LLM 自动标题。
 **后端**
 - store/config:SQLite 单 writer 只管 sessions/messages/turns/events;
   provider profiles 与模型元数据事实源为 `<home>/config/profiles.yaml`,
-  settings 标量事实源为 `<home>/config/settings.yaml`。
+  web tools 配置事实源为 `<home>/config/web.yaml`,settings 标量事实源为
+  `<home>/config/settings.yaml`;主对话提示词由 `internal/prompt` 组装,
+  用户补充读取 `<home>/pudding.md`。
 - engine:per-session turn 状态机(begin/finish/recover、幂等、并发 409、
   cancel 保留 partial);provider/model/effective model config 提交时刻快照进 turns。
 - provider:registry 按 YAML profile 路由 + 指纹缓存;五实现

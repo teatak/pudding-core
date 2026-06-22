@@ -17,16 +17,11 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	if err := m.SetSettings(ctx, map[string]string{
-		store.SettingSystemPrompt: "hi",
-	}); err != nil {
-		t.Fatal(err)
-	}
 	settings, err := m.Settings(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings[store.SettingSystemPrompt] != "hi" {
+	if len(settings) != 0 {
 		t.Fatalf("unexpected settings: %+v", settings)
 	}
 
@@ -63,5 +58,89 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "display_name: OpenAI") || !strings.Contains(string(b), "protocol: openai-responses") || !strings.Contains(string(b), "max_output_tokens: 8192") {
 		t.Fatalf("expected renamed provider keys in profiles.yaml:\n%s", b)
+	}
+}
+
+func TestManagerPersistsWebTools(t *testing.T) {
+	home := t.TempDir()
+	m := NewManager(home)
+	if err := m.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	initial, err := m.WebTools(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if initial.SearchProvider != "" || initial.FetchProvider != "" || len(initial.Providers) != 1 {
+		t.Fatalf("unexpected initial web tools: %+v", initial)
+	}
+	if initial.Providers[0].Name != "tavily" || initial.Providers[0].APIKeySet || initial.Providers[0].APIKey != "" {
+		t.Fatalf("unexpected initial tavily provider: %+v", initial.Providers[0])
+	}
+
+	key := "  tvly-secret  "
+	updated, err := m.PatchWebTools(ctx, WebToolsUpdate{
+		Providers: map[string]WebToolProviderUpdate{
+			"tavily": {APIKey: &key},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.SearchProvider != "tavily" || updated.FetchProvider != "tavily" {
+		t.Fatalf("saving key should enable tavily providers: %+v", updated)
+	}
+	if got := updated.Providers[0].APIKey; got != "tvly-secret" {
+		t.Fatalf("api key should be trimmed, got %q", got)
+	}
+	if ok := updated.Providers[0].APIKeySet; !ok {
+		t.Fatalf("api key should be marked configured: %+v", updated.Providers[0])
+	}
+	stored, ok, err := m.TavilyAPIKey(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || stored != "tvly-secret" {
+		t.Fatalf("unexpected tavily api key: %q %v", stored, ok)
+	}
+	webToolsPath := home + "/config/web.yaml"
+	b, err := os.ReadFile(webToolsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "api_key: tvly-secret") || !strings.Contains(string(b), "provider: tavily") {
+		t.Fatalf("expected tavily config in web.yaml:\n%s", b)
+	}
+
+	empty := ""
+	cleared, err := m.PatchWebTools(ctx, WebToolsUpdate{
+		Providers: map[string]WebToolProviderUpdate{
+			"tavily": {APIKey: &empty},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared.Providers[0].APIKeySet || cleared.Providers[0].APIKey != "" {
+		t.Fatalf("clear should remove tavily api key: %+v", cleared.Providers[0])
+	}
+	if cleared.SearchProvider != "" || cleared.FetchProvider != "" {
+		t.Fatalf("clear should disable tavily providers: %+v", cleared)
+	}
+	stored, ok, err = m.TavilyAPIKey(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok || stored != "" {
+		t.Fatalf("cleared tavily api key should be empty: %q %v", stored, ok)
+	}
+	b, err = os.ReadFile(webToolsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "tvly-secret") || strings.Contains(string(b), "api_key:") {
+		t.Fatalf("cleared web.yaml must not keep api key:\n%s", b)
 	}
 }
