@@ -1,5 +1,15 @@
 import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
-import { Children, isValidElement, useEffect, useRef, useState, type ReactNode, type ToggleEvent } from "react";
+import {
+  Children,
+  isValidElement,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+  type ToggleEvent,
+} from "react";
 import ReactMarkdown, { type Components, type UrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -210,18 +220,40 @@ function findLastOverlayPartIndex(parts: AssistantOverlayPart[], type: Assistant
 
 function useLocalDisclosure(defaultOpen: boolean, onOpenChange?: (open: boolean) => void) {
   const [open, setOpen] = useState(defaultOpen);
+  const openRef = useRef(defaultOpen);
 
   useEffect(() => {
+    openRef.current = defaultOpen;
     setOpen(defaultOpen);
   }, [defaultOpen]);
 
-  function handleToggle(event: ToggleEvent<HTMLDetailsElement>) {
-    const next = event.currentTarget.open;
-    setOpen((current) => (current === next ? current : next));
+  function setDisclosureOpen(next: boolean) {
+    if (openRef.current === next) {
+      return;
+    }
+    openRef.current = next;
+    setOpen(next);
     onOpenChange?.(next);
   }
 
-  return [open, handleToggle] as const;
+  function handleToggle(event: ToggleEvent<HTMLDetailsElement>) {
+    setDisclosureOpen(event.currentTarget.open);
+  }
+
+  function handleSummaryClick(event: MouseEvent<HTMLElement>) {
+    event.preventDefault();
+    setDisclosureOpen(!openRef.current);
+  }
+
+  function handleSummaryKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    event.preventDefault();
+    setDisclosureOpen(!openRef.current);
+  }
+
+  return { handleSummaryClick, handleSummaryKeyDown, handleToggle, open };
 }
 
 function ThoughtPart({
@@ -237,7 +269,7 @@ function ThoughtPart({
 }) {
   const { locale, t } = useI18n();
   const bodyRef = useRef<HTMLDivElement | null>(null);
-  const [open, handleToggle] = useLocalDisclosure(defaultOpen, onOpenChange);
+  const { handleSummaryClick, handleSummaryKeyDown, handleToggle, open } = useLocalDisclosure(defaultOpen, onOpenChange);
 
   useEffect(() => {
     if (!active || !open || !bodyRef.current) {
@@ -253,7 +285,11 @@ function ThoughtPart({
       onToggle={handleToggle}
     >
       {open ? <span aria-hidden="true" className="pointer-events-none absolute top-6 bottom-0 left-[6px] border-l border-border" /> : null}
-      <summary className="inline-grid h-6 cursor-default list-none grid-cols-[0.75rem_auto] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden">
+      <summary
+        className="inline-grid h-6 cursor-default list-none grid-cols-[0.75rem_auto] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden"
+        onClick={handleSummaryClick}
+        onKeyDown={handleSummaryKeyDown}
+      >
         <span className="relative z-[1] inline-flex h-6 w-3 shrink-0 items-center justify-center opacity-90">
           <PhaseDot active={active} phase="thinking" size="md" />
         </span>
@@ -288,7 +324,7 @@ function ToolUsePart({
   onOpenChange?: (open: boolean) => void;
 }) {
   const { locale, t } = useI18n();
-  const [open, handleToggle] = useLocalDisclosure(defaultOpen, onOpenChange);
+  const { handleSummaryClick, handleSummaryKeyDown, handleToggle, open } = useLocalDisclosure(defaultOpen, onOpenChange);
   const args = formatToolArgs(part.argsText || part.args);
   const result = formatToolResult(part.resultContent);
   const liveResult = result || (part.phase === "ok" || part.phase === "error" ? formatToolResult(part.summary) : null);
@@ -304,7 +340,11 @@ function ToolUsePart({
       onToggle={handleToggle}
     >
       {open ? <span aria-hidden="true" className="pointer-events-none absolute top-6 bottom-0 left-[6px] border-l border-border" /> : null}
-      <summary className="inline-grid h-6 cursor-default list-none grid-cols-[0.75rem_auto] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden">
+      <summary
+        className="inline-grid h-6 cursor-default list-none grid-cols-[0.75rem_auto] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden"
+        onClick={handleSummaryClick}
+        onKeyDown={handleSummaryKeyDown}
+      >
         <span className="relative z-[1] inline-flex h-6 w-3 shrink-0 items-center justify-center opacity-90">
           <PhaseDot active={active} phase={part.dotPhase || toolPhaseDot(part.phase)} size="md" />
         </span>

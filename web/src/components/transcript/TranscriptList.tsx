@@ -1,5 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { TranscriptTurn } from "./TranscriptTurn";
 import type { TranscriptTurnVM, TurnDisclosureState } from "./types";
@@ -11,10 +11,12 @@ const LIST_PADDING_TOP_PX = 16;
 const TURN_GAP_PX = 16;
 const TURN_OVERSCAN = 6;
 const SCROLL_END_THRESHOLD_PX = 8;
+const ANCHOR_RESTORE_EPSILON_PX = 0.75;
 const BOTTOM_STICK_STABILIZE_FRAMES = 4;
 const CONTENT_STICK_STABILIZE_FRAMES = 8;
 
 type HistoryLoadState = "idle" | "loading" | "settling";
+type DisclosureOpenState = { openedAtLatest: boolean; userScrollSeq: number };
 type ViewportAnchor = { top: number; turnID: string };
 
 export const TranscriptList = memo(function TranscriptList({
@@ -52,6 +54,10 @@ export const TranscriptList = memo(function TranscriptList({
   const stickRafRef = useRef<number | null>(null);
   const stickRunRef = useRef(0);
   const lastScrollTopRef = useRef(0);
+  const programmaticScrollIgnoreUntilRef = useRef(0);
+  const userScrollSeqRef = useRef(0);
+  const viewportAnchorRef = useRef<ViewportAnchor | null>(null);
+  const disclosureOpenStateRef = useRef(new Map<string, DisclosureOpenState>());
   const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
   const virtualizer = useVirtualizer({
     anchorTo: "end",
@@ -68,6 +74,7 @@ export const TranscriptList = memo(function TranscriptList({
     scrollEndThreshold: SCROLL_END_THRESHOLD_PX,
     useAnimationFrameWithResizeObserver: true,
   });
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = disableVirtualizerSizeAdjustment;
   const virtualItems = virtualizer.getVirtualItems();
   const setVirtualizerContainer = useCallback(
     (node: HTMLDivElement | null) => {
@@ -98,8 +105,9 @@ export const TranscriptList = memo(function TranscriptList({
 
   const disableAutoStick = useCallback(() => {
     autoStickRef.current = false;
+    viewportAnchorRef.current = captureViewportAnchor(scrollElement);
     cancelScheduledStick();
-  }, [cancelScheduledStick]);
+  }, [cancelScheduledStick, scrollElement]);
 
   const updatePinned = useCallback(() => {
     if (!scrollElement) {
@@ -107,6 +115,7 @@ export const TranscriptList = memo(function TranscriptList({
     }
     if (distanceFromBottom(scrollElement) <= SCROLL_END_THRESHOLD_PX) {
       autoStickRef.current = true;
+      viewportAnchorRef.current = null;
       setLatestState(true);
     }
   }, [scrollElement, setLatestState]);
@@ -115,12 +124,91 @@ export const TranscriptList = memo(function TranscriptList({
     if (!scrollElement) {
       return;
     }
-    virtualizer.scrollToEnd();
-    scrollElement.scrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
+    if (distanceFromBottom(scrollElement) > ANCHOR_RESTORE_EPSILON_PX) {
+      virtualizer.scrollToEnd();
+      scrollElement.scrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
+    }
     lastScrollTopRef.current = scrollElement.scrollTop;
     autoStickRef.current = true;
+    viewportAnchorRef.current = null;
     setLatestState(true);
   }, [scrollElement, setLatestState, virtualizer]);
+
+  const settleAfterDisclosureClose = useCallback(
+    (shouldRestoreLatest: boolean) => {
+      let remaining = BOTTOM_STICK_STABILIZE_FRAMES;
+      const tick = () => {
+        if (!scrollElement) {
+          return;
+        }
+        if (distanceFromBottom(scrollElement) <= SCROLL_END_THRESHOLD_PX) {
+          autoStickRef.current = true;
+          viewportAnchorRef.current = null;
+          setLatestState(true);
+          lastScrollTopRef.current = scrollElement.scrollTop;
+          return;
+        }
+        if (shouldRestoreLatest) {
+          scrollToLatest();
+          remaining -= 1;
+          if (remaining > 0) {
+            window.requestAnimationFrame(tick);
+          }
+          return;
+        }
+        autoStickRef.current = false;
+        viewportAnchorRef.current = captureViewportAnchor(scrollElement);
+        setLatestState(false);
+      };
+      window.requestAnimationFrame(tick);
+    },
+    [scrollElement, scrollToLatest, setLatestState],
+  );
+
+  const handleDisclosureOpenChange = useCallback(
+    (key: string, open: boolean) => {
+      if (!disclosure || disclosure.isOpen(key) === open) {
+        return;
+      }
+
+      if (open) {
+        disclosureOpenStateRef.current.set(key, {
+          openedAtLatest: scrollElement
+            ? distanceFromBottom(scrollElement) <= SCROLL_END_THRESHOLD_PX || isAtLatestRef.current
+            : isAtLatestRef.current,
+          userScrollSeq: userScrollSeqRef.current,
+        });
+        disableAutoStick();
+        disclosure.setOpen(key, true);
+        return;
+      }
+
+      const openState = disclosureOpenStateRef.current.get(key);
+      disclosureOpenStateRef.current.delete(key);
+      const currentlyAtLatest = scrollElement
+        ? distanceFromBottom(scrollElement) <= SCROLL_END_THRESHOLD_PX || isAtLatestRef.current
+        : isAtLatestRef.current;
+      disclosure.setOpen(key, false);
+      const userScrolledDuringDisclosure = openState ? userScrollSeqRef.current !== openState.userScrollSeq : false;
+      settleAfterDisclosureClose(currentlyAtLatest || (Boolean(openState?.openedAtLatest) && !userScrolledDuringDisclosure));
+    },
+    [
+      disableAutoStick,
+      disclosure,
+      scrollElement,
+      settleAfterDisclosureClose,
+    ],
+  );
+
+  const listDisclosure = useMemo<TurnDisclosureState | undefined>(() => {
+    if (!disclosure) {
+      return undefined;
+    }
+    return {
+      isOpen: disclosure.isOpen,
+      setOpen: handleDisclosureOpenChange,
+    };
+  }, [disclosure, handleDisclosureOpenChange]);
 
   const stickToLatestIfPinned = useCallback(
     (frames = 1) => {
@@ -175,6 +263,7 @@ export const TranscriptList = memo(function TranscriptList({
       stickToLatestIfPinned(CONTENT_STICK_STABILIZE_FRAMES);
       return;
     }
+    viewportAnchorRef.current = captureViewportAnchor(scrollElement);
     if (scrollElement && distanceFromBottom(scrollElement) > SCROLL_END_THRESHOLD_PX) {
       setLatestState(false);
     }
@@ -215,12 +304,20 @@ export const TranscriptList = memo(function TranscriptList({
       const nearTop = nextScrollTop < HISTORY_LOAD_SCROLL_TOP_PX;
       const bottomDistance = distanceFromBottom(node);
       lastScrollTopRef.current = nextScrollTop;
+      const isProgrammaticScroll = performance.now() < programmaticScrollIgnoreUntilRef.current;
+      if (!autoStickRef.current) {
+        viewportAnchorRef.current = captureViewportAnchor(node);
+      }
+      if (!autoStickRef.current && !isProgrammaticScroll && (movingUp || movingDown)) {
+        userScrollSeqRef.current += 1;
+      }
       if (movingUp || nearTop) {
         historyLoader.request();
         disableAutoStick();
       }
       if (bottomDistance <= SCROLL_END_THRESHOLD_PX && (movingDown || autoStickRef.current)) {
         autoStickRef.current = true;
+        viewportAnchorRef.current = null;
         setLatestState(true);
       } else if ((movingUp || nearTop) && bottomDistance > SCROLL_END_THRESHOLD_PX) {
         setLatestState(false);
@@ -228,6 +325,9 @@ export const TranscriptList = memo(function TranscriptList({
       historyLoader.check();
     };
     const onWheel = (event: WheelEvent) => {
+      if (event.deltaY !== 0) {
+        userScrollSeqRef.current += 1;
+      }
       if (event.deltaY < 0) {
         disableAutoStick();
         historyLoader.request();
@@ -237,9 +337,15 @@ export const TranscriptList = memo(function TranscriptList({
       if (isEditableTarget(event.target)) {
         return;
       }
+      if (isDisclosureToggleTarget(event.target)) {
+        return;
+      }
       if (event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home") {
+        userScrollSeqRef.current += 1;
         disableAutoStick();
         historyLoader.request();
+      } else if (event.key === "ArrowDown" || event.key === "PageDown" || event.key === "End" || event.key === " ") {
+        userScrollSeqRef.current += 1;
       }
     };
     node.addEventListener("scroll", onScroll, { passive: true });
@@ -284,11 +390,29 @@ export const TranscriptList = memo(function TranscriptList({
 
   useEffect(() => {
     historyLoader.reset();
+    disclosureOpenStateRef.current.clear();
     autoStickRef.current = true;
+    viewportAnchorRef.current = null;
     setLatestState(true);
   }, [historyLoader.reset, sessionID, setLatestState]);
 
-  useEffect(() => cancelScheduledStick, [cancelScheduledStick]);
+  useLayoutEffect(() => {
+    if (!scrollElement || autoStickRef.current) {
+      return;
+    }
+    const anchor = viewportAnchorRef.current ?? captureViewportAnchor(scrollElement);
+    viewportAnchorRef.current = anchor;
+    restoreViewportAnchorOverFrames(scrollElement, anchor, () => {
+      programmaticScrollIgnoreUntilRef.current = performance.now() + 120;
+    });
+  }, [scrollElement, turns]);
+
+  useEffect(() => {
+    return () => {
+      cancelScheduledStick();
+      virtualizer.shouldAdjustScrollPositionOnItemSizeChange = undefined;
+    };
+  }, [cancelScheduledStick, virtualizer]);
 
   if (turns.length === 0) {
     return null;
@@ -309,7 +433,7 @@ export const TranscriptList = memo(function TranscriptList({
             data-index={virtualItem.index}
           >
             <TranscriptTurn
-              disclosure={disclosure}
+              disclosure={listDisclosure}
               onAssistantContentGrow={handleAssistantContentGrow}
               onAssistantRevealComplete={onAssistantRevealComplete}
               onQueuedCancel={onQueuedCancel}
@@ -420,6 +544,10 @@ function distanceFromBottom(node: HTMLElement) {
   return Math.max(0, node.scrollHeight - node.clientHeight - node.scrollTop);
 }
 
+function disableVirtualizerSizeAdjustment() {
+  return false;
+}
+
 function waitForScrollSettle(getScrollElement: () => HTMLElement | null) {
   return new Promise<void>((resolve) => {
     let frameCount = 0;
@@ -483,13 +611,13 @@ function captureViewportAnchor(node: HTMLElement | null): ViewportAnchor | null 
   return turnID ? { top: best.top, turnID } : null;
 }
 
-function restoreViewportAnchorOverFrames(node: HTMLElement | null, anchor: ViewportAnchor | null) {
+function restoreViewportAnchorOverFrames(node: HTMLElement | null, anchor: ViewportAnchor | null, beforeScroll?: () => void) {
   if (!node || !anchor) {
     return;
   }
   let remaining = 8;
   const tick = () => {
-    restoreViewportAnchor(node, anchor);
+    restoreViewportAnchor(node, anchor, beforeScroll);
     remaining -= 1;
     if (remaining > 0) {
       window.requestAnimationFrame(tick);
@@ -498,14 +626,20 @@ function restoreViewportAnchorOverFrames(node: HTMLElement | null, anchor: Viewp
   window.requestAnimationFrame(tick);
 }
 
-function restoreViewportAnchor(node: HTMLElement, anchor: ViewportAnchor) {
+function restoreViewportAnchor(node: HTMLElement, anchor: ViewportAnchor, beforeScroll?: () => void) {
   const element = node.querySelector<HTMLElement>(`[data-transcript-turn-id="${CSS.escape(anchor.turnID)}"]`);
   if (!element) {
-    return;
+    return false;
   }
   const viewportRect = node.getBoundingClientRect();
   const top = element.getBoundingClientRect().top - viewportRect.top;
-  node.scrollTop += top - anchor.top;
+  const delta = top - anchor.top;
+  if (Math.abs(delta) < ANCHOR_RESTORE_EPSILON_PX) {
+    return false;
+  }
+  beforeScroll?.();
+  node.scrollTop += delta;
+  return true;
 }
 
 function isEditableTarget(target: EventTarget | null) {
@@ -517,4 +651,8 @@ function isEditableTarget(target: EventTarget | null) {
   }
   const tagName = target.tagName.toLowerCase();
   return tagName === "input" || tagName === "textarea" || tagName === "select";
+}
+
+function isDisclosureToggleTarget(target: EventTarget | null) {
+  return target instanceof HTMLElement && Boolean(target.closest("summary"));
 }

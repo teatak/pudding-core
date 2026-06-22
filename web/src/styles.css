@@ -621,7 +621,7 @@ html[data-shell] .pudding-markdown * {
 }
 
 .pudding-markdown {
-  @apply grid gap-2 whitespace-normal break-words;
+  @apply grid gap-1 whitespace-normal break-words;
 }
 
 .pudding-markdown > :where(p, ul, ol, blockquote, hr, .code-block-wrap, .table-wrap) {
@@ -669,7 +669,7 @@ html[data-shell] .pudding-markdown * {
 }
 
 .pudding-markdown :where(ul, ol) {
-  @apply grid gap-1 pl-5;
+  @apply my-1 grid gap-1 pl-5;
 }
 
 .pudding-markdown :where(ul ul, ul ol, ol ul, ol ol) {
@@ -697,7 +697,7 @@ html[data-shell] .pudding-markdown * {
 }
 
 .pudding-markdown blockquote {
-  @apply rounded-r-md border-l-2 border-border/80 bg-muted/25 py-1 pr-2 pl-3 text-muted-foreground;
+  @apply my-1 rounded-r-md border-l-2 border-border/80 bg-muted/25 py-1 pr-2 pl-3 text-muted-foreground;
 }
 
 .pudding-markdown hr {
@@ -761,7 +761,7 @@ html[data-shell] .pudding-markdown * {
 }
 
 .pudding-markdown .code-block-wrap {
-  @apply relative max-w-full;
+  @apply relative my-1 max-w-full;
 }
 
 .pudding-markdown .code-block-wrap pre {
@@ -788,7 +788,7 @@ html[data-shell] .pudding-markdown * {
 /* wrapper 负责圆角边框与横向滚动;table 本体保持 table 布局并 w-full,
    内容窄时行随容器通栏,内容宽时在 wrapper 内横滚 */
 .pudding-markdown .table-wrap {
-  @apply max-w-full overflow-x-auto rounded-lg border;
+  @apply my-1 max-w-full overflow-x-auto rounded-lg border;
 }
 
 .pudding-markdown table {
