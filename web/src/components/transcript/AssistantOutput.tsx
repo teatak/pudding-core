@@ -67,7 +67,7 @@ function CanonicalAssistantOutput({
         <TurnParts disclosure={disclosure} parts={parts} turnID={turnID} />
         {assistant.messages.some((message) => message.interrupted) ? <InterruptedBadge /> : null}
       </div>
-      <MessageMeta createdAt={lastMessage.createdAt} duration={assistant.duration} text={text} />
+      <MessageMeta createdAt={lastMessage.createdAt} duration={assistant.duration} model={assistant.model} text={text} />
     </div>
   );
 }
@@ -122,7 +122,7 @@ function LiveAssistantOutput({
         ? { phase: footerPhaseName, sessionID: overlay.sessionID, turnID: overlay.turnID, updatedAt: "" }
         : undefined;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     onContentGrow?.();
   }, [overlay.parts, text, onContentGrow]);
   useLayoutEffect(() => {

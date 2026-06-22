@@ -420,6 +420,16 @@ func TestTurnModelConfigPersists(t *testing.T) {
 	if string(turn.ModelConfig) != string(cfg) {
 		t.Fatalf("model config not persisted: %s", turn.ModelConfig)
 	}
+	turns, err := reopened.ListTurnsPage(context.Background(), "sess_1", "", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turns.Turns) != 1 {
+		t.Fatalf("unexpected turns: %+v", turns.Turns)
+	}
+	if turns.Turns[0].Provider != "default" || turns.Turns[0].Model != "m1" {
+		t.Fatalf("conversation turn model snapshot wrong: provider=%q model=%q", turns.Turns[0].Provider, turns.Turns[0].Model)
+	}
 }
 
 func TestDeleteSessionCascades(t *testing.T) {
@@ -446,6 +456,40 @@ func TestDeleteSessionCascades(t *testing.T) {
 		if count != 0 {
 			t.Fatalf("%s should cascade delete, count=%d", table, count)
 		}
+	}
+}
+
+func TestOpenDropsObsoleteConfigTables(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pudding.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.Exec(`CREATE TABLE settings(key TEXT); CREATE TABLE provider_profiles(id TEXT);`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+
+	assertTableMissing(t, reopened, "settings")
+	assertTableMissing(t, reopened, "provider_profiles")
+}
+
+func assertTableMissing(t *testing.T, st *Store, name string) {
+	t.Helper()
+	var count int
+	if err := st.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("obsolete table %q must not be in SQLite runtime store", name)
 	}
 }
 

@@ -609,6 +609,8 @@ func conversationTurnFromMem(turn *store.Turn, messages []*store.Message) *store
 		SessionID:       turn.SessionID,
 		ClientMessageID: turn.ClientMessageID,
 		Status:          turn.Status,
+		Provider:        turn.Provider,
+		Model:           turn.Model,
 		Error:           turn.Error,
 		CreatedAt:       turn.CreatedAt,
 		UpdatedAt:       turn.UpdatedAt,

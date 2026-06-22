@@ -132,6 +132,8 @@ export const conversationTurn = z.object({
   sessionID: z.string(),
   clientMessageID: z.string(),
   status: z.enum(["running", "completed", "failed", "cancelled"]),
+  provider: z.string().optional(),
+  model: z.string().optional(),
   error: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),

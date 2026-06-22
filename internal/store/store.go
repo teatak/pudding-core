@@ -432,6 +432,8 @@ type ConversationTurn struct {
 	SessionID       string     `json:"sessionID"`
 	ClientMessageID string     `json:"clientMessageID"`
 	Status          TurnStatus `json:"status"`
+	Provider        string     `json:"provider,omitempty"`
+	Model           string     `json:"model,omitempty"`
 	Error           string     `json:"error,omitempty"`
 	CreatedAt       time.Time  `json:"createdAt"`
 	UpdatedAt       time.Time  `json:"updatedAt"`

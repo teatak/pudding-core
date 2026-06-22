@@ -1,5 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { memo, useCallback, useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { TranscriptTurn } from "./TranscriptTurn";
 import type { TranscriptTurnVM, TurnDisclosureState } from "./types";
@@ -10,39 +10,54 @@ const LIST_PADDING_BOTTOM_PX = 32;
 const LIST_PADDING_TOP_PX = 16;
 const TURN_GAP_PX = 16;
 const TURN_OVERSCAN = 6;
+const SCROLL_END_THRESHOLD_PX = 8;
+const BOTTOM_STICK_STABILIZE_FRAMES = 4;
+const CONTENT_STICK_STABILIZE_FRAMES = 8;
+
+type HistoryLoadState = "idle" | "loading" | "settling";
+type ViewportAnchor = { top: number; turnID: string };
 
 export const TranscriptList = memo(function TranscriptList({
   disclosure,
   hasMoreHistory,
   isLoadingHistory,
-  onAssistantContentGrow,
+  jumpLatestSignal,
   onAssistantRevealComplete,
+  onLatestChange,
   onLoadHistory,
   onQueuedCancel,
   onQueuedEditStart,
   onQueuedSave,
   scrollElement,
+  sessionID,
   turns,
 }: {
   disclosure?: TurnDisclosureState;
   hasMoreHistory: boolean;
   isLoadingHistory: boolean;
-  onAssistantContentGrow?: () => void;
+  jumpLatestSignal: number;
   onAssistantRevealComplete?: (turnID: string) => void;
+  onLatestChange?: (isAtLatest: boolean) => void;
   onLoadHistory: () => Promise<unknown> | void;
   onQueuedCancel?: (clientMessageID: string) => Promise<unknown>;
   onQueuedEditStart?: (clientMessageID: string) => Promise<unknown>;
   onQueuedSave?: (clientMessageID: string, text: string) => Promise<unknown>;
   scrollElement: HTMLDivElement | null;
+  sessionID: string;
   turns: TranscriptTurnVM[];
 }) {
-  const loaderRef = useRef({ hasMoreHistory, isLoadingHistory, onLoadHistory });
-  const loadingLockedRef = useRef(false);
+  const autoStickRef = useRef(true);
+  const isAtLatestRef = useRef(true);
+  const initialScrollSessionRef = useRef("");
+  const stickRafRef = useRef<number | null>(null);
+  const stickRunRef = useRef(0);
+  const lastScrollTopRef = useRef(0);
+  const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
   const virtualizer = useVirtualizer({
     anchorTo: "end",
     count: turns.length,
     directDomUpdates: true,
-    estimateSize: () => ESTIMATED_TURN_HEIGHT,
+    estimateSize: (index) => estimateTurnHeight(turns[index]),
     followOnAppend: true,
     gap: TURN_GAP_PX,
     getItemKey: (index) => turns[index]?.key || index,
@@ -50,33 +65,142 @@ export const TranscriptList = memo(function TranscriptList({
     overscan: TURN_OVERSCAN,
     paddingEnd: LIST_PADDING_BOTTOM_PX,
     paddingStart: LIST_PADDING_TOP_PX,
-    scrollEndThreshold: 80,
+    scrollEndThreshold: SCROLL_END_THRESHOLD_PX,
     useAnimationFrameWithResizeObserver: true,
   });
   const virtualItems = virtualizer.getVirtualItems();
+  const setVirtualizerContainer = useCallback(
+    (node: HTMLDivElement | null) => {
+      virtualizer.containerRef(node);
+      setListElement((current) => (current === node ? current : node));
+    },
+    [virtualizer],
+  );
 
-  useEffect(() => {
-    loaderRef.current = { hasMoreHistory, isLoadingHistory, onLoadHistory };
-  }, [hasMoreHistory, isLoadingHistory, onLoadHistory]);
+  const setLatestState = useCallback(
+    (next: boolean) => {
+      if (isAtLatestRef.current === next) {
+        return;
+      }
+      isAtLatestRef.current = next;
+      onLatestChange?.(next);
+    },
+    [onLatestChange],
+  );
 
-  const maybeLoadHistory = useCallback((node: HTMLDivElement) => {
-    const loader = loaderRef.current;
-    if (
-      loadingLockedRef.current ||
-      loader.isLoadingHistory ||
-      !loader.hasMoreHistory ||
-      node.scrollTop > HISTORY_LOAD_SCROLL_TOP_PX
-    ) {
+  const cancelScheduledStick = useCallback(() => {
+    stickRunRef.current += 1;
+    if (stickRafRef.current !== null) {
+      window.cancelAnimationFrame(stickRafRef.current);
+      stickRafRef.current = null;
+    }
+  }, []);
+
+  const disableAutoStick = useCallback(() => {
+    autoStickRef.current = false;
+    cancelScheduledStick();
+  }, [cancelScheduledStick]);
+
+  const updatePinned = useCallback(() => {
+    if (!scrollElement) {
       return;
     }
+    if (distanceFromBottom(scrollElement) <= SCROLL_END_THRESHOLD_PX) {
+      autoStickRef.current = true;
+      setLatestState(true);
+    }
+  }, [scrollElement, setLatestState]);
 
-    loadingLockedRef.current = true;
-    void Promise.resolve(loader.onLoadHistory())
-      .catch(() => undefined)
-      .finally(() => {
-        loadingLockedRef.current = false;
-      });
-  }, []);
+  const scrollToLatest = useCallback(() => {
+    if (!scrollElement) {
+      return;
+    }
+    virtualizer.scrollToEnd();
+    scrollElement.scrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
+    lastScrollTopRef.current = scrollElement.scrollTop;
+    autoStickRef.current = true;
+    setLatestState(true);
+  }, [scrollElement, setLatestState, virtualizer]);
+
+  const stickToLatestIfPinned = useCallback(
+    (frames = 1) => {
+      if (!autoStickRef.current) {
+        return;
+      }
+      const run = stickRunRef.current + 1;
+      stickRunRef.current = run;
+      if (stickRafRef.current !== null) {
+        window.cancelAnimationFrame(stickRafRef.current);
+        stickRafRef.current = null;
+      }
+      let remaining = frames;
+      const tick = () => {
+        stickRafRef.current = null;
+        if (!autoStickRef.current || stickRunRef.current !== run) {
+          return;
+        }
+        scrollToLatest();
+        remaining -= 1;
+        if (remaining > 0) {
+          stickRafRef.current = window.requestAnimationFrame(tick);
+        }
+      };
+      tick();
+    },
+    [scrollToLatest],
+  );
+
+  const loadHistory = useCallback(async () => {
+    const anchor = captureViewportAnchor(scrollElement);
+    const result = await onLoadHistory();
+    restoreViewportAnchorOverFrames(scrollElement, anchor);
+    return result;
+  }, [onLoadHistory, scrollElement]);
+
+  const isNearTop = useCallback(() => Boolean(scrollElement && scrollElement.scrollTop < HISTORY_LOAD_SCROLL_TOP_PX), [scrollElement]);
+  const historyLoader = useHistoryLoadController({
+    getScrollElement: () => scrollElement,
+    hasMore: hasMoreHistory,
+    isLoading: isLoadingHistory,
+    isNearTop,
+    loadMore: loadHistory,
+  });
+
+  const handleAssistantContentGrow = useCallback(() => {
+    stickToLatestIfPinned(CONTENT_STICK_STABILIZE_FRAMES);
+  }, [stickToLatestIfPinned]);
+
+  const handleContentResize = useCallback(() => {
+    if (autoStickRef.current) {
+      stickToLatestIfPinned(CONTENT_STICK_STABILIZE_FRAMES);
+      return;
+    }
+    if (scrollElement && distanceFromBottom(scrollElement) > SCROLL_END_THRESHOLD_PX) {
+      setLatestState(false);
+    }
+  }, [scrollElement, setLatestState, stickToLatestIfPinned]);
+
+  useEffect(() => {
+    if (!scrollElement) {
+      return;
+    }
+    lastScrollTopRef.current = scrollElement.scrollTop;
+  }, [scrollElement]);
+
+  useEffect(() => {
+    if (!scrollElement || turns.length === 0 || initialScrollSessionRef.current === sessionID) {
+      return;
+    }
+    initialScrollSessionRef.current = sessionID;
+    window.requestAnimationFrame(scrollToLatest);
+  }, [scrollElement, scrollToLatest, sessionID, turns.length]);
+
+  useEffect(() => {
+    if (jumpLatestSignal <= 0) {
+      return;
+    }
+    window.requestAnimationFrame(scrollToLatest);
+  }, [jumpLatestSignal, scrollToLatest]);
 
   useEffect(() => {
     const node = scrollElement;
@@ -84,30 +208,94 @@ export const TranscriptList = memo(function TranscriptList({
       return;
     }
     const onScroll = () => {
-      maybeLoadHistory(node);
+      const previousScrollTop = lastScrollTopRef.current;
+      const nextScrollTop = node.scrollTop;
+      const movingUp = nextScrollTop < previousScrollTop - 1;
+      const movingDown = nextScrollTop > previousScrollTop + 1;
+      const nearTop = nextScrollTop < HISTORY_LOAD_SCROLL_TOP_PX;
+      const bottomDistance = distanceFromBottom(node);
+      lastScrollTopRef.current = nextScrollTop;
+      if (movingUp || nearTop) {
+        historyLoader.request();
+        disableAutoStick();
+      }
+      if (bottomDistance <= SCROLL_END_THRESHOLD_PX && (movingDown || autoStickRef.current)) {
+        autoStickRef.current = true;
+        setLatestState(true);
+      } else if ((movingUp || nearTop) && bottomDistance > SCROLL_END_THRESHOLD_PX) {
+        setLatestState(false);
+      }
+      historyLoader.check();
+    };
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0) {
+        disableAutoStick();
+        historyLoader.request();
+      }
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (isEditableTarget(event.target)) {
         return;
       }
       if (event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home") {
-        maybeLoadHistory(node);
+        disableAutoStick();
+        historyLoader.request();
       }
     };
     node.addEventListener("scroll", onScroll, { passive: true });
+    node.addEventListener("wheel", onWheel, { passive: true });
     window.addEventListener("keydown", onKeyDown);
+    updatePinned();
     return () => {
       node.removeEventListener("scroll", onScroll);
+      node.removeEventListener("wheel", onWheel);
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [maybeLoadHistory, scrollElement]);
+  }, [disableAutoStick, historyLoader.check, historyLoader.request, scrollElement, setLatestState, updatePinned]);
+
+  useEffect(() => {
+    if (!scrollElement) {
+      return;
+    }
+    const stick = () => {
+      if (autoStickRef.current) {
+        stickToLatestIfPinned(BOTTOM_STICK_STABILIZE_FRAMES);
+      }
+    };
+    const observer = new ResizeObserver(stick);
+    observer.observe(scrollElement);
+    window.addEventListener("resize", stick);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", stick);
+    };
+  }, [scrollElement, stickToLatestIfPinned]);
+
+  useEffect(() => {
+    if (!listElement) {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      handleContentResize();
+    });
+    observer.observe(listElement);
+    return () => observer.disconnect();
+  }, [handleContentResize, listElement]);
+
+  useEffect(() => {
+    historyLoader.reset();
+    autoStickRef.current = true;
+    setLatestState(true);
+  }, [historyLoader.reset, sessionID, setLatestState]);
+
+  useEffect(() => cancelScheduledStick, [cancelScheduledStick]);
 
   if (turns.length === 0) {
     return null;
   }
 
   return (
-    <div ref={virtualizer.containerRef} className="relative min-w-0">
+    <div ref={setVirtualizerContainer} className="relative min-w-0">
       {virtualItems.map((virtualItem) => {
         const turn = turns[virtualItem.index];
         if (!turn) {
@@ -122,7 +310,7 @@ export const TranscriptList = memo(function TranscriptList({
           >
             <TranscriptTurn
               disclosure={disclosure}
-              onAssistantContentGrow={onAssistantContentGrow}
+              onAssistantContentGrow={handleAssistantContentGrow}
               onAssistantRevealComplete={onAssistantRevealComplete}
               onQueuedCancel={onQueuedCancel}
               onQueuedEditStart={onQueuedEditStart}
@@ -135,6 +323,190 @@ export const TranscriptList = memo(function TranscriptList({
     </div>
   );
 });
+
+function useHistoryLoadController({
+  getScrollElement,
+  hasMore,
+  isLoading,
+  isNearTop,
+  loadMore,
+}: {
+  getScrollElement: () => HTMLDivElement | null;
+  hasMore: boolean;
+  isLoading: boolean;
+  isNearTop: () => boolean;
+  loadMore: () => Promise<unknown> | unknown;
+}) {
+  const optionsRef = useRef({ getScrollElement, hasMore, isLoading, isNearTop, loadMore });
+  const pendingForceRef = useRef(false);
+  const pendingMoreRef = useRef(false);
+  const pumpRef = useRef<() => void>(() => {});
+  const stateRef = useRef<HistoryLoadState>("idle");
+
+  useEffect(() => {
+    optionsRef.current = { getScrollElement, hasMore, isLoading, isNearTop, loadMore };
+  }, [getScrollElement, hasMore, isLoading, isNearTop, loadMore]);
+
+  const setControllerState = useCallback((next: HistoryLoadState) => {
+    stateRef.current = next;
+  }, []);
+
+  const pump = useCallback(() => {
+    if (stateRef.current !== "idle" || !pendingMoreRef.current) {
+      return;
+    }
+
+    const options = optionsRef.current;
+    const force = pendingForceRef.current;
+    if (!options.hasMore || options.isLoading || (!force && !options.isNearTop())) {
+      return;
+    }
+
+    pendingForceRef.current = false;
+    pendingMoreRef.current = false;
+    setControllerState("loading");
+    void Promise.resolve(options.loadMore())
+      .catch(() => undefined)
+      .then(async () => {
+        setControllerState("settling");
+        await waitForScrollSettle(options.getScrollElement);
+      })
+      .finally(() => {
+        setControllerState("idle");
+        window.requestAnimationFrame(() => pumpRef.current());
+      });
+  }, [setControllerState]);
+
+  useEffect(() => {
+    pumpRef.current = pump;
+  }, [pump]);
+
+  const check = useCallback(() => {
+    pump();
+  }, [pump]);
+
+  const request = useCallback(
+    ({ force = false }: { force?: boolean } = {}) => {
+      pendingMoreRef.current = true;
+      pendingForceRef.current ||= force;
+      pump();
+    },
+    [pump],
+  );
+
+  const reset = useCallback(() => {
+    pendingForceRef.current = false;
+    pendingMoreRef.current = false;
+    setControllerState("idle");
+  }, [setControllerState]);
+
+  return useMemo(() => ({ check, request, reset }), [check, request, reset]);
+}
+
+function estimateTurnHeight(turn: TranscriptTurnVM | undefined) {
+  if (!turn) {
+    return ESTIMATED_TURN_HEIGHT;
+  }
+  if (turn.user && !turn.assistant) {
+    return 96;
+  }
+  if (!turn.assistant) {
+    return 140;
+  }
+  return 220;
+}
+
+function distanceFromBottom(node: HTMLElement) {
+  return Math.max(0, node.scrollHeight - node.clientHeight - node.scrollTop);
+}
+
+function waitForScrollSettle(getScrollElement: () => HTMLElement | null) {
+  return new Promise<void>((resolve) => {
+    let frameCount = 0;
+    let lastScrollHeight = -1;
+    let lastScrollTop = -1;
+    let stableFrames = 0;
+
+    const tick = () => {
+      const node = getScrollElement();
+      if (!node) {
+        resolve();
+        return;
+      }
+
+      frameCount += 1;
+      const scrollHeight = node.scrollHeight;
+      const scrollTop = node.scrollTop;
+      if (Math.abs(scrollTop - lastScrollTop) < 0.5 && Math.abs(scrollHeight - lastScrollHeight) < 1) {
+        stableFrames += 1;
+      } else {
+        stableFrames = 0;
+      }
+      lastScrollHeight = scrollHeight;
+      lastScrollTop = scrollTop;
+
+      if (stableFrames >= 2 || frameCount >= 12) {
+        resolve();
+        return;
+      }
+      window.requestAnimationFrame(tick);
+    };
+
+    window.requestAnimationFrame(tick);
+  });
+}
+
+function captureViewportAnchor(node: HTMLElement | null): ViewportAnchor | null {
+  if (!node) {
+    return null;
+  }
+  const viewportRect = node.getBoundingClientRect();
+  let best: { element: HTMLElement; top: number } | null = null;
+  for (const element of Array.from(node.querySelectorAll<HTMLElement>("[data-transcript-turn-id]"))) {
+    const turnID = element.dataset.transcriptTurnId;
+    if (!turnID) {
+      continue;
+    }
+    const rect = element.getBoundingClientRect();
+    if (rect.bottom <= viewportRect.top || rect.top >= viewportRect.bottom) {
+      continue;
+    }
+    const top = rect.top - viewportRect.top;
+    if (!best || Math.abs(top) < Math.abs(best.top)) {
+      best = { element, top };
+    }
+  }
+  if (!best) {
+    return null;
+  }
+  const turnID = best.element.dataset.transcriptTurnId;
+  return turnID ? { top: best.top, turnID } : null;
+}
+
+function restoreViewportAnchorOverFrames(node: HTMLElement | null, anchor: ViewportAnchor | null) {
+  if (!node || !anchor) {
+    return;
+  }
+  let remaining = 8;
+  const tick = () => {
+    restoreViewportAnchor(node, anchor);
+    remaining -= 1;
+    if (remaining > 0) {
+      window.requestAnimationFrame(tick);
+    }
+  };
+  window.requestAnimationFrame(tick);
+}
+
+function restoreViewportAnchor(node: HTMLElement, anchor: ViewportAnchor) {
+  const element = node.querySelector<HTMLElement>(`[data-transcript-turn-id="${CSS.escape(anchor.turnID)}"]`);
+  if (!element) {
+    return;
+  }
+  const viewportRect = node.getBoundingClientRect();
+  const top = element.getBoundingClientRect().top - viewportRect.top;
+  node.scrollTop += top - anchor.top;
+}
 
 function isEditableTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {

@@ -15,6 +15,7 @@ export type AssistantOutputVM =
       duration?: string;
       kind: "canonical";
       messages: Message[];
+      model?: TurnModelVM;
     }
   | {
       canonicalReady: boolean;
@@ -34,6 +35,11 @@ export type TranscriptTurnVM = {
   kind: "canonical" | "live" | "pending" | "phase";
   turnID?: string;
   user?: UserInputVM;
+};
+
+export type TurnModelVM = {
+  model: string;
+  provider?: string;
 };
 
 export type TurnDisclosureState = {

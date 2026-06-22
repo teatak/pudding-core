@@ -8,7 +8,13 @@ import {
   type TurnPhaseState,
 } from "@/state/overlayStore";
 
-import { textFromContentParts, transcriptPhaseKey, type TranscriptTurnVM, type UserInputVM } from "./types";
+import {
+  textFromContentParts,
+  transcriptPhaseKey,
+  type TranscriptTurnVM,
+  type TurnModelVM,
+  type UserInputVM,
+} from "./types";
 
 type CanonicalTurnCacheEntry = {
   duration?: string;
@@ -104,6 +110,7 @@ export function useTranscriptViewModel({
                 duration,
                 kind: "canonical",
                 messages: outputMessages,
+                model: modelFromTurn(turn),
               }
             : phaseForTurn
               ? {
@@ -203,6 +210,10 @@ export function useTranscriptViewModel({
 
 function isTurnOutputMessage(message: Message) {
   return message.role !== "user";
+}
+
+function modelFromTurn(turn: ConversationTurn): TurnModelVM | undefined {
+  return turn.model ? { model: turn.model, provider: turn.provider } : undefined;
 }
 
 function userFromMessages(messages: Message[]): UserInputVM | undefined {

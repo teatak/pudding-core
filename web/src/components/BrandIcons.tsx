@@ -292,6 +292,11 @@ function normalizeBrandName(name: string) {
   }
 }
 
+export function brandIconName(name: string) {
+  const normalizedName = normalizeBrandName(name);
+  return brandBackgrounds[normalizedName] ? normalizedName : "";
+}
+
 function BrandMark({ name, className }: { name: string; className?: string }) {
   switch (normalizeBrandName(name)) {
     case "deepseek":
@@ -333,8 +338,8 @@ export function BrandIcon({
   iconClassName?: string;
   shape?: "rounded" | "circle";
 }) {
-  const normalizedName = normalizeBrandName(name);
-  if (!brandBackgrounds[normalizedName]) {
+  const normalizedName = brandIconName(name);
+  if (!normalizedName) {
     return null;
   }
 

@@ -1,5 +1,5 @@
 import { ArrowDown, CircleAlert, Loader2 } from "lucide-react";
-import { useCallback, useState, type Ref } from "react";
+import { useState } from "react";
 
 import { ChatColumn } from "@/components/ChatColumn";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -10,7 +10,6 @@ import { TranscriptList } from "./TranscriptList";
 import type { TranscriptTurnVM, TurnDisclosureState } from "./types";
 
 export function TranscriptView({
-  contentRef,
   disclosure,
   hasMoreHistory,
   hasItems,
@@ -19,20 +18,20 @@ export function TranscriptView({
   isLoading,
   isLoadingHistory,
   isPending,
+  jumpLatestSignal,
   newMessageCount,
-  onAssistantContentGrow,
   onAssistantRevealComplete,
   onJumpLatest,
+  onLatestChange,
   onLoadHistory,
   onQueuedCancel,
   onQueuedEditStart,
   onQueuedSave,
+  sessionID,
   showJumpLatest,
   submitError,
   turns,
-  viewportRef,
 }: {
-  contentRef: Ref<HTMLDivElement>;
   disclosure?: TurnDisclosureState;
   hasMoreHistory: boolean;
   hasItems: boolean;
@@ -41,28 +40,22 @@ export function TranscriptView({
   isLoading: boolean;
   isLoadingHistory: boolean;
   isPending: boolean;
+  jumpLatestSignal: number;
   newMessageCount: number;
-  onAssistantContentGrow?: () => void;
   onAssistantRevealComplete?: (turnID: string) => void;
   onJumpLatest: () => void;
+  onLatestChange?: (isAtLatest: boolean) => void;
   onLoadHistory: () => Promise<unknown> | void;
   onQueuedCancel?: (clientMessageID: string) => Promise<unknown>;
   onQueuedEditStart?: (clientMessageID: string) => Promise<unknown>;
   onQueuedSave?: (clientMessageID: string, text: string) => Promise<unknown>;
+  sessionID: string;
   showJumpLatest: boolean;
   submitError?: string | null;
   turns: TranscriptTurnVM[];
-  viewportRef: Ref<HTMLDivElement>;
 }) {
   const { t } = useI18n();
   const [viewportNode, setViewportNode] = useState<HTMLDivElement | null>(null);
-  const handleViewportRef = useCallback(
-    (node: HTMLDivElement | null) => {
-      setViewportNode(node);
-      setRef(viewportRef, node);
-    },
-    [viewportRef],
-  );
   const jumpLatestLabel =
     newMessageCount > 0 ? t("transcript.newMessages").replace("{count}", String(newMessageCount)) : t("transcript.jumpLatest");
 
@@ -81,11 +74,11 @@ export function TranscriptView({
   return (
     <div className="relative min-h-0 flex-1 overflow-hidden">
       <div
-        ref={handleViewportRef}
+        ref={setViewportNode}
         className="h-full overflow-y-auto overscroll-none [contain:strict] [overflow-anchor:none]"
         data-transcript-viewport
       >
-        <ChatColumn innerRef={contentRef}>
+        <ChatColumn>
           {isError ? (
             <Alert className="mb-4" variant="destructive">
               <CircleAlert className="h-3.5 w-3.5" />
@@ -96,13 +89,15 @@ export function TranscriptView({
             disclosure={disclosure}
             hasMoreHistory={hasMoreHistory}
             isLoadingHistory={isLoadingHistory}
-            onAssistantContentGrow={onAssistantContentGrow}
+            jumpLatestSignal={jumpLatestSignal}
             onAssistantRevealComplete={onAssistantRevealComplete}
+            onLatestChange={onLatestChange}
             onLoadHistory={onLoadHistory}
             onQueuedCancel={onQueuedCancel}
             onQueuedEditStart={onQueuedEditStart}
             onQueuedSave={onQueuedSave}
             scrollElement={viewportNode}
+            sessionID={sessionID}
             turns={turns}
           />
           {submitError ? (
@@ -139,14 +134,4 @@ export function TranscriptView({
       ) : null}
     </div>
   );
-}
-
-function setRef<T>(ref: Ref<T>, value: T | null) {
-  if (typeof ref === "function") {
-    ref(value);
-    return;
-  }
-  if (ref) {
-    (ref as { current: T | null }).current = value;
-  }
 }

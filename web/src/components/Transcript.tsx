@@ -4,7 +4,6 @@ import type { ContentPart } from "@/api/client";
 import { TranscriptView } from "@/components/transcript/TranscriptView";
 import type { TranscriptTurnVM } from "@/components/transcript/types";
 import { useTranscriptData } from "@/components/transcript/useTranscriptData";
-import { useBottomStick } from "@/hooks/useBottomStick";
 
 type TranscriptProps = {
   token: string;
@@ -15,21 +14,19 @@ type TranscriptProps = {
 
 export function Transcript({ token, sessionID, sessionRunning = false, submitError }: TranscriptProps) {
   const [disclosureByKey, setDisclosureByKey] = useState<Record<string, boolean>>({});
+  const [isAtLatest, setIsAtLatest] = useState(true);
+  const [jumpLatestSignal, setJumpLatestSignal] = useState(0);
   const [newMessageCount, setNewMessageCount] = useState(0);
-  const { markAssistantRevealed, pendingUsers, transcript, turnsQuery, updateQueued } = useTranscriptData({
+  const { markAssistantRevealed, transcript, turnsQuery, updateQueued } = useTranscriptData({
     sessionID,
     sessionRunning,
     token,
   });
-  const bottomStick = useBottomStick({ sessionID });
-  const viewportRef = useCallback(
-    (node: HTMLDivElement | null) => {
-      bottomStick.viewportRef(node);
-    },
-    [bottomStick.viewportRef],
-  );
-  const pendingIDsRef = useRef<Set<string>>(new Set());
+  const disclosureByKeyRef = useRef(disclosureByKey);
+  const sessionIDRef = useRef(sessionID);
   const turnVMsRef = useRef<TranscriptTurnVM[]>([]);
+  disclosureByKeyRef.current = disclosureByKey;
+  sessionIDRef.current = sessionID;
   const cancelQueued = useCallback(
     (clientMessageID: string) => updateQueued(clientMessageID, { status: "cancelled" }),
     [updateQueued],
@@ -44,9 +41,9 @@ export function Transcript({ token, sessionID, sessionRunning = false, submitErr
   );
   const disclosure = useMemo(
     () => ({
-      isOpen: (key: string) => Boolean(disclosureByKey[`${sessionID}:${key}`]),
+      isOpen: (key: string) => Boolean(disclosureByKeyRef.current[`${sessionIDRef.current}:${key}`]),
       setOpen: (key: string, open: boolean) => {
-        const scopedKey = `${sessionID}:${key}`;
+        const scopedKey = `${sessionIDRef.current}:${key}`;
         setDisclosureByKey((previous) => {
           if (Boolean(previous[scopedKey]) === open) {
             return previous;
@@ -60,33 +57,16 @@ export function Transcript({ token, sessionID, sessionRunning = false, submitErr
         });
       },
     }),
-    [disclosureByKey, sessionID],
+    [],
   );
 
-  const handleAssistantRevealComplete = useCallback(
-    (turnID: string) => {
-      markAssistantRevealed(turnID);
-      window.requestAnimationFrame(() => {
-        bottomStick.stickToBottomIfNeeded({ stabilizeFrames: 2 });
-      });
-    },
-    [bottomStick.stickToBottomIfNeeded, markAssistantRevealed],
-  );
-
-  useLayoutEffect(() => {
-    const previous = pendingIDsRef.current;
-    const next = new Set(pendingUsers.map((message) => message.clientMessageID));
-    pendingIDsRef.current = next;
-    if (bottomStick.mode === "following" && pendingUsers.some((message) => !previous.has(message.clientMessageID))) {
-      bottomStick.enterBottomMode({ stabilizeFrames: 2 });
-    }
-  }, [bottomStick.enterBottomMode, bottomStick.mode, pendingUsers]);
+  const handleAssistantRevealComplete = useCallback((turnID: string) => markAssistantRevealed(turnID), [markAssistantRevealed]);
 
   useLayoutEffect(() => {
     const previous = turnVMsRef.current;
     const next = transcript.turnVMs;
     turnVMsRef.current = next;
-    if (bottomStick.mode === "following") {
+    if (isAtLatest) {
       setNewMessageCount((count) => (count === 0 ? count : 0));
       return;
     }
@@ -94,16 +74,23 @@ export function Transcript({ token, sessionID, sessionRunning = false, submitErr
     if (appended > 0) {
       setNewMessageCount((count) => count + appended);
     }
-  }, [bottomStick.mode, transcript.turnVMs]);
+  }, [isAtLatest, transcript.turnVMs]);
+
+  const handleLatestChange = useCallback((next: boolean) => {
+    setIsAtLatest(next);
+    if (next) {
+      setNewMessageCount(0);
+    }
+  }, []);
 
   const handleJumpLatest = useCallback(() => {
     setNewMessageCount(0);
-    bottomStick.enterBottomMode({ stabilizeFrames: 2 });
-  }, [bottomStick.enterBottomMode]);
+    setIsAtLatest(true);
+    setJumpLatestSignal((signal) => signal + 1);
+  }, []);
 
   return (
     <TranscriptView
-      contentRef={bottomStick.contentRef}
       disclosure={disclosure}
       hasItems={transcript.hasItems}
       isError={turnsQuery.isError}
@@ -112,14 +99,15 @@ export function Transcript({ token, sessionID, sessionRunning = false, submitErr
       isLoading={turnsQuery.isLoading}
       isLoadingHistory={turnsQuery.isFetchingNextPage}
       isPending={turnsQuery.isPending}
+      jumpLatestSignal={jumpLatestSignal}
       newMessageCount={newMessageCount}
-      showJumpLatest={bottomStick.showJumpLatest}
+      sessionID={sessionID}
+      showJumpLatest={!isAtLatest}
       submitError={submitError}
       turns={transcript.turnVMs}
-      viewportRef={viewportRef}
-      onAssistantContentGrow={bottomStick.stickToBottomIfNeeded}
       onAssistantRevealComplete={handleAssistantRevealComplete}
       onJumpLatest={handleJumpLatest}
+      onLatestChange={handleLatestChange}
       onLoadHistory={turnsQuery.fetchNextPage}
       onQueuedCancel={cancelQueued}
       onQueuedEditStart={startQueuedEdit}

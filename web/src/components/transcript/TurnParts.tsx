@@ -1,5 +1,5 @@
 import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
-import { Children, isValidElement, useEffect, useRef, useState, type ReactNode } from "react";
+import { Children, isValidElement, useEffect, useRef, useState, type ReactNode, type ToggleEvent } from "react";
 import ReactMarkdown, { type Components, type UrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -35,7 +35,7 @@ export function TurnParts({
               <ThoughtPart
                 key={partKey}
                 active={part.active}
-                open={disclosure?.isOpen(disclosureKey) || false}
+                defaultOpen={disclosure?.isOpen(disclosureKey) || false}
                 text={part.text}
                 onOpenChange={(open) => disclosure?.setOpen(disclosureKey, open)}
               />
@@ -44,7 +44,7 @@ export function TurnParts({
             return (
               <ToolUsePart
                 key={partKey}
-                open={disclosure?.isOpen(disclosureKey) || false}
+                defaultOpen={disclosure?.isOpen(disclosureKey) || false}
                 part={part}
                 onOpenChange={(open) => disclosure?.setOpen(disclosureKey, open)}
               />
@@ -208,19 +208,36 @@ function findLastOverlayPartIndex(parts: AssistantOverlayPart[], type: Assistant
   return -1;
 }
 
+function useLocalDisclosure(defaultOpen: boolean, onOpenChange?: (open: boolean) => void) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  useEffect(() => {
+    setOpen(defaultOpen);
+  }, [defaultOpen]);
+
+  function handleToggle(event: ToggleEvent<HTMLDetailsElement>) {
+    const next = event.currentTarget.open;
+    setOpen((current) => (current === next ? current : next));
+    onOpenChange?.(next);
+  }
+
+  return [open, handleToggle] as const;
+}
+
 function ThoughtPart({
   active = false,
-  open,
+  defaultOpen,
   text,
   onOpenChange,
 }: {
   active?: boolean;
-  open: boolean;
+  defaultOpen: boolean;
   text: string;
   onOpenChange?: (open: boolean) => void;
 }) {
   const { locale, t } = useI18n();
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [open, handleToggle] = useLocalDisclosure(defaultOpen, onOpenChange);
 
   useEffect(() => {
     if (!active || !open || !bodyRef.current) {
@@ -233,7 +250,7 @@ function ThoughtPart({
     <details
       className="relative text-[12px] leading-[1.5] text-muted-foreground"
       open={open}
-      onToggle={(event) => onOpenChange?.(event.currentTarget.open)}
+      onToggle={handleToggle}
     >
       {open ? <span aria-hidden="true" className="pointer-events-none absolute top-6 bottom-0 left-[6px] border-l border-border" /> : null}
       <summary className="inline-grid h-6 cursor-default list-none grid-cols-[0.75rem_auto] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden">
@@ -262,15 +279,16 @@ function ThoughtPart({
 }
 
 function ToolUsePart({
-  open,
+  defaultOpen,
   part,
   onOpenChange,
 }: {
-  open: boolean;
+  defaultOpen: boolean;
   part: Extract<TurnPartVM, { type: "tool_use" }>;
   onOpenChange?: (open: boolean) => void;
 }) {
   const { locale, t } = useI18n();
+  const [open, handleToggle] = useLocalDisclosure(defaultOpen, onOpenChange);
   const args = formatToolArgs(part.argsText || part.args);
   const result = formatToolResult(part.resultContent);
   const liveResult = result || (part.phase === "ok" || part.phase === "error" ? formatToolResult(part.summary) : null);
@@ -283,7 +301,7 @@ function ToolUsePart({
     <details
       className="relative text-[12px] leading-[1.5] text-muted-foreground"
       open={open}
-      onToggle={(event) => onOpenChange?.(event.currentTarget.open)}
+      onToggle={handleToggle}
     >
       {open ? <span aria-hidden="true" className="pointer-events-none absolute top-6 bottom-0 left-[6px] border-l border-border" /> : null}
       <summary className="inline-grid h-6 cursor-default list-none grid-cols-[0.75rem_auto] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden">

@@ -48,7 +48,18 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("sqlite: apply schema: %w", err)
 	}
+	if err := dropObsoleteTables(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return s, nil
+}
+
+func dropObsoleteTables(db *sql.DB) error {
+	if _, err := db.Exec(`DROP TABLE IF EXISTS provider_profiles; DROP TABLE IF EXISTS settings;`); err != nil {
+		return fmt.Errorf("sqlite: drop obsolete tables: %w", err)
+	}
+	return nil
 }
 
 func ensureDBFile(path string) error {
@@ -1053,6 +1064,8 @@ func conversationTurnFromSQL(turn *store.Turn, messages []*store.Message) *store
 		SessionID:       turn.SessionID,
 		ClientMessageID: turn.ClientMessageID,
 		Status:          turn.Status,
+		Provider:        turn.Provider,
+		Model:           turn.Model,
 		Error:           turn.Error,
 		CreatedAt:       turn.CreatedAt,
 		UpdatedAt:       turn.UpdatedAt,
