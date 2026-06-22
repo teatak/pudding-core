@@ -621,19 +621,7 @@ html[data-shell] .pudding-markdown * {
 }
 
 .pudding-markdown {
-  @apply grid gap-1 whitespace-normal break-words;
-}
-
-.pudding-markdown > :where(p, ul, ol, blockquote, hr, .code-block-wrap, .table-wrap) {
-  @apply min-w-0;
-}
-
-.pudding-markdown :where(p, li, blockquote) {
-  @apply leading-6;
-}
-
-.pudding-markdown strong {
-  @apply font-medium;
+  @apply grid gap-2 whitespace-normal break-words;
 }
 
 .phase-dot-breathe {
@@ -669,15 +657,7 @@ html[data-shell] .pudding-markdown * {
 }
 
 .pudding-markdown :where(ul, ol) {
-  @apply my-1 grid gap-1 pl-5;
-}
-
-.pudding-markdown :where(ul ul, ul ol, ol ul, ol ol) {
-  @apply mt-1;
-}
-
-.pudding-markdown li > :where(p, ul, ol, blockquote, .code-block-wrap, .table-wrap):not(:first-child) {
-  @apply mt-1;
+  @apply grid gap-1 pl-5;
 }
 
 .pudding-markdown ul {
@@ -692,16 +672,12 @@ html[data-shell] .pudding-markdown * {
   @apply text-primary underline underline-offset-4;
 }
 
-.pudding-markdown .markdown-image-link {
-  @apply inline-flex max-w-full items-center rounded-md border border-border/60 bg-muted/30 px-1.5 py-0.5 text-xs leading-5 text-muted-foreground no-underline transition-colors hover:bg-muted hover:text-foreground;
-}
-
 .pudding-markdown blockquote {
-  @apply my-1 rounded-r-md border-l-2 border-border/80 bg-muted/25 py-1 pr-2 pl-3 text-muted-foreground;
+  @apply border-l-2 border-border pl-3 text-muted-foreground;
 }
 
 .pudding-markdown hr {
-  @apply my-1 border-border/70;
+  @apply border-border;
 }
 
 .pudding-markdown .contains-task-list {
@@ -713,23 +689,7 @@ html[data-shell] .pudding-markdown * {
 }
 
 .pudding-markdown .task-list-item input {
-  @apply mt-1 size-3.5 accent-primary;
-}
-
-.pudding-markdown sup a {
-  @apply text-[11px] no-underline;
-}
-
-.pudding-markdown section[data-footnotes] {
-  @apply border-t border-border/60 pt-2 text-xs leading-5 text-muted-foreground;
-}
-
-.pudding-markdown section[data-footnotes] h2 {
-  @apply text-xs text-muted-foreground;
-}
-
-.pudding-markdown section[data-footnotes] ol {
-  @apply gap-0 pl-4;
+  @apply mt-1;
 }
 
 .pudding-markdown code {
@@ -761,7 +721,7 @@ html[data-shell] .pudding-markdown * {
 }
 
 .pudding-markdown .code-block-wrap {
-  @apply relative my-1 max-w-full;
+  @apply relative max-w-full;
 }
 
 .pudding-markdown .code-block-wrap pre {
@@ -788,7 +748,7 @@ html[data-shell] .pudding-markdown * {
 /* wrapper 负责圆角边框与横向滚动;table 本体保持 table 布局并 w-full,
    内容窄时行随容器通栏,内容宽时在 wrapper 内横滚 */
 .pudding-markdown .table-wrap {
-  @apply my-1 max-w-full overflow-x-auto rounded-lg border;
+  @apply max-w-full overflow-x-auto rounded-lg border;
 }
 
 .pudding-markdown table {

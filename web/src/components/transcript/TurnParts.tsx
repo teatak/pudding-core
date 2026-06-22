@@ -396,7 +396,7 @@ function MarkdownBody({ text }: { text: string }) {
         return label ? <span>{label}</span> : null;
       }
       return (
-        <a className="markdown-image-link" href={src} target="_blank" rel="noreferrer noopener">
+        <a href={src} target="_blank" rel="noreferrer noopener">
           {label}
         </a>
       );
