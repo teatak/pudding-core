@@ -232,8 +232,8 @@ function UsageSettings({ token }: { token: string }) {
   const summary = useMemo(() => summarizeDailyUsage(days), [days]);
 
   return (
-    <div className="@container mx-auto grid w-full max-w-6xl gap-5">
-      <section className="grid gap-4">
+    <div className="@container mx-auto grid w-full max-w-[980px] gap-6 pt-2">
+      <section className="grid gap-5">
         {usageQuery.isError ? (
           <Alert variant="destructive">
             <AlertDescription className="grid gap-2">
@@ -244,7 +244,7 @@ function UsageSettings({ token }: { token: string }) {
         {usageQuery.isLoading ? <UsageSkeleton /> : null}
         {!usageQuery.isLoading ? (
           <>
-            <div className="grid gap-4 border-b pb-4 sm:grid-cols-4 sm:divide-x sm:divide-border/70">
+            <div className="grid gap-y-4 border-b pb-5 sm:grid-cols-4 sm:divide-x sm:divide-border/70">
               <UsageMetric label={t("settings.usage.totalTokens")} value={formatUsageTokens(summary.totalTokens)} />
               <UsageMetric label={t("settings.usage.requests")} value={formatNumber(summary.requestCount)} />
               <UsageMetric label={t("settings.usage.activeDays")} value={formatNumber(summary.activeDays)} />
@@ -260,8 +260,8 @@ function UsageSettings({ token }: { token: string }) {
 
 function UsageMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 sm:px-4 first:sm:pl-0">
-      <div className="text-lg font-semibold tabular-nums text-foreground">{value}</div>
+    <div className="min-w-0 sm:px-5 first:sm:pl-0">
+      <div className="text-2xl font-semibold tabular-nums tracking-tight text-foreground">{value}</div>
       <div className="mt-0.5 text-xs text-muted-foreground">{label}</div>
     </div>
   );
@@ -276,6 +276,15 @@ function UsageHeatmap({
   locale: string;
   t: (key: string) => string;
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollLeft = el.scrollWidth;
+    }
+  }, [days.length]);
+
   if (days.length === 0) {
     return <div className="text-sm text-muted-foreground">{t("settings.usage.noData")}</div>;
   }
@@ -286,14 +295,14 @@ function UsageHeatmap({
   const monthLabels = usageMonthLabels(days, leading, locale);
 
   return (
-    <div className="grid gap-3">
-      <div className="text-sm text-muted-foreground">{t("settings.usage.last365Days")}</div>
-      <div className="overflow-x-auto pb-1">
+    <div ref={scrollRef} className="grid gap-3 overflow-x-auto pb-1">
+      <div className="mx-auto min-w-max">
+        <div className="mb-3 text-sm font-medium text-muted-foreground">{t("settings.usage.last365Days")}</div>
         <div className="min-w-max">
           <TooltipProvider>
             <div
-              className="grid grid-flow-col grid-rows-7 gap-1"
-              style={{ gridTemplateRows: "repeat(7, 0.75rem)" }}
+              className="grid grid-flow-col grid-rows-7 gap-0.5"
+              style={{ gridAutoColumns: "0.875rem", gridTemplateRows: "repeat(7, 0.875rem)" }}
             >
               {cells.map((day, index) =>
                 day ? (
@@ -305,14 +314,14 @@ function UsageHeatmap({
                     t={t}
                   />
                 ) : (
-                  <div key={`empty-${index}`} className="size-3" />
+                  <div key={`empty-${index}`} className="size-3.5" />
                 ),
               )}
             </div>
           </TooltipProvider>
           <div
-            className="mt-3 grid gap-1 text-xs text-muted-foreground"
-            style={{ gridTemplateColumns: `repeat(${weekCount}, 0.75rem)` }}
+            className="mt-2.5 grid gap-0.5 text-xs text-muted-foreground"
+            style={{ gridTemplateColumns: `repeat(${weekCount}, 0.875rem)` }}
           >
             {monthLabels.map((label) => (
               <div key={`${label.month}-${label.column}`} className="whitespace-nowrap" style={{ gridColumn: `${label.column + 1} / span 4` }}>
@@ -338,7 +347,7 @@ function UsageHeatmapCell({
   t: (key: string) => string;
 }) {
   if (day.totalTokens <= 0 && day.requestCount <= 0) {
-    return <div className={cn("size-3 rounded-[3px]", usageHeatClass(day.totalTokens, heatThresholds))} />;
+    return <div className={cn("size-3.5 rounded", usageHeatClass(day.totalTokens, heatThresholds))} />;
   }
 
   return (
@@ -346,7 +355,7 @@ function UsageHeatmapCell({
       <TooltipTrigger asChild>
         <button
           aria-label={usageDayTitle(day, t)}
-          className={cn("size-3 rounded-[3px] transition-colors", usageHeatClass(day.totalTokens, heatThresholds))}
+          className={cn("size-3.5 rounded transition-colors", usageHeatClass(day.totalTokens, heatThresholds))}
           type="button"
         />
       </TooltipTrigger>
@@ -395,7 +404,7 @@ function summarizeDailyUsage(days: DailyUsageStat[]) {
 }
 
 function usageMonthLabels(days: DailyUsageStat[], leading: number, locale: string) {
-  const rawLabels: Array<{ column: number; month: string }> = [];
+  const labels: Array<{ column: number; month: string }> = [];
   let previousMonth = "";
   for (let index = 0; index < days.length; index += 1) {
     const date = parseUsageDate(days[index].date);
@@ -404,23 +413,15 @@ function usageMonthLabels(days: DailyUsageStat[], leading: number, locale: strin
       continue;
     }
     previousMonth = monthKey;
-    rawLabels.push({
+    labels.push({
       column: Math.floor((leading + index) / 7),
       month: new Intl.DateTimeFormat(locale, { month: "short" }).format(date),
     });
   }
-
-  const labels: Array<{ column: number; month: string }> = [];
-  for (let index = 0; index < rawLabels.length; index += 1) {
-    const label = rawLabels[index];
-    const nextLabel = rawLabels[index + 1];
-    if (index === 0 && nextLabel && nextLabel.column - label.column < 5) {
-      continue;
-    }
-    if (labels.length > 0 && label.column - labels[labels.length - 1].column < 5) {
-      continue;
-    }
-    labels.push(label);
+  const first = labels[0];
+  const second = labels[1];
+  if (first && second && second.column - first.column < 5) {
+    return labels.slice(1);
   }
   return labels;
 }

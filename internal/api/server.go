@@ -47,6 +47,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/sessions/:id").GET(s.getSession).PATCH(s.patchSession).DELETE(s.deleteSession)
 	app.Route("/sessions/:id/submit").POST(s.submit)
 	app.Route("/sessions/:id/cancel").POST(s.cancel)
+	app.Route("/sessions/:id/compact").POST(s.compactSession)
 	app.Route("/sessions/:id/approvals").GET(s.listApprovals)
 	app.Route("/sessions/:id/approvals/:approvalID/approve").POST(s.approveApproval)
 	app.Route("/sessions/:id/approvals/:approvalID/deny").POST(s.denyApproval)
@@ -196,6 +197,7 @@ func (s *Server) deleteSession(c *cart.Context) error {
 type submitReq struct {
 	ClientMessageID string `json:"clientMessageID"`
 	Text            string `json:"text"`
+	Kind            string `json:"kind,omitempty"`
 }
 
 func (s *Server) submit(c *cart.Context) error {
@@ -208,6 +210,7 @@ func (s *Server) submit(c *cart.Context) error {
 		SessionID:       id,
 		ClientMessageID: req.ClientMessageID,
 		Text:            req.Text,
+		Kind:            req.Kind,
 	})
 	switch {
 	case errors.Is(err, engine.ErrEmptyInput):
@@ -304,6 +307,43 @@ func (s *Server) cancel(c *cart.Context) error {
 		return nil
 	}
 	c.JSON(http.StatusAccepted, map[string]string{"status": "cancelling"})
+	return nil
+}
+
+type compactReq struct {
+	Hint string `json:"hint"`
+}
+
+func (s *Server) compactSession(c *cart.Context) error {
+	id, _ := c.Param("id")
+	var req compactReq
+	if err := decode(c, &req); err != nil && !errors.Is(err, io.EOF) {
+		return badRequest(c, "invalid json body")
+	}
+	res, err := s.engine.Compact(c.Request.Context(), engine.CompactInput{
+		SessionID: id,
+		Hint:      req.Hint,
+	})
+	switch {
+	case errors.Is(err, engine.ErrTurnRunning):
+		c.JSON(http.StatusConflict, map[string]string{"error": "turn_running"})
+		return nil
+	case errors.Is(err, engine.ErrCompactRunning):
+		c.JSON(http.StatusConflict, map[string]string{"error": "compact_running"})
+		return nil
+	case errors.Is(err, engine.ErrCompactEmpty):
+		c.JSON(http.StatusBadRequest, map[string]string{"error": "compact_empty"})
+		return nil
+	case errors.Is(err, engine.ErrNoModel):
+		c.JSON(http.StatusBadRequest, map[string]string{"error": "no_model"})
+		return nil
+	case errors.Is(err, engine.ErrProviderConfig):
+		c.JSON(http.StatusBadRequest, map[string]string{"error": "provider_config"})
+		return nil
+	case err != nil:
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusAccepted, res)
 	return nil
 }
 

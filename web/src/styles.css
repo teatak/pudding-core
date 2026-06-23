@@ -375,6 +375,48 @@ html[data-shell] .pudding-markdown * {
     background-color: var(--message-user-background);
 }
 
+[data-slot="head-art"],
+[data-slot="face-art"],
+[data-slot="head-art"] :is(rect, path, circle),
+[data-slot="face-art"] :is(rect, path, circle),
+[data-slot="shadow"] ellipse {
+    transition:
+        fill 260ms ease,
+        stroke 260ms ease,
+        filter 220ms ease;
+}
+
+[data-slot="head-art"] stop,
+[data-slot="face-art"] stop {
+    transition:
+        stop-color 320ms ease,
+        stop-opacity 260ms ease;
+}
+
+[data-slot="eyes"],
+[data-slot="eye-glints"],
+[data-slot="mouth"],
+[data-slot="eyes-error"],
+[data-slot="mouth-error"] {
+    transition: opacity 180ms ease;
+}
+
+[data-slot="eyes-error"],
+[data-slot="mouth-error"] {
+    opacity: 0;
+}
+
+[data-mood="error"] [data-slot="eyes"],
+[data-mood="error"] [data-slot="eye-glints"],
+[data-mood="error"] [data-slot="mouth"] {
+    opacity: 0;
+}
+
+[data-mood="error"] [data-slot="eyes-error"],
+[data-mood="error"] [data-slot="mouth-error"] {
+    opacity: 1;
+}
+
 [data-mood="thinking"] [data-slot="antenna"] circle {
     animation: pudding-mascot-thinking-glow 1.4s ease-in-out infinite;
     transform-box: fill-box;
@@ -633,7 +675,12 @@ html[data-shell] .pudding-markdown * {
 }
 
 .pudding-markdown {
-  @apply grid gap-2 whitespace-normal break-words;
+  @apply grid min-w-0 max-w-full gap-2 whitespace-normal break-words;
+}
+
+.pudding-markdown > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .phase-dot-breathe {
@@ -723,7 +770,7 @@ html[data-shell] .pudding-markdown * {
 }
 
 .pudding-markdown pre {
-  @apply overflow-auto rounded-lg bg-muted p-3;
+  @apply max-w-full overflow-auto rounded-lg bg-muted p-3;
 }
 
 .pudding-markdown pre code {
@@ -731,6 +778,8 @@ html[data-shell] .pudding-markdown * {
 }
 
 .pudding-markdown .shiki {
+  max-width: 100%;
+  overflow-x: auto;
   background-color: color-mix(in oklch, var(--muted), var(--background) 18%) !important;
 }
 
@@ -747,7 +796,12 @@ html[data-shell] .pudding-markdown * {
 }
 
 .pudding-markdown .code-block-wrap {
-  @apply relative max-w-full;
+  @apply relative min-w-0 max-w-full;
+}
+
+.pudding-markdown .code-block-wrap > div {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .pudding-markdown .code-block-wrap pre {
@@ -755,7 +809,7 @@ html[data-shell] .pudding-markdown * {
 }
 
 .pudding-markdown .code-copy-btn {
-  @apply absolute top-2 right-2 z-10 inline-flex size-6 items-center justify-center rounded-md bg-transparent text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground dark:hover:bg-muted/50;
+  @apply absolute top-2 right-2 z-10 inline-flex size-6 items-center justify-center rounded-md border border-border/70 bg-background/85 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-background hover:text-foreground dark:bg-background/80 dark:hover:bg-background;
 }
 
 .pudding-markdown .code-copy-btn::before {

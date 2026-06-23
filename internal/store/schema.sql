@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS turns (
     id                TEXT PRIMARY KEY,
     session_id        TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     client_message_id TEXT    NOT NULL,
-    status            TEXT    NOT NULL CHECK (status IN ('running','completed','failed','cancelled')),
+    status            TEXT    NOT NULL,
     provider          TEXT    NOT NULL DEFAULT '', -- BeginTurn 时刻快照
     model             TEXT    NOT NULL DEFAULT '',
     mode              TEXT    NOT NULL DEFAULT 'chat',
@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS queued_inputs (
     session_id        TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     client_message_id TEXT    NOT NULL,
     text              TEXT    NOT NULL,
-    status            TEXT    NOT NULL CHECK (status IN ('queued','editing','cancelled','promoted')),
+    status            TEXT    NOT NULL,
     provider          TEXT    NOT NULL DEFAULT '',
     model             TEXT    NOT NULL DEFAULT '',
     mode              TEXT    NOT NULL DEFAULT 'chat',
@@ -89,11 +89,12 @@ CREATE TABLE IF NOT EXISTS messages (
     id                TEXT PRIMARY KEY,
     session_id        TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     turn_id           TEXT    NOT NULL DEFAULT '',
-    role              TEXT    NOT NULL CHECK (role IN ('user','assistant','tool','summary')),
+    role              TEXT    NOT NULL,
     kind              TEXT    NOT NULL DEFAULT '',
     text              TEXT    NOT NULL,
     parts             TEXT    NOT NULL DEFAULT '[]',
     turn_index        INTEGER NOT NULL DEFAULT 0,
+    metadata          TEXT    NOT NULL DEFAULT '{}',
     client_message_id TEXT    NOT NULL DEFAULT '', -- 仅 user message
     interrupted       INTEGER NOT NULL DEFAULT 0,  -- cancel/failed 保留的半截输出
     created_at        INTEGER NOT NULL

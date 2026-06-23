@@ -176,3 +176,68 @@ func TestBuildFiltersToolPartsOutsideMode(t *testing.T) {
 		t.Fatalf("research context should keep research tool history: %+v", researchParts)
 	}
 }
+
+func TestBuildUsesLatestCompactBoundary(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID: "s1", TurnID: "t1", UserMessageID: "m_old",
+		ClientMessageID: "c_old", UserText: "old user",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.FinishTurn(ctx, store.FinishTurnInput{
+		TurnID:         "t1",
+		Status:         store.TurnCompleted,
+		AssistantParts: store.TextPart("old assistant"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID: "s1", TurnID: "t2", UserMessageID: "m_tail",
+		ClientMessageID: "c_tail", UserText: "tail user",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.FinishTurn(ctx, store.FinishTurnInput{
+		TurnID:         "t2",
+		Status:         store.TurnCompleted,
+		AssistantParts: store.TextPart("tail assistant"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.AppendCompactSummary(ctx, store.AppendCompactSummaryInput{
+		SessionID:       "s1",
+		TurnID:          "t_compact",
+		MessageID:       "m_compact",
+		ClientMessageID: "compact:t_compact",
+		Provider:        "mock",
+		Model:           "mock",
+		Text:            "summary of old history",
+		Metadata:        store.CompactMessageMetadata([]string{"m_old", "msg_t1"}, []string{"m_tail", "msg_t2"}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID: "s1", TurnID: "t3", UserMessageID: "m_after",
+		ClientMessageID: "c_after", UserText: "after compact",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := New(ms, nil).Build(ctx, "s1", "m", string(store.ModeChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(req.Messages))
+	for _, msg := range req.Messages {
+		got = append(got, msg.Text)
+	}
+	want := []string{"summary of old history", "tail user", "tail assistant", "after compact"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("unexpected compact context: got %v want %v", got, want)
+	}
+}

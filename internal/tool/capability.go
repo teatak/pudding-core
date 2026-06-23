@@ -15,7 +15,6 @@ type CapabilityRequest struct {
 	WorkspaceDirs     []string        `json:"workspaceDirs,omitempty"`
 	NeedsWorkspaceDir bool            `json:"needsWorkspaceDir,omitempty"`
 	SuggestedDirName  string          `json:"suggestedDirName,omitempty"`
-	IntendedActions   []string        `json:"intendedActions,omitempty"`
 	Risk              string          `json:"risk,omitempty"`
 }
 
@@ -23,7 +22,7 @@ func RequestCapabilityDefinition() provider.ToolDef {
 	return provider.ToolDef{
 		Name:        RequestCapability,
 		Description: "Request higher capability when the current mode cannot complete the user's task.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"targetMode":{"type":"string","enum":["research","workspace"],"description":"Minimum sufficient higher capability to complete the task."},"reason":{"type":"string","description":"Why the current capability is insufficient."},"workspaceDirs":{"type":"array","items":{"type":"string"},"description":"Absolute workspace directories requested for workspace capability. Leave empty if the user must choose."},"needsWorkspaceDir":{"type":"boolean","description":"Set true when workspace capability is needed but no concrete directory is known."},"suggestedDirName":{"type":"string","description":"Optional short suggested folder name when asking the user to choose a workspace directory."},"intendedActions":{"type":"array","items":{"type":"string"},"description":"Concrete actions you intend to take after approval."},"risk":{"type":"string","description":"Potential side effects or privacy/network/file risks."}},"required":["targetMode","reason"],"additionalProperties":false}`),
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"targetMode":{"type":"string","enum":["research","workspace"],"description":"Minimum sufficient higher capability to complete the task."},"reason":{"type":"string","description":"Why the current capability is insufficient."},"workspaceDirs":{"type":"array","items":{"type":"string"},"description":"Absolute workspace directories requested for workspace capability. Leave empty if the user must choose."},"needsWorkspaceDir":{"type":"boolean","description":"Set true when workspace capability is needed but no concrete directory is known."},"suggestedDirName":{"type":"string","description":"Optional short suggested folder name when asking the user to choose a workspace directory."},"risk":{"type":"string","description":"Potential side effects or privacy/network/file risks."}},"required":["targetMode","reason"],"additionalProperties":false}`),
 		Capability:  store.ModeChat,
 	}
 }

@@ -282,6 +282,7 @@ const (
 	RoleUser      Role = "user"
 	RoleAssistant Role = "assistant"
 	RoleTool      Role = "tool"
+	RoleSystem    Role = "system"
 	RoleSummary   Role = "summary"
 )
 
@@ -347,14 +348,15 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 }
 
 type Message struct {
-	ID        string        `json:"id"`
-	SessionID string        `json:"sessionID"`
-	TurnID    string        `json:"turnID"`
-	Role      Role          `json:"role"`
-	Kind      MessageKind   `json:"kind"`
-	Text      string        `json:"text"`
-	Parts     []ContentPart `json:"parts"`
-	TurnIndex int           `json:"turnIndex"`
+	ID        string          `json:"id"`
+	SessionID string          `json:"sessionID"`
+	TurnID    string          `json:"turnID"`
+	Role      Role            `json:"role"`
+	Kind      MessageKind     `json:"kind"`
+	Text      string          `json:"text"`
+	Parts     []ContentPart   `json:"parts"`
+	TurnIndex int             `json:"turnIndex"`
+	Metadata  json.RawMessage `json:"metadata,omitempty"`
 	// ClientMessageID 只在 user message 上有值,承载 submit 幂等与前端 overlay 对账。
 	ClientMessageID string `json:"clientMessageID,omitempty"`
 	// Interrupted 标记 cancel / failed 时保留的半截 assistant 输出
@@ -368,6 +370,48 @@ func TextPart(text string) []ContentPart {
 		return nil
 	}
 	return []ContentPart{{Type: ContentPartText, Text: text}}
+}
+
+type MessageMetadata struct {
+	Compact *CompactMetadata `json:"compact,omitempty"`
+}
+
+type CompactMetadata struct {
+	SourceMessageIDs []string `json:"source_message_ids,omitempty"`
+	TailMessageIDs   []string `json:"tail_message_ids,omitempty"`
+}
+
+func CompactMessageMetadata(sourceIDs, tailIDs []string) json.RawMessage {
+	meta := MessageMetadata{Compact: &CompactMetadata{
+		SourceMessageIDs: cloneStringSlice(sourceIDs),
+		TailMessageIDs:   cloneStringSlice(tailIDs),
+	}}
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return data
+}
+
+func CompactMetadataFromMessage(msg *Message) (*CompactMetadata, bool) {
+	if msg == nil || len(msg.Metadata) == 0 || !json.Valid(msg.Metadata) {
+		return nil, false
+	}
+	var meta MessageMetadata
+	if err := json.Unmarshal(msg.Metadata, &meta); err != nil || meta.Compact == nil {
+		return nil, false
+	}
+	out := *meta.Compact
+	out.SourceMessageIDs = cloneStringSlice(out.SourceMessageIDs)
+	out.TailMessageIDs = cloneStringSlice(out.TailMessageIDs)
+	return &out, true
+}
+
+func cloneStringSlice(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	return append([]string(nil), values...)
 }
 
 func CloneContentParts(parts []ContentPart) []ContentPart {
@@ -652,6 +696,26 @@ type BeginTurnResult struct {
 	StartedEvent *event.Event // 已分配 seq 并落库;Duplicate 时为 nil
 }
 
+type BeginSystemTurnInput struct {
+	SessionID       string
+	TurnID          string
+	SystemMessageID string
+	ClientMessageID string
+	Text            string
+	// Provider / Model 由 engine 在提交时刻解析后传入,随 turn 落库。
+	Provider    string
+	Model       string
+	Mode        AgentMode
+	ModelConfig json.RawMessage
+}
+
+type BeginSystemTurnResult struct {
+	Duplicate     bool
+	Turn          *Turn
+	SystemMessage *Message
+	StartedEvent  *event.Event // 已分配 seq 并落库;Duplicate 时为 nil
+}
+
 type FinishTurnInput struct {
 	TurnID string
 	Status TurnStatus // completed | failed | cancelled
@@ -670,6 +734,25 @@ type AppendTurnOutputInput struct {
 
 type AppendTurnOutputResult struct {
 	Messages []*Message
+}
+
+type AppendCompactSummaryInput struct {
+	SessionID       string
+	TurnID          string
+	MessageID       string
+	ClientMessageID string
+	Provider        string
+	Model           string
+	Mode            AgentMode
+	ModelConfig     json.RawMessage
+	Text            string
+	Metadata        json.RawMessage
+}
+
+type AppendCompactSummaryResult struct {
+	Turn       *Turn
+	Message    *Message
+	FinalEvent *event.Event
 }
 
 type FinishTurnResult struct {
@@ -756,6 +839,9 @@ type Store interface {
 	// running turn(否则 ErrTurnRunning)→ 落 user message + running turn
 	// + turn.started 事件。
 	BeginTurn(ctx context.Context, in BeginTurnInput) (*BeginTurnResult, error)
+	// BeginSystemTurn 创建无 user message 的 running turn。用于 /summary
+	// 这类 system reminder:触发模型回复,但不在 transcript 里冒用户气泡。
+	BeginSystemTurn(ctx context.Context, in BeginSystemTurnInput) (*BeginSystemTurnResult, error)
 	// QueueInput 持久化等待发送的用户输入。Duplicate 表示同一
 	// clientMessageID 已存在于 queued_inputs 或 turns,不重复写入。
 	QueueInput(ctx context.Context, in QueueInputInput) (*QueueInputResult, error)
@@ -767,6 +853,8 @@ type Store interface {
 	// AppendTurnOutput 在 turn 仍 running 时追加已经完整的 assistant/tool
 	// output message;token delta 不走这里。
 	AppendTurnOutput(ctx context.Context, in AppendTurnOutputInput) (*AppendTurnOutputResult, error)
+	// AppendCompactSummary 追加一条 completed summary turn,作为后续上下文压缩边界。
+	AppendCompactSummary(ctx context.Context, in AppendCompactSummaryInput) (*AppendCompactSummaryResult, error)
 	// FinishTurn:更新 turn 状态 + 落 assistant message(如有)+ 落 final 事件。
 	FinishTurn(ctx context.Context, in FinishTurnInput) (*FinishTurnResult, error)
 	// RecordUsage 把一次或一批 provider usage delta 累加进全局 UTC 小时桶。

@@ -34,6 +34,8 @@ var (
 	// 不做任何隐式 provider/model 兜底。API 映射 400 "no_model"。
 	ErrNoModel        = errors.New("engine: no model configured for session")
 	ErrProviderConfig = errors.New("engine: provider config unavailable")
+	ErrCompactRunning = errors.New("engine: compact already running")
+	ErrCompactEmpty   = errors.New("engine: not enough history to compact")
 )
 
 // Resolver 把 provider profile 名解析为 client 实例;
@@ -77,6 +79,7 @@ type Engine struct {
 	approvals         map[string]*pendingApproval
 	turnWorkspaceDirs map[string][]string // turnID → 本轮临时授权目录
 	wg                sync.WaitGroup
+	compactMu         sync.Mutex
 }
 
 type Option func(*Engine)
@@ -124,6 +127,7 @@ type SubmitInput struct {
 	SessionID       string
 	ClientMessageID string
 	Text            string
+	Kind            string
 }
 
 type SubmitResult struct {
@@ -190,6 +194,13 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrProviderConfig, err)
 	}
+	switch strings.TrimSpace(in.Kind) {
+	case "", "user":
+	case "system":
+		return e.submitSystem(ctx, in, resolved, client)
+	default:
+		return nil, ErrEmptyInput
+	}
 
 	queued, err := e.store.HasQueuedInputs(ctx, in.SessionID)
 	if err != nil {
@@ -243,6 +254,47 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	go e.runTurn(turnCtx, in.SessionID, res.Turn.ID, resolved, client)
 
 	return &SubmitResult{TurnID: res.Turn.ID, UserMessageID: res.UserMessage.ID}, nil
+}
+
+func (e *Engine) submitSystem(ctx context.Context, in SubmitInput, resolved *resolvedModel, client provider.Client) (*SubmitResult, error) {
+	queued, err := e.store.HasQueuedInputs(ctx, in.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if queued {
+		return nil, ErrTurnRunning
+	}
+	res, err := e.store.BeginSystemTurn(ctx, store.BeginSystemTurnInput{
+		SessionID:       in.SessionID,
+		TurnID:          store.NewID("turn"),
+		SystemMessageID: store.NewID("msg"),
+		ClientMessageID: in.ClientMessageID,
+		Text:            in.Text,
+		Provider:        resolved.providerName,
+		Model:           resolved.model,
+		Mode:            resolved.mode,
+		ModelConfig:     resolved.configJSON,
+	})
+	if errors.Is(err, store.ErrTurnRunning) {
+		return nil, ErrTurnRunning
+	}
+	if err != nil {
+		return nil, err
+	}
+	if res.Duplicate {
+		return &SubmitResult{Duplicate: true, TurnID: res.Turn.ID}, nil
+	}
+	turnCtx, cancel := context.WithCancel(context.Background())
+	e.mu.Lock()
+	e.running[in.SessionID] = cancel
+	e.mu.Unlock()
+
+	e.hub.Publish(*res.StartedEvent)
+
+	e.wg.Add(1)
+	go e.runTurn(turnCtx, in.SessionID, res.Turn.ID, resolved, client)
+
+	return &SubmitResult{TurnID: res.Turn.ID}, nil
 }
 
 func (e *Engine) SessionUsage(ctx context.Context, sessionID string) (*SessionUsageInfo, error) {

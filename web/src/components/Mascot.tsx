@@ -5,6 +5,7 @@ type MascotProps = {
   gaze?: MascotGaze;
   inputPitchBias?: number;
   mood?: MascotMood;
+  headShakeSignal?: number;
   onPointerGaze?: () => void;
   showFaceDebugFrame?: boolean;
   showHeadDebugFrame?: boolean;
@@ -67,6 +68,10 @@ const MOUTH_BLINK_D_VALUES =
   "M57 88.7 Q64 90.1 71 88.7;M57 88.7 Q64 90.1 71 88.7;M60 88.9 Q64 89.5 68 88.9;M57 88.7 Q64 90.1 71 88.7;M57 88.7 Q64 90.1 71 88.7;M58.5 88.8 Q64 90.3 69.5 88.8;M57 88.7 Q64 90.1 71 88.7;M57 88.7 Q64 90.1 71 88.7";
 const MOUTH_BLINK_WIDTH_VALUES = "3.5;3.5;3;3.5;3.5;3.3;3.5;3.5";
 const CLICK_ANIMATION_DURATION_MS = 2200;
+// Standard error gesture: face forward, lower the head slightly, then shake no.
+const HEAD_SHAKE_NO_DURATION_MS = 650;
+const HEAD_SHAKE_NO_X = EYE_MAX_X * 0.6;
+const HEAD_SHAKE_NO_Y = EYE_MAX_Y * 0.23;
 const CLICK_KEY_TIMES = {
   start: 0,
   hit: 0.16,
@@ -125,6 +130,7 @@ export function Mascot({
   gaze = DEFAULT_GAZE,
   inputPitchBias = 0,
   mood = "idle",
+  headShakeSignal = 0,
   onPointerGaze,
   showFaceDebugFrame = false,
   showHeadDebugFrame = false,
@@ -143,9 +149,11 @@ export function Mascot({
   const targetXRef = useRef(0);
   const targetYRef = useRef(0);
   const rafRef = useRef(0);
+  const headShakeRafRef = useRef(0);
   const pressAnimationRef = useRef<Animation | null>(null);
   const currentInputPitchBiasRef = useRef(gaze.type === "input" ? inputPitchBias : 0);
   const targetInputPitchBiasRef = useRef(gaze.type === "input" ? inputPitchBias : 0);
+  const gazeLockedRef = useRef(gaze.type === "center" || mood === "error");
   const onPointerGazeRef = useRef(onPointerGaze);
   const id = useId().replace(/:/g, "");
   const faceID = `mascot-face-${id}`;
@@ -274,12 +282,22 @@ export function Mascot({
     onPointerGazeRef.current = onPointerGaze;
   }, [onPointerGaze]);
 
+  useEffect(() => {
+    gazeLockedRef.current = gaze.type === "center" || mood === "error";
+  }, [gaze.type, mood]);
+
   useLayoutEffect(() => {
     const onPointerMove = (event: PointerEvent) => {
+      if (gazeLockedRef.current) {
+        return;
+      }
       onPointerGazeRef.current?.();
       setTargetFromPoint(event.clientX, event.clientY);
     };
     const onMouseMove = (event: MouseEvent) => {
+      if (gazeLockedRef.current) {
+        return;
+      }
       onPointerGazeRef.current?.();
       setTargetFromPoint(event.clientX, event.clientY);
     };
@@ -291,6 +309,10 @@ export function Mascot({
       if (rafRef.current) {
         window.cancelAnimationFrame(rafRef.current);
         rafRef.current = 0;
+      }
+      if (headShakeRafRef.current) {
+        window.cancelAnimationFrame(headShakeRafRef.current);
+        headShakeRafRef.current = 0;
       }
       window.removeEventListener("pointermove", onPointerMove, { capture: true });
       window.removeEventListener("mousemove", onMouseMove, { capture: true });
@@ -344,6 +366,44 @@ export function Mascot({
     );
   };
 
+  const centerPoseImmediately = () => {
+    targetXRef.current = 0;
+    targetYRef.current = HEAD_SHAKE_NO_Y;
+    currentXRef.current = 0;
+    currentYRef.current = HEAD_SHAKE_NO_Y;
+    targetInputPitchBiasRef.current = 0;
+    currentInputPitchBiasRef.current = 0;
+    applyPose(0, HEAD_SHAKE_NO_Y);
+  };
+
+  const playHeadShakeNo = () => {
+    centerPoseImmediately();
+    pressAnimationRef.current?.cancel();
+    pressAnimationRef.current = null;
+    if (headShakeRafRef.current) {
+      window.cancelAnimationFrame(headShakeRafRef.current);
+      headShakeRafRef.current = 0;
+    }
+    const startedAt = performance.now();
+    const step = (now: number) => {
+      const progress = Math.min((now - startedAt) / HEAD_SHAKE_NO_DURATION_MS, 1);
+      const x = headShakeNoXAt(progress) * HEAD_SHAKE_NO_X;
+      currentXRef.current = x;
+      targetXRef.current = x;
+      currentYRef.current = HEAD_SHAKE_NO_Y;
+      targetYRef.current = HEAD_SHAKE_NO_Y;
+      currentInputPitchBiasRef.current = 0;
+      targetInputPitchBiasRef.current = 0;
+      applyPose(x, HEAD_SHAKE_NO_Y);
+      if (progress < 1) {
+        headShakeRafRef.current = window.requestAnimationFrame(step);
+        return;
+      }
+      headShakeRafRef.current = 0;
+    };
+    headShakeRafRef.current = window.requestAnimationFrame(step);
+  };
+
   const playClickAnimation = () => {
     if (Math.random() < 0.5) {
       bounce();
@@ -351,6 +411,12 @@ export function Mascot({
     }
     wobble();
   };
+
+  useEffect(() => {
+    if (headShakeSignal > 0) {
+      playHeadShakeNo();
+    }
+  }, [headShakeSignal]);
 
   return (
     <span
@@ -537,6 +603,10 @@ export function Mascot({
                 <rect height="1.4" rx="0.7" width="3.2" x="46" y="67" />
                 <rect height="1.4" rx="0.7" width="3.2" x="73" y="67" />
               </g>
+              <g data-slot="eyes-error" fill="none" stroke="#ffffff" strokeLinecap="round" strokeWidth="4.1">
+                <path d="M47 66.9 L56 70.8 L47 74.7" />
+                <path d="M81 66.9 L72 70.8 L81 74.7" />
+              </g>
               <path
                 data-slot="mouth"
                 d="M57 88.7 Q64 90.1 71 88.7"
@@ -562,6 +632,14 @@ export function Mascot({
                   values={MOUTH_BLINK_WIDTH_VALUES}
                 />
               </path>
+              <path
+                data-slot="mouth-error"
+                d="M58 89.1 Q64 88.1 70 89.1"
+                fill="none"
+                stroke="#ffffff"
+                strokeLinecap="round"
+                strokeWidth="3.2"
+              />
             </g>
             </svg>
           </span>
@@ -583,6 +661,32 @@ function faceTransform(turnX: number, turnY: number): string {
     `scale(${scaleX} ${scaleY})`,
     `translate(${-FACE_CENTER_X} ${-FACE_CENTER_Y})`,
   ].join(" ");
+}
+
+function headShakeNoXAt(progress: number): number {
+  const points = [
+    { t: 0, x: 0 },
+    { t: 0.16, x: -1 },
+    { t: 0.38, x: 1 },
+    { t: 0.58, x: -0.48 },
+    { t: 0.76, x: 0.34 },
+    { t: 0.9, x: -0.12 },
+    { t: 1, x: 0 },
+  ];
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const next = points[index];
+    if (progress <= next.t) {
+      const rawSegmentProgress = (progress - previous.t) / (next.t - previous.t);
+      const segmentProgress = index >= 4 ? easeOutCubic(rawSegmentProgress) : rawSegmentProgress;
+      return previous.x + (next.x - previous.x) * segmentProgress;
+    }
+  }
+  return 0;
+}
+
+function easeOutCubic(value: number): number {
+  return 1 - (1 - value) ** 3;
 }
 
 function clamp(value: number, min: number, max: number): number {

@@ -93,8 +93,12 @@ export function partsFromOverlay(
   const overlayParts = orderedOverlayParts(overlay);
   const lastThoughtIndex = findLastOverlayPartIndex(overlayParts, "thought");
   const lastToolIndex = findLastOverlayPartIndex(overlayParts, "tool");
+  const hasTextPart = overlayParts.some((part) => part.type === "text");
   return withPartKeys([
     ...overlayParts.map((part, index): TurnPartVM => {
+      if (part.type === "text") {
+        return { type: "text", text: part.text };
+      }
       if (part.type === "thought") {
         return { type: "thought", active: activePhaseName === "thinking" && index === lastThoughtIndex, text: part.text };
       }
@@ -131,7 +135,7 @@ export function partsFromOverlay(
         summaryKind: part.summaryKind,
       };
     }),
-    ...partsFromText(streamedText),
+    ...(hasTextPart ? [] : partsFromText(streamedText)),
   ]);
 }
 

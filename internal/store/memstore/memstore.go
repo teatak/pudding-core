@@ -5,6 +5,7 @@ package memstore
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"sync"
@@ -240,6 +241,74 @@ func (m *Memstore) BeginTurn(_ context.Context, in store.BeginTurnInput) (*store
 
 	ec := ev
 	return &store.BeginTurnResult{Turn: cloneTurn(turn), UserMessage: cloneMessage(msg), StartedEvent: &ec}, nil
+}
+
+func (m *Memstore) BeginSystemTurn(_ context.Context, in store.BeginSystemTurnInput) (*store.BeginSystemTurnResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[in.SessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	for _, t := range m.turns {
+		if t.SessionID == in.SessionID && t.ClientMessageID == in.ClientMessageID {
+			return &store.BeginSystemTurnResult{
+				Duplicate: true,
+				Turn:      cloneTurn(t),
+			}, nil
+		}
+	}
+	for _, t := range m.turns {
+		if t.SessionID == in.SessionID && t.Status == store.TurnRunning {
+			return nil, store.ErrTurnRunning
+		}
+	}
+
+	now := time.Now()
+	mode := in.Mode
+	if mode == "" {
+		mode = store.ModeChat
+	}
+	mode = store.NormalizeAgentMode(mode)
+	if mode == "" {
+		mode = store.ModeChat
+	}
+	turn := &store.Turn{
+		ID:              in.TurnID,
+		SessionID:       in.SessionID,
+		ClientMessageID: in.ClientMessageID,
+		Status:          store.TurnRunning,
+		Provider:        in.Provider,
+		Model:           in.Model,
+		Mode:            mode,
+		ModelConfig:     append([]byte(nil), in.ModelConfig...),
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	msg := &store.Message{
+		ID:        in.SystemMessageID,
+		SessionID: in.SessionID,
+		TurnID:    in.TurnID,
+		Role:      store.RoleSystem,
+		Kind:      store.MessageKindText,
+		Text:      in.Text,
+		Parts:     store.TextPart(in.Text),
+		TurnIndex: 0,
+		CreatedAt: now,
+	}
+	ev := event.Event{
+		Seq:             m.nextSeq(in.SessionID),
+		SessionID:       in.SessionID,
+		Kind:            event.TurnStarted,
+		TurnID:          in.TurnID,
+		ClientMessageID: in.ClientMessageID,
+	}
+	m.turns[turn.ID] = turn
+	m.messages[in.SessionID] = append(m.messages[in.SessionID], msg)
+	m.appendEventLocked(in.SessionID, ev)
+	m.sessions[in.SessionID].LastActivityAt = now
+
+	ec := ev
+	return &store.BeginSystemTurnResult{Turn: cloneTurn(turn), SystemMessage: cloneMessage(msg), StartedEvent: &ec}, nil
 }
 
 func (m *Memstore) QueueInput(_ context.Context, in store.QueueInputInput) (*store.QueueInputResult, error) {
@@ -526,6 +595,63 @@ func (m *Memstore) AppendTurnOutput(_ context.Context, in store.AppendTurnOutput
 		out = append(out, cloneMessage(msg))
 	}
 	return &store.AppendTurnOutputResult{Messages: out}, nil
+}
+
+func (m *Memstore) AppendCompactSummary(_ context.Context, in store.AppendCompactSummaryInput) (*store.AppendCompactSummaryResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[in.SessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	if m.runningLocked(in.SessionID) {
+		return nil, store.ErrTurnRunning
+	}
+	now := time.Now()
+	mode := in.Mode
+	if mode == "" {
+		mode = store.ModeChat
+	}
+	mode = store.NormalizeAgentMode(mode)
+	if mode == "" {
+		mode = store.ModeChat
+	}
+	turn := &store.Turn{
+		ID:              in.TurnID,
+		SessionID:       in.SessionID,
+		ClientMessageID: in.ClientMessageID,
+		Status:          store.TurnCompleted,
+		Provider:        in.Provider,
+		Model:           in.Model,
+		Mode:            mode,
+		ModelConfig:     normalizeJSON(in.ModelConfig),
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	msg := &store.Message{
+		ID:        in.MessageID,
+		SessionID: in.SessionID,
+		TurnID:    in.TurnID,
+		Role:      store.RoleSummary,
+		Kind:      store.MessageKindSummary,
+		Text:      in.Text,
+		Parts:     store.TextPart(in.Text),
+		TurnIndex: 1,
+		Metadata:  normalizeJSON(in.Metadata),
+		CreatedAt: now,
+	}
+	ev := event.Event{
+		Seq:                m.nextSeq(in.SessionID),
+		SessionID:          in.SessionID,
+		Kind:               event.TurnCompleted,
+		TurnID:             in.TurnID,
+		AssistantMessageID: in.MessageID,
+	}
+	m.turns[turn.ID] = turn
+	m.messages[in.SessionID] = append(m.messages[in.SessionID], msg)
+	m.appendEventLocked(in.SessionID, ev)
+	m.sessions[in.SessionID].LastActivityAt = now
+	ec := ev
+	return &store.AppendCompactSummaryResult{Turn: cloneTurn(turn), Message: cloneMessage(msg), FinalEvent: &ec}, nil
 }
 
 func (m *Memstore) RecordUsage(_ context.Context, in store.UsageRecordInput) (*store.UsageHourlyStat, error) {
@@ -983,6 +1109,7 @@ func cloneMessage(msg *store.Message) *store.Message {
 	}
 	cp := *msg
 	cp.Parts = store.CloneContentParts(msg.Parts)
+	cp.Metadata = append([]byte(nil), msg.Metadata...)
 	return &cp
 }
 
@@ -1041,4 +1168,11 @@ func validQueuedInputStatus(status store.QueuedInputStatus) bool {
 	default:
 		return false
 	}
+}
+
+func normalizeJSON(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return json.RawMessage(`{}`)
+	}
+	return append(json.RawMessage(nil), raw...)
 }

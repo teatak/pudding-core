@@ -118,11 +118,12 @@ export const message = z
     id: z.string(),
     sessionID: z.string(),
     turnID: z.string(),
-    role: z.enum(["user", "assistant", "tool", "summary"]),
+    role: z.enum(["user", "assistant", "tool", "system", "summary"]),
     kind: z.enum(["text", "thought", "tool_use", "tool_result", "summary"]),
     text: z.string(),
     parts: z.array(contentPart),
     turnIndex: z.number().int(),
+    metadata: z.unknown().optional(),
     clientMessageID: z.string().optional(), // 仅 user message,overlay 对账键
     interrupted: z.boolean().optional(),
     createdAt: z.string(),
@@ -172,6 +173,7 @@ export type QueuedInput = z.infer<typeof queuedInput>;
 
 export const submitRequest = z.object({
   clientMessageID: z.string().min(1),
+  kind: z.enum(["user", "system"]).optional(),
   text: z.string().min(1),
 });
 
@@ -183,6 +185,15 @@ export const submitResponse = z.object({
   userMessageID: z.string().optional(),
   status: queuedInputStatus.optional(),
   clientMessageID: z.string().optional(),
+});
+
+export const compactResponse = z.object({
+  turnID: z.string(),
+  summaryMessageID: z.string(),
+  status: z.literal("completed"),
+  sourceMessages: z.number(),
+  tailMessages: z.number(),
+  summaryChars: z.number(),
 });
 
 export const pendingApproval = z.object({

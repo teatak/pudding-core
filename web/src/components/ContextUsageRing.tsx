@@ -23,7 +23,7 @@ export function ContextUsageRing({ token, sessionID }: ContextUsageRingProps) {
     staleTime: 5_000,
   });
   const usage = usageQuery.data;
-  const currentTokens = usage ? usage.lastPromptTokens || usage.contextEstimatedTokens : 0;
+  const currentTokens = usage?.lastPromptTokens || 0;
   const estimatedTokens = usage?.contextEstimatedTokens || 0;
   const currentPercent = usage && usage.contextWindow > 0 ? Math.min(100, (currentTokens / usage.contextWindow) * 100) : 0;
   const estimatedPercent = usage && usage.contextWindow > 0 ? Math.min(100, (estimatedTokens / usage.contextWindow) * 100) : 0;
@@ -90,8 +90,11 @@ function UsagePanel({
       <div className="space-y-2 px-3 py-2.5">
         <SectionHeader>{t("usage.contextWindow")}</SectionHeader>
         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-3">
-          <div className="truncate text-base font-semibold text-foreground">
-            {formatTokens(currentTokens)} / {usage.contextWindow > 0 ? formatTokens(usage.contextWindow) : "--"}
+          <div className="flex min-w-0 items-baseline gap-1.5">
+            <span className="shrink-0 text-xs font-medium text-muted-foreground">{t("usage.currentInput")}</span>
+            <span className="truncate text-base font-semibold text-foreground">
+              {formatTokens(currentTokens)} / {usage.contextWindow > 0 ? formatTokens(usage.contextWindow) : "--"}
+            </span>
           </div>
           <div className="text-right text-xs font-medium tabular-nums text-muted-foreground">{Math.round(currentPercent)}%</div>
         </div>

@@ -134,6 +134,51 @@ func TestSubmitHappyPath(t *testing.T) {
 	}
 }
 
+func TestSystemSubmitDoesNotCreateUserMessage(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	capture := &captureClient{reqCh: make(chan provider.Request, 1)}
+	eng := New(ms, hub, mapResolver{"capture": capture}, ms)
+	ctx := context.Background()
+	sid := "sess_system"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "named", Provider: "capture", Model: "model"}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := eng.Submit(ctx, SubmitInput{
+		SessionID:       sid,
+		ClientMessageID: "sys_1",
+		Kind:            "system",
+		Text:            "Summarize this chat.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.UserMessageID != "" {
+		t.Fatalf("system submit must not create user message: %+v", res)
+	}
+	waitTurnDone(t, ms, sid)
+
+	msgs, err := ms.ListMessages(ctx, sid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 2 || msgs[0].Role != store.RoleSystem || msgs[0].Text != "Summarize this chat." || msgs[1].Role != store.RoleAssistant || msgs[1].Text != "ok" {
+		t.Fatalf("unexpected canonical messages: %+v", msgs)
+	}
+	select {
+	case req := <-capture.reqCh:
+		if len(req.Messages) != 1 || req.Messages[0].Role != provider.RoleUser {
+			t.Fatalf("system reminder should be a transient user-role provider message: %+v", req.Messages)
+		}
+		if !strings.Contains(req.Messages[0].Text, "<system-reminder>") || !strings.Contains(req.Messages[0].Text, "Summarize this chat.") {
+			t.Fatalf("system reminder missing from request: %q", req.Messages[0].Text)
+		}
+	default:
+		t.Fatal("provider request was not captured")
+	}
+}
+
 func TestUsageChunkRecordsHourlyStats(t *testing.T) {
 	usage := provider.UsageInfo{
 		InputUncachedTokens:   10,
@@ -243,6 +288,49 @@ func TestProviderRequestCountRecordedWithoutUsageChunk(t *testing.T) {
 	}
 	if sessionUsage.RequestCount != 1 || sessionUsage.CumulativeTotalTokens != 0 {
 		t.Fatalf("session usage wrong: %+v", sessionUsage)
+	}
+}
+
+func TestCompactWritesSummaryAndContextBoundary(t *testing.T) {
+	eng, ms, _, sid := newTestEngine(t, mock.WithScript([]string{"## User Context\nremembered facts"}), mock.WithDelay(time.Millisecond))
+	ctx := context.Background()
+	appendEngineTestTurn(t, ms, sid, "1", "old user", "old assistant")
+	appendEngineTestTurn(t, ms, sid, "2", "tail user 1", "tail assistant 1")
+	appendEngineTestTurn(t, ms, sid, "3", "tail user 2", "tail assistant 2")
+
+	res, err := eng.Compact(ctx, CompactInput{SessionID: sid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SourceMessages != 2 || res.TailMessages != 4 || res.SummaryMessageID == "" || res.TurnID == "" {
+		t.Fatalf("unexpected compact result: %+v", res)
+	}
+	msgs, err := ms.ListMessages(ctx, sid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary := msgs[len(msgs)-1]
+	if summary.Role != store.RoleSummary || !strings.Contains(summary.Text, "@message(msg_1)") {
+		t.Fatalf("summary message missing role or fallback reference: %+v", summary)
+	}
+	meta, ok := store.CompactMetadataFromMessage(summary)
+	if !ok || !sameStrings(meta.TailMessageIDs, []string{"msg_2", "msg_turn_2", "msg_3", "msg_turn_3"}) {
+		t.Fatalf("unexpected compact metadata: %+v", meta)
+	}
+	req, err := eng.builder.Build(ctx, sid, "mock-model", string(store.ModeChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	texts := make([]string, 0, len(req.Messages))
+	for _, msg := range req.Messages {
+		texts = append(texts, msg.Text)
+	}
+	joined := strings.Join(texts, "\n")
+	if strings.Contains(joined, "old user") || strings.Contains(joined, "old assistant") {
+		t.Fatalf("old raw messages should be compacted away: %v", texts)
+	}
+	if !strings.Contains(joined, "tail user 1") || !strings.Contains(joined, "tail assistant 2") {
+		t.Fatalf("tail messages should remain raw: %v", texts)
 	}
 }
 
@@ -1008,7 +1096,7 @@ func (c *capabilityClient) Stream(_ context.Context, req provider.Request) (<-ch
 			Index:     0,
 			CallID:    "call_cap",
 			Name:      tool.RequestCapability,
-			ArgsDelta: `{"targetMode":"research","reason":"需要联网搜索","intendedActions":["search web"],"risk":"external read"}`,
+			ArgsDelta: `{"targetMode":"research","reason":"需要联网搜索","risk":"external read"}`,
 		}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	} else {
@@ -1116,6 +1204,27 @@ func sameStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func appendEngineTestTurn(t *testing.T, ms store.Store, sessionID, suffix, userText, assistantText string) {
+	t.Helper()
+	turnID := "turn_" + suffix
+	if _, err := ms.BeginTurn(context.Background(), store.BeginTurnInput{
+		SessionID:       sessionID,
+		TurnID:          turnID,
+		UserMessageID:   "msg_" + suffix,
+		ClientMessageID: "client_" + suffix,
+		UserText:        userText,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.FinishTurn(context.Background(), store.FinishTurnInput{
+		TurnID:         turnID,
+		Status:         store.TurnCompleted,
+		AssistantParts: store.TextPart(assistantText),
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func findTurn(ms store.Store, sessionID, clientMessageID string) (*store.Turn, error) {

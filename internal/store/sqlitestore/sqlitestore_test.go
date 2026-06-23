@@ -314,6 +314,53 @@ func TestFinishTurnTerminalStatesAndEventsAfter(t *testing.T) {
 	}
 }
 
+func TestAppendCompactSummaryPersistsMetadataAndEvent(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, st, "sess_compact")
+
+	res, err := st.AppendCompactSummary(ctx, store.AppendCompactSummaryInput{
+		SessionID:       "sess_compact",
+		TurnID:          "turn_compact",
+		MessageID:       "msg_compact",
+		ClientMessageID: "compact:turn_compact",
+		Provider:        "mock",
+		Model:           "mock",
+		Text:            "summary @message(msg_1)",
+		Metadata:        store.CompactMessageMetadata([]string{"msg_1", "msg_2"}, []string{"msg_3"}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.FinalEvent == nil || res.FinalEvent.Kind != event.TurnCompleted || res.FinalEvent.AssistantMessageID != "msg_compact" {
+		t.Fatalf("unexpected compact event: %+v", res.FinalEvent)
+	}
+	if _, err := st.RunningTurn(ctx, "sess_compact"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("compact must not leave a running turn: %v", err)
+	}
+	msgs, err := st.ListMessages(ctx, "sess_compact", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 1 || msgs[0].Role != store.RoleSummary || msgs[0].Kind != store.MessageKindSummary {
+		t.Fatalf("unexpected compact message: %+v", msgs)
+	}
+	meta, ok := store.CompactMetadataFromMessage(msgs[0])
+	if !ok {
+		t.Fatalf("compact metadata missing: %+v", msgs[0])
+	}
+	if !sameStrings(meta.SourceMessageIDs, []string{"msg_1", "msg_2"}) || !sameStrings(meta.TailMessageIDs, []string{"msg_3"}) {
+		t.Fatalf("unexpected compact metadata: %+v", meta)
+	}
+	events, err := st.EventsAfter(ctx, "sess_compact", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Kind != event.TurnCompleted || events[0].TurnID != "turn_compact" {
+		t.Fatalf("unexpected compact events: %+v", events)
+	}
+}
+
 func TestPersistenceAndSeqContinuation(t *testing.T) {
 	st, path := openTestStore(t)
 	createTestSession(t, st, "sess_1")
@@ -547,40 +594,6 @@ func TestDeleteSessionCascades(t *testing.T) {
 		if count != 0 {
 			t.Fatalf("%s should cascade delete, count=%d", table, count)
 		}
-	}
-}
-
-func TestOpenDropsObsoleteConfigTables(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "pudding.db")
-	st, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.db.Exec(`CREATE TABLE settings(key TEXT); CREATE TABLE provider_profiles(id TEXT);`); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	reopened, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.Close()
-
-	assertTableMissing(t, reopened, "settings")
-	assertTableMissing(t, reopened, "provider_profiles")
-}
-
-func assertTableMissing(t *testing.T, st *Store, name string) {
-	t.Helper()
-	var count int
-	if err := st.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 0 {
-		t.Fatalf("obsolete table %q must not be in SQLite runtime store", name)
 	}
 }
 

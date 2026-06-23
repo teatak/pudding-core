@@ -1,5 +1,6 @@
 import {
   listBuiltinToolsResponse,
+  compactResponse,
   conflictResponse,
   listModelsResponse,
   createProviderRequest,
@@ -67,6 +68,7 @@ const sessionPatchRequest = z.object({
 });
 
 export type SubmitResult = z.infer<typeof submitResponse>;
+export type CompactResult = z.infer<typeof compactResponse>;
 
 function authHeaders(token: string) {
   return {
@@ -206,7 +208,7 @@ export function updateQueuedInput(
 export function submitMessage(
   token: string,
   sessionID: string,
-  body: { clientMessageID: string; text: string },
+  body: { clientMessageID: string; kind?: "system" | "user"; text: string },
 ): Promise<SubmitResult> {
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/submit`, submitResponse, {
     method: "POST",
@@ -217,6 +219,13 @@ export function submitMessage(
 export async function cancelTurn(token: string, sessionID: string): Promise<void> {
   await request(token, `/sessions/${encodeURIComponent(sessionID)}/cancel`, z.object({ status: z.string() }), {
     method: "POST",
+  });
+}
+
+export function compactSession(token: string, sessionID: string, body: { hint?: string } = {}): Promise<CompactResult> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/compact`, compactResponse, {
+    method: "POST",
+    body: JSON.stringify(body),
   });
 }
 

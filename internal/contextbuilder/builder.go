@@ -5,6 +5,7 @@ package contextbuilder
 
 import (
 	"context"
+	"strings"
 
 	"github.com/teatak/pudding-core/internal/prompt"
 	"github.com/teatak/pudding-core/internal/provider"
@@ -35,6 +36,7 @@ func (b *Builder) Build(ctx context.Context, sessionID, model string, mode strin
 	if err != nil {
 		return provider.Request{}, err
 	}
+	msgs = EffectiveMessages(msgs)
 	system, err := b.prompts.Prompt(ctx, mode)
 	if err != nil {
 		return provider.Request{}, err
@@ -66,6 +68,16 @@ func (b *Builder) Build(ctx context.Context, sessionID, model string, mode strin
 			flushAssistant()
 			parts := providerParts(m.Parts, currentMode)
 			req.Messages = append(req.Messages, provider.Message{Role: provider.RoleUser, Text: textFromProviderParts(parts), Parts: parts})
+		case store.RoleSystem:
+			flushAssistant()
+			text := wrapSystemReminder(store.TextFromParts(m.Parts))
+			if text != "" {
+				req.Messages = append(req.Messages, provider.Message{
+					Role:  provider.RoleUser,
+					Text:  text,
+					Parts: []provider.Part{{Type: provider.PartText, Text: text}},
+				})
+			}
 		case store.RoleAssistant, store.RoleTool:
 			assistantParts = append(assistantParts, providerParts(m.Parts, currentMode)...)
 		case store.RoleSummary:
@@ -80,6 +92,79 @@ func (b *Builder) Build(ctx context.Context, sessionID, model string, mode strin
 	}
 	flushAssistant()
 	return req, nil
+}
+
+func wrapSystemReminder(text string) string {
+	text = strings.TrimSpace(escapeSystemReminderText(text))
+	if text == "" {
+		return ""
+	}
+	return "<system-reminder>\n" + text + "\n</system-reminder>"
+}
+
+func escapeSystemReminderText(text string) string {
+	replacer := strings.NewReplacer(
+		"<system-reminder>", "<system-reminder escaped>",
+		"</system-reminder>", "</system-reminder escaped>",
+	)
+	return replacer.Replace(text)
+}
+
+func EffectiveMessages(msgs []*store.Message) []*store.Message {
+	compactIndex := -1
+	for i, msg := range msgs {
+		if _, ok := store.CompactMetadataFromMessage(msg); ok {
+			compactIndex = i
+		}
+	}
+	if compactIndex < 0 {
+		return msgs
+	}
+	compactMsg := msgs[compactIndex]
+	meta, _ := store.CompactMetadataFromMessage(compactMsg)
+	byID := make(map[string]*store.Message, len(msgs))
+	for _, msg := range msgs {
+		byID[msg.ID] = msg
+	}
+	seen := make(map[string]bool, len(msgs)-compactIndex)
+	out := make([]*store.Message, 0, 1+len(meta.TailMessageIDs)+len(msgs)-compactIndex-1)
+	appendMsg := func(msg *store.Message) {
+		if msg == nil || seen[msg.ID] {
+			return
+		}
+		seen[msg.ID] = true
+		out = append(out, msg)
+	}
+	appendMsg(compactMsg)
+	for _, id := range meta.TailMessageIDs {
+		appendMsg(byID[id])
+	}
+	for _, msg := range msgs[compactIndex+1:] {
+		appendMsg(msg)
+	}
+	return out
+}
+
+func SplitRecentRawTail(msgs []*store.Message, recentUserTurns int) ([]*store.Message, []*store.Message) {
+	if recentUserTurns <= 0 || len(msgs) == 0 {
+		return msgs, nil
+	}
+	split := 0
+	seenUsers := 0
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != store.RoleUser {
+			continue
+		}
+		seenUsers++
+		if seenUsers == recentUserTurns {
+			split = i
+			break
+		}
+	}
+	if seenUsers < recentUserTurns {
+		return nil, msgs
+	}
+	return msgs[:split], msgs[split:]
 }
 
 type staticPrompt struct{}

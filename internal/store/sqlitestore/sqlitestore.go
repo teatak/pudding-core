@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -48,176 +49,7 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("sqlite: apply schema: %w", err)
 	}
-	if err := migrateUsageModelDimension(db); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	if err := migrateModeColumns(db); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	if err := migrateSessionWorkspaceDirs(db); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	if err := dropObsoleteTables(db); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
 	return s, nil
-}
-
-func migrateModeColumns(db *sql.DB) error {
-	for _, spec := range []struct {
-		table string
-		name  string
-		def   string
-	}{
-		{"sessions", "active_mode", `TEXT NOT NULL DEFAULT 'chat'`},
-		{"sessions", "mode_lease", `TEXT NOT NULL DEFAULT 'none'`},
-		{"turns", "mode", `TEXT NOT NULL DEFAULT 'chat'`},
-		{"queued_inputs", "mode", `TEXT NOT NULL DEFAULT 'chat'`},
-	} {
-		ok, err := columnExists(db, spec.table, spec.name)
-		if err != nil {
-			return err
-		}
-		if ok {
-			continue
-		}
-		if _, err := db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, spec.table, spec.name, spec.def)); err != nil {
-			return fmt.Errorf("sqlite: add %s.%s: %w", spec.table, spec.name, err)
-		}
-	}
-	for _, spec := range []struct {
-		table  string
-		column string
-	}{
-		{"sessions", "active_mode"},
-		{"turns", "mode"},
-		{"queued_inputs", "mode"},
-	} {
-		if _, err := db.Exec(fmt.Sprintf(`UPDATE %s SET %s='research' WHERE %s='work'`, spec.table, spec.column, spec.column)); err != nil {
-			return fmt.Errorf("sqlite: migrate %s.%s work: %w", spec.table, spec.column, err)
-		}
-		if _, err := db.Exec(fmt.Sprintf(`UPDATE %s SET %s='workspace' WHERE %s IN ('code','operate','local')`, spec.table, spec.column, spec.column)); err != nil {
-			return fmt.Errorf("sqlite: migrate %s.%s code: %w", spec.table, spec.column, err)
-		}
-	}
-	return nil
-}
-
-func migrateSessionWorkspaceDirs(db *sql.DB) error {
-	ok, err := columnExists(db, "sessions", "workspace_dirs")
-	if err != nil {
-		return err
-	}
-	if ok {
-		return nil
-	}
-	if _, err := db.Exec(`ALTER TABLE sessions ADD COLUMN workspace_dirs TEXT NOT NULL DEFAULT '[]'`); err != nil {
-		return fmt.Errorf("sqlite: add sessions.workspace_dirs: %w", err)
-	}
-	return nil
-}
-
-func columnExists(db *sql.DB, table, column string) (bool, error) {
-	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
-	if err != nil {
-		return false, fmt.Errorf("sqlite: inspect %s: %w", table, err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid int
-		var name, typ string
-		var notNull, pkIndex int
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pkIndex); err != nil {
-			return false, err
-		}
-		if name == column {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
-}
-
-func dropObsoleteTables(db *sql.DB) error {
-	if _, err := db.Exec(`DROP TABLE IF EXISTS provider_profiles; DROP TABLE IF EXISTS settings;`); err != nil {
-		return fmt.Errorf("sqlite: drop obsolete tables: %w", err)
-	}
-	return nil
-}
-
-func migrateUsageModelDimension(db *sql.DB) error {
-	ok, hasModel, err := usageModelPrimaryKey(db)
-	if err != nil {
-		return err
-	}
-	if ok {
-		return nil
-	}
-	modelExpr := `''`
-	if hasModel {
-		modelExpr = `model`
-	}
-	_, err = db.Exec(fmt.Sprintf(`
-		ALTER TABLE usage RENAME TO usage_old;
-		CREATE TABLE usage (
-			hour_start_at             INTEGER NOT NULL,
-			model                     TEXT    NOT NULL DEFAULT '',
-			request_count             INTEGER NOT NULL DEFAULT 0,
-			input_uncached_tokens     INTEGER NOT NULL DEFAULT 0,
-			input_cached_tokens       INTEGER NOT NULL DEFAULT 0,
-			cache_creation_tokens     INTEGER NOT NULL DEFAULT 0,
-			output_content_tokens     INTEGER NOT NULL DEFAULT 0,
-			output_reasoning_tokens   INTEGER NOT NULL DEFAULT 0,
-			updated_at                INTEGER NOT NULL,
-			PRIMARY KEY (hour_start_at, model)
-		);
-		INSERT INTO usage(
-			hour_start_at,model,request_count,input_uncached_tokens,input_cached_tokens,cache_creation_tokens,
-			output_content_tokens,output_reasoning_tokens,updated_at
-		)
-		SELECT hour_start_at,%s,SUM(request_count),SUM(input_uncached_tokens),SUM(input_cached_tokens),SUM(cache_creation_tokens),
-			SUM(output_content_tokens),SUM(output_reasoning_tokens),MAX(updated_at)
-		FROM usage_old
-		GROUP BY hour_start_at,%s;
-		DROP TABLE usage_old;
-	`, modelExpr, modelExpr))
-	if err != nil {
-		return fmt.Errorf("sqlite: migrate usage model dimension: %w", err)
-	}
-	return nil
-}
-
-func usageModelPrimaryKey(db *sql.DB) (bool, bool, error) {
-	rows, err := db.Query(`PRAGMA table_info(usage)`)
-	if err != nil {
-		return false, false, fmt.Errorf("sqlite: inspect usage table: %w", err)
-	}
-	defer rows.Close()
-	hasModel := false
-	pk := map[int]string{}
-	for rows.Next() {
-		var cid int
-		var name, typ string
-		var notNull, pkIndex int
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pkIndex); err != nil {
-			return false, false, err
-		}
-		if name == "model" {
-			hasModel = true
-		}
-		if pkIndex > 0 {
-			pk[pkIndex] = name
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return false, false, err
-	}
-	return hasModel && len(pk) == 2 && pk[1] == "hour_start_at" && pk[2] == "model", hasModel, nil
 }
 
 func ensureDBFile(path string) error {
@@ -239,7 +71,7 @@ func ensureDBFile(path string) error {
 
 var _ store.Store = (*Store)(nil)
 
-const messageSelectColumns = `id,session_id,turn_id,role,kind,text,parts,turn_index,client_message_id,interrupted,created_at`
+const messageSelectColumns = `id,session_id,turn_id,role,kind,text,parts,turn_index,metadata,client_message_id,interrupted,created_at`
 
 func (s *Store) Close() error { return s.db.Close() }
 
@@ -443,8 +275,8 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 			return err
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO messages(id,session_id,turn_id,role,kind,text,parts,turn_index,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-			msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Kind, msg.Text, encodeParts(msg.Parts), msg.TurnIndex, msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
+			`INSERT INTO messages(id,session_id,turn_id,role,kind,text,parts,turn_index,metadata,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+			msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Kind, msg.Text, encodeParts(msg.Parts), msg.TurnIndex, string(normalizeJSON(msg.Metadata)), msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
 		); err != nil {
 			return err
 		}
@@ -463,6 +295,91 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 			return err
 		}
 		out = &store.BeginTurnResult{Turn: turn, UserMessage: msg, StartedEvent: &ev}
+		return nil
+	})
+	return out, err
+}
+
+func (s *Store) BeginSystemTurn(ctx context.Context, in store.BeginSystemTurnInput) (*store.BeginSystemTurnResult, error) {
+	var out *store.BeginSystemTurnResult
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		if _, err := getSessionTx(ctx, tx, in.SessionID); err != nil {
+			return err
+		}
+
+		existing, err := getTurnByClientMessageIDTx(ctx, tx, in.SessionID, in.ClientMessageID)
+		if err == nil {
+			out = &store.BeginSystemTurnResult{Duplicate: true, Turn: existing}
+			return nil
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+
+		if _, err := runningTurnTx(ctx, tx, in.SessionID); err == nil {
+			return store.ErrTurnRunning
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+
+		now := time.Now()
+		mode := in.Mode
+		if mode == "" {
+			mode = store.ModeChat
+		}
+		mode = store.NormalizeAgentMode(mode)
+		if mode == "" {
+			mode = store.ModeChat
+		}
+		turn := &store.Turn{
+			ID:              in.TurnID,
+			SessionID:       in.SessionID,
+			ClientMessageID: in.ClientMessageID,
+			Status:          store.TurnRunning,
+			Provider:        in.Provider,
+			Model:           in.Model,
+			Mode:            mode,
+			ModelConfig:     normalizeJSON(in.ModelConfig),
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		msg := &store.Message{
+			ID:        in.SystemMessageID,
+			SessionID: in.SessionID,
+			TurnID:    in.TurnID,
+			Role:      store.RoleSystem,
+			Kind:      store.MessageKindText,
+			Text:      in.Text,
+			Parts:     store.TextPart(in.Text),
+			TurnIndex: 0,
+			CreatedAt: now,
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO turns(id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+			turn.ID, turn.SessionID, turn.ClientMessageID, turn.Status, turn.Provider, turn.Model, turn.Mode, string(turn.ModelConfig), turn.Error, unixMS(now), unixMS(now),
+		); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO messages(id,session_id,turn_id,role,kind,text,parts,turn_index,metadata,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+			msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Kind, msg.Text, encodeParts(msg.Parts), msg.TurnIndex, string(normalizeJSON(msg.Metadata)), msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
+		); err != nil {
+			return err
+		}
+		ev := event.Event{
+			Seq:             0,
+			SessionID:       in.SessionID,
+			Kind:            event.TurnStarted,
+			TurnID:          in.TurnID,
+			ClientMessageID: in.ClientMessageID,
+		}
+		if err := insertEventTx(ctx, tx, &ev); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(now), in.SessionID); err != nil {
+			return err
+		}
+		out = &store.BeginSystemTurnResult{Turn: turn, SystemMessage: msg, StartedEvent: &ev}
 		return nil
 	})
 	return out, err
@@ -681,8 +598,8 @@ func (s *Store) PromoteNextQueuedInput(ctx context.Context, in store.PromoteQueu
 					return err
 				}
 				if _, err := tx.ExecContext(ctx,
-					`INSERT INTO messages(id,session_id,turn_id,role,kind,text,parts,turn_index,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-					msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Kind, msg.Text, encodeParts(msg.Parts), msg.TurnIndex, msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
+					`INSERT INTO messages(id,session_id,turn_id,role,kind,text,parts,turn_index,metadata,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+					msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Kind, msg.Text, encodeParts(msg.Parts), msg.TurnIndex, string(normalizeJSON(msg.Metadata)), msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
 				); err != nil {
 					return err
 				}
@@ -851,6 +768,80 @@ func (s *Store) AppendTurnOutput(ctx context.Context, in store.AppendTurnOutputI
 			return err
 		}
 		out = &store.AppendTurnOutputResult{Messages: messages}
+		return nil
+	})
+	return out, err
+}
+
+func (s *Store) AppendCompactSummary(ctx context.Context, in store.AppendCompactSummaryInput) (*store.AppendCompactSummaryResult, error) {
+	var out *store.AppendCompactSummaryResult
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		if _, err := getSessionTx(ctx, tx, in.SessionID); err != nil {
+			return err
+		}
+		if _, err := runningTurnTx(ctx, tx, in.SessionID); err == nil {
+			return store.ErrTurnRunning
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		now := time.Now()
+		mode := in.Mode
+		if mode == "" {
+			mode = store.ModeChat
+		}
+		mode = store.NormalizeAgentMode(mode)
+		if mode == "" {
+			mode = store.ModeChat
+		}
+		turn := &store.Turn{
+			ID:              in.TurnID,
+			SessionID:       in.SessionID,
+			ClientMessageID: in.ClientMessageID,
+			Status:          store.TurnCompleted,
+			Provider:        in.Provider,
+			Model:           in.Model,
+			Mode:            mode,
+			ModelConfig:     normalizeJSON(in.ModelConfig),
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		msg := &store.Message{
+			ID:        in.MessageID,
+			SessionID: in.SessionID,
+			TurnID:    in.TurnID,
+			Role:      store.RoleSummary,
+			Kind:      store.MessageKindSummary,
+			Text:      in.Text,
+			Parts:     store.TextPart(in.Text),
+			TurnIndex: 1,
+			Metadata:  normalizeJSON(in.Metadata),
+			CreatedAt: now,
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO turns(id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+			turn.ID, turn.SessionID, turn.ClientMessageID, turn.Status, turn.Provider, turn.Model, turn.Mode, string(turn.ModelConfig), turn.Error, unixMS(now), unixMS(now),
+		); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO messages(id,session_id,turn_id,role,kind,text,parts,turn_index,metadata,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+			msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Kind, msg.Text, encodeParts(msg.Parts), msg.TurnIndex, string(normalizeJSON(msg.Metadata)), msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
+		); err != nil {
+			return err
+		}
+		ev := event.Event{
+			SessionID:          in.SessionID,
+			Kind:               event.TurnCompleted,
+			TurnID:             in.TurnID,
+			AssistantMessageID: in.MessageID,
+		}
+		if err := insertEventTx(ctx, tx, &ev); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(now), in.SessionID); err != nil {
+			return err
+		}
+		out = &store.AppendCompactSummaryResult{Turn: turn, Message: msg, FinalEvent: &ev}
 		return nil
 	})
 	return out, err
@@ -1561,6 +1552,7 @@ func scanTurn(row messageScanner) (*store.Turn, error) {
 func scanMessage(row messageScanner) (*store.Message, error) {
 	var msg store.Message
 	var parts string
+	var metadata string
 	var interrupted int
 	var created int64
 	err := row.Scan(
@@ -1572,6 +1564,7 @@ func scanMessage(row messageScanner) (*store.Message, error) {
 		&msg.Text,
 		&parts,
 		&msg.TurnIndex,
+		&metadata,
 		&msg.ClientMessageID,
 		&interrupted,
 		&created,
@@ -1580,6 +1573,7 @@ func scanMessage(row messageScanner) (*store.Message, error) {
 		return nil, err
 	}
 	msg.Parts = decodeParts(parts)
+	msg.Metadata = normalizeMessageMetadata(metadata)
 	msg.Interrupted = interrupted != 0
 	msg.CreatedAt = timeFromMS(created)
 	return &msg, nil
@@ -1726,8 +1720,8 @@ func appendTurnOutputSegmentsTx(ctx context.Context, tx *sql.Tx, turn *store.Tur
 			CreatedAt:   now,
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO messages(id,session_id,turn_id,role,kind,text,parts,turn_index,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-			msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Kind, msg.Text, encodeParts(msg.Parts), msg.TurnIndex, msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
+			`INSERT INTO messages(id,session_id,turn_id,role,kind,text,parts,turn_index,metadata,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+			msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Kind, msg.Text, encodeParts(msg.Parts), msg.TurnIndex, string(normalizeJSON(msg.Metadata)), msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
 		); err != nil {
 			return nil, err
 		}
@@ -1783,6 +1777,14 @@ func normalizeJSON(raw json.RawMessage) json.RawMessage {
 		return json.RawMessage(`{}`)
 	}
 	return append(json.RawMessage(nil), raw...)
+}
+
+func normalizeMessageMetadata(raw string) json.RawMessage {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "{}" {
+		return nil
+	}
+	return normalizeJSON(json.RawMessage(raw))
 }
 
 func unixMS(t time.Time) int64 { return t.UnixNano() / int64(time.Millisecond) }

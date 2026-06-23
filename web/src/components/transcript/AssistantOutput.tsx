@@ -1,6 +1,7 @@
-import { CircleAlert } from "lucide-react";
+import { Archive, CircleAlert } from "lucide-react";
 import { memo, useEffect, useLayoutEffect, useMemo } from "react";
 
+import type { Message } from "@/api/client";
 import { PhaseDot } from "@/components/PhaseDot";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useI18n } from "@/i18n";
@@ -61,8 +62,12 @@ function CanonicalAssistantOutput({
   if (!lastMessage) {
     return null;
   }
+  const compactMessage = assistant.messages.find(isCompactMessage);
+  if (compactMessage) {
+    return <CompactMarker message={compactMessage} summaryText={text} />;
+  }
   return (
-    <div className="group flex flex-col">
+    <div className="group flex min-w-0 flex-col">
       <div className="selectable-text min-w-0 text-sm leading-6">
         <TurnParts disclosure={disclosure} parts={parts} turnID={turnID} />
         {assistant.messages.some((message) => message.interrupted) ? <InterruptedBadge /> : null}
@@ -70,6 +75,50 @@ function CanonicalAssistantOutput({
       <MessageMeta createdAt={lastMessage.createdAt} duration={assistant.duration} model={assistant.model} text={text} />
     </div>
   );
+}
+
+function CompactMarker({ message, summaryText }: { message: Message; summaryText: string }) {
+  const { t } = useI18n();
+  const compact = compactMetadata(message);
+  const sourceCount = compact?.source_message_ids?.length || 0;
+  const tailCount = compact?.tail_message_ids?.length || 0;
+  return (
+    <div className="selectable-text my-1 rounded-lg border bg-muted/35 px-3 py-2 text-sm">
+      <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
+        <Archive className="size-3.5 shrink-0" />
+        <span className="shrink-0 font-medium text-foreground">{t("transcript.compactMark")}</span>
+        <span className="min-w-0 truncate text-xs">
+          {t("transcript.compactStats")
+            .replace("{source}", String(sourceCount))
+            .replace("{tail}", String(tailCount))}
+        </span>
+      </div>
+      {summaryText.trim() ? (
+        <details className="mt-2 text-xs text-muted-foreground">
+          <summary className="cursor-pointer select-none">{t("transcript.compactSummary")}</summary>
+          <div className="mt-2 border-t pt-2 text-foreground/80">
+            <TurnParts parts={partsFromMessages([message])} turnID={message.turnID} />
+          </div>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function isCompactMessage(message: Message) {
+  return Boolean(compactMetadata(message));
+}
+
+function compactMetadata(message: Message): { source_message_ids?: string[]; tail_message_ids?: string[] } | null {
+  const meta = message.metadata;
+  if (!meta || typeof meta !== "object" || !("compact" in meta)) {
+    return null;
+  }
+  const compact = (meta as { compact?: unknown }).compact;
+  if (!compact || typeof compact !== "object") {
+    return null;
+  }
+  return compact as { source_message_ids?: string[]; tail_message_ids?: string[] };
 }
 
 function LiveAssistantOutput({

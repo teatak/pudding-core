@@ -25,6 +25,7 @@ export type AssistantOverlay = {
 };
 
 export type AssistantOverlayPart =
+  | { type: "text"; text: string }
   | { type: "thought"; text: string }
   | {
       type: "approval";
@@ -179,6 +180,19 @@ function appendThoughtPart(parts: AssistantOverlayPart[], delta: string): Assist
     );
   }
   return [...parts, { type: "thought", text: delta }];
+}
+
+function appendTextPart(parts: AssistantOverlayPart[], delta: string): AssistantOverlayPart[] {
+  if (!delta) {
+    return parts;
+  }
+  const last = parts.length - 1;
+  if (last >= 0 && parts[last].type === "text") {
+    return parts.map((part, index) =>
+      index === last && part.type === "text" ? { ...part, text: part.text + delta } : part,
+    );
+  }
+  return [...parts, { type: "text", text: delta }];
 }
 
 function upsertToolPart(
@@ -348,7 +362,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
         const current = overlayWithDefaults(state.assistants[event.turnID], event.turnID, event.sessionID);
         const phase = state.turnPhases[event.sessionID];
         const part = event.part;
-        const parts = part === "thought" ? appendThoughtPart(current.parts, event.delta) : current.parts;
+        const parts = part === "thought" ? appendThoughtPart(current.parts, event.delta) : appendTextPart(current.parts, event.delta);
         const nextPhase = part === "thought" ? "thinking" : "streaming_text";
         const nextRunningTurns =
           state.runningTurns[event.sessionID] === event.turnID

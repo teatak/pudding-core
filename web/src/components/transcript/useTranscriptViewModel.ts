@@ -209,7 +209,7 @@ export function useTranscriptViewModel({
 }
 
 function isTurnOutputMessage(message: Message) {
-  return message.role !== "user";
+  return message.role !== "user" && message.role !== "system";
 }
 
 function modelFromTurn(turn: ConversationTurn): TurnModelVM | undefined {
