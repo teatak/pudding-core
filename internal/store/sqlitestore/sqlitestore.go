@@ -48,6 +48,10 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("sqlite: apply schema: %w", err)
 	}
+	if err := migrateUsageModelDimension(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := dropObsoleteTables(db); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -60,6 +64,77 @@ func dropObsoleteTables(db *sql.DB) error {
 		return fmt.Errorf("sqlite: drop obsolete tables: %w", err)
 	}
 	return nil
+}
+
+func migrateUsageModelDimension(db *sql.DB) error {
+	ok, hasModel, err := usageModelPrimaryKey(db)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+	modelExpr := `''`
+	if hasModel {
+		modelExpr = `model`
+	}
+	_, err = db.Exec(fmt.Sprintf(`
+		ALTER TABLE usage RENAME TO usage_old;
+		CREATE TABLE usage (
+			hour_start_at             INTEGER NOT NULL,
+			model                     TEXT    NOT NULL DEFAULT '',
+			request_count             INTEGER NOT NULL DEFAULT 0,
+			input_uncached_tokens     INTEGER NOT NULL DEFAULT 0,
+			input_cached_tokens       INTEGER NOT NULL DEFAULT 0,
+			cache_creation_tokens     INTEGER NOT NULL DEFAULT 0,
+			output_content_tokens     INTEGER NOT NULL DEFAULT 0,
+			output_reasoning_tokens   INTEGER NOT NULL DEFAULT 0,
+			updated_at                INTEGER NOT NULL,
+			PRIMARY KEY (hour_start_at, model)
+		);
+		INSERT INTO usage(
+			hour_start_at,model,request_count,input_uncached_tokens,input_cached_tokens,cache_creation_tokens,
+			output_content_tokens,output_reasoning_tokens,updated_at
+		)
+		SELECT hour_start_at,%s,SUM(request_count),SUM(input_uncached_tokens),SUM(input_cached_tokens),SUM(cache_creation_tokens),
+			SUM(output_content_tokens),SUM(output_reasoning_tokens),MAX(updated_at)
+		FROM usage_old
+		GROUP BY hour_start_at,%s;
+		DROP TABLE usage_old;
+	`, modelExpr, modelExpr))
+	if err != nil {
+		return fmt.Errorf("sqlite: migrate usage model dimension: %w", err)
+	}
+	return nil
+}
+
+func usageModelPrimaryKey(db *sql.DB) (bool, bool, error) {
+	rows, err := db.Query(`PRAGMA table_info(usage)`)
+	if err != nil {
+		return false, false, fmt.Errorf("sqlite: inspect usage table: %w", err)
+	}
+	defer rows.Close()
+	hasModel := false
+	pk := map[int]string{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pkIndex int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pkIndex); err != nil {
+			return false, false, err
+		}
+		if name == "model" {
+			hasModel = true
+		}
+		if pkIndex > 0 {
+			pk[pkIndex] = name
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, false, err
+	}
+	return hasModel && len(pk) == 2 && pk[1] == "hour_start_at" && pk[2] == "model", hasModel, nil
 }
 
 func ensureDBFile(path string) error {
@@ -616,6 +691,175 @@ func (s *Store) FinishTurn(ctx context.Context, in store.FinishTurnInput) (*stor
 		return nil
 	})
 	return out, err
+}
+
+func (s *Store) RecordUsage(ctx context.Context, in store.UsageRecordInput) (*store.UsageHourlyStat, error) {
+	when := in.OccurredAt
+	if when.IsZero() {
+		when = time.Now()
+	}
+	hour := when.UTC().Truncate(time.Hour)
+	now := time.Now()
+	requestCount := in.RequestCount
+	if requestCount <= 0 {
+		requestCount = 1
+	}
+	inputUncached := clampNonNegative(in.InputUncachedTokens)
+	inputCached := clampNonNegative(in.InputCachedTokens)
+	cacheCreation := clampNonNegative(in.CacheCreationTokens)
+	outputContent := clampNonNegative(in.OutputContentTokens)
+	outputReasoning := clampNonNegative(in.OutputReasoningTokens)
+	model := in.Model
+
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO usage(
+				hour_start_at,model,request_count,input_uncached_tokens,input_cached_tokens,cache_creation_tokens,
+				output_content_tokens,output_reasoning_tokens,updated_at
+			) VALUES(?,?,?,?,?,?,?,?,?)
+			ON CONFLICT(hour_start_at,model) DO UPDATE SET
+				request_count=request_count+excluded.request_count,
+				input_uncached_tokens=input_uncached_tokens+excluded.input_uncached_tokens,
+				input_cached_tokens=input_cached_tokens+excluded.input_cached_tokens,
+				cache_creation_tokens=cache_creation_tokens+excluded.cache_creation_tokens,
+				output_content_tokens=output_content_tokens+excluded.output_content_tokens,
+				output_reasoning_tokens=output_reasoning_tokens+excluded.output_reasoning_tokens,
+				updated_at=excluded.updated_at`,
+			unixMS(hour), model, requestCount, inputUncached, inputCached, cacheCreation,
+			outputContent, outputReasoning, unixMS(now),
+		)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.usageHourlyStat(ctx, hour, model)
+}
+
+func (s *Store) UsageHourlyStats(ctx context.Context, from, to time.Time) ([]*store.UsageHourlyStat, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	from = from.UTC().Truncate(time.Hour)
+	var rows *sql.Rows
+	var err error
+	if to.IsZero() {
+		rows, err = s.db.QueryContext(ctx,
+			`SELECT hour_start_at,model,request_count,input_uncached_tokens,input_cached_tokens,cache_creation_tokens,
+				output_content_tokens,output_reasoning_tokens,updated_at
+			FROM usage
+			WHERE hour_start_at>=?
+			ORDER BY hour_start_at ASC, model ASC`,
+			unixMS(from),
+		)
+	} else {
+		to = to.UTC().Truncate(time.Hour)
+		rows, err = s.db.QueryContext(ctx,
+			`SELECT hour_start_at,model,request_count,input_uncached_tokens,input_cached_tokens,cache_creation_tokens,
+				output_content_tokens,output_reasoning_tokens,updated_at
+			FROM usage
+			WHERE hour_start_at>=? AND hour_start_at<?
+			ORDER BY hour_start_at ASC, model ASC`,
+			unixMS(from), unixMS(to),
+		)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]*store.UsageHourlyStat, 0)
+	for rows.Next() {
+		stat, err := scanUsageHourlyStat(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, stat)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) usageHourlyStat(ctx context.Context, hour time.Time, model string) (*store.UsageHourlyStat, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return scanUsageHourlyStat(s.db.QueryRowContext(ctx,
+		`SELECT hour_start_at,model,request_count,input_uncached_tokens,input_cached_tokens,cache_creation_tokens,
+			output_content_tokens,output_reasoning_tokens,updated_at
+		FROM usage
+		WHERE hour_start_at=? AND model=?`,
+		unixMS(hour.UTC().Truncate(time.Hour)), model,
+	))
+}
+
+func (s *Store) RecordSessionUsage(ctx context.Context, sessionID string, in store.UsageRecordInput) (*store.SessionUsageStat, error) {
+	now := time.Now()
+	requestCount := in.RequestCount
+	if requestCount <= 0 {
+		requestCount = 1
+	}
+	inputUncached := clampNonNegative(in.InputUncachedTokens)
+	inputCached := clampNonNegative(in.InputCachedTokens)
+	cacheCreation := clampNonNegative(in.CacheCreationTokens)
+	outputContent := clampNonNegative(in.OutputContentTokens)
+	outputReasoning := clampNonNegative(in.OutputReasoningTokens)
+
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO session_usage(
+				session_id,request_count,
+				last_input_uncached_tokens,last_input_cached_tokens,last_cache_creation_tokens,
+				last_output_content_tokens,last_output_reasoning_tokens,
+				cumulative_input_uncached_tokens,cumulative_input_cached_tokens,cumulative_cache_creation_tokens,
+				cumulative_output_content_tokens,cumulative_output_reasoning_tokens,updated_at
+			) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+			ON CONFLICT(session_id) DO UPDATE SET
+				request_count=request_count+excluded.request_count,
+				last_input_uncached_tokens=excluded.last_input_uncached_tokens,
+				last_input_cached_tokens=excluded.last_input_cached_tokens,
+				last_cache_creation_tokens=excluded.last_cache_creation_tokens,
+				last_output_content_tokens=excluded.last_output_content_tokens,
+				last_output_reasoning_tokens=excluded.last_output_reasoning_tokens,
+				cumulative_input_uncached_tokens=cumulative_input_uncached_tokens+excluded.cumulative_input_uncached_tokens,
+				cumulative_input_cached_tokens=cumulative_input_cached_tokens+excluded.cumulative_input_cached_tokens,
+				cumulative_cache_creation_tokens=cumulative_cache_creation_tokens+excluded.cumulative_cache_creation_tokens,
+				cumulative_output_content_tokens=cumulative_output_content_tokens+excluded.cumulative_output_content_tokens,
+				cumulative_output_reasoning_tokens=cumulative_output_reasoning_tokens+excluded.cumulative_output_reasoning_tokens,
+				updated_at=excluded.updated_at`,
+			sessionID, requestCount,
+			inputUncached, inputCached, cacheCreation,
+			outputContent, outputReasoning,
+			inputUncached, inputCached, cacheCreation,
+			outputContent, outputReasoning, unixMS(now),
+		)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.SessionUsage(ctx, sessionID)
+}
+
+func (s *Store) SessionUsage(ctx context.Context, sessionID string) (*store.SessionUsageStat, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
+		return nil, err
+	}
+	stat, err := sessionUsageTx(ctx, tx, sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return &store.SessionUsageStat{SessionID: sessionID}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return stat, nil
 }
 
 func (s *Store) RunningTurn(ctx context.Context, sessionID string) (*store.Turn, error) {
@@ -1184,6 +1428,65 @@ func scanQueuedInput(row messageScanner) (*store.QueuedInput, error) {
 	return &input, nil
 }
 
+func scanUsageHourlyStat(row messageScanner) (*store.UsageHourlyStat, error) {
+	var stat store.UsageHourlyStat
+	var hourStart, updated int64
+	err := row.Scan(
+		&hourStart,
+		&stat.Model,
+		&stat.RequestCount,
+		&stat.InputUncachedTokens,
+		&stat.InputCachedTokens,
+		&stat.CacheCreationTokens,
+		&stat.OutputContentTokens,
+		&stat.OutputReasoningTokens,
+		&updated,
+	)
+	if err != nil {
+		return nil, err
+	}
+	stat.HourStartAt = timeFromMS(hourStart)
+	stat.UpdatedAt = timeFromMS(updated)
+	return &stat, nil
+}
+
+func sessionUsageTx(ctx context.Context, tx *sql.Tx, sessionID string) (*store.SessionUsageStat, error) {
+	return scanSessionUsageStat(tx.QueryRowContext(ctx,
+		`SELECT session_id,request_count,
+			last_input_uncached_tokens,last_input_cached_tokens,last_cache_creation_tokens,
+			last_output_content_tokens,last_output_reasoning_tokens,
+			cumulative_input_uncached_tokens,cumulative_input_cached_tokens,cumulative_cache_creation_tokens,
+			cumulative_output_content_tokens,cumulative_output_reasoning_tokens,updated_at
+		FROM session_usage WHERE session_id=?`,
+		sessionID,
+	))
+}
+
+func scanSessionUsageStat(row messageScanner) (*store.SessionUsageStat, error) {
+	var stat store.SessionUsageStat
+	var updated int64
+	err := row.Scan(
+		&stat.SessionID,
+		&stat.RequestCount,
+		&stat.LastInputUncachedTokens,
+		&stat.LastInputCachedTokens,
+		&stat.LastCacheCreationTokens,
+		&stat.LastOutputContentTokens,
+		&stat.LastOutputReasoningTokens,
+		&stat.CumulativeInputUncachedTokens,
+		&stat.CumulativeInputCachedTokens,
+		&stat.CumulativeCacheCreationTokens,
+		&stat.CumulativeOutputContentTokens,
+		&stat.CumulativeOutputReasoningTokens,
+		&updated,
+	)
+	if err != nil {
+		return nil, err
+	}
+	stat.UpdatedAt = timeFromMS(updated)
+	return &stat, nil
+}
+
 func validQueuedInputStatus(status store.QueuedInputStatus) bool {
 	switch status {
 	case store.QueuedInputQueued, store.QueuedInputEditing, store.QueuedInputCancelled, store.QueuedInputPromoted:
@@ -1233,6 +1536,13 @@ func normalizeJSON(raw json.RawMessage) json.RawMessage {
 func unixMS(t time.Time) int64 { return t.UnixNano() / int64(time.Millisecond) }
 
 func timeFromMS(ms int64) time.Time { return time.Unix(0, ms*int64(time.Millisecond)) }
+
+func clampNonNegative(v int) int {
+	if v < 0 {
+		return 0
+	}
+	return v
+}
 
 func boolInt(v bool) int {
 	if v {

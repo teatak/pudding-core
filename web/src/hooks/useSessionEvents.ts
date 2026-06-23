@@ -84,6 +84,9 @@ function openSessionEventSource({
     }
     applyEvent(parsed.data);
     syncSessionListFromEvent(queryClient, parsed.data);
+    if (parsed.data.kind === "turn.started" || isTurnTerminalEvent(parsed.data)) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessionUsage(sessionID) });
+    }
     if (isTurnTerminalEvent(parsed.data) && syncMessages) {
       syncTerminalTurn(queryClient, token, sessionID, parsed.data.turnID);
     }

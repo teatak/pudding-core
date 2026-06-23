@@ -524,6 +524,61 @@ func TestCreateSessionCarriesProviderAndModel(t *testing.T) {
 	}
 }
 
+func TestGetSessionUsage(t *testing.T) {
+	srv, st := newTestServer(t)
+	sess := decodeJSON[store.Session](t, req(t, http.MethodPost, srv.URL+"/sessions",
+		map[string]string{"title": "x", "provider": "mock", "model": "m1"}))
+	if _, err := st.RecordSessionUsage(context.Background(), sess.ID, store.UsageRecordInput{
+		InputUncachedTokens:   10,
+		InputCachedTokens:     20,
+		CacheCreationTokens:   30,
+		OutputContentTokens:   40,
+		OutputReasoningTokens: 50,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := decodeJSON[engine.SessionUsageInfo](t, req(t, http.MethodGet, srv.URL+"/sessions/"+sess.ID+"/usage", nil))
+	if got.SessionID != sess.ID || got.RequestCount != 1 || got.LastPromptTokens != 60 || got.LastOutputTokens != 90 || got.CumulativeTotalTokens != 150 {
+		t.Fatalf("unexpected session usage: %+v", got)
+	}
+}
+
+func TestGetDailyUsage(t *testing.T) {
+	srv, st := newTestServer(t)
+	now := time.Now()
+	if _, err := st.RecordUsage(context.Background(), store.UsageRecordInput{
+		OccurredAt:            now,
+		RequestCount:          2,
+		InputUncachedTokens:   10,
+		InputCachedTokens:     20,
+		CacheCreationTokens:   30,
+		OutputContentTokens:   40,
+		OutputReasoningTokens: 50,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.RecordUsage(context.Background(), store.UsageRecordInput{
+		OccurredAt:          now.AddDate(0, 0, -1),
+		InputUncachedTokens: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := decodeJSON[dailyUsageResponse](t, req(t, http.MethodGet, srv.URL+"/usage/daily?days=3", nil))
+	if len(got.Days) != 3 {
+		t.Fatalf("want 3 days, got %+v", got.Days)
+	}
+	today := got.Days[2]
+	if today.Date != now.Format("2006-01-02") || today.RequestCount != 2 || today.TotalTokens != 150 {
+		t.Fatalf("today usage wrong: %+v", today)
+	}
+	yesterday := got.Days[1]
+	if yesterday.RequestCount != 1 || yesterday.TotalTokens != 1 {
+		t.Fatalf("yesterday usage wrong: %+v", yesterday)
+	}
+}
+
 func TestCreateSessionBodyValidation(t *testing.T) {
 	srv, _ := newTestServer(t)
 

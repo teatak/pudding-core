@@ -141,12 +141,29 @@ type ToolCallChunk struct {
 	ArgsDelta string
 }
 
+type UsageInfo struct {
+	InputUncachedTokens   int
+	InputCachedTokens     int
+	CacheCreationTokens   int
+	OutputContentTokens   int
+	OutputReasoningTokens int
+}
+
+func (u UsageInfo) Empty() bool {
+	return u.InputUncachedTokens == 0 &&
+		u.InputCachedTokens == 0 &&
+		u.CacheCreationTokens == 0 &&
+		u.OutputContentTokens == 0 &&
+		u.OutputReasoningTokens == 0
+}
+
 // Chunk 是模型流的最小单元:Delta 增量文本;Done 正常收尾;Err 异常终止。
 // Done 与 Err 之后不得再有 chunk。
 type Chunk struct {
 	Part   PartType
 	Delta  string
 	Tool   *ToolCallChunk
+	Usage  *UsageInfo
 	Done   bool
 	Finish FinishReason
 	Err    error

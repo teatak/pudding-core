@@ -186,6 +186,14 @@ type streamFrame struct {
 	PromptFeedback *struct {
 		BlockReason string `json:"blockReason"`
 	} `json:"promptFeedback"`
+	UsageMetadata *usageMetadata `json:"usageMetadata"`
+}
+
+type usageMetadata struct {
+	PromptTokenCount        int `json:"promptTokenCount"`
+	CandidatesTokenCount    int `json:"candidatesTokenCount"`
+	CachedContentTokenCount int `json:"cachedContentTokenCount"`
+	ThoughtsTokenCount      int `json:"thoughtsTokenCount"`
 }
 
 // readSSE 解析 Gemini 的 SSE 流。协议没有 [DONE] 哨兵,
@@ -195,6 +203,7 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	sawFinish := false
 	finish := provider.FinishStop
+	var latestUsage *usageMetadata
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || !strings.HasPrefix(line, "data:") {
@@ -207,6 +216,10 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 		}
 		if frame.PromptFeedback != nil && frame.PromptFeedback.BlockReason != "" {
 			return fmt.Errorf("google: prompt blocked: %s", frame.PromptFeedback.BlockReason)
+		}
+		if frame.UsageMetadata != nil {
+			cp := *frame.UsageMetadata
+			latestUsage = &cp
 		}
 		for _, cand := range frame.Candidates {
 			for partIndex, p := range cand.Content.Parts {
@@ -252,8 +265,32 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 	if !sawFinish {
 		return errors.New("google: stream ended without finish reason")
 	}
+	if latestUsage != nil {
+		usage := googleUsageInfo(*latestUsage)
+		if !usage.Empty() && !emitChunk(ctx, out, provider.Chunk{Usage: &usage}) {
+			return ctx.Err()
+		}
+	}
 	out <- provider.Chunk{Done: true, Finish: finish} // 终止 chunk 阻塞发送,消费方 drain 到 close
 	return nil
+}
+
+func googleUsageInfo(u usageMetadata) provider.UsageInfo {
+	cached := clampUsage(u.CachedContentTokenCount)
+	input := clampUsage(u.PromptTokenCount - cached)
+	return provider.UsageInfo{
+		InputUncachedTokens:   input,
+		InputCachedTokens:     cached,
+		OutputContentTokens:   clampUsage(u.CandidatesTokenCount),
+		OutputReasoningTokens: clampUsage(u.ThoughtsTokenCount),
+	}
+}
+
+func clampUsage(v int) int {
+	if v < 0 {
+		return 0
+	}
+	return v
 }
 
 func emitChunk(ctx context.Context, out chan<- provider.Chunk, chunk provider.Chunk) bool {

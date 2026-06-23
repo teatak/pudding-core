@@ -55,7 +55,15 @@ func (c *Client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 }
 
 func (c *Client) stream(ctx context.Context, req provider.Request, out chan<- provider.Chunk) error {
-	httpReq, err := c.newRequest(ctx, req)
+	err := c.streamOnce(ctx, req, out, true)
+	if isUnsupportedUsageStreamOption(err) {
+		return c.streamOnce(ctx, req, out, false)
+	}
+	return err
+}
+
+func (c *Client) streamOnce(ctx context.Context, req provider.Request, out chan<- provider.Chunk, includeUsage bool) error {
+	httpReq, err := c.newRequest(ctx, req, includeUsage)
 	if err != nil {
 		return err
 	}
@@ -69,12 +77,36 @@ func (c *Client) stream(ctx context.Context, req provider.Request, out chan<- pr
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("openai: status %d: %s", resp.StatusCode, redact(bodySummary(resp.Body), c.apiKey))
+		return &httpStatusError{status: resp.StatusCode, summary: redact(bodySummary(resp.Body), c.apiKey)}
 	}
 	return readSSE(ctx, resp.Body, out)
 }
 
-func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Request, error) {
+type httpStatusError struct {
+	status  int
+	summary string
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("openai: status %d: %s", e.status, e.summary)
+}
+
+func isUnsupportedUsageStreamOption(err error) bool {
+	var statusErr *httpStatusError
+	if !errors.As(err, &statusErr) {
+		return false
+	}
+	if statusErr.status != http.StatusBadRequest && statusErr.status != http.StatusUnprocessableEntity {
+		return false
+	}
+	summary := strings.ToLower(statusErr.summary)
+	return strings.Contains(summary, "stream_options") ||
+		strings.Contains(summary, "stream options") ||
+		strings.Contains(summary, "include_usage") ||
+		strings.Contains(summary, "include usage")
+}
+
+func (c *Client) newRequest(ctx context.Context, req provider.Request, includeUsage bool) (*http.Request, error) {
 	if c.baseURL == "" {
 		return nil, errors.New("openai: base url is required")
 	}
@@ -82,6 +114,9 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 		Model:    req.Model,
 		Stream:   true,
 		Messages: make([]chatMessage, 0, len(req.Messages)+1),
+	}
+	if includeUsage {
+		body.StreamOptions = &chatStreamOptions{IncludeUsage: true}
 	}
 	opts := req.Config.OpenAIOptions()
 	if v, ok := provider.FloatOption(opts, "temperature"); ok {
@@ -133,6 +168,7 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) error {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	finish := provider.FinishStop
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, ":") || !strings.HasPrefix(line, "data:") {
@@ -140,12 +176,18 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "[DONE]" {
-			emit(ctx, out, provider.Chunk{Done: true})
+			emit(ctx, out, provider.Chunk{Done: true, Finish: finish})
 			return nil
 		}
 		var frame chatStreamFrame
 		if err := json.Unmarshal([]byte(data), &frame); err != nil {
 			return fmt.Errorf("openai: parse stream frame: %w", err)
+		}
+		if frame.Usage != nil {
+			usage := chatUsageInfo(*frame.Usage)
+			if !usage.Empty() && !emit(ctx, out, provider.Chunk{Usage: &usage}) {
+				return ctx.Err()
+			}
 		}
 		for _, choice := range frame.Choices {
 			if choice.Delta.Content != "" {
@@ -169,12 +211,10 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 				}
 			}
 			if choice.FinishReason != "" {
-				finish := provider.FinishStop
+				finish = provider.FinishStop
 				if choice.FinishReason == "tool_calls" {
 					finish = provider.FinishToolCalls
 				}
-				emit(ctx, out, provider.Chunk{Done: true, Finish: finish})
-				return nil
 			}
 		}
 	}
@@ -280,13 +320,18 @@ func httpClient(client *http.Client) *http.Client {
 }
 
 type chatRequest struct {
-	Model               string        `json:"model"`
-	Stream              bool          `json:"stream"`
-	Messages            []chatMessage `json:"messages"`
-	Tools               []chatTool    `json:"tools,omitempty"`
-	Temperature         *float64      `json:"temperature,omitempty"`
-	MaxCompletionTokens *int          `json:"max_completion_tokens,omitempty"`
-	ReasoningEffort     string        `json:"reasoning_effort,omitempty"`
+	Model               string             `json:"model"`
+	Stream              bool               `json:"stream"`
+	Messages            []chatMessage      `json:"messages"`
+	Tools               []chatTool         `json:"tools,omitempty"`
+	Temperature         *float64           `json:"temperature,omitempty"`
+	MaxCompletionTokens *int               `json:"max_completion_tokens,omitempty"`
+	ReasoningEffort     string             `json:"reasoning_effort,omitempty"`
+	StreamOptions       *chatStreamOptions `json:"stream_options,omitempty"`
+}
+
+type chatStreamOptions struct {
+	IncludeUsage bool `json:"include_usage,omitempty"`
 }
 
 type chatMessage struct {
@@ -334,6 +379,56 @@ type chatStreamFrame struct {
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
+	Usage *chatUsage `json:"usage,omitempty"`
+}
+
+type chatUsage struct {
+	PromptTokens            int                     `json:"prompt_tokens"`
+	CompletionTokens        int                     `json:"completion_tokens"`
+	PromptTokensDetails     *promptTokensDetails    `json:"prompt_tokens_details,omitempty"`
+	CompletionTokensDetails *completionTokenDetails `json:"completion_tokens_details,omitempty"`
+}
+
+type promptTokensDetails struct {
+	CachedTokens int `json:"cached_tokens"`
+}
+
+type completionTokenDetails struct {
+	ReasoningTokens int `json:"reasoning_tokens"`
+}
+
+func chatUsageInfo(u chatUsage) provider.UsageInfo {
+	cached := clampUsage(u.PromptTokensDetails.cachedTokens())
+	input := clampUsage(u.PromptTokens - cached)
+	reasoning := clampUsage(u.CompletionTokensDetails.reasoningTokens())
+	output := clampUsage(u.CompletionTokens - reasoning)
+	return provider.UsageInfo{
+		InputUncachedTokens:   input,
+		InputCachedTokens:     cached,
+		OutputContentTokens:   output,
+		OutputReasoningTokens: reasoning,
+	}
+}
+
+func (d *promptTokensDetails) cachedTokens() int {
+	if d == nil {
+		return 0
+	}
+	return d.CachedTokens
+}
+
+func (d *completionTokenDetails) reasoningTokens() int {
+	if d == nil {
+		return 0
+	}
+	return d.ReasoningTokens
+}
+
+func clampUsage(v int) int {
+	if v < 0 {
+		return 0
+	}
+	return v
 }
 
 func messageText(msg provider.Message) string {

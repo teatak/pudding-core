@@ -128,6 +128,31 @@ func TestStreamHappyPath(t *testing.T) {
 	}
 }
 
+func TestReadSSEUsage(t *testing.T) {
+	out := make(chan provider.Chunk, 8)
+	err := readSSE(context.Background(), strings.NewReader(happyStream), out)
+	close(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var usage *provider.UsageInfo
+	done := false
+	for chunk := range out {
+		if chunk.Usage != nil {
+			usage = chunk.Usage
+		}
+		if chunk.Done {
+			done = true
+		}
+	}
+	if !done || usage == nil {
+		t.Fatalf("missing usage or done: done=%v usage=%+v", done, usage)
+	}
+	if usage.InputUncachedTokens != 10 || usage.OutputContentTokens != 8 {
+		t.Fatalf("usage wrong: %+v", usage)
+	}
+}
+
 func TestRequestShapeWithToolHistory(t *testing.T) {
 	var gotBody messagesRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -32,7 +32,7 @@ func New(eng *engine.Engine, s store.Store, cfg engine.ConfigSource, hub *event.
 }
 
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
-var apiPrefixes = []string{"/sessions", "/settings", "/providers", "/tools"}
+var apiPrefixes = []string{"/sessions", "/settings", "/providers", "/tools", "/usage"}
 
 // Handler 返回根 handler:API 前缀走 token 鉴权 + cart 路由,
 // 其余路径 serve 静态 web UI(HTML/JS 非敏感,数据全在 API 后面;
@@ -47,6 +47,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/sessions/:id/submit").POST(s.submit)
 	app.Route("/sessions/:id/cancel").POST(s.cancel)
 	app.Route("/sessions/:id/events").GET(s.sessionEvents)
+	app.Route("/sessions/:id/usage").GET(s.getSessionUsage)
 	app.Route("/sessions/:id/turns").GET(s.listTurns)
 	app.Route("/sessions/:id/turns/:turnID").GET(s.getTurn)
 	app.Route("/sessions/:id/messages").GET(s.listMessages)
@@ -58,6 +59,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/providers/:name/models").GET(s.listProviderModels)
 	app.Route("/tools/builtin").GET(s.listBuiltinTools)
 	app.Route("/tools/web").GET(s.getWebTools).PATCH(s.patchWebTools).PUT(s.patchWebTools)
+	app.Route("/usage/daily").GET(s.getDailyUsage)
 
 	authed := withAuth(token, app)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -130,6 +132,16 @@ func (s *Server) getSession(c *cart.Context) error {
 		return s.fail(c, err)
 	}
 	c.JSON(http.StatusOK, sess)
+	return nil
+}
+
+func (s *Server) getSessionUsage(c *cart.Context) error {
+	id, _ := c.Param("id")
+	usage, err := s.engine.SessionUsage(c.Request.Context(), id)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, usage)
 	return nil
 }
 

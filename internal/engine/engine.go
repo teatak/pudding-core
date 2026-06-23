@@ -132,6 +132,34 @@ type SubmitResult struct {
 	ClientMessageID string `json:"clientMessageID,omitempty"`
 }
 
+type SessionUsageInfo struct {
+	SessionID                       string    `json:"sessionID"`
+	ContextWindow                   int       `json:"contextWindow"`
+	ContextEstimatedTokens          int       `json:"contextEstimatedTokens"`
+	MessageEstimatedTokens          int       `json:"messageEstimatedTokens"`
+	PromptOverheadEstimatedTokens   int       `json:"promptOverheadEstimatedTokens"`
+	SystemPromptEstimatedTokens     int       `json:"systemPromptEstimatedTokens"`
+	ToolsSchemaEstimatedTokens      int       `json:"toolsSchemaEstimatedTokens"`
+	AutoCompactThresholdTokens      int       `json:"autoCompactThresholdTokens"`
+	RequestCount                    int       `json:"requestCount"`
+	LastPromptTokens                int       `json:"lastPromptTokens"`
+	LastInputUncachedTokens         int       `json:"lastInputUncachedTokens"`
+	LastInputCachedTokens           int       `json:"lastInputCachedTokens"`
+	LastCacheCreationTokens         int       `json:"lastCacheCreationTokens"`
+	LastOutputContentTokens         int       `json:"lastOutputContentTokens"`
+	LastOutputReasoningTokens       int       `json:"lastOutputReasoningTokens"`
+	LastOutputTokens                int       `json:"lastOutputTokens"`
+	CumulativeInputUncachedTokens   int       `json:"cumulativeInputUncachedTokens"`
+	CumulativeInputCachedTokens     int       `json:"cumulativeInputCachedTokens"`
+	CumulativeCacheCreationTokens   int       `json:"cumulativeCacheCreationTokens"`
+	CumulativeOutputContentTokens   int       `json:"cumulativeOutputContentTokens"`
+	CumulativeOutputReasoningTokens int       `json:"cumulativeOutputReasoningTokens"`
+	CumulativeInputTokens           int       `json:"cumulativeInputTokens"`
+	CumulativeOutputTokens          int       `json:"cumulativeOutputTokens"`
+	CumulativeTotalTokens           int       `json:"cumulativeTotalTokens"`
+	UpdatedAt                       time.Time `json:"updatedAt,omitempty"`
+}
+
 type resolvedModel struct {
 	providerName string
 	model        string
@@ -208,6 +236,66 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	go e.runTurn(turnCtx, in.SessionID, res.Turn.ID, resolved, client)
 
 	return &SubmitResult{TurnID: res.Turn.ID, UserMessageID: res.UserMessage.ID}, nil
+}
+
+func (e *Engine) SessionUsage(ctx context.Context, sessionID string) (*SessionUsageInfo, error) {
+	sess, err := e.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	resolved, err := e.resolveModel(ctx, sess)
+	if err != nil {
+		return nil, err
+	}
+	req, err := e.builder.Build(ctx, sessionID, resolved.model)
+	if err != nil {
+		return nil, err
+	}
+	req.Config = resolved.config
+	if e.tools != nil && modelSupportsTools(resolved.config) {
+		defs, err := e.tools.Definitions(ctx, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("list tools: %w", err)
+		}
+		req.Tools = defs
+	}
+	estimate := contextbuilder.EstimateRequest(req)
+	stat, err := e.store.SessionUsage(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	contextWindow := resolved.config.ContextWindow
+	threshold := 0
+	if contextWindow > 0 {
+		threshold = contextWindow * 4 / 5
+	}
+	return &SessionUsageInfo{
+		SessionID:                       sessionID,
+		ContextWindow:                   contextWindow,
+		ContextEstimatedTokens:          estimate.Total(),
+		MessageEstimatedTokens:          estimate.MessageTokens,
+		PromptOverheadEstimatedTokens:   estimate.SystemTokens + estimate.ToolsTokens,
+		SystemPromptEstimatedTokens:     estimate.SystemTokens,
+		ToolsSchemaEstimatedTokens:      estimate.ToolsTokens,
+		AutoCompactThresholdTokens:      threshold,
+		RequestCount:                    stat.RequestCount,
+		LastPromptTokens:                stat.LastInputTokens(),
+		LastInputUncachedTokens:         stat.LastInputUncachedTokens,
+		LastInputCachedTokens:           stat.LastInputCachedTokens,
+		LastCacheCreationTokens:         stat.LastCacheCreationTokens,
+		LastOutputContentTokens:         stat.LastOutputContentTokens,
+		LastOutputReasoningTokens:       stat.LastOutputReasoningTokens,
+		LastOutputTokens:                stat.LastOutputTokens(),
+		CumulativeInputUncachedTokens:   stat.CumulativeInputUncachedTokens,
+		CumulativeInputCachedTokens:     stat.CumulativeInputCachedTokens,
+		CumulativeCacheCreationTokens:   stat.CumulativeCacheCreationTokens,
+		CumulativeOutputContentTokens:   stat.CumulativeOutputContentTokens,
+		CumulativeOutputReasoningTokens: stat.CumulativeOutputReasoningTokens,
+		CumulativeInputTokens:           stat.CumulativeInputTokens(),
+		CumulativeOutputTokens:          stat.CumulativeOutputTokens(),
+		CumulativeTotalTokens:           stat.CumulativeTotalTokens(),
+		UpdatedAt:                       stat.UpdatedAt,
+	}, nil
 }
 
 func (e *Engine) queueSubmit(ctx context.Context, in SubmitInput, resolved *resolvedModel) (*SubmitResult, error) {
@@ -467,7 +555,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 		if err != nil {
 			return store.TurnFailed, fmt.Sprintf("provider: %v", err)
 		}
-		finish, status, errMsg := e.consumeStream(ctx, sessionID, turnID, ch, parts)
+		finish, status, errMsg := e.consumeStream(ctx, sessionID, turnID, resolved.model, ch, parts)
 		if status != store.TurnRunning {
 			return status, errMsg
 		}
@@ -493,9 +581,11 @@ func modelSupportsTools(cfg provider.ModelConfig) bool {
 	return cfg.Capabilities != nil && cfg.Capabilities.Tools
 }
 
-func (e *Engine) consumeStream(ctx context.Context, sessionID, turnID string, ch <-chan provider.Chunk, parts *turnPartAccumulator) (provider.FinishReason, store.TurnStatus, string) {
+func (e *Engine) consumeStream(ctx context.Context, sessionID, turnID, model string, ch <-chan provider.Chunk, parts *turnPartAccumulator) (provider.FinishReason, store.TurnStatus, string) {
 	coalescer := newStreamEventCoalescer(e.hub)
 	defer coalescer.Flush()
+	var usage provider.UsageInfo
+	usageSeen := false
 
 	for {
 		select {
@@ -510,6 +600,9 @@ func (e *Engine) consumeStream(ctx context.Context, sessionID, turnID string, ch
 				if ctx.Err() != nil {
 					return "", store.TurnCancelled, ""
 				}
+				if usageSeen {
+					e.recordUsage(ctx, sessionID, model, usage, 1)
+				}
 				return "", store.TurnFailed, "provider stream ended without terminal chunk"
 			}
 			switch {
@@ -517,8 +610,19 @@ func (e *Engine) consumeStream(ctx context.Context, sessionID, turnID string, ch
 				if errors.Is(chunk.Err, context.Canceled) {
 					return "", store.TurnCancelled, ""
 				}
+				if usageSeen {
+					e.recordUsage(ctx, sessionID, model, usage, 1)
+				}
 				return "", store.TurnFailed, chunk.Err.Error()
+			case chunk.Usage != nil:
+				mergeUsageInfo(&usage, *chunk.Usage)
+				usageSeen = true
 			case chunk.Done:
+				if usageSeen {
+					e.recordUsage(ctx, sessionID, model, usage, 1)
+				} else {
+					e.recordUsage(ctx, sessionID, model, provider.UsageInfo{}, 1)
+				}
 				return chunk.Finish, store.TurnRunning, ""
 			case chunk.Tool != nil:
 				callID, name, argsDelta := parts.AppendTool(*chunk.Tool)
@@ -549,6 +653,46 @@ func (e *Engine) consumeStream(ctx context.Context, sessionID, turnID string, ch
 				})
 			}
 		}
+	}
+}
+
+func mergeUsageInfo(dst *provider.UsageInfo, src provider.UsageInfo) {
+	if src.InputUncachedTokens != 0 {
+		dst.InputUncachedTokens = src.InputUncachedTokens
+	}
+	if src.InputCachedTokens != 0 {
+		dst.InputCachedTokens = src.InputCachedTokens
+	}
+	if src.CacheCreationTokens != 0 {
+		dst.CacheCreationTokens = src.CacheCreationTokens
+	}
+	if src.OutputContentTokens != 0 {
+		dst.OutputContentTokens = src.OutputContentTokens
+	}
+	if src.OutputReasoningTokens != 0 {
+		dst.OutputReasoningTokens = src.OutputReasoningTokens
+	}
+}
+
+func (e *Engine) recordUsage(ctx context.Context, sessionID, model string, usage provider.UsageInfo, requestCount int) {
+	if usage.Empty() && requestCount <= 0 {
+		return
+	}
+	in := store.UsageRecordInput{
+		OccurredAt:            time.Now(),
+		Model:                 model,
+		RequestCount:          requestCount,
+		InputUncachedTokens:   usage.InputUncachedTokens,
+		InputCachedTokens:     usage.InputCachedTokens,
+		CacheCreationTokens:   usage.CacheCreationTokens,
+		OutputContentTokens:   usage.OutputContentTokens,
+		OutputReasoningTokens: usage.OutputReasoningTokens,
+	}
+	if _, err := e.store.RecordUsage(ctx, in); err != nil {
+		slog.Warn("engine: record usage failed", "err", err)
+	}
+	if _, err := e.store.RecordSessionUsage(ctx, sessionID, in); err != nil {
+		slog.Warn("engine: record session usage failed", "sessionID", sessionID, "err", err)
 	}
 }
 

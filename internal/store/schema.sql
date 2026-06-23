@@ -51,6 +51,35 @@ CREATE INDEX IF NOT EXISTS queued_inputs_session_active
     ON queued_inputs(session_id, created_at)
     WHERE status IN ('queued','editing','cancelled');
 
+CREATE TABLE IF NOT EXISTS usage (
+    hour_start_at             INTEGER NOT NULL, -- unix ms, UTC hour boundary
+    model                     TEXT    NOT NULL DEFAULT '',
+    request_count             INTEGER NOT NULL DEFAULT 0,
+    input_uncached_tokens     INTEGER NOT NULL DEFAULT 0,
+    input_cached_tokens       INTEGER NOT NULL DEFAULT 0,
+    cache_creation_tokens     INTEGER NOT NULL DEFAULT 0,
+    output_content_tokens     INTEGER NOT NULL DEFAULT 0,
+    output_reasoning_tokens   INTEGER NOT NULL DEFAULT 0,
+    updated_at                INTEGER NOT NULL,
+    PRIMARY KEY (hour_start_at, model)
+);
+
+CREATE TABLE IF NOT EXISTS session_usage (
+    session_id                         TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    request_count                      INTEGER NOT NULL DEFAULT 0,
+    last_input_uncached_tokens         INTEGER NOT NULL DEFAULT 0,
+    last_input_cached_tokens           INTEGER NOT NULL DEFAULT 0,
+    last_cache_creation_tokens         INTEGER NOT NULL DEFAULT 0,
+    last_output_content_tokens         INTEGER NOT NULL DEFAULT 0,
+    last_output_reasoning_tokens       INTEGER NOT NULL DEFAULT 0,
+    cumulative_input_uncached_tokens   INTEGER NOT NULL DEFAULT 0,
+    cumulative_input_cached_tokens     INTEGER NOT NULL DEFAULT 0,
+    cumulative_cache_creation_tokens   INTEGER NOT NULL DEFAULT 0,
+    cumulative_output_content_tokens   INTEGER NOT NULL DEFAULT 0,
+    cumulative_output_reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+    updated_at                         INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS messages (
     id                TEXT PRIMARY KEY,
     session_id        TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

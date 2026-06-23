@@ -540,6 +540,69 @@ type FinishTurnResult struct {
 	FinalEvent        *event.Event
 }
 
+type UsageRecordInput struct {
+	OccurredAt            time.Time
+	Model                 string
+	RequestCount          int
+	InputUncachedTokens   int
+	InputCachedTokens     int
+	CacheCreationTokens   int
+	OutputContentTokens   int
+	OutputReasoningTokens int
+}
+
+type UsageHourlyStat struct {
+	HourStartAt           time.Time `json:"hourStartAt"`
+	Model                 string    `json:"model"`
+	RequestCount          int       `json:"requestCount"`
+	InputUncachedTokens   int       `json:"inputUncachedTokens"`
+	InputCachedTokens     int       `json:"inputCachedTokens"`
+	CacheCreationTokens   int       `json:"cacheCreationTokens"`
+	OutputContentTokens   int       `json:"outputContentTokens"`
+	OutputReasoningTokens int       `json:"outputReasoningTokens"`
+	UpdatedAt             time.Time `json:"updatedAt"`
+}
+
+func (s UsageHourlyStat) TotalTokens() int {
+	return s.InputUncachedTokens + s.InputCachedTokens + s.CacheCreationTokens + s.OutputContentTokens + s.OutputReasoningTokens
+}
+
+type SessionUsageStat struct {
+	SessionID                       string    `json:"sessionID"`
+	RequestCount                    int       `json:"requestCount"`
+	LastInputUncachedTokens         int       `json:"lastInputUncachedTokens"`
+	LastInputCachedTokens           int       `json:"lastInputCachedTokens"`
+	LastCacheCreationTokens         int       `json:"lastCacheCreationTokens"`
+	LastOutputContentTokens         int       `json:"lastOutputContentTokens"`
+	LastOutputReasoningTokens       int       `json:"lastOutputReasoningTokens"`
+	CumulativeInputUncachedTokens   int       `json:"cumulativeInputUncachedTokens"`
+	CumulativeInputCachedTokens     int       `json:"cumulativeInputCachedTokens"`
+	CumulativeCacheCreationTokens   int       `json:"cumulativeCacheCreationTokens"`
+	CumulativeOutputContentTokens   int       `json:"cumulativeOutputContentTokens"`
+	CumulativeOutputReasoningTokens int       `json:"cumulativeOutputReasoningTokens"`
+	UpdatedAt                       time.Time `json:"updatedAt"`
+}
+
+func (s SessionUsageStat) LastInputTokens() int {
+	return s.LastInputUncachedTokens + s.LastInputCachedTokens + s.LastCacheCreationTokens
+}
+
+func (s SessionUsageStat) LastOutputTokens() int {
+	return s.LastOutputContentTokens + s.LastOutputReasoningTokens
+}
+
+func (s SessionUsageStat) CumulativeInputTokens() int {
+	return s.CumulativeInputUncachedTokens + s.CumulativeInputCachedTokens + s.CumulativeCacheCreationTokens
+}
+
+func (s SessionUsageStat) CumulativeOutputTokens() int {
+	return s.CumulativeOutputContentTokens + s.CumulativeOutputReasoningTokens
+}
+
+func (s SessionUsageStat) CumulativeTotalTokens() int {
+	return s.CumulativeInputTokens() + s.CumulativeOutputTokens()
+}
+
 // Store 的每个方法是一个完整事务。BeginTurn 与 FinishTurn 内部必须把
 // message、turns 状态、lifecycle event 写在同一事务里(AGENTS.md 硬约束 15);
 // 事件 seq 由 Store 在事务内按 session 单调分配。
@@ -565,6 +628,14 @@ type Store interface {
 	QueuedSessions(ctx context.Context) ([]string, error)
 	// FinishTurn:更新 turn 状态 + 落 assistant message(如有)+ 落 final 事件。
 	FinishTurn(ctx context.Context, in FinishTurnInput) (*FinishTurnResult, error)
+	// RecordUsage 把一次或一批 provider usage delta 累加进全局 UTC 小时桶。
+	RecordUsage(ctx context.Context, in UsageRecordInput) (*UsageHourlyStat, error)
+	// UsageHourlyStats 返回 [from, to) 的全局小时统计;to 为零值表示无上界。
+	UsageHourlyStats(ctx context.Context, from, to time.Time) ([]*UsageHourlyStat, error)
+	// RecordSessionUsage 把一次 provider request 用量写入 session 统计。
+	RecordSessionUsage(ctx context.Context, sessionID string, in UsageRecordInput) (*SessionUsageStat, error)
+	// SessionUsage 返回 session 最近一次与累计 token 用量;无用量时返回零统计。
+	SessionUsage(ctx context.Context, sessionID string) (*SessionUsageStat, error)
 	// RunningTurn 返回 session 当前 running 的 turn,无则 ErrNotFound。
 	RunningTurn(ctx context.Context, sessionID string) (*Turn, error)
 	// RunningTurns 返回所有 session 的 running turn,服务 daemon 启动恢复。

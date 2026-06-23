@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/provider"
@@ -30,6 +31,33 @@ func TestResponsesStreamHappyPath(t *testing.T) {
 	}
 	if !chunks[len(chunks)-1].Done {
 		t.Fatalf("last chunk should be Done: %+v", chunks)
+	}
+}
+
+func TestResponsesReadSSEUsage(t *testing.T) {
+	out := make(chan provider.Chunk, 3)
+	err := readResponsesSSE(context.Background(), strings.NewReader(
+		`data: {"type":"response.completed","response":{"usage":{"input_tokens":100,"output_tokens":20,"input_tokens_details":{"cached_tokens":25},"output_tokens_details":{"reasoning_tokens":5}}}}`+"\n\n",
+	), out)
+	close(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var usage *provider.UsageInfo
+	done := false
+	for chunk := range out {
+		if chunk.Usage != nil {
+			usage = chunk.Usage
+		}
+		if chunk.Done {
+			done = true
+		}
+	}
+	if !done || usage == nil {
+		t.Fatalf("missing usage or done: done=%v usage=%+v", done, usage)
+	}
+	if usage.InputUncachedTokens != 75 || usage.InputCachedTokens != 25 || usage.OutputContentTokens != 15 || usage.OutputReasoningTokens != 5 {
+		t.Fatalf("usage wrong: %+v", usage)
 	}
 }
 

@@ -134,6 +134,118 @@ func TestSubmitHappyPath(t *testing.T) {
 	}
 }
 
+func TestUsageChunkRecordsHourlyStats(t *testing.T) {
+	usage := provider.UsageInfo{
+		InputUncachedTokens:   10,
+		InputCachedTokens:     20,
+		CacheCreationTokens:   30,
+		OutputContentTokens:   40,
+		OutputReasoningTokens: 50,
+	}
+	eng, ms, _, sid := newTestEngine(t,
+		mock.WithChunks([]provider.Chunk{
+			{Usage: &usage},
+			{Delta: "ok"},
+			{Done: true, Finish: provider.FinishStop},
+		}),
+		mock.WithDelay(time.Millisecond),
+	)
+	title := "has title"
+	if _, err := ms.UpdateSession(context.Background(), sid, store.SessionUpdate{Title: &title}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Submit(context.Background(), SubmitInput{SessionID: sid, ClientMessageID: "usage_1", Text: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+
+	stats, err := ms.UsageHourlyStats(context.Background(), time.Now().Add(-time.Hour), time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats) != 1 {
+		t.Fatalf("stats len=%d want 1: %+v", len(stats), stats)
+	}
+	stat := stats[0]
+	if stat.Model != "mock-model" || stat.RequestCount != 1 || stat.TotalTokens() != 150 {
+		t.Fatalf("stat wrong: %+v", stat)
+	}
+	sessionUsage, err := eng.SessionUsage(context.Background(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sessionUsage.RequestCount != 1 || sessionUsage.LastPromptTokens != 60 || sessionUsage.LastOutputTokens != 90 || sessionUsage.CumulativeTotalTokens != 150 {
+		t.Fatalf("session usage wrong: %+v", sessionUsage)
+	}
+}
+
+func TestMultipleUsageChunksCountOneRequest(t *testing.T) {
+	inputUsage := provider.UsageInfo{InputUncachedTokens: 10, InputCachedTokens: 20}
+	outputUsage := provider.UsageInfo{OutputContentTokens: 30, OutputReasoningTokens: 40}
+	eng, ms, _, sid := newTestEngine(t,
+		mock.WithChunks([]provider.Chunk{
+			{Usage: &inputUsage},
+			{Delta: "ok"},
+			{Usage: &outputUsage},
+			{Done: true, Finish: provider.FinishStop},
+		}),
+		mock.WithDelay(time.Millisecond),
+	)
+	title := "has title"
+	if _, err := ms.UpdateSession(context.Background(), sid, store.SessionUpdate{Title: &title}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Submit(context.Background(), SubmitInput{SessionID: sid, ClientMessageID: "usage_multi", Text: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+
+	stats, err := ms.UsageHourlyStats(context.Background(), time.Now().Add(-time.Hour), time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats) != 1 || stats[0].RequestCount != 1 || stats[0].TotalTokens() != 100 {
+		t.Fatalf("global usage wrong: %+v", stats)
+	}
+	sessionUsage, err := eng.SessionUsage(context.Background(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sessionUsage.RequestCount != 1 || sessionUsage.LastPromptTokens != 30 || sessionUsage.LastOutputTokens != 70 || sessionUsage.CumulativeTotalTokens != 100 {
+		t.Fatalf("session usage wrong: %+v", sessionUsage)
+	}
+}
+
+func TestProviderRequestCountRecordedWithoutUsageChunk(t *testing.T) {
+	eng, ms, _, sid := newTestEngine(t, mock.WithScript([]string{"ok"}), mock.WithDelay(time.Millisecond))
+	title := "has title"
+	if _, err := ms.UpdateSession(context.Background(), sid, store.SessionUpdate{Title: &title}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Submit(context.Background(), SubmitInput{SessionID: sid, ClientMessageID: "usage_empty", Text: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+
+	stats, err := ms.UsageHourlyStats(context.Background(), time.Now().Add(-time.Hour), time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats) != 1 {
+		t.Fatalf("stats len=%d want 1: %+v", len(stats), stats)
+	}
+	if stats[0].RequestCount != 1 || stats[0].TotalTokens() != 0 {
+		t.Fatalf("stat wrong: %+v", stats[0])
+	}
+	sessionUsage, err := eng.SessionUsage(context.Background(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sessionUsage.RequestCount != 1 || sessionUsage.CumulativeTotalTokens != 0 {
+		t.Fatalf("session usage wrong: %+v", sessionUsage)
+	}
+}
+
 func TestSubmitPersistsThoughtParts(t *testing.T) {
 	eng, ms, hub, sid := newTestEngine(t, mock.WithChunks([]provider.Chunk{
 		{Part: provider.PartThought, Delta: "thinking"},

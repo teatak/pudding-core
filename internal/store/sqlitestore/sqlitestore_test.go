@@ -515,6 +515,115 @@ func TestSchemaDoesNotStoreConfigTables(t *testing.T) {
 	}
 }
 
+func TestUsageHourlyStatsRecordAndQuery(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	at := time.Date(2026, 6, 23, 10, 37, 0, 0, time.FixedZone("SGT", 8*60*60))
+
+	first, err := st.RecordUsage(ctx, store.UsageRecordInput{
+		OccurredAt:            at,
+		InputUncachedTokens:   10,
+		InputCachedTokens:     20,
+		CacheCreationTokens:   30,
+		OutputContentTokens:   40,
+		OutputReasoningTokens: 50,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantHour := at.UTC().Truncate(time.Hour)
+	if !first.HourStartAt.Equal(wantHour) || first.RequestCount != 1 {
+		t.Fatalf("first stat = %+v want hour %s count 1", first, wantHour)
+	}
+	if first.TotalTokens() != 150 {
+		t.Fatalf("first total = %d want 150", first.TotalTokens())
+	}
+
+	second, err := st.RecordUsage(ctx, store.UsageRecordInput{
+		OccurredAt:            at.Add(10 * time.Minute),
+		RequestCount:          2,
+		InputUncachedTokens:   -1,
+		InputCachedTokens:     1,
+		OutputContentTokens:   2,
+		OutputReasoningTokens: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.RequestCount != 3 || second.InputUncachedTokens != 10 || second.InputCachedTokens != 21 || second.TotalTokens() != 156 {
+		t.Fatalf("merged stat wrong: %+v", second)
+	}
+
+	third, err := st.RecordUsage(ctx, store.UsageRecordInput{
+		OccurredAt:          at.Add(20 * time.Minute),
+		Model:               "model-b",
+		InputUncachedTokens: 7,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.Model != "model-b" || third.RequestCount != 1 || third.TotalTokens() != 7 {
+		t.Fatalf("model stat wrong: %+v", third)
+	}
+
+	stats, err := st.UsageHourlyStats(ctx, wantHour, wantHour.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats) != 2 || stats[0].Model != "" || stats[0].RequestCount != 3 || stats[0].TotalTokens() != 156 || stats[1].Model != "model-b" || stats[1].TotalTokens() != 7 {
+		t.Fatalf("queried stats wrong: %+v", stats)
+	}
+}
+
+func TestSessionUsageRecordAndQuery(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, st, "sess_usage")
+
+	empty, err := st.SessionUsage(ctx, "sess_usage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.SessionID != "sess_usage" || empty.RequestCount != 0 || empty.CumulativeTotalTokens() != 0 {
+		t.Fatalf("empty session usage wrong: %+v", empty)
+	}
+
+	first, err := st.RecordSessionUsage(ctx, "sess_usage", store.UsageRecordInput{
+		InputUncachedTokens:   10,
+		InputCachedTokens:     20,
+		CacheCreationTokens:   30,
+		OutputContentTokens:   40,
+		OutputReasoningTokens: 50,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.RequestCount != 1 || first.LastInputTokens() != 60 || first.LastOutputTokens() != 90 || first.CumulativeTotalTokens() != 150 {
+		t.Fatalf("first session usage wrong: %+v", first)
+	}
+
+	second, err := st.RecordSessionUsage(ctx, "sess_usage", store.UsageRecordInput{
+		RequestCount:          2,
+		InputUncachedTokens:   -1,
+		InputCachedTokens:     1,
+		OutputContentTokens:   2,
+		OutputReasoningTokens: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.RequestCount != 3 || second.LastInputUncachedTokens != 0 || second.LastInputTokens() != 1 || second.LastOutputTokens() != 5 || second.CumulativeTotalTokens() != 156 {
+		t.Fatalf("merged session usage wrong: %+v", second)
+	}
+
+	if err := st.DeleteSession(ctx, "sess_usage"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SessionUsage(ctx, "sess_usage"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted session usage should be not found, got %v", err)
+	}
+}
+
 func strptr(s string) *string { return &s }
 
 func messageIDs(messages []*store.Message) []string {

@@ -118,6 +118,33 @@ func TestStreamHappyPath(t *testing.T) {
 	}
 }
 
+func TestReadSSEUsageMetadata(t *testing.T) {
+	out := make(chan provider.Chunk, 4)
+	err := readSSE(context.Background(), strings.NewReader(
+		`data: {"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":100,"cachedContentTokenCount":30,"candidatesTokenCount":20,"thoughtsTokenCount":7}}`+"\n\n",
+	), out)
+	close(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var usage *provider.UsageInfo
+	done := false
+	for chunk := range out {
+		if chunk.Usage != nil {
+			usage = chunk.Usage
+		}
+		if chunk.Done {
+			done = true
+		}
+	}
+	if !done || usage == nil {
+		t.Fatalf("missing usage or done: done=%v usage=%+v", done, usage)
+	}
+	if usage.InputUncachedTokens != 70 || usage.InputCachedTokens != 30 || usage.OutputContentTokens != 20 || usage.OutputReasoningTokens != 7 {
+		t.Fatalf("usage wrong: %+v", usage)
+	}
+}
+
 func TestRequestShapeWithToolHistory(t *testing.T) {
 	var gotBody generateRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

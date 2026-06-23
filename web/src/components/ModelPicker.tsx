@@ -105,7 +105,7 @@ export function ModelPicker({ token, session, value, onChange, onResolvedChange,
         <Button
           aria-label={t("session.model")}
           className={cn(
-            "group/model-picker h-6 max-w-64 gap-1 rounded-full border-0 bg-muted py-0 pr-2 text-xs font-normal text-foreground hover:bg-accent aria-expanded:bg-accent data-[state=open]:bg-accent dark:hover:bg-accent dark:aria-expanded:bg-accent dark:data-[state=open]:bg-accent",
+            "group/model-picker h-6 max-w-64 gap-1 rounded-full border-0 bg-muted py-0 pr-2 text-xs font-normal text-foreground transition-none hover:bg-accent aria-expanded:bg-accent data-[state=open]:bg-accent dark:hover:bg-accent dark:aria-expanded:bg-accent dark:data-[state=open]:bg-accent",
             visibleModel ? "pl-0.5" : "pl-2",
             className,
           )}

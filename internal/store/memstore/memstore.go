@@ -20,7 +20,9 @@ type Memstore struct {
 	turns    map[string]*store.Turn
 	messages map[string][]*store.Message // sessionID → 时间升序
 	queued   map[string][]*store.QueuedInput
-	events   map[string][]event.Event // sessionID → seq 升序
+	usage    map[usageKey]*store.UsageHourlyStat // (UTC hour unix ms, model) → global stats
+	susage   map[string]*store.SessionUsageStat  // sessionID → session stats
+	events   map[string][]event.Event            // sessionID → seq 升序
 	seq      map[string]int64
 	settings map[string]string
 	profiles map[string]*store.ProviderProfile
@@ -32,6 +34,8 @@ func New() *Memstore {
 		turns:    make(map[string]*store.Turn),
 		messages: make(map[string][]*store.Message),
 		queued:   make(map[string][]*store.QueuedInput),
+		usage:    make(map[usageKey]*store.UsageHourlyStat),
+		susage:   make(map[string]*store.SessionUsageStat),
 		events:   make(map[string][]event.Event),
 		seq:      make(map[string]int64),
 		settings: make(map[string]string),
@@ -133,6 +137,7 @@ func (m *Memstore) DeleteSession(_ context.Context, id string) error {
 	delete(m.sessions, id)
 	delete(m.messages, id)
 	delete(m.queued, id)
+	delete(m.susage, id)
 	delete(m.events, id)
 	delete(m.seq, id)
 	for tid, t := range m.turns {
@@ -457,6 +462,118 @@ func (m *Memstore) FinishTurn(_ context.Context, in store.FinishTurnInput) (*sto
 	return res, nil
 }
 
+func (m *Memstore) RecordUsage(_ context.Context, in store.UsageRecordInput) (*store.UsageHourlyStat, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	when := in.OccurredAt
+	if when.IsZero() {
+		when = time.Now()
+	}
+	hour := when.UTC().Truncate(time.Hour)
+	key := usageKey{hourMS: unixMS(hour), model: in.Model}
+	requestCount := in.RequestCount
+	if requestCount <= 0 {
+		requestCount = 1
+	}
+	stat := m.usage[key]
+	if stat == nil {
+		stat = &store.UsageHourlyStat{HourStartAt: hour, Model: in.Model}
+		m.usage[key] = stat
+	}
+	stat.RequestCount += requestCount
+	stat.InputUncachedTokens += clampNonNegative(in.InputUncachedTokens)
+	stat.InputCachedTokens += clampNonNegative(in.InputCachedTokens)
+	stat.CacheCreationTokens += clampNonNegative(in.CacheCreationTokens)
+	stat.OutputContentTokens += clampNonNegative(in.OutputContentTokens)
+	stat.OutputReasoningTokens += clampNonNegative(in.OutputReasoningTokens)
+	stat.UpdatedAt = time.Now()
+	return cloneUsageHourlyStat(stat), nil
+}
+
+func (m *Memstore) UsageHourlyStats(_ context.Context, from, to time.Time) ([]*store.UsageHourlyStat, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	from = from.UTC().Truncate(time.Hour)
+	if !to.IsZero() {
+		to = to.UTC().Truncate(time.Hour)
+	}
+	keys := make([]usageKey, 0, len(m.usage))
+	fromMS := unixMS(from)
+	toMS := int64(0)
+	if !to.IsZero() {
+		toMS = unixMS(to)
+	}
+	for key := range m.usage {
+		if key.hourMS < fromMS {
+			continue
+		}
+		if toMS > 0 && key.hourMS >= toMS {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].hourMS != keys[j].hourMS {
+			return keys[i].hourMS < keys[j].hourMS
+		}
+		return keys[i].model < keys[j].model
+	})
+	out := make([]*store.UsageHourlyStat, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, cloneUsageHourlyStat(m.usage[key]))
+	}
+	return out, nil
+}
+
+func (m *Memstore) RecordSessionUsage(_ context.Context, sessionID string, in store.UsageRecordInput) (*store.SessionUsageStat, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[sessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	requestCount := in.RequestCount
+	if requestCount <= 0 {
+		requestCount = 1
+	}
+	inputUncached := clampNonNegative(in.InputUncachedTokens)
+	inputCached := clampNonNegative(in.InputCachedTokens)
+	cacheCreation := clampNonNegative(in.CacheCreationTokens)
+	outputContent := clampNonNegative(in.OutputContentTokens)
+	outputReasoning := clampNonNegative(in.OutputReasoningTokens)
+
+	stat := m.susage[sessionID]
+	if stat == nil {
+		stat = &store.SessionUsageStat{SessionID: sessionID}
+		m.susage[sessionID] = stat
+	}
+	stat.RequestCount += requestCount
+	stat.LastInputUncachedTokens = inputUncached
+	stat.LastInputCachedTokens = inputCached
+	stat.LastCacheCreationTokens = cacheCreation
+	stat.LastOutputContentTokens = outputContent
+	stat.LastOutputReasoningTokens = outputReasoning
+	stat.CumulativeInputUncachedTokens += inputUncached
+	stat.CumulativeInputCachedTokens += inputCached
+	stat.CumulativeCacheCreationTokens += cacheCreation
+	stat.CumulativeOutputContentTokens += outputContent
+	stat.CumulativeOutputReasoningTokens += outputReasoning
+	stat.UpdatedAt = time.Now()
+	return cloneSessionUsageStat(stat), nil
+}
+
+func (m *Memstore) SessionUsage(_ context.Context, sessionID string) (*store.SessionUsageStat, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[sessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	stat := m.susage[sessionID]
+	if stat == nil {
+		return &store.SessionUsageStat{SessionID: sessionID}, nil
+	}
+	return cloneSessionUsageStat(stat), nil
+}
+
 func assistantMessageID(turnID string, index int) string {
 	if index == 0 {
 		return "msg_" + turnID
@@ -777,6 +894,36 @@ func cloneTurn(t *store.Turn) *store.Turn {
 	cp := *t
 	cp.ModelConfig = append([]byte(nil), t.ModelConfig...)
 	return &cp
+}
+
+func cloneUsageHourlyStat(stat *store.UsageHourlyStat) *store.UsageHourlyStat {
+	if stat == nil {
+		return nil
+	}
+	cp := *stat
+	return &cp
+}
+
+type usageKey struct {
+	hourMS int64
+	model  string
+}
+
+func cloneSessionUsageStat(stat *store.SessionUsageStat) *store.SessionUsageStat {
+	if stat == nil {
+		return nil
+	}
+	cp := *stat
+	return &cp
+}
+
+func unixMS(t time.Time) int64 { return t.UnixNano() / int64(time.Millisecond) }
+
+func clampNonNegative(v int) int {
+	if v < 0 {
+		return 0
+	}
+	return v
 }
 
 func validQueuedInputStatus(status store.QueuedInputStatus) bool {

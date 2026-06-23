@@ -17,6 +17,7 @@ import { z } from "zod";
 import { APIError, cancelTurn, getTurn, submitMessage, updateSession, type Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
+import { ContextUsageRing } from "@/components/ContextUsageRing";
 import { Mascot, type MascotGaze, type MascotGazePoint, type MascotMood } from "@/components/Mascot";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { ModelPicker } from "@/components/ModelPicker";
@@ -277,12 +278,14 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
                 </TooltipTrigger>
                 <TooltipContent>{t("composer.attach")}</TooltipContent>
               </Tooltip>
-              <ModelPicker
-                className="ml-auto"
-                token={token}
-                session={session}
-                onResolvedChange={handleResolvedModelChange}
-              />
+              <div className="ml-auto flex items-center gap-1">
+                <ContextUsageRing token={token} sessionID={sessionID} />
+                <ModelPicker
+                  token={token}
+                  session={session}
+                  onResolvedChange={handleResolvedModelChange}
+                />
+              </div>
               {showStopButton ? (
                 <Tooltip>
                   <TooltipTrigger asChild>

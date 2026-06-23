@@ -827,7 +827,7 @@ function RailPanel({
               size="icon"
               tabIndex={-1}
               variant="ghost"
-              onClick={() => openSettingsDialog({ section: "model" })}
+              onClick={() => openSettingsDialog()}
             >
               <Settings />
             </Button>

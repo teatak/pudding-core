@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Activity,
   Copy,
   ExternalLink,
   Eye,
@@ -19,12 +20,14 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 
 import {
   deleteProvider,
+  getDailyUsage,
   getWebTools,
   listBuiltinTools,
   listProviders,
   listSessions,
   patchWebTools,
   type BuiltinTool,
+  type DailyUsageStat,
   type ProviderProfile,
   type Session,
 } from "@/api/client";
@@ -74,6 +77,7 @@ import {
   SidebarProvider,
 } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { BrandIcon } from "@/components/BrandIcons";
 import {
   cloneProviderProfileForm,
@@ -95,6 +99,7 @@ const SETTINGS_SECTIONS: Array<{
   icon: typeof MessageSquareText;
   labelKey: string;
 }> = [
+  { id: "usage", icon: Activity, labelKey: "settings.section.usage" },
   { id: "dialogue", icon: MessageSquareText, labelKey: "settings.section.dialogue" },
   { id: "model", icon: Sparkles, labelKey: "settings.section.model" },
   { id: "tools", icon: Globe2, labelKey: "settings.section.tools" },
@@ -110,16 +115,14 @@ type SettingsDialogProps = {
 export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProps) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  const [active, setActive] = useState<SettingsSectionID>("model");
+  const [active, setActive] = useState<SettingsSectionID>("usage");
   const [createProviderNonce, setCreateProviderNonce] = useState(0);
   const activeSection = SETTINGS_SECTIONS.find((section) => section.id === active) || SETTINGS_SECTIONS[0];
 
   useEffect(() => {
     const handleOpen = (event: Event) => {
       const detail = (event as CustomEvent<SettingsDialogOpenDetail>).detail || {};
-      if (detail.section) {
-        setActive(detail.section);
-      }
+      setActive(detail.createProvider ? "model" : detail.section || "usage");
       if (detail.createProvider) {
         setCreateProviderNonce((nonce) => nonce + 1);
       }
@@ -130,7 +133,15 @@ export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProp
   }, []);
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen && !open) {
+          setActive("usage");
+        }
+        setOpen(nextOpen);
+      }}
+    >
       {showTrigger ? (
         <DialogTrigger asChild>
           <Button aria-label={t("settings.title")} size="icon" tabIndex={-1} variant="ghost">
@@ -150,6 +161,7 @@ export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProp
               </div>
             </header>
             <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 pt-0">
+              {active === "usage" ? <UsageSettings token={token} /> : null}
               {active === "model" ? <ProviderSettings createNonce={createProviderNonce} token={token} /> : null}
               {active === "tools" ? <ToolsSettings token={token} /> : null}
             </div>
@@ -206,6 +218,255 @@ function SettingsSidebar({
       </SidebarContent>
     </Sidebar>
   );
+}
+
+function UsageSettings({ token }: { token: string }) {
+  const { locale, t } = useI18n();
+  const usageQuery = useQuery({
+    queryKey: queryKeys.usageDaily(365),
+    queryFn: () => getDailyUsage(token, 365),
+    enabled: Boolean(token),
+    refetchOnMount: "always",
+  });
+  const days = usageQuery.data?.days || [];
+  const summary = useMemo(() => summarizeDailyUsage(days), [days]);
+
+  return (
+    <div className="@container mx-auto grid w-full max-w-6xl gap-5">
+      <section className="grid gap-4">
+        {usageQuery.isError ? (
+          <Alert variant="destructive">
+            <AlertDescription className="grid gap-2">
+              <span>{t("settings.usage.loadFailed")}</span>
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        {usageQuery.isLoading ? <UsageSkeleton /> : null}
+        {!usageQuery.isLoading ? (
+          <>
+            <div className="grid gap-4 border-b pb-4 sm:grid-cols-4 sm:divide-x sm:divide-border/70">
+              <UsageMetric label={t("settings.usage.totalTokens")} value={formatUsageTokens(summary.totalTokens)} />
+              <UsageMetric label={t("settings.usage.requests")} value={formatNumber(summary.requestCount)} />
+              <UsageMetric label={t("settings.usage.activeDays")} value={formatNumber(summary.activeDays)} />
+              <UsageMetric label={t("settings.usage.peakDay")} value={formatUsageTokens(summary.peakTokens)} />
+            </div>
+            <UsageHeatmap days={days} locale={locale} t={t} />
+          </>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+function UsageMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 sm:px-4 first:sm:pl-0">
+      <div className="text-lg font-semibold tabular-nums text-foreground">{value}</div>
+      <div className="mt-0.5 text-xs text-muted-foreground">{label}</div>
+    </div>
+  );
+}
+
+function UsageHeatmap({
+  days,
+  locale,
+  t,
+}: {
+  days: DailyUsageStat[];
+  locale: string;
+  t: (key: string) => string;
+}) {
+  if (days.length === 0) {
+    return <div className="text-sm text-muted-foreground">{t("settings.usage.noData")}</div>;
+  }
+  const leading = parseUsageDate(days[0]?.date).getDay();
+  const cells: Array<DailyUsageStat | null> = [...Array.from({ length: leading }, () => null), ...days];
+  const weekCount = Math.ceil(cells.length / 7);
+  const heatThresholds = usageHeatThresholds(days);
+  const monthLabels = usageMonthLabels(days, leading, locale);
+
+  return (
+    <div className="grid gap-3">
+      <div className="text-sm text-muted-foreground">{t("settings.usage.last365Days")}</div>
+      <div className="overflow-x-auto pb-1">
+        <div className="min-w-max">
+          <TooltipProvider>
+            <div
+              className="grid grid-flow-col grid-rows-7 gap-1"
+              style={{ gridTemplateRows: "repeat(7, 0.75rem)" }}
+            >
+              {cells.map((day, index) =>
+                day ? (
+                  <UsageHeatmapCell
+                    key={day.date}
+                    day={day}
+                    heatThresholds={heatThresholds}
+                    locale={locale}
+                    t={t}
+                  />
+                ) : (
+                  <div key={`empty-${index}`} className="size-3" />
+                ),
+              )}
+            </div>
+          </TooltipProvider>
+          <div
+            className="mt-3 grid gap-1 text-xs text-muted-foreground"
+            style={{ gridTemplateColumns: `repeat(${weekCount}, 0.75rem)` }}
+          >
+            {monthLabels.map((label) => (
+              <div key={`${label.month}-${label.column}`} className="whitespace-nowrap" style={{ gridColumn: `${label.column + 1} / span 4` }}>
+                {label.month}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UsageHeatmapCell({
+  day,
+  heatThresholds,
+  locale,
+  t,
+}: {
+  day: DailyUsageStat;
+  heatThresholds: number[];
+  locale: string;
+  t: (key: string) => string;
+}) {
+  if (day.totalTokens <= 0 && day.requestCount <= 0) {
+    return <div className={cn("size-3 rounded-[3px]", usageHeatClass(day.totalTokens, heatThresholds))} />;
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          aria-label={usageDayTitle(day, t)}
+          className={cn("size-3 rounded-[3px] transition-colors", usageHeatClass(day.totalTokens, heatThresholds))}
+          type="button"
+        />
+      </TooltipTrigger>
+      <TooltipContent
+        className="grid gap-1"
+        side="top"
+        sideOffset={8}
+      >
+        <div className="font-medium">{formatUsageDateLabel(day.date, locale)}</div>
+        <div className="tabular-nums">{`${t("usage.totalTokens")} ${formatUsageTokens(day.totalTokens)}`}</div>
+        <div className="tabular-nums">{`${t("usage.requests")} ${formatNumber(day.requestCount)}`}</div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function UsageSkeleton() {
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-4 sm:grid-cols-4">
+        <Skeleton className="h-12" />
+        <Skeleton className="h-12" />
+        <Skeleton className="h-12" />
+        <Skeleton className="h-12" />
+      </div>
+      <Skeleton className="h-44" />
+    </div>
+  );
+}
+
+function summarizeDailyUsage(days: DailyUsageStat[]) {
+  return days.reduce(
+    (summary, day) => {
+      summary.totalTokens += day.totalTokens;
+      summary.requestCount += day.requestCount;
+      if (day.totalTokens > 0) {
+        summary.activeDays += 1;
+      }
+      if (day.totalTokens > summary.peakTokens) {
+        summary.peakTokens = day.totalTokens;
+      }
+      return summary;
+    },
+    { activeDays: 0, peakTokens: 0, requestCount: 0, totalTokens: 0 },
+  );
+}
+
+function usageMonthLabels(days: DailyUsageStat[], leading: number, locale: string) {
+  const rawLabels: Array<{ column: number; month: string }> = [];
+  let previousMonth = "";
+  for (let index = 0; index < days.length; index += 1) {
+    const date = parseUsageDate(days[index].date);
+    const monthKey = `${date.getFullYear()}-${date.getMonth()}`;
+    if (monthKey === previousMonth) {
+      continue;
+    }
+    previousMonth = monthKey;
+    rawLabels.push({
+      column: Math.floor((leading + index) / 7),
+      month: new Intl.DateTimeFormat(locale, { month: "short" }).format(date),
+    });
+  }
+
+  const labels: Array<{ column: number; month: string }> = [];
+  for (let index = 0; index < rawLabels.length; index += 1) {
+    const label = rawLabels[index];
+    const nextLabel = rawLabels[index + 1];
+    if (index === 0 && nextLabel && nextLabel.column - label.column < 5) {
+      continue;
+    }
+    if (labels.length > 0 && label.column - labels[labels.length - 1].column < 5) {
+      continue;
+    }
+    labels.push(label);
+  }
+  return labels;
+}
+
+function usageHeatThresholds(days: DailyUsageStat[]) {
+  const values = days
+    .map((day) => day.totalTokens)
+    .filter((tokens) => tokens > 0)
+    .sort((left, right) => left - right);
+  if (values.length === 0) {
+    return [];
+  }
+  return [0.2, 0.4, 0.6, 0.8].map((ratio) => values[Math.floor((values.length - 1) * ratio)]);
+}
+
+function usageHeatClass(tokens: number, thresholds: number[]) {
+  if (tokens <= 0 || thresholds.length === 0) {
+    return "bg-muted/60";
+  }
+  if (tokens >= thresholds[3]) {
+    return "bg-blue-600";
+  }
+  if (tokens >= thresholds[2]) {
+    return "bg-blue-500";
+  }
+  if (tokens >= thresholds[1]) {
+    return "bg-sky-400";
+  }
+  if (tokens >= thresholds[0]) {
+    return "bg-sky-300";
+  }
+  return "bg-sky-200";
+}
+
+function usageDayTitle(day: DailyUsageStat, t: (key: string) => string) {
+  const input = day.inputUncachedTokens + day.inputCachedTokens + day.cacheCreationTokens;
+  const output = day.outputContentTokens + day.outputReasoningTokens;
+  return `${day.date} · ${t("usage.totalTokens")} ${formatUsageTokens(day.totalTokens)} · ${t("usage.requests")} ${formatNumber(day.requestCount)} · ${t("usage.inputTotal")} ${formatUsageTokens(input)} · ${t("usage.outputTotal")} ${formatUsageTokens(output)}`;
+}
+
+function formatUsageDateLabel(date: string, locale: string) {
+  return new Intl.DateTimeFormat(locale, { day: "numeric", month: "long" }).format(parseUsageDate(date));
+}
+
+function parseUsageDate(date: string) {
+  return new Date(`${date}T00:00:00`);
 }
 
 function ToolsSettings({ token }: { token: string }) {
@@ -354,7 +615,7 @@ function BuiltinToolsPanel({
   const { t } = useI18n();
 
   return (
-    <Accordion className="overflow-hidden rounded-xl border bg-card shadow-sm" collapsible type="single">
+    <Accordion className="overflow-hidden rounded-xl border bg-card" collapsible type="single">
       <AccordionItem className="border-b-0" value="builtin-tools">
         <AccordionTrigger className="h-14 items-center rounded-none border-0 px-4 py-0 text-sm font-normal hover:no-underline focus-visible:ring-0">
           <span>{`${t("settings.tools.builtin.title")} (${tools.length})`}</span>
@@ -671,7 +932,7 @@ function SettingsPanel({
   title: ReactNode;
 }) {
   return (
-    <section className="overflow-hidden rounded-xl border bg-card shadow-sm">
+    <section className="overflow-hidden rounded-xl border bg-card">
       <div className="pudding-settings-panel-header flex h-14 items-center justify-between gap-3 border-b px-4">
         <h3 className="text-sm font-normal">{title}</h3>
         {action}
@@ -706,6 +967,24 @@ function modelCountLabel(count: number, t: (key: string) => string) {
     return t("picker.noModels");
   }
   return `${count}${t("provider.modelCountSuffix")}`;
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
+}
+
+function formatUsageTokens(value: number) {
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000_000) {
+    return `${(value / 1_000_000_000).toFixed(2)}B`;
+  }
+  if (abs >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(2)}M`;
+  }
+  if (abs >= 1_000) {
+    return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1).replace(/\.0$/, "")}K`;
+  }
+  return formatNumber(value);
 }
 
 function ProviderSkeleton() {

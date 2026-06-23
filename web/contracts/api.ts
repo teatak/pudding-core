@@ -174,6 +174,48 @@ export const submitResponse = z.object({
   clientMessageID: z.string().optional(),
 });
 
+export const sessionUsage = z.object({
+  sessionID: z.string(),
+  contextWindow: z.number(),
+  contextEstimatedTokens: z.number(),
+  messageEstimatedTokens: z.number(),
+  promptOverheadEstimatedTokens: z.number(),
+  systemPromptEstimatedTokens: z.number(),
+  toolsSchemaEstimatedTokens: z.number(),
+  autoCompactThresholdTokens: z.number(),
+  requestCount: z.number(),
+  lastPromptTokens: z.number(),
+  lastInputUncachedTokens: z.number(),
+  lastInputCachedTokens: z.number(),
+  lastCacheCreationTokens: z.number(),
+  lastOutputContentTokens: z.number(),
+  lastOutputReasoningTokens: z.number(),
+  lastOutputTokens: z.number(),
+  cumulativeInputUncachedTokens: z.number(),
+  cumulativeInputCachedTokens: z.number(),
+  cumulativeCacheCreationTokens: z.number(),
+  cumulativeOutputContentTokens: z.number(),
+  cumulativeOutputReasoningTokens: z.number(),
+  cumulativeInputTokens: z.number(),
+  cumulativeOutputTokens: z.number(),
+  cumulativeTotalTokens: z.number(),
+  updatedAt: z.string().optional(),
+});
+export type SessionUsage = z.infer<typeof sessionUsage>;
+
+export const dailyUsageStat = z.object({
+  date: z.string(),
+  requestCount: z.number(),
+  inputUncachedTokens: z.number(),
+  inputCachedTokens: z.number(),
+  cacheCreationTokens: z.number(),
+  outputContentTokens: z.number(),
+  outputReasoningTokens: z.number(),
+  totalTokens: z.number(),
+});
+export type DailyUsageStat = z.infer<typeof dailyUsageStat>;
+export const dailyUsageResponse = z.object({ days: z.array(dailyUsageStat) });
+
 export const listSessionsResponse = z.object({ sessions: z.array(session) });
 export const listMessagesResponse = z.object({ messages: z.array(message), hasMore: z.boolean() });
 export const listTurnsResponse = z.object({ turns: z.array(conversationTurn), hasMore: z.boolean() });

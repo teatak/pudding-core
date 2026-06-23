@@ -33,6 +33,35 @@ func TestStreamHappyPath(t *testing.T) {
 	}
 }
 
+func TestReadSSEUsageChunk(t *testing.T) {
+	out := make(chan provider.Chunk, 4)
+	err := readSSE(context.Background(), strings.NewReader(
+		`data: {"choices":[{"delta":{},"finish_reason":"stop"}]}`+"\n\n"+
+			`data: {"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":30},"completion_tokens_details":{"reasoning_tokens":7}}}`+"\n\n"+
+			"data: [DONE]\n\n",
+	), out)
+	close(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var usage *provider.UsageInfo
+	done := false
+	for chunk := range out {
+		if chunk.Usage != nil {
+			usage = chunk.Usage
+		}
+		if chunk.Done {
+			done = true
+		}
+	}
+	if !done || usage == nil {
+		t.Fatalf("missing usage or done: done=%v usage=%+v", done, usage)
+	}
+	if usage.InputUncachedTokens != 70 || usage.InputCachedTokens != 30 || usage.OutputContentTokens != 13 || usage.OutputReasoningTokens != 7 {
+		t.Fatalf("usage wrong: %+v", usage)
+	}
+}
+
 func TestRequestShape(t *testing.T) {
 	var got chatRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -75,6 +104,9 @@ func TestRequestShape(t *testing.T) {
 
 	if got.Model != "model-a" || !got.Stream {
 		t.Fatalf("unexpected request head: %+v", got)
+	}
+	if got.StreamOptions == nil || !got.StreamOptions.IncludeUsage {
+		t.Fatalf("usage stream option not enabled: %+v", got.StreamOptions)
 	}
 	if got.Temperature == nil || *got.Temperature != 0.2 || got.MaxCompletionTokens == nil || *got.MaxCompletionTokens != 123 || got.ReasoningEffort != "low" {
 		t.Fatalf("model config not applied: %+v", got)
@@ -144,6 +176,7 @@ func TestToolCallChunks(t *testing.T) {
 		fmt.Fprint(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"web_fetch","arguments":"{\"url\""}}]}}]}`+"\n\n")
 		fmt.Fprint(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"https://example.com\"}"}}]}}]}`+"\n\n")
 		fmt.Fprint(w, `data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`+"\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer srv.Close()
 
@@ -190,6 +223,53 @@ func TestStreamEndsWithoutDoneEmitsErr(t *testing.T) {
 	chunks := collect(t, ch)
 	if chunksText(chunks) != "partial" || chunks[len(chunks)-1].Err == nil {
 		t.Fatalf("want partial delta then Err, got %+v", chunks)
+	}
+}
+
+func TestStreamFinishWithoutDoneEmitsErr(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, `data: {"choices":[{"delta":{},"finish_reason":"stop"}]}`+"\n\n")
+	}))
+	defer srv.Close()
+
+	chunks := collect(t, streamForTest(t, srv.URL, provider.Request{Model: "m"}))
+	last := chunks[len(chunks)-1]
+	if last.Err == nil || last.Done {
+		t.Fatalf("want Err without Done, got %+v", chunks)
+	}
+}
+
+func TestStreamOptionsUnsupportedRetriesWithoutUsage(t *testing.T) {
+	var requests []chatRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var got chatRequest
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		requests = append(requests, got)
+		if len(requests) == 1 {
+			http.Error(w, "unknown field stream_options", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, `data: {"choices":[{"delta":{"content":"ok"}}]}`+"\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	chunks := collect(t, streamForTest(t, srv.URL, provider.Request{Model: "m"}))
+	if got := chunksText(chunks); got != "ok" {
+		t.Fatalf("unexpected deltas: %q", got)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("want retry once, got %d requests", len(requests))
+	}
+	if requests[0].StreamOptions == nil || !requests[0].StreamOptions.IncludeUsage {
+		t.Fatalf("first request should include usage: %+v", requests[0].StreamOptions)
+	}
+	if requests[1].StreamOptions != nil {
+		t.Fatalf("retry should omit stream_options: %+v", requests[1].StreamOptions)
 	}
 }
 

@@ -15,18 +15,22 @@ import {
   providerProfile,
   queuedInput,
   session,
+  sessionUsage,
   settingsResponse,
   submitResponse,
   conversationTurn,
+  dailyUsageResponse,
   webToolsConfig,
   type BuiltinTool,
   type ContentPart,
+  type DailyUsageStat,
   type Message,
   type ConversationTurn,
   type ProviderModel,
   type ProviderProfile,
   type QueuedInput,
   type Session,
+  type SessionUsage,
   type WebToolsConfig,
 } from "@/contracts/api";
 import { z } from "zod";
@@ -169,6 +173,14 @@ export function getTurn(token: string, sessionID: string, turnID: string): Promi
   );
 }
 
+export function getSessionUsage(token: string, sessionID: string): Promise<SessionUsage> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/usage`, sessionUsage);
+}
+
+export function getDailyUsage(token: string, days = 365): Promise<{ days: DailyUsageStat[] }> {
+  return request(token, `/usage/daily?days=${encodeURIComponent(String(days))}`, dailyUsageResponse);
+}
+
 export function listQueuedInputs(token: string, sessionID: string): Promise<{ queuedInputs: QueuedInput[] }> {
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/queued-inputs`, listQueuedInputsResponse);
 }
@@ -266,5 +278,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { BuiltinTool, ContentPart, Message, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, WebToolsConfig };
+export type { BuiltinTool, ContentPart, DailyUsageStat, Message, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, WebToolsConfig };
 export { createProviderRequest, patchProviderRequest };

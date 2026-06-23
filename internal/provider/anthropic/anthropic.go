@@ -177,6 +177,10 @@ type streamEvent struct {
 	Type  string `json:"type"`
 	Index int    `json:"index"`
 
+	Message *struct {
+		Usage anthUsage `json:"usage"`
+	} `json:"message"`
+
 	ContentBlock *struct {
 		Type  string          `json:"type"`
 		ID    string          `json:"id"`
@@ -192,10 +196,19 @@ type streamEvent struct {
 		StopReason  string `json:"stop_reason"`
 	} `json:"delta"`
 
+	Usage *anthUsage `json:"usage"`
+
 	Error *struct {
 		Type    string `json:"type"`
 		Message string `json:"message"`
 	} `json:"error"`
+}
+
+type anthUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 }
 
 // readSSE 解析 Messages API 的 SSE 流。协议没有 [DONE] 哨兵,
@@ -206,6 +219,7 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 	blockCalls := map[int]string{}
 	sawStop := false
 	finish := provider.FinishStop
+	var usage provider.UsageInfo
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || !strings.HasPrefix(line, "data:") {
@@ -217,6 +231,13 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 			return fmt.Errorf("anthropic: parse stream event: %w", err)
 		}
 		switch event.Type {
+		case "message_start":
+			if event.Message != nil {
+				usage.InputUncachedTokens = event.Message.Usage.InputTokens
+				usage.OutputContentTokens = event.Message.Usage.OutputTokens
+				usage.CacheCreationTokens = event.Message.Usage.CacheCreationInputTokens
+				usage.InputCachedTokens = event.Message.Usage.CacheReadInputTokens
+			}
 		case "content_block_start":
 			if event.ContentBlock != nil {
 				if event.ContentBlock.Type == "tool_use" {
@@ -253,6 +274,20 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 				}
 			}
 		case "message_delta":
+			if event.Usage != nil {
+				if event.Usage.OutputTokens > 0 {
+					usage.OutputContentTokens = event.Usage.OutputTokens
+				}
+				if event.Usage.InputTokens > 0 {
+					usage.InputUncachedTokens = event.Usage.InputTokens
+				}
+				if event.Usage.CacheCreationInputTokens > 0 {
+					usage.CacheCreationTokens = event.Usage.CacheCreationInputTokens
+				}
+				if event.Usage.CacheReadInputTokens > 0 {
+					usage.InputCachedTokens = event.Usage.CacheReadInputTokens
+				}
+			}
 			if event.Delta != nil && event.Delta.StopReason != "" {
 				switch event.Delta.StopReason {
 				case "end_turn", "max_tokens", "stop_sequence":
@@ -284,6 +319,9 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 	}
 	if !sawStop {
 		return errors.New("anthropic: stream ended without message_stop")
+	}
+	if !usage.Empty() && !emitChunk(ctx, out, provider.Chunk{Usage: &usage}) {
+		return ctx.Err()
 	}
 	out <- provider.Chunk{Done: true, Finish: finish} // 终止 chunk 阻塞发送,消费方 drain 到 close
 	return nil

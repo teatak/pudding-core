@@ -174,6 +174,12 @@ func readResponsesSSE(ctx context.Context, body io.Reader, out chan<- provider.C
 			if sawTool {
 				finish = provider.FinishToolCalls
 			}
+			if frame.Response.Usage != nil {
+				usage := responsesUsageInfo(*frame.Response.Usage)
+				if !usage.Empty() && !emit(ctx, out, provider.Chunk{Usage: &usage}) {
+					return ctx.Err()
+				}
+			}
 			emit(ctx, out, provider.Chunk{Done: true, Finish: finish})
 			return nil
 		case "response.failed":
@@ -256,10 +262,31 @@ type responsesStreamFrame struct {
 		IncompleteDetails struct {
 			Reason string `json:"reason"`
 		} `json:"incomplete_details"`
+		Usage *responsesUsage `json:"usage,omitempty"`
 	} `json:"response"`
 	Error struct {
 		Message string `json:"message"`
 	} `json:"error"`
+}
+
+type responsesUsage struct {
+	InputTokens         int                     `json:"input_tokens"`
+	OutputTokens        int                     `json:"output_tokens"`
+	InputTokensDetails  *promptTokensDetails    `json:"input_tokens_details,omitempty"`
+	OutputTokensDetails *completionTokenDetails `json:"output_tokens_details,omitempty"`
+}
+
+func responsesUsageInfo(u responsesUsage) provider.UsageInfo {
+	cached := clampUsage(u.InputTokensDetails.cachedTokens())
+	input := clampUsage(u.InputTokens - cached)
+	reasoning := clampUsage(u.OutputTokensDetails.reasoningTokens())
+	output := clampUsage(u.OutputTokens - reasoning)
+	return provider.UsageInfo{
+		InputUncachedTokens:   input,
+		InputCachedTokens:     cached,
+		OutputContentTokens:   output,
+		OutputReasoningTokens: reasoning,
+	}
 }
 
 func responsesInputsFor(msg provider.Message) []responsesInputMessage {

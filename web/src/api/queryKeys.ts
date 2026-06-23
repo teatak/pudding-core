@@ -1,10 +1,12 @@
 export const queryKeys = {
   sessions: () => ["sessions"] as const,
   session: (sessionID: string) => ["session", sessionID] as const,
+  sessionUsage: (sessionID: string) => ["session", sessionID, "usage"] as const,
   messages: (sessionID: string) => ["session", sessionID, "messages", "pages"] as const,
   turns: (sessionID: string) => ["session", sessionID, "turns", "pages"] as const,
   queuedInputs: (sessionID: string) => ["session", sessionID, "queued-inputs"] as const,
   settings: () => ["settings"] as const,
+  usageDaily: (days: number) => ["usage", "daily", days] as const,
   builtinTools: () => ["tools", "builtin"] as const,
   webTools: () => ["tools", "web"] as const,
   providers: () => ["providers"] as const,
