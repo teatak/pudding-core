@@ -14,6 +14,8 @@
 | `turn.completed` | ✓ | ✓ | `assistantMessageID` |
 | `turn.failed` | ✓ | ✓ | `error`;有半截输出时 `assistantMessageID` + `interrupted` |
 | `turn.cancelled` | ✓ | ✓ | 有半截输出时 `assistantMessageID` + `interrupted` |
+| `approval.requested` | — | — | `approvalID`, `approvalKind`, `title`, `reason`, `risk?`, `payload?` |
+| `approval.resolved` | — | — | `approvalID`, `approvalKind`, `status`, `reason?`, `payload?` |
 | `session.titled` | — | — | `title`;自动标题写回(provisional / LLM 各一次),不落库 |
 | `ping` | — | — | — |
 
@@ -27,10 +29,11 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 
 | 实体 | Go | TS | 字段 |
 | --- | --- | --- | --- |
-| Session | `store.Session` | `session` | id, title, provider, model, createdAt, updatedAt, running(读取时派生) |
-| ConversationTurn | `store.ConversationTurn` | `conversationTurn` | id, sessionID, clientMessageID, status, error?, createdAt, updatedAt, messages[] |
+| Session | `store.Session` | `session` | id, title, provider, model, activeMode(chat/research/workspace), modeLease, createdAt, updatedAt, running(读取时派生) |
+| ConversationTurn | `store.ConversationTurn` | `conversationTurn` | id, sessionID, clientMessageID, status, provider?, model?, mode?, error?, createdAt, updatedAt, messages[] |
 | ContentPart | `store.ContentPart` | `contentPart` | type(text/thought/tool_use/tool_result), text?, id?, name?, args?, ok?, content?, summaryKind?, summaryCount? |
 | Message | `store.Message` | `message` | id, sessionID, turnID, role, kind?, text, parts[], turnIndex?, clientMessageID?, interrupted?, createdAt |
+| QueuedInput | `store.QueuedInput` | `queuedInput` | sessionID, clientMessageID, text, status, provider?, model?, mode?, modelConfig?, turnID?, createdAt, updatedAt |
 | ProviderProfile(设置视图) | `api.providerProfileView` | `providerProfile` | id, displayName, protocol, baseURL, apiKey?, apiKeySet, models |
 
 时间一律 RFC3339 字符串(Go `time.Time` 默认 JSON 编码)。
@@ -50,6 +53,9 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | `DELETE /sessions/{id}` | — | 204 | 404 |
 | `POST /sessions/{id}/submit` | `{clientMessageID, text}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_running` |
 | `POST /sessions/{id}/cancel` | — | 202 `{status}` | 404 / 409 `no_running_turn` |
+| `GET /sessions/{id}/approvals` | — | `{approvals: []}` pending approval 快照 | 404 |
+| `POST /sessions/{id}/approvals/{approvalID}/approve` | `{scope?: "turn" \| "session"}` | 202 `{status}` | 404 |
+| `POST /sessions/{id}/approvals/{approvalID}/deny` | `{reason?}` | 202 `{status}` | 404 |
 | `GET /sessions/{id}/events` | SSE | event stream | 404 |
 | `GET /sessions/{id}/turns` | `before?`, `limit?` | `{turns: [], hasMore}` | 404 |
 | `GET /sessions/{id}/messages` | — | `{messages: []}` | 404 |
@@ -78,7 +84,9 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | --- | --- |
 | — | 当前无主路径设置键 |
 
-session 创建时必须显式写入 `provider` 与 `model`。draft 页可记住"上次选用模型",
+session 创建时必须显式写入 `provider` 与 `model`。能力档为 `chat` / `research` / `workspace`;无授权默认 `activeMode=chat, modeLease=none`;
+`request_capability` 审批通过且 scope=session 时写入 `activeMode` 与 `modeLease=session`。
+draft 页可记住"上次选用模型",
 但不影响既有 session。
 历史上的 `model.default` 与 `provider.openai.*` 过渡键已随 registry 收口删除。
 

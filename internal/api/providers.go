@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -60,6 +61,12 @@ type patchProfileReq struct {
 	// APIKey 传非空才覆盖;清除 key 走 DELETE 后重建。
 	APIKey *string                `json:"apiKey"`
 	Models *[]store.ProviderModel `json:"models"`
+}
+
+type probeProviderModelsReq struct {
+	Protocol string `json:"protocol"`
+	BaseURL  string `json:"baseURL"`
+	APIKey   string `json:"apiKey"`
 }
 
 type providerWriter interface {
@@ -222,6 +229,31 @@ func cleanModels(models []store.ProviderModel) []store.ProviderModel {
 	return out
 }
 
+func (s *Server) probeProviderModels(c *cart.Context) error {
+	var req probeProviderModelsReq
+	if err := decode(c, &req); err != nil {
+		return badRequest(c, "invalid json body")
+	}
+	req.Protocol = strings.TrimSpace(req.Protocol)
+	req.BaseURL = strings.TrimRight(strings.TrimSpace(req.BaseURL), "/")
+	if !registry.SupportedProtocol(req.Protocol) {
+		return badRequest(c, "unsupported protocol: "+req.Protocol)
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+	models, err := fetchProviderModels(ctx, req.Protocol, req.BaseURL, req.APIKey)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return nil
+	}
+	if models == nil {
+		models = []string{}
+	}
+	c.JSON(http.StatusOK, map[string]any{"models": models})
+	return nil
+}
+
 // 模型目录代理:按 profile protocol 转发真实端点的模型列表,短缓存。
 // 上游失败回 502,前端回落 presets 静态清单(docs/design.md 第 4 节)。
 const modelsCacheTTL = 60 * time.Second
@@ -259,17 +291,7 @@ func (s *Server) listProviderModels(c *cart.Context) error {
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
-	var models []string
-	switch p.Protocol {
-	case registry.TypeOpenAICompatible, registry.TypeOpenAIResponses:
-		models, err = openai.ListModels(ctx, openai.Config{BaseURL: p.BaseURL, APIKey: apiKey})
-	case registry.TypeGoogle:
-		models, err = google.ListModels(ctx, google.Config{BaseURL: p.BaseURL, APIKey: apiKey})
-	case registry.TypeAnthropic:
-		models, err = anthropic.ListModels(ctx, anthropic.Config{BaseURL: p.BaseURL, APIKey: apiKey})
-	default:
-		return badRequest(c, "unsupported protocol: "+p.Protocol)
-	}
+	models, err := fetchProviderModels(ctx, p.Protocol, p.BaseURL, apiKey)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return nil
@@ -283,4 +305,17 @@ func (s *Server) listProviderModels(c *cart.Context) error {
 	modelsCacheMu.Unlock()
 	c.JSON(http.StatusOK, map[string]any{"models": models})
 	return nil
+}
+
+func fetchProviderModels(ctx context.Context, protocol, baseURL, apiKey string) ([]string, error) {
+	switch protocol {
+	case registry.TypeOpenAICompatible, registry.TypeOpenAIResponses:
+		return openai.ListModels(ctx, openai.Config{BaseURL: baseURL, APIKey: apiKey})
+	case registry.TypeGoogle:
+		return google.ListModels(ctx, google.Config{BaseURL: baseURL, APIKey: apiKey})
+	case registry.TypeAnthropic:
+		return anthropic.ListModels(ctx, anthropic.Config{BaseURL: baseURL, APIKey: apiKey})
+	default:
+		return nil, errors.New("unsupported protocol: " + protocol)
+	}
 }

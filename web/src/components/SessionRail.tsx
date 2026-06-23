@@ -910,7 +910,7 @@ type SessionItemsProps = {
 
 function SessionListSkeleton() {
   return (
-    <div className="grid gap-1">
+    <div className="grid gap-1 p-2">
       <Skeleton className="h-8 rounded-md" />
       <Skeleton className="h-8 rounded-md" />
       <Skeleton className="h-8 rounded-md" />

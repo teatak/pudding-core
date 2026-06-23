@@ -9,12 +9,14 @@ import (
 	"time"
 
 	"github.com/teatak/pudding-core/internal/provider"
+	"github.com/teatak/pudding-core/internal/store"
 )
 
 const (
 	TimeGetCurrent = "builtin_time_get_current"
 	WebSearch      = "builtin_web_search"
 	WebFetch       = "builtin_web_fetch"
+	WorkspaceList  = "builtin_workspace_list"
 )
 
 type WebConfigSource interface {
@@ -73,16 +75,25 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Name:        TimeGetCurrent,
 			Description: "Get the current time. Optionally accepts an IANA timezone name.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"timezone":{"type":"string","description":"IANA timezone name, for example Asia/Singapore or America/Los_Angeles. Defaults to the system local timezone."}},"additionalProperties":false}`),
+			Capability:  store.ModeChat,
 		},
 		{
 			Name:        WebSearch,
 			Description: "Search the web for current or external information. Returns a short answer plus relevant results.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"Search query in natural language. Use one topic per call."},"max_results":{"type":"integer","description":"Optional result count, 1-10, default 5."},"depth":{"type":"string","enum":["basic","advanced"],"description":"Optional search depth. Defaults to basic."},"topic":{"type":"string","enum":["general","news"],"description":"Optional topic. Use news for recent/current events."},"include_answer":{"type":"boolean","description":"Optional, defaults to true."}},"required":["query"],"additionalProperties":false}`),
+			Capability:  store.ModeResearch,
 		},
 		{
 			Name:        WebFetch,
 			Description: "Fetch readable body text from one URL. Use for page reading and summarization, not API calls.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","description":"Full URL starting with http:// or https://."},"depth":{"type":"string","enum":["basic","advanced"],"description":"Optional extract depth. Defaults to basic."},"max_chars":{"type":"integer","description":"Optional maximum body characters, default 4000 and cap 20000."}},"required":["url"],"additionalProperties":false}`),
+			Capability:  store.ModeResearch,
+		},
+		{
+			Name:        WorkspaceList,
+			Description: "List files and directories inside authorized workspace directories.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Relative path from an authorized workspace root, or an absolute path inside one. Defaults to ."},"maxEntries":{"type":"integer","description":"Optional maximum entries, 1-1000, default 200."}},"additionalProperties":false}`),
+			Capability:  store.ModeWorkspace,
 		},
 	}
 }
@@ -100,6 +111,8 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.webSearch(ctx, call)
 	case WebFetch:
 		return r.webFetch(ctx, call)
+	case WorkspaceList:
+		return workspaceList(call)
 	default:
 		out.Ok = false
 		out.Content = fmt.Sprintf("unknown tool: %s", call.Name)

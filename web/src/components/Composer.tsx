@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, Loader2, Plus } from "lucide-react";
+import { ArrowUp, Check, Code2, Loader2, MessageCircle, Plus, SearchCheck, ShieldCheck, X, type LucideIcon } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -14,7 +14,7 @@ import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 
-import { APIError, cancelTurn, getTurn, submitMessage, updateSession, type Session } from "@/api/client";
+import { APIError, approveApproval, cancelTurn, denyApproval, getTurn, submitMessage, updateSession, type Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
 import { ContextUsageRing } from "@/components/ContextUsageRing";
@@ -28,7 +28,7 @@ import { useImeCompositionGuard } from "@/hooks/useImeCompositionGuard";
 import { useI18n } from "@/i18n";
 import { getSubmitFailure } from "@/lib/submitFailure";
 import { getTextAreaCaretClientPoint } from "@/lib/textCaret";
-import { useOverlayStore, type TurnPhaseState } from "@/state/overlayStore";
+import { useOverlayStore, type AssistantOverlay, type AssistantOverlayPart, type TurnPhaseState } from "@/state/overlayStore";
 
 const composerSchema = z.object({
   text: z.string(),
@@ -41,6 +41,8 @@ type ComposerProps = {
   session: Session;
   onSubmitError?: (message: string | null) => void;
 };
+
+type ComposerApproval = Extract<AssistantOverlayPart, { type: "approval" }>;
 
 export function Composer({ token, session, onSubmitError }: ComposerProps) {
   const sessionID = session.id;
@@ -57,7 +59,9 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
   // 保证停止按钮不丢(cancel 按 sessionID 取消,无需 turnID)。
   const overlayRunning = useOverlayStore((state) => Boolean(state.runningTurns[sessionID]));
   const turnPhase = useOverlayStore((state) => state.turnPhases[sessionID]);
+  const pendingApproval = useOverlayStore((state) => selectPendingApproval(state.assistants, sessionID, state.runningTurns[sessionID]));
   const running = overlayRunning || session.running;
+  const currentMode = session.modeLease === "session" ? session.activeMode : "chat";
   const [resolvedModel, setResolvedModel] = useState<{ provider: string; model: string } | null>(null);
   const [mascotGaze, setMascotGaze] = useState<MascotGaze>({ type: "pointer" });
   // clientMessageID 按"草稿"生成而不是按请求生成:失败重试和快速双击
@@ -231,7 +235,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
 
   return (
     <form
-      className="relative shrink-0 pt-2 pb-4"
+      className={`relative shrink-0 pb-4 ${pendingApproval ? "pt-36" : "pt-2"}`}
       onSubmit={form.handleSubmit(submitDraft)}
     >
       {/* 底部遮罩:滚动内容贴近输入区时淡出,随 composer 定位、宽度走 ChatColumn。
@@ -243,7 +247,8 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
       </div>
       <ChatColumn>
         <div className="relative">
-          <div className="relative z-0 rounded-3xl border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/25">
+          <ComposerApprovalBar approval={pendingApproval} token={token} />
+          <div className="relative z-10 rounded-3xl border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/25">
             <div className="px-4 pt-4 pb-2">
               <Textarea
                 className="block max-h-36 min-h-6 resize-none overflow-y-auto rounded-none border-0 bg-transparent p-0 text-sm leading-6 shadow-none focus-visible:ring-0 md:text-sm dark:bg-transparent"
@@ -278,6 +283,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
                 </TooltipTrigger>
                 <TooltipContent>{t("composer.attach")}</TooltipContent>
               </Tooltip>
+              <CapabilityBadge mode={currentMode} />
               <div className="ml-auto flex items-center gap-1">
                 <ContextUsageRing token={token} sessionID={sessionID} />
                 <ModelPicker
@@ -345,6 +351,213 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
       </ChatColumn>
     </form>
   );
+}
+
+function CapabilityBadge({ mode }: { mode: Session["activeMode"] }) {
+  const { t } = useI18n();
+  const label = t(`mode.${mode}`);
+  const title = t("mode.current").replace("{mode}", label);
+  const iconByMode = {
+    chat: { Icon: MessageCircle, className: "text-muted-foreground/80" },
+    research: { Icon: SearchCheck, className: "text-blue-600/80 dark:text-blue-300/80" },
+    workspace: { Icon: Code2, className: "text-emerald-600/80 dark:text-emerald-300/80" },
+  } satisfies Record<Session["activeMode"], { Icon: LucideIcon; className: string }>;
+  const { Icon, className } = iconByMode[mode];
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          aria-label={title}
+          className={`inline-flex size-5 shrink-0 items-center justify-center rounded-full ${className}`}
+          role="img"
+        >
+          <Icon aria-hidden="true" className="size-3.5" strokeWidth={2.2} />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{title}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval; token: string }) {
+  const queryClient = useQueryClient();
+  const { t } = useI18n();
+  const [pendingAction, setPendingAction] = useState<"turn" | "session" | "deny" | null>(null);
+  const [workspaceDirText, setWorkspaceDirText] = useState("");
+  useEffect(() => {
+    setWorkspaceDirText(workspaceDirsFromPayload(approval?.payload).join("\n"));
+  }, [approval?.approvalID]);
+  if (!approval) {
+    return null;
+  }
+  const current = approval;
+  const targetMode = approvalTargetMode(current.payload);
+  const title = approvalTitle(current, targetMode, t);
+  const pending = pendingAction !== null;
+  const isWorkspaceApproval = targetMode === "workspace";
+  const workspaceDirs = parseWorkspaceDirs(workspaceDirText);
+  const needsWorkspaceDir = isWorkspaceApproval && workspaceDirs.length === 0;
+  const suggestedDirName = suggestedWorkspaceDirName(current.payload);
+  const workspacePlaceholder = suggestedDirName
+    ? t("transcript.approvalWorkspaceDirsSuggested").replace("{name}", suggestedDirName)
+    : t("transcript.approvalWorkspaceDirsPlaceholder");
+
+  async function approve(scope: "turn" | "session") {
+    if (pending || needsWorkspaceDir) {
+      return;
+    }
+    setPendingAction(scope);
+    try {
+      await approveApproval(token, current.sessionID, current.approvalID, scope, isWorkspaceApproval ? workspaceDirs : []);
+      if (scope === "session") {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      }
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function deny() {
+    if (pending) {
+      return;
+    }
+    setPendingAction("deny");
+    try {
+      await denyApproval(token, current.sessionID, current.approvalID);
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  return (
+    <div className="absolute right-8 bottom-full left-16 z-0 grid gap-1 rounded-t-lg border border-border/70 bg-popover/95 px-3 py-2 text-xs text-popover-foreground shadow-sm backdrop-blur">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <ShieldCheck className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 truncate font-medium">{title}</span>
+      </div>
+      {current.reason ? <div className="line-clamp-2 leading-5 text-muted-foreground">{current.reason}</div> : null}
+      {isWorkspaceApproval ? (
+        <div className="grid gap-1">
+          <label className="text-[11px] font-medium text-muted-foreground" htmlFor={`workspace-dirs-${current.approvalID}`}>
+            {t("transcript.approvalWorkspaceDirs")}
+          </label>
+          <Textarea
+            className="min-h-14 resize-y rounded-md border-border/70 bg-background/70 px-2 py-1.5 text-[11px] leading-4 shadow-none focus-visible:ring-1"
+            id={`workspace-dirs-${current.approvalID}`}
+            placeholder={workspacePlaceholder}
+            rows={2}
+            value={workspaceDirText}
+            onChange={(event) => setWorkspaceDirText(event.target.value)}
+          />
+          {needsWorkspaceDir ? <div className="text-[11px] text-destructive">{t("transcript.approvalWorkspaceDirsRequired")}</div> : null}
+        </div>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Button
+          className="h-6 gap-1 rounded-full px-2 text-[11px]"
+          disabled={pending || needsWorkspaceDir}
+          size="sm"
+          type="button"
+          onClick={() => void approve("turn")}
+        >
+          {pendingAction === "turn" ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
+          {t("transcript.approvalAllowTurn")}
+        </Button>
+        <Button
+          className="h-6 gap-1 rounded-full px-2 text-[11px]"
+          disabled={pending || needsWorkspaceDir}
+          size="sm"
+          type="button"
+          variant="secondary"
+          onClick={() => void approve("session")}
+        >
+          {pendingAction === "session" ? <Loader2 className="size-3 animate-spin" /> : <ShieldCheck className="size-3" />}
+          {t("transcript.approvalAllowSession")}
+        </Button>
+        <Button
+          className="h-6 gap-1 rounded-full px-1.5 text-[11px]"
+          disabled={pending}
+          size="sm"
+          type="button"
+          variant="ghost"
+          onClick={() => void deny()}
+        >
+          {pendingAction === "deny" ? <Loader2 className="size-3 animate-spin" /> : <X className="size-3" />}
+          {t("transcript.approvalDeny")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function selectPendingApproval(assistants: Record<string, AssistantOverlay>, sessionID: string, runningTurnID?: string): ComposerApproval | undefined {
+  if (runningTurnID) {
+    const running = assistants[runningTurnID];
+    const approval = firstPendingApproval(running);
+    if (approval) {
+      return approval;
+    }
+  }
+  for (const overlay of Object.values(assistants)) {
+    if (overlay.turnID === runningTurnID || overlay.sessionID !== sessionID) {
+      continue;
+    }
+    const approval = firstPendingApproval(overlay);
+    if (approval) {
+      return approval;
+    }
+  }
+  return undefined;
+}
+
+function firstPendingApproval(overlay: AssistantOverlay | undefined): ComposerApproval | undefined {
+  if (!overlay || overlay.status !== "streaming") {
+    return undefined;
+  }
+  return overlay.parts.find(isPendingApprovalPart);
+}
+
+function isPendingApprovalPart(part: AssistantOverlayPart): part is ComposerApproval {
+  return part.type === "approval" && !part.status;
+}
+
+function approvalTargetMode(payload: unknown) {
+  if (payload && typeof payload === "object" && "targetMode" in payload && typeof payload.targetMode === "string") {
+    return payload.targetMode;
+  }
+  return "";
+}
+
+function workspaceDirsFromPayload(payload: unknown) {
+  if (!payload || typeof payload !== "object" || !("workspaceDirs" in payload) || !Array.isArray(payload.workspaceDirs)) {
+    return [];
+  }
+  return dedupeStrings(payload.workspaceDirs.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean));
+}
+
+function parseWorkspaceDirs(value: string) {
+  return dedupeStrings(value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean));
+}
+
+function suggestedWorkspaceDirName(payload: unknown) {
+  if (payload && typeof payload === "object" && "suggestedDirName" in payload && typeof payload.suggestedDirName === "string") {
+    return payload.suggestedDirName.trim();
+  }
+  return "";
+}
+
+function dedupeStrings(values: string[]) {
+  return values.filter((value, index) => values.indexOf(value) === index);
+}
+
+function approvalTitle(approval: ComposerApproval, targetMode: string, t: (key: string) => string) {
+  if (approval.approvalKind === "capability") {
+    const mode = targetMode ? t(`mode.${targetMode}`) : "";
+    if (mode) {
+      return t("transcript.approvalCapabilityTitle").replace("{mode}", mode);
+    }
+  }
+  return approval.title || t("transcript.approvalTitle");
 }
 
 function mascotMoodFromPhase(phase: TurnPhaseState | undefined, running: boolean): MascotMood {

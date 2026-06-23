@@ -11,6 +11,7 @@ type PhaseDotProps = {
 const phaseColors: Record<TurnPhase, string> = {
   submitting: "var(--phase-submitting)",
   awaiting_model: "var(--phase-awaiting-model)",
+  awaiting_approval: "var(--phase-awaiting-model)",
   streaming_text: "var(--phase-streaming-text)",
   awaiting_followup: "var(--phase-awaiting-followup)",
   thinking: "var(--phase-thinking)",

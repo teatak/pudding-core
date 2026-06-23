@@ -30,6 +30,49 @@ func createTestSession(t *testing.T, st store.Store, id string) {
 	}
 }
 
+func TestSessionWorkspaceDirsPersist(t *testing.T) {
+	st, path := openTestStore(t)
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "project")
+	if err := st.CreateSession(ctx, &store.Session{
+		ID:            "sess_workspace",
+		Title:         "workspace",
+		Provider:      "mock",
+		Model:         "mock",
+		WorkspaceDirs: []string{root, root + "/.", "relative"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetSession(ctx, "sess_workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameStrings(got.WorkspaceDirs, []string{root}) {
+		t.Fatalf("workspace dirs not normalized: %+v", got.WorkspaceDirs)
+	}
+
+	other := filepath.Join(t.TempDir(), "other")
+	dirs := []string{other, other}
+	if _, err := st.UpdateSession(ctx, "sess_workspace", store.SessionUpdate{WorkspaceDirs: &dirs}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	got, err = reopened.GetSession(ctx, "sess_workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameStrings(got.WorkspaceDirs, []string{other}) {
+		t.Fatalf("workspace dirs not persisted: %+v", got.WorkspaceDirs)
+	}
+}
+
 func TestRenameDoesNotAffectRecentOrdering(t *testing.T) {
 	st, _ := openTestStore(t)
 	createTestSession(t, st, "older")
@@ -385,6 +428,54 @@ func TestMessagePartsPersist(t *testing.T) {
 	want := []string{"msg_1", "msg_turn_1", "msg_turn_1_002", "msg_turn_1_003", "msg_turn_1_004"}
 	if !sameStrings(got, want) {
 		t.Fatalf("turn should group all messages in turn_index order: got %v want %v", got, want)
+	}
+}
+
+func TestAppendTurnOutputBeforeFinish(t *testing.T) {
+	st, _ := openTestStore(t)
+	createTestSession(t, st, "sess_1")
+	beginTestTurn(t, st, "sess_1", "turn_1", "msg_1", "client_1")
+
+	if _, err := st.AppendTurnOutput(context.Background(), store.AppendTurnOutputInput{
+		TurnID: "turn_1",
+		Parts:  store.TextPart("first"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AppendTurnOutput(context.Background(), store.AppendTurnOutputInput{
+		TurnID: "turn_1",
+		Parts: []store.ContentPart{{
+			Type:   store.ContentPartToolUse,
+			CallID: "call_1",
+			Name:   "builtin_time_get_current",
+			Args:   []byte(`{"timezone":"Asia/Singapore"}`),
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.FinishTurn(context.Background(), store.FinishTurnInput{
+		TurnID: "turn_1",
+		Status: store.TurnCompleted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs, err := st.ListMessages(context.Background(), "sess_1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := messageIDs(msgs), []string{"msg_1", "msg_turn_1", "msg_turn_1_002"}; !sameStrings(got, want) {
+		t.Fatalf("finish must not duplicate appended output: got %v want %v", got, want)
+	}
+	if msgs[1].Text != "first" || msgs[2].Kind != store.MessageKindToolUse {
+		t.Fatalf("unexpected appended messages: %+v", msgs)
+	}
+	evs, err := st.EventsAfter(context.Background(), "sess_1", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs) != 2 || evs[1].Kind != event.TurnCompleted || evs[1].AssistantMessageID != "msg_turn_1" {
+		t.Fatalf("final event should point at first appended output: %+v", evs)
 	}
 }
 

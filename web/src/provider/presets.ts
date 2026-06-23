@@ -10,6 +10,7 @@ export type ProviderPresetId =
   | "moonshot"
   | "zhipu"
   | "openrouter"
+  | "buzzhive"
   | "ollama";
 
 export type ProviderPresetProtocol = "openai-compatible" | "openai-responses" | "google" | "anthropic";
@@ -21,6 +22,9 @@ export type ProviderPresetVariant = {
   protocol: ProviderPresetProtocol;
   baseURL: string;
   models: ProviderModel[];
+  dynamicModels?: boolean;
+  baseURLEditable?: boolean;
+  baseURLPlaceholder?: string;
   apiKeyOptional?: boolean;
   profileName?: string;
 };
@@ -330,6 +334,26 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     ],
   },
   {
+    id: "buzzhive",
+    name: "BuzzHive",
+    description: "BuzzHive proxy through an OpenAI-compatible endpoint; models are loaded from the endpoint.",
+    apiKeyURL: "http://127.0.0.1:9622/admin/",
+    defaultVariantId: "default",
+    variants: [
+      {
+        id: "default",
+        label: "OpenAI Compatible",
+        description: "http://127.0.0.1:9622/v1",
+        protocol: "openai-compatible",
+        baseURL: "http://127.0.0.1:9622/v1",
+        baseURLPlaceholder: "http://127.0.0.1:9622/v1",
+        baseURLEditable: true,
+        dynamicModels: true,
+        models: [],
+      },
+    ],
+  },
+  {
     id: "ollama",
     name: "Ollama",
     description: "Local Ollama OpenAI-compatible endpoint.",
@@ -356,6 +380,7 @@ const ZH_ORDER: ProviderPresetId[] = [
   "moonshot",
   "zhipu",
   "openrouter",
+  "buzzhive",
   "ollama",
   "openai",
   "anthropic",
@@ -372,6 +397,7 @@ const DEFAULT_ORDER: ProviderPresetId[] = [
   "moonshot",
   "zhipu",
   "openrouter",
+  "buzzhive",
   "ollama",
 ];
 
@@ -390,6 +416,7 @@ const PROFILE_ID_BRANDS = new Set([
   "grok",
   "glm",
   "openrouter",
+  "buzzhive",
   PROFILE_ID_DEFAULT_BRAND,
 ]);
 

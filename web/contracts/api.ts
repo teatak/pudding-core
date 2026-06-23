@@ -7,6 +7,9 @@ export const session = z.object({
   title: z.string(),
   provider: z.string(), // provider profile 名;session 创建时必须显式写入
   model: z.string(),
+  activeMode: z.enum(["chat", "research", "workspace"]),
+  modeLease: z.enum(["none", "session"]),
+  workspaceDirs: z.array(z.string()).optional(),
   pinned: z.boolean(),
   pinnedOrder: z.number(),
   createdAt: z.string(), // RFC3339
@@ -83,6 +86,12 @@ export const listProvidersResponse = z.object({ providers: z.array(providerProfi
 
 export const listModelsResponse = z.object({ models: z.array(z.string()) });
 
+export const probeProviderModelsRequest = z.object({
+  protocol: providerProtocol,
+  baseURL: z.string().optional(),
+  apiKey: z.string().optional(),
+});
+
 export const contentPart = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), text: z.string() }),
   z.object({ type: z.literal("thought"), text: z.string() }),
@@ -136,6 +145,7 @@ export const conversationTurn = z.object({
   status: z.enum(["running", "completed", "failed", "cancelled"]),
   provider: z.string().optional(),
   model: z.string().optional(),
+  mode: z.enum(["chat", "research", "workspace"]).optional(),
   error: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -152,6 +162,7 @@ export const queuedInput = z.object({
   status: queuedInputStatus,
   provider: z.string().optional(),
   model: z.string().optional(),
+  mode: z.enum(["chat", "research", "workspace"]).optional(),
   modelConfig: z.unknown().optional(),
   turnID: z.string().optional(),
   createdAt: z.string(),
@@ -173,6 +184,23 @@ export const submitResponse = z.object({
   status: queuedInputStatus.optional(),
   clientMessageID: z.string().optional(),
 });
+
+export const pendingApproval = z.object({
+  id: z.string(),
+  sessionID: z.string(),
+  turnID: z.string(),
+  callID: z.string().optional(),
+  approvalKind: z.string(),
+  targetMode: z.enum(["chat", "research", "workspace"]).optional(),
+  title: z.string().optional(),
+  reason: z.string().optional(),
+  risk: z.string().optional(),
+  payload: z.unknown().optional(),
+  createdAt: z.string(),
+});
+export type PendingApproval = z.infer<typeof pendingApproval>;
+
+export const listPendingApprovalsResponse = z.object({ approvals: z.array(pendingApproval) });
 
 export const sessionUsage = z.object({
   sessionID: z.string(),
@@ -229,6 +257,7 @@ export const settingsResponse = z.object({ settings: z.record(z.string(), z.stri
 export const builtinTool = z.object({
   id: z.string(),
   description: z.string(),
+  capability: z.enum(["chat", "research", "workspace"]),
   inputSchema: z.unknown().optional(),
 });
 export type BuiltinTool = z.infer<typeof builtinTool>;

@@ -9,6 +9,7 @@ import (
 	"github.com/teatak/pudding-core/internal/prompt"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
+	"github.com/teatak/pudding-core/internal/tool"
 )
 
 type Builder struct {
@@ -17,7 +18,7 @@ type Builder struct {
 }
 
 type PromptSource interface {
-	Prompt(ctx context.Context) (prompt.Output, error)
+	Prompt(ctx context.Context, mode string) (prompt.Output, error)
 }
 
 func New(s store.Store, prompts PromptSource) *Builder {
@@ -29,14 +30,18 @@ func New(s store.Store, prompts PromptSource) *Builder {
 
 // Build 在 user message 已落库之后调用,因此 current input 已包含在
 // canonical messages 里,不需要单独拼接。
-func (b *Builder) Build(ctx context.Context, sessionID, model string) (provider.Request, error) {
+func (b *Builder) Build(ctx context.Context, sessionID, model string, mode string) (provider.Request, error) {
 	msgs, err := b.store.ListMessages(ctx, sessionID, 0)
 	if err != nil {
 		return provider.Request{}, err
 	}
-	system, err := b.prompts.Prompt(ctx)
+	system, err := b.prompts.Prompt(ctx, mode)
 	if err != nil {
 		return provider.Request{}, err
+	}
+	currentMode := store.NormalizeAgentMode(store.AgentMode(mode))
+	if currentMode == "" {
+		currentMode = store.ModeChat
 	}
 	req := provider.Request{
 		Model:    model,
@@ -59,13 +64,13 @@ func (b *Builder) Build(ctx context.Context, sessionID, model string) (provider.
 		switch m.Role {
 		case store.RoleUser:
 			flushAssistant()
-			parts := providerParts(m.Parts)
+			parts := providerParts(m.Parts, currentMode)
 			req.Messages = append(req.Messages, provider.Message{Role: provider.RoleUser, Text: textFromProviderParts(parts), Parts: parts})
 		case store.RoleAssistant, store.RoleTool:
-			assistantParts = append(assistantParts, providerParts(m.Parts)...)
+			assistantParts = append(assistantParts, providerParts(m.Parts, currentMode)...)
 		case store.RoleSummary:
 			flushAssistant()
-			parts := providerParts(m.Parts)
+			parts := providerParts(m.Parts, currentMode)
 			if len(parts) > 0 {
 				req.Messages = append(req.Messages, provider.Message{Role: provider.RoleAssistant, Text: textFromProviderParts(parts), Parts: parts})
 			}
@@ -79,11 +84,11 @@ func (b *Builder) Build(ctx context.Context, sessionID, model string) (provider.
 
 type staticPrompt struct{}
 
-func (staticPrompt) Prompt(context.Context) (prompt.Output, error) {
-	return prompt.Assemble(prompt.Input{}), nil
+func (staticPrompt) Prompt(_ context.Context, mode string) (prompt.Output, error) {
+	return prompt.Assemble(prompt.Input{Mode: mode}), nil
 }
 
-func providerParts(parts []store.ContentPart) []provider.Part {
+func providerParts(parts []store.ContentPart, mode store.AgentMode) []provider.Part {
 	out := make([]provider.Part, 0, len(parts))
 	for _, part := range parts {
 		switch part.Type {
@@ -94,6 +99,9 @@ func providerParts(parts []store.ContentPart) []provider.Part {
 		case store.ContentPartThought:
 			continue
 		case store.ContentPartToolUse:
+			if !tool.NameAllowedForMode(mode, part.Name) {
+				continue
+			}
 			out = append(out, provider.Part{
 				Type:   provider.PartToolUse,
 				CallID: part.CallID,
@@ -101,6 +109,9 @@ func providerParts(parts []store.ContentPart) []provider.Part {
 				Args:   append([]byte(nil), part.Args...),
 			})
 		case store.ContentPartToolResult:
+			if !tool.NameAllowedForMode(mode, part.Name) {
+				continue
+			}
 			out = append(out, provider.Part{
 				Type:    provider.PartToolResult,
 				CallID:  part.CallID,

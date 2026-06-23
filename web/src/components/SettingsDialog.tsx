@@ -658,9 +658,15 @@ function ToolList({ tools }: { tools: BuiltinTool[] }) {
 
 function ToolRow({ tool }: { tool: BuiltinTool }) {
   const { t } = useI18n();
+  const capabilityLabel = t(`mode.${tool.capability}`);
   return (
     <div className="grid gap-1 px-4 py-3">
-      <div className="break-all font-mono text-xs text-foreground">{tool.id}</div>
+      <div className="flex min-w-0 items-center gap-2">
+        <div className="min-w-0 break-all font-mono text-xs text-foreground">{tool.id}</div>
+        <span className="shrink-0 rounded border border-border/70 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
+          {capabilityLabel}
+        </span>
+      </div>
       <div className="line-clamp-2 text-xs leading-5 text-muted-foreground">
         {tool.description || t("settings.tools.builtin.noDescription")}
       </div>

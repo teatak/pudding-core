@@ -80,6 +80,31 @@ export const inputUpdatedEvent = z.object({
   status: z.enum(["queued", "editing", "cancelled", "promoted"]),
 });
 
+export const approvalRequestedEvent = z.object({
+  kind: z.literal("approval.requested"),
+  sessionID: z.string(),
+  turnID: z.string(),
+  callID: z.string().optional(),
+  approvalID: z.string(),
+  approvalKind: z.string(),
+  title: z.string().optional(),
+  reason: z.string().optional(),
+  risk: z.string().optional(),
+  payload: z.unknown().optional(),
+});
+
+export const approvalResolvedEvent = z.object({
+  kind: z.literal("approval.resolved"),
+  sessionID: z.string(),
+  turnID: z.string(),
+  callID: z.string().optional(),
+  approvalID: z.string(),
+  approvalKind: z.string(),
+  status: z.enum(["approved", "denied", "cancelled", "expired"]),
+  reason: z.string().optional(),
+  payload: z.unknown().optional(),
+});
+
 // session.titled 不落库、无 seq:自动标题写回(provisional / LLM 各一次),
 // 丢失由 sessions 轮询兜底
 export const sessionTitledEvent = z.object({
@@ -102,6 +127,8 @@ export const sessionEvent = z.discriminatedUnion("kind", [
   turnCancelledEvent,
   inputQueuedEvent,
   inputUpdatedEvent,
+  approvalRequestedEvent,
+  approvalResolvedEvent,
   sessionTitledEvent,
   pingEvent,
 ]);

@@ -52,11 +52,94 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := migrateModeColumns(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := migrateSessionWorkspaceDirs(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := dropObsoleteTables(db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return s, nil
+}
+
+func migrateModeColumns(db *sql.DB) error {
+	for _, spec := range []struct {
+		table string
+		name  string
+		def   string
+	}{
+		{"sessions", "active_mode", `TEXT NOT NULL DEFAULT 'chat'`},
+		{"sessions", "mode_lease", `TEXT NOT NULL DEFAULT 'none'`},
+		{"turns", "mode", `TEXT NOT NULL DEFAULT 'chat'`},
+		{"queued_inputs", "mode", `TEXT NOT NULL DEFAULT 'chat'`},
+	} {
+		ok, err := columnExists(db, spec.table, spec.name)
+		if err != nil {
+			return err
+		}
+		if ok {
+			continue
+		}
+		if _, err := db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, spec.table, spec.name, spec.def)); err != nil {
+			return fmt.Errorf("sqlite: add %s.%s: %w", spec.table, spec.name, err)
+		}
+	}
+	for _, spec := range []struct {
+		table  string
+		column string
+	}{
+		{"sessions", "active_mode"},
+		{"turns", "mode"},
+		{"queued_inputs", "mode"},
+	} {
+		if _, err := db.Exec(fmt.Sprintf(`UPDATE %s SET %s='research' WHERE %s='work'`, spec.table, spec.column, spec.column)); err != nil {
+			return fmt.Errorf("sqlite: migrate %s.%s work: %w", spec.table, spec.column, err)
+		}
+		if _, err := db.Exec(fmt.Sprintf(`UPDATE %s SET %s='workspace' WHERE %s IN ('code','operate','local')`, spec.table, spec.column, spec.column)); err != nil {
+			return fmt.Errorf("sqlite: migrate %s.%s code: %w", spec.table, spec.column, err)
+		}
+	}
+	return nil
+}
+
+func migrateSessionWorkspaceDirs(db *sql.DB) error {
+	ok, err := columnExists(db, "sessions", "workspace_dirs")
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+	if _, err := db.Exec(`ALTER TABLE sessions ADD COLUMN workspace_dirs TEXT NOT NULL DEFAULT '[]'`); err != nil {
+		return fmt.Errorf("sqlite: add sessions.workspace_dirs: %w", err)
+	}
+	return nil
+}
+
+func columnExists(db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return false, fmt.Errorf("sqlite: inspect %s: %w", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pkIndex int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pkIndex); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 func dropObsoleteTables(db *sql.DB) error {
@@ -168,8 +251,8 @@ func (s *Store) CreateSession(ctx context.Context, sess *store.Session) error {
 		now := time.Now()
 		sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = now, now, now
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO sessions(id,title,provider,model,pinned,pinned_order,created_at,updated_at,last_activity_at) VALUES(?,?,?,?,?,?,?,?,?)`,
-			sess.ID, sess.Title, sess.Provider, sess.Model, boolInt(sess.Pinned), sess.PinnedOrder, unixMS(now), unixMS(now), unixMS(now),
+			`INSERT INTO sessions(id,title,provider,model,active_mode,mode_lease,workspace_dirs,pinned,pinned_order,created_at,updated_at,last_activity_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+			sess.ID, sess.Title, sess.Provider, sess.Model, sess.ActiveMode, sess.ModeLease, encodeStringSlice(sess.WorkspaceDirs), boolInt(sess.Pinned), sess.PinnedOrder, unixMS(now), unixMS(now), unixMS(now),
 		)
 		return err
 	})
@@ -181,15 +264,21 @@ func (s *Store) GetSession(ctx context.Context, id string) (*store.Session, erro
 
 	var sess store.Session
 	var created, updated, lastActivity int64
+	var workspaceDirs string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id,title,provider,model,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
+		`SELECT id,title,provider,model,active_mode,mode_lease,workspace_dirs,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ActiveMode, &sess.ModeLease, &workspaceDirs, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
+	sess.ActiveMode = store.NormalizeAgentMode(sess.ActiveMode)
+	if sess.ActiveMode == "" {
+		sess.ActiveMode = store.ModeChat
+	}
+	sess.WorkspaceDirs = store.NormalizeWorkspaceDirs(decodeStringSlice(workspaceDirs))
 	sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = timeFromMS(created), timeFromMS(updated), timeFromMS(lastActivity)
 	return &sess, nil
 }
@@ -198,7 +287,7 @@ func (s *Store) ListSessions(ctx context.Context) ([]*store.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.QueryContext(ctx, `SELECT id,title,provider,model,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions ORDER BY last_activity_at DESC, created_at DESC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,title,provider,model,active_mode,mode_lease,workspace_dirs,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions ORDER BY last_activity_at DESC, created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -208,9 +297,15 @@ func (s *Store) ListSessions(ctx context.Context) ([]*store.Session, error) {
 	for rows.Next() {
 		var sess store.Session
 		var created, updated, lastActivity int64
-		if err := rows.Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running); err != nil {
+		var workspaceDirs string
+		if err := rows.Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ActiveMode, &sess.ModeLease, &workspaceDirs, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running); err != nil {
 			return nil, err
 		}
+		sess.ActiveMode = store.NormalizeAgentMode(sess.ActiveMode)
+		if sess.ActiveMode == "" {
+			sess.ActiveMode = store.ModeChat
+		}
+		sess.WorkspaceDirs = store.NormalizeWorkspaceDirs(decodeStringSlice(workspaceDirs))
 		sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = timeFromMS(created), timeFromMS(updated), timeFromMS(lastActivity)
 		out = append(out, &sess)
 	}
@@ -236,6 +331,15 @@ func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionU
 		if upd.Model != nil {
 			sess.Model = *upd.Model
 		}
+		if upd.ActiveMode != nil {
+			sess.ActiveMode = *upd.ActiveMode
+		}
+		if upd.ModeLease != nil {
+			sess.ModeLease = *upd.ModeLease
+		}
+		if upd.WorkspaceDirs != nil {
+			sess.WorkspaceDirs = append([]string(nil), (*upd.WorkspaceDirs)...)
+		}
 		if upd.Pinned != nil {
 			sess.Pinned = *upd.Pinned
 		}
@@ -244,8 +348,8 @@ func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionU
 		}
 		sess.UpdatedAt = time.Now()
 		_, err = tx.ExecContext(ctx,
-			`UPDATE sessions SET title=?, provider=?, model=?, pinned=?, pinned_order=?, updated_at=? WHERE id=?`,
-			sess.Title, sess.Provider, sess.Model, boolInt(sess.Pinned), sess.PinnedOrder, unixMS(sess.UpdatedAt), id,
+			`UPDATE sessions SET title=?, provider=?, model=?, active_mode=?, mode_lease=?, workspace_dirs=?, pinned=?, pinned_order=?, updated_at=? WHERE id=?`,
+			sess.Title, sess.Provider, sess.Model, sess.ActiveMode, sess.ModeLease, encodeStringSlice(sess.WorkspaceDirs), boolInt(sess.Pinned), sess.PinnedOrder, unixMS(sess.UpdatedAt), id,
 		)
 		if err != nil {
 			return err
@@ -300,6 +404,14 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 		}
 
 		now := time.Now()
+		mode := in.Mode
+		if mode == "" {
+			mode = store.ModeChat
+		}
+		mode = store.NormalizeAgentMode(mode)
+		if mode == "" {
+			mode = store.ModeChat
+		}
 		turn := &store.Turn{
 			ID:              in.TurnID,
 			SessionID:       in.SessionID,
@@ -307,6 +419,7 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 			Status:          store.TurnRunning,
 			Provider:        in.Provider,
 			Model:           in.Model,
+			Mode:            mode,
 			ModelConfig:     normalizeJSON(in.ModelConfig),
 			CreatedAt:       now,
 			UpdatedAt:       now,
@@ -324,8 +437,8 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 			CreatedAt:       now,
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO turns(id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
-			turn.ID, turn.SessionID, turn.ClientMessageID, turn.Status, turn.Provider, turn.Model, string(turn.ModelConfig), turn.Error, unixMS(now), unixMS(now),
+			`INSERT INTO turns(id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+			turn.ID, turn.SessionID, turn.ClientMessageID, turn.Status, turn.Provider, turn.Model, turn.Mode, string(turn.ModelConfig), turn.Error, unixMS(now), unixMS(now),
 		); err != nil {
 			return err
 		}
@@ -375,6 +488,14 @@ func (s *Store) QueueInput(ctx context.Context, in store.QueueInputInput) (*stor
 		}
 
 		now := time.Now()
+		mode := in.Mode
+		if mode == "" {
+			mode = store.ModeChat
+		}
+		mode = store.NormalizeAgentMode(mode)
+		if mode == "" {
+			mode = store.ModeChat
+		}
 		input := &store.QueuedInput{
 			SessionID:       in.SessionID,
 			ClientMessageID: in.ClientMessageID,
@@ -382,13 +503,14 @@ func (s *Store) QueueInput(ctx context.Context, in store.QueueInputInput) (*stor
 			Status:          store.QueuedInputQueued,
 			Provider:        in.Provider,
 			Model:           in.Model,
+			Mode:            mode,
 			ModelConfig:     normalizeJSON(in.ModelConfig),
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO queued_inputs(session_id,client_message_id,text,status,provider,model,model_config,turn_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
-			input.SessionID, input.ClientMessageID, input.Text, input.Status, input.Provider, input.Model, string(input.ModelConfig), input.TurnID, unixMS(now), unixMS(now),
+			`INSERT INTO queued_inputs(session_id,client_message_id,text,status,provider,model,mode,model_config,turn_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+			input.SessionID, input.ClientMessageID, input.Text, input.Status, input.Provider, input.Model, input.Mode, string(input.ModelConfig), input.TurnID, unixMS(now), unixMS(now),
 		); err != nil {
 			return err
 		}
@@ -423,7 +545,7 @@ func (s *Store) ListQueuedInputs(ctx context.Context, sessionID string) ([]*stor
 		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx,
-		`SELECT session_id,client_message_id,text,status,provider,model,model_config,turn_id,created_at,updated_at
+		`SELECT session_id,client_message_id,text,status,provider,model,mode,model_config,turn_id,created_at,updated_at
 		FROM queued_inputs
 		WHERE session_id=? AND status IN (?,?)
 		ORDER BY created_at ASC, rowid ASC`,
@@ -535,6 +657,7 @@ func (s *Store) PromoteNextQueuedInput(ctx context.Context, in store.PromoteQueu
 					Status:          store.TurnRunning,
 					Provider:        input.Provider,
 					Model:           input.Model,
+					Mode:            input.Mode,
 					ModelConfig:     normalizeJSON(input.ModelConfig),
 					CreatedAt:       now,
 					UpdatedAt:       now,
@@ -552,8 +675,8 @@ func (s *Store) PromoteNextQueuedInput(ctx context.Context, in store.PromoteQueu
 					CreatedAt:       now,
 				}
 				if _, err := tx.ExecContext(ctx,
-					`INSERT INTO turns(id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
-					turn.ID, turn.SessionID, turn.ClientMessageID, turn.Status, turn.Provider, turn.Model, string(turn.ModelConfig), turn.Error, unixMS(now), unixMS(now),
+					`INSERT INTO turns(id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+					turn.ID, turn.SessionID, turn.ClientMessageID, turn.Status, turn.Provider, turn.Model, turn.Mode, string(turn.ModelConfig), turn.Error, unixMS(now), unixMS(now),
 				); err != nil {
 					return err
 				}
@@ -632,9 +755,15 @@ func (s *Store) FinishTurn(ctx context.Context, in store.FinishTurnInput) (*stor
 		}
 
 		now := time.Now()
+		mode := turn.Mode
+		if in.Mode != "" {
+			if normalized := store.NormalizeAgentMode(in.Mode); normalized != "" {
+				mode = normalized
+			}
+		}
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE turns SET status=?, error=?, updated_at=? WHERE id=?`,
-			in.Status, in.Error, unixMS(now), in.TurnID,
+			`UPDATE turns SET status=?, mode=?, error=?, updated_at=? WHERE id=?`,
+			in.Status, mode, in.Error, unixMS(now), in.TurnID,
 		); err != nil {
 			return err
 		}
@@ -654,28 +783,26 @@ func (s *Store) FinishTurn(ctx context.Context, in store.FinishTurnInput) (*stor
 		case store.TurnCancelled:
 			ev.Kind = event.TurnCancelled
 		}
+		maxIndex, firstOutputID, err := turnOutputStatsTx(ctx, tx, turn.SessionID, turn.ID)
+		if err != nil {
+			return err
+		}
 		segments := store.FinishAssistantOutputSegments(in)
-		for i, segment := range segments {
-			msg := &store.Message{
-				ID:          assistantMessageID(turn.ID, i),
-				SessionID:   turn.SessionID,
-				TurnID:      turn.ID,
-				Role:        segment.Role,
-				Kind:        segment.Kind,
-				Text:        segment.Text,
-				Parts:       store.CloneContentParts(segment.Parts),
-				TurnIndex:   i + 1,
-				Interrupted: in.Interrupted && i == len(segments)-1,
-				CreatedAt:   now,
-			}
-			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO messages(id,session_id,turn_id,role,kind,text,parts,turn_index,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-				msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Kind, msg.Text, encodeParts(msg.Parts), msg.TurnIndex, msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
-			); err != nil {
-				return err
+		if maxIndex > 0 && len(in.AssistantParts) == 0 {
+			segments = nil
+		}
+		messages, err := appendTurnOutputSegmentsTx(ctx, tx, turn, maxIndex, segments, in.Interrupted, now)
+		if err != nil {
+			return err
+		}
+		if firstOutputID != "" {
+			ev.AssistantMessageID = firstOutputID
+		}
+		for i, msg := range messages {
+			if ev.AssistantMessageID == "" && i == 0 {
+				ev.AssistantMessageID = msg.ID
 			}
 			if i == 0 {
-				ev.AssistantMessageID = msg.ID
 				res.AssistantMessage = msg
 			}
 			res.AssistantMessages = append(res.AssistantMessages, msg)
@@ -688,6 +815,42 @@ func (s *Store) FinishTurn(ctx context.Context, in store.FinishTurnInput) (*stor
 		}
 		res.FinalEvent = &ev
 		out = res
+		return nil
+	})
+	return out, err
+}
+
+func (s *Store) AppendTurnOutput(ctx context.Context, in store.AppendTurnOutputInput) (*store.AppendTurnOutputResult, error) {
+	var out *store.AppendTurnOutputResult
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		turn, err := getTurnTx(ctx, tx, in.TurnID)
+		if err != nil {
+			return err
+		}
+		if turn.Status != store.TurnRunning {
+			return store.ErrNotFound
+		}
+		segments := store.AssistantOutputSegments(in.Parts)
+		if len(segments) == 0 {
+			out = &store.AppendTurnOutputResult{}
+			return nil
+		}
+		now := time.Now()
+		maxIndex, _, err := turnOutputStatsTx(ctx, tx, turn.SessionID, turn.ID)
+		if err != nil {
+			return err
+		}
+		messages, err := appendTurnOutputSegmentsTx(ctx, tx, turn, maxIndex, segments, false, now)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE turns SET updated_at=? WHERE id=?`, unixMS(now), turn.ID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(now), turn.SessionID); err != nil {
+			return err
+		}
+		out = &store.AppendTurnOutputResult{Messages: messages}
 		return nil
 	})
 	return out, err
@@ -877,7 +1040,7 @@ func (s *Store) RunningTurns(ctx context.Context) ([]*store.Turn, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at
+		`SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at
 		FROM turns WHERE status=?`, store.TurnRunning)
 	if err != nil {
 		return nil, err
@@ -992,7 +1155,7 @@ func (s *Store) ListTurnsPage(ctx context.Context, sessionID string, beforeTurnI
 		return nil, err
 	}
 
-	query := `SELECT id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at FROM turns WHERE session_id=? ORDER BY created_at ASC, rowid ASC`
+	query := `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at FROM turns WHERE session_id=? ORDER BY created_at ASC, rowid ASC`
 	args := []any{sessionID}
 	if beforeTurnID != "" {
 		var beforeCreated int64
@@ -1007,7 +1170,7 @@ func (s *Store) ListTurnsPage(ctx context.Context, sessionID string, beforeTurnI
 		if err != nil {
 			return nil, err
 		}
-		query = `SELECT id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at
+		query = `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at
 			FROM turns
 			WHERE session_id=? AND (created_at < ? OR (created_at=? AND rowid < ?))
 			ORDER BY created_at ASC, rowid ASC`
@@ -1017,12 +1180,12 @@ func (s *Store) ListTurnsPage(ctx context.Context, sessionID string, beforeTurnI
 	if fetchLimit > 0 {
 		fetchLimit++
 		if beforeTurnID == "" {
-			query = `SELECT id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at FROM (
+			query = `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at FROM (
 				SELECT rowid AS rid, * FROM turns WHERE session_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?
 			) ORDER BY created_at ASC, rid ASC`
 			args = []any{sessionID, fetchLimit}
 		} else {
-			query = `SELECT id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at FROM (
+			query = `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at FROM (
 				SELECT rowid AS rid, * FROM turns
 				WHERE session_id=? AND (created_at < ? OR (created_at=? AND rowid < ?))
 				ORDER BY created_at DESC, rowid DESC LIMIT ?
@@ -1075,7 +1238,7 @@ func (s *Store) GetConversationTurn(ctx context.Context, sessionID string, turnI
 		return nil, err
 	}
 	row := tx.QueryRowContext(ctx,
-		`SELECT id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at FROM turns WHERE session_id=? AND id=?`,
+		`SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at FROM turns WHERE session_id=? AND id=?`,
 		sessionID, turnID,
 	)
 	turn, err := scanTurn(row)
@@ -1150,15 +1313,21 @@ func (s *Store) LatestSeq(ctx context.Context, sessionID string) (int64, error) 
 func (s *Store) getSessionDB(ctx context.Context, id string) (*store.Session, error) {
 	var sess store.Session
 	var created, updated, lastActivity int64
+	var workspaceDirs string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id,title,provider,model,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
+		`SELECT id,title,provider,model,active_mode,mode_lease,workspace_dirs,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ActiveMode, &sess.ModeLease, &workspaceDirs, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
+	sess.ActiveMode = store.NormalizeAgentMode(sess.ActiveMode)
+	if sess.ActiveMode == "" {
+		sess.ActiveMode = store.ModeChat
+	}
+	sess.WorkspaceDirs = store.NormalizeWorkspaceDirs(decodeStringSlice(workspaceDirs))
 	sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = timeFromMS(created), timeFromMS(updated), timeFromMS(lastActivity)
 	return &sess, nil
 }
@@ -1180,22 +1349,28 @@ func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 func getSessionTx(ctx context.Context, tx *sql.Tx, id string) (*store.Session, error) {
 	var sess store.Session
 	var created, updated, lastActivity int64
+	var workspaceDirs string
 	err := tx.QueryRowContext(ctx,
-		`SELECT id,title,provider,model,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
+		`SELECT id,title,provider,model,active_mode,mode_lease,workspace_dirs,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ActiveMode, &sess.ModeLease, &workspaceDirs, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
+	sess.ActiveMode = store.NormalizeAgentMode(sess.ActiveMode)
+	if sess.ActiveMode == "" {
+		sess.ActiveMode = store.ModeChat
+	}
+	sess.WorkspaceDirs = store.NormalizeWorkspaceDirs(decodeStringSlice(workspaceDirs))
 	sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = timeFromMS(created), timeFromMS(updated), timeFromMS(lastActivity)
 	return &sess, nil
 }
 
 func getTurnTx(ctx context.Context, tx *sql.Tx, id string) (*store.Turn, error) {
 	row := tx.QueryRowContext(ctx,
-		`SELECT id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at FROM turns WHERE id=?`, id,
+		`SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at FROM turns WHERE id=?`, id,
 	)
 	turn, err := scanTurn(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1209,7 +1384,7 @@ func getTurnTx(ctx context.Context, tx *sql.Tx, id string) (*store.Turn, error) 
 
 func getTurnByClientMessageIDTx(ctx context.Context, tx *sql.Tx, sessionID, clientMessageID string) (*store.Turn, error) {
 	row := tx.QueryRowContext(ctx,
-		`SELECT id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at
+		`SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at
 		FROM turns WHERE session_id=? AND client_message_id=?`,
 		sessionID, clientMessageID,
 	)
@@ -1225,7 +1400,7 @@ func getTurnByClientMessageIDTx(ctx context.Context, tx *sql.Tx, sessionID, clie
 
 func runningTurnTx(ctx context.Context, tx *sql.Tx, sessionID string) (*store.Turn, error) {
 	row := tx.QueryRowContext(ctx,
-		`SELECT id,session_id,client_message_id,status,provider,model,model_config,error,created_at,updated_at
+		`SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at
 		FROM turns WHERE session_id=? AND status=?`,
 		sessionID, store.TurnRunning,
 	)
@@ -1254,7 +1429,7 @@ func getUserMessageByClientMessageIDTx(ctx context.Context, tx *sql.Tx, sessionI
 
 func getQueuedInputTx(ctx context.Context, tx *sql.Tx, sessionID, clientMessageID string) (*store.QueuedInput, error) {
 	row := tx.QueryRowContext(ctx,
-		`SELECT session_id,client_message_id,text,status,provider,model,model_config,turn_id,created_at,updated_at
+		`SELECT session_id,client_message_id,text,status,provider,model,mode,model_config,turn_id,created_at,updated_at
 		FROM queued_inputs WHERE session_id=? AND client_message_id=?`,
 		sessionID, clientMessageID,
 	)
@@ -1267,7 +1442,7 @@ func getQueuedInputTx(ctx context.Context, tx *sql.Tx, sessionID, clientMessageI
 
 func firstQueuedInputTx(ctx context.Context, tx *sql.Tx, sessionID string) (*store.QueuedInput, error) {
 	row := tx.QueryRowContext(ctx,
-		`SELECT session_id,client_message_id,text,status,provider,model,model_config,turn_id,created_at,updated_at
+		`SELECT session_id,client_message_id,text,status,provider,model,mode,model_config,turn_id,created_at,updated_at
 		FROM queued_inputs
 		WHERE session_id=? AND status IN (?,?,?)
 		ORDER BY created_at ASC, rowid ASC
@@ -1310,6 +1485,7 @@ func conversationTurnFromSQL(turn *store.Turn, messages []*store.Message) *store
 		Status:          turn.Status,
 		Provider:        turn.Provider,
 		Model:           turn.Model,
+		Mode:            turn.Mode,
 		Error:           turn.Error,
 		CreatedAt:       turn.CreatedAt,
 		UpdatedAt:       turn.UpdatedAt,
@@ -1364,6 +1540,7 @@ func scanTurn(row messageScanner) (*store.Turn, error) {
 		&turn.Status,
 		&turn.Provider,
 		&turn.Model,
+		&turn.Mode,
 		&modelConfig,
 		&turn.Error,
 		&created,
@@ -1373,6 +1550,10 @@ func scanTurn(row messageScanner) (*store.Turn, error) {
 		return nil, err
 	}
 	turn.ModelConfig = normalizeJSON(json.RawMessage(modelConfig))
+	turn.Mode = store.NormalizeAgentMode(turn.Mode)
+	if turn.Mode == "" {
+		turn.Mode = store.ModeChat
+	}
 	turn.CreatedAt, turn.UpdatedAt = timeFromMS(created), timeFromMS(updated)
 	return &turn, nil
 }
@@ -1415,6 +1596,7 @@ func scanQueuedInput(row messageScanner) (*store.QueuedInput, error) {
 		&input.Status,
 		&input.Provider,
 		&input.Model,
+		&input.Mode,
 		&modelConfig,
 		&input.TurnID,
 		&created,
@@ -1424,6 +1606,10 @@ func scanQueuedInput(row messageScanner) (*store.QueuedInput, error) {
 		return nil, err
 	}
 	input.ModelConfig = normalizeJSON(json.RawMessage(modelConfig))
+	input.Mode = store.NormalizeAgentMode(input.Mode)
+	if input.Mode == "" {
+		input.Mode = store.ModeChat
+	}
 	input.CreatedAt, input.UpdatedAt = timeFromMS(created), timeFromMS(updated)
 	return &input, nil
 }
@@ -1503,6 +1689,53 @@ func assistantMessageID(turnID string, index int) string {
 	return fmt.Sprintf("msg_%s_%03d", turnID, index+1)
 }
 
+func turnOutputStatsTx(ctx context.Context, tx *sql.Tx, sessionID, turnID string) (int, string, error) {
+	var maxIndex int
+	err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(turn_index),0) FROM messages WHERE session_id=? AND turn_id=? AND turn_index>0`,
+		sessionID, turnID,
+	).Scan(&maxIndex)
+	if err != nil {
+		return 0, "", err
+	}
+	var firstID string
+	err = tx.QueryRowContext(ctx,
+		`SELECT id FROM messages WHERE session_id=? AND turn_id=? AND turn_index>0 ORDER BY turn_index ASC LIMIT 1`,
+		sessionID, turnID,
+	).Scan(&firstID)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = nil
+	}
+	return maxIndex, firstID, err
+}
+
+func appendTurnOutputSegmentsTx(ctx context.Context, tx *sql.Tx, turn *store.Turn, maxIndex int, segments []store.AssistantOutputSegment, interrupted bool, now time.Time) ([]*store.Message, error) {
+	out := make([]*store.Message, 0, len(segments))
+	for i, segment := range segments {
+		turnIndex := maxIndex + i + 1
+		msg := &store.Message{
+			ID:          assistantMessageID(turn.ID, turnIndex-1),
+			SessionID:   turn.SessionID,
+			TurnID:      turn.ID,
+			Role:        segment.Role,
+			Kind:        segment.Kind,
+			Text:        segment.Text,
+			Parts:       store.CloneContentParts(segment.Parts),
+			TurnIndex:   turnIndex,
+			Interrupted: interrupted && i == len(segments)-1,
+			CreatedAt:   now,
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO messages(id,session_id,turn_id,role,kind,text,parts,turn_index,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+			msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Kind, msg.Text, encodeParts(msg.Parts), msg.TurnIndex, msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, msg)
+	}
+	return out, nil
+}
+
 func encodeParts(parts []store.ContentPart) string {
 	normalized := store.NormalizeContentParts(parts)
 	if len(normalized) == 0 {
@@ -1521,6 +1754,25 @@ func decodeParts(raw string) []store.ContentPart {
 		_ = json.Unmarshal([]byte(raw), &parts)
 	}
 	return store.NormalizeContentParts(parts)
+}
+
+func encodeStringSlice(values []string) string {
+	if len(values) == 0 {
+		return "[]"
+	}
+	data, err := json.Marshal(values)
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
+}
+
+func decodeStringSlice(raw string) []string {
+	var out []string
+	if raw != "" {
+		_ = json.Unmarshal([]byte(raw), &out)
+	}
+	return out
 }
 
 func normalizeJSON(raw json.RawMessage) json.RawMessage {

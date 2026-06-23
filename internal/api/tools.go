@@ -8,12 +8,14 @@ import (
 	"github.com/teatak/cart/v3"
 	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/provider"
+	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
 type builtinToolView struct {
 	ID          string          `json:"id"`
 	Description string          `json:"description"`
+	Capability  store.AgentMode `json:"capability"`
 	InputSchema json.RawMessage `json:"inputSchema,omitempty"`
 }
 
@@ -23,7 +25,8 @@ type webToolsConfig interface {
 }
 
 func (s *Server) listBuiltinTools(c *cart.Context) error {
-	c.JSON(http.StatusOK, map[string]any{"tools": viewBuiltinTools(tool.BuiltinDefinitions())})
+	defs := append([]provider.ToolDef{tool.RequestCapabilityDefinition()}, tool.BuiltinDefinitions()...)
+	c.JSON(http.StatusOK, map[string]any{"tools": viewBuiltinTools(defs)})
 	return nil
 }
 
@@ -69,9 +72,14 @@ func (s *Server) webToolsConfig(c *cart.Context) (webToolsConfig, bool) {
 func viewBuiltinTools(defs []provider.ToolDef) []builtinToolView {
 	views := make([]builtinToolView, 0, len(defs))
 	for _, def := range defs {
+		capability := store.NormalizeAgentMode(def.Capability)
+		if capability == "" {
+			capability = store.ModeWorkspace
+		}
 		views = append(views, builtinToolView{
 			ID:          def.Name,
 			Description: def.Description,
+			Capability:  capability,
 			InputSchema: def.InputSchema,
 		})
 	}

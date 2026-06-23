@@ -11,6 +11,7 @@ import (
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/tool"
 )
 
 func TestBuildUsesCoreAndUserPrompt(t *testing.T) {
@@ -31,7 +32,7 @@ func TestBuildUsesCoreAndUserPrompt(t *testing.T) {
 	}
 	b := New(ms, prompt.NewLoader(home))
 
-	req, err := b.Build(ctx, "s1", "m")
+	req, err := b.Build(ctx, "s1", "m", string(store.ModeChat))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +43,7 @@ func TestBuildUsesCoreAndUserPrompt(t *testing.T) {
 	if err := ms.SetSettings(ctx, map[string]string{"system_prompt": "你是布丁"}); err != nil {
 		t.Fatal(err)
 	}
-	req, err = b.Build(ctx, "s1", "m")
+	req, err = b.Build(ctx, "s1", "m", string(store.ModeChat))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +78,7 @@ func TestBuildStripsThoughtParts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req, err := New(ms, nil).Build(ctx, "s1", "m")
+	req, err := New(ms, nil).Build(ctx, "s1", "m", string(store.ModeChat))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +118,7 @@ func TestBuildKeepsToolParts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req, err := New(ms, nil).Build(ctx, "s1", "m")
+	req, err := New(ms, nil).Build(ctx, "s1", "m", string(store.ModeChat))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,5 +131,48 @@ func TestBuildKeepsToolParts(t *testing.T) {
 	}
 	if parts[1].CallID != "call_1" || parts[1].Name != "builtin_time_get_current" || !parts[1].Ok || parts[1].Content == "" {
 		t.Fatalf("tool result not preserved: %+v", parts[1])
+	}
+}
+
+func TestBuildFiltersToolPartsOutsideMode(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID: "s1", TurnID: "t1", UserMessageID: "m1",
+		ClientMessageID: "c1", UserText: "weather",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.FinishTurn(ctx, store.FinishTurnInput{
+		TurnID: "t1",
+		Status: store.TurnCompleted,
+		AssistantParts: []store.ContentPart{
+			{Type: store.ContentPartToolUse, CallID: "call_1", Name: tool.WebSearch, Args: []byte(`{"query":"北京天气"}`)},
+			{Type: store.ContentPartToolResult, CallID: "call_1", Name: tool.WebSearch, Ok: true, Content: `{"answer":"sunny"}`},
+			{Type: store.ContentPartText, Text: "sunny"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	chatReq, err := New(ms, nil).Build(ctx, "s1", "m", string(store.ModeChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	chatParts := chatReq.Messages[1].Parts
+	if len(chatParts) != 1 || chatParts[0].Type != provider.PartText || chatParts[0].Text != "sunny" {
+		t.Fatalf("chat context should hide research tool history: %+v", chatParts)
+	}
+
+	researchReq, err := New(ms, nil).Build(ctx, "s1", "m", string(store.ModeResearch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	researchParts := researchReq.Messages[1].Parts
+	if len(researchParts) != 3 || researchParts[0].Type != provider.PartToolUse || researchParts[1].Type != provider.PartToolResult || researchParts[2].Type != provider.PartText {
+		t.Fatalf("research context should keep research tool history: %+v", researchParts)
 	}
 }

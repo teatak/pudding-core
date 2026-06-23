@@ -27,6 +27,18 @@ export type AssistantOverlay = {
 export type AssistantOverlayPart =
   | { type: "thought"; text: string }
   | {
+      type: "approval";
+      approvalID: string;
+      approvalKind: string;
+      callID?: string;
+      payload?: unknown;
+      reason?: string;
+      risk?: string;
+      sessionID: string;
+      status?: "approved" | "denied" | "cancelled" | "expired";
+      title?: string;
+    }
+  | {
       type: "tool";
       callID: string;
       name?: string;
@@ -44,6 +56,7 @@ export type TurnPhase =
   | "thinking"
   | "streaming_tool_args"
   | "executing_tool"
+  | "awaiting_approval"
   | "awaiting_followup"
   | "error"
   | "cancelled";
@@ -64,6 +77,7 @@ const activeTurnPhases = new Set<TurnPhase>([
   "thinking",
   "streaming_tool_args",
   "executing_tool",
+  "awaiting_approval",
   "awaiting_followup",
 ]);
 
@@ -188,6 +202,39 @@ function upsertToolPart(
     return [...parts, next];
   }
   return parts.map((part, i) => (i === index ? next : part));
+}
+
+function upsertApprovalPart(
+  parts: AssistantOverlayPart[],
+  event: Extract<SessionEvent, { kind: "approval.requested" }>,
+) {
+  const index = parts.findIndex((part) => part.type === "approval" && part.approvalID === event.approvalID);
+  const next: AssistantOverlayPart = {
+    type: "approval",
+    approvalID: event.approvalID,
+    approvalKind: event.approvalKind,
+    callID: event.callID,
+    payload: event.payload,
+    reason: event.reason,
+    risk: event.risk,
+    sessionID: event.sessionID,
+    title: event.title,
+  };
+  if (index < 0) {
+    return [...parts, next];
+  }
+  return parts.map((part, i) => (i === index ? next : part));
+}
+
+function resolveApprovalPart(
+  parts: AssistantOverlayPart[],
+  event: Extract<SessionEvent, { kind: "approval.resolved" }>,
+) {
+  return parts.map((part) =>
+    part.type === "approval" && part.approvalID === event.approvalID
+      ? { ...part, status: event.status }
+      : part,
+  );
 }
 
 export const useOverlayStore = create<OverlayState>((set) => ({
@@ -368,6 +415,54 @@ export const useOverlayStore = create<OverlayState>((set) => ({
           },
           runningTurns: nextRunningTurns,
           turnPhases: nextTurnPhases,
+        };
+      }
+      if (event.kind === "approval.requested") {
+        const current = overlayWithDefaults(state.assistants[event.turnID], event.turnID, event.sessionID);
+        const currentPhase = state.turnPhases[event.sessionID];
+        return {
+          assistants: {
+            ...state.assistants,
+            [event.turnID]: {
+              ...current,
+              parts: upsertApprovalPart(current.parts, event),
+              status: "streaming",
+              clientMessageID:
+                current.clientMessageID || (currentPhase?.turnID === event.turnID ? currentPhase.clientMessageID : undefined),
+              revealed: false,
+            },
+          },
+          runningTurns: { ...state.runningTurns, [event.sessionID]: event.turnID },
+          turnPhases: {
+            ...state.turnPhases,
+            [event.sessionID]: makePhase({
+              phase: "awaiting_approval",
+              sessionID: event.sessionID,
+              turnID: event.turnID,
+            }),
+          },
+        };
+      }
+      if (event.kind === "approval.resolved") {
+        const current = overlayWithDefaults(state.assistants[event.turnID], event.turnID, event.sessionID);
+        return {
+          assistants: {
+            ...state.assistants,
+            [event.turnID]: {
+              ...current,
+              parts: resolveApprovalPart(current.parts, event),
+              status: "streaming",
+              revealed: false,
+            },
+          },
+          turnPhases: {
+            ...state.turnPhases,
+            [event.sessionID]: makePhase({
+              phase: event.status === "approved" ? "awaiting_followup" : "error",
+              sessionID: event.sessionID,
+              turnID: event.turnID,
+            }),
+          },
         };
       }
       const status =

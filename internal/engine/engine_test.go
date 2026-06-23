@@ -303,6 +303,7 @@ func TestSubmitRunsToolLoop(t *testing.T) {
 			Name:        tool.TimeGetCurrent,
 			Description: "Get time",
 			InputSchema: json.RawMessage(`{"type":"object"}`),
+			Capability:  store.ModeChat,
 		}},
 		result: tool.Result{Ok: true, Content: `{"iso":"2026-06-21T12:00:00+08:00"}`, SummaryKind: tool.SummaryReturnedFields, SummaryCount: 1},
 	}
@@ -331,7 +332,7 @@ func TestSubmitRunsToolLoop(t *testing.T) {
 	if len(client.requests) != 2 {
 		t.Fatalf("want 2 provider calls, got %d", len(client.requests))
 	}
-	if len(client.requests[0].Tools) != 1 || client.requests[0].Tools[0].Name != tool.TimeGetCurrent {
+	if !hasToolDef(client.requests[0].Tools, tool.TimeGetCurrent) {
 		t.Fatalf("tool definitions not injected: %+v", client.requests[0].Tools)
 	}
 	last := client.requests[1].Messages[len(client.requests[1].Messages)-1]
@@ -358,6 +359,269 @@ func TestSubmitRunsToolLoop(t *testing.T) {
 	if len(parts) != 1 || parts[0].Type != store.ContentPartToolResult || parts[0].Name != tool.TimeGetCurrent || !parts[0].Ok || parts[0].Content == "" || parts[0].SummaryKind != tool.SummaryReturnedFields || parts[0].SummaryCount != 1 {
 		t.Fatalf("tool_result part wrong: %+v", parts)
 	}
+}
+
+func TestSubmitBlocksToolOutsideCurrentMode(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	client := &unauthorizedWebClient{}
+	runner := &recordingToolRunner{
+		defs:   tool.BuiltinDefinitions(),
+		result: tool.Result{Ok: true, Content: `{"answer":"should not run"}`},
+	}
+	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithTools(runner))
+	ctx := context.Background()
+	sid := "sess_tool_gate"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "gate", Provider: "capture", Model: "tool-model"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "capture", Protocol: "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID:           "tool-model",
+			Capabilities: &store.ModelCaps{Tools: true},
+			Limits:       &store.ModelLimits{MaxToolLoops: 3},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "再查一次天气"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+
+	if len(client.requests) != 2 {
+		t.Fatalf("want 2 provider calls, got %d", len(client.requests))
+	}
+	if hasToolDef(client.requests[0].Tools, tool.WebSearch) {
+		t.Fatalf("chat request must not expose web search: %+v", client.requests[0].Tools)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("unauthorized tool should not execute: %+v", runner.calls)
+	}
+	msgs, err := ms.ListMessages(ctx, sid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 4 || msgs[2].Kind != store.MessageKindToolResult {
+		t.Fatalf("unexpected messages: %+v", msgs)
+	}
+	parts := msgs[2].Parts
+	if len(parts) != 1 || parts[0].Type != store.ContentPartToolResult || parts[0].Name != tool.WebSearch || parts[0].Ok {
+		t.Fatalf("blocked tool result wrong: %+v", parts)
+	}
+	if !strings.Contains(parts[0].Content, "capability_required") {
+		t.Fatalf("blocked tool result should explain capability gate: %+v", parts[0])
+	}
+	turn, err := ms.GetConversationTurn(ctx, sid, msgs[0].TurnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn.Mode != store.ModeChat {
+		t.Fatalf("blocked tool must not upgrade mode: %+v", turn.Mode)
+	}
+}
+
+func TestCapabilityApprovalUpgradesTurnTools(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	client := &capabilityClient{}
+	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions()}
+	eng := New(ms, hub, mapResolver{"cap": client}, ms, WithTools(runner))
+	ctx := context.Background()
+	sid := "sess_capability"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "cap", Provider: "cap", Model: "cap-model"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "cap", Protocol: "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID:           "cap-model",
+			Capabilities: &store.ModelCaps{Tools: true},
+			Limits:       &store.ModelLimits{MaxToolLoops: 3},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sub, unsub := hub.Subscribe(sid)
+	defer unsub()
+
+	res, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "查一下最新资料"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var approval event.Event
+	deadline := time.After(time.Second)
+	for approval.Kind != event.ApprovalRequested {
+		select {
+		case ev := <-sub:
+			if ev.Kind == event.ApprovalRequested {
+				approval = ev
+			}
+		case <-deadline:
+			t.Fatal("approval request not emitted")
+		}
+	}
+	if approval.ApprovalID == "" || approval.ApprovalKind != "capability" {
+		t.Fatalf("bad approval event: %+v", approval)
+	}
+	pending := eng.PendingApprovals(sid)
+	if len(pending) != 1 || pending[0].ID != approval.ApprovalID || pending[0].TargetMode != store.ModeResearch {
+		t.Fatalf("pending approval not exposed: %+v", pending)
+	}
+	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeTurn, nil); err != nil {
+		t.Fatal(err)
+	}
+	if pending := eng.PendingApprovals(sid); len(pending) != 0 {
+		t.Fatalf("pending approval should be cleared: %+v", pending)
+	}
+	waitTurnDone(t, ms, sid)
+
+	if len(client.requests) != 2 {
+		t.Fatalf("want 2 provider calls, got %d", len(client.requests))
+	}
+	if !hasToolDef(client.requests[0].Tools, tool.RequestCapability) || !hasToolDef(client.requests[0].Tools, tool.TimeGetCurrent) || hasToolDef(client.requests[0].Tools, tool.WebSearch) {
+		t.Fatalf("chat tools wrong: %+v", client.requests[0].Tools)
+	}
+	if !hasToolDef(client.requests[1].Tools, tool.RequestCapability) || !hasToolDef(client.requests[1].Tools, tool.WebSearch) || !hasToolDef(client.requests[1].Tools, tool.WebFetch) {
+		t.Fatalf("research tools wrong: %+v", client.requests[1].Tools)
+	}
+	turn, err := ms.GetConversationTurn(ctx, sid, res.TurnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn.Mode != store.ModeResearch {
+		t.Fatalf("turn mode not upgraded: %+v", turn)
+	}
+}
+
+func TestWorkspaceApprovalRequiresAndStoresDirs(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	client := &workspaceCapabilityClient{}
+	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions()}
+	eng := New(ms, hub, mapResolver{"workspace": client}, ms, WithTools(runner))
+	ctx := context.Background()
+	sid := "sess_workspace"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "workspace", Provider: "workspace", Model: "workspace-model"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "workspace", Protocol: "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID:           "workspace-model",
+			Capabilities: &store.ModelCaps{Tools: true},
+			Limits:       &store.ModelLimits{MaxToolLoops: 3},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sub, unsub := hub.Subscribe(sid)
+	defer unsub()
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "写一个五子棋游戏"}); err != nil {
+		t.Fatal(err)
+	}
+	var approval event.Event
+	deadline := time.After(time.Second)
+	for approval.Kind != event.ApprovalRequested {
+		select {
+		case ev := <-sub:
+			if ev.Kind == event.ApprovalRequested {
+				approval = ev
+			}
+		case <-deadline:
+			t.Fatal("approval request not emitted")
+		}
+	}
+	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeSession, nil); !errors.Is(err, ErrWorkspaceDirsRequired) {
+		t.Fatalf("workspace approval without dirs should fail, got %v", err)
+	}
+	if len(eng.PendingApprovals(sid)) != 1 {
+		t.Fatal("approval should remain pending after missing dirs")
+	}
+	root := t.TempDir()
+	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeSession, []string{root}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+
+	sess, err := ms.GetSession(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess.ActiveMode != store.ModeWorkspace || sess.ModeLease != store.ModeLeaseSession {
+		t.Fatalf("session mode not upgraded: %+v", sess)
+	}
+	if !sameStrings(sess.WorkspaceDirs, []string{root}) {
+		t.Fatalf("workspace dirs not stored: %+v", sess.WorkspaceDirs)
+	}
+	if len(client.requests) != 2 || !hasToolDef(client.requests[1].Tools, tool.WorkspaceList) {
+		t.Fatalf("workspace tools not exposed after approval: %+v", client.requests)
+	}
+}
+
+func TestCompletedOutputPersistsBeforeTurnFinish(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	client := &capabilityAfterTextClient{}
+	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions()}
+	eng := New(ms, hub, mapResolver{"cap": client}, ms, WithTools(runner))
+	ctx := context.Background()
+	sid := "sess_incremental_output"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "cap", Provider: "cap", Model: "cap-model"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "cap", Protocol: "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID:           "cap-model",
+			Capabilities: &store.ModelCaps{Tools: true},
+			Limits:       &store.ModelLimits{MaxToolLoops: 3},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sub, unsub := hub.Subscribe(sid)
+	defer unsub()
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "查最新赛况"}); err != nil {
+		t.Fatal(err)
+	}
+	var approval event.Event
+	deadline := time.After(time.Second)
+	for approval.Kind != event.ApprovalRequested {
+		select {
+		case ev := <-sub:
+			if ev.Kind == event.ApprovalRequested {
+				approval = ev
+			}
+		case <-deadline:
+			t.Fatal("approval request not emitted")
+		}
+	}
+	if _, err := ms.RunningTurn(ctx, sid); err != nil {
+		t.Fatalf("turn should still be running: %v", err)
+	}
+	msgs, err := ms.ListMessages(ctx, sid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) < 3 {
+		t.Fatalf("completed output should be persisted while turn runs: %+v", msgs)
+	}
+	if msgs[1].Role != store.RoleAssistant || msgs[1].Kind != store.MessageKindText || msgs[1].Text != "需要查询最新信息。" {
+		t.Fatalf("assistant text not persisted: %+v", msgs)
+	}
+	if msgs[2].Role != store.RoleAssistant || msgs[2].Kind != store.MessageKindToolUse || msgs[2].Parts[0].Name != tool.RequestCapability {
+		t.Fatalf("tool use not persisted: %+v", msgs)
+	}
+
+	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeTurn, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
 }
 
 func TestSubmitIdempotent(t *testing.T) {
@@ -705,6 +969,107 @@ func (c *toolLoopClient) Stream(_ context.Context, req provider.Request) (<-chan
 	return out, nil
 }
 
+type unauthorizedWebClient struct {
+	requests []provider.Request
+}
+
+func (c *unauthorizedWebClient) Name() string { return "unauthorized-web" }
+
+func (c *unauthorizedWebClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	c.requests = append(c.requests, req)
+	out := make(chan provider.Chunk, 4)
+	if len(c.requests) == 1 {
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
+			Index:     0,
+			CallID:    "call_web",
+			Name:      tool.WebSearch,
+			ArgsDelta: `{"query":"北京天气"}`,
+		}}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	} else {
+		out <- provider.Chunk{Part: provider.PartText, Delta: "已被能力边界拦截"}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
+	}
+	close(out)
+	return out, nil
+}
+
+type capabilityClient struct {
+	requests []provider.Request
+}
+
+func (c *capabilityClient) Name() string { return "capability" }
+
+func (c *capabilityClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	c.requests = append(c.requests, req)
+	out := make(chan provider.Chunk, 4)
+	if len(c.requests) == 1 {
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
+			Index:     0,
+			CallID:    "call_cap",
+			Name:      tool.RequestCapability,
+			ArgsDelta: `{"targetMode":"research","reason":"需要联网搜索","intendedActions":["search web"],"risk":"external read"}`,
+		}}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	} else {
+		out <- provider.Chunk{Part: provider.PartText, Delta: "已完成"}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
+	}
+	close(out)
+	return out, nil
+}
+
+type capabilityAfterTextClient struct {
+	requests []provider.Request
+}
+
+func (c *capabilityAfterTextClient) Name() string { return "capability-after-text" }
+
+func (c *capabilityAfterTextClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	c.requests = append(c.requests, req)
+	out := make(chan provider.Chunk, 8)
+	if len(c.requests) == 1 {
+		out <- provider.Chunk{Part: provider.PartText, Delta: "需要查询最新信息。"}
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
+			Index:     0,
+			CallID:    "call_cap",
+			Name:      tool.RequestCapability,
+			ArgsDelta: `{"targetMode":"research","reason":"需要查询外部最新信息"}`,
+		}}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	} else {
+		out <- provider.Chunk{Part: provider.PartText, Delta: "已完成"}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
+	}
+	close(out)
+	return out, nil
+}
+
+type workspaceCapabilityClient struct {
+	requests []provider.Request
+}
+
+func (c *workspaceCapabilityClient) Name() string { return "workspace-capability" }
+
+func (c *workspaceCapabilityClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	c.requests = append(c.requests, req)
+	out := make(chan provider.Chunk, 4)
+	if len(c.requests) == 1 {
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
+			Index:     0,
+			CallID:    "call_workspace_cap",
+			Name:      tool.RequestCapability,
+			ArgsDelta: `{"targetMode":"workspace","reason":"需要在工作区创建文件并运行本地命令","needsWorkspaceDir":true,"suggestedDirName":"gomoku"}`,
+		}}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	} else {
+		out <- provider.Chunk{Part: provider.PartText, Delta: "已准备好工作区"}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
+	}
+	close(out)
+	return out, nil
+}
+
 type recordingToolRunner struct {
 	defs   []provider.ToolDef
 	result tool.Result
@@ -730,6 +1095,27 @@ func hasProviderPart(parts []provider.Part, typ provider.PartType) bool {
 		}
 	}
 	return false
+}
+
+func hasToolDef(defs []provider.ToolDef, name string) bool {
+	for _, def := range defs {
+		if def.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func findTurn(ms store.Store, sessionID, clientMessageID string) (*store.Turn, error) {

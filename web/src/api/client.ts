@@ -4,6 +4,7 @@ import {
   listModelsResponse,
   createProviderRequest,
   listMessagesResponse,
+  listPendingApprovalsResponse,
   listProvidersResponse,
   listQueuedInputsResponse,
   listSessionsResponse,
@@ -11,6 +12,7 @@ import {
   message,
   patchQueuedInputRequest,
   patchProviderRequest,
+  probeProviderModelsRequest,
   patchWebToolsRequest,
   providerProfile,
   queuedInput,
@@ -25,6 +27,7 @@ import {
   type ContentPart,
   type DailyUsageStat,
   type Message,
+  type PendingApproval,
   type ConversationTurn,
   type ProviderModel,
   type ProviderProfile,
@@ -56,6 +59,9 @@ const sessionPatchRequest = z.object({
   title: z.string().optional(),
   provider: z.string().optional(),
   model: z.string().optional(),
+  activeMode: z.enum(["chat", "research", "workspace"]).optional(),
+  modeLease: z.enum(["none", "session"]).optional(),
+  workspaceDirs: z.array(z.string()).optional(),
   pinned: z.boolean().optional(),
   pinnedOrder: z.number().optional(),
 });
@@ -214,8 +220,42 @@ export async function cancelTurn(token: string, sessionID: string): Promise<void
   });
 }
 
+export function listPendingApprovals(token: string, sessionID: string): Promise<{ approvals: PendingApproval[] }> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/approvals`, listPendingApprovalsResponse);
+}
+
+export async function approveApproval(
+  token: string,
+  sessionID: string,
+  approvalID: string,
+  scope: "turn" | "session" = "turn",
+  workspaceDirs: string[] = [],
+): Promise<void> {
+  await request(token, `/sessions/${encodeURIComponent(sessionID)}/approvals/${encodeURIComponent(approvalID)}/approve`, z.object({ status: z.string() }), {
+    method: "POST",
+    body: JSON.stringify({ scope, workspaceDirs }),
+  });
+}
+
+export async function denyApproval(token: string, sessionID: string, approvalID: string, reason = ""): Promise<void> {
+  await request(token, `/sessions/${encodeURIComponent(sessionID)}/approvals/${encodeURIComponent(approvalID)}/deny`, z.object({ status: z.string() }), {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+}
+
 export function listProviderModels(token: string, name: string): Promise<{ models: string[] }> {
   return request(token, `/providers/${encodeURIComponent(name)}/models`, listModelsResponse);
+}
+
+export function probeProviderModels(
+  token: string,
+  body: z.infer<typeof probeProviderModelsRequest>,
+): Promise<{ models: string[] }> {
+  return request(token, "/providers/models", listModelsResponse, {
+    method: "POST",
+    body: JSON.stringify(probeProviderModelsRequest.parse(body)),
+  });
 }
 
 export function getSettings(token: string): Promise<{ settings: Record<string, string> }> {
@@ -278,5 +318,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { BuiltinTool, ContentPart, DailyUsageStat, Message, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, WebToolsConfig };
+export type { BuiltinTool, ContentPart, DailyUsageStat, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, WebToolsConfig };
 export { createProviderRequest, patchProviderRequest };

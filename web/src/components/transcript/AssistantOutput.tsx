@@ -90,6 +90,7 @@ function LiveAssistantOutput({
   const text = overlay.text;
   const hasThoughtPart = overlay.parts.some((part) => part.type === "thought");
   const hasToolPart = overlay.parts.some((part) => part.type === "tool");
+  const hasApprovalPart = overlay.parts.some((part) => part.type === "approval");
   const activePhaseName: TurnPhaseState["phase"] | undefined =
     phase && isTurnPhaseActive(phase)
       ? phase.phase
@@ -104,6 +105,7 @@ function LiveAssistantOutput({
         : undefined;
   const phaseCarriedByPart =
     (activePhaseName === "thinking" && hasThoughtPart) ||
+    (activePhaseName === "awaiting_approval" && hasApprovalPart) ||
     ((activePhaseName === "streaming_tool_args" ||
       activePhaseName === "executing_tool" ||
       activePhaseName === "awaiting_followup") &&
@@ -186,6 +188,8 @@ function phaseLabel(phase: TurnPhaseState["phase"], t: (key: string) => string) 
       return t("transcript.toolReadingArgs");
     case "executing_tool":
       return t("transcript.toolRunning");
+    case "awaiting_approval":
+      return t("transcript.phaseAwaitingApproval");
     case "awaiting_followup":
       return t("transcript.phaseAwaitingFollowup");
     case "error":

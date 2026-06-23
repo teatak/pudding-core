@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -30,10 +31,14 @@ type Session struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
 	// Provider 是 provider profile 名;会话创建时必须显式写入。
-	Provider  string    `json:"provider"`
-	Model     string    `json:"model"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	Provider   string    `json:"provider"`
+	Model      string    `json:"model"`
+	ActiveMode AgentMode `json:"activeMode"`
+	ModeLease  ModeLease `json:"modeLease"`
+	// WorkspaceDirs 是用户授权给本 session 的工作区根目录集合。
+	WorkspaceDirs []string  `json:"workspaceDirs,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 	// LastActivityAt 只描述会话内容活动时间:用户提交 / assistant 收尾推进。
 	// 列表排序和"最近"时间显示使用它,避免 rename / 改模型把会话顶到最上面。
 	LastActivityAt time.Time `json:"lastActivityAt"`
@@ -45,13 +50,31 @@ type Session struct {
 }
 
 type SessionUpdate struct {
-	Title    *string `json:"title"`
-	Provider *string `json:"provider"`
-	Model    *string `json:"model"`
-	Pinned   *bool   `json:"pinned"`
+	Title         *string    `json:"title"`
+	Provider      *string    `json:"provider"`
+	Model         *string    `json:"model"`
+	ActiveMode    *AgentMode `json:"activeMode"`
+	ModeLease     *ModeLease `json:"modeLease"`
+	WorkspaceDirs *[]string  `json:"workspaceDirs"`
+	Pinned        *bool      `json:"pinned"`
 	// PinnedOrder 仅描述 pinned 组内手动排序,不改变最近会话排序。
 	PinnedOrder *int64 `json:"pinnedOrder"`
 }
+
+type AgentMode string
+
+const (
+	ModeChat      AgentMode = "chat"
+	ModeResearch  AgentMode = "research"
+	ModeWorkspace AgentMode = "workspace"
+)
+
+type ModeLease string
+
+const (
+	ModeLeaseNone    ModeLease = "none"
+	ModeLeaseSession ModeLease = "session"
+)
 
 // ProviderProfile 描述一个 LLM 端点实例。新的事实源是 config/profiles.yaml;
 // store 里保留 provider 配置契约是为了让 registry / API / 测试共用。
@@ -114,6 +137,20 @@ func NormalizeSessionProviderModel(s *Session) error {
 	if s.Provider == "" || s.Model == "" {
 		return ErrInvalidSession
 	}
+	if s.ActiveMode == "" {
+		s.ActiveMode = ModeChat
+	}
+	s.ActiveMode = NormalizeAgentMode(s.ActiveMode)
+	if s.ModeLease == "" {
+		s.ModeLease = ModeLeaseNone
+	}
+	if !ValidAgentMode(s.ActiveMode) || !ValidModeLease(s.ModeLease) {
+		return ErrInvalidSession
+	}
+	if s.ModeLease == ModeLeaseNone {
+		s.ActiveMode = ModeChat
+	}
+	s.WorkspaceDirs = NormalizeWorkspaceDirs(s.WorkspaceDirs)
 	return nil
 }
 
@@ -132,7 +169,85 @@ func NormalizeSessionUpdate(upd *SessionUpdate) error {
 		}
 		upd.Model = &model
 	}
+	if upd.ActiveMode != nil {
+		mode := NormalizeAgentMode(*upd.ActiveMode)
+		if !ValidAgentMode(mode) {
+			return ErrInvalidSession
+		}
+		upd.ActiveMode = &mode
+	}
+	if upd.ModeLease != nil {
+		lease := ModeLease(strings.TrimSpace(string(*upd.ModeLease)))
+		if !ValidModeLease(lease) {
+			return ErrInvalidSession
+		}
+		upd.ModeLease = &lease
+		if lease == ModeLeaseNone && upd.ActiveMode == nil {
+			mode := ModeChat
+			upd.ActiveMode = &mode
+		}
+	}
+	if upd.WorkspaceDirs != nil {
+		dirs := NormalizeWorkspaceDirs(*upd.WorkspaceDirs)
+		upd.WorkspaceDirs = &dirs
+	}
 	return nil
+}
+
+func NormalizeWorkspaceDirs(dirs []string) []string {
+	seen := make(map[string]bool, len(dirs))
+	out := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		dir = strings.TrimSpace(dir)
+		if dir == "" || !filepath.IsAbs(dir) {
+			continue
+		}
+		cleaned := filepath.Clean(dir)
+		if seen[cleaned] {
+			continue
+		}
+		seen[cleaned] = true
+		out = append(out, cleaned)
+	}
+	return out
+}
+
+func ValidAgentMode(mode AgentMode) bool {
+	return NormalizeAgentMode(mode) != ""
+}
+
+func NormalizeAgentMode(mode AgentMode) AgentMode {
+	switch AgentMode(strings.TrimSpace(strings.ToLower(string(mode)))) {
+	case "code", "operate", "local":
+		return ModeWorkspace
+	case "work":
+		return ModeResearch
+	case ModeWorkspace:
+		return ModeWorkspace
+	case ModeResearch:
+		return ModeResearch
+	case ModeChat:
+		return ModeChat
+	default:
+		return ""
+	}
+}
+
+func ValidModeLease(lease ModeLease) bool {
+	return lease == ModeLeaseNone || lease == ModeLeaseSession
+}
+
+func AgentModeRank(mode AgentMode) int {
+	switch NormalizeAgentMode(mode) {
+	case ModeWorkspace:
+		return 3
+	case ModeResearch:
+		return 2
+	case ModeChat:
+		fallthrough
+	default:
+		return 1
+	}
 }
 
 type ProviderModel struct {
@@ -349,16 +464,8 @@ type AssistantOutputSegment struct {
 	Parts []ContentPart
 }
 
-func FinishAssistantOutputSegments(in FinishTurnInput) []AssistantOutputSegment {
-	parts := NormalizeContentParts(in.AssistantParts)
-	if len(parts) == 0 && in.Status == TurnCompleted {
-		return []AssistantOutputSegment{{
-			Role:  RoleAssistant,
-			Kind:  MessageKindText,
-			Text:  "",
-			Parts: []ContentPart{},
-		}}
-	}
+func AssistantOutputSegments(parts []ContentPart) []AssistantOutputSegment {
+	parts = NormalizeContentParts(parts)
 	if len(parts) == 0 {
 		return nil
 	}
@@ -376,6 +483,22 @@ func FinishAssistantOutputSegments(in FinishTurnInput) []AssistantOutputSegment 
 		out = append(out, segment)
 	}
 	return out
+}
+
+func FinishAssistantOutputSegments(in FinishTurnInput) []AssistantOutputSegment {
+	parts := NormalizeContentParts(in.AssistantParts)
+	if len(parts) == 0 && in.Status == TurnCompleted {
+		return []AssistantOutputSegment{{
+			Role:  RoleAssistant,
+			Kind:  MessageKindText,
+			Text:  "",
+			Parts: []ContentPart{},
+		}}
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	return AssistantOutputSegments(parts)
 }
 
 func messageKindForPart(part ContentPartType) MessageKind {
@@ -414,6 +537,7 @@ type QueuedInput struct {
 	Status          QueuedInputStatus `json:"status"`
 	Provider        string            `json:"provider,omitempty"`
 	Model           string            `json:"model,omitempty"`
+	Mode            AgentMode         `json:"mode,omitempty"`
 	ModelConfig     json.RawMessage   `json:"modelConfig,omitempty"`
 	TurnID          string            `json:"turnID,omitempty"`
 	CreatedAt       time.Time         `json:"createdAt"`
@@ -426,6 +550,7 @@ type QueueInputInput struct {
 	Text            string
 	Provider        string
 	Model           string
+	Mode            AgentMode
 	ModelConfig     json.RawMessage
 }
 
@@ -468,6 +593,7 @@ type ConversationTurn struct {
 	Status          TurnStatus `json:"status"`
 	Provider        string     `json:"provider,omitempty"`
 	Model           string     `json:"model,omitempty"`
+	Mode            AgentMode  `json:"mode,omitempty"`
 	Error           string     `json:"error,omitempty"`
 	CreatedAt       time.Time  `json:"createdAt"`
 	UpdatedAt       time.Time  `json:"updatedAt"`
@@ -497,6 +623,7 @@ type Turn struct {
 	// 进行中 turn 稳定性用;用户改 profile 不影响已开始的 turn。
 	Provider    string          `json:"provider,omitempty"`
 	Model       string          `json:"model,omitempty"`
+	Mode        AgentMode       `json:"mode,omitempty"`
 	ModelConfig json.RawMessage `json:"modelConfig,omitempty"`
 	Error       string          `json:"error,omitempty"`
 	CreatedAt   time.Time       `json:"createdAt"`
@@ -512,6 +639,7 @@ type BeginTurnInput struct {
 	// Provider / Model 由 engine 在提交时刻解析后传入,随 turn 落库。
 	Provider    string
 	Model       string
+	Mode        AgentMode
 	ModelConfig json.RawMessage
 }
 
@@ -527,11 +655,21 @@ type BeginTurnResult struct {
 type FinishTurnInput struct {
 	TurnID string
 	Status TurnStatus // completed | failed | cancelled
+	Mode   AgentMode
 	// AssistantParts 为空时:completed 落一个空 assistant message 保持事件可定位;
 	// failed/cancelled 不落 assistant message。
 	AssistantParts []ContentPart
 	Interrupted    bool
 	Error          string
+}
+
+type AppendTurnOutputInput struct {
+	TurnID string
+	Parts  []ContentPart
+}
+
+type AppendTurnOutputResult struct {
+	Messages []*Message
 }
 
 type FinishTurnResult struct {
@@ -626,6 +764,9 @@ type Store interface {
 	UpdateQueuedInput(ctx context.Context, in UpdateQueuedInputInput) (*UpdateQueuedInputResult, error)
 	PromoteNextQueuedInput(ctx context.Context, in PromoteQueuedInputInput) (*PromoteQueuedInputResult, error)
 	QueuedSessions(ctx context.Context) ([]string, error)
+	// AppendTurnOutput 在 turn 仍 running 时追加已经完整的 assistant/tool
+	// output message;token delta 不走这里。
+	AppendTurnOutput(ctx context.Context, in AppendTurnOutputInput) (*AppendTurnOutputResult, error)
 	// FinishTurn:更新 turn 状态 + 落 assistant message(如有)+ 落 final 事件。
 	FinishTurn(ctx context.Context, in FinishTurnInput) (*FinishTurnResult, error)
 	// RecordUsage 把一次或一批 provider usage delta 累加进全局 UTC 小时桶。

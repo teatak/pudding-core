@@ -52,6 +52,19 @@ export type TurnPartVM =
   | { active?: boolean; key?: string; text: string; type: "thought" }
   | {
       active?: boolean;
+      approvalID: string;
+      approvalKind: string;
+      key?: string;
+      payload?: unknown;
+      reason?: string;
+      risk?: string;
+      sessionID: string;
+      status?: "approved" | "denied" | "cancelled" | "expired";
+      title?: string;
+      type: "approval";
+    }
+  | {
+      active?: boolean;
       args?: unknown;
       argsText?: string;
       dotPhase?: TurnPhaseState["phase"];

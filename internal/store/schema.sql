@@ -7,6 +7,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     title      TEXT    NOT NULL DEFAULT '',
     provider   TEXT    NOT NULL, -- provider profile 名;创建 session 时必须显式写入
     model      TEXT    NOT NULL,
+    active_mode TEXT   NOT NULL DEFAULT 'chat',
+    mode_lease  TEXT   NOT NULL DEFAULT 'none',
+    workspace_dirs TEXT NOT NULL DEFAULT '[]',
     pinned     INTEGER NOT NULL DEFAULT 0,
     pinned_order INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL, -- unix ms
@@ -21,6 +24,7 @@ CREATE TABLE IF NOT EXISTS turns (
     status            TEXT    NOT NULL CHECK (status IN ('running','completed','failed','cancelled')),
     provider          TEXT    NOT NULL DEFAULT '', -- BeginTurn 时刻快照
     model             TEXT    NOT NULL DEFAULT '',
+    mode              TEXT    NOT NULL DEFAULT 'chat',
     model_config      TEXT    NOT NULL DEFAULT '{}',
     error             TEXT    NOT NULL DEFAULT '',
     created_at        INTEGER NOT NULL,
@@ -40,6 +44,7 @@ CREATE TABLE IF NOT EXISTS queued_inputs (
     status            TEXT    NOT NULL CHECK (status IN ('queued','editing','cancelled','promoted')),
     provider          TEXT    NOT NULL DEFAULT '',
     model             TEXT    NOT NULL DEFAULT '',
+    mode              TEXT    NOT NULL DEFAULT 'chat',
     model_config      TEXT    NOT NULL DEFAULT '{}',
     turn_id           TEXT    NOT NULL DEFAULT '',
     created_at        INTEGER NOT NULL,

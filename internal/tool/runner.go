@@ -9,11 +9,12 @@ import (
 )
 
 type Call struct {
-	SessionID string
-	TurnID    string
-	CallID    string
-	Name      string
-	Args      json.RawMessage
+	SessionID     string
+	TurnID        string
+	CallID        string
+	Name          string
+	Args          json.RawMessage
+	WorkspaceDirs []string
 }
 
 type Result struct {

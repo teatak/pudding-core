@@ -13,7 +13,7 @@ import {
 import ReactMarkdown, { type Components, type UrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import type { ContentPart, Message } from "@/api/client";
+import { type ContentPart, type Message } from "@/api/client";
 import { PhaseDot } from "@/components/PhaseDot";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
@@ -50,6 +50,8 @@ export function TurnParts({
                 onOpenChange={(open) => disclosure?.setOpen(disclosureKey, open)}
               />
             );
+          case "approval":
+            return null;
           case "tool_use":
             return (
               <ToolUsePart
@@ -95,6 +97,20 @@ export function partsFromOverlay(
     ...overlayParts.map((part, index): TurnPartVM => {
       if (part.type === "thought") {
         return { type: "thought", active: activePhaseName === "thinking" && index === lastThoughtIndex, text: part.text };
+      }
+      if (part.type === "approval") {
+        return {
+          type: "approval",
+          active: activePhaseName === "awaiting_approval" && !part.status,
+          approvalID: part.approvalID,
+          approvalKind: part.approvalKind,
+          payload: part.payload,
+          reason: part.reason,
+          risk: part.risk,
+          sessionID: part.sessionID,
+          status: part.status,
+          title: part.title,
+        };
       }
       const active =
         index === lastToolIndex &&
@@ -211,6 +227,8 @@ function withPartKeys(parts: TurnPartVM[]) {
         return { ...part, key: `text:${textIndex++}` };
       case "thought":
         return { ...part, key: `thought:${thoughtIndex++}` };
+      case "approval":
+        return { ...part, key: `approval:${part.approvalID}` };
       case "tool_use":
         return { ...part, key: part.id ? `tool:${part.id}` : `tool:${toolIndex++}` };
       case "tool_result":
@@ -632,11 +650,13 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
   if (!name) {
     return fallback;
   }
-  const known: Record<string, string> = {
-    builtin_time_get_current: t("transcript.toolTimeCurrent"),
-    builtin_web_fetch: t("transcript.toolWebFetch"),
-    builtin_web_search: t("transcript.toolWebSearch"),
-  };
+	  const known: Record<string, string> = {
+	    builtin_time_get_current: t("transcript.toolTimeCurrent"),
+	    builtin_web_fetch: t("transcript.toolWebFetch"),
+	    builtin_web_search: t("transcript.toolWebSearch"),
+	    builtin_workspace_list: t("transcript.toolWorkspaceList"),
+	    request_capability: t("transcript.toolRequestCapability"),
+	  };
   if (known[name]) {
     return known[name];
   }
@@ -659,10 +679,15 @@ function toolTitle(
       summary: elapsed,
     };
   }
-  if (toolFailed(part)) {
-    return { label: baseTitle, summary: t("transcript.toolFailed") };
-  }
-  const summary = toolProtocolSummary(part, t);
+	  if (toolFailed(part)) {
+	    const capabilitySummary = capabilityToolSummary(part, result, t);
+	    return { label: baseTitle, summary: capabilitySummary || t("transcript.toolFailed") };
+	  }
+	  const capabilitySummary = capabilityToolSummary(part, result, t);
+	  if (capabilitySummary) {
+	    return { label: baseTitle, summary: capabilitySummary };
+	  }
+	  const summary = toolProtocolSummary(part, t);
   if (summary) {
     return { label: baseTitle, summary };
   }
@@ -671,6 +696,29 @@ function toolTitle(
     return { label: baseTitle, summary: structuralSummary };
   }
   return { label: baseTitle, summary: "" };
+}
+
+function capabilityToolSummary(
+  part: Extract<TurnPartVM, { type: "tool_use" }>,
+  result: ReturnType<typeof formatToolResult>,
+  t: (key: string) => string,
+) {
+  if ((part.name || part.resultName) !== "request_capability") {
+    return "";
+  }
+  const value = result?.value;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return "";
+  }
+  const status = String((value as Record<string, unknown>).status || "");
+  switch (status) {
+    case "approved":
+      return t("transcript.approvalApproved");
+    case "denied":
+      return t("transcript.approvalDenied");
+    default:
+      return "";
+  }
 }
 
 function toolProtocolSummary(part: Extract<TurnPartVM, { type: "tool_use" }>, t: (key: string) => string) {

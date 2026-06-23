@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/teatak/cart/v3"
 	"github.com/teatak/pudding-core/internal/engine"
@@ -46,6 +47,9 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/sessions/:id").GET(s.getSession).PATCH(s.patchSession).DELETE(s.deleteSession)
 	app.Route("/sessions/:id/submit").POST(s.submit)
 	app.Route("/sessions/:id/cancel").POST(s.cancel)
+	app.Route("/sessions/:id/approvals").GET(s.listApprovals)
+	app.Route("/sessions/:id/approvals/:approvalID/approve").POST(s.approveApproval)
+	app.Route("/sessions/:id/approvals/:approvalID/deny").POST(s.denyApproval)
 	app.Route("/sessions/:id/events").GET(s.sessionEvents)
 	app.Route("/sessions/:id/usage").GET(s.getSessionUsage)
 	app.Route("/sessions/:id/turns").GET(s.listTurns)
@@ -55,6 +59,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/sessions/:id/queued-inputs/:clientMessageID").PATCH(s.patchQueuedInput)
 	app.Route("/settings").GET(s.getSettings).PUT(s.putSettings)
 	app.Route("/providers").GET(s.listProviders).POST(s.createProvider)
+	app.Route("/providers/models").POST(s.probeProviderModels)
 	app.Route("/providers/:name").GET(s.getProvider).PATCH(s.patchProvider).DELETE(s.deleteProvider)
 	app.Route("/providers/:name/models").GET(s.listProviderModels)
 	app.Route("/tools/builtin").GET(s.listBuiltinTools)
@@ -299,6 +304,98 @@ func (s *Server) cancel(c *cart.Context) error {
 		return nil
 	}
 	c.JSON(http.StatusAccepted, map[string]string{"status": "cancelling"})
+	return nil
+}
+
+type approveApprovalReq struct {
+	Scope         string   `json:"scope"`
+	WorkspaceDirs []string `json:"workspaceDirs"`
+}
+
+type approvalView struct {
+	ID           string          `json:"id"`
+	SessionID    string          `json:"sessionID"`
+	TurnID       string          `json:"turnID"`
+	CallID       string          `json:"callID,omitempty"`
+	ApprovalKind string          `json:"approvalKind"`
+	TargetMode   store.AgentMode `json:"targetMode,omitempty"`
+	Title        string          `json:"title,omitempty"`
+	Reason       string          `json:"reason,omitempty"`
+	Risk         string          `json:"risk,omitempty"`
+	Payload      json.RawMessage `json:"payload,omitempty"`
+	CreatedAt    string          `json:"createdAt"`
+}
+
+func (s *Server) listApprovals(c *cart.Context) error {
+	id, _ := c.Param("id")
+	pending := s.engine.PendingApprovals(id)
+	views := make([]approvalView, 0, len(pending))
+	for _, approval := range pending {
+		views = append(views, approvalView{
+			ID:           approval.ID,
+			SessionID:    approval.SessionID,
+			TurnID:       approval.TurnID,
+			CallID:       approval.CallID,
+			ApprovalKind: approval.Kind,
+			TargetMode:   approval.TargetMode,
+			Title:        approval.Title,
+			Reason:       approval.Reason,
+			Risk:         approval.Risk,
+			Payload:      approval.Payload,
+			CreatedAt:    approval.CreatedAt.Format(time.RFC3339),
+		})
+	}
+	c.JSON(http.StatusOK, map[string]any{"approvals": views})
+	return nil
+}
+
+func (s *Server) approveApproval(c *cart.Context) error {
+	id, _ := c.Param("id")
+	approvalID, _ := c.Param("approvalID")
+	var req approveApprovalReq
+	if err := decode(c, &req); err != nil && !errors.Is(err, io.EOF) {
+		return badRequest(c, "invalid json body")
+	}
+	scope := engine.ApprovalScope(strings.TrimSpace(req.Scope))
+	if scope == "" {
+		scope = engine.ApprovalScopeTurn
+	}
+	if scope != engine.ApprovalScopeTurn && scope != engine.ApprovalScopeSession {
+		return badRequest(c, "invalid approval scope")
+	}
+	if err := s.engine.ApproveApproval(c.Request.Context(), id, approvalID, scope, req.WorkspaceDirs); err != nil {
+		if errors.Is(err, engine.ErrApprovalNotFound) {
+			c.JSON(http.StatusNotFound, map[string]string{"error": "not_found"})
+			return nil
+		}
+		if errors.Is(err, engine.ErrWorkspaceDirsRequired) {
+			return badRequest(c, "workspace_dirs_required")
+		}
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusAccepted, map[string]string{"status": "approved"})
+	return nil
+}
+
+type denyApprovalReq struct {
+	Reason string `json:"reason"`
+}
+
+func (s *Server) denyApproval(c *cart.Context) error {
+	id, _ := c.Param("id")
+	approvalID, _ := c.Param("approvalID")
+	var req denyApprovalReq
+	if err := decode(c, &req); err != nil && !errors.Is(err, io.EOF) {
+		return badRequest(c, "invalid json body")
+	}
+	if err := s.engine.DenyApproval(c.Request.Context(), id, approvalID, strings.TrimSpace(req.Reason)); err != nil {
+		if errors.Is(err, engine.ErrApprovalNotFound) {
+			c.JSON(http.StatusNotFound, map[string]string{"error": "not_found"})
+			return nil
+		}
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusAccepted, map[string]string{"status": "denied"})
 	return nil
 }
 

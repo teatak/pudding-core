@@ -9,6 +9,8 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
+
+	"github.com/teatak/pudding-core/internal/store"
 )
 
 type Client interface {
@@ -106,6 +108,7 @@ type ToolDef struct {
 	Name        string
 	Description string
 	InputSchema json.RawMessage
+	Capability  store.AgentMode
 }
 
 type PartType string

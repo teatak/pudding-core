@@ -77,14 +77,37 @@ func TestBuiltinToolsAPI(t *testing.T) {
 	}
 	got := decodeJSON[map[string][]map[string]any](t, resp)
 	tools := got["tools"]
-	if len(tools) != 3 {
+	if len(tools) != 5 {
 		t.Fatalf("unexpected builtin tools: %+v", got)
 	}
-	if tools[0]["id"] != tool.TimeGetCurrent {
+	if tools[0]["id"] != tool.RequestCapability {
 		t.Fatalf("unexpected builtin tool id: %+v", tools[0])
 	}
 	if tools[0]["description"] == "" || tools[0]["inputSchema"] == nil {
 		t.Fatalf("builtin tool should include description and input schema: %+v", tools[0])
+	}
+	if tools[0]["capability"] != string(store.ModeChat) {
+		t.Fatalf("request capability should be chat-scoped: %+v", tools[0])
+	}
+	var webSearch map[string]any
+	for _, item := range tools {
+		if item["id"] == tool.WebSearch {
+			webSearch = item
+			break
+		}
+	}
+	if webSearch == nil || webSearch["capability"] != string(store.ModeResearch) {
+		t.Fatalf("web search should declare research capability: %+v", webSearch)
+	}
+	var workspaceList map[string]any
+	for _, item := range tools {
+		if item["id"] == tool.WorkspaceList {
+			workspaceList = item
+			break
+		}
+	}
+	if workspaceList == nil || workspaceList["capability"] != string(store.ModeWorkspace) {
+		t.Fatalf("workspace list should declare workspace capability: %+v", workspaceList)
 	}
 }
 
@@ -502,6 +525,13 @@ func TestProviderModelsProxy(t *testing.T) {
 	got := decodeJSON[map[string][]string](t, req(t, http.MethodGet, srv.URL+"/providers/up/models", nil))
 	if len(got["models"]) != 2 || got["models"][0] != "m-alpha" {
 		t.Fatalf("unexpected models: %+v", got)
+	}
+
+	got = decodeJSON[map[string][]string](t, req(t, http.MethodPost, srv.URL+"/providers/models", map[string]string{
+		"protocol": "openai-compatible", "baseURL": upstream.URL,
+	}))
+	if len(got["models"]) != 2 || got["models"][1] != "m-beta" {
+		t.Fatalf("unexpected probed models: %+v", got)
 	}
 
 	resp = req(t, http.MethodGet, srv.URL+"/providers/nope/models", nil)

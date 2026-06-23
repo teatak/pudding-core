@@ -72,9 +72,11 @@ type Engine struct {
 	auxCtx    context.Context
 	auxCancel context.CancelFunc
 
-	mu      sync.Mutex
-	running map[string]context.CancelFunc // sessionID → 当前 turn 的 cancel
-	wg      sync.WaitGroup
+	mu                sync.Mutex
+	running           map[string]context.CancelFunc // sessionID → 当前 turn 的 cancel
+	approvals         map[string]*pendingApproval
+	turnWorkspaceDirs map[string][]string // turnID → 本轮临时授权目录
+	wg                sync.WaitGroup
 }
 
 type Option func(*Engine)
@@ -97,14 +99,16 @@ func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opt
 	}
 	auxCtx, auxCancel := context.WithCancel(context.Background())
 	e := &Engine{
-		store:     s,
-		config:    cfg,
-		hub:       hub,
-		resolver:  resolver,
-		builder:   contextbuilder.New(s, nil),
-		auxCtx:    auxCtx,
-		auxCancel: auxCancel,
-		running:   make(map[string]context.CancelFunc),
+		store:             s,
+		config:            cfg,
+		hub:               hub,
+		resolver:          resolver,
+		builder:           contextbuilder.New(s, nil),
+		auxCtx:            auxCtx,
+		auxCancel:         auxCancel,
+		running:           make(map[string]context.CancelFunc),
+		approvals:         make(map[string]*pendingApproval),
+		turnWorkspaceDirs: make(map[string][]string),
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -163,6 +167,7 @@ type SessionUsageInfo struct {
 type resolvedModel struct {
 	providerName string
 	model        string
+	mode         store.AgentMode
 	config       provider.ModelConfig
 	configJSON   json.RawMessage
 }
@@ -180,6 +185,7 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	if err != nil {
 		return nil, err
 	}
+	resolved.mode = initialMode(sess)
 	client, err := e.resolver.Resolve(ctx, resolved.providerName)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrProviderConfig, err)
@@ -201,6 +207,7 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 		UserText:        in.Text,
 		Provider:        resolved.providerName,
 		Model:           resolved.model,
+		Mode:            resolved.mode,
 		ModelConfig:     resolved.configJSON,
 	})
 	if errors.Is(err, store.ErrTurnRunning) {
@@ -247,15 +254,16 @@ func (e *Engine) SessionUsage(ctx context.Context, sessionID string) (*SessionUs
 	if err != nil {
 		return nil, err
 	}
-	req, err := e.builder.Build(ctx, sessionID, resolved.model)
+	mode := initialMode(sess)
+	req, err := e.builder.Build(ctx, sessionID, resolved.model, string(mode))
 	if err != nil {
 		return nil, err
 	}
 	req.Config = resolved.config
-	if e.tools != nil && modelSupportsTools(resolved.config) {
-		defs, err := e.tools.Definitions(ctx, sessionID)
+	if modelSupportsTools(resolved.config) {
+		defs, err := e.toolDefinitions(ctx, sessionID, mode)
 		if err != nil {
-			return nil, fmt.Errorf("list tools: %w", err)
+			return nil, err
 		}
 		req.Tools = defs
 	}
@@ -305,6 +313,7 @@ func (e *Engine) queueSubmit(ctx context.Context, in SubmitInput, resolved *reso
 		Text:            strings.TrimSpace(in.Text),
 		Provider:        resolved.providerName,
 		Model:           resolved.model,
+		Mode:            resolved.mode,
 		ModelConfig:     resolved.configJSON,
 	})
 	if err != nil {
@@ -353,6 +362,16 @@ func (e *Engine) resolveModel(ctx context.Context, sess *store.Session) (*resolv
 		config:       cfg,
 		configJSON:   cfgJSON,
 	}, nil
+}
+
+func initialMode(sess *store.Session) store.AgentMode {
+	if sess != nil && sess.ModeLease == store.ModeLeaseSession {
+		mode := store.NormalizeAgentMode(sess.ActiveMode)
+		if store.ValidAgentMode(mode) {
+			return mode
+		}
+	}
+	return store.ModeChat
 }
 
 func modelConfigFromEntry(m store.ProviderModel) provider.ModelConfig {
@@ -444,12 +463,12 @@ func (e *Engine) runTurn(ctx context.Context, sessionID, turnID string, resolved
 	defer e.wg.Done()
 
 	var parts turnPartAccumulator
-	status, errMsg := e.streamTurn(ctx, sessionID, turnID, resolved, client, &parts)
-	e.finishTurn(sessionID, turnID, status, errMsg, parts.Parts())
+	status, errMsg, mode := e.streamTurn(ctx, sessionID, turnID, resolved, client, &parts)
+	e.finishTurn(sessionID, turnID, mode, status, errMsg, parts.UncommittedParts())
 }
 
-func (e *Engine) finishTurn(sessionID, turnID string, status store.TurnStatus, errMsg string, assistantParts []store.ContentPart) {
-	in := store.FinishTurnInput{TurnID: turnID, Status: status, Error: errMsg}
+func (e *Engine) finishTurn(sessionID, turnID string, mode store.AgentMode, status store.TurnStatus, errMsg string, assistantParts []store.ContentPart) {
+	in := store.FinishTurnInput{TurnID: turnID, Status: status, Mode: mode, Error: errMsg}
 	if len(assistantParts) > 0 {
 		in.AssistantParts = assistantParts
 	}
@@ -464,21 +483,22 @@ func (e *Engine) finishTurn(sessionID, turnID string, status store.TurnStatus, e
 		// 静默(删除路径已 cancel 本 turn,见 api deleteSession)。
 		if errors.Is(err, store.ErrNotFound) {
 			slog.Debug("engine: finish turn skipped, session/turn gone", "turnID", turnID)
-			e.clearRunning(sessionID)
+			e.clearRunning(sessionID, turnID)
 			return
 		}
 		slog.Error("engine: finish turn", "turnID", turnID, "err", err)
-		e.clearRunning(sessionID)
+		e.clearRunning(sessionID, turnID)
 		return
 	}
-	e.clearRunning(sessionID)
+	e.clearRunning(sessionID, turnID)
 	e.hub.Publish(*res.FinalEvent)
 	e.TryDrainQueued(sessionID)
 }
 
-func (e *Engine) clearRunning(sessionID string) {
+func (e *Engine) clearRunning(sessionID, turnID string) {
 	e.mu.Lock()
 	delete(e.running, sessionID)
+	delete(e.turnWorkspaceDirs, turnID)
 	e.mu.Unlock()
 }
 
@@ -511,13 +531,13 @@ func (e *Engine) TryDrainQueued(sessionID string) {
 	var cfg provider.ModelConfig
 	if len(res.Input.ModelConfig) > 0 {
 		if err := json.Unmarshal(res.Input.ModelConfig, &cfg); err != nil {
-			e.finishTurn(sessionID, res.Turn.ID, store.TurnFailed, fmt.Sprintf("model config: %v", err), nil)
+			e.finishTurn(sessionID, res.Turn.ID, res.Turn.Mode, store.TurnFailed, fmt.Sprintf("model config: %v", err), nil)
 			return
 		}
 	}
 	client, err := e.resolver.Resolve(turnCtx, res.Input.Provider)
 	if err != nil {
-		e.finishTurn(sessionID, res.Turn.ID, store.TurnFailed, fmt.Sprintf("%v: %v", ErrProviderConfig, err), nil)
+		e.finishTurn(sessionID, res.Turn.ID, res.Turn.Mode, store.TurnFailed, fmt.Sprintf("%v: %v", ErrProviderConfig, err), nil)
 		return
 	}
 	resolved := &resolvedModel{
@@ -525,23 +545,29 @@ func (e *Engine) TryDrainQueued(sessionID string) {
 		model:        res.Input.Model,
 		config:       cfg,
 		configJSON:   append(json.RawMessage(nil), res.Input.ModelConfig...),
+		mode:         res.Input.Mode,
+	}
+	if resolved.mode == "" {
+		resolved.mode = store.ModeChat
+	} else {
+		resolved.mode = store.NormalizeAgentMode(resolved.mode)
+		if resolved.mode == "" {
+			resolved.mode = store.ModeChat
+		}
 	}
 	e.wg.Add(1)
 	go e.runTurn(turnCtx, sessionID, res.Turn.ID, resolved, client)
 }
 
-func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resolved *resolvedModel, client provider.Client, parts *turnPartAccumulator) (store.TurnStatus, string) {
-	baseReq, err := e.builder.Build(ctx, sessionID, resolved.model)
-	if err != nil {
-		return store.TurnFailed, fmt.Sprintf("build context: %v", err)
+func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resolved *resolvedModel, client provider.Client, parts *turnPartAccumulator) (store.TurnStatus, string, store.AgentMode) {
+	currentMode := resolved.mode
+	currentMode = store.NormalizeAgentMode(currentMode)
+	if currentMode == "" {
+		currentMode = store.ModeChat
 	}
-	baseReq.Config = resolved.config
-	if e.tools != nil && modelSupportsTools(resolved.config) {
-		defs, err := e.tools.Definitions(ctx, sessionID)
-		if err != nil {
-			return store.TurnFailed, fmt.Sprintf("list tools: %v", err)
-		}
-		baseReq.Tools = defs
+	baseReq, err := e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
+	if err != nil {
+		return store.TurnFailed, fmt.Sprintf("build context: %v", err), currentMode
 	}
 
 	maxLoops := defaultMaxToolLoops
@@ -553,32 +579,92 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 		req.Messages = requestMessagesWithTurnParts(baseReq.Messages, parts.Parts())
 		ch, err := client.Stream(ctx, req)
 		if err != nil {
-			return store.TurnFailed, fmt.Sprintf("provider: %v", err)
+			return store.TurnFailed, fmt.Sprintf("provider: %v", err), currentMode
 		}
 		finish, status, errMsg := e.consumeStream(ctx, sessionID, turnID, resolved.model, ch, parts)
 		if status != store.TurnRunning {
-			return status, errMsg
+			return status, errMsg, currentMode
 		}
 		if finish == "" || finish == provider.FinishStop {
-			return store.TurnCompleted, ""
+			if err := e.commitTurnParts(turnID, parts, true); err != nil {
+				return store.TurnFailed, fmt.Sprintf("append output: %v", err), currentMode
+			}
+			return store.TurnCompleted, "", currentMode
 		}
 		if finish != provider.FinishToolCalls {
-			return store.TurnFailed, fmt.Sprintf("unsupported finish reason: %s", finish)
+			return store.TurnFailed, fmt.Sprintf("unsupported finish reason: %s", finish), currentMode
 		}
 		if len(baseReq.Tools) == 0 {
-			return store.TurnFailed, "provider requested tool calls but no tools are available"
+			return store.TurnFailed, "provider requested tool calls but no tools are available", currentMode
 		}
 		if loop >= maxLoops {
-			return store.TurnFailed, "max tool loops exceeded"
+			return store.TurnFailed, "max tool loops exceeded", currentMode
 		}
-		if status, msg := e.executePendingTools(ctx, sessionID, turnID, parts); status != store.TurnRunning {
-			return status, msg
+		if err := e.commitTurnParts(turnID, parts, true); err != nil {
+			return store.TurnFailed, fmt.Sprintf("append output: %v", err), currentMode
+		}
+		status, msg, nextMode, changed := e.executePendingTools(ctx, sessionID, turnID, currentMode, baseReq.Tools, parts)
+		if status != store.TurnRunning {
+			return status, msg, currentMode
+		}
+		if changed {
+			messages := baseReq.Messages
+			currentMode = nextMode
+			baseReq, err = e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
+			if err != nil {
+				return store.TurnFailed, fmt.Sprintf("build context: %v", err), currentMode
+			}
+			baseReq.Messages = messages
 		}
 	}
 }
 
+func (e *Engine) commitTurnParts(turnID string, parts *turnPartAccumulator, includeLast bool) error {
+	upto := len(parts.parts)
+	if !includeLast && upto > parts.committedParts {
+		upto--
+	}
+	if upto <= parts.committedParts {
+		return nil
+	}
+	commitParts := parts.PartsRange(parts.committedParts, upto)
+	if _, err := e.store.AppendTurnOutput(context.Background(), store.AppendTurnOutputInput{TurnID: turnID, Parts: commitParts}); err != nil {
+		return err
+	}
+	parts.committedParts = upto
+	return nil
+}
+
+func (e *Engine) buildProviderRequest(ctx context.Context, sessionID string, resolved *resolvedModel, mode store.AgentMode) (provider.Request, error) {
+	req, err := e.builder.Build(ctx, sessionID, resolved.model, string(mode))
+	if err != nil {
+		return provider.Request{}, err
+	}
+	req.Config = resolved.config
+	if modelSupportsTools(resolved.config) {
+		defs, err := e.toolDefinitions(ctx, sessionID, mode)
+		if err != nil {
+			return provider.Request{}, err
+		}
+		req.Tools = defs
+	}
+	return req, nil
+}
+
+func (e *Engine) toolDefinitions(ctx context.Context, sessionID string, mode store.AgentMode) ([]provider.ToolDef, error) {
+	var defs []provider.ToolDef
+	if e.tools != nil {
+		runnerDefs, err := e.tools.Definitions(ctx, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("list tools: %w", err)
+		}
+		defs = runnerDefs
+	}
+	return tool.DefinitionsForMode(mode, defs), nil
+}
+
 func modelSupportsTools(cfg provider.ModelConfig) bool {
-	return cfg.Capabilities != nil && cfg.Capabilities.Tools
+	return cfg.Capabilities == nil || cfg.Capabilities.Tools
 }
 
 func (e *Engine) consumeStream(ctx context.Context, sessionID, turnID, model string, ch <-chan provider.Chunk, parts *turnPartAccumulator) (provider.FinishReason, store.TurnStatus, string) {
@@ -626,6 +712,9 @@ func (e *Engine) consumeStream(ctx context.Context, sessionID, turnID, model str
 				return chunk.Finish, store.TurnRunning, ""
 			case chunk.Tool != nil:
 				callID, name, argsDelta := parts.AppendTool(*chunk.Tool)
+				if err := e.commitTurnParts(turnID, parts, false); err != nil {
+					return "", store.TurnFailed, fmt.Sprintf("append output: %v", err)
+				}
 				coalescer.Push(event.Event{
 					SessionID: sessionID,
 					Kind:      event.TurnTool,
@@ -644,6 +733,9 @@ func (e *Engine) consumeStream(ctx context.Context, sessionID, turnID, model str
 					continue
 				}
 				parts.AppendDelta(part, chunk.Delta)
+				if err := e.commitTurnParts(turnID, parts, false); err != nil {
+					return "", store.TurnFailed, fmt.Sprintf("append output: %v", err)
+				}
 				coalescer.Push(event.Event{
 					SessionID: sessionID,
 					Kind:      event.TurnDelta,
@@ -789,11 +881,13 @@ func mergeStreamEvents(previous, next event.Event) (event.Event, bool) {
 	return event.Event{}, false
 }
 
-func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID string, parts *turnPartAccumulator) (store.TurnStatus, string) {
+func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID string, currentMode store.AgentMode, allowedTools []provider.ToolDef, parts *turnPartAccumulator) (store.TurnStatus, string, store.AgentMode, bool) {
 	calls := parts.PendingToolCalls()
 	if len(calls) == 0 {
-		return store.TurnFailed, "provider finished with tool_calls but emitted no complete tool call"
+		return store.TurnFailed, "provider finished with tool_calls but emitted no complete tool call", currentMode, false
 	}
+	nextMode := currentMode
+	modeChanged := false
 	for _, call := range calls {
 		call.SessionID = sessionID
 		call.TurnID = turnID
@@ -805,19 +899,35 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			Name:      call.Name,
 			Phase:     "running",
 		})
-		toolCtx, cancel := context.WithTimeout(ctx, toolCallTimeout)
-		result := e.tools.Call(toolCtx, call)
-		cancel()
-		if ctx.Err() != nil {
-			return store.TurnCancelled, ""
-		}
-		if toolCtx.Err() != nil && result.Content == "" {
-			result = tool.Result{
-				CallID:  call.CallID,
-				Name:    call.Name,
-				Ok:      false,
-				Content: "tool timed out",
+		var result tool.Result
+		if call.Name == tool.RequestCapability {
+			var requestedMode store.AgentMode
+			var changed bool
+			result, requestedMode, changed = e.requestCapabilityApproval(ctx, sessionID, turnID, call, nextMode)
+			if changed {
+				nextMode = requestedMode
+				modeChanged = true
 			}
+		} else if !tool.AllowedForMode(nextMode, allowedTools, call.Name) {
+			result = toolNotAllowedResult(call, nextMode)
+		} else if e.tools == nil {
+			result = tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: "tool runner unavailable"}
+		} else {
+			call.WorkspaceDirs = e.workspaceDirsForToolCall(ctx, sessionID, turnID)
+			toolCtx, cancel := context.WithTimeout(ctx, toolCallTimeout)
+			result = e.tools.Call(toolCtx, call)
+			cancel()
+			if toolCtx.Err() != nil && result.Content == "" {
+				result = tool.Result{
+					CallID:  call.CallID,
+					Name:    call.Name,
+					Ok:      false,
+					Content: "tool timed out",
+				}
+			}
+		}
+		if ctx.Err() != nil {
+			return store.TurnCancelled, "", nextMode, modeChanged
 		}
 		if result.CallID == "" {
 			result.CallID = call.CallID
@@ -826,6 +936,9 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			result.Name = call.Name
 		}
 		parts.AppendToolResult(result)
+		if err := e.commitTurnParts(turnID, parts, true); err != nil {
+			return store.TurnFailed, fmt.Sprintf("append output: %v", err), nextMode, modeChanged
+		}
 		phase := "ok"
 		if !result.Ok {
 			phase = "error"
@@ -841,14 +954,48 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			SummaryCount: result.SummaryCount,
 		})
 		if ctx.Err() != nil {
-			return store.TurnCancelled, ""
+			return store.TurnCancelled, "", nextMode, modeChanged
 		}
 	}
-	return store.TurnRunning, ""
+	return store.TurnRunning, "", nextMode, modeChanged
+}
+
+func (e *Engine) workspaceDirsForToolCall(ctx context.Context, sessionID, turnID string) []string {
+	var dirs []string
+	if sess, err := e.store.GetSession(ctx, sessionID); err == nil {
+		dirs = append(dirs, sess.WorkspaceDirs...)
+	}
+	e.mu.Lock()
+	dirs = append(dirs, e.turnWorkspaceDirs[turnID]...)
+	e.mu.Unlock()
+	return store.NormalizeWorkspaceDirs(dirs)
+}
+
+func toolNotAllowedResult(call tool.Call, mode store.AgentMode) tool.Result {
+	payload := map[string]any{
+		"ok":          false,
+		"reason":      "capability_required",
+		"currentMode": store.NormalizeAgentMode(mode),
+		"tool":        call.Name,
+		"message":     "tool is not available in the current capability; call request_capability first",
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		b = []byte(`{"ok":false,"reason":"capability_required"}`)
+	}
+	return tool.Result{
+		CallID:       call.CallID,
+		Name:         call.Name,
+		Ok:           false,
+		Content:      string(b),
+		SummaryKind:  tool.SummaryReturnedFields,
+		SummaryCount: len(payload),
+	}
 }
 
 type turnPartAccumulator struct {
 	parts          []store.ContentPart
+	committedParts int
 	toolPartByKey  map[string]int
 	toolKeyByIndex map[int]string
 	toolArgs       map[string]*strings.Builder
@@ -982,9 +1129,28 @@ func (a *turnPartAccumulator) rawToolArgs(partIndex int) json.RawMessage {
 }
 
 func (a *turnPartAccumulator) Parts() []store.ContentPart {
-	out := store.CloneContentParts(a.parts)
+	return a.PartsRange(0, len(a.parts))
+}
+
+func (a *turnPartAccumulator) UncommittedParts() []store.ContentPart {
+	return a.PartsRange(a.committedParts, len(a.parts))
+}
+
+func (a *turnPartAccumulator) PartsRange(start, end int) []store.ContentPart {
+	if start < 0 {
+		start = 0
+	}
+	if end > len(a.parts) {
+		end = len(a.parts)
+	}
+	if start >= end {
+		return nil
+	}
+	partOffset := start
+	source := a.parts[start:end]
+	out := store.CloneContentParts(source)
 	for key, partIndex := range a.toolPartByKey {
-		if partIndex < 0 || partIndex >= len(out) {
+		if partIndex < start || partIndex >= end {
 			continue
 		}
 		raw := ""
@@ -996,7 +1162,7 @@ func (a *turnPartAccumulator) Parts() []store.ContentPart {
 		}
 		args := json.RawMessage(raw)
 		if json.Valid(args) {
-			out[partIndex].Args = append(json.RawMessage(nil), args...)
+			out[partIndex-partOffset].Args = append(json.RawMessage(nil), args...)
 		}
 	}
 	return store.NormalizeContentParts(out)

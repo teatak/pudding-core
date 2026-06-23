@@ -54,6 +54,7 @@ func (m *Memstore) CreateSession(_ context.Context, s *store.Session) error {
 	now := time.Now()
 	s.CreatedAt, s.UpdatedAt, s.LastActivityAt = now, now, now
 	cp := *s
+	cp.WorkspaceDirs = append([]string(nil), s.WorkspaceDirs...)
 	m.sessions[s.ID] = &cp
 	return nil
 }
@@ -66,6 +67,11 @@ func (m *Memstore) GetSession(_ context.Context, id string) (*store.Session, err
 		return nil, store.ErrNotFound
 	}
 	cp := *s
+	cp.WorkspaceDirs = append([]string(nil), s.WorkspaceDirs...)
+	cp.ActiveMode = store.NormalizeAgentMode(cp.ActiveMode)
+	if cp.ActiveMode == "" {
+		cp.ActiveMode = store.ModeChat
+	}
 	cp.Running = m.runningLocked(id)
 	return &cp, nil
 }
@@ -76,6 +82,11 @@ func (m *Memstore) ListSessions(_ context.Context) ([]*store.Session, error) {
 	out := make([]*store.Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
 		cp := *s
+		cp.WorkspaceDirs = append([]string(nil), s.WorkspaceDirs...)
+		cp.ActiveMode = store.NormalizeAgentMode(cp.ActiveMode)
+		if cp.ActiveMode == "" {
+			cp.ActiveMode = store.ModeChat
+		}
 		cp.Running = m.runningLocked(s.ID)
 		out = append(out, &cp)
 	}
@@ -117,6 +128,15 @@ func (m *Memstore) UpdateSession(_ context.Context, id string, upd store.Session
 	if upd.Model != nil {
 		s.Model = *upd.Model
 	}
+	if upd.ActiveMode != nil {
+		s.ActiveMode = *upd.ActiveMode
+	}
+	if upd.ModeLease != nil {
+		s.ModeLease = *upd.ModeLease
+	}
+	if upd.WorkspaceDirs != nil {
+		s.WorkspaceDirs = append([]string(nil), (*upd.WorkspaceDirs)...)
+	}
 	if upd.Pinned != nil {
 		s.Pinned = *upd.Pinned
 	}
@@ -125,6 +145,7 @@ func (m *Memstore) UpdateSession(_ context.Context, id string, upd store.Session
 	}
 	s.UpdatedAt = time.Now()
 	cp := *s
+	cp.WorkspaceDirs = append([]string(nil), s.WorkspaceDirs...)
 	return &cp, nil
 }
 
@@ -172,6 +193,14 @@ func (m *Memstore) BeginTurn(_ context.Context, in store.BeginTurnInput) (*store
 	}
 
 	now := time.Now()
+	mode := in.Mode
+	if mode == "" {
+		mode = store.ModeChat
+	}
+	mode = store.NormalizeAgentMode(mode)
+	if mode == "" {
+		mode = store.ModeChat
+	}
 	turn := &store.Turn{
 		ID:              in.TurnID,
 		SessionID:       in.SessionID,
@@ -179,6 +208,7 @@ func (m *Memstore) BeginTurn(_ context.Context, in store.BeginTurnInput) (*store
 		Status:          store.TurnRunning,
 		Provider:        in.Provider,
 		Model:           in.Model,
+		Mode:            mode,
 		ModelConfig:     append([]byte(nil), in.ModelConfig...),
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -229,6 +259,14 @@ func (m *Memstore) QueueInput(_ context.Context, in store.QueueInputInput) (*sto
 		}
 	}
 	now := time.Now()
+	mode := in.Mode
+	if mode == "" {
+		mode = store.ModeChat
+	}
+	mode = store.NormalizeAgentMode(mode)
+	if mode == "" {
+		mode = store.ModeChat
+	}
 	input := &store.QueuedInput{
 		SessionID:       in.SessionID,
 		ClientMessageID: in.ClientMessageID,
@@ -236,6 +274,7 @@ func (m *Memstore) QueueInput(_ context.Context, in store.QueueInputInput) (*sto
 		Status:          store.QueuedInputQueued,
 		Provider:        in.Provider,
 		Model:           in.Model,
+		Mode:            mode,
 		ModelConfig:     append([]byte(nil), in.ModelConfig...),
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -342,6 +381,7 @@ func (m *Memstore) PromoteNextQueuedInput(_ context.Context, in store.PromoteQue
 				Status:          store.TurnRunning,
 				Provider:        input.Provider,
 				Model:           input.Model,
+				Mode:            input.Mode,
 				ModelConfig:     append([]byte(nil), input.ModelConfig...),
 				CreatedAt:       now,
 				UpdatedAt:       now,
@@ -414,6 +454,12 @@ func (m *Memstore) FinishTurn(_ context.Context, in store.FinishTurnInput) (*sto
 	}
 	now := time.Now()
 	turn.Status = in.Status
+	if in.Mode != "" {
+		mode := store.NormalizeAgentMode(in.Mode)
+		if mode != "" {
+			turn.Mode = mode
+		}
+	}
 	turn.Error = in.Error
 	turn.UpdatedAt = now
 
@@ -435,23 +481,20 @@ func (m *Memstore) FinishTurn(_ context.Context, in store.FinishTurnInput) (*sto
 	default:
 		return nil, store.ErrNotFound
 	}
+	maxIndex, firstOutputID := m.turnOutputStatsLocked(turn.SessionID, turn.ID)
 	segments := store.FinishAssistantOutputSegments(in)
-	for i, segment := range segments {
-		msg := &store.Message{
-			ID:          assistantMessageID(turn.ID, i),
-			SessionID:   turn.SessionID,
-			TurnID:      turn.ID,
-			Role:        segment.Role,
-			Kind:        segment.Kind,
-			Text:        segment.Text,
-			Parts:       store.CloneContentParts(segment.Parts),
-			TurnIndex:   i + 1,
-			Interrupted: in.Interrupted && i == len(segments)-1,
-			CreatedAt:   now,
-		}
-		m.messages[turn.SessionID] = append(m.messages[turn.SessionID], msg)
-		if i == 0 {
+	if maxIndex > 0 && len(in.AssistantParts) == 0 {
+		segments = nil
+	}
+	messages := m.appendTurnOutputSegmentsLocked(turn, maxIndex, segments, in.Interrupted, now)
+	if firstOutputID != "" {
+		ev.AssistantMessageID = firstOutputID
+	}
+	for i, msg := range messages {
+		if ev.AssistantMessageID == "" && i == 0 {
 			ev.AssistantMessageID = msg.ID
+		}
+		if i == 0 {
 			res.AssistantMessage = cloneMessage(msg)
 		}
 		res.AssistantMessages = append(res.AssistantMessages, cloneMessage(msg))
@@ -460,6 +503,29 @@ func (m *Memstore) FinishTurn(_ context.Context, in store.FinishTurnInput) (*sto
 	m.sessions[turn.SessionID].LastActivityAt = now
 	res.FinalEvent = &ev
 	return res, nil
+}
+
+func (m *Memstore) AppendTurnOutput(_ context.Context, in store.AppendTurnOutputInput) (*store.AppendTurnOutputResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	turn, ok := m.turns[in.TurnID]
+	if !ok || turn.Status != store.TurnRunning {
+		return nil, store.ErrNotFound
+	}
+	segments := store.AssistantOutputSegments(in.Parts)
+	if len(segments) == 0 {
+		return &store.AppendTurnOutputResult{}, nil
+	}
+	now := time.Now()
+	maxIndex, _ := m.turnOutputStatsLocked(turn.SessionID, turn.ID)
+	messages := m.appendTurnOutputSegmentsLocked(turn, maxIndex, segments, false, now)
+	turn.UpdatedAt = now
+	m.sessions[turn.SessionID].LastActivityAt = now
+	out := make([]*store.Message, 0, len(messages))
+	for _, msg := range messages {
+		out = append(out, cloneMessage(msg))
+	}
+	return &store.AppendTurnOutputResult{Messages: out}, nil
 }
 
 func (m *Memstore) RecordUsage(_ context.Context, in store.UsageRecordInput) (*store.UsageHourlyStat, error) {
@@ -728,6 +794,7 @@ func conversationTurnFromMem(turn *store.Turn, messages []*store.Message) *store
 		Status:          turn.Status,
 		Provider:        turn.Provider,
 		Model:           turn.Model,
+		Mode:            turn.Mode,
 		Error:           turn.Error,
 		CreatedAt:       turn.CreatedAt,
 		UpdatedAt:       turn.UpdatedAt,
@@ -738,6 +805,47 @@ func conversationTurnFromMem(turn *store.Turn, messages []*store.Message) *store
 			continue
 		}
 		out.Messages = append(out.Messages, cloneMessage(msg))
+	}
+	return out
+}
+
+func (m *Memstore) turnOutputStatsLocked(sessionID, turnID string) (int, string) {
+	maxIndex := 0
+	firstIndex := 0
+	firstID := ""
+	for _, msg := range m.messages[sessionID] {
+		if msg.TurnID != turnID || msg.TurnIndex <= 0 {
+			continue
+		}
+		if msg.TurnIndex > maxIndex {
+			maxIndex = msg.TurnIndex
+		}
+		if firstID == "" || msg.TurnIndex < firstIndex {
+			firstIndex = msg.TurnIndex
+			firstID = msg.ID
+		}
+	}
+	return maxIndex, firstID
+}
+
+func (m *Memstore) appendTurnOutputSegmentsLocked(turn *store.Turn, maxIndex int, segments []store.AssistantOutputSegment, interrupted bool, now time.Time) []*store.Message {
+	out := make([]*store.Message, 0, len(segments))
+	for i, segment := range segments {
+		turnIndex := maxIndex + i + 1
+		msg := &store.Message{
+			ID:          assistantMessageID(turn.ID, turnIndex-1),
+			SessionID:   turn.SessionID,
+			TurnID:      turn.ID,
+			Role:        segment.Role,
+			Kind:        segment.Kind,
+			Text:        segment.Text,
+			Parts:       store.CloneContentParts(segment.Parts),
+			TurnIndex:   turnIndex,
+			Interrupted: interrupted && i == len(segments)-1,
+			CreatedAt:   now,
+		}
+		m.messages[turn.SessionID] = append(m.messages[turn.SessionID], msg)
+		out = append(out, msg)
 	}
 	return out
 }

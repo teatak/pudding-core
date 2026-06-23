@@ -8,14 +8,17 @@ import (
 )
 
 func TestAssembleIncludesCoreAndUserInstruction(t *testing.T) {
-	out := Assemble(Input{UserInstruction: "  请尽量简短  "})
+	out := Assemble(Input{UserInstruction: "  请尽量简短  ", Mode: "research"})
 	if !strings.Contains(out.SystemInstruction, "You are Pudding") {
 		t.Fatalf("assembled prompt missing core:\n%s", out.SystemInstruction)
+	}
+	if !strings.Contains(out.SystemInstruction, "Research Mode") {
+		t.Fatalf("assembled prompt missing mode:\n%s", out.SystemInstruction)
 	}
 	if !strings.Contains(out.SystemInstruction, "请尽量简短") {
 		t.Fatalf("assembled prompt missing user instruction:\n%s", out.SystemInstruction)
 	}
-	if len(out.Segments) != 2 || out.Segments[0].ID != "core_system" || out.Segments[1].ID != "user_system" {
+	if len(out.Segments) != 3 || out.Segments[0].ID != "core_system" || out.Segments[1].ID != "mode_research" || out.Segments[2].ID != "user_system" {
 		t.Fatalf("unexpected segments: %+v", out.Segments)
 	}
 }

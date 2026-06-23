@@ -1,7 +1,7 @@
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
-import { getTurn, type Session } from "@/api/client";
+import { getTurn, listPendingApprovals, type PendingApproval, type Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { sessionEvent, type SessionEvent } from "@/contracts/events";
@@ -103,12 +103,46 @@ function openSessionEventSource({
   source.addEventListener("turn.cancelled", handleMessage);
   source.addEventListener("input.queued", handleMessage);
   source.addEventListener("input.updated", handleMessage);
+  source.addEventListener("approval.requested", handleMessage);
+  source.addEventListener("approval.resolved", handleMessage);
   source.addEventListener("session.titled", handleMessage);
   source.addEventListener("ping", handleMessage);
+  hydratePendingApprovals(applyEvent, token, sessionID);
   return {
     close: () => {
       source.close();
     },
+  };
+}
+
+function hydratePendingApprovals(
+  applyEvent: (event: SessionEvent) => void,
+  token: string,
+  sessionID: string,
+) {
+  void listPendingApprovals(token, sessionID)
+    .then(({ approvals }) => {
+      for (const approval of approvals) {
+        applyEvent(pendingApprovalToEvent(approval));
+      }
+    })
+    .catch((error) => {
+      console.warn("failed to hydrate pending approvals", error);
+    });
+}
+
+function pendingApprovalToEvent(approval: PendingApproval): Extract<SessionEvent, { kind: "approval.requested" }> {
+  return {
+    kind: "approval.requested",
+    sessionID: approval.sessionID,
+    turnID: approval.turnID,
+    callID: approval.callID,
+    approvalID: approval.id,
+    approvalKind: approval.approvalKind,
+    title: approval.title,
+    reason: approval.reason,
+    risk: approval.risk,
+    payload: approval.payload,
   };
 }
 
