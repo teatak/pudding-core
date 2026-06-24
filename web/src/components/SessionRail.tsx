@@ -71,6 +71,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useBackgroundSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
 import type { AppSearch } from "@/lib/route";
@@ -119,6 +120,7 @@ export function SessionRail({
   const turnPhases = useOverlayStore((state) => state.turnPhases);
   const collapsed = useRailCollapsed();
   const forcedCollapsed = useRailForcedCollapsed();
+  const isMobile = useIsMobile();
   const hover = useHoverPopover();
 
   const sessionsQuery = useQuery({
@@ -242,6 +244,9 @@ export function SessionRail({
               return next;
             },
           });
+          if (isMobile) {
+            hover.close();
+          }
         }}
         onDelete={(id) => deleteMutation.mutate(id)}
         onRename={(id, title) => renameMutation.mutate({ id, title })}
@@ -255,6 +260,9 @@ export function SessionRail({
               return search.session === id ? search : { ...search, split: id };
             },
           });
+          if (isMobile) {
+            hover.close();
+          }
         }}
         onPinChange={changePinned}
         onRefetch={() => void sessionsQuery.refetch()}
@@ -274,6 +282,9 @@ export function SessionRail({
               return next;
             },
           });
+          if (isMobile) {
+            hover.close();
+          }
         }}
       />
     );
@@ -299,6 +310,10 @@ export function SessionRail({
                 tabIndex={-1}
                 variant="ghost"
                 onClick={() => {
+                  if (isMobile) {
+                    hover.toggle();
+                    return;
+                  }
                   if (!collapsed) {
                     collapse(true);
                     return;
@@ -311,12 +326,12 @@ export function SessionRail({
                   collapse(false);
                 }}
                 onMouseEnter={() => {
-                  if (collapsed) {
+                  if (!isMobile && collapsed) {
                     hover.openNow();
                   }
                 }}
                 onMouseLeave={() => {
-                  if (collapsed) {
+                  if (!isMobile && collapsed) {
                     hover.scheduleClose();
                   }
                 }}
@@ -331,15 +346,20 @@ export function SessionRail({
           <PopoverContent
             align="start"
             alignOffset={popoverAlignOffset}
-            className="flex h-[min(48rem,calc(100vh-var(--toolbar-h)-1.5rem))] max-h-[calc(100vh-var(--toolbar-h)-1.5rem)] w-[260px] flex-col p-0"
+            className={cn(
+              "flex w-[260px] flex-col p-0",
+              isMobile
+                ? "h-[calc(100svh-var(--toolbar-h)-1rem)] max-h-[calc(100svh-var(--toolbar-h)-1rem)] w-[min(20rem,calc(100vw-1rem))]"
+                : "h-[min(48rem,calc(100vh-var(--toolbar-h)-1.5rem))] max-h-[calc(100vh-var(--toolbar-h)-1.5rem)]",
+            )}
             side="bottom"
-            sideOffset={11}
-            onMouseEnter={hover.cancelClose}
-            onMouseLeave={hover.scheduleClose}
+            sideOffset={isMobile ? 8 : 11}
+            onMouseEnter={isMobile ? undefined : hover.cancelClose}
+            onMouseLeave={isMobile ? undefined : hover.scheduleClose}
             onFocusOutside={(event) => event.preventDefault()}
             onInteractOutside={(event) => {
               const target = event.target as HTMLElement | null;
-              if (isRailPopoverPortalTarget(target)) {
+              if (target?.closest(".pudding-rail-toggle") || isRailPopoverPortalTarget(target)) {
                 event.preventDefault();
               }
             }}
@@ -466,6 +486,22 @@ function useHoverPopover(closeDelay = 160) {
       setOpen(next);
     },
   };
+}
+
+function useHasHoverInput() {
+  const [hasHover, setHasHover] = useState(() =>
+    typeof window === "undefined" ? true : window.matchMedia("(hover: hover) and (pointer: fine)").matches,
+  );
+
+  useEffect(() => {
+    const media = window.matchMedia("(hover: hover) and (pointer: fine)");
+    const update = () => setHasHover(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  return hasHover;
 }
 
 type RailPanelProps = {
@@ -1050,6 +1086,7 @@ function SessionItem({
   onPointerDragCancel,
 }: SessionItemProps) {
   const { t, locale } = useI18n();
+  const actionsAlwaysVisible = !useHasHoverInput();
   const title = session.title || t("session.untitled");
   const [actionsOpen, setActionsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -1248,7 +1285,9 @@ function SessionItem({
         <SidebarMenuButton
           asChild
           className={cn(
-            "pr-11 data-active:font-normal group-has-data-[sidebar=menu-action]/menu-item:pr-11",
+            actionsAlwaysVisible
+              ? "pr-20 data-active:font-normal group-has-data-[sidebar=menu-action]/menu-item:pr-20"
+              : "pr-11 data-active:font-normal group-has-data-[sidebar=menu-action]/menu-item:pr-11",
             suppressInteractiveState
               ? "hover:bg-transparent hover:text-sidebar-foreground active:bg-transparent active:text-sidebar-foreground"
               : "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground",
@@ -1287,8 +1326,11 @@ function SessionItem({
         <>
           <SidebarMenuBadge
             className={cn(
-              "right-2 min-w-0 px-0 font-normal text-muted-foreground",
-              !suppressInteractiveState && "group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0",
+              "min-w-0 px-0 font-normal text-muted-foreground",
+              actionsAlwaysVisible ? "right-8" : "right-2",
+              !actionsAlwaysVisible &&
+                !suppressInteractiveState &&
+                "group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0",
               actionsOpen && "opacity-0",
             )}
           >
@@ -1300,11 +1342,13 @@ function SessionItem({
                 aria-label={t("session.actions")}
                 className={cn(
                   "right-1.5 rounded-sm bg-transparent text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-0",
-                  suppressInteractiveState &&
+                  actionsAlwaysVisible && "opacity-100",
+                  !actionsAlwaysVisible &&
+                    suppressInteractiveState &&
                     "group-hover/menu-item:opacity-0 hover:bg-transparent hover:text-muted-foreground md:opacity-0",
                   actionsOpen && "opacity-100 md:opacity-100",
                 )}
-                showOnHover
+                showOnHover={!actionsAlwaysVisible}
                 tabIndex={-1}
               >
                 <Ellipsis />

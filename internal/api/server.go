@@ -16,6 +16,7 @@ import (
 	"github.com/teatak/cart/v3"
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
+	"github.com/teatak/pudding-core/internal/mobileauth"
 	"github.com/teatak/pudding-core/internal/store"
 )
 
@@ -33,15 +34,44 @@ func New(eng *engine.Engine, s store.Store, cfg engine.ConfigSource, hub *event.
 }
 
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
-var apiPrefixes = []string{"/sessions", "/settings", "/providers", "/tools", "/usage"}
+var apiPrefixes = []string{"/sessions", "/settings", "/providers", "/tools", "/usage", "/mobile"}
+
+type deviceTokenValidator interface {
+	ValidToken(token string) bool
+}
+
+type pairingService interface {
+	Create(fallbackBaseURL string) (mobileauth.Pairing, error)
+	Claim(code, deviceName string) (mobileauth.ClaimResult, error)
+}
+
+type handlerConfig struct {
+	deviceTokens deviceTokenValidator
+	pairing      pairingService
+}
+
+type HandlerOption func(*handlerConfig)
+
+func WithDeviceTokenValidator(v deviceTokenValidator) HandlerOption {
+	return func(cfg *handlerConfig) { cfg.deviceTokens = v }
+}
+
+func WithPairing(p pairingService) HandlerOption {
+	return func(cfg *handlerConfig) { cfg.pairing = p }
+}
 
 // Handler 返回根 handler:API 前缀走 token 鉴权 + cart 路由,
 // 其余路径 serve 静态 web UI(HTML/JS 非敏感,数据全在 API 后面;
 // static 为 nil 时只有 API)。
 // token 经 Authorization: Bearer 或 ?token= 传递;后者服务 EventSource
 // (浏览器 SSE 无法自定义 header)。
-func (s *Server) Handler(token string, static http.Handler) http.Handler {
+func (s *Server) Handler(token string, static http.Handler, options ...HandlerOption) http.Handler {
+	cfg := handlerConfig{}
+	for _, option := range options {
+		option(&cfg)
+	}
 	app := cart.New()
+	public := cart.New()
 
 	app.Route("/sessions").POST(s.createSession).GET(s.listSessions)
 	app.Route("/sessions/:id").GET(s.getSession).PATCH(s.patchSession).DELETE(s.deleteSession)
@@ -66,9 +96,42 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/tools/builtin").GET(s.listBuiltinTools)
 	app.Route("/tools/web").GET(s.getWebTools).PATCH(s.patchWebTools).PUT(s.patchWebTools)
 	app.Route("/usage/daily").GET(s.getDailyUsage)
+	if cfg.pairing != nil {
+		app.Route("/mobile/pairings").POST(func(c *cart.Context) error {
+			pairing, err := cfg.pairing.Create(requestBaseURL(c.Request))
+			if err != nil {
+				return s.fail(c, err)
+			}
+			c.JSON(http.StatusCreated, pairing)
+			return nil
+		})
+		public.Route("/mobile/pairings/:code/claim").POST(func(c *cart.Context) error {
+			code, _ := c.Param("code")
+			var req struct {
+				DeviceName string `json:"deviceName"`
+			}
+			if err := decode(c, &req); err != nil && !errors.Is(err, io.EOF) {
+				return badRequest(c, "invalid json body")
+			}
+			claim, err := cfg.pairing.Claim(code, req.DeviceName)
+			if errors.Is(err, mobileauth.ErrPairingInvalid) {
+				c.JSON(http.StatusNotFound, map[string]string{"error": "pairing_invalid"})
+				return nil
+			}
+			if err != nil {
+				return s.fail(c, err)
+			}
+			c.JSON(http.StatusOK, claim)
+			return nil
+		})
+	}
 
-	authed := withAuth(token, app)
+	authed := withAuth(token, cfg.deviceTokens, app)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if cfg.pairing != nil && isPublicMobilePath(r.URL.Path) {
+			public.ServeHTTP(w, r)
+			return
+		}
 		for _, prefix := range apiPrefixes {
 			if r.URL.Path == prefix || strings.HasPrefix(r.URL.Path, prefix+"/") {
 				authed.ServeHTTP(w, r)
@@ -84,9 +147,9 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	return withCORS(handler)
 }
 
-func withAuth(token string, next http.Handler) http.Handler {
+func withAuth(token string, devices deviceTokenValidator, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") == "Bearer "+token || r.URL.Query().Get("token") == token {
+		if validBearerToken(r, token, devices) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -94,6 +157,35 @@ func withAuth(token string, next http.Handler) http.Handler {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 	})
+}
+
+func validBearerToken(r *http.Request, daemonToken string, devices deviceTokenValidator) bool {
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if token == r.Header.Get("Authorization") {
+		token = ""
+	}
+	if token == "" {
+		token = r.URL.Query().Get("token")
+	}
+	if token == "" {
+		return false
+	}
+	if token == daemonToken {
+		return true
+	}
+	return devices != nil && devices.ValidToken(token)
+}
+
+func isPublicMobilePath(path string) bool {
+	return strings.HasPrefix(path, "/mobile/pairings/") && strings.HasSuffix(path, "/claim")
+}
+
+func requestBaseURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host + "/"
 }
 
 type createSessionReq struct {

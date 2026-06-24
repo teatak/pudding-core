@@ -27,6 +27,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useImeCompositionGuard } from "@/hooks/useImeCompositionGuard";
 import { useI18n } from "@/i18n";
+import { newClientID } from "@/lib/id";
 import type { AppSearch } from "@/lib/route";
 import { getSubmitFailure } from "@/lib/submitFailure";
 import { getTextAreaCaretClientPoint } from "@/lib/textCaret";
@@ -86,7 +87,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
   // clientMessageID 按"草稿"生成而不是按请求生成:失败重试和快速双击
   // 复用同一个 ID,服务端幂等去重才生效;成功后才轮换到下一个草稿 ID。
-  const draftIDRef = useRef<string>(crypto.randomUUID());
+  const draftIDRef = useRef<string>(newClientID());
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
   const mascotErrorTimerRef = useRef<number | null>(null);
   const mascotGazeRafRef = useRef(0);
@@ -198,7 +199,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
     onSuccess: async (result) => {
       clearMascotError();
       onSubmitError?.(null);
-      draftIDRef.current = crypto.randomUUID();
+      draftIDRef.current = newClientID();
       form.reset({ text: "" });
       // 标题自动生成由后端 titler 负责(provisional + LLM,session.titled
       // 事件回推),前端不写标题
@@ -237,7 +238,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
     onMutate: () => {
       clearMascotError();
       onSubmitError?.(null);
-      draftIDRef.current = crypto.randomUUID();
+      draftIDRef.current = newClientID();
       form.reset({ text: "" });
     },
     onSuccess: async () => {
@@ -266,7 +267,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
     onMutate: () => {
       clearMascotError();
       onSubmitError?.(null);
-      draftIDRef.current = crypto.randomUUID();
+      draftIDRef.current = newClientID();
       form.reset({ text: "" });
     },
     onSuccess: async () => {
@@ -290,7 +291,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
     onSuccess: async () => {
       clearMascotError();
       onSubmitError?.(null);
-      draftIDRef.current = crypto.randomUUID();
+      draftIDRef.current = newClientID();
       form.reset({ text: "" });
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
     },
@@ -315,7 +316,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
   const runClearCommand = useCallback(() => {
     clearMascotError();
     onSubmitError?.(null);
-    draftIDRef.current = crypto.randomUUID();
+    draftIDRef.current = newClientID();
     form.reset({ text: "" });
     setTextFocused(false);
     void navigate({
@@ -513,7 +514,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
           <div className="relative z-10 rounded-3xl border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/25">
             <div className="px-4 pt-4 pb-2">
               <Textarea
-                className="block max-h-36 min-h-6 resize-none overflow-y-auto rounded-none border-0 bg-transparent p-0 text-sm leading-6 shadow-none focus-visible:ring-0 md:text-sm dark:bg-transparent"
+                className="block max-h-36 min-h-6 resize-none overflow-y-auto rounded-none border-0 bg-transparent p-0 text-base leading-6 shadow-none focus-visible:ring-0 md:text-sm dark:bg-transparent"
                 placeholder={t("composer.messagePlaceholder")}
                 rows={1}
                 name={textField.name}
@@ -1064,9 +1065,6 @@ function approvalTitle(approval: ComposerApproval, targetMode: string, t: (key: 
 }
 
 function mascotMoodFromPhase(phase: TurnPhaseState | undefined, running: boolean): MascotMood {
-  if (phase?.phase === "error") {
-    return "error";
-  }
   if (phase?.phase === "streaming_text") {
     return "ready";
   }

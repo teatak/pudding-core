@@ -33,7 +33,7 @@ var trayIcon []byte // macOS menubar template icon(黑 + alpha 剪影)
 
 func main() {
 	addr := home.DefaultAddr()
-	d, err := daemon.Start(daemon.Options{Addr: addr})
+	d, err := daemon.Start(daemon.Options{Addr: addr, MobileLAN: true})
 	if err != nil {
 		// 通道单端口:端口被占说明已有实例在跑。不再 attach(壳会加载旧实例 serve
 		// 的旧 web,改了代码却看不到),直接报错退出,让用户先停掉旧实例

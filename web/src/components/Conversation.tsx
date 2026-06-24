@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import type { Session } from "@/api/client";
+import { ChatColumn } from "@/components/ChatColumn";
 import { Composer } from "@/components/Composer";
 import { Transcript } from "@/components/Transcript";
 
@@ -13,6 +14,11 @@ export function Conversation({ token, session }: { token: string; session: Sessi
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
+        <ChatColumn>
+          <div className="h-6 bg-gradient-to-b from-background to-transparent" />
+        </ChatColumn>
+      </div>
       <Transcript token={token} sessionID={session.id} sessionRunning={session.running} submitError={submitError} />
       <Composer token={token} session={session} onSubmitError={setSubmitError} />
     </div>

@@ -6,6 +6,7 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n";
 import { setToken } from "@/state/tokenStore";
+import { Loader2 } from "lucide-react";
 
 export function TokenGate() {
   const [value, setValue] = useState("");
@@ -46,6 +47,25 @@ export function TokenGate() {
           </CardFooter>
         </Card>
       </form>
+    </main>
+  );
+}
+
+export function PairingGate({ failed = false }: { failed?: boolean }) {
+  const { t } = useI18n();
+
+  return (
+    <main className="flex min-h-svh items-center justify-center bg-background p-6">
+      <Card className="w-full max-w-sm">
+        <CardHeader>
+          <CardTitle>{t("app.core")}</CardTitle>
+          <CardDescription>{failed ? t("mobilePairing.failed") : t("mobilePairing.claiming")}</CardDescription>
+        </CardHeader>
+        <CardContent className="flex items-center gap-2 text-sm text-muted-foreground">
+          {failed ? null : <Loader2 className="size-4 animate-spin" />}
+          <span>{failed ? t("mobilePairing.retry") : t("common.loading")}</span>
+        </CardContent>
+      </Card>
     </main>
   );
 }

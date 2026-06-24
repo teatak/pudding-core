@@ -1,18 +1,21 @@
 import { useSearch } from "@tanstack/react-router";
 import { PanelRight } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useGroupRef } from "react-resizable-panels";
 
 import { CanvasPane } from "@/components/CanvasPane";
 import { ChatPane } from "@/components/ChatPane";
 import { SessionRail } from "@/components/SessionRail";
 import { SettingsDialog } from "@/components/SettingsDialog";
-import { TokenGate } from "@/components/TokenGate";
+import { PairingGate, TokenGate } from "@/components/TokenGate";
+import { claimMobilePairing } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Toaster } from "@/components/ui/sonner";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceResizableHandle } from "@/components/WorkspaceResizableHandle";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useVisibleSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
 import {
@@ -23,13 +26,17 @@ import {
 } from "@/lib/layoutConstants";
 import { readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
 import { setCanvasOpen, useCanvasOpen } from "@/state/canvasStore";
-import { useToken } from "@/state/tokenStore";
+import { clearPendingPairingCode, pendingPairingCode } from "@/state/token";
+import { setToken, useToken } from "@/state/tokenStore";
 
 export function App() {
   const token = useToken();
   const { session: selectedSessionID, draft, split: splitSessionID } = useSearch({ from: "/" });
   const { t } = useI18n();
+  const isMobile = useIsMobile();
   const canvasOpen = useCanvasOpen();
+  const [pairingCode] = useState(() => pendingPairingCode());
+  const [pairingFailed, setPairingFailed] = useState(false);
   const workspaceGroupRef = useGroupRef();
   const splitGroupRef = useGroupRef();
   const savedSplitLayout = useMemo(
@@ -61,6 +68,36 @@ export function App() {
   useVisibleSessionEvents(activeSessionIDs, token);
 
   useEffect(() => {
+    if (token) {
+      return;
+    }
+    if (!pairingCode) {
+      return;
+    }
+    let cancelled = false;
+    void claimMobilePairing(pairingCode, { deviceName: navigator.userAgent || "Mobile device" })
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        clearPendingPairingCode();
+        setToken(result.token);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          clearPendingPairingCode();
+          setPairingFailed(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pairingCode, token]);
+
+  useEffect(() => {
+    if (isMobile) {
+      return;
+    }
     const group = workspaceGroupRef.current;
     if (!group) {
       return;
@@ -75,7 +112,7 @@ export function App() {
         maxPercent: workspaceLayout.maxPercent,
       }),
     );
-  }, [canvasOpen, workspaceGroupRef]);
+  }, [canvasOpen, isMobile, workspaceGroupRef]);
 
   useEffect(() => {
     const group = splitGroupRef.current;
@@ -96,6 +133,9 @@ export function App() {
   }, [selectedSessionID, splitGroupRef, splitSessionID]);
 
   if (!token) {
+    if (pairingCode) {
+      return <PairingGate failed={pairingFailed} />;
+    }
     return <TokenGate />;
   }
 
@@ -176,42 +216,60 @@ export function App() {
               </TooltipContent>
             </Tooltip>
           </div>
-          <ResizablePanelGroup
-            className="h-full min-w-0"
-            defaultLayout={canvasOpen ? savedWorkspaceLayout : workspaceLayout.closed}
-            groupRef={workspaceGroupRef}
-            id="workspace"
-            orientation="horizontal"
-            resizeTargetMinimumSize={resizeTargetMinimumSize}
-            onLayoutChanged={(layout) => {
-              if (canvasOpen && typeof layout.canvas === "number" && layout.canvas > 0) {
-                savePanelLayout(layoutStorageKeys.workspaceRatio, layout);
-              }
-            }}
-          >
-            <ResizablePanel
-              id="chat"
-              className="min-w-0"
-              minSize={workspaceLayout.minChatPx}
-            >
+          {isMobile ? (
+            <>
               {chatArea}
-            </ResizablePanel>
-            <WorkspaceResizableHandle
-              id="chat-canvas"
-              aria-label={t("layout.resizeHint")}
-              className={canvasOpen ? undefined : "hidden"}
-              disabled={!canvasOpen}
-            />
-            <ResizablePanel
-              id="canvas"
-              className="min-w-0"
-              collapsedSize="0%"
-              collapsible
-              minSize={workspaceLayout.minCanvasPx}
+              <Sheet open={canvasOpen} onOpenChange={setCanvasOpen}>
+                <SheetContent
+                  className="w-[min(28rem,92vw)] max-w-none gap-0 p-0"
+                  side="right"
+                >
+                  <SheetHeader className="sr-only">
+                    <SheetTitle>{t("canvas.title")}</SheetTitle>
+                    <SheetDescription>{t("canvas.empty")}</SheetDescription>
+                  </SheetHeader>
+                  <CanvasPane />
+                </SheetContent>
+              </Sheet>
+            </>
+          ) : (
+            <ResizablePanelGroup
+              className="h-full min-w-0"
+              defaultLayout={canvasOpen ? savedWorkspaceLayout : workspaceLayout.closed}
+              groupRef={workspaceGroupRef}
+              id="workspace"
+              orientation="horizontal"
+              resizeTargetMinimumSize={resizeTargetMinimumSize}
+              onLayoutChanged={(layout) => {
+                if (canvasOpen && typeof layout.canvas === "number" && layout.canvas > 0) {
+                  savePanelLayout(layoutStorageKeys.workspaceRatio, layout);
+                }
+              }}
             >
-              {canvasOpen ? <CanvasPane /> : null}
-            </ResizablePanel>
-          </ResizablePanelGroup>
+              <ResizablePanel
+                id="chat"
+                className="min-w-0"
+                minSize={workspaceLayout.minChatPx}
+              >
+                {chatArea}
+              </ResizablePanel>
+              <WorkspaceResizableHandle
+                id="chat-canvas"
+                aria-label={t("layout.resizeHint")}
+                className={canvasOpen ? undefined : "hidden"}
+                disabled={!canvasOpen}
+              />
+              <ResizablePanel
+                id="canvas"
+                className="min-w-0"
+                collapsedSize="0%"
+                collapsible
+                minSize={workspaceLayout.minCanvasPx}
+              >
+                {canvasOpen ? <CanvasPane /> : null}
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          )}
         </div>
       </div>
       <SettingsDialog token={token} showTrigger={false} />

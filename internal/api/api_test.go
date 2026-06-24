@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
+	"github.com/teatak/pudding-core/internal/mobileauth"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
@@ -109,6 +111,82 @@ func TestBuiltinToolsAPI(t *testing.T) {
 	if workspaceList == nil || workspaceList["capability"] != string(store.ModeWorkspace) {
 		t.Fatalf("workspace list should declare workspace capability: %+v", workspaceList)
 	}
+}
+
+func TestMobilePairingIssuesDeviceToken(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
+	devices, err := mobileauth.OpenDeviceStore(filepath.Join(t.TempDir(), "devices.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pairing := mobileauth.NewManager(devices, []string{"http://192.168.1.20:9679/"})
+	srv := httptest.NewServer(New(eng, ms, ms, hub).Handler(
+		testToken,
+		nil,
+		WithDeviceTokenValidator(devices),
+		WithPairing(pairing),
+	))
+	t.Cleanup(srv.Close)
+
+	createResp := req(t, http.MethodPost, srv.URL+"/mobile/pairings", nil)
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create pairing: want 201, got %d", createResp.StatusCode)
+	}
+	created := decodeJSON[mobileauth.Pairing](t, createResp)
+	if created.Code == "" || created.URL == "" || created.QRDataURL == "" {
+		t.Fatalf("pairing must include code, url and qr: %+v", created)
+	}
+
+	claimResp, err := postPairingClaim(t, srv.URL, created.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimResp.StatusCode != http.StatusOK {
+		t.Fatalf("claim pairing: want 200, got %d", claimResp.StatusCode)
+	}
+	claim := decodeJSON[mobileauth.ClaimResult](t, claimResp)
+	if claim.Token == "" || claim.Device.Name != "iPhone" {
+		t.Fatalf("unexpected claim: %+v", claim)
+	}
+
+	deviceReq, err := http.NewRequest(http.MethodGet, srv.URL+"/sessions", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deviceReq.Header.Set("Authorization", "Bearer "+claim.Token)
+	deviceResp, err := http.DefaultClient.Do(deviceReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deviceResp.Body.Close()
+	if deviceResp.StatusCode != http.StatusOK {
+		t.Fatalf("device token should authorize sessions, got %d", deviceResp.StatusCode)
+	}
+
+	replayResp, err := postPairingClaim(t, srv.URL, created.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayResp.Body.Close()
+	if replayResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("pairing code must be single-use, got %d", replayResp.StatusCode)
+	}
+}
+
+func postPairingClaim(t *testing.T, baseURL, code string) (*http.Response, error) {
+	t.Helper()
+	var body bytes.Buffer
+	if err := json.NewEncoder(&body).Encode(map[string]string{"deviceName": "iPhone"}); err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/mobile/pairings/"+code+"/claim", &body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return http.DefaultClient.Do(req)
 }
 
 func TestWebToolsAPI(t *testing.T) {

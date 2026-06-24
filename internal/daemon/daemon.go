@@ -20,6 +20,7 @@ import (
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/home"
+	"github.com/teatak/pudding-core/internal/mobileauth"
 	"github.com/teatak/pudding-core/internal/prompt"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
@@ -29,20 +30,23 @@ import (
 )
 
 type Options struct {
-	Home string // 空 = 通道默认目录
-	Addr string // 空 = 通道默认地址
-	Mock bool
+	Home      string // 空 = 通道默认目录
+	Addr      string // 空 = 通道默认地址
+	Mock      bool
+	MobileLAN bool // true = 同一 HTTP 服务监听局域网接口
 }
 
 type Daemon struct {
-	store    *sqlitestore.Store
-	engine   *engine.Engine
-	server   *http.Server
-	listener net.Listener
-	token    string
-	homeDir  string
-	stopSSE  context.CancelFunc
-	serveErr chan error
+	store     *sqlitestore.Store
+	engine    *engine.Engine
+	server    *http.Server
+	listener  net.Listener
+	localAddr string
+	lanURLs   []string
+	token     string
+	homeDir   string
+	stopSSE   context.CancelFunc
+	serveErr  chan error
 }
 
 // Start 完成启动并开始 serve;返回时端口已监听、恢复已完成。
@@ -88,28 +92,51 @@ func Start(opts Options) (*Daemon, error) {
 	if addr == "" {
 		addr = home.DefaultAddr()
 	}
-	ln, err := net.Listen("tcp", addr)
+	listenAddr := addr
+	if opts.MobileLAN {
+		listenAddr = lanListenAddr(addr)
+	}
+	ln, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		_ = st.Close()
 		return nil, err
 	}
+	localAddr := localAddrFor(addr, ln.Addr().String(), opts.MobileLAN)
+	var lanURLs []string
+	if opts.MobileLAN {
+		lanURLs = lanURLsFor(ln.Addr().String())
+	}
+	devices, err := mobileauth.OpenDeviceStore(home.MobileDevicesPath(dir))
+	if err != nil {
+		_ = st.Close()
+		_ = ln.Close()
+		return nil, err
+	}
+	pairing := mobileauth.NewManager(devices, append(lanURLs, "http://"+localAddr+"/"))
 
 	// request ctx 派生自此:Shutdown 时 SSE 长连接立即退出,不拖优雅关闭
 	sseCtx, stopSSE := context.WithCancel(context.Background())
 	server := &http.Server{
-		Handler:     api.New(eng, st, cfg, hub).Handler(token, webui.Handler()),
+		Handler: api.New(eng, st, cfg, hub).Handler(
+			token,
+			webui.Handler(),
+			api.WithDeviceTokenValidator(devices),
+			api.WithPairing(pairing),
+		),
 		BaseContext: func(net.Listener) context.Context { return sseCtx },
 	}
 
 	d := &Daemon{
-		store:    st,
-		engine:   eng,
-		server:   server,
-		listener: ln,
-		token:    token,
-		homeDir:  dir,
-		stopSSE:  stopSSE,
-		serveErr: make(chan error, 1),
+		store:     st,
+		engine:    eng,
+		server:    server,
+		listener:  ln,
+		localAddr: localAddr,
+		lanURLs:   lanURLs,
+		token:     token,
+		homeDir:   dir,
+		stopSSE:   stopSSE,
+		serveErr:  make(chan error, 1),
 	}
 	go func() { d.serveErr <- server.Serve(ln) }()
 
@@ -117,13 +144,18 @@ func Start(opts Options) (*Daemon, error) {
 		"channel", buildinfo.Channel(),
 		"home", dir,
 		"addr", d.Addr(),
+		"listen", ln.Addr().String(),
+		"lan", opts.MobileLAN,
+		"lanURLs", d.LANURLs(),
 		"provider", providerLabel,
 		"store", "sqlite")
 	slog.Info("open", "url", d.OpenURL())
 	return d, nil
 }
 
-func (d *Daemon) Addr() string { return d.listener.Addr().String() }
+func (d *Daemon) Addr() string { return d.localAddr }
+
+func (d *Daemon) LANURLs() []string { return append([]string(nil), d.lanURLs...) }
 
 func (d *Daemon) Token() string { return d.token }
 
@@ -132,6 +164,82 @@ func (d *Daemon) Home() string { return d.homeDir }
 // OpenURL 是带 token 的一键入口;前端读取后会从地址栏清掉。
 func (d *Daemon) OpenURL() string {
 	return fmt.Sprintf("http://%s/?token=%s", d.Addr(), d.token)
+}
+
+func lanListenAddr(addr string) string {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil || port == "" {
+		return addr
+	}
+	return net.JoinHostPort("0.0.0.0", port)
+}
+
+func localAddrFor(configuredAddr, actualAddr string, mobileLAN bool) string {
+	if !mobileLAN {
+		if host, port, err := net.SplitHostPort(actualAddr); err == nil && isUnspecifiedHost(host) {
+			return net.JoinHostPort("127.0.0.1", port)
+		}
+		return actualAddr
+	}
+	_, port, err := net.SplitHostPort(actualAddr)
+	if err != nil || port == "" {
+		return configuredAddr
+	}
+	return net.JoinHostPort("127.0.0.1", port)
+}
+
+func lanURLsFor(actualAddr string) []string {
+	_, port, err := net.SplitHostPort(actualAddr)
+	if err != nil || port == "" {
+		return nil
+	}
+	var urls []string
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ip := addrIP(addr)
+			if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+				continue
+			}
+			if ip4 := ip.To4(); ip4 != nil {
+				ip = ip4
+			}
+			host := ip.String()
+			if seen[host] {
+				continue
+			}
+			seen[host] = true
+			urls = append(urls, "http://"+net.JoinHostPort(host, port)+"/")
+		}
+	}
+	return urls
+}
+
+func addrIP(addr net.Addr) net.IP {
+	switch v := addr.(type) {
+	case *net.IPNet:
+		return v.IP
+	case *net.IPAddr:
+		return v.IP
+	default:
+		return nil
+	}
+}
+
+func isUnspecifiedHost(host string) bool {
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsUnspecified()
 }
 
 // ServeErr 在 serve 异常退出时收到错误(正常 Shutdown 收到 http.ErrServerClosed)。

@@ -27,13 +27,15 @@ func run() error {
 		flagHome = flag.String("home", "", "data home (default: channel home, see docs)")
 		flagAddr = flag.String("addr", home.DefaultAddr(), "HTTP listen address")
 		flagMock = flag.Bool("mock", false, "use mock provider")
+		flagLAN  = flag.Bool("lan", false, "listen on LAN interfaces for mobile pairing")
 	)
 	flag.Parse()
 
 	d, err := daemon.Start(daemon.Options{
-		Home: *flagHome,
-		Addr: *flagAddr,
-		Mock: *flagMock,
+		Home:      *flagHome,
+		Addr:      *flagAddr,
+		Mock:      *flagMock,
+		MobileLAN: *flagLAN,
 	})
 	if err != nil {
 		return err

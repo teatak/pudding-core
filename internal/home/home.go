@@ -54,3 +54,5 @@ func DefaultAddr() string {
 func DBPath(dir string) string { return filepath.Join(dir, "data", "pudding.db") }
 
 func TokenPath(dir string) string { return filepath.Join(dir, "daemon.token") }
+
+func MobileDevicesPath(dir string) string { return filepath.Join(dir, "config", "mobile-devices.json") }

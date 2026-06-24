@@ -13,12 +13,14 @@ import {
   Pencil,
   Plus,
   Settings,
+  Smartphone,
   Sparkles,
   Trash,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import {
+  createMobilePairing,
   deleteProvider,
   getDailyUsage,
   getWebTools,
@@ -28,6 +30,7 @@ import {
   patchWebTools,
   type BuiltinTool,
   type DailyUsageStat,
+  type MobilePairing,
   type ProviderProfile,
   type Session,
 } from "@/api/client";
@@ -104,6 +107,7 @@ const SETTINGS_SECTIONS: Array<{
   { id: "dialogue", icon: MessageSquareText, labelKey: "settings.section.dialogue" },
   { id: "model", icon: Sparkles, labelKey: "settings.section.model" },
   { id: "tools", icon: Globe2, labelKey: "settings.section.tools" },
+  { id: "mobile", icon: Smartphone, labelKey: "settings.section.mobile" },
   { id: "appearance", icon: Palette, labelKey: "settings.section.appearance" },
   { id: "about", icon: Info, labelKey: "settings.section.about" },
 ];
@@ -150,26 +154,104 @@ export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProp
           </Button>
         </DialogTrigger>
       ) : null}
-      <DialogContent className="top-[calc(var(--toolbar-h)+(100svh-var(--toolbar-h))/2)] h-[min(900px,calc(100svh-var(--toolbar-h)-1.5rem))] w-[calc(100vw-2rem)] max-w-[1180px] overflow-hidden bg-background p-0 sm:max-w-[1180px] xl:max-w-[1240px]">
+      <DialogContent className="top-[calc(var(--toolbar-h)+(100svh-var(--toolbar-h))/2)] h-[min(900px,calc(100svh-var(--toolbar-h)-1.5rem))] w-[calc(100%-0.5rem)] max-w-[430px] overflow-hidden bg-background p-0 sm:w-[calc(100vw-2rem)] sm:max-w-[1180px] xl:max-w-[1240px]">
         <DialogTitle className="sr-only">{t("settings.title")}</DialogTitle>
         <DialogDescription className="sr-only">{t("settings.description")}</DialogDescription>
-        <SidebarProvider className="h-full min-h-0 items-start" style={{ "--sidebar-width": "14rem" } as CSSProperties}>
-          <SettingsSidebar active={active} onActiveChange={setActive} />
-          <main className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-background">
-            <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
+        <SidebarProvider
+          className="h-full !min-h-0 min-w-0 max-w-full items-start overflow-hidden"
+          style={{ "--sidebar-width": "14rem" } as CSSProperties}
+        >
+          <div className="hidden h-full shrink-0 lg:flex">
+            <SettingsSidebar active={active} onActiveChange={setActive} />
+          </div>
+          <main className="flex h-full min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-background">
+            <SettingsTopNav active={active} onActiveChange={setActive} />
+            <header className="flex h-14 shrink-0 items-center gap-2 transition-[width,height] ease-linear lg:h-16 group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
               <div className="flex items-center gap-2 px-4">
                 <h2 className="text-sm font-normal text-foreground">{t(activeSection.labelKey)}</h2>
               </div>
             </header>
-            <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 pt-0">
+            <div className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-3 pb-4 sm:px-4">
               {active === "usage" ? <UsageSettings token={token} /> : null}
               {active === "model" ? <ProviderSettings createNonce={createProviderNonce} token={token} /> : null}
               {active === "tools" ? <ToolsSettings token={token} /> : null}
+              {active === "mobile" ? <MobileSettings token={token} /> : null}
             </div>
           </main>
         </SidebarProvider>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function SettingsTopNav({
+  active,
+  onActiveChange,
+}: {
+  active: SettingsSectionID;
+  onActiveChange: (section: SettingsSectionID) => void;
+}) {
+  const { t } = useI18n();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [showLeftHint, setShowLeftHint] = useState(false);
+  const [showRightHint, setShowRightHint] = useState(false);
+
+  useEffect(() => {
+    const scrollEl = scrollRef.current;
+    if (!scrollEl) {
+      return;
+    }
+    const updateHint = () => {
+      setShowLeftHint(scrollEl.scrollLeft > 1);
+      setShowRightHint(scrollEl.scrollLeft + scrollEl.clientWidth < scrollEl.scrollWidth - 1);
+    };
+    const resizeObserver = new ResizeObserver(updateHint);
+    resizeObserver.observe(scrollEl);
+    scrollEl.addEventListener("scroll", updateHint, { passive: true });
+    updateHint();
+    return () => {
+      resizeObserver.disconnect();
+      scrollEl.removeEventListener("scroll", updateHint);
+    };
+  }, []);
+
+  return (
+    <nav className="shrink-0 border-b lg:hidden" aria-label={t("settings.title")}>
+      <div className="relative w-[calc(100%-3rem)] overflow-hidden">
+        <div
+          ref={scrollRef}
+          className="flex gap-1 overflow-x-auto px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {SETTINGS_SECTIONS.map((section) => {
+            const Icon = section.icon;
+            const isActive = section.id === active;
+            return (
+              <button
+                key={section.id}
+                aria-current={isActive ? "page" : undefined}
+                className={cn(
+                  "inline-flex h-9 shrink-0 items-center gap-2 rounded-md px-3 text-sm transition-colors",
+                  isActive
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
+                )}
+                type="button"
+                onClick={() => onActiveChange(section.id)}
+              >
+                <Icon className="size-4" />
+                <span>{t(section.labelKey)}</span>
+              </button>
+            );
+          })}
+        </div>
+        {showLeftHint ? (
+          <div className="pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-background to-transparent" />
+        ) : null}
+        {showRightHint ? (
+          <div className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-background to-transparent" />
+        ) : null}
+      </div>
+    </nav>
   );
 }
 
@@ -197,7 +279,7 @@ function SettingsSidebar({
                 const isActive = section.id === active;
                 return (
                   <SidebarMenuItem key={section.id}>
-                    <SidebarMenuButton asChild isActive={isActive}>
+                    <SidebarMenuButton asChild className="cursor-default" isActive={isActive}>
                       <a
                         aria-current={isActive ? "page" : undefined}
                         href={`#settings-${section.id}`}
@@ -233,8 +315,8 @@ function UsageSettings({ token }: { token: string }) {
   const summary = useMemo(() => summarizeDailyUsage(days), [days]);
 
   return (
-    <div className="@container mx-auto grid w-full max-w-[980px] gap-6 pt-2">
-      <section className="grid gap-5">
+    <div className="@container mx-auto grid min-w-0 w-full max-w-[980px] gap-6 pt-2">
+      <section className="grid min-w-0 gap-5">
         {usageQuery.isError ? (
           <Alert variant="destructive">
             <AlertDescription className="grid gap-2">
@@ -245,7 +327,7 @@ function UsageSettings({ token }: { token: string }) {
         {usageQuery.isLoading ? <UsageSkeleton /> : null}
         {!usageQuery.isLoading ? (
           <>
-            <div className="grid gap-y-4 border-b pb-5 sm:grid-cols-4 sm:divide-x sm:divide-border/70">
+            <div className="grid grid-cols-4 divide-x divide-border/70 border-b pb-5">
               <UsageMetric label={t("settings.usage.totalTokens")} value={formatUsageTokens(summary.totalTokens)} />
               <UsageMetric label={t("settings.usage.requests")} value={formatNumber(summary.requestCount)} />
               <UsageMetric label={t("settings.usage.activeDays")} value={formatNumber(summary.activeDays)} />
@@ -261,7 +343,7 @@ function UsageSettings({ token }: { token: string }) {
 
 function UsageMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 sm:px-5 first:sm:pl-0">
+    <div className="min-w-0 px-3 first:pl-0 sm:px-5">
       <div className="text-2xl font-semibold tabular-nums tracking-tight text-foreground">{value}</div>
       <div className="mt-0.5 text-xs text-muted-foreground">{label}</div>
     </div>
@@ -294,16 +376,25 @@ function UsageHeatmap({
   const weekCount = Math.ceil(cells.length / 7);
   const heatThresholds = usageHeatThresholds(days);
   const monthLabels = usageMonthLabels(days, leading, locale);
+  const heatmapGapRem = Math.max(0, weekCount - 1) * 0.125;
 
   return (
-    <div ref={scrollRef} className="grid gap-3 overflow-x-auto pb-1">
-      <div className="mx-auto min-w-max">
+    <div
+      ref={scrollRef}
+      className="grid min-w-0 gap-3 overflow-x-auto pb-1"
+      style={
+        {
+          "--usage-heat-cell": `clamp(0.45rem, calc((100cqw - ${heatmapGapRem}rem) / ${weekCount}), 0.875rem)`,
+        } as CSSProperties
+      }
+    >
+      <div className="mx-auto w-max max-w-full">
         <div className="mb-3 text-sm font-medium text-muted-foreground">{t("settings.usage.last365Days")}</div>
-        <div className="min-w-max">
+        <div className="w-max max-w-full">
           <TooltipProvider>
             <div
               className="grid grid-flow-col grid-rows-7 gap-0.5"
-              style={{ gridAutoColumns: "0.875rem", gridTemplateRows: "repeat(7, 0.875rem)" }}
+              style={{ gridAutoColumns: "var(--usage-heat-cell)", gridTemplateRows: "repeat(7, var(--usage-heat-cell))" }}
             >
               {cells.map((day, index) =>
                 day ? (
@@ -315,14 +406,14 @@ function UsageHeatmap({
                     t={t}
                   />
                 ) : (
-                  <div key={`empty-${index}`} className="size-3.5" />
+                  <div key={`empty-${index}`} className="size-(--usage-heat-cell)" />
                 ),
               )}
             </div>
           </TooltipProvider>
           <div
             className="mt-2.5 grid gap-0.5 text-xs text-muted-foreground"
-            style={{ gridTemplateColumns: `repeat(${weekCount}, 0.875rem)` }}
+            style={{ gridTemplateColumns: `repeat(${weekCount}, var(--usage-heat-cell))` }}
           >
             {monthLabels.map((label) => (
               <div key={`${label.month}-${label.column}`} className="whitespace-nowrap" style={{ gridColumn: `${label.column + 1} / span 4` }}>
@@ -348,7 +439,7 @@ function UsageHeatmapCell({
   t: (key: string) => string;
 }) {
   if (day.totalTokens <= 0 && day.requestCount <= 0) {
-    return <div className={cn("size-3.5 rounded", usageHeatClass(day.totalTokens, heatThresholds))} />;
+    return <div className={cn("size-(--usage-heat-cell) rounded", usageHeatClass(day.totalTokens, heatThresholds))} />;
   }
 
   return (
@@ -356,7 +447,7 @@ function UsageHeatmapCell({
       <TooltipTrigger asChild>
         <button
           aria-label={usageDayTitle(day, t)}
-          className={cn("size-3.5 rounded transition-colors", usageHeatClass(day.totalTokens, heatThresholds))}
+          className={cn("size-(--usage-heat-cell) rounded transition-colors", usageHeatClass(day.totalTokens, heatThresholds))}
           type="button"
         />
       </TooltipTrigger>
@@ -597,6 +688,78 @@ function ToolsSettings({ token }: { token: string }) {
               </div>
             </div>
           </div>
+        </div>
+      </SettingsPanel>
+    </div>
+  );
+}
+
+function MobileSettings({ token }: { token: string }) {
+  const { locale, t } = useI18n();
+  const [pairing, setPairing] = useState<MobilePairing | null>(null);
+  const mutation = useMutation({
+    mutationFn: () => createMobilePairing(token),
+    onSuccess: (next) => setPairing(next),
+    onError: () => toast.error(t("settings.mobile.createFailed")),
+  });
+  const expiresAt = pairing?.expiresAt
+    ? new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(
+        new Date(pairing.expiresAt),
+      )
+    : "";
+
+  function copyURL() {
+    if (!pairing?.url) {
+      return;
+    }
+    void navigator.clipboard.writeText(pairing.url).then(() => toast.success(t("common.copied")));
+  }
+
+  return (
+    <div className="@container mx-auto grid w-full max-w-3xl gap-5">
+      <SettingsPanel
+        action={
+          <Button disabled={mutation.isPending} type="button" onClick={() => mutation.mutate()}>
+            {mutation.isPending ? <Loader2 className="animate-spin" /> : null}
+            {t("settings.mobile.generate")}
+          </Button>
+        }
+        title={t("settings.mobile.title")}
+      >
+        <div className="grid gap-4">
+          <p className="text-sm leading-6 text-muted-foreground">{t("settings.mobile.desc")}</p>
+          {pairing ? (
+            <div className="grid gap-4 sm:grid-cols-[16rem_1fr]">
+              <div className="grid justify-items-center gap-2 rounded-lg border bg-background p-4">
+                {pairing.qrDataURL ? (
+                  <img className="size-52 rounded-md bg-white p-2" src={pairing.qrDataURL} alt={t("settings.mobile.qrAlt")} />
+                ) : null}
+                <div className="text-xs text-muted-foreground">
+                  {expiresAt ? `${t("settings.mobile.expiresAt")} ${expiresAt}` : null}
+                </div>
+              </div>
+              <div className="grid content-start gap-2">
+                <label className="text-sm" htmlFor="pudding-mobile-pairing-url">
+                  {t("settings.mobile.url")}
+                </label>
+                <div className="flex min-w-0 gap-2">
+                  <Input
+                    readOnly
+                    className="font-mono text-xs"
+                    id="pudding-mobile-pairing-url"
+                    value={pairing.url}
+                  />
+                  <Button aria-label={t("common.copy")} size="icon" type="button" variant="outline" onClick={copyURL}>
+                    <Copy />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
+              {t("settings.mobile.empty")}
+            </div>
+          )}
         </div>
       </SettingsPanel>
     </div>

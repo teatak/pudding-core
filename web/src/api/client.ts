@@ -66,9 +66,25 @@ const sessionPatchRequest = z.object({
   pinned: z.boolean().optional(),
   pinnedOrder: z.number().optional(),
 });
+const mobilePairingClaimResponse = z.object({
+  token: z.string().min(1),
+  device: z.object({
+    id: z.string(),
+    name: z.string(),
+    createdAt: z.string(),
+  }),
+});
+const mobilePairingResponse = z.object({
+  code: z.string(),
+  url: z.string(),
+  urls: z.array(z.string()),
+  expiresAt: z.string(),
+  qrDataURL: z.string().optional(),
+});
 
 export type SubmitResult = z.infer<typeof submitResponse>;
 export type CompactResult = z.infer<typeof compactResponse>;
+export type MobilePairing = z.infer<typeof mobilePairingResponse>;
 
 function authHeaders(token: string) {
   return {
@@ -108,6 +124,46 @@ async function request<T>(
     throw new APIError(response.status, code);
   }
   return schema.parse(payload);
+}
+
+async function publicRequest<T>(
+  path: string,
+  schema: z.ZodType<T>,
+  init?: RequestInit,
+): Promise<T> {
+  const response = await fetch(apiURL(path), {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...init?.headers,
+    },
+  });
+  const payload = await readJSON(response);
+  if (!response.ok) {
+    const code = typeof payload?.error === "string" ? payload.error : response.statusText;
+    throw new APIError(response.status, code);
+  }
+  return schema.parse(payload);
+}
+
+export function claimMobilePairing(
+  code: string,
+  body: { deviceName?: string } = {},
+): Promise<z.infer<typeof mobilePairingClaimResponse>> {
+  return publicRequest(
+    `/mobile/pairings/${encodeURIComponent(code)}/claim`,
+    mobilePairingClaimResponse,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export function createMobilePairing(token: string): Promise<MobilePairing> {
+  return request(token, "/mobile/pairings", mobilePairingResponse, {
+    method: "POST",
+  });
 }
 
 export function listSessions(token: string): Promise<{ sessions: Session[] }> {
