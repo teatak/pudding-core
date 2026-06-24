@@ -674,6 +674,24 @@ html[data-shell] .pudding-markdown * {
   }
 }
 
+.pudding-transcript-viewport {
+  scrollbar-color: color-mix(in oklch, var(--muted-foreground), transparent 55%) transparent;
+}
+
+.pudding-transcript-viewport[data-scrollbar-state="hidden"]::-webkit-scrollbar {
+  width: initial;
+  height: initial;
+}
+
+.pudding-transcript-viewport[data-scrollbar-state="hidden"] {
+  scrollbar-color: transparent transparent;
+}
+
+.pudding-transcript-viewport[data-scrollbar-state="hidden"]::-webkit-scrollbar-thumb,
+.pudding-transcript-viewport[data-scrollbar-state="hidden"]::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
 .pudding-markdown {
   @apply grid min-w-0 max-w-full gap-2 whitespace-normal break-words;
 }

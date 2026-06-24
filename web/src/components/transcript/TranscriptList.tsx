@@ -7,10 +7,11 @@ const HISTORY_LOAD_SCROLL_TOP_PX = 120;
 const LIST_PADDING_BOTTOM_PX = 32;
 const LIST_PADDING_TOP_PX = 16;
 const TURN_GAP_PX = 16;
+const LIST_BOTTOM_SPACER_PX = Math.max(0, LIST_PADDING_BOTTOM_PX - TURN_GAP_PX);
 const SCROLL_END_THRESHOLD_PX = 8;
 const ANCHOR_RESTORE_EPSILON_PX = 0.75;
 const BOTTOM_STICK_STABILIZE_FRAMES = 4;
-const CONTENT_STICK_STABILIZE_FRAMES = 8;
+const CONTENT_STICK_STABILIZE_FRAMES = 2;
 const VIEWPORT_ANCHOR_MAX_TOP_RATIO = 0.7;
 const VIEWPORT_ANCHOR_MIN_TOP_RATIO = 0.3;
 const VIEWPORT_ANCHOR_TARGET_RATIO = 0.5;
@@ -55,6 +56,7 @@ export const TranscriptList = memo(function TranscriptList({
   const initialScrollSessionRef = useRef("");
   const isAtLatestRef = useRef(true);
   const lastScrollTopRef = useRef(0);
+  const latestSentinelRef = useRef<HTMLDivElement | null>(null);
   const listElementRef = useRef<HTMLDivElement | null>(null);
   const programmaticScrollIgnoreUntilRef = useRef(0);
   const stickRafRef = useRef<number | null>(null);
@@ -68,15 +70,25 @@ export const TranscriptList = memo(function TranscriptList({
   const viewportResizeSettleTimerRef = useRef<number | null>(null);
   const firstTurnKey = turns[0]?.key ?? "";
 
+  const syncViewportScrollbar = useCallback(
+    (atLatest: boolean) => {
+      if (scrollElement) {
+        scrollElement.dataset.scrollbarState = atLatest ? "hidden" : "visible";
+      }
+    },
+    [scrollElement],
+  );
+
   const setLatestState = useCallback(
     (next: boolean) => {
+      syncViewportScrollbar(next);
       if (isAtLatestRef.current === next) {
         return;
       }
       isAtLatestRef.current = next;
       onLatestChange?.(next);
     },
-    [onLatestChange],
+    [onLatestChange, syncViewportScrollbar],
   );
 
   const cancelScheduledStick = useCallback(() => {
@@ -148,8 +160,9 @@ export const TranscriptList = memo(function TranscriptList({
 
   const disableAutoStick = useCallback(() => {
     autoStickRef.current = false;
+    syncViewportScrollbar(false);
     cancelScheduledStick();
-  }, [cancelScheduledStick]);
+  }, [cancelScheduledStick, syncViewportScrollbar]);
 
   const scrollToLatest = useCallback(() => {
     if (!scrollElement) {
@@ -157,8 +170,13 @@ export const TranscriptList = memo(function TranscriptList({
     }
     releaseViewportResizeAnchor();
     if (distanceFromBottom(scrollElement) > ANCHOR_RESTORE_EPSILON_PX) {
-      scrollElement.scrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
       markProgrammaticScroll(programmaticScrollIgnoreUntilRef);
+      const sentinel = latestSentinelRef.current;
+      if (sentinel) {
+        sentinel.scrollIntoView({ block: "end", inline: "nearest" });
+      } else {
+        scrollElement.scrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
+      }
     }
     lastScrollTopRef.current = scrollElement.scrollTop;
     autoStickRef.current = true;
@@ -166,7 +184,7 @@ export const TranscriptList = memo(function TranscriptList({
   }, [releaseViewportResizeAnchor, scrollElement, setLatestState]);
 
   const stickToLatestIfPinned = useCallback(
-    (frames = 1) => {
+    (frames = 1, options: { deferFirstFrame?: boolean } = {}) => {
       if (!autoStickRef.current) {
         return;
       }
@@ -188,6 +206,10 @@ export const TranscriptList = memo(function TranscriptList({
           stickRafRef.current = window.requestAnimationFrame(tick);
         }
       };
+      if (options.deferFirstFrame) {
+        stickRafRef.current = window.requestAnimationFrame(tick);
+        return;
+      }
       tick();
     },
     [scrollToLatest],
@@ -284,7 +306,7 @@ export const TranscriptList = memo(function TranscriptList({
   });
 
   const handleAssistantContentGrow = useCallback(() => {
-    stickToLatestIfPinned(CONTENT_STICK_STABILIZE_FRAMES);
+    stickToLatestIfPinned(CONTENT_STICK_STABILIZE_FRAMES, { deferFirstFrame: true });
   }, [stickToLatestIfPinned]);
 
   const restoreResizeAnchorIfDetached = useCallback((anchorOverride?: ResizeAnchor | null) => {
@@ -297,28 +319,24 @@ export const TranscriptList = memo(function TranscriptList({
   }, [scrollElement]);
 
   const handleContentResize = useCallback(() => {
-    if (autoStickRef.current) {
-      stickToLatestIfPinned(CONTENT_STICK_STABILIZE_FRAMES);
+    if (autoStickRef.current || isAtLatestRef.current) {
+      autoStickRef.current = true;
+      stickToLatestIfPinned(CONTENT_STICK_STABILIZE_FRAMES, { deferFirstFrame: true });
       return;
     }
     if (resizeAnchorRef.current) {
       restoreResizeAnchorIfDetached(resizeAnchorRef.current);
       return;
     }
-    if (performance.now() < programmaticScrollIgnoreUntilRef.current) {
-      return;
-    }
-    if (scrollElement && distanceFromBottom(scrollElement) > SCROLL_END_THRESHOLD_PX) {
-      setLatestState(false);
-    }
-  }, [restoreResizeAnchorIfDetached, scrollElement, setLatestState, stickToLatestIfPinned]);
+  }, [restoreResizeAnchorIfDetached, stickToLatestIfPinned]);
 
   useEffect(() => {
     if (!scrollElement) {
       return;
     }
     lastScrollTopRef.current = scrollElement.scrollTop;
-  }, [scrollElement]);
+    syncViewportScrollbar(distanceFromBottom(scrollElement) <= SCROLL_END_THRESHOLD_PX);
+  }, [scrollElement, syncViewportScrollbar]);
 
   useLayoutEffect(() => {
     const previousFirstTurnKey = previousFirstTurnKeyRef.current;
@@ -439,7 +457,8 @@ export const TranscriptList = memo(function TranscriptList({
 
   useEffect(() => {
     const handleViewportResize = () => {
-      if (autoStickRef.current) {
+      if (autoStickRef.current || isAtLatestRef.current) {
+        autoStickRef.current = true;
         stickToLatestIfPinned(BOTTOM_STICK_STABILIZE_FRAMES);
         return;
       }
@@ -493,7 +512,7 @@ export const TranscriptList = memo(function TranscriptList({
     <div
       ref={listElementRef}
       className="grid min-w-0"
-      style={{ gap: TURN_GAP_PX, paddingBottom: LIST_PADDING_BOTTOM_PX, paddingTop: LIST_PADDING_TOP_PX }}
+      style={{ gap: TURN_GAP_PX, paddingTop: LIST_PADDING_TOP_PX }}
     >
       {turns.map((turn) => (
         <TranscriptTurn
@@ -507,6 +526,7 @@ export const TranscriptList = memo(function TranscriptList({
           turn={turn}
         />
       ))}
+      <div ref={latestSentinelRef} aria-hidden="true" className="scroll-mb-0" style={{ height: LIST_BOTTOM_SPACER_PX }} />
     </div>
   );
 });

@@ -183,14 +183,17 @@ export function ChatPane({ token, sessionID, draftActive = false, reserveTopRigh
       >
         <div className="flex h-8 min-w-0 max-w-(--chat-title-max-w) flex-1 items-center overflow-visible text-sm font-normal">
           {selectedSession ? (
-            <HeaderSessionTitle
-              key={selectedSession.id}
-              deletePending={deleteMutation.isPending}
-              renamePending={renameMutation.isPending}
-              session={selectedSession}
-              onDelete={() => deleteMutation.mutate(selectedSession.id)}
-              onRename={(title) => renameMutation.mutate({ id: selectedSession.id, title })}
-            />
+            <>
+              <HeaderSessionTitle
+                key={selectedSession.id}
+                deletePending={deleteMutation.isPending}
+                renamePending={renameMutation.isPending}
+                session={selectedSession}
+                onDelete={() => deleteMutation.mutate(selectedSession.id)}
+                onRename={(title) => renameMutation.mutate({ id: selectedSession.id, title })}
+              />
+              <HeaderStatus session={selectedSession} />
+            </>
           ) : (
             <span className="flex h-8 min-w-0 max-w-full items-center truncate text-sm font-normal leading-6">
               {headerTitle}
@@ -198,7 +201,6 @@ export function ChatPane({ token, sessionID, draftActive = false, reserveTopRigh
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <HeaderStatus session={selectedSession} />
           {!isPrimary ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -441,11 +443,10 @@ function LoadingState() {
   );
 }
 
-// header 单行状态区(docs/design.md 第 5 节):running 双源取或
+// header 单行状态点(docs/design.md 第 5 节):running 双源取或
 // (sessions 快照兜底 + overlay 实时);estimatedSteps/currentStep 协议
-// 落地后在此渲染细进度条,字段缺省时只显示状态点 + 文案。
+// 落地后在此渲染细进度条,字段缺省时只显示状态点。
 function HeaderStatus({ session }: { session: Session | undefined }) {
-  const { t } = useI18n();
   const liveRunning = useOverlayStore((state) =>
     session ? Boolean(state.runningTurns[session.id]) : false,
   );
@@ -458,9 +459,8 @@ function HeaderStatus({ session }: { session: Session | undefined }) {
     return null;
   }
   return (
-    <div className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+    <div className="flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
       <PhaseDot phase={livePhase?.phase} size="sm" />
-      {t("session.generating")}
     </div>
   );
 }

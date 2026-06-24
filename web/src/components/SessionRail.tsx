@@ -1292,7 +1292,7 @@ function SessionItem({
               actionsOpen && "opacity-0",
             )}
           >
-            {running ? t("session.generating") : formatRelative(session.lastActivityAt || session.createdAt, locale)}
+            {formatRelative(session.lastActivityAt || session.createdAt, locale)}
           </SidebarMenuBadge>
           <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen}>
             <DropdownMenuTrigger asChild>
