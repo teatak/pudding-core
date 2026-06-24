@@ -213,10 +213,10 @@ export function ProviderProfileEditorDialog({
   function applyPresetVariant(variant: ProviderPresetVariant) {
     form.setValue("group", variant.group || "", { shouldDirty: true });
     form.setValue("protocol", variant.protocol, { shouldDirty: true });
-    form.setValue("baseURL", variant.baseURL, { shouldDirty: true });
-    if (variant.dynamicModels) {
-      fields.replace([]);
-    } else if (variant.models.length > 0) {
+    form.setValue("baseURL", baseURLForVariantSwitch(form.getValues("baseURL"), variant), { shouldDirty: true });
+    // 动态模型只表示"预设不内置模型清单";切换接入方式时不能清空
+    // 用户已经配置的模型,也不在这里从端点隐式恢复。
+    if (!variant.dynamicModels && variant.models.length > 0) {
       fields.replace(variant.models.map(modelToForm));
     }
     form.clearErrors("root");
@@ -582,13 +582,14 @@ function emptyModel(id = ""): ModelFormValue {
 }
 
 function providerToForm(profile: ProviderProfile): ProviderProfileEditorValue {
+  const variant = providerPresetVariantForSelection(providerPresetForBrand(profile.brand), profile.group, profile.protocol);
   return {
     id: profile.id,
     displayName: profile.displayName,
     brand: profile.brand || "",
     group: profile.group || "",
     protocol: profile.protocol,
-    baseURL: profile.baseURL,
+    baseURL: profile.baseURL || variant?.baseURL || "",
     apiKey: profile.apiKey || "",
     models: profile.models.map(modelToForm),
   };
@@ -689,6 +690,25 @@ function stringifyOption(value: unknown) {
     return "";
   }
   return String(value);
+}
+
+function baseURLForVariantSwitch(currentBaseURL: string | undefined, variant: ProviderPresetVariant) {
+  const target = variant.baseURL.trim();
+  const current = (currentBaseURL || "").trim();
+  if (!current || !target) {
+    return target || current;
+  }
+  if (!variant.baseURLEditable) {
+    return target;
+  }
+  try {
+    const currentURL = new URL(current);
+    const variantURL = new URL(target);
+    const path = variantURL.pathname === "/" ? "" : variantURL.pathname.replace(/\/+$/, "");
+    return `${currentURL.origin}${path}${variantURL.search}`;
+  } catch {
+    return target;
+  }
 }
 
 function presetGroupLabel(preset: ProviderPreset, group: string, t: (key: string) => string) {

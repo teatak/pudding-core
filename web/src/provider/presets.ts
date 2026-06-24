@@ -204,9 +204,9 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       {
         id: "default",
         label: "Google API",
-        description: "Google AI Studio API",
+        description: "https://generativelanguage.googleapis.com",
         protocol: "google",
-        baseURL: "",
+        baseURL: "https://generativelanguage.googleapis.com",
         models: [
           model("gemini-3.5-flash", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: 0.7, maxOutputTokens: 64_000 } }),
           model("gemini-3.5-pro", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: 0.7, maxOutputTokens: 64_000 } }),
