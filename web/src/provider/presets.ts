@@ -19,6 +19,7 @@ export type ProviderPresetVariant = {
   id: string;
   label: string;
   description: string;
+  group?: string;
   protocol: ProviderPresetProtocol;
   baseURL: string;
   models: ProviderModel[];
@@ -156,6 +157,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "standard-openai",
         label: "Standard API / OpenAI",
         description: "api.xiaomimimo.com/v1 · token-based billing",
+        group: "standard",
         protocol: "openai-compatible",
         baseURL: "https://api.xiaomimimo.com/v1",
         models: MIMO_OPENAI_MODELS,
@@ -164,6 +166,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "standard-anthropic",
         label: "Standard API / Anthropic",
         description: "api.xiaomimimo.com/anthropic · token-based billing",
+        group: "standard",
         protocol: "anthropic",
         baseURL: "https://api.xiaomimimo.com/anthropic",
         models: MIMO_ANTHROPIC_MODELS,
@@ -173,6 +176,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "plan-openai",
         label: "Plan / OpenAI",
         description: "token-plan-cn.xiaomimimo.com/v1 · subscription plan",
+        group: "plan",
         protocol: "openai-compatible",
         baseURL: "https://token-plan-cn.xiaomimimo.com/v1",
         models: MIMO_OPENAI_MODELS,
@@ -182,6 +186,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         id: "plan-anthropic",
         label: "Plan / Anthropic",
         description: "token-plan-cn.xiaomimimo.com/anthropic · subscription plan",
+        group: "plan",
         protocol: "anthropic",
         baseURL: "https://token-plan-cn.xiaomimimo.com/anthropic",
         models: MIMO_ANTHROPIC_MODELS,
@@ -336,13 +341,13 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "buzzhive",
     name: "BuzzHive",
-    description: "BuzzHive proxy through an OpenAI-compatible endpoint; models are loaded from the endpoint.",
+    description: "BuzzHive proxy with OpenAI Chat, OpenAI Responses, Anthropic, and Gemini-compatible endpoints; models are loaded from the endpoint.",
     apiKeyURL: "http://127.0.0.1:9622/admin/",
-    defaultVariantId: "default",
+    defaultVariantId: "openai-compatible",
     variants: [
       {
-        id: "default",
-        label: "OpenAI Compatible",
+        id: "openai-compatible",
+        label: "OpenAI Chat",
         description: "http://127.0.0.1:9622/v1",
         protocol: "openai-compatible",
         baseURL: "http://127.0.0.1:9622/v1",
@@ -350,13 +355,50 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         baseURLEditable: true,
         dynamicModels: true,
         models: [],
+        profileName: "BuzzHive OpenAI",
+      },
+      {
+        id: "openai-responses",
+        label: "OpenAI Responses",
+        description: "http://127.0.0.1:9622/v1",
+        protocol: "openai-responses",
+        baseURL: "http://127.0.0.1:9622/v1",
+        baseURLPlaceholder: "http://127.0.0.1:9622/v1",
+        baseURLEditable: true,
+        dynamicModels: true,
+        models: [],
+        profileName: "BuzzHive Responses",
+      },
+      {
+        id: "anthropic",
+        label: "Anthropic",
+        description: "http://127.0.0.1:9622",
+        protocol: "anthropic",
+        baseURL: "http://127.0.0.1:9622",
+        baseURLPlaceholder: "http://127.0.0.1:9622",
+        baseURLEditable: true,
+        dynamicModels: true,
+        models: [],
+        profileName: "BuzzHive Anthropic",
+      },
+      {
+        id: "google",
+        label: "Gemini",
+        description: "http://127.0.0.1:9622",
+        protocol: "google",
+        baseURL: "http://127.0.0.1:9622",
+        baseURLPlaceholder: "http://127.0.0.1:9622",
+        baseURLEditable: true,
+        dynamicModels: true,
+        models: [],
+        profileName: "BuzzHive Gemini",
       },
     ],
   },
   {
     id: "ollama",
     name: "Ollama",
-    description: "Local Ollama OpenAI-compatible endpoint.",
+    description: "Local Ollama OpenAI-compatible endpoint; models are loaded from the endpoint.",
     defaultVariantId: "default",
     apiKeyURL: "https://ollama.com/download",
     variants: [
@@ -366,7 +408,10 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         description: "http://localhost:11434/v1",
         protocol: "openai-compatible",
         baseURL: "http://localhost:11434/v1",
-        models: ["llama3.3", "qwen3", "gemma3", "gpt-oss:120b-cloud", "qwen3-coder:480b-cloud"].map((id) => model(id, { capabilities: { tools: true }, openai: { temperature: 0.7 } })),
+        baseURLPlaceholder: "http://localhost:11434/v1",
+        baseURLEditable: true,
+        dynamicModels: true,
+        models: [],
         apiKeyOptional: true,
       },
     ],
@@ -433,6 +478,72 @@ export function defaultProviderPresetVariant(preset: ProviderPreset) {
 
 export function providerPresetVariant(preset: ProviderPreset, variantID: string) {
   return preset.variants.find((variant) => variant.id === variantID) || preset.variants[0];
+}
+
+export function providerPresetForBrand(brand: string | undefined) {
+  const normalizedBrand = (brand || "").trim().toLowerCase();
+  if (!normalizedBrand) {
+    return undefined;
+  }
+  return PROVIDER_PRESETS.find((preset) => preset.id === normalizedBrand);
+}
+
+export function providerPresetVariantGroup(variant: ProviderPresetVariant | undefined) {
+  return variant?.group || "default";
+}
+
+export function providerPresetGroups(preset: ProviderPreset) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const variant of preset.variants) {
+    const group = providerPresetVariantGroup(variant);
+    if (!seen.has(group)) {
+      seen.add(group);
+      out.push(group);
+    }
+  }
+  return out;
+}
+
+export function providerPresetProtocolsForGroup(preset: ProviderPreset, group: string) {
+  const activeGroup = group || "default";
+  const seen = new Set<ProviderPresetProtocol>();
+  const out: ProviderPresetProtocol[] = [];
+  for (const variant of preset.variants) {
+    if (providerPresetVariantGroup(variant) !== activeGroup || seen.has(variant.protocol)) {
+      continue;
+    }
+    seen.add(variant.protocol);
+    out.push(variant.protocol);
+  }
+  return out;
+}
+
+export function providerPresetVariantForSelection(
+  preset: ProviderPreset | undefined,
+  group: string | undefined,
+  protocol: ProviderPresetProtocol | undefined,
+) {
+  if (!preset || !protocol) {
+    return undefined;
+  }
+  const activeGroup = group || "default";
+  return preset.variants.find(
+    (variant) => providerPresetVariantGroup(variant) === activeGroup && variant.protocol === protocol,
+  );
+}
+
+export function mergeProviderModelCandidate(
+  id: string,
+  variant: ProviderPresetVariant | undefined,
+  protocol: ProviderPresetProtocol,
+): ProviderModel {
+  const trimmedID = id.trim();
+  const presetModel = variant?.models.find((model) => model.id === trimmedID);
+  if (presetModel) {
+    return { ...presetModel };
+  }
+  return providerModelFromCandidate(trimmedID, protocol);
 }
 
 export function providerPresetProfileName(preset: ProviderPreset, variant: ProviderPresetVariant) {
@@ -504,6 +615,17 @@ function model(id: string, patch: ProviderModelPatch = {}): ProviderModel {
       anthropic: cleanAnthropic,
     }),
   };
+}
+
+function providerModelFromCandidate(id: string, protocol: ProviderPresetProtocol): ProviderModel {
+  const capabilities = { tools: true };
+  if (protocol === "anthropic") {
+    return { id, capabilities, providerOptions: { anthropic: { temperature: 0.7 } } };
+  }
+  if (protocol === "google") {
+    return { id, capabilities, providerOptions: { google: { temperature: 0.7 } } };
+  }
+  return { id, capabilities, providerOptions: { openai: { temperature: 0.7 } } };
 }
 
 function numericOption(value: unknown) {

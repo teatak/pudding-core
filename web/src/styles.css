@@ -573,7 +573,7 @@ html[data-shell] .pudding-markdown * {
 
 .pudding-provider-preset-icon,
 .pudding-provider-preset-custom-icon {
-    @apply size-5 shrink-0;
+    @apply size-5 shrink-0 rounded;
 }
 
 .pudding-provider-preset-custom-icon-mark {
@@ -603,7 +603,7 @@ html[data-shell] .pudding-markdown * {
 
     .pudding-provider-preset-icon,
     .pudding-provider-preset-custom-icon {
-        @apply size-7;
+        @apply size-7 rounded-md;
     }
 
     .pudding-provider-preset-custom-icon-mark {
@@ -638,7 +638,7 @@ html[data-shell] .pudding-markdown * {
 
     .pudding-provider-preset-icon,
     .pudding-provider-preset-custom-icon {
-        @apply size-8;
+        @apply size-8 rounded-lg;
     }
 }
 

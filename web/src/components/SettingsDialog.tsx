@@ -90,6 +90,7 @@ import { cn } from "@/lib/utils";
 import { SETTINGS_DIALOG_OPEN_EVENT, type SettingsDialogOpenDetail, type SettingsSectionID } from "@/lib/settingsDialog";
 import {
   getOrderedProviderPresets,
+  providerPresetForBrand,
   type ProviderPreset,
 } from "@/provider/presets";
 import { toast } from "sonner";
@@ -814,7 +815,7 @@ function ProviderSettings({ createNonce = 0, token }: { createNonce?: number; to
                 >
                   <div className="flex min-w-0 flex-1 items-center gap-3 text-left">
                     <ItemMedia>
-                      <BrandIcon className="size-9 shrink-0" name={profile.brand || profile.displayName || profile.id} />
+                      <BrandIcon className="size-9 shrink-0" name={profile.brand || profile.displayName || profile.id} radius="lg" />
                     </ItemMedia>
                     <ItemContent className="min-w-0 gap-0.5">
                       <ItemTitle className="w-full min-w-0 font-normal">
@@ -828,7 +829,7 @@ function ProviderSettings({ createNonce = 0, token }: { createNonce?: number; to
                         />
                       </ItemTitle>
                       <ItemDescription className="truncate text-xs">
-                        {profile.protocol} · {modelCountLabel(profile.models.length, t)}
+                        {profile.protocol} · {profileModelCountLabel(profile, t)}
                       </ItemDescription>
                     </ItemContent>
                   </div>
@@ -974,6 +975,17 @@ function modelCountLabel(count: number, t: (key: string) => string) {
     return t("picker.noModels");
   }
   return `${count}${t("provider.modelCountSuffix")}`;
+}
+
+function profileModelCountLabel(profile: ProviderProfile, t: (key: string) => string) {
+  if (profile.models.length > 0) {
+    return modelCountLabel(profile.models.length, t);
+  }
+  const preset = providerPresetForBrand(profile.brand);
+  if (preset?.variants.some((variant) => variant.dynamicModels)) {
+    return t("provider.modelCountDynamic");
+  }
+  return modelCountLabel(0, t);
 }
 
 function formatNumber(value: number) {

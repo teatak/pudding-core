@@ -195,8 +195,8 @@ func readSSE(ctx context.Context, body io.Reader, out chan<- provider.Chunk) err
 					return ctx.Err()
 				}
 			}
-			if choice.Delta.ReasoningContent != "" {
-				if !emit(ctx, out, provider.Chunk{Part: provider.PartThought, Delta: choice.Delta.ReasoningContent}) {
+			for _, reasoning := range choice.Delta.reasoningDeltas() {
+				if !emit(ctx, out, provider.Chunk{Part: provider.PartThought, Delta: reasoning}) {
 					return ctx.Err()
 				}
 			}
@@ -365,21 +365,52 @@ type chatToolCallFunction struct {
 
 type chatStreamFrame struct {
 	Choices []struct {
-		Delta struct {
-			Content          string `json:"content"`
-			ReasoningContent string `json:"reasoning_content"`
-			ToolCalls        []struct {
-				Index    int    `json:"index"`
-				ID       string `json:"id"`
-				Function struct {
-					Name      string `json:"name"`
-					Arguments string `json:"arguments"`
-				} `json:"function"`
-			} `json:"tool_calls"`
-		} `json:"delta"`
-		FinishReason string `json:"finish_reason"`
+		Delta        chatStreamDelta `json:"delta"`
+		FinishReason string          `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *chatUsage `json:"usage,omitempty"`
+}
+
+type chatStreamDelta struct {
+	Content          string                `json:"content"`
+	Reasoning        string                `json:"reasoning"`
+	ReasoningContent string                `json:"reasoning_content"`
+	ReasoningDetails []chatReasoningDetail `json:"reasoning_details"`
+	ToolCalls        []struct {
+		Index    int    `json:"index"`
+		ID       string `json:"id"`
+		Function struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		} `json:"function"`
+	} `json:"tool_calls"`
+}
+
+type chatReasoningDetail struct {
+	Text    string `json:"text"`
+	Summary string `json:"summary"`
+}
+
+func (d chatStreamDelta) reasoningDeltas() []string {
+	out := make([]string, 0, 1+len(d.ReasoningDetails))
+	appendUnique := func(s string) {
+		if s == "" {
+			return
+		}
+		for _, existing := range out {
+			if existing == s {
+				return
+			}
+		}
+		out = append(out, s)
+	}
+	appendUnique(d.ReasoningContent)
+	appendUnique(d.Reasoning)
+	for _, detail := range d.ReasoningDetails {
+		appendUnique(detail.Text)
+		appendUnique(detail.Summary)
+	}
+	return out
 }
 
 type chatUsage struct {

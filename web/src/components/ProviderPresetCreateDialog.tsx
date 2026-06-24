@@ -5,8 +5,6 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   createProvider,
   createProviderRequest,
-  probeProviderModels,
-  type ProviderModel,
   type ProviderProfile,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
@@ -66,7 +64,7 @@ export function ProviderPresetGrid({
             type="button"
             onClick={() => onSelect(preset)}
           >
-            <BrandIcon className="pudding-provider-preset-icon" name={preset.id} />
+            <BrandIcon className="pudding-provider-preset-icon" name={preset.id} radius="none" />
             <span className="pudding-provider-preset-text">
               <span className="pudding-provider-preset-title">{displayName}</span>
               <span className="pudding-provider-preset-meta">{variantModelCountLabel(variant, t)}</span>
@@ -122,8 +120,6 @@ export function ProviderPresetCreateDialog({
   const [variantID, setVariantID] = useState("");
   const [apiKey, setAPIKey] = useState("");
   const [baseURL, setBaseURL] = useState("");
-  const [loadedModels, setLoadedModels] = useState<ProviderModel[]>([]);
-  const [candidatesLoading, setCandidatesLoading] = useState(false);
   const [profileID, setProfileID] = useState("");
   const [localError, setLocalError] = useState("");
   const initializedPresetIDRef = useRef<string | null>(null);
@@ -141,8 +137,6 @@ export function ProviderPresetCreateDialog({
     setVariantID(initialVariant.id);
     setAPIKey("");
     setBaseURL(initialVariant.baseURL);
-    setLoadedModels([]);
-    setCandidatesLoading(false);
     setProfileID(generateProviderProfileID(profiles, preset.id));
     setLocalError("");
   }, [open, preset, profiles]);
@@ -154,15 +148,13 @@ export function ProviderPresetCreateDialog({
     : t("provider.quickCreateHint");
   const apiKeyRequired = variant ? !variant.apiKeyOptional : true;
   const activeBaseURL = variant?.baseURLEditable ? baseURL.trim() : variant?.baseURL || "";
-  const activeModels = variant?.dynamicModels ? loadedModels : variant?.models || [];
+  const activeModels = variant?.dynamicModels ? [] : variant?.models || [];
   const baseURLReady = !variant?.baseURLEditable || Boolean(activeBaseURL);
-  const canLoadCandidates = Boolean(variant?.dynamicModels && activeBaseURL && (!apiKeyRequired || apiKey.trim()));
-  const canCreate = Boolean(preset && variant && profileID && baseURLReady && (!apiKeyRequired || apiKey.trim()) && (!variant.dynamicModels || loadedModels.length > 0));
+  const canCreate = Boolean(preset && variant && profileID && baseURLReady && (!apiKeyRequired || apiKey.trim()));
   const handleVariantChange = (value: string) => {
     setVariantID(value);
     const nextVariant = preset ? providerPresetVariant(preset, value) : null;
     setBaseURL(nextVariant?.baseURL || "");
-    setLoadedModels([]);
     setLocalError("");
   };
   const openAPIKeyURL = () => {
@@ -189,6 +181,7 @@ export function ProviderPresetCreateDialog({
           id: profileID,
           displayName: providerPresetProfileName(preset, variant),
           brand: preset.id,
+          group: variant.group,
           protocol: variant.protocol,
           baseURL: activeBaseURL,
           apiKey: apiKey.trim(),
@@ -208,42 +201,6 @@ export function ProviderPresetCreateDialog({
       setLocalError(error instanceof Error ? error.message : t("provider.saveFailed"));
     },
   });
-
-  async function loadCandidates() {
-    if (!variant) {
-      return;
-    }
-    setCandidatesLoading(true);
-    setLocalError("");
-    try {
-      const { models } = await probeProviderModels(token, {
-        protocol: variant.protocol,
-        baseURL: activeBaseURL,
-        apiKey: apiKey.trim(),
-      });
-      const seen = new Set<string>();
-      const nextModels = models
-        .map((id) => id.trim())
-        .filter((id) => {
-          if (!id || seen.has(id)) {
-            return false;
-          }
-          seen.add(id);
-          return true;
-        })
-        .map((id) => providerModelFromCandidate(id, variant.protocol));
-      if (nextModels.length === 0) {
-        setLocalError(t("provider.candidatesEmpty"));
-        setLoadedModels([]);
-        return;
-      }
-      setLoadedModels(nextModels);
-    } catch {
-      setLocalError(t("provider.candidatesFailed"));
-    } finally {
-      setCandidatesLoading(false);
-    }
-  }
 
   return (
     <Dialog open={open} onOpenChange={(next) => {
@@ -304,7 +261,6 @@ export function ProviderPresetCreateDialog({
                 value={baseURL}
                 onChange={(event) => {
                   setBaseURL(event.target.value);
-                  setLoadedModels([]);
                   setLocalError("");
                 }}
               />
@@ -323,27 +279,14 @@ export function ProviderPresetCreateDialog({
               value={apiKey}
               onChange={(event) => {
                 setAPIKey(event.target.value);
-                setLoadedModels([]);
                 setLocalError("");
               }}
             />
           </Field>
 
           {variant?.dynamicModels ? (
-            <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 p-3">
-              <div className="min-w-0 text-xs text-muted-foreground">
-                {loadedModels.length > 0 ? dynamicModelsLoadedLabel(loadedModels.length, t) : t("provider.dynamicModelsHint")}
-              </div>
-              <Button
-                disabled={!canLoadCandidates || candidatesLoading}
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={() => void loadCandidates()}
-              >
-                {candidatesLoading ? <Loader2 className="animate-spin" /> : null}
-                {t("provider.loadCandidates")}
-              </Button>
+            <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+              {t("provider.dynamicModelsHint")}
             </div>
           ) : null}
 
@@ -356,7 +299,7 @@ export function ProviderPresetCreateDialog({
           <Button disabled={mutation.isPending} type="button" variant="ghost" onClick={() => onOpenChange(false)}>
             {t("common.cancel")}
           </Button>
-          <Button disabled={mutation.isPending || candidatesLoading || !canCreate} type="button" onClick={() => mutation.mutate()}>
+          <Button disabled={mutation.isPending || !canCreate} type="button" onClick={() => mutation.mutate()}>
             {mutation.isPending ? <Loader2 className="animate-spin" /> : <Plus />}
             {t("provider.create")}
           </Button>
@@ -524,30 +467,15 @@ function variantModelCountLabel(variant: ProviderPresetVariant, t: (key: string)
   return modelCountLabel(variant.models.length, t);
 }
 
-function dynamicModelsLoadedLabel(count: number, t: (key: string) => string) {
-  return t("provider.dynamicModelsLoaded").replace("{count}", String(count));
-}
-
-function providerModelFromCandidate(id: string, protocol: ProviderPresetVariant["protocol"]): ProviderModel {
-  const capabilities = { tools: true };
-  if (protocol === "anthropic") {
-    return { id, capabilities, providerOptions: { anthropic: { temperature: 0.7 } } };
-  }
-  if (protocol === "google") {
-    return { id, capabilities, providerOptions: { google: { temperature: 0.7 } } };
-  }
-  return { id, capabilities, providerOptions: { openai: { temperature: 0.7 } } };
-}
-
 function providerPresetAccessMethodLabel(
   preset: ProviderPreset,
   variant: ProviderPresetVariant,
   t: (key: string) => string,
 ) {
-  if (variant.protocol === "openai-compatible") {
+  if (preset.id === "mimo" && variant.protocol === "openai-compatible") {
     return translatePresetText(t, "providerPreset.mimo.protocol.openai.label", "OpenAI");
   }
-  if (variant.protocol === "anthropic") {
+  if (preset.id === "mimo" && variant.protocol === "anthropic") {
     return translatePresetText(t, "providerPreset.mimo.protocol.anthropic.label", "Anthropic");
   }
   return providerPresetVariantLabel(preset, variant, t);

@@ -12,6 +12,7 @@ import {
   listProviderModels,
   patchProvider,
   patchProviderRequest,
+  probeProviderModels,
   type ProviderModel,
   type ProviderProfile,
 } from "@/api/client";
@@ -34,9 +35,21 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
-import { generateProviderProfileID } from "@/provider/presets";
+import {
+  generateProviderProfileID,
+  mergeProviderModelCandidate,
+  providerPresetForBrand,
+  providerPresetGroups,
+  providerPresetProtocolsForGroup,
+  providerPresetVariantForSelection,
+  providerPresetVariantGroup,
+  type ProviderPreset,
+  type ProviderPresetProtocol,
+  type ProviderPresetVariant,
+} from "@/provider/presets";
 
 const providerProtocolSchema = z.enum(["openai-compatible", "openai-responses", "google", "anthropic"]);
+const PROVIDER_PROTOCOL_OPTIONS: ProviderPresetProtocol[] = ["openai-compatible", "openai-responses", "google", "anthropic"];
 
 const modelFormSchema = z.object({
   id: z.string().trim().min(1),
@@ -56,10 +69,11 @@ const providerFormSchema = z.object({
   id: z.string().trim().min(1),
   displayName: z.string().trim().min(1),
   brand: z.string().optional(),
+  group: z.string().optional(),
   protocol: providerProtocolSchema,
   baseURL: z.string().optional(),
   apiKey: z.string().optional(),
-  models: z.array(modelFormSchema).min(1),
+  models: z.array(modelFormSchema),
 });
 
 export type ProviderProfileEditorValue = z.infer<typeof providerFormSchema>;
@@ -92,9 +106,17 @@ export function ProviderProfileEditorDialog({
     defaultValues: emptyProviderProfileForm(),
   });
   const fields = useFieldArray({ control: form.control, name: "models" });
+  const providerBrand = form.watch("brand");
+  const providerGroup = form.watch("group") || "default";
   const providerProtocol = form.watch("protocol");
   const profileID = form.watch("id");
   const existingIDs = useMemo(() => profiles.map((item) => item.id), [profiles]);
+  const preset = useMemo(() => providerPresetForBrand(providerBrand), [providerBrand]);
+  const presetGroups = useMemo(() => (preset ? providerPresetGroups(preset) : []), [preset]);
+  const providerProtocolOptions = useMemo(() => {
+    const presetProtocols = preset ? providerPresetProtocolsForGroup(preset, providerGroup) : [];
+    return presetProtocols.length > 0 ? presetProtocols : PROVIDER_PROTOCOL_OPTIONS;
+  }, [preset, providerGroup]);
   const showAPIKeyToggle = Boolean(editingID);
 
   useEffect(() => {
@@ -152,11 +174,20 @@ export function ProviderProfileEditorDialog({
     }
     setCandidatesLoading(true);
     try {
-      const { models } = await listProviderModels(token, editingID);
+      const values = form.getValues();
+      const variant = providerPresetVariantForSelection(preset, values.group, values.protocol);
+      const response = values.apiKey?.trim()
+        ? await probeProviderModels(token, {
+            protocol: values.protocol,
+            baseURL: values.baseURL,
+            apiKey: values.apiKey.trim(),
+          })
+        : await listProviderModels(token, editingID);
+      const { models } = response;
       const existing = new Set(form.getValues("models").map((model) => model.id.trim()).filter(Boolean));
       for (const id of models) {
         if (!existing.has(id)) {
-          fields.append(emptyModel(id));
+          fields.append(modelToForm(mergeProviderModelCandidate(id, variant, values.protocol)));
           existing.add(id);
         }
       }
@@ -179,6 +210,42 @@ export function ProviderProfileEditorDialog({
     createMutation.mutate(value);
   }
 
+  function applyPresetVariant(variant: ProviderPresetVariant) {
+    form.setValue("group", variant.group || "", { shouldDirty: true });
+    form.setValue("protocol", variant.protocol, { shouldDirty: true });
+    form.setValue("baseURL", variant.baseURL, { shouldDirty: true });
+    if (variant.dynamicModels) {
+      fields.replace([]);
+    } else if (variant.models.length > 0) {
+      fields.replace(variant.models.map(modelToForm));
+    }
+    form.clearErrors("root");
+  }
+
+  function handlePresetGroupChange(group: string) {
+    if (!preset) {
+      form.setValue("group", group, { shouldDirty: true });
+      return;
+    }
+    const nextVariant =
+      providerPresetVariantForSelection(preset, group, providerProtocol) ||
+      preset.variants.find((variant) => providerPresetVariantGroup(variant) === group);
+    if (nextVariant) {
+      applyPresetVariant(nextVariant);
+      return;
+    }
+    form.setValue("group", group, { shouldDirty: true });
+  }
+
+  function handleProtocolChange(protocol: ProviderPresetProtocol) {
+    const nextVariant = providerPresetVariantForSelection(preset, providerGroup, protocol);
+    if (nextVariant) {
+      applyPresetVariant(nextVariant);
+      return;
+    }
+    form.setValue("protocol", protocol, { shouldDirty: true });
+  }
+
   const saving = createMutation.isPending || patchMutation.isPending;
 
   return (
@@ -190,6 +257,7 @@ export function ProviderProfileEditorDialog({
         </DialogHeader>
         <form className="contents" onSubmit={form.handleSubmit(submitProvider)}>
           <input type="hidden" {...form.register("brand")} />
+          <input type="hidden" {...form.register("group")} />
           <input type="hidden" {...form.register("id")} />
           <div className="min-h-0 overflow-y-auto border-y px-5 py-4 [mask-image:linear-gradient(to_bottom,transparent_0,black_16px,black_calc(100%-16px),transparent_100%)]">
             <div className="grid gap-4">
@@ -217,23 +285,32 @@ export function ProviderProfileEditorDialog({
                 </Field>
               </div>
 
+              {preset && presetGroups.length > 1 ? (
+                <PresetGroupSwitch
+                  group={providerGroup}
+                  groups={presetGroups}
+                  preset={preset}
+                  t={t}
+                  onGroupChange={handlePresetGroupChange}
+                />
+              ) : null}
+
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field className="gap-2 rounded-none border-0 bg-transparent p-0 hover:bg-transparent">
                   <FieldLabel className="w-auto cursor-default text-sm font-medium">{t("provider.protocol")}</FieldLabel>
                   <Select
                     value={providerProtocol}
-                    onValueChange={(value) =>
-                      form.setValue("protocol", value as ProviderProfileEditorValue["protocol"], { shouldDirty: true })
-                    }
+                    onValueChange={(value) => handleProtocolChange(value as ProviderPresetProtocol)}
                   >
                     <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="openai-compatible">OpenAI</SelectItem>
-                      <SelectItem value="openai-responses">OpenAI Responses</SelectItem>
-                      <SelectItem value="google">Google</SelectItem>
-                      <SelectItem value="anthropic">Anthropic</SelectItem>
+                      {providerProtocolOptions.map((protocol) => (
+                        <SelectItem key={protocol} value={protocol}>
+                          {providerProtocolLabel(protocol)}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </Field>
@@ -428,11 +505,44 @@ function CheckField({
   );
 }
 
+function PresetGroupSwitch({
+  group,
+  groups,
+  preset,
+  t,
+  onGroupChange,
+}: {
+  group: string;
+  groups: string[];
+  preset: ProviderPreset;
+  t: (key: string) => string;
+  onGroupChange: (group: string) => void;
+}) {
+  return (
+    <Field className="gap-2 rounded-none border-0 bg-transparent p-0 hover:bg-transparent">
+      <FieldLabel className="w-auto cursor-default text-sm font-medium">{t("provider.endpointMode")}</FieldLabel>
+      <Select value={group} onValueChange={onGroupChange}>
+        <SelectTrigger className="w-full sm:w-56">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {groups.map((item) => (
+            <SelectItem key={item} value={item}>
+              {presetGroupLabel(preset, item, t)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
 export function emptyProviderProfileForm(id = ""): ProviderProfileEditorValue {
   return {
     id,
     displayName: "",
     brand: "",
+    group: "",
     protocol: "openai-compatible",
     baseURL: "",
     apiKey: "",
@@ -450,6 +560,7 @@ export function cloneProviderProfileForm(
     id: generateProviderProfileID(profiles, profile.brand || profile.id || "custom"),
     displayName: `${profile.displayName} ${copySuffix}`,
     brand: profile.brand || "",
+    group: profile.group || "",
     apiKey: "",
   };
 }
@@ -475,10 +586,11 @@ function providerToForm(profile: ProviderProfile): ProviderProfileEditorValue {
     id: profile.id,
     displayName: profile.displayName,
     brand: profile.brand || "",
+    group: profile.group || "",
     protocol: profile.protocol,
     baseURL: profile.baseURL,
     apiKey: profile.apiKey || "",
-    models: profile.models.length > 0 ? profile.models.map(modelToForm) : [emptyModel()],
+    models: profile.models.map(modelToForm),
   };
 }
 
@@ -504,6 +616,7 @@ function cleanCreateProvider(value: ProviderProfileEditorValue) {
     id: value.id.trim(),
     displayName: value.displayName.trim(),
     brand: value.brand?.trim() || undefined,
+    group: value.group?.trim() || undefined,
     protocol: value.protocol,
     baseURL: value.baseURL?.trim(),
     apiKey: value.apiKey?.trim(),
@@ -515,6 +628,7 @@ function cleanPatchProvider(value: ProviderProfileEditorValue) {
   return patchProviderRequest.parse({
     displayName: value.displayName.trim(),
     brand: value.brand?.trim() || undefined,
+    group: value.group?.trim() || undefined,
     protocol: value.protocol,
     baseURL: value.baseURL?.trim(),
     apiKey: value.apiKey?.trim() || undefined,
@@ -575,6 +689,31 @@ function stringifyOption(value: unknown) {
     return "";
   }
   return String(value);
+}
+
+function presetGroupLabel(preset: ProviderPreset, group: string, t: (key: string) => string) {
+  const key = `providerPreset.${preset.id}.plan.${group}.label`;
+  const translated = t(key);
+  if (translated !== key) {
+    return translated;
+  }
+  if (group === "default") {
+    return t("provider.customHint");
+  }
+  return group;
+}
+
+function providerProtocolLabel(protocol: ProviderPresetProtocol) {
+  switch (protocol) {
+    case "openai-compatible":
+      return "OpenAI";
+    case "openai-responses":
+      return "OpenAI Responses";
+    case "google":
+      return "Google";
+    case "anthropic":
+      return "Anthropic";
+  }
 }
 
 function positiveInt(value: string | undefined) {

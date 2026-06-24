@@ -340,11 +340,13 @@ export function BrandIcon({
   name,
   className,
   iconClassName,
+  radius = "md",
   shape = "rounded",
 }: {
   name: string;
   className?: string;
   iconClassName?: string;
+  radius?: "none" | "sm" | "md" | "lg";
   shape?: "rounded" | "circle";
 }) {
   const normalizedName = brandIconName(name);
@@ -364,7 +366,7 @@ export function BrandIcon({
     <span
       className={cn(
         "inline-grid shrink-0 place-items-center overflow-hidden",
-        shape === "circle" ? "rounded-full" : "rounded",
+        shape === "circle" ? "rounded-full" : brandIconRadiusClass(radius),
         lightBackground ? "border bg-white text-black" : "text-white",
         className,
       )}
@@ -376,6 +378,20 @@ export function BrandIcon({
       />
     </span>
   );
+}
+
+function brandIconRadiusClass(radius: "none" | "sm" | "md" | "lg") {
+  switch (radius) {
+    case "none":
+      return "";
+    case "sm":
+      return "rounded";
+    case "lg":
+      return "rounded-lg";
+    case "md":
+    default:
+      return "rounded-md";
+  }
 }
 
 function brandMarkSize(name: string) {

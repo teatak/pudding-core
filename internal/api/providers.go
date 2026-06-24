@@ -23,6 +23,7 @@ type providerProfileView struct {
 	ID          string                `json:"id"`
 	DisplayName string                `json:"displayName"`
 	Brand       string                `json:"brand,omitempty"`
+	Group       string                `json:"group,omitempty"`
 	Protocol    string                `json:"protocol"`
 	BaseURL     string                `json:"baseURL"`
 	APIKey      string                `json:"apiKey,omitempty"`
@@ -35,6 +36,7 @@ func viewProfile(p *store.ProviderProfile) providerProfileView {
 		ID:          p.ProfileID(),
 		DisplayName: p.DisplayLabel(),
 		Brand:       strings.TrimSpace(p.Brand),
+		Group:       strings.TrimSpace(p.Group),
 		Protocol:    p.Protocol,
 		BaseURL:     p.BaseURL,
 		APIKey:      p.APIKey,
@@ -47,6 +49,7 @@ type createProfileReq struct {
 	ID          string                `json:"id"`
 	DisplayName string                `json:"displayName"`
 	Brand       string                `json:"brand"`
+	Group       string                `json:"group"`
 	Protocol    string                `json:"protocol"`
 	BaseURL     string                `json:"baseURL"`
 	APIKey      string                `json:"apiKey"`
@@ -56,6 +59,7 @@ type createProfileReq struct {
 type patchProfileReq struct {
 	DisplayName *string `json:"displayName"`
 	Brand       *string `json:"brand"`
+	Group       *string `json:"group"`
 	Protocol    *string `json:"protocol"`
 	BaseURL     *string `json:"baseURL"`
 	// APIKey 传非空才覆盖;清除 key 走 DELETE 后重建。
@@ -118,6 +122,7 @@ func (s *Server) createProvider(c *cart.Context) error {
 		ID:          req.ID,
 		DisplayName: strings.TrimSpace(req.DisplayName),
 		Brand:       strings.TrimSpace(req.Brand),
+		Group:       strings.TrimSpace(req.Group),
 		Protocol:    req.Protocol,
 		BaseURL:     strings.TrimRight(req.BaseURL, "/"),
 		APIKey:      req.APIKey,
@@ -170,6 +175,9 @@ func (s *Server) patchProvider(c *cart.Context) error {
 	}
 	if req.Brand != nil {
 		p.Brand = strings.TrimSpace(*req.Brand)
+	}
+	if req.Group != nil {
+		p.Group = strings.TrimSpace(*req.Group)
 	}
 	if req.Protocol != nil {
 		if !registry.SupportedProtocol(*req.Protocol) {
@@ -280,7 +288,13 @@ func (s *Server) listProviderModels(c *cart.Context) error {
 	}
 
 	apiKey := config.EffectiveAPIKey(p)
-	cacheKey := p.ProfileID() + "\x00" + p.Protocol + "\x00" + p.BaseURL + "\x00" + apiKey
+	modelProtocol := p.Protocol
+	modelBaseURL := p.BaseURL
+	if strings.EqualFold(strings.TrimSpace(p.Brand), "buzzhive") {
+		modelProtocol = registry.TypeOpenAICompatible
+		modelBaseURL = buzzHiveModelsBaseURL(p.BaseURL)
+	}
+	cacheKey := p.ProfileID() + "\x00" + modelProtocol + "\x00" + modelBaseURL + "\x00" + apiKey
 	modelsCacheMu.Lock()
 	if entry, ok := modelsCache[cacheKey]; ok && time.Since(entry.at) < modelsCacheTTL {
 		modelsCacheMu.Unlock()
@@ -291,7 +305,7 @@ func (s *Server) listProviderModels(c *cart.Context) error {
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
-	models, err := fetchProviderModels(ctx, p.Protocol, p.BaseURL, apiKey)
+	models, err := fetchProviderModels(ctx, modelProtocol, modelBaseURL, apiKey)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return nil
@@ -305,6 +319,20 @@ func (s *Server) listProviderModels(c *cart.Context) error {
 	modelsCacheMu.Unlock()
 	c.JSON(http.StatusOK, map[string]any{"models": models})
 	return nil
+}
+
+func buzzHiveModelsBaseURL(baseURL string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if base == "" {
+		return ""
+	}
+	if strings.HasSuffix(base, "/v1") {
+		return base
+	}
+	if strings.HasSuffix(base, "/v1beta") {
+		return strings.TrimSuffix(base, "/v1beta") + "/v1"
+	}
+	return base + "/v1"
 }
 
 func fetchProviderModels(ctx context.Context, protocol, baseURL, apiKey string) ([]string, error) {

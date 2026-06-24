@@ -53,6 +53,7 @@ export const providerProfile = z.object({
   id: z.string(),
   displayName: z.string(),
   brand: z.string().optional(),
+  group: z.string().optional(),
   protocol: providerProtocol,
   baseURL: z.string(),
   apiKey: z.string().optional(),
@@ -66,6 +67,7 @@ export const createProviderRequest = z.object({
   id: z.string().min(1),
   displayName: z.string().min(1),
   brand: z.string().optional(),
+  group: z.string().optional(),
   protocol: providerProtocol,
   baseURL: z.string().optional(),
   apiKey: z.string().optional(),
@@ -76,6 +78,7 @@ export const createProviderRequest = z.object({
 export const patchProviderRequest = z.object({
   displayName: z.string().optional(),
   brand: z.string().optional(),
+  group: z.string().optional(),
   protocol: providerProtocol.optional(),
   baseURL: z.string().optional(),
   apiKey: z.string().optional(),

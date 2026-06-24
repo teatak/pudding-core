@@ -33,6 +33,36 @@ func TestStreamHappyPath(t *testing.T) {
 	}
 }
 
+func TestReadSSEReasoningVariants(t *testing.T) {
+	out := make(chan provider.Chunk, 8)
+	err := readSSE(context.Background(), strings.NewReader(
+		`data: {"choices":[{"delta":{"reasoning_content":"deepseek "}}]}`+"\n\n"+
+			`data: {"choices":[{"delta":{"reasoning":"ollama "}}]}`+"\n\n"+
+			`data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.text","text":"openrouter text "},{"type":"reasoning.summary","summary":"openrouter summary"}]}}]}`+"\n\n"+
+			`data: {"choices":[{"delta":{"content":"answer"}}]}`+"\n\n"+
+			"data: [DONE]\n\n",
+	), out)
+	close(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var thought, text strings.Builder
+	for chunk := range out {
+		switch chunk.Part {
+		case provider.PartThought:
+			thought.WriteString(chunk.Delta)
+		case provider.PartText:
+			text.WriteString(chunk.Delta)
+		}
+	}
+	if got := thought.String(); got != "deepseek ollama openrouter text openrouter summary" {
+		t.Fatalf("unexpected reasoning: %q", got)
+	}
+	if got := text.String(); got != "answer" {
+		t.Fatalf("unexpected text: %q", got)
+	}
+}
+
 func TestReadSSEUsageChunk(t *testing.T) {
 	out := make(chan provider.Chunk, 4)
 	err := readSSE(context.Background(), strings.NewReader(

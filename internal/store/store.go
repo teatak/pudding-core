@@ -83,6 +83,7 @@ type ProviderProfile struct {
 	ID          string          `json:"id" yaml:"-"`
 	DisplayName string          `json:"displayName" yaml:"display_name,omitempty"`
 	Brand       string          `json:"brand,omitempty" yaml:"brand,omitempty"`
+	Group       string          `json:"group,omitempty" yaml:"group,omitempty"`
 	Protocol    string          `json:"protocol" yaml:"protocol"` // openai-compatible | openai-responses | google | ...
 	BaseURL     string          `json:"baseURL" yaml:"base_url,omitempty"`
 	APIKey      string          `json:"-" yaml:"api_key,omitempty"`

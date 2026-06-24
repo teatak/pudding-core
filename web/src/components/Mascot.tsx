@@ -69,7 +69,7 @@ const MOUTH_BLINK_D_VALUES =
 const MOUTH_BLINK_WIDTH_VALUES = "3.5;3.5;3;3.5;3.5;3.3;3.5;3.5";
 const CLICK_ANIMATION_DURATION_MS = 2200;
 // Standard error gesture: face forward, lower the head slightly, then shake no.
-const HEAD_SHAKE_NO_DURATION_MS = 650;
+const HEAD_SHAKE_NO_DURATION_MS = 600;
 const HEAD_SHAKE_NO_X = EYE_MAX_X * 0.6;
 const HEAD_SHAKE_NO_Y = EYE_MAX_Y * 0.23;
 const CLICK_KEY_TIMES = {
@@ -667,10 +667,9 @@ function headShakeNoXAt(progress: number): number {
   const points = [
     { t: 0, x: 0 },
     { t: 0.16, x: -1 },
-    { t: 0.38, x: 1 },
-    { t: 0.58, x: -0.48 },
-    { t: 0.76, x: 0.34 },
-    { t: 0.9, x: -0.12 },
+    { t: 0.4, x: 1 },
+    { t: 0.64, x: -1 },
+    { t: 0.84, x: 0.36 },
     { t: 1, x: 0 },
   ];
   for (let index = 1; index < points.length; index += 1) {
@@ -678,15 +677,10 @@ function headShakeNoXAt(progress: number): number {
     const next = points[index];
     if (progress <= next.t) {
       const rawSegmentProgress = (progress - previous.t) / (next.t - previous.t);
-      const segmentProgress = index >= 4 ? easeOutCubic(rawSegmentProgress) : rawSegmentProgress;
-      return previous.x + (next.x - previous.x) * segmentProgress;
+      return previous.x + (next.x - previous.x) * rawSegmentProgress;
     }
   }
   return 0;
-}
-
-function easeOutCubic(value: number): number {
-  return 1 - (1 - value) ** 3;
 }
 
 function clamp(value: number, min: number, max: number): number {
