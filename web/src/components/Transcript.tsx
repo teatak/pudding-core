@@ -20,11 +20,12 @@ export function Transcript({ token, sessionID, sessionRunning = false, submitErr
   const [isAtLatest, setIsAtLatest] = useState(true);
   const [jumpLatestSignal, setJumpLatestSignal] = useState(0);
   const [newMessageCount, setNewMessageCount] = useState(0);
-  const { markAssistantRevealed, transcript, turnsQuery, updateQueued } = useTranscriptData({
-    sessionID,
-    sessionRunning,
-    token,
-  });
+  const { hasMoreHistory, isLoadingHistory, loadHistory, markAssistantRevealed, transcript, turnsQuery, updateQueued } =
+    useTranscriptData({
+      sessionID,
+      sessionRunning,
+      token,
+    });
   const settingsQuery = useQuery({
     queryKey: queryKeys.settings(),
     queryFn: () => getSettings(token),
@@ -109,9 +110,9 @@ export function Transcript({ token, sessionID, sessionRunning = false, submitErr
       hasItems={transcript.hasItems}
       isError={turnsQuery.isError}
       isFetchingNextPage={turnsQuery.isFetchingNextPage}
-      hasMoreHistory={Boolean(turnsQuery.hasNextPage)}
+      hasMoreHistory={hasMoreHistory}
       isLoading={turnsQuery.isLoading}
-      isLoadingHistory={turnsQuery.isFetchingNextPage}
+      isLoadingHistory={isLoadingHistory}
       isPending={turnsQuery.isPending}
       jumpLatestSignal={jumpLatestSignal}
       newMessageCount={newMessageCount}
@@ -122,7 +123,7 @@ export function Transcript({ token, sessionID, sessionRunning = false, submitErr
       onAssistantRevealComplete={handleAssistantRevealComplete}
       onJumpLatest={handleJumpLatest}
       onLatestChange={handleLatestChange}
-      onLoadHistory={turnsQuery.fetchNextPage}
+      onLoadHistory={loadHistory}
       onQueuedCancel={cancelQueued}
       onQueuedEditStart={startQueuedEdit}
       onQueuedSave={saveQueued}

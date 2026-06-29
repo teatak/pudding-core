@@ -36,6 +36,7 @@ import { getSubmitFailure } from "@/lib/submitFailure";
 import { getTextAreaCaretClientPoint } from "@/lib/textCaret";
 import { cn } from "@/lib/utils";
 import { useOverlayStore, type AssistantOverlay, type AssistantOverlayPart, type TurnPhaseState } from "@/state/overlayStore";
+import { useSessionDraftStore } from "@/state/sessionDraftStore";
 
 const composerSchema = z.object({
   text: z.string(),
@@ -75,6 +76,9 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
   const removePendingUser = useOverlayStore((state) => state.removePendingUser);
   const startCompactRun = useOverlayStore((state) => state.startCompactRun);
   const startSubmittingTurn = useOverlayStore((state) => state.startSubmittingTurn);
+  const clearSessionDraft = useSessionDraftStore((state) => state.clear);
+  const ensureSessionDraft = useSessionDraftStore((state) => state.ensure);
+  const setSessionDraftText = useSessionDraftStore((state) => state.setText);
   // 停止态双源:overlay 的 runningTurns(本地实时)|| session 快照的 running
   // (后端 turns 表派生)。中途刷新走 SSE tail 不回放 turn.started,若此时
   // provider 暂无 delta,overlay 不知道有 turn 在跑——session.running 兜底,
@@ -100,6 +104,11 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
     resolver: zodResolver(composerSchema),
     defaultValues: { text: "" },
   });
+  useEffect(() => {
+    const draft = ensureSessionDraft(sessionID);
+    draftIDRef.current = draft.clientMessageID;
+    form.reset({ text: draft.text });
+  }, [ensureSessionDraft, form, sessionID]);
   // 空消息(含纯空白)不可发:禁用发送按钮 + Enter 不触发提交,从源头避免
   // 弹出 zod min(1) 的校验错误。watch 让按钮态随输入实时更新。
   const draftText = form.watch("text");
@@ -193,6 +202,11 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
     }
     setMascotErrorMessage(null);
   }, []);
+  const resetSessionDraft = useCallback(() => {
+    const draft = clearSessionDraft(sessionID);
+    draftIDRef.current = draft.clientMessageID;
+    form.reset({ text: draft.text });
+  }, [clearSessionDraft, form, sessionID]);
   // Prefer this mascot feedback for composer-local validation and command errors.
   const showMascotError = useCallback(
     (message: string) => {
@@ -240,8 +254,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
     onSuccess: async (result) => {
       clearMascotError();
       onSubmitError?.(null);
-      draftIDRef.current = newClientID();
-      form.reset({ text: "" });
+      resetSessionDraft();
       // 标题自动生成由后端 titler 负责(provisional + LLM,session.titled
       // 事件回推),前端不写标题
       if (result.duplicate && result.turnID) {
@@ -280,13 +293,11 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
       clearMascotError();
       onSubmitError?.(null);
       startCompactRun(sessionID);
-      draftIDRef.current = newClientID();
-      form.reset({ text: "" });
+      resetSessionDraft();
     },
     onSuccess: async () => {
       clearMascotError();
       onSubmitError?.(null);
-      toast.success(t("composer.compactDone"));
       await queryClient.invalidateQueries({ queryKey: queryKeys.turns(sessionID) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessionUsage(sessionID) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
@@ -312,8 +323,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
     onMutate: () => {
       clearMascotError();
       onSubmitError?.(null);
-      draftIDRef.current = newClientID();
-      form.reset({ text: "" });
+      resetSessionDraft();
     },
     onSuccess: async () => {
       clearMascotError();
@@ -336,8 +346,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
     onSuccess: async () => {
       clearMascotError();
       onSubmitError?.(null);
-      draftIDRef.current = newClientID();
-      form.reset({ text: "" });
+      resetSessionDraft();
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
     },
     onError: () => {
@@ -361,8 +370,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
   const runClearCommand = useCallback(() => {
     clearMascotError();
     onSubmitError?.(null);
-    draftIDRef.current = newClientID();
-    form.reset({ text: "" });
+    resetSessionDraft();
     setTextFocused(false);
     void navigate({
       to: "/",
@@ -372,7 +380,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
         return next;
       },
     });
-  }, [clearMascotError, form, navigate, onSubmitError]);
+  }, [clearMascotError, navigate, onSubmitError, resetSessionDraft]);
 
   const submitDraft = (value: z.infer<typeof composerSchema>) => {
     const text = value.text.trim();
@@ -474,6 +482,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
   };
   const handleTextChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     void textField.onChange(event);
+    setSessionDraftText(sessionID, event.target.value);
     if (mascotErrorMessage) {
       clearMascotError();
     }
@@ -485,7 +494,9 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
       runClearCommand();
       return;
     }
-    form.setValue("text", command.command + " ");
+    const nextText = command.command + " ";
+    form.setValue("text", nextText);
+    setSessionDraftText(sessionID, nextText);
     window.requestAnimationFrame(() => {
       textAreaRef.current?.focus();
       scheduleMascotInputGaze();

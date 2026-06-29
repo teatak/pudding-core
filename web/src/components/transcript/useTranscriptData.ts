@@ -33,7 +33,15 @@ export function useTranscriptData({
   );
   const compactRun = useOverlayStore((state) => state.compactRuns[sessionID]);
   const turnPhase = useOverlayStore((state) => state.turnPhases[sessionID]);
-  const { messages, query: turnsQuery, turnDurationByID, turns } = useTranscriptTurns(token, sessionID);
+  const {
+    hasMoreHistory,
+    isLoadingHistory,
+    loadHistory,
+    messages,
+    query: turnsQuery,
+    turnDurationByID,
+    turns,
+  } = useTranscriptTurns(token, sessionID);
 
   const queuedInputsQuery = useQuery({
     queryKey: queryKeys.queuedInputs(sessionID),
@@ -89,6 +97,9 @@ export function useTranscriptData({
 
   return {
     markAssistantRevealed,
+    hasMoreHistory,
+    isLoadingHistory,
+    loadHistory,
     pendingUsers,
     transcript,
     turnsQuery,

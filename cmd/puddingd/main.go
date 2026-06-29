@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -15,6 +16,8 @@ import (
 	"github.com/teatak/pudding-core/internal/daemon"
 	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/prompt"
+	"github.com/teatak/pudding-core/internal/store"
+	"github.com/teatak/pudding-core/internal/tool"
 )
 
 func main() {
@@ -67,6 +70,7 @@ func runPrompt(args []string) error {
 	flagHome := fs.String("home", "", "data home (default: channel home, see docs)")
 	flagMode := fs.String("mode", "chat", "agent mode: chat, research, workspace")
 	flagSegments := fs.Bool("segments", false, "print prompt segments with headers")
+	flagTools := fs.Bool("tools", true, "print provider-neutral tool schemas for the mode")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -85,8 +89,44 @@ func runPrompt(args []string) error {
 			}
 			fmt.Printf("===== %s (%s) =====\n%s\n", seg.ID, seg.Layer, seg.Content)
 		}
-		return nil
+	} else {
+		fmt.Printf("===== system prompt =====\n%s\n", out.SystemInstruction)
 	}
-	fmt.Println(out.SystemInstruction)
+	if *flagTools {
+		printPromptTools(store.AgentMode(*flagMode))
+	}
 	return nil
+}
+
+func printPromptTools(mode store.AgentMode) {
+	mode = store.NormalizeAgentMode(mode)
+	if mode == "" {
+		mode = store.ModeChat
+	}
+	defs := tool.DefinitionsForMode(mode, tool.BuiltinDefinitions())
+	fmt.Printf("\n===== tool schemas (%s, %d) =====\n", mode, len(defs))
+	for _, def := range defs {
+		fmt.Printf("\n## %s\n", def.Name)
+		if def.Capability != "" {
+			fmt.Printf("Capability: %s\n", store.NormalizeAgentMode(def.Capability))
+		}
+		if def.Description != "" {
+			fmt.Printf("Description: %s\n", def.Description)
+		}
+		if len(def.InputSchema) > 0 {
+			fmt.Printf("Parameters:\n%s\n", prettyJSON(def.InputSchema))
+		}
+	}
+}
+
+func prettyJSON(raw json.RawMessage) string {
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return string(raw)
+	}
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return string(raw)
+	}
+	return string(b)
 }
