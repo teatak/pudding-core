@@ -20,10 +20,11 @@ import {
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
 import { Mascot, type MascotGaze, type MascotGazePoint } from "@/components/Mascot";
-import { ModelPicker, type ResolvedModelSelection } from "@/components/ModelPicker";
+import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
+import { type ResolvedModelSelection } from "@/components/ModelPicker";
 import { ProviderProfileEditorDialog } from "@/components/ProviderProfileEditorDialog";
 import { ProviderCustomCard, ProviderPresetCreateDialog, ProviderPresetGrid } from "@/components/ProviderPresetCreateDialog";
-import { defaultReasoningEffortForSelection, ReasoningEffortChip, reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
+import { reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -250,7 +251,6 @@ function DraftComposer({
   const sendEnabled = canSend && modelReady;
   const textField = form.register("text");
   const reasoningOptions = useMemo(() => reasoningEffortOptionsForSelection(resolvedModel), [resolvedModel]);
-  const defaultReasoningEffort = useMemo(() => defaultReasoningEffortForSelection(resolvedModel), [resolvedModel]);
   const resolvedModelKey = resolvedModel ? `${resolvedModel.provider}:${resolvedModel.model}` : "";
   const reasoningEffort = resolvedModelKey && draftReasoningModelKey === resolvedModelKey ? draftReasoningEffort : "";
   const setDraftReasoningEffort = useCallback(
@@ -497,23 +497,16 @@ function DraftComposer({
               </TooltipTrigger>
               <TooltipContent>{t("composer.attach")}</TooltipContent>
             </Tooltip>
-            <ModelPicker
+            <ModelReasoningPicker
               className="ml-auto"
               token={token}
               value={modelValue}
+              reasoningValue={reasoningEffort}
               onChange={onModelValueChange}
               onAfterClose={focusTextarea}
+              onReasoningChange={setDraftReasoningEffort}
               onResolvedChange={handleResolvedModelChange}
             />
-            {reasoningOptions.length > 0 ? (
-              <ReasoningEffortChip
-                defaultValue={defaultReasoningEffort}
-                options={reasoningOptions}
-                value={reasoningEffort}
-                onAfterClose={focusTextarea}
-                onValueChange={setDraftReasoningEffort}
-              />
-            ) : null}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button

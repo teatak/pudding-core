@@ -22,8 +22,9 @@ import { ChatColumn } from "@/components/ChatColumn";
 import { ContextUsageRing } from "@/components/ContextUsageRing";
 import { Mascot, type MascotGaze, type MascotGazePoint, type MascotMood } from "@/components/Mascot";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
-import { ModelPicker, type ResolvedModelSelection } from "@/components/ModelPicker";
-import { defaultReasoningEffortForSelection, ReasoningEffortChip, reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
+import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
+import { type ResolvedModelSelection } from "@/components/ModelPicker";
+import { reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -141,7 +142,6 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
       : [];
   const slashMenuOpen = visibleSlashCommands.length > 0;
   const reasoningOptions = useMemo(() => reasoningEffortOptionsForSelection(resolvedModel), [resolvedModel]);
-  const defaultReasoningEffort = useMemo(() => defaultReasoningEffortForSelection(resolvedModel), [resolvedModel]);
   const resolvedModelKey = resolvedModel ? `${resolvedModel.provider}:${resolvedModel.model}` : "";
   const reasoningEffort = resolvedModelKey && session.reasoningModelKey === resolvedModelKey ? session.reasoningEffort || "" : "";
   const setSessionReasoningEffort = useCallback(
@@ -609,23 +609,16 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
               ) : null}
               <div className="ml-auto flex items-center gap-1">
                 <ContextUsageRing token={token} sessionID={sessionID} />
-                <ModelPicker
+                <ModelReasoningPicker
                   token={token}
                   session={session}
+                  reasoningValue={reasoningEffort}
                   onAfterClose={focusTextarea}
+                  onReasoningChange={(value) => {
+                    setSessionReasoningEffort(value);
+                  }}
                   onResolvedChange={handleResolvedModelChange}
                 />
-                {reasoningOptions.length > 0 ? (
-                  <ReasoningEffortChip
-                    defaultValue={defaultReasoningEffort}
-                    options={reasoningOptions}
-                    value={reasoningEffort}
-                    onValueChange={(value) => {
-                      setSessionReasoningEffort(value);
-                    }}
-                    onAfterClose={focusTextarea}
-                  />
-                ) : null}
               </div>
               {showStopButton ? (
                 <Tooltip>
