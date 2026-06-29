@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, CircleCheck } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   listProviders,
   updateSession,
+  type ProviderModel,
   type ProviderProfile,
   type Session,
 } from "@/api/client";
@@ -18,18 +19,27 @@ import { useI18n } from "@/i18n";
 import { formatModelLabel } from "@/lib/model";
 import { cn } from "@/lib/utils";
 
+export type ResolvedModelSelection = {
+  provider: string;
+  model: string;
+  providerBrand?: string;
+  providerProtocol?: ProviderProfile["protocol"];
+  modelConfig?: ProviderModel;
+};
+
 type ModelPickerProps = {
   token: string;
   session?: Session;
   value?: { provider?: string; model?: string };
   onChange?: (value: { provider: string; model: string }) => void;
-  onResolvedChange?: (value: { provider: string; model: string } | null) => void;
+  onAfterClose?: () => void;
+  onResolvedChange?: (value: ResolvedModelSelection | null) => void;
   className?: string;
 };
 
 // 两层模型选择(docs/design.md 第 4 节):第一层 profile,第二层模型。
 // 真实 session 下选中后 PATCH;draft 下只更新本地 value,首条发送时随 createSession 落库。
-export function ModelPicker({ token, session, value, onChange, onResolvedChange, className }: ModelPickerProps) {
+export function ModelPicker({ token, session, value, onAfterClose, onChange, onResolvedChange, className }: ModelPickerProps) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -39,6 +49,27 @@ export function ModelPicker({ token, session, value, onChange, onResolvedChange,
     queryFn: () => listProviders(token),
     enabled: Boolean(token),
   });
+  const profiles = useMemo(() => providersQuery.data?.providers ?? [], [providersQuery.data?.providers]);
+  const resolveSelection = useCallback(
+    (providerID: string, modelID: string): ResolvedModelSelection | null => {
+      if (!providerID || !modelID) {
+        return null;
+      }
+      const profile = profiles.find((item) => item.id === providerID);
+      const modelConfig = profile?.models.find((item) => item.id === modelID);
+      if (!profile || !modelConfig) {
+        return { provider: providerID, model: modelID };
+      }
+      return {
+        provider: providerID,
+        model: modelID,
+        providerBrand: profile.brand,
+        providerProtocol: profile.protocol,
+        modelConfig,
+      };
+    },
+    [profiles],
+  );
   const patchMutation = useMutation({
     mutationFn: (body: { provider?: string; model?: string }) => {
       if (!session) {
@@ -48,14 +79,13 @@ export function ModelPicker({ token, session, value, onChange, onResolvedChange,
     },
     onSuccess: async (updated) => {
       if (updated.provider && updated.model) {
-        onResolvedChange?.({ provider: updated.provider, model: updated.model });
+        onResolvedChange?.(resolveSelection(updated.provider, updated.model));
       }
       setOpen(false);
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
     },
   });
 
-  const profiles = providersQuery.data?.providers || [];
   const selectableProfiles = useMemo(
     () => profiles.filter((profile) => profile.models.some((model) => model.id)),
     [profiles],
@@ -89,10 +119,10 @@ export function ModelPicker({ token, session, value, onChange, onResolvedChange,
     }
     onResolvedChange?.(
       currentModelAvailable
-        ? { provider: currentProfileID, model: currentModel }
+        ? resolveSelection(currentProfileID, currentModel)
         : null,
     );
-  }, [currentModel, currentModelAvailable, currentProfileID, onResolvedChange, providersQuery.isSuccess]);
+  }, [currentModel, currentModelAvailable, currentProfileID, onResolvedChange, providersQuery.isSuccess, resolveSelection]);
 
   // 品牌图标代替 provider 名;未命中图标的 profile 回落为文字名
   const activeBrand = visibleModel ? providerBrandKey(activeProfile) || currentProfileID : "";
@@ -100,7 +130,12 @@ export function ModelPicker({ token, session, value, onChange, onResolvedChange,
   const label = visibleModel ? formatModelLabel(visibleModel) : t("picker.selectModel");
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+      }}
+    >
       <PopoverTrigger asChild>
         <Button
           aria-label={t("session.model")}
@@ -132,6 +167,10 @@ export function ModelPicker({ token, session, value, onChange, onResolvedChange,
         side="top"
         sideOffset={8}
         onOpenAutoFocus={(event) => event.preventDefault()}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          onAfterClose?.();
+        }}
       >
         {providersQuery.isLoading ? (
           <div className="px-2.5 py-1.5 text-xs text-muted-foreground">{t("common.loading")}</div>

@@ -7,6 +7,8 @@ export const session = z.object({
   title: z.string(),
   provider: z.string(), // provider profile 名;session 创建时必须显式写入
   model: z.string(),
+  reasoningEffort: z.string().optional(),
+  reasoningModelKey: z.string().optional(),
   activeMode: z.enum(["chat", "research", "workspace"]),
   modeLease: z.enum(["none", "session"]),
   workspaceDirs: z.array(z.string()).optional(),
@@ -177,6 +179,7 @@ export type QueuedInput = z.infer<typeof queuedInput>;
 export const submitRequest = z.object({
   clientMessageID: z.string().min(1),
   kind: z.enum(["user", "system"]).optional(),
+  reasoningEffort: z.string().optional(),
   text: z.string().min(1),
 });
 

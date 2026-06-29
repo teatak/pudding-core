@@ -83,8 +83,8 @@ func (s *Store) CreateSession(ctx context.Context, sess *store.Session) error {
 		now := time.Now()
 		sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = now, now, now
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO sessions(id,title,provider,model,active_mode,mode_lease,workspace_dirs,pinned,pinned_order,created_at,updated_at,last_activity_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-			sess.ID, sess.Title, sess.Provider, sess.Model, sess.ActiveMode, sess.ModeLease, encodeStringSlice(sess.WorkspaceDirs), boolInt(sess.Pinned), sess.PinnedOrder, unixMS(now), unixMS(now), unixMS(now),
+			`INSERT INTO sessions(id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,workspace_dirs,pinned,pinned_order,created_at,updated_at,last_activity_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			sess.ID, sess.Title, sess.Provider, sess.Model, sess.ReasoningEffort, sess.ReasoningModelKey, sess.ActiveMode, sess.ModeLease, encodeStringSlice(sess.WorkspaceDirs), boolInt(sess.Pinned), sess.PinnedOrder, unixMS(now), unixMS(now), unixMS(now),
 		)
 		return err
 	})
@@ -98,8 +98,8 @@ func (s *Store) GetSession(ctx context.Context, id string) (*store.Session, erro
 	var created, updated, lastActivity int64
 	var workspaceDirs string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id,title,provider,model,active_mode,mode_lease,workspace_dirs,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ActiveMode, &sess.ModeLease, &workspaceDirs, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
+		`SELECT id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,workspace_dirs,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ReasoningEffort, &sess.ReasoningModelKey, &sess.ActiveMode, &sess.ModeLease, &workspaceDirs, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -119,7 +119,7 @@ func (s *Store) ListSessions(ctx context.Context) ([]*store.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.QueryContext(ctx, `SELECT id,title,provider,model,active_mode,mode_lease,workspace_dirs,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions ORDER BY last_activity_at DESC, created_at DESC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,workspace_dirs,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions ORDER BY last_activity_at DESC, created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +130,7 @@ func (s *Store) ListSessions(ctx context.Context) ([]*store.Session, error) {
 		var sess store.Session
 		var created, updated, lastActivity int64
 		var workspaceDirs string
-		if err := rows.Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ActiveMode, &sess.ModeLease, &workspaceDirs, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running); err != nil {
+		if err := rows.Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ReasoningEffort, &sess.ReasoningModelKey, &sess.ActiveMode, &sess.ModeLease, &workspaceDirs, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running); err != nil {
 			return nil, err
 		}
 		sess.ActiveMode = store.NormalizeAgentMode(sess.ActiveMode)
@@ -157,11 +157,25 @@ func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionU
 		if upd.Title != nil {
 			sess.Title = *upd.Title
 		}
+		modelChanged := false
 		if upd.Provider != nil {
 			sess.Provider = *upd.Provider
+			modelChanged = true
 		}
 		if upd.Model != nil {
 			sess.Model = *upd.Model
+			modelChanged = true
+		}
+		if modelChanged {
+			sess.ReasoningEffort = ""
+			sess.ReasoningModelKey = ""
+		}
+		if upd.ReasoningEffort != nil {
+			sess.ReasoningEffort = *upd.ReasoningEffort
+			sess.ReasoningModelKey = ""
+			if sess.ReasoningEffort != "" {
+				sess.ReasoningModelKey = sessionModelKey(sess.Provider, sess.Model)
+			}
 		}
 		if upd.ActiveMode != nil {
 			sess.ActiveMode = *upd.ActiveMode
@@ -180,8 +194,8 @@ func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionU
 		}
 		sess.UpdatedAt = time.Now()
 		_, err = tx.ExecContext(ctx,
-			`UPDATE sessions SET title=?, provider=?, model=?, active_mode=?, mode_lease=?, workspace_dirs=?, pinned=?, pinned_order=?, updated_at=? WHERE id=?`,
-			sess.Title, sess.Provider, sess.Model, sess.ActiveMode, sess.ModeLease, encodeStringSlice(sess.WorkspaceDirs), boolInt(sess.Pinned), sess.PinnedOrder, unixMS(sess.UpdatedAt), id,
+			`UPDATE sessions SET title=?, provider=?, model=?, reasoning_effort=?, reasoning_model_key=?, active_mode=?, mode_lease=?, workspace_dirs=?, pinned=?, pinned_order=?, updated_at=? WHERE id=?`,
+			sess.Title, sess.Provider, sess.Model, sess.ReasoningEffort, sess.ReasoningModelKey, sess.ActiveMode, sess.ModeLease, encodeStringSlice(sess.WorkspaceDirs), boolInt(sess.Pinned), sess.PinnedOrder, unixMS(sess.UpdatedAt), id,
 		)
 		if err != nil {
 			return err
@@ -1306,8 +1320,8 @@ func (s *Store) getSessionDB(ctx context.Context, id string) (*store.Session, er
 	var created, updated, lastActivity int64
 	var workspaceDirs string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id,title,provider,model,active_mode,mode_lease,workspace_dirs,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ActiveMode, &sess.ModeLease, &workspaceDirs, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
+		`SELECT id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,workspace_dirs,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ReasoningEffort, &sess.ReasoningModelKey, &sess.ActiveMode, &sess.ModeLease, &workspaceDirs, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -1342,8 +1356,8 @@ func getSessionTx(ctx context.Context, tx *sql.Tx, id string) (*store.Session, e
 	var created, updated, lastActivity int64
 	var workspaceDirs string
 	err := tx.QueryRowContext(ctx,
-		`SELECT id,title,provider,model,active_mode,mode_lease,workspace_dirs,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ActiveMode, &sess.ModeLease, &workspaceDirs, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
+		`SELECT id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,workspace_dirs,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ReasoningEffort, &sess.ReasoningModelKey, &sess.ActiveMode, &sess.ModeLease, &workspaceDirs, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -1767,6 +1781,10 @@ func decodeStringSlice(raw string) []string {
 		_ = json.Unmarshal([]byte(raw), &out)
 	}
 	return out
+}
+
+func sessionModelKey(providerName, model string) string {
+	return strings.TrimSpace(providerName) + ":" + strings.TrimSpace(model)
 }
 
 func normalizeJSON(raw json.RawMessage) json.RawMessage {

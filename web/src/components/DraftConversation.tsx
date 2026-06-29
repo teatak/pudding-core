@@ -2,7 +2,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowUp, CircleAlert, Loader2, Plus } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FocusEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FocusEvent, type KeyboardEvent } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -13,15 +13,17 @@ import {
   deleteSession,
   listProviders,
   submitMessage,
+  updateSession,
   type ProviderProfile,
   type Session,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
 import { Mascot, type MascotGaze, type MascotGazePoint } from "@/components/Mascot";
-import { ModelPicker } from "@/components/ModelPicker";
+import { ModelPicker, type ResolvedModelSelection } from "@/components/ModelPicker";
 import { ProviderProfileEditorDialog } from "@/components/ProviderProfileEditorDialog";
 import { ProviderCustomCard, ProviderPresetCreateDialog, ProviderPresetGrid } from "@/components/ProviderPresetCreateDialog";
+import { defaultReasoningEffortForSelection, ReasoningEffortChip, reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -233,6 +235,9 @@ function DraftComposer({
   const draftText = useDraftStore((state) => state.text);
   const setDraftText = useDraftStore((state) => state.setText);
   const clearDraft = useDraftStore((state) => state.clear);
+  const [resolvedModel, setResolvedModel] = useState<ResolvedModelSelection | null>(null);
+  const [draftReasoningEffort, setDraftReasoningEffortValue] = useState("");
+  const [draftReasoningModelKey, setDraftReasoningModelKey] = useState("");
   const draftIDRef = useRef<string>(newClientID());
   const quickSubmitIDRef = useRef<number | null>(null);
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -244,6 +249,20 @@ function DraftComposer({
   const canSend = Boolean(form.watch("text").trim());
   const sendEnabled = canSend && modelReady;
   const textField = form.register("text");
+  const reasoningOptions = useMemo(() => reasoningEffortOptionsForSelection(resolvedModel), [resolvedModel]);
+  const defaultReasoningEffort = useMemo(() => defaultReasoningEffortForSelection(resolvedModel), [resolvedModel]);
+  const resolvedModelKey = resolvedModel ? `${resolvedModel.provider}:${resolvedModel.model}` : "";
+  const reasoningEffort = resolvedModelKey && draftReasoningModelKey === resolvedModelKey ? draftReasoningEffort : "";
+  const setDraftReasoningEffort = useCallback(
+    (value: string) => {
+      if (!resolvedModelKey) {
+        return;
+      }
+      setDraftReasoningModelKey(resolvedModelKey);
+      setDraftReasoningEffortValue(value);
+    },
+    [resolvedModelKey],
+  );
 
   const updateMascotInputGaze = useCallback(() => {
     const textArea = textAreaRef.current;
@@ -262,7 +281,19 @@ function DraftComposer({
       updateMascotInputGaze();
     });
   }, [updateMascotInputGaze]);
+  const focusTextarea = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      textAreaRef.current?.focus({ preventScroll: true });
+      scheduleMascotInputGaze();
+    });
+  }, [scheduleMascotInputGaze]);
   const ime = useImeCompositionGuard({ onCompositionEnd: scheduleMascotInputGaze });
+
+  useEffect(() => {
+    if (reasoningEffort && !reasoningOptions.includes(reasoningEffort)) {
+      setDraftReasoningEffort("");
+    }
+  }, [reasoningEffort, reasoningOptions, setDraftReasoningEffort]);
 
   useEffect(() => {
     return () => {
@@ -276,14 +307,18 @@ function DraftComposer({
   const submitMutation = useMutation({
     mutationFn: async (value: DraftValue) => {
       const clientMessageID = draftIDRef.current;
+      const activeReasoningEffort = reasoningEffort && reasoningOptions.includes(reasoningEffort) ? reasoningEffort : "";
       if (!modelValue.provider || !modelValue.model) {
         throw new APIError(400, "no_model");
       }
-      const created = await createSession(token, {
+      let created = await createSession(token, {
         title: "",
         provider: modelValue.provider,
         model: modelValue.model,
       });
+      if (activeReasoningEffort) {
+        created = await updateSession(token, created.id, { reasoningEffort: activeReasoningEffort });
+      }
       cacheCreatedSession(queryClient, created);
       await navigate({
         to: "/",
@@ -303,7 +338,11 @@ function DraftComposer({
       });
       startSubmittingTurn(created.id, clientMessageID);
       try {
-        const result = await submitMessage(token, created.id, { clientMessageID, text: value.text });
+        const result = await submitMessage(token, created.id, {
+          clientMessageID,
+          reasoningEffort: activeReasoningEffort || undefined,
+          text: value.text,
+        });
         if (result.queued || !result.turnID) {
           clearSubmittingTurn(created.id, clientMessageID);
         } else {
@@ -387,9 +426,10 @@ function DraftComposer({
   }, [form, quickSubmit, setDraftText, submitText]);
 
   const submitDraft = (value: DraftValue) => submitText(value.text);
-  const handleResolvedModelChange = useCallback((next: { provider: string; model: string } | null) => {
+  const handleResolvedModelChange = useCallback((next: ResolvedModelSelection | null) => {
+    setResolvedModel(next);
     if (next) {
-      onModelValueChange(next);
+      onModelValueChange({ provider: next.provider, model: next.model });
     }
   }, [onModelValueChange]);
   const setTextAreaRef = (node: HTMLTextAreaElement | null) => {
@@ -462,8 +502,18 @@ function DraftComposer({
               token={token}
               value={modelValue}
               onChange={onModelValueChange}
+              onAfterClose={focusTextarea}
               onResolvedChange={handleResolvedModelChange}
             />
+            {reasoningOptions.length > 0 ? (
+              <ReasoningEffortChip
+                defaultValue={defaultReasoningEffort}
+                options={reasoningOptions}
+                value={reasoningEffort}
+                onAfterClose={focusTextarea}
+                onValueChange={setDraftReasoningEffort}
+              />
+            ) : null}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button

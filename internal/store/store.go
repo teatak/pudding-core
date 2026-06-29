@@ -31,10 +31,12 @@ type Session struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
 	// Provider 是 provider profile 名;会话创建时必须显式写入。
-	Provider   string    `json:"provider"`
-	Model      string    `json:"model"`
-	ActiveMode AgentMode `json:"activeMode"`
-	ModeLease  ModeLease `json:"modeLease"`
+	Provider          string    `json:"provider"`
+	Model             string    `json:"model"`
+	ReasoningEffort   string    `json:"reasoningEffort,omitempty"`
+	ReasoningModelKey string    `json:"reasoningModelKey,omitempty"`
+	ActiveMode        AgentMode `json:"activeMode"`
+	ModeLease         ModeLease `json:"modeLease"`
 	// WorkspaceDirs 是用户授权给本 session 的工作区根目录集合。
 	WorkspaceDirs []string  `json:"workspaceDirs,omitempty"`
 	CreatedAt     time.Time `json:"createdAt"`
@@ -50,13 +52,14 @@ type Session struct {
 }
 
 type SessionUpdate struct {
-	Title         *string    `json:"title"`
-	Provider      *string    `json:"provider"`
-	Model         *string    `json:"model"`
-	ActiveMode    *AgentMode `json:"activeMode"`
-	ModeLease     *ModeLease `json:"modeLease"`
-	WorkspaceDirs *[]string  `json:"workspaceDirs"`
-	Pinned        *bool      `json:"pinned"`
+	Title           *string    `json:"title"`
+	Provider        *string    `json:"provider"`
+	Model           *string    `json:"model"`
+	ReasoningEffort *string    `json:"reasoningEffort"`
+	ActiveMode      *AgentMode `json:"activeMode"`
+	ModeLease       *ModeLease `json:"modeLease"`
+	WorkspaceDirs   *[]string  `json:"workspaceDirs"`
+	Pinned          *bool      `json:"pinned"`
 	// PinnedOrder 仅描述 pinned 组内手动排序,不改变最近会话排序。
 	PinnedOrder *int64 `json:"pinnedOrder"`
 }
@@ -138,6 +141,8 @@ func NormalizeSessionProviderModel(s *Session) error {
 	if s.Provider == "" || s.Model == "" {
 		return ErrInvalidSession
 	}
+	s.ReasoningEffort = strings.TrimSpace(s.ReasoningEffort)
+	s.ReasoningModelKey = strings.TrimSpace(s.ReasoningModelKey)
 	if s.ActiveMode == "" {
 		s.ActiveMode = ModeChat
 	}
@@ -169,6 +174,10 @@ func NormalizeSessionUpdate(upd *SessionUpdate) error {
 			return ErrInvalidSession
 		}
 		upd.Model = &model
+	}
+	if upd.ReasoningEffort != nil {
+		effort := strings.TrimSpace(*upd.ReasoningEffort)
+		upd.ReasoningEffort = &effort
 	}
 	if upd.ActiveMode != nil {
 		mode := NormalizeAgentMode(*upd.ActiveMode)

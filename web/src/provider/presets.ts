@@ -46,13 +46,13 @@ type ProviderModelPatch = Omit<ProviderModel, "id" | "limits" | "providerOptions
 };
 
 const DEEPSEEK_OPENAI_MODELS = [
-  model("deepseek-v4-flash", { contextWindow: 1_050_000, capabilities: { tools: true }, openai: { temperature: 0.7, max_completion_tokens: 384_000, max_tool_loops: 64 } }),
-  model("deepseek-v4-pro", { contextWindow: 1_050_000, capabilities: { tools: true }, openai: { temperature: 0.7, max_completion_tokens: 384_000, max_tool_loops: 64 } }),
+  model("deepseek-v4-flash", { contextWindow: 1_050_000, capabilities: { tools: true }, openai: { temperature: 0.7, max_completion_tokens: 384_000, max_tool_loops: 64, reasoning_effort: "high" } }),
+  model("deepseek-v4-pro", { contextWindow: 1_050_000, capabilities: { tools: true }, openai: { temperature: 0.7, max_completion_tokens: 384_000, max_tool_loops: 64, reasoning_effort: "high" } }),
 ];
 
 const DEEPSEEK_ANTHROPIC_MODELS = [
-  model("deepseek-v4-flash", { contextWindow: 1_050_000, capabilities: { tools: true }, anthropic: { temperature: 0.7, max_tokens: 384_000 } }),
-  model("deepseek-v4-pro", { contextWindow: 1_050_000, capabilities: { tools: true }, anthropic: { temperature: 0.7, max_tokens: 384_000 } }),
+  model("deepseek-v4-flash", { contextWindow: 1_050_000, capabilities: { tools: true }, anthropic: { temperature: 0.7, max_tokens: 384_000, output_config: { effort: "high" } } }),
+  model("deepseek-v4-pro", { contextWindow: 1_050_000, capabilities: { tools: true }, anthropic: { temperature: 0.7, max_tokens: 384_000, output_config: { effort: "high" } } }),
 ];
 
 const MIMO_OPENAI_MODELS = ["mimo-v2.5", "mimo-v2.5-pro"].map((id) =>
@@ -88,9 +88,10 @@ const ZHIPU_ANTHROPIC_MODELS = ZHIPU_MODEL_IDS.map((id) =>
 );
 
 const OPENAI_MODELS = [
-  model("gpt-5.5", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: 0.7, reasoning_effort: "medium" } }),
-  model("gpt-5.4", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: 0.7, reasoning_effort: "medium" } }),
-  model("gpt-5.4-mini", { contextWindow: 400_000, capabilities: { image: true, tools: true }, openai: { temperature: 0.7, reasoning_effort: "low" } }),
+  model("gpt-5.5", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: 0.7, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
+  model("gpt-5.4", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: 0.7, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
+  model("gpt-5.4-mini", { contextWindow: 400_000, capabilities: { image: true, tools: true }, openai: { temperature: 0.7, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
+  model("gpt-5.4-nano", { contextWindow: 400_000, capabilities: { image: true, tools: true }, openai: { temperature: 0.7, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
 ];
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
@@ -196,7 +197,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   },
   {
     id: "gemini",
-    name: "Google Gemini",
+    name: "Gemini",
     description: "Google Gemini API with multimodal chat models.",
     defaultVariantId: "default",
     apiKeyURL: "https://aistudio.google.com/app/apikey",
@@ -208,9 +209,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         protocol: "google",
         baseURL: "https://generativelanguage.googleapis.com",
         models: [
-          model("gemini-3.5-flash", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: 0.7, maxOutputTokens: 64_000 } }),
-          model("gemini-3.5-pro", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: 0.7, maxOutputTokens: 64_000 } }),
-          model("gemini-2.5-flash", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: 0.7, maxOutputTokens: 64_000 } }),
+          model("gemini-3.5-flash", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: 0.7, maxOutputTokens: 64_000, thinking: { include_thoughts: true, level: "medium" } } }),
+          model("gemini-3.1-pro", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: 0.7, maxOutputTokens: 64_000, thinking: { include_thoughts: true, level: "high" } } }),
         ],
       },
     ],
@@ -623,7 +623,7 @@ function providerModelFromCandidate(id: string, protocol: ProviderPresetProtocol
     return { id, capabilities, providerOptions: { anthropic: { temperature: 0.7 } } };
   }
   if (protocol === "google") {
-    return { id, capabilities, providerOptions: { google: { temperature: 0.7 } } };
+    return { id, capabilities, providerOptions: { google: { temperature: 0.7, thinking: { include_thoughts: true, level: "low" } } } };
   }
   return { id, capabilities, providerOptions: { openai: { temperature: 0.7 } } };
 }

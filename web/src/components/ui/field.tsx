@@ -15,7 +15,7 @@ function Field({
       data-orientation={orientation}
       data-slot="field"
       className={cn(
-        "flex flex-col gap-1.5 rounded-lg border bg-background px-3 py-2.5 transition-colors hover:bg-accent",
+        "flex flex-col gap-1.5 rounded-lg border bg-background px-3 py-2.5 transition-colors",
         orientation === "horizontal" && "flex-row items-center justify-between gap-3",
         orientation === "responsive" && "sm:flex-row sm:items-center sm:justify-between sm:gap-3",
         className

@@ -290,6 +290,7 @@ type submitReq struct {
 	ClientMessageID string `json:"clientMessageID"`
 	Text            string `json:"text"`
 	Kind            string `json:"kind,omitempty"`
+	ReasoningEffort string `json:"reasoningEffort,omitempty"`
 }
 
 func (s *Server) submit(c *cart.Context) error {
@@ -303,6 +304,7 @@ func (s *Server) submit(c *cart.Context) error {
 		ClientMessageID: req.ClientMessageID,
 		Text:            req.Text,
 		Kind:            req.Kind,
+		ReasoningEffort: req.ReasoningEffort,
 	})
 	switch {
 	case errors.Is(err, engine.ErrEmptyInput):

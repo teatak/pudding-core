@@ -98,8 +98,15 @@ type functionDeclaration struct {
 }
 
 type generationConfig struct {
-	Temperature     *float64 `json:"temperature,omitempty"`
-	MaxOutputTokens *int     `json:"maxOutputTokens,omitempty"`
+	Temperature     *float64        `json:"temperature,omitempty"`
+	MaxOutputTokens *int            `json:"maxOutputTokens,omitempty"`
+	ThinkingConfig  *thinkingConfig `json:"thinkingConfig,omitempty"`
+}
+
+type thinkingConfig struct {
+	IncludeThoughts bool   `json:"includeThoughts,omitempty"`
+	ThinkingBudget  *int   `json:"thinkingBudget,omitempty"`
+	ThinkingLevel   string `json:"thinkingLevel,omitempty"`
 }
 
 type content struct {
@@ -142,7 +149,10 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 	} else if v, ok := provider.IntOption(opts, "maxOutputTokens", "max_output_tokens", "max_tokens"); ok {
 		gen.MaxOutputTokens = &v
 	}
-	if gen.Temperature != nil || gen.MaxOutputTokens != nil {
+	if thinking := googleThinkingConfig(req.Model, opts); thinking != nil {
+		gen.ThinkingConfig = thinking
+	}
+	if gen.Temperature != nil || gen.MaxOutputTokens != nil || gen.ThinkingConfig != nil {
 		body.GenerationConfig = &gen
 	}
 	if req.System != "" {
@@ -154,7 +164,7 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 			declarations = append(declarations, functionDeclaration{
 				Name:        t.Name,
 				Description: t.Description,
-				Parameters:  t.InputSchema,
+				Parameters:  sanitizeToolParameters(t.InputSchema),
 			})
 		}
 		body.Tools = []tool{{FunctionDeclarations: declarations}}
@@ -174,6 +184,206 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 		httpReq.Header.Set("x-goog-api-key", c.apiKey)
 	}
 	return httpReq, nil
+}
+
+func googleThinkingConfig(model string, opts map[string]any) *thinkingConfig {
+	thinking, _ := mapOption(opts, "thinking", "thinkingConfig", "thinking_config")
+	includeThoughts, includeSet := boolOption(thinking, "include_thoughts", "includeThoughts")
+	if !includeSet {
+		includeThoughts, includeSet = boolOption(opts, "include_thoughts", "includeThoughts")
+	}
+	level, _ := provider.StringOption(thinking, "level", "thinkingLevel", "thinking_level")
+	if level == "" {
+		level, _ = provider.StringOption(opts, "thinkingLevel", "thinking_level")
+	}
+	budget, budgetSet := provider.IntOption(thinking, "budget", "thinkingBudget", "thinking_budget")
+	if !budgetSet {
+		budget, budgetSet = provider.IntOption(opts, "thinkingBudget", "thinking_budget")
+	}
+	if !includeSet && level == "" && !budgetSet {
+		return nil
+	}
+	cfg := &thinkingConfig{IncludeThoughts: includeThoughts || !includeSet}
+	if usesGemini3ThinkingLevel(model) {
+		if parsed := parseThinkingLevel(level); parsed != "" {
+			cfg.ThinkingLevel = parsed
+		}
+		return cfg
+	}
+	if budgetSet {
+		cfg.ThinkingBudget = &budget
+		return cfg
+	}
+	budget = thinkingBudgetFromLevel(level)
+	cfg.ThinkingBudget = &budget
+	return cfg
+}
+
+func mapOption(opts map[string]any, names ...string) (map[string]any, bool) {
+	for _, name := range names {
+		value, ok := opts[name]
+		if !ok || value == nil {
+			continue
+		}
+		if typed, ok := value.(map[string]any); ok {
+			return typed, true
+		}
+	}
+	return nil, false
+}
+
+func boolOption(opts map[string]any, names ...string) (bool, bool) {
+	for _, name := range names {
+		value, ok := opts[name]
+		if !ok || value == nil {
+			continue
+		}
+		switch typed := value.(type) {
+		case bool:
+			return typed, true
+		case string:
+			switch strings.ToLower(strings.TrimSpace(typed)) {
+			case "true", "1", "yes", "on":
+				return true, true
+			case "false", "0", "no", "off":
+				return false, true
+			}
+		}
+	}
+	return false, false
+}
+
+func usesGemini3ThinkingLevel(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	m = strings.TrimPrefix(m, "models/")
+	switch m {
+	case "gemini-flash-latest", "gemini-pro-latest", "gemini-flash-lite-latest":
+		return true
+	default:
+		return strings.HasPrefix(m, "gemini-3")
+	}
+}
+
+func parseThinkingLevel(level string) string {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "minimal":
+		return "MINIMAL"
+	case "low":
+		return "LOW"
+	case "medium":
+		return "MEDIUM"
+	case "high":
+		return "HIGH"
+	default:
+		return ""
+	}
+}
+
+func thinkingBudgetFromLevel(level string) int {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "minimal":
+		return 128
+	case "low":
+		return 1024
+	case "medium":
+		return 8192
+	case "high":
+		return 24576
+	default:
+		return -1
+	}
+}
+
+func sanitizeToolParameters(schema json.RawMessage) json.RawMessage {
+	var value any
+	if err := json.Unmarshal(schema, &value); err != nil {
+		return schema
+	}
+	cleanValue, ok := sanitizeSchemaValue(value).(map[string]any)
+	if !ok || len(cleanValue) == 0 {
+		cleanValue = map[string]any{"type": "object"}
+	}
+	clean, err := json.Marshal(cleanValue)
+	if err != nil {
+		return schema
+	}
+	return clean
+}
+
+// Gemini function declarations accept only a subset of JSON Schema. This mirrors
+// the old project adapter: keep the structural fields Google understands and
+// drop JSON Schema extras such as additionalProperties/default/oneOf.
+func sanitizeSchemaValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make(map[string]any)
+		if schemaType := stringValue(typed["type"]); schemaType != "" {
+			out["type"] = strings.ToLower(schemaType)
+		}
+		if description := stringValue(typed["description"]); description != "" {
+			out["description"] = description
+		}
+		if required := stringListValue(typed["required"]); len(required) > 0 {
+			out["required"] = required
+		}
+		if enum := scalarListValue(typed["enum"]); len(enum) > 0 {
+			out["enum"] = enum
+		}
+		if props, ok := typed["properties"].(map[string]any); ok {
+			cleanProps := make(map[string]any, len(props))
+			for name, prop := range props {
+				if cleanProp, ok := sanitizeSchemaValue(prop).(map[string]any); ok {
+					cleanProps[name] = cleanProp
+				}
+			}
+			if len(cleanProps) > 0 {
+				out["properties"] = cleanProps
+			}
+		}
+		if items, ok := sanitizeSchemaValue(typed["items"]).(map[string]any); ok && len(items) > 0 {
+			out["items"] = items
+		}
+		if _, ok := out["type"]; !ok {
+			out["type"] = "object"
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func stringValue(value any) string {
+	s, _ := value.(string)
+	return strings.TrimSpace(s)
+}
+
+func stringListValue(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if s := stringValue(item); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func scalarListValue(value any) []any {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]any, 0, len(items))
+	for _, item := range items {
+		switch item.(type) {
+		case string, float64, bool:
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 type streamFrame struct {

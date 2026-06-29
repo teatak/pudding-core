@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -123,11 +124,25 @@ func (m *Memstore) UpdateSession(_ context.Context, id string, upd store.Session
 	if upd.Title != nil {
 		s.Title = *upd.Title
 	}
+	modelChanged := false
 	if upd.Provider != nil {
 		s.Provider = *upd.Provider
+		modelChanged = true
 	}
 	if upd.Model != nil {
 		s.Model = *upd.Model
+		modelChanged = true
+	}
+	if modelChanged {
+		s.ReasoningEffort = ""
+		s.ReasoningModelKey = ""
+	}
+	if upd.ReasoningEffort != nil {
+		s.ReasoningEffort = *upd.ReasoningEffort
+		s.ReasoningModelKey = ""
+		if s.ReasoningEffort != "" {
+			s.ReasoningModelKey = sessionModelKey(s.Provider, s.Model)
+		}
 	}
 	if upd.ActiveMode != nil {
 		s.ActiveMode = *upd.ActiveMode
@@ -148,6 +163,10 @@ func (m *Memstore) UpdateSession(_ context.Context, id string, upd store.Session
 	cp := *s
 	cp.WorkspaceDirs = append([]string(nil), s.WorkspaceDirs...)
 	return &cp, nil
+}
+
+func sessionModelKey(providerName, model string) string {
+	return strings.TrimSpace(providerName) + ":" + strings.TrimSpace(model)
 }
 
 func (m *Memstore) DeleteSession(_ context.Context, id string) error {

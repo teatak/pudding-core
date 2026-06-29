@@ -5,6 +5,7 @@ import { ArrowUp, Check, Code2, FolderOpen, Loader2, MessageCircle, Plus, Search
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -21,7 +22,8 @@ import { ChatColumn } from "@/components/ChatColumn";
 import { ContextUsageRing } from "@/components/ContextUsageRing";
 import { Mascot, type MascotGaze, type MascotGazePoint, type MascotMood } from "@/components/Mascot";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
-import { ModelPicker } from "@/components/ModelPicker";
+import { ModelPicker, type ResolvedModelSelection } from "@/components/ModelPicker";
+import { defaultReasoningEffortForSelection, ReasoningEffortChip, reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -79,7 +81,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
   const pendingApproval = useOverlayStore((state) => selectPendingApproval(state.assistants, sessionID, state.runningTurns[sessionID]));
   const running = overlayRunning || session.running;
   const currentMode = session.modeLease === "session" ? session.activeMode : "chat";
-  const [resolvedModel, setResolvedModel] = useState<{ provider: string; model: string } | null>(null);
+  const [resolvedModel, setResolvedModel] = useState<ResolvedModelSelection | null>(null);
   const [mascotGaze, setMascotGaze] = useState<MascotGaze>({ type: "pointer" });
   const [mascotErrorMessage, setMascotErrorMessage] = useState<string | null>(null);
   const [mascotErrorSignal, setMascotErrorSignal] = useState(0);
@@ -138,6 +140,35 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
       ? slashCommands.filter((command) => command.command.startsWith("/" + slashQuery))
       : [];
   const slashMenuOpen = visibleSlashCommands.length > 0;
+  const reasoningOptions = useMemo(() => reasoningEffortOptionsForSelection(resolvedModel), [resolvedModel]);
+  const defaultReasoningEffort = useMemo(() => defaultReasoningEffortForSelection(resolvedModel), [resolvedModel]);
+  const resolvedModelKey = resolvedModel ? `${resolvedModel.provider}:${resolvedModel.model}` : "";
+  const reasoningEffort = resolvedModelKey && session.reasoningModelKey === resolvedModelKey ? session.reasoningEffort || "" : "";
+  const setSessionReasoningEffort = useCallback(
+    (value: string) => {
+      if (!resolvedModelKey) {
+        return;
+      }
+      void updateSession(token, sessionID, { reasoningEffort: value })
+        .then((updated) => {
+          queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), (previous) => {
+            if (!previous) {
+              return previous;
+            }
+            return {
+              sessions: previous.sessions.map((item) => (item.id === updated.id ? updated : item)),
+            };
+          });
+        })
+        .catch((error) => {
+          console.warn("failed to update reasoning effort", error);
+        })
+        .finally(() => {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+        });
+    },
+    [queryClient, resolvedModelKey, sessionID, token],
+  );
 
   useEffect(() => {
     if (!slashMenuOpen) {
@@ -146,6 +177,12 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
     }
     setSlashSelectedIndex((index) => Math.min(index, visibleSlashCommands.length - 1));
   }, [slashMenuOpen, visibleSlashCommands.length]);
+
+  useEffect(() => {
+    if (reasoningEffort && !reasoningOptions.includes(reasoningEffort)) {
+      setSessionReasoningEffort("");
+    }
+  }, [reasoningEffort, reasoningOptions, setSessionReasoningEffort]);
 
   const clearMascotError = useCallback(() => {
     if (mascotErrorTimerRef.current) {
@@ -170,7 +207,6 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
     },
     [onSubmitError],
   );
-
   const submitMutation = useMutation({
     mutationFn: async (value: z.infer<typeof composerSchema>) => {
       const clientMessageID = draftIDRef.current;
@@ -188,7 +224,10 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
       if (session.provider !== provider || session.model !== model) {
         await updateSession(token, sessionID, { provider, model });
       }
-      const result = await submitMessage(token, sessionID, { clientMessageID, text: value.text });
+      const result = await submitMessage(token, sessionID, {
+        clientMessageID,
+        text: value.text,
+      });
       if (result.queued || !result.turnID) {
         clearSubmittingTurn(sessionID, clientMessageID);
       } else {
@@ -368,12 +407,18 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
     submitMutation.mutate({ text });
   };
 
-  const handleResolvedModelChange = useCallback((next: { provider: string; model: string } | null) => {
+  const handleResolvedModelChange = useCallback((next: ResolvedModelSelection | null) => {
     setResolvedModel((current) => {
       if (!next) {
         return current ? null : current;
       }
-      if (current?.provider === next.provider && current.model === next.model) {
+      if (
+        current?.provider === next.provider &&
+        current.model === next.model &&
+        current.providerProtocol === next.providerProtocol &&
+        current.providerBrand === next.providerBrand &&
+        current.modelConfig === next.modelConfig
+      ) {
         return current;
       }
       return next;
@@ -401,6 +446,12 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
       updateMascotInputGaze();
     });
   }, [updateMascotInputGaze]);
+  const focusTextarea = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      textAreaRef.current?.focus({ preventScroll: true });
+      scheduleMascotInputGaze();
+    });
+  }, [scheduleMascotInputGaze]);
   const ime = useImeCompositionGuard({ onCompositionEnd: scheduleMascotInputGaze });
   const setTextAreaRef = (node: HTMLTextAreaElement | null) => {
     textAreaRef.current = node;
@@ -561,8 +612,20 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
                 <ModelPicker
                   token={token}
                   session={session}
+                  onAfterClose={focusTextarea}
                   onResolvedChange={handleResolvedModelChange}
                 />
+                {reasoningOptions.length > 0 ? (
+                  <ReasoningEffortChip
+                    defaultValue={defaultReasoningEffort}
+                    options={reasoningOptions}
+                    value={reasoningEffort}
+                    onValueChange={(value) => {
+                      setSessionReasoningEffort(value);
+                    }}
+                    onAfterClose={focusTextarea}
+                  />
+                ) : null}
               </div>
               {showStopButton ? (
                 <Tooltip>

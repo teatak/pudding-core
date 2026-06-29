@@ -731,6 +731,15 @@ func TestDeleteSessionCancelsRunningTurn(t *testing.T) {
 	// mock 慢流:submit 后 turn 持续 running,delete 必须 cancel 它而非
 	// 留 goroutine 跑到自然结束。
 	ms := memstore.New()
+	if err := ms.PutProviderProfile(context.Background(), &store.ProviderProfile{
+		ID:          "mock",
+		DisplayName: "mock",
+		Protocol:    "openai-compatible",
+		BaseURL:     "http://127.0.0.1:11434/v1",
+		Models:      []store.ProviderModel{{ID: "m"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	hub := event.NewHub()
 	eng := engine.New(ms, hub,
 		registry.Static(mock.New(mock.WithScript([]string{"slow"}), mock.WithDelay(2*time.Second))), ms)

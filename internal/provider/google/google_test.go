@@ -1,6 +1,7 @@
 package google
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -72,6 +73,10 @@ func TestStreamHappyPath(t *testing.T) {
 			ProviderOptions: &provider.ModelProviderOptions{
 				Google: map[string]any{
 					"temperature": 0.5,
+					"thinking": map[string]any{
+						"include_thoughts": true,
+						"level":            "low",
+					},
 				},
 			},
 		},
@@ -106,6 +111,9 @@ func TestStreamHappyPath(t *testing.T) {
 	if gotBody.GenerationConfig == nil || gotBody.GenerationConfig.Temperature == nil || *gotBody.GenerationConfig.Temperature != 0.5 || gotBody.GenerationConfig.MaxOutputTokens == nil || *gotBody.GenerationConfig.MaxOutputTokens != 2048 {
 		t.Fatalf("model config not applied: %+v", gotBody.GenerationConfig)
 	}
+	if gotBody.GenerationConfig.ThinkingConfig == nil || !gotBody.GenerationConfig.ThinkingConfig.IncludeThoughts || gotBody.GenerationConfig.ThinkingConfig.ThinkingLevel != "LOW" || gotBody.GenerationConfig.ThinkingConfig.ThinkingBudget != nil {
+		t.Fatalf("thinking config not applied: %+v", gotBody.GenerationConfig.ThinkingConfig)
+	}
 	if len(gotBody.Tools) != 1 || len(gotBody.Tools[0].FunctionDeclarations) != 1 || gotBody.Tools[0].FunctionDeclarations[0].Name != "web_fetch" || string(gotBody.Tools[0].FunctionDeclarations[0].Parameters) != `{"type":"object"}` {
 		t.Fatalf("tools not applied: %+v", gotBody.Tools)
 	}
@@ -115,6 +123,75 @@ func TestStreamHappyPath(t *testing.T) {
 	}
 	if strings.Join(roles, ",") != "user,model,user" {
 		t.Fatalf("role mapping wrong: %v", roles)
+	}
+}
+
+func TestThinkingConfigUsesBudgetForGemini25(t *testing.T) {
+	client := New(Config{BaseURL: "https://example.test", APIKey: "test-key"})
+	httpReq, err := client.newRequest(context.Background(), provider.Request{
+		Model: "gemini-2.5-flash",
+		Config: provider.ModelConfig{
+			ProviderOptions: &provider.ModelProviderOptions{
+				Google: map[string]any{
+					"thinking": map[string]any{
+						"include_thoughts": true,
+						"level":            "medium",
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotBody generateRequest
+	if err := json.NewDecoder(httpReq.Body).Decode(&gotBody); err != nil {
+		t.Fatal(err)
+	}
+	if gotBody.GenerationConfig == nil || gotBody.GenerationConfig.ThinkingConfig == nil {
+		t.Fatalf("thinking config missing: %+v", gotBody.GenerationConfig)
+	}
+	thinking := gotBody.GenerationConfig.ThinkingConfig
+	if !thinking.IncludeThoughts || thinking.ThinkingBudget == nil || *thinking.ThinkingBudget != 8192 || thinking.ThinkingLevel != "" {
+		t.Fatalf("thinking config wrong: %+v", thinking)
+	}
+}
+
+func TestToolSchemaStripsAdditionalProperties(t *testing.T) {
+	client := New(Config{BaseURL: "https://example.test", APIKey: "test-key"})
+	httpReq, err := client.newRequest(context.Background(), provider.Request{
+		Model: "gemini-3-flash",
+		Tools: []provider.ToolDef{{
+			Name: "web_search",
+			InputSchema: json.RawMessage(`{
+				"type":"object",
+				"properties":{
+					"query":{"type":"string","additionalProperties":false},
+					"filters":{"type":"object","properties":{"topic":{"type":"string"}},"additionalProperties":false}
+				},
+				"required":["query"],
+				"additionalProperties":false
+			}`),
+		}},
+		Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got generateRequest
+	body, _ := io.ReadAll(httpReq.Body)
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Tools) != 1 || len(got.Tools[0].FunctionDeclarations) != 1 {
+		t.Fatalf("tool declarations missing: %+v", got.Tools)
+	}
+	params := got.Tools[0].FunctionDeclarations[0].Parameters
+	if bytes.Contains(params, []byte("additionalProperties")) {
+		t.Fatalf("google tool schema should not contain additionalProperties: %s", params)
+	}
+	if !bytes.Contains(params, []byte(`"query"`)) || !bytes.Contains(params, []byte(`"filters"`)) || !bytes.Contains(params, []byte(`"required"`)) {
+		t.Fatalf("tool schema lost properties: %s", params)
 	}
 }
 

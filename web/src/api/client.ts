@@ -60,6 +60,7 @@ const sessionPatchRequest = z.object({
   title: z.string().optional(),
   provider: z.string().optional(),
   model: z.string().optional(),
+  reasoningEffort: z.string().optional(),
   activeMode: z.enum(["chat", "research", "workspace"]).optional(),
   modeLease: z.enum(["none", "session"]).optional(),
   workspaceDirs: z.array(z.string()).optional(),
@@ -264,7 +265,7 @@ export function updateQueuedInput(
 export function submitMessage(
   token: string,
   sessionID: string,
-  body: { clientMessageID: string; kind?: "system" | "user"; text: string },
+  body: { clientMessageID: string; kind?: "system" | "user"; reasoningEffort?: string; text: string },
 ): Promise<SubmitResult> {
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/submit`, submitResponse, {
     method: "POST",

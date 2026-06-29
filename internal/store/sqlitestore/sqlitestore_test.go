@@ -73,6 +73,45 @@ func TestSessionWorkspaceDirsPersist(t *testing.T) {
 	}
 }
 
+func TestSessionReasoningEffortPersistsAndClearsOnModelChange(t *testing.T) {
+	st, path := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, st, "sess_reasoning")
+
+	effort := "high"
+	updated, err := st.UpdateSession(ctx, "sess_reasoning", store.SessionUpdate{ReasoningEffort: &effort})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ReasoningEffort != "high" || updated.ReasoningModelKey != "mock:mock" {
+		t.Fatalf("reasoning effort not bound to current model: %+v", updated)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	got, err := reopened.GetSession(ctx, "sess_reasoning")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ReasoningEffort != "high" || got.ReasoningModelKey != "mock:mock" {
+		t.Fatalf("reasoning effort not persisted: %+v", got)
+	}
+
+	model := "next"
+	got, err = reopened.UpdateSession(ctx, "sess_reasoning", store.SessionUpdate{Model: &model})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ReasoningEffort != "" || got.ReasoningModelKey != "" {
+		t.Fatalf("reasoning effort must clear on model change: %+v", got)
+	}
+}
+
 func TestRenameDoesNotAffectRecentOrdering(t *testing.T) {
 	st, _ := openTestStore(t)
 	createTestSession(t, st, "older")

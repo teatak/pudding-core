@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     title      TEXT    NOT NULL DEFAULT '',
     provider   TEXT    NOT NULL, -- provider profile 名;创建 session 时必须显式写入
     model      TEXT    NOT NULL,
+    reasoning_effort TEXT NOT NULL DEFAULT '',
+    reasoning_model_key TEXT NOT NULL DEFAULT '',
     active_mode TEXT   NOT NULL DEFAULT 'chat',
     mode_lease  TEXT   NOT NULL DEFAULT 'none',
     workspace_dirs TEXT NOT NULL DEFAULT '[]',

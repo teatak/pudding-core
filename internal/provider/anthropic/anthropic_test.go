@@ -81,7 +81,8 @@ func TestStreamHappyPath(t *testing.T) {
 			Limits: &provider.ModelLimits{MaxOutputTokens: 1234},
 			ProviderOptions: &provider.ModelProviderOptions{
 				Anthropic: map[string]any{
-					"temperature": 0.4,
+					"temperature":   0.4,
+					"output_config": map[string]any{"effort": "max"},
 				},
 			},
 		},
@@ -115,6 +116,10 @@ func TestStreamHappyPath(t *testing.T) {
 	}
 	if gotBody.Temperature == nil || *gotBody.Temperature != 0.4 {
 		t.Fatalf("model config not applied: %+v", gotBody)
+	}
+	outputConfig, ok := gotBody.OutputConfig.(map[string]any)
+	if !ok || outputConfig["effort"] != "max" {
+		t.Fatalf("output config not applied: %+v", gotBody.OutputConfig)
 	}
 	if len(gotBody.Tools) != 1 || gotBody.Tools[0].Name != "web_fetch" || string(gotBody.Tools[0].InputSchema) != `{"type":"object"}` {
 		t.Fatalf("tools not applied: %+v", gotBody.Tools)

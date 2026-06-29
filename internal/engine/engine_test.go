@@ -26,6 +26,15 @@ func newTestEngine(t *testing.T, opts ...mock.Option) (*Engine, *memstore.Memsto
 	if err := ms.CreateSession(context.Background(), sess); err != nil {
 		t.Fatal(err)
 	}
+	if err := ms.PutProviderProfile(context.Background(), &store.ProviderProfile{
+		ID:          "mock",
+		DisplayName: "mock",
+		Protocol:    "openai-compatible",
+		BaseURL:     "http://127.0.0.1:11434/v1",
+		Models:      []store.ProviderModel{{ID: "mock-model"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	return eng, ms, hub, sess.ID
 }
 
@@ -58,6 +67,48 @@ func waitTurnDone(t *testing.T, s store.Store, sessionID string) *store.Turn {
 				return nil
 			}
 		}
+	}
+}
+
+func TestSubmitFallsBackWhenSessionProviderDeleted(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	eng := New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"ok"}))), ms)
+	ctx := context.Background()
+	if err := ms.CreateSession(ctx, &store.Session{ID: "sess_fallback", Provider: "deleted", Model: "old-model"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		ID:          "fallback",
+		DisplayName: "fallback",
+		Protocol:    "openai-compatible",
+		BaseURL:     "http://127.0.0.1:11434/v1",
+		Models: []store.ProviderModel{{
+			ID:            "new-model",
+			ContextWindow: 1234,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: "sess_fallback", ClientMessageID: "c1", Text: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, "sess_fallback")
+
+	sess, err := ms.GetSession(ctx, "sess_fallback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess.Provider != "fallback" || sess.Model != "new-model" {
+		t.Fatalf("session should be updated to fallback model, got provider=%q model=%q", sess.Provider, sess.Model)
+	}
+	page, err := ms.ListTurnsPage(ctx, "sess_fallback", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Turns) != 1 || page.Turns[0].Provider != "fallback" || page.Turns[0].Model != "new-model" {
+		t.Fatalf("turn should use fallback model, got %+v", page.Turns)
 	}
 }
 
@@ -142,6 +193,15 @@ func TestSystemSubmitDoesNotCreateUserMessage(t *testing.T) {
 	ctx := context.Background()
 	sid := "sess_system"
 	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "named", Provider: "capture", Model: "model"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		ID:          "capture",
+		DisplayName: "capture",
+		Protocol:    "openai-compatible",
+		BaseURL:     "http://127.0.0.1:11434/v1",
+		Models:      []store.ProviderModel{{ID: "model"}},
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -910,6 +970,17 @@ func TestPerSessionProviderRouting(t *testing.T) {
 	if err := ms.CreateSession(ctx, sessB); err != nil {
 		t.Fatal(err)
 	}
+	for _, id := range []string{"alpha", "beta"} {
+		if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+			ID:          id,
+			DisplayName: id,
+			Protocol:    "openai-compatible",
+			BaseURL:     "http://127.0.0.1:11434/v1",
+			Models:      []store.ProviderModel{{ID: "mock-model"}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	if _, err := eng.Submit(ctx, SubmitInput{SessionID: "sa", ClientMessageID: "a1", Text: "hi"}); err != nil {
 		t.Fatal(err)
@@ -967,7 +1038,7 @@ func TestTurnSnapshotsProviderAndModel(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	res, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "hi"})
+	res, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "hi", ReasoningEffort: "high"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1000,6 +1071,9 @@ func TestTurnSnapshotsProviderAndModel(t *testing.T) {
 	if v, ok := provider.FloatOption(snap.OpenAIOptions(), "temperature"); !ok || v != 0.6 {
 		t.Fatalf("temperature snapshot missing: %+v", snap.OpenAIOptions())
 	}
+	if v, ok := provider.StringOption(snap.OpenAIOptions(), "reasoning_effort"); !ok || v != "high" {
+		t.Fatalf("reasoning effort snapshot missing: %+v", snap.OpenAIOptions())
+	}
 
 	select {
 	case req := <-capture.reqCh:
@@ -1011,6 +1085,119 @@ func TestTurnSnapshotsProviderAndModel(t *testing.T) {
 		}
 		if v, ok := req.Config.MaxToolLoops(); !ok || v != 7 {
 			t.Fatalf("request config missing maxToolLoops: %+v", req.Config.Limits)
+		}
+	default:
+		t.Fatal("provider request was not captured")
+	}
+}
+
+func TestSubmitUsesSessionReasoningEffort(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	capture := &captureClient{reqCh: make(chan provider.Request, 1)}
+	eng := New(ms, hub, mapResolver{"capture": capture}, ms)
+	ctx := context.Background()
+	sid := "sess_reasoning"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "reasoning", Provider: "capture", Model: "snap-model"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "capture",
+		Protocol:    "openai-compatible",
+		BaseURL:     "http://unused",
+		Models: []store.ProviderModel{{
+			ID: "snap-model",
+			ProviderOptions: &store.ProviderOptions{
+				OpenAI: map[string]any{},
+			},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	effort := "medium"
+	if _, err := ms.UpdateSession(ctx, sid, store.SessionUpdate{ReasoningEffort: &effort}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+	turn, err := findTurn(ms, sid, "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snap provider.ModelConfig
+	if err := json.Unmarshal(turn.ModelConfig, &snap); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := provider.StringOption(snap.OpenAIOptions(), "reasoning_effort"); !ok || v != "medium" {
+		t.Fatalf("session reasoning effort snapshot missing: %+v", snap.OpenAIOptions())
+	}
+
+	select {
+	case req := <-capture.reqCh:
+		if v, ok := provider.StringOption(req.Config.OpenAIOptions(), "reasoning_effort"); !ok || v != "medium" {
+			t.Fatalf("session reasoning effort request missing: %+v", req.Config.OpenAIOptions())
+		}
+	default:
+		t.Fatal("provider request was not captured")
+	}
+}
+
+func TestDeepSeekReasoningEffortMapsToProviderOptions(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	capture := &captureClient{reqCh: make(chan provider.Request, 1)}
+	eng := New(ms, hub, mapResolver{"capture": capture}, ms)
+	ctx := context.Background()
+	sid := "sess_deepseek_reasoning"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "reasoning", Provider: "capture", Model: "deepseek-v4-pro"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "capture",
+		Brand:       "deepseek",
+		Protocol:    "openai-compatible",
+		BaseURL:     "http://unused",
+		Models: []store.ProviderModel{{
+			ID: "deepseek-v4-pro",
+			ProviderOptions: &store.ProviderOptions{
+				OpenAI: map[string]any{},
+			},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	effort := "xhigh"
+	if _, err := ms.UpdateSession(ctx, sid, store.SessionUpdate{ReasoningEffort: &effort}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+	turn, err := findTurn(ms, sid, "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snap provider.ModelConfig
+	if err := json.Unmarshal(turn.ModelConfig, &snap); err != nil {
+		t.Fatal(err)
+	}
+	opts := snap.OpenAIOptions()
+	if v, ok := provider.StringOption(opts, "reasoning_effort"); !ok || v != "xhigh" {
+		t.Fatalf("deepseek reasoning effort not passed as standard option: %+v", opts)
+	}
+	if _, ok := opts["thinking"]; ok {
+		t.Fatalf("deepseek thinking should not be sent as openai-compatible option: %+v", opts)
+	}
+
+	select {
+	case req := <-capture.reqCh:
+		if v, ok := provider.StringOption(req.Config.OpenAIOptions(), "reasoning_effort"); !ok || v != "xhigh" {
+			t.Fatalf("request deepseek reasoning effort not passed as standard option: %+v", req.Config.OpenAIOptions())
 		}
 	default:
 		t.Fatal("provider request was not captured")

@@ -26,13 +26,11 @@ import {
   getWebTools,
   listBuiltinTools,
   listProviders,
-  listSessions,
   patchWebTools,
   type BuiltinTool,
   type DailyUsageStat,
   type MobilePairing,
   type ProviderProfile,
-  type Session,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -534,18 +532,18 @@ function usageHeatClass(tokens: number, thresholds: number[]) {
     return "bg-muted/60";
   }
   if (tokens >= thresholds[3]) {
-    return "bg-blue-600";
+    return "bg-indigo-600";
   }
   if (tokens >= thresholds[2]) {
-    return "bg-blue-500";
+    return "bg-indigo-500";
   }
   if (tokens >= thresholds[1]) {
-    return "bg-sky-400";
+    return "bg-indigo-400";
   }
   if (tokens >= thresholds[0]) {
-    return "bg-sky-300";
+    return "bg-indigo-300";
   }
-  return "bg-sky-200";
+  return "bg-indigo-200";
 }
 
 function usageDayTitle(day: DailyUsageStat, t: (key: string) => string) {
@@ -855,12 +853,6 @@ function ProviderSettings({ createNonce = 0, token }: { createNonce?: number; to
     queryFn: () => listProviders(token),
     enabled: Boolean(token),
   });
-  const sessionsQuery = useQuery({
-    queryKey: queryKeys.sessions(),
-    queryFn: () => listSessions(token),
-    enabled: Boolean(token),
-  });
-
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteProvider(token, id),
     onSuccess: async (_, id) => {
@@ -875,20 +867,7 @@ function ProviderSettings({ createNonce = 0, token }: { createNonce?: number; to
   });
 
   const profiles = providersQuery.data?.providers || [];
-  const sessions = sessionsQuery.data?.sessions || [];
   const showInlinePresets = !providersQuery.isLoading && !providersQuery.isError && profiles.length === 0;
-
-  const usage = useMemo(() => {
-    const byProfile = new Map<string, Session[]>();
-    for (const session of sessions) {
-      const profileID = session.provider;
-      if (!profileID) {
-        continue;
-      }
-      byProfile.set(profileID, [...(byProfile.get(profileID) || []), session]);
-    }
-    return byProfile;
-  }, [sessions]);
 
   function startCreate() {
     setEditingProfile(null);
@@ -967,8 +946,6 @@ function ProviderSettings({ createNonce = 0, token }: { createNonce?: number; to
         {profiles.length > 0 ? (
           <ItemGroup className="gap-2">
             {profiles.map((profile) => {
-              const usedBy = usage.get(profile.id) || [];
-              const deleteBlocked = usedBy.length > 0;
               return (
                 <Item
                   key={profile.id}
@@ -1005,9 +982,8 @@ function ProviderSettings({ createNonce = 0, token }: { createNonce?: number; to
                     </Button>
                     <Button
                       aria-label={t("common.delete")}
-                      disabled={deleteBlocked || deleteMutation.isPending}
+                      disabled={deleteMutation.isPending}
                       size="icon-sm"
-                      title={deleteBlocked ? t("provider.deleteBlockedSessions") : undefined}
                       type="button"
                       variant="ghost"
                       onClick={() => setDeletingProfile(profile)}

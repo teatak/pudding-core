@@ -90,13 +90,14 @@ func (c *Client) stream(ctx context.Context, req provider.Request, out chan<- pr
 // Messages API 形状:system 是顶层字段,messages 角色 user / assistant。
 // 纯文本历史继续用 string content;工具历史用 content block 数组。
 type messagesRequest struct {
-	Model       string    `json:"model"`
-	MaxTokens   int       `json:"max_tokens"`
-	Stream      bool      `json:"stream"`
-	System      string    `json:"system,omitempty"`
-	Messages    []message `json:"messages"`
-	Tools       []tool    `json:"tools,omitempty"`
-	Temperature *float64  `json:"temperature,omitempty"`
+	Model        string    `json:"model"`
+	MaxTokens    int       `json:"max_tokens"`
+	Stream       bool      `json:"stream"`
+	System       string    `json:"system,omitempty"`
+	Messages     []message `json:"messages"`
+	Tools        []tool    `json:"tools,omitempty"`
+	Temperature  *float64  `json:"temperature,omitempty"`
+	OutputConfig any       `json:"output_config,omitempty"`
 }
 
 type tool struct {
@@ -140,6 +141,9 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Re
 	}
 	if v, ok := provider.FloatOption(opts, "temperature"); ok {
 		body.Temperature = &v
+	}
+	if outputConfig, ok := opts["output_config"]; ok {
+		body.OutputConfig = outputConfig
 	}
 	if len(req.Tools) > 0 {
 		body.Tools = make([]tool, 0, len(req.Tools))

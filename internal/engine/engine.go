@@ -30,8 +30,8 @@ var (
 	// ErrNoRunningTurn:cancel 时没有进行中的 turn,API 映射 409。
 	ErrNoRunningTurn = errors.New("engine: no running turn")
 	ErrEmptyInput    = errors.New("engine: empty text or clientMessageID")
-	// ErrNoModel:会话未解析出可用 provider/model(空配置),提交时直接报错,
-	// 不做任何隐式 provider/model 兜底。API 映射 400 "no_model"。
+	// ErrNoModel:会话未解析出可用 provider/model,且当前没有可 fallback 的配置。
+	// API 映射 400 "no_model"。
 	ErrNoModel        = errors.New("engine: no model configured for session")
 	ErrProviderConfig = errors.New("engine: provider config unavailable")
 	ErrCompactRunning = errors.New("engine: compact already running")
@@ -46,6 +46,7 @@ type Resolver interface {
 
 type ConfigSource interface {
 	Settings(ctx context.Context) (map[string]string, error)
+	ListProviderProfiles(ctx context.Context) ([]*store.ProviderProfile, error)
 	GetProviderProfile(ctx context.Context, name string) (*store.ProviderProfile, error)
 }
 
@@ -53,6 +54,10 @@ type emptyConfig struct{}
 
 func (emptyConfig) Settings(context.Context) (map[string]string, error) {
 	return map[string]string{}, nil
+}
+
+func (emptyConfig) ListProviderProfiles(context.Context) ([]*store.ProviderProfile, error) {
+	return nil, nil
 }
 
 func (emptyConfig) GetProviderProfile(context.Context, string) (*store.ProviderProfile, error) {
@@ -128,6 +133,7 @@ type SubmitInput struct {
 	ClientMessageID string
 	Text            string
 	Kind            string
+	ReasoningEffort string
 }
 
 type SubmitResult struct {
@@ -169,11 +175,13 @@ type SessionUsageInfo struct {
 }
 
 type resolvedModel struct {
-	providerName string
-	model        string
-	mode         store.AgentMode
-	config       provider.ModelConfig
-	configJSON   json.RawMessage
+	providerName  string
+	providerBrand string
+	protocol      string
+	model         string
+	mode          store.AgentMode
+	config        provider.ModelConfig
+	configJSON    json.RawMessage
 }
 
 func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, error) {
@@ -190,6 +198,12 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 		return nil, err
 	}
 	resolved.mode = initialMode(sess)
+	if err := resolved.applyReasoningEffort(activeReasoningEffort(in.ReasoningEffort, sess, resolved)); err != nil {
+		return nil, err
+	}
+	if err := resolved.normalizeReasoningOptions(); err != nil {
+		return nil, err
+	}
 	client, err := e.resolver.Resolve(ctx, resolved.providerName)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrProviderConfig, err)
@@ -389,31 +403,259 @@ func (e *Engine) queueSubmit(ctx context.Context, in SubmitInput, resolved *reso
 
 func (e *Engine) resolveModel(ctx context.Context, sess *store.Session) (*resolvedModel, error) {
 	// provider / model 在提交时刻解析并随 turn 快照,改配置不影响进行中的 turn。
+	// 若会话引用的 profile/model 已被删除,自动落到当前第一个可用配置。
 	providerName := strings.TrimSpace(sess.Provider)
 	model := strings.TrimSpace(sess.Model)
 	if providerName == "" || model == "" {
-		return nil, ErrNoModel
+		return e.fallbackModel(ctx, sess)
 	}
 
 	var cfg provider.ModelConfig
-	if p, err := e.config.GetProviderProfile(ctx, providerName); err == nil {
-		if len(p.Models) > 0 && !p.HasModel(model) {
-			return nil, ErrNoModel
+	p, err := e.config.GetProviderProfile(ctx, providerName)
+	if err != nil {
+		if fallback, fallbackErr := e.fallbackModel(ctx, sess); fallbackErr == nil {
+			return fallback, nil
+		} else if !errors.Is(fallbackErr, ErrNoModel) {
+			return nil, fallbackErr
 		}
-		if entry, ok := p.ModelByID(model); ok {
-			cfg = modelConfigFromEntry(entry)
-		}
+		return resolvedModelFromParts(providerName, "", "", model, cfg)
 	}
+	if len(p.Models) > 0 && !p.HasModel(model) {
+		return e.fallbackModel(ctx, sess)
+	}
+	if entry, ok := p.ModelByID(model); ok {
+		cfg = modelConfigFromEntry(entry)
+	}
+	return resolvedModelFromParts(providerName, p.Brand, p.Protocol, model, cfg)
+}
+
+func (e *Engine) fallbackModel(ctx context.Context, sess *store.Session) (*resolvedModel, error) {
+	profiles, err := e.config.ListProviderProfiles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range profiles {
+		if p == nil || len(p.Models) == 0 {
+			continue
+		}
+		providerName := strings.TrimSpace(p.ProfileID())
+		model := strings.TrimSpace(p.Models[0].ID)
+		if providerName == "" || model == "" {
+			continue
+		}
+		cfg := modelConfigFromEntry(p.Models[0])
+		cfgJSON, err := json.Marshal(cfg)
+		if err != nil {
+			return nil, err
+		}
+		if sess != nil && (strings.TrimSpace(sess.Provider) != providerName || strings.TrimSpace(sess.Model) != model) {
+			_, _ = e.store.UpdateSession(ctx, sess.ID, store.SessionUpdate{Provider: &providerName, Model: &model})
+		}
+		return &resolvedModel{
+			providerName:  providerName,
+			providerBrand: p.Brand,
+			protocol:      p.Protocol,
+			model:         model,
+			config:        cfg,
+			configJSON:    cfgJSON,
+		}, nil
+	}
+	return nil, ErrNoModel
+}
+
+func resolvedModelFromParts(providerName, brand, protocol, model string, cfg provider.ModelConfig) (*resolvedModel, error) {
 	cfgJSON, err := json.Marshal(cfg)
 	if err != nil {
 		return nil, err
 	}
 	return &resolvedModel{
-		providerName: providerName,
-		model:        model,
-		config:       cfg,
-		configJSON:   cfgJSON,
+		providerName:  providerName,
+		providerBrand: brand,
+		protocol:      protocol,
+		model:         model,
+		config:        cfg,
+		configJSON:    cfgJSON,
 	}, nil
+}
+
+func activeReasoningEffort(requestValue string, sess *store.Session, resolved *resolvedModel) string {
+	if effort := strings.TrimSpace(requestValue); effort != "" {
+		return effort
+	}
+	if sess == nil || resolved == nil {
+		return ""
+	}
+	if strings.TrimSpace(sess.ReasoningModelKey) != resolved.modelKey() {
+		return ""
+	}
+	return strings.TrimSpace(sess.ReasoningEffort)
+}
+
+func (r *resolvedModel) modelKey() string {
+	if r == nil {
+		return ""
+	}
+	return strings.TrimSpace(r.providerName) + ":" + strings.TrimSpace(r.model)
+}
+
+func (r *resolvedModel) applyReasoningEffort(value string) error {
+	effort := strings.TrimSpace(value)
+	if effort == "" || effort == "auto" {
+		return nil
+	}
+	target := r.reasoningTarget()
+	switch target {
+	case "deepseek-openai":
+		if r.config.ProviderOptions == nil {
+			r.config.ProviderOptions = &provider.ModelProviderOptions{}
+		}
+		if r.config.ProviderOptions.OpenAI == nil {
+			r.config.ProviderOptions.OpenAI = map[string]any{}
+		}
+		if effort != "low" && effort != "medium" && effort != "high" && effort != "xhigh" {
+			return nil
+		}
+		r.config.ProviderOptions.OpenAI["reasoning_effort"] = effort
+	case "deepseek-anthropic":
+		mapped, ok := deepSeekReasoningEffort(effort)
+		if !ok {
+			return nil
+		}
+		if r.config.ProviderOptions == nil {
+			r.config.ProviderOptions = &provider.ModelProviderOptions{}
+		}
+		if r.config.ProviderOptions.Anthropic == nil {
+			r.config.ProviderOptions.Anthropic = map[string]any{}
+		}
+		r.config.ProviderOptions.Anthropic["output_config"] = map[string]any{"effort": mapped}
+	case "google":
+		if effort != "low" && effort != "medium" && effort != "high" {
+			return nil
+		}
+		if r.config.ProviderOptions == nil {
+			r.config.ProviderOptions = &provider.ModelProviderOptions{}
+		}
+		if r.config.ProviderOptions.Google == nil {
+			r.config.ProviderOptions.Google = map[string]any{}
+		}
+		existingThinking, _ := r.config.ProviderOptions.Google["thinking"].(map[string]any)
+		thinking := map[string]any{}
+		for k, v := range existingThinking {
+			thinking[k] = v
+		}
+		thinking["include_thoughts"] = true
+		thinking["level"] = effort
+		r.config.ProviderOptions.Google["thinking"] = thinking
+	case "openai":
+		if effort != "none" && effort != "low" && effort != "medium" && effort != "high" && effort != "xhigh" {
+			return nil
+		}
+		if r.config.ProviderOptions == nil {
+			r.config.ProviderOptions = &provider.ModelProviderOptions{}
+		}
+		if r.config.ProviderOptions.OpenAI == nil {
+			r.config.ProviderOptions.OpenAI = map[string]any{}
+		}
+		r.config.ProviderOptions.OpenAI["reasoning_effort"] = effort
+	default:
+		return nil
+	}
+	cfgJSON, err := json.Marshal(r.config)
+	if err != nil {
+		return err
+	}
+	r.configJSON = cfgJSON
+	return nil
+}
+
+func (r *resolvedModel) reasoningTarget() string {
+	if r.isDeepSeek() {
+		switch strings.TrimSpace(r.protocol) {
+		case "openai-compatible", "openai-responses":
+			return "deepseek-openai"
+		case "anthropic":
+			return "deepseek-anthropic"
+		}
+	}
+	switch strings.TrimSpace(r.protocol) {
+	case "google":
+		return "google"
+	case "openai-compatible", "openai-responses":
+		return "openai"
+	}
+	if r.config.ProviderOptions != nil {
+		if r.config.ProviderOptions.Google != nil {
+			return "google"
+		}
+		if r.config.ProviderOptions.OpenAI != nil {
+			return "openai"
+		}
+	}
+	return ""
+}
+
+func (r *resolvedModel) normalizeReasoningOptions() error {
+	if r == nil || !r.isDeepSeek() || r.config.ProviderOptions == nil {
+		return nil
+	}
+	switch r.reasoningTarget() {
+	case "deepseek-openai":
+		opts := r.config.ProviderOptions.OpenAI
+		if opts == nil {
+			return nil
+		}
+		_, hadThinking := opts["thinking"]
+		delete(opts, "thinking")
+		effort, _ := provider.StringOption(opts, "reasoning_effort")
+		if effort == "" {
+			if hadThinking {
+				return r.refreshConfigJSON()
+			}
+			return nil
+		}
+		if effort != "low" && effort != "medium" && effort != "high" && effort != "xhigh" {
+			delete(opts, "reasoning_effort")
+		}
+	case "deepseek-anthropic":
+		opts := r.config.ProviderOptions.Anthropic
+		outputConfig, _ := opts["output_config"].(map[string]any)
+		effort, _ := provider.StringOption(outputConfig, "effort")
+		mapped, ok := deepSeekReasoningEffort(effort)
+		if !ok {
+			return nil
+		}
+		opts["output_config"] = map[string]any{"effort": mapped}
+	default:
+		return nil
+	}
+	return r.refreshConfigJSON()
+}
+
+func (r *resolvedModel) refreshConfigJSON() error {
+	cfgJSON, err := json.Marshal(r.config)
+	if err != nil {
+		return err
+	}
+	r.configJSON = cfgJSON
+	return nil
+}
+
+func (r *resolvedModel) isDeepSeek() bool {
+	if r == nil {
+		return false
+	}
+	return strings.TrimSpace(r.providerBrand) == "deepseek" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(r.model)), "deepseek-v4-")
+}
+
+func deepSeekReasoningEffort(effort string) (string, bool) {
+	switch strings.TrimSpace(effort) {
+	case "low", "medium", "high":
+		return "high", true
+	case "xhigh", "max":
+		return "max", true
+	default:
+		return "", false
+	}
 }
 
 func initialMode(sess *store.Session) store.AgentMode {
