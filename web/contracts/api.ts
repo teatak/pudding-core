@@ -270,6 +270,11 @@ export const patchQueuedInputRequest = z.object({
   status: z.enum(["queued", "editing", "cancelled"]).optional(),
 });
 export const settingsResponse = z.object({ settings: z.record(z.string(), z.string()) });
+export const userPromptResponse = z.object({
+  path: z.string(),
+  content: z.string(),
+  exists: z.boolean(),
+});
 
 export const builtinTool = z.object({
   id: z.string(),

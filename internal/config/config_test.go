@@ -21,7 +21,11 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(settings) != 0 {
+	if settings[SettingCompactTailInputTurns] != "2" ||
+		settings[SettingCompactAutoThresholdPercent] != "80" ||
+		settings[SettingShowCompactSummary] != "true" ||
+		settings[SettingShowReasoning] != "true" ||
+		settings[SettingShowToolDetails] != "true" {
 		t.Fatalf("unexpected settings: %+v", settings)
 	}
 
@@ -58,6 +62,70 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "display_name: OpenAI") || !strings.Contains(string(b), "protocol: openai-responses") || !strings.Contains(string(b), "max_output_tokens: 8192") {
 		t.Fatalf("expected renamed provider keys in profiles.yaml:\n%s", b)
+	}
+}
+
+func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {
+	home := t.TempDir()
+	m := NewManager(home)
+	if err := m.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	if err := m.SetSettings(ctx, map[string]string{
+		SettingCompactTailInputTurns:       "3",
+		SettingCompactAutoThresholdPercent: "70",
+		SettingShowCompactSummary:          "false",
+		SettingShowReasoning:               "false",
+		SettingShowToolDetails:             "false",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := m.Settings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings[SettingCompactTailInputTurns] != "3" ||
+		settings[SettingCompactAutoThresholdPercent] != "70" ||
+		settings[SettingShowCompactSummary] != "false" ||
+		settings[SettingShowReasoning] != "false" ||
+		settings[SettingShowToolDetails] != "false" {
+		t.Fatalf("unexpected settings: %+v", settings)
+	}
+	settingsPath := home + "/config/settings.yaml"
+	b, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settingsYAML := string(b)
+	if !strings.Contains(settingsYAML, "tail_input_turns: 3") ||
+		!strings.Contains(settingsYAML, "auto_threshold_percent: 70") ||
+		!strings.Contains(settingsYAML, "reasoning: false") ||
+		!strings.Contains(settingsYAML, "tool_details: false") {
+		t.Fatalf("expected settings in settings.yaml:\n%s", settingsYAML)
+	}
+
+	initialPrompt, err := m.UserPrompt(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if initialPrompt.Exists || initialPrompt.Content != "" || initialPrompt.Path != home+"/pudding.md" {
+		t.Fatalf("unexpected initial prompt: %+v", initialPrompt)
+	}
+	updatedPrompt, err := m.SetUserPrompt(ctx, "short replies")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updatedPrompt.Exists || updatedPrompt.Content != "short replies" || updatedPrompt.Path != home+"/pudding.md" {
+		t.Fatalf("unexpected updated prompt: %+v", updatedPrompt)
+	}
+	b, err = os.ReadFile(home + "/pudding.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != "short replies" {
+		t.Fatalf("unexpected pudding.md content: %q", b)
 	}
 }
 

@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 
 import { TranscriptTurn } from "./TranscriptTurn";
-import type { TranscriptTurnVM, TurnDisclosureState } from "./types";
+import type { TranscriptDisplaySettings, TranscriptTurnVM, TurnDisclosureState } from "./types";
 
 const HISTORY_LOAD_SCROLL_TOP_PX = 120;
 const LIST_PADDING_BOTTOM_PX = 32;
@@ -24,6 +24,7 @@ type CapturedAnchor<T> = T & { element: HTMLElement };
 
 export const TranscriptList = memo(function TranscriptList({
   disclosure,
+  displaySettings,
   hasMoreHistory,
   isLoadingHistory,
   jumpLatestSignal,
@@ -38,6 +39,7 @@ export const TranscriptList = memo(function TranscriptList({
   turns,
 }: {
   disclosure?: TurnDisclosureState;
+  displaySettings?: TranscriptDisplaySettings;
   hasMoreHistory: boolean;
   isLoadingHistory: boolean;
   jumpLatestSignal: number;
@@ -518,6 +520,7 @@ export const TranscriptList = memo(function TranscriptList({
         <TranscriptTurn
           key={turn.key}
           disclosure={listDisclosure}
+          displaySettings={displaySettings}
           onAssistantContentGrow={handleAssistantContentGrow}
           onAssistantRevealComplete={onAssistantRevealComplete}
           onQueuedCancel={onQueuedCancel}

@@ -1,5 +1,8 @@
 import type { ContentPart, Message } from "@/api/client";
-import type { AssistantOverlay, TurnPhaseState } from "@/state/overlayStore";
+import type { TranscriptDisplaySettings } from "@/lib/appSettings";
+import type { AssistantOverlay, CompactRun, TurnPhaseState } from "@/state/overlayStore";
+
+export type { TranscriptDisplaySettings };
 
 export type UserInputVM = {
   clientMessageID?: string;
@@ -31,8 +34,9 @@ export type AssistantOutputVM =
 export type TranscriptTurnVM = {
   assistant?: AssistantOutputVM;
   clientMessageID?: string;
+  compact?: CompactRun;
   key: string;
-  kind: "canonical" | "live" | "pending" | "phase";
+  kind: "canonical" | "compact" | "live" | "pending" | "phase";
   turnID?: string;
   user?: UserInputVM;
 };

@@ -1690,13 +1690,6 @@ func validQueuedInputStatus(status store.QueuedInputStatus) bool {
 	}
 }
 
-func assistantMessageID(turnID string, index int) string {
-	if index == 0 {
-		return "msg_" + turnID
-	}
-	return fmt.Sprintf("msg_%s_%03d", turnID, index+1)
-}
-
 func turnOutputStatsTx(ctx context.Context, tx *sql.Tx, sessionID, turnID string) (int, string, error) {
 	var maxIndex int
 	err := tx.QueryRowContext(ctx,
@@ -1722,7 +1715,7 @@ func appendTurnOutputSegmentsTx(ctx context.Context, tx *sql.Tx, turn *store.Tur
 	for i, segment := range segments {
 		turnIndex := maxIndex + i + 1
 		msg := &store.Message{
-			ID:          assistantMessageID(turn.ID, turnIndex-1),
+			ID:          store.NewID("msg"),
 			SessionID:   turn.SessionID,
 			TurnID:      turn.ID,
 			Role:        segment.Role,

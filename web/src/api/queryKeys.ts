@@ -6,6 +6,7 @@ export const queryKeys = {
   turns: (sessionID: string) => ["session", sessionID, "turns", "pages"] as const,
   queuedInputs: (sessionID: string) => ["session", sessionID, "queued-inputs"] as const,
   settings: () => ["settings"] as const,
+  userPrompt: () => ["settings", "user-prompt"] as const,
   usageDaily: (days: number) => ["usage", "daily", days] as const,
   builtinTools: () => ["tools", "builtin"] as const,
   webTools: () => ["tools", "web"] as const,

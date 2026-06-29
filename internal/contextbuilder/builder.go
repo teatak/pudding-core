@@ -145,26 +145,33 @@ func EffectiveMessages(msgs []*store.Message) []*store.Message {
 	return out
 }
 
-func SplitRecentRawTail(msgs []*store.Message, recentUserTurns int) ([]*store.Message, []*store.Message) {
-	if recentUserTurns <= 0 || len(msgs) == 0 {
+func SplitRecentInputTail(msgs []*store.Message, recentInputTurns int) ([]*store.Message, []*store.Message) {
+	if recentInputTurns <= 0 || len(msgs) == 0 {
 		return msgs, nil
 	}
 	split := 0
-	seenUsers := 0
+	seenInputs := 0
 	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role != store.RoleUser {
+		if !IsInputTurnBoundary(msgs[i]) {
 			continue
 		}
-		seenUsers++
-		if seenUsers == recentUserTurns {
+		seenInputs++
+		if seenInputs == recentInputTurns {
 			split = i
 			break
 		}
 	}
-	if seenUsers < recentUserTurns {
+	if seenInputs < recentInputTurns {
 		return nil, msgs
 	}
 	return msgs[:split], msgs[split:]
+}
+
+func IsInputTurnBoundary(msg *store.Message) bool {
+	if msg == nil || msg.TurnID == "" {
+		return false
+	}
+	return msg.Role == store.RoleUser || msg.Role == store.RoleSystem
 }
 
 type staticPrompt struct{}

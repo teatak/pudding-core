@@ -389,12 +389,20 @@ type MessageMetadata struct {
 type CompactMetadata struct {
 	SourceMessageIDs []string `json:"source_message_ids,omitempty"`
 	TailMessageIDs   []string `json:"tail_message_ids,omitempty"`
+	SourceTurnCount  int      `json:"source_turn_count,omitempty"`
+	TailTurnCount    int      `json:"tail_turn_count,omitempty"`
 }
 
 func CompactMessageMetadata(sourceIDs, tailIDs []string) json.RawMessage {
+	return CompactMessageMetadataWithCounts(sourceIDs, tailIDs, 0, 0)
+}
+
+func CompactMessageMetadataWithCounts(sourceIDs, tailIDs []string, sourceTurns, tailTurns int) json.RawMessage {
 	meta := MessageMetadata{Compact: &CompactMetadata{
 		SourceMessageIDs: cloneStringSlice(sourceIDs),
 		TailMessageIDs:   cloneStringSlice(tailIDs),
+		SourceTurnCount:  sourceTurns,
+		TailTurnCount:    tailTurns,
 	}}
 	data, err := json.Marshal(meta)
 	if err != nil {

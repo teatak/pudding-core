@@ -21,17 +21,21 @@ import { getShikiCodeRenderer, type CodeBlockRenderer } from "@/lib/shiki";
 import type { AssistantOverlay, AssistantOverlayPart, TurnPhaseState } from "@/state/overlayStore";
 
 import { useElapsedDuration } from "./time";
-import { textFromContentParts, type TurnDisclosureState, type TurnPartVM } from "./types";
+import { textFromContentParts, type TranscriptDisplaySettings, type TurnDisclosureState, type TurnPartVM } from "./types";
 
 export function TurnParts({
   disclosure,
+  displaySettings,
   parts,
   turnID,
 }: {
   disclosure?: TurnDisclosureState;
+  displaySettings?: TranscriptDisplaySettings;
   parts: TurnPartVM[];
   turnID: string;
 }) {
+  const showReasoningContent = displaySettings?.showReasoning ?? true;
+  const showToolDetails = displaySettings?.showToolDetails ?? true;
   return (
     <>
       {parts.map((part, index) => {
@@ -46,6 +50,7 @@ export function TurnParts({
                 key={partKey}
                 active={part.active}
                 defaultOpen={disclosure?.isOpen(disclosureKey) || false}
+                showContent={showReasoningContent}
                 text={part.text}
                 onOpenChange={(open) => disclosure?.setOpen(disclosureKey, open)}
               />
@@ -58,6 +63,7 @@ export function TurnParts({
                 key={partKey}
                 defaultOpen={disclosure?.isOpen(disclosureKey) || false}
                 part={part}
+                showDetails={showToolDetails}
                 onOpenChange={(open) => disclosure?.setOpen(disclosureKey, open)}
               />
             );
@@ -295,17 +301,38 @@ function useLocalDisclosure(defaultOpen: boolean, onOpenChange?: (open: boolean)
 function ThoughtPart({
   active = false,
   defaultOpen,
+  showContent = true,
   text,
   onOpenChange,
 }: {
   active?: boolean;
   defaultOpen: boolean;
+  showContent?: boolean;
   text: string;
   onOpenChange?: (open: boolean) => void;
 }) {
   const { locale, t } = useI18n();
   const bodyRef = useRef<HTMLDivElement | null>(null);
-  const { handleSummaryClick, handleSummaryKeyDown, handleToggle, open } = useLocalDisclosure(defaultOpen, onOpenChange);
+  const canShowContent = showContent && text.trim().length > 0;
+  const { handleSummaryClick, handleSummaryKeyDown, handleToggle, open } = useLocalDisclosure(
+    canShowContent ? defaultOpen : false,
+    onOpenChange,
+  );
+
+  function handleThoughtSummaryClick(event: MouseEvent<HTMLElement>) {
+    if (!canShowContent) {
+      event.preventDefault();
+      return;
+    }
+    handleSummaryClick(event);
+  }
+
+  function handleThoughtSummaryKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (!canShowContent) {
+      return;
+    }
+    handleSummaryKeyDown(event);
+  }
 
   useEffect(() => {
     if (!active || !open || !bodyRef.current) {
@@ -317,26 +344,30 @@ function ThoughtPart({
   return (
     <details
       className="relative text-[12px] leading-[1.5] text-muted-foreground"
-      open={open}
+      open={canShowContent && open}
       onToggle={handleToggle}
     >
-      {open ? <span aria-hidden="true" className="pointer-events-none absolute top-6 bottom-0 left-[6px] border-l border-border" /> : null}
+      {canShowContent && open ? (
+        <span aria-hidden="true" className="pointer-events-none absolute top-6 bottom-0 left-[6px] border-l border-border" />
+      ) : null}
       <summary
         className="inline-grid h-6 cursor-default list-none grid-cols-[0.75rem_auto] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden"
-        onClick={handleSummaryClick}
-        onKeyDown={handleSummaryKeyDown}
+        onClick={handleThoughtSummaryClick}
+        onKeyDown={handleThoughtSummaryKeyDown}
       >
         <span className="relative z-[1] inline-flex h-6 w-3 shrink-0 items-center justify-center opacity-90">
           <PhaseDot active={active} phase="thinking" size="md" />
         </span>
         <span className="flex min-w-0 flex-1 items-center gap-1">
           <span className="shrink-0 truncate">{active ? t("transcript.thinking") : t("transcript.thought")}</span>
-          <span className="shrink-0 text-muted-foreground/50">
-            {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-          </span>
+          {canShowContent ? (
+            <span className="shrink-0 text-muted-foreground/50">
+              {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+            </span>
+          ) : null}
         </span>
       </summary>
-      {open ? (
+      {canShowContent && open ? (
         <div className="ml-[5px] py-1 pl-2">
           <div
             ref={bodyRef}
@@ -353,10 +384,12 @@ function ThoughtPart({
 function ToolUsePart({
   defaultOpen,
   part,
+  showDetails,
   onOpenChange,
 }: {
   defaultOpen: boolean;
   part: Extract<TurnPartVM, { type: "tool_use" }>;
+  showDetails: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
   const { locale, t } = useI18n();
@@ -371,6 +404,19 @@ function ToolUsePart({
   const dotPhase = part.dotPhase || (failed ? "error" : toolPhaseDot(part.phase));
   const title = toolTitle(part, liveResult, baseTitle, elapsed, t);
   const copyText = toolCopyText(part, args, liveResult, baseTitle, t);
+  if (!showDetails) {
+    return (
+      <div className="grid h-6 w-full grid-cols-[0.75rem_minmax(0,1fr)] items-center gap-1 pr-1 text-[12px] leading-[1.5] text-muted-foreground">
+        <span className="relative z-[1] inline-flex h-6 w-3 shrink-0 items-center justify-center opacity-90">
+          <PhaseDot active={active} phase={dotPhase} size="md" />
+        </span>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          <span className="shrink-0 truncate">{title.label}</span>
+          {title.summary ? <span className="min-w-0 truncate text-muted-foreground/50">{title.summary}</span> : null}
+        </span>
+      </div>
+    );
+  }
   return (
     <details
       className="relative text-[12px] leading-[1.5] text-muted-foreground"

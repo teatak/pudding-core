@@ -226,8 +226,8 @@ func TestListMessagesPageUsesStableOrder(t *testing.T) {
 	if !first.HasMore {
 		t.Fatal("first recent page should report older messages")
 	}
-	got := messageIDs(first.Messages)
-	want := []string{"msg_3", "msg_turn_3", "msg_4", "msg_turn_4"}
+	got := messageLabels(first.Messages)
+	want := []string{"user:hello", "assistant:assistant 3", "user:hello", "assistant:assistant 4"}
 	if !sameStrings(got, want) {
 		t.Fatalf("unexpected recent page: got %v want %v", got, want)
 	}
@@ -239,8 +239,8 @@ func TestListMessagesPageUsesStableOrder(t *testing.T) {
 	if older.HasMore {
 		t.Fatal("older page should be exhausted")
 	}
-	got = messageIDs(older.Messages)
-	want = []string{"msg_1", "msg_turn_1", "msg_2", "msg_turn_2"}
+	got = messageLabels(older.Messages)
+	want = []string{"user:hello", "assistant:assistant 1", "user:hello", "assistant:assistant 2"}
 	if !sameStrings(got, want) {
 		t.Fatalf("unexpected older page: got %v want %v", got, want)
 	}
@@ -270,8 +270,8 @@ func TestListTurnsPageUsesStableOrder(t *testing.T) {
 	if !sameStrings(got, want) {
 		t.Fatalf("unexpected recent page: got %v want %v", got, want)
 	}
-	gotMessages := messageIDs(first.Turns[0].Messages)
-	wantMessages := []string{"msg_3", "msg_turn_3"}
+	gotMessages := messageLabels(first.Turns[0].Messages)
+	wantMessages := []string{"user:hello", "assistant:assistant 3"}
 	if !sameStrings(gotMessages, wantMessages) {
 		t.Fatalf("turn should include complete messages: got %v want %v", gotMessages, wantMessages)
 	}
@@ -510,8 +510,8 @@ func TestMessagePartsPersist(t *testing.T) {
 	if len(turns.Turns) != 1 {
 		t.Fatalf("unexpected turns: %+v", turns.Turns)
 	}
-	got := messageIDs(turns.Turns[0].Messages)
-	want := []string{"msg_1", "msg_turn_1", "msg_turn_1_002", "msg_turn_1_003", "msg_turn_1_004"}
+	got := messageLabels(turns.Turns[0].Messages)
+	want := []string{"user:hello", "assistant:thinking", "assistant:web_fetch", "tool:{\"ok\":true}", "assistant:done"}
 	if !sameStrings(got, want) {
 		t.Fatalf("turn should group all messages in turn_index order: got %v want %v", got, want)
 	}
@@ -550,7 +550,7 @@ func TestAppendTurnOutputBeforeFinish(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := messageIDs(msgs), []string{"msg_1", "msg_turn_1", "msg_turn_1_002"}; !sameStrings(got, want) {
+	if got, want := messageLabels(msgs), []string{"user:hello", "assistant:first", "assistant:builtin_time_get_current"}; !sameStrings(got, want) {
 		t.Fatalf("finish must not duplicate appended output: got %v want %v", got, want)
 	}
 	if msgs[1].Text != "first" || msgs[2].Kind != store.MessageKindToolUse {
@@ -560,7 +560,7 @@ func TestAppendTurnOutputBeforeFinish(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(evs) != 2 || evs[1].Kind != event.TurnCompleted || evs[1].AssistantMessageID != "msg_turn_1" {
+	if len(evs) != 2 || evs[1].Kind != event.TurnCompleted || evs[1].AssistantMessageID != msgs[1].ID {
 		t.Fatalf("final event should point at first appended output: %+v", evs)
 	}
 }
@@ -769,10 +769,10 @@ func TestSessionUsageRecordAndQuery(t *testing.T) {
 
 func strptr(s string) *string { return &s }
 
-func messageIDs(messages []*store.Message) []string {
+func messageLabels(messages []*store.Message) []string {
 	out := make([]string, 0, len(messages))
 	for _, msg := range messages {
-		out = append(out, msg.ID)
+		out = append(out, string(msg.Role)+":"+msg.Text)
 	}
 	return out
 }

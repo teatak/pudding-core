@@ -1,9 +1,12 @@
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import type { ContentPart } from "@/api/client";
+import { getSettings, type ContentPart } from "@/api/client";
+import { queryKeys } from "@/api/queryKeys";
 import { TranscriptView } from "@/components/transcript/TranscriptView";
 import type { TranscriptTurnVM } from "@/components/transcript/types";
 import { useTranscriptData } from "@/components/transcript/useTranscriptData";
+import { transcriptDisplaySettings } from "@/lib/appSettings";
 
 type TranscriptProps = {
   token: string;
@@ -22,6 +25,16 @@ export function Transcript({ token, sessionID, sessionRunning = false, submitErr
     sessionRunning,
     token,
   });
+  const settingsQuery = useQuery({
+    queryKey: queryKeys.settings(),
+    queryFn: () => getSettings(token),
+    enabled: Boolean(token),
+    staleTime: 30_000,
+  });
+  const displaySettings = useMemo(
+    () => transcriptDisplaySettings(settingsQuery.data?.settings),
+    [settingsQuery.data?.settings],
+  );
   const disclosureByKeyRef = useRef(disclosureByKey);
   const sessionIDRef = useRef(sessionID);
   const turnVMsRef = useRef<TranscriptTurnVM[]>([]);
@@ -92,6 +105,7 @@ export function Transcript({ token, sessionID, sessionRunning = false, submitErr
   return (
     <TranscriptView
       disclosure={disclosure}
+      displaySettings={displaySettings}
       hasItems={transcript.hasItems}
       isError={turnsQuery.isError}
       isFetchingNextPage={turnsQuery.isFetchingNextPage}
@@ -143,7 +157,11 @@ function appendedMessageCount(previous: TranscriptTurnVM[], next: TranscriptTurn
 }
 
 function messageUnitCount(turn: TranscriptTurnVM) {
-  return (turn.user ? 1 : 0) + (turn.assistant && hasAssistantMessageContent(turn.assistant) ? 1 : 0);
+  return (
+    (turn.user ? 1 : 0) +
+    (turn.compact ? 1 : 0) +
+    (turn.assistant && hasAssistantMessageContent(turn.assistant) ? 1 : 0)
+  );
 }
 
 function hasAssistantMessageContent(assistant: NonNullable<TranscriptTurnVM["assistant"]>) {

@@ -209,6 +209,12 @@ func TestBuildUsesLatestCompactBoundary(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	beforeCompact, err := ms.ListMessages(ctx, "s1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldAssistantID := testMessageIDByText(t, beforeCompact, "old assistant")
+	tailAssistantID := testMessageIDByText(t, beforeCompact, "tail assistant")
 	if _, err := ms.AppendCompactSummary(ctx, store.AppendCompactSummaryInput{
 		SessionID:       "s1",
 		TurnID:          "t_compact",
@@ -217,7 +223,7 @@ func TestBuildUsesLatestCompactBoundary(t *testing.T) {
 		Provider:        "mock",
 		Model:           "mock",
 		Text:            "summary of old history",
-		Metadata:        store.CompactMessageMetadata([]string{"m_old", "msg_t1"}, []string{"m_tail", "msg_t2"}),
+		Metadata:        store.CompactMessageMetadata([]string{"m_old", oldAssistantID}, []string{"m_tail", tailAssistantID}),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -240,4 +246,50 @@ func TestBuildUsesLatestCompactBoundary(t *testing.T) {
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("unexpected compact context: got %v want %v", got, want)
 	}
+}
+
+func TestSplitRecentInputTailTreatsSystemAsInputBoundary(t *testing.T) {
+	msg := func(id, turn string, role store.Role) *store.Message {
+		return &store.Message{ID: id, TurnID: turn, Role: role}
+	}
+	msgs := []*store.Message{
+		msg("m_summary", "t_summary", store.RoleSummary),
+		msg("m_user_old", "t_user_old", store.RoleUser),
+		msg("m_assistant_old", "t_user_old", store.RoleAssistant),
+		msg("m_system", "t_system", store.RoleSystem),
+		msg("m_assistant_system", "t_system", store.RoleAssistant),
+		msg("m_user_tail", "t_user_tail", store.RoleUser),
+		msg("m_assistant_tail", "t_user_tail", store.RoleAssistant),
+	}
+
+	cold, tail := SplitRecentInputTail(msgs, 2)
+	gotCold := testMessageIDs(cold)
+	gotTail := testMessageIDs(tail)
+	wantCold := []string{"m_summary", "m_user_old", "m_assistant_old"}
+	wantTail := []string{"m_system", "m_assistant_system", "m_user_tail", "m_assistant_tail"}
+	if strings.Join(gotCold, "|") != strings.Join(wantCold, "|") {
+		t.Fatalf("unexpected cold messages: got %v want %v", gotCold, wantCold)
+	}
+	if strings.Join(gotTail, "|") != strings.Join(wantTail, "|") {
+		t.Fatalf("unexpected tail messages: got %v want %v", gotTail, wantTail)
+	}
+}
+
+func testMessageIDs(msgs []*store.Message) []string {
+	ids := make([]string, 0, len(msgs))
+	for _, msg := range msgs {
+		ids = append(ids, msg.ID)
+	}
+	return ids
+}
+
+func testMessageIDByText(t *testing.T, msgs []*store.Message, text string) string {
+	t.Helper()
+	for _, msg := range msgs {
+		if msg.Text == text {
+			return msg.ID
+		}
+	}
+	t.Fatalf("message text %q not found in %+v", text, msgs)
+	return ""
 }

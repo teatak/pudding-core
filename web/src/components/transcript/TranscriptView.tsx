@@ -7,10 +7,11 @@ import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
 
 import { TranscriptList } from "./TranscriptList";
-import type { TranscriptTurnVM, TurnDisclosureState } from "./types";
+import type { TranscriptDisplaySettings, TranscriptTurnVM, TurnDisclosureState } from "./types";
 
 export function TranscriptView({
   disclosure,
+  displaySettings,
   hasMoreHistory,
   hasItems,
   isError,
@@ -33,6 +34,7 @@ export function TranscriptView({
   turns,
 }: {
   disclosure?: TurnDisclosureState;
+  displaySettings?: TranscriptDisplaySettings;
   hasMoreHistory: boolean;
   hasItems: boolean;
   isError: boolean;
@@ -80,13 +82,14 @@ export function TranscriptView({
       >
         <ChatColumn>
           {isError ? (
-            <Alert className="mb-4" variant="destructive">
+            <Alert className="mb-4 min-w-0" variant="destructive">
               <CircleAlert className="h-3.5 w-3.5" />
-              <AlertDescription>{t("transcript.loadFailed")}</AlertDescription>
+              <AlertDescription className="min-w-0 overflow-hidden break-words">{t("transcript.loadFailed")}</AlertDescription>
             </Alert>
           ) : null}
           <TranscriptList
             disclosure={disclosure}
+            displaySettings={displaySettings}
             hasMoreHistory={hasMoreHistory}
             isLoadingHistory={isLoadingHistory}
             jumpLatestSignal={jumpLatestSignal}
@@ -101,9 +104,9 @@ export function TranscriptView({
             turns={turns}
           />
           {submitError ? (
-            <Alert className="mt-4" variant="destructive">
+            <Alert className="mt-4 min-w-0" variant="destructive">
               <CircleAlert className="h-3.5 w-3.5" />
-              <AlertDescription>{submitError}</AlertDescription>
+              <AlertDescription className="min-w-0 overflow-hidden break-words">{submitError}</AlertDescription>
             </Alert>
           ) : null}
         </ChatColumn>

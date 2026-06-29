@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, CircleCheck } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -209,34 +209,44 @@ export function ModelReasoningPicker({
               <div className="px-2.5 py-1.5 text-xs text-muted-foreground">{t("picker.noModels")}</div>
             ) : (
               <Accordion collapsible type="single" value={expanded} onValueChange={setExpanded}>
-                {selectableProfiles.map((profile) => (
-                  <AccordionItem key={profile.id} className="not-last:border-b-0" value={profile.id}>
-                    <AccordionTrigger className="items-center rounded-md px-2.5 py-1.5 text-sm font-normal text-muted-foreground hover:bg-accent hover:text-foreground hover:no-underline [&_[data-slot=accordion-trigger-icon]]:text-muted-foreground/70">
-                      <span className="flex min-w-0 items-center gap-2">
-                        <RoundBrandIcon name={providerBrandKey(profile)} />
-                        <span className="truncate">{profile.displayName}</span>
-                        <Badge className="h-4 border-muted-foreground/20 bg-transparent px-1.5 text-[9px] font-normal text-muted-foreground/70" variant="outline">
-                          {profile.protocol}
-                        </Badge>
-                      </span>
-                    </AccordionTrigger>
-                    <AccordionContent className="pb-0">
-                      <ProfileModels
-                        currentModel={currentModelAvailable && selectedProvider === profile.id ? selectedModel : ""}
-                        isCurrentProfile={currentModelAvailable && selectedProvider === profile.id}
-                        profile={profile}
-                        onPick={(model) => {
-                          if (session) {
-                            patchMutation.mutate({ provider: profile.id, model });
-                            return;
-                          }
-                          onChange?.({ provider: profile.id, model });
-                          setOpen(false);
-                        }}
-                      />
-                    </AccordionContent>
-                  </AccordionItem>
-                ))}
+                {selectableProfiles.map((profile) => {
+                  const profileSelected = currentModelAvailable && selectedProvider === profile.id;
+                  return (
+                    <AccordionItem key={profile.id} className="not-last:border-b-0" value={profile.id}>
+                      <AccordionTrigger
+                        aria-current={profileSelected ? "true" : undefined}
+                        className={cn(
+                          "items-center rounded-md px-2.5 py-1.5 text-sm font-normal text-muted-foreground hover:bg-accent hover:text-foreground hover:no-underline [&_[data-slot=accordion-trigger-icon]]:text-muted-foreground/70",
+                          profileSelected && "text-foreground",
+                        )}
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          <RoundBrandIcon name={providerBrandKey(profile)} />
+                          <span className="truncate">{profile.displayName}</span>
+                          <Badge className="h-4 border-muted-foreground/20 bg-transparent px-1.5 text-[9px] font-normal text-muted-foreground/70" variant="outline">
+                            {profile.protocol}
+                          </Badge>
+                          {profileSelected ? <span className="size-2 shrink-0 rounded-full bg-success/85" /> : null}
+                        </span>
+                      </AccordionTrigger>
+                      <AccordionContent className="pb-0">
+                        <ProfileModels
+                          currentModel={currentModelAvailable && selectedProvider === profile.id ? selectedModel : ""}
+                          isCurrentProfile={currentModelAvailable && selectedProvider === profile.id}
+                          profile={profile}
+                          onPick={(model) => {
+                            if (session) {
+                              patchMutation.mutate({ provider: profile.id, model });
+                              return;
+                            }
+                            onChange?.({ provider: profile.id, model });
+                            setOpen(false);
+                          }}
+                        />
+                      </AccordionContent>
+                    </AccordionItem>
+                  );
+                })}
               </Accordion>
             )}
           </DropdownMenuSubContent>
@@ -293,18 +303,12 @@ function ProfileModels({
             type="button"
             onClick={() => onPick(model)}
           >
-            {selected ? (
-              <span className="grid size-5 shrink-0 place-items-center">
-                <CircleCheck className="size-4 text-success/85" />
-              </span>
-            ) : (
-              <span className="size-5 shrink-0" />
-            )}
-            <span className="flex min-w-0 items-center gap-2">
+            <span className="flex min-w-0 flex-1 items-center gap-2">
               <span className="truncate" title={model}>
                 {formatModelLabel(model)}
               </span>
             </span>
+            {selected ? <Check className="size-4 shrink-0" /> : null}
           </button>
         );
       })}

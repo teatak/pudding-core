@@ -316,7 +316,7 @@ func TestListMessagesPagination(t *testing.T) {
 	if !first.HasMore {
 		t.Fatal("recent page should report older messages")
 	}
-	if got, want := messageValueIDs(first.Messages), []string{"msg_3", "msg_turn_3", "msg_4", "msg_turn_4"}; !sameStringValues(got, want) {
+	if got, want := messageValueLabels(first.Messages), []string{"user:user 3", "assistant:assistant 3", "user:user 4", "assistant:assistant 4"}; !sameStringValues(got, want) {
 		t.Fatalf("unexpected recent page: got %v want %v", got, want)
 	}
 
@@ -328,7 +328,7 @@ func TestListMessagesPagination(t *testing.T) {
 	if older.HasMore {
 		t.Fatal("older page should be exhausted")
 	}
-	if got, want := messageValueIDs(older.Messages), []string{"msg_1", "msg_turn_1", "msg_2", "msg_turn_2"}; !sameStringValues(got, want) {
+	if got, want := messageValueLabels(older.Messages), []string{"user:user 1", "assistant:assistant 1", "user:user 2", "assistant:assistant 2"}; !sameStringValues(got, want) {
 		t.Fatalf("unexpected older page: got %v want %v", got, want)
 	}
 }
@@ -353,7 +353,7 @@ func TestListTurnsPagination(t *testing.T) {
 	if got, want := turnValueIDs(first.Turns), []string{"turn_3", "turn_4"}; !sameStringValues(got, want) {
 		t.Fatalf("unexpected recent page: got %v want %v", got, want)
 	}
-	if got, want := messagePtrValueIDs(first.Turns[0].Messages), []string{"msg_3", "msg_turn_3"}; !sameStringValues(got, want) {
+	if got, want := messagePtrValueLabels(first.Turns[0].Messages), []string{"user:user 3", "assistant:assistant 3"}; !sameStringValues(got, want) {
 		t.Fatalf("turn should include complete messages: got %v want %v", got, want)
 	}
 
@@ -385,7 +385,7 @@ func TestGetTurn(t *testing.T) {
 	if turn.ID != "turn_1" {
 		t.Fatalf("unexpected turn id %q", turn.ID)
 	}
-	if got, want := messagePtrValueIDs(turn.Messages), []string{"msg_1", "msg_turn_1"}; !sameStringValues(got, want) {
+	if got, want := messagePtrValueLabels(turn.Messages), []string{"user:user 1", "assistant:assistant 1"}; !sameStringValues(got, want) {
 		t.Fatalf("turn should include complete messages: got %v want %v", got, want)
 	}
 }
@@ -423,18 +423,18 @@ func appendAPITestTurn(t *testing.T, st store.Store, sessionID string, index int
 	}
 }
 
-func messageValueIDs(messages []store.Message) []string {
+func messageValueLabels(messages []store.Message) []string {
 	out := make([]string, 0, len(messages))
 	for _, msg := range messages {
-		out = append(out, msg.ID)
+		out = append(out, string(msg.Role)+":"+msg.Text)
 	}
 	return out
 }
 
-func messagePtrValueIDs(messages []*store.Message) []string {
+func messagePtrValueLabels(messages []*store.Message) []string {
 	out := make([]string, 0, len(messages))
 	for _, msg := range messages {
-		out = append(out, msg.ID)
+		out = append(out, string(msg.Role)+":"+msg.Text)
 	}
 	return out
 }

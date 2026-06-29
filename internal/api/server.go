@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/teatak/cart/v3"
+	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/mobileauth"
@@ -89,6 +90,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/queued-inputs").GET(s.listQueuedInputs)
 	app.Route("/sessions/:id/queued-inputs/:clientMessageID").PATCH(s.patchQueuedInput)
 	app.Route("/settings").GET(s.getSettings).PUT(s.putSettings)
+	app.Route("/settings/user-prompt").GET(s.getUserPrompt).PUT(s.putUserPrompt)
 	app.Route("/providers").GET(s.listProviders).POST(s.createProvider)
 	app.Route("/providers/models").POST(s.probeProviderModels)
 	app.Route("/providers/:name").GET(s.getProvider).PATCH(s.patchProvider).DELETE(s.deleteProvider)
@@ -606,9 +608,6 @@ func (s *Server) putSettings(c *cart.Context) error {
 	if err := decode(c, &kv); err != nil {
 		return badRequest(c, "invalid json body")
 	}
-	for k := range kv {
-		return badRequest(c, "unknown setting: "+k)
-	}
 	settings, ok := s.config.(interface {
 		SetSettings(context.Context, map[string]string) error
 	})
@@ -616,9 +615,48 @@ func (s *Server) putSettings(c *cart.Context) error {
 		return badRequest(c, "settings are read-only")
 	}
 	if err := settings.SetSettings(c.Request.Context(), kv); err != nil {
+		if errors.Is(err, config.ErrInvalidSetting) {
+			return badRequest(c, err.Error())
+		}
 		return s.fail(c, err)
 	}
 	c.String(http.StatusNoContent, "")
+	return nil
+}
+
+func (s *Server) getUserPrompt(c *cart.Context) error {
+	prompts, ok := s.config.(interface {
+		UserPrompt(context.Context) (*config.UserPromptView, error)
+	})
+	if !ok {
+		return badRequest(c, "user prompt is read-only")
+	}
+	view, err := prompts.UserPrompt(c.Request.Context())
+	if err != nil {
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, view)
+	return nil
+}
+
+func (s *Server) putUserPrompt(c *cart.Context) error {
+	var req struct {
+		Content string `json:"content"`
+	}
+	if err := decode(c, &req); err != nil {
+		return badRequest(c, "invalid json body")
+	}
+	prompts, ok := s.config.(interface {
+		SetUserPrompt(context.Context, string) (*config.UserPromptView, error)
+	})
+	if !ok {
+		return badRequest(c, "user prompt is read-only")
+	}
+	view, err := prompts.SetUserPrompt(c.Request.Context(), req.Content)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, view)
 	return nil
 }
 

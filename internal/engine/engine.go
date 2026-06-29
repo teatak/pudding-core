@@ -341,7 +341,10 @@ func (e *Engine) SessionUsage(ctx context.Context, sessionID string) (*SessionUs
 	contextWindow := resolved.config.ContextWindow
 	threshold := 0
 	if contextWindow > 0 {
-		threshold = contextWindow * 4 / 5
+		percent := e.autoCompactThresholdPercent(ctx)
+		if percent > 0 {
+			threshold = contextWindow * percent / 100
+		}
 	}
 	return &SessionUsageInfo{
 		SessionID:                       sessionID,

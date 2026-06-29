@@ -31,6 +31,7 @@ export function useTranscriptData({
   const assistantOverlays = useOverlayStore(
     useShallow((state) => Object.values(state.assistants).filter((overlay) => overlay.sessionID === sessionID)),
   );
+  const compactRun = useOverlayStore((state) => state.compactRuns[sessionID]);
   const turnPhase = useOverlayStore((state) => state.turnPhases[sessionID]);
   const { messages, query: turnsQuery, turnDurationByID, turns } = useTranscriptTurns(token, sessionID);
 
@@ -70,6 +71,7 @@ export function useTranscriptData({
 
   const transcript = useTranscriptViewModel({
     assistantOverlays,
+    compactRun,
     pendingUsers,
     sessionID,
     sessionRunning,

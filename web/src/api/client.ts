@@ -23,6 +23,7 @@ import {
   submitResponse,
   conversationTurn,
   dailyUsageResponse,
+  userPromptResponse,
   webToolsConfig,
   type BuiltinTool,
   type ContentPart,
@@ -86,6 +87,7 @@ const mobilePairingResponse = z.object({
 export type SubmitResult = z.infer<typeof submitResponse>;
 export type CompactResult = z.infer<typeof compactResponse>;
 export type MobilePairing = z.infer<typeof mobilePairingResponse>;
+export type UserPrompt = z.infer<typeof userPromptResponse>;
 
 function authHeaders(token: string) {
   return {
@@ -328,6 +330,10 @@ export function getSettings(token: string): Promise<{ settings: Record<string, s
   return request(token, "/settings", settingsResponse);
 }
 
+export function getUserPrompt(token: string): Promise<UserPrompt> {
+  return request(token, "/settings/user-prompt", userPromptResponse);
+}
+
 export function listBuiltinTools(token: string): Promise<{ tools: BuiltinTool[] }> {
   return request(token, "/tools/builtin", listBuiltinToolsResponse);
 }
@@ -336,6 +342,13 @@ export async function putSettings(token: string, settings: Record<string, string
   await request(token, "/settings", z.null(), {
     method: "PUT",
     body: JSON.stringify(settings),
+  });
+}
+
+export function putUserPrompt(token: string, content: string): Promise<UserPrompt> {
+  return request(token, "/settings/user-prompt", userPromptResponse, {
+    method: "PUT",
+    body: JSON.stringify({ content }),
   });
 }
 

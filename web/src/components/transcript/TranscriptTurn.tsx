@@ -1,11 +1,12 @@
 import { memo } from "react";
 
-import { AssistantOutput } from "./AssistantOutput";
-import type { TranscriptTurnVM, TurnDisclosureState } from "./types";
+import { AssistantOutput, CompactPendingMarker } from "./AssistantOutput";
+import type { TranscriptDisplaySettings, TranscriptTurnVM, TurnDisclosureState } from "./types";
 import { UserInput } from "./UserInput";
 
 function TranscriptTurnView({
   disclosure,
+  displaySettings,
   onAssistantContentGrow,
   onAssistantRevealComplete,
   onQueuedCancel,
@@ -14,6 +15,7 @@ function TranscriptTurnView({
   turn,
 }: {
   disclosure?: TurnDisclosureState;
+  displaySettings?: TranscriptDisplaySettings;
   onAssistantContentGrow?: () => void;
   onAssistantRevealComplete?: (turnID: string) => void;
   onQueuedCancel?: (clientMessageID: string) => Promise<unknown>;
@@ -39,10 +41,16 @@ function TranscriptTurnView({
           <AssistantOutput
             assistant={turn.assistant}
             disclosure={disclosure}
+            displaySettings={displaySettings}
             turnID={anchorTurnID}
             onContentGrow={onAssistantContentGrow}
             onRevealComplete={onAssistantRevealComplete}
           />
+        </div>
+      ) : null}
+      {turn.compact ? (
+        <div className="min-w-0" data-transcript-ai-anchor={anchorTurnID}>
+          <CompactPendingMarker />
         </div>
       ) : null}
     </div>
@@ -50,7 +58,11 @@ function TranscriptTurnView({
 }
 
 export const TranscriptTurn = memo(TranscriptTurnView, (previous, next) => {
-  return previous.disclosure === next.disclosure && transcriptTurnEqual(previous.turn, next.turn);
+  return (
+    previous.disclosure === next.disclosure &&
+    previous.displaySettings === next.displaySettings &&
+    transcriptTurnEqual(previous.turn, next.turn)
+  );
 });
 
 function transcriptTurnEqual(previous: TranscriptTurnVM, next: TranscriptTurnVM) {
@@ -59,9 +71,20 @@ function transcriptTurnEqual(previous: TranscriptTurnVM, next: TranscriptTurnVM)
     previous.kind === next.kind &&
     previous.turnID === next.turnID &&
     previous.clientMessageID === next.clientMessageID &&
+    compactEqual(previous.compact, next.compact) &&
     userEqual(previous.user, next.user) &&
     assistantEqual(previous.assistant, next.assistant)
   );
+}
+
+function compactEqual(previous: TranscriptTurnVM["compact"], next: TranscriptTurnVM["compact"]) {
+  if (previous === next) {
+    return true;
+  }
+  if (!previous || !next) {
+    return false;
+  }
+  return previous.sessionID === next.sessionID && previous.startedAt === next.startedAt;
 }
 
 function userEqual(previous: TranscriptTurnVM["user"], next: TranscriptTurnVM["user"]) {

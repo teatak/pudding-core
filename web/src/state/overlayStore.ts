@@ -11,6 +11,11 @@ export type PendingUserMessage = {
   createdAt: string;
 };
 
+export type CompactRun = {
+  sessionID: string;
+  startedAt: string;
+};
+
 export type AssistantOverlay = {
   turnID: string;
   sessionID: string;
@@ -85,10 +90,13 @@ const activeTurnPhases = new Set<TurnPhase>([
 type OverlayState = {
   pendingUsers: Record<string, PendingUserMessage[]>;
   assistants: Record<string, AssistantOverlay>;
+  compactRuns: Record<string, CompactRun | undefined>;
   runningTurns: Record<string, string | undefined>;
   turnPhases: Record<string, TurnPhaseState | undefined>;
   lastEventSeqs: Record<string, number | undefined>;
   addPendingUser: (message: PendingUserMessage) => void;
+  startCompactRun: (sessionID: string) => void;
+  finishCompactRun: (sessionID: string) => void;
   startSubmittingTurn: (sessionID: string, clientMessageID: string) => void;
   acceptSubmittingTurn: (sessionID: string, clientMessageID: string, turnID: string) => void;
   clearSubmittingTurn: (sessionID: string, clientMessageID: string) => void;
@@ -254,6 +262,7 @@ function resolveApprovalPart(
 export const useOverlayStore = create<OverlayState>((set) => ({
   pendingUsers: {},
   assistants: {},
+  compactRuns: {},
   runningTurns: {},
   turnPhases: {},
   lastEventSeqs: {},
@@ -261,6 +270,22 @@ export const useOverlayStore = create<OverlayState>((set) => ({
     set((state) => ({
       pendingUsers: upsertPendingUser(state.pendingUsers, message),
     })),
+  startCompactRun: (sessionID) =>
+    set((state) => ({
+      compactRuns: {
+        ...state.compactRuns,
+        [sessionID]: { sessionID, startedAt: new Date().toISOString() },
+      },
+    })),
+  finishCompactRun: (sessionID) =>
+    set((state) => {
+      if (!state.compactRuns[sessionID]) {
+        return state;
+      }
+      const compactRuns = { ...state.compactRuns };
+      delete compactRuns[sessionID];
+      return { compactRuns };
+    }),
   startSubmittingTurn: (sessionID, clientMessageID) =>
     set((state) => ({
       turnPhases: {
@@ -562,11 +587,13 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       delete runningTurns[sessionID];
       const turnPhases = { ...state.turnPhases };
       delete turnPhases[sessionID];
+      const compactRuns = { ...state.compactRuns };
+      delete compactRuns[sessionID];
       const lastEventSeqs = { ...state.lastEventSeqs };
       delete lastEventSeqs[sessionID];
       const assistants = Object.fromEntries(
         Object.entries(state.assistants).filter(([, overlay]) => overlay.sessionID !== sessionID),
       );
-      return { pendingUsers, runningTurns, turnPhases, lastEventSeqs, assistants };
+      return { pendingUsers, runningTurns, turnPhases, compactRuns, lastEventSeqs, assistants };
     }),
 }));

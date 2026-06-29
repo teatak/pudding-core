@@ -370,12 +370,18 @@ func TestCompactWritesSummaryAndContextBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	summary := msgs[len(msgs)-1]
-	if summary.Role != store.RoleSummary || !strings.Contains(summary.Text, "@message(msg_1)") {
-		t.Fatalf("summary message missing role or fallback reference: %+v", summary)
+	if summary.Role != store.RoleSummary || summary.Text != "## User Context\nremembered facts" {
+		t.Fatalf("summary message not preserved: %+v", summary)
 	}
 	meta, ok := store.CompactMetadataFromMessage(summary)
-	if !ok || !sameStrings(meta.TailMessageIDs, []string{"msg_2", "msg_turn_2", "msg_3", "msg_turn_3"}) {
+	if !ok {
 		t.Fatalf("unexpected compact metadata: %+v", meta)
+	}
+	if got, want := messageLabelsByID(msgs, meta.TailMessageIDs), []string{"user:tail user 1", "assistant:tail assistant 1", "user:tail user 2", "assistant:tail assistant 2"}; !sameStrings(got, want) {
+		t.Fatalf("unexpected tail messages: got %v want %v", got, want)
+	}
+	if meta.SourceTurnCount != 1 || meta.TailTurnCount != 2 {
+		t.Fatalf("unexpected compact turn counts: %+v", meta)
 	}
 	req, err := eng.builder.Build(ctx, sid, "mock-model", string(store.ModeChat))
 	if err != nil {
@@ -391,6 +397,36 @@ func TestCompactWritesSummaryAndContextBoundary(t *testing.T) {
 	}
 	if !strings.Contains(joined, "tail user 1") || !strings.Contains(joined, "tail assistant 2") {
 		t.Fatalf("tail messages should remain raw: %v", texts)
+	}
+}
+
+func TestCompactCountsSystemReminderAsInputTurn(t *testing.T) {
+	eng, ms, _, sid := newTestEngine(t, mock.WithScript([]string{"## User Context\nremembered facts"}), mock.WithDelay(time.Millisecond))
+	ctx := context.Background()
+	appendEngineTestTurn(t, ms, sid, "1", "old user", "old assistant")
+	appendEngineTestSystemTurn(t, ms, sid, "2", "system reminder", "system answer")
+	appendEngineTestTurn(t, ms, sid, "3", "tail user", "tail assistant")
+
+	res, err := eng.Compact(ctx, CompactInput{SessionID: sid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SourceMessages != 2 || res.TailMessages != 4 {
+		t.Fatalf("unexpected compact result: %+v", res)
+	}
+	msgs, err := ms.ListMessages(ctx, sid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, ok := store.CompactMetadataFromMessage(msgs[len(msgs)-1])
+	if !ok {
+		t.Fatalf("compact metadata missing: %+v", msgs[len(msgs)-1])
+	}
+	if meta.SourceTurnCount != 1 || meta.TailTurnCount != 2 {
+		t.Fatalf("unexpected compact turn counts: %+v", meta)
+	}
+	if got, want := messageLabelsByID(msgs, meta.TailMessageIDs), []string{"system:system reminder", "assistant:system answer", "user:tail user", "assistant:tail assistant"}; !sameStrings(got, want) {
+		t.Fatalf("unexpected tail messages: got %v want %v", got, want)
 	}
 }
 
@@ -1393,6 +1429,23 @@ func sameStrings(a, b []string) bool {
 	return true
 }
 
+func messageLabelsByID(messages []*store.Message, ids []string) []string {
+	byID := make(map[string]*store.Message, len(messages))
+	for _, msg := range messages {
+		byID[msg.ID] = msg
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		msg := byID[id]
+		if msg == nil {
+			out = append(out, "<missing>:"+id)
+			continue
+		}
+		out = append(out, string(msg.Role)+":"+msg.Text)
+	}
+	return out
+}
+
 func appendEngineTestTurn(t *testing.T, ms store.Store, sessionID, suffix, userText, assistantText string) {
 	t.Helper()
 	turnID := "turn_" + suffix
@@ -1402,6 +1455,27 @@ func appendEngineTestTurn(t *testing.T, ms store.Store, sessionID, suffix, userT
 		UserMessageID:   "msg_" + suffix,
 		ClientMessageID: "client_" + suffix,
 		UserText:        userText,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.FinishTurn(context.Background(), store.FinishTurnInput{
+		TurnID:         turnID,
+		Status:         store.TurnCompleted,
+		AssistantParts: store.TextPart(assistantText),
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func appendEngineTestSystemTurn(t *testing.T, ms store.Store, sessionID, suffix, systemText, assistantText string) {
+	t.Helper()
+	turnID := "turn_" + suffix
+	if _, err := ms.BeginSystemTurn(context.Background(), store.BeginSystemTurnInput{
+		SessionID:       sessionID,
+		TurnID:          turnID,
+		SystemMessageID: "msg_" + suffix,
+		ClientMessageID: "client_" + suffix,
+		Text:            systemText,
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -1,7 +1,7 @@
 MODULE := github.com/teatak/pudding-core
 LDFLAGS_RELEASE := -X $(MODULE)/internal/buildinfo.channel=release
 
-.PHONY: test tidy clean embed desktop desktop-dev daemon daemon-dev daemon-release package
+.PHONY: test tidy clean embed desktop desktop-dev daemon daemon-dev daemon-release package prompt
 
 # 共享:构建前端并装填进 daemon 的 embed 目录(产物不进 git)
 embed:
@@ -28,6 +28,9 @@ daemon: embed
 # 热更循环:停旧实例 → 起 puddingd + Vite,浏览器开脚本打印的带 token URL
 daemon-dev:
 	@bash scripts/dev.sh daemon
+
+prompt:
+	go run ./cmd/puddingd prompt $(RUNARGS)
 
 # 发布构建(release 通道:端口 9669 / ~/.pudding;含 embed web)
 daemon-release: embed

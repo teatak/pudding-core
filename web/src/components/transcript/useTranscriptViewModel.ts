@@ -4,6 +4,7 @@ import type { ConversationTurn, Message } from "@/api/client";
 import {
   isTurnPhaseActive,
   type AssistantOverlay,
+  type CompactRun,
   type PendingUserMessage,
   type TurnPhaseState,
 } from "@/state/overlayStore";
@@ -25,6 +26,7 @@ type CanonicalTurnCacheEntry = {
 
 export function useTranscriptViewModel({
   assistantOverlays,
+  compactRun,
   pendingUsers,
   sessionID,
   sessionRunning,
@@ -33,6 +35,7 @@ export function useTranscriptViewModel({
   turns,
 }: {
   assistantOverlays: AssistantOverlay[];
+  compactRun?: CompactRun;
   pendingUsers: PendingUserMessage[];
   sessionID: string;
   sessionRunning: boolean;
@@ -188,14 +191,22 @@ export function useTranscriptViewModel({
       });
     }
 
+    if (compactRun) {
+      items.push({
+        compact: compactRun,
+        key: `compact:${sessionID}`,
+        kind: "compact",
+      });
+    }
+
     for (const turnID of canonicalTurnCache.keys()) {
       if (!seenCanonicalTurnIDs.has(turnID)) {
         canonicalTurnCache.delete(turnID);
       }
     }
 
-    return items.filter((item) => item.user || item.assistant);
-  }, [canonicalMessageIDs, displayPhase, pendingUsers, turnDurationByID, turns, visibleAssistantOverlays]);
+    return items.filter((item) => item.user || item.assistant || item.compact);
+  }, [canonicalMessageIDs, compactRun, displayPhase, pendingUsers, sessionID, turnDurationByID, turns, visibleAssistantOverlays]);
 
   const itemKeys = useMemo(() => turnVMs.map((item) => item.key), [turnVMs]);
 

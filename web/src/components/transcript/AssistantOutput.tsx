@@ -16,28 +16,32 @@ import {
   TurnParts,
 } from "./TurnParts";
 import type { AssistantOutputVM, TurnDisclosureState } from "./types";
+import type { TranscriptDisplaySettings } from "./types";
 
 export const AssistantOutput = memo(function AssistantOutput({
   assistant,
   disclosure,
+  displaySettings,
   onContentGrow,
   onRevealComplete,
   turnID,
 }: {
   assistant: AssistantOutputVM;
   disclosure?: TurnDisclosureState;
+  displaySettings?: TranscriptDisplaySettings;
   onContentGrow?: () => void;
   onRevealComplete?: (turnID: string) => void;
   turnID: string;
 }) {
   if (assistant.kind === "canonical") {
-    return <CanonicalAssistantOutput assistant={assistant} disclosure={disclosure} turnID={turnID} />;
+    return <CanonicalAssistantOutput assistant={assistant} disclosure={disclosure} displaySettings={displaySettings} turnID={turnID} />;
   }
   if (assistant.kind === "live") {
     return (
       <LiveAssistantOutput
         assistant={assistant}
         disclosure={disclosure}
+        displaySettings={displaySettings}
         turnID={turnID}
         onContentGrow={onContentGrow}
         onRevealComplete={onRevealComplete}
@@ -50,10 +54,12 @@ export const AssistantOutput = memo(function AssistantOutput({
 function CanonicalAssistantOutput({
   assistant,
   disclosure,
+  displaySettings,
   turnID,
 }: {
   assistant: Extract<AssistantOutputVM, { kind: "canonical" }>;
   disclosure?: TurnDisclosureState;
+  displaySettings?: TranscriptDisplaySettings;
   turnID: string;
 }) {
   const parts = useMemo(() => partsFromMessages(assistant.messages), [assistant.messages]);
@@ -64,12 +70,12 @@ function CanonicalAssistantOutput({
   }
   const compactMessage = assistant.messages.find(isCompactMessage);
   if (compactMessage) {
-    return <CompactMarker message={compactMessage} summaryText={text} />;
+    return <CompactMarker message={compactMessage} showSummary={displaySettings?.showCompactSummary ?? true} summaryText={text} />;
   }
   return (
     <div className="group flex min-w-0 flex-col">
       <div className="selectable-text min-w-0 text-sm leading-6">
-        <TurnParts disclosure={disclosure} parts={parts} turnID={turnID} />
+        <TurnParts disclosure={disclosure} displaySettings={displaySettings} parts={parts} turnID={turnID} />
         {assistant.messages.some((message) => message.interrupted) ? <InterruptedBadge /> : null}
       </div>
       <MessageMeta createdAt={lastMessage.createdAt} duration={assistant.duration} model={assistant.model} text={text} />
@@ -77,23 +83,29 @@ function CanonicalAssistantOutput({
   );
 }
 
-function CompactMarker({ message, summaryText }: { message: Message; summaryText: string }) {
+function CompactMarker({ message, showSummary, summaryText }: { message: Message; showSummary: boolean; summaryText: string }) {
   const { t } = useI18n();
   const compact = compactMetadata(message);
   const sourceCount = compact?.source_message_ids?.length || 0;
   const tailCount = compact?.tail_message_ids?.length || 0;
+  const sourceTurnCount = compact?.source_turn_count || 0;
+  const tailTurnCount = compact?.tail_turn_count || 0;
+  const statsText =
+    tailTurnCount > 0
+      ? t("transcript.compactStatsTurns")
+          .replace("{source}", String(sourceTurnCount))
+          .replace("{tail}", String(tailTurnCount))
+      : t("transcript.compactStats")
+          .replace("{source}", String(sourceCount))
+          .replace("{tail}", String(tailCount));
   return (
     <div className="selectable-text my-1 rounded-lg border bg-muted/35 px-3 py-2 text-sm">
       <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
         <Archive className="size-3.5 shrink-0" />
         <span className="shrink-0 font-medium text-foreground">{t("transcript.compactMark")}</span>
-        <span className="min-w-0 truncate text-xs">
-          {t("transcript.compactStats")
-            .replace("{source}", String(sourceCount))
-            .replace("{tail}", String(tailCount))}
-        </span>
+        <span className="min-w-0 truncate text-xs">{statsText}</span>
       </div>
-      {summaryText.trim() ? (
+      {showSummary && summaryText.trim() ? (
         <details className="mt-2 text-xs text-muted-foreground">
           <summary className="cursor-pointer select-none">{t("transcript.compactSummary")}</summary>
           <div className="mt-2 border-t pt-2 text-foreground/80">
@@ -105,11 +117,29 @@ function CompactMarker({ message, summaryText }: { message: Message; summaryText
   );
 }
 
+export function CompactPendingMarker() {
+  const { t } = useI18n();
+  return (
+    <div className="selectable-text my-1 rounded-lg border bg-muted/35 px-3 py-2 text-sm">
+      <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
+        <Archive className="size-3.5 shrink-0" />
+        <span className="shrink-0 font-medium leading-none text-foreground">{t("transcript.compactRunning")}</span>
+        <span
+          aria-hidden="true"
+          className="inline-block size-3.5 shrink-0 rounded-full border-2 border-muted-foreground/25 border-t-muted-foreground align-middle animate-spin"
+        />
+      </div>
+    </div>
+  );
+}
+
 function isCompactMessage(message: Message) {
   return Boolean(compactMetadata(message));
 }
 
-function compactMetadata(message: Message): { source_message_ids?: string[]; tail_message_ids?: string[] } | null {
+function compactMetadata(
+  message: Message,
+): { source_message_ids?: string[]; source_turn_count?: number; tail_message_ids?: string[]; tail_turn_count?: number } | null {
   const meta = message.metadata;
   if (!meta || typeof meta !== "object" || !("compact" in meta)) {
     return null;
@@ -118,18 +148,25 @@ function compactMetadata(message: Message): { source_message_ids?: string[]; tai
   if (!compact || typeof compact !== "object") {
     return null;
   }
-  return compact as { source_message_ids?: string[]; tail_message_ids?: string[] };
+  return compact as {
+    source_message_ids?: string[];
+    source_turn_count?: number;
+    tail_message_ids?: string[];
+    tail_turn_count?: number;
+  };
 }
 
 function LiveAssistantOutput({
   assistant,
   disclosure,
+  displaySettings,
   onContentGrow,
   onRevealComplete,
   turnID,
 }: {
   assistant: Extract<AssistantOutputVM, { kind: "live" }>;
   disclosure?: TurnDisclosureState;
+  displaySettings?: TranscriptDisplaySettings;
   onContentGrow?: () => void;
   onRevealComplete?: (turnID: string) => void;
   turnID: string;
@@ -152,20 +189,21 @@ function LiveAssistantOutput({
               ? "streaming_tool_args"
               : "awaiting_model"
         : undefined;
+  const visibleActivePhaseName = activePhaseName;
   const phaseCarriedByPart =
-    (activePhaseName === "thinking" && hasThoughtPart) ||
-    (activePhaseName === "awaiting_approval" && hasApprovalPart) ||
-    ((activePhaseName === "streaming_tool_args" ||
-      activePhaseName === "executing_tool" ||
-      activePhaseName === "awaiting_followup") &&
+    (visibleActivePhaseName === "thinking" && hasThoughtPart) ||
+    (visibleActivePhaseName === "awaiting_approval" && hasApprovalPart) ||
+    ((visibleActivePhaseName === "streaming_tool_args" ||
+      visibleActivePhaseName === "executing_tool" ||
+      visibleActivePhaseName === "awaiting_followup") &&
       hasToolPart);
   const activePhaseUpdatedAt =
-    phase && isTurnPhaseActive(phase) && phase.phase === activePhaseName ? phase.updatedAt : undefined;
+    phase && isTurnPhaseActive(phase) && phase.phase === visibleActivePhaseName ? phase.updatedAt : undefined;
   const parts = useMemo(
-    () => partsFromOverlay(overlay, text, activePhaseName, activePhaseUpdatedAt),
-    [activePhaseName, activePhaseUpdatedAt, overlay, text],
+    () => partsFromOverlay(overlay, text, visibleActivePhaseName, activePhaseUpdatedAt),
+    [activePhaseUpdatedAt, overlay, text, visibleActivePhaseName],
   );
-  const footerPhaseName = phaseCarriedByPart || activePhaseName === "streaming_text" ? undefined : activePhaseName;
+  const footerPhaseName = phaseCarriedByPart || visibleActivePhaseName === "streaming_text" ? undefined : visibleActivePhaseName;
   const footerPhase =
     footerPhaseName && phase
       ? { ...phase, phase: footerPhaseName }
@@ -196,12 +234,14 @@ function LiveAssistantOutput({
 
   return (
     <div className="selectable-text animate-in min-w-0 text-sm leading-6 duration-150 fade-in slide-in-from-bottom-1">
-      <div className="min-w-0">{parts.length > 0 ? <TurnParts disclosure={disclosure} parts={parts} turnID={turnID} /> : null}</div>
+      <div className="min-w-0">
+        {parts.length > 0 ? <TurnParts disclosure={disclosure} displaySettings={displaySettings} parts={parts} turnID={turnID} /> : null}
+      </div>
       {footerPhase ? <AssistantPhaseItem phase={footerPhase} /> : null}
       {overlay.status === "failed" && overlay.error ? (
-        <Alert className="mt-2" variant="destructive">
+        <Alert className="mt-2 min-w-0" variant="destructive">
           <CircleAlert className="h-3.5 w-3.5" />
-          <AlertDescription>{overlay.error}</AlertDescription>
+          <AlertDescription className="min-w-0 overflow-hidden break-words">{overlay.error}</AlertDescription>
         </Alert>
       ) : null}
       {overlay.status === "cancelled" || overlay.interrupted ? <InterruptedBadge /> : null}

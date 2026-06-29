@@ -6,7 +6,6 @@ package memstore
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -785,13 +784,6 @@ func (m *Memstore) SessionUsage(_ context.Context, sessionID string) (*store.Ses
 	return cloneSessionUsageStat(stat), nil
 }
 
-func assistantMessageID(turnID string, index int) string {
-	if index == 0 {
-		return "msg_" + turnID
-	}
-	return fmt.Sprintf("msg_%s_%03d", turnID, index+1)
-}
-
 // appendEventLocked 追加事件并按保留窗口滚动清理;调用方必须已持锁。
 func (m *Memstore) appendEventLocked(sessionID string, ev event.Event) {
 	evs := append(m.events[sessionID], ev)
@@ -978,7 +970,7 @@ func (m *Memstore) appendTurnOutputSegmentsLocked(turn *store.Turn, maxIndex int
 	for i, segment := range segments {
 		turnIndex := maxIndex + i + 1
 		msg := &store.Message{
-			ID:          assistantMessageID(turn.ID, turnIndex-1),
+			ID:          store.NewID("msg"),
 			SessionID:   turn.SessionID,
 			TurnID:      turn.ID,
 			Role:        segment.Role,

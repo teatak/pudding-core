@@ -13,6 +13,7 @@ import {
   Pencil,
   Plus,
   Settings,
+  SlidersHorizontal,
   Smartphone,
   Sparkles,
   Trash,
@@ -23,10 +24,14 @@ import {
   createMobilePairing,
   deleteProvider,
   getDailyUsage,
+  getSettings,
+  getUserPrompt,
   getWebTools,
   listBuiltinTools,
   listProviders,
   patchWebTools,
+  putSettings,
+  putUserPrompt,
   type BuiltinTool,
   type DailyUsageStat,
   type MobilePairing,
@@ -64,6 +69,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Sidebar,
   SidebarContent,
@@ -78,6 +84,7 @@ import {
   SidebarProvider,
 } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { BrandIcon } from "@/components/BrandIcons";
 import {
@@ -87,6 +94,7 @@ import {
 } from "@/components/ProviderProfileEditorDialog";
 import { ProviderPresetCreateDialog, ProviderPresetGrid } from "@/components/ProviderPresetCreateDialog";
 import { useI18n } from "@/i18n";
+import { SETTINGS_KEYS, settingsWithDefaults } from "@/lib/appSettings";
 import { cn } from "@/lib/utils";
 import { SETTINGS_DIALOG_OPEN_EVENT, type SettingsDialogOpenDetail, type SettingsSectionID } from "@/lib/settingsDialog";
 import {
@@ -102,7 +110,7 @@ const SETTINGS_SECTIONS: Array<{
   labelKey: string;
 }> = [
   { id: "usage", icon: Activity, labelKey: "settings.section.usage" },
-  { id: "dialogue", icon: MessageSquareText, labelKey: "settings.section.dialogue" },
+  { id: "dialogue", icon: SlidersHorizontal, labelKey: "settings.section.dialogue" },
   { id: "model", icon: Sparkles, labelKey: "settings.section.model" },
   { id: "tools", icon: Globe2, labelKey: "settings.section.tools" },
   { id: "mobile", icon: Smartphone, labelKey: "settings.section.mobile" },
@@ -171,6 +179,7 @@ export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProp
             </header>
             <div className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-3 pb-4 sm:px-4">
               {active === "usage" ? <UsageSettings token={token} /> : null}
+              {active === "dialogue" ? <GeneralSettings token={token} /> : null}
               {active === "model" ? <ProviderSettings createNonce={createProviderNonce} token={token} /> : null}
               {active === "tools" ? <ToolsSettings token={token} /> : null}
               {active === "mobile" ? <MobileSettings token={token} /> : null}
@@ -339,6 +348,280 @@ function UsageSettings({ token }: { token: string }) {
   );
 }
 
+function GeneralSettings({ token }: { token: string }) {
+  const queryClient = useQueryClient();
+  const { t } = useI18n();
+  const [promptContent, setPromptContent] = useState("");
+  const [tailTurns, setTailTurns] = useState("2");
+  const [autoThreshold, setAutoThreshold] = useState("80");
+  const [showCompactSummary, setShowCompactSummary] = useState(true);
+  const [showReasoning, setShowReasoning] = useState(true);
+  const [showToolDetails, setShowToolDetails] = useState(true);
+
+  const settingsQuery = useQuery({
+    queryKey: queryKeys.settings(),
+    queryFn: () => getSettings(token),
+    enabled: Boolean(token),
+  });
+  const userPromptQuery = useQuery({
+    queryKey: queryKeys.userPrompt(),
+    queryFn: () => getUserPrompt(token),
+    enabled: Boolean(token),
+  });
+
+  const savedSettings = useMemo(() => settingsWithDefaults(settingsQuery.data?.settings), [settingsQuery.data?.settings]);
+  const savedPrompt = userPromptQuery.data?.content || "";
+
+  useEffect(() => {
+    if (userPromptQuery.isSuccess) {
+      setPromptContent(savedPrompt);
+    }
+  }, [savedPrompt, userPromptQuery.isSuccess]);
+
+  useEffect(() => {
+    if (!settingsQuery.isSuccess) {
+      return;
+    }
+    setTailTurns(savedSettings[SETTINGS_KEYS.compactTailInputTurns]);
+    setAutoThreshold(savedSettings[SETTINGS_KEYS.compactAutoThresholdPercent]);
+    setShowCompactSummary(savedSettings[SETTINGS_KEYS.showCompactSummary] !== "false");
+    setShowReasoning(savedSettings[SETTINGS_KEYS.showReasoning] !== "false");
+    setShowToolDetails(savedSettings[SETTINGS_KEYS.showToolDetails] !== "false");
+  }, [savedSettings, settingsQuery.isSuccess]);
+
+  const promptMutation = useMutation({
+    mutationFn: () => putUserPrompt(token, promptContent),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.userPrompt() });
+      toast.success(t("settings.general.personalizationSaved"));
+    },
+    onError: () => toast.error(t("settings.general.saveFailed")),
+  });
+
+  const settingsMutation = useMutation({
+    mutationFn: (settings: Record<string, string>) => putSettings(token, settings),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.settings() }),
+        queryClient.invalidateQueries({ queryKey: ["session"] }),
+      ]);
+    },
+    onError: () => {
+      toast.error(t("settings.general.saveFailed"));
+      void queryClient.invalidateQueries({ queryKey: queryKeys.settings() });
+    },
+  });
+
+  const saveBooleanSetting = (key: string, next: boolean, setValue: (value: boolean) => void) => {
+    setValue(next);
+    settingsMutation.mutate({ [key]: String(next) });
+  };
+
+  const saveNumberSetting = (
+    key: string,
+    value: string,
+    setValue: (value: string) => void,
+    min: number,
+    max: number,
+  ) => {
+    const fallback = savedSettings[key];
+    const raw = value.trim();
+    if (!raw) {
+      setValue(fallback);
+      return;
+    }
+    const parsed = Number(raw);
+    if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+      setValue(fallback);
+      toast.error(t("settings.general.saveFailed"));
+      return;
+    }
+    const normalized = String(parsed);
+    setValue(normalized);
+    if (normalized !== savedSettings[key]) {
+      settingsMutation.mutate({ [key]: normalized });
+    }
+  };
+
+  const promptDirty = promptContent !== savedPrompt;
+
+  return (
+    <div className="@container mx-auto grid w-full max-w-3xl gap-8">
+      <section className="grid gap-4">
+        <div className="grid gap-2">
+          <h3 className="text-lg font-semibold tracking-tight">{t("settings.general.personalization")}</h3>
+          <p className="text-sm leading-6 text-muted-foreground">{t("settings.general.personalizationDesc")}</p>
+        </div>
+        {userPromptQuery.isError ? (
+          <Alert variant="destructive">
+            <AlertDescription>{t("settings.general.loadFailed")}</AlertDescription>
+          </Alert>
+        ) : null}
+        <div className="grid gap-2">
+          <div className="text-xs text-muted-foreground">{userPromptQuery.data?.path || "<home>/pudding.md"}</div>
+          <Textarea
+            className="min-h-72 resize-y font-mono text-sm leading-6"
+            disabled={userPromptQuery.isLoading}
+            placeholder={t("settings.general.personalizationPlaceholder")}
+            value={promptContent}
+            onChange={(event) => setPromptContent(event.target.value)}
+          />
+          <div className="flex justify-end">
+            <Button
+              disabled={userPromptQuery.isLoading || promptMutation.isPending || !promptDirty}
+              size="sm"
+              type="button"
+              onClick={() => promptMutation.mutate()}
+            >
+              {promptMutation.isPending ? <Loader2 className="animate-spin" /> : null}
+              {t("common.save")}
+            </Button>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-4">
+        <div className="grid gap-2">
+          <h3 className="text-lg font-semibold tracking-tight">{t("settings.general.context")}</h3>
+        </div>
+        {settingsQuery.isError ? (
+          <Alert variant="destructive">
+            <AlertDescription>{t("settings.general.loadFailed")}</AlertDescription>
+          </Alert>
+        ) : null}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <SettingsNumberField
+            description={t("settings.general.tailTurnsDesc")}
+            disabled={settingsQuery.isLoading}
+            id="pudding-compact-tail-turns"
+            label={t("settings.general.tailTurns")}
+            max={50}
+            min={1}
+            value={tailTurns}
+            onBlur={() => saveNumberSetting(SETTINGS_KEYS.compactTailInputTurns, tailTurns, setTailTurns, 1, 50)}
+            onChange={setTailTurns}
+          />
+          <SettingsNumberField
+            description={t("settings.general.autoThresholdDesc")}
+            disabled={settingsQuery.isLoading}
+            id="pudding-auto-compact-threshold"
+            label={t("settings.general.autoThreshold")}
+            max={100}
+            min={0}
+            suffix="%"
+            value={autoThreshold}
+            onBlur={() =>
+              saveNumberSetting(SETTINGS_KEYS.compactAutoThresholdPercent, autoThreshold, setAutoThreshold, 0, 100)
+            }
+            onChange={setAutoThreshold}
+          />
+        </div>
+        <div className="divide-y rounded-lg border">
+          <SettingsToggleRow
+            checked={showCompactSummary}
+            description={t("settings.general.showCompactSummaryDesc")}
+            disabled={settingsQuery.isLoading}
+            id="pudding-show-compact-summary"
+            label={t("settings.general.showCompactSummary")}
+            onChange={(next) => saveBooleanSetting(SETTINGS_KEYS.showCompactSummary, next, setShowCompactSummary)}
+          />
+          <SettingsToggleRow
+            checked={showReasoning}
+            description={t("settings.general.showReasoningDesc")}
+            disabled={settingsQuery.isLoading}
+            id="pudding-show-reasoning"
+            label={t("settings.general.showReasoning")}
+            onChange={(next) => saveBooleanSetting(SETTINGS_KEYS.showReasoning, next, setShowReasoning)}
+          />
+          <SettingsToggleRow
+            checked={showToolDetails}
+            description={t("settings.general.showToolDetailsDesc")}
+            disabled={settingsQuery.isLoading}
+            id="pudding-show-tool-details"
+            label={t("settings.general.showToolDetails")}
+            onChange={(next) => saveBooleanSetting(SETTINGS_KEYS.showToolDetails, next, setShowToolDetails)}
+          />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SettingsNumberField({
+  description,
+  disabled,
+  id,
+  label,
+  max,
+  min,
+  onBlur,
+  onChange,
+  suffix,
+  value,
+}: {
+  description: string;
+  disabled?: boolean;
+  id: string;
+  label: string;
+  max: number;
+  min: number;
+  onBlur?: () => void;
+  onChange: (value: string) => void;
+  suffix?: string;
+  value: string;
+}) {
+  return (
+    <label className="grid gap-2" htmlFor={id}>
+      <span className="text-sm font-medium">{label}</span>
+      <div className="flex items-center gap-2">
+        <Input
+          className="min-w-0"
+          disabled={disabled}
+          id={id}
+          inputMode="numeric"
+          max={max}
+          min={min}
+          type="number"
+          value={value}
+          onBlur={onBlur}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        {suffix ? <span className="shrink-0 text-sm text-muted-foreground">{suffix}</span> : null}
+      </div>
+      <span className="text-xs leading-5 text-muted-foreground">{description}</span>
+    </label>
+  );
+}
+
+function SettingsToggleRow({
+  checked,
+  description,
+  disabled,
+  id,
+  label,
+  onChange,
+}: {
+  checked: boolean;
+  description: string;
+  disabled?: boolean;
+  id: string;
+  label: string;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label
+      className={cn("flex cursor-pointer items-center justify-between gap-4 px-3 py-3", disabled && "opacity-60")}
+      htmlFor={id}
+    >
+      <span className="grid min-w-0 gap-1">
+        <span className="text-sm font-medium">{label}</span>
+        <span className="text-xs leading-5 text-muted-foreground">{description}</span>
+      </span>
+      <Switch disabled={disabled} id={id} checked={checked} onCheckedChange={onChange} />
+    </label>
+  );
+}
+
 function UsageMetric({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 px-3 first:pl-0 sm:px-5">
@@ -374,7 +657,7 @@ function UsageHeatmap({
   const weekCount = Math.ceil(cells.length / 7);
   const heatThresholds = usageHeatThresholds(days);
   const monthLabels = usageMonthLabels(days, leading, locale);
-  const heatmapGapRem = Math.max(0, weekCount - 1) * 0.125;
+  const heatmapGapRem = Math.max(0, weekCount - 1) * 0.25;
 
   return (
     <div
@@ -382,7 +665,7 @@ function UsageHeatmap({
       className="grid min-w-0 gap-3 overflow-x-auto pb-1"
       style={
         {
-          "--usage-heat-cell": `clamp(0.45rem, calc((100cqw - ${heatmapGapRem}rem) / ${weekCount}), 0.875rem)`,
+          "--usage-heat-cell": `clamp(0.4rem, calc((100cqw - ${heatmapGapRem}rem) / ${weekCount}), 0.75rem)`,
         } as CSSProperties
       }
     >
@@ -391,7 +674,7 @@ function UsageHeatmap({
         <div className="w-max max-w-full">
           <TooltipProvider>
             <div
-              className="grid grid-flow-col grid-rows-7 gap-0.5"
+              className="grid grid-flow-col grid-rows-7 gap-1"
               style={{ gridAutoColumns: "var(--usage-heat-cell)", gridTemplateRows: "repeat(7, var(--usage-heat-cell))" }}
             >
               {cells.map((day, index) =>
@@ -410,7 +693,7 @@ function UsageHeatmap({
             </div>
           </TooltipProvider>
           <div
-            className="mt-2.5 grid gap-0.5 text-xs text-muted-foreground"
+            className="mt-2.5 grid gap-1 text-xs text-muted-foreground"
             style={{ gridTemplateColumns: `repeat(${weekCount}, var(--usage-heat-cell))` }}
           >
             {monthLabels.map((label) => (
@@ -437,7 +720,7 @@ function UsageHeatmapCell({
   t: (key: string) => string;
 }) {
   if (day.totalTokens <= 0 && day.requestCount <= 0) {
-    return <div className={cn("size-(--usage-heat-cell) rounded", usageHeatClass(day.totalTokens, heatThresholds))} />;
+    return <div className={cn("size-(--usage-heat-cell) rounded-[2px]", usageHeatClass(day.totalTokens, heatThresholds))} />;
   }
 
   return (
@@ -445,7 +728,7 @@ function UsageHeatmapCell({
       <TooltipTrigger asChild>
         <button
           aria-label={usageDayTitle(day, t)}
-          className={cn("size-(--usage-heat-cell) rounded transition-colors", usageHeatClass(day.totalTokens, heatThresholds))}
+          className={cn("size-(--usage-heat-cell) rounded-[2px] transition-colors", usageHeatClass(day.totalTokens, heatThresholds))}
           type="button"
         />
       </TooltipTrigger>
@@ -532,18 +815,18 @@ function usageHeatClass(tokens: number, thresholds: number[]) {
     return "bg-muted/60";
   }
   if (tokens >= thresholds[3]) {
-    return "bg-indigo-600";
+    return "bg-[#75a8d5]";
   }
   if (tokens >= thresholds[2]) {
-    return "bg-indigo-500";
+    return "bg-[#5f8caf]";
   }
   if (tokens >= thresholds[1]) {
-    return "bg-indigo-400";
+    return "bg-[#466b86]";
   }
   if (tokens >= thresholds[0]) {
-    return "bg-indigo-300";
+    return "bg-[#30485b]";
   }
-  return "bg-indigo-200";
+  return "bg-[#263746]";
 }
 
 function usageDayTitle(day: DailyUsageStat, t: (key: string) => string) {

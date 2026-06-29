@@ -71,7 +71,9 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
   const addPendingUser = useOverlayStore((state) => state.addPendingUser);
   const acceptSubmittingTurn = useOverlayStore((state) => state.acceptSubmittingTurn);
   const clearSubmittingTurn = useOverlayStore((state) => state.clearSubmittingTurn);
+  const finishCompactRun = useOverlayStore((state) => state.finishCompactRun);
   const removePendingUser = useOverlayStore((state) => state.removePendingUser);
+  const startCompactRun = useOverlayStore((state) => state.startCompactRun);
   const startSubmittingTurn = useOverlayStore((state) => state.startSubmittingTurn);
   // 停止态双源:overlay 的 runningTurns(本地实时)|| session 快照的 running
   // (后端 turns 表派生)。中途刷新走 SSE tail 不回放 turn.started,若此时
@@ -277,6 +279,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
     onMutate: () => {
       clearMascotError();
       onSubmitError?.(null);
+      startCompactRun(sessionID);
       draftIDRef.current = newClientID();
       form.reset({ text: "" });
     },
@@ -290,6 +293,9 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
     },
     onError: (error) => {
       showMascotError(compactErrorMessage(error, t));
+    },
+    onSettled: () => {
+      finishCompactRun(sessionID);
     },
   });
   const systemSubmitMutation = useMutation({
@@ -860,8 +866,8 @@ function CapabilityBadge({ mode }: { mode: Session["activeMode"] }) {
   const title = t("mode.current").replace("{mode}", label);
   const iconByMode = {
     chat: { Icon: MessageCircle, className: "text-muted-foreground/80" },
-    research: { Icon: SearchCheck, className: "text-blue-600/80 dark:text-blue-300/80" },
-    workspace: { Icon: Code2, className: "text-emerald-600/80 dark:text-emerald-300/80" },
+    research: { Icon: SearchCheck, className: "text-muted-foreground/80" },
+    workspace: { Icon: Code2, className: "text-muted-foreground/80" },
   } satisfies Record<Session["activeMode"], { Icon: LucideIcon; className: string }>;
   const { Icon, className } = iconByMode[mode];
   return (

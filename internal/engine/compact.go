@@ -4,16 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
+	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/contextbuilder"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
 )
 
 const (
-	defaultCompactTailUserTurns = 2
-	compactMessageTextLimit     = 4000
+	defaultCompactTailInputTurns = 2
+	compactMessageTextLimit      = 4000
 )
 
 type CompactInput struct {
@@ -63,7 +65,7 @@ func (e *Engine) Compact(ctx context.Context, in CompactInput) (*CompactResult, 
 		return nil, err
 	}
 	effective := contextbuilder.EffectiveMessages(msgs)
-	cold, tail := contextbuilder.SplitRecentRawTail(effective, defaultCompactTailUserTurns)
+	cold, tail := contextbuilder.SplitRecentInputTail(effective, e.compactTailInputTurns(ctx))
 	if len(cold) == 0 {
 		return nil, ErrCompactEmpty
 	}
@@ -77,7 +79,6 @@ func (e *Engine) Compact(ctx context.Context, in CompactInput) (*CompactResult, 
 	if err != nil {
 		return nil, err
 	}
-	summary = ensureCompactSummaryReferences(summary, sourceIDs)
 	if strings.TrimSpace(summary) == "" {
 		return nil, ErrCompactEmpty
 	}
@@ -94,7 +95,7 @@ func (e *Engine) Compact(ctx context.Context, in CompactInput) (*CompactResult, 
 		Mode:            resolved.mode,
 		ModelConfig:     resolved.configJSON,
 		Text:            summary,
-		Metadata:        store.CompactMessageMetadata(sourceIDs, tailIDs),
+		Metadata:        store.CompactMessageMetadataWithCounts(sourceIDs, tailIDs, messageInputTurnCount(cold), messageInputTurnCount(tail)),
 	})
 	if err != nil {
 		return nil, err
@@ -110,6 +111,37 @@ func (e *Engine) Compact(ctx context.Context, in CompactInput) (*CompactResult, 
 		TailMessages:     len(tailIDs),
 		SummaryChars:     len([]rune(summary)),
 	}, nil
+}
+
+func (e *Engine) compactTailInputTurns(ctx context.Context) int {
+	return e.intSetting(ctx, config.SettingCompactTailInputTurns, defaultCompactTailInputTurns, 1, 50)
+}
+
+func (e *Engine) autoCompactThresholdPercent(ctx context.Context) int {
+	return e.intSetting(ctx, config.SettingCompactAutoThresholdPercent, config.DefaultCompactAutoThresholdPercent, 0, 100)
+}
+
+func (e *Engine) intSetting(ctx context.Context, key string, fallback, min, max int) int {
+	settings, err := e.config.Settings(ctx)
+	if err != nil {
+		return fallback
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(settings[key]))
+	if err != nil || n < min || n > max {
+		return fallback
+	}
+	return n
+}
+
+func messageInputTurnCount(msgs []*store.Message) int {
+	seen := make(map[string]struct{}, len(msgs))
+	for _, msg := range msgs {
+		if !contextbuilder.IsInputTurnBoundary(msg) {
+			continue
+		}
+		seen[msg.TurnID] = struct{}{}
+	}
+	return len(seen)
 }
 
 func (e *Engine) generateCompactSummary(ctx context.Context, sessionID string, resolved *resolvedModel, client provider.Client, history, hint string) (string, error) {
@@ -230,36 +262,6 @@ func truncateCompactText(text string, limit int) string {
 		return text
 	}
 	return string(runes[:limit]) + "\n[truncated]"
-}
-
-func ensureCompactSummaryReferences(summary string, sourceIDs []string) string {
-	summary = strings.TrimSpace(summary)
-	if strings.Contains(summary, "@message(") || len(sourceIDs) == 0 {
-		return summary
-	}
-	anchors := compactFallbackAnchors(sourceIDs)
-	if len(anchors) == 0 {
-		return summary
-	}
-	var b strings.Builder
-	b.WriteString(summary)
-	b.WriteString("\n\n## Retrievable Messages\n")
-	for _, id := range anchors {
-		b.WriteString("- @message(")
-		b.WriteString(id)
-		b.WriteString(")\n")
-	}
-	return strings.TrimSpace(b.String())
-}
-
-func compactFallbackAnchors(ids []string) []string {
-	if len(ids) <= 24 {
-		return append([]string(nil), ids...)
-	}
-	out := make([]string, 0, 24)
-	out = append(out, ids[:12]...)
-	out = append(out, ids[len(ids)-12:]...)
-	return out
 }
 
 func messageIDs(msgs []*store.Message) []string {

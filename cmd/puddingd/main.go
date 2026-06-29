@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/teatak/pudding-core/internal/daemon"
 	"github.com/teatak/pudding-core/internal/home"
+	"github.com/teatak/pudding-core/internal/prompt"
 )
 
 func main() {
@@ -23,6 +25,10 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) > 1 && os.Args[1] == "prompt" {
+		return runPrompt(os.Args[2:])
+	}
+
 	var (
 		flagHome = flag.String("home", "", "data home (default: channel home, see docs)")
 		flagAddr = flag.String("addr", home.DefaultAddr(), "HTTP listen address")
@@ -54,4 +60,33 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return d.Shutdown(shutdownCtx)
+}
+
+func runPrompt(args []string) error {
+	fs := flag.NewFlagSet("prompt", flag.ExitOnError)
+	flagHome := fs.String("home", "", "data home (default: channel home, see docs)")
+	flagMode := fs.String("mode", "chat", "agent mode: chat, research, workspace")
+	flagSegments := fs.Bool("segments", false, "print prompt segments with headers")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	dir, err := home.Resolve(*flagHome)
+	if err != nil {
+		return err
+	}
+	out, err := prompt.NewLoader(dir).Prompt(context.Background(), *flagMode)
+	if err != nil {
+		return err
+	}
+	if *flagSegments {
+		for i, seg := range out.Segments {
+			if i > 0 {
+				fmt.Println()
+			}
+			fmt.Printf("===== %s (%s) =====\n%s\n", seg.ID, seg.Layer, seg.Content)
+		}
+		return nil
+	}
+	fmt.Println(out.SystemInstruction)
+	return nil
 }
