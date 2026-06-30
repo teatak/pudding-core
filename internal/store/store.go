@@ -842,6 +842,65 @@ func (s SessionUsageStat) CumulativeTotalTokens() int {
 	return s.CumulativeInputTokens() + s.CumulativeOutputTokens()
 }
 
+type SessionAppGrant struct {
+	SessionID        string          `json:"sessionID"`
+	AppID            string          `json:"appID"`
+	ConnectionID     string          `json:"connectionID"`
+	AllowedEndpoints []string        `json:"allowedEndpoints,omitempty"`
+	Permissions      []string        `json:"permissions,omitempty"`
+	Constraints      json.RawMessage `json:"constraints,omitempty"`
+	CreatedAt        time.Time       `json:"createdAt"`
+	UpdatedAt        time.Time       `json:"updatedAt"`
+}
+
+func NormalizeSessionAppGrant(g *SessionAppGrant) error {
+	if g == nil {
+		return ErrInvalidSession
+	}
+	g.SessionID = strings.TrimSpace(g.SessionID)
+	g.AppID = strings.TrimSpace(g.AppID)
+	g.ConnectionID = strings.TrimSpace(g.ConnectionID)
+	if g.SessionID == "" || g.AppID == "" || g.ConnectionID == "" {
+		return ErrInvalidSession
+	}
+	g.AllowedEndpoints = normalizeStringIDs(g.AllowedEndpoints)
+	g.Permissions = normalizeStringIDs(g.Permissions)
+	if len(g.Constraints) == 0 || !json.Valid(g.Constraints) {
+		g.Constraints = json.RawMessage(`{}`)
+	}
+	return nil
+}
+
+func (g *SessionAppGrant) EndpointAllowed(endpoint string) bool {
+	if g == nil {
+		return false
+	}
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return false
+	}
+	for _, allowed := range g.AllowedEndpoints {
+		if allowed == endpoint {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeStringIDs(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
 // Store 的每个方法是一个完整事务。BeginTurn 与 FinishTurn 内部必须把
 // message、turns 状态、lifecycle event 写在同一事务里(AGENTS.md 硬约束 15);
 // 事件 seq 由 Store 在事务内按 session 单调分配。
@@ -904,6 +963,10 @@ type Store interface {
 	// LatestSeq 返回 session 当前最大事件 seq(无事件为 0),
 	// 服务无续传位点的全新 SSE 连接从尾部开始(tail)。
 	LatestSeq(ctx context.Context, sessionID string) (int64, error)
+
+	PutSessionAppGrant(ctx context.Context, grant *SessionAppGrant) (*SessionAppGrant, error)
+	ListSessionAppGrants(ctx context.Context, sessionID string) ([]*SessionAppGrant, error)
+	DeleteSessionAppGrant(ctx context.Context, sessionID, appID, connectionID string) error
 
 	Close() error
 }

@@ -1,5 +1,6 @@
 import {
   listBuiltinToolsResponse,
+  listSkillsResponse,
   compactResponse,
   conflictResponse,
   listModelsResponse,
@@ -36,6 +37,7 @@ import {
   type QueuedInput,
   type Session,
   type SessionUsage,
+  type Skill,
   type WebToolsConfig,
 } from "@/contracts/api";
 import { z } from "zod";
@@ -338,6 +340,25 @@ export function listBuiltinTools(token: string): Promise<{ tools: BuiltinTool[] 
   return request(token, "/tools/builtin", listBuiltinToolsResponse);
 }
 
+export function listSkills(token: string): Promise<{ skills: Skill[] }> {
+  return request(token, "/skills", listSkillsResponse);
+}
+
+export function skillIconURL(token: string, skill: Skill): string | undefined {
+  const raw = skill.iconPath?.trim();
+  if (!raw) {
+    return undefined;
+  }
+  const path = raw.split("/").map(encodeURIComponent).join("/");
+  return apiURL(`/skill-assets/${path}?token=${encodeURIComponent(token)}`);
+}
+
+export async function deleteSkill(token: string, id: string): Promise<void> {
+  await request(token, `/skills/${encodeURIComponent(id)}`, z.null(), {
+    method: "DELETE",
+  });
+}
+
 export async function putSettings(token: string, settings: Record<string, string>): Promise<void> {
   await request(token, "/settings", z.null(), {
     method: "PUT",
@@ -397,5 +418,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { BuiltinTool, ContentPart, DailyUsageStat, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, WebToolsConfig };
+export type { BuiltinTool, ContentPart, DailyUsageStat, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, WebToolsConfig };
 export { createProviderRequest, patchProviderRequest };

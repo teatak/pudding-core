@@ -15,6 +15,7 @@ import (
 	"os"
 
 	"github.com/teatak/pudding-core/internal/api"
+	appsvc "github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/buildinfo"
 	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/engine"
@@ -24,6 +25,7 @@ import (
 	"github.com/teatak/pudding-core/internal/prompt"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
+	skillsvc "github.com/teatak/pudding-core/internal/skill"
 	"github.com/teatak/pudding-core/internal/store/sqlitestore"
 	"github.com/teatak/pudding-core/internal/tool"
 	"github.com/teatak/pudding-core/internal/webui"
@@ -82,7 +84,9 @@ func Start(opts Options) (*Daemon, error) {
 		resolver = registry.New(cfg)
 	}
 	hub := event.NewHub()
-	eng := engine.New(st, hub, resolver, cfg, engine.WithPromptSource(prompt.NewLoader(dir)), engine.WithTools(tool.NewBuiltinRunner(tool.WithWebConfig(cfg))))
+	apps := appsvc.NewService(dir, st, cfg)
+	skills := skillsvc.NewService(dir)
+	eng := engine.New(st, hub, resolver, cfg, engine.WithPromptSource(prompt.NewLoader(dir)), engine.WithTools(tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithSkills(skills))))
 	if err := eng.Recover(context.Background()); err != nil {
 		_ = st.Close()
 		return nil, fmt.Errorf("recover interrupted turns: %w", err)
@@ -117,7 +121,7 @@ func Start(opts Options) (*Daemon, error) {
 	// request ctx 派生自此:Shutdown 时 SSE 长连接立即退出,不拖优雅关闭
 	sseCtx, stopSSE := context.WithCancel(context.Background())
 	server := &http.Server{
-		Handler: api.New(eng, st, cfg, hub).Handler(
+		Handler: api.New(eng, st, cfg, hub).WithApps(apps).WithSkills(skills).Handler(
 			token,
 			webui.Handler(),
 			api.WithDeviceTokenValidator(devices),

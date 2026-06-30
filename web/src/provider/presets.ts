@@ -342,7 +342,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: "buzzhive",
     name: "BuzzHive",
     description: "BuzzHive proxy with OpenAI Chat, OpenAI Responses, Anthropic, and Gemini-compatible endpoints; models are loaded from the endpoint.",
-    apiKeyURL: "http://127.0.0.1:9622/admin/",
+    apiKeyURL: "https://github.com/teatak/buzzhive",
     defaultVariantId: "openai-compatible",
     variants: [
       {

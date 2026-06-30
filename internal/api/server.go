@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/teatak/cart/v3"
+	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
@@ -26,6 +27,8 @@ type Server struct {
 	store     store.Store
 	config    engine.ConfigSource
 	providers providerWriter
+	apps      appService
+	skills    skillService
 	hub       *event.Hub
 }
 
@@ -34,8 +37,22 @@ func New(eng *engine.Engine, s store.Store, cfg engine.ConfigSource, hub *event.
 	return &Server{engine: eng, store: s, config: cfg, providers: providers, hub: hub}
 }
 
+func (s *Server) WithApps(apps appService) *Server {
+	s.apps = apps
+	return s
+}
+
+func (s *Server) WithSkills(skills skillService) *Server {
+	s.skills = skills
+	return s
+}
+
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
-var apiPrefixes = []string{"/sessions", "/settings", "/providers", "/tools", "/usage", "/mobile"}
+var apiPrefixes = []string{"/sessions", "/settings", "/providers", "/tools", "/skills", "/skill-assets", "/usage", "/mobile", "/apps", "/app-connections"}
+
+type appService interface {
+	ListDefinitions(ctx context.Context) ([]*app.Definition, error)
+}
 
 type deviceTokenValidator interface {
 	ValidToken(token string) bool
@@ -97,6 +114,14 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/providers/:name/models").GET(s.listProviderModels)
 	app.Route("/tools/builtin").GET(s.listBuiltinTools)
 	app.Route("/tools/web").GET(s.getWebTools).PATCH(s.patchWebTools).PUT(s.patchWebTools)
+	app.Route("/skills").GET(s.listSkills)
+	app.Route("/skills/:id").DELETE(s.deleteSkill)
+	app.Route("/skill-assets/*path").GET(s.getSkillAsset)
+	app.Route("/apps").GET(s.listApps)
+	app.Route("/app-connections").GET(s.listAppConnections)
+	app.Route("/app-connections/:id").PUT(s.putAppConnection).DELETE(s.deleteAppConnection)
+	app.Route("/sessions/:id/app-grants").GET(s.listSessionAppGrants).PUT(s.putSessionAppGrant)
+	app.Route("/sessions/:id/app-grants/:appID/:connectionID").DELETE(s.deleteSessionAppGrant)
 	app.Route("/usage/daily").GET(s.getDailyUsage)
 	if cfg.pairing != nil {
 		app.Route("/mobile/pairings").POST(func(c *cart.Context) error {

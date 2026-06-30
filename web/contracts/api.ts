@@ -286,6 +286,20 @@ export type BuiltinTool = z.infer<typeof builtinTool>;
 
 export const listBuiltinToolsResponse = z.object({ tools: z.array(builtinTool) });
 
+export const skill = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  scope: z.literal("global"),
+  source: z.enum(["builtin", "user"]),
+  system: z.boolean(),
+  path: z.string().optional(),
+  iconPath: z.string().optional(),
+});
+export type Skill = z.infer<typeof skill>;
+
+export const listSkillsResponse = z.object({ skills: z.array(skill) });
+
 export const webToolProvider = z.object({
   name: z.string(),
   apiKey: z.string().optional(),

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	"github.com/teatak/pudding-core/internal/mobileauth"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
+	skillsvc "github.com/teatak/pudding-core/internal/skill"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/memstore"
 	"github.com/teatak/pudding-core/internal/tool"
@@ -70,6 +72,107 @@ func req(t *testing.T, method, url string, body any) *http.Response {
 	return resp
 }
 
+func TestSkillsAPI(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, "skills", "test-skill"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "skills", "test-skill", "SKILL.md"), []byte("---\nname: test-skill\ndescription: Test skill.\n---\nBody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, "skills", "test-skill", "assets"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "skills", "test-skill", "assets", "icon.svg"), []byte("<svg/>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithSkills(skillsvc.NewService(home)).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+
+	resp := req(t, http.MethodGet, srv.URL+"/skills", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	got := decodeJSON[map[string][]map[string]any](t, resp)
+	var foundBuiltin, foundUser bool
+	for _, item := range got["skills"] {
+		if item["id"] == "skill-creator" {
+			if item["scope"] != "global" || item["source"] != "builtin" || item["system"] != true || item["iconPath"] != ".system/skill-creator/assets/icon.svg" {
+				t.Fatalf("unexpected skill-creator view: %+v", item)
+			}
+			foundBuiltin = true
+		}
+		if item["id"] == "test-skill" {
+			if item["scope"] != "global" || item["source"] != "user" || item["system"] != false || item["iconPath"] != "test-skill/assets/icon.svg" {
+				t.Fatalf("unexpected test-skill view: %+v", item)
+			}
+			foundUser = true
+		}
+	}
+	if !foundBuiltin || !foundUser {
+		t.Fatalf("expected builtin and user skills, got: %+v", got)
+	}
+}
+
+func TestDeleteSkillAPI(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, "skills", "test-skill"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "skills", "test-skill", "SKILL.md"), []byte("---\nname: test-skill\ndescription: Test skill.\n---\nBody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithSkills(skillsvc.NewService(home)).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+
+	resp := req(t, http.MethodDelete, srv.URL+"/skills/test-skill", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("want 204, got %d", resp.StatusCode)
+	}
+	if _, err := os.Stat(filepath.Join(home, "skills", "test-skill")); !os.IsNotExist(err) {
+		t.Fatalf("skill dir should be removed, stat err=%v", err)
+	}
+}
+
+func TestSkillAssetsAPI(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
+	home := t.TempDir()
+	dir := filepath.Join(home, "skills", "test-skill", "assets")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "skills", "test-skill", "SKILL.md"), []byte("---\nname: test-skill\ndescription: Test skill.\n---\nBody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "icon.svg"), []byte("<svg/>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithSkills(skillsvc.NewService(home)).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+
+	resp := req(t, http.MethodGet, srv.URL+"/skill-assets/test-skill/assets/icon.svg", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "image/svg+xml" {
+		t.Fatalf("unexpected skill asset response: %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(resp.Body); err != nil {
+		t.Fatal(err)
+	}
+	if buf.String() != "<svg/>" {
+		t.Fatalf("unexpected asset body: %q", buf.String())
+	}
+}
+
 func TestBuiltinToolsAPI(t *testing.T) {
 	srv, _ := newTestServer(t)
 
@@ -79,7 +182,7 @@ func TestBuiltinToolsAPI(t *testing.T) {
 	}
 	got := decodeJSON[map[string][]map[string]any](t, resp)
 	tools := got["tools"]
-	if len(tools) != 5 {
+	if len(tools) != 8 {
 		t.Fatalf("unexpected builtin tools: %+v", got)
 	}
 	if tools[0]["id"] != tool.RequestCapability {
@@ -110,6 +213,28 @@ func TestBuiltinToolsAPI(t *testing.T) {
 	}
 	if workspaceList == nil || workspaceList["capability"] != string(store.ModeWorkspace) {
 		t.Fatalf("workspace list should declare workspace capability: %+v", workspaceList)
+	}
+	var skillRead map[string]any
+	var restRequest map[string]any
+	var graphqlRequest map[string]any
+	for _, item := range tools {
+		switch item["id"] {
+		case tool.SkillRead:
+			skillRead = item
+		case tool.RESTRequest:
+			restRequest = item
+		case tool.GraphQLRequest:
+			graphqlRequest = item
+		}
+	}
+	if skillRead == nil || skillRead["capability"] != string(store.ModeChat) {
+		t.Fatalf("skill read should declare chat capability: %+v", skillRead)
+	}
+	if restRequest == nil || restRequest["capability"] != string(store.ModeResearch) {
+		t.Fatalf("rest request should declare research capability: %+v", restRequest)
+	}
+	if graphqlRequest == nil || graphqlRequest["capability"] != string(store.ModeResearch) {
+		t.Fatalf("graphql request should declare research capability: %+v", graphqlRequest)
 	}
 }
 

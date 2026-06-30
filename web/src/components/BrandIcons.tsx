@@ -265,6 +265,26 @@ export function OllamaIcon({ className }: { className?: string }) {
   );
 }
 
+export function DefaultProviderIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      aria-hidden
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+    >
+      <path d="M12 4.25 18.75 8v8L12 19.75 5.25 16V8L12 4.25Z" />
+      <path d="M8.5 10.25 12 12.25l3.5-2" />
+      <path d="M12 12.25v4" />
+    </svg>
+  );
+}
+
 const brandBackgrounds: Record<string, string> = {
   deepseek: "#4D6BFE",
   gemini: "#3186FF",
@@ -281,6 +301,7 @@ const brandBackgrounds: Record<string, string> = {
 };
 
 const buzzHiveBackground = "radial-gradient(circle at 28% 20%, rgba(255,255,255,.34), transparent 58%), linear-gradient(132deg, #7c3aed 0%, #4f46e5 52%, #2563eb 100%)";
+const defaultProviderBackground = "#64748B";
 
 function normalizeBrandName(name: string) {
   switch (name.toLowerCase()) {
@@ -330,12 +351,14 @@ function BrandMark({ name, className }: { name: string; className?: string }) {
       return <ClaudeIcon className={className} />;
     case "grok":
       return <GrokIcon className={className} />;
+    case "default":
+      return <DefaultProviderIcon className={className} />;
     default:
       return null;
   }
 }
 
-// 名称 → 品牌图标映射:profile 名或 preset id 命中即显示,未命中返回 null
+// 名称 → 品牌图标映射:profile 名或 preset id 命中即显示,未命中使用默认 provider 图标
 export function BrandIcon({
   name,
   className,
@@ -349,10 +372,8 @@ export function BrandIcon({
   radius?: "none" | "sm" | "md" | "lg";
   shape?: "rounded" | "circle";
 }) {
-  const normalizedName = brandIconName(name);
-  if (!normalizedName) {
-    return null;
-  }
+  const knownBrandName = brandIconName(name);
+  const normalizedName = knownBrandName || "default";
 
   const lightBackground = normalizedName === "gemini" || normalizedName === "ollama";
   const style: CSSProperties | undefined =
@@ -360,7 +381,7 @@ export function BrandIcon({
       ? { backgroundImage: buzzHiveBackground }
       : lightBackground
         ? undefined
-        : { backgroundColor: brandBackgrounds[normalizedName] };
+        : { backgroundColor: brandBackgrounds[normalizedName] || defaultProviderBackground };
 
   return (
     <span

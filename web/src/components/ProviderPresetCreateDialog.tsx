@@ -39,6 +39,8 @@ import {
   type ProviderPresetVariant,
 } from "@/provider/presets";
 
+const providerOptionSelectedClass = "border-primary/45 bg-primary/5 text-foreground";
+
 export function ProviderPresetGrid({
   children,
   className,
@@ -331,7 +333,7 @@ function VariantListPicker({
           const id = `provider-preset-${preset.id}-${item.id}`;
           return (
             <FieldLabel key={item.id} htmlFor={id}>
-              <Field className={cn(active && "border-ring bg-accent")} orientation="horizontal">
+              <Field className={cn(active && providerOptionSelectedClass)} orientation="horizontal">
                 <FieldContent>
                   <FieldTitle>{providerPresetAccessMethodLabel(preset, item, t)}</FieldTitle>
                 </FieldContent>
@@ -392,7 +394,7 @@ function MiMoVariantPicker({
             const id = `provider-preset-${preset.id}-protocol-${item.id}`;
             return (
               <FieldLabel key={item.id} htmlFor={id}>
-                <Field className={cn("h-full", active && "border-ring bg-accent")} orientation="horizontal">
+                <Field className={cn("h-full", active && providerOptionSelectedClass)} orientation="horizontal">
                   <FieldContent>
                     <FieldTitle>{item.label}</FieldTitle>
                   </FieldContent>
@@ -416,7 +418,7 @@ function MiMoVariantPicker({
             const id = `provider-preset-${preset.id}-plan-${item.id}`;
             return (
               <FieldLabel key={item.id} htmlFor={id}>
-                <Field className={cn("h-full", active && "border-ring bg-accent")} orientation="horizontal">
+                <Field className={cn("h-full", active && providerOptionSelectedClass)} orientation="horizontal">
                   <FieldContent>
                     <FieldTitle>{item.label}</FieldTitle>
                   </FieldContent>

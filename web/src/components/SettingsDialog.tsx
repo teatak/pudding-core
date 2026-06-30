@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
+  BookOpenText,
   Copy,
   ExternalLink,
   Eye,
@@ -23,19 +24,23 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import {
   createMobilePairing,
   deleteProvider,
+  deleteSkill,
   getDailyUsage,
   getSettings,
   getUserPrompt,
   getWebTools,
   listBuiltinTools,
   listProviders,
+  listSkills,
   patchWebTools,
   putSettings,
   putUserPrompt,
+  skillIconURL,
   type BuiltinTool,
   type DailyUsageStat,
   type MobilePairing,
   type ProviderProfile,
+  type Skill,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -112,11 +117,15 @@ const SETTINGS_SECTIONS: Array<{
   { id: "usage", icon: Activity, labelKey: "settings.section.usage" },
   { id: "dialogue", icon: SlidersHorizontal, labelKey: "settings.section.dialogue" },
   { id: "model", icon: Sparkles, labelKey: "settings.section.model" },
+  { id: "skills", icon: BookOpenText, labelKey: "settings.section.skills" },
   { id: "tools", icon: Globe2, labelKey: "settings.section.tools" },
   { id: "mobile", icon: Smartphone, labelKey: "settings.section.mobile" },
   { id: "appearance", icon: Palette, labelKey: "settings.section.appearance" },
   { id: "about", icon: Info, labelKey: "settings.section.about" },
 ];
+
+const SETTINGS_CONTENT_CLASS = "@container mx-auto grid min-w-0 w-full max-w-4xl gap-5";
+const SETTINGS_NARROW_CONTENT_CLASS = "@container mx-auto grid min-w-0 w-full max-w-3xl gap-5";
 
 type SettingsDialogProps = {
   token: string;
@@ -181,6 +190,7 @@ export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProp
               {active === "usage" ? <UsageSettings token={token} /> : null}
               {active === "dialogue" ? <GeneralSettings token={token} /> : null}
               {active === "model" ? <ProviderSettings createNonce={createProviderNonce} token={token} /> : null}
+              {active === "skills" ? <SkillsSettings token={token} /> : null}
               {active === "tools" ? <ToolsSettings token={token} /> : null}
               {active === "mobile" ? <MobileSettings token={token} /> : null}
             </div>
@@ -322,7 +332,7 @@ function UsageSettings({ token }: { token: string }) {
   const summary = useMemo(() => summarizeDailyUsage(days), [days]);
 
   return (
-    <div className="@container mx-auto grid min-w-0 w-full max-w-[980px] gap-6 pt-2">
+    <div className={cn(SETTINGS_CONTENT_CLASS, "gap-6 pt-2")}>
       <section className="grid min-w-0 gap-5">
         {usageQuery.isError ? (
           <Alert variant="destructive">
@@ -446,7 +456,7 @@ function GeneralSettings({ token }: { token: string }) {
   const promptDirty = promptContent !== savedPrompt;
 
   return (
-    <div className="@container mx-auto grid w-full max-w-3xl gap-8">
+    <div className={cn(SETTINGS_NARROW_CONTENT_CLASS, "gap-8")}>
       <section className="grid gap-4">
         <div className="grid gap-2">
           <h3 className="text-lg font-semibold tracking-tight">{t("settings.general.personalization")}</h3>
@@ -460,7 +470,7 @@ function GeneralSettings({ token }: { token: string }) {
         <div className="grid gap-2">
           <div className="text-xs text-muted-foreground">{userPromptQuery.data?.path || "<home>/pudding.md"}</div>
           <Textarea
-            className="min-h-72 resize-y font-mono text-sm leading-6"
+            className="min-h-48 resize-y font-mono text-sm leading-6"
             disabled={userPromptQuery.isLoading}
             placeholder={t("settings.general.personalizationPlaceholder")}
             value={promptContent}
@@ -812,21 +822,21 @@ function usageHeatThresholds(days: DailyUsageStat[]) {
 
 function usageHeatClass(tokens: number, thresholds: number[]) {
   if (tokens <= 0 || thresholds.length === 0) {
-    return "bg-muted/60";
+    return "bg-slate-100 dark:bg-muted/60";
   }
   if (tokens >= thresholds[3]) {
-    return "bg-[#75a8d5]";
+    return "bg-[#2563eb] dark:bg-[#75a8d5]";
   }
   if (tokens >= thresholds[2]) {
-    return "bg-[#5f8caf]";
+    return "bg-[#3b82f6] dark:bg-[#5f8caf]";
   }
   if (tokens >= thresholds[1]) {
-    return "bg-[#466b86]";
+    return "bg-[#60a5fa] dark:bg-[#466b86]";
   }
   if (tokens >= thresholds[0]) {
-    return "bg-[#30485b]";
+    return "bg-[#93c5fd] dark:bg-[#30485b]";
   }
-  return "bg-[#263746]";
+  return "bg-[#dbeafe] dark:bg-[#263746]";
 }
 
 function usageDayTitle(day: DailyUsageStat, t: (key: string) => string) {
@@ -841,6 +851,174 @@ function formatUsageDateLabel(date: string, locale: string) {
 
 function parseUsageDate(date: string) {
   return new Date(`${date}T00:00:00`);
+}
+
+function SkillsSettings({ token }: { token: string }) {
+  const queryClient = useQueryClient();
+  const { t } = useI18n();
+  const [deletingSkill, setDeletingSkill] = useState<Skill | null>(null);
+  const skillsQuery = useQuery({
+    queryKey: queryKeys.skills(),
+    queryFn: () => listSkills(token),
+    enabled: Boolean(token),
+    staleTime: Infinity,
+  });
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteSkill(token, id),
+    onSuccess: async () => {
+      setDeletingSkill(null);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.skills() });
+      toast.success(t("settings.skills.deleted"));
+    },
+    onError: () => toast.error(t("settings.skills.deleteFailed")),
+  });
+  const skills = skillsQuery.data?.skills || [];
+
+  return (
+    <div className={SETTINGS_CONTENT_CLASS}>
+      <SettingsSection title={`${t("settings.skills.title")} (${skills.length})`}>
+        {skillsQuery.isError ? (
+          <Alert variant="destructive">
+            <AlertDescription className="grid gap-2">
+              <span>{t("settings.skills.loadFailed")}</span>
+              <Button size="sm" type="button" variant="outline" onClick={() => void skillsQuery.refetch()}>
+                {t("common.refresh")}
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        {skillsQuery.isLoading ? (
+          <SkillsSkeleton />
+        ) : (
+          <SkillList
+            deletingID={deleteMutation.isPending ? deletingSkill?.id : undefined}
+            skills={skills}
+            token={token}
+            onDelete={(skill) => setDeletingSkill(skill)}
+          />
+        )}
+      </SettingsSection>
+      <AlertDialog open={Boolean(deletingSkill)} onOpenChange={(open) => !open && setDeletingSkill(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("settings.skills.deleteTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("settings.skills.deleteDescription")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!deletingSkill || deleteMutation.isPending}
+              variant="destructive"
+              onClick={(event) => {
+                event.preventDefault();
+                if (deletingSkill) {
+                  deleteMutation.mutate(deletingSkill.id);
+                }
+              }}
+            >
+              {t("common.delete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+function SkillList({
+  deletingID,
+  onDelete,
+  skills,
+  token,
+}: {
+  deletingID?: string;
+  onDelete: (skill: Skill) => void;
+  skills: Skill[];
+  token: string;
+}) {
+  const { t } = useI18n();
+  if (skills.length === 0) {
+    return <div className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">{t("settings.skills.empty")}</div>;
+  }
+  return (
+    <ItemGroup className="gap-2">
+      {skills.map((skill) => (
+        <SkillRow
+          key={`${skill.source}:${skill.id}`}
+          deleting={deletingID === skill.id}
+          skill={skill}
+          token={token}
+          onDelete={() => onDelete(skill)}
+        />
+      ))}
+    </ItemGroup>
+  );
+}
+
+function SkillRow({ deleting, onDelete, skill, token }: { deleting?: boolean; onDelete: () => void; skill: Skill; token: string }) {
+  const { t } = useI18n();
+  const iconURL = skillIconURL(token, skill);
+  return (
+    <Item className="items-start gap-3 rounded-lg px-3 py-3" variant="outline">
+      <ItemMedia>
+        {iconURL ? (
+          <img className="size-8 rounded-md bg-muted object-cover shadow-sm" src={iconURL} alt="" />
+        ) : (
+          <div className="flex size-8 items-center justify-center rounded-md bg-muted text-foreground">
+            <BookOpenText className="size-4" strokeWidth={2.25} />
+          </div>
+        )}
+      </ItemMedia>
+      <ItemContent className="min-w-0 gap-1">
+        <ItemTitle className="flex max-w-full flex-wrap items-center gap-2">
+          <span className="min-w-0 truncate text-sm font-medium">{skill.id}</span>
+          <span className="min-w-0 truncate font-mono text-[11px] font-normal text-muted-foreground">
+            {skillDisplayPath(skill)}
+          </span>
+          <span className="rounded border border-border/70 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
+            {t(`settings.skills.source.${skill.source}`)}
+          </span>
+          <span className="rounded border border-border/70 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
+            {t("settings.skills.scope.global")}
+          </span>
+        </ItemTitle>
+        <ItemDescription className="line-clamp-2 text-xs leading-5">
+          {skill.description || t("settings.skills.noDescription")}
+        </ItemDescription>
+      </ItemContent>
+      {skill.source === "user" ? (
+        <ItemActions className="self-center opacity-0 transition-opacity group-hover/item:opacity-100 group-focus-within/item:opacity-100">
+          <Button
+            aria-label={t("common.delete")}
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+            disabled={deleting}
+            size="icon"
+            type="button"
+            variant="ghost"
+            onClick={onDelete}
+          >
+            {deleting ? <Loader2 className="animate-spin" /> : <Trash />}
+          </Button>
+        </ItemActions>
+      ) : null}
+    </Item>
+  );
+}
+
+function skillDisplayPath(skill: Skill) {
+  if (skill.source === "builtin") {
+    return `.system/${skill.id}`;
+  }
+  return `skills/${skill.id}`;
+}
+
+function SkillsSkeleton() {
+  return (
+    <div className="grid gap-2">
+      <Skeleton className="h-16" />
+      <Skeleton className="h-16" />
+    </div>
+  );
 }
 
 function ToolsSettings({ token }: { token: string }) {
@@ -888,7 +1066,7 @@ function ToolsSettings({ token }: { token: string }) {
   const saving = mutation.isPending;
 
   return (
-    <div className="@container mx-auto grid w-full max-w-6xl gap-5">
+    <div className={SETTINGS_CONTENT_CLASS}>
       <BuiltinToolsPanel
         loading={builtinToolsQuery.isFetching}
         error={builtinToolsQuery.isError}
@@ -997,7 +1175,7 @@ function MobileSettings({ token }: { token: string }) {
   }
 
   return (
-    <div className="@container mx-auto grid w-full max-w-3xl gap-5">
+    <div className={SETTINGS_CONTENT_CLASS}>
       <SettingsPanel
         action={
           <Button disabled={mutation.isPending} type="button" onClick={() => mutation.mutate()}>
@@ -1186,7 +1364,7 @@ function ProviderSettings({ createNonce = 0, token }: { createNonce?: number; to
   }
 
   return (
-    <div className="@container mx-auto grid w-full max-w-6xl gap-5">
+    <div className={SETTINGS_CONTENT_CLASS}>
       {showInlinePresets ? (
         <SettingsSection title={t("provider.addFromPreset")}>
           <ProviderPresetGrid presets={providerPresets} onSelect={selectPreset} />

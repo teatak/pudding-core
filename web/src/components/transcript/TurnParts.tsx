@@ -700,13 +700,14 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
   if (!name) {
     return fallback;
   }
-	  const known: Record<string, string> = {
-	    builtin_time_get_current: t("transcript.toolTimeCurrent"),
-	    builtin_web_fetch: t("transcript.toolWebFetch"),
-	    builtin_web_search: t("transcript.toolWebSearch"),
-	    builtin_workspace_list: t("transcript.toolWorkspaceList"),
-	    request_capability: t("transcript.toolRequestCapability"),
-	  };
+  const known: Record<string, string> = {
+    builtin_skill_read: t("transcript.toolSkillRead"),
+    builtin_time_get_current: t("transcript.toolTimeCurrent"),
+    builtin_web_fetch: t("transcript.toolWebFetch"),
+    builtin_web_search: t("transcript.toolWebSearch"),
+    builtin_workspace_list: t("transcript.toolWorkspaceList"),
+    request_capability: t("transcript.toolRequestCapability"),
+  };
   if (known[name]) {
     return known[name];
   }

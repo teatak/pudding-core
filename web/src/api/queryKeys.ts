@@ -8,6 +8,7 @@ export const queryKeys = {
   settings: () => ["settings"] as const,
   userPrompt: () => ["settings", "user-prompt"] as const,
   usageDaily: (days: number) => ["usage", "daily", days] as const,
+  skills: () => ["skills"] as const,
   builtinTools: () => ["tools", "builtin"] as const,
   webTools: () => ["tools", "web"] as const,
   providers: () => ["providers"] as const,

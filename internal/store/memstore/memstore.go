@@ -16,31 +16,33 @@ import (
 )
 
 type Memstore struct {
-	mu       sync.Mutex
-	sessions map[string]*store.Session
-	turns    map[string]*store.Turn
-	messages map[string][]*store.Message // sessionID → 时间升序
-	queued   map[string][]*store.QueuedInput
-	usage    map[usageKey]*store.UsageHourlyStat // (UTC hour unix ms, model) → global stats
-	susage   map[string]*store.SessionUsageStat  // sessionID → session stats
-	events   map[string][]event.Event            // sessionID → seq 升序
-	seq      map[string]int64
-	settings map[string]string
-	profiles map[string]*store.ProviderProfile
+	mu        sync.Mutex
+	sessions  map[string]*store.Session
+	turns     map[string]*store.Turn
+	messages  map[string][]*store.Message // sessionID → 时间升序
+	queued    map[string][]*store.QueuedInput
+	usage     map[usageKey]*store.UsageHourlyStat // (UTC hour unix ms, model) → global stats
+	susage    map[string]*store.SessionUsageStat  // sessionID → session stats
+	appGrants map[string][]*store.SessionAppGrant // sessionID → grants
+	events    map[string][]event.Event            // sessionID → seq 升序
+	seq       map[string]int64
+	settings  map[string]string
+	profiles  map[string]*store.ProviderProfile
 }
 
 func New() *Memstore {
 	return &Memstore{
-		sessions: make(map[string]*store.Session),
-		turns:    make(map[string]*store.Turn),
-		messages: make(map[string][]*store.Message),
-		queued:   make(map[string][]*store.QueuedInput),
-		usage:    make(map[usageKey]*store.UsageHourlyStat),
-		susage:   make(map[string]*store.SessionUsageStat),
-		events:   make(map[string][]event.Event),
-		seq:      make(map[string]int64),
-		settings: make(map[string]string),
-		profiles: make(map[string]*store.ProviderProfile),
+		sessions:  make(map[string]*store.Session),
+		turns:     make(map[string]*store.Turn),
+		messages:  make(map[string][]*store.Message),
+		queued:    make(map[string][]*store.QueuedInput),
+		usage:     make(map[usageKey]*store.UsageHourlyStat),
+		susage:    make(map[string]*store.SessionUsageStat),
+		appGrants: make(map[string][]*store.SessionAppGrant),
+		events:    make(map[string][]event.Event),
+		seq:       make(map[string]int64),
+		settings:  make(map[string]string),
+		profiles:  make(map[string]*store.ProviderProfile),
 	}
 }
 
@@ -178,6 +180,7 @@ func (m *Memstore) DeleteSession(_ context.Context, id string) error {
 	delete(m.messages, id)
 	delete(m.queued, id)
 	delete(m.susage, id)
+	delete(m.appGrants, id)
 	delete(m.events, id)
 	delete(m.seq, id)
 	for tid, t := range m.turns {
@@ -784,6 +787,69 @@ func (m *Memstore) SessionUsage(_ context.Context, sessionID string) (*store.Ses
 	return cloneSessionUsageStat(stat), nil
 }
 
+func (m *Memstore) PutSessionAppGrant(_ context.Context, grant *store.SessionAppGrant) (*store.SessionAppGrant, error) {
+	if err := store.NormalizeSessionAppGrant(grant); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[grant.SessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	now := time.Now()
+	grants := m.appGrants[grant.SessionID]
+	for i, existing := range grants {
+		if existing.AppID == grant.AppID && existing.ConnectionID == grant.ConnectionID {
+			cp := cloneSessionAppGrant(grant)
+			cp.CreatedAt = existing.CreatedAt
+			cp.UpdatedAt = now
+			grants[i] = cp
+			return cloneSessionAppGrant(cp), nil
+		}
+	}
+	cp := cloneSessionAppGrant(grant)
+	cp.CreatedAt = now
+	cp.UpdatedAt = now
+	m.appGrants[grant.SessionID] = append(grants, cp)
+	return cloneSessionAppGrant(cp), nil
+}
+
+func (m *Memstore) ListSessionAppGrants(_ context.Context, sessionID string) ([]*store.SessionAppGrant, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[sessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	grants := m.appGrants[sessionID]
+	out := make([]*store.SessionAppGrant, 0, len(grants))
+	for _, grant := range grants {
+		out = append(out, cloneSessionAppGrant(grant))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].AppID != out[j].AppID {
+			return out[i].AppID < out[j].AppID
+		}
+		return out[i].ConnectionID < out[j].ConnectionID
+	})
+	return out, nil
+}
+
+func (m *Memstore) DeleteSessionAppGrant(_ context.Context, sessionID, appID, connectionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[sessionID]; !ok {
+		return store.ErrNotFound
+	}
+	grants := m.appGrants[sessionID]
+	for i, grant := range grants {
+		if grant.AppID == appID && grant.ConnectionID == connectionID {
+			m.appGrants[sessionID] = append(grants[:i], grants[i+1:]...)
+			return nil
+		}
+	}
+	return store.ErrNotFound
+}
+
 // appendEventLocked 追加事件并按保留窗口滚动清理;调用方必须已持锁。
 func (m *Memstore) appendEventLocked(sessionID string, ev event.Event) {
 	evs := append(m.events[sessionID], ev)
@@ -1160,6 +1226,17 @@ func cloneSessionUsageStat(stat *store.SessionUsageStat) *store.SessionUsageStat
 		return nil
 	}
 	cp := *stat
+	return &cp
+}
+
+func cloneSessionAppGrant(grant *store.SessionAppGrant) *store.SessionAppGrant {
+	if grant == nil {
+		return nil
+	}
+	cp := *grant
+	cp.AllowedEndpoints = append([]string(nil), grant.AllowedEndpoints...)
+	cp.Permissions = append([]string(nil), grant.Permissions...)
+	cp.Constraints = append([]byte(nil), grant.Constraints...)
 	return &cp
 }
 

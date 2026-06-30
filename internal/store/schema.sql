@@ -87,6 +87,18 @@ CREATE TABLE IF NOT EXISTS session_usage (
     updated_at                         INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS session_app_grants (
+    session_id        TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    app_id            TEXT    NOT NULL,
+    connection_id     TEXT    NOT NULL,
+    allowed_endpoints TEXT    NOT NULL DEFAULT '[]',
+    permissions       TEXT    NOT NULL DEFAULT '[]',
+    constraints       TEXT    NOT NULL DEFAULT '{}',
+    created_at        INTEGER NOT NULL,
+    updated_at        INTEGER NOT NULL,
+    PRIMARY KEY (session_id, app_id, connection_id)
+);
+
 CREATE TABLE IF NOT EXISTS messages (
     id                TEXT PRIMARY KEY,
     session_id        TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

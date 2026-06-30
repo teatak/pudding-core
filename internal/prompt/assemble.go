@@ -6,9 +6,12 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/teatak/pudding-core/internal/skill"
 )
 
 const defaultUserPromptName = "pudding.md"
@@ -34,6 +37,7 @@ type Segment struct {
 type Input struct {
 	UserInstruction string
 	Mode            string
+	Skills          []skill.Skill
 }
 
 type Output struct {
@@ -42,28 +46,45 @@ type Output struct {
 }
 
 type Loader struct {
-	home string
+	home   string
+	skills SkillLister
 }
 
 func NewLoader(home string) *Loader {
-	return &Loader{home: home}
+	return &Loader{home: home, skills: skill.NewService(home)}
 }
 
-func (l *Loader) Prompt(_ context.Context, mode string) (Output, error) {
+type SkillLister interface {
+	ListSkills(ctx context.Context) ([]skill.Skill, error)
+}
+
+func (l *Loader) Prompt(ctx context.Context, mode string) (Output, error) {
 	user, err := LoadUserInstruction(l.home)
 	if err != nil {
 		return Output{}, err
 	}
-	return Assemble(Input{UserInstruction: user, Mode: mode}), nil
+	var skills []skill.Skill
+	if l.skills != nil {
+		loaded, err := l.skills.ListSkills(ctx)
+		if err != nil {
+			slog.Warn("prompt: load skills failed", "error", err)
+		} else {
+			skills = loaded
+		}
+	}
+	return Assemble(Input{UserInstruction: user, Mode: mode, Skills: skills}), nil
 }
 
 func Assemble(input Input) Output {
-	segments := make([]Segment, 0, 3)
+	segments := make([]Segment, 0, 4)
 	if core := strings.TrimSpace(coreSystemPrompt); core != "" {
 		segments = append(segments, Segment{ID: "core_system", Layer: "core", Content: core})
 	}
 	if mode := strings.TrimSpace(modePrompt(input.Mode)); mode != "" {
 		segments = append(segments, Segment{ID: "mode_" + normalizeMode(input.Mode), Layer: "mode", Content: mode})
+	}
+	if seg := skillsSegment(input.Skills); seg != nil {
+		segments = append(segments, *seg)
 	}
 	if user := strings.TrimSpace(input.UserInstruction); user != "" {
 		segments = append(segments, Segment{
@@ -82,6 +103,40 @@ func Assemble(input Input) Output {
 		}
 	}
 	return Output{SystemInstruction: strings.Join(parts, "\n\n"), Segments: segments}
+}
+
+func skillsSegment(list []skill.Skill) *Segment {
+	if len(list) == 0 {
+		return nil
+	}
+	var b strings.Builder
+	b.WriteString("## Available Skills\n\n")
+	b.WriteString("Registered global skills are listed below with their trigger descriptions.\n")
+	b.WriteString("Full SKILL.md bodies are not loaded by default. Load a skill only when the user's intent clearly matches its description.\n")
+	b.WriteString("When a skill matches, call `builtin_skill_read(skill_id=\"<id>\")` once, then follow the returned SKILL.md instructions.\n")
+	b.WriteString("Do not proactively load untriggered skills.\n\n")
+	for _, item := range list {
+		id := strings.TrimSpace(item.ID)
+		desc := strings.TrimSpace(item.Description)
+		if id == "" || desc == "" {
+			continue
+		}
+		source := strings.TrimSpace(item.Source)
+		if source == "" {
+			source = "unknown"
+		}
+		path := strings.TrimSpace(item.Path)
+		if path != "" {
+			fmt.Fprintf(&b, "- `%s` (%s, path: `%s`) — %s\n", id, source, path, desc)
+		} else {
+			fmt.Fprintf(&b, "- `%s` (%s) — %s\n", id, source, desc)
+		}
+	}
+	content := strings.TrimSpace(b.String())
+	if content == "" {
+		return nil
+	}
+	return &Segment{ID: "skills_index", Layer: "skill", Content: content}
 }
 
 func modePrompt(mode string) string {
