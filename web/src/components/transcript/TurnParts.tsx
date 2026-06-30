@@ -17,6 +17,7 @@ import { type ContentPart, type Message } from "@/api/client";
 import { PhaseDot } from "@/components/PhaseDot";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
+import { cn } from "@/lib/utils";
 import { getShikiCodeRenderer, type CodeBlockRenderer } from "@/lib/shiki";
 import type { AssistantOverlay, AssistantOverlayPart, TurnPhaseState } from "@/state/overlayStore";
 
@@ -404,28 +405,31 @@ function ToolUsePart({
   const dotPhase = part.dotPhase || (failed ? "error" : toolPhaseDot(part.phase));
   const title = toolTitle(part, liveResult, baseTitle, elapsed, t);
   const copyText = toolCopyText(part, args, liveResult, baseTitle, t);
+  const toneClass = failed ? "text-destructive" : "text-muted-foreground";
+  const summaryClass = failed ? "text-destructive/70" : "text-muted-foreground/50";
+  const hoverClass = failed ? "hover:text-destructive" : "hover:text-foreground";
   if (!showDetails) {
     return (
-      <div className="grid h-6 w-full grid-cols-[0.75rem_minmax(0,1fr)] items-center gap-1 pr-1 text-[12px] leading-[1.5] text-muted-foreground">
+      <div className={cn("grid h-6 w-full grid-cols-[0.75rem_minmax(0,1fr)] items-center gap-1 pr-1 text-[12px] leading-[1.5]", toneClass)}>
         <span className="relative z-[1] inline-flex h-6 w-3 shrink-0 items-center justify-center opacity-90">
           <PhaseDot active={active} phase={dotPhase} size="md" />
         </span>
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="shrink-0 truncate">{title.label}</span>
-          {title.summary ? <span className="min-w-0 truncate text-muted-foreground/50">{title.summary}</span> : null}
+          {title.summary ? <span className={cn("min-w-0 truncate", summaryClass)}>{title.summary}</span> : null}
         </span>
       </div>
     );
   }
   return (
     <details
-      className="relative text-[12px] leading-[1.5] text-muted-foreground"
+      className={cn("relative text-[12px] leading-[1.5]", toneClass)}
       open={open}
       onToggle={handleToggle}
     >
       {open ? <span aria-hidden="true" className="pointer-events-none absolute top-6 bottom-0 left-[6px] border-l border-border" /> : null}
       <summary
-        className="inline-grid h-6 cursor-default list-none grid-cols-[0.75rem_auto] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden"
+        className={cn("inline-grid h-6 cursor-default list-none grid-cols-[0.75rem_auto] items-center gap-1 pr-1 outline-none [&::-webkit-details-marker]:hidden", hoverClass)}
         onClick={handleSummaryClick}
         onKeyDown={handleSummaryKeyDown}
       >
@@ -434,8 +438,8 @@ function ToolUsePart({
         </span>
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="shrink-0 truncate">{title.label}</span>
-          {title.summary ? <span className="min-w-0 truncate text-muted-foreground/50">{title.summary}</span> : null}
-          <span className="shrink-0 text-muted-foreground/50">
+          {title.summary ? <span className={cn("min-w-0 truncate", summaryClass)}>{title.summary}</span> : null}
+          <span className={cn("shrink-0", summaryClass)}>
             {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
           </span>
         </span>
@@ -443,12 +447,23 @@ function ToolUsePart({
       <div className="ml-[5px] py-1 pl-2">
         <div className="relative rounded-md border border-border/50 bg-muted/20 p-2 pr-9">
           <ToolCopyButton text={copyText} />
+          {part.name || part.resultName ? <ToolNameLine name={part.name || part.resultName || ""} /> : null}
           {args ? <ToolDetailBlock label={t("transcript.toolArgs")} text={args} /> : null}
           {liveResult ? <ToolDetailBlock label={t("transcript.toolResult")} text={liveResult.text} /> : null}
           {!args && !liveResult ? <div className="leading-5">{title.summary || title.label}</div> : null}
         </div>
       </div>
     </details>
+  );
+}
+
+function ToolNameLine({ name }: { name: string }) {
+  const { t } = useI18n();
+  return (
+    <div className="mb-2 flex min-w-0 items-center gap-2 text-[11px] leading-5">
+      <span className="font-medium text-muted-foreground/80">{t("transcript.tool")}</span>
+      <code className="min-w-0 truncate rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">{name}</code>
+    </div>
   );
 }
 
@@ -701,7 +716,15 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     return fallback;
   }
   const known: Record<string, string> = {
+    builtin_file_delete: t("transcript.toolFileDelete"),
+    builtin_file_list: t("transcript.toolFileList"),
+    builtin_file_move: t("transcript.toolFileMove"),
+    builtin_file_patch: t("transcript.toolFilePatch"),
+    builtin_file_read: t("transcript.toolFileRead"),
+    builtin_file_write: t("transcript.toolFileWrite"),
     builtin_skill_read: t("transcript.toolSkillRead"),
+    builtin_skill_submit: t("transcript.toolSkillSubmit"),
+    builtin_skill_validate: t("transcript.toolSkillValidate"),
     builtin_time_get_current: t("transcript.toolTimeCurrent"),
     builtin_web_fetch: t("transcript.toolWebFetch"),
     builtin_web_search: t("transcript.toolWebSearch"),
@@ -730,15 +753,19 @@ function toolTitle(
       summary: elapsed,
     };
   }
-	  if (toolFailed(part)) {
-	    const capabilitySummary = capabilityToolSummary(part, result, t);
-	    return { label: baseTitle, summary: capabilitySummary || t("transcript.toolFailed") };
-	  }
-	  const capabilitySummary = capabilityToolSummary(part, result, t);
-	  if (capabilitySummary) {
-	    return { label: baseTitle, summary: capabilitySummary };
-	  }
-	  const summary = toolProtocolSummary(part, t);
+  if (toolFailed(part)) {
+    const unknownName = unknownToolName(part, result);
+    if (unknownName) {
+      return { label: t("transcript.toolUnknown"), summary: unknownName };
+    }
+    const capabilitySummary = capabilityToolSummary(part, result, t);
+    return { label: baseTitle, summary: capabilitySummary || t("transcript.toolFailed") };
+  }
+  const capabilitySummary = capabilityToolSummary(part, result, t);
+  if (capabilitySummary) {
+    return { label: baseTitle, summary: capabilitySummary };
+  }
+  const summary = toolProtocolSummary(part, t);
   if (summary) {
     return { label: baseTitle, summary };
   }
@@ -747,6 +774,19 @@ function toolTitle(
     return { label: baseTitle, summary: structuralSummary };
   }
   return { label: baseTitle, summary: "" };
+}
+
+function unknownToolName(part: Extract<TurnPartVM, { type: "tool_use" }>, result: ReturnType<typeof formatToolResult>) {
+  const value = result?.value;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return "";
+  }
+  const record = value as Record<string, unknown>;
+  if (record.reason !== "unknown_tool") {
+    return "";
+  }
+  const toolName = typeof record.tool === "string" ? record.tool : "";
+  return toolName || part.name || part.resultName || "";
 }
 
 function capabilityToolSummary(

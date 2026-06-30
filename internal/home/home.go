@@ -31,7 +31,7 @@ func Resolve(flagValue string) (string, error) {
 
 // Prepare 创建 home 目录结构。
 func Prepare(dir string) error {
-	for _, d := range []string{dir, filepath.Join(dir, "data"), filepath.Join(dir, "config"), filepath.Join(dir, "logs"), filepath.Join(dir, "apps"), filepath.Join(dir, "skills")} {
+	for _, d := range []string{dir, filepath.Join(dir, "data"), filepath.Join(dir, "config"), filepath.Join(dir, "logs"), filepath.Join(dir, "apps"), filepath.Join(dir, "skills"), filepath.Join(dir, "skills-draft"), filepath.Join(dir, "temp")} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return fmt.Errorf("home: mkdir %s: %w", d, err)
 		}
@@ -60,3 +60,7 @@ func MobileDevicesPath(dir string) string { return filepath.Join(dir, "config", 
 func AppsPath(dir string) string { return filepath.Join(dir, "apps") }
 
 func SkillsPath(dir string) string { return filepath.Join(dir, "skills") }
+
+func SkillsDraftPath(dir string) string { return filepath.Join(dir, "skills-draft") }
+
+func TempPath(dir string) string { return filepath.Join(dir, "temp") }

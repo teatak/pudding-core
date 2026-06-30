@@ -16,16 +16,18 @@ import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 
-import { APIError, approveApproval, cancelTurn, compactSession, denyApproval, getTurn, submitMessage, updateSession, type Session } from "@/api/client";
+import { APIError, approveApproval, cancelTurn, compactSession, denyApproval, getTurn, submitMessage, updateSession, type Session, type SkillDraft } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
 import { ContextUsageRing } from "@/components/ContextUsageRing";
 import { Mascot, type MascotGaze, type MascotGazePoint, type MascotMood } from "@/components/Mascot";
+import { SkillDraftDiffDialog } from "@/components/SkillDraftDiffDialog";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
 import { type ResolvedModelSelection } from "@/components/ModelPicker";
 import { reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useImeCompositionGuard } from "@/hooks/useImeCompositionGuard";
@@ -615,6 +617,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
                 <TooltipContent>{t("composer.attach")}</TooltipContent>
               </Tooltip>
               <CapabilityBadge mode={currentMode} />
+              {currentMode === "workspace" ? <WorkspaceDirsControl session={session} token={token} /> : null}
               {compactMutation.isPending ? (
                 <span
                   aria-live="polite"
@@ -897,19 +900,150 @@ function CapabilityBadge({ mode }: { mode: Session["activeMode"] }) {
   );
 }
 
+function WorkspaceDirsControl({ session, token }: { session: Session; token: string }) {
+  const queryClient = useQueryClient();
+  const { t } = useI18n();
+  const [picking, setPicking] = useState(false);
+  const [savingDir, setSavingDir] = useState("");
+  const dirs = session.workspaceDirs || [];
+  const title = dirs.length > 0
+    ? t("composer.workspaceDirsCount").replace("{count}", String(dirs.length))
+    : t("composer.workspaceDirsEmpty");
+
+  async function saveWorkspaceDirs(nextDirs: string[]) {
+    const normalized = dedupeStrings(nextDirs.map((dir) => dir.trim()).filter(Boolean));
+    setSavingDir("__all__");
+    try {
+      const updated = await updateSession(token, session.id, { workspaceDirs: normalized });
+      updateSessionInCache(queryClient, updated);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+    } catch {
+      toast.error(t("composer.workspaceDirsSaveFailed"));
+    } finally {
+      setSavingDir("");
+    }
+  }
+
+  async function addWorkspaceDirs() {
+    if (picking || savingDir) {
+      return;
+    }
+    setPicking(true);
+    try {
+      const picked = await pickWorkspaceDirectories(t);
+      if (picked.length > 0) {
+        await saveWorkspaceDirs([...dirs, ...picked]);
+      }
+    } catch {
+      toast.error(t("transcript.approvalWorkspaceDirPickFailed"));
+    } finally {
+      setPicking(false);
+    }
+  }
+
+  async function removeWorkspaceDir(dir: string) {
+    if (savingDir) {
+      return;
+    }
+    setSavingDir(dir);
+    try {
+      const updated = await updateSession(token, session.id, { workspaceDirs: dirs.filter((item) => item !== dir) });
+      updateSessionInCache(queryClient, updated);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+    } catch {
+      toast.error(t("composer.workspaceDirsSaveFailed"));
+    } finally {
+      setSavingDir("");
+    }
+  }
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          aria-label={title}
+          className={cn(
+            "size-6 rounded-full border-0 bg-transparent text-muted-foreground hover:text-foreground",
+            dirs.length === 0 && "text-warning hover:text-warning",
+          )}
+          size="icon-xs"
+          title={title}
+          type="button"
+          variant="ghost"
+        >
+          <FolderOpen className="size-3.5" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="grid w-[min(24rem,calc(100vw-2rem))] gap-2 p-2.5" side="top" sideOffset={8}>
+        <div className="grid gap-0.5">
+          <div className="text-sm font-medium">{t("composer.workspaceDirsTitle")}</div>
+          <div className="text-xs leading-5 text-muted-foreground">{t("composer.workspaceDirsDesc")}</div>
+        </div>
+        {dirs.length > 0 ? (
+          <div className="grid max-h-40 gap-1 overflow-y-auto rounded-md border bg-background/70 p-1.5">
+            {dirs.map((dir) => (
+              <div key={dir} className="flex min-w-0 items-center gap-1 rounded px-1.5 py-1 text-xs" title={dir}>
+                <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground">{formatWorkspaceDirLabel(dir)}</span>
+                <Button
+                  aria-label={t("common.delete")}
+                  className="size-6 shrink-0 text-muted-foreground hover:text-destructive"
+                  disabled={Boolean(savingDir)}
+                  size="icon-xs"
+                  type="button"
+                  variant="ghost"
+                  onClick={() => void removeWorkspaceDir(dir)}
+                >
+                  {savingDir === dir ? <Loader2 className="size-3 animate-spin" /> : <X className="size-3" />}
+                </Button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-md border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">{t("composer.workspaceDirsNone")}</div>
+        )}
+        <Button
+          className="h-8 gap-1.5 rounded-full px-3 text-xs"
+          disabled={picking || Boolean(savingDir)}
+          size="sm"
+          type="button"
+          variant="secondary"
+          onClick={() => void addWorkspaceDirs()}
+        >
+          {picking || savingDir === "__all__" ? <Loader2 className="size-3 animate-spin" /> : <FolderOpen className="size-3.5" />}
+          {t("composer.workspaceDirsAdd")}
+        </Button>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function updateSessionInCache(queryClient: ReturnType<typeof useQueryClient>, updated: Session) {
+  queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), (previous) => {
+    if (!previous) {
+      return previous;
+    }
+    return {
+      sessions: previous.sessions.map((item) => (item.id === updated.id ? updated : item)),
+    };
+  });
+}
+
 function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval; token: string }) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const [pendingAction, setPendingAction] = useState<"turn" | "session" | "deny" | null>(null);
   const [selectedWorkspaceDirs, setSelectedWorkspaceDirs] = useState<string[]>([]);
   const [pickingWorkspaceDir, setPickingWorkspaceDir] = useState(false);
+  const [viewingSkillDraft, setViewingSkillDraft] = useState<SkillDraft | null>(null);
   useEffect(() => {
     setSelectedWorkspaceDirs([]);
+    setViewingSkillDraft(null);
   }, [approval?.approvalID]);
   if (!approval) {
     return null;
   }
   const current = approval;
+  const isSkillDraftApproval = current.approvalKind === "skill_draft";
   const targetMode = approvalTargetMode(current.payload);
   const title = approvalTitle(current, targetMode, t);
   const pending = pendingAction !== null;
@@ -917,11 +1051,12 @@ function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval;
   const payloadWorkspaceDirs = workspaceDirsFromPayload(current.payload);
   const hasPayloadWorkspaceDirs = payloadWorkspaceDirs.length > 0;
   const workspaceDirs = hasPayloadWorkspaceDirs ? payloadWorkspaceDirs : selectedWorkspaceDirs;
-  const needsWorkspaceDir = isWorkspaceApproval && workspaceDirs.length === 0;
   const suggestedDirName = suggestedWorkspaceDirName(current.payload);
+  const skillDraftApproval = skillDraftFromPayload(current.payload);
+  const skillDraft = skillDraftApproval?.draft || null;
 
   async function approve(scope: "turn" | "session") {
-    if (pending || needsWorkspaceDir) {
+    if (pending) {
       return;
     }
     setPendingAction(scope);
@@ -929,6 +1064,13 @@ function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval;
       await approveApproval(token, current.sessionID, current.approvalID, scope, isWorkspaceApproval ? workspaceDirs : []);
       if (scope === "session") {
         await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      }
+      if (isSkillDraftApproval) {
+        setViewingSkillDraft(null);
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: queryKeys.skills() }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.skillDrafts() }),
+        ]);
       }
     } finally {
       setPendingAction(null);
@@ -963,6 +1105,7 @@ function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval;
     setPendingAction("deny");
     try {
       await denyApproval(token, current.sessionID, current.approvalID);
+      setViewingSkillDraft(null);
     } finally {
       setPendingAction(null);
     }
@@ -975,7 +1118,18 @@ function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval;
         <span className="min-w-0 truncate font-medium">{title}</span>
       </div>
       {current.reason ? <div className="line-clamp-2 leading-5 text-muted-foreground">{current.reason}</div> : null}
-      {isWorkspaceApproval ? (
+      {isSkillDraftApproval && skillDraft ? (
+        <div className="grid gap-1 rounded-md border border-border/70 bg-background/70 px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
+          <div className="flex min-w-0 items-center gap-1">
+            <span className="shrink-0 font-medium text-foreground">{skillDraft.id}</span>
+            {skillDraft.path ? <span className="min-w-0 truncate font-mono">{skillDraft.path}</span> : null}
+          </div>
+          {typeof skillDraftApproval?.fileCount === "number" ? (
+            <div>{t("transcript.approvalSkillDraftFiles").replace("{count}", String(skillDraftApproval.fileCount))}</div>
+          ) : null}
+        </div>
+      ) : null}
+      {!isSkillDraftApproval && isWorkspaceApproval ? (
         <div className="grid gap-1">
           <div className="text-[11px] font-medium text-muted-foreground">
             {t("transcript.approvalWorkspaceDirs")}
@@ -1015,31 +1169,57 @@ function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval;
               {suggestedDirName ? <span className="text-[11px] text-muted-foreground">{t("transcript.approvalWorkspaceDirsSuggested").replace("{name}", suggestedDirName)}</span> : null}
             </div>
           ) : null}
-          {needsWorkspaceDir ? <div className="text-[11px] text-destructive">{t("transcript.approvalWorkspaceDirsRequired")}</div> : null}
         </div>
       ) : null}
       <div className="flex flex-wrap items-center gap-1.5">
-        <Button
-          className="h-6 gap-1 rounded-full px-2 text-[11px]"
-          disabled={pending || needsWorkspaceDir}
-          size="sm"
-          type="button"
-          onClick={() => void approve("turn")}
-        >
-          {pendingAction === "turn" ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
-          {t("transcript.approvalAllowTurn")}
-        </Button>
-        <Button
-          className="h-6 gap-1 rounded-full px-2 text-[11px]"
-          disabled={pending || needsWorkspaceDir}
-          size="sm"
-          type="button"
-          variant="secondary"
-          onClick={() => void approve("session")}
-        >
-          {pendingAction === "session" ? <Loader2 className="size-3 animate-spin" /> : <ShieldCheck className="size-3" />}
-          {t("transcript.approvalAllowSession")}
-        </Button>
+        {isSkillDraftApproval ? (
+          <>
+            <Button
+              className="h-6 gap-1 rounded-full px-2 text-[11px]"
+              disabled={pending || !skillDraft}
+              size="sm"
+              type="button"
+              variant="secondary"
+              onClick={() => skillDraft && setViewingSkillDraft(skillDraft)}
+            >
+              {t("settings.skills.viewDiff")}
+            </Button>
+            <Button
+              className="h-6 gap-1 rounded-full px-2 text-[11px]"
+              disabled={pending}
+              size="sm"
+              type="button"
+              onClick={() => void approve("turn")}
+            >
+              {pendingAction === "turn" ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
+              {t("transcript.approvalPublishSkillDraft")}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button
+              className="h-6 gap-1 rounded-full px-2 text-[11px]"
+              disabled={pending}
+              size="sm"
+              type="button"
+              onClick={() => void approve("turn")}
+            >
+              {pendingAction === "turn" ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
+              {t("transcript.approvalAllowTurn")}
+            </Button>
+            <Button
+              className="h-6 gap-1 rounded-full px-2 text-[11px]"
+              disabled={pending}
+              size="sm"
+              type="button"
+              variant="secondary"
+              onClick={() => void approve("session")}
+            >
+              {pendingAction === "session" ? <Loader2 className="size-3 animate-spin" /> : <ShieldCheck className="size-3" />}
+              {t("transcript.approvalAllowSession")}
+            </Button>
+          </>
+        )}
         <Button
           className="h-6 gap-1 rounded-full px-1.5 text-[11px]"
           disabled={pending}
@@ -1052,6 +1232,15 @@ function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval;
           {t("transcript.approvalDeny")}
         </Button>
       </div>
+      <SkillDraftDiffDialog
+        applying={pendingAction === "turn"}
+        draft={viewingSkillDraft}
+        rejecting={pendingAction === "deny"}
+        token={token}
+        onApply={() => void approve("turn")}
+        onOpenChange={(open) => !open && setViewingSkillDraft(null)}
+        onReject={() => void deny()}
+      />
     </div>
   );
 }
@@ -1077,10 +1266,17 @@ function selectPendingApproval(assistants: Record<string, AssistantOverlay>, ses
 }
 
 function firstPendingApproval(overlay: AssistantOverlay | undefined): ComposerApproval | undefined {
-  if (!overlay || overlay.status !== "streaming") {
+  if (!overlay) {
     return undefined;
   }
-  return overlay.parts.find(isPendingApprovalPart);
+  const approval = overlay.parts.find(isPendingApprovalPart);
+  if (!approval) {
+    return undefined;
+  }
+  if (overlay.status === "streaming" || approval.approvalKind === "skill_draft") {
+    return approval;
+  }
+  return undefined;
 }
 
 function isPendingApprovalPart(part: AssistantOverlayPart): part is ComposerApproval {
@@ -1108,8 +1304,45 @@ function suggestedWorkspaceDirName(payload: unknown) {
   return "";
 }
 
+function skillDraftFromPayload(payload: unknown) {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  const data = payload as Record<string, unknown>;
+  const draft = data.draft && typeof data.draft === "object" ? (data.draft as Record<string, unknown>) : {};
+  const id = typeof data.draft_id === "string" ? data.draft_id.trim() : typeof draft.id === "string" ? draft.id.trim() : "";
+  const path = typeof draft.path === "string" ? draft.path.trim() : "";
+  const description = typeof draft.description === "string" ? draft.description : "";
+  const change: SkillDraft["change"] = draft.change === "modified" ? "modified" : "added";
+  const validation = draft.validation && typeof draft.validation === "object" ? (draft.validation as SkillDraft["validation"]) : { ok: true };
+  const fileCount = typeof data.fileCount === "number" ? data.fileCount : undefined;
+  if (!id) {
+    return null;
+  }
+  return {
+    draft: {
+      change,
+      description,
+      id,
+      name: typeof draft.name === "string" ? draft.name : id,
+      path,
+      validation,
+    },
+    fileCount,
+  };
+}
+
 function dedupeStrings(values: string[]) {
   return values.filter((value, index) => values.indexOf(value) === index);
+}
+
+function formatWorkspaceDirLabel(dir: string) {
+  const normalized = dir.trim().replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts.length <= 3) {
+    return dir;
+  }
+  return `.../${parts.slice(-3).join("/")}`;
 }
 
 async function pickWorkspaceDirectories(t: (key: string) => string) {
@@ -1128,6 +1361,9 @@ async function pickWorkspaceDirectories(t: (key: string) => string) {
 }
 
 function approvalTitle(approval: ComposerApproval, targetMode: string, t: (key: string) => string) {
+  if (approval.approvalKind === "skill_draft") {
+    return t("transcript.approvalSkillDraftTitle");
+  }
   if (approval.approvalKind === "capability") {
     const mode = targetMode ? t(`mode.${targetMode}`) : "";
     if (mode) {

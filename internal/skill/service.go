@@ -119,11 +119,18 @@ func (s *Service) ReadAsset(_ context.Context, rel string) ([]byte, string, erro
 	parts := strings.Split(rel, "/")
 	offset := 0
 	system := false
+	draft := false
 	if parts[0] == SystemSubdir {
 		if len(parts) != 4 {
 			return nil, "", ErrInvalidAsset
 		}
 		system = true
+		offset = 1
+	} else if parts[0] == DraftDirName {
+		if len(parts) != 4 {
+			return nil, "", ErrInvalidAsset
+		}
+		draft = true
 		offset = 1
 	} else if len(parts) != 3 {
 		return nil, "", ErrInvalidAsset
@@ -150,7 +157,11 @@ func (s *Service) ReadAsset(_ context.Context, rel string) ([]byte, string, erro
 	if s.homeDir == "" {
 		return nil, "", ErrInvalidAsset
 	}
-	data, err := os.ReadFile(filepath.Join(s.homeDir, "skills", id, "assets", name))
+	root := "skills"
+	if draft {
+		root = DraftDirName
+	}
+	data, err := os.ReadFile(filepath.Join(s.homeDir, root, id, "assets", name))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, "", ErrInvalidAsset

@@ -150,8 +150,8 @@ func TestBuildFiltersToolPartsOutsideMode(t *testing.T) {
 		TurnID: "t1",
 		Status: store.TurnCompleted,
 		AssistantParts: []store.ContentPart{
-			{Type: store.ContentPartToolUse, CallID: "call_1", Name: tool.WebSearch, Args: []byte(`{"query":"北京天气"}`)},
-			{Type: store.ContentPartToolResult, CallID: "call_1", Name: tool.WebSearch, Ok: true, Content: `{"answer":"sunny"}`},
+			{Type: store.ContentPartToolUse, CallID: "call_1", Name: tool.RESTRequest, Args: []byte(`{"endpoint":"github_rest","path":"/user"}`)},
+			{Type: store.ContentPartToolResult, CallID: "call_1", Name: tool.RESTRequest, Ok: true, Content: `{"login":"pudding"}`},
 			{Type: store.ContentPartText, Text: "sunny"},
 		},
 	}); err != nil {

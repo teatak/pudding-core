@@ -26,6 +26,15 @@ Global user skills live here:
 <home>/skills/<name>/assets/icon.svg
 ```
 
+LLM-created or LLM-edited skills must be drafted first:
+
+```text
+<home>/skills-draft/<name>/SKILL.md
+<home>/skills-draft/<name>/assets/icon.svg
+```
+
+Only the user can publish a draft from Settings > Knowledge. Do not write directly to `<home>/skills/` unless the user explicitly asks to bypass the review flow outside the normal app behavior.
+
 System skills are bundled in the binary and appear as `.system/<name>` in the UI. Do not edit or overwrite system skills.
 
 At runtime Pudding injects only the skills index (`name`, `description`, path/source metadata) into the system prompt. The full `SKILL.md` body is loaded on demand with `builtin_skill_read(skill_id="<name>")` when the user's intent matches the description.
@@ -34,15 +43,32 @@ At runtime Pudding injects only the skills index (`name`, `description`, path/so
 
 1. Align on intent: confirm what problem the skill solves and what the user would normally say that should trigger it.
 2. Choose a name: use lowercase kebab-case with letters, numbers, and hyphens only.
-3. Create the skill directory under `<home>/skills/<name>/`.
+3. Create or update the draft directory under `<home>/skills-draft/<name>/`.
 4. Write `SKILL.md` with YAML frontmatter plus concise operational instructions.
 5. Add `assets/icon.svg` by default unless the user explicitly says not to.
-6. Validate manually:
-   - `SKILL.md` exists.
-   - Frontmatter has `name` and `description`.
-   - Directory name matches the frontmatter name.
-   - Body contains useful instructions.
-7. Tell the user where the skill was written and refresh the Settings skills list.
+6. Call `builtin_skill_validate` with `draft_id`.
+7. Fix validation errors by editing the draft.
+8. Call `builtin_skill_submit` so the draft appears in Settings for user review.
+9. Tell the user the draft is ready to review in Settings > Knowledge.
+
+## Available Draft Tools
+
+- Use `builtin_file_list` to inspect `scope="skill_draft"` or `scope="skill_published"`; pass `path="."` to list a scope root.
+- Use `builtin_file_read` to inspect existing draft or published files.
+- Use `builtin_file_write` to create or overwrite draft files.
+- Use `builtin_file_patch` for precise draft edits.
+- Use `builtin_file_delete` and `builtin_file_move` only inside `skill_draft` when needed.
+- Use `builtin_skill_validate` before submission.
+- Use `builtin_skill_submit` after validation passes.
+
+The `skill_published` scope is read-only. Publishing is done by the user in Settings, not by a tool call.
+
+When updating an existing skill, the draft is incremental:
+
+- Write only files that actually change under `skill_draft/<name>/...`.
+- Unmentioned published files such as `assets/icon.svg` are preserved automatically.
+- Use `builtin_file_delete` only when the user explicitly wants to remove a published file; it records the deletion in the draft.
+- Use `builtin_file_patch` when editing a published text file; it copies only that file into the draft and applies the patch.
 
 ## Minimal SKILL.md Template
 

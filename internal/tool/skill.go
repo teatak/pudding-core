@@ -27,12 +27,12 @@ func (r *BuiltinRunner) skillRead(ctx context.Context, call Call) Result {
 		out.Content = `{"ok":false,"reason":"skill_id_required","hint":"Pass skill_id from the Available Skills index."}`
 		return out
 	}
-	if r.skills == nil {
+	if r.skillReader == nil {
 		out.Ok = false
 		out.Content = `{"ok":false,"reason":"skill_reader_unavailable"}`
 		return out
 	}
-	doc, err := r.skills.ReadSkill(ctx, id)
+	doc, err := r.skillReader.ReadSkill(ctx, id)
 	if err != nil {
 		reason := "read_failed"
 		switch {

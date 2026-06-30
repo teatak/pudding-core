@@ -1205,8 +1205,17 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 				nextMode = requestedMode
 				modeChanged = true
 			}
-		} else if !tool.AllowedForMode(nextMode, allowedTools, call.Name) {
-			result = toolNotAllowedResult(call, nextMode)
+		} else if call.Name == tool.SkillSubmit {
+			result = e.requestSkillDraftApproval(ctx, sessionID, turnID, call)
+		} else if !tool.HasDefinition(allowedTools, call.Name) {
+			known, err := e.toolNameKnown(ctx, sessionID, call.Name)
+			if err != nil {
+				result = tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: fmt.Sprintf("list tools: %v", err)}
+			} else if known {
+				result = toolNotAllowedResult(call, nextMode)
+			} else {
+				result = unknownToolResult(call)
+			}
 		} else if e.tools == nil {
 			result = tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: "tool runner unavailable"}
 		} else {
@@ -1266,6 +1275,41 @@ func (e *Engine) workspaceDirsForToolCall(ctx context.Context, sessionID, turnID
 	dirs = append(dirs, e.turnWorkspaceDirs[turnID]...)
 	e.mu.Unlock()
 	return store.NormalizeWorkspaceDirs(dirs)
+}
+
+func (e *Engine) toolNameKnown(ctx context.Context, sessionID, name string) (bool, error) {
+	if name == tool.RequestCapability {
+		return true, nil
+	}
+	if e.tools == nil {
+		return false, nil
+	}
+	defs, err := e.tools.Definitions(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	return tool.HasDefinition(defs, name), nil
+}
+
+func unknownToolResult(call tool.Call) tool.Result {
+	payload := map[string]any{
+		"ok":      false,
+		"reason":  "unknown_tool",
+		"tool":    call.Name,
+		"message": "tool is not defined; use one of the advertised tool names exactly",
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		b = []byte(`{"ok":false,"reason":"unknown_tool"}`)
+	}
+	return tool.Result{
+		CallID:       call.CallID,
+		Name:         call.Name,
+		Ok:           false,
+		Content:      string(b),
+		SummaryKind:  tool.SummaryReturnedFields,
+		SummaryCount: len(payload),
+	}
 }
 
 func toolNotAllowedResult(call tool.Call, mode store.AgentMode) tool.Result {

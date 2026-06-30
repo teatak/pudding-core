@@ -122,4 +122,18 @@ func TestServiceReadsSkillAssets(t *testing.T) {
 	if len(data) == 0 || contentType != "image/svg+xml" {
 		t.Fatalf("unexpected builtin asset: len=%d type=%s", len(data), contentType)
 	}
+	draftDir := filepath.Join(home, DraftDirName, "draft-review", "assets")
+	if err := os.MkdirAll(draftDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(draftDir, "icon.svg"), []byte("<svg draft/>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data, contentType, err = NewService(home).ReadAsset(context.Background(), "skills-draft/draft-review/assets/icon.svg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "<svg draft/>" || contentType != "image/svg+xml" {
+		t.Fatalf("unexpected draft asset: %q %s", data, contentType)
+	}
 }

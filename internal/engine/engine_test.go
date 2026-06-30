@@ -548,7 +548,7 @@ func TestSubmitRunsToolLoop(t *testing.T) {
 func TestSubmitBlocksToolOutsideCurrentMode(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
-	client := &unauthorizedWebClient{}
+	client := &unauthorizedRESTClient{}
 	runner := &recordingToolRunner{
 		defs:   tool.BuiltinDefinitions(),
 		result: tool.Result{Ok: true, Content: `{"answer":"should not run"}`},
@@ -578,8 +578,8 @@ func TestSubmitBlocksToolOutsideCurrentMode(t *testing.T) {
 	if len(client.requests) != 2 {
 		t.Fatalf("want 2 provider calls, got %d", len(client.requests))
 	}
-	if hasToolDef(client.requests[0].Tools, tool.WebSearch) {
-		t.Fatalf("chat request must not expose web search: %+v", client.requests[0].Tools)
+	if !hasToolDef(client.requests[0].Tools, tool.WebSearch) || hasToolDef(client.requests[0].Tools, tool.RESTRequest) {
+		t.Fatalf("chat request should expose web but not REST: %+v", client.requests[0].Tools)
 	}
 	if len(runner.calls) != 0 {
 		t.Fatalf("unauthorized tool should not execute: %+v", runner.calls)
@@ -592,7 +592,7 @@ func TestSubmitBlocksToolOutsideCurrentMode(t *testing.T) {
 		t.Fatalf("unexpected messages: %+v", msgs)
 	}
 	parts := msgs[2].Parts
-	if len(parts) != 1 || parts[0].Type != store.ContentPartToolResult || parts[0].Name != tool.WebSearch || parts[0].Ok {
+	if len(parts) != 1 || parts[0].Type != store.ContentPartToolResult || parts[0].Name != tool.RESTRequest || parts[0].Ok {
 		t.Fatalf("blocked tool result wrong: %+v", parts)
 	}
 	if !strings.Contains(parts[0].Content, "capability_required") {
@@ -604,6 +604,55 @@ func TestSubmitBlocksToolOutsideCurrentMode(t *testing.T) {
 	}
 	if turn.Mode != store.ModeChat {
 		t.Fatalf("blocked tool must not upgrade mode: %+v", turn.Mode)
+	}
+}
+
+func TestSubmitMarksUnknownTool(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	client := &unknownToolClient{}
+	runner := &recordingToolRunner{
+		defs:   tool.BuiltinDefinitions(),
+		result: tool.Result{Ok: true, Content: `{"answer":"should not run"}`},
+	}
+	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithTools(runner))
+	ctx := context.Background()
+	sid := "sess_unknown_tool"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "unknown", Provider: "capture", Model: "tool-model"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "capture", Protocol: "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID:           "tool-model",
+			Capabilities: &store.ModelCaps{Tools: true},
+			Limits:       &store.ModelLimits{MaxToolLoops: 3},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "查网页"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+
+	if len(runner.calls) != 0 {
+		t.Fatalf("unknown tool should not execute: %+v", runner.calls)
+	}
+	msgs, err := ms.ListMessages(ctx, sid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 4 || msgs[2].Kind != store.MessageKindToolResult {
+		t.Fatalf("unexpected messages: %+v", msgs)
+	}
+	parts := msgs[2].Parts
+	if len(parts) != 1 || parts[0].Type != store.ContentPartToolResult || parts[0].Name != "builtin_search_webpage_search" || parts[0].Ok {
+		t.Fatalf("unknown tool result wrong: %+v", parts)
+	}
+	if !strings.Contains(parts[0].Content, "unknown_tool") || strings.Contains(parts[0].Content, "capability_required") {
+		t.Fatalf("unknown tool result should not look like capability gate: %+v", parts[0])
 	}
 }
 
@@ -665,10 +714,10 @@ func TestCapabilityApprovalUpgradesTurnTools(t *testing.T) {
 	if len(client.requests) != 2 {
 		t.Fatalf("want 2 provider calls, got %d", len(client.requests))
 	}
-	if !hasToolDef(client.requests[0].Tools, tool.RequestCapability) || !hasToolDef(client.requests[0].Tools, tool.TimeGetCurrent) || hasToolDef(client.requests[0].Tools, tool.WebSearch) {
+	if !hasToolDef(client.requests[0].Tools, tool.RequestCapability) || !hasToolDef(client.requests[0].Tools, tool.TimeGetCurrent) || !hasToolDef(client.requests[0].Tools, tool.WebSearch) || !hasToolDef(client.requests[0].Tools, tool.WebFetch) || hasToolDef(client.requests[0].Tools, tool.RESTRequest) {
 		t.Fatalf("chat tools wrong: %+v", client.requests[0].Tools)
 	}
-	if !hasToolDef(client.requests[1].Tools, tool.RequestCapability) || !hasToolDef(client.requests[1].Tools, tool.WebSearch) || !hasToolDef(client.requests[1].Tools, tool.WebFetch) {
+	if !hasToolDef(client.requests[1].Tools, tool.RequestCapability) || !hasToolDef(client.requests[1].Tools, tool.WebSearch) || !hasToolDef(client.requests[1].Tools, tool.WebFetch) || !hasToolDef(client.requests[1].Tools, tool.RESTRequest) || !hasToolDef(client.requests[1].Tools, tool.GraphQLRequest) {
 		t.Fatalf("research tools wrong: %+v", client.requests[1].Tools)
 	}
 	turn, err := ms.GetConversationTurn(ctx, sid, res.TurnID)
@@ -680,7 +729,67 @@ func TestCapabilityApprovalUpgradesTurnTools(t *testing.T) {
 	}
 }
 
-func TestWorkspaceApprovalRequiresAndStoresDirs(t *testing.T) {
+func TestSkillDraftSubmitApprovalAppliesDraft(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	client := &skillDraftSubmitClient{}
+	runner := &recordingToolRunner{
+		defs: tool.BuiltinDefinitions(),
+		result: tool.Result{
+			Ok:      true,
+			Content: `{"ok":true,"status":"pending_user_review","draft":{"id":"demo-skill","description":"Demo skill ready for review.","path":"skills-draft/demo-skill","validation":{"ok":true}},"fileCount":1}`,
+		},
+	}
+	eng := New(ms, hub, mapResolver{"skill": client}, ms, WithTools(runner))
+	ctx := context.Background()
+	sid := "sess_skill_draft"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "skill", Provider: "skill", Model: "skill-model"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "skill", Protocol: "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID:           "skill-model",
+			Capabilities: &store.ModelCaps{Tools: true},
+			Limits:       &store.ModelLimits{MaxToolLoops: 3},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sub, unsub := hub.Subscribe(sid)
+	defer unsub()
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "创建 skill"}); err != nil {
+		t.Fatal(err)
+	}
+	var approval event.Event
+	deadline := time.After(time.Second)
+	for approval.Kind != event.ApprovalRequested {
+		select {
+		case ev := <-sub:
+			if ev.Kind == event.ApprovalRequested {
+				approval = ev
+			}
+		case <-deadline:
+			t.Fatal("approval request not emitted")
+		}
+	}
+	if approval.ApprovalKind != ApprovalKindSkillDraft || !strings.Contains(string(approval.Payload), `"draft_id":"demo-skill"`) {
+		t.Fatalf("bad skill draft approval: %+v", approval)
+	}
+	waitTurnDone(t, ms, sid)
+	if pending := eng.PendingApprovals(sid); len(pending) != 1 || pending[0].ID != approval.ApprovalID {
+		t.Fatalf("skill draft approval should remain pending after turn finishes: %+v", pending)
+	}
+	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeTurn, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.appliedDrafts) != 1 || runner.appliedDrafts[0] != "demo-skill" {
+		t.Fatalf("draft not applied: %+v", runner.appliedDrafts)
+	}
+}
+
+func TestWorkspaceApprovalAllowsOptionalDirs(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
 	client := &workspaceCapabilityClient{}
@@ -719,14 +828,7 @@ func TestWorkspaceApprovalRequiresAndStoresDirs(t *testing.T) {
 			t.Fatal("approval request not emitted")
 		}
 	}
-	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeSession, nil); !errors.Is(err, ErrWorkspaceDirsRequired) {
-		t.Fatalf("workspace approval without dirs should fail, got %v", err)
-	}
-	if len(eng.PendingApprovals(sid)) != 1 {
-		t.Fatal("approval should remain pending after missing dirs")
-	}
-	root := t.TempDir()
-	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeSession, []string{root}); err != nil {
+	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeSession, nil); err != nil {
 		t.Fatal(err)
 	}
 	waitTurnDone(t, ms, sid)
@@ -738,7 +840,7 @@ func TestWorkspaceApprovalRequiresAndStoresDirs(t *testing.T) {
 	if sess.ActiveMode != store.ModeWorkspace || sess.ModeLease != store.ModeLeaseSession {
 		t.Fatalf("session mode not upgraded: %+v", sess)
 	}
-	if !sameStrings(sess.WorkspaceDirs, []string{root}) {
+	if len(sess.WorkspaceDirs) != 0 {
 		t.Fatalf("workspace dirs not stored: %+v", sess.WorkspaceDirs)
 	}
 	if len(client.requests) != 2 || !hasToolDef(client.requests[1].Tools, tool.WorkspaceList) {
@@ -1280,25 +1382,50 @@ func (c *toolLoopClient) Stream(_ context.Context, req provider.Request) (<-chan
 	return out, nil
 }
 
-type unauthorizedWebClient struct {
+type unauthorizedRESTClient struct {
 	requests []provider.Request
 }
 
-func (c *unauthorizedWebClient) Name() string { return "unauthorized-web" }
+func (c *unauthorizedRESTClient) Name() string { return "unauthorized-rest" }
 
-func (c *unauthorizedWebClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+func (c *unauthorizedRESTClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	c.requests = append(c.requests, req)
 	out := make(chan provider.Chunk, 4)
 	if len(c.requests) == 1 {
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
 			Index:     0,
-			CallID:    "call_web",
-			Name:      tool.WebSearch,
-			ArgsDelta: `{"query":"北京天气"}`,
+			CallID:    "call_rest",
+			Name:      tool.RESTRequest,
+			ArgsDelta: `{"endpoint":"github_rest","path":"/user"}`,
 		}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	} else {
 		out <- provider.Chunk{Part: provider.PartText, Delta: "已被能力边界拦截"}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
+	}
+	close(out)
+	return out, nil
+}
+
+type unknownToolClient struct {
+	requests []provider.Request
+}
+
+func (c *unknownToolClient) Name() string { return "unknown-tool" }
+
+func (c *unknownToolClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	c.requests = append(c.requests, req)
+	out := make(chan provider.Chunk, 4)
+	if len(c.requests) == 1 {
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
+			Index:     0,
+			CallID:    "call_unknown",
+			Name:      "builtin_search_webpage_search",
+			ArgsDelta: `{"query":"pudding"}`,
+		}}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	} else {
+		out <- provider.Chunk{Part: provider.PartText, Delta: "工具不存在"}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
 	}
 	close(out)
@@ -1319,7 +1446,7 @@ func (c *capabilityClient) Stream(_ context.Context, req provider.Request) (<-ch
 			Index:     0,
 			CallID:    "call_cap",
 			Name:      tool.RequestCapability,
-			ArgsDelta: `{"targetMode":"research","reason":"需要联网搜索","risk":"external read"}`,
+			ArgsDelta: `{"targetMode":"research","reason":"需要调用 REST endpoint","risk":"external request"}`,
 		}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	} else {
@@ -1381,10 +1508,36 @@ func (c *workspaceCapabilityClient) Stream(_ context.Context, req provider.Reque
 	return out, nil
 }
 
+type skillDraftSubmitClient struct {
+	requests []provider.Request
+}
+
+func (c *skillDraftSubmitClient) Name() string { return "skill-draft-submit" }
+
+func (c *skillDraftSubmitClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	c.requests = append(c.requests, req)
+	out := make(chan provider.Chunk, 4)
+	if len(c.requests) == 1 {
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
+			Index:     0,
+			CallID:    "call_skill_submit",
+			Name:      tool.SkillSubmit,
+			ArgsDelta: `{"draft_id":"demo-skill"}`,
+		}}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	} else {
+		out <- provider.Chunk{Part: provider.PartText, Delta: "skill 已发布"}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
+	}
+	close(out)
+	return out, nil
+}
+
 type recordingToolRunner struct {
-	defs   []provider.ToolDef
-	result tool.Result
-	calls  []tool.Call
+	defs          []provider.ToolDef
+	result        tool.Result
+	calls         []tool.Call
+	appliedDrafts []string
 }
 
 func (r *recordingToolRunner) Definitions(context.Context, string) ([]provider.ToolDef, error) {
@@ -1397,6 +1550,11 @@ func (r *recordingToolRunner) Call(_ context.Context, call tool.Call) tool.Resul
 	result.CallID = call.CallID
 	result.Name = call.Name
 	return result
+}
+
+func (r *recordingToolRunner) ApplySkillDraft(_ context.Context, id string) error {
+	r.appliedDrafts = append(r.appliedDrafts, id)
+	return nil
 }
 
 func hasProviderPart(parts []provider.Part, typ provider.PartType) bool {

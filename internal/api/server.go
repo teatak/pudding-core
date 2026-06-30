@@ -48,7 +48,7 @@ func (s *Server) WithSkills(skills skillService) *Server {
 }
 
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
-var apiPrefixes = []string{"/sessions", "/settings", "/providers", "/tools", "/skills", "/skill-assets", "/usage", "/mobile", "/apps", "/app-connections"}
+var apiPrefixes = []string{"/sessions", "/settings", "/providers", "/tools", "/skills", "/skill-drafts", "/skill-assets", "/usage", "/mobile", "/apps", "/app-connections"}
 
 type appService interface {
 	ListDefinitions(ctx context.Context) ([]*app.Definition, error)
@@ -116,6 +116,9 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/tools/web").GET(s.getWebTools).PATCH(s.patchWebTools).PUT(s.patchWebTools)
 	app.Route("/skills").GET(s.listSkills)
 	app.Route("/skills/:id").DELETE(s.deleteSkill)
+	app.Route("/skill-drafts").GET(s.listSkillDrafts)
+	app.Route("/skill-drafts/:id").GET(s.getSkillDraft).DELETE(s.deleteSkillDraft)
+	app.Route("/skill-drafts/:id/apply").POST(s.applySkillDraft)
 	app.Route("/skill-assets/*path").GET(s.getSkillAsset)
 	app.Route("/apps").GET(s.listApps)
 	app.Route("/app-connections").GET(s.listAppConnections)

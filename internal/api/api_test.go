@@ -141,6 +141,53 @@ func TestDeleteSkillAPI(t *testing.T) {
 	}
 }
 
+func TestSkillDraftsAPI(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
+	home := t.TempDir()
+	draftDir := filepath.Join(home, "skills-draft", "test-skill")
+	if err := os.MkdirAll(draftDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(draftDir, "SKILL.md"), []byte("---\nname: test-skill\ndescription: Test skill draft.\n---\nBody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithSkills(skillsvc.NewService(home)).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+
+	resp := req(t, http.MethodGet, srv.URL+"/skill-drafts", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	list := decodeJSON[map[string][]map[string]any](t, resp)
+	if len(list["drafts"]) != 1 || list["drafts"][0]["id"] != "test-skill" {
+		t.Fatalf("unexpected drafts: %+v", list)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/skill-drafts/test-skill", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	detail := decodeJSON[map[string]any](t, resp)
+	files := detail["files"].([]any)
+	if len(files) != 1 {
+		t.Fatalf("unexpected draft detail: %+v", detail)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/skill-drafts/test-skill/apply", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	if _, err := os.Stat(filepath.Join(home, "skills", "test-skill", "SKILL.md")); err != nil {
+		t.Fatalf("published skill missing: %v", err)
+	}
+	if _, err := os.Stat(draftDir); !os.IsNotExist(err) {
+		t.Fatalf("draft should be removed, stat err=%v", err)
+	}
+}
+
 func TestSkillAssetsAPI(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
@@ -182,7 +229,7 @@ func TestBuiltinToolsAPI(t *testing.T) {
 	}
 	got := decodeJSON[map[string][]map[string]any](t, resp)
 	tools := got["tools"]
-	if len(tools) != 8 {
+	if len(tools) < 16 {
 		t.Fatalf("unexpected builtin tools: %+v", got)
 	}
 	if tools[0]["id"] != tool.RequestCapability {
@@ -201,8 +248,8 @@ func TestBuiltinToolsAPI(t *testing.T) {
 			break
 		}
 	}
-	if webSearch == nil || webSearch["capability"] != string(store.ModeResearch) {
-		t.Fatalf("web search should declare research capability: %+v", webSearch)
+	if webSearch == nil || webSearch["capability"] != string(store.ModeChat) {
+		t.Fatalf("web search should declare chat capability: %+v", webSearch)
 	}
 	var workspaceList map[string]any
 	for _, item := range tools {
@@ -214,21 +261,33 @@ func TestBuiltinToolsAPI(t *testing.T) {
 	if workspaceList == nil || workspaceList["capability"] != string(store.ModeWorkspace) {
 		t.Fatalf("workspace list should declare workspace capability: %+v", workspaceList)
 	}
+	var fileWrite map[string]any
 	var skillRead map[string]any
+	var skillSubmit map[string]any
 	var restRequest map[string]any
 	var graphqlRequest map[string]any
 	for _, item := range tools {
 		switch item["id"] {
+		case tool.FileWrite:
+			fileWrite = item
 		case tool.SkillRead:
 			skillRead = item
+		case tool.SkillSubmit:
+			skillSubmit = item
 		case tool.RESTRequest:
 			restRequest = item
 		case tool.GraphQLRequest:
 			graphqlRequest = item
 		}
 	}
+	if fileWrite == nil || fileWrite["capability"] != string(store.ModeWorkspace) {
+		t.Fatalf("file write should declare workspace capability: %+v", fileWrite)
+	}
 	if skillRead == nil || skillRead["capability"] != string(store.ModeChat) {
 		t.Fatalf("skill read should declare chat capability: %+v", skillRead)
+	}
+	if skillSubmit == nil || skillSubmit["capability"] != string(store.ModeWorkspace) {
+		t.Fatalf("skill submit should declare workspace capability: %+v", skillSubmit)
 	}
 	if restRequest == nil || restRequest["capability"] != string(store.ModeResearch) {
 		t.Fatalf("rest request should declare research capability: %+v", restRequest)

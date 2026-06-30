@@ -15,6 +15,12 @@ import (
 
 var ErrApprovalNotFound = errors.New("engine: approval not found")
 var ErrWorkspaceDirsRequired = errors.New("engine: workspace dirs required")
+var ErrApprovalUnsupported = errors.New("engine: approval unsupported")
+
+const (
+	ApprovalKindCapability = "capability"
+	ApprovalKindSkillDraft = "skill_draft"
+)
 
 type ApprovalScope string
 
@@ -48,6 +54,10 @@ type approvalDecision struct {
 type pendingApproval struct {
 	req ApprovalRequest
 	ch  chan approvalDecision
+}
+
+type skillDraftApplier interface {
+	ApplySkillDraft(ctx context.Context, id string) error
 }
 
 func (e *Engine) PendingApprovals(sessionID string) []ApprovalRequest {
@@ -85,32 +95,47 @@ func (e *Engine) ApproveApproval(ctx context.Context, sessionID, approvalID stri
 	if err != nil {
 		return err
 	}
-	workspaceDirs = store.NormalizeWorkspaceDirs(workspaceDirs)
-	if len(workspaceDirs) == 0 {
-		workspaceDirs = append([]string(nil), p.req.WorkspaceDirs...)
-	}
-	workspaceDirs = store.NormalizeWorkspaceDirs(workspaceDirs)
-	if p.req.TargetMode == store.ModeWorkspace && len(workspaceDirs) == 0 {
-		return ErrWorkspaceDirsRequired
-	}
-	if scope == ApprovalScopeSession {
-		mode := p.req.TargetMode
-		lease := store.ModeLeaseSession
-		upd := store.SessionUpdate{ActiveMode: &mode, ModeLease: &lease}
-		if p.req.TargetMode == store.ModeWorkspace {
-			dirs := workspaceDirs
-			if sess, err := e.store.GetSession(ctx, sessionID); err == nil {
-				dirs = store.NormalizeWorkspaceDirs(append(sess.WorkspaceDirs, workspaceDirs...))
-			}
-			upd.WorkspaceDirs = &dirs
+	switch p.req.Kind {
+	case ApprovalKindCapability:
+		workspaceDirs = store.NormalizeWorkspaceDirs(workspaceDirs)
+		if len(workspaceDirs) == 0 {
+			workspaceDirs = append([]string(nil), p.req.WorkspaceDirs...)
 		}
-		if _, err := e.store.UpdateSession(ctx, sessionID, upd); err != nil {
+		workspaceDirs = store.NormalizeWorkspaceDirs(workspaceDirs)
+		if scope == ApprovalScopeSession {
+			mode := p.req.TargetMode
+			lease := store.ModeLeaseSession
+			upd := store.SessionUpdate{ActiveMode: &mode, ModeLease: &lease}
+			if p.req.TargetMode == store.ModeWorkspace {
+				dirs := workspaceDirs
+				if sess, err := e.store.GetSession(ctx, sessionID); err == nil {
+					dirs = store.NormalizeWorkspaceDirs(append(sess.WorkspaceDirs, workspaceDirs...))
+				}
+				upd.WorkspaceDirs = &dirs
+			}
+			if _, err := e.store.UpdateSession(ctx, sessionID, upd); err != nil {
+				return err
+			}
+		} else if p.req.TargetMode == store.ModeWorkspace {
+			e.mu.Lock()
+			e.turnWorkspaceDirs[p.req.TurnID] = store.NormalizeWorkspaceDirs(append(e.turnWorkspaceDirs[p.req.TurnID], workspaceDirs...))
+			e.mu.Unlock()
+		}
+	case ApprovalKindSkillDraft:
+		draftID := skillDraftApprovalID(p.req.Payload)
+		if draftID == "" {
+			return fmt.Errorf("engine: skill draft id missing")
+		}
+		applier, ok := e.tools.(skillDraftApplier)
+		if !ok {
+			return ErrApprovalUnsupported
+		}
+		if err := applier.ApplySkillDraft(ctx, draftID); err != nil {
 			return err
 		}
-	} else if p.req.TargetMode == store.ModeWorkspace {
-		e.mu.Lock()
-		e.turnWorkspaceDirs[p.req.TurnID] = store.NormalizeWorkspaceDirs(append(e.turnWorkspaceDirs[p.req.TurnID], workspaceDirs...))
-		e.mu.Unlock()
+		scope = ApprovalScopeTurn
+	default:
+		return ErrApprovalUnsupported
 	}
 	if err := e.completePendingApproval(sessionID, approvalID, p); err != nil {
 		return err
@@ -123,7 +148,7 @@ func (e *Engine) ApproveApproval(ctx context.Context, sessionID, approvalID stri
 		ApprovalID:   p.req.ID,
 		ApprovalKind: p.req.Kind,
 		Status:       "approved",
-		Payload:      mustJSON(map[string]any{"scope": scope, "workspaceDirs": workspaceDirs}),
+		Payload:      approvalResolvedPayload(p.req.Kind, scope, workspaceDirs),
 	})
 	p.ch <- approvalDecision{approved: true, scope: scope, workspaceDirs: workspaceDirs}
 	return nil
@@ -192,7 +217,7 @@ func (e *Engine) requestCapabilityApproval(ctx context.Context, sessionID, turnI
 		SessionID:     sessionID,
 		TurnID:        turnID,
 		CallID:        call.CallID,
-		Kind:          "capability",
+		Kind:          ApprovalKindCapability,
 		TargetMode:    req.TargetMode,
 		WorkspaceDirs: req.WorkspaceDirs,
 		Reason:        strings.TrimSpace(req.Reason),
@@ -233,13 +258,120 @@ func (e *Engine) requestCapabilityApproval(ctx context.Context, sessionID, turnI
 	}
 }
 
+func (e *Engine) requestSkillDraftApproval(ctx context.Context, sessionID, turnID string, call tool.Call) tool.Result {
+	id := skillDraftIDFromToolArgs(call.Args)
+	if id == "" {
+		return approvalToolResult(call, false, map[string]any{"ok": false, "reason": "draft_id_required"})
+	}
+	if e.tools == nil {
+		return approvalToolResult(call, false, map[string]any{"ok": false, "reason": "tool_runner_unavailable"})
+	}
+	toolCtx, cancel := context.WithTimeout(ctx, toolCallTimeout)
+	result := e.tools.Call(toolCtx, call)
+	cancel()
+	if toolCtx.Err() != nil && result.Content == "" {
+		return approvalToolResult(call, false, map[string]any{"ok": false, "reason": "tool_timed_out"})
+	}
+	if !result.Ok {
+		return result
+	}
+	payload := skillDraftApprovalPayload(id, result.Content)
+	approval := ApprovalRequest{
+		ID:        store.NewID("appr"),
+		SessionID: sessionID,
+		TurnID:    turnID,
+		CallID:    call.CallID,
+		Kind:      ApprovalKindSkillDraft,
+		Title:     "Publish skill draft",
+		Reason:    skillDraftApprovalReason(payload),
+		Payload:   mustJSON(payload),
+		CreatedAt: time.Now(),
+	}
+	pending := &pendingApproval{req: approval, ch: make(chan approvalDecision, 1)}
+	e.mu.Lock()
+	e.approvals[approval.ID] = pending
+	e.mu.Unlock()
+	e.hub.Publish(event.Event{
+		SessionID:    sessionID,
+		Kind:         event.ApprovalRequested,
+		TurnID:       turnID,
+		CallID:       call.CallID,
+		ApprovalID:   approval.ID,
+		ApprovalKind: approval.Kind,
+		Title:        approval.Title,
+		Reason:       approval.Reason,
+		Payload:      approval.Payload,
+	})
+	payload["ok"] = true
+	payload["status"] = "pending_user_review"
+	payload["approval_id"] = approval.ID
+	if _, ok := payload["draft_id"]; !ok {
+		payload["draft_id"] = id
+	}
+	return approvalToolResult(call, true, payload)
+}
+
 func capabilityToolResult(call tool.Call, ok bool, payload map[string]any) tool.Result {
+	return approvalToolResult(call, ok, payload)
+}
+
+func approvalToolResult(call tool.Call, ok bool, payload map[string]any) tool.Result {
 	b, err := json.Marshal(payload)
 	if err != nil {
 		b = []byte(`{"ok":false,"reason":"encode_error"}`)
 		ok = false
 	}
 	return tool.Result{CallID: call.CallID, Name: call.Name, Ok: ok, Content: string(b), SummaryKind: tool.SummaryReturnedFields, SummaryCount: len(payload)}
+}
+
+func skillDraftIDFromToolArgs(raw json.RawMessage) string {
+	var args struct {
+		DraftID string `json:"draft_id"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil {
+		return ""
+	}
+	return strings.TrimSpace(args.DraftID)
+}
+
+func skillDraftApprovalPayload(id, content string) map[string]any {
+	payload := map[string]any{"draft_id": id}
+	var parsed map[string]any
+	if json.Unmarshal([]byte(content), &parsed) == nil {
+		for key, value := range parsed {
+			payload[key] = value
+		}
+	}
+	payload["draft_id"] = id
+	return payload
+}
+
+func skillDraftApprovalID(payload json.RawMessage) string {
+	var data struct {
+		DraftID string `json:"draft_id"`
+	}
+	if len(payload) == 0 || json.Unmarshal(payload, &data) != nil {
+		return ""
+	}
+	return strings.TrimSpace(data.DraftID)
+}
+
+func skillDraftApprovalReason(payload map[string]any) string {
+	draft, ok := payload["draft"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	if description, ok := draft["description"].(string); ok {
+		return strings.TrimSpace(description)
+	}
+	return ""
+}
+
+func approvalResolvedPayload(kind string, scope ApprovalScope, workspaceDirs []string) json.RawMessage {
+	if kind == ApprovalKindSkillDraft {
+		return mustJSON(map[string]any{"published": true})
+	}
+	return mustJSON(map[string]any{"scope": scope, "workspaceDirs": workspaceDirs})
 }
 
 func mustJSON(v any) json.RawMessage {

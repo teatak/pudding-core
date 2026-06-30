@@ -300,6 +300,41 @@ export type Skill = z.infer<typeof skill>;
 
 export const listSkillsResponse = z.object({ skills: z.array(skill) });
 
+export const skillValidation = z.object({
+  ok: z.boolean(),
+  errors: z.array(z.string()).optional(),
+  warnings: z.array(z.string()).optional(),
+});
+export type SkillValidation = z.infer<typeof skillValidation>;
+
+export const skillDraft = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  path: z.string(),
+  iconPath: z.string().optional(),
+  change: z.enum(["added", "modified"]),
+  validation: skillValidation,
+});
+export type SkillDraft = z.infer<typeof skillDraft>;
+
+export const skillFileDiff = z.object({
+  path: z.string(),
+  change: z.enum(["added", "modified", "deleted"]),
+  old: z.string().optional(),
+  new: z.string().optional(),
+  unifiedDiff: z.string().optional(),
+});
+export type SkillFileDiff = z.infer<typeof skillFileDiff>;
+
+export const skillDraftDetail = z.object({
+  draft: skillDraft,
+  files: z.array(skillFileDiff),
+});
+export type SkillDraftDetail = z.infer<typeof skillDraftDetail>;
+
+export const listSkillDraftsResponse = z.object({ drafts: z.array(skillDraft) });
+
 export const webToolProvider = z.object({
   name: z.string(),
   apiKey: z.string().optional(),

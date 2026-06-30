@@ -20,6 +20,14 @@ const (
 	WebFetch       = "builtin_web_fetch"
 	WorkspaceList  = "builtin_workspace_list"
 	SkillRead      = "builtin_skill_read"
+	FileList       = "builtin_file_list"
+	FileRead       = "builtin_file_read"
+	FileWrite      = "builtin_file_write"
+	FilePatch      = "builtin_file_patch"
+	FileDelete     = "builtin_file_delete"
+	FileMove       = "builtin_file_move"
+	SkillValidate  = "builtin_skill_validate"
+	SkillSubmit    = "builtin_skill_submit"
 	RESTRequest    = "builtin_rest_request"
 	GraphQLRequest = "builtin_graphql_request"
 )
@@ -32,8 +40,14 @@ type AppEndpointSource interface {
 	ResolveEndpoint(ctx context.Context, sessionID, endpointName string) (*app.EndpointBinding, error)
 }
 
-type SkillSource interface {
+type SkillReader interface {
 	ReadSkill(ctx context.Context, id string) (*skill.Document, error)
+}
+
+type SkillDraftSource interface {
+	ValidateDraft(ctx context.Context, id string) (*skill.Validation, error)
+	DraftDetail(ctx context.Context, id string) (*skill.DraftDetail, error)
+	ApplyDraft(ctx context.Context, id string) error
 }
 
 type BuiltinOption func(*BuiltinRunner)
@@ -41,7 +55,9 @@ type BuiltinOption func(*BuiltinRunner)
 type BuiltinRunner struct {
 	webConfig     WebConfigSource
 	appEndpoints  AppEndpointSource
-	skills        SkillSource
+	skillReader   SkillReader
+	skillDrafts   SkillDraftSource
+	homeDir       string
 	webHTTPClient *http.Client
 	tavilySearch  string
 	tavilyExtract string
@@ -71,9 +87,18 @@ func WithAppEndpoints(source AppEndpointSource) BuiltinOption {
 	}
 }
 
-func WithSkills(source SkillSource) BuiltinOption {
+func WithSkills(source SkillReader) BuiltinOption {
 	return func(r *BuiltinRunner) {
-		r.skills = source
+		r.skillReader = source
+		if drafts, ok := source.(SkillDraftSource); ok {
+			r.skillDrafts = drafts
+		}
+	}
+}
+
+func WithHomeDir(dir string) BuiltinOption {
+	return func(r *BuiltinRunner) {
+		r.homeDir = dir
 	}
 }
 
@@ -108,13 +133,13 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Name:        WebSearch,
 			Description: "Search the web for current or external information. Returns a short answer plus relevant results.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"Search query in natural language. Use one topic per call."},"max_results":{"type":"integer","description":"Optional result count, 1-10, default 5."},"depth":{"type":"string","enum":["basic","advanced"],"description":"Optional search depth. Defaults to basic."},"topic":{"type":"string","enum":["general","news"],"description":"Optional topic. Use news for recent/current events."},"include_answer":{"type":"boolean","description":"Optional, defaults to true."}},"required":["query"],"additionalProperties":false}`),
-			Capability:  store.ModeResearch,
+			Capability:  store.ModeChat,
 		},
 		{
 			Name:        WebFetch,
 			Description: "Fetch readable body text from one URL. Use for page reading and summarization, not API calls.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","description":"Full URL starting with http:// or https://."},"depth":{"type":"string","enum":["basic","advanced"],"description":"Optional extract depth. Defaults to basic."},"max_chars":{"type":"integer","description":"Optional maximum body characters, default 4000 and cap 20000."}},"required":["url"],"additionalProperties":false}`),
-			Capability:  store.ModeResearch,
+			Capability:  store.ModeChat,
 		},
 		{
 			Name:        WorkspaceList,
@@ -127,6 +152,54 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Description: "Read the full SKILL.md body for one registered skill after the user's intent clearly matches the skill index.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"skill_id":{"type":"string","description":"Registered skill id from the Available Skills index, for example skill-creator."}},"required":["skill_id"],"additionalProperties":false}`),
 			Capability:  store.ModeChat,
+		},
+		{
+			Name:        FileList,
+			Description: "List files in a Pudding-managed file area, such as drafts, published artifacts, or temporary files.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp"],"description":"Target managed file area."},"path":{"type":"string","description":"Relative path inside the file area. Use . to list the root."},"max_entries":{"type":"integer","description":"Optional maximum entries, 1-1000, default 200."}},"required":["scope","path"],"additionalProperties":false}`),
+			Capability:  store.ModeWorkspace,
+		},
+		{
+			Name:        FileRead,
+			Description: "Read one text file from a Pudding-managed file area. Published areas are read-only; draft and temp areas are writable.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp"],"description":"Target managed file area."},"path":{"type":"string","description":"Relative file path inside the file area."},"max_chars":{"type":"integer","description":"Optional max characters, default 20000 and cap 100000."}},"required":["scope","path"],"additionalProperties":false}`),
+			Capability:  store.ModeWorkspace,
+		},
+		{
+			Name:        FileWrite,
+			Description: "Overwrite one text file in a writable Pudding-managed file area.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp"],"description":"Target writable file area."},"path":{"type":"string","description":"Relative file path inside the file area."},"content":{"type":"string","description":"New file content."}},"required":["scope","path","content"],"additionalProperties":false}`),
+			Capability:  store.ModeWorkspace,
+		},
+		{
+			Name:        FilePatch,
+			Description: "Replace text in one file in a writable Pudding-managed file area by exact string match.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp"],"description":"Target writable file area."},"path":{"type":"string","description":"Relative file path inside the file area."},"old_string":{"type":"string","description":"Exact text to replace."},"new_string":{"type":"string","description":"Replacement text."},"replace_all":{"type":"boolean","description":"Replace all matches. Defaults false; without this, exactly one match is required."}},"required":["scope","path","old_string","new_string"],"additionalProperties":false}`),
+			Capability:  store.ModeWorkspace,
+		},
+		{
+			Name:        FileDelete,
+			Description: "Delete a file or, when recursive is true, a directory from a writable Pudding-managed file area.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp"],"description":"Target writable file area."},"path":{"type":"string","description":"Relative path inside the file area."},"recursive":{"type":"boolean","description":"Required to delete a directory."}},"required":["scope","path"],"additionalProperties":false}`),
+			Capability:  store.ModeWorkspace,
+		},
+		{
+			Name:        FileMove,
+			Description: "Move or rename a file or directory inside the same writable Pudding-managed scope.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp"]},"from_path":{"type":"string"},"to_path":{"type":"string"}},"required":["scope","from_path","to_path"],"additionalProperties":false}`),
+			Capability:  store.ModeWorkspace,
+		},
+		{
+			Name:        SkillValidate,
+			Description: "Validate one staged skill package before asking the user to review it.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"draft_id":{"type":"string","description":"Staged skill package id."}},"required":["draft_id"],"additionalProperties":false}`),
+			Capability:  store.ModeWorkspace,
+		},
+		{
+			Name:        SkillSubmit,
+			Description: "Submit one valid staged skill package for user review in Settings. This does not publish the skill.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"draft_id":{"type":"string","description":"Staged skill package id."}},"required":["draft_id"],"additionalProperties":false}`),
+			Capability:  store.ModeWorkspace,
 		},
 		{
 			Name:        RESTRequest,
@@ -160,6 +233,22 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return workspaceList(call)
 	case SkillRead:
 		return r.skillRead(ctx, call)
+	case FileList:
+		return r.fileList(call)
+	case FileRead:
+		return r.fileRead(call)
+	case FileWrite:
+		return r.fileWrite(call)
+	case FilePatch:
+		return r.filePatch(call)
+	case FileDelete:
+		return r.fileDelete(call)
+	case FileMove:
+		return r.fileMove(call)
+	case SkillValidate:
+		return r.skillValidate(ctx, call)
+	case SkillSubmit:
+		return r.skillSubmit(ctx, call)
 	case RESTRequest:
 		return r.restRequest(ctx, call)
 	case GraphQLRequest:

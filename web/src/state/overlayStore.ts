@@ -259,6 +259,12 @@ function resolveApprovalPart(
   );
 }
 
+function hasPendingSkillDraftApproval(overlay: AssistantOverlay | undefined) {
+  return Boolean(
+    overlay?.parts.some((part) => part.type === "approval" && part.approvalKind === "skill_draft" && !part.status),
+  );
+}
+
 export const useOverlayStore = create<OverlayState>((set) => ({
   pendingUsers: {},
   assistants: {},
@@ -364,7 +370,8 @@ export const useOverlayStore = create<OverlayState>((set) => ({
         // 无 canonical 产物的 failed 气泡(reconcile 清不到)在用户重试时让位
         const assistants = Object.fromEntries(
           Object.entries(state.assistants).filter(
-            ([, overlay]) => overlay.sessionID !== event.sessionID || overlay.status === "streaming",
+            ([, overlay]) =>
+              overlay.sessionID !== event.sessionID || overlay.status === "streaming" || hasPendingSkillDraftApproval(overlay),
           ),
         );
         const current = overlayWithDefaults(assistants[event.turnID], event.turnID, event.sessionID);
@@ -459,6 +466,20 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       if (event.kind === "approval.requested") {
         const current = overlayWithDefaults(state.assistants[event.turnID], event.turnID, event.sessionID);
         const currentPhase = state.turnPhases[event.sessionID];
+        if (event.approvalKind === "skill_draft") {
+          return {
+            assistants: {
+              ...state.assistants,
+              [event.turnID]: {
+                ...current,
+                parts: upsertApprovalPart(current.parts, event),
+                clientMessageID:
+                  current.clientMessageID || (currentPhase?.turnID === event.turnID ? currentPhase.clientMessageID : undefined),
+                revealed: false,
+              },
+            },
+          };
+        }
         return {
           assistants: {
             ...state.assistants,
@@ -484,6 +505,18 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       }
       if (event.kind === "approval.resolved") {
         const current = overlayWithDefaults(state.assistants[event.turnID], event.turnID, event.sessionID);
+        if (event.approvalKind === "skill_draft") {
+          return {
+            assistants: {
+              ...state.assistants,
+              [event.turnID]: {
+                ...current,
+                parts: resolveApprovalPart(current.parts, event),
+                revealed: false,
+              },
+            },
+          };
+        }
         return {
           assistants: {
             ...state.assistants,
@@ -542,6 +575,14 @@ export const useOverlayStore = create<OverlayState>((set) => ({
         return state;
       }
       if (overlay.assistantMessageID) {
+        if (hasPendingSkillDraftApproval(overlay)) {
+          return {
+            assistants: {
+              ...state.assistants,
+              [turnID]: { ...overlay, revealed: true },
+            },
+          };
+        }
         const assistants = { ...state.assistants };
         delete assistants[turnID];
         return { assistants };
@@ -570,6 +611,9 @@ export const useOverlayStore = create<OverlayState>((set) => ({
           continue;
         }
         if (overlay.assistantMessageID && canonicalMessageIDs.has(overlay.assistantMessageID)) {
+          if (hasPendingSkillDraftApproval(overlay)) {
+            continue;
+          }
           delete assistants[overlay.turnID];
           assistantsChanged = true;
         }

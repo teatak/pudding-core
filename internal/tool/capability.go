@@ -94,3 +94,12 @@ func AllowedForMode(mode store.AgentMode, defs []provider.ToolDef, name string) 
 	}
 	return false
 }
+
+func HasDefinition(defs []provider.ToolDef, name string) bool {
+	for _, def := range defs {
+		if def.Name == name {
+			return true
+		}
+	}
+	return false
+}

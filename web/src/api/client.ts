@@ -1,5 +1,6 @@
 import {
   listBuiltinToolsResponse,
+  listSkillDraftsResponse,
   listSkillsResponse,
   compactResponse,
   conflictResponse,
@@ -21,6 +22,7 @@ import {
   session,
   sessionUsage,
   settingsResponse,
+  skillDraftDetail,
   submitResponse,
   conversationTurn,
   dailyUsageResponse,
@@ -38,6 +40,8 @@ import {
   type Session,
   type SessionUsage,
   type Skill,
+  type SkillDraft,
+  type SkillDraftDetail,
   type WebToolsConfig,
 } from "@/contracts/api";
 import { z } from "zod";
@@ -344,7 +348,27 @@ export function listSkills(token: string): Promise<{ skills: Skill[] }> {
   return request(token, "/skills", listSkillsResponse);
 }
 
-export function skillIconURL(token: string, skill: Skill): string | undefined {
+export function listSkillDrafts(token: string): Promise<{ drafts: SkillDraft[] }> {
+  return request(token, "/skill-drafts", listSkillDraftsResponse);
+}
+
+export function getSkillDraft(token: string, id: string): Promise<SkillDraftDetail> {
+  return request(token, `/skill-drafts/${encodeURIComponent(id)}`, skillDraftDetail);
+}
+
+export async function applySkillDraft(token: string, id: string): Promise<void> {
+  await request(token, `/skill-drafts/${encodeURIComponent(id)}/apply`, z.object({ status: z.string() }), {
+    method: "POST",
+  });
+}
+
+export async function deleteSkillDraft(token: string, id: string): Promise<void> {
+  await request(token, `/skill-drafts/${encodeURIComponent(id)}`, z.null(), {
+    method: "DELETE",
+  });
+}
+
+export function skillIconURL(token: string, skill: { iconPath?: string }): string | undefined {
   const raw = skill.iconPath?.trim();
   if (!raw) {
     return undefined;
@@ -418,5 +442,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { BuiltinTool, ContentPart, DailyUsageStat, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, WebToolsConfig };
+export type { BuiltinTool, ContentPart, DailyUsageStat, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
 export { createProviderRequest, patchProviderRequest };
