@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/skill"
 )
 
@@ -34,7 +35,7 @@ func TestAssembleIncludesSkillsIndex(t *testing.T) {
 				ID:          "skill-creator",
 				Description: "Create or update Pudding skills.",
 				Source:      skill.SourceBuiltin,
-				Path:        ".system/skill-creator/SKILL.md",
+				Path:        "builtin/skill-creator/SKILL.md",
 			},
 		},
 	})
@@ -49,6 +50,45 @@ func TestAssembleIncludesSkillsIndex(t *testing.T) {
 	}
 	if strings.Contains(out.SystemInstruction, "# Skill Creator") {
 		t.Fatalf("assembled prompt should not inline SKILL.md body:\n%s", out.SystemInstruction)
+	}
+}
+
+func TestAssembleIncludesAppsIndex(t *testing.T) {
+	out := Assemble(Input{
+		Mode: "chat",
+		Apps: []*app.Definition{
+			{
+				ID:          "github",
+				Name:        "GitHub",
+				Description: "Access repositories and issues.",
+				Endpoints: map[string]app.Endpoint{
+					"github_rest": {
+						Kind:        app.EndpointKindREST,
+						Description: "GitHub REST API.",
+					},
+				},
+				Skills: []app.SkillRef{
+					{
+						ID:          "github-issues",
+						Name:        "github-issues",
+						Description: "Inspect GitHub issues.",
+						Path:        "skills/issues/SKILL.md",
+					},
+				},
+			},
+		},
+	})
+	if !strings.Contains(out.SystemInstruction, "## Installed Apps") {
+		t.Fatalf("assembled prompt missing apps index:\n%s", out.SystemInstruction)
+	}
+	if !strings.Contains(out.SystemInstruction, "App `github`") || !strings.Contains(out.SystemInstruction, "Endpoint `github_rest`") {
+		t.Fatalf("assembled prompt missing app endpoint metadata:\n%s", out.SystemInstruction)
+	}
+	if !strings.Contains(out.SystemInstruction, `builtin_skill_read(app_id="<app id>", skill_id="<skill path>")`) {
+		t.Fatalf("assembled prompt missing app skill read instruction:\n%s", out.SystemInstruction)
+	}
+	if strings.Contains(out.SystemInstruction, "# GitHub Issues") {
+		t.Fatalf("assembled prompt should not inline app skill body:\n%s", out.SystemInstruction)
 	}
 }
 

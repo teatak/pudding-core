@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -14,7 +15,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const AppFileName = "app.yaml"
+const (
+	AppFileName = "app.yaml"
+)
 
 var appIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 var endpointNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
@@ -22,7 +25,9 @@ var endpointNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 type fileDefinition struct {
 	ID          string                 `yaml:"id"`
 	Name        string                 `yaml:"name"`
+	Version     string                 `yaml:"version,omitempty"`
 	Description string                 `yaml:"description,omitempty"`
+	Icon        IconSpec               `yaml:"icon,omitempty"`
 	Endpoints   map[string]Endpoint    `yaml:"endpoints,omitempty"`
 	Skills      []fileSkillRef         `yaml:"skills,omitempty"`
 	Extra       map[string]interface{} `yaml:",inline"`
@@ -91,7 +96,9 @@ func LoadDefinitionDir(dir string) (*Definition, error) {
 	def := &Definition{
 		ID:          strings.TrimSpace(raw.ID),
 		Name:        strings.TrimSpace(raw.Name),
+		Version:     strings.TrimSpace(raw.Version),
 		Description: strings.TrimSpace(raw.Description),
+		Icon:        normalizeIconSpec(raw.Icon, dir),
 		Endpoints:   raw.Endpoints,
 		Path:        path,
 	}
@@ -112,7 +119,46 @@ func LoadDefinitionDir(dir string) (*Definition, error) {
 	if err := ValidateDefinition(def); err != nil {
 		return nil, fmt.Errorf("app: validate %s: %w", path, err)
 	}
+	applyDefinitionLock(dir, def)
 	return def, nil
+}
+
+func normalizeIconSpec(raw IconSpec, appDir string) *IconSpec {
+	icon := IconSpec{SVG: strings.TrimSpace(raw.SVG)}
+	if raw.Color != nil {
+		color := normalizeThemeColor(*raw.Color)
+		if color.Light != "" || color.Dark != "" {
+			icon.Color = &color
+		}
+	}
+	if raw.Background != nil {
+		background := normalizeThemeColor(*raw.Background)
+		if background.Light != "" || background.Dark != "" {
+			icon.Background = &background
+		}
+	}
+	if icon.SVG == "" {
+		icon.SVG = defaultAppIconPath(appDir)
+	}
+	if icon.SVG == "" && icon.Color == nil && icon.Background == nil {
+		return nil
+	}
+	return &icon
+}
+
+func normalizeThemeColor(raw ThemeColor) ThemeColor {
+	return ThemeColor{
+		Light: strings.TrimSpace(raw.Light),
+		Dark:  strings.TrimSpace(raw.Dark),
+	}
+}
+
+func defaultAppIconPath(appDir string) string {
+	name := "icon.svg"
+	if _, err := os.Stat(filepath.Join(appDir, "assets", name)); err == nil {
+		return filepath.ToSlash(filepath.Join("assets", name))
+	}
+	return ""
 }
 
 func ValidateDefinition(def *Definition) error {
@@ -134,6 +180,29 @@ func ValidateDefinition(def *Definition) error {
 		if strings.TrimSpace(skill.Path) == "" {
 			return errors.New("skill path is required")
 		}
+	}
+	if def.Icon != nil {
+		if err := ValidateIcon(*def.Icon); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ValidateIcon(icon IconSpec) error {
+	if strings.TrimSpace(icon.SVG) == "" {
+		return errors.New("icon svg is required")
+	}
+	cleaned, err := cleanRelativeSlashPath(icon.SVG)
+	if err != nil {
+		return fmt.Errorf("invalid icon svg: %w", err)
+	}
+	parts := strings.Split(cleaned, "/")
+	if len(parts) != 2 || parts[0] != "assets" {
+		return fmt.Errorf("icon svg must be assets/<file>")
+	}
+	if contentType, ok := iconContentType(parts[1]); !ok || contentType != "image/svg+xml" {
+		return fmt.Errorf("icon svg must point to an svg file")
 	}
 	return nil
 }
@@ -177,6 +246,24 @@ func loadSkillRef(appDir, rel string) (SkillRef, error) {
 		Description: strings.TrimSpace(meta.Description),
 		Path:        filepath.ToSlash(rel),
 	}, nil
+}
+
+func cleanRelativeSlashPath(rel string) (string, error) {
+	rel = strings.TrimSpace(rel)
+	if rel == "" || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("invalid relative path %q", rel)
+	}
+	slashed := filepath.ToSlash(rel)
+	for _, part := range strings.Split(slashed, "/") {
+		if part == ".." {
+			return "", fmt.Errorf("invalid relative path %q", rel)
+		}
+	}
+	cleaned := path.Clean(slashed)
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", fmt.Errorf("invalid relative path %q", rel)
+	}
+	return cleaned, nil
 }
 
 func parseSkillFrontmatter(data []byte) (skillFrontmatter, bool) {

@@ -35,7 +35,7 @@ LLM-created or LLM-edited skills must be drafted first:
 
 Only the user can publish a draft from Settings > Knowledge. Do not write directly to `<home>/skills/` unless the user explicitly asks to bypass the review flow outside the normal app behavior.
 
-System skills are bundled in the binary and appear as `.system/<name>` in the UI. Do not edit or overwrite system skills.
+Builtin skills are bundled in the binary and appear as `builtin/<name>` in the UI. Do not edit or overwrite builtin skills.
 
 At runtime Pudding injects only the skills index (`name`, `description`, path/source metadata) into the system prompt. The full `SKILL.md` body is loaded on demand with `builtin_skill_read(skill_id="<name>")` when the user's intent matches the description.
 
@@ -113,14 +113,7 @@ Pudding discovers one icon per skill in this order:
 
 The file name is always `icon`; it is independent of the skill directory name.
 
-The backend exposes discovered icons through:
-
-```text
-/skill-assets/<name>/assets/icon.<ext>
-/skill-assets/.system/<name>/assets/icon.<ext>
-```
-
-Only `icon.png`, `icon.jpg`, and `icon.svg` are served. Icons are for the Settings UI; the LLM does not need to read `assets/`.
+Only `icon.png`, `icon.jpg`, and `icon.svg` are served. Icons are for the Settings UI; create or update the file under the skill draft, not under any `/skill-assets` URL or builtin path.
 
 When creating a new SVG icon:
 

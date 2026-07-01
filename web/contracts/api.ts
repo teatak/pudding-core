@@ -349,6 +349,78 @@ export const webToolsConfig = z.object({
 });
 export type WebToolsConfig = z.infer<typeof webToolsConfig>;
 
+export const appEndpoint = z.object({
+  kind: z.enum(["rest", "graphql"]),
+  url: z.string(),
+  description: z.string().optional(),
+});
+export type AppEndpoint = z.infer<typeof appEndpoint>;
+
+export const appSkillRef = z.object({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  description: z.string().optional(),
+  path: z.string(),
+});
+export type AppSkillRef = z.infer<typeof appSkillRef>;
+
+export const appSkillDetail = appSkillRef.extend({
+  content: z.string(),
+});
+export type AppSkillDetail = z.infer<typeof appSkillDetail>;
+
+export const appIconThemeColor = z.object({
+  light: z.string().optional(),
+  dark: z.string().optional(),
+});
+export type AppIconThemeColor = z.infer<typeof appIconThemeColor>;
+
+export const appIconSpec = z.object({
+  svg: z.string().optional(),
+  color: appIconThemeColor.optional(),
+  background: appIconThemeColor.optional(),
+});
+export type AppIconSpec = z.infer<typeof appIconSpec>;
+
+export const appDefinition = z.object({
+  id: z.string(),
+  name: z.string(),
+  version: z.string().optional(),
+  description: z.string().optional(),
+  icon: appIconSpec.optional(),
+  endpoints: z.record(z.string(), appEndpoint).optional(),
+  skills: z.array(appSkillRef).optional(),
+  path: z.string().optional(),
+  sourceURL: z.string().optional(),
+  packageSHA256: z.string().optional(),
+});
+export type AppDefinition = z.infer<typeof appDefinition>;
+
+export const installAppRequest = z.object({
+  packageJSON: z.string().min(1),
+  packageSHA256: z.string().optional(),
+  sourceURL: z.string().optional(),
+});
+
+export const appConnection = z.object({
+  id: z.string(),
+  name: z.string().optional(),
+  appID: z.string(),
+  authType: z.string().optional(),
+  tokenSet: z.boolean(),
+  header: z.string().optional(),
+  prefix: z.string().optional(),
+  token: z.string().optional(),
+  username: z.string().optional(),
+  password: z.string().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
+export type AppConnection = z.infer<typeof appConnection>;
+
+export const listAppsResponse = z.object({ apps: z.array(appDefinition) });
+export const listAppConnectionsResponse = z.object({ connections: z.array(appConnection) });
+
 export const patchWebToolsRequest = z.object({
   searchProvider: z.string().optional(),
   fetchProvider: z.string().optional(),

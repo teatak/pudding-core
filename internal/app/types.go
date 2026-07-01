@@ -13,12 +13,27 @@ const (
 )
 
 type Definition struct {
-	ID          string              `json:"id" yaml:"id"`
-	Name        string              `json:"name" yaml:"name"`
-	Description string              `json:"description,omitempty" yaml:"description,omitempty"`
-	Endpoints   map[string]Endpoint `json:"endpoints,omitempty" yaml:"endpoints,omitempty"`
-	Skills      []SkillRef          `json:"skills,omitempty" yaml:"skills,omitempty"`
-	Path        string              `json:"path,omitempty" yaml:"-"`
+	ID            string              `json:"id" yaml:"id"`
+	Name          string              `json:"name" yaml:"name"`
+	Version       string              `json:"version,omitempty" yaml:"version,omitempty"`
+	Description   string              `json:"description,omitempty" yaml:"description,omitempty"`
+	Icon          *IconSpec           `json:"icon,omitempty" yaml:"icon,omitempty"`
+	Endpoints     map[string]Endpoint `json:"endpoints,omitempty" yaml:"endpoints,omitempty"`
+	Skills        []SkillRef          `json:"skills,omitempty" yaml:"skills,omitempty"`
+	Path          string              `json:"path,omitempty" yaml:"-"`
+	SourceURL     string              `json:"sourceURL,omitempty" yaml:"-"`
+	PackageSHA256 string              `json:"packageSHA256,omitempty" yaml:"-"`
+}
+
+type IconSpec struct {
+	SVG        string      `json:"svg,omitempty" yaml:"svg,omitempty"`
+	Color      *ThemeColor `json:"color,omitempty" yaml:"color,omitempty"`
+	Background *ThemeColor `json:"background,omitempty" yaml:"background,omitempty"`
+}
+
+type ThemeColor struct {
+	Light string `json:"light,omitempty" yaml:"light,omitempty"`
+	Dark  string `json:"dark,omitempty" yaml:"dark,omitempty"`
 }
 
 type Endpoint struct {
@@ -34,8 +49,17 @@ type SkillRef struct {
 	Path        string `json:"path" yaml:"-"`
 }
 
+type SkillDetail struct {
+	ID          string `json:"id,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	Path        string `json:"path"`
+	Content     string `json:"content"`
+}
+
 type Connection struct {
 	ID        string    `json:"id" yaml:"-"`
+	Name      string    `json:"name,omitempty" yaml:"name,omitempty"`
 	AppID     string    `json:"appID" yaml:"app"`
 	Auth      Auth      `json:"-" yaml:"auth,omitempty"`
 	CreatedAt time.Time `json:"createdAt,omitempty" yaml:"-"`
@@ -44,12 +68,21 @@ type Connection struct {
 
 type ConnectionView struct {
 	ID        string    `json:"id"`
+	Name      string    `json:"name,omitempty"`
 	AppID     string    `json:"appID"`
 	AuthType  string    `json:"authType,omitempty"`
 	TokenSet  bool      `json:"tokenSet"`
 	Header    string    `json:"header,omitempty"`
 	CreatedAt time.Time `json:"createdAt,omitempty"`
 	UpdatedAt time.Time `json:"updatedAt,omitempty"`
+}
+
+type ConnectionDetailView struct {
+	ConnectionView
+	Token    string `json:"token,omitempty"`
+	Prefix   string `json:"prefix,omitempty"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
 }
 
 type Auth struct {
@@ -79,12 +112,26 @@ func ViewConnection(c *Connection) ConnectionView {
 	}
 	return ConnectionView{
 		ID:        c.ID,
+		Name:      c.Name,
 		AppID:     c.AppID,
 		AuthType:  c.Auth.Type,
 		TokenSet:  c.Auth.Token != "" || c.Auth.Password != "",
 		Header:    c.Auth.Header,
 		CreatedAt: c.CreatedAt,
 		UpdatedAt: c.UpdatedAt,
+	}
+}
+
+func ViewConnectionDetail(c *Connection) ConnectionDetailView {
+	if c == nil {
+		return ConnectionDetailView{}
+	}
+	return ConnectionDetailView{
+		ConnectionView: ViewConnection(c),
+		Token:          c.Auth.Token,
+		Prefix:         c.Auth.Prefix,
+		Username:       c.Auth.Username,
+		Password:       c.Auth.Password,
 	}
 }
 
@@ -104,6 +151,18 @@ func CloneDefinition(in *Definition) *Definition {
 		return nil
 	}
 	out := *in
+	if in.Icon != nil {
+		icon := *in.Icon
+		if in.Icon.Color != nil {
+			color := *in.Icon.Color
+			icon.Color = &color
+		}
+		if in.Icon.Background != nil {
+			background := *in.Icon.Background
+			icon.Background = &background
+		}
+		out.Icon = &icon
+	}
 	if in.Endpoints != nil {
 		out.Endpoints = make(map[string]Endpoint, len(in.Endpoints))
 		for k, v := range in.Endpoints {

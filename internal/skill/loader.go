@@ -83,7 +83,7 @@ func loadEmbeddedSkillDir(fsys fs.FS, root, dir string) (Skill, error) {
 	if err != nil {
 		return Skill{}, err
 	}
-	virtualDir := path.Join(SystemSubdir, dir)
+	virtualDir := path.Join(BuiltinSubdir, dir)
 	return skillFromData(data, dir, path.Join(virtualDir, SkillFileName), probeIconFS(fsys, root, dir, virtualDir), SourceBuiltin, true)
 }
 

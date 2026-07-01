@@ -15,7 +15,7 @@ type fakeEndpointSource struct {
 	binding *app.EndpointBinding
 }
 
-func (f fakeEndpointSource) ResolveEndpoint(_ context.Context, sessionID, endpointName string) (*app.EndpointBinding, error) {
+func (f fakeEndpointSource) ResolveEndpoint(_ context.Context, sessionID, endpointName, _ string) (*app.EndpointBinding, error) {
 	if sessionID == "" || endpointName == "" {
 		return nil, appErr("missing input")
 	}

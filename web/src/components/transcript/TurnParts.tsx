@@ -716,12 +716,14 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     return fallback;
   }
   const known: Record<string, string> = {
+    builtin_graphql_request: t("transcript.toolGraphQLRequest"),
     builtin_file_delete: t("transcript.toolFileDelete"),
     builtin_file_list: t("transcript.toolFileList"),
     builtin_file_move: t("transcript.toolFileMove"),
     builtin_file_patch: t("transcript.toolFilePatch"),
     builtin_file_read: t("transcript.toolFileRead"),
     builtin_file_write: t("transcript.toolFileWrite"),
+    builtin_rest_request: t("transcript.toolRESTRequest"),
     builtin_skill_read: t("transcript.toolSkillRead"),
     builtin_skill_submit: t("transcript.toolSkillSubmit"),
     builtin_skill_validate: t("transcript.toolSkillValidate"),

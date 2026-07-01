@@ -97,6 +97,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { BrandIcon } from "@/components/BrandIcons";
+import { IdentityIcon } from "@/components/IdentityIcon";
 import {
   cloneProviderProfileForm,
   ProviderProfileEditorDialog,
@@ -1089,13 +1090,7 @@ function SkillDraftRow({
   return (
     <Item className="items-start gap-3 rounded-lg px-3 py-3" variant="outline">
       <ItemMedia>
-        {iconURL ? (
-          <img className="size-8 rounded-md bg-muted object-cover shadow-sm" src={iconURL} alt="" />
-        ) : (
-          <div className="flex size-8 items-center justify-center rounded-md bg-muted text-foreground">
-            <BookOpenText className="size-4" strokeWidth={2.25} />
-          </div>
-        )}
+        <IdentityIcon fallback="skill" fit="contain" src={iconURL || undefined} />
       </ItemMedia>
       <ItemContent className="min-w-0 gap-1">
         <ItemTitle className="flex max-w-full flex-wrap items-center gap-2">
@@ -1150,13 +1145,7 @@ function SkillRow({ deleting, onDelete, skill, token }: { deleting?: boolean; on
   return (
     <Item className="items-start gap-3 rounded-lg px-3 py-3" variant="outline">
       <ItemMedia>
-        {iconURL ? (
-          <img className="size-8 rounded-md bg-muted object-cover shadow-sm" src={iconURL} alt="" />
-        ) : (
-          <div className="flex size-8 items-center justify-center rounded-md bg-muted text-foreground">
-            <BookOpenText className="size-4" strokeWidth={2.25} />
-          </div>
-        )}
+        <IdentityIcon fallback="skill" fit="contain" src={iconURL || undefined} />
       </ItemMedia>
       <ItemContent className="min-w-0 gap-1">
         <ItemTitle className="flex max-w-full flex-wrap items-center gap-2">
@@ -1196,7 +1185,7 @@ function SkillRow({ deleting, onDelete, skill, token }: { deleting?: boolean; on
 
 function skillDisplayPath(skill: Skill) {
   if (skill.source === "builtin") {
-    return `.system/${skill.id}`;
+    return `builtin/${skill.id}`;
   }
   return `skills/${skill.id}`;
 }
@@ -1605,7 +1594,7 @@ function ProviderSettings({ createNonce = 0, token }: { createNonce?: number; to
                 >
                   <div className="flex min-w-0 flex-1 items-center gap-3 text-left">
                     <ItemMedia>
-                      <BrandIcon className="size-9 shrink-0" name={profile.brand || profile.displayName || profile.id} radius="lg" />
+                      <BrandIcon className="shrink-0" name={profile.brand || profile.displayName || profile.id} size="lg" />
                     </ItemMedia>
                     <ItemContent className="min-w-0 gap-0.5">
                       <ItemTitle className="w-full min-w-0 font-normal">

@@ -461,6 +461,22 @@ html[data-shell] .pudding-markdown * {
     background-color: var(--rail-drop-target-background);
 }
 
+.pudding-app-icon[data-has-background="true"] {
+    background-color: var(--app-icon-background);
+}
+
+.dark .pudding-app-icon[data-has-background="true"] {
+    background-color: var(--app-icon-background-dark);
+}
+
+.pudding-app-icon[data-has-color="true"] {
+    color: var(--app-icon-color);
+}
+
+.dark .pudding-app-icon[data-has-color="true"] {
+    color: var(--app-icon-color-dark);
+}
+
 .pudding-session-rail [data-slot="sidebar-header"] [data-slot="sidebar-menu-button"] {
     font-weight: 400;
 }

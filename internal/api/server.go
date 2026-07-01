@@ -48,10 +48,14 @@ func (s *Server) WithSkills(skills skillService) *Server {
 }
 
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
-var apiPrefixes = []string{"/sessions", "/settings", "/providers", "/tools", "/skills", "/skill-drafts", "/skill-assets", "/usage", "/mobile", "/apps", "/app-connections"}
+var apiPrefixes = []string{"/sessions", "/settings", "/providers", "/tools", "/skills", "/skill-drafts", "/skill-assets", "/usage", "/mobile", "/apps", "/app-assets", "/app-skills", "/app-connections"}
 
 type appService interface {
 	ListDefinitions(ctx context.Context) ([]*app.Definition, error)
+	InstallPackage(ctx context.Context, packageJSON []byte, expectedSHA256, sourceURL string) (*app.Definition, error)
+	DeleteDefinition(ctx context.Context, id string) error
+	ReadAsset(ctx context.Context, rel string) ([]byte, string, error)
+	ReadSkill(ctx context.Context, appID, skillPath string) (*app.SkillDetail, error)
 }
 
 type deviceTokenValidator interface {
@@ -121,8 +125,12 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/skill-drafts/:id/apply").POST(s.applySkillDraft)
 	app.Route("/skill-assets/*path").GET(s.getSkillAsset)
 	app.Route("/apps").GET(s.listApps)
+	app.Route("/apps/install").POST(s.installApp)
+	app.Route("/apps/:id").DELETE(s.deleteApp)
+	app.Route("/app-assets/*path").GET(s.getAppAsset)
+	app.Route("/app-skills/*path").GET(s.getAppSkill)
 	app.Route("/app-connections").GET(s.listAppConnections)
-	app.Route("/app-connections/:id").PUT(s.putAppConnection).DELETE(s.deleteAppConnection)
+	app.Route("/app-connections/:id").GET(s.getAppConnection).PUT(s.putAppConnection).DELETE(s.deleteAppConnection)
 	app.Route("/sessions/:id/app-grants").GET(s.listSessionAppGrants).PUT(s.putSessionAppGrant)
 	app.Route("/sessions/:id/app-grants/:appID/:connectionID").DELETE(s.deleteSessionAppGrant)
 	app.Route("/usage/daily").GET(s.getDailyUsage)

@@ -70,6 +70,9 @@ func (m *Manager) PutAppConnection(_ context.Context, conn *app.Connection) erro
 	existing := cfg.Connections[id]
 	cp := app.CloneConnection(conn)
 	cp.ID = ""
+	if strings.TrimSpace(cp.Name) == "" {
+		cp.Name = id
+	}
 	if existing != nil && !existing.CreatedAt.IsZero() {
 		cp.CreatedAt = existing.CreatedAt
 	} else {

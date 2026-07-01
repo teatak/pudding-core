@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	appsvc "github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
@@ -100,7 +101,7 @@ func TestSkillsAPI(t *testing.T) {
 	var foundBuiltin, foundUser bool
 	for _, item := range got["skills"] {
 		if item["id"] == "skill-creator" {
-			if item["scope"] != "global" || item["source"] != "builtin" || item["system"] != true || item["iconPath"] != ".system/skill-creator/assets/icon.svg" {
+			if item["scope"] != "global" || item["source"] != "builtin" || item["system"] != true || item["iconPath"] != "builtin/skill-creator/assets/icon.svg" {
 				t.Fatalf("unexpected skill-creator view: %+v", item)
 			}
 			foundBuiltin = true
@@ -114,6 +115,96 @@ func TestSkillsAPI(t *testing.T) {
 	}
 	if !foundBuiltin || !foundUser {
 		t.Fatalf("expected builtin and user skills, got: %+v", got)
+	}
+}
+
+func TestAppAssetAPI(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, "apps", "github", "assets"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "apps", "github", "assets", "icon.svg"), []byte("<svg/>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithApps(appsvc.NewService(home, nil, nil)).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+
+	resp := req(t, http.MethodGet, srv.URL+"/app-assets/github/assets/icon.svg?token="+testToken, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "image/svg+xml" {
+		t.Fatalf("unexpected content type: %s", got)
+	}
+}
+
+func TestAppSkillAPI(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
+	home := t.TempDir()
+	appDir := filepath.Join(home, "apps", "github")
+	skillDir := filepath.Join(appDir, "skills", "issues")
+	if err := os.MkdirAll(skillDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "app.yaml"), []byte(`id: github
+name: GitHub
+skills:
+  - skills/issues/SKILL.md
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: github-issues\ndescription: Read issues.\n---\nBody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithApps(appsvc.NewService(home, nil, nil)).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+
+	resp := req(t, http.MethodGet, srv.URL+"/app-skills/github/skills/issues/SKILL.md", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	got := decodeJSON[map[string]any](t, resp)
+	if got["name"] != "github-issues" || !strings.Contains(got["content"].(string), "Body") {
+		t.Fatalf("unexpected app skill detail: %+v", got)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/app-skills/github/app.yaml", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("want 404, got %d", resp.StatusCode)
+	}
+}
+
+func TestDeleteAppAPI(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
+	home := t.TempDir()
+	appDir := filepath.Join(home, "apps", "github")
+	if err := os.MkdirAll(appDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "app.yaml"), []byte("id: github\nname: GitHub\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithApps(appsvc.NewService(home, nil, nil)).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+
+	resp := req(t, http.MethodDelete, srv.URL+"/apps/github", nil)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("want 204, got %d", resp.StatusCode)
+	}
+	if _, err := os.Stat(appDir); !os.IsNotExist(err) {
+		t.Fatalf("app dir should be removed, stat err=%v", err)
+	}
+
+	resp = req(t, http.MethodDelete, srv.URL+"/apps/github", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("want 404, got %d", resp.StatusCode)
 	}
 }
 

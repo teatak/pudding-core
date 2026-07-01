@@ -9,8 +9,10 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/skill"
 )
 
@@ -38,6 +40,7 @@ type Input struct {
 	UserInstruction string
 	Mode            string
 	Skills          []skill.Skill
+	Apps            []*app.Definition
 }
 
 type Output struct {
@@ -48,14 +51,19 @@ type Output struct {
 type Loader struct {
 	home   string
 	skills SkillLister
+	apps   AppLister
 }
 
 func NewLoader(home string) *Loader {
-	return &Loader{home: home, skills: skill.NewService(home)}
+	return &Loader{home: home, skills: skill.NewService(home), apps: app.NewService(home, nil, nil)}
 }
 
 type SkillLister interface {
 	ListSkills(ctx context.Context) ([]skill.Skill, error)
+}
+
+type AppLister interface {
+	ListDefinitions(ctx context.Context) ([]*app.Definition, error)
 }
 
 func (l *Loader) Prompt(ctx context.Context, mode string) (Output, error) {
@@ -72,7 +80,16 @@ func (l *Loader) Prompt(ctx context.Context, mode string) (Output, error) {
 			skills = loaded
 		}
 	}
-	return Assemble(Input{UserInstruction: user, Mode: mode, Skills: skills}), nil
+	var apps []*app.Definition
+	if l.apps != nil {
+		loaded, err := l.apps.ListDefinitions(ctx)
+		if err != nil {
+			slog.Warn("prompt: load apps failed", "error", err)
+		} else {
+			apps = loaded
+		}
+	}
+	return Assemble(Input{UserInstruction: user, Mode: mode, Skills: skills, Apps: apps}), nil
 }
 
 func Assemble(input Input) Output {
@@ -84,6 +101,9 @@ func Assemble(input Input) Output {
 		segments = append(segments, Segment{ID: "mode_" + normalizeMode(input.Mode), Layer: "mode", Content: mode})
 	}
 	if seg := skillsSegment(input.Skills); seg != nil {
+		segments = append(segments, *seg)
+	}
+	if seg := appsSegment(input.Apps); seg != nil {
 		segments = append(segments, *seg)
 	}
 	if user := strings.TrimSpace(input.UserInstruction); user != "" {
@@ -103,6 +123,76 @@ func Assemble(input Input) Output {
 		}
 	}
 	return Output{SystemInstruction: strings.Join(parts, "\n\n"), Segments: segments}
+}
+
+func appsSegment(list []*app.Definition) *Segment {
+	if len(list) == 0 {
+		return nil
+	}
+	var b strings.Builder
+	b.WriteString("## Installed Apps\n\n")
+	b.WriteString("Installed apps provide configured endpoints and app-scoped skills.\n")
+	b.WriteString("Endpoint calls use configured app connections. Use the listed endpoint names with `builtin_rest_request` or `builtin_graphql_request`; omit `connection` unless the tool reports multiple configured connections.\n")
+	b.WriteString("Full app SKILL.md bodies are not loaded by default. When an app skill matches, call `builtin_skill_read(app_id=\"<app id>\", skill_id=\"<skill path>\")` once, then follow the returned instructions.\n")
+	b.WriteString("Do not proactively load untriggered app skills.\n\n")
+	for _, item := range list {
+		if item == nil {
+			continue
+		}
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			name = id
+		}
+		desc := strings.TrimSpace(item.Description)
+		if desc != "" {
+			fmt.Fprintf(&b, "- App `%s` (%s) — %s\n", id, name, desc)
+		} else {
+			fmt.Fprintf(&b, "- App `%s` (%s)\n", id, name)
+		}
+		if len(item.Endpoints) > 0 {
+			names := make([]string, 0, len(item.Endpoints))
+			for name := range item.Endpoints {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				endpoint := item.Endpoints[name]
+				kind := strings.TrimSpace(endpoint.Kind)
+				if kind == "" {
+					kind = "endpoint"
+				}
+				if endpoint.Description != "" {
+					fmt.Fprintf(&b, "  - Endpoint `%s` (%s) — %s\n", name, kind, endpoint.Description)
+				} else {
+					fmt.Fprintf(&b, "  - Endpoint `%s` (%s)\n", name, kind)
+				}
+			}
+		}
+		for _, sk := range item.Skills {
+			path := strings.TrimSpace(sk.Path)
+			desc := strings.TrimSpace(sk.Description)
+			if path == "" || desc == "" {
+				continue
+			}
+			name := strings.TrimSpace(sk.Name)
+			if name == "" {
+				name = strings.TrimSpace(sk.ID)
+			}
+			if name == "" {
+				name = path
+			}
+			fmt.Fprintf(&b, "  - Skill `%s` (path: `%s`) — %s\n", name, path, desc)
+		}
+	}
+	content := strings.TrimSpace(b.String())
+	if content == "" {
+		return nil
+	}
+	return &Segment{ID: "apps_index", Layer: "app", Content: content}
 }
 
 func skillsSegment(list []skill.Skill) *Segment {

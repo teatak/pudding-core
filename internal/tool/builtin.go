@@ -37,7 +37,11 @@ type WebConfigSource interface {
 }
 
 type AppEndpointSource interface {
-	ResolveEndpoint(ctx context.Context, sessionID, endpointName string) (*app.EndpointBinding, error)
+	ResolveEndpoint(ctx context.Context, sessionID, endpointName, connection string) (*app.EndpointBinding, error)
+}
+
+type AppSkillReader interface {
+	ReadSkill(ctx context.Context, appID, skillPath string) (*app.SkillDetail, error)
 }
 
 type SkillReader interface {
@@ -55,6 +59,7 @@ type BuiltinOption func(*BuiltinRunner)
 type BuiltinRunner struct {
 	webConfig     WebConfigSource
 	appEndpoints  AppEndpointSource
+	appSkills     AppSkillReader
 	skillReader   SkillReader
 	skillDrafts   SkillDraftSource
 	homeDir       string
@@ -84,6 +89,15 @@ func WithWebConfig(source WebConfigSource) BuiltinOption {
 func WithAppEndpoints(source AppEndpointSource) BuiltinOption {
 	return func(r *BuiltinRunner) {
 		r.appEndpoints = source
+		if skills, ok := source.(AppSkillReader); ok {
+			r.appSkills = skills
+		}
+	}
+}
+
+func WithAppSkills(source AppSkillReader) BuiltinOption {
+	return func(r *BuiltinRunner) {
+		r.appSkills = source
 	}
 }
 
@@ -149,8 +163,8 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        SkillRead,
-			Description: "Read the full SKILL.md body for one registered skill after the user's intent clearly matches the skill index.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"skill_id":{"type":"string","description":"Registered skill id from the Available Skills index, for example skill-creator."}},"required":["skill_id"],"additionalProperties":false}`),
+			Description: "Read the full SKILL.md body for one registered global skill or one installed app skill after the user's intent clearly matches the prompt index.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"skill_id":{"type":"string","description":"For global skills, pass the id from Available Skills. For app skills, pass the skill path from Installed Apps."},"app_id":{"type":"string","description":"Optional installed app id. When set, skill_id must be an app skill path from that app."}},"required":["skill_id"],"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{
@@ -203,14 +217,14 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        RESTRequest,
-			Description: "Send one HTTP request to a session-granted REST endpoint. Pass an endpoint name plus a relative path; authorization and configured headers are injected by Pudding.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"endpoint":{"type":"string","description":"Configured endpoint name, for example github_rest. Required; there is no default endpoint."},"method":{"type":"string","enum":["GET","POST","PUT","PATCH","DELETE"],"description":"HTTP method. Defaults to GET."},"path":{"type":"string","description":"Relative path under the endpoint base URL, for example /repos/owner/repo/issues. Must not be a full URL."},"query":{"type":"object","additionalProperties":{"type":["string","number","boolean"]},"description":"Optional query parameters."},"body_json":{"description":"Optional JSON body. Mutually exclusive with body_text."},"body_text":{"type":"string","description":"Optional text body. Mutually exclusive with body_json."}},"required":["endpoint","path"],"additionalProperties":false}`),
+			Description: "Send one HTTP request to a configured REST endpoint. Pass an endpoint name plus a relative path; authorization and configured headers are injected by Pudding. Omit connection when the app has one connection.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"endpoint":{"type":"string","description":"Configured endpoint name, for example github_rest. Required; there is no default endpoint."},"connection":{"type":"string","description":"Optional connection name or id. Only pass this when the endpoint reports multiple configured connections."},"method":{"type":"string","enum":["GET","POST","PUT","PATCH","DELETE"],"description":"HTTP method. Defaults to GET."},"path":{"type":"string","description":"Relative path under the endpoint base URL, for example /repos/owner/repo/issues. Must not be a full URL."},"query":{"type":"object","additionalProperties":{"type":["string","number","boolean"]},"description":"Optional query parameters."},"body_json":{"description":"Optional JSON body. Mutually exclusive with body_text."},"body_text":{"type":"string","description":"Optional text body. Mutually exclusive with body_json."}},"required":["endpoint","path"],"additionalProperties":false}`),
 			Capability:  store.ModeResearch,
 		},
 		{
 			Name:        GraphQLRequest,
-			Description: "Send one GraphQL query or mutation to a session-granted GraphQL endpoint. Authorization is injected by Pudding.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"endpoint":{"type":"string","description":"Configured GraphQL endpoint name. Required; there is no default endpoint."},"query":{"type":"string","description":"GraphQL query or mutation text."},"variables":{"description":"Optional GraphQL variables object or JSON object string."}},"required":["endpoint","query"],"additionalProperties":false}`),
+			Description: "Send one GraphQL query or mutation to a configured GraphQL endpoint. Authorization is injected by Pudding. Omit connection when the app has one connection.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"endpoint":{"type":"string","description":"Configured GraphQL endpoint name. Required; there is no default endpoint."},"connection":{"type":"string","description":"Optional connection name or id. Only pass this when the endpoint reports multiple configured connections."},"query":{"type":"string","description":"GraphQL query or mutation text."},"variables":{"description":"Optional GraphQL variables object or JSON object string."}},"required":["endpoint","query"],"additionalProperties":false}`),
 			Capability:  store.ModeResearch,
 		},
 	}

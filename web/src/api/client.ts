@@ -1,5 +1,7 @@
 import {
   listBuiltinToolsResponse,
+  listAppConnectionsResponse,
+  listAppsResponse,
   listSkillDraftsResponse,
   listSkillsResponse,
   compactResponse,
@@ -27,7 +29,14 @@ import {
   conversationTurn,
   dailyUsageResponse,
   userPromptResponse,
+  appDefinition,
+  appConnection,
+  appSkillDetail,
+  installAppRequest,
   webToolsConfig,
+  type AppConnection,
+  type AppDefinition,
+  type AppSkillDetail,
   type BuiltinTool,
   type ContentPart,
   type DailyUsageStat,
@@ -94,6 +103,16 @@ export type SubmitResult = z.infer<typeof submitResponse>;
 export type CompactResult = z.infer<typeof compactResponse>;
 export type MobilePairing = z.infer<typeof mobilePairingResponse>;
 export type UserPrompt = z.infer<typeof userPromptResponse>;
+export type AppConnectionPayload = {
+  appID: string;
+  name?: string;
+  authType: "none" | "bearer" | "token" | "basic" | "header";
+  token?: string;
+  prefix?: string;
+  header?: string;
+  username?: string;
+  password?: string;
+};
 
 function authHeaders(token: string) {
   return {
@@ -344,6 +363,61 @@ export function listBuiltinTools(token: string): Promise<{ tools: BuiltinTool[] 
   return request(token, "/tools/builtin", listBuiltinToolsResponse);
 }
 
+export function listApps(token: string): Promise<{ apps: AppDefinition[] }> {
+  return request(token, "/apps", listAppsResponse);
+}
+
+export function installAppPackage(token: string, body: z.infer<typeof installAppRequest>): Promise<AppDefinition> {
+  return request(token, "/apps/install", appDefinition, {
+    method: "POST",
+    body: JSON.stringify(installAppRequest.parse(body)),
+  });
+}
+
+export async function deleteApp(token: string, id: string): Promise<void> {
+  await request(token, `/apps/${encodeURIComponent(id)}`, z.null(), {
+    method: "DELETE",
+  });
+}
+
+export function listAppConnections(token: string): Promise<{ connections: AppConnection[] }> {
+  return request(token, "/app-connections", listAppConnectionsResponse);
+}
+
+export function getAppConnection(token: string, id: string): Promise<AppConnection> {
+  return request(token, `/app-connections/${encodeURIComponent(id)}`, appConnection);
+}
+
+export function putAppConnection(token: string, id: string, body: AppConnectionPayload): Promise<AppConnection> {
+  return request(token, `/app-connections/${encodeURIComponent(id)}`, appConnection, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteAppConnection(token: string, id: string): Promise<void> {
+  await request(token, `/app-connections/${encodeURIComponent(id)}`, z.null(), {
+    method: "DELETE",
+  });
+}
+
+export function getAppSkill(token: string, appID: string, path: string): Promise<AppSkillDetail> {
+  const skillPath = `${appID}/${path}`.split("/").map(encodeURIComponent).join("/");
+  return request(token, `/app-skills/${skillPath}`, appSkillDetail);
+}
+
+export function appIconURL(token: string, app: { id: string; icon?: { svg?: string } }): string | undefined {
+  const raw = app.icon?.svg?.trim();
+  if (!raw) {
+    return undefined;
+  }
+  if (raw.startsWith("/") || /^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+    return undefined;
+  }
+  const path = `${app.id}/${raw}`.split("/").map(encodeURIComponent).join("/");
+  return apiURL(`/app-assets/${path}?token=${encodeURIComponent(token)}`);
+}
+
 export function listSkills(token: string): Promise<{ skills: Skill[] }> {
   return request(token, "/skills", listSkillsResponse);
 }
@@ -442,5 +516,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { BuiltinTool, ContentPart, DailyUsageStat, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
+export type { AppConnection, AppDefinition, AppSkillDetail, BuiltinTool, ContentPart, DailyUsageStat, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
 export { createProviderRequest, patchProviderRequest };

@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import {
   Blocks,
+  Cable,
   Ellipsis,
   MessageSquareText,
   PanelLeft,
@@ -12,7 +13,6 @@ import {
   Rows2,
   Settings,
   Trash,
-  Workflow,
 } from "lucide-react";
 import {
   createContext,
@@ -114,6 +114,7 @@ export function SessionRail({
 }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate({ from: "/" });
+  const { view } = useSearch({ from: "/" });
   const { t } = useI18n();
   const clearSession = useOverlayStore((state) => state.clearSession);
   const runningTurns = useOverlayStore((state) => state.runningTurns);
@@ -129,6 +130,7 @@ export function SessionRail({
     enabled: Boolean(token),
   });
   const sessions = sessionsQuery.data?.sessions || [];
+  const appsActive = view === "apps";
   const activeSessionIDSet = new Set([selectedSessionID, ...activeSessionIDs].filter(Boolean));
   const backgroundSessionIDs = [
     ...sessions.filter((session) => session.running).map((session) => session.id),
@@ -228,6 +230,7 @@ export function SessionRail({
   function renderPanel() {
     return (
       <RailPanel
+        appsActive={appsActive}
         draftActive={draftActive}
         deletePending={deleteMutation.isPending}
         isError={sessionsQuery.isError}
@@ -241,6 +244,8 @@ export function SessionRail({
             search: (prev) => {
               const next = { ...(prev as AppSearch), draft: "1" };
               delete next.session;
+              delete next.split;
+              delete next.view;
               return next;
             },
           });
@@ -257,7 +262,12 @@ export function SessionRail({
             to: "/",
             search: (prev) => {
               const search = prev as AppSearch;
-              return search.session === id ? search : { ...search, split: id };
+              if (search.session === id) {
+                return search;
+              }
+              const next = { ...search, split: id };
+              delete next.view;
+              return next;
             },
           });
           if (isMobile) {
@@ -275,10 +285,12 @@ export function SessionRail({
               if (search.split === id && search.session) {
                 const next = { ...search, session: id, split: search.session };
                 delete next.draft;
+                delete next.view;
                 return next;
               }
               const next = { ...search, session: id };
               delete next.draft;
+              delete next.view;
               return next;
             },
           });
@@ -294,7 +306,7 @@ export function SessionRail({
   const popoverAlignOffset = collapsed ? -(readTrafficInsetPx() + popoverAlignNudgePx) : 0;
   const railButton = (
     <div
-      className="pudding-rail-toggle no-drag-region absolute top-0 left-[11px] z-30 flex items-center"
+      className="pudding-rail-toggle no-drag-region absolute top-0 left-[11px] z-40 flex items-center"
       style={{
         height: "var(--toolbar-h)",
         marginLeft: "var(--traffic-inset)",
@@ -508,6 +520,7 @@ type RailPanelProps = {
   token: string;
   sessions: Session[];
   selectedSessionID: string | undefined;
+  appsActive: boolean;
   isLoading: boolean;
   isError: boolean;
   draftActive: boolean;
@@ -535,6 +548,7 @@ function RailPanel({
   token,
   sessions,
   selectedSessionID,
+  appsActive,
   isLoading,
   isError,
   draftActive,
@@ -549,6 +563,7 @@ function RailPanel({
   onRefetch,
 }: RailPanelProps) {
   const { t } = useI18n();
+  const navigate = useNavigate({ from: "/" });
   const [draggingSessionID, setDraggingSessionID] = useState<string | null>(null);
   const [dragTarget, setDragTarget] = useState<SessionDropTarget | null>(null);
   const [dragPreview, setDragPreview] = useState<{
@@ -776,8 +791,22 @@ function RailPanel({
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <SidebarMenuButton>
-                <Workflow />
+              <SidebarMenuButton
+                isActive={appsActive}
+                onClick={() => {
+                  void navigate({
+                    to: "/",
+                    search: (prev) => {
+                      const next = { ...(prev as AppSearch), view: "apps" as const };
+                      delete next.session;
+                      delete next.split;
+                      delete next.draft;
+                      return next;
+                    },
+                  });
+                }}
+              >
+                <Cable />
                 <span>{t("rail.automations")}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>

@@ -5,6 +5,7 @@ import { useGroupRef } from "react-resizable-panels";
 
 import { CanvasPane } from "@/components/CanvasPane";
 import { ChatPane } from "@/components/ChatPane";
+import { AppsPane } from "@/components/AppsPane";
 import { SessionRail } from "@/components/SessionRail";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { PairingGate, TokenGate } from "@/components/TokenGate";
@@ -31,7 +32,7 @@ import { setToken, useToken } from "@/state/tokenStore";
 
 export function App() {
   const token = useToken();
-  const { session: selectedSessionID, draft, split: splitSessionID } = useSearch({ from: "/" });
+  const { session: selectedSessionID, draft, split: splitSessionID, view } = useSearch({ from: "/" });
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const canvasOpen = useCanvasOpen();
@@ -57,9 +58,10 @@ export function App() {
   );
   // 上下分屏(docs/design.md 2.2):pane 三件套整体复用,路由是唯一事实源;
   // split 与主 pane 相同的会话不重复渲染
-  const showSplit = Boolean(splitSessionID && splitSessionID !== selectedSessionID);
-  const draftActive = draft === "1" && !selectedSessionID;
-  const activeSessionIDs = [selectedSessionID, showSplit ? splitSessionID : undefined].filter(
+  const appsActive = view === "apps";
+  const showSplit = !appsActive && Boolean(splitSessionID && splitSessionID !== selectedSessionID);
+  const draftActive = !appsActive && draft === "1" && !selectedSessionID;
+  const activeSessionIDs = (appsActive ? [] : [selectedSessionID, showSplit ? splitSessionID : undefined]).filter(
     (sessionID): sessionID is string => Boolean(sessionID),
   );
 
@@ -192,11 +194,15 @@ export function App() {
         <SessionRail
           activeSessionIDs={activeSessionIDs}
           draftActive={draftActive}
-          selectedSessionID={selectedSessionID}
+          selectedSessionID={appsActive ? undefined : selectedSessionID}
           token={token}
         />
         {/* rail 固定宽度,不参与 resize。核心工作区只在 chat/canvas 之间分配空间。 */}
         <div className="relative h-full min-w-0 flex-1 bg-background">
+          {appsActive ? (
+            <AppsPane token={token} />
+          ) : (
+            <>
           <div className="pudding-canvas-toggle no-drag-region absolute top-0 right-[13px] z-30 flex h-(--toolbar-h) items-center">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -269,6 +275,8 @@ export function App() {
                 {canvasOpen ? <CanvasPane /> : null}
               </ResizablePanel>
             </ResizablePanelGroup>
+          )}
+            </>
           )}
         </div>
       </div>

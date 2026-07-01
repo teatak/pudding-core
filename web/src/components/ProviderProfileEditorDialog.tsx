@@ -63,8 +63,8 @@ const providerProtocolSchema = z.enum(["openai-compatible", "openai-responses", 
 const PROVIDER_PROTOCOL_OPTIONS: ProviderPresetProtocol[] = ["openai-compatible", "openai-responses", "google", "anthropic"];
 const BASE_REASONING_EFFORT_OPTIONS = ["auto", "low", "medium", "high"];
 const OPENAI_REASONING_EFFORT_OPTIONS = [...BASE_REASONING_EFFORT_OPTIONS, "xhigh"];
-const optionSelectedClass = "border-primary/45 bg-primary/5 text-foreground";
-const optionIdleClass = "bg-background text-muted-foreground";
+const optionSelectedClass = "border-primary/45 bg-primary/10 text-foreground";
+const optionIdleClass = "bg-transparent text-muted-foreground hover:bg-transparent";
 
 const modelFormSchema = z.object({
   id: z.string().trim().min(1),

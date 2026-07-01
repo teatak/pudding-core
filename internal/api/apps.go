@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -20,6 +21,7 @@ type appConnectionConfig interface {
 
 type putAppConnectionReq struct {
 	AppID    string `json:"appID"`
+	Name     string `json:"name"`
 	AuthType string `json:"authType"`
 	Token    string `json:"token"`
 	Prefix   string `json:"prefix"`
@@ -36,6 +38,12 @@ type putSessionAppGrantReq struct {
 	Constraints      json.RawMessage `json:"constraints"`
 }
 
+type installAppReq struct {
+	PackageJSON   string `json:"packageJSON"`
+	PackageSHA256 string `json:"packageSHA256"`
+	SourceURL     string `json:"sourceURL"`
+}
+
 func (s *Server) listApps(c *cart.Context) error {
 	if s.apps == nil {
 		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_service_unavailable"})
@@ -46,6 +54,92 @@ func (s *Server) listApps(c *cart.Context) error {
 		return s.fail(c, err)
 	}
 	c.JSON(http.StatusOK, map[string]any{"apps": apps})
+	return nil
+}
+
+func (s *Server) installApp(c *cart.Context) error {
+	if s.apps == nil {
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_service_unavailable"})
+		return nil
+	}
+	var req installAppReq
+	if err := decode(c, &req); err != nil {
+		return badRequest(c, "invalid json body")
+	}
+	if strings.TrimSpace(req.PackageJSON) == "" {
+		return badRequest(c, "packageJSON is required")
+	}
+	def, err := s.apps.InstallPackage(c.Request.Context(), []byte(req.PackageJSON), req.PackageSHA256, req.SourceURL)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, def)
+	return nil
+}
+
+func (s *Server) deleteApp(c *cart.Context) error {
+	if s.apps == nil {
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_service_unavailable"})
+		return nil
+	}
+	id, _ := c.Param("id")
+	if err := s.apps.DeleteDefinition(c.Request.Context(), id); err != nil {
+		if errors.Is(err, app.ErrInvalidID) {
+			return badRequest(c, "invalid app id")
+		}
+		if errors.Is(err, app.ErrNotFound) {
+			c.JSON(http.StatusNotFound, map[string]string{"error": "app_not_found"})
+			return nil
+		}
+		return s.fail(c, err)
+	}
+	c.String(http.StatusNoContent, "")
+	return nil
+}
+
+func (s *Server) getAppAsset(c *cart.Context) error {
+	if s.apps == nil {
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_service_unavailable"})
+		return nil
+	}
+	rel, _ := c.Param("path")
+	data, contentType, err := s.apps.ReadAsset(c.Request.Context(), rel)
+	if err != nil {
+		if errors.Is(err, app.ErrInvalidAsset) {
+			c.JSON(http.StatusNotFound, map[string]string{"error": "app_asset_not_found"})
+			return nil
+		}
+		return s.fail(c, err)
+	}
+	c.Header("Cache-Control", "private, max-age=300")
+	c.Data(http.StatusOK, contentType, data)
+	return nil
+}
+
+func (s *Server) getAppSkill(c *cart.Context) error {
+	if s.apps == nil {
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_service_unavailable"})
+		return nil
+	}
+	rel, _ := c.Param("path")
+	parts := strings.SplitN(strings.TrimPrefix(rel, "/"), "/", 2)
+	if len(parts) != 2 {
+		return badRequest(c, "invalid app skill path")
+	}
+	id := parts[0]
+	skillPath := parts[1]
+	detail, err := s.apps.ReadSkill(c.Request.Context(), id, skillPath)
+	if err != nil {
+		if errors.Is(err, app.ErrInvalidID) {
+			return badRequest(c, "invalid app id")
+		}
+		if errors.Is(err, app.ErrNotFound) {
+			c.JSON(http.StatusNotFound, map[string]string{"error": "app_skill_not_found"})
+			return nil
+		}
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, detail)
 	return nil
 }
 
@@ -63,6 +157,24 @@ func (s *Server) listAppConnections(c *cart.Context) error {
 		views = append(views, app.ViewConnection(conn))
 	}
 	c.JSON(http.StatusOK, app.AppConnectionsView{Connections: views})
+	return nil
+}
+
+func (s *Server) getAppConnection(c *cart.Context) error {
+	id, _ := c.Param("id")
+	cfg, ok := s.appConnectionConfig(c)
+	if !ok {
+		return nil
+	}
+	conn, err := cfg.GetAppConnection(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			c.JSON(http.StatusNotFound, map[string]string{"error": "app_connection_not_found"})
+			return nil
+		}
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, app.ViewConnectionDetail(conn))
 	return nil
 }
 
@@ -86,6 +198,7 @@ func (s *Server) putAppConnection(c *cart.Context) error {
 	}
 	conn := &app.Connection{
 		ID:    id,
+		Name:  strings.TrimSpace(req.Name),
 		AppID: strings.TrimSpace(req.AppID),
 		Auth: app.Auth{
 			Type:     authType,

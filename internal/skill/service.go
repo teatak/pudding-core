@@ -120,7 +120,7 @@ func (s *Service) ReadAsset(_ context.Context, rel string) ([]byte, string, erro
 	offset := 0
 	system := false
 	draft := false
-	if parts[0] == SystemSubdir {
+	if parts[0] == BuiltinSubdir {
 		if len(parts) != 4 {
 			return nil, "", ErrInvalidAsset
 		}

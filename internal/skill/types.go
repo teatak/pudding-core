@@ -6,7 +6,7 @@ const (
 	SourceBuiltin = "builtin"
 	SourceUser    = "user"
 
-	SystemSubdir = ".system"
+	BuiltinSubdir = "builtin"
 )
 
 type Skill struct {

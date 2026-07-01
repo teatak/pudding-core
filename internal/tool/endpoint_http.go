@@ -62,7 +62,7 @@ func (r *BuiltinRunner) restRequest(ctx context.Context, call Call) Result {
 	if err != nil {
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "invalid_arguments", "error": err.Error()})
 	}
-	binding, err := r.resolveAppEndpoint(ctx, call.SessionID, stringArg(args, "endpoint"), app.EndpointKindREST)
+	binding, err := r.resolveAppEndpoint(ctx, call.SessionID, stringArg(args, "endpoint"), stringArg(args, "connection"), app.EndpointKindREST)
 	if err != nil {
 		return toolJSON(out, false, endpointResolveError("rest_endpoint", err))
 	}
@@ -106,7 +106,7 @@ func (r *BuiltinRunner) graphqlRequest(ctx context.Context, call Call) Result {
 	if query == "" {
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "missing_query"})
 	}
-	binding, err := r.resolveAppEndpoint(ctx, call.SessionID, stringArg(args, "endpoint"), app.EndpointKindGraphQL)
+	binding, err := r.resolveAppEndpoint(ctx, call.SessionID, stringArg(args, "endpoint"), stringArg(args, "connection"), app.EndpointKindGraphQL)
 	if err != nil {
 		return toolJSON(out, false, endpointResolveError("graphql_endpoint", err))
 	}
@@ -131,11 +131,11 @@ func (r *BuiltinRunner) graphqlRequest(ctx context.Context, call Call) Result {
 	return r.doEndpointRequest(ctx, out, payload)
 }
 
-func (r *BuiltinRunner) resolveAppEndpoint(ctx context.Context, sessionID, endpointName, wantKind string) (*app.EndpointBinding, error) {
+func (r *BuiltinRunner) resolveAppEndpoint(ctx context.Context, sessionID, endpointName, connection, wantKind string) (*app.EndpointBinding, error) {
 	if r.appEndpoints == nil {
 		return nil, errors.New("app endpoints unavailable")
 	}
-	binding, err := r.appEndpoints.ResolveEndpoint(ctx, sessionID, endpointName)
+	binding, err := r.appEndpoints.ResolveEndpoint(ctx, sessionID, endpointName, connection)
 	if err != nil {
 		return nil, err
 	}
@@ -222,6 +222,20 @@ func (r *BuiltinRunner) doEndpointRequest(ctx context.Context, out Result, paylo
 
 func endpointResolveError(kind string, err error) map[string]any {
 	reason := "endpoint_unavailable"
+	var resolveErr *app.EndpointResolveError
+	if errors.As(err, &resolveErr) {
+		out := map[string]any{"ok": false, "reason": resolveErr.Reason, "error": resolveErr.Error()}
+		if resolveErr.Endpoint != "" {
+			out["endpoint"] = resolveErr.Endpoint
+		}
+		if resolveErr.Connection != "" {
+			out["connection"] = resolveErr.Connection
+		}
+		if len(resolveErr.Connections) > 0 {
+			out["connections"] = resolveErr.Connections
+		}
+		return out
+	}
 	if errors.Is(err, context.Canceled) {
 		reason = "cancelled"
 	}

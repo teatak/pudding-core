@@ -4,10 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/store"
+)
+
+var (
+	ErrInvalidID = errors.New("app: invalid id")
+	ErrNotFound  = errors.New("app: not found")
 )
 
 type ConnectionSource interface {
@@ -17,6 +24,38 @@ type ConnectionSource interface {
 
 type GrantSource interface {
 	ListSessionAppGrants(ctx context.Context, sessionID string) ([]*store.SessionAppGrant, error)
+}
+
+type ConnectionChoice struct {
+	ID    string `json:"id"`
+	Name  string `json:"name,omitempty"`
+	AppID string `json:"appID"`
+}
+
+type EndpointResolveError struct {
+	Reason      string             `json:"reason"`
+	Endpoint    string             `json:"endpoint,omitempty"`
+	Connection  string             `json:"connection,omitempty"`
+	Connections []ConnectionChoice `json:"connections,omitempty"`
+}
+
+func (e *EndpointResolveError) Error() string {
+	if e == nil {
+		return ""
+	}
+	switch e.Reason {
+	case "connection_required":
+		if len(e.Connections) > 1 {
+			return fmt.Sprintf("multiple connections are configured for endpoint %q; choose one by connection name", e.Endpoint)
+		}
+		return fmt.Sprintf("no connection is configured for endpoint %q", e.Endpoint)
+	case "connection_not_found":
+		return fmt.Sprintf("connection %q is not configured for endpoint %q", e.Connection, e.Endpoint)
+	case "endpoint_ambiguous":
+		return fmt.Sprintf("endpoint %q matches multiple app connections", e.Endpoint)
+	default:
+		return fmt.Sprintf("endpoint %q is not available", e.Endpoint)
+	}
 }
 
 type Service struct {
@@ -48,10 +87,95 @@ func (s *Service) ListDefinitions(ctx context.Context) ([]*Definition, error) {
 	return out, nil
 }
 
-func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName string) (*EndpointBinding, error) {
+func (s *Service) InstallPackage(ctx context.Context, packageJSON []byte, expectedSHA256, sourceURL string) (*Definition, error) {
+	if s == nil {
+		return nil, errors.New("app service unavailable")
+	}
+	def, err := InstallPackage(s.appsRoot, packageJSON, expectedSHA256, sourceURL)
+	if err != nil {
+		return nil, err
+	}
+	return CloneDefinition(def), nil
+}
+
+func (s *Service) DeleteDefinition(ctx context.Context, id string) error {
+	if s == nil {
+		return errors.New("app service unavailable")
+	}
+	id = strings.TrimSpace(id)
+	if !appIDPattern.MatchString(id) {
+		return ErrInvalidID
+	}
+	target := filepath.Join(s.appsRoot, id)
+	if _, err := os.Stat(filepath.Join(target, AppFileName)); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if err := os.RemoveAll(target); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Service) ReadAsset(ctx context.Context, rel string) ([]byte, string, error) {
+	if s == nil {
+		return nil, "", errors.New("app service unavailable")
+	}
+	return ReadAsset(s.appsRoot, rel)
+}
+
+func (s *Service) ReadSkill(ctx context.Context, appID, skillPath string) (*SkillDetail, error) {
+	if s == nil {
+		return nil, errors.New("app service unavailable")
+	}
+	appID = strings.TrimSpace(appID)
+	if !appIDPattern.MatchString(appID) {
+		return nil, ErrInvalidID
+	}
+	def, err := LoadDefinitionDir(filepath.Join(s.appsRoot, appID))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	cleaned, err := cleanRelativeSlashPath(skillPath)
+	if err != nil {
+		return nil, ErrNotFound
+	}
+	var ref *SkillRef
+	for i := range def.Skills {
+		if def.Skills[i].Path == cleaned {
+			ref = &def.Skills[i]
+			break
+		}
+	}
+	if ref == nil {
+		return nil, ErrNotFound
+	}
+	data, err := os.ReadFile(filepath.Join(s.appsRoot, appID, filepath.FromSlash(cleaned)))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &SkillDetail{
+		ID:          ref.ID,
+		Name:        ref.Name,
+		Description: ref.Description,
+		Path:        ref.Path,
+		Content:     string(data),
+	}, nil
+}
+
+func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, connectionRef string) (*EndpointBinding, error) {
 	endpointName = strings.TrimSpace(endpointName)
+	connectionRef = strings.TrimSpace(connectionRef)
 	sessionID = strings.TrimSpace(sessionID)
-	if s == nil || s.grants == nil || s.connections == nil {
+	if s == nil || s.connections == nil {
 		return nil, errors.New("app service unavailable")
 	}
 	if sessionID == "" || endpointName == "" {
@@ -65,9 +189,13 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName s
 	for _, def := range defs {
 		defByID[def.ID] = def
 	}
-	grants, err := s.grants.ListSessionAppGrants(ctx, sessionID)
-	if err != nil {
-		return nil, err
+	var grants []*store.SessionAppGrant
+	if s.grants != nil {
+		loaded, err := s.grants.ListSessionAppGrants(ctx, sessionID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+		grants = loaded
 	}
 	var matches []*EndpointBinding
 	for _, grant := range grants {
@@ -84,7 +212,13 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName s
 		}
 		conn, err := s.connections.GetAppConnection(ctx, grant.ConnectionID)
 		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				continue
+			}
 			return nil, err
+		}
+		if connectionRef != "" && !connectionMatches(conn, connectionRef) {
+			continue
 		}
 		if conn.AppID != grant.AppID {
 			return nil, fmt.Errorf("connection %s belongs to app %s, not %s", conn.ID, conn.AppID, grant.AppID)
@@ -97,12 +231,104 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName s
 			Auth:         CloneAuth(conn.Auth),
 		})
 	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	if len(matches) > 1 {
+		return nil, &EndpointResolveError{Reason: "endpoint_ambiguous", Endpoint: endpointName, Connection: connectionRef, Connections: connectionChoices(matches)}
+	}
+
+	connections, err := s.connections.ListAppConnections(ctx)
+	if err != nil {
+		return nil, err
+	}
+	allChoices := make([]ConnectionChoice, 0)
+	endpointSeen := false
+	for _, def := range defs {
+		if def == nil {
+			continue
+		}
+		endpoint, ok := def.Endpoints[endpointName]
+		if !ok {
+			continue
+		}
+		endpointSeen = true
+		for _, conn := range connections {
+			if conn == nil || conn.AppID != def.ID {
+				continue
+			}
+			allChoices = append(allChoices, viewConnectionChoice(conn))
+			if connectionRef != "" && !connectionMatches(conn, connectionRef) {
+				continue
+			}
+			matches = append(matches, &EndpointBinding{
+				AppID:        def.ID,
+				ConnectionID: conn.ID,
+				EndpointName: endpointName,
+				Endpoint:     endpoint,
+				Auth:         CloneAuth(conn.Auth),
+			})
+		}
+	}
 	switch len(matches) {
 	case 0:
-		return nil, store.ErrNotFound
+		if !endpointSeen {
+			return nil, &EndpointResolveError{Reason: "endpoint_not_found", Endpoint: endpointName}
+		}
+		reason := "connection_required"
+		if connectionRef != "" {
+			reason = "connection_not_found"
+		}
+		if len(allChoices) == 0 {
+			return nil, &EndpointResolveError{Reason: "connection_required", Endpoint: endpointName}
+		}
+		return nil, &EndpointResolveError{Reason: reason, Endpoint: endpointName, Connection: connectionRef, Connections: dedupeConnectionChoices(allChoices)}
 	case 1:
 		return matches[0], nil
 	default:
-		return nil, fmt.Errorf("endpoint %q is ambiguous in session grants", endpointName)
+		return nil, &EndpointResolveError{Reason: "connection_required", Endpoint: endpointName, Connection: connectionRef, Connections: dedupeConnectionChoices(allChoices)}
 	}
+}
+
+func connectionMatches(conn *Connection, ref string) bool {
+	if conn == nil {
+		return false
+	}
+	ref = strings.TrimSpace(ref)
+	return ref != "" && (strings.EqualFold(conn.ID, ref) || strings.EqualFold(conn.Name, ref))
+}
+
+func viewConnectionChoice(conn *Connection) ConnectionChoice {
+	if conn == nil {
+		return ConnectionChoice{}
+	}
+	return ConnectionChoice{ID: conn.ID, Name: strings.TrimSpace(conn.Name), AppID: conn.AppID}
+}
+
+func connectionChoices(bindings []*EndpointBinding) []ConnectionChoice {
+	out := make([]ConnectionChoice, 0, len(bindings))
+	for _, binding := range bindings {
+		if binding == nil {
+			continue
+		}
+		out = append(out, ConnectionChoice{ID: binding.ConnectionID, AppID: binding.AppID})
+	}
+	return dedupeConnectionChoices(out)
+}
+
+func dedupeConnectionChoices(in []ConnectionChoice) []ConnectionChoice {
+	seen := make(map[string]struct{}, len(in))
+	out := make([]ConnectionChoice, 0, len(in))
+	for _, item := range in {
+		key := item.AppID + "/" + item.ID
+		if key == "/" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, item)
+	}
+	return out
 }

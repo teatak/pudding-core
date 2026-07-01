@@ -14,7 +14,7 @@ func TestLoadBuiltinSkillsIncludesSkillCreator(t *testing.T) {
 	}
 	for _, item := range skills {
 		if item.ID == "skill-creator" {
-			if item.Scope != ScopeGlobal || item.Source != SourceBuiltin || !item.System || item.Description == "" || item.IconPath != ".system/skill-creator/assets/icon.svg" {
+			if item.Scope != ScopeGlobal || item.Source != SourceBuiltin || !item.System || item.Description == "" || item.IconPath != "builtin/skill-creator/assets/icon.svg" {
 				t.Fatalf("unexpected skill-creator metadata: %+v", item)
 			}
 			return
@@ -115,7 +115,7 @@ func TestServiceReadsSkillAssets(t *testing.T) {
 	if string(data) != "<svg/>" || contentType != "image/svg+xml" {
 		t.Fatalf("unexpected asset: %q %s", data, contentType)
 	}
-	data, contentType, err = NewService(home).ReadAsset(context.Background(), ".system/skill-creator/assets/icon.svg")
+	data, contentType, err = NewService(home).ReadAsset(context.Background(), "builtin/skill-creator/assets/icon.svg")
 	if err != nil {
 		t.Fatal(err)
 	}

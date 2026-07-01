@@ -20,6 +20,9 @@ export default defineConfig(({ mode }) => {
         "/sessions": daemon,
         "/settings": daemon,
         "/providers": daemon,
+        "/apps": daemon,
+        "/app-assets": daemon,
+        "/app-connections": daemon,
       },
     },
   };

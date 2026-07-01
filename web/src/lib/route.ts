@@ -5,4 +5,5 @@ export type AppSearch = {
   session?: string;
   draft?: string;
   split?: string;
+  view?: "apps";
 };

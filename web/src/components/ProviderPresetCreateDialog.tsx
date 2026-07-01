@@ -39,7 +39,8 @@ import {
   type ProviderPresetVariant,
 } from "@/provider/presets";
 
-const providerOptionSelectedClass = "border-primary/45 bg-primary/5 text-foreground";
+const providerOptionSelectedClass = "border-primary/45 bg-primary/10 text-foreground";
+const providerOptionIdleClass = "bg-transparent text-muted-foreground hover:bg-transparent";
 
 export function ProviderPresetGrid({
   children,
@@ -66,7 +67,7 @@ export function ProviderPresetGrid({
             type="button"
             onClick={() => onSelect(preset)}
           >
-            <BrandIcon className="pudding-provider-preset-icon" name={preset.id} radius="none" />
+            <BrandIcon className="pudding-provider-preset-icon" name={preset.id} />
             <span className="pudding-provider-preset-text">
               <span className="pudding-provider-preset-title">{displayName}</span>
               <span className="pudding-provider-preset-meta">{variantModelCountLabel(variant, t)}</span>
@@ -333,7 +334,7 @@ function VariantListPicker({
           const id = `provider-preset-${preset.id}-${item.id}`;
           return (
             <FieldLabel key={item.id} htmlFor={id}>
-              <Field className={cn(active && providerOptionSelectedClass)} orientation="horizontal">
+              <Field className={cn(active ? providerOptionSelectedClass : providerOptionIdleClass)} orientation="horizontal">
                 <FieldContent>
                   <FieldTitle>{providerPresetAccessMethodLabel(preset, item, t)}</FieldTitle>
                 </FieldContent>
@@ -394,7 +395,7 @@ function MiMoVariantPicker({
             const id = `provider-preset-${preset.id}-protocol-${item.id}`;
             return (
               <FieldLabel key={item.id} htmlFor={id}>
-                <Field className={cn("h-full", active && providerOptionSelectedClass)} orientation="horizontal">
+                <Field className={cn("h-full", active ? providerOptionSelectedClass : providerOptionIdleClass)} orientation="horizontal">
                   <FieldContent>
                     <FieldTitle>{item.label}</FieldTitle>
                   </FieldContent>
@@ -418,7 +419,7 @@ function MiMoVariantPicker({
             const id = `provider-preset-${preset.id}-plan-${item.id}`;
             return (
               <FieldLabel key={item.id} htmlFor={id}>
-                <Field className={cn("h-full", active && providerOptionSelectedClass)} orientation="horizontal">
+                <Field className={cn("h-full", active ? providerOptionSelectedClass : providerOptionIdleClass)} orientation="horizontal">
                   <FieldContent>
                     <FieldTitle>{item.label}</FieldTitle>
                   </FieldContent>
