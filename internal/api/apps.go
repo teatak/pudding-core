@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/teatak/cart/v3"
@@ -369,13 +370,12 @@ func (s *Server) putSessionAppGrant(c *cart.Context) error {
 	if err := decode(c, &req); err != nil {
 		return badRequest(c, "invalid json body")
 	}
-	grant := &store.SessionAppGrant{
-		SessionID:        id,
-		AppID:            strings.TrimSpace(req.AppID),
-		ConnectionID:     strings.TrimSpace(req.ConnectionID),
-		AllowedEndpoints: req.AllowedEndpoints,
-		Permissions:      req.Permissions,
-		Constraints:      req.Constraints,
+	grant, err := s.validatedSessionAppGrant(c, id, req)
+	if err != nil {
+		return err
+	}
+	if grant == nil {
+		return nil
 	}
 	out, err := s.store.PutSessionAppGrant(c.Request.Context(), grant)
 	if err != nil {
@@ -385,10 +385,104 @@ func (s *Server) putSessionAppGrant(c *cart.Context) error {
 	return nil
 }
 
+func (s *Server) validatedSessionAppGrant(c *cart.Context, sessionID string, req putSessionAppGrantReq) (*store.SessionAppGrant, error) {
+	appID := strings.TrimSpace(req.AppID)
+	connectionID := strings.TrimSpace(req.ConnectionID)
+	if strings.TrimSpace(sessionID) == "" || appID == "" || connectionID == "" {
+		return nil, badRequest(c, "sessionID, appID and connectionID are required")
+	}
+	def, err := s.getAppDefinition(c.Request.Context(), appID)
+	if err != nil {
+		if errors.Is(err, app.ErrNotFound) {
+			c.JSON(http.StatusNotFound, map[string]string{"error": "app_not_found"})
+			return nil, nil
+		}
+		return nil, s.fail(c, err)
+	}
+	cfg, ok := s.appConnectionConfig(c)
+	if !ok {
+		return nil, nil
+	}
+	conn, err := cfg.GetAppConnection(c.Request.Context(), connectionID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			c.JSON(http.StatusNotFound, map[string]string{"error": "app_connection_not_found"})
+			return nil, nil
+		}
+		return nil, s.fail(c, err)
+	}
+	if conn.AppID != appID {
+		return nil, badRequest(c, "connection does not belong to app")
+	}
+	allowed, err := validatedGrantEndpoints(req.AllowedEndpoints, def.Endpoints)
+	if err != nil {
+		return nil, badRequest(c, err.Error())
+	}
+	if len(req.Constraints) > 0 && !json.Valid(req.Constraints) {
+		return nil, badRequest(c, "constraints must be valid json")
+	}
+	grant := &store.SessionAppGrant{
+		SessionID:        sessionID,
+		AppID:            appID,
+		ConnectionID:     connectionID,
+		AllowedEndpoints: allowed,
+		Permissions:      cleanStringList(req.Permissions),
+		Constraints:      req.Constraints,
+	}
+	return grant, nil
+}
+
+func validatedGrantEndpoints(raw []string, endpoints map[string]app.Endpoint) ([]string, error) {
+	if len(endpoints) == 0 {
+		return nil, errors.New("app has no endpoints")
+	}
+	if len(raw) == 0 {
+		out := make([]string, 0, len(endpoints))
+		for name := range endpoints {
+			out = append(out, name)
+		}
+		sort.Strings(out)
+		return out, nil
+	}
+	out := cleanStringList(raw)
+	if len(out) == 0 {
+		return nil, errors.New("allowedEndpoints is required")
+	}
+	for _, name := range out {
+		if _, ok := endpoints[name]; !ok {
+			return nil, errors.New("allowed endpoint is not defined by app: " + name)
+		}
+	}
+	return out, nil
+}
+
+func cleanStringList(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
 func (s *Server) deleteSessionAppGrant(c *cart.Context) error {
 	sessionID, _ := c.Param("id")
 	appID, _ := c.Param("appID")
 	connectionID, _ := c.Param("connectionID")
+	sessionID = strings.TrimSpace(sessionID)
+	appID = strings.TrimSpace(appID)
+	connectionID = strings.TrimSpace(connectionID)
+	if sessionID == "" || appID == "" || connectionID == "" {
+		return badRequest(c, "sessionID, appID and connectionID are required")
+	}
 	if err := s.store.DeleteSessionAppGrant(c.Request.Context(), sessionID, appID, connectionID); err != nil {
 		return s.fail(c, err)
 	}

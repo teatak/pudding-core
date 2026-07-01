@@ -46,11 +46,13 @@ func (e *EndpointResolveError) Error() string {
 	switch e.Reason {
 	case "connection_required":
 		if len(e.Connections) > 1 {
-			return fmt.Sprintf("multiple connections are configured for endpoint %q; choose one by connection name", e.Endpoint)
+			return fmt.Sprintf("multiple session-granted connections are available for endpoint %q; choose one by connection name", e.Endpoint)
 		}
-		return fmt.Sprintf("no connection is configured for endpoint %q", e.Endpoint)
+		return fmt.Sprintf("no session-granted connection is available for endpoint %q", e.Endpoint)
+	case "endpoint_not_granted":
+		return fmt.Sprintf("endpoint %q is not granted to this session", e.Endpoint)
 	case "connection_not_found":
-		return fmt.Sprintf("connection %q is not configured for endpoint %q", e.Connection, e.Endpoint)
+		return fmt.Sprintf("connection %q is not granted for endpoint %q", e.Connection, e.Endpoint)
 	case "endpoint_ambiguous":
 		return fmt.Sprintf("endpoint %q matches multiple app connections", e.Endpoint)
 	default:
@@ -198,15 +200,18 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 	for _, def := range defs {
 		defByID[def.ID] = def
 	}
+	hasGrantSource := s.grants != nil
 	var grants []*store.SessionAppGrant
 	if s.grants != nil {
 		loaded, err := s.grants.ListSessionAppGrants(ctx, sessionID)
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
+		if err != nil {
 			return nil, err
 		}
 		grants = loaded
 	}
 	var matches []*EndpointBinding
+	grantChoices := make([]ConnectionChoice, 0)
+	endpointSeen := false
 	for _, grant := range grants {
 		if grant == nil || !grant.EndpointAllowed(endpointName) {
 			continue
@@ -219,6 +224,7 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 		if !ok {
 			continue
 		}
+		endpointSeen = true
 		conn, err := s.connections.GetAppConnection(ctx, grant.ConnectionID)
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
@@ -226,11 +232,12 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 			}
 			return nil, err
 		}
-		if connectionRef != "" && !connectionMatches(conn, connectionRef) {
-			continue
-		}
 		if conn.AppID != grant.AppID {
 			return nil, fmt.Errorf("connection %s belongs to app %s, not %s", conn.ID, conn.AppID, grant.AppID)
+		}
+		grantChoices = append(grantChoices, viewConnectionChoice(conn))
+		if connectionRef != "" && !connectionMatches(conn, connectionRef) {
+			continue
 		}
 		matches = append(matches, &EndpointBinding{
 			AppID:        grant.AppID,
@@ -244,7 +251,20 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 		return matches[0], nil
 	}
 	if len(matches) > 1 {
-		return nil, &EndpointResolveError{Reason: "endpoint_ambiguous", Endpoint: endpointName, Connection: connectionRef, Connections: connectionChoices(matches)}
+		return nil, &EndpointResolveError{Reason: "connection_required", Endpoint: endpointName, Connection: connectionRef, Connections: dedupeConnectionChoices(grantChoices)}
+	}
+	if hasGrantSource {
+		if !endpointSeen {
+			if endpointExists(defs, endpointName) {
+				return nil, &EndpointResolveError{Reason: "endpoint_not_granted", Endpoint: endpointName}
+			}
+			return nil, &EndpointResolveError{Reason: "endpoint_not_found", Endpoint: endpointName}
+		}
+		reason := "endpoint_not_granted"
+		if connectionRef != "" {
+			reason = "connection_not_found"
+		}
+		return nil, &EndpointResolveError{Reason: reason, Endpoint: endpointName, Connection: connectionRef, Connections: dedupeConnectionChoices(grantChoices)}
 	}
 
 	connections, err := s.connections.ListAppConnections(ctx)
@@ -252,7 +272,6 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 		return nil, err
 	}
 	allChoices := make([]ConnectionChoice, 0)
-	endpointSeen := false
 	for _, def := range defs {
 		if def == nil {
 			continue
@@ -299,6 +318,18 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 	}
 }
 
+func endpointExists(defs []*Definition, endpointName string) bool {
+	for _, def := range defs {
+		if def == nil {
+			continue
+		}
+		if _, ok := def.Endpoints[endpointName]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 func connectionMatches(conn *Connection, ref string) bool {
 	if conn == nil {
 		return false
@@ -312,17 +343,6 @@ func viewConnectionChoice(conn *Connection) ConnectionChoice {
 		return ConnectionChoice{}
 	}
 	return ConnectionChoice{ID: conn.ID, Name: strings.TrimSpace(conn.Name), AppID: conn.AppID}
-}
-
-func connectionChoices(bindings []*EndpointBinding) []ConnectionChoice {
-	out := make([]ConnectionChoice, 0, len(bindings))
-	for _, binding := range bindings {
-		if binding == nil {
-			continue
-		}
-		out = append(out, ConnectionChoice{ID: binding.ConnectionID, AppID: binding.AppID})
-	}
-	return dedupeConnectionChoices(out)
 }
 
 func dedupeConnectionChoices(in []ConnectionChoice) []ConnectionChoice {

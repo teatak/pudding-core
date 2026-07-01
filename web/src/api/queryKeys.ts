@@ -16,6 +16,7 @@ export const queryKeys = {
   appCatalogDetail: (id: string, version: string) => ["apps", "catalog", id, version] as const,
   appSkill: (appID: string, path: string) => ["apps", appID, "skill", path] as const,
   appConnections: () => ["app-connections"] as const,
+  sessionAppGrants: (sessionID: string) => ["session", sessionID, "app-grants"] as const,
   builtinTools: () => ["tools", "builtin"] as const,
   webTools: () => ["tools", "web"] as const,
   providers: () => ["providers"] as const,

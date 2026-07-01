@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Cable, Download, Eye, EyeOff, KeyRound, Loader2, Pencil, Plus, Trash } from "lucide-react";
+import { ArrowLeft, Cable, Download, Eye, EyeOff, KeyRound, Loader2, Pencil, Plus, ShieldCheck, ShieldOff, Trash } from "lucide-react";
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -9,17 +9,21 @@ import {
   appIconURL,
   deleteApp,
   deleteAppConnection,
+  deleteSessionAppGrant,
   getAppConnection,
   getAppSkill,
   installAppPackage,
   listAppConnections,
   listApps,
+  listSessionAppGrants,
   putAppConnection,
+  putSessionAppGrant,
   startAppOAuth,
   type AppConnection,
   type AppConnectionPayload,
   type AppDefinition,
   type AppSkillDetail,
+  type SessionAppGrant,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { DialogSelectContent } from "@/components/DialogSelectContent";
@@ -53,9 +57,20 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { translate, useI18n } from "@/i18n";
 import { shouldKeepDialogOpenForSelectDismiss } from "@/lib/layerGuards";
 import { cn } from "@/lib/utils";
+import { useShowPreviewAppVersions } from "@/state/appCatalogPrefs";
 
 type AuthType = AppConnectionPayload["authType"];
 type LocalizedText = string | Record<string, string>;
+type AppRegistryRelease = {
+  version: string;
+  manifest?: string;
+  package: string;
+  package_sha256?: string;
+  requires?: Record<string, string>;
+  released_at?: string;
+  channel?: string;
+  preview?: boolean;
+};
 type AppRegistryItem = {
   id: string;
   name?: string;
@@ -63,8 +78,10 @@ type AppRegistryItem = {
   version?: string;
   description?: LocalizedText;
   icon?: AppIconSpec;
-  package: string;
+  manifest?: string;
+  package?: string;
   package_sha256?: string;
+  releases?: AppRegistryRelease[];
   tags?: string[];
 };
 type AppRegistry = {
@@ -96,6 +113,10 @@ type AppPackage = {
   kind?: string;
   files?: AppPackageFile[];
 };
+type CatalogInstallTarget = {
+  app: AppRegistryItem;
+  release: AppRegistryRelease;
+};
 
 type ConnectionForm = {
   id: string;
@@ -115,7 +136,7 @@ const OFFICIAL_APP_REGISTRY =
 
 const appIconSVGInflight = new Map<string, Promise<string>>();
 
-export function AppsPane({ token }: { token: string }) {
+export function AppsPane({ token, selectedSessionID }: { token: string; selectedSessionID?: string }) {
   const { locale, t } = useI18n();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<{ app: AppDefinition; connection?: AppConnection } | null>(null);
@@ -123,6 +144,8 @@ export function AppsPane({ token }: { token: string }) {
   const [uninstalling, setUninstalling] = useState<AppDefinition | null>(null);
   const [detailAppID, setDetailAppID] = useState<string | null>(null);
   const [detailCatalogID, setDetailCatalogID] = useState<string | null>(null);
+  const [catalogReleaseByID, setCatalogReleaseByID] = useState<Record<string, string>>({});
+  const showPreviewVersions = useShowPreviewAppVersions();
   const [selectedSkill, setSelectedSkill] = useState<SelectedSkill | null>(null);
   const appsQuery = useQuery({
     queryKey: queryKeys.apps(),
@@ -135,6 +158,11 @@ export function AppsPane({ token }: { token: string }) {
   const connectionsQuery = useQuery({
     queryKey: queryKeys.appConnections(),
     queryFn: () => listAppConnections(token),
+  });
+  const grantsQuery = useQuery({
+    queryKey: queryKeys.sessionAppGrants(selectedSessionID || ""),
+    queryFn: () => listSessionAppGrants(token, selectedSessionID!),
+    enabled: Boolean(selectedSessionID),
   });
   const apps = useMemo(
     () => [...(appsQuery.data?.apps || [])].sort((a, b) => a.name.localeCompare(b.name)),
@@ -153,16 +181,23 @@ export function AppsPane({ token }: { token: string }) {
     [catalogApps],
   );
   const connections = useMemo(() => connectionsQuery.data?.connections || [], [connectionsQuery.data?.connections]);
+  const sessionGrants = useMemo(() => grantsQuery.data?.grants || [], [grantsQuery.data?.grants]);
   const detailApp = apps.find((app) => app.id === detailAppID) || null;
   const detailCatalogForInstalled = detailApp ? catalogByLocalID.get(detailApp.id) : undefined;
   const detailCatalogApp = catalogApps.find((app) => app.id === detailCatalogID) || null;
+  const detailCatalogReleases = detailCatalogApp ? appRegistryReleases(detailCatalogApp, showPreviewVersions) : [];
+  const detailCatalogRelease =
+    detailCatalogApp && detailCatalogReleases.length > 0
+      ? detailCatalogReleases.find((release) => release.version === catalogReleaseByID[detailCatalogApp.id]) ||
+        appRegistryDefaultRelease(detailCatalogApp, showPreviewVersions)
+      : undefined;
   const catalogDetailQuery = useQuery({
     queryKey: queryKeys.appCatalogDetail(
       detailCatalogApp?.id || "",
-      detailCatalogApp?.package_sha256 || detailCatalogApp?.version || detailCatalogApp?.package || "",
+      detailCatalogRelease?.package_sha256 || detailCatalogRelease?.version || detailCatalogRelease?.package || "",
     ),
-    queryFn: () => fetchCatalogAppContent(detailCatalogApp!, OFFICIAL_APP_REGISTRY),
-    enabled: Boolean(detailCatalogApp),
+    queryFn: () => fetchCatalogAppContent(detailCatalogApp!, OFFICIAL_APP_REGISTRY, detailCatalogRelease!),
+    enabled: Boolean(detailCatalogApp && detailCatalogRelease),
   });
   const selectedSkillQuery = useQuery({
     queryKey: queryKeys.appSkill(selectedSkill?.appID || "", selectedSkill?.skill.path || ""),
@@ -176,6 +211,7 @@ export function AppsPane({ token }: { token: string }) {
     return selectedSkillQuery.data || selectedSkill.skill;
   }, [selectedSkill, selectedSkillQuery.data]);
   const detailConnections = detailApp ? connections.filter((conn) => conn.appID === detailApp.id) : [];
+  const detailGrants = detailApp ? sessionGrants.filter((grant) => grant.appID === detailApp.id) : [];
   const loadFailed = appsQuery.isError || connectionsQuery.isError;
 
   useEffect(() => {
@@ -191,11 +227,11 @@ export function AppsPane({ token }: { token: string }) {
   }, [catalogApps, detailCatalogID]);
 
   const installMutation = useMutation({
-    mutationFn: async (item: AppRegistryItem) => {
-      const packageJSON = await fetchAppPackage(item, OFFICIAL_APP_REGISTRY);
+    mutationFn: async (target: CatalogInstallTarget) => {
+      const packageJSON = await fetchAppPackage(target.app, OFFICIAL_APP_REGISTRY, target.release);
       return installAppPackage(token, {
         packageJSON,
-        packageSHA256: item.package_sha256,
+        packageSHA256: target.release.package_sha256,
         sourceURL: OFFICIAL_APP_REGISTRY,
       });
     },
@@ -225,9 +261,48 @@ export function AppsPane({ token }: { token: string }) {
     onSuccess: async () => {
       toast.success(t("apps.connectionDeleted"));
       setDeleting(null);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.appConnections() });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.appConnections() }),
+        selectedSessionID
+          ? queryClient.invalidateQueries({ queryKey: queryKeys.sessionAppGrants(selectedSessionID) })
+          : Promise.resolve(),
+      ]);
     },
     onError: () => toast.error(t("apps.connectionDeleteFailed")),
+  });
+  const grantMutation = useMutation({
+    mutationFn: ({ app, connection }: { app: AppDefinition; connection: AppConnection }) => {
+      if (!selectedSessionID) {
+        throw new Error("session required");
+      }
+      return putSessionAppGrant(token, selectedSessionID, {
+        appID: app.id,
+        connectionID: connection.id,
+        allowedEndpoints: Object.keys(app.endpoints || {}).sort(),
+      });
+    },
+    onSuccess: async () => {
+      toast.success(t("apps.grantSaved"));
+      if (selectedSessionID) {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.sessionAppGrants(selectedSessionID) });
+      }
+    },
+    onError: () => toast.error(t("apps.grantSaveFailed")),
+  });
+  const revokeGrantMutation = useMutation({
+    mutationFn: ({ appID, connectionID }: { appID: string; connectionID: string }) => {
+      if (!selectedSessionID) {
+        throw new Error("session required");
+      }
+      return deleteSessionAppGrant(token, selectedSessionID, appID, connectionID);
+    },
+    onSuccess: async () => {
+      toast.success(t("apps.grantDeleted"));
+      if (selectedSessionID) {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.sessionAppGrants(selectedSessionID) });
+      }
+    },
+    onError: () => toast.error(t("apps.grantDeleteFailed")),
   });
   const uninstallMutation = useMutation({
     mutationFn: (id: string) => deleteApp(token, id),
@@ -278,10 +353,26 @@ export function AppsPane({ token }: { token: string }) {
               app={detailApp}
               catalogApp={detailCatalogForInstalled}
               connections={detailConnections}
+              grantingConnectionID={
+                grantMutation.isPending && grantMutation.variables?.app.id === detailApp.id
+                  ? grantMutation.variables.connection.id
+                  : undefined
+              }
+              grants={detailGrants}
+              revokingConnectionID={
+                revokeGrantMutation.isPending && revokeGrantMutation.variables?.appID === detailApp.id
+                  ? revokeGrantMutation.variables.connectionID
+                  : undefined
+              }
+              selectedSessionID={selectedSessionID}
               token={token}
               onAdd={() => setEditing({ app: detailApp })}
               onDelete={setDeleting}
               onEdit={(connection) => setEditing({ app: detailApp, connection })}
+              onGrant={(connection) => grantMutation.mutate({ app: detailApp, connection })}
+              onRevokeGrant={(connection) =>
+                revokeGrantMutation.mutate({ appID: detailApp.id, connectionID: connection.id })
+              }
               onSkillSelect={(skill, icon, iconSrc) =>
                 setSelectedSkill({
                   appID: detailApp.id,
@@ -301,8 +392,22 @@ export function AppsPane({ token }: { token: string }) {
               detailFailed={catalogDetailQuery.isError}
               detailLoading={catalogDetailQuery.isLoading}
               installed={installedByID.get(appRegistryLocalID(detailCatalogApp))}
-              installing={installMutation.isPending && installMutation.variables?.id === detailCatalogApp.id}
-              onInstall={() => installMutation.mutate(detailCatalogApp)}
+              installing={
+                installMutation.isPending &&
+                installMutation.variables?.app.id === detailCatalogApp.id &&
+                installMutation.variables.release.version === detailCatalogRelease?.version
+              }
+              releases={detailCatalogReleases}
+              selectedRelease={detailCatalogRelease}
+              showPreviewVersions={showPreviewVersions}
+              onInstall={() => {
+                if (detailCatalogRelease) {
+                  installMutation.mutate({ app: detailCatalogApp, release: detailCatalogRelease });
+                }
+              }}
+              onReleaseChange={(version) =>
+                setCatalogReleaseByID((current) => ({ ...current, [detailCatalogApp.id]: version }))
+              }
               onSkillSelect={(skill) =>
                 setSelectedSkill({
                   appName: appRegistryTitle(detailCatalogApp, locale),
@@ -336,7 +441,9 @@ export function AppsPane({ token }: { token: string }) {
                 </section>
               ) : null}
               <section className="grid gap-4">
-                <SectionTitle>{t("apps.availableTitle")}</SectionTitle>
+                <div className="border-b pb-4">
+                  <h2 className="text-lg font-semibold tracking-normal">{t("apps.availableTitle")}</h2>
+                </div>
                 {catalogQuery.isLoading ? (
                   <SectionSpinner />
                 ) : catalogQuery.isError ? (
@@ -345,24 +452,36 @@ export function AppsPane({ token }: { token: string }) {
                   </div>
                 ) : catalogApps.length > 0 ? (
                   <div className="grid gap-x-12 gap-y-7 md:grid-cols-2">
-                    {catalogApps.map((app) => (
-                      <CatalogAppItem
-                        key={app.id}
-                        app={app}
-                        installed={installedByID.get(appRegistryLocalID(app))}
-                        installing={installMutation.isPending && installMutation.variables?.id === app.id}
-                        token={token}
-                        onInstall={() => installMutation.mutate(app)}
-                        onSelect={() => {
-                          const installed = installedByID.get(appRegistryLocalID(app));
-                          if (installed) {
-                            setDetailAppID(installed.id);
-                          } else {
-                            setDetailCatalogID(app.id);
+                    {catalogApps.map((app) => {
+                      const release = appRegistryDefaultRelease(app, false) || appRegistryDefaultRelease(app, showPreviewVersions);
+                      const installed = installedByID.get(appRegistryLocalID(app));
+                      if (!release) {
+                        return null;
+                      }
+                      return (
+                        <CatalogAppItem
+                          key={app.id}
+                          app={app}
+                          installed={installed}
+                          installing={
+                            installMutation.isPending &&
+                            installMutation.variables?.app.id === app.id &&
+                            installMutation.variables.release.version === release.version
                           }
-                        }}
-                      />
-                    ))}
+                          release={release}
+                          showPreviewVersions={showPreviewVersions}
+                          token={token}
+                          onInstall={() => installMutation.mutate({ app, release })}
+                          onSelect={() => {
+                            if (installed && installedMatchesRelease(installed, release)) {
+                              setDetailAppID(installed.id);
+                            } else {
+                              setDetailCatalogID(app.id);
+                            }
+                          }}
+                        />
+                      );
+                    })}
                   </div>
                 ) : (
                   <EmptyLine>{t("apps.empty")}</EmptyLine>
@@ -469,24 +588,28 @@ async function fetchAppRegistry(url: string): Promise<AppRegistry> {
   };
 }
 
-async function fetchAppPackage(item: AppRegistryItem, registryURL: string): Promise<string> {
-  const packageURL = new URL(item.package, registryURL).href;
+async function fetchAppPackage(item: AppRegistryItem, registryURL: string, release?: AppRegistryRelease): Promise<string> {
+  const target = release || appRegistryDefaultRelease(item, true);
+  if (!target?.package) {
+    throw new Error("app package is missing");
+  }
+  const packageURL = new URL(target.package, registryURL).href;
   const response = await fetch(packageURL, { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`app package request failed: ${response.status}`);
   }
   const body = await response.text();
-  if (item.package_sha256 && crypto.subtle) {
+  if (target.package_sha256 && crypto.subtle) {
     const actual = await sha256Hex(body);
-    if (actual !== item.package_sha256.toLowerCase()) {
+    if (actual !== target.package_sha256.toLowerCase()) {
       throw new Error("app package hash mismatch");
     }
   }
   return body;
 }
 
-async function fetchCatalogAppContent(item: AppRegistryItem, registryURL: string): Promise<CatalogAppContent> {
-  return parseCatalogAppContent(await fetchAppPackage(item, registryURL));
+async function fetchCatalogAppContent(item: AppRegistryItem, registryURL: string, release?: AppRegistryRelease): Promise<CatalogAppContent> {
+  return parseCatalogAppContent(await fetchAppPackage(item, registryURL, release));
 }
 
 function parseCatalogAppContent(packageJSON: string): CatalogAppContent {
@@ -620,11 +743,79 @@ function isAppRegistryItem(value: unknown): value is AppRegistryItem {
     return false;
   }
   const item = value as Record<string, unknown>;
-  return typeof item.id === "string" && typeof item.package === "string";
+  const releases = Array.isArray(item.releases) ? item.releases : [];
+  return (
+    typeof item.id === "string" &&
+    (typeof item.package === "string" ||
+      releases.some((release) => Boolean(release && typeof release === "object" && typeof (release as Record<string, unknown>).package === "string")))
+  );
 }
 
 function appRegistryLocalID(item: AppRegistryItem) {
   return item.name || item.id.split("/").pop() || item.id;
+}
+
+function appRegistryReleases(item: AppRegistryItem, includePreview: boolean): AppRegistryRelease[] {
+  const releases = normalizedAppRegistryReleases(item);
+  return includePreview ? releases : releases.filter((release) => !isPreviewRelease(release));
+}
+
+function appRegistryDefaultRelease(item: AppRegistryItem, includePreview: boolean): AppRegistryRelease | undefined {
+  return appRegistryReleases(item, includePreview)[0];
+}
+
+function normalizedAppRegistryReleases(item: AppRegistryItem): AppRegistryRelease[] {
+  const releases = (item.releases || []).map(normalizedAppRegistryRelease).filter((release): release is AppRegistryRelease => Boolean(release));
+  if (item.package) {
+    const topLevel: AppRegistryRelease = {
+      version: item.version || "",
+      manifest: item.manifest,
+      package: item.package,
+      package_sha256: item.package_sha256,
+    };
+    if (!releases.some((release) => release.version === topLevel.version && release.package === topLevel.package)) {
+      releases.push(topLevel);
+    }
+  }
+  return releases.sort(compareRegistryReleases);
+}
+
+function normalizedAppRegistryRelease(value: AppRegistryRelease | undefined): AppRegistryRelease | null {
+  const version = value?.version?.trim();
+  const packagePath = value?.package?.trim();
+  if (!version || !packagePath) {
+    return null;
+  }
+  return {
+    ...value,
+    version,
+    package: packagePath,
+    manifest: value?.manifest?.trim(),
+    package_sha256: value?.package_sha256?.trim(),
+    channel: value?.channel?.trim(),
+  };
+}
+
+function compareRegistryReleases(a: AppRegistryRelease, b: AppRegistryRelease) {
+  const aPreview = isPreviewRelease(a);
+  const bPreview = isPreviewRelease(b);
+  if (aPreview !== bPreview) {
+    return aPreview ? 1 : -1;
+  }
+  return b.version.localeCompare(a.version, undefined, { numeric: true });
+}
+
+function appHasPreviewRelease(item: AppRegistryItem) {
+  return normalizedAppRegistryReleases(item).some(isPreviewRelease);
+}
+
+function isPreviewRelease(release: AppRegistryRelease) {
+  const channel = release.channel?.trim().toLowerCase();
+  return Boolean(release.preview || channel === "preview" || channel === "dev" || isPreviewVersion(release.version));
+}
+
+function isPreviewVersion(version: string) {
+  return /(?:^|[-.])(?:dev|preview|alpha|beta|rc)(?:[-.]|$)/i.test(version);
 }
 
 function appRegistryTitle(item: AppRegistryItem, locale: string) {
@@ -653,12 +844,23 @@ function localizedText(value: LocalizedText | undefined, locale: string) {
   return value[locale] || value["zh-CN"] || value.en || Object.values(value)[0] || "";
 }
 
-function needsAppUpgrade(item: AppRegistryItem, installed: AppDefinition) {
-  const expectedSHA = item.package_sha256?.toLowerCase();
+function installedMatchesRelease(installed: AppDefinition | undefined, release: AppRegistryRelease) {
+  if (!installed) {
+    return false;
+  }
+  if (release.version && installed.version !== release.version) {
+    return false;
+  }
+  const expectedSHA = release.package_sha256?.toLowerCase();
+  return !expectedSHA || installed.packageSHA256?.toLowerCase() === expectedSHA;
+}
+
+function needsAppUpgrade(installed: AppDefinition, release: AppRegistryRelease) {
+  const expectedSHA = release.package_sha256?.toLowerCase();
   if (expectedSHA && installed.packageSHA256?.toLowerCase() !== expectedSHA) {
     return true;
   }
-  return Boolean(item.version && installed.version && item.version !== installed.version);
+  return Boolean(release.version && installed.version && release.version !== installed.version);
 }
 
 async function sha256Hex(text: string) {
@@ -698,21 +900,33 @@ function AppDetail({
   app,
   catalogApp,
   connections,
+  grantingConnectionID,
+  grants,
   onAdd,
   onDelete,
   onEdit,
+  onGrant,
+  onRevokeGrant,
   onSkillSelect,
   onUninstall,
+  revokingConnectionID,
+  selectedSessionID,
   token,
 }: {
   app: AppDefinition;
   catalogApp?: AppRegistryItem;
   connections: AppConnection[];
+  grantingConnectionID?: string;
+  grants: SessionAppGrant[];
   onAdd: () => void;
   onDelete: (connection: AppConnection) => void;
   onEdit: (connection: AppConnection) => void;
+  onGrant: (connection: AppConnection) => void;
+  onRevokeGrant: (connection: AppConnection) => void;
   onSkillSelect: (skill: AppSkillItem, icon?: AppIconSpec, iconSrc?: string) => void;
   onUninstall: () => void;
+  revokingConnectionID?: string;
+  selectedSessionID?: string;
   token: string;
 }) {
   const { locale, t } = useI18n();
@@ -723,6 +937,12 @@ function AppDetail({
   const title = catalogApp ? appRegistryTitle(catalogApp, locale) : app.name;
   const description = (catalogApp ? appRegistryDescription(catalogApp, locale) : "") || app.description;
   const authMethods = appAuthMethods(app);
+  const installedIsPreview = Boolean(app.version && isPreviewVersion(app.version));
+  const grantByConnectionID = useMemo(
+    () => new Map(grants.map((grant) => [grant.connectionID, grant])),
+    [grants],
+  );
+  const grantable = Boolean(selectedSessionID && endpoints.length > 0);
 
   return (
     <section className="grid gap-8">
@@ -734,6 +954,7 @@ function AppDetail({
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <h2 className="truncate text-2xl font-semibold tracking-normal">{title}</h2>
                 {app.version ? <Badge variant="outline">v{app.version}</Badge> : null}
+                {installedIsPreview ? <Badge variant="secondary">{t("apps.previewVersion")}</Badge> : null}
                 {catalogApp?.tags?.map((tag) => (
                   <Badge key={tag} variant="outline">
                     {tag}
@@ -765,7 +986,20 @@ function AppDetail({
         >
           {connections.length > 0 ? (
             connections.map((connection) => (
-              <ConnectionRow key={connection.id} authMethods={authMethods} connection={connection} onDelete={onDelete} onEdit={onEdit} />
+              <ConnectionRow
+                key={connection.id}
+                authMethods={authMethods}
+                connection={connection}
+                grant={grantByConnectionID.get(connection.id)}
+                grantable={grantable}
+                granting={grantingConnectionID === connection.id}
+                revoking={revokingConnectionID === connection.id}
+                selectedSessionID={selectedSessionID}
+                onDelete={onDelete}
+                onEdit={onEdit}
+                onGrant={onGrant}
+                onRevokeGrant={onRevokeGrant}
+              />
             ))
           ) : (
             <EmptyLine>{t("apps.noConnections")}</EmptyLine>
@@ -785,6 +1019,8 @@ function CatalogAppItem({
   installing,
   onInstall,
   onSelect,
+  release,
+  showPreviewVersions,
   token,
 }: {
   app: AppRegistryItem;
@@ -792,13 +1028,16 @@ function CatalogAppItem({
   installing: boolean;
   onInstall: () => void;
   onSelect: () => void;
+  release: AppRegistryRelease;
+  showPreviewVersions: boolean;
   token: string;
 }) {
   const { locale, t } = useI18n();
   const title = appRegistryTitle(app, locale);
   const description = appRegistryDescription(app, locale);
-  const upgradeAvailable = installed ? needsAppUpgrade(app, installed) : false;
-  const alreadyInstalled = Boolean(installed) && !upgradeAvailable;
+  const upgradeAvailable = installed ? needsAppUpgrade(installed, release) : false;
+  const alreadyInstalled = Boolean(installed) && installedMatchesRelease(installed, release);
+  const previewAvailable = showPreviewVersions && appHasPreviewRelease(app);
   const icon = installed?.icon || app.icon;
   const iconSrc = installed ? appIconURL(token, installed) || appRegistryIconURL(app, OFFICIAL_APP_REGISTRY) : appRegistryIconURL(app, OFFICIAL_APP_REGISTRY);
 
@@ -809,7 +1048,8 @@ function CatalogAppItem({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
             <h3 className="truncate text-sm font-semibold">{title}</h3>
-            {app.version ? <span className="shrink-0 text-xs text-muted-foreground">v{app.version}</span> : null}
+            {release.version ? <span className="shrink-0 text-xs text-muted-foreground">v{release.version}</span> : null}
+            {previewAvailable ? <Badge variant="secondary">{t("apps.previewAvailable")}</Badge> : null}
           </div>
           <p className="mt-0.5 truncate text-sm text-muted-foreground">{description || t("apps.noDescription")}</p>
         </div>
@@ -837,7 +1077,11 @@ function CatalogAppDetail({
   detailLoading,
   installed,
   installing,
+  onReleaseChange,
   onInstall,
+  releases,
+  selectedRelease,
+  showPreviewVersions,
   onSkillSelect,
 }: {
   app: AppRegistryItem;
@@ -847,17 +1091,20 @@ function CatalogAppDetail({
   detailLoading: boolean;
   installed?: AppDefinition;
   installing: boolean;
+  onReleaseChange: (version: string) => void;
   onInstall: () => void;
+  releases: AppRegistryRelease[];
+  selectedRelease?: AppRegistryRelease;
+  showPreviewVersions: boolean;
   onSkillSelect: (skill: AppSkillItem) => void;
 }) {
   const { locale, t } = useI18n();
   const title = appRegistryTitle(app, locale);
   const description = appRegistryDescription(app, locale);
-  const upgradeAvailable = installed ? needsAppUpgrade(app, installed) : false;
-  const alreadyInstalled = Boolean(installed) && !upgradeAvailable;
+  const upgradeAvailable = installed && selectedRelease ? needsAppUpgrade(installed, selectedRelease) : false;
+  const alreadyInstalled = Boolean(installed && selectedRelease && installedMatchesRelease(installed, selectedRelease));
   const endpoints = Object.entries(detail?.endpoints || {}).sort(([a], [b]) => a.localeCompare(b));
   const skills = detail?.skills || [];
-
   return (
     <section className="grid gap-8">
       <div className="min-w-0 border-b pb-6">
@@ -867,17 +1114,41 @@ function CatalogAppDetail({
             <div className="flex min-w-0 items-start justify-between gap-4">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <h2 className="truncate text-2xl font-semibold tracking-normal">{title}</h2>
-                {app.version ? <Badge variant="outline">v{app.version}</Badge> : null}
+                {selectedRelease?.version ? <Badge variant="outline">v{selectedRelease.version}</Badge> : null}
+                {selectedRelease && isPreviewRelease(selectedRelease) ? (
+                  <Badge variant="secondary">{t("apps.previewVersion")}</Badge>
+                ) : null}
                 {app.tags?.map((tag) => (
                   <Badge key={tag} variant="outline">
                     {tag}
                   </Badge>
                 ))}
               </div>
-              <Button className="shrink-0" disabled={installing || alreadyInstalled} type="button" onClick={onInstall}>
-                {installing ? <Loader2 className="size-4 animate-spin" /> : upgradeAvailable ? <Download className="size-4" /> : null}
-                {alreadyInstalled ? t("apps.installedAction") : upgradeAvailable ? t("apps.upgrade") : t("apps.install")}
-              </Button>
+              <div className="flex shrink-0 items-center gap-2">
+                {releases.length > 1 ? (
+                  <Select value={selectedRelease?.version || ""} onValueChange={onReleaseChange}>
+                    <SelectTrigger className="w-40">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <DialogSelectContent>
+                      {releases.map((release) => (
+                        <SelectItem key={release.version} value={release.version}>
+                          {release.version}
+                        </SelectItem>
+                      ))}
+                    </DialogSelectContent>
+                  </Select>
+                ) : null}
+                <Button
+                  className="shrink-0"
+                  disabled={installing || alreadyInstalled || !selectedRelease}
+                  type="button"
+                  onClick={onInstall}
+                >
+                  {installing ? <Loader2 className="size-4 animate-spin" /> : upgradeAvailable ? <Download className="size-4" /> : null}
+                  {alreadyInstalled ? t("apps.installedAction") : upgradeAvailable ? t("apps.upgrade") : t("apps.install")}
+                </Button>
+              </div>
             </div>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">{description || t("apps.noDescription")}</p>
           </div>
@@ -1261,13 +1532,27 @@ function DetailSkeletonRows() {
 function ConnectionRow({
   authMethods,
   connection,
+  grant,
+  grantable,
+  granting,
   onDelete,
   onEdit,
+  onGrant,
+  onRevokeGrant,
+  revoking,
+  selectedSessionID,
 }: {
   authMethods: AppAuthMethod[];
   connection: AppConnection;
+  grant?: SessionAppGrant;
+  grantable: boolean;
+  granting: boolean;
   onDelete: (connection: AppConnection) => void;
   onEdit: (connection: AppConnection) => void;
+  onGrant: (connection: AppConnection) => void;
+  onRevokeGrant: (connection: AppConnection) => void;
+  revoking: boolean;
+  selectedSessionID?: string;
 }) {
   const { t } = useI18n();
   const name = connection.name || connection.id || t("apps.connection");
@@ -1283,9 +1568,37 @@ function ConnectionRow({
               {authLabel}
             </Badge>
           ) : null}
+          {grant ? <Badge variant="secondary">{t("apps.grantedToSession")}</Badge> : null}
         </div>
         {connection.header ? <div className="truncate text-xs text-muted-foreground">{connection.header}</div> : null}
       </div>
+      {selectedSessionID ? (
+        grant ? (
+          <Button
+            className="h-7 shrink-0 px-2"
+            disabled={revoking}
+            size="xs"
+            type="button"
+            variant="outline"
+            onClick={() => onRevokeGrant(connection)}
+          >
+            {revoking ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldOff className="size-3.5" />}
+            {t("apps.revokeGrant")}
+          </Button>
+        ) : (
+          <Button
+            className="h-7 shrink-0 px-2"
+            disabled={!grantable || granting}
+            size="xs"
+            type="button"
+            variant="secondary"
+            onClick={() => onGrant(connection)}
+          >
+            {granting ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
+            {t("apps.grantToSession")}
+          </Button>
+        )
+      ) : null}
       <Button aria-label={t("apps.editConnection")} className="size-7 shrink-0" size="icon-xs" type="button" variant="ghost" onClick={() => onEdit(connection)}>
         <Pencil className="size-3.5" />
       </Button>

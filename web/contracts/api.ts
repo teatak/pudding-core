@@ -437,6 +437,27 @@ export type AppConnection = z.infer<typeof appConnection>;
 export const listAppsResponse = z.object({ apps: z.array(appDefinition) });
 export const listAppConnectionsResponse = z.object({ connections: z.array(appConnection) });
 
+export const sessionAppGrant = z.object({
+  sessionID: z.string(),
+  appID: z.string(),
+  connectionID: z.string(),
+  allowedEndpoints: z.array(z.string()).optional(),
+  permissions: z.array(z.string()).optional(),
+  constraints: z.unknown().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
+export type SessionAppGrant = z.infer<typeof sessionAppGrant>;
+
+export const putSessionAppGrantRequest = z.object({
+  appID: z.string().min(1),
+  connectionID: z.string().min(1),
+  allowedEndpoints: z.array(z.string()).optional(),
+  permissions: z.array(z.string()).optional(),
+  constraints: z.unknown().optional(),
+});
+export const listSessionAppGrantsResponse = z.object({ grants: z.array(sessionAppGrant) });
+
 export const startAppOAuthRequest = z.object({
   appID: z.string().min(1),
   authMethodID: z.string().optional(),

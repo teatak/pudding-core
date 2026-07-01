@@ -3,6 +3,7 @@ import {
   Activity,
   BookOpenText,
   Check,
+  CircleHelp,
   Copy,
   ExternalLink,
   Eye,
@@ -114,6 +115,7 @@ import {
   providerPresetForBrand,
   type ProviderPreset,
 } from "@/provider/presets";
+import { setShowPreviewAppVersions, useShowPreviewAppVersions } from "@/state/appCatalogPrefs";
 import { toast } from "sonner";
 
 const SETTINGS_SECTIONS: Array<{
@@ -374,6 +376,7 @@ function GeneralSettings({ token }: { token: string }) {
   const [showCompactSummary, setShowCompactSummary] = useState(true);
   const [showReasoning, setShowReasoning] = useState(true);
   const [showToolDetails, setShowToolDetails] = useState(true);
+  const showPreviewAppVersions = useShowPreviewAppVersions();
 
   const settingsQuery = useQuery({
     queryKey: queryKeys.settings(),
@@ -560,6 +563,21 @@ function GeneralSettings({ token }: { token: string }) {
           />
         </div>
       </section>
+
+      <section className="grid gap-4">
+        <div className="grid gap-2">
+          <h3 className="text-lg font-semibold tracking-tight">{t("settings.general.developer")}</h3>
+        </div>
+        <div className="divide-y rounded-lg border">
+          <SettingsToggleRow
+            checked={showPreviewAppVersions}
+            description={t("settings.general.showPreviewAppVersionsDesc")}
+            id="pudding-show-preview-app-versions"
+            label={t("settings.general.showPreviewAppVersions")}
+            onChange={setShowPreviewAppVersions}
+          />
+        </div>
+      </section>
     </div>
   );
 }
@@ -588,8 +606,28 @@ function SettingsNumberField({
   value: string;
 }) {
   return (
-    <label className="grid gap-2" htmlFor={id}>
-      <span className="text-sm font-medium">{label}</span>
+    <div className="grid gap-2">
+      <div className="flex items-center gap-1.5">
+        <label className="text-sm font-medium" htmlFor={id}>
+          {label}
+        </label>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                aria-label={description}
+                className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                type="button"
+              >
+                <CircleHelp className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs text-xs leading-5" side="top" sideOffset={6}>
+              {description}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </div>
       <div className="flex items-center gap-2">
         <Input
           className="min-w-0"
@@ -605,8 +643,7 @@ function SettingsNumberField({
         />
         {suffix ? <span className="shrink-0 text-sm text-muted-foreground">{suffix}</span> : null}
       </div>
-      <span className="text-xs leading-5 text-muted-foreground">{description}</span>
-    </label>
+    </div>
   );
 }
 

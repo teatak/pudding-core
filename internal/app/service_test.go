@@ -31,15 +31,27 @@ func (f fakeConnectionStore) GetAppConnection(_ context.Context, id string) (*Co
 	return CloneConnection(item), nil
 }
 
-type fakeGrantStore struct{}
+type fakeGrantStore struct {
+	grants []*store.SessionAppGrant
+	err    error
+}
 
-func (fakeGrantStore) ListSessionAppGrants(context.Context, string) ([]*store.SessionAppGrant, error) {
-	return nil, nil
+func (f fakeGrantStore) ListSessionAppGrants(context.Context, string) ([]*store.SessionAppGrant, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make([]*store.SessionAppGrant, 0, len(f.grants))
+	for _, grant := range f.grants {
+		cp := *grant
+		cp.AllowedEndpoints = append([]string(nil), grant.AllowedEndpoints...)
+		out = append(out, &cp)
+	}
+	return out, nil
 }
 
 func TestResolveEndpointUsesOnlyConfiguredConnection(t *testing.T) {
 	homeDir := writeTestApp(t)
-	svc := NewService(homeDir, fakeGrantStore{}, fakeConnectionStore{items: map[string]*Connection{
+	svc := NewService(homeDir, nil, fakeConnectionStore{items: map[string]*Connection{
 		"github-main": {ID: "github-main", Name: "GitHub", AppID: "github", Auth: Auth{Type: "bearer", Token: "secret"}},
 	}})
 
@@ -54,7 +66,7 @@ func TestResolveEndpointUsesOnlyConfiguredConnection(t *testing.T) {
 
 func TestResolveEndpointRequiresConnectionWhenMultipleConfigured(t *testing.T) {
 	homeDir := writeTestApp(t)
-	svc := NewService(homeDir, fakeGrantStore{}, fakeConnectionStore{items: map[string]*Connection{
+	svc := NewService(homeDir, nil, fakeConnectionStore{items: map[string]*Connection{
 		"github-work":     {ID: "github-work", Name: "Work", AppID: "github"},
 		"github-personal": {ID: "github-personal", Name: "Personal", AppID: "github"},
 	}})
@@ -71,6 +83,51 @@ func TestResolveEndpointRequiresConnectionWhenMultipleConfigured(t *testing.T) {
 	}
 	if binding.ConnectionID != "github-personal" {
 		t.Fatalf("unexpected binding: %+v", binding)
+	}
+}
+
+func TestResolveEndpointRequiresSessionGrantWhenGrantSourcePresent(t *testing.T) {
+	homeDir := writeTestApp(t)
+	svc := NewService(homeDir, fakeGrantStore{}, fakeConnectionStore{items: map[string]*Connection{
+		"github-main": {ID: "github-main", Name: "GitHub", AppID: "github", Auth: Auth{Type: "bearer", Token: "secret"}},
+	}})
+
+	_, err := svc.ResolveEndpoint(context.Background(), "session-1", "github_rest", "")
+	var resolveErr *EndpointResolveError
+	if !errors.As(err, &resolveErr) || resolveErr.Reason != "endpoint_not_granted" {
+		t.Fatalf("expected endpoint_not_granted, got %#v", err)
+	}
+}
+
+func TestResolveEndpointUsesSessionGrants(t *testing.T) {
+	homeDir := writeTestApp(t)
+	grants := fakeGrantStore{grants: []*store.SessionAppGrant{
+		{SessionID: "session-1", AppID: "github", ConnectionID: "github-work", AllowedEndpoints: []string{"github_rest"}},
+		{SessionID: "session-1", AppID: "github", ConnectionID: "github-personal", AllowedEndpoints: []string{"github_rest"}},
+	}}
+	svc := NewService(homeDir, grants, fakeConnectionStore{items: map[string]*Connection{
+		"github-work":     {ID: "github-work", Name: "Work", AppID: "github"},
+		"github-personal": {ID: "github-personal", Name: "Personal", AppID: "github"},
+		"github-other":    {ID: "github-other", Name: "Other", AppID: "github"},
+	}})
+
+	_, err := svc.ResolveEndpoint(context.Background(), "session-1", "github_rest", "")
+	var resolveErr *EndpointResolveError
+	if !errors.As(err, &resolveErr) || resolveErr.Reason != "connection_required" || len(resolveErr.Connections) != 2 {
+		t.Fatalf("expected granted connection choices, got %#v", err)
+	}
+
+	binding, err := svc.ResolveEndpoint(context.Background(), "session-1", "github_rest", "Personal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if binding.ConnectionID != "github-personal" {
+		t.Fatalf("unexpected binding: %+v", binding)
+	}
+
+	_, err = svc.ResolveEndpoint(context.Background(), "session-1", "github_rest", "Other")
+	if !errors.As(err, &resolveErr) || resolveErr.Reason != "connection_not_found" {
+		t.Fatalf("expected ungranted connection not found, got %#v", err)
 	}
 }
 

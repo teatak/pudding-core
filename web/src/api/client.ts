@@ -1,6 +1,7 @@
 import {
   listBuiltinToolsResponse,
   listAppConnectionsResponse,
+  listSessionAppGrantsResponse,
   listAppsResponse,
   listSkillDraftsResponse,
   listSkillsResponse,
@@ -19,9 +20,11 @@ import {
   patchProviderRequest,
   probeProviderModelsRequest,
   patchWebToolsRequest,
+  putSessionAppGrantRequest,
   providerProfile,
   queuedInput,
   session,
+  sessionAppGrant,
   sessionUsage,
   settingsResponse,
   skillDraftDetail,
@@ -49,6 +52,7 @@ import {
   type ProviderProfile,
   type QueuedInput,
   type Session,
+  type SessionAppGrant,
   type SessionUsage,
   type Skill,
   type SkillDraft,
@@ -116,6 +120,7 @@ export type AppConnectionPayload = {
   username?: string;
   password?: string;
 };
+export type SessionAppGrantPayload = z.infer<typeof putSessionAppGrantRequest>;
 
 function authHeaders(token: string) {
   return {
@@ -404,6 +409,26 @@ export async function deleteAppConnection(token: string, id: string): Promise<vo
   });
 }
 
+export function listSessionAppGrants(token: string, sessionID: string): Promise<{ grants: SessionAppGrant[] }> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/app-grants`, listSessionAppGrantsResponse);
+}
+
+export function putSessionAppGrant(token: string, sessionID: string, body: SessionAppGrantPayload): Promise<SessionAppGrant> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/app-grants`, sessionAppGrant, {
+    method: "PUT",
+    body: JSON.stringify(putSessionAppGrantRequest.parse(body)),
+  });
+}
+
+export async function deleteSessionAppGrant(token: string, sessionID: string, appID: string, connectionID: string): Promise<void> {
+  await request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/app-grants/${encodeURIComponent(appID)}/${encodeURIComponent(connectionID)}`,
+    z.null(),
+    { method: "DELETE" },
+  );
+}
+
 export function startAppOAuth(
   token: string,
   body: z.infer<typeof startAppOAuthRequest>,
@@ -529,5 +554,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { AppConnection, AppDefinition, AppSkillDetail, BuiltinTool, ContentPart, DailyUsageStat, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
+export type { AppConnection, AppDefinition, AppSkillDetail, BuiltinTool, ContentPart, DailyUsageStat, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionAppGrant, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
 export { createProviderRequest, patchProviderRequest };

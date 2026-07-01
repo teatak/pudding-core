@@ -76,6 +76,13 @@ auth:
     - id: github-pat
       type: bearer
       label: Personal access token
+endpoints:
+  github_rest:
+    kind: rest
+    url: https://api.github.com
+  github_graphql:
+    kind: graphql
+    url: https://api.github.com/graphql
 `,
 		"gmail": `
 id: gmail
@@ -88,6 +95,10 @@ auth:
       provider: gmail
       label: Google OAuth
       default: true
+endpoints:
+  gmail_rest:
+    kind: rest
+    url: https://gmail.googleapis.com/gmail/v1
 `,
 	}
 	for id, body := range apps {
@@ -231,6 +242,79 @@ func TestPutAppConnectionPreservesLegacyBearerByType(t *testing.T) {
 	payload := decodeJSON[appsvc.ConnectionView](t, resp)
 	if payload.AuthMethodID != "github-pat" || payload.AuthType != "bearer" || !payload.TokenSet {
 		t.Fatalf("unexpected connection view: %+v", payload)
+	}
+}
+
+func TestSessionAppGrantAPIValidatesAndDefaultsEndpoints(t *testing.T) {
+	srv, ms, cfg := newConfigTestServer(t)
+	if err := ms.CreateSession(context.Background(), &store.Session{ID: "sess_1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.PutAppConnection(context.Background(), &appsvc.Connection{
+		ID:    "github-main",
+		Name:  "GitHub",
+		AppID: "github",
+		Auth:  appsvc.Auth{MethodID: "github-pat", Type: "bearer", Token: "ghp_test"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.PutAppConnection(context.Background(), &appsvc.Connection{
+		ID:    "gmail-main",
+		Name:  "Gmail",
+		AppID: "gmail",
+		Auth:  appsvc.Auth{MethodID: "google-oauth", Type: "oauth2", AccessToken: "ya29_test"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	badEndpoint := req(t, http.MethodPut, srv.URL+"/sessions/sess_1/app-grants", map[string]any{
+		"appID":            "github",
+		"connectionID":     "github-main",
+		"allowedEndpoints": []string{"github_rest", "missing"},
+	})
+	defer badEndpoint.Body.Close()
+	if badEndpoint.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad endpoint status = %d", badEndpoint.StatusCode)
+	}
+
+	wrongApp := req(t, http.MethodPut, srv.URL+"/sessions/sess_1/app-grants", map[string]string{
+		"appID":        "github",
+		"connectionID": "gmail-main",
+	})
+	defer wrongApp.Body.Close()
+	if wrongApp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("wrong app status = %d", wrongApp.StatusCode)
+	}
+
+	resp := req(t, http.MethodPut, srv.URL+"/sessions/sess_1/app-grants", map[string]string{
+		"appID":        "github",
+		"connectionID": "github-main",
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	grant := decodeJSON[store.SessionAppGrant](t, resp)
+	if !sameStringValues(grant.AllowedEndpoints, []string{"github_graphql", "github_rest"}) {
+		t.Fatalf("endpoints should default to all app endpoints: %+v", grant)
+	}
+
+	listResp := req(t, http.MethodGet, srv.URL+"/sessions/sess_1/app-grants", nil)
+	defer listResp.Body.Close()
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("list status = %d", listResp.StatusCode)
+	}
+	list := decodeJSON[struct {
+		Grants []store.SessionAppGrant `json:"grants"`
+	}](t, listResp)
+	if len(list.Grants) != 1 || list.Grants[0].ConnectionID != "github-main" {
+		t.Fatalf("unexpected grants: %+v", list.Grants)
+	}
+
+	delResp := req(t, http.MethodDelete, srv.URL+"/sessions/sess_1/app-grants/github/github-main", nil)
+	defer delResp.Body.Close()
+	if delResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete status = %d", delResp.StatusCode)
 	}
 }
 
