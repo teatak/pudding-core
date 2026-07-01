@@ -15,12 +15,14 @@ import {
   listAppConnections,
   listApps,
   putAppConnection,
+  startAppOAuth,
   type AppConnection,
   type AppConnectionPayload,
   type AppDefinition,
   type AppSkillDetail,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { DialogSelectContent } from "@/components/DialogSelectContent";
 import { IdentityIcon, type IdentityIconSize } from "@/components/IdentityIcon";
 import { PageHeader } from "@/components/PageHeader";
 import {
@@ -46,9 +48,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { translate, useI18n } from "@/i18n";
+import { shouldKeepDialogOpenForSelectDismiss } from "@/lib/layerGuards";
 import { cn } from "@/lib/utils";
 
 type AuthType = AppConnectionPayload["authType"];
@@ -68,6 +71,7 @@ type AppRegistry = {
   items: AppRegistryItem[];
 };
 type AppIconSpec = NonNullable<AppDefinition["icon"]>;
+type AppAuthMethod = NonNullable<NonNullable<AppDefinition["auth"]>["methods"]>[number];
 type AppEndpoints = NonNullable<AppDefinition["endpoints"]>;
 type AppSkills = NonNullable<AppDefinition["skills"]>;
 type AppSkillItem = AppSkills[number] & { content?: string };
@@ -96,6 +100,7 @@ type AppPackage = {
 type ConnectionForm = {
   id: string;
   name: string;
+  authMethodID: string;
   authType: AuthType;
   token: string;
   prefix: string;
@@ -104,7 +109,7 @@ type ConnectionForm = {
   password: string;
 };
 
-const authTypes: AuthType[] = ["none", "bearer", "token", "basic", "header"];
+const authTypes: AuthType[] = ["none", "bearer", "token", "basic", "header", "oauth2"];
 const OFFICIAL_APP_REGISTRY =
   import.meta.env.VITE_PUDDING_APP_REGISTRY_URL || "https://raw.githubusercontent.com/teatak/pudding-hub/main/apps/registry.json";
 
@@ -171,9 +176,7 @@ export function AppsPane({ token }: { token: string }) {
     return selectedSkillQuery.data || selectedSkill.skill;
   }, [selectedSkill, selectedSkillQuery.data]);
   const detailConnections = detailApp ? connections.filter((conn) => conn.appID === detailApp.id) : [];
-  const loading = appsQuery.isLoading || connectionsQuery.isLoading || (apps.length === 0 && catalogQuery.isLoading);
   const loadFailed = appsQuery.isError || connectionsQuery.isError;
-  const hasApps = apps.length > 0 || catalogApps.length > 0;
 
   useEffect(() => {
     if (detailAppID && !apps.some((app) => app.id === detailAppID)) {
@@ -212,6 +215,7 @@ export function AppsPane({ token }: { token: string }) {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.apps() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.appCatalog() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.appConnections() }),
       ]);
     },
     onError: () => toast.error(t("apps.installFailed")),
@@ -243,7 +247,6 @@ export function AppsPane({ token }: { token: string }) {
     },
     onError: () => toast.error(t("apps.uninstallFailed")),
   });
-
   return (
     <main className="flex h-full min-w-0 flex-col overflow-hidden bg-background">
       <PageHeader
@@ -294,6 +297,7 @@ export function AppsPane({ token }: { token: string }) {
             <CatalogAppDetail
               app={detailCatalogApp}
               detail={catalogDetailQuery.data}
+              detailError={catalogDetailQuery.error}
               detailFailed={catalogDetailQuery.isError}
               detailLoading={catalogDetailQuery.isLoading}
               installed={installedByID.get(appRegistryLocalID(detailCatalogApp))}
@@ -308,15 +312,9 @@ export function AppsPane({ token }: { token: string }) {
                 })
               }
             />
-          ) : loading ? (
-            <AppsSkeleton />
           ) : loadFailed ? (
             <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
               {t("apps.loadFailed")}
-            </div>
-          ) : !hasApps ? (
-            <div className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
-              {t("apps.empty")}
             </div>
           ) : (
             <>
@@ -337,9 +335,15 @@ export function AppsPane({ token }: { token: string }) {
                   </div>
                 </section>
               ) : null}
-              {catalogApps.length > 0 ? (
-                <section className="grid gap-4">
-                  <SectionTitle>{t("apps.availableTitle")}</SectionTitle>
+              <section className="grid gap-4">
+                <SectionTitle>{t("apps.availableTitle")}</SectionTitle>
+                {catalogQuery.isLoading ? (
+                  <SectionSpinner />
+                ) : catalogQuery.isError ? (
+                  <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                    {t("apps.loadFailed")}
+                  </div>
+                ) : catalogApps.length > 0 ? (
                   <div className="grid gap-x-12 gap-y-7 md:grid-cols-2">
                     {catalogApps.map((app) => (
                       <CatalogAppItem
@@ -360,8 +364,10 @@ export function AppsPane({ token }: { token: string }) {
                       />
                     ))}
                   </div>
-                </section>
-              ) : null}
+                ) : (
+                  <EmptyLine>{t("apps.empty")}</EmptyLine>
+                )}
+              </section>
             </>
           )}
         </div>
@@ -441,6 +447,15 @@ export function AppsPane({ token }: { token: string }) {
 
 function SectionTitle({ children }: { children: ReactNode }) {
   return <h2 className="border-b pb-4 text-lg font-semibold tracking-normal">{children}</h2>;
+}
+
+function SectionSpinner() {
+  const { t } = useI18n();
+  return (
+    <div className="flex h-24 items-center justify-center text-muted-foreground">
+      <Loader2 aria-label={t("common.loading")} className="size-4 animate-spin" />
+    </div>
+  );
 }
 
 async function fetchAppRegistry(url: string): Promise<AppRegistry> {
@@ -707,6 +722,7 @@ function AppDetail({
   const iconSrc = appIconURL(token, app) || (catalogApp ? appRegistryIconURL(catalogApp, OFFICIAL_APP_REGISTRY) : undefined);
   const title = catalogApp ? appRegistryTitle(catalogApp, locale) : app.name;
   const description = (catalogApp ? appRegistryDescription(catalogApp, locale) : "") || app.description;
+  const authMethods = appAuthMethods(app);
 
   return (
     <section className="grid gap-8">
@@ -725,10 +741,6 @@ function AppDetail({
                 ))}
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <Button type="button" variant="secondary" onClick={onAdd}>
-                  <Plus className="size-3.5" />
-                  {t("apps.addConnection")}
-                </Button>
                 <Button className="text-destructive hover:text-destructive" type="button" variant="ghost" onClick={onUninstall}>
                   <Trash className="size-3.5" />
                   {t("apps.uninstall")}
@@ -741,10 +753,19 @@ function AppDetail({
       </div>
 
       <div className="grid gap-8">
-        <DetailSection title={t("apps.connections")} count={connections.length}>
+        <DetailSection
+          title={t("apps.connections")}
+          count={connections.length}
+          action={
+            <Button size="sm" type="button" variant="secondary" onClick={onAdd}>
+              <Plus className="size-3.5" />
+              {t("apps.addConnection")}
+            </Button>
+          }
+        >
           {connections.length > 0 ? (
             connections.map((connection) => (
-              <ConnectionRow key={connection.id} connection={connection} onDelete={onDelete} onEdit={onEdit} />
+              <ConnectionRow key={connection.id} authMethods={authMethods} connection={connection} onDelete={onDelete} onEdit={onEdit} />
             ))
           ) : (
             <EmptyLine>{t("apps.noConnections")}</EmptyLine>
@@ -811,6 +832,7 @@ function CatalogAppItem({
 function CatalogAppDetail({
   app,
   detail,
+  detailError,
   detailFailed,
   detailLoading,
   installed,
@@ -820,6 +842,7 @@ function CatalogAppDetail({
 }: {
   app: AppRegistryItem;
   detail?: CatalogAppContent;
+  detailError?: unknown;
   detailFailed: boolean;
   detailLoading: boolean;
   installed?: AppDefinition;
@@ -864,7 +887,7 @@ function CatalogAppDetail({
         {detailLoading ? (
           <DetailSkeletonRows />
         ) : detailFailed ? (
-          <EmptyLine>{t("apps.contentLoadFailed")}</EmptyLine>
+          <ContentLoadFailed error={detailError} />
         ) : (
           <EndpointRows endpoints={endpoints} />
         )}
@@ -879,7 +902,7 @@ function CatalogAppDetail({
         {detailLoading ? (
           <DetailSkeletonRows />
         ) : detailFailed ? (
-          <EmptyLine>{t("apps.contentLoadFailed")}</EmptyLine>
+          <ContentLoadFailed error={detailError} />
         ) : (
           <SkillRows
             icon={app.icon}
@@ -908,6 +931,7 @@ function AppIcon({
   const [svgText, setSvgText] = useState<{ src: string; text: string } | null>(null);
   const hasIconColor = Boolean(icon?.color?.light || icon?.color?.dark);
   const hasIconBackground = Boolean(icon?.background?.light || icon?.background?.dark);
+  const hasWhiteLightBackground = isWhiteAppIconBackground(icon?.background?.light || icon?.background?.dark);
   const iconStyle = appIconCSSVariables(icon);
   const hasThemeStyle = hasIconColor || hasIconBackground;
 
@@ -953,9 +977,10 @@ function AppIcon({
   return (
     <IdentityIcon
       className={cn("pudding-app-icon", className)}
-      contentClassName={cn(icon ? "object-contain" : "object-cover", !hasThemeStyle && "dark:invert")}
+      contentClassName={cn(icon ? "object-contain" : "object-cover")}
       data-has-background={hasIconBackground ? "true" : undefined}
       data-has-color={hasIconColor ? "true" : undefined}
+      data-light-background={hasWhiteLightBackground ? "white" : undefined}
       fallback="app"
       fit={icon ? "contain" : "cover"}
       size={size}
@@ -1004,6 +1029,11 @@ function appIconCSSVariables(icon: AppIconSpec | undefined): CSSProperties | und
     style["--app-icon-background-dark"] = backgroundDark || backgroundLight;
   }
   return Object.keys(style).length > 0 ? style : undefined;
+}
+
+function isWhiteAppIconBackground(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase().replace(/\s+/g, "");
+  return normalized === "white" || normalized === "#fff" || normalized === "#ffffff" || normalized === "rgb(255,255,255)" || normalized === "rgba(255,255,255,1)";
 }
 
 function AppEndpointsSection({
@@ -1165,12 +1195,15 @@ function stripSkillFrontmatter(content: string) {
   return content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
 }
 
-function DetailSection({ title, count, children }: { title: string; count?: number; children: ReactNode }) {
+function DetailSection({ action, title, count, children }: { action?: ReactNode; title: string; count?: number; children: ReactNode }) {
   return (
     <section className="grid min-w-0 gap-3.5">
-      <div className="flex items-baseline gap-2">
-        <h3 className="text-base font-semibold tracking-normal">{title}</h3>
-        {typeof count === "number" ? <span className="text-xs text-muted-foreground">{count}</span> : null}
+      <div className="flex min-w-0 items-center justify-between gap-3">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <h3 className="text-base font-semibold tracking-normal">{title}</h3>
+          {typeof count === "number" ? <span className="text-xs text-muted-foreground">{count}</span> : null}
+        </div>
+        {action ? <div className="shrink-0">{action}</div> : null}
       </div>
       <div className="grid min-w-0 gap-2">{children}</div>
     </section>
@@ -1185,6 +1218,37 @@ function EmptyLine({ children }: { children: ReactNode }) {
   return <div className="rounded-md bg-muted/25 px-3 py-2.5 text-sm text-muted-foreground">{children}</div>;
 }
 
+function ContentLoadFailed({ error }: { error?: unknown }) {
+  const { t } = useI18n();
+  const detail = appContentErrorDetail(error, t);
+  return (
+    <EmptyLine>
+      <div className="grid gap-1">
+        <span>{t("apps.contentLoadFailed")}</span>
+        {detail ? <span className="text-xs">{detail}</span> : null}
+      </div>
+    </EmptyLine>
+  );
+}
+
+function appContentErrorDetail(error: unknown, t: (key: string) => string) {
+  if (!error) {
+    return "";
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  const packageStatus = message.match(/app package request failed: (\d+)/);
+  if (packageStatus) {
+    return `${t("apps.contentLoadPackageFailed")} (${packageStatus[1]})`;
+  }
+  if (message.includes("app package hash mismatch")) {
+    return t("apps.contentLoadHashMismatch");
+  }
+  if (message.includes("JSON") || message.includes("parse")) {
+    return t("apps.contentLoadParseFailed");
+  }
+  return message;
+}
+
 function DetailSkeletonRows() {
   return (
     <div className="grid gap-2">
@@ -1195,25 +1259,30 @@ function DetailSkeletonRows() {
 }
 
 function ConnectionRow({
+  authMethods,
   connection,
   onDelete,
   onEdit,
 }: {
+  authMethods: AppAuthMethod[];
   connection: AppConnection;
   onDelete: (connection: AppConnection) => void;
   onEdit: (connection: AppConnection) => void;
 }) {
   const { t } = useI18n();
   const name = connection.name || connection.id || t("apps.connection");
+  const authLabel = connectionAuthBadgeLabel(connection, authMethods, t);
   return (
     <div className="flex min-w-0 items-center gap-3 rounded-md bg-muted/35 px-3 py-2.5">
       <KeyRound className="size-3.5 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate text-sm font-medium">{name}</span>
-          <Badge className={cn(connection.tokenSet && "text-success")} variant="outline">
-            {connection.tokenSet ? t("apps.tokenSet") : connection.authType || "none"}
-          </Badge>
+          {authLabel ? (
+            <Badge className={cn(connection.tokenSet && "text-success")} variant="outline">
+              {authLabel}
+            </Badge>
+          ) : null}
         </div>
         {connection.header ? <div className="truncate text-xs text-muted-foreground">{connection.header}</div> : null}
       </div>
@@ -1243,23 +1312,31 @@ function ConnectionDialog({
   const app = editing?.app;
   const connection = editing?.connection;
   const editingAppID = editing?.app.id || "";
+  const editingAppAuth = editing?.app.auth;
   const editingConnectionID = editing?.connection?.id || "";
   const editingConnectionName = editing?.connection?.name || "";
+  const editingConnectionAuthMethodID = editing?.connection?.authMethodID || "";
   const editingConnectionAuthType = editing?.connection?.authType || "";
   const editingConnectionHeader = editing?.connection?.header || "";
   const editingAppName = editing?.app.name || "";
   const [form, setForm] = useState<ConnectionForm>(emptyConnectionForm());
   const [secretVisible, setSecretVisible] = useState(false);
   const [secretLoading, setSecretLoading] = useState(false);
+  const authMethods = useMemo(() => appAuthMethods(app), [app]);
+  const selectedAuthMethod = findAppAuthMethod(authMethods, form.authMethodID, form.authType);
   const saveMutation = useMutation({
     mutationFn: () => {
       if (!app) {
         throw new Error("app required");
       }
+      if (!selectedAuthMethod) {
+        throw new Error("auth method required");
+      }
       return putAppConnection(token, form.id.trim(), {
         appID: app.id,
         name: form.name.trim(),
-        authType: form.authType,
+        authMethodID: selectedAuthMethod.id,
+        authType: normalizeAuthType(selectedAuthMethod.type),
         token: form.token,
         prefix: form.prefix,
         header: form.header,
@@ -1274,6 +1351,28 @@ function ConnectionDialog({
     },
     onError: () => toast.error(t("apps.connectionSaveFailed")),
   });
+  const startOAuthMutation = useMutation({
+    mutationFn: async () => {
+      if (!app) {
+        throw new Error("app required");
+      }
+      if (!selectedAuthMethod) {
+        throw new Error("auth method required");
+      }
+      const result = await startAppOAuth(token, {
+        appID: app.id,
+        authMethodID: selectedAuthMethod.id,
+        connectionID: form.id.trim(),
+        connectionName: form.name.trim(),
+      });
+      await openExternalURL(result.authorizationURL);
+      return result;
+    },
+    onSuccess: () => {
+      onOpenChange(false);
+    },
+    onError: () => toast.error(t("apps.oauthStartFailed")),
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -1281,13 +1380,16 @@ function ConnectionDialog({
       return;
     }
     setSecretVisible(false);
+    const methods = appAuthMethods({ auth: editingAppAuth });
+    const initialMethod = findAppAuthMethod(methods, editingConnectionAuthMethodID, editingConnectionAuthType) || defaultAppAuthMethod(methods);
     setForm({
       id: editingConnectionID || nextConnectionID(editingAppID, connections),
       name: editingConnectionName || nextConnectionName(editingAppName || editingAppID, editingAppID, connections),
-      authType: normalizeAuthType(editingConnectionAuthType),
+      authMethodID: initialMethod?.id || "",
+      authType: normalizeAuthType(initialMethod?.type || editingConnectionAuthType),
       token: "",
-      prefix: "",
-      header: editingConnectionHeader,
+      prefix: initialMethod?.prefix || "",
+      header: editingConnectionHeader || initialMethod?.header || "",
       username: "",
       password: "",
     });
@@ -1301,13 +1403,15 @@ function ConnectionDialog({
         if (cancelled) {
           return;
         }
+        const detailMethod = findAppAuthMethod(methods, detail.authMethodID, detail.authType) || initialMethod;
         setForm((current) => ({
           ...current,
           name: detail.name || current.name,
-          authType: normalizeAuthType(detail.authType),
+          authMethodID: detailMethod?.id || detail.authMethodID || current.authMethodID,
+          authType: normalizeAuthType(detailMethod?.type || detail.authType),
           token: detail.token || "",
-          prefix: detail.prefix || current.prefix,
-          header: detail.header || current.header,
+          prefix: detail.prefix || detailMethod?.prefix || current.prefix,
+          header: detail.header || detailMethod?.header || current.header,
           username: detail.username || "",
           password: detail.password || "",
         }));
@@ -1325,17 +1429,57 @@ function ConnectionDialog({
     return () => {
       cancelled = true;
     };
-  }, [connections, editingAppID, editingAppName, editingConnectionAuthType, editingConnectionHeader, editingConnectionID, editingConnectionName, locale, token]);
+  }, [
+    connections,
+    editingAppAuth,
+    editingAppID,
+    editingAppName,
+    editingConnectionAuthMethodID,
+    editingConnectionAuthType,
+    editingConnectionHeader,
+    editingConnectionID,
+    editingConnectionName,
+    locale,
+    token,
+  ]);
 
   if (!editing || !app) {
     return null;
   }
 
-  const canSave = form.id.trim() !== "" && form.name.trim() !== "" && !saveMutation.isPending && !secretLoading;
+  const isOAuth = selectedAuthMethod?.type === "oauth2";
+  const canReuseExistingSecret = Boolean(connection?.tokenSet && sameConnectionAuthMethod(connection, selectedAuthMethod));
+  const tokenReady = !["bearer", "token", "header"].includes(form.authType) || form.token.trim() !== "" || canReuseExistingSecret;
+  const basicReady = form.authType !== "basic" || form.username.trim() !== "" || form.password !== "" || canReuseExistingSecret;
+  const headerReady = form.authType !== "header" || form.header.trim() !== "";
+  const canSave =
+    Boolean(selectedAuthMethod) &&
+    !isOAuth &&
+    form.id.trim() !== "" &&
+    form.name.trim() !== "" &&
+    tokenReady &&
+    basicReady &&
+    headerReady &&
+    !saveMutation.isPending &&
+    !secretLoading;
+  const canStartOAuth =
+    Boolean(selectedAuthMethod) && isOAuth && form.id.trim() !== "" && form.name.trim() !== "" && !startOAuthMutation.isPending && !secretLoading;
 
   return (
-    <Dialog open={Boolean(editing)} onOpenChange={saveMutation.isPending ? undefined : onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+    <Dialog open={Boolean(editing)} onOpenChange={saveMutation.isPending || startOAuthMutation.isPending ? undefined : onOpenChange}>
+      <DialogContent
+        className="sm:max-w-lg"
+        onPointerDownOutside={(event) => {
+          if (shouldKeepDialogOpenForSelectDismiss(event.target)) {
+            event.preventDefault();
+          }
+        }}
+        onInteractOutside={(event) => {
+          if (shouldKeepDialogOpenForSelectDismiss(event.target)) {
+            event.preventDefault();
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{connection ? t("apps.editConnection") : t("apps.addConnection")}</DialogTitle>
           <DialogDescription>{app.name}</DialogDescription>
@@ -1346,21 +1490,42 @@ function ConnectionDialog({
             value={form.name}
             onChange={(value) => setForm((current) => ({ ...current, name: value }))}
           />
-          <div className="grid gap-1.5">
-            <Label>{t("apps.authType")}</Label>
-            <Select value={form.authType} onValueChange={(value) => setForm((current) => ({ ...current, authType: normalizeAuthType(value) }))}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {authTypes.map((type) => (
-                  <SelectItem key={type} value={type}>
-                    {t(`apps.auth.${type}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {authMethods.length > 0 ? (
+            <div className="grid gap-1.5">
+              <Label>{t("apps.authType")}</Label>
+              <Select
+                value={selectedAuthMethod?.id || form.authMethodID}
+                onValueChange={(value) => {
+                  const method = authMethods.find((item) => item.id === value);
+                  if (!method) {
+                    return;
+                  }
+                  setForm((current) => ({
+                    ...current,
+                    authMethodID: method.id || "",
+                    authType: normalizeAuthType(method.type),
+                    header: method.header || "",
+                    password: "",
+                    prefix: method.prefix || "",
+                    token: "",
+                    username: "",
+                  }));
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <DialogSelectContent>
+                  {authMethods.map((method) => (
+                    <SelectItem key={method.id} value={method.id || method.type}>
+                      {appAuthMethodLabel(method, t)}
+                    </SelectItem>
+                  ))}
+                </DialogSelectContent>
+              </Select>
+            </div>
+          ) : null}
+          {authMethods.length === 0 ? <div className="text-sm text-destructive">{t("apps.authUnavailable")}</div> : null}
           {form.authType === "token" ? (
             <LabeledInput
               label={t("apps.prefix")}
@@ -1386,7 +1551,7 @@ function ConnectionDialog({
               />
               <LabeledSecretInput
                 label={t("apps.password")}
-                placeholder={connection?.tokenSet ? t("apps.secretKeepPlaceholder") : undefined}
+                placeholder={canReuseExistingSecret ? t("apps.secretKeepPlaceholder") : undefined}
                 disabled={secretLoading}
                 visible={secretVisible}
                 value={form.password}
@@ -1398,7 +1563,7 @@ function ConnectionDialog({
           {["bearer", "token", "header"].includes(form.authType) ? (
             <LabeledSecretInput
               label={t("apps.token")}
-              placeholder={connection?.tokenSet ? t("apps.secretKeepPlaceholder") : undefined}
+              placeholder={canReuseExistingSecret ? t("apps.secretKeepPlaceholder") : undefined}
               disabled={secretLoading}
               visible={secretVisible}
               value={form.token}
@@ -1406,15 +1571,23 @@ function ConnectionDialog({
               onChange={(value) => setForm((current) => ({ ...current, token: value }))}
             />
           ) : null}
+          {isOAuth ? <div className="text-sm text-muted-foreground">{t("apps.oauthConnectionHint")}</div> : null}
         </div>
         <DialogFooter>
-          <Button disabled={saveMutation.isPending} type="button" variant="outline" onClick={() => onOpenChange(false)}>
+          <Button disabled={saveMutation.isPending || startOAuthMutation.isPending} type="button" variant="outline" onClick={() => onOpenChange(false)}>
             {t("common.cancel")}
           </Button>
-          <Button disabled={!canSave} type="button" onClick={() => saveMutation.mutate()}>
-            {saveMutation.isPending ? <Loader2 className="animate-spin" /> : null}
-            {t("common.save")}
-          </Button>
+          {isOAuth ? (
+            <Button disabled={!canStartOAuth} type="button" onClick={() => startOAuthMutation.mutate()}>
+              {startOAuthMutation.isPending ? <Loader2 className="animate-spin" /> : null}
+              {connection ? t("apps.reauthorizeConnection") : t("apps.authorizeConnection")}
+            </Button>
+          ) : (
+            <Button disabled={!canSave} type="button" onClick={() => saveMutation.mutate()}>
+              {saveMutation.isPending ? <Loader2 className="animate-spin" /> : null}
+              {t("common.save")}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1489,17 +1662,9 @@ function LabeledSecretInput({
   );
 }
 
-function AppsSkeleton() {
-  return (
-    <div className="grid gap-3">
-      <Skeleton className="h-36 rounded-lg" />
-      <Skeleton className="h-36 rounded-lg" />
-    </div>
-  );
-}
-
 function emptyConnectionForm(): ConnectionForm {
   return {
+    authMethodID: "",
     authType: "none",
     header: "",
     id: "",
@@ -1546,4 +1711,104 @@ function nextConnectionID(appID: string, connections: AppConnection[]) {
 
 function normalizeAuthType(value: unknown): AuthType {
   return authTypes.includes(value as AuthType) ? (value as AuthType) : "none";
+}
+
+function appAuthMethods(app?: Pick<AppDefinition, "auth"> | null): AppAuthMethod[] {
+  const methods = app?.auth?.methods || [];
+  return methods
+    .map((method) => {
+      const type = normalizeAuthType(method.type);
+      const id = (method.id || method.type || type).trim();
+      return {
+        ...method,
+        id,
+        type,
+        header: method.header?.trim(),
+        label: method.label?.trim(),
+        prefix: method.prefix?.trim(),
+        provider: method.provider?.trim(),
+      };
+    })
+    .filter((method) => method.id && method.type && method.type !== "none");
+}
+
+function defaultAppAuthMethod(methods: AppAuthMethod[]) {
+  return methods.find((method) => method.default) || methods[0];
+}
+
+function findAppAuthMethod(methods: AppAuthMethod[], methodID?: string, authType?: string) {
+  const id = (methodID || "").trim();
+  if (id) {
+    return methods.find((method) => method.id === id);
+  }
+  const type = normalizeAuthType(authType);
+  const matched = methods.filter((method) => method.type === type);
+  if (matched.length === 1) {
+    return matched[0];
+  }
+  return defaultAppAuthMethod(methods);
+}
+
+function appAuthMethodLabel(method: AppAuthMethod, t: (key: string) => string) {
+  return method.label || authTypeLabel(normalizeAuthType(method.type), t);
+}
+
+function connectionAuthBadgeLabel(connection: AppConnection, methods: AppAuthMethod[], t: (key: string) => string) {
+  const method = findConnectionAuthMethod(methods, connection.authMethodID, connection.authType);
+  if (method && isPATAuthMethod(method)) {
+    return "PAT";
+  }
+  const type = normalizeAuthType(method?.type || connection.authType);
+  if (type === "none") {
+    return "";
+  }
+  return authTypeLabel(type, t);
+}
+
+function findConnectionAuthMethod(methods: AppAuthMethod[], methodID?: string, authType?: string) {
+  const id = (methodID || "").trim();
+  if (id) {
+    return methods.find((method) => method.id === id);
+  }
+  const rawType = (authType || "").trim();
+  if (!rawType) {
+    return undefined;
+  }
+  const type = normalizeAuthType(rawType);
+  if (type === "none") {
+    return undefined;
+  }
+  const matched = methods.filter((method) => method.type === type);
+  return matched.length === 1 ? matched[0] : undefined;
+}
+
+function sameConnectionAuthMethod(connection: AppConnection, method?: AppAuthMethod) {
+  if (!method) {
+    return false;
+  }
+  const connectionMethodID = (connection.authMethodID || "").trim();
+  const methodID = (method.id || "").trim();
+  if (connectionMethodID && methodID) {
+    return connectionMethodID === methodID;
+  }
+  return normalizeAuthType(connection.authType) === normalizeAuthType(method.type);
+}
+
+function isPATAuthMethod(method: AppAuthMethod) {
+  const value = `${method.id || ""} ${method.label || ""}`.toLowerCase();
+  return value.includes("pat") || value.includes("personal access token");
+}
+
+function authTypeLabel(type: AuthType, t: (key: string) => string) {
+  return t(`apps.auth.${type}`);
+}
+
+async function openExternalURL(url: string) {
+  try {
+    const { Browser } = await import("@wailsio/runtime");
+    await Browser.OpenURL(url);
+    return;
+  } catch {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
 }

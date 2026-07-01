@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/teatak/cart/v3"
@@ -30,11 +31,13 @@ type Server struct {
 	apps      appService
 	skills    skillService
 	hub       *event.Hub
+	oauthMu   sync.Mutex
+	oauth     map[string]oauthStartState
 }
 
 func New(eng *engine.Engine, s store.Store, cfg engine.ConfigSource, hub *event.Hub) *Server {
 	providers, _ := cfg.(providerWriter)
-	return &Server{engine: eng, store: s, config: cfg, providers: providers, hub: hub}
+	return &Server{engine: eng, store: s, config: cfg, providers: providers, hub: hub, oauth: map[string]oauthStartState{}}
 }
 
 func (s *Server) WithApps(apps appService) *Server {
@@ -48,14 +51,14 @@ func (s *Server) WithSkills(skills skillService) *Server {
 }
 
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
-var apiPrefixes = []string{"/sessions", "/settings", "/providers", "/tools", "/skills", "/skill-drafts", "/skill-assets", "/usage", "/mobile", "/apps", "/app-assets", "/app-skills", "/app-connections"}
+var apiPrefixes = []string{"/sessions", "/settings", "/providers", "/tools", "/skills", "/skill-drafts", "/skill-assets", "/usage", "/mobile", "/apps", "/app-assets", "/app-skills", "/app-connections", "/app-oauth"}
 
 type appService interface {
 	ListDefinitions(ctx context.Context) ([]*app.Definition, error)
 	InstallPackage(ctx context.Context, packageJSON []byte, expectedSHA256, sourceURL string) (*app.Definition, error)
 	DeleteDefinition(ctx context.Context, id string) error
 	ReadAsset(ctx context.Context, rel string) ([]byte, string, error)
-	ReadSkill(ctx context.Context, appID, skillPath string) (*app.SkillDetail, error)
+	ReadSkill(ctx context.Context, appID, skillID string) (*app.SkillDetail, error)
 }
 
 type deviceTokenValidator interface {
@@ -131,6 +134,8 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/app-skills/*path").GET(s.getAppSkill)
 	app.Route("/app-connections").GET(s.listAppConnections)
 	app.Route("/app-connections/:id").GET(s.getAppConnection).PUT(s.putAppConnection).DELETE(s.deleteAppConnection)
+	app.Route("/app-oauth/start").POST(s.startAppOAuth)
+	public.Route("/oauth/callback/:provider").GET(s.appOAuthCallback)
 	app.Route("/sessions/:id/app-grants").GET(s.listSessionAppGrants).PUT(s.putSessionAppGrant)
 	app.Route("/sessions/:id/app-grants/:appID/:connectionID").DELETE(s.deleteSessionAppGrant)
 	app.Route("/usage/daily").GET(s.getDailyUsage)
@@ -167,6 +172,10 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	authed := withAuth(token, cfg.deviceTokens, app)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if cfg.pairing != nil && isPublicMobilePath(r.URL.Path) {
+			public.ServeHTTP(w, r)
+			return
+		}
+		if isPublicOAuthPath(r.URL.Path) {
 			public.ServeHTTP(w, r)
 			return
 		}
@@ -216,6 +225,10 @@ func validBearerToken(r *http.Request, daemonToken string, devices deviceTokenVa
 
 func isPublicMobilePath(path string) bool {
 	return strings.HasPrefix(path, "/mobile/pairings/") && strings.HasSuffix(path, "/claim")
+}
+
+func isPublicOAuthPath(path string) bool {
+	return strings.HasPrefix(path, "/oauth/callback/")
 }
 
 func requestBaseURL(r *http.Request) string {

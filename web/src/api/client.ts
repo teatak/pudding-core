@@ -33,6 +33,8 @@ import {
   appConnection,
   appSkillDetail,
   installAppRequest,
+  startAppOAuthRequest,
+  startAppOAuthResponse,
   webToolsConfig,
   type AppConnection,
   type AppDefinition,
@@ -106,7 +108,8 @@ export type UserPrompt = z.infer<typeof userPromptResponse>;
 export type AppConnectionPayload = {
   appID: string;
   name?: string;
-  authType: "none" | "bearer" | "token" | "basic" | "header";
+  authMethodID?: string;
+  authType: "none" | "bearer" | "token" | "basic" | "header" | "oauth2";
   token?: string;
   prefix?: string;
   header?: string;
@@ -398,6 +401,16 @@ export function putAppConnection(token: string, id: string, body: AppConnectionP
 export async function deleteAppConnection(token: string, id: string): Promise<void> {
   await request(token, `/app-connections/${encodeURIComponent(id)}`, z.null(), {
     method: "DELETE",
+  });
+}
+
+export function startAppOAuth(
+  token: string,
+  body: z.infer<typeof startAppOAuthRequest>,
+): Promise<z.infer<typeof startAppOAuthResponse>> {
+  return request(token, "/app-oauth/start", startAppOAuthResponse, {
+    method: "POST",
+    body: JSON.stringify(startAppOAuthRequest.parse(body)),
   });
 }
 

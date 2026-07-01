@@ -48,6 +48,14 @@ cat > "$app/Contents/Info.plist" <<EOF
   <key>CFBundleName</key><string>Pudding</string>
   <key>CFBundleDisplayName</key><string>Pudding</string>
   <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key><string>Pudding OAuth Callback</string>
+      <key>CFBundleURLSchemes</key>
+      <array><string>pudding</string></array>
+    </dict>
+  </array>
   <key>CFBundleShortVersionString</key><string>$ver</string>
   <key>CFBundleVersion</key><string>$ver</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
@@ -62,20 +70,20 @@ cat > "$app/Contents/Info.plist" <<EOF
 EOF
 plutil -lint "$app/Contents/Info.plist" >/dev/null
 
-# 3) DMG(直接 UDZO 压缩只读盘;带 Applications 软链拖拽安装)
+# 3) 输出 .app + DMG。先覆盖 .app,避免 hdiutil 失败时 dist 里还留老版本。
 dist_dir="$PWD/dist"; mkdir -p "$dist_dir"
 name="Pudding-$version-$goarch"
 dmg="$dist_dir/$name.dmg"
 rm -f "$dmg" "$dmg.sha256"
+
+rm -rf "$dist_dir/Pudding.app"
+cp -R "$app" "$dist_dir/Pudding.app"
+
 stage="$workdir/stage"; mkdir -p "$stage"
 cp -R "$app" "$stage/Pudding.app"
 ln -s /Applications "$stage/Applications"
 hdiutil create -volname "Pudding" -srcfolder "$stage" -ov -format UDZO "$dmg" >/dev/null
 (cd "$dist_dir" && shasum -a 256 "$name.dmg" > "$name.dmg.sha256")
-
-# 同时在 dist 留一份 .app,便于直接拷进 /Applications 跑
-rm -rf "$dist_dir/Pudding.app"
-cp -R "$app" "$dist_dir/Pudding.app"
 
 echo ">> done (unsigned):"
 echo "   $dmg"

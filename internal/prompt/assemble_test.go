@@ -28,6 +28,38 @@ func TestAssembleIncludesCoreAndUserInstruction(t *testing.T) {
 }
 
 func TestAssembleIncludesSkillsIndex(t *testing.T) {
+	home := t.TempDir()
+	out := Assemble(Input{
+		Mode: "chat",
+		Home: home,
+		Skills: []skill.Skill{
+			{
+				ID:          "skill-creator",
+				Description: "Create or update Pudding skills.",
+				Source:      skill.SourceUser,
+				Path:        "skill-creator/SKILL.md",
+			},
+		},
+	})
+	realPath := filepath.Join(home, "skills", "skill-creator", "SKILL.md")
+	if !strings.Contains(out.SystemInstruction, "## Available Skills") {
+		t.Fatalf("assembled prompt missing skills index:\n%s", out.SystemInstruction)
+	}
+	if !strings.Contains(out.SystemInstruction, "`skill-creator`") || !strings.Contains(out.SystemInstruction, "Create or update Pudding skills.") {
+		t.Fatalf("assembled prompt missing skill metadata:\n%s", out.SystemInstruction)
+	}
+	if !strings.Contains(out.SystemInstruction, realPath) {
+		t.Fatalf("assembled prompt missing real skill path %q:\n%s", realPath, out.SystemInstruction)
+	}
+	if !strings.Contains(out.SystemInstruction, "builtin_skill_read") {
+		t.Fatalf("assembled prompt missing skill read instruction:\n%s", out.SystemInstruction)
+	}
+	if strings.Contains(out.SystemInstruction, "# Skill Creator") {
+		t.Fatalf("assembled prompt should not inline SKILL.md body:\n%s", out.SystemInstruction)
+	}
+}
+
+func TestAssembleDoesNotShowPseudoPathForBuiltinSkill(t *testing.T) {
 	out := Assemble(Input{
 		Mode: "chat",
 		Skills: []skill.Skill{
@@ -39,21 +71,14 @@ func TestAssembleIncludesSkillsIndex(t *testing.T) {
 			},
 		},
 	})
-	if !strings.Contains(out.SystemInstruction, "## Available Skills") {
-		t.Fatalf("assembled prompt missing skills index:\n%s", out.SystemInstruction)
-	}
-	if !strings.Contains(out.SystemInstruction, "`skill-creator`") || !strings.Contains(out.SystemInstruction, "Create or update Pudding skills.") {
-		t.Fatalf("assembled prompt missing skill metadata:\n%s", out.SystemInstruction)
-	}
-	if !strings.Contains(out.SystemInstruction, "builtin_skill_read") {
-		t.Fatalf("assembled prompt missing skill read instruction:\n%s", out.SystemInstruction)
-	}
-	if strings.Contains(out.SystemInstruction, "# Skill Creator") {
-		t.Fatalf("assembled prompt should not inline SKILL.md body:\n%s", out.SystemInstruction)
+	if strings.Contains(out.SystemInstruction, "builtin://") || strings.Contains(out.SystemInstruction, "path:") {
+		t.Fatalf("assembled prompt should not show pseudo path for builtin skill:\n%s", out.SystemInstruction)
 	}
 }
 
 func TestAssembleIncludesAppsIndex(t *testing.T) {
+	appPath := filepath.Join(t.TempDir(), "apps", "github", app.AppFileName)
+	realSkillPath := filepath.Join(filepath.Dir(appPath), "skills", "issues", "SKILL.md")
 	out := Assemble(Input{
 		Mode: "chat",
 		Apps: []*app.Definition{
@@ -61,6 +86,7 @@ func TestAssembleIncludesAppsIndex(t *testing.T) {
 				ID:          "github",
 				Name:        "GitHub",
 				Description: "Access repositories and issues.",
+				Path:        appPath,
 				Endpoints: map[string]app.Endpoint{
 					"github_rest": {
 						Kind:        app.EndpointKindREST,
@@ -84,8 +110,11 @@ func TestAssembleIncludesAppsIndex(t *testing.T) {
 	if !strings.Contains(out.SystemInstruction, "App `github`") || !strings.Contains(out.SystemInstruction, "Endpoint `github_rest`") {
 		t.Fatalf("assembled prompt missing app endpoint metadata:\n%s", out.SystemInstruction)
 	}
-	if !strings.Contains(out.SystemInstruction, `builtin_skill_read(app_id="<app id>", skill_id="<skill path>")`) {
+	if !strings.Contains(out.SystemInstruction, `builtin_skill_read(app_id="<app id>", skill_id="<skill id>")`) {
 		t.Fatalf("assembled prompt missing app skill read instruction:\n%s", out.SystemInstruction)
+	}
+	if !strings.Contains(out.SystemInstruction, "Skill `github-issues`") || !strings.Contains(out.SystemInstruction, realSkillPath) {
+		t.Fatalf("assembled prompt missing app skill id or real path %q:\n%s", realSkillPath, out.SystemInstruction)
 	}
 	if strings.Contains(out.SystemInstruction, "# GitHub Issues") {
 		t.Fatalf("assembled prompt should not inline app skill body:\n%s", out.SystemInstruction)

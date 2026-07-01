@@ -31,8 +31,30 @@ import (
 //go:embed tray_icon.png
 var trayIcon []byte // macOS menubar template icon(黑 + alpha 剪影)
 
+const desktopAppOAuthConnectedEvent = "pudding:app-oauth-connected"
+
 func main() {
 	addr := home.DefaultAddr()
+	apiBase := "http://" + addr
+	configureFrontendDevServer()
+
+	var window *application.WebviewWindow
+	app := application.New(application.Options{
+		Name: "Pudding",
+		Assets: application.AssetOptions{
+			Handler: application.BundledAssetFileServer(webui.FS()),
+		},
+		SingleInstance: &application.SingleInstanceOptions{
+			UniqueID: "com.teatak.pudding",
+			ExitCode: 0,
+			OnSecondInstanceLaunch: func(data application.SecondInstanceData) {
+				if handleOAuthConnectedArg(data.Args, window) {
+					showDesktopWindow(window)
+				}
+			},
+		},
+	})
+
 	d, err := daemon.Start(daemon.Options{Addr: addr, MobileLAN: true})
 	if err != nil {
 		// 通道单端口:端口被占说明已有实例在跑。不再 attach(壳会加载旧实例 serve
@@ -46,14 +68,6 @@ func main() {
 		}
 		os.Exit(1)
 	}
-	configureFrontendDevServer()
-
-	app := application.New(application.Options{
-		Name: "Pudding",
-		Assets: application.AssetOptions{
-			Handler: application.BundledAssetFileServer(webui.FS()),
-		},
-	})
 	if runtime.GOOS == "darwin" {
 		bindDesktopNoZoomRects(app)
 	}
@@ -87,7 +101,7 @@ func main() {
 	// installZoomSwizzle()
 	windowOpts := application.WebviewWindowOptions{
 		Title:     "Pudding",
-		URL:       launchURL(d.Token(), "http://"+d.Addr(), desktopShell(), initialThemeState, localePreference),
+		URL:       launchURL(d.Token(), apiBase, desktopShell(), initialThemeState, localePreference),
 		Width:     1200,
 		Height:    800,
 		MinWidth:  520,
@@ -113,7 +127,16 @@ func main() {
 			Appearance: macAppearanceForTheme(themePreference),
 		}
 	}
-	window := app.Window.NewWithOptions(windowOpts)
+	window = app.Window.NewWithOptions(windowOpts)
+
+	app.Event.OnApplicationEvent(events.Common.ApplicationLaunchedWithUrl, func(e *application.ApplicationEvent) {
+		if e == nil || e.Context() == nil {
+			return
+		}
+		if handleOAuthConnectedURL(e.Context().URL(), window) {
+			showDesktopWindow(window)
+		}
+	})
 
 	themeManager := newDesktopThemeManager(app, window, preferencesPath, themePreference)
 	themeManager.bind()
@@ -206,6 +229,55 @@ func launchURL(token, apiBase, shell string, theme desktopThemeState, locale des
 	}
 	u.RawQuery = q.Encode()
 	return u.String()
+}
+
+func showDesktopWindow(window *application.WebviewWindow) {
+	if window == nil {
+		return
+	}
+	window.Show()
+	window.Focus()
+}
+
+func handleOAuthConnectedArg(args []string, window *application.WebviewWindow) bool {
+	for _, arg := range args {
+		if handleOAuthConnectedURL(arg, window) {
+			return true
+		}
+	}
+	return false
+}
+
+func handleOAuthConnectedURL(raw string, window *application.WebviewWindow) bool {
+	provider, ok := appOAuthConnectedProvider(raw)
+	if !ok {
+		return false
+	}
+	emitAppOAuthConnected(window, provider, true, "")
+	return true
+}
+
+func emitAppOAuthConnected(window *application.WebviewWindow, provider string, ok bool, detail string) {
+	if window == nil {
+		return
+	}
+	window.EmitEvent(desktopAppOAuthConnectedEvent, map[string]any{
+		"provider": provider,
+		"ok":       ok,
+		"detail":   detail,
+	})
+}
+
+func appOAuthConnectedProvider(raw string) (string, bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme != "pudding" || u.Host != "oauth" || !strings.HasPrefix(u.Path, "/connected/") {
+		return "", false
+	}
+	provider := strings.TrimPrefix(u.Path, "/connected/")
+	if provider == "" || strings.Contains(provider, "/") {
+		return "", false
+	}
+	return provider, true
 }
 
 func bindMacWindowEvents(window *application.WebviewWindow, hideAfterFullscreenExit *atomic.Bool, applyWindowBase func()) {

@@ -74,6 +74,27 @@ func TestResolveEndpointRequiresConnectionWhenMultipleConfigured(t *testing.T) {
 	}
 }
 
+func TestReadSkillUsesSkillID(t *testing.T) {
+	homeDir := writeTestAppWithSkill(t)
+	svc := NewService(homeDir, nil, nil)
+
+	detail, err := svc.ReadSkill(context.Background(), "github", "github-issues")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.ID != "github-issues" || detail.Path != "skills/issues/SKILL.md" || detail.Content != "---\nname: github-issues\ndescription: Read issues.\n---\n\n# GitHub Issues\n" {
+		t.Fatalf("unexpected skill detail: %+v", detail)
+	}
+
+	detail, err = svc.ReadSkill(context.Background(), "github", "skills/issues/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.ID != "github-issues" {
+		t.Fatalf("expected path fallback to read same skill, got %+v", detail)
+	}
+}
+
 func writeTestApp(t *testing.T) string {
 	t.Helper()
 	homeDir := t.TempDir()
@@ -89,6 +110,32 @@ endpoints:
     kind: rest
     url: https://api.github.com
 `), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return homeDir
+}
+
+func writeTestAppWithSkill(t *testing.T) string {
+	t.Helper()
+	homeDir := t.TempDir()
+	appDir := filepath.Join(home.AppsPath(homeDir), "github")
+	skillDir := filepath.Join(appDir, "skills", "issues")
+	if err := os.MkdirAll(skillDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, AppFileName), []byte(`
+id: github
+name: GitHub
+endpoints:
+  github_rest:
+    kind: rest
+    url: https://api.github.com
+skills:
+  - skills/issues/SKILL.md
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: github-issues\ndescription: Read issues.\n---\n\n# GitHub Issues\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return homeDir

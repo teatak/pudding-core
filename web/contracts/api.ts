@@ -382,12 +382,27 @@ export const appIconSpec = z.object({
 });
 export type AppIconSpec = z.infer<typeof appIconSpec>;
 
+export const appAuthMethod = z.object({
+  id: z.string().optional(),
+  type: z.string(),
+  provider: z.string().optional(),
+  label: z.string().optional(),
+  default: z.boolean().optional(),
+  prefix: z.string().optional(),
+  header: z.string().optional(),
+});
+export const appAuthConfig = z.object({
+  required: z.boolean().optional(),
+  methods: z.array(appAuthMethod).optional(),
+});
+
 export const appDefinition = z.object({
   id: z.string(),
   name: z.string(),
   version: z.string().optional(),
   description: z.string().optional(),
   icon: appIconSpec.optional(),
+  auth: appAuthConfig.optional(),
   endpoints: z.record(z.string(), appEndpoint).optional(),
   skills: z.array(appSkillRef).optional(),
   path: z.string().optional(),
@@ -407,6 +422,7 @@ export const appConnection = z.object({
   name: z.string().optional(),
   appID: z.string(),
   authType: z.string().optional(),
+  authMethodID: z.string().optional(),
   tokenSet: z.boolean(),
   header: z.string().optional(),
   prefix: z.string().optional(),
@@ -420,6 +436,16 @@ export type AppConnection = z.infer<typeof appConnection>;
 
 export const listAppsResponse = z.object({ apps: z.array(appDefinition) });
 export const listAppConnectionsResponse = z.object({ connections: z.array(appConnection) });
+
+export const startAppOAuthRequest = z.object({
+  appID: z.string().min(1),
+  authMethodID: z.string().optional(),
+  connectionID: z.string().optional(),
+  connectionName: z.string().optional(),
+});
+export const startAppOAuthResponse = z.object({
+  authorizationURL: z.string().url(),
+});
 
 export const patchWebToolsRequest = z.object({
   searchProvider: z.string().optional(),

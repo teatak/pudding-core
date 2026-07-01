@@ -41,7 +41,7 @@ type AppEndpointSource interface {
 }
 
 type AppSkillReader interface {
-	ReadSkill(ctx context.Context, appID, skillPath string) (*app.SkillDetail, error)
+	ReadSkill(ctx context.Context, appID, skillID string) (*app.SkillDetail, error)
 }
 
 type SkillReader interface {
@@ -164,7 +164,7 @@ func BuiltinDefinitions() []provider.ToolDef {
 		{
 			Name:        SkillRead,
 			Description: "Read the full SKILL.md body for one registered global skill or one installed app skill after the user's intent clearly matches the prompt index.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"skill_id":{"type":"string","description":"For global skills, pass the id from Available Skills. For app skills, pass the skill path from Installed Apps."},"app_id":{"type":"string","description":"Optional installed app id. When set, skill_id must be an app skill path from that app."}},"required":["skill_id"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"skill_id":{"type":"string","description":"Skill id from Available Skills or Installed Apps. Do not pass the display path."},"app_id":{"type":"string","description":"Optional installed app id. Set this when reading an app-scoped skill."}},"required":["skill_id"],"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{

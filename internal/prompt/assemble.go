@@ -39,6 +39,7 @@ type Segment struct {
 type Input struct {
 	UserInstruction string
 	Mode            string
+	Home            string
 	Skills          []skill.Skill
 	Apps            []*app.Definition
 }
@@ -89,7 +90,7 @@ func (l *Loader) Prompt(ctx context.Context, mode string) (Output, error) {
 			apps = loaded
 		}
 	}
-	return Assemble(Input{UserInstruction: user, Mode: mode, Skills: skills, Apps: apps}), nil
+	return Assemble(Input{UserInstruction: user, Mode: mode, Home: l.home, Skills: skills, Apps: apps}), nil
 }
 
 func Assemble(input Input) Output {
@@ -100,7 +101,7 @@ func Assemble(input Input) Output {
 	if mode := strings.TrimSpace(modePrompt(input.Mode)); mode != "" {
 		segments = append(segments, Segment{ID: "mode_" + normalizeMode(input.Mode), Layer: "mode", Content: mode})
 	}
-	if seg := skillsSegment(input.Skills); seg != nil {
+	if seg := skillsSegment(input.Skills, input.Home); seg != nil {
 		segments = append(segments, *seg)
 	}
 	if seg := appsSegment(input.Apps); seg != nil {
@@ -133,7 +134,7 @@ func appsSegment(list []*app.Definition) *Segment {
 	b.WriteString("## Installed Apps\n\n")
 	b.WriteString("Installed apps provide configured endpoints and app-scoped skills.\n")
 	b.WriteString("Endpoint calls use configured app connections. Use the listed endpoint names with `builtin_rest_request` or `builtin_graphql_request`; omit `connection` unless the tool reports multiple configured connections.\n")
-	b.WriteString("Full app SKILL.md bodies are not loaded by default. When an app skill matches, call `builtin_skill_read(app_id=\"<app id>\", skill_id=\"<skill path>\")` once, then follow the returned instructions.\n")
+	b.WriteString("Full app SKILL.md bodies are not loaded by default. When an app skill matches, call `builtin_skill_read(app_id=\"<app id>\", skill_id=\"<skill id>\")` once, then follow the returned instructions.\n")
 	b.WriteString("Do not proactively load untriggered app skills.\n\n")
 	for _, item := range list {
 		if item == nil {
@@ -173,19 +174,20 @@ func appsSegment(list []*app.Definition) *Segment {
 			}
 		}
 		for _, sk := range item.Skills {
-			path := strings.TrimSpace(sk.Path)
+			id := strings.TrimSpace(sk.ID)
+			if id == "" {
+				id = strings.TrimSpace(sk.Name)
+			}
+			path := appSkillRealPath(item, sk)
 			desc := strings.TrimSpace(sk.Description)
-			if path == "" || desc == "" {
+			if id == "" || desc == "" {
 				continue
 			}
-			name := strings.TrimSpace(sk.Name)
-			if name == "" {
-				name = strings.TrimSpace(sk.ID)
+			if path != "" {
+				fmt.Fprintf(&b, "  - Skill `%s` (path: `%s`) — %s\n", id, path, desc)
+			} else {
+				fmt.Fprintf(&b, "  - Skill `%s` — %s\n", id, desc)
 			}
-			if name == "" {
-				name = path
-			}
-			fmt.Fprintf(&b, "  - Skill `%s` (path: `%s`) — %s\n", name, path, desc)
 		}
 	}
 	content := strings.TrimSpace(b.String())
@@ -195,7 +197,7 @@ func appsSegment(list []*app.Definition) *Segment {
 	return &Segment{ID: "apps_index", Layer: "app", Content: content}
 }
 
-func skillsSegment(list []skill.Skill) *Segment {
+func skillsSegment(list []skill.Skill, homeDir string) *Segment {
 	if len(list) == 0 {
 		return nil
 	}
@@ -215,7 +217,7 @@ func skillsSegment(list []skill.Skill) *Segment {
 		if source == "" {
 			source = "unknown"
 		}
-		path := strings.TrimSpace(item.Path)
+		path := skillRealPath(item, homeDir)
 		if path != "" {
 			fmt.Fprintf(&b, "- `%s` (%s, path: `%s`) — %s\n", id, source, path, desc)
 		} else {
@@ -227,6 +229,38 @@ func skillsSegment(list []skill.Skill) *Segment {
 		return nil
 	}
 	return &Segment{ID: "skills_index", Layer: "skill", Content: content}
+}
+
+func skillRealPath(item skill.Skill, homeDir string) string {
+	raw := strings.TrimSpace(item.Path)
+	if raw == "" {
+		return ""
+	}
+	if filepath.IsAbs(raw) {
+		return raw
+	}
+	switch item.Source {
+	case skill.SourceUser:
+		if strings.TrimSpace(homeDir) != "" {
+			return filepath.Join(homeDir, "skills", filepath.FromSlash(raw))
+		}
+	}
+	return ""
+}
+
+func appSkillRealPath(def *app.Definition, ref app.SkillRef) string {
+	raw := strings.TrimSpace(ref.Path)
+	if raw == "" {
+		return ""
+	}
+	if filepath.IsAbs(raw) {
+		return raw
+	}
+	appFile := strings.TrimSpace(def.Path)
+	if filepath.IsAbs(appFile) {
+		return filepath.Join(filepath.Dir(appFile), filepath.FromSlash(raw))
+	}
+	return ""
 }
 
 func modePrompt(mode string) string {

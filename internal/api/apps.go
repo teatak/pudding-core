@@ -20,14 +20,15 @@ type appConnectionConfig interface {
 }
 
 type putAppConnectionReq struct {
-	AppID    string `json:"appID"`
-	Name     string `json:"name"`
-	AuthType string `json:"authType"`
-	Token    string `json:"token"`
-	Prefix   string `json:"prefix"`
-	Header   string `json:"header"`
-	Username string `json:"username"`
-	Password string `json:"password"`
+	AppID        string `json:"appID"`
+	Name         string `json:"name"`
+	AuthMethodID string `json:"authMethodID"`
+	AuthType     string `json:"authType"`
+	Token        string `json:"token"`
+	Prefix       string `json:"prefix"`
+	Header       string `json:"header"`
+	Username     string `json:"username"`
+	Password     string `json:"password"`
 }
 
 type putSessionAppGrantReq struct {
@@ -83,6 +84,17 @@ func (s *Server) deleteApp(c *cart.Context) error {
 		return nil
 	}
 	id, _ := c.Param("id")
+	id = strings.TrimSpace(id)
+	var cfg appConnectionConfig
+	var conns []*app.Connection
+	if candidate, ok := s.config.(appConnectionConfig); ok {
+		cfg = candidate
+		var err error
+		conns, err = cfg.ListAppConnections(c.Request.Context())
+		if err != nil {
+			return s.fail(c, err)
+		}
+	}
 	if err := s.apps.DeleteDefinition(c.Request.Context(), id); err != nil {
 		if errors.Is(err, app.ErrInvalidID) {
 			return badRequest(c, "invalid app id")
@@ -92,6 +104,16 @@ func (s *Server) deleteApp(c *cart.Context) error {
 			return nil
 		}
 		return s.fail(c, err)
+	}
+	if cfg != nil {
+		for _, conn := range conns {
+			if conn == nil || conn.AppID != id {
+				continue
+			}
+			if err := cfg.DeleteAppConnection(c.Request.Context(), conn.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
+				return s.fail(c, err)
+			}
+		}
 	}
 	c.String(http.StatusNoContent, "")
 	return nil
@@ -192,34 +214,62 @@ func (s *Server) putAppConnection(c *cart.Context) error {
 	if err := decode(c, &req); err != nil {
 		return badRequest(c, "invalid json body")
 	}
-	authType := strings.TrimSpace(req.AuthType)
-	if authType == "" {
-		authType = "none"
+	appID := strings.TrimSpace(req.AppID)
+	if appID == "" {
+		return badRequest(c, "appID is required")
+	}
+	def, err := s.getAppDefinition(c.Request.Context(), appID)
+	if err != nil {
+		if errors.Is(err, app.ErrNotFound) {
+			c.JSON(http.StatusNotFound, map[string]string{"error": "app_not_found"})
+			return nil
+		}
+		return s.fail(c, err)
+	}
+	method, ok := app.FindAuthMethod(def, req.AuthMethodID, req.AuthType)
+	if !ok {
+		return badRequest(c, "auth method is not supported by app")
+	}
+	prefix := strings.TrimSpace(req.Prefix)
+	if prefix == "" {
+		prefix = method.Prefix
+	}
+	header := strings.TrimSpace(req.Header)
+	if header == "" {
+		header = method.Header
 	}
 	conn := &app.Connection{
 		ID:    id,
 		Name:  strings.TrimSpace(req.Name),
-		AppID: strings.TrimSpace(req.AppID),
+		AppID: appID,
 		Auth: app.Auth{
-			Type:     authType,
+			MethodID: method.ID,
+			Type:     method.Type,
 			Token:    req.Token,
-			Prefix:   strings.TrimSpace(req.Prefix),
-			Header:   strings.TrimSpace(req.Header),
+			Prefix:   prefix,
+			Header:   header,
 			Username: req.Username,
 			Password: req.Password,
 		},
 	}
-	if conn.AppID == "" {
-		return badRequest(c, "appID is required")
-	}
 	if req.Token == "" && req.Password == "" {
 		if existing, err := cfg.GetAppConnection(c.Request.Context(), id); err == nil {
-			conn.Auth.Token = existing.Auth.Token
-			conn.Auth.Password = existing.Auth.Password
-			if conn.Auth.Username == "" {
-				conn.Auth.Username = existing.Auth.Username
+			if sameAppConnectionAuthMethod(existing.Auth, method) {
+				conn.Auth.Token = existing.Auth.Token
+				conn.Auth.AccessToken = existing.Auth.AccessToken
+				conn.Auth.RefreshToken = existing.Auth.RefreshToken
+				conn.Auth.TokenType = existing.Auth.TokenType
+				conn.Auth.ExpiresAt = existing.Auth.ExpiresAt
+				conn.Auth.Scopes = append([]string(nil), existing.Auth.Scopes...)
+				conn.Auth.Password = existing.Auth.Password
+				if conn.Auth.Username == "" {
+					conn.Auth.Username = existing.Auth.Username
+				}
 			}
 		}
+	}
+	if err := validateAppConnectionAuth(conn.Auth); err != nil {
+		return badRequest(c, err.Error())
 	}
 	if err := cfg.PutAppConnection(c.Request.Context(), conn); err != nil {
 		return s.fail(c, err)
@@ -230,6 +280,64 @@ func (s *Server) putAppConnection(c *cart.Context) error {
 	}
 	c.JSON(http.StatusOK, app.ViewConnection(updated))
 	return nil
+}
+
+func sameAppConnectionAuthMethod(auth app.Auth, method app.AuthMethod) bool {
+	authMethodID := strings.TrimSpace(auth.MethodID)
+	methodID := strings.TrimSpace(method.ID)
+	if authMethodID != "" && methodID != "" {
+		return authMethodID == methodID
+	}
+	return strings.TrimSpace(auth.Type) == strings.TrimSpace(method.Type)
+}
+
+func validateAppConnectionAuth(auth app.Auth) error {
+	switch strings.TrimSpace(auth.Type) {
+	case app.AuthTypeNone:
+		return nil
+	case app.AuthTypeBearer:
+		if strings.TrimSpace(auth.Token) == "" {
+			return errors.New("bearer token is required")
+		}
+	case app.AuthTypeToken:
+		if strings.TrimSpace(auth.Token) == "" {
+			return errors.New("token is required")
+		}
+	case app.AuthTypeHeader:
+		if strings.TrimSpace(auth.Header) == "" {
+			return errors.New("header is required")
+		}
+		if strings.TrimSpace(auth.Token) == "" {
+			return errors.New("header token is required")
+		}
+	case app.AuthTypeBasic:
+		if strings.TrimSpace(auth.Username) == "" && strings.TrimSpace(auth.Password) == "" {
+			return errors.New("username or password is required")
+		}
+	case app.AuthTypeOAuth2:
+		if strings.TrimSpace(auth.AccessToken) == "" {
+			return errors.New("oauth2 access token is required")
+		}
+	default:
+		return errors.New("auth type is not supported")
+	}
+	return nil
+}
+
+func (s *Server) getAppDefinition(ctx context.Context, id string) (*app.Definition, error) {
+	if s.apps == nil {
+		return nil, errors.New("app service unavailable")
+	}
+	defs, err := s.apps.ListDefinitions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, def := range defs {
+		if def != nil && def.ID == id {
+			return def, nil
+		}
+	}
+	return nil, app.ErrNotFound
 }
 
 func (s *Server) deleteAppConnection(c *cart.Context) error {

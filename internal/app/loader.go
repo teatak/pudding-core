@@ -28,6 +28,7 @@ type fileDefinition struct {
 	Version     string                 `yaml:"version,omitempty"`
 	Description string                 `yaml:"description,omitempty"`
 	Icon        IconSpec               `yaml:"icon,omitempty"`
+	Auth        *AuthConfig            `yaml:"auth,omitempty"`
 	Endpoints   map[string]Endpoint    `yaml:"endpoints,omitempty"`
 	Skills      []fileSkillRef         `yaml:"skills,omitempty"`
 	Extra       map[string]interface{} `yaml:",inline"`
@@ -99,6 +100,7 @@ func LoadDefinitionDir(dir string) (*Definition, error) {
 		Version:     strings.TrimSpace(raw.Version),
 		Description: strings.TrimSpace(raw.Description),
 		Icon:        normalizeIconSpec(raw.Icon, dir),
+		Auth:        normalizeAuthConfig(raw.Auth),
 		Endpoints:   raw.Endpoints,
 		Path:        path,
 	}
@@ -153,6 +155,32 @@ func normalizeThemeColor(raw ThemeColor) ThemeColor {
 	}
 }
 
+func normalizeAuthConfig(raw *AuthConfig) *AuthConfig {
+	if raw == nil {
+		return nil
+	}
+	out := &AuthConfig{Required: raw.Required}
+	for _, method := range raw.Methods {
+		method.ID = strings.TrimSpace(method.ID)
+		method.Type = strings.TrimSpace(method.Type)
+		method.Provider = strings.TrimSpace(method.Provider)
+		method.Label = strings.TrimSpace(method.Label)
+		method.Prefix = strings.TrimSpace(method.Prefix)
+		method.Header = strings.TrimSpace(method.Header)
+		if method.ID == "" {
+			method.ID = method.Type
+		}
+		if method.Type == "" {
+			continue
+		}
+		out.Methods = append(out.Methods, method)
+	}
+	if len(out.Methods) == 0 && !out.Required {
+		return nil
+	}
+	return out
+}
+
 func defaultAppIconPath(appDir string) string {
 	name := "icon.svg"
 	if _, err := os.Stat(filepath.Join(appDir, "assets", name)); err == nil {
@@ -184,6 +212,42 @@ func ValidateDefinition(def *Definition) error {
 	if def.Icon != nil {
 		if err := ValidateIcon(*def.Icon); err != nil {
 			return err
+		}
+	}
+	if err := ValidateAuthConfig(def.Auth); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ValidateAuthConfig(auth *AuthConfig) error {
+	if auth == nil {
+		return nil
+	}
+	if auth.Required && len(auth.Methods) == 0 {
+		return errors.New("auth methods are required")
+	}
+	seen := map[string]struct{}{}
+	for _, method := range auth.Methods {
+		id := strings.TrimSpace(method.ID)
+		if id == "" {
+			return errors.New("auth method id is required")
+		}
+		if _, ok := seen[id]; ok {
+			return fmt.Errorf("duplicate auth method %q", id)
+		}
+		seen[id] = struct{}{}
+		switch strings.TrimSpace(method.Type) {
+		case AuthTypeNone:
+			if auth.Required {
+				return fmt.Errorf("auth method %q cannot be none when auth is required", id)
+			}
+		case AuthTypeBearer, AuthTypeToken, AuthTypeBasic, AuthTypeHeader, AuthTypeOAuth2:
+		default:
+			return fmt.Errorf("unsupported auth method type %q", method.Type)
+		}
+		if method.Type == AuthTypeHeader && strings.TrimSpace(method.Header) == "" {
+			return fmt.Errorf("auth method %q header is required", id)
 		}
 	}
 	return nil

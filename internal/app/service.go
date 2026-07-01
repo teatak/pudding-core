@@ -126,7 +126,7 @@ func (s *Service) ReadAsset(ctx context.Context, rel string) ([]byte, string, er
 	return ReadAsset(s.appsRoot, rel)
 }
 
-func (s *Service) ReadSkill(ctx context.Context, appID, skillPath string) (*SkillDetail, error) {
+func (s *Service) ReadSkill(ctx context.Context, appID, skillID string) (*SkillDetail, error) {
 	if s == nil {
 		return nil, errors.New("app service unavailable")
 	}
@@ -141,13 +141,22 @@ func (s *Service) ReadSkill(ctx context.Context, appID, skillPath string) (*Skil
 		}
 		return nil, err
 	}
-	cleaned, err := cleanRelativeSlashPath(skillPath)
-	if err != nil {
+	selector := strings.TrimSpace(skillID)
+	if selector == "" {
 		return nil, ErrNotFound
+	}
+	cleanedPath := ""
+	if strings.Contains(selector, "/") {
+		cleaned, err := cleanRelativeSlashPath(selector)
+		if err != nil {
+			return nil, ErrNotFound
+		}
+		cleanedPath = cleaned
 	}
 	var ref *SkillRef
 	for i := range def.Skills {
-		if def.Skills[i].Path == cleaned {
+		item := &def.Skills[i]
+		if selector == item.ID || selector == item.Name || (cleanedPath != "" && item.Path == cleanedPath) {
 			ref = &def.Skills[i]
 			break
 		}
@@ -155,7 +164,7 @@ func (s *Service) ReadSkill(ctx context.Context, appID, skillPath string) (*Skil
 	if ref == nil {
 		return nil, ErrNotFound
 	}
-	data, err := os.ReadFile(filepath.Join(s.appsRoot, appID, filepath.FromSlash(cleaned)))
+	data, err := os.ReadFile(filepath.Join(s.appsRoot, appID, filepath.FromSlash(ref.Path)))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, ErrNotFound

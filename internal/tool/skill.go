@@ -74,13 +74,13 @@ func (r *BuiltinRunner) skillRead(ctx context.Context, call Call) Result {
 	return out
 }
 
-func (r *BuiltinRunner) appSkillRead(ctx context.Context, out Result, appID, skillPath string) Result {
+func (r *BuiltinRunner) appSkillRead(ctx context.Context, out Result, appID, skillID string) Result {
 	if r.appSkills == nil {
 		out.Ok = false
 		out.Content = `{"ok":false,"reason":"app_skill_reader_unavailable"}`
 		return out
 	}
-	doc, err := r.appSkills.ReadSkill(ctx, appID, skillPath)
+	doc, err := r.appSkills.ReadSkill(ctx, appID, skillID)
 	if err != nil {
 		reason := "read_failed"
 		switch {

@@ -5,9 +5,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,15 +46,243 @@ func newTestServer(t *testing.T) (*httptest.Server, store.Store) {
 func newConfigTestServer(t *testing.T) (*httptest.Server, store.Store, *config.Manager) {
 	t.Helper()
 	ms := memstore.New()
-	cfg := config.NewManager(t.TempDir())
+	homeDir := t.TempDir()
+	cfg := config.NewManager(homeDir)
 	if err := cfg.Prepare(); err != nil {
 		t.Fatal(err)
 	}
+	writeOAuthTestApps(t, homeDir)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好", "世界"}), mock.WithDelay(5*time.Millisecond))), cfg)
-	srv := httptest.NewServer(New(eng, ms, cfg, hub).Handler(testToken, nil))
+	srv := httptest.NewServer(New(eng, ms, cfg, hub).WithApps(appsvc.NewService(homeDir, nil, nil)).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 	return srv, ms, cfg
+}
+
+func writeOAuthTestApps(t *testing.T, homeDir string) {
+	t.Helper()
+	apps := map[string]string{
+		"github": `
+id: github
+name: GitHub
+auth:
+  required: true
+  methods:
+    - id: github-oauth
+      type: oauth2
+      provider: github
+      label: GitHub OAuth
+      default: true
+    - id: github-pat
+      type: bearer
+      label: Personal access token
+`,
+		"gmail": `
+id: gmail
+name: Gmail
+auth:
+  required: true
+  methods:
+    - id: google-oauth
+      type: oauth2
+      provider: gmail
+      label: Google OAuth
+      default: true
+`,
+	}
+	for id, body := range apps {
+		dir := filepath.Join(homeDir, "apps", id)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, appsvc.AppFileName), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestStartAppOAuth(t *testing.T) {
+	srv, _, cfg := newConfigTestServer(t)
+	resp := req(t, http.MethodPost, srv.URL+"/app-oauth/start", map[string]string{"appID": "github"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var payload struct {
+		AuthorizationURL string `json:"authorizationURL"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(payload.AuthorizationURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Host != "github.com" || u.Path != "/login/oauth/authorize" {
+		t.Fatalf("unexpected auth url: %s", payload.AuthorizationURL)
+	}
+	q := u.Query()
+	if q.Get("client_id") == "" || q.Get("state") == "" {
+		t.Fatalf("missing auth params: %s", payload.AuthorizationURL)
+	}
+	if got, want := q.Get("client_id"), "Ov23li6YcOqhzvGBD9s4"; got != want {
+		t.Fatalf("client_id = %q, want %q", got, want)
+	}
+	srvURL, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, port, err := net.SplitHostPort(srvURL.Host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := q.Get("redirect_uri"), "http://localhost:"+port+"/oauth/callback/github"; got != want {
+		t.Fatalf("redirect_uri = %q, want %q", got, want)
+	}
+	if got, want := q.Get("scope"), "read:user repo read:org"; got != want {
+		t.Fatalf("scope = %q, want %q", got, want)
+	}
+	if got, want := q.Get("response_type"), "code"; got != want {
+		t.Fatalf("response_type = %q, want %q", got, want)
+	}
+
+	if err := cfg.PutAppConnection(context.Background(), &appsvc.Connection{
+		ID:    "github-work",
+		Name:  "Work",
+		AppID: "github",
+		Auth:  appsvc.Auth{MethodID: "github-oauth", Type: "oauth2", AccessToken: "old-token"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resp = req(t, http.MethodPost, srv.URL+"/app-oauth/start", map[string]string{
+		"appID":          "github",
+		"connectionID":   "github-work",
+		"connectionName": "Work GitHub",
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("reauth status = %d", resp.StatusCode)
+	}
+	payload = decodeJSON[struct {
+		AuthorizationURL string `json:"authorizationURL"`
+	}](t, resp)
+	u, err = url.Parse(payload.AuthorizationURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Query().Get("state") == q.Get("state") || u.Query().Get("state") == "" {
+		t.Fatalf("reauth should create a fresh state: %s", payload.AuthorizationURL)
+	}
+}
+
+func TestPutAppConnectionSupportsGitHubPAT(t *testing.T) {
+	srv, _, _ := newConfigTestServer(t)
+	resp := req(t, http.MethodPut, srv.URL+"/app-connections/github-pat", map[string]string{
+		"appID":        "github",
+		"name":         "GitHub PAT",
+		"authMethodID": "github-pat",
+		"authType":     "bearer",
+		"token":        "ghp_test",
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	payload := decodeJSON[appsvc.ConnectionView](t, resp)
+	if payload.AuthMethodID != "github-pat" || payload.AuthType != "bearer" || !payload.TokenSet {
+		t.Fatalf("unexpected connection view: %+v", payload)
+	}
+}
+
+func TestPutAppConnectionRejectsEmptyGitHubPAT(t *testing.T) {
+	srv, _, _ := newConfigTestServer(t)
+	resp := req(t, http.MethodPut, srv.URL+"/app-connections/github-pat", map[string]string{
+		"appID":        "github",
+		"name":         "GitHub PAT",
+		"authMethodID": "github-pat",
+		"authType":     "bearer",
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+}
+
+func TestPutAppConnectionPreservesLegacyBearerByType(t *testing.T) {
+	srv, _, cfg := newConfigTestServer(t)
+	if err := cfg.PutAppConnection(context.Background(), &appsvc.Connection{
+		ID:    "github-legacy",
+		Name:  "Legacy GitHub",
+		AppID: "github",
+		Auth:  appsvc.Auth{Type: "bearer", Token: "ghp_old"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resp := req(t, http.MethodPut, srv.URL+"/app-connections/github-legacy", map[string]string{
+		"appID":        "github",
+		"name":         "GitHub PAT",
+		"authMethodID": "github-pat",
+		"authType":     "bearer",
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	payload := decodeJSON[appsvc.ConnectionView](t, resp)
+	if payload.AuthMethodID != "github-pat" || payload.AuthType != "bearer" || !payload.TokenSet {
+		t.Fatalf("unexpected connection view: %+v", payload)
+	}
+}
+
+func TestStartGmailAppOAuth(t *testing.T) {
+	srv, _, _ := newConfigTestServer(t)
+	resp := req(t, http.MethodPost, srv.URL+"/app-oauth/start", map[string]string{"appID": "gmail"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	payload := decodeJSON[struct {
+		AuthorizationURL string `json:"authorizationURL"`
+	}](t, resp)
+	u, err := url.Parse(payload.AuthorizationURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Host != "accounts.google.com" || u.Path != "/o/oauth2/v2/auth" {
+		t.Fatalf("unexpected auth url: %s", payload.AuthorizationURL)
+	}
+	q := u.Query()
+	if got, want := q.Get("client_id"), "226317408426-s2jpl76do0qegl9vesjn1osrkbos1t9o.apps.googleusercontent.com"; got != want {
+		t.Fatalf("client_id = %q, want %q", got, want)
+	}
+	if got, want := q.Get("access_type"), "offline"; got != want {
+		t.Fatalf("access_type = %q, want %q", got, want)
+	}
+	if got, want := q.Get("prompt"), "consent"; got != want {
+		t.Fatalf("prompt = %q, want %q", got, want)
+	}
+	if !strings.Contains(q.Get("scope"), "https://www.googleapis.com/auth/gmail.readonly") {
+		t.Fatalf("scope missing gmail readonly: %q", q.Get("scope"))
+	}
+}
+
+func TestAppOAuthCallbackReturnsHTML(t *testing.T) {
+	srv, _, _ := newConfigTestServer(t)
+	resp := req(t, http.MethodGet, srv.URL+"/oauth/callback/github", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); !strings.Contains(got, "text/html") {
+		t.Fatalf("content type = %q", got)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); !strings.Contains(got, "<h1>Authorization failed</h1>") {
+		t.Fatalf("unexpected body: %q", got)
+	}
 }
 
 func req(t *testing.T, method, url string, body any) *http.Response {
@@ -205,6 +437,53 @@ func TestDeleteAppAPI(t *testing.T) {
 	resp = req(t, http.MethodDelete, srv.URL+"/apps/github", nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("want 404, got %d", resp.StatusCode)
+	}
+}
+
+func TestDeleteAppRemovesConnections(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	home := t.TempDir()
+	cfg := config.NewManager(home)
+	if err := cfg.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	eng := engine.New(ms, hub, registry.Static(mock.New()), cfg)
+	appDir := filepath.Join(home, "apps", "github")
+	if err := os.MkdirAll(appDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "app.yaml"), []byte("id: github\nname: GitHub\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.PutAppConnection(context.Background(), &appsvc.Connection{
+		ID:    "github-main",
+		Name:  "GitHub Main",
+		AppID: "github",
+		Auth:  appsvc.Auth{Type: "bearer", Token: "secret"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.PutAppConnection(context.Background(), &appsvc.Connection{
+		ID:    "other-main",
+		Name:  "Other Main",
+		AppID: "other",
+		Auth:  appsvc.Auth{Type: "bearer", Token: "secret"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(New(eng, ms, cfg, hub).WithApps(appsvc.NewService(home, nil, nil)).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+
+	resp := req(t, http.MethodDelete, srv.URL+"/apps/github", nil)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("want 204, got %d", resp.StatusCode)
+	}
+	if _, err := cfg.GetAppConnection(context.Background(), "github-main"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("github connection should be removed, err=%v", err)
+	}
+	if _, err := cfg.GetAppConnection(context.Background(), "other-main"); err != nil {
+		t.Fatalf("other connection should remain: %v", err)
 	}
 }
 

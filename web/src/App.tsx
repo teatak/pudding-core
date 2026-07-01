@@ -1,8 +1,11 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useSearch } from "@tanstack/react-router";
 import { PanelRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useGroupRef } from "react-resizable-panels";
+import { toast } from "sonner";
 
+import { queryKeys } from "@/api/queryKeys";
 import { CanvasPane } from "@/components/CanvasPane";
 import { ChatPane } from "@/components/ChatPane";
 import { AppsPane } from "@/components/AppsPane";
@@ -18,7 +21,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { WorkspaceResizableHandle } from "@/components/WorkspaceResizableHandle";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useVisibleSessionEvents } from "@/hooks/useSessionEvents";
-import { useI18n } from "@/i18n";
+import { translate, useI18n } from "@/i18n";
 import {
   layoutStorageKeys,
   resizeTargetMinimumSize,
@@ -30,10 +33,13 @@ import { setCanvasOpen, useCanvasOpen } from "@/state/canvasStore";
 import { clearPendingPairingCode, pendingPairingCode } from "@/state/token";
 import { setToken, useToken } from "@/state/tokenStore";
 
+const APP_OAUTH_CONNECTED_EVENT = "pudding:app-oauth-connected";
+
 export function App() {
   const token = useToken();
   const { session: selectedSessionID, draft, split: splitSessionID, view } = useSearch({ from: "/" });
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
+  const queryClient = useQueryClient();
   const isMobile = useIsMobile();
   const canvasOpen = useCanvasOpen();
   const [pairingCode] = useState(() => pendingPairingCode());
@@ -68,6 +74,37 @@ export function App() {
   // SSE 是 session-scoped,不是 pane-scoped。visible sessions 在 App 层统一去重订阅,
   // ChatPane 只负责 pane-local UI/滚动状态。
   useVisibleSessionEvents(activeSessionIDs, token);
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+    let off: (() => void) | undefined;
+    let cancelled = false;
+    void import("@wailsio/runtime")
+      .then(({ Events }) => {
+        if (cancelled) {
+          return;
+        }
+        off = Events.On(APP_OAUTH_CONNECTED_EVENT, (event) => {
+          const payload = event.data as { ok?: boolean } | undefined;
+          if (payload?.ok === false) {
+            toast.error(translate("apps.oauthFailed", locale));
+          } else {
+            toast.success(translate("apps.oauthConnected", locale));
+          }
+          void Promise.all([
+            queryClient.invalidateQueries({ queryKey: queryKeys.apps() }),
+            queryClient.invalidateQueries({ queryKey: queryKeys.appConnections() }),
+          ]);
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      off?.();
+    };
+  }, [locale, queryClient, token]);
 
   useEffect(() => {
     if (token) {

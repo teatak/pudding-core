@@ -447,6 +447,19 @@ func applyEndpointAuth(headers http.Header, auth app.Auth) error {
 			return errors.New("bearer token is empty")
 		}
 		headers.Set("Authorization", "Bearer "+strings.TrimSpace(auth.Token))
+	case "oauth2":
+		token := strings.TrimSpace(auth.AccessToken)
+		if token == "" {
+			return errors.New("oauth2 access token is empty")
+		}
+		tokenType := strings.TrimSpace(auth.TokenType)
+		if tokenType == "" || strings.EqualFold(tokenType, "bearer") {
+			tokenType = "Bearer"
+		}
+		if strings.ContainsAny(tokenType, "\r\n ") {
+			return errors.New("oauth2 token type is invalid")
+		}
+		headers.Set("Authorization", tokenType+" "+token)
 	case "token":
 		if strings.TrimSpace(auth.Token) == "" {
 			return errors.New("token is empty")

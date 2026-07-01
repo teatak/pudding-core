@@ -465,8 +465,16 @@ html[data-shell] .pudding-markdown * {
     background-color: var(--app-icon-background);
 }
 
+.pudding-app-icon[data-light-background="white"] {
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+
 .dark .pudding-app-icon[data-has-background="true"] {
     background-color: var(--app-icon-background-dark);
+}
+
+.dark .pudding-app-icon[data-light-background="white"] {
+    box-shadow: none;
 }
 
 .pudding-app-icon[data-has-color="true"] {

@@ -17,6 +17,7 @@ import {
   type ProviderProfile,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { DialogSelectContent } from "@/components/DialogSelectContent";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
@@ -42,9 +43,10 @@ import {
   PopoverTitle,
 } from "@/components/ui/popover";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { useI18n } from "@/i18n";
+import { shouldKeepDialogOpenForSelectDismiss } from "@/lib/layerGuards";
 import { cn } from "@/lib/utils";
 import {
   generateProviderProfileID,
@@ -313,7 +315,19 @@ export function ProviderProfileEditorDialog({
 
   return (
     <Dialog open={open} onOpenChange={saving ? undefined : onOpenChange}>
-      <DialogContent className="top-[calc(var(--toolbar-h)+(100svh-var(--toolbar-h))/2)] grid h-[min(900px,calc(100svh-var(--toolbar-h)-1.5rem))] w-[min(680px,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-none">
+      <DialogContent
+        className="top-[calc(var(--toolbar-h)+(100svh-var(--toolbar-h))/2)] grid h-[min(900px,calc(100svh-var(--toolbar-h)-1.5rem))] w-[min(680px,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-none"
+        onPointerDownOutside={(event) => {
+          if (shouldKeepDialogOpenForSelectDismiss(event.target)) {
+            event.preventDefault();
+          }
+        }}
+        onInteractOutside={(event) => {
+          if (shouldKeepDialogOpenForSelectDismiss(event.target)) {
+            event.preventDefault();
+          }
+        }}
+      >
         <DialogHeader className="px-5 py-4 pr-14">
           <DialogTitle>{editingID ? t("provider.edit") : t("provider.create")}</DialogTitle>
           <DialogDescription>{t("provider.keyHint")}</DialogDescription>
@@ -368,13 +382,13 @@ export function ProviderProfileEditorDialog({
                     <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <DialogSelectContent>
                       {providerProtocolOptions.map((protocol) => (
                         <SelectItem key={protocol} value={protocol}>
                           {providerProtocolLabel(protocol)}
                         </SelectItem>
                       ))}
-                    </SelectContent>
+                    </DialogSelectContent>
                   </Select>
                 </Field>
                 <Field className="gap-2 rounded-none border-0 bg-transparent p-0 hover:bg-transparent">
@@ -805,13 +819,13 @@ function ReasoningEffortField({
         <SelectTrigger className="w-full">
           <SelectValue />
         </SelectTrigger>
-        <SelectContent>
+        <DialogSelectContent>
           {options.map((item) => (
             <SelectItem key={item} value={item}>
               {t(`provider.reasoningEffort.${item}`)}
             </SelectItem>
           ))}
-        </SelectContent>
+        </DialogSelectContent>
       </Select>
     </PlainField>
   );
