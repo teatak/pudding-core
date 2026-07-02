@@ -99,6 +99,24 @@ CREATE TABLE IF NOT EXISTS session_app_grants (
     PRIMARY KEY (session_id, app_id, connection_id)
 );
 
+CREATE TABLE IF NOT EXISTS canvas_items (
+    id                    TEXT    PRIMARY KEY,
+    canvas_id             TEXT    NOT NULL DEFAULT 'default',
+    source_session_id     TEXT    NOT NULL DEFAULT '',
+    created_by_session_id TEXT    NOT NULL DEFAULT '',
+    updated_by_session_id TEXT    NOT NULL DEFAULT '',
+    kind                  TEXT    NOT NULL DEFAULT '',
+    title                 TEXT    NOT NULL DEFAULT '',
+    item_json             TEXT    NOT NULL,
+    window_json           TEXT    NOT NULL DEFAULT '',
+    visible               INTEGER NOT NULL DEFAULT 1,
+    created_at            INTEGER NOT NULL,
+    updated_at            INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS canvas_items_canvas_visible_updated
+    ON canvas_items(canvas_id, visible, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS messages (
     id                TEXT PRIMARY KEY,
     session_id        TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

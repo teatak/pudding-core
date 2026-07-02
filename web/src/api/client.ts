@@ -1,6 +1,8 @@
 import {
   listBuiltinToolsResponse,
+  listBrowserMCPSessionsResponse,
   listAppConnectionsResponse,
+  listCanvasItemsResponse,
   listSessionAppGrantsResponse,
   listAppsResponse,
   listSkillDraftsResponse,
@@ -18,7 +20,9 @@ import {
   message,
   patchQueuedInputRequest,
   patchProviderRequest,
+  patchCanvasItemRequest,
   probeProviderModelsRequest,
+  putCanvasItemRequest,
   patchWebToolsRequest,
   putSessionAppGrantRequest,
   providerProfile,
@@ -34,6 +38,7 @@ import {
   userPromptResponse,
   appDefinition,
   appConnection,
+  canvasItem,
   appSkillDetail,
   installAppRequest,
   startAppOAuthRequest,
@@ -43,6 +48,8 @@ import {
   type AppDefinition,
   type AppSkillDetail,
   type BuiltinTool,
+  type BrowserMCPSession,
+  type CanvasItem,
   type ContentPart,
   type DailyUsageStat,
   type Message,
@@ -121,6 +128,8 @@ export type AppConnectionPayload = {
   password?: string;
 };
 export type SessionAppGrantPayload = z.infer<typeof putSessionAppGrantRequest>;
+export type CanvasItemPayload = z.infer<typeof putCanvasItemRequest>;
+export type CanvasItemWindowPayload = z.infer<typeof patchCanvasItemRequest>;
 
 function authHeaders(token: string) {
   return {
@@ -285,6 +294,42 @@ export function listQueuedInputs(token: string, sessionID: string): Promise<{ qu
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/queued-inputs`, listQueuedInputsResponse);
 }
 
+export function listCanvasItems(token: string, sessionID: string): Promise<{ items: CanvasItem[] }> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/canvas/items`, listCanvasItemsResponse);
+}
+
+export function createCanvasItem(token: string, sessionID: string, body: CanvasItemPayload): Promise<CanvasItem> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/canvas/items`, canvasItem, {
+    method: "POST",
+    body: JSON.stringify(putCanvasItemRequest.parse(body)),
+  });
+}
+
+export function putCanvasItem(token: string, sessionID: string, itemID: string, body: CanvasItemPayload): Promise<CanvasItem> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/canvas/items/${encodeURIComponent(itemID)}`, canvasItem, {
+    method: "PUT",
+    body: JSON.stringify(putCanvasItemRequest.parse(body)),
+  });
+}
+
+export function patchCanvasItemWindow(
+  token: string,
+  sessionID: string,
+  itemID: string,
+  body: CanvasItemWindowPayload,
+): Promise<CanvasItem> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/canvas/items/${encodeURIComponent(itemID)}`, canvasItem, {
+    method: "PATCH",
+    body: JSON.stringify(patchCanvasItemRequest.parse(body)),
+  });
+}
+
+export async function deleteCanvasItem(token: string, sessionID: string, itemID: string): Promise<void> {
+  await request(token, `/sessions/${encodeURIComponent(sessionID)}/canvas/items/${encodeURIComponent(itemID)}`, z.null(), {
+    method: "DELETE",
+  });
+}
+
 export function updateQueuedInput(
   token: string,
   sessionID: string,
@@ -369,6 +414,10 @@ export function getUserPrompt(token: string): Promise<UserPrompt> {
 
 export function listBuiltinTools(token: string): Promise<{ tools: BuiltinTool[] }> {
   return request(token, "/tools/builtin", listBuiltinToolsResponse);
+}
+
+export function listBrowserMCPSessions(token: string): Promise<{ sessions: BrowserMCPSession[] }> {
+  return request(token, "/mcp/browser-sessions", listBrowserMCPSessionsResponse);
 }
 
 export function listApps(token: string): Promise<{ apps: AppDefinition[] }> {
@@ -554,5 +603,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { AppConnection, AppDefinition, AppSkillDetail, BuiltinTool, ContentPart, DailyUsageStat, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionAppGrant, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
+export type { AppConnection, AppDefinition, AppSkillDetail, BuiltinTool, BrowserMCPSession, ContentPart, DailyUsageStat, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionAppGrant, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
 export { createProviderRequest, patchProviderRequest };

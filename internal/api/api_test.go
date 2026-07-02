@@ -318,6 +318,56 @@ func TestSessionAppGrantAPIValidatesAndDefaultsEndpoints(t *testing.T) {
 	}
 }
 
+func TestCanvasItemsAPIUsesSessionActorForGlobalCanvas(t *testing.T) {
+	srv, ms := newTestServer(t)
+	if err := ms.CreateSession(context.Background(), &store.Session{ID: "sess_left", Provider: "mock", Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.CreateSession(context.Background(), &store.Session{ID: "sess_right", Provider: "mock", Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_left/canvas/items", map[string]any{
+		"id":     "canvas_api",
+		"kind":   "markdown",
+		"title":  "Shared",
+		"item":   map[string]any{"kind": "markdown", "content": "hello"},
+		"window": map[string]any{"x": 10, "y": 12, "w": 320, "h": 220, "z": 1},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create status = %d", resp.StatusCode)
+	}
+	item := decodeJSON[store.CanvasItem](t, resp)
+	if item.SourceSessionID != "sess_left" || item.UpdatedBySessionID != "sess_left" {
+		t.Fatalf("unexpected created item: %+v", item)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_right/canvas/items", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list status = %d", resp.StatusCode)
+	}
+	list := decodeJSON[struct {
+		Items []store.CanvasItem `json:"items"`
+	}](t, resp)
+	if len(list.Items) != 1 || list.Items[0].ID != "canvas_api" {
+		t.Fatalf("right session should see shared item: %+v", list.Items)
+	}
+
+	resp = req(t, http.MethodPatch, srv.URL+"/sessions/sess_right/canvas/items/canvas_api", map[string]any{
+		"window": map[string]any{"x": 42, "y": 12, "w": 320, "h": 220, "z": 2},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("patch status = %d", resp.StatusCode)
+	}
+	item = decodeJSON[store.CanvasItem](t, resp)
+	if item.SourceSessionID != "sess_left" || item.UpdatedBySessionID != "sess_right" {
+		t.Fatalf("patch should keep source and update actor: %+v", item)
+	}
+}
+
 func TestStartGmailAppOAuth(t *testing.T) {
 	srv, _, _ := newConfigTestServer(t)
 	resp := req(t, http.MethodPost, srv.URL+"/app-oauth/start", map[string]string{"appID": "gmail"})

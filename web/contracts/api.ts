@@ -21,6 +21,59 @@ export const session = z.object({
 });
 export type Session = z.infer<typeof session>;
 
+export const canvasItem = z.object({
+  id: z.string(),
+  canvasID: z.string(),
+  sourceSessionID: z.string().optional(),
+  createdBySessionID: z.string().optional(),
+  updatedBySessionID: z.string().optional(),
+  kind: z.string(),
+  title: z.string().optional(),
+  item: z.unknown(),
+  window: z.unknown().optional(),
+  visible: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type CanvasItem = z.infer<typeof canvasItem>;
+
+export const listCanvasItemsResponse = z.object({
+  items: z.array(canvasItem),
+});
+
+export const putCanvasItemRequest = z.object({
+  id: z.string().optional(),
+  sourceSessionID: z.string().optional(),
+  kind: z.string().min(1),
+  title: z.string().optional(),
+  item: z.unknown(),
+  window: z.unknown().optional(),
+});
+
+export const patchCanvasItemRequest = z.object({
+  window: z.unknown(),
+});
+
+export const browserMCPTool = z.object({
+  name: z.string(),
+  description: z.string().optional(),
+  capability: z.enum(["chat", "research", "workspace"]).optional(),
+});
+export type BrowserMCPTool = z.infer<typeof browserMCPTool>;
+
+export const browserMCPSession = z.object({
+  id: z.string(),
+  connectedAt: z.string(),
+  serverName: z.string().optional(),
+  serverVersion: z.string().optional(),
+  tools: z.array(browserMCPTool),
+});
+export type BrowserMCPSession = z.infer<typeof browserMCPSession>;
+
+export const listBrowserMCPSessionsResponse = z.object({
+  sessions: z.array(browserMCPSession),
+});
+
 // provider profile 的设置视图:apiKey 来自本地配置,编辑时可回显;apiKeySet 用于列表状态。
 export const providerProtocol = z.enum(["openai-compatible", "openai-responses", "google", "anthropic"]);
 

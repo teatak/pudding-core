@@ -33,6 +33,7 @@ import {
   getSettings,
   getUserPrompt,
   getWebTools,
+  listBrowserMCPSessions,
   listBuiltinTools,
   listSkillDrafts,
   listProviders,
@@ -42,6 +43,7 @@ import {
   putUserPrompt,
   skillIconURL,
   type BuiltinTool,
+  type BrowserMCPSession,
   type DailyUsageStat,
   type MobilePairing,
   type ProviderProfile,
@@ -1247,6 +1249,12 @@ function ToolsSettings({ token }: { token: string }) {
     enabled: Boolean(token),
     staleTime: Infinity,
   });
+  const browserMCPQuery = useQuery({
+    queryKey: queryKeys.browserMCPSessions(),
+    queryFn: () => listBrowserMCPSessions(token),
+    enabled: Boolean(token),
+    refetchInterval: 2000,
+  });
   const toolsQuery = useQuery({
     queryKey: queryKeys.webTools(),
     queryFn: () => getWebTools(token),
@@ -1287,6 +1295,12 @@ function ToolsSettings({ token }: { token: string }) {
         error={builtinToolsQuery.isError}
         tools={builtinToolsQuery.data?.tools || []}
         onRetry={() => void builtinToolsQuery.refetch()}
+      />
+      <CanvasToolsPanel
+        error={browserMCPQuery.isError}
+        loading={browserMCPQuery.isLoading}
+        sessions={browserMCPQuery.data?.sessions || []}
+        onRetry={() => void browserMCPQuery.refetch()}
       />
       <SettingsPanel
         action={
@@ -1489,22 +1503,106 @@ function ToolList({ tools }: { tools: BuiltinTool[] }) {
   return (
     <div className="divide-y divide-border/70 border-t">
       {tools.map((tool) => (
-        <ToolRow key={tool.id} tool={tool} />
+        <ToolInfoRow key={tool.id} tool={tool} />
       ))}
     </div>
   );
 }
 
-function ToolRow({ tool }: { tool: BuiltinTool }) {
+type ToolInfo = {
+  id: string;
+  description?: string;
+  capability?: "chat" | "research" | "workspace";
+};
+
+function CanvasToolsPanel({
+  error,
+  loading,
+  onRetry,
+  sessions,
+}: {
+  error: boolean;
+  loading: boolean;
+  onRetry: () => void;
+  sessions: BrowserMCPSession[];
+}) {
   const { t } = useI18n();
-  const capabilityLabel = t(`mode.${tool.capability}`);
+  const tools = useMemo(() => uniqueCanvasTools(sessions), [sessions]);
+  const connected = sessions.length > 0;
+  return (
+    <Accordion className="overflow-hidden rounded-xl border bg-card" collapsible type="single">
+      <AccordionItem className="border-b-0" value="canvas-tools">
+        <AccordionTrigger className="h-14 items-center rounded-none border-0 px-4 py-0 text-sm font-normal hover:no-underline focus-visible:ring-0">
+          <span className="flex min-w-0 items-center gap-2">
+            <span>{`${t("settings.tools.canvas.title")} (${tools.length})`}</span>
+            <span
+              aria-hidden="true"
+              className={cn("size-2 rounded-full", connected ? "bg-success" : "bg-muted-foreground/50")}
+            />
+          </span>
+          {loading ? <Loader2 className="mr-2 size-4 animate-spin text-muted-foreground" /> : null}
+        </AccordionTrigger>
+        <AccordionContent className="p-0">
+          {error ? (
+            <div className="border-t p-4">
+              <Alert variant="destructive">
+                <AlertDescription className="grid gap-2">
+                  <span>{t("settings.tools.canvas.loadFailed")}</span>
+                  <Button size="sm" type="button" variant="outline" onClick={onRetry}>
+                    {t("common.refresh")}
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            </div>
+          ) : tools.length === 0 ? (
+            <div className="grid gap-1 border-t px-4 py-3 text-sm text-muted-foreground">
+              <span>{t("settings.tools.canvas.empty")}</span>
+              <span className="text-xs">{t("settings.tools.canvas.desc")}</span>
+            </div>
+          ) : (
+            <div className="divide-y divide-border/70 border-t">
+              {tools.map((tool) => (
+                <ToolInfoRow key={tool.id} tool={tool} />
+              ))}
+            </div>
+          )}
+        </AccordionContent>
+      </AccordionItem>
+    </Accordion>
+  );
+}
+
+function uniqueCanvasTools(sessions: BrowserMCPSession[]): ToolInfo[] {
+  const seen = new Set<string>();
+  const tools: ToolInfo[] = [];
+  for (const session of sessions) {
+    for (const tool of session.tools) {
+      if (!tool.name.startsWith("canvas_") || seen.has(tool.name)) {
+        continue;
+      }
+      seen.add(tool.name);
+      tools.push({
+        id: tool.name,
+        description: tool.description,
+        capability: tool.capability,
+      });
+    }
+  }
+  return tools;
+}
+
+function ToolInfoRow({ tool }: { tool: ToolInfo }) {
+  const { t } = useI18n();
+  const capabilityLabel = tool.capability ? t(`mode.${tool.capability}`) : "";
   return (
     <div className="grid gap-1 px-4 py-3">
       <div className="flex min-w-0 items-center gap-2">
         <div className="min-w-0 break-all font-mono text-xs text-foreground">{tool.id}</div>
-        <span className="shrink-0 rounded border border-border/70 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
-          {capabilityLabel}
-        </span>
+        {capabilityLabel ? (
+          <span className="shrink-0 rounded border border-border/70 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
+            {capabilityLabel}
+          </span>
+        ) : null}
       </div>
       <div className="line-clamp-2 text-xs leading-5 text-muted-foreground">
         {tool.description || t("settings.tools.builtin.noDescription")}

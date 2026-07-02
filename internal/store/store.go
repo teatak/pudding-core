@@ -20,6 +20,7 @@ var (
 	ErrTurnRunning    = errors.New("store: session has a running turn")
 	ErrInvalidSession = errors.New("store: session provider and model are required")
 	ErrQueueBlocked   = errors.New("store: queued input is editing")
+	ErrInvalidCanvas  = errors.New("store: invalid canvas item")
 )
 
 // EventsRetainPerSession 是每个 session 的 lifecycle 事件保留条数。
@@ -901,6 +902,84 @@ func normalizeStringIDs(values []string) []string {
 	return out
 }
 
+const DefaultCanvasID = "default"
+
+type CanvasItem struct {
+	ID                 string          `json:"id"`
+	CanvasID           string          `json:"canvasID"`
+	SourceSessionID    string          `json:"sourceSessionID,omitempty"`
+	CreatedBySessionID string          `json:"createdBySessionID,omitempty"`
+	UpdatedBySessionID string          `json:"updatedBySessionID,omitempty"`
+	Kind               string          `json:"kind"`
+	Title              string          `json:"title,omitempty"`
+	Item               json.RawMessage `json:"item"`
+	Window             json.RawMessage `json:"window,omitempty"`
+	Visible            bool            `json:"visible"`
+	CreatedAt          time.Time       `json:"createdAt"`
+	UpdatedAt          time.Time       `json:"updatedAt"`
+}
+
+type CanvasItemInput struct {
+	ID              string
+	CanvasID        string
+	ActorSessionID  string
+	SourceSessionID string
+	Kind            string
+	Title           string
+	Item            json.RawMessage
+	Window          json.RawMessage
+}
+
+type CanvasItemWindowPatch struct {
+	CanvasID       string
+	ActorSessionID string
+	ItemID         string
+	Window         json.RawMessage
+}
+
+func NormalizeCanvasItemInput(in *CanvasItemInput) error {
+	if in == nil {
+		return ErrInvalidCanvas
+	}
+	in.ID = strings.TrimSpace(in.ID)
+	in.CanvasID = normalizeCanvasID(in.CanvasID)
+	in.ActorSessionID = strings.TrimSpace(in.ActorSessionID)
+	in.SourceSessionID = strings.TrimSpace(in.SourceSessionID)
+	in.Kind = strings.TrimSpace(in.Kind)
+	in.Title = strings.TrimSpace(in.Title)
+	if in.ID == "" || in.ActorSessionID == "" || in.Kind == "" || len(in.Item) == 0 || !json.Valid(in.Item) {
+		return ErrInvalidCanvas
+	}
+	if len(in.Window) > 0 && !json.Valid(in.Window) {
+		return ErrInvalidCanvas
+	}
+	in.Item = append(json.RawMessage(nil), in.Item...)
+	in.Window = append(json.RawMessage(nil), in.Window...)
+	return nil
+}
+
+func NormalizeCanvasItemWindowPatch(patch *CanvasItemWindowPatch) error {
+	if patch == nil {
+		return ErrInvalidCanvas
+	}
+	patch.CanvasID = normalizeCanvasID(patch.CanvasID)
+	patch.ActorSessionID = strings.TrimSpace(patch.ActorSessionID)
+	patch.ItemID = strings.TrimSpace(patch.ItemID)
+	if patch.ActorSessionID == "" || patch.ItemID == "" || len(patch.Window) == 0 || !json.Valid(patch.Window) {
+		return ErrInvalidCanvas
+	}
+	patch.Window = append(json.RawMessage(nil), patch.Window...)
+	return nil
+}
+
+func normalizeCanvasID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return DefaultCanvasID
+	}
+	return id
+}
+
 // Store 的每个方法是一个完整事务。BeginTurn 与 FinishTurn 内部必须把
 // message、turns 状态、lifecycle event 写在同一事务里(AGENTS.md 硬约束 15);
 // 事件 seq 由 Store 在事务内按 session 单调分配。
@@ -967,6 +1046,11 @@ type Store interface {
 	PutSessionAppGrant(ctx context.Context, grant *SessionAppGrant) (*SessionAppGrant, error)
 	ListSessionAppGrants(ctx context.Context, sessionID string) ([]*SessionAppGrant, error)
 	DeleteSessionAppGrant(ctx context.Context, sessionID, appID, connectionID string) error
+
+	ListCanvasItems(ctx context.Context, actorSessionID string) ([]*CanvasItem, error)
+	PutCanvasItem(ctx context.Context, in CanvasItemInput) (*CanvasItem, error)
+	UpdateCanvasItemWindow(ctx context.Context, patch CanvasItemWindowPatch) (*CanvasItem, error)
+	DeleteCanvasItem(ctx context.Context, actorSessionID, itemID string) error
 
 	Close() error
 }

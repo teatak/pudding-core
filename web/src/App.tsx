@@ -29,6 +29,7 @@ import {
   workspaceLayout,
 } from "@/lib/layoutConstants";
 import { readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
+import { useCanvasMCP } from "@/mcp/canvasTools";
 import { setCanvasOpen, useCanvasOpen } from "@/state/canvasStore";
 import { clearPendingPairingCode, pendingPairingCode } from "@/state/token";
 import { setToken, useToken } from "@/state/tokenStore";
@@ -74,6 +75,7 @@ export function App() {
   // SSE 是 session-scoped,不是 pane-scoped。visible sessions 在 App 层统一去重订阅,
   // ChatPane 只负责 pane-local UI/滚动状态。
   useVisibleSessionEvents(activeSessionIDs, token);
+  useCanvasMCP(token);
 
   useEffect(() => {
     if (!token) {
@@ -271,7 +273,7 @@ export function App() {
                     <SheetTitle>{t("canvas.title")}</SheetTitle>
                     <SheetDescription>{t("canvas.empty")}</SheetDescription>
                   </SheetHeader>
-                  <CanvasPane />
+                  <CanvasPane token={token} sessionID={selectedSessionID} />
                 </SheetContent>
               </Sheet>
             </>
@@ -309,7 +311,7 @@ export function App() {
                 collapsible
                 minSize={workspaceLayout.minCanvasPx}
               >
-                {canvasOpen ? <CanvasPane /> : null}
+                {canvasOpen ? <CanvasPane token={token} sessionID={selectedSessionID} /> : null}
               </ResizablePanel>
             </ResizablePanelGroup>
           )}

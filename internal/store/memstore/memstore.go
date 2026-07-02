@@ -24,6 +24,7 @@ type Memstore struct {
 	usage     map[usageKey]*store.UsageHourlyStat // (UTC hour unix ms, model) → global stats
 	susage    map[string]*store.SessionUsageStat  // sessionID → session stats
 	appGrants map[string][]*store.SessionAppGrant // sessionID → grants
+	canvas    map[string]*store.CanvasItem        // itemID → global canvas item
 	events    map[string][]event.Event            // sessionID → seq 升序
 	seq       map[string]int64
 	settings  map[string]string
@@ -39,6 +40,7 @@ func New() *Memstore {
 		usage:     make(map[usageKey]*store.UsageHourlyStat),
 		susage:    make(map[string]*store.SessionUsageStat),
 		appGrants: make(map[string][]*store.SessionAppGrant),
+		canvas:    make(map[string]*store.CanvasItem),
 		events:    make(map[string][]event.Event),
 		seq:       make(map[string]int64),
 		settings:  make(map[string]string),
@@ -850,6 +852,96 @@ func (m *Memstore) DeleteSessionAppGrant(_ context.Context, sessionID, appID, co
 	return store.ErrNotFound
 }
 
+func (m *Memstore) ListCanvasItems(_ context.Context, actorSessionID string) ([]*store.CanvasItem, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[actorSessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	out := make([]*store.CanvasItem, 0, len(m.canvas))
+	for _, item := range m.canvas {
+		if item.CanvasID == store.DefaultCanvasID && item.Visible {
+			out = append(out, cloneCanvasItem(item))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+			return out[i].UpdatedAt.After(out[j].UpdatedAt)
+		}
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	return out, nil
+}
+
+func (m *Memstore) PutCanvasItem(_ context.Context, in store.CanvasItemInput) (*store.CanvasItem, error) {
+	if err := store.NormalizeCanvasItemInput(&in); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[in.ActorSessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	now := time.Now()
+	sourceSessionID := in.SourceSessionID
+	if sourceSessionID == "" {
+		sourceSessionID = in.ActorSessionID
+	}
+	item := &store.CanvasItem{
+		ID:                 in.ID,
+		CanvasID:           in.CanvasID,
+		SourceSessionID:    sourceSessionID,
+		CreatedBySessionID: in.ActorSessionID,
+		UpdatedBySessionID: in.ActorSessionID,
+		Kind:               in.Kind,
+		Title:              in.Title,
+		Item:               append([]byte(nil), in.Item...),
+		Window:             append([]byte(nil), in.Window...),
+		Visible:            true,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+	if existing := m.canvas[in.ID]; existing != nil {
+		item.SourceSessionID = existing.SourceSessionID
+		item.CreatedBySessionID = existing.CreatedBySessionID
+		item.CreatedAt = existing.CreatedAt
+	}
+	m.canvas[in.ID] = item
+	return cloneCanvasItem(item), nil
+}
+
+func (m *Memstore) UpdateCanvasItemWindow(_ context.Context, patch store.CanvasItemWindowPatch) (*store.CanvasItem, error) {
+	if err := store.NormalizeCanvasItemWindowPatch(&patch); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[patch.ActorSessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	item := m.canvas[patch.ItemID]
+	if item == nil || item.CanvasID != patch.CanvasID || !item.Visible {
+		return nil, store.ErrNotFound
+	}
+	item.Window = append([]byte(nil), patch.Window...)
+	item.UpdatedBySessionID = patch.ActorSessionID
+	item.UpdatedAt = time.Now()
+	return cloneCanvasItem(item), nil
+}
+
+func (m *Memstore) DeleteCanvasItem(_ context.Context, actorSessionID, itemID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[actorSessionID]; !ok {
+		return store.ErrNotFound
+	}
+	if _, ok := m.canvas[itemID]; !ok {
+		return store.ErrNotFound
+	}
+	delete(m.canvas, itemID)
+	return nil
+}
+
 // appendEventLocked 追加事件并按保留窗口滚动清理;调用方必须已持锁。
 func (m *Memstore) appendEventLocked(sessionID string, ev event.Event) {
 	evs := append(m.events[sessionID], ev)
@@ -1237,6 +1329,16 @@ func cloneSessionAppGrant(grant *store.SessionAppGrant) *store.SessionAppGrant {
 	cp.AllowedEndpoints = append([]string(nil), grant.AllowedEndpoints...)
 	cp.Permissions = append([]string(nil), grant.Permissions...)
 	cp.Constraints = append([]byte(nil), grant.Constraints...)
+	return &cp
+}
+
+func cloneCanvasItem(item *store.CanvasItem) *store.CanvasItem {
+	if item == nil {
+		return nil
+	}
+	cp := *item
+	cp.Item = append([]byte(nil), item.Item...)
+	cp.Window = append([]byte(nil), item.Window...)
 	return &cp
 }
 

@@ -21,18 +21,20 @@ import (
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/mobileauth"
 	"github.com/teatak/pudding-core/internal/store"
+	"github.com/teatak/pudding-core/internal/tool"
 )
 
 type Server struct {
-	engine    *engine.Engine
-	store     store.Store
-	config    engine.ConfigSource
-	providers providerWriter
-	apps      appService
-	skills    skillService
-	hub       *event.Hub
-	oauthMu   sync.Mutex
-	oauth     map[string]oauthStartState
+	engine     *engine.Engine
+	store      store.Store
+	config     engine.ConfigSource
+	providers  providerWriter
+	apps       appService
+	skills     skillService
+	hub        *event.Hub
+	browserMCP browserMCPService
+	oauthMu    sync.Mutex
+	oauth      map[string]oauthStartState
 }
 
 func New(eng *engine.Engine, s store.Store, cfg engine.ConfigSource, hub *event.Hub) *Server {
@@ -50,8 +52,13 @@ func (s *Server) WithSkills(skills skillService) *Server {
 	return s
 }
 
+func (s *Server) WithBrowserMCP(handler browserMCPService) *Server {
+	s.browserMCP = handler
+	return s
+}
+
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
-var apiPrefixes = []string{"/sessions", "/settings", "/providers", "/tools", "/skills", "/skill-drafts", "/skill-assets", "/usage", "/mobile", "/apps", "/app-assets", "/app-skills", "/app-connections", "/app-oauth"}
+var apiPrefixes = []string{"/sessions", "/settings", "/providers", "/tools", "/skills", "/skill-drafts", "/skill-assets", "/usage", "/mobile", "/apps", "/app-assets", "/app-skills", "/app-connections", "/app-oauth", "/mcp"}
 
 type appService interface {
 	ListDefinitions(ctx context.Context) ([]*app.Definition, error)
@@ -59,6 +66,11 @@ type appService interface {
 	DeleteDefinition(ctx context.Context, id string) error
 	ReadAsset(ctx context.Context, rel string) ([]byte, string, error)
 	ReadSkill(ctx context.Context, appID, skillID string) (*app.SkillDetail, error)
+}
+
+type browserMCPService interface {
+	http.Handler
+	BrowserSessions() []tool.BrowserMCPSessionSnapshot
 }
 
 type deviceTokenValidator interface {
@@ -113,6 +125,8 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/messages").GET(s.listMessages)
 	app.Route("/sessions/:id/queued-inputs").GET(s.listQueuedInputs)
 	app.Route("/sessions/:id/queued-inputs/:clientMessageID").PATCH(s.patchQueuedInput)
+	app.Route("/sessions/:id/canvas/items").GET(s.listCanvasItems).POST(s.createCanvasItem)
+	app.Route("/sessions/:id/canvas/items/:itemID").PUT(s.putCanvasItem).PATCH(s.patchCanvasItem).DELETE(s.deleteCanvasItem)
 	app.Route("/settings").GET(s.getSettings).PUT(s.putSettings)
 	app.Route("/settings/user-prompt").GET(s.getUserPrompt).PUT(s.putUserPrompt)
 	app.Route("/providers").GET(s.listProviders).POST(s.createProvider)
@@ -121,6 +135,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/providers/:name/models").GET(s.listProviderModels)
 	app.Route("/tools/builtin").GET(s.listBuiltinTools)
 	app.Route("/tools/web").GET(s.getWebTools).PATCH(s.patchWebTools).PUT(s.patchWebTools)
+	app.Route("/mcp/browser-sessions").GET(s.listBrowserMCPSessions)
 	app.Route("/skills").GET(s.listSkills)
 	app.Route("/skills/:id").DELETE(s.deleteSkill)
 	app.Route("/skill-drafts").GET(s.listSkillDrafts)
@@ -170,7 +185,15 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	}
 
 	authed := withAuth(token, cfg.deviceTokens, app)
+	var mcpAuthed http.Handler
+	if s.browserMCP != nil {
+		mcpAuthed = withAuth(token, cfg.deviceTokens, s.browserMCP)
+	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mcp/ws" && mcpAuthed != nil {
+			mcpAuthed.ServeHTTP(w, r)
+			return
+		}
 		if cfg.pairing != nil && isPublicMobilePath(r.URL.Path) {
 			public.ServeHTTP(w, r)
 			return

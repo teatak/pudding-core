@@ -86,7 +86,12 @@ func Start(opts Options) (*Daemon, error) {
 	hub := event.NewHub()
 	apps := appsvc.NewService(dir, st, cfg)
 	skills := skillsvc.NewService(dir)
-	eng := engine.New(st, hub, resolver, cfg, engine.WithPromptSource(prompt.NewLoader(dir)), engine.WithTools(tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithSkills(skills), tool.WithHomeDir(dir))))
+	browserMCP := tool.NewBrowserMCPRunner()
+	tools := tool.NewMultiRunner(
+		tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithSkills(skills), tool.WithHomeDir(dir)),
+		browserMCP,
+	)
+	eng := engine.New(st, hub, resolver, cfg, engine.WithPromptSource(prompt.NewLoader(dir)), engine.WithTools(tools))
 	if err := eng.Recover(context.Background()); err != nil {
 		_ = st.Close()
 		return nil, fmt.Errorf("recover interrupted turns: %w", err)
@@ -120,8 +125,9 @@ func Start(opts Options) (*Daemon, error) {
 
 	// request ctx 派生自此:Shutdown 时 SSE 长连接立即退出,不拖优雅关闭
 	sseCtx, stopSSE := context.WithCancel(context.Background())
+	apiServer := api.New(eng, st, cfg, hub).WithApps(apps).WithSkills(skills).WithBrowserMCP(browserMCP)
 	server := &http.Server{
-		Handler: api.New(eng, st, cfg, hub).WithApps(apps).WithSkills(skills).Handler(
+		Handler: apiServer.Handler(
 			token,
 			webui.Handler(),
 			api.WithDeviceTokenValidator(devices),

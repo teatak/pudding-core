@@ -156,6 +156,75 @@ func TestSessionAppGrantsPersist(t *testing.T) {
 	}
 }
 
+func TestCanvasItemsAreGlobalWithSessionActor(t *testing.T) {
+	st, path := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, st, "sess_left")
+	createTestSession(t, st, "sess_right")
+
+	item, err := st.PutCanvasItem(ctx, store.CanvasItemInput{
+		ID:             "canvas_1",
+		ActorSessionID: "sess_left",
+		Kind:           "markdown",
+		Title:          "Note",
+		Item:           []byte(`{"kind":"markdown","content":"hello"}`),
+		Window:         []byte(`{"x":1,"y":2,"w":300,"h":200,"z":1}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.SourceSessionID != "sess_left" || item.CreatedBySessionID != "sess_left" || item.UpdatedBySessionID != "sess_left" {
+		t.Fatalf("unexpected actor fields: %+v", item)
+	}
+
+	visible, err := st.ListCanvasItems(ctx, "sess_right")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(visible) != 1 || visible[0].ID != "canvas_1" {
+		t.Fatalf("right session should see global canvas item: %+v", visible)
+	}
+
+	item, err = st.UpdateCanvasItemWindow(ctx, store.CanvasItemWindowPatch{
+		ActorSessionID: "sess_right",
+		ItemID:         "canvas_1",
+		Window:         []byte(`{"x":9,"y":8,"w":320,"h":240,"z":2}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.SourceSessionID != "sess_left" || item.UpdatedBySessionID != "sess_right" {
+		t.Fatalf("source should stay fixed and actor should update: %+v", item)
+	}
+
+	if err := st.DeleteSession(ctx, "sess_left"); err != nil {
+		t.Fatal(err)
+	}
+	visible, err = st.ListCanvasItems(ctx, "sess_right")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(visible) != 1 || visible[0].SourceSessionID != "sess_left" {
+		t.Fatalf("global canvas item should survive source session delete: %+v", visible)
+	}
+
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	visible, err = reopened.ListCanvasItems(ctx, "sess_right")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(visible) != 1 || visible[0].UpdatedBySessionID != "sess_right" {
+		t.Fatalf("canvas item not persisted: %+v", visible)
+	}
+}
+
 func TestRenameDoesNotAffectRecentOrdering(t *testing.T) {
 	st, _ := openTestStore(t)
 	createTestSession(t, st, "older")
