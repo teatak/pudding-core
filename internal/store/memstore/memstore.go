@@ -801,10 +801,10 @@ func (m *Memstore) ListCanvasItems(_ context.Context, actorSessionID string) ([]
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if !out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
-			return out[i].UpdatedAt.After(out[j].UpdatedAt)
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
 		}
-		return out[i].CreatedAt.After(out[j].CreatedAt)
+		return out[i].ID < out[j].ID
 	})
 	return out, nil
 }

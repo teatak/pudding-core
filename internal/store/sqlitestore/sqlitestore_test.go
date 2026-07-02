@@ -181,6 +181,49 @@ func TestCanvasItemsAreGlobalWithSessionActor(t *testing.T) {
 	}
 }
 
+func TestCanvasItemListOrderIgnoresWindowUpdates(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, st, "sess_canvas_order")
+
+	for _, id := range []string{"canvas_a", "canvas_b"} {
+		if _, err := st.PutCanvasItem(ctx, store.CanvasItemInput{
+			ID:             id,
+			ActorSessionID: "sess_canvas_order",
+			Kind:           "markdown",
+			Title:          id,
+			Item:           []byte(`{"kind":"markdown","content":"hello"}`),
+			Window:         []byte(`{"x":1,"y":2,"w":300,"h":200,"z":1}`),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	visible, err := st.ListCanvasItems(ctx, "sess_canvas_order")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(visible) != 2 || visible[0].ID != "canvas_a" || visible[1].ID != "canvas_b" {
+		t.Fatalf("canvas items should use stable created order: %+v", visible)
+	}
+
+	if _, err := st.UpdateCanvasItemWindow(ctx, store.CanvasItemWindowPatch{
+		ActorSessionID: "sess_canvas_order",
+		ItemID:         "canvas_b",
+		Window:         []byte(`{"x":9,"y":8,"w":320,"h":240,"z":99}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	visible, err = st.ListCanvasItems(ctx, "sess_canvas_order")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(visible) != 2 || visible[0].ID != "canvas_a" || visible[1].ID != "canvas_b" {
+		t.Fatalf("window updates should not reorder canvas items: %+v", visible)
+	}
+}
+
 func TestRenameDoesNotAffectRecentOrdering(t *testing.T) {
 	st, _ := openTestStore(t)
 	createTestSession(t, st, "older")

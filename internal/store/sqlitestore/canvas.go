@@ -19,7 +19,7 @@ func (s *Store) ListCanvasItems(ctx context.Context, actorSessionID string) ([]*
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT `+canvasItemColumns+` FROM canvas_items WHERE canvas_id=? AND visible=1 ORDER BY updated_at DESC, created_at DESC`,
+		`SELECT `+canvasItemColumns+` FROM canvas_items WHERE canvas_id=? AND visible=1 ORDER BY created_at ASC, id ASC`,
 		store.DefaultCanvasID,
 	)
 	if err != nil {

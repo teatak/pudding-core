@@ -3,11 +3,15 @@ import { useMemo } from "react";
 
 import {
   createCanvasItem,
+  deleteCanvasItem,
+  listCanvasItems,
   putCanvasItem,
   type CanvasItemPayload,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import type { CanvasItem } from "@/contracts/api";
 import { apiURL } from "@/state/apiBase";
+import { setCanvasOpen } from "@/state/canvasStore";
 import { useBrowserMCP, type ToolDefinition } from "@/mcp/browserMCP";
 
 export function useCanvasMCP(token: string) {
@@ -17,8 +21,124 @@ export function useCanvasMCP(token: string) {
   const tools = useMemo<ToolDefinition[]>(
     () => [
       {
+        name: "canvas_doc_read",
+        description: "Read concise on-demand docs for canvas tools. Use only when a canvas workflow or schema detail is unclear.",
+        capability: "chat",
+        inputSchema: {
+          type: "object",
+          properties: {
+            ref: {
+              type: "string",
+              enum: Object.keys(CANVAS_DOCS),
+              description:
+                "Doc ref: canvas_overview, canvas_items, canvas_markdown, canvas_table, canvas_chart, canvas_gallery, or canvas_grid.",
+            },
+          },
+          required: ["ref"],
+          additionalProperties: false,
+        },
+        handler: async (args) => {
+          const record = requiredRecord(args);
+          const ref = requiredString(record.ref, "ref");
+          const content = CANVAS_DOCS[ref];
+          if (!content) {
+            return jsonToolResult({ ok: false, reason: "not_found", ref, availableRefs: Object.keys(CANVAS_DOCS) });
+          }
+          return jsonToolResult({ ok: true, ref, content });
+        },
+      },
+      {
+        name: "canvas_item_list",
+        description:
+          "List current global canvas widgets with lightweight summaries. Call this before creating or updating canvas widgets in multi-turn work. For details call canvas_doc_read(ref='canvas_items').",
+        capability: "chat",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          additionalProperties: false,
+        },
+        handler: async (args) => {
+          const sessionID = sessionIDFromArgs(args);
+          const { items } = await listCanvasItems(token, sessionID);
+          return jsonToolResult({
+            ok: true,
+            count: items.length,
+            items: items.map(canvasItemSummary),
+          });
+        },
+      },
+      {
+        name: "canvas_item_inspect",
+        description:
+          "Read one existing global canvas widget by id with its current content and source details. Use after canvas_item_list when the summary is not enough.",
+        capability: "chat",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Canvas widget id to inspect." },
+          },
+          required: ["id"],
+          additionalProperties: false,
+        },
+        handler: async (args) => {
+          const record = requiredRecord(args);
+          const sessionID = sessionIDFromArgs(record);
+          const id = requiredString(record.id, "id");
+          const { items } = await listCanvasItems(token, sessionID);
+          const item = items.find((entry) => entry.id === id);
+          if (!item) {
+            return jsonToolResult({ ok: false, reason: "not_found", id });
+          }
+          return jsonToolResult({
+            ok: true,
+            item: canvasItemInspection(item),
+          });
+        },
+      },
+      {
+        name: "canvas_item_remove",
+        description:
+          "Remove one global canvas widget by id. Call only when the user clearly asks to close or remove a widget.",
+        capability: "chat",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Canvas widget id to remove." },
+          },
+          required: ["id"],
+          additionalProperties: false,
+        },
+        handler: async (args) => {
+          const record = requiredRecord(args);
+          const sessionID = sessionIDFromArgs(record);
+          const id = requiredString(record.id, "id");
+          await deleteCanvasItem(token, sessionID, id);
+          await queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
+          return jsonToolResult({ ok: true, removed: id });
+        },
+      },
+      {
+        name: "canvas_item_clear",
+        description:
+          "Clear all global canvas widgets. Call only when the user clearly asks to clear the canvas, close everything, or start over.",
+        capability: "chat",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          additionalProperties: false,
+        },
+        handler: async (args) => {
+          const sessionID = sessionIDFromArgs(args);
+          const { items } = await listCanvasItems(token, sessionID);
+          await Promise.all(items.map((item) => deleteCanvasItem(token, sessionID, item.id)));
+          await queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
+          return jsonToolResult({ ok: true, cleared: items.length, ids: items.map((item) => item.id) });
+        },
+      },
+      {
         name: "canvas_markdown",
-        description: "Create or update a markdown item on the shared canvas.",
+        description:
+          "Create or update a markdown item on the shared canvas. For workflow details call canvas_doc_read(ref='canvas_markdown').",
         capability: "chat",
         inputSchema: {
           type: "object",
@@ -47,7 +167,8 @@ export function useCanvasMCP(token: string) {
       },
       {
         name: "canvas_table",
-        description: "Create or update a table item on the shared canvas.",
+        description:
+          "Create or update a table item on the shared canvas. For schema details call canvas_doc_read(ref='canvas_table').",
         capability: "chat",
         inputSchema: {
           type: "object",
@@ -101,7 +222,8 @@ export function useCanvasMCP(token: string) {
       },
       {
         name: "canvas_chart",
-        description: "Create or update a chart item on the shared canvas. Supports bar, line, area, pie, and donut charts.",
+        description:
+          "Create or update a chart item on the shared canvas. Supports bar, line, area, pie, and donut charts. For schema details call canvas_doc_read(ref='canvas_chart').",
         capability: "chat",
         inputSchema: {
           type: "object",
@@ -127,6 +249,92 @@ export function useCanvasMCP(token: string) {
             kind: "chart",
             title,
             item: { kind: "chart", title, chart, caption },
+          });
+        },
+      },
+      {
+        name: "canvas_gallery",
+        description:
+          "Create or update an image gallery item on the shared canvas. For schema details call canvas_doc_read(ref='canvas_gallery').",
+        capability: "chat",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Optional stable canvas item id to update." },
+            title: { type: "string", description: "Short item title." },
+            items: {
+              type: "array",
+              description: "Image items with url/src or base64 data.",
+              items: galleryItemSchema(),
+            },
+            layout: { type: "string", enum: ["grid", "row", "column"], description: "Gallery layout. Defaults to grid." },
+            caption: { type: "string", description: "Optional caption." },
+            mode: { type: "string", enum: ["replace", "append"], description: "Replace items or append to an existing gallery id." },
+            window: canvasWindowSchema(),
+          },
+          required: ["items"],
+          additionalProperties: false,
+        },
+        handler: async (args) => {
+          const record = requiredRecord(args);
+          const title = stringValue(record.title);
+          const items = normalizeGalleryItems(requiredArray(record.items, "items"));
+          const layout = record.layout === undefined ? "" : galleryLayoutValue(record.layout);
+          const caption = stringValue(record.caption);
+          return saveGalleryItem({
+            token,
+            queryClient,
+            args: record,
+            title,
+            items,
+            layout,
+            caption,
+            mode: galleryModeValue(record.mode),
+          });
+        },
+      },
+      {
+        name: "canvas_grid",
+        description:
+          "Create or update one multi-block grid widget on the shared canvas. Supports markdown, metric, table, gallery, chart, and one-level nested grid blocks. For schema details call canvas_doc_read(ref='canvas_grid').",
+        capability: "chat",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Optional stable canvas item id to update." },
+            title: { type: "string", description: "Grid widget title." },
+            items: {
+              type: "array",
+              description: "Internal content blocks.",
+              items: gridItemSchema(0),
+            },
+            columns: { type: "string", enum: ["auto", "1", "2", "3"], description: "Default layout columns." },
+            layout: gridLayoutSchema(),
+            caption: { type: "string", description: "Optional caption." },
+            window: canvasWindowSchema(),
+          },
+          required: ["title", "items"],
+          additionalProperties: false,
+        },
+        handler: async (args) => {
+          const record = requiredRecord(args);
+          const title = requiredString(record.title, "title");
+          const items = normalizeGridItems(requiredArray(record.items, "items"), 0);
+          const caption = stringValue(record.caption);
+          return saveCanvasItem({
+            token,
+            queryClient,
+            args: record,
+            kind: "grid",
+            title,
+            item: {
+              kind: "grid",
+              title,
+              items,
+              ...(gridColumnsValue(record.columns) ? { columns: gridColumnsValue(record.columns) } : {}),
+              ...(asRecord(record.layout) ? { layout: asRecord(record.layout) } : {}),
+              caption,
+            },
           });
         },
       },
@@ -170,20 +378,78 @@ async function saveCanvasItem({
     ? await putCanvasItem(token, sessionID, id, body)
     : await createCanvasItem(token, sessionID, body);
   await queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
-  return {
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify({
-          ok: true,
-          id: saved.id,
-          kind: saved.kind,
-          title: saved.title,
-          sourceSessionID: saved.sourceSessionID,
-        }),
-      },
-    ],
+  setCanvasOpen(true);
+  return jsonToolResult({
+    ok: true,
+    id: saved.id,
+    kind: saved.kind,
+    title: saved.title,
+    sourceSessionID: saved.sourceSessionID,
+  });
+}
+
+async function saveGalleryItem({
+  token,
+  queryClient,
+  args,
+  title,
+  items,
+  layout,
+  caption,
+  mode,
+}: {
+  token: string;
+  queryClient: ReturnType<typeof useQueryClient>;
+  args: Record<string, unknown>;
+  title: string;
+  items: Array<Record<string, string>>;
+  layout: string;
+  caption: string;
+  mode: "replace" | "append";
+}) {
+  const sessionID = requiredString(args._pudding_session_id, "_pudding_session_id");
+  const id = stringValue(args.id);
+  let nextTitle = title || "Gallery";
+  let nextItems = items;
+  let nextLayout = layout || "grid";
+  let nextCaption = caption;
+  if (id) {
+    const existing = (await listCanvasItems(token, sessionID)).items.find((item) => item.id === id);
+    if (existing) {
+      const payload = asRecord(existing.item);
+      const existingKind = stringValue(payload?.kind) || existing.kind;
+      if (existingKind !== "gallery") {
+        throw new Error(`canvas item "${id}" is ${existingKind}, not gallery`);
+      }
+      if (mode === "append") {
+        const previousItems = Array.isArray(payload?.items) ? normalizeGalleryItems(payload.items) : [];
+        nextTitle = title || existing.title || stringValue(payload?.title) || nextTitle;
+        nextItems = [...previousItems, ...items];
+        nextLayout = layout || galleryLayoutValue(payload?.layout);
+        nextCaption = caption || stringValue(payload?.caption);
+      }
+    }
+  }
+  const item = { kind: "gallery", title: nextTitle, items: nextItems, layout: nextLayout, caption: nextCaption };
+  const body: CanvasItemPayload = {
+    ...(id ? { id } : {}),
+    kind: "gallery",
+    title: nextTitle,
+    item,
+    window: asRecord(args.window),
   };
+  const saved = id
+    ? await putCanvasItem(token, sessionID, id, body)
+    : await createCanvasItem(token, sessionID, body);
+  await queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
+  setCanvasOpen(true);
+  return jsonToolResult({
+    ok: true,
+    id: saved.id,
+    kind: saved.kind,
+    title: saved.title,
+    sourceSessionID: saved.sourceSessionID,
+  });
 }
 
 function mcpWebSocketURL(token: string) {
@@ -191,6 +457,99 @@ function mcpWebSocketURL(token: string) {
   httpURL.protocol = httpURL.protocol === "https:" ? "wss:" : "ws:";
   return httpURL.toString();
 }
+
+const CANVAS_DOCS: Record<string, string> = {
+  canvas_overview: [
+    "# Canvas Tool Overview",
+    "",
+    "canvas_* tools create or update real UI widgets on the shared canvas. Tool arguments must contain the real data to display; chat text is not copied into canvas automatically.",
+    "",
+    "- Use markdown for prose, steps, code, links, and compact notes.",
+    "- Use table for structured rows, comparisons, query results, and lists.",
+    "- Use chart for one chart based on real row data.",
+    "- Use gallery for image-first content.",
+    "- Use grid when one topic needs multiple blocks in one widget.",
+    "- Before changing previous canvas work in multi-turn tasks, call canvas_item_list and decide whether to update an existing id or create a new widget.",
+    "- Use canvas_item_inspect only when a lightweight list summary is not enough.",
+    "- Only call canvas_item_remove or canvas_item_clear when the user clearly asks to close, remove, clear, or start over.",
+  ].join("\n"),
+  canvas_items: [
+    "# Canvas Item Management",
+    "",
+    "Use these tools to manage existing global canvas widgets.",
+    "",
+    "- canvas_item_list returns lightweight summaries only. Table summaries include row and column counts. Chart summaries include chart type, row count, and series count.",
+    "- canvas_item_inspect returns full content for one id. Use it before patch-like updates when exact existing content matters.",
+    "- canvas_item_remove removes one widget by id. Do not proactively clean up older widgets.",
+    "- canvas_item_clear removes all widgets. Use only for explicit clear-canvas or start-over requests.",
+    "- Reuse stable ids when updating existing work so the canvas does not accumulate duplicate widgets.",
+  ].join("\n"),
+  canvas_markdown: [
+    "# Canvas Markdown",
+    "",
+    "Use canvas_markdown for readable prose, plans, summaries, instructions, code snippets, and short mixed content.",
+    "",
+    "- Required fields: title, content.",
+    "- Optional field: id updates an existing markdown widget with the same id.",
+    "- Optional window can provide x, y, w, h, and z. Omit it unless placement matters.",
+    "- Keep markdown self-contained. Do not say content is elsewhere unless you also include the relevant content.",
+    "- For structured rows, use canvas_table instead of a markdown table when the data may need export, inspection, or later updates.",
+  ].join("\n"),
+  canvas_table: [
+    "# Canvas Table",
+    "",
+    "Use canvas_table for structured rows, comparisons, query results, rankings, inventories, and schedules. Rows must be real object data.",
+    "",
+    "- Required fields: title, columns, rows.",
+    "- columns may be strings or objects like {key,label}. A string column uses the same key and label.",
+    "- rows must be objects keyed by column key. Do not pass stringified JSON, placeholders, or omitted data.",
+    "- Optional caption appears below the table.",
+    "- Optional id updates an existing table widget with the same id.",
+    "- For later updates, call canvas_item_list first. If the summary is not enough, call canvas_item_inspect to read the current rows.",
+  ].join("\n"),
+  canvas_chart: [
+    "# Canvas Chart",
+    "",
+    "Use canvas_chart for one visual chart backed by real row data. Supported types: bar, line, area, pie, donut.",
+    "",
+    "- Required fields: title, chart.",
+    "- chart.data is required and must be an array of objects.",
+    "- For bar, line, and area charts, set x_key for the category/time field.",
+    "- For pie and donut charts, set name_key for labels and value_key for values.",
+    "- For single-series bar/line/area charts, set value_key or provide series.",
+    "- series items use {key,label,color}. Omit series to infer numeric fields where possible.",
+    "- Optional caption explains the chart. Keep it short.",
+    "- If the user needs exact values or exportable data, use canvas_table alongside or instead of a chart.",
+  ].join("\n"),
+  canvas_gallery: [
+    "# Canvas Gallery",
+    "",
+    "Use canvas_gallery for image-first content: screenshots, result sets, references, and visual comparisons.",
+    "",
+    "- Required fields: items. Provide title unless appending to an existing gallery.",
+    "- Each item should include url or src. For inline base64 images, use data and optional mime.",
+    "- Optional item fields: alt, caption.",
+    "- Optional layout is grid, row, or column. Default is grid.",
+    "- Optional mode is replace or append. append requires id and adds images to the existing gallery.",
+    "- Optional id updates an existing gallery widget with the same id. Do not reuse an id from another widget kind.",
+    "- Do not use gallery for mostly textual content. Use markdown or grid instead.",
+  ].join("\n"),
+  canvas_grid: [
+    "# Canvas Grid",
+    "",
+    "Use canvas_grid when one topic needs multiple blocks in one widget: dashboard summaries, chart plus notes, table plus explanation, image plus text, or comparisons.",
+    "",
+    "- Required fields: title, items.",
+    "- Supported item kinds: markdown, metric, table, gallery, chart, grid.",
+    "- Nested grid is only one level deep. Do not put kind=grid inside a nested grid.",
+    "- Use item.id as a stable block id when future updates may need to target the block.",
+    "- Use item.span.xs/sm/md/lg with values 1-12 to control width in the 12-column layout.",
+    "- Metric items render as KPI cards. Use title, value, optional description, optional icon, and optional color: default, green, amber, red, sky, or violet. Unrecognized metric fields are appended to description.",
+    "- Table, gallery, and chart item schemas match canvas_table, canvas_gallery, and canvas_chart.",
+    "- Optional columns can be auto, 1, 2, or 3. Optional layout.gap controls inner gap.",
+    "- If the user asks for later incremental updates, call canvas_item_list first and reuse the existing grid id.",
+  ].join("\n"),
+};
 
 function canvasWindowSchema() {
   return {
@@ -239,12 +598,132 @@ function chartSchema() {
   };
 }
 
+function galleryItemSchema() {
+  return {
+    type: "object",
+    properties: {
+      url: { type: "string" },
+      src: { type: "string" },
+      data: { type: "string", description: "Base64 image data without data: prefix." },
+      mime: { type: "string", description: "Image MIME for base64 data." },
+      alt: { type: "string" },
+      caption: { type: "string" },
+    },
+    additionalProperties: false,
+  };
+}
+
+function gridLayoutSchema() {
+  return {
+    type: "object",
+    properties: {
+      columns: { type: "number", enum: [12], description: "Always 12." },
+      gap: { type: "number", description: "Gap in px." },
+    },
+    additionalProperties: false,
+  };
+}
+
+function gridSpanSchema() {
+  const spanValue = { type: "number", enum: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] };
+  return {
+    type: "object",
+    properties: {
+      xs: spanValue,
+      sm: spanValue,
+      md: spanValue,
+      lg: spanValue,
+    },
+    additionalProperties: false,
+  };
+}
+
+function gridItemSchema(depth: number): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Stable block id." },
+      kind: {
+        type: "string",
+        enum: depth > 0 ? ["markdown", "metric", "table", "gallery", "chart"] : ["markdown", "metric", "table", "gallery", "chart", "grid"],
+      },
+      title: { type: "string", description: "Block title." },
+      variant: { type: "string", enum: ["hero", "normal", "compact", "subtle"] },
+      surface: { type: "string", enum: ["default", "tinted"] },
+      span: gridSpanSchema(),
+      text: { type: "string", description: "Markdown body." },
+      content: { type: "string", description: "Markdown body." },
+      value: { type: ["string", "number", "boolean"], description: "Metric value." },
+      description: { type: "string", description: "Metric description." },
+      icon: {
+        type: "string",
+        enum: ["activity", "calendar", "clock", "gauge", "hash", "money", "percent", "users"],
+        description: "Metric icon shown before the title.",
+      },
+      color: { type: "string", enum: ["default", "green", "amber", "red", "sky", "violet"], description: "Metric value color." },
+      columns: {
+        type: "array",
+        description: "Table columns.",
+        items: {
+          anyOf: [
+            { type: "string" },
+            {
+              type: "object",
+              properties: {
+                key: { type: "string" },
+                label: { type: "string" },
+              },
+              required: ["key"],
+              additionalProperties: true,
+            },
+          ],
+        },
+      },
+      rows: { type: "array", description: "Table rows.", items: { type: "object", additionalProperties: true } },
+      type: { type: "string", enum: ["bar", "line", "area", "pie", "donut"], description: "Chart type for kind=chart." },
+      x_key: { type: "string", description: "Chart category/time key for kind=chart." },
+      name_key: { type: "string", description: "Chart name key for kind=chart pie/donut." },
+      value_key: { type: "string", description: "Chart value key for kind=chart." },
+      series: {
+        type: "array",
+        description: "Chart series for kind=chart.",
+        items: {
+          type: "object",
+          properties: {
+            key: { type: "string" },
+            label: { type: "string" },
+            color: { type: "string" },
+          },
+          required: ["key"],
+          additionalProperties: false,
+        },
+      },
+      data: { type: "array", description: "Chart rows for kind=chart.", items: { type: "object", additionalProperties: true } },
+      items: {
+        type: "array",
+        description: depth > 0 ? "Gallery image items." : "Gallery image items or nested grid blocks.",
+        items: depth > 0 ? galleryItemSchema() : { anyOf: [galleryItemSchema(), gridItemSchema(depth + 1)] },
+      },
+      chart: chartSchema(),
+      layout: { anyOf: [gridLayoutSchema(), { type: "string", enum: ["grid", "row", "column"] }] },
+      caption: { type: "string" },
+    },
+    required: ["kind"],
+    additionalProperties: true,
+  };
+}
+
 function requiredRecord(value: unknown): Record<string, unknown> {
   const record = asRecord(value);
   if (!record) {
     throw new Error("arguments must be an object");
   }
   return record;
+}
+
+function sessionIDFromArgs(args: unknown): string {
+  const record = requiredRecord(args);
+  return requiredString(record._pudding_session_id, "_pudding_session_id");
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -303,4 +782,275 @@ function normalizeChartSeries(value: unknown[]): Array<Record<string, string>> {
       ...(stringValue(record.color) ? { color: stringValue(record.color) } : {}),
     };
   });
+}
+
+function normalizeGalleryItems(value: unknown[]): Array<Record<string, string>> {
+  if (value.length === 0) {
+    throw new Error("items must not be empty");
+  }
+  return value.map((item, index) => {
+    const record = requiredRecord(item);
+    const url = stringValue(record.url) || stringValue(record.src);
+    const data = stringValue(record.data);
+    if (!url && !data) {
+      throw new Error(`items[${index}] must include url, src, or data`);
+    }
+    return {
+      ...(url ? { url } : {}),
+      ...(data ? { data } : {}),
+      ...(stringValue(record.mime) ? { mime: stringValue(record.mime) } : {}),
+      ...(stringValue(record.alt) ? { alt: stringValue(record.alt) } : {}),
+      ...(stringValue(record.caption) ? { caption: stringValue(record.caption) } : {}),
+    };
+  });
+}
+
+function galleryLayoutValue(value: unknown): string {
+  return value === "row" || value === "column" ? value : "grid";
+}
+
+function galleryModeValue(value: unknown): "replace" | "append" {
+  return value === "append" ? "append" : "replace";
+}
+
+function gridColumnsValue(value: unknown): string {
+  return value === "1" || value === "2" || value === "3" || value === "auto" ? value : "";
+}
+
+function normalizeGridItems(value: unknown[], depth: number): Array<Record<string, unknown>> {
+  return value.map((item, index) => {
+    const record = requiredRecord(item);
+    const kind = gridItemKind(record.kind, depth);
+    const title = stringValue(record.title);
+    const base: Record<string, unknown> = {
+      ...(stringValue(record.id) ? { id: stringValue(record.id) } : { id: `${kind}-${index + 1}` }),
+      kind,
+      ...(title ? { title } : {}),
+      ...(gridVariantValue(record.variant) ? { variant: gridVariantValue(record.variant) } : {}),
+      ...(gridSurfaceValue(record.surface) ? { surface: gridSurfaceValue(record.surface) } : {}),
+      ...(normalizeSpan(record.span) ? { span: normalizeSpan(record.span) } : {}),
+      ...(stringValue(record.caption) ? { caption: stringValue(record.caption) } : {}),
+    };
+    if (kind === "markdown") {
+      return { ...base, content: stringValue(record.content) || stringValue(record.text) };
+    }
+    if (kind === "metric") {
+      const description = metricDescriptionValue(record);
+      return {
+        ...base,
+        value: metricValue(record.value),
+        ...(description ? { description } : {}),
+        ...(metricIconValue(record.icon) ? { icon: metricIconValue(record.icon) } : {}),
+        ...(metricColorValue(record.color) ? { color: metricColorValue(record.color) } : {}),
+      };
+    }
+    if (kind === "table") {
+      return {
+        ...base,
+        columns: Array.isArray(record.columns) ? record.columns : [],
+        rows: Array.isArray(record.rows) ? record.rows : [],
+      };
+    }
+    if (kind === "gallery") {
+      return {
+        ...base,
+        items: Array.isArray(record.items) ? normalizeGalleryItems(record.items) : [],
+        ...(record.layout === undefined ? {} : { layout: galleryLayoutValue(record.layout) }),
+      };
+    }
+    if (kind === "chart") {
+      return {
+        ...base,
+        chart: normalizeChart(asRecord(record.chart) ?? record),
+      };
+    }
+    return {
+      ...base,
+      items: Array.isArray(record.items) ? normalizeGridItems(record.items, depth + 1) : [],
+      ...(asRecord(record.layout) ? { layout: asRecord(record.layout) } : {}),
+    };
+  });
+}
+
+function gridItemKind(value: unknown, depth: number): string {
+  if (value === "metric" || value === "table" || value === "gallery" || value === "chart") {
+    return value;
+  }
+  if (value === "grid" && depth === 0) {
+    return "grid";
+  }
+  return "markdown";
+}
+
+function gridVariantValue(value: unknown): string {
+  return value === "hero" || value === "compact" || value === "subtle" || value === "normal" ? value : "";
+}
+
+function gridSurfaceValue(value: unknown): string {
+  return value === "tinted" || value === "default" ? value : "";
+}
+
+function metricColorValue(value: unknown): string {
+  return value === "green" || value === "amber" || value === "red" || value === "sky" || value === "violet" || value === "default"
+    ? value
+    : "";
+}
+
+function metricIconValue(value: unknown): string {
+  return value === "activity" ||
+    value === "calendar" ||
+    value === "clock" ||
+    value === "gauge" ||
+    value === "hash" ||
+    value === "money" ||
+    value === "percent" ||
+    value === "users"
+    ? value
+    : "";
+}
+
+function metricDescriptionValue(record: Record<string, unknown>): string {
+  const parts: string[] = [];
+  const description = stringValue(record.description);
+  if (description) {
+    parts.push(description);
+  }
+  const knownKeys = new Set(["id", "kind", "title", "variant", "surface", "span", "caption", "value", "description", "icon", "color"]);
+  for (const [key, value] of Object.entries(record)) {
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+    if (key === "icon") {
+      if (!metricIconValue(value)) {
+        parts.push(`${key}: ${metricDescriptionPart(value)}`);
+      }
+      continue;
+    }
+    if (key === "color") {
+      if (!metricColorValue(value)) {
+        parts.push(`${key}: ${metricDescriptionPart(value)}`);
+      }
+      continue;
+    }
+    if (knownKeys.has(key)) {
+      continue;
+    }
+    parts.push(`${key}: ${metricDescriptionPart(value)}`);
+  }
+  return parts.join("\n");
+}
+
+function metricDescriptionPart(value: unknown): string {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function metricValue(value: unknown): string | number | boolean {
+  return typeof value === "number" || typeof value === "boolean" ? value : stringValue(value);
+}
+
+function normalizeSpan(value: unknown): Record<string, number> | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    return undefined;
+  }
+  const out: Record<string, number> = {};
+  for (const key of ["xs", "sm", "md", "lg"]) {
+    const value = spanValue(record[key]);
+    if (value) {
+      out[key] = value;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function spanValue(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.min(12, Math.max(1, Math.round(value)));
+}
+
+function jsonToolResult(value: unknown) {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(value),
+      },
+    ],
+  };
+}
+
+function canvasItemSummary(item: CanvasItem) {
+  const payload = asRecord(item.item);
+  const kind = stringValue(payload?.kind) || item.kind;
+  return {
+    id: item.id,
+    kind,
+    title: item.title || stringValue(payload?.title),
+    sourceSessionID: item.sourceSessionID,
+    createdBySessionID: item.createdBySessionID,
+    updatedBySessionID: item.updatedBySessionID,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    window: item.window,
+    summary: payloadSummary(kind, payload),
+  };
+}
+
+function canvasItemInspection(item: CanvasItem) {
+  return {
+    id: item.id,
+    canvasID: item.canvasID,
+    kind: item.kind,
+    title: item.title,
+    sourceSessionID: item.sourceSessionID,
+    createdBySessionID: item.createdBySessionID,
+    updatedBySessionID: item.updatedBySessionID,
+    visible: item.visible,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    window: item.window,
+    item: item.item,
+  };
+}
+
+function payloadSummary(kind: string, payload: Record<string, unknown> | undefined) {
+  if (!payload) {
+    return { kind, fields: 0 };
+  }
+  if (kind === "markdown") {
+    const content = stringValue(payload.content) || stringValue(payload.markdown);
+    return { chars: content.length };
+  }
+  if (kind === "table") {
+    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    const columns = Array.isArray(payload.columns) ? payload.columns : [];
+    return { rows: rows.length, columns: columns.length };
+  }
+  if (kind === "chart") {
+    const chart = asRecord(payload.chart) ?? payload;
+    const data = Array.isArray(chart?.data) ? chart.data : [];
+    const series = Array.isArray(chart?.series) ? chart.series : [];
+    return { type: chartTypeValue(chart?.type), rows: data.length, series: series.length };
+  }
+  if (kind === "gallery") {
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    return { items: items.length, layout: galleryLayoutValue(payload.layout) };
+  }
+  if (kind === "grid") {
+    const blocks = Array.isArray(payload.items) ? payload.items : Array.isArray(payload.blocks) ? payload.blocks : [];
+    return {
+      blocks: blocks.length,
+      blockIDs: blocks.map((block) => stringValue(asRecord(block)?.id)).filter(Boolean),
+    };
+  }
+  return { fields: Object.keys(payload).length };
 }

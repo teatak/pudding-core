@@ -1189,7 +1189,7 @@ function SkillRow({ deleting, onDelete, skill, token }: { deleting?: boolean; on
       <ItemContent className="min-w-0 gap-1">
         <ItemTitle className="flex max-w-full flex-wrap items-center gap-2">
           <span className="min-w-0 truncate text-sm font-medium">{skill.id}</span>
-          <span className="min-w-0 truncate font-mono text-[11px] font-normal text-muted-foreground">
+          <span className="min-w-0 truncate text-[11px] font-normal text-muted-foreground">
             {skillDisplayPath(skill)}
           </span>
           <span className="rounded border border-border/70 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
@@ -1597,7 +1597,7 @@ function ToolInfoRow({ tool }: { tool: ToolInfo }) {
   return (
     <div className="grid gap-1 px-4 py-3">
       <div className="flex min-w-0 items-center gap-2">
-        <div className="min-w-0 break-all font-mono text-xs text-foreground">{tool.id}</div>
+        <div className="min-w-0 break-all text-xs text-foreground">{tool.id}</div>
         {capabilityLabel ? (
           <span className="shrink-0 rounded border border-border/70 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
             {capabilityLabel}

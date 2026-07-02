@@ -1,21 +1,41 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  BarChart3,
+  Activity,
   Blocks,
+  CalendarDays,
+  ChartPie,
   Check,
+  Clock,
   Copy,
+  DollarSign,
   Download,
   FileText,
+  GalleryHorizontal,
+  GalleryVertical,
+  Grid2X2,
+  Gauge,
+  Hash,
   Image,
   Maximize2,
   Minimize2,
-  Table2,
+  Percent,
+  Sheet,
   Trash2,
   Undo2,
+  Users,
   X,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MutableRefObject,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import {
   Area,
   AreaChart,
@@ -122,6 +142,13 @@ type ChartSeries = {
   label?: string;
   color?: string;
 };
+type GalleryLayout = "grid" | "row" | "column";
+type GalleryImageItem = {
+  src: string;
+  alt: string;
+  caption: string;
+  key: string;
+};
 
 type TableExportData = {
   id: string;
@@ -143,6 +170,7 @@ const MIN_H = 160;
 const DEFAULT_W = 420;
 const DEFAULT_H = 300;
 const CASCADE = 28;
+const FULLSCREEN_SNAP = 12;
 const CHART_COLORS = [
   "var(--chart-1)",
   "var(--chart-2)",
@@ -151,14 +179,15 @@ const CHART_COLORS = [
   "var(--chart-5)",
 ];
 const KIND_ICON: Record<string, LucideIcon> = {
-  chart: BarChart3,
+  chart: ChartPie,
   form: FileText,
   gallery: Image,
   grid: Blocks,
   iframe: Blocks,
   image: Image,
   markdown: FileText,
-  table: Table2,
+  metric: ChartPie,
+  table: Sheet,
   widget: Blocks,
 };
 const KIND_TILE_CLASS: Record<string, string> = {
@@ -169,6 +198,7 @@ const KIND_TILE_CLASS: Record<string, string> = {
   iframe: "bg-sky-600",
   image: "bg-pink-600",
   markdown: "bg-blue-600",
+  metric: "bg-sky-600",
   table: "bg-emerald-600",
   widget: "bg-orange-500",
 };
@@ -179,6 +209,32 @@ const BADGE_COLOR_CLASS: Record<SemanticColor, string> = {
   sky: "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-200",
   violet: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-200",
   gray: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200",
+};
+const GRID_COLOR_CLASS: Record<string, string> = {
+  default: "bg-muted/40 text-foreground",
+  green: "bg-green-50 text-green-800 dark:bg-green-950/40 dark:text-green-100",
+  amber: "bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-100",
+  red: "bg-red-50 text-red-800 dark:bg-red-950/40 dark:text-red-100",
+  sky: "bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-100",
+  violet: "bg-violet-50 text-violet-800 dark:bg-violet-950/40 dark:text-violet-100",
+};
+const METRIC_VALUE_COLOR_CLASS: Record<string, string> = {
+  default: "text-foreground",
+  green: "text-green-600 dark:text-green-300",
+  amber: "text-amber-600 dark:text-amber-300",
+  red: "text-red-600 dark:text-red-300",
+  sky: "text-sky-600 dark:text-sky-300",
+  violet: "text-violet-600 dark:text-violet-300",
+};
+const METRIC_ICON: Record<string, LucideIcon> = {
+  activity: Activity,
+  calendar: CalendarDays,
+  clock: Clock,
+  gauge: Gauge,
+  hash: Hash,
+  money: DollarSign,
+  percent: Percent,
+  users: Users,
 };
 
 function CanvasKindIcon({
@@ -212,8 +268,11 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   const actorSessionIDRef = useRef("");
   const draftWindowsRef = useRef<Record<string, WindowState>>({});
   const restoreWindowsRef = useRef<Record<string, WindowState>>({});
+  const gestureFrameRef = useRef<number | null>(null);
+  const pendingGestureWindowRef = useRef<WindowState | null>(null);
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
   const [draftWindows, setDraftWindows] = useState<Record<string, WindowState>>({});
+  const [galleryActiveIndices, setGalleryActiveIndices] = useState<Record<string, number>>({});
   const [restoreWindows, setRestoreWindows] = useState<Record<string, WindowState>>({});
   const [gesture, setGesture] = useState<Gesture | null>(null);
   useEffect(() => {
@@ -263,6 +322,26 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       }
     },
   });
+  const galleryLayoutMutation = useMutation({
+    mutationFn: ({ item, layout }: { item: CanvasItem; layout: GalleryLayout }) => {
+      const payload = asRecord(item.item) || {};
+      const title = titleForItem(item, t);
+      const kind = stringValue(payload.kind) || item.kind;
+      return putCanvasItem(token, actorSessionID, item.id, {
+        id: item.id,
+        kind,
+        title,
+        item: { ...payload, kind, title, layout },
+        window: draftWindowsRef.current[item.id] || item.window,
+      });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
+    },
+    onError: () => {
+      toast.error(t("canvas.galleryLayoutFailed"));
+    },
+  });
 
   const deleteMutation = useMutation({
     mutationFn: async (item: CanvasItem) => {
@@ -280,6 +359,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       restoreWindowsRef.current = withoutKey(restoreWindowsRef.current, item.id);
       setRestoreWindows(restoreWindowsRef.current);
       setDraftWindows((prev) => withoutKey(prev, item.id));
+      setGalleryActiveIndices((prev) => withoutKey(prev, item.id));
     },
     onError: (_error, item) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
@@ -387,6 +467,28 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     if (!gesture) {
       return;
     }
+    const flushGestureWindow = () => {
+      const nextWindow = pendingGestureWindowRef.current;
+      pendingGestureWindowRef.current = null;
+      gestureFrameRef.current = null;
+      if (!nextWindow) {
+        return;
+      }
+      setDraftWindows((prev) => {
+        const current = prev[gesture.itemID];
+        if (current && sameWindow(current, nextWindow)) {
+          return prev;
+        }
+        return { ...prev, [gesture.itemID]: nextWindow };
+      });
+    };
+    const scheduleGestureWindow = (nextWindow: WindowState) => {
+      pendingGestureWindowRef.current = nextWindow;
+      if (gestureFrameRef.current !== null) {
+        return;
+      }
+      gestureFrameRef.current = window.requestAnimationFrame(flushGestureWindow);
+    };
     const move = (event: PointerEvent) => {
       const dx = event.clientX - gesture.startX;
       const dy = event.clientY - gesture.startY;
@@ -394,14 +496,39 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
         gesture.type === "drag"
           ? { ...gesture.window, x: gesture.window.x + dx, y: gesture.window.y + dy }
           : resizeWindow(gesture.window, gesture.edge, dx, dy);
-      setDraftWindows((prev) => ({
-        ...prev,
-        [gesture.itemID]: clampWindow(next, containerSize),
-      }));
+      scheduleGestureWindow(clampWindow(next, containerSize));
     };
     const stop = () => {
-      const current = draftWindowsRef.current[gesture.itemID] || gesture.window;
-      patchWindowMutation.mutate({ itemID: gesture.itemID, window: clampWindow(current, containerSize) });
+      if (gestureFrameRef.current !== null) {
+        window.cancelAnimationFrame(gestureFrameRef.current);
+        gestureFrameRef.current = null;
+      }
+      const current = clampWindow(
+        pendingGestureWindowRef.current || draftWindowsRef.current[gesture.itemID] || gesture.window,
+        containerSize,
+      );
+      const finalWindow =
+        gesture.type === "resize" && isNearFullscreenWindow(current, containerSize)
+          ? fullscreenWindow(containerSize, current.z)
+          : current;
+      if (gesture.type === "resize" && finalWindow !== current) {
+        const restore = isNearFullscreenWindow(gesture.window, containerSize)
+          ? undefined
+          : clampWindow(gesture.window, containerSize);
+        restoreWindowsRef.current = restore
+          ? { ...restoreWindowsRef.current, [gesture.itemID]: restore }
+          : withoutKey(restoreWindowsRef.current, gesture.itemID);
+        setRestoreWindows(restoreWindowsRef.current);
+      }
+      pendingGestureWindowRef.current = null;
+      setDraftWindows((prev) => {
+        const existing = prev[gesture.itemID];
+        if (existing && sameWindow(existing, finalWindow)) {
+          return prev;
+        }
+        return { ...prev, [gesture.itemID]: finalWindow };
+      });
+      patchWindowMutation.mutate({ itemID: gesture.itemID, window: finalWindow });
       document.body.style.userSelect = "";
       document.body.style.webkitUserSelect = "";
       setGesture(null);
@@ -411,6 +538,11 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     return () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", stop);
+      if (gestureFrameRef.current !== null) {
+        window.cancelAnimationFrame(gestureFrameRef.current);
+        gestureFrameRef.current = null;
+      }
+      pendingGestureWindowRef.current = null;
       document.body.style.userSelect = "";
       document.body.style.webkitUserSelect = "";
     };
@@ -487,38 +619,40 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     <aside className="relative flex h-full shrink-0 flex-col bg-sidebar text-sidebar-foreground">
       <div className="drag-region relative z-30 flex h-(--toolbar-h) shrink-0 items-center overflow-hidden pr-14 pl-3">
         {items.length > 0 ? (
-          <div className="inline-flex min-w-0 flex-1 items-center overflow-hidden rounded-lg bg-muted p-[3px] text-muted-foreground">
-            {items.map((item) => {
-              const win = windows[item.id];
-              const active = win ? win.z === maxZ : false;
-              const title = titleForItem(item, t);
-              return (
-                <button
-                  key={item.id}
-                  aria-selected={active}
-                  className="group inline-flex h-8 min-w-32 max-w-52 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium whitespace-nowrap transition-colors data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm"
-                  data-active={active}
-                  title={title}
-                  type="button"
-                  onClick={() => focusWindow(item.id)}
-                >
-                  <CanvasKindIcon kind={item.kind} size="xs" />
-                  <span className="min-w-0 flex-1 truncate text-left">{title}</span>
-                  <span
-                    aria-label={t("canvas.delete")}
-                    className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded opacity-70 hover:bg-muted-foreground/20 hover:opacity-100"
-                    role="button"
-                    tabIndex={-1}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      deleteMutation.mutate(item);
-                    }}
+          <div className="no-drag-region w-fit max-w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-lg bg-muted p-[3px] text-muted-foreground [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
+            <div className="inline-flex min-w-max items-center gap-1">
+              {items.map((item) => {
+                const win = windows[item.id];
+                const active = win ? win.z === maxZ : false;
+                const title = titleForItem(item, t);
+                return (
+                  <button
+                    key={item.id}
+                    aria-selected={active}
+                    className="group inline-flex h-8 w-40 max-w-[44vw] shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium whitespace-nowrap transition-colors data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm sm:w-48 sm:max-w-52"
+                    data-active={active}
+                    title={title}
+                    type="button"
+                    onClick={() => focusWindow(item.id)}
                   >
-                    <X className="h-3 w-3" />
-                  </span>
-                </button>
-              );
-            })}
+                    <CanvasKindIcon kind={item.kind} size="xs" />
+                    <span className="min-w-0 flex-1 truncate text-left">{title}</span>
+                    <span
+                      aria-label={t("canvas.delete")}
+                      className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded opacity-70 hover:bg-muted-foreground/20 hover:opacity-100"
+                      role="button"
+                      tabIndex={-1}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        deleteMutation.mutate(item);
+                      }}
+                    >
+                      <X className="h-3 w-3" />
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         ) : null}
         <div className="ml-auto flex shrink-0 items-center pl-2">
@@ -543,10 +677,15 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
                 item={item}
                 token={token}
                 window={windows[item.id] || windowFromItem(item, index)}
+                galleryActiveIndex={galleryActiveIndices[item.id] || 0}
                 isMaximized={Boolean(restoreWindows[item.id])}
                 onDelete={() => deleteMutation.mutate(item)}
                 onDragStart={(event) => startGesture(event, "drag", item.id)}
                 onFocus={() => focusWindow(item.id)}
+                onGalleryActiveIndexChange={(activeIndex) => {
+                  setGalleryActiveIndices((prev) => ({ ...prev, [item.id]: activeIndex }));
+                }}
+                onGalleryLayoutChange={(layout) => galleryLayoutMutation.mutate({ item, layout })}
                 onMaximize={() => toggleMaximize(item.id)}
                 onResizeStart={(edge, event) => startGesture(event, "resize", item.id, edge)}
               />
@@ -570,30 +709,39 @@ function CanvasWindow({
   item,
   token,
   window,
+  galleryActiveIndex,
   isMaximized,
   onDelete,
   onDragStart,
   onFocus,
+  onGalleryActiveIndexChange,
+  onGalleryLayoutChange,
   onMaximize,
   onResizeStart,
 }: {
   item: CanvasItem;
   token: string;
   window: WindowState;
+  galleryActiveIndex: number;
   isMaximized: boolean;
   onDelete: () => void;
   onDragStart: (event: ReactPointerEvent) => void;
   onFocus: () => void;
+  onGalleryActiveIndexChange: (activeIndex: number) => void;
+  onGalleryLayoutChange: (layout: GalleryLayout) => void;
   onMaximize: () => void;
   onResizeStart: (edge: ResizeEdge, event: ReactPointerEvent) => void;
 }) {
   const { t } = useI18n();
   const title = titleForItem(item, t);
-  const table = tableExportData(item, t);
+  const table = useMemo(() => tableExportData(item, t), [item, t]);
+  const galleryLayout = galleryLayoutForItem(item);
+  const contentKind = stringValue(asRecord(item.item)?.kind) || item.kind;
+  const isMaximizedGrid = isMaximized && contentKind === "grid";
   return (
     <section
       className={cn(
-        "absolute flex min-h-0 flex-col overflow-hidden rounded-lg border bg-card text-card-foreground",
+        "absolute isolate transform-gpu flex min-h-0 flex-col overflow-hidden rounded-lg text-card-foreground",
         isMaximized ? "shadow-none" : "shadow-sm",
       )}
       style={{
@@ -606,12 +754,18 @@ function CanvasWindow({
       onPointerDownCapture={onFocus}
     >
       <div
-        className="flex h-10 shrink-0 cursor-default items-center gap-2 border-b px-3"
+        className={cn(
+          "flex h-10 shrink-0 cursor-default items-center gap-2 border bg-card px-3",
+          isMaximizedGrid ? "rounded-lg" : "rounded-t-lg",
+        )}
         onDoubleClick={onMaximize}
         onPointerDown={onDragStart}
       >
         <CanvasKindIcon kind={item.kind} size="xs" />
         <div className="min-w-0 flex-1 truncate text-sm font-medium">{title}</div>
+        {galleryLayout ? (
+          <GalleryLayoutControls layout={galleryLayout} onLayoutChange={onGalleryLayoutChange} />
+        ) : null}
         {table ? <TableExportMenu table={table} token={token} /> : null}
         <Button
           aria-label={isMaximized ? t("canvas.restore") : t("canvas.maximize")}
@@ -640,9 +794,26 @@ function CanvasWindow({
           <X className="h-4 w-4" />
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-3">
-        <CanvasContent item={item} />
+      <div
+        className={cn(
+          "min-h-0 flex-1 overflow-auto rounded-b-lg",
+          isMaximizedGrid ? "pt-3" : "border-x border-b p-3",
+          contentKind === "grid" ? "bg-sidebar" : "bg-card",
+        )}
+      >
+        <MemoCanvasContent
+          item={item}
+          galleryActiveIndex={galleryActiveIndex}
+          onGalleryActiveIndexChange={onGalleryActiveIndexChange}
+          onGalleryLayoutChange={onGalleryLayoutChange}
+        />
       </div>
+      {isMaximizedGrid ? (
+        <>
+          <div aria-hidden="true" className="pointer-events-none absolute bottom-0 left-0 h-4 w-4 rounded-bl-lg border-b border-l" />
+          <div aria-hidden="true" className="pointer-events-none absolute right-0 bottom-0 h-4 w-4 rounded-br-lg border-r border-b" />
+        </>
+      ) : null}
       {resizeHandleSpecs.map(({ edge, className }) => (
         <div
           key={edge}
@@ -652,6 +823,47 @@ function CanvasWindow({
         />
       ))}
     </section>
+  );
+}
+
+function GalleryLayoutControls({
+  layout,
+  onLayoutChange,
+}: {
+  layout: GalleryLayout;
+  onLayoutChange: (layout: GalleryLayout) => void;
+}) {
+  const { t } = useI18n();
+  const options: Array<{ layout: GalleryLayout; label: string; Icon: LucideIcon }> = [
+    { layout: "grid", label: t("canvas.galleryLayoutGrid"), Icon: Grid2X2 },
+    { layout: "row", label: t("canvas.galleryLayoutRow"), Icon: GalleryHorizontal },
+    { layout: "column", label: t("canvas.galleryLayoutColumn"), Icon: GalleryVertical },
+  ];
+  return (
+    <div
+      className="mr-1 flex shrink-0 items-center rounded-md bg-muted p-0.5"
+      onDoubleClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      {options.map(({ layout: option, label, Icon }) => (
+        <button
+          key={option}
+          aria-label={label}
+          aria-pressed={layout === option}
+          className="inline-flex h-7 w-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-background hover:text-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm"
+          title={label}
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            if (layout !== option) {
+              onLayoutChange(option);
+            }
+          }}
+        >
+          <Icon className="h-4 w-4" />
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -852,7 +1064,17 @@ function ExportSavedDescription({ path }: { path: string }) {
   );
 }
 
-function CanvasContent({ item }: { item: CanvasItem }) {
+function CanvasContent({
+  item,
+  galleryActiveIndex,
+  onGalleryActiveIndexChange,
+  onGalleryLayoutChange,
+}: {
+  item: CanvasItem;
+  galleryActiveIndex: number;
+  onGalleryActiveIndexChange: (activeIndex: number) => void;
+  onGalleryLayoutChange: (layout: GalleryLayout) => void;
+}) {
   const payload = asRecord(item.item);
   const kind = typeof payload?.kind === "string" ? payload.kind : item.kind;
   if (kind === "markdown") {
@@ -865,8 +1087,18 @@ function CanvasContent({ item }: { item: CanvasItem }) {
   if (kind === "chart") {
     return <CanvasChart payload={payload} />;
   }
+  if (kind === "grid") {
+    return <CanvasGrid payload={payload} />;
+  }
   if (kind === "gallery") {
-    return <CanvasGallery payload={payload} />;
+    return (
+      <CanvasGallery
+        payload={payload}
+        activeIndex={galleryActiveIndex}
+        onActiveIndexChange={onGalleryActiveIndexChange}
+        onLayoutChange={onGalleryLayoutChange}
+      />
+    );
   }
   if (kind === "form") {
     return <CanvasForm payload={payload} />;
@@ -876,6 +1108,154 @@ function CanvasContent({ item }: { item: CanvasItem }) {
       {JSON.stringify(item.item, null, 2)}
     </pre>
   );
+}
+
+const MemoCanvasContent = memo(CanvasContent);
+
+function CanvasGrid({ payload, nested = false }: { payload: Record<string, unknown> | undefined; nested?: boolean }) {
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  const gap = Math.max(4, Math.min(32, numberValue(asRecord(payload?.layout)?.gap, nested ? 8 : 12)));
+  const caption = stringValue(payload?.caption);
+  return (
+    <div className="min-w-0">
+      <div
+        className="grid min-w-0"
+        style={{
+          gridTemplateColumns: "repeat(12, minmax(0, 1fr))",
+          gap,
+        }}
+      >
+        {items.map((item, index) => {
+          const record = asRecord(item);
+          if (!record) {
+            return null;
+          }
+          const kind = stringValue(record.kind) || "markdown";
+          const span = gridItemSpan(record, stringValue(payload?.columns), nested);
+          const isMetric = kind === "metric";
+          return (
+            <section
+              key={stringValue(record.id) || `${kind}-${index}`}
+              className={cn(
+                "min-w-0 overflow-hidden rounded-lg",
+                isMetric ? "border-0 bg-transparent shadow-none" : "border",
+                !isMetric ? gridItemSurfaceClass(record) : null,
+                !isMetric && stringValue(record.variant) === "subtle" ? "shadow-none" : null,
+                !isMetric && stringValue(record.variant) !== "subtle" ? "shadow-sm" : null,
+              )}
+              style={{ gridColumn: `span ${span} / span ${span}` }}
+            >
+              {!isMetric && stringValue(record.title) ? (
+                <div className="px-3 pt-2.5 text-[13px] font-semibold">
+                  <span className="block min-w-0 truncate">{stringValue(record.title)}</span>
+                </div>
+              ) : null}
+              <div
+                className={cn(
+                  "min-w-0 overflow-auto",
+                  kind === "metric"
+                    ? "flex min-h-24"
+                    : kind === "chart"
+                      ? "h-64 p-3"
+                      : stringValue(record.variant) === "compact"
+                        ? "p-2"
+                        : "p-3",
+                )}
+              >
+                <GridItemContent item={record} kind={kind} />
+              </div>
+            </section>
+          );
+        })}
+      </div>
+      {caption ? <div className="mt-2 text-xs text-muted-foreground">{caption}</div> : null}
+    </div>
+  );
+}
+
+function GridItemContent({ item, kind }: { item: Record<string, unknown>; kind: string }) {
+  if (kind === "metric") {
+    return <CanvasMetric item={item} />;
+  }
+  if (kind === "table") {
+    return <CanvasTable payload={item} />;
+  }
+  if (kind === "gallery") {
+    return <CanvasGallery payload={item} compact />;
+  }
+  if (kind === "chart") {
+    return <CanvasChart payload={item} />;
+  }
+  if (kind === "grid") {
+    return <CanvasGrid payload={item} nested />;
+  }
+  return <MarkdownBody text={stringValue(item.content) || stringValue(item.text)} />;
+}
+
+function gridItemSpan(item: Record<string, unknown>, columns: string, nested: boolean): number {
+  const span = asRecord(item.span);
+  const explicit = numberValue(span?.lg, numberValue(span?.md, numberValue(span?.sm, numberValue(span?.xs, 0))));
+  if (explicit > 0) {
+    return Math.min(12, Math.max(1, Math.round(explicit)));
+  }
+  if (columns === "1") {
+    return 12;
+  }
+  if (columns === "2") {
+    return 6;
+  }
+  if (columns === "3") {
+    return 4;
+  }
+  if (nested) {
+    return 12;
+  }
+  const kind = stringValue(item.kind);
+  return kind === "metric" || kind === "chart" ? 6 : 12;
+}
+
+function gridItemSurfaceClass(item: Record<string, unknown>): string {
+  if (stringValue(item.surface) === "tinted") {
+    return GRID_COLOR_CLASS[stringValue(item.color)] || GRID_COLOR_CLASS.default;
+  }
+  return stringValue(item.variant) === "subtle" ? "border-border/40 bg-card" : "border-border/60 bg-card";
+}
+
+function CanvasMetric({ item }: { item: Record<string, unknown> }) {
+  const title = stringValue(item.title);
+  const description = stringValue(item.description);
+  const color = stringValue(item.color);
+  const Icon = METRIC_ICON[stringValue(item.icon)];
+  return (
+    <div className="@container/metric flex h-full min-h-24 min-w-0 flex-1 flex-col justify-between rounded-lg border border-border/60 bg-card px-4 py-3">
+      <div className="min-w-0">
+        {title ? (
+          <div className="mb-2 flex min-w-0 items-center gap-1.5 text-sm font-medium text-muted-foreground">
+            {Icon ? <Icon className="h-4 w-4 shrink-0" /> : null}
+            <span className="min-w-0 truncate">{title}</span>
+          </div>
+        ) : null}
+        <div
+          className={cn(
+            "min-w-0 break-words text-[32px] leading-[0.95] font-semibold tracking-normal tabular-nums @[260px]/metric:text-[40px]",
+            METRIC_VALUE_COLOR_CLASS[color] || METRIC_VALUE_COLOR_CLASS.default,
+          )}
+        >
+          {formatMetricValue(item.value)}
+        </div>
+      </div>
+      {description ? (
+        <div className="mt-3 line-clamp-2 text-sm text-muted-foreground">{description}</div>
+      ) : null}
+    </div>
+  );
+}
+
+function formatMetricValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? String(value) : JSON.stringify(value);
 }
 
 function CanvasChart({ payload }: { payload: Record<string, unknown> | undefined }) {
@@ -1236,27 +1616,427 @@ function safeFilename(raw: string): string {
   return name || "table";
 }
 
-function CanvasGallery({ payload }: { payload: Record<string, unknown> | undefined }) {
-  const items = Array.isArray(payload?.items) ? payload.items : [];
-  return (
-    <div className="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-2">
-      {items.map((item, index) => {
-        const record = asRecord(item);
-        const src = stringValue(record?.src) || stringValue(record?.url);
-        if (!src) {
-          return null;
+function CanvasGallery({
+  payload,
+  compact = false,
+  activeIndex = 0,
+  onActiveIndexChange,
+  onLayoutChange,
+}: {
+  payload: Record<string, unknown> | undefined;
+  compact?: boolean;
+  activeIndex?: number;
+  onActiveIndexChange?: (activeIndex: number) => void;
+  onLayoutChange?: (layout: GalleryLayout) => void;
+}) {
+  const { t } = useI18n();
+  const images = useMemo(() => galleryImages(payload), [payload]);
+  const layout = galleryLayoutValue(payload?.layout);
+  const caption = stringValue(payload?.caption);
+  const currentIndex = clampIndex(activeIndex, images.length);
+  const isRow = layout === "row";
+  const isColumn = layout === "column";
+  const mainRef = useRef<HTMLDivElement | null>(null);
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const thumbScrollerRef = useRef<HTMLDivElement | null>(null);
+  const itemRefs = useRef<Array<HTMLElement | null>>([]);
+  const thumbRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const scrollFrameRef = useRef<number | null>(null);
+  const previousLayoutRef = useRef(layout);
+  useEffect(() => {
+    if (activeIndex !== currentIndex) {
+      onActiveIndexChange?.(currentIndex);
+    }
+  }, [activeIndex, currentIndex, onActiveIndexChange]);
+  useEffect(() => {
+    return () => {
+      if (scrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollFrameRef.current);
+      }
+    };
+  }, []);
+  useEffect(() => {
+    const previousLayout = previousLayoutRef.current;
+    if (previousLayout === layout) {
+      return;
+    }
+    previousLayoutRef.current = layout;
+    window.requestAnimationFrame(() => {
+      if (layout === "row" || layout === "column") {
+        scrollGalleryIndexToCenter(layout, currentIndex, mainRef.current, itemRefs.current, thumbScrollerRef.current, thumbRefs.current, "auto");
+        return;
+      }
+      const item = itemRefs.current[currentIndex] ?? null;
+      const scroller = gridRef.current?.parentElement ?? null;
+      scrollChildToCenter(scroller, item, "y", "auto");
+      scrollChildToCenter(scroller, item, "x", "auto");
+    });
+  }, [currentIndex, layout]);
+  if (images.length === 0) {
+    return <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">{t("canvas.galleryEmpty")}</div>;
+  }
+  if (compact) {
+    return <CompactGallery images={images} layout={layout} caption={caption} />;
+  }
+  if (images.length === 1) {
+    return <SingleGalleryImage image={images[0]} caption={caption} />;
+  }
+  const activate = (index: number, focusThumb = false, behavior: ScrollBehavior = "smooth") => {
+    const next = clampIndex(index, images.length);
+    onActiveIndexChange?.(next);
+    if (isRow || isColumn) {
+      window.requestAnimationFrame(() => {
+        scrollGalleryIndexToCenter(layout, next, mainRef.current, itemRefs.current, thumbScrollerRef.current, thumbRefs.current, behavior);
+        if (focusThumb) {
+          thumbRefs.current[next]?.focus({ preventScroll: true });
         }
-        return (
-          <figure key={`${src}-${index}`} className="overflow-hidden rounded border bg-background">
-            <img alt={stringValue(record?.alt) || ""} className="aspect-video w-full object-cover" src={src} />
-            {record?.caption ? (
-              <figcaption className="px-2 py-1 text-xs text-muted-foreground">{stringValue(record.caption)}</figcaption>
-            ) : null}
-          </figure>
-        );
-      })}
+      });
+    }
+  };
+  const syncActiveFromScroll = () => {
+    if (!mainRef.current || (!isRow && !isColumn)) {
+      return;
+    }
+    const next = nearestGalleryIndex(mainRef.current, itemRefs.current, isColumn ? "y" : "x", currentIndex);
+    if (next === currentIndex) {
+      return;
+    }
+    onActiveIndexChange?.(next);
+    scrollChildToCenter(thumbScrollerRef.current, thumbRefs.current[next] ?? null, isColumn ? "y" : "x", "auto");
+  };
+  const handleMainScroll = () => {
+    if (scrollFrameRef.current !== null) {
+      return;
+    }
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      syncActiveFromScroll();
+    });
+  };
+  const handleNavigationKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!isRow && !isColumn) {
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onLayoutChange?.("grid");
+      return;
+    }
+    if (event.key === " ") {
+      event.preventDefault();
+      activate(currentIndex + 1, true);
+      return;
+    }
+    if ((isRow && event.key === "ArrowLeft") || (isColumn && event.key === "ArrowUp")) {
+      event.preventDefault();
+      activate(currentIndex - 1, true);
+      return;
+    }
+    if ((isRow && event.key === "ArrowRight") || (isColumn && event.key === "ArrowDown")) {
+      event.preventDefault();
+      activate(currentIndex + 1, true);
+    }
+  };
+  if (isRow || isColumn) {
+    return (
+      <div className="flex h-full min-h-[360px] min-w-0 flex-col">
+        <div
+          className={cn(
+            "min-w-0 overflow-hidden rounded-lg border bg-background outline-none",
+            isRow ? "flex h-full min-h-0 flex-col" : "flex h-full min-h-0",
+          )}
+          tabIndex={0}
+          onKeyDown={handleNavigationKeyDown}
+        >
+          <div
+            ref={mainRef}
+            className={cn(
+              "min-h-0 min-w-0 flex-1 gap-4 p-3",
+              isRow
+                ? "flex snap-x snap-mandatory overflow-x-auto overflow-y-hidden"
+                : "flex snap-y snap-mandatory flex-col overflow-x-hidden overflow-y-auto",
+            )}
+            onScroll={handleMainScroll}
+          >
+            {images.map((image, index) => (
+              <figure
+                key={image.key}
+                ref={(el) => {
+                  itemRefs.current[index] = el;
+                }}
+                className="relative m-0 flex h-full min-h-full w-full shrink-0 snap-center items-center justify-center overflow-hidden rounded-md border bg-card"
+              >
+                <img alt={image.alt} className="block h-full w-full object-contain" src={image.src} />
+                {image.caption ? (
+                  <figcaption className="absolute inset-x-0 bottom-0 bg-card/70 px-2 py-1 text-xs text-muted-foreground backdrop-blur-sm">
+                    {image.caption}
+                  </figcaption>
+                ) : null}
+              </figure>
+            ))}
+          </div>
+          <GalleryDetailThumbs
+            axis={isColumn ? "y" : "x"}
+            images={images}
+            activeIndex={currentIndex}
+            scrollerRef={thumbScrollerRef}
+            thumbRefs={thumbRefs}
+            onActivate={(index) => activate(index)}
+          />
+        </div>
+        {caption ? <div className="mt-2 text-xs text-muted-foreground">{caption}</div> : null}
+      </div>
+    );
+  }
+  return (
+    <div className="min-w-0">
+      <div ref={gridRef} className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
+        {images.map((image, index) => (
+          <GalleryGridTile
+            key={image.key}
+            image={image}
+            innerRef={(el) => {
+              itemRefs.current[index] = el;
+            }}
+            onClick={() => {
+              onActiveIndexChange?.(index);
+              onLayoutChange?.("row");
+            }}
+          />
+        ))}
+      </div>
+      {caption ? <div className="mt-3 text-xs text-muted-foreground">{caption}</div> : null}
     </div>
   );
+}
+
+function CompactGallery({ images, layout, caption }: { images: GalleryImageItem[]; layout: GalleryLayout; caption: string }) {
+  const containerClass =
+    layout === "row"
+      ? "flex min-w-0 gap-2 overflow-x-auto"
+      : layout === "column"
+        ? "grid grid-cols-1 gap-2"
+        : "grid grid-cols-[repeat(auto-fit,minmax(100px,1fr))] gap-2";
+  return (
+    <div className="min-w-0">
+      <div className={containerClass}>
+        {images.map((image) => (
+          <figure key={image.key} className={cn("overflow-hidden rounded border bg-background", layout === "row" ? "w-40 shrink-0" : "")}>
+            <img alt={image.alt} className="h-28 w-full object-cover" src={image.src} />
+            {image.caption ? <figcaption className="px-2 py-1 text-xs text-muted-foreground">{image.caption}</figcaption> : null}
+          </figure>
+        ))}
+      </div>
+      {caption ? <div className="mt-2 text-xs text-muted-foreground">{caption}</div> : null}
+    </div>
+  );
+}
+
+function SingleGalleryImage({ image, caption }: { image: GalleryImageItem; caption: string }) {
+  return (
+    <div className="min-w-0 space-y-2">
+      <figure className="overflow-hidden rounded-lg border bg-muted/25">
+        <div className="flex min-h-56 items-center justify-center bg-muted/20">
+          <img alt={image.alt} className="max-h-[520px] w-full object-contain" src={image.src} />
+        </div>
+        {image.caption ? <figcaption className="border-t px-3 py-2 text-sm text-muted-foreground">{image.caption}</figcaption> : null}
+      </figure>
+      {caption ? <div className="text-xs text-muted-foreground">{caption}</div> : null}
+    </div>
+  );
+}
+
+const GalleryGridTile = memo(function GalleryGridTile({
+  image,
+  innerRef,
+  onClick,
+}: {
+  image: GalleryImageItem;
+  innerRef: (element: HTMLButtonElement | null) => void;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      ref={innerRef}
+      aria-label={image.caption || image.alt}
+      className="group relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-md border bg-card text-left shadow-sm transition-colors hover:border-muted-foreground/50"
+      type="button"
+      onClick={onClick}
+    >
+      <img alt={image.alt} className="block max-h-full max-w-full object-contain transition duration-150 group-hover:scale-[1.02]" src={image.src} />
+      {image.caption ? (
+        <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-background/75 px-1.5 py-1 text-[10px] text-foreground opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
+          {image.caption}
+        </span>
+      ) : null}
+    </button>
+  );
+});
+
+function GalleryDetailThumbs({
+  axis,
+  images,
+  activeIndex,
+  scrollerRef,
+  thumbRefs,
+  onActivate,
+}: {
+  axis: "x" | "y";
+  images: GalleryImageItem[];
+  activeIndex: number;
+  scrollerRef: MutableRefObject<HTMLDivElement | null>;
+  thumbRefs: MutableRefObject<Array<HTMLButtonElement | null>>;
+  onActivate: (index: number) => void;
+}) {
+  const vertical = axis === "y";
+  return (
+    <div
+      ref={scrollerRef}
+      className={cn(
+        "shrink-0 bg-card/85",
+        vertical ? "w-16 overflow-x-hidden overflow-y-auto border-l" : "h-16 overflow-x-auto overflow-y-hidden border-t",
+      )}
+    >
+      <div
+        className={cn(
+          "gap-1.5",
+          vertical
+            ? "flex h-max min-h-full flex-col items-center justify-center py-2"
+            : "flex h-full min-w-full w-max items-center justify-center px-2",
+        )}
+      >
+        {images.map((image, index) => {
+          const active = index === activeIndex;
+          return (
+            <button
+              key={image.key}
+              ref={(el) => {
+                thumbRefs.current[index] = el;
+              }}
+              aria-current={active ? "true" : undefined}
+              aria-label={image.caption || image.alt}
+              className={cn(
+                "shrink-0 overflow-hidden rounded-md border bg-card p-0.5 shadow-sm transition focus-visible:ring-2 focus-visible:ring-primary/55 focus-visible:outline-none",
+                vertical ? "h-11 w-11" : "h-11 w-16",
+                active
+                  ? "border-primary shadow-[0_0_0_2px_hsl(var(--primary)/0.38)]"
+                  : "border-border opacity-70 hover:border-muted-foreground/50 hover:opacity-100",
+              )}
+              tabIndex={active ? 0 : -1}
+              type="button"
+              onClick={() => onActivate(index)}
+            >
+              <img alt="" className="block h-full w-full object-contain" src={image.src} />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function clampIndex(index: number, length: number): number {
+  if (length <= 0) {
+    return 0;
+  }
+  return Math.min(length - 1, Math.max(0, Math.round(index)));
+}
+
+function scrollGalleryIndexToCenter(
+  layout: GalleryLayout,
+  index: number,
+  main: HTMLElement | null,
+  items: Array<HTMLElement | null>,
+  thumbs: HTMLElement | null,
+  thumbItems: Array<HTMLElement | null>,
+  behavior: ScrollBehavior,
+): void {
+  const axis = layout === "column" ? "y" : "x";
+  scrollChildToCenter(main, items[index] ?? null, axis, behavior);
+  scrollChildToCenter(thumbs, thumbItems[index] ?? null, axis, behavior);
+}
+
+function nearestGalleryIndex(
+  container: HTMLElement,
+  items: Array<HTMLElement | null>,
+  axis: "x" | "y",
+  fallback: number,
+): number {
+  const containerRect = container.getBoundingClientRect();
+  const center = axis === "y"
+    ? containerRect.top + containerRect.height / 2
+    : containerRect.left + containerRect.width / 2;
+  let bestIndex = fallback;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  items.forEach((item, index) => {
+    if (!item) {
+      return;
+    }
+    const itemRect = item.getBoundingClientRect();
+    const itemCenter = axis === "y" ? itemRect.top + itemRect.height / 2 : itemRect.left + itemRect.width / 2;
+    const distance = Math.abs(itemCenter - center);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  });
+  return bestIndex;
+}
+
+function scrollChildToCenter(
+  container: HTMLElement | null,
+  child: HTMLElement | null,
+  axis: "x" | "y",
+  behavior: ScrollBehavior,
+): void {
+  if (!container || !child) {
+    return;
+  }
+  const containerRect = container.getBoundingClientRect();
+  const childRect = child.getBoundingClientRect();
+  if (axis === "x") {
+    const delta = childRect.left + childRect.width / 2 - (containerRect.left + containerRect.width / 2);
+    container.scrollTo({ left: container.scrollLeft + delta, behavior });
+    return;
+  }
+  const delta = childRect.top + childRect.height / 2 - (containerRect.top + containerRect.height / 2);
+  container.scrollTo({ top: container.scrollTop + delta, behavior });
+}
+
+function galleryImages(payload: Record<string, unknown> | undefined): GalleryImageItem[] {
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  return items.flatMap((item, index) => {
+    const record = asRecord(item);
+    const src = imageSource(record);
+    if (!src) {
+      return [];
+    }
+    const caption = stringValue(record?.caption);
+    const alt = stringValue(record?.alt) || caption;
+    return [{ src, alt, caption, key: `${src}-${index}` }];
+  });
+}
+
+function galleryLayoutForItem(item: CanvasItem): GalleryLayout | null {
+  const payload = asRecord(item.item);
+  const kind = stringValue(payload?.kind) || item.kind;
+  return kind === "gallery" ? galleryLayoutValue(payload?.layout) : null;
+}
+
+function galleryLayoutValue(value: unknown): GalleryLayout {
+  return value === "row" || value === "column" ? value : "grid";
+}
+
+function imageSource(record: Record<string, unknown> | undefined): string {
+  const src = stringValue(record?.src) || stringValue(record?.url);
+  if (src) {
+    return src;
+  }
+  const data = stringValue(record?.data);
+  if (!data) {
+    return "";
+  }
+  return `data:${stringValue(record?.mime) || "image/jpeg"};base64,${data}`;
 }
 
 function CanvasForm({ payload }: { payload: Record<string, unknown> | undefined }) {
@@ -1325,6 +2105,22 @@ function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T
 
 function sameWindow(a: WindowState, b: WindowState): boolean {
   return a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h && a.z === b.z;
+}
+
+function isNearFullscreenWindow(win: WindowState, bounds = { w: 0, h: 0 }): boolean {
+  if (bounds.w <= 0 || bounds.h <= 0) {
+    return false;
+  }
+  return (
+    win.x <= FULLSCREEN_SNAP &&
+    win.y <= FULLSCREEN_SNAP &&
+    Math.abs(win.x + win.w - bounds.w) <= FULLSCREEN_SNAP &&
+    Math.abs(win.y + win.h - bounds.h) <= FULLSCREEN_SNAP
+  );
+}
+
+function fullscreenWindow(bounds: { w: number; h: number }, z: number): WindowState {
+  return clampWindow({ x: 0, y: 0, w: bounds.w, h: bounds.h, z }, bounds);
 }
 
 function clampWindow(win: WindowState, bounds = { w: 0, h: 0 }): WindowState {

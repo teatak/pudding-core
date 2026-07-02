@@ -762,7 +762,7 @@ function SlashCommandMenu({
             onSelect(command);
           }}
         >
-          <span className="font-mono font-medium">{command.command.slice(1)}</span>
+          <span className="font-medium">{command.command.slice(1)}</span>
           <span className="min-w-0 truncate text-muted-foreground">{command.description}</span>
         </button>
       ))}

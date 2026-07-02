@@ -1244,7 +1244,7 @@ function EndpointRows({ endpoints }: { endpoints: Array<[string, AppEndpoints[st
       {endpoints.map(([name, endpoint]) => (
         <DetailRow key={name}>
           <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate font-mono text-sm font-medium">{name}</span>
+            <span className="truncate text-sm font-medium">{name}</span>
             <Badge variant="outline">{endpoint.kind}</Badge>
           </div>
           <div className="truncate text-xs text-muted-foreground" title={endpoint.url}>
