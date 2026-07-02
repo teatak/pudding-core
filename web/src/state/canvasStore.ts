@@ -1,7 +1,6 @@
 import { useSyncExternalStore } from "react";
 
 // canvas 栏开合(docs/design.md 2.4):纯 UI 偏好,localStorage 持久。
-// 本版只有布局插槽与空态,内容(小组件/产物/工具大块输出)后续解封。
 const KEY = "pudding.canvasOpen";
 
 let open = localStorage.getItem(KEY) === "1";

@@ -239,10 +239,10 @@ export function App() {
         {/* rail 固定宽度,不参与 resize。核心工作区只在 chat/canvas 之间分配空间。 */}
         <div className="relative h-full min-w-0 flex-1 bg-background">
           {appsActive ? (
-            <AppsPane token={token} selectedSessionID={selectedSessionID} />
+            <AppsPane token={token} />
           ) : (
             <>
-          <div className="pudding-canvas-toggle no-drag-region absolute top-0 right-[13px] z-30 flex h-(--toolbar-h) items-center">
+          <div className="pudding-canvas-toggle no-drag-region absolute top-0 right-[13px] z-40 flex h-(--toolbar-h) items-center">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button

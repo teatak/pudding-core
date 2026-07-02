@@ -15,6 +15,9 @@ export default defineConfig(({ mode }) => {
         "@": path.resolve(__dirname, "src"),
       },
     },
+    optimizeDeps: {
+      include: ["recharts"],
+    },
     server: {
       proxy: {
         "/sessions": daemon,

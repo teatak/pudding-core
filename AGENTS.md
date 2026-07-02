@@ -104,6 +104,7 @@ HTTP/SSE/WS 分工:
 - submit 不直接写 canonical messages;只允许 pending overlay,最终以 SSE / refetch 为准。
 - pending overlay 与 canonical message 用 `clientMessageID` 对账替换。
 - localStorage 只持久化 UI 偏好,不存 messages。
+- 新增或改名任何 LLM 可调用工具(内置工具、MCP 工具、App 工具)时,必须同步适配 transcript 的工具显示名与 i18n 文案;对话折叠行不得直接暴露 `snake_case` 工具名。
 
 shadcn 规则:
 

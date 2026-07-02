@@ -1,18 +1,70 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { GripHorizontal, Shapes, Trash2 } from "lucide-react";
+import {
+  BarChart3,
+  Blocks,
+  Check,
+  Copy,
+  Download,
+  FileText,
+  Image,
+  Maximize2,
+  Minimize2,
+  Table2,
+  Trash2,
+  Undo2,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  XAxis,
+} from "recharts";
+import { toast } from "sonner";
 
 import {
+  clearClosedCanvasItems,
+  createClosedCanvasItem,
   deleteCanvasItem,
+  deleteClosedCanvasItem,
+  listClosedCanvasItems,
   listCanvasItems,
   patchCanvasItemWindow,
+  putCanvasItem,
+  type CanvasItemPayload,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { MarkdownBody } from "@/components/transcript/TurnParts";
 import { Button } from "@/components/ui/button";
-import type { CanvasItem } from "@/contracts/api";
+import {
+  ChartContainer,
+  ChartLegend as RechartsChartLegend,
+  ChartLegendContent,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import type { CanvasItem, ClosedCanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
+import { cn } from "@/lib/utils";
+import { apiURL } from "@/state/apiBase";
 
 type CanvasPaneProps = {
   token: string;
@@ -26,6 +78,8 @@ type WindowState = {
   h: number;
   z: number;
 };
+
+type ResizeEdge = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 
 type Gesture =
   | {
@@ -41,13 +95,115 @@ type Gesture =
       startX: number;
       startY: number;
       window: WindowState;
+      edge: ResizeEdge;
     };
+
+type ColumnType = "text" | "enum" | "number" | "currency" | "date" | "datetime" | "truncate";
+type SemanticColor = "red" | "amber" | "green" | "sky" | "violet" | "gray";
+type ColumnColor = SemanticColor | `#${string}`;
+
+type Column = {
+  key: string;
+  label: string;
+  type?: ColumnType;
+  map?: Record<string, string>;
+  colors?: Record<string, ColumnColor>;
+  divide?: number;
+  decimals?: number;
+  thousands?: boolean;
+  currency?: string;
+  format?: string;
+  max?: number;
+};
+
+type ChartType = "bar" | "line" | "area" | "pie" | "donut";
+type ChartSeries = {
+  key: string;
+  label?: string;
+  color?: string;
+};
+
+type TableExportData = {
+  id: string;
+  title: string;
+  filename: string;
+  columns: Column[];
+  rows: unknown[];
+  caption: string;
+};
+
+type SaveResult = {
+  filename: string;
+  path?: string;
+  via: "desktop" | "browser";
+};
 
 const MIN_W = 260;
 const MIN_H = 160;
 const DEFAULT_W = 420;
 const DEFAULT_H = 300;
 const CASCADE = 28;
+const CHART_COLORS = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+];
+const KIND_ICON: Record<string, LucideIcon> = {
+  chart: BarChart3,
+  form: FileText,
+  gallery: Image,
+  grid: Blocks,
+  iframe: Blocks,
+  image: Image,
+  markdown: FileText,
+  table: Table2,
+  widget: Blocks,
+};
+const KIND_TILE_CLASS: Record<string, string> = {
+  chart: "bg-amber-600",
+  form: "bg-violet-600",
+  gallery: "bg-pink-600",
+  grid: "bg-indigo-600",
+  iframe: "bg-sky-600",
+  image: "bg-pink-600",
+  markdown: "bg-blue-600",
+  table: "bg-emerald-600",
+  widget: "bg-orange-500",
+};
+const BADGE_COLOR_CLASS: Record<SemanticColor, string> = {
+  red: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200",
+  amber: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200",
+  green: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200",
+  sky: "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-200",
+  violet: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-200",
+  gray: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200",
+};
+
+function CanvasKindIcon({
+  kind,
+  size = "sm",
+}: {
+  kind?: string;
+  size?: "xs" | "sm";
+}) {
+  const Icon = KIND_ICON[kind || ""] || Blocks;
+  const sizeClass = size === "xs" ? "h-[18px] w-[18px] rounded-[5px]" : "h-5 w-5 rounded-md";
+  const iconClass = size === "xs" ? "h-3.5 w-3.5" : "h-4 w-4";
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "inline-flex shrink-0 items-center justify-center text-white shadow-sm",
+        sizeClass,
+        KIND_TILE_CLASS[kind || ""] || "bg-muted-foreground",
+      )}
+    >
+      <Icon className={iconClass} />
+    </span>
+  );
+}
 
 export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   const { t } = useI18n();
@@ -55,8 +211,10 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const actorSessionIDRef = useRef("");
   const draftWindowsRef = useRef<Record<string, WindowState>>({});
+  const restoreWindowsRef = useRef<Record<string, WindowState>>({});
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
   const [draftWindows, setDraftWindows] = useState<Record<string, WindowState>>({});
+  const [restoreWindows, setRestoreWindows] = useState<Record<string, WindowState>>({});
   const [gesture, setGesture] = useState<Gesture | null>(null);
   useEffect(() => {
     if (sessionID) {
@@ -73,8 +231,16 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     placeholderData: (previous) => previous,
     staleTime: Infinity,
   });
+  const closedItemsQuery = useQuery({
+    enabled,
+    queryKey: queryKeys.closedCanvasItems(),
+    queryFn: () => listClosedCanvasItems(token, actorSessionID),
+    placeholderData: (previous) => previous,
+    staleTime: 30_000,
+  });
 
   const items = itemsQuery.data?.items ?? [];
+  const closedItems = closedItemsQuery.data?.items ?? [];
   const windows = useMemo(() => {
     const out: Record<string, WindowState> = {};
     items.forEach((item, index) => {
@@ -99,17 +265,104 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (itemID: string) => deleteCanvasItem(token, actorSessionID, itemID),
+    mutationFn: async (item: CanvasItem) => {
+      await createClosedCanvasItem(token, actorSessionID, {
+        sourceItemID: item.id,
+        kind: item.kind,
+        title: titleForItem(item, t),
+        item: item.item,
+        window: draftWindowsRef.current[item.id] || item.window,
+        closedAt: new Date().toISOString(),
+      });
+      await deleteCanvasItem(token, actorSessionID, item.id);
+    },
+    onMutate: (item) => {
+      restoreWindowsRef.current = withoutKey(restoreWindowsRef.current, item.id);
+      setRestoreWindows(restoreWindowsRef.current);
+      setDraftWindows((prev) => withoutKey(prev, item.id));
+    },
+    onError: (_error, item) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems() });
+      toast.error(t("canvas.closeFailed"));
+    },
     onSuccess: () => {
       if (actorSessionID) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems() });
       }
+    },
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: async (entry: ClosedCanvasItem) => {
+      const item = await putCanvasItem(token, actorSessionID, entry.sourceItemID, canvasPayloadFromClosedItem(entry));
+      await deleteClosedCanvasItem(token, actorSessionID, entry.id);
+      return item;
+    },
+    onSuccess: (_item, entry) => {
+      const restoredWindow = clampWindow({ ...windowFromClosedItem(entry), z: maxZ + 1 }, containerSize);
+      setDraftWindows((prev) => ({ ...prev, [entry.sourceItemID]: restoredWindow }));
+      if (actorSessionID) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems() });
+      }
+      toast.success(t("canvas.restoreDone"));
+    },
+    onError: () => {
+      toast.error(t("canvas.restoreFailed"));
+    },
+  });
+
+  const restoreClosedItem = (entry: ClosedCanvasItem) => {
+    if (windows[entry.sourceItemID]) {
+      void deleteClosedCanvasItem(token, actorSessionID, entry.id).then(() =>
+        queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems() }),
+      );
+      focusWindow(entry.sourceItemID);
+      return;
+    }
+    restoreMutation.mutate(entry);
+  };
+
+  const removeClosedMutation = useMutation({
+    mutationFn: (entry: ClosedCanvasItem) => deleteClosedCanvasItem(token, actorSessionID, entry.id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems() });
+    },
+  });
+
+  const clearClosedMutation = useMutation({
+    mutationFn: () => clearClosedCanvasItems(token, actorSessionID),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems() });
     },
   });
 
   useEffect(() => {
     draftWindowsRef.current = draftWindows;
   }, [draftWindows]);
+
+  useEffect(() => {
+    if (containerSize.w <= 0 || containerSize.h <= 0 || items.length === 0) {
+      return;
+    }
+    setDraftWindows((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      items.forEach((item, index) => {
+        const current = prev[item.id] || windowFromItem(item, index);
+        const fitted = restoreWindows[item.id]
+          ? clampWindow({ ...current, x: 0, y: 0, w: containerSize.w, h: containerSize.h }, containerSize)
+          : clampWindow(current, containerSize);
+        if (!sameWindow(current, fitted)) {
+          next[item.id] = fitted;
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [containerSize, items, restoreWindows]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -140,7 +393,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       const next =
         gesture.type === "drag"
           ? { ...gesture.window, x: gesture.window.x + dx, y: gesture.window.y + dy }
-          : { ...gesture.window, w: gesture.window.w + dx, h: gesture.window.h + dy };
+          : resizeWindow(gesture.window, gesture.edge, dx, dy);
       setDraftWindows((prev) => ({
         ...prev,
         [gesture.itemID]: clampWindow(next, containerSize),
@@ -149,6 +402,8 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     const stop = () => {
       const current = draftWindowsRef.current[gesture.itemID] || gesture.window;
       patchWindowMutation.mutate({ itemID: gesture.itemID, window: clampWindow(current, containerSize) });
+      document.body.style.userSelect = "";
+      document.body.style.webkitUserSelect = "";
       setGesture(null);
     };
     window.addEventListener("pointermove", move);
@@ -156,17 +411,37 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     return () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", stop);
+      document.body.style.userSelect = "";
+      document.body.style.webkitUserSelect = "";
     };
   }, [containerSize, gesture, patchWindowMutation]);
 
-  const startGesture = (event: ReactPointerEvent, type: Gesture["type"], itemID: string) => {
+  const startGesture = (event: ReactPointerEvent, type: Gesture["type"], itemID: string, edge?: ResizeEdge) => {
     event.preventDefault();
+    event.stopPropagation();
     const win = windows[itemID];
     if (!win) {
       return;
     }
     const lifted = { ...win, z: maxZ + 1 };
     setDraftWindows((prev) => ({ ...prev, [itemID]: lifted }));
+    if (type === "resize") {
+      restoreWindowsRef.current = withoutKey(restoreWindowsRef.current, itemID);
+      setRestoreWindows(restoreWindowsRef.current);
+    }
+    document.body.style.userSelect = "none";
+    document.body.style.webkitUserSelect = "none";
+    if (type === "resize") {
+      setGesture({
+        type,
+        itemID,
+        startX: event.clientX,
+        startY: event.clientY,
+        window: lifted,
+        edge: edge ?? "se",
+      });
+      return;
+    }
     setGesture({
       type,
       itemID,
@@ -176,61 +451,151 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     });
   };
 
+  const focusWindow = (itemID: string) => {
+    const win = windows[itemID];
+    if (!win || win.z >= maxZ) {
+      return;
+    }
+    setDraftWindows((prev) => ({ ...prev, [itemID]: { ...win, z: maxZ + 1 } }));
+  };
+
+  const toggleMaximize = (itemID: string) => {
+    const win = windows[itemID];
+    if (!win) {
+      return;
+    }
+    const restore = restoreWindowsRef.current[itemID];
+    const next = restore
+      ? { ...restore, z: maxZ + 1 }
+      : {
+          x: 0,
+          y: 0,
+          w: containerSize.w || win.w,
+          h: containerSize.h || win.h,
+          z: maxZ + 1,
+        };
+    restoreWindowsRef.current = restore
+      ? withoutKey(restoreWindowsRef.current, itemID)
+      : { ...restoreWindowsRef.current, [itemID]: win };
+    setRestoreWindows(restoreWindowsRef.current);
+    const clamped = clampWindow(next, containerSize);
+    setDraftWindows((prev) => ({ ...prev, [itemID]: clamped }));
+    patchWindowMutation.mutate({ itemID, window: clamped });
+  };
+
   return (
-    <aside className="flex h-full shrink-0 flex-col bg-sidebar text-sidebar-foreground">
-      <div className="flex h-(--toolbar-h) shrink-0 items-center gap-2 pr-12 pl-4">
-        <div className="text-sm font-normal">{t("canvas.title")}</div>
-        {items.length > 0 ? <div className="text-xs text-muted-foreground">{items.length}</div> : null}
+    <aside className="relative flex h-full shrink-0 flex-col bg-sidebar text-sidebar-foreground">
+      <div className="drag-region relative z-30 flex h-(--toolbar-h) shrink-0 items-center overflow-hidden pr-14 pl-3">
+        {items.length > 0 ? (
+          <div className="inline-flex min-w-0 flex-1 items-center overflow-hidden rounded-lg bg-muted p-[3px] text-muted-foreground">
+            {items.map((item) => {
+              const win = windows[item.id];
+              const active = win ? win.z === maxZ : false;
+              const title = titleForItem(item, t);
+              return (
+                <button
+                  key={item.id}
+                  aria-selected={active}
+                  className="group inline-flex h-8 min-w-32 max-w-52 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium whitespace-nowrap transition-colors data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm"
+                  data-active={active}
+                  title={title}
+                  type="button"
+                  onClick={() => focusWindow(item.id)}
+                >
+                  <CanvasKindIcon kind={item.kind} size="xs" />
+                  <span className="min-w-0 flex-1 truncate text-left">{title}</span>
+                  <span
+                    aria-label={t("canvas.delete")}
+                    className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded opacity-70 hover:bg-muted-foreground/20 hover:opacity-100"
+                    role="button"
+                    tabIndex={-1}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      deleteMutation.mutate(item);
+                    }}
+                  >
+                    <X className="h-3 w-3" />
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+        <div className="ml-auto flex shrink-0 items-center pl-2">
+          <CanvasLibraryMenu
+            closedItems={closedItems}
+            onClearClosed={() => clearClosedMutation.mutate()}
+            onRemoveClosed={(entry) => removeClosedMutation.mutate(entry)}
+            onRestoreClosed={restoreClosedItem}
+          />
+        </div>
       </div>
-      <div ref={containerRef} className="relative min-h-0 flex-1 overflow-hidden">
-        {(!enabled && items.length === 0) || (itemsQuery.isLoading && items.length === 0) ? (
-          <CanvasEmpty text={t("canvas.empty")} />
-        ) : items.length === 0 ? (
-          <CanvasEmpty text={t("canvas.empty")} />
-        ) : (
-          items.map((item, index) => (
-            <CanvasWindow
-              key={item.id}
-              item={item}
-              window={windows[item.id] || windowFromItem(item, index)}
-              onDelete={() => deleteMutation.mutate(item.id)}
-              onDragStart={(event) => startGesture(event, "drag", item.id)}
-              onResizeStart={(event) => startGesture(event, "resize", item.id)}
-            />
-          ))
-        )}
+      <div className="relative z-0 min-h-0 flex-1 overflow-hidden px-3 pb-3">
+        <div ref={containerRef} className="relative isolate z-0 h-full overflow-hidden">
+          {(!enabled && items.length === 0) || (itemsQuery.isLoading && items.length === 0) ? (
+            <CanvasEmpty />
+          ) : items.length === 0 ? (
+            <CanvasEmpty />
+          ) : (
+            items.map((item, index) => (
+              <CanvasWindow
+                key={item.id}
+                item={item}
+                token={token}
+                window={windows[item.id] || windowFromItem(item, index)}
+                isMaximized={Boolean(restoreWindows[item.id])}
+                onDelete={() => deleteMutation.mutate(item)}
+                onDragStart={(event) => startGesture(event, "drag", item.id)}
+                onFocus={() => focusWindow(item.id)}
+                onMaximize={() => toggleMaximize(item.id)}
+                onResizeStart={(edge, event) => startGesture(event, "resize", item.id, edge)}
+              />
+            ))
+          )}
+        </div>
       </div>
     </aside>
   );
 }
 
-function CanvasEmpty({ text }: { text: string }) {
+function CanvasEmpty() {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-      <Shapes className="h-8 w-8 text-muted-foreground/60" />
-      <div className="text-sm text-muted-foreground">{text}</div>
+      <Blocks className="h-8 w-8 text-muted-foreground/60" />
     </div>
   );
 }
 
 function CanvasWindow({
   item,
+  token,
   window,
+  isMaximized,
   onDelete,
   onDragStart,
+  onFocus,
+  onMaximize,
   onResizeStart,
 }: {
   item: CanvasItem;
+  token: string;
   window: WindowState;
+  isMaximized: boolean;
   onDelete: () => void;
   onDragStart: (event: ReactPointerEvent) => void;
-  onResizeStart: (event: ReactPointerEvent) => void;
+  onFocus: () => void;
+  onMaximize: () => void;
+  onResizeStart: (edge: ResizeEdge, event: ReactPointerEvent) => void;
 }) {
   const { t } = useI18n();
-  const title = item.title?.trim() || titleFromPayload(item.item) || item.kind || t("canvas.untitled");
+  const title = titleForItem(item, t);
+  const table = tableExportData(item, t);
   return (
     <section
-      className="absolute flex min-h-0 flex-col overflow-hidden rounded-md border bg-card text-card-foreground shadow-sm"
+      className={cn(
+        "absolute flex min-h-0 flex-col overflow-hidden rounded-lg border bg-card text-card-foreground",
+        isMaximized ? "shadow-none" : "shadow-sm",
+      )}
       style={{
         left: window.x,
         top: window.y,
@@ -238,35 +603,252 @@ function CanvasWindow({
         height: window.h,
         zIndex: window.z,
       }}
+      onPointerDownCapture={onFocus}
     >
       <div
-        className="flex h-9 shrink-0 cursor-grab items-center gap-2 border-b px-2 active:cursor-grabbing"
+        className="flex h-10 shrink-0 cursor-default items-center gap-2 border-b px-3"
+        onDoubleClick={onMaximize}
         onPointerDown={onDragStart}
       >
-        <GripHorizontal className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <CanvasKindIcon kind={item.kind} size="xs" />
         <div className="min-w-0 flex-1 truncate text-sm font-medium">{title}</div>
+        {table ? <TableExportMenu table={table} token={token} /> : null}
+        <Button
+          aria-label={isMaximized ? t("canvas.restore") : t("canvas.maximize")}
+          size="icon-sm"
+          variant="ghost"
+          onPointerDown={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            onMaximize();
+          }}
+        >
+          {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+        </Button>
         <Button
           aria-label={t("canvas.delete")}
           size="icon-sm"
           variant="ghost"
           onPointerDown={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
           onClick={(event) => {
             event.stopPropagation();
             onDelete();
           }}
         >
-          <Trash2 className="h-4 w-4" />
+          <X className="h-4 w-4" />
         </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-3">
         <CanvasContent item={item} />
       </div>
-      <div
-        aria-hidden="true"
-        className="absolute right-0 bottom-0 h-4 w-4 cursor-nwse-resize border-r-2 border-b-2 border-muted-foreground/50"
-        onPointerDown={onResizeStart}
-      />
+      {resizeHandleSpecs.map(({ edge, className }) => (
+        <div
+          key={edge}
+          aria-hidden="true"
+          className={className}
+          onPointerDown={(event) => onResizeStart(edge, event)}
+        />
+      ))}
     </section>
+  );
+}
+
+function CanvasLibraryMenu({
+  closedItems,
+  onClearClosed,
+  onRemoveClosed,
+  onRestoreClosed,
+}: {
+  closedItems: ClosedCanvasItem[];
+  onClearClosed: () => void;
+  onRemoveClosed: (entry: ClosedCanvasItem) => void;
+  onRestoreClosed: (entry: ClosedCanvasItem) => void;
+}) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const hasEntries = closedItems.length > 0;
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <Button aria-label={t("canvas.widgetLibrary")} size="icon-sm" variant="ghost">
+          <Blocks className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-64" collisionPadding={8}>
+        <DropdownMenuLabel>{t("canvas.widgetLibrary")}</DropdownMenuLabel>
+        {!hasEntries ? <div className="px-2 py-3 text-xs text-muted-foreground">{t("canvas.widgetLibraryEmpty")}</div> : null}
+        {hasEntries ? (
+          <>
+            <DropdownMenuSeparator />
+            <div className="flex items-center justify-between px-2 py-1.5">
+              <span className="text-xs font-medium text-muted-foreground">{t("canvas.recentClosed")}</span>
+              <button
+                className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                type="button"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onClearClosed();
+                }}
+              >
+                {t("canvas.clearRecentClosed")}
+              </button>
+            </div>
+            {closedItems.map((entry) => (
+              <ClosedCanvasItemRow
+                key={entry.id}
+                entry={entry}
+                onRemove={() => onRemoveClosed(entry)}
+                onRestore={() => {
+                  onRestoreClosed(entry);
+                  setOpen(false);
+                }}
+              />
+            ))}
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function ClosedCanvasItemRow({
+  entry,
+  onRemove,
+  onRestore,
+}: {
+  entry: ClosedCanvasItem;
+  onRemove: () => void;
+  onRestore: () => void;
+}) {
+  const { t } = useI18n();
+  const title = entry.title || entry.kind;
+  return (
+    <div
+      className="group/closed mx-1 flex h-9 min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+      role="button"
+      tabIndex={0}
+      title={title}
+      onClick={onRestore}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) {
+          return;
+        }
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onRestore();
+        }
+      }}
+    >
+      <CanvasKindIcon kind={entry.kind} size="xs" />
+      <span className="min-w-0 flex-1 truncate text-left">{title}</span>
+      <div className="relative flex h-6 w-12 shrink-0 items-center justify-end">
+        <span className="absolute right-0 text-xs text-muted-foreground transition-opacity group-hover/closed:opacity-0 group-focus-within/closed:opacity-0">
+          {formatClosedTime(entry.closedAt)}
+        </span>
+        <span className="absolute right-0 flex items-center gap-1 opacity-0 transition-opacity group-hover/closed:opacity-100 group-focus-within/closed:opacity-100">
+          <button
+            aria-label={t("canvas.restore")}
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-background/80 hover:text-foreground"
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onRestore();
+            }}
+          >
+            <Undo2 className="h-3.5 w-3.5" />
+          </button>
+          <button
+            aria-label={t("canvas.delete")}
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-destructive hover:bg-destructive/10"
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onRemove();
+            }}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function TableExportMenu({ table, token }: { table: TableExportData; token: string }) {
+  const { t } = useI18n();
+  const runExport = async (format: "csv" | "json") => {
+    const toastID = toast.loading(t("canvas.exporting"));
+    try {
+      const result = await exportTable(table, format, token);
+      toast.success(t("canvas.exportDone"), {
+        id: toastID,
+        description: result.path ? <ExportSavedDescription path={result.path} /> : result.filename,
+        action: result.path
+          ? {
+              label: t("canvas.exportReveal"),
+              onClick: () => {
+                void revealFile(result.path!, token);
+              },
+            }
+          : undefined,
+        duration: 6000,
+      });
+    } catch (error) {
+      toast.error(t("canvas.exportFailed"), {
+        id: toastID,
+        description: error instanceof Error ? error.message : String(error),
+        duration: 6000,
+      });
+    }
+  };
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          aria-label={t("canvas.exportTable")}
+          size="icon-sm"
+          variant="ghost"
+          onPointerDown={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
+        >
+          <Download className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-32">
+        <DropdownMenuItem onSelect={() => void runExport("csv")}>{t("canvas.exportCsv")}</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => void runExport("json")}>{t("canvas.exportJson")}</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function ExportSavedDescription({ path }: { path: string }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  const copyPath = async () => {
+    try {
+      await navigator.clipboard.writeText(path);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch (error) {
+      toast.error(t("canvas.exportCopyFailed"), { description: error instanceof Error ? error.message : String(error) });
+    }
+  };
+  return (
+    <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs">
+      <span className="shrink-0 text-muted-foreground">{t("canvas.exportSavedTo")}</span>
+      <button
+        className="inline-flex min-w-0 max-w-[260px] items-center gap-1 rounded-md border bg-background px-2 py-0.5 text-left"
+        type="button"
+        onClick={() => void copyPath()}
+      >
+        <span className="truncate font-mono">{prettyPath(path)}</span>
+        {copied ? <Check className="h-3.5 w-3.5 shrink-0 text-emerald-500" /> : <Copy className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+      </button>
+    </div>
   );
 }
 
@@ -275,14 +857,13 @@ function CanvasContent({ item }: { item: CanvasItem }) {
   const kind = typeof payload?.kind === "string" ? payload.kind : item.kind;
   if (kind === "markdown") {
     const content = stringValue(payload?.content) || stringValue(payload?.markdown) || "";
-    return (
-      <div className="space-y-2 text-sm leading-6 break-words">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-      </div>
-    );
+    return <MarkdownBody text={content} />;
   }
   if (kind === "table") {
     return <CanvasTable payload={payload} />;
+  }
+  if (kind === "chart") {
+    return <CanvasChart payload={payload} />;
   }
   if (kind === "gallery") {
     return <CanvasGallery payload={payload} />;
@@ -297,40 +878,169 @@ function CanvasContent({ item }: { item: CanvasItem }) {
   );
 }
 
+function CanvasChart({ payload }: { payload: Record<string, unknown> | undefined }) {
+  const { t } = useI18n();
+  const chart = asRecord(payload?.chart) ?? payload;
+  const data = sanitizeChartData(Array.isArray(chart?.data) ? chart.data : []);
+  const caption = stringValue(payload?.caption);
+  const type = chartTypeValue(chart?.type);
+  if (data.length === 0) {
+    return <div className="text-xs text-muted-foreground">{t("canvas.chartNoData")}</div>;
+  }
+  if (type === "pie" || type === "donut") {
+    return <CanvasPieChart chart={chart} data={data} caption={caption} donut={type === "donut"} />;
+  }
+  const xKey = stringValue(chart?.x_key) || stringValue(chart?.xKey) || inferChartXKey(data);
+  const series = normalizeChartSeries(chart?.series, data, xKey, stringValue(chart?.value_key) || stringValue(chart?.valueKey));
+  if (series.length === 0) {
+    return <div className="text-xs text-muted-foreground">{t("canvas.chartNoSeries")}</div>;
+  }
+  const chartConfig = buildChartConfig(series);
+  return (
+    <div className="flex h-full min-h-[180px] flex-col">
+      <ChartContainer config={chartConfig} className="aspect-auto min-h-[160px] flex-1">
+          {type === "line" ? (
+            <LineChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+              <ChartAxes xKey={xKey} />
+              <ChartTooltip content={<ChartTooltipContent indicator="line" />} />
+              {series.length > 1 ? <RechartsChartLegend content={<ChartLegendContent />} /> : null}
+              {series.map((entry, index) => (
+                <Line
+                  key={entry.key}
+                  dataKey={entry.key}
+                  dot={false}
+                  name={entry.label ?? entry.key}
+                  stroke={chartSeriesCSSColor(entry, index)}
+                  strokeWidth={2}
+                  type="monotone"
+                />
+              ))}
+            </LineChart>
+          ) : type === "area" ? (
+            <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+              <ChartAxes xKey={xKey} />
+              <ChartTooltip content={<ChartTooltipContent indicator="line" />} />
+              {series.length > 1 ? <RechartsChartLegend content={<ChartLegendContent />} /> : null}
+              {series.map((entry, index) => {
+                const color = chartSeriesCSSColor(entry, index);
+                return (
+                  <Area
+                    key={entry.key}
+                    dataKey={entry.key}
+                    fill={color}
+                    fillOpacity={0.18}
+                    name={entry.label ?? entry.key}
+                    stroke={color}
+                    strokeWidth={2}
+                    type="monotone"
+                  />
+                );
+              })}
+            </AreaChart>
+          ) : (
+            <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+              <ChartAxes xKey={xKey} />
+              <ChartTooltip content={<ChartTooltipContent />} />
+              {series.length > 1 ? <RechartsChartLegend content={<ChartLegendContent />} /> : null}
+              {series.map((entry, index) => (
+                <Bar
+                  key={entry.key}
+                  dataKey={entry.key}
+                  fill={chartSeriesCSSColor(entry, index)}
+                  name={entry.label ?? entry.key}
+                  radius={8}
+                />
+              ))}
+            </BarChart>
+          )}
+      </ChartContainer>
+      {caption ? <div className="mt-2 shrink-0 text-xs text-muted-foreground">{caption}</div> : null}
+    </div>
+  );
+}
+
+function ChartAxes({ xKey }: { xKey: string }) {
+  return (
+    <>
+      <CartesianGrid vertical={false} />
+      <XAxis axisLine={false} dataKey={xKey} fontSize={11} tickLine={false} tickMargin={10} />
+    </>
+  );
+}
+
+function CanvasPieChart({
+  chart,
+  data,
+  caption,
+  donut,
+}: {
+  chart: Record<string, unknown> | undefined;
+  data: Record<string, unknown>[];
+  caption: string;
+  donut: boolean;
+}) {
+  const nameKey = stringValue(chart?.name_key) || stringValue(chart?.x_key) || "name";
+  const valueKey = stringValue(chart?.value_key) || normalizeChartSeries(chart?.series, data, nameKey)[0]?.key || "value";
+  const chartConfig: ChartConfig = {
+    [valueKey]: {
+      label: valueKey,
+      color: CHART_COLORS[0],
+    },
+  };
+  return (
+    <div className="flex h-full min-h-[180px] flex-col">
+      <ChartContainer config={chartConfig} className="aspect-auto min-h-[160px] flex-1">
+          <PieChart>
+            <ChartTooltip content={<ChartTooltipContent hideLabel />} />
+            <Pie
+              data={data}
+              dataKey={valueKey}
+              innerRadius={donut ? "46%" : 0}
+              nameKey={nameKey}
+              outerRadius="78%"
+              paddingAngle={donut ? 2 : 0}
+            >
+              {data.map((_, index) => (
+                <Cell key={index} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+              ))}
+            </Pie>
+          </PieChart>
+      </ChartContainer>
+      {caption ? <div className="mt-2 shrink-0 text-xs text-muted-foreground">{caption}</div> : null}
+    </div>
+  );
+}
+
 function CanvasTable({ payload }: { payload: Record<string, unknown> | undefined }) {
   const rows = Array.isArray(payload?.rows) ? payload.rows : [];
-  const rawColumns = Array.isArray(payload?.columns) ? payload.columns : columnsFromRows(rows);
-  const columns = rawColumns
-    .map((column) => {
-      const object = asRecord(column);
-      if (object) {
-        const key = stringValue(object.key);
-        return key ? { key, label: stringValue(object.label) || key } : undefined;
-      }
-      const key = stringValue(column);
-      return key ? { key, label: key } : undefined;
-    })
-    .filter((column): column is { key: string; label: string } => Boolean(column));
+  const columns = normalizeColumns(Array.isArray(payload?.columns) ? payload.columns : columnsFromRows(rows));
+  const caption = stringValue(payload?.caption);
   return (
-    <div className="overflow-auto">
-      <table className="w-full min-w-max border-collapse text-left text-sm">
+    <div className="min-w-0 overflow-x-auto">
+      <table className="w-max min-w-full table-auto border-separate border-spacing-0 text-[12.5px]">
         <thead>
-          <tr className="border-b text-muted-foreground">
+          <tr>
             {columns.map((column) => (
-              <th key={column.key} className="px-2 py-1 font-medium">
+              <th
+                key={column.key}
+                className="border-b border-border bg-card px-2.5 py-1.5 text-left font-semibold text-muted-foreground whitespace-nowrap"
+                title={column.label}
+              >
                 {column.label}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody>
+        <tbody className="[&>tr:last-child>td]:border-b-0">
           {rows.map((row, index) => {
-            const record = asRecord(row);
             return (
-              <tr key={index} className="border-b last:border-0">
-                {columns.map((column) => (
-                  <td key={column.key} className="px-2 py-1 align-top">
-                    {formatCell(record?.[column.key])}
+              <tr key={index}>
+                {columns.map((column, columnIndex) => (
+                  <td
+                    key={column.key}
+                    className={`border-b border-border px-2.5 py-1.5 align-top whitespace-nowrap ${columnAlignClass(column)}`}
+                  >
+                    <TableCell column={column} fallbackIndex={columnIndex} row={row} />
                   </td>
                 ))}
               </tr>
@@ -338,8 +1048,192 @@ function CanvasTable({ payload }: { payload: Record<string, unknown> | undefined
           })}
         </tbody>
       </table>
+      {caption ? <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground">{caption}</div> : null}
     </div>
   );
+}
+
+function tableExportData(item: CanvasItem, t: (key: string) => string): TableExportData | null {
+  const payload = asRecord(item.item);
+  const kind = typeof payload?.kind === "string" ? payload.kind : item.kind;
+  if (kind !== "table") {
+    return null;
+  }
+  const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+  const columns = normalizeColumns(Array.isArray(payload?.columns) ? payload.columns : columnsFromRows(rows));
+  const title = titleForItem(item, t);
+  return {
+    id: item.id,
+    title,
+    filename: safeFilename(title || item.id),
+    columns,
+    rows,
+    caption: stringValue(payload?.caption),
+  };
+}
+
+function canvasPayloadFromClosedItem(item: ClosedCanvasItem): CanvasItemPayload {
+  return {
+    id: item.sourceItemID,
+    kind: item.kind,
+    title: item.title,
+    item: item.item,
+    window: item.window,
+  };
+}
+
+function windowFromClosedItem(item: ClosedCanvasItem): WindowState {
+  return clampWindow({
+    x: numberValue(asRecord(item.window)?.x, 16),
+    y: numberValue(asRecord(item.window)?.y, 16),
+    w: numberValue(asRecord(item.window)?.w, DEFAULT_W),
+    h: numberValue(asRecord(item.window)?.h, DEFAULT_H),
+    z: numberValue(asRecord(item.window)?.z, 1),
+  });
+}
+
+async function exportTable(table: TableExportData, format: "csv" | "json", token: string): Promise<SaveResult> {
+  if (format === "json") {
+    return saveText({
+      token,
+      filename: `${table.filename}.json`,
+      mime: "application/json;charset=utf-8",
+      content: JSON.stringify(
+        {
+          id: table.id,
+          title: table.title,
+          columns: table.columns,
+          rows: table.rows,
+          caption: table.caption,
+        },
+        null,
+        2,
+      ),
+    });
+  }
+  const header = table.columns.map((column) => escapeCsvCell(column.label));
+  const rows = table.rows.map((row) =>
+    table.columns.map((column, index) => escapeCsvCell(formatTableCell(rawCellValue(row, column, index), column).text)),
+  );
+  const content = [header, ...rows].map((line) => line.join(",")).join("\r\n");
+  return saveText({
+    token,
+    filename: `${table.filename}.csv`,
+    mime: "text/csv;charset=utf-8",
+    content: `\uFEFF${content}`,
+  });
+}
+
+async function saveText({
+  token,
+  filename,
+  mime,
+  content,
+}: {
+  token: string;
+  filename: string;
+  mime: string;
+  content: string;
+}): Promise<SaveResult> {
+  if (isDesktopRuntime()) {
+    const response = await fetch(apiURL("/desktop/save-file"), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        filename,
+        mime,
+        data: bytesToBase64(new TextEncoder().encode(content)),
+      }),
+    });
+    const body = (await response.json().catch(() => null)) as
+      | { ok?: boolean; error?: unknown; filename?: unknown; path?: unknown }
+      | null;
+    if (!response.ok || !body?.ok) {
+      throw new Error(typeof body?.error === "string" ? body.error : `HTTP ${response.status}`);
+    }
+    return {
+      filename: typeof body.filename === "string" ? body.filename : filename,
+      path: typeof body.path === "string" ? body.path : undefined,
+      via: "desktop",
+    };
+  }
+  downloadText(filename, mime, content);
+  return { filename, via: "browser" };
+}
+
+function downloadText(filename: string, mime: string, content: string): void {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+async function revealFile(path: string, token: string): Promise<void> {
+  try {
+    const response = await fetch(apiURL("/desktop/reveal-file"), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ path }),
+    });
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
+      throw new Error(typeof body?.error === "string" ? body.error : `HTTP ${response.status}`);
+    }
+  } catch (error) {
+    toast.error("Finder", { description: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+function isDesktopRuntime(): boolean {
+  return typeof document !== "undefined" && Boolean(document.documentElement.dataset.shell);
+}
+
+function prettyPath(path: string): string {
+  return path.replace(/^\/Users\/[^/]+/, "~");
+}
+
+function formatClosedTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function escapeCsvCell(value: string): string {
+  const normalized = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const escaped = normalized.replace(/"/g, '""');
+  return /[",\n]/.test(escaped) ? `"${escaped}"` : escaped;
+}
+
+function safeFilename(raw: string): string {
+  const name = raw
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, " ")
+    .slice(0, 80);
+  return name || "table";
 }
 
 function CanvasGallery({ payload }: { payload: Record<string, unknown> | undefined }) {
@@ -395,11 +1289,51 @@ function windowFromItem(item: CanvasItem, index: number): WindowState {
   });
 }
 
+function titleForItem(item: CanvasItem, t: (key: string) => string): string {
+  return item.title?.trim() || titleFromPayload(item.item) || item.kind || t("canvas.untitled");
+}
+
+function resizeWindow(win: WindowState, edge: ResizeEdge, dx: number, dy: number): WindowState {
+  const right = win.x + win.w;
+  const bottom = win.y + win.h;
+  let x = win.x;
+  let y = win.y;
+  let w = win.w;
+  let h = win.h;
+  if (edge.includes("e")) {
+    w = Math.max(MIN_W, win.w + dx);
+  }
+  if (edge.includes("s")) {
+    h = Math.max(MIN_H, win.h + dy);
+  }
+  if (edge.includes("w")) {
+    x = Math.min(win.x + dx, right - MIN_W);
+    w = right - x;
+  }
+  if (edge.includes("n")) {
+    y = Math.min(win.y + dy, bottom - MIN_H);
+    h = bottom - y;
+  }
+  return { x, y, w, h, z: win.z };
+}
+
+function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  const next = { ...record };
+  delete next[key];
+  return next;
+}
+
+function sameWindow(a: WindowState, b: WindowState): boolean {
+  return a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h && a.z === b.z;
+}
+
 function clampWindow(win: WindowState, bounds = { w: 0, h: 0 }): WindowState {
-  const maxW = bounds.w > 0 ? Math.max(MIN_W, bounds.w) : Number.POSITIVE_INFINITY;
-  const maxH = bounds.h > 0 ? Math.max(MIN_H, bounds.h) : Number.POSITIVE_INFINITY;
-  const w = Math.min(Math.max(MIN_W, Math.round(win.w)), maxW);
-  const h = Math.min(Math.max(MIN_H, Math.round(win.h)), maxH);
+  const minW = bounds.w > 0 ? Math.min(MIN_W, bounds.w) : MIN_W;
+  const minH = bounds.h > 0 ? Math.min(MIN_H, bounds.h) : MIN_H;
+  const maxW = bounds.w > 0 ? Math.max(minW, bounds.w) : Number.POSITIVE_INFINITY;
+  const maxH = bounds.h > 0 ? Math.max(minH, bounds.h) : Number.POSITIVE_INFINITY;
+  const w = Math.min(Math.max(minW, Math.round(win.w)), maxW);
+  const h = Math.min(Math.max(minH, Math.round(win.h)), maxH);
   const maxX = bounds.w > 0 ? Math.max(0, bounds.w - w) : Number.POSITIVE_INFINITY;
   const maxY = bounds.h > 0 ? Math.max(0, bounds.h - h) : Number.POSITIVE_INFINITY;
   return {
@@ -409,6 +1343,405 @@ function clampWindow(win: WindowState, bounds = { w: 0, h: 0 }): WindowState {
     h,
     z: Math.max(1, Math.round(win.z)),
   };
+}
+
+const resizeHandleSpecs: Array<{ edge: ResizeEdge; className: string }> = [
+  { edge: "n", className: "absolute top-0 right-3 left-3 h-1 cursor-ns-resize" },
+  { edge: "s", className: "absolute right-3 bottom-0 left-3 h-1 cursor-ns-resize" },
+  { edge: "e", className: "absolute top-3 right-0 bottom-3 w-1 cursor-ew-resize" },
+  { edge: "w", className: "absolute top-3 bottom-3 left-0 w-1 cursor-ew-resize" },
+  { edge: "ne", className: "absolute top-0 right-0 h-3 w-3 cursor-nesw-resize" },
+  { edge: "nw", className: "absolute top-0 left-0 h-3 w-3 cursor-nwse-resize" },
+  { edge: "se", className: "absolute right-0 bottom-0 h-4 w-4 cursor-nwse-resize" },
+  { edge: "sw", className: "absolute bottom-0 left-0 h-3 w-3 cursor-nesw-resize" },
+];
+
+function chartTypeValue(value: unknown): ChartType {
+  return value === "line" || value === "area" || value === "pie" || value === "donut" ? value : "bar";
+}
+
+function sanitizeChartData(raw: unknown[]): Record<string, unknown>[] {
+  return raw
+    .map((row) => asRecord(row))
+    .filter((row): row is Record<string, unknown> => Boolean(row))
+    .map((row) => {
+      const out: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(row)) {
+        const number = toNumber(value);
+        out[key] = number == null ? value : number;
+      }
+      return out;
+    });
+}
+
+function inferChartXKey(data: Record<string, unknown>[]): string {
+  const first = data[0] ?? {};
+  return Object.keys(first).find((key) => toNumber(first[key]) == null) ?? Object.keys(first)[0] ?? "name";
+}
+
+function normalizeChartSeries(
+  raw: unknown,
+  data: Record<string, unknown>[],
+  xKey: string,
+  valueKey?: string,
+): ChartSeries[] {
+  if (Array.isArray(raw)) {
+    const normalized = raw
+      .map((entry) => {
+        const record = asRecord(entry);
+        const key = stringValue(record?.key);
+        if (!key) {
+          return null;
+        }
+        return {
+          key,
+          ...(stringValue(record?.label) ? { label: stringValue(record?.label) } : {}),
+          ...(stringValue(record?.color) ? { color: stringValue(record?.color) } : {}),
+        };
+      })
+      .filter((entry): entry is ChartSeries => Boolean(entry));
+    if (normalized.length > 0) {
+      return normalized;
+    }
+  }
+  if (valueKey) {
+    return [{ key: valueKey }];
+  }
+  const first = data[0] ?? {};
+  return Object.keys(first)
+    .filter((key) => key !== xKey && toNumber(first[key]) != null)
+    .map((key) => ({ key }));
+}
+
+function buildChartConfig(series: ChartSeries[]): ChartConfig {
+  return Object.fromEntries(
+    series.map((entry, index) => [
+      entry.key,
+      {
+        label: entry.label ?? entry.key,
+        color: chartSeriesColor(entry, index),
+      },
+    ]),
+  );
+}
+
+function chartSeriesColor(series: ChartSeries, index: number): string {
+  return series.color || CHART_COLORS[index % CHART_COLORS.length] || "var(--chart-1)";
+}
+
+function chartSeriesCSSColor(series: ChartSeries, index: number): string {
+  return series.color || `var(--color-${series.key}, ${CHART_COLORS[index % CHART_COLORS.length] || "var(--chart-1)"})`;
+}
+
+function normalizeColumns(raw: unknown): Column[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .map((column, index) => {
+      const object = asRecord(column);
+      if (!object) {
+        const key = stringValue(column) || String(index);
+        return { key, label: key };
+      }
+      const key = String(object.key ?? object.label ?? index);
+      const label = String(object.label ?? object.key ?? index);
+      const next: Column = { key, label };
+      if (isColumnType(object.type)) next.type = object.type;
+      const map = normalizeStringRecord(object.map);
+      if (map) next.map = map;
+      const colors = normalizeColumnColors(object.colors);
+      if (colors) next.colors = colors;
+      if (typeof object.divide === "number") next.divide = object.divide;
+      if (typeof object.decimals === "number") next.decimals = object.decimals;
+      if (typeof object.thousands === "boolean") next.thousands = object.thousands;
+      if (typeof object.currency === "string") next.currency = object.currency;
+      if (typeof object.format === "string") next.format = object.format;
+      if (typeof object.max === "number") next.max = object.max;
+      return next;
+    })
+    .filter((column) => column.key);
+}
+
+function isColumnType(value: unknown): value is ColumnType {
+  return (
+    value === "text" ||
+    value === "enum" ||
+    value === "number" ||
+    value === "currency" ||
+    value === "date" ||
+    value === "datetime" ||
+    value === "truncate"
+  );
+}
+
+function normalizeStringRecord(value: unknown): Record<string, string> | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    return undefined;
+  }
+  const out: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(record)) {
+    if (typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean") {
+      out[key] = String(raw);
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function normalizeColumnColors(value: unknown): Record<string, ColumnColor> | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    return undefined;
+  }
+  const out: Record<string, ColumnColor> = {};
+  for (const [key, raw] of Object.entries(record)) {
+    const color = normalizeColumnColor(raw);
+    if (color) {
+      out[key] = color;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function normalizeColumnColor(value: unknown): ColumnColor | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const color = value.trim().toLowerCase();
+  if (isSemanticColor(color)) {
+    return color;
+  }
+  return /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(color) ? (color as `#${string}`) : undefined;
+}
+
+function TableCell({ row, column, fallbackIndex }: { row: unknown; column: Column; fallbackIndex: number }) {
+  const formatted = formatTableCell(rawCellValue(row, column, fallbackIndex), column);
+  if (formatted.isBadge) {
+    const semanticColor = isSemanticColor(formatted.color) ? formatted.color : undefined;
+    const style = formatted.color?.startsWith("#")
+      ? { backgroundColor: hexWithAlpha(formatted.color, "1f"), color: formatted.color }
+      : undefined;
+    return (
+      <span
+        className={`inline-block rounded px-1.5 py-0.5 text-[11px] font-medium ${semanticColor ? BADGE_COLOR_CLASS[semanticColor] : "bg-muted text-muted-foreground"}`}
+        style={style}
+        title={formatted.title ?? formatted.text}
+      >
+        {formatted.text}
+      </span>
+    );
+  }
+  return <span title={formatted.title ?? formatted.text}>{formatted.text}</span>;
+}
+
+function rawCellValue(row: unknown, column: Column, fallbackIndex: number): unknown {
+  if (Array.isArray(row)) {
+    return row[fallbackIndex];
+  }
+  const record = asRecord(row);
+  if (!record) {
+    return undefined;
+  }
+  const cleaned = column.key.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+  if (!cleaned.includes(".")) {
+    return record[cleaned];
+  }
+  let current: unknown = record;
+  for (const part of cleaned.split(".").filter(Boolean)) {
+    const currentRecord = asRecord(current);
+    if (!currentRecord) {
+      return undefined;
+    }
+    current = currentRecord[part];
+  }
+  return current;
+}
+
+function columnAlignClass(column: Column): string {
+  return inferColumnKind(column) === "number" ? "text-right tabular-nums" : "text-left";
+}
+
+type FormattedCell = { text: string; color?: ColumnColor; isBadge?: boolean; title?: string };
+type ColumnKind = "number" | "enum" | "date" | "datetime" | "identifier" | "text";
+
+function inferColumnKind(column: Column): ColumnKind {
+  const key = `${column.key} ${column.label}`.toLowerCase();
+  if (column.type === "number" || column.type === "currency" || column.currency || column.divide != null || column.decimals != null) {
+    return "number";
+  }
+  if (column.type === "enum" || column.map || column.colors || /\b(status|state|type|kind)\b/.test(key)) {
+    return "enum";
+  }
+  if (column.type === "datetime" || /time|datetime|created|updated|create|update/.test(key)) {
+    return "datetime";
+  }
+  if (column.type === "date" || /date|入住|离店/.test(key)) {
+    return "date";
+  }
+  if (/(^|[_\s-])(id|code|no|serial|number)([_\s-]|$)|订单号|编号|单号/.test(key)) {
+    return "identifier";
+  }
+  return "text";
+}
+
+function formatTableCell(value: unknown, column: Column): FormattedCell {
+  const type = effectiveColumnType(column);
+  if (value == null || value === "") {
+    return { text: "" };
+  }
+  if (type === "enum") {
+    const code = String(value);
+    return {
+      text: column.map?.[code] ?? code,
+      color: column.colors?.[code],
+      isBadge: true,
+    };
+  }
+  if (type === "number") {
+    return { text: formatNumber(value, column) };
+  }
+  if (type === "currency") {
+    return { text: formatCurrency(value, column) };
+  }
+  if (type === "date") {
+    return { text: formatDateTime(value, column.format ?? "YYYY-MM-DD") };
+  }
+  if (type === "datetime") {
+    return { text: formatDateTime(value, column.format ?? "YYYY-MM-DD HH:mm") };
+  }
+  if (type === "truncate") {
+    const text = formatPlainCell(value);
+    const max = column.max ?? 30;
+    return text.length <= max ? { text } : { text: `${text.slice(0, max)}...`, title: text };
+  }
+  return { text: formatPlainCell(value) };
+}
+
+function effectiveColumnType(column: Column): ColumnType {
+  if (column.type) {
+    return column.type;
+  }
+  if (column.map || column.colors) {
+    return "enum";
+  }
+  if (column.currency) {
+    return "currency";
+  }
+  if (typeof column.divide === "number" || typeof column.decimals === "number" || typeof column.thousands === "boolean") {
+    return "number";
+  }
+  return "text";
+}
+
+function formatPlainCell(value: unknown): string {
+  if (value == null) {
+    return "";
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return JSON.stringify(value);
+}
+
+function formatNumber(value: unknown, column: Column): string {
+  const parsed = toNumber(value);
+  if (parsed == null) {
+    return String(value);
+  }
+  const scaled = typeof column.divide === "number" && column.divide !== 0 ? parsed / column.divide : parsed;
+  const decimals = typeof column.decimals === "number" && column.decimals >= 0 ? column.decimals : undefined;
+  const useThousands = column.thousands !== false;
+  if (decimals != null) {
+    return useThousands
+      ? scaled.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+      : scaled.toFixed(decimals);
+  }
+  return useThousands ? scaled.toLocaleString("en-US") : String(scaled);
+}
+
+function formatCurrency(value: unknown, column: Column): string {
+  const decimals = typeof column.decimals === "number" ? column.decimals : 2;
+  const merged = { ...column, decimals, thousands: column.thousands !== false };
+  const text = formatNumber(value, merged);
+  if (text === String(value)) {
+    return text;
+  }
+  const code = (column.currency ?? "").toUpperCase();
+  const symbol = code ? CURRENCY_SYMBOL[code] ?? `${code} ` : "";
+  return `${symbol}${text}`;
+}
+
+const CURRENCY_SYMBOL: Record<string, string> = {
+  CNY: "¥",
+  RMB: "¥",
+  USD: "$",
+  EUR: "€",
+  GBP: "£",
+  JPY: "¥",
+  HKD: "HK$",
+  TWD: "NT$",
+  SGD: "S$",
+  KRW: "₩",
+};
+
+function toNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value.trim().replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function formatDateTime(value: unknown, format: string): string {
+  const date = dateFromValue(value);
+  if (!date) {
+    return String(value);
+  }
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  return format
+    .replace(/YYYY/g, String(date.getFullYear()))
+    .replace(/MM/g, pad2(date.getMonth() + 1))
+    .replace(/DD/g, pad2(date.getDate()))
+    .replace(/HH/g, pad2(date.getHours()))
+    .replace(/mm/g, pad2(date.getMinutes()))
+    .replace(/ss/g, pad2(date.getSeconds()));
+}
+
+function dateFromValue(value: unknown): Date | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const date = new Date(value < 1e12 ? value * 1000 : value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
+  }
+  const trimmed = value.trim();
+  const date = /^-?\d+$/.test(trimmed)
+    ? new Date(Number(trimmed) < 1e12 ? Number(trimmed) * 1000 : Number(trimmed))
+    : new Date(trimmed);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isSemanticColor(value: unknown): value is SemanticColor {
+  return value === "red" || value === "amber" || value === "green" || value === "sky" || value === "violet" || value === "gray";
+}
+
+function hexWithAlpha(color: string, alpha: string): string {
+  if (/^#[0-9a-f]{3}$/i.test(color)) {
+    return `#${color
+      .slice(1)
+      .split("")
+      .map((ch) => ch + ch)
+      .join("")}${alpha}`;
+  }
+  return `${color}${alpha}`;
 }
 
 function titleFromPayload(value: unknown): string {
@@ -434,14 +1767,4 @@ function stringValue(value: unknown): string {
 
 function numberValue(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-function formatCell(value: unknown): string {
-  if (value == null) {
-    return "";
-  }
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  return JSON.stringify(value);
 }

@@ -843,66 +843,10 @@ func (s SessionUsageStat) CumulativeTotalTokens() int {
 	return s.CumulativeInputTokens() + s.CumulativeOutputTokens()
 }
 
-type SessionAppGrant struct {
-	SessionID        string          `json:"sessionID"`
-	AppID            string          `json:"appID"`
-	ConnectionID     string          `json:"connectionID"`
-	AllowedEndpoints []string        `json:"allowedEndpoints,omitempty"`
-	Permissions      []string        `json:"permissions,omitempty"`
-	Constraints      json.RawMessage `json:"constraints,omitempty"`
-	CreatedAt        time.Time       `json:"createdAt"`
-	UpdatedAt        time.Time       `json:"updatedAt"`
-}
-
-func NormalizeSessionAppGrant(g *SessionAppGrant) error {
-	if g == nil {
-		return ErrInvalidSession
-	}
-	g.SessionID = strings.TrimSpace(g.SessionID)
-	g.AppID = strings.TrimSpace(g.AppID)
-	g.ConnectionID = strings.TrimSpace(g.ConnectionID)
-	if g.SessionID == "" || g.AppID == "" || g.ConnectionID == "" {
-		return ErrInvalidSession
-	}
-	g.AllowedEndpoints = normalizeStringIDs(g.AllowedEndpoints)
-	g.Permissions = normalizeStringIDs(g.Permissions)
-	if len(g.Constraints) == 0 || !json.Valid(g.Constraints) {
-		g.Constraints = json.RawMessage(`{}`)
-	}
-	return nil
-}
-
-func (g *SessionAppGrant) EndpointAllowed(endpoint string) bool {
-	if g == nil {
-		return false
-	}
-	endpoint = strings.TrimSpace(endpoint)
-	if endpoint == "" {
-		return false
-	}
-	for _, allowed := range g.AllowedEndpoints {
-		if allowed == endpoint {
-			return true
-		}
-	}
-	return false
-}
-
-func normalizeStringIDs(values []string) []string {
-	seen := make(map[string]bool, len(values))
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" || seen[value] {
-			continue
-		}
-		seen[value] = true
-		out = append(out, value)
-	}
-	return out
-}
-
 const DefaultCanvasID = "default"
+const ClosedCanvasDefaultLimit = 24
+const ClosedCanvasMaxLimit = 50
+const ClosedCanvasKeepLimit = 50
 
 type CanvasItem struct {
 	ID                 string          `json:"id"`
@@ -937,6 +881,30 @@ type CanvasItemWindowPatch struct {
 	Window         json.RawMessage
 }
 
+type ClosedCanvasItem struct {
+	ID             string          `json:"id"`
+	SourceItemID   string          `json:"sourceItemID"`
+	ActorSessionID string          `json:"actorSessionID,omitempty"`
+	Kind           string          `json:"kind"`
+	Title          string          `json:"title,omitempty"`
+	Item           json.RawMessage `json:"item"`
+	Window         json.RawMessage `json:"window,omitempty"`
+	ClosedAt       time.Time       `json:"closedAt"`
+	CreatedAt      time.Time       `json:"createdAt"`
+	UpdatedAt      time.Time       `json:"updatedAt"`
+}
+
+type ClosedCanvasItemInput struct {
+	ID             string
+	SourceItemID   string
+	ActorSessionID string
+	Kind           string
+	Title          string
+	Item           json.RawMessage
+	Window         json.RawMessage
+	ClosedAt       time.Time
+}
+
 func NormalizeCanvasItemInput(in *CanvasItemInput) error {
 	if in == nil {
 		return ErrInvalidCanvas
@@ -969,6 +937,29 @@ func NormalizeCanvasItemWindowPatch(patch *CanvasItemWindowPatch) error {
 		return ErrInvalidCanvas
 	}
 	patch.Window = append(json.RawMessage(nil), patch.Window...)
+	return nil
+}
+
+func NormalizeClosedCanvasItemInput(in *ClosedCanvasItemInput) error {
+	if in == nil {
+		return ErrInvalidCanvas
+	}
+	in.ID = strings.TrimSpace(in.ID)
+	in.SourceItemID = strings.TrimSpace(in.SourceItemID)
+	in.ActorSessionID = strings.TrimSpace(in.ActorSessionID)
+	in.Kind = strings.TrimSpace(in.Kind)
+	in.Title = strings.TrimSpace(in.Title)
+	if in.ID == "" || in.SourceItemID == "" || in.ActorSessionID == "" || in.Kind == "" || len(in.Item) == 0 || !json.Valid(in.Item) {
+		return ErrInvalidCanvas
+	}
+	if len(in.Window) > 0 && !json.Valid(in.Window) {
+		return ErrInvalidCanvas
+	}
+	if in.ClosedAt.IsZero() {
+		in.ClosedAt = time.Now()
+	}
+	in.Item = append(json.RawMessage(nil), in.Item...)
+	in.Window = append(json.RawMessage(nil), in.Window...)
 	return nil
 }
 
@@ -1043,14 +1034,14 @@ type Store interface {
 	// 服务无续传位点的全新 SSE 连接从尾部开始(tail)。
 	LatestSeq(ctx context.Context, sessionID string) (int64, error)
 
-	PutSessionAppGrant(ctx context.Context, grant *SessionAppGrant) (*SessionAppGrant, error)
-	ListSessionAppGrants(ctx context.Context, sessionID string) ([]*SessionAppGrant, error)
-	DeleteSessionAppGrant(ctx context.Context, sessionID, appID, connectionID string) error
-
 	ListCanvasItems(ctx context.Context, actorSessionID string) ([]*CanvasItem, error)
 	PutCanvasItem(ctx context.Context, in CanvasItemInput) (*CanvasItem, error)
 	UpdateCanvasItemWindow(ctx context.Context, patch CanvasItemWindowPatch) (*CanvasItem, error)
 	DeleteCanvasItem(ctx context.Context, actorSessionID, itemID string) error
+	ListClosedCanvasItems(ctx context.Context, actorSessionID string, limit int) ([]*ClosedCanvasItem, error)
+	PutClosedCanvasItem(ctx context.Context, in ClosedCanvasItemInput, keepLimit int) (*ClosedCanvasItem, error)
+	DeleteClosedCanvasItem(ctx context.Context, actorSessionID, id string) error
+	ClearClosedCanvasItems(ctx context.Context, actorSessionID string) error
 
 	Close() error
 }

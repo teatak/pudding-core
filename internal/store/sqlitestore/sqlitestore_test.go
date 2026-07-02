@@ -112,50 +112,6 @@ func TestSessionReasoningEffortPersistsAndClearsOnModelChange(t *testing.T) {
 	}
 }
 
-func TestSessionAppGrantsPersist(t *testing.T) {
-	st, path := openTestStore(t)
-	ctx := context.Background()
-	createTestSession(t, st, "sess_app")
-	grant, err := st.PutSessionAppGrant(ctx, &store.SessionAppGrant{
-		SessionID:        "sess_app",
-		AppID:            "github",
-		ConnectionID:     "github-main",
-		AllowedEndpoints: []string{"github_rest", "github_graphql", "github_rest"},
-		Permissions:      []string{"read"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !grant.EndpointAllowed("github_rest") || grant.EndpointAllowed("missing") {
-		t.Fatalf("endpoint allowlist wrong: %+v", grant)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-	reopened, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.Close()
-	grants, err := reopened.ListSessionAppGrants(ctx, "sess_app")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(grants) != 1 || !sameStrings(grants[0].AllowedEndpoints, []string{"github_rest", "github_graphql"}) {
-		t.Fatalf("grant not persisted or normalized: %+v", grants)
-	}
-	if err := reopened.DeleteSessionAppGrant(ctx, "sess_app", "github", "github-main"); err != nil {
-		t.Fatal(err)
-	}
-	grants, err = reopened.ListSessionAppGrants(ctx, "sess_app")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(grants) != 0 {
-		t.Fatalf("grant not deleted: %+v", grants)
-	}
-}
-
 func TestCanvasItemsAreGlobalWithSessionActor(t *testing.T) {
 	st, path := openTestStore(t)
 	ctx := context.Background()

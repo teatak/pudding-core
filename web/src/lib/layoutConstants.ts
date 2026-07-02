@@ -8,7 +8,7 @@ export const workspaceLayout = {
   closed: { chat: 100, canvas: 0 },
   minPercent: 1,
   maxPercent: 99,
-  minChatPx: 360,
+  minChatPx: 480,
   minCanvasPx: 240,
 } as const;
 

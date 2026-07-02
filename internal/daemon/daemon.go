@@ -84,7 +84,7 @@ func Start(opts Options) (*Daemon, error) {
 		resolver = registry.New(cfg)
 	}
 	hub := event.NewHub()
-	apps := appsvc.NewService(dir, st, cfg)
+	apps := appsvc.NewService(dir, cfg)
 	skills := skillsvc.NewService(dir)
 	browserMCP := tool.NewBrowserMCPRunner()
 	tools := tool.NewMultiRunner(

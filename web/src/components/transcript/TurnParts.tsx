@@ -467,7 +467,7 @@ function ToolNameLine({ name }: { name: string }) {
   );
 }
 
-function MarkdownBody({ text }: { text: string }) {
+export function MarkdownBody({ text }: { text: string }) {
   const { t } = useI18n();
   const [codeRenderer, setCodeRenderer] = useState<CodeBlockRenderer | null>(null);
   useEffect(() => {
@@ -731,6 +731,9 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     builtin_web_fetch: t("transcript.toolWebFetch"),
     builtin_web_search: t("transcript.toolWebSearch"),
     builtin_workspace_list: t("transcript.toolWorkspaceList"),
+    canvas_chart: t("transcript.toolCanvasChart"),
+    canvas_markdown: t("transcript.toolCanvasMarkdown"),
+    canvas_table: t("transcript.toolCanvasTable"),
     request_capability: t("transcript.toolRequestCapability"),
   };
   if (known[name]) {

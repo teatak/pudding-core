@@ -16,35 +16,35 @@ import (
 )
 
 type Memstore struct {
-	mu        sync.Mutex
-	sessions  map[string]*store.Session
-	turns     map[string]*store.Turn
-	messages  map[string][]*store.Message // sessionID → 时间升序
-	queued    map[string][]*store.QueuedInput
-	usage     map[usageKey]*store.UsageHourlyStat // (UTC hour unix ms, model) → global stats
-	susage    map[string]*store.SessionUsageStat  // sessionID → session stats
-	appGrants map[string][]*store.SessionAppGrant // sessionID → grants
-	canvas    map[string]*store.CanvasItem        // itemID → global canvas item
-	events    map[string][]event.Event            // sessionID → seq 升序
-	seq       map[string]int64
-	settings  map[string]string
-	profiles  map[string]*store.ProviderProfile
+	mu       sync.Mutex
+	sessions map[string]*store.Session
+	turns    map[string]*store.Turn
+	messages map[string][]*store.Message // sessionID → 时间升序
+	queued   map[string][]*store.QueuedInput
+	usage    map[usageKey]*store.UsageHourlyStat // (UTC hour unix ms, model) → global stats
+	susage   map[string]*store.SessionUsageStat  // sessionID → session stats
+	canvas   map[string]*store.CanvasItem        // itemID → global canvas item
+	closed   map[string]*store.ClosedCanvasItem  // id → recently closed canvas item
+	events   map[string][]event.Event            // sessionID → seq 升序
+	seq      map[string]int64
+	settings map[string]string
+	profiles map[string]*store.ProviderProfile
 }
 
 func New() *Memstore {
 	return &Memstore{
-		sessions:  make(map[string]*store.Session),
-		turns:     make(map[string]*store.Turn),
-		messages:  make(map[string][]*store.Message),
-		queued:    make(map[string][]*store.QueuedInput),
-		usage:     make(map[usageKey]*store.UsageHourlyStat),
-		susage:    make(map[string]*store.SessionUsageStat),
-		appGrants: make(map[string][]*store.SessionAppGrant),
-		canvas:    make(map[string]*store.CanvasItem),
-		events:    make(map[string][]event.Event),
-		seq:       make(map[string]int64),
-		settings:  make(map[string]string),
-		profiles:  make(map[string]*store.ProviderProfile),
+		sessions: make(map[string]*store.Session),
+		turns:    make(map[string]*store.Turn),
+		messages: make(map[string][]*store.Message),
+		queued:   make(map[string][]*store.QueuedInput),
+		usage:    make(map[usageKey]*store.UsageHourlyStat),
+		susage:   make(map[string]*store.SessionUsageStat),
+		canvas:   make(map[string]*store.CanvasItem),
+		closed:   make(map[string]*store.ClosedCanvasItem),
+		events:   make(map[string][]event.Event),
+		seq:      make(map[string]int64),
+		settings: make(map[string]string),
+		profiles: make(map[string]*store.ProviderProfile),
 	}
 }
 
@@ -182,7 +182,6 @@ func (m *Memstore) DeleteSession(_ context.Context, id string) error {
 	delete(m.messages, id)
 	delete(m.queued, id)
 	delete(m.susage, id)
-	delete(m.appGrants, id)
 	delete(m.events, id)
 	delete(m.seq, id)
 	for tid, t := range m.turns {
@@ -789,69 +788,6 @@ func (m *Memstore) SessionUsage(_ context.Context, sessionID string) (*store.Ses
 	return cloneSessionUsageStat(stat), nil
 }
 
-func (m *Memstore) PutSessionAppGrant(_ context.Context, grant *store.SessionAppGrant) (*store.SessionAppGrant, error) {
-	if err := store.NormalizeSessionAppGrant(grant); err != nil {
-		return nil, err
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.sessions[grant.SessionID]; !ok {
-		return nil, store.ErrNotFound
-	}
-	now := time.Now()
-	grants := m.appGrants[grant.SessionID]
-	for i, existing := range grants {
-		if existing.AppID == grant.AppID && existing.ConnectionID == grant.ConnectionID {
-			cp := cloneSessionAppGrant(grant)
-			cp.CreatedAt = existing.CreatedAt
-			cp.UpdatedAt = now
-			grants[i] = cp
-			return cloneSessionAppGrant(cp), nil
-		}
-	}
-	cp := cloneSessionAppGrant(grant)
-	cp.CreatedAt = now
-	cp.UpdatedAt = now
-	m.appGrants[grant.SessionID] = append(grants, cp)
-	return cloneSessionAppGrant(cp), nil
-}
-
-func (m *Memstore) ListSessionAppGrants(_ context.Context, sessionID string) ([]*store.SessionAppGrant, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.sessions[sessionID]; !ok {
-		return nil, store.ErrNotFound
-	}
-	grants := m.appGrants[sessionID]
-	out := make([]*store.SessionAppGrant, 0, len(grants))
-	for _, grant := range grants {
-		out = append(out, cloneSessionAppGrant(grant))
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].AppID != out[j].AppID {
-			return out[i].AppID < out[j].AppID
-		}
-		return out[i].ConnectionID < out[j].ConnectionID
-	})
-	return out, nil
-}
-
-func (m *Memstore) DeleteSessionAppGrant(_ context.Context, sessionID, appID, connectionID string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.sessions[sessionID]; !ok {
-		return store.ErrNotFound
-	}
-	grants := m.appGrants[sessionID]
-	for i, grant := range grants {
-		if grant.AppID == appID && grant.ConnectionID == connectionID {
-			m.appGrants[sessionID] = append(grants[:i], grants[i+1:]...)
-			return nil
-		}
-	}
-	return store.ErrNotFound
-}
-
 func (m *Memstore) ListCanvasItems(_ context.Context, actorSessionID string) ([]*store.CanvasItem, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -940,6 +876,106 @@ func (m *Memstore) DeleteCanvasItem(_ context.Context, actorSessionID, itemID st
 	}
 	delete(m.canvas, itemID)
 	return nil
+}
+
+func (m *Memstore) ListClosedCanvasItems(_ context.Context, actorSessionID string, limit int) ([]*store.ClosedCanvasItem, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[actorSessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	limit = normalizeClosedLimit(limit)
+	out := make([]*store.ClosedCanvasItem, 0, len(m.closed))
+	for _, item := range m.closed {
+		out = append(out, cloneClosedCanvasItem(item))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].ClosedAt.Equal(out[j].ClosedAt) {
+			return out[i].ClosedAt.After(out[j].ClosedAt)
+		}
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (m *Memstore) PutClosedCanvasItem(_ context.Context, in store.ClosedCanvasItemInput, keepLimit int) (*store.ClosedCanvasItem, error) {
+	if err := store.NormalizeClosedCanvasItemInput(&in); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[in.ActorSessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	now := time.Now()
+	created := now
+	for id, existing := range m.closed {
+		if existing.SourceItemID == in.SourceItemID {
+			created = existing.CreatedAt
+			delete(m.closed, id)
+			break
+		}
+	}
+	item := &store.ClosedCanvasItem{
+		ID:             in.ID,
+		SourceItemID:   in.SourceItemID,
+		ActorSessionID: in.ActorSessionID,
+		Kind:           in.Kind,
+		Title:          in.Title,
+		Item:           append([]byte(nil), in.Item...),
+		Window:         append([]byte(nil), in.Window...),
+		ClosedAt:       in.ClosedAt,
+		CreatedAt:      created,
+		UpdatedAt:      now,
+	}
+	m.closed[in.ID] = item
+	m.trimClosedCanvasItemsLocked(normalizeKeepLimit(keepLimit))
+	return cloneClosedCanvasItem(item), nil
+}
+
+func (m *Memstore) DeleteClosedCanvasItem(_ context.Context, actorSessionID, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[actorSessionID]; !ok {
+		return store.ErrNotFound
+	}
+	if _, ok := m.closed[id]; !ok {
+		return store.ErrNotFound
+	}
+	delete(m.closed, id)
+	return nil
+}
+
+func (m *Memstore) ClearClosedCanvasItems(_ context.Context, actorSessionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[actorSessionID]; !ok {
+		return store.ErrNotFound
+	}
+	m.closed = make(map[string]*store.ClosedCanvasItem)
+	return nil
+}
+
+func (m *Memstore) trimClosedCanvasItemsLocked(limit int) {
+	if len(m.closed) <= limit {
+		return
+	}
+	out := make([]*store.ClosedCanvasItem, 0, len(m.closed))
+	for _, item := range m.closed {
+		out = append(out, item)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].ClosedAt.Equal(out[j].ClosedAt) {
+			return out[i].ClosedAt.After(out[j].ClosedAt)
+		}
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	for _, item := range out[limit:] {
+		delete(m.closed, item.ID)
+	}
 }
 
 // appendEventLocked 追加事件并按保留窗口滚动清理;调用方必须已持锁。
@@ -1321,17 +1357,6 @@ func cloneSessionUsageStat(stat *store.SessionUsageStat) *store.SessionUsageStat
 	return &cp
 }
 
-func cloneSessionAppGrant(grant *store.SessionAppGrant) *store.SessionAppGrant {
-	if grant == nil {
-		return nil
-	}
-	cp := *grant
-	cp.AllowedEndpoints = append([]string(nil), grant.AllowedEndpoints...)
-	cp.Permissions = append([]string(nil), grant.Permissions...)
-	cp.Constraints = append([]byte(nil), grant.Constraints...)
-	return &cp
-}
-
 func cloneCanvasItem(item *store.CanvasItem) *store.CanvasItem {
 	if item == nil {
 		return nil
@@ -1340,6 +1365,33 @@ func cloneCanvasItem(item *store.CanvasItem) *store.CanvasItem {
 	cp.Item = append([]byte(nil), item.Item...)
 	cp.Window = append([]byte(nil), item.Window...)
 	return &cp
+}
+
+func cloneClosedCanvasItem(item *store.ClosedCanvasItem) *store.ClosedCanvasItem {
+	if item == nil {
+		return nil
+	}
+	cp := *item
+	cp.Item = append([]byte(nil), item.Item...)
+	cp.Window = append([]byte(nil), item.Window...)
+	return &cp
+}
+
+func normalizeClosedLimit(limit int) int {
+	if limit <= 0 {
+		return store.ClosedCanvasDefaultLimit
+	}
+	if limit > store.ClosedCanvasMaxLimit {
+		return store.ClosedCanvasMaxLimit
+	}
+	return limit
+}
+
+func normalizeKeepLimit(limit int) int {
+	if limit <= 0 {
+		return store.ClosedCanvasKeepLimit
+	}
+	return limit
 }
 
 func unixMS(t time.Time) int64 { return t.UnixNano() / int64(time.Millisecond) }

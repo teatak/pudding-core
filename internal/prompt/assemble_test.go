@@ -6,13 +6,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/skill"
 )
 
 func TestAssembleIncludesCoreAndUserInstruction(t *testing.T) {
-	out := Assemble(Input{UserInstruction: "  请尽量简短  ", Mode: "research"})
+	now := time.Date(2026, 7, 2, 15, 30, 0, 0, time.FixedZone("UTC+8", 8*60*60))
+	out := Assemble(Input{UserInstruction: "  请尽量简短  ", Mode: "research", RuntimeNow: now})
 	if !strings.Contains(out.SystemInstruction, "You are Pudding") {
 		t.Fatalf("assembled prompt missing core:\n%s", out.SystemInstruction)
 	}
@@ -22,7 +24,10 @@ func TestAssembleIncludesCoreAndUserInstruction(t *testing.T) {
 	if !strings.Contains(out.SystemInstruction, "请尽量简短") {
 		t.Fatalf("assembled prompt missing user instruction:\n%s", out.SystemInstruction)
 	}
-	if len(out.Segments) != 3 || out.Segments[0].ID != "core_system" || out.Segments[1].ID != "mode_research" || out.Segments[2].ID != "user_system" {
+	if !strings.Contains(out.SystemInstruction, "Current date: 2026-07-02") || !strings.Contains(out.SystemInstruction, "UTC offset: +08:00") {
+		t.Fatalf("assembled prompt missing runtime date:\n%s", out.SystemInstruction)
+	}
+	if len(out.Segments) != 4 || out.Segments[0].ID != "core_system" || out.Segments[1].ID != "mode_research" || out.Segments[2].ID != "user_system" || out.Segments[3].ID != "runtime_context" {
 		t.Fatalf("unexpected segments: %+v", out.Segments)
 	}
 }

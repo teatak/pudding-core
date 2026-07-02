@@ -3,7 +3,7 @@ import {
   listBrowserMCPSessionsResponse,
   listAppConnectionsResponse,
   listCanvasItemsResponse,
-  listSessionAppGrantsResponse,
+  listClosedCanvasItemsResponse,
   listAppsResponse,
   listSkillDraftsResponse,
   listSkillsResponse,
@@ -23,12 +23,11 @@ import {
   patchCanvasItemRequest,
   probeProviderModelsRequest,
   putCanvasItemRequest,
+  putClosedCanvasItemRequest,
   patchWebToolsRequest,
-  putSessionAppGrantRequest,
   providerProfile,
   queuedInput,
   session,
-  sessionAppGrant,
   sessionUsage,
   settingsResponse,
   skillDraftDetail,
@@ -39,6 +38,7 @@ import {
   appDefinition,
   appConnection,
   canvasItem,
+  closedCanvasItem,
   appSkillDetail,
   installAppRequest,
   startAppOAuthRequest,
@@ -50,6 +50,7 @@ import {
   type BuiltinTool,
   type BrowserMCPSession,
   type CanvasItem,
+  type ClosedCanvasItem,
   type ContentPart,
   type DailyUsageStat,
   type Message,
@@ -59,7 +60,6 @@ import {
   type ProviderProfile,
   type QueuedInput,
   type Session,
-  type SessionAppGrant,
   type SessionUsage,
   type Skill,
   type SkillDraft,
@@ -127,9 +127,9 @@ export type AppConnectionPayload = {
   username?: string;
   password?: string;
 };
-export type SessionAppGrantPayload = z.infer<typeof putSessionAppGrantRequest>;
 export type CanvasItemPayload = z.infer<typeof putCanvasItemRequest>;
 export type CanvasItemWindowPayload = z.infer<typeof patchCanvasItemRequest>;
+export type ClosedCanvasItemPayload = z.infer<typeof putClosedCanvasItemRequest>;
 
 function authHeaders(token: string) {
   return {
@@ -330,6 +330,41 @@ export async function deleteCanvasItem(token: string, sessionID: string, itemID:
   });
 }
 
+export function listClosedCanvasItems(
+  token: string,
+  sessionID: string,
+  limit = 24,
+): Promise<{ items: ClosedCanvasItem[] }> {
+  return request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/canvas/closed?limit=${encodeURIComponent(String(limit))}`,
+    listClosedCanvasItemsResponse,
+  );
+}
+
+export function createClosedCanvasItem(
+  token: string,
+  sessionID: string,
+  body: ClosedCanvasItemPayload,
+): Promise<ClosedCanvasItem> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/canvas/closed`, closedCanvasItem, {
+    method: "POST",
+    body: JSON.stringify(putClosedCanvasItemRequest.parse(body)),
+  });
+}
+
+export async function deleteClosedCanvasItem(token: string, sessionID: string, closedID: string): Promise<void> {
+  await request(token, `/sessions/${encodeURIComponent(sessionID)}/canvas/closed/${encodeURIComponent(closedID)}`, z.null(), {
+    method: "DELETE",
+  });
+}
+
+export async function clearClosedCanvasItems(token: string, sessionID: string): Promise<void> {
+  await request(token, `/sessions/${encodeURIComponent(sessionID)}/canvas/closed`, z.null(), {
+    method: "DELETE",
+  });
+}
+
 export function updateQueuedInput(
   token: string,
   sessionID: string,
@@ -458,26 +493,6 @@ export async function deleteAppConnection(token: string, id: string): Promise<vo
   });
 }
 
-export function listSessionAppGrants(token: string, sessionID: string): Promise<{ grants: SessionAppGrant[] }> {
-  return request(token, `/sessions/${encodeURIComponent(sessionID)}/app-grants`, listSessionAppGrantsResponse);
-}
-
-export function putSessionAppGrant(token: string, sessionID: string, body: SessionAppGrantPayload): Promise<SessionAppGrant> {
-  return request(token, `/sessions/${encodeURIComponent(sessionID)}/app-grants`, sessionAppGrant, {
-    method: "PUT",
-    body: JSON.stringify(putSessionAppGrantRequest.parse(body)),
-  });
-}
-
-export async function deleteSessionAppGrant(token: string, sessionID: string, appID: string, connectionID: string): Promise<void> {
-  await request(
-    token,
-    `/sessions/${encodeURIComponent(sessionID)}/app-grants/${encodeURIComponent(appID)}/${encodeURIComponent(connectionID)}`,
-    z.null(),
-    { method: "DELETE" },
-  );
-}
-
 export function startAppOAuth(
   token: string,
   body: z.infer<typeof startAppOAuthRequest>,
@@ -603,5 +618,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { AppConnection, AppDefinition, AppSkillDetail, BuiltinTool, BrowserMCPSession, ContentPart, DailyUsageStat, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionAppGrant, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
+export type { AppConnection, AppDefinition, AppSkillDetail, BuiltinTool, BrowserMCPSession, ContentPart, DailyUsageStat, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
 export { createProviderRequest, patchProviderRequest };

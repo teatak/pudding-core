@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -54,7 +55,7 @@ func newConfigTestServer(t *testing.T) (*httptest.Server, store.Store, *config.M
 	writeOAuthTestApps(t, homeDir)
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好", "世界"}), mock.WithDelay(5*time.Millisecond))), cfg)
-	srv := httptest.NewServer(New(eng, ms, cfg, hub).WithApps(appsvc.NewService(homeDir, nil, nil)).Handler(testToken, nil))
+	srv := httptest.NewServer(New(eng, ms, cfg, hub).WithApps(appsvc.NewService(homeDir, nil)).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 	return srv, ms, cfg
 }
@@ -245,79 +246,6 @@ func TestPutAppConnectionPreservesLegacyBearerByType(t *testing.T) {
 	}
 }
 
-func TestSessionAppGrantAPIValidatesAndDefaultsEndpoints(t *testing.T) {
-	srv, ms, cfg := newConfigTestServer(t)
-	if err := ms.CreateSession(context.Background(), &store.Session{ID: "sess_1", Provider: "mock", Model: "mock"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := cfg.PutAppConnection(context.Background(), &appsvc.Connection{
-		ID:    "github-main",
-		Name:  "GitHub",
-		AppID: "github",
-		Auth:  appsvc.Auth{MethodID: "github-pat", Type: "bearer", Token: "ghp_test"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := cfg.PutAppConnection(context.Background(), &appsvc.Connection{
-		ID:    "gmail-main",
-		Name:  "Gmail",
-		AppID: "gmail",
-		Auth:  appsvc.Auth{MethodID: "google-oauth", Type: "oauth2", AccessToken: "ya29_test"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	badEndpoint := req(t, http.MethodPut, srv.URL+"/sessions/sess_1/app-grants", map[string]any{
-		"appID":            "github",
-		"connectionID":     "github-main",
-		"allowedEndpoints": []string{"github_rest", "missing"},
-	})
-	defer badEndpoint.Body.Close()
-	if badEndpoint.StatusCode != http.StatusBadRequest {
-		t.Fatalf("bad endpoint status = %d", badEndpoint.StatusCode)
-	}
-
-	wrongApp := req(t, http.MethodPut, srv.URL+"/sessions/sess_1/app-grants", map[string]string{
-		"appID":        "github",
-		"connectionID": "gmail-main",
-	})
-	defer wrongApp.Body.Close()
-	if wrongApp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("wrong app status = %d", wrongApp.StatusCode)
-	}
-
-	resp := req(t, http.MethodPut, srv.URL+"/sessions/sess_1/app-grants", map[string]string{
-		"appID":        "github",
-		"connectionID": "github-main",
-	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-	grant := decodeJSON[store.SessionAppGrant](t, resp)
-	if !sameStringValues(grant.AllowedEndpoints, []string{"github_graphql", "github_rest"}) {
-		t.Fatalf("endpoints should default to all app endpoints: %+v", grant)
-	}
-
-	listResp := req(t, http.MethodGet, srv.URL+"/sessions/sess_1/app-grants", nil)
-	defer listResp.Body.Close()
-	if listResp.StatusCode != http.StatusOK {
-		t.Fatalf("list status = %d", listResp.StatusCode)
-	}
-	list := decodeJSON[struct {
-		Grants []store.SessionAppGrant `json:"grants"`
-	}](t, listResp)
-	if len(list.Grants) != 1 || list.Grants[0].ConnectionID != "github-main" {
-		t.Fatalf("unexpected grants: %+v", list.Grants)
-	}
-
-	delResp := req(t, http.MethodDelete, srv.URL+"/sessions/sess_1/app-grants/github/github-main", nil)
-	defer delResp.Body.Close()
-	if delResp.StatusCode != http.StatusNoContent {
-		t.Fatalf("delete status = %d", delResp.StatusCode)
-	}
-}
-
 func TestCanvasItemsAPIUsesSessionActorForGlobalCanvas(t *testing.T) {
 	srv, ms := newTestServer(t)
 	if err := ms.CreateSession(context.Background(), &store.Session{ID: "sess_left", Provider: "mock", Model: "m"}); err != nil {
@@ -365,6 +293,106 @@ func TestCanvasItemsAPIUsesSessionActorForGlobalCanvas(t *testing.T) {
 	item = decodeJSON[store.CanvasItem](t, resp)
 	if item.SourceSessionID != "sess_left" || item.UpdatedBySessionID != "sess_right" {
 		t.Fatalf("patch should keep source and update actor: %+v", item)
+	}
+}
+
+func TestClosedCanvasItemsAPI(t *testing.T) {
+	srv, ms := newTestServer(t)
+	if err := ms.CreateSession(context.Background(), &store.Session{ID: "sess_canvas", Provider: "mock", Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_canvas/canvas/closed", map[string]any{
+		"id":           "closed_1",
+		"sourceItemID": "canvas_1",
+		"kind":         "table",
+		"title":        "Orders",
+		"item":         map[string]any{"kind": "table", "rows": []any{}},
+		"window":       map[string]any{"x": 1, "y": 2, "w": 300, "h": 200, "z": 3},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create status = %d", resp.StatusCode)
+	}
+	item := decodeJSON[store.ClosedCanvasItem](t, resp)
+	if item.ID != "closed_1" || item.SourceItemID != "canvas_1" || item.ActorSessionID != "sess_canvas" {
+		t.Fatalf("unexpected closed item: %+v", item)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_canvas/canvas/closed", map[string]any{
+		"id":           "closed_2",
+		"sourceItemID": "canvas_1",
+		"kind":         "table",
+		"title":        "Orders updated",
+		"item":         map[string]any{"kind": "table", "rows": []any{}},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("replace status = %d", resp.StatusCode)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_canvas/canvas/closed", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list status = %d", resp.StatusCode)
+	}
+	list := decodeJSON[struct {
+		Items []store.ClosedCanvasItem `json:"items"`
+	}](t, resp)
+	if len(list.Items) != 1 || list.Items[0].ID != "closed_2" || list.Items[0].Title != "Orders updated" {
+		t.Fatalf("closed items should dedupe by source item: %+v", list.Items)
+	}
+
+	resp = req(t, http.MethodDelete, srv.URL+"/sessions/sess_canvas/canvas/closed/closed_2", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete status = %d", resp.StatusCode)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_canvas/canvas/closed", nil)
+	defer resp.Body.Close()
+	list = decodeJSON[struct {
+		Items []store.ClosedCanvasItem `json:"items"`
+	}](t, resp)
+	if len(list.Items) != 0 {
+		t.Fatalf("closed item should be deleted: %+v", list.Items)
+	}
+}
+
+func TestDesktopSaveFileWritesDownload(t *testing.T) {
+	downloads := t.TempDir()
+	t.Setenv("PUDDING_DESKTOP_DOWNLOADS_DIR", downloads)
+	srv, _ := newTestServer(t)
+
+	resp := req(t, http.MethodPost, srv.URL+"/desktop/save-file", map[string]string{
+		"filename": `测试/bad:name.csv`,
+		"mime":     "text/csv;charset=utf-8",
+		"data":     base64.StdEncoding.EncodeToString([]byte("a,b\n1,2\n")),
+	})
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	payload := decodeJSON[struct {
+		OK       bool   `json:"ok"`
+		Path     string `json:"path"`
+		Filename string `json:"filename"`
+	}](t, resp)
+	if !payload.OK || payload.Path == "" {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+	if got := filepath.Dir(payload.Path); got != downloads {
+		t.Fatalf("dir = %q, want %q", got, downloads)
+	}
+	if strings.ContainsAny(payload.Filename, `\/:*?"<>|`) {
+		t.Fatalf("filename was not sanitized: %q", payload.Filename)
+	}
+	data, err := os.ReadFile(payload.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(data), "a,b\n1,2\n"; got != want {
+		t.Fatalf("file content = %q, want %q", got, want)
 	}
 }
 
@@ -495,7 +523,7 @@ func TestAppAssetAPI(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, "apps", "github", "assets", "icon.svg"), []byte("<svg/>"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(New(eng, ms, ms, hub).WithApps(appsvc.NewService(home, nil, nil)).Handler(testToken, nil))
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithApps(appsvc.NewService(home, nil)).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 
 	resp := req(t, http.MethodGet, srv.URL+"/app-assets/github/assets/icon.svg?token="+testToken, nil)
@@ -527,7 +555,7 @@ skills:
 	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: github-issues\ndescription: Read issues.\n---\nBody\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(New(eng, ms, ms, hub).WithApps(appsvc.NewService(home, nil, nil)).Handler(testToken, nil))
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithApps(appsvc.NewService(home, nil)).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 
 	resp := req(t, http.MethodGet, srv.URL+"/app-skills/github/skills/issues/SKILL.md", nil)
@@ -557,7 +585,7 @@ func TestDeleteAppAPI(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(appDir, "app.yaml"), []byte("id: github\nname: GitHub\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(New(eng, ms, ms, hub).WithApps(appsvc.NewService(home, nil, nil)).Handler(testToken, nil))
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithApps(appsvc.NewService(home, nil)).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 
 	resp := req(t, http.MethodDelete, srv.URL+"/apps/github", nil)
@@ -606,7 +634,7 @@ func TestDeleteAppRemovesConnections(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(New(eng, ms, cfg, hub).WithApps(appsvc.NewService(home, nil, nil)).Handler(testToken, nil))
+	srv := httptest.NewServer(New(eng, ms, cfg, hub).WithApps(appsvc.NewService(home, nil)).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 
 	resp := req(t, http.MethodDelete, srv.URL+"/apps/github", nil)

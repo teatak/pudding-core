@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/skill"
@@ -42,6 +43,7 @@ type Input struct {
 	Home            string
 	Skills          []skill.Skill
 	Apps            []*app.Definition
+	RuntimeNow      time.Time
 }
 
 type Output struct {
@@ -56,7 +58,7 @@ type Loader struct {
 }
 
 func NewLoader(home string) *Loader {
-	return &Loader{home: home, skills: skill.NewService(home), apps: app.NewService(home, nil, nil)}
+	return &Loader{home: home, skills: skill.NewService(home), apps: app.NewService(home, nil)}
 }
 
 type SkillLister interface {
@@ -90,7 +92,7 @@ func (l *Loader) Prompt(ctx context.Context, mode string) (Output, error) {
 			apps = loaded
 		}
 	}
-	return Assemble(Input{UserInstruction: user, Mode: mode, Home: l.home, Skills: skills, Apps: apps}), nil
+	return Assemble(Input{UserInstruction: user, Mode: mode, Home: l.home, Skills: skills, Apps: apps, RuntimeNow: time.Now()}), nil
 }
 
 func Assemble(input Input) Output {
@@ -116,6 +118,7 @@ func Assemble(input Input) Output {
 				user,
 		})
 	}
+	segments = append(segments, runtimeSegment(input.RuntimeNow))
 
 	parts := make([]string, 0, len(segments))
 	for _, seg := range segments {
@@ -126,6 +129,14 @@ func Assemble(input Input) Output {
 	return Output{SystemInstruction: strings.Join(parts, "\n\n"), Segments: segments}
 }
 
+func runtimeSegment(now time.Time) Segment {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	content := fmt.Sprintf("## Runtime Context\n\nCurrent date: %s\nUTC offset: %s\n\nUse this current date for relative dates. Dates from prior turns or prior tool results are historical unless the user explicitly refers to them.", now.Format("2006-01-02"), now.Format("-07:00"))
+	return Segment{ID: "runtime_context", Layer: "runtime", Content: content}
+}
+
 func appsSegment(list []*app.Definition) *Segment {
 	if len(list) == 0 {
 		return nil
@@ -133,7 +144,7 @@ func appsSegment(list []*app.Definition) *Segment {
 	var b strings.Builder
 	b.WriteString("## Installed Apps\n\n")
 	b.WriteString("Installed apps provide configured endpoints and app-scoped skills.\n")
-	b.WriteString("Endpoint calls use session-granted app connections. Use the listed endpoint names with `builtin_rest_request` or `builtin_graphql_request`; omit `connection` unless the tool reports multiple session-granted connections.\n")
+	b.WriteString("Endpoint calls use configured app connections. Use the listed endpoint names with `builtin_rest_request` or `builtin_graphql_request`; omit `connection` unless the tool reports multiple configured connections.\n")
 	b.WriteString("Full app SKILL.md bodies are not loaded by default. When an app skill matches, call `builtin_skill_read(app_id=\"<app id>\", skill_id=\"<skill id>\")` once, then follow the returned instructions.\n")
 	b.WriteString("Do not proactively load untriggered app skills.\n\n")
 	for _, item := range list {

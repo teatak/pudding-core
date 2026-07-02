@@ -99,6 +99,37 @@ export function useCanvasMCP(token: string) {
           });
         },
       },
+      {
+        name: "canvas_chart",
+        description: "Create or update a chart item on the shared canvas. Supports bar, line, area, pie, and donut charts.",
+        capability: "chat",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Optional stable canvas item id to update." },
+            title: { type: "string", description: "Short item title." },
+            chart: chartSchema(),
+            caption: { type: "string", description: "Optional caption." },
+            window: canvasWindowSchema(),
+          },
+          required: ["title", "chart"],
+          additionalProperties: false,
+        },
+        handler: async (args) => {
+          const record = requiredRecord(args);
+          const title = requiredString(record.title, "title");
+          const chart = normalizeChart(record.chart);
+          const caption = stringValue(record.caption);
+          return saveCanvasItem({
+            token,
+            queryClient,
+            args: record,
+            kind: "chart",
+            title,
+            item: { kind: "chart", title, chart, caption },
+          });
+        },
+      },
     ],
     [queryClient, token],
   );
@@ -175,6 +206,39 @@ function canvasWindowSchema() {
   };
 }
 
+function chartSchema() {
+  return {
+    type: "object",
+    properties: {
+      type: { type: "string", enum: ["bar", "line", "area", "pie", "donut"] },
+      x_key: { type: "string", description: "Category/time key for bar, line, and area charts." },
+      name_key: { type: "string", description: "Name key for pie and donut charts." },
+      value_key: { type: "string", description: "Value key for pie/donut, or single-series charts." },
+      series: {
+        type: "array",
+        description: "Series to draw. Omit to infer numeric fields.",
+        items: {
+          type: "object",
+          properties: {
+            key: { type: "string" },
+            label: { type: "string" },
+            color: { type: "string" },
+          },
+          required: ["key"],
+          additionalProperties: false,
+        },
+      },
+      data: {
+        type: "array",
+        description: "Chart rows.",
+        items: { type: "object", additionalProperties: true },
+      },
+    },
+    required: ["data"],
+    additionalProperties: false,
+  };
+}
+
 function requiredRecord(value: unknown): Record<string, unknown> {
   const record = asRecord(value);
   if (!record) {
@@ -204,4 +268,39 @@ function requiredArray(value: unknown, field: string): unknown[] {
     throw new Error(`${field} is required`);
   }
   return value;
+}
+
+function normalizeChart(value: unknown): Record<string, unknown> {
+  const record = requiredRecord(value);
+  const data = requiredArray(record.data, "chart.data").map((row) => {
+    const object = asRecord(row);
+    if (!object) {
+      throw new Error("chart.data items must be objects");
+    }
+    return object;
+  });
+  return {
+    type: chartTypeValue(record.type),
+    ...(stringValue(record.x_key) ? { x_key: stringValue(record.x_key) } : {}),
+    ...(stringValue(record.name_key) ? { name_key: stringValue(record.name_key) } : {}),
+    ...(stringValue(record.value_key) ? { value_key: stringValue(record.value_key) } : {}),
+    ...(Array.isArray(record.series) ? { series: normalizeChartSeries(record.series) } : {}),
+    data,
+  };
+}
+
+function chartTypeValue(value: unknown): string {
+  return value === "line" || value === "area" || value === "pie" || value === "donut" ? value : "bar";
+}
+
+function normalizeChartSeries(value: unknown[]): Array<Record<string, string>> {
+  return value.map((item) => {
+    const record = requiredRecord(item);
+    const key = requiredString(record.key, "series.key");
+    return {
+      key,
+      ...(stringValue(record.label) ? { label: stringValue(record.label) } : {}),
+      ...(stringValue(record.color) ? { color: stringValue(record.color) } : {}),
+    };
+  });
 }

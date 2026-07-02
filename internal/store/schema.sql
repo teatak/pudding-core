@@ -87,18 +87,6 @@ CREATE TABLE IF NOT EXISTS session_usage (
     updated_at                         INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS session_app_grants (
-    session_id        TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    app_id            TEXT    NOT NULL,
-    connection_id     TEXT    NOT NULL,
-    allowed_endpoints TEXT    NOT NULL DEFAULT '[]',
-    permissions       TEXT    NOT NULL DEFAULT '[]',
-    constraints       TEXT    NOT NULL DEFAULT '{}',
-    created_at        INTEGER NOT NULL,
-    updated_at        INTEGER NOT NULL,
-    PRIMARY KEY (session_id, app_id, connection_id)
-);
-
 CREATE TABLE IF NOT EXISTS canvas_items (
     id                    TEXT    PRIMARY KEY,
     canvas_id             TEXT    NOT NULL DEFAULT 'default',
@@ -116,6 +104,23 @@ CREATE TABLE IF NOT EXISTS canvas_items (
 
 CREATE INDEX IF NOT EXISTS canvas_items_canvas_visible_updated
     ON canvas_items(canvas_id, visible, updated_at DESC);
+
+-- 最近关闭的小组件。后端只保留有限历史,避免前端存储积累大列表。
+CREATE TABLE IF NOT EXISTS canvas_closed_items (
+    id               TEXT    PRIMARY KEY,
+    source_item_id   TEXT    NOT NULL UNIQUE,
+    actor_session_id TEXT    NOT NULL DEFAULT '',
+    kind             TEXT    NOT NULL DEFAULT '',
+    title            TEXT    NOT NULL DEFAULT '',
+    item_json        TEXT    NOT NULL,
+    window_json      TEXT    NOT NULL DEFAULT '',
+    closed_at        INTEGER NOT NULL,
+    created_at       INTEGER NOT NULL,
+    updated_at       INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS canvas_closed_items_closed_at
+    ON canvas_closed_items(closed_at DESC);
 
 CREATE TABLE IF NOT EXISTS messages (
     id                TEXT PRIMARY KEY,

@@ -41,6 +41,24 @@ export const listCanvasItemsResponse = z.object({
   items: z.array(canvasItem),
 });
 
+export const closedCanvasItem = z.object({
+  id: z.string(),
+  sourceItemID: z.string(),
+  actorSessionID: z.string().optional(),
+  kind: z.string(),
+  title: z.string().optional(),
+  item: z.unknown(),
+  window: z.unknown().optional(),
+  closedAt: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type ClosedCanvasItem = z.infer<typeof closedCanvasItem>;
+
+export const listClosedCanvasItemsResponse = z.object({
+  items: z.array(closedCanvasItem),
+});
+
 export const putCanvasItemRequest = z.object({
   id: z.string().optional(),
   sourceSessionID: z.string().optional(),
@@ -52,6 +70,16 @@ export const putCanvasItemRequest = z.object({
 
 export const patchCanvasItemRequest = z.object({
   window: z.unknown(),
+});
+
+export const putClosedCanvasItemRequest = z.object({
+  id: z.string().optional(),
+  sourceItemID: z.string().min(1),
+  kind: z.string().min(1),
+  title: z.string().optional(),
+  item: z.unknown(),
+  window: z.unknown().optional(),
+  closedAt: z.string().optional(),
 });
 
 export const browserMCPTool = z.object({
@@ -489,27 +517,6 @@ export type AppConnection = z.infer<typeof appConnection>;
 
 export const listAppsResponse = z.object({ apps: z.array(appDefinition) });
 export const listAppConnectionsResponse = z.object({ connections: z.array(appConnection) });
-
-export const sessionAppGrant = z.object({
-  sessionID: z.string(),
-  appID: z.string(),
-  connectionID: z.string(),
-  allowedEndpoints: z.array(z.string()).optional(),
-  permissions: z.array(z.string()).optional(),
-  constraints: z.unknown().optional(),
-  createdAt: z.string().optional(),
-  updatedAt: z.string().optional(),
-});
-export type SessionAppGrant = z.infer<typeof sessionAppGrant>;
-
-export const putSessionAppGrantRequest = z.object({
-  appID: z.string().min(1),
-  connectionID: z.string().min(1),
-  allowedEndpoints: z.array(z.string()).optional(),
-  permissions: z.array(z.string()).optional(),
-  constraints: z.unknown().optional(),
-});
-export const listSessionAppGrantsResponse = z.object({ grants: z.array(sessionAppGrant) });
 
 export const startAppOAuthRequest = z.object({
   appID: z.string().min(1),

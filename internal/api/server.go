@@ -58,7 +58,7 @@ func (s *Server) WithBrowserMCP(handler browserMCPService) *Server {
 }
 
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
-var apiPrefixes = []string{"/sessions", "/settings", "/providers", "/tools", "/skills", "/skill-drafts", "/skill-assets", "/usage", "/mobile", "/apps", "/app-assets", "/app-skills", "/app-connections", "/app-oauth", "/mcp"}
+var apiPrefixes = []string{"/sessions", "/settings", "/providers", "/tools", "/skills", "/skill-drafts", "/skill-assets", "/usage", "/mobile", "/apps", "/app-assets", "/app-skills", "/app-connections", "/app-oauth", "/mcp", "/desktop"}
 
 type appService interface {
 	ListDefinitions(ctx context.Context) ([]*app.Definition, error)
@@ -127,6 +127,8 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/queued-inputs/:clientMessageID").PATCH(s.patchQueuedInput)
 	app.Route("/sessions/:id/canvas/items").GET(s.listCanvasItems).POST(s.createCanvasItem)
 	app.Route("/sessions/:id/canvas/items/:itemID").PUT(s.putCanvasItem).PATCH(s.patchCanvasItem).DELETE(s.deleteCanvasItem)
+	app.Route("/sessions/:id/canvas/closed").GET(s.listClosedCanvasItems).POST(s.createClosedCanvasItem).DELETE(s.clearClosedCanvasItems)
+	app.Route("/sessions/:id/canvas/closed/:closedID").DELETE(s.deleteClosedCanvasItem)
 	app.Route("/settings").GET(s.getSettings).PUT(s.putSettings)
 	app.Route("/settings/user-prompt").GET(s.getUserPrompt).PUT(s.putUserPrompt)
 	app.Route("/providers").GET(s.listProviders).POST(s.createProvider)
@@ -135,6 +137,8 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/providers/:name/models").GET(s.listProviderModels)
 	app.Route("/tools/builtin").GET(s.listBuiltinTools)
 	app.Route("/tools/web").GET(s.getWebTools).PATCH(s.patchWebTools).PUT(s.patchWebTools)
+	app.Route("/desktop/save-file").POST(s.desktopSaveFile)
+	app.Route("/desktop/reveal-file").POST(s.desktopRevealFile)
 	app.Route("/mcp/browser-sessions").GET(s.listBrowserMCPSessions)
 	app.Route("/skills").GET(s.listSkills)
 	app.Route("/skills/:id").DELETE(s.deleteSkill)
@@ -151,8 +155,6 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/app-connections/:id").GET(s.getAppConnection).PUT(s.putAppConnection).DELETE(s.deleteAppConnection)
 	app.Route("/app-oauth/start").POST(s.startAppOAuth)
 	public.Route("/oauth/callback/:provider").GET(s.appOAuthCallback)
-	app.Route("/sessions/:id/app-grants").GET(s.listSessionAppGrants).PUT(s.putSessionAppGrant)
-	app.Route("/sessions/:id/app-grants/:appID/:connectionID").DELETE(s.deleteSessionAppGrant)
 	app.Route("/usage/daily").GET(s.getDailyUsage)
 	if cfg.pairing != nil {
 		app.Route("/mobile/pairings").POST(func(c *cart.Context) error {

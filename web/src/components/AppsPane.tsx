@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Cable, Download, Eye, EyeOff, KeyRound, Loader2, Pencil, Plus, ShieldCheck, ShieldOff, Trash } from "lucide-react";
+import { ArrowLeft, Cable, Download, Eye, EyeOff, KeyRound, Loader2, Pencil, Plus, Trash } from "lucide-react";
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -9,21 +9,17 @@ import {
   appIconURL,
   deleteApp,
   deleteAppConnection,
-  deleteSessionAppGrant,
   getAppConnection,
   getAppSkill,
   installAppPackage,
   listAppConnections,
   listApps,
-  listSessionAppGrants,
   putAppConnection,
-  putSessionAppGrant,
   startAppOAuth,
   type AppConnection,
   type AppConnectionPayload,
   type AppDefinition,
   type AppSkillDetail,
-  type SessionAppGrant,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { DialogSelectContent } from "@/components/DialogSelectContent";
@@ -136,7 +132,7 @@ const OFFICIAL_APP_REGISTRY =
 
 const appIconSVGInflight = new Map<string, Promise<string>>();
 
-export function AppsPane({ token, selectedSessionID }: { token: string; selectedSessionID?: string }) {
+export function AppsPane({ token }: { token: string }) {
   const { locale, t } = useI18n();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<{ app: AppDefinition; connection?: AppConnection } | null>(null);
@@ -159,11 +155,6 @@ export function AppsPane({ token, selectedSessionID }: { token: string; selected
     queryKey: queryKeys.appConnections(),
     queryFn: () => listAppConnections(token),
   });
-  const grantsQuery = useQuery({
-    queryKey: queryKeys.sessionAppGrants(selectedSessionID || ""),
-    queryFn: () => listSessionAppGrants(token, selectedSessionID!),
-    enabled: Boolean(selectedSessionID),
-  });
   const apps = useMemo(
     () => [...(appsQuery.data?.apps || [])].sort((a, b) => a.name.localeCompare(b.name)),
     [appsQuery.data?.apps],
@@ -181,7 +172,6 @@ export function AppsPane({ token, selectedSessionID }: { token: string; selected
     [catalogApps],
   );
   const connections = useMemo(() => connectionsQuery.data?.connections || [], [connectionsQuery.data?.connections]);
-  const sessionGrants = useMemo(() => grantsQuery.data?.grants || [], [grantsQuery.data?.grants]);
   const detailApp = apps.find((app) => app.id === detailAppID) || null;
   const detailCatalogForInstalled = detailApp ? catalogByLocalID.get(detailApp.id) : undefined;
   const detailCatalogApp = catalogApps.find((app) => app.id === detailCatalogID) || null;
@@ -211,7 +201,6 @@ export function AppsPane({ token, selectedSessionID }: { token: string; selected
     return selectedSkillQuery.data || selectedSkill.skill;
   }, [selectedSkill, selectedSkillQuery.data]);
   const detailConnections = detailApp ? connections.filter((conn) => conn.appID === detailApp.id) : [];
-  const detailGrants = detailApp ? sessionGrants.filter((grant) => grant.appID === detailApp.id) : [];
   const loadFailed = appsQuery.isError || connectionsQuery.isError;
 
   useEffect(() => {
@@ -261,48 +250,9 @@ export function AppsPane({ token, selectedSessionID }: { token: string; selected
     onSuccess: async () => {
       toast.success(t("apps.connectionDeleted"));
       setDeleting(null);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.appConnections() }),
-        selectedSessionID
-          ? queryClient.invalidateQueries({ queryKey: queryKeys.sessionAppGrants(selectedSessionID) })
-          : Promise.resolve(),
-      ]);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.appConnections() });
     },
     onError: () => toast.error(t("apps.connectionDeleteFailed")),
-  });
-  const grantMutation = useMutation({
-    mutationFn: ({ app, connection }: { app: AppDefinition; connection: AppConnection }) => {
-      if (!selectedSessionID) {
-        throw new Error("session required");
-      }
-      return putSessionAppGrant(token, selectedSessionID, {
-        appID: app.id,
-        connectionID: connection.id,
-        allowedEndpoints: Object.keys(app.endpoints || {}).sort(),
-      });
-    },
-    onSuccess: async () => {
-      toast.success(t("apps.grantSaved"));
-      if (selectedSessionID) {
-        await queryClient.invalidateQueries({ queryKey: queryKeys.sessionAppGrants(selectedSessionID) });
-      }
-    },
-    onError: () => toast.error(t("apps.grantSaveFailed")),
-  });
-  const revokeGrantMutation = useMutation({
-    mutationFn: ({ appID, connectionID }: { appID: string; connectionID: string }) => {
-      if (!selectedSessionID) {
-        throw new Error("session required");
-      }
-      return deleteSessionAppGrant(token, selectedSessionID, appID, connectionID);
-    },
-    onSuccess: async () => {
-      toast.success(t("apps.grantDeleted"));
-      if (selectedSessionID) {
-        await queryClient.invalidateQueries({ queryKey: queryKeys.sessionAppGrants(selectedSessionID) });
-      }
-    },
-    onError: () => toast.error(t("apps.grantDeleteFailed")),
   });
   const uninstallMutation = useMutation({
     mutationFn: (id: string) => deleteApp(token, id),
@@ -353,26 +303,10 @@ export function AppsPane({ token, selectedSessionID }: { token: string; selected
               app={detailApp}
               catalogApp={detailCatalogForInstalled}
               connections={detailConnections}
-              grantingConnectionID={
-                grantMutation.isPending && grantMutation.variables?.app.id === detailApp.id
-                  ? grantMutation.variables.connection.id
-                  : undefined
-              }
-              grants={detailGrants}
-              revokingConnectionID={
-                revokeGrantMutation.isPending && revokeGrantMutation.variables?.appID === detailApp.id
-                  ? revokeGrantMutation.variables.connectionID
-                  : undefined
-              }
-              selectedSessionID={selectedSessionID}
               token={token}
               onAdd={() => setEditing({ app: detailApp })}
               onDelete={setDeleting}
               onEdit={(connection) => setEditing({ app: detailApp, connection })}
-              onGrant={(connection) => grantMutation.mutate({ app: detailApp, connection })}
-              onRevokeGrant={(connection) =>
-                revokeGrantMutation.mutate({ appID: detailApp.id, connectionID: connection.id })
-              }
               onSkillSelect={(skill, icon, iconSrc) =>
                 setSelectedSkill({
                   appID: detailApp.id,
@@ -900,33 +834,21 @@ function AppDetail({
   app,
   catalogApp,
   connections,
-  grantingConnectionID,
-  grants,
   onAdd,
   onDelete,
   onEdit,
-  onGrant,
-  onRevokeGrant,
   onSkillSelect,
   onUninstall,
-  revokingConnectionID,
-  selectedSessionID,
   token,
 }: {
   app: AppDefinition;
   catalogApp?: AppRegistryItem;
   connections: AppConnection[];
-  grantingConnectionID?: string;
-  grants: SessionAppGrant[];
   onAdd: () => void;
   onDelete: (connection: AppConnection) => void;
   onEdit: (connection: AppConnection) => void;
-  onGrant: (connection: AppConnection) => void;
-  onRevokeGrant: (connection: AppConnection) => void;
   onSkillSelect: (skill: AppSkillItem, icon?: AppIconSpec, iconSrc?: string) => void;
   onUninstall: () => void;
-  revokingConnectionID?: string;
-  selectedSessionID?: string;
   token: string;
 }) {
   const { locale, t } = useI18n();
@@ -938,11 +860,6 @@ function AppDetail({
   const description = (catalogApp ? appRegistryDescription(catalogApp, locale) : "") || app.description;
   const authMethods = appAuthMethods(app);
   const installedIsPreview = Boolean(app.version && isPreviewVersion(app.version));
-  const grantByConnectionID = useMemo(
-    () => new Map(grants.map((grant) => [grant.connectionID, grant])),
-    [grants],
-  );
-  const grantable = Boolean(selectedSessionID && endpoints.length > 0);
 
   return (
     <section className="grid gap-8">
@@ -990,15 +907,8 @@ function AppDetail({
                 key={connection.id}
                 authMethods={authMethods}
                 connection={connection}
-                grant={grantByConnectionID.get(connection.id)}
-                grantable={grantable}
-                granting={grantingConnectionID === connection.id}
-                revoking={revokingConnectionID === connection.id}
-                selectedSessionID={selectedSessionID}
                 onDelete={onDelete}
                 onEdit={onEdit}
-                onGrant={onGrant}
-                onRevokeGrant={onRevokeGrant}
               />
             ))
           ) : (
@@ -1532,27 +1442,13 @@ function DetailSkeletonRows() {
 function ConnectionRow({
   authMethods,
   connection,
-  grant,
-  grantable,
-  granting,
   onDelete,
   onEdit,
-  onGrant,
-  onRevokeGrant,
-  revoking,
-  selectedSessionID,
 }: {
   authMethods: AppAuthMethod[];
   connection: AppConnection;
-  grant?: SessionAppGrant;
-  grantable: boolean;
-  granting: boolean;
   onDelete: (connection: AppConnection) => void;
   onEdit: (connection: AppConnection) => void;
-  onGrant: (connection: AppConnection) => void;
-  onRevokeGrant: (connection: AppConnection) => void;
-  revoking: boolean;
-  selectedSessionID?: string;
 }) {
   const { t } = useI18n();
   const name = connection.name || connection.id || t("apps.connection");
@@ -1568,37 +1464,9 @@ function ConnectionRow({
               {authLabel}
             </Badge>
           ) : null}
-          {grant ? <Badge variant="secondary">{t("apps.grantedToSession")}</Badge> : null}
         </div>
         {connection.header ? <div className="truncate text-xs text-muted-foreground">{connection.header}</div> : null}
       </div>
-      {selectedSessionID ? (
-        grant ? (
-          <Button
-            className="h-7 shrink-0 px-2"
-            disabled={revoking}
-            size="xs"
-            type="button"
-            variant="outline"
-            onClick={() => onRevokeGrant(connection)}
-          >
-            {revoking ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldOff className="size-3.5" />}
-            {t("apps.revokeGrant")}
-          </Button>
-        ) : (
-          <Button
-            className="h-7 shrink-0 px-2"
-            disabled={!grantable || granting}
-            size="xs"
-            type="button"
-            variant="secondary"
-            onClick={() => onGrant(connection)}
-          >
-            {granting ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
-            {t("apps.grantToSession")}
-          </Button>
-        )
-      ) : null}
       <Button aria-label={t("apps.editConnection")} className="size-7 shrink-0" size="icon-xs" type="button" variant="ghost" onClick={() => onEdit(connection)}>
         <Pencil className="size-3.5" />
       </Button>

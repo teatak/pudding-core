@@ -601,7 +601,7 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
                 onSelect={scheduleMascotInputGaze}
               />
             </div>
-            <div className="flex items-center gap-1 px-2 pb-2">
+            <div className="flex min-w-0 items-center gap-1 px-2 pb-2">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -627,9 +627,10 @@ export function Composer({ token, session, onSubmitError }: ComposerProps) {
                   {t("composer.compacting")}
                 </span>
               ) : null}
-              <div className="ml-auto flex items-center gap-1">
+              <div className="ml-auto flex min-w-0 items-center gap-1">
                 <ContextUsageRing token={token} sessionID={sessionID} />
                 <ModelReasoningPicker
+                  className="min-w-0"
                   token={token}
                   session={session}
                   reasoningValue={reasoningEffort}

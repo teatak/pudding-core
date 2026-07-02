@@ -482,7 +482,7 @@ function DraftComposer({
               onSelect={scheduleMascotInputGaze}
             />
           </div>
-          <div className="flex items-center gap-1 px-2 pb-2">
+          <div className="flex min-w-0 items-center gap-1 px-2 pb-2">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -498,7 +498,7 @@ function DraftComposer({
               <TooltipContent>{t("composer.attach")}</TooltipContent>
             </Tooltip>
             <ModelReasoningPicker
-              className="ml-auto"
+              className="ml-auto min-w-0"
               token={token}
               value={modelValue}
               reasoningValue={reasoningEffort}
