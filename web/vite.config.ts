@@ -8,6 +8,9 @@ export default defineConfig(({ mode }) => {
   const daemon = env.PUDDING_DAEMON_URL || "http://127.0.0.1:9679";
 
   return {
+    define: {
+      "process.env.DRAGGABLE_DEBUG": "false",
+    },
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

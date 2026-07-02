@@ -741,6 +741,7 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     canvas_item_remove: t("transcript.toolCanvasItemRemove"),
     canvas_markdown: t("transcript.toolCanvasMarkdown"),
     canvas_table: t("transcript.toolCanvasTable"),
+    canvas_timeline: t("transcript.toolCanvasTimeline"),
     request_capability: t("transcript.toolRequestCapability"),
   };
   if (known[name]) {

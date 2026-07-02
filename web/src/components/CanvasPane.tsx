@@ -34,8 +34,8 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type MutableRefObject,
-  type PointerEvent as ReactPointerEvent,
 } from "react";
+import { Rnd } from "react-rnd";
 import {
   Area,
   AreaChart,
@@ -65,6 +65,7 @@ import {
 import { queryKeys } from "@/api/queryKeys";
 import { MarkdownBody } from "@/components/transcript/TurnParts";
 import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
 import {
   ChartContainer,
   ChartLegend as RechartsChartLegend,
@@ -99,24 +100,8 @@ type WindowState = {
   z: number;
 };
 
-type ResizeEdge = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
-
-type Gesture =
-  | {
-      type: "drag";
-      itemID: string;
-      startX: number;
-      startY: number;
-      window: WindowState;
-    }
-  | {
-      type: "resize";
-      itemID: string;
-      startX: number;
-      startY: number;
-      window: WindowState;
-      edge: ResizeEdge;
-    };
+type WindowPosition = Pick<WindowState, "x" | "y">;
+type WindowGeometry = Pick<WindowState, "x" | "y" | "w" | "h">;
 
 type ColumnType = "text" | "enum" | "number" | "currency" | "date" | "datetime" | "truncate";
 type SemanticColor = "red" | "amber" | "green" | "sky" | "violet" | "gray";
@@ -143,6 +128,7 @@ type ChartSeries = {
   color?: string;
 };
 type GalleryLayout = "grid" | "row" | "column";
+type TimelineStatus = "done" | "in_progress" | "planned" | "blocked" | "";
 type GalleryImageItem = {
   src: string;
   alt: string;
@@ -188,6 +174,7 @@ const KIND_ICON: Record<string, LucideIcon> = {
   markdown: FileText,
   metric: ChartPie,
   table: Sheet,
+  timeline: CalendarDays,
   widget: Blocks,
 };
 const KIND_TILE_CLASS: Record<string, string> = {
@@ -200,6 +187,7 @@ const KIND_TILE_CLASS: Record<string, string> = {
   markdown: "bg-blue-600",
   metric: "bg-sky-600",
   table: "bg-emerald-600",
+  timeline: "bg-cyan-600",
   widget: "bg-orange-500",
 };
 const BADGE_COLOR_CLASS: Record<SemanticColor, string> = {
@@ -236,6 +224,20 @@ const METRIC_ICON: Record<string, LucideIcon> = {
   percent: Percent,
   users: Users,
 };
+const TIMELINE_STATUS_COLOR: Record<Exclude<TimelineStatus, "">, SemanticColor> = {
+  done: "green",
+  in_progress: "sky",
+  planned: "gray",
+  blocked: "red",
+};
+const TIMELINE_DOT_CLASS: Record<SemanticColor, string> = {
+  red: "bg-red-500",
+  amber: "bg-amber-500",
+  green: "bg-green-500",
+  sky: "bg-sky-500",
+  violet: "bg-violet-500",
+  gray: "bg-muted-foreground",
+};
 
 function CanvasKindIcon({
   kind,
@@ -268,13 +270,14 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   const actorSessionIDRef = useRef("");
   const draftWindowsRef = useRef<Record<string, WindowState>>({});
   const restoreWindowsRef = useRef<Record<string, WindowState>>({});
-  const gestureFrameRef = useRef<number | null>(null);
-  const pendingGestureWindowRef = useRef<WindowState | null>(null);
+  const seenCanvasItemIDsRef = useRef<Set<string>>(new Set());
+  const hasSeenCanvasItemsRef = useRef(false);
+  const resizeStartWindowsRef = useRef<Record<string, WindowState>>({});
+  const resizeStartRestoresRef = useRef<Record<string, WindowState | undefined>>({});
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
   const [draftWindows, setDraftWindows] = useState<Record<string, WindowState>>({});
   const [galleryActiveIndices, setGalleryActiveIndices] = useState<Record<string, number>>({});
   const [restoreWindows, setRestoreWindows] = useState<Record<string, WindowState>>({});
-  const [gesture, setGesture] = useState<Gesture | null>(null);
   useEffect(() => {
     if (sessionID) {
       actorSessionIDRef.current = sessionID;
@@ -387,7 +390,6 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
         void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems() });
       }
-      toast.success(t("canvas.restoreDone"));
     },
     onError: () => {
       toast.error(t("canvas.restoreFailed"));
@@ -424,17 +426,46 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   }, [draftWindows]);
 
   useEffect(() => {
-    if (containerSize.w <= 0 || containerSize.h <= 0 || items.length === 0) {
+    if (items.length === 0) {
+      if (!itemsQuery.isLoading) {
+        seenCanvasItemIDsRef.current = new Set();
+        hasSeenCanvasItemsRef.current = true;
+      }
       return;
     }
+    if (containerSize.w <= 0 || containerSize.h <= 0) {
+      return;
+    }
+    const seenIDs = seenCanvasItemIDsRef.current;
+    const shouldPromoteNewItems = hasSeenCanvasItemsRef.current;
+    const newItemIDs = new Set<string>();
+    if (shouldPromoteNewItems) {
+      items.forEach((item) => {
+        if (!seenIDs.has(item.id)) {
+          newItemIDs.add(item.id);
+        }
+      });
+    }
+    seenCanvasItemIDsRef.current = new Set(items.map((item) => item.id));
+    hasSeenCanvasItemsRef.current = true;
+
     setDraftWindows((prev) => {
       let changed = false;
+      let nextZ = Math.max(
+        maxZ,
+        ...Object.values(prev).map((window) => window.z),
+        ...items.map((item, index) => windowFromItem(item, index).z),
+      );
       const next = { ...prev };
       items.forEach((item, index) => {
         const current = prev[item.id] || windowFromItem(item, index);
-        const fitted = restoreWindows[item.id]
+        let fitted = restoreWindows[item.id]
           ? clampWindow({ ...current, x: 0, y: 0, w: containerSize.w, h: containerSize.h }, containerSize)
           : clampWindow(current, containerSize);
+        if (newItemIDs.has(item.id)) {
+          nextZ += 1;
+          fitted = { ...fitted, z: nextZ };
+        }
         if (!sameWindow(current, fitted)) {
           next[item.id] = fitted;
           changed = true;
@@ -442,7 +473,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       });
       return changed ? next : prev;
     });
-  }, [containerSize, items, restoreWindows]);
+  }, [containerSize, items, itemsQuery.isLoading, maxZ, restoreWindows]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -463,132 +494,99 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     };
   }, []);
 
-  useEffect(() => {
-    if (!gesture) {
-      return;
-    }
-    const flushGestureWindow = () => {
-      const nextWindow = pendingGestureWindowRef.current;
-      pendingGestureWindowRef.current = null;
-      gestureFrameRef.current = null;
-      if (!nextWindow) {
-        return;
-      }
-      setDraftWindows((prev) => {
-        const current = prev[gesture.itemID];
-        if (current && sameWindow(current, nextWindow)) {
-          return prev;
-        }
-        return { ...prev, [gesture.itemID]: nextWindow };
-      });
-    };
-    const scheduleGestureWindow = (nextWindow: WindowState) => {
-      pendingGestureWindowRef.current = nextWindow;
-      if (gestureFrameRef.current !== null) {
-        return;
-      }
-      gestureFrameRef.current = window.requestAnimationFrame(flushGestureWindow);
-    };
-    const move = (event: PointerEvent) => {
-      const dx = event.clientX - gesture.startX;
-      const dy = event.clientY - gesture.startY;
-      const next =
-        gesture.type === "drag"
-          ? { ...gesture.window, x: gesture.window.x + dx, y: gesture.window.y + dy }
-          : resizeWindow(gesture.window, gesture.edge, dx, dy);
-      scheduleGestureWindow(clampWindow(next, containerSize));
-    };
-    const stop = () => {
-      if (gestureFrameRef.current !== null) {
-        window.cancelAnimationFrame(gestureFrameRef.current);
-        gestureFrameRef.current = null;
-      }
-      const current = clampWindow(
-        pendingGestureWindowRef.current || draftWindowsRef.current[gesture.itemID] || gesture.window,
-        containerSize,
-      );
-      const finalWindow =
-        gesture.type === "resize" && isNearFullscreenWindow(current, containerSize)
-          ? fullscreenWindow(containerSize, current.z)
-          : current;
-      if (gesture.type === "resize" && finalWindow !== current) {
-        const restore = isNearFullscreenWindow(gesture.window, containerSize)
-          ? undefined
-          : clampWindow(gesture.window, containerSize);
-        restoreWindowsRef.current = restore
-          ? { ...restoreWindowsRef.current, [gesture.itemID]: restore }
-          : withoutKey(restoreWindowsRef.current, gesture.itemID);
-        setRestoreWindows(restoreWindowsRef.current);
-      }
-      pendingGestureWindowRef.current = null;
-      setDraftWindows((prev) => {
-        const existing = prev[gesture.itemID];
-        if (existing && sameWindow(existing, finalWindow)) {
-          return prev;
-        }
-        return { ...prev, [gesture.itemID]: finalWindow };
-      });
-      patchWindowMutation.mutate({ itemID: gesture.itemID, window: finalWindow });
-      document.body.style.userSelect = "";
-      document.body.style.webkitUserSelect = "";
-      setGesture(null);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop, { once: true });
-    return () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", stop);
-      if (gestureFrameRef.current !== null) {
-        window.cancelAnimationFrame(gestureFrameRef.current);
-        gestureFrameRef.current = null;
-      }
-      pendingGestureWindowRef.current = null;
-      document.body.style.userSelect = "";
-      document.body.style.webkitUserSelect = "";
-    };
-  }, [containerSize, gesture, patchWindowMutation]);
+  const setBodySelectionDisabled = (disabled: boolean) => {
+    document.body.style.userSelect = disabled ? "none" : "";
+    document.body.style.webkitUserSelect = disabled ? "none" : "";
+  };
 
-  const startGesture = (event: ReactPointerEvent, type: Gesture["type"], itemID: string, edge?: ResizeEdge) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const win = windows[itemID];
+  const setWindowDraft = (itemID: string, win: WindowState) => {
+    draftWindowsRef.current = { ...draftWindowsRef.current, [itemID]: win };
+    setDraftWindows(draftWindowsRef.current);
+  };
+
+  const liftWindow = (itemID: string): WindowState | undefined => {
+    const win = draftWindowsRef.current[itemID] || windows[itemID];
     if (!win) {
-      return;
+      return undefined;
     }
-    const lifted = { ...win, z: maxZ + 1 };
-    setDraftWindows((prev) => ({ ...prev, [itemID]: lifted }));
-    if (type === "resize") {
-      restoreWindowsRef.current = withoutKey(restoreWindowsRef.current, itemID);
-      setRestoreWindows(restoreWindowsRef.current);
+    const currentMaxZ = Math.max(maxZ, ...Object.values(draftWindowsRef.current).map((window) => window.z));
+    if (win.z >= currentMaxZ) {
+      return win;
     }
-    document.body.style.userSelect = "none";
-    document.body.style.webkitUserSelect = "none";
-    if (type === "resize") {
-      setGesture({
-        type,
-        itemID,
-        startX: event.clientX,
-        startY: event.clientY,
-        window: lifted,
-        edge: edge ?? "se",
-      });
-      return;
-    }
-    setGesture({
-      type,
-      itemID,
-      startX: event.clientX,
-      startY: event.clientY,
-      window: lifted,
-    });
+    const lifted = { ...win, z: currentMaxZ + 1 };
+    setWindowDraft(itemID, lifted);
+    return lifted;
   };
 
   const focusWindow = (itemID: string) => {
-    const win = windows[itemID];
-    if (!win || win.z >= maxZ) {
+    liftWindow(itemID);
+  };
+
+  const commitWindow = (itemID: string, win: WindowState) => {
+    setWindowDraft(itemID, win);
+    patchWindowMutation.mutate({ itemID, window: win });
+  };
+
+  const updateWindowDraftGeometry = (itemID: string, geometry: Partial<WindowGeometry>) => {
+    const current = draftWindowsRef.current[itemID] || windows[itemID];
+    if (!current) {
       return;
     }
-    setDraftWindows((prev) => ({ ...prev, [itemID]: { ...win, z: maxZ + 1 } }));
+    setWindowDraft(itemID, clampWindow({ ...current, ...geometry }, containerSize));
+  };
+
+  const startWindowDrag = (itemID: string) => {
+    liftWindow(itemID);
+    setBodySelectionDisabled(true);
+  };
+
+  const stopWindowDrag = (itemID: string, position: WindowPosition) => {
+    setBodySelectionDisabled(false);
+    const current = draftWindowsRef.current[itemID] || windows[itemID];
+    if (!current) {
+      return;
+    }
+    commitWindow(itemID, clampWindow({ ...current, x: position.x, y: position.y }, containerSize));
+  };
+
+  const startWindowResize = (itemID: string) => {
+    const current = draftWindowsRef.current[itemID] || windows[itemID];
+    if (!current) {
+      return;
+    }
+    resizeStartWindowsRef.current = { ...resizeStartWindowsRef.current, [itemID]: current };
+    resizeStartRestoresRef.current = { ...resizeStartRestoresRef.current, [itemID]: restoreWindowsRef.current[itemID] };
+    liftWindow(itemID);
+    restoreWindowsRef.current = withoutKey(restoreWindowsRef.current, itemID);
+    setRestoreWindows(restoreWindowsRef.current);
+    setBodySelectionDisabled(true);
+  };
+
+  const stopWindowResize = (itemID: string, geometry: WindowGeometry) => {
+    setBodySelectionDisabled(false);
+    const current = draftWindowsRef.current[itemID] || windows[itemID];
+    if (!current) {
+      return;
+    }
+    const candidate = clampWindow({ ...current, ...geometry }, containerSize);
+    const start = resizeStartWindowsRef.current[itemID] || current;
+    const existingRestore = resizeStartRestoresRef.current[itemID];
+    resizeStartWindowsRef.current = withoutKey(resizeStartWindowsRef.current, itemID);
+    resizeStartRestoresRef.current = withoutKey(resizeStartRestoresRef.current, itemID);
+
+    if (isNearFullscreenWindow(candidate, containerSize)) {
+      const restore = existingRestore || (isNearFullscreenWindow(start, containerSize) ? undefined : clampWindow(start, containerSize));
+      restoreWindowsRef.current = restore
+        ? { ...restoreWindowsRef.current, [itemID]: restore }
+        : withoutKey(restoreWindowsRef.current, itemID);
+      setRestoreWindows(restoreWindowsRef.current);
+      commitWindow(itemID, fullscreenWindow(containerSize, candidate.z));
+      return;
+    }
+
+    restoreWindowsRef.current = withoutKey(restoreWindowsRef.current, itemID);
+    setRestoreWindows(restoreWindowsRef.current);
+    commitWindow(itemID, candidate);
   };
 
   const toggleMaximize = (itemID: string) => {
@@ -616,7 +614,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   };
 
   return (
-    <aside className="relative flex h-full shrink-0 flex-col bg-sidebar text-sidebar-foreground">
+    <aside className="relative flex h-full shrink-0 flex-col bg-[var(--canvas-background)] text-sidebar-foreground">
       <div className="drag-region relative z-30 flex h-(--toolbar-h) shrink-0 items-center overflow-hidden pr-14 pl-3">
         {items.length > 0 ? (
           <div className="no-drag-region w-fit max-w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-lg bg-muted p-[3px] text-muted-foreground [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
@@ -675,19 +673,24 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
               <CanvasWindow
                 key={item.id}
                 item={item}
+                bounds={containerSize}
                 token={token}
                 window={windows[item.id] || windowFromItem(item, index)}
                 galleryActiveIndex={galleryActiveIndices[item.id] || 0}
                 isMaximized={Boolean(restoreWindows[item.id])}
                 onDelete={() => deleteMutation.mutate(item)}
-                onDragStart={(event) => startGesture(event, "drag", item.id)}
+                onDrag={(position) => updateWindowDraftGeometry(item.id, position)}
+                onDragStart={() => startWindowDrag(item.id)}
+                onDragStop={(position) => stopWindowDrag(item.id, position)}
                 onFocus={() => focusWindow(item.id)}
                 onGalleryActiveIndexChange={(activeIndex) => {
                   setGalleryActiveIndices((prev) => ({ ...prev, [item.id]: activeIndex }));
                 }}
                 onGalleryLayoutChange={(layout) => galleryLayoutMutation.mutate({ item, layout })}
                 onMaximize={() => toggleMaximize(item.id)}
-                onResizeStart={(edge, event) => startGesture(event, "resize", item.id, edge)}
+                onResize={(geometry) => updateWindowDraftGeometry(item.id, geometry)}
+                onResizeStart={() => startWindowResize(item.id)}
+                onResizeStop={(geometry) => stopWindowResize(item.id, geometry)}
               />
             ))
           )}
@@ -707,30 +710,40 @@ function CanvasEmpty() {
 
 function CanvasWindow({
   item,
+  bounds,
   token,
   window,
   galleryActiveIndex,
   isMaximized,
   onDelete,
+  onDrag,
   onDragStart,
+  onDragStop,
   onFocus,
   onGalleryActiveIndexChange,
   onGalleryLayoutChange,
   onMaximize,
+  onResize,
   onResizeStart,
+  onResizeStop,
 }: {
   item: CanvasItem;
+  bounds: { w: number; h: number };
   token: string;
   window: WindowState;
   galleryActiveIndex: number;
   isMaximized: boolean;
   onDelete: () => void;
-  onDragStart: (event: ReactPointerEvent) => void;
+  onDrag: (position: WindowPosition) => void;
+  onDragStart: () => void;
+  onDragStop: (position: WindowPosition) => void;
   onFocus: () => void;
   onGalleryActiveIndexChange: (activeIndex: number) => void;
   onGalleryLayoutChange: (layout: GalleryLayout) => void;
   onMaximize: () => void;
-  onResizeStart: (edge: ResizeEdge, event: ReactPointerEvent) => void;
+  onResize: (geometry: WindowGeometry) => void;
+  onResizeStart: () => void;
+  onResizeStop: (geometry: WindowGeometry) => void;
 }) {
   const { t } = useI18n();
   const title = titleForItem(item, t);
@@ -738,91 +751,122 @@ function CanvasWindow({
   const galleryLayout = galleryLayoutForItem(item);
   const contentKind = stringValue(asRecord(item.item)?.kind) || item.kind;
   const isMaximizedGrid = isMaximized && contentKind === "grid";
+  const usesCanvasBackground = contentKind === "grid" || contentKind === "gallery";
   return (
-    <section
-      className={cn(
-        "absolute isolate transform-gpu flex min-h-0 flex-col overflow-hidden rounded-lg text-card-foreground",
-        isMaximized ? "shadow-none" : "shadow-sm",
-      )}
+    <Rnd
+      bounds="parent"
+      cancel=".canvas-window-no-drag"
+      className="absolute"
+      disableDragging={isMaximized}
+      dragHandleClassName="canvas-window-drag-handle"
+      maxHeight={bounds.h > 0 ? bounds.h : undefined}
+      maxWidth={bounds.w > 0 ? bounds.w : undefined}
+      minHeight={Math.min(MIN_H, bounds.h || MIN_H)}
+      minWidth={Math.min(MIN_W, bounds.w || MIN_W)}
+      position={{ x: window.x, y: window.y }}
+      size={{ width: window.w, height: window.h }}
       style={{
-        left: window.x,
-        top: window.y,
-        width: window.w,
-        height: window.h,
         zIndex: window.z,
       }}
-      onPointerDownCapture={onFocus}
+      onDrag={(_event, data) => onDrag({ x: data.x, y: data.y })}
+      onDragStart={() => onDragStart()}
+      onDragStop={(_event, data) => onDragStop({ x: data.x, y: data.y })}
+      onMouseDown={(event) => {
+        if (event.target instanceof Element && event.target.closest(".canvas-window-no-drag")) {
+          return;
+        }
+        globalThis.requestAnimationFrame(onFocus);
+      }}
+      onResize={(_event, _direction, ref, _delta, position) =>
+        onResize({
+          x: position.x,
+          y: position.y,
+          w: ref.offsetWidth,
+          h: ref.offsetHeight,
+        })
+      }
+      onResizeStart={() => onResizeStart()}
+      onResizeStop={(_event, _direction, ref, _delta, position) =>
+        onResizeStop({
+          x: position.x,
+          y: position.y,
+          w: ref.offsetWidth,
+          h: ref.offsetHeight,
+        })
+      }
     >
       <div
         className={cn(
-          "flex h-10 shrink-0 cursor-default items-center gap-2 border bg-card px-3",
-          isMaximizedGrid ? "rounded-lg" : "rounded-t-lg",
-        )}
-        onDoubleClick={onMaximize}
-        onPointerDown={onDragStart}
-      >
-        <CanvasKindIcon kind={item.kind} size="xs" />
-        <div className="min-w-0 flex-1 truncate text-sm font-medium">{title}</div>
-        {galleryLayout ? (
-          <GalleryLayoutControls layout={galleryLayout} onLayoutChange={onGalleryLayoutChange} />
-        ) : null}
-        {table ? <TableExportMenu table={table} token={token} /> : null}
-        <Button
-          aria-label={isMaximized ? t("canvas.restore") : t("canvas.maximize")}
-          size="icon-sm"
-          variant="ghost"
-          onPointerDown={(event) => event.stopPropagation()}
-          onDoubleClick={(event) => event.stopPropagation()}
-          onClick={(event) => {
-            event.stopPropagation();
-            onMaximize();
-          }}
-        >
-          {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-        </Button>
-        <Button
-          aria-label={t("canvas.delete")}
-          size="icon-sm"
-          variant="ghost"
-          onPointerDown={(event) => event.stopPropagation()}
-          onDoubleClick={(event) => event.stopPropagation()}
-          onClick={(event) => {
-            event.stopPropagation();
-            onDelete();
-          }}
-        >
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
-      <div
-        className={cn(
-          "min-h-0 flex-1 overflow-auto rounded-b-lg",
-          isMaximizedGrid ? "pt-3" : "border-x border-b p-3",
-          contentKind === "grid" ? "bg-sidebar" : "bg-card",
+          "relative flex h-full w-full min-h-0 flex-col overflow-hidden rounded-lg text-card-foreground",
+          usesCanvasBackground ? "bg-[var(--canvas-background)]" : "bg-card",
+          isMaximized ? "shadow-none" : "shadow-sm",
         )}
       >
-        <MemoCanvasContent
-          item={item}
-          galleryActiveIndex={galleryActiveIndex}
-          onGalleryActiveIndexChange={onGalleryActiveIndexChange}
-          onGalleryLayoutChange={onGalleryLayoutChange}
-        />
-      </div>
-      {isMaximizedGrid ? (
-        <>
-          <div aria-hidden="true" className="pointer-events-none absolute bottom-0 left-0 h-4 w-4 rounded-bl-lg border-b border-l" />
-          <div aria-hidden="true" className="pointer-events-none absolute right-0 bottom-0 h-4 w-4 rounded-br-lg border-r border-b" />
-        </>
-      ) : null}
-      {resizeHandleSpecs.map(({ edge, className }) => (
         <div
-          key={edge}
-          aria-hidden="true"
-          className={className}
-          onPointerDown={(event) => onResizeStart(edge, event)}
-        />
-      ))}
-    </section>
+          className={cn(
+            "canvas-window-drag-handle flex h-10 shrink-0 cursor-default items-center gap-2 border bg-card px-3",
+            isMaximizedGrid ? "rounded-lg" : "rounded-t-lg",
+          )}
+          onDoubleClick={onMaximize}
+        >
+          <CanvasKindIcon kind={item.kind} size="xs" />
+          <div className="min-w-0 flex-1 truncate text-sm font-medium">{title}</div>
+          {galleryLayout ? (
+            <GalleryLayoutControls layout={galleryLayout} onLayoutChange={onGalleryLayoutChange} />
+          ) : null}
+          {table ? <TableExportMenu table={table} token={token} /> : null}
+          <Button
+            aria-label={isMaximized ? t("canvas.restore") : t("canvas.maximize")}
+            className="canvas-window-no-drag"
+            size="icon-sm"
+            variant="ghost"
+            onPointerDown={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              onMaximize();
+            }}
+          >
+            {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </Button>
+          <Button
+            aria-label={t("canvas.delete")}
+            className="canvas-window-no-drag"
+            size="icon-sm"
+            variant="ghost"
+            onPointerDown={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              onDelete();
+            }}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        <div
+          className={cn(
+            "min-h-0 flex-1 overflow-auto rounded-b-lg",
+            isMaximizedGrid ? "" : "border-x border-b",
+            usesCanvasBackground ? "bg-[var(--canvas-background)]" : "bg-card",
+          )}
+        >
+          <MemoCanvasContent
+            item={item}
+            galleryActiveIndex={galleryActiveIndex}
+            isMaximized={isMaximized}
+            onGalleryActiveIndexChange={onGalleryActiveIndexChange}
+            onGalleryLayoutChange={onGalleryLayoutChange}
+          />
+        </div>
+        {isMaximizedGrid ? (
+          <>
+            <div aria-hidden="true" className="pointer-events-none absolute bottom-0 left-0 h-4 w-4 rounded-bl-lg border-b border-l" />
+            <div aria-hidden="true" className="pointer-events-none absolute right-0 bottom-0 h-4 w-4 rounded-br-lg border-r border-b" />
+          </>
+        ) : null}
+      </div>
+    </Rnd>
   );
 }
 
@@ -840,19 +884,23 @@ function GalleryLayoutControls({
     { layout: "column", label: t("canvas.galleryLayoutColumn"), Icon: GalleryVertical },
   ];
   return (
-    <div
-      className="mr-1 flex shrink-0 items-center rounded-md bg-muted p-0.5"
+    <ButtonGroup
+      aria-label={t("canvas.galleryLayout")}
+      className="canvas-window-no-drag mr-1 shrink-0"
       onDoubleClick={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
     >
       {options.map(({ layout: option, label, Icon }) => (
-        <button
+        <Button
           key={option}
           aria-label={label}
           aria-pressed={layout === option}
-          className="inline-flex h-7 w-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-background hover:text-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm"
+          className="text-muted-foreground hover:text-foreground aria-pressed:bg-muted aria-pressed:text-foreground aria-pressed:shadow-none dark:aria-pressed:bg-input/50"
+          size="icon-sm"
           title={label}
           type="button"
+          variant="outline"
           onClick={(event) => {
             event.stopPropagation();
             if (layout !== option) {
@@ -861,9 +909,9 @@ function GalleryLayoutControls({
           }}
         >
           <Icon className="h-4 w-4" />
-        </button>
+        </Button>
       ))}
-    </div>
+    </ButtonGroup>
   );
 }
 
@@ -1021,8 +1069,10 @@ function TableExportMenu({ table, token }: { table: TableExportData; token: stri
       <DropdownMenuTrigger asChild>
         <Button
           aria-label={t("canvas.exportTable")}
+          className="canvas-window-no-drag"
           size="icon-sm"
           variant="ghost"
+          onMouseDown={(event) => event.stopPropagation()}
           onPointerDown={(event) => event.stopPropagation()}
           onDoubleClick={(event) => event.stopPropagation()}
         >
@@ -1067,11 +1117,13 @@ function ExportSavedDescription({ path }: { path: string }) {
 function CanvasContent({
   item,
   galleryActiveIndex,
+  isMaximized,
   onGalleryActiveIndexChange,
   onGalleryLayoutChange,
 }: {
   item: CanvasItem;
   galleryActiveIndex: number;
+  isMaximized: boolean;
   onGalleryActiveIndexChange: (activeIndex: number) => void;
   onGalleryLayoutChange: (layout: GalleryLayout) => void;
 }) {
@@ -1079,34 +1131,62 @@ function CanvasContent({
   const kind = typeof payload?.kind === "string" ? payload.kind : item.kind;
   if (kind === "markdown") {
     const content = stringValue(payload?.content) || stringValue(payload?.markdown) || "";
-    return <MarkdownBody text={content} />;
+    return (
+      <div className="p-3">
+        <MarkdownBody text={content} />
+      </div>
+    );
   }
   if (kind === "table") {
     return <CanvasTable payload={payload} />;
   }
   if (kind === "chart") {
-    return <CanvasChart payload={payload} />;
+    return (
+      <div className="h-full min-h-0 p-3">
+        <CanvasChart payload={payload} />
+      </div>
+    );
+  }
+  if (kind === "timeline") {
+    return (
+      <div className="p-3">
+        <CanvasTimeline payload={payload} />
+      </div>
+    );
   }
   if (kind === "grid") {
-    return <CanvasGrid payload={payload} />;
+    return (
+      <div className={cn(isMaximized ? "py-3" : "p-3")}>
+        <CanvasGrid payload={payload} />
+      </div>
+    );
   }
   if (kind === "gallery") {
+    const galleryLayout = galleryLayoutValue(payload?.layout);
     return (
-      <CanvasGallery
-        payload={payload}
-        activeIndex={galleryActiveIndex}
-        onActiveIndexChange={onGalleryActiveIndexChange}
-        onLayoutChange={onGalleryLayoutChange}
-      />
+      <div className={cn("h-full min-h-0", galleryLayout === "grid" ? "p-3" : "")}>
+        <CanvasGallery
+          payload={payload}
+          activeIndex={galleryActiveIndex}
+          onActiveIndexChange={onGalleryActiveIndexChange}
+          onLayoutChange={onGalleryLayoutChange}
+        />
+      </div>
     );
   }
   if (kind === "form") {
-    return <CanvasForm payload={payload} />;
+    return (
+      <div className="p-3">
+        <CanvasForm payload={payload} />
+      </div>
+    );
   }
   return (
-    <pre className="overflow-auto rounded bg-muted/50 p-3 text-xs whitespace-pre-wrap">
-      {JSON.stringify(item.item, null, 2)}
-    </pre>
+    <div className="p-3">
+      <pre className="overflow-auto rounded bg-muted/50 p-3 text-xs whitespace-pre-wrap">
+        {JSON.stringify(item.item, null, 2)}
+      </pre>
+    </div>
   );
 }
 
@@ -1186,6 +1266,9 @@ function GridItemContent({ item, kind }: { item: Record<string, unknown>; kind: 
   if (kind === "chart") {
     return <CanvasChart payload={item} />;
   }
+  if (kind === "timeline") {
+    return <CanvasTimeline payload={item} />;
+  }
   if (kind === "grid") {
     return <CanvasGrid payload={item} nested />;
   }
@@ -1237,7 +1320,7 @@ function CanvasMetric({ item }: { item: Record<string, unknown> }) {
         ) : null}
         <div
           className={cn(
-            "min-w-0 break-words text-[32px] leading-[0.95] font-semibold tracking-normal tabular-nums @[260px]/metric:text-[40px]",
+            "min-w-0 break-words text-[28px] leading-[0.95] font-semibold tracking-normal tabular-nums @[260px]/metric:text-[34px]",
             METRIC_VALUE_COLOR_CLASS[color] || METRIC_VALUE_COLOR_CLASS.default,
           )}
         >
@@ -1389,6 +1472,150 @@ function CanvasPieChart({
       {caption ? <div className="mt-2 shrink-0 text-xs text-muted-foreground">{caption}</div> : null}
     </div>
   );
+}
+
+type TimelineEntry = {
+  key: string;
+  group: string;
+  time: string;
+  title: string;
+  status: TimelineStatus;
+  description: string;
+  meta: string;
+  link: string;
+  color?: SemanticColor;
+};
+
+function CanvasTimeline({ payload }: { payload: Record<string, unknown> | undefined }) {
+  const { t } = useI18n();
+  const entries = timelineEntries(payload);
+  const groups = timelineGroups(entries);
+  const caption = stringValue(payload?.caption);
+  if (entries.length === 0) {
+    return <div className="text-xs text-muted-foreground">{t("canvas.timelineEmpty")}</div>;
+  }
+  return (
+    <div className="min-w-0">
+      <div className="space-y-4">
+        {groups.map((group) => (
+          <section key={group.key} className="min-w-0">
+            {group.title ? <div className="mb-2 text-xs font-semibold text-muted-foreground">{group.title}</div> : null}
+            <ol className="relative ml-1 border-l border-border/80">
+              {group.items.map((entry) => {
+                const color = entry.color || (entry.status ? TIMELINE_STATUS_COLOR[entry.status] : "gray");
+                return (
+                  <li key={entry.key} className="relative pb-4 pl-5 last:pb-0">
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "absolute top-1.5 -left-[5px] h-2.5 w-2.5 rounded-full border-2 border-background",
+                        TIMELINE_DOT_CLASS[color],
+                      )}
+                    />
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                        {entry.time ? (
+                          <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">{entry.time}</span>
+                        ) : null}
+                        {entry.link ? (
+                          <a
+                            className="min-w-0 truncate text-sm font-medium text-foreground underline-offset-2 hover:underline"
+                            href={entry.link}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            {entry.title}
+                          </a>
+                        ) : (
+                          <span className="min-w-0 truncate text-sm font-medium text-foreground">{entry.title}</span>
+                        )}
+                        {entry.status ? (
+                          <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", BADGE_COLOR_CLASS[color])}>
+                            {timelineStatusLabel(entry.status, t)}
+                          </span>
+                        ) : null}
+                        {entry.meta ? <span className="text-xs text-muted-foreground">{entry.meta}</span> : null}
+                      </div>
+                      {entry.description ? (
+                        <p className="mt-1 whitespace-pre-wrap text-sm leading-5 text-muted-foreground">{entry.description}</p>
+                      ) : null}
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </section>
+        ))}
+      </div>
+      {caption ? <div className="mt-3 text-xs text-muted-foreground">{caption}</div> : null}
+    </div>
+  );
+}
+
+function timelineEntries(payload: Record<string, unknown> | undefined): TimelineEntry[] {
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  return items.flatMap((item, index) => {
+    const record = asRecord(item);
+    const title = stringValue(record?.title);
+    if (!record || !title) {
+      return [];
+    }
+    const status = timelineStatusValue(record.status);
+    const color = timelineColorValue(record.color);
+    return [
+      {
+        key: `${title}-${index}`,
+        group: stringValue(record.group) || stringValue(record.date),
+        time: stringValue(record.time),
+        title,
+        status,
+        description: stringValue(record.description),
+        meta: stringValue(record.meta),
+        link: stringValue(record.link),
+        ...(color ? { color } : {}),
+      },
+    ];
+  });
+}
+
+function timelineGroups(entries: TimelineEntry[]): Array<{ key: string; title: string; items: TimelineEntry[] }> {
+  const groups: Array<{ key: string; title: string; items: TimelineEntry[] }> = [];
+  const byTitle = new Map<string, { key: string; title: string; items: TimelineEntry[] }>();
+  entries.forEach((entry) => {
+    const title = entry.group;
+    const key = title || "__default";
+    let group = byTitle.get(key);
+    if (!group) {
+      group = { key, title, items: [] };
+      byTitle.set(key, group);
+      groups.push(group);
+    }
+    group.items.push(entry);
+  });
+  return groups;
+}
+
+function timelineStatusValue(value: unknown): TimelineStatus {
+  return value === "done" || value === "in_progress" || value === "planned" || value === "blocked" ? value : "";
+}
+
+function timelineColorValue(value: unknown): SemanticColor | undefined {
+  return value === "gray" || value === "green" || value === "amber" || value === "red" || value === "sky" || value === "violet"
+    ? value
+    : undefined;
+}
+
+function timelineStatusLabel(status: TimelineStatus, t: (key: string) => string): string {
+  if (status === "done") {
+    return t("canvas.timelineStatusDone");
+  }
+  if (status === "in_progress") {
+    return t("canvas.timelineStatusInProgress");
+  }
+  if (status === "blocked") {
+    return t("canvas.timelineStatusBlocked");
+  }
+  return t("canvas.timelineStatusPlanned");
 }
 
 function CanvasTable({ payload }: { payload: Record<string, unknown> | undefined }) {
@@ -1742,8 +1969,8 @@ function CanvasGallery({
       <div className="flex h-full min-h-[360px] min-w-0 flex-col">
         <div
           className={cn(
-            "min-w-0 overflow-hidden rounded-lg border bg-background outline-none",
-            isRow ? "flex h-full min-h-0 flex-col" : "flex h-full min-h-0",
+            "min-w-0 overflow-hidden outline-none",
+            isRow ? "flex min-h-0 flex-1 flex-col" : "flex min-h-0 flex-1",
           )}
           tabIndex={0}
           onKeyDown={handleNavigationKeyDown}
@@ -1751,10 +1978,10 @@ function CanvasGallery({
           <div
             ref={mainRef}
             className={cn(
-              "min-h-0 min-w-0 flex-1 gap-4 p-3",
+              "min-h-0 min-w-0 flex-1 gap-4",
               isRow
-                ? "flex snap-x snap-mandatory overflow-x-auto overflow-y-hidden"
-                : "flex snap-y snap-mandatory flex-col overflow-x-hidden overflow-y-auto",
+                ? "flex snap-x snap-mandatory overflow-x-auto overflow-y-hidden px-3 py-3"
+                : "flex snap-y snap-mandatory flex-col overflow-x-hidden overflow-y-auto px-3 py-3",
             )}
             onScroll={handleMainScroll}
           >
@@ -1768,7 +1995,7 @@ function CanvasGallery({
               >
                 <img alt={image.alt} className="block h-full w-full object-contain" src={image.src} />
                 {image.caption ? (
-                  <figcaption className="absolute inset-x-0 bottom-0 bg-card/70 px-2 py-1 text-xs text-muted-foreground backdrop-blur-sm">
+                  <figcaption className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background/95 via-background/70 to-transparent px-3 pt-8 pb-2.5 text-xs font-medium text-muted-foreground">
                     {image.caption}
                   </figcaption>
                 ) : null}
@@ -1784,7 +2011,11 @@ function CanvasGallery({
             onActivate={(index) => activate(index)}
           />
         </div>
-        {caption ? <div className="mt-2 text-xs text-muted-foreground">{caption}</div> : null}
+        {caption ? (
+          <div className="shrink-0 border-t border-border/60 bg-card/50 px-3 pt-2 pb-2.5 text-xs text-muted-foreground">
+            {caption}
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -1893,7 +2124,7 @@ function GalleryDetailThumbs({
     <div
       ref={scrollerRef}
       className={cn(
-        "shrink-0 bg-card/85",
+        "shrink-0 bg-card/50",
         vertical ? "w-16 overflow-x-hidden overflow-y-auto border-l" : "h-16 overflow-x-auto overflow-y-hidden border-t",
       )}
     >
@@ -2073,30 +2304,6 @@ function titleForItem(item: CanvasItem, t: (key: string) => string): string {
   return item.title?.trim() || titleFromPayload(item.item) || item.kind || t("canvas.untitled");
 }
 
-function resizeWindow(win: WindowState, edge: ResizeEdge, dx: number, dy: number): WindowState {
-  const right = win.x + win.w;
-  const bottom = win.y + win.h;
-  let x = win.x;
-  let y = win.y;
-  let w = win.w;
-  let h = win.h;
-  if (edge.includes("e")) {
-    w = Math.max(MIN_W, win.w + dx);
-  }
-  if (edge.includes("s")) {
-    h = Math.max(MIN_H, win.h + dy);
-  }
-  if (edge.includes("w")) {
-    x = Math.min(win.x + dx, right - MIN_W);
-    w = right - x;
-  }
-  if (edge.includes("n")) {
-    y = Math.min(win.y + dy, bottom - MIN_H);
-    h = bottom - y;
-  }
-  return { x, y, w, h, z: win.z };
-}
-
 function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
   const next = { ...record };
   delete next[key];
@@ -2140,17 +2347,6 @@ function clampWindow(win: WindowState, bounds = { w: 0, h: 0 }): WindowState {
     z: Math.max(1, Math.round(win.z)),
   };
 }
-
-const resizeHandleSpecs: Array<{ edge: ResizeEdge; className: string }> = [
-  { edge: "n", className: "absolute top-0 right-3 left-3 h-1 cursor-ns-resize" },
-  { edge: "s", className: "absolute right-3 bottom-0 left-3 h-1 cursor-ns-resize" },
-  { edge: "e", className: "absolute top-3 right-0 bottom-3 w-1 cursor-ew-resize" },
-  { edge: "w", className: "absolute top-3 bottom-3 left-0 w-1 cursor-ew-resize" },
-  { edge: "ne", className: "absolute top-0 right-0 h-3 w-3 cursor-nesw-resize" },
-  { edge: "nw", className: "absolute top-0 left-0 h-3 w-3 cursor-nwse-resize" },
-  { edge: "se", className: "absolute right-0 bottom-0 h-4 w-4 cursor-nwse-resize" },
-  { edge: "sw", className: "absolute bottom-0 left-0 h-3 w-3 cursor-nesw-resize" },
-];
 
 function chartTypeValue(value: unknown): ChartType {
   return value === "line" || value === "area" || value === "pie" || value === "donut" ? value : "bar";

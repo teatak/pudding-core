@@ -31,7 +31,7 @@ export function useCanvasMCP(token: string) {
               type: "string",
               enum: Object.keys(CANVAS_DOCS),
               description:
-                "Doc ref: canvas_overview, canvas_items, canvas_markdown, canvas_table, canvas_chart, canvas_gallery, or canvas_grid.",
+                "Doc ref: canvas_overview, canvas_items, canvas_markdown, canvas_table, canvas_chart, canvas_gallery, canvas_timeline, or canvas_grid.",
             },
           },
           required: ["ref"],
@@ -294,9 +294,45 @@ export function useCanvasMCP(token: string) {
         },
       },
       {
+        name: "canvas_timeline",
+        description:
+          "Create or update a timeline item on the shared canvas. Use for ordered plans, schedules, event recaps, milestones, and processes. For schema details call canvas_doc_read(ref='canvas_timeline').",
+        capability: "chat",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Optional stable canvas item id to update." },
+            title: { type: "string", description: "Short item title." },
+            items: {
+              type: "array",
+              description: "Timeline entries in display order.",
+              items: timelineItemSchema(),
+            },
+            caption: { type: "string", description: "Optional caption." },
+            window: canvasWindowSchema(),
+          },
+          required: ["title", "items"],
+          additionalProperties: false,
+        },
+        handler: async (args) => {
+          const record = requiredRecord(args);
+          const title = requiredString(record.title, "title");
+          const items = normalizeTimelineItems(requiredArray(record.items, "items"));
+          const caption = stringValue(record.caption);
+          return saveCanvasItem({
+            token,
+            queryClient,
+            args: record,
+            kind: "timeline",
+            title,
+            item: { kind: "timeline", title, items, caption },
+          });
+        },
+      },
+      {
         name: "canvas_grid",
         description:
-          "Create or update one multi-block grid widget on the shared canvas. Supports markdown, metric, table, gallery, chart, and one-level nested grid blocks. For schema details call canvas_doc_read(ref='canvas_grid').",
+          "Create or update one multi-block grid widget on the shared canvas. Supports markdown, metric, table, gallery, chart, timeline, and one-level nested grid blocks. For schema details call canvas_doc_read(ref='canvas_grid').",
         capability: "chat",
         inputSchema: {
           type: "object",
@@ -468,6 +504,7 @@ const CANVAS_DOCS: Record<string, string> = {
     "- Use table for structured rows, comparisons, query results, and lists.",
     "- Use chart for one chart based on real row data.",
     "- Use gallery for image-first content.",
+    "- Use timeline for ordered plans, schedules, event recaps, milestones, and processes.",
     "- Use grid when one topic needs multiple blocks in one widget.",
     "- Before changing previous canvas work in multi-turn tasks, call canvas_item_list and decide whether to update an existing id or create a new widget.",
     "- Use canvas_item_inspect only when a lightweight list summary is not enough.",
@@ -534,18 +571,31 @@ const CANVAS_DOCS: Record<string, string> = {
     "- Optional id updates an existing gallery widget with the same id. Do not reuse an id from another widget kind.",
     "- Do not use gallery for mostly textual content. Use markdown or grid instead.",
   ].join("\n"),
+  canvas_timeline: [
+    "# Canvas Timeline",
+    "",
+    "Use canvas_timeline for time-ordered or sequence-ordered content: plans, schedules, milestones, incident recaps, trip itineraries, match schedules, and approval/deploy flows.",
+    "",
+    "- Required fields: title, items.",
+    "- Each item requires title.",
+    "- Optional item fields: group, date, time, status, description, meta, link, color.",
+    "- group is the visible section label. If group is omitted, date is used as the section label.",
+    "- status may be done, in_progress, planned, or blocked.",
+    "- color may be gray, green, amber, red, sky, or violet.",
+    "- Keep items in display order. Do not use timeline for unordered lists; use table, markdown, or grid instead.",
+  ].join("\n"),
   canvas_grid: [
     "# Canvas Grid",
     "",
     "Use canvas_grid when one topic needs multiple blocks in one widget: dashboard summaries, chart plus notes, table plus explanation, image plus text, or comparisons.",
     "",
     "- Required fields: title, items.",
-    "- Supported item kinds: markdown, metric, table, gallery, chart, grid.",
+    "- Supported item kinds: markdown, metric, table, gallery, chart, timeline, grid.",
     "- Nested grid is only one level deep. Do not put kind=grid inside a nested grid.",
     "- Use item.id as a stable block id when future updates may need to target the block.",
     "- Use item.span.xs/sm/md/lg with values 1-12 to control width in the 12-column layout.",
     "- Metric items render as KPI cards. Use title, value, optional description, optional icon, and optional color: default, green, amber, red, sky, or violet. Unrecognized metric fields are appended to description.",
-    "- Table, gallery, and chart item schemas match canvas_table, canvas_gallery, and canvas_chart.",
+    "- Table, gallery, chart, and timeline item schemas match their standalone tools.",
     "- Optional columns can be auto, 1, 2, or 3. Optional layout.gap controls inner gap.",
     "- If the user asks for later incremental updates, call canvas_item_list first and reuse the existing grid id.",
   ].join("\n"),
@@ -613,6 +663,25 @@ function galleryItemSchema() {
   };
 }
 
+function timelineItemSchema() {
+  return {
+    type: "object",
+    properties: {
+      group: { type: "string", description: "Visible section label, such as Jul 3, Phase 1, or Day 2." },
+      date: { type: "string", description: "Date label used as group when group is omitted." },
+      time: { type: "string", description: "Optional time label." },
+      title: { type: "string", description: "Entry title." },
+      status: { type: "string", enum: ["done", "in_progress", "planned", "blocked"] },
+      description: { type: "string" },
+      meta: { type: "string", description: "Small secondary label." },
+      link: { type: "string", description: "Optional URL." },
+      color: { type: "string", enum: ["gray", "green", "amber", "red", "sky", "violet"] },
+    },
+    required: ["title"],
+    additionalProperties: false,
+  };
+}
+
 function gridLayoutSchema() {
   return {
     type: "object",
@@ -645,7 +714,9 @@ function gridItemSchema(depth: number): Record<string, unknown> {
       id: { type: "string", description: "Stable block id." },
       kind: {
         type: "string",
-        enum: depth > 0 ? ["markdown", "metric", "table", "gallery", "chart"] : ["markdown", "metric", "table", "gallery", "chart", "grid"],
+        enum: depth > 0
+          ? ["markdown", "metric", "table", "gallery", "chart", "timeline"]
+          : ["markdown", "metric", "table", "gallery", "chart", "timeline", "grid"],
       },
       title: { type: "string", description: "Block title." },
       variant: { type: "string", enum: ["hero", "normal", "compact", "subtle"] },
@@ -701,8 +772,8 @@ function gridItemSchema(depth: number): Record<string, unknown> {
       data: { type: "array", description: "Chart rows for kind=chart.", items: { type: "object", additionalProperties: true } },
       items: {
         type: "array",
-        description: depth > 0 ? "Gallery image items." : "Gallery image items or nested grid blocks.",
-        items: depth > 0 ? galleryItemSchema() : { anyOf: [galleryItemSchema(), gridItemSchema(depth + 1)] },
+        description: depth > 0 ? "Gallery image items or timeline entries." : "Gallery image items, timeline entries, or nested grid blocks.",
+        items: depth > 0 ? { anyOf: [galleryItemSchema(), timelineItemSchema()] } : { anyOf: [galleryItemSchema(), timelineItemSchema(), gridItemSchema(depth + 1)] },
       },
       chart: chartSchema(),
       layout: { anyOf: [gridLayoutSchema(), { type: "string", enum: ["grid", "row", "column"] }] },
@@ -805,6 +876,29 @@ function normalizeGalleryItems(value: unknown[]): Array<Record<string, string>> 
   });
 }
 
+function normalizeTimelineItems(value: unknown[]): Array<Record<string, string>> {
+  if (value.length === 0) {
+    throw new Error("items must not be empty");
+  }
+  return value.map((item, index) => {
+    const record = requiredRecord(item);
+    const title = requiredString(record.title, `items[${index}].title`);
+    const status = timelineStatusValue(record.status);
+    const color = timelineColorValue(record.color);
+    return {
+      ...(stringValue(record.group) ? { group: stringValue(record.group) } : {}),
+      ...(stringValue(record.date) ? { date: stringValue(record.date) } : {}),
+      ...(stringValue(record.time) ? { time: stringValue(record.time) } : {}),
+      title,
+      ...(status ? { status } : {}),
+      ...(stringValue(record.description) ? { description: stringValue(record.description) } : {}),
+      ...(stringValue(record.meta) ? { meta: stringValue(record.meta) } : {}),
+      ...(stringValue(record.link) ? { link: stringValue(record.link) } : {}),
+      ...(color ? { color } : {}),
+    };
+  });
+}
+
 function galleryLayoutValue(value: unknown): string {
   return value === "row" || value === "column" ? value : "grid";
 }
@@ -858,6 +952,12 @@ function normalizeGridItems(value: unknown[], depth: number): Array<Record<strin
         ...(record.layout === undefined ? {} : { layout: galleryLayoutValue(record.layout) }),
       };
     }
+    if (kind === "timeline") {
+      return {
+        ...base,
+        items: Array.isArray(record.items) ? normalizeTimelineItems(record.items) : [],
+      };
+    }
     if (kind === "chart") {
       return {
         ...base,
@@ -873,7 +973,7 @@ function normalizeGridItems(value: unknown[], depth: number): Array<Record<strin
 }
 
 function gridItemKind(value: unknown, depth: number): string {
-  if (value === "metric" || value === "table" || value === "gallery" || value === "chart") {
+  if (value === "metric" || value === "table" || value === "gallery" || value === "chart" || value === "timeline") {
     return value;
   }
   if (value === "grid" && depth === 0) {
@@ -953,6 +1053,16 @@ function metricDescriptionPart(value: unknown): string {
 
 function metricValue(value: unknown): string | number | boolean {
   return typeof value === "number" || typeof value === "boolean" ? value : stringValue(value);
+}
+
+function timelineStatusValue(value: unknown): string {
+  return value === "done" || value === "in_progress" || value === "planned" || value === "blocked" ? value : "";
+}
+
+function timelineColorValue(value: unknown): string {
+  return value === "gray" || value === "green" || value === "amber" || value === "red" || value === "sky" || value === "violet"
+    ? value
+    : "";
 }
 
 function normalizeSpan(value: unknown): Record<string, number> | undefined {
@@ -1044,6 +1154,20 @@ function payloadSummary(kind: string, payload: Record<string, unknown> | undefin
   if (kind === "gallery") {
     const items = Array.isArray(payload.items) ? payload.items : [];
     return { items: items.length, layout: galleryLayoutValue(payload.layout) };
+  }
+  if (kind === "timeline") {
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    const groups = Array.from(
+      new Set(
+        items
+          .map((item) => {
+            const record = asRecord(item);
+            return stringValue(record?.group) || stringValue(record?.date);
+          })
+          .filter(Boolean),
+      ),
+    );
+    return { items: items.length, groups };
   }
   if (kind === "grid") {
     const blocks = Array.isArray(payload.items) ? payload.items : Array.isArray(payload.blocks) ? payload.blocks : [];
