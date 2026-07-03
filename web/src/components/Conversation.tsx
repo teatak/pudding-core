@@ -39,6 +39,7 @@ export function Conversation({ token, session }: { token: string; session: Sessi
         droppedFilesNonceRef.current += 1;
         setDroppedFiles({
           attachments: drop.attachments,
+          failedFiles: drop.failedFiles,
           failedFileCount: drop.failedFileCount,
           files: [],
           folderPathUnavailable: false,

@@ -303,11 +303,12 @@ const (
 type ContentPartType string
 
 const (
-	ContentPartText       ContentPartType = "text"
-	ContentPartThought    ContentPartType = "thought"
-	ContentPartToolUse    ContentPartType = "tool_use"
-	ContentPartToolResult ContentPartType = "tool_result"
-	ContentPartAttachment ContentPartType = "attachment"
+	ContentPartText        ContentPartType = "text"
+	ContentPartThought     ContentPartType = "thought"
+	ContentPartToolUse     ContentPartType = "tool_use"
+	ContentPartToolResult  ContentPartType = "tool_result"
+	ContentPartAttachment  ContentPartType = "attachment"
+	ContentPartLocalFolder ContentPartType = "local_folder"
 )
 
 type ContentPart struct {
@@ -322,6 +323,8 @@ type ContentPart struct {
 	SummaryCount        int             `json:"summaryCount,omitempty"`
 	AttachmentKey       string          `json:"attachmentKey,omitempty"`
 	URL                 string          `json:"url,omitempty"`
+	Path                string          `json:"path,omitempty"`
+	SourcePath          string          `json:"sourcePath,omitempty"`
 	MIME                string          `json:"mime,omitempty"`
 	Size                int64           `json:"size,omitempty"`
 	Origin              string          `json:"origin,omitempty"`
@@ -342,6 +345,8 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 		SummaryCount    *int            `json:"summaryCount,omitempty"`
 		AttachmentKey   string          `json:"attachmentKey,omitempty"`
 		URL             string          `json:"url,omitempty"`
+		Path            string          `json:"path,omitempty"`
+		SourcePath      string          `json:"sourcePath,omitempty"`
 		MIME            string          `json:"mime,omitempty"`
 		Size            int64           `json:"size,omitempty"`
 		Origin          string          `json:"origin,omitempty"`
@@ -357,6 +362,8 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 		Content:         p.Content,
 		AttachmentKey:   p.AttachmentKey,
 		URL:             p.URL,
+		Path:            p.Path,
+		SourcePath:      p.SourcePath,
 		MIME:            p.MIME,
 		Size:            p.Size,
 		Origin:          p.Origin,
@@ -381,8 +388,16 @@ type Attachment struct {
 	MIME            string `json:"mime"`
 	Size            int64  `json:"size"`
 	Origin          string `json:"origin,omitempty"`
+	SourcePath      string `json:"sourcePath,omitempty"`
 	CreatedAt       string `json:"createdAt,omitempty"`
 	AudioTranscript string `json:"audioTranscript,omitempty"`
+}
+
+type LocalFolder struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Path   string `json:"path"`
+	Origin string `json:"origin,omitempty"`
 }
 
 type Message struct {
@@ -410,7 +425,7 @@ func TextPart(text string) []ContentPart {
 	return []ContentPart{{Type: ContentPartText, Text: text}}
 }
 
-func UserInputParts(text string, attachments []Attachment) []ContentPart {
+func UserInputParts(text string, attachments []Attachment, localFolders []LocalFolder) []ContentPart {
 	parts := TextPart(text)
 	for _, attachment := range NormalizeAttachments(attachments) {
 		parts = append(parts, ContentPart{
@@ -422,8 +437,18 @@ func UserInputParts(text string, attachments []Attachment) []ContentPart {
 			MIME:                attachment.MIME,
 			Size:                attachment.Size,
 			Origin:              attachment.Origin,
+			SourcePath:          attachment.SourcePath,
 			AttachmentCreatedAt: attachment.CreatedAt,
 			AudioTranscript:     attachment.AudioTranscript,
+		})
+	}
+	for _, folder := range NormalizeLocalFolders(localFolders) {
+		parts = append(parts, ContentPart{
+			Type:   ContentPartLocalFolder,
+			CallID: folder.ID,
+			Name:   folder.Name,
+			Path:   folder.Path,
+			Origin: folder.Origin,
 		})
 	}
 	return parts
@@ -438,6 +463,7 @@ func NormalizeAttachments(attachments []Attachment) []Attachment {
 		attachment.URL = strings.TrimSpace(attachment.URL)
 		attachment.MIME = strings.TrimSpace(attachment.MIME)
 		attachment.Origin = strings.TrimSpace(attachment.Origin)
+		attachment.SourcePath = strings.TrimSpace(attachment.SourcePath)
 		attachment.CreatedAt = strings.TrimSpace(attachment.CreatedAt)
 		attachment.AudioTranscript = strings.TrimSpace(attachment.AudioTranscript)
 		if attachment.ID == "" || attachment.Name == "" || attachment.AttachmentKey == "" || attachment.MIME == "" || attachment.Size < 0 {
@@ -462,11 +488,58 @@ func AttachmentsFromParts(parts []ContentPart) []Attachment {
 			MIME:            part.MIME,
 			Size:            part.Size,
 			Origin:          part.Origin,
+			SourcePath:      part.SourcePath,
 			CreatedAt:       part.AttachmentCreatedAt,
 			AudioTranscript: part.AudioTranscript,
 		})
 	}
 	return NormalizeAttachments(out)
+}
+
+func NormalizeLocalFolders(folders []LocalFolder) []LocalFolder {
+	out := make([]LocalFolder, 0, len(folders))
+	for _, folder := range folders {
+		folder.ID = strings.TrimSpace(folder.ID)
+		folder.Name = strings.TrimSpace(folder.Name)
+		folder.Path = strings.TrimSpace(folder.Path)
+		folder.Origin = strings.TrimSpace(folder.Origin)
+		if folder.ID == "" || folder.Path == "" {
+			continue
+		}
+		if folder.Name == "" {
+			folder.Name = localFolderName(folder.Path)
+		}
+		out = append(out, folder)
+	}
+	return out
+}
+
+func LocalFoldersFromParts(parts []ContentPart) []LocalFolder {
+	out := make([]LocalFolder, 0, len(parts))
+	for _, part := range NormalizeContentParts(parts) {
+		if part.Type != ContentPartLocalFolder {
+			continue
+		}
+		out = append(out, LocalFolder{
+			ID:     part.CallID,
+			Name:   part.Name,
+			Path:   part.Path,
+			Origin: part.Origin,
+		})
+	}
+	return NormalizeLocalFolders(out)
+}
+
+func localFolderName(path string) string {
+	normalized := strings.TrimRight(strings.ReplaceAll(strings.TrimSpace(path), "\\", "/"), "/")
+	if normalized == "" {
+		return path
+	}
+	name := filepath.Base(normalized)
+	if name == "." || name == string(filepath.Separator) {
+		return normalized
+	}
+	return name
 }
 
 type MessageMetadata struct {
@@ -566,6 +639,8 @@ func MessageTextFromParts(parts []ContentPart) string {
 			}
 		case ContentPartAttachment:
 			continue
+		case ContentPartLocalFolder:
+			continue
 		}
 	}
 	return b.String()
@@ -609,6 +684,7 @@ func NormalizeContentParts(parts []ContentPart) []ContentPart {
 				MIME:            part.MIME,
 				Size:            part.Size,
 				Origin:          part.Origin,
+				SourcePath:      part.SourcePath,
 				CreatedAt:       part.AttachmentCreatedAt,
 				AudioTranscript: part.AudioTranscript,
 			}})
@@ -622,9 +698,31 @@ func NormalizeContentParts(parts []ContentPart) []ContentPart {
 			part.MIME = attachment[0].MIME
 			part.Size = attachment[0].Size
 			part.Origin = attachment[0].Origin
+			part.SourcePath = attachment[0].SourcePath
 			part.AttachmentCreatedAt = attachment[0].CreatedAt
 			part.AudioTranscript = attachment[0].AudioTranscript
 			part.Text, part.Args, part.Content = "", nil, ""
+			part.Ok = false
+			part.SummaryKind, part.SummaryCount = "", 0
+		case ContentPartLocalFolder:
+			folder := NormalizeLocalFolders([]LocalFolder{{
+				ID:     part.CallID,
+				Name:   part.Name,
+				Path:   part.Path,
+				Origin: part.Origin,
+			}})
+			if len(folder) == 0 {
+				continue
+			}
+			part.CallID = folder[0].ID
+			part.Name = folder[0].Name
+			part.Path = folder[0].Path
+			part.Origin = folder[0].Origin
+			part.Text, part.Args, part.Content = "", nil, ""
+			part.AttachmentKey, part.URL, part.MIME = "", "", ""
+			part.SourcePath = ""
+			part.Size = 0
+			part.AttachmentCreatedAt, part.AudioTranscript = "", ""
 			part.Ok = false
 			part.SummaryKind, part.SummaryCount = "", 0
 		default:
@@ -715,6 +813,7 @@ type QueuedInput struct {
 	ClientMessageID string            `json:"clientMessageID"`
 	Text            string            `json:"text"`
 	Attachments     []Attachment      `json:"attachments,omitempty"`
+	LocalFolders    []LocalFolder     `json:"localFolders,omitempty"`
 	Status          QueuedInputStatus `json:"status"`
 	Provider        string            `json:"provider,omitempty"`
 	Model           string            `json:"model,omitempty"`
@@ -730,6 +829,7 @@ type QueueInputInput struct {
 	ClientMessageID string
 	Text            string
 	Attachments     []Attachment
+	LocalFolders    []LocalFolder
 	Provider        string
 	Model           string
 	Mode            AgentMode
@@ -813,12 +913,13 @@ type Turn struct {
 }
 
 type BeginTurnInput struct {
-	SessionID       string
-	TurnID          string
-	UserMessageID   string
-	ClientMessageID string
-	UserText        string
-	UserAttachments []Attachment
+	SessionID        string
+	TurnID           string
+	UserMessageID    string
+	ClientMessageID  string
+	UserText         string
+	UserAttachments  []Attachment
+	UserLocalFolders []LocalFolder
 	// Provider / Model 由 engine 在提交时刻解析后传入,随 turn 落库。
 	Provider    string
 	Model       string

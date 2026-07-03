@@ -337,10 +337,17 @@ func TestQueuedInputPersistsAttachments(t *testing.T) {
 		Size:          12,
 		Origin:        "upload",
 	}
+	folder := store.LocalFolder{
+		ID:     "folder_1",
+		Name:   "files",
+		Path:   "/Users/me/files",
+		Origin: "local_path",
+	}
 	if _, err := st.QueueInput(ctx, store.QueueInputInput{
 		SessionID:       "sess_attach",
 		ClientMessageID: "client_attach",
 		Attachments:     []store.Attachment{attachment},
+		LocalFolders:    []store.LocalFolder{folder},
 		Provider:        "mock",
 		Model:           "mock",
 		Mode:            store.ModeChat,
@@ -360,8 +367,8 @@ func TestQueuedInputPersistsAttachments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(queued) != 1 || len(queued[0].Attachments) != 1 || queued[0].Attachments[0].AttachmentKey != attachment.AttachmentKey {
-		t.Fatalf("queued attachment was not persisted: %+v", queued)
+	if len(queued) != 1 || len(queued[0].Attachments) != 1 || queued[0].Attachments[0].AttachmentKey != attachment.AttachmentKey || len(queued[0].LocalFolders) != 1 || queued[0].LocalFolders[0].Path != folder.Path {
+		t.Fatalf("queued attachment/folder was not persisted: %+v", queued)
 	}
 	promoted, err := reopened.PromoteNextQueuedInput(ctx, store.PromoteQueuedInputInput{
 		SessionID:     "sess_attach",
@@ -374,6 +381,10 @@ func TestQueuedInputPersistsAttachments(t *testing.T) {
 	got := store.AttachmentsFromParts(promoted.UserMessage.Parts)
 	if len(got) != 1 || got[0].AttachmentKey != attachment.AttachmentKey {
 		t.Fatalf("promoted message lost attachment: %+v", promoted.UserMessage.Parts)
+	}
+	gotFolders := store.LocalFoldersFromParts(promoted.UserMessage.Parts)
+	if len(gotFolders) != 1 || gotFolders[0].Path != folder.Path {
+		t.Fatalf("promoted message lost local folder: %+v", promoted.UserMessage.Parts)
 	}
 }
 

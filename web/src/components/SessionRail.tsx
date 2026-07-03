@@ -3,8 +3,10 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import {
   Blocks,
   Cable,
+  ChevronRight,
   Ellipsis,
   MessageSquareText,
+  Package,
   PanelLeft,
   Pin,
   TextCursorInput,
@@ -84,6 +86,7 @@ import { setRailCollapsed, useRailCollapsed, useRailForcedCollapsed } from "@/st
 const popoverAlignNudgePx = 3;
 const dragAutoScrollEdgePx = 44;
 const dragAutoScrollMaxStepPx = 14;
+const collapsedSessionGroupsStorageKey = "pudding.sessionRail.collapsedGroups";
 const RailOverlayHoldContext = createContext<((id: string, open: boolean) => void) | null>(null);
 
 function useRailOverlayHold(open: boolean) {
@@ -439,6 +442,38 @@ function sortPinnedSessions(sessions: Session[]) {
   });
 }
 
+function sortSessionsByActivity(sessions: Session[]) {
+  return [...sessions].sort((left, right) => sessionActivityTime(right) - sessionActivityTime(left));
+}
+
+function groupProjectSessions(sessions: Session[], fallbackLabel: string): ProjectSessionGroup[] {
+  const groups = new Map<string, ProjectSessionGroup>();
+  for (const session of sessions) {
+    const firstDir = (session.workspaceDirs || []).find(Boolean) || "";
+    const label = firstDir ? basename(firstDir) : fallbackLabel;
+    const key = firstDir || "__workspace__";
+    const existing = groups.get(key);
+    if (existing) {
+      existing.sessions.push(session);
+      existing.lastActivity = Math.max(existing.lastActivity, sessionActivityTime(session));
+      continue;
+    }
+    groups.set(key, {
+      key,
+      label,
+      sessions: [session],
+      lastActivity: sessionActivityTime(session),
+    });
+  }
+  return Array.from(groups.values())
+    .map((group) => ({ ...group, sessions: sortSessionsByActivity(group.sessions) }))
+    .sort((left, right) => right.lastActivity - left.lastActivity);
+}
+
+function isWorkspaceSession(session: Session) {
+  return session.activeMode === "workspace" || Boolean(session.workspaceDirs?.length);
+}
+
 function sessionActivityTime(session: Session) {
   return new Date(session.lastActivityAt || session.createdAt).getTime();
 }
@@ -500,6 +535,32 @@ function useHoverPopover(closeDelay = 160) {
   };
 }
 
+function readCollapsedSessionGroups() {
+  if (typeof window === "undefined") {
+    return new Set<string>();
+  }
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(collapsedSessionGroupsStorageKey) || "[]");
+    if (!Array.isArray(parsed)) {
+      return new Set<string>();
+    }
+    return new Set(parsed.filter((value): value is string => typeof value === "string"));
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function writeCollapsedSessionGroups(groups: Set<string>) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(collapsedSessionGroupsStorageKey, JSON.stringify([...groups]));
+  } catch {
+    // localStorage 可能被禁用;折叠状态继续保留在内存态。
+  }
+}
+
 function useHasHoverInput() {
   const [hasHover, setHasHover] = useState(() =>
     typeof window === "undefined" ? true : window.matchMedia("(hover: hover) and (pointer: fine)").matches,
@@ -535,11 +596,18 @@ type RailPanelProps = {
   onRefetch: () => void;
 };
 
-type SessionDropGroup = "pinned" | "recents";
+type SessionDropGroup = "pinned" | "unpinned";
 
 type SessionDropTarget = {
   group: SessionDropGroup;
   index: number;
+};
+
+type ProjectSessionGroup = {
+  key: string;
+  label: string;
+  sessions: Session[];
+  lastActivity: number;
 };
 
 // 面板三段:新建 / 列表 / 脚部。四边间距由外层容器(aside / popover)统一给 8px,
@@ -572,6 +640,7 @@ function RailPanel({
     x: number;
     y: number;
   } | null>(null);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => readCollapsedSessionGroups());
   const dragPreviewRef = useRef<HTMLDivElement | null>(null);
   const dragPreviewPointRef = useRef({ x: 0, y: 0 });
   const dragPreviewFrameRef = useRef<number | null>(null);
@@ -579,10 +648,32 @@ function RailPanel({
   const autoScrollFrameRef = useRef<number | null>(null);
   const autoScrollPointerRef = useRef<{ x: number; y: number } | null>(null);
   const pinnedSessions = sortPinnedSessions(sessions.filter((session) => session.pinned));
-  const recentSessions = sessions.filter((session) => !session.pinned);
+  const unpinnedSessions = sortSessionsByActivity(sessions.filter((session) => !session.pinned));
+  const chatSessions = unpinnedSessions.filter((session) => !isWorkspaceSession(session));
+  const projectGroups = groupProjectSessions(
+    unpinnedSessions.filter((session) => isWorkspaceSession(session)),
+    t("mode.workspace"),
+  );
   const showPinnedGroup = pinnedSessions.length > 0 || Boolean(draggingSessionID);
+  const draggedSession = draggingSessionID ? sessions.find((session) => session.id === draggingSessionID) : undefined;
+  const isDraggingPinned = Boolean(draggedSession?.pinned);
+  const pinnedCollapsed = collapsedGroups.has("pinned");
+  const chatCollapsed = collapsedGroups.has("chat");
   const onOverlayOpenChangeRef = useRef(onOverlayOpenChange);
   const overlayHoldIDsRef = useRef(new Set<string>());
+
+  function toggleGroupCollapsed(groupID: string) {
+    setCollapsedGroups((previous) => {
+      const next = new Set(previous);
+      if (next.has(groupID)) {
+        next.delete(groupID);
+      } else {
+        next.add(groupID);
+      }
+      writeCollapsedSessionGroups(next);
+      return next;
+    });
+  }
 
   useEffect(() => {
     onOverlayOpenChangeRef.current = onOverlayOpenChange;
@@ -698,8 +789,11 @@ function RailPanel({
     const target = document.elementFromPoint(clientX, clientY);
     const group = target?.closest<HTMLElement>("[data-session-drop-group]");
     const value = group?.dataset.sessionDropGroup;
-    if (!group || (value !== "pinned" && value !== "recents")) {
+    if (!group || (value !== "pinned" && value !== "unpinned")) {
       return null;
+    }
+    if (value === "unpinned") {
+      return { group: value, index: 0 };
     }
     const itemElements = Array.from(group.querySelectorAll<HTMLElement>("[data-session-item-id]")).filter(
       (item) => item.dataset.sessionItemId !== draggingSessionID,
@@ -766,139 +860,197 @@ function RailPanel({
   return (
     <RailOverlayHoldContext.Provider value={setOverlayHold}>
       <SidebarProvider className="pudding-session-rail !contents">
-      <Sidebar className="min-h-0 w-full flex-1 bg-transparent" collapsible="none">
-        <SidebarHeader>
-          <SidebarMenu className="gap-1">
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                isActive={draftActive}
-                onClick={onCreate}
-              >
-                <MessageCirclePlus />
-                <span>{t("session.create")}</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton>
-                <Search />
-                <span>{t("rail.search")}</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton>
-                <Blocks />
-                <span>{t("rail.widgets")}</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                isActive={appsActive}
-                onClick={() => {
-                  void navigate({
-                    to: "/",
-                    search: (prev) => {
-                      const next = { ...(prev as AppSearch), view: "apps" as const };
-                      delete next.session;
-                      delete next.split;
-                      delete next.draft;
-                      return next;
-                    },
-                  });
-                }}
-              >
-                <Cable />
-                <span>{t("rail.automations")}</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarHeader>
-        <SidebarContent ref={scrollContainerRef} className="py-2 overscroll-contain">
-          {isLoading ? (
-            <SessionListSkeleton />
-          ) : isError ? (
-            <SessionListError onRefetch={onRefetch} />
-          ) : (
-            <>
-              {showPinnedGroup ? (
-                <SidebarGroup
-                  data-session-drop-group="pinned"
+        <Sidebar className="min-h-0 w-full flex-1 bg-transparent" collapsible="none">
+          <SidebarHeader>
+            <SidebarMenu className="gap-1">
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={draftActive}
+                  onClick={onCreate}
                 >
-                  <SidebarGroupLabel>{t("session.pinned")}</SidebarGroupLabel>
-                  <SidebarGroupContent>
-                    <SessionItems
-                      deletePending={deletePending}
-                      selectedSessionID={selectedSessionID}
-                      sessions={pinnedSessions}
-                      showEmptyState={false}
-                      draggingSessionID={draggingSessionID}
-                      dropIndex={dragTarget?.group === "pinned" ? dragTarget.index : null}
-                      showEmptyDropTarget={Boolean(draggingSessionID && pinnedSessions.length === 0)}
-                      onDelete={onDelete}
-                      onOpenSplit={onOpenSplit}
-                      onPinChange={onPinChange}
-                      onPointerDragCancel={clearDragState}
-                      onPointerDragEnd={handlePointerDrop}
-                      onPointerDragMove={handlePointerDragMove}
-                      onPointerDragStart={handlePointerDragStart}
-                      onRename={onRename}
-                      onSelect={onSelect}
+                  <MessageCirclePlus />
+                  <span>{t("session.create")}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton>
+                  <Search />
+                  <span>{t("rail.search")}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton>
+                  <Blocks />
+                  <span>{t("rail.widgets")}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={appsActive}
+                  onClick={() => {
+                    void navigate({
+                      to: "/",
+                      search: (prev) => {
+                        const next = { ...(prev as AppSearch), view: "apps" as const };
+                        delete next.session;
+                        delete next.split;
+                        delete next.draft;
+                        return next;
+                      },
+                    });
+                  }}
+                >
+                  <Cable />
+                  <span>{t("rail.automations")}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarHeader>
+          <SidebarContent ref={scrollContainerRef} className="py-2 overscroll-contain">
+            {isLoading ? (
+              <SessionListSkeleton />
+            ) : isError ? (
+              <SessionListError onRefetch={onRefetch} />
+            ) : (
+              <>
+                {showPinnedGroup ? (
+                  <SidebarGroup
+                    className="px-2 py-1"
+                    data-session-drop-group="pinned"
+                  >
+                    <CollapsibleSessionGroupLabel
+                      collapsed={pinnedCollapsed}
+                      icon="pinned"
+                      label={t("session.pinned")}
+                      onToggle={() => toggleGroupCollapsed("pinned")}
                     />
-                  </SidebarGroupContent>
-                </SidebarGroup>
-              ) : null}
-              <SidebarGroup>
-                <SidebarGroupLabel>{t("session.recents")}</SidebarGroupLabel>
-                <SidebarGroupContent
-                  className={cn(draggingSessionID && "min-h-8")}
-                  data-session-drop-group="recents"
+                    {!pinnedCollapsed ? (
+                      <SidebarGroupContent>
+                        <SessionItems
+                          deletePending={deletePending}
+                          selectedSessionID={selectedSessionID}
+                          sessions={pinnedSessions}
+                          showEmptyState={false}
+                          draggingSessionID={draggingSessionID}
+                          dropIndex={dragTarget?.group === "pinned" ? dragTarget.index : null}
+                          showEmptyDropTarget={Boolean(draggingSessionID && pinnedSessions.length === 0)}
+                          onDelete={onDelete}
+                          onOpenSplit={onOpenSplit}
+                          onPinChange={onPinChange}
+                          onPointerDragCancel={clearDragState}
+                          onPointerDragEnd={handlePointerDrop}
+                          onPointerDragMove={handlePointerDragMove}
+                          onPointerDragStart={handlePointerDragStart}
+                          onRename={onRename}
+                          onSelect={onSelect}
+                        />
+                      </SidebarGroupContent>
+                    ) : null}
+                  </SidebarGroup>
+                ) : null}
+                <div
+                  className={cn(
+                    "rounded-md transition-colors",
+                    isDraggingPinned && "min-h-10",
+                    isDraggingPinned &&
+                    dragTarget?.group === "unpinned" &&
+                    "pudding-session-drop-indicator-active ring-1 ring-sidebar-ring/60",
+                  )}
+                  data-session-drop-group="unpinned"
                 >
-                  <SessionItems
-                    deletePending={deletePending}
-                    selectedSessionID={selectedSessionID}
-                    sessions={recentSessions}
-                    showEmptyState={sessions.length === 0}
-                    draggingSessionID={draggingSessionID}
-                    dropIndex={null}
-                    showEmptyDropTarget={false}
-                    onDelete={onDelete}
-                    onOpenSplit={onOpenSplit}
-                    onPinChange={onPinChange}
-                    onPointerDragCancel={clearDragState}
-                    onPointerDragEnd={handlePointerDrop}
-                    onPointerDragMove={handlePointerDragMove}
-                    onPointerDragStart={handlePointerDragStart}
-                    onRename={onRename}
-                    onSelect={onSelect}
-                  />
-                </SidebarGroupContent>
-              </SidebarGroup>
-            </>
-          )}
-          {dragPreview ? (
-            <SessionDragPreview
-              point={dragPreviewPointRef.current}
-              preview={dragPreview}
-              previewRef={dragPreviewRef}
-            />
-          ) : null}
-        </SidebarContent>
-        <SidebarFooter>
-          <div className="flex items-center gap-1">
-            <RailThemeToggle />
-            <RailLanguageToggle />
-            <div className="flex-1" />
-            <Button
-              aria-label={t("settings.title")}
-              size="icon"
-              tabIndex={-1}
-              variant="ghost"
-              onClick={() => openSettingsDialog()}
-            >
-              <Settings />
-            </Button>
-          </div>
-        </SidebarFooter>
-      </Sidebar>
+                  {chatSessions.length > 0 || sessions.length === 0 || (isDraggingPinned && unpinnedSessions.length === 0) ? (
+                    <SidebarGroup className="px-2 py-0.5">
+                      <CollapsibleSessionGroupLabel
+                        collapsed={chatCollapsed}
+                        icon="chat"
+                        label={t("session.chats")}
+                        onToggle={() => toggleGroupCollapsed("chat")}
+                      />
+                      {!chatCollapsed ? (
+                        <SidebarGroupContent className={cn(isDraggingPinned && chatSessions.length === 0 && "min-h-8")}>
+                          <SessionItems
+                            deletePending={deletePending}
+                            selectedSessionID={selectedSessionID}
+                            sessions={chatSessions}
+                            showEmptyState={sessions.length === 0}
+                            draggingSessionID={draggingSessionID}
+                            dropIndex={null}
+                            showEmptyDropTarget={Boolean(isDraggingPinned && chatSessions.length === 0 && sessions.length > 0)}
+                            onDelete={onDelete}
+                            onOpenSplit={onOpenSplit}
+                            onPinChange={onPinChange}
+                            onPointerDragCancel={clearDragState}
+                            onPointerDragEnd={handlePointerDrop}
+                            onPointerDragMove={handlePointerDragMove}
+                            onPointerDragStart={handlePointerDragStart}
+                            onRename={onRename}
+                            onSelect={onSelect}
+                          />
+                        </SidebarGroupContent>
+                      ) : null}
+                    </SidebarGroup>
+                  ) : null}
+                  {projectGroups.map((group) => (
+                    <SidebarGroup key={group.key} className="px-2 py-0.5">
+                      <CollapsibleSessionGroupLabel
+                        collapsed={collapsedGroups.has(`project:${group.key}`)}
+                        icon="project"
+                        label={group.label}
+                        title={group.label}
+                        onToggle={() => toggleGroupCollapsed(`project:${group.key}`)}
+                      />
+                      {!collapsedGroups.has(`project:${group.key}`) ? (
+                        <SidebarGroupContent>
+                          <SessionItems
+                            deletePending={deletePending}
+                            selectedSessionID={selectedSessionID}
+                            sessions={group.sessions}
+                            showEmptyState={false}
+                            draggingSessionID={draggingSessionID}
+                            dropIndex={null}
+                            showEmptyDropTarget={false}
+                            onDelete={onDelete}
+                            onOpenSplit={onOpenSplit}
+                            onPinChange={onPinChange}
+                            onPointerDragCancel={clearDragState}
+                            onPointerDragEnd={handlePointerDrop}
+                            onPointerDragMove={handlePointerDragMove}
+                            onPointerDragStart={handlePointerDragStart}
+                            onRename={onRename}
+                            onSelect={onSelect}
+                          />
+                        </SidebarGroupContent>
+                      ) : null}
+                    </SidebarGroup>
+                  ))}
+                </div>
+              </>
+            )}
+            {dragPreview ? (
+              <SessionDragPreview
+                point={dragPreviewPointRef.current}
+                preview={dragPreview}
+                previewRef={dragPreviewRef}
+              />
+            ) : null}
+          </SidebarContent>
+          <SidebarFooter>
+            <div className="flex items-center gap-1">
+              <RailThemeToggle />
+              <RailLanguageToggle />
+              <div className="flex-1" />
+              <Button
+                aria-label={t("settings.title")}
+                size="icon"
+                tabIndex={-1}
+                variant="ghost"
+                onClick={() => openSettingsDialog()}
+              >
+                <Settings />
+              </Button>
+            </div>
+          </SidebarFooter>
+        </Sidebar>
       </SidebarProvider>
     </RailOverlayHoldContext.Provider>
   );
@@ -951,6 +1103,40 @@ function SessionDragPreview({
       <div className="truncate">{preview.title}</div>
     </div>,
     document.body,
+  );
+}
+
+function CollapsibleSessionGroupLabel({
+  collapsed,
+  icon,
+  label,
+  title,
+  onToggle,
+}: {
+  collapsed: boolean;
+  icon: "chat" | "pinned" | "project";
+  label: string;
+  title?: string;
+  onToggle: () => void;
+}) {
+  const Icon = icon === "pinned" ? Pin : icon === "chat" ? MessageSquareText : Package;
+  return (
+    <SidebarGroupLabel asChild className="h-8 px-1.5 text-[13px]" title={title || label}>
+      <button
+        className="group w-full cursor-pointer gap-1 pr-1 text-left hover:text-sidebar-foreground"
+        type="button"
+        onClick={onToggle}
+      >
+        <Icon className={cn("size-3.5 shrink-0 text-sidebar-foreground/60", icon === "pinned" && "rotate-45")} />
+        <span className="min-w-0 truncate">{label}</span>
+        <ChevronRight
+          className={cn(
+            "size-3.5 shrink-0 opacity-0 transition-[opacity,transform] group-hover:opacity-100 group-focus-visible:opacity-100",
+            !collapsed && "rotate-90",
+          )}
+        />
+      </button>
+    </SidebarGroupLabel>
   );
 }
 
@@ -1358,8 +1544,8 @@ function SessionItem({
               "min-w-0 px-0 font-normal text-muted-foreground",
               actionsAlwaysVisible ? "right-8" : "right-2",
               !actionsAlwaysVisible &&
-                !suppressInteractiveState &&
-                "group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0",
+              !suppressInteractiveState &&
+              "group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0",
               actionsOpen && "opacity-0",
             )}
           >
@@ -1373,8 +1559,8 @@ function SessionItem({
                   "right-1.5 rounded-sm bg-transparent text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-0",
                   actionsAlwaysVisible && "opacity-100",
                   !actionsAlwaysVisible &&
-                    suppressInteractiveState &&
-                    "group-hover/menu-item:opacity-0 hover:bg-transparent hover:text-muted-foreground md:opacity-0",
+                  suppressInteractiveState &&
+                  "group-hover/menu-item:opacity-0 hover:bg-transparent hover:text-muted-foreground md:opacity-0",
                   actionsOpen && "opacity-100 md:opacity-100",
                 )}
                 showOnHover={!actionsAlwaysVisible}
@@ -1397,7 +1583,7 @@ function SessionItem({
               }}
             >
               <DropdownMenuItem className="whitespace-nowrap" onSelect={() => onPinChange(!session.pinned)}>
-                <Pin />
+                <Pin className="rotate-45" />
                 {session.pinned ? t("session.unpin") : t("session.pin")}
               </DropdownMenuItem>
               <DropdownMenuItem className="whitespace-nowrap" onSelect={onOpenSplit}>
@@ -1443,6 +1629,11 @@ function SessionItem({
       ) : null}
     </SidebarMenuItem>
   );
+}
+
+function basename(path: string) {
+  const normalized = path.replace(/\/+$/, "");
+  return normalized.split(/[\\/]/).filter(Boolean).pop() || path;
 }
 
 function SessionRunningSlot({ phase, running }: { phase?: TurnPhaseState; running: boolean }) {

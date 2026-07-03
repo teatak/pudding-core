@@ -56,6 +56,7 @@ import {
   type ClosedCanvasItem,
   type ContentPart,
   type DailyUsageStat,
+  type LocalFolder,
   type Message,
   type PendingApproval,
   type ConversationTurn,
@@ -392,9 +393,12 @@ export function submitMessage(
   });
 }
 
-export async function uploadAttachment(token: string, sessionID: string, file: File): Promise<Attachment> {
+export async function uploadAttachment(token: string, sessionID: string, file: File, options?: { origin?: "temp" }): Promise<Attachment> {
   const form = new FormData();
   form.append("file", file);
+  if (options?.origin) {
+    form.append("origin", options.origin);
+  }
   const response = await fetch(apiURL(`/sessions/${encodeURIComponent(sessionID)}/attachments`), {
     method: "POST",
     headers: authHeaders(token),
@@ -406,6 +410,13 @@ export async function uploadAttachment(token: string, sessionID: string, file: F
     throw new APIError(response.status, code);
   }
   return attachment.parse(payload);
+}
+
+export async function revealDesktopPath(token: string, path: string): Promise<void> {
+  await request(token, "/desktop/reveal-file", z.object({ ok: z.boolean() }), {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
 }
 
 export async function cancelTurn(token: string, sessionID: string): Promise<void> {
@@ -638,5 +649,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { AppConnection, AppDefinition, AppSkillDetail, Attachment, BuiltinTool, BrowserMCPSession, ContentPart, DailyUsageStat, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
+export type { AppConnection, AppDefinition, AppSkillDetail, Attachment, BuiltinTool, BrowserMCPSession, ContentPart, DailyUsageStat, LocalFolder, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
 export { createProviderRequest, patchProviderRequest };

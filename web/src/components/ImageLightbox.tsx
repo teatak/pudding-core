@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef, type PointerEvent, type WheelEvent } from "react";
 
 import {
   Dialog,
@@ -18,6 +18,10 @@ export type ImageLightboxItem = {
   url: string;
 };
 
+const lightboxDragThresholdPx = 56;
+const lightboxWheelThresholdPx = 36;
+const lightboxWheelCooldownMs = 420;
+
 export function ImageLightbox({
   images,
   openIndex,
@@ -31,6 +35,8 @@ export function ImageLightbox({
   const currentIndex = open ? openIndex : 0;
   const current = images[currentIndex];
   const multiple = images.length > 1;
+  const pointerSwipeRef = useRef<{ id: number; startX: number; startY: number } | null>(null);
+  const wheelAtRef = useRef(0);
   const goTo = useCallback(
     (delta: number) => {
       if (!multiple) {
@@ -40,6 +46,54 @@ export function ImageLightbox({
       onOpenIndexChange(next);
     },
     [currentIndex, images.length, multiple, onOpenIndexChange],
+  );
+  const handleWheel = useCallback(
+    (event: WheelEvent<HTMLDivElement>) => {
+      if (!multiple || event.currentTarget.querySelector("[data-lightbox-thumbnails]")?.contains(event.target as Node)) {
+        return;
+      }
+      const absX = Math.abs(event.deltaX);
+      const absY = Math.abs(event.deltaY);
+      if (absX < lightboxWheelThresholdPx || absX < absY * 1.2) {
+        return;
+      }
+      const now = performance.now();
+      if (now - wheelAtRef.current < lightboxWheelCooldownMs) {
+        return;
+      }
+      event.preventDefault();
+      wheelAtRef.current = now;
+      goTo(event.deltaX > 0 ? 1 : -1);
+    },
+    [goTo, multiple],
+  );
+  const handlePointerDown = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      if (!multiple || event.button !== 0) {
+        return;
+      }
+      pointerSwipeRef.current = { id: event.pointerId, startX: event.clientX, startY: event.clientY };
+      event.currentTarget.setPointerCapture(event.pointerId);
+    },
+    [multiple],
+  );
+  const finishPointerSwipe = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      const swipe = pointerSwipeRef.current;
+      if (!swipe || swipe.id !== event.pointerId) {
+        return;
+      }
+      pointerSwipeRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      const dx = event.clientX - swipe.startX;
+      const dy = event.clientY - swipe.startY;
+      if (Math.abs(dx) >= lightboxDragThresholdPx && Math.abs(dx) > Math.abs(dy) * 1.25) {
+        goTo(dx < 0 ? 1 : -1);
+      }
+    },
+    [goTo],
   );
 
   useEffect(() => {
@@ -71,7 +125,7 @@ export function ImageLightbox({
       >
         <DialogTitle className="sr-only">图片预览</DialogTitle>
         <DialogDescription className="sr-only">放大查看图片，可用左右方向键切换。</DialogDescription>
-        <div className="relative flex h-full min-h-0 flex-col">
+        <div className="relative flex h-full min-h-0 flex-col" onWheel={handleWheel}>
           <div className="absolute inset-x-0 top-0 z-10 flex min-w-0 items-center gap-3 bg-gradient-to-b from-black/65 to-transparent px-3 py-3">
             <div className="min-w-0 text-sm">
               <div className="truncate font-medium">{current.name}</div>
@@ -90,7 +144,12 @@ export function ImageLightbox({
             </DialogClose>
           </div>
 
-          <div className="flex min-h-0 flex-1 items-center justify-center px-3 pt-12 pb-16">
+          <div
+            className={cn("flex min-h-0 flex-1 items-center justify-center px-3 pt-12 pb-16", multiple && "cursor-grab active:cursor-grabbing")}
+            onPointerCancel={finishPointerSwipe}
+            onPointerDown={handlePointerDown}
+            onPointerUp={finishPointerSwipe}
+          >
             <img
               key={current.id}
               alt={current.name}
@@ -123,7 +182,7 @@ export function ImageLightbox({
                 <ChevronRight />
               </Button>
               <div className="absolute inset-x-0 bottom-0 z-10 flex justify-center bg-gradient-to-t from-black/70 to-transparent px-3 py-3">
-                <div className="flex max-w-full gap-2 overflow-x-auto">
+                <div className="flex max-w-full gap-2 overflow-x-auto" data-lightbox-thumbnails="">
                   {images.map((image, index) => (
                     <button
                       key={image.id}

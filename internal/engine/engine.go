@@ -148,6 +148,7 @@ type SubmitInput struct {
 	ClientMessageID string
 	Text            string
 	Attachments     []store.Attachment
+	LocalFolders    []store.LocalFolder
 	Kind            string
 	ReasoningEffort string
 }
@@ -202,17 +203,18 @@ type resolvedModel struct {
 
 func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, error) {
 	in.Attachments = store.NormalizeAttachments(in.Attachments)
+	in.LocalFolders = store.NormalizeLocalFolders(in.LocalFolders)
 	kind := strings.TrimSpace(in.Kind)
 	if in.ClientMessageID == "" {
 		return nil, ErrEmptyInput
 	}
 	switch kind {
 	case "", "user":
-		if strings.TrimSpace(in.Text) == "" && len(in.Attachments) == 0 {
+		if strings.TrimSpace(in.Text) == "" && len(in.Attachments) == 0 && len(in.LocalFolders) == 0 {
 			return nil, ErrEmptyInput
 		}
 	case "system":
-		if strings.TrimSpace(in.Text) == "" || len(in.Attachments) > 0 {
+		if strings.TrimSpace(in.Text) == "" || len(in.Attachments) > 0 || len(in.LocalFolders) > 0 {
 			return nil, ErrEmptyInput
 		}
 	default:
@@ -253,16 +255,17 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	}
 
 	res, err := e.store.BeginTurn(ctx, store.BeginTurnInput{
-		SessionID:       in.SessionID,
-		TurnID:          store.NewID("turn"),
-		UserMessageID:   store.NewID("msg"),
-		ClientMessageID: in.ClientMessageID,
-		UserText:        in.Text,
-		UserAttachments: in.Attachments,
-		Provider:        resolved.providerName,
-		Model:           resolved.model,
-		Mode:            resolved.mode,
-		ModelConfig:     resolved.configJSON,
+		SessionID:        in.SessionID,
+		TurnID:           store.NewID("turn"),
+		UserMessageID:    store.NewID("msg"),
+		ClientMessageID:  in.ClientMessageID,
+		UserText:         in.Text,
+		UserAttachments:  in.Attachments,
+		UserLocalFolders: in.LocalFolders,
+		Provider:         resolved.providerName,
+		Model:            resolved.model,
+		Mode:             resolved.mode,
+		ModelConfig:      resolved.configJSON,
 	})
 	if errors.Is(err, store.ErrTurnRunning) {
 		return e.queueSubmit(ctx, in, resolved)
@@ -410,6 +413,7 @@ func (e *Engine) queueSubmit(ctx context.Context, in SubmitInput, resolved *reso
 		ClientMessageID: in.ClientMessageID,
 		Text:            strings.TrimSpace(in.Text),
 		Attachments:     in.Attachments,
+		LocalFolders:    in.LocalFolders,
 		Provider:        resolved.providerName,
 		Model:           resolved.model,
 		Mode:            resolved.mode,

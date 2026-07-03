@@ -87,6 +87,36 @@ func TestBuildIncludesAttachmentSummary(t *testing.T) {
 	}
 }
 
+func TestBuildIncludesLocalFoldersTag(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "s1",
+		TurnID:          "t1",
+		UserMessageID:   "m1",
+		ClientMessageID: "c1",
+		UserText:        "scan this",
+		UserLocalFolders: []store.LocalFolder{{
+			ID:     "folder_1",
+			Name:   "files",
+			Path:   "/Users/me/files",
+			Origin: "local_path",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req, err := New(ms, nil).Build(ctx, "s1", "m", string(store.ModeChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 1 || !strings.Contains(req.Messages[0].Text, "<pudding-local-folders version=\"1\">") || !strings.Contains(req.Messages[0].Text, `"/Users/me/files"`) {
+		t.Fatalf("local folder tag missing from provider context: %+v", req.Messages)
+	}
+}
+
 func TestBuildIncludesAttachmentToolPathWhenAvailable(t *testing.T) {
 	ms := memstore.New()
 	ctx := context.Background()
@@ -115,6 +145,36 @@ func TestBuildIncludesAttachmentToolPathWhenAvailable(t *testing.T) {
 	}
 	if len(req.Messages) != 1 || !strings.Contains(req.Messages[0].Text, "Local path for tools: ") || !strings.Contains(req.Messages[0].Text, "demo.wav") {
 		t.Fatalf("attachment tool path missing from fallback: %+v", req.Messages)
+	}
+}
+
+func TestBuildIncludesTempAttachmentToolScope(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	home := t.TempDir()
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := attachment.NewService(home).StoreReader(attachment.DraftSessionID, "pasted-text.txt", "text/plain", bytes.NewReader([]byte("long text")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored.Origin = attachment.OriginTemp
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "s1",
+		TurnID:          "t1",
+		UserMessageID:   "m1",
+		ClientMessageID: "c1",
+		UserAttachments: []store.Attachment{stored},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req, err := New(ms, nil, WithAttachmentHome(home)).Build(ctx, "s1", "m", string(store.ModeChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 1 || !strings.Contains(req.Messages[0].Text, "File tool scope: temp") || !strings.Contains(req.Messages[0].Text, "File tool path: attachments/") {
+		t.Fatalf("temp attachment tool scope missing from fallback: %+v", req.Messages)
 	}
 }
 

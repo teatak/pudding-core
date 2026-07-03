@@ -2,9 +2,11 @@ package api
 
 import (
 	"errors"
+	"io"
 	"mime"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/teatak/cart/v3"
@@ -52,6 +54,13 @@ func (s *Server) uploadAttachment(c *cart.Context) error {
 		c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "attachment_too_large"})
 		return nil
 	}
+	origin := strings.TrimSpace(c.Request.FormValue("origin"))
+	if origin != "" && origin != attachment.OriginTemp {
+		return badRequest(c, "invalid attachment origin")
+	}
+	if origin == attachment.OriginTemp && sessionID != attachment.DraftSessionID {
+		return badRequest(c, "temp attachments must use draft session")
+	}
 	mimeType := header.Header.Get("Content-Type")
 	if cleaned, _, err := mime.ParseMediaType(mimeType); err == nil {
 		mimeType = cleaned
@@ -67,6 +76,9 @@ func (s *Server) uploadAttachment(c *cart.Context) error {
 			return nil
 		}
 		return s.fail(c, err)
+	}
+	if origin == attachment.OriginTemp {
+		stored.Origin = attachment.OriginTemp
 	}
 	c.JSON(http.StatusOK, stored)
 	return nil
@@ -92,7 +104,7 @@ func (s *Server) getAttachment(c *cart.Context) error {
 		c.JSON(http.StatusNotFound, map[string]string{"error": "attachment_not_found"})
 		return nil
 	}
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		c.JSON(http.StatusNotFound, map[string]string{"error": "attachment_not_found"})
 		return nil
@@ -100,12 +112,30 @@ func (s *Server) getAttachment(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
-	contentType := http.DetectContentType(data)
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return s.fail(c, err)
+	}
+	if info.IsDir() {
+		c.JSON(http.StatusNotFound, map[string]string{"error": "attachment_not_found"})
+		return nil
+	}
+	var header [512]byte
+	n, readErr := file.Read(header[:])
+	if readErr != nil && !errors.Is(readErr, io.EOF) {
+		return s.fail(c, readErr)
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return s.fail(c, err)
+	}
+	contentType := http.DetectContentType(header[:n])
 	if extMIME := attachment.MIMEFromExt(path); extMIME != "" {
 		contentType = extMIME
 	}
 	c.Header("Cache-Control", "private, max-age=300")
-	c.Data(http.StatusOK, contentType, data)
+	c.Header("Content-Type", contentType)
+	http.ServeContent(c.Response, c.Request, filepath.Base(path), info.ModTime(), file)
 	return nil
 }
 
@@ -133,6 +163,19 @@ func (s *Server) normalizeSubmitAttachments(sessionID string, values []store.Att
 }
 
 func (s *Server) normalizeSubmitAttachment(svc *attachment.Service, sessionID string, item store.Attachment) (store.Attachment, error) {
+	if item.Origin == attachment.OriginTemp {
+		if !strings.Contains(item.AttachmentKey, "/"+attachment.DraftSessionID+"/") {
+			return store.Attachment{}, errInvalidAttachment
+		}
+		if ok, err := attachmentFileExists(svc, attachment.DraftSessionID, item.AttachmentKey); !ok || err != nil {
+			if err != nil {
+				return store.Attachment{}, err
+			}
+			return store.Attachment{}, errInvalidAttachment
+		}
+		item.URL = attachment.URL(attachment.DraftSessionID, item.AttachmentKey)
+		return item, nil
+	}
 	if ok, err := attachmentFileExists(svc, sessionID, item.AttachmentKey); ok || err != nil {
 		if err != nil {
 			return store.Attachment{}, err

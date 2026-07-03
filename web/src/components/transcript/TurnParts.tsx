@@ -82,7 +82,16 @@ export function TurnParts({
 }
 
 export function partsFromMessages(messages: Message[]): TurnPartVM[] {
-  return withPartKeys(mergeToolParts(messages.flatMap((message) => message.parts.map(partFromContentPart))));
+  return withPartKeys(
+    mergeToolParts(
+      messages.flatMap((message) =>
+        message.parts.flatMap((part) => {
+          const viewPart = partFromContentPart(part);
+          return viewPart ? [viewPart] : [];
+        }),
+      ),
+    ),
+  );
 }
 
 export function assistantTextFromMessages(messages: Message[]) {
@@ -169,7 +178,7 @@ function partsFromText(text: string): TurnPartVM[] {
   return text ? [{ type: "text", text }] : [];
 }
 
-function partFromContentPart(part: ContentPart): TurnPartVM {
+function partFromContentPart(part: ContentPart): TurnPartVM | null {
   switch (part.type) {
     case "text":
       return { type: "text", text: part.text };
@@ -189,6 +198,8 @@ function partFromContentPart(part: ContentPart): TurnPartVM {
       };
     case "attachment":
       return { type: "attachment", attachment: part };
+    case "local_folder":
+      return null;
   }
 }
 

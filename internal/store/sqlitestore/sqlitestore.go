@@ -57,13 +57,18 @@ func Open(path string) (*Store, error) {
 }
 
 func ensureSchema(db *sql.DB) error {
-	has, err := tableHasColumn(db, "queued_inputs", "attachments")
-	if err != nil {
+	if has, err := tableHasColumn(db, "queued_inputs", "attachments"); err != nil {
 		return err
-	}
-	if !has {
+	} else if !has {
 		if _, err := db.Exec(`ALTER TABLE queued_inputs ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'`); err != nil {
 			return fmt.Errorf("sqlite: migrate queued_inputs.attachments: %w", err)
+		}
+	}
+	if has, err := tableHasColumn(db, "queued_inputs", "local_folders"); err != nil {
+		return err
+	} else if !has {
+		if _, err := db.Exec(`ALTER TABLE queued_inputs ADD COLUMN local_folders TEXT NOT NULL DEFAULT '[]'`); err != nil {
+			return fmt.Errorf("sqlite: migrate queued_inputs.local_folders: %w", err)
 		}
 	}
 	return nil
@@ -316,7 +321,7 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 			Role:            store.RoleUser,
 			Kind:            store.MessageKindText,
 			Text:            in.UserText,
-			Parts:           store.UserInputParts(in.UserText, in.UserAttachments),
+			Parts:           store.UserInputParts(in.UserText, in.UserAttachments, in.UserLocalFolders),
 			TurnIndex:       0,
 			ClientMessageID: in.ClientMessageID,
 			CreatedAt:       now,
@@ -471,6 +476,7 @@ func (s *Store) QueueInput(ctx context.Context, in store.QueueInputInput) (*stor
 			ClientMessageID: in.ClientMessageID,
 			Text:            in.Text,
 			Attachments:     store.NormalizeAttachments(in.Attachments),
+			LocalFolders:    store.NormalizeLocalFolders(in.LocalFolders),
 			Status:          store.QueuedInputQueued,
 			Provider:        in.Provider,
 			Model:           in.Model,
@@ -480,8 +486,8 @@ func (s *Store) QueueInput(ctx context.Context, in store.QueueInputInput) (*stor
 			UpdatedAt:       now,
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO queued_inputs(session_id,client_message_id,text,attachments,status,provider,model,mode,model_config,turn_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-			input.SessionID, input.ClientMessageID, input.Text, encodeAttachments(input.Attachments), input.Status, input.Provider, input.Model, input.Mode, string(input.ModelConfig), input.TurnID, unixMS(now), unixMS(now),
+			`INSERT INTO queued_inputs(session_id,client_message_id,text,attachments,local_folders,status,provider,model,mode,model_config,turn_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			input.SessionID, input.ClientMessageID, input.Text, encodeAttachments(input.Attachments), encodeLocalFolders(input.LocalFolders), input.Status, input.Provider, input.Model, input.Mode, string(input.ModelConfig), input.TurnID, unixMS(now), unixMS(now),
 		); err != nil {
 			return err
 		}
@@ -516,7 +522,7 @@ func (s *Store) ListQueuedInputs(ctx context.Context, sessionID string) ([]*stor
 		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx,
-		`SELECT session_id,client_message_id,text,attachments,status,provider,model,mode,model_config,turn_id,created_at,updated_at
+		`SELECT session_id,client_message_id,text,attachments,local_folders,status,provider,model,mode,model_config,turn_id,created_at,updated_at
 		FROM queued_inputs
 		WHERE session_id=? AND status IN (?,?)
 		ORDER BY created_at ASC, rowid ASC`,
@@ -640,7 +646,7 @@ func (s *Store) PromoteNextQueuedInput(ctx context.Context, in store.PromoteQueu
 					Role:            store.RoleUser,
 					Kind:            store.MessageKindText,
 					Text:            input.Text,
-					Parts:           store.UserInputParts(input.Text, input.Attachments),
+					Parts:           store.UserInputParts(input.Text, input.Attachments, input.LocalFolders),
 					TurnIndex:       0,
 					ClientMessageID: input.ClientMessageID,
 					CreatedAt:       now,
@@ -1474,7 +1480,7 @@ func getUserMessageByClientMessageIDTx(ctx context.Context, tx *sql.Tx, sessionI
 
 func getQueuedInputTx(ctx context.Context, tx *sql.Tx, sessionID, clientMessageID string) (*store.QueuedInput, error) {
 	row := tx.QueryRowContext(ctx,
-		`SELECT session_id,client_message_id,text,attachments,status,provider,model,mode,model_config,turn_id,created_at,updated_at
+		`SELECT session_id,client_message_id,text,attachments,local_folders,status,provider,model,mode,model_config,turn_id,created_at,updated_at
 		FROM queued_inputs WHERE session_id=? AND client_message_id=?`,
 		sessionID, clientMessageID,
 	)
@@ -1487,7 +1493,7 @@ func getQueuedInputTx(ctx context.Context, tx *sql.Tx, sessionID, clientMessageI
 
 func firstQueuedInputTx(ctx context.Context, tx *sql.Tx, sessionID string) (*store.QueuedInput, error) {
 	row := tx.QueryRowContext(ctx,
-		`SELECT session_id,client_message_id,text,attachments,status,provider,model,mode,model_config,turn_id,created_at,updated_at
+		`SELECT session_id,client_message_id,text,attachments,local_folders,status,provider,model,mode,model_config,turn_id,created_at,updated_at
 		FROM queued_inputs
 		WHERE session_id=? AND status IN (?,?,?)
 		ORDER BY created_at ASC, rowid ASC
@@ -1636,6 +1642,7 @@ func scanMessage(row messageScanner) (*store.Message, error) {
 func scanQueuedInput(row messageScanner) (*store.QueuedInput, error) {
 	var input store.QueuedInput
 	var attachments string
+	var localFolders string
 	var modelConfig string
 	var created, updated int64
 	err := row.Scan(
@@ -1643,6 +1650,7 @@ func scanQueuedInput(row messageScanner) (*store.QueuedInput, error) {
 		&input.ClientMessageID,
 		&input.Text,
 		&attachments,
+		&localFolders,
 		&input.Status,
 		&input.Provider,
 		&input.Model,
@@ -1656,6 +1664,7 @@ func scanQueuedInput(row messageScanner) (*store.QueuedInput, error) {
 		return nil, err
 	}
 	input.Attachments = decodeAttachments(attachments)
+	input.LocalFolders = decodeLocalFolders(localFolders)
 	input.ModelConfig = normalizeJSON(json.RawMessage(modelConfig))
 	input.Mode = store.NormalizeAgentMode(input.Mode)
 	if input.Mode == "" {
@@ -1818,6 +1827,26 @@ func decodeAttachments(raw string) []store.Attachment {
 		_ = json.Unmarshal([]byte(raw), &attachments)
 	}
 	return store.NormalizeAttachments(attachments)
+}
+
+func encodeLocalFolders(folders []store.LocalFolder) string {
+	normalized := store.NormalizeLocalFolders(folders)
+	if len(normalized) == 0 {
+		return "[]"
+	}
+	data, err := json.Marshal(normalized)
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
+}
+
+func decodeLocalFolders(raw string) []store.LocalFolder {
+	var folders []store.LocalFolder
+	if raw != "" {
+		_ = json.Unmarshal([]byte(raw), &folders)
+	}
+	return store.NormalizeLocalFolders(folders)
 }
 
 func encodeStringSlice(values []string) string {

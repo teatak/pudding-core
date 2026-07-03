@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowUp, CircleAlert, FileText, FolderOpen, Loader2, Upload, X } from "lucide-react";
+import { ArrowUp, CircleAlert, FileText, FolderOpen, Loader2, Pause, Play, Upload, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -26,6 +26,7 @@ import {
   submitMessage,
   updateSession,
   uploadAttachment,
+  revealDesktopPath,
   type Attachment,
   type ProviderProfile,
   type Session,
@@ -44,13 +45,14 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useComposerSelectionGuard } from "@/hooks/useComposerSelectionGuard";
 import { useImeCompositionGuard } from "@/hooks/useImeCompositionGuard";
 import { useI18n } from "@/i18n";
 import { attachmentResourceURL } from "@/lib/attachmentURL";
+import { createPastedTextAttachmentFile, shouldAttachPastedText } from "@/lib/clipboardTextAttachment";
 import { bindDesktopFileDrop, nativeFileDropLikelyAvailable } from "@/lib/desktopFileDrop";
 import { newClientID } from "@/lib/id";
 import {
-  appendLocalFolderPaths,
   createLocalFolderPath,
   droppedLocalItemsFromDataTransfer,
   type DroppedLocalItems,
@@ -72,6 +74,7 @@ const draftSchema = z.object({
 type DraftValue = z.infer<typeof draftSchema>;
 type DraftDroppedFilesBatch = DroppedLocalItems & {
   attachments?: Attachment[];
+  failedFiles?: string[];
   failedFileCount?: number;
   nonce: number;
 };
@@ -129,6 +132,7 @@ export function DraftConversation({ token }: { token: string }) {
         droppedFilesNonceRef.current += 1;
         setDroppedFiles({
           attachments: drop.attachments,
+          failedFiles: drop.failedFiles,
           failedFileCount: drop.failedFileCount,
           files: [],
           folderPathUnavailable: false,
@@ -389,6 +393,7 @@ function DraftComposer({
   const quickSubmitIDRef = useRef<number | null>(null);
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
   const mascotGazeRafRef = useRef(0);
+  const selectionGuardRef = useComposerSelectionGuard<HTMLDivElement>();
   const form = useForm<DraftValue>({
     resolver: zodResolver(draftSchema),
     defaultValues: { text: draftText },
@@ -476,7 +481,7 @@ function DraftComposer({
   }, [attachments, setDraftAttachments, setDraftLocalFolders]);
 
   const addFiles = useCallback(
-    (files: File[]) => {
+    (files: File[], options?: { origin?: "temp" }) => {
       const nextFiles = files.filter((file) => file.size > 0);
       if (nextFiles.length === 0) {
         return;
@@ -493,7 +498,7 @@ function DraftComposer({
       onSubmitError(null);
       items.forEach((item, index) => {
         const file = nextFiles[index];
-        void uploadAttachment(token, draftAttachmentSessionID, file)
+        void uploadAttachment(token, draftAttachmentSessionID, file, options?.origin ? { origin: options.origin } : undefined)
           .then((attachment) => {
             setDraftAttachments((current) =>
               current.map((currentItem) =>
@@ -505,7 +510,7 @@ function DraftComposer({
           })
           .catch((error) => {
             console.warn("draft attachment upload failed", error);
-            toast.error(draftAttachmentUploadErrorMessage(error, t));
+            toast.error(uploadFailedMessage(item.name, draftAttachmentUploadErrorMessage(error, t)));
             setDraftAttachments((current) => {
               const failed = current.find((currentItem) => currentItem.id === item.id);
               if (failed) {
@@ -574,6 +579,12 @@ function DraftComposer({
   const removeLocalFolder = useCallback((id: string) => {
     setDraftLocalFolders((current) => current.filter((folder) => folder.id !== id));
   }, [setDraftLocalFolders]);
+  const revealLocalPath = useCallback((path: string) => {
+    if (!path.trim()) {
+      return;
+    }
+    void revealDesktopPath(token, path).catch(() => toast.error(t("composer.revealFailed")));
+  }, [t, token]);
   const pickAttachment = useCallback(() => {
     if (pickingAttachment) {
       return;
@@ -641,7 +652,7 @@ function DraftComposer({
       addLocalFolderPaths(droppedFiles.folderPaths);
     }
     if (droppedFiles.failedFileCount) {
-      toast.error(t("composer.uploadFailed"));
+      toast.error(dropFailedMessage(droppedFiles.failedFiles, t));
     }
     if (droppedFiles.folderPathUnavailable) {
       toast.error(t("composer.folderDropPathUnavailable"));
@@ -671,7 +682,7 @@ function DraftComposer({
   }, [onMascotInputGazeChange]);
 
   const submitMutation = useMutation({
-    mutationFn: async (value: DraftValue & { attachments: Attachment[] }) => {
+    mutationFn: async (value: DraftValue & { attachments: Attachment[]; localFolders: LocalFolderPath[] }) => {
       const clientMessageID = draftIDRef.current;
       const activeReasoningEffort = reasoningEffort && reasoningOptions.includes(reasoningEffort) ? reasoningEffort : "";
       if (!modelValue.provider || !modelValue.model) {
@@ -701,6 +712,7 @@ function DraftComposer({
         status: "submitting",
         text: value.text,
         attachments: value.attachments,
+        localFolders: value.localFolders,
         createdAt: new Date().toISOString(),
       });
       startSubmittingTurn(created.id, clientMessageID);
@@ -710,6 +722,7 @@ function DraftComposer({
           reasoningEffort: activeReasoningEffort || undefined,
           text: value.text,
           attachments: value.attachments,
+          localFolders: value.localFolders,
         });
         if (result.queued || !result.turnID) {
           clearSubmittingTurn(created.id, clientMessageID);
@@ -771,14 +784,15 @@ function DraftComposer({
 
   const submitText = useCallback(
     (raw: string) => {
-      const text = appendLocalFolderPaths(raw, localFolders);
+      const text = raw.trim();
       const attachmentsToSubmit = attachments.flatMap((item) => (item.status === "uploaded" && item.attachment ? [item.attachment] : []));
+      const localFoldersToSubmit = localFolders;
       const hasPending = attachments.some((item) => item.status === "uploading");
-      if ((!text && attachmentsToSubmit.length === 0) || !modelReady || submitMutation.isPending || hasPending) {
+      if ((!text && attachmentsToSubmit.length === 0 && localFoldersToSubmit.length === 0) || !modelReady || submitMutation.isPending || hasPending) {
         return;
       }
       onSubmitError(null);
-      submitMutation.mutate({ text, attachments: attachmentsToSubmit });
+      submitMutation.mutate({ text, attachments: attachmentsToSubmit, localFolders: localFoldersToSubmit });
     },
     [attachments, localFolders, modelReady, onSubmitError, submitMutation],
   );
@@ -827,11 +841,17 @@ function DraftComposer({
   };
   const handleTextPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const files = Array.from(event.clipboardData.files || []);
-    if (files.length === 0) {
+    if (files.length > 0) {
+      event.preventDefault();
+      addFiles(files);
+      return;
+    }
+    const text = event.clipboardData.getData("text/plain");
+    if (!shouldAttachPastedText(text)) {
       return;
     }
     event.preventDefault();
-    addFiles(files);
+    addFiles([createPastedTextAttachmentFile(text)], { origin: "temp" });
   };
   const handleTextKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "@" && !event.metaKey && !event.ctrlKey && !event.altKey) {
@@ -883,7 +903,10 @@ function DraftComposer({
     <>
       <form className="relative shrink-0" onSubmit={form.handleSubmit(submitDraft)}>
         <ChatColumn>
-          <div className="relative rounded-3xl border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/25">
+          <div
+            ref={selectionGuardRef}
+            className="relative rounded-3xl border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/25"
+          >
             {addMenuVisible ? (
               <ComposerAddActionMenu
                 actions={addMenuActions}
@@ -902,15 +925,6 @@ function DraftComposer({
             />
             {attachments.length > 0 || localFolders.length > 0 ? (
               <div className="flex flex-wrap gap-2 px-3 pt-3">
-                {localFolders.map((folder) => (
-                  <DraftLocalFolderChip
-                    key={folder.id}
-                    folder={folder}
-                    label={t("composer.folderLabel")}
-                    removeLabel={t("composer.removeFolder")}
-                    onRemove={() => removeLocalFolder(folder.id)}
-                  />
-                ))}
                 {attachments.map((item) => (
                   <DraftAttachmentChip
                     key={item.id}
@@ -920,7 +934,18 @@ function DraftComposer({
                     removeLabel={t("composer.removeAttachment")}
                     token={token}
                     onPreview={setAttachmentPreviewIndex}
+                    onRevealSource={revealLocalPath}
                     onRemove={() => removeAttachment(item.id)}
+                  />
+                ))}
+                {localFolders.map((folder) => (
+                  <DraftLocalFolderChip
+                    key={folder.id}
+                    folder={folder}
+                    label={t("composer.folderLabel")}
+                    removeLabel={t("composer.removeFolder")}
+                    onReveal={() => revealLocalPath(folder.path)}
+                    onRemove={() => removeLocalFolder(folder.id)}
                   />
                 ))}
               </div>
@@ -1020,28 +1045,28 @@ function DraftLocalFolderChip({
   folder,
   label,
   removeLabel,
+  onReveal,
   onRemove,
 }: {
   folder: LocalFolderPath;
   label: string;
   removeLabel: string;
+  onReveal: () => void;
   onRemove: () => void;
 }) {
   return (
     <div
-      className="relative inline-flex h-20 min-w-56 max-w-full items-center gap-3 rounded-lg border border-border/70 bg-card px-3 pr-9 text-sm shadow-sm"
+      className="relative inline-flex h-10 max-w-full items-center gap-1.5 rounded-lg border border-border/70 bg-card pr-7 pl-2.5 text-sm whitespace-nowrap shadow-sm"
       title={folder.path}
     >
-      <span className="flex size-14 shrink-0 items-center justify-center rounded-md bg-muted/70 text-muted-foreground">
-        <FolderOpen className="size-7" strokeWidth={1.8} />
-      </span>
-      <span className="flex min-w-0 max-w-64 flex-1 flex-col justify-center">
-        <span className="truncate font-medium leading-6 text-foreground">{folder.name}</span>
-        <span className="truncate text-muted-foreground">{label}</span>
-      </span>
+      <button className="inline-flex min-w-0 items-center gap-1.5 text-left whitespace-nowrap" type="button" onClick={onReveal}>
+        <FolderOpen className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.8} />
+        <span className="min-w-0 truncate font-medium leading-5 text-foreground">{folder.name}</span>
+        <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">{label}</span>
+      </button>
       <Button
         aria-label={removeLabel}
-        className="absolute top-2 right-2 size-6 rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
+        className="absolute top-2 right-1.5 size-5 rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
         size="icon-xs"
         type="button"
         variant="ghost"
@@ -1060,6 +1085,7 @@ function DraftAttachmentChip({
   removeLabel,
   token,
   onPreview,
+  onRevealSource,
   onRemove,
 }: {
   item: DraftAttachment;
@@ -1068,16 +1094,18 @@ function DraftAttachmentChip({
   removeLabel: string;
   token: string;
   onPreview: (index: number) => void;
+  onRevealSource: (path: string) => void;
   onRemove: () => void;
 }) {
   const src = draftAttachmentImageSource(item, token);
   const image = src && isImageAttachmentLike(item.attachment?.mime || item.file?.type, item.name);
+  const audio = isAudioAttachmentLike(item.attachment?.mime || item.file?.type, item.name);
   const busy = item.status === "uploading";
   if (image) {
     return (
       <div
         className={cn(
-          "group relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border bg-muted/40 shadow-sm",
+          "group relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border bg-muted/40 shadow-sm",
           item.status === "error" ? "border-destructive/40" : "border-border/70",
         )}
         title={`${item.name} ${formatAttachmentSize(item.size)}`}
@@ -1102,7 +1130,7 @@ function DraftAttachmentChip({
         ) : null}
         <Button
           aria-label={removeLabel}
-          className="absolute top-2 right-2 z-10 size-6 rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
+          className="absolute top-1.5 right-1.5 z-10 size-5 rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
           disabled={locked}
           size="icon-xs"
           type="button"
@@ -1117,21 +1145,33 @@ function DraftAttachmentChip({
   return (
     <div
       className={cn(
-        "relative inline-flex h-20 min-w-56 max-w-full items-center gap-3 rounded-lg border bg-card px-3 pr-9 text-sm shadow-sm",
+        "relative inline-flex h-16 min-w-44 max-w-full items-center gap-2 rounded-lg border bg-card px-2.5 pr-8 text-sm shadow-sm",
+        item.attachment?.sourcePath && "cursor-pointer",
         item.status === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-border/70 text-muted-foreground",
       )}
       title={`${item.name} ${formatAttachmentSize(item.size)}`}
+      onClick={() => {
+        if (item.attachment?.sourcePath) {
+          onRevealSource(item.attachment.sourcePath);
+        }
+      }}
     >
-      <span className="flex size-14 shrink-0 items-center justify-center rounded-md bg-muted/70 text-muted-foreground">
-        {busy ? <Loader2 className="size-7 animate-spin" strokeWidth={1.8} /> : <FileText className="size-7" strokeWidth={1.8} />}
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted/70 text-muted-foreground">
+        {busy ? (
+          <Loader2 className="size-5 animate-spin" strokeWidth={1.8} />
+        ) : audio ? (
+          <DraftAudioPreviewButton label={item.name} src={draftAttachmentImageSource(item, token)} />
+        ) : (
+          <FileText className="size-5" strokeWidth={1.8} />
+        )}
       </span>
-      <span className="flex min-w-0 max-w-64 flex-1 flex-col justify-center">
-        <span className="truncate font-medium leading-6 text-foreground">{item.name}</span>
-        <span className="truncate text-muted-foreground">{attachmentKindLabel(item.name, item.attachment?.mime || item.file?.type)}</span>
+      <span className="flex min-w-0 max-w-52 flex-1 flex-col justify-center">
+        <span className="truncate font-medium leading-5 text-foreground">{item.name}</span>
+        <span className="truncate text-xs text-muted-foreground">{attachmentKindLabel(item.name, item.attachment?.mime || item.file?.type)}</span>
       </span>
       <Button
         aria-label={removeLabel}
-        className="absolute top-2 right-2 size-6 rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
+        className="absolute top-1.5 right-1.5 size-5 rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
         disabled={locked}
         size="icon-xs"
         type="button"
@@ -1141,6 +1181,46 @@ function DraftAttachmentChip({
         <X className="size-3" />
       </Button>
     </div>
+  );
+}
+
+function DraftAudioPreviewButton({ label, src }: { label: string; src: string }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  return (
+    <>
+      <button
+        aria-label={label}
+        className="grid size-full place-items-center rounded-md hover:bg-muted"
+        disabled={!src}
+        type="button"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const audio = audioRef.current;
+          if (!audio) {
+            return;
+          }
+          if (audio.paused) {
+            void audio.play();
+          } else {
+            audio.pause();
+          }
+        }}
+      >
+        {playing ? <Pause className="size-5" fill="currentColor" strokeWidth={1.8} /> : <Play className="size-5" fill="currentColor" strokeWidth={1.8} />}
+      </button>
+      {src ? (
+        <audio
+          ref={audioRef}
+          preload="none"
+          src={src}
+          onEnded={() => setPlaying(false)}
+          onPause={() => setPlaying(false)}
+          onPlay={() => setPlaying(true)}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -1171,6 +1251,24 @@ function formatAttachmentSize(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function uploadFailedMessage(name: string, message: string) {
+  return `${name}: ${message}`;
+}
+
+function dropFailedMessage(paths: string[] | undefined, t: (key: string) => string) {
+  const names = (paths || []).map(pathBaseName).filter(Boolean).slice(0, 3);
+  if (names.length === 0) {
+    return t("composer.uploadFailed");
+  }
+  return `${names.join(", ")}: ${t("composer.uploadFailed")}`;
+}
+
+function pathBaseName(path: string) {
+  const normalized = path.replaceAll("\\", "/").replace(/\/+$/, "");
+  const name = normalized.split("/").pop();
+  return name || path;
+}
+
 function attachmentKindLabel(name: string, mime?: string) {
   const ext = name.split(".").pop()?.trim();
   if (ext && ext !== name) {
@@ -1186,6 +1284,14 @@ function isImageAttachmentLike(mime: string | undefined, name: string) {
     return true;
   }
   return /\.(png|jpe?g|gif|webp)$/i.test(name);
+}
+
+function isAudioAttachmentLike(mime: string | undefined, name: string) {
+  const cleaned = (mime || "").toLowerCase();
+  if (cleaned.startsWith("audio/")) {
+    return true;
+  }
+  return /\.(wav|mp3|m4a|aac|ogg|oga|flac|webm)$/i.test(name);
 }
 
 function draftAttachmentImageSource(item: DraftAttachment, token: string) {

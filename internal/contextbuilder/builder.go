@@ -5,7 +5,9 @@ package contextbuilder
 
 import (
 	"context"
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -202,6 +204,7 @@ func (staticPrompt) Prompt(_ context.Context, mode string) (prompt.Output, error
 
 func (b *Builder) providerParts(sessionID string, parts []store.ContentPart, mode store.AgentMode, cfg provider.ModelConfig) []provider.Part {
 	out := make([]provider.Part, 0, len(parts))
+	localFolders := make([]store.LocalFolder, 0)
 	for _, part := range parts {
 		switch part.Type {
 		case store.ContentPartText:
@@ -239,7 +242,17 @@ func (b *Builder) providerParts(sessionID string, parts []store.ContentPart, mod
 			} else if text := attachmentProviderText(part, b.attachmentToolPath(sessionID, part)); text != "" {
 				out = append(out, provider.Part{Type: provider.PartText, Text: text})
 			}
+		case store.ContentPartLocalFolder:
+			localFolders = append(localFolders, store.LocalFolder{
+				ID:     part.CallID,
+				Name:   part.Name,
+				Path:   part.Path,
+				Origin: part.Origin,
+			})
 		}
+	}
+	if text := localFoldersProviderText(localFolders); text != "" {
+		out = append(out, provider.Part{Type: provider.PartText, Text: text})
 	}
 	return out
 }
@@ -252,7 +265,7 @@ func (b *Builder) imageProviderPart(sessionID string, part store.ContentPart, cf
 	if !strings.HasPrefix(mime, "image/") || mime == "image/svg+xml" {
 		return provider.Part{}, false
 	}
-	path, ok, err := attachment.NewService(b.attachmentHome).Path(sessionID, part.AttachmentKey)
+	path, ok, err := attachment.NewService(b.attachmentHome).Path(attachmentSessionID(sessionID, part), part.AttachmentKey)
 	if err != nil || !ok {
 		return provider.Part{}, false
 	}
@@ -271,7 +284,7 @@ func (b *Builder) audioProviderPart(sessionID string, part store.ContentPart, cf
 	if !strings.HasPrefix(mime, "audio/") {
 		return provider.Part{}, false
 	}
-	path, ok, err := attachment.NewService(b.attachmentHome).Path(sessionID, part.AttachmentKey)
+	path, ok, err := attachment.NewService(b.attachmentHome).Path(attachmentSessionID(sessionID, part), part.AttachmentKey)
 	if err != nil || !ok {
 		return provider.Part{}, false
 	}
@@ -286,7 +299,7 @@ func (b *Builder) attachmentToolPath(sessionID string, part store.ContentPart) s
 	if strings.TrimSpace(b.attachmentHome) == "" {
 		return ""
 	}
-	path, ok, err := attachment.NewService(b.attachmentHome).Path(sessionID, part.AttachmentKey)
+	path, ok, err := attachment.NewService(b.attachmentHome).Path(attachmentSessionID(sessionID, part), part.AttachmentKey)
 	if err != nil || !ok {
 		return ""
 	}
@@ -295,6 +308,13 @@ func (b *Builder) attachmentToolPath(sessionID string, part store.ContentPart) s
 		return ""
 	}
 	return path
+}
+
+func attachmentSessionID(sessionID string, part store.ContentPart) string {
+	if part.Origin == attachment.OriginTemp && strings.Contains(part.AttachmentKey, "/"+attachment.DraftSessionID+"/") {
+		return attachment.DraftSessionID
+	}
+	return sessionID
 }
 
 func imageAttachmentsAllowed(cfg provider.ModelConfig) bool {
@@ -327,6 +347,12 @@ func attachmentProviderText(part store.ContentPart, toolPath string) string {
 		b.WriteString("Local path for tools: ")
 		b.WriteString(toolPath)
 		b.WriteByte('\n')
+		if part.Origin == attachment.OriginTemp {
+			b.WriteString("File tool scope: temp\n")
+			b.WriteString("File tool path: ")
+			b.WriteString(filepath.ToSlash(filepath.Join("attachments", filepath.Base(filepath.FromSlash(part.AttachmentKey)))))
+			b.WriteByte('\n')
+		}
 	}
 	if part.AudioTranscript != "" {
 		b.WriteString("Audio transcript: ")
@@ -334,6 +360,21 @@ func attachmentProviderText(part store.ContentPart, toolPath string) string {
 		b.WriteByte('\n')
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func localFoldersProviderText(folders []store.LocalFolder) string {
+	folders = store.NormalizeLocalFolders(folders)
+	if len(folders) == 0 {
+		return ""
+	}
+	payload := struct {
+		Folders []store.LocalFolder `json:"folders"`
+	}{Folders: folders}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	return "<pudding-local-folders version=\"1\">\n" + string(data) + "\n</pudding-local-folders>"
 }
 
 func textFromProviderParts(parts []provider.Part) string {

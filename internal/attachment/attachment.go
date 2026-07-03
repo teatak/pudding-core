@@ -20,8 +20,11 @@ import (
 const (
 	MaxUploadBytes int64 = 20 << 20
 	DraftSessionID       = "draft"
+	OriginTemp           = "temp"
+	OriginUpload         = "upload"
 
 	attachmentsDirName = "attachments"
+	tempDirName        = "temp"
 	sessionDirName     = "sessions"
 	blobDirName        = "blobs"
 )
@@ -69,6 +72,9 @@ func (s *Service) StoreReader(sessionID, name, mimeType string, r io.Reader) (st
 		return store.Attachment{}, err
 	}
 	dir := filepath.Join(root, blobDirName)
+	if sessionID == DraftSessionID {
+		dir = root
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return store.Attachment{}, err
 	}
@@ -96,7 +102,7 @@ func (s *Service) StoreReader(sessionID, name, mimeType string, r io.Reader) (st
 		URL:           URL(sessionID, key),
 		MIME:          mimeType,
 		Size:          written,
-		Origin:        "upload",
+		Origin:        OriginUpload,
 		CreatedAt:     now.Format(time.RFC3339),
 	}, nil
 }
@@ -137,6 +143,11 @@ func (s *Service) StorePath(sessionID, path string) (store.Attachment, error) {
 	return s.StoreReader(sessionID, name, mimeType, file)
 }
 
+func WithSourcePath(item store.Attachment, path string) store.Attachment {
+	item.SourcePath = strings.TrimSpace(path)
+	return item
+}
+
 func (s *Service) Path(sessionID, raw string) (string, bool, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	key := normalizeKey(raw)
@@ -155,6 +166,23 @@ func (s *Service) Path(sessionID, raw string) (string, bool, error) {
 	root, err := s.root()
 	if err != nil {
 		return "", false, err
+	}
+	if sessionID == DraftSessionID {
+		root, err = s.tempAttachmentRoot()
+		if err != nil {
+			return "", false, err
+		}
+		name := filepath.Base(filepath.FromSlash(key))
+		if name == "." || name == string(filepath.Separator) {
+			return "", false, nil
+		}
+		abs := filepath.Join(root, name)
+		cleanRoot := filepath.Clean(root)
+		cleanAbs := filepath.Clean(abs)
+		if cleanAbs != cleanRoot && !strings.HasPrefix(cleanAbs, cleanRoot+string(os.PathSeparator)) {
+			return "", false, nil
+		}
+		return cleanAbs, true, nil
 	}
 	abs := filepath.Join(root, filepath.FromSlash(key))
 	cleanRoot := filepath.Clean(root)
@@ -247,7 +275,21 @@ func (s *Service) sessionRoot(sessionID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if strings.TrimSpace(sessionID) == DraftSessionID {
+		root, err = s.tempAttachmentRoot()
+		if err != nil {
+			return "", err
+		}
+		return root, nil
+	}
 	return filepath.Join(root, sessionDirName, sessionID), nil
+}
+
+func (s *Service) tempAttachmentRoot() (string, error) {
+	if s == nil || strings.TrimSpace(s.home) == "" {
+		return "", errors.New("attachment: home dir is required")
+	}
+	return filepath.Join(s.home, tempDirName, attachmentsDirName), nil
 }
 
 func normalizeKey(raw string) string {

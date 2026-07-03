@@ -71,18 +71,31 @@ func (s *Server) desktopRevealFile(c *cart.Context) error {
 	if path == "" || !filepath.IsAbs(path) {
 		return badRequest(c, "path must be absolute")
 	}
-	if _, err := os.Stat(path); err != nil {
+	info, err := os.Stat(path)
+	if err != nil {
 		c.JSON(http.StatusNotFound, map[string]string{"error": "file_not_found"})
 		return nil
 	}
 	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", "-R", path)
-	case "windows":
-		cmd = exec.Command("explorer", "/select,"+path)
-	default:
-		cmd = exec.Command("xdg-open", filepath.Dir(path))
+	if info.IsDir() {
+		switch runtime.GOOS {
+		case "windows":
+			cmd = exec.Command("explorer", path)
+		default:
+			cmd = exec.Command("open", path)
+			if runtime.GOOS != "darwin" {
+				cmd = exec.Command("xdg-open", path)
+			}
+		}
+	} else {
+		switch runtime.GOOS {
+		case "darwin":
+			cmd = exec.Command("open", "-R", path)
+		case "windows":
+			cmd = exec.Command("explorer", "/select,"+path)
+		default:
+			cmd = exec.Command("xdg-open", filepath.Dir(path))
+		}
 	}
 	if err := cmd.Start(); err != nil {
 		return s.fail(c, err)

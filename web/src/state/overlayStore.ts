@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { Attachment, Message } from "@/api/client";
+import type { Attachment, LocalFolder, Message } from "@/api/client";
 import type { SessionEvent } from "@/contracts/events";
 
 export type PendingUserMessage = {
@@ -9,6 +9,7 @@ export type PendingUserMessage = {
   status?: "submitting" | "queued" | "editing";
   text: string;
   attachments?: Attachment[];
+  localFolders?: LocalFolder[];
   createdAt: string;
 };
 

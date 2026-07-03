@@ -371,11 +371,12 @@ func (s *Server) deleteSession(c *cart.Context) error {
 }
 
 type submitReq struct {
-	ClientMessageID string             `json:"clientMessageID"`
-	Text            string             `json:"text"`
-	Attachments     []store.Attachment `json:"attachments,omitempty"`
-	Kind            string             `json:"kind,omitempty"`
-	ReasoningEffort string             `json:"reasoningEffort,omitempty"`
+	ClientMessageID string              `json:"clientMessageID"`
+	Text            string              `json:"text"`
+	Attachments     []store.Attachment  `json:"attachments,omitempty"`
+	LocalFolders    []store.LocalFolder `json:"localFolders,omitempty"`
+	Kind            string              `json:"kind,omitempty"`
+	ReasoningEffort string              `json:"reasoningEffort,omitempty"`
 }
 
 func (s *Server) submit(c *cart.Context) error {
@@ -400,12 +401,13 @@ func (s *Server) submit(c *cart.Context) error {
 		ClientMessageID: req.ClientMessageID,
 		Text:            req.Text,
 		Attachments:     attachments,
+		LocalFolders:    req.LocalFolders,
 		Kind:            req.Kind,
 		ReasoningEffort: req.ReasoningEffort,
 	})
 	switch {
 	case errors.Is(err, engine.ErrEmptyInput):
-		return badRequest(c, "text or attachments and clientMessageID are required")
+		return badRequest(c, "text, attachments, or localFolders and clientMessageID are required")
 	case errors.Is(err, engine.ErrTurnRunning):
 		c.JSON(http.StatusConflict, map[string]string{"error": "turn_running"})
 		return nil

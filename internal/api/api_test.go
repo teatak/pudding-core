@@ -1058,6 +1058,33 @@ func TestAttachmentUploadSubmitAndRead(t *testing.T) {
 		t.Fatalf("unexpected attachment body: %q", string(data))
 	}
 
+	r, err = http.NewRequest(http.MethodGet, srv.URL+uploaded.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Header.Set("Authorization", "Bearer "+testToken)
+	r.Header.Set("Range", "bytes=0-4")
+	resp, err = http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusPartialContent {
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("range read status = %d body=%s", resp.StatusCode, string(data))
+	}
+	if contentRange := resp.Header.Get("Content-Range"); !strings.HasPrefix(contentRange, "bytes 0-4/") {
+		t.Fatalf("unexpected Content-Range: %q", contentRange)
+	}
+	data, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "hello" {
+		t.Fatalf("unexpected range body: %q", string(data))
+	}
+
 	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_attach/submit", map[string]any{
 		"clientMessageID": "client_attach",
 		"attachments":     []store.Attachment{uploaded},
@@ -1084,6 +1111,42 @@ func TestAttachmentUploadSubmitAndRead(t *testing.T) {
 	attachments := store.AttachmentsFromParts(msg.Parts)
 	if len(attachments) != 1 || attachments[0].AttachmentKey != uploaded.AttachmentKey {
 		t.Fatalf("attachment part not persisted: %+v", msg.Parts)
+	}
+}
+
+func TestSubmitLocalFoldersPersistsPart(t *testing.T) {
+	srv, st := newTestServer(t)
+	if err := st.CreateSession(context.Background(), &store.Session{ID: "sess_folder", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	folder := store.LocalFolder{
+		ID:     "folder_1",
+		Name:   "files",
+		Path:   "/Users/me/files",
+		Origin: "local_path",
+	}
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_folder/submit", map[string]any{
+		"clientMessageID": "client_folder",
+		"localFolders":    []store.LocalFolder{folder},
+	})
+	if resp.StatusCode != http.StatusAccepted {
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("submit status = %d body=%s", resp.StatusCode, string(data))
+	}
+	resp.Body.Close()
+
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_folder/messages?limit=10", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("messages status = %d", resp.StatusCode)
+	}
+	page := decodeJSON[messagePageResponse](t, resp)
+	if len(page.Messages) == 0 {
+		t.Fatal("missing canonical user message")
+	}
+	folders := store.LocalFoldersFromParts(page.Messages[0].Parts)
+	if len(folders) != 1 || folders[0].Path != folder.Path {
+		t.Fatalf("local folder part not persisted: %+v", page.Messages[0].Parts)
 	}
 }
 
@@ -1172,6 +1235,88 @@ func TestDraftAttachmentSubmitCopiesToSession(t *testing.T) {
 		t.Fatalf("draft read status = %d", resp.StatusCode)
 	}
 	resp.Body.Close()
+}
+
+func TestTempDraftAttachmentSubmitStaysInTemp(t *testing.T) {
+	srv, st := newTestServer(t)
+	if err := st.CreateSession(context.Background(), &store.Session{ID: "sess_temp_attach", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("origin", "temp"); err != nil {
+		t.Fatal(err)
+	}
+	part, err := writer.CreateFormFile("file", "pasted-text.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte("long pasted text")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err := http.NewRequest(http.MethodPost, srv.URL+"/sessions/draft/attachments", &body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Header.Set("Authorization", "Bearer "+testToken)
+	r.Header.Set("Content-Type", writer.FormDataContentType())
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("temp upload status = %d body=%s", resp.StatusCode, string(data))
+	}
+	uploaded := decodeJSON[store.Attachment](t, resp)
+	if uploaded.Origin != "temp" {
+		t.Fatalf("origin = %q, want temp", uploaded.Origin)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_temp_attach/submit", map[string]any{
+		"clientMessageID": "client_temp_attach",
+		"attachments":     []store.Attachment{uploaded},
+	})
+	if resp.StatusCode != http.StatusAccepted {
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("submit status = %d body=%s", resp.StatusCode, string(data))
+	}
+	resp.Body.Close()
+
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_temp_attach/messages?limit=10", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("messages status = %d", resp.StatusCode)
+	}
+	page := decodeJSON[messagePageResponse](t, resp)
+	if len(page.Messages) == 0 {
+		t.Fatal("missing canonical user message")
+	}
+	attachments := store.AttachmentsFromParts(page.Messages[0].Parts)
+	if len(attachments) != 1 {
+		t.Fatalf("attachment part not persisted: %+v", page.Messages[0].Parts)
+	}
+	if attachments[0].AttachmentKey != uploaded.AttachmentKey || attachments[0].URL != uploaded.URL || attachments[0].Origin != "temp" {
+		t.Fatalf("temp attachment should keep draft temp identity: uploaded=%+v persisted=%+v", uploaded, attachments[0])
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+attachments[0].URL, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("temp read status = %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "long pasted text" {
+		t.Fatalf("unexpected temp body: %q", string(data))
+	}
 }
 
 func TestListMessagesPagination(t *testing.T) {

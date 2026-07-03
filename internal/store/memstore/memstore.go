@@ -243,7 +243,7 @@ func (m *Memstore) BeginTurn(_ context.Context, in store.BeginTurnInput) (*store
 		Role:            store.RoleUser,
 		Kind:            store.MessageKindText,
 		Text:            in.UserText,
-		Parts:           store.UserInputParts(in.UserText, in.UserAttachments),
+		Parts:           store.UserInputParts(in.UserText, in.UserAttachments, in.UserLocalFolders),
 		TurnIndex:       0,
 		ClientMessageID: in.ClientMessageID,
 		CreatedAt:       now,
@@ -363,6 +363,7 @@ func (m *Memstore) QueueInput(_ context.Context, in store.QueueInputInput) (*sto
 		ClientMessageID: in.ClientMessageID,
 		Text:            in.Text,
 		Attachments:     store.NormalizeAttachments(in.Attachments),
+		LocalFolders:    store.NormalizeLocalFolders(in.LocalFolders),
 		Status:          store.QueuedInputQueued,
 		Provider:        in.Provider,
 		Model:           in.Model,
@@ -485,7 +486,7 @@ func (m *Memstore) PromoteNextQueuedInput(_ context.Context, in store.PromoteQue
 				Role:            store.RoleUser,
 				Kind:            store.MessageKindText,
 				Text:            input.Text,
-				Parts:           store.UserInputParts(input.Text, input.Attachments),
+				Parts:           store.UserInputParts(input.Text, input.Attachments, input.LocalFolders),
 				TurnIndex:       0,
 				ClientMessageID: input.ClientMessageID,
 				CreatedAt:       now,
@@ -1325,6 +1326,7 @@ func cloneQueuedInput(input *store.QueuedInput) *store.QueuedInput {
 	}
 	cp := *input
 	cp.Attachments = store.NormalizeAttachments(input.Attachments)
+	cp.LocalFolders = store.NormalizeLocalFolders(input.LocalFolders)
 	cp.ModelConfig = append([]byte(nil), input.ModelConfig...)
 	return &cp
 }

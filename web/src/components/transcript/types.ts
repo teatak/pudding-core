@@ -1,4 +1,4 @@
-import type { Attachment, ContentPart, Message } from "@/api/client";
+import type { Attachment, ContentPart, LocalFolder, Message } from "@/api/client";
 import type { TranscriptDisplaySettings } from "@/lib/appSettings";
 import type { AssistantOverlay, CompactRun, TurnPhaseState } from "@/state/overlayStore";
 
@@ -12,6 +12,7 @@ export type UserInputVM = {
   status?: "submitting" | "queued" | "editing";
   text: string;
   attachments?: Attachment[];
+  localFolders?: LocalFolder[];
 };
 
 export type AssistantOutputVM =
@@ -116,8 +117,20 @@ export function attachmentsFromContentParts(parts: ContentPart[]): Attachment[] 
       mime: part.mime,
       size: part.size,
       origin: part.origin,
+      sourcePath: part.sourcePath,
       createdAt: part.createdAt,
       audioTranscript: part.audioTranscript,
+    }));
+}
+
+export function localFoldersFromContentParts(parts: ContentPart[]): LocalFolder[] {
+  return parts
+    .filter((part) => part.type === "local_folder")
+    .map((part) => ({
+      id: part.id,
+      name: part.name,
+      path: part.path,
+      origin: part.origin,
     }));
 }
 

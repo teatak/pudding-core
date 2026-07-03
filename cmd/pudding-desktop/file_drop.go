@@ -71,6 +71,7 @@ func storeDroppedFileAttachments(svc *attachment.Service, sessionID string, path
 			slog.Warn("pudding-desktop: store dropped file", "path", path, "err", err)
 			continue
 		}
+		stored = attachment.WithSourcePath(stored, path)
 		attachments = append(attachments, stored)
 	}
 	return attachments, failed

@@ -186,10 +186,19 @@ export const attachment = z.object({
   mime: z.string(),
   size: z.number(),
   origin: z.string().optional(),
+  sourcePath: z.string().optional(),
   createdAt: z.string().optional(),
   audioTranscript: z.string().optional(),
 });
 export type Attachment = z.infer<typeof attachment>;
+
+export const localFolder = z.object({
+  id: z.string(),
+  name: z.string(),
+  path: z.string(),
+  origin: z.string().optional(),
+});
+export type LocalFolder = z.infer<typeof localFolder>;
 
 export const contentPart = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), text: z.string() }),
@@ -210,6 +219,7 @@ export const contentPart = z.discriminatedUnion("type", [
     summaryCount: z.number().optional(),
   }),
   attachment.extend({ type: z.literal("attachment") }),
+  localFolder.extend({ type: z.literal("local_folder") }),
 ]);
 export type ContentPart = z.infer<typeof contentPart>;
 
@@ -261,6 +271,7 @@ export const queuedInput = z.object({
   clientMessageID: z.string(),
   text: z.string(),
   attachments: z.array(attachment).optional(),
+  localFolders: z.array(localFolder).optional(),
   status: queuedInputStatus,
   provider: z.string().optional(),
   model: z.string().optional(),
@@ -279,16 +290,17 @@ export const submitRequest = z
     reasoningEffort: z.string().optional(),
     text: z.string().optional().default(""),
     attachments: z.array(attachment).optional(),
+    localFolders: z.array(localFolder).optional(),
   })
   .superRefine((value, ctx) => {
     if (value.kind === "system") {
-      if (!value.text.trim() || (value.attachments?.length ?? 0) > 0) {
+      if (!value.text.trim() || (value.attachments?.length ?? 0) > 0 || (value.localFolders?.length ?? 0) > 0) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: "system submit requires text only" });
       }
       return;
     }
-    if (!value.text.trim() && (value.attachments?.length ?? 0) === 0) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "submit requires text or attachments" });
+    if (!value.text.trim() && (value.attachments?.length ?? 0) === 0 && (value.localFolders?.length ?? 0) === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "submit requires text, attachments, or localFolders" });
     }
   });
 

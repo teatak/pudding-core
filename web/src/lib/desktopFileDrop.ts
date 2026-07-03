@@ -5,6 +5,7 @@ const DESKTOP_FILE_DROP_EVENT = "pudding:file-drop";
 export type DesktopFileDropResult = {
   attachments: Attachment[];
   directories: string[];
+  failedFiles: string[];
   failedFileCount: number;
 };
 
@@ -47,6 +48,7 @@ export function bindDesktopFileDrop(target: DesktopFileDropTarget, onDrop: (drop
         onDrop({
           attachments: payload.attachments,
           directories: payload.directories,
+          failedFiles: payload.failedFiles,
           failedFileCount: payload.failedFiles.length,
         });
       });
@@ -116,6 +118,7 @@ function attachmentArray(value: unknown): Attachment[] {
         mime,
         size,
         origin: optionalString(item.origin),
+        sourcePath: optionalString(item.sourcePath),
         createdAt: optionalString(item.createdAt),
         audioTranscript: optionalString(item.audioTranscript),
       },

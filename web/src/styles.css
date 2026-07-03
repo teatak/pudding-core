@@ -193,6 +193,12 @@ html[data-shell] .pudding-markdown * {
     -webkit-user-select: text;
 }
 
+html[data-shell] [data-composer-selection-guard="true"] textarea {
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
 @layer utilities {
   .active\:not-aria-\[haspopup\]\:translate-y-px:active:not([aria-haspopup]) {
     --tw-translate-y: 0px;

@@ -24,16 +24,6 @@ export function createLocalFolderPath(path: string): LocalFolderPath | null {
   };
 }
 
-export function appendLocalFolderPaths(text: string, folders: LocalFolderPath[]) {
-  const paths = dedupeStrings(folders.map((folder) => folder.path.trim()).filter(Boolean));
-  if (paths.length === 0) {
-    return text.trim();
-  }
-  const prefix = text.trim();
-  const folderText = ["[Local folders]", ...paths.map((path) => `- ${path}`)].join("\n");
-  return prefix ? `${prefix}\n\n${folderText}` : folderText;
-}
-
 export async function pickLocalFolderPaths(t: (key: string) => string) {
   const { Dialogs } = await import("@wailsio/runtime");
   const result = await Dialogs.OpenFile({
