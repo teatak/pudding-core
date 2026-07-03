@@ -28,6 +28,7 @@ type Server struct {
 	engine     *engine.Engine
 	store      store.Store
 	config     engine.ConfigSource
+	home       string
 	providers  providerWriter
 	apps       appService
 	skills     skillService
@@ -49,6 +50,11 @@ func (s *Server) WithApps(apps appService) *Server {
 
 func (s *Server) WithSkills(skills skillService) *Server {
 	s.skills = skills
+	return s
+}
+
+func (s *Server) WithHome(home string) *Server {
+	s.home = strings.TrimSpace(home)
 	return s
 }
 
@@ -123,6 +129,8 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/turns").GET(s.listTurns)
 	app.Route("/sessions/:id/turns/:turnID").GET(s.getTurn)
 	app.Route("/sessions/:id/messages").GET(s.listMessages)
+	app.Route("/sessions/:id/attachments").POST(s.uploadAttachment)
+	app.Route("/sessions/:id/attachments/*path").GET(s.getAttachment)
 	app.Route("/sessions/:id/queued-inputs").GET(s.listQueuedInputs)
 	app.Route("/sessions/:id/queued-inputs/:clientMessageID").PATCH(s.patchQueuedInput)
 	app.Route("/sessions/:id/canvas/items").GET(s.listCanvasItems).POST(s.createCanvasItem)
@@ -363,10 +371,11 @@ func (s *Server) deleteSession(c *cart.Context) error {
 }
 
 type submitReq struct {
-	ClientMessageID string `json:"clientMessageID"`
-	Text            string `json:"text"`
-	Kind            string `json:"kind,omitempty"`
-	ReasoningEffort string `json:"reasoningEffort,omitempty"`
+	ClientMessageID string             `json:"clientMessageID"`
+	Text            string             `json:"text"`
+	Attachments     []store.Attachment `json:"attachments,omitempty"`
+	Kind            string             `json:"kind,omitempty"`
+	ReasoningEffort string             `json:"reasoningEffort,omitempty"`
 }
 
 func (s *Server) submit(c *cart.Context) error {
@@ -375,16 +384,28 @@ func (s *Server) submit(c *cart.Context) error {
 	if err := decode(c, &req); err != nil {
 		return badRequest(c, "invalid json body")
 	}
+	attachments, err := s.normalizeSubmitAttachments(id, req.Attachments)
+	if errors.Is(err, errAttachmentHomeUnavailable) {
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "attachment_home_unavailable"})
+		return nil
+	}
+	if errors.Is(err, errInvalidAttachment) {
+		return badRequest(c, "invalid attachments")
+	}
+	if err != nil {
+		return s.fail(c, err)
+	}
 	res, err := s.engine.Submit(c.Request.Context(), engine.SubmitInput{
 		SessionID:       id,
 		ClientMessageID: req.ClientMessageID,
 		Text:            req.Text,
+		Attachments:     attachments,
 		Kind:            req.Kind,
 		ReasoningEffort: req.ReasoningEffort,
 	})
 	switch {
 	case errors.Is(err, engine.ErrEmptyInput):
-		return badRequest(c, "text and clientMessageID are required")
+		return badRequest(c, "text or attachments and clientMessageID are required")
 	case errors.Is(err, engine.ErrTurnRunning):
 		c.JSON(http.StatusConflict, map[string]string{"error": "turn_running"})
 		return nil

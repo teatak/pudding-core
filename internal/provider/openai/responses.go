@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -232,11 +233,23 @@ type responsesReasoning struct {
 type responsesInputMessage struct {
 	Type      string `json:"type,omitempty"`
 	Role      string `json:"role,omitempty"`
-	Content   string `json:"content,omitempty"`
+	Content   any    `json:"content,omitempty"`
 	CallID    string `json:"call_id,omitempty"`
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
 	Output    string `json:"output,omitempty"`
+}
+
+type responsesContentPart struct {
+	Type       string               `json:"type"`
+	Text       string               `json:"text,omitempty"`
+	ImageURL   string               `json:"image_url,omitempty"`
+	InputAudio *responsesInputAudio `json:"input_audio,omitempty"`
+}
+
+type responsesInputAudio struct {
+	Data   string `json:"data"`
+	Format string `json:"format"`
 }
 
 type responsesTool struct {
@@ -294,6 +307,9 @@ func responsesInputsFor(msg provider.Message) []responsesInputMessage {
 		return []responsesInputMessage{{Role: string(msg.Role), Content: msg.Text}}
 	}
 	role := string(msg.Role)
+	if content := responsesMediaContent(msg.Parts); len(content) > 0 {
+		return []responsesInputMessage{{Role: role, Content: content}}
+	}
 	var out []responsesInputMessage
 	var text strings.Builder
 	flushText := func() {
@@ -331,6 +347,40 @@ func responsesInputsFor(msg provider.Message) []responsesInputMessage {
 	flushText()
 	if len(out) == 0 {
 		out = append(out, responsesInputMessage{Role: role, Content: msg.Text})
+	}
+	return out
+}
+
+func responsesMediaContent(parts []provider.Part) []responsesContentPart {
+	hasMedia := false
+	for _, part := range parts {
+		if (part.Type == provider.PartImage || part.Type == provider.PartAudio) && len(part.Data) > 0 {
+			hasMedia = true
+			break
+		}
+	}
+	if !hasMedia {
+		return nil
+	}
+	out := make([]responsesContentPart, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case "", provider.PartText:
+			if part.Text != "" {
+				out = append(out, responsesContentPart{Type: "input_text", Text: part.Text})
+			}
+		case provider.PartImage:
+			if len(part.Data) > 0 {
+				out = append(out, responsesContentPart{Type: "input_image", ImageURL: provider.ImageDataURL(part.MIME, part.Data)})
+			}
+		case provider.PartAudio:
+			if len(part.Data) > 0 {
+				out = append(out, responsesContentPart{Type: "input_audio", InputAudio: &responsesInputAudio{
+					Data:   base64.StdEncoding.EncodeToString(part.Data),
+					Format: provider.AudioFormat(part.MIME),
+				}})
+			}
+		}
 	}
 	return out
 }

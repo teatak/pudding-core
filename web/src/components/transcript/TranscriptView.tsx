@@ -31,6 +31,7 @@ export function TranscriptView({
   sessionID,
   showJumpLatest,
   submitError,
+  token,
   turns,
 }: {
   disclosure?: TurnDisclosureState;
@@ -54,6 +55,7 @@ export function TranscriptView({
   sessionID: string;
   showJumpLatest: boolean;
   submitError?: string | null;
+  token: string;
   turns: TranscriptTurnVM[];
 }) {
   const { t } = useI18n();
@@ -101,6 +103,7 @@ export function TranscriptView({
             onQueuedSave={onQueuedSave}
             scrollElement={viewportNode}
             sessionID={sessionID}
+            token={token}
             turns={turns}
           />
           {submitError ? (

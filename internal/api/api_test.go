@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -37,9 +38,10 @@ const testToken = "test-token"
 func newTestServer(t *testing.T) (*httptest.Server, store.Store) {
 	t.Helper()
 	ms := memstore.New()
+	homeDir := t.TempDir()
 	hub := event.NewHub()
-	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好", "世界"}), mock.WithDelay(5*time.Millisecond))), ms)
-	srv := httptest.NewServer(New(eng, ms, ms, hub).Handler(testToken, nil))
+	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好", "世界"}), mock.WithDelay(5*time.Millisecond))), ms, engine.WithAttachmentHome(homeDir))
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithHome(homeDir).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 	return srv, ms
 }
@@ -54,8 +56,8 @@ func newConfigTestServer(t *testing.T) (*httptest.Server, store.Store, *config.M
 	}
 	writeOAuthTestApps(t, homeDir)
 	hub := event.NewHub()
-	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好", "世界"}), mock.WithDelay(5*time.Millisecond))), cfg)
-	srv := httptest.NewServer(New(eng, ms, cfg, hub).WithApps(appsvc.NewService(homeDir, nil)).Handler(testToken, nil))
+	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好", "世界"}), mock.WithDelay(5*time.Millisecond))), cfg, engine.WithAttachmentHome(homeDir))
+	srv := httptest.NewServer(New(eng, ms, cfg, hub).WithHome(homeDir).WithApps(appsvc.NewService(homeDir, nil)).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 	return srv, ms, cfg
 }
@@ -1013,6 +1015,173 @@ func TestCORSRejectsNonLoopbackOrigin(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("want 403, got %d", resp.StatusCode)
 	}
+}
+
+func TestAttachmentUploadSubmitAndRead(t *testing.T) {
+	srv, st := newTestServer(t)
+	if err := st.CreateSession(context.Background(), &store.Session{ID: "sess_attach", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "note.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte("hello attachment")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err := http.NewRequest(http.MethodPost, srv.URL+"/sessions/sess_attach/attachments", &body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Header.Set("Authorization", "Bearer "+testToken)
+	r.Header.Set("Content-Type", writer.FormDataContentType())
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("upload status = %d body=%s", resp.StatusCode, string(data))
+	}
+	uploaded := decodeJSON[store.Attachment](t, resp)
+	if uploaded.Name != "note.txt" || uploaded.MIME != "text/plain" || uploaded.AttachmentKey == "" || uploaded.URL == "" {
+		t.Fatalf("unexpected uploaded attachment: %+v", uploaded)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+uploaded.URL, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("read status = %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "hello attachment" {
+		t.Fatalf("unexpected attachment body: %q", string(data))
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_attach/submit", map[string]any{
+		"clientMessageID": "client_attach",
+		"attachments":     []store.Attachment{uploaded},
+	})
+	if resp.StatusCode != http.StatusAccepted {
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("submit status = %d body=%s", resp.StatusCode, string(data))
+	}
+	resp.Body.Close()
+
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_attach/messages?limit=10", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("messages status = %d", resp.StatusCode)
+	}
+	page := decodeJSON[messagePageResponse](t, resp)
+	if len(page.Messages) == 0 {
+		t.Fatal("missing canonical user message")
+	}
+	msg := page.Messages[0]
+	if msg.ClientMessageID != "client_attach" {
+		t.Fatalf("unexpected client message id: %+v", msg)
+	}
+	attachments := store.AttachmentsFromParts(msg.Parts)
+	if len(attachments) != 1 || attachments[0].AttachmentKey != uploaded.AttachmentKey {
+		t.Fatalf("attachment part not persisted: %+v", msg.Parts)
+	}
+}
+
+func TestDraftAttachmentSubmitCopiesToSession(t *testing.T) {
+	srv, st := newTestServer(t)
+	if err := st.CreateSession(context.Background(), &store.Session{ID: "sess_from_draft", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "demo.wav")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte("RIFFdemo wav data")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err := http.NewRequest(http.MethodPost, srv.URL+"/sessions/draft/attachments", &body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Header.Set("Authorization", "Bearer "+testToken)
+	r.Header.Set("Content-Type", writer.FormDataContentType())
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("draft upload status = %d body=%s", resp.StatusCode, string(data))
+	}
+	uploaded := decodeJSON[store.Attachment](t, resp)
+	if !strings.HasPrefix(uploaded.AttachmentKey, "sessions/draft/blobs/") {
+		t.Fatalf("unexpected draft key: %q", uploaded.AttachmentKey)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_from_draft/submit", map[string]any{
+		"clientMessageID": "client_draft_attach",
+		"attachments":     []store.Attachment{uploaded},
+	})
+	if resp.StatusCode != http.StatusAccepted {
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("submit status = %d body=%s", resp.StatusCode, string(data))
+	}
+	resp.Body.Close()
+
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_from_draft/messages?limit=10", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("messages status = %d", resp.StatusCode)
+	}
+	page := decodeJSON[messagePageResponse](t, resp)
+	if len(page.Messages) == 0 {
+		t.Fatal("missing canonical user message")
+	}
+	attachments := store.AttachmentsFromParts(page.Messages[0].Parts)
+	if len(attachments) != 1 {
+		t.Fatalf("attachment part not persisted: %+v", page.Messages[0].Parts)
+	}
+	if !strings.HasPrefix(attachments[0].AttachmentKey, "sessions/sess_from_draft/blobs/") {
+		t.Fatalf("attachment was not copied to real session: %+v", attachments[0])
+	}
+	if attachments[0].URL == uploaded.URL {
+		t.Fatalf("attachment URL still points at draft: %+v", attachments[0])
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+attachments[0].URL, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("copied read status = %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "RIFFdemo wav data" {
+		t.Fatalf("unexpected copied body: %q", string(data))
+	}
+	resp = req(t, http.MethodGet, srv.URL+uploaded.URL, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("draft read status = %d", resp.StatusCode)
+	}
+	resp.Body.Close()
 }
 
 func TestListMessagesPagination(t *testing.T) {

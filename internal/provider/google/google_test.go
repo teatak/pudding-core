@@ -399,3 +399,39 @@ func TestContextCancelTerminatesPromptly(t *testing.T) {
 		t.Fatal("cancel did not terminate promptly")
 	}
 }
+
+func TestContentsForMessageImagePart(t *testing.T) {
+	contents := contentsForMessage(provider.Message{
+		Role: provider.RoleUser,
+		Parts: []provider.Part{
+			{Type: provider.PartText, Text: "看图"},
+			{Type: provider.PartImage, MIME: "image/png", Data: []byte("png")},
+		},
+	}, map[string]string{})
+	data, err := json.Marshal(contents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(data)
+	if !strings.Contains(body, `"inlineData"`) || !strings.Contains(body, `"mimeType":"image/png"`) || !strings.Contains(body, `"data":"cG5n"`) {
+		t.Fatalf("image part not serialized for google: %s", body)
+	}
+}
+
+func TestContentsForMessageAudioPart(t *testing.T) {
+	contents := contentsForMessage(provider.Message{
+		Role: provider.RoleUser,
+		Parts: []provider.Part{
+			{Type: provider.PartText, Text: "听一下"},
+			{Type: provider.PartAudio, MIME: "audio/wav", Data: []byte("wav")},
+		},
+	}, map[string]string{})
+	data, err := json.Marshal(contents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(data)
+	if !strings.Contains(body, `"inlineData"`) || !strings.Contains(body, `"mimeType":"audio/wav"`) || !strings.Contains(body, `"data":"d2F2"`) {
+		t.Fatalf("audio part not serialized for google: %s", body)
+	}
+}

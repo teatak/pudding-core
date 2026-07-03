@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, Paperclip } from "lucide-react";
 import {
   Children,
   isValidElement,
@@ -17,6 +17,7 @@ import { type ContentPart, type Message } from "@/api/client";
 import { PhaseDot } from "@/components/PhaseDot";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
+import { attachmentResourceURL } from "@/lib/attachmentURL";
 import { cn } from "@/lib/utils";
 import { getShikiCodeRenderer, type CodeBlockRenderer } from "@/lib/shiki";
 import type { AssistantOverlay, AssistantOverlayPart, TurnPhaseState } from "@/state/overlayStore";
@@ -28,11 +29,13 @@ export function TurnParts({
   disclosure,
   displaySettings,
   parts,
+  token = "",
   turnID,
 }: {
   disclosure?: TurnDisclosureState;
   displaySettings?: TranscriptDisplaySettings;
   parts: TurnPartVM[];
+  token?: string;
   turnID: string;
 }) {
   const showReasoningContent = displaySettings?.showReasoning ?? true;
@@ -45,6 +48,8 @@ export function TurnParts({
         switch (part.type) {
           case "text":
             return <MarkdownBody key={partKey} text={part.text} />;
+          case "attachment":
+            return <AttachmentPart key={partKey} attachment={part.attachment} token={token} />;
           case "thought":
             return (
               <ThoughtPart
@@ -182,6 +187,8 @@ function partFromContentPart(part: ContentPart): TurnPartVM {
         summaryCount: part.summaryCount,
         summaryKind: part.summaryKind,
       };
+    case "attachment":
+      return { type: "attachment", attachment: part };
   }
 }
 
@@ -229,6 +236,7 @@ function mergeToolParts(parts: TurnPartVM[]): TurnPartVM[] {
 
 function withPartKeys(parts: TurnPartVM[]) {
   let textIndex = 0;
+  let attachmentIndex = 0;
   let thoughtIndex = 0;
   let toolIndex = 0;
   let resultIndex = 0;
@@ -236,6 +244,8 @@ function withPartKeys(parts: TurnPartVM[]) {
     switch (part.type) {
       case "text":
         return { ...part, key: `text:${textIndex++}` };
+      case "attachment":
+        return { ...part, key: part.attachment.id ? `attachment:${part.attachment.id}` : `attachment:${attachmentIndex++}` };
       case "thought":
         return { ...part, key: `thought:${thoughtIndex++}` };
       case "approval":
@@ -297,6 +307,20 @@ function useLocalDisclosure(defaultOpen: boolean, onOpenChange?: (open: boolean)
   }
 
   return { handleSummaryClick, handleSummaryKeyDown, handleToggle, open };
+}
+
+function AttachmentPart({ attachment, token }: { attachment: Extract<TurnPartVM, { type: "attachment" }>["attachment"]; token: string }) {
+  return (
+    <a
+      className="inline-flex max-w-full items-center gap-1 rounded-md border border-border/70 bg-muted/30 px-2 py-1 text-xs leading-5 text-muted-foreground no-underline hover:bg-muted hover:text-foreground"
+      href={attachmentResourceURL(attachment, token)}
+      rel="noreferrer"
+      target="_blank"
+    >
+      <Paperclip className="size-3 shrink-0" />
+      <span className="min-w-0 truncate">{attachment.name}</span>
+    </a>
+  );
 }
 
 function ThoughtPart({

@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -122,6 +123,12 @@ type part struct {
 	Thought          bool              `json:"thought,omitempty"`
 	FunctionCall     *functionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *functionResponse `json:"functionResponse,omitempty"`
+	InlineData       *inlineData       `json:"inlineData,omitempty"`
+}
+
+type inlineData struct {
+	MIMEType string `json:"mimeType"`
+	Data     string `json:"data"`
 }
 
 type functionCall struct {
@@ -559,6 +566,10 @@ func contentsForMessage(msg provider.Message, toolNames map[string]string) []con
 		case "", provider.PartText:
 			if p.Text != "" {
 				parts = append(parts, part{Text: p.Text})
+			}
+		case provider.PartImage, provider.PartAudio:
+			if len(p.Data) > 0 {
+				parts = append(parts, part{InlineData: &inlineData{MIMEType: p.MIME, Data: base64.StdEncoding.EncodeToString(p.Data)}})
 			}
 		case provider.PartToolUse:
 			args := p.Args

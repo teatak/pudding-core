@@ -324,6 +324,59 @@ func TestBeginTurnIdempotencyPrecedesRunningConflict(t *testing.T) {
 	}
 }
 
+func TestQueuedInputPersistsAttachments(t *testing.T) {
+	st, path := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, st, "sess_attach")
+	attachment := store.Attachment{
+		ID:            "att_1",
+		Name:          "note.txt",
+		AttachmentKey: "sessions/sess_attach/blobs/note.txt",
+		URL:           "/sessions/sess_attach/attachments/blobs/note.txt",
+		MIME:          "text/plain",
+		Size:          12,
+		Origin:        "upload",
+	}
+	if _, err := st.QueueInput(ctx, store.QueueInputInput{
+		SessionID:       "sess_attach",
+		ClientMessageID: "client_attach",
+		Attachments:     []store.Attachment{attachment},
+		Provider:        "mock",
+		Model:           "mock",
+		Mode:            store.ModeChat,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+
+	queued, err := reopened.ListQueuedInputs(ctx, "sess_attach")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queued) != 1 || len(queued[0].Attachments) != 1 || queued[0].Attachments[0].AttachmentKey != attachment.AttachmentKey {
+		t.Fatalf("queued attachment was not persisted: %+v", queued)
+	}
+	promoted, err := reopened.PromoteNextQueuedInput(ctx, store.PromoteQueuedInputInput{
+		SessionID:     "sess_attach",
+		TurnID:        "turn_attach",
+		UserMessageID: "msg_attach",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := store.AttachmentsFromParts(promoted.UserMessage.Parts)
+	if len(got) != 1 || got[0].AttachmentKey != attachment.AttachmentKey {
+		t.Fatalf("promoted message lost attachment: %+v", promoted.UserMessage.Parts)
+	}
+}
+
 func TestListMessagesPageUsesStableOrder(t *testing.T) {
 	st, _ := openTestStore(t)
 	createTestSession(t, st, "sess_1")

@@ -1,12 +1,14 @@
 package contextbuilder
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/prompt"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
@@ -52,6 +54,199 @@ func TestBuildUsesCoreAndUserPrompt(t *testing.T) {
 	}
 	if len(req.Messages) != 1 || req.Messages[0].Text != "hi" {
 		t.Fatalf("unexpected messages: %+v", req.Messages)
+	}
+}
+
+func TestBuildIncludesAttachmentSummary(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "s1",
+		TurnID:          "t1",
+		UserMessageID:   "m1",
+		ClientMessageID: "c1",
+		UserAttachments: []store.Attachment{{
+			ID:            "att_1",
+			Name:          "report.pdf",
+			AttachmentKey: "sessions/s1/blobs/report.pdf",
+			MIME:          "application/pdf",
+			Size:          42,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req, err := New(ms, nil).Build(ctx, "s1", "m", string(store.ModeChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 1 || !strings.Contains(req.Messages[0].Text, "report.pdf") || !strings.Contains(req.Messages[0].Text, "application/pdf") {
+		t.Fatalf("attachment summary missing from provider context: %+v", req.Messages)
+	}
+}
+
+func TestBuildIncludesAttachmentToolPathWhenAvailable(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	home := t.TempDir()
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := attachment.NewService(home).StoreReader("s1", "demo.wav", "audio/wav", bytes.NewReader([]byte("wav bytes")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "s1",
+		TurnID:          "t1",
+		UserMessageID:   "m1",
+		ClientMessageID: "c1",
+		UserAttachments: []store.Attachment{stored},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req, err := New(ms, nil, WithAttachmentHome(home)).Build(ctx, "s1", "m", string(store.ModeChat), provider.ModelConfig{
+		Capabilities: &provider.ModelCapabilities{Audio: false},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 1 || !strings.Contains(req.Messages[0].Text, "Local path for tools: ") || !strings.Contains(req.Messages[0].Text, "demo.wav") {
+		t.Fatalf("attachment tool path missing from fallback: %+v", req.Messages)
+	}
+}
+
+func TestBuildInlinesImageAttachmentWhenSupported(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	home := t.TempDir()
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := attachment.NewService(home).StoreReader("s1", "image.png", "image/png", bytes.NewReader([]byte("png bytes")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "s1",
+		TurnID:          "t1",
+		UserMessageID:   "m1",
+		ClientMessageID: "c1",
+		UserText:        "看图",
+		UserAttachments: []store.Attachment{stored},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req, err := New(ms, nil, WithAttachmentHome(home)).Build(ctx, "s1", "m", string(store.ModeChat), provider.ModelConfig{
+		Capabilities: &provider.ModelCapabilities{Image: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 2 || req.Messages[0].Parts[1].Type != provider.PartImage {
+		t.Fatalf("image attachment was not inlined: %+v", req.Messages)
+	}
+	if string(req.Messages[0].Parts[1].Data) != "png bytes" {
+		t.Fatalf("unexpected image bytes: %q", string(req.Messages[0].Parts[1].Data))
+	}
+}
+
+func TestBuildFallsBackWhenImageUnsupported(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	home := t.TempDir()
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := attachment.NewService(home).StoreReader("s1", "image.png", "image/png", bytes.NewReader([]byte("png bytes")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "s1",
+		TurnID:          "t1",
+		UserMessageID:   "m1",
+		ClientMessageID: "c1",
+		UserAttachments: []store.Attachment{stored},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req, err := New(ms, nil, WithAttachmentHome(home)).Build(ctx, "s1", "m", string(store.ModeChat), provider.ModelConfig{
+		Capabilities: &provider.ModelCapabilities{Image: false},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 1 || req.Messages[0].Parts[0].Type != provider.PartText {
+		t.Fatalf("unsupported image should fallback to text summary: %+v", req.Messages)
+	}
+}
+
+func TestBuildInlinesAudioAttachmentWhenSupported(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	home := t.TempDir()
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := attachment.NewService(home).StoreReader("s1", "demo.wav", "audio/wav", bytes.NewReader([]byte("wav bytes")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "s1",
+		TurnID:          "t1",
+		UserMessageID:   "m1",
+		ClientMessageID: "c1",
+		UserText:        "听一下",
+		UserAttachments: []store.Attachment{stored},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req, err := New(ms, nil, WithAttachmentHome(home)).Build(ctx, "s1", "m", string(store.ModeChat), provider.ModelConfig{
+		Capabilities: &provider.ModelCapabilities{Audio: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 2 || req.Messages[0].Parts[1].Type != provider.PartAudio {
+		t.Fatalf("audio attachment was not inlined: %+v", req.Messages)
+	}
+	if string(req.Messages[0].Parts[1].Data) != "wav bytes" {
+		t.Fatalf("unexpected audio bytes: %q", string(req.Messages[0].Parts[1].Data))
+	}
+}
+
+func TestBuildFallsBackWhenAudioUnsupported(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	home := t.TempDir()
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := attachment.NewService(home).StoreReader("s1", "demo.wav", "audio/wav", bytes.NewReader([]byte("wav bytes")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "s1",
+		TurnID:          "t1",
+		UserMessageID:   "m1",
+		ClientMessageID: "c1",
+		UserAttachments: []store.Attachment{stored},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req, err := New(ms, nil, WithAttachmentHome(home)).Build(ctx, "s1", "m", string(store.ModeChat), provider.ModelConfig{
+		Capabilities: &provider.ModelCapabilities{Audio: false},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 1 || req.Messages[0].Parts[0].Type != provider.PartText {
+		t.Fatalf("unsupported audio should fallback to text summary: %+v", req.Messages)
 	}
 }
 

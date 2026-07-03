@@ -12,6 +12,7 @@ function TranscriptTurnView({
   onQueuedCancel,
   onQueuedEditStart,
   onQueuedSave,
+  token,
   turn,
 }: {
   disclosure?: TurnDisclosureState;
@@ -21,6 +22,7 @@ function TranscriptTurnView({
   onQueuedCancel?: (clientMessageID: string) => Promise<unknown>;
   onQueuedEditStart?: (clientMessageID: string) => Promise<unknown>;
   onQueuedSave?: (clientMessageID: string, text: string) => Promise<unknown>;
+  token: string;
   turn: TranscriptTurnVM;
 }) {
   const anchorTurnID = turn.turnID || turn.key;
@@ -29,6 +31,7 @@ function TranscriptTurnView({
       {turn.user ? (
         <div>
           <UserInput
+            token={token}
             user={turn.user}
             onQueuedCancel={onQueuedCancel}
             onQueuedEditStart={onQueuedEditStart}
@@ -42,6 +45,7 @@ function TranscriptTurnView({
             assistant={turn.assistant}
             disclosure={disclosure}
             displaySettings={displaySettings}
+            token={token}
             turnID={anchorTurnID}
             onContentGrow={onAssistantContentGrow}
             onRevealComplete={onAssistantRevealComplete}
@@ -61,6 +65,7 @@ export const TranscriptTurn = memo(TranscriptTurnView, (previous, next) => {
   return (
     previous.disclosure === next.disclosure &&
     previous.displaySettings === next.displaySettings &&
+    previous.token === next.token &&
     transcriptTurnEqual(previous.turn, next.turn)
   );
 });
@@ -100,8 +105,28 @@ function userEqual(previous: TranscriptTurnVM["user"], next: TranscriptTurnVM["u
     previous.interrupted === next.interrupted &&
     previous.pending === next.pending &&
     previous.status === next.status &&
-    previous.text === next.text
+    previous.text === next.text &&
+    attachmentsEqual(previous.attachments, next.attachments)
   );
+}
+
+function attachmentsEqual(
+  previous: NonNullable<TranscriptTurnVM["user"]>["attachments"],
+  next: NonNullable<TranscriptTurnVM["user"]>["attachments"],
+) {
+  if (previous === next) {
+    return true;
+  }
+  if (!previous || !next) {
+    return false;
+  }
+  if (previous.length !== next.length) {
+    return false;
+  }
+  return previous.every((item, index) => {
+    const other = next[index];
+    return item.id === other.id && item.attachmentKey === other.attachmentKey && item.name === other.name && item.size === other.size;
+  });
 }
 
 function assistantEqual(previous: TranscriptTurnVM["assistant"], next: TranscriptTurnVM["assistant"]) {

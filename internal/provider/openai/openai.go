@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -336,9 +337,25 @@ type chatStreamOptions struct {
 
 type chatMessage struct {
 	Role       string         `json:"role"`
-	Content    string         `json:"content"`
+	Content    any            `json:"content"`
 	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string         `json:"tool_call_id,omitempty"`
+}
+
+type chatContentPart struct {
+	Type       string          `json:"type"`
+	Text       string          `json:"text,omitempty"`
+	ImageURL   *chatImageURL   `json:"image_url,omitempty"`
+	InputAudio *chatInputAudio `json:"input_audio,omitempty"`
+}
+
+type chatImageURL struct {
+	URL string `json:"url"`
+}
+
+type chatInputAudio struct {
+	Data   string `json:"data"`
+	Format string `json:"format"`
 }
 
 type chatTool struct {
@@ -483,6 +500,9 @@ func chatMessagesFor(msg provider.Message) []chatMessage {
 		return []chatMessage{{Role: string(msg.Role), Content: msg.Text}}
 	}
 	role := string(msg.Role)
+	if content := chatMediaContent(msg.Parts); len(content) > 0 {
+		return []chatMessage{{Role: role, Content: content}}
+	}
 	var out []chatMessage
 	var text strings.Builder
 	var calls []chatToolCall
@@ -528,6 +548,40 @@ func chatMessagesFor(msg provider.Message) []chatMessage {
 	flushText()
 	if len(out) == 0 {
 		out = append(out, chatMessage{Role: role, Content: msg.Text})
+	}
+	return out
+}
+
+func chatMediaContent(parts []provider.Part) []chatContentPart {
+	hasMedia := false
+	for _, part := range parts {
+		if (part.Type == provider.PartImage || part.Type == provider.PartAudio) && len(part.Data) > 0 {
+			hasMedia = true
+			break
+		}
+	}
+	if !hasMedia {
+		return nil
+	}
+	out := make([]chatContentPart, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case "", provider.PartText:
+			if part.Text != "" {
+				out = append(out, chatContentPart{Type: "text", Text: part.Text})
+			}
+		case provider.PartImage:
+			if len(part.Data) > 0 {
+				out = append(out, chatContentPart{Type: "image_url", ImageURL: &chatImageURL{URL: provider.ImageDataURL(part.MIME, part.Data)}})
+			}
+		case provider.PartAudio:
+			if len(part.Data) > 0 {
+				out = append(out, chatContentPart{Type: "input_audio", InputAudio: &chatInputAudio{
+					Data:   base64.StdEncoding.EncodeToString(part.Data),
+					Format: provider.AudioFormat(part.MIME),
+				}})
+			}
+		}
 	}
 	return out
 }

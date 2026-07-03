@@ -178,6 +178,19 @@ export const probeProviderModelsRequest = z.object({
   apiKey: z.string().optional(),
 });
 
+export const attachment = z.object({
+  id: z.string(),
+  name: z.string(),
+  attachmentKey: z.string(),
+  url: z.string(),
+  mime: z.string(),
+  size: z.number(),
+  origin: z.string().optional(),
+  createdAt: z.string().optional(),
+  audioTranscript: z.string().optional(),
+});
+export type Attachment = z.infer<typeof attachment>;
+
 export const contentPart = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), text: z.string() }),
   z.object({ type: z.literal("thought"), text: z.string() }),
@@ -196,6 +209,7 @@ export const contentPart = z.discriminatedUnion("type", [
     summaryKind: z.string().optional(),
     summaryCount: z.number().optional(),
   }),
+  attachment.extend({ type: z.literal("attachment") }),
 ]);
 export type ContentPart = z.infer<typeof contentPart>;
 
@@ -246,6 +260,7 @@ export const queuedInput = z.object({
   sessionID: z.string(),
   clientMessageID: z.string(),
   text: z.string(),
+  attachments: z.array(attachment).optional(),
   status: queuedInputStatus,
   provider: z.string().optional(),
   model: z.string().optional(),
@@ -257,12 +272,25 @@ export const queuedInput = z.object({
 });
 export type QueuedInput = z.infer<typeof queuedInput>;
 
-export const submitRequest = z.object({
-  clientMessageID: z.string().min(1),
-  kind: z.enum(["user", "system"]).optional(),
-  reasoningEffort: z.string().optional(),
-  text: z.string().min(1),
-});
+export const submitRequest = z
+  .object({
+    clientMessageID: z.string().min(1),
+    kind: z.enum(["user", "system"]).optional(),
+    reasoningEffort: z.string().optional(),
+    text: z.string().optional().default(""),
+    attachments: z.array(attachment).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.kind === "system") {
+      if (!value.text.trim() || (value.attachments?.length ?? 0) > 0) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "system submit requires text only" });
+      }
+      return;
+    }
+    if (!value.text.trim() && (value.attachments?.length ?? 0) === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "submit requires text or attachments" });
+    }
+  });
 
 // 202 新 turn 或 queued input;200 + duplicate=true 幂等重放
 export const submitResponse = z.object({

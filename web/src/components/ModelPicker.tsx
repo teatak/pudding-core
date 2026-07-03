@@ -12,7 +12,6 @@ import {
 import { queryKeys } from "@/api/queryKeys";
 import { BrandIcon } from "@/components/BrandIcons";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useI18n } from "@/i18n";
@@ -140,7 +139,7 @@ export function ModelPicker({ token, session, value, onAfterClose, onChange, onR
         <Button
           aria-label={t("session.model")}
           className={cn(
-            "group/model-picker h-6 min-w-0 max-w-full gap-1 rounded-full border-0 bg-muted py-0 pr-2 text-xs font-normal text-foreground transition-none hover:bg-accent aria-expanded:bg-accent data-[state=open]:bg-accent dark:hover:bg-accent dark:aria-expanded:bg-accent dark:data-[state=open]:bg-accent",
+            "group/model-picker h-6 min-w-0 max-w-[12rem] gap-1 rounded-full border-0 bg-muted py-0 pr-2 text-xs font-normal text-foreground transition-none hover:bg-accent aria-expanded:bg-accent data-[state=open]:bg-accent dark:hover:bg-accent dark:aria-expanded:bg-accent dark:data-[state=open]:bg-accent",
             visibleModel ? "pl-0.5" : "pl-2",
             className,
           )}
@@ -154,8 +153,8 @@ export function ModelPicker({ token, session, value, onAfterClose, onChange, onR
                 : <span className="grid size-5 place-items-center rounded-full bg-background/60 text-[10px] text-foreground">{(activeProfile?.displayName || currentProfileID).slice(0, 1).toUpperCase()}</span>}
             </span>
           ) : null}
-          <span className="flex h-5 min-w-0 items-center gap-1 text-foreground/75">
-            <span className="truncate">{label}</span>
+          <span className="flex h-5 min-w-0 flex-1 items-center gap-1 overflow-hidden text-foreground/75">
+            <span className="min-w-0 flex-1 truncate">{label}</span>
             <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
           </span>
         </Button>
@@ -163,7 +162,7 @@ export function ModelPicker({ token, session, value, onAfterClose, onChange, onR
       <PopoverContent
         align="start"
         alignOffset={-16}
-        className="w-80 p-2"
+        className="w-64 max-w-[calc(100vw-2rem)] p-2"
         side="top"
         sideOffset={8}
         onOpenAutoFocus={(event) => event.preventDefault()}
@@ -188,10 +187,7 @@ export function ModelPicker({ token, session, value, onAfterClose, onChange, onR
                 <AccordionTrigger className="items-center rounded-md px-2.5 py-1.5 text-sm font-normal text-muted-foreground hover:bg-accent hover:text-foreground hover:no-underline [&_[data-slot=accordion-trigger-icon]]:text-muted-foreground/70">
                   <span className="flex min-w-0 items-center gap-2">
                     <RoundBrandIcon name={providerBrandKey(profile)} />
-                    <span className="truncate">{profile.displayName}</span>
-                    <Badge className="h-4 border-muted-foreground/20 bg-transparent px-1.5 text-[9px] font-normal text-muted-foreground/70" variant="outline">
-                      {profile.protocol}
-                    </Badge>
+                    <span className="min-w-0 flex-1 truncate">{profile.displayName}</span>
                   </span>
                 </AccordionTrigger>
                 <AccordionContent className="pb-0">

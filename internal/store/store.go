@@ -314,39 +314,61 @@ const (
 	ContentPartThought    ContentPartType = "thought"
 	ContentPartToolUse    ContentPartType = "tool_use"
 	ContentPartToolResult ContentPartType = "tool_result"
+	ContentPartAttachment ContentPartType = "attachment"
 )
 
 type ContentPart struct {
-	Type         ContentPartType `json:"type"`
-	Text         string          `json:"text,omitempty"`
-	CallID       string          `json:"id,omitempty"`
-	Name         string          `json:"name,omitempty"`
-	Args         json.RawMessage `json:"args,omitempty"`
-	Ok           bool            `json:"ok,omitempty"`
-	Content      string          `json:"content,omitempty"`
-	SummaryKind  string          `json:"summaryKind,omitempty"`
-	SummaryCount int             `json:"summaryCount,omitempty"`
+	Type                ContentPartType `json:"type"`
+	Text                string          `json:"text,omitempty"`
+	CallID              string          `json:"id,omitempty"`
+	Name                string          `json:"name,omitempty"`
+	Args                json.RawMessage `json:"args,omitempty"`
+	Ok                  bool            `json:"ok,omitempty"`
+	Content             string          `json:"content,omitempty"`
+	SummaryKind         string          `json:"summaryKind,omitempty"`
+	SummaryCount        int             `json:"summaryCount,omitempty"`
+	AttachmentKey       string          `json:"attachmentKey,omitempty"`
+	URL                 string          `json:"url,omitempty"`
+	MIME                string          `json:"mime,omitempty"`
+	Size                int64           `json:"size,omitempty"`
+	Origin              string          `json:"origin,omitempty"`
+	AttachmentCreatedAt string          `json:"createdAt,omitempty"`
+	AudioTranscript     string          `json:"audioTranscript,omitempty"`
 }
 
 func (p ContentPart) MarshalJSON() ([]byte, error) {
 	type contentPartJSON struct {
-		Type         ContentPartType `json:"type"`
-		Text         string          `json:"text,omitempty"`
-		CallID       string          `json:"id,omitempty"`
-		Name         string          `json:"name,omitempty"`
-		Args         json.RawMessage `json:"args,omitempty"`
-		Ok           *bool           `json:"ok,omitempty"`
-		Content      string          `json:"content,omitempty"`
-		SummaryKind  string          `json:"summaryKind,omitempty"`
-		SummaryCount *int            `json:"summaryCount,omitempty"`
+		Type            ContentPartType `json:"type"`
+		Text            string          `json:"text,omitempty"`
+		CallID          string          `json:"id,omitempty"`
+		Name            string          `json:"name,omitempty"`
+		Args            json.RawMessage `json:"args,omitempty"`
+		Ok              *bool           `json:"ok,omitempty"`
+		Content         string          `json:"content,omitempty"`
+		SummaryKind     string          `json:"summaryKind,omitempty"`
+		SummaryCount    *int            `json:"summaryCount,omitempty"`
+		AttachmentKey   string          `json:"attachmentKey,omitempty"`
+		URL             string          `json:"url,omitempty"`
+		MIME            string          `json:"mime,omitempty"`
+		Size            int64           `json:"size,omitempty"`
+		Origin          string          `json:"origin,omitempty"`
+		CreatedAt       string          `json:"createdAt,omitempty"`
+		AudioTranscript string          `json:"audioTranscript,omitempty"`
 	}
 	out := contentPartJSON{
-		Type:    p.Type,
-		Text:    p.Text,
-		CallID:  p.CallID,
-		Name:    p.Name,
-		Args:    p.Args,
-		Content: p.Content,
+		Type:            p.Type,
+		Text:            p.Text,
+		CallID:          p.CallID,
+		Name:            p.Name,
+		Args:            p.Args,
+		Content:         p.Content,
+		AttachmentKey:   p.AttachmentKey,
+		URL:             p.URL,
+		MIME:            p.MIME,
+		Size:            p.Size,
+		Origin:          p.Origin,
+		CreatedAt:       p.AttachmentCreatedAt,
+		AudioTranscript: p.AudioTranscript,
 	}
 	if p.Type == ContentPartToolResult {
 		out.Ok = &p.Ok
@@ -356,6 +378,18 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 		}
 	}
 	return json.Marshal(out)
+}
+
+type Attachment struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	AttachmentKey   string `json:"attachmentKey"`
+	URL             string `json:"url"`
+	MIME            string `json:"mime"`
+	Size            int64  `json:"size"`
+	Origin          string `json:"origin,omitempty"`
+	CreatedAt       string `json:"createdAt,omitempty"`
+	AudioTranscript string `json:"audioTranscript,omitempty"`
 }
 
 type Message struct {
@@ -381,6 +415,65 @@ func TextPart(text string) []ContentPart {
 		return nil
 	}
 	return []ContentPart{{Type: ContentPartText, Text: text}}
+}
+
+func UserInputParts(text string, attachments []Attachment) []ContentPart {
+	parts := TextPart(text)
+	for _, attachment := range NormalizeAttachments(attachments) {
+		parts = append(parts, ContentPart{
+			Type:                ContentPartAttachment,
+			CallID:              attachment.ID,
+			Name:                attachment.Name,
+			AttachmentKey:       attachment.AttachmentKey,
+			URL:                 attachment.URL,
+			MIME:                attachment.MIME,
+			Size:                attachment.Size,
+			Origin:              attachment.Origin,
+			AttachmentCreatedAt: attachment.CreatedAt,
+			AudioTranscript:     attachment.AudioTranscript,
+		})
+	}
+	return parts
+}
+
+func NormalizeAttachments(attachments []Attachment) []Attachment {
+	out := make([]Attachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		attachment.ID = strings.TrimSpace(attachment.ID)
+		attachment.Name = strings.TrimSpace(attachment.Name)
+		attachment.AttachmentKey = strings.TrimSpace(attachment.AttachmentKey)
+		attachment.URL = strings.TrimSpace(attachment.URL)
+		attachment.MIME = strings.TrimSpace(attachment.MIME)
+		attachment.Origin = strings.TrimSpace(attachment.Origin)
+		attachment.CreatedAt = strings.TrimSpace(attachment.CreatedAt)
+		attachment.AudioTranscript = strings.TrimSpace(attachment.AudioTranscript)
+		if attachment.ID == "" || attachment.Name == "" || attachment.AttachmentKey == "" || attachment.MIME == "" || attachment.Size < 0 {
+			continue
+		}
+		out = append(out, attachment)
+	}
+	return out
+}
+
+func AttachmentsFromParts(parts []ContentPart) []Attachment {
+	out := make([]Attachment, 0, len(parts))
+	for _, part := range NormalizeContentParts(parts) {
+		if part.Type != ContentPartAttachment {
+			continue
+		}
+		out = append(out, Attachment{
+			ID:              part.CallID,
+			Name:            part.Name,
+			AttachmentKey:   part.AttachmentKey,
+			URL:             part.URL,
+			MIME:            part.MIME,
+			Size:            part.Size,
+			Origin:          part.Origin,
+			CreatedAt:       part.AttachmentCreatedAt,
+			AudioTranscript: part.AudioTranscript,
+		})
+	}
+	return NormalizeAttachments(out)
 }
 
 type MessageMetadata struct {
@@ -478,6 +571,8 @@ func MessageTextFromParts(parts []ContentPart) string {
 				}
 				b.WriteString(part.Content)
 			}
+		case ContentPartAttachment:
+			continue
 		}
 	}
 	return b.String()
@@ -512,6 +607,33 @@ func NormalizeContentParts(parts []ContentPart) []ContentPart {
 				continue
 			}
 			part.Text, part.Args = "", nil
+		case ContentPartAttachment:
+			attachment := NormalizeAttachments([]Attachment{{
+				ID:              part.CallID,
+				Name:            part.Name,
+				AttachmentKey:   part.AttachmentKey,
+				URL:             part.URL,
+				MIME:            part.MIME,
+				Size:            part.Size,
+				Origin:          part.Origin,
+				CreatedAt:       part.AttachmentCreatedAt,
+				AudioTranscript: part.AudioTranscript,
+			}})
+			if len(attachment) == 0 {
+				continue
+			}
+			part.CallID = attachment[0].ID
+			part.Name = attachment[0].Name
+			part.AttachmentKey = attachment[0].AttachmentKey
+			part.URL = attachment[0].URL
+			part.MIME = attachment[0].MIME
+			part.Size = attachment[0].Size
+			part.Origin = attachment[0].Origin
+			part.AttachmentCreatedAt = attachment[0].CreatedAt
+			part.AudioTranscript = attachment[0].AudioTranscript
+			part.Text, part.Args, part.Content = "", nil, ""
+			part.Ok = false
+			part.SummaryKind, part.SummaryCount = "", 0
 		default:
 			continue
 		}
@@ -574,6 +696,8 @@ func messageKindForPart(part ContentPartType) MessageKind {
 		return MessageKindToolResult
 	case ContentPartText:
 		fallthrough
+	case ContentPartAttachment:
+		fallthrough
 	default:
 		return MessageKindText
 	}
@@ -597,6 +721,7 @@ type QueuedInput struct {
 	SessionID       string            `json:"sessionID"`
 	ClientMessageID string            `json:"clientMessageID"`
 	Text            string            `json:"text"`
+	Attachments     []Attachment      `json:"attachments,omitempty"`
 	Status          QueuedInputStatus `json:"status"`
 	Provider        string            `json:"provider,omitempty"`
 	Model           string            `json:"model,omitempty"`
@@ -611,6 +736,7 @@ type QueueInputInput struct {
 	SessionID       string
 	ClientMessageID string
 	Text            string
+	Attachments     []Attachment
 	Provider        string
 	Model           string
 	Mode            AgentMode
@@ -699,6 +825,7 @@ type BeginTurnInput struct {
 	UserMessageID   string
 	ClientMessageID string
 	UserText        string
+	UserAttachments []Attachment
 	// Provider / Model 由 engine 在提交时刻解析后传入,随 turn 落库。
 	Provider    string
 	Model       string

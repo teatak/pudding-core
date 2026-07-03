@@ -77,6 +77,11 @@ func estimatePartTokens(part provider.Part) int {
 	switch part.Type {
 	case provider.PartText, provider.PartThought:
 		return EstimateTextTokens(part.Text)
+	case provider.PartImage, provider.PartAudio:
+		if len(part.Data) == 0 {
+			return 0
+		}
+		return 1024
 	case provider.PartToolUse:
 		return EstimateTextTokens(part.CallID) + EstimateTextTokens(part.Name) + EstimateTextTokens(string(part.Args))
 	case provider.PartToolResult:

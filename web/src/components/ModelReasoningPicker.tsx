@@ -17,7 +17,6 @@ import {
   reasoningEffortOptionsForSelection,
 } from "@/components/ReasoningEffortChip";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -154,7 +153,7 @@ export function ModelReasoningPicker({
         <Button
           aria-label={t("session.model")}
           className={cn(
-            "group/model-picker h-6 min-w-0 max-w-full gap-1 rounded-full border-0 bg-muted py-0 pr-2 text-xs font-normal text-foreground transition-none hover:bg-accent aria-expanded:bg-accent data-[state=open]:bg-accent dark:hover:bg-accent dark:aria-expanded:bg-accent dark:data-[state=open]:bg-accent",
+            "group/model-picker h-6 min-w-0 max-w-[12rem] gap-1 rounded-full border-0 bg-muted py-0 pr-2 text-xs font-normal text-foreground transition-none hover:bg-accent aria-expanded:bg-accent data-[state=open]:bg-accent dark:hover:bg-accent dark:aria-expanded:bg-accent dark:data-[state=open]:bg-accent",
             visibleModel ? "pl-0.5" : "pl-2",
             className,
           )}
@@ -166,8 +165,8 @@ export function ModelReasoningPicker({
               ? <RoundBrandIcon name={activeBrand} sizeClassName="size-5" />
               : <span className="grid size-5 shrink-0 place-items-center rounded-full bg-background/60 text-[10px] text-foreground">{(activeProfile?.displayName || selectedProvider).slice(0, 1).toUpperCase()}</span>
           ) : null}
-          <span className="flex h-5 min-w-0 items-center gap-1 text-foreground/75">
-            <span className="min-w-0 truncate">{label}</span>
+          <span className="flex h-5 min-w-0 flex-1 items-center gap-1 overflow-hidden text-foreground/75">
+            <span className="min-w-0 flex-1 truncate">{label}</span>
             {reasoningLabel ? <span className="shrink-0 text-muted-foreground/70">·</span> : null}
             {reasoningLabel ? <span className="shrink-0">{reasoningLabel}</span> : null}
             <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
@@ -202,7 +201,7 @@ export function ModelReasoningPicker({
           <DropdownMenuSubTrigger className="h-8">
             <span className="min-w-0 flex-1 truncate">{label}</span>
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent alignOffset={-196} className="w-80 p-2">
+          <DropdownMenuSubContent alignOffset={-164} className="w-64 max-w-[calc(100vw-2rem)] p-2">
             {providersQuery.isLoading ? (
               <div className="px-2.5 py-1.5 text-xs text-muted-foreground">{t("common.loading")}</div>
             ) : selectableProfiles.length === 0 ? (
@@ -222,10 +221,7 @@ export function ModelReasoningPicker({
                       >
                         <span className="flex min-w-0 items-center gap-2">
                           <RoundBrandIcon name={providerBrandKey(profile)} />
-                          <span className="truncate">{profile.displayName}</span>
-                          <Badge className="h-4 border-muted-foreground/20 bg-transparent px-1.5 text-[9px] font-normal text-muted-foreground/70" variant="outline">
-                            {profile.protocol}
-                          </Badge>
+                          <span className="min-w-0 flex-1 truncate">{profile.displayName}</span>
                           {profileSelected ? <span className="size-2 shrink-0 rounded-full bg-success/85" /> : null}
                         </span>
                       </AccordionTrigger>

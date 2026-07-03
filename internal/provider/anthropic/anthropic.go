@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -114,12 +115,19 @@ type message struct {
 type contentBlock struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text,omitempty"`
+	Source    *contentSource  `json:"source,omitempty"`
 	ID        string          `json:"id,omitempty"`
 	Name      string          `json:"name,omitempty"`
 	Input     json.RawMessage `json:"input,omitempty"`
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   string          `json:"content,omitempty"`
 	IsError   bool            `json:"is_error,omitempty"`
+}
+
+type contentSource struct {
+	Type      string `json:"type"`
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
 }
 
 func (c *Client) newRequest(ctx context.Context, req provider.Request) (*http.Request, error) {
@@ -378,6 +386,17 @@ func messagesFor(msg provider.Message) []message {
 		case "", provider.PartText:
 			if part.Text != "" {
 				blocks = append(blocks, contentBlock{Type: "text", Text: part.Text})
+			}
+		case provider.PartImage:
+			if len(part.Data) > 0 {
+				blocks = append(blocks, contentBlock{
+					Type: "image",
+					Source: &contentSource{
+						Type:      "base64",
+						MediaType: part.MIME,
+						Data:      base64.StdEncoding.EncodeToString(part.Data),
+					},
+				})
 			}
 		case provider.PartToolUse:
 			args := part.Args

@@ -31,6 +31,8 @@ import {
   sessionUsage,
   settingsResponse,
   skillDraftDetail,
+  attachment,
+  submitRequest,
   submitResponse,
   conversationTurn,
   dailyUsageResponse,
@@ -47,6 +49,7 @@ import {
   type AppConnection,
   type AppDefinition,
   type AppSkillDetail,
+  type Attachment,
   type BuiltinTool,
   type BrowserMCPSession,
   type CanvasItem,
@@ -113,6 +116,7 @@ const mobilePairingResponse = z.object({
 });
 
 export type SubmitResult = z.infer<typeof submitResponse>;
+export type SubmitPayload = z.input<typeof submitRequest>;
 export type CompactResult = z.infer<typeof compactResponse>;
 export type MobilePairing = z.infer<typeof mobilePairingResponse>;
 export type UserPrompt = z.infer<typeof userPromptResponse>;
@@ -380,12 +384,28 @@ export function updateQueuedInput(
 export function submitMessage(
   token: string,
   sessionID: string,
-  body: { clientMessageID: string; kind?: "system" | "user"; reasoningEffort?: string; text: string },
+  body: SubmitPayload,
 ): Promise<SubmitResult> {
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/submit`, submitResponse, {
     method: "POST",
-    body: JSON.stringify(body),
+    body: JSON.stringify(submitRequest.parse(body)),
   });
+}
+
+export async function uploadAttachment(token: string, sessionID: string, file: File): Promise<Attachment> {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await fetch(apiURL(`/sessions/${encodeURIComponent(sessionID)}/attachments`), {
+    method: "POST",
+    headers: authHeaders(token),
+    body: form,
+  });
+  const payload = await readJSON(response);
+  if (!response.ok) {
+    const code = typeof payload?.error === "string" ? payload.error : response.statusText;
+    throw new APIError(response.status, code);
+  }
+  return attachment.parse(payload);
 }
 
 export async function cancelTurn(token: string, sessionID: string): Promise<void> {
@@ -618,5 +638,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { AppConnection, AppDefinition, AppSkillDetail, BuiltinTool, BrowserMCPSession, ContentPart, DailyUsageStat, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
+export type { AppConnection, AppDefinition, AppSkillDetail, Attachment, BuiltinTool, BrowserMCPSession, ContentPart, DailyUsageStat, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
 export { createProviderRequest, patchProviderRequest };

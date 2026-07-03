@@ -72,6 +72,9 @@ type Engine struct {
 	builder  *contextbuilder.Builder
 	tools    tool.Runner
 
+	promptSource   contextbuilder.PromptSource
+	attachmentHome string
+
 	// auxCtx 是辅助 goroutine(自动标题,将来工具相关后台任务)的基 ctx;
 	// Stop() 取消它,优雅退出时这些 best-effort 任务立即中断,不拖住
 	// Wait()。turn goroutine 不挂在这上面——turn 要写完 canonical 才退,
@@ -97,8 +100,20 @@ func WithTools(runner tool.Runner) Option {
 
 func WithPromptSource(source contextbuilder.PromptSource) Option {
 	return func(e *Engine) {
-		e.builder = contextbuilder.New(e.store, source)
+		e.promptSource = source
+		e.rebuildBuilder()
 	}
+}
+
+func WithAttachmentHome(home string) Option {
+	return func(e *Engine) {
+		e.attachmentHome = strings.TrimSpace(home)
+		e.rebuildBuilder()
+	}
+}
+
+func (e *Engine) rebuildBuilder() {
+	e.builder = contextbuilder.New(e.store, e.promptSource, contextbuilder.WithAttachmentHome(e.attachmentHome))
 }
 
 func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opts ...Option) *Engine {
@@ -132,6 +147,7 @@ type SubmitInput struct {
 	SessionID       string
 	ClientMessageID string
 	Text            string
+	Attachments     []store.Attachment
 	Kind            string
 	ReasoningEffort string
 }
@@ -185,7 +201,21 @@ type resolvedModel struct {
 }
 
 func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, error) {
-	if strings.TrimSpace(in.Text) == "" || in.ClientMessageID == "" {
+	in.Attachments = store.NormalizeAttachments(in.Attachments)
+	kind := strings.TrimSpace(in.Kind)
+	if in.ClientMessageID == "" {
+		return nil, ErrEmptyInput
+	}
+	switch kind {
+	case "", "user":
+		if strings.TrimSpace(in.Text) == "" && len(in.Attachments) == 0 {
+			return nil, ErrEmptyInput
+		}
+	case "system":
+		if strings.TrimSpace(in.Text) == "" || len(in.Attachments) > 0 {
+			return nil, ErrEmptyInput
+		}
+	default:
 		return nil, ErrEmptyInput
 	}
 	sess, err := e.store.GetSession(ctx, in.SessionID)
@@ -208,12 +238,10 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrProviderConfig, err)
 	}
-	switch strings.TrimSpace(in.Kind) {
+	switch kind {
 	case "", "user":
 	case "system":
 		return e.submitSystem(ctx, in, resolved, client)
-	default:
-		return nil, ErrEmptyInput
 	}
 
 	queued, err := e.store.HasQueuedInputs(ctx, in.SessionID)
@@ -230,6 +258,7 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 		UserMessageID:   store.NewID("msg"),
 		ClientMessageID: in.ClientMessageID,
 		UserText:        in.Text,
+		UserAttachments: in.Attachments,
 		Provider:        resolved.providerName,
 		Model:           resolved.model,
 		Mode:            resolved.mode,
@@ -260,7 +289,7 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 
 	// 空标题会话:首条消息触发自动标题(provisional + 异步 LLM),
 	// 与 turn 生命周期解耦(titler.go)
-	if sess.Title == "" {
+	if sess.Title == "" && strings.TrimSpace(in.Text) != "" {
 		e.autoTitle(in.SessionID, resolved.providerName, resolved.model, resolved.config, in.Text)
 	}
 
@@ -321,7 +350,7 @@ func (e *Engine) SessionUsage(ctx context.Context, sessionID string) (*SessionUs
 		return nil, err
 	}
 	mode := initialMode(sess)
-	req, err := e.builder.Build(ctx, sessionID, resolved.model, string(mode))
+	req, err := e.builder.Build(ctx, sessionID, resolved.model, string(mode), resolved.config)
 	if err != nil {
 		return nil, err
 	}
@@ -380,6 +409,7 @@ func (e *Engine) queueSubmit(ctx context.Context, in SubmitInput, resolved *reso
 		SessionID:       in.SessionID,
 		ClientMessageID: in.ClientMessageID,
 		Text:            strings.TrimSpace(in.Text),
+		Attachments:     in.Attachments,
 		Provider:        resolved.providerName,
 		Model:           resolved.model,
 		Mode:            resolved.mode,
@@ -933,7 +963,7 @@ func (e *Engine) commitTurnParts(turnID string, parts *turnPartAccumulator, incl
 }
 
 func (e *Engine) buildProviderRequest(ctx context.Context, sessionID string, resolved *resolvedModel, mode store.AgentMode) (provider.Request, error) {
-	req, err := e.builder.Build(ctx, sessionID, resolved.model, string(mode))
+	req, err := e.builder.Build(ctx, sessionID, resolved.model, string(mode), resolved.config)
 	if err != nil {
 		return provider.Request{}, err
 	}

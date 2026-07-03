@@ -5,8 +5,11 @@ package contextbuilder
 
 import (
 	"context"
+	"os"
+	"strconv"
 	"strings"
 
+	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/prompt"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
@@ -14,24 +17,37 @@ import (
 )
 
 type Builder struct {
-	store   store.Store
-	prompts PromptSource
+	store          store.Store
+	prompts        PromptSource
+	attachmentHome string
+}
+
+type Option func(*Builder)
+
+func WithAttachmentHome(home string) Option {
+	return func(b *Builder) {
+		b.attachmentHome = strings.TrimSpace(home)
+	}
 }
 
 type PromptSource interface {
 	Prompt(ctx context.Context, mode string) (prompt.Output, error)
 }
 
-func New(s store.Store, prompts PromptSource) *Builder {
+func New(s store.Store, prompts PromptSource, opts ...Option) *Builder {
 	if prompts == nil {
 		prompts = staticPrompt{}
 	}
-	return &Builder{store: s, prompts: prompts}
+	b := &Builder{store: s, prompts: prompts}
+	for _, opt := range opts {
+		opt(b)
+	}
+	return b
 }
 
 // Build 在 user message 已落库之后调用,因此 current input 已包含在
 // canonical messages 里,不需要单独拼接。
-func (b *Builder) Build(ctx context.Context, sessionID, model string, mode string) (provider.Request, error) {
+func (b *Builder) Build(ctx context.Context, sessionID, model string, mode string, configs ...provider.ModelConfig) (provider.Request, error) {
 	msgs, err := b.store.ListMessages(ctx, sessionID, 0)
 	if err != nil {
 		return provider.Request{}, err
@@ -44,6 +60,10 @@ func (b *Builder) Build(ctx context.Context, sessionID, model string, mode strin
 	currentMode := store.NormalizeAgentMode(store.AgentMode(mode))
 	if currentMode == "" {
 		currentMode = store.ModeChat
+	}
+	var cfg provider.ModelConfig
+	if len(configs) > 0 {
+		cfg = configs[0]
 	}
 	req := provider.Request{
 		Model:    model,
@@ -66,7 +86,7 @@ func (b *Builder) Build(ctx context.Context, sessionID, model string, mode strin
 		switch m.Role {
 		case store.RoleUser:
 			flushAssistant()
-			parts := providerParts(m.Parts, currentMode)
+			parts := b.providerParts(sessionID, m.Parts, currentMode, cfg)
 			req.Messages = append(req.Messages, provider.Message{Role: provider.RoleUser, Text: textFromProviderParts(parts), Parts: parts})
 		case store.RoleSystem:
 			flushAssistant()
@@ -79,10 +99,10 @@ func (b *Builder) Build(ctx context.Context, sessionID, model string, mode strin
 				})
 			}
 		case store.RoleAssistant, store.RoleTool:
-			assistantParts = append(assistantParts, providerParts(m.Parts, currentMode)...)
+			assistantParts = append(assistantParts, b.providerParts(sessionID, m.Parts, currentMode, cfg)...)
 		case store.RoleSummary:
 			flushAssistant()
-			parts := providerParts(m.Parts, currentMode)
+			parts := b.providerParts(sessionID, m.Parts, currentMode, cfg)
 			if len(parts) > 0 {
 				req.Messages = append(req.Messages, provider.Message{Role: provider.RoleAssistant, Text: textFromProviderParts(parts), Parts: parts})
 			}
@@ -180,7 +200,7 @@ func (staticPrompt) Prompt(_ context.Context, mode string) (prompt.Output, error
 	return prompt.Assemble(prompt.Input{Mode: mode}), nil
 }
 
-func providerParts(parts []store.ContentPart, mode store.AgentMode) []provider.Part {
+func (b *Builder) providerParts(sessionID string, parts []store.ContentPart, mode store.AgentMode, cfg provider.ModelConfig) []provider.Part {
 	out := make([]provider.Part, 0, len(parts))
 	for _, part := range parts {
 		switch part.Type {
@@ -211,9 +231,109 @@ func providerParts(parts []store.ContentPart, mode store.AgentMode) []provider.P
 				Ok:      part.Ok,
 				Content: part.Content,
 			})
+		case store.ContentPartAttachment:
+			if imagePart, ok := b.imageProviderPart(sessionID, part, cfg); ok {
+				out = append(out, imagePart)
+			} else if audioPart, ok := b.audioProviderPart(sessionID, part, cfg); ok {
+				out = append(out, audioPart)
+			} else if text := attachmentProviderText(part, b.attachmentToolPath(sessionID, part)); text != "" {
+				out = append(out, provider.Part{Type: provider.PartText, Text: text})
+			}
 		}
 	}
 	return out
+}
+
+func (b *Builder) imageProviderPart(sessionID string, part store.ContentPart, cfg provider.ModelConfig) (provider.Part, bool) {
+	if !imageAttachmentsAllowed(cfg) || strings.TrimSpace(b.attachmentHome) == "" {
+		return provider.Part{}, false
+	}
+	mime := strings.ToLower(strings.TrimSpace(part.MIME))
+	if !strings.HasPrefix(mime, "image/") || mime == "image/svg+xml" {
+		return provider.Part{}, false
+	}
+	path, ok, err := attachment.NewService(b.attachmentHome).Path(sessionID, part.AttachmentKey)
+	if err != nil || !ok {
+		return provider.Part{}, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 {
+		return provider.Part{}, false
+	}
+	return provider.Part{Type: provider.PartImage, MIME: mime, Data: data}, true
+}
+
+func (b *Builder) audioProviderPart(sessionID string, part store.ContentPart, cfg provider.ModelConfig) (provider.Part, bool) {
+	if !audioAttachmentsAllowed(cfg) || strings.TrimSpace(b.attachmentHome) == "" {
+		return provider.Part{}, false
+	}
+	mime := strings.ToLower(strings.TrimSpace(part.MIME))
+	if !strings.HasPrefix(mime, "audio/") {
+		return provider.Part{}, false
+	}
+	path, ok, err := attachment.NewService(b.attachmentHome).Path(sessionID, part.AttachmentKey)
+	if err != nil || !ok {
+		return provider.Part{}, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 {
+		return provider.Part{}, false
+	}
+	return provider.Part{Type: provider.PartAudio, MIME: mime, Data: data}, true
+}
+
+func (b *Builder) attachmentToolPath(sessionID string, part store.ContentPart) string {
+	if strings.TrimSpace(b.attachmentHome) == "" {
+		return ""
+	}
+	path, ok, err := attachment.NewService(b.attachmentHome).Path(sessionID, part.AttachmentKey)
+	if err != nil || !ok {
+		return ""
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return ""
+	}
+	return path
+}
+
+func imageAttachmentsAllowed(cfg provider.ModelConfig) bool {
+	return cfg.Capabilities == nil || cfg.Capabilities.Image
+}
+
+func audioAttachmentsAllowed(cfg provider.ModelConfig) bool {
+	return cfg.Capabilities != nil && cfg.Capabilities.Audio
+}
+
+func attachmentProviderText(part store.ContentPart, toolPath string) string {
+	var b strings.Builder
+	b.WriteString("[Attachment]\n")
+	if part.Name != "" {
+		b.WriteString("Name: ")
+		b.WriteString(part.Name)
+		b.WriteByte('\n')
+	}
+	if part.MIME != "" {
+		b.WriteString("MIME: ")
+		b.WriteString(part.MIME)
+		b.WriteByte('\n')
+	}
+	if part.Size > 0 {
+		b.WriteString("Size bytes: ")
+		b.WriteString(strconv.FormatInt(part.Size, 10))
+		b.WriteByte('\n')
+	}
+	if toolPath != "" {
+		b.WriteString("Local path for tools: ")
+		b.WriteString(toolPath)
+		b.WriteByte('\n')
+	}
+	if part.AudioTranscript != "" {
+		b.WriteString("Audio transcript: ")
+		b.WriteString(part.AudioTranscript)
+		b.WriteByte('\n')
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func textFromProviderParts(parts []provider.Part) string {
@@ -235,6 +355,9 @@ func cloneProviderParts(parts []provider.Part) []provider.Part {
 		cp := part
 		if part.Args != nil {
 			cp.Args = append([]byte(nil), part.Args...)
+		}
+		if part.Data != nil {
+			cp.Data = append([]byte(nil), part.Data...)
 		}
 		out = append(out, cp)
 	}

@@ -370,3 +370,21 @@ func TestContextCancelTerminatesPromptly(t *testing.T) {
 		t.Fatal("cancel did not terminate promptly")
 	}
 }
+
+func TestMessagesForImagePart(t *testing.T) {
+	messages := messagesFor(provider.Message{
+		Role: provider.RoleUser,
+		Parts: []provider.Part{
+			{Type: provider.PartText, Text: "看图"},
+			{Type: provider.PartImage, MIME: "image/png", Data: []byte("png")},
+		},
+	})
+	data, err := json.Marshal(messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(data)
+	if !strings.Contains(body, `"type":"image"`) || !strings.Contains(body, `"media_type":"image/png"`) || !strings.Contains(body, `"data":"cG5n"`) {
+		t.Fatalf("image part not serialized for anthropic: %s", body)
+	}
+}

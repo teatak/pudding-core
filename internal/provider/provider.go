@@ -7,6 +7,7 @@ package provider
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"strconv"
 
@@ -116,6 +117,8 @@ type PartType string
 const (
 	PartText       PartType = "text"
 	PartThought    PartType = "thought"
+	PartImage      PartType = "image"
+	PartAudio      PartType = "audio"
 	PartToolUse    PartType = "tool_use"
 	PartToolResult PartType = "tool_result"
 )
@@ -128,6 +131,36 @@ type Part struct {
 	Args    json.RawMessage `json:"args,omitempty"`
 	Ok      bool            `json:"ok,omitempty"`
 	Content string          `json:"content,omitempty"`
+	MIME    string          `json:"mime,omitempty"`
+	Data    []byte          `json:"-"`
+}
+
+func ImageDataURL(mime string, data []byte) string {
+	if mime == "" {
+		mime = "image/png"
+	}
+	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
+}
+
+func AudioFormat(mime string) string {
+	switch mime {
+	case "audio/mpeg", "audio/mp3":
+		return "mp3"
+	case "audio/mp4", "audio/m4a":
+		return "m4a"
+	case "audio/aac":
+		return "aac"
+	case "audio/ogg":
+		return "ogg"
+	case "audio/flac":
+		return "flac"
+	case "audio/opus":
+		return "opus"
+	case "audio/webm":
+		return "webm"
+	default:
+		return "wav"
+	}
 }
 
 type FinishReason string

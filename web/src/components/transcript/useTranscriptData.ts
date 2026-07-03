@@ -117,6 +117,7 @@ function mergePendingUsers(queuedInputs: QueuedInput[], overlayPending: PendingU
     seen.add(input.clientMessageID);
     out.push({
       clientMessageID: input.clientMessageID,
+      attachments: input.attachments,
       createdAt: input.createdAt,
       sessionID: input.sessionID,
       status: input.status,

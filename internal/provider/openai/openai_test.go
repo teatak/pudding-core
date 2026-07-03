@@ -340,6 +340,42 @@ func streamForTest(t *testing.T, baseURL string, req provider.Request) <-chan pr
 	return ch
 }
 
+func TestChatMessagesForImagePart(t *testing.T) {
+	msgs := chatMessagesFor(provider.Message{
+		Role: provider.RoleUser,
+		Parts: []provider.Part{
+			{Type: provider.PartText, Text: "看图"},
+			{Type: provider.PartImage, MIME: "image/png", Data: []byte("png")},
+		},
+	})
+	data, err := json.Marshal(msgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(data)
+	if !strings.Contains(body, `"type":"image_url"`) || !strings.Contains(body, `data:image/png;base64,cG5n`) {
+		t.Fatalf("image part not serialized for chat completions: %s", body)
+	}
+}
+
+func TestChatMessagesForAudioPart(t *testing.T) {
+	msgs := chatMessagesFor(provider.Message{
+		Role: provider.RoleUser,
+		Parts: []provider.Part{
+			{Type: provider.PartText, Text: "听一下"},
+			{Type: provider.PartAudio, MIME: "audio/wav", Data: []byte("wav")},
+		},
+	})
+	data, err := json.Marshal(msgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(data)
+	if !strings.Contains(body, `"type":"input_audio"`) || !strings.Contains(body, `"data":"d2F2"`) || !strings.Contains(body, `"format":"wav"`) {
+		t.Fatalf("audio part not serialized for chat completions: %s", body)
+	}
+}
+
 func collect(t *testing.T, ch <-chan provider.Chunk) []provider.Chunk {
 	t.Helper()
 	var chunks []provider.Chunk

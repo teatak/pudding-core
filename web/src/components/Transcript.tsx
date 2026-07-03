@@ -119,6 +119,7 @@ export function Transcript({ token, sessionID, sessionRunning = false, submitErr
       sessionID={sessionID}
       showJumpLatest={!isAtLatest}
       submitError={submitError}
+      token={token}
       turns={transcript.turnVMs}
       onAssistantRevealComplete={handleAssistantRevealComplete}
       onJumpLatest={handleJumpLatest}

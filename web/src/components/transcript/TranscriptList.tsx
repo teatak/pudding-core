@@ -36,6 +36,7 @@ export const TranscriptList = memo(function TranscriptList({
   onQueuedSave,
   scrollElement,
   sessionID,
+  token,
   turns,
 }: {
   disclosure?: TurnDisclosureState;
@@ -51,6 +52,7 @@ export const TranscriptList = memo(function TranscriptList({
   onQueuedSave?: (clientMessageID: string, text: string) => Promise<unknown>;
   scrollElement: HTMLDivElement | null;
   sessionID: string;
+  token: string;
   turns: TranscriptTurnVM[];
 }) {
   const autoStickRef = useRef(true);
@@ -526,6 +528,7 @@ export const TranscriptList = memo(function TranscriptList({
           onQueuedCancel={onQueuedCancel}
           onQueuedEditStart={onQueuedEditStart}
           onQueuedSave={onQueuedSave}
+          token={token}
           turn={turn}
         />
       ))}

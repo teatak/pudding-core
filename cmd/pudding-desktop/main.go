@@ -100,12 +100,13 @@ func main() {
 	// desktop chrome path is being aligned with Wails-native behavior.
 	// installZoomSwizzle()
 	windowOpts := application.WebviewWindowOptions{
-		Title:     "Pudding",
-		URL:       launchURL(d.Token(), apiBase, desktopShell(), initialThemeState, localePreference),
-		Width:     1200,
-		Height:    800,
-		MinWidth:  520,
-		MinHeight: 600,
+		Title:          "Pudding",
+		URL:            launchURL(d.Token(), apiBase, desktopShell(), initialThemeState, localePreference),
+		Width:          1200,
+		Height:         800,
+		MinWidth:       520,
+		MinHeight:      600,
+		EnableFileDrop: true,
 		// 不透明窗口底:WKWebView 在 zoom/失焦/遮挡等合成空档会先露出
 		// 自己的默认 canvas。这里对齐暗色主题底色,避免层间跳色。
 		// BackgroundColour: application.NewRGB(28, 28, 28),
@@ -128,6 +129,7 @@ func main() {
 		}
 	}
 	window = app.Window.NewWithOptions(windowOpts)
+	bindDesktopFileDrop(window, d.Home())
 
 	app.Event.OnApplicationEvent(events.Common.ApplicationLaunchedWithUrl, func(e *application.ApplicationEvent) {
 		if e == nil || e.Context() == nil {

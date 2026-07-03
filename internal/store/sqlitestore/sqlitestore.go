@@ -49,7 +49,46 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("sqlite: apply schema: %w", err)
 	}
+	if err := ensureSchema(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return s, nil
+}
+
+func ensureSchema(db *sql.DB) error {
+	has, err := tableHasColumn(db, "queued_inputs", "attachments")
+	if err != nil {
+		return err
+	}
+	if !has {
+		if _, err := db.Exec(`ALTER TABLE queued_inputs ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'`); err != nil {
+			return fmt.Errorf("sqlite: migrate queued_inputs.attachments: %w", err)
+		}
+	}
+	return nil
+}
+
+func tableHasColumn(db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return false, fmt.Errorf("sqlite: inspect table %s: %w", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 func ensureDBFile(path string) error {
@@ -277,7 +316,7 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 			Role:            store.RoleUser,
 			Kind:            store.MessageKindText,
 			Text:            in.UserText,
-			Parts:           store.TextPart(in.UserText),
+			Parts:           store.UserInputParts(in.UserText, in.UserAttachments),
 			TurnIndex:       0,
 			ClientMessageID: in.ClientMessageID,
 			CreatedAt:       now,
@@ -431,6 +470,7 @@ func (s *Store) QueueInput(ctx context.Context, in store.QueueInputInput) (*stor
 			SessionID:       in.SessionID,
 			ClientMessageID: in.ClientMessageID,
 			Text:            in.Text,
+			Attachments:     store.NormalizeAttachments(in.Attachments),
 			Status:          store.QueuedInputQueued,
 			Provider:        in.Provider,
 			Model:           in.Model,
@@ -440,8 +480,8 @@ func (s *Store) QueueInput(ctx context.Context, in store.QueueInputInput) (*stor
 			UpdatedAt:       now,
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO queued_inputs(session_id,client_message_id,text,status,provider,model,mode,model_config,turn_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-			input.SessionID, input.ClientMessageID, input.Text, input.Status, input.Provider, input.Model, input.Mode, string(input.ModelConfig), input.TurnID, unixMS(now), unixMS(now),
+			`INSERT INTO queued_inputs(session_id,client_message_id,text,attachments,status,provider,model,mode,model_config,turn_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+			input.SessionID, input.ClientMessageID, input.Text, encodeAttachments(input.Attachments), input.Status, input.Provider, input.Model, input.Mode, string(input.ModelConfig), input.TurnID, unixMS(now), unixMS(now),
 		); err != nil {
 			return err
 		}
@@ -476,7 +516,7 @@ func (s *Store) ListQueuedInputs(ctx context.Context, sessionID string) ([]*stor
 		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx,
-		`SELECT session_id,client_message_id,text,status,provider,model,mode,model_config,turn_id,created_at,updated_at
+		`SELECT session_id,client_message_id,text,attachments,status,provider,model,mode,model_config,turn_id,created_at,updated_at
 		FROM queued_inputs
 		WHERE session_id=? AND status IN (?,?)
 		ORDER BY created_at ASC, rowid ASC`,
@@ -600,7 +640,7 @@ func (s *Store) PromoteNextQueuedInput(ctx context.Context, in store.PromoteQueu
 					Role:            store.RoleUser,
 					Kind:            store.MessageKindText,
 					Text:            input.Text,
-					Parts:           store.TextPart(input.Text),
+					Parts:           store.UserInputParts(input.Text, input.Attachments),
 					TurnIndex:       0,
 					ClientMessageID: input.ClientMessageID,
 					CreatedAt:       now,
@@ -1434,7 +1474,7 @@ func getUserMessageByClientMessageIDTx(ctx context.Context, tx *sql.Tx, sessionI
 
 func getQueuedInputTx(ctx context.Context, tx *sql.Tx, sessionID, clientMessageID string) (*store.QueuedInput, error) {
 	row := tx.QueryRowContext(ctx,
-		`SELECT session_id,client_message_id,text,status,provider,model,mode,model_config,turn_id,created_at,updated_at
+		`SELECT session_id,client_message_id,text,attachments,status,provider,model,mode,model_config,turn_id,created_at,updated_at
 		FROM queued_inputs WHERE session_id=? AND client_message_id=?`,
 		sessionID, clientMessageID,
 	)
@@ -1447,7 +1487,7 @@ func getQueuedInputTx(ctx context.Context, tx *sql.Tx, sessionID, clientMessageI
 
 func firstQueuedInputTx(ctx context.Context, tx *sql.Tx, sessionID string) (*store.QueuedInput, error) {
 	row := tx.QueryRowContext(ctx,
-		`SELECT session_id,client_message_id,text,status,provider,model,mode,model_config,turn_id,created_at,updated_at
+		`SELECT session_id,client_message_id,text,attachments,status,provider,model,mode,model_config,turn_id,created_at,updated_at
 		FROM queued_inputs
 		WHERE session_id=? AND status IN (?,?,?)
 		ORDER BY created_at ASC, rowid ASC
@@ -1595,12 +1635,14 @@ func scanMessage(row messageScanner) (*store.Message, error) {
 
 func scanQueuedInput(row messageScanner) (*store.QueuedInput, error) {
 	var input store.QueuedInput
+	var attachments string
 	var modelConfig string
 	var created, updated int64
 	err := row.Scan(
 		&input.SessionID,
 		&input.ClientMessageID,
 		&input.Text,
+		&attachments,
 		&input.Status,
 		&input.Provider,
 		&input.Model,
@@ -1613,6 +1655,7 @@ func scanQueuedInput(row messageScanner) (*store.QueuedInput, error) {
 	if err != nil {
 		return nil, err
 	}
+	input.Attachments = decodeAttachments(attachments)
 	input.ModelConfig = normalizeJSON(json.RawMessage(modelConfig))
 	input.Mode = store.NormalizeAgentMode(input.Mode)
 	if input.Mode == "" {
@@ -1755,6 +1798,26 @@ func decodeParts(raw string) []store.ContentPart {
 		_ = json.Unmarshal([]byte(raw), &parts)
 	}
 	return store.NormalizeContentParts(parts)
+}
+
+func encodeAttachments(attachments []store.Attachment) string {
+	normalized := store.NormalizeAttachments(attachments)
+	if len(normalized) == 0 {
+		return "[]"
+	}
+	data, err := json.Marshal(normalized)
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
+}
+
+func decodeAttachments(raw string) []store.Attachment {
+	var attachments []store.Attachment
+	if raw != "" {
+		_ = json.Unmarshal([]byte(raw), &attachments)
+	}
+	return store.NormalizeAttachments(attachments)
 }
 
 func encodeStringSlice(values []string) string {

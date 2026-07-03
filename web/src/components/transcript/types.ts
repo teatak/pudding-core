@@ -1,4 +1,4 @@
-import type { ContentPart, Message } from "@/api/client";
+import type { Attachment, ContentPart, Message } from "@/api/client";
 import type { TranscriptDisplaySettings } from "@/lib/appSettings";
 import type { AssistantOverlay, CompactRun, TurnPhaseState } from "@/state/overlayStore";
 
@@ -11,6 +11,7 @@ export type UserInputVM = {
   pending?: boolean;
   status?: "submitting" | "queued" | "editing";
   text: string;
+  attachments?: Attachment[];
 };
 
 export type AssistantOutputVM =
@@ -53,6 +54,7 @@ export type TurnDisclosureState = {
 
 export type TurnPartVM =
   | { key?: string; type: "text"; text: string }
+  | { attachment: Attachment; key?: string; type: "attachment" }
   | { active?: boolean; key?: string; text: string; type: "thought" }
   | {
       active?: boolean;
@@ -101,6 +103,22 @@ export function textFromContentParts(parts: ContentPart[]) {
     .filter((part) => part.type === "text")
     .map((part) => part.text)
     .join("");
+}
+
+export function attachmentsFromContentParts(parts: ContentPart[]): Attachment[] {
+  return parts
+    .filter((part) => part.type === "attachment")
+    .map((part) => ({
+      id: part.id,
+      name: part.name,
+      attachmentKey: part.attachmentKey,
+      url: part.url,
+      mime: part.mime,
+      size: part.size,
+      origin: part.origin,
+      createdAt: part.createdAt,
+      audioTranscript: part.audioTranscript,
+    }));
 }
 
 export function transcriptPhaseKey(phase: TurnPhaseState) {

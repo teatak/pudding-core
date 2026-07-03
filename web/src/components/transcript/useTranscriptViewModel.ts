@@ -10,6 +10,7 @@ import {
 } from "@/state/overlayStore";
 
 import {
+  attachmentsFromContentParts,
   textFromContentParts,
   transcriptPhaseKey,
   type TranscriptTurnVM,
@@ -233,6 +234,7 @@ function userFromMessages(messages: Message[]): UserInputVM | undefined {
     return undefined;
   }
   return {
+    attachments: attachmentsFromContentParts(userMessage.parts),
     createdAt: userMessage.createdAt,
     interrupted: userMessage.interrupted,
     text: textFromContentParts(userMessage.parts),
@@ -241,6 +243,7 @@ function userFromMessages(messages: Message[]): UserInputVM | undefined {
 
 function userFromPending(message: PendingUserMessage, options: { pending?: boolean } = {}): UserInputVM {
   return {
+    attachments: message.attachments,
     clientMessageID: message.clientMessageID,
     createdAt: message.createdAt,
     pending: options.pending ?? true,
