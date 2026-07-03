@@ -1,15 +1,16 @@
 import { useSyncExternalStore } from "react";
 
 // rail 折叠态:SessionRail(渲染形态)与 ChatPane(header 让位)共同消费。
-// 有效折叠 = 用户偏好 || 窄屏强制;窄屏下展开按钮退化为开关 popover。
+// 有效折叠 = 用户偏好 || 窄屏强制 || 左工作区宽度强制。
 const KEY = "pudding.railCollapsed";
 
-// 断点 720 < 壳窗口 MinWidth 760:桌面壳内永不强制折叠(折叠只随用户
-// 偏好)。920 时代踩过坑:WKWebView 跨屏/HiDPI 下 CSS viewport 与窗口
+// 断点 720 < 壳窗口 MinWidth 760:保留媒体查询兜底,主要桌面折叠由
+// App 根据左工作区实际宽度驱动。920 时代踩过坑:WKWebView 跨屏/HiDPI 下 CSS viewport 与窗口
 // 逻辑宽有缩放偏差,1200pt 窗口可折算到 920 以下,失焦/移屏瞬间 rail
 // 被强制收起,观感像"窗口出现大片黑背景"。
 const media = window.matchMedia("(max-width: 720px)");
 let pref = localStorage.getItem(KEY) === "1";
+let layoutForcedCollapsed = false;
 const listeners = new Set<() => void>();
 
 function notify() {
@@ -30,16 +31,28 @@ export function setRailCollapsed(next: boolean) {
   notify();
 }
 
+export function setRailLayoutForcedCollapsed(next: boolean) {
+  if (layoutForcedCollapsed === next) {
+    return;
+  }
+  layoutForcedCollapsed = next;
+  notify();
+}
+
 function subscribe(listener: () => void) {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
 
+function isForcedCollapsed() {
+  return media.matches || layoutForcedCollapsed;
+}
+
 export function useRailCollapsed() {
   return useSyncExternalStore(
     subscribe,
-    () => pref || media.matches,
-    () => pref || media.matches,
+    () => pref || isForcedCollapsed(),
+    () => pref || isForcedCollapsed(),
   );
 }
 
@@ -47,7 +60,7 @@ export function useRailCollapsed() {
 export function useRailForcedCollapsed() {
   return useSyncExternalStore(
     subscribe,
-    () => media.matches,
-    () => media.matches,
+    isForcedCollapsed,
+    isForcedCollapsed,
   );
 }

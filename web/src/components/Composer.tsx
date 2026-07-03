@@ -51,7 +51,7 @@ import {
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
-import { ComposerAddActionMenu, ComposerAddButton, type ComposerAddMenuAction } from "@/components/ComposerAddMenu";
+import { ComposerAddButton } from "@/components/ComposerAddMenu";
 import { buildComposerMentionReferences } from "@/components/composerMentionData";
 import { ComposerMentionMenu } from "@/components/ComposerMentionMenu";
 import { useComposerMentions } from "@/components/useComposerMentions";
@@ -94,7 +94,6 @@ const composerSchema = z.object({
 
 const MASCOT_INPUT_PITCH_BIAS = 0.65;
 const draftAttachmentSessionID = "draft";
-type AddMenuTrigger = { source: "button" | "text"; index: number | null };
 
 type ComposerProps = {
   droppedFiles?: DroppedFilesBatch | null;
@@ -157,8 +156,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const [mascotErrorMessage, setMascotErrorMessage] = useState<string | null>(null);
   const [mascotErrorSignal, setMascotErrorSignal] = useState(0);
   const [textFocused, setTextFocused] = useState(false);
-  const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const [addSelectedIndex, setAddSelectedIndex] = useState(0);
   const [attachmentPreviewIndex, setAttachmentPreviewIndex] = useState<number | null>(null);
   const [pickingAttachment, setPickingAttachment] = useState(false);
   const [pickingLocalFolder, setPickingLocalFolder] = useState(false);
@@ -166,7 +163,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   // clientMessageID 按"草稿"生成而不是按请求生成:失败重试和快速双击
   // 复用同一个 ID,服务端幂等去重才生效;成功后才轮换到下一个草稿 ID。
   const draftIDRef = useRef<string>(newClientID());
-  const addMenuTriggerRef = useRef<AddMenuTrigger>({ source: "button", index: null });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const lastDroppedFilesNonceRef = useRef(0);
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -296,11 +292,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     },
   });
   const mentionMenuOpen = textFocused && mentions.open && !slashMenuOpen;
-  const addMenuActions: ComposerAddMenuAction[] = [
-    { id: "files", label: t("composer.attach"), loading: pickingAttachment },
-    { id: "folder", label: t("composer.attachFolder"), loading: pickingLocalFolder },
-  ];
-  const addMenuVisible = addMenuOpen;
   const reasoningOptions = useMemo(() => reasoningEffortOptionsForSelection(resolvedModel), [resolvedModel]);
   const resolvedModelKey = resolvedModel ? `${resolvedModel.provider}:${resolvedModel.model}` : "";
   const reasoningEffort = resolvedModelKey && session.reasoningModelKey === resolvedModelKey ? session.reasoningEffort || "" : "";
@@ -337,14 +328,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     }
     setSlashSelectedIndex((index) => Math.min(index, visibleSlashCommands.length - 1));
   }, [slashMenuOpen, visibleSlashCommands.length]);
-
-  useEffect(() => {
-    if (!addMenuVisible) {
-      setAddSelectedIndex(0);
-      return;
-    }
-    setAddSelectedIndex((index) => Math.min(index, addMenuActions.length - 1));
-  }, [addMenuActions.length, addMenuVisible]);
 
   useEffect(() => {
     if (reasoningEffort && !reasoningOptions.includes(reasoningEffort)) {
@@ -460,7 +443,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       toast.error(t("composer.folderPickFailed"));
     } finally {
       setPickingLocalFolder(false);
-      setAddMenuOpen(false);
     }
   }, [addLocalFolderPaths, pickingLocalFolder, t]);
   const removeLocalFolder = useCallback((id: string) => {
@@ -480,7 +462,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     const clearPicking = () => {
       window.setTimeout(() => {
         setPickingAttachment(false);
-        setAddMenuOpen(false);
       }, 200);
     };
     window.addEventListener("focus", clearPicking, { once: true });
@@ -489,41 +470,10 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       textAreaRef.current?.focus({ preventScroll: true });
     });
   }, [pickingAttachment]);
-  const removeTextAddMenuTrigger = useCallback(() => {
-    const trigger = addMenuTriggerRef.current;
-    if (trigger.source !== "text" || trigger.index === null) {
-      return;
-    }
-    const textArea = textAreaRef.current;
-    const value = textArea?.value ?? form.getValues("text");
-    const index = trigger.index;
-    if (index < 0 || index >= value.length || value[index] !== "@") {
-      return;
-    }
-    const nextText = value.slice(0, index) + value.slice(index + 1);
-    form.setValue("text", nextText);
-    setSessionDraftText(sessionID, nextText);
-    window.requestAnimationFrame(() => {
-      textAreaRef.current?.setSelectionRange(index, index);
-    });
-  }, [form, sessionID, setSessionDraftText]);
-  const openAddMenu = useCallback((source: AddMenuTrigger["source"] = "button", index: number | null = null) => {
-    addMenuTriggerRef.current = { source, index };
+  const openMentionMenuFromButton = useCallback(() => {
     setTextFocused(true);
-    setAddMenuOpen(true);
-    window.requestAnimationFrame(() => textAreaRef.current?.focus({ preventScroll: true }));
-  }, []);
-  const selectAddAction = useCallback(
-    (action: ComposerAddMenuAction) => {
-      removeTextAddMenuTrigger();
-      if (action.id === "files") {
-        pickAttachment();
-        return;
-      }
-      pickLocalFolder();
-    },
-    [pickAttachment, pickLocalFolder, removeTextAddMenuTrigger],
-  );
+    mentions.openManual();
+  }, [mentions]);
   // Prefer this mascot feedback for composer-local validation and command errors.
   const showMascotError = useCallback(
     (message: string) => {
@@ -676,7 +626,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   });
   const sendEnabled =
     canSend &&
-    !addMenuVisible &&
     !mentionMenuOpen &&
     !slashMenuOpen &&
     !submitMutation.isPending &&
@@ -853,9 +802,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     void textField.onChange(event);
     setSessionDraftText(sessionID, nextText);
     mentions.notifyChange(nextText, previousText, event.target.selectionStart);
-    if (addMenuOpen) {
-      setAddMenuOpen(false);
-    }
     if (mascotErrorMessage) {
       clearMascotError();
     }
@@ -864,7 +810,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   };
   const handleAttachmentInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     setPickingAttachment(false);
-    setAddMenuOpen(false);
     addFiles(Array.from(event.target.files || []));
     event.target.value = "";
   };
@@ -902,31 +847,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     if (mentions.onKeyDown(event)) {
       scheduleMascotInputGaze();
       return;
-    }
-    if (addMenuVisible) {
-      switch (event.key) {
-        case "ArrowDown":
-          event.preventDefault();
-          setAddSelectedIndex((index) => (index + 1) % addMenuActions.length);
-          return;
-        case "ArrowUp":
-          event.preventDefault();
-          setAddSelectedIndex((index) => (index - 1 + addMenuActions.length) % addMenuActions.length);
-          return;
-        case "Enter":
-        case "Tab": {
-          event.preventDefault();
-          const action = addMenuActions[addSelectedIndex] ?? addMenuActions[0];
-          if (action) {
-            selectAddAction(action);
-          }
-          return;
-        }
-        case "Escape":
-          event.preventDefault();
-          setAddMenuOpen(false);
-          return;
-      }
     }
     if (slashMenuOpen) {
       switch (event.key) {
@@ -1006,13 +926,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
               onHover={mentions.setActiveIndex}
               onSelect={mentions.select}
             />
-          ) : addMenuVisible ? (
-            <ComposerAddActionMenu
-              actions={addMenuActions}
-              selectedIndex={addSelectedIndex}
-              onHover={setAddSelectedIndex}
-              onSelect={selectAddAction}
-            />
           ) : slashMenuOpen ? (
             <SlashCommandMenu
               commands={visibleSlashCommands}
@@ -1078,10 +991,10 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
             </div>
             <div className="flex min-w-0 items-center gap-1 px-2 pb-2">
               <ComposerAddButton
-                active={addMenuVisible}
+                active={mentionMenuOpen}
                 busy={pickingAttachment || pickingLocalFolder}
                 label={t("composer.addMenuTitle")}
-                onClick={() => openAddMenu("button")}
+                onClick={openMentionMenuFromButton}
               />
               {currentMode === "workspace" ? <WorkspaceDirsControl session={session} token={token} /> : null}
               {compactMutation.isPending ? (

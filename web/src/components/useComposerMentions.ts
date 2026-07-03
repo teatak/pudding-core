@@ -5,6 +5,7 @@ import {
   filterComposerMentionReferences,
   findComposerMentionTrigger,
   type ComposerMentionReference,
+  type ComposerMentionTrigger,
 } from "@/components/composerMentionReferences";
 
 export type ComposerMentionState = {
@@ -13,6 +14,7 @@ export type ComposerMentionState = {
   activeIndex: number;
   query: string;
   setActiveIndex: (index: number) => void;
+  openManual: () => void;
   select: (reference: ComposerMentionReference) => void;
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => boolean;
   notifyChange: (newValue: string, oldValue: string, cursor: number) => void;
@@ -35,15 +37,20 @@ export function useComposerMentions({
   const [cursor, setCursor] = useState(0);
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [manualTrigger, setManualTrigger] = useState<ComposerMentionTrigger | null>(null);
   const userClosedRef = useRef(false);
-  const trigger = useMemo(() => findComposerMentionTrigger(text, cursor), [cursor, text]);
+  const textTrigger = useMemo(() => findComposerMentionTrigger(text, cursor), [cursor, text]);
+  const trigger = manualTrigger || textTrigger;
   const filtered = useMemo(
     () => (trigger ? filterComposerMentionReferences(references, trigger.query) : []),
     [references, trigger],
   );
 
   useEffect(() => {
-    if (!trigger) {
+    if (manualTrigger) {
+      return;
+    }
+    if (!textTrigger) {
       setOpen(false);
       userClosedRef.current = false;
       return;
@@ -53,7 +60,7 @@ export function useComposerMentions({
     }
     setOpen(true);
     setActiveIndex(0);
-  }, [trigger]);
+  }, [manualTrigger, textTrigger]);
 
   useEffect(() => {
     if (activeIndex >= filtered.length) {
@@ -75,6 +82,7 @@ export function useComposerMentions({
 
   const notifyChange = (newValue: string, oldValue: string, nextCursor: number) => {
     setCursor(nextCursor);
+    setManualTrigger(null);
     if (newValue.length - oldValue.length > 2) {
       setOpen(false);
       userClosedRef.current = true;
@@ -89,6 +97,17 @@ export function useComposerMentions({
     setCursor(nextCursor);
   };
 
+  const openManual = () => {
+    const textArea = textAreaRef.current;
+    const position = Math.max(0, Math.min(textArea?.selectionStart ?? cursor, text.length));
+    setCursor(position);
+    setManualTrigger({ start: position, end: position, query: "" });
+    setOpen(true);
+    setActiveIndex(0);
+    userClosedRef.current = false;
+    setSelection(position);
+  };
+
   const replaceTrigger = (replacement: string, keepOpen = false) => {
     if (!trigger) {
       return;
@@ -96,6 +115,7 @@ export function useComposerMentions({
     const next = text.slice(0, trigger.start) + replacement + text.slice(trigger.end);
     const nextCursor = trigger.start + replacement.length;
     setText(next);
+    setManualTrigger(null);
     setOpen(keepOpen);
     userClosedRef.current = !keepOpen;
     setSelection(nextCursor);
@@ -138,6 +158,7 @@ export function useComposerMentions({
       }
       case "Escape":
         event.preventDefault();
+        setManualTrigger(null);
         setOpen(false);
         userClosedRef.current = true;
         return true;
@@ -152,6 +173,7 @@ export function useComposerMentions({
     activeIndex,
     query: trigger?.query ?? "",
     setActiveIndex,
+    openManual,
     select,
     onKeyDown,
     notifyChange,

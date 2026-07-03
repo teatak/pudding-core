@@ -199,6 +199,10 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
     -webkit-user-select: none;
 }
 
+[data-slot="sheet-content"] > [data-slot="sheet-close"] {
+    z-index: 30;
+}
+
 @layer utilities {
   .active\:not-aria-\[haspopup\]\:translate-y-px:active:not([aria-haspopup]) {
     --tw-translate-y: 0px;

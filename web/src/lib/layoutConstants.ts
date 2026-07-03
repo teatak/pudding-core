@@ -9,7 +9,9 @@ export const workspaceLayout = {
   minPercent: 1,
   maxPercent: 99,
   minChatPx: 480,
-  minCanvasPx: 240,
+  maxChatPx: 920,
+  minCanvasPx: 320,
+  railAutoCollapsePx: 760,
 } as const;
 
 export const resizeTargetMinimumSize = {

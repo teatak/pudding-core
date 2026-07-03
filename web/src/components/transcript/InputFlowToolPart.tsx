@@ -63,6 +63,8 @@ type UIConfirmRow = {
   value: unknown;
 };
 
+function noop() {}
+
 export function InputFlowPanel({ request }: { request: InputFlowRequest }) {
   if (request.kind === "confirm") {
     return <UIConfirmPanel request={request} />;
@@ -234,46 +236,14 @@ function UIConfirmPanel({ request }: { request: InputFlowRequest }) {
   }
 
   return (
-    <div
-      className="absolute bottom-full left-4 z-20 max-h-[min(16rem,calc(100vh-14rem))] w-[min(34rem,calc(100%-2rem))] overflow-y-auto rounded-t-lg border border-border/70 bg-popover/95 px-3 py-2 text-popover-foreground shadow-sm backdrop-blur sm:left-16 sm:w-[min(34rem,calc(100%-5rem))]"
-      onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          cancelInputFlow(request);
-        }
-      }}
+    <FloatingUIPanel
+      cancelLabel={schema.cancelLabel || t("common.cancel")}
+      description={schema.description}
+      title={schema.title}
+      onCancel={() => cancelInputFlow(request)}
     >
-      <div className="flex min-w-0 items-start gap-2">
-        <TextCursorInput className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{schema.title}</div>
-          {schema.description ? <div className="mt-0.5 line-clamp-2 text-xs leading-5 text-muted-foreground">{schema.description}</div> : null}
-        </div>
-        <Button
-          aria-label={schema.cancelLabel || t("common.cancel")}
-          className="-mr-1 -mt-1 size-7 shrink-0 rounded-full"
-          size="icon-sm"
-          type="button"
-          variant="ghost"
-          onClick={() => cancelInputFlow(request)}
-        >
-          <X className="size-4" />
-        </Button>
-      </div>
-      {schema.rows.length > 0 ? (
-        <div className="mt-3 max-h-36 overflow-y-auto rounded-md border border-border/60 text-xs">
-          {schema.rows.map((row, index) => (
-            <div key={`${row.label}:${index}`} className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 border-b border-border/50 px-2 py-1.5 last:border-b-0">
-              <div className="truncate font-medium text-muted-foreground">{row.label}</div>
-              <div className="min-w-0">
-                <div className="truncate text-foreground">{formatConfirmValue(row.value)}</div>
-                {row.description ? <div className="mt-0.5 truncate text-muted-foreground">{row.description}</div> : null}
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : null}
-      <div className="mt-3">
+      <div className="space-y-3 text-sm text-foreground">
+        {schema.rows.length > 0 ? <ConfirmRows rows={schema.rows} /> : null}
         <ChoiceMenu
           maxHeightClassName="max-h-28"
           items={[
@@ -297,6 +267,194 @@ function UIConfirmPanel({ request }: { request: InputFlowRequest }) {
           }}
         />
       </div>
+    </FloatingUIPanel>
+  );
+}
+
+function FloatingUIPanel({
+  cancelLabel,
+  children,
+  description,
+  title,
+  onCancel,
+}: {
+  cancelLabel: string;
+  children: ReactNode;
+  description?: string;
+  title: string;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      className="absolute bottom-full left-4 z-20 flex max-h-[min(20rem,calc(100vh-12rem))] w-[min(34rem,calc(100%-2rem))] flex-col overflow-hidden rounded-t-lg border border-border/70 bg-popover/95 text-popover-foreground shadow-sm backdrop-blur sm:left-16 sm:w-[min(34rem,calc(100%-5rem))]"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onCancel();
+        }
+      }}
+    >
+      <div className="flex min-w-0 shrink-0 items-start gap-2 px-3 py-2">
+        <TextCursorInput className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium">{title}</div>
+          {description ? <div className="mt-0.5 line-clamp-2 text-xs leading-5 text-muted-foreground">{description}</div> : null}
+        </div>
+        <Button
+          aria-label={cancelLabel}
+          className="-mr-1 -mt-1 size-7 shrink-0 rounded-full"
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+          onClick={onCancel}
+        >
+          <X className="size-4" />
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-2">{children}</div>
+    </div>
+  );
+}
+
+function SelectedItems({ items }: { items: Array<Record<string, unknown>> }) {
+  return (
+    <div className="space-y-1">
+      {items.map((item, index) => (
+        <div key={index} className="flex items-center gap-2 rounded-md bg-background/60 px-2 py-1.5 text-xs">
+          <Check className="size-3.5 text-primary" />
+          <span className="min-w-0 truncate">{itemSummary(item)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ActiveStep({
+  confirmItems = [],
+  confirmResultKey = "items",
+  confirmValues = {},
+  customOpen,
+  customValue,
+  max,
+  step,
+  textValue = "",
+  onConfirm,
+  onCustomOpen,
+  onCustomValue,
+  onNumberSelect,
+  onOptionSelect,
+  onTextChange,
+  onTextSubmit,
+}: {
+  confirmItems?: Array<Record<string, unknown>>;
+  confirmResultKey?: string;
+  confirmValues?: Record<string, unknown>;
+  customOpen: boolean;
+  customValue: string;
+  max?: number;
+  step: InputFlowStep;
+  textValue?: string;
+  onConfirm?: () => void;
+  onCustomOpen: () => void;
+  onCustomValue: (value: string) => void;
+  onNumberSelect: (value: number) => void;
+  onOptionSelect: (option: InputFlowOption) => void;
+  onTextChange?: (value: string) => void;
+  onTextSubmit?: (value: string) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <StepTitle step={step} />
+      {step.type === "option_list" ? (
+        <OptionList step={step} onSelect={onOptionSelect} />
+      ) : step.type === "quick_number" ? (
+        <QuickNumber
+          customOpen={customOpen}
+          customValue={customValue}
+          max={max}
+          step={step}
+          onCustomOpen={onCustomOpen}
+          onCustomValue={onCustomValue}
+          onSelect={onNumberSelect}
+        />
+      ) : step.type === "text_input" || step.type === "phone_input" ? (
+        <TextInputStep step={step} value={textValue} onChange={onTextChange || noop} onSubmit={onTextSubmit || noop} />
+      ) : step.type === "confirm" ? (
+        <ConfirmStep items={confirmItems} resultKey={confirmResultKey} values={confirmValues} onConfirm={onConfirm || noop} />
+      ) : null}
+    </div>
+  );
+}
+
+function AfterItemMenu({
+  canAddMore,
+  current,
+  doneDisabled,
+  schema,
+  onCancel,
+  onContinue,
+  onDone,
+}: {
+  canAddMore: boolean;
+  current: Record<string, unknown>;
+  doneDisabled: boolean;
+  schema: InputFlowSchema;
+  onCancel: () => void;
+  onContinue: () => void;
+  onDone: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="space-y-3">
+      {schema.afterItem?.title ? <div className="text-xs font-medium text-muted-foreground">{schema.afterItem.title}</div> : null}
+      <div className="px-2 py-1 text-xs text-muted-foreground">{itemSummary(current)}</div>
+      <ChoiceMenu
+        items={[
+          ...(canAddMore
+            ? [
+                {
+                  id: "continue",
+                  label: actionLabel(schema.afterItem, "continue", t("inputFlow.continue")),
+                  value: "continue" as const,
+                },
+              ]
+            : []),
+          {
+            id: "done",
+            label: actionLabel(schema.afterItem, "done", t("inputFlow.done")),
+            value: "done" as const,
+            disabled: doneDisabled,
+          },
+          { id: "cancel", label: t("common.cancel"), value: "cancel" as const },
+        ]}
+        onSelect={(action) => {
+          if (action === "continue") {
+            onContinue();
+            return;
+          }
+          if (action === "done") {
+            onDone();
+            return;
+          }
+          onCancel();
+        }}
+      />
+    </div>
+  );
+}
+
+function ConfirmRows({ rows }: { rows: UIConfirmRow[] }) {
+  return (
+    <div className="max-h-36 overflow-y-auto rounded-md border border-border/60 text-xs">
+      {rows.map((row, index) => (
+        <div key={`${row.label}:${index}`} className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 border-b border-border/50 px-2 py-1.5 last:border-b-0">
+          <div className="truncate font-medium text-muted-foreground">{row.label}</div>
+          <div className="min-w-0">
+            <div className="truncate text-foreground">{formatConfirmValue(row.value)}</div>
+            {row.description ? <div className="mt-0.5 truncate text-muted-foreground">{row.description}</div> : null}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

@@ -1043,9 +1043,16 @@ function TableExportMenu({ table, token }: { table: TableExportData; token: stri
     const toastID = toast.loading(t("canvas.exporting"), { position: "top-center" });
     try {
       const result = await exportTable(table, format, token);
+      const exportedPath = result.path;
       toast.success(t("canvas.exportDone"), {
         id: toastID,
-        description: result.path ? <ExportSavedDescription path={result.path} token={token} /> : result.filename,
+        description: exportedPath ? <ExportSavedDescription path={exportedPath} /> : result.filename,
+        action: exportedPath
+          ? {
+              label: t("canvas.exportReveal"),
+              onClick: () => void revealFile(exportedPath, token),
+            }
+          : undefined,
         duration: 6000,
         position: "top-center",
       });
@@ -1081,7 +1088,7 @@ function TableExportMenu({ table, token }: { table: TableExportData; token: stri
   );
 }
 
-function ExportSavedDescription({ path, token }: { path: string; token: string }) {
+function ExportSavedDescription({ path }: { path: string }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const copyPath = async () => {
@@ -1094,22 +1101,15 @@ function ExportSavedDescription({ path, token }: { path: string; token: string }
     }
   };
   return (
-    <div className="mt-0.5 flex max-w-full min-w-0 flex-wrap items-center gap-1.5 text-xs">
+    <div className="mt-0.5 flex w-full min-w-0 max-w-full items-center gap-1.5 text-xs">
       <span className="shrink-0 text-muted-foreground">{t("canvas.exportSavedTo")}</span>
       <button
-        className="inline-flex min-w-0 flex-1 basis-36 items-center gap-1 rounded-md border bg-background px-2 py-0.5 text-left"
+        className="inline-flex min-w-0 flex-1 items-center gap-1 rounded-md border bg-background px-2 py-0.5 text-left"
         type="button"
         onClick={() => void copyPath()}
       >
-        <span className="truncate font-mono">{prettyPath(path)}</span>
+        <span className="min-w-0 truncate font-mono">{prettyPath(path)}</span>
         {copied ? <Check className="h-3.5 w-3.5 shrink-0 text-emerald-500" /> : <Copy className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
-      </button>
-      <button
-        className="inline-flex h-8 shrink-0 items-center justify-center rounded-md border bg-background px-3 font-medium text-foreground hover:bg-muted"
-        type="button"
-        onClick={() => void revealFile(path, token)}
-      >
-        {t("canvas.exportReveal")}
       </button>
     </div>
   );

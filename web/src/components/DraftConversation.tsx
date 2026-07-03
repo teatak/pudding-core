@@ -35,7 +35,7 @@ import {
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
-import { ComposerAddActionMenu, ComposerAddButton, type ComposerAddMenuAction } from "@/components/ComposerAddMenu";
+import { ComposerAddButton } from "@/components/ComposerAddMenu";
 import { buildComposerMentionReferences } from "@/components/composerMentionData";
 import { ComposerMentionMenu } from "@/components/ComposerMentionMenu";
 import { useComposerMentions } from "@/components/useComposerMentions";
@@ -83,7 +83,6 @@ type DraftDroppedFilesBatch = DroppedLocalItems & {
   failedFileCount?: number;
   nonce: number;
 };
-type AddMenuTrigger = { source: "button" | "text"; index: number | null };
 type QuickSubmit = { id: number; text: string };
 
 const suggestionKeys = ["draft.suggest.1", "draft.suggest.2", "draft.suggest.3"] as const;
@@ -386,14 +385,11 @@ function DraftComposer({
   const [resolvedModel, setResolvedModel] = useState<ResolvedModelSelection | null>(null);
   const [draftReasoningEffort, setDraftReasoningEffortValue] = useState("");
   const [draftReasoningModelKey, setDraftReasoningModelKey] = useState("");
-  const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const [addSelectedIndex, setAddSelectedIndex] = useState(0);
   const [attachmentPreviewIndex, setAttachmentPreviewIndex] = useState<number | null>(null);
   const [textFocused, setTextFocused] = useState(false);
   const [pickingAttachment, setPickingAttachment] = useState(false);
   const [pickingLocalFolder, setPickingLocalFolder] = useState(false);
   const draftIDRef = useRef<string>(newClientID());
-  const addMenuTriggerRef = useRef<AddMenuTrigger>({ source: "button", index: null });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const lastDroppedFilesNonceRef = useRef(0);
   const quickSubmitIDRef = useRef<number | null>(null);
@@ -447,13 +443,8 @@ function DraftComposer({
       pickLocalFolder();
     },
   });
-  const addMenuActions: ComposerAddMenuAction[] = [
-    { id: "files", label: t("composer.attach"), loading: pickingAttachment },
-    { id: "folder", label: t("composer.attachFolder"), loading: pickingLocalFolder },
-  ];
-  const addMenuVisible = addMenuOpen;
   const mentionMenuOpen = textFocused && mentions.open;
-  const sendEnabled = canSend && modelReady && !addMenuVisible && !mentionMenuOpen;
+  const sendEnabled = canSend && modelReady && !mentionMenuOpen;
   const textField = form.register("text");
   const attachmentPreviewItems = useMemo(
     () =>
@@ -483,14 +474,6 @@ function DraftComposer({
     },
     [resolvedModelKey],
   );
-
-  useEffect(() => {
-    if (!addMenuVisible) {
-      setAddSelectedIndex(0);
-      return;
-    }
-    setAddSelectedIndex((index) => Math.min(index, addMenuActions.length - 1));
-  }, [addMenuActions.length, addMenuVisible]);
 
   const updateMascotInputGaze = useCallback(() => {
     const textArea = textAreaRef.current;
@@ -619,7 +602,6 @@ function DraftComposer({
       toast.error(t("composer.folderPickFailed"));
     } finally {
       setPickingLocalFolder(false);
-      setAddMenuOpen(false);
     }
   }, [addLocalFolderPaths, pickingLocalFolder, t]);
   const removeLocalFolder = useCallback((id: string) => {
@@ -639,7 +621,6 @@ function DraftComposer({
     const clearPicking = () => {
       window.setTimeout(() => {
         setPickingAttachment(false);
-        setAddMenuOpen(false);
       }, 200);
     };
     window.addEventListener("focus", clearPicking, { once: true });
@@ -648,40 +629,10 @@ function DraftComposer({
       textAreaRef.current?.focus({ preventScroll: true });
     });
   }, [pickingAttachment]);
-  const removeTextAddMenuTrigger = useCallback(() => {
-    const trigger = addMenuTriggerRef.current;
-    if (trigger.source !== "text" || trigger.index === null) {
-      return;
-    }
-    const textArea = textAreaRef.current;
-    const value = textArea?.value ?? form.getValues("text");
-    const index = trigger.index;
-    if (index < 0 || index >= value.length || value[index] !== "@") {
-      return;
-    }
-    const nextText = value.slice(0, index) + value.slice(index + 1);
-    form.setValue("text", nextText);
-    setDraftText(nextText);
-    window.requestAnimationFrame(() => {
-      textAreaRef.current?.setSelectionRange(index, index);
-    });
-  }, [form, setDraftText]);
-  const openAddMenu = useCallback((source: AddMenuTrigger["source"] = "button", index: number | null = null) => {
-    addMenuTriggerRef.current = { source, index };
-    setAddMenuOpen(true);
-    window.requestAnimationFrame(() => textAreaRef.current?.focus({ preventScroll: true }));
-  }, []);
-  const selectAddAction = useCallback(
-    (action: ComposerAddMenuAction) => {
-      removeTextAddMenuTrigger();
-      if (action.id === "files") {
-        pickAttachment();
-        return;
-      }
-      pickLocalFolder();
-    },
-    [pickAttachment, pickLocalFolder, removeTextAddMenuTrigger],
-  );
+  const openMentionMenuFromButton = useCallback(() => {
+    setTextFocused(true);
+    mentions.openManual();
+  }, [mentions]);
 
   useEffect(() => {
     if (!droppedFiles || droppedFiles.nonce === lastDroppedFilesNonceRef.current) {
@@ -889,15 +840,11 @@ function DraftComposer({
     void textField.onChange(event);
     setDraftText(nextText);
     mentions.notifyChange(nextText, previousText, event.currentTarget.selectionStart);
-    if (addMenuOpen) {
-      setAddMenuOpen(false);
-    }
     setTextFocused(true);
     scheduleMascotInputGaze();
   };
   const handleAttachmentInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     setPickingAttachment(false);
-    setAddMenuOpen(false);
     addFiles(Array.from(event.target.files || []));
     event.target.value = "";
   };
@@ -922,31 +869,6 @@ function DraftComposer({
     if (mentions.onKeyDown(event)) {
       scheduleMascotInputGaze();
       return;
-    }
-    if (addMenuVisible) {
-      switch (event.key) {
-        case "ArrowDown":
-          event.preventDefault();
-          setAddSelectedIndex((index) => (index + 1) % addMenuActions.length);
-          return;
-        case "ArrowUp":
-          event.preventDefault();
-          setAddSelectedIndex((index) => (index - 1 + addMenuActions.length) % addMenuActions.length);
-          return;
-        case "Enter":
-        case "Tab": {
-          event.preventDefault();
-          const action = addMenuActions[addSelectedIndex] ?? addMenuActions[0];
-          if (action) {
-            selectAddAction(action);
-          }
-          return;
-        }
-        case "Escape":
-          event.preventDefault();
-          setAddMenuOpen(false);
-          return;
-      }
     }
     if (event.key === "Enter" && !event.shiftKey) {
       if (ime.isComposing(event)) {
@@ -974,14 +896,6 @@ function DraftComposer({
                 selectedIndex={mentions.activeIndex}
                 onHover={mentions.setActiveIndex}
                 onSelect={mentions.select}
-              />
-            ) : addMenuVisible ? (
-              <ComposerAddActionMenu
-                align="start"
-                actions={addMenuActions}
-                selectedIndex={addSelectedIndex}
-                onHover={setAddSelectedIndex}
-                onSelect={selectAddAction}
               />
             ) : null}
             <div className="relative z-10 rounded-3xl border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/25">
@@ -1042,10 +956,10 @@ function DraftComposer({
             </div>
             <div className="flex min-w-0 items-center gap-1 px-2 pb-2">
               <ComposerAddButton
-                active={addMenuVisible}
+                active={mentionMenuOpen}
                 busy={pickingAttachment || pickingLocalFolder}
                 label={t("composer.addMenuTitle")}
-                onClick={() => openAddMenu("button")}
+                onClick={openMentionMenuFromButton}
               />
               <ModelReasoningPicker
                 className="ml-auto min-w-0"

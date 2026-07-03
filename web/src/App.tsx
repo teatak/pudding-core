@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useSearch } from "@tanstack/react-router";
 import { PanelRight } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { useGroupRef } from "react-resizable-panels";
 import { toast } from "sonner";
 
@@ -31,6 +31,7 @@ import {
 import { readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
 import { useCanvasMCP } from "@/mcp/canvasTools";
 import { setCanvasOpen, useCanvasOpen } from "@/state/canvasStore";
+import { setRailLayoutForcedCollapsed } from "@/state/railStore";
 import { clearPendingPairingCode, pendingPairingCode } from "@/state/token";
 import { setToken, useToken } from "@/state/tokenStore";
 
@@ -45,6 +46,7 @@ export function App() {
   const canvasOpen = useCanvasOpen();
   const [pairingCode] = useState(() => pendingPairingCode());
   const [pairingFailed, setPairingFailed] = useState(false);
+  const [leftWorkspaceNode, setLeftWorkspaceNode] = useState<HTMLDivElement | null>(null);
   const workspaceGroupRef = useGroupRef();
   const splitGroupRef = useGroupRef();
   const savedSplitLayout = useMemo(
@@ -78,6 +80,22 @@ export function App() {
   // ChatPane 只负责 pane-local UI/滚动状态。
   useVisibleSessionEvents(activeSessionIDs, token);
   useCanvasMCP(token);
+
+  useLayoutEffect(() => {
+    if (!leftWorkspaceNode) {
+      setRailLayoutForcedCollapsed(false);
+      return;
+    }
+    const update = () => {
+      setRailLayoutForcedCollapsed(leftWorkspaceNode.getBoundingClientRect().width < workspaceLayout.railAutoCollapsePx);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(leftWorkspaceNode);
+    return () => {
+      observer.disconnect();
+    };
+  }, [leftWorkspaceNode]);
 
   useEffect(() => {
     if (!token) {
@@ -228,101 +246,114 @@ export function App() {
     </main>
   );
 
+  const canvasToggle = canUseCanvas ? (
+    <div className="pudding-canvas-toggle no-drag-region absolute top-0 right-[13px] z-40 flex h-(--toolbar-h) items-center">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            aria-label={t("canvas.toggle")}
+            aria-pressed={effectiveCanvasOpen}
+            size="icon-sm"
+            tabIndex={-1}
+            variant="ghost"
+            onClick={() => setCanvasOpen(!canvasOpen)}
+          >
+            <PanelRight />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent align="end" side="bottom">
+          {t("canvas.toggle")}
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  ) : null;
+
+  const mainPane = appsActive ? (
+    <AppsPane token={token} />
+  ) : !canUseCanvas ? (
+    chatArea
+  ) : isMobile ? (
+    <>
+      {chatArea}
+      <Sheet open={effectiveCanvasOpen} onOpenChange={setCanvasOpen}>
+        <SheetContent
+          className="w-[min(28rem,92vw)] max-w-none gap-0 p-0"
+          side="right"
+        >
+          <SheetHeader className="sr-only">
+            <SheetTitle>{t("canvas.title")}</SheetTitle>
+            <SheetDescription>{t("canvas.empty")}</SheetDescription>
+          </SheetHeader>
+          <CanvasPane token={token} sessionID={selectedSessionID} />
+        </SheetContent>
+      </Sheet>
+    </>
+  ) : (
+    chatArea
+  );
+
+  const leftWorkspace = (
+    <div ref={setLeftWorkspaceNode} className="relative flex h-full min-w-0 bg-background">
+      <SessionRail
+        activeSessionIDs={activeSessionIDs}
+        draftActive={draftActive}
+        selectedSessionID={appsActive ? undefined : selectedSessionID}
+        token={token}
+      />
+      <div className="relative h-full min-w-0 flex-1 bg-background">{mainPane}</div>
+    </div>
+  );
+
+  const workspaceContent =
+    !effectiveCanvasOpen || isMobile ? (
+      leftWorkspace
+    ) : (
+      <ResizablePanelGroup
+        className="h-full min-w-0"
+        defaultLayout={savedWorkspaceLayout}
+        groupRef={workspaceGroupRef}
+        id="workspace"
+        orientation="horizontal"
+        resizeTargetMinimumSize={resizeTargetMinimumSize}
+        onLayoutChanged={(layout) => {
+          if (effectiveCanvasOpen && typeof layout.canvas === "number" && layout.canvas > 0) {
+            savePanelLayout(layoutStorageKeys.workspaceRatio, layout);
+          }
+        }}
+      >
+        <ResizablePanel
+          id="chat"
+          className="min-w-0"
+          maxSize={workspaceLayout.maxChatPx}
+          minSize={workspaceLayout.minChatPx}
+        >
+          {leftWorkspace}
+        </ResizablePanel>
+        <WorkspaceResizableHandle
+          id="chat-canvas"
+          aria-label={t("layout.resizeHint")}
+          className={effectiveCanvasOpen ? undefined : "hidden"}
+          disabled={!effectiveCanvasOpen}
+        />
+        <ResizablePanel
+          id="canvas"
+          className="min-w-0"
+          collapsedSize="0%"
+          collapsible
+          minSize={workspaceLayout.minCanvasPx}
+        >
+          {effectiveCanvasOpen ? <CanvasPane token={token} sessionID={selectedSessionID} /> : null}
+        </ResizablePanel>
+      </ResizablePanelGroup>
+    );
+
   return (
     <TooltipProvider delayDuration={250}>
       <div className="relative flex h-[100svh] overflow-hidden">
         <div aria-hidden="true" className="drag-region absolute inset-x-0 top-0 z-20 h-(--toolbar-h)" />
-        <SessionRail
-          activeSessionIDs={activeSessionIDs}
-          draftActive={draftActive}
-          selectedSessionID={appsActive ? undefined : selectedSessionID}
-          token={token}
-        />
-        {/* rail 固定宽度,不参与 resize。核心工作区只在 chat/canvas 之间分配空间。 */}
         <div className="relative h-full min-w-0 flex-1 bg-background">
-          {appsActive ? (
-            <AppsPane token={token} />
-          ) : (
-            <>
-              {canUseCanvas ? (
-                <div className="pudding-canvas-toggle no-drag-region absolute top-0 right-[13px] z-40 flex h-(--toolbar-h) items-center">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        aria-label={t("canvas.toggle")}
-                        aria-pressed={effectiveCanvasOpen}
-                        size="icon-sm"
-                        tabIndex={-1}
-                        variant="ghost"
-                        onClick={() => setCanvasOpen(!canvasOpen)}
-                      >
-                        <PanelRight />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent align="end" side="bottom">
-                      {t("canvas.toggle")}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-              ) : null}
-              {!canUseCanvas ? (
-                chatArea
-              ) : isMobile ? (
-                <>
-                  {chatArea}
-                  <Sheet open={effectiveCanvasOpen} onOpenChange={setCanvasOpen}>
-                    <SheetContent
-                      className="w-[min(28rem,92vw)] max-w-none gap-0 p-0"
-                      side="right"
-                    >
-                      <SheetHeader className="sr-only">
-                        <SheetTitle>{t("canvas.title")}</SheetTitle>
-                        <SheetDescription>{t("canvas.empty")}</SheetDescription>
-                      </SheetHeader>
-                      <CanvasPane token={token} sessionID={selectedSessionID} />
-                    </SheetContent>
-                  </Sheet>
-                </>
-              ) : (
-                <ResizablePanelGroup
-                  className="h-full min-w-0"
-                  defaultLayout={effectiveCanvasOpen ? savedWorkspaceLayout : workspaceLayout.closed}
-                  groupRef={workspaceGroupRef}
-                  id="workspace"
-                  orientation="horizontal"
-                  resizeTargetMinimumSize={resizeTargetMinimumSize}
-                  onLayoutChanged={(layout) => {
-                    if (effectiveCanvasOpen && typeof layout.canvas === "number" && layout.canvas > 0) {
-                      savePanelLayout(layoutStorageKeys.workspaceRatio, layout);
-                    }
-                  }}
-                >
-                  <ResizablePanel
-                    id="chat"
-                    className="min-w-0"
-                    minSize={workspaceLayout.minChatPx}
-                  >
-                    {chatArea}
-                  </ResizablePanel>
-                  <WorkspaceResizableHandle
-                    id="chat-canvas"
-                    aria-label={t("layout.resizeHint")}
-                    className={effectiveCanvasOpen ? undefined : "hidden"}
-                    disabled={!effectiveCanvasOpen}
-                  />
-                  <ResizablePanel
-                    id="canvas"
-                    className="min-w-0"
-                    collapsedSize="0%"
-                    collapsible
-                    minSize={workspaceLayout.minCanvasPx}
-                  >
-                    {effectiveCanvasOpen ? <CanvasPane token={token} sessionID={selectedSessionID} /> : null}
-                  </ResizablePanel>
-                </ResizablePanelGroup>
-              )}
-            </>
-          )}
+          {canvasToggle}
+          {workspaceContent}
         </div>
       </div>
       <SettingsDialog token={token} showTrigger={false} />
