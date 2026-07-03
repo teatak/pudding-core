@@ -1254,10 +1254,10 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			result = tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: "tool runner unavailable"}
 		} else {
 			call.WorkspaceDirs = e.workspaceDirsForToolCall(ctx, sessionID, turnID)
-			toolCtx, cancel := context.WithTimeout(ctx, toolCallTimeout)
+			toolCtx, cancel, timed := toolContext(ctx, call.Name)
 			result = e.tools.Call(toolCtx, call)
 			cancel()
-			if toolCtx.Err() != nil && result.Content == "" {
+			if timed && toolCtx.Err() != nil && result.Content == "" {
 				result = tool.Result{
 					CallID:  call.CallID,
 					Name:    call.Name,
@@ -1298,6 +1298,14 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 		}
 	}
 	return store.TurnRunning, "", nextMode, modeChanged
+}
+
+func toolContext(ctx context.Context, name string) (context.Context, context.CancelFunc, bool) {
+	if strings.HasPrefix(name, "ui_") {
+		return ctx, func() {}, false
+	}
+	toolCtx, cancel := context.WithTimeout(ctx, toolCallTimeout)
+	return toolCtx, cancel, true
 }
 
 func (e *Engine) workspaceDirsForToolCall(ctx context.Context, sessionID, turnID string) []string {

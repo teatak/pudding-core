@@ -984,7 +984,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   return (
     <>
       <form
-        className={cn("relative shrink-0 pb-4", pendingInputFlow ? "pt-[24rem]" : pendingApproval ? "pt-36" : "pt-2")}
+        className={cn("relative shrink-0 pb-4", pendingApproval ? "pt-36" : "pt-2")}
         onSubmit={form.handleSubmit(submitDraft)}
       >
       {/* 底部遮罩:滚动内容贴近输入区时淡出,随 composer 定位、宽度走 ChatColumn。

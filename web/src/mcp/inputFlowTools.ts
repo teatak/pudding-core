@@ -1,5 +1,5 @@
 import type { ToolDefinition } from "@/mcp/browserMCP";
-import { waitForInputFlow } from "@/state/inputFlowStore";
+import { waitForInputFlow, waitForUIConfirm } from "@/state/inputFlowStore";
 
 export function createInputFlowTools(): ToolDefinition[] {
   return [
@@ -61,6 +61,49 @@ export function createInputFlowTools(): ToolDefinition[] {
           throw new Error("repeatSteps is required");
         }
         const result = await waitForInputFlow({
+          args: record,
+          sessionID,
+          title,
+        });
+        return jsonToolResult(result);
+      },
+    },
+    {
+      name: "ui_confirm",
+      description:
+        "Show a compact confirmation prompt above the composer and wait until the user confirms or cancels. Use this before irreversible or user-visible actions, such as creating an order after showing a summary. The result is returned as JSON in the tool result.",
+      capability: "chat",
+      inputSchema: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Short confirmation title." },
+          description: { type: "string", description: "Optional short helper text." },
+          rows: {
+            type: "array",
+            description: "Optional summary rows to show before confirmation.",
+            items: {
+              type: "object",
+              properties: {
+                label: { type: "string" },
+                value: {},
+                description: { type: "string" },
+              },
+              required: ["label", "value"],
+              additionalProperties: true,
+            },
+          },
+          confirmLabel: { type: "string", description: "Confirm action label. Defaults to Confirm." },
+          cancelLabel: { type: "string", description: "Cancel action label. Defaults to Cancel." },
+          destructive: { type: "boolean", description: "Set true for destructive confirmations." },
+        },
+        required: ["title"],
+        additionalProperties: true,
+      },
+      handler: async (args) => {
+        const record = requiredRecord(args);
+        const sessionID = requiredString(record._pudding_session_id, "_pudding_session_id");
+        const title = requiredString(record.title, "title");
+        const result = await waitForUIConfirm({
           args: record,
           sessionID,
           title,

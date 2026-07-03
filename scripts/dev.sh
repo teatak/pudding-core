@@ -10,6 +10,7 @@ cd "$(dirname "$0")/.."
 DEV_PORT=9679   # dev 通道单端口(internal/home);release 是 9669
 VITE_PORT=5174  # 与 .claude/launch.json / vite 一致
 MODE="${1:-desktop}"
+BUILDTAGS="${BUILDTAGS:-sqlite_fts5}"
 
 listening() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
 wait_free() { for _ in $(seq 1 20); do listening "$1" || return 0; sleep 0.3; done; }
@@ -32,7 +33,7 @@ ensure_vite() {
 
 case "$MODE" in
   desktop)
-    go build -o bin/pudding-desktop ./cmd/pudding-desktop || exit 1
+    go build -tags "$BUILDTAGS" -o bin/pudding-desktop ./cmd/pudding-desktop || exit 1
     ensure_vite
     stop_old
     echo ">> launching pudding-desktop with Wails/Vite :$VITE_PORT (HMR; API :$DEV_PORT; log /tmp/pudding-desktop.log)"
@@ -42,7 +43,7 @@ case "$MODE" in
     echo "   edit web/src for instant HMR; no shell restart needed"
     ;;
   daemon)
-    go build -o bin/puddingd ./cmd/puddingd || exit 1
+    go build -tags "$BUILDTAGS" -o bin/puddingd ./cmd/puddingd || exit 1
     ensure_vite
     stop_old
     echo ">> launching puddingd on :$DEV_PORT (log /tmp/puddingd.log)"

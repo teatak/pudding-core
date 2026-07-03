@@ -5,6 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 MODULE="github.com/teatak/pudding-core"
+BUILDTAGS="${BUILDTAGS:-sqlite_fts5}"
 
 version="${1:-}"
 if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9._-]+)?$ ]]; then
@@ -23,6 +24,7 @@ fi
 echo ">> building web embed + release binary ($goos/$goarch)"
 make embed
 CGO_ENABLED=1 go build \
+  -tags "$BUILDTAGS" \
   -ldflags "-X $MODULE/internal/buildinfo.channel=release" \
   -o bin/pudding-desktop ./cmd/pudding-desktop
 

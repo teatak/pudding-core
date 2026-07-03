@@ -53,6 +53,10 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := ensureHistorySearch(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -116,6 +120,8 @@ func ensureDBFile(path string) error {
 var _ store.Store = (*Store)(nil)
 
 const messageSelectColumns = `id,session_id,turn_id,role,kind,text,parts,turn_index,metadata,client_message_id,interrupted,created_at`
+
+const messageSelectColumnsAliasM = `m.id,m.session_id,m.turn_id,m.role,m.kind,m.text,m.parts,m.turn_index,m.metadata,m.client_message_id,m.interrupted,m.created_at`
 
 func (s *Store) Close() error { return s.db.Close() }
 
@@ -1192,6 +1198,90 @@ func (s *Store) ListMessagesPage(ctx context.Context, sessionID string, beforeMe
 		out = out[1:]
 	}
 	return &store.MessagePage{Messages: out, HasMore: hasMore}, nil
+}
+
+func (s *Store) GetMessage(ctx context.Context, sessionID string, messageID string) (*store.Message, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	messageID = strings.TrimSpace(messageID)
+	if sessionID == "" || messageID == "" {
+		return nil, store.ErrNotFound
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
+		return nil, err
+	}
+	msg, err := scanMessage(tx.QueryRowContext(ctx,
+		`SELECT `+messageSelectColumns+`
+		FROM messages WHERE session_id=? AND id=?`,
+		sessionID, messageID,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	return msg, err
+}
+
+func (s *Store) SearchMessages(ctx context.Context, in store.MessageSearchInput) ([]*store.Message, error) {
+	if !historySearchAvailable() {
+		return nil, store.ErrHistorySearchUnavailable
+	}
+	sessionID := strings.TrimSpace(in.SessionID)
+	query := strings.TrimSpace(in.Query)
+	if sessionID == "" {
+		return nil, store.ErrInvalidSession
+	}
+	if query == "" {
+		return nil, nil
+	}
+	limit := in.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx,
+		`SELECT `+messageSelectColumnsAliasM+`
+		FROM messages_fts f
+		JOIN messages m ON m.rowid = f.rowid
+		WHERE f.text MATCH ? AND m.session_id=?
+		ORDER BY rank
+		LIMIT ?`,
+		query, sessionID, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: search messages: %w", err)
+	}
+	defer rows.Close()
+	out := make([]*store.Message, 0)
+	for rows.Next() {
+		msg, err := scanMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, msg)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (s *Store) ListTurnsPage(ctx context.Context, sessionID string, beforeTurnID string, limit int) (*store.TurnPage, error) {

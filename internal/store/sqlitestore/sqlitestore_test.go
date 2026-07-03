@@ -274,6 +274,25 @@ func beginTestTurn(t *testing.T, st store.Store, sessionID, turnID, msgID, clien
 	return res
 }
 
+func TestGetMessageRequiresSessionScope(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, st, "sess_1")
+	createTestSession(t, st, "sess_2")
+	beginTestTurn(t, st, "sess_1", "turn_1", "msg_1", "client_1")
+
+	msg, err := st.GetMessage(ctx, "sess_1", "msg_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.ID != "msg_1" || msg.SessionID != "sess_1" || msg.Text != "hello" {
+		t.Fatalf("unexpected message: %+v", msg)
+	}
+	if _, err := st.GetMessage(ctx, "sess_2", "msg_1"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("wrong session must not read message: %v", err)
+	}
+}
+
 func appendCompletedTestTurn(t *testing.T, st store.Store, sessionID string, index int) {
 	t.Helper()
 	suffix := strconv.Itoa(index)

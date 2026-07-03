@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/teatak/pudding-core/internal/app"
@@ -15,23 +16,29 @@ import (
 )
 
 const (
-	TimeGetCurrent = "builtin_time_get_current"
-	WebSearch      = "builtin_web_search"
-	WebFetch       = "builtin_web_fetch"
-	SkillRead      = "builtin_skill_read"
-	FileList       = "builtin_file_list"
-	FileRead       = "builtin_file_read"
-	FileStat       = "builtin_file_stat"
-	FileSearch     = "builtin_file_search"
-	FileSlice      = "builtin_file_slice"
-	FileWrite      = "builtin_file_write"
-	FilePatch      = "builtin_file_patch"
-	FileDelete     = "builtin_file_delete"
-	FileMove       = "builtin_file_move"
-	SkillValidate  = "builtin_skill_validate"
-	SkillSubmit    = "builtin_skill_submit"
-	RESTRequest    = "builtin_rest_request"
-	GraphQLRequest = "builtin_graphql_request"
+	TimeGetCurrent    = "builtin_time_get_current"
+	WebSearch         = "builtin_web_search"
+	WebFetch          = "builtin_web_fetch"
+	HistorySearch     = "builtin_history_search"
+	HistoryGetMessage = "builtin_history_get_message"
+	SkillRead         = "builtin_skill_read"
+	FileList          = "builtin_file_list"
+	FileRead          = "builtin_file_read"
+	FileStat          = "builtin_file_stat"
+	FileSearch        = "builtin_file_search"
+	FileSlice         = "builtin_file_slice"
+	FileWrite         = "builtin_file_write"
+	FilePatch         = "builtin_file_patch"
+	FileDelete        = "builtin_file_delete"
+	FileMove          = "builtin_file_move"
+	FileCopy          = "builtin_file_copy"
+	SkillValidate     = "builtin_skill_validate"
+	SkillSubmit       = "builtin_skill_submit"
+	RESTRequest       = "builtin_rest_request"
+	GraphQLRequest    = "builtin_graphql_request"
+	GraphQLIntrospect = "builtin_graphql_introspect"
+	GraphQLSearch     = "builtin_graphql_search"
+	WeatherGet        = "builtin_weather_get"
 )
 
 type WebConfigSource interface {
@@ -56,25 +63,43 @@ type SkillDraftSource interface {
 	ApplyDraft(ctx context.Context, id string) error
 }
 
+type HistorySearchSource interface {
+	SearchMessages(ctx context.Context, in store.MessageSearchInput) ([]*store.Message, error)
+}
+
+type HistoryMessageSource interface {
+	GetMessage(ctx context.Context, sessionID string, messageID string) (*store.Message, error)
+}
+
 type BuiltinOption func(*BuiltinRunner)
 
 type BuiltinRunner struct {
-	webConfig     WebConfigSource
-	appEndpoints  AppEndpointSource
-	appSkills     AppSkillReader
-	skillReader   SkillReader
-	skillDrafts   SkillDraftSource
-	homeDir       string
-	webHTTPClient *http.Client
-	tavilySearch  string
-	tavilyExtract string
+	webConfig       WebConfigSource
+	appEndpoints    AppEndpointSource
+	appSkills       AppSkillReader
+	skillReader     SkillReader
+	skillDrafts     SkillDraftSource
+	history         HistorySearchSource
+	historyMessages HistoryMessageSource
+	homeDir         string
+	webHTTPClient   *http.Client
+	tavilySearch    string
+	tavilyExtract   string
+	weatherEndpoint string
+	weatherMu       sync.Mutex
+	weatherCache    map[string]weatherCacheEntry
+	graphqlSchemaMu sync.Mutex
+	graphqlSchemas  map[string]*graphqlSchemaCache
 }
 
 func NewBuiltinRunner(opts ...BuiltinOption) *BuiltinRunner {
 	r := &BuiltinRunner{
-		webHTTPClient: &http.Client{Timeout: webDefaultTimeout},
-		tavilySearch:  tavilySearchEndpoint,
-		tavilyExtract: tavilyExtractEndpoint,
+		webHTTPClient:   &http.Client{Timeout: webDefaultTimeout},
+		tavilySearch:    tavilySearchEndpoint,
+		tavilyExtract:   tavilyExtractEndpoint,
+		weatherEndpoint: weatherDefaultEndpoint,
+		weatherCache:    map[string]weatherCacheEntry{},
+		graphqlSchemas:  map[string]*graphqlSchemaCache{},
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -112,6 +137,15 @@ func WithSkills(source SkillReader) BuiltinOption {
 	}
 }
 
+func WithHistorySearch(source HistorySearchSource) BuiltinOption {
+	return func(r *BuiltinRunner) {
+		r.history = source
+		if messages, ok := source.(HistoryMessageSource); ok {
+			r.historyMessages = messages
+		}
+	}
+}
+
 func WithHomeDir(dir string) BuiltinOption {
 	return func(r *BuiltinRunner) {
 		r.homeDir = dir
@@ -137,6 +171,14 @@ func WithTavilyEndpoints(searchURL, extractURL string) BuiltinOption {
 	}
 }
 
+func WithWeatherEndpoint(endpoint string) BuiltinOption {
+	return func(r *BuiltinRunner) {
+		if strings.TrimSpace(endpoint) != "" {
+			r.weatherEndpoint = strings.TrimRight(strings.TrimSpace(endpoint), "/")
+		}
+	}
+}
+
 func BuiltinDefinitions() []provider.ToolDef {
 	return []provider.ToolDef{
 		{
@@ -155,6 +197,18 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Name:        WebFetch,
 			Description: "Fetch readable body text from one URL. Use for page reading and summarization, not API calls.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","description":"Full URL starting with http:// or https://."},"depth":{"type":"string","enum":["basic","advanced"],"description":"Optional extract depth. Defaults to basic."},"max_chars":{"type":"integer","description":"Optional maximum body characters, default 4000 and cap 20000."}},"required":["url"],"additionalProperties":false}`),
+			Capability:  store.ModeChat,
+		},
+		{
+			Name:        HistorySearch,
+			Description: "Full-text search canonical message history in one session. Defaults to the current session; pass session_id only when the user clearly refers to another session. Use when the answer is not in the current context or was compacted away.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"SQLite FTS5 query. Use keywords, quoted phrases, or prefix terms such as chan*. For Chinese, prefer at least three characters."},"session_id":{"type":"string","description":"Optional session id. Defaults to the current session; empty never means all sessions."},"limit":{"type":"integer","description":"Maximum hits, default 10 and hard cap 30."}},"required":["query"],"additionalProperties":false}`),
+			Capability:  store.ModeChat,
+		},
+		{
+			Name:        HistoryGetMessage,
+			Description: "Read one full canonical history message by message_id. Use after builtin_history_search returns @message(id), or when context contains an attachment/local folder hint and original message details are needed. Defaults to the current session.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"message_id":{"type":"string","description":"Canonical message id, usually from an @message(message_id) reference."},"session_id":{"type":"string","description":"Optional session id. Defaults to the current session."}},"required":["message_id"],"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{
@@ -218,6 +272,12 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Capability:  store.ModeWorkspace,
 		},
 		{
+			Name:        FileCopy,
+			Description: "Copy a file or directory inside the same writable managed area or authorized workspace directory. Directories require recursive=true; existing destinations require overwrite=true.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp","workspace"],"description":"Target writable file area."},"from_path":{"type":"string","description":"Source path in the same scope."},"to_path":{"type":"string","description":"Destination path in the same scope."},"recursive":{"type":"boolean","description":"Required when copying a directory."},"overwrite":{"type":"boolean","description":"Replace an existing destination. Defaults false."}},"required":["scope","from_path","to_path"],"additionalProperties":false}`),
+			Capability:  store.ModeWorkspace,
+		},
+		{
 			Name:        SkillValidate,
 			Description: "Validate one staged skill package before asking the user to review it.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"draft_id":{"type":"string","description":"Staged skill package id."}},"required":["draft_id"],"additionalProperties":false}`),
@@ -241,6 +301,24 @@ func BuiltinDefinitions() []provider.ToolDef {
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"endpoint":{"type":"string","description":"Configured GraphQL endpoint name. Required; there is no default endpoint."},"connection":{"type":"string","description":"Optional connection name or id. Only pass this when the endpoint reports multiple configured connections."},"query":{"type":"string","description":"GraphQL query or mutation text."},"variables":{"description":"Optional GraphQL variables object or JSON object string."}},"required":["endpoint","query"],"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
+		{
+			Name:        GraphQLIntrospect,
+			Description: "Inspect a configured GraphQL endpoint schema. Without type_name returns Query/Mutation/Subscription fields; with type_name returns that type's one-level structure.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"endpoint":{"type":"string","description":"Configured GraphQL endpoint name."},"connection":{"type":"string","description":"Optional connection name or id."},"type_name":{"type":"string","description":"Optional GraphQL type name to inspect, for example Query, User, or UserInput."},"force_refresh":{"type":"boolean","description":"Ignore cached schema and fetch again."}},"required":["endpoint"],"additionalProperties":false}`),
+			Capability:  store.ModeChat,
+		},
+		{
+			Name:        GraphQLSearch,
+			Description: "Search names and descriptions in a configured GraphQL endpoint schema. Use before writing GraphQL when field/type names are uncertain.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"endpoint":{"type":"string","description":"Configured GraphQL endpoint name."},"connection":{"type":"string","description":"Optional connection name or id."},"query":{"type":"string","description":"Case-insensitive keywords. Space-separated keywords are ANDed."},"max_results":{"type":"integer","description":"Optional result count, default 30 and cap 50."},"force_refresh":{"type":"boolean","description":"Ignore cached schema and fetch again."}},"required":["endpoint","query"],"additionalProperties":false}`),
+			Capability:  store.ModeChat,
+		},
+		{
+			Name:        WeatherGet,
+			Description: "Get current weather and optional short forecast for a location using wttr.in JSON. Useful for weather answers without doing web search.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"location":{"type":"string","description":"City/location. Empty uses IP-based approximate location."},"lang":{"type":"string","description":"Optional language, for example en, zh, zh-cn, zh-tw. Defaults to en."},"days":{"type":"integer","description":"Forecast days to include, 0-3. Defaults to 0 current-only."}},"additionalProperties":false}`),
+			Capability:  store.ModeChat,
+		},
 	}
 }
 
@@ -257,6 +335,10 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.webSearch(ctx, call)
 	case WebFetch:
 		return r.webFetch(ctx, call)
+	case HistorySearch:
+		return r.historySearch(ctx, call)
+	case HistoryGetMessage:
+		return r.historyGetMessage(ctx, call)
 	case SkillRead:
 		return r.skillRead(ctx, call)
 	case FileList:
@@ -277,6 +359,8 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.fileDelete(call)
 	case FileMove:
 		return r.fileMove(call)
+	case FileCopy:
+		return r.fileCopy(call)
 	case SkillValidate:
 		return r.skillValidate(ctx, call)
 	case SkillSubmit:
@@ -285,6 +369,12 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.restRequest(ctx, call)
 	case GraphQLRequest:
 		return r.graphqlRequest(ctx, call)
+	case GraphQLIntrospect:
+		return r.graphqlIntrospect(ctx, call)
+	case GraphQLSearch:
+		return r.graphqlSearch(ctx, call)
+	case WeatherGet:
+		return r.weatherGet(ctx, call)
 	default:
 		out.Ok = false
 		out.Content = fmt.Sprintf("unknown tool: %s", call.Name)

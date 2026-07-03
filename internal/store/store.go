@@ -17,10 +17,11 @@ var (
 	ErrNotFound = errors.New("store: not found")
 	// ErrTurnRunning:同一 session 已有 running turn。第一阶段不允许并发 turn,
 	// API 层映射为 409(docs/technology-decisions.md 第 14 节)。
-	ErrTurnRunning    = errors.New("store: session has a running turn")
-	ErrInvalidSession = errors.New("store: session provider and model are required")
-	ErrQueueBlocked   = errors.New("store: queued input is editing")
-	ErrInvalidCanvas  = errors.New("store: invalid canvas item")
+	ErrTurnRunning              = errors.New("store: session has a running turn")
+	ErrInvalidSession           = errors.New("store: session provider and model are required")
+	ErrQueueBlocked             = errors.New("store: queued input is editing")
+	ErrInvalidCanvas            = errors.New("store: invalid canvas item")
+	ErrHistorySearchUnavailable = errors.New("store: history search unavailable")
 )
 
 // EventsRetainPerSession 是每个 session 的 lifecycle 事件保留条数。
@@ -416,6 +417,12 @@ type Message struct {
 	// (开放问题的当前倾向:保留进 canonical context)。
 	Interrupted bool      `json:"interrupted,omitempty"`
 	CreatedAt   time.Time `json:"createdAt"`
+}
+
+type MessageSearchInput struct {
+	SessionID string
+	Query     string
+	Limit     int
 }
 
 func TextPart(text string) []ContentPart {
@@ -1243,6 +1250,11 @@ type Store interface {
 	// ListMessagesPage 按时间升序返回一页 messages。beforeMessageID 为空时返回
 	// 最近 limit 条;非空时返回该 message 之前的 limit 条。limit <= 0 表示不分页。
 	ListMessagesPage(ctx context.Context, sessionID string, beforeMessageID string, limit int) (*MessagePage, error)
+	// GetMessage 按 id 读取单条 canonical message;必须显式带 sessionID。
+	GetMessage(ctx context.Context, sessionID string, messageID string) (*Message, error)
+	// SearchMessages 在单个 session 的 canonical message text 上做全文检索。
+	// SQLite 正式实现走 FTS5;未启用 FTS5 时返回 ErrHistorySearchUnavailable。
+	SearchMessages(ctx context.Context, in MessageSearchInput) ([]*Message, error)
 	// ListTurnsPage 按 turn 创建时间升序返回一页完整 turn。beforeTurnID 为空时
 	// 返回最近 limit 个 turn;非空时返回该 turn 之前的 limit 个 turn。
 	ListTurnsPage(ctx context.Context, sessionID string, beforeTurnID string, limit int) (*TurnPage, error)

@@ -210,6 +210,65 @@ func TestBuiltinFileWorkspaceScopeReadWrite(t *testing.T) {
 	}
 }
 
+func TestBuiltinFileCopyFileAndDirectory(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "src", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "src", "note.txt"), []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "src", "nested", "deep.txt"), []byte("deep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
+
+	fileCopy := runner.Call(context.Background(), Call{
+		Name:          FileCopy,
+		Args:          json.RawMessage(`{"scope":"workspace","from_path":"src/note.txt","to_path":"copy/note.txt"}`),
+		WorkspaceDirs: []string{root},
+	})
+	if !fileCopy.Ok {
+		t.Fatalf("file copy should succeed: %+v", fileCopy)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "copy", "note.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "hello" {
+		t.Fatalf("copied file content = %q", data)
+	}
+
+	dirWithoutRecursive := runner.Call(context.Background(), Call{
+		Name:          FileCopy,
+		Args:          json.RawMessage(`{"scope":"workspace","from_path":"src","to_path":"copy/src"}`),
+		WorkspaceDirs: []string{root},
+	})
+	if dirWithoutRecursive.Ok {
+		t.Fatalf("directory copy without recursive should fail")
+	}
+	payload := decodeToolResult(t, dirWithoutRecursive)
+	if payload["reason"] != "recursive_required" {
+		t.Fatalf("unexpected recursive reason: %+v", payload)
+	}
+
+	dirCopy := runner.Call(context.Background(), Call{
+		Name:          FileCopy,
+		Args:          json.RawMessage(`{"scope":"workspace","from_path":"src","to_path":"copy/src","recursive":true}`),
+		WorkspaceDirs: []string{root},
+	})
+	if !dirCopy.Ok {
+		t.Fatalf("directory copy should succeed: %+v", dirCopy)
+	}
+	deep, err := os.ReadFile(filepath.Join(root, "copy", "src", "nested", "deep.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(deep) != "deep" {
+		t.Fatalf("copied nested content = %q", deep)
+	}
+}
+
 func TestBuiltinFileWorkspaceRejectsOutsideRoot(t *testing.T) {
 	root := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "note.txt")

@@ -1,12 +1,13 @@
 import { create } from "zustand";
 
 export type InputFlowResult = {
+  confirmed?: boolean;
   ok: boolean;
   reason?: string;
   requestID: string;
   result?: Record<string, unknown>;
   sessionID: string;
-  status: "completed" | "cancelled";
+  status: "completed" | "cancelled" | "confirmed";
   title: string;
 };
 
@@ -14,6 +15,7 @@ export type InputFlowRequest = {
   args: Record<string, unknown>;
   createdAt: string;
   id: string;
+  kind: "input_flow" | "confirm";
   sessionID: string;
   title: string;
 };
@@ -40,10 +42,28 @@ export function waitForInputFlow(input: {
   sessionID: string;
   title: string;
 }): Promise<InputFlowResult> {
+  return waitForUIRequest({ ...input, kind: "input_flow" });
+}
+
+export function waitForUIConfirm(input: {
+  args: Record<string, unknown>;
+  sessionID: string;
+  title: string;
+}): Promise<InputFlowResult> {
+  return waitForUIRequest({ ...input, kind: "confirm" });
+}
+
+function waitForUIRequest(input: {
+  args: Record<string, unknown>;
+  kind: InputFlowRequest["kind"];
+  sessionID: string;
+  title: string;
+}): Promise<InputFlowResult> {
   const request: InputFlowRequest = {
     args: input.args,
     createdAt: new Date().toISOString(),
     id: newRequestID(),
+    kind: input.kind,
     sessionID: input.sessionID,
     title: input.title,
   };
@@ -61,6 +81,18 @@ export function completeInputFlow(request: InputFlowRequest, result: Record<stri
     result,
     sessionID: request.sessionID,
     status: "completed",
+    title: request.title,
+  });
+}
+
+export function confirmUIRequest(request: InputFlowRequest, result: Record<string, unknown> = {}) {
+  resolveInputFlow(request, {
+    confirmed: true,
+    ok: true,
+    requestID: request.id,
+    result,
+    sessionID: request.sessionID,
+    status: "confirmed",
     title: request.title,
   });
 }

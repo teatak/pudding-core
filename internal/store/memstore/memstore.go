@@ -1062,6 +1062,51 @@ func (m *Memstore) ListMessagesPage(_ context.Context, sessionID string, beforeM
 	return &store.MessagePage{Messages: out, HasMore: hasMore}, nil
 }
 
+func (m *Memstore) GetMessage(_ context.Context, sessionID string, messageID string) (*store.Message, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	messageID = strings.TrimSpace(messageID)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[sessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	for _, msg := range m.messages[sessionID] {
+		if msg.ID == messageID {
+			return cloneMessage(msg), nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
+func (m *Memstore) SearchMessages(_ context.Context, in store.MessageSearchInput) ([]*store.Message, error) {
+	sessionID := strings.TrimSpace(in.SessionID)
+	query := strings.TrimSpace(in.Query)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[sessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	if query == "" {
+		return nil, nil
+	}
+	limit := in.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	needle := strings.ToLower(query)
+	out := make([]*store.Message, 0)
+	for i := len(m.messages[sessionID]) - 1; i >= 0 && len(out) < limit; i-- {
+		msg := m.messages[sessionID][i]
+		if strings.Contains(strings.ToLower(msg.Text), needle) {
+			out = append(out, cloneMessage(msg))
+		}
+	}
+	return out, nil
+}
+
 func (m *Memstore) ListTurnsPage(_ context.Context, sessionID string, beforeTurnID string, limit int) (*store.TurnPage, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

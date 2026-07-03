@@ -4,7 +4,7 @@ export const layoutStorageKeys = {
 } as const;
 
 export const workspaceLayout = {
-  fallback: { chat: 70, canvas: 30 },
+  fallback: { chat: 30, canvas: 70 },
   closed: { chat: 100, canvas: 0 },
   minPercent: 1,
   maxPercent: 99,

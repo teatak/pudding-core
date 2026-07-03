@@ -27,6 +27,9 @@ func TestAssembleIncludesCoreAndUserInstruction(t *testing.T) {
 	if !strings.Contains(out.SystemInstruction, "Current date: 2026-07-02") || !strings.Contains(out.SystemInstruction, "UTC offset: +08:00") {
 		t.Fatalf("assembled prompt missing runtime date:\n%s", out.SystemInstruction)
 	}
+	if !strings.Contains(out.SystemInstruction, "builtin_history_search") || !strings.Contains(out.SystemInstruction, "builtin_history_get_message") {
+		t.Fatalf("assembled prompt missing history tool guidance:\n%s", out.SystemInstruction)
+	}
 	if len(out.Segments) != 4 || out.Segments[0].ID != "core_system" || out.Segments[1].ID != "mode_chat" || out.Segments[2].ID != "user_system" || out.Segments[3].ID != "runtime_context" {
 		t.Fatalf("unexpected segments: %+v", out.Segments)
 	}

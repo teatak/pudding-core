@@ -942,6 +942,11 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
   }
   const known: Record<string, string> = {
     builtin_graphql_request: t("transcript.toolGraphQLRequest"),
+    builtin_graphql_introspect: t("transcript.toolGraphQLIntrospect"),
+    builtin_graphql_search: t("transcript.toolGraphQLSearch"),
+    builtin_history_get_message: t("transcript.toolHistoryGetMessage"),
+    builtin_history_search: t("transcript.toolHistorySearch"),
+    builtin_file_copy: t("transcript.toolFileCopy"),
     builtin_file_delete: t("transcript.toolFileDelete"),
     builtin_file_list: t("transcript.toolFileList"),
     builtin_file_move: t("transcript.toolFileMove"),
@@ -956,8 +961,10 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     builtin_skill_submit: t("transcript.toolSkillSubmit"),
     builtin_skill_validate: t("transcript.toolSkillValidate"),
     builtin_time_get_current: t("transcript.toolTimeCurrent"),
+    builtin_weather_get: t("transcript.toolWeatherGet"),
     builtin_web_fetch: t("transcript.toolWebFetch"),
     builtin_web_search: t("transcript.toolWebSearch"),
+    ui_confirm: t("transcript.toolUIConfirm"),
     ui_input_flow: t("transcript.toolInputFlow"),
     canvas_chart: t("transcript.toolCanvasChart"),
     canvas_doc_read: t("transcript.toolCanvasDocRead"),

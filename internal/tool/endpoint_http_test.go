@@ -215,6 +215,90 @@ func TestGraphQLRequestExtractsDataAndErrors(t *testing.T) {
 	}
 }
 
+func TestGraphQLIntrospectUsesEndpointSchema(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if got := r.Header.Get("X-Test-Token"); got != "secret" {
+			t.Fatalf("unexpected token header %q", got)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		query, _ := body["query"].(string)
+		if strings.Contains(query, "__type") {
+			return jsonResponse(200, `{"data":{"__type":{"kind":"OBJECT","name":"User","fields":[{"name":"login","type":{"kind":"SCALAR","name":"String"}}]}}}`), nil
+		}
+		return jsonResponse(200, `{"data":{"__schema":{"queryType":{"name":"Query","fields":[{"name":"viewer","type":{"kind":"OBJECT","name":"User"}}]},"mutationType":null,"subscriptionType":null}}}`), nil
+	})}
+	runner := NewBuiltinRunner(
+		WithWebHTTPClient(client),
+		WithAppEndpoints(fakeEndpointSource{binding: &app.EndpointBinding{
+			AppID:        "github",
+			ConnectionID: "github-main",
+			EndpointName: "github_graphql",
+			Endpoint:     app.Endpoint{Kind: app.EndpointKindGraphQL, URL: "https://api.example.test/graphql"},
+			Auth:         app.Auth{Type: "header", Header: "X-Test-Token", Token: "secret"},
+		}}),
+	)
+
+	top := runner.Call(context.Background(), Call{
+		SessionID: "sess_1",
+		Name:      GraphQLIntrospect,
+		Args:      json.RawMessage(`{"endpoint":"github_graphql"}`),
+	})
+	if !top.Ok {
+		t.Fatalf("introspect top should succeed: %+v", top)
+	}
+	topPayload := decodeToolResult(t, top)
+	queryFields := topPayload["query"].([]any)
+	if queryFields[0].(map[string]any)["name"] != "viewer" {
+		t.Fatalf("unexpected top payload: %+v", topPayload)
+	}
+
+	typ := runner.Call(context.Background(), Call{
+		SessionID: "sess_1",
+		Name:      GraphQLIntrospect,
+		Args:      json.RawMessage(`{"endpoint":"github_graphql","type_name":"User"}`),
+	})
+	if !typ.Ok {
+		t.Fatalf("introspect type should succeed: %+v", typ)
+	}
+	typePayload := decodeToolResult(t, typ)
+	typeInfo := typePayload["type"].(map[string]any)
+	if typeInfo["name"] != "User" {
+		t.Fatalf("unexpected type payload: %+v", typePayload)
+	}
+}
+
+func TestGraphQLSearchFindsSchemaFields(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return jsonResponse(200, `{"data":{"__schema":{"queryType":{"name":"Query"},"mutationType":null,"subscriptionType":null,"types":[{"kind":"OBJECT","name":"Query","fields":[{"name":"viewer","description":"Current user","type":{"kind":"OBJECT","name":"User"}}]},{"kind":"OBJECT","name":"User","fields":[{"name":"login","type":{"kind":"SCALAR","name":"String"}}]},{"kind":"INPUT_OBJECT","name":"UserInput","inputFields":[{"name":"login","type":{"kind":"SCALAR","name":"String"}}]}]}}}`), nil
+	})}
+	runner := NewBuiltinRunner(
+		WithWebHTTPClient(client),
+		WithAppEndpoints(fakeEndpointSource{binding: &app.EndpointBinding{
+			AppID:        "github",
+			ConnectionID: "github-main",
+			EndpointName: "github_graphql",
+			Endpoint:     app.Endpoint{Kind: app.EndpointKindGraphQL, URL: "https://api.example.test/graphql"},
+			Auth:         app.Auth{Type: "none"},
+		}}),
+	)
+	res := runner.Call(context.Background(), Call{
+		SessionID: "sess_1",
+		Name:      GraphQLSearch,
+		Args:      json.RawMessage(`{"endpoint":"github_graphql","query":"viewer"}`),
+	})
+	if !res.Ok {
+		t.Fatalf("graphql search should succeed: %+v", res)
+	}
+	payload := decodeToolResult(t, res)
+	matches := payload["matches"].([]any)
+	if len(matches) != 1 || matches[0].(map[string]any)["where"] != "Query.viewer" {
+		t.Fatalf("unexpected matches: %+v", payload)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {

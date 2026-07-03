@@ -88,7 +88,7 @@ func Start(opts Options) (*Daemon, error) {
 	skills := skillsvc.NewService(dir)
 	browserMCP := tool.NewBrowserMCPRunner()
 	tools := tool.NewMultiRunner(
-		tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithSkills(skills), tool.WithHomeDir(dir)),
+		tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithHomeDir(dir)),
 		browserMCP,
 	)
 	eng := engine.New(st, hub, resolver, cfg, engine.WithPromptSource(prompt.NewLoader(dir)), engine.WithAttachmentHome(dir), engine.WithTools(tools))
