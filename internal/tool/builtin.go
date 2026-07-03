@@ -18,7 +18,6 @@ const (
 	TimeGetCurrent = "builtin_time_get_current"
 	WebSearch      = "builtin_web_search"
 	WebFetch       = "builtin_web_fetch"
-	WorkspaceList  = "builtin_workspace_list"
 	SkillRead      = "builtin_skill_read"
 	FileList       = "builtin_file_list"
 	FileRead       = "builtin_file_read"
@@ -156,12 +155,6 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Capability:  store.ModeChat,
 		},
 		{
-			Name:        WorkspaceList,
-			Description: "List files and directories inside authorized workspace directories.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Relative path from an authorized workspace root, or an absolute path inside one. Defaults to ."},"maxEntries":{"type":"integer","description":"Optional maximum entries, 1-1000, default 200."}},"additionalProperties":false}`),
-			Capability:  store.ModeWorkspace,
-		},
-		{
 			Name:        SkillRead,
 			Description: "Read the full SKILL.md body for one registered global skill or one installed app skill after the user's intent clearly matches the prompt index.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"skill_id":{"type":"string","description":"Skill id from Available Skills or Installed Apps. Do not pass the display path."},"app_id":{"type":"string","description":"Optional installed app id. Set this when reading an app-scoped skill."}},"required":["skill_id"],"additionalProperties":false}`),
@@ -169,38 +162,38 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        FileList,
-			Description: "List files in a Pudding-managed file area, such as drafts, published artifacts, or temporary files.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp"],"description":"Target managed file area."},"path":{"type":"string","description":"Relative path inside the file area. Use . to list the root."},"max_entries":{"type":"integer","description":"Optional maximum entries, 1-1000, default 200."}},"required":["scope","path"],"additionalProperties":false}`),
+			Description: "List files in a Pudding-managed file area or an authorized workspace directory.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","workspace"],"description":"Target file area. Use workspace for authorized local workspace directories."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized workspace directories. Use . to list the root."},"max_entries":{"type":"integer","description":"Optional maximum entries, 1-1000, default 200."}},"required":["scope","path"],"additionalProperties":false}`),
 			Capability:  store.ModeWorkspace,
 		},
 		{
 			Name:        FileRead,
-			Description: "Read one text file from a Pudding-managed file area. Published areas are read-only; draft and temp areas are writable.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp"],"description":"Target managed file area."},"path":{"type":"string","description":"Relative file path inside the file area."},"max_chars":{"type":"integer","description":"Optional max characters, default 20000 and cap 100000."}},"required":["scope","path"],"additionalProperties":false}`),
+			Description: "Read one text file from a Pudding-managed file area or an authorized workspace directory.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","workspace"],"description":"Target file area. Use workspace for authorized local workspace directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized workspace directories."},"max_chars":{"type":"integer","description":"Optional max characters, default 20000 and cap 100000."}},"required":["scope","path"],"additionalProperties":false}`),
 			Capability:  store.ModeWorkspace,
 		},
 		{
 			Name:        FileWrite,
-			Description: "Overwrite one text file in a writable Pudding-managed file area.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp"],"description":"Target writable file area."},"path":{"type":"string","description":"Relative file path inside the file area."},"content":{"type":"string","description":"New file content."}},"required":["scope","path","content"],"additionalProperties":false}`),
+			Description: "Overwrite one text file in a writable Pudding-managed file area or authorized workspace directory.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp","workspace"],"description":"Target writable file area. Use workspace for authorized local workspace directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized workspace directories."},"content":{"type":"string","description":"New file content."}},"required":["scope","path","content"],"additionalProperties":false}`),
 			Capability:  store.ModeWorkspace,
 		},
 		{
 			Name:        FilePatch,
-			Description: "Replace text in one file in a writable Pudding-managed file area by exact string match.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp"],"description":"Target writable file area."},"path":{"type":"string","description":"Relative file path inside the file area."},"old_string":{"type":"string","description":"Exact text to replace."},"new_string":{"type":"string","description":"Replacement text."},"replace_all":{"type":"boolean","description":"Replace all matches. Defaults false; without this, exactly one match is required."}},"required":["scope","path","old_string","new_string"],"additionalProperties":false}`),
+			Description: "Replace text in one file in a writable Pudding-managed file area or authorized workspace directory by exact string match.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp","workspace"],"description":"Target writable file area. Use workspace for authorized local workspace directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized workspace directories."},"old_string":{"type":"string","description":"Exact text to replace."},"new_string":{"type":"string","description":"Replacement text."},"replace_all":{"type":"boolean","description":"Replace all matches. Defaults false; without this, exactly one match is required."}},"required":["scope","path","old_string","new_string"],"additionalProperties":false}`),
 			Capability:  store.ModeWorkspace,
 		},
 		{
 			Name:        FileDelete,
-			Description: "Delete a file or, when recursive is true, a directory from a writable Pudding-managed file area.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp"],"description":"Target writable file area."},"path":{"type":"string","description":"Relative path inside the file area."},"recursive":{"type":"boolean","description":"Required to delete a directory."}},"required":["scope","path"],"additionalProperties":false}`),
+			Description: "Delete a file or, when recursive is true, a directory from a writable Pudding-managed file area or authorized workspace directory.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp","workspace"],"description":"Target writable file area. Use workspace for authorized local workspace directories."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized workspace directories."},"recursive":{"type":"boolean","description":"Required to delete a directory."}},"required":["scope","path"],"additionalProperties":false}`),
 			Capability:  store.ModeWorkspace,
 		},
 		{
 			Name:        FileMove,
-			Description: "Move or rename a file or directory inside the same writable Pudding-managed scope.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp"]},"from_path":{"type":"string"},"to_path":{"type":"string"}},"required":["scope","from_path","to_path"],"additionalProperties":false}`),
+			Description: "Move or rename a file or directory inside the same writable managed area or authorized workspace directories.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp","workspace"]},"from_path":{"type":"string"},"to_path":{"type":"string"}},"required":["scope","from_path","to_path"],"additionalProperties":false}`),
 			Capability:  store.ModeWorkspace,
 		},
 		{
@@ -219,13 +212,13 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Name:        RESTRequest,
 			Description: "Send one HTTP request to a configured REST endpoint. Pass an endpoint name plus a relative path; authorization and configured headers are injected by Pudding. Omit connection when there is one configured connection.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"endpoint":{"type":"string","description":"Configured endpoint name, for example github_rest. Required; there is no default endpoint."},"connection":{"type":"string","description":"Optional connection name or id. Only pass this when the endpoint reports multiple configured connections."},"method":{"type":"string","enum":["GET","POST","PUT","PATCH","DELETE"],"description":"HTTP method. Defaults to GET."},"path":{"type":"string","description":"Relative path under the endpoint base URL, for example /repos/owner/repo/issues. Must not be a full URL."},"query":{"type":"object","additionalProperties":{"type":["string","number","boolean"]},"description":"Optional query parameters."},"body_json":{"description":"Optional JSON body. Mutually exclusive with body_text."},"body_text":{"type":"string","description":"Optional text body. Mutually exclusive with body_json."}},"required":["endpoint","path"],"additionalProperties":false}`),
-			Capability:  store.ModeResearch,
+			Capability:  store.ModeChat,
 		},
 		{
 			Name:        GraphQLRequest,
 			Description: "Send one GraphQL query or mutation to a configured GraphQL endpoint. Authorization is injected by Pudding. Omit connection when there is one configured connection.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"endpoint":{"type":"string","description":"Configured GraphQL endpoint name. Required; there is no default endpoint."},"connection":{"type":"string","description":"Optional connection name or id. Only pass this when the endpoint reports multiple configured connections."},"query":{"type":"string","description":"GraphQL query or mutation text."},"variables":{"description":"Optional GraphQL variables object or JSON object string."}},"required":["endpoint","query"],"additionalProperties":false}`),
-			Capability:  store.ModeResearch,
+			Capability:  store.ModeChat,
 		},
 	}
 }
@@ -243,8 +236,6 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.webSearch(ctx, call)
 	case WebFetch:
 		return r.webFetch(ctx, call)
-	case WorkspaceList:
-		return workspaceList(call)
 	case SkillRead:
 		return r.skillRead(ctx, call)
 	case FileList:

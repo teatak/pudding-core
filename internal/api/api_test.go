@@ -763,7 +763,7 @@ func TestBuiltinToolsAPI(t *testing.T) {
 	}
 	got := decodeJSON[map[string][]map[string]any](t, resp)
 	tools := got["tools"]
-	if len(tools) < 16 {
+	if len(tools) < 15 {
 		t.Fatalf("unexpected builtin tools: %+v", got)
 	}
 	if tools[0]["id"] != tool.RequestCapability {
@@ -784,16 +784,6 @@ func TestBuiltinToolsAPI(t *testing.T) {
 	}
 	if webSearch == nil || webSearch["capability"] != string(store.ModeChat) {
 		t.Fatalf("web search should declare chat capability: %+v", webSearch)
-	}
-	var workspaceList map[string]any
-	for _, item := range tools {
-		if item["id"] == tool.WorkspaceList {
-			workspaceList = item
-			break
-		}
-	}
-	if workspaceList == nil || workspaceList["capability"] != string(store.ModeWorkspace) {
-		t.Fatalf("workspace list should declare workspace capability: %+v", workspaceList)
 	}
 	var fileWrite map[string]any
 	var skillRead map[string]any
@@ -823,11 +813,11 @@ func TestBuiltinToolsAPI(t *testing.T) {
 	if skillSubmit == nil || skillSubmit["capability"] != string(store.ModeWorkspace) {
 		t.Fatalf("skill submit should declare workspace capability: %+v", skillSubmit)
 	}
-	if restRequest == nil || restRequest["capability"] != string(store.ModeResearch) {
-		t.Fatalf("rest request should declare research capability: %+v", restRequest)
+	if restRequest == nil || restRequest["capability"] != string(store.ModeChat) {
+		t.Fatalf("rest request should declare chat capability: %+v", restRequest)
 	}
-	if graphqlRequest == nil || graphqlRequest["capability"] != string(store.ModeResearch) {
-		t.Fatalf("graphql request should declare research capability: %+v", graphqlRequest)
+	if graphqlRequest == nil || graphqlRequest["capability"] != string(store.ModeChat) {
+		t.Fatalf("graphql request should declare chat capability: %+v", graphqlRequest)
 	}
 }
 

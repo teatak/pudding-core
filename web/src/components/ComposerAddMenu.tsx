@@ -1,56 +1,89 @@
 import { FolderOpen, Loader2, Paperclip, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
 
-export function ComposerAddMenu({
-  attachFolderLabel,
-  attachLabel,
-  menuTitle,
-  pickingFolder,
-  onAttachFiles,
-  onAttachFolder,
+export type ComposerAddMenuAction = {
+  disabled?: boolean;
+  id: "files" | "folder";
+  label: string;
+  loading?: boolean;
+};
+
+export function ComposerAddButton({
+  active,
+  busy,
+  label,
+  onClick,
 }: {
-  attachFolderLabel: string;
-  attachLabel: string;
-  menuTitle: string;
-  pickingFolder: boolean;
-  onAttachFiles: () => void;
-  onAttachFolder: () => void;
+  active: boolean;
+  busy: boolean;
+  label: string;
+  onClick: () => void;
 }) {
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button
-          aria-label={menuTitle}
-          className="rounded-full border-0 bg-transparent text-muted-foreground hover:text-foreground"
-          size="icon"
-          type="button"
-          variant="ghost"
-        >
-          <Plus className="size-4" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-56 p-1.5" side="top" sideOffset={8}>
-        <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">{menuTitle}</div>
+    <Button
+      aria-expanded={active}
+      aria-label={label}
+      className={cn(
+        "rounded-full border-0 bg-transparent text-muted-foreground hover:text-foreground",
+        active && "bg-muted text-foreground",
+      )}
+      size="icon"
+      type="button"
+      variant="ghost"
+      onClick={onClick}
+    >
+      {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+    </Button>
+  );
+}
+
+export function ComposerAddActionMenu({
+  actions,
+  selectedIndex,
+  onHover,
+  onSelect,
+}: {
+  actions: ComposerAddMenuAction[];
+  selectedIndex: number;
+  onHover: (index: number) => void;
+  onSelect: (action: ComposerAddMenuAction) => void;
+}) {
+  return (
+    <div
+      className="absolute bottom-full left-16 z-20 w-60 rounded-t-lg border border-border/70 bg-popover/95 p-1 text-sm text-popover-foreground shadow-sm backdrop-blur"
+      role="listbox"
+    >
+      {actions.map((action, index) => (
         <button
-          className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-muted"
+          key={action.id}
+          aria-selected={index === selectedIndex}
+          className={cn(
+            "flex h-9 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-muted disabled:opacity-60",
+            index === selectedIndex && "bg-muted text-foreground",
+          )}
+          disabled={action.disabled || action.loading}
+          role="option"
           type="button"
-          onClick={onAttachFiles}
+          onMouseEnter={() => onHover(index)}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            if (!action.disabled && !action.loading) {
+              onSelect(action);
+            }
+          }}
         >
-          <Paperclip className="size-4 text-muted-foreground" />
-          <span>{attachLabel}</span>
+          {action.loading ? (
+            <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
+          ) : action.id === "folder" ? (
+            <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <Paperclip className="size-4 shrink-0 text-muted-foreground" />
+          )}
+          <span className="min-w-0 truncate">{action.label}</span>
         </button>
-        <button
-          className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-muted disabled:opacity-60"
-          disabled={pickingFolder}
-          type="button"
-          onClick={onAttachFolder}
-        >
-          {pickingFolder ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : <FolderOpen className="size-4 text-muted-foreground" />}
-          <span>{attachFolderLabel}</span>
-        </button>
-      </PopoverContent>
-    </Popover>
+      ))}
+    </div>
   );
 }

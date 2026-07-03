@@ -205,10 +205,13 @@ func (e *Engine) requestCapabilityApproval(ctx context.Context, sessionID, turnI
 	req.WorkspaceDirs = store.NormalizeWorkspaceDirs(req.WorkspaceDirs)
 	req.SuggestedDirName = strings.TrimSpace(req.SuggestedDirName)
 	currentMode = store.NormalizeAgentMode(currentMode)
-	if !store.ValidAgentMode(req.TargetMode) || req.TargetMode == store.ModeChat {
+	if req.TargetMode != store.ModeWorkspace {
 		return capabilityToolResult(call, false, map[string]any{"ok": false, "reason": "invalid_target_mode"}), currentMode, false
 	}
-	if store.AgentModeRank(req.TargetMode) <= store.AgentModeRank(currentMode) {
+	if currentMode == store.ModeWorkspace && len(req.WorkspaceDirs) == 0 && !req.NeedsWorkspaceDir {
+		return capabilityToolResult(call, false, map[string]any{"ok": false, "reason": "workspace_dirs_required"}), currentMode, false
+	}
+	if currentMode != store.ModeWorkspace && store.AgentModeRank(req.TargetMode) <= store.AgentModeRank(currentMode) {
 		return capabilityToolResult(call, false, map[string]any{"ok": false, "reason": "target_mode_not_higher", "currentMode": currentMode, "targetMode": req.TargetMode}), currentMode, false
 	}
 	payload := mustJSON(req)

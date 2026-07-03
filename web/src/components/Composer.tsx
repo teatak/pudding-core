@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowUp, Check, Code2, FolderOpen, Loader2, MessageCircle, Paperclip, SearchCheck, ShieldCheck, X, type LucideIcon } from "lucide-react";
+import { ArrowUp, Check, FileText, FolderOpen, Loader2, ShieldCheck, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -33,7 +33,7 @@ import {
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
-import { ComposerAddMenu } from "@/components/ComposerAddMenu";
+import { ComposerAddActionMenu, ComposerAddButton, type ComposerAddMenuAction } from "@/components/ComposerAddMenu";
 import { ContextUsageRing } from "@/components/ContextUsageRing";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
 import { Mascot, type MascotGaze, type MascotGazePoint, type MascotMood } from "@/components/Mascot";
@@ -54,7 +54,6 @@ import {
   appendLocalFolderPaths,
   createLocalFolderPath,
   type DroppedLocalItems,
-  formatLocalFolderLabel,
   pickLocalFolderPaths,
   type LocalFolderPath,
 } from "@/lib/localFolders";
@@ -63,13 +62,14 @@ import { getSubmitFailure } from "@/lib/submitFailure";
 import { getTextAreaCaretClientPoint } from "@/lib/textCaret";
 import { cn } from "@/lib/utils";
 import { useOverlayStore, type AssistantOverlay, type AssistantOverlayPart, type TurnPhaseState } from "@/state/overlayStore";
-import { useSessionDraftStore } from "@/state/sessionDraftStore";
+import { useSessionDraftStore, type SessionDraftAttachment } from "@/state/sessionDraftStore";
 
 const composerSchema = z.object({
   text: z.string(),
 });
 
 const MASCOT_INPUT_PITCH_BIAS = 0.65;
+type AddMenuTrigger = { source: "button" | "text"; index: number | null };
 
 type ComposerProps = {
   droppedFiles?: DroppedFilesBatch | null;
@@ -98,14 +98,7 @@ type SlashSubmitCommand =
   | { id: "rename"; title: string }
   | { id: "summary"; hint: string };
 
-type ComposerAttachment = {
-  id: string;
-  name: string;
-  previewURL?: string;
-  size: number;
-  status: "uploading" | "uploaded" | "error";
-  attachment?: Attachment;
-};
+type ComposerAttachment = SessionDraftAttachment;
 
 export function Composer({ droppedFiles, token, session, onSubmitError }: ComposerProps) {
   const sessionID = session.id;
@@ -136,15 +129,16 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const [mascotErrorMessage, setMascotErrorMessage] = useState<string | null>(null);
   const [mascotErrorSignal, setMascotErrorSignal] = useState(0);
   const [textFocused, setTextFocused] = useState(false);
-  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [addSelectedIndex, setAddSelectedIndex] = useState(0);
   const [attachmentPreviewIndex, setAttachmentPreviewIndex] = useState<number | null>(null);
-  const [localFolders, setLocalFolders] = useState<LocalFolderPath[]>([]);
+  const [pickingAttachment, setPickingAttachment] = useState(false);
   const [pickingLocalFolder, setPickingLocalFolder] = useState(false);
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
   // clientMessageID 按"草稿"生成而不是按请求生成:失败重试和快速双击
   // 复用同一个 ID,服务端幂等去重才生效;成功后才轮换到下一个草稿 ID。
   const draftIDRef = useRef<string>(newClientID());
-  const attachmentsRef = useRef<ComposerAttachment[]>([]);
+  const addMenuTriggerRef = useRef<AddMenuTrigger>({ source: "button", index: null });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const lastDroppedFilesNonceRef = useRef(0);
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -154,18 +148,14 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     resolver: zodResolver(composerSchema),
     defaultValues: { text: "" },
   });
-  useEffect(() => {
-    attachmentsRef.current = attachments;
-  }, [attachments]);
+  const attachments = useSessionDraftStore((state) => state.drafts[sessionID]?.attachments ?? []);
+  const localFolders = useSessionDraftStore((state) => state.drafts[sessionID]?.localFolders ?? []);
+  const setSessionDraftAttachments = useSessionDraftStore((state) => state.setAttachments);
+  const setSessionDraftLocalFolders = useSessionDraftStore((state) => state.setLocalFolders);
   useEffect(() => {
     const draft = ensureSessionDraft(sessionID);
     draftIDRef.current = draft.clientMessageID;
     form.reset({ text: draft.text });
-    setAttachments((current) => {
-      current.forEach(revokeAttachmentPreview);
-      return [];
-    });
-    setLocalFolders([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -233,6 +223,11 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       ? slashCommands.filter((command) => command.command.startsWith("/" + slashQuery))
       : [];
   const slashMenuOpen = visibleSlashCommands.length > 0;
+  const addMenuActions: ComposerAddMenuAction[] = [
+    { id: "files", label: t("composer.attach"), loading: pickingAttachment },
+    { id: "folder", label: t("composer.attachFolder"), loading: pickingLocalFolder },
+  ];
+  const addMenuVisible = addMenuOpen;
   const reasoningOptions = useMemo(() => reasoningEffortOptionsForSelection(resolvedModel), [resolvedModel]);
   const resolvedModelKey = resolvedModel ? `${resolvedModel.provider}:${resolvedModel.model}` : "";
   const reasoningEffort = resolvedModelKey && session.reasoningModelKey === resolvedModelKey ? session.reasoningEffort || "" : "";
@@ -271,6 +266,14 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   }, [slashMenuOpen, visibleSlashCommands.length]);
 
   useEffect(() => {
+    if (!addMenuVisible) {
+      setAddSelectedIndex(0);
+      return;
+    }
+    setAddSelectedIndex((index) => Math.min(index, addMenuActions.length - 1));
+  }, [addMenuActions.length, addMenuVisible]);
+
+  useEffect(() => {
     if (reasoningEffort && !reasoningOptions.includes(reasoningEffort)) {
       setSessionReasoningEffort("");
     }
@@ -284,18 +287,15 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     setMascotErrorMessage(null);
   }, []);
   const resetSessionDraft = useCallback(() => {
+    const current = ensureSessionDraft(sessionID);
+    current.attachments.forEach(revokeAttachmentPreview);
     const draft = clearSessionDraft(sessionID);
     draftIDRef.current = draft.clientMessageID;
     form.reset({ text: draft.text });
-    setAttachments((current) => {
-      current.forEach(revokeAttachmentPreview);
-      return [];
-    });
-    setLocalFolders([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
-  }, [clearSessionDraft, form, sessionID]);
+  }, [clearSessionDraft, ensureSessionDraft, form, sessionID]);
   const addFiles = useCallback(
     (files: File[]) => {
       const nextFiles = files.filter((file) => file.size > 0);
@@ -309,12 +309,12 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
         size: file.size,
         status: "uploading" as const,
       }));
-      setAttachments((current) => [...current, ...items]);
+      setSessionDraftAttachments(sessionID, (current) => [...current, ...items]);
       items.forEach((item, index) => {
         const file = nextFiles[index];
         void uploadAttachment(token, sessionID, file)
           .then((attachment) => {
-            setAttachments((current) =>
+            setSessionDraftAttachments(sessionID, (current) =>
               current.map((currentItem) =>
                 currentItem.id === item.id
                   ? { ...currentItem, attachment, name: attachment.name, size: attachment.size, status: "uploaded" }
@@ -325,7 +325,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
           .catch((error) => {
             console.warn("attachment upload failed", error);
             toast.error(t("composer.uploadFailed"));
-            setAttachments((current) => {
+            setSessionDraftAttachments(sessionID, (current) => {
               const failed = current.find((currentItem) => currentItem.id === item.id);
               if (failed) {
                 revokeAttachmentPreview(failed);
@@ -335,22 +335,22 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
           });
       });
     },
-    [sessionID, t, token],
+    [sessionID, setSessionDraftAttachments, t, token],
   );
   const removeAttachment = useCallback((id: string) => {
-    setAttachments((current) => {
+    setSessionDraftAttachments(sessionID, (current) => {
       const removed = current.find((item) => item.id === id);
       if (removed) {
         revokeAttachmentPreview(removed);
       }
       return current.filter((item) => item.id !== id);
     });
-  }, []);
+  }, [sessionID, setSessionDraftAttachments]);
   const addUploadedAttachments = useCallback((values: Attachment[]) => {
     if (values.length === 0) {
       return;
     }
-    setAttachments((current) => [
+    setSessionDraftAttachments(sessionID, (current) => [
       ...current,
       ...values.map((attachment) => ({
         id: newClientID(),
@@ -360,7 +360,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
         status: "uploaded" as const,
       })),
     ]);
-  }, []);
+  }, [sessionID, setSessionDraftAttachments]);
   const addLocalFolderPaths = useCallback((paths: string[]) => {
     const folders = paths.flatMap((path) => {
       const folder = createLocalFolderPath(path);
@@ -369,11 +369,11 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     if (folders.length === 0) {
       return;
     }
-    setLocalFolders((current) => {
+    setSessionDraftLocalFolders(sessionID, (current) => {
       const existing = new Set(current.map((folder) => folder.path));
       return [...current, ...folders.filter((folder) => !existing.has(folder.path))];
     });
-  }, []);
+  }, [sessionID, setSessionDraftLocalFolders]);
   const pickLocalFolder = useCallback(async () => {
     if (pickingLocalFolder) {
       return;
@@ -386,11 +386,64 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       toast.error(t("composer.folderPickFailed"));
     } finally {
       setPickingLocalFolder(false);
+      setAddMenuOpen(false);
     }
   }, [addLocalFolderPaths, pickingLocalFolder, t]);
   const removeLocalFolder = useCallback((id: string) => {
-    setLocalFolders((current) => current.filter((folder) => folder.id !== id));
+    setSessionDraftLocalFolders(sessionID, (current) => current.filter((folder) => folder.id !== id));
+  }, [sessionID, setSessionDraftLocalFolders]);
+  const pickAttachment = useCallback(() => {
+    if (pickingAttachment) {
+      return;
+    }
+    setPickingAttachment(true);
+    const clearPicking = () => {
+      window.setTimeout(() => {
+        setPickingAttachment(false);
+        setAddMenuOpen(false);
+      }, 200);
+    };
+    window.addEventListener("focus", clearPicking, { once: true });
+    window.requestAnimationFrame(() => {
+      fileInputRef.current?.click();
+      textAreaRef.current?.focus({ preventScroll: true });
+    });
+  }, [pickingAttachment]);
+  const removeTextAddMenuTrigger = useCallback(() => {
+    const trigger = addMenuTriggerRef.current;
+    if (trigger.source !== "text" || trigger.index === null) {
+      return;
+    }
+    const textArea = textAreaRef.current;
+    const value = textArea?.value ?? form.getValues("text");
+    const index = trigger.index;
+    if (index < 0 || index >= value.length || value[index] !== "@") {
+      return;
+    }
+    const nextText = value.slice(0, index) + value.slice(index + 1);
+    form.setValue("text", nextText);
+    setSessionDraftText(sessionID, nextText);
+    window.requestAnimationFrame(() => {
+      textAreaRef.current?.setSelectionRange(index, index);
+    });
+  }, [form, sessionID, setSessionDraftText]);
+  const openAddMenu = useCallback((source: AddMenuTrigger["source"] = "button", index: number | null = null) => {
+    addMenuTriggerRef.current = { source, index };
+    setTextFocused(true);
+    setAddMenuOpen(true);
+    window.requestAnimationFrame(() => textAreaRef.current?.focus({ preventScroll: true }));
   }, []);
+  const selectAddAction = useCallback(
+    (action: ComposerAddMenuAction) => {
+      removeTextAddMenuTrigger();
+      if (action.id === "files") {
+        pickAttachment();
+        return;
+      }
+      pickLocalFolder();
+    },
+    [pickAttachment, pickLocalFolder, removeTextAddMenuTrigger],
+  );
   // Prefer this mascot feedback for composer-local validation and command errors.
   const showMascotError = useCallback(
     (message: string) => {
@@ -541,6 +594,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   });
   const sendEnabled =
     canSend &&
+    !addMenuVisible &&
     !slashMenuOpen &&
     !submitMutation.isPending &&
     !compactMutation.isPending &&
@@ -705,6 +759,9 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const handleTextChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     void textField.onChange(event);
     setSessionDraftText(sessionID, event.target.value);
+    if (addMenuOpen) {
+      setAddMenuOpen(false);
+    }
     if (mascotErrorMessage) {
       clearMascotError();
     }
@@ -712,6 +769,8 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     scheduleMascotInputGaze();
   };
   const handleAttachmentInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    setPickingAttachment(false);
+    setAddMenuOpen(false);
     addFiles(Array.from(event.target.files || []));
     event.target.value = "";
   };
@@ -737,6 +796,38 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     });
   };
   const handleTextKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "@" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      const triggerIndex = event.currentTarget.selectionStart;
+      event.preventDefault();
+      openAddMenu("text", triggerIndex);
+      scheduleMascotInputGaze();
+      return;
+    }
+    if (addMenuVisible) {
+      switch (event.key) {
+        case "ArrowDown":
+          event.preventDefault();
+          setAddSelectedIndex((index) => (index + 1) % addMenuActions.length);
+          return;
+        case "ArrowUp":
+          event.preventDefault();
+          setAddSelectedIndex((index) => (index - 1 + addMenuActions.length) % addMenuActions.length);
+          return;
+        case "Enter":
+        case "Tab": {
+          event.preventDefault();
+          const action = addMenuActions[addSelectedIndex] ?? addMenuActions[0];
+          if (action) {
+            selectAddAction(action);
+          }
+          return;
+        }
+        case "Escape":
+          event.preventDefault();
+          setAddMenuOpen(false);
+          return;
+      }
+    }
     if (slashMenuOpen) {
       switch (event.key) {
         case "ArrowDown":
@@ -777,7 +868,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
 
   useEffect(() => {
     return () => {
-      attachmentsRef.current.forEach(revokeAttachmentPreview);
       if (mascotGazeRafRef.current) {
         window.cancelAnimationFrame(mascotGazeRafRef.current);
       }
@@ -807,7 +897,14 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       <ChatColumn>
         <div className="relative">
           <ComposerApprovalBar approval={pendingApproval} token={token} />
-          {slashMenuOpen ? (
+          {addMenuVisible ? (
+            <ComposerAddActionMenu
+              actions={addMenuActions}
+              selectedIndex={addSelectedIndex}
+              onHover={setAddSelectedIndex}
+              onSelect={selectAddAction}
+            />
+          ) : slashMenuOpen ? (
             <SlashCommandMenu
               commands={visibleSlashCommands}
               selectedIndex={slashSelectedIndex}
@@ -869,15 +966,12 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
               />
             </div>
             <div className="flex min-w-0 items-center gap-1 px-2 pb-2">
-              <ComposerAddMenu
-                attachFolderLabel={t("composer.attachFolder")}
-                attachLabel={t("composer.attach")}
-                menuTitle={t("composer.addMenuTitle")}
-                pickingFolder={pickingLocalFolder}
-                onAttachFiles={() => fileInputRef.current?.click()}
-                onAttachFolder={() => void pickLocalFolder()}
+              <ComposerAddButton
+                active={addMenuVisible}
+                busy={pickingAttachment || pickingLocalFolder}
+                label={t("composer.addMenuTitle")}
+                onClick={() => openAddMenu("button")}
               />
-              <CapabilityBadge mode={currentMode} />
               {currentMode === "workspace" ? <WorkspaceDirsControl session={session} token={token} /> : null}
               {compactMutation.isPending ? (
                 <span
@@ -993,16 +1087,19 @@ function LocalFolderChip({
 }) {
   return (
     <div
-      className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-md border border-border/70 bg-muted/40 px-2 py-1 text-xs leading-5 text-muted-foreground"
+      className="relative inline-flex h-20 min-w-56 max-w-full items-center gap-3 rounded-lg border border-border/70 bg-card px-3 pr-9 text-sm shadow-sm"
       title={folder.path}
     >
-      <FolderOpen className="size-3 shrink-0" />
-      <span className="shrink-0 text-muted-foreground/70">{label}</span>
-      <span className="min-w-0 truncate font-medium text-foreground">{folder.name}</span>
-      <span className="min-w-0 max-w-44 truncate font-mono text-muted-foreground/70">{formatLocalFolderLabel(folder.path)}</span>
+      <span className="flex size-14 shrink-0 items-center justify-center rounded-md bg-muted/70 text-muted-foreground">
+        <FolderOpen className="size-7" strokeWidth={1.8} />
+      </span>
+      <span className="flex min-w-0 max-w-64 flex-1 flex-col justify-center">
+        <span className="truncate font-medium leading-6 text-foreground">{folder.name}</span>
+        <span className="truncate text-muted-foreground">{label}</span>
+      </span>
       <Button
         aria-label={removeLabel}
-        className="-mr-1 size-5 bg-transparent hover:bg-background/70"
+        className="absolute top-2 right-2 size-6 rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
         size="icon-xs"
         type="button"
         variant="ghost"
@@ -1036,7 +1133,7 @@ function ComposerAttachmentChip({
     return (
       <div
         className={cn(
-          "group relative h-16 w-20 overflow-hidden rounded-md border bg-muted/40",
+          "group relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border bg-muted/40 shadow-sm",
           item.status === "error" ? "border-destructive/40" : "border-border/70",
         )}
         title={`${item.name} ${formatAttachmentSize(item.size)}`}
@@ -1060,7 +1157,7 @@ function ComposerAttachmentChip({
         ) : null}
         <Button
           aria-label={removeLabel}
-          className="absolute top-1 right-1 z-10 size-5 bg-background/85 text-foreground shadow-sm hover:bg-background"
+          className="absolute top-2 right-2 z-10 size-6 rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
           size="icon-xs"
           type="button"
           variant="ghost"
@@ -1074,17 +1171,21 @@ function ComposerAttachmentChip({
   return (
     <div
       className={cn(
-        "inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border px-2 py-1 text-xs leading-5",
-        item.status === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-border/70 bg-muted/40 text-muted-foreground",
+          "relative inline-flex h-20 min-w-56 max-w-full items-center gap-3 rounded-lg border bg-card px-3 pr-9 text-sm shadow-sm",
+        item.status === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-border/70 text-muted-foreground",
       )}
       title={`${item.name} ${formatAttachmentSize(item.size)}`}
     >
-      {busy ? <Loader2 className="size-3 shrink-0 animate-spin" /> : <Paperclip className="size-3 shrink-0" />}
-      <span className="min-w-0 truncate">{item.name}</span>
-      <span className="shrink-0 text-muted-foreground/70">{formatAttachmentSize(item.size)}</span>
+      <span className="flex size-14 shrink-0 items-center justify-center rounded-md bg-muted/70 text-muted-foreground">
+        {busy ? <Loader2 className="size-7 animate-spin" strokeWidth={1.8} /> : <FileText className="size-7" strokeWidth={1.8} />}
+      </span>
+      <span className="flex min-w-0 max-w-64 flex-1 flex-col justify-center">
+        <span className="truncate font-medium leading-6 text-foreground">{item.name}</span>
+        <span className="truncate text-muted-foreground">{attachmentKindLabel(item.name, item.attachment?.mime)}</span>
+      </span>
       <Button
         aria-label={removeLabel}
-        className="-mr-1 size-5 bg-transparent hover:bg-background/70"
+        className="absolute top-2 right-2 size-6 rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
         size="icon-xs"
         type="button"
         variant="ghost"
@@ -1228,6 +1329,15 @@ function formatAttachmentSize(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function attachmentKindLabel(name: string, mime?: string) {
+  const ext = name.split(".").pop()?.trim();
+  if (ext && ext !== name) {
+    return ext.toUpperCase();
+  }
+  const major = mime?.split("/")[0]?.trim();
+  return major ? major.toUpperCase() : "FILE";
+}
+
 function isImageAttachmentLike(mime: string | undefined, name: string) {
   const cleaned = (mime || "").toLowerCase();
   if (cleaned.startsWith("image/") && cleaned !== "image/svg+xml") {
@@ -1280,32 +1390,6 @@ function compactErrorMessage(error: unknown, t: (key: string) => string) {
     }
   }
   return t("composer.compactFailed");
-}
-
-function CapabilityBadge({ mode }: { mode: Session["activeMode"] }) {
-  const { t } = useI18n();
-  const label = t(`mode.${mode}`);
-  const title = t("mode.current").replace("{mode}", label);
-  const iconByMode = {
-    chat: { Icon: MessageCircle, className: "text-muted-foreground/80" },
-    research: { Icon: SearchCheck, className: "text-muted-foreground/80" },
-    workspace: { Icon: Code2, className: "text-muted-foreground/80" },
-  } satisfies Record<Session["activeMode"], { Icon: LucideIcon; className: string }>;
-  const { Icon, className } = iconByMode[mode];
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          aria-label={title}
-          className={`inline-flex size-5 shrink-0 items-center justify-center rounded-full ${className}`}
-          role="img"
-        >
-          <Icon aria-hidden="true" className="size-3.5" strokeWidth={2.2} />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{title}</TooltipContent>
-    </Tooltip>
-  );
 }
 
 function WorkspaceDirsControl({ session, token }: { session: Session; token: string }) {

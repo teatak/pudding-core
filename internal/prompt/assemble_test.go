@@ -18,7 +18,7 @@ func TestAssembleIncludesCoreAndUserInstruction(t *testing.T) {
 	if !strings.Contains(out.SystemInstruction, "You are Pudding") {
 		t.Fatalf("assembled prompt missing core:\n%s", out.SystemInstruction)
 	}
-	if !strings.Contains(out.SystemInstruction, "Research Mode") {
+	if !strings.Contains(out.SystemInstruction, "Chat Mode") {
 		t.Fatalf("assembled prompt missing mode:\n%s", out.SystemInstruction)
 	}
 	if !strings.Contains(out.SystemInstruction, "请尽量简短") {
@@ -27,7 +27,7 @@ func TestAssembleIncludesCoreAndUserInstruction(t *testing.T) {
 	if !strings.Contains(out.SystemInstruction, "Current date: 2026-07-02") || !strings.Contains(out.SystemInstruction, "UTC offset: +08:00") {
 		t.Fatalf("assembled prompt missing runtime date:\n%s", out.SystemInstruction)
 	}
-	if len(out.Segments) != 4 || out.Segments[0].ID != "core_system" || out.Segments[1].ID != "mode_research" || out.Segments[2].ID != "user_system" || out.Segments[3].ID != "runtime_context" {
+	if len(out.Segments) != 4 || out.Segments[0].ID != "core_system" || out.Segments[1].ID != "mode_chat" || out.Segments[2].ID != "user_system" || out.Segments[3].ID != "runtime_context" {
 		t.Fatalf("unexpected segments: %+v", out.Segments)
 	}
 }

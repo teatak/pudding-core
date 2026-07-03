@@ -2,99 +2,17 @@ package tool
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
-const defaultWorkspaceListMax = 200
-
-func workspaceList(call Call) Result {
-	out := Result{CallID: call.CallID, Name: call.Name}
-	roots := normalizeWorkspaceDirs(call.WorkspaceDirs)
-	if len(roots) == 0 {
-		out.Ok = false
-		out.Content = jsonString(map[string]any{"ok": false, "reason": "workspace_dirs_required"})
-		out.SummaryKind = SummaryReturnedFields
-		out.SummaryCount = 2
-		return out
-	}
-	var args struct {
-		Path       string `json:"path"`
-		MaxEntries int    `json:"maxEntries"`
-	}
-	if len(call.Args) > 0 {
-		if err := json.Unmarshal(call.Args, &args); err != nil {
-			out.Ok = false
-			out.Content = jsonString(map[string]any{"ok": false, "reason": "invalid_arguments", "error": err.Error()})
-			out.SummaryKind = SummaryReturnedFields
-			out.SummaryCount = 3
-			return out
-		}
-	}
-	maxEntries := args.MaxEntries
-	if maxEntries <= 0 {
-		maxEntries = defaultWorkspaceListMax
-	}
-	if maxEntries > 1000 {
-		maxEntries = 1000
-	}
-	root, target, rel, err := resolveWorkspacePath(roots, args.Path)
-	if err != nil {
-		out.Ok = false
-		out.Content = jsonString(map[string]any{"ok": false, "reason": "path_not_allowed", "error": err.Error()})
-		out.SummaryKind = SummaryReturnedFields
-		out.SummaryCount = 3
-		return out
-	}
-	entries, err := os.ReadDir(target)
-	if err != nil {
-		out.Ok = false
-		out.Content = jsonString(map[string]any{"ok": false, "reason": "read_dir_failed", "error": err.Error()})
-		out.SummaryKind = SummaryReturnedFields
-		out.SummaryCount = 3
-		return out
-	}
-	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].IsDir() != entries[j].IsDir() {
-			return entries[i].IsDir()
-		}
-		return entries[i].Name() < entries[j].Name()
-	})
-	capacity := len(entries)
-	if capacity > maxEntries {
-		capacity = maxEntries
-	}
-	items := make([]map[string]any, 0, capacity)
-	for i, entry := range entries {
-		if i >= maxEntries {
-			break
-		}
-		item := map[string]any{
-			"name": entry.Name(),
-			"type": "file",
-		}
-		if entry.IsDir() {
-			item["type"] = "dir"
-		} else if info, err := entry.Info(); err == nil {
-			item["size"] = info.Size()
-		}
-		items = append(items, item)
-	}
-	out.Ok = true
-	out.Content = jsonString(map[string]any{
-		"ok":         true,
-		"root":       root,
-		"path":       rel,
-		"entries":    items,
-		"truncated":  len(entries) > maxEntries,
-		"totalCount": len(entries),
-	})
-	out.SummaryKind = SummaryReturnedItems
-	out.SummaryCount = len(items)
-	return out
-}
+var (
+	errWorkspaceDirsRequired     = errors.New("workspace directories are required")
+	errWorkspacePathNotAllowed   = errors.New("path is outside authorized workspace directories")
+	errWorkspaceFilePathRequired = errors.New("file path is required")
+)
 
 func normalizeWorkspaceDirs(dirs []string) []string {
 	seen := make(map[string]bool, len(dirs))
@@ -114,7 +32,11 @@ func normalizeWorkspaceDirs(dirs []string) []string {
 	return out
 }
 
-func resolveWorkspacePath(roots []string, rawPath string) (string, string, string, error) {
+func resolveWorkspacePath(roots []string, rawPath string, allowRoot, allowMissing bool) (string, string, string, error) {
+	roots = normalizeWorkspaceDirs(roots)
+	if len(roots) == 0 {
+		return "", "", "", errWorkspaceDirsRequired
+	}
 	rawPath = strings.TrimSpace(rawPath)
 	if rawPath == "" {
 		rawPath = "."
@@ -128,29 +50,67 @@ func resolveWorkspacePath(roots []string, rawPath string) (string, string, strin
 		}
 	}
 	for _, candidate := range candidates {
-		resolvedCandidate, err := filepath.EvalSymlinks(candidate)
-		if err != nil {
-			continue
-		}
+		candidate = filepath.Clean(candidate)
 		for _, root := range roots {
+			root = filepath.Clean(root)
+			if !pathInsideRoot(candidate, root) {
+				continue
+			}
 			resolvedRoot, err := filepath.EvalSymlinks(root)
 			if err != nil {
 				continue
 			}
-			if !pathInsideRoot(resolvedCandidate, resolvedRoot) {
+			if resolvedCandidate, err := filepath.EvalSymlinks(candidate); err == nil {
+				if !pathInsideRoot(resolvedCandidate, resolvedRoot) {
+					continue
+				}
+				rel, err := filepath.Rel(resolvedRoot, resolvedCandidate)
+				if err != nil {
+					continue
+				}
+				if rel == "" {
+					rel = "."
+				}
+				if rel == "." && !allowRoot {
+					return "", "", "", errWorkspaceFilePathRequired
+				}
+				return root, resolvedCandidate, filepath.ToSlash(rel), nil
+			}
+			if !allowMissing {
 				continue
 			}
-			rel, err := filepath.Rel(resolvedRoot, resolvedCandidate)
+			resolvedParent, err := resolveExistingParent(candidate)
+			if err != nil || !pathInsideRoot(resolvedParent, resolvedRoot) {
+				continue
+			}
+			rel, err := filepath.Rel(root, candidate)
 			if err != nil {
 				continue
 			}
 			if rel == "" {
 				rel = "."
 			}
-			return root, resolvedCandidate, rel, nil
+			if rel == "." && !allowRoot {
+				return "", "", "", errWorkspaceFilePathRequired
+			}
+			return root, candidate, filepath.ToSlash(rel), nil
 		}
 	}
-	return "", "", "", os.ErrPermission
+	return "", "", "", errWorkspacePathNotAllowed
+}
+
+func resolveExistingParent(path string) (string, error) {
+	parent := filepath.Dir(filepath.Clean(path))
+	for {
+		if _, err := os.Stat(parent); err == nil {
+			return filepath.EvalSymlinks(parent)
+		}
+		next := filepath.Dir(parent)
+		if next == parent {
+			return "", os.ErrNotExist
+		}
+		parent = next
+	}
 }
 
 func pathInsideRoot(path, root string) bool {

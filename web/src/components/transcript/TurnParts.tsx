@@ -754,7 +754,6 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     builtin_time_get_current: t("transcript.toolTimeCurrent"),
     builtin_web_fetch: t("transcript.toolWebFetch"),
     builtin_web_search: t("transcript.toolWebSearch"),
-    builtin_workspace_list: t("transcript.toolWorkspaceList"),
     canvas_chart: t("transcript.toolCanvasChart"),
     canvas_doc_read: t("transcript.toolCanvasDocRead"),
     canvas_gallery: t("transcript.toolCanvasGallery"),

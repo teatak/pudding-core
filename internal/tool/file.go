@@ -17,11 +17,35 @@ const (
 	managedScopeSkillDraft     = "skill_draft"
 	managedScopeSkillPublished = "skill_published"
 	managedScopeTemp           = "temp"
+	managedScopeWorkspace      = "workspace"
 
 	defaultFileReadMaxChars = 20000
 	maxFileReadChars        = 100000
 	defaultFileListMax      = 200
 )
+
+type resolvedFilePath struct {
+	root      string
+	target    string
+	rel       string
+	workspace bool
+}
+
+func (p resolvedFilePath) outputPath() string {
+	if p.workspace {
+		return p.target
+	}
+	return p.rel
+}
+
+func (p resolvedFilePath) payload(base map[string]any) map[string]any {
+	base["path"] = p.outputPath()
+	if p.workspace {
+		base["root"] = p.root
+		base["relativePath"] = p.rel
+	}
+	return base
+}
 
 func (r *BuiltinRunner) fileList(call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
@@ -40,11 +64,11 @@ func (r *BuiltinRunner) fileList(call Call) Result {
 	if maxEntries > 1000 {
 		maxEntries = 1000
 	}
-	_, target, rel, err := r.resolveManagedPath(args.Scope, args.Path, false, true)
+	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, false, true, false)
 	if err != nil {
-		return toolJSONError(out, "path_not_allowed", err.Error())
+		return filePathError(out, args.Scope, err)
 	}
-	entries, err := os.ReadDir(target)
+	entries, err := os.ReadDir(resolved.target)
 	if err != nil {
 		return toolJSONError(out, "read_dir_failed", err.Error())
 	}
@@ -69,8 +93,10 @@ func (r *BuiltinRunner) fileList(call Call) Result {
 			break
 		}
 		itemRel := entry.Name()
-		if rel != "." {
-			itemRel = filepath.ToSlash(filepath.Join(rel, entry.Name()))
+		if resolved.workspace {
+			itemRel = filepath.Join(resolved.target, entry.Name())
+		} else if resolved.rel != "." {
+			itemRel = filepath.ToSlash(filepath.Join(resolved.rel, entry.Name()))
 		}
 		item := map[string]any{"name": entry.Name(), "path": itemRel, "type": "file"}
 		if entry.IsDir() {
@@ -81,14 +107,13 @@ func (r *BuiltinRunner) fileList(call Call) Result {
 		items = append(items, item)
 	}
 	out.Ok = true
-	out.Content = jsonString(map[string]any{
+	out.Content = jsonString(resolved.payload(map[string]any{
 		"ok":         true,
 		"scope":      args.Scope,
-		"path":       rel,
 		"entries":    items,
 		"truncated":  len(entries) > maxEntries,
 		"totalCount": len(entries),
-	})
+	}))
 	out.SummaryKind = SummaryReturnedItems
 	out.SummaryCount = len(items)
 	return out
@@ -104,11 +129,11 @@ func (r *BuiltinRunner) fileRead(call Call) Result {
 	if err := decodeStructToolArgs(call.Args, &args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
-	_, target, rel, err := r.resolveManagedPath(args.Scope, args.Path, false, false)
+	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, false, false, false)
 	if err != nil {
-		return toolJSONError(out, "path_not_allowed", err.Error())
+		return filePathError(out, args.Scope, err)
 	}
-	data, err := os.ReadFile(target)
+	data, err := os.ReadFile(resolved.target)
 	if err != nil {
 		return toolJSONError(out, "read_failed", err.Error())
 	}
@@ -129,14 +154,13 @@ func (r *BuiltinRunner) fileRead(call Call) Result {
 		truncated = true
 	}
 	out.Ok = true
-	out.Content = jsonString(map[string]any{
+	out.Content = jsonString(resolved.payload(map[string]any{
 		"ok":        true,
 		"scope":     args.Scope,
-		"path":      rel,
 		"content":   content,
 		"truncated": truncated,
 		"chars":     len([]rune(string(data))),
-	})
+	}))
 	out.SummaryKind = SummaryReadChars
 	out.SummaryCount = len([]rune(content))
 	return out
@@ -152,21 +176,21 @@ func (r *BuiltinRunner) fileWrite(call Call) Result {
 	if err := decodeStructToolArgs(call.Args, &args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
-	_, target, rel, err := r.resolveManagedPath(args.Scope, args.Path, true, false)
+	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, true, false, true)
 	if err != nil {
-		return toolJSONError(out, "path_not_allowed", err.Error())
+		return filePathError(out, args.Scope, err)
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(resolved.target), 0o700); err != nil {
 		return toolJSONError(out, "mkdir_failed", err.Error())
 	}
-	if err := os.WriteFile(target, []byte(args.Content), 0o600); err != nil {
+	if err := os.WriteFile(resolved.target, []byte(args.Content), 0o600); err != nil {
 		return toolJSONError(out, "write_failed", err.Error())
 	}
 	if args.Scope == managedScopeSkillDraft {
-		_ = r.removeDraftDelete(rel)
+		_ = r.removeDraftDelete(resolved.rel)
 	}
 	out.Ok = true
-	out.Content = jsonString(map[string]any{"ok": true, "scope": args.Scope, "path": rel, "bytes": len([]byte(args.Content))})
+	out.Content = jsonString(resolved.payload(map[string]any{"ok": true, "scope": args.Scope, "bytes": len([]byte(args.Content))}))
 	out.SummaryKind = SummaryChangedLines
 	out.SummaryCount = countLines(args.Content)
 	return out
@@ -187,16 +211,16 @@ func (r *BuiltinRunner) filePatch(call Call) Result {
 	if args.OldString == "" {
 		return toolJSONError(out, "old_string_required", "old_string must not be empty")
 	}
-	_, target, rel, err := r.resolveManagedPath(args.Scope, args.Path, true, false)
+	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, true, false, true)
 	if err != nil {
-		return toolJSONError(out, "path_not_allowed", err.Error())
+		return filePathError(out, args.Scope, err)
 	}
 	if args.Scope == managedScopeSkillDraft {
-		if err := r.copyPublishedFileForDraftPatch(rel, target); err != nil {
+		if err := r.copyPublishedFileForDraftPatch(resolved.rel, resolved.target); err != nil {
 			return toolJSONError(out, "read_failed", err.Error())
 		}
 	}
-	data, err := os.ReadFile(target)
+	data, err := os.ReadFile(resolved.target)
 	if err != nil {
 		return toolJSONError(out, "read_failed", err.Error())
 	}
@@ -216,18 +240,18 @@ func (r *BuiltinRunner) filePatch(call Call) Result {
 		replaceN = -1
 	}
 	next := strings.Replace(content, args.OldString, args.NewString, replaceN)
-	if err := os.WriteFile(target, []byte(next), 0o600); err != nil {
+	if err := os.WriteFile(resolved.target, []byte(next), 0o600); err != nil {
 		return toolJSONError(out, "write_failed", err.Error())
 	}
 	if args.Scope == managedScopeSkillDraft {
-		_ = r.removeDraftDelete(rel)
+		_ = r.removeDraftDelete(resolved.rel)
 	}
 	changed := matches
 	if !args.ReplaceAll {
 		changed = 1
 	}
 	out.Ok = true
-	out.Content = jsonString(map[string]any{"ok": true, "scope": args.Scope, "path": rel, "replacements": changed})
+	out.Content = jsonString(resolved.payload(map[string]any{"ok": true, "scope": args.Scope, "replacements": changed}))
 	out.SummaryKind = SummaryChangedLines
 	out.SummaryCount = changed
 	return out
@@ -243,17 +267,17 @@ func (r *BuiltinRunner) fileDelete(call Call) Result {
 	if err := decodeStructToolArgs(call.Args, &args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
-	_, target, rel, err := r.resolveManagedPath(args.Scope, args.Path, true, false)
+	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, true, false, true)
 	if err != nil {
-		return toolJSONError(out, "path_not_allowed", err.Error())
+		return filePathError(out, args.Scope, err)
 	}
-	if rel == "." {
+	if resolved.rel == "." {
 		return toolJSONError(out, "refuse_root_delete", "deleting a scope root is not allowed")
 	}
 	if args.Scope == managedScopeSkillDraft {
-		return r.fileDeleteSkillDraft(out, rel, target, args.Recursive)
+		return r.fileDeleteSkillDraft(out, resolved.rel, resolved.target, args.Recursive)
 	}
-	info, err := os.Stat(target)
+	info, err := os.Stat(resolved.target)
 	if err != nil {
 		return toolJSONError(out, "stat_failed", err.Error())
 	}
@@ -261,15 +285,15 @@ func (r *BuiltinRunner) fileDelete(call Call) Result {
 		return toolJSONError(out, "recursive_required", "recursive=true is required to delete a directory")
 	}
 	if args.Recursive {
-		err = os.RemoveAll(target)
+		err = os.RemoveAll(resolved.target)
 	} else {
-		err = os.Remove(target)
+		err = os.Remove(resolved.target)
 	}
 	if err != nil {
 		return toolJSONError(out, "delete_failed", err.Error())
 	}
 	out.Ok = true
-	out.Content = jsonString(map[string]any{"ok": true, "scope": args.Scope, "path": rel})
+	out.Content = jsonString(resolved.payload(map[string]any{"ok": true, "scope": args.Scope}))
 	out.SummaryKind = SummaryReturnedFields
 	out.SummaryCount = 3
 	return out
@@ -285,39 +309,78 @@ func (r *BuiltinRunner) fileMove(call Call) Result {
 	if err := decodeStructToolArgs(call.Args, &args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
-	_, from, fromRel, err := r.resolveManagedPath(args.Scope, args.FromPath, true, false)
+	fromResolved, err := r.resolveFilePath(call, args.Scope, args.FromPath, true, false, false)
 	if err != nil {
-		return toolJSONError(out, "from_path_not_allowed", err.Error())
+		return filePathErrorWithReason(out, args.Scope, "from_path_not_allowed", err)
 	}
-	_, to, toRel, err := r.resolveManagedPath(args.Scope, args.ToPath, true, false)
+	toResolved, err := r.resolveFilePath(call, args.Scope, args.ToPath, true, false, true)
 	if err != nil {
-		return toolJSONError(out, "to_path_not_allowed", err.Error())
+		return filePathErrorWithReason(out, args.Scope, "to_path_not_allowed", err)
 	}
-	if fromRel == "." || toRel == "." {
+	if fromResolved.rel == "." || toResolved.rel == "." {
 		return toolJSONError(out, "refuse_root_move", "moving a scope root is not allowed")
 	}
 	if args.Scope == managedScopeSkillDraft {
-		if err := r.copyPublishedFileForDraftPatch(fromRel, from); err != nil {
+		if err := r.copyPublishedFileForDraftPatch(fromResolved.rel, fromResolved.target); err != nil {
 			return toolJSONError(out, "move_failed", err.Error())
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(to), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(toResolved.target), 0o700); err != nil {
 		return toolJSONError(out, "mkdir_failed", err.Error())
 	}
-	if err := os.Rename(from, to); err != nil {
+	if err := os.Rename(fromResolved.target, toResolved.target); err != nil {
 		return toolJSONError(out, "move_failed", err.Error())
 	}
 	if args.Scope == managedScopeSkillDraft {
-		if publishedDeletes, err := r.publishedDeletePaths(fromRel, false); err == nil {
+		if publishedDeletes, err := r.publishedDeletePaths(fromResolved.rel, false); err == nil {
 			_ = r.addDraftDeletes(publishedDeletes)
 		}
-		_ = r.removeDraftDelete(toRel)
+		_ = r.removeDraftDelete(toResolved.rel)
 	}
 	out.Ok = true
-	out.Content = jsonString(map[string]any{"ok": true, "scope": args.Scope, "from": fromRel, "to": toRel})
+	payload := map[string]any{"ok": true, "scope": args.Scope, "from": fromResolved.outputPath(), "to": toResolved.outputPath()}
+	if fromResolved.workspace {
+		payload["fromRoot"] = fromResolved.root
+		payload["fromRelativePath"] = fromResolved.rel
+		payload["toRoot"] = toResolved.root
+		payload["toRelativePath"] = toResolved.rel
+	}
+	out.Content = jsonString(payload)
 	out.SummaryKind = SummaryReturnedFields
 	out.SummaryCount = 4
 	return out
+}
+
+func (r *BuiltinRunner) resolveFilePath(call Call, scope, rawPath string, requireWritable, allowRoot, allowMissing bool) (resolvedFilePath, error) {
+	if strings.TrimSpace(scope) == managedScopeWorkspace {
+		root, target, rel, err := resolveWorkspacePath(call.WorkspaceDirs, rawPath, allowRoot, allowMissing)
+		if err != nil {
+			return resolvedFilePath{}, err
+		}
+		return resolvedFilePath{root: root, target: target, rel: rel, workspace: true}, nil
+	}
+	root, target, rel, err := r.resolveManagedPath(scope, rawPath, requireWritable, allowRoot)
+	if err != nil {
+		return resolvedFilePath{}, err
+	}
+	return resolvedFilePath{root: root, target: target, rel: rel}, nil
+}
+
+func filePathError(out Result, scope string, err error) Result {
+	return filePathErrorWithReason(out, scope, "path_not_allowed", err)
+}
+
+func filePathErrorWithReason(out Result, scope, fallbackReason string, err error) Result {
+	if strings.TrimSpace(scope) != managedScopeWorkspace {
+		return toolJSONError(out, fallbackReason, err.Error())
+	}
+	reason := "path_not_authorized"
+	if errors.Is(err, errWorkspaceDirsRequired) {
+		reason = "workspace_dirs_required"
+	} else if errors.Is(err, errWorkspaceFilePathRequired) {
+		reason = "path_not_allowed"
+	}
+	return toolJSONError(out, reason, err.Error())
 }
 
 func (r *BuiltinRunner) managedRoot(scope string) (string, bool, error) {

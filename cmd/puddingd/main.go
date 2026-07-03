@@ -68,7 +68,7 @@ func run() error {
 func runPrompt(args []string) error {
 	fs := flag.NewFlagSet("prompt", flag.ExitOnError)
 	flagHome := fs.String("home", "", "data home (default: channel home, see docs)")
-	flagMode := fs.String("mode", "chat", "agent mode: chat, research, workspace")
+	flagMode := fs.String("mode", "chat", "agent mode: chat, workspace")
 	flagSegments := fs.Bool("segments", false, "print prompt segments with headers")
 	flagTools := fs.Bool("tools", false, "print provider-neutral tool schemas for the mode")
 	if err := fs.Parse(args); err != nil {

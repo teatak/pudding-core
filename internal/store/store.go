@@ -69,7 +69,6 @@ type AgentMode string
 
 const (
 	ModeChat      AgentMode = "chat"
-	ModeResearch  AgentMode = "research"
 	ModeWorkspace AgentMode = "workspace"
 )
 
@@ -231,13 +230,9 @@ func NormalizeAgentMode(mode AgentMode) AgentMode {
 	switch AgentMode(strings.TrimSpace(strings.ToLower(string(mode)))) {
 	case "code", "operate", "local":
 		return ModeWorkspace
-	case "work":
-		return ModeResearch
 	case ModeWorkspace:
 		return ModeWorkspace
-	case ModeResearch:
-		return ModeResearch
-	case ModeChat:
+	case "work", "research", ModeChat:
 		return ModeChat
 	default:
 		return ""
@@ -251,8 +246,6 @@ func ValidModeLease(lease ModeLease) bool {
 func AgentModeRank(mode AgentMode) int {
 	switch NormalizeAgentMode(mode) {
 	case ModeWorkspace:
-		return 3
-	case ModeResearch:
 		return 2
 	case ModeChat:
 		fallthrough

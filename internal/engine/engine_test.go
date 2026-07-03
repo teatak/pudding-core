@@ -548,7 +548,7 @@ func TestSubmitRunsToolLoop(t *testing.T) {
 func TestSubmitBlocksToolOutsideCurrentMode(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
-	client := &unauthorizedRESTClient{}
+	client := &unauthorizedFileClient{}
 	runner := &recordingToolRunner{
 		defs:   tool.BuiltinDefinitions(),
 		result: tool.Result{Ok: true, Content: `{"answer":"should not run"}`},
@@ -578,8 +578,8 @@ func TestSubmitBlocksToolOutsideCurrentMode(t *testing.T) {
 	if len(client.requests) != 2 {
 		t.Fatalf("want 2 provider calls, got %d", len(client.requests))
 	}
-	if !hasToolDef(client.requests[0].Tools, tool.WebSearch) || hasToolDef(client.requests[0].Tools, tool.RESTRequest) {
-		t.Fatalf("chat request should expose web but not REST: %+v", client.requests[0].Tools)
+	if !hasToolDef(client.requests[0].Tools, tool.WebSearch) || !hasToolDef(client.requests[0].Tools, tool.RESTRequest) || hasToolDef(client.requests[0].Tools, tool.FileRead) {
+		t.Fatalf("chat request should expose endpoint tools but not file tools: %+v", client.requests[0].Tools)
 	}
 	if len(runner.calls) != 0 {
 		t.Fatalf("unauthorized tool should not execute: %+v", runner.calls)
@@ -592,7 +592,7 @@ func TestSubmitBlocksToolOutsideCurrentMode(t *testing.T) {
 		t.Fatalf("unexpected messages: %+v", msgs)
 	}
 	parts := msgs[2].Parts
-	if len(parts) != 1 || parts[0].Type != store.ContentPartToolResult || parts[0].Name != tool.RESTRequest || parts[0].Ok {
+	if len(parts) != 1 || parts[0].Type != store.ContentPartToolResult || parts[0].Name != tool.FileRead || parts[0].Ok {
 		t.Fatalf("blocked tool result wrong: %+v", parts)
 	}
 	if !strings.Contains(parts[0].Content, "capability_required") {
@@ -700,7 +700,7 @@ func TestCapabilityApprovalUpgradesTurnTools(t *testing.T) {
 		t.Fatalf("bad approval event: %+v", approval)
 	}
 	pending := eng.PendingApprovals(sid)
-	if len(pending) != 1 || pending[0].ID != approval.ApprovalID || pending[0].TargetMode != store.ModeResearch {
+	if len(pending) != 1 || pending[0].ID != approval.ApprovalID || pending[0].TargetMode != store.ModeWorkspace {
 		t.Fatalf("pending approval not exposed: %+v", pending)
 	}
 	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeTurn, nil); err != nil {
@@ -714,17 +714,17 @@ func TestCapabilityApprovalUpgradesTurnTools(t *testing.T) {
 	if len(client.requests) != 2 {
 		t.Fatalf("want 2 provider calls, got %d", len(client.requests))
 	}
-	if !hasToolDef(client.requests[0].Tools, tool.RequestCapability) || !hasToolDef(client.requests[0].Tools, tool.TimeGetCurrent) || !hasToolDef(client.requests[0].Tools, tool.WebSearch) || !hasToolDef(client.requests[0].Tools, tool.WebFetch) || hasToolDef(client.requests[0].Tools, tool.RESTRequest) {
+	if !hasToolDef(client.requests[0].Tools, tool.RequestCapability) || !hasToolDef(client.requests[0].Tools, tool.TimeGetCurrent) || !hasToolDef(client.requests[0].Tools, tool.WebSearch) || !hasToolDef(client.requests[0].Tools, tool.WebFetch) || !hasToolDef(client.requests[0].Tools, tool.RESTRequest) || hasToolDef(client.requests[0].Tools, tool.FileRead) {
 		t.Fatalf("chat tools wrong: %+v", client.requests[0].Tools)
 	}
-	if !hasToolDef(client.requests[1].Tools, tool.RequestCapability) || !hasToolDef(client.requests[1].Tools, tool.WebSearch) || !hasToolDef(client.requests[1].Tools, tool.WebFetch) || !hasToolDef(client.requests[1].Tools, tool.RESTRequest) || !hasToolDef(client.requests[1].Tools, tool.GraphQLRequest) {
-		t.Fatalf("research tools wrong: %+v", client.requests[1].Tools)
+	if !hasToolDef(client.requests[1].Tools, tool.RequestCapability) || !hasToolDef(client.requests[1].Tools, tool.WebSearch) || !hasToolDef(client.requests[1].Tools, tool.WebFetch) || !hasToolDef(client.requests[1].Tools, tool.RESTRequest) || !hasToolDef(client.requests[1].Tools, tool.GraphQLRequest) || !hasToolDef(client.requests[1].Tools, tool.FileRead) {
+		t.Fatalf("workspace tools wrong: %+v", client.requests[1].Tools)
 	}
 	turn, err := ms.GetConversationTurn(ctx, sid, res.TurnID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if turn.Mode != store.ModeResearch {
+	if turn.Mode != store.ModeWorkspace {
 		t.Fatalf("turn mode not upgraded: %+v", turn)
 	}
 }
@@ -843,7 +843,7 @@ func TestWorkspaceApprovalAllowsOptionalDirs(t *testing.T) {
 	if len(sess.WorkspaceDirs) != 0 {
 		t.Fatalf("workspace dirs not stored: %+v", sess.WorkspaceDirs)
 	}
-	if len(client.requests) != 2 || !hasToolDef(client.requests[1].Tools, tool.WorkspaceList) {
+	if len(client.requests) != 2 || !hasToolDef(client.requests[1].Tools, tool.FileList) {
 		t.Fatalf("workspace tools not exposed after approval: %+v", client.requests)
 	}
 }
@@ -1382,21 +1382,21 @@ func (c *toolLoopClient) Stream(_ context.Context, req provider.Request) (<-chan
 	return out, nil
 }
 
-type unauthorizedRESTClient struct {
+type unauthorizedFileClient struct {
 	requests []provider.Request
 }
 
-func (c *unauthorizedRESTClient) Name() string { return "unauthorized-rest" }
+func (c *unauthorizedFileClient) Name() string { return "unauthorized-file" }
 
-func (c *unauthorizedRESTClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+func (c *unauthorizedFileClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	c.requests = append(c.requests, req)
 	out := make(chan provider.Chunk, 4)
 	if len(c.requests) == 1 {
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
 			Index:     0,
-			CallID:    "call_rest",
-			Name:      tool.RESTRequest,
-			ArgsDelta: `{"endpoint":"github_rest","path":"/user"}`,
+			CallID:    "call_file",
+			Name:      tool.FileRead,
+			ArgsDelta: `{"scope":"workspace","path":"/tmp/demo.txt"}`,
 		}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	} else {
@@ -1446,7 +1446,7 @@ func (c *capabilityClient) Stream(_ context.Context, req provider.Request) (<-ch
 			Index:     0,
 			CallID:    "call_cap",
 			Name:      tool.RequestCapability,
-			ArgsDelta: `{"targetMode":"research","reason":"需要调用 REST endpoint","risk":"external request"}`,
+			ArgsDelta: `{"targetMode":"workspace","reason":"需要读取本地文件","risk":"local file access"}`,
 		}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	} else {
@@ -1472,7 +1472,7 @@ func (c *capabilityAfterTextClient) Stream(_ context.Context, req provider.Reque
 			Index:     0,
 			CallID:    "call_cap",
 			Name:      tool.RequestCapability,
-			ArgsDelta: `{"targetMode":"research","reason":"需要查询外部最新信息"}`,
+			ArgsDelta: `{"targetMode":"workspace","reason":"需要读取本地文件"}`,
 		}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	} else {

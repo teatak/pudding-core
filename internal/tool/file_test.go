@@ -146,3 +146,100 @@ func TestBuiltinFileDeleteRecordsDraftManifest(t *testing.T) {
 		t.Fatalf("delete manifest missing icon: %q", data)
 	}
 }
+
+func TestBuiltinFileWorkspaceScopeReadWrite(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	notePath := filepath.Join(root, "dir", "note.txt")
+	if err := os.WriteFile(notePath, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolvedNotePath, err := filepath.EvalSymlinks(notePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
+
+	list := runner.Call(context.Background(), Call{
+		Name:          FileList,
+		Args:          json.RawMessage(`{"scope":"workspace","path":"dir"}`),
+		WorkspaceDirs: []string{root},
+	})
+	if !list.Ok {
+		t.Fatalf("workspace list should succeed: %+v", list)
+	}
+	listPayload := decodeToolResult(t, list)
+	if listPayload["root"] != root || listPayload["relativePath"] != "dir" {
+		t.Fatalf("workspace metadata missing: %+v", listPayload)
+	}
+	entries := listPayload["entries"].([]any)
+	if len(entries) != 1 || entries[0].(map[string]any)["path"] != resolvedNotePath {
+		t.Fatalf("workspace entries should use absolute paths: %+v", entries)
+	}
+
+	read := runner.Call(context.Background(), Call{
+		Name:          FileRead,
+		Args:          json.RawMessage(`{"scope":"workspace","path":"` + filepath.ToSlash(notePath) + `"}`),
+		WorkspaceDirs: []string{root},
+	})
+	if !read.Ok {
+		t.Fatalf("workspace read should succeed: %+v", read)
+	}
+	readPayload := decodeToolResult(t, read)
+	if readPayload["content"] != "hello" || readPayload["path"] != resolvedNotePath {
+		t.Fatalf("unexpected workspace read payload: %+v", readPayload)
+	}
+
+	writePath := filepath.Join(root, "nested", "created.txt")
+	write := runner.Call(context.Background(), Call{
+		Name:          FileWrite,
+		Args:          json.RawMessage(`{"scope":"workspace","path":"` + filepath.ToSlash(writePath) + `","content":"created"}`),
+		WorkspaceDirs: []string{root},
+	})
+	if !write.Ok {
+		t.Fatalf("workspace write should succeed: %+v", write)
+	}
+	data, err := os.ReadFile(writePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "created" {
+		t.Fatalf("workspace write content = %q", data)
+	}
+}
+
+func TestBuiltinFileWorkspaceRejectsOutsideRoot(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "note.txt")
+	if err := os.WriteFile(outside, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res := NewBuiltinRunner(WithHomeDir(t.TempDir())).Call(context.Background(), Call{
+		Name:          FileRead,
+		Args:          json.RawMessage(`{"scope":"workspace","path":"` + filepath.ToSlash(outside) + `"}`),
+		WorkspaceDirs: []string{root},
+	})
+	if res.Ok {
+		t.Fatalf("outside workspace read should fail: %+v", res)
+	}
+	payload := decodeToolResult(t, res)
+	if payload["reason"] != "path_not_authorized" {
+		t.Fatalf("unexpected reason: %+v", payload)
+	}
+}
+
+func TestBuiltinFileWorkspaceRequiresDirs(t *testing.T) {
+	res := NewBuiltinRunner(WithHomeDir(t.TempDir())).Call(context.Background(), Call{
+		Name: FileList,
+		Args: json.RawMessage(`{"scope":"workspace","path":"."}`),
+	})
+	if res.Ok {
+		t.Fatalf("workspace list without dirs should fail: %+v", res)
+	}
+	payload := decodeToolResult(t, res)
+	if payload["reason"] != "workspace_dirs_required" {
+		t.Fatalf("unexpected reason: %+v", payload)
+	}
+}

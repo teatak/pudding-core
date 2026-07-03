@@ -1,10 +1,28 @@
 import { create } from "zustand";
 
+import type { Attachment } from "@/api/client";
+import type { LocalFolderPath } from "@/lib/localFolders";
+
 export type DraftModelValue = { provider?: string; model?: string };
+export type DraftAttachment = {
+  attachment?: Attachment;
+  file?: File;
+  id: string;
+  name: string;
+  previewURL?: string;
+  size: number;
+  status: "uploading" | "uploaded" | "error";
+};
+
+type DraftListUpdate<T> = T[] | ((current: T[]) => T[]);
 
 type DraftState = {
+  attachments: DraftAttachment[];
+  localFolders: LocalFolderPath[];
   text: string;
   model: DraftModelValue;
+  setAttachments: (update: DraftListUpdate<DraftAttachment>) => void;
+  setLocalFolders: (update: DraftListUpdate<LocalFolderPath>) => void;
   setText: (text: string) => void;
   setModel: (model: DraftModelValue) => void;
   clear: () => void;
@@ -48,8 +66,12 @@ function writeLastModel(model: DraftModelValue) {
 
 // 新会话未落库前的本地草稿。只放内存,切换会话不丢,真正提交成功后清空。
 export const useDraftStore = create<DraftState>((set) => ({
+  attachments: [],
+  localFolders: [],
   text: "",
   model: readLastModel(),
+  setAttachments: (update) => set((state) => ({ attachments: applyDraftListUpdate(state.attachments, update) })),
+  setLocalFolders: (update) => set((state) => ({ localFolders: applyDraftListUpdate(state.localFolders, update) })),
   setText: (text) => set({ text }),
   setModel: (model) => {
     writeLastModel(model);
@@ -57,3 +79,7 @@ export const useDraftStore = create<DraftState>((set) => ({
   },
   clear: () => set({ text: "" }),
 }));
+
+function applyDraftListUpdate<T>(current: T[], update: DraftListUpdate<T>) {
+  return typeof update === "function" ? update(current) : update;
+}

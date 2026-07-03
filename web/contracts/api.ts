@@ -9,7 +9,7 @@ export const session = z.object({
   model: z.string(),
   reasoningEffort: z.string().optional(),
   reasoningModelKey: z.string().optional(),
-  activeMode: z.enum(["chat", "research", "workspace"]),
+  activeMode: z.enum(["chat", "workspace"]),
   modeLease: z.enum(["none", "session"]),
   workspaceDirs: z.array(z.string()).optional(),
   pinned: z.boolean(),
@@ -85,7 +85,7 @@ export const putClosedCanvasItemRequest = z.object({
 export const browserMCPTool = z.object({
   name: z.string(),
   description: z.string().optional(),
-  capability: z.enum(["chat", "research", "workspace"]).optional(),
+  capability: z.enum(["chat", "workspace"]).optional(),
 });
 export type BrowserMCPTool = z.infer<typeof browserMCPTool>;
 
@@ -246,7 +246,7 @@ export const conversationTurn = z.object({
   status: z.enum(["running", "completed", "failed", "cancelled"]),
   provider: z.string().optional(),
   model: z.string().optional(),
-  mode: z.enum(["chat", "research", "workspace"]).optional(),
+  mode: z.enum(["chat", "workspace"]).optional(),
   error: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -264,7 +264,7 @@ export const queuedInput = z.object({
   status: queuedInputStatus,
   provider: z.string().optional(),
   model: z.string().optional(),
-  mode: z.enum(["chat", "research", "workspace"]).optional(),
+  mode: z.enum(["chat", "workspace"]).optional(),
   modelConfig: z.unknown().optional(),
   turnID: z.string().optional(),
   createdAt: z.string(),
@@ -317,7 +317,7 @@ export const pendingApproval = z.object({
   turnID: z.string(),
   callID: z.string().optional(),
   approvalKind: z.string(),
-  targetMode: z.enum(["chat", "research", "workspace"]).optional(),
+  targetMode: z.enum(["chat", "workspace"]).optional(),
   title: z.string().optional(),
   reason: z.string().optional(),
   risk: z.string().optional(),
@@ -388,7 +388,7 @@ export const userPromptResponse = z.object({
 export const builtinTool = z.object({
   id: z.string(),
   description: z.string(),
-  capability: z.enum(["chat", "research", "workspace"]),
+  capability: z.enum(["chat", "workspace"]),
   inputSchema: z.unknown().optional(),
 });
 export type BuiltinTool = z.infer<typeof builtinTool>;

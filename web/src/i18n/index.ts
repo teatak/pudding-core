@@ -20,7 +20,6 @@ const zh: Messages = {
   "common.clear": "清除",
   "mode.chat": "对话",
   "mode.workspace": "工作区",
-  "mode.research": "研究",
   "mode.current": "当前能力：{mode}",
   "picker.noModels": "暂无可用模型，请先添加。",
   "picker.selectModel": "请选择模型",
@@ -575,7 +574,6 @@ const zh: Messages = {
   "transcript.toolTimeCurrent": "获取当前时间",
   "transcript.toolWebFetch": "读取网页",
   "transcript.toolWebSearch": "Web 搜索",
-  "transcript.toolWorkspaceList": "列出工作区",
   "transcript.toolResult": "结果",
 };
 
@@ -591,7 +589,6 @@ const zhTW: Messages = {
   "common.clear": "清除",
   "mode.chat": "對話",
   "mode.workspace": "工作區",
-  "mode.research": "研究",
   "mode.current": "目前能力：{mode}",
   "picker.noModels": "暫無可用模型，請先新增。",
   "picker.selectModel": "請選擇模型",
@@ -1146,7 +1143,6 @@ const zhTW: Messages = {
   "transcript.toolTimeCurrent": "取得目前時間",
   "transcript.toolWebFetch": "讀取網頁",
   "transcript.toolWebSearch": "Web 搜尋",
-  "transcript.toolWorkspaceList": "列出工作區",
   "transcript.toolResult": "結果",
 };
 
@@ -1162,7 +1158,6 @@ const en: Messages = {
   "common.clear": "Clear",
   "mode.chat": "Chat",
   "mode.workspace": "Workspace",
-  "mode.research": "Research",
   "mode.current": "Current capability: {mode}",
   "picker.noModels": "No models available. Add one first.",
   "picker.selectModel": "Select a model",
@@ -1717,7 +1712,6 @@ const en: Messages = {
   "transcript.toolTimeCurrent": "Get current time",
   "transcript.toolWebFetch": "Fetch webpage",
   "transcript.toolWebSearch": "Web search",
-  "transcript.toolWorkspaceList": "List workspace",
   "transcript.toolResult": "Result",
 };
 

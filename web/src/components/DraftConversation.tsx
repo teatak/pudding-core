@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowUp, CircleAlert, FolderOpen, Loader2, Paperclip, Upload, X } from "lucide-react";
+import { ArrowUp, CircleAlert, FileText, FolderOpen, Loader2, Upload, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -32,7 +32,7 @@ import {
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
-import { ComposerAddMenu } from "@/components/ComposerAddMenu";
+import { ComposerAddActionMenu, ComposerAddButton, type ComposerAddMenuAction } from "@/components/ComposerAddMenu";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
 import { Mascot, type MascotGaze, type MascotGazePoint } from "@/components/Mascot";
 import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
@@ -54,7 +54,6 @@ import {
   createLocalFolderPath,
   droppedLocalItemsFromDataTransfer,
   type DroppedLocalItems,
-  formatLocalFolderLabel,
   pickLocalFolderPaths,
   type LocalFolderPath,
 } from "@/lib/localFolders";
@@ -63,7 +62,7 @@ import { getSubmitFailure } from "@/lib/submitFailure";
 import { getTextAreaCaretClientPoint } from "@/lib/textCaret";
 import { cn } from "@/lib/utils";
 import { getOrderedProviderPresets, type ProviderPreset } from "@/provider/presets";
-import { useDraftStore, type DraftModelValue } from "@/state/draftStore";
+import { useDraftStore, type DraftAttachment, type DraftModelValue } from "@/state/draftStore";
 import { useOverlayStore } from "@/state/overlayStore";
 
 const draftSchema = z.object({
@@ -76,15 +75,7 @@ type DraftDroppedFilesBatch = DroppedLocalItems & {
   failedFileCount?: number;
   nonce: number;
 };
-type DraftAttachment = {
-  id: string;
-  file?: File;
-  name: string;
-  previewURL?: string;
-  size: number;
-  status: "uploading" | "uploaded" | "error";
-  attachment?: Attachment;
-};
+type AddMenuTrigger = { source: "button" | "text"; index: number | null };
 type QuickSubmit = { id: number; text: string };
 
 const suggestionKeys = ["draft.suggest.1", "draft.suggest.2", "draft.suggest.3"] as const;
@@ -377,17 +368,22 @@ function DraftComposer({
   const removePendingUser = useOverlayStore((state) => state.removePendingUser);
   const startSubmittingTurn = useOverlayStore((state) => state.startSubmittingTurn);
   const draftText = useDraftStore((state) => state.text);
+  const attachments = useDraftStore((state) => state.attachments);
+  const localFolders = useDraftStore((state) => state.localFolders);
+  const setDraftAttachments = useDraftStore((state) => state.setAttachments);
+  const setDraftLocalFolders = useDraftStore((state) => state.setLocalFolders);
   const setDraftText = useDraftStore((state) => state.setText);
   const clearDraft = useDraftStore((state) => state.clear);
   const [resolvedModel, setResolvedModel] = useState<ResolvedModelSelection | null>(null);
   const [draftReasoningEffort, setDraftReasoningEffortValue] = useState("");
   const [draftReasoningModelKey, setDraftReasoningModelKey] = useState("");
-  const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [addSelectedIndex, setAddSelectedIndex] = useState(0);
   const [attachmentPreviewIndex, setAttachmentPreviewIndex] = useState<number | null>(null);
-  const [localFolders, setLocalFolders] = useState<LocalFolderPath[]>([]);
+  const [pickingAttachment, setPickingAttachment] = useState(false);
   const [pickingLocalFolder, setPickingLocalFolder] = useState(false);
   const draftIDRef = useRef<string>(newClientID());
-  const attachmentsRef = useRef<DraftAttachment[]>([]);
+  const addMenuTriggerRef = useRef<AddMenuTrigger>({ source: "button", index: null });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const lastDroppedFilesNonceRef = useRef(0);
   const quickSubmitIDRef = useRef<number | null>(null);
@@ -401,7 +397,12 @@ function DraftComposer({
   const uploadedAttachments = attachments.flatMap((item) => (item.status === "uploaded" && item.attachment ? [item.attachment] : []));
   const hasPendingAttachments = attachments.some((item) => item.status === "uploading");
   const canSend = Boolean(watchedText.trim() || uploadedAttachments.length || localFolders.length) && !hasPendingAttachments;
-  const sendEnabled = canSend && modelReady;
+  const addMenuActions: ComposerAddMenuAction[] = [
+    { id: "files", label: t("composer.attach"), loading: pickingAttachment },
+    { id: "folder", label: t("composer.attachFolder"), loading: pickingLocalFolder },
+  ];
+  const addMenuVisible = addMenuOpen;
+  const sendEnabled = canSend && modelReady && !addMenuVisible;
   const textField = form.register("text");
   const attachmentPreviewItems = useMemo(
     () =>
@@ -432,6 +433,14 @@ function DraftComposer({
     [resolvedModelKey],
   );
 
+  useEffect(() => {
+    if (!addMenuVisible) {
+      setAddSelectedIndex(0);
+      return;
+    }
+    setAddSelectedIndex((index) => Math.min(index, addMenuActions.length - 1));
+  }, [addMenuActions.length, addMenuVisible]);
+
   const updateMascotInputGaze = useCallback(() => {
     const textArea = textAreaRef.current;
     if (!textArea || document.activeElement !== textArea) {
@@ -457,20 +466,14 @@ function DraftComposer({
   }, [scheduleMascotInputGaze]);
   const ime = useImeCompositionGuard({ onCompositionEnd: scheduleMascotInputGaze });
 
-  useEffect(() => {
-    attachmentsRef.current = attachments;
-  }, [attachments]);
-
   const clearDraftAttachments = useCallback(() => {
-    setAttachments((current) => {
-      current.forEach(revokeDraftAttachmentPreview);
-      return [];
-    });
-    setLocalFolders([]);
+    attachments.forEach(revokeDraftAttachmentPreview);
+    setDraftAttachments([]);
+    setDraftLocalFolders([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
-  }, []);
+  }, [attachments, setDraftAttachments, setDraftLocalFolders]);
 
   const addFiles = useCallback(
     (files: File[]) => {
@@ -486,13 +489,13 @@ function DraftComposer({
         size: file.size,
         status: "uploading" as const,
       }));
-      setAttachments((current) => [...current, ...items]);
+      setDraftAttachments((current) => [...current, ...items]);
       onSubmitError(null);
       items.forEach((item, index) => {
         const file = nextFiles[index];
         void uploadAttachment(token, draftAttachmentSessionID, file)
           .then((attachment) => {
-            setAttachments((current) =>
+            setDraftAttachments((current) =>
               current.map((currentItem) =>
                 currentItem.id === item.id
                   ? { ...currentItem, attachment, name: attachment.name, size: attachment.size, status: "uploaded" }
@@ -503,7 +506,7 @@ function DraftComposer({
           .catch((error) => {
             console.warn("draft attachment upload failed", error);
             toast.error(draftAttachmentUploadErrorMessage(error, t));
-            setAttachments((current) => {
+            setDraftAttachments((current) => {
               const failed = current.find((currentItem) => currentItem.id === item.id);
               if (failed) {
                 revokeDraftAttachmentPreview(failed);
@@ -513,23 +516,23 @@ function DraftComposer({
           });
       });
     },
-    [onSubmitError, t, token],
+    [onSubmitError, setDraftAttachments, t, token],
   );
 
   const removeAttachment = useCallback((id: string) => {
-    setAttachments((current) => {
+    setDraftAttachments((current) => {
       const removed = current.find((item) => item.id === id);
       if (removed) {
         revokeDraftAttachmentPreview(removed);
       }
       return current.filter((item) => item.id !== id);
     });
-  }, []);
+  }, [setDraftAttachments]);
   const addUploadedAttachments = useCallback((values: Attachment[]) => {
     if (values.length === 0) {
       return;
     }
-    setAttachments((current) => [
+    setDraftAttachments((current) => [
       ...current,
       ...values.map((attachment) => ({
         id: newClientID(),
@@ -539,7 +542,7 @@ function DraftComposer({
         status: "uploaded" as const,
       })),
     ]);
-  }, []);
+  }, [setDraftAttachments]);
   const addLocalFolderPaths = useCallback((paths: string[]) => {
     const folders = paths.flatMap((path) => {
       const folder = createLocalFolderPath(path);
@@ -548,11 +551,11 @@ function DraftComposer({
     if (folders.length === 0) {
       return;
     }
-    setLocalFolders((current) => {
+    setDraftLocalFolders((current) => {
       const existing = new Set(current.map((folder) => folder.path));
       return [...current, ...folders.filter((folder) => !existing.has(folder.path))];
     });
-  }, []);
+  }, [setDraftLocalFolders]);
   const pickLocalFolder = useCallback(async () => {
     if (pickingLocalFolder) {
       return;
@@ -565,11 +568,63 @@ function DraftComposer({
       toast.error(t("composer.folderPickFailed"));
     } finally {
       setPickingLocalFolder(false);
+      setAddMenuOpen(false);
     }
   }, [addLocalFolderPaths, pickingLocalFolder, t]);
   const removeLocalFolder = useCallback((id: string) => {
-    setLocalFolders((current) => current.filter((folder) => folder.id !== id));
+    setDraftLocalFolders((current) => current.filter((folder) => folder.id !== id));
+  }, [setDraftLocalFolders]);
+  const pickAttachment = useCallback(() => {
+    if (pickingAttachment) {
+      return;
+    }
+    setPickingAttachment(true);
+    const clearPicking = () => {
+      window.setTimeout(() => {
+        setPickingAttachment(false);
+        setAddMenuOpen(false);
+      }, 200);
+    };
+    window.addEventListener("focus", clearPicking, { once: true });
+    window.requestAnimationFrame(() => {
+      fileInputRef.current?.click();
+      textAreaRef.current?.focus({ preventScroll: true });
+    });
+  }, [pickingAttachment]);
+  const removeTextAddMenuTrigger = useCallback(() => {
+    const trigger = addMenuTriggerRef.current;
+    if (trigger.source !== "text" || trigger.index === null) {
+      return;
+    }
+    const textArea = textAreaRef.current;
+    const value = textArea?.value ?? form.getValues("text");
+    const index = trigger.index;
+    if (index < 0 || index >= value.length || value[index] !== "@") {
+      return;
+    }
+    const nextText = value.slice(0, index) + value.slice(index + 1);
+    form.setValue("text", nextText);
+    setDraftText(nextText);
+    window.requestAnimationFrame(() => {
+      textAreaRef.current?.setSelectionRange(index, index);
+    });
+  }, [form, setDraftText]);
+  const openAddMenu = useCallback((source: AddMenuTrigger["source"] = "button", index: number | null = null) => {
+    addMenuTriggerRef.current = { source, index };
+    setAddMenuOpen(true);
+    window.requestAnimationFrame(() => textAreaRef.current?.focus({ preventScroll: true }));
   }, []);
+  const selectAddAction = useCallback(
+    (action: ComposerAddMenuAction) => {
+      removeTextAddMenuTrigger();
+      if (action.id === "files") {
+        pickAttachment();
+        return;
+      }
+      pickLocalFolder();
+    },
+    [pickAttachment, pickLocalFolder, removeTextAddMenuTrigger],
+  );
 
   useEffect(() => {
     if (!droppedFiles || droppedFiles.nonce === lastDroppedFilesNonceRef.current) {
@@ -608,7 +663,6 @@ function DraftComposer({
 
   useEffect(() => {
     return () => {
-      attachmentsRef.current.forEach(revokeDraftAttachmentPreview);
       if (mascotGazeRafRef.current) {
         window.cancelAnimationFrame(mascotGazeRafRef.current);
       }
@@ -718,16 +772,15 @@ function DraftComposer({
   const submitText = useCallback(
     (raw: string) => {
       const text = appendLocalFolderPaths(raw, localFolders);
-      const draftAttachments = attachmentsRef.current;
-      const attachmentsToSubmit = draftAttachments.flatMap((item) => (item.status === "uploaded" && item.attachment ? [item.attachment] : []));
-      const hasPending = draftAttachments.some((item) => item.status === "uploading");
+      const attachmentsToSubmit = attachments.flatMap((item) => (item.status === "uploaded" && item.attachment ? [item.attachment] : []));
+      const hasPending = attachments.some((item) => item.status === "uploading");
       if ((!text && attachmentsToSubmit.length === 0) || !modelReady || submitMutation.isPending || hasPending) {
         return;
       }
       onSubmitError(null);
       submitMutation.mutate({ text, attachments: attachmentsToSubmit });
     },
-    [localFolders, modelReady, onSubmitError, submitMutation],
+    [attachments, localFolders, modelReady, onSubmitError, submitMutation],
   );
 
   useEffect(() => {
@@ -761,9 +814,14 @@ function DraftComposer({
   const handleTextChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     void textField.onChange(event);
     setDraftText(event.currentTarget.value);
+    if (addMenuOpen) {
+      setAddMenuOpen(false);
+    }
     scheduleMascotInputGaze();
   };
   const handleAttachmentInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    setPickingAttachment(false);
+    setAddMenuOpen(false);
     addFiles(Array.from(event.target.files || []));
     event.target.value = "";
   };
@@ -776,6 +834,38 @@ function DraftComposer({
     addFiles(files);
   };
   const handleTextKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "@" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      const triggerIndex = event.currentTarget.selectionStart;
+      event.preventDefault();
+      openAddMenu("text", triggerIndex);
+      scheduleMascotInputGaze();
+      return;
+    }
+    if (addMenuVisible) {
+      switch (event.key) {
+        case "ArrowDown":
+          event.preventDefault();
+          setAddSelectedIndex((index) => (index + 1) % addMenuActions.length);
+          return;
+        case "ArrowUp":
+          event.preventDefault();
+          setAddSelectedIndex((index) => (index - 1 + addMenuActions.length) % addMenuActions.length);
+          return;
+        case "Enter":
+        case "Tab": {
+          event.preventDefault();
+          const action = addMenuActions[addSelectedIndex] ?? addMenuActions[0];
+          if (action) {
+            selectAddAction(action);
+          }
+          return;
+        }
+        case "Escape":
+          event.preventDefault();
+          setAddMenuOpen(false);
+          return;
+      }
+    }
     if (event.key === "Enter" && !event.shiftKey) {
       if (ime.isComposing(event)) {
         scheduleMascotInputGaze();
@@ -794,6 +884,14 @@ function DraftComposer({
       <form className="relative shrink-0" onSubmit={form.handleSubmit(submitDraft)}>
         <ChatColumn>
           <div className="relative rounded-3xl border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/25">
+            {addMenuVisible ? (
+              <ComposerAddActionMenu
+                actions={addMenuActions}
+                selectedIndex={addSelectedIndex}
+                onHover={setAddSelectedIndex}
+                onSelect={selectAddAction}
+              />
+            ) : null}
             <input
               ref={fileInputRef}
               className="sr-only"
@@ -848,13 +946,11 @@ function DraftComposer({
               />
             </div>
             <div className="flex min-w-0 items-center gap-1 px-2 pb-2">
-              <ComposerAddMenu
-                attachFolderLabel={t("composer.attachFolder")}
-                attachLabel={t("composer.attach")}
-                menuTitle={t("composer.addMenuTitle")}
-                pickingFolder={pickingLocalFolder}
-                onAttachFiles={() => fileInputRef.current?.click()}
-                onAttachFolder={() => void pickLocalFolder()}
+              <ComposerAddButton
+                active={addMenuVisible}
+                busy={pickingAttachment || pickingLocalFolder}
+                label={t("composer.addMenuTitle")}
+                onClick={() => openAddMenu("button")}
               />
               <ModelReasoningPicker
                 className="ml-auto min-w-0"
@@ -933,16 +1029,19 @@ function DraftLocalFolderChip({
 }) {
   return (
     <div
-      className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-md border border-border/70 bg-muted/40 px-2 py-1 text-xs leading-5 text-muted-foreground"
+      className="relative inline-flex h-20 min-w-56 max-w-full items-center gap-3 rounded-lg border border-border/70 bg-card px-3 pr-9 text-sm shadow-sm"
       title={folder.path}
     >
-      <FolderOpen className="size-3 shrink-0" />
-      <span className="shrink-0 text-muted-foreground/70">{label}</span>
-      <span className="min-w-0 truncate font-medium text-foreground">{folder.name}</span>
-      <span className="min-w-0 max-w-44 truncate font-mono text-muted-foreground/70">{formatLocalFolderLabel(folder.path)}</span>
+      <span className="flex size-14 shrink-0 items-center justify-center rounded-md bg-muted/70 text-muted-foreground">
+        <FolderOpen className="size-7" strokeWidth={1.8} />
+      </span>
+      <span className="flex min-w-0 max-w-64 flex-1 flex-col justify-center">
+        <span className="truncate font-medium leading-6 text-foreground">{folder.name}</span>
+        <span className="truncate text-muted-foreground">{label}</span>
+      </span>
       <Button
         aria-label={removeLabel}
-        className="-mr-1 size-5 bg-transparent hover:bg-background/70"
+        className="absolute top-2 right-2 size-6 rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
         size="icon-xs"
         type="button"
         variant="ghost"
@@ -978,7 +1077,7 @@ function DraftAttachmentChip({
     return (
       <div
         className={cn(
-          "group relative h-16 w-20 overflow-hidden rounded-md border bg-muted/40",
+          "group relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border bg-muted/40 shadow-sm",
           item.status === "error" ? "border-destructive/40" : "border-border/70",
         )}
         title={`${item.name} ${formatAttachmentSize(item.size)}`}
@@ -1003,7 +1102,7 @@ function DraftAttachmentChip({
         ) : null}
         <Button
           aria-label={removeLabel}
-          className="absolute top-1 right-1 z-10 size-5 bg-background/85 text-foreground shadow-sm hover:bg-background"
+          className="absolute top-2 right-2 z-10 size-6 rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
           disabled={locked}
           size="icon-xs"
           type="button"
@@ -1018,17 +1117,21 @@ function DraftAttachmentChip({
   return (
     <div
       className={cn(
-        "inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border px-2 py-1 text-xs leading-5",
-        item.status === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-border/70 bg-muted/40 text-muted-foreground",
+        "relative inline-flex h-20 min-w-56 max-w-full items-center gap-3 rounded-lg border bg-card px-3 pr-9 text-sm shadow-sm",
+        item.status === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-border/70 text-muted-foreground",
       )}
       title={`${item.name} ${formatAttachmentSize(item.size)}`}
     >
-      {busy ? <Loader2 className="size-3 shrink-0 animate-spin" /> : <Paperclip className="size-3 shrink-0" />}
-      <span className="min-w-0 truncate">{item.name}</span>
-      <span className="shrink-0 text-muted-foreground/70">{formatAttachmentSize(item.size)}</span>
+      <span className="flex size-14 shrink-0 items-center justify-center rounded-md bg-muted/70 text-muted-foreground">
+        {busy ? <Loader2 className="size-7 animate-spin" strokeWidth={1.8} /> : <FileText className="size-7" strokeWidth={1.8} />}
+      </span>
+      <span className="flex min-w-0 max-w-64 flex-1 flex-col justify-center">
+        <span className="truncate font-medium leading-6 text-foreground">{item.name}</span>
+        <span className="truncate text-muted-foreground">{attachmentKindLabel(item.name, item.attachment?.mime || item.file?.type)}</span>
+      </span>
       <Button
         aria-label={removeLabel}
-        className="-mr-1 size-5 bg-transparent hover:bg-background/70"
+        className="absolute top-2 right-2 size-6 rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
         disabled={locked}
         size="icon-xs"
         type="button"
@@ -1066,6 +1169,15 @@ function formatAttachmentSize(size: number) {
     return `${Math.round(size / 1024)} KB`;
   }
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function attachmentKindLabel(name: string, mime?: string) {
+  const ext = name.split(".").pop()?.trim();
+  if (ext && ext !== name) {
+    return ext.toUpperCase();
+  }
+  const major = mime?.split("/")[0]?.trim();
+  return major ? major.toUpperCase() : "FILE";
 }
 
 function isImageAttachmentLike(mime: string | undefined, name: string) {

@@ -25,9 +25,6 @@ var coreSystemPrompt string
 //go:embed assets/mode_chat.md
 var chatModePrompt string
 
-//go:embed assets/mode_research.md
-var researchModePrompt string
-
 //go:embed assets/mode_workspace.md
 var workspaceModePrompt string
 
@@ -278,8 +275,6 @@ func modePrompt(mode string) string {
 	switch normalizeMode(mode) {
 	case "workspace":
 		return workspaceModePrompt
-	case "research":
-		return researchModePrompt
 	case "chat":
 		fallthrough
 	default:
@@ -291,9 +286,7 @@ func normalizeMode(mode string) string {
 	switch strings.TrimSpace(strings.ToLower(mode)) {
 	case "code", "operate", "local", "workspace":
 		return "workspace"
-	case "work", "research":
-		return "research"
-	case "chat":
+	case "work", "research", "chat":
 		fallthrough
 	default:
 		return "chat"

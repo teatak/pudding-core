@@ -358,17 +358,17 @@ func TestBuildFiltersToolPartsOutsideMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	chatParts := chatReq.Messages[1].Parts
-	if len(chatParts) != 1 || chatParts[0].Type != provider.PartText || chatParts[0].Text != "sunny" {
-		t.Fatalf("chat context should hide research tool history: %+v", chatParts)
+	if len(chatParts) != 3 || chatParts[0].Type != provider.PartToolUse || chatParts[1].Type != provider.PartToolResult || chatParts[2].Type != provider.PartText {
+		t.Fatalf("chat context should keep endpoint tool history: %+v", chatParts)
 	}
 
-	researchReq, err := New(ms, nil).Build(ctx, "s1", "m", string(store.ModeResearch))
+	workspaceReq, err := New(ms, nil).Build(ctx, "s1", "m", string(store.ModeWorkspace))
 	if err != nil {
 		t.Fatal(err)
 	}
-	researchParts := researchReq.Messages[1].Parts
-	if len(researchParts) != 3 || researchParts[0].Type != provider.PartToolUse || researchParts[1].Type != provider.PartToolResult || researchParts[2].Type != provider.PartText {
-		t.Fatalf("research context should keep research tool history: %+v", researchParts)
+	workspaceParts := workspaceReq.Messages[1].Parts
+	if len(workspaceParts) != 3 || workspaceParts[0].Type != provider.PartToolUse || workspaceParts[1].Type != provider.PartToolResult || workspaceParts[2].Type != provider.PartText {
+		t.Fatalf("workspace context should keep chat tool history: %+v", workspaceParts)
 	}
 }
 

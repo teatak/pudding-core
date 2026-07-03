@@ -1512,7 +1512,7 @@ function ToolList({ tools }: { tools: BuiltinTool[] }) {
 type ToolInfo = {
   id: string;
   description?: string;
-  capability?: "chat" | "research" | "workspace";
+  capability?: "chat" | "workspace";
 };
 
 function CanvasToolsPanel({

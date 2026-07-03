@@ -29,7 +29,7 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 
 | 实体 | Go | TS | 字段 |
 | --- | --- | --- | --- |
-| Session | `store.Session` | `session` | id, title, provider, model, activeMode(chat/research/workspace), modeLease, createdAt, updatedAt, running(读取时派生) |
+| Session | `store.Session` | `session` | id, title, provider, model, activeMode(chat/workspace), modeLease, createdAt, updatedAt, running(读取时派生) |
 | ConversationTurn | `store.ConversationTurn` | `conversationTurn` | id, sessionID, clientMessageID, status, provider?, model?, mode?, error?, createdAt, updatedAt, messages[] |
 | ContentPart | `store.ContentPart` | `contentPart` | type(text/thought/tool_use/tool_result), text?, id?, name?, args?, ok?, content?, summaryKind?, summaryCount? |
 | Message | `store.Message` | `message` | id, sessionID, turnID, role, kind?, text, parts[], turnIndex?, clientMessageID?, interrupted?, createdAt |
@@ -84,7 +84,7 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | --- | --- |
 | — | 当前无主路径设置键 |
 
-session 创建时必须显式写入 `provider` 与 `model`。能力档为 `chat` / `research` / `workspace`;无授权默认 `activeMode=chat, modeLease=none`;
+session 创建时必须显式写入 `provider` 与 `model`。能力档为 `chat` / `workspace`;无授权默认 `activeMode=chat, modeLease=none`;
 `request_capability` 审批通过且 scope=session 时写入 `activeMode` 与 `modeLease=session`。
 draft 页可记住"上次选用模型",
 但不影响既有 session。
