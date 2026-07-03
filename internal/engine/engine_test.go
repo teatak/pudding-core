@@ -848,6 +848,69 @@ func TestWorkspaceApprovalAllowsOptionalDirs(t *testing.T) {
 	}
 }
 
+func TestWorkspaceApprovalTurnScopeGrantsDirsWithoutPersisting(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	dir := t.TempDir()
+	client := &workspaceDirGrantClient{dir: dir}
+	runner := &recordingToolRunner{
+		defs:   tool.BuiltinDefinitions(),
+		result: tool.Result{Ok: true, Content: `{"ok":true}`},
+	}
+	eng := New(ms, hub, mapResolver{"workspace": client}, ms, WithTools(runner))
+	ctx := context.Background()
+	sid := "sess_workspace_turn_dirs"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "workspace", Provider: "workspace", Model: "workspace-model"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "workspace", Protocol: "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID:           "workspace-model",
+			Capabilities: &store.ModelCaps{Tools: true},
+			Limits:       &store.ModelLimits{MaxToolLoops: 4},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sub, unsub := hub.Subscribe(sid)
+	defer unsub()
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "看看这个目录"}); err != nil {
+		t.Fatal(err)
+	}
+	var approval event.Event
+	deadline := time.After(time.Second)
+	for approval.Kind != event.ApprovalRequested {
+		select {
+		case ev := <-sub:
+			if ev.Kind == event.ApprovalRequested {
+				approval = ev
+			}
+		case <-deadline:
+			t.Fatal("approval request not emitted")
+		}
+	}
+	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeTurn, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected one file tool call after approval, got %+v", runner.calls)
+	}
+	if got := runner.calls[0].WorkspaceDirs; len(got) != 1 || got[0] != dir {
+		t.Fatalf("turn-scoped workspace dir not passed to tool: %+v", got)
+	}
+	sess, err := ms.GetSession(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sess.WorkspaceDirs) != 0 {
+		t.Fatalf("turn-scoped approval must not persist dirs: %+v", sess.WorkspaceDirs)
+	}
+}
+
 func TestCompletedOutputPersistsBeforeTurnFinish(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
@@ -1502,6 +1565,46 @@ func (c *workspaceCapabilityClient) Stream(_ context.Context, req provider.Reque
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	} else {
 		out <- provider.Chunk{Part: provider.PartText, Delta: "已准备好工作区"}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
+	}
+	close(out)
+	return out, nil
+}
+
+type workspaceDirGrantClient struct {
+	dir      string
+	requests []provider.Request
+}
+
+func (c *workspaceDirGrantClient) Name() string { return "workspace-dir-grant" }
+
+func (c *workspaceDirGrantClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	c.requests = append(c.requests, req)
+	out := make(chan provider.Chunk, 4)
+	switch len(c.requests) {
+	case 1:
+		args, _ := json.Marshal(map[string]any{
+			"targetMode":    "workspace",
+			"reason":        "需要读取用户附带的本地目录",
+			"workspaceDirs": []string{c.dir},
+		})
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
+			Index:     0,
+			CallID:    "call_workspace_dir",
+			Name:      tool.RequestCapability,
+			ArgsDelta: string(args),
+		}}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	case 2:
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
+			Index:     0,
+			CallID:    "call_file_list",
+			Name:      tool.FileList,
+			ArgsDelta: `{"scope":"workspace","path":"."}`,
+		}}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	default:
+		out <- provider.Chunk{Part: provider.PartText, Delta: "完成"}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
 	}
 	close(out)

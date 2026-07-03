@@ -1,12 +1,18 @@
 package tool
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
+	"io"
+	"mime"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/teatak/pudding-core/internal/home"
@@ -21,7 +27,16 @@ const (
 
 	defaultFileReadMaxChars = 20000
 	maxFileReadChars        = 100000
+	maxFileReadWholeBytes   = 128 * 1024
 	defaultFileListMax      = 200
+	defaultFileSliceLines   = 100
+	maxFileSliceLines       = 500
+	maxFileSliceSkip        = 5000
+	maxFileSlicePayload     = 64 * 1024
+	maxFileSearchBytes      = 1 << 20
+	maxFileSearchLineChars  = 200
+	defaultFileSearchMax    = 100
+	maxFileSearchMax        = 500
 )
 
 type resolvedFilePath struct {
@@ -119,6 +134,221 @@ func (r *BuiltinRunner) fileList(call Call) Result {
 	return out
 }
 
+func (r *BuiltinRunner) fileStat(call Call) Result {
+	out := Result{CallID: call.CallID, Name: call.Name}
+	var args struct {
+		Scope string `json:"scope"`
+		Path  string `json:"path"`
+	}
+	if err := decodeStructToolArgs(call.Args, &args); err != nil {
+		return toolJSONError(out, "invalid_arguments", err.Error())
+	}
+	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, false, true, true)
+	if err != nil {
+		return filePathError(out, args.Scope, err)
+	}
+	info, err := os.Lstat(resolved.target)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			out.Ok = true
+			out.Content = jsonString(resolved.payload(map[string]any{"ok": true, "scope": args.Scope, "exists": false}))
+			out.SummaryKind = SummaryReturnedFields
+			out.SummaryCount = 4
+			return out
+		}
+		return toolJSONError(out, "stat_failed", err.Error())
+	}
+	kind := "file"
+	switch {
+	case info.IsDir():
+		kind = "dir"
+	case info.Mode()&os.ModeSymlink != 0:
+		kind = "symlink"
+	case !info.Mode().IsRegular():
+		kind = "other"
+	}
+	payload := resolved.payload(map[string]any{
+		"ok":     true,
+		"scope":  args.Scope,
+		"exists": true,
+		"type":   kind,
+		"size":   info.Size(),
+		"mtime":  info.ModTime().UTC().Format(time.RFC3339),
+	})
+	if kind == "file" {
+		if mt := sniffFileMIME(resolved.target); mt != "" {
+			payload["mime"] = mt
+		}
+	}
+	out.Ok = true
+	out.Content = jsonString(payload)
+	out.SummaryKind = SummaryReturnedFields
+	out.SummaryCount = len(payload)
+	return out
+}
+
+func (r *BuiltinRunner) fileSearch(call Call) Result {
+	out := Result{CallID: call.CallID, Name: call.Name}
+	var args struct {
+		Scope      string `json:"scope"`
+		Path       string `json:"path"`
+		Query      string `json:"query"`
+		MaxResults int    `json:"max_results"`
+	}
+	if err := decodeStructToolArgs(call.Args, &args); err != nil {
+		return toolJSONError(out, "invalid_arguments", err.Error())
+	}
+	args.Query = strings.TrimSpace(args.Query)
+	if args.Query == "" {
+		return toolJSONError(out, "query_required", "query must be a non-empty literal string")
+	}
+	maxResults := args.MaxResults
+	if maxResults <= 0 {
+		maxResults = defaultFileSearchMax
+	}
+	if maxResults > maxFileSearchMax {
+		maxResults = maxFileSearchMax
+	}
+	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, false, true, false)
+	if err != nil {
+		return filePathError(out, args.Scope, err)
+	}
+	matches, filesScanned, capped, err := searchTextFiles(resolved.target, args.Query, maxResults)
+	if err != nil {
+		return toolJSONError(out, "search_failed", err.Error())
+	}
+	items := make([]map[string]any, 0, len(matches))
+	for _, match := range matches {
+		path := match.path
+		if !resolved.workspace {
+			if rel, err := filepath.Rel(resolved.root, match.path); err == nil {
+				path = filepath.ToSlash(rel)
+			}
+		}
+		items = append(items, map[string]any{
+			"path":      path,
+			"line":      match.line,
+			"text":      match.text,
+			"truncated": match.truncated,
+		})
+	}
+	out.Ok = true
+	out.Content = jsonString(resolved.payload(map[string]any{
+		"ok":            true,
+		"scope":         args.Scope,
+		"query":         args.Query,
+		"matches":       items,
+		"matchCount":    len(items),
+		"filesScanned":  filesScanned,
+		"resultsCapped": capped,
+		"caseSensitive": true,
+		"searchType":    "literal",
+	}))
+	out.SummaryKind = SummaryReturnedItems
+	out.SummaryCount = len(items)
+	return out
+}
+
+func (r *BuiltinRunner) fileSlice(call Call) Result {
+	out := Result{CallID: call.CallID, Name: call.Name}
+	var args struct {
+		Scope  string `json:"scope"`
+		Path   string `json:"path"`
+		Origin string `json:"origin"`
+		Start  int    `json:"start"`
+		End    int    `json:"end"`
+		Lines  int    `json:"lines"`
+		Skip   int    `json:"skip"`
+		Order  string `json:"order"`
+	}
+	if err := decodeStructToolArgs(call.Args, &args); err != nil {
+		return toolJSONError(out, "invalid_arguments", err.Error())
+	}
+	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, false, false, false)
+	if err != nil {
+		return filePathError(out, args.Scope, err)
+	}
+	if isBinary, mt, err := probeBinaryFile(resolved.target); err != nil {
+		return toolJSONError(out, "read_failed", err.Error())
+	} else if isBinary {
+		return toolJSONError(out, "binary_file", "file is not UTF-8 text; mime="+mt)
+	}
+	origin := strings.TrimSpace(args.Origin)
+	if origin == "" {
+		origin = "start"
+	}
+	order := strings.TrimSpace(args.Order)
+	if order == "" {
+		order = "natural"
+	}
+	lines := args.Lines
+	truncated := false
+	if lines <= 0 {
+		lines = defaultFileSliceLines
+	}
+	if lines > maxFileSliceLines {
+		lines = maxFileSliceLines
+		truncated = true
+	}
+	var slice fileLineSlice
+	switch origin {
+	case "start":
+		start := args.Start
+		end := args.End
+		if start <= 0 {
+			start = 1
+		}
+		if end <= 0 {
+			end = start + lines - 1
+		}
+		if end < start {
+			return toolJSONError(out, "invalid_line_range", "end must be greater than or equal to start")
+		}
+		if end-start+1 > maxFileSliceLines {
+			end = start + maxFileSliceLines - 1
+			truncated = true
+		}
+		slice, err = readLineRange(resolved.target, start, end)
+	case "end":
+		if args.Skip < 0 {
+			return toolJSONError(out, "invalid_skip", "skip must be greater than or equal to 0")
+		}
+		if args.Skip > maxFileSliceSkip {
+			return toolJSONError(out, "skip_too_large", "skip exceeds the maximum")
+		}
+		slice, err = readLineRangeFromEnd(resolved.target, lines, args.Skip)
+	default:
+		return toolJSONError(out, "invalid_origin", "origin must be start or end")
+	}
+	if err != nil {
+		return toolJSONError(out, "read_failed", err.Error())
+	}
+	switch order {
+	case "natural":
+	case "reverse":
+		reverseLineRecords(slice.lines)
+	default:
+		return toolJSONError(out, "invalid_order", "order must be natural or reverse")
+	}
+	content, numbered, payloadTruncated := renderLineSlice(slice.lines, maxFileSlicePayload)
+	out.Ok = true
+	out.Content = jsonString(resolved.payload(map[string]any{
+		"ok":              true,
+		"scope":           args.Scope,
+		"origin":          origin,
+		"order":           order,
+		"start":           slice.start,
+		"end":             slice.end,
+		"lines":           len(slice.lines),
+		"content":         content,
+		"numberedContent": numbered,
+		"truncated":       truncated || slice.truncated || payloadTruncated,
+	}))
+	out.SummaryKind = SummaryReadChars
+	out.SummaryCount = utf8.RuneCountInString(content)
+	return out
+}
+
 func (r *BuiltinRunner) fileRead(call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	var args struct {
@@ -133,12 +363,32 @@ func (r *BuiltinRunner) fileRead(call Call) Result {
 	if err != nil {
 		return filePathError(out, args.Scope, err)
 	}
+	if isBinary, mt, err := probeBinaryFile(resolved.target); err != nil {
+		return toolJSONError(out, "read_failed", err.Error())
+	} else if isBinary {
+		return toolJSONError(out, "binary_file", "file is not UTF-8 text; mime="+mt)
+	}
+	if info, err := os.Stat(resolved.target); err == nil && info.Mode().IsRegular() && info.Size() > maxFileReadWholeBytes {
+		out.Ok = false
+		out.Content = jsonString(resolved.payload(map[string]any{
+			"ok":     false,
+			"scope":  args.Scope,
+			"reason": "file_too_large",
+			"size":   info.Size(),
+			"limit":  maxFileReadWholeBytes,
+			"hint":   "Use builtin_file_slice for a line range or builtin_file_search to locate text before reading a focused slice.",
+		}))
+		out.SummaryKind = SummaryReturnedFields
+		out.SummaryCount = 7
+		return out
+	}
 	data, err := os.ReadFile(resolved.target)
 	if err != nil {
 		return toolJSONError(out, "read_failed", err.Error())
 	}
 	if !isToolText(data) {
-		return toolJSONError(out, "binary_file", "file is not valid UTF-8 text")
+		mt := sniffBytesMIME(resolved.target, data)
+		return toolJSONError(out, "binary_file", "file is not UTF-8 text; mime="+mt)
 	}
 	maxChars := args.MaxChars
 	if maxChars <= 0 {
@@ -375,12 +625,19 @@ func filePathErrorWithReason(out Result, scope, fallbackReason string, err error
 		return toolJSONError(out, fallbackReason, err.Error())
 	}
 	reason := "path_not_authorized"
+	hint := "The path is outside authorized workspace directories. Use request_capability with targetMode=workspace and workspaceDirs containing the directory, then ask the user to approve it for this turn if temporary access is enough."
 	if errors.Is(err, errWorkspaceDirsRequired) {
 		reason = "workspace_dirs_required"
+		hint = "No workspace directories are authorized. Use request_capability with targetMode=workspace and workspaceDirs, then ask the user to approve it for this turn if temporary access is enough."
 	} else if errors.Is(err, errWorkspaceFilePathRequired) {
 		reason = "path_not_allowed"
+		hint = "A file path is required for this tool."
 	}
-	return toolJSONError(out, reason, err.Error())
+	out.Ok = false
+	out.Content = jsonString(map[string]any{"ok": false, "reason": reason, "detail": err.Error(), "hint": hint})
+	out.SummaryKind = SummaryReturnedFields
+	out.SummaryCount = 4
+	return out
 }
 
 func (r *BuiltinRunner) managedRoot(scope string) (string, bool, error) {
@@ -678,6 +935,359 @@ func updateDeleteManifest(path string, add, remove []string) error {
 		return err
 	}
 	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600)
+}
+
+type fileSearchMatch struct {
+	path      string
+	line      int
+	text      string
+	truncated bool
+}
+
+var fileSearchSkipDirs = map[string]struct{}{
+	".cache":        {},
+	".git":          {},
+	".hg":           {},
+	".next":         {},
+	".pytest_cache": {},
+	".svn":          {},
+	".turbo":        {},
+	".vscode":       {},
+	"__pycache__":   {},
+	"build":         {},
+	"dist":          {},
+	"node_modules":  {},
+}
+
+var binaryFileExts = map[string]string{
+	".7z":    "application/x-7z-compressed",
+	".a":     "application/octet-stream",
+	".avi":   "video/x-msvideo",
+	".bin":   "application/octet-stream",
+	".bmp":   "image/bmp",
+	".bz2":   "application/x-bzip2",
+	".class": "application/java-vm",
+	".dll":   "application/octet-stream",
+	".doc":   "application/msword",
+	".docx":  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	".dylib": "application/octet-stream",
+	".eot":   "application/vnd.ms-fontobject",
+	".exe":   "application/octet-stream",
+	".flac":  "audio/flac",
+	".gif":   "image/gif",
+	".gz":    "application/gzip",
+	".heic":  "image/heic",
+	".heif":  "image/heif",
+	".ico":   "image/x-icon",
+	".jar":   "application/java-archive",
+	".jpeg":  "image/jpeg",
+	".jpg":   "image/jpeg",
+	".m4a":   "audio/mp4",
+	".mkv":   "video/x-matroska",
+	".mov":   "video/quicktime",
+	".mp3":   "audio/mpeg",
+	".mp4":   "video/mp4",
+	".ogg":   "audio/ogg",
+	".onnx":  "application/octet-stream",
+	".otf":   "font/otf",
+	".pdf":   "application/pdf",
+	".png":   "image/png",
+	".pt":    "application/octet-stream",
+	".pth":   "application/octet-stream",
+	".rar":   "application/vnd.rar",
+	".so":    "application/octet-stream",
+	".tar":   "application/x-tar",
+	".ttf":   "font/ttf",
+	".wav":   "audio/wav",
+	".webm":  "video/webm",
+	".webp":  "image/webp",
+	".woff":  "font/woff",
+	".woff2": "font/woff2",
+	".xls":   "application/vnd.ms-excel",
+	".xlsx":  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+	".zip":   "application/zip",
+}
+
+func searchTextFiles(root, query string, maxResults int) ([]fileSearchMatch, int, bool, error) {
+	info, err := os.Lstat(root)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, 0, false, errors.New("symlink search is not supported")
+	}
+	if !info.IsDir() {
+		matches, scanned, err := searchTextFile(root, query, maxResults)
+		return matches, scanned, len(matches) >= maxResults, err
+	}
+	var matches []fileSearchMatch
+	filesScanned := 0
+	capped := false
+	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if entry.IsDir() {
+			if path != root {
+				if _, skip := fileSearchSkipDirs[entry.Name()]; skip {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() > maxFileSearchBytes {
+			return nil
+		}
+		if isKnownBinaryExt(path) {
+			return nil
+		}
+		fileMatches, scanned, err := searchTextFile(path, query, maxResults-len(matches))
+		filesScanned += scanned
+		if err != nil {
+			return nil
+		}
+		matches = append(matches, fileMatches...)
+		if len(matches) >= maxResults {
+			capped = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, filepath.SkipAll) {
+		return nil, filesScanned, capped, err
+	}
+	return matches, filesScanned, capped, nil
+}
+
+func searchTextFile(path, query string, remaining int) ([]fileSearchMatch, int, error) {
+	if remaining <= 0 {
+		return nil, 0, nil
+	}
+	if isBinary, _, err := probeBinaryFile(path); err != nil || isBinary {
+		return nil, 0, err
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	lineNo := 0
+	matches := make([]fileSearchMatch, 0)
+	for scanner.Scan() {
+		lineNo++
+		line := scanner.Text()
+		if !strings.Contains(line, query) {
+			continue
+		}
+		text := line
+		truncated := false
+		if utf8.RuneCountInString(text) > maxFileSearchLineChars {
+			text = string([]rune(text)[:maxFileSearchLineChars])
+			truncated = true
+		}
+		matches = append(matches, fileSearchMatch{path: path, line: lineNo, text: text, truncated: truncated})
+		if len(matches) >= remaining {
+			break
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return matches, 1, err
+	}
+	return matches, 1, nil
+}
+
+type fileLineRecord struct {
+	number int
+	text   string
+}
+
+type fileLineSlice struct {
+	start     int
+	end       int
+	lines     []fileLineRecord
+	truncated bool
+}
+
+func readLineRange(path string, start, end int) (fileLineSlice, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return fileLineSlice{}, err
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	lineNo := 0
+	out := make([]fileLineRecord, 0, end-start+1)
+	for scanner.Scan() {
+		lineNo++
+		if lineNo < start {
+			continue
+		}
+		if lineNo > end {
+			break
+		}
+		out = append(out, fileLineRecord{number: lineNo, text: scanner.Text()})
+	}
+	if err := scanner.Err(); err != nil {
+		return fileLineSlice{}, err
+	}
+	actualStart, actualEnd := 0, 0
+	if len(out) > 0 {
+		actualStart = out[0].number
+		actualEnd = out[len(out)-1].number
+	}
+	return fileLineSlice{start: actualStart, end: actualEnd, lines: out}, nil
+}
+
+func readLineRangeFromEnd(path string, lines, skip int) (fileLineSlice, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return fileLineSlice{}, err
+	}
+	defer file.Close()
+	windowSize := lines + skip
+	if windowSize <= 0 {
+		windowSize = lines
+	}
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	window := make([]fileLineRecord, 0, windowSize)
+	lineNo := 0
+	for scanner.Scan() {
+		lineNo++
+		window = append(window, fileLineRecord{number: lineNo, text: scanner.Text()})
+		if len(window) > windowSize {
+			copy(window, window[1:])
+			window = window[:len(window)-1]
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fileLineSlice{}, err
+	}
+	end := len(window) - skip
+	if end < 0 {
+		end = 0
+	}
+	start := end - lines
+	if start < 0 {
+		start = 0
+	}
+	out := append([]fileLineRecord(nil), window[start:end]...)
+	actualStart, actualEnd := 0, 0
+	if len(out) > 0 {
+		actualStart = out[0].number
+		actualEnd = out[len(out)-1].number
+	}
+	return fileLineSlice{start: actualStart, end: actualEnd, lines: out}, nil
+}
+
+func renderLineSlice(lines []fileLineRecord, maxChars int) (string, string, bool) {
+	var content strings.Builder
+	var numbered strings.Builder
+	truncated := false
+	for i, line := range lines {
+		next := line.text
+		prefix := ""
+		if i > 0 {
+			prefix = "\n"
+		}
+		numberedLine := prefix + strconv.Itoa(line.number) + ": " + line.text
+		contentLine := prefix + next
+		if content.Len()+len(contentLine) > maxChars || numbered.Len()+len(numberedLine) > maxChars {
+			truncated = true
+			break
+		}
+		content.WriteString(contentLine)
+		numbered.WriteString(numberedLine)
+	}
+	return content.String(), numbered.String(), truncated
+}
+
+func reverseLineRecords(lines []fileLineRecord) {
+	for i, j := 0, len(lines)-1; i < j; i, j = i+1, j-1 {
+		lines[i], lines[j] = lines[j], lines[i]
+	}
+}
+
+func probeBinaryFile(path string) (bool, string, error) {
+	if isKnownBinaryExt(path) {
+		return true, sniffBytesMIME(path, nil), nil
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return false, "", err
+	}
+	defer file.Close()
+	buf := make([]byte, 512)
+	n, err := file.Read(buf)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, "", err
+	}
+	mt := sniffBytesMIME(path, buf[:n])
+	if n == 0 {
+		return false, mt, nil
+	}
+	if !utf8.Valid(buf[:n]) || strings.Contains(string(buf[:n]), "\x00") {
+		return true, mt, nil
+	}
+	main := strings.ToLower(strings.TrimSpace(strings.Split(mt, ";")[0]))
+	switch {
+	case strings.HasPrefix(main, "text/"),
+		main == "application/json",
+		main == "application/xml",
+		main == "application/javascript",
+		main == "application/x-yaml":
+		return false, main, nil
+	case strings.HasPrefix(main, "image/"),
+		strings.HasPrefix(main, "audio/"),
+		strings.HasPrefix(main, "video/"),
+		strings.HasPrefix(main, "font/"),
+		main == "application/pdf",
+		main == "application/zip",
+		main == "application/gzip":
+		return true, main, nil
+	}
+	return false, main, nil
+}
+
+func sniffFileMIME(path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return sniffBytesMIME(path, nil)
+	}
+	defer file.Close()
+	buf := make([]byte, 512)
+	n, _ := file.Read(buf)
+	return sniffBytesMIME(path, buf[:n])
+}
+
+func sniffBytesMIME(path string, data []byte) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	if mt, ok := binaryFileExts[ext]; ok {
+		return mt
+	}
+	if mt := mime.TypeByExtension(ext); mt != "" {
+		if main, _, ok := strings.Cut(mt, ";"); ok {
+			return strings.TrimSpace(main)
+		}
+		return strings.TrimSpace(mt)
+	}
+	if len(data) > 0 {
+		mt := http.DetectContentType(data[:min(len(data), 512)])
+		if main, _, ok := strings.Cut(mt, ";"); ok {
+			return strings.TrimSpace(main)
+		}
+		return strings.TrimSpace(mt)
+	}
+	return ""
+}
+
+func isKnownBinaryExt(path string) bool {
+	_, ok := binaryFileExts[strings.ToLower(filepath.Ext(path))]
+	return ok
 }
 
 func decodeStructToolArgs(raw json.RawMessage, into any) error {

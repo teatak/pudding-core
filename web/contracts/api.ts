@@ -517,6 +517,25 @@ export const appAuthConfig = z.object({
   methods: z.array(appAuthMethod).optional(),
 });
 
+export const appConnectionFieldInject = z.object({
+  target: z.string(),
+  name: z.string().optional(),
+  methods: z.array(z.string()).optional(),
+});
+
+export const appConnectionField = z.object({
+  id: z.string(),
+  label: z.string().optional(),
+  description: z.string().optional(),
+  placeholder: z.string().optional(),
+  required: z.boolean().optional(),
+  secret: z.boolean().optional(),
+  inject: z.array(appConnectionFieldInject).optional(),
+});
+export const appConnectionConfig = z.object({
+  fields: z.array(appConnectionField).optional(),
+});
+
 export const appDefinition = z.object({
   id: z.string(),
   name: z.string(),
@@ -524,6 +543,7 @@ export const appDefinition = z.object({
   description: z.string().optional(),
   icon: appIconSpec.optional(),
   auth: appAuthConfig.optional(),
+  connection: appConnectionConfig.optional(),
   endpoints: z.record(z.string(), appEndpoint).optional(),
   skills: z.array(appSkillRef).optional(),
   path: z.string().optional(),
@@ -546,6 +566,7 @@ export const appConnection = z.object({
   authMethodID: z.string().optional(),
   tokenSet: z.boolean(),
   header: z.string().optional(),
+  fields: z.record(z.string(), z.string()).optional(),
   prefix: z.string().optional(),
   token: z.string().optional(),
   username: z.string().optional(),

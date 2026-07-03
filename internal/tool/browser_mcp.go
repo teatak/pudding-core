@@ -388,13 +388,17 @@ func browserToolArgs(call Call) (map[string]any, error) {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 	}
-	if strings.HasPrefix(call.Name, "canvas_") {
+	if sessionScopedBrowserTool(call.Name) {
 		sessionID := strings.TrimSpace(call.SessionID)
 		if sessionID != "" {
 			args["_pudding_session_id"] = sessionID
 		}
 	}
 	return args, nil
+}
+
+func sessionScopedBrowserTool(name string) bool {
+	return strings.HasPrefix(name, "canvas_") || strings.HasPrefix(name, "ui_")
 }
 
 func browserToolResult(call Call, raw json.RawMessage) Result {

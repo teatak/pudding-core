@@ -243,3 +243,126 @@ func TestBuiltinFileWorkspaceRequiresDirs(t *testing.T) {
 		t.Fatalf("unexpected reason: %+v", payload)
 	}
 }
+
+func TestBuiltinFileStatSearchAndSlice(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "node_modules", "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	notePath := filepath.Join(root, "docs", "note.txt")
+	content := strings.Join([]string{
+		"first line",
+		"alpha marker",
+		"middle line",
+		"omega marker",
+		"last line",
+	}, "\n")
+	if err := os.WriteFile(notePath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "node_modules", "pkg", "junk.txt"), []byte("marker should be skipped"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
+
+	stat := runner.Call(context.Background(), Call{
+		Name:          FileStat,
+		Args:          json.RawMessage(`{"scope":"workspace","path":"` + filepath.ToSlash(notePath) + `"}`),
+		WorkspaceDirs: []string{root},
+	})
+	if !stat.Ok {
+		t.Fatalf("stat should succeed: %+v", stat)
+	}
+	statPayload := decodeToolResult(t, stat)
+	if statPayload["exists"] != true || statPayload["type"] != "file" {
+		t.Fatalf("unexpected stat payload: %+v", statPayload)
+	}
+
+	search := runner.Call(context.Background(), Call{
+		Name:          FileSearch,
+		Args:          json.RawMessage(`{"scope":"workspace","path":".","query":"marker"}`),
+		WorkspaceDirs: []string{root},
+	})
+	if !search.Ok {
+		t.Fatalf("search should succeed: %+v", search)
+	}
+	searchPayload := decodeToolResult(t, search)
+	matches := searchPayload["matches"].([]any)
+	if len(matches) != 2 {
+		t.Fatalf("expected 2 matches outside skipped dirs, got %+v", matches)
+	}
+
+	slice := runner.Call(context.Background(), Call{
+		Name:          FileSlice,
+		Args:          json.RawMessage(`{"scope":"workspace","path":"docs/note.txt","start":2,"end":3}`),
+		WorkspaceDirs: []string{root},
+	})
+	if !slice.Ok {
+		t.Fatalf("slice should succeed: %+v", slice)
+	}
+	slicePayload := decodeToolResult(t, slice)
+	if slicePayload["content"] != "alpha marker\nmiddle line" || slicePayload["numberedContent"] != "2: alpha marker\n3: middle line" {
+		t.Fatalf("unexpected slice payload: %+v", slicePayload)
+	}
+
+	reverseTail := runner.Call(context.Background(), Call{
+		Name:          FileSlice,
+		Args:          json.RawMessage(`{"scope":"workspace","path":"docs/note.txt","origin":"end","lines":2,"order":"reverse"}`),
+		WorkspaceDirs: []string{root},
+	})
+	if !reverseTail.Ok {
+		t.Fatalf("reverse tail slice should succeed: %+v", reverseTail)
+	}
+	tailPayload := decodeToolResult(t, reverseTail)
+	if tailPayload["content"] != "last line\nomega marker" || tailPayload["numberedContent"] != "5: last line\n4: omega marker" {
+		t.Fatalf("unexpected tail payload: %+v", tailPayload)
+	}
+}
+
+func TestBuiltinFileReadRejectsLargeText(t *testing.T) {
+	home := t.TempDir()
+	tempDir := filepath.Join(home, "temp")
+	if err := os.MkdirAll(tempDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "large.txt"), []byte(strings.Repeat("x", maxFileReadWholeBytes+1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res := NewBuiltinRunner(WithHomeDir(home)).Call(context.Background(), Call{
+		Name: FileRead,
+		Args: json.RawMessage(`{"scope":"temp","path":"large.txt"}`),
+	})
+	if res.Ok {
+		t.Fatalf("large read should fail with guidance: %+v", res)
+	}
+	payload := decodeToolResult(t, res)
+	if payload["reason"] != "file_too_large" || payload["hint"] == "" {
+		t.Fatalf("unexpected large read payload: %+v", payload)
+	}
+}
+
+func TestBuiltinFileReadRejectsBinaryBeforeLargeHint(t *testing.T) {
+	home := t.TempDir()
+	tempDir := filepath.Join(home, "temp")
+	if err := os.MkdirAll(tempDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data := append([]byte{0, 1, 2, 3}, []byte(strings.Repeat("x", maxFileReadWholeBytes+1))...)
+	if err := os.WriteFile(filepath.Join(tempDir, "large.wav"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res := NewBuiltinRunner(WithHomeDir(home)).Call(context.Background(), Call{
+		Name: FileRead,
+		Args: json.RawMessage(`{"scope":"temp","path":"large.wav"}`),
+	})
+	if res.Ok {
+		t.Fatalf("large binary read should fail: %+v", res)
+	}
+	payload := decodeToolResult(t, res)
+	if payload["reason"] != "binary_file" {
+		t.Fatalf("large binary should report binary_file, got %+v", payload)
+	}
+}

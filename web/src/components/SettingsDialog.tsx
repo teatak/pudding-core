@@ -1296,7 +1296,7 @@ function ToolsSettings({ token }: { token: string }) {
         tools={builtinToolsQuery.data?.tools || []}
         onRetry={() => void builtinToolsQuery.refetch()}
       />
-      <CanvasToolsPanel
+      <BrowserMCPToolsPanel
         error={browserMCPQuery.isError}
         loading={browserMCPQuery.isLoading}
         sessions={browserMCPQuery.data?.sessions || []}
@@ -1515,7 +1515,7 @@ type ToolInfo = {
   capability?: "chat" | "workspace";
 };
 
-function CanvasToolsPanel({
+function BrowserMCPToolsPanel({
   error,
   loading,
   onRetry,
@@ -1526,15 +1526,54 @@ function CanvasToolsPanel({
   onRetry: () => void;
   sessions: BrowserMCPSession[];
 }) {
-  const { t } = useI18n();
-  const tools = useMemo(() => uniqueCanvasTools(sessions), [sessions]);
+  const canvasTools = useMemo(() => uniqueBrowserTools(sessions, "canvas_"), [sessions]);
+  const uiTools = useMemo(() => uniqueBrowserTools(sessions, "ui_"), [sessions]);
   const connected = sessions.length > 0;
+
+  return (
+    <div className="grid gap-3">
+      <BrowserMCPToolGroup
+        connected={connected && canvasTools.length > 0}
+        error={error}
+        group="canvas"
+        loading={loading}
+        tools={canvasTools}
+        onRetry={onRetry}
+      />
+      <BrowserMCPToolGroup
+        connected={connected && uiTools.length > 0}
+        error={error}
+        group="ui"
+        loading={loading}
+        tools={uiTools}
+        onRetry={onRetry}
+      />
+    </div>
+  );
+}
+
+function BrowserMCPToolGroup({
+  connected,
+  error,
+  group,
+  loading,
+  onRetry,
+  tools,
+}: {
+  connected: boolean;
+  error: boolean;
+  group: "canvas" | "ui";
+  loading: boolean;
+  onRetry: () => void;
+  tools: ToolInfo[];
+}) {
+  const { t } = useI18n();
   return (
     <Accordion className="overflow-hidden rounded-xl border bg-card" collapsible type="single">
-      <AccordionItem className="border-b-0" value="canvas-tools">
+      <AccordionItem className="border-b-0" value={`${group}-tools`}>
         <AccordionTrigger className="h-14 items-center rounded-none border-0 px-4 py-0 text-sm font-normal hover:no-underline focus-visible:ring-0">
           <span className="flex min-w-0 items-center gap-2">
-            <span>{`${t("settings.tools.canvas.title")} (${tools.length})`}</span>
+            <span>{`${t(`settings.tools.${group}.title`)} (${tools.length})`}</span>
             <span
               aria-hidden="true"
               className={cn("size-2 rounded-full", connected ? "bg-success" : "bg-muted-foreground/50")}
@@ -1547,7 +1586,7 @@ function CanvasToolsPanel({
             <div className="border-t p-4">
               <Alert variant="destructive">
                 <AlertDescription className="grid gap-2">
-                  <span>{t("settings.tools.canvas.loadFailed")}</span>
+                  <span>{t(`settings.tools.${group}.loadFailed`)}</span>
                   <Button size="sm" type="button" variant="outline" onClick={onRetry}>
                     {t("common.refresh")}
                   </Button>
@@ -1556,8 +1595,8 @@ function CanvasToolsPanel({
             </div>
           ) : tools.length === 0 ? (
             <div className="grid gap-1 border-t px-4 py-3 text-sm text-muted-foreground">
-              <span>{t("settings.tools.canvas.empty")}</span>
-              <span className="text-xs">{t("settings.tools.canvas.desc")}</span>
+              <span>{t(`settings.tools.${group}.empty`)}</span>
+              <span className="text-xs">{t(`settings.tools.${group}.desc`)}</span>
             </div>
           ) : (
             <div className="divide-y divide-border/70 border-t">
@@ -1572,12 +1611,12 @@ function CanvasToolsPanel({
   );
 }
 
-function uniqueCanvasTools(sessions: BrowserMCPSession[]): ToolInfo[] {
+function uniqueBrowserTools(sessions: BrowserMCPSession[], prefix: string): ToolInfo[] {
   const seen = new Set<string>();
   const tools: ToolInfo[] = [];
   for (const session of sessions) {
     for (const tool of session.tools) {
-      if (!tool.name.startsWith("canvas_") || seen.has(tool.name)) {
+      if (!tool.name.startsWith(prefix) || seen.has(tool.name)) {
         continue;
       }
       seen.add(tool.name);

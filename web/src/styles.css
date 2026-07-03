@@ -733,6 +733,20 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
   max-width: 100%;
 }
 
+.pudding-markdown-html-images {
+  display: block;
+}
+
+.pudding-markdown-html-images > * + * {
+  margin-top: 0.5rem;
+}
+
+.pudding-markdown-html-images::after {
+  display: block;
+  clear: both;
+  content: "";
+}
+
 .phase-dot-breathe {
   animation: pudding-phase-dot-breathe 1.4s ease-in-out infinite;
 }

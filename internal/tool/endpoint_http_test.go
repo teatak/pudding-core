@@ -64,6 +64,113 @@ func TestRESTRequestUsesGrantedEndpointAndInjectedAuth(t *testing.T) {
 	}
 }
 
+func TestRESTRequestInjectsConnectionQueryFields(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		query := r.URL.Query()
+		if got := query.Get("hotelCode"); got != "H001" {
+			t.Fatalf("hotelCode = %q, want H001 in %s", got, r.URL.String())
+		}
+		if got := query.Get("status"); got != "active" {
+			t.Fatalf("status = %q, want active", got)
+		}
+		return jsonResponse(200, `{"ok":true}`), nil
+	})}
+
+	runner := NewBuiltinRunner(
+		WithWebHTTPClient(client),
+		WithAppEndpoints(fakeEndpointSource{binding: &app.EndpointBinding{
+			AppID:            "unicorn",
+			ConnectionID:     "unicorn-main",
+			EndpointName:     "unicorn_rest",
+			Endpoint:         app.Endpoint{Kind: app.EndpointKindREST, URL: "https://api.example.test/api"},
+			Auth:             app.Auth{Type: "header", Header: "X-Token", Token: "secret"},
+			ConnectionFields: map[string]string{"hotelCode": "H001"},
+			ConnectionFieldDefs: []app.ConnectionField{
+				{ID: "hotelCode", Inject: []app.ConnectionFieldInject{{Target: "query", Methods: []string{"GET"}}}},
+			},
+		}}),
+	)
+	res := runner.Call(context.Background(), Call{
+		SessionID: "sess_1",
+		Name:      RESTRequest,
+		Args:      json.RawMessage(`{"endpoint":"unicorn_rest","path":"/rooms","query":{"status":"active"}}`),
+	})
+	if !res.Ok {
+		t.Fatalf("rest request should succeed: %+v", res)
+	}
+}
+
+func TestRESTRequestInjectsConnectionBodyFields(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if got := r.URL.Query().Get("hotelCode"); got != "" {
+			t.Fatalf("hotelCode should not be injected into POST query: %s", r.URL.String())
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["hotelCode"] != "H001" || body["roomNo"] != "1201" {
+			t.Fatalf("unexpected body: %+v", body)
+		}
+		return jsonResponse(200, `{"ok":true}`), nil
+	})}
+
+	runner := NewBuiltinRunner(
+		WithWebHTTPClient(client),
+		WithAppEndpoints(fakeEndpointSource{binding: &app.EndpointBinding{
+			AppID:            "unicorn",
+			ConnectionID:     "unicorn-main",
+			EndpointName:     "unicorn_rest",
+			Endpoint:         app.Endpoint{Kind: app.EndpointKindREST, URL: "https://api.example.test/api"},
+			Auth:             app.Auth{Type: "header", Header: "X-Token", Token: "secret"},
+			ConnectionFields: map[string]string{"hotelCode": "H001"},
+			ConnectionFieldDefs: []app.ConnectionField{
+				{ID: "hotelCode", Inject: []app.ConnectionFieldInject{{Target: "body", Methods: []string{"POST"}}}},
+			},
+		}}),
+	)
+	res := runner.Call(context.Background(), Call{
+		SessionID: "sess_1",
+		Name:      RESTRequest,
+		Args:      json.RawMessage(`{"endpoint":"unicorn_rest","method":"POST","path":"/rooms","body_json":{"roomNo":"1201"}}`),
+	})
+	if !res.Ok {
+		t.Fatalf("rest request should succeed: %+v", res)
+	}
+}
+
+func TestRESTRequestInjectsConnectionHeaderFields(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if got := r.Header.Get("X-Hotel-Code"); got != "H001" {
+			t.Fatalf("X-Hotel-Code = %q, want H001", got)
+		}
+		return jsonResponse(200, `{"ok":true}`), nil
+	})}
+
+	runner := NewBuiltinRunner(
+		WithWebHTTPClient(client),
+		WithAppEndpoints(fakeEndpointSource{binding: &app.EndpointBinding{
+			AppID:            "unicorn",
+			ConnectionID:     "unicorn-main",
+			EndpointName:     "unicorn_rest",
+			Endpoint:         app.Endpoint{Kind: app.EndpointKindREST, URL: "https://api.example.test/api"},
+			Auth:             app.Auth{Type: "header", Header: "X-Token", Token: "secret"},
+			ConnectionFields: map[string]string{"hotelCode": "H001"},
+			ConnectionFieldDefs: []app.ConnectionField{
+				{ID: "hotelCode", Inject: []app.ConnectionFieldInject{{Target: "header", Name: "X-Hotel-Code"}}},
+			},
+		}}),
+	)
+	res := runner.Call(context.Background(), Call{
+		SessionID: "sess_1",
+		Name:      RESTRequest,
+		Args:      json.RawMessage(`{"endpoint":"unicorn_rest","path":"/rooms"}`),
+	})
+	if !res.Ok {
+		t.Fatalf("rest request should succeed: %+v", res)
+	}
+}
+
 func TestGraphQLRequestExtractsDataAndErrors(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.Method != http.MethodPost {

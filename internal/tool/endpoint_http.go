@@ -70,9 +70,6 @@ func (r *BuiltinRunner) restRequest(ctx context.Context, call Call) Result {
 	if err != nil {
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "invalid_path", "error": err.Error()})
 	}
-	if err := applyEndpointQuery(target, args["query"]); err != nil {
-		return toolJSON(out, false, map[string]any{"ok": false, "reason": "invalid_query", "error": err.Error()})
-	}
 	method := strings.ToUpper(strings.TrimSpace(stringArg(args, "method")))
 	if method == "" {
 		method = http.MethodGet
@@ -80,18 +77,29 @@ func (r *BuiltinRunner) restRequest(ctx context.Context, call Call) Result {
 	if _, ok := endpointAllowedMethods[method]; !ok {
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "unsupported_method", "method": method})
 	}
+	if err := applyEndpointQuery(target, args["query"]); err != nil {
+		return toolJSON(out, false, map[string]any{"ok": false, "reason": "invalid_query", "error": err.Error()})
+	}
+	if err := applyEndpointConnectionQuery(target, method, binding.ConnectionFields, binding.ConnectionFieldDefs); err != nil {
+		return toolJSON(out, false, map[string]any{"ok": false, "reason": "connection_field_error", "error": err.Error()})
+	}
+	if err := applyEndpointConnectionBodyJSON(args, method, binding.ConnectionFields, binding.ConnectionFieldDefs); err != nil {
+		return toolJSON(out, false, map[string]any{"ok": false, "reason": "connection_field_error", "error": err.Error()})
+	}
 	body, contentType, err := buildEndpointRequestBody(args)
 	if err != nil {
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "invalid_body", "error": err.Error()})
 	}
 	payload := endpointRequestPayload{
-		EndpointName: binding.EndpointName,
-		AppID:        binding.AppID,
-		Method:       method,
-		URL:          target.String(),
-		Body:         body,
-		ContentType:  contentType,
-		Auth:         binding.Auth,
+		EndpointName:        binding.EndpointName,
+		AppID:               binding.AppID,
+		Method:              method,
+		URL:                 target.String(),
+		Body:                body,
+		ContentType:         contentType,
+		Auth:                binding.Auth,
+		ConnectionFields:    binding.ConnectionFields,
+		ConnectionFieldDefs: binding.ConnectionFieldDefs,
 	}
 	return r.doEndpointRequest(ctx, out, payload)
 }
@@ -119,14 +127,16 @@ func (r *BuiltinRunner) graphqlRequest(ctx context.Context, call Call) Result {
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "encode_error", "error": err.Error()})
 	}
 	payload := endpointRequestPayload{
-		EndpointName: binding.EndpointName,
-		AppID:        binding.AppID,
-		Method:       http.MethodPost,
-		URL:          binding.Endpoint.URL,
-		Body:         body,
-		ContentType:  "application/json",
-		Auth:         binding.Auth,
-		GraphQL:      true,
+		EndpointName:        binding.EndpointName,
+		AppID:               binding.AppID,
+		Method:              http.MethodPost,
+		URL:                 binding.Endpoint.URL,
+		Body:                body,
+		ContentType:         "application/json",
+		Auth:                binding.Auth,
+		ConnectionFields:    binding.ConnectionFields,
+		ConnectionFieldDefs: binding.ConnectionFieldDefs,
+		GraphQL:             true,
 	}
 	return r.doEndpointRequest(ctx, out, payload)
 }
@@ -146,14 +156,16 @@ func (r *BuiltinRunner) resolveAppEndpoint(ctx context.Context, sessionID, endpo
 }
 
 type endpointRequestPayload struct {
-	EndpointName string
-	AppID        string
-	Method       string
-	URL          string
-	Body         []byte
-	ContentType  string
-	Auth         app.Auth
-	GraphQL      bool
+	EndpointName        string
+	AppID               string
+	Method              string
+	URL                 string
+	Body                []byte
+	ContentType         string
+	Auth                app.Auth
+	ConnectionFields    map[string]string
+	ConnectionFieldDefs []app.ConnectionField
+	GraphQL             bool
 }
 
 func (r *BuiltinRunner) doEndpointRequest(ctx context.Context, out Result, payload endpointRequestPayload) Result {
@@ -169,6 +181,9 @@ func (r *BuiltinRunner) doEndpointRequest(ctx context.Context, out Result, paylo
 	}
 	if err := applyEndpointAuth(req.Header, payload.Auth); err != nil {
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "auth_config_error", "error": err.Error()})
+	}
+	if err := applyEndpointConnectionHeaders(req.Header, payload.Method, payload.ConnectionFields, payload.ConnectionFieldDefs); err != nil {
+		return toolJSON(out, false, map[string]any{"ok": false, "reason": "connection_field_error", "error": err.Error()})
 	}
 	if payload.ContentType != "" {
 		req.Header.Set("Content-Type", payload.ContentType)
@@ -324,6 +339,158 @@ func applyEndpointQuery(target *url.URL, raw any) error {
 	}
 	target.RawQuery = values.Encode()
 	return nil
+}
+
+func applyEndpointConnectionQuery(target *url.URL, method string, fields map[string]string, defs []app.ConnectionField) error {
+	if len(fields) == 0 || len(defs) == 0 {
+		return nil
+	}
+	values := target.Query()
+	changed := false
+	for _, field := range defs {
+		id := strings.TrimSpace(field.ID)
+		value := strings.TrimSpace(fields[id])
+		if id == "" || value == "" {
+			continue
+		}
+		for _, rule := range field.Inject {
+			if !connectionFieldRuleMatches(rule, "query", method) {
+				continue
+			}
+			name := connectionFieldInjectName(field, rule)
+			if name == "" {
+				return fmt.Errorf("connection field %q has empty query name", id)
+			}
+			if _, exists := values[name]; exists {
+				continue
+			}
+			values.Set(name, value)
+			changed = true
+		}
+	}
+	if changed {
+		target.RawQuery = values.Encode()
+	}
+	return nil
+}
+
+func applyEndpointConnectionBodyJSON(args map[string]any, method string, fields map[string]string, defs []app.ConnectionField) error {
+	if len(fields) == 0 || len(defs) == 0 {
+		return nil
+	}
+	type bodyInject struct {
+		field app.ConnectionField
+		rule  app.ConnectionFieldInject
+	}
+	bodyFields := make([]bodyInject, 0)
+	for _, field := range defs {
+		id := strings.TrimSpace(field.ID)
+		if id == "" || strings.TrimSpace(fields[id]) == "" {
+			continue
+		}
+		for _, rule := range field.Inject {
+			if connectionFieldRuleMatches(rule, "body", method) {
+				bodyFields = append(bodyFields, bodyInject{field: field, rule: rule})
+			}
+		}
+	}
+	if len(bodyFields) == 0 {
+		return nil
+	}
+	if rawText, ok := args["body_text"]; ok && strings.TrimSpace(fmt.Sprint(rawText)) != "" {
+		return errors.New("connection fields cannot be injected into body_text; use body_json")
+	}
+	body := map[string]any{}
+	hadBody := false
+	if raw, ok := args["body_json"]; ok && raw != nil {
+		hadBody = true
+		switch value := raw.(type) {
+		case map[string]any:
+			body = value
+		case map[string]string:
+			body = make(map[string]any, len(value))
+			for k, v := range value {
+				body[k] = v
+			}
+		default:
+			return errors.New("connection fields require body_json to be an object")
+		}
+	}
+	changed := false
+	for _, item := range bodyFields {
+		field := item.field
+		id := strings.TrimSpace(field.ID)
+		value := strings.TrimSpace(fields[id])
+		if id == "" || value == "" {
+			continue
+		}
+		name := connectionFieldInjectName(field, item.rule)
+		if name == "" {
+			return fmt.Errorf("connection field %q has empty body field name", id)
+		}
+		if _, exists := body[name]; exists {
+			continue
+		}
+		body[name] = value
+		changed = true
+	}
+	if changed || hadBody {
+		args["body_json"] = body
+	}
+	return nil
+}
+
+func applyEndpointConnectionHeaders(headers http.Header, method string, fields map[string]string, defs []app.ConnectionField) error {
+	if len(fields) == 0 || len(defs) == 0 {
+		return nil
+	}
+	for _, field := range defs {
+		id := strings.TrimSpace(field.ID)
+		value := strings.TrimSpace(fields[id])
+		if id == "" || value == "" {
+			continue
+		}
+		for _, rule := range field.Inject {
+			if !connectionFieldRuleMatches(rule, "header", method) {
+				continue
+			}
+			name := connectionFieldInjectName(field, rule)
+			if name == "" {
+				return fmt.Errorf("connection field %q has empty header name", id)
+			}
+			if _, forbidden := endpointForbiddenRequestHeaders[strings.ToLower(name)]; forbidden {
+				return fmt.Errorf("connection field %q targets forbidden header %q", id, name)
+			}
+			if headers.Get(name) == "" {
+				headers.Set(name, value)
+			}
+		}
+	}
+	return nil
+}
+
+func connectionFieldRuleMatches(rule app.ConnectionFieldInject, target, method string) bool {
+	if strings.TrimSpace(rule.Target) != target {
+		return false
+	}
+	method = strings.ToUpper(strings.TrimSpace(method))
+	if method == "" || len(rule.Methods) == 0 {
+		return true
+	}
+	for _, allowed := range rule.Methods {
+		if strings.ToUpper(strings.TrimSpace(allowed)) == method {
+			return true
+		}
+	}
+	return false
+}
+
+func connectionFieldInjectName(field app.ConnectionField, rule app.ConnectionFieldInject) string {
+	name := strings.TrimSpace(rule.Name)
+	if name == "" {
+		name = strings.TrimSpace(field.ID)
+	}
+	return name
 }
 
 func buildEndpointRequestBody(args map[string]any) ([]byte, string, error) {

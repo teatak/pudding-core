@@ -13,16 +13,17 @@ import type { CanvasItem } from "@/contracts/api";
 import { apiURL } from "@/state/apiBase";
 import { setCanvasOpen } from "@/state/canvasStore";
 import { useBrowserMCP, type ToolDefinition } from "@/mcp/browserMCP";
+import { createInputFlowTools } from "@/mcp/inputFlowTools";
 
 export function useCanvasMCP(token: string) {
   const queryClient = useQueryClient();
   const endpoint = useMemo(() => (token ? mcpWebSocketURL(token) : ""), [token]);
-  const serverInfo = useMemo(() => ({ name: "pudding-canvas", version: "1.0" }), []);
+  const serverInfo = useMemo(() => ({ name: "pudding-ui", version: "1.0" }), []);
   const tools = useMemo<ToolDefinition[]>(
     () => [
       {
         name: "canvas_doc_read",
-        description: "Read concise on-demand docs for canvas tools. Use only when a canvas workflow or schema detail is unclear.",
+        description: "Read concise on-demand docs for canvas tools. Use when a canvas workflow/schema detail is unclear, or before presenting complex structured query results.",
         capability: "chat",
         inputSchema: {
           type: "object",
@@ -168,7 +169,7 @@ export function useCanvasMCP(token: string) {
       {
         name: "canvas_table",
         description:
-          "Create or update a table item on the shared canvas. For schema details call canvas_doc_read(ref='canvas_table').",
+          "Create or update a table item on the shared canvas. Prefer this for complex structured query results, lists, comparisons, inventories, schedules, and exportable rows. For schema details call canvas_doc_read(ref='canvas_table').",
         capability: "chat",
         inputSchema: {
           type: "object",
@@ -332,7 +333,7 @@ export function useCanvasMCP(token: string) {
       {
         name: "canvas_grid",
         description:
-          "Create or update one multi-block grid widget on the shared canvas. Supports markdown, metric, table, gallery, chart, timeline, and one-level nested grid blocks. For schema details call canvas_doc_read(ref='canvas_grid').",
+          "Create or update one multi-block grid widget on the shared canvas. Prefer this when complex results need multiple views such as metrics plus table, chart plus notes, or nested detail sections. Supports markdown, metric, table, gallery, chart, timeline, and one-level nested grid blocks. For later partial updates use canvas_grid_patch. For schema details call canvas_doc_read(ref='canvas_grid').",
         capability: "chat",
         inputSchema: {
           type: "object",
@@ -374,6 +375,54 @@ export function useCanvasMCP(token: string) {
           });
         },
       },
+      {
+        name: "canvas_grid_patch",
+        description:
+          "Patch an existing grid widget without resending the full items array. Use after canvas_item_list when updating metadata, upserting/replacing/removing blocks by stable item.id, or changing block order. For first render or intentional full replacement, use canvas_grid.",
+        capability: "chat",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Existing grid widget id." },
+            patch: {
+              type: "object",
+              description: "Optional grid-level metadata patch.",
+              properties: {
+                title: { type: "string" },
+                columns: { type: "string", enum: ["auto", "1", "2", "3"] },
+                layout: gridLayoutSchema(),
+                caption: { type: "string" },
+              },
+              additionalProperties: false,
+            },
+            ops: {
+              type: "array",
+              description:
+                "Patch operations. upsert shallow-merges by item.id or appends a new item; replace replaces an existing item; remove deletes by itemId; move repositions itemId before/after targetId; reorder moves listed top-level ids to the front and keeps unlisted ids after them.",
+              items: {
+                type: "object",
+                properties: {
+                  op: { type: "string", enum: ["upsert", "replace", "remove", "move", "reorder"] },
+                  item: gridItemSchema(0),
+                  itemId: { type: "string", description: "Required for remove and move." },
+                  targetId: { type: "string", description: "Required for move." },
+                  position: { type: "string", enum: ["before", "after"], description: "Defaults to before." },
+                  order: { type: "array", items: { type: "string" }, description: "Required for reorder." },
+                },
+                required: ["op"],
+                additionalProperties: false,
+              },
+            },
+          },
+          required: ["id"],
+          additionalProperties: false,
+        },
+        handler: async (args) => {
+          const record = requiredRecord(args);
+          return patchGridItem({ token, queryClient, args: record });
+        },
+      },
+      ...createInputFlowTools(),
     ],
     [queryClient, token],
   );
@@ -488,6 +537,157 @@ async function saveGalleryItem({
   });
 }
 
+async function patchGridItem({
+  token,
+  queryClient,
+  args,
+}: {
+  token: string;
+  queryClient: ReturnType<typeof useQueryClient>;
+  args: Record<string, unknown>;
+}) {
+  const sessionID = requiredString(args._pudding_session_id, "_pudding_session_id");
+  const id = requiredString(args.id, "id");
+  const existing = (await listCanvasItems(token, sessionID)).items.find((item) => item.id === id);
+  if (!existing) {
+    throw new Error(`canvas_grid_patch: grid ${id} not found`);
+  }
+  const payload = { ...requiredRecord(existing.item) };
+  const kind = stringValue(payload.kind) || existing.kind;
+  if (kind !== "grid") {
+    throw new Error(`canvas_grid_patch: item ${id} is ${kind || "unknown"}, not grid`);
+  }
+
+  let title = existing.title || stringValue(payload.title) || id;
+  let items = normalizeGridItems(Array.isArray(payload.items) ? payload.items : [], 0);
+  let changedPatch = false;
+  let changedOps = 0;
+  const patch = asRecord(args.patch);
+  if (patch) {
+    if (typeof patch.title === "string") {
+      title = patch.title;
+      changedPatch = true;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "columns")) {
+      const columns = gridColumnsValue(patch.columns);
+      if (columns) {
+        payload.columns = columns;
+      } else {
+        delete payload.columns;
+      }
+      changedPatch = true;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "layout")) {
+      const layout = asRecord(patch.layout);
+      if (layout) {
+        payload.layout = layout;
+      } else {
+        delete payload.layout;
+      }
+      changedPatch = true;
+    }
+    if (typeof patch.caption === "string") {
+      payload.caption = patch.caption;
+      changedPatch = true;
+    }
+  }
+
+  for (const op of Array.isArray(args.ops) ? args.ops : []) {
+    const operation = requiredRecord(op);
+    const opKind = stringValue(operation.op);
+    if (opKind === "remove") {
+      const itemID = requiredString(operation.itemId, "itemId");
+      const nextItems = removeGridItemList(items, itemID);
+      if (nextItems === items) {
+        throw new Error(`canvas_grid_patch: item ${itemID} not found`);
+      }
+      items = nextItems;
+      changedOps += 1;
+      continue;
+    }
+    if (opKind === "move") {
+      const itemID = requiredString(operation.itemId, "itemId");
+      const targetID = requiredString(operation.targetId, "targetId");
+      const position = operation.position === "after" ? "after" : "before";
+      const nextItems = moveGridItemList(items, itemID, targetID, position);
+      if (nextItems === items) {
+        throw new Error(`canvas_grid_patch: item ${itemID} already ${position} ${targetID}`);
+      }
+      items = nextItems;
+      changedOps += 1;
+      continue;
+    }
+    if (opKind === "reorder") {
+      if (!Array.isArray(operation.order)) {
+        throw new Error("canvas_grid_patch: reorder needs order");
+      }
+      const nextItems = reorderGridItemList(items, operation.order.map(String));
+      if (nextItems !== items) {
+        items = nextItems;
+        changedOps += 1;
+      }
+      continue;
+    }
+    if (opKind === "upsert" || opKind === "replace") {
+      const itemRecord = requiredRecord(operation.item);
+      const itemID = requiredString(itemRecord.id, "item.id");
+      const hasKind = Boolean(stringValue(itemRecord.kind));
+      if (opKind === "replace" && !hasKind) {
+        throw new Error("canvas_grid_patch: replace item.kind is required");
+      }
+      const nextItems = updateGridItemList(items, itemID, (existingItem) =>
+        opKind === "replace"
+          ? normalizeGridItems([itemRecord], 0)[0]!
+          : mergeGridItemPatch(existingItem, hasKind ? normalizeGridItems([itemRecord], 0)[0]! : itemRecord),
+      );
+      if (nextItems === items) {
+        if (opKind === "replace") {
+          throw new Error(`canvas_grid_patch: item ${itemID} not found`);
+        }
+        if (!hasKind) {
+          throw new Error(`canvas_grid_patch: new upsert item ${itemID} needs kind`);
+        }
+        items = [...items, normalizeGridItems([itemRecord], 0)[0]!];
+      } else {
+        items = nextItems;
+      }
+      changedOps += 1;
+      continue;
+    }
+    throw new Error(`canvas_grid_patch: unsupported op ${opKind}`);
+  }
+
+  if (!changedPatch && changedOps === 0) {
+    return jsonToolResult({ ok: true, id, updated: false, count: items.length, changedOps: 0 });
+  }
+
+  const item = {
+    ...payload,
+    kind: "grid",
+    title,
+    items: normalizeGridItems(items, 0),
+  };
+  const body: CanvasItemPayload = {
+    id,
+    kind: "grid",
+    title,
+    item,
+    window: existing.window,
+  };
+  const saved = await putCanvasItem(token, sessionID, id, body);
+  await queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
+  setCanvasOpen(true);
+  return jsonToolResult({
+    ok: true,
+    id: saved.id,
+    kind: saved.kind,
+    title: saved.title,
+    updated: true,
+    count: items.length,
+    changedOps,
+  });
+}
+
 function mcpWebSocketURL(token: string) {
   const httpURL = new URL(apiURL(`/mcp/ws?token=${encodeURIComponent(token)}`), window.location.href);
   httpURL.protocol = httpURL.protocol === "https:" ? "wss:" : "ws:";
@@ -499,6 +699,12 @@ const CANVAS_DOCS: Record<string, string> = {
     "# Canvas Tool Overview",
     "",
     "canvas_* tools create or update real UI widgets on the shared canvas. Tool arguments must contain the real data to display; chat text is not copied into canvas automatically.",
+    "",
+    "Default behavior:",
+    "",
+    "- Put complex structured results on canvas instead of only answering in chat.",
+    "- Use canvas when results contain more than a few rows, nested objects, repeated records, multiple sections, exact values users may inspect later, or data that should be exported or compared.",
+    "- Keep the chat reply short after creating canvas content: summarize the count, highlight the key result, and mention that details are on canvas.",
     "",
     "- Use markdown for prose, steps, code, links, and compact notes.",
     "- Use table for structured rows, comparisons, query results, and lists.",
@@ -537,6 +743,8 @@ const CANVAS_DOCS: Record<string, string> = {
     "",
     "Use canvas_table for structured rows, comparisons, query results, rankings, inventories, and schedules. Rows must be real object data.",
     "",
+    "- Prefer canvas_table for API/query results with more than a few rows, many fields, or exact values users may inspect, export, or compare later.",
+    "- In chat, summarize the table briefly instead of repeating every row.",
     "- Required fields: title, columns, rows.",
     "- columns may be strings or objects like {key,label}. A string column uses the same key and label.",
     "- rows must be objects keyed by column key. Do not pass stringified JSON, placeholders, or omitted data.",
@@ -589,10 +797,13 @@ const CANVAS_DOCS: Record<string, string> = {
     "",
     "Use canvas_grid when one topic needs multiple blocks in one widget: dashboard summaries, chart plus notes, table plus explanation, image plus text, or comparisons.",
     "",
+    "- Prefer canvas_grid for complex query results that combine summary metrics, detail tables, charts, timelines, galleries, or nested sections.",
+    "- In chat, summarize the grid briefly instead of duplicating all block content.",
     "- Required fields: title, items.",
     "- Supported item kinds: markdown, metric, table, gallery, chart, timeline, grid.",
     "- Nested grid is only one level deep. Do not put kind=grid inside a nested grid.",
     "- Use item.id as a stable block id when future updates may need to target the block.",
+    "- For partial updates to an existing grid, call canvas_item_list first, then use canvas_grid_patch with stable item.id. Use upsert for shallow updates, replace for full block replacement, remove/move/reorder for layout changes.",
     "- Use item.span.xs/sm/md/lg with values 1-12 to control width in the 12-column layout.",
     "- Metric items render as KPI cards. Use title, value, optional description, optional icon, and optional color: default, green, amber, red, sky, or violet. Unrecognized metric fields are appended to description.",
     "- Table, gallery, chart, and timeline item schemas match their standalone tools.",
@@ -970,6 +1181,125 @@ function normalizeGridItems(value: unknown[], depth: number): Array<Record<strin
       ...(asRecord(record.layout) ? { layout: asRecord(record.layout) } : {}),
     };
   });
+}
+
+function updateGridItemList(
+  items: Array<Record<string, unknown>>,
+  itemID: string,
+  update: (item: Record<string, unknown>) => Record<string, unknown>,
+): Array<Record<string, unknown>> {
+  let changed = false;
+  const next = items.map((item) => {
+    if (stringValue(item.id) === itemID) {
+      changed = true;
+      return update(item);
+    }
+    if (item.kind === "grid" && Array.isArray(item.items)) {
+      const childItems = item.items as Array<Record<string, unknown>>;
+      const nested = updateGridItemList(childItems, itemID, update);
+      if (nested !== childItems) {
+        changed = true;
+        return { ...item, items: nested };
+      }
+    }
+    return item;
+  });
+  return changed ? next : items;
+}
+
+function removeGridItemList(items: Array<Record<string, unknown>>, itemID: string): Array<Record<string, unknown>> {
+  let changed = false;
+  const next: Array<Record<string, unknown>> = [];
+  for (const item of items) {
+    if (stringValue(item.id) === itemID) {
+      changed = true;
+      continue;
+    }
+    if (item.kind === "grid" && Array.isArray(item.items)) {
+      const childItems = item.items as Array<Record<string, unknown>>;
+      const nested = removeGridItemList(childItems, itemID);
+      if (nested !== childItems) {
+        changed = true;
+        next.push({ ...item, items: nested });
+        continue;
+      }
+    }
+    next.push(item);
+  }
+  return changed ? next : items;
+}
+
+function moveGridItemList(
+  items: Array<Record<string, unknown>>,
+  itemID: string,
+  targetID: string,
+  position: "before" | "after",
+): Array<Record<string, unknown>> {
+  if (itemID === targetID) {
+    return items;
+  }
+  const from = items.findIndex((item) => stringValue(item.id) === itemID);
+  const to = items.findIndex((item) => stringValue(item.id) === targetID);
+  if (from >= 0 || to >= 0) {
+    if (from < 0) {
+      throw new Error(`canvas_grid_patch: item ${itemID} not found`);
+    }
+    if (to < 0) {
+      throw new Error(`canvas_grid_patch: target item ${targetID} not found`);
+    }
+    const moving = items[from]!;
+    const rest = items.filter((_, index) => index !== from);
+    const targetIndex = rest.findIndex((item) => stringValue(item.id) === targetID);
+    const insertAt = position === "before" ? targetIndex : targetIndex + 1;
+    return [...rest.slice(0, insertAt), moving, ...rest.slice(insertAt)];
+  }
+
+  let changed = false;
+  const next = items.map((item) => {
+    if (item.kind !== "grid" || !Array.isArray(item.items)) {
+      return item;
+    }
+    const childItems = item.items as Array<Record<string, unknown>>;
+    const nested = moveGridItemList(childItems, itemID, targetID, position);
+    if (nested === childItems) {
+      return item;
+    }
+    changed = true;
+    return { ...item, items: nested };
+  });
+  return changed ? next : items;
+}
+
+function reorderGridItemList(items: Array<Record<string, unknown>>, order: string[]): Array<Record<string, unknown>> {
+  const ids = order.map((id) => id.trim()).filter(Boolean);
+  if (ids.length === 0) {
+    return items;
+  }
+  const byID = new Map(items.map((item) => [stringValue(item.id), item]));
+  const picked: Array<Record<string, unknown>> = [];
+  const seen = new Set<string>();
+  for (const id of ids) {
+    const item = byID.get(id);
+    if (!item) {
+      throw new Error(`canvas_grid_patch: item ${id} not found`);
+    }
+    if (seen.has(id)) {
+      throw new Error(`canvas_grid_patch: duplicate item ${id}`);
+    }
+    picked.push(item);
+    seen.add(id);
+  }
+  const rest = items.filter((item) => !seen.has(stringValue(item.id)));
+  const next = [...picked, ...rest];
+  const unchanged = next.length === items.length && next.every((item, index) => item === items[index]);
+  return unchanged ? items : next;
+}
+
+function mergeGridItemPatch(existing: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
+  if (stringValue(patch.kind) && patch.kind !== existing.kind) {
+    return patch;
+  }
+  return { ...existing, ...patch, kind: existing.kind };
 }
 
 function gridItemKind(value: unknown, depth: number): string {

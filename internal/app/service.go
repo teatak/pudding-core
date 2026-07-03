@@ -211,11 +211,13 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 				continue
 			}
 			matches = append(matches, &EndpointBinding{
-				AppID:        def.ID,
-				ConnectionID: conn.ID,
-				EndpointName: endpointName,
-				Endpoint:     endpoint,
-				Auth:         CloneAuth(conn.Auth),
+				AppID:               def.ID,
+				ConnectionID:        conn.ID,
+				EndpointName:        endpointName,
+				Endpoint:            endpoint,
+				Auth:                CloneAuth(conn.Auth),
+				ConnectionFields:    cloneStringMap(conn.Fields),
+				ConnectionFieldDefs: connectionFieldDefs(def.Connection),
 			})
 		}
 	}
@@ -237,6 +239,13 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 	default:
 		return nil, &EndpointResolveError{Reason: "connection_required", Endpoint: endpointName, Connection: connectionRef, Connections: dedupeConnectionChoices(allChoices)}
 	}
+}
+
+func connectionFieldDefs(config *ConnectionConfig) []ConnectionField {
+	if config == nil || len(config.Fields) == 0 {
+		return nil
+	}
+	return cloneConnectionFields(config.Fields)
 }
 
 func endpointExists(defs []*Definition, endpointName string) bool {

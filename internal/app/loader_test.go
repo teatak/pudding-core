@@ -17,6 +17,16 @@ func TestLoadUserDefinitions(t *testing.T) {
 id: github
 name: GitHub
 description: GitHub API access
+connection:
+  fields:
+    - id: hotelCode
+      label: Hotel code
+      required: true
+      inject:
+        - target: query
+          methods: [GET, DELETE]
+        - target: body
+          methods: [POST, PUT, PATCH]
 endpoints:
   github_rest:
     kind: rest
@@ -46,6 +56,9 @@ Use builtin_rest_request with github_rest.
 	def := defs[0]
 	if def.ID != "github" || def.Endpoints["github_rest"].Kind != EndpointKindREST {
 		t.Fatalf("unexpected definition: %+v", def)
+	}
+	if def.Connection == nil || len(def.Connection.Fields) != 1 || def.Connection.Fields[0].ID != "hotelCode" {
+		t.Fatalf("connection fields not loaded: %+v", def.Connection)
 	}
 	if len(def.Skills) != 1 || def.Skills[0].ID != "github-issues" || def.Skills[0].Description == "" {
 		t.Fatalf("skill frontmatter not loaded: %+v", def.Skills)

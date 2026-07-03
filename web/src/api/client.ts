@@ -131,6 +131,7 @@ export type AppConnectionPayload = {
   header?: string;
   username?: string;
   password?: string;
+  fields?: Record<string, string>;
 };
 export type CanvasItemPayload = z.infer<typeof putCanvasItemRequest>;
 export type CanvasItemWindowPayload = z.infer<typeof patchCanvasItemRequest>;
@@ -540,7 +541,7 @@ export function getAppSkill(token: string, appID: string, path: string): Promise
 }
 
 export function appIconURL(token: string, app: { id: string; icon?: { svg?: string } }): string | undefined {
-  const raw = app.icon?.svg?.trim();
+  const raw = app.icon?.svg?.trim().replace(/^\.\//, "");
   if (!raw) {
     return undefined;
   }

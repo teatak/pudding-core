@@ -25,7 +25,13 @@ func (f fakeConnectionStore) ListAppConnections(context.Context) ([]*Connection,
 func TestResolveEndpointUsesOnlyConfiguredConnection(t *testing.T) {
 	homeDir := writeTestApp(t)
 	svc := NewService(homeDir, fakeConnectionStore{items: map[string]*Connection{
-		"github-main": {ID: "github-main", Name: "GitHub", AppID: "github", Auth: Auth{Type: "bearer", Token: "secret"}},
+		"github-main": {
+			ID:     "github-main",
+			Name:   "GitHub",
+			AppID:  "github",
+			Auth:   Auth{Type: "bearer", Token: "secret"},
+			Fields: map[string]string{"hotelCode": "H001"},
+		},
 	}})
 
 	binding, err := svc.ResolveEndpoint(context.Background(), "session-1", "github_rest", "")
@@ -34,6 +40,9 @@ func TestResolveEndpointUsesOnlyConfiguredConnection(t *testing.T) {
 	}
 	if binding.ConnectionID != "github-main" || binding.Auth.Token != "secret" {
 		t.Fatalf("unexpected binding: %+v", binding)
+	}
+	if binding.ConnectionFields["hotelCode"] != "H001" || len(binding.ConnectionFieldDefs) != 1 {
+		t.Fatalf("connection fields not resolved: %+v", binding)
 	}
 }
 
@@ -90,6 +99,14 @@ func writeTestApp(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(appDir, AppFileName), []byte(`
 id: github
 name: GitHub
+connection:
+  fields:
+    - id: hotelCode
+      label: Hotel code
+      required: true
+      inject:
+        - target: query
+          methods: [GET, DELETE]
 endpoints:
   github_rest:
     kind: rest

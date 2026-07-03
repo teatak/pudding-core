@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Cable, Download, Eye, EyeOff, KeyRound, Loader2, Pencil, Plus, Trash } from "lucide-react";
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
@@ -22,8 +22,8 @@ import {
   type AppSkillDetail,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { AppIcon, mergeAppIconSpec, type AppIconSpec } from "@/components/AppIcon";
 import { DialogSelectContent } from "@/components/DialogSelectContent";
-import { IdentityIcon, type IdentityIconSize } from "@/components/IdentityIcon";
 import { PageHeader } from "@/components/PageHeader";
 import {
   AlertDialog,
@@ -83,8 +83,8 @@ type AppRegistryItem = {
 type AppRegistry = {
   items: AppRegistryItem[];
 };
-type AppIconSpec = NonNullable<AppDefinition["icon"]>;
 type AppAuthMethod = NonNullable<NonNullable<AppDefinition["auth"]>["methods"]>[number];
+type AppConnectionField = NonNullable<NonNullable<AppDefinition["connection"]>["fields"]>[number];
 type AppEndpoints = NonNullable<AppDefinition["endpoints"]>;
 type AppSkills = NonNullable<AppDefinition["skills"]>;
 type AppSkillItem = AppSkills[number] & { content?: string };
@@ -119,6 +119,7 @@ type ConnectionForm = {
   name: string;
   authMethodID: string;
   authType: AuthType;
+  fields: Record<string, string>;
   token: string;
   prefix: string;
   header: string;
@@ -129,8 +130,6 @@ type ConnectionForm = {
 const authTypes: AuthType[] = ["none", "bearer", "token", "basic", "header", "oauth2"];
 const OFFICIAL_APP_REGISTRY =
   import.meta.env.VITE_PUDDING_APP_REGISTRY_URL || "https://raw.githubusercontent.com/teatak/pudding-hub/main/apps/registry.json";
-
-const appIconSVGInflight = new Map<string, Promise<string>>();
 
 export function AppsPane({ token }: { token: string }) {
   const { locale, t } = useI18n();
@@ -854,7 +853,7 @@ function AppDetail({
   const { locale, t } = useI18n();
   const endpoints = Object.entries(app.endpoints || {}).sort(([a], [b]) => a.localeCompare(b));
   const skills = (app.skills || []) as AppSkillItems;
-  const icon = app.icon || catalogApp?.icon;
+  const icon = mergeAppIconSpec(app.icon, catalogApp?.icon);
   const iconSrc = appIconURL(token, app) || (catalogApp ? appRegistryIconURL(catalogApp, OFFICIAL_APP_REGISTRY) : undefined);
   const title = catalogApp ? appRegistryTitle(catalogApp, locale) : app.name;
   const description = (catalogApp ? appRegistryDescription(catalogApp, locale) : "") || app.description;
@@ -948,7 +947,7 @@ function CatalogAppItem({
   const upgradeAvailable = installed ? needsAppUpgrade(installed, release) : false;
   const alreadyInstalled = Boolean(installed) && installedMatchesRelease(installed, release);
   const previewAvailable = showPreviewVersions && appHasPreviewRelease(app);
-  const icon = installed?.icon || app.icon;
+  const icon = mergeAppIconSpec(installed?.icon, app.icon);
   const iconSrc = installed ? appIconURL(token, installed) || appRegistryIconURL(app, OFFICIAL_APP_REGISTRY) : appRegistryIconURL(app, OFFICIAL_APP_REGISTRY);
 
   return (
@@ -1095,126 +1094,6 @@ function CatalogAppDetail({
       </AppSkillsSection>
     </section>
   );
-}
-
-function AppIcon({
-  className,
-  icon,
-  size = "md",
-  src,
-}: {
-  className?: string;
-  icon?: AppIconSpec;
-  size?: IdentityIconSize;
-  src?: string;
-}) {
-  const [failed, setFailed] = useState(false);
-  const [svgText, setSvgText] = useState<{ src: string; text: string } | null>(null);
-  const hasIconColor = Boolean(icon?.color?.light || icon?.color?.dark);
-  const hasIconBackground = Boolean(icon?.background?.light || icon?.background?.dark);
-  const hasWhiteLightBackground = isWhiteAppIconBackground(icon?.background?.light || icon?.background?.dark);
-  const iconStyle = appIconCSSVariables(icon);
-  const hasThemeStyle = hasIconColor || hasIconBackground;
-
-  useEffect(() => {
-    setFailed(false);
-    setSvgText(null);
-  }, [src]);
-
-  useEffect(() => {
-    if (!src || !hasIconColor || failed) {
-      return;
-    }
-    let cancelled = false;
-    fetchThemedAppIconSVG(src)
-      .then((text) => {
-        if (!cancelled) {
-          setSvgText({ src, text });
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setFailed(true);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [failed, hasIconColor, src]);
-
-  const themedIcon =
-    src && !failed && hasIconColor ? (
-      svgText?.src === src ? (
-        <span
-          aria-hidden="true"
-          className="block size-full [&_svg]:block [&_svg]:size-full"
-          dangerouslySetInnerHTML={{ __html: svgText.text }}
-        />
-      ) : (
-        <span aria-hidden="true" className="block size-full" />
-      )
-    ) : undefined;
-
-  return (
-    <IdentityIcon
-      className={cn("pudding-app-icon", className)}
-      contentClassName={cn(icon ? "object-contain" : "object-cover")}
-      data-has-background={hasIconBackground ? "true" : undefined}
-      data-has-color={hasIconColor ? "true" : undefined}
-      data-light-background={hasWhiteLightBackground ? "white" : undefined}
-      fallback="app"
-      fit={icon ? "contain" : "cover"}
-      size={size}
-      src={src && !hasIconColor ? src : undefined}
-      style={iconStyle}
-    >
-      {themedIcon}
-    </IdentityIcon>
-  );
-}
-
-function fetchThemedAppIconSVG(src: string) {
-  const existing = appIconSVGInflight.get(src);
-  if (existing) {
-    return existing;
-  }
-  const request = fetch(src).then((response) => (response.ok ? response.text() : Promise.reject(new Error("icon fetch failed"))));
-  appIconSVGInflight.set(src, request);
-  request.then(
-    () => {
-      if (appIconSVGInflight.get(src) === request) {
-        appIconSVGInflight.delete(src);
-      }
-    },
-    () => {
-      if (appIconSVGInflight.get(src) === request) {
-        appIconSVGInflight.delete(src);
-      }
-    },
-  );
-  return request;
-}
-
-function appIconCSSVariables(icon: AppIconSpec | undefined): CSSProperties | undefined {
-  const style: CSSProperties & Record<string, string> = {};
-  const colorLight = icon?.color?.light || icon?.color?.dark || "";
-  const colorDark = icon?.color?.dark || icon?.color?.light || "";
-  const backgroundLight = icon?.background?.light || icon?.background?.dark || "";
-  const backgroundDark = icon?.background?.dark || icon?.background?.light || "";
-  if (colorLight) {
-    style["--app-icon-color"] = colorLight;
-    style["--app-icon-color-dark"] = colorDark || colorLight;
-  }
-  if (backgroundLight) {
-    style["--app-icon-background"] = backgroundLight;
-    style["--app-icon-background-dark"] = backgroundDark || backgroundLight;
-  }
-  return Object.keys(style).length > 0 ? style : undefined;
-}
-
-function isWhiteAppIconBackground(value: string | undefined): boolean {
-  const normalized = value?.trim().toLowerCase().replace(/\s+/g, "");
-  return normalized === "white" || normalized === "#fff" || normalized === "#ffffff" || normalized === "rgb(255,255,255)" || normalized === "rgba(255,255,255,1)";
 }
 
 function AppEndpointsSection({
@@ -1500,6 +1379,8 @@ function ConnectionDialog({
   const editingConnectionAuthType = editing?.connection?.authType || "";
   const editingConnectionHeader = editing?.connection?.header || "";
   const editingAppName = editing?.app.name || "";
+  const editingAppConnection = editing?.app.connection;
+  const connectionFields = useMemo(() => appConnectionFields(app), [app]);
   const [form, setForm] = useState<ConnectionForm>(emptyConnectionForm());
   const [secretVisible, setSecretVisible] = useState(false);
   const [secretLoading, setSecretLoading] = useState(false);
@@ -1523,6 +1404,7 @@ function ConnectionDialog({
         header: form.header,
         username: form.username,
         password: form.password,
+        fields: form.fields,
       });
     },
     onSuccess: async () => {
@@ -1568,6 +1450,7 @@ function ConnectionDialog({
       name: editingConnectionName || nextConnectionName(editingAppName || editingAppID, editingAppID, connections),
       authMethodID: initialMethod?.id || "",
       authType: normalizeAuthType(initialMethod?.type || editingConnectionAuthType),
+      fields: emptyConnectionFields(editingAppConnection),
       token: "",
       prefix: initialMethod?.prefix || "",
       header: editingConnectionHeader || initialMethod?.header || "",
@@ -1595,6 +1478,7 @@ function ConnectionDialog({
           header: detail.header || detailMethod?.header || current.header,
           username: detail.username || "",
           password: detail.password || "",
+          fields: emptyConnectionFields(editingAppConnection, detail.fields),
         }));
       })
       .catch(() => {
@@ -1620,6 +1504,7 @@ function ConnectionDialog({
     editingConnectionHeader,
     editingConnectionID,
     editingConnectionName,
+    editingAppConnection,
     locale,
     token,
   ]);
@@ -1633,6 +1518,7 @@ function ConnectionDialog({
   const tokenReady = !["bearer", "token", "header"].includes(form.authType) || form.token.trim() !== "" || canReuseExistingSecret;
   const basicReady = form.authType !== "basic" || form.username.trim() !== "" || form.password !== "" || canReuseExistingSecret;
   const headerReady = form.authType !== "header" || form.header.trim() !== "";
+  const fieldsReady = connectionFields.every((field) => !field.required || form.fields[field.id]?.trim());
   const canSave =
     Boolean(selectedAuthMethod) &&
     !isOAuth &&
@@ -1641,6 +1527,7 @@ function ConnectionDialog({
     tokenReady &&
     basicReady &&
     headerReady &&
+    fieldsReady &&
     !saveMutation.isPending &&
     !secretLoading;
   const canStartOAuth =
@@ -1752,6 +1639,37 @@ function ConnectionDialog({
               onChange={(value) => setForm((current) => ({ ...current, token: value }))}
             />
           ) : null}
+          {connectionFields.map((field) => {
+            const label = `${field.label || field.id}${field.required ? " *" : ""}`;
+            const value = form.fields[field.id] || "";
+            const onFieldChange = (next: string) =>
+              setForm((current) => ({
+                ...current,
+                fields: { ...current.fields, [field.id]: next },
+              }));
+            return field.secret ? (
+              <LabeledSecretInput
+                key={field.id}
+                description={field.description}
+                disabled={secretLoading}
+                label={label}
+                placeholder={field.placeholder}
+                value={value}
+                visible={secretVisible}
+                onChange={onFieldChange}
+                onVisibleChange={setSecretVisible}
+              />
+            ) : (
+              <LabeledInput
+                key={field.id}
+                description={field.description}
+                label={label}
+                placeholder={field.placeholder}
+                value={value}
+                onChange={onFieldChange}
+              />
+            );
+          })}
           {isOAuth ? <div className="text-sm text-muted-foreground">{t("apps.oauthConnectionHint")}</div> : null}
         </div>
         <DialogFooter>
@@ -1776,6 +1694,7 @@ function ConnectionDialog({
 }
 
 function LabeledInput({
+  description,
   disabled,
   label,
   onChange,
@@ -1783,6 +1702,7 @@ function LabeledInput({
   type = "text",
   value,
 }: {
+  description?: string;
   disabled?: boolean;
   label: string;
   onChange: (value: string) => void;
@@ -1794,11 +1714,13 @@ function LabeledInput({
     <div className="grid gap-1.5">
       <Label>{label}</Label>
       <Input disabled={disabled} placeholder={placeholder} type={type} value={value} onChange={(event) => onChange(event.target.value)} />
+      {description ? <div className="text-xs text-muted-foreground">{description}</div> : null}
     </div>
   );
 }
 
 function LabeledSecretInput({
+  description,
   label,
   disabled,
   onChange,
@@ -1807,6 +1729,7 @@ function LabeledSecretInput({
   value,
   visible,
 }: {
+  description?: string;
   disabled?: boolean;
   label: string;
   onChange: (value: string) => void;
@@ -1839,6 +1762,7 @@ function LabeledSecretInput({
           {visible ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
         </button>
       </div>
+      {description ? <div className="text-xs text-muted-foreground">{description}</div> : null}
     </div>
   );
 }
@@ -1847,6 +1771,7 @@ function emptyConnectionForm(): ConnectionForm {
   return {
     authMethodID: "",
     authType: "none",
+    fields: {},
     header: "",
     id: "",
     name: "",
@@ -1855,6 +1780,18 @@ function emptyConnectionForm(): ConnectionForm {
     token: "",
     username: "",
   };
+}
+
+function appConnectionFields(app?: AppDefinition | null): AppConnectionField[] {
+  return app?.connection?.fields || [];
+}
+
+function emptyConnectionFields(config?: AppDefinition["connection"], values?: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const field of config?.fields || []) {
+    out[field.id] = values?.[field.id] || "";
+  }
+  return out;
 }
 
 function nextConnectionName(appName: string, appID: string, connections: AppConnection[]) {

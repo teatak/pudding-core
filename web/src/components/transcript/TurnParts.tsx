@@ -5,6 +5,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
@@ -502,7 +503,16 @@ function ToolNameLine({ name }: { name: string }) {
   );
 }
 
-export function MarkdownBody({ text }: { text: string }) {
+type MarkdownSegment = { type: "markdown"; text: string } | { type: "image"; image: SafeHtmlImage };
+
+type SafeHtmlImage = {
+  alt: string;
+  src: string;
+  style: CSSProperties;
+  title?: string;
+};
+
+export function MarkdownBody({ allowHtmlImages = true, text }: { allowHtmlImages?: boolean; text: string }) {
   const { t } = useI18n();
   const [codeRenderer, setCodeRenderer] = useState<CodeBlockRenderer | null>(null);
   useEffect(() => {
@@ -559,13 +569,193 @@ export function MarkdownBody({ text }: { text: string }) {
     },
   };
 
+  const segments = allowHtmlImages ? splitMarkdownHtmlImages(text) : [{ type: "markdown" as const, text }];
+  const hasHtmlImage = segments.some((segment) => segment.type === "image");
+
   return (
-    <div className="pudding-markdown">
-      <ReactMarkdown components={components} remarkPlugins={[remarkGfm]} urlTransform={markdownUrlTransform}>
-        {text}
-      </ReactMarkdown>
+    <div className={cn("pudding-markdown", hasHtmlImage && "pudding-markdown-html-images")}>
+      {segments.map((segment, index) => {
+        if (segment.type === "image") {
+          return (
+            <img
+              key={`html-img-${index}`}
+              alt={segment.image.alt}
+              decoding="async"
+              loading="lazy"
+              src={segment.image.src}
+              style={segment.image.style}
+              title={segment.image.title}
+            />
+          );
+        }
+        if (!segment.text) {
+          return null;
+        }
+        return (
+          <ReactMarkdown key={`md-${index}`} components={components} remarkPlugins={[remarkGfm]} urlTransform={markdownUrlTransform}>
+            {segment.text}
+          </ReactMarkdown>
+        );
+      })}
     </div>
   );
+}
+
+function splitMarkdownHtmlImages(text: string): MarkdownSegment[] {
+  const segments: MarkdownSegment[] = [];
+  const tagPattern = /<img\b([^>]*)\/?>/gi;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = tagPattern.exec(text))) {
+    const image = parseSafeHtmlImage(match[1] || "");
+    if (!image) {
+      continue;
+    }
+    const before = text.slice(lastIndex, match.index);
+    if (before) {
+      segments.push({ type: "markdown", text: before });
+    }
+    segments.push({ type: "image", image });
+    lastIndex = match.index + match[0].length;
+  }
+
+  const after = text.slice(lastIndex);
+  if (after || segments.length === 0) {
+    segments.push({ type: "markdown", text: after });
+  }
+  return segments;
+}
+
+function parseSafeHtmlImage(attrs: string): SafeHtmlImage | null {
+  const src = safeHtmlImageSrc(readHtmlAttr(attrs, "src") || "");
+  if (!src) {
+    return null;
+  }
+  const title = decodeBasicHtmlEntities(readHtmlAttr(attrs, "title") || "").trim();
+  return {
+    alt: decodeBasicHtmlEntities(readHtmlAttr(attrs, "alt") || "").trim(),
+    src,
+    style: readSafeHtmlImageStyle(attrs),
+    ...(title ? { title } : {}),
+  };
+}
+
+function readHtmlAttr(attrs: string, name: string): string | undefined {
+  const re = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>]+))`, "i");
+  const match = re.exec(attrs);
+  return match?.[1] ?? match?.[2] ?? match?.[3];
+}
+
+function safeHtmlImageSrc(raw: string): string | null {
+  const src = decodeBasicHtmlEntities(raw).trim();
+  if (!src) {
+    return null;
+  }
+  if (/^data:image\/[a-z0-9.+-]+;base64,/i.test(src)) {
+    return src;
+  }
+  if (src.startsWith("/files/") || src.startsWith("/captures/") || src.startsWith("/attachments/")) {
+    return src;
+  }
+  try {
+    const url = new URL(src);
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      return src;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function readSafeHtmlImageStyle(attrs: string): CSSProperties {
+  const style: CSSProperties = { maxWidth: "100%" };
+  const attrWidth = safeHtmlImageLength(readHtmlAttr(attrs, "width"));
+  const attrHeight = safeHtmlImageLength(readHtmlAttr(attrs, "height"));
+  if (attrWidth) {
+    style.width = attrWidth;
+  }
+  if (attrHeight) {
+    style.height = attrHeight;
+  }
+
+  for (const part of decodeBasicHtmlEntities(readHtmlAttr(attrs, "style") || "").split(";")) {
+    const [rawName, ...rawValue] = part.split(":");
+    const name = rawName?.trim().toLowerCase();
+    const value = rawValue.join(":").trim();
+    if (!name || !value) {
+      continue;
+    }
+    if (name === "width") {
+      const safe = safeHtmlImageLength(value);
+      if (safe) style.width = safe;
+    } else if (name === "height") {
+      const safe = safeHtmlImageLength(value);
+      if (safe) style.height = safe;
+    } else if (name === "border-radius") {
+      const safe = safeHtmlImageSpacing(value);
+      if (safe) style.borderRadius = safe;
+    } else if (name === "float") {
+      if (value === "left" || value === "right" || value === "none") {
+        style.float = value;
+      }
+    } else if (name === "margin") {
+      const safe = safeHtmlImageSpacing(value);
+      if (safe) style.margin = safe;
+    } else if (name === "margin-left") {
+      const safe = safeHtmlImageLength(value);
+      if (safe) style.marginLeft = safe;
+    } else if (name === "margin-right") {
+      const safe = safeHtmlImageLength(value);
+      if (safe) style.marginRight = safe;
+    } else if (name === "margin-top") {
+      const safe = safeHtmlImageLength(value);
+      if (safe) style.marginTop = safe;
+    } else if (name === "margin-bottom") {
+      const safe = safeHtmlImageLength(value);
+      if (safe) style.marginBottom = safe;
+    } else if (name === "object-fit" && /^(contain|cover|fill|none|scale-down)$/i.test(value)) {
+      style.objectFit = value.toLowerCase() as CSSProperties["objectFit"];
+    }
+  }
+  return style;
+}
+
+function safeHtmlImageSpacing(raw: string | undefined): string | undefined {
+  const parts = decodeBasicHtmlEntities(raw || "")
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length === 0 || parts.length > 4) {
+    return undefined;
+  }
+  const safeParts = parts.map(safeHtmlImageLength);
+  return safeParts.every(Boolean) ? safeParts.join(" ") : undefined;
+}
+
+function safeHtmlImageLength(raw: string | undefined): string | undefined {
+  const value = decodeBasicHtmlEntities(raw || "").trim().toLowerCase();
+  if (!value) {
+    return undefined;
+  }
+  if (/^\d{1,4}$/.test(value)) {
+    return `${value}px`;
+  }
+  if (/^\d{1,4}px$/.test(value) || /^(?:100|[1-9]?\d)%$/.test(value)) {
+    return value;
+  }
+  return undefined;
+}
+
+function decodeBasicHtmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
 }
 
 const markdownUrlTransform: UrlTransform = (raw, key) => {
@@ -757,6 +947,9 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     builtin_file_move: t("transcript.toolFileMove"),
     builtin_file_patch: t("transcript.toolFilePatch"),
     builtin_file_read: t("transcript.toolFileRead"),
+    builtin_file_search: t("transcript.toolFileSearch"),
+    builtin_file_slice: t("transcript.toolFileSlice"),
+    builtin_file_stat: t("transcript.toolFileStat"),
     builtin_file_write: t("transcript.toolFileWrite"),
     builtin_rest_request: t("transcript.toolRESTRequest"),
     builtin_skill_read: t("transcript.toolSkillRead"),
@@ -765,10 +958,12 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     builtin_time_get_current: t("transcript.toolTimeCurrent"),
     builtin_web_fetch: t("transcript.toolWebFetch"),
     builtin_web_search: t("transcript.toolWebSearch"),
+    ui_input_flow: t("transcript.toolInputFlow"),
     canvas_chart: t("transcript.toolCanvasChart"),
     canvas_doc_read: t("transcript.toolCanvasDocRead"),
     canvas_gallery: t("transcript.toolCanvasGallery"),
     canvas_grid: t("transcript.toolCanvasGrid"),
+    canvas_grid_patch: t("transcript.toolCanvasGridPatch"),
     canvas_item_clear: t("transcript.toolCanvasItemClear"),
     canvas_item_inspect: t("transcript.toolCanvasItemInspect"),
     canvas_item_list: t("transcript.toolCanvasItemList"),

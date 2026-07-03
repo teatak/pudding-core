@@ -19,15 +19,16 @@ type appConnectionConfig interface {
 }
 
 type putAppConnectionReq struct {
-	AppID        string `json:"appID"`
-	Name         string `json:"name"`
-	AuthMethodID string `json:"authMethodID"`
-	AuthType     string `json:"authType"`
-	Token        string `json:"token"`
-	Prefix       string `json:"prefix"`
-	Header       string `json:"header"`
-	Username     string `json:"username"`
-	Password     string `json:"password"`
+	AppID        string            `json:"appID"`
+	Name         string            `json:"name"`
+	AuthMethodID string            `json:"authMethodID"`
+	AuthType     string            `json:"authType"`
+	Token        string            `json:"token"`
+	Prefix       string            `json:"prefix"`
+	Header       string            `json:"header"`
+	Username     string            `json:"username"`
+	Password     string            `json:"password"`
+	Fields       map[string]string `json:"fields"`
 }
 
 type installAppReq struct {
@@ -221,6 +222,14 @@ func (s *Server) putAppConnection(c *cart.Context) error {
 	if !ok {
 		return badRequest(c, "auth method is not supported by app")
 	}
+	var existing *app.Connection
+	if found, err := cfg.GetAppConnection(c.Request.Context(), id); err == nil {
+		existing = found
+	}
+	fields, err := normalizeAppConnectionFields(def.Connection, req.Fields, existing)
+	if err != nil {
+		return badRequest(c, err.Error())
+	}
 	prefix := strings.TrimSpace(req.Prefix)
 	if prefix == "" {
 		prefix = method.Prefix
@@ -230,9 +239,10 @@ func (s *Server) putAppConnection(c *cart.Context) error {
 		header = method.Header
 	}
 	conn := &app.Connection{
-		ID:    id,
-		Name:  strings.TrimSpace(req.Name),
-		AppID: appID,
+		ID:     id,
+		Name:   strings.TrimSpace(req.Name),
+		AppID:  appID,
+		Fields: fields,
 		Auth: app.Auth{
 			MethodID: method.ID,
 			Type:     method.Type,
@@ -244,7 +254,7 @@ func (s *Server) putAppConnection(c *cart.Context) error {
 		},
 	}
 	if req.Token == "" && req.Password == "" {
-		if existing, err := cfg.GetAppConnection(c.Request.Context(), id); err == nil {
+		if existing != nil {
 			if sameAppConnectionAuthMethod(existing.Auth, method) {
 				conn.Auth.Token = existing.Auth.Token
 				conn.Auth.AccessToken = existing.Auth.AccessToken
@@ -280,6 +290,43 @@ func sameAppConnectionAuthMethod(auth app.Auth, method app.AuthMethod) bool {
 		return authMethodID == methodID
 	}
 	return strings.TrimSpace(auth.Type) == strings.TrimSpace(method.Type)
+}
+
+func normalizeAppConnectionFields(config *app.ConnectionConfig, values map[string]string, existing *app.Connection) (map[string]string, error) {
+	if config == nil || len(config.Fields) == 0 {
+		if len(values) > 0 {
+			return nil, errors.New("connection fields are not supported by app")
+		}
+		return nil, nil
+	}
+	out := make(map[string]string, len(config.Fields))
+	seen := map[string]struct{}{}
+	for _, field := range config.Fields {
+		id := strings.TrimSpace(field.ID)
+		if id == "" {
+			continue
+		}
+		seen[id] = struct{}{}
+		value := strings.TrimSpace(values[id])
+		if value == "" && field.Secret && existing != nil {
+			value = strings.TrimSpace(existing.Fields[id])
+		}
+		if field.Required && value == "" {
+			return nil, errors.New("connection field " + id + " is required")
+		}
+		if value != "" {
+			out[id] = value
+		}
+	}
+	for id := range values {
+		if _, ok := seen[id]; !ok {
+			return nil, errors.New("connection field " + id + " is not supported by app")
+		}
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
 }
 
 func validateAppConnectionAuth(auth app.Auth) error {

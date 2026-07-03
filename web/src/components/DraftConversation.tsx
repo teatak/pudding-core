@@ -22,6 +22,8 @@ import {
   APIError,
   createSession,
   deleteSession,
+  listApps,
+  listSkills,
   listProviders,
   submitMessage,
   updateSession,
@@ -34,6 +36,9 @@ import {
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
 import { ComposerAddActionMenu, ComposerAddButton, type ComposerAddMenuAction } from "@/components/ComposerAddMenu";
+import { buildComposerMentionReferences } from "@/components/composerMentionData";
+import { ComposerMentionMenu } from "@/components/ComposerMentionMenu";
+import { useComposerMentions } from "@/components/useComposerMentions";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
 import { Mascot, type MascotGaze, type MascotGazePoint } from "@/components/Mascot";
 import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
@@ -384,6 +389,7 @@ function DraftComposer({
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [addSelectedIndex, setAddSelectedIndex] = useState(0);
   const [attachmentPreviewIndex, setAttachmentPreviewIndex] = useState<number | null>(null);
+  const [textFocused, setTextFocused] = useState(false);
   const [pickingAttachment, setPickingAttachment] = useState(false);
   const [pickingLocalFolder, setPickingLocalFolder] = useState(false);
   const draftIDRef = useRef<string>(newClientID());
@@ -402,12 +408,52 @@ function DraftComposer({
   const uploadedAttachments = attachments.flatMap((item) => (item.status === "uploaded" && item.attachment ? [item.attachment] : []));
   const hasPendingAttachments = attachments.some((item) => item.status === "uploading");
   const canSend = Boolean(watchedText.trim() || uploadedAttachments.length || localFolders.length) && !hasPendingAttachments;
+  const appsQuery = useQuery({
+    queryKey: queryKeys.apps(),
+    queryFn: () => listApps(token),
+    enabled: Boolean(token),
+    staleTime: 30_000,
+  });
+  const skillsQuery = useQuery({
+    queryKey: queryKeys.skills(),
+    queryFn: () => listSkills(token),
+    enabled: Boolean(token),
+    staleTime: 30_000,
+  });
+  const mentionReferences = useMemo(
+    () => buildComposerMentionReferences({ apps: appsQuery.data?.apps ?? [], skills: skillsQuery.data?.skills ?? [], t, token }),
+    [appsQuery.data?.apps, skillsQuery.data?.skills, t, token],
+  );
+  const setComposerText = useCallback(
+    (nextText: string) => {
+      form.setValue("text", nextText, { shouldDirty: true });
+      setDraftText(nextText);
+      if (textAreaRef.current && textAreaRef.current.value !== nextText) {
+        textAreaRef.current.value = nextText;
+      }
+    },
+    [form, setDraftText],
+  );
+  const mentions = useComposerMentions({
+    references: mentionReferences,
+    text: draftText,
+    setText: setComposerText,
+    textAreaRef,
+    onAction: (actionID) => {
+      if (actionID === "files") {
+        pickAttachment();
+        return;
+      }
+      pickLocalFolder();
+    },
+  });
   const addMenuActions: ComposerAddMenuAction[] = [
     { id: "files", label: t("composer.attach"), loading: pickingAttachment },
     { id: "folder", label: t("composer.attachFolder"), loading: pickingLocalFolder },
   ];
   const addMenuVisible = addMenuOpen;
-  const sendEnabled = canSend && modelReady && !addMenuVisible;
+  const mentionMenuOpen = textFocused && mentions.open;
+  const sendEnabled = canSend && modelReady && !addMenuVisible && !mentionMenuOpen;
   const textField = form.register("text");
   const attachmentPreviewItems = useMemo(
     () =>
@@ -823,14 +869,30 @@ function DraftComposer({
   };
   const handleTextBlur = (event: FocusEvent<HTMLTextAreaElement>) => {
     textField.onBlur(event);
+    setTextFocused(false);
     onMascotInputGazeChange(null);
   };
+  const handleTextFocus = () => {
+    setTextFocused(true);
+    if (textAreaRef.current) {
+      mentions.notifyCursor(textAreaRef.current.selectionStart);
+    }
+    scheduleMascotInputGaze();
+  };
+  const handleTextCursorUpdate = (event: { currentTarget: HTMLTextAreaElement }) => {
+    mentions.notifyCursor(event.currentTarget.selectionStart);
+    scheduleMascotInputGaze();
+  };
   const handleTextChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    const previousText = form.getValues("text");
+    const nextText = event.currentTarget.value;
     void textField.onChange(event);
-    setDraftText(event.currentTarget.value);
+    setDraftText(nextText);
+    mentions.notifyChange(nextText, previousText, event.currentTarget.selectionStart);
     if (addMenuOpen) {
       setAddMenuOpen(false);
     }
+    setTextFocused(true);
     scheduleMascotInputGaze();
   };
   const handleAttachmentInputChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -855,9 +917,9 @@ function DraftComposer({
   };
   const handleTextKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "@" && !event.metaKey && !event.ctrlKey && !event.altKey) {
-      const triggerIndex = event.currentTarget.selectionStart;
-      event.preventDefault();
-      openAddMenu("text", triggerIndex);
+      mentions.notifyCursor(event.currentTarget.selectionStart + 1);
+    }
+    if (mentions.onKeyDown(event)) {
       scheduleMascotInputGaze();
       return;
     }
@@ -903,18 +965,26 @@ function DraftComposer({
     <>
       <form className="relative shrink-0" onSubmit={form.handleSubmit(submitDraft)}>
         <ChatColumn>
-          <div
-            ref={selectionGuardRef}
-            className="relative rounded-3xl border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/25"
-          >
-            {addMenuVisible ? (
+          <div ref={selectionGuardRef} className="relative">
+            {mentionMenuOpen ? (
+              <ComposerMentionMenu
+                align="start"
+                references={mentions.filtered}
+                query={mentions.query}
+                selectedIndex={mentions.activeIndex}
+                onHover={mentions.setActiveIndex}
+                onSelect={mentions.select}
+              />
+            ) : addMenuVisible ? (
               <ComposerAddActionMenu
+                align="start"
                 actions={addMenuActions}
                 selectedIndex={addSelectedIndex}
                 onHover={setAddSelectedIndex}
                 onSelect={selectAddAction}
               />
             ) : null}
+            <div className="relative z-10 rounded-3xl border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/25">
             <input
               ref={fileInputRef}
               className="sr-only"
@@ -961,13 +1031,13 @@ function DraftComposer({
                 onChange={handleTextChange}
                 onCompositionEnd={ime.onCompositionEnd}
                 onCompositionStart={ime.onCompositionStart}
-                onClick={scheduleMascotInputGaze}
-                onFocus={scheduleMascotInputGaze}
+                onClick={handleTextCursorUpdate}
+                onFocus={handleTextFocus}
                 onKeyDown={handleTextKeyDown}
-                onKeyUp={scheduleMascotInputGaze}
-                onMouseUp={scheduleMascotInputGaze}
+                onKeyUp={handleTextCursorUpdate}
+                onMouseUp={handleTextCursorUpdate}
                 onPaste={handleTextPaste}
-                onSelect={scheduleMascotInputGaze}
+                onSelect={handleTextCursorUpdate}
               />
             </div>
             <div className="flex min-w-0 items-center gap-1 px-2 pb-2">
@@ -1003,6 +1073,7 @@ function DraftComposer({
                 <TooltipContent>{t("composer.send")}</TooltipContent>
               </Tooltip>
             </div>
+          </div>
           </div>
         </ChatColumn>
       </form>

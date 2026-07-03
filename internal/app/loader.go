@@ -21,6 +21,7 @@ const (
 
 var appIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 var endpointNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+var connectionFieldIDPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 
 type fileDefinition struct {
 	ID          string                 `yaml:"id"`
@@ -29,6 +30,7 @@ type fileDefinition struct {
 	Description string                 `yaml:"description,omitempty"`
 	Icon        IconSpec               `yaml:"icon,omitempty"`
 	Auth        *AuthConfig            `yaml:"auth,omitempty"`
+	Connection  *ConnectionConfig      `yaml:"connection,omitempty"`
 	Endpoints   map[string]Endpoint    `yaml:"endpoints,omitempty"`
 	Skills      []fileSkillRef         `yaml:"skills,omitempty"`
 	Extra       map[string]interface{} `yaml:",inline"`
@@ -101,6 +103,7 @@ func LoadDefinitionDir(dir string) (*Definition, error) {
 		Description: strings.TrimSpace(raw.Description),
 		Icon:        normalizeIconSpec(raw.Icon, dir),
 		Auth:        normalizeAuthConfig(raw.Auth),
+		Connection:  normalizeConnectionConfig(raw.Connection),
 		Endpoints:   raw.Endpoints,
 		Path:        path,
 	}
@@ -181,6 +184,45 @@ func normalizeAuthConfig(raw *AuthConfig) *AuthConfig {
 	return out
 }
 
+func normalizeConnectionConfig(raw *ConnectionConfig) *ConnectionConfig {
+	if raw == nil {
+		return nil
+	}
+	out := &ConnectionConfig{}
+	for _, field := range raw.Fields {
+		field.ID = strings.TrimSpace(field.ID)
+		field.Label = strings.TrimSpace(field.Label)
+		field.Description = strings.TrimSpace(field.Description)
+		field.Placeholder = strings.TrimSpace(field.Placeholder)
+		rules := make([]ConnectionFieldInject, 0, len(field.Inject))
+		for _, rule := range field.Inject {
+			rule.Target = strings.TrimSpace(rule.Target)
+			rule.Name = strings.TrimSpace(rule.Name)
+			methods := make([]string, 0, len(rule.Methods))
+			for _, method := range rule.Methods {
+				method = strings.ToUpper(strings.TrimSpace(method))
+				if method != "" {
+					methods = append(methods, method)
+				}
+			}
+			rule.Methods = methods
+			rules = append(rules, rule)
+		}
+		field.Inject = rules
+		if field.ID == "" {
+			continue
+		}
+		if field.Label == "" {
+			field.Label = field.ID
+		}
+		out.Fields = append(out.Fields, field)
+	}
+	if len(out.Fields) == 0 {
+		return nil
+	}
+	return out
+}
+
 func defaultAppIconPath(appDir string) string {
 	name := "icon.svg"
 	if _, err := os.Stat(filepath.Join(appDir, "assets", name)); err == nil {
@@ -216,6 +258,41 @@ func ValidateDefinition(def *Definition) error {
 	}
 	if err := ValidateAuthConfig(def.Auth); err != nil {
 		return err
+	}
+	if err := ValidateConnectionConfig(def.Connection); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ValidateConnectionConfig(connection *ConnectionConfig) error {
+	if connection == nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	for _, field := range connection.Fields {
+		id := strings.TrimSpace(field.ID)
+		if !connectionFieldIDPattern.MatchString(id) {
+			return fmt.Errorf("invalid connection field id %q", field.ID)
+		}
+		if _, ok := seen[id]; ok {
+			return fmt.Errorf("duplicate connection field %q", id)
+		}
+		seen[id] = struct{}{}
+		for _, rule := range field.Inject {
+			switch strings.TrimSpace(rule.Target) {
+			case "query", "body", "header":
+			default:
+				return fmt.Errorf("connection field %q has unsupported inject target %q", id, rule.Target)
+			}
+			for _, method := range rule.Methods {
+				switch strings.ToUpper(strings.TrimSpace(method)) {
+				case "GET", "POST", "PUT", "PATCH", "DELETE":
+				default:
+					return fmt.Errorf("connection field %q has unsupported inject method %q", id, method)
+				}
+			}
+		}
 	}
 	return nil
 }

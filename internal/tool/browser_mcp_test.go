@@ -69,6 +69,32 @@ func TestBrowserMCPRunnerRegistersAndCallsCanvasTool(t *testing.T) {
 	}
 }
 
+func TestBrowserToolArgsInjectsSessionForUITools(t *testing.T) {
+	args, err := browserToolArgs(Call{
+		SessionID: "sess_b",
+		Name:      "ui_input_flow",
+		Args:      json.RawMessage(`{"title":"New order"}`),
+	})
+	if err != nil {
+		t.Fatalf("browserToolArgs: %v", err)
+	}
+	if args["_pudding_session_id"] != "sess_b" {
+		t.Fatalf("missing session injection: %+v", args)
+	}
+
+	args, err = browserToolArgs(Call{
+		SessionID: "sess_b",
+		Name:      "browser_navigate",
+		Args:      json.RawMessage(`{"url":"https://example.test"}`),
+	})
+	if err != nil {
+		t.Fatalf("browserToolArgs: %v", err)
+	}
+	if _, ok := args["_pudding_session_id"]; ok {
+		t.Fatalf("unexpected session injection for generic browser tool: %+v", args)
+	}
+}
+
 func fakeBrowserMCPServer(ctx context.Context, t *testing.T, conn *websocket.Conn, calls chan<- map[string]any) {
 	t.Helper()
 	for {

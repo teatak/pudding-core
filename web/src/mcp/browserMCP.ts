@@ -31,7 +31,7 @@ export function useBrowserMCP({ endpoint, enabled, serverInfo, tools }: BrowserM
     }
     const server = new BrowserMCPServer({
       endpoint,
-      serverInfo: serverInfo ?? { name: "pudding-canvas", version: "1.0" },
+      serverInfo: serverInfo ?? { name: "pudding-ui", version: "1.0" },
       tools,
     });
     let cancelled = false;

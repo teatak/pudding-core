@@ -1,7 +1,22 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowUp, Check, FileText, FolderOpen, Loader2, Pause, Play, ShieldCheck, X } from "lucide-react";
+import {
+  ArchiveRestore,
+  ArrowUp,
+  Check,
+  FileText,
+  FolderOpen,
+  Loader2,
+  MessageSquarePlus,
+  NotebookText,
+  Pause,
+  PenLine,
+  Play,
+  ShieldCheck,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -24,6 +39,8 @@ import {
   compactSession,
   denyApproval,
   getTurn,
+  listApps,
+  listSkills,
   submitMessage,
   updateSession,
   uploadAttachment,
@@ -35,8 +52,12 @@ import {
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
 import { ComposerAddActionMenu, ComposerAddButton, type ComposerAddMenuAction } from "@/components/ComposerAddMenu";
+import { buildComposerMentionReferences } from "@/components/composerMentionData";
+import { ComposerMentionMenu } from "@/components/ComposerMentionMenu";
+import { useComposerMentions } from "@/components/useComposerMentions";
 import { ContextUsageRing } from "@/components/ContextUsageRing";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
+import { InputFlowPanel } from "@/components/transcript/InputFlowToolPart";
 import { Mascot, type MascotGaze, type MascotGazePoint, type MascotMood } from "@/components/Mascot";
 import { SkillDraftDiffDialog } from "@/components/SkillDraftDiffDialog";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
@@ -64,6 +85,7 @@ import { getSubmitFailure } from "@/lib/submitFailure";
 import { getTextAreaCaretClientPoint } from "@/lib/textCaret";
 import { cn } from "@/lib/utils";
 import { useOverlayStore, type AssistantOverlay, type AssistantOverlayPart, type TurnPhaseState } from "@/state/overlayStore";
+import { useInputFlowStore } from "@/state/inputFlowStore";
 import { useSessionDraftStore, type SessionDraftAttachment } from "@/state/sessionDraftStore";
 
 const composerSchema = z.object({
@@ -93,6 +115,7 @@ type SlashCommand = {
   command: string;
   description: string;
   hasArgs: boolean;
+  icon: LucideIcon;
   id: "clear" | "compact" | "rename" | "summary";
   label: string;
 };
@@ -126,6 +149,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const overlayRunning = useOverlayStore((state) => Boolean(state.runningTurns[sessionID]));
   const turnPhase = useOverlayStore((state) => state.turnPhases[sessionID]);
   const pendingApproval = useOverlayStore((state) => selectPendingApproval(state.assistants, sessionID, state.runningTurns[sessionID]));
+  const pendingInputFlow = useInputFlowStore((state) => state.requests.find((request) => request.sessionID === sessionID));
   const running = overlayRunning || session.running;
   const currentMode = session.modeLease === "session" ? session.activeMode : "chat";
   const [resolvedModel, setResolvedModel] = useState<ResolvedModelSelection | null>(null);
@@ -197,6 +221,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       command: "/compact",
       description: t("composer.commandCompactDesc"),
       hasArgs: true,
+      icon: ArchiveRestore,
       id: "compact",
       label: t("composer.commandCompact"),
     },
@@ -204,6 +229,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       command: "/clear",
       description: t("composer.commandClearDesc"),
       hasArgs: false,
+      icon: MessageSquarePlus,
       id: "clear",
       label: t("composer.commandClear"),
     },
@@ -211,6 +237,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       command: "/rename",
       description: t("composer.commandRenameDesc"),
       hasArgs: true,
+      icon: PenLine,
       id: "rename",
       label: t("composer.commandRename"),
     },
@@ -218,6 +245,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       command: "/summary",
       description: t("composer.commandSummaryDesc"),
       hasArgs: true,
+      icon: NotebookText,
       id: "summary",
       label: t("composer.commandSummary"),
     },
@@ -228,6 +256,46 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       ? slashCommands.filter((command) => command.command.startsWith("/" + slashQuery))
       : [];
   const slashMenuOpen = visibleSlashCommands.length > 0;
+  const appsQuery = useQuery({
+    queryKey: queryKeys.apps(),
+    queryFn: () => listApps(token),
+    enabled: Boolean(token),
+    staleTime: 30_000,
+  });
+  const skillsQuery = useQuery({
+    queryKey: queryKeys.skills(),
+    queryFn: () => listSkills(token),
+    enabled: Boolean(token),
+    staleTime: 30_000,
+  });
+  const mentionReferences = useMemo(
+    () => buildComposerMentionReferences({ apps: appsQuery.data?.apps ?? [], skills: skillsQuery.data?.skills ?? [], t, token }),
+    [appsQuery.data?.apps, skillsQuery.data?.skills, t, token],
+  );
+  const setComposerText = useCallback(
+    (nextText: string) => {
+      form.setValue("text", nextText, { shouldDirty: true });
+      setSessionDraftText(sessionID, nextText);
+      if (textAreaRef.current && textAreaRef.current.value !== nextText) {
+        textAreaRef.current.value = nextText;
+      }
+    },
+    [form, sessionID, setSessionDraftText],
+  );
+  const mentions = useComposerMentions({
+    references: mentionReferences,
+    text: draftText,
+    setText: setComposerText,
+    textAreaRef,
+    onAction: (actionID) => {
+      if (actionID === "files") {
+        pickAttachment();
+        return;
+      }
+      pickLocalFolder();
+    },
+  });
+  const mentionMenuOpen = textFocused && mentions.open && !slashMenuOpen;
   const addMenuActions: ComposerAddMenuAction[] = [
     { id: "files", label: t("composer.attach"), loading: pickingAttachment },
     { id: "folder", label: t("composer.attachFolder"), loading: pickingLocalFolder },
@@ -609,6 +677,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const sendEnabled =
     canSend &&
     !addMenuVisible &&
+    !mentionMenuOpen &&
     !slashMenuOpen &&
     !submitMutation.isPending &&
     !compactMutation.isPending &&
@@ -769,11 +838,21 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   };
   const handleTextFocus = () => {
     setTextFocused(true);
+    if (textAreaRef.current) {
+      mentions.notifyCursor(textAreaRef.current.selectionStart);
+    }
+    scheduleMascotInputGaze();
+  };
+  const handleTextCursorUpdate = (event: { currentTarget: HTMLTextAreaElement }) => {
+    mentions.notifyCursor(event.currentTarget.selectionStart);
     scheduleMascotInputGaze();
   };
   const handleTextChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    const previousText = form.getValues("text");
+    const nextText = event.target.value;
     void textField.onChange(event);
-    setSessionDraftText(sessionID, event.target.value);
+    setSessionDraftText(sessionID, nextText);
+    mentions.notifyChange(nextText, previousText, event.target.selectionStart);
     if (addMenuOpen) {
       setAddMenuOpen(false);
     }
@@ -818,9 +897,9 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   };
   const handleTextKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "@" && !event.metaKey && !event.ctrlKey && !event.altKey) {
-      const triggerIndex = event.currentTarget.selectionStart;
-      event.preventDefault();
-      openAddMenu("text", triggerIndex);
+      mentions.notifyCursor(event.currentTarget.selectionStart + 1);
+    }
+    if (mentions.onKeyDown(event)) {
       scheduleMascotInputGaze();
       return;
     }
@@ -905,7 +984,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   return (
     <>
       <form
-        className={`relative shrink-0 pb-4 ${pendingApproval ? "pt-36" : "pt-2"}`}
+        className={cn("relative shrink-0 pb-4", pendingInputFlow ? "pt-[24rem]" : pendingApproval ? "pt-36" : "pt-2")}
         onSubmit={form.handleSubmit(submitDraft)}
       >
       {/* 底部遮罩:滚动内容贴近输入区时淡出,随 composer 定位、宽度走 ChatColumn。
@@ -918,7 +997,16 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       <ChatColumn>
         <div ref={selectionGuardRef} className="relative">
           <ComposerApprovalBar approval={pendingApproval} token={token} />
-          {addMenuVisible ? (
+          {pendingInputFlow ? <InputFlowPanel key={pendingInputFlow.id} request={pendingInputFlow} /> : null}
+          {mentionMenuOpen ? (
+            <ComposerMentionMenu
+              references={mentions.filtered}
+              query={mentions.query}
+              selectedIndex={mentions.activeIndex}
+              onHover={mentions.setActiveIndex}
+              onSelect={mentions.select}
+            />
+          ) : addMenuVisible ? (
             <ComposerAddActionMenu
               actions={addMenuActions}
               selectedIndex={addSelectedIndex}
@@ -979,13 +1067,13 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
                 onChange={handleTextChange}
                 onCompositionEnd={ime.onCompositionEnd}
                 onCompositionStart={ime.onCompositionStart}
-                onClick={scheduleMascotInputGaze}
+                onClick={handleTextCursorUpdate}
                 onFocus={handleTextFocus}
                 onKeyDown={handleTextKeyDown}
-                onKeyUp={scheduleMascotInputGaze}
-                onMouseUp={scheduleMascotInputGaze}
+                onKeyUp={handleTextCursorUpdate}
+                onMouseUp={handleTextCursorUpdate}
                 onPaste={handleTextPaste}
-                onSelect={scheduleMascotInputGaze}
+                onSelect={handleTextCursorUpdate}
               />
             </div>
             <div className="flex min-w-0 items-center gap-1 px-2 pb-2">
@@ -1288,7 +1376,6 @@ function SlashCommandMenu({
 }) {
   const selectedRef = useRef<HTMLButtonElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
-  const menuLayout = slashCommandMenuLayout(commands);
 
   useEffect(() => {
     scrollActiveSlashCommandIntoList(selectedRef.current, listRef.current);
@@ -1297,22 +1384,20 @@ function SlashCommandMenu({
   return (
     <div
       ref={listRef}
-      className="absolute bottom-full left-16 z-20 max-h-64 overflow-y-auto rounded-t-lg border border-border/70 bg-popover/95 p-1 text-sm text-popover-foreground shadow-sm backdrop-blur"
+      className="absolute bottom-full left-16 z-20 max-h-64 w-[min(30rem,calc(100%-6rem))] overflow-y-auto rounded-t-lg border border-border/70 bg-popover/95 p-1 text-sm text-popover-foreground shadow-sm backdrop-blur"
       role="listbox"
-      style={{ width: `min(${menuLayout.width}px, calc(100% - 6rem))` }}
     >
       {commands.map((command, index) => (
         <button
           key={command.id}
           ref={index === selectedIndex ? selectedRef : undefined}
           aria-selected={index === selectedIndex}
-          aria-label={`${command.command} ${command.description}`}
+          aria-label={`${command.label} ${command.description}`}
           className={cn(
-            "grid h-8 w-full items-center gap-3 rounded-md px-2 text-left text-[12px] hover:bg-muted",
+            "flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-[12px] hover:bg-muted",
             index === selectedIndex && "bg-muted text-foreground",
           )}
           role="option"
-          style={{ gridTemplateColumns: `${menuLayout.commandColumnWidth}px minmax(0, 1fr)` }}
           type="button"
           onMouseEnter={() => onHover(index)}
           onMouseDown={(event) => {
@@ -1320,11 +1405,21 @@ function SlashCommandMenu({
             onSelect(command);
           }}
         >
-          <span className="font-medium">{command.command.slice(1)}</span>
-          <span className="min-w-0 truncate text-muted-foreground">{command.description}</span>
+          <SlashCommandIcon command={command} />
+          <span className="shrink-0 font-medium">{command.label}</span>
+          <span className="ml-1 min-w-0 flex-1 truncate text-muted-foreground/65">{command.description}</span>
         </button>
       ))}
     </div>
+  );
+}
+
+function SlashCommandIcon({ command }: { command: SlashCommand }) {
+  const Icon = command.icon;
+  return (
+    <span className="grid size-5 shrink-0 place-items-center text-foreground/70">
+      <Icon className="size-4" strokeWidth={2.15} />
+    </span>
   );
 }
 
@@ -1341,41 +1436,6 @@ function scrollActiveSlashCommandIntoList(active: HTMLElement | null, list: HTML
   } else if (activeBottom > visibleBottom) {
     list.scrollTop = activeBottom - list.clientHeight;
   }
-}
-
-function slashCommandMenuLayout(commands: SlashCommand[]) {
-  const commandColumnWidth = Math.ceil(
-    Math.max(48, ...commands.map((command) => estimateInlineTextWidth(command.command.slice(1)))),
-  );
-  const descriptionWidth = Math.ceil(
-    Math.max(0, ...commands.map((command) => estimateInlineTextWidth(command.description))),
-  );
-  return {
-    commandColumnWidth,
-    width: clampNumber(28 + commandColumnWidth + 12 + descriptionWidth, 260, 360),
-  };
-}
-
-function estimateInlineTextWidth(value: string) {
-  let width = 0;
-  for (const char of value) {
-    if (/\s/.test(char)) {
-      width += 4;
-    } else if (/[\u2E80-\u9FFF\uF900-\uFAFF]/.test(char)) {
-      width += 12;
-    } else if (/[A-Z]/.test(char)) {
-      width += 8;
-    } else if (/[.,;:!?()[\]{}'"`-]/.test(char)) {
-      width += 4;
-    } else {
-      width += 7;
-    }
-  }
-  return width;
-}
-
-function clampNumber(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
 }
 
 function parseSlashSubmitCommand(text: string): SlashSubmitCommand | null {
@@ -1647,6 +1707,8 @@ function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval;
   const payloadWorkspaceDirs = workspaceDirsFromPayload(current.payload);
   const hasPayloadWorkspaceDirs = payloadWorkspaceDirs.length > 0;
   const workspaceDirs = hasPayloadWorkspaceDirs ? payloadWorkspaceDirs : selectedWorkspaceDirs;
+  const needsWorkspaceDir = needsWorkspaceDirFromPayload(current.payload);
+  const workspaceDirsRequired = isWorkspaceApproval && needsWorkspaceDir && workspaceDirs.length === 0;
   const suggestedDirName = suggestedWorkspaceDirName(current.payload);
   const skillDraftApproval = skillDraftFromPayload(current.payload);
   const skillDraft = skillDraftApproval?.draft || null;
@@ -1749,6 +1811,9 @@ function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval;
               ))}
             </div>
           ) : null}
+          {workspaceDirsRequired ? (
+            <div className="text-[11px] leading-4 text-warning">{t("transcript.approvalWorkspaceDirsRequired")}</div>
+          ) : null}
           {!hasPayloadWorkspaceDirs ? (
             <div className="flex flex-wrap items-center gap-1.5">
               <Button
@@ -1795,7 +1860,7 @@ function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval;
           <>
             <Button
               className="h-6 gap-1 rounded-full px-2 text-[11px]"
-              disabled={pending}
+              disabled={pending || workspaceDirsRequired}
               size="sm"
               type="button"
               onClick={() => void approve("turn")}
@@ -1805,7 +1870,7 @@ function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval;
             </Button>
             <Button
               className="h-6 gap-1 rounded-full px-2 text-[11px]"
-              disabled={pending}
+              disabled={pending || workspaceDirsRequired}
               size="sm"
               type="button"
               variant="secondary"
@@ -1891,6 +1956,10 @@ function workspaceDirsFromPayload(payload: unknown) {
     return [];
   }
   return dedupeStrings(payload.workspaceDirs.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean));
+}
+
+function needsWorkspaceDirFromPayload(payload: unknown) {
+  return Boolean(payload && typeof payload === "object" && "needsWorkspaceDir" in payload && payload.needsWorkspaceDir === true);
 }
 
 function suggestedWorkspaceDirName(payload: unknown) {

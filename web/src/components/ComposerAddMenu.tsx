@@ -41,18 +41,23 @@ export function ComposerAddButton({
 
 export function ComposerAddActionMenu({
   actions,
+  align = "default",
   selectedIndex,
   onHover,
   onSelect,
 }: {
   actions: ComposerAddMenuAction[];
+  align?: "default" | "start";
   selectedIndex: number;
   onHover: (index: number) => void;
   onSelect: (action: ComposerAddMenuAction) => void;
 }) {
   return (
     <div
-      className="absolute bottom-full left-16 z-20 w-60 rounded-t-lg border border-border/70 bg-popover/95 p-1 text-sm text-popover-foreground shadow-sm backdrop-blur"
+      className={cn(
+        "absolute bottom-full z-0 w-60 rounded-t-lg border border-border/70 bg-popover/95 p-1 text-sm text-popover-foreground shadow-sm backdrop-blur",
+        align === "start" ? "left-4" : "left-16",
+      )}
       role="listbox"
     >
       {actions.map((action, index) => (

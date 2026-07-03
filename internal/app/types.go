@@ -29,6 +29,7 @@ type Definition struct {
 	Description   string              `json:"description,omitempty" yaml:"description,omitempty"`
 	Icon          *IconSpec           `json:"icon,omitempty" yaml:"icon,omitempty"`
 	Auth          *AuthConfig         `json:"auth,omitempty" yaml:"auth,omitempty"`
+	Connection    *ConnectionConfig   `json:"connection,omitempty" yaml:"connection,omitempty"`
 	Endpoints     map[string]Endpoint `json:"endpoints,omitempty" yaml:"endpoints,omitempty"`
 	Skills        []SkillRef          `json:"skills,omitempty" yaml:"skills,omitempty"`
 	Path          string              `json:"path,omitempty" yaml:"-"`
@@ -62,6 +63,26 @@ type AuthMethod struct {
 	Header   string `json:"header,omitempty" yaml:"header,omitempty"`
 }
 
+type ConnectionConfig struct {
+	Fields []ConnectionField `json:"fields,omitempty" yaml:"fields,omitempty"`
+}
+
+type ConnectionField struct {
+	ID          string                  `json:"id" yaml:"id"`
+	Label       string                  `json:"label,omitempty" yaml:"label,omitempty"`
+	Description string                  `json:"description,omitempty" yaml:"description,omitempty"`
+	Placeholder string                  `json:"placeholder,omitempty" yaml:"placeholder,omitempty"`
+	Required    bool                    `json:"required,omitempty" yaml:"required,omitempty"`
+	Secret      bool                    `json:"secret,omitempty" yaml:"secret,omitempty"`
+	Inject      []ConnectionFieldInject `json:"inject,omitempty" yaml:"inject,omitempty"`
+}
+
+type ConnectionFieldInject struct {
+	Target  string   `json:"target" yaml:"target"` // query | body | header
+	Name    string   `json:"name,omitempty" yaml:"name,omitempty"`
+	Methods []string `json:"methods,omitempty" yaml:"methods,omitempty"`
+}
+
 type Endpoint struct {
 	Kind        string `json:"kind" yaml:"kind"`
 	URL         string `json:"url" yaml:"url"`
@@ -84,12 +105,13 @@ type SkillDetail struct {
 }
 
 type Connection struct {
-	ID        string    `json:"id" yaml:"-"`
-	Name      string    `json:"name,omitempty" yaml:"name,omitempty"`
-	AppID     string    `json:"appID" yaml:"app"`
-	Auth      Auth      `json:"-" yaml:"auth,omitempty"`
-	CreatedAt time.Time `json:"createdAt,omitempty" yaml:"-"`
-	UpdatedAt time.Time `json:"updatedAt,omitempty" yaml:"-"`
+	ID        string            `json:"id" yaml:"-"`
+	Name      string            `json:"name,omitempty" yaml:"name,omitempty"`
+	AppID     string            `json:"appID" yaml:"app"`
+	Auth      Auth              `json:"-" yaml:"auth,omitempty"`
+	Fields    map[string]string `json:"-" yaml:"fields,omitempty"`
+	CreatedAt time.Time         `json:"createdAt,omitempty" yaml:"-"`
+	UpdatedAt time.Time         `json:"updatedAt,omitempty" yaml:"-"`
 }
 
 type ConnectionView struct {
@@ -106,10 +128,11 @@ type ConnectionView struct {
 
 type ConnectionDetailView struct {
 	ConnectionView
-	Token    string `json:"token,omitempty"`
-	Prefix   string `json:"prefix,omitempty"`
-	Username string `json:"username,omitempty"`
-	Password string `json:"password,omitempty"`
+	Fields   map[string]string `json:"fields,omitempty"`
+	Token    string            `json:"token,omitempty"`
+	Prefix   string            `json:"prefix,omitempty"`
+	Username string            `json:"username,omitempty"`
+	Password string            `json:"password,omitempty"`
 }
 
 type Auth struct {
@@ -128,11 +151,13 @@ type Auth struct {
 }
 
 type EndpointBinding struct {
-	AppID        string
-	ConnectionID string
-	EndpointName string
-	Endpoint     Endpoint
-	Auth         Auth
+	AppID               string
+	ConnectionID        string
+	EndpointName        string
+	Endpoint            Endpoint
+	Auth                Auth
+	ConnectionFields    map[string]string
+	ConnectionFieldDefs []ConnectionField
 }
 
 type AppConnectionsView struct {
@@ -162,6 +187,7 @@ func ViewConnectionDetail(c *Connection) ConnectionDetailView {
 	}
 	return ConnectionDetailView{
 		ConnectionView: ViewConnection(c),
+		Fields:         cloneStringMap(c.Fields),
 		Token:          c.Auth.Token,
 		Prefix:         c.Auth.Prefix,
 		Username:       c.Auth.Username,
@@ -207,6 +233,11 @@ func CloneDefinition(in *Definition) *Definition {
 		auth := *in.Auth
 		auth.Methods = append([]AuthMethod(nil), in.Auth.Methods...)
 		out.Auth = &auth
+	}
+	if in.Connection != nil {
+		connection := *in.Connection
+		connection.Fields = cloneConnectionFields(in.Connection.Fields)
+		out.Connection = &connection
 	}
 	if in.Endpoints != nil {
 		out.Endpoints = make(map[string]Endpoint, len(in.Endpoints))
@@ -269,7 +300,33 @@ func CloneConnection(in *Connection) *Connection {
 	}
 	out := *in
 	out.Auth = CloneAuth(in.Auth)
+	out.Fields = cloneStringMap(in.Fields)
 	return &out
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneConnectionFields(in []ConnectionField) []ConnectionField {
+	if len(in) == 0 {
+		return nil
+	}
+	out := append([]ConnectionField(nil), in...)
+	for i := range out {
+		out[i].Inject = append([]ConnectionFieldInject(nil), in[i].Inject...)
+		for j := range out[i].Inject {
+			out[i].Inject[j].Methods = append([]string(nil), in[i].Inject[j].Methods...)
+		}
+	}
+	return out
 }
 
 func CloneJSON(raw json.RawMessage) json.RawMessage {

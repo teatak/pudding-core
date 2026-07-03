@@ -103,6 +103,31 @@ endpoints:
     kind: rest
     url: https://gmail.googleapis.com/gmail/v1
 `,
+		"unicorn": `
+id: unicorn
+name: Unicorn
+auth:
+  required: true
+  methods:
+    - id: unicorn-header
+      type: header
+      header: X-Token
+      label: Custom header
+connection:
+  fields:
+    - id: hotelCode
+      label: 酒店代码
+      required: true
+      inject:
+        - target: query
+          methods: [GET, DELETE]
+        - target: body
+          methods: [POST, PUT, PATCH]
+endpoints:
+  unicorn_rest:
+    kind: rest
+    url: https://test-unicorn-uiserver-server.lumous.cn
+`,
 	}
 	for id, body := range apps {
 		dir := filepath.Join(homeDir, "apps", id)
@@ -215,6 +240,53 @@ func TestPutAppConnectionRejectsEmptyGitHubPAT(t *testing.T) {
 		"name":         "GitHub PAT",
 		"authMethodID": "github-pat",
 		"authType":     "bearer",
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+}
+
+func TestPutAppConnectionStoresConnectionFields(t *testing.T) {
+	srv, _, _ := newConfigTestServer(t)
+	resp := req(t, http.MethodPut, srv.URL+"/app-connections/unicorn-main", map[string]any{
+		"appID":        "unicorn",
+		"name":         "麒麟",
+		"authMethodID": "unicorn-header",
+		"authType":     "header",
+		"token":        "secret",
+		"fields": map[string]string{
+			"hotelCode": "H001",
+		},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	payload := decodeJSON[appsvc.ConnectionView](t, resp)
+	if payload.ID != "unicorn-main" || !payload.TokenSet {
+		t.Fatalf("unexpected connection view: %+v", payload)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/app-connections/unicorn-main", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("detail status = %d", resp.StatusCode)
+	}
+	detail := decodeJSON[appsvc.ConnectionDetailView](t, resp)
+	if detail.Fields["hotelCode"] != "H001" {
+		t.Fatalf("connection fields not stored: %+v", detail.Fields)
+	}
+}
+
+func TestPutAppConnectionRequiresConnectionFields(t *testing.T) {
+	srv, _, _ := newConfigTestServer(t)
+	resp := req(t, http.MethodPut, srv.URL+"/app-connections/unicorn-main", map[string]string{
+		"appID":        "unicorn",
+		"name":         "麒麟",
+		"authMethodID": "unicorn-header",
+		"authType":     "header",
+		"token":        "secret",
 	})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {

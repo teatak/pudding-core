@@ -21,6 +21,9 @@ const (
 	SkillRead      = "builtin_skill_read"
 	FileList       = "builtin_file_list"
 	FileRead       = "builtin_file_read"
+	FileStat       = "builtin_file_stat"
+	FileSearch     = "builtin_file_search"
+	FileSlice      = "builtin_file_slice"
 	FileWrite      = "builtin_file_write"
 	FilePatch      = "builtin_file_patch"
 	FileDelete     = "builtin_file_delete"
@@ -168,8 +171,26 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        FileRead,
-			Description: "Read one text file from a Pudding-managed file area or an authorized workspace directory.",
+			Description: "Read one small UTF-8 text file from a Pudding-managed file area or an authorized workspace directory. For large files use builtin_file_slice or builtin_file_search first.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","workspace"],"description":"Target file area. Use workspace for authorized local workspace directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized workspace directories."},"max_chars":{"type":"integer","description":"Optional max characters, default 20000 and cap 100000."}},"required":["scope","path"],"additionalProperties":false}`),
+			Capability:  store.ModeWorkspace,
+		},
+		{
+			Name:        FileStat,
+			Description: "Return metadata for one file or directory: exists, type, size, mtime, and MIME when available.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","workspace"],"description":"Target file area. Use workspace for authorized local workspace directories."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized workspace directories."}},"required":["scope","path"],"additionalProperties":false}`),
+			Capability:  store.ModeWorkspace,
+		},
+		{
+			Name:        FileSearch,
+			Description: "Search UTF-8 text files by literal case-sensitive substring under one file or directory. Skips binary files and common generated directories.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","workspace"],"description":"Target file area. Use workspace for authorized local workspace directories."},"path":{"type":"string","description":"Search root. Relative path inside a managed area, or an absolute/relative path inside authorized workspace directories. Use . for the root."},"query":{"type":"string","description":"Literal case-sensitive substring to search for. Not regex."},"max_results":{"type":"integer","description":"Optional maximum matches, default 100 and cap 500."}},"required":["scope","path","query"],"additionalProperties":false}`),
+			Capability:  store.ModeWorkspace,
+		},
+		{
+			Name:        FileSlice,
+			Description: "Read a focused line slice from a UTF-8 text file. Supports origin=start for line ranges and origin=end for tail-style reads, with optional reverse order.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","workspace"],"description":"Target file area. Use workspace for authorized local workspace directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized workspace directories."},"origin":{"type":"string","enum":["start","end"],"description":"start reads from a 1-based line range. end reads the last N lines after optional skip. Default start."},"start":{"type":"integer","description":"1-based start line for origin=start. Default 1."},"end":{"type":"integer","description":"Inclusive end line for origin=start. If omitted, lines controls the range length."},"lines":{"type":"integer","description":"Line count for origin=end or when end is omitted. Default 100 and cap 500."},"skip":{"type":"integer","description":"For origin=end, skip this many lines from the file end before taking lines. Default 0."},"order":{"type":"string","enum":["natural","reverse"],"description":"natural returns file order. reverse returns newest/end-most lines first. Default natural."}},"required":["scope","path"],"additionalProperties":false}`),
 			Capability:  store.ModeWorkspace,
 		},
 		{
@@ -242,6 +263,12 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.fileList(call)
 	case FileRead:
 		return r.fileRead(call)
+	case FileStat:
+		return r.fileStat(call)
+	case FileSearch:
+		return r.fileSearch(call)
+	case FileSlice:
+		return r.fileSlice(call)
 	case FileWrite:
 		return r.fileWrite(call)
 	case FilePatch:
