@@ -13,11 +13,24 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+	"runtime"
 
 	"github.com/teatak/pudding-core/internal/api"
 	appsvc "github.com/teatak/pudding-core/internal/app"
+	audioasr "github.com/teatak/pudding-core/internal/audio/asr"
+	sherpaasr "github.com/teatak/pudding-core/internal/audio/asr/sherpa"
+	audiodriver "github.com/teatak/pudding-core/internal/audio/driver"
+	portaudiodriver "github.com/teatak/pudding-core/internal/audio/driver/portaudio"
+	"github.com/teatak/pudding-core/internal/audio/frame"
+	audiotts "github.com/teatak/pudding-core/internal/audio/tts"
+	"github.com/teatak/pudding-core/internal/audio/tts/macsay"
+	"github.com/teatak/pudding-core/internal/audio/voice"
+	"github.com/teatak/pudding-core/internal/browser"
 	"github.com/teatak/pudding-core/internal/buildinfo"
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/desktopcamera"
+	"github.com/teatak/pudding-core/internal/desktopscreen"
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/home"
@@ -47,6 +60,8 @@ type Daemon struct {
 	lanURLs   []string
 	token     string
 	homeDir   string
+	voice     *voice.Service
+	browser   browser.Service
 	stopSSE   context.CancelFunc
 	serveErr  chan error
 }
@@ -86,12 +101,24 @@ func Start(opts Options) (*Daemon, error) {
 	hub := event.NewHub()
 	apps := appsvc.NewService(dir, cfg)
 	skills := skillsvc.NewService(dir)
+	browserManager := browser.NewManager(browser.Config{HomeDir: dir})
 	browserMCP := tool.NewBrowserMCPRunner()
+	camera := desktopcamera.New()
+	screen := desktopscreen.New()
 	tools := tool.NewMultiRunner(
-		tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithHomeDir(dir)),
+		tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithHomeDir(dir), tool.WithBrowser(browserManager), tool.WithCamera(camera), tool.WithDesktopScreen(screen)),
 		browserMCP,
 	)
 	eng := engine.New(st, hub, resolver, cfg, engine.WithPromptSource(prompt.NewLoader(dir)), engine.WithAttachmentHome(dir), engine.WithTools(tools))
+	voiceService := voice.NewService(voice.ServiceConfig{
+		Manager:   voice.NewManager(),
+		Submitter: eng,
+		Canceler:  eng,
+		Events:    hub,
+		Driver:    defaultCaptureDriver(),
+		ASR:       defaultASR(dir),
+		TTS:       defaultTTS(),
+	})
 	if err := eng.Recover(context.Background()); err != nil {
 		_ = st.Close()
 		return nil, fmt.Errorf("recover interrupted turns: %w", err)
@@ -125,7 +152,7 @@ func Start(opts Options) (*Daemon, error) {
 
 	// request ctx 派生自此:Shutdown 时 SSE 长连接立即退出,不拖优雅关闭
 	sseCtx, stopSSE := context.WithCancel(context.Background())
-	apiServer := api.New(eng, st, cfg, hub).WithHome(dir).WithApps(apps).WithSkills(skills).WithBrowserMCP(browserMCP)
+	apiServer := api.New(eng, st, cfg, hub).WithHome(dir).WithApps(apps).WithSkills(skills).WithBrowserMCP(browserMCP).WithVoice(voiceService).WithBrowser(browserManager).WithCamera(camera)
 	server := &http.Server{
 		Handler: apiServer.Handler(
 			token,
@@ -145,6 +172,8 @@ func Start(opts Options) (*Daemon, error) {
 		lanURLs:   lanURLs,
 		token:     token,
 		homeDir:   dir,
+		voice:     voiceService,
+		browser:   browserManager,
 		stopSSE:   stopSSE,
 		serveErr:  make(chan error, 1),
 	}
@@ -247,6 +276,60 @@ func addrIP(addr net.Addr) net.IP {
 	}
 }
 
+func defaultTTS() audiotts.Client {
+	if runtime.GOOS == "darwin" {
+		client, err := macsay.New(macsay.Config{Rate: 230})
+		if err == nil {
+			return client
+		}
+		slog.Warn("daemon: macsay unavailable", "err", err)
+	}
+	return audiotts.NewNoop()
+}
+
+func defaultCaptureDriver() audiodriver.Driver {
+	return portaudiodriver.New(portaudiodriver.Config{
+		Format:      frame.Format{SampleRate: 16000, Channels: 1},
+		FrameMillis: 20,
+	})
+}
+
+func defaultASR(homeDir string) audioasr.Client {
+	cfg, ok := defaultSherpaConfig(homeDir)
+	if !ok {
+		slog.Warn("daemon: sherpa ASR models unavailable")
+		return nil
+	}
+	client, err := sherpaasr.New(cfg)
+	if err != nil {
+		slog.Warn("daemon: sherpa ASR unavailable", "err", err)
+		return nil
+	}
+	return client
+}
+
+func defaultSherpaConfig(homeDir string) (sherpaasr.Config, bool) {
+	root := filepath.Join(homeDir, "runtime", "models")
+	cfg := sherpaasr.Config{
+		ModelPath:                   filepath.Join(root, "asr", "model.int8.onnx"),
+		TokensPath:                  filepath.Join(root, "asr", "tokens.txt"),
+		VADModelPath:                filepath.Join(root, "vad", "silero_vad.onnx"),
+		Language:                    "auto",
+		UseInverseTextNormalization: true,
+		Provider:                    "cpu",
+		NumThreads:                  2,
+	}
+	if fileExists(cfg.ModelPath) && fileExists(cfg.TokensPath) && fileExists(cfg.VADModelPath) {
+		return cfg, true
+	}
+	return cfg, false
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
 func isUnspecifiedHost(host string) bool {
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsUnspecified()
@@ -257,6 +340,12 @@ func (d *Daemon) ServeErr() <-chan error { return d.serveErr }
 
 // Shutdown 优雅关闭:SSE 退出 → server 关闭 → 等 turn 收尾 → 关存储。
 func (d *Daemon) Shutdown(ctx context.Context) error {
+	if d.voice != nil {
+		_ = d.voice.Close()
+	}
+	if d.browser != nil {
+		_ = d.browser.Close()
+	}
 	d.stopSSE()
 	err := d.server.Shutdown(ctx)
 	if err != nil {

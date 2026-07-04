@@ -21,7 +21,9 @@ import (
 	"time"
 
 	appsvc "github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/audio/voice"
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/desktopcamera"
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/mobileauth"
@@ -60,6 +62,87 @@ func newConfigTestServer(t *testing.T) (*httptest.Server, store.Store, *config.M
 	srv := httptest.NewServer(New(eng, ms, cfg, hub).WithHome(homeDir).WithApps(appsvc.NewService(homeDir, nil)).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 	return srv, ms, cfg
+}
+
+func newAudioTestServer(t *testing.T) (*httptest.Server, store.Store, *voice.Manager) {
+	t.Helper()
+	ms := memstore.New()
+	homeDir := t.TempDir()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好"}))), ms, engine.WithAttachmentHome(homeDir))
+	manager := voice.NewManager()
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithHome(homeDir).WithVoice(manager).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+	return srv, ms, manager
+}
+
+func TestAudioBindingsAreSessionScoped(t *testing.T) {
+	srv, st, _ := newAudioTestServer(t)
+	ctx := context.Background()
+	for _, id := range []string{"sess_a", "sess_b"} {
+		if err := st.CreateSession(ctx, &store.Session{ID: id, Provider: "mock", Model: "mock"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	type bindingsPayload struct {
+		Bindings voice.Bindings `json:"bindings"`
+	}
+	type bindPayload struct {
+		OK       bool           `json:"ok"`
+		Bindings voice.Bindings `json:"bindings"`
+	}
+
+	resp := req(t, http.MethodGet, srv.URL+"/sessions/sess_a/audio/bindings", nil)
+	got := decodeJSON[bindingsPayload](t, resp)
+	if got.Bindings.InputOwner != "" || got.Bindings.OutputOwner != "" {
+		t.Fatalf("initial bindings = %+v", got.Bindings)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/audio/input", map[string]bool{"enabled": true})
+	bound := decodeJSON[bindPayload](t, resp)
+	if resp.StatusCode != http.StatusOK || !bound.OK || bound.Bindings.InputOwner != "sess_a" {
+		t.Fatalf("bind input response status=%d body=%+v", resp.StatusCode, bound)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/audio/output", map[string]bool{"enabled": true})
+	bound = decodeJSON[bindPayload](t, resp)
+	if resp.StatusCode != http.StatusOK || bound.Bindings.OutputOwner != "sess_a" {
+		t.Fatalf("bind output response status=%d body=%+v", resp.StatusCode, bound)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_b/audio/input", map[string]bool{"enabled": true})
+	bound = decodeJSON[bindPayload](t, resp)
+	if resp.StatusCode != http.StatusOK || bound.Bindings.InputOwner != "sess_b" || bound.Bindings.OutputOwner != "sess_a" {
+		t.Fatalf("replace input response status=%d body=%+v", resp.StatusCode, bound)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/audio/input", map[string]bool{"enabled": false})
+	bound = decodeJSON[bindPayload](t, resp)
+	if resp.StatusCode != http.StatusOK || bound.Bindings.InputOwner != "sess_b" {
+		t.Fatalf("non-owner disable response status=%d body=%+v", resp.StatusCode, bound)
+	}
+
+	resp = req(t, http.MethodDelete, srv.URL+"/sessions/sess_a", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete status = %d", resp.StatusCode)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_b/audio/bindings", nil)
+	got = decodeJSON[bindingsPayload](t, resp)
+	if got.Bindings.InputOwner != "sess_b" || got.Bindings.OutputOwner != "" {
+		t.Fatalf("bindings after delete = %+v", got.Bindings)
+	}
+}
+
+func TestAudioBindingRequiresExistingSession(t *testing.T) {
+	srv, _, _ := newAudioTestServer(t)
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/missing/audio/input", map[string]bool{"enabled": true})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
 }
 
 func writeOAuthTestApps(t *testing.T, homeDir string) {
@@ -1184,6 +1267,137 @@ func TestAttachmentUploadSubmitAndRead(t *testing.T) {
 	if len(attachments) != 1 || attachments[0].AttachmentKey != uploaded.AttachmentKey {
 		t.Fatalf("attachment part not persisted: %+v", msg.Parts)
 	}
+}
+
+func TestDesktopScreenshotStoresAttachment(t *testing.T) {
+	original := runDesktopScreenshots
+	t.Cleanup(func() { runDesktopScreenshots = original })
+	runDesktopScreenshots = func(ctx context.Context, dir, filenamePrefix string) ([]string, error) {
+		path := filepath.Join(dir, filenamePrefix+".png")
+		if err := os.WriteFile(path, []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}, 0600); err != nil {
+			return nil, err
+		}
+		return []string{path}, nil
+	}
+
+	srv, st := newTestServer(t)
+	if err := st.CreateSession(context.Background(), &store.Session{ID: "sess_shot", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_shot/desktop/screenshot", nil)
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("screenshot status = %d body=%s", resp.StatusCode, string(data))
+	}
+	payload := decodeJSON[struct {
+		Attachments []store.Attachment `json:"attachments"`
+	}](t, resp)
+	if len(payload.Attachments) != 1 {
+		t.Fatalf("unexpected screenshot attachment count: %+v", payload)
+	}
+	uploaded := payload.Attachments[0]
+	if uploaded.MIME != "image/png" || uploaded.AttachmentKey == "" || uploaded.URL == "" {
+		t.Fatalf("unexpected screenshot attachment: %+v", uploaded)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+uploaded.URL, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("read screenshot status = %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(data, []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}) {
+		t.Fatalf("unexpected screenshot body: %v", data)
+	}
+}
+
+func TestDesktopScreenshotStoresMultipleAttachments(t *testing.T) {
+	original := runDesktopScreenshots
+	t.Cleanup(func() { runDesktopScreenshots = original })
+	runDesktopScreenshots = func(ctx context.Context, dir, filenamePrefix string) ([]string, error) {
+		paths := []string{
+			filepath.Join(dir, filenamePrefix+" Display 1.png"),
+			filepath.Join(dir, filenamePrefix+" Display 2.png"),
+		}
+		for _, path := range paths {
+			if err := os.WriteFile(path, []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}, 0600); err != nil {
+				return nil, err
+			}
+		}
+		return paths, nil
+	}
+
+	srv, st := newTestServer(t)
+	if err := st.CreateSession(context.Background(), &store.Session{ID: "sess_multi_shot", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_multi_shot/desktop/screenshot", nil)
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("screenshot status = %d body=%s", resp.StatusCode, string(data))
+	}
+	payload := decodeJSON[struct {
+		Attachments []store.Attachment `json:"attachments"`
+	}](t, resp)
+	if len(payload.Attachments) != 2 {
+		t.Fatalf("unexpected screenshot attachment count: %+v", payload)
+	}
+}
+
+func TestDesktopPhotoStoresAttachment(t *testing.T) {
+	ms := memstore.New()
+	homeDir := t.TempDir()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好"}))), ms, engine.WithAttachmentHome(homeDir))
+	photoBytes := []byte{0xff, 0xd8, 0xff, 0xd9}
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithHome(homeDir).WithCamera(fakeAPICamera{
+		photo: &desktopcamera.Photo{Data: photoBytes, MIME: "image/jpeg", Name: "camera.jpg"},
+	}).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+
+	if err := ms.CreateSession(context.Background(), &store.Session{ID: "sess_photo", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_photo/desktop/photo", nil)
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("photo status = %d body=%s", resp.StatusCode, string(data))
+	}
+	uploaded := decodeJSON[store.Attachment](t, resp)
+	if uploaded.MIME != "image/jpeg" || uploaded.AttachmentKey == "" || uploaded.URL == "" {
+		t.Fatalf("unexpected photo attachment: %+v", uploaded)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+uploaded.URL, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("read photo status = %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(data, photoBytes) {
+		t.Fatalf("unexpected photo body: %v", data)
+	}
+}
+
+type fakeAPICamera struct {
+	photo *desktopcamera.Photo
+	err   error
+}
+
+func (f fakeAPICamera) CapturePhoto(context.Context) (*desktopcamera.Photo, error) {
+	return f.photo, f.err
 }
 
 func TestSubmitLocalFoldersPersistsPart(t *testing.T) {

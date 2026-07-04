@@ -64,6 +64,8 @@ cat > "$app/Contents/Info.plist" <<EOF
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>NSHumanReadableCopyright</key><string>Copyright © 2026 Teatak. All rights reserved.</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSCameraUsageDescription</key><string>Pudding uses the camera only when you choose to take a photo as chat context.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Pudding uses the microphone only when you turn on voice dictation.</string>
   <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
   <key>CFBundleLocalizations</key>
   <array><string>en</string><string>zh-Hans</string><string>zh-Hant</string></array>

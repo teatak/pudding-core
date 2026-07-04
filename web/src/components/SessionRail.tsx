@@ -30,7 +30,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-import { deleteSession, listSessions, updateSession } from "@/api/client";
+import { deleteSession, getAudioBindings, listSessions, updateSession } from "@/api/client";
 import type { Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { LanguageToggle } from "@/components/LanguageToggle";
@@ -133,10 +133,19 @@ export function SessionRail({
     enabled: Boolean(token),
   });
   const sessions = sessionsQuery.data?.sessions || [];
+  const audioBindingsSessionID = selectedSessionID || sessions[0]?.id;
+  const audioBindingsQuery = useQuery({
+    queryKey: queryKeys.audioBindings(),
+    queryFn: () => getAudioBindings(token, audioBindingsSessionID || ""),
+    enabled: Boolean(token && audioBindingsSessionID),
+    refetchInterval: 2000,
+  });
   const appsActive = view === "apps";
   const activeSessionIDSet = new Set([selectedSessionID, ...activeSessionIDs].filter(Boolean));
+  const audioInputOwner = audioBindingsQuery.data?.bindings.inputOwner;
   const backgroundSessionIDs = [
     ...sessions.filter((session) => session.running).map((session) => session.id),
+    ...(audioInputOwner ? [audioInputOwner] : []),
     ...Object.entries(runningTurns)
       .filter(([, turnID]) => Boolean(turnID))
       .map(([sessionID]) => sessionID),

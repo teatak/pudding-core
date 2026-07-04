@@ -1,12 +1,15 @@
 package tool
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/teatak/pudding-core/internal/attachment"
 )
 
 func TestBuiltinFileDraftWriteReadPatch(t *testing.T) {
@@ -423,5 +426,45 @@ func TestBuiltinFileReadRejectsBinaryBeforeLargeHint(t *testing.T) {
 	payload := decodeToolResult(t, res)
 	if payload["reason"] != "binary_file" {
 		t.Fatalf("large binary should report binary_file, got %+v", payload)
+	}
+}
+
+func TestBuiltinFileReadRoutesImageAttachment(t *testing.T) {
+	home := t.TempDir()
+	tempDir := filepath.Join(home, "temp")
+	if err := os.MkdirAll(tempDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	imagePath := filepath.Join(tempDir, "image.png")
+	imageBytes := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0, 'I', 'E', 'N', 'D'}
+	if err := os.WriteFile(imagePath, imageBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res := NewBuiltinRunner(WithHomeDir(home)).Call(context.Background(), Call{
+		SessionID: "sess_img",
+		Name:      FileRead,
+		Args:      json.RawMessage(`{"scope":"temp","path":"image.png"}`),
+	})
+	if !res.Ok {
+		t.Fatalf("image read should route attachment: %+v", res)
+	}
+	if len(res.Attachments) != 1 || res.Attachments[0].MIME != "image/png" || res.Attachments[0].Origin != attachment.OriginTool {
+		t.Fatalf("unexpected routed attachment: %+v", res.Attachments)
+	}
+	payload := decodeToolResult(t, res)
+	if payload["kind"] != "attachment_routed" || payload["attachmentKey"] == "" {
+		t.Fatalf("unexpected image payload: %+v", payload)
+	}
+	storedPath, ok, err := attachment.NewService(home).Path("sess_img", res.Attachments[0].AttachmentKey)
+	if err != nil || !ok {
+		t.Fatalf("stored attachment path missing: ok=%v err=%v", ok, err)
+	}
+	data, err := os.ReadFile(storedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(data, imageBytes) {
+		t.Fatalf("unexpected stored bytes: %x", data)
 	}
 }

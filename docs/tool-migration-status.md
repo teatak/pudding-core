@@ -26,6 +26,12 @@ Rules for new tools:
 | `builtin_time_get_current` | chat | `builtin_time_get_current` | Done | Yes | Yes |
 | `builtin_web_search` | chat | `builtin_web_search` | Done | Yes | Yes |
 | `builtin_web_fetch` | chat | `builtin_web_fetch` | Done | Yes | Yes |
+| `builtin_browser_open` | chat | New managed browser tool | Done, managed visible browser MVP | Yes | Yes |
+| `builtin_browser_observe` | chat | New managed browser tool | Done, managed visible browser MVP | Yes | Yes |
+| `builtin_browser_screenshot` | chat | New managed browser tool | Done, routes screenshot as attachment | Yes | Yes |
+| `builtin_browser_click` | chat | New managed browser tool | Done, basic selector/coordinate click | Yes | Yes |
+| `builtin_browser_type` | chat | New managed browser tool | Done, basic editable element input | Yes | Yes |
+| `builtin_browser_scroll` | chat | New managed browser tool | Done, basic page/element scroll | Yes | Yes |
 | `builtin_history_search` | chat | `builtin_history_search` | Done, semantics changed to current-session default | Yes | Yes |
 | `builtin_history_get_message` | chat | `builtin_history_get_message` | Done, session-scoped | Yes | Yes |
 | `builtin_skill_read` | chat | New on-demand skill body reader | Done | Yes | Yes |
@@ -106,6 +112,12 @@ Current new builtins have transcript display names and i18n entries:
 - `builtin_time_get_current`
 - `builtin_web_search`
 - `builtin_web_fetch`
+- `builtin_browser_open`
+- `builtin_browser_observe`
+- `builtin_browser_screenshot`
+- `builtin_browser_click`
+- `builtin_browser_type`
+- `builtin_browser_scroll`
 - `builtin_history_search`
 - `builtin_history_get_message`
 - `builtin_skill_read`
@@ -129,7 +141,7 @@ Current new builtins have transcript display names and i18n entries:
 
 Prompt coverage:
 
-- Chat mode mentions time, weather, web, history, REST/GraphQL endpoints, and capability escalation.
+- Chat mode mentions time, weather, web, managed browser, history, REST/GraphQL endpoints, and capability escalation.
 - Workspace mode mentions file search/slice and workspace directory authorization.
 - Skill creator skill prompt mentions skill/file authoring tools.
 

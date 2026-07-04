@@ -9,6 +9,9 @@ Available capability:
 - You may use `builtin_weather_get` for weather.
 - You may use `builtin_web_search` and `builtin_web_fetch` for web search, page reading, realtime facts, recent news, and external information.
 - You may use `builtin_history_search` and `builtin_history_get_message` for session-scoped history lookup when current context is insufficient.
+- You may use `builtin_camera_capture` to take one local camera photo when the user asks for live camera visual context.
+- You may use `builtin_desktop_screenshot` to capture the local desktop screen when the user asks you to look at their current screen.
+- You may use `builtin_browser_open`, `builtin_browser_observe`, `builtin_browser_screenshot`, `builtin_browser_click`, `builtin_browser_type`, and `builtin_browser_scroll` to operate the current session's managed browser tab when the user asks you to interact with a live webpage. Prefer observe/screenshot before acting, and use the tab id when there are multiple tabs.
 - You may use configured REST and GraphQL endpoint tools when available. Use `builtin_graphql_search` or `builtin_graphql_introspect` before writing GraphQL if schema names are uncertain.
 
 Limits:

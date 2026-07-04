@@ -213,6 +213,35 @@ func TestBuildInlinesImageAttachmentWhenSupported(t *testing.T) {
 	}
 }
 
+func TestBuildFallsBackWhenImageCapabilityUnknown(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	home := t.TempDir()
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := attachment.NewService(home).StoreReader("s1", "image.png", "image/png", bytes.NewReader([]byte("png bytes")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "s1",
+		TurnID:          "t1",
+		UserMessageID:   "m1",
+		ClientMessageID: "c1",
+		UserAttachments: []store.Attachment{stored},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req, err := New(ms, nil, WithAttachmentHome(home)).Build(ctx, "s1", "m", string(store.ModeChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 1 || req.Messages[0].Parts[0].Type != provider.PartText {
+		t.Fatalf("unknown image capability should fallback to text summary: %+v", req.Messages)
+	}
+}
+
 func TestBuildFallsBackWhenImageUnsupported(t *testing.T) {
 	ms := memstore.New()
 	ctx := context.Background()
@@ -241,6 +270,53 @@ func TestBuildFallsBackWhenImageUnsupported(t *testing.T) {
 	}
 	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 1 || req.Messages[0].Parts[0].Type != provider.PartText {
 		t.Fatalf("unsupported image should fallback to text summary: %+v", req.Messages)
+	}
+}
+
+func TestBuildReplaysToolImageAttachmentAsUserMessage(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	home := t.TempDir()
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := attachment.NewService(home).StoreReader("s1", "image.png", "image/png", bytes.NewReader([]byte("png bytes")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored.Origin = attachment.OriginTool
+	begin, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "s1",
+		TurnID:          "t1",
+		UserMessageID:   "m1",
+		ClientMessageID: "c1",
+		UserText:        "读图",
+		Mode:            store.ModeWorkspace,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.AppendTurnOutput(ctx, store.AppendTurnOutputInput{
+		TurnID: begin.Turn.ID,
+		Parts: []store.ContentPart{
+			{Type: store.ContentPartToolResult, CallID: "call_image", Name: tool.FileRead, Ok: true, Content: `{"ok":true}`},
+			store.UserInputParts("", []store.Attachment{stored}, nil)[0],
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := New(ms, nil, WithAttachmentHome(home)).Build(ctx, "s1", "m", string(store.ModeWorkspace), provider.ModelConfig{
+		Capabilities: &provider.ModelCapabilities{Image: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 3 {
+		t.Fatalf("tool image should be split into assistant tool result + user image: %+v", req.Messages)
+	}
+	if req.Messages[2].Role != provider.RoleUser || len(req.Messages[2].Parts) != 1 || req.Messages[2].Parts[0].Type != provider.PartImage {
+		t.Fatalf("tool image should replay as user image: %+v", req.Messages)
 	}
 }
 

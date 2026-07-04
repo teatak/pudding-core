@@ -1,0 +1,631 @@
+package voice
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/teatak/pudding-core/internal/audio/asr"
+	"github.com/teatak/pudding-core/internal/audio/driver"
+	"github.com/teatak/pudding-core/internal/audio/frame"
+	audioqueue "github.com/teatak/pudding-core/internal/audio/queue"
+	"github.com/teatak/pudding-core/internal/audio/tts"
+	"github.com/teatak/pudding-core/internal/engine"
+	"github.com/teatak/pudding-core/internal/event"
+	"github.com/teatak/pudding-core/internal/store"
+)
+
+var (
+	ErrNoInputBinding   = errors.New("voice: session does not own audio input")
+	ErrInputUnavailable = errors.New("voice: input backend unavailable")
+	ErrEmptySentence    = errors.New("voice: empty sentence")
+)
+
+const feedbackSuppressGrace = 1500 * time.Millisecond
+
+type Submitter interface {
+	Submit(ctx context.Context, in engine.SubmitInput) (*engine.SubmitResult, error)
+}
+
+type Canceler interface {
+	Cancel(sessionID string) error
+}
+
+type EventSubscriber interface {
+	Subscribe(sessionID string) (<-chan event.Event, func())
+}
+
+type ServiceConfig struct {
+	Manager   *Manager
+	Submitter Submitter
+	Canceler  Canceler
+	Events    EventSubscriber
+	Driver    driver.Driver
+	ASR       asr.Client
+	TTS       tts.Client
+}
+
+// Service is the daemon-owned voice orchestrator. It routes ASR text into the
+// engine and routes session text deltas into TTS without owning session state.
+type Service struct {
+	manager   *Manager
+	submitter Submitter
+	canceler  Canceler
+	events    EventSubscriber
+	driver    driver.Driver
+	asr       asr.Client
+	tts       tts.Client
+	playback  *audioqueue.Queue
+
+	mu             sync.Mutex
+	driverReady    bool
+	asrStarted     bool
+	inputSession   string
+	inputCancel    context.CancelFunc
+	asrLoopStarted bool
+	outputCancels  map[string]context.CancelFunc
+	turnBuffers    map[string]*turnBuffer
+	playbackCancel context.CancelFunc
+	playbackDone   chan struct{}
+	currentSession string
+	currentTurn    string
+
+	ttsSpeaking           atomic.Bool
+	feedbackSuppressUntil atomic.Int64
+}
+
+type turnBuffer struct {
+	sessionID string
+	splitter  *SentenceSplitter
+}
+
+func NewService(cfg ServiceConfig) *Service {
+	manager := cfg.Manager
+	if manager == nil {
+		manager = NewManager()
+	}
+	canceler := cfg.Canceler
+	if canceler == nil {
+		canceler, _ = cfg.Submitter.(Canceler)
+	}
+	svc := &Service{
+		manager:       manager,
+		submitter:     cfg.Submitter,
+		canceler:      canceler,
+		events:        cfg.Events,
+		driver:        cfg.Driver,
+		asr:           cfg.ASR,
+		tts:           cfg.TTS,
+		playback:      audioqueue.New(),
+		outputCancels: make(map[string]context.CancelFunc),
+		turnBuffers:   make(map[string]*turnBuffer),
+	}
+	if svc.tts != nil {
+		if err := svc.tts.Start(context.Background()); err != nil {
+			slog.Warn("voice: start tts failed", "err", err)
+		}
+		svc.startPlayback()
+	}
+	return svc
+}
+
+func (s *Service) Snapshot() Bindings {
+	return s.manager.Snapshot()
+}
+
+func (s *Service) BindInput(sessionID string, enabled bool) (Bindings, error) {
+	before := s.manager.Snapshot()
+	slog.Info("voice: input bind requested", "sessionID", sessionID, "enabled", enabled, "previousOwner", before.InputOwner)
+	if enabled {
+		if before.InputOwner != sessionID {
+			s.stopInput()
+			if err := s.startInput(sessionID); err != nil {
+				slog.Warn("voice: input start failed", "sessionID", sessionID, "err", err)
+				return Bindings{}, err
+			}
+		}
+		bindings, err := s.manager.BindInput(sessionID, true)
+		if err == nil {
+			slog.Info("voice: input bound", "sessionID", sessionID, "inputOwner", bindings.InputOwner)
+		}
+		return bindings, err
+	}
+	bindings, err := s.manager.BindInput(sessionID, false)
+	if err != nil {
+		return Bindings{}, err
+	}
+	if before.InputOwner != bindings.InputOwner && before.InputOwner != "" {
+		s.stopInput()
+	}
+	slog.Info("voice: input released", "sessionID", sessionID, "inputOwner", bindings.InputOwner)
+	return bindings, nil
+}
+
+func (s *Service) BindOutput(sessionID string, enabled bool) (Bindings, error) {
+	before := s.manager.Snapshot()
+	slog.Info("voice: output bind requested", "sessionID", sessionID, "enabled", enabled, "previousOwner", before.OutputOwner)
+	bindings, err := s.manager.BindOutput(sessionID, enabled)
+	if err != nil {
+		return Bindings{}, err
+	}
+	if before.OutputOwner != bindings.OutputOwner {
+		if before.OutputOwner != "" {
+			s.stopOutput(before.OutputOwner)
+		}
+		if bindings.OutputOwner != "" {
+			s.startOutput(bindings.OutputOwner)
+		}
+	}
+	slog.Info("voice: output binding updated", "sessionID", sessionID, "outputOwner", bindings.OutputOwner)
+	return bindings, nil
+}
+
+func (s *Service) ReleaseSession(sessionID string) Bindings {
+	before := s.manager.Snapshot()
+	bindings := s.manager.ReleaseSession(sessionID)
+	if before.OutputOwner != bindings.OutputOwner && before.OutputOwner != "" {
+		s.stopOutput(before.OutputOwner)
+	}
+	if before.InputOwner != bindings.InputOwner && before.InputOwner != "" {
+		s.stopInput()
+	}
+	return bindings
+}
+
+func (s *Service) CancelSession(ctx context.Context, sessionID string) bool {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return false
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cancelled := s.cancelSessionPlayback(ctx, sessionID)
+	slog.Info("voice: session audio cancelled", "sessionID", sessionID, "cancelled", cancelled)
+	return cancelled
+}
+
+func (s *Service) Close() error {
+	s.mu.Lock()
+	inputCancel := s.inputCancel
+	s.inputCancel = nil
+	s.inputSession = ""
+	cancels := make([]context.CancelFunc, 0, len(s.outputCancels))
+	for sessionID, cancel := range s.outputCancels {
+		cancels = append(cancels, cancel)
+		delete(s.outputCancels, sessionID)
+	}
+	playbackCancel := s.playbackCancel
+	playbackDone := s.playbackDone
+	s.playbackCancel = nil
+	s.playbackDone = nil
+	s.mu.Unlock()
+	if inputCancel != nil {
+		inputCancel()
+	}
+	if s.driver != nil {
+		_ = s.driver.StopCapture(context.Background())
+		_ = s.driver.Close()
+	}
+	for _, cancel := range cancels {
+		cancel()
+	}
+	if s.playback != nil {
+		s.playback.Close()
+	}
+	if playbackCancel != nil {
+		playbackCancel()
+	}
+	if playbackDone != nil {
+		<-playbackDone
+	}
+	var err error
+	if s.tts != nil {
+		err = s.tts.Stop(context.Background())
+	}
+	if s.asr != nil {
+		if asrErr := s.asr.Stop(context.Background()); err == nil {
+			err = asrErr
+		}
+	}
+	return err
+}
+
+func (s *Service) HandleASREvent(ctx context.Context, sessionID string, ev asr.Event) (*engine.SubmitResult, error) {
+	switch ev.Kind {
+	case asr.EventSentence:
+		return s.SubmitSentence(ctx, sessionID, ev.Text)
+	case asr.EventError:
+		if ev.Err != nil {
+			return nil, ev.Err
+		}
+	}
+	return nil, nil
+}
+
+func (s *Service) SubmitSentence(ctx context.Context, sessionID, text string) (*engine.SubmitResult, error) {
+	if s.submitter == nil {
+		return nil, errors.New("voice: submitter unavailable")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil, ErrEmptySentence
+	}
+	if s.manager.Snapshot().InputOwner != sessionID {
+		return nil, ErrNoInputBinding
+	}
+	clientMessageID := store.NewID("audmsg")
+	slog.Info("voice: submitting asr sentence", "sessionID", sessionID, "clientMessageID", clientMessageID, "text", previewText(text, 80))
+	result, err := s.submitter.Submit(ctx, engine.SubmitInput{
+		SessionID:       sessionID,
+		ClientMessageID: clientMessageID,
+		Text:            text,
+	})
+	if err != nil {
+		slog.Warn("voice: submit asr sentence failed", "sessionID", sessionID, "clientMessageID", clientMessageID, "err", err)
+		return nil, err
+	}
+	if result != nil {
+		slog.Info(
+			"voice: submit asr sentence accepted",
+			"sessionID", sessionID,
+			"clientMessageID", clientMessageID,
+			"turnID", result.TurnID,
+			"queued", result.Queued,
+			"duplicate", result.Duplicate,
+			"status", result.Status,
+		)
+	}
+	return result, nil
+}
+
+func (s *Service) startInput(sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ErrSessionRequired
+	}
+	if s.driver == nil || s.asr == nil {
+		return ErrInputUnavailable
+	}
+	s.mu.Lock()
+	if !s.asrStarted {
+		slog.Info("voice: starting asr", "sessionID", sessionID, "asr", s.asr.Name())
+		if err := s.asr.Start(context.Background()); err != nil {
+			s.mu.Unlock()
+			return err
+		}
+		s.asrStarted = true
+	}
+	if !s.driverReady {
+		slog.Info("voice: initializing audio driver", "sessionID", sessionID, "driver", s.driver.Name())
+		if err := s.driver.Init(context.Background()); err != nil {
+			s.mu.Unlock()
+			return err
+		}
+		s.driverReady = true
+	}
+	if !s.asrLoopStarted {
+		s.asrLoopStarted = true
+		go s.asrEventLoop()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.inputSession = sessionID
+	s.inputCancel = cancel
+	s.mu.Unlock()
+
+	if err := s.driver.StartCapture(ctx, func(pcm frame.PCM16) {
+		if s.manager.Snapshot().InputOwner != sessionID {
+			return
+		}
+		if err := s.asr.Feed(ctx, pcm); err != nil && !errors.Is(err, context.Canceled) {
+			slog.Warn("voice: asr feed failed", "sessionID", sessionID, "err", err)
+		}
+	}); err != nil {
+		cancel()
+		s.mu.Lock()
+		s.inputCancel = nil
+		s.inputSession = ""
+		s.mu.Unlock()
+		return err
+	}
+	slog.Info("voice: input capture started", "sessionID", sessionID, "driver", s.driver.Name(), "asr", s.asr.Name())
+	return nil
+}
+
+func (s *Service) stopInput() {
+	s.mu.Lock()
+	cancel := s.inputCancel
+	s.inputCancel = nil
+	s.inputSession = ""
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if s.driver != nil {
+		_ = s.driver.StopCapture(context.Background())
+	}
+	if cancel != nil {
+		slog.Info("voice: input capture stopped")
+	}
+}
+
+func (s *Service) asrEventLoop() {
+	for ev := range s.asr.Events() {
+		owner := s.manager.Snapshot().InputOwner
+		if owner == "" {
+			continue
+		}
+		if ev.Kind == asr.EventSentence {
+			slog.Info(
+				"voice: asr sentence received",
+				"sessionID", owner,
+				"text", previewText(ev.Text, 80),
+				"language", ev.Language,
+				"audioDuration", ev.AudioDuration,
+				"decodeDuration", ev.DecodeDuration,
+			)
+			bargeIn := s.bargeInIfPlaying(context.Background(), owner)
+			if !bargeIn && s.feedbackSuppressed() {
+				slog.Debug("voice: suppress asr sentence during tts feedback window", "sessionID", owner)
+				continue
+			}
+		}
+		if _, err := s.HandleASREvent(context.Background(), owner, ev); err != nil && !errors.Is(err, ErrEmptySentence) && !errors.Is(err, ErrNoInputBinding) {
+			slog.Warn("voice: handle asr event failed", "sessionID", owner, "err", err)
+		}
+	}
+}
+
+func (s *Service) bargeInIfPlaying(ctx context.Context, sessionID string) bool {
+	turnID, playing := s.currentPlayback(sessionID)
+	if !playing {
+		return false
+	}
+	slog.Info("voice: barge-in detected during tts", "sessionID", sessionID, "turnID", turnID)
+	s.cancelSessionPlayback(ctx, sessionID)
+	if s.canceler != nil {
+		if err := s.canceler.Cancel(sessionID); err != nil && !errors.Is(err, engine.ErrNoRunningTurn) {
+			slog.Warn("voice: cancel running turn for barge-in failed", "sessionID", sessionID, "turnID", turnID, "err", err)
+		}
+	}
+	return true
+}
+
+func (s *Service) startOutput(sessionID string) {
+	if s.events == nil || s.tts == nil {
+		return
+	}
+	s.mu.Lock()
+	if cancel, ok := s.outputCancels[sessionID]; ok {
+		cancel()
+	}
+	ch, unsubscribe := s.events.Subscribe(sessionID)
+	ctx, cancel := context.WithCancel(context.Background())
+	s.outputCancels[sessionID] = cancel
+	s.mu.Unlock()
+
+	go func() {
+		defer unsubscribe()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ev, ok := <-ch:
+				if !ok {
+					return
+				}
+				s.handleOutputEvent(ctx, ev)
+			}
+		}
+	}()
+}
+
+func (s *Service) stopOutput(sessionID string) {
+	s.mu.Lock()
+	cancel, ok := s.outputCancels[sessionID]
+	if ok {
+		delete(s.outputCancels, sessionID)
+	}
+	s.mu.Unlock()
+	if ok {
+		cancel()
+	}
+	s.cancelSessionPlayback(context.Background(), sessionID)
+}
+
+func (s *Service) handleOutputEvent(ctx context.Context, ev event.Event) {
+	if s.manager.Snapshot().OutputOwner != ev.SessionID {
+		return
+	}
+	switch ev.Kind {
+	case event.TurnDelta:
+		if ev.Part != "" && ev.Part != "text" {
+			return
+		}
+		if strings.TrimSpace(ev.Delta) == "" {
+			return
+		}
+		for _, segment := range s.pushDelta(ev.SessionID, ev.TurnID, ev.Delta) {
+			s.enqueueSegment(ev.SessionID, ev.TurnID, segment)
+		}
+	case event.TurnCompleted:
+		for _, segment := range s.flushTurn(ev.TurnID) {
+			s.enqueueSegment(ev.SessionID, ev.TurnID, segment)
+		}
+	case event.TurnFailed, event.TurnCancelled:
+		s.discardTurn(ev.TurnID)
+		if s.playback != nil {
+			s.playback.ClearTurn(ev.TurnID)
+		}
+		if err := s.tts.Cancel(ctx, ev.TurnID); err != nil && !errors.Is(err, context.Canceled) {
+			slog.Warn("voice: tts cancel failed", "sessionID", ev.SessionID, "turnID", ev.TurnID, "err", err)
+		}
+	}
+}
+
+func (s *Service) startPlayback() {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	s.playbackCancel = cancel
+	s.playbackDone = done
+	go func() {
+		defer close(done)
+		for {
+			item, ok := s.playback.Next(ctx)
+			if !ok {
+				return
+			}
+			if s.manager.Snapshot().OutputOwner != item.SessionID {
+				continue
+			}
+			s.beginFeedbackSuppression()
+			s.setCurrentPlayback(item.SessionID, item.TurnID)
+			if err := s.tts.Speak(ctx, tts.Request{
+				SessionID: item.SessionID,
+				TurnID:    item.TurnID,
+				SegmentID: item.SegmentID,
+				Text:      item.Text,
+			}); err != nil && !errors.Is(err, context.Canceled) {
+				slog.Warn("voice: tts speak failed", "sessionID", item.SessionID, "turnID", item.TurnID, "err", err)
+			}
+			s.clearCurrentPlayback(item.SessionID, item.TurnID)
+			s.endFeedbackSuppression()
+		}
+	}()
+}
+
+func (s *Service) cancelSessionPlayback(ctx context.Context, sessionID string) bool {
+	cancelled := false
+	if s.playback != nil {
+		if removed := s.playback.ClearSession(sessionID); removed > 0 {
+			cancelled = true
+		}
+	}
+	if s.clearSessionBuffers(sessionID) > 0 {
+		cancelled = true
+	}
+	turnID, current := s.currentPlayback(sessionID)
+	if current && s.tts != nil {
+		if err := s.tts.Cancel(ctx, turnID); err != nil && !errors.Is(err, context.Canceled) {
+			slog.Warn("voice: tts cancel failed", "sessionID", sessionID, "turnID", turnID, "err", err)
+		}
+		cancelled = true
+	}
+	return cancelled
+}
+
+func (s *Service) setCurrentPlayback(sessionID, turnID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.currentSession = sessionID
+	s.currentTurn = turnID
+}
+
+func (s *Service) clearCurrentPlayback(sessionID, turnID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.currentSession == sessionID && s.currentTurn == turnID {
+		s.currentSession = ""
+		s.currentTurn = ""
+	}
+}
+
+func (s *Service) currentPlayback(sessionID string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.currentSession != sessionID {
+		return "", false
+	}
+	return s.currentTurn, true
+}
+
+func (s *Service) beginFeedbackSuppression() {
+	s.ttsSpeaking.Store(true)
+}
+
+func (s *Service) endFeedbackSuppression() {
+	s.ttsSpeaking.Store(false)
+	s.feedbackSuppressUntil.Store(time.Now().Add(feedbackSuppressGrace).UnixNano())
+}
+
+func (s *Service) feedbackSuppressed() bool {
+	if s.ttsSpeaking.Load() {
+		return true
+	}
+	until := s.feedbackSuppressUntil.Load()
+	return until > 0 && time.Now().UnixNano() < until
+}
+
+func (s *Service) pushDelta(sessionID, turnID, delta string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	buf := s.turnBuffers[turnID]
+	if buf == nil {
+		buf = &turnBuffer{sessionID: sessionID, splitter: NewSentenceSplitter(0)}
+		s.turnBuffers[turnID] = buf
+	}
+	return append([]string(nil), buf.splitter.Push(delta)...)
+}
+
+func (s *Service) flushTurn(turnID string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	buf := s.turnBuffers[turnID]
+	if buf == nil {
+		return nil
+	}
+	delete(s.turnBuffers, turnID)
+	return append([]string(nil), buf.splitter.Flush()...)
+}
+
+func (s *Service) discardTurn(turnID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.turnBuffers, turnID)
+}
+
+func (s *Service) clearSessionBuffers(sessionID string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	removed := 0
+	for turnID, buf := range s.turnBuffers {
+		if buf.sessionID == sessionID {
+			delete(s.turnBuffers, turnID)
+			removed++
+		}
+	}
+	return removed
+}
+
+func (s *Service) enqueueSegment(sessionID, turnID, text string) {
+	if s.playback == nil {
+		return
+	}
+	text = tts.SanitizeText(text)
+	if text == "" || !tts.HasSpeakableText(text) {
+		return
+	}
+	s.playback.Enqueue(audioqueue.Item{
+		SessionID: sessionID,
+		TurnID:    turnID,
+		SegmentID: store.NewID("seg"),
+		Text:      text,
+	})
+}
+
+func previewText(text string, maxRunes int) string {
+	text = strings.TrimSpace(text)
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) <= maxRunes {
+		return text
+	}
+	return string(runes[:maxRunes]) + "..."
+}

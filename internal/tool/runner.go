@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 
 	"github.com/teatak/pudding-core/internal/provider"
+	"github.com/teatak/pudding-core/internal/store"
 )
 
 type Call struct {
@@ -22,6 +23,7 @@ type Result struct {
 	Name         string
 	Ok           bool
 	Content      string
+	Attachments  []store.Attachment
 	SummaryKind  string
 	SummaryCount int
 }

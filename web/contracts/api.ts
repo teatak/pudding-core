@@ -382,6 +382,92 @@ export const dailyUsageStat = z.object({
 export type DailyUsageStat = z.infer<typeof dailyUsageStat>;
 export const dailyUsageResponse = z.object({ days: z.array(dailyUsageStat) });
 
+export const audioBindings = z.object({
+  inputOwner: z.string(),
+  outputOwner: z.string(),
+});
+export type AudioBindings = z.infer<typeof audioBindings>;
+export const audioBindingsResponse = z.object({ bindings: audioBindings });
+export const audioBindingRequest = z.object({ enabled: z.boolean() });
+export const audioBindingResponse = z.object({
+  ok: z.boolean(),
+  bindings: audioBindings,
+});
+
+export const browserTab = z.object({
+  id: z.string(),
+  sessionID: z.string(),
+  targetID: z.string().optional(),
+  url: z.string(),
+  title: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type BrowserTab = z.infer<typeof browserTab>;
+
+export const observedBrowserElement = z.object({
+  index: z.number(),
+  tag: z.string(),
+  text: z.string().optional(),
+  href: z.string().optional(),
+  role: z.string().optional(),
+  ariaLabel: z.string().optional(),
+  selector: z.string().optional(),
+  inputType: z.string().optional(),
+  disabled: z.boolean().optional(),
+});
+
+export const browserObservation = z.object({
+  tab: browserTab,
+  title: z.string(),
+  url: z.string(),
+  readyState: z.string(),
+  text: z.string(),
+  textChars: z.number(),
+  truncated: z.boolean(),
+  elements: z.array(observedBrowserElement),
+});
+export type BrowserObservation = z.infer<typeof browserObservation>;
+
+export const browserScreenshot = z.object({
+  tab: browserTab,
+  mime: z.string(),
+  dataBase64: z.string(),
+  size: z.number(),
+  capturedAt: z.string(),
+});
+export type BrowserScreenshot = z.infer<typeof browserScreenshot>;
+
+export const browserActionResult = z.object({
+  tab: browserTab,
+  action: z.string(),
+  result: z.record(z.string(), z.unknown()).nullable(),
+});
+export type BrowserActionResult = z.infer<typeof browserActionResult>;
+
+export const listBrowserTabsResponse = z.object({ tabs: z.array(browserTab) });
+export const browserOpenRequest = z.object({ url: z.string().min(1) });
+export const browserObserveRequest = z.object({
+  maxTextChars: z.number().optional(),
+  maxElements: z.number().optional(),
+});
+export const browserScreenshotRequest = z.object({ fullPage: z.boolean().optional() });
+export const browserClickRequest = z.object({
+  selector: z.string().optional(),
+  x: z.number().optional(),
+  y: z.number().optional(),
+});
+export const browserTypeRequest = z.object({
+  selector: z.string().optional(),
+  text: z.string().min(1),
+  clear: z.boolean().optional(),
+});
+export const browserScrollRequest = z.object({
+  selector: z.string().optional(),
+  deltaX: z.number().optional(),
+  deltaY: z.number().optional(),
+});
+
 export const listSessionsResponse = z.object({ sessions: z.array(session) });
 export const listMessagesResponse = z.object({ messages: z.array(message), hasMore: z.boolean() });
 export const listTurnsResponse = z.object({ turns: z.array(conversationTurn), hasMore: z.boolean() });

@@ -42,16 +42,35 @@ import {
   canvasItem,
   closedCanvasItem,
   appSkillDetail,
+  audioBindingRequest,
+  audioBindingResponse,
+  audioBindingsResponse,
+  browserActionResult,
+  browserClickRequest,
+  browserObservation,
+  browserObserveRequest,
+  browserOpenRequest,
+  browserScrollRequest,
+  browserScreenshot,
+  browserScreenshotRequest,
+  browserTab,
+  browserTypeRequest,
   installAppRequest,
+  listBrowserTabsResponse,
   startAppOAuthRequest,
   startAppOAuthResponse,
   webToolsConfig,
   type AppConnection,
   type AppDefinition,
   type AppSkillDetail,
+  type AudioBindings,
   type Attachment,
   type BuiltinTool,
+  type BrowserActionResult,
+  type BrowserObservation,
   type BrowserMCPSession,
+  type BrowserScreenshot,
+  type BrowserTab,
   type CanvasItem,
   type ClosedCanvasItem,
   type ContentPart,
@@ -300,6 +319,120 @@ export function listQueuedInputs(token: string, sessionID: string): Promise<{ qu
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/queued-inputs`, listQueuedInputsResponse);
 }
 
+export function getAudioBindings(token: string, sessionID: string): Promise<{ bindings: AudioBindings }> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/audio/bindings`, audioBindingsResponse);
+}
+
+export function listBrowserTabs(token: string, sessionID: string): Promise<{ tabs: BrowserTab[] }> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs`, listBrowserTabsResponse);
+}
+
+export function createBrowserTab(token: string, sessionID: string): Promise<BrowserTab> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs`, browserTab, {
+    method: "POST",
+  });
+}
+
+export function openBrowserTab(
+  token: string,
+  sessionID: string,
+  tabID: string,
+  body: z.infer<typeof browserOpenRequest>,
+): Promise<BrowserTab> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/open`, browserTab, {
+    method: "POST",
+    body: JSON.stringify(browserOpenRequest.parse(body)),
+  });
+}
+
+export function observeBrowserTab(
+  token: string,
+  sessionID: string,
+  tabID: string,
+  body: z.infer<typeof browserObserveRequest> = {},
+): Promise<BrowserObservation> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/observe`, browserObservation, {
+    method: "POST",
+    body: JSON.stringify(browserObserveRequest.parse(body)),
+  });
+}
+
+export function screenshotBrowserTab(
+  token: string,
+  sessionID: string,
+  tabID: string,
+  body: z.infer<typeof browserScreenshotRequest> = {},
+): Promise<BrowserScreenshot> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/screenshot`, browserScreenshot, {
+    method: "POST",
+    body: JSON.stringify(browserScreenshotRequest.parse(body)),
+  });
+}
+
+export function clickBrowserTab(
+  token: string,
+  sessionID: string,
+  tabID: string,
+  body: z.infer<typeof browserClickRequest>,
+): Promise<BrowserActionResult> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/click`, browserActionResult, {
+    method: "POST",
+    body: JSON.stringify(browserClickRequest.parse(body)),
+  });
+}
+
+export function typeBrowserTab(
+  token: string,
+  sessionID: string,
+  tabID: string,
+  body: z.infer<typeof browserTypeRequest>,
+): Promise<BrowserActionResult> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/type`, browserActionResult, {
+    method: "POST",
+    body: JSON.stringify(browserTypeRequest.parse(body)),
+  });
+}
+
+export function scrollBrowserTab(
+  token: string,
+  sessionID: string,
+  tabID: string,
+  body: z.infer<typeof browserScrollRequest> = {},
+): Promise<BrowserActionResult> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/scroll`, browserActionResult, {
+    method: "POST",
+    body: JSON.stringify(browserScrollRequest.parse(body)),
+  });
+}
+
+export async function releaseBrowserTab(token: string, sessionID: string, tabID: string): Promise<void> {
+  await request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/release`, z.null(), {
+    method: "POST",
+  });
+}
+
+export function bindAudioInput(
+  token: string,
+  sessionID: string,
+  enabled: boolean,
+): Promise<{ ok: boolean; bindings: AudioBindings }> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/audio/input`, audioBindingResponse, {
+    method: "POST",
+    body: JSON.stringify(audioBindingRequest.parse({ enabled })),
+  });
+}
+
+export function bindAudioOutput(
+  token: string,
+  sessionID: string,
+  enabled: boolean,
+): Promise<{ ok: boolean; bindings: AudioBindings }> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/audio/output`, audioBindingResponse, {
+    method: "POST",
+    body: JSON.stringify(audioBindingRequest.parse({ enabled })),
+  });
+}
+
 export function listCanvasItems(token: string, sessionID: string): Promise<{ items: CanvasItem[] }> {
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/canvas/items`, listCanvasItemsResponse);
 }
@@ -411,6 +544,23 @@ export async function uploadAttachment(token: string, sessionID: string, file: F
     throw new APIError(response.status, code);
   }
   return attachment.parse(payload);
+}
+
+const desktopScreenshotResponse = z.object({
+  attachments: z.array(attachment),
+});
+
+export async function captureDesktopScreenshot(token: string, sessionID: string): Promise<Attachment[]> {
+  const result = await request(token, `/sessions/${encodeURIComponent(sessionID)}/desktop/screenshot`, desktopScreenshotResponse, {
+    method: "POST",
+  });
+  return result.attachments;
+}
+
+export function captureDesktopPhoto(token: string, sessionID: string): Promise<Attachment> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/desktop/photo`, attachment, {
+    method: "POST",
+  });
 }
 
 export async function revealDesktopPath(token: string, path: string): Promise<void> {
@@ -650,5 +800,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { AppConnection, AppDefinition, AppSkillDetail, Attachment, BuiltinTool, BrowserMCPSession, ContentPart, DailyUsageStat, LocalFolder, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
+export type { AppConnection, AppDefinition, AppSkillDetail, Attachment, AudioBindings, BuiltinTool, BrowserActionResult, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserTab, ContentPart, DailyUsageStat, LocalFolder, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
 export { createProviderRequest, patchProviderRequest };

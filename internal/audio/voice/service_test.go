@@ -1,0 +1,503 @@
+package voice
+
+import (
+	"context"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/teatak/pudding-core/internal/audio/asr"
+	"github.com/teatak/pudding-core/internal/audio/driver"
+	"github.com/teatak/pudding-core/internal/audio/frame"
+	ttspkg "github.com/teatak/pudding-core/internal/audio/tts"
+	"github.com/teatak/pudding-core/internal/engine"
+	"github.com/teatak/pudding-core/internal/event"
+	"github.com/teatak/pudding-core/internal/provider/mock"
+	"github.com/teatak/pudding-core/internal/provider/registry"
+	"github.com/teatak/pudding-core/internal/store"
+	"github.com/teatak/pudding-core/internal/store/memstore"
+)
+
+func TestServiceSubmitsSentenceThroughEngine(t *testing.T) {
+	ctx := context.Background()
+	ms := memstore.New()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"voice reply"}), mock.WithDelay(time.Millisecond))), ms)
+	if err := ms.CreateSession(ctx, &store.Session{ID: "sess_voice", Title: "Voice", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	drv, fakeASR := testInputBackend()
+	svc := NewService(ServiceConfig{Submitter: eng, Events: hub, Driver: drv, ASR: fakeASR, TTS: ttspkg.NewNoop()})
+	defer svc.Close()
+	if _, err := svc.BindInput("sess_voice", true); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := svc.HandleASREvent(ctx, "sess_voice", asr.Event{Kind: asr.EventSentence, Text: "hello by voice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res == nil || res.TurnID == "" {
+		t.Fatalf("unexpected submit result: %+v", res)
+	}
+	eng.Wait()
+
+	msgs, err := ms.ListMessages(ctx, "sess_voice", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("messages len = %d, want 2: %+v", len(msgs), msgs)
+	}
+	if msgs[0].Role != store.RoleUser || msgs[0].Text != "hello by voice" {
+		t.Fatalf("unexpected user message: %+v", msgs[0])
+	}
+	if msgs[1].Role != store.RoleAssistant || msgs[1].Text != "voice reply" {
+		t.Fatalf("unexpected assistant message: %+v", msgs[1])
+	}
+}
+
+func TestServiceRejectsSentenceWithoutInputOwner(t *testing.T) {
+	svc := NewService(ServiceConfig{Submitter: submitterFunc(func(context.Context, engine.SubmitInput) (*engine.SubmitResult, error) {
+		t.Fatal("submit should not be called")
+		return nil, nil
+	})})
+	defer svc.Close()
+	if _, err := svc.SubmitSentence(context.Background(), "sess_voice", "hello"); err != ErrNoInputBinding {
+		t.Fatalf("err = %v, want %v", err, ErrNoInputBinding)
+	}
+}
+
+func TestBindInputStartsCaptureAndRoutesASR(t *testing.T) {
+	ctx := context.Background()
+	ms := memstore.New()
+	hub := event.NewHub()
+	fakeASR := asr.NewFake(4)
+	drv := &captureDriver{format: frame.Format{SampleRate: 16000, Channels: 1}}
+	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"ok"}), mock.WithDelay(time.Millisecond))), ms)
+	if err := ms.CreateSession(ctx, &store.Session{ID: "sess_input", Title: "Voice", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(ServiceConfig{Submitter: eng, Events: hub, Driver: drv, ASR: fakeASR, TTS: ttspkg.NewNoop()})
+	defer svc.Close()
+	if _, err := svc.BindInput("sess_input", true); err != nil {
+		t.Fatal(err)
+	}
+	if !drv.started {
+		t.Fatal("capture driver was not started")
+	}
+
+	fakeASR.EmitSentence("from mic")
+	msgs := waitMessages(t, ctx, ms, "sess_input", 2)
+	eng.Wait()
+	if len(msgs) != 2 || msgs[0].Text != "from mic" {
+		t.Fatalf("unexpected messages: %+v", msgs)
+	}
+	if _, err := svc.BindInput("sess_input", false); err != nil {
+		t.Fatal(err)
+	}
+	if drv.started {
+		t.Fatal("capture driver should be stopped")
+	}
+}
+
+func waitMessages(t *testing.T, ctx context.Context, ms *memstore.Memstore, sessionID string, want int) []*store.Message {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		msgs, err := ms.ListMessages(ctx, sessionID, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) >= want {
+			return msgs
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for %d messages, got %d: %+v", want, len(msgs), msgs)
+		case <-tick.C:
+		}
+	}
+}
+
+func testInputBackend() (*captureDriver, *asr.Fake) {
+	return &captureDriver{format: frame.Format{SampleRate: 16000, Channels: 1}}, asr.NewFake(4)
+}
+
+func TestServiceRoutesTextDeltaToTTSOutputOwner(t *testing.T) {
+	ctx := context.Background()
+	ms := memstore.New()
+	hub := event.NewHub()
+	fakeTTS := ttspkg.NewFake(4)
+	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"spoken"}), mock.WithDelay(time.Millisecond))), ms)
+	if err := ms.CreateSession(ctx, &store.Session{ID: "sess_tts", Title: "Voice", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	drv, fakeASR := testInputBackend()
+	svc := NewService(ServiceConfig{Submitter: eng, Events: hub, Driver: drv, ASR: fakeASR, TTS: fakeTTS})
+	defer svc.Close()
+	if _, err := svc.BindInput("sess_tts", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.BindOutput("sess_tts", true); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.SubmitSentence(ctx, "sess_tts", "hello"); err != nil {
+		t.Fatal(err)
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	req, ok := fakeTTS.WaitRequest(waitCtx)
+	if !ok {
+		t.Fatal("timed out waiting for tts request")
+	}
+	if req.SessionID != "sess_tts" || req.TurnID == "" || req.Text != "spoken" {
+		t.Fatalf("unexpected tts request: %+v", req)
+	}
+	eng.Wait()
+}
+
+func TestServiceSplitsDeltasBeforeTTS(t *testing.T) {
+	ctx := context.Background()
+	hub := event.NewHub()
+	fakeTTS := ttspkg.NewFake(8)
+	svc := NewService(ServiceConfig{Events: hub, TTS: fakeTTS})
+	defer svc.Close()
+	if _, err := svc.BindOutput("sess_split", true); err != nil {
+		t.Fatal(err)
+	}
+
+	hub.Publish(event.Event{SessionID: "sess_split", Kind: event.TurnDelta, TurnID: "turn_split", Part: "text", Delta: "Hello "})
+	shortCtx, shortCancel := context.WithTimeout(ctx, 20*time.Millisecond)
+	defer shortCancel()
+	if req, ok := fakeTTS.WaitRequest(shortCtx); ok {
+		t.Fatalf("incomplete sentence should not reach tts: %+v", req)
+	}
+
+	hub.Publish(event.Event{SessionID: "sess_split", Kind: event.TurnDelta, TurnID: "turn_split", Part: "text", Delta: "world."})
+	waitCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	req, ok := fakeTTS.WaitRequest(waitCtx)
+	if !ok {
+		t.Fatal("timed out waiting for sentence")
+	}
+	if req.Text != "Hello world." {
+		t.Fatalf("sentence text = %q, want %q", req.Text, "Hello world.")
+	}
+
+	hub.Publish(event.Event{SessionID: "sess_split", Kind: event.TurnDelta, TurnID: "turn_split", Part: "text", Delta: " Tail"})
+	hub.Publish(event.Event{SessionID: "sess_split", Kind: event.TurnCompleted, TurnID: "turn_split"})
+	req, ok = fakeTTS.WaitRequest(waitCtx)
+	if !ok {
+		t.Fatal("timed out waiting for flushed tail")
+	}
+	if req.Text != "Tail" {
+		t.Fatalf("tail text = %q, want %q", req.Text, "Tail")
+	}
+}
+
+func TestServiceBargeInDuringRunningTurnCancelsTTSAndSubmitsASR(t *testing.T) {
+	hub := event.NewHub()
+	fakeASR := asr.NewFake(4)
+	drv, _ := testInputBackend()
+	blockingTTS := newBlockingTTS()
+	recorder := newSubmitCancelRecorder(nil)
+	svc := NewService(ServiceConfig{
+		Submitter: recorder,
+		Canceler:  recorder,
+		Events:    hub,
+		Driver:    drv,
+		ASR:       fakeASR,
+		TTS:       blockingTTS,
+	})
+	defer svc.Close()
+	defer blockingTTS.Release()
+
+	if _, err := svc.BindInput("sess_barge", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.BindOutput("sess_barge", true); err != nil {
+		t.Fatal(err)
+	}
+
+	hub.Publish(event.Event{SessionID: "sess_barge", Kind: event.TurnDelta, TurnID: "turn_running", Part: "text", Delta: "Speaking now."})
+	waitCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, ok := blockingTTS.WaitRequest(waitCtx); !ok {
+		t.Fatal("timed out waiting for tts playback")
+	}
+
+	fakeASR.EmitSentence("stop and listen")
+	if turnID, ok := blockingTTS.WaitCancel(waitCtx); !ok || turnID != "turn_running" {
+		t.Fatalf("tts cancelled turn = %q ok=%v, want turn_running", turnID, ok)
+	}
+	if sessionID, ok := recorder.WaitCancel(waitCtx); !ok || sessionID != "sess_barge" {
+		t.Fatalf("engine cancelled session = %q ok=%v, want sess_barge", sessionID, ok)
+	}
+	submit, ok := recorder.WaitSubmit(waitCtx)
+	if !ok {
+		t.Fatal("timed out waiting for barge-in submit")
+	}
+	if submit.SessionID != "sess_barge" || submit.Text != "stop and listen" {
+		t.Fatalf("unexpected barge-in submit: %+v", submit)
+	}
+}
+
+func TestServiceBargeInAfterTurnCompletedStopsTTSAndSubmitsASR(t *testing.T) {
+	hub := event.NewHub()
+	fakeASR := asr.NewFake(4)
+	drv, _ := testInputBackend()
+	blockingTTS := newBlockingTTS()
+	recorder := newSubmitCancelRecorder(engine.ErrNoRunningTurn)
+	svc := NewService(ServiceConfig{
+		Submitter: recorder,
+		Canceler:  recorder,
+		Events:    hub,
+		Driver:    drv,
+		ASR:       fakeASR,
+		TTS:       blockingTTS,
+	})
+	defer svc.Close()
+	defer blockingTTS.Release()
+
+	if _, err := svc.BindInput("sess_done", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.BindOutput("sess_done", true); err != nil {
+		t.Fatal(err)
+	}
+
+	hub.Publish(event.Event{SessionID: "sess_done", Kind: event.TurnDelta, TurnID: "turn_done", Part: "text", Delta: "Already completed but still speaking."})
+	hub.Publish(event.Event{SessionID: "sess_done", Kind: event.TurnCompleted, TurnID: "turn_done"})
+	waitCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, ok := blockingTTS.WaitRequest(waitCtx); !ok {
+		t.Fatal("timed out waiting for tts playback")
+	}
+
+	fakeASR.EmitSentence("new request after completion")
+	if turnID, ok := blockingTTS.WaitCancel(waitCtx); !ok || turnID != "turn_done" {
+		t.Fatalf("tts cancelled turn = %q ok=%v, want turn_done", turnID, ok)
+	}
+	if sessionID, ok := recorder.WaitCancel(waitCtx); !ok || sessionID != "sess_done" {
+		t.Fatalf("engine cancel session = %q ok=%v, want sess_done", sessionID, ok)
+	}
+	submit, ok := recorder.WaitSubmit(waitCtx)
+	if !ok {
+		t.Fatal("timed out waiting for barge-in submit")
+	}
+	if submit.SessionID != "sess_done" || submit.Text != "new request after completion" {
+		t.Fatalf("unexpected barge-in submit: %+v", submit)
+	}
+}
+
+func TestServiceCancelSessionStopsCurrentTTSAndClearsQueue(t *testing.T) {
+	hub := event.NewHub()
+	blockingTTS := newBlockingTTS()
+	svc := NewService(ServiceConfig{Events: hub, TTS: blockingTTS})
+	defer svc.Close()
+	defer blockingTTS.Release()
+
+	if _, err := svc.BindOutput("sess_cancel", true); err != nil {
+		t.Fatal(err)
+	}
+
+	hub.Publish(event.Event{SessionID: "sess_cancel", Kind: event.TurnDelta, TurnID: "turn_cancel", Part: "text", Delta: "First sentence."})
+	waitCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	req, ok := blockingTTS.WaitRequest(waitCtx)
+	if !ok {
+		t.Fatal("timed out waiting for first tts request")
+	}
+	if req.SessionID != "sess_cancel" || req.TurnID != "turn_cancel" {
+		t.Fatalf("unexpected first request: %+v", req)
+	}
+
+	hub.Publish(event.Event{SessionID: "sess_cancel", Kind: event.TurnDelta, TurnID: "turn_cancel", Part: "text", Delta: "Second sentence."})
+	waitPlaybackLen(t, svc, 1)
+
+	if cancelled := svc.CancelSession(context.Background(), "sess_cancel"); !cancelled {
+		t.Fatal("CancelSession returned false, want true")
+	}
+	if turnID, ok := blockingTTS.WaitCancel(waitCtx); !ok || turnID != "turn_cancel" {
+		t.Fatalf("cancelled turn = %q ok=%v, want turn_cancel", turnID, ok)
+	}
+
+	shortCtx, shortCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer shortCancel()
+	if req, ok := blockingTTS.WaitRequest(shortCtx); ok {
+		t.Fatalf("queued tts request should have been cleared, got %+v", req)
+	}
+}
+
+func waitPlaybackLen(t *testing.T, svc *Service, want int) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if svc.playback != nil && svc.playback.Len() >= want {
+			return
+		}
+		select {
+		case <-deadline:
+			got := 0
+			if svc.playback != nil {
+				got = svc.playback.Len()
+			}
+			t.Fatalf("timed out waiting for playback queue len >= %d, got %d", want, got)
+		case <-tick.C:
+		}
+	}
+}
+
+type submitterFunc func(context.Context, engine.SubmitInput) (*engine.SubmitResult, error)
+
+func (f submitterFunc) Submit(ctx context.Context, in engine.SubmitInput) (*engine.SubmitResult, error) {
+	return f(ctx, in)
+}
+
+type submitCancelRecorder struct {
+	submitCh  chan engine.SubmitInput
+	cancelCh  chan string
+	cancelErr error
+}
+
+func newSubmitCancelRecorder(cancelErr error) *submitCancelRecorder {
+	return &submitCancelRecorder{
+		submitCh:  make(chan engine.SubmitInput, 4),
+		cancelCh:  make(chan string, 4),
+		cancelErr: cancelErr,
+	}
+}
+
+func (r *submitCancelRecorder) Submit(_ context.Context, in engine.SubmitInput) (*engine.SubmitResult, error) {
+	select {
+	case r.submitCh <- in:
+	default:
+	}
+	return &engine.SubmitResult{TurnID: "turn_barge_in"}, nil
+}
+
+func (r *submitCancelRecorder) Cancel(sessionID string) error {
+	select {
+	case r.cancelCh <- sessionID:
+	default:
+	}
+	return r.cancelErr
+}
+
+func (r *submitCancelRecorder) WaitSubmit(ctx context.Context) (engine.SubmitInput, bool) {
+	select {
+	case in := <-r.submitCh:
+		return in, true
+	case <-ctx.Done():
+		return engine.SubmitInput{}, false
+	}
+}
+
+func (r *submitCancelRecorder) WaitCancel(ctx context.Context) (string, bool) {
+	select {
+	case sessionID := <-r.cancelCh:
+		return sessionID, true
+	case <-ctx.Done():
+		return "", false
+	}
+}
+
+type captureDriver struct {
+	format  frame.Format
+	started bool
+	handler driver.CaptureHandler
+}
+
+func (d *captureDriver) Name() string               { return "capture-test" }
+func (d *captureDriver) Init(context.Context) error { return nil }
+func (d *captureDriver) Close() error {
+	d.started = false
+	return nil
+}
+func (d *captureDriver) InputFormat() frame.Format  { return d.format }
+func (d *captureDriver) OutputFormat() frame.Format { return d.format }
+func (d *captureDriver) StartCapture(_ context.Context, handler driver.CaptureHandler) error {
+	d.started = true
+	d.handler = handler
+	return nil
+}
+func (d *captureDriver) StopCapture(context.Context) error {
+	d.started = false
+	return nil
+}
+func (d *captureDriver) StartPlayback(context.Context) error              { return nil }
+func (d *captureDriver) WritePlayback(context.Context, frame.PCM16) error { return nil }
+func (d *captureDriver) StopPlayback(context.Context) error               { return nil }
+
+type blockingTTS struct {
+	requestCh chan ttspkg.Request
+	cancelCh  chan string
+	release   chan struct{}
+	released  atomic.Bool
+}
+
+func newBlockingTTS() *blockingTTS {
+	return &blockingTTS{
+		requestCh: make(chan ttspkg.Request, 1),
+		cancelCh:  make(chan string, 4),
+		release:   make(chan struct{}),
+	}
+}
+
+func (t *blockingTTS) Name() string { return "blocking" }
+func (t *blockingTTS) Start(context.Context) error {
+	return nil
+}
+func (t *blockingTTS) Speak(ctx context.Context, req ttspkg.Request) error {
+	select {
+	case t.requestCh <- req:
+	default:
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.release:
+		return nil
+	}
+}
+func (t *blockingTTS) Cancel(_ context.Context, turnID string) error {
+	select {
+	case t.cancelCh <- turnID:
+	default:
+	}
+	t.Release()
+	return nil
+}
+func (t *blockingTTS) Events() <-chan ttspkg.Event { return nil }
+func (t *blockingTTS) Stop(context.Context) error {
+	t.Release()
+	return nil
+}
+func (t *blockingTTS) Release() {
+	if t.released.CompareAndSwap(false, true) {
+		close(t.release)
+	}
+}
+func (t *blockingTTS) WaitRequest(ctx context.Context) (ttspkg.Request, bool) {
+	select {
+	case req := <-t.requestCh:
+		return req, true
+	case <-ctx.Done():
+		return ttspkg.Request{}, false
+	}
+}
+
+func (t *blockingTTS) WaitCancel(ctx context.Context) (string, bool) {
+	select {
+	case turnID := <-t.cancelCh:
+		return turnID, true
+	case <-ctx.Done():
+		return "", false
+	}
+}

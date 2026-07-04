@@ -16,7 +16,10 @@ import (
 
 	"github.com/teatak/cart/v3"
 	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/audio/voice"
+	"github.com/teatak/pudding-core/internal/browser"
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/desktopcamera"
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/mobileauth"
@@ -33,9 +36,20 @@ type Server struct {
 	apps       appService
 	skills     skillService
 	hub        *event.Hub
+	voice      voiceController
+	browser    browser.Service
+	camera     desktopcamera.Capturer
 	browserMCP browserMCPService
 	oauthMu    sync.Mutex
 	oauth      map[string]oauthStartState
+}
+
+type voiceController interface {
+	Snapshot() voice.Bindings
+	BindInput(sessionID string, enabled bool) (voice.Bindings, error)
+	BindOutput(sessionID string, enabled bool) (voice.Bindings, error)
+	CancelSession(ctx context.Context, sessionID string) bool
+	ReleaseSession(sessionID string) voice.Bindings
 }
 
 func New(eng *engine.Engine, s store.Store, cfg engine.ConfigSource, hub *event.Hub) *Server {
@@ -60,6 +74,21 @@ func (s *Server) WithHome(home string) *Server {
 
 func (s *Server) WithBrowserMCP(handler browserMCPService) *Server {
 	s.browserMCP = handler
+	return s
+}
+
+func (s *Server) WithVoice(controller voiceController) *Server {
+	s.voice = controller
+	return s
+}
+
+func (s *Server) WithBrowser(service browser.Service) *Server {
+	s.browser = service
+	return s
+}
+
+func (s *Server) WithCamera(capturer desktopcamera.Capturer) *Server {
+	s.camera = capturer
 	return s
 }
 
@@ -131,6 +160,20 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/messages").GET(s.listMessages)
 	app.Route("/sessions/:id/attachments").POST(s.uploadAttachment)
 	app.Route("/sessions/:id/attachments/*path").GET(s.getAttachment)
+	app.Route("/sessions/:id/desktop/screenshot").POST(s.desktopScreenshot)
+	app.Route("/sessions/:id/desktop/photo").POST(s.desktopPhoto)
+	app.Route("/sessions/:id/audio/bindings").GET(s.getAudioBindings)
+	app.Route("/sessions/:id/audio/input").POST(s.bindAudioInput)
+	app.Route("/sessions/:id/audio/output").POST(s.bindAudioOutput)
+	app.Route("/sessions/:id/browser/tabs").GET(s.listBrowserTabs).POST(s.createBrowserTab)
+	app.Route("/sessions/:id/browser/tabs/:tabID").GET(s.getBrowserTab)
+	app.Route("/sessions/:id/browser/tabs/:tabID/open").POST(s.openBrowserTab)
+	app.Route("/sessions/:id/browser/tabs/:tabID/observe").POST(s.observeBrowserTab)
+	app.Route("/sessions/:id/browser/tabs/:tabID/screenshot").POST(s.screenshotBrowserTab)
+	app.Route("/sessions/:id/browser/tabs/:tabID/click").POST(s.clickBrowserTab)
+	app.Route("/sessions/:id/browser/tabs/:tabID/type").POST(s.typeBrowserTab)
+	app.Route("/sessions/:id/browser/tabs/:tabID/scroll").POST(s.scrollBrowserTab)
+	app.Route("/sessions/:id/browser/tabs/:tabID/release").POST(s.releaseBrowserTab)
 	app.Route("/sessions/:id/queued-inputs").GET(s.listQueuedInputs)
 	app.Route("/sessions/:id/queued-inputs/:clientMessageID").PATCH(s.patchQueuedInput)
 	app.Route("/sessions/:id/canvas/items").GET(s.listCanvasItems).POST(s.createCanvasItem)
@@ -202,6 +245,10 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/mcp/ws" && mcpAuthed != nil {
 			mcpAuthed.ServeHTTP(w, r)
+			return
+		}
+		if r.URL.Path == browserTestFormPath {
+			serveBrowserTestForm(w, r)
 			return
 		}
 		if cfg.pairing != nil && isPublicMobilePath(r.URL.Path) {
@@ -357,6 +404,9 @@ func (s *Server) patchSession(c *cart.Context) error {
 
 func (s *Server) deleteSession(c *cart.Context) error {
 	id, _ := c.Param("id")
+	if s.voice != nil {
+		s.voice.CancelSession(c.Request.Context(), id)
+	}
 	// 先 cancel 进行中的 turn:否则 provider 流会继续跑到自然结束,
 	// 且收尾 FinishTurn 撞上已删除的 session。无进行中 turn 时 cancel 返回
 	// ErrNoRunningTurn,忽略即可。
@@ -365,6 +415,12 @@ func (s *Server) deleteSession(c *cart.Context) error {
 	}
 	if err := s.store.DeleteSession(c.Request.Context(), id); err != nil {
 		return s.fail(c, err)
+	}
+	if s.voice != nil {
+		s.voice.ReleaseSession(id)
+	}
+	if s.browser != nil {
+		_ = s.browser.ReleaseSession(c.Request.Context(), id)
 	}
 	c.String(http.StatusNoContent, "")
 	return nil
@@ -495,7 +551,15 @@ func (s *Server) cancel(c *cart.Context) error {
 	if _, err := s.store.GetSession(c.Request.Context(), id); err != nil {
 		return s.fail(c, err)
 	}
+	voiceCancelled := false
+	if s.voice != nil {
+		voiceCancelled = s.voice.CancelSession(c.Request.Context(), id)
+	}
 	if err := s.engine.Cancel(id); err != nil {
+		if errors.Is(err, engine.ErrNoRunningTurn) && voiceCancelled {
+			c.JSON(http.StatusAccepted, map[string]string{"status": "cancelling"})
+			return nil
+		}
 		c.JSON(http.StatusConflict, map[string]string{"error": "no_running_turn"})
 		return nil
 	}

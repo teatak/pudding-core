@@ -1,4 +1,4 @@
-import { Cable, FolderOpen, Paperclip, WandSparkles } from "lucide-react";
+import { Cable, Camera, FolderOpen, Paperclip, ScanLine, WandSparkles } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 
 import { AppIcon } from "@/components/AppIcon";
@@ -111,17 +111,25 @@ function MentionIcon({ reference }: { reference: ComposerMentionReference }) {
   if (reference.kind === "skill") {
     return <ColoredMentionIcon tone="violet" icon={<WandSparkles className="size-3.5" />} />;
   }
-  return reference.kind === "action" && reference.actionID === "folder" ? (
-    <ColoredMentionIcon tone="amber" icon={<FolderOpen className="size-3.5" />} />
-  ) : (
-    <ColoredMentionIcon tone="sky" icon={<Paperclip className="size-3.5" />} />
-  );
+  if (reference.kind === "action" && reference.actionID === "folder") {
+    return <ColoredMentionIcon tone="amber" icon={<FolderOpen className="size-3.5" />} />;
+  }
+  if (reference.kind === "action" && reference.actionID === "screenshot") {
+    return <ColoredMentionIcon tone="indigo" icon={<ScanLine className="size-3.5" />} />;
+  }
+  if (reference.kind === "action" && reference.actionID === "photo") {
+    return <ColoredMentionIcon tone="emerald" icon={<Camera className="size-3.5" />} />;
+  }
+  return <ColoredMentionIcon tone="sky" icon={<Paperclip className="size-3.5" />} />;
 }
 
-function ColoredMentionIcon({ icon, tone }: { icon: ReactNode; tone: "amber" | "sky" | "teal" | "violet" }) {
+function ColoredMentionIcon({ icon, tone }: { icon: ReactNode; tone: "amber" | "emerald" | "indigo" | "sky" | "slate" | "teal" | "violet" }) {
   const toneClass = {
     amber: "bg-amber-600 text-white",
+    emerald: "bg-emerald-600 text-white",
+    indigo: "bg-indigo-600 text-white",
     sky: "bg-sky-600 text-white",
+    slate: "bg-slate-600 text-white",
     teal: "bg-teal-600 text-white",
     violet: "bg-violet-600 text-white",
   }[tone];

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleExecutable</key><string>pudding-desktop</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleIdentifier</key><string>com.teatak.pudding.dev</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleName</key><string>Pudding Dev</string>
+  <key>CFBundleDisplayName</key><string>Pudding Dev</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleVersion</key><string>0.0.0-dev</string>
+  <key>CFBundleShortVersionString</key><string>0.0.0-dev</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSCameraUsageDescription</key><string>Pudding Dev uses the camera only when you choose to take a photo as chat context.</string>
+  <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
+</dict>
+</plist>

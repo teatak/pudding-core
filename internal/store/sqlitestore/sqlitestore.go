@@ -362,6 +362,7 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 			TurnID:          in.TurnID,
 			ClientMessageID: in.ClientMessageID,
 			UserMessageID:   in.UserMessageID,
+			Text:            in.UserText,
 		}
 		if err := insertEventTx(ctx, tx, &ev); err != nil {
 			return err
@@ -695,6 +696,7 @@ func (s *Store) PromoteNextQueuedInput(ctx context.Context, in store.PromoteQueu
 					TurnID:          turn.ID,
 					ClientMessageID: turn.ClientMessageID,
 					UserMessageID:   msg.ID,
+					Text:            input.Text,
 				}
 				if err := insertEventTx(ctx, tx, &ev); err != nil {
 					return err

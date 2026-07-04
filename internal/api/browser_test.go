@@ -1,0 +1,235 @@
+package api
+
+import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/teatak/pudding-core/internal/browser"
+	"github.com/teatak/pudding-core/internal/engine"
+	"github.com/teatak/pudding-core/internal/event"
+	"github.com/teatak/pudding-core/internal/provider/mock"
+	"github.com/teatak/pudding-core/internal/provider/registry"
+	"github.com/teatak/pudding-core/internal/store"
+	"github.com/teatak/pudding-core/internal/store/memstore"
+)
+
+func newBrowserTestServer(t *testing.T) (*httptest.Server, store.Store, *fakeBrowserService) {
+	t.Helper()
+	ms := memstore.New()
+	homeDir := t.TempDir()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"ok"}))), ms, engine.WithAttachmentHome(homeDir))
+	browserSvc := &fakeBrowserService{tabs: map[string]browser.TabSnapshot{}}
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithHome(homeDir).WithBrowser(browserSvc).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+	return srv, ms, browserSvc
+}
+
+func TestBrowserTabsAreSessionScoped(t *testing.T) {
+	srv, st, browserSvc := newBrowserTestServer(t)
+	ctx := context.Background()
+	for _, id := range []string{"sess_a", "sess_b"} {
+		if err := st.CreateSession(ctx, &store.Session{ID: id, Provider: "mock", Model: "mock"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/tabs", nil)
+	tab := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusCreated || tab.SessionID != "sess_a" || tab.ID == "" {
+		t.Fatalf("create tab status=%d tab=%+v", resp.StatusCode, tab)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_b/browser/tabs/"+tab.ID, nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("cross-session get status = %d", resp.StatusCode)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/tabs/"+tab.ID+"/open", map[string]string{"url": "example.com"})
+	opened := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusOK || opened.URL != "example.com" {
+		t.Fatalf("open status=%d tab=%+v", resp.StatusCode, opened)
+	}
+	if browserSvc.openSession != "sess_a" {
+		t.Fatalf("open session = %q", browserSvc.openSession)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/tabs/"+tab.ID+"/click", map[string]string{"selector": "#save"})
+	clicked := decodeJSON[browser.ActionResult](t, resp)
+	if resp.StatusCode != http.StatusOK || clicked.Action != "click" || browserSvc.clickSession != "sess_a" {
+		t.Fatalf("click status=%d result=%+v session=%q", resp.StatusCode, clicked, browserSvc.clickSession)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/tabs/"+tab.ID+"/type", map[string]any{"selector": "#name", "text": "Pudding", "clear": true})
+	typed := decodeJSON[browser.ActionResult](t, resp)
+	if resp.StatusCode != http.StatusOK || typed.Action != "type" || browserSvc.typeText != "Pudding" {
+		t.Fatalf("type status=%d result=%+v text=%q", resp.StatusCode, typed, browserSvc.typeText)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/tabs/"+tab.ID+"/scroll", map[string]any{"deltaY": 400})
+	scrolled := decodeJSON[browser.ActionResult](t, resp)
+	if resp.StatusCode != http.StatusOK || scrolled.Action != "scroll" || browserSvc.scrollY != 400 {
+		t.Fatalf("scroll status=%d result=%+v deltaY=%v", resp.StatusCode, scrolled, browserSvc.scrollY)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_b/browser/tabs/"+tab.ID+"/click", map[string]string{"selector": "#save"})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("cross-session click status = %d", resp.StatusCode)
+	}
+
+	resp = req(t, http.MethodDelete, srv.URL+"/sessions/sess_a", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete status=%d", resp.StatusCode)
+	}
+	if browserSvc.releasedSession != "sess_a" {
+		t.Fatalf("released session = %q", browserSvc.releasedSession)
+	}
+	if _, ok := browserSvc.tabs[tab.ID]; ok {
+		t.Fatalf("session tab was not released")
+	}
+}
+
+func TestBrowserRoutesRequireExistingSession(t *testing.T) {
+	srv, _, _ := newBrowserTestServer(t)
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/missing/browser/tabs", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+}
+
+func TestBrowserTestFormIsPublic(t *testing.T) {
+	srv, _, _ := newBrowserTestServer(t)
+	resp, err := http.Get(srv.URL + browserTestFormPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `id="test-form"`) {
+		t.Fatalf("status=%d body=%q", resp.StatusCode, string(body))
+	}
+}
+
+type fakeBrowserService struct {
+	tabs            map[string]browser.TabSnapshot
+	openSession     string
+	releasedSession string
+	clickSession    string
+	typeText        string
+	scrollY         float64
+}
+
+func (f *fakeBrowserService) CreateTab(_ context.Context, sessionID string) (browser.TabSnapshot, error) {
+	return f.create(sessionID), nil
+}
+
+func (f *fakeBrowserService) create(sessionID string) browser.TabSnapshot {
+	now := time.Now().UTC()
+	tab := browser.TabSnapshot{
+		ID:        "tab_" + sessionID,
+		SessionID: sessionID,
+		URL:       "about:blank",
+		Title:     "Blank",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	f.tabs[tab.ID] = tab
+	return tab
+}
+
+func (f *fakeBrowserService) ListTabs(_ context.Context, sessionID string) ([]browser.TabSnapshot, error) {
+	var out []browser.TabSnapshot
+	for _, tab := range f.tabs {
+		if tab.SessionID == sessionID {
+			out = append(out, tab)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeBrowserService) GetTab(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
+	tab, ok := f.tabs[tabID]
+	if !ok || tab.SessionID != sessionID {
+		return browser.TabSnapshot{}, browser.ErrTabNotFound
+	}
+	return tab, nil
+}
+
+func (f *fakeBrowserService) ReleaseTab(_ context.Context, sessionID, tabID string) error {
+	tab, ok := f.tabs[tabID]
+	if !ok || tab.SessionID != sessionID {
+		return browser.ErrTabNotFound
+	}
+	delete(f.tabs, tabID)
+	return nil
+}
+
+func (f *fakeBrowserService) ReleaseSession(_ context.Context, sessionID string) error {
+	f.releasedSession = sessionID
+	for id, tab := range f.tabs {
+		if tab.SessionID == sessionID {
+			delete(f.tabs, id)
+		}
+	}
+	return nil
+}
+
+func (f *fakeBrowserService) Open(_ context.Context, sessionID, tabID, rawURL string) (browser.TabSnapshot, error) {
+	f.openSession = sessionID
+	tab, ok := f.tabs[tabID]
+	if !ok {
+		tab = f.create(sessionID)
+	}
+	if tab.SessionID != sessionID {
+		return browser.TabSnapshot{}, browser.ErrTabNotFound
+	}
+	tab.URL = rawURL
+	f.tabs[tab.ID] = tab
+	return tab, nil
+}
+
+func (f *fakeBrowserService) Observe(context.Context, string, string, browser.ObserveOptions) (browser.ObserveResult, error) {
+	return browser.ObserveResult{}, nil
+}
+
+func (f *fakeBrowserService) Screenshot(context.Context, string, string, browser.ScreenshotOptions) (browser.ScreenshotResult, error) {
+	return browser.ScreenshotResult{}, nil
+}
+
+func (f *fakeBrowserService) Click(_ context.Context, sessionID, tabID string, in browser.ClickInput) (browser.ActionResult, error) {
+	tab, err := f.GetTab(context.Background(), sessionID, tabID)
+	if err != nil {
+		return browser.ActionResult{}, err
+	}
+	f.clickSession = sessionID
+	return browser.ActionResult{Tab: tab, Action: "click", Result: map[string]any{"selector": in.Selector}}, nil
+}
+
+func (f *fakeBrowserService) Type(_ context.Context, sessionID, tabID string, in browser.TypeInput) (browser.ActionResult, error) {
+	tab, err := f.GetTab(context.Background(), sessionID, tabID)
+	if err != nil {
+		return browser.ActionResult{}, err
+	}
+	f.typeText = in.Text
+	return browser.ActionResult{Tab: tab, Action: "type", Result: map[string]any{"textLength": len(in.Text)}}, nil
+}
+
+func (f *fakeBrowserService) Scroll(_ context.Context, sessionID, tabID string, in browser.ScrollInput) (browser.ActionResult, error) {
+	tab, err := f.GetTab(context.Background(), sessionID, tabID)
+	if err != nil {
+		return browser.ActionResult{}, err
+	}
+	f.scrollY = in.DeltaY
+	return browser.ActionResult{Tab: tab, Action: "scroll", Result: map[string]any{"y": in.DeltaY}}, nil
+}
+
+func (f *fakeBrowserService) Close() error { return nil }

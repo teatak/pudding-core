@@ -9,10 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/contextbuilder"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider"
@@ -910,7 +912,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 	}
 	for loop := 0; ; loop++ {
 		req := baseReq
-		req.Messages = requestMessagesWithTurnParts(baseReq.Messages, parts.Parts())
+		req.Messages = requestMessagesWithTurnParts(baseReq.Messages, parts.Parts(), sessionID, e.attachmentHome, resolved.config)
 		ch, err := client.Stream(ctx, req)
 		if err != nil {
 			return store.TurnFailed, fmt.Sprintf("provider: %v", err), currentMode
@@ -1279,6 +1281,7 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			result.Name = call.Name
 		}
 		parts.AppendToolResult(result)
+		parts.AppendAttachments(result.Attachments)
 		if err := e.commitTurnParts(turnID, parts, true); err != nil {
 			return store.TurnFailed, fmt.Sprintf("append output: %v", err), nextMode, modeChanged
 		}
@@ -1477,6 +1480,24 @@ func (a *turnPartAccumulator) AppendToolResult(result tool.Result) {
 	})
 }
 
+func (a *turnPartAccumulator) AppendAttachments(attachments []store.Attachment) {
+	for _, item := range store.NormalizeAttachments(attachments) {
+		a.parts = append(a.parts, store.ContentPart{
+			Type:                store.ContentPartAttachment,
+			CallID:              item.ID,
+			Name:                item.Name,
+			AttachmentKey:       item.AttachmentKey,
+			URL:                 item.URL,
+			MIME:                item.MIME,
+			Size:                item.Size,
+			Origin:              item.Origin,
+			SourcePath:          item.SourcePath,
+			AttachmentCreatedAt: item.CreatedAt,
+			AudioTranscript:     item.AudioTranscript,
+		})
+	}
+}
+
 func (a *turnPartAccumulator) PendingToolCalls() []tool.Call {
 	results := make(map[string]bool)
 	for _, part := range a.parts {
@@ -1554,15 +1575,35 @@ func (a *turnPartAccumulator) PartsRange(start, end int) []store.ContentPart {
 	return store.NormalizeContentParts(out)
 }
 
-func requestMessagesWithTurnParts(base []provider.Message, parts []store.ContentPart) []provider.Message {
+func requestMessagesWithTurnParts(base []provider.Message, parts []store.ContentPart, sessionID, attachmentHome string, cfg provider.ModelConfig) []provider.Message {
 	out := cloneProviderMessages(base)
-	providerParts := providerPartsFromStore(parts)
-	if len(providerParts) > 0 {
+	assistantStoreParts := nonAttachmentParts(parts)
+	assistantProviderParts := providerPartsFromStore(assistantStoreParts)
+	if len(assistantProviderParts) > 0 {
 		out = append(out, provider.Message{
 			Role:  provider.RoleAssistant,
-			Text:  store.TextFromParts(parts),
-			Parts: providerParts,
+			Text:  store.TextFromParts(assistantStoreParts),
+			Parts: assistantProviderParts,
 		})
+	}
+	attachmentProviderParts := providerAttachmentPartsFromStore(sessionID, parts, attachmentHome, cfg)
+	if len(attachmentProviderParts) > 0 {
+		out = append(out, provider.Message{
+			Role:  provider.RoleUser,
+			Text:  textFromProviderParts(attachmentProviderParts),
+			Parts: attachmentProviderParts,
+		})
+	}
+	return out
+}
+
+func nonAttachmentParts(parts []store.ContentPart) []store.ContentPart {
+	out := make([]store.ContentPart, 0, len(parts))
+	for _, part := range parts {
+		if part.Type == store.ContentPartAttachment {
+			continue
+		}
+		out = append(out, part)
 	}
 	return out
 }
@@ -1595,6 +1636,104 @@ func providerPartsFromStore(parts []store.ContentPart) []provider.Part {
 		}
 	}
 	return out
+}
+
+func providerAttachmentPartsFromStore(sessionID string, parts []store.ContentPart, attachmentHome string, cfg provider.ModelConfig) []provider.Part {
+	out := make([]provider.Part, 0, len(parts))
+	mediaStarted := false
+	for _, part := range parts {
+		if part.Type != store.ContentPartAttachment {
+			continue
+		}
+		if imagePart, ok := providerImagePartFromAttachment(sessionID, attachmentHome, part, cfg); ok {
+			if !mediaStarted {
+				out = append(out, provider.Part{Type: provider.PartText, Text: "Image attachment returned by builtin_file_read."})
+				mediaStarted = true
+			}
+			out = append(out, imagePart)
+			continue
+		}
+		if text := providerAttachmentFallbackText(part); text != "" {
+			out = append(out, provider.Part{Type: provider.PartText, Text: text})
+		}
+	}
+	return out
+}
+
+func providerImagePartFromAttachment(sessionID, attachmentHome string, part store.ContentPart, cfg provider.ModelConfig) (provider.Part, bool) {
+	if cfg.Capabilities == nil || !cfg.Capabilities.Image {
+		return provider.Part{}, false
+	}
+	if strings.TrimSpace(attachmentHome) == "" {
+		return provider.Part{}, false
+	}
+	mime := strings.ToLower(strings.TrimSpace(part.MIME))
+	if !strings.HasPrefix(mime, "image/") || mime == "image/svg+xml" {
+		return provider.Part{}, false
+	}
+	path, ok, err := attachment.NewService(attachmentHome).Path(attachmentSessionIDForPart(sessionID, part), part.AttachmentKey)
+	if err != nil || !ok {
+		return provider.Part{}, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 {
+		return provider.Part{}, false
+	}
+	return provider.Part{Type: provider.PartImage, MIME: mime, Data: data}, true
+}
+
+func attachmentSessionIDForPart(sessionID string, part store.ContentPart) string {
+	if part.Origin == attachment.OriginTemp && strings.Contains(part.AttachmentKey, "/"+attachment.DraftSessionID+"/") {
+		return attachment.DraftSessionID
+	}
+	return sessionID
+}
+
+func providerAttachmentFallbackText(part store.ContentPart) string {
+	var b strings.Builder
+	b.WriteString("[Attachment]\n")
+	if part.Name != "" {
+		b.WriteString("Name: ")
+		b.WriteString(part.Name)
+		b.WriteByte('\n')
+	}
+	if part.MIME != "" {
+		b.WriteString("MIME: ")
+		b.WriteString(part.MIME)
+		b.WriteByte('\n')
+	}
+	if part.Size > 0 {
+		b.WriteString("Size bytes: ")
+		b.WriteString(fmt.Sprintf("%d", part.Size))
+		b.WriteByte('\n')
+	}
+	if part.SourcePath != "" {
+		b.WriteString("Source path: ")
+		b.WriteString(part.SourcePath)
+		b.WriteByte('\n')
+	}
+	if part.URL != "" {
+		b.WriteString("URL: ")
+		b.WriteString(part.URL)
+		b.WriteByte('\n')
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func textFromProviderParts(parts []provider.Part) string {
+	var b strings.Builder
+	for _, part := range parts {
+		switch part.Type {
+		case "", provider.PartText, provider.PartThought:
+			b.WriteString(part.Text)
+		case provider.PartToolResult:
+			if b.Len() > 0 && part.Content != "" {
+				b.WriteByte('\n')
+			}
+			b.WriteString(part.Content)
+		}
+	}
+	return b.String()
 }
 
 func cloneProviderMessages(in []provider.Message) []provider.Message {

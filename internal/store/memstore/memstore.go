@@ -255,6 +255,7 @@ func (m *Memstore) BeginTurn(_ context.Context, in store.BeginTurnInput) (*store
 		TurnID:          in.TurnID,
 		ClientMessageID: in.ClientMessageID,
 		UserMessageID:   in.UserMessageID,
+		Text:            in.UserText,
 	}
 	m.turns[turn.ID] = turn
 	m.messages[in.SessionID] = append(m.messages[in.SessionID], msg)
@@ -498,6 +499,7 @@ func (m *Memstore) PromoteNextQueuedInput(_ context.Context, in store.PromoteQue
 				TurnID:          turn.ID,
 				ClientMessageID: input.ClientMessageID,
 				UserMessageID:   msg.ID,
+				Text:            input.Text,
 			}
 			m.turns[turn.ID] = turn
 			m.messages[input.SessionID] = append(m.messages[input.SessionID], msg)

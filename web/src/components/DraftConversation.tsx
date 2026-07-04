@@ -20,6 +20,8 @@ import { z } from "zod";
 
 import {
   APIError,
+  captureDesktopPhoto,
+  captureDesktopScreenshot,
   createSession,
   deleteSession,
   listApps,
@@ -386,6 +388,8 @@ function DraftComposer({
   const [draftReasoningEffort, setDraftReasoningEffortValue] = useState("");
   const [draftReasoningModelKey, setDraftReasoningModelKey] = useState("");
   const [attachmentPreviewIndex, setAttachmentPreviewIndex] = useState<number | null>(null);
+  const [capturingPhoto, setCapturingPhoto] = useState(false);
+  const [capturingScreenshot, setCapturingScreenshot] = useState(false);
   const [textFocused, setTextFocused] = useState(false);
   const [pickingAttachment, setPickingAttachment] = useState(false);
   const [pickingLocalFolder, setPickingLocalFolder] = useState(false);
@@ -440,7 +444,17 @@ function DraftComposer({
         pickAttachment();
         return;
       }
-      pickLocalFolder();
+      if (actionID === "folder") {
+        pickLocalFolder();
+        return;
+      }
+      if (actionID === "screenshot") {
+        captureScreenshot();
+        return;
+      }
+      if (actionID === "photo") {
+        capturePhoto();
+      }
     },
   });
   const mentionMenuOpen = textFocused && mentions.open;
@@ -577,6 +591,53 @@ function DraftComposer({
       })),
     ]);
   }, [setDraftAttachments]);
+  const captureScreenshot = useCallback(async () => {
+    if (capturingScreenshot) {
+      return;
+    }
+    setCapturingScreenshot(true);
+    try {
+      addUploadedAttachments(await captureDesktopScreenshot(token, draftAttachmentSessionID));
+      onSubmitError(null);
+      window.requestAnimationFrame(() => textAreaRef.current?.focus({ preventScroll: true }));
+    } catch (error) {
+      if (error instanceof APIError && error.code === "screenshot_cancelled") {
+        return;
+      }
+      toast.error(t("composer.screenshotFailed"));
+    } finally {
+      setCapturingScreenshot(false);
+    }
+  }, [addUploadedAttachments, capturingScreenshot, onSubmitError, t, token]);
+  const capturePhoto = useCallback(async () => {
+    if (capturingPhoto) {
+      return;
+    }
+    setCapturingPhoto(true);
+    try {
+      addUploadedAttachments([await captureDesktopPhoto(token, draftAttachmentSessionID)]);
+      onSubmitError(null);
+      window.requestAnimationFrame(() => textAreaRef.current?.focus({ preventScroll: true }));
+    } catch (error) {
+      if (error instanceof APIError) {
+        if (error.code === "camera_timeout") {
+          toast.error(t("composer.photoTimeout"));
+          return;
+        }
+        if (error.code === "camera_permission_denied") {
+          toast.error(t("composer.photoPermissionDenied"));
+          return;
+        }
+        if (error.code === "camera_unavailable" || error.code === "camera_unsupported") {
+          toast.error(t("composer.photoUnavailable"));
+          return;
+        }
+      }
+      toast.error(t("composer.photoFailed"));
+    } finally {
+      setCapturingPhoto(false);
+    }
+  }, [addUploadedAttachments, capturingPhoto, onSubmitError, t, token]);
   const addLocalFolderPaths = useCallback((paths: string[]) => {
     const folders = paths.flatMap((path) => {
       const folder = createLocalFolderPath(path);
@@ -957,7 +1018,7 @@ function DraftComposer({
             <div className="flex min-w-0 items-center gap-1 px-2 pb-2">
               <ComposerAddButton
                 active={mentionMenuOpen}
-                busy={pickingAttachment || pickingLocalFolder}
+                busy={capturingPhoto || capturingScreenshot || pickingAttachment || pickingLocalFolder}
                 label={t("composer.addMenuTitle")}
                 onClick={openMentionMenuFromButton}
               />
@@ -1093,7 +1154,6 @@ function DraftAttachmentChip({
           "group relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border bg-muted/40 shadow-sm",
           item.status === "error" ? "border-destructive/40" : "border-border/70",
         )}
-        title={`${item.name} ${formatAttachmentSize(item.size)}`}
       >
         <button
           aria-label={item.name}
@@ -1113,17 +1173,15 @@ function DraftAttachmentChip({
             <Loader2 className="size-4 animate-spin text-foreground" />
           </span>
         ) : null}
-        <Button
+        <button
           aria-label={removeLabel}
-          className="absolute top-1.5 right-1.5 z-10 size-5 rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
+          className="absolute top-1.5 right-1.5 z-10 grid size-5 place-items-center rounded-full bg-foreground text-background shadow-sm hover:bg-foreground hover:text-background focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-50"
           disabled={locked}
-          size="icon-xs"
           type="button"
-          variant="ghost"
           onClick={onRemove}
         >
           <X className="size-3" />
-        </Button>
+        </button>
       </div>
     );
   }

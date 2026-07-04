@@ -1,13 +1,17 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/teatak/pudding-core/internal/browser"
 	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider"
@@ -163,6 +167,9 @@ func TestSubmitHappyPath(t *testing.T) {
 	}
 	if evs[0].Seq != 1 || evs[1].Seq != 2 {
 		t.Fatalf("seq not monotonic: %+v", evs)
+	}
+	if evs[0].Text != "hi" {
+		t.Fatalf("started event must carry user text for live transcript: %+v", evs[0])
 	}
 	if evs[1].AssistantMessageID != msgs[1].ID {
 		t.Fatalf("completed event not linked to assistant message")
@@ -636,6 +643,184 @@ func TestSubmitRunsToolLoop(t *testing.T) {
 	parts := msgs[2].Parts
 	if len(parts) != 1 || parts[0].Type != store.ContentPartToolResult || parts[0].Name != tool.TimeGetCurrent || !parts[0].Ok || parts[0].Content == "" || parts[0].SummaryKind != tool.SummaryReturnedFields || parts[0].SummaryCount != 1 {
 		t.Fatalf("tool_result part wrong: %+v", parts)
+	}
+}
+
+func TestSubmitRunsBuiltinBrowserToolLoop(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	client := &browserToolLoopClient{}
+	browserSvc := &engineTestBrowser{}
+	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithTools(tool.NewBuiltinRunner(tool.WithBrowser(browserSvc))))
+	ctx := context.Background()
+	sid := "sess_browser_tool"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "browser", Provider: "capture", Model: "tool-model"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "capture", Protocol: "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID:           "tool-model",
+			Capabilities: &store.ModelCaps{Tools: true},
+			Limits:       &store.ModelLimits{MaxToolLoops: 3},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "看一下网页"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+
+	if len(client.requests) != 2 {
+		t.Fatalf("want 2 provider calls, got %d", len(client.requests))
+	}
+	if !hasToolDef(client.requests[0].Tools, tool.BrowserObserve) {
+		t.Fatalf("browser tool definitions not injected: %+v", client.requests[0].Tools)
+	}
+	if browserSvc.observedSession != sid || browserSvc.observedTab != "tab_1" || browserSvc.observedOptions.MaxElements != 2 {
+		t.Fatalf("browser observe not routed correctly: %+v", browserSvc)
+	}
+	last := client.requests[1].Messages[len(client.requests[1].Messages)-1]
+	if !hasProviderPart(last.Parts, provider.PartToolUse) || !hasProviderPart(last.Parts, provider.PartToolResult) {
+		t.Fatalf("second provider call missing browser tool history: %+v", last.Parts)
+	}
+	msgs, err := ms.ListMessages(ctx, sid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 4 || msgs[3].Text != "浏览器结果已收到" {
+		t.Fatalf("unexpected messages: %+v", msgs)
+	}
+	parts := msgs[2].Parts
+	if len(parts) != 1 || parts[0].Type != store.ContentPartToolResult || parts[0].Name != tool.BrowserObserve || !parts[0].Ok || !strings.Contains(parts[0].Content, "Example Domain") {
+		t.Fatalf("browser tool result part wrong: %+v", parts)
+	}
+}
+
+func TestSubmitRoutesFileReadImageToNextProviderRequest(t *testing.T) {
+	home := t.TempDir()
+	tempDir := filepath.Join(home, "temp")
+	if err := os.MkdirAll(tempDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	expectedImageBytes := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0, 'I', 'E', 'N', 'D'}
+	if err := os.WriteFile(filepath.Join(tempDir, "image.png"), expectedImageBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ms := memstore.New()
+	hub := event.NewHub()
+	client := &fileReadImageClient{}
+	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithAttachmentHome(home), WithTools(tool.NewBuiltinRunner(tool.WithHomeDir(home))))
+	ctx := context.Background()
+	sid := "sess_image_tool"
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID:         sid,
+		Title:      "image tool",
+		Provider:   "capture",
+		Model:      "vision-model",
+		ActiveMode: store.ModeWorkspace,
+		ModeLease:  store.ModeLeaseSession,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "capture", Protocol: "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID:           "vision-model",
+			Capabilities: &store.ModelCaps{Image: true, Tools: true},
+			Limits:       &store.ModelLimits{MaxToolLoops: 3},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "看图"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+
+	if len(client.requests) != 2 {
+		t.Fatalf("want 2 provider calls, got %d", len(client.requests))
+	}
+	lastReq := client.requests[1]
+	if len(lastReq.Messages) < 2 {
+		t.Fatalf("second request should include tool history and image: %+v", lastReq.Messages)
+	}
+	imageMsg := lastReq.Messages[len(lastReq.Messages)-1]
+	if imageMsg.Role != provider.RoleUser || !hasProviderPart(imageMsg.Parts, provider.PartImage) {
+		t.Fatalf("image should be routed as a user image message: %+v", imageMsg)
+	}
+	var routedImageBytes []byte
+	for _, part := range imageMsg.Parts {
+		if part.Type == provider.PartImage {
+			routedImageBytes = part.Data
+		}
+	}
+	if !bytes.Equal(routedImageBytes, expectedImageBytes) {
+		t.Fatalf("unexpected image bytes: %x", routedImageBytes)
+	}
+}
+
+func TestSubmitDoesNotRouteFileReadImageWhenCapabilityUnknown(t *testing.T) {
+	home := t.TempDir()
+	tempDir := filepath.Join(home, "temp")
+	if err := os.MkdirAll(tempDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "image.png"), []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ms := memstore.New()
+	hub := event.NewHub()
+	client := &fileReadImageClient{}
+	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithAttachmentHome(home), WithTools(tool.NewBuiltinRunner(tool.WithHomeDir(home))))
+	ctx := context.Background()
+	sid := "sess_image_tool_unknown"
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID:         sid,
+		Title:      "image tool",
+		Provider:   "capture",
+		Model:      "tool-model",
+		ActiveMode: store.ModeWorkspace,
+		ModeLease:  store.ModeLeaseSession,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "capture", Protocol: "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID:           "tool-model",
+			Capabilities: &store.ModelCaps{Tools: true},
+			Limits:       &store.ModelLimits{MaxToolLoops: 3},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "看图"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+
+	if len(client.requests) != 2 {
+		t.Fatalf("want 2 provider calls, got %d", len(client.requests))
+	}
+	lastReq := client.requests[1]
+	if len(lastReq.Messages) == 0 {
+		t.Fatalf("second request should include fallback attachment text")
+	}
+	for _, msg := range lastReq.Messages {
+		if hasProviderPart(msg.Parts, provider.PartImage) {
+			t.Fatalf("unknown image capability should not route image bytes: %+v", msg)
+		}
+	}
+	imageMsg := lastReq.Messages[len(lastReq.Messages)-1]
+	if !strings.Contains(imageMsg.Text, "Source path:") {
+		t.Fatalf("fallback should expose source path metadata: %+v", imageMsg)
 	}
 }
 
@@ -1533,6 +1718,119 @@ func (c *toolLoopClient) Stream(_ context.Context, req provider.Request) (<-chan
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	} else {
 		out <- provider.Chunk{Part: provider.PartText, Delta: "工具结果已收到"}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
+	}
+	close(out)
+	return out, nil
+}
+
+type browserToolLoopClient struct {
+	requests []provider.Request
+}
+
+func (c *browserToolLoopClient) Name() string { return "browser-tool-loop" }
+
+func (c *browserToolLoopClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	c.requests = append(c.requests, req)
+	out := make(chan provider.Chunk, 4)
+	if len(c.requests) == 1 {
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
+			Index:     0,
+			CallID:    "call_browser",
+			Name:      tool.BrowserObserve,
+			ArgsDelta: `{"tabID":"tab_1","maxTextChars":120,"maxElements":2}`,
+		}}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	} else {
+		out <- provider.Chunk{Part: provider.PartText, Delta: "浏览器结果已收到"}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
+	}
+	close(out)
+	return out, nil
+}
+
+type engineTestBrowser struct {
+	observedSession string
+	observedTab     string
+	observedOptions browser.ObserveOptions
+}
+
+func (b *engineTestBrowser) CreateTab(_ context.Context, sessionID string) (browser.TabSnapshot, error) {
+	return browser.TabSnapshot{ID: "tab_1", SessionID: sessionID}, nil
+}
+
+func (b *engineTestBrowser) ListTabs(context.Context, string) ([]browser.TabSnapshot, error) {
+	return nil, nil
+}
+
+func (b *engineTestBrowser) GetTab(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
+	return browser.TabSnapshot{ID: tabID, SessionID: sessionID}, nil
+}
+
+func (b *engineTestBrowser) ReleaseTab(context.Context, string, string) error {
+	return nil
+}
+
+func (b *engineTestBrowser) ReleaseSession(context.Context, string) error {
+	return nil
+}
+
+func (b *engineTestBrowser) Open(_ context.Context, sessionID, tabID, rawURL string) (browser.TabSnapshot, error) {
+	return browser.TabSnapshot{ID: tabID, SessionID: sessionID, URL: rawURL}, nil
+}
+
+func (b *engineTestBrowser) Observe(_ context.Context, sessionID, tabID string, opts browser.ObserveOptions) (browser.ObserveResult, error) {
+	b.observedSession = sessionID
+	b.observedTab = tabID
+	b.observedOptions = opts
+	tab := browser.TabSnapshot{ID: tabID, SessionID: sessionID, URL: "https://example.com", Title: "Example Domain"}
+	return browser.ObserveResult{
+		Tab:        tab,
+		Title:      "Example Domain",
+		URL:        "https://example.com",
+		ReadyState: "complete",
+		Text:       "Example Domain",
+		TextChars:  len("Example Domain"),
+	}, nil
+}
+
+func (b *engineTestBrowser) Screenshot(context.Context, string, string, browser.ScreenshotOptions) (browser.ScreenshotResult, error) {
+	return browser.ScreenshotResult{}, nil
+}
+
+func (b *engineTestBrowser) Click(context.Context, string, string, browser.ClickInput) (browser.ActionResult, error) {
+	return browser.ActionResult{}, nil
+}
+
+func (b *engineTestBrowser) Type(context.Context, string, string, browser.TypeInput) (browser.ActionResult, error) {
+	return browser.ActionResult{}, nil
+}
+
+func (b *engineTestBrowser) Scroll(context.Context, string, string, browser.ScrollInput) (browser.ActionResult, error) {
+	return browser.ActionResult{}, nil
+}
+
+func (b *engineTestBrowser) Close() error { return nil }
+
+type fileReadImageClient struct {
+	requests []provider.Request
+}
+
+func (c *fileReadImageClient) Name() string { return "file-read-image" }
+
+func (c *fileReadImageClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	c.requests = append(c.requests, req)
+	out := make(chan provider.Chunk, 4)
+	if len(c.requests) == 1 {
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
+			Index:     0,
+			CallID:    "call_image",
+			Name:      tool.FileRead,
+			ArgsDelta: `{"scope":"temp","path":"image.png"}`,
+		}}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	} else {
+		out <- provider.Chunk{Part: provider.PartText, Delta: "已收到图片"}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
 	}
 	close(out)

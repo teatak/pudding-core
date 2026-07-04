@@ -9,11 +9,13 @@ import {
   FolderOpen,
   Loader2,
   MessageSquarePlus,
+  Mic,
   NotebookText,
   Pause,
   PenLine,
   Play,
   ShieldCheck,
+  Volume2,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -35,9 +37,14 @@ import { z } from "zod";
 import {
   APIError,
   approveApproval,
+  bindAudioInput,
+  bindAudioOutput,
   cancelTurn,
+  captureDesktopPhoto,
+  captureDesktopScreenshot,
   compactSession,
   denyApproval,
+  getAudioBindings,
   getTurn,
   listApps,
   listSkills,
@@ -46,6 +53,7 @@ import {
   uploadAttachment,
   revealDesktopPath,
   type Attachment,
+  type AudioBindings,
   type Session,
   type SkillDraft,
 } from "@/api/client";
@@ -157,6 +165,8 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const [mascotErrorSignal, setMascotErrorSignal] = useState(0);
   const [textFocused, setTextFocused] = useState(false);
   const [attachmentPreviewIndex, setAttachmentPreviewIndex] = useState<number | null>(null);
+  const [capturingPhoto, setCapturingPhoto] = useState(false);
+  const [capturingScreenshot, setCapturingScreenshot] = useState(false);
   const [pickingAttachment, setPickingAttachment] = useState(false);
   const [pickingLocalFolder, setPickingLocalFolder] = useState(false);
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
@@ -288,7 +298,17 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
         pickAttachment();
         return;
       }
-      pickLocalFolder();
+      if (actionID === "folder") {
+        pickLocalFolder();
+        return;
+      }
+      if (actionID === "screenshot") {
+        captureScreenshot();
+        return;
+      }
+      if (actionID === "photo") {
+        capturePhoto();
+      }
     },
   });
   const mentionMenuOpen = textFocused && mentions.open && !slashMenuOpen;
@@ -418,6 +438,53 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       })),
     ]);
   }, [sessionID, setSessionDraftAttachments]);
+  const captureScreenshot = useCallback(async () => {
+    if (capturingScreenshot) {
+      return;
+    }
+    setCapturingScreenshot(true);
+    try {
+      addUploadedAttachments(await captureDesktopScreenshot(token, sessionID));
+      onSubmitError?.(null);
+      window.requestAnimationFrame(() => textAreaRef.current?.focus({ preventScroll: true }));
+    } catch (error) {
+      if (error instanceof APIError && error.code === "screenshot_cancelled") {
+        return;
+      }
+      toast.error(t("composer.screenshotFailed"));
+    } finally {
+      setCapturingScreenshot(false);
+    }
+  }, [addUploadedAttachments, capturingScreenshot, onSubmitError, sessionID, t, token]);
+  const capturePhoto = useCallback(async () => {
+    if (capturingPhoto) {
+      return;
+    }
+    setCapturingPhoto(true);
+    try {
+      addUploadedAttachments([await captureDesktopPhoto(token, sessionID)]);
+      onSubmitError?.(null);
+      window.requestAnimationFrame(() => textAreaRef.current?.focus({ preventScroll: true }));
+    } catch (error) {
+      if (error instanceof APIError) {
+        if (error.code === "camera_timeout") {
+          toast.error(t("composer.photoTimeout"));
+          return;
+        }
+        if (error.code === "camera_permission_denied") {
+          toast.error(t("composer.photoPermissionDenied"));
+          return;
+        }
+        if (error.code === "camera_unavailable" || error.code === "camera_unsupported") {
+          toast.error(t("composer.photoUnavailable"));
+          return;
+        }
+      }
+      toast.error(t("composer.photoFailed"));
+    } finally {
+      setCapturingPhoto(false);
+    }
+  }, [addUploadedAttachments, capturingPhoto, onSubmitError, sessionID, t, token]);
   const addLocalFolderPaths = useCallback((paths: string[]) => {
     const folders = paths.flatMap((path) => {
       const folder = createLocalFolderPath(path);
@@ -992,7 +1059,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
             <div className="flex min-w-0 items-center gap-1 px-2 pb-2">
               <ComposerAddButton
                 active={mentionMenuOpen}
-                busy={pickingAttachment || pickingLocalFolder}
+                busy={capturingPhoto || capturingScreenshot || pickingAttachment || pickingLocalFolder}
                 label={t("composer.addMenuTitle")}
                 onClick={openMentionMenuFromButton}
               />
@@ -1020,6 +1087,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
                   onResolvedChange={handleResolvedModelChange}
                 />
               </div>
+              <SessionAudioControls token={token} session={session} />
               {showStopButton ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1135,6 +1203,112 @@ function LocalFolderChip({
   );
 }
 
+function SessionAudioControls({ token, session }: { token: string; session: Session }) {
+  const { t } = useI18n();
+  const queryClient = useQueryClient();
+  const bindingsQuery = useQuery({
+    queryKey: queryKeys.audioBindings(),
+    queryFn: () => getAudioBindings(token, session.id),
+    enabled: Boolean(token && session.id),
+    refetchInterval: 2000,
+  });
+  const bindings = bindingsQuery.data?.bindings;
+  const inputActive = bindings?.inputOwner === session.id;
+  const outputActive = bindings?.outputOwner === session.id;
+  const invalidateAudioBindings = () => queryClient.invalidateQueries({ queryKey: queryKeys.audioBindings() });
+  const setBindings = (next: AudioBindings) => {
+    queryClient.setQueryData(queryKeys.audioBindings(), { bindings: next });
+    void invalidateAudioBindings();
+  };
+  const inputMutation = useMutation({
+    mutationFn: (enabled: boolean) => bindAudioInput(token, session.id, enabled),
+    onMutate: async (enabled) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.audioBindings() });
+      const previous = queryClient.getQueryData<{ bindings: AudioBindings }>(queryKeys.audioBindings());
+      const current = previous?.bindings ?? { inputOwner: "", outputOwner: "" };
+      queryClient.setQueryData(queryKeys.audioBindings(), {
+        bindings: {
+          ...current,
+          inputOwner: enabled ? session.id : current.inputOwner === session.id ? "" : current.inputOwner,
+        },
+      });
+      return { previous };
+    },
+    onSuccess: (result) => setBindings(result.bindings),
+    onError: (_error, _enabled, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.audioBindings(), context.previous);
+      }
+      toast.error(t("voice.inputFailed"));
+    },
+  });
+  const outputMutation = useMutation({
+    mutationFn: (enabled: boolean) => bindAudioOutput(token, session.id, enabled),
+    onMutate: async (enabled) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.audioBindings() });
+      const previous = queryClient.getQueryData<{ bindings: AudioBindings }>(queryKeys.audioBindings());
+      const current = previous?.bindings ?? { inputOwner: "", outputOwner: "" };
+      queryClient.setQueryData(queryKeys.audioBindings(), {
+        bindings: {
+          ...current,
+          outputOwner: enabled ? session.id : current.outputOwner === session.id ? "" : current.outputOwner,
+        },
+      });
+      return { previous };
+    },
+    onSuccess: (result) => setBindings(result.bindings),
+    onError: (_error, _enabled, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.audioBindings(), context.previous);
+      }
+      toast.error(t("voice.outputFailed"));
+    },
+  });
+  const inputLabel = inputActive ? t("voice.inputOn") : t("voice.inputOff");
+  const outputLabel = outputActive ? t("voice.outputOn") : t("voice.outputOff");
+
+  return (
+    <div className="flex shrink-0 items-center gap-1" aria-label={t("voice.controls")}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            aria-label={inputLabel}
+            aria-pressed={inputActive}
+            className={cn("rounded-full", inputActive && "text-primary")}
+            disabled={inputMutation.isPending}
+            size="icon"
+            type="button"
+            variant={inputActive ? "secondary" : "ghost"}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => inputMutation.mutate(!inputActive)}
+          >
+            {inputMutation.isPending ? <Loader2 className="animate-spin" /> : <Mic />}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{inputLabel}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            aria-label={outputLabel}
+            aria-pressed={outputActive}
+            className={cn("rounded-full", outputActive && "text-primary")}
+            disabled={outputMutation.isPending}
+            size="icon"
+            type="button"
+            variant={outputActive ? "secondary" : "ghost"}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => outputMutation.mutate(!outputActive)}
+          >
+            {outputMutation.isPending ? <Loader2 className="animate-spin" /> : <Volume2 />}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{outputLabel}</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
+
 function ComposerAttachmentChip({
   item,
   previewIndex,
@@ -1163,7 +1337,6 @@ function ComposerAttachmentChip({
           "group relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border bg-muted/40 shadow-sm",
           item.status === "error" ? "border-destructive/40" : "border-border/70",
         )}
-        title={`${item.name} ${formatAttachmentSize(item.size)}`}
       >
         <button
           aria-label={item.name}
@@ -1182,16 +1355,14 @@ function ComposerAttachmentChip({
             <Loader2 className="size-4 animate-spin text-foreground" />
           </span>
         ) : null}
-        <Button
+        <button
           aria-label={removeLabel}
-          className="absolute top-1.5 right-1.5 z-10 size-5 rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
-          size="icon-xs"
+          className="absolute top-1.5 right-1.5 z-10 grid size-5 place-items-center rounded-full bg-foreground text-background shadow-sm hover:bg-foreground hover:text-background focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
           type="button"
-          variant="ghost"
           onClick={onRemove}
         >
           <X className="size-3" />
-        </Button>
+        </button>
       </div>
     );
   }

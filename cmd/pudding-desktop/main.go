@@ -10,6 +10,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"log"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -33,7 +34,10 @@ var trayIcon []byte // macOS menubar template icon(黑 + alpha 剪影)
 
 const desktopAppOAuthConnectedEvent = "pudding:app-oauth-connected"
 
+var desktopLogFile *os.File
+
 func main() {
+	configureDesktopLaunchEnvironment()
 	addr := home.DefaultAddr()
 	apiBase := "http://" + addr
 	configureFrontendDevServer()
@@ -200,6 +204,56 @@ func main() {
 	if err := d.Shutdown(shutdownCtx); err != nil {
 		slog.Error("pudding-desktop: shutdown daemon", "err", err)
 	}
+}
+
+func configureDesktopLaunchEnvironment() {
+	applyDesktopLaunchArgs()
+	configureDesktopLogFile()
+	repoDir := strings.TrimSpace(os.Getenv("PUDDING_REPO_DIR"))
+	if repoDir == "" {
+		return
+	}
+	if err := os.Chdir(repoDir); err != nil {
+		slog.Warn("pudding-desktop: chdir repo dir", "dir", repoDir, "err", err)
+	}
+}
+
+func applyDesktopLaunchArgs() {
+	setEnvFromLaunchArg("PUDDING_DESKTOP_LOG", "--pudding-desktop-log=")
+	setEnvFromLaunchArg("PUDDING_DEV_URL", "--pudding-dev-url=")
+	setEnvFromLaunchArg("PUDDING_REPO_DIR", "--pudding-repo-dir=")
+}
+
+func setEnvFromLaunchArg(envKey, argPrefix string) {
+	value := desktopLaunchArg(argPrefix)
+	if value == "" {
+		return
+	}
+	_ = os.Setenv(envKey, value)
+}
+
+func desktopLaunchArg(prefix string) string {
+	for _, arg := range os.Args[1:] {
+		if strings.HasPrefix(arg, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(arg, prefix))
+		}
+	}
+	return ""
+}
+
+func configureDesktopLogFile() {
+	path := strings.TrimSpace(os.Getenv("PUDDING_DESKTOP_LOG"))
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		slog.Warn("pudding-desktop: open log file", "path", path, "err", err)
+		return
+	}
+	desktopLogFile = f
+	slog.SetDefault(slog.New(slog.NewTextHandler(f, nil)))
+	log.SetOutput(f)
 }
 
 func configureFrontendDevServer() {

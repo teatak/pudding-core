@@ -179,6 +179,10 @@ function upsertPendingUser(
   };
 }
 
+function hasPendingUser(pendingUsers: Record<string, PendingUserMessage[]>, sessionID: string, clientMessageID: string) {
+  return (pendingUsers[sessionID] || []).some((message) => message.clientMessageID === clientMessageID);
+}
+
 function appendThoughtPart(parts: AssistantOverlayPart[], delta: string): AssistantOverlayPart[] {
   if (!delta) {
     return parts;
@@ -377,9 +381,19 @@ export const useOverlayStore = create<OverlayState>((set) => ({
           ),
         );
         const current = overlayWithDefaults(assistants[event.turnID], event.turnID, event.sessionID);
+        const pendingUsers =
+          event.text && !hasPendingUser(state.pendingUsers, event.sessionID, event.clientMessageID)
+            ? upsertPendingUser(state.pendingUsers, {
+                clientMessageID: event.clientMessageID,
+                createdAt: new Date().toISOString(),
+                sessionID: event.sessionID,
+                text: event.text,
+              })
+            : state.pendingUsers;
         return {
           assistants: { ...assistants, [event.turnID]: { ...current, clientMessageID: event.clientMessageID } },
           lastEventSeqs: recordEventSeq(state.lastEventSeqs, event),
+          pendingUsers,
           runningTurns: { ...state.runningTurns, [event.sessionID]: event.turnID },
           turnPhases: {
             ...state.turnPhases,

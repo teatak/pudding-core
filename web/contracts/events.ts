@@ -10,6 +10,7 @@ export const turnStartedEvent = z.object({
   turnID: z.string(),
   clientMessageID: z.string(),
   userMessageID: z.string(),
+  text: z.string().optional(),
 });
 
 // turn.delta 不落库、无 seq;丢失由 turn.completed 后 refetch 兜底

@@ -1,4 +1,4 @@
-export type ComposerMentionActionID = "files" | "folder";
+export type ComposerMentionActionID = "files" | "folder" | "photo" | "screenshot";
 export type ComposerMentionKind = "action" | "app" | "skill";
 export type ComposerMentionAppIcon = {
   svg?: string;

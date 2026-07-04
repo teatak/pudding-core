@@ -101,6 +101,14 @@ func (b *Builder) Build(ctx context.Context, sessionID, model string, mode strin
 				})
 			}
 		case store.RoleAssistant, store.RoleTool:
+			if isToolAttachmentMessage(m) {
+				flushAssistant()
+				parts := b.providerParts(sessionID, m.Parts, currentMode, cfg)
+				if len(parts) > 0 {
+					req.Messages = append(req.Messages, provider.Message{Role: provider.RoleUser, Text: textFromProviderParts(parts), Parts: parts})
+				}
+				continue
+			}
 			assistantParts = append(assistantParts, b.providerParts(sessionID, m.Parts, currentMode, cfg)...)
 		case store.RoleSummary:
 			flushAssistant()
@@ -114,6 +122,14 @@ func (b *Builder) Build(ctx context.Context, sessionID, model string, mode strin
 	}
 	flushAssistant()
 	return req, nil
+}
+
+func isToolAttachmentMessage(msg *store.Message) bool {
+	if msg == nil || len(msg.Parts) != 1 {
+		return false
+	}
+	part := msg.Parts[0]
+	return part.Type == store.ContentPartAttachment && part.Origin == attachment.OriginTool
 }
 
 func wrapSystemReminder(text string) string {
@@ -318,7 +334,7 @@ func attachmentSessionID(sessionID string, part store.ContentPart) string {
 }
 
 func imageAttachmentsAllowed(cfg provider.ModelConfig) bool {
-	return cfg.Capabilities == nil || cfg.Capabilities.Image
+	return cfg.Capabilities != nil && cfg.Capabilities.Image
 }
 
 func audioAttachmentsAllowed(cfg provider.ModelConfig) bool {

@@ -29,6 +29,7 @@ export default defineConfig(({ mode }) => {
         "/apps": daemon,
         "/app-assets": daemon,
         "/app-connections": daemon,
+        "/browser-test-form": daemon,
       },
     },
   };

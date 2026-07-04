@@ -3,7 +3,12 @@ import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown, Loader2, TextCursorInput, Trash, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { deleteSession, listSessions, updateSession, type Session } from "@/api/client";
+import {
+  deleteSession,
+  listSessions,
+  updateSession,
+  type Session,
+} from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { Conversation } from "@/components/Conversation";
 import { DraftConversation } from "@/components/DraftConversation";
@@ -200,7 +205,7 @@ export function ChatPane({ token, sessionID, draftActive = false, reserveTopRigh
             </span>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="no-drag-region relative z-30 flex shrink-0 items-center gap-2">
           {!isPrimary ? (
             <Tooltip>
               <TooltipTrigger asChild>

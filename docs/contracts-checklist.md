@@ -8,7 +8,7 @@
 
 | kind | seq | 落库 | 专属字段 |
 | --- | --- | --- | --- |
-| `turn.started` | ✓ | ✓ | `clientMessageID`, `userMessageID` |
+| `turn.started` | ✓ | ✓ | `clientMessageID`, `userMessageID`, `text` |
 | `turn.delta` | — | — | `part(text/thought)`, `delta` |
 | `turn.tool` | — | — | `callID`, `name`, `phase`, `argsDelta?`, `summaryKind?`, `summaryCount?`;最终以 message.parts 兜底 |
 | `turn.completed` | ✓ | ✓ | `assistantMessageID` |

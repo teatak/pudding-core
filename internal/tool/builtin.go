@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/browser"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/skill"
 	"github.com/teatak/pudding-core/internal/store"
@@ -39,6 +40,14 @@ const (
 	GraphQLIntrospect = "builtin_graphql_introspect"
 	GraphQLSearch     = "builtin_graphql_search"
 	WeatherGet        = "builtin_weather_get"
+	CameraCapture     = "builtin_camera_capture"
+	DesktopScreenshot = "builtin_desktop_screenshot"
+	BrowserOpen       = "builtin_browser_open"
+	BrowserObserve    = "builtin_browser_observe"
+	BrowserScreenshot = "builtin_browser_screenshot"
+	BrowserClick      = "builtin_browser_click"
+	BrowserType       = "builtin_browser_type"
+	BrowserScroll     = "builtin_browser_scroll"
 )
 
 type WebConfigSource interface {
@@ -81,6 +90,9 @@ type BuiltinRunner struct {
 	skillDrafts     SkillDraftSource
 	history         HistorySearchSource
 	historyMessages HistoryMessageSource
+	browser         browser.Service
+	camera          CameraCapturer
+	screen          DesktopScreenCapturer
 	homeDir         string
 	webHTTPClient   *http.Client
 	tavilySearch    string
@@ -143,6 +155,24 @@ func WithHistorySearch(source HistorySearchSource) BuiltinOption {
 		if messages, ok := source.(HistoryMessageSource); ok {
 			r.historyMessages = messages
 		}
+	}
+}
+
+func WithBrowser(service browser.Service) BuiltinOption {
+	return func(r *BuiltinRunner) {
+		r.browser = service
+	}
+}
+
+func WithCamera(capturer CameraCapturer) BuiltinOption {
+	return func(r *BuiltinRunner) {
+		r.camera = capturer
+	}
+}
+
+func WithDesktopScreen(capturer DesktopScreenCapturer) BuiltinOption {
+	return func(r *BuiltinRunner) {
+		r.screen = capturer
 	}
 }
 
@@ -225,7 +255,7 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        FileRead,
-			Description: "Read one small UTF-8 text file from a Pudding-managed file area or an authorized workspace directory. For large files use builtin_file_slice or builtin_file_search first.",
+			Description: "Read one small UTF-8 text file, or route one supported image file as a model-visible attachment, from a Pudding-managed file area or an authorized workspace directory. For large text files use builtin_file_slice or builtin_file_search first.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","workspace"],"description":"Target file area. Use workspace for authorized local workspace directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized workspace directories."},"max_chars":{"type":"integer","description":"Optional max characters, default 20000 and cap 100000."}},"required":["scope","path"],"additionalProperties":false}`),
 			Capability:  store.ModeWorkspace,
 		},
@@ -319,6 +349,54 @@ func BuiltinDefinitions() []provider.ToolDef {
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"location":{"type":"string","description":"City/location. Empty uses IP-based approximate location."},"lang":{"type":"string","description":"Optional language, for example en, zh, zh-cn, zh-tw. Defaults to en."},"days":{"type":"integer","description":"Forecast days to include, 0-3. Defaults to 0 current-only."}},"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
+		{
+			Name:        CameraCapture,
+			Description: "Take one photo from the local camera and route it as an image attachment for the model. Use only when the user asks for a live camera photo or visual context from the camera.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+			Capability:  store.ModeChat,
+		},
+		{
+			Name:        DesktopScreenshot,
+			Description: "Capture the local desktop screen and route it as image attachment(s). Use only when the user asks you to look at the current screen or desktop.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"display":{"type":"integer","description":"Optional display index. Main display is 0. Omit to capture all active displays."}},"additionalProperties":false}`),
+			Capability:  store.ModeChat,
+		},
+		{
+			Name:        BrowserOpen,
+			Description: "Open a URL in the current session's managed visible browser tab. Creates a tab when the session has none.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","description":"URL to open. http and https are supported; scheme defaults to https."},"tabID":{"type":"string","description":"Optional session-scoped browser tab id. Required when the session has multiple browser tabs."}},"required":["url"],"additionalProperties":false}`),
+			Capability:  store.ModeChat,
+		},
+		{
+			Name:        BrowserObserve,
+			Description: "Observe the current session's managed browser tab: title, URL, visible page text, and interactive elements.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Optional session-scoped browser tab id. Required when the session has multiple browser tabs."},"maxTextChars":{"type":"integer","description":"Optional max page text characters, default 6000, cap 20000."},"maxElements":{"type":"integer","description":"Optional max interactive elements, default 30, cap 100."}},"additionalProperties":false}`),
+			Capability:  store.ModeChat,
+		},
+		{
+			Name:        BrowserScreenshot,
+			Description: "Capture a screenshot of the current session's managed browser tab and route it as an image attachment.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Optional session-scoped browser tab id. Required when the session has multiple browser tabs."},"fullPage":{"type":"boolean","description":"Capture beyond the viewport when supported. Defaults false."}},"additionalProperties":false}`),
+			Capability:  store.ModeChat,
+		},
+		{
+			Name:        BrowserClick,
+			Description: "Click an element in the current session's managed browser tab by CSS selector or viewport coordinates.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Optional session-scoped browser tab id. Required when the session has multiple browser tabs."},"selector":{"type":"string","description":"CSS selector to click."},"x":{"type":"number","description":"Viewport X coordinate, used when selector is omitted."},"y":{"type":"number","description":"Viewport Y coordinate, used when selector is omitted."}},"additionalProperties":false}`),
+			Capability:  store.ModeChat,
+		},
+		{
+			Name:        BrowserType,
+			Description: "Type text into an editable element in the current session's managed browser tab.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Optional session-scoped browser tab id. Required when the session has multiple browser tabs."},"selector":{"type":"string","description":"CSS selector for the input. If omitted, uses the active element."},"text":{"type":"string","description":"Text to type."},"clear":{"type":"boolean","description":"Replace existing value before typing."}},"required":["text"],"additionalProperties":false}`),
+			Capability:  store.ModeChat,
+		},
+		{
+			Name:        BrowserScroll,
+			Description: "Scroll the current session's managed browser tab or a scrollable element.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Optional session-scoped browser tab id. Required when the session has multiple browser tabs."},"selector":{"type":"string","description":"Optional CSS selector for a scrollable element."},"deltaX":{"type":"number","description":"Horizontal scroll delta in pixels."},"deltaY":{"type":"number","description":"Vertical scroll delta in pixels. Defaults to 600 when both deltas are omitted."}},"additionalProperties":false}`),
+			Capability:  store.ModeChat,
+		},
 	}
 }
 
@@ -375,6 +453,22 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.graphqlSearch(ctx, call)
 	case WeatherGet:
 		return r.weatherGet(ctx, call)
+	case CameraCapture:
+		return r.cameraCapture(ctx, call)
+	case DesktopScreenshot:
+		return r.desktopScreenshot(ctx, call)
+	case BrowserOpen:
+		return r.browserOpen(ctx, call)
+	case BrowserObserve:
+		return r.browserObserve(ctx, call)
+	case BrowserScreenshot:
+		return r.browserScreenshot(ctx, call)
+	case BrowserClick:
+		return r.browserClick(ctx, call)
+	case BrowserType:
+		return r.browserType(ctx, call)
+	case BrowserScroll:
+		return r.browserScroll(ctx, call)
 	default:
 		out.Ok = false
 		out.Content = fmt.Sprintf("unknown tool: %s", call.Name)

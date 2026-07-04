@@ -453,6 +453,8 @@ home 内容(第一阶段):
 
 第一阶段不做音频。
 
+当前迁移计划见 [voice-migration-plan.md](voice-migration-plan.md)。范围已收敛为单用户语音对话,不迁移声纹、Gemini Live、meeting、多人与 raw audio。
+
 后续音频原则:
 
 - hardware belongs to daemon.
@@ -462,7 +464,7 @@ home 内容(第一阶段):
 
 候选技术:
 
-- malgo 或 PortAudio
+- PortAudio
 - Sherpa ONNX
 - WebRTC AEC
 - Kokoro / Edge / macOS say 等 TTS

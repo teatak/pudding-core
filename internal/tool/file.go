@@ -16,8 +16,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/skill"
+	"github.com/teatak/pudding-core/internal/store"
 )
 
 const (
@@ -272,6 +274,9 @@ func (r *BuiltinRunner) fileSlice(call Call) Result {
 	if isBinary, mt, err := probeBinaryFile(resolved.target); err != nil {
 		return toolJSONError(out, "read_failed", err.Error())
 	} else if isBinary {
+		if isReadableImageMIME(mt) {
+			return r.fileReadImageAttachment(out, call, args.Scope, resolved)
+		}
 		return toolJSONError(out, "binary_file", "file is not UTF-8 text; mime="+mt)
 	}
 	origin := strings.TrimSpace(args.Origin)
@@ -367,6 +372,9 @@ func (r *BuiltinRunner) fileRead(call Call) Result {
 	if isBinary, mt, err := probeBinaryFile(resolved.target); err != nil {
 		return toolJSONError(out, "read_failed", err.Error())
 	} else if isBinary {
+		if isReadableImageMIME(mt) {
+			return r.fileReadImageAttachment(out, call, args.Scope, resolved)
+		}
 		return toolJSONError(out, "binary_file", "file is not UTF-8 text; mime="+mt)
 	}
 	if info, err := os.Stat(resolved.target); err == nil && info.Mode().IsRegular() && info.Size() > maxFileReadWholeBytes {
@@ -389,6 +397,9 @@ func (r *BuiltinRunner) fileRead(call Call) Result {
 	}
 	if !isToolText(data) {
 		mt := sniffBytesMIME(resolved.target, data)
+		if isReadableImageMIME(mt) {
+			return r.fileReadImageAttachment(out, call, args.Scope, resolved)
+		}
 		return toolJSONError(out, "binary_file", "file is not UTF-8 text; mime="+mt)
 	}
 	maxChars := args.MaxChars
@@ -414,6 +425,33 @@ func (r *BuiltinRunner) fileRead(call Call) Result {
 	}))
 	out.SummaryKind = SummaryReadChars
 	out.SummaryCount = len([]rune(content))
+	return out
+}
+
+func (r *BuiltinRunner) fileReadImageAttachment(out Result, call Call, scope string, resolved resolvedFilePath) Result {
+	if strings.TrimSpace(call.SessionID) == "" {
+		return toolJSONError(out, "session_required", "session id is required to route image attachments")
+	}
+	stored, err := attachment.NewService(r.homeDir).StorePath(call.SessionID, resolved.target)
+	if err != nil {
+		return toolJSONError(out, "attachment_store_failed", err.Error())
+	}
+	stored = attachment.WithSourcePath(stored, resolved.target)
+	stored.Origin = attachment.OriginTool
+	out.Ok = true
+	out.Attachments = []store.Attachment{stored}
+	out.Content = jsonString(resolved.payload(map[string]any{
+		"ok":            true,
+		"scope":         scope,
+		"kind":          "attachment_routed",
+		"mime":          stored.MIME,
+		"size":          stored.Size,
+		"attachmentKey": stored.AttachmentKey,
+		"url":           stored.URL,
+		"hint":          "image bytes were routed as an attachment for the model; use the returned path metadata for reference only.",
+	}))
+	out.SummaryKind = SummaryReturnedFields
+	out.SummaryCount = 8
 	return out
 }
 
@@ -1479,6 +1517,11 @@ func sniffBytesMIME(path string, data []byte) string {
 		return strings.TrimSpace(mt)
 	}
 	return ""
+}
+
+func isReadableImageMIME(mimeType string) bool {
+	mimeType = strings.ToLower(strings.TrimSpace(mimeType))
+	return strings.HasPrefix(mimeType, "image/") && mimeType != "image/svg+xml"
 }
 
 func isKnownBinaryExt(path string) bool {

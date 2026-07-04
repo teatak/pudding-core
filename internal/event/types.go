@@ -27,7 +27,7 @@ const (
 
 // Event 的字段按 Kind 选填:
 //
-//	turn.started   seq, turnID, clientMessageID, userMessageID
+//	turn.started   seq, turnID, clientMessageID, userMessageID, text
 //	turn.delta     turnID, part, delta      (不落库,无 seq)
 //	turn.tool      turnID, callID, name, phase, argsDelta/summaryKind/summaryCount (不落库,无 seq)
 //	turn.completed seq, turnID, assistantMessageID

@@ -87,8 +87,8 @@ function openSessionEventSource({
     if (parsed.data.kind === "turn.started" || isTurnTerminalEvent(parsed.data)) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessionUsage(sessionID) });
     }
-    if (isTurnTerminalEvent(parsed.data) && syncMessages) {
-      syncTerminalTurn(queryClient, token, sessionID, parsed.data.turnID);
+    if ((parsed.data.kind === "turn.started" || isTurnTerminalEvent(parsed.data)) && syncMessages) {
+      syncTurn(queryClient, token, sessionID, parsed.data.turnID);
     }
     if (syncMessages && (isInputEvent(parsed.data) || parsed.data.kind === "turn.started")) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.queuedInputs(sessionID) });
@@ -146,13 +146,13 @@ function pendingApprovalToEvent(approval: PendingApproval): Extract<SessionEvent
   };
 }
 
-function syncTerminalTurn(queryClient: QueryClient, token: string, sessionID: string, turnID: string) {
+function syncTurn(queryClient: QueryClient, token: string, sessionID: string, turnID: string) {
   void getTurn(token, sessionID, turnID)
     .then((turn) => {
       queryClient.setQueryData<TurnsInfiniteData>(queryKeys.turns(sessionID), (previous) => upsertTurnIntoPages(previous, turn));
     })
     .catch((error) => {
-      console.warn("failed to sync terminal turn", error);
+      console.warn("failed to sync turn", error);
     });
 }
 

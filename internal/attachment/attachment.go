@@ -21,6 +21,7 @@ const (
 	MaxUploadBytes int64 = 20 << 20
 	DraftSessionID       = "draft"
 	OriginTemp           = "temp"
+	OriginTool           = "tool"
 	OriginUpload         = "upload"
 
 	attachmentsDirName = "attachments"
