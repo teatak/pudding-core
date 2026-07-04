@@ -9,16 +9,20 @@ import {
   Copy,
   DollarSign,
   Download,
+  ExternalLink,
   FileText,
   GalleryHorizontal,
   GalleryVertical,
+  Globe,
   Grid2X2,
   Gauge,
   Hash,
   Image,
+  Loader2,
   Maximize2,
   Minimize2,
   Percent,
+  RefreshCw,
   Sheet,
   Trash2,
   Undo2,
@@ -33,6 +37,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type MutableRefObject,
 } from "react";
 import { Rnd } from "react-rnd";
@@ -52,14 +57,23 @@ import {
 import { toast } from "sonner";
 
 import {
+  clickBrowserTab,
   clearClosedCanvasItems,
+  createBrowserTab,
   createClosedCanvasItem,
   deleteCanvasItem,
   deleteClosedCanvasItem,
+  listBrowserTabs,
   listClosedCanvasItems,
   listCanvasItems,
+  openBrowserTab,
   patchCanvasItemWindow,
   putCanvasItem,
+  screenshotBrowserTab,
+  scrollBrowserTab,
+  typeBrowserTab,
+  type BrowserScreenshot,
+  type BrowserTab,
   type CanvasItemPayload,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
@@ -82,6 +96,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import type { CanvasItem, ClosedCanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
@@ -151,10 +166,20 @@ type SaveResult = {
   via: "desktop" | "browser";
 };
 
+type BrowserCanvasPayload = {
+  kind: "browser";
+  sessionID: string;
+  tabID?: string;
+  url?: string;
+  title?: string;
+};
+
 const MIN_W = 260;
 const MIN_H = 160;
 const DEFAULT_W = 420;
 const DEFAULT_H = 300;
+const BROWSER_W = 760;
+const BROWSER_H = 560;
 const CASCADE = 28;
 const FULLSCREEN_SNAP = 12;
 const CHART_COLORS = [
@@ -165,6 +190,7 @@ const CHART_COLORS = [
   "var(--chart-5)",
 ];
 const KIND_ICON: Record<string, LucideIcon> = {
+  browser: Globe,
   chart: ChartPie,
   form: FileText,
   gallery: Image,
@@ -178,6 +204,7 @@ const KIND_ICON: Record<string, LucideIcon> = {
   widget: Blocks,
 };
 const KIND_TILE_CLASS: Record<string, string> = {
+  browser: "bg-blue-600",
   chart: "bg-amber-600",
   form: "bg-violet-600",
   gallery: "bg-pink-600",
@@ -420,6 +447,57 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems() });
     },
   });
+  const browserWidgetMutation = useMutation({
+    mutationFn: async () => {
+      const existing = items.find((item) => browserPayloadForItem(item)?.sessionID === actorSessionID);
+      if (existing) {
+        return existing;
+      }
+      const id = browserCanvasItemID(actorSessionID);
+      const title = t("browser.title");
+      const existingTabs = await listBrowserTabs(token, actorSessionID);
+      const tab = existingTabs.tabs[0] || (await createBrowserTab(token, actorSessionID));
+      const z = Math.max(maxZ, ...Object.values(draftWindowsRef.current).map((window) => window.z)) + 1;
+      const window = clampWindow(
+        {
+          x: 16,
+          y: 16,
+          w: containerSize.w > 0 ? Math.min(BROWSER_W, Math.max(MIN_W, containerSize.w - 32)) : BROWSER_W,
+          h: containerSize.h > 0 ? Math.min(BROWSER_H, Math.max(MIN_H, containerSize.h - 32)) : BROWSER_H,
+          z,
+        },
+        containerSize,
+      );
+      return putCanvasItem(token, actorSessionID, id, {
+        id,
+        sourceSessionID: actorSessionID,
+        kind: "browser",
+        title: tab.title?.trim() || title,
+        item: {
+          kind: "browser",
+          sessionID: actorSessionID,
+          tabID: tab.id,
+          url: tab.url,
+          title: tab.title?.trim() || title,
+        },
+        window,
+      });
+    },
+    onSuccess: (item) => {
+      const win = clampWindow(
+        {
+          ...windowFromItem(item, items.length),
+          z: Math.max(maxZ, ...Object.values(draftWindowsRef.current).map((window) => window.z)) + 1,
+        },
+        containerSize,
+      );
+      setDraftWindows((prev) => ({ ...prev, [item.id]: win }));
+      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
+    },
+    onError: () => {
+      toast.error(t("browser.createFailed"));
+    },
+  });
 
   useEffect(() => {
     draftWindowsRef.current = draftWindows;
@@ -654,6 +732,20 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
           </div>
         ) : null}
         <div className="ml-auto flex shrink-0 items-center pl-2">
+          {actorSessionID ? (
+            <Button
+              aria-label={t("browser.title")}
+              className="no-drag-region mr-1"
+              disabled={browserWidgetMutation.isPending}
+              size="icon-sm"
+              title={t("browser.title")}
+              type="button"
+              variant="ghost"
+              onClick={() => browserWidgetMutation.mutate()}
+            >
+              {browserWidgetMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
+            </Button>
+          ) : null}
           <CanvasLibraryMenu
             closedItems={closedItems}
             onClearClosed={() => clearClosedMutation.mutate()}
@@ -853,6 +945,7 @@ function CanvasWindow({
         >
           <MemoCanvasContent
             item={item}
+            token={token}
             galleryActiveIndex={galleryActiveIndex}
             isMaximized={isMaximized}
             onGalleryActiveIndexChange={onGalleryActiveIndexChange}
@@ -1117,12 +1210,14 @@ function ExportSavedDescription({ path }: { path: string }) {
 
 function CanvasContent({
   item,
+  token,
   galleryActiveIndex,
   isMaximized,
   onGalleryActiveIndexChange,
   onGalleryLayoutChange,
 }: {
   item: CanvasItem;
+  token: string;
   galleryActiveIndex: number;
   isMaximized: boolean;
   onGalleryActiveIndexChange: (activeIndex: number) => void;
@@ -1130,6 +1225,9 @@ function CanvasContent({
 }) {
   const payload = asRecord(item.item);
   const kind = typeof payload?.kind === "string" ? payload.kind : item.kind;
+  if (kind === "browser") {
+    return <CanvasBrowserWidget token={token} item={item} />;
+  }
   if (kind === "markdown") {
     const content = stringValue(payload?.content) || stringValue(payload?.markdown) || "";
     return (
@@ -1192,6 +1290,276 @@ function CanvasContent({
 }
 
 const MemoCanvasContent = memo(CanvasContent);
+
+function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem }) {
+  const { t } = useI18n();
+  const queryClient = useQueryClient();
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const createTabPromiseRef = useRef<Promise<BrowserTab> | null>(null);
+  const payload = browserPayloadForItem(item);
+  const ownerSessionID = payload?.sessionID || item.sourceSessionID;
+  const [urlDraft, setURLDraft] = useState(payload?.url || "");
+  const [textDraft, setTextDraft] = useState("");
+  const [screenshot, setScreenshot] = useState<BrowserScreenshot | null>(null);
+  const tabsQuery = useQuery({
+    enabled: Boolean(token && ownerSessionID),
+    queryKey: ownerSessionID ? queryKeys.browserTabs(ownerSessionID) : ["browser", "missing-session"],
+    queryFn: () => {
+      if (!ownerSessionID) {
+        throw new Error("browser session id missing");
+      }
+      return listBrowserTabs(token, ownerSessionID);
+    },
+  });
+  const tabs = tabsQuery.data?.tabs || [];
+  const activeTab = (payload?.tabID ? tabs.find((tab) => tab.id === payload.tabID) : undefined) || tabs[0];
+  const busyTitle = tabsQuery.isPending ? t("browser.loading") : t("browser.empty");
+
+  useEffect(() => {
+    if (activeTab?.url && activeTab.url !== "about:blank") {
+      setURLDraft(activeTab.url);
+      return;
+    }
+    if (payload?.url) {
+      setURLDraft(payload.url);
+    }
+  }, [activeTab?.id, activeTab?.url, payload?.url]);
+
+  const persistTab = async (tab: BrowserTab) => {
+    if (!ownerSessionID) {
+      return;
+    }
+    const title = tab.title?.trim() || payload?.title || t("browser.title");
+    await putCanvasItem(token, ownerSessionID, item.id, {
+      id: item.id,
+      sourceSessionID: ownerSessionID,
+      kind: "browser",
+      title,
+      item: {
+        ...(payload || {}),
+        kind: "browser",
+        sessionID: ownerSessionID,
+        tabID: tab.id,
+        url: tab.url,
+        title,
+      },
+      window: item.window,
+    });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(ownerSessionID) });
+  };
+
+  const ensureTab = async () => {
+    if (!ownerSessionID) {
+      throw new Error("browser session id missing");
+    }
+    if (activeTab) {
+      return activeTab;
+    }
+    if (tabs[0]) {
+      await persistTab(tabs[0]);
+      return tabs[0];
+    }
+    if (!createTabPromiseRef.current) {
+      createTabPromiseRef.current = createBrowserTab(token, ownerSessionID).finally(() => {
+        createTabPromiseRef.current = null;
+      });
+    }
+    const tab = await createTabPromiseRef.current;
+    await persistTab(tab);
+    return tab;
+  };
+
+  const captureTab = async (tab: BrowserTab) => {
+    if (!ownerSessionID) {
+      throw new Error("browser session id missing");
+    }
+    const shot = await screenshotBrowserTab(token, ownerSessionID, tab.id);
+    setScreenshot(shot);
+    await persistTab(shot.tab);
+    return shot;
+  };
+
+  const screenshotMutation = useMutation({
+    mutationFn: async () => captureTab(await ensureTab()),
+    onError: () => toast.error(t("browser.screenshotFailed")),
+  });
+
+  const openMutation = useMutation({
+    mutationFn: async () => {
+      if (!ownerSessionID) {
+        throw new Error("browser session id missing");
+      }
+      const tab = await ensureTab();
+      return openBrowserTab(token, ownerSessionID, tab.id, { url: urlDraft });
+    },
+    onSuccess: (tab) => {
+      setScreenshot(null);
+      void persistTab(tab).then(() => captureTab(tab).catch(() => undefined));
+    },
+    onError: () => toast.error(t("browser.openFailed")),
+  });
+
+  const clickMutation = useMutation({
+    mutationFn: async ({ x, y }: { x: number; y: number }) => {
+      if (!ownerSessionID || !activeTab) {
+        throw new Error("browser tab missing");
+      }
+      return clickBrowserTab(token, ownerSessionID, activeTab.id, { x, y });
+    },
+    onSuccess: (result) => {
+      void persistTab(result.tab).then(() => captureTab(result.tab).catch(() => undefined));
+    },
+    onError: () => toast.error(t("browser.clickFailed")),
+  });
+
+  const scrollMutation = useMutation({
+    mutationFn: async (deltaY: number) => {
+      if (!ownerSessionID || !activeTab) {
+        throw new Error("browser tab missing");
+      }
+      return scrollBrowserTab(token, ownerSessionID, activeTab.id, { deltaY });
+    },
+    onSuccess: (result) => {
+      void persistTab(result.tab).then(() => captureTab(result.tab).catch(() => undefined));
+    },
+    onError: () => toast.error(t("browser.scrollFailed")),
+  });
+
+  const typeMutation = useMutation({
+    mutationFn: async () => {
+      if (!ownerSessionID || !activeTab) {
+        throw new Error("browser tab missing");
+      }
+      return typeBrowserTab(token, ownerSessionID, activeTab.id, { text: textDraft, clear: false });
+    },
+    onSuccess: (result) => {
+      setTextDraft("");
+      void persistTab(result.tab).then(() => captureTab(result.tab).catch(() => undefined));
+    },
+    onError: () => toast.error(t("browser.typeFailed")),
+  });
+
+  const screenshotPending = screenshotMutation.isPending;
+
+  useEffect(() => {
+    if (!activeTab || screenshot || screenshotPending) {
+      return;
+    }
+    screenshotMutation.mutate();
+  }, [activeTab?.id, screenshot?.capturedAt, screenshotPending]);
+
+  const handleImageClick = (event: ReactMouseEvent<HTMLImageElement>) => {
+    if (!screenshot || !activeTab || clickMutation.isPending) {
+      return;
+    }
+    const image = imageRef.current;
+    if (!image) {
+      return;
+    }
+    const rect = image.getBoundingClientRect();
+    const viewportWidth = screenshot.viewportWidth || screenshot.width || image.naturalWidth;
+    const viewportHeight = screenshot.viewportHeight || screenshot.height || image.naturalHeight;
+    if (rect.width <= 0 || rect.height <= 0 || viewportWidth <= 0 || viewportHeight <= 0) {
+      return;
+    }
+    const x = ((event.clientX - rect.left) / rect.width) * viewportWidth;
+    const y = ((event.clientY - rect.top) / rect.height) * viewportHeight;
+    clickMutation.mutate({ x, y });
+  };
+
+  const busy =
+    openMutation.isPending ||
+    screenshotMutation.isPending ||
+    clickMutation.isPending ||
+    scrollMutation.isPending ||
+    typeMutation.isPending;
+  const title = activeTab?.title?.trim() || payload?.title || busyTitle;
+  const currentURL = activeTab?.url || payload?.url || "about:blank";
+
+  if (!ownerSessionID) {
+    return <div className="p-3 text-sm text-muted-foreground">{t("browser.loadFailed")}</div>;
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-card">
+      <form
+        className="canvas-window-no-drag flex shrink-0 items-center gap-2 border-b p-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (urlDraft.trim()) {
+            openMutation.mutate();
+          }
+        }}
+      >
+        <Input
+          className="h-8 min-w-0 flex-1"
+          placeholder={t("browser.urlPlaceholder")}
+          value={urlDraft}
+          onChange={(event) => setURLDraft(event.target.value)}
+        />
+        <Button aria-label={t("browser.openURL")} disabled={busy || !urlDraft.trim()} size="icon-sm" type="submit">
+          {openMutation.isPending ? <Loader2 className="animate-spin" /> : <ExternalLink />}
+        </Button>
+        <Button
+          aria-label={t("browser.screenshot")}
+          disabled={busy}
+          size="icon-sm"
+          type="button"
+          variant="outline"
+          onClick={() => screenshotMutation.mutate()}
+        >
+          {screenshotMutation.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+        </Button>
+      </form>
+      <div className="min-w-0 shrink-0 border-b px-3 py-2 text-xs">
+        <div className="truncate font-medium">{title}</div>
+        <div className="truncate text-muted-foreground">{currentURL}</div>
+      </div>
+      <div className="canvas-window-no-drag relative flex min-h-0 flex-1 items-center justify-center overflow-auto bg-muted/30">
+        {screenshot ? (
+          <img
+            ref={imageRef}
+            alt={title}
+            className="max-h-full max-w-full cursor-crosshair object-contain"
+            draggable={false}
+            src={`data:${screenshot.mime};base64,${screenshot.dataBase64}`}
+            onClick={handleImageClick}
+          />
+        ) : (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            {busy || tabsQuery.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {busy || tabsQuery.isPending ? t("browser.loading") : t("browser.empty")}
+          </div>
+        )}
+      </div>
+      <div className="canvas-window-no-drag flex shrink-0 items-center gap-2 border-t p-2">
+        <Input
+          className="h-8 min-w-0 flex-1"
+          placeholder={t("browser.textPlaceholder")}
+          value={textDraft}
+          onChange={(event) => setTextDraft(event.target.value)}
+        />
+        <Button
+          disabled={busy || !textDraft}
+          size="sm"
+          type="button"
+          variant="outline"
+          onClick={() => typeMutation.mutate()}
+        >
+          {typeMutation.isPending ? <Loader2 className="animate-spin" /> : null}
+          {t("browser.type")}
+        </Button>
+        <Button disabled={busy || !activeTab} size="sm" type="button" variant="outline" onClick={() => scrollMutation.mutate(-500)}>
+          ↑
+        </Button>
+        <Button disabled={busy || !activeTab} size="sm" type="button" variant="outline" onClick={() => scrollMutation.mutate(500)}>
+          ↓
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 function CanvasGrid({ payload, nested = false }: { payload: Record<string, unknown> | undefined; nested?: boolean }) {
   const items = Array.isArray(payload?.items) ? payload.items : [];
@@ -2303,6 +2671,29 @@ function windowFromItem(item: CanvasItem, index: number): WindowState {
 
 function titleForItem(item: CanvasItem, t: (key: string) => string): string {
   return item.title?.trim() || titleFromPayload(item.item) || item.kind || t("canvas.untitled");
+}
+
+function browserCanvasItemID(sessionID: string): string {
+  return `browser_${sessionID.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+}
+
+function browserPayloadForItem(item: CanvasItem): BrowserCanvasPayload | null {
+  const payload = asRecord(item.item);
+  const kind = stringValue(payload?.kind) || item.kind;
+  if (kind !== "browser") {
+    return null;
+  }
+  const sessionID = stringValue(payload?.sessionID) || item.sourceSessionID;
+  if (!sessionID) {
+    return null;
+  }
+  return {
+    kind: "browser",
+    sessionID,
+    tabID: stringValue(payload?.tabID) || undefined,
+    url: stringValue(payload?.url) || undefined,
+    title: stringValue(payload?.title) || item.title || undefined,
+  };
 }
 
 function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {

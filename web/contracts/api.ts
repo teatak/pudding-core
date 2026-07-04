@@ -434,6 +434,11 @@ export const browserScreenshot = z.object({
   mime: z.string(),
   dataBase64: z.string(),
   size: z.number(),
+  width: z.number().optional(),
+  height: z.number().optional(),
+  viewportWidth: z.number().optional(),
+  viewportHeight: z.number().optional(),
+  deviceScaleFactor: z.number().optional(),
   capturedAt: z.string(),
 });
 export type BrowserScreenshot = z.infer<typeof browserScreenshot>;

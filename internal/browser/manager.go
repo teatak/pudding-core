@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image/png"
 	"io"
 	"net"
 	"net/http"
@@ -113,11 +114,16 @@ type ScreenshotOptions struct {
 }
 
 type ScreenshotResult struct {
-	Tab        TabSnapshot `json:"tab"`
-	MIME       string      `json:"mime"`
-	DataBase64 string      `json:"dataBase64"`
-	Size       int64       `json:"size"`
-	CapturedAt time.Time   `json:"capturedAt"`
+	Tab               TabSnapshot `json:"tab"`
+	MIME              string      `json:"mime"`
+	DataBase64        string      `json:"dataBase64"`
+	Size              int64       `json:"size"`
+	Width             int         `json:"width,omitempty"`
+	Height            int         `json:"height,omitempty"`
+	ViewportWidth     int         `json:"viewportWidth,omitempty"`
+	ViewportHeight    int         `json:"viewportHeight,omitempty"`
+	DeviceScaleFactor float64     `json:"deviceScaleFactor,omitempty"`
+	CapturedAt        time.Time   `json:"capturedAt"`
 }
 
 type ClickInput struct {
@@ -380,14 +386,28 @@ func (m *Manager) Screenshot(ctx context.Context, sessionID, tabID string, opts 
 	if err != nil {
 		return ScreenshotResult{}, err
 	}
+	imageConfig, _ := png.DecodeConfig(bytes.NewReader(decoded))
+	var viewport struct {
+		Width             int     `json:"width"`
+		Height            int     `json:"height"`
+		DeviceScaleFactor float64 `json:"deviceScaleFactor"`
+	}
+	if rawViewport, err := proc.evaluateJSON(ctx, m.client, binding.targetID, `(() => JSON.stringify({width: window.innerWidth, height: window.innerHeight, deviceScaleFactor: window.devicePixelRatio || 1}))()`); err == nil {
+		_ = json.Unmarshal(rawViewport, &viewport)
+	}
 	target, _ := proc.target(ctx, m.client, binding.targetID)
 	m.touch(binding.id)
 	return ScreenshotResult{
-		Tab:        snapshotFromTarget(binding, target),
-		MIME:       "image/png",
-		DataBase64: payload.Data,
-		Size:       int64(len(decoded)),
-		CapturedAt: time.Now().UTC(),
+		Tab:               snapshotFromTarget(binding, target),
+		MIME:              "image/png",
+		DataBase64:        payload.Data,
+		Size:              int64(len(decoded)),
+		Width:             imageConfig.Width,
+		Height:            imageConfig.Height,
+		ViewportWidth:     viewport.Width,
+		ViewportHeight:    viewport.Height,
+		DeviceScaleFactor: viewport.DeviceScaleFactor,
+		CapturedAt:        time.Now().UTC(),
 	}, nil
 }
 
