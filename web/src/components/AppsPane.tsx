@@ -1641,6 +1641,7 @@ function ConnectionDialog({
           ) : null}
           {connectionFields.map((field) => {
             const label = `${field.label || field.id}${field.required ? " *" : ""}`;
+            const description = connectionFieldDescription(field, t);
             const value = form.fields[field.id] || "";
             const onFieldChange = (next: string) =>
               setForm((current) => ({
@@ -1650,7 +1651,7 @@ function ConnectionDialog({
             return field.secret ? (
               <LabeledSecretInput
                 key={field.id}
-                description={field.description}
+                description={description}
                 disabled={secretLoading}
                 label={label}
                 placeholder={field.placeholder}
@@ -1662,7 +1663,7 @@ function ConnectionDialog({
             ) : (
               <LabeledInput
                 key={field.id}
-                description={field.description}
+                description={description}
                 label={label}
                 placeholder={field.placeholder}
                 value={value}
@@ -1714,7 +1715,7 @@ function LabeledInput({
     <div className="grid gap-1.5">
       <Label>{label}</Label>
       <Input disabled={disabled} placeholder={placeholder} type={type} value={value} onChange={(event) => onChange(event.target.value)} />
-      {description ? <div className="text-xs text-muted-foreground">{description}</div> : null}
+      {description ? <div className="whitespace-pre-line text-xs text-muted-foreground">{description}</div> : null}
     </div>
   );
 }
@@ -1762,7 +1763,7 @@ function LabeledSecretInput({
           {visible ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
         </button>
       </div>
-      {description ? <div className="text-xs text-muted-foreground">{description}</div> : null}
+      {description ? <div className="whitespace-pre-line text-xs text-muted-foreground">{description}</div> : null}
     </div>
   );
 }
@@ -1784,6 +1785,37 @@ function emptyConnectionForm(): ConnectionForm {
 
 function appConnectionFields(app?: AppDefinition | null): AppConnectionField[] {
   return app?.connection?.fields || [];
+}
+
+function connectionFieldDescription(field: AppConnectionField, t: (key: string) => string) {
+  const lines = [field.description?.trim(), connectionFieldInjectionDescription(field, t)].filter(Boolean);
+  return lines.join("\n");
+}
+
+function connectionFieldInjectionDescription(field: AppConnectionField, t: (key: string) => string) {
+  if (!field.inject?.length) {
+    return "";
+  }
+  const targets = field.inject.map((rule) => {
+    const target = connectionFieldInjectTargetLabel(rule.target, t);
+    const name = rule.name || field.id;
+    const methods = rule.methods?.length ? ` (${rule.methods.join(", ")})` : "";
+    return `${target}.${name}${methods}`;
+  });
+  return `${t("apps.fieldInjectsInto")}: ${targets.join(", ")}`;
+}
+
+function connectionFieldInjectTargetLabel(target: string, t: (key: string) => string) {
+  switch (target) {
+    case "body":
+      return t("apps.fieldInjectTarget.body");
+    case "header":
+      return t("apps.fieldInjectTarget.header");
+    case "query":
+      return t("apps.fieldInjectTarget.query");
+    default:
+      return target;
+  }
 }
 
 function emptyConnectionFields(config?: AppDefinition["connection"], values?: Record<string, string>): Record<string, string> {
