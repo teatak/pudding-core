@@ -3,6 +3,7 @@
 package sqlitestore
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -10,6 +11,21 @@ import (
 )
 
 func historySearchAvailable() bool { return true }
+
+func recoverableHistorySearchError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "database disk image is malformed") ||
+		strings.Contains(msg, "messages_fts")
+}
+
+func (s *Store) repairHistorySearch(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return resetMessagesFTS(ctx, s.db)
+}
 
 func ensureHistorySearch(db *sql.DB) error {
 	if err := rebuildMessagesFTSIfWrongTokenizer(db); err != nil {
@@ -22,6 +38,22 @@ func ensureHistorySearch(db *sql.DB) error {
 		return fmt.Errorf("sqlite: backfill messages fts5: %w", err)
 	}
 	return nil
+}
+
+func resetMessagesFTS(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `
+DROP TRIGGER IF EXISTS messages_ai;
+DROP TRIGGER IF EXISTS messages_ad;
+DROP TRIGGER IF EXISTS messages_au;
+DROP TABLE IF EXISTS messages_fts;
+`); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, messagesFTS5Schema); err != nil {
+		return err
+	}
+	_, err := db.ExecContext(ctx, `INSERT INTO messages_fts(messages_fts) VALUES('rebuild')`)
+	return err
 }
 
 const messagesFTS5Schema = `

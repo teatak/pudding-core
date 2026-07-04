@@ -954,11 +954,13 @@ function RailPanel({
                     isDraggingPinned && "min-h-10",
                     isDraggingPinned &&
                     dragTarget?.group === "unpinned" &&
-                    "pudding-session-drop-indicator-active ring-1 ring-sidebar-ring/60",
+                    "pudding-session-drop-indicator-active ring-1 ring-inset ring-sidebar-ring/60",
                   )}
                   data-session-drop-group="unpinned"
                 >
-                  {chatSessions.length > 0 || sessions.length === 0 || (isDraggingPinned && unpinnedSessions.length === 0) ? (
+                  {sessions.length === 0 ? (
+                    <SessionEmptyState />
+                  ) : chatSessions.length > 0 || (isDraggingPinned && unpinnedSessions.length === 0) ? (
                     <SidebarGroup className="px-2 py-0.5">
                       <CollapsibleSessionGroupLabel
                         collapsed={chatCollapsed}
@@ -1121,9 +1123,9 @@ function CollapsibleSessionGroupLabel({
 }) {
   const Icon = icon === "pinned" ? Pin : icon === "chat" ? MessageSquareText : Package;
   return (
-    <SidebarGroupLabel asChild className="h-8 px-1.5 text-[13px]" title={title || label}>
+    <SidebarGroupLabel asChild className="h-8 px-2 text-[13px]" title={title || label}>
       <button
-        className="group w-full cursor-pointer gap-1 pr-1 text-left hover:text-sidebar-foreground"
+        className="group w-full cursor-pointer gap-2 pr-1 text-left hover:text-sidebar-foreground"
         type="button"
         onClick={onToggle}
       >
@@ -1205,12 +1207,7 @@ function SessionItems({
   const turnPhases = useOverlayStore((state) => state.turnPhases);
 
   if (sessions.length === 0 && showEmptyState) {
-    return (
-      <div className="grid justify-items-center gap-2 px-2 py-10 text-center text-sm text-muted-foreground">
-        <MessageSquareText className="h-5 w-5" />
-        <div>{t("session.empty")}</div>
-      </div>
-    );
+    return <SessionEmptyState />;
   }
   const visibleSessions = sessions.filter((session) => session.id !== draggingSessionID);
   if (visibleSessions.length === 0 && (dropIndex !== null || showEmptyDropTarget)) {
@@ -1253,13 +1250,23 @@ function SessionItems({
   );
 }
 
+function SessionEmptyState() {
+  const { t } = useI18n();
+  return (
+    <div className="grid justify-items-center gap-2 px-2 py-10 text-center text-sm text-muted-foreground">
+      <MessageSquareText className="h-5 w-5" />
+      <div>{t("session.empty")}</div>
+    </div>
+  );
+}
+
 function SessionDropIndicator({ active }: { active: boolean }) {
   return (
     <li
       aria-hidden="true"
       className={cn(
-        "h-8 rounded-md border border-dashed transition-colors",
-        active ? "pudding-session-drop-indicator-active border-sidebar-ring/70" : "border-sidebar-border/70",
+        "h-8 rounded-md ring-1 ring-inset transition-colors",
+        active ? "pudding-session-drop-indicator-active ring-sidebar-ring/70" : "ring-sidebar-border/70",
       )}
     />
   );

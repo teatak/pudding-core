@@ -257,6 +257,17 @@ func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionU
 }
 
 func (s *Store) DeleteSession(ctx context.Context, id string) error {
+	err := s.deleteSession(ctx, id)
+	if err == nil || !recoverableHistorySearchError(err) {
+		return err
+	}
+	if repairErr := s.repairHistorySearch(ctx); repairErr != nil {
+		return fmt.Errorf("%w; repair history search: %v", err, repairErr)
+	}
+	return s.deleteSession(ctx, id)
+}
+
+func (s *Store) deleteSession(ctx context.Context, id string) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE id=?`, id)
 		if err != nil {

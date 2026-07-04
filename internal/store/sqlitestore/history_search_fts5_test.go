@@ -58,3 +58,39 @@ func TestSearchMessagesUsesFTS5AndSessionScope(t *testing.T) {
 		}
 	}
 }
+
+func TestDeleteSessionRepairsMessagesFTS5(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, st, "sess_fts_repair")
+	if _, err := st.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "sess_fts_repair",
+		TurnID:          "turn_fts_repair",
+		UserMessageID:   "msg_fts_repair_user",
+		ClientMessageID: "client_fts_repair",
+		UserText:        "message that should be indexed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.FinishTurn(ctx, store.FinishTurnInput{
+		TurnID:         "turn_fts_repair",
+		Status:         store.TurnCompleted,
+		AssistantParts: store.TextPart("assistant indexed text"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.Exec(`DROP TABLE messages_fts`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.DeleteSession(ctx, "sess_fts_repair"); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := st.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE id='sess_fts_repair'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("session should be deleted after fts repair, count=%d", count)
+	}
+}
