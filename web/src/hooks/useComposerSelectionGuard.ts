@@ -17,18 +17,28 @@ export function useComposerSelectionGuard<T extends HTMLElement>() {
         clearGuard();
         return;
       }
+      const activeElement = document.activeElement;
+      if (activeElement instanceof HTMLElement && root.contains(activeElement)) {
+        activeElement.blur();
+      }
       root.setAttribute("data-composer-selection-guard", "true");
     };
 
+    const handleFocusIn = (event: FocusEvent) => {
+      const root = rootRef.current;
+      if (!root || !root.contains(event.target as Node)) {
+        return;
+      }
+      clearGuard();
+    };
+
     document.addEventListener("pointerdown", handlePointerDown, true);
-    document.addEventListener("pointerup", clearGuard, true);
-    document.addEventListener("pointercancel", clearGuard, true);
+    document.addEventListener("focusin", handleFocusIn, true);
     window.addEventListener("blur", clearGuard);
 
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown, true);
-      document.removeEventListener("pointerup", clearGuard, true);
-      document.removeEventListener("pointercancel", clearGuard, true);
+      document.removeEventListener("focusin", handleFocusIn, true);
       window.removeEventListener("blur", clearGuard);
     };
   }, []);

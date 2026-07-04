@@ -138,8 +138,8 @@ export const UserInput = memo(function UserInput({
 
   return (
     <>
-      <div className={cn("group flex flex-col items-end", user.pending && "opacity-70")}>
-        <div className="pudding-user-message selectable-text min-w-0 max-w-[min(82%,42rem)] rounded-2xl rounded-br-md border border-border/60 px-3 py-2 text-left text-sm leading-6 break-words whitespace-pre-wrap shadow-sm">
+      <div className={cn("group flex min-w-0 flex-col items-end", user.pending && "opacity-70")}>
+        <div className="pudding-user-message selectable-text min-w-0 max-w-[min(82%,42rem)] overflow-hidden rounded-2xl rounded-br-md border border-border/60 px-3 py-2 text-left text-sm leading-6 break-words whitespace-pre-wrap shadow-sm [overflow-wrap:anywhere]">
           {editing ? (
             <div className="grid gap-2">
               <Textarea
@@ -157,8 +157,8 @@ export const UserInput = memo(function UserInput({
               </div>
             </div>
           ) : (
-            <div className="grid gap-2">
-              {user.text ? <div>{user.text}</div> : null}
+            <div className="grid min-w-0 max-w-full gap-2">
+              {user.text ? <div className="min-w-0 max-w-full [overflow-wrap:anywhere]">{user.text}</div> : null}
               {imagePreviewItems.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
                   {imagePreviewItems.map((image, index) => (

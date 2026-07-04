@@ -29,7 +29,7 @@ function TranscriptTurnView({
   return (
     <div className="grid min-w-0 gap-4" data-transcript-turn-id={anchorTurnID}>
       {turn.user ? (
-        <div>
+        <div className="min-w-0">
           <UserInput
             token={token}
             user={turn.user}

@@ -7,6 +7,7 @@ type ResolvedTheme = "light" | "dark";
 type ThemeSnapshot = `${Theme}:${ResolvedTheme}`;
 
 const STORAGE_KEY = "pudding.theme";
+const FALLBACK_STYLE_ID = "pudding-theme-fallback";
 const listeners = new Set<() => void>();
 let themeSyncStarted = false;
 let nativeTheme: Theme | null = null;
@@ -59,8 +60,7 @@ export function applyTheme(theme: Theme) {
     return;
   }
   const resolved = resolveTheme(theme);
-  document.documentElement.classList.toggle("dark", resolved === "dark");
-  document.documentElement.style.colorScheme = resolved;
+  applyDocumentTheme(resolved);
 }
 
 function notifyThemeChange() {
@@ -120,8 +120,7 @@ function applyNativeThemeState(theme: Theme, resolved: ResolvedTheme) {
   nativeTheme = theme;
   nativeResolvedTheme = resolved;
   window.localStorage.setItem(STORAGE_KEY, theme);
-  document.documentElement.classList.toggle("dark", resolved === "dark");
-  document.documentElement.style.colorScheme = resolved;
+  applyDocumentTheme(resolved);
   if (snapshot() !== oldSnapshot) {
     listeners.forEach((listener) => listener());
   }
@@ -151,6 +150,30 @@ function browserResolvedTheme(): ResolvedTheme {
     return "light";
   }
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function applyDocumentTheme(resolved: ResolvedTheme) {
+  if (typeof document === "undefined") {
+    return;
+  }
+  const { bg, fg } = themeFallbackColors(resolved);
+  document.documentElement.classList.toggle("dark", resolved === "dark");
+  document.documentElement.style.colorScheme = resolved;
+  document.documentElement.style.backgroundColor = bg;
+  document.documentElement.style.color = fg;
+  let style = document.getElementById(FALLBACK_STYLE_ID);
+  if (!style) {
+    style = document.createElement("style");
+    style.id = FALLBACK_STYLE_ID;
+    document.head.appendChild(style);
+  }
+  style.textContent = `html,body,#root{background:${bg};color:${fg};}`;
+}
+
+function themeFallbackColors(resolved: ResolvedTheme) {
+  return resolved === "dark"
+    ? { bg: "oklch(0.205 0 0)", fg: "oklch(0.95 0 0)" }
+    : { bg: "oklch(1 0 0)", fg: "oklch(0.18 0 0)" };
 }
 
 function isDesktopThemeControlled() {

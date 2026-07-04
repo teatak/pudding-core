@@ -22,6 +22,7 @@
           document.documentElement.style.backgroundColor = bg;
           document.documentElement.style.color = fg;
           var style = document.createElement("style");
+          style.id = "pudding-theme-fallback";
           style.textContent = "html,body,#root{background:" + bg + ";color:" + fg + ";}";
           document.head.appendChild(style);
         } catch (e) {}
