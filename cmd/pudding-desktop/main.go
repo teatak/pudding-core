@@ -224,7 +224,6 @@ func launchURL(token, apiBase, shell string, theme desktopThemeState, locale des
 	q.Set("token", token)
 	q.Set("api", apiBase)
 	q.Set("theme", string(theme.Theme))
-	q.Set("resolved", string(theme.Resolved))
 	q.Set("locale", string(normalizeDesktopLocalePreference(locale)))
 	if shell != "" {
 		q.Set("shell", shell)

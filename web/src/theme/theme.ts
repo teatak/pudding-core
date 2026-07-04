@@ -39,10 +39,8 @@ export function initThemeFromLaunch() {
     return;
   }
   const theme = consumeLaunchParam("theme");
-  const resolved = consumeLaunchParam("resolved");
-  const next = normalizeThemeState({ theme, resolved });
-  if (next) {
-    applyNativeThemeState(next.theme, next.resolved);
+  if (isTheme(theme)) {
+    applyNativeThemeState(theme, theme === "system" ? browserResolvedTheme() : theme);
   }
 }
 
@@ -53,10 +51,7 @@ export function resolveTheme(theme: Theme): ResolvedTheme {
   if (nativeResolvedTheme) {
     return nativeResolvedTheme;
   }
-  if (typeof window === "undefined") {
-    return "light";
-  }
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return browserResolvedTheme();
 }
 
 export function applyTheme(theme: Theme) {
@@ -149,6 +144,13 @@ function isTheme(value: unknown): value is Theme {
 
 function isResolvedTheme(value: unknown): value is ResolvedTheme {
   return value === "light" || value === "dark";
+}
+
+function browserResolvedTheme(): ResolvedTheme {
+  if (typeof window === "undefined") {
+    return "light";
+  }
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 function isDesktopThemeControlled() {

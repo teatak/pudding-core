@@ -6,7 +6,7 @@
     <title>Pudding Core</title>
     <script>
       // 首屏防闪:在 CSS/JS 之前同步定好主题,避免暗黑模式启动闪白。
-      // color-scheme 让浏览器默认底色即为深色(连 CSS 加载前那帧也不白)。
+      // color-scheme + html/body/#root fallback 让浏览器默认底色即为深色。
       // 逻辑须与 src/theme/theme.ts 一致(key=pudding.theme;非 light/dark 即跟随系统)。
       (function () {
         try {
@@ -14,8 +14,16 @@
           if (t !== "light" && t !== "dark") {
             t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
           }
-          document.documentElement.classList.toggle("dark", t === "dark");
+          var dark = t === "dark";
+          var bg = dark ? "oklch(0.205 0 0)" : "oklch(1 0 0)";
+          var fg = dark ? "oklch(0.95 0 0)" : "oklch(0.18 0 0)";
+          document.documentElement.classList.toggle("dark", dark);
           document.documentElement.style.colorScheme = t;
+          document.documentElement.style.backgroundColor = bg;
+          document.documentElement.style.color = fg;
+          var style = document.createElement("style");
+          style.textContent = "html,body,#root{background:" + bg + ";color:" + fg + ";}";
+          document.head.appendChild(style);
         } catch (e) {}
       })();
     </script>
