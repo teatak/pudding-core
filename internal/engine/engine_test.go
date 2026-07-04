@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/mock"
@@ -427,6 +428,99 @@ func TestCompactCountsSystemReminderAsInputTurn(t *testing.T) {
 	}
 	if got, want := messageLabelsByID(msgs, meta.TailMessageIDs), []string{"system:system reminder", "assistant:system answer", "user:tail user", "assistant:tail assistant"}; !sameStrings(got, want) {
 		t.Fatalf("unexpected tail messages: got %v want %v", got, want)
+	}
+}
+
+func TestAutoCompactRunsAfterCompletedTurn(t *testing.T) {
+	eng, ms, _, sid := newTestEngine(t, mock.WithScript([]string{"auto compact summary"}), mock.WithDelay(time.Millisecond))
+	ctx := context.Background()
+	title := "has title"
+	if _, err := ms.UpdateSession(ctx, sid, store.SessionUpdate{Title: &title}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		ID:          "mock",
+		DisplayName: "mock",
+		Protocol:    "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID:            "mock-model",
+			ContextWindow: 100,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.SetSettings(ctx, map[string]string{
+		config.SettingCompactAutoThresholdPercent: "1",
+		config.SettingCompactTailInputTurns:       "2",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	appendEngineTestTurn(t, ms, sid, "1", "old user 1", "old assistant 1")
+	appendEngineTestTurn(t, ms, sid, "2", "old user 2", "old assistant 2")
+	appendEngineTestTurn(t, ms, sid, "3", "tail user", "tail assistant")
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c_auto", Text: "new user"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+	eng.Wait()
+
+	msgs, err := ms.ListMessages(ctx, sid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var summary *store.Message
+	for _, msg := range msgs {
+		if _, ok := store.CompactMetadataFromMessage(msg); ok {
+			summary = msg
+		}
+	}
+	if summary == nil || summary.Role != store.RoleSummary || summary.Text != "auto compact summary" {
+		t.Fatalf("auto compact summary missing: %+v", msgs)
+	}
+	meta, _ := store.CompactMetadataFromMessage(summary)
+	if meta.SourceTurnCount != 2 || meta.TailTurnCount != 2 {
+		t.Fatalf("unexpected compact metadata: %+v", meta)
+	}
+}
+
+func TestAutoCompactDueSkipsQueuedInput(t *testing.T) {
+	eng, ms, _, sid := newTestEngine(t, mock.WithScript([]string{"summary"}), mock.WithDelay(time.Millisecond))
+	ctx := context.Background()
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		ID:          "mock",
+		DisplayName: "mock",
+		Protocol:    "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID:            "mock-model",
+			ContextWindow: 100,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.SetSettings(ctx, map[string]string{
+		config.SettingCompactAutoThresholdPercent: "1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	appendEngineTestTurn(t, ms, sid, "1", "old user", "old assistant")
+	if _, err := ms.QueueInput(ctx, store.QueueInputInput{
+		SessionID:       sid,
+		ClientMessageID: "queued_1",
+		Text:            "queued",
+		Provider:        "mock",
+		Model:           "mock-model",
+		Mode:            store.ModeChat,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	due, err := eng.autoCompactDue(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if due {
+		t.Fatal("auto compact must not run while queued input exists")
 	}
 }
 

@@ -162,7 +162,7 @@ export function ModelPicker({ token, session, value, onAfterClose, onChange, onR
       <PopoverContent
         align="start"
         alignOffset={-16}
-        className="w-64 max-w-[calc(100vw-2rem)] p-2"
+        className="w-56 max-w-[calc(100vw-2rem)] p-2"
         side="top"
         sideOffset={8}
         onOpenAutoFocus={(event) => event.preventDefault()}

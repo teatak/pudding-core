@@ -221,7 +221,7 @@ export function ProviderPresetCreateDialog({
               type="button"
               onClick={openAPIKeyURL}
             >
-              {t("provider.getAPIKey")}
+              {t("provider.learnMore")}
               <ExternalLink className="size-3.5" />
             </button>
           ) : null}

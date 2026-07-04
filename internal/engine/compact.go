@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/contextbuilder"
@@ -16,6 +18,7 @@ import (
 const (
 	defaultCompactTailInputTurns = 2
 	compactMessageTextLimit      = 4000
+	autoCompactTimeout           = 2 * time.Minute
 )
 
 type CompactInput struct {
@@ -111,6 +114,60 @@ func (e *Engine) Compact(ctx context.Context, in CompactInput) (*CompactResult, 
 		TailMessages:     len(tailIDs),
 		SummaryChars:     len([]rune(summary)),
 	}, nil
+}
+
+func (e *Engine) scheduleAutoCompact(sessionID string) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
+	}
+	e.wg.Add(1)
+	go func() {
+		defer e.wg.Done()
+		ctx, cancel := context.WithTimeout(e.auxCtx, autoCompactTimeout)
+		defer cancel()
+		if err := e.maybeAutoCompact(ctx, sessionID); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			slog.Warn("engine: auto compact failed", "sessionID", sessionID, "err", err)
+		}
+	}()
+}
+
+func (e *Engine) maybeAutoCompact(ctx context.Context, sessionID string) error {
+	due, err := e.autoCompactDue(ctx, sessionID)
+	if err != nil || !due {
+		return err
+	}
+	if queued, err := e.store.HasQueuedInputs(ctx, sessionID); err != nil {
+		return err
+	} else if queued {
+		return nil
+	}
+	_, err = e.Compact(ctx, CompactInput{SessionID: sessionID})
+	if errors.Is(err, ErrCompactEmpty) || errors.Is(err, ErrCompactRunning) || errors.Is(err, ErrTurnRunning) {
+		return nil
+	}
+	return err
+}
+
+func (e *Engine) autoCompactDue(ctx context.Context, sessionID string) (bool, error) {
+	if e.autoCompactThresholdPercent(ctx) <= 0 {
+		return false, nil
+	}
+	if _, err := e.store.RunningTurn(ctx, sessionID); err == nil {
+		return false, nil
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return false, err
+	}
+	if queued, err := e.store.HasQueuedInputs(ctx, sessionID); err != nil {
+		return false, err
+	} else if queued {
+		return false, nil
+	}
+	usage, err := e.SessionUsage(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	return usage.AutoCompactThresholdTokens > 0 && usage.ContextEstimatedTokens >= usage.AutoCompactThresholdTokens, nil
 }
 
 func (e *Engine) compactTailInputTurns(ctx context.Context) int {

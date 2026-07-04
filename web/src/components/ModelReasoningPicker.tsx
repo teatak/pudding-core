@@ -201,7 +201,7 @@ export function ModelReasoningPicker({
           <DropdownMenuSubTrigger className="h-8">
             <span className="min-w-0 flex-1 truncate">{label}</span>
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent alignOffset={-164} className="w-64 max-w-[calc(100vw-2rem)] p-2">
+          <DropdownMenuSubContent alignOffset={-164} className="w-56 max-w-[calc(100vw-2rem)] p-2">
             {providersQuery.isLoading ? (
               <div className="px-2.5 py-1.5 text-xs text-muted-foreground">{t("common.loading")}</div>
             ) : selectableProfiles.length === 0 ? (

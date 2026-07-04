@@ -824,6 +824,9 @@ func (e *Engine) finishTurn(sessionID, turnID string, mode store.AgentMode, stat
 	e.clearRunning(sessionID, turnID)
 	e.hub.Publish(*res.FinalEvent)
 	e.TryDrainQueued(sessionID)
+	if status == store.TurnCompleted {
+		e.scheduleAutoCompact(sessionID)
+	}
 }
 
 func (e *Engine) clearRunning(sessionID, turnID string) {
