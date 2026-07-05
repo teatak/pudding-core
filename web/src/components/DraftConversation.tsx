@@ -1110,16 +1110,14 @@ function DraftLocalFolderChip({
         <span className="min-w-0 truncate font-medium leading-5 text-foreground">{folder.name}</span>
         <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">{label}</span>
       </button>
-      <Button
+      <button
         aria-label={removeLabel}
-        className="absolute top-2 right-1.5 size-5 rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
-        size="icon-xs"
+        className="absolute top-2 right-1.5 grid size-5 place-items-center rounded-full bg-foreground text-background shadow-sm focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
         type="button"
-        variant="ghost"
         onClick={onRemove}
       >
         <X className="size-3" />
-      </Button>
+      </button>
     </div>
   );
 }
@@ -1175,7 +1173,7 @@ function DraftAttachmentChip({
         ) : null}
         <button
           aria-label={removeLabel}
-          className="absolute top-1.5 right-1.5 z-10 grid size-5 place-items-center rounded-full bg-foreground text-background shadow-sm hover:bg-foreground hover:text-background focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-50"
+          className="absolute top-1.5 right-1.5 z-10 grid size-5 place-items-center rounded-full border border-black/10 bg-white text-black shadow-sm focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-50"
           disabled={locked}
           type="button"
           onClick={onRemove}
@@ -1188,7 +1186,7 @@ function DraftAttachmentChip({
   return (
     <div
       className={cn(
-        "relative inline-flex h-16 min-w-44 max-w-full items-center gap-2 rounded-lg border bg-card px-2.5 pr-8 text-sm shadow-sm",
+        "relative inline-flex h-10 max-w-full items-center gap-1.5 rounded-lg border bg-card pr-7 pl-2.5 text-sm whitespace-nowrap shadow-sm",
         item.attachment?.sourcePath && "cursor-pointer",
         item.status === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-border/70 text-muted-foreground",
       )}
@@ -1199,30 +1197,31 @@ function DraftAttachmentChip({
         }
       }}
     >
-      <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted/70 text-muted-foreground">
+      <span className="grid size-4 shrink-0 place-items-center text-muted-foreground">
         {busy ? (
-          <Loader2 className="size-5 animate-spin" strokeWidth={1.8} />
+          <Loader2 className="size-4 animate-spin" strokeWidth={1.8} />
         ) : audio ? (
           <DraftAudioPreviewButton label={item.name} src={draftAttachmentImageSource(item, token)} />
         ) : (
-          <FileText className="size-5" strokeWidth={1.8} />
+          <FileText className="size-4" strokeWidth={1.8} />
         )}
       </span>
-      <span className="flex min-w-0 max-w-52 flex-1 flex-col justify-center">
+      <span className="inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap">
         <span className="truncate font-medium leading-5 text-foreground">{item.name}</span>
-        <span className="truncate text-xs text-muted-foreground">{attachmentKindLabel(item.name, item.attachment?.mime || item.file?.type)}</span>
+        <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">{attachmentKindLabel(item.name, item.attachment?.mime || item.file?.type)}</span>
       </span>
-      <Button
+      <button
         aria-label={removeLabel}
-        className="absolute top-1.5 right-1.5 size-5 rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
+        className="absolute top-2 right-1.5 grid size-5 place-items-center rounded-full bg-foreground text-background shadow-sm focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-50"
         disabled={locked}
-        size="icon-xs"
         type="button"
-        variant="ghost"
-        onClick={onRemove}
+        onClick={(event) => {
+          event.stopPropagation();
+          onRemove();
+        }}
       >
         <X className="size-3" />
-      </Button>
+      </button>
     </div>
   );
 }
@@ -1234,7 +1233,7 @@ function DraftAudioPreviewButton({ label, src }: { label: string; src: string })
     <>
       <button
         aria-label={label}
-        className="grid size-full place-items-center rounded-md hover:bg-muted"
+        className="grid size-full place-items-center rounded-sm hover:text-foreground"
         disabled={!src}
         type="button"
         onClick={(event) => {
@@ -1251,7 +1250,7 @@ function DraftAudioPreviewButton({ label, src }: { label: string; src: string })
           }
         }}
       >
-        {playing ? <Pause className="size-5" fill="currentColor" strokeWidth={1.8} /> : <Play className="size-5" fill="currentColor" strokeWidth={1.8} />}
+        {playing ? <Pause className="size-4" fill="currentColor" strokeWidth={1.8} /> : <Play className="size-4" fill="currentColor" strokeWidth={1.8} />}
       </button>
       {src ? (
         <audio

@@ -257,7 +257,7 @@ function ProfileModels({
           <button
             key={model}
             className={cn(
-              "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-accent",
+              "flex w-full items-center gap-2 rounded-md py-1.5 pr-2.5 pl-4 text-left text-[13px] hover:bg-accent",
               selected && "bg-accent",
             )}
             type="button"

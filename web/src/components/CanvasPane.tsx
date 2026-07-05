@@ -66,7 +66,6 @@ import {
   backBrowserTab,
   clickBrowserTab,
   clearClosedCanvasItems,
-  createBrowserTab,
   createClosedCanvasItem,
   deleteCanvasItem,
   deleteClosedCanvasItem,
@@ -188,6 +187,7 @@ type BrowserCanvasPayload = {
   faviconURL?: string;
   mode?: "headless" | "external";
 };
+type CanvasSurface = "canvas" | "browser";
 
 type BrowserScreencastMetadata = {
   deviceWidth?: number;
@@ -377,6 +377,9 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   const restoredWindowHydrationRef = useRef("");
   const seenCanvasItemIDsRef = useRef<Set<string>>(new Set());
   const hasSeenCanvasItemsRef = useRef(false);
+  const browserAutoSwitchKeyRef = useRef("");
+  const hasSeenBrowserTabStateRef = useRef(false);
+  const sessionSurfaceRef = useRef<Record<string, CanvasSurface>>({});
   const resizeStartWindowsRef = useRef<Record<string, WindowState>>({});
   const resizeStartRestoresRef = useRef<Record<string, WindowState | undefined>>({});
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
@@ -391,10 +394,23 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   }, [sessionID]);
   const actorSessionID = sessionID || actorSessionIDRef.current;
   const enabled = Boolean(token && actorSessionID);
+  const rememberSessionSurface = (targetSessionID: string, surface: CanvasSurface) => {
+    sessionSurfaceRef.current = { ...sessionSurfaceRef.current, [targetSessionID]: surface };
+  };
+  const setActiveSurface = (surface: CanvasSurface) => {
+    if (actorSessionID) {
+      rememberSessionSurface(actorSessionID, surface);
+    }
+    setBrowserActive(surface === "browser");
+  };
 
   useEffect(() => {
     if (!actorSessionID || canvasSessionStateRef.current === actorSessionID) {
       return;
+    }
+    const previousSessionID = canvasSessionStateRef.current;
+    if (previousSessionID) {
+      rememberSessionSurface(previousSessionID, browserActive ? "browser" : "canvas");
     }
     canvasSessionStateRef.current = actorSessionID;
     draftWindowsRef.current = {};
@@ -402,10 +418,12 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     restoredWindowHydrationRef.current = "";
     seenCanvasItemIDsRef.current = new Set();
     hasSeenCanvasItemsRef.current = false;
+    browserAutoSwitchKeyRef.current = "";
+    hasSeenBrowserTabStateRef.current = false;
     resizeStartWindowsRef.current = {};
     resizeStartRestoresRef.current = {};
     setDraftWindows({});
-    setBrowserActive(false);
+    setBrowserActive(sessionSurfaceRef.current[actorSessionID] === "browser");
     setRestoreWindows({});
     setGalleryActiveIndices({});
   }, [actorSessionID]);
@@ -428,7 +446,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     () => allItems.find((item) => browserPayloadForItem(item)?.sessionID === actorSessionID),
     [actorSessionID, allItems],
   );
-  const items = useMemo(() => allItems.filter((item) => item.id !== browserItem?.id), [allItems, browserItem?.id]);
+  const items = useMemo(() => allItems.filter((item) => !canvasItemIsBrowser(item)), [allItems]);
   const closedItems = useMemo(
     () => (closedItemsQuery.data?.items ?? []).filter((item) => !closedCanvasItemIsBrowser(item)),
     [closedItemsQuery.data?.items],
@@ -447,12 +465,22 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   });
   const browserTabs = browserTabsQuery.data?.tabs ?? [];
   const activeBrowserTab = preferredBrowserTab(browserTabs, browserPayload);
+  const activeBrowserSwitchKey = browserTabSwitchKey(activeBrowserTab);
+  const selectCanvasSurface = () => {
+    browserAutoSwitchKeyRef.current = activeBrowserSwitchKey;
+    setActiveSurface("canvas");
+  };
+  const hasBrowserState = Boolean(activeBrowserTab || browserPayloadHasRealState(browserPayload));
   const browserTabTitleText = activeBrowserTab
     ? browserTabTitle(activeBrowserTab, browserPayload?.title || t("browser.title"))
-    : browserPayload?.title || t("browser.title");
+    : hasBrowserState
+      ? browserPayload?.title || t("browser.title")
+      : "";
   const browserTabFaviconURLText = activeBrowserTab
     ? browserTabFaviconURL(activeBrowserTab)
-    : browserPayload?.faviconURL || (browserPayload?.url ? faviconURLForPage(browserPayload.url) : "");
+    : hasBrowserState
+      ? browserPayload?.faviconURL || (browserPayload?.url ? faviconURLForPage(browserPayload.url) : "")
+      : "";
   const windows = useMemo(() => {
     const out: Record<string, WindowState> = {};
     items.forEach((item, index) => {
@@ -551,6 +579,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     },
     onSuccess: (_item, entry) => {
       const restoredWindow = clampWindow({ ...windowFromClosedItem(entry), z: maxZ + 1 }, containerSize);
+      selectCanvasSurface();
       setDraftWindows((prev) => ({ ...prev, [entry.sourceItemID]: restoredWindow }));
       if (actorSessionID) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
@@ -567,6 +596,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       void deleteClosedCanvasItem(token, actorSessionID, entry.id).then(() =>
         queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) }),
       );
+      selectCanvasSurface();
       focusWindow(entry.sourceItemID);
       return;
     }
@@ -628,7 +658,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       });
     },
     onSuccess: (item) => {
-      setBrowserActive(true);
+      setActiveSurface("browser");
       restoreWindowsRef.current = withoutKey(restoreWindowsRef.current, item.id);
       setRestoreWindows(restoreWindowsRef.current);
       setDraftWindows((prev) => withoutKey(prev, item.id));
@@ -640,6 +670,57 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     },
   });
 
+  useEffect(() => {
+    if (!enabled || !browserTabsQuery.isSuccess) {
+      return;
+    }
+    const key = activeBrowserSwitchKey;
+    if (!hasSeenBrowserTabStateRef.current) {
+      hasSeenBrowserTabStateRef.current = true;
+      browserAutoSwitchKeyRef.current = key;
+      return;
+    }
+    if (key === browserAutoSwitchKeyRef.current) {
+      return;
+    }
+    if (!key) {
+      browserAutoSwitchKeyRef.current = "";
+      return;
+    }
+    if (browserActive) {
+      browserAutoSwitchKeyRef.current = key;
+      return;
+    }
+    if (browserWidgetMutation.isPending) {
+      return;
+    }
+    browserAutoSwitchKeyRef.current = key;
+    browserWidgetMutation.mutate();
+  }, [
+    activeBrowserTab?.id,
+    activeBrowserTab?.url,
+    activeBrowserSwitchKey,
+    browserActive,
+    browserTabsQuery.isSuccess,
+    browserWidgetMutation.isPending,
+    enabled,
+  ]);
+
+  useEffect(() => {
+    if (!enabled || !browserActive || browserItem || !activeBrowserTab || browserWidgetMutation.isPending) {
+      return;
+    }
+    browserAutoSwitchKeyRef.current = activeBrowserSwitchKey;
+    browserWidgetMutation.mutate();
+  }, [
+    activeBrowserSwitchKey,
+    activeBrowserTab?.id,
+    browserActive,
+    browserItem?.id,
+    browserWidgetMutation.isPending,
+    enabled,
+  ]);
+
   const browserCloseMutation = useMutation({
     mutationFn: async () => {
       if (activeBrowserTab) {
@@ -650,7 +731,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       }
     },
     onSuccess: () => {
-      setBrowserActive(false);
+      selectCanvasSurface();
       if (browserItem) {
         restoreWindowsRef.current = withoutKey(restoreWindowsRef.current, browserItem.id);
         setRestoreWindows(restoreWindowsRef.current);
@@ -691,6 +772,9 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     }
     seenCanvasItemIDsRef.current = new Set(items.map((item) => item.id));
     hasSeenCanvasItemsRef.current = true;
+    if (newItemIDs.size > 0) {
+      selectCanvasSurface();
+    }
 
     setDraftWindows((prev) => {
       let changed = false;
@@ -858,7 +942,20 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
 
   return (
     <aside className="relative flex h-full shrink-0 flex-col bg-[var(--canvas-background)] text-sidebar-foreground">
-      <div className="drag-region relative z-30 flex h-(--toolbar-h) shrink-0 items-center overflow-hidden pr-[47px] pl-3">
+      <div className="drag-region relative z-30 flex h-(--toolbar-h) shrink-0 items-center gap-2 overflow-hidden pr-[47px] pl-3">
+        {actorSessionID ? (
+          <BrowserCanvasTabButton
+            active={browserActive}
+            closePending={browserCloseMutation.isPending}
+            closable={hasBrowserState}
+            faviconURL={browserTabFaviconURLText}
+            hasTitle={hasBrowserState}
+            pending={browserButtonPending}
+            title={browserTabTitleText}
+            onClick={() => browserWidgetMutation.mutate()}
+            onClose={() => browserCloseMutation.mutate()}
+          />
+        ) : null}
         {items.length > 0 ? (
           <div className="no-drag-region w-fit max-w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-lg bg-muted p-[3px] text-muted-foreground [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
             <div className="inline-flex min-w-max items-center gap-1">
@@ -875,7 +972,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
                     title={title}
                     type="button"
                     onClick={() => {
-                      setBrowserActive(false);
+                      selectCanvasSurface();
                       focusWindow(item.id);
                     }}
                   >
@@ -899,16 +996,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
             </div>
           </div>
         ) : null}
-        <div className="ml-auto flex shrink-0 items-center gap-1.5 pl-2">
-          {actorSessionID ? (
-            <BrowserCanvasTabButton
-              active={browserActive}
-              faviconURL={browserTabFaviconURLText}
-              pending={browserButtonPending}
-              title={browserTabTitleText}
-              onClick={() => browserWidgetMutation.mutate()}
-            />
-          ) : null}
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
           <CanvasLibraryMenu
             closedItems={closedItems}
             onClearClosed={() => clearClosedMutation.mutate()}
@@ -922,10 +1010,9 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
           {browserActive ? (
             browserItem ? (
               <FullscreenBrowserWindow
+                key={browserWindowKey(browserItem)}
                 item={browserItem}
                 token={token}
-                closePending={browserCloseMutation.isPending}
-                onClose={() => browserCloseMutation.mutate()}
               />
             ) : (
               <CanvasBrowserLoading />
@@ -1008,63 +1095,77 @@ function BrowserTabIcon({ faviconURL }: { faviconURL?: string }) {
 
 function BrowserCanvasTabButton({
   active,
+  closePending,
+  closable,
   faviconURL,
+  hasTitle,
   pending,
   title,
   onClick,
+  onClose,
 }: {
   active: boolean;
+  closePending: boolean;
+  closable: boolean;
   faviconURL?: string;
+  hasTitle: boolean;
   pending: boolean;
   title: string;
   onClick: () => void;
+  onClose: () => void;
 }) {
   const { t } = useI18n();
   return (
-    <button
-      aria-label={t("browser.title")}
-      aria-selected={active}
-      className="no-drag-region inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground data-[active=true]:text-foreground"
-      data-active={active}
-      disabled={pending}
-      title={title || t("browser.title")}
-      type="button"
-      onClick={onClick}
-    >
-      {pending ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <BrowserTabIcon faviconURL={faviconURL} />}
-    </button>
+    <div className="no-drag-region w-fit max-w-full min-w-0 shrink-0 overflow-hidden rounded-lg bg-muted p-[3px] text-muted-foreground">
+      <button
+        aria-label={t("browser.title")}
+        aria-selected={active}
+        className={cn(
+          "group inline-flex h-8 min-w-0 shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium whitespace-nowrap transition-colors data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm hover:bg-background hover:text-foreground",
+          hasTitle ? "max-w-36" : "w-10 justify-center",
+        )}
+        data-active={active}
+        disabled={pending}
+        title={title || t("browser.title")}
+        type="button"
+        onClick={onClick}
+      >
+        {pending ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <BrowserTabIcon faviconURL={faviconURL} />}
+        {hasTitle ? <span className="min-w-0 max-w-20 truncate text-left">{title || t("browser.title")}</span> : null}
+        {closable ? (
+          <span
+            aria-label={t("canvas.delete")}
+            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded opacity-70 hover:bg-muted-foreground/20 hover:opacity-100"
+            role="button"
+            tabIndex={-1}
+            onClick={(event) => {
+              event.stopPropagation();
+              onClose();
+            }}
+          >
+            {closePending ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
+          </span>
+        ) : null}
+      </button>
+    </div>
   );
 }
 
 function FullscreenBrowserWindow({
   item,
   token,
-  closePending,
-  onClose,
 }: {
   item: CanvasItem;
   token: string;
-  closePending: boolean;
-  onClose: () => void;
 }) {
-  const { t } = useI18n();
+  const browserKey = browserWindowKey(item);
   return (
-    <div className="absolute inset-0 z-20 flex min-h-0 flex-col overflow-hidden rounded-lg border bg-card text-card-foreground shadow-none">
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b bg-card px-3">
-        <CanvasBrowserToolbar item={item} token={token} />
-        <Button
-          aria-label={t("canvas.delete")}
-          className="canvas-window-no-drag"
-          disabled={closePending}
-          size="icon-sm"
-          variant="ghost"
-          onClick={onClose}
-        >
-          {closePending ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
-        </Button>
+    <div className="absolute inset-0 z-20 flex min-h-0 flex-col overflow-hidden rounded-lg bg-card text-card-foreground shadow-none">
+      <div className="canvas-window-drag-handle flex h-10 shrink-0 cursor-default items-center gap-2 rounded-t-lg border bg-card px-3">
+        <CanvasBrowserToolbar key={`toolbar:${browserKey}`} item={item} token={token} />
       </div>
-      <div className="min-h-0 flex-1 overflow-hidden">
-        <CanvasBrowserWidget item={item} token={token} />
+      <div className="min-h-0 flex-1 overflow-hidden rounded-b-lg border-x border-b bg-card">
+        <CanvasBrowserWidget key={`widget:${browserKey}`} item={item} token={token} />
       </div>
     </div>
   );
@@ -1571,10 +1672,9 @@ const MemoCanvasContent = memo(CanvasContent);
 function CanvasBrowserToolbar({ token, item }: { token: string; item: CanvasItem }) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
-  const createTabPromiseRef = useRef<Promise<BrowserTab> | null>(null);
   const payload = browserPayloadForItem(item);
   const ownerSessionID = payload?.sessionID || item.sourceSessionID;
-  const [urlDraft, setURLDraft] = useState((payload?.url || "").trim());
+  const [urlDraft, setURLDraft] = useState(browserDisplayURL(payload?.url));
   const tabsQuery = useQuery({
     enabled: Boolean(token && ownerSessionID),
     queryKey: ownerSessionID ? queryKeys.browserTabs(ownerSessionID) : ["browser", "missing-session"],
@@ -1591,10 +1691,10 @@ function CanvasBrowserToolbar({ token, item }: { token: string; item: CanvasItem
 
   useEffect(() => {
     if (activeTab?.url) {
-      setURLDraft(activeTab.url);
+      setURLDraft(browserDisplayURL(activeTab.url));
       return;
     }
-    setURLDraft((payload?.url || "").trim());
+    setURLDraft(browserDisplayURL(payload?.url));
   }, [activeTab?.id, activeTab?.url, payload?.url]);
 
   const persistTab = async (tab: BrowserTab) => {
@@ -1621,27 +1721,6 @@ function CanvasBrowserToolbar({ token, item }: { token: string; item: CanvasItem
     });
     void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(ownerSessionID) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(ownerSessionID) });
-  };
-
-  const ensureTab = async () => {
-    if (!ownerSessionID) {
-      throw new Error("browser session id missing");
-    }
-    if (activeTab) {
-      return activeTab;
-    }
-    if (tabs[0]) {
-      await persistTab(tabs[0]);
-      return tabs[0];
-    }
-    if (!createTabPromiseRef.current) {
-      createTabPromiseRef.current = createBrowserTab(token, ownerSessionID).finally(() => {
-        createTabPromiseRef.current = null;
-      });
-    }
-    const tab = await createTabPromiseRef.current;
-    await persistTab(tab);
-    return tab;
   };
 
   useEffect(() => {
@@ -1691,7 +1770,12 @@ function CanvasBrowserToolbar({ token, item }: { token: string; item: CanvasItem
       if (!ownerSessionID) {
         throw new Error("browser session id missing");
       }
-      const tab = await ensureTab();
+      let tab = activeTab;
+      if (!tab) {
+        const url = browserAddressToURL(urlDraft);
+        tab = await openBrowserURL(token, ownerSessionID, { url });
+        await persistTab(tab);
+      }
       return revealBrowserTab(token, ownerSessionID, tab.id);
     },
     onSuccess: (tab) => {
@@ -1701,7 +1785,11 @@ function CanvasBrowserToolbar({ token, item }: { token: string; item: CanvasItem
   });
   const navigationDisabled = !activeTab || tabsQuery.isPending || navigationMutation.isPending;
   const pendingNavigationAction = navigationMutation.isPending ? navigationMutation.variables : undefined;
-  const toolbarTitle = activeTab ? browserTabTitle(activeTab, payload?.title || t("browser.title")) : payload?.title || t("browser.title");
+  const toolbarTitle = activeTab
+    ? browserTabTitle(activeTab, payload?.title || t("browser.title"))
+    : browserPayloadHasRealState(payload)
+      ? payload?.title || t("browser.title")
+      : t("browser.title");
 
   return (
     <form
@@ -1755,7 +1843,7 @@ function CanvasBrowserToolbar({ token, item }: { token: string; item: CanvasItem
         <Button
           aria-label={t("browser.reveal")}
           className="h-7 w-7 text-muted-foreground hover:text-foreground"
-          disabled={revealMutation.isPending || tabsQuery.isPending}
+          disabled={revealMutation.isPending || tabsQuery.isPending || (!activeTab && !urlDraft.trim())}
           size="icon-sm"
           title={t("browser.reveal")}
           type="button"
@@ -1765,7 +1853,7 @@ function CanvasBrowserToolbar({ token, item }: { token: string; item: CanvasItem
           {revealMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ExternalLink className="h-3.5 w-3.5" />}
         </Button>
       </div>
-      <div className="group relative flex min-w-0 flex-1 items-center rounded-md border border-transparent bg-transparent transition-colors hover:bg-background/45 focus-within:border-border/70 focus-within:bg-background/45 focus-within:ring-1 focus-within:ring-ring/20">
+      <div className="group relative flex h-8 min-w-0 flex-1 items-center rounded-md border border-transparent bg-transparent transition-[background-color,box-shadow] hover:bg-background/45 focus-within:bg-background/45 focus-within:shadow-[0_0_0_1px_hsl(var(--border)/0.7),0_0_0_3px_hsl(var(--ring)/0.12)]">
         <Input
           className="h-7 min-w-0 flex-1 border-0 bg-transparent pr-8 shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
           placeholder={t("browser.urlPlaceholder")}
@@ -1794,7 +1882,6 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
   const imageRef = useRef<HTMLImageElement | null>(null);
   const textInputRef = useRef<HTMLTextAreaElement | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const createTabPromiseRef = useRef<Promise<BrowserTab> | null>(null);
   const isComposingRef = useRef(false);
   const suppressIMECommitKeyRef = useRef(false);
   const suppressIMECommitKeyUpRef = useRef("");
@@ -1821,7 +1908,8 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
   const tabs = tabsQuery.data?.tabs || [];
   const activeTab = preferredBrowserTab(tabs, payload);
   const busyTitle = tabsQuery.isPending ? t("browser.loading") : t("browser.empty");
-  const isExternalBrowser = activeTab ? activeTab.mode === "external" : payload?.mode === "external";
+  const hasRealPayloadState = browserPayloadHasRealState(payload);
+  const isExternalBrowser = activeTab ? activeTab.mode === "external" : hasRealPayloadState && payload?.mode === "external";
 
   useEffect(() => {
     if (!isExternalBrowser) {
@@ -1866,18 +1954,7 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
     if (activeTab) {
       return activeTab;
     }
-    if (tabs[0]) {
-      await persistTab(tabs[0]);
-      return tabs[0];
-    }
-    if (!createTabPromiseRef.current) {
-      createTabPromiseRef.current = createBrowserTab(token, ownerSessionID).finally(() => {
-        createTabPromiseRef.current = null;
-      });
-    }
-    const tab = await createTabPromiseRef.current;
-    await persistTab(tab);
-    return tab;
+    throw new Error("browser tab missing");
   };
 
   const captureTab = async (tab: BrowserTab) => {
@@ -1925,6 +2002,8 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
     let resizeObserver: ResizeObserver | null = null;
     const ws = new WebSocket(browserScreencastURL(token, ownerSessionID, activeTab.id));
     wsRef.current = ws;
+    setStreamFrame(null);
+    setScreenshot(null);
     setStreamStatus("connecting");
     setStreamError("");
 
@@ -2320,7 +2399,7 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
   };
 
   const busy = screenshotMutation.isPending || clickMutation.isPending;
-  const title = activeTab?.title?.trim() || payload?.title || busyTitle;
+  const title = activeTab?.title?.trim() || (hasRealPayloadState ? payload?.title : "") || busyTitle;
 
   if (!ownerSessionID) {
     return <div className="p-3 text-sm text-muted-foreground">{t("browser.loadFailed")}</div>;
@@ -3554,6 +3633,12 @@ function browserCanvasItemID(sessionID: string): string {
   return `browser_${sessionID.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
 }
 
+function browserWindowKey(item: CanvasItem): string {
+  const payload = browserPayloadForItem(item);
+  const ownerSessionID = payload?.sessionID || item.sourceSessionID || item.id;
+  return `${ownerSessionID}:${payload?.tabID || payload?.url || item.id}`;
+}
+
 function browserScreencastURL(token: string, sessionID: string, tabID: string): string {
   const url = new URL(
     apiURL(`/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/screencast`),
@@ -3594,29 +3679,55 @@ function browserAddressToURL(value: string): string {
 function browserTabTitle(tab: BrowserTab, fallback: string): string {
   const title = (tab.title || "").trim();
   const url = (tab.url || "").trim();
-  if (title && !(title === "about:blank" && url && url !== "about:blank")) {
+  if (title && !(title === "about:blank" && !browserURLIsBlank(url))) {
     return title;
   }
-  if (url && url !== "about:blank") {
+  if (!browserURLIsBlank(url)) {
     return browserTitleFromURL(url) || url;
   }
   return fallback;
 }
 
 function browserTabFaviconURL(tab: BrowserTab): string {
+  if (!browserTabIsReal(tab)) {
+    return "";
+  }
   return (tab.faviconURL || "").trim() || faviconURLForPage(tab.url);
 }
 
 function preferredBrowserTab(tabs: BrowserTab[], payload: BrowserCanvasPayload | null): BrowserTab | undefined {
-  if (tabs.length === 0) {
+  const realTabs = tabs.filter(browserTabIsReal);
+  if (realTabs.length === 0) {
     return undefined;
   }
-  const payloadTab = payload?.tabID ? tabs.find((tab) => tab.id === payload.tabID) : undefined;
-  const latestTab = tabs.reduce((latest, tab) => (browserTabTimestamp(tab) > browserTabTimestamp(latest) ? tab : latest), tabs[0]!);
+  const payloadTab = payload?.tabID ? realTabs.find((tab) => tab.id === payload.tabID) : undefined;
+  const latestTab = realTabs.reduce((latest, tab) => (browserTabTimestamp(tab) > browserTabTimestamp(latest) ? tab : latest), realTabs[0]!);
   if (!payloadTab) {
     return latestTab;
   }
   return browserTabTimestamp(latestTab) > browserTabTimestamp(payloadTab) ? latestTab : payloadTab;
+}
+
+function browserTabIsReal(tab: BrowserTab): boolean {
+  return !browserURLIsBlank(tab.url);
+}
+
+function browserTabSwitchKey(tab: BrowserTab | undefined): string {
+  return tab ? `${tab.id}:${tab.url}` : "";
+}
+
+function browserPayloadHasRealState(payload: BrowserCanvasPayload | null): boolean {
+  return Boolean(payload && (payload.tabID || payload.url) && !browserURLIsBlank(payload.url));
+}
+
+function browserDisplayURL(rawURL?: string): string {
+  const url = (rawURL || "").trim();
+  return browserURLIsBlank(url) ? "" : url;
+}
+
+function browserURLIsBlank(rawURL?: string): boolean {
+  const url = (rawURL || "").trim().toLowerCase();
+  return !url || url === "about:blank";
 }
 
 function browserTabTimestamp(tab: BrowserTab): number {
@@ -3839,6 +3950,11 @@ function browserPayloadForItem(item: CanvasItem): BrowserCanvasPayload | null {
 }
 
 function closedCanvasItemIsBrowser(item: ClosedCanvasItem): boolean {
+  const payload = asRecord(item.item);
+  return (stringValue(payload?.kind) || item.kind) === "browser";
+}
+
+function canvasItemIsBrowser(item: CanvasItem): boolean {
   const payload = asRecord(item.item);
   return (stringValue(payload?.kind) || item.kind) === "browser";
 }

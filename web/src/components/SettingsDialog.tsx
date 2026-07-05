@@ -12,7 +12,6 @@ import {
   Info,
   Loader2,
   MessageSquareText,
-  Palette,
   Pencil,
   Plus,
   Settings,
@@ -133,7 +132,6 @@ const SETTINGS_SECTIONS: Array<{
   { id: "skills", icon: BookOpenText, labelKey: "settings.section.skills" },
   { id: "tools", icon: Globe2, labelKey: "settings.section.tools" },
   { id: "mobile", icon: Smartphone, labelKey: "settings.section.mobile" },
-  { id: "appearance", icon: Palette, labelKey: "settings.section.appearance" },
   { id: "about", icon: Info, labelKey: "settings.section.about" },
 ];
 
@@ -600,7 +598,7 @@ function GeneralSettings({ token }: { token: string }) {
             onChange={setAutoThreshold}
           />
         </div>
-        <div className="divide-y rounded-lg border">
+        <div className="divide-y overflow-hidden rounded-xl border bg-card">
           <SettingsToggleRow
             checked={showCompactSummary}
             description={t("settings.general.showCompactSummaryDesc")}
@@ -632,7 +630,7 @@ function GeneralSettings({ token }: { token: string }) {
         <div className="grid gap-2">
           <h3 className="text-lg font-semibold tracking-tight">{t("settings.general.developer")}</h3>
         </div>
-        <div className="divide-y rounded-lg border">
+        <div className="divide-y overflow-hidden rounded-xl border bg-card">
           <SettingsToggleRow
             checked={showPreviewAppVersions}
             description={t("settings.general.showPreviewAppVersionsDesc")}
@@ -1532,7 +1530,7 @@ function BuiltinToolsPanel({
   return (
     <Accordion className="overflow-hidden rounded-xl border bg-card" collapsible type="single">
       <AccordionItem className="border-b-0" value="builtin-tools">
-        <AccordionTrigger className="h-14 items-center rounded-none border-0 px-4 py-0 text-sm font-normal hover:no-underline focus-visible:ring-0">
+        <AccordionTrigger className="h-11 items-center rounded-none border-0 px-4 py-0 text-sm font-normal hover:no-underline focus-visible:ring-0">
           <span>{`${t("settings.tools.builtin.title")} (${tools.length})`}</span>
           {loading ? <Loader2 className="mr-2 size-4 animate-spin text-muted-foreground" /> : null}
         </AccordionTrigger>
@@ -1593,7 +1591,7 @@ function BrowserMCPToolsPanel({
   const connected = sessions.length > 0;
 
   return (
-    <div className="grid gap-3">
+    <>
       <BrowserMCPToolGroup
         connected={connected && canvasTools.length > 0}
         error={error}
@@ -1610,7 +1608,7 @@ function BrowserMCPToolsPanel({
         tools={uiTools}
         onRetry={onRetry}
       />
-    </div>
+    </>
   );
 }
 
@@ -1633,7 +1631,7 @@ function BrowserMCPToolGroup({
   return (
     <Accordion className="overflow-hidden rounded-xl border bg-card" collapsible type="single">
       <AccordionItem className="border-b-0" value={`${group}-tools`}>
-        <AccordionTrigger className="h-14 items-center rounded-none border-0 px-4 py-0 text-sm font-normal hover:no-underline focus-visible:ring-0">
+        <AccordionTrigger className="h-11 items-center rounded-none border-0 px-4 py-0 text-sm font-normal hover:no-underline focus-visible:ring-0">
           <span className="flex min-w-0 items-center gap-2">
             <span>{`${t(`settings.tools.${group}.title`)} (${tools.length})`}</span>
             <span
@@ -1955,7 +1953,7 @@ function SettingsPanel({
 }) {
   return (
     <section className="overflow-hidden rounded-xl border bg-card">
-      <div className="pudding-settings-panel-header flex h-14 items-center justify-between gap-3 border-b px-4">
+      <div className="pudding-settings-panel-header flex h-11 items-center justify-between gap-3 border-b px-4">
         <h3 className="text-sm font-normal">{title}</h3>
         {action}
       </div>

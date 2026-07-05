@@ -11,7 +11,7 @@ export const workspaceLayout = {
   minChatPx: 480,
   maxChatPx: 920,
   minCanvasPx: 320,
-  railAutoCollapsePx: 760,
+  railAutoCollapsePx: 660,
 } as const;
 
 export const resizeTargetMinimumSize = {
