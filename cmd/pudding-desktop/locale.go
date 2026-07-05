@@ -34,6 +34,9 @@ func loadDesktopLocalePreference(path string) (desktopLocalePreference, error) {
 }
 
 func saveDesktopLocalePreference(path string, locale desktopLocalePreference) error {
+	desktopPreferencesMu.Lock()
+	defer desktopPreferencesMu.Unlock()
+
 	prefs, err := loadDesktopPreferences(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err

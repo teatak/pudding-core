@@ -124,6 +124,17 @@ CREATE TABLE IF NOT EXISTS canvas_closed_items (
 CREATE INDEX IF NOT EXISTS canvas_closed_items_closed_at
     ON canvas_closed_items(closed_at DESC);
 
+CREATE TABLE IF NOT EXISTS session_browser_state (
+    session_id  TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    tab_id      TEXT NOT NULL DEFAULT '',
+    url         TEXT NOT NULL DEFAULT '',
+    title       TEXT NOT NULL DEFAULT '',
+    favicon_url TEXT NOT NULL DEFAULT '',
+    mode        TEXT NOT NULL DEFAULT '',
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS messages (
     id                TEXT PRIMARY KEY,
     session_id        TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

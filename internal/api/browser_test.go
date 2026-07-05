@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -134,6 +135,55 @@ func TestBrowserRoutesRequireExistingSession(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d", resp.StatusCode)
+	}
+}
+
+func TestBrowserStateAPITracksRecoverableSessionState(t *testing.T) {
+	srv, st, browserSvc := newBrowserTestServer(t)
+	ctx := context.Background()
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_state", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	type stateResponse struct {
+		HasState    bool   `json:"hasState"`
+		SessionID   string `json:"sessionID"`
+		TabID       string `json:"tabID"`
+		URL         string `json:"url"`
+		Recoverable bool   `json:"recoverable"`
+	}
+
+	resp := req(t, http.MethodGet, srv.URL+"/sessions/sess_state/browser/state", nil)
+	state := decodeJSON[stateResponse](t, resp)
+	if resp.StatusCode != http.StatusOK || state.HasState || state.SessionID != "sess_state" {
+		t.Fatalf("empty state status=%d state=%+v", resp.StatusCode, state)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_state/browser/open", map[string]string{"url": "https://www.sohu.com/"})
+	tab := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("open status=%d tab=%+v", resp.StatusCode, tab)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_state/browser/state", nil)
+	state = decodeJSON[stateResponse](t, resp)
+	if resp.StatusCode != http.StatusOK || !state.HasState || state.TabID != tab.ID || state.URL != "https://www.sohu.com/" || state.Recoverable {
+		t.Fatalf("live state status=%d state=%+v", resp.StatusCode, state)
+	}
+
+	browserSvc.tabs = map[string]browser.TabSnapshot{}
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_state/browser/state", nil)
+	state = decodeJSON[stateResponse](t, resp)
+	if resp.StatusCode != http.StatusOK || !state.HasState || state.URL != "https://www.sohu.com/" || !state.Recoverable {
+		t.Fatalf("recoverable state status=%d state=%+v", resp.StatusCode, state)
+	}
+
+	resp = req(t, http.MethodDelete, srv.URL+"/sessions/sess_state/browser/state", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete state status=%d", resp.StatusCode)
+	}
+	if _, err := st.GetBrowserState(ctx, "sess_state"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("browser state should be cleared: %v", err)
 	}
 }
 

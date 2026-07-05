@@ -42,9 +42,14 @@ const (
 	WeatherGet        = "builtin_weather_get"
 	CameraCapture     = "builtin_camera_capture"
 	DesktopScreenshot = "builtin_desktop_screenshot"
+	BrowserStatus     = "builtin_browser_status"
 	BrowserOpen       = "builtin_browser_open"
 	BrowserObserve    = "builtin_browser_observe"
 	BrowserScreenshot = "builtin_browser_screenshot"
+	BrowserBack       = "builtin_browser_back"
+	BrowserForward    = "builtin_browser_forward"
+	BrowserReload     = "builtin_browser_reload"
+	BrowserClose      = "builtin_browser_close"
 	BrowserClick      = "builtin_browser_click"
 	BrowserType       = "builtin_browser_type"
 	BrowserScroll     = "builtin_browser_scroll"
@@ -80,6 +85,12 @@ type HistoryMessageSource interface {
 	GetMessage(ctx context.Context, sessionID string, messageID string) (*store.Message, error)
 }
 
+type BrowserStateStore interface {
+	GetBrowserState(ctx context.Context, sessionID string) (*store.BrowserState, error)
+	PutBrowserState(ctx context.Context, in store.BrowserStateInput) (*store.BrowserState, error)
+	ClearBrowserState(ctx context.Context, sessionID string) error
+}
+
 type BuiltinOption func(*BuiltinRunner)
 
 type BuiltinRunner struct {
@@ -90,6 +101,7 @@ type BuiltinRunner struct {
 	skillDrafts     SkillDraftSource
 	history         HistorySearchSource
 	historyMessages HistoryMessageSource
+	browserState    BrowserStateStore
 	browser         browser.Service
 	camera          CameraCapturer
 	screen          DesktopScreenCapturer
@@ -161,6 +173,12 @@ func WithHistorySearch(source HistorySearchSource) BuiltinOption {
 func WithBrowser(service browser.Service) BuiltinOption {
 	return func(r *BuiltinRunner) {
 		r.browser = service
+	}
+}
+
+func WithBrowserState(store BrowserStateStore) BuiltinOption {
+	return func(r *BuiltinRunner) {
+		r.browserState = store
 	}
 }
 
@@ -362,39 +380,69 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Capability:  store.ModeChat,
 		},
 		{
+			Name:        BrowserStatus,
+			Description: "Return the current session's managed browser slot status. The browser is single-slot per session; this does not switch tabs.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+			Capability:  store.ModeChat,
+		},
+		{
 			Name:        BrowserOpen,
-			Description: "Open a URL in the current session's managed visible browser tab. Creates a tab when the session has none.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","description":"URL to open. http and https are supported; scheme defaults to https."},"tabID":{"type":"string","description":"Optional session-scoped browser tab id. Required when the session has multiple browser tabs."}},"required":["url"],"additionalProperties":false}`),
+			Description: "Open or replace the current session's single managed browser slot. Creates a browser tab when the session has none.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","description":"URL to open. http and https are supported; scheme defaults to https."}},"required":["url"],"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{
 			Name:        BrowserObserve,
-			Description: "Observe the current session's managed browser tab: title, URL, visible page text, and interactive elements.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Optional session-scoped browser tab id. Required when the session has multiple browser tabs."},"maxTextChars":{"type":"integer","description":"Optional max page text characters, default 6000, cap 20000."},"maxElements":{"type":"integer","description":"Optional max interactive elements, default 30, cap 100."}},"additionalProperties":false}`),
+			Description: "Observe the current session's managed browser slot: title, URL, visible page text, and interactive elements.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"maxTextChars":{"type":"integer","description":"Optional max page text characters, default 6000, cap 20000."},"maxElements":{"type":"integer","description":"Optional max interactive elements, default 30, cap 100."}},"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{
 			Name:        BrowserScreenshot,
-			Description: "Capture a screenshot of the current session's managed browser tab and route it as an image attachment.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Optional session-scoped browser tab id. Required when the session has multiple browser tabs."},"fullPage":{"type":"boolean","description":"Capture beyond the viewport when supported. Defaults false."}},"additionalProperties":false}`),
+			Description: "Capture a screenshot of the current session's managed browser slot and route it as an image attachment.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"fullPage":{"type":"boolean","description":"Capture beyond the viewport when supported. Defaults false."}},"additionalProperties":false}`),
+			Capability:  store.ModeChat,
+		},
+		{
+			Name:        BrowserBack,
+			Description: "Navigate the current session's managed browser slot back in history.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+			Capability:  store.ModeChat,
+		},
+		{
+			Name:        BrowserForward,
+			Description: "Navigate the current session's managed browser slot forward in history.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+			Capability:  store.ModeChat,
+		},
+		{
+			Name:        BrowserReload,
+			Description: "Reload the current session's managed browser slot.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+			Capability:  store.ModeChat,
+		},
+		{
+			Name:        BrowserClose,
+			Description: "Close the current session's managed browser slot. This only affects the current session.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{
 			Name:        BrowserClick,
-			Description: "Click an element in the current session's managed browser tab by CSS selector or viewport coordinates.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Optional session-scoped browser tab id. Required when the session has multiple browser tabs."},"selector":{"type":"string","description":"CSS selector to click."},"x":{"type":"number","description":"Viewport X coordinate, used when selector is omitted."},"y":{"type":"number","description":"Viewport Y coordinate, used when selector is omitted."}},"additionalProperties":false}`),
+			Description: "Click an element in the current session's managed browser slot by CSS selector or viewport coordinates.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"selector":{"type":"string","description":"CSS selector to click."},"x":{"type":"number","description":"Viewport X coordinate, used when selector is omitted."},"y":{"type":"number","description":"Viewport Y coordinate, used when selector is omitted."}},"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{
 			Name:        BrowserType,
-			Description: "Type text into an editable element in the current session's managed browser tab.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Optional session-scoped browser tab id. Required when the session has multiple browser tabs."},"selector":{"type":"string","description":"CSS selector for the input. If omitted, uses the active element."},"text":{"type":"string","description":"Text to type."},"clear":{"type":"boolean","description":"Replace existing value before typing."}},"required":["text"],"additionalProperties":false}`),
+			Description: "Type text into an editable element in the current session's managed browser slot.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"selector":{"type":"string","description":"CSS selector for the input. If omitted, uses the active element."},"text":{"type":"string","description":"Text to type."},"clear":{"type":"boolean","description":"Replace existing value before typing."}},"required":["text"],"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{
 			Name:        BrowserScroll,
-			Description: "Scroll the current session's managed browser tab or a scrollable element.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Optional session-scoped browser tab id. Required when the session has multiple browser tabs."},"selector":{"type":"string","description":"Optional CSS selector for a scrollable element."},"deltaX":{"type":"number","description":"Horizontal scroll delta in pixels."},"deltaY":{"type":"number","description":"Vertical scroll delta in pixels. Defaults to 600 when both deltas are omitted."}},"additionalProperties":false}`),
+			Description: "Scroll the current session's managed browser slot or a scrollable element.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"selector":{"type":"string","description":"Optional CSS selector for a scrollable element."},"deltaX":{"type":"number","description":"Horizontal scroll delta in pixels."},"deltaY":{"type":"number","description":"Vertical scroll delta in pixels. Defaults to 600 when both deltas are omitted."}},"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 	}
@@ -457,12 +505,22 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.cameraCapture(ctx, call)
 	case DesktopScreenshot:
 		return r.desktopScreenshot(ctx, call)
+	case BrowserStatus:
+		return r.browserStatus(ctx, call)
 	case BrowserOpen:
 		return r.browserOpen(ctx, call)
 	case BrowserObserve:
 		return r.browserObserve(ctx, call)
 	case BrowserScreenshot:
 		return r.browserScreenshot(ctx, call)
+	case BrowserBack:
+		return r.browserNavigate(ctx, call, "back")
+	case BrowserForward:
+		return r.browserNavigate(ctx, call, "forward")
+	case BrowserReload:
+		return r.browserNavigate(ctx, call, "reload")
+	case BrowserClose:
+		return r.browserClose(ctx, call)
 	case BrowserClick:
 		return r.browserClick(ctx, call)
 	case BrowserType:

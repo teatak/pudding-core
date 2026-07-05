@@ -102,6 +102,20 @@ export const listBrowserMCPSessionsResponse = z.object({
   sessions: z.array(browserMCPSession),
 });
 
+export const browserState = z.object({
+  hasState: z.boolean(),
+  sessionID: z.string(),
+  tabID: z.string().optional(),
+  url: z.string().optional(),
+  title: z.string().optional(),
+  faviconURL: z.string().optional(),
+  mode: z.enum(["headless", "external"]).optional(),
+  recoverable: z.boolean().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
+export type BrowserState = z.infer<typeof browserState>;
+
 // provider profile 的设置视图:apiKey 来自本地配置,编辑时可回显;apiKeySet 用于列表状态。
 export const providerProtocol = z.enum(["openai-compatible", "openai-responses", "google", "anthropic"]);
 
@@ -393,6 +407,65 @@ export const audioBindingResponse = z.object({
   ok: z.boolean(),
   bindings: audioBindings,
 });
+
+export const audioDriverConfig = z.object({
+  type: z.string(),
+  captureSampleRate: z.number(),
+  playbackSampleRate: z.number(),
+  channels: z.number(),
+  periodMillis: z.number(),
+});
+export const audioASRVADConfig = z.object({
+  modelPath: z.string(),
+  threshold: z.number(),
+  minSilenceMillis: z.number(),
+  minSpeechMillis: z.number(),
+  windowSize: z.number(),
+  prerollMillis: z.number(),
+});
+export const audioASRConfig = z.object({
+  enabled: z.boolean().optional(),
+  engine: z.string(),
+  modelPath: z.string(),
+  tokensPath: z.string(),
+  language: z.string(),
+  useITN: z.boolean().optional(),
+  numThreads: z.number(),
+  provider: z.string(),
+  vad: audioASRVADConfig,
+});
+export const audioAECConfig = z.object({
+  enabled: z.boolean().optional(),
+  model: z.string(),
+});
+export const audioNSConfig = z.object({
+  enabled: z.boolean().optional(),
+  model: z.string(),
+  level: z.string(),
+});
+export const audioTTSProfile = z.object({
+  voice: z.string().optional(),
+  speed: z.number().optional(),
+});
+export const audioTTSConfig = z.object({
+  enabled: z.boolean().optional(),
+  profile: z.string(),
+  profiles: z.record(z.string(), audioTTSProfile),
+});
+export const audioConfig = z.object({
+  version: z.number(),
+  driver: audioDriverConfig,
+  asr: audioASRConfig,
+  aec: audioAECConfig,
+  ns: audioNSConfig,
+  tts: audioTTSConfig,
+});
+export type AudioConfig = z.infer<typeof audioConfig>;
+export const audioConfigResponse = z.object({
+  path: z.string(),
+  config: audioConfig,
+});
+export type AudioConfigResponse = z.infer<typeof audioConfigResponse>;
 
 export const desktopAboutRow = z.object({
   key: z.string(),

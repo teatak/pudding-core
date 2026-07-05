@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 MODULE="github.com/teatak/pudding-core"
-BUILDTAGS="${BUILDTAGS:-sqlite_fts5}"
+BUILDTAGS="${BUILDTAGS:-sqlite_fts5 webrtcaec}"
 
 version="${1:-}"
 if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9._-]+)?$ ]]; then

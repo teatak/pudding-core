@@ -3,7 +3,6 @@ import {
   Activity,
   BookOpenText,
   Check,
-  CircleHelp,
   Copy,
   ExternalLink,
   Eye,
@@ -12,6 +11,7 @@ import {
   Info,
   Loader2,
   MessageSquareText,
+  Mic2,
   Pencil,
   Plus,
   Settings,
@@ -28,6 +28,7 @@ import {
   deleteSkillDraft,
   deleteProvider,
   deleteSkill,
+  getAudioConfig,
   getDailyUsage,
   getDesktopAbout,
   getSettings,
@@ -39,11 +40,13 @@ import {
   listProviders,
   listSkills,
   patchWebTools,
+  putAudioConfig,
   putSettings,
   putUserPrompt,
   skillIconURL,
   type BuiltinTool,
   type BrowserMCPSession,
+  type AudioConfig,
   type DailyUsageStat,
   type DesktopAboutSection,
   type MobilePairing,
@@ -83,6 +86,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Input } from "@/components/ui/input";
+import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Sidebar,
@@ -101,6 +105,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { BrandIcon } from "@/components/BrandIcons";
+import { DialogSelectContent } from "@/components/DialogSelectContent";
 import { IdentityIcon } from "@/components/IdentityIcon";
 import {
   cloneProviderProfileForm,
@@ -111,6 +116,7 @@ import { ProviderPresetCreateDialog, ProviderPresetGrid } from "@/components/Pro
 import { SkillDraftDiffDialog } from "@/components/SkillDraftDiffDialog";
 import { useI18n } from "@/i18n";
 import { SETTINGS_KEYS, settingsWithDefaults } from "@/lib/appSettings";
+import { shouldKeepDialogOpenForSelectDismiss } from "@/lib/layerGuards";
 import { cn } from "@/lib/utils";
 import { SETTINGS_DIALOG_OPEN_EVENT, type SettingsDialogOpenDetail, type SettingsSectionID } from "@/lib/settingsDialog";
 import {
@@ -128,6 +134,7 @@ const SETTINGS_SECTIONS: Array<{
 }> = [
   { id: "usage", icon: Activity, labelKey: "settings.section.usage" },
   { id: "dialogue", icon: SlidersHorizontal, labelKey: "settings.section.dialogue" },
+  { id: "voice", icon: Mic2, labelKey: "settings.section.voice" },
   { id: "model", icon: Sparkles, labelKey: "settings.section.model" },
   { id: "skills", icon: BookOpenText, labelKey: "settings.section.skills" },
   { id: "tools", icon: Globe2, labelKey: "settings.section.tools" },
@@ -180,7 +187,19 @@ export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProp
           </Button>
         </DialogTrigger>
       ) : null}
-      <DialogContent className="top-[calc(var(--toolbar-h)+(100svh-var(--toolbar-h))/2)] h-[min(900px,calc(100svh-var(--toolbar-h)-1.5rem))] w-[calc(100%-0.5rem)] max-w-[430px] overflow-hidden bg-background p-0 sm:w-[calc(100vw-2rem)] sm:max-w-[1180px] xl:max-w-[1240px]">
+      <DialogContent
+        className="top-[calc(var(--toolbar-h)+(100svh-var(--toolbar-h))/2)] h-[min(900px,calc(100svh-var(--toolbar-h)-1.5rem))] w-[calc(100%-0.5rem)] max-w-[430px] overflow-hidden bg-background p-0 sm:w-[calc(100vw-2rem)] sm:max-w-[1180px] xl:max-w-[1240px]"
+        onPointerDownOutside={(event) => {
+          if (shouldKeepDialogOpenForSelectDismiss(event.target)) {
+            event.preventDefault();
+          }
+        }}
+        onInteractOutside={(event) => {
+          if (shouldKeepDialogOpenForSelectDismiss(event.target)) {
+            event.preventDefault();
+          }
+        }}
+      >
         <DialogTitle className="sr-only">{t("settings.title")}</DialogTitle>
         <DialogDescription className="sr-only">{t("settings.description")}</DialogDescription>
         <SidebarProvider
@@ -200,6 +219,7 @@ export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProp
             <div className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-3 pb-4 sm:px-4">
               {active === "usage" ? <UsageSettings token={token} /> : null}
               {active === "dialogue" ? <GeneralSettings token={token} /> : null}
+              {active === "voice" ? <VoiceSettings token={token} /> : null}
               {active === "model" ? <ProviderSettings createNonce={createProviderNonce} token={token} /> : null}
               {active === "skills" ? <SkillsSettings token={token} /> : null}
               {active === "tools" ? <ToolsSettings token={token} /> : null}
@@ -571,7 +591,7 @@ function GeneralSettings({ token }: { token: string }) {
             <AlertDescription>{t("settings.general.loadFailed")}</AlertDescription>
           </Alert>
         ) : null}
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="divide-y overflow-hidden rounded-xl border bg-card">
           <SettingsNumberField
             description={t("settings.general.tailTurnsDesc")}
             disabled={settingsQuery.isLoading}
@@ -597,8 +617,6 @@ function GeneralSettings({ token }: { token: string }) {
             }
             onChange={setAutoThreshold}
           />
-        </div>
-        <div className="divide-y overflow-hidden rounded-xl border bg-card">
           <SettingsToggleRow
             checked={showCompactSummary}
             description={t("settings.general.showCompactSummaryDesc")}
@@ -644,6 +662,459 @@ function GeneralSettings({ token }: { token: string }) {
   );
 }
 
+type VoiceFormState = {
+  asrEnabled: boolean;
+  asrLanguage: string;
+  asrNumThreads: string;
+  asrUseITN: boolean;
+  vadMinSilenceMillis: string;
+  vadMinSpeechMillis: string;
+  vadPrerollMillis: string;
+  vadThreshold: string;
+  aecEnabled: boolean;
+  nsEnabled: boolean;
+  nsLevel: string;
+  ttsEnabled: boolean;
+  ttsSpeed: string;
+  ttsVoice: string;
+};
+
+const VOICE_LANGUAGE_OPTIONS = ["zh", "en", "ja", "ko", "yue", "auto"];
+const VOICE_NS_LEVEL_OPTIONS = ["low", "moderate", "high", "very_high"];
+
+function VoiceSettings({ token }: { token: string }) {
+  const queryClient = useQueryClient();
+  const { t } = useI18n();
+  const [form, setForm] = useState<VoiceFormState>(defaultVoiceForm());
+  const audioQuery = useQuery({
+    queryKey: queryKeys.audioConfig(),
+    queryFn: () => getAudioConfig(token),
+    enabled: Boolean(token),
+    refetchOnMount: "always",
+  });
+  const savedConfig = audioQuery.data?.config;
+
+  useEffect(() => {
+    if (savedConfig) {
+      setForm(voiceFormFromConfig(savedConfig));
+    }
+  }, [savedConfig]);
+
+  const saveMutation = useMutation({
+    mutationFn: (nextForm: VoiceFormState) => {
+      if (!savedConfig) {
+        throw new Error("audio config missing");
+      }
+      return putAudioConfig(token, audioConfigFromForm(savedConfig, nextForm));
+    },
+    onSuccess: async (response) => {
+      queryClient.setQueryData(queryKeys.audioConfig(), response);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.audioConfig() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.desktopAbout() }),
+      ]);
+    },
+    onError: () => {
+      toast.error(t("settings.voice.saveFailed"));
+      void queryClient.invalidateQueries({ queryKey: queryKeys.audioConfig() });
+    },
+  });
+
+  const saveVoiceForm = (nextForm: VoiceFormState) => {
+    setForm(nextForm);
+    if (!savedConfig) {
+      return;
+    }
+    saveMutation.mutate(nextForm);
+  };
+  const saveVoicePatch = (patch: Partial<VoiceFormState>) => saveVoiceForm({ ...form, ...patch });
+  const saveCurrentVoiceForm = () => {
+    if (!savedConfig) {
+      return;
+    }
+    saveMutation.mutate(form);
+  };
+  const disabled = audioQuery.isLoading || saveMutation.isPending;
+  const edge = savedConfig ? edgeTTSProfile(savedConfig) : {};
+
+  return (
+    <div className={cn(SETTINGS_NARROW_CONTENT_CLASS, "gap-8")}>
+      <section className="grid gap-4">
+        <div className="grid gap-2">
+          <h3 className="text-lg font-semibold tracking-tight">{t("settings.voice.runtime")}</h3>
+          <p className="text-sm leading-6 text-muted-foreground">{t("settings.voice.restartRequired")}</p>
+        </div>
+        {audioQuery.isError ? (
+          <Alert variant="destructive">
+            <AlertDescription>{t("settings.voice.loadFailed")}</AlertDescription>
+          </Alert>
+        ) : null}
+        {audioQuery.isLoading ? (
+          <div className="grid gap-2 rounded-xl border bg-card p-4">
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-4 w-1/2" />
+            <Skeleton className="h-4 w-3/5" />
+          </div>
+        ) : (
+          <dl className="grid gap-2 rounded-xl border bg-card p-4 text-sm">
+            <SettingsInfoRow label="path" value={audioQuery.data?.path || "-"} />
+            <SettingsInfoRow label="driver" value={savedConfig?.driver.type || "-"} />
+            <SettingsInfoRow label="asr" value={savedConfig?.asr.engine || "-"} />
+            <SettingsInfoRow label="asr_model" value={savedConfig?.asr.modelPath || "-"} />
+            <SettingsInfoRow label="vad_model" value={savedConfig?.asr.vad.modelPath || "-"} />
+            <SettingsInfoRow label="aec" value={savedConfig?.aec.enabled === false ? "off" : savedConfig?.aec.model || "-"} />
+            <SettingsInfoRow label="ns" value={savedConfig?.ns.enabled === false ? "off" : savedConfig?.ns.model || "-"} />
+            <SettingsInfoRow label="tts" value={savedConfig?.tts.profile || "-"} />
+          </dl>
+        )}
+      </section>
+
+      <section className="grid gap-4">
+        <div className="grid gap-2">
+          <h3 className="text-lg font-semibold tracking-tight">{t("settings.voice.asr")}</h3>
+        </div>
+        <div className="divide-y overflow-hidden rounded-xl border bg-card">
+          <SettingsToggleRow
+            checked={form.asrEnabled}
+            description={t("settings.voice.asrEnabledDesc")}
+            disabled={disabled}
+            id="pudding-voice-asr-enabled"
+            label={t("settings.voice.asrEnabled")}
+            onChange={(next) => saveVoicePatch({ asrEnabled: next })}
+          />
+          <SettingsToggleRow
+            checked={form.asrUseITN}
+            description={t("settings.voice.asrUseITNDesc")}
+            disabled={disabled}
+            id="pudding-voice-asr-itn"
+            label={t("settings.voice.asrUseITN")}
+            onChange={(next) => saveVoicePatch({ asrUseITN: next })}
+          />
+          <SettingsControlRow
+            description={t("settings.voice.asrLanguageDesc")}
+            disabled={disabled}
+            id="pudding-voice-asr-language"
+            label={t("settings.voice.asrLanguage")}
+          >
+            <Select
+              disabled={disabled}
+              value={form.asrLanguage}
+              onValueChange={(value) => saveVoicePatch({ asrLanguage: value })}
+            >
+              <SelectTrigger id="pudding-voice-asr-language" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <DialogSelectContent>
+                {VOICE_LANGUAGE_OPTIONS.map((language) => (
+                  <SelectItem key={language} value={language}>
+                    {language}
+                  </SelectItem>
+                ))}
+              </DialogSelectContent>
+            </Select>
+          </SettingsControlRow>
+          <SettingsNumberField
+            description={t("settings.voice.asrNumThreadsDesc")}
+            disabled={disabled}
+            id="pudding-voice-asr-threads"
+            label={t("settings.voice.asrNumThreads")}
+            max={8}
+            min={1}
+            value={form.asrNumThreads}
+            onBlur={saveCurrentVoiceForm}
+            onChange={(value) => setForm((prev) => ({ ...prev, asrNumThreads: value }))}
+          />
+        </div>
+      </section>
+
+      <section className="grid gap-4">
+        <div className="grid gap-2">
+          <h3 className="text-lg font-semibold tracking-tight">{t("settings.voice.vad")}</h3>
+        </div>
+        <div className="divide-y overflow-hidden rounded-xl border bg-card">
+          <SettingsNumberField
+            description={t("settings.voice.vadPrerollDesc")}
+            disabled={disabled}
+            id="pudding-voice-vad-preroll"
+            label={t("settings.voice.vadPreroll")}
+            max={2000}
+            min={100}
+            value={form.vadPrerollMillis}
+            onBlur={saveCurrentVoiceForm}
+            onChange={(value) => setForm((prev) => ({ ...prev, vadPrerollMillis: value }))}
+          />
+          <SettingsNumberField
+            description={t("settings.voice.vadThresholdDesc")}
+            disabled={disabled}
+            id="pudding-voice-vad-threshold"
+            label={t("settings.voice.vadThreshold")}
+            max={0.99}
+            min={0.01}
+            step={0.01}
+            value={form.vadThreshold}
+            onBlur={saveCurrentVoiceForm}
+            onChange={(value) => setForm((prev) => ({ ...prev, vadThreshold: value }))}
+          />
+          <SettingsNumberField
+            description={t("settings.voice.vadMinSilenceDesc")}
+            disabled={disabled}
+            id="pudding-voice-vad-min-silence"
+            label={t("settings.voice.vadMinSilence")}
+            max={5000}
+            min={100}
+            value={form.vadMinSilenceMillis}
+            onBlur={saveCurrentVoiceForm}
+            onChange={(value) => setForm((prev) => ({ ...prev, vadMinSilenceMillis: value }))}
+          />
+          <SettingsNumberField
+            description={t("settings.voice.vadMinSpeechDesc")}
+            disabled={disabled}
+            id="pudding-voice-vad-min-speech"
+            label={t("settings.voice.vadMinSpeech")}
+            max={5000}
+            min={100}
+            value={form.vadMinSpeechMillis}
+            onBlur={saveCurrentVoiceForm}
+            onChange={(value) => setForm((prev) => ({ ...prev, vadMinSpeechMillis: value }))}
+          />
+        </div>
+      </section>
+
+      <section className="grid gap-4">
+        <div className="grid gap-2">
+          <h3 className="text-lg font-semibold tracking-tight">{t("settings.voice.dsp")}</h3>
+        </div>
+        <div className="divide-y overflow-hidden rounded-xl border bg-card">
+          <SettingsToggleRow
+            checked={form.aecEnabled}
+            description={t("settings.voice.aecEnabledDesc")}
+            disabled={disabled}
+            id="pudding-voice-aec-enabled"
+            label={t("settings.voice.aecEnabled")}
+            onChange={(next) => saveVoicePatch({ aecEnabled: next })}
+          />
+          <SettingsToggleRow
+            checked={form.nsEnabled}
+            description={t("settings.voice.nsEnabledDesc")}
+            disabled={disabled}
+            id="pudding-voice-ns-enabled"
+            label={t("settings.voice.nsEnabled")}
+            onChange={(next) => saveVoicePatch({ nsEnabled: next })}
+          />
+          <SettingsControlRow
+            description={t("settings.voice.nsLevelDesc")}
+            disabled={disabled || !form.nsEnabled}
+            id="pudding-voice-ns-level"
+            label={t("settings.voice.nsLevel")}
+          >
+            <Select
+              disabled={disabled || !form.nsEnabled}
+              value={form.nsLevel}
+              onValueChange={(value) => saveVoicePatch({ nsLevel: value })}
+            >
+              <SelectTrigger id="pudding-voice-ns-level" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <DialogSelectContent>
+                {VOICE_NS_LEVEL_OPTIONS.map((level) => (
+                  <SelectItem key={level} value={level}>
+                    {t(`settings.voice.nsLevel.${level}`)}
+                  </SelectItem>
+                ))}
+              </DialogSelectContent>
+            </Select>
+          </SettingsControlRow>
+        </div>
+      </section>
+
+      <section className="grid gap-4">
+        <div className="grid gap-2">
+          <h3 className="text-lg font-semibold tracking-tight">{t("settings.voice.tts")}</h3>
+        </div>
+        <div className="divide-y overflow-hidden rounded-xl border bg-card">
+          <SettingsToggleRow
+            checked={form.ttsEnabled}
+            description={t("settings.voice.ttsEnabledDesc")}
+            disabled={disabled}
+            id="pudding-voice-tts-enabled"
+            label={t("settings.voice.ttsEnabled")}
+            onChange={(next) => saveVoicePatch({ ttsEnabled: next })}
+          />
+          <SettingsControlRow
+            description={t("settings.voice.ttsVoiceDesc")}
+            disabled={disabled}
+            id="pudding-voice-tts-voice"
+            label={t("settings.voice.ttsVoice")}
+          >
+            <Input
+              className="w-full"
+              disabled={disabled}
+              id="pudding-voice-tts-voice"
+              placeholder={edge.voice || "zh-CN-YunxiaNeural"}
+              value={form.ttsVoice}
+              onBlur={saveCurrentVoiceForm}
+              onChange={(event) => setForm((prev) => ({ ...prev, ttsVoice: event.target.value }))}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.currentTarget.blur();
+                }
+              }}
+            />
+          </SettingsControlRow>
+          <SettingsNumberField
+            description={t("settings.voice.ttsSpeedDesc")}
+            disabled={disabled}
+            id="pudding-voice-tts-speed"
+            label={t("settings.voice.ttsSpeed")}
+            max={2}
+            min={0.5}
+            step={0.05}
+            value={form.ttsSpeed}
+            onBlur={saveCurrentVoiceForm}
+            onChange={(value) => setForm((prev) => ({ ...prev, ttsSpeed: value }))}
+          />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SettingsInfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid min-w-0 grid-cols-[minmax(7rem,12rem)_minmax(0,1fr)] gap-3">
+      <dt className="min-w-0 truncate text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 break-words text-foreground">{value}</dd>
+    </div>
+  );
+}
+
+function defaultVoiceForm(): VoiceFormState {
+  return {
+    asrEnabled: true,
+    asrLanguage: "zh",
+    asrNumThreads: "2",
+    asrUseITN: false,
+    vadMinSilenceMillis: "400",
+    vadMinSpeechMillis: "300",
+    vadPrerollMillis: "500",
+    vadThreshold: "0.6",
+    aecEnabled: true,
+    nsEnabled: true,
+    nsLevel: "moderate",
+    ttsEnabled: true,
+    ttsSpeed: "1.2",
+    ttsVoice: "zh-CN-YunxiaNeural",
+  };
+}
+
+function voiceFormFromConfig(config: AudioConfig): VoiceFormState {
+  const edge = edgeTTSProfile(config);
+  return {
+    asrEnabled: config.asr.enabled ?? true,
+    asrLanguage: config.asr.language || "zh",
+    asrNumThreads: String(config.asr.numThreads || 2),
+    asrUseITN: config.asr.useITN ?? false,
+    vadMinSilenceMillis: String(config.asr.vad.minSilenceMillis || 400),
+    vadMinSpeechMillis: String(config.asr.vad.minSpeechMillis || 300),
+    vadPrerollMillis: String(config.asr.vad.prerollMillis || 500),
+    vadThreshold: String(config.asr.vad.threshold || 0.6),
+    aecEnabled: config.aec.enabled ?? true,
+    nsEnabled: config.ns.enabled ?? true,
+    nsLevel: config.ns.level || "moderate",
+    ttsEnabled: config.tts.enabled ?? true,
+    ttsSpeed: String(edge.speed || 1.2),
+    ttsVoice: edge.voice || "zh-CN-YunxiaNeural",
+  };
+}
+
+function audioConfigFromForm(config: AudioConfig, form: VoiceFormState): AudioConfig {
+  const edge = edgeTTSProfile(config);
+  return {
+    ...config,
+    asr: {
+      ...config.asr,
+      enabled: form.asrEnabled,
+      language: form.asrLanguage,
+      numThreads: normalizedInteger(form.asrNumThreads, config.asr.numThreads),
+      useITN: form.asrUseITN,
+      vad: {
+        ...config.asr.vad,
+        threshold: normalizedNumber(form.vadThreshold, config.asr.vad.threshold),
+        minSilenceMillis: normalizedInteger(form.vadMinSilenceMillis, config.asr.vad.minSilenceMillis),
+        minSpeechMillis: normalizedInteger(form.vadMinSpeechMillis, config.asr.vad.minSpeechMillis),
+        prerollMillis: normalizedInteger(form.vadPrerollMillis, config.asr.vad.prerollMillis),
+      },
+    },
+    aec: {
+      ...config.aec,
+      enabled: form.aecEnabled,
+      model: "webrtc",
+    },
+    ns: {
+      ...config.ns,
+      enabled: form.nsEnabled,
+      model: "webrtc",
+      level: form.nsLevel,
+    },
+    tts: {
+      ...config.tts,
+      enabled: form.ttsEnabled,
+      profile: "edge",
+      profiles: {
+        ...config.tts.profiles,
+        edge: {
+          ...edge,
+          voice: form.ttsVoice.trim() || edge.voice || "zh-CN-YunxiaNeural",
+          speed: normalizedNumber(form.ttsSpeed, edge.speed || 1.2),
+        },
+      },
+    },
+  };
+}
+
+function edgeTTSProfile(config: AudioConfig) {
+  return config.tts.profiles.edge || config.tts.profiles[config.tts.profile] || {};
+}
+
+function normalizedInteger(raw: string, fallback: number) {
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) ? parsed : fallback;
+}
+
+function normalizedNumber(raw: string, fallback: number) {
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function SettingsControlRow({
+  children,
+  description,
+  disabled,
+  id,
+  label,
+}: {
+  children: ReactNode;
+  description: string;
+  disabled?: boolean;
+  id: string;
+  label: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "grid gap-3 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(12rem,18rem)] sm:items-center",
+        disabled && "opacity-60",
+      )}
+    >
+      <label className="grid min-w-0 gap-1" htmlFor={id}>
+        <span className="text-sm font-medium">{label}</span>
+        <span className="text-xs leading-5 text-muted-foreground">{description}</span>
+      </label>
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
+}
+
 function SettingsNumberField({
   description,
   disabled,
@@ -653,6 +1124,7 @@ function SettingsNumberField({
   min,
   onBlur,
   onChange,
+  step,
   suffix,
   value,
 }: {
@@ -664,40 +1136,21 @@ function SettingsNumberField({
   min: number;
   onBlur?: () => void;
   onChange: (value: string) => void;
+  step?: number | string;
   suffix?: string;
   value: string;
 }) {
   return (
-    <div className="grid gap-2">
-      <div className="flex items-center gap-1.5">
-        <label className="text-sm font-medium" htmlFor={id}>
-          {label}
-        </label>
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                aria-label={description}
-                className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                type="button"
-              >
-                <CircleHelp className="size-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent className="max-w-xs text-xs leading-5" side="top" sideOffset={6}>
-              {description}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      </div>
+    <SettingsControlRow description={description} disabled={disabled} id={id} label={label}>
       <div className="flex items-center gap-2">
         <Input
-          className="min-w-0"
+          className="min-w-0 flex-1"
           disabled={disabled}
           id={id}
           inputMode="numeric"
           max={max}
           min={min}
+          step={step}
           type="number"
           value={value}
           onBlur={onBlur}
@@ -705,7 +1158,7 @@ function SettingsNumberField({
         />
         {suffix ? <span className="shrink-0 text-sm text-muted-foreground">{suffix}</span> : null}
       </div>
-    </div>
+    </SettingsControlRow>
   );
 }
 
@@ -724,17 +1177,27 @@ function SettingsToggleRow({
   label: string;
   onChange: (checked: boolean) => void;
 }) {
+  const labelID = `${id}-label`;
+  const descriptionID = `${id}-description`;
   return (
-    <label
-      className={cn("flex cursor-pointer items-center justify-between gap-4 px-3 py-3", disabled && "opacity-60")}
-      htmlFor={id}
-    >
+    <div className={cn("flex items-center justify-between gap-4 px-3 py-3", disabled && "opacity-60")}>
       <span className="grid min-w-0 gap-1">
-        <span className="text-sm font-medium">{label}</span>
-        <span className="text-xs leading-5 text-muted-foreground">{description}</span>
+        <span id={labelID} className="text-sm font-medium">
+          {label}
+        </span>
+        <span id={descriptionID} className="text-xs leading-5 text-muted-foreground">
+          {description}
+        </span>
       </span>
-      <Switch disabled={disabled} id={id} checked={checked} onCheckedChange={onChange} />
-    </label>
+      <Switch
+        aria-describedby={descriptionID}
+        aria-labelledby={labelID}
+        checked={checked}
+        disabled={disabled}
+        id={id}
+        onCheckedChange={onChange}
+      />
+    </div>
   );
 }
 

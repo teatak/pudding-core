@@ -130,6 +130,16 @@ func (s *Server) desktopAbout(c *cart.Context) error {
 			"min_silence_millis", intText(audioCfg.ASR.VAD.MinSilenceMillis),
 			"min_speech_millis", intText(audioCfg.ASR.VAD.MinSpeechMillis),
 			"window_size", intText(audioCfg.ASR.VAD.WindowSize),
+			"preroll_millis", intText(audioCfg.ASR.VAD.PrerollMillis),
+		)),
+		aboutSection("aec", "回声消除 (AEC)", aboutRows(
+			"enabled", onOff(audioCfg.AECEnabled()),
+			"model", audioCfg.AEC.Model,
+		)),
+		aboutSection("ns", "噪声抑制 (NS)", aboutRows(
+			"enabled", onOff(audioCfg.NSEnabled()),
+			"model", audioCfg.NS.Model,
+			"level", audioCfg.NS.Level,
 		)),
 		aboutSection("tts", "语音合成 (TTS)", aboutRows(
 			"enabled", onOff(audioCfg.TTSEnabled()),

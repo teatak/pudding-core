@@ -11,7 +11,7 @@ import {
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { BrandIcon } from "@/components/BrandIcons";
-import { type ResolvedModelSelection } from "@/components/ModelPicker";
+import { type ResolvedModelSelection } from "@/lib/modelSelection";
 import {
   defaultReasoningEffortForSelection,
   reasoningEffortOptionsForSelection,

@@ -44,7 +44,7 @@ import { useComposerMentions } from "@/components/useComposerMentions";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
 import { Mascot, type MascotGaze, type MascotGazePoint } from "@/components/Mascot";
 import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
-import { type ResolvedModelSelection } from "@/components/ModelPicker";
+import { type ResolvedModelSelection } from "@/lib/modelSelection";
 import { ProviderProfileEditorDialog } from "@/components/ProviderProfileEditorDialog";
 import { ProviderCustomCard, ProviderPresetCreateDialog, ProviderPresetGrid } from "@/components/ProviderPresetCreateDialog";
 import { reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";

@@ -72,7 +72,13 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 		audio.ASR.Engine != "sherpa-sensevoice" ||
 		audio.ASR.Language != "zh" ||
 		audio.ASRUseITN() ||
-		audio.ASR.VAD.Threshold != 0.6 {
+		audio.ASR.VAD.Threshold != 0.6 ||
+		audio.ASR.VAD.PrerollMillis != 500 ||
+		!audio.AECEnabled() ||
+		audio.AEC.Model != "webrtc" ||
+		!audio.NSEnabled() ||
+		audio.NS.Model != "webrtc" ||
+		audio.NS.Level != "moderate" {
 		t.Fatalf("unexpected audio config: %+v", audio)
 	}
 	audioPath := home + "/config/audio.yaml"
@@ -86,10 +92,48 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 		"engine: sherpa-sensevoice",
 		"language: zh",
 		"use_itn: false",
+		"preroll_millis: 500",
+		"level: moderate",
 		"voice: zh-CN-YunxiaNeural",
 	} {
 		if !strings.Contains(audioYAML, want) {
 			t.Fatalf("expected %q in audio.yaml:\n%s", want, audioYAML)
+		}
+	}
+
+	useITN := true
+	audio.ASR.Language = "en"
+	audio.ASR.UseInverseTextNormalization = &useITN
+	audio.ASR.VAD.Threshold = 0.55
+	audio.ASR.VAD.PrerollMillis = 650
+	audio.NS.Level = "high"
+	edge := audio.TTS.Profiles["edge"]
+	edge.Voice = "zh-CN-XiaoxiaoNeural"
+	edge.Speed = 1.35
+	audio.TTS.Profiles["edge"] = edge
+	updatedAudio, err := m.SetAudio(ctx, audio)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedAudio.ASR.Language != "en" || !updatedAudio.ASRUseITN() || updatedAudio.ASR.VAD.Threshold != 0.55 || updatedAudio.ASR.VAD.PrerollMillis != 650 || updatedAudio.NS.Level != "high" || updatedAudio.TTS.Profiles["edge"].Speed != 1.35 {
+		t.Fatalf("unexpected updated audio config: %+v", updatedAudio)
+	}
+	b, err = os.ReadFile(audioPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	audioYAML = string(b)
+	for _, want := range []string{
+		"language: en",
+		"use_itn: true",
+		"threshold: 0.55",
+		"preroll_millis: 650",
+		"level: high",
+		"voice: zh-CN-XiaoxiaoNeural",
+		"speed: 1.35",
+	} {
+		if !strings.Contains(audioYAML, want) {
+			t.Fatalf("expected %q in updated audio.yaml:\n%s", want, audioYAML)
 		}
 	}
 }

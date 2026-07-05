@@ -1,6 +1,6 @@
 MODULE := github.com/teatak/pudding-core
 LDFLAGS_RELEASE := -X $(MODULE)/internal/buildinfo.channel=release
-BUILDTAGS := sqlite_fts5
+BUILDTAGS := sqlite_fts5 webrtcaec
 
 .PHONY: test tidy clean embed desktop desktop-dev dev-cert daemon daemon-dev daemon-release package prompt
 

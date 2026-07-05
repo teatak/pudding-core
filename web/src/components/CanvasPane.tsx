@@ -69,6 +69,7 @@ import {
   createClosedCanvasItem,
   deleteCanvasItem,
   deleteClosedCanvasItem,
+  getBrowserState,
   listBrowserTabs,
   listClosedCanvasItems,
   listCanvasItems,
@@ -80,8 +81,10 @@ import {
   reloadBrowserTab,
   revealBrowserTab,
   releaseBrowserTab,
+  clearBrowserState,
   screenshotBrowserTab,
   type BrowserScreenshot,
+  type BrowserState,
   type BrowserTab,
   type CanvasItemPayload,
 } from "@/api/client";
@@ -371,6 +374,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   const queryClient = useQueryClient();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const actorSessionIDRef = useRef("");
+  const currentActorSessionIDRef = useRef("");
   const canvasSessionStateRef = useRef("");
   const draftWindowsRef = useRef<Record<string, WindowState>>({});
   const restoreWindowsRef = useRef<Record<string, WindowState>>({});
@@ -393,6 +397,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     }
   }, [sessionID]);
   const actorSessionID = sessionID || actorSessionIDRef.current;
+  currentActorSessionIDRef.current = actorSessionID;
   const enabled = Boolean(token && actorSessionID);
   const rememberSessionSurface = (targetSessionID: string, surface: CanvasSurface) => {
     sessionSurfaceRef.current = { ...sessionSurfaceRef.current, [targetSessionID]: surface };
@@ -413,19 +418,11 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       rememberSessionSurface(previousSessionID, browserActive ? "browser" : "canvas");
     }
     canvasSessionStateRef.current = actorSessionID;
-    draftWindowsRef.current = {};
-    restoreWindowsRef.current = {};
-    restoredWindowHydrationRef.current = "";
-    seenCanvasItemIDsRef.current = new Set();
-    hasSeenCanvasItemsRef.current = false;
     browserAutoSwitchKeyRef.current = "";
     hasSeenBrowserTabStateRef.current = false;
     resizeStartWindowsRef.current = {};
     resizeStartRestoresRef.current = {};
-    setDraftWindows({});
     setBrowserActive(sessionSurfaceRef.current[actorSessionID] === "browser");
-    setRestoreWindows({});
-    setGalleryActiveIndices({});
   }, [actorSessionID]);
 
   const itemsQuery = useQuery({
@@ -451,7 +448,19 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     () => (closedItemsQuery.data?.items ?? []).filter((item) => !closedCanvasItemIsBrowser(item)),
     [closedItemsQuery.data?.items],
   );
-  const browserPayload = browserItem ? browserPayloadForItem(browserItem) : null;
+  const browserItemPayload = browserItem ? browserPayloadForItem(browserItem) : null;
+  const browserStateQuery = useQuery({
+    enabled,
+    queryKey: actorSessionID ? queryKeys.browserState(actorSessionID) : ["browser", "missing-session", "state"],
+    queryFn: () => {
+      if (!actorSessionID) {
+        throw new Error("browser session id missing");
+      }
+      return getBrowserState(token, actorSessionID);
+    },
+    refetchInterval: 1500,
+  });
+  const browserPayload = browserPayloadFromState(browserStateQuery.data) || browserItemPayload;
   const browserTabsQuery = useQuery({
     enabled,
     queryKey: actorSessionID ? queryKeys.browserTabs(actorSessionID) : ["browser", "missing-session"],
@@ -495,10 +504,16 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   }, [windows]);
 
   useEffect(() => {
-    if (!actorSessionID || itemsQuery.isLoading || restoredWindowHydrationRef.current === actorSessionID) {
+    if (
+      !enabled ||
+      itemsQuery.isLoading ||
+      containerSize.w <= 0 ||
+      containerSize.h <= 0 ||
+      restoredWindowHydrationRef.current === "global"
+    ) {
       return;
     }
-    restoredWindowHydrationRef.current = actorSessionID;
+    restoredWindowHydrationRef.current = "global";
     const restored: Record<string, WindowState> = {};
     items.forEach((item) => {
       const restore = restoreWindowFromItem(item, containerSize);
@@ -508,7 +523,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     });
     restoreWindowsRef.current = restored;
     setRestoreWindows(restored);
-  }, [actorSessionID, containerSize, items, itemsQuery.isLoading]);
+  }, [containerSize, enabled, items, itemsQuery.isLoading]);
 
   const patchWindowMutation = useMutation({
     mutationFn: ({ itemID, window }: { itemID: string; window: WindowState }) =>
@@ -618,11 +633,18 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   });
   const browserWidgetMutation = useMutation({
     mutationFn: async () => {
-      const id = browserItem?.id || browserCanvasItemID(actorSessionID);
+      const targetSessionID = actorSessionID;
+      if (!targetSessionID) {
+        throw new Error("browser session id missing");
+      }
+      const id = browserItem?.id || browserCanvasItemID(targetSessionID);
       const title = t("browser.title");
-      const existingTabs = browserTabsQuery.data || (await listBrowserTabs(token, actorSessionID));
-      const payload = browserItem ? browserPayloadForItem(browserItem) : null;
-      const tab = preferredBrowserTab(existingTabs.tabs, payload);
+      const existingTabs = browserTabsQuery.data || (await listBrowserTabs(token, targetSessionID));
+      const payload = browserPayload;
+      let tab = preferredBrowserTab(existingTabs.tabs, payload);
+      if (!tab && browserPayloadHasRealState(payload) && payload?.url) {
+        tab = await openBrowserURL(token, targetSessionID, { url: payload.url });
+      }
       const itemTitle = tab ? browserTabTitle(tab, title) : title;
       const z = Math.max(maxZ, ...Object.values(draftWindowsRef.current).map((window) => window.z)) + 1;
       const restoreWindow = clampWindow(
@@ -636,14 +658,15 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
         containerSize,
       );
       const window = windowPayloadForPersist(fullscreenWindow(containerSize, z), restoreWindow);
-      return putCanvasItem(token, actorSessionID, id, {
+      const item = await putCanvasItem(token, targetSessionID, id, {
         id,
-        sourceSessionID: actorSessionID,
+        sourceSessionID: targetSessionID,
         kind: "browser",
         title: itemTitle,
         item: {
+          ...(payload || {}),
           kind: "browser",
-          sessionID: actorSessionID,
+          sessionID: targetSessionID,
           ...(tab
             ? {
                 tabID: tab.id,
@@ -656,19 +679,35 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
         },
         window,
       });
+      return { item, sessionID: targetSessionID };
     },
-    onSuccess: (item) => {
-      setActiveSurface("browser");
+    onSuccess: ({ item, sessionID: targetSessionID }) => {
+      const itemSessionID = browserPayloadForItem(item)?.sessionID || item.sourceSessionID || targetSessionID;
+      if (currentActorSessionIDRef.current === itemSessionID && sessionSurfaceRef.current[itemSessionID] === "browser") {
+        setBrowserActive(true);
+      }
       restoreWindowsRef.current = withoutKey(restoreWindowsRef.current, item.id);
       setRestoreWindows(restoreWindowsRef.current);
       setDraftWindows((prev) => withoutKey(prev, item.id));
-      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(actorSessionID) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(itemSessionID) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(itemSessionID) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(itemSessionID) });
     },
     onError: () => {
       toast.error(t("browser.createFailed"));
     },
   });
+
+  const activateBrowserSurface = () => {
+    if (!actorSessionID) {
+      return;
+    }
+    setActiveSurface("browser");
+    browserAutoSwitchKeyRef.current = activeBrowserSwitchKey;
+    if (!browserWidgetMutation.isPending) {
+      browserWidgetMutation.mutate();
+    }
+  };
 
   useEffect(() => {
     if (!enabled || !browserTabsQuery.isSuccess) {
@@ -695,8 +734,10 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       return;
     }
     browserAutoSwitchKeyRef.current = key;
+    setActiveSurface("browser");
     browserWidgetMutation.mutate();
   }, [
+    actorSessionID,
     activeBrowserTab?.id,
     activeBrowserTab?.url,
     activeBrowserSwitchKey,
@@ -710,9 +751,13 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     if (!enabled || !browserActive || browserItem || !activeBrowserTab || browserWidgetMutation.isPending) {
       return;
     }
+    if (actorSessionID) {
+      rememberSessionSurface(actorSessionID, "browser");
+    }
     browserAutoSwitchKeyRef.current = activeBrowserSwitchKey;
     browserWidgetMutation.mutate();
   }, [
+    actorSessionID,
     activeBrowserSwitchKey,
     activeBrowserTab?.id,
     browserActive,
@@ -723,22 +768,34 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
 
   const browserCloseMutation = useMutation({
     mutationFn: async () => {
+      const targetSessionID = actorSessionID;
+      if (!targetSessionID) {
+        throw new Error("browser session id missing");
+      }
+      const targetItemID = browserItem?.id;
       if (activeBrowserTab) {
-        await releaseBrowserTab(token, actorSessionID, activeBrowserTab.id);
+        await releaseBrowserTab(token, targetSessionID, activeBrowserTab.id);
       }
+      await clearBrowserState(token, targetSessionID);
       if (browserItem) {
-        await deleteCanvasItem(token, actorSessionID, browserItem.id);
+        await deleteCanvasItem(token, targetSessionID, browserItem.id);
       }
+      return { itemID: targetItemID, sessionID: targetSessionID };
     },
-    onSuccess: () => {
-      selectCanvasSurface();
-      if (browserItem) {
-        restoreWindowsRef.current = withoutKey(restoreWindowsRef.current, browserItem.id);
-        setRestoreWindows(restoreWindowsRef.current);
-        setDraftWindows((prev) => withoutKey(prev, browserItem.id));
+    onSuccess: ({ itemID, sessionID: targetSessionID }) => {
+      rememberSessionSurface(targetSessionID, "canvas");
+      if (currentActorSessionIDRef.current === targetSessionID) {
+        browserAutoSwitchKeyRef.current = "";
+        setBrowserActive(false);
       }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(actorSessionID) });
+      if (itemID) {
+        restoreWindowsRef.current = withoutKey(restoreWindowsRef.current, itemID);
+        setRestoreWindows(restoreWindowsRef.current);
+        setDraftWindows((prev) => withoutKey(prev, itemID));
+      }
+      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(targetSessionID) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(targetSessionID) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(targetSessionID) });
     },
     onError: () => {
       toast.error(t("browser.releaseFailed"));
@@ -952,7 +1009,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
             hasTitle={hasBrowserState}
             pending={browserButtonPending}
             title={browserTabTitleText}
-            onClick={() => browserWidgetMutation.mutate()}
+            onClick={activateBrowserSurface}
             onClose={() => browserCloseMutation.mutate()}
           />
         ) : null}
@@ -1720,6 +1777,7 @@ function CanvasBrowserToolbar({ token, item }: { token: string; item: CanvasItem
       window: item.window,
     });
     void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(ownerSessionID) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(ownerSessionID) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(ownerSessionID) });
   };
 
@@ -1944,6 +2002,7 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
       window: item.window,
     });
     void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(ownerSessionID) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(ownerSessionID) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(ownerSessionID) });
   };
 
@@ -3946,6 +4005,21 @@ function browserPayloadForItem(item: CanvasItem): BrowserCanvasPayload | null {
     title: stringValue(payload?.title) || item.title || undefined,
     faviconURL: stringValue(payload?.faviconURL) || undefined,
     mode: payload?.mode === "external" ? "external" : payload?.mode === "headless" ? "headless" : undefined,
+  };
+}
+
+function browserPayloadFromState(state: BrowserState | undefined): BrowserCanvasPayload | null {
+  if (!state?.hasState || !state.sessionID || !state.url) {
+    return null;
+  }
+  return {
+    kind: "browser",
+    sessionID: state.sessionID,
+    tabID: state.tabID,
+    url: state.url,
+    title: state.title,
+    faviconURL: state.faviconURL,
+    mode: state.mode,
   };
 }
 

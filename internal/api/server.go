@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -165,6 +166,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/audio/bindings").GET(s.getAudioBindings)
 	app.Route("/sessions/:id/audio/input").POST(s.bindAudioInput)
 	app.Route("/sessions/:id/audio/output").POST(s.bindAudioOutput)
+	app.Route("/sessions/:id/browser/state").GET(s.getBrowserState).DELETE(s.clearBrowserState)
 	app.Route("/sessions/:id/browser/open").POST(s.openBrowserSession)
 	app.Route("/sessions/:id/browser/tabs").GET(s.listBrowserTabs).POST(s.createBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID").GET(s.getBrowserTab)
@@ -186,6 +188,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/canvas/closed").GET(s.listClosedCanvasItems).POST(s.createClosedCanvasItem).DELETE(s.clearClosedCanvasItems)
 	app.Route("/sessions/:id/canvas/closed/:closedID").DELETE(s.deleteClosedCanvasItem)
 	app.Route("/settings").GET(s.getSettings).PUT(s.putSettings)
+	app.Route("/settings/audio").GET(s.getAudioConfig).PUT(s.putAudioConfig)
 	app.Route("/settings/user-prompt").GET(s.getUserPrompt).PUT(s.putUserPrompt)
 	app.Route("/providers").GET(s.listProviders).POST(s.createProvider)
 	app.Route("/providers/models").POST(s.probeProviderModels)
@@ -793,6 +796,48 @@ func (s *Server) putSettings(c *cart.Context) error {
 		return s.fail(c, err)
 	}
 	c.String(http.StatusNoContent, "")
+	return nil
+}
+
+type audioConfigView struct {
+	Path   string             `json:"path"`
+	Config config.AudioConfig `json:"config"`
+}
+
+func (s *Server) getAudioConfig(c *cart.Context) error {
+	audio, ok := s.config.(interface {
+		Audio(context.Context) (config.AudioConfig, error)
+	})
+	if !ok {
+		return badRequest(c, "audio config is read-only")
+	}
+	cfg, err := audio.Audio(c.Request.Context())
+	if err != nil {
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, audioConfigView{Path: filepath.Join(s.home, "config", "audio.yaml"), Config: cfg})
+	return nil
+}
+
+func (s *Server) putAudioConfig(c *cart.Context) error {
+	var req config.AudioConfig
+	if err := decode(c, &req); err != nil {
+		return badRequest(c, "invalid json body")
+	}
+	audio, ok := s.config.(interface {
+		SetAudio(context.Context, config.AudioConfig) (config.AudioConfig, error)
+	})
+	if !ok {
+		return badRequest(c, "audio config is read-only")
+	}
+	cfg, err := audio.SetAudio(c.Request.Context(), req)
+	if err != nil {
+		if errors.Is(err, config.ErrInvalidSetting) {
+			return badRequest(c, err.Error())
+		}
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, audioConfigView{Path: filepath.Join(s.home, "config", "audio.yaml"), Config: cfg})
 	return nil
 }
 

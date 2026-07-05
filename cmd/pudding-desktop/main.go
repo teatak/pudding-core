@@ -84,6 +84,10 @@ func main() {
 	if err != nil {
 		slog.Warn("pudding-desktop: load desktop locale preference", "path", preferencesPath, "err", err)
 	}
+	windowPreference, err := loadDesktopWindowPreference(preferencesPath)
+	if err != nil {
+		slog.Warn("pudding-desktop: load desktop window preference", "path", preferencesPath, "err", err)
+	}
 	initialThemeState := desktopThemeState{
 		Theme:    themePreference,
 		Resolved: resolveDesktopTheme(themePreference, app.Env.IsDarkMode()),
@@ -106,10 +110,10 @@ func main() {
 	windowOpts := application.WebviewWindowOptions{
 		Title:          "Pudding",
 		URL:            launchURL(d.Token(), apiBase, desktopShell(), initialThemeState, localePreference),
-		Width:          1200,
-		Height:         800,
-		MinWidth:       520,
-		MinHeight:      600,
+		Width:          windowPreference.Width,
+		Height:         windowPreference.Height,
+		MinWidth:       minDesktopWindowWidth,
+		MinHeight:      minDesktopWindowHeight,
 		EnableFileDrop: true,
 		// 不透明窗口底:WKWebView 在 zoom/失焦/遮挡等合成空档会先露出
 		// 自己的默认 canvas。这里对齐暗色主题底色,避免层间跳色。
@@ -133,6 +137,8 @@ func main() {
 		}
 	}
 	window = app.Window.NewWithOptions(windowOpts)
+	windowPreferenceManager := newDesktopWindowPreferenceManager(window, preferencesPath)
+	windowPreferenceManager.bind()
 	bindDesktopFileDrop(window, d.Home())
 
 	app.Event.OnApplicationEvent(events.Common.ApplicationLaunchedWithUrl, func(e *application.ApplicationEvent) {
@@ -158,6 +164,7 @@ func main() {
 	// 关窗 = 隐藏:daemon 常驻后台,tray 可唤回;退出只走 tray 菜单。
 	// 全屏中直接 Hide 会留下黑屏 Space,先退全屏再藏。
 	window.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		windowPreferenceManager.saveCurrentSize()
 		e.Cancel()
 		if runtime.GOOS == "darwin" && window.IsFullscreen() {
 			hideAfterFullscreenExit.Store(true)

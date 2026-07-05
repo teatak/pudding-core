@@ -39,6 +39,7 @@ type Config struct {
 	MinSilenceDuration time.Duration
 	MinSpeechDuration  time.Duration
 	VADWindowSize      int
+	PrerollDuration    time.Duration
 
 	NumThreads int
 	Provider   string
@@ -56,6 +57,11 @@ type Client struct {
 	events chan asr.Event
 	segs   chan []float32
 
+	history        *sampleRing
+	prerollSamples int
+	vadSpeech      bool
+	pendingPreroll []float32
+
 	started atomic.Bool
 	stopped atomic.Bool
 
@@ -69,11 +75,15 @@ func New(cfg Config) (*Client, error) {
 	if err := validateConfig(&cfg); err != nil {
 		return nil, err
 	}
+	prerollSamples := durationSamples(cfg.PrerollDuration)
+	historySamples := int(defaultVADBufferSecs*expectedSampleRate) + expectedSampleRate + prerollSamples
 	return &Client{
-		cfg:    cfg,
-		events: make(chan asr.Event, defaultEventBuf),
-		segs:   make(chan []float32, defaultSegQueueSize),
-		stopCh: make(chan struct{}),
+		cfg:            cfg,
+		events:         make(chan asr.Event, defaultEventBuf),
+		segs:           make(chan []float32, defaultSegQueueSize),
+		history:        newSampleRing(historySamples),
+		prerollSamples: prerollSamples,
+		stopCh:         make(chan struct{}),
 	}, nil
 }
 
@@ -136,6 +146,7 @@ func (c *Client) Start(context.Context) error {
 		"provider", c.cfg.Provider,
 		"vadThreshold", c.cfg.VADThreshold,
 		"minSilence", c.cfg.MinSilenceDuration,
+		"preroll", c.cfg.PrerollDuration,
 	)
 	return nil
 }
@@ -154,22 +165,47 @@ func (c *Client) Feed(_ context.Context, f frame.PCM16) error {
 	samples := pcm16BytesToFloat32(f.Data)
 	c.vadMu.Lock()
 	c.vad.AcceptWaveform(samples)
+	speechNow := c.vad.IsSpeech()
+	if !c.vadSpeech && speechNow && c.prerollSamples > 0 && c.history != nil {
+		c.pendingPreroll = c.history.Tail(c.prerollSamples)
+	}
+	c.vadSpeech = speechNow
+	c.history.Append(samples)
 	for !c.vad.IsEmpty() {
 		seg := c.vad.Front()
 		c.vad.Pop()
 		if seg == nil || len(seg.Samples) == 0 {
 			continue
 		}
+		samples := c.samplesWithPreroll(seg)
 		select {
-		case c.segs <- seg.Samples:
-			slog.Debug("sherpa asr: vad segment queued", "samples", len(seg.Samples))
+		case c.segs <- samples:
+			slog.Debug("sherpa asr: vad segment queued", "samples", len(samples), "prerollSamples", len(samples)-len(seg.Samples), "segmentStart", seg.Start)
 		default:
 			dropped := c.droppedSegs.Add(1)
-			slog.Warn("sherpa asr: vad segment dropped", "samples", len(seg.Samples), "dropped", dropped)
+			slog.Warn("sherpa asr: vad segment dropped", "samples", len(samples), "dropped", dropped)
 		}
+		c.pendingPreroll = nil
 	}
 	c.vadMu.Unlock()
 	return nil
+}
+
+func (c *Client) samplesWithPreroll(seg *sherpaonnx.SpeechSegment) []float32 {
+	if c.prerollSamples <= 0 || seg == nil || len(seg.Samples) == 0 {
+		return seg.Samples
+	}
+	preroll := c.history.Slice(int64(seg.Start-c.prerollSamples), int64(seg.Start))
+	if len(preroll) == 0 && len(c.pendingPreroll) > 0 {
+		preroll = append([]float32(nil), c.pendingPreroll...)
+	}
+	if len(preroll) == 0 {
+		return seg.Samples
+	}
+	out := make([]float32, 0, len(preroll)+len(seg.Samples))
+	out = append(out, preroll...)
+	out = append(out, seg.Samples...)
+	return out
 }
 
 func (c *Client) Events() <-chan asr.Event { return c.events }
@@ -289,6 +325,9 @@ func validateConfig(cfg *Config) error {
 	if cfg.VADWindowSize <= 0 {
 		cfg.VADWindowSize = 512
 	}
+	if cfg.PrerollDuration < 0 {
+		return errors.New("sherpa asr: preroll duration must not be negative")
+	}
 	if cfg.NumThreads <= 0 {
 		cfg.NumThreads = 2
 	}
@@ -296,6 +335,76 @@ func validateConfig(cfg *Config) error {
 		cfg.Provider = "cpu"
 	}
 	return nil
+}
+
+func durationSamples(d time.Duration) int {
+	if d <= 0 {
+		return 0
+	}
+	return int(d.Seconds() * expectedSampleRate)
+}
+
+type sampleRing struct {
+	data   []float32
+	start  int
+	length int
+	base   int64
+	next   int64
+}
+
+func newSampleRing(capacity int) *sampleRing {
+	if capacity <= 0 {
+		return nil
+	}
+	return &sampleRing{data: make([]float32, capacity)}
+}
+
+func (r *sampleRing) Append(samples []float32) {
+	if r == nil || len(r.data) == 0 || len(samples) == 0 {
+		return
+	}
+	for _, sample := range samples {
+		if r.length < len(r.data) {
+			r.data[(r.start+r.length)%len(r.data)] = sample
+			r.length++
+		} else {
+			r.data[r.start] = sample
+			r.start = (r.start + 1) % len(r.data)
+			r.base++
+		}
+		r.next++
+	}
+}
+
+func (r *sampleRing) Tail(maxSamples int) []float32 {
+	if r == nil || maxSamples <= 0 {
+		return nil
+	}
+	end := r.next
+	start := end - int64(maxSamples)
+	return r.Slice(start, end)
+}
+
+func (r *sampleRing) Slice(start, end int64) []float32 {
+	if r == nil || len(r.data) == 0 || r.length == 0 || end <= start {
+		return nil
+	}
+	if start < r.base {
+		start = r.base
+	}
+	if end > r.next {
+		end = r.next
+	}
+	if end <= start {
+		return nil
+	}
+	n := int(end - start)
+	out := make([]float32, n)
+	offset := int(start - r.base)
+	for i := range out {
+		out[i] = r.data[(r.start+offset+i)%len(r.data)]
+	}
+	return out
 }
 
 func stripSenseVoiceTag(s string) string {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -33,6 +34,7 @@ const (
 type desktopPreferences struct {
 	Theme  desktopThemePreference  `json:"theme"`
 	Locale desktopLocalePreference `json:"locale,omitempty"`
+	Window desktopWindowPreference `json:"window,omitempty"`
 }
 
 type desktopThemeState struct {
@@ -46,6 +48,8 @@ type desktopThemeManager struct {
 	path   string
 	theme  desktopThemePreference
 }
+
+var desktopPreferencesMu sync.Mutex
 
 func desktopPreferencesPath(homeDir string) string {
 	return filepath.Join(homeDir, "config", "desktop.json")
@@ -84,6 +88,9 @@ func loadDesktopThemePreference(path string) (desktopThemePreference, error) {
 }
 
 func saveDesktopThemePreference(path string, theme desktopThemePreference) error {
+	desktopPreferencesMu.Lock()
+	defer desktopPreferencesMu.Unlock()
+
 	prefs, err := loadDesktopPreferences(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -96,6 +103,7 @@ func defaultDesktopPreferences() desktopPreferences {
 	return desktopPreferences{
 		Theme:  desktopThemeSystem,
 		Locale: detectDesktopLocalePreference(),
+		Window: defaultDesktopWindowPreference(),
 	}
 }
 
@@ -103,6 +111,7 @@ func normalizeDesktopPreferences(prefs desktopPreferences) desktopPreferences {
 	return desktopPreferences{
 		Theme:  normalizeDesktopThemePreference(prefs.Theme),
 		Locale: normalizeDesktopLocalePreference(prefs.Locale),
+		Window: normalizeDesktopWindowPreference(prefs.Window),
 	}
 }
 

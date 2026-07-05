@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.."
 DEV_PORT=9679   # dev 通道单端口(internal/home);release 是 9669
 VITE_PORT=5174  # 与 .claude/launch.json / vite 一致
 MODE="${1:-desktop}"
-BUILDTAGS="${BUILDTAGS:-sqlite_fts5}"
+BUILDTAGS="${BUILDTAGS:-sqlite_fts5 webrtcaec}"
 DEV_CODESIGN_IDENTITY="${PUDDING_DEV_CODESIGN_IDENTITY:-${PUDDING_CODESIGN_IDENTITY:-Pudding Dev Local}}"
 
 listening() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }

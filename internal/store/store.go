@@ -21,6 +21,7 @@ var (
 	ErrInvalidSession           = errors.New("store: session provider and model are required")
 	ErrQueueBlocked             = errors.New("store: queued input is editing")
 	ErrInvalidCanvas            = errors.New("store: invalid canvas item")
+	ErrInvalidBrowserState      = errors.New("store: invalid browser state")
 	ErrHistorySearchUnavailable = errors.New("store: history search unavailable")
 )
 
@@ -1133,6 +1134,26 @@ type ClosedCanvasItemInput struct {
 	ClosedAt       time.Time
 }
 
+type BrowserState struct {
+	SessionID  string    `json:"sessionID"`
+	TabID      string    `json:"tabID,omitempty"`
+	URL        string    `json:"url,omitempty"`
+	Title      string    `json:"title,omitempty"`
+	FaviconURL string    `json:"faviconURL,omitempty"`
+	Mode       string    `json:"mode,omitempty"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+type BrowserStateInput struct {
+	SessionID  string
+	TabID      string
+	URL        string
+	Title      string
+	FaviconURL string
+	Mode       string
+}
+
 func NormalizeCanvasItemInput(in *CanvasItemInput) error {
 	if in == nil {
 		return ErrInvalidCanvas
@@ -1188,6 +1209,22 @@ func NormalizeClosedCanvasItemInput(in *ClosedCanvasItemInput) error {
 	}
 	in.Item = append(json.RawMessage(nil), in.Item...)
 	in.Window = append(json.RawMessage(nil), in.Window...)
+	return nil
+}
+
+func NormalizeBrowserStateInput(in *BrowserStateInput) error {
+	if in == nil {
+		return ErrInvalidBrowserState
+	}
+	in.SessionID = strings.TrimSpace(in.SessionID)
+	in.TabID = strings.TrimSpace(in.TabID)
+	in.URL = strings.TrimSpace(in.URL)
+	in.Title = strings.TrimSpace(in.Title)
+	in.FaviconURL = strings.TrimSpace(in.FaviconURL)
+	in.Mode = strings.TrimSpace(in.Mode)
+	if in.SessionID == "" || in.URL == "" || strings.EqualFold(in.URL, "about:blank") {
+		return ErrInvalidBrowserState
+	}
 	return nil
 }
 
@@ -1275,6 +1312,10 @@ type Store interface {
 	PutClosedCanvasItem(ctx context.Context, in ClosedCanvasItemInput, keepLimit int) (*ClosedCanvasItem, error)
 	DeleteClosedCanvasItem(ctx context.Context, actorSessionID, id string) error
 	ClearClosedCanvasItems(ctx context.Context, actorSessionID string) error
+
+	GetBrowserState(ctx context.Context, sessionID string) (*BrowserState, error)
+	PutBrowserState(ctx context.Context, in BrowserStateInput) (*BrowserState, error)
+	ClearBrowserState(ctx context.Context, sessionID string) error
 
 	Close() error
 }

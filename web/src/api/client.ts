@@ -46,6 +46,8 @@ import {
   audioBindingRequest,
   audioBindingResponse,
   audioBindingsResponse,
+  audioConfig,
+  audioConfigResponse,
   browserActionResult,
   browserClickRequest,
   browserObservation,
@@ -54,6 +56,7 @@ import {
   browserScrollRequest,
   browserScreenshot,
   browserScreenshotRequest,
+  browserState,
   browserTab,
   browserTypeRequest,
   installAppRequest,
@@ -65,12 +68,15 @@ import {
   type AppDefinition,
   type AppSkillDetail,
   type AudioBindings,
+  type AudioConfig,
+  type AudioConfigResponse,
   type Attachment,
   type BuiltinTool,
   type BrowserActionResult,
   type BrowserObservation,
   type BrowserMCPSession,
   type BrowserScreenshot,
+  type BrowserState,
   type BrowserTab,
   type CanvasItem,
   type ClosedCanvasItem,
@@ -142,6 +148,7 @@ export type SubmitPayload = z.input<typeof submitRequest>;
 export type CompactResult = z.infer<typeof compactResponse>;
 export type MobilePairing = z.infer<typeof mobilePairingResponse>;
 export type UserPrompt = z.infer<typeof userPromptResponse>;
+export type { AudioConfig, AudioConfigResponse };
 export type AppConnectionPayload = {
   appID: string;
   name?: string;
@@ -327,6 +334,16 @@ export function getAudioBindings(token: string, sessionID: string): Promise<{ bi
 
 export function listBrowserTabs(token: string, sessionID: string): Promise<{ tabs: BrowserTab[] }> {
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs`, listBrowserTabsResponse);
+}
+
+export function getBrowserState(token: string, sessionID: string): Promise<BrowserState> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/state`, browserState);
+}
+
+export async function clearBrowserState(token: string, sessionID: string): Promise<void> {
+  await request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/state`, z.null(), {
+    method: "DELETE",
+  });
 }
 
 export function createBrowserTab(token: string, sessionID: string): Promise<BrowserTab> {
@@ -666,6 +683,10 @@ export function getDesktopAbout(token: string): Promise<{ sections: DesktopAbout
   return request(token, "/desktop/about", desktopAboutResponse);
 }
 
+export function getAudioConfig(token: string): Promise<AudioConfigResponse> {
+  return request(token, "/settings/audio", audioConfigResponse);
+}
+
 export function getUserPrompt(token: string): Promise<UserPrompt> {
   return request(token, "/settings/user-prompt", userPromptResponse);
 }
@@ -789,6 +810,13 @@ export async function putSettings(token: string, settings: Record<string, string
   });
 }
 
+export function putAudioConfig(token: string, body: AudioConfig): Promise<AudioConfigResponse> {
+  return request(token, "/settings/audio", audioConfigResponse, {
+    method: "PUT",
+    body: JSON.stringify(audioConfig.parse(body)),
+  });
+}
+
 export function putUserPrompt(token: string, content: string): Promise<UserPrompt> {
   return request(token, "/settings/user-prompt", userPromptResponse, {
     method: "PUT",
@@ -841,5 +869,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { AppConnection, AppDefinition, AppSkillDetail, Attachment, AudioBindings, BuiltinTool, BrowserActionResult, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
+export type { AppConnection, AppDefinition, AppSkillDetail, Attachment, AudioBindings, BuiltinTool, BrowserActionResult, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
 export { createProviderRequest, patchProviderRequest };

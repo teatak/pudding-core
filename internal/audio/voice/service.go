@@ -11,6 +11,9 @@ import (
 
 	"github.com/teatak/pudding-core/internal/audio/asr"
 	"github.com/teatak/pudding-core/internal/audio/driver"
+	"github.com/teatak/pudding-core/internal/audio/dsp/aec"
+	"github.com/teatak/pudding-core/internal/audio/dsp/ns"
+	"github.com/teatak/pudding-core/internal/audio/dsp/resample"
 	"github.com/teatak/pudding-core/internal/audio/frame"
 	audioqueue "github.com/teatak/pudding-core/internal/audio/queue"
 	"github.com/teatak/pudding-core/internal/audio/tts"
@@ -46,6 +49,8 @@ type ServiceConfig struct {
 	Events    EventSubscriber
 	Driver    driver.Driver
 	ASR       asr.Client
+	AEC       aec.Processor
+	NS        ns.Processor
 	TTS       tts.Client
 }
 
@@ -58,6 +63,9 @@ type Service struct {
 	events    EventSubscriber
 	driver    driver.Driver
 	asr       asr.Client
+	aec       aec.Processor
+	ns        ns.Processor
+	aecRender *resample.Linear
 	tts       tts.Client
 	playback  *audioqueue.Queue
 
@@ -102,6 +110,8 @@ func NewService(cfg ServiceConfig) *Service {
 		events:        cfg.Events,
 		driver:        cfg.Driver,
 		asr:           cfg.ASR,
+		aec:           cfg.AEC,
+		ns:            cfg.NS,
 		tts:           cfg.TTS,
 		playback:      audioqueue.New(),
 		outputCancels: make(map[string]context.CancelFunc),
@@ -114,6 +124,13 @@ func NewService(cfg ServiceConfig) *Service {
 		}
 		svc.startTTSEventLoop()
 		svc.startPlayback()
+	}
+	if svc.driver != nil && svc.aec != nil {
+		in := svc.driver.InputFormat()
+		out := svc.driver.OutputFormat()
+		if in.Valid() && out.Valid() && in.Channels == 1 && out.Channels == 1 {
+			svc.aecRender = resample.NewLinear(out.SampleRate, in.SampleRate)
+		}
 	}
 	return svc
 }
@@ -218,7 +235,6 @@ func (s *Service) Close() error {
 	}
 	if s.driver != nil {
 		_ = s.driver.StopCapture(context.Background())
-		_ = s.driver.Close()
 	}
 	for _, cancel := range cancels {
 		cancel()
@@ -241,6 +257,10 @@ func (s *Service) Close() error {
 	}
 	if ttsEventsDone != nil {
 		<-ttsEventsDone
+	}
+	s.closeDSP()
+	if s.driver != nil {
+		_ = s.driver.Close()
 	}
 	if s.asr != nil {
 		if asrErr := s.asr.Stop(context.Background()); err == nil {
@@ -333,11 +353,17 @@ func (s *Service) startInput(sessionID string) error {
 	s.inputCancel = cancel
 	s.mu.Unlock()
 
+	s.resetDSP()
 	if err := s.driver.StartCapture(ctx, func(pcm frame.PCM16) {
 		if s.manager.Snapshot().InputOwner != sessionID {
 			return
 		}
-		if err := s.asr.Feed(ctx, pcm); err != nil && !errors.Is(err, context.Canceled) {
+		processed, err := s.processCapture(pcm)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			slog.Warn("voice: capture dsp failed", "sessionID", sessionID, "err", err)
+			processed = pcm
+		}
+		if err := s.asr.Feed(ctx, processed); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Warn("voice: asr feed failed", "sessionID", sessionID, "err", err)
 		}
 	}); err != nil {
@@ -361,6 +387,7 @@ func (s *Service) stopInput() {
 	if cancel != nil {
 		cancel()
 	}
+	s.resetDSP()
 	if s.driver != nil {
 		_ = s.driver.StopCapture(context.Background())
 	}
@@ -547,6 +574,9 @@ func (s *Service) handleTTSEvent(ctx context.Context, ev tts.Event) {
 			slog.Warn("voice: tts audio format mismatch", "sessionID", ev.SessionID, "turnID", ev.TurnID, "got", audio.Format, "want", s.driver.OutputFormat())
 			return
 		}
+		if err := s.pushRenderReference(audio); err != nil && !errors.Is(err, context.Canceled) {
+			slog.Warn("voice: aec render reference failed", "sessionID", ev.SessionID, "turnID", ev.TurnID, "err", err)
+		}
 		if err := s.driver.WritePlayback(ctx, audio); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, driver.ErrNotStarted) {
 			slog.Warn("voice: playback write failed", "sessionID", ev.SessionID, "turnID", ev.TurnID, "err", err)
 		}
@@ -730,6 +760,63 @@ func (s *Service) enqueueSegment(sessionID, turnID, text string) {
 		SegmentID: store.NewID("seg"),
 		Text:      text,
 	})
+}
+
+func (s *Service) processCapture(pcm frame.PCM16) (frame.PCM16, error) {
+	var err error
+	out := pcm
+	if s.aec != nil {
+		out, err = s.aec.ProcessCapture(out)
+		if err != nil {
+			return out, err
+		}
+	}
+	if s.ns != nil {
+		out, err = s.ns.Process(out)
+		if err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}
+
+func (s *Service) pushRenderReference(pcm frame.PCM16) error {
+	if s.aec == nil {
+		return nil
+	}
+	ref := pcm
+	if s.aecRender != nil {
+		ref = frame.PCM16{
+			Format: frame.Format{
+				SampleRate: s.aecRender.DstRate(),
+				Channels:   pcm.Format.Channels,
+			},
+			Data:      s.aecRender.Process(pcm.Data),
+			Timestamp: pcm.Timestamp,
+		}
+	}
+	return s.aec.PushRender(ref)
+}
+
+func (s *Service) resetDSP() {
+	if s.aec != nil {
+		s.aec.Reset()
+	}
+	if s.ns != nil {
+		s.ns.Reset()
+	}
+	if s.aecRender != nil {
+		s.aecRender.Reset()
+	}
+}
+
+func (s *Service) closeDSP() {
+	if closer, ok := s.aec.(aec.Closer); ok {
+		_ = closer.Close()
+	}
+	if closer, ok := s.ns.(ns.Closer); ok {
+		_ = closer.Close()
+	}
 }
 
 func previewText(text string, maxRunes int) string {

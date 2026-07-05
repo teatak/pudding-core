@@ -166,11 +166,66 @@ func TestDesktopAboutIncludesAudioConfig(t *testing.T) {
 		rows["asr.language"] != "zh" ||
 		rows["asr.use_itn"] != "off" ||
 		rows["asr_vad.threshold"] != "0.6" ||
+		rows["asr_vad.preroll_millis"] != "500" ||
+		rows["aec.enabled"] != "on" ||
+		rows["aec.model"] != "webrtc" ||
+		rows["ns.enabled"] != "on" ||
+		rows["ns.level"] != "moderate" ||
 		rows["tts.voice"] != "zh-CN-YunxiaNeural" {
 		t.Fatalf("unexpected about rows: %+v", rows)
 	}
 	if !strings.HasSuffix(rows["audio_config.path"], filepath.Join("config", "audio.yaml")) {
 		t.Fatalf("audio config path = %q", rows["audio_config.path"])
+	}
+}
+
+func TestAudioConfigAPI(t *testing.T) {
+	srv, _, _ := newConfigTestServer(t)
+	type audioPayload struct {
+		Path   string             `json:"path"`
+		Config config.AudioConfig `json:"config"`
+	}
+
+	resp := req(t, http.MethodGet, srv.URL+"/settings/audio", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	payload := decodeJSON[audioPayload](t, resp)
+	if !strings.HasSuffix(payload.Path, filepath.Join("config", "audio.yaml")) {
+		t.Fatalf("path = %q", payload.Path)
+	}
+	if payload.Config.ASR.Language != "zh" || !payload.Config.AECEnabled() || !payload.Config.NSEnabled() || payload.Config.NS.Level != "moderate" || payload.Config.TTS.Profiles["edge"].Voice != "zh-CN-YunxiaNeural" {
+		t.Fatalf("unexpected initial audio config: %+v", payload.Config)
+	}
+
+	useITN := true
+	next := payload.Config
+	next.ASR.Language = "en"
+	next.ASR.UseInverseTextNormalization = &useITN
+	next.ASR.VAD.Threshold = 0.5
+	next.ASR.VAD.PrerollMillis = 650
+	next.NS.Level = "high"
+	edge := next.TTS.Profiles["edge"]
+	edge.Voice = "zh-CN-XiaoxiaoNeural"
+	edge.Speed = 1.4
+	next.TTS.Profiles["edge"] = edge
+
+	resp = req(t, http.MethodPut, srv.URL+"/settings/audio", next)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	updated := decodeJSON[audioPayload](t, resp)
+	if updated.Config.ASR.Language != "en" || !updated.Config.ASRUseITN() || updated.Config.ASR.VAD.Threshold != 0.5 || updated.Config.ASR.VAD.PrerollMillis != 650 || updated.Config.NS.Level != "high" || updated.Config.TTS.Profiles["edge"].Speed != 1.4 {
+		t.Fatalf("unexpected updated audio config: %+v", updated.Config)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/settings/audio", nil)
+	defer resp.Body.Close()
+	reloaded := decodeJSON[audioPayload](t, resp)
+	if reloaded.Config.ASR.Language != "en" || reloaded.Config.NS.Level != "high" || reloaded.Config.TTS.Profiles["edge"].Voice != "zh-CN-XiaoxiaoNeural" {
+		t.Fatalf("audio config was not persisted: %+v", reloaded.Config)
 	}
 }
 

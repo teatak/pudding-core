@@ -1,6 +1,6 @@
 import { ChevronDown } from "lucide-react";
 
-import type { ResolvedModelSelection } from "@/components/ModelPicker";
+import type { ResolvedModelSelection } from "@/lib/modelSelection";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,

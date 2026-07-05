@@ -224,6 +224,54 @@ func TestCanvasItemListOrderIgnoresWindowUpdates(t *testing.T) {
 	}
 }
 
+func TestBrowserStatePersistsAndClears(t *testing.T) {
+	st, path := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, st, "sess_browser")
+
+	state, err := st.PutBrowserState(ctx, store.BrowserStateInput{
+		SessionID:  "sess_browser",
+		TabID:      "tab_1",
+		URL:        "https://www.sohu.com/",
+		Title:      "搜狐",
+		FaviconURL: "https://www.sohu.com/favicon.ico",
+		Mode:       "headless",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.SessionID != "sess_browser" || state.URL != "https://www.sohu.com/" || state.Title != "搜狐" {
+		t.Fatalf("unexpected browser state: %+v", state)
+	}
+	if _, err := st.PutBrowserState(ctx, store.BrowserStateInput{
+		SessionID: "sess_browser",
+		URL:       "about:blank",
+	}); !errors.Is(err, store.ErrInvalidBrowserState) {
+		t.Fatalf("about:blank should not persist as browser state: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	state, err = reopened.GetBrowserState(ctx, "sess_browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.TabID != "tab_1" || state.FaviconURL == "" || state.Mode != "headless" {
+		t.Fatalf("browser state not persisted: %+v", state)
+	}
+	if err := reopened.ClearBrowserState(ctx, "sess_browser"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reopened.GetBrowserState(ctx, "sess_browser"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("cleared browser state should be missing: %v", err)
+	}
+}
+
 func TestRenameDoesNotAffectRecentOrdering(t *testing.T) {
 	st, _ := openTestStore(t)
 	createTestSession(t, st, "older")

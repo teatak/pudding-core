@@ -126,7 +126,12 @@ internal/audio/
   - `asr/tokens.txt`
   - `vad/silero_vad.onnx`
 - daemon ASR 默认对齐老项目:`engine=sherpa-sensevoice`,`language=zh`,`use_itn=false`,`num_threads=2`,`provider=cpu`;ASR 内置 VAD 为 `threshold=0.6`,`min_silence=400ms`,`min_speech=300ms`,`window_size=512`。
-- 语音运行配置落在 `<home>/config/audio.yaml`;当前可调项包括 PortAudio driver、Sherpa ASR/Silero VAD、Edge TTS。未接入的 KWS/AEC/NS/声纹不写入配置。
+- sherpa ASR 已补 VAD preroll:默认把 VAD segment 起点前 `500ms` PCM 拼回 SenseVoice 输入,减少首字被 VAD 起点延后吞掉。
+- 已接入 WebRTC AEC/NS:
+  - playback PCM 会作为 AEC render reference 注入。
+  - capture PCM 先过 AEC,再过 NS,最后送入 ASR/VAD。
+  - AEC/NS 配置写入 `<home>/config/audio.yaml`,默认 `aec.model=webrtc`,`ns.model=webrtc`,`ns.level=moderate`。
+- 语音运行配置落在 `<home>/config/audio.yaml`;当前可调项包括 PortAudio driver、Sherpa ASR/Silero VAD、WebRTC AEC/NS、Edge TTS。未接入的 KWS/声纹不写入配置。
 - 设置中心「关于」页会展示当前生效的语音配置、配置文件路径和 input/output owner。
 - 找不到模型时不会启用 fake ASR。
 - 已补诊断日志:
@@ -169,7 +174,7 @@ internal/audio/
 - 如果 `make desktop-dev` 提示缺少 `Pudding Dev Local`,先跑一次 `make dev-cert`;不需要 Apple 开发者证书。
 - PortAudio 默认输入设备受系统当前设备影响;后续需要做设备枚举/选择。
 - Edge TTS 依赖外部网络和非官方 Edge 朗读协议;若 Microsoft 调整协议或 token,需要同步更新常量。
-- 未接 AEC/NS,强扬声器外放环境仍可能触发回采;当前先按用户 barge-in 处理,后续需要接 AEC/NS 降低喇叭回灌误触发。
+- AEC/NS 已接 WebRTC bridge,但外放环境仍需真机验证参数;后续如仍误触发,优先调 NS level / AEC reference 时序。
 
 ## 迁移阶段
 

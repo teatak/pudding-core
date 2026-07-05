@@ -70,7 +70,7 @@ import { Mascot, type MascotGaze, type MascotGazePoint, type MascotMood } from "
 import { SkillDraftDiffDialog } from "@/components/SkillDraftDiffDialog";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
-import { type ResolvedModelSelection } from "@/components/ModelPicker";
+import { type ResolvedModelSelection } from "@/lib/modelSelection";
 import { reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";

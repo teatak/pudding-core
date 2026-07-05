@@ -25,6 +25,7 @@ type Memstore struct {
 	susage   map[string]*store.SessionUsageStat  // sessionID → session stats
 	canvas   map[string]*store.CanvasItem        // itemID → global canvas item
 	closed   map[string]*store.ClosedCanvasItem  // id → recently closed canvas item
+	browser  map[string]*store.BrowserState      // sessionID → browser state
 	events   map[string][]event.Event            // sessionID → seq 升序
 	seq      map[string]int64
 	settings map[string]string
@@ -41,6 +42,7 @@ func New() *Memstore {
 		susage:   make(map[string]*store.SessionUsageStat),
 		canvas:   make(map[string]*store.CanvasItem),
 		closed:   make(map[string]*store.ClosedCanvasItem),
+		browser:  make(map[string]*store.BrowserState),
 		events:   make(map[string][]event.Event),
 		seq:      make(map[string]int64),
 		settings: make(map[string]string),
@@ -182,6 +184,7 @@ func (m *Memstore) DeleteSession(_ context.Context, id string) error {
 	delete(m.messages, id)
 	delete(m.queued, id)
 	delete(m.susage, id)
+	delete(m.browser, id)
 	delete(m.events, id)
 	delete(m.seq, id)
 	for tid, t := range m.turns {
@@ -963,6 +966,57 @@ func (m *Memstore) ClearClosedCanvasItems(_ context.Context, actorSessionID stri
 	return nil
 }
 
+func (m *Memstore) GetBrowserState(_ context.Context, sessionID string) (*store.BrowserState, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[sessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	state := m.browser[sessionID]
+	if state == nil {
+		return nil, store.ErrNotFound
+	}
+	return cloneBrowserState(state), nil
+}
+
+func (m *Memstore) PutBrowserState(_ context.Context, in store.BrowserStateInput) (*store.BrowserState, error) {
+	if err := store.NormalizeBrowserStateInput(&in); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[in.SessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	now := time.Now()
+	created := now
+	if existing := m.browser[in.SessionID]; existing != nil {
+		created = existing.CreatedAt
+	}
+	state := &store.BrowserState{
+		SessionID:  in.SessionID,
+		TabID:      in.TabID,
+		URL:        in.URL,
+		Title:      in.Title,
+		FaviconURL: in.FaviconURL,
+		Mode:       in.Mode,
+		CreatedAt:  created,
+		UpdatedAt:  now,
+	}
+	m.browser[in.SessionID] = state
+	return cloneBrowserState(state), nil
+}
+
+func (m *Memstore) ClearBrowserState(_ context.Context, sessionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[sessionID]; !ok {
+		return store.ErrNotFound
+	}
+	delete(m.browser, sessionID)
+	return nil
+}
+
 func (m *Memstore) trimClosedCanvasItemsLocked(limit int) {
 	if len(m.closed) <= limit {
 		return
@@ -1425,6 +1479,14 @@ func cloneClosedCanvasItem(item *store.ClosedCanvasItem) *store.ClosedCanvasItem
 	cp := *item
 	cp.Item = append([]byte(nil), item.Item...)
 	cp.Window = append([]byte(nil), item.Window...)
+	return &cp
+}
+
+func cloneBrowserState(state *store.BrowserState) *store.BrowserState {
+	if state == nil {
+		return nil
+	}
+	cp := *state
 	return &cp
 }
 

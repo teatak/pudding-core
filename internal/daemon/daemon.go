@@ -24,6 +24,8 @@ import (
 	sherpaasr "github.com/teatak/pudding-core/internal/audio/asr/sherpa"
 	audiodriver "github.com/teatak/pudding-core/internal/audio/driver"
 	portaudiodriver "github.com/teatak/pudding-core/internal/audio/driver/portaudio"
+	aecproc "github.com/teatak/pudding-core/internal/audio/dsp/aec"
+	nsproc "github.com/teatak/pudding-core/internal/audio/dsp/ns"
 	"github.com/teatak/pudding-core/internal/audio/frame"
 	audiotts "github.com/teatak/pudding-core/internal/audio/tts"
 	"github.com/teatak/pudding-core/internal/audio/tts/edgetts"
@@ -114,17 +116,20 @@ func Start(opts Options) (*Daemon, error) {
 	camera := desktopcamera.New()
 	screen := desktopscreen.New()
 	tools := tool.NewMultiRunner(
-		tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithHomeDir(dir), tool.WithBrowser(browserManager), tool.WithCamera(camera), tool.WithDesktopScreen(screen)),
+		tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithBrowserState(st), tool.WithHomeDir(dir), tool.WithBrowser(browserManager), tool.WithCamera(camera), tool.WithDesktopScreen(screen)),
 		browserMCP,
 	)
 	eng := engine.New(st, hub, resolver, cfg, engine.WithPromptSource(prompt.NewLoader(dir)), engine.WithAttachmentHome(dir), engine.WithTools(tools))
+	audioDriver := defaultCaptureDriver(audioCfg)
 	voiceService := voice.NewService(voice.ServiceConfig{
 		Manager:   voice.NewManager(),
 		Submitter: eng,
 		Canceler:  eng,
 		Events:    hub,
-		Driver:    defaultCaptureDriver(audioCfg),
+		Driver:    audioDriver,
 		ASR:       defaultASR(dir, audioCfg),
+		AEC:       defaultAEC(audioCfg, audioDriver),
+		NS:        defaultNS(audioCfg, audioDriver),
 		TTS:       defaultTTS(audioCfg),
 	})
 	if err := eng.Recover(context.Background()); err != nil {
@@ -328,6 +333,59 @@ func defaultCaptureDriver(cfg config.AudioConfig) audiodriver.Driver {
 	})
 }
 
+func defaultAEC(cfg config.AudioConfig, drv audiodriver.Driver) aecproc.Processor {
+	cfg = cfg.WithDefaults()
+	if !cfg.AECEnabled() {
+		return nil
+	}
+	if drv == nil {
+		return nil
+	}
+	if strings.ToLower(strings.TrimSpace(cfg.AEC.Model)) != "webrtc" {
+		slog.Warn("daemon: unsupported aec model", "model", cfg.AEC.Model)
+		return nil
+	}
+	format := drv.InputFormat()
+	client, err := aecproc.NewWebRTCAEC(aecproc.WebRTCAECConfig{
+		SampleRate:   format.SampleRate,
+		Channels:     format.Channels,
+		PeriodMillis: cfg.Driver.PeriodMillis,
+	})
+	if err != nil {
+		slog.Warn("daemon: WebRTC AEC unavailable", "err", err)
+		return nil
+	}
+	slog.Info("daemon: WebRTC AEC configured", "name", client.Name(), "sampleRate", format.SampleRate, "channels", format.Channels)
+	return client
+}
+
+func defaultNS(cfg config.AudioConfig, drv audiodriver.Driver) nsproc.Processor {
+	cfg = cfg.WithDefaults()
+	if !cfg.NSEnabled() {
+		return nil
+	}
+	if drv == nil {
+		return nil
+	}
+	if strings.ToLower(strings.TrimSpace(cfg.NS.Model)) != "webrtc" {
+		slog.Warn("daemon: unsupported ns model", "model", cfg.NS.Model)
+		return nil
+	}
+	format := drv.InputFormat()
+	client, err := nsproc.NewWebRTCNS(nsproc.WebRTCNSConfig{
+		SampleRate:   format.SampleRate,
+		Channels:     format.Channels,
+		PeriodMillis: cfg.Driver.PeriodMillis,
+		Level:        cfg.NS.Level,
+	})
+	if err != nil {
+		slog.Warn("daemon: WebRTC NS unavailable", "err", err)
+		return nil
+	}
+	slog.Info("daemon: WebRTC NS configured", "name", client.Name(), "level", client.Level(), "sampleRate", format.SampleRate, "channels", format.Channels)
+	return client
+}
+
 func defaultASR(homeDir string, audioCfg config.AudioConfig) audioasr.Client {
 	audioCfg = audioCfg.WithDefaults()
 	if !audioCfg.ASREnabled() {
@@ -360,6 +418,7 @@ func defaultSherpaConfig(homeDir string, audioCfg config.AudioConfig) (sherpaasr
 		MinSilenceDuration:          time.Duration(asrCfg.VAD.MinSilenceMillis) * time.Millisecond,
 		MinSpeechDuration:           time.Duration(asrCfg.VAD.MinSpeechMillis) * time.Millisecond,
 		VADWindowSize:               asrCfg.VAD.WindowSize,
+		PrerollDuration:             time.Duration(asrCfg.VAD.PrerollMillis) * time.Millisecond,
 		Provider:                    asrCfg.Provider,
 		NumThreads:                  asrCfg.NumThreads,
 	}
