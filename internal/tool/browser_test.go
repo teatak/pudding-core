@@ -177,6 +177,14 @@ func (f *fakeToolBrowser) Reveal(_ context.Context, sessionID, tabID string) (br
 	return browser.TabSnapshot{ID: tabID, SessionID: sessionID}, nil
 }
 
+func (f *fakeToolBrowser) Recover(_ context.Context, sessionID string, hint browser.RecoverHint) (browser.TabSnapshot, error) {
+	return browser.TabSnapshot{ID: hint.TabID, SessionID: sessionID, URL: hint.URL, Title: hint.Title, Mode: hint.Mode}, nil
+}
+
+func (f *fakeToolBrowser) Internal(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
+	return browser.TabSnapshot{ID: tabID, SessionID: sessionID}, nil
+}
+
 func (f *fakeToolBrowser) Back(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
 	return browser.TabSnapshot{ID: tabID, SessionID: sessionID}, nil
 }

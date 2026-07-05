@@ -79,6 +79,15 @@ func (s *Server) getBrowserState(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
+	if tab, ok, err := s.recoverBrowserState(c.Request.Context(), sessionID, state); err != nil {
+		return s.browserError(c, err)
+	} else if ok {
+		if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
+			return browserStoreError(c, s, err)
+		}
+		c.JSON(http.StatusOK, browserStateResponseFromTab(tab))
+		return nil
+	}
 	c.JSON(http.StatusOK, browserStateResponse(state, true))
 	return nil
 }
@@ -184,7 +193,46 @@ func (s *Server) revealBrowserTab(c *cart.Context) error {
 	tabID, _ := c.Param("tabID")
 	tab, err := s.browser.Reveal(c.Request.Context(), sessionID, tabID)
 	if err != nil {
-		return s.browserError(c, err)
+		if !errors.Is(err, browser.ErrTabNotFound) {
+			return s.browserError(c, err)
+		}
+		if ok, recoverErr := s.recoverStoredBrowserTab(c.Request.Context(), sessionID, tabID); recoverErr != nil {
+			return s.browserError(c, recoverErr)
+		} else if !ok {
+			return s.browserError(c, err)
+		}
+		tab, err = s.browser.Reveal(c.Request.Context(), sessionID, tabID)
+		if err != nil {
+			return s.browserError(c, err)
+		}
+	}
+	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
+		return browserStoreError(c, s, err)
+	}
+	c.JSON(http.StatusOK, tab)
+	return nil
+}
+
+func (s *Server) internalBrowserTab(c *cart.Context) error {
+	sessionID, ok := s.browserSession(c)
+	if !ok {
+		return nil
+	}
+	tabID, _ := c.Param("tabID")
+	tab, err := s.browser.Internal(c.Request.Context(), sessionID, tabID)
+	if err != nil {
+		if !errors.Is(err, browser.ErrTabNotFound) {
+			return s.browserError(c, err)
+		}
+		if ok, recoverErr := s.recoverStoredBrowserTab(c.Request.Context(), sessionID, tabID); recoverErr != nil {
+			return s.browserError(c, recoverErr)
+		} else if !ok {
+			return s.browserError(c, err)
+		}
+		tab, err = s.browser.Internal(c.Request.Context(), sessionID, tabID)
+		if err != nil {
+			return s.browserError(c, err)
+		}
 	}
 	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
 		return browserStoreError(c, s, err)
@@ -464,6 +512,50 @@ func (s *Server) syncBrowserState(ctx context.Context, sessionID string, tab bro
 	}
 	_, err := s.store.PutBrowserState(ctx, in)
 	return err
+}
+
+func (s *Server) recoverStoredBrowserTab(ctx context.Context, sessionID, tabID string) (bool, error) {
+	if s.browser == nil {
+		return false, nil
+	}
+	state, err := s.store.GetBrowserState(ctx, sessionID)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if tabID != "" && state.TabID != tabID {
+		return false, nil
+	}
+	tab, ok, err := s.recoverBrowserState(ctx, sessionID, state)
+	if err != nil || !ok {
+		return ok, err
+	}
+	if err := s.syncBrowserState(ctx, sessionID, tab); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *Server) recoverBrowserState(ctx context.Context, sessionID string, state *store.BrowserState) (browser.TabSnapshot, bool, error) {
+	if s.browser == nil || state == nil || state.Mode != "external" {
+		return browser.TabSnapshot{}, false, nil
+	}
+	tab, err := s.browser.Recover(ctx, sessionID, browser.RecoverHint{
+		TabID:      state.TabID,
+		URL:        state.URL,
+		Title:      state.Title,
+		FaviconURL: state.FaviconURL,
+		Mode:       state.Mode,
+	})
+	if errors.Is(err, browser.ErrTabNotFound) {
+		return browser.TabSnapshot{}, false, nil
+	}
+	if err != nil {
+		return browser.TabSnapshot{}, false, err
+	}
+	return tab, true, nil
 }
 
 func browserStateInputFromTab(sessionID string, tab browser.TabSnapshot) (store.BrowserStateInput, bool) {

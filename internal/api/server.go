@@ -172,6 +172,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/browser/tabs/:tabID").GET(s.getBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/open").POST(s.openBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/reveal").POST(s.revealBrowserTab)
+	app.Route("/sessions/:id/browser/tabs/:tabID/internal").POST(s.internalBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/back").POST(s.backBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/forward").POST(s.forwardBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/reload").POST(s.reloadBrowserTab)

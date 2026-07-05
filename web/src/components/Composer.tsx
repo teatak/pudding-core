@@ -159,6 +159,14 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const pendingInputFlow = useInputFlowStore((state) => state.requests.find((request) => request.sessionID === sessionID));
   const running = overlayRunning || session.running;
   const currentMode = session.modeLease === "session" ? session.activeMode : "chat";
+  const audioBindingsQuery = useQuery({
+    queryKey: queryKeys.audioBindings(),
+    queryFn: () => getAudioBindings(token, sessionID),
+    enabled: Boolean(token && sessionID),
+    refetchInterval: 2000,
+  });
+  const audioBindings = audioBindingsQuery.data?.bindings;
+  const micActive = audioBindings?.inputOwner === sessionID;
   const [resolvedModel, setResolvedModel] = useState<ResolvedModelSelection | null>(null);
   const [mascotGaze, setMascotGaze] = useState<MascotGaze>({ type: "pointer" });
   const [mascotErrorMessage, setMascotErrorMessage] = useState<string | null>(null);
@@ -1001,7 +1009,12 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
               onSelect={selectSlashCommand}
             />
           ) : null}
-          <div className="relative z-10 rounded-3xl border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/25">
+          <div
+            className={cn(
+              "pudding-composer-shell relative isolate z-10 rounded-3xl border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/25",
+              micActive && "is-mic-active",
+            )}
+          >
             <input
               ref={fileInputRef}
               className="sr-only"
@@ -1087,7 +1100,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
                   onResolvedChange={handleResolvedModelChange}
                 />
               </div>
-              <SessionAudioControls token={token} session={session} />
+              <SessionAudioControls bindings={audioBindings} token={token} session={session} />
               {showStopButton ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1201,16 +1214,9 @@ function LocalFolderChip({
   );
 }
 
-function SessionAudioControls({ token, session }: { token: string; session: Session }) {
+function SessionAudioControls({ bindings, token, session }: { bindings?: AudioBindings; token: string; session: Session }) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
-  const bindingsQuery = useQuery({
-    queryKey: queryKeys.audioBindings(),
-    queryFn: () => getAudioBindings(token, session.id),
-    enabled: Boolean(token && session.id),
-    refetchInterval: 2000,
-  });
-  const bindings = bindingsQuery.data?.bindings;
   const inputActive = bindings?.inputOwner === session.id;
   const outputActive = bindings?.outputOwner === session.id;
   const invalidateAudioBindings = () => queryClient.invalidateQueries({ queryKey: queryKeys.audioBindings() });

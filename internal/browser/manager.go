@@ -45,10 +45,12 @@ type Service interface {
 	CreateTab(ctx context.Context, sessionID string) (TabSnapshot, error)
 	ListTabs(ctx context.Context, sessionID string) ([]TabSnapshot, error)
 	GetTab(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
+	Recover(ctx context.Context, sessionID string, hint RecoverHint) (TabSnapshot, error)
 	ReleaseTab(ctx context.Context, sessionID, tabID string) error
 	ReleaseSession(ctx context.Context, sessionID string) error
 	Open(ctx context.Context, sessionID, tabID, rawURL string) (TabSnapshot, error)
 	Reveal(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
+	Internal(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
 	Back(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
 	Forward(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
 	Reload(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
@@ -68,12 +70,13 @@ type Config struct {
 }
 
 type Manager struct {
-	mu       sync.Mutex
-	cfg      Config
-	client   *http.Client
-	process  *browserProcess
-	tabs     map[string]*tabBinding
-	sessions map[string]map[string]bool
+	mu          sync.Mutex
+	lifecycleMu sync.Mutex
+	cfg         Config
+	client      *http.Client
+	process     *browserProcess
+	tabs        map[string]*tabBinding
+	sessions    map[string]map[string]bool
 }
 
 type TabSnapshot struct {
@@ -84,8 +87,18 @@ type TabSnapshot struct {
 	Title      string    `json:"title"`
 	FaviconURL string    `json:"faviconURL,omitempty"`
 	Mode       string    `json:"mode,omitempty"`
+	CanGoBack  bool      `json:"canGoBack,omitempty"`
+	CanGoForward bool    `json:"canGoForward,omitempty"`
 	CreatedAt  time.Time `json:"createdAt"`
 	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+type RecoverHint struct {
+	TabID      string
+	URL        string
+	Title      string
+	FaviconURL string
+	Mode       string
 }
 
 type ObserveOptions struct {
@@ -248,7 +261,7 @@ func (m *Manager) CreateTab(ctx context.Context, sessionID string) (TabSnapshot,
 	if err != nil {
 		return TabSnapshot{}, err
 	}
-	return m.snapshotFromTarget(binding, target), nil
+	return m.snapshotFromLiveTarget(ctx, binding, target), nil
 }
 
 func (m *Manager) createTab(ctx context.Context, sessionID, rawURL string) (*browserProcess, *tabBinding, targetInfo, error) {
@@ -296,12 +309,16 @@ func (m *Manager) ListTabs(ctx context.Context, sessionID string) ([]TabSnapshot
 		return []TabSnapshot{}, nil
 	}
 	out := make([]TabSnapshot, 0, len(bindings))
+	proc, err := m.ensureProcess(ctx)
+	if err != nil {
+		return nil, err
+	}
 	for _, binding := range bindings {
-		_, live, target, err := m.liveTarget(ctx, sessionID, binding.id, false)
+		target, err := proc.target(ctx, m.client, binding.targetID)
 		if err != nil {
 			continue
 		}
-		out = append(out, m.snapshotFromTarget(live, target))
+		out = append(out, m.snapshotFromLiveTarget(ctx, binding, target))
 	}
 	return out, nil
 }
@@ -311,7 +328,55 @@ func (m *Manager) GetTab(ctx context.Context, sessionID, tabID string) (TabSnaps
 	if err != nil {
 		return TabSnapshot{}, err
 	}
-	return m.snapshotFromTarget(binding, target), nil
+	return m.snapshotFromLiveTarget(ctx, binding, target), nil
+}
+
+func (m *Manager) Recover(ctx context.Context, sessionID string, hint RecoverHint) (TabSnapshot, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return TabSnapshot{}, errors.New("session id is required")
+	}
+	if strings.TrimSpace(hint.Mode) != "external" {
+		return TabSnapshot{}, ErrTabNotFound
+	}
+	proc, err := m.attachExternalProcess(ctx)
+	if err != nil {
+		return TabSnapshot{}, err
+	}
+	targets, err := proc.listTargets(ctx, m.client)
+	if err != nil {
+		return TabSnapshot{}, err
+	}
+	target, ok := recoverTarget(targets, hint)
+	if !ok {
+		return TabSnapshot{}, ErrTabNotFound
+	}
+	now := time.Now().UTC()
+	tabID := strings.TrimSpace(hint.TabID)
+	if tabID == "" {
+		tabID = newID("tab")
+	}
+	binding := &tabBinding{
+		id:         tabID,
+		sessionID:  sessionID,
+		targetID:   target.ID,
+		url:        target.URL,
+		title:      target.Title,
+		faviconURL: target.FaviconURL,
+		createdAt:  now,
+		updatedAt:  now,
+	}
+	m.mu.Lock()
+	if existing := m.tabs[tabID]; existing != nil {
+		binding.createdAt = existing.createdAt
+	}
+	m.tabs[tabID] = binding
+	if m.sessions[sessionID] == nil {
+		m.sessions[sessionID] = map[string]bool{}
+	}
+	m.sessions[sessionID][tabID] = true
+	m.mu.Unlock()
+	return m.snapshotFromLiveTarget(ctx, binding, target), nil
 }
 
 func (m *Manager) ReleaseTab(ctx context.Context, sessionID, tabID string) error {
@@ -370,7 +435,7 @@ func (m *Manager) Open(ctx context.Context, sessionID, tabID, rawURL string) (Ta
 				target = current
 			}
 			m.touch(binding.id)
-			return m.snapshotFromTarget(binding, target), nil
+			return m.snapshotFromLiveTarget(ctx, binding, target), nil
 		}
 		return TabSnapshot{}, err
 	}
@@ -383,7 +448,7 @@ func (m *Manager) Open(ctx context.Context, sessionID, tabID, rawURL string) (Ta
 		return TabSnapshot{}, err
 	}
 	m.touch(binding.id)
-	return m.snapshotFromTarget(binding, target), nil
+	return m.snapshotFromLiveTarget(ctx, binding, target), nil
 }
 
 func (m *Manager) Reveal(ctx context.Context, sessionID, tabID string) (TabSnapshot, error) {
@@ -391,11 +456,36 @@ func (m *Manager) Reveal(ctx context.Context, sessionID, tabID string) (TabSnaps
 	if err != nil {
 		return TabSnapshot{}, err
 	}
-	m.snapshotFromTarget(binding, target)
 	if proc.headless {
 		if err := m.switchMode(ctx, false); err != nil {
 			return TabSnapshot{}, err
 		}
+	}
+	proc, binding, target, err = m.liveTarget(ctx, sessionID, binding.id, false)
+	if err != nil {
+		return TabSnapshot{}, err
+	}
+	if err := proc.activateTarget(ctx, m.client, binding.targetID); err != nil {
+		return TabSnapshot{}, err
+	}
+	m.touch(binding.id)
+	return m.snapshotFromLiveTarget(ctx, binding, target), nil
+}
+
+func (m *Manager) Internal(ctx context.Context, sessionID, tabID string) (TabSnapshot, error) {
+	binding, err := m.binding(sessionID, tabID)
+	if err != nil {
+		return TabSnapshot{}, err
+	}
+	if proc := m.currentProcess(ctx); proc != nil {
+		if target, err := proc.target(ctx, m.client, binding.targetID); err == nil {
+			m.rememberBindingTarget(binding.id, target)
+		} else if !errors.Is(err, ErrTabNotFound) {
+			return TabSnapshot{}, err
+		}
+	}
+	if err := m.switchMode(ctx, true); err != nil {
+		return TabSnapshot{}, err
 	}
 	return m.GetTab(ctx, sessionID, binding.id)
 }
@@ -422,7 +512,7 @@ func (m *Manager) Reload(ctx context.Context, sessionID, tabID string) (TabSnaps
 		return TabSnapshot{}, err
 	}
 	m.touch(binding.id)
-	return m.snapshotFromTarget(binding, target), nil
+	return m.snapshotFromLiveTarget(ctx, binding, target), nil
 }
 
 func (m *Manager) Observe(ctx context.Context, sessionID, tabID string, opts ObserveOptions) (ObserveResult, error) {
@@ -441,7 +531,7 @@ func (m *Manager) Observe(ctx context.Context, sessionID, tabID string, opts Obs
 		return ObserveResult{}, err
 	}
 	target, _ := proc.target(ctx, m.client, binding.targetID)
-	out.Tab = m.snapshotFromTarget(binding, target)
+	out.Tab = m.snapshotFromLiveTarget(ctx, binding, target)
 	if out.Title == "" {
 		out.Title = out.Tab.Title
 	}
@@ -490,7 +580,7 @@ func (m *Manager) Screenshot(ctx context.Context, sessionID, tabID string, opts 
 	target, _ := proc.target(ctx, m.client, binding.targetID)
 	m.touch(binding.id)
 	return ScreenshotResult{
-		Tab:               m.snapshotFromTarget(binding, target),
+		Tab:               m.snapshotFromLiveTarget(ctx, binding, target),
 		MIME:              "image/png",
 		DataBase64:        payload.Data,
 		Size:              int64(len(decoded)),
@@ -694,7 +784,7 @@ func (m *Manager) actionResult(ctx context.Context, proc *browserProcess, bindin
 	}
 	target, _ := proc.target(ctx, m.client, binding.targetID)
 	m.touch(binding.id)
-	return ActionResult{Tab: m.snapshotFromTarget(binding, target), Action: action, Result: result}, nil
+	return ActionResult{Tab: m.snapshotFromLiveTarget(ctx, binding, target), Action: action, Result: result}, nil
 }
 
 func (m *Manager) liveTarget(ctx context.Context, sessionID, tabID string, create bool) (*browserProcess, *tabBinding, targetInfo, error) {
@@ -736,6 +826,22 @@ func (m *Manager) rememberBindingTarget(tabID string, target targetInfo) {
 		binding.updatedAt = time.Now().UTC()
 	}
 	m.mu.Unlock()
+}
+
+func (m *Manager) snapshotFromLiveTarget(ctx context.Context, binding *tabBinding, target targetInfo) TabSnapshot {
+	snap := m.snapshotFromTarget(binding, target)
+	if snap.TargetID == "" {
+		return snap
+	}
+	proc := m.currentProcess(ctx)
+	if proc == nil {
+		return snap
+	}
+	if canGoBack, canGoForward, ok := proc.navigationAvailability(ctx, m.client, snap.TargetID); ok {
+		snap.CanGoBack = canGoBack
+		snap.CanGoForward = canGoForward
+	}
+	return snap
 }
 
 func (m *Manager) snapshotFromTarget(binding *tabBinding, target targetInfo) TabSnapshot {
@@ -808,10 +914,12 @@ func (m *Manager) navigateHistory(ctx context.Context, sessionID, tabID string, 
 		return TabSnapshot{}, err
 	}
 	m.touch(binding.id)
-	return m.snapshotFromTarget(binding, target), nil
+	return m.snapshotFromLiveTarget(ctx, binding, target), nil
 }
 
 func (m *Manager) ensureProcess(ctx context.Context) (*browserProcess, error) {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	m.mu.Lock()
 	proc := m.process
 	cfg := m.cfg
@@ -847,6 +955,8 @@ func (m *Manager) setProcess(proc *browserProcess) {
 }
 
 func (m *Manager) switchMode(ctx context.Context, headless bool) error {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	m.mu.Lock()
 	proc := m.process
 	cfg := m.cfg
@@ -939,6 +1049,8 @@ func profileDir(cfg Config) (string, error) {
 }
 
 func (m *Manager) currentProcess(ctx context.Context) *browserProcess {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	m.mu.Lock()
 	proc := m.process
 	m.mu.Unlock()
@@ -954,6 +1066,38 @@ func (m *Manager) currentProcess(ctx context.Context) *browserProcess {
 		return nil
 	}
 	return proc
+}
+
+func (m *Manager) attachExternalProcess(ctx context.Context) (*browserProcess, error) {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	m.mu.Lock()
+	proc := m.process
+	cfg := m.cfg
+	m.mu.Unlock()
+	if proc != nil {
+		if err := proc.ping(ctx, m.client); err == nil {
+			if proc.headless {
+				return nil, ErrTabNotFound
+			}
+			return proc, nil
+		}
+		m.mu.Lock()
+		if m.process == proc {
+			m.process = nil
+		}
+		m.mu.Unlock()
+		_ = stopBrowserProcess(proc)
+	}
+	proc, err := attachExisting(ctx, cfg, m.client)
+	if err != nil {
+		return nil, ErrTabNotFound
+	}
+	if proc.headless {
+		return nil, ErrTabNotFound
+	}
+	m.setProcess(proc)
+	return proc, nil
 }
 
 func (m *Manager) resolveTab(ctx context.Context, sessionID, tabID string, create bool) (*tabBinding, error) {
@@ -1230,6 +1374,48 @@ func (p *browserProcess) target(ctx context.Context, client *http.Client, target
 	return targetInfo{}, ErrTabNotFound
 }
 
+func recoverTarget(targets []targetInfo, hint RecoverHint) (targetInfo, bool) {
+	rawURL := strings.TrimSpace(hint.URL)
+	title := strings.TrimSpace(hint.Title)
+	var candidates []targetInfo
+	for _, target := range targets {
+		if target.Type != "" && target.Type != "page" {
+			continue
+		}
+		if strings.TrimSpace(target.URL) == "" || target.URL == "about:blank" {
+			continue
+		}
+		candidates = append(candidates, target)
+	}
+	if rawURL != "" {
+		for _, target := range candidates {
+			if sameRecoverURL(target.URL, rawURL) {
+				return target, true
+			}
+		}
+	}
+	if title != "" {
+		for _, target := range candidates {
+			if strings.TrimSpace(target.Title) == title {
+				return target, true
+			}
+		}
+	}
+	if len(candidates) == 1 {
+		return candidates[0], true
+	}
+	return targetInfo{}, false
+}
+
+func sameRecoverURL(a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == b {
+		return true
+	}
+	return strings.TrimRight(a, "/") == strings.TrimRight(b, "/")
+}
+
 func (p *browserProcess) closeTarget(ctx context.Context, client *http.Client, targetID string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.endpoint+"/json/close/"+url.PathEscape(targetID), nil)
 	if err != nil {
@@ -1244,6 +1430,40 @@ func (p *browserProcess) closeTarget(ctx context.Context, client *http.Client, t
 		return fmt.Errorf("close tab: status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+func (p *browserProcess) activateTarget(ctx context.Context, client *http.Client, targetID string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.endpoint+"/json/activate/"+url.PathEscape(targetID), nil)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("activate tab: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+func (p *browserProcess) navigationAvailability(ctx context.Context, client *http.Client, targetID string) (bool, bool, bool) {
+	raw, err := p.cdpCall(ctx, client, targetID, "Page.getNavigationHistory", nil)
+	if err != nil {
+		return false, false, false
+	}
+	var history struct {
+		CurrentIndex int `json:"currentIndex"`
+		Entries      []struct {
+			ID int `json:"id"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(raw, &history); err != nil {
+		return false, false, false
+	}
+	return history.CurrentIndex > 0, history.CurrentIndex >= 0 && history.CurrentIndex < len(history.Entries)-1, true
 }
 
 func (p *browserProcess) waitReady(ctx context.Context, client *http.Client, targetID string) error {

@@ -77,6 +77,12 @@ func TestBrowserTabsAreSessionScoped(t *testing.T) {
 		t.Fatalf("reveal status=%d tab=%+v last=%q", resp.StatusCode, revealed, browserSvc.lastNavigation)
 	}
 
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/tabs/"+tab.ID+"/internal", nil)
+	internal := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusOK || internal.ID != tab.ID || browserSvc.lastNavigation != "internal" {
+		t.Fatalf("internal status=%d tab=%+v last=%q", resp.StatusCode, internal, browserSvc.lastNavigation)
+	}
+
 	for _, action := range []struct {
 		path string
 		want string
@@ -278,6 +284,25 @@ func (f *fakeBrowserService) GetTab(_ context.Context, sessionID, tabID string) 
 	return tab, nil
 }
 
+func (f *fakeBrowserService) Recover(_ context.Context, sessionID string, hint browser.RecoverHint) (browser.TabSnapshot, error) {
+	if hint.Mode != "external" || hint.TabID == "" {
+		return browser.TabSnapshot{}, browser.ErrTabNotFound
+	}
+	now := time.Now().UTC()
+	tab := browser.TabSnapshot{
+		ID:         hint.TabID,
+		SessionID:  sessionID,
+		URL:        hint.URL,
+		Title:      hint.Title,
+		FaviconURL: hint.FaviconURL,
+		Mode:       "external",
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	f.tabs[tab.ID] = tab
+	return tab, nil
+}
+
 func (f *fakeBrowserService) ReleaseTab(_ context.Context, sessionID, tabID string) error {
 	tab, ok := f.tabs[tabID]
 	if !ok || tab.SessionID != sessionID {
@@ -313,6 +338,11 @@ func (f *fakeBrowserService) Open(_ context.Context, sessionID, tabID, rawURL st
 
 func (f *fakeBrowserService) Reveal(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
 	f.lastNavigation = "reveal"
+	return f.GetTab(context.Background(), sessionID, tabID)
+}
+
+func (f *fakeBrowserService) Internal(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
+	f.lastNavigation = "internal"
 	return f.GetTab(context.Background(), sessionID, tabID)
 }
 
