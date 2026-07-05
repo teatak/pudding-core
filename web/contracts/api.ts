@@ -394,12 +394,28 @@ export const audioBindingResponse = z.object({
   bindings: audioBindings,
 });
 
+export const desktopAboutRow = z.object({
+  key: z.string(),
+  value: z.string(),
+});
+export const desktopAboutSection = z.object({
+  id: z.string(),
+  title: z.string(),
+  rows: z.array(desktopAboutRow),
+});
+export type DesktopAboutSection = z.infer<typeof desktopAboutSection>;
+export const desktopAboutResponse = z.object({
+  sections: z.array(desktopAboutSection),
+});
+
 export const browserTab = z.object({
   id: z.string(),
   sessionID: z.string(),
   targetID: z.string().optional(),
   url: z.string(),
   title: z.string(),
+  faviconURL: z.string().optional(),
+  mode: z.enum(["headless", "external"]).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

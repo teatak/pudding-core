@@ -6,14 +6,17 @@ import {
   ChartPie,
   Check,
   Clock,
+  Compass,
+  CornerDownLeft,
   Copy,
   DollarSign,
   Download,
+  ArrowLeft,
+  ArrowRight,
   ExternalLink,
   FileText,
   GalleryHorizontal,
   GalleryVertical,
-  Globe,
   Grid2X2,
   Gauge,
   Hash,
@@ -36,9 +39,12 @@ import {
   useMemo,
   useRef,
   useState,
+  type CompositionEvent as ReactCompositionEvent,
+  type FormEvent as ReactFormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type MutableRefObject,
+  type WheelEvent as ReactWheelEvent,
 } from "react";
 import { Rnd } from "react-rnd";
 import {
@@ -57,6 +63,7 @@ import {
 import { toast } from "sonner";
 
 import {
+  backBrowserTab,
   clickBrowserTab,
   clearClosedCanvasItems,
   createBrowserTab,
@@ -66,12 +73,15 @@ import {
   listBrowserTabs,
   listClosedCanvasItems,
   listCanvasItems,
+  forwardBrowserTab,
   openBrowserTab,
+  openBrowserURL,
   patchCanvasItemWindow,
   putCanvasItem,
+  reloadBrowserTab,
+  revealBrowserTab,
+  releaseBrowserTab,
   screenshotBrowserTab,
-  scrollBrowserTab,
-  typeBrowserTab,
   type BrowserScreenshot,
   type BrowserTab,
   type CanvasItemPayload,
@@ -113,10 +123,13 @@ type WindowState = {
   w: number;
   h: number;
   z: number;
+  maximized?: boolean;
+  restore?: WindowRestoreState;
 };
 
 type WindowPosition = Pick<WindowState, "x" | "y">;
 type WindowGeometry = Pick<WindowState, "x" | "y" | "w" | "h">;
+type WindowRestoreState = Pick<WindowState, "x" | "y" | "w" | "h" | "z">;
 
 type ColumnType = "text" | "enum" | "number" | "currency" | "date" | "datetime" | "truncate";
 type SemanticColor = "red" | "amber" | "green" | "sky" | "violet" | "gray";
@@ -172,7 +185,40 @@ type BrowserCanvasPayload = {
   tabID?: string;
   url?: string;
   title?: string;
+  faviconURL?: string;
+  mode?: "headless" | "external";
 };
+
+type BrowserScreencastMetadata = {
+  deviceWidth?: number;
+  deviceHeight?: number;
+  pageScaleFactor?: number;
+  scrollOffsetX?: number;
+  scrollOffsetY?: number;
+  offsetTop?: number;
+};
+
+type BrowserScreencastFrame = {
+  type: "frame";
+  mime: string;
+  data: string;
+  metadata?: BrowserScreencastMetadata;
+};
+
+type BrowserScreencastCaret = {
+  type: "caret";
+  x: number;
+  y: number;
+  height?: number;
+  visible: boolean;
+};
+
+type BrowserScreencastMessage =
+  | BrowserScreencastFrame
+  | BrowserScreencastCaret
+  | { type: "status"; status: string }
+  | { type: "error"; error: string };
+type BrowserNavigationAction = "back" | "forward" | "reload";
 
 const MIN_W = 260;
 const MIN_H = 160;
@@ -190,7 +236,7 @@ const CHART_COLORS = [
   "var(--chart-5)",
 ];
 const KIND_ICON: Record<string, LucideIcon> = {
-  browser: Globe,
+  browser: Compass,
   chart: ChartPie,
   form: FileText,
   gallery: Image,
@@ -290,19 +336,52 @@ function CanvasKindIcon({
   );
 }
 
+function CanvasItemIcon({ item, size = "sm" }: { item: CanvasItem; size?: "xs" | "sm" }) {
+  const browserPayload = browserPayloadForItem(item);
+  const faviconURL = browserPayload?.faviconURL || (browserPayload?.url ? faviconURLForPage(browserPayload.url) : "");
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [faviconURL]);
+
+  if (faviconURL && !failed) {
+    const sizeClass = size === "xs" ? "h-[18px] w-[18px] rounded-[5px]" : "h-5 w-5 rounded-md";
+    return (
+      <span
+        aria-hidden="true"
+        className={cn("inline-flex shrink-0 items-center justify-center overflow-hidden", sizeClass)}
+      >
+        <img
+          alt=""
+          className="h-full w-full object-cover"
+          draggable={false}
+          src={faviconURL}
+          onError={() => setFailed(true)}
+        />
+      </span>
+    );
+  }
+
+  return <CanvasKindIcon kind={item.kind} size={size} />;
+}
+
 export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const actorSessionIDRef = useRef("");
+  const canvasSessionStateRef = useRef("");
   const draftWindowsRef = useRef<Record<string, WindowState>>({});
   const restoreWindowsRef = useRef<Record<string, WindowState>>({});
+  const restoredWindowHydrationRef = useRef("");
   const seenCanvasItemIDsRef = useRef<Set<string>>(new Set());
   const hasSeenCanvasItemsRef = useRef(false);
   const resizeStartWindowsRef = useRef<Record<string, WindowState>>({});
   const resizeStartRestoresRef = useRef<Record<string, WindowState | undefined>>({});
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
   const [draftWindows, setDraftWindows] = useState<Record<string, WindowState>>({});
+  const [browserActive, setBrowserActive] = useState(false);
   const [galleryActiveIndices, setGalleryActiveIndices] = useState<Record<string, number>>({});
   const [restoreWindows, setRestoreWindows] = useState<Record<string, WindowState>>({});
   useEffect(() => {
@@ -313,23 +392,67 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   const actorSessionID = sessionID || actorSessionIDRef.current;
   const enabled = Boolean(token && actorSessionID);
 
+  useEffect(() => {
+    if (!actorSessionID || canvasSessionStateRef.current === actorSessionID) {
+      return;
+    }
+    canvasSessionStateRef.current = actorSessionID;
+    draftWindowsRef.current = {};
+    restoreWindowsRef.current = {};
+    restoredWindowHydrationRef.current = "";
+    seenCanvasItemIDsRef.current = new Set();
+    hasSeenCanvasItemsRef.current = false;
+    resizeStartWindowsRef.current = {};
+    resizeStartRestoresRef.current = {};
+    setDraftWindows({});
+    setBrowserActive(false);
+    setRestoreWindows({});
+    setGalleryActiveIndices({});
+  }, [actorSessionID]);
+
   const itemsQuery = useQuery({
     enabled,
-    queryKey: queryKeys.canvasItems(),
+    queryKey: queryKeys.canvasItems(actorSessionID),
     queryFn: () => listCanvasItems(token, actorSessionID),
-    placeholderData: (previous) => previous,
     staleTime: Infinity,
   });
   const closedItemsQuery = useQuery({
     enabled,
-    queryKey: queryKeys.closedCanvasItems(),
+    queryKey: queryKeys.closedCanvasItems(actorSessionID),
     queryFn: () => listClosedCanvasItems(token, actorSessionID),
-    placeholderData: (previous) => previous,
     staleTime: 30_000,
   });
 
-  const items = itemsQuery.data?.items ?? [];
-  const closedItems = closedItemsQuery.data?.items ?? [];
+  const allItems = itemsQuery.data?.items ?? [];
+  const browserItem = useMemo(
+    () => allItems.find((item) => browserPayloadForItem(item)?.sessionID === actorSessionID),
+    [actorSessionID, allItems],
+  );
+  const items = useMemo(() => allItems.filter((item) => item.id !== browserItem?.id), [allItems, browserItem?.id]);
+  const closedItems = useMemo(
+    () => (closedItemsQuery.data?.items ?? []).filter((item) => !closedCanvasItemIsBrowser(item)),
+    [closedItemsQuery.data?.items],
+  );
+  const browserPayload = browserItem ? browserPayloadForItem(browserItem) : null;
+  const browserTabsQuery = useQuery({
+    enabled,
+    queryKey: actorSessionID ? queryKeys.browserTabs(actorSessionID) : ["browser", "missing-session"],
+    queryFn: () => {
+      if (!actorSessionID) {
+        throw new Error("browser session id missing");
+      }
+      return listBrowserTabs(token, actorSessionID);
+    },
+    refetchInterval: 1500,
+  });
+  const browserTabs = browserTabsQuery.data?.tabs ?? [];
+  const activeBrowserTab = preferredBrowserTab(browserTabs, browserPayload);
+  const browserTabTitleText = activeBrowserTab
+    ? browserTabTitle(activeBrowserTab, browserPayload?.title || t("browser.title"))
+    : browserPayload?.title || t("browser.title");
+  const browserTabFaviconURLText = activeBrowserTab
+    ? browserTabFaviconURL(activeBrowserTab)
+    : browserPayload?.faviconURL || (browserPayload?.url ? faviconURLForPage(browserPayload.url) : "");
   const windows = useMemo(() => {
     const out: Record<string, WindowState> = {};
     items.forEach((item, index) => {
@@ -343,12 +466,28 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     return zs.length > 0 ? Math.max(...zs) : 0;
   }, [windows]);
 
+  useEffect(() => {
+    if (!actorSessionID || itemsQuery.isLoading || restoredWindowHydrationRef.current === actorSessionID) {
+      return;
+    }
+    restoredWindowHydrationRef.current = actorSessionID;
+    const restored: Record<string, WindowState> = {};
+    items.forEach((item) => {
+      const restore = restoreWindowFromItem(item, containerSize);
+      if (restore) {
+        restored[item.id] = restore;
+      }
+    });
+    restoreWindowsRef.current = restored;
+    setRestoreWindows(restored);
+  }, [actorSessionID, containerSize, items, itemsQuery.isLoading]);
+
   const patchWindowMutation = useMutation({
     mutationFn: ({ itemID, window }: { itemID: string; window: WindowState }) =>
       patchCanvasItemWindow(token, actorSessionID, itemID, { window }),
     onSuccess: () => {
       if (actorSessionID) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
       }
     },
   });
@@ -366,7 +505,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       });
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
     },
     onError: () => {
       toast.error(t("canvas.galleryLayoutFailed"));
@@ -392,14 +531,14 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       setGalleryActiveIndices((prev) => withoutKey(prev, item.id));
     },
     onError: (_error, item) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
       toast.error(t("canvas.closeFailed"));
     },
     onSuccess: () => {
       if (actorSessionID) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems() });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
       }
     },
   });
@@ -414,8 +553,8 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       const restoredWindow = clampWindow({ ...windowFromClosedItem(entry), z: maxZ + 1 }, containerSize);
       setDraftWindows((prev) => ({ ...prev, [entry.sourceItemID]: restoredWindow }));
       if (actorSessionID) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems() });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
       }
     },
     onError: () => {
@@ -426,7 +565,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   const restoreClosedItem = (entry: ClosedCanvasItem) => {
     if (windows[entry.sourceItemID]) {
       void deleteClosedCanvasItem(token, actorSessionID, entry.id).then(() =>
-        queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) }),
       );
       focusWindow(entry.sourceItemID);
       return;
@@ -437,28 +576,26 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   const removeClosedMutation = useMutation({
     mutationFn: (entry: ClosedCanvasItem) => deleteClosedCanvasItem(token, actorSessionID, entry.id),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
     },
   });
 
   const clearClosedMutation = useMutation({
     mutationFn: () => clearClosedCanvasItems(token, actorSessionID),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
     },
   });
   const browserWidgetMutation = useMutation({
     mutationFn: async () => {
-      const existing = items.find((item) => browserPayloadForItem(item)?.sessionID === actorSessionID);
-      if (existing) {
-        return existing;
-      }
-      const id = browserCanvasItemID(actorSessionID);
+      const id = browserItem?.id || browserCanvasItemID(actorSessionID);
       const title = t("browser.title");
-      const existingTabs = await listBrowserTabs(token, actorSessionID);
-      const tab = existingTabs.tabs[0] || (await createBrowserTab(token, actorSessionID));
+      const existingTabs = browserTabsQuery.data || (await listBrowserTabs(token, actorSessionID));
+      const payload = browserItem ? browserPayloadForItem(browserItem) : null;
+      const tab = preferredBrowserTab(existingTabs.tabs, payload);
+      const itemTitle = tab ? browserTabTitle(tab, title) : title;
       const z = Math.max(maxZ, ...Object.values(draftWindowsRef.current).map((window) => window.z)) + 1;
-      const window = clampWindow(
+      const restoreWindow = clampWindow(
         {
           x: 16,
           y: 16,
@@ -468,34 +605,62 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
         },
         containerSize,
       );
+      const window = windowPayloadForPersist(fullscreenWindow(containerSize, z), restoreWindow);
       return putCanvasItem(token, actorSessionID, id, {
         id,
         sourceSessionID: actorSessionID,
         kind: "browser",
-        title: tab.title?.trim() || title,
+        title: itemTitle,
         item: {
           kind: "browser",
           sessionID: actorSessionID,
-          tabID: tab.id,
-          url: tab.url,
-          title: tab.title?.trim() || title,
+          ...(tab
+            ? {
+                tabID: tab.id,
+                url: tab.url,
+                title: itemTitle,
+                faviconURL: browserTabFaviconURL(tab),
+                mode: tab.mode,
+              }
+            : { title }),
         },
         window,
       });
     },
     onSuccess: (item) => {
-      const win = clampWindow(
-        {
-          ...windowFromItem(item, items.length),
-          z: Math.max(maxZ, ...Object.values(draftWindowsRef.current).map((window) => window.z)) + 1,
-        },
-        containerSize,
-      );
-      setDraftWindows((prev) => ({ ...prev, [item.id]: win }));
-      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
+      setBrowserActive(true);
+      restoreWindowsRef.current = withoutKey(restoreWindowsRef.current, item.id);
+      setRestoreWindows(restoreWindowsRef.current);
+      setDraftWindows((prev) => withoutKey(prev, item.id));
+      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(actorSessionID) });
     },
     onError: () => {
       toast.error(t("browser.createFailed"));
+    },
+  });
+
+  const browserCloseMutation = useMutation({
+    mutationFn: async () => {
+      if (activeBrowserTab) {
+        await releaseBrowserTab(token, actorSessionID, activeBrowserTab.id);
+      }
+      if (browserItem) {
+        await deleteCanvasItem(token, actorSessionID, browserItem.id);
+      }
+    },
+    onSuccess: () => {
+      setBrowserActive(false);
+      if (browserItem) {
+        restoreWindowsRef.current = withoutKey(restoreWindowsRef.current, browserItem.id);
+        setRestoreWindows(restoreWindowsRef.current);
+        setDraftWindows((prev) => withoutKey(prev, browserItem.id));
+      }
+      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(actorSessionID) });
+    },
+    onError: () => {
+      toast.error(t("browser.releaseFailed"));
     },
   });
 
@@ -602,7 +767,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
 
   const commitWindow = (itemID: string, win: WindowState) => {
     setWindowDraft(itemID, win);
-    patchWindowMutation.mutate({ itemID, window: win });
+    patchWindowMutation.mutate({ itemID, window: windowPayloadForPersist(win, restoreWindowsRef.current[itemID]) });
   };
 
   const updateWindowDraftGeometry = (itemID: string, geometry: Partial<WindowGeometry>) => {
@@ -673,33 +838,33 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       return;
     }
     const restore = restoreWindowsRef.current[itemID];
-    const next = restore
-      ? { ...restore, z: maxZ + 1 }
-      : {
-          x: 0,
-          y: 0,
-          w: containerSize.w || win.w,
-          h: containerSize.h || win.h,
-          z: maxZ + 1,
-        };
-    restoreWindowsRef.current = restore
-      ? withoutKey(restoreWindowsRef.current, itemID)
-      : { ...restoreWindowsRef.current, [itemID]: win };
+    if (restore) {
+      restoreWindowsRef.current = withoutKey(restoreWindowsRef.current, itemID);
+      setRestoreWindows(restoreWindowsRef.current);
+      const restored = clampWindow({ ...restore, z: maxZ + 1 }, containerSize);
+      setWindowDraft(itemID, restored);
+      patchWindowMutation.mutate({ itemID, window: restored });
+      return;
+    }
+    const restoreWindow = clampWindow(win, containerSize);
+    restoreWindowsRef.current = { ...restoreWindowsRef.current, [itemID]: restoreWindow };
     setRestoreWindows(restoreWindowsRef.current);
-    const clamped = clampWindow(next, containerSize);
-    setDraftWindows((prev) => ({ ...prev, [itemID]: clamped }));
-    patchWindowMutation.mutate({ itemID, window: clamped });
+    const maximized = fullscreenWindow(containerSize, maxZ + 1);
+    setWindowDraft(itemID, maximized);
+    patchWindowMutation.mutate({ itemID, window: windowPayloadForPersist(maximized, restoreWindow) });
   };
+
+  const browserButtonPending = !browserItem && !activeBrowserTab && (browserWidgetMutation.isPending || browserTabsQuery.isPending);
 
   return (
     <aside className="relative flex h-full shrink-0 flex-col bg-[var(--canvas-background)] text-sidebar-foreground">
-      <div className="drag-region relative z-30 flex h-(--toolbar-h) shrink-0 items-center overflow-hidden pr-14 pl-3">
+      <div className="drag-region relative z-30 flex h-(--toolbar-h) shrink-0 items-center overflow-hidden pr-[47px] pl-3">
         {items.length > 0 ? (
           <div className="no-drag-region w-fit max-w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-lg bg-muted p-[3px] text-muted-foreground [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
             <div className="inline-flex min-w-max items-center gap-1">
               {items.map((item) => {
                 const win = windows[item.id];
-                const active = win ? win.z === maxZ : false;
+                const active = !browserActive && win ? win.z === maxZ : false;
                 const title = titleForItem(item, t);
                 return (
                   <button
@@ -709,9 +874,12 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
                     data-active={active}
                     title={title}
                     type="button"
-                    onClick={() => focusWindow(item.id)}
+                    onClick={() => {
+                      setBrowserActive(false);
+                      focusWindow(item.id);
+                    }}
                   >
-                    <CanvasKindIcon kind={item.kind} size="xs" />
+                    <CanvasItemIcon item={item} size="xs" />
                     <span className="min-w-0 flex-1 truncate text-left">{title}</span>
                     <span
                       aria-label={t("canvas.delete")}
@@ -731,20 +899,15 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
             </div>
           </div>
         ) : null}
-        <div className="ml-auto flex shrink-0 items-center pl-2">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5 pl-2">
           {actorSessionID ? (
-            <Button
-              aria-label={t("browser.title")}
-              className="no-drag-region mr-1"
-              disabled={browserWidgetMutation.isPending}
-              size="icon-sm"
-              title={t("browser.title")}
-              type="button"
-              variant="ghost"
+            <BrowserCanvasTabButton
+              active={browserActive}
+              faviconURL={browserTabFaviconURLText}
+              pending={browserButtonPending}
+              title={browserTabTitleText}
               onClick={() => browserWidgetMutation.mutate()}
-            >
-              {browserWidgetMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
-            </Button>
+            />
           ) : null}
           <CanvasLibraryMenu
             closedItems={closedItems}
@@ -756,7 +919,18 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       </div>
       <div className="relative z-0 min-h-0 flex-1 overflow-hidden px-3 pb-3">
         <div ref={containerRef} className="relative isolate z-0 h-full overflow-hidden">
-          {(!enabled && items.length === 0) || (itemsQuery.isLoading && items.length === 0) ? (
+          {browserActive ? (
+            browserItem ? (
+              <FullscreenBrowserWindow
+                item={browserItem}
+                token={token}
+                closePending={browserCloseMutation.isPending}
+                onClose={() => browserCloseMutation.mutate()}
+              />
+            ) : (
+              <CanvasBrowserLoading />
+            )
+          ) : (!enabled && items.length === 0) || (itemsQuery.isLoading && items.length === 0) ? (
             <CanvasEmpty />
           ) : items.length === 0 ? (
             <CanvasEmpty />
@@ -796,6 +970,102 @@ function CanvasEmpty() {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
       <Blocks className="h-8 w-8 text-muted-foreground/60" />
+    </div>
+  );
+}
+
+function CanvasBrowserLoading() {
+  const { t } = useI18n();
+  return (
+    <div className="absolute inset-0 flex items-center justify-center rounded-lg border bg-card text-sm text-muted-foreground">
+      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+      {t("browser.loading")}
+    </div>
+  );
+}
+
+function BrowserTabIcon({ faviconURL }: { faviconURL?: string }) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [faviconURL]);
+
+  if (faviconURL && !failed) {
+    return (
+      <span aria-hidden="true" className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center overflow-hidden rounded-[5px]">
+        <img alt="" className="h-full w-full object-cover" draggable={false} src={faviconURL} onError={() => setFailed(true)} />
+      </span>
+    );
+  }
+
+  return (
+    <span aria-hidden="true" className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] bg-blue-600 text-white shadow-sm">
+      <Compass className="h-3.5 w-3.5" />
+    </span>
+  );
+}
+
+function BrowserCanvasTabButton({
+  active,
+  faviconURL,
+  pending,
+  title,
+  onClick,
+}: {
+  active: boolean;
+  faviconURL?: string;
+  pending: boolean;
+  title: string;
+  onClick: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <button
+      aria-label={t("browser.title")}
+      aria-selected={active}
+      className="no-drag-region inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground data-[active=true]:text-foreground"
+      data-active={active}
+      disabled={pending}
+      title={title || t("browser.title")}
+      type="button"
+      onClick={onClick}
+    >
+      {pending ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <BrowserTabIcon faviconURL={faviconURL} />}
+    </button>
+  );
+}
+
+function FullscreenBrowserWindow({
+  item,
+  token,
+  closePending,
+  onClose,
+}: {
+  item: CanvasItem;
+  token: string;
+  closePending: boolean;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="absolute inset-0 z-20 flex min-h-0 flex-col overflow-hidden rounded-lg border bg-card text-card-foreground shadow-none">
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b bg-card px-3">
+        <CanvasBrowserToolbar item={item} token={token} />
+        <Button
+          aria-label={t("canvas.delete")}
+          className="canvas-window-no-drag"
+          disabled={closePending}
+          size="icon-sm"
+          variant="ghost"
+          onClick={onClose}
+        >
+          {closePending ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <CanvasBrowserWidget item={item} token={token} />
+      </div>
     </div>
   );
 }
@@ -850,6 +1120,7 @@ function CanvasWindow({
       cancel=".canvas-window-no-drag"
       className="absolute"
       disableDragging={isMaximized}
+      disableResizing={isMaximized}
       dragHandleClassName="canvas-window-drag-handle"
       maxHeight={bounds.h > 0 ? bounds.h : undefined}
       maxWidth={bounds.w > 0 ? bounds.w : undefined}
@@ -901,12 +1172,18 @@ function CanvasWindow({
           )}
           onDoubleClick={onMaximize}
         >
-          <CanvasKindIcon kind={item.kind} size="xs" />
-          <div className="min-w-0 flex-1 truncate text-sm font-medium">{title}</div>
-          {galleryLayout ? (
-            <GalleryLayoutControls layout={galleryLayout} onLayoutChange={onGalleryLayoutChange} />
-          ) : null}
-          {table ? <TableExportMenu table={table} token={token} /> : null}
+          {contentKind === "browser" ? (
+            <CanvasBrowserToolbar item={item} token={token} />
+          ) : (
+            <>
+              <CanvasKindIcon kind={item.kind} size="xs" />
+              <div className="min-w-0 flex-1 truncate text-sm font-medium">{title}</div>
+              {galleryLayout ? (
+                <GalleryLayoutControls layout={galleryLayout} onLayoutChange={onGalleryLayoutChange} />
+              ) : null}
+              {table ? <TableExportMenu table={table} token={token} /> : null}
+            </>
+          )}
           <Button
             aria-label={isMaximized ? t("canvas.restore") : t("canvas.maximize")}
             className="canvas-window-no-drag"
@@ -1291,16 +1568,13 @@ function CanvasContent({
 
 const MemoCanvasContent = memo(CanvasContent);
 
-function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem }) {
+function CanvasBrowserToolbar({ token, item }: { token: string; item: CanvasItem }) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
-  const imageRef = useRef<HTMLImageElement | null>(null);
   const createTabPromiseRef = useRef<Promise<BrowserTab> | null>(null);
   const payload = browserPayloadForItem(item);
   const ownerSessionID = payload?.sessionID || item.sourceSessionID;
-  const [urlDraft, setURLDraft] = useState(payload?.url || "");
-  const [textDraft, setTextDraft] = useState("");
-  const [screenshot, setScreenshot] = useState<BrowserScreenshot | null>(null);
+  const [urlDraft, setURLDraft] = useState((payload?.url || "").trim());
   const tabsQuery = useQuery({
     enabled: Boolean(token && ownerSessionID),
     queryKey: ownerSessionID ? queryKeys.browserTabs(ownerSessionID) : ["browser", "missing-session"],
@@ -1310,26 +1584,24 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
       }
       return listBrowserTabs(token, ownerSessionID);
     },
+    refetchInterval: 1500,
   });
   const tabs = tabsQuery.data?.tabs || [];
-  const activeTab = (payload?.tabID ? tabs.find((tab) => tab.id === payload.tabID) : undefined) || tabs[0];
-  const busyTitle = tabsQuery.isPending ? t("browser.loading") : t("browser.empty");
+  const activeTab = preferredBrowserTab(tabs, payload);
 
   useEffect(() => {
-    if (activeTab?.url && activeTab.url !== "about:blank") {
+    if (activeTab?.url) {
       setURLDraft(activeTab.url);
       return;
     }
-    if (payload?.url) {
-      setURLDraft(payload.url);
-    }
+    setURLDraft((payload?.url || "").trim());
   }, [activeTab?.id, activeTab?.url, payload?.url]);
 
   const persistTab = async (tab: BrowserTab) => {
     if (!ownerSessionID) {
       return;
     }
-    const title = tab.title?.trim() || payload?.title || t("browser.title");
+    const title = browserTabTitle(tab, payload?.title || t("browser.title"));
     await putCanvasItem(token, ownerSessionID, item.id, {
       id: item.id,
       sourceSessionID: ownerSessionID,
@@ -1342,10 +1614,248 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
         tabID: tab.id,
         url: tab.url,
         title,
+        faviconURL: browserTabFaviconURL(tab),
+        mode: tab.mode,
       },
       window: item.window,
     });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(ownerSessionID) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(ownerSessionID) });
+  };
+
+  const ensureTab = async () => {
+    if (!ownerSessionID) {
+      throw new Error("browser session id missing");
+    }
+    if (activeTab) {
+      return activeTab;
+    }
+    if (tabs[0]) {
+      await persistTab(tabs[0]);
+      return tabs[0];
+    }
+    if (!createTabPromiseRef.current) {
+      createTabPromiseRef.current = createBrowserTab(token, ownerSessionID).finally(() => {
+        createTabPromiseRef.current = null;
+      });
+    }
+    const tab = await createTabPromiseRef.current;
+    await persistTab(tab);
+    return tab;
+  };
+
+  useEffect(() => {
+    if (!activeTab || !browserPayloadNeedsTabSync(item, payload, activeTab, t("browser.title"))) {
+      return;
+    }
+    void persistTab(activeTab);
+  }, [activeTab?.id, activeTab?.url, activeTab?.title, activeTab?.faviconURL, activeTab?.mode, item.id, item.title, payload?.tabID, payload?.url, payload?.title, payload?.faviconURL, payload?.mode]);
+
+  const openMutation = useMutation({
+    mutationFn: async () => {
+      if (!ownerSessionID) {
+        throw new Error("browser session id missing");
+      }
+      const url = browserAddressToURL(urlDraft);
+      if (activeTab) {
+        return openBrowserTab(token, ownerSessionID, activeTab.id, { url });
+      }
+      return openBrowserURL(token, ownerSessionID, { url });
+    },
+    onSuccess: (tab) => {
+      void persistTab(tab);
+    },
+    onError: () => toast.error(t("browser.openFailed")),
+  });
+  const navigationMutation = useMutation({
+    mutationFn: async (action: BrowserNavigationAction) => {
+      if (!ownerSessionID || !activeTab) {
+        throw new Error("browser tab missing");
+      }
+      switch (action) {
+        case "back":
+          return backBrowserTab(token, ownerSessionID, activeTab.id);
+        case "forward":
+          return forwardBrowserTab(token, ownerSessionID, activeTab.id);
+        case "reload":
+          return reloadBrowserTab(token, ownerSessionID, activeTab.id);
+      }
+    },
+    onSuccess: (tab) => {
+      void persistTab(tab);
+    },
+    onError: () => toast.error(t("browser.navigationFailed")),
+  });
+  const revealMutation = useMutation({
+    mutationFn: async () => {
+      if (!ownerSessionID) {
+        throw new Error("browser session id missing");
+      }
+      const tab = await ensureTab();
+      return revealBrowserTab(token, ownerSessionID, tab.id);
+    },
+    onSuccess: (tab) => {
+      void persistTab(tab);
+    },
+    onError: () => toast.error(t("browser.revealFailed")),
+  });
+  const navigationDisabled = !activeTab || tabsQuery.isPending || navigationMutation.isPending;
+  const pendingNavigationAction = navigationMutation.isPending ? navigationMutation.variables : undefined;
+  const toolbarTitle = activeTab ? browserTabTitle(activeTab, payload?.title || t("browser.title")) : payload?.title || t("browser.title");
+
+  return (
+    <form
+      className="canvas-window-no-drag flex min-w-0 flex-1 items-center gap-2"
+      onDoubleClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (urlDraft.trim()) {
+          openMutation.mutate();
+        }
+      }}
+    >
+      <div className="w-[60px] shrink-0 truncate text-sm font-medium text-foreground" title={toolbarTitle}>
+        {toolbarTitle}
+      </div>
+      <div className="flex shrink-0 items-center gap-0.5">
+        <Button
+          aria-label={t("browser.back")}
+          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+          disabled={navigationDisabled}
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+          onClick={() => navigationMutation.mutate("back")}
+        >
+          {pendingNavigationAction === "back" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowLeft className="h-3.5 w-3.5" />}
+        </Button>
+        <Button
+          aria-label={t("browser.forward")}
+          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+          disabled={navigationDisabled}
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+          onClick={() => navigationMutation.mutate("forward")}
+        >
+          {pendingNavigationAction === "forward" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowRight className="h-3.5 w-3.5" />}
+        </Button>
+        <Button
+          aria-label={t("browser.reload")}
+          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+          disabled={navigationDisabled}
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+          onClick={() => navigationMutation.mutate("reload")}
+        >
+          {pendingNavigationAction === "reload" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+        </Button>
+        <Button
+          aria-label={t("browser.reveal")}
+          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+          disabled={revealMutation.isPending || tabsQuery.isPending}
+          size="icon-sm"
+          title={t("browser.reveal")}
+          type="button"
+          variant="ghost"
+          onClick={() => revealMutation.mutate()}
+        >
+          {revealMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ExternalLink className="h-3.5 w-3.5" />}
+        </Button>
+      </div>
+      <div className="group relative flex min-w-0 flex-1 items-center rounded-md border border-transparent bg-transparent transition-colors hover:bg-background/45 focus-within:border-border/70 focus-within:bg-background/45 focus-within:ring-1 focus-within:ring-ring/20">
+        <Input
+          className="h-7 min-w-0 flex-1 border-0 bg-transparent pr-8 shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
+          placeholder={t("browser.urlPlaceholder")}
+          value={urlDraft}
+          onChange={(event) => setURLDraft(event.target.value)}
+        />
+        <Button
+          aria-label={t("browser.openURL")}
+          className="absolute top-1/2 right-1 h-5 w-5 -translate-y-1/2 rounded-[5px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted/70 hover:text-foreground focus-visible:opacity-100 disabled:opacity-0 group-focus-within:opacity-100"
+          disabled={openMutation.isPending || !urlDraft.trim()}
+          size="icon-sm"
+          type="submit"
+          variant="ghost"
+        >
+          {openMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CornerDownLeft className="h-3.5 w-3.5" />}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem }) {
+  const { t } = useI18n();
+  const queryClient = useQueryClient();
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const textInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const createTabPromiseRef = useRef<Promise<BrowserTab> | null>(null);
+  const isComposingRef = useRef(false);
+  const suppressIMECommitKeyRef = useRef(false);
+  const suppressIMECommitKeyUpRef = useRef("");
+  const suppressIMECommitUntilRef = useRef(0);
+  const skipNextInputTextRef = useRef("");
+  const lastMouseMoveAtRef = useRef(0);
+  const mouseButtonsRef = useRef(0);
+  const payload = browserPayloadForItem(item);
+  const ownerSessionID = payload?.sessionID || item.sourceSessionID;
+  const [screenshot, setScreenshot] = useState<BrowserScreenshot | null>(null);
+  const [streamFrame, setStreamFrame] = useState<BrowserScreencastFrame | null>(null);
+  const [streamStatus, setStreamStatus] = useState<"closed" | "connecting" | "open" | "external" | "error">("closed");
+  const [streamError, setStreamError] = useState("");
+  const tabsQuery = useQuery({
+    enabled: Boolean(token && ownerSessionID),
+    queryKey: ownerSessionID ? queryKeys.browserTabs(ownerSessionID) : ["browser", "missing-session"],
+    queryFn: () => {
+      if (!ownerSessionID) {
+        throw new Error("browser session id missing");
+      }
+      return listBrowserTabs(token, ownerSessionID);
+    },
+  });
+  const tabs = tabsQuery.data?.tabs || [];
+  const activeTab = preferredBrowserTab(tabs, payload);
+  const busyTitle = tabsQuery.isPending ? t("browser.loading") : t("browser.empty");
+  const isExternalBrowser = activeTab ? activeTab.mode === "external" : payload?.mode === "external";
+
+  useEffect(() => {
+    if (!isExternalBrowser) {
+      return;
+    }
+    const id = window.setInterval(() => {
+      void tabsQuery.refetch();
+    }, 1500);
+    return () => window.clearInterval(id);
+  }, [isExternalBrowser, tabsQuery.refetch]);
+
+  const persistTab = async (tab: BrowserTab) => {
+    if (!ownerSessionID) {
+      return;
+    }
+    const title = browserTabTitle(tab, payload?.title || t("browser.title"));
+    await putCanvasItem(token, ownerSessionID, item.id, {
+      id: item.id,
+      sourceSessionID: ownerSessionID,
+      kind: "browser",
+      title,
+      item: {
+        ...(payload || {}),
+        kind: "browser",
+        sessionID: ownerSessionID,
+        tabID: tab.id,
+        url: tab.url,
+        title,
+        faviconURL: browserTabFaviconURL(tab),
+        mode: tab.mode,
+      },
+      window: item.window,
+    });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(ownerSessionID) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(ownerSessionID) });
   };
 
@@ -1385,21 +1895,6 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
     onError: () => toast.error(t("browser.screenshotFailed")),
   });
 
-  const openMutation = useMutation({
-    mutationFn: async () => {
-      if (!ownerSessionID) {
-        throw new Error("browser session id missing");
-      }
-      const tab = await ensureTab();
-      return openBrowserTab(token, ownerSessionID, tab.id, { url: urlDraft });
-    },
-    onSuccess: (tab) => {
-      setScreenshot(null);
-      void persistTab(tab).then(() => captureTab(tab).catch(() => undefined));
-    },
-    onError: () => toast.error(t("browser.openFailed")),
-  });
-
   const clickMutation = useMutation({
     mutationFn: async ({ x, y }: { x: number; y: number }) => {
       if (!ownerSessionID || !activeTab) {
@@ -1408,74 +1903,424 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
       return clickBrowserTab(token, ownerSessionID, activeTab.id, { x, y });
     },
     onSuccess: (result) => {
-      void persistTab(result.tab).then(() => captureTab(result.tab).catch(() => undefined));
+      setScreenshot(null);
+      void persistTab(result.tab);
     },
     onError: () => toast.error(t("browser.clickFailed")),
   });
 
-  const scrollMutation = useMutation({
-    mutationFn: async (deltaY: number) => {
-      if (!ownerSessionID || !activeTab) {
-        throw new Error("browser tab missing");
-      }
-      return scrollBrowserTab(token, ownerSessionID, activeTab.id, { deltaY });
-    },
-    onSuccess: (result) => {
-      void persistTab(result.tab).then(() => captureTab(result.tab).catch(() => undefined));
-    },
-    onError: () => toast.error(t("browser.scrollFailed")),
-  });
+  useEffect(() => {
+    if (!token || !ownerSessionID || !activeTab?.id) {
+      setStreamFrame(null);
+      setStreamStatus("closed");
+      return;
+    }
+    if (isExternalBrowser) {
+      setStreamFrame(null);
+      setScreenshot(null);
+      setStreamStatus("external");
+      return;
+    }
+    let alive = true;
+    let resizeObserver: ResizeObserver | null = null;
+    const ws = new WebSocket(browserScreencastURL(token, ownerSessionID, activeTab.id));
+    wsRef.current = ws;
+    setStreamStatus("connecting");
+    setStreamError("");
 
-  const typeMutation = useMutation({
-    mutationFn: async () => {
-      if (!ownerSessionID || !activeTab) {
-        throw new Error("browser tab missing");
+    const sendStart = () => {
+      if (ws.readyState !== WebSocket.OPEN) {
+        return;
       }
-      return typeBrowserTab(token, ownerSessionID, activeTab.id, { text: textDraft, clear: false });
-    },
-    onSuccess: (result) => {
-      setTextDraft("");
-      void persistTab(result.tab).then(() => captureTab(result.tab).catch(() => undefined));
-    },
-    onError: () => toast.error(t("browser.typeFailed")),
-  });
+      const rect = surfaceRef.current?.getBoundingClientRect();
+      const width = Math.max(1, Math.round(rect?.width || 0));
+      const height = Math.max(1, Math.round(rect?.height || 0));
+      ws.send(JSON.stringify({ type: "start", width, height, everyNthFrame: 1 }));
+    };
 
-  const screenshotPending = screenshotMutation.isPending;
+    ws.onopen = () => {
+      if (!alive) {
+        return;
+      }
+      setStreamStatus("open");
+      sendStart();
+      if (surfaceRef.current) {
+        resizeObserver = new ResizeObserver(sendStart);
+        resizeObserver.observe(surfaceRef.current);
+      }
+    };
+    ws.onmessage = (event) => {
+      if (!alive) {
+        return;
+      }
+      try {
+        const message = JSON.parse(String(event.data)) as BrowserScreencastMessage;
+        if (message.type === "frame") {
+          setStreamFrame(message);
+          setScreenshot(null);
+        } else if (message.type === "caret") {
+          moveTextInputToViewportPoint(message);
+        } else if (message.type === "status" && message.status === "external") {
+          setStreamFrame(null);
+          setScreenshot(null);
+          setStreamStatus("external");
+        } else if (message.type === "error") {
+          setStreamStatus("error");
+          setStreamError(message.error);
+        }
+      } catch {
+        // Ignore malformed frames from a stale connection.
+      }
+    };
+    ws.onerror = () => {
+      if (!alive) {
+        return;
+      }
+      setStreamStatus("error");
+      setStreamError("screencast_error");
+    };
+    ws.onclose = () => {
+      if (!alive) {
+        return;
+      }
+      setStreamStatus((current) => (current === "error" || current === "external" ? current : "closed"));
+    };
+    return () => {
+      alive = false;
+      resizeObserver?.disconnect();
+      if (wsRef.current === ws) {
+        wsRef.current = null;
+      }
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "stop" }));
+      }
+      ws.close();
+    };
+  }, [token, ownerSessionID, activeTab?.id, isExternalBrowser]);
 
   useEffect(() => {
-    if (!activeTab || screenshot || screenshotPending) {
+    const canFallback = streamStatus === "error" || streamStatus === "closed";
+    if (!canFallback || isExternalBrowser || !activeTab || streamFrame || screenshot || screenshotMutation.isPending) {
       return;
     }
     screenshotMutation.mutate();
-  }, [activeTab?.id, screenshot?.capturedAt, screenshotPending]);
+  }, [activeTab?.id, isExternalBrowser, screenshot?.capturedAt, screenshotMutation.isPending, streamFrame?.data, streamStatus]);
+
+  const sendScreencast = (message: Record<string, unknown>) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    ws.send(JSON.stringify(message));
+    return true;
+  };
+
+  const insertBrowserText = (text: string) => {
+    if (!streamFrame || !text) {
+      return;
+    }
+    sendScreencast({ type: "text", text });
+    requestBrowserCaret();
+  };
+
+  const requestBrowserCaret = () => {
+    window.setTimeout(() => {
+      sendScreencast({ type: "caret" });
+    }, 0);
+  };
+
+  const pointForEvent = (event: { clientX: number; clientY: number }) => {
+    const image = imageRef.current;
+    if (!image) {
+      return null;
+    }
+    const viewportWidth = streamFrame?.metadata?.deviceWidth || screenshot?.viewportWidth || screenshot?.width || image.naturalWidth;
+    const viewportHeight = streamFrame?.metadata?.deviceHeight || screenshot?.viewportHeight || screenshot?.height || image.naturalHeight;
+    const rect = renderedBrowserImageRect(image, viewportWidth, viewportHeight);
+    if (!rect || viewportWidth <= 0 || viewportHeight <= 0) {
+      return null;
+    }
+    const localX = event.clientX - rect.left;
+    const localY = event.clientY - rect.top;
+    if (localX < 0 || localY < 0 || localX > rect.width || localY > rect.height) {
+      return null;
+    }
+    return {
+      x: Math.max(0, Math.min(viewportWidth, (localX / rect.width) * viewportWidth)),
+      y: Math.max(0, Math.min(viewportHeight, (localY / rect.height) * viewportHeight)),
+    };
+  };
+
+  const moveTextInputToEvent = (event: { clientX: number; clientY: number }) => {
+    const surface = surfaceRef.current;
+    const input = textInputRef.current;
+    if (!surface || !input) {
+      return;
+    }
+    const rect = surface.getBoundingClientRect();
+    const x = Math.max(4, Math.min(rect.width - 4, event.clientX - rect.left));
+    const y = Math.max(4, Math.min(rect.height - 4, event.clientY - rect.top));
+    input.style.left = `${x}px`;
+    input.style.top = `${y}px`;
+  };
+
+  const moveTextInputToViewportPoint = (caret: BrowserScreencastCaret) => {
+    if (!caret.visible) {
+      return;
+    }
+    const surface = surfaceRef.current;
+    const image = imageRef.current;
+    const input = textInputRef.current;
+    if (!surface || !image || !input) {
+      return;
+    }
+    const viewportWidth = streamFrame?.metadata?.deviceWidth || screenshot?.viewportWidth || screenshot?.width || image.naturalWidth;
+    const viewportHeight = streamFrame?.metadata?.deviceHeight || screenshot?.viewportHeight || screenshot?.height || image.naturalHeight;
+    const imageRect = renderedBrowserImageRect(image, viewportWidth, viewportHeight);
+    if (!imageRect || viewportWidth <= 0 || viewportHeight <= 0) {
+      return;
+    }
+    const surfaceRect = surface.getBoundingClientRect();
+    const x = imageRect.left + (caret.x / viewportWidth) * imageRect.width - surfaceRect.left;
+    const y = imageRect.top + (caret.y / viewportHeight) * imageRect.height - surfaceRect.top;
+    const height = Math.max(16, ((caret.height || 18) / viewportHeight) * imageRect.height);
+    input.style.left = `${Math.max(4, Math.min(surfaceRect.width - 4, x))}px`;
+    input.style.top = `${Math.max(4, Math.min(surfaceRect.height - 4, y))}px`;
+    input.style.height = `${height}px`;
+  };
 
   const handleImageClick = (event: ReactMouseEvent<HTMLImageElement>) => {
     if (!screenshot || !activeTab || clickMutation.isPending) {
       return;
     }
-    const image = imageRef.current;
-    if (!image) {
+    const point = pointForEvent(event);
+    if (!point) {
       return;
     }
-    const rect = image.getBoundingClientRect();
-    const viewportWidth = screenshot.viewportWidth || screenshot.width || image.naturalWidth;
-    const viewportHeight = screenshot.viewportHeight || screenshot.height || image.naturalHeight;
-    if (rect.width <= 0 || rect.height <= 0 || viewportWidth <= 0 || viewportHeight <= 0) {
-      return;
-    }
-    const x = ((event.clientX - rect.left) / rect.width) * viewportWidth;
-    const y = ((event.clientY - rect.top) / rect.height) * viewportHeight;
-    clickMutation.mutate({ x, y });
+    clickMutation.mutate(point);
   };
 
-  const busy =
-    openMutation.isPending ||
-    screenshotMutation.isPending ||
-    clickMutation.isPending ||
-    scrollMutation.isPending ||
-    typeMutation.isPending;
+  const focusSurface = () => {
+    if (streamFrame) {
+      textInputRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    surfaceRef.current?.focus({ preventScroll: true });
+  };
+
+  const handleSurfaceMouseMove = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!streamFrame) {
+      return;
+    }
+    const now = performance.now();
+    if (now - lastMouseMoveAtRef.current < 16) {
+      return;
+    }
+    lastMouseMoveAtRef.current = now;
+    const point = pointForEvent(event);
+    if (!point) {
+      return;
+    }
+    sendScreencast({
+      type: "mouse",
+      eventType: "mouseMoved",
+      x: point.x,
+      y: point.y,
+      button: browserMouseButton(event.button),
+      buttons: event.buttons || mouseButtonsRef.current,
+      modifiers: browserModifiers(event),
+    });
+  };
+
+  const handleSurfaceMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!streamFrame) {
+      return;
+    }
+    moveTextInputToEvent(event);
+    event.preventDefault();
+    focusSurface();
+    const point = pointForEvent(event);
+    if (!point) {
+      return;
+    }
+    mouseButtonsRef.current = event.buttons || browserMouseButtonMask(event.button);
+    sendScreencast({
+      type: "mouse",
+      eventType: "mousePressed",
+      x: point.x,
+      y: point.y,
+      button: browserMouseButton(event.button),
+      buttons: mouseButtonsRef.current,
+      clickCount: event.detail || 1,
+      modifiers: browserModifiers(event),
+    });
+  };
+
+  const handleSurfaceMouseUp = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!streamFrame) {
+      return;
+    }
+    event.preventDefault();
+    const point = pointForEvent(event);
+    if (!point) {
+      return;
+    }
+    sendScreencast({
+      type: "mouse",
+      eventType: "mouseReleased",
+      x: point.x,
+      y: point.y,
+      button: browserMouseButton(event.button),
+      buttons: event.buttons,
+      clickCount: event.detail || 1,
+      modifiers: browserModifiers(event),
+    });
+    mouseButtonsRef.current = event.buttons;
+    requestBrowserCaret();
+  };
+
+  const handleSurfaceWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+    if (!streamFrame) {
+      return;
+    }
+    event.preventDefault();
+    focusSurface();
+    const point = pointForEvent(event);
+    if (!point) {
+      return;
+    }
+    sendScreencast({
+      type: "wheel",
+      x: point.x,
+      y: point.y,
+      deltaX: event.deltaX,
+      deltaY: event.deltaY,
+      modifiers: browserModifiers(event),
+    });
+  };
+
+  const handleSurfaceKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+    if (!streamFrame) {
+      return;
+    }
+    event.preventDefault();
+    sendScreencast(browserKeyMessage(event, "keyDown"));
+  };
+
+  const handleSurfaceKeyUp = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+    if (!streamFrame) {
+      return;
+    }
+    event.preventDefault();
+    sendScreencast(browserKeyMessage(event, "keyUp"));
+    requestBrowserCaret();
+  };
+
+  const handleTextInput = (event: ReactFormEvent<HTMLTextAreaElement>) => {
+    if (isComposingRef.current) {
+      return;
+    }
+    const text = event.currentTarget.value;
+    if (!text) {
+      return;
+    }
+    event.currentTarget.value = "";
+    if (skipNextInputTextRef.current === text) {
+      skipNextInputTextRef.current = "";
+      return;
+    }
+    skipNextInputTextRef.current = "";
+    insertBrowserText(text);
+  };
+
+  const handleTextCompositionStart = () => {
+    isComposingRef.current = true;
+    suppressIMECommitKeyRef.current = false;
+  };
+
+  const handleTextCompositionUpdate = (event: ReactCompositionEvent<HTMLTextAreaElement>) => {
+    const text = event.data || event.currentTarget.value;
+    sendScreencast({
+      type: "composition",
+      text,
+      selectionStart: text.length,
+      selectionEnd: text.length,
+    });
+  };
+
+  const handleTextCompositionEnd = (event: ReactCompositionEvent<HTMLTextAreaElement>) => {
+    isComposingRef.current = false;
+    suppressIMECommitKeyRef.current = true;
+    suppressIMECommitUntilRef.current = performance.now() + 350;
+    const text = event.currentTarget.value || event.data;
+    sendScreencast({ type: "compositionEnd" });
+    if (!text) {
+      return;
+    }
+    event.currentTarget.value = "";
+    skipNextInputTextRef.current = text;
+    insertBrowserText(text);
+  };
+
+  const shouldSuppressIMECommitKey = (event: ReactKeyboardEvent<HTMLTextAreaElement>, phase: "down" | "up") => {
+    const key = event.key === "Spacebar" ? " " : event.key;
+    const isCommitKey = key === "Enter" || key === " ";
+    if (!isCommitKey) {
+      return false;
+    }
+    if (phase === "up" && suppressIMECommitKeyUpRef.current === key) {
+      event.preventDefault();
+      suppressIMECommitKeyUpRef.current = "";
+      return true;
+    }
+    if (!suppressIMECommitKeyRef.current) {
+      return false;
+    }
+    if (performance.now() > suppressIMECommitUntilRef.current) {
+      suppressIMECommitKeyRef.current = false;
+      return false;
+    }
+    event.preventDefault();
+    suppressIMECommitKeyRef.current = false;
+    if (phase === "down") {
+      suppressIMECommitKeyUpRef.current = key;
+    }
+    return true;
+  };
+
+  const handleTextKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (!streamFrame || isComposingRef.current || event.nativeEvent.isComposing || event.key === "Process") {
+      return;
+    }
+    if (shouldSuppressIMECommitKey(event, "down")) {
+      return;
+    }
+    if (isPlainTextKey(event)) {
+      return;
+    }
+    event.preventDefault();
+    sendScreencast(browserKeyMessage(event, "keyDown"));
+  };
+
+  const handleTextKeyUp = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (!streamFrame || isComposingRef.current || event.nativeEvent.isComposing || event.key === "Process" || isPlainTextKey(event)) {
+      return;
+    }
+    if (shouldSuppressIMECommitKey(event, "up")) {
+      return;
+    }
+    event.preventDefault();
+    sendScreencast(browserKeyMessage(event, "keyUp"));
+  };
+
+  const busy = screenshotMutation.isPending || clickMutation.isPending;
   const title = activeTab?.title?.trim() || payload?.title || busyTitle;
-  const currentURL = activeTab?.url || payload?.url || "about:blank";
 
   if (!ownerSessionID) {
     return <div className="p-3 text-sm text-muted-foreground">{t("browser.loadFailed")}</div>;
@@ -1483,41 +2328,49 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-card">
-      <form
-        className="canvas-window-no-drag flex shrink-0 items-center gap-2 border-b p-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (urlDraft.trim()) {
-            openMutation.mutate();
-          }
-        }}
+      <div
+        ref={surfaceRef}
+        className="canvas-window-no-drag relative flex min-h-0 flex-1 touch-none items-center justify-center overflow-hidden bg-muted/30 outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
+        role="application"
+        tabIndex={0}
+        onKeyDown={handleSurfaceKeyDown}
+        onKeyUp={handleSurfaceKeyUp}
+        onMouseDown={handleSurfaceMouseDown}
+        onMouseMove={handleSurfaceMouseMove}
+        onMouseUp={handleSurfaceMouseUp}
+        onWheel={handleSurfaceWheel}
       >
-        <Input
-          className="h-8 min-w-0 flex-1"
-          placeholder={t("browser.urlPlaceholder")}
-          value={urlDraft}
-          onChange={(event) => setURLDraft(event.target.value)}
+        <textarea
+          ref={textInputRef}
+          aria-hidden="true"
+          autoCapitalize="off"
+          autoCorrect="off"
+          className="pointer-events-none absolute top-2 left-2 h-5 w-px resize-none overflow-hidden border-0 bg-transparent p-0 text-[16px] opacity-0 outline-none"
+          spellCheck={false}
+          tabIndex={-1}
+          onCompositionEnd={handleTextCompositionEnd}
+          onCompositionStart={handleTextCompositionStart}
+          onCompositionUpdate={handleTextCompositionUpdate}
+          onInput={handleTextInput}
+          onKeyDown={handleTextKeyDown}
+          onKeyUp={handleTextKeyUp}
         />
-        <Button aria-label={t("browser.openURL")} disabled={busy || !urlDraft.trim()} size="icon-sm" type="submit">
-          {openMutation.isPending ? <Loader2 className="animate-spin" /> : <ExternalLink />}
-        </Button>
-        <Button
-          aria-label={t("browser.screenshot")}
-          disabled={busy}
-          size="icon-sm"
-          type="button"
-          variant="outline"
-          onClick={() => screenshotMutation.mutate()}
-        >
-          {screenshotMutation.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-        </Button>
-      </form>
-      <div className="min-w-0 shrink-0 border-b px-3 py-2 text-xs">
-        <div className="truncate font-medium">{title}</div>
-        <div className="truncate text-muted-foreground">{currentURL}</div>
-      </div>
-      <div className="canvas-window-no-drag relative flex min-h-0 flex-1 items-center justify-center overflow-auto bg-muted/30">
-        {screenshot ? (
+        {isExternalBrowser || streamStatus === "external" ? (
+          <div className="flex max-w-sm flex-col items-center gap-2 px-6 text-center text-sm text-muted-foreground">
+            <ExternalLink className="h-5 w-5" />
+            <div className="font-medium text-foreground">{t("browser.externalOpen")}</div>
+            <div className="text-xs leading-relaxed">{t("browser.externalHint")}</div>
+          </div>
+        ) : streamFrame ? (
+          <img
+            ref={imageRef}
+            alt={title}
+            className="h-full max-h-full w-full max-w-full cursor-default object-contain"
+            draggable={false}
+            src={`data:${streamFrame.mime};base64,${streamFrame.data}`}
+            onDragStart={(event) => event.preventDefault()}
+          />
+        ) : screenshot ? (
           <img
             ref={imageRef}
             alt={title}
@@ -1528,34 +2381,15 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
           />
         ) : (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            {busy || tabsQuery.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            {busy || tabsQuery.isPending ? t("browser.loading") : t("browser.empty")}
+            {busy || tabsQuery.isPending || streamStatus === "connecting" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {busy || tabsQuery.isPending || streamStatus === "connecting" ? t("browser.loading") : t("browser.empty")}
           </div>
         )}
-      </div>
-      <div className="canvas-window-no-drag flex shrink-0 items-center gap-2 border-t p-2">
-        <Input
-          className="h-8 min-w-0 flex-1"
-          placeholder={t("browser.textPlaceholder")}
-          value={textDraft}
-          onChange={(event) => setTextDraft(event.target.value)}
-        />
-        <Button
-          disabled={busy || !textDraft}
-          size="sm"
-          type="button"
-          variant="outline"
-          onClick={() => typeMutation.mutate()}
-        >
-          {typeMutation.isPending ? <Loader2 className="animate-spin" /> : null}
-          {t("browser.type")}
-        </Button>
-        <Button disabled={busy || !activeTab} size="sm" type="button" variant="outline" onClick={() => scrollMutation.mutate(-500)}>
-          ↑
-        </Button>
-        <Button disabled={busy || !activeTab} size="sm" type="button" variant="outline" onClick={() => scrollMutation.mutate(500)}>
-          ↓
-        </Button>
+        {streamStatus === "error" && streamError ? (
+          <div className="pointer-events-none absolute right-2 bottom-2 max-w-[70%] truncate rounded-md bg-destructive/90 px-2 py-1 text-xs text-destructive-foreground">
+            {streamError}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -2669,12 +3503,318 @@ function windowFromItem(item: CanvasItem, index: number): WindowState {
   });
 }
 
+function restoreWindowFromItem(item: CanvasItem, bounds = { w: 0, h: 0 }): WindowState | undefined {
+  const raw = asRecord(item.window);
+  if (raw?.maximized !== true) {
+    return undefined;
+  }
+  const restore = asRecord(raw.restore);
+  if (!restore) {
+    return undefined;
+  }
+  return clampWindow(
+    {
+      x: numberValue(restore.x, 16),
+      y: numberValue(restore.y, 16),
+      w: numberValue(restore.w, DEFAULT_W),
+      h: numberValue(restore.h, DEFAULT_H),
+      z: numberValue(restore.z, numberValue(raw.z, 1)),
+    },
+    bounds,
+  );
+}
+
+function windowPayloadForPersist(win: WindowState, restore: WindowState | undefined): WindowState {
+  const clean = serializeWindow(win);
+  if (!restore) {
+    return clean;
+  }
+  return {
+    ...clean,
+    maximized: true,
+    restore: serializeWindow(restore),
+  };
+}
+
+function serializeWindow(win: WindowState): WindowRestoreState {
+  return {
+    x: Math.round(win.x),
+    y: Math.round(win.y),
+    w: Math.round(win.w),
+    h: Math.round(win.h),
+    z: Math.max(1, Math.round(win.z)),
+  };
+}
+
 function titleForItem(item: CanvasItem, t: (key: string) => string): string {
   return item.title?.trim() || titleFromPayload(item.item) || item.kind || t("canvas.untitled");
 }
 
 function browserCanvasItemID(sessionID: string): string {
   return `browser_${sessionID.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+}
+
+function browserScreencastURL(token: string, sessionID: string, tabID: string): string {
+  const url = new URL(
+    apiURL(`/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/screencast`),
+    window.location.href,
+  );
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.searchParams.set("token", token);
+  return url.toString();
+}
+
+function browserAddressToURL(value: string): string {
+  const raw = value.trim();
+  if (!raw) {
+    return "";
+  }
+  const searchText = raw.startsWith("?") ? raw.slice(1).trim() : "";
+  if (searchText) {
+    return browserSearchURL(searchText);
+  }
+  if (hasURLScheme(raw)) {
+    return raw;
+  }
+  if (isBrowserSearchText(raw)) {
+    return browserSearchURL(raw);
+  }
+  if (isLocalBrowserHost(raw)) {
+    return `http://${raw}`;
+  }
+  if (isLikelyBrowserHost(raw)) {
+    return `https://${raw}`;
+  }
+  if (isSingleBrowserLabel(raw)) {
+    return `https://${raw}.com`;
+  }
+  return browserSearchURL(raw);
+}
+
+function browserTabTitle(tab: BrowserTab, fallback: string): string {
+  const title = (tab.title || "").trim();
+  const url = (tab.url || "").trim();
+  if (title && !(title === "about:blank" && url && url !== "about:blank")) {
+    return title;
+  }
+  if (url && url !== "about:blank") {
+    return browserTitleFromURL(url) || url;
+  }
+  return fallback;
+}
+
+function browserTabFaviconURL(tab: BrowserTab): string {
+  return (tab.faviconURL || "").trim() || faviconURLForPage(tab.url);
+}
+
+function preferredBrowserTab(tabs: BrowserTab[], payload: BrowserCanvasPayload | null): BrowserTab | undefined {
+  if (tabs.length === 0) {
+    return undefined;
+  }
+  const payloadTab = payload?.tabID ? tabs.find((tab) => tab.id === payload.tabID) : undefined;
+  const latestTab = tabs.reduce((latest, tab) => (browserTabTimestamp(tab) > browserTabTimestamp(latest) ? tab : latest), tabs[0]!);
+  if (!payloadTab) {
+    return latestTab;
+  }
+  return browserTabTimestamp(latestTab) > browserTabTimestamp(payloadTab) ? latestTab : payloadTab;
+}
+
+function browserTabTimestamp(tab: BrowserTab): number {
+  const updated = Date.parse(tab.updatedAt);
+  if (Number.isFinite(updated)) {
+    return updated;
+  }
+  const created = Date.parse(tab.createdAt);
+  return Number.isFinite(created) ? created : 0;
+}
+
+function browserPayloadNeedsTabSync(
+  item: CanvasItem,
+  payload: BrowserCanvasPayload | null,
+  tab: BrowserTab,
+  fallbackTitle: string,
+): boolean {
+  const title = browserTabTitle(tab, fallbackTitle);
+  const faviconURL = browserTabFaviconURL(tab);
+  return (
+    item.title !== title ||
+    payload?.tabID !== tab.id ||
+    payload?.url !== tab.url ||
+    payload?.title !== title ||
+    (payload?.faviconURL || "") !== faviconURL ||
+    (payload?.mode || "") !== (tab.mode || "")
+  );
+}
+
+function browserTitleFromURL(rawURL: string): string {
+  try {
+    const url = new URL(rawURL);
+    return url.hostname || rawURL;
+  } catch {
+    return rawURL;
+  }
+}
+
+function browserSearchURL(query: string): string {
+  return `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+}
+
+function hasURLScheme(value: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
+}
+
+function isBrowserSearchText(value: string): boolean {
+  return /\s/.test(value) || /[^\x00-\x7f]/.test(value);
+}
+
+function isLocalBrowserHost(value: string): boolean {
+  const lower = value.toLowerCase();
+  return (
+    lower === "localhost" ||
+    lower.startsWith("localhost:") ||
+    lower.startsWith("localhost/") ||
+    lower.startsWith("127.") ||
+    lower.startsWith("0.0.0.0") ||
+    lower.startsWith("192.168.") ||
+    lower.startsWith("10.") ||
+    /^\[::1\](?::|\/|$)/.test(lower)
+  );
+}
+
+function isLikelyBrowserHost(value: string): boolean {
+  if (/[/?#]/.test(value) && value.includes(".")) {
+    return true;
+  }
+  if (/^\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?(?:\/.*)?$/.test(value)) {
+    return true;
+  }
+  return /^[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\:\d+)?(?:[/?#].*)?$/i.test(value);
+}
+
+function isSingleBrowserLabel(value: string): boolean {
+  return /^[a-z0-9][a-z0-9-]{1,62}$/i.test(value);
+}
+
+function faviconURLForPage(rawURL: string): string {
+  try {
+    const url = new URL(rawURL);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return "";
+    }
+    return `${url.origin}/favicon.ico`;
+  } catch {
+    return "";
+  }
+}
+
+function renderedBrowserImageRect(image: HTMLImageElement, fallbackWidth: number, fallbackHeight: number) {
+  const rect = image.getBoundingClientRect();
+  const mediaWidth = image.naturalWidth || fallbackWidth;
+  const mediaHeight = image.naturalHeight || fallbackHeight;
+  if (rect.width <= 0 || rect.height <= 0 || mediaWidth <= 0 || mediaHeight <= 0) {
+    return null;
+  }
+  const mediaRatio = mediaWidth / mediaHeight;
+  const rectRatio = rect.width / rect.height;
+  if (rectRatio > mediaRatio) {
+    const width = rect.height * mediaRatio;
+    return {
+      left: rect.left + (rect.width - width) / 2,
+      top: rect.top,
+      width,
+      height: rect.height,
+    };
+  }
+  const height = rect.width / mediaRatio;
+  return {
+    left: rect.left,
+    top: rect.top,
+    width: rect.width,
+    height,
+  };
+}
+
+function browserMouseButton(button: number): string {
+  switch (button) {
+    case 1:
+      return "middle";
+    case 2:
+      return "right";
+    case 3:
+      return "back";
+    case 4:
+      return "forward";
+    default:
+      return "left";
+  }
+}
+
+function browserMouseButtonMask(button: number): number {
+  switch (button) {
+    case 1:
+      return 4;
+    case 2:
+      return 2;
+    case 3:
+      return 8;
+    case 4:
+      return 16;
+    default:
+      return 1;
+  }
+}
+
+function browserModifiers(event: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): number {
+  return (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0);
+}
+
+function isPlainTextKey(event: { altKey: boolean; ctrlKey: boolean; key: string; metaKey: boolean }): boolean {
+  return event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;
+}
+
+function browserKeyMessage(event: ReactKeyboardEvent<HTMLElement>, eventType: "keyDown" | "keyUp"): Record<string, unknown> {
+  const text = eventType === "keyDown" && event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey ? event.key : "";
+  const virtualKeyCode = browserVirtualKeyCode(event);
+  return {
+    type: "key",
+    eventType,
+    key: event.key,
+    code: event.code,
+    text,
+    unmodifiedText: text,
+    windowsVirtualKeyCode: virtualKeyCode,
+    nativeVirtualKeyCode: virtualKeyCode,
+    modifiers: browserModifiers(event),
+  };
+}
+
+function browserVirtualKeyCode(event: ReactKeyboardEvent<HTMLElement>): number {
+  if (event.code.startsWith("Key") && event.code.length === 4) {
+    return event.code.charCodeAt(3);
+  }
+  if (event.code.startsWith("Digit") && event.code.length === 6) {
+    return event.code.charCodeAt(5);
+  }
+  const map: Record<string, number> = {
+    Backspace: 8,
+    Tab: 9,
+    Enter: 13,
+    Shift: 16,
+    Control: 17,
+    Alt: 18,
+    Escape: 27,
+    " ": 32,
+    PageUp: 33,
+    PageDown: 34,
+    End: 35,
+    Home: 36,
+    ArrowLeft: 37,
+    ArrowUp: 38,
+    ArrowRight: 39,
+    ArrowDown: 40,
+    Delete: 46,
+  };
+  return map[event.key] || 0;
 }
 
 function browserPayloadForItem(item: CanvasItem): BrowserCanvasPayload | null {
@@ -2693,7 +3833,14 @@ function browserPayloadForItem(item: CanvasItem): BrowserCanvasPayload | null {
     tabID: stringValue(payload?.tabID) || undefined,
     url: stringValue(payload?.url) || undefined,
     title: stringValue(payload?.title) || item.title || undefined,
+    faviconURL: stringValue(payload?.faviconURL) || undefined,
+    mode: payload?.mode === "external" ? "external" : payload?.mode === "headless" ? "headless" : undefined,
   };
+}
+
+function closedCanvasItemIsBrowser(item: ClosedCanvasItem): boolean {
+  const payload = asRecord(item.item);
+  return (stringValue(payload?.kind) || item.kind) === "browser";
 }
 
 function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {

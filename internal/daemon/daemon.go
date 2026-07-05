@@ -15,6 +15,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"time"
 
 	"github.com/teatak/pudding-core/internal/api"
 	appsvc "github.com/teatak/pudding-core/internal/app"
@@ -24,6 +26,7 @@ import (
 	portaudiodriver "github.com/teatak/pudding-core/internal/audio/driver/portaudio"
 	"github.com/teatak/pudding-core/internal/audio/frame"
 	audiotts "github.com/teatak/pudding-core/internal/audio/tts"
+	"github.com/teatak/pudding-core/internal/audio/tts/edgetts"
 	"github.com/teatak/pudding-core/internal/audio/tts/macsay"
 	"github.com/teatak/pudding-core/internal/audio/voice"
 	"github.com/teatak/pudding-core/internal/browser"
@@ -89,6 +92,11 @@ func Start(opts Options) (*Daemon, error) {
 		_ = st.Close()
 		return nil, err
 	}
+	audioCfg, err := cfg.Audio(context.Background())
+	if err != nil {
+		slog.Warn("daemon: audio config unavailable, using defaults", "err", err)
+		audioCfg = config.DefaultAudioConfig()
+	}
 
 	var resolver engine.Resolver
 	providerLabel := "registry"
@@ -101,7 +109,7 @@ func Start(opts Options) (*Daemon, error) {
 	hub := event.NewHub()
 	apps := appsvc.NewService(dir, cfg)
 	skills := skillsvc.NewService(dir)
-	browserManager := browser.NewManager(browser.Config{HomeDir: dir})
+	browserManager := browser.NewManager(browser.Config{HomeDir: dir, Headless: true})
 	browserMCP := tool.NewBrowserMCPRunner()
 	camera := desktopcamera.New()
 	screen := desktopscreen.New()
@@ -115,9 +123,9 @@ func Start(opts Options) (*Daemon, error) {
 		Submitter: eng,
 		Canceler:  eng,
 		Events:    hub,
-		Driver:    defaultCaptureDriver(),
-		ASR:       defaultASR(dir),
-		TTS:       defaultTTS(),
+		Driver:    defaultCaptureDriver(audioCfg),
+		ASR:       defaultASR(dir, audioCfg),
+		TTS:       defaultTTS(audioCfg),
 	})
 	if err := eng.Recover(context.Background()); err != nil {
 		_ = st.Close()
@@ -276,7 +284,27 @@ func addrIP(addr net.Addr) net.IP {
 	}
 }
 
-func defaultTTS() audiotts.Client {
+func defaultTTS(cfg config.AudioConfig) audiotts.Client {
+	cfg = cfg.WithDefaults()
+	if !cfg.TTSEnabled() {
+		slog.Info("daemon: tts disabled by config")
+		return nil
+	}
+	profileName, profile := cfg.ActiveTTSProfile()
+	switch strings.ToLower(profileName) {
+	case "edge":
+		client, err := edgetts.New(edgetts.Config{
+			Voice: profile.Voice,
+			Speed: float32(profile.Speed),
+		})
+		if err == nil {
+			slog.Info("daemon: using edge tts", "tts", client.Name(), "profile", profileName)
+			return client
+		}
+		slog.Warn("daemon: edge tts unavailable", "err", err)
+	default:
+		slog.Warn("daemon: unsupported tts profile", "profile", profileName)
+	}
 	if runtime.GOOS == "darwin" {
 		client, err := macsay.New(macsay.Config{Rate: 230})
 		if err == nil {
@@ -287,15 +315,26 @@ func defaultTTS() audiotts.Client {
 	return audiotts.NewNoop()
 }
 
-func defaultCaptureDriver() audiodriver.Driver {
+func defaultCaptureDriver(cfg config.AudioConfig) audiodriver.Driver {
+	cfg = cfg.WithDefaults()
+	if strings.ToLower(strings.TrimSpace(cfg.Driver.Type)) != "portaudio" {
+		slog.Warn("daemon: unsupported audio driver", "driver", cfg.Driver.Type)
+		return nil
+	}
 	return portaudiodriver.New(portaudiodriver.Config{
-		Format:      frame.Format{SampleRate: 16000, Channels: 1},
-		FrameMillis: 20,
+		InputFormat:  frame.Format{SampleRate: cfg.Driver.CaptureSampleRate, Channels: cfg.Driver.Channels},
+		OutputFormat: frame.Format{SampleRate: cfg.Driver.PlaybackSampleRate, Channels: cfg.Driver.Channels},
+		FrameMillis:  cfg.Driver.PeriodMillis,
 	})
 }
 
-func defaultASR(homeDir string) audioasr.Client {
-	cfg, ok := defaultSherpaConfig(homeDir)
+func defaultASR(homeDir string, audioCfg config.AudioConfig) audioasr.Client {
+	audioCfg = audioCfg.WithDefaults()
+	if !audioCfg.ASREnabled() {
+		slog.Info("daemon: asr disabled by config")
+		return nil
+	}
+	cfg, ok := defaultSherpaConfig(homeDir, audioCfg)
 	if !ok {
 		slog.Warn("daemon: sherpa ASR models unavailable")
 		return nil
@@ -308,21 +347,45 @@ func defaultASR(homeDir string) audioasr.Client {
 	return client
 }
 
-func defaultSherpaConfig(homeDir string) (sherpaasr.Config, bool) {
-	root := filepath.Join(homeDir, "runtime", "models")
+func defaultSherpaConfig(homeDir string, audioCfg config.AudioConfig) (sherpaasr.Config, bool) {
+	audioCfg = audioCfg.WithDefaults()
+	asrCfg := audioCfg.ASR
 	cfg := sherpaasr.Config{
-		ModelPath:                   filepath.Join(root, "asr", "model.int8.onnx"),
-		TokensPath:                  filepath.Join(root, "asr", "tokens.txt"),
-		VADModelPath:                filepath.Join(root, "vad", "silero_vad.onnx"),
-		Language:                    "auto",
-		UseInverseTextNormalization: true,
-		Provider:                    "cpu",
-		NumThreads:                  2,
+		ModelPath:                   resolveAudioPath(homeDir, asrCfg.ModelPath, "asr"),
+		TokensPath:                  resolveAudioPath(homeDir, asrCfg.TokensPath, "asr"),
+		VADModelPath:                resolveAudioPath(homeDir, asrCfg.VAD.ModelPath, "vad"),
+		Language:                    asrCfg.Language,
+		UseInverseTextNormalization: audioCfg.ASRUseITN(),
+		VADThreshold:                asrCfg.VAD.Threshold,
+		MinSilenceDuration:          time.Duration(asrCfg.VAD.MinSilenceMillis) * time.Millisecond,
+		MinSpeechDuration:           time.Duration(asrCfg.VAD.MinSpeechMillis) * time.Millisecond,
+		VADWindowSize:               asrCfg.VAD.WindowSize,
+		Provider:                    asrCfg.Provider,
+		NumThreads:                  asrCfg.NumThreads,
+	}
+	if strings.ToLower(strings.TrimSpace(asrCfg.Engine)) != "sherpa-sensevoice" {
+		slog.Warn("daemon: unsupported asr engine", "engine", asrCfg.Engine)
+		return cfg, false
 	}
 	if fileExists(cfg.ModelPath) && fileExists(cfg.TokensPath) && fileExists(cfg.VADModelPath) {
 		return cfg, true
 	}
 	return cfg, false
+}
+
+func resolveAudioPath(homeDir, raw, modelSubdir string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || filepath.IsAbs(raw) {
+		return raw
+	}
+	clean := filepath.Clean(raw)
+	if clean == "." {
+		return ""
+	}
+	if strings.ContainsRune(clean, filepath.Separator) || strings.HasPrefix(clean, "runtime") {
+		return filepath.Join(homeDir, clean)
+	}
+	return filepath.Join(homeDir, "runtime", "models", modelSubdir, clean)
 }
 
 func fileExists(path string) bool {

@@ -137,6 +137,7 @@ func (c *Client) newRequest(ctx context.Context, req provider.Request, includeUs
 	for _, msg := range req.Messages {
 		body.Messages = append(body.Messages, chatMessagesFor(msg)...)
 	}
+	body.Messages = sanitizeChatToolMessages(body.Messages)
 	if len(req.Tools) > 0 {
 		body.Tools = make([]chatTool, 0, len(req.Tools))
 		for _, tool := range req.Tools {
@@ -550,6 +551,68 @@ func chatMessagesFor(msg provider.Message) []chatMessage {
 		out = append(out, chatMessage{Role: role, Content: msg.Text})
 	}
 	return out
+}
+
+func sanitizeChatToolMessages(messages []chatMessage) []chatMessage {
+	if len(messages) == 0 {
+		return messages
+	}
+	out := make([]chatMessage, 0, len(messages))
+	for i := 0; i < len(messages); {
+		msg := messages[i]
+		if msg.Role == "tool" {
+			i++
+			continue
+		}
+		if msg.Role != "assistant" || len(msg.ToolCalls) == 0 {
+			out = append(out, msg)
+			i++
+			continue
+		}
+
+		required, ok := requiredToolCallIDs(msg.ToolCalls)
+		if !ok {
+			i++
+			continue
+		}
+		seen := make(map[string]bool, len(required))
+		j := i + 1
+		valid := true
+		for j < len(messages) && messages[j].Role == "tool" {
+			toolCallID := messages[j].ToolCallID
+			if !required[toolCallID] || seen[toolCallID] {
+				valid = false
+				break
+			}
+			seen[toolCallID] = true
+			j++
+			if len(seen) == len(required) {
+				break
+			}
+		}
+		if valid && len(seen) == len(required) {
+			out = append(out, msg)
+			out = append(out, messages[i+1:j]...)
+			i = j
+			continue
+		}
+		i++
+	}
+	return out
+}
+
+func requiredToolCallIDs(calls []chatToolCall) (map[string]bool, bool) {
+	if len(calls) == 0 {
+		return nil, false
+	}
+	ids := make(map[string]bool, len(calls))
+	for _, call := range calls {
+		if call.ID == "" || ids[call.ID] {
+			return nil, false
+		}
+		ids[call.ID] = true
+	}
+	return ids, true
 }
 
 func chatMediaContent(parts []provider.Part) []chatContentPart {

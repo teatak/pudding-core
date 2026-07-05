@@ -2,9 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import {
   Blocks,
-  Cable,
   ChevronRight,
   Ellipsis,
+  FolderCode,
   MessageSquareText,
   Package,
   PanelLeft,
@@ -909,7 +909,7 @@ function RailPanel({
                     });
                   }}
                 >
-                  <Cable />
+                  <Package />
                   <span>{t("rail.automations")}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -1130,7 +1130,7 @@ function CollapsibleSessionGroupLabel({
   title?: string;
   onToggle: () => void;
 }) {
-  const Icon = icon === "pinned" ? Pin : icon === "chat" ? MessageSquareText : Package;
+  const Icon = icon === "pinned" ? Pin : icon === "chat" ? MessageSquareText : FolderCode;
   return (
     <SidebarGroupLabel asChild className="h-8 px-2 text-[13px]" title={title || label}>
       <button

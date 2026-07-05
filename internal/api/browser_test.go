@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/teatak/pudding-core/internal/browser"
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
@@ -39,7 +40,16 @@ func TestBrowserTabsAreSessionScoped(t *testing.T) {
 		}
 	}
 
-	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/tabs", nil)
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_b/browser/open", map[string]string{"url": "example.org"})
+	firstOpened := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusOK || firstOpened.SessionID != "sess_b" || firstOpened.URL != "example.org" || firstOpened.ID == "" {
+		t.Fatalf("session open status=%d tab=%+v", resp.StatusCode, firstOpened)
+	}
+	if browserSvc.openSession != "sess_b" {
+		t.Fatalf("session open session = %q", browserSvc.openSession)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/tabs", nil)
 	tab := decodeJSON[browser.TabSnapshot](t, resp)
 	if resp.StatusCode != http.StatusCreated || tab.SessionID != "sess_a" || tab.ID == "" {
 		t.Fatalf("create tab status=%d tab=%+v", resp.StatusCode, tab)
@@ -58,6 +68,27 @@ func TestBrowserTabsAreSessionScoped(t *testing.T) {
 	}
 	if browserSvc.openSession != "sess_a" {
 		t.Fatalf("open session = %q", browserSvc.openSession)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/tabs/"+tab.ID+"/reveal", nil)
+	revealed := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusOK || revealed.ID != tab.ID || browserSvc.lastNavigation != "reveal" {
+		t.Fatalf("reveal status=%d tab=%+v last=%q", resp.StatusCode, revealed, browserSvc.lastNavigation)
+	}
+
+	for _, action := range []struct {
+		path string
+		want string
+	}{
+		{path: "back", want: "back"},
+		{path: "forward", want: "forward"},
+		{path: "reload", want: "reload"},
+	} {
+		resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/tabs/"+tab.ID+"/"+action.path, nil)
+		navigated := decodeJSON[browser.TabSnapshot](t, resp)
+		if resp.StatusCode != http.StatusOK || navigated.ID != tab.ID || browserSvc.lastNavigation != action.want {
+			t.Fatalf("%s status=%d tab=%+v last=%q", action.path, resp.StatusCode, navigated, browserSvc.lastNavigation)
+		}
 	}
 
 	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/tabs/"+tab.ID+"/click", map[string]string{"selector": "#save"})
@@ -106,6 +137,35 @@ func TestBrowserRoutesRequireExistingSession(t *testing.T) {
 	}
 }
 
+func TestBrowserScreencastIsSessionScoped(t *testing.T) {
+	srv, st, browserSvc := newBrowserTestServer(t)
+	ctx := context.Background()
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_cast", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	browserSvc.screencastDone = make(chan struct{})
+
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_cast/browser/tabs", nil)
+	tab := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create tab status=%d", resp.StatusCode)
+	}
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/sessions/sess_cast/browser/tabs/" + tab.ID + "/screencast?token=" + testToken
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	select {
+	case <-browserSvc.screencastDone:
+	case <-time.After(time.Second):
+		t.Fatalf("screencast was not called")
+	}
+	if browserSvc.screencastSession != "sess_cast" || browserSvc.screencastTab != tab.ID {
+		t.Fatalf("screencast routed to session=%q tab=%q", browserSvc.screencastSession, browserSvc.screencastTab)
+	}
+}
+
 func TestBrowserTestFormIsPublic(t *testing.T) {
 	srv, _, _ := newBrowserTestServer(t)
 	resp, err := http.Get(srv.URL + browserTestFormPath)
@@ -120,12 +180,16 @@ func TestBrowserTestFormIsPublic(t *testing.T) {
 }
 
 type fakeBrowserService struct {
-	tabs            map[string]browser.TabSnapshot
-	openSession     string
-	releasedSession string
-	clickSession    string
-	typeText        string
-	scrollY         float64
+	tabs              map[string]browser.TabSnapshot
+	openSession       string
+	releasedSession   string
+	clickSession      string
+	lastNavigation    string
+	typeText          string
+	scrollY           float64
+	screencastSession string
+	screencastTab     string
+	screencastDone    chan struct{}
 }
 
 func (f *fakeBrowserService) CreateTab(_ context.Context, sessionID string) (browser.TabSnapshot, error) {
@@ -197,6 +261,26 @@ func (f *fakeBrowserService) Open(_ context.Context, sessionID, tabID, rawURL st
 	return tab, nil
 }
 
+func (f *fakeBrowserService) Reveal(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
+	f.lastNavigation = "reveal"
+	return f.GetTab(context.Background(), sessionID, tabID)
+}
+
+func (f *fakeBrowserService) Back(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
+	f.lastNavigation = "back"
+	return f.GetTab(context.Background(), sessionID, tabID)
+}
+
+func (f *fakeBrowserService) Forward(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
+	f.lastNavigation = "forward"
+	return f.GetTab(context.Background(), sessionID, tabID)
+}
+
+func (f *fakeBrowserService) Reload(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
+	f.lastNavigation = "reload"
+	return f.GetTab(context.Background(), sessionID, tabID)
+}
+
 func (f *fakeBrowserService) Observe(context.Context, string, string, browser.ObserveOptions) (browser.ObserveResult, error) {
 	return browser.ObserveResult{}, nil
 }
@@ -230,6 +314,15 @@ func (f *fakeBrowserService) Scroll(_ context.Context, sessionID, tabID string, 
 	}
 	f.scrollY = in.DeltaY
 	return browser.ActionResult{Tab: tab, Action: "scroll", Result: map[string]any{"y": in.DeltaY}}, nil
+}
+
+func (f *fakeBrowserService) Screencast(_ context.Context, sessionID, tabID string, _ *websocket.Conn) error {
+	f.screencastSession = sessionID
+	f.screencastTab = tabID
+	if f.screencastDone != nil {
+		close(f.screencastDone)
+	}
+	return nil
 }
 
 func (f *fakeBrowserService) Close() error { return nil }

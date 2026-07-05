@@ -36,6 +36,7 @@ import {
   submitResponse,
   conversationTurn,
   dailyUsageResponse,
+  desktopAboutResponse,
   userPromptResponse,
   appDefinition,
   appConnection,
@@ -75,6 +76,7 @@ import {
   type ClosedCanvasItem,
   type ContentPart,
   type DailyUsageStat,
+  type DesktopAboutSection,
   type LocalFolder,
   type Message,
   type PendingApproval,
@@ -333,6 +335,17 @@ export function createBrowserTab(token: string, sessionID: string): Promise<Brow
   });
 }
 
+export function openBrowserURL(
+  token: string,
+  sessionID: string,
+  body: z.infer<typeof browserOpenRequest>,
+): Promise<BrowserTab> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/open`, browserTab, {
+    method: "POST",
+    body: JSON.stringify(browserOpenRequest.parse(body)),
+  });
+}
+
 export function openBrowserTab(
   token: string,
   sessionID: string,
@@ -342,6 +355,30 @@ export function openBrowserTab(
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/open`, browserTab, {
     method: "POST",
     body: JSON.stringify(browserOpenRequest.parse(body)),
+  });
+}
+
+export function revealBrowserTab(token: string, sessionID: string, tabID: string): Promise<BrowserTab> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/reveal`, browserTab, {
+    method: "POST",
+  });
+}
+
+export function backBrowserTab(token: string, sessionID: string, tabID: string): Promise<BrowserTab> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/back`, browserTab, {
+    method: "POST",
+  });
+}
+
+export function forwardBrowserTab(token: string, sessionID: string, tabID: string): Promise<BrowserTab> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/forward`, browserTab, {
+    method: "POST",
+  });
+}
+
+export function reloadBrowserTab(token: string, sessionID: string, tabID: string): Promise<BrowserTab> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/reload`, browserTab, {
+    method: "POST",
   });
 }
 
@@ -625,6 +662,10 @@ export function getSettings(token: string): Promise<{ settings: Record<string, s
   return request(token, "/settings", settingsResponse);
 }
 
+export function getDesktopAbout(token: string): Promise<{ sections: DesktopAboutSection[] }> {
+  return request(token, "/desktop/about", desktopAboutResponse);
+}
+
 export function getUserPrompt(token: string): Promise<UserPrompt> {
   return request(token, "/settings/user-prompt", userPromptResponse);
 }
@@ -800,5 +841,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { AppConnection, AppDefinition, AppSkillDetail, Attachment, AudioBindings, BuiltinTool, BrowserActionResult, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserTab, ContentPart, DailyUsageStat, LocalFolder, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
+export type { AppConnection, AppDefinition, AppSkillDetail, Attachment, AudioBindings, BuiltinTool, BrowserActionResult, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
 export { createProviderRequest, patchProviderRequest };

@@ -30,6 +30,7 @@ import {
   deleteProvider,
   deleteSkill,
   getDailyUsage,
+  getDesktopAbout,
   getSettings,
   getUserPrompt,
   getWebTools,
@@ -45,6 +46,7 @@ import {
   type BuiltinTool,
   type BrowserMCPSession,
   type DailyUsageStat,
+  type DesktopAboutSection,
   type MobilePairing,
   type ProviderProfile,
   type Skill,
@@ -204,6 +206,7 @@ export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProp
               {active === "skills" ? <SkillsSettings token={token} /> : null}
               {active === "tools" ? <ToolsSettings token={token} /> : null}
               {active === "mobile" ? <MobileSettings token={token} /> : null}
+              {active === "about" ? <AboutSettings token={token} /> : null}
             </div>
           </main>
         </SidebarProvider>
@@ -366,6 +369,65 @@ function UsageSettings({ token }: { token: string }) {
         ) : null}
       </section>
     </div>
+  );
+}
+
+function AboutSettings({ token }: { token: string }) {
+  const { t } = useI18n();
+  const aboutQuery = useQuery({
+    queryKey: queryKeys.desktopAbout(),
+    queryFn: () => getDesktopAbout(token),
+    enabled: Boolean(token),
+    refetchOnMount: "always",
+  });
+  const sections = aboutQuery.data?.sections || [];
+
+  return (
+    <div className={cn(SETTINGS_NARROW_CONTENT_CLASS, "gap-4 pt-2")}>
+      {aboutQuery.isError ? (
+        <Alert variant="destructive">
+          <AlertDescription>{t("settings.loadFailed")}</AlertDescription>
+        </Alert>
+      ) : null}
+      {aboutQuery.isLoading ? <AboutSettingsSkeleton /> : null}
+      {!aboutQuery.isLoading
+        ? sections.map((section) => <AboutInfoSection key={section.id} section={section} />)
+        : null}
+    </div>
+  );
+}
+
+function AboutInfoSection({ section }: { section: DesktopAboutSection }) {
+  return (
+    <SettingsPanel title={section.title}>
+      <dl className="grid gap-2">
+        {section.rows.map((row) => (
+          <div
+            key={`${section.id}-${row.key}`}
+            className="grid min-w-0 grid-cols-[minmax(7rem,12rem)_minmax(0,1fr)] gap-3 text-sm"
+          >
+            <dt className="min-w-0 truncate text-muted-foreground">{row.key}</dt>
+            <dd className="min-w-0 break-words text-foreground">{row.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </SettingsPanel>
+  );
+}
+
+function AboutSettingsSkeleton() {
+  return (
+    <>
+      {[0, 1, 2].map((index) => (
+        <SettingsPanel key={index} title={<Skeleton className="h-4 w-24" />}>
+          <div className="grid gap-2">
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-4 w-1/2" />
+            <Skeleton className="h-4 w-3/5" />
+          </div>
+        </SettingsPanel>
+      ))}
+    </>
   );
 }
 

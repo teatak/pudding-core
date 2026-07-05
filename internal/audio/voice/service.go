@@ -61,18 +61,21 @@ type Service struct {
 	tts       tts.Client
 	playback  *audioqueue.Queue
 
-	mu             sync.Mutex
-	driverReady    bool
-	asrStarted     bool
-	inputSession   string
-	inputCancel    context.CancelFunc
-	asrLoopStarted bool
-	outputCancels  map[string]context.CancelFunc
-	turnBuffers    map[string]*turnBuffer
-	playbackCancel context.CancelFunc
-	playbackDone   chan struct{}
-	currentSession string
-	currentTurn    string
+	mu              sync.Mutex
+	driverReady     bool
+	asrStarted      bool
+	inputSession    string
+	inputCancel     context.CancelFunc
+	asrLoopStarted  bool
+	outputCancels   map[string]context.CancelFunc
+	turnBuffers     map[string]*turnBuffer
+	playbackCancel  context.CancelFunc
+	playbackDone    chan struct{}
+	ttsEventsCancel context.CancelFunc
+	ttsEventsDone   chan struct{}
+	currentSession  string
+	currentTurn     string
+	mutedTurns      map[string]bool
 
 	ttsSpeaking           atomic.Bool
 	feedbackSuppressUntil atomic.Int64
@@ -103,11 +106,13 @@ func NewService(cfg ServiceConfig) *Service {
 		playback:      audioqueue.New(),
 		outputCancels: make(map[string]context.CancelFunc),
 		turnBuffers:   make(map[string]*turnBuffer),
+		mutedTurns:    make(map[string]bool),
 	}
 	if svc.tts != nil {
 		if err := svc.tts.Start(context.Background()); err != nil {
 			slog.Warn("voice: start tts failed", "err", err)
 		}
+		svc.startTTSEventLoop()
 		svc.startPlayback()
 	}
 	return svc
@@ -201,8 +206,12 @@ func (s *Service) Close() error {
 	}
 	playbackCancel := s.playbackCancel
 	playbackDone := s.playbackDone
+	ttsEventsCancel := s.ttsEventsCancel
+	ttsEventsDone := s.ttsEventsDone
 	s.playbackCancel = nil
 	s.playbackDone = nil
+	s.ttsEventsCancel = nil
+	s.ttsEventsDone = nil
 	s.mu.Unlock()
 	if inputCancel != nil {
 		inputCancel()
@@ -223,9 +232,15 @@ func (s *Service) Close() error {
 	if playbackDone != nil {
 		<-playbackDone
 	}
+	if ttsEventsCancel != nil {
+		ttsEventsCancel()
+	}
 	var err error
 	if s.tts != nil {
 		err = s.tts.Stop(context.Background())
+	}
+	if ttsEventsDone != nil {
+		<-ttsEventsDone
 	}
 	if s.asr != nil {
 		if asrErr := s.asr.Stop(context.Background()); err == nil {
@@ -436,6 +451,7 @@ func (s *Service) stopOutput(sessionID string) {
 		cancel()
 	}
 	s.cancelSessionPlayback(context.Background(), sessionID)
+	s.stopDriverPlayback(sessionID)
 }
 
 func (s *Service) handleOutputEvent(ctx context.Context, ev event.Event) {
@@ -459,6 +475,7 @@ func (s *Service) handleOutputEvent(ctx context.Context, ev event.Event) {
 		}
 	case event.TurnFailed, event.TurnCancelled:
 		s.discardTurn(ev.TurnID)
+		s.markTurnMuted(ev.TurnID)
 		if s.playback != nil {
 			s.playback.ClearTurn(ev.TurnID)
 		}
@@ -466,6 +483,82 @@ func (s *Service) handleOutputEvent(ctx context.Context, ev event.Event) {
 			slog.Warn("voice: tts cancel failed", "sessionID", ev.SessionID, "turnID", ev.TurnID, "err", err)
 		}
 	}
+}
+
+func (s *Service) startDriverPlayback(sessionID string) {
+	if s.driver == nil {
+		return
+	}
+	if err := s.driver.Init(context.Background()); err != nil {
+		slog.Warn("voice: initialize playback driver failed", "sessionID", sessionID, "driver", s.driver.Name(), "err", err)
+		return
+	}
+	if err := s.driver.StartPlayback(context.Background()); err != nil {
+		slog.Warn("voice: start playback driver failed", "sessionID", sessionID, "driver", s.driver.Name(), "err", err)
+	}
+}
+
+func (s *Service) stopDriverPlayback(sessionID string) {
+	if s.driver == nil {
+		return
+	}
+	if err := s.driver.StopPlayback(context.Background()); err != nil {
+		slog.Warn("voice: stop playback driver failed", "sessionID", sessionID, "driver", s.driver.Name(), "err", err)
+	}
+}
+
+func (s *Service) startTTSEventLoop() {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	s.ttsEventsCancel = cancel
+	s.ttsEventsDone = done
+	go func() {
+		defer close(done)
+		events := s.tts.Events()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ev, ok := <-events:
+				if !ok {
+					return
+				}
+				s.handleTTSEvent(ctx, ev)
+			}
+		}
+	}()
+}
+
+func (s *Service) handleTTSEvent(ctx context.Context, ev tts.Event) {
+	switch ev.Kind {
+	case tts.EventAudio:
+		if s.driver == nil || ev.Audio.Data == nil {
+			return
+		}
+		if s.manager.Snapshot().OutputOwner != ev.SessionID || s.isTurnMuted(ev.TurnID) {
+			return
+		}
+		s.startDriverPlayback(ev.SessionID)
+		audio := ev.Audio
+		if len(audio.Data) == 0 {
+			return
+		}
+		if !audio.Format.Valid() || audio.Format != s.driver.OutputFormat() {
+			slog.Warn("voice: tts audio format mismatch", "sessionID", ev.SessionID, "turnID", ev.TurnID, "got", audio.Format, "want", s.driver.OutputFormat())
+			return
+		}
+		if err := s.driver.WritePlayback(ctx, audio); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, driver.ErrNotStarted) {
+			slog.Warn("voice: playback write failed", "sessionID", ev.SessionID, "turnID", ev.TurnID, "err", err)
+		}
+	case tts.EventEnded, tts.EventError:
+		s.cleanupTTSPlayback(ev)
+	}
+}
+
+func (s *Service) cleanupTTSPlayback(ev tts.Event) {
+	s.mu.Lock()
+	delete(s.mutedTurns, ev.TurnID)
+	s.mu.Unlock()
 }
 
 func (s *Service) startPlayback() {
@@ -511,6 +604,7 @@ func (s *Service) cancelSessionPlayback(ctx context.Context, sessionID string) b
 	}
 	turnID, current := s.currentPlayback(sessionID)
 	if current && s.tts != nil {
+		s.markTurnMuted(turnID)
 		if err := s.tts.Cancel(ctx, turnID); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Warn("voice: tts cancel failed", "sessionID", sessionID, "turnID", turnID, "err", err)
 		}
@@ -533,6 +627,26 @@ func (s *Service) clearCurrentPlayback(sessionID, turnID string) {
 		s.currentSession = ""
 		s.currentTurn = ""
 	}
+}
+
+func (s *Service) markTurnMuted(turnID string) {
+	turnID = strings.TrimSpace(turnID)
+	if turnID == "" {
+		return
+	}
+	s.mu.Lock()
+	s.mutedTurns[turnID] = true
+	s.mu.Unlock()
+}
+
+func (s *Service) isTurnMuted(turnID string) bool {
+	turnID = strings.TrimSpace(turnID)
+	if turnID == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.mutedTurns[turnID]
 }
 
 func (s *Service) currentPlayback(sessionID string) (string, bool) {

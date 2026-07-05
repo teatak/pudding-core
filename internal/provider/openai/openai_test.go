@@ -200,6 +200,55 @@ func TestRequestShapeWithToolHistory(t *testing.T) {
 	}
 }
 
+func TestRequestShapeDropsDanglingToolCallHistory(t *testing.T) {
+	got := newChatRequestForTest(t, provider.Request{
+		Model: "model-a",
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Text: "hi"},
+			{Role: provider.RoleAssistant, Parts: []provider.Part{
+				{Type: provider.PartToolUse, CallID: "call_1", Name: "builtin_time_get_current", Args: json.RawMessage(`{"timezone":"Asia/Singapore"}`)},
+				{Type: provider.PartToolUse, CallID: "call_2", Name: "builtin_time_get_current", Args: json.RawMessage(`{"timezone":"UTC"}`)},
+				{Type: provider.PartToolResult, CallID: "call_1", Name: "builtin_time_get_current", Ok: true, Content: `{"iso":"now"}`},
+			}},
+			{Role: provider.RoleUser, Text: "next"},
+		},
+	})
+
+	if len(got.Messages) != 2 {
+		t.Fatalf("unexpected messages: %+v", got.Messages)
+	}
+	if got.Messages[0].Role != "user" || got.Messages[0].Content != "hi" {
+		t.Fatalf("first message wrong: %+v", got.Messages[0])
+	}
+	if got.Messages[1].Role != "user" || got.Messages[1].Content != "next" {
+		t.Fatalf("second message wrong: %+v", got.Messages[1])
+	}
+	for _, msg := range got.Messages {
+		if msg.Role == "tool" || len(msg.ToolCalls) > 0 {
+			t.Fatalf("dangling tool history should be removed: %+v", got.Messages)
+		}
+	}
+}
+
+func TestRequestShapeDropsOrphanToolResult(t *testing.T) {
+	got := newChatRequestForTest(t, provider.Request{
+		Model: "model-a",
+		Messages: []provider.Message{
+			{Role: provider.RoleAssistant, Parts: []provider.Part{
+				{Type: provider.PartToolResult, CallID: "call_1", Name: "builtin_time_get_current", Ok: true, Content: `{"iso":"now"}`},
+				{Type: provider.PartText, Text: "继续。"},
+			}},
+		},
+	})
+
+	if len(got.Messages) != 1 {
+		t.Fatalf("unexpected messages: %+v", got.Messages)
+	}
+	if got.Messages[0].Role != "assistant" || got.Messages[0].Content != "继续。" {
+		t.Fatalf("orphan tool result should be dropped while text remains: %+v", got.Messages)
+	}
+}
+
 func TestToolCallChunks(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -338,6 +387,20 @@ func streamForTest(t *testing.T, baseURL string, req provider.Request) <-chan pr
 		t.Fatal(err)
 	}
 	return ch
+}
+
+func newChatRequestForTest(t *testing.T, req provider.Request) chatRequest {
+	t.Helper()
+	client := New(Config{BaseURL: "http://example.test", APIKey: "test-key"})
+	httpReq, err := client.newRequest(context.Background(), req, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got chatRequest
+	if err := json.NewDecoder(httpReq.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	return got
 }
 
 func TestChatMessagesForImagePart(t *testing.T) {

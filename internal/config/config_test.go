@@ -63,6 +63,35 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 	if !strings.Contains(string(b), "display_name: OpenAI") || !strings.Contains(string(b), "protocol: openai-responses") || !strings.Contains(string(b), "max_output_tokens: 8192") {
 		t.Fatalf("expected renamed provider keys in profiles.yaml:\n%s", b)
 	}
+
+	audio, err := m.Audio(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if audio.Driver.Type != "portaudio" ||
+		audio.ASR.Engine != "sherpa-sensevoice" ||
+		audio.ASR.Language != "zh" ||
+		audio.ASRUseITN() ||
+		audio.ASR.VAD.Threshold != 0.6 {
+		t.Fatalf("unexpected audio config: %+v", audio)
+	}
+	audioPath := home + "/config/audio.yaml"
+	b, err = os.ReadFile(audioPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	audioYAML := string(b)
+	for _, want := range []string{
+		"type: portaudio",
+		"engine: sherpa-sensevoice",
+		"language: zh",
+		"use_itn: false",
+		"voice: zh-CN-YunxiaNeural",
+	} {
+		if !strings.Contains(audioYAML, want) {
+			t.Fatalf("expected %q in audio.yaml:\n%s", want, audioYAML)
+		}
+	}
 }
 
 func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {

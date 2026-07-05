@@ -165,9 +165,14 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/audio/bindings").GET(s.getAudioBindings)
 	app.Route("/sessions/:id/audio/input").POST(s.bindAudioInput)
 	app.Route("/sessions/:id/audio/output").POST(s.bindAudioOutput)
+	app.Route("/sessions/:id/browser/open").POST(s.openBrowserSession)
 	app.Route("/sessions/:id/browser/tabs").GET(s.listBrowserTabs).POST(s.createBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID").GET(s.getBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/open").POST(s.openBrowserTab)
+	app.Route("/sessions/:id/browser/tabs/:tabID/reveal").POST(s.revealBrowserTab)
+	app.Route("/sessions/:id/browser/tabs/:tabID/back").POST(s.backBrowserTab)
+	app.Route("/sessions/:id/browser/tabs/:tabID/forward").POST(s.forwardBrowserTab)
+	app.Route("/sessions/:id/browser/tabs/:tabID/reload").POST(s.reloadBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/observe").POST(s.observeBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/screenshot").POST(s.screenshotBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/click").POST(s.clickBrowserTab)
@@ -188,6 +193,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/providers/:name/models").GET(s.listProviderModels)
 	app.Route("/tools/builtin").GET(s.listBuiltinTools)
 	app.Route("/tools/web").GET(s.getWebTools).PATCH(s.patchWebTools).PUT(s.patchWebTools)
+	app.Route("/desktop/about").GET(s.desktopAbout)
 	app.Route("/desktop/save-file").POST(s.desktopSaveFile)
 	app.Route("/desktop/reveal-file").POST(s.desktopRevealFile)
 	app.Route("/mcp/browser-sessions").GET(s.listBrowserMCPSessions)
@@ -238,11 +244,16 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	}
 
 	authed := withAuth(token, cfg.deviceTokens, app)
+	browserScreencastAuthed := withAuth(token, cfg.deviceTokens, http.HandlerFunc(s.serveBrowserScreencast))
 	var mcpAuthed http.Handler
 	if s.browserMCP != nil {
 		mcpAuthed = withAuth(token, cfg.deviceTokens, s.browserMCP)
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isBrowserScreencastPath(r.URL.Path) {
+			browserScreencastAuthed.ServeHTTP(w, r)
+			return
+		}
 		if r.URL.Path == "/mcp/ws" && mcpAuthed != nil {
 			mcpAuthed.ServeHTTP(w, r)
 			return

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Cable, Download, Eye, EyeOff, KeyRound, Loader2, Pencil, Plus, Trash } from "lucide-react";
+import { ArrowLeft, Download, Eye, EyeOff, KeyRound, Loader2, Package, Pencil, Plus, Trash } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -290,7 +290,7 @@ export function AppsPane({ token }: { token: string }) {
               <ArrowLeft className="size-4" />
             </Button>
           ) : (
-            <Cable className="size-4" />
+            <Package className="size-4" />
           )
         }
         title={detailApp ? detailApp.name : detailCatalogApp ? appRegistryTitle(detailCatalogApp, locale) : t("apps.title")}

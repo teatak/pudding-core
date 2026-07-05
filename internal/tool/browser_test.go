@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/browser"
 )
@@ -96,6 +97,22 @@ func (f *fakeToolBrowser) Open(_ context.Context, sessionID, tabID, rawURL strin
 	return browser.TabSnapshot{ID: tabID, SessionID: sessionID, URL: rawURL}, nil
 }
 
+func (f *fakeToolBrowser) Reveal(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
+	return browser.TabSnapshot{ID: tabID, SessionID: sessionID}, nil
+}
+
+func (f *fakeToolBrowser) Back(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
+	return browser.TabSnapshot{ID: tabID, SessionID: sessionID}, nil
+}
+
+func (f *fakeToolBrowser) Forward(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
+	return browser.TabSnapshot{ID: tabID, SessionID: sessionID}, nil
+}
+
+func (f *fakeToolBrowser) Reload(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
+	return browser.TabSnapshot{ID: tabID, SessionID: sessionID}, nil
+}
+
 func (f *fakeToolBrowser) Observe(_ context.Context, sessionID, tabID string, _ browser.ObserveOptions) (browser.ObserveResult, error) {
 	tab := browser.TabSnapshot{ID: tabID, SessionID: sessionID}
 	return browser.ObserveResult{Tab: tab, Title: "Example", URL: "https://example.com", Text: "Example"}, nil
@@ -115,6 +132,10 @@ func (f *fakeToolBrowser) Type(context.Context, string, string, browser.TypeInpu
 
 func (f *fakeToolBrowser) Scroll(context.Context, string, string, browser.ScrollInput) (browser.ActionResult, error) {
 	return browser.ActionResult{}, nil
+}
+
+func (f *fakeToolBrowser) Screencast(context.Context, string, string, *websocket.Conn) error {
+	return nil
 }
 
 func (f *fakeToolBrowser) Close() error { return nil }

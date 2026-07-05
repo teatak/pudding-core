@@ -66,6 +66,13 @@ func (m *Manager) Prepare() error {
 	} else if err != nil {
 		return err
 	}
+	if _, err := os.Stat(m.path(audioFile)); errors.Is(err, os.ErrNotExist) {
+		if err := m.writeAudio(DefaultAudioConfig()); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
 	return nil
 }
 

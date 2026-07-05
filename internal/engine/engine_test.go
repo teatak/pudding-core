@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/teatak/pudding-core/internal/browser"
 	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/event"
@@ -1779,6 +1780,22 @@ func (b *engineTestBrowser) Open(_ context.Context, sessionID, tabID, rawURL str
 	return browser.TabSnapshot{ID: tabID, SessionID: sessionID, URL: rawURL}, nil
 }
 
+func (b *engineTestBrowser) Reveal(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
+	return browser.TabSnapshot{ID: tabID, SessionID: sessionID}, nil
+}
+
+func (b *engineTestBrowser) Back(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
+	return browser.TabSnapshot{ID: tabID, SessionID: sessionID}, nil
+}
+
+func (b *engineTestBrowser) Forward(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
+	return browser.TabSnapshot{ID: tabID, SessionID: sessionID}, nil
+}
+
+func (b *engineTestBrowser) Reload(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
+	return browser.TabSnapshot{ID: tabID, SessionID: sessionID}, nil
+}
+
 func (b *engineTestBrowser) Observe(_ context.Context, sessionID, tabID string, opts browser.ObserveOptions) (browser.ObserveResult, error) {
 	b.observedSession = sessionID
 	b.observedTab = tabID
@@ -1808,6 +1825,10 @@ func (b *engineTestBrowser) Type(context.Context, string, string, browser.TypeIn
 
 func (b *engineTestBrowser) Scroll(context.Context, string, string, browser.ScrollInput) (browser.ActionResult, error) {
 	return browser.ActionResult{}, nil
+}
+
+func (b *engineTestBrowser) Screencast(context.Context, string, string, *websocket.Conn) error {
+	return nil
 }
 
 func (b *engineTestBrowser) Close() error { return nil }

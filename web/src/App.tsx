@@ -253,6 +253,7 @@ export function App() {
           <Button
             aria-label={t("canvas.toggle")}
             aria-pressed={effectiveCanvasOpen}
+            className="aria-pressed:bg-muted aria-pressed:text-foreground dark:aria-pressed:bg-muted/50"
             size="icon-sm"
             tabIndex={-1}
             variant="ghost"

@@ -19,6 +19,8 @@ import (
 	"github.com/kbinani/screenshot"
 	"github.com/teatak/cart/v3"
 	"github.com/teatak/pudding-core/internal/attachment"
+	"github.com/teatak/pudding-core/internal/buildinfo"
+	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/store"
 )
 
@@ -37,6 +39,108 @@ type desktopSaveFileRequest struct {
 
 type desktopRevealFileRequest struct {
 	Path string `json:"path"`
+}
+
+type desktopAboutResponse struct {
+	Sections []desktopAboutSection `json:"sections"`
+}
+
+type desktopAboutSection struct {
+	ID    string            `json:"id"`
+	Title string            `json:"title"`
+	Rows  []desktopAboutRow `json:"rows"`
+}
+
+type desktopAboutRow struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+type audioConfigReader interface {
+	Audio(context.Context) (config.AudioConfig, error)
+}
+
+func (s *Server) desktopAbout(c *cart.Context) error {
+	audioCfg := config.DefaultAudioConfig()
+	if reader, ok := s.config.(audioConfigReader); ok {
+		cfg, err := reader.Audio(c.Request.Context())
+		if err == nil {
+			audioCfg = cfg
+		}
+	}
+	audioCfg = audioCfg.WithDefaults()
+
+	bindings := map[string]string{
+		"input_owner":  "—",
+		"output_owner": "—",
+	}
+	if s.voice != nil {
+		snap := s.voice.Snapshot()
+		if snap.InputOwner != "" {
+			bindings["input_owner"] = snap.InputOwner
+		}
+		if snap.OutputOwner != "" {
+			bindings["output_owner"] = snap.OutputOwner
+		}
+	}
+
+	ttsProfileName, ttsProfile := audioCfg.ActiveTTSProfile()
+	sections := []desktopAboutSection{
+		aboutSection("version", "版本", aboutRows(
+			"pudding", buildinfo.Channel(),
+			"go", runtime.Version(),
+			"platform", runtime.GOOS+"/"+runtime.GOARCH,
+		)),
+		aboutSection("service", "服务", aboutRows(
+			"endpoint", requestBaseURL(c.Request),
+			"phase", "active",
+			"home", s.home,
+		)),
+		aboutSection("health", "健康自检", aboutRows(
+			"capture", enabledText(audioCfg.ASREnabled() && strings.EqualFold(audioCfg.Driver.Type, "portaudio")),
+			"playback", enabledText(audioCfg.TTSEnabled() && strings.EqualFold(ttsProfileName, "edge")),
+		)),
+		aboutSection("audio_bindings", "语音绑定", aboutRows(
+			"input_owner", bindings["input_owner"],
+			"output_owner", bindings["output_owner"],
+		)),
+		aboutSection("audio_config", "语音配置文件", aboutRows(
+			"path", filepath.Join(s.home, "config", "audio.yaml"),
+		)),
+		aboutSection("driver", "驱动 (Driver)", aboutRows(
+			"type", audioCfg.Driver.Type,
+			"capture_sample_rate", intText(audioCfg.Driver.CaptureSampleRate),
+			"playback_sample_rate", intText(audioCfg.Driver.PlaybackSampleRate),
+			"channels", intText(audioCfg.Driver.Channels),
+			"period_millis", intText(audioCfg.Driver.PeriodMillis),
+		)),
+		aboutSection("asr", "语音识别 (ASR)", aboutRows(
+			"enabled", onOff(audioCfg.ASREnabled()),
+			"engine", audioCfg.ASR.Engine,
+			"language", audioCfg.ASR.Language,
+			"model_path", baseNameOrDash(audioCfg.ASR.ModelPath),
+			"tokens_path", baseNameOrDash(audioCfg.ASR.TokensPath),
+			"num_threads", intText(audioCfg.ASR.NumThreads),
+			"provider", audioCfg.ASR.Provider,
+			"use_itn", onOff(audioCfg.ASRUseITN()),
+		)),
+		aboutSection("asr_vad", "ASR 内置切句 VAD", aboutRows(
+			"model_path", baseNameOrDash(audioCfg.ASR.VAD.ModelPath),
+			"threshold", floatText(audioCfg.ASR.VAD.Threshold),
+			"min_silence_millis", intText(audioCfg.ASR.VAD.MinSilenceMillis),
+			"min_speech_millis", intText(audioCfg.ASR.VAD.MinSpeechMillis),
+			"window_size", intText(audioCfg.ASR.VAD.WindowSize),
+		)),
+		aboutSection("tts", "语音合成 (TTS)", aboutRows(
+			"enabled", onOff(audioCfg.TTSEnabled()),
+			"profile", ttsProfileName,
+			"backend", ttsProfileName,
+			"voice", ttsProfile.Voice,
+			"speed", floatText(ttsProfile.Speed),
+		)),
+	}
+	c.JSON(http.StatusOK, desktopAboutResponse{Sections: sections})
+	return nil
 }
 
 func (s *Server) desktopScreenshot(c *cart.Context) error {
@@ -105,6 +209,56 @@ func (s *Server) desktopScreenshot(c *cart.Context) error {
 	}
 	c.JSON(http.StatusOK, map[string]any{"attachments": stored})
 	return nil
+}
+
+func aboutSection(id, title string, rows []desktopAboutRow) desktopAboutSection {
+	return desktopAboutSection{ID: id, Title: title, Rows: rows}
+}
+
+func aboutRows(kv ...string) []desktopAboutRow {
+	rows := make([]desktopAboutRow, 0, len(kv)/2)
+	for i := 0; i+1 < len(kv); i += 2 {
+		rows = append(rows, desktopAboutRow{Key: kv[i], Value: fallbackDash(kv[i+1])})
+	}
+	return rows
+}
+
+func fallbackDash(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "—"
+	}
+	return value
+}
+
+func enabledText(enabled bool) string {
+	if enabled {
+		return "enabled"
+	}
+	return "disabled"
+}
+
+func onOff(enabled bool) string {
+	if enabled {
+		return "on"
+	}
+	return "off"
+}
+
+func intText(value int) string {
+	return fmt.Sprintf("%d", value)
+}
+
+func floatText(value float64) string {
+	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.3f", value), "0"), ".")
+}
+
+func baseNameOrDash(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "—"
+	}
+	return filepath.Base(path)
 }
 
 func (s *Server) desktopSaveFile(c *cart.Context) error {

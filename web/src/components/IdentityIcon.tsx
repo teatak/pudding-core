@@ -1,4 +1,4 @@
-import { BookOpenText, Box, Cable } from "lucide-react";
+import { BookOpenText, Box, Package } from "lucide-react";
 import { useEffect, useState, type HTMLAttributes, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
@@ -118,7 +118,7 @@ function IdentityIconFallbackView({ fallback, size }: { fallback: IdentityIconFa
   const className = fallbackSizeClassByToken[size];
   switch (fallback) {
     case "app":
-      return <Cable className={className} />;
+      return <Package className={className} />;
     case "skill":
       return <BookOpenText className={className} strokeWidth={2.25} />;
     case "brand":

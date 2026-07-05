@@ -145,6 +145,35 @@ func TestAudioBindingRequiresExistingSession(t *testing.T) {
 	}
 }
 
+func TestDesktopAboutIncludesAudioConfig(t *testing.T) {
+	srv, _, _ := newConfigTestServer(t)
+	resp := req(t, http.MethodGet, srv.URL+"/desktop/about", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	payload := decodeJSON[struct {
+		Sections []desktopAboutSection `json:"sections"`
+	}](t, resp)
+	rows := map[string]string{}
+	for _, section := range payload.Sections {
+		for _, row := range section.Rows {
+			rows[section.ID+"."+row.Key] = row.Value
+		}
+	}
+	if rows["driver.type"] != "portaudio" ||
+		rows["asr.engine"] != "sherpa-sensevoice" ||
+		rows["asr.language"] != "zh" ||
+		rows["asr.use_itn"] != "off" ||
+		rows["asr_vad.threshold"] != "0.6" ||
+		rows["tts.voice"] != "zh-CN-YunxiaNeural" {
+		t.Fatalf("unexpected about rows: %+v", rows)
+	}
+	if !strings.HasSuffix(rows["audio_config.path"], filepath.Join("config", "audio.yaml")) {
+		t.Fatalf("audio config path = %q", rows["audio_config.path"])
+	}
+}
+
 func writeOAuthTestApps(t *testing.T, homeDir string) {
 	t.Helper()
 	apps := map[string]string{

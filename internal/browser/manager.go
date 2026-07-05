@@ -48,11 +48,16 @@ type Service interface {
 	ReleaseTab(ctx context.Context, sessionID, tabID string) error
 	ReleaseSession(ctx context.Context, sessionID string) error
 	Open(ctx context.Context, sessionID, tabID, rawURL string) (TabSnapshot, error)
+	Reveal(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
+	Back(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
+	Forward(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
+	Reload(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
 	Observe(ctx context.Context, sessionID, tabID string, opts ObserveOptions) (ObserveResult, error)
 	Screenshot(ctx context.Context, sessionID, tabID string, opts ScreenshotOptions) (ScreenshotResult, error)
 	Click(ctx context.Context, sessionID, tabID string, in ClickInput) (ActionResult, error)
 	Type(ctx context.Context, sessionID, tabID string, in TypeInput) (ActionResult, error)
 	Scroll(ctx context.Context, sessionID, tabID string, in ScrollInput) (ActionResult, error)
+	Screencast(ctx context.Context, sessionID, tabID string, client *websocket.Conn) error
 	Close() error
 }
 
@@ -72,13 +77,15 @@ type Manager struct {
 }
 
 type TabSnapshot struct {
-	ID        string    `json:"id"`
-	SessionID string    `json:"sessionID"`
-	TargetID  string    `json:"targetID,omitempty"`
-	URL       string    `json:"url"`
-	Title     string    `json:"title"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID         string    `json:"id"`
+	SessionID  string    `json:"sessionID"`
+	TargetID   string    `json:"targetID,omitempty"`
+	URL        string    `json:"url"`
+	Title      string    `json:"title"`
+	FaviconURL string    `json:"faviconURL,omitempty"`
+	Mode       string    `json:"mode,omitempty"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
 type ObserveOptions struct {
@@ -153,12 +160,55 @@ type ActionResult struct {
 	Result map[string]any `json:"result"`
 }
 
+type ScreencastClientMessage struct {
+	Type                  string  `json:"type"`
+	EventType             string  `json:"eventType,omitempty"`
+	Width                 int     `json:"width,omitempty"`
+	Height                int     `json:"height,omitempty"`
+	EveryNthFrame         int     `json:"everyNthFrame,omitempty"`
+	X                     float64 `json:"x,omitempty"`
+	Y                     float64 `json:"y,omitempty"`
+	Button                string  `json:"button,omitempty"`
+	Buttons               int     `json:"buttons,omitempty"`
+	ClickCount            int     `json:"clickCount,omitempty"`
+	DeltaX                float64 `json:"deltaX,omitempty"`
+	DeltaY                float64 `json:"deltaY,omitempty"`
+	Key                   string  `json:"key,omitempty"`
+	Code                  string  `json:"code,omitempty"`
+	Text                  string  `json:"text,omitempty"`
+	SelectionStart        int     `json:"selectionStart,omitempty"`
+	SelectionEnd          int     `json:"selectionEnd,omitempty"`
+	UnmodifiedText        string  `json:"unmodifiedText,omitempty"`
+	WindowsVirtualKeyCode int     `json:"windowsVirtualKeyCode,omitempty"`
+	NativeVirtualKeyCode  int     `json:"nativeVirtualKeyCode,omitempty"`
+	Modifiers             int     `json:"modifiers,omitempty"`
+}
+
+type ScreencastFrame struct {
+	Type           string         `json:"type"`
+	MIME           string         `json:"mime"`
+	Data           string         `json:"data"`
+	FrameSessionID int            `json:"frameSessionID,omitempty"`
+	Metadata       map[string]any `json:"metadata,omitempty"`
+}
+
+type ScreencastCaret struct {
+	Type    string  `json:"type"`
+	X       float64 `json:"x"`
+	Y       float64 `json:"y"`
+	Height  float64 `json:"height,omitempty"`
+	Visible bool    `json:"visible"`
+}
+
 type tabBinding struct {
-	id        string
-	sessionID string
-	targetID  string
-	createdAt time.Time
-	updatedAt time.Time
+	id         string
+	sessionID  string
+	targetID   string
+	url        string
+	title      string
+	faviconURL string
+	createdAt  time.Time
+	updatedAt  time.Time
 }
 
 type browserProcess struct {
@@ -167,6 +217,7 @@ type browserProcess struct {
 	chromePath string
 	profileDir string
 	port       int
+	headless   bool
 }
 
 type targetInfo struct {
@@ -174,7 +225,13 @@ type targetInfo struct {
 	Type                 string `json:"type"`
 	URL                  string `json:"url"`
 	Title                string `json:"title"`
+	FaviconURL           string `json:"faviconUrl"`
 	WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
+}
+
+type versionInfo struct {
+	Browser   string `json:"Browser"`
+	UserAgent string `json:"User-Agent"`
 }
 
 func NewManager(cfg Config) *Manager {
@@ -187,17 +244,29 @@ func NewManager(cfg Config) *Manager {
 }
 
 func (m *Manager) CreateTab(ctx context.Context, sessionID string) (TabSnapshot, error) {
+	_, binding, target, err := m.createTab(ctx, sessionID, "about:blank")
+	if err != nil {
+		return TabSnapshot{}, err
+	}
+	return m.snapshotFromTarget(binding, target), nil
+}
+
+func (m *Manager) createTab(ctx context.Context, sessionID, rawURL string) (*browserProcess, *tabBinding, targetInfo, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
-		return TabSnapshot{}, errors.New("session id is required")
+		return nil, nil, targetInfo{}, errors.New("session id is required")
+	}
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		rawURL = "about:blank"
 	}
 	proc, err := m.ensureProcess(ctx)
 	if err != nil {
-		return TabSnapshot{}, err
+		return nil, nil, targetInfo{}, err
 	}
-	target, err := proc.newTarget(ctx, m.client, "about:blank")
+	target, err := proc.newTarget(ctx, m.client, rawURL)
 	if err != nil {
-		return TabSnapshot{}, err
+		return nil, nil, targetInfo{}, err
 	}
 	now := time.Now().UTC()
 	binding := &tabBinding{
@@ -214,7 +283,7 @@ func (m *Manager) CreateTab(ctx context.Context, sessionID string) (TabSnapshot,
 	}
 	m.sessions[sessionID][binding.id] = true
 	m.mu.Unlock()
-	return snapshotFromTarget(binding, target), nil
+	return proc, binding, target, nil
 }
 
 func (m *Manager) ListTabs(ctx context.Context, sessionID string) ([]TabSnapshot, error) {
@@ -226,41 +295,23 @@ func (m *Manager) ListTabs(ctx context.Context, sessionID string) ([]TabSnapshot
 	if len(bindings) == 0 {
 		return []TabSnapshot{}, nil
 	}
-	proc, err := m.ensureProcess(ctx)
-	if err != nil {
-		return nil, err
-	}
-	targets, _ := proc.listTargets(ctx, m.client)
-	byID := map[string]targetInfo{}
-	for _, target := range targets {
-		byID[target.ID] = target
-	}
 	out := make([]TabSnapshot, 0, len(bindings))
 	for _, binding := range bindings {
-		target, ok := byID[binding.targetID]
-		if !ok {
-			m.removeBinding(binding.id)
+		_, live, target, err := m.liveTarget(ctx, sessionID, binding.id, false)
+		if err != nil {
 			continue
 		}
-		out = append(out, snapshotFromTarget(binding, target))
+		out = append(out, m.snapshotFromTarget(live, target))
 	}
 	return out, nil
 }
 
 func (m *Manager) GetTab(ctx context.Context, sessionID, tabID string) (TabSnapshot, error) {
-	binding, err := m.binding(sessionID, tabID)
+	_, binding, target, err := m.liveTarget(ctx, sessionID, tabID, false)
 	if err != nil {
 		return TabSnapshot{}, err
 	}
-	proc, err := m.ensureProcess(ctx)
-	if err != nil {
-		return TabSnapshot{}, err
-	}
-	target, err := proc.target(ctx, m.client, binding.targetID)
-	if err != nil {
-		return TabSnapshot{}, err
-	}
-	return snapshotFromTarget(binding, target), nil
+	return m.snapshotFromTarget(binding, target), nil
 }
 
 func (m *Manager) ReleaseTab(ctx context.Context, sessionID, tabID string) error {
@@ -301,16 +352,26 @@ func (m *Manager) ReleaseSession(ctx context.Context, sessionID string) error {
 }
 
 func (m *Manager) Open(ctx context.Context, sessionID, tabID, rawURL string) (TabSnapshot, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	tabID = strings.TrimSpace(tabID)
 	rawURL, err := normalizeURL(rawURL)
 	if err != nil {
 		return TabSnapshot{}, err
 	}
-	binding, err := m.resolveTab(ctx, sessionID, tabID, true)
+	proc, binding, _, err := m.liveTarget(ctx, sessionID, tabID, false)
 	if err != nil {
-		return TabSnapshot{}, err
-	}
-	proc, err := m.ensureProcess(ctx)
-	if err != nil {
+		if errors.Is(err, ErrTabRequired) && tabID == "" && len(m.sessionBindings(sessionID)) == 0 {
+			proc, binding, target, err := m.createTab(ctx, sessionID, rawURL)
+			if err != nil {
+				return TabSnapshot{}, err
+			}
+			_ = proc.waitReady(ctx, m.client, binding.targetID)
+			if current, err := proc.target(ctx, m.client, binding.targetID); err == nil {
+				target = current
+			}
+			m.touch(binding.id)
+			return m.snapshotFromTarget(binding, target), nil
+		}
 		return TabSnapshot{}, err
 	}
 	if _, err := proc.cdpCall(ctx, m.client, binding.targetID, "Page.navigate", map[string]any{"url": rawURL}); err != nil {
@@ -322,15 +383,50 @@ func (m *Manager) Open(ctx context.Context, sessionID, tabID, rawURL string) (Ta
 		return TabSnapshot{}, err
 	}
 	m.touch(binding.id)
-	return snapshotFromTarget(binding, target), nil
+	return m.snapshotFromTarget(binding, target), nil
+}
+
+func (m *Manager) Reveal(ctx context.Context, sessionID, tabID string) (TabSnapshot, error) {
+	proc, binding, target, err := m.liveTarget(ctx, sessionID, tabID, false)
+	if err != nil {
+		return TabSnapshot{}, err
+	}
+	m.snapshotFromTarget(binding, target)
+	if proc.headless {
+		if err := m.switchMode(ctx, false); err != nil {
+			return TabSnapshot{}, err
+		}
+	}
+	return m.GetTab(ctx, sessionID, binding.id)
+}
+
+func (m *Manager) Back(ctx context.Context, sessionID, tabID string) (TabSnapshot, error) {
+	return m.navigateHistory(ctx, sessionID, tabID, -1)
+}
+
+func (m *Manager) Forward(ctx context.Context, sessionID, tabID string) (TabSnapshot, error) {
+	return m.navigateHistory(ctx, sessionID, tabID, 1)
+}
+
+func (m *Manager) Reload(ctx context.Context, sessionID, tabID string) (TabSnapshot, error) {
+	proc, binding, _, err := m.liveTarget(ctx, sessionID, tabID, false)
+	if err != nil {
+		return TabSnapshot{}, err
+	}
+	if _, err := proc.cdpCall(ctx, m.client, binding.targetID, "Page.reload", map[string]any{"ignoreCache": false}); err != nil {
+		return TabSnapshot{}, err
+	}
+	_ = proc.waitReady(ctx, m.client, binding.targetID)
+	target, err := proc.target(ctx, m.client, binding.targetID)
+	if err != nil {
+		return TabSnapshot{}, err
+	}
+	m.touch(binding.id)
+	return m.snapshotFromTarget(binding, target), nil
 }
 
 func (m *Manager) Observe(ctx context.Context, sessionID, tabID string, opts ObserveOptions) (ObserveResult, error) {
-	binding, err := m.resolveTab(ctx, sessionID, tabID, false)
-	if err != nil {
-		return ObserveResult{}, err
-	}
-	proc, err := m.ensureProcess(ctx)
+	proc, binding, _, err := m.liveTarget(ctx, sessionID, tabID, false)
 	if err != nil {
 		return ObserveResult{}, err
 	}
@@ -345,7 +441,7 @@ func (m *Manager) Observe(ctx context.Context, sessionID, tabID string, opts Obs
 		return ObserveResult{}, err
 	}
 	target, _ := proc.target(ctx, m.client, binding.targetID)
-	out.Tab = snapshotFromTarget(binding, target)
+	out.Tab = m.snapshotFromTarget(binding, target)
 	if out.Title == "" {
 		out.Title = out.Tab.Title
 	}
@@ -357,11 +453,7 @@ func (m *Manager) Observe(ctx context.Context, sessionID, tabID string, opts Obs
 }
 
 func (m *Manager) Screenshot(ctx context.Context, sessionID, tabID string, opts ScreenshotOptions) (ScreenshotResult, error) {
-	binding, err := m.resolveTab(ctx, sessionID, tabID, false)
-	if err != nil {
-		return ScreenshotResult{}, err
-	}
-	proc, err := m.ensureProcess(ctx)
+	proc, binding, _, err := m.liveTarget(ctx, sessionID, tabID, false)
 	if err != nil {
 		return ScreenshotResult{}, err
 	}
@@ -398,7 +490,7 @@ func (m *Manager) Screenshot(ctx context.Context, sessionID, tabID string, opts 
 	target, _ := proc.target(ctx, m.client, binding.targetID)
 	m.touch(binding.id)
 	return ScreenshotResult{
-		Tab:               snapshotFromTarget(binding, target),
+		Tab:               m.snapshotFromTarget(binding, target),
 		MIME:              "image/png",
 		DataBase64:        payload.Data,
 		Size:              int64(len(decoded)),
@@ -415,11 +507,7 @@ func (m *Manager) Click(ctx context.Context, sessionID, tabID string, in ClickIn
 	if tabID == "" {
 		tabID = in.TabID
 	}
-	binding, err := m.resolveTab(ctx, sessionID, tabID, false)
-	if err != nil {
-		return ActionResult{}, err
-	}
-	proc, err := m.ensureProcess(ctx)
+	proc, binding, _, err := m.liveTarget(ctx, sessionID, tabID, false)
 	if err != nil {
 		return ActionResult{}, err
 	}
@@ -437,11 +525,7 @@ func (m *Manager) Type(ctx context.Context, sessionID, tabID string, in TypeInpu
 	if in.Text == "" {
 		return ActionResult{}, errors.New("text is required")
 	}
-	binding, err := m.resolveTab(ctx, sessionID, tabID, false)
-	if err != nil {
-		return ActionResult{}, err
-	}
-	proc, err := m.ensureProcess(ctx)
+	proc, binding, _, err := m.liveTarget(ctx, sessionID, tabID, false)
 	if err != nil {
 		return ActionResult{}, err
 	}
@@ -459,11 +543,7 @@ func (m *Manager) Scroll(ctx context.Context, sessionID, tabID string, in Scroll
 	if in.DeltaX == 0 && in.DeltaY == 0 {
 		in.DeltaY = 600
 	}
-	binding, err := m.resolveTab(ctx, sessionID, tabID, false)
-	if err != nil {
-		return ActionResult{}, err
-	}
-	proc, err := m.ensureProcess(ctx)
+	proc, binding, _, err := m.liveTarget(ctx, sessionID, tabID, false)
 	if err != nil {
 		return ActionResult{}, err
 	}
@@ -474,6 +554,108 @@ func (m *Manager) Scroll(ctx context.Context, sessionID, tabID string, in Scroll
 	return m.actionResult(ctx, proc, binding, "scroll", raw)
 }
 
+func (m *Manager) Screencast(ctx context.Context, sessionID, tabID string, client *websocket.Conn) error {
+	if client == nil {
+		return errors.New("screencast client is required")
+	}
+	proc, binding, target, err := m.liveTarget(ctx, sessionID, tabID, false)
+	if err != nil {
+		return err
+	}
+	if target.WebSocketDebuggerURL == "" {
+		return errors.New("target has no websocket debugger url")
+	}
+	if !proc.headless {
+		_ = writeScreencastClient(ctx, client, map[string]string{"type": "status", "status": "external"})
+		return nil
+	}
+	cdp, _, err := websocket.Dial(ctx, target.WebSocketDebuggerURL, nil)
+	if err != nil {
+		return err
+	}
+	defer cdp.Close(websocket.StatusNormalClosure, "")
+	client.SetReadLimit(2 << 20)
+	cdp.SetReadLimit(64 << 20)
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var (
+		cdpWriteMu       sync.Mutex
+		nextID           int
+		pendingCaretMu   sync.Mutex
+		pendingCaretByID = map[int]bool{}
+	)
+	sendCDP := func(method string, params any, beforeWrite func(int)) (int, error) {
+		cdpWriteMu.Lock()
+		defer cdpWriteMu.Unlock()
+		nextID++
+		id := nextID
+		if beforeWrite != nil {
+			beforeWrite(id)
+		}
+		req := map[string]any{"id": id, "method": method}
+		if params != nil {
+			req["params"] = params
+		}
+		data, err := json.Marshal(req)
+		if err != nil {
+			return id, err
+		}
+		return id, cdp.Write(ctx, websocket.MessageText, data)
+	}
+	writeCDP := func(method string, params any) error {
+		_, err := sendCDP(method, params, nil)
+		return err
+	}
+	requestCaret := func() error {
+		id, err := sendCDP("Runtime.evaluate", map[string]any{
+			"expression":    caretRectScript(),
+			"returnByValue": true,
+		}, func(id int) {
+			pendingCaretMu.Lock()
+			pendingCaretByID[id] = true
+			pendingCaretMu.Unlock()
+		})
+		if err != nil {
+			pendingCaretMu.Lock()
+			delete(pendingCaretByID, id)
+			pendingCaretMu.Unlock()
+		}
+		return err
+	}
+	takeCaretRequest := func(id int) bool {
+		pendingCaretMu.Lock()
+		defer pendingCaretMu.Unlock()
+		if !pendingCaretByID[id] {
+			return false
+		}
+		delete(pendingCaretByID, id)
+		return true
+	}
+	if err := writeCDP("Page.enable", nil); err != nil {
+		return err
+	}
+	if err := startScreencast(writeCDP, 0, 0, 1); err != nil {
+		return err
+	}
+	_ = writeScreencastClient(ctx, client, map[string]string{"type": "status", "status": "started"})
+
+	done := make(chan error, 2)
+	go func() {
+		done <- screencastClientLoop(ctx, client, writeCDP, requestCaret)
+	}()
+	go func() {
+		done <- screencastCDPLoop(ctx, cdp, client, writeCDP, takeCaretRequest)
+	}()
+	err = <-done
+	cancel()
+	m.touch(binding.id)
+	if errors.Is(err, context.Canceled) {
+		return nil
+	}
+	return err
+}
+
 func (m *Manager) Close() error {
 	m.mu.Lock()
 	proc := m.process
@@ -481,6 +663,10 @@ func (m *Manager) Close() error {
 	m.tabs = map[string]*tabBinding{}
 	m.sessions = map[string]map[string]bool{}
 	m.mu.Unlock()
+	return stopBrowserProcess(proc)
+}
+
+func stopBrowserProcess(proc *browserProcess) error {
 	if proc == nil || proc.cmd == nil || proc.cmd.Process == nil {
 		return nil
 	}
@@ -508,30 +694,178 @@ func (m *Manager) actionResult(ctx context.Context, proc *browserProcess, bindin
 	}
 	target, _ := proc.target(ctx, m.client, binding.targetID)
 	m.touch(binding.id)
-	return ActionResult{Tab: snapshotFromTarget(binding, target), Action: action, Result: result}, nil
+	return ActionResult{Tab: m.snapshotFromTarget(binding, target), Action: action, Result: result}, nil
+}
+
+func (m *Manager) liveTarget(ctx context.Context, sessionID, tabID string, create bool) (*browserProcess, *tabBinding, targetInfo, error) {
+	binding, err := m.resolveTab(ctx, sessionID, tabID, create)
+	if err != nil {
+		return nil, nil, targetInfo{}, err
+	}
+	proc, err := m.ensureProcess(ctx)
+	if err != nil {
+		return nil, nil, targetInfo{}, err
+	}
+	target, err := proc.target(ctx, m.client, binding.targetID)
+	if err == nil {
+		return proc, binding, target, nil
+	}
+	if !errors.Is(err, ErrTabNotFound) {
+		return nil, nil, targetInfo{}, err
+	}
+	rawURL := binding.url
+	if strings.TrimSpace(rawURL) == "" {
+		rawURL = "about:blank"
+	}
+	target, err = proc.newTarget(ctx, m.client, rawURL)
+	if err != nil {
+		return nil, nil, targetInfo{}, err
+	}
+	binding.targetID = target.ID
+	m.rememberBindingTarget(binding.id, target)
+	return proc, binding, target, nil
+}
+
+func (m *Manager) rememberBindingTarget(tabID string, target targetInfo) {
+	m.mu.Lock()
+	if binding := m.tabs[tabID]; binding != nil {
+		binding.targetID = target.ID
+		binding.url = target.URL
+		binding.title = target.Title
+		binding.faviconURL = target.FaviconURL
+		binding.updatedAt = time.Now().UTC()
+	}
+	m.mu.Unlock()
+}
+
+func (m *Manager) snapshotFromTarget(binding *tabBinding, target targetInfo) TabSnapshot {
+	if binding != nil {
+		m.mu.Lock()
+		if current := m.tabs[binding.id]; current != nil {
+			cp := *current
+			binding = &cp
+		}
+		m.mu.Unlock()
+	}
+	snap := snapshotFromTarget(binding, target)
+	snap.Mode = m.mode()
+	m.rememberSnapshot(snap)
+	return snap
+}
+
+func (m *Manager) mode() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.process != nil && !m.process.headless {
+		return "external"
+	}
+	return "headless"
+}
+
+func (m *Manager) rememberSnapshot(snap TabSnapshot) {
+	if snap.ID == "" {
+		return
+	}
+	m.mu.Lock()
+	if binding := m.tabs[snap.ID]; binding != nil {
+		binding.url = snap.URL
+		binding.title = snap.Title
+		binding.faviconURL = snap.FaviconURL
+		binding.updatedAt = snap.UpdatedAt
+	}
+	m.mu.Unlock()
+}
+
+func (m *Manager) navigateHistory(ctx context.Context, sessionID, tabID string, delta int) (TabSnapshot, error) {
+	proc, binding, _, err := m.liveTarget(ctx, sessionID, tabID, false)
+	if err != nil {
+		return TabSnapshot{}, err
+	}
+	raw, err := proc.cdpCall(ctx, m.client, binding.targetID, "Page.getNavigationHistory", nil)
+	if err != nil {
+		return TabSnapshot{}, err
+	}
+	var history struct {
+		CurrentIndex int `json:"currentIndex"`
+		Entries      []struct {
+			ID int `json:"id"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(raw, &history); err != nil {
+		return TabSnapshot{}, err
+	}
+	nextIndex := history.CurrentIndex + delta
+	if nextIndex >= 0 && nextIndex < len(history.Entries) {
+		if _, err := proc.cdpCall(ctx, m.client, binding.targetID, "Page.navigateToHistoryEntry", map[string]any{
+			"entryId": history.Entries[nextIndex].ID,
+		}); err != nil {
+			return TabSnapshot{}, err
+		}
+		_ = proc.waitReady(ctx, m.client, binding.targetID)
+	}
+	target, err := proc.target(ctx, m.client, binding.targetID)
+	if err != nil {
+		return TabSnapshot{}, err
+	}
+	m.touch(binding.id)
+	return m.snapshotFromTarget(binding, target), nil
 }
 
 func (m *Manager) ensureProcess(ctx context.Context) (*browserProcess, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.process != nil {
-		if err := m.process.ping(ctx, m.client); err == nil {
-			return m.process, nil
+	proc := m.process
+	cfg := m.cfg
+	m.mu.Unlock()
+	if proc != nil {
+		if err := proc.ping(ctx, m.client); err == nil {
+			return proc, nil
 		}
-		m.process = nil
-		m.clearBindingsLocked()
+		m.mu.Lock()
+		if m.process == proc {
+			m.process = nil
+		}
+		m.mu.Unlock()
+		_ = stopBrowserProcess(proc)
 	}
-	if proc, err := attachExisting(ctx, m.cfg, m.client); err == nil {
-		m.process = proc
+	if proc, err := attachExisting(ctx, cfg, m.client); err == nil {
+		m.setProcess(proc)
 		return proc, nil
 	}
-	reapStaleProfileOwner(m.cfg)
-	proc, err := launch(ctx, m.cfg, m.client)
+	reapStaleProfileOwner(cfg)
+	proc, err := launch(ctx, cfg, m.client)
 	if err != nil {
 		return nil, err
 	}
-	m.process = proc
+	m.setProcess(proc)
 	return proc, nil
+}
+
+func (m *Manager) setProcess(proc *browserProcess) {
+	m.mu.Lock()
+	m.process = proc
+	m.mu.Unlock()
+}
+
+func (m *Manager) switchMode(ctx context.Context, headless bool) error {
+	m.mu.Lock()
+	proc := m.process
+	cfg := m.cfg
+	if proc != nil && proc.headless == headless {
+		m.mu.Unlock()
+		return nil
+	}
+	m.process = nil
+	m.mu.Unlock()
+	if err := stopBrowserProcess(proc); err != nil {
+		return err
+	}
+	reapStaleProfileOwner(cfg)
+	next, err := launchMode(ctx, cfg, m.client, headless)
+	if err != nil {
+		return err
+	}
+	m.setProcess(next)
+	return nil
 }
 
 func reapStaleProfileOwner(cfg Config) {
@@ -588,9 +922,11 @@ func attachExisting(ctx context.Context, cfg Config, client *http.Client) (*brow
 		profileDir: profileDir,
 		port:       port,
 	}
-	if err := proc.ping(ctx, client); err != nil {
+	version, err := proc.version(ctx, client)
+	if err != nil {
 		return nil, err
 	}
+	proc.headless = detectHeadless(version, cfg.Headless)
 	return proc, nil
 }
 
@@ -613,7 +949,6 @@ func (m *Manager) currentProcess(ctx context.Context) *browserProcess {
 		m.mu.Lock()
 		if m.process == proc {
 			m.process = nil
-			m.clearBindingsLocked()
 		}
 		m.mu.Unlock()
 		return nil
@@ -697,27 +1032,6 @@ func (m *Manager) releaseSessionBindings(sessionID string) []*tabBinding {
 	return out
 }
 
-func (m *Manager) removeBinding(tabID string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	binding := m.tabs[tabID]
-	if binding == nil {
-		return
-	}
-	delete(m.tabs, tabID)
-	if ids := m.sessions[binding.sessionID]; ids != nil {
-		delete(ids, tabID)
-		if len(ids) == 0 {
-			delete(m.sessions, binding.sessionID)
-		}
-	}
-}
-
-func (m *Manager) clearBindingsLocked() {
-	m.tabs = map[string]*tabBinding{}
-	m.sessions = map[string]map[string]bool{}
-}
-
 func (m *Manager) touch(tabID string) {
 	m.mu.Lock()
 	if binding := m.tabs[tabID]; binding != nil {
@@ -727,6 +1041,10 @@ func (m *Manager) touch(tabID string) {
 }
 
 func launch(ctx context.Context, cfg Config, client *http.Client) (*browserProcess, error) {
+	return launchMode(ctx, cfg, client, cfg.Headless)
+}
+
+func launchMode(ctx context.Context, cfg Config, client *http.Client, headless bool) (*browserProcess, error) {
 	chromePath := strings.TrimSpace(cfg.ChromePath)
 	if chromePath == "" {
 		var err error
@@ -754,10 +1072,9 @@ func launch(ctx context.Context, cfg Config, client *http.Client) (*browserProce
 		"--no-default-browser-check",
 		"--disable-background-mode",
 	}
-	if cfg.Headless {
+	if headless {
 		args = append(args, "--headless=new")
 	}
-	args = append(args, "about:blank")
 	cmd := exec.Command(chromePath, args...)
 	if err := cmd.Start(); err != nil {
 		return nil, err
@@ -768,6 +1085,7 @@ func launch(ctx context.Context, cfg Config, client *http.Client) (*browserProce
 		chromePath: chromePath,
 		profileDir: profileDir,
 		port:       port,
+		headless:   headless,
 	}
 	if err := proc.wait(ctx, client); err != nil {
 		_ = cmd.Process.Kill()
@@ -794,19 +1112,37 @@ func (p *browserProcess) wait(ctx context.Context, client *http.Client) error {
 }
 
 func (p *browserProcess) ping(ctx context.Context, client *http.Client) error {
+	_, err := p.version(ctx, client)
+	return err
+}
+
+func (p *browserProcess) version(ctx context.Context, client *http.Client) (versionInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.endpoint+"/json/version", nil)
 	if err != nil {
-		return err
+		return versionInfo{}, err
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return versionInfo{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("devtools status %d", resp.StatusCode)
+		return versionInfo{}, fmt.Errorf("devtools status %d", resp.StatusCode)
 	}
-	return nil
+	var out versionInfo
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return out, nil
+}
+
+func detectHeadless(version versionInfo, fallback bool) bool {
+	marker := strings.ToLower(version.Browser + " " + version.UserAgent)
+	if strings.Contains(marker, "headless") {
+		return true
+	}
+	if strings.TrimSpace(marker) != "" {
+		return false
+	}
+	return fallback
 }
 
 func (p *browserProcess) newTarget(ctx context.Context, client *http.Client, rawURL string) (targetInfo, error) {
@@ -1019,18 +1355,365 @@ func (p *browserProcess) cdpCall(ctx context.Context, client *http.Client, targe
 	}
 }
 
+type cdpWriteFunc func(method string, params any) error
+
+func startScreencast(writeCDP cdpWriteFunc, width, height, everyNthFrame int) error {
+	if everyNthFrame <= 0 {
+		everyNthFrame = 1
+	}
+	width = clampInt(width, 0, 4096)
+	height = clampInt(height, 0, 4096)
+	if width > 0 && height > 0 {
+		if err := writeCDP("Emulation.setDeviceMetricsOverride", map[string]any{
+			"width":             width,
+			"height":            height,
+			"deviceScaleFactor": 1,
+			"mobile":            false,
+			"screenWidth":       width,
+			"screenHeight":      height,
+		}); err != nil {
+			return err
+		}
+	}
+	params := map[string]any{
+		"format":        "jpeg",
+		"quality":       72,
+		"everyNthFrame": everyNthFrame,
+	}
+	if width > 0 {
+		params["maxWidth"] = width
+	}
+	if height > 0 {
+		params["maxHeight"] = height
+	}
+	return writeCDP("Page.startScreencast", params)
+}
+
+func screencastClientLoop(ctx context.Context, client *websocket.Conn, writeCDP cdpWriteFunc, requestCaret func() error) error {
+	for {
+		typ, payload, err := client.Read(ctx)
+		if err != nil {
+			return nil
+		}
+		if typ != websocket.MessageText && typ != websocket.MessageBinary {
+			continue
+		}
+		var msg ScreencastClientMessage
+		if err := json.Unmarshal(payload, &msg); err != nil {
+			continue
+		}
+		switch strings.TrimSpace(msg.Type) {
+		case "start":
+			_ = writeCDP("Page.stopScreencast", nil)
+			if err := startScreencast(writeCDP, msg.Width, msg.Height, msg.EveryNthFrame); err != nil {
+				return err
+			}
+		case "mouse":
+			if err := writeCDP("Input.dispatchMouseEvent", mouseEventParams(msg)); err != nil {
+				return err
+			}
+		case "wheel":
+			msg.EventType = "mouseWheel"
+			if err := writeCDP("Input.dispatchMouseEvent", mouseEventParams(msg)); err != nil {
+				return err
+			}
+		case "key":
+			if err := writeCDP("Input.dispatchKeyEvent", keyEventParams(msg)); err != nil {
+				return err
+			}
+		case "text":
+			_ = clearIMEComposition(writeCDP)
+			if msg.Text != "" {
+				if err := writeCDP("Input.insertText", map[string]any{"text": msg.Text}); err != nil {
+					return err
+				}
+			}
+		case "composition":
+			if err := setIMEComposition(writeCDP, msg); err != nil {
+				return err
+			}
+		case "compositionEnd":
+			if err := clearIMEComposition(writeCDP); err != nil {
+				return err
+			}
+		case "caret":
+			if requestCaret != nil {
+				if err := requestCaret(); err != nil {
+					return err
+				}
+			}
+		case "stop":
+			return nil
+		}
+	}
+}
+
+func screencastCDPLoop(ctx context.Context, cdp, client *websocket.Conn, writeCDP cdpWriteFunc, takeCaretRequest func(int) bool) error {
+	for {
+		typ, payload, err := cdp.Read(ctx)
+		if err != nil {
+			return err
+		}
+		if typ != websocket.MessageText && typ != websocket.MessageBinary {
+			continue
+		}
+		var msg struct {
+			ID     int             `json:"id"`
+			Method string          `json:"method"`
+			Result json.RawMessage `json:"result"`
+			Params json.RawMessage `json:"params"`
+			Error  *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(payload, &msg); err != nil {
+			continue
+		}
+		if msg.Error != nil {
+			_ = writeScreencastClient(ctx, client, map[string]string{"type": "error", "error": msg.Error.Message})
+			continue
+		}
+		if msg.ID > 0 && takeCaretRequest != nil && takeCaretRequest(msg.ID) {
+			caret := parseCaretResponse(msg.Result)
+			if err := writeScreencastClient(ctx, client, caret); err != nil {
+				return nil
+			}
+			continue
+		}
+		if msg.Method != "Page.screencastFrame" {
+			continue
+		}
+		var params struct {
+			Data      string         `json:"data"`
+			Metadata  map[string]any `json:"metadata"`
+			SessionID int            `json:"sessionId"`
+		}
+		if err := json.Unmarshal(msg.Params, &params); err != nil || params.Data == "" {
+			continue
+		}
+		_ = writeCDP("Page.screencastFrameAck", map[string]any{"sessionId": params.SessionID})
+		frame := ScreencastFrame{
+			Type:           "frame",
+			MIME:           "image/jpeg",
+			Data:           params.Data,
+			FrameSessionID: params.SessionID,
+			Metadata:       params.Metadata,
+		}
+		if err := writeScreencastClient(ctx, client, frame); err != nil {
+			return nil
+		}
+	}
+}
+
+func setIMEComposition(writeCDP cdpWriteFunc, msg ScreencastClientMessage) error {
+	text := msg.Text
+	selectionStart := msg.SelectionStart
+	selectionEnd := msg.SelectionEnd
+	if selectionStart < 0 {
+		selectionStart = 0
+	}
+	if selectionEnd < 0 {
+		selectionEnd = 0
+	}
+	if selectionStart == 0 && selectionEnd == 0 {
+		selectionStart = len([]rune(text))
+		selectionEnd = selectionStart
+	}
+	return writeCDP("Input.imeSetComposition", map[string]any{
+		"text":           text,
+		"selectionStart": selectionStart,
+		"selectionEnd":   selectionEnd,
+	})
+}
+
+func clearIMEComposition(writeCDP cdpWriteFunc) error {
+	return writeCDP("Input.imeSetComposition", map[string]any{
+		"text":           "",
+		"selectionStart": 0,
+		"selectionEnd":   0,
+	})
+}
+
+func parseCaretResponse(raw json.RawMessage) ScreencastCaret {
+	out := ScreencastCaret{Type: "caret"}
+	var payload struct {
+		Result struct {
+			Value struct {
+				X       float64 `json:"x"`
+				Y       float64 `json:"y"`
+				Height  float64 `json:"height"`
+				Visible bool    `json:"visible"`
+			} `json:"value"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return out
+	}
+	out.X = payload.Result.Value.X
+	out.Y = payload.Result.Value.Y
+	out.Height = payload.Result.Value.Height
+	out.Visible = payload.Result.Value.Visible
+	return out
+}
+
+func caretRectScript() string {
+	return `(() => {
+  const empty = { x: 0, y: 0, height: 0, visible: false };
+  const el = document.activeElement;
+  if (!el || el === document.body || el === document.documentElement) return empty;
+  const clamp = (rect) => {
+    if (!rect) return empty;
+    const x = Math.max(0, Math.min(window.innerWidth, rect.left));
+    const y = Math.max(0, Math.min(window.innerHeight, rect.top));
+    const height = Math.max(14, Math.min(48, rect.height || 18));
+    return { x, y, height, visible: true };
+  };
+  if (el.isContentEditable) {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return clamp(el.getBoundingClientRect());
+    const range = sel.getRangeAt(0).cloneRange();
+    range.collapse(false);
+    let rect = range.getBoundingClientRect();
+    if ((!rect || (rect.left === 0 && rect.top === 0)) && range.getClientRects().length) {
+      rect = range.getClientRects()[0];
+    }
+    return clamp(rect || el.getBoundingClientRect());
+  }
+  const tag = String(el.tagName || "").toLowerCase();
+  if (tag !== "input" && tag !== "textarea") return clamp(el.getBoundingClientRect());
+  const start = typeof el.selectionStart === "number" ? el.selectionStart : String(el.value || "").length;
+  const before = String(el.value || "").slice(0, start);
+  const hostRect = el.getBoundingClientRect();
+  const style = window.getComputedStyle(el);
+  const mirror = document.createElement("div");
+  const props = [
+    "boxSizing", "fontFamily", "fontSize", "fontWeight", "fontStyle", "letterSpacing",
+    "textTransform", "wordSpacing", "textIndent", "lineHeight", "textAlign",
+    "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "borderTopWidth",
+    "borderRightWidth", "borderBottomWidth", "borderLeftWidth"
+  ];
+  for (const prop of props) mirror.style[prop] = style[prop];
+  mirror.style.position = "fixed";
+  mirror.style.visibility = "hidden";
+  mirror.style.pointerEvents = "none";
+  mirror.style.left = (hostRect.left - (el.scrollLeft || 0)) + "px";
+  mirror.style.top = (hostRect.top - (el.scrollTop || 0)) + "px";
+  mirror.style.width = el.offsetWidth + "px";
+  mirror.style.height = el.offsetHeight + "px";
+  mirror.style.overflow = "hidden";
+  mirror.style.whiteSpace = tag === "textarea" ? "pre-wrap" : "pre";
+  mirror.style.overflowWrap = tag === "textarea" ? "break-word" : "normal";
+  mirror.textContent = before;
+  const marker = document.createElement("span");
+  marker.textContent = "\u200b";
+  mirror.appendChild(marker);
+  document.body.appendChild(mirror);
+  const rect = marker.getBoundingClientRect();
+  mirror.remove();
+  return clamp(rect);
+})()`
+}
+
+func writeScreencastClient(ctx context.Context, client *websocket.Conn, payload any) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	return client.Write(ctx, websocket.MessageText, data)
+}
+
+func mouseEventParams(msg ScreencastClientMessage) map[string]any {
+	eventType := strings.TrimSpace(msg.EventType)
+	if eventType == "" {
+		eventType = "mouseMoved"
+	}
+	button := strings.TrimSpace(msg.Button)
+	if button == "" {
+		button = "left"
+	}
+	clickCount := msg.ClickCount
+	if clickCount <= 0 && (eventType == "mousePressed" || eventType == "mouseReleased") {
+		clickCount = 1
+	}
+	buttons := msg.Buttons
+	if buttons == 0 && eventType == "mousePressed" {
+		buttons = 1
+	}
+	params := map[string]any{
+		"type":      eventType,
+		"x":         msg.X,
+		"y":         msg.Y,
+		"modifiers": msg.Modifiers,
+	}
+	if eventType == "mouseWheel" {
+		params["deltaX"] = msg.DeltaX
+		params["deltaY"] = msg.DeltaY
+		return params
+	}
+	params["button"] = button
+	params["buttons"] = buttons
+	params["clickCount"] = clickCount
+	return params
+}
+
+func keyEventParams(msg ScreencastClientMessage) map[string]any {
+	eventType := strings.TrimSpace(msg.EventType)
+	if eventType == "" {
+		eventType = "keyDown"
+	}
+	params := map[string]any{
+		"type":      eventType,
+		"key":       msg.Key,
+		"code":      msg.Code,
+		"modifiers": msg.Modifiers,
+	}
+	if msg.Text != "" {
+		params["text"] = msg.Text
+		params["unmodifiedText"] = msg.UnmodifiedText
+	}
+	if msg.WindowsVirtualKeyCode > 0 {
+		params["windowsVirtualKeyCode"] = msg.WindowsVirtualKeyCode
+	}
+	if msg.NativeVirtualKeyCode > 0 {
+		params["nativeVirtualKeyCode"] = msg.NativeVirtualKeyCode
+	}
+	return params
+}
+
 func snapshotFromTarget(binding *tabBinding, target targetInfo) TabSnapshot {
 	if binding == nil {
 		return TabSnapshot{}
 	}
+	rawURL := target.URL
+	if rawURL == "" {
+		rawURL = binding.url
+	}
+	title := target.Title
+	if title == "about:blank" && rawURL != "" && rawURL != "about:blank" {
+		title = ""
+	}
+	if title == "" {
+		title = binding.title
+		if title == "about:blank" && rawURL != "" && rawURL != "about:blank" {
+			title = ""
+		}
+	}
+	if title == "" {
+		title = rawURL
+	}
+	faviconURL := target.FaviconURL
+	if faviconURL == "" {
+		faviconURL = binding.faviconURL
+	}
 	return TabSnapshot{
-		ID:        binding.id,
-		SessionID: binding.sessionID,
-		TargetID:  binding.targetID,
-		URL:       target.URL,
-		Title:     target.Title,
-		CreatedAt: binding.createdAt,
-		UpdatedAt: binding.updatedAt,
+		ID:         binding.id,
+		SessionID:  binding.sessionID,
+		TargetID:   binding.targetID,
+		URL:        rawURL,
+		Title:      title,
+		FaviconURL: faviconURL,
+		CreatedAt:  binding.createdAt,
+		UpdatedAt:  binding.updatedAt,
 	}
 }
 

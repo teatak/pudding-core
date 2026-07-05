@@ -93,16 +93,17 @@ internal/audio/
 
 - `internal/audio/frame`:PCM16 frame 与 format 基础契约。
 - `internal/audio/driver`:daemon-owned driver interface 与 noop driver。
-- `internal/audio/driver/portaudio`:正式 mic capture driver,使用默认输入设备输出 16k/mono/PCM16。
+- `internal/audio/driver/portaudio`:正式 mic capture + speaker playback driver;input 默认 16k/mono/PCM16,output 默认 24k/mono/PCM16。
 - `internal/audio/queue`:串行 playback queue,支持按 session / turn 清理。
 - `internal/audio/asr`:ASR client/event interface 与 fake client。
 - `internal/audio/asr/sherpa`:真实 sherpa-onnx SenseVoice + Silero VAD client。
-- `internal/audio/tts`:TTS client/event interface、noop/fake client、macOS `say` client;已迁入 TTS 文本清洗,会跳过纯标点/emoji 片段。
+- `internal/audio/tts`:TTS client/event interface、noop/fake client、macOS `say` client、Edge TTS client;已迁入 TTS 文本清洗,会跳过纯标点/emoji 片段。
 - `internal/audio/voice`:session input/output binding manager、sentence splitter 与 AudioService 骨架。
 - AudioService:
   - input binding 会启动真实 capture + ASR backend;释放 input owner 时停止 capture。
   - ASR sentence 只在 session 拥有 input binding 时调用 `engine.Submit`。
   - output owner 订阅 session event,把 `turn.delta` text 聚句后送入 playback queue。
+  - Edge TTS PCM event 会按 output owner 写入 PortAudio speaker playback;输出格式固定为 24k/mono/PCM16。
   - TTS 播放结束后的短窗口会抑制 ASR sentence,减少 speaker 回灌尾巴变成用户输入。
   - `/sessions/{id}/cancel` 会同步调用 `voice.CancelSession`,清理该 session 的 TTS 队列、丢弃未 flush 的 turn buffer,并取消当前属于该 session 的 TTS 播放。
   - ASR sentence 在本 session 正在播 TTS 时会触发 barge-in:
@@ -115,15 +116,18 @@ internal/audio/
   - `POST /sessions/{id}/audio/input`
   - `POST /sessions/{id}/audio/output`
 - daemon 启动时创建 `voice.Service`;删除 session 时释放其 input/output owner。
-- macOS daemon 默认使用真实 `macsay` TTS,默认 rate=230;非 macOS 安全降级为 noop。
+- daemon 默认使用 Edge TTS(`zh-CN-YunxiaNeural`, speed=1.2);构造失败时 macOS 降级为真实 `macsay`(rate=230),非 macOS 降级为 noop。
 - `macsay` 会保留 stderr 到错误日志,便于排查系统 voice / audio device 问题。
-- daemon 默认使用 PortAudio 作为 capture driver;input binding 时才初始化并打开麦克风。
-- macOS desktop dev/release bundle 已写入 `NSMicrophoneUsageDescription`;PortAudio 初始化前会主动请求 mic 权限。
+- daemon 默认使用 PortAudio 作为 capture/playback driver;input binding 时才请求并打开麦克风,output 只在收到 Edge PCM 时懒启动 speaker playback。
+- macOS desktop dev/release bundle 已写入 `NSMicrophoneUsageDescription`;PortAudio capture 前会主动请求 mic 权限。
 - `make desktop-dev` 的 macOS dev app 需要稳定本机 code signing identity,默认名称为 `Pudding Dev Local`;没有时先跑一次 `make dev-cert`,避免 TCC 把每次重建的 `.app` 当成新身份反复申请权限。
-- daemon 只从 `<home>/runtime/models` 加载 sherpa 模型:
+- daemon 只从 `<home>/runtime/models` 加载 sherpa ASR/VAD 模型:
   - `asr/model.int8.onnx`
   - `asr/tokens.txt`
   - `vad/silero_vad.onnx`
+- daemon ASR 默认对齐老项目:`engine=sherpa-sensevoice`,`language=zh`,`use_itn=false`,`num_threads=2`,`provider=cpu`;ASR 内置 VAD 为 `threshold=0.6`,`min_silence=400ms`,`min_speech=300ms`,`window_size=512`。
+- 语音运行配置落在 `<home>/config/audio.yaml`;当前可调项包括 PortAudio driver、Sherpa ASR/Silero VAD、Edge TTS。未接入的 KWS/AEC/NS/声纹不写入配置。
+- 设置中心「关于」页会展示当前生效的语音配置、配置文件路径和 input/output owner。
 - 找不到模型时不会启用 fake ASR。
 - 已补诊断日志:
   - mic 权限检查/授权/拒绝/超时。
@@ -155,8 +159,8 @@ internal/audio/
 ## 演示口径
 
 - 不做 fake 演示。
-- 可演示的最低门槛是真实 `macsay` 输出接通。
-- 完整语音演示必须满足:本机 mic 权限 + PortAudio capture + sherpa 模型 + session audio input/output binding 都真实可用。
+- 可演示的最低门槛是真实 Edge TTS 或 `macsay` 输出接通。
+- 完整语音对话演示必须满足:本机 mic 权限 + PortAudio capture/playback + sherpa ASR/VAD 模型 + Edge TTS 网络可用 + session audio input/output binding 都真实可用。
 - 当前状态:不是 fake,已具备本机受控演示能力;完整麦克风对话演示时需要现场开真 mic 说一句确认当前输入环境。
 
 ## 剩余风险
@@ -164,7 +168,7 @@ internal/audio/
 - macOS TCC 权限被拒后需要用户在系统设置里重新打开,或开发机执行 `tccutil reset Microphone com.teatak.pudding.dev` 后重启 `make desktop-dev`。
 - 如果 `make desktop-dev` 提示缺少 `Pudding Dev Local`,先跑一次 `make dev-cert`;不需要 Apple 开发者证书。
 - PortAudio 默认输入设备受系统当前设备影响;后续需要做设备枚举/选择。
-- 当前 TTS 仍是 `macsay`;旧系统更自然的 TTS 建议在 cancel/barge-in 稳定后迁移。
+- Edge TTS 依赖外部网络和非官方 Edge 朗读协议;若 Microsoft 调整协议或 token,需要同步更新常量。
 - 未接 AEC/NS,强扬声器外放环境仍可能触发回采;当前先按用户 barge-in 处理,后续需要接 AEC/NS 降低喇叭回灌误触发。
 
 ## 迁移阶段
@@ -284,17 +288,12 @@ turn.delta(text) -> sentence splitter -> tts.Speak -> playback queue
 
 ### 8. 更好的 TTS
 
-建议在 barge-in/cancel 稳定后迁移,不要阻塞当前 PortAudio 语音闭环。
-
-优先级:
-
-1. Edge TTS:旧系统默认方案,中文自然度最好,默认 `zh-CN-YunxiaNeural`,speed `1.2`。
-2. sherpa 本地 TTS:可选离线方案,但模型体积和质量不适合作为默认 release 资源。
+已迁旧项目 Edge TTS;Sherpa TTS 已删除,不作为默认路径。
 
 迁移要求:
 
 - 适配新项目 `tts.Client` interface。
-- TTS profile 来自 config,不是 SQLite。
+- Edge TTS 输出 24k/mono/PCM16,直接接 PortAudio speaker playback。
 - playback/cancel/barge-in 仍由 `voice.Service` 统一编排。
 
 ## 时间估算

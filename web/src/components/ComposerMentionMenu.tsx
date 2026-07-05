@@ -1,4 +1,4 @@
-import { Cable, Camera, FolderOpen, Paperclip, ScanLine, WandSparkles } from "lucide-react";
+import { Camera, FolderOpen, Package, Paperclip, ScanLine, WandSparkles } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 
 import { AppIcon } from "@/components/AppIcon";
@@ -106,7 +106,7 @@ function MentionIcon({ reference }: { reference: ComposerMentionReference }) {
     return <IdentityIcon fallback={reference.kind === "skill" ? "skill" : "app"} fit="contain" size="xs" src={reference.iconURL} />;
   }
   if (reference.kind === "app") {
-    return <ColoredMentionIcon tone="teal" icon={<Cable className="size-3.5" />} />;
+    return <ColoredMentionIcon tone="teal" icon={<Package className="size-3.5" />} />;
   }
   if (reference.kind === "skill") {
     return <ColoredMentionIcon tone="violet" icon={<WandSparkles className="size-3.5" />} />;
