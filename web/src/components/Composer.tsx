@@ -1270,17 +1270,22 @@ function SessionAudioControls({ token, session }: { token: string; session: Sess
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
+            aria-disabled={inputMutation.isPending}
             aria-label={inputLabel}
             aria-pressed={inputActive}
-            className={cn("rounded-full", inputActive && "text-primary")}
-            disabled={inputMutation.isPending}
+            className="rounded-full"
             size="icon"
             type="button"
-            variant={inputActive ? "secondary" : "ghost"}
+            variant={inputActive ? "default" : "ghost"}
             onMouseDown={(event) => event.preventDefault()}
-            onClick={() => inputMutation.mutate(!inputActive)}
+            onClick={() => {
+              if (inputMutation.isPending) {
+                return;
+              }
+              inputMutation.mutate(!inputActive);
+            }}
           >
-            {inputMutation.isPending ? <Loader2 className="animate-spin" /> : <Mic />}
+            {inputMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Mic className="size-4" />}
           </Button>
         </TooltipTrigger>
         <TooltipContent>{inputLabel}</TooltipContent>
@@ -1288,17 +1293,22 @@ function SessionAudioControls({ token, session }: { token: string; session: Sess
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
+            aria-disabled={outputMutation.isPending}
             aria-label={outputLabel}
             aria-pressed={outputActive}
-            className={cn("rounded-full", outputActive && "text-primary")}
-            disabled={outputMutation.isPending}
+            className="rounded-full"
             size="icon"
             type="button"
-            variant={outputActive ? "secondary" : "ghost"}
+            variant={outputActive ? "default" : "ghost"}
             onMouseDown={(event) => event.preventDefault()}
-            onClick={() => outputMutation.mutate(!outputActive)}
+            onClick={() => {
+              if (outputMutation.isPending) {
+                return;
+              }
+              outputMutation.mutate(!outputActive);
+            }}
           >
-            {outputMutation.isPending ? <Loader2 className="animate-spin" /> : <Volume2 />}
+            {outputMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Volume2 className="size-4" />}
           </Button>
         </TooltipTrigger>
         <TooltipContent>{outputLabel}</TooltipContent>
