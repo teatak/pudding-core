@@ -55,7 +55,7 @@ func (s *Server) getBrowserState(c *cart.Context) error {
 	if !ok {
 		return nil
 	}
-	processMode := s.browserProcessMode(c.Request.Context())
+	processMode := s.browserProcessMode(c.Request.Context(), sessionID)
 	if s.browser != nil {
 		tabs, err := s.browser.ListTabs(c.Request.Context(), sessionID)
 		if err != nil {
@@ -95,7 +95,10 @@ func (s *Server) getBrowserState(c *cart.Context) error {
 		c.JSON(http.StatusOK, browserStateResponseFromTab(tab))
 		return nil
 	}
-	c.JSON(http.StatusOK, browserStateResponse(state, true, processMode))
+	if err := s.store.ClearBrowserState(c.Request.Context(), sessionID); err != nil {
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, browserStateResp{HasState: false, SessionID: sessionID, Mode: processMode, ProcessMode: processMode})
 	return nil
 }
 
@@ -103,6 +106,21 @@ func (s *Server) clearBrowserState(c *cart.Context) error {
 	sessionID, ok := s.browserStateSession(c)
 	if !ok {
 		return nil
+	}
+	if err := s.store.ClearBrowserState(c.Request.Context(), sessionID); err != nil {
+		return s.fail(c, err)
+	}
+	c.Response.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (s *Server) closeBrowserSession(c *cart.Context) error {
+	sessionID, ok := s.browserSession(c)
+	if !ok {
+		return nil
+	}
+	if err := s.browser.CloseSessionBrowser(c.Request.Context(), sessionID); err != nil {
+		return s.browserError(c, err)
 	}
 	if err := s.store.ClearBrowserState(c.Request.Context(), sessionID); err != nil {
 		return s.fail(c, err)
@@ -120,7 +138,7 @@ func (s *Server) listBrowserTabs(c *cart.Context) error {
 	if err != nil {
 		return s.browserError(c, err)
 	}
-	c.JSON(http.StatusOK, browserTabsResp{Tabs: tabs, ProcessMode: s.browserProcessMode(c.Request.Context())})
+	c.JSON(http.StatusOK, browserTabsResp{Tabs: tabs, ProcessMode: s.browserProcessMode(c.Request.Context(), sessionID)})
 	return nil
 }
 
@@ -146,6 +164,55 @@ func (s *Server) getBrowserTab(c *cart.Context) error {
 	tab, err := s.browser.GetTab(c.Request.Context(), sessionID, tabID)
 	if err != nil {
 		return s.browserError(c, err)
+	}
+	c.JSON(http.StatusOK, tab)
+	return nil
+}
+
+func (s *Server) recoverBrowserTab(c *cart.Context) error {
+	sessionID, ok := s.browserSession(c)
+	if !ok {
+		return nil
+	}
+	tabID, _ := c.Param("tabID")
+	tab, err := s.browser.GetTab(c.Request.Context(), sessionID, tabID)
+	if err != nil {
+		if !errors.Is(err, browser.ErrTabNotFound) {
+			return s.browserError(c, err)
+		}
+		tab, err = s.browser.Recover(c.Request.Context(), sessionID, browser.RecoverHint{TabID: tabID})
+		if err == nil {
+			if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
+				return browserStoreError(c, s, err)
+			}
+			c.JSON(http.StatusOK, tab)
+			return nil
+		}
+		if !errors.Is(err, browser.ErrTabNotFound) {
+			return s.browserError(c, err)
+		}
+		if ok, recoverErr := s.recoverStoredBrowserTab(c.Request.Context(), sessionID, tabID); recoverErr != nil {
+			return s.browserError(c, recoverErr)
+		} else if !ok {
+			return s.browserError(c, err)
+		}
+		tab, err = s.browser.GetTab(c.Request.Context(), sessionID, tabID)
+		if err != nil {
+			return s.browserError(c, err)
+		}
+	}
+	tab, err = s.browser.Recover(c.Request.Context(), sessionID, browser.RecoverHint{
+		TabID:      tab.ID,
+		URL:        tab.URL,
+		Title:      tab.Title,
+		FaviconURL: tab.FaviconURL,
+		Mode:       tab.Mode,
+	})
+	if err != nil {
+		return s.browserError(c, err)
+	}
+	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
+		return browserStoreError(c, s, err)
 	}
 	c.JSON(http.StatusOK, tab)
 	return nil
@@ -529,11 +596,11 @@ func (s *Server) syncBrowserState(ctx context.Context, sessionID string, tab bro
 	return err
 }
 
-func (s *Server) browserProcessMode(ctx context.Context) string {
+func (s *Server) browserProcessMode(ctx context.Context, sessionID string) string {
 	if s.browser == nil {
 		return "headless"
 	}
-	return s.browser.ProcessMode(ctx)
+	return s.browser.ProcessMode(ctx, sessionID)
 }
 
 func (s *Server) recoverStoredBrowserTab(ctx context.Context, sessionID, tabID string) (bool, error) {
@@ -564,7 +631,7 @@ func (s *Server) recoverBrowserState(ctx context.Context, sessionID string, stat
 	if s.browser == nil || state == nil {
 		return browser.TabSnapshot{}, false, nil
 	}
-	processMode := s.browser.ProcessMode(ctx)
+	processMode := s.browser.ProcessMode(ctx, sessionID)
 	if state.Mode != "external" && processMode != "external" {
 		return browser.TabSnapshot{}, false, nil
 	}

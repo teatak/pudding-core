@@ -2000,7 +2000,7 @@ type engineTestBrowser struct {
 	observedOptions browser.ObserveOptions
 }
 
-func (b *engineTestBrowser) ProcessMode(context.Context) string {
+func (b *engineTestBrowser) ProcessMode(context.Context, string) string {
 	return "headless"
 }
 
@@ -2017,6 +2017,10 @@ func (b *engineTestBrowser) GetTab(_ context.Context, sessionID, tabID string) (
 }
 
 func (b *engineTestBrowser) ReleaseTab(context.Context, string, string) error {
+	return nil
+}
+
+func (b *engineTestBrowser) CloseSessionBrowser(context.Context, string) error {
 	return nil
 }
 

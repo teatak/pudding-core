@@ -33,6 +33,7 @@ const (
 	maxObserveTextChars     = 20000
 	defaultObserveElements  = 30
 	maxObserveElements      = 100
+	globalProcessKey        = "global"
 )
 
 var (
@@ -42,11 +43,12 @@ var (
 )
 
 type Service interface {
-	ProcessMode(ctx context.Context) string
+	ProcessMode(ctx context.Context, sessionID string) string
 	CreateTab(ctx context.Context, sessionID string) (TabSnapshot, error)
 	ListTabs(ctx context.Context, sessionID string) ([]TabSnapshot, error)
 	GetTab(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
 	Recover(ctx context.Context, sessionID string, hint RecoverHint) (TabSnapshot, error)
+	CloseSessionBrowser(ctx context.Context, sessionID string) error
 	ReleaseTab(ctx context.Context, sessionID, tabID string) error
 	ReleaseSession(ctx context.Context, sessionID string) error
 	Open(ctx context.Context, sessionID, tabID, rawURL string) (TabSnapshot, error)
@@ -75,7 +77,7 @@ type Manager struct {
 	lifecycleMu       sync.Mutex
 	cfg               Config
 	client            *http.Client
-	process           *browserProcess
+	processes         map[string]*browserProcess
 	tabs              map[string]*tabBinding
 	sessions          map[string]map[string]bool
 	cursorSubscribers map[string]map[chan ScreencastCursor]bool
@@ -191,6 +193,7 @@ type ScreencastClientMessage struct {
 	Width                 int     `json:"width,omitempty"`
 	Height                int     `json:"height,omitempty"`
 	EveryNthFrame         int     `json:"everyNthFrame,omitempty"`
+	DeviceScaleFactor     float64 `json:"deviceScaleFactor,omitempty"`
 	X                     float64 `json:"x,omitempty"`
 	Y                     float64 `json:"y,omitempty"`
 	Button                string  `json:"button,omitempty"`
@@ -280,6 +283,7 @@ func NewManager(cfg Config) *Manager {
 	return &Manager{
 		cfg:               cfg,
 		client:            &http.Client{Timeout: 10 * time.Second},
+		processes:         map[string]*browserProcess{},
 		tabs:              map[string]*tabBinding{},
 		sessions:          map[string]map[string]bool{},
 		cursorSubscribers: map[string]map[chan ScreencastCursor]bool{},
@@ -351,8 +355,12 @@ func (m *Manager) CreateTab(ctx context.Context, sessionID string) (TabSnapshot,
 	return m.snapshotFromLiveTarget(ctx, binding, target), nil
 }
 
-func (m *Manager) ProcessMode(ctx context.Context) string {
-	proc := m.currentProcess(ctx)
+func (m *Manager) ProcessMode(ctx context.Context, sessionID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return "headless"
+	}
+	proc := m.currentProcess(ctx, sessionID)
 	if proc != nil {
 		if proc.headless {
 			return "headless"
@@ -364,11 +372,11 @@ func (m *Manager) ProcessMode(ctx context.Context) string {
 	m.mu.Lock()
 	cfg := m.cfg
 	m.mu.Unlock()
-	proc, err := attachExisting(ctx, cfg, m.client)
+	proc, err := attachExisting(ctx, cfg, sessionID, m.client)
 	if err != nil {
 		return "headless"
 	}
-	m.setProcess(proc)
+	m.setProcess(sessionID, proc)
 	if proc.headless {
 		return "headless"
 	}
@@ -384,7 +392,7 @@ func (m *Manager) createTab(ctx context.Context, sessionID, rawURL string) (*bro
 	if rawURL == "" {
 		rawURL = "about:blank"
 	}
-	proc, err := m.ensureProcess(ctx)
+	proc, err := m.ensureProcess(ctx, sessionID)
 	if err != nil {
 		return nil, nil, targetInfo{}, err
 	}
@@ -420,7 +428,7 @@ func (m *Manager) ListTabs(ctx context.Context, sessionID string) ([]TabSnapshot
 		return []TabSnapshot{}, nil
 	}
 	out := make([]TabSnapshot, 0, len(bindings))
-	proc, err := m.ensureProcess(ctx)
+	proc, err := m.ensureProcess(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -447,10 +455,18 @@ func (m *Manager) Recover(ctx context.Context, sessionID string, hint RecoverHin
 	if sessionID == "" {
 		return TabSnapshot{}, errors.New("session id is required")
 	}
-	if strings.TrimSpace(hint.Mode) != "external" {
-		return TabSnapshot{}, ErrTabNotFound
+	mode := strings.TrimSpace(hint.Mode)
+	if mode == "" {
+		mode = m.mode(sessionID)
 	}
-	proc, err := m.attachExternalProcess(ctx)
+	if mode == "external" {
+		return m.recoverExternal(ctx, sessionID, hint)
+	}
+	return m.recoverInternal(ctx, sessionID, hint)
+}
+
+func (m *Manager) recoverExternal(ctx context.Context, sessionID string, hint RecoverHint) (TabSnapshot, error) {
+	proc, err := m.attachExternalProcess(ctx, sessionID)
 	if err != nil {
 		return TabSnapshot{}, err
 	}
@@ -490,12 +506,65 @@ func (m *Manager) Recover(ctx context.Context, sessionID string, hint RecoverHin
 	return m.snapshotFromLiveTarget(ctx, binding, target), nil
 }
 
+func (m *Manager) recoverInternal(ctx context.Context, sessionID string, hint RecoverHint) (TabSnapshot, error) {
+	tabID := strings.TrimSpace(hint.TabID)
+	if tabID == "" {
+		return TabSnapshot{}, ErrTabRequired
+	}
+	binding, err := m.binding(sessionID, tabID)
+	if err != nil {
+		return TabSnapshot{}, err
+	}
+	proc, err := m.ensureProcess(ctx, sessionID)
+	if err != nil {
+		return TabSnapshot{}, err
+	}
+	if !proc.headless {
+		return m.recoverExternal(ctx, sessionID, RecoverHint{
+			TabID:      tabID,
+			URL:        firstNonBlank(hint.URL, binding.url),
+			Title:      firstNonBlank(hint.Title, binding.title),
+			FaviconURL: firstNonBlank(hint.FaviconURL, binding.faviconURL),
+			Mode:       "external",
+		})
+	}
+	if binding.targetID != "" {
+		_ = proc.closeTarget(ctx, m.client, binding.targetID)
+	}
+	rawURL := firstNonBlank(hint.URL, binding.url)
+	if rawURL == "" {
+		rawURL = "about:blank"
+	}
+	target, err := proc.newTarget(ctx, m.client, rawURL)
+	if err != nil {
+		return TabSnapshot{}, err
+	}
+	_ = proc.waitReady(ctx, m.client, target.ID)
+	if current, err := proc.target(ctx, m.client, target.ID); err == nil {
+		target = current
+	}
+	m.rememberBindingTarget(binding.id, target)
+	if target.Title == "" || target.FaviconURL == "" {
+		m.mu.Lock()
+		if current := m.tabs[binding.id]; current != nil && current.sessionID == sessionID {
+			if target.Title == "" && hint.Title != "" {
+				current.title = hint.Title
+			}
+			if target.FaviconURL == "" && hint.FaviconURL != "" {
+				current.faviconURL = hint.FaviconURL
+			}
+		}
+		m.mu.Unlock()
+	}
+	return m.GetTab(ctx, sessionID, binding.id)
+}
+
 func (m *Manager) ReleaseTab(ctx context.Context, sessionID, tabID string) error {
 	binding, err := m.binding(sessionID, tabID)
 	if err != nil {
 		return err
 	}
-	if proc := m.currentProcess(ctx); proc != nil {
+	if proc := m.currentProcess(ctx, binding.sessionID); proc != nil {
 		_ = proc.closeTarget(ctx, m.client, binding.targetID)
 	}
 	m.mu.Lock()
@@ -511,15 +580,16 @@ func (m *Manager) ReleaseTab(ctx context.Context, sessionID, tabID string) error
 }
 
 func (m *Manager) ReleaseSession(ctx context.Context, sessionID string) error {
+	return m.CloseSessionBrowser(ctx, sessionID)
+}
+
+func (m *Manager) CloseSessionBrowser(ctx context.Context, sessionID string) error {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return errors.New("session id is required")
 	}
 	bindings := m.releaseSessionBindings(sessionID)
-	if len(bindings) == 0 {
-		return nil
-	}
-	if proc := m.currentProcess(ctx); proc != nil {
+	if proc := m.currentProcess(ctx, sessionID); proc != nil {
 		for _, binding := range bindings {
 			_ = proc.closeTarget(ctx, m.client, binding.targetID)
 		}
@@ -568,7 +638,7 @@ func (m *Manager) Reveal(ctx context.Context, sessionID, tabID string) (TabSnaps
 		return TabSnapshot{}, err
 	}
 	if proc.headless {
-		if err := m.switchMode(ctx, false); err != nil {
+		if err := m.switchMode(ctx, sessionID, false); err != nil {
 			return TabSnapshot{}, err
 		}
 	}
@@ -588,14 +658,14 @@ func (m *Manager) Internal(ctx context.Context, sessionID, tabID string) (TabSna
 	if err != nil {
 		return TabSnapshot{}, err
 	}
-	if proc := m.currentProcess(ctx); proc != nil {
+	if proc := m.currentProcess(ctx, sessionID); proc != nil {
 		if target, err := proc.target(ctx, m.client, binding.targetID); err == nil {
 			m.rememberBindingTarget(binding.id, target)
 		} else if !errors.Is(err, ErrTabNotFound) {
 			return TabSnapshot{}, err
 		}
 	}
-	if err := m.switchMode(ctx, true); err != nil {
+	if err := m.switchMode(ctx, sessionID, true); err != nil {
 		return TabSnapshot{}, err
 	}
 	return m.GetTab(ctx, sessionID, binding.id)
@@ -950,17 +1020,14 @@ func (m *Manager) Screencast(ctx context.Context, sessionID, tabID string, clien
 	if err := writeCDP("Page.enable", nil); err != nil {
 		return err
 	}
-	if err := startScreencast(writeCDP, 0, 0, 1); err != nil {
-		return err
-	}
-	_ = writeClient(map[string]string{"type": "status", "status": "started"})
+	stream := newScreencastController(writeCDP)
 
 	cursorEvents, unsubscribeCursor := m.subscribeCursor(binding.id)
 	defer unsubscribeCursor()
 
 	done := make(chan error, 3)
 	go func() {
-		done <- screencastClientLoop(ctx, client, writeCDP, requestCaret, requestClipboard)
+		done <- screencastClientLoop(ctx, client, stream, writeCDP, requestCaret, requestClipboard)
 	}()
 	go func() {
 		done <- screencastCDPLoop(ctx, cdp, writeClient, writeCDP, takeCaretRequest, takeClipboardRequest)
@@ -969,6 +1036,7 @@ func (m *Manager) Screencast(ctx context.Context, sessionID, tabID string, clien
 		done <- screencastCursorLoop(ctx, cursorEvents, writeClient)
 	}()
 	err = <-done
+	_ = stream.stop()
 	cancel()
 	m.touch(binding.id)
 	if errors.Is(err, context.Canceled) {
@@ -979,13 +1047,22 @@ func (m *Manager) Screencast(ctx context.Context, sessionID, tabID string, clien
 
 func (m *Manager) Close() error {
 	m.mu.Lock()
-	proc := m.process
-	m.process = nil
+	procs := make([]*browserProcess, 0, len(m.processes))
+	for _, proc := range m.processes {
+		procs = append(procs, proc)
+	}
+	m.processes = map[string]*browserProcess{}
 	m.tabs = map[string]*tabBinding{}
 	m.sessions = map[string]map[string]bool{}
 	m.cursorSubscribers = map[string]map[chan ScreencastCursor]bool{}
 	m.mu.Unlock()
-	return stopBrowserProcess(proc)
+	var firstErr error
+	for _, proc := range procs {
+		if err := stopBrowserProcess(proc); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func stopBrowserProcess(proc *browserProcess) error {
@@ -1059,12 +1136,21 @@ func numberValue(value any) (float64, bool) {
 	}
 }
 
+func firstNonBlank(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func (m *Manager) liveTarget(ctx context.Context, sessionID, tabID string, create bool) (*browserProcess, *tabBinding, targetInfo, error) {
 	binding, err := m.resolveTab(ctx, sessionID, tabID, create)
 	if err != nil {
 		return nil, nil, targetInfo{}, err
 	}
-	proc, err := m.ensureProcess(ctx)
+	proc, err := m.ensureProcess(ctx, binding.sessionID)
 	if err != nil {
 		return nil, nil, targetInfo{}, err
 	}
@@ -1074,6 +1160,9 @@ func (m *Manager) liveTarget(ctx context.Context, sessionID, tabID string, creat
 	}
 	if !errors.Is(err, ErrTabNotFound) {
 		return nil, nil, targetInfo{}, err
+	}
+	if !create {
+		return nil, nil, targetInfo{}, ErrTabNotFound
 	}
 	rawURL := binding.url
 	if strings.TrimSpace(rawURL) == "" {
@@ -1105,7 +1194,7 @@ func (m *Manager) snapshotFromLiveTarget(ctx context.Context, binding *tabBindin
 	if snap.TargetID == "" {
 		return snap
 	}
-	proc := m.currentProcess(ctx)
+	proc := m.currentProcess(ctx, binding.sessionID)
 	if proc == nil {
 		return snap
 	}
@@ -1126,15 +1215,19 @@ func (m *Manager) snapshotFromTarget(binding *tabBinding, target targetInfo) Tab
 		m.mu.Unlock()
 	}
 	snap := snapshotFromTarget(binding, target)
-	snap.Mode = m.mode()
+	if binding != nil {
+		snap.Mode = m.mode(binding.sessionID)
+	} else {
+		snap.Mode = "headless"
+	}
 	m.rememberSnapshot(snap)
 	return snap
 }
 
-func (m *Manager) mode() string {
+func (m *Manager) mode(sessionID string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.process != nil && !m.process.headless {
+	if proc := m.processes[globalProcessKey]; proc != nil && !proc.headless {
 		return "external"
 	}
 	return "headless"
@@ -1189,11 +1282,15 @@ func (m *Manager) navigateHistory(ctx context.Context, sessionID, tabID string, 
 	return m.snapshotFromLiveTarget(ctx, binding, target), nil
 }
 
-func (m *Manager) ensureProcess(ctx context.Context) (*browserProcess, error) {
+func (m *Manager) ensureProcess(ctx context.Context, sessionID string) (*browserProcess, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, errors.New("session id is required")
+	}
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
 	m.mu.Lock()
-	proc := m.process
+	proc := m.processes[globalProcessKey]
 	cfg := m.cfg
 	m.mu.Unlock()
 	if proc != nil {
@@ -1201,57 +1298,68 @@ func (m *Manager) ensureProcess(ctx context.Context) (*browserProcess, error) {
 			return proc, nil
 		}
 		m.mu.Lock()
-		if m.process == proc {
-			m.process = nil
+		if m.processes[globalProcessKey] == proc {
+			delete(m.processes, globalProcessKey)
 		}
 		m.mu.Unlock()
 		_ = stopBrowserProcess(proc)
 	}
-	if proc, err := attachExisting(ctx, cfg, m.client); err == nil {
-		m.setProcess(proc)
+	if proc, err := attachExisting(ctx, cfg, sessionID, m.client); err == nil {
+		m.setProcess(sessionID, proc)
 		return proc, nil
 	}
-	reapStaleProfileOwner(cfg)
-	proc, err := launch(ctx, cfg, m.client)
+	reapStaleProfileOwner(cfg, sessionID)
+	proc, err := launch(ctx, cfg, sessionID, m.client)
 	if err != nil {
 		return nil, err
 	}
-	m.setProcess(proc)
+	m.setProcess(sessionID, proc)
 	return proc, nil
 }
 
-func (m *Manager) setProcess(proc *browserProcess) {
+func (m *Manager) setProcess(sessionID string, proc *browserProcess) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
+	}
 	m.mu.Lock()
-	m.process = proc
+	if m.processes == nil {
+		m.processes = map[string]*browserProcess{}
+	}
+	m.processes[globalProcessKey] = proc
 	m.mu.Unlock()
 }
 
-func (m *Manager) switchMode(ctx context.Context, headless bool) error {
+func (m *Manager) switchMode(ctx context.Context, sessionID string, headless bool) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return errors.New("session id is required")
+	}
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
 	m.mu.Lock()
-	proc := m.process
+	proc := m.processes[globalProcessKey]
 	cfg := m.cfg
 	if proc != nil && proc.headless == headless {
 		m.mu.Unlock()
 		return nil
 	}
-	m.process = nil
+	delete(m.processes, globalProcessKey)
 	m.mu.Unlock()
 	if err := stopBrowserProcess(proc); err != nil {
 		return err
 	}
-	reapStaleProfileOwner(cfg)
-	next, err := launchMode(ctx, cfg, m.client, headless)
+	reapStaleProfileOwner(cfg, sessionID)
+	next, err := launchMode(ctx, cfg, sessionID, m.client, headless)
 	if err != nil {
 		return err
 	}
-	m.setProcess(next)
+	m.setProcess(sessionID, next)
 	return nil
 }
 
-func reapStaleProfileOwner(cfg Config) {
-	profileDir, err := profileDir(cfg)
+func reapStaleProfileOwner(cfg Config, sessionID string) {
+	profileDir, err := profileDir(cfg, sessionID)
 	if err != nil {
 		return
 	}
@@ -1282,8 +1390,8 @@ func singletonLockPID(profileDir string) (int, error) {
 	return strconv.Atoi(target[idx+1:])
 }
 
-func attachExisting(ctx context.Context, cfg Config, client *http.Client) (*browserProcess, error) {
-	profileDir, err := profileDir(cfg)
+func attachExisting(ctx context.Context, cfg Config, sessionID string, client *http.Client) (*browserProcess, error) {
+	profileDir, err := profileDir(cfg, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -1312,27 +1420,34 @@ func attachExisting(ctx context.Context, cfg Config, client *http.Client) (*brow
 	return proc, nil
 }
 
-func profileDir(cfg Config) (string, error) {
+func profileDir(cfg Config, sessionID string) (string, error) {
 	homeDir := strings.TrimSpace(cfg.HomeDir)
 	if homeDir == "" {
 		return "", fmt.Errorf("%w: home dir is required", ErrUnavailable)
 	}
+	if strings.TrimSpace(sessionID) == "" {
+		return "", errors.New("session id is required")
+	}
 	return filepath.Join(homeDir, "browser-profiles", "default"), nil
 }
 
-func (m *Manager) currentProcess(ctx context.Context) *browserProcess {
+func (m *Manager) currentProcess(ctx context.Context, sessionID string) *browserProcess {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil
+	}
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
 	m.mu.Lock()
-	proc := m.process
+	proc := m.processes[globalProcessKey]
 	m.mu.Unlock()
 	if proc == nil {
 		return nil
 	}
 	if err := proc.ping(ctx, m.client); err != nil {
 		m.mu.Lock()
-		if m.process == proc {
-			m.process = nil
+		if m.processes[globalProcessKey] == proc {
+			delete(m.processes, globalProcessKey)
 		}
 		m.mu.Unlock()
 		return nil
@@ -1340,11 +1455,15 @@ func (m *Manager) currentProcess(ctx context.Context) *browserProcess {
 	return proc
 }
 
-func (m *Manager) attachExternalProcess(ctx context.Context) (*browserProcess, error) {
+func (m *Manager) attachExternalProcess(ctx context.Context, sessionID string) (*browserProcess, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, errors.New("session id is required")
+	}
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
 	m.mu.Lock()
-	proc := m.process
+	proc := m.processes[globalProcessKey]
 	cfg := m.cfg
 	m.mu.Unlock()
 	if proc != nil {
@@ -1355,20 +1474,20 @@ func (m *Manager) attachExternalProcess(ctx context.Context) (*browserProcess, e
 			return proc, nil
 		}
 		m.mu.Lock()
-		if m.process == proc {
-			m.process = nil
+		if m.processes[globalProcessKey] == proc {
+			delete(m.processes, globalProcessKey)
 		}
 		m.mu.Unlock()
 		_ = stopBrowserProcess(proc)
 	}
-	proc, err := attachExisting(ctx, cfg, m.client)
+	proc, err := attachExisting(ctx, cfg, sessionID, m.client)
 	if err != nil {
 		return nil, ErrTabNotFound
 	}
 	if proc.headless {
 		return nil, ErrTabNotFound
 	}
-	m.setProcess(proc)
+	m.setProcess(sessionID, proc)
 	return proc, nil
 }
 
@@ -1456,11 +1575,11 @@ func (m *Manager) touch(tabID string) {
 	m.mu.Unlock()
 }
 
-func launch(ctx context.Context, cfg Config, client *http.Client) (*browserProcess, error) {
-	return launchMode(ctx, cfg, client, cfg.Headless)
+func launch(ctx context.Context, cfg Config, sessionID string, client *http.Client) (*browserProcess, error) {
+	return launchMode(ctx, cfg, sessionID, client, cfg.Headless)
 }
 
-func launchMode(ctx context.Context, cfg Config, client *http.Client, headless bool) (*browserProcess, error) {
+func launchMode(ctx context.Context, cfg Config, sessionID string, client *http.Client, headless bool) (*browserProcess, error) {
 	chromePath := strings.TrimSpace(cfg.ChromePath)
 	if chromePath == "" {
 		var err error
@@ -1469,7 +1588,7 @@ func launchMode(ctx context.Context, cfg Config, client *http.Client, headless b
 			return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 		}
 	}
-	profileDir, err := profileDir(cfg)
+	profileDir, err := profileDir(cfg, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -1894,40 +2013,110 @@ func (p *browserProcess) dispatchMouseClick(ctx context.Context, client *http.Cl
 type cdpWriteFunc func(method string, params any) error
 type screencastWriteFunc func(payload any) error
 
-func startScreencast(writeCDP cdpWriteFunc, width, height, everyNthFrame int) error {
+type screencastStartConfig struct {
+	width             int
+	height            int
+	everyNthFrame     int
+	deviceScaleFactor float64
+}
+
+func normalizeScreencastStart(width, height, everyNthFrame int, deviceScaleFactor float64) screencastStartConfig {
 	if everyNthFrame <= 0 {
 		everyNthFrame = 1
 	}
-	width = clampInt(width, 0, 4096)
-	height = clampInt(height, 0, 4096)
-	if width > 0 && height > 0 {
+	if deviceScaleFactor < 1 {
+		deviceScaleFactor = 1
+	}
+	if deviceScaleFactor > 2 {
+		deviceScaleFactor = 2
+	}
+	return screencastStartConfig{
+		width:             clampInt(width, 0, 4096),
+		height:            clampInt(height, 0, 4096),
+		everyNthFrame:     everyNthFrame,
+		deviceScaleFactor: deviceScaleFactor,
+	}
+}
+
+func (cfg screencastStartConfig) key() string {
+	return fmt.Sprintf("%d:%d:%d:%.2f", cfg.width, cfg.height, cfg.everyNthFrame, cfg.deviceScaleFactor)
+}
+
+type screencastController struct {
+	mu       sync.Mutex
+	writeCDP cdpWriteFunc
+	started  bool
+	key      string
+}
+
+func newScreencastController(writeCDP cdpWriteFunc) *screencastController {
+	return &screencastController{writeCDP: writeCDP}
+}
+
+func (c *screencastController) start(width, height, everyNthFrame int, deviceScaleFactor float64) error {
+	cfg := normalizeScreencastStart(width, height, everyNthFrame, deviceScaleFactor)
+	key := cfg.key()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.started && c.key == key {
+		return nil
+	}
+	if c.started {
+		if err := c.writeCDP("Page.stopScreencast", nil); err != nil {
+			return err
+		}
+		c.started = false
+		c.key = ""
+	}
+	if err := startScreencastWithConfig(c.writeCDP, cfg); err != nil {
+		return err
+	}
+	c.started = true
+	c.key = key
+	return nil
+}
+
+func (c *screencastController) stop() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.started {
+		return nil
+	}
+	if err := c.writeCDP("Page.stopScreencast", nil); err != nil {
+		return err
+	}
+	c.started = false
+	c.key = ""
+	return nil
+}
+
+func startScreencastWithConfig(writeCDP cdpWriteFunc, cfg screencastStartConfig) error {
+	if cfg.width > 0 && cfg.height > 0 {
 		if err := writeCDP("Emulation.setDeviceMetricsOverride", map[string]any{
-			"width":             width,
-			"height":            height,
-			"deviceScaleFactor": 1,
+			"width":             cfg.width,
+			"height":            cfg.height,
+			"deviceScaleFactor": cfg.deviceScaleFactor,
 			"mobile":            false,
-			"screenWidth":       width,
-			"screenHeight":      height,
+			"screenWidth":       cfg.width,
+			"screenHeight":      cfg.height,
 		}); err != nil {
 			return err
 		}
 	}
 	params := map[string]any{
-		"format":        "jpeg",
-		"quality":       72,
-		"everyNthFrame": everyNthFrame,
+		"format":        "png",
+		"everyNthFrame": cfg.everyNthFrame,
 	}
-	if width > 0 {
-		params["maxWidth"] = width
+	if cfg.width > 0 {
+		params["maxWidth"] = clampInt(int(float64(cfg.width)*cfg.deviceScaleFactor+0.5), 1, 8192)
 	}
-	if height > 0 {
-		params["maxHeight"] = height
+	if cfg.height > 0 {
+		params["maxHeight"] = clampInt(int(float64(cfg.height)*cfg.deviceScaleFactor+0.5), 1, 8192)
 	}
 	return writeCDP("Page.startScreencast", params)
 }
 
-func screencastClientLoop(ctx context.Context, client *websocket.Conn, writeCDP cdpWriteFunc, requestCaret func() error, requestClipboard func(string) error) error {
-	activeStartKey := ""
+func screencastClientLoop(ctx context.Context, client *websocket.Conn, stream *screencastController, writeCDP cdpWriteFunc, requestCaret func() error, requestClipboard func(string) error) error {
 	for {
 		typ, payload, err := client.Read(ctx)
 		if err != nil {
@@ -1942,19 +2131,12 @@ func screencastClientLoop(ctx context.Context, client *websocket.Conn, writeCDP 
 		}
 		switch strings.TrimSpace(msg.Type) {
 		case "start":
-			everyNthFrame := msg.EveryNthFrame
-			if everyNthFrame <= 0 {
-				everyNthFrame = 1
-			}
-			startKey := fmt.Sprintf("%d:%d:%d", msg.Width, msg.Height, everyNthFrame)
-			if startKey == activeStartKey {
+			if stream == nil {
 				continue
 			}
-			_ = writeCDP("Page.stopScreencast", nil)
-			if err := startScreencast(writeCDP, msg.Width, msg.Height, everyNthFrame); err != nil {
+			if err := stream.start(msg.Width, msg.Height, msg.EveryNthFrame, msg.DeviceScaleFactor); err != nil {
 				return err
 			}
-			activeStartKey = startKey
 		case "mouse":
 			if err := writeCDP("Input.dispatchMouseEvent", mouseEventParams(msg)); err != nil {
 				return err
@@ -1996,6 +2178,9 @@ func screencastClientLoop(ctx context.Context, client *websocket.Conn, writeCDP 
 				}
 			}
 		case "stop":
+			if stream != nil {
+				_ = stream.stop()
+			}
 			return nil
 		}
 	}
@@ -2068,7 +2253,7 @@ func screencastCDPLoop(ctx context.Context, cdp *websocket.Conn, writeClient scr
 		_ = writeCDP("Page.screencastFrameAck", map[string]any{"sessionId": params.SessionID})
 		frame := ScreencastFrame{
 			Type:           "frame",
-			MIME:           "image/jpeg",
+			MIME:           "image/png",
 			Data:           params.Data,
 			FrameSessionID: params.SessionID,
 			Metadata:       params.Metadata,

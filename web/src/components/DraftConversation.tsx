@@ -110,7 +110,7 @@ export function DraftConversation({ token }: { token: string }) {
   const starterPromptsQuery = useQuery({
     queryKey: queryKeys.starterPrompts(),
     queryFn: () => fetchStarterPromptCatalog(),
-    retry: 1,
+    retry: false,
     staleTime: STARTER_PROMPTS_CACHE_TTL_MS,
   });
   const profiles = providersQuery.data?.providers || [];

@@ -303,10 +303,10 @@ func (r *BuiltinRunner) browserClose(ctx context.Context, call Call) Result {
 		if strings.TrimSpace(tab.ID) == "" {
 			continue
 		}
-		if err := r.browser.ReleaseTab(ctx, call.SessionID, tab.ID); err != nil && !errors.Is(err, browser.ErrTabNotFound) {
-			return browserToolError(out, err)
-		}
 		closed++
+	}
+	if err := r.browser.CloseSessionBrowser(ctx, call.SessionID); err != nil {
+		return browserToolError(out, err)
 	}
 	if r.browserState != nil {
 		if err := r.browserState.ClearBrowserState(ctx, call.SessionID); err != nil {

@@ -346,6 +346,12 @@ export async function clearBrowserState(token: string, sessionID: string): Promi
   });
 }
 
+export async function closeBrowserSession(token: string, sessionID: string): Promise<void> {
+  await request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/close`, z.null(), {
+    method: "POST",
+  });
+}
+
 export function createBrowserTab(token: string, sessionID: string): Promise<BrowserTab> {
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs`, browserTab, {
     method: "POST",
@@ -401,6 +407,12 @@ export function forwardBrowserTab(token: string, sessionID: string, tabID: strin
 
 export function reloadBrowserTab(token: string, sessionID: string, tabID: string): Promise<BrowserTab> {
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/reload`, browserTab, {
+    method: "POST",
+  });
+}
+
+export function recoverBrowserTab(token: string, sessionID: string, tabID: string): Promise<BrowserTab> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/recover`, browserTab, {
     method: "POST",
   });
 }

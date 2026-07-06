@@ -32,7 +32,7 @@ export type LocalizedStarterPrompt = {
 
 export const OFFICIAL_STARTER_PROMPTS_URL =
   import.meta.env.VITE_PUDDING_STARTER_PROMPTS_URL ||
-  "https://raw.githubusercontent.com/teatak/pudding/main/catalog/starter-prompts.json";
+  "https://cdn.jsdelivr.net/gh/teatak/pudding@main/catalog/starter-prompts.json";
 
 export const STARTER_PROMPTS_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -41,7 +41,7 @@ export async function fetchStarterPromptCatalog(url = OFFICIAL_STARTER_PROMPTS_U
   if (cached) {
     return cached;
   }
-  const response = await fetch(url, { cache: "no-store" });
+  const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`starter prompts request failed: ${response.status}`);
   }

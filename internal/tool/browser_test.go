@@ -118,7 +118,7 @@ func TestBuiltinBrowserNavigationUsesLatestSessionSlot(t *testing.T) {
 	}
 }
 
-func TestBuiltinBrowserCloseReleasesSessionTabs(t *testing.T) {
+func TestBuiltinBrowserCloseClosesSessionBrowser(t *testing.T) {
 	fake := &fakeToolBrowser{
 		tabs: []browser.TabSnapshot{
 			{ID: "tab_a", SessionID: "sess_browser"},
@@ -139,8 +139,8 @@ func TestBuiltinBrowserCloseReleasesSessionTabs(t *testing.T) {
 	if payload["closed"] != float64(2) || payload["has_tab"] != false {
 		t.Fatalf("unexpected close payload: %+v", payload)
 	}
-	if len(fake.releasedTabIDs) != 2 {
-		t.Fatalf("expected two released tabs, got %+v", fake.releasedTabIDs)
+	if fake.closedSession != "sess_browser" {
+		t.Fatalf("closed session = %q", fake.closedSession)
 	}
 }
 
@@ -148,10 +148,11 @@ type fakeToolBrowser struct {
 	screenshot     browser.ScreenshotResult
 	tabs           []browser.TabSnapshot
 	releasedTabIDs []string
+	closedSession  string
 	reloadTabID    string
 }
 
-func (f *fakeToolBrowser) ProcessMode(context.Context) string {
+func (f *fakeToolBrowser) ProcessMode(context.Context, string) string {
 	return "headless"
 }
 
@@ -169,6 +170,11 @@ func (f *fakeToolBrowser) GetTab(context.Context, string, string) (browser.TabSn
 
 func (f *fakeToolBrowser) ReleaseTab(_ context.Context, _ string, tabID string) error {
 	f.releasedTabIDs = append(f.releasedTabIDs, tabID)
+	return nil
+}
+
+func (f *fakeToolBrowser) CloseSessionBrowser(_ context.Context, sessionID string) error {
+	f.closedSession = sessionID
 	return nil
 }
 

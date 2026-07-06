@@ -91,7 +91,7 @@ import {
 } from "@/lib/localFolders";
 import type { AppSearch } from "@/lib/route";
 import { getSubmitFailure } from "@/lib/submitFailure";
-import { buildDraftSubmitParts, orderedDraftItems } from "@/lib/submitParts";
+import { buildDraftSubmitParts, orderedDraftItems, type DraftPartOrderItem } from "@/lib/submitParts";
 import { getTextAreaCaretClientPoint } from "@/lib/textCaret";
 import { cn } from "@/lib/utils";
 import { useOverlayStore, type AssistantOverlay, type AssistantOverlayPart, type TurnPhaseState } from "@/state/overlayStore";
@@ -135,6 +135,9 @@ type SlashSubmitCommand =
   | { id: "summary"; hint: string };
 
 type ComposerAttachment = SessionDraftAttachment;
+const emptyComposerAttachments: ComposerAttachment[] = [];
+const emptyLocalFolders: LocalFolderPath[] = [];
+const emptyPartOrder: DraftPartOrderItem[] = [];
 
 export function Composer({ droppedFiles, token, session, onSubmitError }: ComposerProps) {
   const sessionID = session.id;
@@ -195,9 +198,9 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     resolver: zodResolver(composerSchema),
     defaultValues: { text: "" },
   });
-  const attachments = useSessionDraftStore((state) => state.drafts[sessionID]?.attachments ?? []);
-  const localFolders = useSessionDraftStore((state) => state.drafts[sessionID]?.localFolders ?? []);
-  const partOrder = useSessionDraftStore((state) => state.drafts[sessionID]?.partOrder ?? []);
+  const attachments = useSessionDraftStore((state) => state.drafts[sessionID]?.attachments ?? emptyComposerAttachments);
+  const localFolders = useSessionDraftStore((state) => state.drafts[sessionID]?.localFolders ?? emptyLocalFolders);
+  const partOrder = useSessionDraftStore((state) => state.drafts[sessionID]?.partOrder ?? emptyPartOrder);
   const setSessionDraftAttachments = useSessionDraftStore((state) => state.setAttachments);
   const setSessionDraftLocalFolders = useSessionDraftStore((state) => state.setLocalFolders);
   const setSessionDraftPartOrder = useSessionDraftStore((state) => state.setPartOrder);

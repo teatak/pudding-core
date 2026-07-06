@@ -129,7 +129,8 @@ type ConnectionForm = {
 
 const authTypes: AuthType[] = ["none", "bearer", "token", "basic", "header", "oauth2"];
 const OFFICIAL_APP_REGISTRY =
-  import.meta.env.VITE_PUDDING_APP_REGISTRY_URL || "https://raw.githubusercontent.com/teatak/pudding-hub/main/apps/registry.json";
+  import.meta.env.VITE_PUDDING_APP_REGISTRY_URL || "https://cdn.jsdelivr.net/gh/teatak/pudding-hub@main/apps/registry.json";
+const APP_CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
 
 export function AppsPane({ token }: { token: string }) {
   const { locale, t } = useI18n();
@@ -149,6 +150,8 @@ export function AppsPane({ token }: { token: string }) {
   const catalogQuery = useQuery({
     queryKey: queryKeys.appCatalog(),
     queryFn: () => fetchAppRegistry(OFFICIAL_APP_REGISTRY),
+    retry: false,
+    staleTime: APP_CATALOG_CACHE_TTL_MS,
   });
   const connectionsQuery = useQuery({
     queryKey: queryKeys.appConnections(),
@@ -187,6 +190,8 @@ export function AppsPane({ token }: { token: string }) {
     ),
     queryFn: () => fetchCatalogAppContent(detailCatalogApp!, OFFICIAL_APP_REGISTRY, detailCatalogRelease!),
     enabled: Boolean(detailCatalogApp && detailCatalogRelease),
+    retry: false,
+    staleTime: APP_CATALOG_CACHE_TTL_MS,
   });
   const selectedSkillQuery = useQuery({
     queryKey: queryKeys.appSkill(selectedSkill?.appID || "", selectedSkill?.skill.path || ""),
@@ -511,7 +516,7 @@ function SectionSpinner() {
 }
 
 async function fetchAppRegistry(url: string): Promise<AppRegistry> {
-  const response = await fetch(url, { cache: "no-store" });
+  const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`app registry request failed: ${response.status}`);
   }
@@ -527,7 +532,7 @@ async function fetchAppPackage(item: AppRegistryItem, registryURL: string, relea
     throw new Error("app package is missing");
   }
   const packageURL = new URL(target.package, registryURL).href;
-  const response = await fetch(packageURL, { cache: "no-store" });
+  const response = await fetch(packageURL);
   if (!response.ok) {
     throw new Error(`app package request failed: ${response.status}`);
   }
