@@ -652,6 +652,10 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
     @apply mt-6;
 }
 
+.pudding-draft-suggestions {
+    max-width: min(64rem, calc(100% - 2.5rem));
+}
+
 .pudding-draft-preset-panel {
     @apply mx-auto w-full max-w-6xl px-5;
 }

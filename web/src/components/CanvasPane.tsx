@@ -25,6 +25,7 @@ import {
   Loader2,
   Maximize2,
   Minimize2,
+  MousePointer2,
   Percent,
   RefreshCw,
   Sheet,
@@ -1087,7 +1088,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
                   <button
                     key={item.id}
                     aria-selected={active}
-                    className="group inline-flex h-8 w-40 max-w-[44vw] shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium whitespace-nowrap transition-colors data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm sm:w-48 sm:max-w-52"
+                    className="group inline-flex h-8 w-40 max-w-[44vw] shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium whitespace-nowrap transition-colors data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm hover:bg-background hover:text-foreground sm:w-48 sm:max-w-52"
                     data-active={active}
                     title={title}
                     type="button"
@@ -1924,12 +1925,9 @@ function CanvasBrowserToolbar({ token, item }: { token: string; item: CanvasItem
   const forwardDisabled = navigationDisabled || !activeTab?.canGoForward;
   const revealDisabled = revealMutation.isPending || tabsQuery.isPending || (!actionTabID && !urlDraft.trim());
   const pendingNavigationAction = navigationMutation.isPending ? navigationMutation.variables : undefined;
-  const toolbarTitle = activeTab
-    ? browserTabTitle(activeTab, payload?.title || t("browser.title"))
-    : browserPayloadHasRealState(payload)
-      ? payload?.title || t("browser.title")
-      : t("browser.title");
-
+  const navButtonClass =
+    "h-7 w-7 rounded-md text-muted-foreground [backface-visibility:hidden] [transform:translateZ(0)] [transition-duration:120ms] [transition-property:background-color,color] hover:text-foreground active:translate-y-0";
+  const navIconClass = "h-3.5 w-3.5 [backface-visibility:hidden] [transform:translateZ(0)]";
   return (
     <form
       className="canvas-window-no-drag flex min-w-0 flex-1 items-center gap-2"
@@ -1942,46 +1940,43 @@ function CanvasBrowserToolbar({ token, item }: { token: string; item: CanvasItem
         }
       }}
     >
-      <div className="w-[60px] shrink-0 truncate text-sm font-medium text-foreground" title={toolbarTitle}>
-        {toolbarTitle}
-      </div>
-      <div className="flex shrink-0 items-center gap-0.5">
+      <div className="grid shrink-0 grid-cols-[repeat(4,28px)] gap-0.5">
         <Button
           aria-label={t("browser.back")}
-          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+          className={navButtonClass}
           disabled={backDisabled}
           size="icon-sm"
           type="button"
           variant="ghost"
           onClick={() => navigationMutation.mutate("back")}
         >
-          {pendingNavigationAction === "back" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowLeft className="h-3.5 w-3.5" />}
+          {pendingNavigationAction === "back" ? <Loader2 className={`${navIconClass} animate-spin`} /> : <ArrowLeft className={navIconClass} />}
         </Button>
         <Button
           aria-label={t("browser.forward")}
-          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+          className={navButtonClass}
           disabled={forwardDisabled}
           size="icon-sm"
           type="button"
           variant="ghost"
           onClick={() => navigationMutation.mutate("forward")}
         >
-          {pendingNavigationAction === "forward" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowRight className="h-3.5 w-3.5" />}
+          {pendingNavigationAction === "forward" ? <Loader2 className={`${navIconClass} animate-spin`} /> : <ArrowRight className={navIconClass} />}
         </Button>
         <Button
           aria-label={t("browser.reload")}
-          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+          className={navButtonClass}
           disabled={navigationDisabled}
           size="icon-sm"
           type="button"
           variant="ghost"
           onClick={() => navigationMutation.mutate("reload")}
         >
-          {pendingNavigationAction === "reload" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          {pendingNavigationAction === "reload" ? <Loader2 className={`${navIconClass} animate-spin`} /> : <RefreshCw className={navIconClass} />}
         </Button>
         <Button
           aria-label={t("browser.reveal")}
-          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+          className={navButtonClass}
           disabled={revealDisabled}
           size="icon-sm"
           title={isExternalBrowser ? t("browser.focusExternal") : t("browser.reveal")}
@@ -1989,7 +1984,7 @@ function CanvasBrowserToolbar({ token, item }: { token: string; item: CanvasItem
           variant="ghost"
           onClick={() => revealMutation.mutate()}
         >
-          {revealMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ExternalLink className="h-3.5 w-3.5" />}
+          {revealMutation.isPending ? <Loader2 className={`${navIconClass} animate-spin`} /> : <ExternalLink className={navIconClass} />}
         </Button>
       </div>
       <div className="group relative flex h-8 min-w-0 flex-1 items-center rounded-md border border-transparent bg-transparent transition-[background-color,box-shadow] hover:bg-background/45 focus-within:bg-background/45 focus-within:shadow-[0_0_0_1px_hsl(var(--border)/0.7),0_0_0_3px_hsl(var(--ring)/0.12)]">
@@ -1999,6 +1994,14 @@ function CanvasBrowserToolbar({ token, item }: { token: string; item: CanvasItem
           placeholder={t("browser.urlPlaceholder")}
           value={urlDraft}
           onChange={(event) => setURLDraft(event.target.value)}
+          onFocus={(event) => {
+            const input = event.currentTarget;
+            window.setTimeout(() => {
+              if (document.activeElement === input) {
+                input.select();
+              }
+            }, 0);
+          }}
         />
         <Button
           aria-label={t("browser.openURL")}
@@ -2225,8 +2228,8 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
     let startFrame = 0;
     let connectTimeout = 0;
     let frameTimeout = 0;
-    let startRetryTimer = 0;
     let hasFrame = false;
+    let lastStartKey = "";
     let retrying = false;
     const ws = new WebSocket(browserScreencastURL(token, ownerSessionID, streamTabID));
     wsRef.current = ws;
@@ -2254,16 +2257,14 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
         frameTimeout = 0;
       }
     };
-    const clearStartRetryTimer = () => {
-      if (startRetryTimer) {
-        window.clearInterval(startRetryTimer);
-        startRetryTimer = 0;
+    const clearStartFrame = () => {
+      if (startFrame) {
+        window.cancelAnimationFrame(startFrame);
+        startFrame = 0;
       }
     };
     const watchForFrame = () => {
-      if (frameTimeout) {
-        return;
-      }
+      clearFrameTimeout();
       frameTimeout = window.setTimeout(() => {
         if (!alive || hasFrame) {
           return;
@@ -2271,7 +2272,7 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
         retryStream();
       }, 4000);
     };
-    const sendStart = () => {
+    const sendStart = (force = false) => {
       if (ws.readyState !== WebSocket.OPEN) {
         return;
       }
@@ -2281,9 +2282,26 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
       if (width < 32 || height < 32) {
         return;
       }
+      const key = `${width}:${height}`;
+      if (!force && key === lastStartKey) {
+        return;
+      }
+      lastStartKey = key;
       hasFrame = false;
-      ws.send(JSON.stringify({ type: "start", width, height, everyNthFrame: 1 }));
+      try {
+        ws.send(JSON.stringify({ type: "start", width, height, everyNthFrame: 1 }));
+      } catch {
+        retryStream();
+        return;
+      }
       watchForFrame();
+    };
+    const scheduleStart = (force = false) => {
+      clearStartFrame();
+      startFrame = window.requestAnimationFrame(() => {
+        startFrame = 0;
+        sendStart(force);
+      });
     };
 
     connectTimeout = window.setTimeout(() => {
@@ -2299,17 +2317,10 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
       clearConnectTimeout();
       setStreamStatus("open");
       if (surfaceRef.current) {
-        resizeObserver = new ResizeObserver(sendStart);
+        resizeObserver = new ResizeObserver(() => scheduleStart(false));
         resizeObserver.observe(surfaceRef.current);
       }
-      startFrame = window.requestAnimationFrame(sendStart);
-      startRetryTimer = window.setInterval(() => {
-        if (hasFrame) {
-          clearStartRetryTimer();
-          return;
-        }
-        sendStart();
-      }, 300);
+      scheduleStart(true);
     };
     ws.onmessage = (event) => {
       if (!alive) {
@@ -2319,7 +2330,6 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
         const message = JSON.parse(String(event.data)) as BrowserScreencastMessage;
         if (message.type === "frame") {
           hasFrame = true;
-          clearStartRetryTimer();
           clearFrameTimeout();
           setStreamFrame(message);
         } else if (message.type === "caret") {
@@ -2349,7 +2359,7 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
       setStreamStatus((current) => (current === "external" ? current : "closed"));
       setStreamError("");
       clearConnectTimeout();
-      clearStartRetryTimer();
+      clearStartFrame();
       clearFrameTimeout();
     };
     ws.onclose = () => {
@@ -2357,18 +2367,15 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
         return;
       }
       clearConnectTimeout();
-      clearStartRetryTimer();
+      clearStartFrame();
       clearFrameTimeout();
       setStreamStatus((current) => (current === "error" || current === "external" ? current : "closed"));
     };
     return () => {
       alive = false;
       resizeObserver?.disconnect();
-      if (startFrame) {
-        window.cancelAnimationFrame(startFrame);
-      }
       clearConnectTimeout();
-      clearStartRetryTimer();
+      clearStartFrame();
       clearFrameTimeout();
       if (cursorPulseTimerRef.current) {
         window.clearTimeout(cursorPulseTimerRef.current);
@@ -2861,8 +2868,7 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
               {llmCursorPulse.visible ? (
                 <div key={llmCursorPulse.key} className="absolute inset-0 rounded-full bg-sky-400/35 animate-ping" />
               ) : null}
-              <div className="absolute top-0 left-0 h-3 w-3 rounded-full border border-white bg-sky-500 shadow-[0_0_0_2px_rgba(14,165,233,0.35),0_2px_8px_rgba(0,0,0,0.35)]" />
-              <div className="absolute top-2 left-2 h-2 w-2 rounded-full bg-sky-500/70" />
+              <MousePointer2 className="absolute top-0 left-0 h-5 w-5 fill-sky-500 text-white drop-shadow-[0_2px_5px_rgba(0,0,0,0.45)] [filter:drop-shadow(0_0_2px_rgba(14,165,233,0.8))]" />
             </div>
           </div>
         ) : null}

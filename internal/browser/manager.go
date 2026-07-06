@@ -1927,6 +1927,7 @@ func startScreencast(writeCDP cdpWriteFunc, width, height, everyNthFrame int) er
 }
 
 func screencastClientLoop(ctx context.Context, client *websocket.Conn, writeCDP cdpWriteFunc, requestCaret func() error, requestClipboard func(string) error) error {
+	activeStartKey := ""
 	for {
 		typ, payload, err := client.Read(ctx)
 		if err != nil {
@@ -1941,10 +1942,19 @@ func screencastClientLoop(ctx context.Context, client *websocket.Conn, writeCDP 
 		}
 		switch strings.TrimSpace(msg.Type) {
 		case "start":
+			everyNthFrame := msg.EveryNthFrame
+			if everyNthFrame <= 0 {
+				everyNthFrame = 1
+			}
+			startKey := fmt.Sprintf("%d:%d:%d", msg.Width, msg.Height, everyNthFrame)
+			if startKey == activeStartKey {
+				continue
+			}
 			_ = writeCDP("Page.stopScreencast", nil)
-			if err := startScreencast(writeCDP, msg.Width, msg.Height, msg.EveryNthFrame); err != nil {
+			if err := startScreencast(writeCDP, msg.Width, msg.Height, everyNthFrame); err != nil {
 				return err
 			}
+			activeStartKey = startKey
 		case "mouse":
 			if err := writeCDP("Input.dispatchMouseEvent", mouseEventParams(msg)); err != nil {
 				return err

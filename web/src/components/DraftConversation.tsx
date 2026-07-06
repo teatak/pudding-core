@@ -68,7 +68,7 @@ import {
   type LocalFolderPath,
 } from "@/lib/localFolders";
 import type { AppSearch } from "@/lib/route";
-import { fetchStarterPromptCatalog, localizeStarterPrompts } from "@/lib/starterPrompts";
+import { fetchStarterPromptCatalog, localizeStarterPrompts, STARTER_PROMPTS_CACHE_TTL_MS } from "@/lib/starterPrompts";
 import { getSubmitFailure } from "@/lib/submitFailure";
 import { buildDraftSubmitParts, orderedDraftItems } from "@/lib/submitParts";
 import { getTextAreaCaretClientPoint } from "@/lib/textCaret";
@@ -111,7 +111,7 @@ export function DraftConversation({ token }: { token: string }) {
     queryKey: queryKeys.starterPrompts(),
     queryFn: () => fetchStarterPromptCatalog(),
     retry: 1,
-    staleTime: 5 * 60 * 1000,
+    staleTime: STARTER_PROMPTS_CACHE_TTL_MS,
   });
   const profiles = providersQuery.data?.providers || [];
   const hasConfiguredModel = profiles.some((profile) => profile.models.some((model) => model.id));
@@ -281,7 +281,7 @@ export function DraftConversation({ token }: { token: string }) {
             onSubmitError={setSubmitError}
           />
           {!showPresetSetup && starterPrompts.length > 0 ? (
-            <ChatColumn className="mt-8 flex flex-wrap items-center justify-center gap-2 px-2">
+            <ChatColumn className="pudding-draft-suggestions mt-8 flex flex-wrap items-center justify-center gap-2 px-2">
               {starterPrompts.map((item, index) => {
                 return (
                   <button

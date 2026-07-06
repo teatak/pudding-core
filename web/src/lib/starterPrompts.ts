@@ -16,6 +16,11 @@ const starterPromptCatalog = z.object({
   items: z.array(starterPromptItem),
 });
 
+const starterPromptCache = z.object({
+  expiresAt: z.number(),
+  data: starterPromptCatalog,
+});
+
 export type StarterPromptCatalogItem = z.infer<typeof starterPromptItem>;
 export type StarterPromptCatalog = z.infer<typeof starterPromptCatalog>;
 export type LocalizedStarterPrompt = {
@@ -29,12 +34,20 @@ export const OFFICIAL_STARTER_PROMPTS_URL =
   import.meta.env.VITE_PUDDING_STARTER_PROMPTS_URL ||
   "https://raw.githubusercontent.com/teatak/pudding/main/catalog/starter-prompts.json";
 
+export const STARTER_PROMPTS_CACHE_TTL_MS = 5 * 60 * 1000;
+
 export async function fetchStarterPromptCatalog(url = OFFICIAL_STARTER_PROMPTS_URL): Promise<StarterPromptCatalog> {
+  const cached = readStarterPromptCache(url);
+  if (cached) {
+    return cached;
+  }
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`starter prompts request failed: ${response.status}`);
   }
-  return starterPromptCatalog.parse(await response.json());
+  const data = starterPromptCatalog.parse(await response.json());
+  writeStarterPromptCache(url, data);
+  return data;
 }
 
 export function localizeStarterPrompts(items: StarterPromptCatalogItem[], locale: Locale): LocalizedStarterPrompt[] {
@@ -56,4 +69,39 @@ function localizeText(value: Record<string, string>, locale: Locale) {
     Object.values(value).find((text) => text.trim())?.trim() ||
     ""
   );
+}
+
+function readStarterPromptCache(url: string): StarterPromptCatalog | null {
+  try {
+    const raw = window.localStorage.getItem(starterPromptCacheKey(url));
+    if (!raw) {
+      return null;
+    }
+    const cached = starterPromptCache.parse(JSON.parse(raw));
+    if (cached.expiresAt <= Date.now()) {
+      window.localStorage.removeItem(starterPromptCacheKey(url));
+      return null;
+    }
+    return cached.data;
+  } catch {
+    return null;
+  }
+}
+
+function writeStarterPromptCache(url: string, data: StarterPromptCatalog) {
+  try {
+    window.localStorage.setItem(
+      starterPromptCacheKey(url),
+      JSON.stringify({
+        expiresAt: Date.now() + STARTER_PROMPTS_CACHE_TTL_MS,
+        data,
+      }),
+    );
+  } catch {
+    // 缓存失败不影响远程加载结果。
+  }
+}
+
+function starterPromptCacheKey(url: string) {
+  return `pudding.starterPrompts:${url}`;
 }
