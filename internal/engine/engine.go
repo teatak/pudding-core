@@ -910,14 +910,15 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 	if v, ok := resolved.config.MaxToolLoops(); ok {
 		maxLoops = v
 	}
-	for loop := 0; ; loop++ {
+	consecutiveToolOnlyLoops := 0
+	for {
 		req := baseReq
 		req.Messages = requestMessagesWithTurnParts(baseReq.Messages, parts.Parts(), sessionID, e.attachmentHome, resolved.config)
 		ch, err := client.Stream(ctx, req)
 		if err != nil {
 			return store.TurnFailed, fmt.Sprintf("provider: %v", err), currentMode
 		}
-		finish, status, errMsg := e.consumeStream(ctx, sessionID, turnID, resolved.model, ch, parts)
+		finish, status, errMsg, assistantOutput := e.consumeStream(ctx, sessionID, turnID, resolved.model, ch, parts)
 		if status != store.TurnRunning {
 			return status, errMsg, currentMode
 		}
@@ -933,8 +934,13 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 		if len(baseReq.Tools) == 0 {
 			return store.TurnFailed, "provider requested tool calls but no tools are available", currentMode
 		}
-		if loop >= maxLoops {
-			return store.TurnFailed, "max tool loops exceeded", currentMode
+		if assistantOutput {
+			consecutiveToolOnlyLoops = 0
+		} else {
+			if consecutiveToolOnlyLoops >= maxLoops {
+				return store.TurnFailed, "max tool loops exceeded", currentMode
+			}
+			consecutiveToolOnlyLoops++
 		}
 		if err := e.commitTurnParts(turnID, parts, true); err != nil {
 			return store.TurnFailed, fmt.Sprintf("append output: %v", err), currentMode
@@ -1003,16 +1009,17 @@ func modelSupportsTools(cfg provider.ModelConfig) bool {
 	return cfg.Capabilities == nil || cfg.Capabilities.Tools
 }
 
-func (e *Engine) consumeStream(ctx context.Context, sessionID, turnID, model string, ch <-chan provider.Chunk, parts *turnPartAccumulator) (provider.FinishReason, store.TurnStatus, string) {
+func (e *Engine) consumeStream(ctx context.Context, sessionID, turnID, model string, ch <-chan provider.Chunk, parts *turnPartAccumulator) (provider.FinishReason, store.TurnStatus, string, bool) {
 	coalescer := newStreamEventCoalescer(e.hub)
 	defer coalescer.Flush()
 	var usage provider.UsageInfo
 	usageSeen := false
+	assistantOutput := false
 
 	for {
 		select {
 		case <-ctx.Done():
-			return "", store.TurnCancelled, ""
+			return "", store.TurnCancelled, "", assistantOutput
 		case <-coalescer.C():
 			coalescer.Flush()
 		case chunk, ok := <-ch:
@@ -1020,22 +1027,22 @@ func (e *Engine) consumeStream(ctx context.Context, sessionID, turnID, model str
 				// provider 违反契约提前关 channel:cancel 中的截断仍按 cancelled 收尾,
 				// 避免用户主动停止被记成 failed。
 				if ctx.Err() != nil {
-					return "", store.TurnCancelled, ""
+					return "", store.TurnCancelled, "", assistantOutput
 				}
 				if usageSeen {
 					e.recordUsage(ctx, sessionID, model, usage, 1)
 				}
-				return "", store.TurnFailed, "provider stream ended without terminal chunk"
+				return "", store.TurnFailed, "provider stream ended without terminal chunk", assistantOutput
 			}
 			switch {
 			case chunk.Err != nil:
 				if errors.Is(chunk.Err, context.Canceled) {
-					return "", store.TurnCancelled, ""
+					return "", store.TurnCancelled, "", assistantOutput
 				}
 				if usageSeen {
 					e.recordUsage(ctx, sessionID, model, usage, 1)
 				}
-				return "", store.TurnFailed, chunk.Err.Error()
+				return "", store.TurnFailed, chunk.Err.Error(), assistantOutput
 			case chunk.Usage != nil:
 				mergeUsageInfo(&usage, *chunk.Usage)
 				usageSeen = true
@@ -1045,11 +1052,11 @@ func (e *Engine) consumeStream(ctx context.Context, sessionID, turnID, model str
 				} else {
 					e.recordUsage(ctx, sessionID, model, provider.UsageInfo{}, 1)
 				}
-				return chunk.Finish, store.TurnRunning, ""
+				return chunk.Finish, store.TurnRunning, "", assistantOutput
 			case chunk.Tool != nil:
 				callID, name, argsDelta := parts.AppendTool(*chunk.Tool)
 				if err := e.commitTurnParts(turnID, parts, false); err != nil {
-					return "", store.TurnFailed, fmt.Sprintf("append output: %v", err)
+					return "", store.TurnFailed, fmt.Sprintf("append output: %v", err), assistantOutput
 				}
 				coalescer.Push(event.Event{
 					SessionID: sessionID,
@@ -1068,9 +1075,10 @@ func (e *Engine) consumeStream(ctx context.Context, sessionID, turnID, model str
 				if part != provider.PartText && part != provider.PartThought {
 					continue
 				}
+				assistantOutput = true
 				parts.AppendDelta(part, chunk.Delta)
 				if err := e.commitTurnParts(turnID, parts, false); err != nil {
-					return "", store.TurnFailed, fmt.Sprintf("append output: %v", err)
+					return "", store.TurnFailed, fmt.Sprintf("append output: %v", err), assistantOutput
 				}
 				coalescer.Push(event.Event{
 					SessionID: sessionID,

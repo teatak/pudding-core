@@ -186,8 +186,10 @@ type BrowserCanvasPayload = {
   url?: string;
   title?: string;
   faviconURL?: string;
-  mode?: "headless" | "external";
+  mode?: BrowserProcessMode;
 };
+type BrowserProcessMode = "headless" | "external";
+type BrowserTabsData = { tabs: BrowserTab[]; processMode?: BrowserProcessMode };
 type CanvasSurface = "canvas" | "browser";
 
 type BrowserScreencastMetadata = {
@@ -221,6 +223,7 @@ type BrowserScreencastMessage =
   | { type: "error"; error: string };
 type BrowserNavigationAction = "back" | "forward" | "reload";
 
+const SESSION_SURFACE_STORAGE_KEY = "pudding.canvas.sessionSurface.v1";
 const MIN_W = 260;
 const MIN_H = 160;
 const DEFAULT_W = 420;
@@ -381,7 +384,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   const hasSeenCanvasItemsRef = useRef(false);
   const browserAutoSwitchKeyRef = useRef("");
   const hasSeenBrowserTabStateRef = useRef(false);
-  const sessionSurfaceRef = useRef<Record<string, CanvasSurface>>({});
+  const sessionSurfaceRef = useRef<Record<string, CanvasSurface>>(readSessionSurfaces());
   const resizeStartWindowsRef = useRef<Record<string, WindowState>>({});
   const resizeStartRestoresRef = useRef<Record<string, WindowState | undefined>>({});
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
@@ -399,6 +402,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   const enabled = Boolean(token && actorSessionID);
   const rememberSessionSurface = (targetSessionID: string, surface: CanvasSurface) => {
     sessionSurfaceRef.current = { ...sessionSurfaceRef.current, [targetSessionID]: surface };
+    writeSessionSurfaces(sessionSurfaceRef.current);
   };
   const setActiveSurface = (surface: CanvasSurface) => {
     if (actorSessionID) {
@@ -640,7 +644,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       const existingTabs = browserTabsQuery.data || (await listBrowserTabs(token, targetSessionID));
       const payload = browserPayload;
       let tab = preferredBrowserTab(existingTabs.tabs, payload);
-      if (!tab && browserPayloadHasRealState(payload) && payload?.url) {
+      if (!tab && payload?.mode !== "external" && browserPayloadHasRealState(payload) && payload?.url) {
         tab = await openBrowserURL(token, targetSessionID, { url: payload.url });
       }
       const itemTitle = tab ? browserTabTitle(tab, title) : title;
@@ -780,6 +784,32 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       }
       return { itemID: targetItemID, sessionID: targetSessionID };
     },
+    onMutate: () => {
+      const targetSessionID = actorSessionID;
+      const itemID = browserItem?.id;
+      const tabID = activeBrowserTab?.id;
+      if (!targetSessionID) {
+        return;
+      }
+      rememberSessionSurface(targetSessionID, "canvas");
+      if (currentActorSessionIDRef.current === targetSessionID) {
+        browserAutoSwitchKeyRef.current = "";
+        setBrowserActive(false);
+      }
+      if (itemID) {
+        queryClient.setQueryData(queryKeys.canvasItems(targetSessionID), (current: { items: CanvasItem[] } | undefined) =>
+          current ? { items: current.items.filter((item) => item.id !== itemID) } : current,
+        );
+        restoreWindowsRef.current = withoutKey(restoreWindowsRef.current, itemID);
+        setRestoreWindows(restoreWindowsRef.current);
+        setDraftWindows((prev) => withoutKey(prev, itemID));
+      }
+      queryClient.setQueryData(queryKeys.browserTabs(targetSessionID), (current: BrowserTabsData | undefined) => ({
+        tabs: tabID ? (current?.tabs || []).filter((tab) => tab.id !== tabID) : [],
+        processMode: current?.processMode,
+      }));
+      queryClient.setQueryData(queryKeys.browserState(targetSessionID), { hasState: false, sessionID: targetSessionID });
+    },
     onSuccess: ({ itemID, sessionID: targetSessionID }) => {
       rememberSessionSurface(targetSessionID, "canvas");
       if (currentActorSessionIDRef.current === targetSessionID) {
@@ -787,15 +817,25 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
         setBrowserActive(false);
       }
       if (itemID) {
+        queryClient.setQueryData(queryKeys.canvasItems(targetSessionID), (current: { items: CanvasItem[] } | undefined) =>
+          current ? { items: current.items.filter((item) => item.id !== itemID) } : current,
+        );
         restoreWindowsRef.current = withoutKey(restoreWindowsRef.current, itemID);
         setRestoreWindows(restoreWindowsRef.current);
         setDraftWindows((prev) => withoutKey(prev, itemID));
       }
+      queryClient.setQueryData(queryKeys.browserTabs(targetSessionID), { tabs: [] });
+      queryClient.setQueryData(queryKeys.browserState(targetSessionID), { hasState: false, sessionID: targetSessionID });
       void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(targetSessionID) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(targetSessionID) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(targetSessionID) });
     },
     onError: () => {
+      if (actorSessionID) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(actorSessionID) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(actorSessionID) });
+      }
       toast.error(t("browser.releaseFailed"));
     },
   });
@@ -1743,7 +1783,8 @@ function CanvasBrowserToolbar({ token, item }: { token: string; item: CanvasItem
   });
   const tabs = tabsQuery.data?.tabs || [];
   const activeTab = preferredBrowserTab(tabs, payload);
-  const isExternalBrowser = activeTab ? activeTab.mode === "external" : browserPayloadHasRealState(payload) && payload?.mode === "external";
+  const processMode = tabsQuery.data?.processMode || activeTab?.mode || payload?.mode;
+  const isExternalBrowser = processMode === "external";
   const actionTabID = activeTab?.id || payload?.tabID;
 
   useEffect(() => {
@@ -1776,8 +1817,9 @@ function CanvasBrowserToolbar({ token, item }: { token: string; item: CanvasItem
       },
       window: item.window,
     });
-    queryClient.setQueryData(queryKeys.browserTabs(ownerSessionID), (current: { tabs: BrowserTab[] } | undefined) => ({
+    queryClient.setQueryData(queryKeys.browserTabs(ownerSessionID), (current: BrowserTabsData | undefined) => ({
       tabs: upsertBrowserTab(current?.tabs || [], tab),
+      processMode: tab.mode || current?.processMode,
     }));
     void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(ownerSessionID) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(ownerSessionID) });
@@ -1851,6 +1893,8 @@ function CanvasBrowserToolbar({ token, item }: { token: string; item: CanvasItem
     onError: () => toast.error(t("browser.revealFailed")),
   });
   const navigationDisabled = !activeTab || isExternalBrowser || tabsQuery.isPending || navigationMutation.isPending;
+  const backDisabled = navigationDisabled || !activeTab?.canGoBack;
+  const forwardDisabled = navigationDisabled || !activeTab?.canGoForward;
   const revealDisabled = revealMutation.isPending || tabsQuery.isPending || (!actionTabID && !urlDraft.trim());
   const pendingNavigationAction = navigationMutation.isPending ? navigationMutation.variables : undefined;
   const toolbarTitle = activeTab
@@ -1878,7 +1922,7 @@ function CanvasBrowserToolbar({ token, item }: { token: string; item: CanvasItem
         <Button
           aria-label={t("browser.back")}
           className="h-7 w-7 text-muted-foreground hover:text-foreground"
-          disabled={navigationDisabled}
+          disabled={backDisabled}
           size="icon-sm"
           type="button"
           variant="ghost"
@@ -1889,7 +1933,7 @@ function CanvasBrowserToolbar({ token, item }: { token: string; item: CanvasItem
         <Button
           aria-label={t("browser.forward")}
           className="h-7 w-7 text-muted-foreground hover:text-foreground"
-          disabled={navigationDisabled}
+          disabled={forwardDisabled}
           size="icon-sm"
           type="button"
           variant="ghost"
@@ -1958,6 +2002,7 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
   const skipNextInputTextRef = useRef("");
   const lastMouseMoveAtRef = useRef(0);
   const mouseButtonsRef = useRef(0);
+  const repairBrowserTabKeyRef = useRef("");
   const payload = browserPayloadForItem(item);
   const ownerSessionID = payload?.sessionID || item.sourceSessionID;
   const [streamFrame, setStreamFrame] = useState<BrowserScreencastFrame | null>(null);
@@ -1977,8 +2022,11 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
   const activeTab = preferredBrowserTab(tabs, payload);
   const busyTitle = tabsQuery.isPending ? t("browser.loading") : t("browser.empty");
   const hasRealPayloadState = browserPayloadHasRealState(payload);
-  const isExternalBrowser = activeTab ? activeTab.mode === "external" : hasRealPayloadState && payload?.mode === "external";
+  const processMode = tabsQuery.data?.processMode || activeTab?.mode || payload?.mode;
+  const isExternalBrowser = processMode === "external";
   const actionTabID = activeTab?.id || payload?.tabID;
+  const streamTabID = activeTab?.id || "";
+  const [streamAttempt, setStreamAttempt] = useState(0);
 
   useEffect(() => {
     if (!isExternalBrowser) {
@@ -2012,13 +2060,64 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
       },
       window: item.window,
     });
-    queryClient.setQueryData(queryKeys.browserTabs(ownerSessionID), (current: { tabs: BrowserTab[] } | undefined) => ({
+    queryClient.setQueryData(queryKeys.browserTabs(ownerSessionID), (current: BrowserTabsData | undefined) => ({
       tabs: upsertBrowserTab(current?.tabs || [], tab),
+      processMode: tab.mode || current?.processMode,
     }));
     void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(ownerSessionID) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(ownerSessionID) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(ownerSessionID) });
   };
+
+  const repairTabMutation = useMutation({
+    mutationFn: async () => {
+      if (!ownerSessionID || !payload?.url) {
+        throw new Error("browser tab missing");
+      }
+      return openBrowserURL(token, ownerSessionID, { url: payload.url });
+    },
+    onSuccess: (tab) => {
+      void persistTab(tab);
+    },
+    onError: () => {
+      setStreamStatus("closed");
+      setStreamError("");
+      repairBrowserTabKeyRef.current = "";
+    },
+  });
+
+  useEffect(() => {
+    if (
+      !token ||
+      !ownerSessionID ||
+      activeTab ||
+      isExternalBrowser ||
+      tabsQuery.isPending ||
+      repairTabMutation.isPending ||
+      !payload?.url ||
+      browserURLIsBlank(payload.url)
+    ) {
+      return;
+    }
+    const key = `${ownerSessionID}:${payload.tabID || ""}:${payload.url}`;
+    if (repairBrowserTabKeyRef.current === key) {
+      return;
+    }
+    repairBrowserTabKeyRef.current = key;
+    setStreamFrame(null);
+    setStreamStatus("connecting");
+    setStreamError("");
+    repairTabMutation.mutate();
+  }, [
+    activeTab?.id,
+    isExternalBrowser,
+    ownerSessionID,
+    payload?.tabID,
+    payload?.url,
+    repairTabMutation.isPending,
+    tabsQuery.isPending,
+    token,
+  ]);
 
   const internalMutation = useMutation({
     mutationFn: async () => {
@@ -2050,7 +2149,7 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
   });
 
   useEffect(() => {
-    if (!token || !ownerSessionID || !activeTab?.id) {
+    if (!token || !ownerSessionID || !streamTabID) {
       setStreamFrame(null);
       setStreamStatus("closed");
       return;
@@ -2063,12 +2162,55 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
     }
     let alive = true;
     let resizeObserver: ResizeObserver | null = null;
-    const ws = new WebSocket(browserScreencastURL(token, ownerSessionID, activeTab.id));
+    let startFrame = 0;
+    let connectTimeout = 0;
+    let frameTimeout = 0;
+    let startRetryTimer = 0;
+    let hasFrame = false;
+    let retrying = false;
+    const ws = new WebSocket(browserScreencastURL(token, ownerSessionID, streamTabID));
     wsRef.current = ws;
     setStreamFrame(null);
     setStreamStatus("connecting");
     setStreamError("");
 
+    const retryStream = () => {
+      if (!alive || retrying) {
+        return;
+      }
+      retrying = true;
+      ws.close();
+      setStreamAttempt((value) => value + 1);
+    };
+    const clearConnectTimeout = () => {
+      if (connectTimeout) {
+        window.clearTimeout(connectTimeout);
+        connectTimeout = 0;
+      }
+    };
+    const clearFrameTimeout = () => {
+      if (frameTimeout) {
+        window.clearTimeout(frameTimeout);
+        frameTimeout = 0;
+      }
+    };
+    const clearStartRetryTimer = () => {
+      if (startRetryTimer) {
+        window.clearInterval(startRetryTimer);
+        startRetryTimer = 0;
+      }
+    };
+    const watchForFrame = () => {
+      if (frameTimeout) {
+        return;
+      }
+      frameTimeout = window.setTimeout(() => {
+        if (!alive || hasFrame) {
+          return;
+        }
+        retryStream();
+      }, 4000);
+    };
     const sendStart = () => {
       if (ws.readyState !== WebSocket.OPEN) {
         return;
@@ -2076,19 +2218,38 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
       const rect = surfaceRef.current?.getBoundingClientRect();
       const width = Math.max(1, Math.round(rect?.width || 0));
       const height = Math.max(1, Math.round(rect?.height || 0));
+      if (width < 32 || height < 32) {
+        return;
+      }
+      hasFrame = false;
       ws.send(JSON.stringify({ type: "start", width, height, everyNthFrame: 1 }));
+      watchForFrame();
     };
+
+    connectTimeout = window.setTimeout(() => {
+      if (ws.readyState !== WebSocket.OPEN) {
+        retryStream();
+      }
+    }, 4000);
 
     ws.onopen = () => {
       if (!alive) {
         return;
       }
+      clearConnectTimeout();
       setStreamStatus("open");
-      sendStart();
       if (surfaceRef.current) {
         resizeObserver = new ResizeObserver(sendStart);
         resizeObserver.observe(surfaceRef.current);
       }
+      startFrame = window.requestAnimationFrame(sendStart);
+      startRetryTimer = window.setInterval(() => {
+        if (hasFrame) {
+          clearStartRetryTimer();
+          return;
+        }
+        sendStart();
+      }, 300);
     };
     ws.onmessage = (event) => {
       if (!alive) {
@@ -2097,6 +2258,9 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
       try {
         const message = JSON.parse(String(event.data)) as BrowserScreencastMessage;
         if (message.type === "frame") {
+          hasFrame = true;
+          clearStartRetryTimer();
+          clearFrameTimeout();
           setStreamFrame(message);
         } else if (message.type === "caret") {
           moveTextInputToViewportPoint(message);
@@ -2105,6 +2269,7 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
           setStreamStatus("external");
           setStreamError("");
         } else if (message.type === "error") {
+          clearFrameTimeout();
           setStreamStatus("error");
           setStreamError(message.error);
         }
@@ -2118,25 +2283,34 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
       }
       setStreamStatus((current) => (current === "external" ? current : "closed"));
       setStreamError("");
+      clearConnectTimeout();
+      clearStartRetryTimer();
+      clearFrameTimeout();
     };
     ws.onclose = () => {
       if (!alive) {
         return;
       }
+      clearConnectTimeout();
+      clearStartRetryTimer();
+      clearFrameTimeout();
       setStreamStatus((current) => (current === "error" || current === "external" ? current : "closed"));
     };
     return () => {
       alive = false;
       resizeObserver?.disconnect();
+      if (startFrame) {
+        window.cancelAnimationFrame(startFrame);
+      }
+      clearConnectTimeout();
+      clearStartRetryTimer();
+      clearFrameTimeout();
       if (wsRef.current === ws) {
         wsRef.current = null;
       }
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "stop" }));
-      }
       ws.close();
     };
-  }, [token, ownerSessionID, activeTab?.id, isExternalBrowser]);
+  }, [token, ownerSessionID, streamTabID, isExternalBrowser, streamAttempt]);
 
   const sendScreencast = (message: Record<string, unknown>) => {
     const ws = wsRef.current;
@@ -2440,7 +2614,7 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
     sendScreencast(browserKeyMessage(event, "keyUp"));
   };
 
-  const busy = tabsQuery.isPending || streamStatus === "connecting";
+  const busy = streamStatus === "connecting" || (streamStatus === "open" && !streamFrame) || repairTabMutation.isPending || (!streamTabID && tabsQuery.isPending);
   const title = activeTab?.title?.trim() || (hasRealPayloadState ? payload?.title : "") || busyTitle;
 
   if (!ownerSessionID) {
@@ -4022,8 +4196,41 @@ function browserPayloadFromState(state: BrowserState | undefined): BrowserCanvas
     url: state.url,
     title: state.title,
     faviconURL: state.faviconURL,
-    mode: state.mode,
+    mode: state.processMode || state.mode,
   };
+}
+
+function readSessionSurfaces(): Record<string, CanvasSurface> {
+  if (typeof window === "undefined") {
+    return {};
+  }
+  try {
+    const raw = window.localStorage.getItem(SESSION_SURFACE_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const out: Record<string, CanvasSurface> = {};
+    Object.entries(parsed).forEach(([sessionID, surface]) => {
+      if (surface === "canvas" || surface === "browser") {
+        out[sessionID] = surface;
+      }
+    });
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writeSessionSurfaces(surfaces: Record<string, CanvasSurface>) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(SESSION_SURFACE_STORAGE_KEY, JSON.stringify(surfaces));
+  } catch {
+    // Best-effort UI preference.
+  }
 }
 
 function closedCanvasItemIsBrowser(item: ClosedCanvasItem): boolean {

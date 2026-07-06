@@ -366,7 +366,6 @@ func (r *BuiltinRunner) syncBrowserState(ctx context.Context, sessionID string, 
 		URL:        tab.URL,
 		Title:      tab.Title,
 		FaviconURL: tab.FaviconURL,
-		Mode:       tab.Mode,
 	}
 	if err := store.NormalizeBrowserStateInput(&in); err != nil {
 		return r.browserState.ClearBrowserState(ctx, sessionID)

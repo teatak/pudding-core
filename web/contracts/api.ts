@@ -110,6 +110,7 @@ export const browserState = z.object({
   title: z.string().optional(),
   faviconURL: z.string().optional(),
   mode: z.enum(["headless", "external"]).optional(),
+  processMode: z.enum(["headless", "external"]).optional(),
   recoverable: z.boolean().optional(),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
@@ -489,6 +490,8 @@ export const browserTab = z.object({
   title: z.string(),
   faviconURL: z.string().optional(),
   mode: z.enum(["headless", "external"]).optional(),
+  canGoBack: z.boolean().optional(),
+  canGoForward: z.boolean().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -539,7 +542,10 @@ export const browserActionResult = z.object({
 });
 export type BrowserActionResult = z.infer<typeof browserActionResult>;
 
-export const listBrowserTabsResponse = z.object({ tabs: z.array(browserTab) });
+export const listBrowserTabsResponse = z.object({
+  tabs: z.array(browserTab),
+  processMode: z.enum(["headless", "external"]).optional(),
+});
 export const browserOpenRequest = z.object({ url: z.string().min(1) });
 export const browserObserveRequest = z.object({
   maxTextChars: z.number().optional(),
@@ -550,6 +556,7 @@ export const browserClickRequest = z.object({
   selector: z.string().optional(),
   x: z.number().optional(),
   y: z.number().optional(),
+  method: z.enum(["auto", "pointer", "dom"]).optional(),
 });
 export const browserTypeRequest = z.object({
   selector: z.string().optional(),

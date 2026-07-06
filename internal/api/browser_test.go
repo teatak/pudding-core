@@ -98,10 +98,10 @@ func TestBrowserTabsAreSessionScoped(t *testing.T) {
 		}
 	}
 
-	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/tabs/"+tab.ID+"/click", map[string]string{"selector": "#save"})
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/tabs/"+tab.ID+"/click", map[string]string{"selector": "#save", "method": "pointer"})
 	clicked := decodeJSON[browser.ActionResult](t, resp)
-	if resp.StatusCode != http.StatusOK || clicked.Action != "click" || browserSvc.clickSession != "sess_a" {
-		t.Fatalf("click status=%d result=%+v session=%q", resp.StatusCode, clicked, browserSvc.clickSession)
+	if resp.StatusCode != http.StatusOK || clicked.Action != "click" || browserSvc.clickSession != "sess_a" || browserSvc.clickMethod != "pointer" {
+		t.Fatalf("click status=%d result=%+v session=%q method=%q", resp.StatusCode, clicked, browserSvc.clickSession, browserSvc.clickMethod)
 	}
 
 	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/tabs/"+tab.ID+"/type", map[string]any{"selector": "#name", "text": "Pudding", "clear": true})
@@ -193,6 +193,106 @@ func TestBrowserStateAPITracksRecoverableSessionState(t *testing.T) {
 	}
 }
 
+func TestBrowserStateAPIRecoversExternalBinding(t *testing.T) {
+	srv, st, browserSvc := newBrowserTestServer(t)
+	ctx := context.Background()
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_external", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutBrowserState(ctx, store.BrowserStateInput{
+		SessionID: "sess_external",
+		TabID:     "tab_external",
+		URL:       "https://www.sohu.com/",
+		Title:     "搜狐",
+		Mode:      "external",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	type stateResponse struct {
+		HasState    bool   `json:"hasState"`
+		TabID       string `json:"tabID"`
+		URL         string `json:"url"`
+		Recoverable bool   `json:"recoverable"`
+	}
+	resp := req(t, http.MethodGet, srv.URL+"/sessions/sess_external/browser/state", nil)
+	state := decodeJSON[stateResponse](t, resp)
+	if resp.StatusCode != http.StatusOK || !state.HasState || state.TabID != "tab_external" || state.URL != "https://www.sohu.com/" || state.Recoverable {
+		t.Fatalf("external recovery status=%d state=%+v", resp.StatusCode, state)
+	}
+	if _, ok := browserSvc.tabs["tab_external"]; !ok {
+		t.Fatalf("external tab was not rebound")
+	}
+}
+
+func TestBrowserStateDoesNotPersistProcessMode(t *testing.T) {
+	srv, st, browserSvc := newBrowserTestServer(t)
+	ctx := context.Background()
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_mode", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_mode/browser/open", map[string]string{"url": "https://www.google.com/"})
+	tab := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("open status=%d tab=%+v", resp.StatusCode, tab)
+	}
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_mode/browser/tabs/"+tab.ID+"/reveal", nil)
+	revealed := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusOK || revealed.Mode != "external" {
+		t.Fatalf("reveal status=%d tab=%+v", resp.StatusCode, revealed)
+	}
+	stored, err := st.GetBrowserState(ctx, "sess_mode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Mode != "" {
+		t.Fatalf("process mode must not persist in session state: %+v", stored)
+	}
+
+	browserSvc.processMode = "headless"
+	type stateResponse struct {
+		HasState    bool   `json:"hasState"`
+		Mode        string `json:"mode"`
+		ProcessMode string `json:"processMode"`
+	}
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_mode/browser/state", nil)
+	state := decodeJSON[stateResponse](t, resp)
+	if resp.StatusCode != http.StatusOK || !state.HasState || state.Mode != "headless" || state.ProcessMode != "headless" {
+		t.Fatalf("state should report global process mode status=%d state=%+v", resp.StatusCode, state)
+	}
+	stored, err = st.GetBrowserState(ctx, "sess_mode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Mode != "" {
+		t.Fatalf("session state was polluted by global process mode: %+v", stored)
+	}
+}
+
+func TestReleaseBrowserTabClearsStateWhenTabAlreadyGone(t *testing.T) {
+	srv, st, _ := newBrowserTestServer(t)
+	ctx := context.Background()
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_release", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutBrowserState(ctx, store.BrowserStateInput{
+		SessionID: "sess_release",
+		TabID:     "tab_missing",
+		URL:       "https://www.google.com/",
+		Title:     "Google",
+		Mode:      "headless",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_release/browser/tabs/tab_missing/release", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("release missing tab status=%d", resp.StatusCode)
+	}
+	if _, err := st.GetBrowserState(ctx, "sess_release"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("browser state should be cleared: %v", err)
+	}
+}
+
 func TestBrowserScreencastIsSessionScoped(t *testing.T) {
 	srv, st, browserSvc := newBrowserTestServer(t)
 	ctx := context.Background()
@@ -237,15 +337,24 @@ func TestBrowserTestFormIsPublic(t *testing.T) {
 
 type fakeBrowserService struct {
 	tabs              map[string]browser.TabSnapshot
+	processMode       string
 	openSession       string
 	releasedSession   string
 	clickSession      string
+	clickMethod       string
 	lastNavigation    string
 	typeText          string
 	scrollY           float64
 	screencastSession string
 	screencastTab     string
 	screencastDone    chan struct{}
+}
+
+func (f *fakeBrowserService) ProcessMode(context.Context) string {
+	if f.processMode != "" {
+		return f.processMode
+	}
+	return "headless"
 }
 
 func (f *fakeBrowserService) CreateTab(_ context.Context, sessionID string) (browser.TabSnapshot, error) {
@@ -259,6 +368,7 @@ func (f *fakeBrowserService) create(sessionID string) browser.TabSnapshot {
 		SessionID: sessionID,
 		URL:       "about:blank",
 		Title:     "Blank",
+		Mode:      f.ProcessMode(context.Background()),
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -270,6 +380,7 @@ func (f *fakeBrowserService) ListTabs(_ context.Context, sessionID string) ([]br
 	var out []browser.TabSnapshot
 	for _, tab := range f.tabs {
 		if tab.SessionID == sessionID {
+			tab.Mode = f.ProcessMode(context.Background())
 			out = append(out, tab)
 		}
 	}
@@ -281,6 +392,7 @@ func (f *fakeBrowserService) GetTab(_ context.Context, sessionID, tabID string) 
 	if !ok || tab.SessionID != sessionID {
 		return browser.TabSnapshot{}, browser.ErrTabNotFound
 	}
+	tab.Mode = f.ProcessMode(context.Background())
 	return tab, nil
 }
 
@@ -299,6 +411,8 @@ func (f *fakeBrowserService) Recover(_ context.Context, sessionID string, hint b
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}
+	f.processMode = "external"
+	tab.Mode = f.ProcessMode(context.Background())
 	f.tabs[tab.ID] = tab
 	return tab, nil
 }
@@ -332,18 +446,31 @@ func (f *fakeBrowserService) Open(_ context.Context, sessionID, tabID, rawURL st
 		return browser.TabSnapshot{}, browser.ErrTabNotFound
 	}
 	tab.URL = rawURL
+	tab.Mode = f.ProcessMode(context.Background())
 	f.tabs[tab.ID] = tab
 	return tab, nil
 }
 
 func (f *fakeBrowserService) Reveal(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
 	f.lastNavigation = "reveal"
-	return f.GetTab(context.Background(), sessionID, tabID)
+	f.processMode = "external"
+	tab, err := f.GetTab(context.Background(), sessionID, tabID)
+	tab.Mode = f.ProcessMode(context.Background())
+	if err == nil {
+		f.tabs[tab.ID] = tab
+	}
+	return tab, err
 }
 
 func (f *fakeBrowserService) Internal(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
 	f.lastNavigation = "internal"
-	return f.GetTab(context.Background(), sessionID, tabID)
+	f.processMode = "headless"
+	tab, err := f.GetTab(context.Background(), sessionID, tabID)
+	tab.Mode = f.ProcessMode(context.Background())
+	if err == nil {
+		f.tabs[tab.ID] = tab
+	}
+	return tab, err
 }
 
 func (f *fakeBrowserService) Back(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
@@ -375,6 +502,7 @@ func (f *fakeBrowserService) Click(_ context.Context, sessionID, tabID string, i
 		return browser.ActionResult{}, err
 	}
 	f.clickSession = sessionID
+	f.clickMethod = in.Method
 	return browser.ActionResult{Tab: tab, Action: "click", Result: map[string]any{"selector": in.Selector}}, nil
 }
 

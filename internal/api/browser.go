@@ -39,9 +39,15 @@ type browserStateResp struct {
 	Title       string     `json:"title,omitempty"`
 	FaviconURL  string     `json:"faviconURL,omitempty"`
 	Mode        string     `json:"mode,omitempty"`
+	ProcessMode string     `json:"processMode,omitempty"`
 	Recoverable bool       `json:"recoverable,omitempty"`
 	CreatedAt   *time.Time `json:"createdAt,omitempty"`
 	UpdatedAt   *time.Time `json:"updatedAt,omitempty"`
+}
+
+type browserTabsResp struct {
+	Tabs        []browser.TabSnapshot `json:"tabs"`
+	ProcessMode string                `json:"processMode,omitempty"`
 }
 
 func (s *Server) getBrowserState(c *cart.Context) error {
@@ -49,6 +55,7 @@ func (s *Server) getBrowserState(c *cart.Context) error {
 	if !ok {
 		return nil
 	}
+	processMode := s.browserProcessMode(c.Request.Context())
 	if s.browser != nil {
 		tabs, err := s.browser.ListTabs(c.Request.Context(), sessionID)
 		if err != nil {
@@ -61,7 +68,7 @@ func (s *Server) getBrowserState(c *cart.Context) error {
 				if err := s.store.ClearBrowserState(c.Request.Context(), sessionID); err != nil {
 					return s.fail(c, err)
 				}
-				c.JSON(http.StatusOK, browserStateResp{HasState: false, SessionID: sessionID})
+				c.JSON(http.StatusOK, browserStateResp{HasState: false, SessionID: sessionID, Mode: processMode, ProcessMode: processMode})
 				return nil
 			}
 			if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
@@ -73,7 +80,7 @@ func (s *Server) getBrowserState(c *cart.Context) error {
 	}
 	state, err := s.store.GetBrowserState(c.Request.Context(), sessionID)
 	if errors.Is(err, store.ErrNotFound) {
-		c.JSON(http.StatusOK, browserStateResp{HasState: false, SessionID: sessionID})
+		c.JSON(http.StatusOK, browserStateResp{HasState: false, SessionID: sessionID, Mode: processMode, ProcessMode: processMode})
 		return nil
 	}
 	if err != nil {
@@ -88,7 +95,7 @@ func (s *Server) getBrowserState(c *cart.Context) error {
 		c.JSON(http.StatusOK, browserStateResponseFromTab(tab))
 		return nil
 	}
-	c.JSON(http.StatusOK, browserStateResponse(state, true))
+	c.JSON(http.StatusOK, browserStateResponse(state, true, processMode))
 	return nil
 }
 
@@ -113,7 +120,7 @@ func (s *Server) listBrowserTabs(c *cart.Context) error {
 	if err != nil {
 		return s.browserError(c, err)
 	}
-	c.JSON(http.StatusOK, map[string]any{"tabs": tabs})
+	c.JSON(http.StatusOK, browserTabsResp{Tabs: tabs, ProcessMode: s.browserProcessMode(c.Request.Context())})
 	return nil
 }
 
@@ -344,6 +351,12 @@ func (s *Server) clickBrowserTab(c *cart.Context) error {
 	if strings.TrimSpace(req.Selector) == "" && (req.X == nil || req.Y == nil) {
 		return badRequest(c, "selector or x/y is required")
 	}
+	req.Method = strings.ToLower(strings.TrimSpace(req.Method))
+	switch req.Method {
+	case "", "auto", "pointer", "dom":
+	default:
+		return badRequest(c, "invalid click method")
+	}
 	result, err := s.browser.Click(c.Request.Context(), sessionID, tabID, req)
 	if err != nil {
 		return s.browserError(c, err)
@@ -407,7 +420,9 @@ func (s *Server) releaseBrowserTab(c *cart.Context) error {
 	}
 	tabID, _ := c.Param("tabID")
 	if err := s.browser.ReleaseTab(c.Request.Context(), sessionID, tabID); err != nil {
-		return s.browserError(c, err)
+		if !errors.Is(err, browser.ErrTabNotFound) {
+			return s.browserError(c, err)
+		}
 	}
 	if err := s.store.ClearBrowserState(c.Request.Context(), sessionID); err != nil {
 		return s.fail(c, err)
@@ -514,6 +529,13 @@ func (s *Server) syncBrowserState(ctx context.Context, sessionID string, tab bro
 	return err
 }
 
+func (s *Server) browserProcessMode(ctx context.Context) string {
+	if s.browser == nil {
+		return "headless"
+	}
+	return s.browser.ProcessMode(ctx)
+}
+
 func (s *Server) recoverStoredBrowserTab(ctx context.Context, sessionID, tabID string) (bool, error) {
 	if s.browser == nil {
 		return false, nil
@@ -539,7 +561,11 @@ func (s *Server) recoverStoredBrowserTab(ctx context.Context, sessionID, tabID s
 }
 
 func (s *Server) recoverBrowserState(ctx context.Context, sessionID string, state *store.BrowserState) (browser.TabSnapshot, bool, error) {
-	if s.browser == nil || state == nil || state.Mode != "external" {
+	if s.browser == nil || state == nil {
+		return browser.TabSnapshot{}, false, nil
+	}
+	processMode := s.browser.ProcessMode(ctx)
+	if state.Mode != "external" && processMode != "external" {
 		return browser.TabSnapshot{}, false, nil
 	}
 	tab, err := s.browser.Recover(ctx, sessionID, browser.RecoverHint{
@@ -547,7 +573,7 @@ func (s *Server) recoverBrowserState(ctx context.Context, sessionID string, stat
 		URL:        state.URL,
 		Title:      state.Title,
 		FaviconURL: state.FaviconURL,
-		Mode:       state.Mode,
+		Mode:       "external",
 	})
 	if errors.Is(err, browser.ErrTabNotFound) {
 		return browser.TabSnapshot{}, false, nil
@@ -568,7 +594,6 @@ func browserStateInputFromTab(sessionID string, tab browser.TabSnapshot) (store.
 		URL:        tab.URL,
 		Title:      tab.Title,
 		FaviconURL: tab.FaviconURL,
-		Mode:       tab.Mode,
 	}
 	if err := store.NormalizeBrowserStateInput(&in); err != nil {
 		return store.BrowserStateInput{}, false
@@ -576,7 +601,7 @@ func browserStateInputFromTab(sessionID string, tab browser.TabSnapshot) (store.
 	return in, true
 }
 
-func browserStateResponse(state *store.BrowserState, recoverable bool) browserStateResp {
+func browserStateResponse(state *store.BrowserState, recoverable bool, processMode string) browserStateResp {
 	if state == nil {
 		return browserStateResp{}
 	}
@@ -589,7 +614,8 @@ func browserStateResponse(state *store.BrowserState, recoverable bool) browserSt
 		URL:         state.URL,
 		Title:       state.Title,
 		FaviconURL:  state.FaviconURL,
-		Mode:        state.Mode,
+		Mode:        processMode,
+		ProcessMode: processMode,
 		Recoverable: recoverable,
 		CreatedAt:   &created,
 		UpdatedAt:   &updated,
@@ -607,6 +633,7 @@ func browserStateResponseFromTab(tab browser.TabSnapshot) browserStateResp {
 		Title:       tab.Title,
 		FaviconURL:  tab.FaviconURL,
 		Mode:        tab.Mode,
+		ProcessMode: tab.Mode,
 		Recoverable: false,
 		CreatedAt:   &created,
 		UpdatedAt:   &updated,

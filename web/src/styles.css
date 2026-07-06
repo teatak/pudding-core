@@ -287,6 +287,18 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
     }
 }
 
+.pudding-workspace-panel-animating [data-slot="resizable-panel"] {
+    transition-property: flex-grow, flex-basis;
+    transition-duration: 220ms;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pudding-workspace-panel-animating [data-slot="resizable-panel"] {
+        transition-duration: 1ms;
+    }
+}
+
 .dark {
     --background: oklch(0.205 0 0);
     --foreground: oklch(0.95 0 0);

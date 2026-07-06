@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -644,6 +645,101 @@ func TestSubmitRunsToolLoop(t *testing.T) {
 	parts := msgs[2].Parts
 	if len(parts) != 1 || parts[0].Type != store.ContentPartToolResult || parts[0].Name != tool.TimeGetCurrent || !parts[0].Ok || parts[0].Content == "" || parts[0].SummaryKind != tool.SummaryReturnedFields || parts[0].SummaryCount != 1 {
 		t.Fatalf("tool_result part wrong: %+v", parts)
+	}
+}
+
+func TestMaxToolLoopsResetsAfterAssistantOutput(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	client := &toolOutputResetClient{}
+	runner := &recordingToolRunner{
+		defs: []provider.ToolDef{{
+			Name:        tool.TimeGetCurrent,
+			Description: "Get time",
+			InputSchema: json.RawMessage(`{"type":"object"}`),
+			Capability:  store.ModeChat,
+		}},
+		result: tool.Result{Ok: true, Content: "ok"},
+	}
+	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithTools(runner))
+	ctx := context.Background()
+	sid := "sess_tool_reset"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "tools", Provider: "capture", Model: "tool-model"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "capture", Protocol: "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID:           "tool-model",
+			Capabilities: &store.ModelCaps{Tools: true},
+			Limits:       &store.ModelLimits{MaxToolLoops: 1},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "连续操作"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+
+	evs, err := ms.EventsAfter(ctx, sid, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last := evs[len(evs)-1]; last.Kind != event.TurnCompleted {
+		t.Fatalf("assistant output should reset tool loop limit, got %+v", last)
+	}
+	if len(runner.calls) != 3 || len(client.requests) != 4 {
+		t.Fatalf("all tool calls should run after resets: calls=%d requests=%d", len(runner.calls), len(client.requests))
+	}
+}
+
+func TestMaxToolLoopsFailsConsecutiveToolOnlyCalls(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	client := &toolOnlyLimitClient{}
+	runner := &recordingToolRunner{
+		defs: []provider.ToolDef{{
+			Name:        tool.TimeGetCurrent,
+			Description: "Get time",
+			InputSchema: json.RawMessage(`{"type":"object"}`),
+			Capability:  store.ModeChat,
+		}},
+		result: tool.Result{Ok: true, Content: "ok"},
+	}
+	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithTools(runner))
+	ctx := context.Background()
+	sid := "sess_tool_limit"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "tools", Provider: "capture", Model: "tool-model"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "capture", Protocol: "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID:           "tool-model",
+			Capabilities: &store.ModelCaps{Tools: true},
+			Limits:       &store.ModelLimits{MaxToolLoops: 1},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "连续操作"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+
+	evs, err := ms.EventsAfter(ctx, sid, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := evs[len(evs)-1]
+	if last.Kind != event.TurnFailed || !strings.Contains(last.Error, "max tool loops") {
+		t.Fatalf("consecutive tool-only calls should still hit limit, got %+v", last)
+	}
+	if len(runner.calls) != 1 || len(client.requests) != 2 {
+		t.Fatalf("second tool-only call should not run: calls=%d requests=%d", len(runner.calls), len(client.requests))
 	}
 }
 
@@ -1725,6 +1821,64 @@ func (c *toolLoopClient) Stream(_ context.Context, req provider.Request) (<-chan
 	return out, nil
 }
 
+type toolOutputResetClient struct {
+	requests []provider.Request
+}
+
+func (c *toolOutputResetClient) Name() string { return "tool-output-reset" }
+
+func (c *toolOutputResetClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	c.requests = append(c.requests, req)
+	out := make(chan provider.Chunk, 4)
+	switch len(c.requests) {
+	case 1:
+		out <- timeToolCallChunk("call_1")
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	case 2:
+		out <- provider.Chunk{Part: provider.PartThought, Delta: "我看一下。"}
+		out <- timeToolCallChunk("call_2")
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	case 3:
+		out <- provider.Chunk{Part: provider.PartText, Delta: "继续检查。"}
+		out <- timeToolCallChunk("call_3")
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	default:
+		out <- provider.Chunk{Part: provider.PartText, Delta: "完成"}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
+	}
+	close(out)
+	return out, nil
+}
+
+type toolOnlyLimitClient struct {
+	requests []provider.Request
+}
+
+func (c *toolOnlyLimitClient) Name() string { return "tool-only-limit" }
+
+func (c *toolOnlyLimitClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	c.requests = append(c.requests, req)
+	out := make(chan provider.Chunk, 2)
+	if len(c.requests) <= 2 {
+		out <- timeToolCallChunk(fmt.Sprintf("call_%d", len(c.requests)))
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	} else {
+		out <- provider.Chunk{Part: provider.PartText, Delta: "完成"}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
+	}
+	close(out)
+	return out, nil
+}
+
+func timeToolCallChunk(callID string) provider.Chunk {
+	return provider.Chunk{Tool: &provider.ToolCallChunk{
+		Index:     0,
+		CallID:    callID,
+		Name:      tool.TimeGetCurrent,
+		ArgsDelta: `{}`,
+	}}
+}
+
 type browserToolLoopClient struct {
 	requests []provider.Request
 }
@@ -1754,6 +1908,10 @@ type engineTestBrowser struct {
 	observedSession string
 	observedTab     string
 	observedOptions browser.ObserveOptions
+}
+
+func (b *engineTestBrowser) ProcessMode(context.Context) string {
+	return "headless"
 }
 
 func (b *engineTestBrowser) CreateTab(_ context.Context, sessionID string) (browser.TabSnapshot, error) {

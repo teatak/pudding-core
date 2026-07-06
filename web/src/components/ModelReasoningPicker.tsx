@@ -153,7 +153,7 @@ export function ModelReasoningPicker({
         <Button
           aria-label={t("session.model")}
           className={cn(
-            "group/model-picker h-6 min-w-0 max-w-[12rem] gap-1 rounded-full border-0 bg-muted py-0 pr-2 text-xs font-normal text-foreground transition-none hover:bg-accent aria-expanded:bg-accent data-[state=open]:bg-accent dark:hover:bg-accent dark:aria-expanded:bg-accent dark:data-[state=open]:bg-accent",
+            "group/model-picker h-6 min-w-0 max-w-[9.5rem] shrink gap-0.5 rounded-full border-0 bg-muted py-0 pr-1.5 text-xs font-normal text-foreground transition-none hover:bg-accent aria-expanded:bg-accent data-[state=open]:bg-accent sm:max-w-[12rem] dark:hover:bg-accent dark:aria-expanded:bg-accent dark:data-[state=open]:bg-accent",
             visibleModel ? "pl-0.5" : "pl-2",
             className,
           )}

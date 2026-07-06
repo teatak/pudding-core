@@ -148,6 +148,10 @@ type fakeToolBrowser struct {
 	reloadTabID    string
 }
 
+func (f *fakeToolBrowser) ProcessMode(context.Context) string {
+	return "headless"
+}
+
 func (f *fakeToolBrowser) CreateTab(context.Context, string) (browser.TabSnapshot, error) {
 	return browser.TabSnapshot{}, nil
 }

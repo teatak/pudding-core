@@ -42,6 +42,7 @@ var (
 )
 
 type Service interface {
+	ProcessMode(ctx context.Context) string
 	CreateTab(ctx context.Context, sessionID string) (TabSnapshot, error)
 	ListTabs(ctx context.Context, sessionID string) ([]TabSnapshot, error)
 	GetTab(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
@@ -80,17 +81,17 @@ type Manager struct {
 }
 
 type TabSnapshot struct {
-	ID         string    `json:"id"`
-	SessionID  string    `json:"sessionID"`
-	TargetID   string    `json:"targetID,omitempty"`
-	URL        string    `json:"url"`
-	Title      string    `json:"title"`
-	FaviconURL string    `json:"faviconURL,omitempty"`
-	Mode       string    `json:"mode,omitempty"`
-	CanGoBack  bool      `json:"canGoBack,omitempty"`
-	CanGoForward bool    `json:"canGoForward,omitempty"`
-	CreatedAt  time.Time `json:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt"`
+	ID           string    `json:"id"`
+	SessionID    string    `json:"sessionID"`
+	TargetID     string    `json:"targetID,omitempty"`
+	URL          string    `json:"url"`
+	Title        string    `json:"title"`
+	FaviconURL   string    `json:"faviconURL,omitempty"`
+	Mode         string    `json:"mode,omitempty"`
+	CanGoBack    bool      `json:"canGoBack,omitempty"`
+	CanGoForward bool      `json:"canGoForward,omitempty"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 type RecoverHint struct {
@@ -151,6 +152,16 @@ type ClickInput struct {
 	Selector string   `json:"selector,omitempty"`
 	X        *float64 `json:"x,omitempty"`
 	Y        *float64 `json:"y,omitempty"`
+	Method   string   `json:"method,omitempty"`
+}
+
+type clickTarget struct {
+	OK     bool    `json:"ok"`
+	Tag    string  `json:"tag"`
+	Text   string  `json:"text"`
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Method string  `json:"method"`
 }
 
 type TypeInput struct {
@@ -262,6 +273,30 @@ func (m *Manager) CreateTab(ctx context.Context, sessionID string) (TabSnapshot,
 		return TabSnapshot{}, err
 	}
 	return m.snapshotFromLiveTarget(ctx, binding, target), nil
+}
+
+func (m *Manager) ProcessMode(ctx context.Context) string {
+	proc := m.currentProcess(ctx)
+	if proc != nil {
+		if proc.headless {
+			return "headless"
+		}
+		return "external"
+	}
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	m.mu.Lock()
+	cfg := m.cfg
+	m.mu.Unlock()
+	proc, err := attachExisting(ctx, cfg, m.client)
+	if err != nil {
+		return "headless"
+	}
+	m.setProcess(proc)
+	if proc.headless {
+		return "headless"
+	}
+	return "external"
 }
 
 func (m *Manager) createTab(ctx context.Context, sessionID, rawURL string) (*browserProcess, *tabBinding, targetInfo, error) {
@@ -601,11 +636,46 @@ func (m *Manager) Click(ctx context.Context, sessionID, tabID string, in ClickIn
 	if err != nil {
 		return ActionResult{}, err
 	}
-	raw, err := proc.evaluateJSON(ctx, m.client, binding.targetID, clickScript(in))
+	method := strings.ToLower(strings.TrimSpace(in.Method))
+	if method == "" {
+		method = "auto"
+	}
+	var raw json.RawMessage
+	switch method {
+	case "auto":
+		raw, err = m.pointerClick(ctx, proc, binding, in, "pointer")
+		if err != nil {
+			raw, err = proc.evaluateJSON(ctx, m.client, binding.targetID, clickScript(in, "dom"))
+		}
+	case "pointer":
+		raw, err = m.pointerClick(ctx, proc, binding, in, "pointer")
+	case "dom":
+		raw, err = proc.evaluateJSON(ctx, m.client, binding.targetID, clickScript(in, "dom"))
+	default:
+		return ActionResult{}, fmt.Errorf("unsupported click method %q", in.Method)
+	}
 	if err != nil {
 		return ActionResult{}, err
 	}
 	return m.actionResult(ctx, proc, binding, "click", raw)
+}
+
+func (m *Manager) pointerClick(ctx context.Context, proc *browserProcess, binding *tabBinding, in ClickInput, method string) (json.RawMessage, error) {
+	raw, err := proc.evaluateJSON(ctx, m.client, binding.targetID, clickTargetScript(in, method))
+	if err != nil {
+		return nil, err
+	}
+	var target clickTarget
+	if err := json.Unmarshal(raw, &target); err != nil {
+		return nil, err
+	}
+	if !target.OK {
+		return nil, errors.New("target element not found")
+	}
+	if err := proc.dispatchMouseClick(ctx, m.client, binding.targetID, target.X, target.Y); err != nil {
+		return nil, err
+	}
+	return raw, nil
 }
 
 func (m *Manager) Type(ctx context.Context, sessionID, tabID string, in TypeInput) (ActionResult, error) {
@@ -1575,6 +1645,44 @@ func (p *browserProcess) cdpCall(ctx context.Context, client *http.Client, targe
 	}
 }
 
+func (p *browserProcess) dispatchMouseClick(ctx context.Context, client *http.Client, targetID string, x, y float64) error {
+	events := []map[string]any{
+		{
+			"type":        "mouseMoved",
+			"x":           x,
+			"y":           y,
+			"button":      "none",
+			"buttons":     0,
+			"clickCount":  0,
+			"pointerType": "mouse",
+		},
+		{
+			"type":        "mousePressed",
+			"x":           x,
+			"y":           y,
+			"button":      "left",
+			"buttons":     1,
+			"clickCount":  1,
+			"pointerType": "mouse",
+		},
+		{
+			"type":        "mouseReleased",
+			"x":           x,
+			"y":           y,
+			"button":      "left",
+			"buttons":     0,
+			"clickCount":  1,
+			"pointerType": "mouse",
+		},
+	}
+	for _, event := range events {
+		if _, err := p.cdpCall(ctx, client, targetID, "Input.dispatchMouseEvent", event); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type cdpWriteFunc func(method string, params any) error
 
 func startScreencast(writeCDP cdpWriteFunc, width, height, everyNthFrame int) error {
@@ -2099,8 +2207,9 @@ func observeScript(maxText, maxElements int) string {
 })()`, maxText, maxElements)
 }
 
-func clickScript(in ClickInput) string {
+func clickTargetScript(in ClickInput, method string) string {
 	selector := jsString(in.Selector)
+	methodValue := jsString(method)
 	x := "null"
 	y := "null"
 	if in.X != nil {
@@ -2113,14 +2222,43 @@ func clickScript(in ClickInput) string {
   const selector = %s;
   const x = %s;
   const y = %s;
+  const method = %s;
+  let el = selector ? document.querySelector(selector) : null;
+  if (!el && x !== null && y !== null) el = document.elementFromPoint(x, y);
+  if (!el) throw new Error("target element not found");
+  if (selector) el.scrollIntoView({block: "center", inline: "center"});
+  const rect = el.getBoundingClientRect();
+  const cx = selector ? rect.left + rect.width / 2 : x;
+  const cy = selector ? rect.top + rect.height / 2 : y;
+  if (cx === null || cy === null) throw new Error("target coordinates not found");
+  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), text: (el.innerText || el.value || "").trim().slice(0, 160), x: cx, y: cy, method});
+})()`, selector, x, y, methodValue)
+}
+
+func clickScript(in ClickInput, method string) string {
+	selector := jsString(in.Selector)
+	methodValue := jsString(method)
+	x := "null"
+	y := "null"
+	if in.X != nil {
+		x = strconv.FormatFloat(*in.X, 'f', -1, 64)
+	}
+	if in.Y != nil {
+		y = strconv.FormatFloat(*in.Y, 'f', -1, 64)
+	}
+	return fmt.Sprintf(`(() => {
+  const selector = %s;
+  const x = %s;
+  const y = %s;
+  const method = %s;
   let el = selector ? document.querySelector(selector) : null;
   if (!el && x !== null && y !== null) el = document.elementFromPoint(x, y);
   if (!el) throw new Error("target element not found");
   el.scrollIntoView({block: "center", inline: "center"});
   const rect = el.getBoundingClientRect();
   el.click();
-  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), text: (el.innerText || el.value || "").trim().slice(0, 160), x: rect.left + rect.width / 2, y: rect.top + rect.height / 2});
-})()`, selector, x, y)
+  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), text: (el.innerText || el.value || "").trim().slice(0, 160), x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, method});
+})()`, selector, x, y, methodValue)
 }
 
 func typeScript(in TypeInput) string {

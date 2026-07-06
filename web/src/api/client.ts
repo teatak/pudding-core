@@ -332,7 +332,7 @@ export function getAudioBindings(token: string, sessionID: string): Promise<{ bi
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/audio/bindings`, audioBindingsResponse);
 }
 
-export function listBrowserTabs(token: string, sessionID: string): Promise<{ tabs: BrowserTab[] }> {
+export function listBrowserTabs(token: string, sessionID: string): Promise<{ tabs: BrowserTab[]; processMode?: "headless" | "external" }> {
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs`, listBrowserTabsResponse);
 }
 

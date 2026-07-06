@@ -429,8 +429,8 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        BrowserClick,
-			Description: "Click an element in the current session's managed browser slot by CSS selector or viewport coordinates.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"selector":{"type":"string","description":"CSS selector to click."},"x":{"type":"number","description":"Viewport X coordinate, used when selector is omitted."},"y":{"type":"number","description":"Viewport Y coordinate, used when selector is omitted."}},"additionalProperties":false}`),
+			Description: "Click an element in the current session's managed browser slot by CSS selector or viewport coordinates. Use method=pointer for real mouse events, method=dom only as a fallback for simple elements.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"selector":{"type":"string","description":"CSS selector to click."},"x":{"type":"number","description":"Viewport X coordinate, used when selector is omitted."},"y":{"type":"number","description":"Viewport Y coordinate, used when selector is omitted."},"method":{"type":"string","enum":["auto","pointer","dom"],"description":"Click implementation. auto defaults to real CDP mouse events and falls back to DOM click; pointer forces real mouse events; dom forces element.click()."}},"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{

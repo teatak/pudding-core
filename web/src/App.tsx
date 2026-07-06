@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useSearch } from "@tanstack/react-router";
 import { PanelRight } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useGroupRef } from "react-resizable-panels";
 import { toast } from "sonner";
 
@@ -29,6 +29,7 @@ import {
   workspaceLayout,
 } from "@/lib/layoutConstants";
 import { readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
+import { cn } from "@/lib/utils";
 import { useCanvasMCP } from "@/mcp/canvasTools";
 import { setCanvasOpen, useCanvasOpen } from "@/state/canvasStore";
 import { setRailLayoutForcedCollapsed } from "@/state/railStore";
@@ -47,8 +48,10 @@ export function App() {
   const [pairingCode] = useState(() => pendingPairingCode());
   const [pairingFailed, setPairingFailed] = useState(false);
   const [leftWorkspaceNode, setLeftWorkspaceNode] = useState<HTMLDivElement | null>(null);
+  const [workspaceAnimating, setWorkspaceAnimating] = useState(false);
   const workspaceGroupRef = useGroupRef();
   const splitGroupRef = useGroupRef();
+  const workspaceLayoutHydratedRef = useRef(false);
   const savedSplitLayout = useMemo(
     () =>
       readPanelLayout(layoutStorageKeys.splitRatio, splitLayout.fallback, {
@@ -156,24 +159,38 @@ export function App() {
   }, [pairingCode, token]);
 
   useEffect(() => {
-    if (isMobile) {
+    if (isMobile || !canUseCanvas) {
+      workspaceLayoutHydratedRef.current = false;
+      setWorkspaceAnimating(false);
       return;
     }
     const group = workspaceGroupRef.current;
     if (!group) {
       return;
     }
-    if (!effectiveCanvasOpen) {
-      group.setLayout(workspaceLayout.closed);
+    const nextLayout = !effectiveCanvasOpen
+      ? workspaceLayout.closed
+      : readPanelLayout(layoutStorageKeys.workspaceRatio, workspaceLayout.fallback, {
+          minPercent: workspaceLayout.minPercent,
+          maxPercent: workspaceLayout.maxPercent,
+        });
+    if (!workspaceLayoutHydratedRef.current) {
+      workspaceLayoutHydratedRef.current = true;
+      group.setLayout(nextLayout);
       return;
     }
-    group.setLayout(
-      readPanelLayout(layoutStorageKeys.workspaceRatio, workspaceLayout.fallback, {
-        minPercent: workspaceLayout.minPercent,
-        maxPercent: workspaceLayout.maxPercent,
-      }),
-    );
-  }, [effectiveCanvasOpen, isMobile, workspaceGroupRef]);
+    setWorkspaceAnimating(true);
+    const frame = window.requestAnimationFrame(() => {
+      group.setLayout(nextLayout);
+    });
+    const timeout = window.setTimeout(() => {
+      setWorkspaceAnimating(false);
+    }, 240);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timeout);
+    };
+  }, [canUseCanvas, effectiveCanvasOpen, isMobile, workspaceGroupRef]);
 
   useEffect(() => {
     const group = splitGroupRef.current;
@@ -306,12 +323,12 @@ export function App() {
   );
 
   const workspaceContent =
-    !effectiveCanvasOpen || isMobile ? (
+    isMobile || !canUseCanvas ? (
       leftWorkspace
     ) : (
       <ResizablePanelGroup
-        className="h-full min-w-0"
-        defaultLayout={savedWorkspaceLayout}
+        className={cn("h-full min-w-0", workspaceAnimating && "pudding-workspace-panel-animating")}
+        defaultLayout={effectiveCanvasOpen ? savedWorkspaceLayout : workspaceLayout.closed}
         groupRef={workspaceGroupRef}
         id="workspace"
         orientation="horizontal"
@@ -325,7 +342,7 @@ export function App() {
         <ResizablePanel
           id="chat"
           className="min-w-0"
-          maxSize={workspaceLayout.maxChatPx}
+          maxSize={effectiveCanvasOpen ? workspaceLayout.maxChatPx : undefined}
           minSize={workspaceLayout.minChatPx}
         >
           {leftWorkspace}
@@ -333,7 +350,7 @@ export function App() {
         <WorkspaceResizableHandle
           id="chat-canvas"
           aria-label={t("layout.resizeHint")}
-          className={effectiveCanvasOpen ? undefined : "hidden"}
+          className={cn("transition-opacity duration-150", !effectiveCanvasOpen && "pointer-events-none opacity-0")}
           disabled={!effectiveCanvasOpen}
         />
         <ResizablePanel
