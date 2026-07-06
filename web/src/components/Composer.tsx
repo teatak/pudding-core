@@ -582,7 +582,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     [onSubmitError],
   );
   const submitMutation = useMutation({
-    mutationFn: async (value: z.infer<typeof composerSchema> & { attachments: Attachment[]; localFolders: LocalFolderPath[]; parts: ContentPart[] }) => {
+    mutationFn: async (value: z.infer<typeof composerSchema> & { parts: ContentPart[] }) => {
       const clientMessageID = draftIDRef.current;
       if (!resolvedModel) {
         throw new APIError(400, "no_model");
@@ -593,8 +593,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
         clientMessageID,
         status: "submitting",
         text: value.text,
-        attachments: value.attachments,
-        localFolders: value.localFolders,
         parts: value.parts,
         createdAt: new Date().toISOString(),
       });
@@ -604,8 +602,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       const result = await submitMessage(token, sessionID, {
         clientMessageID,
         text: value.text,
-        attachments: value.attachments,
-        localFolders: value.localFolders,
         parts: value.parts,
       });
       if (result.queued || !result.turnID) {
@@ -796,8 +792,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     }
     submitMutation.mutate({
       text,
-      attachments: attachmentsToSubmit,
-      localFolders: localFoldersToSubmit,
       parts: buildDraftSubmitParts(text, attachmentItemsToSubmit, localFoldersToSubmit, partOrder),
     });
   };

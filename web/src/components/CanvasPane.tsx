@@ -244,6 +244,7 @@ type BrowserScreencastMessage =
   | { type: "error"; error: string };
 type BrowserNavigationAction = "back" | "forward" | "reload";
 
+const browserCursorByTabID = new Map<string, BrowserScreencastCursor>();
 const SESSION_SURFACE_STORAGE_KEY = "pudding.canvas.sessionSurface.v1";
 const MIN_W = 260;
 const MIN_H = 160;
@@ -811,6 +812,9 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       const tabID = activeBrowserTab?.id;
       if (!targetSessionID) {
         return;
+      }
+      if (tabID) {
+        browserCursorByTabID.delete(tabID);
       }
       rememberSessionSurface(targetSessionID, "canvas");
       if (currentActorSessionIDRef.current === targetSessionID) {
@@ -2027,13 +2031,14 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
   const lastMouseMoveAtRef = useRef(0);
   const mouseButtonsRef = useRef(0);
   const repairBrowserTabKeyRef = useRef("");
-  const cursorHideTimerRef = useRef<number | undefined>(undefined);
+  const cursorPulseTimerRef = useRef<number | undefined>(undefined);
   const payload = browserPayloadForItem(item);
   const ownerSessionID = payload?.sessionID || item.sourceSessionID;
   const [streamFrame, setStreamFrame] = useState<BrowserScreencastFrame | null>(null);
   const [streamStatus, setStreamStatus] = useState<"closed" | "connecting" | "open" | "external" | "error">("closed");
   const [streamError, setStreamError] = useState("");
   const [llmCursor, setLLMCursor] = useState<BrowserScreencastCursor | null>(null);
+  const [llmCursorPulse, setLLMCursorPulse] = useState<{ key: number; visible: boolean }>({ key: 0, visible: false });
   const tabsQuery = useQuery({
     enabled: Boolean(token && ownerSessionID),
     queryKey: ownerSessionID ? queryKeys.browserTabs(ownerSessionID) : ["browser", "missing-session"],
@@ -2055,15 +2060,33 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
   const [streamAttempt, setStreamAttempt] = useState(0);
 
   const showLLMCursor = (cursor: BrowserScreencastCursor) => {
-    setLLMCursor(cursor);
-    if (cursorHideTimerRef.current) {
-      window.clearTimeout(cursorHideTimerRef.current);
+    const next = { ...cursor, createdAt: cursor.createdAt || new Date().toISOString() };
+    if (streamTabID) {
+      browserCursorByTabID.set(streamTabID, next);
     }
-    cursorHideTimerRef.current = window.setTimeout(() => {
-      setLLMCursor(null);
-      cursorHideTimerRef.current = undefined;
-    }, cursor.action === "click" ? 1000 : 1300);
+    setLLMCursor(next);
+    if (cursor.action !== "click") {
+      return;
+    }
+    if (cursorPulseTimerRef.current) {
+      window.clearTimeout(cursorPulseTimerRef.current);
+    }
+    setLLMCursorPulse((current) => ({ key: current.key + 1, visible: true }));
+    cursorPulseTimerRef.current = window.setTimeout(() => {
+      setLLMCursorPulse((current) => ({ ...current, visible: false }));
+      cursorPulseTimerRef.current = undefined;
+    }, 700);
   };
+
+  useEffect(() => {
+    if (!streamTabID || isExternalBrowser || streamStatus === "external") {
+      setLLMCursor(null);
+      setLLMCursorPulse((current) => ({ ...current, visible: false }));
+      return;
+    }
+    setLLMCursor(browserCursorByTabID.get(streamTabID) || null);
+    setLLMCursorPulse((current) => ({ ...current, visible: false }));
+  }, [streamTabID, isExternalBrowser, streamStatus]);
 
   useEffect(() => {
     if (!isExternalBrowser) {
@@ -2347,9 +2370,9 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
       clearConnectTimeout();
       clearStartRetryTimer();
       clearFrameTimeout();
-      if (cursorHideTimerRef.current) {
-        window.clearTimeout(cursorHideTimerRef.current);
-        cursorHideTimerRef.current = undefined;
+      if (cursorPulseTimerRef.current) {
+        window.clearTimeout(cursorPulseTimerRef.current);
+        cursorPulseTimerRef.current = undefined;
       }
       if (wsRef.current === ws) {
         wsRef.current = null;
@@ -2835,7 +2858,9 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
             style={{ left: llmCursorStyle.left, top: llmCursorStyle.top }}
           >
             <div className="relative h-5 w-5">
-              {llmCursor?.action === "click" ? <div className="absolute inset-0 rounded-full bg-sky-400/35 animate-ping" /> : null}
+              {llmCursorPulse.visible ? (
+                <div key={llmCursorPulse.key} className="absolute inset-0 rounded-full bg-sky-400/35 animate-ping" />
+              ) : null}
               <div className="absolute top-0 left-0 h-3 w-3 rounded-full border border-white bg-sky-500 shadow-[0_0_0_2px_rgba(14,165,233,0.35),0_2px_8px_rgba(0,0,0,0.35)]" />
               <div className="absolute top-2 left-2 h-2 w-2 rounded-full bg-sky-500/70" />
             </div>

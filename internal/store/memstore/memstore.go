@@ -246,7 +246,7 @@ func (m *Memstore) BeginTurn(_ context.Context, in store.BeginTurnInput) (*store
 		Role:            store.RoleUser,
 		Kind:            store.MessageKindText,
 		Text:            in.UserText,
-		Parts:           store.OrderedUserInputParts(in.UserText, in.UserParts, in.UserAttachments, in.UserLocalFolders),
+		Parts:           store.UserInputParts(in.UserText, in.UserParts),
 		TurnIndex:       0,
 		ClientMessageID: in.ClientMessageID,
 		CreatedAt:       now,
@@ -366,9 +366,7 @@ func (m *Memstore) QueueInput(_ context.Context, in store.QueueInputInput) (*sto
 		SessionID:       in.SessionID,
 		ClientMessageID: in.ClientMessageID,
 		Text:            in.Text,
-		Attachments:     store.NormalizeAttachments(in.Attachments),
-		LocalFolders:    store.NormalizeLocalFolders(in.LocalFolders),
-		Parts:           store.OrderedUserInputParts(in.Text, in.Parts, in.Attachments, in.LocalFolders),
+		Parts:           store.UserInputParts(in.Text, in.Parts),
 		Status:          store.QueuedInputQueued,
 		Provider:        in.Provider,
 		Model:           in.Model,
@@ -437,7 +435,7 @@ func (m *Memstore) UpdateQueuedInput(_ context.Context, in store.UpdateQueuedInp
 	if !validQueuedInputStatus(input.Status) || input.Status == store.QueuedInputPromoted {
 		return nil, store.ErrNotFound
 	}
-	input.Parts = store.OrderedUserInputParts(input.Text, input.Parts, input.Attachments, input.LocalFolders)
+	input.Parts = store.ReplaceUserInputText(input.Parts, input.Text)
 	input.UpdatedAt = time.Now()
 	ev := event.Event{
 		Seq:             m.nextSeq(in.SessionID),
@@ -492,7 +490,7 @@ func (m *Memstore) PromoteNextQueuedInput(_ context.Context, in store.PromoteQue
 				Role:            store.RoleUser,
 				Kind:            store.MessageKindText,
 				Text:            input.Text,
-				Parts:           store.OrderedUserInputParts(input.Text, input.Parts, input.Attachments, input.LocalFolders),
+				Parts:           store.UserInputParts(input.Text, input.Parts),
 				TurnIndex:       0,
 				ClientMessageID: input.ClientMessageID,
 				CreatedAt:       now,
@@ -1428,8 +1426,6 @@ func cloneQueuedInput(input *store.QueuedInput) *store.QueuedInput {
 		return nil
 	}
 	cp := *input
-	cp.Attachments = store.NormalizeAttachments(input.Attachments)
-	cp.LocalFolders = store.NormalizeLocalFolders(input.LocalFolders)
 	cp.Parts = store.CloneContentParts(input.Parts)
 	cp.ModelConfig = append([]byte(nil), input.ModelConfig...)
 	return &cp

@@ -149,8 +149,6 @@ type SubmitInput struct {
 	SessionID       string
 	ClientMessageID string
 	Text            string
-	Attachments     []store.Attachment
-	LocalFolders    []store.LocalFolder
 	Parts           []store.ContentPart
 	Kind            string
 	ReasoningEffort string
@@ -205,20 +203,19 @@ type resolvedModel struct {
 }
 
 func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, error) {
-	in.Attachments = store.NormalizeAttachments(in.Attachments)
-	in.LocalFolders = store.NormalizeLocalFolders(in.LocalFolders)
 	kind := strings.TrimSpace(in.Kind)
 	if in.ClientMessageID == "" {
 		return nil, ErrEmptyInput
 	}
 	switch kind {
 	case "", "user":
-		in.Parts = store.OrderedUserInputParts(in.Text, in.Parts, in.Attachments, in.LocalFolders)
-		if strings.TrimSpace(in.Text) == "" && len(in.Attachments) == 0 && len(in.LocalFolders) == 0 && len(in.Parts) == 0 {
+		in.Parts = store.UserInputParts(in.Text, in.Parts)
+		in.Text = store.TextFromParts(in.Parts)
+		if len(in.Parts) == 0 {
 			return nil, ErrEmptyInput
 		}
 	case "system":
-		if strings.TrimSpace(in.Text) == "" || len(in.Attachments) > 0 || len(in.LocalFolders) > 0 || len(in.Parts) > 0 {
+		if strings.TrimSpace(in.Text) == "" || len(in.Parts) > 0 {
 			return nil, ErrEmptyInput
 		}
 	default:
@@ -259,18 +256,16 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	}
 
 	res, err := e.store.BeginTurn(ctx, store.BeginTurnInput{
-		SessionID:        in.SessionID,
-		TurnID:           store.NewID("turn"),
-		UserMessageID:    store.NewID("msg"),
-		ClientMessageID:  in.ClientMessageID,
-		UserText:         in.Text,
-		UserAttachments:  in.Attachments,
-		UserLocalFolders: in.LocalFolders,
-		UserParts:        in.Parts,
-		Provider:         resolved.providerName,
-		Model:            resolved.model,
-		Mode:             resolved.mode,
-		ModelConfig:      resolved.configJSON,
+		SessionID:       in.SessionID,
+		TurnID:          store.NewID("turn"),
+		UserMessageID:   store.NewID("msg"),
+		ClientMessageID: in.ClientMessageID,
+		UserText:        in.Text,
+		UserParts:       in.Parts,
+		Provider:        resolved.providerName,
+		Model:           resolved.model,
+		Mode:            resolved.mode,
+		ModelConfig:     resolved.configJSON,
 	})
 	if errors.Is(err, store.ErrTurnRunning) {
 		return e.queueSubmit(ctx, in, resolved)
@@ -417,8 +412,6 @@ func (e *Engine) queueSubmit(ctx context.Context, in SubmitInput, resolved *reso
 		SessionID:       in.SessionID,
 		ClientMessageID: in.ClientMessageID,
 		Text:            strings.TrimSpace(in.Text),
-		Attachments:     in.Attachments,
-		LocalFolders:    in.LocalFolders,
 		Parts:           in.Parts,
 		Provider:        resolved.providerName,
 		Model:           resolved.model,
@@ -1293,7 +1286,7 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			result.Name = call.Name
 		}
 		parts.AppendToolResult(result)
-		parts.AppendAttachments(result.Attachments)
+		parts.AppendAttachments(result.ContextAttachments)
 		if err := e.commitTurnParts(turnID, parts, true); err != nil {
 			return store.TurnFailed, fmt.Sprintf("append output: %v", err), nextMode, modeChanged
 		}
@@ -1661,7 +1654,7 @@ func providerAttachmentPartsFromStore(sessionID string, parts []store.ContentPar
 		}
 		if imagePart, ok := providerImagePartFromAttachment(sessionID, attachmentHome, part, cfg); ok {
 			if !mediaStarted {
-				out = append(out, provider.Part{Type: provider.PartText, Text: "Image attachment returned by builtin_file_read."})
+				out = append(out, provider.Part{Type: provider.PartText, Text: "Image attachment returned by an explicit image read tool."})
 				mediaStarted = true
 			}
 			out = append(out, imagePart)

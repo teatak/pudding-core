@@ -391,7 +391,7 @@ func TestBeginTurnIdempotencyPrecedesRunningConflict(t *testing.T) {
 	}
 }
 
-func TestQueuedInputPersistsAttachments(t *testing.T) {
+func TestQueuedInputPersistsParts(t *testing.T) {
 	st, path := openTestStore(t)
 	ctx := context.Background()
 	createTestSession(t, st, "sess_attach")
@@ -414,8 +414,6 @@ func TestQueuedInputPersistsAttachments(t *testing.T) {
 		SessionID:       "sess_attach",
 		ClientMessageID: "client_attach",
 		Text:            "look",
-		Attachments:     []store.Attachment{attachment},
-		LocalFolders:    []store.LocalFolder{folder},
 		Parts:           []store.ContentPart{store.LocalFolderPart(folder), store.AttachmentPart(attachment), store.ContentPart{Type: store.ContentPartText, Text: "look"}},
 		Provider:        "mock",
 		Model:           "mock",
@@ -436,7 +434,12 @@ func TestQueuedInputPersistsAttachments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(queued) != 1 || len(queued[0].Attachments) != 1 || queued[0].Attachments[0].AttachmentKey != attachment.AttachmentKey || len(queued[0].LocalFolders) != 1 || queued[0].LocalFolders[0].Path != folder.Path {
+	if len(queued) != 1 {
+		t.Fatalf("queued attachment/folder was not persisted: %+v", queued)
+	}
+	queuedAttachments := store.AttachmentsFromParts(queued[0].Parts)
+	queuedFolders := store.LocalFoldersFromParts(queued[0].Parts)
+	if len(queuedAttachments) != 1 || queuedAttachments[0].AttachmentKey != attachment.AttachmentKey || len(queuedFolders) != 1 || queuedFolders[0].Path != folder.Path {
 		t.Fatalf("queued attachment/folder was not persisted: %+v", queued)
 	}
 	if len(queued[0].Parts) != 3 || queued[0].Parts[0].Type != store.ContentPartLocalFolder || queued[0].Parts[1].Type != store.ContentPartAttachment || queued[0].Parts[2].Type != store.ContentPartText {

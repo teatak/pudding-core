@@ -452,6 +452,9 @@ func TestBuiltinFileReadRoutesImageAttachment(t *testing.T) {
 	if len(res.Attachments) != 1 || res.Attachments[0].MIME != "image/png" || res.Attachments[0].Origin != attachment.OriginTool {
 		t.Fatalf("unexpected routed attachment: %+v", res.Attachments)
 	}
+	if len(res.ContextAttachments) != 1 || res.ContextAttachments[0].AttachmentKey != res.Attachments[0].AttachmentKey {
+		t.Fatalf("image read should route a context attachment: %+v", res.ContextAttachments)
+	}
 	payload := decodeToolResult(t, res)
 	if payload["kind"] != "attachment_routed" || payload["attachmentKey"] == "" {
 		t.Fatalf("unexpected image payload: %+v", payload)

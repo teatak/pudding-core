@@ -43,8 +43,6 @@ CREATE TABLE IF NOT EXISTS queued_inputs (
     session_id        TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     client_message_id TEXT    NOT NULL,
     text              TEXT    NOT NULL,
-    attachments       TEXT    NOT NULL DEFAULT '[]',
-    local_folders     TEXT    NOT NULL DEFAULT '[]',
     parts             TEXT    NOT NULL DEFAULT '[]',
     status            TEXT    NOT NULL,
     provider          TEXT    NOT NULL DEFAULT '',

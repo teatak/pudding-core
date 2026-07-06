@@ -383,7 +383,11 @@ export function SessionRail({
             onFocusOutside={(event) => event.preventDefault()}
             onInteractOutside={(event) => {
               const target = event.target as HTMLElement | null;
-              if (target?.closest(".pudding-rail-toggle") || isRailPopoverPortalTarget(target)) {
+              if (
+                hover.shouldIgnoreOutsideInteraction() ||
+                target?.closest(".pudding-rail-toggle") ||
+                isRailPopoverPortalTarget(target)
+              ) {
                 event.preventDefault();
               }
             }}
@@ -495,6 +499,7 @@ function useHoverPopover(closeDelay = 160) {
   const [open, setOpen] = useState(false);
   const closeTimer = useRef<number | null>(null);
   const closePausedRef = useRef(false);
+  const ignoreOutsideUntilRef = useRef(0);
   const suppressRef = useRef(false);
 
   function cancelClose() {
@@ -530,10 +535,21 @@ function useHoverPopover(closeDelay = 160) {
     },
     cancelClose,
     setClosePaused(paused: boolean) {
+      const wasPaused = closePausedRef.current;
       closePausedRef.current = paused;
       if (paused) {
         cancelClose();
+      } else if (wasPaused) {
+        ignoreOutsideUntilRef.current = Date.now() + 180;
+        window.setTimeout(() => {
+          if (Date.now() >= ignoreOutsideUntilRef.current) {
+            ignoreOutsideUntilRef.current = 0;
+          }
+        }, 200);
       }
+    },
+    shouldIgnoreOutsideInteraction() {
+      return closePausedRef.current || Date.now() < ignoreOutsideUntilRef.current;
     },
     suppressUntilLeave() {
       suppressRef.current = true;

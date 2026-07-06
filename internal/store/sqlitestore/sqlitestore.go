@@ -61,20 +61,6 @@ func Open(path string) (*Store, error) {
 }
 
 func ensureSchema(db *sql.DB) error {
-	if has, err := tableHasColumn(db, "queued_inputs", "attachments"); err != nil {
-		return err
-	} else if !has {
-		if _, err := db.Exec(`ALTER TABLE queued_inputs ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'`); err != nil {
-			return fmt.Errorf("sqlite: migrate queued_inputs.attachments: %w", err)
-		}
-	}
-	if has, err := tableHasColumn(db, "queued_inputs", "local_folders"); err != nil {
-		return err
-	} else if !has {
-		if _, err := db.Exec(`ALTER TABLE queued_inputs ADD COLUMN local_folders TEXT NOT NULL DEFAULT '[]'`); err != nil {
-			return fmt.Errorf("sqlite: migrate queued_inputs.local_folders: %w", err)
-		}
-	}
 	if has, err := tableHasColumn(db, "queued_inputs", "parts"); err != nil {
 		return err
 	} else if !has {
@@ -345,7 +331,7 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 			Role:            store.RoleUser,
 			Kind:            store.MessageKindText,
 			Text:            in.UserText,
-			Parts:           store.OrderedUserInputParts(in.UserText, in.UserParts, in.UserAttachments, in.UserLocalFolders),
+			Parts:           store.UserInputParts(in.UserText, in.UserParts),
 			TurnIndex:       0,
 			ClientMessageID: in.ClientMessageID,
 			CreatedAt:       now,
@@ -500,9 +486,7 @@ func (s *Store) QueueInput(ctx context.Context, in store.QueueInputInput) (*stor
 			SessionID:       in.SessionID,
 			ClientMessageID: in.ClientMessageID,
 			Text:            in.Text,
-			Attachments:     store.NormalizeAttachments(in.Attachments),
-			LocalFolders:    store.NormalizeLocalFolders(in.LocalFolders),
-			Parts:           store.OrderedUserInputParts(in.Text, in.Parts, in.Attachments, in.LocalFolders),
+			Parts:           store.UserInputParts(in.Text, in.Parts),
 			Status:          store.QueuedInputQueued,
 			Provider:        in.Provider,
 			Model:           in.Model,
@@ -512,8 +496,8 @@ func (s *Store) QueueInput(ctx context.Context, in store.QueueInputInput) (*stor
 			UpdatedAt:       now,
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO queued_inputs(session_id,client_message_id,text,attachments,local_folders,parts,status,provider,model,mode,model_config,turn_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			input.SessionID, input.ClientMessageID, input.Text, encodeAttachments(input.Attachments), encodeLocalFolders(input.LocalFolders), encodeParts(input.Parts), input.Status, input.Provider, input.Model, input.Mode, string(input.ModelConfig), input.TurnID, unixMS(now), unixMS(now),
+			`INSERT INTO queued_inputs(session_id,client_message_id,text,parts,status,provider,model,mode,model_config,turn_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+			input.SessionID, input.ClientMessageID, input.Text, encodeParts(input.Parts), input.Status, input.Provider, input.Model, input.Mode, string(input.ModelConfig), input.TurnID, unixMS(now), unixMS(now),
 		); err != nil {
 			return err
 		}
@@ -548,7 +532,7 @@ func (s *Store) ListQueuedInputs(ctx context.Context, sessionID string) ([]*stor
 		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx,
-		`SELECT session_id,client_message_id,text,attachments,local_folders,parts,status,provider,model,mode,model_config,turn_id,created_at,updated_at
+		`SELECT session_id,client_message_id,text,parts,status,provider,model,mode,model_config,turn_id,created_at,updated_at
 		FROM queued_inputs
 		WHERE session_id=? AND status IN (?,?)
 		ORDER BY created_at ASC, rowid ASC`,
@@ -600,7 +584,7 @@ func (s *Store) UpdateQueuedInput(ctx context.Context, in store.UpdateQueuedInpu
 			return store.ErrNotFound
 		}
 		input.UpdatedAt = time.Now()
-		input.Parts = store.OrderedUserInputParts(input.Text, input.Parts, input.Attachments, input.LocalFolders)
+		input.Parts = store.ReplaceUserInputText(input.Parts, input.Text)
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE queued_inputs SET text=?, parts=?, status=?, updated_at=? WHERE session_id=? AND client_message_id=?`,
 			input.Text, encodeParts(input.Parts), input.Status, unixMS(input.UpdatedAt), input.SessionID, input.ClientMessageID,
@@ -673,7 +657,7 @@ func (s *Store) PromoteNextQueuedInput(ctx context.Context, in store.PromoteQueu
 					Role:            store.RoleUser,
 					Kind:            store.MessageKindText,
 					Text:            input.Text,
-					Parts:           store.OrderedUserInputParts(input.Text, input.Parts, input.Attachments, input.LocalFolders),
+					Parts:           store.UserInputParts(input.Text, input.Parts),
 					TurnIndex:       0,
 					ClientMessageID: input.ClientMessageID,
 					CreatedAt:       now,
@@ -1592,7 +1576,7 @@ func getUserMessageByClientMessageIDTx(ctx context.Context, tx *sql.Tx, sessionI
 
 func getQueuedInputTx(ctx context.Context, tx *sql.Tx, sessionID, clientMessageID string) (*store.QueuedInput, error) {
 	row := tx.QueryRowContext(ctx,
-		`SELECT session_id,client_message_id,text,attachments,local_folders,parts,status,provider,model,mode,model_config,turn_id,created_at,updated_at
+		`SELECT session_id,client_message_id,text,parts,status,provider,model,mode,model_config,turn_id,created_at,updated_at
 		FROM queued_inputs WHERE session_id=? AND client_message_id=?`,
 		sessionID, clientMessageID,
 	)
@@ -1605,7 +1589,7 @@ func getQueuedInputTx(ctx context.Context, tx *sql.Tx, sessionID, clientMessageI
 
 func firstQueuedInputTx(ctx context.Context, tx *sql.Tx, sessionID string) (*store.QueuedInput, error) {
 	row := tx.QueryRowContext(ctx,
-		`SELECT session_id,client_message_id,text,attachments,local_folders,parts,status,provider,model,mode,model_config,turn_id,created_at,updated_at
+		`SELECT session_id,client_message_id,text,parts,status,provider,model,mode,model_config,turn_id,created_at,updated_at
 		FROM queued_inputs
 		WHERE session_id=? AND status IN (?,?,?)
 		ORDER BY created_at ASC, rowid ASC
@@ -1753,8 +1737,6 @@ func scanMessage(row messageScanner) (*store.Message, error) {
 
 func scanQueuedInput(row messageScanner) (*store.QueuedInput, error) {
 	var input store.QueuedInput
-	var attachments string
-	var localFolders string
 	var parts string
 	var modelConfig string
 	var created, updated int64
@@ -1762,8 +1744,6 @@ func scanQueuedInput(row messageScanner) (*store.QueuedInput, error) {
 		&input.SessionID,
 		&input.ClientMessageID,
 		&input.Text,
-		&attachments,
-		&localFolders,
 		&parts,
 		&input.Status,
 		&input.Provider,
@@ -1777,12 +1757,7 @@ func scanQueuedInput(row messageScanner) (*store.QueuedInput, error) {
 	if err != nil {
 		return nil, err
 	}
-	input.Attachments = decodeAttachments(attachments)
-	input.LocalFolders = decodeLocalFolders(localFolders)
 	input.Parts = decodeParts(parts)
-	if len(input.Parts) == 0 {
-		input.Parts = store.UserInputParts(input.Text, input.Attachments, input.LocalFolders)
-	}
 	input.ModelConfig = normalizeJSON(json.RawMessage(modelConfig))
 	input.Mode = store.NormalizeAgentMode(input.Mode)
 	if input.Mode == "" {
@@ -1925,46 +1900,6 @@ func decodeParts(raw string) []store.ContentPart {
 		_ = json.Unmarshal([]byte(raw), &parts)
 	}
 	return store.NormalizeContentParts(parts)
-}
-
-func encodeAttachments(attachments []store.Attachment) string {
-	normalized := store.NormalizeAttachments(attachments)
-	if len(normalized) == 0 {
-		return "[]"
-	}
-	data, err := json.Marshal(normalized)
-	if err != nil {
-		return "[]"
-	}
-	return string(data)
-}
-
-func decodeAttachments(raw string) []store.Attachment {
-	var attachments []store.Attachment
-	if raw != "" {
-		_ = json.Unmarshal([]byte(raw), &attachments)
-	}
-	return store.NormalizeAttachments(attachments)
-}
-
-func encodeLocalFolders(folders []store.LocalFolder) string {
-	normalized := store.NormalizeLocalFolders(folders)
-	if len(normalized) == 0 {
-		return "[]"
-	}
-	data, err := json.Marshal(normalized)
-	if err != nil {
-		return "[]"
-	}
-	return string(data)
-}
-
-func decodeLocalFolders(raw string) []store.LocalFolder {
-	var folders []store.LocalFolder
-	if raw != "" {
-		_ = json.Unmarshal([]byte(raw), &folders)
-	}
-	return store.NormalizeLocalFolders(folders)
 }
 
 func encodeStringSlice(values []string) string {

@@ -15,6 +15,7 @@ import ReactMarkdown, { type Components, type UrlTransform } from "react-markdow
 import remarkGfm from "remark-gfm";
 
 import { type ContentPart, type Message } from "@/api/client";
+import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
 import { PhaseDot } from "@/components/PhaseDot";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
@@ -48,7 +49,7 @@ export function TurnParts({
         const disclosureKey = `${turnID}:${partKey}`;
         switch (part.type) {
           case "text":
-            return <MarkdownBody key={partKey} text={part.text} />;
+            return <MarkdownBody key={partKey} text={part.text} token={token} />;
           case "attachment":
             return <AttachmentPart key={partKey} attachment={part.attachment} token={token} />;
           case "thought":
@@ -514,9 +515,16 @@ type SafeHtmlImage = {
   title?: string;
 };
 
-export function MarkdownBody({ allowHtmlImages = true, text }: { allowHtmlImages?: boolean; text: string }) {
+type MarkdownImageItem = ImageLightboxItem & {
+  sourceKey: string;
+};
+
+export function MarkdownBody({ allowHtmlImages = true, text, token = "" }: { allowHtmlImages?: boolean; text: string; token?: string }) {
   const { t } = useI18n();
   const [codeRenderer, setCodeRenderer] = useState<CodeBlockRenderer | null>(null);
+  const [imagePreviewIndex, setImagePreviewIndex] = useState<number | null>(null);
+  const markdownImages = extractMarkdownImageItems(text, token);
+  const imageIndexBySource = new Map(markdownImages.map((item, index) => [item.sourceKey, index]));
   useEffect(() => {
     let cancelled = false;
     void getShikiCodeRenderer().then((renderer) => {
@@ -540,6 +548,31 @@ export function MarkdownBody({ allowHtmlImages = true, text }: { allowHtmlImages
       const label = alt || src || "";
       if (!src) {
         return label ? <span>{label}</span> : null;
+      }
+      const sourceKey = attachmentPathFromMarkdownURL(src);
+      if (sourceKey) {
+        const imageIndex = imageIndexBySource.get(sourceKey);
+        const image =
+          imageIndex !== undefined
+            ? markdownImages[imageIndex]
+            : {
+                id: sourceKey,
+                name: label || attachmentNameFromPath(sourceKey),
+                sourceKey,
+                url: attachmentResourceURL({ url: sourceKey }, token),
+              };
+        if (image.url) {
+          return (
+            <MarkdownImageCard
+              image={image}
+              onOpen={() => {
+                if (imageIndex !== undefined) {
+                  setImagePreviewIndex(imageIndex);
+                }
+              }}
+            />
+          );
+        }
       }
       return (
         <a href={src} target="_blank" rel="noreferrer noopener" onClick={handleMarkdownLinkClick}>
@@ -575,32 +608,103 @@ export function MarkdownBody({ allowHtmlImages = true, text }: { allowHtmlImages
   const hasHtmlImage = segments.some((segment) => segment.type === "image");
 
   return (
-    <div className={cn("pudding-markdown", hasHtmlImage && "pudding-markdown-html-images")}>
-      {segments.map((segment, index) => {
-        if (segment.type === "image") {
+    <>
+      <div className={cn("pudding-markdown", hasHtmlImage && "pudding-markdown-html-images")}>
+        {segments.map((segment, index) => {
+          if (segment.type === "image") {
+            return (
+              <img
+                key={`html-img-${index}`}
+                alt={segment.image.alt}
+                decoding="async"
+                loading="lazy"
+                src={segment.image.src}
+                style={segment.image.style}
+                title={segment.image.title}
+              />
+            );
+          }
+          if (!segment.text) {
+            return null;
+          }
           return (
-            <img
-              key={`html-img-${index}`}
-              alt={segment.image.alt}
-              decoding="async"
-              loading="lazy"
-              src={segment.image.src}
-              style={segment.image.style}
-              title={segment.image.title}
-            />
+            <ReactMarkdown key={`md-${index}`} components={components} remarkPlugins={[remarkGfm]} urlTransform={markdownUrlTransform}>
+              {segment.text}
+            </ReactMarkdown>
           );
-        }
-        if (!segment.text) {
-          return null;
-        }
-        return (
-          <ReactMarkdown key={`md-${index}`} components={components} remarkPlugins={[remarkGfm]} urlTransform={markdownUrlTransform}>
-            {segment.text}
-          </ReactMarkdown>
-        );
-      })}
-    </div>
+        })}
+      </div>
+      <ImageLightbox images={markdownImages} openIndex={imagePreviewIndex} onOpenIndexChange={setImagePreviewIndex} />
+    </>
   );
+}
+
+function MarkdownImageCard({ image, onOpen }: { image: ImageLightboxItem; onOpen: () => void }) {
+  return (
+    <button
+      className="my-2 block h-20 w-24 overflow-hidden rounded-md border border-border/70 bg-muted/40"
+      title={image.name}
+      type="button"
+      onClick={onOpen}
+    >
+      <img alt={image.name} className="h-full w-full object-cover" decoding="async" loading="lazy" src={image.url} />
+    </button>
+  );
+}
+
+function extractMarkdownImageItems(text: string, token: string): MarkdownImageItem[] {
+  const out: MarkdownImageItem[] = [];
+  const pattern = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text))) {
+    const sourceKey = attachmentPathFromMarkdownURL(stripMarkdownImageURL(match[2] || ""));
+    if (!sourceKey) {
+      continue;
+    }
+    const name = (match[1] || "").trim() || attachmentNameFromPath(sourceKey);
+    out.push({
+      id: `markdown-image:${out.length}:${sourceKey}`,
+      name,
+      sourceKey,
+      url: attachmentResourceURL({ url: sourceKey }, token),
+    });
+  }
+  return out;
+}
+
+function stripMarkdownImageURL(value: string): string {
+  return value.trim().replace(/^<|>$/g, "");
+}
+
+function attachmentPathFromMarkdownURL(value: string | undefined): string {
+  const raw = (value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  if (isAttachmentPath(raw)) {
+    return raw;
+  }
+  try {
+    const url = new URL(raw, window.location.href);
+    const path = `${url.pathname}${url.search}`;
+    return isAttachmentPath(path) ? path : "";
+  } catch {
+    return "";
+  }
+}
+
+function isAttachmentPath(value: string): boolean {
+  return /^\/sessions\/[^/]+\/attachments\//.test(value);
+}
+
+function attachmentNameFromPath(path: string): string {
+  const clean = path.split("?")[0] || "";
+  const name = clean.split("/").filter(Boolean).pop() || "image";
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
 }
 
 function splitMarkdownHtmlImages(text: string): MarkdownSegment[] {
@@ -760,12 +864,12 @@ function decodeBasicHtmlEntities(value: string): string {
     .replace(/&gt;/g, ">");
 }
 
-const markdownUrlTransform: UrlTransform = (raw, key) => {
+const markdownUrlTransform: UrlTransform = (raw, key, node) => {
+  if (key === "src" || node.tagName === "img") {
+    return attachmentPathFromMarkdownURL(raw);
+  }
   try {
     const url = new URL(raw, window.location.origin);
-    if (key === "src") {
-      return url.protocol === "http:" || url.protocol === "https:" ? url.href : "";
-    }
     if (key === "href" && (url.protocol === "http:" || url.protocol === "https:" || url.protocol === "mailto:")) {
       return url.href;
     }
@@ -954,6 +1058,7 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     builtin_file_move: t("transcript.toolFileMove"),
     builtin_file_patch: t("transcript.toolFilePatch"),
     builtin_file_read: t("transcript.toolFileRead"),
+    builtin_attachment_read_image: t("transcript.toolAttachmentReadImage"),
     builtin_file_search: t("transcript.toolFileSearch"),
     builtin_file_slice: t("transcript.toolFileSlice"),
     builtin_file_stat: t("transcript.toolFileStat"),

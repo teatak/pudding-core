@@ -17,42 +17,43 @@ import (
 )
 
 const (
-	TimeGetCurrent    = "builtin_time_get_current"
-	WebSearch         = "builtin_web_search"
-	WebFetch          = "builtin_web_fetch"
-	HistorySearch     = "builtin_history_search"
-	HistoryGetMessage = "builtin_history_get_message"
-	SkillRead         = "builtin_skill_read"
-	FileList          = "builtin_file_list"
-	FileRead          = "builtin_file_read"
-	FileStat          = "builtin_file_stat"
-	FileSearch        = "builtin_file_search"
-	FileSlice         = "builtin_file_slice"
-	FileWrite         = "builtin_file_write"
-	FilePatch         = "builtin_file_patch"
-	FileDelete        = "builtin_file_delete"
-	FileMove          = "builtin_file_move"
-	FileCopy          = "builtin_file_copy"
-	SkillValidate     = "builtin_skill_validate"
-	SkillSubmit       = "builtin_skill_submit"
-	RESTRequest       = "builtin_rest_request"
-	GraphQLRequest    = "builtin_graphql_request"
-	GraphQLIntrospect = "builtin_graphql_introspect"
-	GraphQLSearch     = "builtin_graphql_search"
-	WeatherGet        = "builtin_weather_get"
-	CameraCapture     = "builtin_camera_capture"
-	DesktopScreenshot = "builtin_desktop_screenshot"
-	BrowserStatus     = "builtin_browser_status"
-	BrowserOpen       = "builtin_browser_open"
-	BrowserObserve    = "builtin_browser_observe"
-	BrowserScreenshot = "builtin_browser_screenshot"
-	BrowserBack       = "builtin_browser_back"
-	BrowserForward    = "builtin_browser_forward"
-	BrowserReload     = "builtin_browser_reload"
-	BrowserClose      = "builtin_browser_close"
-	BrowserClick      = "builtin_browser_click"
-	BrowserType       = "builtin_browser_type"
-	BrowserScroll     = "builtin_browser_scroll"
+	TimeGetCurrent      = "builtin_time_get_current"
+	WebSearch           = "builtin_web_search"
+	WebFetch            = "builtin_web_fetch"
+	HistorySearch       = "builtin_history_search"
+	HistoryGetMessage   = "builtin_history_get_message"
+	SkillRead           = "builtin_skill_read"
+	FileList            = "builtin_file_list"
+	FileRead            = "builtin_file_read"
+	AttachmentReadImage = "builtin_attachment_read_image"
+	FileStat            = "builtin_file_stat"
+	FileSearch          = "builtin_file_search"
+	FileSlice           = "builtin_file_slice"
+	FileWrite           = "builtin_file_write"
+	FilePatch           = "builtin_file_patch"
+	FileDelete          = "builtin_file_delete"
+	FileMove            = "builtin_file_move"
+	FileCopy            = "builtin_file_copy"
+	SkillValidate       = "builtin_skill_validate"
+	SkillSubmit         = "builtin_skill_submit"
+	RESTRequest         = "builtin_rest_request"
+	GraphQLRequest      = "builtin_graphql_request"
+	GraphQLIntrospect   = "builtin_graphql_introspect"
+	GraphQLSearch       = "builtin_graphql_search"
+	WeatherGet          = "builtin_weather_get"
+	CameraCapture       = "builtin_camera_capture"
+	DesktopScreenshot   = "builtin_desktop_screenshot"
+	BrowserStatus       = "builtin_browser_status"
+	BrowserOpen         = "builtin_browser_open"
+	BrowserObserve      = "builtin_browser_observe"
+	BrowserScreenshot   = "builtin_browser_screenshot"
+	BrowserBack         = "builtin_browser_back"
+	BrowserForward      = "builtin_browser_forward"
+	BrowserReload       = "builtin_browser_reload"
+	BrowserClose        = "builtin_browser_close"
+	BrowserClick        = "builtin_browser_click"
+	BrowserType         = "builtin_browser_type"
+	BrowserScroll       = "builtin_browser_scroll"
 )
 
 type WebConfigSource interface {
@@ -278,6 +279,12 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Capability:  store.ModeWorkspace,
 		},
 		{
+			Name:        AttachmentReadImage,
+			Description: "Read one captured/uploaded image attachment by attachmentKey or URL and route its image bytes to the model. Capture tools only create displayable images; use this only when you must inspect the image content.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"attachmentKey":{"type":"string","description":"Attachment key returned by a capture/upload tool."},"url":{"type":"string","description":"Attachment URL returned by a capture/upload tool. Used when attachmentKey is omitted."}},"additionalProperties":false}`),
+			Capability:  store.ModeChat,
+		},
+		{
 			Name:        FileStat,
 			Description: "Return metadata for one file or directory: exists, type, size, mtime, and MIME when available.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","workspace"],"description":"Target file area. Use workspace for authorized local workspace directories."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized workspace directories."}},"required":["scope","path"],"additionalProperties":false}`),
@@ -369,7 +376,7 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        CameraCapture,
-			Description: "Take one photo from the local camera and route it as an image attachment for the model. Use only when the user asks for a live camera photo or visual context from the camera.",
+			Description: "Take one photo from the local camera and return a displayable attachment URL. The photo bytes are not routed to the model; call builtin_attachment_read_image only if the image content must be inspected.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
@@ -471,6 +478,8 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.fileList(call)
 	case FileRead:
 		return r.fileRead(call)
+	case AttachmentReadImage:
+		return r.attachmentReadImage(call)
 	case FileStat:
 		return r.fileStat(call)
 	case FileSearch:

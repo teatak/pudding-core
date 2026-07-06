@@ -46,24 +46,6 @@ export function orderedDraftItems<TAttachment extends { id: string }, TFolder ex
   return out;
 }
 
-export function buildSubmitParts(
-  text: string,
-  attachments: Attachment[],
-  localFolders: LocalFolder[],
-  partOrder: DraftPartOrderItem[],
-): ContentPart[] {
-  const parts: ContentPart[] = orderedDraftItems(attachments, localFolders, partOrder).map((item) => {
-    if (item.type === "attachment") {
-      return { ...item.item, type: "attachment" };
-    }
-    return { ...item.item, type: "local_folder" };
-  });
-  if (text) {
-    parts.push({ type: "text", text });
-  }
-  return parts;
-}
-
 export function buildDraftSubmitParts<TAttachment extends { id: string; attachment?: Attachment }>(
   text: string,
   attachments: TAttachment[],

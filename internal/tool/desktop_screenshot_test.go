@@ -34,6 +34,9 @@ func TestBuiltinDesktopScreenshotRoutesAttachments(t *testing.T) {
 	if len(res.Attachments) != 2 {
 		t.Fatalf("unexpected screenshot attachment count: %+v", res.Attachments)
 	}
+	if len(res.ContextAttachments) != len(res.Attachments) {
+		t.Fatalf("desktop screenshot should route context attachments: %+v", res.ContextAttachments)
+	}
 	for i, item := range res.Attachments {
 		if item.Origin != attachment.OriginTool || item.MIME != "image/png" {
 			t.Fatalf("unexpected screenshot attachment: %+v", item)

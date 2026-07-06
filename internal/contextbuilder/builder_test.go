@@ -68,13 +68,13 @@ func TestBuildIncludesAttachmentSummary(t *testing.T) {
 		TurnID:          "t1",
 		UserMessageID:   "m1",
 		ClientMessageID: "c1",
-		UserAttachments: []store.Attachment{{
+		UserParts: []store.ContentPart{store.AttachmentPart(store.Attachment{
 			ID:            "att_1",
 			Name:          "report.pdf",
 			AttachmentKey: "sessions/s1/blobs/report.pdf",
 			MIME:          "application/pdf",
 			Size:          42,
-		}},
+		})},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -99,12 +99,15 @@ func TestBuildIncludesLocalFoldersTag(t *testing.T) {
 		UserMessageID:   "m1",
 		ClientMessageID: "c1",
 		UserText:        "scan this",
-		UserLocalFolders: []store.LocalFolder{{
-			ID:     "folder_1",
-			Name:   "files",
-			Path:   "/Users/me/files",
-			Origin: "local_path",
-		}},
+		UserParts: []store.ContentPart{
+			store.LocalFolderPart(store.LocalFolder{
+				ID:     "folder_1",
+				Name:   "files",
+				Path:   "/Users/me/files",
+				Origin: "local_path",
+			}),
+			{Type: store.ContentPartText, Text: "scan this"},
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +139,7 @@ func TestBuildIncludesAttachmentToolPathWhenAvailable(t *testing.T) {
 		TurnID:          "t1",
 		UserMessageID:   "m1",
 		ClientMessageID: "c1",
-		UserAttachments: []store.Attachment{stored},
+		UserParts:       []store.ContentPart{store.AttachmentPart(stored)},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +171,7 @@ func TestBuildIncludesTempAttachmentToolScope(t *testing.T) {
 		TurnID:          "t1",
 		UserMessageID:   "m1",
 		ClientMessageID: "c1",
-		UserAttachments: []store.Attachment{stored},
+		UserParts:       []store.ContentPart{store.AttachmentPart(stored)},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +201,10 @@ func TestBuildInlinesImageAttachmentWhenSupported(t *testing.T) {
 		UserMessageID:   "m1",
 		ClientMessageID: "c1",
 		UserText:        "看图",
-		UserAttachments: []store.Attachment{stored},
+		UserParts: []store.ContentPart{
+			store.AttachmentPart(stored),
+			{Type: store.ContentPartText, Text: "看图"},
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +238,7 @@ func TestBuildFallsBackWhenImageCapabilityUnknown(t *testing.T) {
 		TurnID:          "t1",
 		UserMessageID:   "m1",
 		ClientMessageID: "c1",
-		UserAttachments: []store.Attachment{stored},
+		UserParts:       []store.ContentPart{store.AttachmentPart(stored)},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +267,7 @@ func TestBuildFallsBackWhenImageUnsupported(t *testing.T) {
 		TurnID:          "t1",
 		UserMessageID:   "m1",
 		ClientMessageID: "c1",
-		UserAttachments: []store.Attachment{stored},
+		UserParts:       []store.ContentPart{store.AttachmentPart(stored)},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +309,7 @@ func TestBuildReplaysToolImageAttachmentAsUserMessage(t *testing.T) {
 		TurnID: begin.Turn.ID,
 		Parts: []store.ContentPart{
 			{Type: store.ContentPartToolResult, CallID: "call_image", Name: tool.FileRead, Ok: true, Content: `{"ok":true}`},
-			store.UserInputParts("", []store.Attachment{stored}, nil)[0],
+			store.AttachmentPart(stored),
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -340,7 +346,10 @@ func TestBuildInlinesAudioAttachmentWhenSupported(t *testing.T) {
 		UserMessageID:   "m1",
 		ClientMessageID: "c1",
 		UserText:        "听一下",
-		UserAttachments: []store.Attachment{stored},
+		UserParts: []store.ContentPart{
+			store.AttachmentPart(stored),
+			{Type: store.ContentPartText, Text: "听一下"},
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +383,7 @@ func TestBuildFallsBackWhenAudioUnsupported(t *testing.T) {
 		TurnID:          "t1",
 		UserMessageID:   "m1",
 		ClientMessageID: "c1",
-		UserAttachments: []store.Attachment{stored},
+		UserParts:       []store.ContentPart{store.AttachmentPart(stored)},
 	}); err != nil {
 		t.Fatal(err)
 	}

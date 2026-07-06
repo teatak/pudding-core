@@ -1326,7 +1326,7 @@ func TestAttachmentUploadSubmitAndRead(t *testing.T) {
 
 	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_attach/submit", map[string]any{
 		"clientMessageID": "client_attach",
-		"attachments":     []store.Attachment{uploaded},
+		"parts":           []store.ContentPart{store.AttachmentPart(uploaded)},
 	})
 	if resp.StatusCode != http.StatusAccepted {
 		data, _ := io.ReadAll(resp.Body)
@@ -1350,6 +1350,22 @@ func TestAttachmentUploadSubmitAndRead(t *testing.T) {
 	attachments := store.AttachmentsFromParts(msg.Parts)
 	if len(attachments) != 1 || attachments[0].AttachmentKey != uploaded.AttachmentKey {
 		t.Fatalf("attachment part not persisted: %+v", msg.Parts)
+	}
+}
+
+func TestSubmitSystemTextOnly(t *testing.T) {
+	srv, st := newTestServer(t)
+	if err := st.CreateSession(context.Background(), &store.Session{ID: "sess_system", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_system/submit", map[string]string{
+		"clientMessageID": "client_system",
+		"kind":            "system",
+		"text":            "summarize this",
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("submit status = %d", resp.StatusCode)
 	}
 }
 
@@ -1497,7 +1513,7 @@ func TestSubmitLocalFoldersPersistsPart(t *testing.T) {
 	}
 	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_folder/submit", map[string]any{
 		"clientMessageID": "client_folder",
-		"localFolders":    []store.LocalFolder{folder},
+		"parts":           []store.ContentPart{store.LocalFolderPart(folder)},
 	})
 	if resp.StatusCode != http.StatusAccepted {
 		data, _ := io.ReadAll(resp.Body)
@@ -1560,7 +1576,7 @@ func TestDraftAttachmentSubmitCopiesToSession(t *testing.T) {
 
 	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_from_draft/submit", map[string]any{
 		"clientMessageID": "client_draft_attach",
-		"attachments":     []store.Attachment{uploaded},
+		"parts":           []store.ContentPart{store.AttachmentPart(uploaded)},
 	})
 	if resp.StatusCode != http.StatusAccepted {
 		data, _ := io.ReadAll(resp.Body)
@@ -1650,7 +1666,7 @@ func TestTempDraftAttachmentSubmitStaysInTemp(t *testing.T) {
 
 	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_temp_attach/submit", map[string]any{
 		"clientMessageID": "client_temp_attach",
-		"attachments":     []store.Attachment{uploaded},
+		"parts":           []store.ContentPart{store.AttachmentPart(uploaded)},
 	})
 	if resp.StatusCode != http.StatusAccepted {
 		data, _ := io.ReadAll(resp.Body)

@@ -19,13 +19,15 @@ type Call struct {
 }
 
 type Result struct {
-	CallID       string
-	Name         string
-	Ok           bool
-	Content      string
-	Attachments  []store.Attachment
-	SummaryKind  string
-	SummaryCount int
+	CallID      string
+	Name        string
+	Ok          bool
+	Content     string
+	Attachments []store.Attachment
+	// ContextAttachments are appended to canonical turn output and replayed to the model.
+	ContextAttachments []store.Attachment
+	SummaryKind        string
+	SummaryCount       int
 }
 
 const (

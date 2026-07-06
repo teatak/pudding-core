@@ -29,6 +29,9 @@ func TestBuiltinCameraCaptureRoutesAttachment(t *testing.T) {
 	if len(res.Attachments) != 1 || res.Attachments[0].Origin != attachment.OriginTool || res.Attachments[0].MIME != "image/jpeg" {
 		t.Fatalf("unexpected camera attachment: %+v", res.Attachments)
 	}
+	if len(res.ContextAttachments) != 0 {
+		t.Fatalf("camera capture must be display-only, got context attachments: %+v", res.ContextAttachments)
+	}
 	payload := decodeToolResult(t, res)
 	if payload["attachmentKey"] == "" || payload["url"] == "" {
 		t.Fatalf("missing attachment metadata: %+v", payload)

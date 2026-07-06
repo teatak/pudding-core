@@ -37,6 +37,9 @@ func TestBuiltinBrowserScreenshotRoutesAttachment(t *testing.T) {
 	if len(res.Attachments) != 1 || res.Attachments[0].Origin != attachment.OriginTool || res.Attachments[0].MIME != "image/png" {
 		t.Fatalf("unexpected screenshot attachment: %+v", res.Attachments)
 	}
+	if len(res.ContextAttachments) != 1 || res.ContextAttachments[0].AttachmentKey != res.Attachments[0].AttachmentKey {
+		t.Fatalf("browser screenshot should route a context attachment: %+v", res.ContextAttachments)
+	}
 	payload := decodeToolResult(t, res)
 	if payload["attachmentKey"] == "" || payload["url"] == "" {
 		t.Fatalf("missing attachment metadata: %+v", payload)

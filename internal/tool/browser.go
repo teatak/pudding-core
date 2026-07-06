@@ -115,6 +115,7 @@ func (r *BuiltinRunner) browserScreenshot(ctx context.Context, call Call) Result
 	stored.Origin = attachment.OriginTool
 	out.Ok = true
 	out.Attachments = []store.Attachment{stored}
+	out.ContextAttachments = []store.Attachment{stored}
 	out.Content = jsonString(map[string]any{
 		"ok":            true,
 		"tab":           result.Tab,

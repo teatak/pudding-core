@@ -754,7 +754,7 @@ function DraftComposer({
   }, [onMascotInputGazeChange]);
 
   const submitMutation = useMutation({
-    mutationFn: async (value: DraftValue & { attachments: Attachment[]; localFolders: LocalFolderPath[]; parts: ContentPart[] }) => {
+    mutationFn: async (value: DraftValue & { parts: ContentPart[] }) => {
       const clientMessageID = draftIDRef.current;
       const activeReasoningEffort = reasoningEffort && reasoningOptions.includes(reasoningEffort) ? reasoningEffort : "";
       if (!modelValue.provider || !modelValue.model) {
@@ -783,8 +783,6 @@ function DraftComposer({
         clientMessageID,
         status: "submitting",
         text: value.text,
-        attachments: value.attachments,
-        localFolders: value.localFolders,
         parts: value.parts,
         createdAt: new Date().toISOString(),
       });
@@ -794,8 +792,6 @@ function DraftComposer({
           clientMessageID,
           reasoningEffort: activeReasoningEffort || undefined,
           text: value.text,
-          attachments: value.attachments,
-          localFolders: value.localFolders,
           parts: value.parts,
         });
         if (result.queued || !result.turnID) {
@@ -869,8 +865,6 @@ function DraftComposer({
       onSubmitError(null);
       submitMutation.mutate({
         text,
-        attachments: attachmentsToSubmit,
-        localFolders: localFoldersToSubmit,
         parts: buildDraftSubmitParts(text, attachmentItemsToSubmit, localFoldersToSubmit, partOrder),
       });
     },

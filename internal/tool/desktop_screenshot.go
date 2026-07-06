@@ -73,6 +73,7 @@ func (r *BuiltinRunner) desktopScreenshot(ctx context.Context, call Call) Result
 	}
 	out.Ok = true
 	out.Attachments = stored
+	out.ContextAttachments = stored
 	out.Content = jsonString(map[string]any{
 		"ok":          true,
 		"attachments": items,

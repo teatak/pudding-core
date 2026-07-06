@@ -440,6 +440,7 @@ func (r *BuiltinRunner) fileReadImageAttachment(out Result, call Call, scope str
 	stored.Origin = attachment.OriginTool
 	out.Ok = true
 	out.Attachments = []store.Attachment{stored}
+	out.ContextAttachments = []store.Attachment{stored}
 	out.Content = jsonString(resolved.payload(map[string]any{
 		"ok":            true,
 		"scope":         scope,

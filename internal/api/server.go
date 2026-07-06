@@ -444,8 +444,6 @@ func (s *Server) deleteSession(c *cart.Context) error {
 type submitReq struct {
 	ClientMessageID string              `json:"clientMessageID"`
 	Text            string              `json:"text"`
-	Attachments     []store.Attachment  `json:"attachments,omitempty"`
-	LocalFolders    []store.LocalFolder `json:"localFolders,omitempty"`
 	Parts           []store.ContentPart `json:"parts,omitempty"`
 	Kind            string              `json:"kind,omitempty"`
 	ReasoningEffort string              `json:"reasoningEffort,omitempty"`
@@ -458,36 +456,32 @@ func (s *Server) submit(c *cart.Context) error {
 		return badRequest(c, "invalid json body")
 	}
 	parts := store.NormalizeContentParts(req.Parts)
-	reqAttachments := store.NormalizeAttachments(req.Attachments)
-	if len(reqAttachments) != len(req.Attachments) {
-		return badRequest(c, "invalid attachments")
+	if req.Kind != "system" {
+		parts = store.UserInputParts(req.Text, req.Parts)
+		attachments, err := s.normalizeSubmitAttachments(id, store.AttachmentsFromParts(parts))
+		if errors.Is(err, errAttachmentHomeUnavailable) {
+			c.JSON(http.StatusInternalServerError, map[string]string{"error": "attachment_home_unavailable"})
+			return nil
+		}
+		if errors.Is(err, errInvalidAttachment) {
+			return badRequest(c, "invalid attachments")
+		}
+		if err != nil {
+			return s.fail(c, err)
+		}
+		parts = store.UserInputPartsWithAttachments(req.Text, parts, attachments)
 	}
-	rawAttachments := mergeSubmitAttachments(reqAttachments, store.AttachmentsFromParts(parts))
-	attachments, err := s.normalizeSubmitAttachments(id, rawAttachments)
-	if errors.Is(err, errAttachmentHomeUnavailable) {
-		c.JSON(http.StatusInternalServerError, map[string]string{"error": "attachment_home_unavailable"})
-		return nil
-	}
-	if errors.Is(err, errInvalidAttachment) {
-		return badRequest(c, "invalid attachments")
-	}
-	if err != nil {
-		return s.fail(c, err)
-	}
-	localFolders := mergeSubmitLocalFolders(req.LocalFolders, store.LocalFoldersFromParts(parts))
 	res, err := s.engine.Submit(c.Request.Context(), engine.SubmitInput{
 		SessionID:       id,
 		ClientMessageID: req.ClientMessageID,
 		Text:            req.Text,
-		Attachments:     attachments,
-		LocalFolders:    localFolders,
 		Parts:           parts,
 		Kind:            req.Kind,
 		ReasoningEffort: req.ReasoningEffort,
 	})
 	switch {
 	case errors.Is(err, engine.ErrEmptyInput):
-		return badRequest(c, "text, attachments, or localFolders and clientMessageID are required")
+		return badRequest(c, "parts and clientMessageID are required")
 	case errors.Is(err, engine.ErrTurnRunning):
 		c.JSON(http.StatusConflict, map[string]string{"error": "turn_running"})
 		return nil
@@ -506,44 +500,6 @@ func (s *Server) submit(c *cart.Context) error {
 	}
 	c.JSON(http.StatusAccepted, res)
 	return nil
-}
-
-func mergeSubmitAttachments(groups ...[]store.Attachment) []store.Attachment {
-	out := make([]store.Attachment, 0)
-	seen := make(map[string]bool)
-	for _, group := range groups {
-		for _, attachment := range store.NormalizeAttachments(group) {
-			key := attachment.ID
-			if key == "" {
-				key = attachment.AttachmentKey
-			}
-			if key == "" || seen[key] {
-				continue
-			}
-			seen[key] = true
-			out = append(out, attachment)
-		}
-	}
-	return out
-}
-
-func mergeSubmitLocalFolders(groups ...[]store.LocalFolder) []store.LocalFolder {
-	out := make([]store.LocalFolder, 0)
-	seen := make(map[string]bool)
-	for _, group := range groups {
-		for _, folder := range store.NormalizeLocalFolders(group) {
-			key := folder.ID
-			if key == "" {
-				key = folder.Path
-			}
-			if key == "" || seen[key] {
-				continue
-			}
-			seen[key] = true
-			out = append(out, folder)
-		}
-	}
-	return out
 }
 
 func (s *Server) listQueuedInputs(c *cart.Context) error {

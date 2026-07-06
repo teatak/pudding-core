@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/browser"
 	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/event"
@@ -875,6 +876,78 @@ func TestSubmitRoutesFileReadImageToNextProviderRequest(t *testing.T) {
 	}
 	if !bytes.Equal(routedImageBytes, expectedImageBytes) {
 		t.Fatalf("unexpected image bytes: %x", routedImageBytes)
+	}
+}
+
+func TestSubmitDoesNotRouteDisplayOnlyToolAttachmentToNextProviderRequest(t *testing.T) {
+	home := t.TempDir()
+	ms := memstore.New()
+	hub := event.NewHub()
+	client := &displayAttachmentToolClient{}
+	sid := "sess_display_photo"
+	runner := &recordingToolRunner{
+		defs: tool.BuiltinDefinitions(),
+		result: tool.Result{
+			Ok:      true,
+			Content: `{"ok":true,"attachmentKey":"sessions/sess_display_photo/blobs/photo.jpg","url":"/sessions/sess_display_photo/attachments/blobs/photo.jpg"}`,
+			Attachments: []store.Attachment{{
+				ID:            "att_photo",
+				Name:          "photo.jpg",
+				AttachmentKey: "sessions/sess_display_photo/blobs/photo.jpg",
+				URL:           "/sessions/sess_display_photo/attachments/blobs/photo.jpg",
+				MIME:          "image/jpeg",
+				Size:          4,
+				Origin:        attachment.OriginTool,
+			}},
+		},
+	}
+	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithAttachmentHome(home), WithTools(runner))
+	ctx := context.Background()
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID:         sid,
+		Title:      "photo display",
+		Provider:   "capture",
+		Model:      "vision-model",
+		ActiveMode: store.ModeChat,
+		ModeLease:  store.ModeLeaseSession,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "capture", Protocol: "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID:           "vision-model",
+			Capabilities: &store.ModelCaps{Image: true, Tools: true},
+			Limits:       &store.ModelLimits{MaxToolLoops: 3},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "拍个照片给我展示一下"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+
+	if len(client.requests) != 2 {
+		t.Fatalf("want 2 provider calls, got %d", len(client.requests))
+	}
+	for _, msg := range client.requests[1].Messages {
+		if hasProviderPart(msg.Parts, provider.PartImage) {
+			t.Fatalf("display-only attachment should not be routed as image bytes: %+v", msg)
+		}
+	}
+	msgs, err := ms.ListMessages(ctx, sid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 4 || msgs[2].Kind != store.MessageKindToolResult {
+		t.Fatalf("unexpected messages: %+v", msgs)
+	}
+	for _, part := range msgs[2].Parts {
+		if part.Type == store.ContentPartAttachment {
+			t.Fatalf("display-only tool attachment should not be stored as context part: %+v", part)
+		}
 	}
 }
 
@@ -2035,6 +2108,31 @@ func (c *fileReadImageClient) Stream(_ context.Context, req provider.Request) (<
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	} else {
 		out <- provider.Chunk{Part: provider.PartText, Delta: "已收到图片"}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
+	}
+	close(out)
+	return out, nil
+}
+
+type displayAttachmentToolClient struct {
+	requests []provider.Request
+}
+
+func (c *displayAttachmentToolClient) Name() string { return "display-attachment-tool" }
+
+func (c *displayAttachmentToolClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	c.requests = append(c.requests, req)
+	out := make(chan provider.Chunk, 4)
+	if len(c.requests) == 1 {
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
+			Index:     0,
+			CallID:    "call_photo",
+			Name:      tool.CameraCapture,
+			ArgsDelta: `{}`,
+		}}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	} else {
+		out <- provider.Chunk{Part: provider.PartText, Delta: "照片已拍好"}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
 	}
 	close(out)

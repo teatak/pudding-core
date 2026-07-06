@@ -63,19 +63,23 @@ func TestHistoryGetMessageReturnsPartsAndLocalFolders(t *testing.T) {
 		Role:      store.RoleUser,
 		Kind:      store.MessageKindText,
 		Text:      "look at this",
-		Parts: store.UserInputParts("look at this", []store.Attachment{{
-			ID:            "att_1",
-			Name:          "demo.txt",
-			AttachmentKey: "sessions/sess_1/blobs/demo.txt",
-			MIME:          "text/plain",
-			Size:          12,
-			SourcePath:    "/tmp/demo.txt",
-		}}, []store.LocalFolder{{
-			ID:     "folder_1",
-			Name:   "files",
-			Path:   "/tmp/files",
-			Origin: "local_path",
-		}}),
+		Parts: store.UserInputParts("look at this", []store.ContentPart{
+			store.AttachmentPart(store.Attachment{
+				ID:            "att_1",
+				Name:          "demo.txt",
+				AttachmentKey: "sessions/sess_1/blobs/demo.txt",
+				MIME:          "text/plain",
+				Size:          12,
+				SourcePath:    "/tmp/demo.txt",
+			}),
+			store.LocalFolderPart(store.LocalFolder{
+				ID:     "folder_1",
+				Name:   "files",
+				Path:   "/tmp/files",
+				Origin: "local_path",
+			}),
+			{Type: store.ContentPartText, Text: "look at this"},
+		}),
 		CreatedAt: time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC),
 	}}
 	res := NewBuiltinRunner(WithHistorySearch(src)).Call(context.Background(), Call{

@@ -245,13 +245,14 @@ function userFromMessages(messages: Message[]): UserInputVM | undefined {
 }
 
 function userFromPending(message: PendingUserMessage, options: { pending?: boolean } = {}): UserInputVM {
+  const parts = message.parts || [];
   return {
-    attachments: message.attachments,
+    attachments: attachmentsFromContentParts(parts),
     clientMessageID: message.clientMessageID,
     createdAt: message.createdAt,
-    localFolders: message.localFolders,
+    localFolders: localFoldersFromContentParts(parts),
     pending: options.pending ?? true,
-    parts: message.parts,
+    parts,
     status: options.pending === false ? undefined : message.status,
     text: message.text,
   };
