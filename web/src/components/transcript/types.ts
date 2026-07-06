@@ -13,6 +13,7 @@ export type UserInputVM = {
   text: string;
   attachments?: Attachment[];
   localFolders?: LocalFolder[];
+  parts?: ContentPart[];
 };
 
 export type AssistantOutputVM =

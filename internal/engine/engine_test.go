@@ -610,11 +610,28 @@ func TestSubmitRunsToolLoop(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	sub, cancelSub := hub.Subscribe(sid)
+	defer cancelSub()
 
 	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "现在几点"}); err != nil {
 		t.Fatal(err)
 	}
 	waitTurnDone(t, ms, sid)
+	var resultEvent event.Event
+	for {
+		select {
+		case ev := <-sub:
+			if ev.Kind == event.TurnTool && ev.Phase == "ok" {
+				resultEvent = ev
+			}
+		default:
+			goto doneDrain
+		}
+	}
+doneDrain:
+	if resultEvent.CallID != "call_time" || resultEvent.Ok == nil || !*resultEvent.Ok || resultEvent.Content == "" {
+		t.Fatalf("tool result event missing content/ok: %+v", resultEvent)
+	}
 
 	if len(client.requests) != 2 {
 		t.Fatalf("want 2 provider calls, got %d", len(client.requests))

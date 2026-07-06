@@ -151,6 +151,7 @@ type SubmitInput struct {
 	Text            string
 	Attachments     []store.Attachment
 	LocalFolders    []store.LocalFolder
+	Parts           []store.ContentPart
 	Kind            string
 	ReasoningEffort string
 }
@@ -212,11 +213,12 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	}
 	switch kind {
 	case "", "user":
-		if strings.TrimSpace(in.Text) == "" && len(in.Attachments) == 0 && len(in.LocalFolders) == 0 {
+		in.Parts = store.OrderedUserInputParts(in.Text, in.Parts, in.Attachments, in.LocalFolders)
+		if strings.TrimSpace(in.Text) == "" && len(in.Attachments) == 0 && len(in.LocalFolders) == 0 && len(in.Parts) == 0 {
 			return nil, ErrEmptyInput
 		}
 	case "system":
-		if strings.TrimSpace(in.Text) == "" || len(in.Attachments) > 0 || len(in.LocalFolders) > 0 {
+		if strings.TrimSpace(in.Text) == "" || len(in.Attachments) > 0 || len(in.LocalFolders) > 0 || len(in.Parts) > 0 {
 			return nil, ErrEmptyInput
 		}
 	default:
@@ -264,6 +266,7 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 		UserText:         in.Text,
 		UserAttachments:  in.Attachments,
 		UserLocalFolders: in.LocalFolders,
+		UserParts:        in.Parts,
 		Provider:         resolved.providerName,
 		Model:            resolved.model,
 		Mode:             resolved.mode,
@@ -416,6 +419,7 @@ func (e *Engine) queueSubmit(ctx context.Context, in SubmitInput, resolved *reso
 		Text:            strings.TrimSpace(in.Text),
 		Attachments:     in.Attachments,
 		LocalFolders:    in.LocalFolders,
+		Parts:           in.Parts,
 		Provider:        resolved.providerName,
 		Model:           resolved.model,
 		Mode:            resolved.mode,
@@ -1304,6 +1308,8 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			CallID:       result.CallID,
 			Name:         result.Name,
 			Phase:        phase,
+			Ok:           &result.Ok,
+			Content:      result.Content,
 			SummaryKind:  result.SummaryKind,
 			SummaryCount: result.SummaryCount,
 		})

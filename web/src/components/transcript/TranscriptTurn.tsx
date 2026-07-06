@@ -106,9 +106,38 @@ function userEqual(previous: TranscriptTurnVM["user"], next: TranscriptTurnVM["u
     previous.pending === next.pending &&
     previous.status === next.status &&
     previous.text === next.text &&
+    partsEqual(previous.parts, next.parts) &&
     attachmentsEqual(previous.attachments, next.attachments) &&
     localFoldersEqual(previous.localFolders, next.localFolders)
   );
+}
+
+function partsEqual(previous: NonNullable<TranscriptTurnVM["user"]>["parts"], next: NonNullable<TranscriptTurnVM["user"]>["parts"]) {
+  if (previous === next) {
+    return true;
+  }
+  if (!previous || !next) {
+    return false;
+  }
+  if (previous.length !== next.length) {
+    return false;
+  }
+  return previous.every((part, index) => {
+    const other = next[index];
+    if (part.type !== other.type) {
+      return false;
+    }
+    if (part.type === "attachment" && other.type === "attachment") {
+      return part.id === other.id && part.attachmentKey === other.attachmentKey;
+    }
+    if (part.type === "local_folder" && other.type === "local_folder") {
+      return part.id === other.id && part.path === other.path;
+    }
+    if (part.type === "text" && other.type === "text") {
+      return part.text === other.text;
+    }
+    return true;
+  });
 }
 
 function attachmentsEqual(

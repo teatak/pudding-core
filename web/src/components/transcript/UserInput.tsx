@@ -34,17 +34,15 @@ export const UserInput = memo(function UserInput({
   const clientMessageID = user.clientMessageID;
   const attachments = user.attachments || [];
   const imageAttachments = attachments.filter((attachment) => isImageAttachment(attachment.mime, attachment.name));
-  const audioAttachments = attachments.filter((attachment) => isAudioAttachment(attachment.mime, attachment.name));
-  const fileAttachments = attachments.filter(
-    (attachment) => !isImageAttachment(attachment.mime, attachment.name) && !isAudioAttachment(attachment.mime, attachment.name),
-  );
   const localFolders = user.localFolders || [];
+  const orderedItems = orderedUserInputItems(attachments, localFolders, user.parts);
   const imagePreviewItems: ImageLightboxItem[] = imageAttachments.map((attachment) => ({
     id: attachment.id,
     name: attachment.name,
     size: attachment.size,
     url: attachmentResourceURL(attachment, token),
   }));
+  const imagePreviewIndexByID = new Map(imagePreviewItems.map((item, index) => [item.id, index]));
   const metaText = user.text || attachments.map((attachment) => attachment.name).concat(localFolders.map((folder) => folder.path)).join("\n");
   const canEditQueued =
     Boolean(clientMessageID && user.pending && (user.status === "queued" || user.status === "editing")) &&
@@ -158,60 +156,57 @@ export const UserInput = memo(function UserInput({
             </div>
           ) : (
             <div className="grid min-w-0 max-w-full gap-2">
-              {user.text ? <div className="min-w-0 max-w-full [overflow-wrap:anywhere]">{user.text}</div> : null}
-              {imagePreviewItems.length > 0 ? (
+              {orderedItems.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
-                  {imagePreviewItems.map((image, index) => (
-                    <ImageAttachmentButton
-                      key={image.id}
-                      image={image}
-                      onOpen={() => setImagePreviewIndex(index)}
-                    />
-                  ))}
-                </div>
-              ) : null}
-              {audioAttachments.length > 0 ? (
-                <div className="flex flex-wrap justify-end gap-1.5">
-                  {audioAttachments.map((attachment) => (
-                    <AudioAttachmentCard key={attachment.id} attachment={attachment} token={token} />
-                  ))}
-                </div>
-              ) : null}
-              {fileAttachments.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5">
-                  {fileAttachments.map((attachment) => {
+                  {orderedItems.map((item) => {
+                    if (item.type === "local_folder") {
+                      return (
+                        <LocalFolderCard
+                          key={`folder:${item.item.id}`}
+                          label={t("composer.folderLabel")}
+                          name={item.item.name}
+                          path={item.item.path}
+                          onReveal={() => revealLocalPath(item.item.path)}
+                        />
+                      );
+                    }
+                    const attachment = item.item;
+                    if (isImageAttachment(attachment.mime, attachment.name)) {
+                      const imageIndex = imagePreviewIndexByID.get(attachment.id);
+                      if (imageIndex === undefined) {
+                        return null;
+                      }
+                      const image = imagePreviewItems[imageIndex];
+                      return image ? <ImageAttachmentButton key={`attachment:${attachment.id}`} image={image} onOpen={() => setImagePreviewIndex(imageIndex)} /> : null;
+                    }
+                    if (isAudioAttachment(attachment.mime, attachment.name)) {
+                      return <AudioAttachmentCard key={`attachment:${attachment.id}`} attachment={attachment} token={token} />;
+                    }
                     const content = (
                       <>
                         <FileText className="size-3 shrink-0" />
                         <span className="min-w-0 truncate">{attachment.name}</span>
-                        {attachment.size > 0 ? (
-                          <span className="shrink-0 text-muted-foreground/70">{formatAttachmentSize(attachment.size)}</span>
-                        ) : null}
+                        {attachment.size > 0 ? <span className="shrink-0 text-muted-foreground/70">{formatAttachmentSize(attachment.size)}</span> : null}
                       </>
                     );
-                    const className = "inline-flex max-w-full items-center gap-1 rounded-md border border-border/70 bg-background/70 px-2 py-1 text-xs leading-5 no-underline hover:bg-muted";
+                    const className =
+                      "inline-flex max-w-full items-center gap-1 rounded-md border border-border/70 bg-background/70 px-2 py-1 text-xs leading-5 no-underline hover:bg-muted";
                     if (attachment.sourcePath) {
                       return (
-                        <button key={attachment.id} className={className} type="button" onClick={() => revealLocalPath(attachment.sourcePath || "")}>
+                        <button key={`attachment:${attachment.id}`} className={className} type="button" onClick={() => revealLocalPath(attachment.sourcePath || "")}>
                           {content}
                         </button>
                       );
                     }
                     return (
-                      <a key={attachment.id} className={className} href={attachmentResourceURL(attachment, token)} rel="noreferrer" target="_blank">
+                      <a key={`attachment:${attachment.id}`} className={className} href={attachmentResourceURL(attachment, token)} rel="noreferrer" target="_blank">
                         {content}
                       </a>
                     );
                   })}
                 </div>
               ) : null}
-              {localFolders.length > 0 ? (
-                <div className="flex flex-wrap justify-end gap-1.5">
-                  {localFolders.map((folder) => (
-                    <LocalFolderCard key={folder.id} label={t("composer.folderLabel")} name={folder.name} path={folder.path} onReveal={() => revealLocalPath(folder.path)} />
-                  ))}
-                </div>
-              ) : null}
+              {user.text ? <div className="min-w-0 max-w-full [overflow-wrap:anywhere]">{user.text}</div> : null}
               {user.interrupted ? <InterruptedBadge /> : null}
             </div>
           )}
@@ -224,6 +219,50 @@ export const UserInput = memo(function UserInput({
 });
 
 type UserAttachment = NonNullable<UserInputVM["attachments"]>[number];
+type UserLocalFolder = NonNullable<UserInputVM["localFolders"]>[number];
+type OrderedUserItem = { type: "attachment"; item: UserAttachment } | { type: "local_folder"; item: UserLocalFolder };
+
+function orderedUserInputItems(attachments: UserAttachment[], localFolders: UserLocalFolder[], parts: UserInputVM["parts"]): OrderedUserItem[] {
+  if (!parts || parts.length === 0) {
+    return [
+      ...attachments.map((item) => ({ type: "attachment" as const, item })),
+      ...localFolders.map((item) => ({ type: "local_folder" as const, item })),
+    ];
+  }
+  const attachmentsByID = new Map(attachments.map((item) => [item.id, item]));
+  const foldersByID = new Map(localFolders.map((item) => [item.id, item]));
+  const seenAttachments = new Set<string>();
+  const seenFolders = new Set<string>();
+  const out: OrderedUserItem[] = [];
+  for (const part of parts) {
+    if (part.type === "attachment") {
+      const attachment = attachmentsByID.get(part.id);
+      if (attachment && !seenAttachments.has(attachment.id)) {
+        seenAttachments.add(attachment.id);
+        out.push({ type: "attachment", item: attachment });
+      }
+      continue;
+    }
+    if (part.type === "local_folder") {
+      const folder = foldersByID.get(part.id);
+      if (folder && !seenFolders.has(folder.id)) {
+        seenFolders.add(folder.id);
+        out.push({ type: "local_folder", item: folder });
+      }
+    }
+  }
+  for (const item of attachments) {
+    if (!seenAttachments.has(item.id)) {
+      out.push({ type: "attachment", item });
+    }
+  }
+  for (const item of localFolders) {
+    if (!seenFolders.has(item.id)) {
+      out.push({ type: "local_folder", item });
+    }
+  }
+  return out;
+}
 
 function LocalFolderCard({ label, name, path, onReveal }: { label: string; name: string; path: string; onReveal: () => void }) {
   return (

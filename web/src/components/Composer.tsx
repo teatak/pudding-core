@@ -54,6 +54,7 @@ import {
   revealDesktopPath,
   type Attachment,
   type AudioBindings,
+  type ContentPart,
   type Session,
   type SkillDraft,
 } from "@/api/client";
@@ -90,6 +91,7 @@ import {
 } from "@/lib/localFolders";
 import type { AppSearch } from "@/lib/route";
 import { getSubmitFailure } from "@/lib/submitFailure";
+import { buildDraftSubmitParts, orderedDraftItems } from "@/lib/submitParts";
 import { getTextAreaCaretClientPoint } from "@/lib/textCaret";
 import { cn } from "@/lib/utils";
 import { useOverlayStore, type AssistantOverlay, type AssistantOverlayPart, type TurnPhaseState } from "@/state/overlayStore";
@@ -195,8 +197,10 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   });
   const attachments = useSessionDraftStore((state) => state.drafts[sessionID]?.attachments ?? []);
   const localFolders = useSessionDraftStore((state) => state.drafts[sessionID]?.localFolders ?? []);
+  const partOrder = useSessionDraftStore((state) => state.drafts[sessionID]?.partOrder ?? []);
   const setSessionDraftAttachments = useSessionDraftStore((state) => state.setAttachments);
   const setSessionDraftLocalFolders = useSessionDraftStore((state) => state.setLocalFolders);
+  const setSessionDraftPartOrder = useSessionDraftStore((state) => state.setPartOrder);
   const selectionGuardRef = useComposerSelectionGuard<HTMLDivElement>();
   useEffect(() => {
     const draft = ensureSessionDraft(sessionID);
@@ -398,6 +402,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
         status: "uploading" as const,
       }));
       setSessionDraftAttachments(sessionID, (current) => [...current, ...items]);
+      setSessionDraftPartOrder(sessionID, (current) => [...current, ...items.map((item) => ({ type: "attachment" as const, id: item.id }))]);
       items.forEach((item, index) => {
         const file = nextFiles[index];
         void uploadAttachment(token, uploadSessionID, file, options?.origin ? { origin: options.origin } : undefined)
@@ -420,10 +425,11 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
               }
               return current.filter((currentItem) => currentItem.id !== item.id);
             });
+            setSessionDraftPartOrder(sessionID, (current) => current.filter((orderItem) => orderItem.type !== "attachment" || orderItem.id !== item.id));
           });
       });
     },
-    [sessionID, setSessionDraftAttachments, t, token],
+    [sessionID, setSessionDraftAttachments, setSessionDraftPartOrder, t, token],
   );
   const removeAttachment = useCallback((id: string) => {
     setSessionDraftAttachments(sessionID, (current) => {
@@ -433,22 +439,22 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       }
       return current.filter((item) => item.id !== id);
     });
-  }, [sessionID, setSessionDraftAttachments]);
+    setSessionDraftPartOrder(sessionID, (current) => current.filter((item) => item.type !== "attachment" || item.id !== id));
+  }, [sessionID, setSessionDraftAttachments, setSessionDraftPartOrder]);
   const addUploadedAttachments = useCallback((values: Attachment[]) => {
     if (values.length === 0) {
       return;
     }
-    setSessionDraftAttachments(sessionID, (current) => [
-      ...current,
-      ...values.map((attachment) => ({
-        id: newClientID(),
-        attachment,
-        name: attachment.name,
-        size: attachment.size,
-        status: "uploaded" as const,
-      })),
-    ]);
-  }, [sessionID, setSessionDraftAttachments]);
+    const items = values.map((attachment) => ({
+      id: newClientID(),
+      attachment,
+      name: attachment.name,
+      size: attachment.size,
+      status: "uploaded" as const,
+    }));
+    setSessionDraftAttachments(sessionID, (current) => [...current, ...items]);
+    setSessionDraftPartOrder(sessionID, (current) => [...current, ...items.map((item) => ({ type: "attachment" as const, id: item.id }))]);
+  }, [sessionID, setSessionDraftAttachments, setSessionDraftPartOrder]);
   const captureScreenshot = useCallback(async () => {
     if (capturingScreenshot) {
       return;
@@ -504,11 +510,17 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     if (folders.length === 0) {
       return;
     }
+    const existing = new Set(localFolders.map((folder) => folder.path));
+    const nextFolders = folders.filter((folder) => !existing.has(folder.path));
+    if (nextFolders.length === 0) {
+      return;
+    }
     setSessionDraftLocalFolders(sessionID, (current) => {
-      const existing = new Set(current.map((folder) => folder.path));
-      return [...current, ...folders.filter((folder) => !existing.has(folder.path))];
+      const currentPaths = new Set(current.map((folder) => folder.path));
+      return [...current, ...nextFolders.filter((folder) => !currentPaths.has(folder.path))];
     });
-  }, [sessionID, setSessionDraftLocalFolders]);
+    setSessionDraftPartOrder(sessionID, (current) => [...current, ...nextFolders.map((folder) => ({ type: "local_folder" as const, id: folder.id }))]);
+  }, [localFolders, sessionID, setSessionDraftLocalFolders, setSessionDraftPartOrder]);
   const pickLocalFolder = useCallback(async () => {
     if (pickingLocalFolder) {
       return;
@@ -525,7 +537,8 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   }, [addLocalFolderPaths, pickingLocalFolder, t]);
   const removeLocalFolder = useCallback((id: string) => {
     setSessionDraftLocalFolders(sessionID, (current) => current.filter((folder) => folder.id !== id));
-  }, [sessionID, setSessionDraftLocalFolders]);
+    setSessionDraftPartOrder(sessionID, (current) => current.filter((item) => item.type !== "local_folder" || item.id !== id));
+  }, [sessionID, setSessionDraftLocalFolders, setSessionDraftPartOrder]);
   const revealLocalPath = useCallback((path: string) => {
     if (!path.trim()) {
       return;
@@ -569,7 +582,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     [onSubmitError],
   );
   const submitMutation = useMutation({
-    mutationFn: async (value: z.infer<typeof composerSchema> & { attachments: Attachment[]; localFolders: LocalFolderPath[] }) => {
+    mutationFn: async (value: z.infer<typeof composerSchema> & { attachments: Attachment[]; localFolders: LocalFolderPath[]; parts: ContentPart[] }) => {
       const clientMessageID = draftIDRef.current;
       if (!resolvedModel) {
         throw new APIError(400, "no_model");
@@ -582,6 +595,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
         text: value.text,
         attachments: value.attachments,
         localFolders: value.localFolders,
+        parts: value.parts,
         createdAt: new Date().toISOString(),
       });
       if (session.provider !== provider || session.model !== model) {
@@ -592,6 +606,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
         text: value.text,
         attachments: value.attachments,
         localFolders: value.localFolders,
+        parts: value.parts,
       });
       if (result.queued || !result.turnID) {
         clearSubmittingTurn(sessionID, clientMessageID);
@@ -734,7 +749,8 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
 
   const submitDraft = (value: z.infer<typeof composerSchema>) => {
     const text = value.text.trim();
-    const attachmentsToSubmit = uploadedAttachments;
+    const attachmentItemsToSubmit = attachments.filter((item) => item.status === "uploaded" && item.attachment);
+    const attachmentsToSubmit = attachmentItemsToSubmit.flatMap((item) => (item.attachment ? [item.attachment] : []));
     const localFoldersToSubmit = localFolders;
     if (
       (!text && attachmentsToSubmit.length === 0 && localFoldersToSubmit.length === 0) ||
@@ -778,7 +794,12 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     if (!running) {
       startSubmittingTurn(sessionID, draftIDRef.current);
     }
-    submitMutation.mutate({ text, attachments: attachmentsToSubmit, localFolders: localFoldersToSubmit });
+    submitMutation.mutate({
+      text,
+      attachments: attachmentsToSubmit,
+      localFolders: localFoldersToSubmit,
+      parts: buildDraftSubmitParts(text, attachmentItemsToSubmit, localFoldersToSubmit, partOrder),
+    });
   };
 
   const handleResolvedModelChange = useCallback((next: ResolvedModelSelection | null) => {
@@ -1028,28 +1049,29 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
             />
             {attachments.length > 0 || localFolders.length > 0 ? (
               <div className="flex flex-wrap gap-2 px-3 pt-3">
-                {attachments.map((item) => (
-                  <ComposerAttachmentChip
-                    key={item.id}
-                    item={item}
-                    previewIndex={attachmentPreviewIndexByID.get(item.id)}
-                    removeLabel={t("composer.removeAttachment")}
-                    token={token}
-                    onPreview={setAttachmentPreviewIndex}
-                    onRevealSource={revealLocalPath}
-                    onRemove={() => removeAttachment(item.id)}
-                  />
-                ))}
-                {localFolders.map((folder) => (
-                  <LocalFolderChip
-                    key={folder.id}
-                    folder={folder}
-                    label={t("composer.folderLabel")}
-                    removeLabel={t("composer.removeFolder")}
-                    onReveal={() => revealLocalPath(folder.path)}
-                    onRemove={() => removeLocalFolder(folder.id)}
-                  />
-                ))}
+                {orderedDraftItems(attachments, localFolders, partOrder).map((orderedItem) =>
+                  orderedItem.type === "attachment" ? (
+                    <ComposerAttachmentChip
+                      key={`attachment:${orderedItem.item.id}`}
+                      item={orderedItem.item}
+                      previewIndex={attachmentPreviewIndexByID.get(orderedItem.item.id)}
+                      removeLabel={t("composer.removeAttachment")}
+                      token={token}
+                      onPreview={setAttachmentPreviewIndex}
+                      onRevealSource={revealLocalPath}
+                      onRemove={() => removeAttachment(orderedItem.item.id)}
+                    />
+                  ) : (
+                    <LocalFolderChip
+                      key={`folder:${orderedItem.item.id}`}
+                      folder={orderedItem.item}
+                      label={t("composer.folderLabel")}
+                      removeLabel={t("composer.removeFolder")}
+                      onReveal={() => revealLocalPath(orderedItem.item.path)}
+                      onRemove={() => removeLocalFolder(orderedItem.item.id)}
+                    />
+                  ),
+                )}
               </div>
             ) : null}
             <div className="px-4 pt-4 pb-2">

@@ -71,13 +71,14 @@ type Config struct {
 }
 
 type Manager struct {
-	mu          sync.Mutex
-	lifecycleMu sync.Mutex
-	cfg         Config
-	client      *http.Client
-	process     *browserProcess
-	tabs        map[string]*tabBinding
-	sessions    map[string]map[string]bool
+	mu                sync.Mutex
+	lifecycleMu       sync.Mutex
+	cfg               Config
+	client            *http.Client
+	process           *browserProcess
+	tabs              map[string]*tabBinding
+	sessions          map[string]map[string]bool
+	cursorSubscribers map[string]map[chan ScreencastCursor]bool
 }
 
 type TabSnapshot struct {
@@ -199,6 +200,7 @@ type ScreencastClientMessage struct {
 	DeltaY                float64 `json:"deltaY,omitempty"`
 	Key                   string  `json:"key,omitempty"`
 	Code                  string  `json:"code,omitempty"`
+	Action                string  `json:"action,omitempty"`
 	Text                  string  `json:"text,omitempty"`
 	SelectionStart        int     `json:"selectionStart,omitempty"`
 	SelectionEnd          int     `json:"selectionEnd,omitempty"`
@@ -222,6 +224,22 @@ type ScreencastCaret struct {
 	Y       float64 `json:"y"`
 	Height  float64 `json:"height,omitempty"`
 	Visible bool    `json:"visible"`
+}
+
+type ScreencastCursor struct {
+	Type      string  `json:"type"`
+	X         float64 `json:"x"`
+	Y         float64 `json:"y"`
+	Action    string  `json:"action,omitempty"`
+	CreatedAt string  `json:"createdAt,omitempty"`
+}
+
+type ScreencastClipboard struct {
+	Type   string `json:"type"`
+	Action string `json:"action"`
+	OK     bool   `json:"ok"`
+	Text   string `json:"text,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 type tabBinding struct {
@@ -260,11 +278,69 @@ type versionInfo struct {
 
 func NewManager(cfg Config) *Manager {
 	return &Manager{
-		cfg:      cfg,
-		client:   &http.Client{Timeout: 10 * time.Second},
-		tabs:     map[string]*tabBinding{},
-		sessions: map[string]map[string]bool{},
+		cfg:               cfg,
+		client:            &http.Client{Timeout: 10 * time.Second},
+		tabs:              map[string]*tabBinding{},
+		sessions:          map[string]map[string]bool{},
+		cursorSubscribers: map[string]map[chan ScreencastCursor]bool{},
 	}
+}
+
+func (m *Manager) subscribeCursor(tabID string) (<-chan ScreencastCursor, func()) {
+	ch := make(chan ScreencastCursor, 8)
+	m.mu.Lock()
+	if m.cursorSubscribers == nil {
+		m.cursorSubscribers = map[string]map[chan ScreencastCursor]bool{}
+	}
+	if m.cursorSubscribers[tabID] == nil {
+		m.cursorSubscribers[tabID] = map[chan ScreencastCursor]bool{}
+	}
+	m.cursorSubscribers[tabID][ch] = true
+	m.mu.Unlock()
+	return ch, func() {
+		m.mu.Lock()
+		if subscribers := m.cursorSubscribers[tabID]; subscribers != nil {
+			delete(subscribers, ch)
+			if len(subscribers) == 0 {
+				delete(m.cursorSubscribers, tabID)
+			}
+		}
+		m.mu.Unlock()
+	}
+}
+
+func (m *Manager) publishCursor(tabID string, event ScreencastCursor) {
+	if tabID == "" {
+		return
+	}
+	event.Type = "cursor"
+	if event.CreatedAt == "" {
+		event.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for ch := range m.cursorSubscribers[tabID] {
+		select {
+		case ch <- event:
+		default:
+			select {
+			case <-ch:
+			default:
+			}
+			select {
+			case ch <- event:
+			default:
+			}
+		}
+	}
+}
+
+func (m *Manager) publishCursorFromRaw(tabID, action string, raw json.RawMessage) {
+	cursor, ok := cursorFromActionRaw(action, raw)
+	if !ok {
+		return
+	}
+	m.publishCursor(tabID, cursor)
 }
 
 func (m *Manager) CreateTab(ctx context.Context, sessionID string) (TabSnapshot, error) {
@@ -657,7 +733,12 @@ func (m *Manager) Click(ctx context.Context, sessionID, tabID string, in ClickIn
 	if err != nil {
 		return ActionResult{}, err
 	}
-	return m.actionResult(ctx, proc, binding, "click", raw)
+	result, err := m.actionResult(ctx, proc, binding, "click", raw)
+	if err != nil {
+		return ActionResult{}, err
+	}
+	m.publishCursorFromRaw(binding.id, "click", raw)
+	return result, nil
 }
 
 func (m *Manager) pointerClick(ctx context.Context, proc *browserProcess, binding *tabBinding, in ClickInput, method string) (json.RawMessage, error) {
@@ -693,7 +774,12 @@ func (m *Manager) Type(ctx context.Context, sessionID, tabID string, in TypeInpu
 	if err != nil {
 		return ActionResult{}, err
 	}
-	return m.actionResult(ctx, proc, binding, "type", raw)
+	result, err := m.actionResult(ctx, proc, binding, "type", raw)
+	if err != nil {
+		return ActionResult{}, err
+	}
+	m.publishCursorFromRaw(binding.id, "type", raw)
+	return result, nil
 }
 
 func (m *Manager) Scroll(ctx context.Context, sessionID, tabID string, in ScrollInput) (ActionResult, error) {
@@ -711,7 +797,12 @@ func (m *Manager) Scroll(ctx context.Context, sessionID, tabID string, in Scroll
 	if err != nil {
 		return ActionResult{}, err
 	}
-	return m.actionResult(ctx, proc, binding, "scroll", raw)
+	result, err := m.actionResult(ctx, proc, binding, "scroll", raw)
+	if err != nil {
+		return ActionResult{}, err
+	}
+	m.publishCursorFromRaw(binding.id, "scroll", raw)
+	return result, nil
 }
 
 func (m *Manager) Screencast(ctx context.Context, sessionID, tabID string, client *websocket.Conn) error {
@@ -741,10 +832,18 @@ func (m *Manager) Screencast(ctx context.Context, sessionID, tabID string, clien
 	defer cancel()
 	var (
 		cdpWriteMu       sync.Mutex
+		clientWriteMu    sync.Mutex
 		nextID           int
 		pendingCaretMu   sync.Mutex
 		pendingCaretByID = map[int]bool{}
+		pendingClipMu    sync.Mutex
+		pendingClipByID  = map[int]string{}
 	)
+	writeClient := func(payload any) error {
+		clientWriteMu.Lock()
+		defer clientWriteMu.Unlock()
+		return writeScreencastClient(ctx, client, payload)
+	}
 	sendCDP := func(method string, params any, beforeWrite func(int)) (int, error) {
 		cdpWriteMu.Lock()
 		defer cdpWriteMu.Unlock()
@@ -783,6 +882,52 @@ func (m *Manager) Screencast(ctx context.Context, sessionID, tabID string, clien
 		}
 		return err
 	}
+	requestClipboard := func(action string) error {
+		action = strings.TrimSpace(action)
+		if action != "copy" && action != "cut" && action != "paste" && action != "selectAll" && action != "undo" && action != "redo" {
+			return nil
+		}
+		if action == "undo" || action == "redo" {
+			if err := dispatchEditShortcut(writeCDP, action); err != nil {
+				return err
+			}
+			if requestCaret != nil {
+				_ = requestCaret()
+			}
+			return writeClient(ScreencastClipboard{Type: "clipboard", Action: action, OK: true})
+		}
+		if action == "paste" {
+			text, err := readSystemClipboard()
+			if err != nil {
+				_ = writeClient(ScreencastClipboard{Type: "clipboard", Action: action, OK: false, Error: err.Error()})
+				return nil
+			}
+			_ = clearIMEComposition(writeCDP)
+			if text != "" {
+				if err := writeCDP("Input.insertText", map[string]any{"text": text}); err != nil {
+					return err
+				}
+			}
+			if requestCaret != nil {
+				_ = requestCaret()
+			}
+			return writeClient(ScreencastClipboard{Type: "clipboard", Action: action, OK: true})
+		}
+		id, err := sendCDP("Runtime.evaluate", map[string]any{
+			"expression":    clipboardActionScript(action),
+			"returnByValue": true,
+		}, func(id int) {
+			pendingClipMu.Lock()
+			pendingClipByID[id] = action
+			pendingClipMu.Unlock()
+		})
+		if err != nil {
+			pendingClipMu.Lock()
+			delete(pendingClipByID, id)
+			pendingClipMu.Unlock()
+		}
+		return err
+	}
 	takeCaretRequest := func(id int) bool {
 		pendingCaretMu.Lock()
 		defer pendingCaretMu.Unlock()
@@ -792,20 +937,36 @@ func (m *Manager) Screencast(ctx context.Context, sessionID, tabID string, clien
 		delete(pendingCaretByID, id)
 		return true
 	}
+	takeClipboardRequest := func(id int) (string, bool) {
+		pendingClipMu.Lock()
+		defer pendingClipMu.Unlock()
+		action, ok := pendingClipByID[id]
+		if !ok {
+			return "", false
+		}
+		delete(pendingClipByID, id)
+		return action, true
+	}
 	if err := writeCDP("Page.enable", nil); err != nil {
 		return err
 	}
 	if err := startScreencast(writeCDP, 0, 0, 1); err != nil {
 		return err
 	}
-	_ = writeScreencastClient(ctx, client, map[string]string{"type": "status", "status": "started"})
+	_ = writeClient(map[string]string{"type": "status", "status": "started"})
 
-	done := make(chan error, 2)
+	cursorEvents, unsubscribeCursor := m.subscribeCursor(binding.id)
+	defer unsubscribeCursor()
+
+	done := make(chan error, 3)
 	go func() {
-		done <- screencastClientLoop(ctx, client, writeCDP, requestCaret)
+		done <- screencastClientLoop(ctx, client, writeCDP, requestCaret, requestClipboard)
 	}()
 	go func() {
-		done <- screencastCDPLoop(ctx, cdp, client, writeCDP, takeCaretRequest)
+		done <- screencastCDPLoop(ctx, cdp, writeClient, writeCDP, takeCaretRequest, takeClipboardRequest)
+	}()
+	go func() {
+		done <- screencastCursorLoop(ctx, cursorEvents, writeClient)
 	}()
 	err = <-done
 	cancel()
@@ -822,6 +983,7 @@ func (m *Manager) Close() error {
 	m.process = nil
 	m.tabs = map[string]*tabBinding{}
 	m.sessions = map[string]map[string]bool{}
+	m.cursorSubscribers = map[string]map[chan ScreencastCursor]bool{}
 	m.mu.Unlock()
 	return stopBrowserProcess(proc)
 }
@@ -855,6 +1017,46 @@ func (m *Manager) actionResult(ctx context.Context, proc *browserProcess, bindin
 	target, _ := proc.target(ctx, m.client, binding.targetID)
 	m.touch(binding.id)
 	return ActionResult{Tab: m.snapshotFromLiveTarget(ctx, binding, target), Action: action, Result: result}, nil
+}
+
+func cursorFromActionRaw(action string, raw json.RawMessage) (ScreencastCursor, bool) {
+	if len(raw) == 0 {
+		return ScreencastCursor{}, false
+	}
+	var result map[string]any
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return ScreencastCursor{}, false
+	}
+	x, okX := numberValue(result["cursorX"])
+	if !okX {
+		x, okX = numberValue(result["x"])
+	}
+	y, okY := numberValue(result["cursorY"])
+	if !okY {
+		y, okY = numberValue(result["y"])
+	}
+	if !okX || !okY {
+		return ScreencastCursor{}, false
+	}
+	return ScreencastCursor{Action: action, X: x, Y: y}, true
+}
+
+func numberValue(value any) (float64, bool) {
+	switch v := value.(type) {
+	case float64:
+		return v, true
+	case float32:
+		return float64(v), true
+	case int:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case json.Number:
+		n, err := v.Float64()
+		return n, err == nil
+	default:
+		return 0, false
+	}
 }
 
 func (m *Manager) liveTarget(ctx context.Context, sessionID, tabID string, create bool) (*browserProcess, *tabBinding, targetInfo, error) {
@@ -1575,13 +1777,19 @@ func (p *browserProcess) evaluateJSON(ctx context.Context, client *http.Client, 
 			Description string          `json:"description"`
 		} `json:"result"`
 		ExceptionDetails *struct {
-			Text string `json:"text"`
+			Text      string `json:"text"`
+			Exception *struct {
+				Description string `json:"description"`
+			} `json:"exception"`
 		} `json:"exceptionDetails"`
 	}
 	if err := json.Unmarshal(raw, &response); err != nil {
 		return nil, err
 	}
 	if response.ExceptionDetails != nil {
+		if response.ExceptionDetails.Exception != nil && response.ExceptionDetails.Exception.Description != "" {
+			return nil, errors.New(response.ExceptionDetails.Exception.Description)
+		}
 		return nil, errors.New(response.ExceptionDetails.Text)
 	}
 	var text string
@@ -1684,6 +1892,7 @@ func (p *browserProcess) dispatchMouseClick(ctx context.Context, client *http.Cl
 }
 
 type cdpWriteFunc func(method string, params any) error
+type screencastWriteFunc func(payload any) error
 
 func startScreencast(writeCDP cdpWriteFunc, width, height, everyNthFrame int) error {
 	if everyNthFrame <= 0 {
@@ -1717,7 +1926,7 @@ func startScreencast(writeCDP cdpWriteFunc, width, height, everyNthFrame int) er
 	return writeCDP("Page.startScreencast", params)
 }
 
-func screencastClientLoop(ctx context.Context, client *websocket.Conn, writeCDP cdpWriteFunc, requestCaret func() error) error {
+func screencastClientLoop(ctx context.Context, client *websocket.Conn, writeCDP cdpWriteFunc, requestCaret func() error, requestClipboard func(string) error) error {
 	for {
 		typ, payload, err := client.Read(ctx)
 		if err != nil {
@@ -1770,13 +1979,19 @@ func screencastClientLoop(ctx context.Context, client *websocket.Conn, writeCDP 
 					return err
 				}
 			}
+		case "clipboard":
+			if requestClipboard != nil {
+				if err := requestClipboard(msg.Action); err != nil {
+					return err
+				}
+			}
 		case "stop":
 			return nil
 		}
 	}
 }
 
-func screencastCDPLoop(ctx context.Context, cdp, client *websocket.Conn, writeCDP cdpWriteFunc, takeCaretRequest func(int) bool) error {
+func screencastCDPLoop(ctx context.Context, cdp *websocket.Conn, writeClient screencastWriteFunc, writeCDP cdpWriteFunc, takeCaretRequest func(int) bool, takeClipboardRequest func(int) (string, bool)) error {
 	for {
 		typ, payload, err := cdp.Read(ctx)
 		if err != nil {
@@ -1798,15 +2013,36 @@ func screencastCDPLoop(ctx context.Context, cdp, client *websocket.Conn, writeCD
 			continue
 		}
 		if msg.Error != nil {
-			_ = writeScreencastClient(ctx, client, map[string]string{"type": "error", "error": msg.Error.Message})
+			if takeClipboardRequest != nil {
+				if action, ok := takeClipboardRequest(msg.ID); ok {
+					_ = writeClient(ScreencastClipboard{Type: "clipboard", Action: action, OK: false, Error: msg.Error.Message})
+					continue
+				}
+			}
+			_ = writeClient(map[string]string{"type": "error", "error": msg.Error.Message})
 			continue
 		}
 		if msg.ID > 0 && takeCaretRequest != nil && takeCaretRequest(msg.ID) {
 			caret := parseCaretResponse(msg.Result)
-			if err := writeScreencastClient(ctx, client, caret); err != nil {
+			if err := writeClient(caret); err != nil {
 				return nil
 			}
 			continue
+		}
+		if msg.ID > 0 && takeClipboardRequest != nil {
+			if action, ok := takeClipboardRequest(msg.ID); ok {
+				result := parseClipboardResponse(action, msg.Result)
+				if result.OK && result.Text != "" && (action == "copy" || action == "cut") {
+					if err := writeSystemClipboard(result.Text); err != nil {
+						result.OK = false
+						result.Error = err.Error()
+					}
+				}
+				if err := writeClient(result); err != nil {
+					return nil
+				}
+				continue
+			}
 		}
 		if msg.Method != "Page.screencastFrame" {
 			continue
@@ -1827,8 +2063,24 @@ func screencastCDPLoop(ctx context.Context, cdp, client *websocket.Conn, writeCD
 			FrameSessionID: params.SessionID,
 			Metadata:       params.Metadata,
 		}
-		if err := writeScreencastClient(ctx, client, frame); err != nil {
+		if err := writeClient(frame); err != nil {
 			return nil
+		}
+	}
+}
+
+func screencastCursorLoop(ctx context.Context, events <-chan ScreencastCursor, writeClient screencastWriteFunc) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case event := <-events:
+			if event.Type == "" {
+				event.Type = "cursor"
+			}
+			if err := writeClient(event); err != nil {
+				return nil
+			}
 		}
 	}
 }
@@ -1882,6 +2134,149 @@ func parseCaretResponse(raw json.RawMessage) ScreencastCaret {
 	out.Height = payload.Result.Value.Height
 	out.Visible = payload.Result.Value.Visible
 	return out
+}
+
+func parseClipboardResponse(action string, raw json.RawMessage) ScreencastClipboard {
+	out := ScreencastClipboard{Type: "clipboard", Action: action}
+	var payload struct {
+		Result struct {
+			Value struct {
+				OK    bool   `json:"ok"`
+				Text  string `json:"text"`
+				Error string `json:"error"`
+			} `json:"value"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		out.Error = err.Error()
+		return out
+	}
+	out.OK = payload.Result.Value.OK
+	out.Text = payload.Result.Value.Text
+	out.Error = payload.Result.Value.Error
+	return out
+}
+
+func writeSystemClipboard(text string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		cmd := exec.Command("pbcopy")
+		cmd.Stdin = strings.NewReader(text)
+		return cmd.Run()
+	default:
+		return fmt.Errorf("system clipboard is unsupported on %s", runtime.GOOS)
+	}
+}
+
+func readSystemClipboard() (string, error) {
+	switch runtime.GOOS {
+	case "darwin":
+		out, err := exec.Command("pbpaste").Output()
+		if err != nil {
+			return "", err
+		}
+		return string(out), nil
+	default:
+		return "", fmt.Errorf("system clipboard is unsupported on %s", runtime.GOOS)
+	}
+}
+
+func dispatchEditShortcut(writeCDP cdpWriteFunc, action string) error {
+	key := "z"
+	code := "KeyZ"
+	virtualKeyCode := 90
+	modifiers := 2
+	if runtime.GOOS == "darwin" {
+		modifiers = 4
+	}
+	if action == "redo" {
+		if runtime.GOOS == "darwin" {
+			modifiers |= 8
+		} else {
+			key = "y"
+			code = "KeyY"
+			virtualKeyCode = 89
+		}
+	}
+	events := []string{"keyDown", "keyUp"}
+	for _, eventType := range events {
+		if err := writeCDP("Input.dispatchKeyEvent", map[string]any{
+			"type":                  eventType,
+			"key":                   key,
+			"code":                  code,
+			"windowsVirtualKeyCode": virtualKeyCode,
+			"nativeVirtualKeyCode":  virtualKeyCode,
+			"modifiers":             modifiers,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func clipboardActionScript(action string) string {
+	actionJSON, _ := json.Marshal(action)
+	return fmt.Sprintf(`(() => {
+  const action = %s;
+  const fail = (error) => ({ ok: false, text: "", error: String(error || "clipboard_failed") });
+  const ok = (text) => ({ ok: true, text: String(text || "") });
+  try {
+    const active = document.activeElement;
+    const tag = active ? String(active.tagName || "").toLowerCase() : "";
+    const isEditableInput =
+      active &&
+      (tag === "textarea" ||
+        (tag === "input" && !["button", "checkbox", "color", "date", "datetime-local", "file", "hidden", "image", "month", "radio", "range", "reset", "submit", "time", "week"].includes(String(active.type || "").toLowerCase())));
+    if (action === "selectAll") {
+      if (isEditableInput && typeof active.setSelectionRange === "function") {
+        const length = String(active.value || "").length;
+        active.focus();
+        active.setSelectionRange(0, length);
+        return ok("");
+      }
+      const selection = window.getSelection();
+      if (!selection) return ok("");
+      selection.removeAllRanges();
+      const range = document.createRange();
+      const editHost = active?.closest?.("[contenteditable=''],[contenteditable='true']");
+      if (editHost || active?.isContentEditable) {
+        range.selectNodeContents(editHost || active);
+      } else {
+        range.selectNodeContents(document.body || document.documentElement);
+      }
+      selection.addRange(range);
+      return ok("");
+    }
+    if (isEditableInput && typeof active.selectionStart === "number" && typeof active.selectionEnd === "number") {
+      const value = String(active.value || "");
+      const start = Math.max(0, active.selectionStart || 0);
+      const end = Math.max(start, active.selectionEnd || 0);
+      const text = value.slice(start, end);
+      if (action === "cut" && end > start && !active.readOnly && !active.disabled) {
+        const next = value.slice(0, start) + value.slice(end);
+        const proto = tag === "textarea" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+        if (setter) setter.call(active, next);
+        else active.value = next;
+        active.setSelectionRange(start, start);
+        active.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteByCut" }));
+      }
+      return ok(text);
+    }
+    const selection = window.getSelection();
+    const text = selection ? selection.toString() : "";
+    if (action === "cut" && selection && !selection.isCollapsed) {
+      const editHost = active?.closest?.("[contenteditable=''],[contenteditable='true']");
+      if (editHost || active?.isContentEditable) {
+        selection.deleteFromDocument();
+        (editHost || active).dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteByCut" }));
+      }
+    }
+    return ok(text);
+  } catch (err) {
+    return fail(err && err.message ? err.message : err);
+  }
+})()`, string(actionJSON))
 }
 
 func caretRectScript() string {
@@ -2223,7 +2618,31 @@ func clickTargetScript(in ClickInput, method string) string {
   const x = %s;
   const y = %s;
   const method = %s;
-  let el = selector ? document.querySelector(selector) : null;
+  const elementText = (node) => String(node.innerText || node.textContent || node.value || node.getAttribute?.("aria-label") || "").trim();
+  const isVisible = (node) => Boolean(node && (node.offsetWidth || node.offsetHeight || node.getClientRects().length));
+  const resolveSelector = (rawSelector) => {
+    if (!rawSelector) return null;
+    const match = rawSelector.match(/^(.*):contains\((["']?)(.*?)\2\)\s*$/);
+    if (match) {
+      const base = match[1].trim() || "*";
+      const needle = match[3];
+      let candidates;
+      try {
+        candidates = Array.from(document.querySelectorAll(base));
+      } catch (err) {
+        throw new Error("invalid selector: " + rawSelector);
+      }
+      return candidates.find((node) => isVisible(node) && elementText(node).includes(needle)) ||
+        candidates.find((node) => elementText(node).includes(needle)) ||
+        null;
+    }
+    try {
+      return document.querySelector(rawSelector);
+    } catch (err) {
+      throw new Error("invalid selector: " + rawSelector);
+    }
+  };
+  let el = selector ? resolveSelector(selector) : null;
   if (!el && x !== null && y !== null) el = document.elementFromPoint(x, y);
   if (!el) throw new Error("target element not found");
   if (selector) el.scrollIntoView({block: "center", inline: "center"});
@@ -2231,7 +2650,7 @@ func clickTargetScript(in ClickInput, method string) string {
   const cx = selector ? rect.left + rect.width / 2 : x;
   const cy = selector ? rect.top + rect.height / 2 : y;
   if (cx === null || cy === null) throw new Error("target coordinates not found");
-  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), text: (el.innerText || el.value || "").trim().slice(0, 160), x: cx, y: cy, method});
+  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), text: (el.innerText || el.value || "").trim().slice(0, 160), x: cx, y: cy, cursorX: cx, cursorY: cy, method});
 })()`, selector, x, y, methodValue)
 }
 
@@ -2251,13 +2670,39 @@ func clickScript(in ClickInput, method string) string {
   const x = %s;
   const y = %s;
   const method = %s;
-  let el = selector ? document.querySelector(selector) : null;
+  const elementText = (node) => String(node.innerText || node.textContent || node.value || node.getAttribute?.("aria-label") || "").trim();
+  const isVisible = (node) => Boolean(node && (node.offsetWidth || node.offsetHeight || node.getClientRects().length));
+  const resolveSelector = (rawSelector) => {
+    if (!rawSelector) return null;
+    const match = rawSelector.match(/^(.*):contains\((["']?)(.*?)\2\)\s*$/);
+    if (match) {
+      const base = match[1].trim() || "*";
+      const needle = match[3];
+      let candidates;
+      try {
+        candidates = Array.from(document.querySelectorAll(base));
+      } catch (err) {
+        throw new Error("invalid selector: " + rawSelector);
+      }
+      return candidates.find((node) => isVisible(node) && elementText(node).includes(needle)) ||
+        candidates.find((node) => elementText(node).includes(needle)) ||
+        null;
+    }
+    try {
+      return document.querySelector(rawSelector);
+    } catch (err) {
+      throw new Error("invalid selector: " + rawSelector);
+    }
+  };
+  let el = selector ? resolveSelector(selector) : null;
   if (!el && x !== null && y !== null) el = document.elementFromPoint(x, y);
   if (!el) throw new Error("target element not found");
   el.scrollIntoView({block: "center", inline: "center"});
   const rect = el.getBoundingClientRect();
   el.click();
-  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), text: (el.innerText || el.value || "").trim().slice(0, 160), x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, method});
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), text: (el.innerText || el.value || "").trim().slice(0, 160), x: cx, y: cy, cursorX: cx, cursorY: cy, method});
 })()`, selector, x, y, methodValue)
 }
 
@@ -2281,7 +2726,10 @@ func typeScript(in TypeInput) string {
   } else {
     throw new Error("target is not editable");
   }
-  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), textLength: text.length});
+  const rect = el.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + Math.min(rect.height / 2, 18);
+  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), textLength: text.length, cursorX: cx, cursorY: cy});
 })()`, jsString(in.Selector), jsString(in.Text), in.Clear)
 }
 
@@ -2292,9 +2740,16 @@ func scrollScript(in ScrollInput) string {
   const dy = %s;
   const target = selector ? document.querySelector(selector) : window;
   if (!target) throw new Error("scroll target not found");
+  let cursorX = window.innerWidth / 2;
+  let cursorY = window.innerHeight / 2;
+  if (target !== window) {
+    const rect = target.getBoundingClientRect();
+    cursorX = rect.left + rect.width / 2;
+    cursorY = rect.top + rect.height / 2;
+  }
   if (target === window) window.scrollBy(dx, dy);
   else target.scrollBy(dx, dy);
-  return JSON.stringify({ok: true, x: window.scrollX, y: window.scrollY});
+  return JSON.stringify({ok: true, x: window.scrollX, y: window.scrollY, cursorX, cursorY});
 })()`, jsString(in.Selector), strconv.FormatFloat(in.DeltaX, 'f', -1, 64), strconv.FormatFloat(in.DeltaY, 'f', -1, 64))
 }
 

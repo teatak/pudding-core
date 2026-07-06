@@ -221,15 +221,23 @@ func (staticPrompt) Prompt(_ context.Context, mode string) (prompt.Output, error
 func (b *Builder) providerParts(sessionID string, parts []store.ContentPart, mode store.AgentMode, cfg provider.ModelConfig) []provider.Part {
 	out := make([]provider.Part, 0, len(parts))
 	localFolders := make([]store.LocalFolder, 0)
+	flushLocalFolders := func() {
+		if text := localFoldersProviderText(localFolders); text != "" {
+			out = append(out, provider.Part{Type: provider.PartText, Text: text})
+		}
+		localFolders = localFolders[:0]
+	}
 	for _, part := range parts {
 		switch part.Type {
 		case store.ContentPartText:
+			flushLocalFolders()
 			if part.Text != "" {
 				out = append(out, provider.Part{Type: provider.PartText, Text: part.Text})
 			}
 		case store.ContentPartThought:
 			continue
 		case store.ContentPartToolUse:
+			flushLocalFolders()
 			if !tool.NameAllowedForMode(mode, part.Name) {
 				continue
 			}
@@ -240,6 +248,7 @@ func (b *Builder) providerParts(sessionID string, parts []store.ContentPart, mod
 				Args:   append([]byte(nil), part.Args...),
 			})
 		case store.ContentPartToolResult:
+			flushLocalFolders()
 			if !tool.NameAllowedForMode(mode, part.Name) {
 				continue
 			}
@@ -251,6 +260,7 @@ func (b *Builder) providerParts(sessionID string, parts []store.ContentPart, mod
 				Content: part.Content,
 			})
 		case store.ContentPartAttachment:
+			flushLocalFolders()
 			if imagePart, ok := b.imageProviderPart(sessionID, part, cfg); ok {
 				out = append(out, imagePart)
 			} else if audioPart, ok := b.audioProviderPart(sessionID, part, cfg); ok {
@@ -267,9 +277,7 @@ func (b *Builder) providerParts(sessionID string, parts []store.ContentPart, mod
 			})
 		}
 	}
-	if text := localFoldersProviderText(localFolders); text != "" {
-		out = append(out, provider.Part{Type: provider.PartText, Text: text})
-	}
+	flushLocalFolders()
 	return out
 }
 
@@ -390,7 +398,7 @@ func localFoldersProviderText(folders []store.LocalFolder) string {
 	if err != nil {
 		return ""
 	}
-	return "<pudding-local-folders version=\"1\">\n" + string(data) + "\n</pudding-local-folders>"
+	return "<pudding-local-folders version=\"1\">\n" + string(data) + "\n</pudding-local-folders>\n"
 }
 
 func textFromProviderParts(parts []provider.Part) string {

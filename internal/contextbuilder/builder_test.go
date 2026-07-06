@@ -115,6 +115,9 @@ func TestBuildIncludesLocalFoldersTag(t *testing.T) {
 	if len(req.Messages) != 1 || !strings.Contains(req.Messages[0].Text, "<pudding-local-folders version=\"1\">") || !strings.Contains(req.Messages[0].Text, `"/Users/me/files"`) {
 		t.Fatalf("local folder tag missing from provider context: %+v", req.Messages)
 	}
+	if strings.Index(req.Messages[0].Text, "<pudding-local-folders version=\"1\">") > strings.Index(req.Messages[0].Text, "scan this") {
+		t.Fatalf("local folder tag should stay before user text: %q", req.Messages[0].Text)
+	}
 }
 
 func TestBuildIncludesAttachmentToolPathWhenAvailable(t *testing.T) {
@@ -205,11 +208,11 @@ func TestBuildInlinesImageAttachmentWhenSupported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 2 || req.Messages[0].Parts[1].Type != provider.PartImage {
+	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 2 || req.Messages[0].Parts[0].Type != provider.PartImage || req.Messages[0].Parts[1].Type != provider.PartText {
 		t.Fatalf("image attachment was not inlined: %+v", req.Messages)
 	}
-	if string(req.Messages[0].Parts[1].Data) != "png bytes" {
-		t.Fatalf("unexpected image bytes: %q", string(req.Messages[0].Parts[1].Data))
+	if string(req.Messages[0].Parts[0].Data) != "png bytes" {
+		t.Fatalf("unexpected image bytes: %q", string(req.Messages[0].Parts[0].Data))
 	}
 }
 
@@ -347,11 +350,11 @@ func TestBuildInlinesAudioAttachmentWhenSupported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 2 || req.Messages[0].Parts[1].Type != provider.PartAudio {
+	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 2 || req.Messages[0].Parts[0].Type != provider.PartAudio || req.Messages[0].Parts[1].Type != provider.PartText {
 		t.Fatalf("audio attachment was not inlined: %+v", req.Messages)
 	}
-	if string(req.Messages[0].Parts[1].Data) != "wav bytes" {
-		t.Fatalf("unexpected audio bytes: %q", string(req.Messages[0].Parts[1].Data))
+	if string(req.Messages[0].Parts[0].Data) != "wav bytes" {
+		t.Fatalf("unexpected audio bytes: %q", string(req.Messages[0].Parts[0].Data))
 	}
 }
 

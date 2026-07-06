@@ -40,6 +40,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ClipboardEvent as ReactClipboardEvent,
   type CompositionEvent as ReactCompositionEvent,
   type FormEvent as ReactFormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -218,9 +219,27 @@ type BrowserScreencastCaret = {
   visible: boolean;
 };
 
+type BrowserScreencastCursor = {
+  type: "cursor";
+  x: number;
+  y: number;
+  action?: string;
+  createdAt?: string;
+};
+
+type BrowserScreencastClipboard = {
+  type: "clipboard";
+  action: "copy" | "cut" | "paste" | "redo" | "selectAll" | "undo";
+  ok?: boolean;
+  text?: string;
+  error?: string;
+};
+
 type BrowserScreencastMessage =
   | BrowserScreencastFrame
   | BrowserScreencastCaret
+  | BrowserScreencastCursor
+  | BrowserScreencastClipboard
   | { type: "status"; status: string }
   | { type: "error"; error: string };
 type BrowserNavigationAction = "back" | "forward" | "reload";
@@ -2003,15 +2022,18 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
   const suppressIMECommitKeyRef = useRef(false);
   const suppressIMECommitKeyUpRef = useRef("");
   const suppressIMECommitUntilRef = useRef(0);
+  const suppressClipboardShortcutKeyUpRef = useRef("");
   const skipNextInputTextRef = useRef("");
   const lastMouseMoveAtRef = useRef(0);
   const mouseButtonsRef = useRef(0);
   const repairBrowserTabKeyRef = useRef("");
+  const cursorHideTimerRef = useRef<number | undefined>(undefined);
   const payload = browserPayloadForItem(item);
   const ownerSessionID = payload?.sessionID || item.sourceSessionID;
   const [streamFrame, setStreamFrame] = useState<BrowserScreencastFrame | null>(null);
   const [streamStatus, setStreamStatus] = useState<"closed" | "connecting" | "open" | "external" | "error">("closed");
   const [streamError, setStreamError] = useState("");
+  const [llmCursor, setLLMCursor] = useState<BrowserScreencastCursor | null>(null);
   const tabsQuery = useQuery({
     enabled: Boolean(token && ownerSessionID),
     queryKey: ownerSessionID ? queryKeys.browserTabs(ownerSessionID) : ["browser", "missing-session"],
@@ -2031,6 +2053,17 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
   const actionTabID = activeTab?.id || payload?.tabID;
   const streamTabID = activeTab?.id || "";
   const [streamAttempt, setStreamAttempt] = useState(0);
+
+  const showLLMCursor = (cursor: BrowserScreencastCursor) => {
+    setLLMCursor(cursor);
+    if (cursorHideTimerRef.current) {
+      window.clearTimeout(cursorHideTimerRef.current);
+    }
+    cursorHideTimerRef.current = window.setTimeout(() => {
+      setLLMCursor(null);
+      cursorHideTimerRef.current = undefined;
+    }, cursor.action === "click" ? 1000 : 1300);
+  };
 
   useEffect(() => {
     if (!isExternalBrowser) {
@@ -2268,8 +2301,13 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
           setStreamFrame(message);
         } else if (message.type === "caret") {
           moveTextInputToViewportPoint(message);
+        } else if (message.type === "cursor") {
+          showLLMCursor(message);
+        } else if (message.type === "clipboard") {
+          void handleBrowserClipboardResult(message);
         } else if (message.type === "status" && message.status === "external") {
           setStreamFrame(null);
+          setLLMCursor(null);
           setStreamStatus("external");
           setStreamError("");
         } else if (message.type === "error") {
@@ -2309,6 +2347,10 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
       clearConnectTimeout();
       clearStartRetryTimer();
       clearFrameTimeout();
+      if (cursorHideTimerRef.current) {
+        window.clearTimeout(cursorHideTimerRef.current);
+        cursorHideTimerRef.current = undefined;
+      }
       if (wsRef.current === ws) {
         wsRef.current = null;
       }
@@ -2331,6 +2373,59 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
     }
     sendScreencast({ type: "text", text });
     requestBrowserCaret();
+  };
+
+  const handleBrowserClipboardResult = (message: BrowserScreencastClipboard) => {
+    if (message.action === "selectAll" || message.action === "undo" || message.action === "redo") {
+      if (message.ok) {
+        requestBrowserCaret();
+      }
+      return;
+    }
+    if (!message.ok) {
+      toast.error(t(message.action === "paste" ? "browser.pasteFailed" : "browser.copyFailed"), { description: message.error });
+      return;
+    }
+    focusSurface();
+    if (message.action === "cut" || message.action === "paste") {
+      requestBrowserCaret();
+    }
+  };
+
+  const handleBrowserClipboardShortcut = (event: ReactKeyboardEvent<HTMLElement>) => {
+    const action = browserClipboardShortcut(event);
+    if (!action) {
+      return false;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    suppressClipboardShortcutKeyUpRef.current = event.key.toLowerCase();
+    sendScreencast({ type: "clipboard", action });
+    return true;
+  };
+
+  const suppressClipboardShortcutKeyUp = (event: ReactKeyboardEvent<HTMLElement>) => {
+    const key = event.key.toLowerCase();
+    if (!suppressClipboardShortcutKeyUpRef.current || suppressClipboardShortcutKeyUpRef.current !== key) {
+      return false;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    suppressClipboardShortcutKeyUpRef.current = "";
+    return true;
+  };
+
+  const handleBrowserPaste = (event: ReactClipboardEvent<HTMLElement>) => {
+    if (!streamFrame) {
+      return;
+    }
+    const text = event.clipboardData.getData("text/plain");
+    if (!text) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    insertBrowserText(text);
   };
 
   const requestBrowserCaret = () => {
@@ -2505,6 +2600,9 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
     if (!streamFrame) {
       return;
     }
+    if (handleBrowserClipboardShortcut(event)) {
+      return;
+    }
     event.preventDefault();
     sendScreencast(browserKeyMessage(event, "keyDown"));
   };
@@ -2514,6 +2612,9 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
       return;
     }
     if (!streamFrame) {
+      return;
+    }
+    if (suppressClipboardShortcutKeyUp(event)) {
       return;
     }
     event.preventDefault();
@@ -2600,6 +2701,9 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
     if (shouldSuppressIMECommitKey(event, "down")) {
       return;
     }
+    if (handleBrowserClipboardShortcut(event)) {
+      return;
+    }
     if (isPlainTextKey(event)) {
       return;
     }
@@ -2614,12 +2718,36 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
     if (shouldSuppressIMECommitKey(event, "up")) {
       return;
     }
+    if (suppressClipboardShortcutKeyUp(event)) {
+      return;
+    }
     event.preventDefault();
     sendScreencast(browserKeyMessage(event, "keyUp"));
   };
 
   const busy = streamStatus === "connecting" || (streamStatus === "open" && !streamFrame) || repairTabMutation.isPending || (!streamTabID && tabsQuery.isPending);
   const title = activeTab?.title?.trim() || (hasRealPayloadState ? payload?.title : "") || busyTitle;
+  const llmCursorStyle = (() => {
+    if (!llmCursor || !streamFrame) {
+      return null;
+    }
+    const surface = surfaceRef.current;
+    const image = imageRef.current;
+    if (!surface || !image) {
+      return null;
+    }
+    const viewportWidth = streamFrame.metadata?.deviceWidth || image.naturalWidth;
+    const viewportHeight = streamFrame.metadata?.deviceHeight || image.naturalHeight;
+    const imageRect = renderedBrowserImageRect(image, viewportWidth, viewportHeight);
+    if (!imageRect || viewportWidth <= 0 || viewportHeight <= 0) {
+      return null;
+    }
+    const surfaceRect = surface.getBoundingClientRect();
+    return {
+      left: imageRect.left + (llmCursor.x / viewportWidth) * imageRect.width - surfaceRect.left,
+      top: imageRect.top + (llmCursor.y / viewportHeight) * imageRect.height - surfaceRect.top,
+    };
+  })();
 
   if (!ownerSessionID) {
     return <div className="p-3 text-sm text-muted-foreground">{t("browser.loadFailed")}</div>;
@@ -2637,6 +2765,7 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
         onMouseDown={handleSurfaceMouseDown}
         onMouseMove={handleSurfaceMouseMove}
         onMouseUp={handleSurfaceMouseUp}
+        onPaste={handleBrowserPaste}
         onWheel={handleSurfaceWheel}
       >
         <textarea
@@ -2653,6 +2782,7 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
           onInput={handleTextInput}
           onKeyDown={handleTextKeyDown}
           onKeyUp={handleTextKeyUp}
+          onPaste={handleBrowserPaste}
         />
         {isExternalBrowser || streamStatus === "external" ? (
           <div className="flex max-w-sm flex-col items-center gap-3 px-6 text-center text-sm text-muted-foreground">
@@ -2698,6 +2828,19 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
             {busy ? t("browser.loading") : t("browser.empty")}
           </div>
         )}
+        {llmCursorStyle ? (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute z-20 -translate-x-1.5 -translate-y-1.5"
+            style={{ left: llmCursorStyle.left, top: llmCursorStyle.top }}
+          >
+            <div className="relative h-5 w-5">
+              {llmCursor?.action === "click" ? <div className="absolute inset-0 rounded-full bg-sky-400/35 animate-ping" /> : null}
+              <div className="absolute top-0 left-0 h-3 w-3 rounded-full border border-white bg-sky-500 shadow-[0_0_0_2px_rgba(14,165,233,0.35),0_2px_8px_rgba(0,0,0,0.35)]" />
+              <div className="absolute top-2 left-2 h-2 w-2 rounded-full bg-sky-500/70" />
+            </div>
+          </div>
+        ) : null}
         {streamStatus === "error" && streamError ? (
           <div className="pointer-events-none absolute right-2 bottom-2 max-w-[70%] truncate rounded-md bg-destructive/90 px-2 py-1 text-xs text-destructive-foreground">
             {streamError}
@@ -4198,6 +4341,34 @@ function browserModifiers(event: { altKey: boolean; ctrlKey: boolean; metaKey: b
 
 function isPlainTextKey(event: { altKey: boolean; ctrlKey: boolean; key: string; metaKey: boolean }): boolean {
   return event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;
+}
+
+function browserClipboardShortcut(event: {
+  altKey: boolean;
+  ctrlKey: boolean;
+  key: string;
+  metaKey: boolean;
+  shiftKey: boolean;
+}): "copy" | "cut" | "paste" | "redo" | "selectAll" | "undo" | null {
+  if (event.altKey || (!event.metaKey && !event.ctrlKey)) {
+    return null;
+  }
+  switch (event.key.toLowerCase()) {
+    case "a":
+      return "selectAll";
+    case "c":
+      return "copy";
+    case "x":
+      return "cut";
+    case "v":
+      return "paste";
+    case "y":
+      return event.ctrlKey && !event.metaKey ? "redo" : null;
+    case "z":
+      return event.shiftKey ? "redo" : "undo";
+    default:
+      return null;
+  }
 }
 
 function browserKeyMessage(event: ReactKeyboardEvent<HTMLElement>, eventType: "keyDown" | "keyUp"): Record<string, unknown> {

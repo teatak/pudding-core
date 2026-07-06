@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { Attachment, LocalFolder, Message } from "@/api/client";
+import type { Attachment, ContentPart, LocalFolder, Message } from "@/api/client";
 import type { SessionEvent } from "@/contracts/events";
 
 export type PendingUserMessage = {
@@ -10,6 +10,7 @@ export type PendingUserMessage = {
   text: string;
   attachments?: Attachment[];
   localFolders?: LocalFolder[];
+  parts?: ContentPart[];
   createdAt: string;
 };
 
@@ -52,6 +53,8 @@ export type AssistantOverlayPart =
       name?: string;
       argsText: string;
       phase?: "streaming_args" | "running" | "ok" | "error";
+      resultContent?: string;
+      resultOk?: boolean;
       summary?: string;
       summaryKind?: string;
       summaryCount?: number;
@@ -221,6 +224,8 @@ function upsertToolPart(
     callID,
     name: event.name || current.name,
     phase: event.phase || current.phase,
+    resultContent: event.content ?? current.resultContent,
+    resultOk: event.ok ?? current.resultOk,
     summary: event.summary || current.summary,
     summaryKind: event.summaryKind || current.summaryKind,
     summaryCount: event.summaryCount ?? current.summaryCount,

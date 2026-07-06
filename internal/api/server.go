@@ -446,6 +446,7 @@ type submitReq struct {
 	Text            string              `json:"text"`
 	Attachments     []store.Attachment  `json:"attachments,omitempty"`
 	LocalFolders    []store.LocalFolder `json:"localFolders,omitempty"`
+	Parts           []store.ContentPart `json:"parts,omitempty"`
 	Kind            string              `json:"kind,omitempty"`
 	ReasoningEffort string              `json:"reasoningEffort,omitempty"`
 }
@@ -456,7 +457,13 @@ func (s *Server) submit(c *cart.Context) error {
 	if err := decode(c, &req); err != nil {
 		return badRequest(c, "invalid json body")
 	}
-	attachments, err := s.normalizeSubmitAttachments(id, req.Attachments)
+	parts := store.NormalizeContentParts(req.Parts)
+	reqAttachments := store.NormalizeAttachments(req.Attachments)
+	if len(reqAttachments) != len(req.Attachments) {
+		return badRequest(c, "invalid attachments")
+	}
+	rawAttachments := mergeSubmitAttachments(reqAttachments, store.AttachmentsFromParts(parts))
+	attachments, err := s.normalizeSubmitAttachments(id, rawAttachments)
 	if errors.Is(err, errAttachmentHomeUnavailable) {
 		c.JSON(http.StatusInternalServerError, map[string]string{"error": "attachment_home_unavailable"})
 		return nil
@@ -467,12 +474,14 @@ func (s *Server) submit(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
+	localFolders := mergeSubmitLocalFolders(req.LocalFolders, store.LocalFoldersFromParts(parts))
 	res, err := s.engine.Submit(c.Request.Context(), engine.SubmitInput{
 		SessionID:       id,
 		ClientMessageID: req.ClientMessageID,
 		Text:            req.Text,
 		Attachments:     attachments,
-		LocalFolders:    req.LocalFolders,
+		LocalFolders:    localFolders,
+		Parts:           parts,
 		Kind:            req.Kind,
 		ReasoningEffort: req.ReasoningEffort,
 	})
@@ -497,6 +506,44 @@ func (s *Server) submit(c *cart.Context) error {
 	}
 	c.JSON(http.StatusAccepted, res)
 	return nil
+}
+
+func mergeSubmitAttachments(groups ...[]store.Attachment) []store.Attachment {
+	out := make([]store.Attachment, 0)
+	seen := make(map[string]bool)
+	for _, group := range groups {
+		for _, attachment := range store.NormalizeAttachments(group) {
+			key := attachment.ID
+			if key == "" {
+				key = attachment.AttachmentKey
+			}
+			if key == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, attachment)
+		}
+	}
+	return out
+}
+
+func mergeSubmitLocalFolders(groups ...[]store.LocalFolder) []store.LocalFolder {
+	out := make([]store.LocalFolder, 0)
+	seen := make(map[string]bool)
+	for _, group := range groups {
+		for _, folder := range store.NormalizeLocalFolders(group) {
+			key := folder.ID
+			if key == "" {
+				key = folder.Path
+			}
+			if key == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, folder)
+		}
+	}
+	return out
 }
 
 func (s *Server) listQueuedInputs(c *cart.Context) error {

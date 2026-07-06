@@ -32,6 +32,7 @@ import {
   uploadAttachment,
   revealDesktopPath,
   type Attachment,
+  type ContentPart,
   type ProviderProfile,
   type Session,
 } from "@/api/client";
@@ -68,6 +69,7 @@ import {
 } from "@/lib/localFolders";
 import type { AppSearch } from "@/lib/route";
 import { getSubmitFailure } from "@/lib/submitFailure";
+import { buildDraftSubmitParts, orderedDraftItems } from "@/lib/submitParts";
 import { getTextAreaCaretClientPoint } from "@/lib/textCaret";
 import { cn } from "@/lib/utils";
 import { getOrderedProviderPresets, type ProviderPreset } from "@/provider/presets";
@@ -380,8 +382,10 @@ function DraftComposer({
   const draftText = useDraftStore((state) => state.text);
   const attachments = useDraftStore((state) => state.attachments);
   const localFolders = useDraftStore((state) => state.localFolders);
+  const partOrder = useDraftStore((state) => state.partOrder);
   const setDraftAttachments = useDraftStore((state) => state.setAttachments);
   const setDraftLocalFolders = useDraftStore((state) => state.setLocalFolders);
+  const setDraftPartOrder = useDraftStore((state) => state.setPartOrder);
   const setDraftText = useDraftStore((state) => state.setText);
   const clearDraft = useDraftStore((state) => state.clear);
   const [resolvedModel, setResolvedModel] = useState<ResolvedModelSelection | null>(null);
@@ -518,10 +522,11 @@ function DraftComposer({
     attachments.forEach(revokeDraftAttachmentPreview);
     setDraftAttachments([]);
     setDraftLocalFolders([]);
+    setDraftPartOrder([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
-  }, [attachments, setDraftAttachments, setDraftLocalFolders]);
+  }, [attachments, setDraftAttachments, setDraftLocalFolders, setDraftPartOrder]);
 
   const addFiles = useCallback(
     (files: File[], options?: { origin?: "temp" }) => {
@@ -538,6 +543,7 @@ function DraftComposer({
         status: "uploading" as const,
       }));
       setDraftAttachments((current) => [...current, ...items]);
+      setDraftPartOrder((current) => [...current, ...items.map((item) => ({ type: "attachment" as const, id: item.id }))]);
       onSubmitError(null);
       items.forEach((item, index) => {
         const file = nextFiles[index];
@@ -561,10 +567,11 @@ function DraftComposer({
               }
               return current.filter((currentItem) => currentItem.id !== item.id);
             });
+            setDraftPartOrder((current) => current.filter((orderItem) => orderItem.type !== "attachment" || orderItem.id !== item.id));
           });
       });
     },
-    [onSubmitError, setDraftAttachments, t, token],
+    [onSubmitError, setDraftAttachments, setDraftPartOrder, t, token],
   );
 
   const removeAttachment = useCallback((id: string) => {
@@ -575,22 +582,22 @@ function DraftComposer({
       }
       return current.filter((item) => item.id !== id);
     });
-  }, [setDraftAttachments]);
+    setDraftPartOrder((current) => current.filter((item) => item.type !== "attachment" || item.id !== id));
+  }, [setDraftAttachments, setDraftPartOrder]);
   const addUploadedAttachments = useCallback((values: Attachment[]) => {
     if (values.length === 0) {
       return;
     }
-    setDraftAttachments((current) => [
-      ...current,
-      ...values.map((attachment) => ({
-        id: newClientID(),
-        attachment,
-        name: attachment.name,
-        size: attachment.size,
-        status: "uploaded" as const,
-      })),
-    ]);
-  }, [setDraftAttachments]);
+    const items = values.map((attachment) => ({
+      id: newClientID(),
+      attachment,
+      name: attachment.name,
+      size: attachment.size,
+      status: "uploaded" as const,
+    }));
+    setDraftAttachments((current) => [...current, ...items]);
+    setDraftPartOrder((current) => [...current, ...items.map((item) => ({ type: "attachment" as const, id: item.id }))]);
+  }, [setDraftAttachments, setDraftPartOrder]);
   const captureScreenshot = useCallback(async () => {
     if (capturingScreenshot) {
       return;
@@ -646,11 +653,17 @@ function DraftComposer({
     if (folders.length === 0) {
       return;
     }
+    const existing = new Set(localFolders.map((folder) => folder.path));
+    const nextFolders = folders.filter((folder) => !existing.has(folder.path));
+    if (nextFolders.length === 0) {
+      return;
+    }
     setDraftLocalFolders((current) => {
-      const existing = new Set(current.map((folder) => folder.path));
-      return [...current, ...folders.filter((folder) => !existing.has(folder.path))];
+      const currentPaths = new Set(current.map((folder) => folder.path));
+      return [...current, ...nextFolders.filter((folder) => !currentPaths.has(folder.path))];
     });
-  }, [setDraftLocalFolders]);
+    setDraftPartOrder((current) => [...current, ...nextFolders.map((folder) => ({ type: "local_folder" as const, id: folder.id }))]);
+  }, [localFolders, setDraftLocalFolders, setDraftPartOrder]);
   const pickLocalFolder = useCallback(async () => {
     if (pickingLocalFolder) {
       return;
@@ -667,7 +680,8 @@ function DraftComposer({
   }, [addLocalFolderPaths, pickingLocalFolder, t]);
   const removeLocalFolder = useCallback((id: string) => {
     setDraftLocalFolders((current) => current.filter((folder) => folder.id !== id));
-  }, [setDraftLocalFolders]);
+    setDraftPartOrder((current) => current.filter((item) => item.type !== "local_folder" || item.id !== id));
+  }, [setDraftLocalFolders, setDraftPartOrder]);
   const revealLocalPath = useCallback((path: string) => {
     if (!path.trim()) {
       return;
@@ -740,7 +754,7 @@ function DraftComposer({
   }, [onMascotInputGazeChange]);
 
   const submitMutation = useMutation({
-    mutationFn: async (value: DraftValue & { attachments: Attachment[]; localFolders: LocalFolderPath[] }) => {
+    mutationFn: async (value: DraftValue & { attachments: Attachment[]; localFolders: LocalFolderPath[]; parts: ContentPart[] }) => {
       const clientMessageID = draftIDRef.current;
       const activeReasoningEffort = reasoningEffort && reasoningOptions.includes(reasoningEffort) ? reasoningEffort : "";
       if (!modelValue.provider || !modelValue.model) {
@@ -771,6 +785,7 @@ function DraftComposer({
         text: value.text,
         attachments: value.attachments,
         localFolders: value.localFolders,
+        parts: value.parts,
         createdAt: new Date().toISOString(),
       });
       startSubmittingTurn(created.id, clientMessageID);
@@ -781,6 +796,7 @@ function DraftComposer({
           text: value.text,
           attachments: value.attachments,
           localFolders: value.localFolders,
+          parts: value.parts,
         });
         if (result.queued || !result.turnID) {
           clearSubmittingTurn(created.id, clientMessageID);
@@ -843,16 +859,22 @@ function DraftComposer({
   const submitText = useCallback(
     (raw: string) => {
       const text = raw.trim();
-      const attachmentsToSubmit = attachments.flatMap((item) => (item.status === "uploaded" && item.attachment ? [item.attachment] : []));
+      const attachmentItemsToSubmit = attachments.filter((item) => item.status === "uploaded" && item.attachment);
+      const attachmentsToSubmit = attachmentItemsToSubmit.flatMap((item) => (item.attachment ? [item.attachment] : []));
       const localFoldersToSubmit = localFolders;
       const hasPending = attachments.some((item) => item.status === "uploading");
       if ((!text && attachmentsToSubmit.length === 0 && localFoldersToSubmit.length === 0) || !modelReady || submitMutation.isPending || hasPending) {
         return;
       }
       onSubmitError(null);
-      submitMutation.mutate({ text, attachments: attachmentsToSubmit, localFolders: localFoldersToSubmit });
+      submitMutation.mutate({
+        text,
+        attachments: attachmentsToSubmit,
+        localFolders: localFoldersToSubmit,
+        parts: buildDraftSubmitParts(text, attachmentItemsToSubmit, localFoldersToSubmit, partOrder),
+      });
     },
-    [attachments, localFolders, modelReady, onSubmitError, submitMutation],
+    [attachments, localFolders, modelReady, onSubmitError, partOrder, submitMutation],
   );
 
   useEffect(() => {
@@ -970,29 +992,30 @@ function DraftComposer({
             />
             {attachments.length > 0 || localFolders.length > 0 ? (
               <div className="flex flex-wrap gap-2 px-3 pt-3">
-                {attachments.map((item) => (
-                  <DraftAttachmentChip
-                    key={item.id}
-                    item={item}
-                    locked={submitMutation.isPending}
-                    previewIndex={attachmentPreviewIndexByID.get(item.id)}
-                    removeLabel={t("composer.removeAttachment")}
-                    token={token}
-                    onPreview={setAttachmentPreviewIndex}
-                    onRevealSource={revealLocalPath}
-                    onRemove={() => removeAttachment(item.id)}
-                  />
-                ))}
-                {localFolders.map((folder) => (
-                  <DraftLocalFolderChip
-                    key={folder.id}
-                    folder={folder}
-                    label={t("composer.folderLabel")}
-                    removeLabel={t("composer.removeFolder")}
-                    onReveal={() => revealLocalPath(folder.path)}
-                    onRemove={() => removeLocalFolder(folder.id)}
-                  />
-                ))}
+                {orderedDraftItems(attachments, localFolders, partOrder).map((orderedItem) =>
+                  orderedItem.type === "attachment" ? (
+                    <DraftAttachmentChip
+                      key={`attachment:${orderedItem.item.id}`}
+                      item={orderedItem.item}
+                      locked={submitMutation.isPending}
+                      previewIndex={attachmentPreviewIndexByID.get(orderedItem.item.id)}
+                      removeLabel={t("composer.removeAttachment")}
+                      token={token}
+                      onPreview={setAttachmentPreviewIndex}
+                      onRevealSource={revealLocalPath}
+                      onRemove={() => removeAttachment(orderedItem.item.id)}
+                    />
+                  ) : (
+                    <DraftLocalFolderChip
+                      key={`folder:${orderedItem.item.id}`}
+                      folder={orderedItem.item}
+                      label={t("composer.folderLabel")}
+                      removeLabel={t("composer.removeFolder")}
+                      onReveal={() => revealLocalPath(orderedItem.item.path)}
+                      onRemove={() => removeLocalFolder(orderedItem.item.id)}
+                    />
+                  ),
+                )}
               </div>
             ) : null}
             <div className="px-4 pt-4 pb-2">

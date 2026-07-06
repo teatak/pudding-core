@@ -3,6 +3,7 @@ import { create } from "zustand";
 import type { Attachment } from "@/api/client";
 import { newClientID } from "@/lib/id";
 import type { LocalFolderPath } from "@/lib/localFolders";
+import type { DraftPartOrderItem } from "@/lib/submitParts";
 
 export type SessionDraftAttachment = {
   id: string;
@@ -17,6 +18,7 @@ type SessionDraft = {
   attachments: SessionDraftAttachment[];
   clientMessageID: string;
   localFolders: LocalFolderPath[];
+  partOrder: DraftPartOrderItem[];
   text: string;
 };
 
@@ -28,6 +30,7 @@ type SessionDraftState = {
   ensure: (sessionID: string) => SessionDraft;
   setAttachments: (sessionID: string, update: DraftListUpdate<SessionDraftAttachment>) => void;
   setLocalFolders: (sessionID: string, update: DraftListUpdate<LocalFolderPath>) => void;
+  setPartOrder: (sessionID: string, update: DraftListUpdate<DraftPartOrderItem>) => void;
   setText: (sessionID: string, text: string) => void;
 };
 
@@ -36,6 +39,7 @@ function newSessionDraft(text = ""): SessionDraft {
     attachments: [],
     clientMessageID: newClientID(),
     localFolders: [],
+    partOrder: [],
     text,
   };
 }
@@ -89,6 +93,20 @@ export const useSessionDraftStore = create<SessionDraftState>((set, get) => ({
           [sessionID]: {
             ...current,
             localFolders: applyDraftListUpdate(current.localFolders, update),
+          },
+        },
+      };
+    });
+  },
+  setPartOrder: (sessionID, update) => {
+    set((state) => {
+      const current = state.drafts[sessionID] ?? newSessionDraft();
+      return {
+        drafts: {
+          ...state.drafts,
+          [sessionID]: {
+            ...current,
+            partOrder: applyDraftListUpdate(current.partOrder, update),
           },
         },
       };

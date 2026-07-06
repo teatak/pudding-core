@@ -29,7 +29,7 @@ const (
 //
 //	turn.started   seq, turnID, clientMessageID, userMessageID, text
 //	turn.delta     turnID, part, delta      (不落库,无 seq)
-//	turn.tool      turnID, callID, name, phase, argsDelta/summaryKind/summaryCount (不落库,无 seq)
+//	turn.tool      turnID, callID, name, phase, argsDelta/ok/content/summaryKind/summaryCount (不落库,无 seq)
 //	turn.completed seq, turnID, assistantMessageID
 //	turn.failed    seq, turnID, error       (有部分输出时附 assistantMessageID + interrupted)
 //	turn.cancelled seq, turnID              (有部分输出时附 assistantMessageID + interrupted)
@@ -55,6 +55,8 @@ type Event struct {
 	Name               string          `json:"name,omitempty"`
 	Phase              string          `json:"phase,omitempty"`
 	ArgsDelta          string          `json:"argsDelta,omitempty"`
+	Ok                 *bool           `json:"ok,omitempty"`
+	Content            string          `json:"content,omitempty"`
 	Summary            string          `json:"summary,omitempty"` // 兼容旧前端,新工具摘要走 SummaryKind/SummaryCount
 	SummaryKind        string          `json:"summaryKind,omitempty"`
 	SummaryCount       int             `json:"summaryCount,omitempty"`

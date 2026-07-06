@@ -434,32 +434,133 @@ func TextPart(text string) []ContentPart {
 }
 
 func UserInputParts(text string, attachments []Attachment, localFolders []LocalFolder) []ContentPart {
-	parts := TextPart(text)
-	for _, attachment := range NormalizeAttachments(attachments) {
-		parts = append(parts, ContentPart{
-			Type:                ContentPartAttachment,
-			CallID:              attachment.ID,
-			Name:                attachment.Name,
-			AttachmentKey:       attachment.AttachmentKey,
-			URL:                 attachment.URL,
-			MIME:                attachment.MIME,
-			Size:                attachment.Size,
-			Origin:              attachment.Origin,
-			SourcePath:          attachment.SourcePath,
-			AttachmentCreatedAt: attachment.CreatedAt,
-			AudioTranscript:     attachment.AudioTranscript,
-		})
+	return OrderedUserInputParts(text, nil, attachments, localFolders)
+}
+
+func OrderedUserInputParts(text string, orderedParts []ContentPart, attachments []Attachment, localFolders []LocalFolder) []ContentPart {
+	attachments = NormalizeAttachments(attachments)
+	localFolders = NormalizeLocalFolders(localFolders)
+	if len(orderedParts) == 0 {
+		parts := make([]ContentPart, 0, len(attachments)+len(localFolders)+1)
+		for _, attachment := range attachments {
+			parts = append(parts, AttachmentPart(attachment))
+		}
+		for _, folder := range localFolders {
+			parts = append(parts, LocalFolderPart(folder))
+		}
+		return appendUserTextPart(parts, text)
 	}
-	for _, folder := range NormalizeLocalFolders(localFolders) {
-		parts = append(parts, ContentPart{
-			Type:   ContentPartLocalFolder,
-			CallID: folder.ID,
-			Name:   folder.Name,
-			Path:   folder.Path,
-			Origin: folder.Origin,
-		})
+
+	orderedParts = NormalizeContentParts(orderedParts)
+	if text == "" {
+		text = TextFromParts(orderedParts)
 	}
-	return parts
+	attachmentByID := make(map[string]Attachment, len(attachments))
+	attachmentByKey := make(map[string]Attachment, len(attachments))
+	for _, attachment := range attachments {
+		attachmentByID[attachment.ID] = attachment
+		attachmentByKey[attachment.AttachmentKey] = attachment
+	}
+	folderByID := make(map[string]LocalFolder, len(localFolders))
+	folderByPath := make(map[string]LocalFolder, len(localFolders))
+	for _, folder := range localFolders {
+		folderByID[folder.ID] = folder
+		folderByPath[folder.Path] = folder
+	}
+
+	parts := make([]ContentPart, 0, len(attachments)+len(localFolders)+1)
+	seenAttachments := make(map[string]bool, len(attachments))
+	seenFolders := make(map[string]bool, len(localFolders))
+	for _, part := range orderedParts {
+		switch part.Type {
+		case ContentPartAttachment:
+			attachment, ok := attachmentByID[part.CallID]
+			if !ok {
+				attachment, ok = attachmentByKey[part.AttachmentKey]
+			}
+			if !ok {
+				continue
+			}
+			key := attachment.ID
+			if key == "" {
+				key = attachment.AttachmentKey
+			}
+			if seenAttachments[key] {
+				continue
+			}
+			seenAttachments[key] = true
+			parts = append(parts, AttachmentPart(attachment))
+		case ContentPartLocalFolder:
+			folder, ok := folderByID[part.CallID]
+			if !ok {
+				folder, ok = folderByPath[part.Path]
+			}
+			if !ok {
+				continue
+			}
+			key := folder.ID
+			if key == "" {
+				key = folder.Path
+			}
+			if seenFolders[key] {
+				continue
+			}
+			seenFolders[key] = true
+			parts = append(parts, LocalFolderPart(folder))
+		}
+	}
+	for _, attachment := range attachments {
+		key := attachment.ID
+		if key == "" {
+			key = attachment.AttachmentKey
+		}
+		if !seenAttachments[key] {
+			parts = append(parts, AttachmentPart(attachment))
+		}
+	}
+	for _, folder := range localFolders {
+		key := folder.ID
+		if key == "" {
+			key = folder.Path
+		}
+		if !seenFolders[key] {
+			parts = append(parts, LocalFolderPart(folder))
+		}
+	}
+	return appendUserTextPart(parts, text)
+}
+
+func AttachmentPart(attachment Attachment) ContentPart {
+	return ContentPart{
+		Type:                ContentPartAttachment,
+		CallID:              attachment.ID,
+		Name:                attachment.Name,
+		AttachmentKey:       attachment.AttachmentKey,
+		URL:                 attachment.URL,
+		MIME:                attachment.MIME,
+		Size:                attachment.Size,
+		Origin:              attachment.Origin,
+		SourcePath:          attachment.SourcePath,
+		AttachmentCreatedAt: attachment.CreatedAt,
+		AudioTranscript:     attachment.AudioTranscript,
+	}
+}
+
+func LocalFolderPart(folder LocalFolder) ContentPart {
+	return ContentPart{
+		Type:   ContentPartLocalFolder,
+		CallID: folder.ID,
+		Name:   folder.Name,
+		Path:   folder.Path,
+		Origin: folder.Origin,
+	}
+}
+
+func appendUserTextPart(parts []ContentPart, text string) []ContentPart {
+	if strings.TrimSpace(text) == "" {
+		return parts
+	}
+	return append(parts, ContentPart{Type: ContentPartText, Text: text})
 }
 
 func NormalizeAttachments(attachments []Attachment) []Attachment {
@@ -822,6 +923,7 @@ type QueuedInput struct {
 	Text            string            `json:"text"`
 	Attachments     []Attachment      `json:"attachments,omitempty"`
 	LocalFolders    []LocalFolder     `json:"localFolders,omitempty"`
+	Parts           []ContentPart     `json:"parts,omitempty"`
 	Status          QueuedInputStatus `json:"status"`
 	Provider        string            `json:"provider,omitempty"`
 	Model           string            `json:"model,omitempty"`
@@ -838,6 +940,7 @@ type QueueInputInput struct {
 	Text            string
 	Attachments     []Attachment
 	LocalFolders    []LocalFolder
+	Parts           []ContentPart
 	Provider        string
 	Model           string
 	Mode            AgentMode
@@ -928,6 +1031,7 @@ type BeginTurnInput struct {
 	UserText         string
 	UserAttachments  []Attachment
 	UserLocalFolders []LocalFolder
+	UserParts        []ContentPart
 	// Provider / Model 由 engine 在提交时刻解析后传入,随 turn 落库。
 	Provider    string
 	Model       string

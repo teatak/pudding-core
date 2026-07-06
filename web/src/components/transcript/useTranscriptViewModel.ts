@@ -239,6 +239,7 @@ function userFromMessages(messages: Message[]): UserInputVM | undefined {
     createdAt: userMessage.createdAt,
     interrupted: userMessage.interrupted,
     localFolders: localFoldersFromContentParts(userMessage.parts),
+    parts: userMessage.parts,
     text: textFromContentParts(userMessage.parts),
   };
 }
@@ -250,6 +251,7 @@ function userFromPending(message: PendingUserMessage, options: { pending?: boole
     createdAt: message.createdAt,
     localFolders: message.localFolders,
     pending: options.pending ?? true,
+    parts: message.parts,
     status: options.pending === false ? undefined : message.status,
     text: message.text,
   };

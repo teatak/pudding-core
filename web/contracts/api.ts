@@ -287,6 +287,7 @@ export const queuedInput = z.object({
   text: z.string(),
   attachments: z.array(attachment).optional(),
   localFolders: z.array(localFolder).optional(),
+  parts: z.array(contentPart).optional(),
   status: queuedInputStatus,
   provider: z.string().optional(),
   model: z.string().optional(),
@@ -306,15 +307,16 @@ export const submitRequest = z
     text: z.string().optional().default(""),
     attachments: z.array(attachment).optional(),
     localFolders: z.array(localFolder).optional(),
+    parts: z.array(contentPart).optional(),
   })
   .superRefine((value, ctx) => {
     if (value.kind === "system") {
-      if (!value.text.trim() || (value.attachments?.length ?? 0) > 0 || (value.localFolders?.length ?? 0) > 0) {
+      if (!value.text.trim() || (value.attachments?.length ?? 0) > 0 || (value.localFolders?.length ?? 0) > 0 || (value.parts?.length ?? 0) > 0) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: "system submit requires text only" });
       }
       return;
     }
-    if (!value.text.trim() && (value.attachments?.length ?? 0) === 0 && (value.localFolders?.length ?? 0) === 0) {
+    if (!value.text.trim() && (value.attachments?.length ?? 0) === 0 && (value.localFolders?.length ?? 0) === 0 && (value.parts?.length ?? 0) === 0) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "submit requires text, attachments, or localFolders" });
     }
   });

@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS queued_inputs (
     text              TEXT    NOT NULL,
     attachments       TEXT    NOT NULL DEFAULT '[]',
     local_folders     TEXT    NOT NULL DEFAULT '[]',
+    parts             TEXT    NOT NULL DEFAULT '[]',
     status            TEXT    NOT NULL,
     provider          TEXT    NOT NULL DEFAULT '',
     model             TEXT    NOT NULL DEFAULT '',

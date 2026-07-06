@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 import type { Attachment } from "@/api/client";
 import type { LocalFolderPath } from "@/lib/localFolders";
+import type { DraftPartOrderItem } from "@/lib/submitParts";
 
 export type DraftModelValue = { provider?: string; model?: string };
 export type DraftAttachment = {
@@ -19,10 +20,12 @@ type DraftListUpdate<T> = T[] | ((current: T[]) => T[]);
 type DraftState = {
   attachments: DraftAttachment[];
   localFolders: LocalFolderPath[];
+  partOrder: DraftPartOrderItem[];
   text: string;
   model: DraftModelValue;
   setAttachments: (update: DraftListUpdate<DraftAttachment>) => void;
   setLocalFolders: (update: DraftListUpdate<LocalFolderPath>) => void;
+  setPartOrder: (update: DraftListUpdate<DraftPartOrderItem>) => void;
   setText: (text: string) => void;
   setModel: (model: DraftModelValue) => void;
   clear: () => void;
@@ -68,16 +71,18 @@ function writeLastModel(model: DraftModelValue) {
 export const useDraftStore = create<DraftState>((set) => ({
   attachments: [],
   localFolders: [],
+  partOrder: [],
   text: "",
   model: readLastModel(),
   setAttachments: (update) => set((state) => ({ attachments: applyDraftListUpdate(state.attachments, update) })),
   setLocalFolders: (update) => set((state) => ({ localFolders: applyDraftListUpdate(state.localFolders, update) })),
+  setPartOrder: (update) => set((state) => ({ partOrder: applyDraftListUpdate(state.partOrder, update) })),
   setText: (text) => set({ text }),
   setModel: (model) => {
     writeLastModel(model);
     set({ model });
   },
-  clear: () => set({ text: "" }),
+  clear: () => set({ text: "", partOrder: [] }),
 }));
 
 function applyDraftListUpdate<T>(current: T[], update: DraftListUpdate<T>) {

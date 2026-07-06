@@ -152,6 +152,8 @@ export function partsFromOverlay(
         name: part.name,
         phase: part.phase,
         phaseUpdatedAt: active ? activePhaseUpdatedAt : undefined,
+        resultContent: part.resultContent,
+        resultOk: part.resultOk,
         summary: part.summary,
         summaryCount: part.summaryCount,
         summaryKind: part.summaryKind,
