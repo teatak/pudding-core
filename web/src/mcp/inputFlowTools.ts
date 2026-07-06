@@ -6,7 +6,7 @@ export function createInputFlowTools(): ToolDefinition[] {
     {
       name: "ui_input_flow",
       description:
-        "Render an interactive, multi-step user input flow above the composer and wait until the user completes or cancels it. Use this when you need the user to choose structured values, such as selecting one or more room types and quantities, then collecting a few follow-up fields. Current version supports type='repeat' with repeatSteps of type='option_list' and 'quick_number', plus optional nextSteps of type='text_input', 'phone_input', 'option_list', 'quick_number', or 'confirm'. The tool call blocks until completion; the result is returned as JSON in the tool result.",
+        "Render an interactive, multi-step user input flow above the composer and wait until the user completes or cancels it. Use this when you need the user to choose structured values, such as selecting one or more room types and quantities, then collecting a few follow-up fields. If the options depend on live data, first call the relevant REST/GraphQL/search tool to get the options, then call this tool with those options. Current version supports type='repeat' with repeatSteps of type='option_list' and 'quick_number', plus optional nextSteps of type='text_input', 'phone_input', 'option_list', 'quick_number', or 'confirm'. The tool call blocks until completion; the result is returned as JSON in the tool result.",
       capability: "chat",
       inputSchema: {
         type: "object",
@@ -71,7 +71,7 @@ export function createInputFlowTools(): ToolDefinition[] {
     {
       name: "ui_confirm",
       description:
-        "Show a compact confirmation prompt above the composer and wait until the user confirms or cancels. Use this before irreversible or user-visible actions, such as creating an order after showing a summary. The result is returned as JSON in the tool result.",
+        "Show a compact confirmation prompt above the composer and wait until the user confirms or cancels. Use this before irreversible or user-visible actions, such as creating an order after showing a summary from prior tool results. The result is returned as JSON in the tool result.",
       capability: "chat",
       inputSchema: {
         type: "object",

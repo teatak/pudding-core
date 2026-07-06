@@ -86,6 +86,16 @@ func TestBindInputStartsCaptureAndRoutesASR(t *testing.T) {
 	if !drv.started {
 		t.Fatal("capture driver was not started")
 	}
+	if drv.handler == nil {
+		t.Fatal("capture handler was not registered")
+	}
+	drv.handler(frame.PCM16{
+		Format: drv.format,
+		Data:   []byte{0, 64, 0, 64, 0, 64, 0, 64},
+	})
+	if got := svc.Snapshot().InputLevel; got <= 0 {
+		t.Fatalf("input level = %v, want > 0", got)
+	}
 
 	fakeASR.EmitSentence("from mic")
 	msgs := waitMessages(t, ctx, ms, "sess_input", 2)
@@ -98,6 +108,9 @@ func TestBindInputStartsCaptureAndRoutesASR(t *testing.T) {
 	}
 	if drv.started {
 		t.Fatal("capture driver should be stopped")
+	}
+	if got := svc.Snapshot().InputLevel; got != 0 {
+		t.Fatalf("input level after stop = %v, want 0", got)
 	}
 }
 

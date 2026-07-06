@@ -1,5 +1,5 @@
 import { Check, ChevronRight, TextCursorInput, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
@@ -46,6 +46,7 @@ type ChoiceMenuItem<T> = {
   disabled?: boolean;
   id: string;
   label: string;
+  noActiveStyle?: boolean;
   render?: (active: boolean) => ReactNode;
   value: T;
 };
@@ -518,14 +519,15 @@ function QuickNumber({
     {
       id: "custom",
       label: step.customLabel || t("inputFlow.custom"),
+      noActiveStyle: customOpen,
       value: { type: "custom" as const },
       render: () =>
         customOpen ? (
-          <div className="flex min-w-0 items-center gap-2 bg-transparent">
+          <div className="flex min-w-0 items-center gap-2">
             <input
               autoFocus
               className={cn(
-                "h-7 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40",
+                "h-6 min-w-0 flex-1 rounded-md border border-border bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40",
                 customValue && !customValid ? "border-destructive" : "",
               )}
               inputMode="numeric"
@@ -543,7 +545,7 @@ function QuickNumber({
                 }
               }}
             />
-            <Button size="sm" type="button" disabled={!customValid} onMouseDown={(event) => event.preventDefault()} onClick={() => onSelect(customNumber)}>
+            <Button className="h-6 px-2 text-xs" size="sm" type="button" disabled={!customValid} onMouseDown={(event) => event.preventDefault()} onClick={() => onSelect(customNumber)}>
               {t("inputFlow.confirm")}
             </Button>
           </div>
@@ -656,7 +658,7 @@ function ChoiceMenu<T>({
   onSelect: (value: T) => void;
 }) {
   const listRef = useRef<HTMLDivElement | null>(null);
-  const selectedRef = useRef<HTMLButtonElement | null>(null);
+  const selectedRef = useRef<HTMLElement | null>(null);
   const signature = items.map((item) => `${item.id}:${item.disabled ? "0" : "1"}`).join("|");
   const [selectedIndex, setSelectedIndex] = useState(() => firstEnabledIndex(items));
 
@@ -714,41 +716,63 @@ function ChoiceMenu<T>({
       tabIndex={0}
       onKeyDown={handleKeyDown}
     >
-      {items.map((item, index) => (
-        <button
-          key={item.id}
-          ref={index === selectedIndex ? selectedRef : undefined}
-          aria-selected={index === selectedIndex}
-          className={cn(
-            "min-w-0 rounded-md px-2.5 py-1.5 text-left transition hover:bg-muted disabled:opacity-50",
-            index === selectedIndex && "bg-muted text-foreground",
-          )}
-          disabled={item.disabled}
-          role="option"
-          tabIndex={-1}
-          type="button"
-          onMouseEnter={() => {
+      {items.map((item, index) => {
+        const itemClassName = cn(
+          "min-w-0 rounded-md px-2.5 py-1.5 text-left transition disabled:opacity-50",
+          !item.noActiveStyle && "hover:bg-muted",
+          index === selectedIndex && !item.noActiveStyle && "bg-muted text-foreground",
+          item.noActiveStyle && "px-0 py-0.5",
+        );
+        const commonProps = {
+          "aria-selected": index === selectedIndex,
+          className: itemClassName,
+          onMouseEnter: () => {
             if (!item.disabled) {
               setSelectedIndex(index);
             }
-          }}
-          onMouseDown={(event) => {
+          },
+          onMouseDown: (event: MouseEvent) => {
             event.preventDefault();
-            if (!item.disabled) {
+            if (!item.disabled && !item.noActiveStyle) {
               onSelect(item.value);
             }
-          }}
-        >
-          {item.render ? (
-            item.render(index === selectedIndex)
-          ) : (
-            <>
-              <div className="truncate text-sm font-medium">{item.label}</div>
-              {item.description ? <div className="mt-0.5 truncate text-xs text-muted-foreground">{item.description}</div> : null}
-            </>
-          )}
-        </button>
-      ))}
+          },
+          role: "option",
+          tabIndex: -1,
+        };
+        if (item.render) {
+          return (
+            <div
+              key={item.id}
+              ref={(node) => {
+                if (index === selectedIndex) {
+                  selectedRef.current = node;
+                }
+              }}
+              aria-disabled={item.disabled || undefined}
+              {...commonProps}
+            >
+              {item.render(index === selectedIndex)}
+            </div>
+          );
+        }
+        return (
+          <button
+            key={item.id}
+            ref={(node) => {
+              if (index === selectedIndex) {
+                selectedRef.current = node;
+              }
+            }}
+            {...commonProps}
+            disabled={item.disabled}
+            type="button"
+          >
+            <div className="truncate text-sm font-medium">{item.label}</div>
+            {item.description ? <div className="mt-0.5 truncate text-xs text-muted-foreground">{item.description}</div> : null}
+          </button>
+        );
+      })}
     </div>
   );
 }

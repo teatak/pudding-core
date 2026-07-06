@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"math"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,6 +30,7 @@ var (
 )
 
 const feedbackSuppressGrace = 1500 * time.Millisecond
+const inputLevelScale = 10000
 
 type Submitter interface {
 	Submit(ctx context.Context, in engine.SubmitInput) (*engine.SubmitResult, error)
@@ -87,6 +89,7 @@ type Service struct {
 
 	ttsSpeaking           atomic.Bool
 	feedbackSuppressUntil atomic.Int64
+	inputLevel            atomic.Int64
 }
 
 type turnBuffer struct {
@@ -136,7 +139,11 @@ func NewService(cfg ServiceConfig) *Service {
 }
 
 func (s *Service) Snapshot() Bindings {
-	return s.manager.Snapshot()
+	bindings := s.manager.Snapshot()
+	if bindings.InputOwner != "" {
+		bindings.InputLevel = s.currentInputLevel()
+	}
+	return bindings
 }
 
 func (s *Service) BindInput(sessionID string, enabled bool) (Bindings, error) {
@@ -233,6 +240,7 @@ func (s *Service) Close() error {
 	if inputCancel != nil {
 		inputCancel()
 	}
+	s.setInputLevel(0)
 	if s.driver != nil {
 		_ = s.driver.StopCapture(context.Background())
 	}
@@ -353,6 +361,7 @@ func (s *Service) startInput(sessionID string) error {
 	s.inputCancel = cancel
 	s.mu.Unlock()
 
+	s.setInputLevel(0)
 	s.resetDSP()
 	if err := s.driver.StartCapture(ctx, func(pcm frame.PCM16) {
 		if s.manager.Snapshot().InputOwner != sessionID {
@@ -363,6 +372,7 @@ func (s *Service) startInput(sessionID string) error {
 			slog.Warn("voice: capture dsp failed", "sessionID", sessionID, "err", err)
 			processed = pcm
 		}
+		s.setInputLevel(pcmRMSLevel(processed))
 		if err := s.asr.Feed(ctx, processed); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Warn("voice: asr feed failed", "sessionID", sessionID, "err", err)
 		}
@@ -387,6 +397,7 @@ func (s *Service) stopInput() {
 	if cancel != nil {
 		cancel()
 	}
+	s.setInputLevel(0)
 	s.resetDSP()
 	if s.driver != nil {
 		_ = s.driver.StopCapture(context.Background())
@@ -817,6 +828,34 @@ func (s *Service) closeDSP() {
 	if closer, ok := s.ns.(ns.Closer); ok {
 		_ = closer.Close()
 	}
+}
+
+func (s *Service) setInputLevel(level float64) {
+	if level < 0 || math.IsNaN(level) || math.IsInf(level, 0) {
+		level = 0
+	}
+	if level > 1 {
+		level = 1
+	}
+	s.inputLevel.Store(int64(level * inputLevelScale))
+}
+
+func (s *Service) currentInputLevel() float64 {
+	return float64(s.inputLevel.Load()) / inputLevelScale
+}
+
+func pcmRMSLevel(pcm frame.PCM16) float64 {
+	if len(pcm.Data) < 2 {
+		return 0
+	}
+	samples := len(pcm.Data) / 2
+	var sumSquares float64
+	for i := 0; i < samples; i++ {
+		sample := int16(uint16(pcm.Data[i*2]) | uint16(pcm.Data[i*2+1])<<8)
+		value := float64(sample) / 32768.0
+		sumSquares += value * value
+	}
+	return math.Sqrt(sumSquares / float64(samples))
 }
 
 func previewText(text string, maxRunes int) string {

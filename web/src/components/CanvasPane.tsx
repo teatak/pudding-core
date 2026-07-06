@@ -21,6 +21,7 @@ import {
   Gauge,
   Hash,
   Image,
+  ImageOff,
   Loader2,
   Maximize2,
   Minimize2,
@@ -109,6 +110,7 @@ import {
 import { Input } from "@/components/ui/input";
 import type { CanvasItem, ClosedCanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
+import { attachmentResourceURL } from "@/lib/attachmentURL";
 import { cn } from "@/lib/utils";
 import { apiURL } from "@/state/apiBase";
 
@@ -1729,16 +1731,18 @@ function CanvasContent({
   if (kind === "grid") {
     return (
       <div className={cn(isMaximized ? "py-3" : "p-3")}>
-        <CanvasGrid payload={payload} />
+        <CanvasGrid payload={payload} token={token} />
       </div>
     );
   }
   if (kind === "gallery") {
     const galleryLayout = galleryLayoutValue(payload?.layout);
+    const singleImage = galleryItemCount(payload) === 1;
     return (
-      <div className={cn("h-full min-h-0", galleryLayout === "grid" ? "p-3" : "")}>
+      <div className={cn("h-full min-h-0", galleryLayout === "grid" && !singleImage ? "p-3" : "")}>
         <CanvasGallery
           payload={payload}
+          token={token}
           activeIndex={galleryActiveIndex}
           onActiveIndexChange={onGalleryActiveIndexChange}
           onLayoutChange={onGalleryLayoutChange}
@@ -2704,7 +2708,7 @@ function CanvasBrowserWidget({ token, item }: { token: string; item: CanvasItem 
   );
 }
 
-function CanvasGrid({ payload, nested = false }: { payload: Record<string, unknown> | undefined; nested?: boolean }) {
+function CanvasGrid({ payload, token, nested = false }: { payload: Record<string, unknown> | undefined; token: string; nested?: boolean }) {
   const items = Array.isArray(payload?.items) ? payload.items : [];
   const gap = Math.max(4, Math.min(32, numberValue(asRecord(payload?.layout)?.gap, nested ? 8 : 12)));
   const caption = stringValue(payload?.caption);
@@ -2754,7 +2758,7 @@ function CanvasGrid({ payload, nested = false }: { payload: Record<string, unkno
                         : "p-3",
                 )}
               >
-                <GridItemContent item={record} kind={kind} />
+                <GridItemContent item={record} kind={kind} token={token} />
               </div>
             </section>
           );
@@ -2765,7 +2769,7 @@ function CanvasGrid({ payload, nested = false }: { payload: Record<string, unkno
   );
 }
 
-function GridItemContent({ item, kind }: { item: Record<string, unknown>; kind: string }) {
+function GridItemContent({ item, kind, token }: { item: Record<string, unknown>; kind: string; token: string }) {
   if (kind === "metric") {
     return <CanvasMetric item={item} />;
   }
@@ -2773,7 +2777,7 @@ function GridItemContent({ item, kind }: { item: Record<string, unknown>; kind: 
     return <CanvasTable payload={item} />;
   }
   if (kind === "gallery") {
-    return <CanvasGallery payload={item} compact />;
+    return <CanvasGallery payload={item} token={token} compact />;
   }
   if (kind === "chart") {
     return <CanvasChart payload={item} />;
@@ -2782,7 +2786,7 @@ function GridItemContent({ item, kind }: { item: Record<string, unknown>; kind: 
     return <CanvasTimeline payload={item} />;
   }
   if (kind === "grid") {
-    return <CanvasGrid payload={item} nested />;
+    return <CanvasGrid payload={item} token={token} nested />;
   }
   return <MarkdownBody text={stringValue(item.content) || stringValue(item.text)} />;
 }
@@ -3357,19 +3361,21 @@ function safeFilename(raw: string): string {
 
 function CanvasGallery({
   payload,
+  token,
   compact = false,
   activeIndex = 0,
   onActiveIndexChange,
   onLayoutChange,
 }: {
   payload: Record<string, unknown> | undefined;
+  token: string;
   compact?: boolean;
   activeIndex?: number;
   onActiveIndexChange?: (activeIndex: number) => void;
   onLayoutChange?: (layout: GalleryLayout) => void;
 }) {
   const { t } = useI18n();
-  const images = useMemo(() => galleryImages(payload), [payload]);
+  const images = useMemo(() => galleryImages(payload, token), [payload, token]);
   const layout = galleryLayoutValue(payload?.layout);
   const caption = stringValue(payload?.caption);
   const currentIndex = clampIndex(activeIndex, images.length);
@@ -3505,7 +3511,7 @@ function CanvasGallery({
                 }}
                 className="relative m-0 flex h-full min-h-full w-full shrink-0 snap-center items-center justify-center overflow-hidden rounded-md border bg-card"
               >
-                <img alt={image.alt} className="block h-full w-full object-contain" src={image.src} />
+                <CanvasImage alt={image.alt} className="block h-full w-full object-contain" src={image.src} />
                 {image.caption ? (
                   <figcaption className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background/95 via-background/70 to-transparent px-3 pt-8 pb-2.5 text-xs font-medium text-muted-foreground">
                     {image.caption}
@@ -3565,7 +3571,7 @@ function CompactGallery({ images, layout, caption }: { images: GalleryImageItem[
       <div className={containerClass}>
         {images.map((image) => (
           <figure key={image.key} className={cn("overflow-hidden rounded border bg-background", layout === "row" ? "w-40 shrink-0" : "")}>
-            <img alt={image.alt} className="h-28 w-full object-cover" src={image.src} />
+            <CanvasImage alt={image.alt} className="h-28 w-full object-cover" src={image.src} />
             {image.caption ? <figcaption className="px-2 py-1 text-xs text-muted-foreground">{image.caption}</figcaption> : null}
           </figure>
         ))}
@@ -3576,17 +3582,52 @@ function CompactGallery({ images, layout, caption }: { images: GalleryImageItem[
 }
 
 function SingleGalleryImage({ image, caption }: { image: GalleryImageItem; caption: string }) {
+  const footer = uniqueGalleryFooter(image.caption, caption);
   return (
-    <div className="min-w-0 space-y-2">
-      <figure className="overflow-hidden rounded-lg border bg-muted/25">
-        <div className="flex min-h-56 items-center justify-center bg-muted/20">
-          <img alt={image.alt} className="max-h-[520px] w-full object-contain" src={image.src} />
-        </div>
-        {image.caption ? <figcaption className="border-t px-3 py-2 text-sm text-muted-foreground">{image.caption}</figcaption> : null}
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-card">
+      <figure className="m-0 flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-card">
+        <CanvasImage alt={image.alt} className="block max-h-full max-w-full object-contain" src={image.src} />
       </figure>
-      {caption ? <div className="text-xs text-muted-foreground">{caption}</div> : null}
+      {footer.length > 0 ? (
+        <div className="shrink-0 space-y-1 border-t bg-card/85 px-3 py-2 text-xs text-muted-foreground">
+          {footer.map((text) => (
+            <div key={text} className="truncate">
+              {text}
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function CanvasImage({ alt, className, src }: { alt: string; className?: string; src: string }) {
+  const { t } = useI18n();
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div
+        aria-label={alt || t("canvas.imageUnavailable")}
+        className={cn(className, "flex min-h-20 flex-col items-center justify-center gap-1.5 bg-muted/40 px-3 py-6 text-[11px] text-muted-foreground")}
+        role="img"
+      >
+        <ImageOff className="h-5 w-5 opacity-60" />
+        <span className="text-center leading-tight">{t("canvas.imageUnavailable")}</span>
+      </div>
+    );
+  }
+  return <img alt={alt} className={className} decoding="async" loading="lazy" referrerPolicy="no-referrer" src={src} onError={() => setFailed(true)} />;
+}
+
+function uniqueGalleryFooter(...values: string[]): string[] {
+  const out: string[] = [];
+  for (const value of values) {
+    const text = value.trim();
+    if (text && !out.includes(text)) {
+      out.push(text);
+    }
+  }
+  return out;
 }
 
 const GalleryGridTile = memo(function GalleryGridTile({
@@ -3606,7 +3647,7 @@ const GalleryGridTile = memo(function GalleryGridTile({
       type="button"
       onClick={onClick}
     >
-      <img alt={image.alt} className="block max-h-full max-w-full object-contain transition duration-150 group-hover:scale-[1.02]" src={image.src} />
+      <CanvasImage alt={image.alt} className="block max-h-full max-w-full object-contain transition duration-150 group-hover:scale-[1.02]" src={image.src} />
       {image.caption ? (
         <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-background/75 px-1.5 py-1 text-[10px] text-foreground opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
           {image.caption}
@@ -3669,7 +3710,7 @@ function GalleryDetailThumbs({
               type="button"
               onClick={() => onActivate(index)}
             >
-              <img alt="" className="block h-full w-full object-contain" src={image.src} />
+              <CanvasImage alt="" className="block h-full w-full object-contain" src={image.src} />
             </button>
           );
         })}
@@ -3746,11 +3787,11 @@ function scrollChildToCenter(
   container.scrollTo({ top: container.scrollTop + delta, behavior });
 }
 
-function galleryImages(payload: Record<string, unknown> | undefined): GalleryImageItem[] {
+function galleryImages(payload: Record<string, unknown> | undefined, token: string): GalleryImageItem[] {
   const items = Array.isArray(payload?.items) ? payload.items : [];
   return items.flatMap((item, index) => {
     const record = asRecord(item);
-    const src = imageSource(record);
+    const src = imageSource(record, token);
     if (!src) {
       return [];
     }
@@ -3763,23 +3804,63 @@ function galleryImages(payload: Record<string, unknown> | undefined): GalleryIma
 function galleryLayoutForItem(item: CanvasItem): GalleryLayout | null {
   const payload = asRecord(item.item);
   const kind = stringValue(payload?.kind) || item.kind;
-  return kind === "gallery" ? galleryLayoutValue(payload?.layout) : null;
+  return kind === "gallery" && galleryItemCount(payload) > 1 ? galleryLayoutValue(payload?.layout) : null;
+}
+
+function galleryItemCount(payload: Record<string, unknown> | undefined): number {
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  return items.filter((item) => Boolean(imageSource(asRecord(item), ""))).length;
 }
 
 function galleryLayoutValue(value: unknown): GalleryLayout {
   return value === "row" || value === "column" ? value : "grid";
 }
 
-function imageSource(record: Record<string, unknown> | undefined): string {
+function imageSource(record: Record<string, unknown> | undefined, token: string): string {
   const src = stringValue(record?.src) || stringValue(record?.url);
   if (src) {
-    return src;
+    return authenticatedImageSource(src, token);
   }
   const data = stringValue(record?.data);
   if (!data) {
     return "";
   }
   return `data:${stringValue(record?.mime) || "image/jpeg"};base64,${data}`;
+}
+
+function authenticatedImageSource(raw: string, token: string): string {
+  const src = raw.trim();
+  if (!src || !token) {
+    return src;
+  }
+  if (isSessionAttachmentPath(src)) {
+    return attachmentResourceURL({ url: src }, token);
+  }
+  try {
+    const url = new URL(src, window.location.href);
+    if (isSessionAttachmentPath(url.pathname) && isAppResourceOrigin(url)) {
+      url.searchParams.set("token", token);
+      return url.toString();
+    }
+  } catch {
+    return src;
+  }
+  return src;
+}
+
+function isSessionAttachmentPath(path: string): boolean {
+  return /^\/sessions\/[^/]+\/attachments\//.test(path);
+}
+
+function isAppResourceOrigin(url: URL): boolean {
+  if (url.origin === window.location.origin) {
+    return true;
+  }
+  try {
+    return url.origin === new URL(apiURL("/"), window.location.href).origin;
+  } catch {
+    return false;
+  }
 }
 
 function CanvasForm({ payload }: { payload: Record<string, unknown> | undefined }) {

@@ -11,8 +11,9 @@ import (
 var ErrSessionRequired = errors.New("voice: session id required")
 
 type Bindings struct {
-	InputOwner  string `json:"inputOwner"`
-	OutputOwner string `json:"outputOwner"`
+	InputOwner  string  `json:"inputOwner"`
+	OutputOwner string  `json:"outputOwner"`
+	InputLevel  float64 `json:"inputLevel"`
 }
 
 type Manager struct {

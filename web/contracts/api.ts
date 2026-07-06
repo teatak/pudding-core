@@ -400,6 +400,7 @@ export const dailyUsageResponse = z.object({ days: z.array(dailyUsageStat) });
 export const audioBindings = z.object({
   inputOwner: z.string(),
   outputOwner: z.string(),
+  inputLevel: z.number().default(0),
 });
 export type AudioBindings = z.infer<typeof audioBindings>;
 export const audioBindingsResponse = z.object({ bindings: audioBindings });

@@ -163,7 +163,10 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     queryKey: queryKeys.audioBindings(),
     queryFn: () => getAudioBindings(token, sessionID),
     enabled: Boolean(token && sessionID),
-    refetchInterval: 2000,
+    refetchInterval: (query) => {
+      const data = query.state.data as { bindings?: AudioBindings } | undefined;
+      return data?.bindings?.inputOwner === sessionID ? 120 : 2000;
+    },
   });
   const audioBindings = audioBindingsQuery.data?.bindings;
   const micActive = audioBindings?.inputOwner === sessionID;
@@ -1219,6 +1222,7 @@ function SessionAudioControls({ bindings, token, session }: { bindings?: AudioBi
   const queryClient = useQueryClient();
   const inputActive = bindings?.inputOwner === session.id;
   const outputActive = bindings?.outputOwner === session.id;
+  const inputLevel = inputActive ? bindings?.inputLevel ?? 0 : 0;
   const invalidateAudioBindings = () => queryClient.invalidateQueries({ queryKey: queryKeys.audioBindings() });
   const setBindings = (next: AudioBindings) => {
     queryClient.setQueryData(queryKeys.audioBindings(), { bindings: next });
@@ -1229,11 +1233,12 @@ function SessionAudioControls({ bindings, token, session }: { bindings?: AudioBi
     onMutate: async (enabled) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.audioBindings() });
       const previous = queryClient.getQueryData<{ bindings: AudioBindings }>(queryKeys.audioBindings());
-      const current = previous?.bindings ?? { inputOwner: "", outputOwner: "" };
+      const current = previous?.bindings ?? { inputOwner: "", outputOwner: "", inputLevel: 0 };
       queryClient.setQueryData(queryKeys.audioBindings(), {
         bindings: {
           ...current,
           inputOwner: enabled ? session.id : current.inputOwner === session.id ? "" : current.inputOwner,
+          inputLevel: enabled ? 0 : current.inputOwner === session.id ? 0 : current.inputLevel,
         },
       });
       return { previous };
@@ -1251,7 +1256,7 @@ function SessionAudioControls({ bindings, token, session }: { bindings?: AudioBi
     onMutate: async (enabled) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.audioBindings() });
       const previous = queryClient.getQueryData<{ bindings: AudioBindings }>(queryKeys.audioBindings());
-      const current = previous?.bindings ?? { inputOwner: "", outputOwner: "" };
+      const current = previous?.bindings ?? { inputOwner: "", outputOwner: "", inputLevel: 0 };
       queryClient.setQueryData(queryKeys.audioBindings(), {
         bindings: {
           ...current,
@@ -1279,7 +1284,7 @@ function SessionAudioControls({ bindings, token, session }: { bindings?: AudioBi
             aria-disabled={inputMutation.isPending}
             aria-label={inputLabel}
             aria-pressed={inputActive}
-            className="rounded-full"
+            className="relative overflow-hidden rounded-full"
             size="icon"
             type="button"
             variant={inputActive ? "default" : "ghost"}
@@ -1291,7 +1296,11 @@ function SessionAudioControls({ bindings, token, session }: { bindings?: AudioBi
               inputMutation.mutate(!inputActive);
             }}
           >
-            {inputMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Mic className="size-4" />}
+            {inputMutation.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <MicButtonContent active={inputActive} level={inputLevel} />
+            )}
           </Button>
         </TooltipTrigger>
         <TooltipContent>{inputLabel}</TooltipContent>
@@ -1320,6 +1329,25 @@ function SessionAudioControls({ bindings, token, session }: { bindings?: AudioBi
         <TooltipContent>{outputLabel}</TooltipContent>
       </Tooltip>
     </div>
+  );
+}
+
+function MicButtonContent({ active, level }: { active: boolean; level: number }) {
+  if (!active) {
+    return <Mic className="size-4" />;
+  }
+  const normalized = Math.max(0, Math.min(1, Math.sqrt(Math.max(0, level)) * 2.2));
+  const profiles = [0.45, 0.75, 1, 0.72, 0.5];
+  return (
+    <span className="pointer-events-none flex h-5 w-5 items-center justify-center gap-0.5">
+      {profiles.map((profile, index) => (
+        <span
+          key={index}
+          className="w-0.5 rounded-full bg-primary-foreground transition-all duration-100 ease-out"
+          style={{ height: `${5 + normalized * profile * 14}px` }}
+        />
+      ))}
+    </span>
   );
 }
 
