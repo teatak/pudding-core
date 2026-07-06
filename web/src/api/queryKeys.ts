@@ -21,6 +21,7 @@ export const queryKeys = {
   apps: () => ["apps"] as const,
   appCatalog: () => ["apps", "catalog"] as const,
   appCatalogDetail: (id: string, version: string) => ["apps", "catalog", id, version] as const,
+  starterPrompts: () => ["starter-prompts"] as const,
   appSkill: (appID: string, path: string) => ["apps", appID, "skill", path] as const,
   appConnections: () => ["app-connections"] as const,
   builtinTools: () => ["tools", "builtin"] as const,

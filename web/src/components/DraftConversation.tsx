@@ -68,6 +68,7 @@ import {
   type LocalFolderPath,
 } from "@/lib/localFolders";
 import type { AppSearch } from "@/lib/route";
+import { fetchStarterPromptCatalog, localizeStarterPrompts } from "@/lib/starterPrompts";
 import { getSubmitFailure } from "@/lib/submitFailure";
 import { buildDraftSubmitParts, orderedDraftItems } from "@/lib/submitParts";
 import { getTextAreaCaretClientPoint } from "@/lib/textCaret";
@@ -89,7 +90,6 @@ type DraftDroppedFilesBatch = DroppedLocalItems & {
 };
 type QuickSubmit = { id: number; text: string };
 
-const suggestionKeys = ["draft.suggest.1", "draft.suggest.2", "draft.suggest.3"] as const;
 const draftAttachmentSessionID = "draft";
 const emptyDraftModel: DraftModelValue = {};
 
@@ -107,11 +107,21 @@ export function DraftConversation({ token }: { token: string }) {
     queryFn: () => listProviders(token),
     enabled: Boolean(token),
   });
+  const starterPromptsQuery = useQuery({
+    queryKey: queryKeys.starterPrompts(),
+    queryFn: () => fetchStarterPromptCatalog(),
+    retry: 1,
+    staleTime: 5 * 60 * 1000,
+  });
   const profiles = providersQuery.data?.providers || [];
   const hasConfiguredModel = profiles.some((profile) => profile.models.some((model) => model.id));
   const draftModelIsValid = providersQuery.isSuccess && isDraftModelAvailable(profiles, modelValue);
   const composerModelValue = draftModelIsValid ? modelValue : emptyDraftModel;
   const showPresetSetup = providersQuery.isSuccess && !hasConfiguredModel;
+  const starterPrompts = useMemo(
+    () => localizeStarterPrompts(starterPromptsQuery.data?.items || [], locale),
+    [locale, starterPromptsQuery.data?.items],
+  );
   const [mascotGaze, setMascotGaze] = useState<MascotGaze>({ type: "pointer" });
   const setMascotPointerGaze = useCallback(() => {
     setMascotGaze((current) => (current.type === "pointer" ? current : { type: "pointer" }));
@@ -270,18 +280,17 @@ export function DraftConversation({ token }: { token: string }) {
             onMascotInputGazeChange={setMascotInputGaze}
             onSubmitError={setSubmitError}
           />
-          {!showPresetSetup ? (
+          {!showPresetSetup && starterPrompts.length > 0 ? (
             <ChatColumn className="mt-8 flex flex-wrap items-center justify-center gap-2 px-2">
-              {suggestionKeys.map((key, index) => {
-                const text = t(key);
+              {starterPrompts.map((item, index) => {
                 return (
                   <button
-                    key={key}
+                    key={item.id}
                     className="rounded-full border border-input bg-background px-4 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                     type="button"
-                    onClick={() => setQuickSubmit({ id: Date.now() + index, text })}
+                    onClick={() => setQuickSubmit({ id: Date.now() + index, text: item.prompt })}
                   >
-                    {text}
+                    {item.label}
                   </button>
                 );
               })}
