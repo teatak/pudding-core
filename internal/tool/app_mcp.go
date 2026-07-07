@@ -55,6 +55,33 @@ type AppMCPRunner struct {
 	cache appMCPToolCache
 }
 
+type AppMCPProbeStatus string
+
+const (
+	AppMCPProbeAvailable       AppMCPProbeStatus = "available"
+	AppMCPProbeUnavailable     AppMCPProbeStatus = "unavailable"
+	AppMCPProbeUnsupported     AppMCPProbeStatus = "unsupported"
+	AppMCPProbeNeedsConnection AppMCPProbeStatus = "needs_connection"
+)
+
+type AppMCPProbeEndpoint struct {
+	AppID        string            `json:"appID"`
+	EndpointName string            `json:"endpointName"`
+	ConnectionID string            `json:"connectionID,omitempty"`
+	Transport    string            `json:"transport,omitempty"`
+	Status       AppMCPProbeStatus `json:"status"`
+	Error        string            `json:"error,omitempty"`
+	Tools        []AppMCPProbeTool `json:"tools,omitempty"`
+}
+
+type AppMCPProbeTool struct {
+	Name         string          `json:"name"`
+	ProviderName string          `json:"providerName,omitempty"`
+	Title        string          `json:"title,omitempty"`
+	Description  string          `json:"description,omitempty"`
+	InputSchema  json.RawMessage `json:"inputSchema,omitempty"`
+}
+
 type appMCPDiscoveredTool struct {
 	binding    *app.EndpointBinding
 	remoteName string
@@ -212,17 +239,7 @@ func (r *AppMCPRunner) discoverBindings(ctx context.Context, bindings []*app.End
 }
 
 func (r *AppMCPRunner) discoverBinding(ctx context.Context, binding *app.EndpointBinding) ([]provider.ToolDef, []appMCPDiscoveredTool, error) {
-	discoverCtx, cancel := context.WithTimeout(ctx, appMCPDiscoverTimeout)
-	defer cancel()
-	client, err := r.newClient(binding)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer client.close()
-	if err := client.initialize(discoverCtx); err != nil {
-		return nil, nil, err
-	}
-	remoteTools, err := client.listTools(discoverCtx)
+	remoteTools, err := r.listBindingRemoteTools(ctx, binding)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -251,6 +268,62 @@ func (r *AppMCPRunner) discoverBinding(ctx context.Context, binding *app.Endpoin
 		})
 	}
 	return defs, tools, nil
+}
+
+func (r *AppMCPRunner) ProbeBinding(ctx context.Context, binding *app.EndpointBinding) AppMCPProbeEndpoint {
+	out := AppMCPProbeEndpoint{Status: AppMCPProbeUnavailable}
+	if binding == nil {
+		out.Error = "mcp endpoint unavailable"
+		return out
+	}
+	out.AppID = binding.AppID
+	out.EndpointName = binding.EndpointName
+	out.ConnectionID = binding.ConnectionID
+	out.Transport = strings.TrimSpace(binding.Endpoint.Transport)
+	if binding.Endpoint.Kind != app.EndpointKindMCP || !appMCPSupportedTransport(binding.Endpoint.Transport) {
+		out.Status = AppMCPProbeUnsupported
+		out.Error = fmt.Sprintf("unsupported mcp transport %q", binding.Endpoint.Transport)
+		return out
+	}
+	remoteTools, err := r.listBindingRemoteTools(ctx, binding)
+	if err != nil {
+		out.Error = err.Error()
+		return out
+	}
+	out.Status = AppMCPProbeAvailable
+	out.Tools = make([]AppMCPProbeTool, 0, len(remoteTools))
+	for _, remote := range remoteTools {
+		remoteName := strings.TrimSpace(remote.Name)
+		if remoteName == "" {
+			continue
+		}
+		inputSchema := remote.InputSchema
+		if len(inputSchema) == 0 {
+			inputSchema = remote.inputSnake
+		}
+		out.Tools = append(out.Tools, AppMCPProbeTool{
+			Name:         remoteName,
+			ProviderName: appMCPProviderToolName(binding, remoteName),
+			Title:        strings.TrimSpace(remote.Title),
+			Description:  strings.TrimSpace(remote.Description),
+			InputSchema:  appMCPInputSchema(inputSchema),
+		})
+	}
+	return out
+}
+
+func (r *AppMCPRunner) listBindingRemoteTools(ctx context.Context, binding *app.EndpointBinding) ([]appMCPRemoteTool, error) {
+	discoverCtx, cancel := context.WithTimeout(ctx, appMCPDiscoverTimeout)
+	defer cancel()
+	client, err := r.newClient(binding)
+	if err != nil {
+		return nil, err
+	}
+	defer client.close()
+	if err := client.initialize(discoverCtx); err != nil {
+		return nil, err
+	}
+	return client.listTools(discoverCtx)
 }
 
 func (r *AppMCPRunner) newClient(binding *app.EndpointBinding) (appMCPClient, error) {

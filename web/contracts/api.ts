@@ -775,6 +775,32 @@ export const appConnection = z.object({
 });
 export type AppConnection = z.infer<typeof appConnection>;
 
+export const appMCPTool = z.object({
+  name: z.string(),
+  providerName: z.string().optional(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  inputSchema: z.unknown().optional(),
+});
+export type AppMCPTool = z.infer<typeof appMCPTool>;
+
+export const appMCPEndpointStatus = z.object({
+  appID: z.string(),
+  endpointName: z.string(),
+  connectionID: z.string().optional(),
+  transport: z.string().optional(),
+  status: z.string(),
+  error: z.string().optional(),
+  tools: z.array(appMCPTool).optional(),
+});
+export type AppMCPEndpointStatus = z.infer<typeof appMCPEndpointStatus>;
+
+export const appMCPStatusResponse = z.object({
+  appID: z.string(),
+  endpoints: z.array(appMCPEndpointStatus),
+});
+export type AppMCPStatusResponse = z.infer<typeof appMCPStatusResponse>;
+
 export const listAppsResponse = z.object({ apps: z.array(appDefinition) });
 export const listAppConnectionsResponse = z.object({ connections: z.array(appConnection) });
 

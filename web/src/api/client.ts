@@ -40,6 +40,7 @@ import {
   userPromptResponse,
   appDefinition,
   appConnection,
+  appMCPStatusResponse,
   canvasItem,
   closedCanvasItem,
   appSkillDetail,
@@ -67,6 +68,9 @@ import {
   webToolsConfig,
   type AppConnection,
   type AppDefinition,
+  type AppMCPEndpointStatus,
+  type AppMCPStatusResponse,
+  type AppMCPTool,
   type AppSkillDetail,
   type AudioBindings,
   type AudioConfig,
@@ -751,6 +755,10 @@ export function listAppConnections(token: string): Promise<{ connections: AppCon
   return request(token, "/app-connections", listAppConnectionsResponse);
 }
 
+export function getAppMCPStatus(token: string, sessionID: string, appID: string): Promise<AppMCPStatusResponse> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/apps/${encodeURIComponent(appID)}/mcp`, appMCPStatusResponse);
+}
+
 export function getAppConnection(token: string, id: string): Promise<AppConnection> {
   return request(token, `/app-connections/${encodeURIComponent(id)}`, appConnection);
 }
@@ -900,5 +908,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { AppConnection, AppDefinition, AppSkillDetail, Attachment, AudioBindings, BuiltinTool, BrowserActionResult, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
+export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BuiltinTool, BrowserActionResult, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
 export { createProviderRequest, patchProviderRequest };

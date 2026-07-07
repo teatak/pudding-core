@@ -278,7 +278,7 @@ export function App() {
   ) : null;
 
   const mainPane = appsActive ? (
-    <AppsPane token={token} />
+    <AppsPane token={token} sessionID={selectedSessionID} />
   ) : !canUseCanvas ? (
     chatArea
   ) : isMobile ? (

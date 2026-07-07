@@ -814,6 +814,109 @@ skills:
 	}
 }
 
+func TestSessionAppMCPStatusAPI(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
+	home := t.TempDir()
+	writeMCPStatusTestApp(t, home)
+	if err := ms.CreateSession(context.Background(), &store.Session{ID: "sess_mcp", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithApps(appsvc.NewService(home, nil)).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+
+	resp := req(t, http.MethodGet, srv.URL+"/sessions/sess_mcp/apps/sequential-thinking/mcp", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	got := decodeJSON[map[string]any](t, resp)
+	if got["appID"] != "sequential-thinking" {
+		t.Fatalf("unexpected app id: %+v", got)
+	}
+	endpoints, _ := got["endpoints"].([]any)
+	if len(endpoints) != 1 {
+		t.Fatalf("unexpected endpoints: %+v", got)
+	}
+	endpoint, _ := endpoints[0].(map[string]any)
+	if endpoint["endpointName"] != "sequential_thinking_mcp" || endpoint["status"] != string(tool.AppMCPProbeAvailable) {
+		t.Fatalf("unexpected endpoint: %+v", endpoint)
+	}
+	tools, _ := endpoint["tools"].([]any)
+	if len(tools) != 1 {
+		t.Fatalf("unexpected tools: %+v", endpoint)
+	}
+	firstTool, _ := tools[0].(map[string]any)
+	if firstTool["name"] != "sequentialthinking" || firstTool["providerName"] == "" {
+		t.Fatalf("unexpected tool: %+v", firstTool)
+	}
+}
+
+func writeMCPStatusTestApp(t *testing.T, home string) {
+	t.Helper()
+	appDir := filepath.Join(home, "apps", "sequential-thinking")
+	if err := os.MkdirAll(appDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf(`id: sequential-thinking
+name: Sequential Thinking
+auth:
+  required: false
+endpoints:
+  sequential_thinking_mcp:
+    kind: mcp
+    transport: stdio
+    command: %q
+    args: ["-test.run=TestAPIAppMCPStdioHelper", "--"]
+    env:
+      PUDDING_API_APP_MCP_STDIO_HELPER: "1"
+`, os.Args[0])
+	if err := os.WriteFile(filepath.Join(appDir, "app.yaml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAPIAppMCPStdioHelper(t *testing.T) {
+	if os.Getenv("PUDDING_API_APP_MCP_STDIO_HELPER") != "1" {
+		return
+	}
+	dec := json.NewDecoder(os.Stdin)
+	enc := json.NewEncoder(os.Stdout)
+	for {
+		var req struct {
+			ID     string `json:"id"`
+			Method string `json:"method"`
+		}
+		if err := dec.Decode(&req); err != nil {
+			return
+		}
+		if req.ID == "" {
+			continue
+		}
+		var result any
+		switch req.Method {
+		case "initialize":
+			result = map[string]any{
+				"protocolVersion": "2025-06-18",
+				"serverInfo":      map[string]any{"name": "api-mcp-test", "version": "1.0"},
+				"capabilities":    map[string]any{"tools": map[string]any{}},
+			}
+		case "tools/list":
+			result = map[string]any{"tools": []map[string]any{{
+				"name":        "sequentialthinking",
+				"title":       "Sequential Thinking",
+				"description": "Break down a problem step by step.",
+				"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"thought": map[string]any{"type": "string"}}},
+			}}}
+		default:
+			result = map[string]any{}
+		}
+		if err := enc.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result}); err != nil {
+			return
+		}
+	}
+}
+
 func TestDeleteAppAPI(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()

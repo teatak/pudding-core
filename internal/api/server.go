@@ -163,6 +163,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/messages").GET(s.listMessages)
 	app.Route("/sessions/:id/attachments").POST(s.uploadAttachment)
 	app.Route("/sessions/:id/attachments/*path").GET(s.getAttachment)
+	app.Route("/sessions/:id/apps/:appID/mcp").GET(s.getSessionAppMCPStatus)
 	app.Route("/sessions/:id/desktop/screenshot").POST(s.desktopScreenshot)
 	app.Route("/sessions/:id/desktop/photo").POST(s.desktopPhoto)
 	app.Route("/sessions/:id/audio/bindings").GET(s.getAudioBindings)

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Download, Eye, EyeOff, KeyRound, Loader2, Package, Pencil, Plus, Trash } from "lucide-react";
+import { ArrowLeft, CircleAlert, CircleCheck, CircleDashed, Download, Eye, EyeOff, KeyRound, Loader2, Package, Pencil, Plus, Trash } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -10,6 +10,7 @@ import {
   deleteApp,
   deleteAppConnection,
   getAppConnection,
+  getAppMCPStatus,
   getAppSkill,
   installAppPackage,
   listAppConnections,
@@ -19,6 +20,8 @@ import {
   type AppConnection,
   type AppConnectionPayload,
   type AppDefinition,
+  type AppMCPEndpointStatus,
+  type AppMCPTool,
   type AppSkillDetail,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
@@ -133,7 +136,7 @@ const OFFICIAL_APP_REGISTRY =
   "https://teatak.github.io/pudding-hub/apps/registry.json";
 const APP_CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
 
-export function AppsPane({ token }: { token: string }) {
+export function AppsPane({ sessionID, token }: { sessionID?: string; token: string }) {
   const { locale, t } = useI18n();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<{ app: AppDefinition; connection?: AppConnection } | null>(null);
@@ -308,6 +311,7 @@ export function AppsPane({ token }: { token: string }) {
               app={detailApp}
               catalogApp={detailCatalogForInstalled}
               connections={detailConnections}
+              sessionID={sessionID}
               token={token}
               onAdd={() => setEditing({ app: detailApp })}
               onDelete={setDeleting}
@@ -850,6 +854,7 @@ function AppDetail({
   app,
   catalogApp,
   connections,
+  sessionID,
   onAdd,
   onDelete,
   onEdit,
@@ -860,6 +865,7 @@ function AppDetail({
   app: AppDefinition;
   catalogApp?: AppRegistryItem;
   connections: AppConnection[];
+  sessionID?: string;
   onAdd: () => void;
   onDelete: (connection: AppConnection) => void;
   onEdit: (connection: AppConnection) => void;
@@ -877,6 +883,18 @@ function AppDetail({
   const authMethods = appAuthMethods(app);
   const canManageConnections = appCanManageConnections(app);
   const installedIsPreview = Boolean(app.version && isPreviewVersion(app.version));
+  const hasMCPEndpoints = endpoints.some(([, endpoint]) => endpoint.kind === "mcp");
+  const mcpStatusQuery = useQuery({
+    queryKey: queryKeys.appMCPStatus(sessionID || "", app.id),
+    queryFn: () => getAppMCPStatus(token, sessionID!, app.id),
+    enabled: Boolean(sessionID && hasMCPEndpoints),
+    retry: false,
+    staleTime: 30_000,
+  });
+  const mcpStatusByEndpoint = useMemo(
+    () => groupMCPStatusByEndpoint(mcpStatusQuery.data?.endpoints || []),
+    [mcpStatusQuery.data?.endpoints],
+  );
 
   return (
     <section className="grid gap-8">
@@ -935,7 +953,13 @@ function AppDetail({
           )}
         </DetailSection>
 
-        <AppEndpointsSection endpoints={endpoints} />
+        <AppEndpointsSection
+          endpoints={endpoints}
+          mcpStatusByEndpoint={mcpStatusByEndpoint}
+          mcpStatusFailed={mcpStatusQuery.isError}
+          mcpStatusLoading={mcpStatusQuery.isLoading}
+          mcpStatusSessionAvailable={Boolean(sessionID)}
+        />
         <AppSkillsSection icon={icon} iconSrc={iconSrc} skills={skills} onSkillSelect={(skill) => onSkillSelect(skill, icon, iconSrc)} />
       </div>
     </section>
@@ -1120,21 +1144,49 @@ function AppEndpointsSection({
   children,
   count,
   endpoints,
+  mcpStatusByEndpoint,
+  mcpStatusFailed,
+  mcpStatusLoading,
+  mcpStatusSessionAvailable = true,
 }: {
   children?: ReactNode;
   count?: number;
   endpoints: Array<[string, AppEndpoints[string]]>;
+  mcpStatusByEndpoint?: Map<string, AppMCPEndpointStatus[]>;
+  mcpStatusFailed?: boolean;
+  mcpStatusLoading?: boolean;
+  mcpStatusSessionAvailable?: boolean;
 }) {
-  const { locale, t } = useI18n();
+  const { t } = useI18n();
   return (
     <DetailSection title={t("apps.endpoints")} count={count ?? endpoints.length}>
-      {children ?? <EndpointRows endpoints={endpoints} />}
+      {children ?? (
+        <EndpointRows
+          endpoints={endpoints}
+          mcpStatusByEndpoint={mcpStatusByEndpoint}
+          mcpStatusFailed={mcpStatusFailed}
+          mcpStatusLoading={mcpStatusLoading}
+          mcpStatusSessionAvailable={mcpStatusSessionAvailable}
+        />
+      )}
     </DetailSection>
   );
 }
 
-function EndpointRows({ endpoints }: { endpoints: Array<[string, AppEndpoints[string]]> }) {
-  const { locale, t } = useI18n();
+function EndpointRows({
+  endpoints,
+  mcpStatusByEndpoint,
+  mcpStatusFailed,
+  mcpStatusLoading,
+  mcpStatusSessionAvailable = true,
+}: {
+  endpoints: Array<[string, AppEndpoints[string]]>;
+  mcpStatusByEndpoint?: Map<string, AppMCPEndpointStatus[]>;
+  mcpStatusFailed?: boolean;
+  mcpStatusLoading?: boolean;
+  mcpStatusSessionAvailable?: boolean;
+}) {
+  const { t } = useI18n();
   if (endpoints.length === 0) {
     return <EmptyLine>{t("apps.none")}</EmptyLine>;
   }
@@ -1149,6 +1201,15 @@ function EndpointRows({ endpoints }: { endpoints: Array<[string, AppEndpoints[st
           </div>
           <EndpointTarget endpoint={endpoint} />
           {endpoint.description ? <div className="text-xs text-muted-foreground">{endpoint.description}</div> : null}
+          {endpoint.kind === "mcp" ? (
+            <MCPStatusDetails
+              endpointName={name}
+              failed={mcpStatusFailed}
+              loading={mcpStatusLoading}
+              sessionAvailable={mcpStatusSessionAvailable}
+              statuses={mcpStatusByEndpoint?.get(name) || []}
+            />
+          ) : null}
         </DetailRow>
       ))}
     </div>
@@ -1165,6 +1226,158 @@ function EndpointTarget({ endpoint }: { endpoint: AppEndpoints[string] }) {
       {target}
     </div>
   );
+}
+
+function MCPStatusDetails({
+  endpointName,
+  failed,
+  loading,
+  sessionAvailable,
+  statuses,
+}: {
+  endpointName: string;
+  failed?: boolean;
+  loading?: boolean;
+  sessionAvailable?: boolean;
+  statuses: AppMCPEndpointStatus[];
+}) {
+  const { t } = useI18n();
+  if (!sessionAvailable) {
+    return <MCPStatusLine icon={<CircleDashed className="size-3.5" />} label={t("apps.mcpStatus.noSession")} tone="muted" />;
+  }
+  if (loading) {
+    return <MCPStatusLine icon={<Loader2 className="size-3.5 animate-spin" />} label={t("apps.mcpStatus.checking")} tone="muted" />;
+  }
+  if (failed) {
+    return <MCPStatusLine icon={<CircleAlert className="size-3.5" />} label={t("apps.mcpStatus.unavailable")} tone="bad" />;
+  }
+  if (statuses.length === 0) {
+    return <MCPStatusLine icon={<CircleDashed className="size-3.5" />} label={t("apps.mcpStatus.needs_connection")} tone="muted" />;
+  }
+  return (
+    <div className="mt-1 grid gap-2 border-t border-border/60 pt-2">
+      {statuses.map((status) => (
+        <div key={`${endpointName}:${status.connectionID || "default"}`} className="grid gap-2">
+          <MCPStatusLine
+            icon={mcpStatusIcon(status.status)}
+            label={mcpStatusLabel(status.status, t)}
+            meta={status.connectionID || undefined}
+            tone={mcpStatusTone(status.status)}
+          />
+          {status.error ? <div className="break-words text-xs text-destructive/90">{status.error}</div> : null}
+          {status.status === "available" ? <MCPToolsList tools={status.tools || []} /> : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MCPStatusLine({
+  icon,
+  label,
+  meta,
+  tone,
+}: {
+  icon: ReactNode;
+  label: string;
+  meta?: string;
+  tone: "good" | "bad" | "muted";
+}) {
+  return (
+    <div
+      className={cn(
+        "flex min-w-0 items-center gap-1.5 text-xs",
+        tone === "good" && "text-emerald-500",
+        tone === "bad" && "text-destructive",
+        tone === "muted" && "text-muted-foreground",
+      )}
+    >
+      <span className="shrink-0">{icon}</span>
+      <span className="font-medium">{label}</span>
+      {meta ? <span className="truncate text-muted-foreground">· {meta}</span> : null}
+    </div>
+  );
+}
+
+function MCPToolsList({ tools }: { tools: AppMCPTool[] }) {
+  const { t } = useI18n();
+  if (tools.length === 0) {
+    return <div className="text-xs text-muted-foreground">{t("apps.mcpNoTools")}</div>;
+  }
+  return (
+    <div className="grid gap-2">
+      <div className="text-xs font-medium text-muted-foreground">{t("apps.mcpTools")}</div>
+      <div className="grid gap-2">
+        {tools.map((tool) => (
+          <div key={tool.name} className="grid gap-1.5">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="truncate text-sm font-medium">{tool.title || tool.name}</span>
+              {tool.title && tool.title !== tool.name ? <Badge variant="outline">{tool.name}</Badge> : null}
+            </div>
+            {tool.description ? <div className="text-xs leading-5 text-muted-foreground">{tool.description}</div> : null}
+            {tool.providerName ? (
+              <div className="truncate font-mono text-[11px] text-muted-foreground" title={tool.providerName}>
+                {t("apps.mcpProviderToolName")}: {tool.providerName}
+              </div>
+            ) : null}
+            {tool.inputSchema ? (
+              <details className="group">
+                <summary className="cursor-pointer text-xs text-muted-foreground transition-colors hover:text-foreground">
+                  {t("apps.mcpInputSchema")}
+                </summary>
+                <pre className="mt-1 max-h-44 overflow-auto rounded-md bg-background/80 p-2 text-[11px] leading-4 text-muted-foreground">
+                  {formatMCPInputSchema(tool.inputSchema)}
+                </pre>
+              </details>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function mcpStatusIcon(status: string) {
+  if (status === "available") {
+    return <CircleCheck className="size-3.5" />;
+  }
+  if (status === "unavailable" || status === "unsupported") {
+    return <CircleAlert className="size-3.5" />;
+  }
+  return <CircleDashed className="size-3.5" />;
+}
+
+function mcpStatusTone(status: string): "good" | "bad" | "muted" {
+  if (status === "available") {
+    return "good";
+  }
+  if (status === "unavailable" || status === "unsupported") {
+    return "bad";
+  }
+  return "muted";
+}
+
+function mcpStatusLabel(status: string, t: (key: string) => string) {
+  switch (status) {
+    case "available":
+      return t("apps.mcpStatus.available");
+    case "unavailable":
+      return t("apps.mcpStatus.unavailable");
+    case "unsupported":
+      return t("apps.mcpStatus.unsupported");
+    case "needs_connection":
+      return t("apps.mcpStatus.needs_connection");
+    default:
+      return status;
+  }
+}
+
+function formatMCPInputSchema(schema: unknown) {
+  try {
+    return JSON.stringify(schema, null, 2);
+  } catch {
+    return String(schema);
+  }
 }
 
 function AppSkillsSection({
@@ -1916,6 +2129,18 @@ function appAuthMethods(app?: Pick<AppDefinition, "auth"> | null): AppAuthMethod
 function appCanManageConnections(app?: Pick<AppDefinition, "auth" | "connection"> | null) {
   const authMethods = appAuthMethods(app).filter((method) => normalizeAuthType(method.type) !== "none");
   return authMethods.length > 0 || appConnectionFields(app).length > 0 || app?.auth?.required !== false;
+}
+
+function groupMCPStatusByEndpoint(statuses: AppMCPEndpointStatus[]) {
+  const out = new Map<string, AppMCPEndpointStatus[]>();
+  for (const status of statuses) {
+    const endpointName = status.endpointName?.trim();
+    if (!endpointName) {
+      continue;
+    }
+    out.set(endpointName, [...(out.get(endpointName) || []), status]);
+  }
+  return out;
 }
 
 function defaultAppAuthMethod(methods: AppAuthMethod[]) {
