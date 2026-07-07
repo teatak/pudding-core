@@ -130,7 +130,7 @@ type ConnectionForm = {
 const authTypes: AuthType[] = ["none", "bearer", "token", "basic", "header", "oauth2"];
 const OFFICIAL_APP_REGISTRY =
   import.meta.env.VITE_PUDDING_APP_REGISTRY_URL ||
-  "https://raw.githubusercontent.com/teatak/pudding-hub/main/apps/registry.json";
+  "https://teatak.github.io/pudding-hub/apps/registry.json";
 const APP_CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
 
 export function AppsPane({ token }: { token: string }) {
