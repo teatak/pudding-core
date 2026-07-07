@@ -74,7 +74,7 @@ export function AppIcon({
       fallback="app"
       fit={icon ? "contain" : "cover"}
       size={size}
-      src={src && (!hasIconColor || failed) ? src : undefined}
+      src={src && !hasIconColor ? src : undefined}
       style={iconStyle}
     >
       {themedIcon}
