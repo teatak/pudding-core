@@ -1914,7 +1914,8 @@ function appAuthMethods(app?: Pick<AppDefinition, "auth"> | null): AppAuthMethod
 }
 
 function appCanManageConnections(app?: Pick<AppDefinition, "auth" | "connection"> | null) {
-  return appAuthMethods(app).length > 0 || appConnectionFields(app).length > 0 || app?.auth?.required !== false;
+  const authMethods = appAuthMethods(app).filter((method) => normalizeAuthType(method.type) !== "none");
+  return authMethods.length > 0 || appConnectionFields(app).length > 0 || app?.auth?.required !== false;
 }
 
 function defaultAppAuthMethod(methods: AppAuthMethod[]) {
