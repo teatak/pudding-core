@@ -15,6 +15,7 @@ import {
   installAppPackage,
   listAppConnections,
   listApps,
+  listSessions,
   putAppConnection,
   startAppOAuth,
   type AppConnection,
@@ -884,10 +885,17 @@ function AppDetail({
   const canManageConnections = appCanManageConnections(app);
   const installedIsPreview = Boolean(app.version && isPreviewVersion(app.version));
   const hasMCPEndpoints = endpoints.some(([, endpoint]) => endpoint.kind === "mcp");
+  const fallbackSessionQuery = useQuery({
+    queryKey: queryKeys.sessions(),
+    queryFn: () => listSessions(token),
+    enabled: Boolean(!sessionID && hasMCPEndpoints),
+    staleTime: 30_000,
+  });
+  const probeSessionID = sessionID || fallbackSessionQuery.data?.sessions[0]?.id || "";
   const mcpStatusQuery = useQuery({
-    queryKey: queryKeys.appMCPStatus(sessionID || "", app.id),
-    queryFn: () => getAppMCPStatus(token, sessionID!, app.id),
-    enabled: Boolean(sessionID && hasMCPEndpoints),
+    queryKey: queryKeys.appMCPStatus(probeSessionID, app.id),
+    queryFn: () => getAppMCPStatus(token, probeSessionID, app.id),
+    enabled: Boolean(probeSessionID && hasMCPEndpoints),
     retry: false,
     staleTime: 30_000,
   });
@@ -926,39 +934,41 @@ function AppDetail({
       </div>
 
       <div className="grid gap-8">
-        <DetailSection
-          title={t("apps.connections")}
-          count={connections.length}
-          action={
-            canManageConnections ? (
-              <Button size="sm" type="button" variant="secondary" onClick={onAdd}>
-                <Plus className="size-3.5" />
-                {t("apps.addConnection")}
-              </Button>
-            ) : null
-          }
-        >
-          {connections.length > 0 ? (
-            connections.map((connection) => (
-              <ConnectionRow
-                key={connection.id}
-                authMethods={authMethods}
-                connection={connection}
-                onDelete={onDelete}
-                onEdit={onEdit}
-              />
-            ))
-          ) : (
-            <EmptyLine>{canManageConnections ? t("apps.noConnections") : t("apps.connectionNotRequired")}</EmptyLine>
-          )}
-        </DetailSection>
+        {canManageConnections || connections.length > 0 ? (
+          <DetailSection
+            title={t("apps.connections")}
+            count={connections.length}
+            action={
+              canManageConnections ? (
+                <Button size="sm" type="button" variant="secondary" onClick={onAdd}>
+                  <Plus className="size-3.5" />
+                  {t("apps.addConnection")}
+                </Button>
+              ) : null
+            }
+          >
+            {connections.length > 0 ? (
+              connections.map((connection) => (
+                <ConnectionRow
+                  key={connection.id}
+                  authMethods={authMethods}
+                  connection={connection}
+                  onDelete={onDelete}
+                  onEdit={onEdit}
+                />
+              ))
+            ) : (
+              <EmptyLine>{t("apps.noConnections")}</EmptyLine>
+            )}
+          </DetailSection>
+        ) : null}
 
         <AppEndpointsSection
           endpoints={endpoints}
           mcpStatusByEndpoint={mcpStatusByEndpoint}
           mcpStatusFailed={mcpStatusQuery.isError}
-          mcpStatusLoading={mcpStatusQuery.isLoading}
-          mcpStatusSessionAvailable={Boolean(sessionID)}
+          mcpStatusLoading={fallbackSessionQuery.isLoading || mcpStatusQuery.isLoading}
+          mcpStatusSessionAvailable={Boolean(probeSessionID)}
         />
         <AppSkillsSection icon={icon} iconSrc={iconSrc} skills={skills} onSkillSelect={(skill) => onSkillSelect(skill, icon, iconSrc)} />
       </div>
@@ -1242,11 +1252,11 @@ function MCPStatusDetails({
   statuses: AppMCPEndpointStatus[];
 }) {
   const { t } = useI18n();
-  if (!sessionAvailable) {
-    return <MCPStatusLine icon={<CircleDashed className="size-3.5" />} label={t("apps.mcpStatus.noSession")} tone="muted" />;
-  }
   if (loading) {
     return <MCPStatusLine icon={<Loader2 className="size-3.5 animate-spin" />} label={t("apps.mcpStatus.checking")} tone="muted" />;
+  }
+  if (!sessionAvailable) {
+    return <MCPStatusLine icon={<CircleDashed className="size-3.5" />} label={t("apps.mcpStatus.noSession")} tone="muted" />;
   }
   if (failed) {
     return <MCPStatusLine icon={<CircleAlert className="size-3.5" />} label={t("apps.mcpStatus.unavailable")} tone="bad" />;
@@ -2128,7 +2138,7 @@ function appAuthMethods(app?: Pick<AppDefinition, "auth"> | null): AppAuthMethod
 
 function appCanManageConnections(app?: Pick<AppDefinition, "auth" | "connection"> | null) {
   const authMethods = appAuthMethods(app).filter((method) => normalizeAuthType(method.type) !== "none");
-  return authMethods.length > 0 || appConnectionFields(app).length > 0 || app?.auth?.required !== false;
+  return authMethods.length > 0 || appConnectionFields(app).length > 0 || app?.auth?.required === true;
 }
 
 function groupMCPStatusByEndpoint(statuses: AppMCPEndpointStatus[]) {

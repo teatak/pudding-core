@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -651,8 +652,13 @@ func (c *appMCPStdioClient) start(ctx context.Context) error {
 	if command == "" {
 		return errors.New("stdio mcp endpoint command is required")
 	}
-	cmd := exec.CommandContext(ctx, command, c.binding.Endpoint.Args...)
-	cmd.Env = appMCPStdioEnv(c.binding.Endpoint.Env)
+	env := appMCPStdioEnv(c.binding.Endpoint.Env)
+	commandPath, err := appMCPResolveCommand(command, env)
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, commandPath, c.binding.Endpoint.Args...)
+	cmd.Env = env
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -801,19 +807,129 @@ func (c *appMCPStdioClient) stderrText() string {
 }
 
 func appMCPStdioEnv(extra map[string]string) []string {
-	env := os.Environ()
-	if len(extra) == 0 {
-		return env
+	env := map[string]string{}
+	for _, item := range os.Environ() {
+		key, value, ok := strings.Cut(item, "=")
+		if !ok || key == "" {
+			continue
+		}
+		env[key] = value
 	}
-	keys := make([]string, 0, len(extra))
-	for key := range extra {
+	for key, value := range extra {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		env[key] = value
+	}
+	env["PATH"] = appMCPMergedPATH(env["PATH"])
+	keys := make([]string, 0, len(env))
+	for key := range env {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
 	for _, key := range keys {
-		env = append(env, key+"="+extra[key])
+		out = append(out, key+"="+env[key])
 	}
-	return env
+	return out
+}
+
+func appMCPMergedPATH(current string) string {
+	seen := map[string]struct{}{}
+	dirs := make([]string, 0)
+	add := func(dir string) {
+		dir = strings.TrimSpace(dir)
+		if dir == "" {
+			return
+		}
+		if _, ok := seen[dir]; ok {
+			return
+		}
+		seen[dir] = struct{}{}
+		dirs = append(dirs, dir)
+	}
+	for _, dir := range filepath.SplitList(current) {
+		add(dir)
+	}
+	for _, dir := range appMCPCommonExecutableDirs() {
+		add(dir)
+	}
+	return strings.Join(dirs, string(os.PathListSeparator))
+}
+
+func appMCPCommonExecutableDirs() []string {
+	dirs := []string{
+		"/opt/homebrew/bin",
+		"/usr/local/bin",
+		"/usr/bin",
+		"/bin",
+		"/usr/sbin",
+		"/sbin",
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(homeDir) == "" {
+		return dirs
+	}
+	dirs = append(dirs,
+		filepath.Join(homeDir, ".volta", "bin"),
+		filepath.Join(homeDir, ".npm-global", "bin"),
+		filepath.Join(homeDir, ".local", "bin"),
+		filepath.Join(homeDir, "Library", "pnpm"),
+	)
+	nodeRoot := filepath.Join(homeDir, ".nvm", "versions", "node")
+	if entries, err := os.ReadDir(nodeRoot); err == nil {
+		names := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			if entry.IsDir() {
+				names = append(names, entry.Name())
+			}
+		}
+		sort.Sort(sort.Reverse(sort.StringSlice(names)))
+		for _, name := range names {
+			dirs = append(dirs, filepath.Join(nodeRoot, name, "bin"))
+		}
+	}
+	return dirs
+}
+
+func appMCPResolveCommand(command string, env []string) (string, error) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return "", errors.New("stdio mcp endpoint command is required")
+	}
+	if strings.ContainsRune(command, os.PathSeparator) {
+		return command, nil
+	}
+	pathValue := appMCPEnvValue(env, "PATH")
+	for _, dir := range filepath.SplitList(pathValue) {
+		candidate := filepath.Join(dir, command)
+		if appMCPExecutable(candidate) {
+			return candidate, nil
+		}
+	}
+	if found, err := exec.LookPath(command); err == nil {
+		return found, nil
+	}
+	return "", fmt.Errorf("stdio mcp command %q was not found in PATH", command)
+}
+
+func appMCPEnvValue(env []string, key string) string {
+	for _, item := range env {
+		gotKey, value, ok := strings.Cut(item, "=")
+		if ok && gotKey == key {
+			return value
+		}
+	}
+	return ""
+}
+
+func appMCPExecutable(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	return info.Mode()&0o111 != 0
 }
 
 type appMCPRPCMessage struct {
