@@ -60,7 +60,20 @@ class BrowserHost {
       throw new Error("browser tab not found");
     }
     if (!slot.webContents.isDestroyed()) {
-      slot.webContents.reload();
+      const reloadURL = normalizeURL(request.url) || normalizeURL(slot.displayURL);
+      const actualURL = normalizeURL(slot.webContents.getURL());
+      if (reloadURL && !sameNormalizedURL(reloadURL, actualURL)) {
+        try {
+          await loadSlotURL(slot, reloadURL);
+        } catch (error) {
+          if (isNavigationAbort(error)) {
+            throw error;
+          }
+          this.noteUpdated(slot);
+        }
+      } else {
+        slot.webContents.reload();
+      }
     }
     return snapshot(slot);
   }
@@ -208,12 +221,23 @@ class BrowserHost {
     const tabID = normalizeTabID(request.tabID);
     const existing = this.slots.get(key);
     if (existing?.webContents === webContents) {
+      const requestedURL = normalizeURL(request.url);
+      if (requestedURL) {
+        existing.displayURL = requestedURL;
+      }
+      if (request.loadError) {
+        existing.displayTitle = requestedURL || existing.displayURL || "";
+        existing.navigationError = normalizeLoadError(request.loadError);
+        this.noteUpdated(existing);
+      }
       return snapshot(existing);
     }
-    const previousURL = existing && !existing.webContents.isDestroyed() ? existing.webContents.getURL() : "";
+    const previousURL = existing && !existing.webContents.isDestroyed() ? existing.displayURL || existing.webContents.getURL() : "";
     if (existing) {
       this.destroySlot(existing);
     }
+    const targetURL = normalizeURL(request.url) || normalizeURL(previousURL) || normalizeURL(webContents.getURL()) || "about:blank";
+    const loadError = normalizeLoadError(request.loadError);
     const slot = {
       key,
       sessionID,
@@ -221,11 +245,13 @@ class BrowserHost {
       headlessView: null,
       webContents,
       version: 0,
+      displayURL: targetURL,
+      displayTitle: loadError ? targetURL : "",
+      navigationError: loadError,
     };
     this.bindSlotEvents(slot);
     this.slots.set(key, slot);
-    const targetURL = normalizeURL(request.url) || normalizeURL(previousURL);
-    if (targetURL && targetURL !== webContents.getURL()) {
+    if (!loadError && targetURL && targetURL !== webContents.getURL()) {
       await loadSlotURL(slot, targetURL);
     }
     this.noteUpdated(slot);
@@ -269,6 +295,9 @@ class BrowserHost {
       headlessView,
       webContents: headlessView.webContents,
       version: 0,
+      displayURL: normalizeURL(request.url) || "about:blank",
+      displayTitle: "",
+      navigationError: null,
     };
     this.bindSlotEvents(slot);
     this.slots.set(key, slot);
@@ -280,13 +309,55 @@ class BrowserHost {
       void loadSlotURL(slot, normalizeURL(url) || "about:blank").catch(() => undefined);
       return { action: "deny" };
     });
-    slot.webContents.on("did-navigate", () => {
+    slot.webContents.on("did-start-navigation", (_event, url, _isInPlace, isMainFrame) => {
+      if (isMainFrame === false) {
+        return;
+      }
+      const nextURL = normalizeURL(url);
+      if (!nextURL) {
+        return;
+      }
+      slot.displayURL = nextURL;
+      slot.displayTitle = "";
+      slot.navigationError = null;
       this.noteUpdated(slot);
     });
-    slot.webContents.on("did-navigate-in-page", () => {
+    slot.webContents.on("did-navigate", (_event, url) => {
+      const nextURL = normalizeURL(url) || normalizeURL(slot.webContents.getURL());
+      if (nextURL) {
+        slot.displayURL = nextURL;
+        slot.displayTitle = "";
+        slot.navigationError = null;
+      }
+      this.noteUpdated(slot);
+    });
+    slot.webContents.on("did-navigate-in-page", (_event, url) => {
+      const nextURL = normalizeURL(url) || normalizeURL(slot.webContents.getURL());
+      if (nextURL) {
+        slot.displayURL = nextURL;
+        slot.navigationError = null;
+      }
       this.noteUpdated(slot);
     });
     slot.webContents.on("page-title-updated", () => {
+      if (sameNormalizedURL(slot.displayURL, slot.webContents.getURL())) {
+        slot.displayTitle = slot.webContents.getTitle();
+      }
+      this.noteUpdated(slot);
+    });
+    slot.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (isMainFrame === false || isNavigationAbortCode(errorCode)) {
+        return;
+      }
+      const failedURL = normalizeURL(validatedURL) || normalizeURL(slot.displayURL) || normalizeURL(slot.webContents.getURL());
+      if (failedURL) {
+        slot.displayURL = failedURL;
+        slot.displayTitle = failedURL;
+      }
+      slot.navigationError = {
+        code: String(errorDescription || errorCode || "ERR_FAILED"),
+        description: String(errorDescription || ""),
+      };
       this.noteUpdated(slot);
     });
     slot.webContents.on("destroyed", () => {
@@ -323,10 +394,21 @@ async function evaluateJSON(slot, script) {
 }
 
 async function loadSlotURL(slot, url) {
+  const targetURL = normalizeURL(url);
+  if (targetURL) {
+    slot.displayURL = targetURL;
+    slot.displayTitle = "";
+    slot.navigationError = null;
+  }
   try {
     await slot.webContents.loadURL(url);
   } catch (error) {
     if (!isNavigationAbort(error)) {
+      if (targetURL) {
+        slot.displayURL = targetURL;
+        slot.displayTitle = targetURL;
+      }
+      slot.navigationError = normalizeLoadError(error);
       throw error;
     }
     await waitForNavigationToSettle(slot.webContents);
@@ -336,6 +418,26 @@ async function loadSlotURL(slot, url) {
 function isNavigationAbort(error) {
   const message = String(error?.message || error || "");
   return message.includes("ERR_ABORTED") || message.includes("(-3)");
+}
+
+function isNavigationAbortCode(errorCode) {
+  return Number(errorCode) === -3;
+}
+
+function normalizeLoadError(error) {
+  if (!error) {
+    return null;
+  }
+  if (typeof error === "object") {
+    return {
+      code: String(error.code || error.errorCode || error.errorDescription || "ERR_FAILED"),
+      description: String(error.description || error.errorDescription || error.message || ""),
+    };
+  }
+  return {
+    code: String(error),
+    description: String(error),
+  };
 }
 
 function waitForNavigationToSettle(webContents) {
@@ -563,6 +665,12 @@ function normalizeURL(rawURL) {
   return "";
 }
 
+function sameNormalizedURL(left, right) {
+  const leftURL = normalizeURL(left);
+  const rightURL = normalizeURL(right);
+  return Boolean(leftURL && rightURL && leftURL === rightURL);
+}
+
 function observeScript(maxText, maxElements) {
   return `(() => {
   const maxText = ${JSON.stringify(maxText)};
@@ -737,12 +845,16 @@ function imageSize(buffer) {
 function snapshot(slot) {
   const webContents = slot.webContents;
   const destroyed = webContents.isDestroyed();
+  const actualURL = destroyed ? "" : webContents.getURL();
+  const url = destroyed ? "" : normalizeURL(slot.displayURL) || actualURL;
+  const actualTitle = destroyed ? "" : webContents.getTitle();
+  const title = destroyed ? "" : sameNormalizedURL(url, actualURL) ? slot.displayTitle || actualTitle : slot.displayTitle || url;
   return {
     sessionID: slot.sessionID,
     tabID: slot.tabID,
     status: destroyed ? "lost" : "detached",
-    url: destroyed ? "" : webContents.getURL(),
-    title: destroyed ? "" : webContents.getTitle(),
+    url,
+    title,
     canGoBack: destroyed ? false : webContentsCanGoBack(webContents),
     canGoForward: destroyed ? false : webContentsCanGoForward(webContents),
     profileID: "default",

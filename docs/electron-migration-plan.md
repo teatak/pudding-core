@@ -175,14 +175,17 @@ model tool call
 
 ## Screencast 删除计划
 
-迁移完成后删除:
+已删除:
 
 - `/sessions/{id}/browser/tabs/{tabID}/screencast`
-- `BrowserStream.tsx`
+- `BrowserStream.tsx` 里的旧 screencast fallback
 - `Page.startScreencast` / `Page.stopScreencast`
 - 首帧超时重连逻辑
 - WebSocket image frame 协议
 - DPR/PNG 清晰度补丁
+
+待确认:
+
 - `Browser state failed to load` 这类 stream 专属错误
 
 保留:
@@ -300,7 +303,7 @@ model tool call
 ### P7 删除 Wails / Screencast
 
 - 删除 Wails desktop shell。
-- 删除 screencast route 和前端 stream。
+- 删除 screencast route 和前端 stream。已完成前端 fallback、Go route、BrowserService 接口、manager controller/CDP loop 清理。
 - 删除 Chrome process/profile 直接管理代码中不再需要的部分。
 - 保留必要的 browser metadata store 和 Go API facade。
 
@@ -317,7 +320,7 @@ Wails legacy 清理范围:
 旧 Electron native browser surface 清理状态:
 
 - 已删除 `web/src/browser/electronNative.tsx` 旧 `WebContentsView` attach/bounds 组件。
-- 已删除 `BrowserStream.tsx` 的 `ElectronNativeBrowser` 分支;Electron 下只走 `<webview>` surface,非 Electron legacy 才保留 screencast。
+- 已删除 `BrowserStream.tsx` 的 `ElectronNativeBrowser` 分支和前端 screencast fallback;Electron 下只走 `<webview>` surface。
 - 已删除 `electronBridge.ts` 的 `attach`、`updateBounds`、`detach`、`hasElectronNativeBrowser`、`ElectronBrowserBounds` 等 native surface API。
 - 已删除 `electron/main.cjs` / `preload.cjs` 的 native attach/bounds/detach IPC 和 embed mode fallback;`webviewTag` 固定开启。
 - 已删除 `CanvasPane` -> `BrowserStream` 的 `nativeSuspended` 无效传参。

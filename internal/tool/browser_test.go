@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/browser"
 )
@@ -230,10 +229,6 @@ func (f *fakeToolBrowser) Type(context.Context, string, string, browser.TypeInpu
 
 func (f *fakeToolBrowser) Scroll(context.Context, string, string, browser.ScrollInput) (browser.ActionResult, error) {
 	return browser.ActionResult{}, nil
-}
-
-func (f *fakeToolBrowser) Screencast(context.Context, string, string, *websocket.Conn) error {
-	return nil
 }
 
 func (f *fakeToolBrowser) Close() error { return nil }

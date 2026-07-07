@@ -253,16 +253,11 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	}
 
 	authed := withAuth(token, cfg.deviceTokens, app)
-	browserScreencastAuthed := withAuth(token, cfg.deviceTokens, http.HandlerFunc(s.serveBrowserScreencast))
 	var mcpAuthed http.Handler
 	if s.browserMCP != nil {
 		mcpAuthed = withAuth(token, cfg.deviceTokens, s.browserMCP)
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isBrowserScreencastPath(r.URL.Path) {
-			browserScreencastAuthed.ServeHTTP(w, r)
-			return
-		}
 		if r.URL.Path == "/mcp/ws" && mcpAuthed != nil {
 			mcpAuthed.ServeHTTP(w, r)
 			return

@@ -85,6 +85,44 @@ export function browserTabSwitchKey(tab: BrowserTab | undefined): string {
   return tab ? `${tab.id}:${tab.url}` : "";
 }
 
+export function browserTargetURL(tab: BrowserTab | undefined, payload: BrowserCanvasPayload | null, payloadUpdatedAt?: string): string {
+  const payloadURL = (payload?.url || "").trim();
+  const tabURL = (tab?.url || "").trim();
+  if (!payloadURL) {
+    return tabURL;
+  }
+  if (!tabURL) {
+    return payloadURL;
+  }
+  return browserTabIsNewerThan(tab, payloadUpdatedAt) ? tabURL : payloadURL;
+}
+
+export function browserTabIsNewerThan(tab: BrowserTab | undefined, timestamp?: string): boolean {
+  if (!tab) {
+    return false;
+  }
+  const tabTime = browserTabTimestamp(tab);
+  const compareTime = browserTimestamp(timestamp);
+  return Number.isFinite(tabTime) && (!Number.isFinite(compareTime) || tabTime > compareTime);
+}
+
+export function latestBrowserPayload(
+  state: BrowserState | undefined,
+  item: CanvasItem | undefined,
+  itemPayload: BrowserCanvasPayload | null,
+): BrowserCanvasPayload | null {
+  const statePayload = browserPayloadFromState(state);
+  if (!statePayload) {
+    return itemPayload;
+  }
+  if (!itemPayload || itemPayload.closedAt) {
+    return statePayload;
+  }
+  const stateTime = browserTimestamp(state?.updatedAt);
+  const itemTime = browserTimestamp(item?.updatedAt);
+  return Number.isFinite(itemTime) && (!Number.isFinite(stateTime) || itemTime > stateTime) ? itemPayload : statePayload;
+}
+
 export function browserPayloadHasRealState(payload: BrowserCanvasPayload | null): boolean {
   return Boolean(payload && !payload.closedAt && (payload.tabID || payload.url) && !browserURLIsBlank(payload.url));
 }
@@ -183,6 +221,11 @@ function browserTabTimestamp(tab: BrowserTab): number {
   }
   const created = Date.parse(tab.createdAt);
   return Number.isFinite(created) ? created : 0;
+}
+
+function browserTimestamp(value?: string): number {
+  const timestamp = Date.parse(value || "");
+  return Number.isFinite(timestamp) ? timestamp : NaN;
 }
 
 function browserTitleFromURL(rawURL: string): string {

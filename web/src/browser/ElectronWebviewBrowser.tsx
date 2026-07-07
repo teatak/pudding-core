@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createElement, useCallback, useEffect, useRef, type HTMLAttributes } from "react";
+import { FileX, Loader2, RefreshCw } from "lucide-react";
+import { createElement, useCallback, useEffect, useRef, useState, type HTMLAttributes } from "react";
 
 import { listBrowserTabs } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
@@ -7,10 +8,12 @@ import { cacheElectronBrowserSnapshot, electronBrowserBridge, type ElectronWebvi
 import {
   browserPayloadForItem,
   browserQueryStaleTimeMS,
+  browserTargetURL,
   browserTabTitle,
   browserURLIsBlank,
   preferredBrowserTab,
 } from "@/browser/helpers";
+import { Button } from "@/components/ui/button";
 import type { CanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
 
@@ -25,6 +28,19 @@ type WebviewElement = HTMLElement & {
   getWebContentsId?: () => number;
   getURL?: () => string;
   loadURL?: (url: string) => Promise<void>;
+};
+
+type WebviewLoadError = {
+  code: string;
+  description: string;
+  url: string;
+};
+
+type WebviewLoadErrorEvent = Event & {
+  errorCode?: number;
+  errorDescription?: string;
+  isMainFrame?: boolean;
+  validatedURL?: string;
 };
 
 type WebviewProps = HTMLAttributes<HTMLElement> & {
@@ -43,7 +59,13 @@ export function ElectronWebviewBrowser({ token, item }: { token: string; item: C
   const webviewReadyRef = useRef(false);
   const webviewReadyCleanupRef = useRef<(() => void) | null>(null);
   const lastRequestedURLRef = useRef("");
+  const pendingProgrammaticURLRef = useRef("");
   const pendingTargetURLRef = useRef("");
+  const navigationSeqRef = useRef(0);
+  const failedNavigationSeqRef = useRef(0);
+  const loadErrorRef = useRef<WebviewLoadError | null>(null);
+  const [loadError, setLoadError] = useState<WebviewLoadError | null>(null);
+  const [navigationLoading, setNavigationLoading] = useState(false);
   const ownerSessionID = payload?.sessionID || item.sourceSessionID;
   const tabsQuery = useQuery({
     enabled: Boolean(token && ownerSessionID),
@@ -60,7 +82,12 @@ export function ElectronWebviewBrowser({ token, item }: { token: string; item: C
   const activeTab = preferredBrowserTab(tabs, payload);
   const title = activeTab ? browserTabTitle(activeTab, payload?.title || t("browser.newTab"), t("browser.newTab")) : payload?.title || t("browser.newTab");
   const tabID = activeTab?.id || payload?.tabID || "default";
-  const targetURL = normalizeWebviewURL(activeTab?.url || payload?.url || "");
+  const targetURL = normalizeWebviewURL(browserTargetURL(activeTab, payload, item.updatedAt));
+
+  const updateLoadError = useCallback((error: WebviewLoadError | null) => {
+    loadErrorRef.current = error;
+    setLoadError(error);
+  }, []);
 
   const setWebviewRef = useCallback((node: WebviewElement | null) => {
     webviewReadyCleanupRef.current?.();
@@ -68,21 +95,96 @@ export function ElectronWebviewBrowser({ token, item }: { token: string; item: C
     webviewRef.current = node;
     webviewReadyRef.current = false;
     lastRequestedURLRef.current = "";
+    pendingProgrammaticURLRef.current = "";
+    navigationSeqRef.current = 0;
+    failedNavigationSeqRef.current = 0;
+    setNavigationLoading(false);
+    updateLoadError(null);
     if (!node) {
       return;
     }
     const handleReady = () => {
       webviewReadyRef.current = true;
-      loadWebviewURL(node, pendingTargetURLRef.current || "about:blank", lastRequestedURLRef);
+      if (!browserURLIsBlank(pendingTargetURLRef.current)) {
+        setNavigationLoading(true);
+      }
+      loadWebviewURL(node, pendingTargetURLRef.current || "about:blank", lastRequestedURLRef, pendingProgrammaticURLRef);
+    };
+    const handleStartLoading = () => {
+      if (!browserURLIsBlank(pendingTargetURLRef.current)) {
+        setNavigationLoading(true);
+      }
+    };
+    const handleStopLoading = () => {
+      if (!loadErrorRef.current) {
+        setNavigationLoading(false);
+      }
+    };
+    const handleStartNavigation = (event: Event) => {
+      const navigationEvent = event as WebviewLoadErrorEvent;
+      if (navigationEvent.isMainFrame === false) {
+        return;
+      }
+      navigationSeqRef.current += 1;
+      if (!browserURLIsBlank(pendingTargetURLRef.current)) {
+        setNavigationLoading(true);
+      }
+      updateLoadError(null);
+    };
+    const handleFinishLoad = () => {
+      pendingProgrammaticURLRef.current = "";
+      setNavigationLoading(false);
+      if (navigationSeqRef.current > failedNavigationSeqRef.current) {
+        updateLoadError(null);
+      }
+    };
+    const handleFailLoad = (event: Event) => {
+      const loadEvent = event as WebviewLoadErrorEvent;
+      if (loadEvent.isMainFrame === false || isWebviewNavigationAbortCode(loadEvent.errorCode)) {
+        return;
+      }
+      failedNavigationSeqRef.current = navigationSeqRef.current;
+      const failedURL = normalizeWebviewURL(loadEvent.validatedURL || pendingProgrammaticURLRef.current || pendingTargetURLRef.current || node.getURL?.() || "");
+      const error = {
+        code: webviewErrorCode(loadEvent),
+        description: loadEvent.errorDescription || "",
+        url: failedURL,
+      };
+      setNavigationLoading(false);
+      updateLoadError(error);
+      const bridge = electronBrowserBridge();
+      const webContentsID = node.getWebContentsId?.();
+      if (bridge && ownerSessionID && webContentsID && !browserURLIsBlank(failedURL)) {
+        void bridge
+          .registerWebview({
+            sessionID: ownerSessionID,
+            tabID,
+            url: failedURL,
+            webContentsID,
+            loadError: { code: error.code, description: error.description },
+          })
+          .then((snapshot) => cacheElectronBrowserSnapshot(queryClient, snapshot, ownerSessionID))
+          .catch(() => undefined);
+      }
     };
     node.addEventListener("dom-ready", handleReady);
+    node.addEventListener("did-start-loading", handleStartLoading);
+    node.addEventListener("did-stop-loading", handleStopLoading);
+    node.addEventListener("did-start-navigation", handleStartNavigation);
+    node.addEventListener("did-finish-load", handleFinishLoad);
+    node.addEventListener("did-fail-load", handleFailLoad);
     webviewReadyCleanupRef.current = () => {
       node.removeEventListener("dom-ready", handleReady);
+      node.removeEventListener("did-start-loading", handleStartLoading);
+      node.removeEventListener("did-stop-loading", handleStopLoading);
+      node.removeEventListener("did-start-navigation", handleStartNavigation);
+      node.removeEventListener("did-finish-load", handleFinishLoad);
+      node.removeEventListener("did-fail-load", handleFailLoad);
       if (webviewRef.current === node) {
         webviewReadyRef.current = false;
       }
     };
-  }, []);
+  }, [ownerSessionID, queryClient, tabID, updateLoadError]);
 
   useEffect(() => {
     pendingTargetURLRef.current = targetURL;
@@ -90,8 +192,36 @@ export function ElectronWebviewBrowser({ token, item }: { token: string; item: C
     if (!node || !webviewReadyRef.current) {
       return;
     }
-    loadWebviewURL(node, targetURL, lastRequestedURLRef);
+    if (
+      !browserURLIsBlank(targetURL) &&
+      !sameWebviewURL(node.getURL?.() || "", targetURL) &&
+      !sameWebviewURL(lastRequestedURLRef.current, targetURL)
+    ) {
+      setNavigationLoading(true);
+    }
+    loadWebviewURL(node, targetURL, lastRequestedURLRef, pendingProgrammaticURLRef);
   }, [targetURL]);
+
+  const reloadAfterError = useCallback(() => {
+    const node = webviewRef.current;
+    const retryURL = loadError?.url || pendingTargetURLRef.current || targetURL || "about:blank";
+    const bridge = electronBrowserBridge();
+    const webContentsID = node?.getWebContentsId?.();
+    if (bridge && ownerSessionID && webContentsID) {
+      void bridge
+        .reload({ sessionID: ownerSessionID, tabID, url: retryURL })
+        .then((snapshot) => cacheElectronBrowserSnapshot(queryClient, snapshot, ownerSessionID))
+        .catch((error) => {
+          if (!isWebviewNavigationAbortError(error)) {
+            console.warn("[browser] webview reload failed", error);
+          }
+        });
+      return;
+    }
+    if (node) {
+      loadWebviewURL(node, retryURL, lastRequestedURLRef, pendingProgrammaticURLRef, { force: true });
+    }
+  }, [loadError?.url, ownerSessionID, queryClient, tabID, targetURL]);
 
   useEffect(() => {
     const node = webviewRef.current;
@@ -108,7 +238,14 @@ export function ElectronWebviewBrowser({ token, item }: { token: string; item: C
       if (!webContentsID) {
         return;
       }
+      if (loadErrorRef.current) {
+        return;
+      }
       const currentURL = normalizeWebviewURL(node.getURL?.() || "");
+      const pendingProgrammaticURL = pendingProgrammaticURLRef.current;
+      if (pendingProgrammaticURL && !sameWebviewURL(currentURL, pendingProgrammaticURL)) {
+        return;
+      }
       if (browserURLIsBlank(currentURL) && !browserURLIsBlank(targetURL)) {
         return;
       }
@@ -170,6 +307,50 @@ export function ElectronWebviewBrowser({ token, item }: { token: string; item: C
         allowpopups: "true",
         webpreferences: "contextIsolation=yes,sandbox=yes",
       } satisfies WebviewProps)}
+      {navigationLoading && !loadError ? <BrowserNavigationLoading label={t("browser.loadingPage")} /> : null}
+      {loadError ? <BrowserLoadErrorPage error={loadError} onReload={reloadAfterError} /> : null}
+    </div>
+  );
+}
+
+function BrowserNavigationLoading({ label }: { label: string }) {
+  return (
+    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-card/35 backdrop-blur-[1px]">
+      <div className="absolute inset-x-0 top-0 h-0.5 overflow-hidden bg-primary/10">
+        <div className="h-full w-1/2 animate-pulse bg-primary/80" />
+      </div>
+      <div className="inline-flex items-center gap-2 rounded-full border bg-popover/95 px-4 py-2 text-sm font-medium text-popover-foreground shadow-sm">
+        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        {label}
+      </div>
+    </div>
+  );
+}
+
+function BrowserLoadErrorPage({ error, onReload }: { error: WebviewLoadError; onReload: () => void }) {
+  const { t } = useI18n();
+  const host = webviewErrorHost(error.url);
+  const message = host ? t("browser.errorHostNotResolved").replace("{host}", host) : t("browser.errorGeneric");
+
+  return (
+    <div className="absolute inset-0 z-10 overflow-auto bg-card text-foreground">
+      <div className="mx-auto w-full max-w-[520px] px-8 pt-[18vh] pb-12">
+        <FileX className="mb-8 h-12 w-12 text-muted-foreground" strokeWidth={1.75} />
+        <h2 className="text-2xl leading-8 font-semibold text-foreground">{t("browser.errorTitle")}</h2>
+        <p className="mt-4 text-[15px] leading-6 text-muted-foreground">{message}</p>
+        <div className="mt-6 text-[15px] leading-6 text-muted-foreground">
+            <p>{t("browser.errorTry")}</p>
+          <ul className="mt-1 list-disc space-y-1 pl-7">
+            <li>{t("browser.errorCheckNetwork")}</li>
+            <li>{t("browser.errorCheckProxy")}</li>
+          </ul>
+        </div>
+        {error.code ? <p className="mt-7 text-[13px] font-medium tracking-wide text-muted-foreground uppercase">{error.code}</p> : null}
+        <Button className="mt-12 gap-2 rounded-full px-5" type="button" onClick={onReload}>
+          <RefreshCw className="h-4 w-4" />
+          {t("browser.errorReload")}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -192,12 +373,19 @@ function comparableWebviewURL(rawURL: string) {
   }
 }
 
-function loadWebviewURL(node: WebviewElement, targetURL: string, lastRequestedURLRef: { current: string }) {
+function loadWebviewURL(
+  node: WebviewElement,
+  targetURL: string,
+  lastRequestedURLRef: { current: string },
+  pendingProgrammaticURLRef: { current: string },
+  options: { force?: boolean } = {},
+) {
   const currentURL = normalizeWebviewURL(node.getURL?.() || "");
-  if (sameWebviewURL(currentURL, targetURL) || sameWebviewURL(lastRequestedURLRef.current, targetURL)) {
+  if (!options.force && (sameWebviewURL(currentURL, targetURL) || sameWebviewURL(lastRequestedURLRef.current, targetURL))) {
     return;
   }
   lastRequestedURLRef.current = targetURL;
+  pendingProgrammaticURLRef.current = targetURL;
   const load = node.loadURL?.bind(node);
   if (!load) {
     node.setAttribute("src", targetURL);
@@ -208,15 +396,16 @@ function loadWebviewURL(node: WebviewElement, targetURL: string, lastRequestedUR
       if (isWebviewNavigationAbortError(error)) {
         return;
       }
-      lastRequestedURLRef.current = "";
       console.warn("[browser] webview navigation failed", error);
     });
   } catch (error) {
     if (isWebviewNavigationAbortError(error) || isWebviewNotReadyError(error)) {
       lastRequestedURLRef.current = "";
+      pendingProgrammaticURLRef.current = "";
       return;
     }
     lastRequestedURLRef.current = "";
+    pendingProgrammaticURLRef.current = "";
     console.warn("[browser] webview navigation failed", error);
   }
 }
@@ -226,9 +415,33 @@ function isWebviewNavigationAbortError(error: unknown) {
   return message.includes("ERR_ABORTED") || message.includes("(-3)");
 }
 
+function isWebviewNavigationAbortCode(errorCode: number | undefined) {
+  return errorCode === -3;
+}
+
 function isWebviewNotReadyError(error: unknown) {
   const message = String(error instanceof Error ? error.message : error || "");
   return message.includes("dom-ready") || message.includes("attached to the DOM");
+}
+
+function webviewErrorCode(event: WebviewLoadErrorEvent) {
+  const description = (event.errorDescription || "").trim();
+  if (/^ERR_/i.test(description)) {
+    return description.toUpperCase();
+  }
+  if (typeof event.errorCode === "number" && Number.isFinite(event.errorCode)) {
+    return `ERR_${event.errorCode}`;
+  }
+  return description || "ERR_FAILED";
+}
+
+function webviewErrorHost(rawURL: string) {
+  try {
+    const url = new URL(rawURL);
+    return url.hostname || "";
+  } catch {
+    return "";
+  }
 }
 
 async function captureCurrentWebview(

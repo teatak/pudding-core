@@ -516,7 +516,7 @@ function SectionSpinner() {
 }
 
 async function fetchAppRegistry(url: string): Promise<AppRegistry> {
-  const response = await fetch(url);
+  const response = await fetch(url, { cache: "reload" });
   if (!response.ok) {
     throw new Error(`app registry request failed: ${response.status}`);
   }
@@ -532,7 +532,7 @@ async function fetchAppPackage(item: AppRegistryItem, registryURL: string, relea
     throw new Error("app package is missing");
   }
   const packageURL = new URL(target.package, registryURL).href;
-  const response = await fetch(packageURL);
+  const response = await fetch(packageURL, { cache: "reload" });
   if (!response.ok) {
     throw new Error(`app package request failed: ${response.status}`);
   }
@@ -769,7 +769,12 @@ function appRegistryIconURL(item: AppRegistryItem, registryURL: string) {
   if (!raw) {
     return undefined;
   }
-  return new URL(raw, registryURL).href;
+  const url = new URL(raw, registryURL);
+  const cacheKey = item.package_sha256 || item.version || item.id;
+  if (cacheKey) {
+    url.searchParams.set("v", cacheKey);
+  }
+  return url.href;
 }
 
 function localizedText(value: LocalizedText | undefined, locale: string) {

@@ -13,6 +13,10 @@ export type ElectronBrowserRequest = {
 
 export type ElectronWebviewRegisterRequest = ElectronBrowserRequest & {
   webContentsID: number;
+  loadError?: {
+    code?: string;
+    description?: string;
+  };
 };
 
 export type ElectronWebviewCaptureRequest = ElectronBrowserRequest & {

@@ -168,10 +168,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     queryKey: queryKeys.audioBindings(),
     queryFn: () => getAudioBindings(token, sessionID),
     enabled: Boolean(token && sessionID),
-    refetchInterval: (query) => {
-      const data = query.state.data as { bindings?: AudioBindings } | undefined;
-      return data?.bindings?.inputOwner === sessionID ? 120 : 2000;
-    },
   });
   const audioBindings = audioBindingsQuery.data?.bindings;
   const micActive = audioBindings?.inputOwner === sessionID;

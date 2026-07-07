@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/teatak/pudding-core/internal/browser"
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
@@ -531,6 +530,38 @@ func TestCloseBrowserSessionIsAtomicAndSessionScoped(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("open b status=%d tab=%+v", resp.StatusCode, tabB)
 	}
+	if _, err := st.PutCanvasItem(ctx, store.CanvasItemInput{
+		ID:              "browser_sess_a",
+		ActorSessionID:  "sess_a",
+		SourceSessionID: "sess_a",
+		Kind:            "browser",
+		Title:           "A",
+		Item:            []byte(`{"kind":"browser","sessionID":"sess_a","tabID":"` + tabA.ID + `","url":"https://a.example/"}`),
+		Window:          []byte(`{}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutCanvasItem(ctx, store.CanvasItemInput{
+		ID:              "browser_sess_b",
+		ActorSessionID:  "sess_b",
+		SourceSessionID: "sess_b",
+		Kind:            "browser",
+		Title:           "B",
+		Item:            []byte(`{"kind":"browser","sessionID":"sess_b","tabID":"` + tabB.ID + `","url":"https://b.example/"}`),
+		Window:          []byte(`{}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutCanvasItem(ctx, store.CanvasItemInput{
+		ID:             "note_sess_a",
+		ActorSessionID: "sess_a",
+		Kind:           "note",
+		Title:          "Note",
+		Item:           []byte(`{"kind":"note"}`),
+		Window:         []byte(`{}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/close", nil)
 	resp.Body.Close()
@@ -551,6 +582,23 @@ func TestCloseBrowserSessionIsAtomicAndSessionScoped(t *testing.T) {
 	}
 	if state, err := st.GetBrowserState(ctx, "sess_b"); err != nil || state.TabID != tabB.ID {
 		t.Fatalf("session b browser state should remain: state=%+v err=%v", state, err)
+	}
+	items, err := st.ListCanvasItems(ctx, "sess_a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, item := range items {
+		seen[item.ID] = true
+	}
+	if seen["browser_sess_a"] {
+		t.Fatal("session a browser canvas item should be deleted")
+	}
+	if !seen["browser_sess_b"] {
+		t.Fatal("session b browser canvas item should remain")
+	}
+	if !seen["note_sess_a"] {
+		t.Fatal("non-browser canvas item should remain")
 	}
 
 	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/close", nil)
@@ -802,35 +850,6 @@ func TestRecoverBrowserTabRebindsStoredExternalState(t *testing.T) {
 	}
 }
 
-func TestBrowserScreencastIsSessionScoped(t *testing.T) {
-	srv, st, browserSvc := newBrowserTestServer(t)
-	ctx := context.Background()
-	if err := st.CreateSession(ctx, &store.Session{ID: "sess_cast", Provider: "mock", Model: "mock"}); err != nil {
-		t.Fatal(err)
-	}
-	browserSvc.screencastDone = make(chan struct{})
-
-	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_cast/browser/tabs", nil)
-	tab := decodeJSON[browser.TabSnapshot](t, resp)
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("create tab status=%d", resp.StatusCode)
-	}
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/sessions/sess_cast/browser/tabs/" + tab.ID + "/screencast?token=" + testToken
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
-	select {
-	case <-browserSvc.screencastDone:
-	case <-time.After(time.Second):
-		t.Fatalf("screencast was not called")
-	}
-	if browserSvc.screencastSession != "sess_cast" || browserSvc.screencastTab != tab.ID {
-		t.Fatalf("screencast routed to session=%q tab=%q", browserSvc.screencastSession, browserSvc.screencastTab)
-	}
-}
-
 func TestBrowserTestFormIsPublic(t *testing.T) {
 	srv, _, _ := newBrowserTestServer(t)
 	resp, err := http.Get(srv.URL + browserTestFormPath)
@@ -858,9 +877,6 @@ type fakeBrowserService struct {
 	lastNavigation           string
 	typeText                 string
 	scrollY                  float64
-	screencastSession        string
-	screencastTab            string
-	screencastDone           chan struct{}
 	recoverCount             int
 	nextTab                  int
 }
@@ -1090,15 +1106,6 @@ func (f *fakeBrowserService) Scroll(_ context.Context, sessionID, tabID string, 
 	}
 	f.scrollY = in.DeltaY
 	return browser.ActionResult{Tab: tab, Action: "scroll", Result: map[string]any{"y": in.DeltaY}}, nil
-}
-
-func (f *fakeBrowserService) Screencast(_ context.Context, sessionID, tabID string, _ *websocket.Conn) error {
-	f.screencastSession = sessionID
-	f.screencastTab = tabID
-	if f.screencastDone != nil {
-		close(f.screencastDone)
-	}
-	return nil
 }
 
 func (f *fakeBrowserService) Close() error { return nil }

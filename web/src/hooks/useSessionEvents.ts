@@ -1,7 +1,7 @@
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
-import { getTurn, listPendingApprovals, type PendingApproval, type Session } from "@/api/client";
+import { getTurn, listPendingApprovals, type AudioBindings, type PendingApproval, type Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { sessionEvent, type SessionEvent } from "@/contracts/events";
@@ -83,6 +83,7 @@ function openSessionEventSource({
       return;
     }
     applyEvent(parsed.data);
+    syncAudioBindingsFromEvent(queryClient, parsed.data);
     syncSessionListFromEvent(queryClient, parsed.data);
     if (parsed.data.kind === "turn.started" || isTurnTerminalEvent(parsed.data)) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessionUsage(sessionID) });
@@ -103,6 +104,8 @@ function openSessionEventSource({
   source.addEventListener("turn.cancelled", handleMessage);
   source.addEventListener("input.queued", handleMessage);
   source.addEventListener("input.updated", handleMessage);
+  source.addEventListener("audio.bindings", handleMessage);
+  source.addEventListener("audio.input_level", handleMessage);
   source.addEventListener("approval.requested", handleMessage);
   source.addEventListener("approval.resolved", handleMessage);
   source.addEventListener("session.titled", handleMessage);
@@ -154,6 +157,31 @@ function syncTurn(queryClient: QueryClient, token: string, sessionID: string, tu
     .catch((error) => {
       console.warn("failed to sync turn", error);
     });
+}
+
+function syncAudioBindingsFromEvent(queryClient: QueryClient, event: SessionEvent) {
+  if (event.kind === "audio.bindings") {
+    queryClient.setQueryData<{ bindings: AudioBindings }>(queryKeys.audioBindings(), {
+      bindings: {
+        inputOwner: event.inputOwner,
+        outputOwner: event.outputOwner,
+        inputLevel: event.inputLevel,
+      },
+    });
+    return;
+  }
+  if (event.kind === "audio.input_level") {
+    queryClient.setQueryData<{ bindings: AudioBindings }>(queryKeys.audioBindings(), (previous) => {
+      const current = previous?.bindings ?? { inputOwner: event.sessionID, outputOwner: "", inputLevel: 0 };
+      return {
+        bindings: {
+          ...current,
+          inputOwner: event.sessionID,
+          inputLevel: event.inputLevel,
+        },
+      };
+    });
+  }
 }
 
 function syncSessionListFromEvent(queryClient: QueryClient, event: SessionEvent) {

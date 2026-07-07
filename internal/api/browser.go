@@ -6,11 +6,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/teatak/cart/v3"
 	"github.com/teatak/pudding-core/internal/browser"
 	"github.com/teatak/pudding-core/internal/store"
@@ -140,15 +138,55 @@ func (s *Server) closeBrowserSession(c *cart.Context) error {
 	if !ok {
 		return nil
 	}
+	s.markBrowserSessionClosed(sessionID)
 	if err := s.browser.CloseSessionBrowser(c.Request.Context(), sessionID); err != nil {
+		s.unmarkBrowserSessionClosed(sessionID)
 		return s.browserError(c, err)
 	}
 	if err := s.store.ClearBrowserState(c.Request.Context(), sessionID); err != nil {
 		return s.fail(c, err)
 	}
-	s.markBrowserSessionClosed(sessionID)
+	if err := s.deleteBrowserCanvasItems(c.Request.Context(), sessionID); err != nil {
+		return s.fail(c, err)
+	}
 	c.Response.WriteHeader(http.StatusNoContent)
 	return nil
+}
+
+func (s *Server) deleteBrowserCanvasItems(ctx context.Context, sessionID string) error {
+	items, err := s.store.ListCanvasItems(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if !canvasItemIsBrowserForSession(item, sessionID) {
+			continue
+		}
+		if err := s.store.DeleteCanvasItem(ctx, sessionID, item.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+	}
+	return nil
+}
+
+func canvasItemIsBrowserForSession(item *store.CanvasItem, sessionID string) bool {
+	if item == nil {
+		return false
+	}
+	var payload struct {
+		Kind      string `json:"kind"`
+		SessionID string `json:"sessionID"`
+	}
+	_ = json.Unmarshal(item.Item, &payload)
+	kind := strings.TrimSpace(payload.Kind)
+	if kind == "" {
+		kind = strings.TrimSpace(item.Kind)
+	}
+	ownerSessionID := strings.TrimSpace(payload.SessionID)
+	if ownerSessionID == "" {
+		ownerSessionID = strings.TrimSpace(item.SourceSessionID)
+	}
+	return kind == "browser" && ownerSessionID == strings.TrimSpace(sessionID)
 }
 
 func (s *Server) listBrowserTabs(c *cart.Context) error {
@@ -364,6 +402,16 @@ func (s *Server) markBrowserSessionClosed(sessionID string) {
 		s.browserClosed = map[string]map[string]struct{}{}
 	}
 	s.browserClosed[sessionID] = map[string]struct{}{}
+}
+
+func (s *Server) unmarkBrowserSessionClosed(sessionID string) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
+	}
+	s.browserMu.Lock()
+	defer s.browserMu.Unlock()
+	delete(s.browserClosed, sessionID)
 }
 
 func (s *Server) allowBrowserTab(sessionID, tabID string) {
@@ -790,63 +838,6 @@ func (s *Server) browserStateSession(c *cart.Context) (string, bool) {
 		return "", false
 	}
 	return sessionID, true
-}
-
-func (s *Server) serveBrowserScreencast(w http.ResponseWriter, r *http.Request) {
-	sessionID, tabID, ok := parseBrowserScreencastPath(r.URL.Path)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	if s.browser == nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "browser_unavailable")
-		return
-	}
-	if strings.TrimSpace(sessionID) == "" {
-		writeJSONError(w, http.StatusBadRequest, "invalid session id")
-		return
-	}
-	if _, err := s.store.GetSession(r.Context(), sessionID); err != nil {
-		writeStoreHTTPError(w, err)
-		return
-	}
-	if _, err := s.browser.GetTab(r.Context(), sessionID, tabID); err != nil {
-		writeBrowserHTTPError(w, err)
-		return
-	}
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
-	if err != nil {
-		return
-	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
-	if err := s.browser.Screencast(r.Context(), sessionID, tabID, conn); err != nil {
-		_ = conn.Close(websocket.StatusInternalError, err.Error())
-	}
-}
-
-func isBrowserScreencastPath(path string) bool {
-	_, _, ok := parseBrowserScreencastPath(path)
-	return ok
-}
-
-func parseBrowserScreencastPath(path string) (string, string, bool) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 6 ||
-		parts[0] != "sessions" ||
-		parts[2] != "browser" ||
-		parts[3] != "tabs" ||
-		parts[5] != "screencast" {
-		return "", "", false
-	}
-	sessionID, err := url.PathUnescape(parts[1])
-	if err != nil {
-		return "", "", false
-	}
-	tabID, err := url.PathUnescape(parts[4])
-	if err != nil {
-		return "", "", false
-	}
-	return sessionID, tabID, true
 }
 
 func (s *Server) syncBrowserState(ctx context.Context, sessionID string, tab browser.TabSnapshot) error {

@@ -14,12 +14,14 @@
 | `turn.completed` | ✓ | ✓ | `assistantMessageID` |
 | `turn.failed` | ✓ | ✓ | `error`;有半截输出时 `assistantMessageID` + `interrupted` |
 | `turn.cancelled` | ✓ | ✓ | 有半截输出时 `assistantMessageID` + `interrupted` |
+| `audio.bindings` | — | — | `inputOwner`, `outputOwner`, `inputLevel`;音频 owner 快照 |
+| `audio.input_level` | — | — | `inputLevel`;mic owner 的波形音量 |
 | `approval.requested` | — | — | `approvalID`, `approvalKind`, `title`, `reason`, `risk?`, `payload?` |
 | `approval.resolved` | — | — | `approvalID`, `approvalKind`, `status`, `reason?`, `payload?` |
 | `session.titled` | — | — | `title`;自动标题写回(provisional / LLM 各一次),不落库 |
 | `ping` | — | — | — |
 
-公共字段:`sessionID`(全部)、`turnID`(除 ping 与 session.titled)。
+公共字段:`sessionID`(全部)、`turnID`(turn / approval 事件)。
 
 SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON>`。
 续传:`Last-Event-ID` header 或 `?after=<seq>`,服务端从 events 表补发缺口。
@@ -53,6 +55,9 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | `DELETE /sessions/{id}` | — | 204 | 404 |
 | `POST /sessions/{id}/submit` | `{clientMessageID, text}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_running` |
 | `POST /sessions/{id}/cancel` | — | 202 `{status}` | 404 / 409 `no_running_turn` |
+| `GET /sessions/{id}/audio/bindings` | — | `{bindings: {inputOwner, outputOwner, inputLevel}}` | 404 / 503 |
+| `POST /sessions/{id}/audio/input` | `{enabled}` | 200 `{ok, bindings}` | 400 / 404 / 503 |
+| `POST /sessions/{id}/audio/output` | `{enabled}` | 200 `{ok, bindings}` | 400 / 404 / 503 |
 | `GET /sessions/{id}/approvals` | — | `{approvals: []}` pending approval 快照 | 404 |
 | `POST /sessions/{id}/approvals/{approvalID}/approve` | `{scope?: "turn" \| "session"}` | 202 `{status}` | 404 |
 | `POST /sessions/{id}/approvals/{approvalID}/deny` | `{reason?}` | 202 `{status}` | 404 |

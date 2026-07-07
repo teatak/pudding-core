@@ -89,7 +89,6 @@ import {
   browserCanvasItemID,
   browserPayloadHasBlankTabIntent,
   browserPayloadForItem,
-  browserPayloadFromState,
   browserPayloadHasRealState,
   browserQueryStaleTimeMS,
   browserTabFaviconURL,
@@ -97,6 +96,7 @@ import {
   browserTabTitle,
   browserWindowKey,
   faviconURLForPage,
+  latestBrowserPayload,
   preferredBrowserTab,
   upsertBrowserTab,
 } from "@/browser/helpers";
@@ -410,6 +410,15 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     sessionSurfaceRef.current = { ...sessionSurfaceRef.current, [targetSessionID]: surface };
     writeSessionSurfaces(sessionSurfaceRef.current);
   };
+  const clearBrowserSyncTimers = (targetSessionID: string) => {
+    const prefix = `${targetSessionID}:`;
+    Object.entries(browserSyncTimersRef.current).forEach(([key, timer]) => {
+      if (key.startsWith(prefix)) {
+        window.clearTimeout(timer);
+        delete browserSyncTimersRef.current[key];
+      }
+    });
+  };
   const setActiveSurface = (surface: CanvasSurface) => {
     if (actorSessionID) {
       rememberSessionSurface(actorSessionID, surface);
@@ -466,7 +475,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     staleTime: browserQueryStaleTimeMS,
   });
   const browserState = browserStateQuery.data?.sessionID === actorSessionID ? browserStateQuery.data : undefined;
-  const browserPayload = browserClosing ? null : browserPayloadFromState(browserState) || browserItemPayload;
+  const browserPayload = browserClosing ? null : latestBrowserPayload(browserState, browserItem, browserItemPayload);
   const browserTabsQuery = useQuery({
     enabled,
     queryKey: actorSessionID ? queryKeys.browserTabs(actorSessionID) : ["browser", "missing-session"],
@@ -491,6 +500,9 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       if (snapshot.sessionID !== actorSessionID) {
         return;
       }
+      if (closingBrowserSessionsRef.current[snapshot.sessionID]) {
+        return;
+      }
       const tab = cacheElectronBrowserSnapshot(queryClient, snapshot, actorSessionID);
       if (!tab) {
         return;
@@ -499,6 +511,9 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       window.clearTimeout(browserSyncTimersRef.current[key]);
       browserSyncTimersRef.current[key] = window.setTimeout(() => {
         delete browserSyncTimersRef.current[key];
+        if (closingBrowserSessionsRef.current[tab.sessionID]) {
+          return;
+        }
         void syncBrowserTab(token, tab.sessionID, tab.id, {
           targetID: tab.targetID,
           url: tab.url,
@@ -915,24 +930,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
         throw new Error("browser session id missing");
       }
       const targetItemID = browserItem?.id;
-      if (browserItem) {
-        await putCanvasItem(token, targetSessionID, browserItem.id, {
-          id: browserItem.id,
-          sourceSessionID: targetSessionID,
-          kind: "browser",
-          title: t("browser.newTab"),
-          item: {
-            kind: "browser",
-            sessionID: targetSessionID,
-            closedAt: new Date().toISOString(),
-          },
-          window: browserItem.window,
-        }).catch(() => undefined);
-      }
       await closeBrowserSession(token, targetSessionID);
-      if (browserItem) {
-        await deleteCanvasItem(token, targetSessionID, browserItem.id).catch(() => undefined);
-      }
       return { itemID: targetItemID, sessionID: targetSessionID };
     },
     onMutate: async () => {
@@ -946,6 +944,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
         ...browserCloseEpochRef.current,
         [targetSessionID]: (browserCloseEpochRef.current[targetSessionID] || 0) + 1,
       };
+      clearBrowserSyncTimers(targetSessionID);
       await Promise.all([
         queryClient.cancelQueries({ queryKey: queryKeys.browserState(targetSessionID) }),
         queryClient.cancelQueries({ queryKey: queryKeys.browserTabs(targetSessionID) }),

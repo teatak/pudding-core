@@ -41,7 +41,7 @@ export async function fetchStarterPromptCatalog(url = OFFICIAL_STARTER_PROMPTS_U
   if (cached) {
     return cached;
   }
-  const response = await fetch(url);
+  const response = await fetch(url, { cache: "reload" });
   if (!response.ok) {
     throw new Error(`starter prompts request failed: ${response.status}`);
   }

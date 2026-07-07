@@ -350,6 +350,9 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       if (event.kind === "ping" || event.kind === "session.titled") {
         return state; // titled 只驱动 sessions refetch,不进 overlay
       }
+      if (event.kind === "audio.bindings" || event.kind === "audio.input_level") {
+        return state;
+      }
       if (event.kind === "input.queued" || event.kind === "input.updated") {
         const lastEventSeqs = recordEventSeq(state.lastEventSeqs, event);
         if (event.status === "cancelled" || event.status === "promoted") {

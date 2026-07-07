@@ -16,6 +16,8 @@ const (
 	TurnCancelled     Kind = "turn.cancelled"
 	InputQueued       Kind = "input.queued"
 	InputUpdated      Kind = "input.updated"
+	AudioBindings     Kind = "audio.bindings"
+	AudioInputLevel   Kind = "audio.input_level"
 	ApprovalRequested Kind = "approval.requested"
 	ApprovalResolved  Kind = "approval.resolved"
 	// SessionTitled:自动标题写回(provisional 与 LLM 正式标题各发一次),
@@ -35,6 +37,8 @@ const (
 //	turn.cancelled seq, turnID              (有部分输出时附 assistantMessageID + interrupted)
 //	input.queued   seq, clientMessageID, text, status
 //	input.updated  seq, clientMessageID, text, status
+//	audio.bindings inputOwner, outputOwner, inputLevel
+//	audio.input_level inputLevel
 //	approval.requested turnID, callID, approvalID, approvalKind, title, reason, risk, payload
 //	approval.resolved  turnID, callID, approvalID, approvalKind, status
 //	ping           —                        (心跳,不落库,无 seq)
@@ -51,6 +55,9 @@ type Event struct {
 	Delta              string          `json:"delta,omitempty"`
 	Text               string          `json:"text,omitempty"`
 	Status             string          `json:"status,omitempty"`
+	InputOwner         string          `json:"inputOwner,omitempty"`
+	OutputOwner        string          `json:"outputOwner,omitempty"`
+	InputLevel         *float64        `json:"inputLevel,omitempty"`
 	CallID             string          `json:"callID,omitempty"` // turn.tool 专用
 	Name               string          `json:"name,omitempty"`
 	Phase              string          `json:"phase,omitempty"`
@@ -78,6 +85,8 @@ func (e Event) Persistent() bool {
 		e.Kind != TurnTool &&
 		e.Kind != ApprovalRequested &&
 		e.Kind != ApprovalResolved &&
+		e.Kind != AudioBindings &&
+		e.Kind != AudioInputLevel &&
 		e.Kind != Ping &&
 		e.Kind != SessionTitled
 }

@@ -11,8 +11,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/coder/websocket"
 )
 
 type ElectronBridgeConfig struct {
@@ -365,10 +363,6 @@ func (s *ElectronBridgeService) Scroll(ctx context.Context, sessionID, tabID str
 		return ActionResult{}, err
 	}
 	return out.result("scroll"), nil
-}
-
-func (s *ElectronBridgeService) Screencast(context.Context, string, string, *websocket.Conn) error {
-	return ErrUnavailable
 }
 
 func (s *ElectronBridgeService) Close() error {

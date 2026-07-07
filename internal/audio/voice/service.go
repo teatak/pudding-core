@@ -31,6 +31,7 @@ var (
 
 const feedbackSuppressGrace = 1500 * time.Millisecond
 const inputLevelScale = 10000
+const inputLevelEventInterval = 100 * time.Millisecond
 
 type Submitter interface {
 	Submit(ctx context.Context, in engine.SubmitInput) (*engine.SubmitResult, error)
@@ -44,11 +45,20 @@ type EventSubscriber interface {
 	Subscribe(sessionID string) (<-chan event.Event, func())
 }
 
+type EventPublisher interface {
+	Publish(event.Event)
+}
+
+type EventBus interface {
+	EventSubscriber
+	EventPublisher
+}
+
 type ServiceConfig struct {
 	Manager   *Manager
 	Submitter Submitter
 	Canceler  Canceler
-	Events    EventSubscriber
+	Events    EventBus
 	Driver    driver.Driver
 	ASR       asr.Client
 	AEC       aec.Processor
@@ -63,6 +73,7 @@ type Service struct {
 	submitter Submitter
 	canceler  Canceler
 	events    EventSubscriber
+	publisher EventPublisher
 	driver    driver.Driver
 	asr       asr.Client
 	aec       aec.Processor
@@ -90,6 +101,7 @@ type Service struct {
 	ttsSpeaking           atomic.Bool
 	feedbackSuppressUntil atomic.Int64
 	inputLevel            atomic.Int64
+	inputLevelEventAt     atomic.Int64
 }
 
 type turnBuffer struct {
@@ -111,6 +123,7 @@ func NewService(cfg ServiceConfig) *Service {
 		submitter:     cfg.Submitter,
 		canceler:      canceler,
 		events:        cfg.Events,
+		publisher:     cfg.Events,
 		driver:        cfg.Driver,
 		asr:           cfg.ASR,
 		aec:           cfg.AEC,
@@ -146,6 +159,45 @@ func (s *Service) Snapshot() Bindings {
 	return bindings
 }
 
+func (s *Service) withCurrentInputLevel(bindings Bindings) Bindings {
+	if bindings.InputOwner != "" {
+		bindings.InputLevel = s.currentInputLevel()
+	} else {
+		bindings.InputLevel = 0
+	}
+	return bindings
+}
+
+func (s *Service) publishAudioBindings(before, after Bindings) {
+	if s.publisher == nil {
+		return
+	}
+	for _, sessionID := range audioBindingEventSessionIDs(before, after) {
+		level := after.InputLevel
+		s.publisher.Publish(event.Event{
+			SessionID:   sessionID,
+			Kind:        event.AudioBindings,
+			InputOwner:  after.InputOwner,
+			OutputOwner: after.OutputOwner,
+			InputLevel:  &level,
+		})
+	}
+}
+
+func audioBindingEventSessionIDs(before, after Bindings) []string {
+	seen := make(map[string]bool, 4)
+	out := make([]string, 0, 4)
+	for _, sessionID := range []string{before.InputOwner, before.OutputOwner, after.InputOwner, after.OutputOwner} {
+		sessionID = strings.TrimSpace(sessionID)
+		if sessionID == "" || seen[sessionID] {
+			continue
+		}
+		seen[sessionID] = true
+		out = append(out, sessionID)
+	}
+	return out
+}
+
 func (s *Service) BindInput(sessionID string, enabled bool) (Bindings, error) {
 	before := s.manager.Snapshot()
 	slog.Info("voice: input bind requested", "sessionID", sessionID, "enabled", enabled, "previousOwner", before.InputOwner)
@@ -159,6 +211,8 @@ func (s *Service) BindInput(sessionID string, enabled bool) (Bindings, error) {
 		}
 		bindings, err := s.manager.BindInput(sessionID, true)
 		if err == nil {
+			bindings = s.withCurrentInputLevel(bindings)
+			s.publishAudioBindings(before, bindings)
 			slog.Info("voice: input bound", "sessionID", sessionID, "inputOwner", bindings.InputOwner)
 		}
 		return bindings, err
@@ -170,6 +224,8 @@ func (s *Service) BindInput(sessionID string, enabled bool) (Bindings, error) {
 	if before.InputOwner != bindings.InputOwner && before.InputOwner != "" {
 		s.stopInput()
 	}
+	bindings = s.withCurrentInputLevel(bindings)
+	s.publishAudioBindings(before, bindings)
 	slog.Info("voice: input released", "sessionID", sessionID, "inputOwner", bindings.InputOwner)
 	return bindings, nil
 }
@@ -189,6 +245,8 @@ func (s *Service) BindOutput(sessionID string, enabled bool) (Bindings, error) {
 			s.startOutput(bindings.OutputOwner)
 		}
 	}
+	bindings = s.withCurrentInputLevel(bindings)
+	s.publishAudioBindings(before, bindings)
 	slog.Info("voice: output binding updated", "sessionID", sessionID, "outputOwner", bindings.OutputOwner)
 	return bindings, nil
 }
@@ -202,6 +260,8 @@ func (s *Service) ReleaseSession(sessionID string) Bindings {
 	if before.InputOwner != bindings.InputOwner && before.InputOwner != "" {
 		s.stopInput()
 	}
+	bindings = s.withCurrentInputLevel(bindings)
+	s.publishAudioBindings(before, bindings)
 	return bindings
 }
 
@@ -838,10 +898,37 @@ func (s *Service) setInputLevel(level float64) {
 		level = 1
 	}
 	s.inputLevel.Store(int64(level * inputLevelScale))
+	s.publishInputLevel(level)
 }
 
 func (s *Service) currentInputLevel() float64 {
 	return float64(s.inputLevel.Load()) / inputLevelScale
+}
+
+func (s *Service) publishInputLevel(level float64) {
+	if s.publisher == nil {
+		return
+	}
+	now := time.Now().UnixNano()
+	interval := int64(inputLevelEventInterval)
+	for {
+		last := s.inputLevelEventAt.Load()
+		if now-last < interval {
+			return
+		}
+		if s.inputLevelEventAt.CompareAndSwap(last, now) {
+			break
+		}
+	}
+	owner := s.manager.Snapshot().InputOwner
+	if owner == "" {
+		return
+	}
+	s.publisher.Publish(event.Event{
+		SessionID:  owner,
+		Kind:       event.AudioInputLevel,
+		InputLevel: &level,
+	})
 }
 
 func pcmRMSLevel(pcm frame.PCM16) float64 {

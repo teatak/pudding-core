@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/browser"
 	"github.com/teatak/pudding-core/internal/config"
@@ -2085,10 +2084,6 @@ func (b *engineTestBrowser) Type(context.Context, string, string, browser.TypeIn
 
 func (b *engineTestBrowser) Scroll(context.Context, string, string, browser.ScrollInput) (browser.ActionResult, error) {
 	return browser.ActionResult{}, nil
-}
-
-func (b *engineTestBrowser) Screencast(context.Context, string, string, *websocket.Conn) error {
-	return nil
 }
 
 func (b *engineTestBrowser) Close() error { return nil }

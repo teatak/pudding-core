@@ -138,7 +138,6 @@ export function SessionRail({
     queryKey: queryKeys.audioBindings(),
     queryFn: () => getAudioBindings(token, audioBindingsSessionID || ""),
     enabled: Boolean(token && audioBindingsSessionID),
-    refetchInterval: 2000,
   });
   const appsActive = view === "apps";
   const activeSessionIDSet = new Set([selectedSessionID, ...activeSessionIDs].filter(Boolean));

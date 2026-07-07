@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, CornerDownLeft, ExternalLink, Loader2, RefreshCw } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -13,6 +13,7 @@ import {
   putCanvasItem,
   reloadBrowserTab,
   revealBrowserTab,
+  syncBrowserTab,
   type BrowserTab,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
@@ -23,7 +24,9 @@ import {
   browserPayloadForItem,
   browserPayloadNeedsTabSync,
   browserQueryStaleTimeMS,
+  browserTabIsNewerThan,
   browserTabFaviconURL,
+  browserTargetURL,
   browserTabTitle,
   preferredBrowserTab,
   upsertBrowserTab,
@@ -36,6 +39,15 @@ import { useI18n } from "@/i18n";
 
 type BrowserOpenAttempt = {
   url: string;
+};
+
+type BrowserCanvasItemsData = {
+  items: CanvasItem[];
+};
+
+type PersistTabOptions = {
+  refreshAfterPersist?: boolean;
+  syncBrowserTab?: boolean;
 };
 
 function browserOpenErrorDescription(attempt: BrowserOpenAttempt | null, error: unknown): string {
@@ -69,6 +81,35 @@ function isBrowserNavigationAbortError(error: unknown): boolean {
   return message.includes("ERR_ABORTED") || message.includes("(-3)");
 }
 
+function sameToolbarURL(left: string, right: string): boolean {
+  const leftURL = browserDisplayURL(left);
+  const rightURL = browserDisplayURL(right);
+  if (leftURL === rightURL) {
+    return true;
+  }
+  try {
+    return new URL(leftURL).toString() === new URL(rightURL).toString();
+  } catch {
+    return false;
+  }
+}
+
+function upsertBrowserCanvasItem(current: BrowserCanvasItemsData | undefined, item: CanvasItem): BrowserCanvasItemsData {
+  const items = current?.items || [];
+  let replaced = false;
+  const next = items.map((entry) => {
+    if (entry.id !== item.id) {
+      return entry;
+    }
+    replaced = true;
+    return item;
+  });
+  if (!replaced) {
+    next.push(item);
+  }
+  return { items: next };
+}
+
 export function BrowserToolbar({ token, item }: { token: string; item: CanvasItem }) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
@@ -76,6 +117,7 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
   const ownerSessionID = payload?.sessionID || item.sourceSessionID;
   const [urlDraft, setURLDraft] = useState(browserDisplayURL(payload?.url));
   const lastOpenAttemptRef = useRef<BrowserOpenAttempt | null>(null);
+  const pendingSubmittedURLRef = useRef("");
   const embeddedBrowser = hasElectronWebviewBrowser();
   const tabsQuery = useQuery({
     enabled: Boolean(token && ownerSessionID),
@@ -90,6 +132,7 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
   });
   const tabs = (tabsQuery.data?.tabs || []).filter((tab) => tab.sessionID === ownerSessionID);
   const activeTab = preferredBrowserTab(tabs, payload);
+  const targetURL = browserTargetURL(activeTab, payload, item.updatedAt);
   const processMode = tabsQuery.data?.processMode || activeTab?.mode || payload?.mode;
   const isExternalBrowser = processMode === "external";
   const actionTabID = activeTab?.id || payload?.tabID;
@@ -102,48 +145,100 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
     void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(ownerSessionID) });
   };
 
-  useEffect(() => {
-    if (activeTab?.url) {
-      setURLDraft(browserDisplayURL(activeTab.url));
+  useLayoutEffect(() => {
+    if (pendingSubmittedURLRef.current && !sameToolbarURL(pendingSubmittedURLRef.current, targetURL)) {
       return;
     }
-    setURLDraft(browserDisplayURL(payload?.url));
-  }, [activeTab?.id, activeTab?.url, payload?.url]);
+    pendingSubmittedURLRef.current = "";
+    setURLDraft(browserDisplayURL(targetURL));
+  }, [targetURL]);
 
-  const persistTab = async (tab: BrowserTab) => {
+  const persistTab = async (tab: BrowserTab, options: PersistTabOptions = {}) => {
     if (!ownerSessionID || tab.sessionID !== ownerSessionID) {
       return;
     }
+    const refreshAfterPersist = options.refreshAfterPersist ?? true;
+    const shouldSyncBrowserTab = options.syncBrowserTab ?? false;
     const title = browserTabTitle(tab, payload?.title || t("browser.newTab"), t("browser.newTab"));
-    allowElectronBrowserTab(ownerSessionID, tab.id);
-    await putCanvasItem(token, ownerSessionID, item.id, {
-      id: item.id,
-      sourceSessionID: ownerSessionID,
+    const faviconURL = browserTabFaviconURL(tab);
+    const nextItem = {
+      ...(payload || {}),
       kind: "browser",
+      sessionID: ownerSessionID,
+      tabID: tab.id,
+      url: tab.url,
       title,
-      item: {
-        ...(payload || {}),
-        kind: "browser",
-        sessionID: ownerSessionID,
-        tabID: tab.id,
-        url: tab.url,
-        title,
-        faviconURL: browserTabFaviconURL(tab),
-        mode: tab.mode,
-      },
-      window: item.window,
-    });
+      faviconURL,
+      mode: tab.mode,
+    };
+    allowElectronBrowserTab(ownerSessionID, tab.id);
     queryClient.setQueryData(queryKeys.browserTabs(ownerSessionID), (current: BrowserTabsData | undefined) => ({
       tabs: upsertBrowserTab(current?.tabs || [], tab),
       processMode: tab.mode || current?.processMode,
     }));
-    void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(ownerSessionID) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(ownerSessionID) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(ownerSessionID) });
+    queryClient.setQueryData(queryKeys.browserState(ownerSessionID), {
+      hasState: true,
+      sessionID: ownerSessionID,
+      tabID: tab.id,
+      url: tab.url,
+      title,
+      faviconURL,
+      mode: tab.mode,
+      processMode: tab.mode || "headless",
+      createdAt: tab.createdAt,
+      updatedAt: tab.updatedAt,
+    });
+    queryClient.setQueryData(queryKeys.canvasItems(ownerSessionID), (current: BrowserCanvasItemsData | undefined) =>
+      upsertBrowserCanvasItem(current, { ...item, sourceSessionID: ownerSessionID, kind: "browser", title, item: nextItem, updatedAt: tab.updatedAt }),
+    );
+    const savedItem = await putCanvasItem(token, ownerSessionID, item.id, {
+      id: item.id,
+      sourceSessionID: ownerSessionID,
+      kind: "browser",
+      title,
+      item: nextItem,
+      window: item.window,
+    });
+    const syncedTab = shouldSyncBrowserTab
+      ? await syncBrowserTab(token, ownerSessionID, tab.id, {
+          targetID: tab.targetID,
+          url: tab.url,
+          title,
+          faviconURL,
+          canGoBack: tab.canGoBack,
+          canGoForward: tab.canGoForward,
+        }).catch(() => null)
+      : null;
+    if (syncedTab) {
+      queryClient.setQueryData(queryKeys.browserTabs(ownerSessionID), (current: BrowserTabsData | undefined) => ({
+        tabs: upsertBrowserTab(current?.tabs || [], syncedTab),
+        processMode: syncedTab.mode || current?.processMode,
+      }));
+      queryClient.setQueryData(queryKeys.browserState(ownerSessionID), {
+        hasState: true,
+        sessionID: ownerSessionID,
+        tabID: syncedTab.id,
+        url: syncedTab.url,
+        title,
+        faviconURL,
+        mode: syncedTab.mode,
+        processMode: syncedTab.mode || "headless",
+        createdAt: syncedTab.createdAt,
+        updatedAt: syncedTab.updatedAt,
+      });
+    }
+    queryClient.setQueryData(queryKeys.canvasItems(ownerSessionID), (current: BrowserCanvasItemsData | undefined) =>
+      upsertBrowserCanvasItem(current, savedItem),
+    );
+    if (refreshAfterPersist) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(ownerSessionID) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(ownerSessionID) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(ownerSessionID) });
+    }
   };
 
   useEffect(() => {
-    if (!activeTab || !browserPayloadNeedsTabSync(item, payload, activeTab, t("browser.newTab"))) {
+    if (!activeTab || !browserTabIsNewerThan(activeTab, item.updatedAt) || !browserPayloadNeedsTabSync(item, payload, activeTab, t("browser.newTab"))) {
       return;
     }
     void persistTab(activeTab);
@@ -155,6 +250,7 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
     activeTab?.mode,
     item.id,
     item.title,
+    item.updatedAt,
     payload?.tabID,
     payload?.url,
     payload?.title,
@@ -163,22 +259,38 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
   ]);
 
   const openMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (url: string) => {
       if (!ownerSessionID) {
         throw new Error("browser session id missing");
       }
       if (isExternalBrowser) {
         throw new Error("browser is external");
       }
-      const url = browserAddressToURL(urlDraft);
       lastOpenAttemptRef.current = { url };
+      const optimisticTabID = activeTab?.id || payload?.tabID;
+      if (embeddedBrowser && optimisticTabID) {
+        const now = new Date().toISOString();
+        return {
+          id: optimisticTabID,
+          sessionID: ownerSessionID,
+          targetID: activeTab?.targetID,
+          url,
+          title: url,
+          faviconURL: "",
+          mode: activeTab?.mode || payload?.mode || "headless",
+          canGoBack: activeTab?.canGoBack,
+          canGoForward: activeTab?.canGoForward,
+          createdAt: activeTab?.createdAt || now,
+          updatedAt: now,
+        } satisfies BrowserTab;
+      }
       if (activeTab) {
         return openBrowserTab(token, ownerSessionID, activeTab.id, { url });
       }
       return openBrowserURL(token, ownerSessionID, { url });
     },
     onSuccess: (tab) => {
-      void persistTab(tab);
+      void persistTab(tab, { refreshAfterPersist: !embeddedBrowser, syncBrowserTab: embeddedBrowser });
     },
     onError: (error) => {
       if (isBrowserNavigationAbortError(error)) {
@@ -251,7 +363,10 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
       onSubmit={(event) => {
         event.preventDefault();
         if (!isExternalBrowser && urlDraft.trim()) {
-          openMutation.mutate();
+          const url = browserAddressToURL(urlDraft);
+          pendingSubmittedURLRef.current = url;
+          setURLDraft(browserDisplayURL(url));
+          openMutation.mutate(url);
         }
       }}
     >
