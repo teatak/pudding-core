@@ -3,6 +3,30 @@
 Apps are local packages under `<home>/apps/<id>/`. Each app declares endpoints,
 auth methods, skills, and optional connection fields in `app.yaml`.
 
+## Endpoint Kinds
+
+Apps can declare REST, GraphQL, and MCP endpoints under `endpoints`.
+
+```yaml
+endpoints:
+  github_rest:
+    kind: rest
+    url: https://api.github.com
+  github_graphql:
+    kind: graphql
+    url: https://api.github.com/graphql
+  github_mcp:
+    kind: mcp
+    transport: streamable_http
+    url: https://example.com/mcp
+```
+
+For MCP endpoints, use `transport: streamable_http` with `url`, or
+`transport: stdio` with `command` and optional `args` / `env`. Runtime tool
+discovery currently exposes `streamable_http` MCP endpoints as model-callable
+tools after the app has a configured connection. `stdio` is a package schema
+target and is not started by the daemon yet.
+
 ## Connection Fields
 
 Use `connection.fields` for per-connection values that are not auth secrets but
@@ -69,4 +93,3 @@ app's skill, for example:
   and header `X-Hotel-Code`; do not duplicate it unless the user explicitly
   wants to override the value for one call.
 ```
-

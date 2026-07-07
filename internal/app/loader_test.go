@@ -143,3 +143,44 @@ Use builtin_rest_request with github_rest.
 		t.Fatal(err)
 	}
 }
+
+func TestLoadMCPAppEndpoints(t *testing.T) {
+	root := t.TempDir()
+	appDir := filepath.Join(root, "mcpapp")
+	if err := os.MkdirAll(appDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, AppFileName), []byte(`
+id: mcpapp
+name: MCP App
+endpoints:
+  remote_mcp:
+    kind: mcp
+    transport: streamable_http
+    url: https://example.test/mcp
+  local_mcp:
+    kind: mcp
+    transport: stdio
+    command: npx
+    args: ["-y", "example-mcp"]
+    env:
+      EXAMPLE_MODE: test
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	defs, err := LoadUserDefinitions(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) != 1 {
+		t.Fatalf("expected one app, got %+v", defs)
+	}
+	remote := defs[0].Endpoints["remote_mcp"]
+	if remote.Kind != EndpointKindMCP || remote.Transport != EndpointTransportStreamableHTTP || remote.URL != "https://example.test/mcp" {
+		t.Fatalf("remote mcp endpoint not loaded: %+v", remote)
+	}
+	local := defs[0].Endpoints["local_mcp"]
+	if local.Kind != EndpointKindMCP || local.Transport != EndpointTransportStdio || local.Command != "npx" || len(local.Args) != 2 || local.Env["EXAMPLE_MODE"] != "test" {
+		t.Fatalf("local mcp endpoint not loaded: %+v", local)
+	}
+}

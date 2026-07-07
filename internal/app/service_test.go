@@ -68,6 +68,29 @@ func TestResolveEndpointRequiresConnectionWhenMultipleConfigured(t *testing.T) {
 	}
 }
 
+func TestListEndpointBindingsFiltersKind(t *testing.T) {
+	homeDir := writeTestApp(t)
+	svc := NewService(homeDir, fakeConnectionStore{items: map[string]*Connection{
+		"github-main": {ID: "github-main", Name: "GitHub", AppID: "github", Auth: Auth{Type: "bearer", Token: "secret"}},
+	}})
+
+	bindings, err := svc.ListEndpointBindings(context.Background(), "session-1", EndpointKindREST)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bindings) != 1 || bindings[0].EndpointName != "github_rest" || bindings[0].ConnectionID != "github-main" {
+		t.Fatalf("unexpected bindings: %+v", bindings)
+	}
+
+	bindings, err = svc.ListEndpointBindings(context.Background(), "session-1", EndpointKindMCP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bindings) != 0 {
+		t.Fatalf("expected no mcp bindings, got %+v", bindings)
+	}
+}
+
 func TestReadSkillUsesSkillID(t *testing.T) {
 	homeDir := writeTestAppWithSkill(t)
 	svc := NewService(homeDir, nil)

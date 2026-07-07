@@ -117,11 +117,13 @@ func Start(opts Options) (*Daemon, error) {
 		return nil, err
 	}
 	browserMCP := tool.NewBrowserMCPRunner()
+	appMCP := tool.NewAppMCPRunner(apps)
 	camera := desktopcamera.New()
 	screen := desktopscreen.New()
 	tools := tool.NewMultiRunner(
 		tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithBrowserState(st), tool.WithHomeDir(dir), tool.WithBrowser(browserService), tool.WithCamera(camera), tool.WithDesktopScreen(screen)),
 		browserMCP,
+		appMCP,
 	)
 	eng := engine.New(st, hub, resolver, cfg, engine.WithPromptSource(prompt.NewLoader(dir)), engine.WithAttachmentHome(dir), engine.WithTools(tools))
 	audioDriver := defaultCaptureDriver(audioCfg)

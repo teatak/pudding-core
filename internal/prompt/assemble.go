@@ -141,7 +141,7 @@ func appsSegment(list []*app.Definition) *Segment {
 	var b strings.Builder
 	b.WriteString("## Installed Apps\n\n")
 	b.WriteString("Installed apps provide configured endpoints and app-scoped skills.\n")
-	b.WriteString("Endpoint calls use configured app connections. Use the listed endpoint names with `builtin_rest_request` or `builtin_graphql_request`; omit `connection` unless the tool reports multiple configured connections.\n")
+	b.WriteString("REST and GraphQL endpoint calls use configured app connections. Use the listed REST endpoint names with `builtin_rest_request` and GraphQL endpoint names with `builtin_graphql_request`; omit `connection` unless the tool reports multiple configured connections. MCP endpoints are exposed as dedicated app MCP tools when their server is reachable, not through REST or GraphQL tools.\n")
 	b.WriteString("Full app SKILL.md bodies are not loaded by default. When an app skill matches, call `builtin_skill_read(app_id=\"<app id>\", skill_id=\"<skill id>\")` once, then follow the returned instructions.\n")
 	b.WriteString("Do not proactively load untriggered app skills.\n\n")
 	for _, item := range list {

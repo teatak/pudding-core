@@ -665,8 +665,13 @@ export const webToolsConfig = z.object({
 export type WebToolsConfig = z.infer<typeof webToolsConfig>;
 
 export const appEndpoint = z.object({
-  kind: z.enum(["rest", "graphql"]),
-  url: z.string(),
+  kind: z.enum(["rest", "graphql", "mcp"]),
+  transport: z.enum(["stdio", "streamable_http"]).optional(),
+  url: z.string().optional(),
+  command: z.string().optional(),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
   description: z.string().optional(),
 });
 export type AppEndpoint = z.infer<typeof appEndpoint>;

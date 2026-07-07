@@ -241,6 +241,51 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 	}
 }
 
+func (s *Service) ListEndpointBindings(ctx context.Context, sessionID, kind string) ([]*EndpointBinding, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	kind = strings.TrimSpace(kind)
+	if s == nil || s.connections == nil {
+		return nil, errors.New("app service unavailable")
+	}
+	if sessionID == "" {
+		return nil, errors.New("sessionID is required")
+	}
+	defs, err := s.ListDefinitions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	connections, err := s.connections.ListAppConnections(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*EndpointBinding, 0)
+	for _, def := range defs {
+		if def == nil {
+			continue
+		}
+		for endpointName, endpoint := range def.Endpoints {
+			if kind != "" && endpoint.Kind != kind {
+				continue
+			}
+			for _, conn := range connections {
+				if conn == nil || conn.AppID != def.ID {
+					continue
+				}
+				out = append(out, &EndpointBinding{
+					AppID:               def.ID,
+					ConnectionID:        conn.ID,
+					EndpointName:        endpointName,
+					Endpoint:            endpoint,
+					Auth:                CloneAuth(conn.Auth),
+					ConnectionFields:    cloneStringMap(conn.Fields),
+					ConnectionFieldDefs: connectionFieldDefs(def.Connection),
+				})
+			}
+		}
+	}
+	return out, nil
+}
+
 func connectionFieldDefs(config *ConnectionConfig) []ConnectionField {
 	if config == nil || len(config.Fields) == 0 {
 		return nil

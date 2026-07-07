@@ -11,6 +11,12 @@ import (
 const (
 	EndpointKindREST    = "rest"
 	EndpointKindGraphQL = "graphql"
+	EndpointKindMCP     = "mcp"
+)
+
+const (
+	EndpointTransportStdio          = "stdio"
+	EndpointTransportStreamableHTTP = "streamable_http"
 )
 
 const (
@@ -84,9 +90,14 @@ type ConnectionFieldInject struct {
 }
 
 type Endpoint struct {
-	Kind        string `json:"kind" yaml:"kind"`
-	URL         string `json:"url" yaml:"url"`
-	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+	Kind        string            `json:"kind" yaml:"kind"`
+	Transport   string            `json:"transport,omitempty" yaml:"transport,omitempty"`
+	URL         string            `json:"url,omitempty" yaml:"url,omitempty"`
+	Command     string            `json:"command,omitempty" yaml:"command,omitempty"`
+	Args        []string          `json:"args,omitempty" yaml:"args,omitempty"`
+	Env         map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
+	Description string            `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
 type SkillRef struct {

@@ -351,10 +351,67 @@ func ValidateIcon(icon IconSpec) error {
 func ValidateEndpoint(endpoint Endpoint) error {
 	switch strings.TrimSpace(endpoint.Kind) {
 	case EndpointKindREST, EndpointKindGraphQL:
+		return validateEndpointURL(endpoint.URL)
+	case EndpointKindMCP:
+		return validateMCPEndpoint(endpoint)
 	default:
 		return fmt.Errorf("unsupported kind %q", endpoint.Kind)
 	}
-	u, err := url.Parse(strings.TrimSpace(endpoint.URL))
+}
+
+func validateMCPEndpoint(endpoint Endpoint) error {
+	switch strings.TrimSpace(endpoint.Transport) {
+	case EndpointTransportStreamableHTTP:
+		if err := validateEndpointURL(endpoint.URL); err != nil {
+			return err
+		}
+	case EndpointTransportStdio:
+		if strings.TrimSpace(endpoint.Command) == "" {
+			return errors.New("stdio mcp endpoint command is required")
+		}
+	case "":
+		return errors.New("mcp endpoint transport is required")
+	default:
+		return fmt.Errorf("unsupported mcp transport %q", endpoint.Transport)
+	}
+	for name := range endpoint.Headers {
+		if strings.TrimSpace(name) == "" {
+			return errors.New("mcp endpoint header name is required")
+		}
+		if !validEndpointHeaderName(name) {
+			return fmt.Errorf("mcp endpoint header %q is invalid", name)
+		}
+	}
+	for name := range endpoint.Env {
+		if strings.TrimSpace(name) == "" {
+			return errors.New("mcp endpoint env name is required")
+		}
+		if strings.ContainsAny(name, "\x00=") {
+			return fmt.Errorf("mcp endpoint env name %q is invalid", name)
+		}
+	}
+	return nil
+}
+
+func validEndpointHeaderName(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			continue
+		}
+		if strings.ContainsRune("!#$%&'*+-.^_`|~", r) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validateEndpointURL(rawURL string) error {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
 		return err
 	}

@@ -1046,6 +1046,9 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
   if (!name) {
     return fallback;
   }
+  if (name.startsWith("app_mcp__")) {
+    return t("transcript.toolAppMCP");
+  }
   const known: Record<string, string> = {
     builtin_graphql_request: t("transcript.toolGraphQLRequest"),
     builtin_graphql_introspect: t("transcript.toolGraphQLIntrospect"),

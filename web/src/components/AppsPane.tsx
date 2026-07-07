@@ -594,7 +594,7 @@ function parseYamlEndpoints(yaml: string): AppEndpoints {
     const endpointMatch = line.match(/^ {2}([\w-]+):\s*$/);
     if (endpointMatch) {
       current = endpointMatch[1];
-      endpoints[current] = { kind: "rest", url: "" };
+      endpoints[current] = { kind: "rest" };
       continue;
     }
     const propMatch = line.match(/^ {4}([\w-]+):\s*(.*)$/);
@@ -603,16 +603,22 @@ function parseYamlEndpoints(yaml: string): AppEndpoints {
     }
     const key = propMatch[1];
     const value = yamlScalar(propMatch[2]);
-    if (key === "kind" && (value === "rest" || value === "graphql")) {
+    if (key === "kind" && (value === "rest" || value === "graphql" || value === "mcp")) {
       endpoints[current].kind = value;
+    } else if (key === "transport" && (value === "stdio" || value === "streamable_http")) {
+      endpoints[current].transport = value;
     } else if (key === "url") {
       endpoints[current].url = value;
+    } else if (key === "command") {
+      endpoints[current].command = value;
     } else if (key === "description") {
       endpoints[current].description = value;
     }
   }
   for (const [name, endpoint] of Object.entries(endpoints)) {
-    if (!endpoint.url) {
+    if (endpoint.kind === "mcp" && !endpoint.url && !endpoint.command) {
+      delete endpoints[name];
+    } else if (endpoint.kind !== "mcp" && !endpoint.url) {
       delete endpoints[name];
     }
   }
@@ -1135,13 +1141,24 @@ function EndpointRows({ endpoints }: { endpoints: Array<[string, AppEndpoints[st
           <div className="flex min-w-0 items-center gap-2">
             <span className="truncate text-sm font-medium">{name}</span>
             <Badge variant="outline">{endpoint.kind}</Badge>
+            {endpoint.kind === "mcp" && endpoint.transport ? <Badge variant="secondary">{endpoint.transport}</Badge> : null}
           </div>
-          <div className="truncate text-xs text-muted-foreground" title={endpoint.url}>
-            {endpoint.url}
-          </div>
+          <EndpointTarget endpoint={endpoint} />
           {endpoint.description ? <div className="text-xs text-muted-foreground">{endpoint.description}</div> : null}
         </DetailRow>
       ))}
+    </div>
+  );
+}
+
+function EndpointTarget({ endpoint }: { endpoint: AppEndpoints[string] }) {
+  const target = endpoint.kind === "mcp" && endpoint.transport === "stdio" ? endpoint.command : endpoint.url || endpoint.command;
+  if (!target) {
+    return null;
+  }
+  return (
+    <div className="truncate text-xs text-muted-foreground" title={target}>
+      {target}
     </div>
   );
 }
