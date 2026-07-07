@@ -15,7 +15,6 @@ import {
   installAppPackage,
   listAppConnections,
   listApps,
-  listSessions,
   putAppConnection,
   startAppOAuth,
   type AppConnection,
@@ -885,17 +884,10 @@ function AppDetail({
   const canManageConnections = appCanManageConnections(app);
   const installedIsPreview = Boolean(app.version && isPreviewVersion(app.version));
   const hasMCPEndpoints = endpoints.some(([, endpoint]) => endpoint.kind === "mcp");
-  const fallbackSessionQuery = useQuery({
-    queryKey: queryKeys.sessions(),
-    queryFn: () => listSessions(token),
-    enabled: Boolean(!sessionID && hasMCPEndpoints),
-    staleTime: 30_000,
-  });
-  const probeSessionID = sessionID || fallbackSessionQuery.data?.sessions[0]?.id || "";
   const mcpStatusQuery = useQuery({
-    queryKey: queryKeys.appMCPStatus(probeSessionID, app.id),
-    queryFn: () => getAppMCPStatus(token, probeSessionID, app.id),
-    enabled: Boolean(probeSessionID && hasMCPEndpoints),
+    queryKey: queryKeys.appMCPStatus(sessionID || "", app.id),
+    queryFn: () => getAppMCPStatus(token, sessionID!, app.id),
+    enabled: Boolean(sessionID && hasMCPEndpoints),
     retry: false,
     staleTime: 30_000,
   });
@@ -967,8 +959,8 @@ function AppDetail({
           endpoints={endpoints}
           mcpStatusByEndpoint={mcpStatusByEndpoint}
           mcpStatusFailed={mcpStatusQuery.isError}
-          mcpStatusLoading={fallbackSessionQuery.isLoading || mcpStatusQuery.isLoading}
-          mcpStatusSessionAvailable={Boolean(probeSessionID)}
+          mcpStatusLoading={mcpStatusQuery.isLoading}
+          mcpStatusVisible={Boolean(sessionID)}
         />
         <AppSkillsSection icon={icon} iconSrc={iconSrc} skills={skills} onSkillSelect={(skill) => onSkillSelect(skill, icon, iconSrc)} />
       </div>
@@ -1157,7 +1149,7 @@ function AppEndpointsSection({
   mcpStatusByEndpoint,
   mcpStatusFailed,
   mcpStatusLoading,
-  mcpStatusSessionAvailable = true,
+  mcpStatusVisible = true,
 }: {
   children?: ReactNode;
   count?: number;
@@ -1165,7 +1157,7 @@ function AppEndpointsSection({
   mcpStatusByEndpoint?: Map<string, AppMCPEndpointStatus[]>;
   mcpStatusFailed?: boolean;
   mcpStatusLoading?: boolean;
-  mcpStatusSessionAvailable?: boolean;
+  mcpStatusVisible?: boolean;
 }) {
   const { t } = useI18n();
   return (
@@ -1176,7 +1168,7 @@ function AppEndpointsSection({
           mcpStatusByEndpoint={mcpStatusByEndpoint}
           mcpStatusFailed={mcpStatusFailed}
           mcpStatusLoading={mcpStatusLoading}
-          mcpStatusSessionAvailable={mcpStatusSessionAvailable}
+          mcpStatusVisible={mcpStatusVisible}
         />
       )}
     </DetailSection>
@@ -1188,13 +1180,13 @@ function EndpointRows({
   mcpStatusByEndpoint,
   mcpStatusFailed,
   mcpStatusLoading,
-  mcpStatusSessionAvailable = true,
+  mcpStatusVisible = true,
 }: {
   endpoints: Array<[string, AppEndpoints[string]]>;
   mcpStatusByEndpoint?: Map<string, AppMCPEndpointStatus[]>;
   mcpStatusFailed?: boolean;
   mcpStatusLoading?: boolean;
-  mcpStatusSessionAvailable?: boolean;
+  mcpStatusVisible?: boolean;
 }) {
   const { t } = useI18n();
   if (endpoints.length === 0) {
@@ -1211,12 +1203,11 @@ function EndpointRows({
           </div>
           <EndpointTarget endpoint={endpoint} />
           {endpoint.description ? <div className="text-xs text-muted-foreground">{endpoint.description}</div> : null}
-          {endpoint.kind === "mcp" ? (
+          {endpoint.kind === "mcp" && mcpStatusVisible ? (
             <MCPStatusDetails
               endpointName={name}
               failed={mcpStatusFailed}
               loading={mcpStatusLoading}
-              sessionAvailable={mcpStatusSessionAvailable}
               statuses={mcpStatusByEndpoint?.get(name) || []}
             />
           ) : null}
@@ -1242,21 +1233,16 @@ function MCPStatusDetails({
   endpointName,
   failed,
   loading,
-  sessionAvailable,
   statuses,
 }: {
   endpointName: string;
   failed?: boolean;
   loading?: boolean;
-  sessionAvailable?: boolean;
   statuses: AppMCPEndpointStatus[];
 }) {
   const { t } = useI18n();
   if (loading) {
     return <MCPStatusLine icon={<Loader2 className="size-3.5 animate-spin" />} label={t("apps.mcpStatus.checking")} tone="muted" />;
-  }
-  if (!sessionAvailable) {
-    return <MCPStatusLine icon={<CircleDashed className="size-3.5" />} label={t("apps.mcpStatus.noSession")} tone="muted" />;
   }
   if (failed) {
     return <MCPStatusLine icon={<CircleAlert className="size-3.5" />} label={t("apps.mcpStatus.unavailable")} tone="bad" />;
@@ -1319,12 +1305,26 @@ function MCPToolsList({ tools }: { tools: AppMCPTool[] }) {
       <div className="text-xs font-medium text-muted-foreground">{t("apps.mcpTools")}</div>
       <div className="grid gap-2">
         {tools.map((tool) => (
-          <div key={tool.name} className="grid gap-1.5">
+          <div key={tool.name} className="grid gap-1.5 border-t border-border/50 pt-2 first:border-t-0 first:pt-0">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <span className="truncate text-sm font-medium">{tool.title || tool.name}</span>
               {tool.title && tool.title !== tool.name ? <Badge variant="outline">{tool.name}</Badge> : null}
             </div>
-            {tool.description ? <div className="text-xs leading-5 text-muted-foreground">{tool.description}</div> : null}
+            {tool.description ? (
+              <>
+                <div className="line-clamp-3 text-xs leading-5 text-muted-foreground">{mcpToolDescriptionSummary(tool.description)}</div>
+                {mcpToolDescriptionNeedsDetails(tool.description) ? (
+                  <details className="group">
+                    <summary className="cursor-pointer text-xs text-muted-foreground transition-colors hover:text-foreground">
+                      {t("apps.mcpFullDescription")}
+                    </summary>
+                    <div className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-background/80 p-2 text-[11px] leading-4 text-muted-foreground">
+                      {tool.description}
+                    </div>
+                  </details>
+                ) : null}
+              </>
+            ) : null}
             {tool.providerName ? (
               <div className="truncate font-mono text-[11px] text-muted-foreground" title={tool.providerName}>
                 {t("apps.mcpProviderToolName")}: {tool.providerName}
@@ -1388,6 +1388,18 @@ function formatMCPInputSchema(schema: unknown) {
   } catch {
     return String(schema);
   }
+}
+
+function mcpToolDescriptionSummary(description: string) {
+  const text = description.replace(/\s+/g, " ").trim();
+  if (text.length <= 260) {
+    return text;
+  }
+  return `${text.slice(0, 257).trimEnd()}...`;
+}
+
+function mcpToolDescriptionNeedsDetails(description: string) {
+  return description.replace(/\s+/g, " ").trim().length > 260 || description.includes("\n");
 }
 
 function AppSkillsSection({
