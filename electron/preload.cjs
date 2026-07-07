@@ -10,6 +10,15 @@ contextBridge.exposeInMainWorld("puddingElectronTheme", {
   },
 });
 
+contextBridge.exposeInMainWorld("puddingElectronShell", {
+  isFullscreen: () => ipcRenderer.invoke("pudding:shell:is-fullscreen"),
+  onFullscreenChanged: (listener) => {
+    const wrapped = (_event, fullscreen) => listener(Boolean(fullscreen));
+    ipcRenderer.on("pudding:shell:fullscreen", wrapped);
+    return () => ipcRenderer.off("pudding:shell:fullscreen", wrapped);
+  },
+});
+
 contextBridge.exposeInMainWorld("puddingElectronBrowser", {
   ensure: (request) => ipcRenderer.invoke("pudding:browser:ensure", request),
   attach: (request) => ipcRenderer.invoke("pudding:browser:attach", request),

@@ -120,9 +120,11 @@ function createMainWindow() {
   window.webContents.on("did-finish-load", () => {
     if (isTrustedRendererURL(window.webContents.getURL())) {
       window.webContents.send("pudding:theme:updated", themeState());
+      sendShellFullscreenState(window);
     }
   });
   bindWindowState(window);
+  bindShellState(window);
   window.on("close", (event) => {
     saveWindowState(window);
     if (process.platform === "darwin" && !quitting) {
@@ -161,6 +163,18 @@ function bindWindowState(window) {
   window.on("maximize", scheduleSave);
   window.on("unmaximize", scheduleSave);
   window.on("leave-full-screen", scheduleSave);
+}
+
+function bindShellState(window) {
+  window.on("enter-full-screen", () => sendShellFullscreenState(window));
+  window.on("leave-full-screen", () => sendShellFullscreenState(window));
+}
+
+function sendShellFullscreenState(window) {
+  if (!window || window.webContents.isDestroyed() || !isTrustedRendererURL(window.webContents.getURL())) {
+    return;
+  }
+  window.webContents.send("pudding:shell:fullscreen", window.isFullScreen());
 }
 
 function readWindowState() {
@@ -243,6 +257,11 @@ ipcMain.handle("pudding:theme:set", (event, theme) => {
   nativeTheme.themeSource = themePreference;
   broadcastThemeState();
   return themeState();
+});
+
+ipcMain.handle("pudding:shell:is-fullscreen", (event) => {
+  const window = assertTrustedSender(event);
+  return window.isFullScreen();
 });
 
 ipcMain.handle("pudding:browser:ensure", (event, request) => {

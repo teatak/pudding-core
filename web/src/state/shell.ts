@@ -6,6 +6,17 @@ const SHELL_KEY = "pudding.shell";
 
 type WailsRuntime = typeof import("@wailsio/runtime");
 
+type ElectronShellBridge = {
+  isFullscreen: () => Promise<boolean>;
+  onFullscreenChanged: (listener: (fullscreen: boolean) => void) => () => void;
+};
+
+declare global {
+  interface Window {
+    puddingElectronShell?: ElectronShellBridge;
+  }
+}
+
 export function initShellMode() {
   const fromURL = consumeLaunchParam("shell");
   if (fromURL) {
@@ -19,6 +30,25 @@ export function initShellMode() {
   if (shell === "mac") {
     void initMacFullscreenTracking();
     void initNoZoomRectsTracking();
+  } else if (shell === "electron-mac") {
+    void initElectronFullscreenTracking();
+  }
+}
+
+async function initElectronFullscreenTracking() {
+  const bridge = typeof window === "undefined" ? undefined : window.puddingElectronShell;
+  if (!bridge) {
+    return;
+  }
+  const apply = (fullscreen: boolean) => {
+    document.documentElement.toggleAttribute("data-fullscreen", fullscreen);
+  };
+  const off = bridge.onFullscreenChanged(apply);
+  window.addEventListener("beforeunload", off, { once: true });
+  try {
+    apply(await bridge.isFullscreen());
+  } catch {
+    apply(false);
   }
 }
 
