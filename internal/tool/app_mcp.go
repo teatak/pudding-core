@@ -13,6 +13,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"sync"
@@ -56,6 +58,13 @@ type AppMCPRunner struct {
 type appMCPDiscoveredTool struct {
 	binding    *app.EndpointBinding
 	remoteName string
+}
+
+type appMCPClient interface {
+	initialize(ctx context.Context) error
+	listTools(ctx context.Context) ([]appMCPRemoteTool, error)
+	call(ctx context.Context, method string, params any) (json.RawMessage, error)
+	close()
 }
 
 type appMCPToolCache struct {
@@ -130,7 +139,11 @@ func (r *AppMCPRunner) Call(ctx context.Context, call Call) Result {
 	if err != nil {
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "invalid_arguments", "error": err.Error()})
 	}
-	client := r.newStreamableHTTPClient(tool.binding)
+	client, err := r.newClient(tool.binding)
+	if err != nil {
+		return toolJSON(out, false, map[string]any{"ok": false, "reason": "mcp_endpoint_error", "error": err.Error()})
+	}
+	defer client.close()
 	if err := client.initialize(ctx); err != nil {
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "mcp_initialize_failed", "error": err.Error()})
 	}
@@ -176,7 +189,7 @@ func (r *AppMCPRunner) discoverBindings(ctx context.Context, bindings []*app.End
 	tools := map[string]appMCPDiscoveredTool{}
 	defs := make([]provider.ToolDef, 0)
 	for _, binding := range bindings {
-		if binding == nil || binding.Endpoint.Kind != app.EndpointKindMCP || binding.Endpoint.Transport != app.EndpointTransportStreamableHTTP {
+		if binding == nil || binding.Endpoint.Kind != app.EndpointKindMCP || !appMCPSupportedTransport(binding.Endpoint.Transport) {
 			continue
 		}
 		bindingDefs, bindingTools, err := r.discoverBinding(ctx, binding)
@@ -201,7 +214,11 @@ func (r *AppMCPRunner) discoverBindings(ctx context.Context, bindings []*app.End
 func (r *AppMCPRunner) discoverBinding(ctx context.Context, binding *app.EndpointBinding) ([]provider.ToolDef, []appMCPDiscoveredTool, error) {
 	discoverCtx, cancel := context.WithTimeout(ctx, appMCPDiscoverTimeout)
 	defer cancel()
-	client := r.newStreamableHTTPClient(binding)
+	client, err := r.newClient(binding)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer client.close()
 	if err := client.initialize(discoverCtx); err != nil {
 		return nil, nil, err
 	}
@@ -236,11 +253,30 @@ func (r *AppMCPRunner) discoverBinding(ctx context.Context, binding *app.Endpoin
 	return defs, tools, nil
 }
 
+func (r *AppMCPRunner) newClient(binding *app.EndpointBinding) (appMCPClient, error) {
+	switch strings.TrimSpace(binding.Endpoint.Transport) {
+	case app.EndpointTransportStreamableHTTP:
+		return r.newStreamableHTTPClient(binding), nil
+	case app.EndpointTransportStdio:
+		return r.newStdioClient(binding), nil
+	default:
+		return nil, fmt.Errorf("unsupported mcp transport %q", binding.Endpoint.Transport)
+	}
+}
+
 func (r *AppMCPRunner) newStreamableHTTPClient(binding *app.EndpointBinding) *appMCPHTTPClient {
 	return &appMCPHTTPClient{
 		runner:   r,
 		binding:  cloneAppMCPBinding(binding),
 		client:   r.httpClient,
+		protocol: appMCPProtocolVersion,
+	}
+}
+
+func (r *AppMCPRunner) newStdioClient(binding *app.EndpointBinding) *appMCPStdioClient {
+	return &appMCPStdioClient{
+		runner:   r,
+		binding:  cloneAppMCPBinding(binding),
 		protocol: appMCPProtocolVersion,
 	}
 }
@@ -427,6 +463,284 @@ func (c *appMCPHTTPClient) requestURL() (*url.URL, error) {
 		return nil, err
 	}
 	return target, nil
+}
+
+func (c *appMCPHTTPClient) close() {}
+
+type appMCPStdioClient struct {
+	runner   *AppMCPRunner
+	binding  *app.EndpointBinding
+	protocol string
+
+	mu       sync.Mutex
+	started  bool
+	cmd      *exec.Cmd
+	stdin    io.WriteCloser
+	decoder  *json.Decoder
+	waitDone chan error
+	stderrMu sync.Mutex
+	stderr   strings.Builder
+}
+
+func (c *appMCPStdioClient) initialize(ctx context.Context) error {
+	if err := c.start(ctx); err != nil {
+		return err
+	}
+	raw, err := c.call(ctx, "initialize", map[string]any{
+		"protocolVersion": appMCPProtocolVersion,
+		"capabilities":    map[string]any{},
+		"clientInfo": map[string]any{
+			"name":    "pudding-core",
+			"title":   "Pudding",
+			"version": "1.0.0",
+		},
+	})
+	if err != nil {
+		return err
+	}
+	var out struct {
+		ProtocolVersion string `json:"protocolVersion"`
+	}
+	if err := json.Unmarshal(raw, &out); err == nil && strings.TrimSpace(out.ProtocolVersion) != "" {
+		c.protocol = strings.TrimSpace(out.ProtocolVersion)
+	}
+	return c.notify(ctx, "notifications/initialized", nil)
+}
+
+func (c *appMCPStdioClient) listTools(ctx context.Context) ([]appMCPRemoteTool, error) {
+	var tools []appMCPRemoteTool
+	cursor := ""
+	for page := 0; page < 20; page++ {
+		params := map[string]any{}
+		if cursor != "" {
+			params["cursor"] = cursor
+		}
+		raw, err := c.call(ctx, "tools/list", params)
+		if err != nil {
+			return nil, err
+		}
+		var out struct {
+			Tools      []appMCPRemoteTool `json:"tools"`
+			NextCursor string             `json:"nextCursor"`
+		}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return nil, err
+		}
+		tools = append(tools, out.Tools...)
+		if len(tools) >= appMCPMaxTools {
+			return tools[:appMCPMaxTools], nil
+		}
+		cursor = strings.TrimSpace(out.NextCursor)
+		if cursor == "" {
+			return tools, nil
+		}
+	}
+	return tools, nil
+}
+
+func (c *appMCPStdioClient) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	if err := c.start(ctx); err != nil {
+		return nil, err
+	}
+	id := fmt.Sprintf("%d", c.runner.nextID.Add(1))
+	if err := c.write(appMCPRPCMessage{
+		JSONRPC: "2.0",
+		ID:      id,
+		Method:  method,
+		Params:  params,
+	}); err != nil {
+		return nil, err
+	}
+	return c.readResponse(ctx, id)
+}
+
+func (c *appMCPStdioClient) notify(ctx context.Context, method string, params any) error {
+	if err := c.start(ctx); err != nil {
+		return err
+	}
+	return c.write(appMCPRPCMessage{
+		JSONRPC: "2.0",
+		Method:  method,
+		Params:  params,
+	})
+}
+
+func (c *appMCPStdioClient) start(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.started {
+		return nil
+	}
+	if c == nil || c.binding == nil {
+		return errors.New("mcp endpoint unavailable")
+	}
+	command := strings.TrimSpace(c.binding.Endpoint.Command)
+	if command == "" {
+		return errors.New("stdio mcp endpoint command is required")
+	}
+	cmd := exec.CommandContext(ctx, command, c.binding.Endpoint.Args...)
+	cmd.Env = appMCPStdioEnv(c.binding.Endpoint.Env)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		_ = stdin.Close()
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stderr.Close()
+		return err
+	}
+	c.cmd = cmd
+	c.stdin = stdin
+	c.decoder = json.NewDecoder(stdout)
+	c.waitDone = make(chan error, 1)
+	c.started = true
+	go c.drainStderr(stderr)
+	go func() {
+		c.waitDone <- cmd.Wait()
+		close(c.waitDone)
+	}()
+	return nil
+}
+
+func (c *appMCPStdioClient) write(msg appMCPRPCMessage) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.stdin == nil {
+		return errors.New("stdio mcp stdin unavailable")
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if _, err := c.stdin.Write(data); err != nil {
+		return fmt.Errorf("write stdio mcp request: %w", err)
+	}
+	return nil
+}
+
+func (c *appMCPStdioClient) readResponse(ctx context.Context, id string) (json.RawMessage, error) {
+	for {
+		got, err := c.readEnvelope(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if len(got.ID) == 0 {
+			continue
+		}
+		if !appMCPIDMatches(got.ID, id) {
+			continue
+		}
+		if got.Error != nil {
+			return nil, errors.New(got.Error.Message)
+		}
+		if got.Result == nil {
+			return nil, errors.New("mcp response missing result")
+		}
+		return got.Result, nil
+	}
+}
+
+func (c *appMCPStdioClient) readEnvelope(ctx context.Context) (rpcEnvelope, error) {
+	type decodedEnvelope struct {
+		envelope rpcEnvelope
+		err      error
+	}
+	ch := make(chan decodedEnvelope, 1)
+	go func() {
+		var envelope rpcEnvelope
+		err := c.decoder.Decode(&envelope)
+		ch <- decodedEnvelope{envelope: envelope, err: err}
+	}()
+	select {
+	case got := <-ch:
+		if got.err != nil {
+			if detail := c.stderrText(); detail != "" {
+				return rpcEnvelope{}, fmt.Errorf("read stdio mcp response: %w; stderr: %s", got.err, detail)
+			}
+			return rpcEnvelope{}, fmt.Errorf("read stdio mcp response: %w", got.err)
+		}
+		return got.envelope, nil
+	case <-ctx.Done():
+		return rpcEnvelope{}, ctx.Err()
+	case err, ok := <-c.waitDone:
+		if !ok {
+			return rpcEnvelope{}, errors.New("stdio mcp process exited")
+		}
+		if err != nil {
+			if detail := c.stderrText(); detail != "" {
+				return rpcEnvelope{}, fmt.Errorf("stdio mcp process exited: %w; stderr: %s", err, detail)
+			}
+			return rpcEnvelope{}, fmt.Errorf("stdio mcp process exited: %w", err)
+		}
+		return rpcEnvelope{}, errors.New("stdio mcp process exited")
+	}
+}
+
+func (c *appMCPStdioClient) close() {
+	c.mu.Lock()
+	if c.stdin != nil {
+		_ = c.stdin.Close()
+		c.stdin = nil
+	}
+	cmd := c.cmd
+	waitDone := c.waitDone
+	c.mu.Unlock()
+	if cmd == nil || waitDone == nil {
+		return
+	}
+	select {
+	case <-waitDone:
+	case <-time.After(500 * time.Millisecond):
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		<-waitDone
+	}
+}
+
+func (c *appMCPStdioClient) drainStderr(stderr io.Reader) {
+	data, _ := io.ReadAll(io.LimitReader(stderr, 16*1024))
+	if len(data) == 0 {
+		return
+	}
+	c.stderrMu.Lock()
+	defer c.stderrMu.Unlock()
+	c.stderr.WriteString(string(data))
+}
+
+func (c *appMCPStdioClient) stderrText() string {
+	c.stderrMu.Lock()
+	defer c.stderrMu.Unlock()
+	return strings.TrimSpace(c.stderr.String())
+}
+
+func appMCPStdioEnv(extra map[string]string) []string {
+	env := os.Environ()
+	if len(extra) == 0 {
+		return env
+	}
+	keys := make([]string, 0, len(extra))
+	for key := range extra {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		env = append(env, key+"="+extra[key])
+	}
+	return env
 }
 
 type appMCPRPCMessage struct {
@@ -651,17 +965,22 @@ func appMCPCacheTTL(defs []provider.ToolDef) time.Duration {
 func appMCPBindingsCacheKey(bindings []*app.EndpointBinding) string {
 	parts := make([]string, 0, len(bindings))
 	for _, binding := range bindings {
-		if binding == nil || binding.Endpoint.Kind != app.EndpointKindMCP || binding.Endpoint.Transport != app.EndpointTransportStreamableHTTP {
+		if binding == nil || binding.Endpoint.Kind != app.EndpointKindMCP || !appMCPSupportedTransport(binding.Endpoint.Transport) {
 			continue
 		}
 		fields := appMCPMapSignature(binding.ConnectionFields)
 		headers := appMCPMapSignature(binding.Endpoint.Headers)
+		env := appMCPMapSignature(binding.Endpoint.Env)
+		args := appMCPSliceSignature(binding.Endpoint.Args)
 		parts = append(parts, strings.Join([]string{
 			binding.AppID,
 			binding.ConnectionID,
 			binding.EndpointName,
 			binding.Endpoint.Transport,
 			binding.Endpoint.URL,
+			binding.Endpoint.Command,
+			args,
+			env,
 			strings.TrimSpace(binding.Auth.Type),
 			fields,
 			headers,
@@ -674,6 +993,15 @@ func appMCPBindingsCacheKey(bindings []*app.EndpointBinding) string {
 		_, _ = h.Write([]byte{0})
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+func appMCPSupportedTransport(transport string) bool {
+	switch strings.TrimSpace(transport) {
+	case app.EndpointTransportStreamableHTTP, app.EndpointTransportStdio:
+		return true
+	default:
+		return false
+	}
 }
 
 func appMCPMapSignature(values map[string]string) string {
@@ -693,6 +1021,13 @@ func appMCPMapSignature(values map[string]string) string {
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+func appMCPSliceSignature(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return strings.Join(values, "\x00")
 }
 
 func cloneAppMCPToolDefs(in []provider.ToolDef) []provider.ToolDef {

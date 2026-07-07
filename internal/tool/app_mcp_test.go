@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -123,6 +124,90 @@ func TestAppMCPRunnerDiscoversAndCallsStreamableHTTPTool(t *testing.T) {
 	})
 	if !res.Ok || !strings.Contains(res.Content, `"ok":true`) || !sawCall {
 		t.Fatalf("unexpected result: %+v sawCall=%v", res, sawCall)
+	}
+}
+
+func TestAppMCPRunnerDiscoversAndCallsStdioTool(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	runner := NewAppMCPRunner(fakeAppMCPSource{bindings: []*app.EndpointBinding{{
+		AppID:        "local",
+		ConnectionID: "local-main",
+		EndpointName: "local_mcp",
+		Endpoint: app.Endpoint{
+			Kind:      app.EndpointKindMCP,
+			Transport: app.EndpointTransportStdio,
+			Command:   os.Args[0],
+			Args:      []string{"-test.run=TestAppMCPStdioServerHelper", "--"},
+			Env:       map[string]string{"PUDDING_APP_MCP_STDIO_HELPER": "1", "FAKE_MCP_TOKEN": "abc"},
+		},
+	}}})
+
+	defs, err := runner.Definitions(ctx, "session-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) != 1 || !strings.HasPrefix(defs[0].Name, appMCPToolPrefix) {
+		t.Fatalf("unexpected definitions: %+v", defs)
+	}
+
+	res := runner.Call(ctx, Call{
+		SessionID: "session-1",
+		CallID:    "call-stdio",
+		Name:      defs[0].Name,
+		Args:      json.RawMessage(`{"query":"hello"}`),
+	})
+	if !res.Ok || !strings.Contains(res.Content, "called hello") {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+}
+
+func TestAppMCPStdioServerHelper(t *testing.T) {
+	if os.Getenv("PUDDING_APP_MCP_STDIO_HELPER") != "1" {
+		return
+	}
+	if os.Getenv("FAKE_MCP_TOKEN") != "abc" {
+		t.Fatalf("missing env")
+	}
+	dec := json.NewDecoder(os.Stdin)
+	enc := json.NewEncoder(os.Stdout)
+	for {
+		var req struct {
+			ID     string         `json:"id"`
+			Method string         `json:"method"`
+			Params map[string]any `json:"params"`
+		}
+		if err := dec.Decode(&req); err != nil {
+			return
+		}
+		if req.ID == "" {
+			continue
+		}
+		var result any
+		switch req.Method {
+		case "initialize":
+			result = map[string]any{
+				"protocolVersion": "2025-06-18",
+				"serverInfo":      map[string]any{"name": "stdio-test", "version": "1.0"},
+				"capabilities":    map[string]any{"tools": map[string]any{}},
+			}
+		case "tools/list":
+			result = map[string]any{"tools": []map[string]any{{
+				"name":        "local_search",
+				"description": "Local search",
+				"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}},
+			}}}
+		case "tools/call":
+			args, _ := req.Params["arguments"].(map[string]any)
+			query, _ := args["query"].(string)
+			result = map[string]any{"content": []map[string]any{{"type": "text", "text": "called " + query}}}
+		default:
+			result = map[string]any{}
+		}
+		if err := enc.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result}); err != nil {
+			return
+		}
 	}
 }
 
