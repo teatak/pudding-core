@@ -176,7 +176,7 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 	endpointName = strings.TrimSpace(endpointName)
 	connectionRef = strings.TrimSpace(connectionRef)
 	sessionID = strings.TrimSpace(sessionID)
-	if s == nil || s.connections == nil {
+	if s == nil {
 		return nil, errors.New("app service unavailable")
 	}
 	if sessionID == "" || endpointName == "" {
@@ -187,9 +187,12 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 		return nil, err
 	}
 	var matches []*EndpointBinding
-	connections, err := s.connections.ListAppConnections(ctx)
-	if err != nil {
-		return nil, err
+	var connections []*Connection
+	if s.connections != nil {
+		connections, err = s.connections.ListAppConnections(ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
 	allChoices := make([]ConnectionChoice, 0)
 	endpointSeen := false
@@ -202,6 +205,12 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 			continue
 		}
 		endpointSeen = true
+		if connectionRef == "" {
+			if binding, ok := connectionlessEndpointBinding(def, endpointName, endpoint); ok {
+				matches = append(matches, binding)
+				continue
+			}
+		}
 		for _, conn := range connections {
 			if conn == nil || conn.AppID != def.ID {
 				continue
@@ -210,15 +219,7 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 			if connectionRef != "" && !connectionMatches(conn, connectionRef) {
 				continue
 			}
-			matches = append(matches, &EndpointBinding{
-				AppID:               def.ID,
-				ConnectionID:        conn.ID,
-				EndpointName:        endpointName,
-				Endpoint:            endpoint,
-				Auth:                CloneAuth(conn.Auth),
-				ConnectionFields:    cloneStringMap(conn.Fields),
-				ConnectionFieldDefs: connectionFieldDefs(def.Connection),
-			})
+			matches = append(matches, endpointBindingForConnection(def, endpointName, endpoint, conn))
 		}
 	}
 	switch len(matches) {
@@ -237,6 +238,9 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 	case 1:
 		return matches[0], nil
 	default:
+		if len(allChoices) == 0 {
+			return nil, &EndpointResolveError{Reason: "endpoint_ambiguous", Endpoint: endpointName}
+		}
 		return nil, &EndpointResolveError{Reason: "connection_required", Endpoint: endpointName, Connection: connectionRef, Connections: dedupeConnectionChoices(allChoices)}
 	}
 }
@@ -244,7 +248,7 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 func (s *Service) ListEndpointBindings(ctx context.Context, sessionID, kind string) ([]*EndpointBinding, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	kind = strings.TrimSpace(kind)
-	if s == nil || s.connections == nil {
+	if s == nil {
 		return nil, errors.New("app service unavailable")
 	}
 	if sessionID == "" {
@@ -254,9 +258,12 @@ func (s *Service) ListEndpointBindings(ctx context.Context, sessionID, kind stri
 	if err != nil {
 		return nil, err
 	}
-	connections, err := s.connections.ListAppConnections(ctx)
-	if err != nil {
-		return nil, err
+	var connections []*Connection
+	if s.connections != nil {
+		connections, err = s.connections.ListAppConnections(ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
 	out := make([]*EndpointBinding, 0)
 	for _, def := range defs {
@@ -267,23 +274,72 @@ func (s *Service) ListEndpointBindings(ctx context.Context, sessionID, kind stri
 			if kind != "" && endpoint.Kind != kind {
 				continue
 			}
-			for _, conn := range connections {
-				if conn == nil || conn.AppID != def.ID {
-					continue
+			appConnections := connectionsForApp(connections, def.ID)
+			if len(appConnections) == 0 {
+				if binding, ok := connectionlessEndpointBinding(def, endpointName, endpoint); ok {
+					out = append(out, binding)
 				}
-				out = append(out, &EndpointBinding{
-					AppID:               def.ID,
-					ConnectionID:        conn.ID,
-					EndpointName:        endpointName,
-					Endpoint:            endpoint,
-					Auth:                CloneAuth(conn.Auth),
-					ConnectionFields:    cloneStringMap(conn.Fields),
-					ConnectionFieldDefs: connectionFieldDefs(def.Connection),
-				})
+				continue
+			}
+			for _, conn := range appConnections {
+				out = append(out, endpointBindingForConnection(def, endpointName, endpoint, conn))
 			}
 		}
 	}
 	return out, nil
+}
+
+func endpointBindingForConnection(def *Definition, endpointName string, endpoint Endpoint, conn *Connection) *EndpointBinding {
+	if def == nil || conn == nil {
+		return nil
+	}
+	return &EndpointBinding{
+		AppID:               def.ID,
+		ConnectionID:        conn.ID,
+		EndpointName:        endpointName,
+		Endpoint:            endpoint,
+		Auth:                CloneAuth(conn.Auth),
+		ConnectionFields:    cloneStringMap(conn.Fields),
+		ConnectionFieldDefs: connectionFieldDefs(def.Connection),
+	}
+}
+
+func connectionlessEndpointBinding(def *Definition, endpointName string, endpoint Endpoint) (*EndpointBinding, bool) {
+	if !allowsConnectionlessEndpoint(def) {
+		return nil, false
+	}
+	return &EndpointBinding{
+		AppID:        def.ID,
+		EndpointName: endpointName,
+		Endpoint:     endpoint,
+	}, true
+}
+
+func allowsConnectionlessEndpoint(def *Definition) bool {
+	return def != nil && def.Auth != nil && !def.Auth.Required && !hasRequiredConnectionFields(def.Connection)
+}
+
+func hasRequiredConnectionFields(config *ConnectionConfig) bool {
+	if config == nil {
+		return false
+	}
+	for _, field := range config.Fields {
+		if field.Required {
+			return true
+		}
+	}
+	return false
+}
+
+func connectionsForApp(connections []*Connection, appID string) []*Connection {
+	out := make([]*Connection, 0)
+	for _, conn := range connections {
+		if conn == nil || conn.AppID != appID {
+			continue
+		}
+		out = append(out, conn)
+	}
+	return out
 }
 
 func connectionFieldDefs(config *ConnectionConfig) []ConnectionField {

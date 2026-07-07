@@ -178,9 +178,6 @@ func normalizeAuthConfig(raw *AuthConfig) *AuthConfig {
 		}
 		out.Methods = append(out.Methods, method)
 	}
-	if len(out.Methods) == 0 && !out.Required {
-		return nil
-	}
 	return out
 }
 

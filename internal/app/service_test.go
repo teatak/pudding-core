@@ -91,6 +91,35 @@ func TestListEndpointBindingsFiltersKind(t *testing.T) {
 	}
 }
 
+func TestResolveEndpointUsesConnectionlessAppWhenAuthNotRequired(t *testing.T) {
+	homeDir := writeConnectionlessTestApp(t)
+	svc := NewService(homeDir, nil)
+
+	binding, err := svc.ResolveEndpoint(context.Background(), "session-1", "local_mcp", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if binding.AppID != "sequential-thinking" || binding.ConnectionID != "" || binding.Auth.Type != "" {
+		t.Fatalf("unexpected connectionless binding: %+v", binding)
+	}
+	if binding.Endpoint.Kind != EndpointKindMCP || binding.Endpoint.Transport != EndpointTransportStdio {
+		t.Fatalf("unexpected endpoint: %+v", binding.Endpoint)
+	}
+}
+
+func TestListEndpointBindingsIncludesConnectionlessAppWhenAuthNotRequired(t *testing.T) {
+	homeDir := writeConnectionlessTestApp(t)
+	svc := NewService(homeDir, nil)
+
+	bindings, err := svc.ListEndpointBindings(context.Background(), "session-1", EndpointKindMCP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bindings) != 1 || bindings[0].AppID != "sequential-thinking" || bindings[0].ConnectionID != "" || bindings[0].EndpointName != "local_mcp" {
+		t.Fatalf("unexpected bindings: %+v", bindings)
+	}
+}
+
 func TestReadSkillUsesSkillID(t *testing.T) {
 	homeDir := writeTestAppWithSkill(t)
 	svc := NewService(homeDir, nil)
@@ -134,6 +163,30 @@ endpoints:
   github_rest:
     kind: rest
     url: https://api.github.com
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return homeDir
+}
+
+func writeConnectionlessTestApp(t *testing.T) string {
+	t.Helper()
+	homeDir := t.TempDir()
+	appDir := filepath.Join(home.AppsPath(homeDir), "sequential-thinking")
+	if err := os.MkdirAll(appDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, AppFileName), []byte(`
+id: sequential-thinking
+name: Sequential Thinking
+auth:
+  required: false
+endpoints:
+  local_mcp:
+    kind: mcp
+    transport: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}

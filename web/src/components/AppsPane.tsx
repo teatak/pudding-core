@@ -875,6 +875,7 @@ function AppDetail({
   const title = catalogApp ? appRegistryTitle(catalogApp, locale) : app.name;
   const description = (catalogApp ? appRegistryDescription(catalogApp, locale) : "") || app.description;
   const authMethods = appAuthMethods(app);
+  const canManageConnections = appCanManageConnections(app);
   const installedIsPreview = Boolean(app.version && isPreviewVersion(app.version));
 
   return (
@@ -911,10 +912,12 @@ function AppDetail({
           title={t("apps.connections")}
           count={connections.length}
           action={
-            <Button size="sm" type="button" variant="secondary" onClick={onAdd}>
-              <Plus className="size-3.5" />
-              {t("apps.addConnection")}
-            </Button>
+            canManageConnections ? (
+              <Button size="sm" type="button" variant="secondary" onClick={onAdd}>
+                <Plus className="size-3.5" />
+                {t("apps.addConnection")}
+              </Button>
+            ) : null
           }
         >
           {connections.length > 0 ? (
@@ -928,7 +931,7 @@ function AppDetail({
               />
             ))
           ) : (
-            <EmptyLine>{t("apps.noConnections")}</EmptyLine>
+            <EmptyLine>{canManageConnections ? t("apps.noConnections") : t("apps.connectionNotRequired")}</EmptyLine>
           )}
         </DetailSection>
 
@@ -1811,7 +1814,7 @@ function emptyConnectionForm(): ConnectionForm {
   };
 }
 
-function appConnectionFields(app?: AppDefinition | null): AppConnectionField[] {
+function appConnectionFields(app?: Pick<AppDefinition, "connection"> | null): AppConnectionField[] {
   return app?.connection?.fields || [];
 }
 
@@ -1908,6 +1911,10 @@ function appAuthMethods(app?: Pick<AppDefinition, "auth"> | null): AppAuthMethod
       };
     })
     .filter((method) => method.id && method.type);
+}
+
+function appCanManageConnections(app?: Pick<AppDefinition, "auth" | "connection"> | null) {
+  return appAuthMethods(app).length > 0 || appConnectionFields(app).length > 0 || app?.auth?.required !== false;
 }
 
 function defaultAppAuthMethod(methods: AppAuthMethod[]) {
