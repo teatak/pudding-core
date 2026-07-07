@@ -165,6 +165,17 @@ func TestBrowserStateAPITracksRecoverableSessionState(t *testing.T) {
 		t.Fatalf("empty state status=%d state=%+v", resp.StatusCode, state)
 	}
 
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_state/browser/tabs", nil)
+	blankTab := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusCreated || blankTab.URL != "about:blank" {
+		t.Fatalf("blank tab status=%d tab=%+v", resp.StatusCode, blankTab)
+	}
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_state/browser/state", nil)
+	state = decodeJSON[stateResponse](t, resp)
+	if resp.StatusCode != http.StatusOK || !state.HasState || state.TabID != blankTab.ID || state.URL != "about:blank" {
+		t.Fatalf("blank state status=%d state=%+v", resp.StatusCode, state)
+	}
+
 	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_state/browser/open", map[string]string{"url": "https://www.sohu.com/"})
 	tab := decodeJSON[browser.TabSnapshot](t, resp)
 	if resp.StatusCode != http.StatusOK {
@@ -194,6 +205,100 @@ func TestBrowserStateAPITracksRecoverableSessionState(t *testing.T) {
 	}
 	if _, err := st.GetBrowserState(ctx, "sess_state"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("browser state should be cleared: %v", err)
+	}
+}
+
+func TestBlankBrowserTabDoesNotLeakAcrossSessions(t *testing.T) {
+	srv, st, _ := newBrowserTestServer(t)
+	ctx := context.Background()
+	for _, id := range []string{"sess_no_browser", "sess_blank_tab"} {
+		if err := st.CreateSession(ctx, &store.Session{ID: id, Provider: "mock", Model: "mock"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_blank_tab/browser/tabs", nil)
+	blank := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusCreated || blank.SessionID != "sess_blank_tab" || blank.URL != "about:blank" {
+		t.Fatalf("blank tab status=%d tab=%+v", resp.StatusCode, blank)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_no_browser/browser/state", nil)
+	emptyState := decodeJSON[browserStateResp](t, resp)
+	if resp.StatusCode != http.StatusOK || emptyState.HasState || emptyState.SessionID != "sess_no_browser" {
+		t.Fatalf("empty session state leaked status=%d state=%+v", resp.StatusCode, emptyState)
+	}
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_no_browser/browser/tabs", nil)
+	emptyTabs := decodeJSON[browserTabsResp](t, resp)
+	if resp.StatusCode != http.StatusOK || len(emptyTabs.Tabs) != 0 {
+		t.Fatalf("empty session tabs leaked status=%d tabs=%+v", resp.StatusCode, emptyTabs.Tabs)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_blank_tab/browser/state", nil)
+	blankState := decodeJSON[browserStateResp](t, resp)
+	if resp.StatusCode != http.StatusOK || !blankState.HasState || blankState.SessionID != "sess_blank_tab" || blankState.TabID != blank.ID || blankState.URL != "about:blank" {
+		t.Fatalf("blank session state status=%d state=%+v blank=%+v", resp.StatusCode, blankState, blank)
+	}
+}
+
+func TestSyncBrowserTabIgnoresTransientBlankForRealState(t *testing.T) {
+	srv, st, _ := newBrowserTestServer(t)
+	ctx := context.Background()
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_real_sync", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_real_sync/browser/open", map[string]string{"url": "https://example.com/"})
+	opened := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusOK || opened.URL != "https://example.com/" {
+		t.Fatalf("open status=%d tab=%+v", resp.StatusCode, opened)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_real_sync/browser/tabs/"+opened.ID+"/sync", map[string]string{
+		"url":   "about:blank",
+		"title": "",
+	})
+	synced := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusOK || synced.URL != "https://example.com/" {
+		t.Fatalf("transient blank should not replace real state status=%d tab=%+v", resp.StatusCode, synced)
+	}
+	state, err := st.GetBrowserState(ctx, "sess_real_sync")
+	if err != nil || state.TabID != opened.ID || state.URL != "https://example.com/" {
+		t.Fatalf("real browser state was overwritten: state=%+v err=%v", state, err)
+	}
+}
+
+func TestReleaseBrowserTabBlocksStaleSync(t *testing.T) {
+	srv, st, _ := newBrowserTestServer(t)
+	ctx := context.Background()
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_release_sync", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_release_sync/browser/open", map[string]string{"url": "https://example.com/"})
+	opened := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusOK || opened.ID == "" {
+		t.Fatalf("open status=%d tab=%+v", resp.StatusCode, opened)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_release_sync/browser/tabs/"+opened.ID+"/release", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("release status=%d", resp.StatusCode)
+	}
+	if _, err := st.GetBrowserState(ctx, "sess_release_sync"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("release should clear browser state: %v", err)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_release_sync/browser/tabs/"+opened.ID+"/sync", map[string]string{
+		"url":   "https://stale.example/",
+		"title": "Stale",
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("stale sync after release should fail status=%d", resp.StatusCode)
+	}
+	if _, err := st.GetBrowserState(ctx, "sess_release_sync"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("stale sync revived browser state: %v", err)
 	}
 }
 

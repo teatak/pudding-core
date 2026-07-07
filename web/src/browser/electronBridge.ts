@@ -2,21 +2,31 @@ import type { QueryClient } from "@tanstack/react-query";
 
 import type { BrowserTab } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
-import { upsertBrowserTab } from "@/browser/helpers";
+import { browserURLIsBlank, upsertBrowserTab } from "@/browser/helpers";
 import type { BrowserTabsData } from "@/browser/types";
-
-export type ElectronBrowserBounds = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
 
 export type ElectronBrowserRequest = {
   sessionID: string;
   tabID?: string;
   url?: string;
-  bounds?: ElectronBrowserBounds;
+};
+
+export type ElectronWebviewRegisterRequest = ElectronBrowserRequest & {
+  webContentsID: number;
+};
+
+export type ElectronWebviewCaptureRequest = ElectronBrowserRequest & {
+  captureID: string;
+  fullPage?: boolean;
+};
+
+export type ElectronWebviewCaptureResponse = {
+  captureID: string;
+  dataBase64?: string;
+  dataURL?: string;
+  width?: number;
+  height?: number;
+  error?: string;
 };
 
 export type ElectronBrowserSnapshot = {
@@ -34,9 +44,8 @@ export type ElectronBrowserSnapshot = {
 
 export type ElectronBrowserBridge = {
   ensure: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
-  attach: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
-  updateBounds: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot | null>;
-  detach: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot | null>;
+  registerWebview: (request: ElectronWebviewRegisterRequest) => Promise<ElectronBrowserSnapshot>;
+  resolveWebviewCapture?: (response: ElectronWebviewCaptureResponse) => Promise<void>;
   loadURL: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
   back: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
   forward: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
@@ -45,6 +54,7 @@ export type ElectronBrowserBridge = {
   closeTab: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
   closeSession: (request: ElectronBrowserRequest) => Promise<void>;
   onUpdated: (listener: (snapshot: ElectronBrowserSnapshot) => void) => () => void;
+  onWebviewCaptureRequest?: (listener: (request: ElectronWebviewCaptureRequest) => void) => () => void;
 };
 
 declare global {
@@ -53,22 +63,24 @@ declare global {
   }
 }
 
-export function hasElectronNativeBrowser() {
+export function hasElectronWebviewBrowser() {
   return typeof window !== "undefined" && Boolean(window.puddingElectronBrowser);
 }
 
-export function electronNativeBrowser() {
+export function electronBrowserBridge() {
   return typeof window === "undefined" ? undefined : window.puddingElectronBrowser;
 }
 
 export function electronBrowserSnapshotToTab(snapshot: ElectronBrowserSnapshot): BrowserTab {
   const now = new Date().toISOString();
+  const url = snapshot.url || "about:blank";
+  const title = browserURLIsBlank(url) ? "" : snapshot.title || snapshot.url || "about:blank";
   return {
     id: snapshot.tabID || "default",
     sessionID: snapshot.sessionID,
     targetID: snapshot.runtimeID,
-    url: snapshot.url || "about:blank",
-    title: snapshot.title || snapshot.url || "about:blank",
+    url,
+    title,
     mode: "headless",
     canGoBack: snapshot.canGoBack,
     canGoForward: snapshot.canGoForward,
@@ -108,7 +120,12 @@ export function allowElectronBrowserTab(sessionID: string, tabID?: string) {
   gate.add(tabKey);
 }
 
-function electronBrowserSnapshotAllowed(snapshot: ElectronBrowserSnapshot) {
+function electronBrowserSnapshotAllowed(snapshot: ElectronBrowserSnapshot, expectedSessionID?: string) {
+  const snapshotSessionID = snapshot.sessionID.trim();
+  const expected = (expectedSessionID || "").trim();
+  if (expected && snapshotSessionID !== expected) {
+    return false;
+  }
   const gate = electronBrowserSessionGates.get(snapshot.sessionID.trim());
   if (!gate) {
     return true;
@@ -116,8 +133,12 @@ function electronBrowserSnapshotAllowed(snapshot: ElectronBrowserSnapshot) {
   return gate.has((snapshot.tabID || "").trim());
 }
 
-export function cacheElectronBrowserSnapshot(queryClient: QueryClient, snapshot: ElectronBrowserSnapshot): BrowserTab | null {
-  if (!electronBrowserSnapshotAllowed(snapshot)) {
+export function cacheElectronBrowserSnapshot(
+  queryClient: QueryClient,
+  snapshot: ElectronBrowserSnapshot,
+  expectedSessionID?: string,
+): BrowserTab | null {
+  if (!electronBrowserSnapshotAllowed(snapshot, expectedSessionID)) {
     return null;
   }
   if (snapshot.status === "lost") {

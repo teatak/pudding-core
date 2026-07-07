@@ -21,9 +21,8 @@ contextBridge.exposeInMainWorld("puddingElectronShell", {
 
 contextBridge.exposeInMainWorld("puddingElectronBrowser", {
   ensure: (request) => ipcRenderer.invoke("pudding:browser:ensure", request),
-  attach: (request) => ipcRenderer.invoke("pudding:browser:attach", request),
-  updateBounds: (request) => ipcRenderer.invoke("pudding:browser:update-bounds", request),
-  detach: (request) => ipcRenderer.invoke("pudding:browser:detach", request),
+  registerWebview: (request) => ipcRenderer.invoke("pudding:browser:webview-register", request),
+  resolveWebviewCapture: (response) => ipcRenderer.invoke("pudding:browser:webview-capture-result", response),
   loadURL: (request) => ipcRenderer.invoke("pudding:browser:load-url", request),
   back: (request) => ipcRenderer.invoke("pudding:browser:back", request),
   forward: (request) => ipcRenderer.invoke("pudding:browser:forward", request),
@@ -35,5 +34,10 @@ contextBridge.exposeInMainWorld("puddingElectronBrowser", {
     const wrapped = (_event, snapshot) => listener(snapshot);
     ipcRenderer.on("pudding:browser:updated", wrapped);
     return () => ipcRenderer.off("pudding:browser:updated", wrapped);
+  },
+  onWebviewCaptureRequest: (listener) => {
+    const wrapped = (_event, request) => listener(request);
+    ipcRenderer.on("pudding:browser:webview-capture-request", wrapped);
+    return () => ipcRenderer.off("pudding:browser:webview-capture-request", wrapped);
   },
 });

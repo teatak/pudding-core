@@ -243,11 +243,17 @@ func TestBrowserStatePersistsAndClears(t *testing.T) {
 	if state.SessionID != "sess_browser" || state.URL != "https://www.sohu.com/" || state.Title != "搜狐" {
 		t.Fatalf("unexpected browser state: %+v", state)
 	}
-	if _, err := st.PutBrowserState(ctx, store.BrowserStateInput{
+	state, err = st.PutBrowserState(ctx, store.BrowserStateInput{
 		SessionID: "sess_browser",
+		TabID:     "tab_blank",
 		URL:       "about:blank",
-	}); !errors.Is(err, store.ErrInvalidBrowserState) {
-		t.Fatalf("about:blank should not persist as browser state: %v", err)
+		Mode:      "headless",
+	})
+	if err != nil {
+		t.Fatalf("about:blank should persist as blank browser tab: %v", err)
+	}
+	if state.TabID != "tab_blank" || state.URL != "about:blank" || state.Title != "" {
+		t.Fatalf("unexpected blank browser state: %+v", state)
 	}
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
@@ -261,7 +267,7 @@ func TestBrowserStatePersistsAndClears(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.TabID != "tab_1" || state.FaviconURL == "" || state.Mode != "headless" {
+	if state.TabID != "tab_blank" || state.URL != "about:blank" || state.Title != "" || state.Mode != "headless" {
 		t.Fatalf("browser state not persisted: %+v", state)
 	}
 	if err := reopened.ClearBrowserState(ctx, "sess_browser"); err != nil {

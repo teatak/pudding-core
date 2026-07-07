@@ -104,6 +104,7 @@
     --traffic-inset: 0px;
     --toolbar-h: 54px;
     --rail-toggle-left: 11px;
+    --rail-title-gap: 6px;
     --canvas-toggle-right: 13px;
     --canvas-toolbar-pl: 0.75rem;
     --canvas-toolbar-pr: 47px;
@@ -155,15 +156,15 @@
 }
 
 html[data-shell="mac"] {
-    /* 红绿灯本体占位 ~52px,81px 给折叠按钮留出呼吸间距 */
-    --traffic-inset: 81px;
+    /* 红绿灯本体占位 ~52px,72px 让折叠按钮更贴近窗口控件 */
+    --traffic-inset: 72px;
     --toolbar-h: 54px;
     --rail-left-radius: 18px;
 }
 
 html[data-shell="electron-mac"] {
     /* Electron uses trafficLightPosition { x:18, y:18 }; align toolbar to that visual anchor. */
-    --traffic-inset: 81px;
+    --traffic-inset: 72px;
     --toolbar-h: 50px;
     --rail-toggle-left: 11px;
     --canvas-toggle-right: 13px;

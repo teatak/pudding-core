@@ -123,7 +123,9 @@ export function ChatPane({ token, sessionID, draftActive = false, reserveTopRigh
       ? ""
       : t("session.noSelected");
   const headerStyle = {
-    ...(isPrimary && railCollapsed ? { paddingLeft: "calc(var(--traffic-inset) + 3.25rem)" } : {}),
+    ...(isPrimary && railCollapsed
+      ? { paddingLeft: "calc(var(--traffic-inset) + var(--rail-toggle-left) + var(--toolbar-icon-button-size) + var(--rail-title-gap))" }
+      : {}),
     ...(reserveTopRightAction ? { paddingRight: "calc(13px + 2.75rem)" } : {}),
   };
 

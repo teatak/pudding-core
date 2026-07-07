@@ -1275,7 +1275,7 @@ func NormalizeBrowserStateInput(in *BrowserStateInput) error {
 	in.Title = strings.TrimSpace(in.Title)
 	in.FaviconURL = strings.TrimSpace(in.FaviconURL)
 	in.Mode = strings.TrimSpace(in.Mode)
-	if in.SessionID == "" || in.URL == "" || strings.EqualFold(in.URL, "about:blank") {
+	if in.SessionID == "" || in.URL == "" {
 		return ErrInvalidBrowserState
 	}
 	return nil

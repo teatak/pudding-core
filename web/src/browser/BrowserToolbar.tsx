@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, CornerDownLeft, ExternalLink, Loader2, RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
+  APIError,
   backBrowserTab,
   forwardBrowserTab,
   listBrowserTabs,
@@ -15,10 +16,7 @@ import {
   type BrowserTab,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
-import {
-  allowElectronBrowserTab,
-  hasElectronNativeBrowser,
-} from "@/browser/electronBridge";
+import { allowElectronBrowserTab, hasElectronWebviewBrowser } from "@/browser/electronBridge";
 import {
   browserAddressToURL,
   browserDisplayURL,
@@ -36,13 +34,49 @@ import { Input } from "@/components/ui/input";
 import type { CanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
 
+type BrowserOpenAttempt = {
+  url: string;
+};
+
+function browserOpenErrorDescription(attempt: BrowserOpenAttempt | null, error: unknown): string {
+  const lines: string[] = [];
+  if (attempt?.url) {
+    lines.push(`URL: ${attempt.url}`);
+  }
+  const message =
+    error instanceof APIError
+      ? `${error.status} ${error.code}`
+      : error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : "";
+  if (message) {
+    lines.push(`Error: ${message}`);
+  }
+  return lines.join("\n");
+}
+
+function isBrowserNavigationAbortError(error: unknown): boolean {
+  const message =
+    error instanceof APIError
+      ? error.code
+      : error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : "";
+  return message.includes("ERR_ABORTED") || message.includes("(-3)");
+}
+
 export function BrowserToolbar({ token, item }: { token: string; item: CanvasItem }) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const payload = browserPayloadForItem(item);
   const ownerSessionID = payload?.sessionID || item.sourceSessionID;
   const [urlDraft, setURLDraft] = useState(browserDisplayURL(payload?.url));
-  const nativeBrowser = hasElectronNativeBrowser();
+  const lastOpenAttemptRef = useRef<BrowserOpenAttempt | null>(null);
+  const embeddedBrowser = hasElectronWebviewBrowser();
   const tabsQuery = useQuery({
     enabled: Boolean(token && ownerSessionID),
     queryKey: ownerSessionID ? queryKeys.browserTabs(ownerSessionID) : ["browser", "missing-session"],
@@ -59,6 +93,14 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
   const processMode = tabsQuery.data?.processMode || activeTab?.mode || payload?.mode;
   const isExternalBrowser = processMode === "external";
   const actionTabID = activeTab?.id || payload?.tabID;
+  const refreshBrowserQueries = () => {
+    if (!ownerSessionID) {
+      return;
+    }
+    void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(ownerSessionID) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(ownerSessionID) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(ownerSessionID) });
+  };
 
   useEffect(() => {
     if (activeTab?.url) {
@@ -72,7 +114,7 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
     if (!ownerSessionID || tab.sessionID !== ownerSessionID) {
       return;
     }
-    const title = browserTabTitle(tab, payload?.title || t("browser.newTab"));
+    const title = browserTabTitle(tab, payload?.title || t("browser.newTab"), t("browser.newTab"));
     allowElectronBrowserTab(ownerSessionID, tab.id);
     await putCanvasItem(token, ownerSessionID, item.id, {
       id: item.id,
@@ -129,6 +171,7 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
         throw new Error("browser is external");
       }
       const url = browserAddressToURL(urlDraft);
+      lastOpenAttemptRef.current = { url };
       if (activeTab) {
         return openBrowserTab(token, ownerSessionID, activeTab.id, { url });
       }
@@ -137,7 +180,13 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
     onSuccess: (tab) => {
       void persistTab(tab);
     },
-    onError: () => toast.error(t("browser.openFailed")),
+    onError: (error) => {
+      if (isBrowserNavigationAbortError(error)) {
+        refreshBrowserQueries();
+        return;
+      }
+      toast.error(t("browser.openFailed"), { description: browserOpenErrorDescription(lastOpenAttemptRef.current, error) });
+    },
   });
   const navigationMutation = useMutation({
     mutationFn: async (action: BrowserNavigationAction) => {
@@ -156,7 +205,13 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
     onSuccess: (tab) => {
       void persistTab(tab);
     },
-    onError: () => toast.error(t("browser.navigationFailed")),
+    onError: (error) => {
+      if (isBrowserNavigationAbortError(error)) {
+        refreshBrowserQueries();
+        return;
+      }
+      toast.error(t("browser.navigationFailed"), { description: browserOpenErrorDescription(null, error) });
+    },
   });
   const revealMutation = useMutation({
     mutationFn: async () => {
@@ -182,7 +237,7 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
   const navigationDisabled = !activeTab || isExternalBrowser || tabsQuery.isPending || navigationMutation.isPending;
   const backDisabled = navigationDisabled || !activeTab?.canGoBack;
   const forwardDisabled = navigationDisabled || !activeTab?.canGoForward;
-  const revealDisabled = nativeBrowser || revealMutation.isPending || tabsQuery.isPending || (!actionTabID && !urlDraft.trim());
+  const revealDisabled = embeddedBrowser || revealMutation.isPending || tabsQuery.isPending || (!actionTabID && !urlDraft.trim());
   const pendingNavigationAction = navigationMutation.isPending ? navigationMutation.variables : undefined;
   const navButtonClass =
     "h-7 w-7 rounded-md text-muted-foreground [backface-visibility:hidden] [transform:translateZ(0)] [transition-duration:120ms] [transition-property:background-color,color] hover:text-foreground active:translate-y-0";
@@ -200,7 +255,7 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
         }
       }}
     >
-      <div className="grid shrink-0 gap-0.5" style={{ gridTemplateColumns: `repeat(${nativeBrowser ? 3 : 4}, 28px)` }}>
+      <div className="grid shrink-0 gap-0.5" style={{ gridTemplateColumns: `repeat(${embeddedBrowser ? 3 : 4}, 28px)` }}>
         <Button
           aria-label={t("browser.back")}
           className={navButtonClass}
@@ -234,7 +289,7 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
         >
           {pendingNavigationAction === "reload" ? <Loader2 className={`${navIconClass} animate-spin`} /> : <RefreshCw className={navIconClass} />}
         </Button>
-        {nativeBrowser ? null : (
+        {embeddedBrowser ? null : (
           <Button
             aria-label={t("browser.reveal")}
             className={navButtonClass}

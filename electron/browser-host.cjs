@@ -6,64 +6,20 @@ class BrowserHost {
   constructor(onUpdate) {
     this.slots = new Map();
     this.onUpdate = typeof onUpdate === "function" ? onUpdate : () => {};
+    this.captureWebview = null;
+  }
+
+  setWebviewCaptureHandler(handler) {
+    this.captureWebview = typeof handler === "function" ? handler : null;
   }
 
   async ensure(request) {
     const slot = this.ensureSlot(request);
     const url = normalizeURL(request.url);
     if (url && slot.webContents.getURL() !== url) {
-      await slot.webContents.loadURL(url);
+      await loadSlotURL(slot, url);
     }
     return snapshot(slot);
-  }
-
-  async attach(window, request) {
-    const slot = this.ensureSlot(request);
-    const bounds = normalizeBounds(request.bounds);
-    if (slot.attachedWindow && slot.attachedWindow !== window) {
-      detachSlot(slot);
-    }
-    this.detachOtherSlots(window, slot);
-    if (!slot.attachedWindow) {
-      window.contentView.addChildView(slot.view);
-      slot.attachedWindow = window;
-    }
-    slot.view.setBounds(bounds);
-    return snapshot(slot);
-  }
-
-  updateBounds(window, request) {
-    const slot = this.getSlot(request);
-    if (!slot || slot.attachedWindow !== window) {
-      return null;
-    }
-    slot.view.setBounds(normalizeBounds(request.bounds));
-    return snapshot(slot);
-  }
-
-  detach(window, request) {
-    const slot = this.getSlot(request);
-    if (!slot || slot.attachedWindow !== window) {
-      return null;
-    }
-    detachSlot(slot);
-    return snapshot(slot);
-  }
-
-  detachWindow(window) {
-    for (const slot of this.slots.values()) {
-      if (slot.attachedWindow === window) {
-        detachSlot(slot);
-      }
-    }
-  }
-
-  detachOtherSlots(window, activeSlot) {
-    for (const slot of this.slots.values()) {
-      if (slot !== activeSlot && slot.attachedWindow === window) {
-        detachSlot(slot);
-      }
-    }
   }
 
   async loadURL(request) {
@@ -72,7 +28,7 @@ class BrowserHost {
     if (!url || slot.webContents.getURL() === url) {
       return snapshot(slot);
     }
-    await slot.webContents.loadURL(url);
+    await loadSlotURL(slot, url);
     return snapshot(slot);
   }
 
@@ -81,7 +37,7 @@ class BrowserHost {
     if (!slot) {
       throw new Error("browser tab not found");
     }
-    if (!slot.webContents.isDestroyed() && slot.webContents.canGoBack()) {
+    if (!slot.webContents.isDestroyed() && webContentsCanGoBack(slot.webContents)) {
       slot.webContents.goBack();
     }
     return snapshot(slot);
@@ -92,7 +48,7 @@ class BrowserHost {
     if (!slot) {
       throw new Error("browser tab not found");
     }
-    if (!slot.webContents.isDestroyed() && slot.webContents.canGoForward()) {
+    if (!slot.webContents.isDestroyed() && webContentsCanGoForward(slot.webContents)) {
       slot.webContents.goForward();
     }
     return snapshot(slot);
@@ -129,7 +85,23 @@ class BrowserHost {
   async screenshot(request) {
     const slot = this.requireLiveSlot(request);
     const viewport = await viewportMetrics(slot);
-    const dataBase64 = await captureScreenshot(slot, Boolean(request.fullPage));
+    const fullPage = Boolean(request.fullPage);
+    let dataBase64 = "";
+    if (this.captureWebview) {
+      try {
+        const result = await this.captureWebview({
+          sessionID: slot.sessionID,
+          tabID: slot.tabID,
+          fullPage,
+        });
+        dataBase64 = assertPNGData(result?.dataBase64 || dataURLToBase64(result?.dataURL), "webview.capturePage");
+      } catch (error) {
+        throw new Error(`renderer capture failed: ${errorMessage(error)}`);
+      }
+    }
+    if (!dataBase64) {
+      dataBase64 = await captureScreenshot(slot, fullPage);
+    }
     const buffer = Buffer.from(dataBase64, "base64");
     const size = imageSize(buffer);
     return {
@@ -221,11 +193,43 @@ class BrowserHost {
   }
 
   destroySlot(slot) {
-    detachSlot(slot);
     this.slots.delete(slot.key);
     if (!slot.webContents.isDestroyed()) {
       slot.webContents.destroy();
     }
+  }
+
+  async registerWebContents(request, webContents) {
+    if (!webContents || webContents.isDestroyed()) {
+      throw new Error("browser webview target not found");
+    }
+    const key = slotKey(request);
+    const sessionID = normalizeSessionID(request.sessionID);
+    const tabID = normalizeTabID(request.tabID);
+    const existing = this.slots.get(key);
+    if (existing?.webContents === webContents) {
+      return snapshot(existing);
+    }
+    const previousURL = existing && !existing.webContents.isDestroyed() ? existing.webContents.getURL() : "";
+    if (existing) {
+      this.destroySlot(existing);
+    }
+    const slot = {
+      key,
+      sessionID,
+      tabID,
+      headlessView: null,
+      webContents,
+      version: 0,
+    };
+    this.bindSlotEvents(slot);
+    this.slots.set(key, slot);
+    const targetURL = normalizeURL(request.url) || normalizeURL(previousURL);
+    if (targetURL && targetURL !== webContents.getURL()) {
+      await loadSlotURL(slot, targetURL);
+    }
+    this.noteUpdated(slot);
+    return snapshot(slot);
   }
 
   getSlot(request) {
@@ -249,7 +253,8 @@ class BrowserHost {
     if (existing && !existing.webContents.isDestroyed()) {
       return existing;
     }
-    const view = new WebContentsView({
+    // Only used as an invisible tool target before the renderer webview registers.
+    const headlessView = new WebContentsView({
       webPreferences: {
         partition: browserPartition,
         contextIsolation: true,
@@ -261,31 +266,34 @@ class BrowserHost {
       key,
       sessionID: normalizeSessionID(request.sessionID),
       tabID: normalizeTabID(request.tabID),
-      view,
-      webContents: view.webContents,
-      attachedWindow: null,
+      headlessView,
+      webContents: headlessView.webContents,
       version: 0,
     };
-    view.webContents.setWindowOpenHandler(({ url }) => {
-      void view.webContents.loadURL(normalizeURL(url) || "about:blank");
-      return { action: "deny" };
-    });
-    view.webContents.on("did-navigate", () => {
-      this.noteUpdated(slot);
-    });
-    view.webContents.on("did-navigate-in-page", () => {
-      this.noteUpdated(slot);
-    });
-    view.webContents.on("page-title-updated", () => {
-      this.noteUpdated(slot);
-    });
-    view.webContents.on("destroyed", () => {
-      if (this.slots.get(key) === slot) {
-        this.slots.delete(key);
-      }
-    });
+    this.bindSlotEvents(slot);
     this.slots.set(key, slot);
     return slot;
+  }
+
+  bindSlotEvents(slot) {
+    slot.webContents.setWindowOpenHandler(({ url }) => {
+      void loadSlotURL(slot, normalizeURL(url) || "about:blank").catch(() => undefined);
+      return { action: "deny" };
+    });
+    slot.webContents.on("did-navigate", () => {
+      this.noteUpdated(slot);
+    });
+    slot.webContents.on("did-navigate-in-page", () => {
+      this.noteUpdated(slot);
+    });
+    slot.webContents.on("page-title-updated", () => {
+      this.noteUpdated(slot);
+    });
+    slot.webContents.on("destroyed", () => {
+      if (this.slots.get(slot.key) === slot) {
+        this.slots.delete(slot.key);
+      }
+    });
   }
 
   noteUpdated(slot) {
@@ -314,6 +322,47 @@ async function evaluateJSON(slot, script) {
   return raw || {};
 }
 
+async function loadSlotURL(slot, url) {
+  try {
+    await slot.webContents.loadURL(url);
+  } catch (error) {
+    if (!isNavigationAbort(error)) {
+      throw error;
+    }
+    await waitForNavigationToSettle(slot.webContents);
+  }
+}
+
+function isNavigationAbort(error) {
+  const message = String(error?.message || error || "");
+  return message.includes("ERR_ABORTED") || message.includes("(-3)");
+}
+
+function waitForNavigationToSettle(webContents) {
+  if (!webContents || webContents.isDestroyed()) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    let done = false;
+    let timer = 0;
+    const finish = () => {
+      if (done) {
+        return;
+      }
+      done = true;
+      clearTimeout(timer);
+      webContents.removeListener("did-stop-loading", finish);
+      webContents.removeListener("did-finish-load", finish);
+      webContents.removeListener("destroyed", finish);
+      resolve();
+    };
+    webContents.once("did-stop-loading", finish);
+    webContents.once("did-finish-load", finish);
+    webContents.once("destroyed", finish);
+    timer = setTimeout(finish, 500);
+  });
+}
+
 async function viewportMetrics(slot) {
   try {
     const metrics = await evaluateJSON(
@@ -331,18 +380,41 @@ async function viewportMetrics(slot) {
 }
 
 async function captureScreenshot(slot, fullPage) {
-  try {
-    return await withDebugger(slot, (send) =>
-      send("Page.captureScreenshot", {
-        format: "png",
-        fromSurface: true,
-        captureBeyondViewport: fullPage,
-      }).then((result) => result.data),
-    );
-  } catch {
-    const image = await slot.webContents.capturePage();
-    return image.toPNG().toString("base64");
+  const errors = [];
+  if (!fullPage) {
+    try {
+      return await capturePagePNG(slot);
+    } catch (error) {
+      errors.push(errorMessage(error));
+    }
   }
+
+  for (const fromSurface of [false, true]) {
+    try {
+      return await captureCDPScreenshot(slot, fullPage, fromSurface);
+    } catch (error) {
+      errors.push(errorMessage(error));
+    }
+  }
+
+  try {
+    return await capturePagePNG(slot);
+  } catch (error) {
+    errors.push(errorMessage(error));
+  }
+
+  throw new Error(`screenshot failed: ${errors.filter(Boolean).join("; ")}`);
+}
+
+async function captureCDPScreenshot(slot, fullPage, fromSurface) {
+  const data = await withDebugger(slot, (send) =>
+    send("Page.captureScreenshot", {
+      format: "png",
+      fromSurface,
+      captureBeyondViewport: fullPage,
+    }).then((result) => result.data),
+  );
+  return assertPNGData(data, `Page.captureScreenshot fromSurface=${fromSurface}`);
 }
 
 async function withDebugger(slot, fn) {
@@ -352,12 +424,62 @@ async function withDebugger(slot, fn) {
     debug.attach("1.3");
   }
   try {
-    return await fn((method, params) => debug.sendCommand(method, params || {}));
+    return await fn((method, params) =>
+      withTimeout(debug.sendCommand(method, params || {}), 5000, `${method} timed out`),
+    );
   } finally {
     if (!wasAttached && debug.isAttached()) {
       debug.detach();
     }
   }
+}
+
+async function capturePagePNG(slot) {
+  const viewport = await viewportMetrics(slot);
+  const rect =
+    viewport.width > 0 && viewport.height > 0
+      ? { x: 0, y: 0, width: viewport.width, height: viewport.height }
+      : undefined;
+  const image = await withTimeout(slot.webContents.capturePage(rect), 5000, "capturePage timed out");
+  if (!image || typeof image.toPNG !== "function" || image.isEmpty?.()) {
+    throw new Error("capturePage returned empty image");
+  }
+  return assertPNGData(image.toPNG().toString("base64"), "capturePage");
+}
+
+function withTimeout(promise, ms, message) {
+  let timer = 0;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms);
+    }),
+  ]).finally(() => {
+    clearTimeout(timer);
+  });
+}
+
+function assertPNGData(dataBase64, source) {
+  const data = String(dataBase64 || "");
+  if (!data) {
+    throw new Error(`${source} returned empty image`);
+  }
+  const size = imageSize(Buffer.from(data, "base64"));
+  if (!size.width || !size.height) {
+    throw new Error(`${source} returned invalid image`);
+  }
+  return data;
+}
+
+function dataURLToBase64(dataURL) {
+  const value = String(dataURL || "");
+  const marker = "base64,";
+  const index = value.indexOf(marker);
+  return index >= 0 ? value.slice(index + marker.length) : "";
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error || "");
 }
 
 async function dispatchMouseClick(slot, x, y) {
@@ -384,20 +506,6 @@ async function dispatchMouseClick(slot, x, y) {
   }
 }
 
-function detachSlot(slot) {
-  const window = slot.attachedWindow;
-  if (!window) {
-    return;
-  }
-  try {
-    window.contentView.removeChildView(slot.view);
-  } catch {
-    // The renderer may race with window teardown; keeping the webContents alive
-    // is enough for this POC.
-  }
-  slot.attachedWindow = null;
-}
-
 function slotKey(request) {
   const sessionID = normalizeSessionID(request.sessionID);
   const tabID = normalizeTabID(request.tabID);
@@ -418,15 +526,6 @@ function slotBelongsToSession(slot, sessionID) {
 
 function normalizeTabID(tabID) {
   return String(tabID || "default").trim() || "default";
-}
-
-function normalizeBounds(bounds) {
-  return {
-    x: Math.max(0, Math.round(Number(bounds?.x) || 0)),
-    y: Math.max(0, Math.round(Number(bounds?.y) || 0)),
-    width: Math.max(0, Math.round(Number(bounds?.width) || 0)),
-    height: Math.max(0, Math.round(Number(bounds?.height) || 0)),
-  };
 }
 
 function normalizeClickMethod(method) {
@@ -641,11 +740,11 @@ function snapshot(slot) {
   return {
     sessionID: slot.sessionID,
     tabID: slot.tabID,
-    status: destroyed ? "lost" : slot.attachedWindow ? "live_internal" : "detached",
+    status: destroyed ? "lost" : "detached",
     url: destroyed ? "" : webContents.getURL(),
     title: destroyed ? "" : webContents.getTitle(),
-    canGoBack: destroyed ? false : webContents.canGoBack(),
-    canGoForward: destroyed ? false : webContents.canGoForward(),
+    canGoBack: destroyed ? false : webContentsCanGoBack(webContents),
+    canGoForward: destroyed ? false : webContentsCanGoForward(webContents),
     profileID: "default",
     runtimeID: destroyed ? "" : `webContents:${webContents.id}`,
     version: slot.version,
@@ -680,6 +779,20 @@ function lostSnapshotFromRequest(request) {
     runtimeID: "",
     version: 0,
   };
+}
+
+function webContentsCanGoBack(webContents) {
+  if (webContents.navigationHistory?.canGoBack) {
+    return Boolean(webContents.navigationHistory.canGoBack());
+  }
+  return Boolean(webContents.canGoBack?.());
+}
+
+function webContentsCanGoForward(webContents) {
+  if (webContents.navigationHistory?.canGoForward) {
+    return Boolean(webContents.navigationHistory.canGoForward());
+  }
+  return Boolean(webContents.canGoForward?.());
 }
 
 module.exports = { BrowserHost };

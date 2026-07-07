@@ -2,7 +2,7 @@
 
 > 状态:P4 CDP Tool Parity 已接入,P5 Multi-session Lifecycle 进行中。  
 > 日期:2026-07-07。  
-> 决策:迁移到 Electron shell,浏览器显示改为原生 `WebContentsView`;保留 Go daemon 作为业务核心。
+> 决策:迁移到 Electron shell,浏览器显示改为 Electron `<webview>`;保留 Go daemon 作为业务核心。
 
 ## 背景
 
@@ -22,7 +22,7 @@ Chrome CDP screencast -> WebSocket -> React img/canvas
 新方向:
 
 ```text
-Electron native WebContentsView -> 直接显示真实 Chromium 页面
+Electron <webview> -> 直接显示真实 Chromium 页面
 Go daemon -> 继续负责 sessions / messages / tools / storage
 ```
 
@@ -33,7 +33,7 @@ Go daemon -> 继续负责 sessions / messages / tools / storage
 - 所有 session 共用一个持久 profile,登录态全局复用。
 - 每个 session 拥有自己的 browser slot/tab,切 session 不串页。
 - tab 切换、小组件切换、canvas/browser 切换不销毁 `webContents`。
-- internal/external 只是同一个 `webContents` 在主窗口和外部窗口之间移动。
+- internal 由 renderer `<webview>` 承载;外部打开先禁用,后续重新设计。
 - LLM 继续能通过 CDP 控制页面。
 - 应用重启后只恢复可验证或新建成功的真实 `webContents`,不显示假内容。
 
@@ -52,14 +52,13 @@ Electron main
   ├─ BrowserHost
   │   ├─ global persistent profile: persist:pudding-default
   │   ├─ sessionID -> BrowserSlot
-  │   ├─ tabID -> WebContentsView / webContents
-  │   ├─ internal attach: main window contentView
-  │   └─ external attach: BrowserWindow
+  │   ├─ tabID -> registered webview webContents
+  │   └─ headless webContents for LLM tools before UI mounts
   └─ Go daemon child process
 
 Renderer React
   ├─ 继续通过 daemon HTTP/SSE 读写业务状态
-  └─ 仅通过 Electron IPC 汇报浏览器容器 bounds/attach/detach
+  └─ 通过 Electron IPC 注册 webview webContents
 
 Go daemon
   ├─ sessions / messages / turns / tools / SQLite
@@ -70,8 +69,8 @@ Go daemon
 边界:
 
 - Go 是业务事实源。
-- Electron main 是浏览器运行态事实源。
-- renderer 不直接拥有 browser tab 生命周期。
+- Electron main 是浏览器工具 target 的运行态事实源。
+- renderer 拥有可见 webview DOM,但 tab metadata 仍通过 daemon/bridge 对账。
 - 所有 browser bridge 消息必须显式带 `sessionID` 和 `tabID`。
 
 ## BrowserHost 状态模型
@@ -167,13 +166,12 @@ model tool call
 
 ## Internal / External
 
-Electron 后 external 不再依赖系统 Chrome:
+当前阶段先只保留 internal:
 
-- internal:同一个 `WebContentsView` 挂在主窗口浏览器区域。
-- external:把同一个 `webContents` 移到独立 `BrowserWindow`。
-- return internal:从外部窗口移回主窗口。
-- 多 session external:多个 session 各自的 `webContents` 可放在多个外部窗口。
-- 因为 profile 同属 Electron persistent session,授权 cookie/localStorage 可直接回到 internal。
+- internal:renderer `<webview>` 显示真实 Chromium 页面。
+- BrowserHost 记录 webview `webContents`,供 Go browser tools 调用 CDP。
+- external 暂时禁用,后续重新设计为同一 Electron profile 下的可恢复窗口能力。
+- 因为 profile 同属 Electron persistent session,后续外部授权 cookie/localStorage 仍应能回到 internal。
 
 ## Screencast 删除计划
 
@@ -226,10 +224,10 @@ Electron 后 external 不再依赖系统 Chrome:
 ### P2 Native Browser POC
 
 - 在 Electron main 实现 `BrowserHost` 最小版。
-- 使用 `WebContentsView` 打开一个 URL。
+- 使用 renderer `<webview>` 打开一个 URL。
 - 使用持久 partition:`persist:pudding-default`。
-- renderer 只汇报浏览器区域 bounds。
-- 当前落点:Electron preload 暴露最小 browser IPC;前端 `BrowserStream` 在 Electron 壳内自动切到原生 `WebContentsView`,非 Electron 继续使用旧 screencast。
+- renderer 在 webview ready/navigation/title/favicon 事件后向 main 注册 `webContentsID`。
+- 当前落点:Electron preload 暴露 webview 注册和 browser IPC;前端 `BrowserStream` 已收敛为 `<webview>` surface 薄壳,不再保留 screencast fallback。
 - 暂未迁移:Go browser bridge、LLM CDP 工具仍走旧 API。
 
 验收:
@@ -274,8 +272,8 @@ Electron 后 external 不再依赖系统 Chrome:
 - app restart 从 metadata 恢复,无真实页面时不显示假内容。
 - 当前落点:
   - Electron bridge 声明支持 metadata recovery;`/browser/state` 可在 Electron 下从持久 URL 重建真实 tab,旧 Chrome manager 仍不恢复 internal metadata。
-  - Electron native surface 在没有真实 tab/URL 时显示空态,不再自动创建 `about:blank` 假 tab。
-  - BrowserHost attach 时同一窗口只保留当前 slot view,避免 session 快速切换时旧 view 残留盖住当前 session。
+  - Electron webview surface 区分无浏览器、显式新选项卡、真实页面;新选项卡以 `about:blank` metadata 持久化。
+  - BrowserHost 不再 attach view 到窗口,只维护 webview `webContents` 注册表和 LLM 工具 target。
   - `closeTab` 在 Electron Host 内幂等,重复关闭返回 lost snapshot。
   - 关闭浏览器时前端进入 session-scoped closing guard,清空旧 tab/payload 缓存并丢弃并发创建结果,避免标题/icon 残留和关闭后复活。
 
@@ -316,11 +314,21 @@ Wails legacy 清理范围:
 - `cmd/pudding-desktop/file_drop.go`、`cmd/pudding-desktop/locale.go`:删除前需要确认 Electron 已补齐文件拖拽和 locale bridge。
 - `web` 中 `@wailsio/runtime` fallback、`internal/api/cors.go` 中 `wails://` origin 特判、`Makefile` 中 `desktop/desktop-dev` 入口,随 Wails shell 一起移除。
 
+旧 Electron native browser surface 清理状态:
+
+- 已删除 `web/src/browser/electronNative.tsx` 旧 `WebContentsView` attach/bounds 组件。
+- 已删除 `BrowserStream.tsx` 的 `ElectronNativeBrowser` 分支;Electron 下只走 `<webview>` surface,非 Electron legacy 才保留 screencast。
+- 已删除 `electronBridge.ts` 的 `attach`、`updateBounds`、`detach`、`hasElectronNativeBrowser`、`ElectronBrowserBounds` 等 native surface API。
+- 已删除 `electron/main.cjs` / `preload.cjs` 的 native attach/bounds/detach IPC 和 embed mode fallback;`webviewTag` 固定开启。
+- 已删除 `CanvasPane` -> `BrowserStream` 的 `nativeSuspended` 无效传参。
+- 保留 `electron/browser-host.cjs` 内部的 `WebContentsView`,但仅作为 UI webview 尚未注册时的 invisible headless tool target,不再 attach 到主窗口。
+
 清理原则:
 
 - 不再把上述 Wails 防御代码迁移到 Electron。
 - 不零散删除某个补丁,避免留下半残 Wails fallback。
 - Electron packaging、file drop、locale、theme、窗口状态全部稳定后,一次性删除 Wails shell。
+- Electron browser surface 切到 webview 后,旧 native surface 也按上面清单一次性删除,避免继续在两套嵌入模型之间打补丁。
 
 验收:
 

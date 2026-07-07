@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, nativeTheme, screen, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, nativeTheme, screen, shell, webContents } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
@@ -26,7 +26,10 @@ const browserHost = new BrowserHost((snapshot) => {
     }
   }
 });
+browserHost.setWebviewCaptureHandler(captureVisibleWebview);
 const browserBridgeServer = new BrowserBridgeServer(browserHost);
+const webviewCaptureRequests = new Map();
+let webviewCaptureSeq = 0;
 
 let daemonProcess = null;
 let quitting = false;
@@ -102,6 +105,7 @@ function createMainWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      webviewTag: true,
     },
   });
 
@@ -132,7 +136,6 @@ function createMainWindow() {
       window.hide();
       return;
     }
-    browserHost.detachWindow(window);
   });
 
   return window;
@@ -269,19 +272,15 @@ ipcMain.handle("pudding:browser:ensure", (event, request) => {
   return browserHost.ensure(request || {});
 });
 
-ipcMain.handle("pudding:browser:attach", (event, request) => {
-  const window = assertTrustedSender(event);
-  return browserHost.attach(window, request || {});
+ipcMain.handle("pudding:browser:webview-register", (event, request) => {
+  assertTrustedSender(event);
+  const target = webContents.fromId(Number(request?.webContentsID));
+  return browserHost.registerWebContents(request || {}, target);
 });
 
-ipcMain.handle("pudding:browser:update-bounds", (event, request) => {
-  const window = assertTrustedSender(event);
-  return browserHost.updateBounds(window, request || {});
-});
-
-ipcMain.handle("pudding:browser:detach", (event, request) => {
-  const window = assertTrustedSender(event);
-  return browserHost.detach(window, request || {});
+ipcMain.handle("pudding:browser:webview-capture-result", (event, response) => {
+  assertTrustedSender(event);
+  return settleWebviewCapture(response || {});
 });
 
 ipcMain.handle("pudding:browser:load-url", (event, request) => {
@@ -318,6 +317,49 @@ ipcMain.handle("pudding:browser:close-tab", (event, request) => {
   assertTrustedSender(event);
   return browserHost.closeTab(request || {});
 });
+
+function captureVisibleWebview(request) {
+  const windows = BrowserWindow.getAllWindows().filter(
+    (window) => !window.webContents.isDestroyed() && isTrustedRendererURL(window.webContents.getURL()),
+  );
+  if (windows.length === 0) {
+    return Promise.reject(new Error("no renderer window available"));
+  }
+  const captureID = `capture_${Date.now()}_${++webviewCaptureSeq}`;
+  const payload = {
+    captureID,
+    sessionID: String(request?.sessionID || ""),
+    tabID: String(request?.tabID || ""),
+    fullPage: Boolean(request?.fullPage),
+  };
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      webviewCaptureRequests.delete(captureID);
+      reject(new Error("renderer webview capture timed out"));
+    }, 5000);
+    webviewCaptureRequests.set(captureID, { resolve, reject, timer });
+    for (const window of windows) {
+      window.webContents.send("pudding:browser:webview-capture-request", payload);
+    }
+  });
+}
+
+function settleWebviewCapture(response) {
+  const captureID = String(response?.captureID || "");
+  const pending = webviewCaptureRequests.get(captureID);
+  if (!pending) {
+    return { ok: false };
+  }
+  clearTimeout(pending.timer);
+  webviewCaptureRequests.delete(captureID);
+  const error = String(response?.error || "");
+  if (error) {
+    pending.reject(new Error(error));
+    return { ok: true };
+  }
+  pending.resolve(response);
+  return { ok: true };
+}
 
 async function loadRenderer(window, token) {
   const rendererBase = devURL || apiBase;

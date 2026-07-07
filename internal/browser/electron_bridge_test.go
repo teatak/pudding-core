@@ -76,6 +76,66 @@ func TestElectronBridgeServiceOpenListAndRelease(t *testing.T) {
 	}
 }
 
+func TestElectronBridgeServiceCreateTabIsMetadataOnly(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		http.Error(w, `{"error":"unexpected bridge call"}`, http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: "bridge-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tab, err := service.CreateTab(context.Background(), "sess_blank")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Fatal("CreateTab should not create a native bridge target")
+	}
+	if tab.SessionID != "sess_blank" || tab.ID == "" || tab.URL != "about:blank" || tab.Title != "" {
+		t.Fatalf("unexpected blank tab metadata: %+v", tab)
+	}
+}
+
+func TestElectronBridgeServiceListTabsFiltersLostAndCrossSessionSnapshots(t *testing.T) {
+	const token = "bridge-token"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+token {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		var req electronBridgeRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid json body"}`, http.StatusBadRequest)
+			return
+		}
+		if r.URL.Path != "/browser/tabs/list" || req.SessionID != "sess_a" {
+			t.Fatalf("unexpected request path=%s req=%+v", r.URL.Path, req)
+		}
+		writeElectronBridgeTestJSON(w, electronBridgeTabsResponse{Tabs: []electronBridgeSnapshot{
+			{SessionID: "sess_a", TabID: "tab_live", Status: "detached", URL: "https://a.example/", Title: "A", RuntimeID: "webContents:1"},
+			{SessionID: "sess_a", TabID: "tab_lost", Status: "lost", URL: "https://lost.example/", Title: "Lost", RuntimeID: "webContents:2"},
+			{SessionID: "sess_b", TabID: "tab_wrong", Status: "detached", URL: "https://b.example/", Title: "B", RuntimeID: "webContents:3"},
+		}})
+	}))
+	defer server.Close()
+
+	service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tabs, err := service.ListTabs(context.Background(), "sess_a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tabs) != 1 || tabs[0].ID != "tab_live" || tabs[0].SessionID != "sess_a" {
+		t.Fatalf("unexpected filtered tabs: %+v", tabs)
+	}
+}
+
 func TestElectronBridgeServiceMapsMissingTab(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

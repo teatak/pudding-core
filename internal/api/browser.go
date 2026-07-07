@@ -179,6 +179,9 @@ func (s *Server) createBrowserTab(c *cart.Context) error {
 		return s.browserError(c, err)
 	}
 	s.allowBrowserTab(sessionID, tab.ID)
+	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
+		return browserStoreError(c, s, err)
+	}
 	c.JSON(http.StatusCreated, tab)
 	return nil
 }
@@ -301,6 +304,12 @@ func (s *Server) syncBrowserTab(c *cart.Context) error {
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
+	if current, ignore, err := s.ignoreTransientBlankSync(c.Request.Context(), sessionID, tab); err != nil {
+		return s.fail(c, err)
+	} else if ignore {
+		c.JSON(http.StatusOK, current)
+		return nil
+	}
 	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
 		return browserStoreError(c, s, err)
 	}
@@ -376,6 +385,26 @@ func (s *Server) allowBrowserTab(sessionID, tabID string) {
 	allowed[tabID] = struct{}{}
 }
 
+func (s *Server) replaceAllowedBrowserTabs(sessionID string, tabs []browser.TabSnapshot) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
+	}
+	allowed := map[string]struct{}{}
+	for _, tab := range tabs {
+		tabID := strings.TrimSpace(tab.ID)
+		if strings.TrimSpace(tab.SessionID) == sessionID && tabID != "" {
+			allowed[tabID] = struct{}{}
+		}
+	}
+	s.browserMu.Lock()
+	defer s.browserMu.Unlock()
+	if s.browserClosed == nil {
+		s.browserClosed = map[string]map[string]struct{}{}
+	}
+	s.browserClosed[sessionID] = allowed
+}
+
 func (s *Server) browserSessionGated(sessionID string) bool {
 	s.browserMu.Lock()
 	defer s.browserMu.Unlock()
@@ -405,6 +434,36 @@ func (s *Server) browserTabAllowed(sessionID, tabID string) bool {
 	}
 	_, ok = allowed[strings.TrimSpace(tabID)]
 	return ok
+}
+
+func (s *Server) ignoreTransientBlankSync(ctx context.Context, sessionID string, tab browser.TabSnapshot) (browser.TabSnapshot, bool, error) {
+	if !browserURLIsBlank(tab.URL) {
+		return browser.TabSnapshot{}, false, nil
+	}
+	state, err := s.store.GetBrowserState(ctx, sessionID)
+	if errors.Is(err, store.ErrNotFound) {
+		return browser.TabSnapshot{}, false, nil
+	}
+	if err != nil {
+		return browser.TabSnapshot{}, false, err
+	}
+	if state.TabID != tab.ID || browserURLIsBlank(state.URL) {
+		return browser.TabSnapshot{}, false, nil
+	}
+	return browser.TabSnapshot{
+		ID:         state.TabID,
+		SessionID:  state.SessionID,
+		URL:        state.URL,
+		Title:      state.Title,
+		FaviconURL: state.FaviconURL,
+		Mode:       s.browserProcessMode(ctx, sessionID),
+		CreatedAt:  state.CreatedAt,
+		UpdatedAt:  state.UpdatedAt,
+	}, true, nil
+}
+
+func browserURLIsBlank(rawURL string) bool {
+	return strings.EqualFold(strings.TrimSpace(rawURL), "about:blank")
 }
 
 func (s *Server) filterBrowserTabs(sessionID string, tabs []browser.TabSnapshot) []browser.TabSnapshot {
@@ -689,6 +748,11 @@ func (s *Server) releaseBrowserTab(c *cart.Context) error {
 			return s.browserError(c, err)
 		}
 	}
+	tabs, err := s.browser.ListTabs(c.Request.Context(), sessionID)
+	if err != nil {
+		return s.browserError(c, err)
+	}
+	s.replaceAllowedBrowserTabs(sessionID, tabs)
 	if err := s.store.ClearBrowserState(c.Request.Context(), sessionID); err != nil {
 		return s.fail(c, err)
 	}

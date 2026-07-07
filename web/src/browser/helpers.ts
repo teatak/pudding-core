@@ -1,6 +1,5 @@
 import type { BrowserState, BrowserTab } from "@/api/client";
 import type { CanvasItem } from "@/contracts/api";
-import { apiURL } from "@/state/apiBase";
 
 import type { BrowserCanvasPayload } from "./types";
 
@@ -14,16 +13,6 @@ export function browserWindowKey(item: CanvasItem): string {
   const payload = browserPayloadForItem(item);
   const ownerSessionID = payload?.sessionID || item.sourceSessionID || item.id;
   return `${ownerSessionID}:${payload?.tabID || payload?.url || item.id}`;
-}
-
-export function browserScreencastURL(token: string, sessionID: string, tabID: string): string {
-  const url = new URL(
-    apiURL(`/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/screencast`),
-    window.location.href,
-  );
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  url.searchParams.set("token", token);
-  return url.toString();
 }
 
 export function browserAddressToURL(value: string): string {
@@ -53,11 +42,11 @@ export function browserAddressToURL(value: string): string {
   return browserSearchURL(raw);
 }
 
-export function browserTabTitle(tab: BrowserTab, fallback: string): string {
+export function browserTabTitle(tab: BrowserTab, fallback: string, blankFallback = fallback): string {
   const title = (tab.title || "").trim();
   const url = (tab.url || "").trim();
   if (browserURLIsBlank(url)) {
-    return fallback;
+    return blankFallback;
   }
   if (title && title !== "about:blank") {
     return title;
@@ -148,125 +137,6 @@ export function faviconURLForPage(rawURL: string): string {
   } catch {
     return "";
   }
-}
-
-export function renderedBrowserImageRect(image: HTMLImageElement, fallbackWidth: number, fallbackHeight: number) {
-  const rect = image.getBoundingClientRect();
-  const mediaWidth = image.naturalWidth || fallbackWidth;
-  const mediaHeight = image.naturalHeight || fallbackHeight;
-  if (rect.width <= 0 || rect.height <= 0 || mediaWidth <= 0 || mediaHeight <= 0) {
-    return null;
-  }
-  const mediaRatio = mediaWidth / mediaHeight;
-  const rectRatio = rect.width / rect.height;
-  if (rectRatio > mediaRatio) {
-    const width = rect.height * mediaRatio;
-    return {
-      left: rect.left + (rect.width - width) / 2,
-      top: rect.top,
-      width,
-      height: rect.height,
-    };
-  }
-  const height = rect.width / mediaRatio;
-  return {
-    left: rect.left,
-    top: rect.top,
-    width: rect.width,
-    height,
-  };
-}
-
-export function browserMouseButton(button: number): string {
-  switch (button) {
-    case 1:
-      return "middle";
-    case 2:
-      return "right";
-    case 3:
-      return "back";
-    case 4:
-      return "forward";
-    default:
-      return "left";
-  }
-}
-
-export function browserMouseButtonMask(button: number): number {
-  switch (button) {
-    case 1:
-      return 4;
-    case 2:
-      return 2;
-    case 3:
-      return 8;
-    case 4:
-      return 16;
-    default:
-      return 1;
-  }
-}
-
-export function browserModifiers(event: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): number {
-  return (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0);
-}
-
-export function isPlainTextKey(event: { altKey: boolean; ctrlKey: boolean; key: string; metaKey: boolean }): boolean {
-  return event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;
-}
-
-export function browserClipboardShortcut(event: {
-  altKey: boolean;
-  ctrlKey: boolean;
-  key: string;
-  metaKey: boolean;
-  shiftKey: boolean;
-}): "copy" | "cut" | "paste" | "redo" | "selectAll" | "undo" | null {
-  if (event.altKey || (!event.metaKey && !event.ctrlKey)) {
-    return null;
-  }
-  switch (event.key.toLowerCase()) {
-    case "a":
-      return "selectAll";
-    case "c":
-      return "copy";
-    case "x":
-      return "cut";
-    case "v":
-      return "paste";
-    case "y":
-      return event.ctrlKey && !event.metaKey ? "redo" : null;
-    case "z":
-      return event.shiftKey ? "redo" : "undo";
-    default:
-      return null;
-  }
-}
-
-export function browserKeyMessage(
-  event: {
-    altKey: boolean;
-    code: string;
-    ctrlKey: boolean;
-    key: string;
-    metaKey: boolean;
-    shiftKey: boolean;
-  },
-  eventType: "keyDown" | "keyUp",
-): Record<string, unknown> {
-  const text = eventType === "keyDown" && event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey ? event.key : "";
-  const virtualKeyCode = browserVirtualKeyCode(event);
-  return {
-    type: "key",
-    eventType,
-    key: event.key,
-    code: event.code,
-    text,
-    unmodifiedText: text,
-    windowsVirtualKeyCode: virtualKeyCode,
-    nativeVirtualKeyCode: virtualKeyCode,
-    modifiers: browserModifiers(event),
-  };
 }
 
 export function browserPayloadForItem(item: CanvasItem): BrowserCanvasPayload | null {
@@ -362,35 +232,6 @@ function isLikelyBrowserHost(value: string): boolean {
 
 function isSingleBrowserLabel(value: string): boolean {
   return /^[a-z0-9][a-z0-9-]{1,62}$/i.test(value);
-}
-
-function browserVirtualKeyCode(event: { code: string; key: string }): number {
-  if (event.code.startsWith("Key") && event.code.length === 4) {
-    return event.code.charCodeAt(3);
-  }
-  if (event.code.startsWith("Digit") && event.code.length === 6) {
-    return event.code.charCodeAt(5);
-  }
-  const map: Record<string, number> = {
-    Backspace: 8,
-    Tab: 9,
-    Enter: 13,
-    Shift: 16,
-    Control: 17,
-    Alt: 18,
-    Escape: 27,
-    " ": 32,
-    PageUp: 33,
-    PageDown: 34,
-    End: 35,
-    Home: 36,
-    ArrowLeft: 37,
-    ArrowUp: 38,
-    ArrowRight: 39,
-    ArrowDown: 40,
-    Delete: 46,
-  };
-  return map[event.key] || 0;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

@@ -15,7 +15,9 @@ export function PageHeader({
   title: ReactNode;
 }) {
   const railCollapsed = useRailCollapsed();
-  const headerStyle = railCollapsed ? { paddingLeft: "calc(var(--traffic-inset) + 3.25rem)" } : undefined;
+  const headerStyle = railCollapsed
+    ? { paddingLeft: "calc(var(--traffic-inset) + var(--rail-toggle-left) + var(--toolbar-icon-button-size) + var(--rail-title-gap))" }
+    : undefined;
 
   return (
     <header

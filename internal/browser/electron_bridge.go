@@ -153,15 +153,15 @@ func (s *ElectronBridgeService) SupportsMetadataRecovery() bool {
 
 func (s *ElectronBridgeService) CreateTab(ctx context.Context, sessionID string) (TabSnapshot, error) {
 	tabID := newID("tab")
-	var snapshot electronBridgeSnapshot
-	if err := s.post(ctx, "/browser/tabs/ensure", electronBridgeRequest{
+	now := time.Now().UTC()
+	return TabSnapshot{
+		ID:        tabID,
 		SessionID: sessionID,
-		TabID:     tabID,
 		URL:       "about:blank",
-	}, &snapshot); err != nil {
-		return TabSnapshot{}, err
-	}
-	return snapshot.tab(), nil
+		Mode:      "headless",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}, nil
 }
 
 func (s *ElectronBridgeService) ListTabs(ctx context.Context, sessionID string) ([]TabSnapshot, error) {
@@ -171,7 +171,7 @@ func (s *ElectronBridgeService) ListTabs(ctx context.Context, sessionID string) 
 	}
 	tabs := make([]TabSnapshot, 0, len(out.Tabs))
 	for _, snapshot := range out.Tabs {
-		if snapshot.Status == "lost" {
+		if snapshot.Status == "lost" || strings.TrimSpace(snapshot.SessionID) != sessionID {
 			continue
 		}
 		tabs = append(tabs, snapshot.tab())
@@ -477,7 +477,9 @@ func (snapshot electronBridgeSnapshot) tab() TabSnapshot {
 		rawURL = "about:blank"
 	}
 	title := strings.TrimSpace(snapshot.Title)
-	if title == "" {
+	if rawURL == "about:blank" {
+		title = ""
+	} else if title == "" {
 		title = rawURL
 	}
 	return TabSnapshot{

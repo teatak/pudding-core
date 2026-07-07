@@ -71,6 +71,7 @@ import {
   putCanvasItem,
   releaseBrowserTab,
   syncBrowserTab,
+  type BrowserTab,
   type CanvasItemPayload,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
@@ -81,7 +82,7 @@ import {
   allowElectronBrowserTab,
   cacheElectronBrowserSnapshot,
   clearElectronBrowserSessionGate,
-  electronNativeBrowser,
+  electronBrowserBridge,
   markElectronBrowserSessionClosed,
 } from "@/browser/electronBridge";
 import {
@@ -94,7 +95,6 @@ import {
   browserTabFaviconURL,
   browserTabSwitchKey,
   browserTabTitle,
-  browserURLIsBlank,
   browserWindowKey,
   faviconURLForPage,
   preferredBrowserTab,
@@ -158,6 +158,22 @@ type WindowState = {
 type WindowPosition = Pick<WindowState, "x" | "y">;
 type WindowGeometry = Pick<WindowState, "x" | "y" | "w" | "h">;
 type WindowRestoreState = Pick<WindowState, "x" | "y" | "w" | "h" | "z">;
+
+function blankBrowserTabFromPayload(sessionID: string, payload: BrowserCanvasPayload): BrowserTab {
+  const now = new Date().toISOString();
+  return {
+    id: payload.tabID || "default",
+    sessionID,
+    targetID: "",
+    url: "about:blank",
+    title: "",
+    mode: payload.mode || "headless",
+    canGoBack: false,
+    canGoForward: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
 
 type ColumnType = "text" | "enum" | "number" | "currency" | "date" | "datetime" | "truncate";
 type SemanticColor = "red" | "amber" | "green" | "sky" | "violet" | "gray";
@@ -405,10 +421,6 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     if (!actorSessionID || canvasSessionStateRef.current === actorSessionID) {
       return;
     }
-    const previousSessionID = canvasSessionStateRef.current;
-    if (previousSessionID) {
-      rememberSessionSurface(previousSessionID, browserActive ? "browser" : "canvas");
-    }
     canvasSessionStateRef.current = actorSessionID;
     browserAutoSwitchKeyRef.current = "";
     hasSeenBrowserTabStateRef.current = false;
@@ -471,7 +483,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   const activeBrowserSwitchKey = browserTabSwitchKey(activeBrowserTab);
 
   useEffect(() => {
-    const bridge = electronNativeBrowser();
+    const bridge = electronBrowserBridge();
     if (!bridge || !enabled || !actorSessionID) {
       return;
     }
@@ -479,8 +491,8 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       if (snapshot.sessionID !== actorSessionID) {
         return;
       }
-      const tab = cacheElectronBrowserSnapshot(queryClient, snapshot);
-      if (!tab || browserURLIsBlank(tab.url)) {
+      const tab = cacheElectronBrowserSnapshot(queryClient, snapshot, actorSessionID);
+      if (!tab) {
         return;
       }
       const key = `${tab.sessionID}:${tab.id}`;
@@ -510,9 +522,9 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     browserAutoSwitchKeyRef.current = activeBrowserSwitchKey;
     setActiveSurface("canvas");
   };
-  const hasBrowserState = Boolean(activeBrowserTab || browserPayloadHasRealState(browserPayload));
+  const hasBrowserState = Boolean(activeBrowserTab || browserPayloadHasRealState(browserPayload) || browserPayloadHasBlankTabIntent(browserPayload));
   const browserTabTitleText = activeBrowserTab
-    ? browserTabTitle(activeBrowserTab, browserPayload?.title || t("browser.newTab"))
+    ? browserTabTitle(activeBrowserTab, browserPayload?.title || t("browser.newTab"), t("browser.newTab"))
     : hasBrowserState
       ? browserPayload?.title || t("browser.newTab")
       : "";
@@ -682,6 +694,9 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       const payload = fresh ? null : options.payload || null;
       const itemPayload = payload?.closedAt ? null : payload;
       let tab = preferredBrowserTab(existingTabs.tabs, payload);
+      if (!tab && payload?.tabID && browserPayloadHasBlankTabIntent(payload)) {
+        tab = blankBrowserTabFromPayload(targetSessionID, payload);
+      }
       if (!tab && payload?.mode !== "external" && browserPayloadHasRealState(payload) && payload?.url) {
         tab = payload.tabID
           ? await openBrowserTab(token, targetSessionID, payload.tabID, { url: payload.url })
@@ -690,7 +705,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       if (!tab && options?.createIfEmpty) {
         tab = await createBrowserTab(token, targetSessionID);
       }
-      const itemTitle = tab ? browserTabTitle(tab, title) : title;
+      const itemTitle = tab ? browserTabTitle(tab, title, title) : title;
       const z = Math.max(maxZ, ...Object.values(draftWindowsRef.current).map((window) => window.z)) + 1;
       const restoreWindow = clampWindow(
         {
@@ -768,6 +783,36 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       toast.error(t("browser.createFailed"));
     },
   });
+
+  useEffect(() => {
+    if (
+      !enabled ||
+      !actorSessionID ||
+      !browserActive ||
+      browserClosing ||
+      browserWidgetMutation.isPending ||
+      itemsQuery.isPending ||
+      browserStateQuery.isPending ||
+      browserTabsQuery.isPending ||
+      browserItem ||
+      hasBrowserState
+    ) {
+      return;
+    }
+    rememberSessionSurface(actorSessionID, "canvas");
+    setBrowserActive(false);
+  }, [
+    actorSessionID,
+    browserActive,
+    browserClosing,
+    browserItem,
+    browserStateQuery.isPending,
+    browserTabsQuery.isPending,
+    browserWidgetMutation.isPending,
+    enabled,
+    hasBrowserState,
+    itemsQuery.isPending,
+  ]);
 
   const activateBrowserSurface = () => {
     if (!actorSessionID) {
@@ -859,37 +904,6 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     activeBrowserTab?.id,
     browserActive,
     browserItem?.id,
-    browserWidgetMutation.isPending,
-    enabled,
-  ]);
-
-  useEffect(() => {
-    if (
-      !enabled ||
-      !browserActive ||
-      !browserItem ||
-      activeBrowserTab ||
-      browserWidgetMutation.isPending ||
-      !browserTabsQuery.isSuccess ||
-      !browserPayloadHasBlankTabIntent(browserItemPayload)
-    ) {
-      return;
-    }
-    browserWidgetMutation.mutate({
-      targetSessionID: actorSessionID,
-      browserItem,
-      createIfEmpty: true,
-      payload: browserItemPayload,
-      tabsData: browserTabsQuery.data,
-    });
-  }, [
-    activeBrowserTab?.id,
-    browserActive,
-    browserItem?.id,
-    browserItemPayload?.tabID,
-    browserItemPayload?.url,
-    browserItemPayload?.closedAt,
-    browserTabsQuery.isSuccess,
     browserWidgetMutation.isPending,
     enabled,
   ]);
@@ -1260,7 +1274,6 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
               <FullscreenBrowserWindow
                 key={browserWindowKey(browserItem)}
                 item={browserItem}
-                nativeSuspended={canvasLibraryOpen}
                 token={token}
               />
             ) : (
@@ -1280,7 +1293,6 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
                 window={windows[item.id] || windowFromItem(item, index)}
                 galleryActiveIndex={galleryActiveIndices[item.id] || 0}
                 isMaximized={Boolean(restoreWindows[item.id])}
-                nativeSuspended={canvasLibraryOpen}
                 onDelete={() => deleteMutation.mutate(item)}
                 onDrag={(position) => updateWindowDraftGeometry(item.id, position)}
                 onDragStart={() => startWindowDrag(item.id)}
@@ -1323,11 +1335,9 @@ function CanvasBrowserLoading() {
 
 function FullscreenBrowserWindow({
   item,
-  nativeSuspended,
   token,
 }: {
   item: CanvasItem;
-  nativeSuspended: boolean;
   token: string;
 }) {
   const browserKey = browserWindowKey(item);
@@ -1337,7 +1347,7 @@ function FullscreenBrowserWindow({
         <BrowserToolbar key={`toolbar:${browserKey}`} item={item} token={token} />
       </div>
       <div className="min-h-0 flex-1 overflow-hidden rounded-b-lg border-x border-b bg-card">
-        <BrowserStream key={`widget:${browserKey}`} item={item} nativeSuspended={nativeSuspended} token={token} />
+        <BrowserStream key={`widget:${browserKey}`} item={item} token={token} />
       </div>
     </div>
   );
@@ -1350,7 +1360,6 @@ function CanvasWindow({
   window,
   galleryActiveIndex,
   isMaximized,
-  nativeSuspended,
   onDelete,
   onDrag,
   onDragStart,
@@ -1369,7 +1378,6 @@ function CanvasWindow({
   window: WindowState;
   galleryActiveIndex: number;
   isMaximized: boolean;
-  nativeSuspended: boolean;
   onDelete: () => void;
   onDrag: (position: WindowPosition) => void;
   onDragStart: () => void;
@@ -1500,7 +1508,6 @@ function CanvasWindow({
             token={token}
             galleryActiveIndex={galleryActiveIndex}
             isMaximized={isMaximized}
-            nativeSuspended={nativeSuspended}
             onGalleryActiveIndexChange={onGalleryActiveIndexChange}
             onGalleryLayoutChange={onGalleryLayoutChange}
           />
@@ -1769,7 +1776,6 @@ function CanvasContent({
   token,
   galleryActiveIndex,
   isMaximized,
-  nativeSuspended,
   onGalleryActiveIndexChange,
   onGalleryLayoutChange,
 }: {
@@ -1777,14 +1783,13 @@ function CanvasContent({
   token: string;
   galleryActiveIndex: number;
   isMaximized: boolean;
-  nativeSuspended: boolean;
   onGalleryActiveIndexChange: (activeIndex: number) => void;
   onGalleryLayoutChange: (layout: GalleryLayout) => void;
 }) {
   const payload = asRecord(item.item);
   const kind = typeof payload?.kind === "string" ? payload.kind : item.kind;
   if (kind === "browser") {
-    return <BrowserStream token={token} item={item} nativeSuspended={nativeSuspended} />;
+    return <BrowserStream token={token} item={item} />;
   }
   if (kind === "markdown") {
     const content = stringValue(payload?.content) || stringValue(payload?.markdown) || "";
