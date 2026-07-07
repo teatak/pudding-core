@@ -135,17 +135,24 @@ Pudding Core = local-first multi-session AI daemon + app core.
 
 ## 4. 桌面
 
-选择:
+历史选择:
 
 - Wails v3
+
+迁移决策(2026-07-07):
+
+- 桌面壳迁移到 Electron。
+- 原因:核心浏览器体验需要原生 Chromium `WebContentsView`,当前 Wails + CDP screencast 链路无法稳定解决清晰度、首帧、session 切换和 external/internal 授权回流问题。
+- Go daemon 继续作为业务核心,Electron 只负责桌面壳、原生窗口和浏览器运行态。
+- 迁移计划见 `docs/electron-migration-plan.md`。
 
 边界:
 
 - Desktop shell 负责启动 daemon、承载 Web UI、提供系统集成。
 - daemon 核心业务协议仍然是 loopback HTTP/SSE/WebSocket。
-- desktop native/system capabilities 必须走 Wails bindings。
+- desktop native/system capabilities 迁移期从 Wails bindings 逐步切到 Electron IPC。
 - Desktop 不拥有 session runtime。
-- Wails AssetServer 只托管 Web UI 资源和开发态 Vite/HMR,不充当业务 API 网关。
+- Desktop shell 只托管 Web UI 资源和开发态 Vite/HMR,不充当业务 API 网关。
 
 通讯边界:
 
@@ -154,24 +161,23 @@ Pudding Core = local-first multi-session AI daemon + app core.
 | daemon HTTP REST | 业务请求和快照,如 sessions/messages/settings/model |
 | daemon SSE | session-scoped event stream |
 | daemon WebSocket | MCP / browser tools / realtime bridge |
-| Wails bindings/events | desktop native/system capabilities |
-| Wails AssetServer | Web UI assets / Vite HMR 资源 |
+| Electron IPC | desktop native/system capabilities |
+| Electron window / Vite | Web UI assets / Vite HMR 资源 |
 
 规则:
 
 - session / submit / messages / settings / provider config 由前端直连 daemon HTTP REST。
 - `/sessions/{id}/events` 由前端直连 daemon SSE。
 - MCP / browser tools / 需要双向长连接的能力由前端直连 daemon WebSocket。
-- 文件选择、保存文件、Reveal in Finder/Explorer、外链打开、窗口状态、全屏/titlebar、tray、系统通知、更新安装、native dialogs 走 Wails bindings。
-- Wails bindings 不承载核心 session runtime。
-- Wails AssetServer / Middleware 不反代 `/sessions`、`/settings`、`/providers` 等业务路径。
+- 文件选择、保存文件、Reveal in Finder/Explorer、外链打开、窗口状态、全屏/titlebar、tray、系统通知、更新安装、native dialogs 走 Electron IPC。
+- Electron IPC 不承载核心 session runtime。
+- Desktop shell / Middleware 不反代 `/sessions`、`/settings`、`/providers` 等业务路径。
 - HTTP/SSE/WS 不硬凹 desktop native 能力。
 
 不选择:
 
-- Electron:太重。
-- Tauri:当前 Go daemon + Wails 更贴合。
-- Wails AssetServer 反代业务 API:会混淆 UI 资源通道与业务通道,且桌面 WebView 链路可能丢失 mutating request body。
+- Tauri:当前 Go daemon + Chromium browser host 需求下不如 Electron 直接。
+- Desktop shell 反代业务 API:会混淆 UI 资源通道与业务通道。
 
 风险:
 

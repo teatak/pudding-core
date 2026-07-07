@@ -1,6 +1,6 @@
 # Electron Migration Plan
 
-> 状态:草案。  
+> 状态:P3 Go Browser Bridge 基础控制已接入。  
 > 日期:2026-07-07。  
 > 决策:迁移到 Electron shell,浏览器显示改为原生 `WebContentsView`;保留 Go daemon 作为业务核心。
 
@@ -214,6 +214,8 @@ Electron 后 external 不再依赖系统 Chrome:
 - Electron main 启动 Go daemon 子进程。
 - renderer 加载现有 Vite/React UI。
 - REST/SSE 仍直连 daemon。
+- macOS 使用隐藏标题栏,红绿灯固定为 `trafficLightPosition: { x: 18, y: 18 }`;会话 toolbar、画布 toolbar、rail toggle、全局拖拽带统一通过 `electron-mac` 的 CSS vars 对齐。
+- 开发入口:`make electron-dev`。
 
 验收:
 
@@ -227,6 +229,8 @@ Electron 后 external 不再依赖系统 Chrome:
 - 使用 `WebContentsView` 打开一个 URL。
 - 使用持久 partition:`persist:pudding-default`。
 - renderer 只汇报浏览器区域 bounds。
+- 当前落点:Electron preload 暴露最小 browser IPC;前端 `BrowserStream` 在 Electron 壳内自动切到原生 `WebContentsView`,非 Electron 继续使用旧 screencast。
+- 暂未迁移:Go browser bridge、LLM CDP 工具仍走旧 API。
 
 验收:
 
@@ -239,10 +243,13 @@ Electron 后 external 不再依赖系统 Chrome:
 - Go `internal/browser` 改成 bridge client。
 - 现有 `/sessions/{id}/browser/...` API 不变。
 - Electron BrowserHost 支持 open/state/tabs/close/recover。
+- 当前落点:Electron main 启动 loopback bridge server,daemon 通过 `PUDDING_ELECTRON_BROWSER_BRIDGE_URL/TOKEN` 切换到 `ElectronBridgeService`。
+- 已完成:open/list/get/back/forward/reload/close tab/close session 的基础 bridge。
+- 未完成:observe/screenshot/click/type/scroll 仍返回 unavailable,等待 P4 用 `webContents.debugger` 接入。
 
 验收:
 
-- UI toolbar 仍通过 Go API 操作浏览器。
+- Go browser API 能操作 Electron BrowserHost。
 - LLM browser open 能打开当前 session tab。
 - session A/B tab 不互串。
 
@@ -290,6 +297,22 @@ Electron 后 external 不再依赖系统 Chrome:
 - 删除 screencast route 和前端 stream。
 - 删除 Chrome process/profile 直接管理代码中不再需要的部分。
 - 保留必要的 browser metadata store 和 Go API facade。
+
+Wails legacy 清理范围:
+
+- `cmd/pudding-desktop/main.go`:启动隐藏窗口、等待 `WebViewDidFinishNavigation` 再显示的 WKWebView 白屏防御,Electron 路径不需要。
+- `cmd/pudding-desktop/chrome_darwin.go`:红绿灯、toolbar、fullscreen、双击 zoom 等 Wails/macOS chrome 补丁,Electron 由 `BrowserWindow` 配置和前端 CSS 处理。
+- `cmd/pudding-desktop/window_preferences.go`:Wails 窗口尺寸记忆,Electron 已由 main process 持久化 window state。
+- `cmd/pudding-desktop/theme.go`:Wails theme bridge,Electron 已由 preload/main IPC 和 `nativeTheme` 负责。
+- `cmd/pudding-desktop/no_zoom_rects.go`:Wails zoom 排除区域,Electron 侧用 drag/no-drag 区域处理。
+- `cmd/pudding-desktop/file_drop.go`、`cmd/pudding-desktop/locale.go`:删除前需要确认 Electron 已补齐文件拖拽和 locale bridge。
+- `web` 中 `@wailsio/runtime` fallback、`internal/api/cors.go` 中 `wails://` origin 特判、`Makefile` 中 `desktop/desktop-dev` 入口,随 Wails shell 一起移除。
+
+清理原则:
+
+- 不再把上述 Wails 防御代码迁移到 Electron。
+- 不零散删除某个补丁,避免留下半残 Wails fallback。
+- Electron packaging、file drop、locale、theme、窗口状态全部稳定后,一次性删除 Wails shell。
 
 验收:
 

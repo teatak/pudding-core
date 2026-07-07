@@ -2,7 +2,7 @@ MODULE := github.com/teatak/pudding-core
 LDFLAGS_RELEASE := -X $(MODULE)/internal/buildinfo.channel=release
 BUILDTAGS := sqlite_fts5 webrtcaec
 
-.PHONY: test tidy clean embed desktop desktop-dev dev-cert daemon daemon-dev daemon-release package prompt
+.PHONY: test tidy clean embed desktop desktop-dev electron-dev dev-cert daemon daemon-dev daemon-release package prompt
 
 # 共享:构建前端并装填进 daemon 的 embed 目录(产物不进 git)
 embed:
@@ -20,6 +20,9 @@ desktop: embed
 # 热更循环:Wails AssetServer 托管 Vite(HMR),业务 API 直连 daemon;停旧实例后 detached 拉起
 desktop-dev:
 	@BUILDTAGS="$(BUILDTAGS)" bash scripts/dev.sh desktop
+
+electron-dev:
+	@BUILDTAGS="$(BUILDTAGS)" bash scripts/electron-dev.sh
 
 dev-cert:
 	@bash scripts/create-dev-codesign-cert.sh

@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useSearch } from "@tanstack/react-router";
 import { PanelRight } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useGroupRef } from "react-resizable-panels";
 import { toast } from "sonner";
 
@@ -38,6 +38,20 @@ import { setToken, useToken } from "@/state/tokenStore";
 
 const APP_OAUTH_CONNECTED_EVENT = "pudding:app-oauth-connected";
 
+function readSavedSplitLayout() {
+  return readPanelLayout(layoutStorageKeys.splitRatio, splitLayout.fallback, {
+    minPercent: splitLayout.minPercent,
+    maxPercent: splitLayout.maxPercent,
+  });
+}
+
+function readSavedWorkspaceLayout() {
+  return readPanelLayout(layoutStorageKeys.workspaceRatio, workspaceLayout.fallback, {
+    minPercent: workspaceLayout.minPercent,
+    maxPercent: workspaceLayout.maxPercent,
+  });
+}
+
 export function App() {
   const token = useToken();
   const { session: selectedSessionID, draft, split: splitSessionID, view } = useSearch({ from: "/" });
@@ -52,22 +66,6 @@ export function App() {
   const workspaceGroupRef = useGroupRef();
   const splitGroupRef = useGroupRef();
   const workspaceLayoutHydratedRef = useRef(false);
-  const savedSplitLayout = useMemo(
-    () =>
-      readPanelLayout(layoutStorageKeys.splitRatio, splitLayout.fallback, {
-        minPercent: splitLayout.minPercent,
-        maxPercent: splitLayout.maxPercent,
-      }),
-    [],
-  );
-  const savedWorkspaceLayout = useMemo(
-    () =>
-      readPanelLayout(layoutStorageKeys.workspaceRatio, workspaceLayout.fallback, {
-        minPercent: workspaceLayout.minPercent,
-        maxPercent: workspaceLayout.maxPercent,
-      }),
-    [],
-  );
   // 上下分屏(docs/design.md 2.2):pane 三件套整体复用,路由是唯一事实源;
   // split 与主 pane 相同的会话不重复渲染
   const appsActive = view === "apps";
@@ -170,10 +168,7 @@ export function App() {
     }
     const nextLayout = !effectiveCanvasOpen
       ? workspaceLayout.closed
-      : readPanelLayout(layoutStorageKeys.workspaceRatio, workspaceLayout.fallback, {
-          minPercent: workspaceLayout.minPercent,
-          maxPercent: workspaceLayout.maxPercent,
-        });
+      : readSavedWorkspaceLayout();
     if (!workspaceLayoutHydratedRef.current) {
       workspaceLayoutHydratedRef.current = true;
       group.setLayout(nextLayout);
@@ -202,12 +197,7 @@ export function App() {
       group.setLayout(splitLayout.closed);
       return;
     }
-    group.setLayout(
-      readPanelLayout(layoutStorageKeys.splitRatio, splitLayout.fallback, {
-        minPercent: splitLayout.minPercent,
-        maxPercent: splitLayout.maxPercent,
-      }),
-    );
+    group.setLayout(readSavedSplitLayout());
   }, [selectedSessionID, splitGroupRef, splitSessionID]);
 
   if (!token) {
@@ -221,7 +211,7 @@ export function App() {
     <main className="flex h-full min-w-0 flex-col overflow-hidden bg-background">
       <ResizablePanelGroup
         className="min-h-0 flex-1"
-        defaultLayout={showSplit ? savedSplitLayout : splitLayout.closed}
+        defaultLayout={showSplit ? readSavedSplitLayout() : splitLayout.closed}
         groupRef={splitGroupRef}
         id="split-workspace"
         orientation="vertical"
@@ -264,15 +254,16 @@ export function App() {
   );
 
   const canvasToggle = canUseCanvas ? (
-    <div className="pudding-canvas-toggle no-drag-region absolute top-0 right-[13px] z-40 flex h-(--toolbar-h) items-center">
+    <div className="pudding-canvas-toggle no-drag-region pointer-events-auto absolute top-0 right-(--canvas-toggle-right) z-[100] flex h-(--toolbar-h) items-center">
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
             aria-label={t("canvas.toggle")}
             aria-pressed={effectiveCanvasOpen}
-            className="aria-pressed:bg-muted aria-pressed:text-foreground dark:aria-pressed:bg-muted/50"
+            className="no-drag-region pointer-events-auto aria-pressed:bg-muted aria-pressed:text-foreground dark:aria-pressed:bg-muted/50"
             size="icon-sm"
             tabIndex={-1}
+            type="button"
             variant="ghost"
             onClick={() => setCanvasOpen(!canvasOpen)}
           >
@@ -328,7 +319,7 @@ export function App() {
     ) : (
       <ResizablePanelGroup
         className={cn("h-full min-w-0", workspaceAnimating && "pudding-workspace-panel-animating")}
-        defaultLayout={effectiveCanvasOpen ? savedWorkspaceLayout : workspaceLayout.closed}
+        defaultLayout={effectiveCanvasOpen ? readSavedWorkspaceLayout() : workspaceLayout.closed}
         groupRef={workspaceGroupRef}
         id="workspace"
         orientation="horizontal"
@@ -370,8 +361,8 @@ export function App() {
       <div className="relative flex h-[100svh] overflow-hidden">
         <div aria-hidden="true" className="drag-region absolute inset-x-0 top-0 z-20 h-(--toolbar-h)" />
         <div className="relative h-full min-w-0 flex-1 bg-background">
-          {canvasToggle}
           {workspaceContent}
+          {canvasToggle}
         </div>
       </div>
       <SettingsDialog token={token} showTrigger={false} />

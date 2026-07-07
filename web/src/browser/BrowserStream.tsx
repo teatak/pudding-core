@@ -24,6 +24,8 @@ import {
   type BrowserTab,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { hasElectronNativeBrowser } from "@/browser/electronBridge";
+import { ElectronNativeBrowser } from "@/browser/electronNative";
 import {
   browserClipboardShortcut,
   browserKeyMessage,
@@ -63,6 +65,13 @@ export function forgetBrowserCursor(tabID?: string) {
   if (tabID) {
     browserCursorByTabID.delete(tabID);
   }
+}
+
+export function BrowserStream({ token, item }: { token: string; item: CanvasItem }) {
+  if (hasElectronNativeBrowser()) {
+    return <ElectronNativeBrowser token={token} item={item} />;
+  }
+  return <ScreencastBrowserStream token={token} item={item} />;
 }
 
 type BrowserStreamPhase = "idle" | "connecting" | "waiting_first_frame" | "live" | "external" | "recovering" | "error";
@@ -118,7 +127,7 @@ function browserStreamReducer(state: BrowserStreamState, action: BrowserStreamAc
   }
 }
 
-export function BrowserStream({ token, item }: { token: string; item: CanvasItem }) {
+function ScreencastBrowserStream({ token, item }: { token: string; item: CanvasItem }) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const surfaceRef = useRef<HTMLDivElement | null>(null);

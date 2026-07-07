@@ -103,8 +103,17 @@
        否则双击区跟视觉工具条割裂 */
     --traffic-inset: 0px;
     --toolbar-h: 54px;
+    --rail-toggle-left: 11px;
+    --canvas-toggle-right: 13px;
+    --canvas-toolbar-pl: 0.75rem;
+    --canvas-toolbar-pr: 47px;
+    --toolbar-icon-button-size: 2rem;
+    --toolbar-icon-size: 1rem;
+    --canvas-toolbar-tab-h: 2rem;
+    --canvas-toolbar-tab-padding: 3px;
+    --canvas-toolbar-tab-icon: 18px;
     --rail-content-align-gap: 0px;
-    --rail-radius: 12px;
+    --rail-radius: 8px;
     --rail-left-radius: var(--rail-radius);
     --rail-item-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 22%);
     --chrome-icon-button-foreground: var(--rail-item-foreground);
@@ -152,7 +161,24 @@ html[data-shell="mac"] {
     --rail-left-radius: 18px;
 }
 
-html[data-shell="mac"][data-fullscreen] {
+html[data-shell="electron-mac"] {
+    /* Electron uses trafficLightPosition { x:18, y:18 }; align toolbar to that visual anchor. */
+    --traffic-inset: 81px;
+    --toolbar-h: 50px;
+    --rail-toggle-left: 11px;
+    --canvas-toggle-right: 13px;
+    --canvas-toolbar-pl: 0.75rem;
+    --canvas-toolbar-pr: 47px;
+    --toolbar-icon-button-size: 1.75rem;
+    --toolbar-icon-size: 0.95rem;
+    --canvas-toolbar-tab-h: 1.75rem;
+    --canvas-toolbar-tab-padding: 2px;
+    --canvas-toolbar-tab-icon: 16px;
+    --rail-left-radius: var(--rail-radius);
+}
+
+html[data-shell="mac"][data-fullscreen],
+html[data-shell="electron-mac"][data-fullscreen] {
     --traffic-inset: 0px;
 }
 
@@ -161,6 +187,7 @@ html[data-shell="mac"][data-fullscreen] {
    仅 data-shell 下生效,纯浏览器访问无副作用 */
 html[data-shell] .drag-region {
     --wails-draggable: drag;
+    -webkit-app-region: drag;
     cursor: default;
     user-select: none;
     -webkit-user-select: none;
@@ -174,6 +201,7 @@ html[data-shell] body {
 html[data-shell] .no-drag-region,
 html[data-shell] .drag-region :where(button, a, input, textarea, select, [role="button"]) {
     --wails-draggable: no-drag;
+    -webkit-app-region: no-drag;
 }
 
 html[data-shell] .no-drag-region {
@@ -429,6 +457,20 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
 .pudding-canvas-toggle [data-slot="button"],
 .pudding-session-rail [data-slot="sidebar-footer"] :where([data-slot="button"], [data-slot="dropdown-menu-trigger"]) {
     font-weight: 400;
+}
+
+.pudding-rail-toggle [data-slot="button"],
+.pudding-canvas-toggle [data-slot="button"],
+.pudding-toolbar-icon-button {
+    width: var(--toolbar-icon-button-size) !important;
+    height: var(--toolbar-icon-button-size) !important;
+}
+
+.pudding-rail-toggle [data-slot="button"] svg,
+.pudding-canvas-toggle [data-slot="button"] svg,
+.pudding-toolbar-icon-button svg {
+    width: var(--toolbar-icon-size) !important;
+    height: var(--toolbar-icon-size) !important;
 }
 
 .pudding-rail-toggle,

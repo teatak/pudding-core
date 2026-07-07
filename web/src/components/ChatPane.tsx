@@ -200,7 +200,7 @@ export function ChatPane({ token, sessionID, draftActive = false, reserveTopRigh
               <HeaderStatus session={selectedSession} />
             </>
           ) : (
-            <span className="flex h-8 min-w-0 max-w-full items-center truncate text-sm font-normal leading-6">
+            <span className="inline-flex h-7 min-w-0 max-w-full items-center truncate rounded-md border border-transparent px-2 text-sm font-normal leading-6">
               {headerTitle}
             </span>
           )}

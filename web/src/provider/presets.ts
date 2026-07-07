@@ -45,53 +45,55 @@ type ProviderModelPatch = Omit<ProviderModel, "id" | "limits" | "providerOptions
   anthropic?: Record<string, unknown>;
 };
 
+const DEFAULT_PRESET_TEMPERATURE = 0.2;
+
 const DEEPSEEK_OPENAI_MODELS = [
-  model("deepseek-v4-flash", { contextWindow: 1_050_000, capabilities: { tools: true }, openai: { temperature: 0.7, max_completion_tokens: 384_000, max_tool_loops: 64, reasoning_effort: "high" } }),
-  model("deepseek-v4-pro", { contextWindow: 1_050_000, capabilities: { tools: true }, openai: { temperature: 0.7, max_completion_tokens: 384_000, max_tool_loops: 64, reasoning_effort: "high" } }),
+  model("deepseek-v4-flash", { contextWindow: 1_050_000, capabilities: { tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 384_000, max_tool_loops: 64, reasoning_effort: "high" } }),
+  model("deepseek-v4-pro", { contextWindow: 1_050_000, capabilities: { tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 384_000, max_tool_loops: 64, reasoning_effort: "high" } }),
 ];
 
 const DEEPSEEK_ANTHROPIC_MODELS = [
-  model("deepseek-v4-flash", { contextWindow: 1_050_000, capabilities: { tools: true }, anthropic: { temperature: 0.7, max_tokens: 384_000, output_config: { effort: "high" } } }),
-  model("deepseek-v4-pro", { contextWindow: 1_050_000, capabilities: { tools: true }, anthropic: { temperature: 0.7, max_tokens: 384_000, output_config: { effort: "high" } } }),
+  model("deepseek-v4-flash", { contextWindow: 1_050_000, capabilities: { tools: true }, anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE, max_tokens: 384_000, output_config: { effort: "high" } } }),
+  model("deepseek-v4-pro", { contextWindow: 1_050_000, capabilities: { tools: true }, anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE, max_tokens: 384_000, output_config: { effort: "high" } } }),
 ];
 
 const MIMO_OPENAI_MODELS = ["mimo-v2.5", "mimo-v2.5-pro"].map((id) =>
-  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: 0.7, max_completion_tokens: 131_072 } }),
+  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 131_072 } }),
 );
 
 const MIMO_ANTHROPIC_MODELS = ["mimo-v2.5", "mimo-v2.5-pro"].map((id) =>
-  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, anthropic: { temperature: 0.7, max_tokens: 131_072 } }),
+  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE, max_tokens: 131_072 } }),
 );
 
 const QWEN_MODEL_IDS = ["qwen3.6-flash", "qwen3.7-max", "qwen3.6-plus", "qwen3-max"];
 const QWEN_OPENAI_MODELS = QWEN_MODEL_IDS.map((id) =>
-  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: 0.7 } }),
+  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE } }),
 );
 const QWEN_ANTHROPIC_MODELS = QWEN_MODEL_IDS.map((id) =>
-  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, anthropic: { temperature: 0.7, max_tokens: 131_072 } }),
+  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE, max_tokens: 131_072 } }),
 );
 
 const MOONSHOT_MODEL_IDS = ["kimi-k2.6", "kimi-k2.5"];
 const MOONSHOT_OPENAI_MODELS = MOONSHOT_MODEL_IDS.map((id) =>
-  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: 0.7 } }),
+  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE } }),
 );
 const MOONSHOT_ANTHROPIC_MODELS = MOONSHOT_MODEL_IDS.map((id) =>
-  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, anthropic: { temperature: 0.7, max_tokens: 131_072 } }),
+  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE, max_tokens: 131_072 } }),
 );
 
 const ZHIPU_MODEL_IDS = ["glm-5.1", "glm-5"];
 const ZHIPU_OPENAI_MODELS = ZHIPU_MODEL_IDS.map((id) =>
-  model(id, { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, openai: { temperature: 0.7 } }),
+  model(id, { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE } }),
 );
 const ZHIPU_ANTHROPIC_MODELS = ZHIPU_MODEL_IDS.map((id) =>
-  model(id, { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, anthropic: { temperature: 0.7, max_tokens: 131_072 } }),
+  model(id, { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE, max_tokens: 131_072 } }),
 );
 
 const OPENAI_MODELS = [
-  model("gpt-5.5", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: 0.7, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
-  model("gpt-5.4", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: 0.7, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
-  model("gpt-5.4-mini", { contextWindow: 400_000, capabilities: { image: true, tools: true }, openai: { temperature: 0.7, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
-  model("gpt-5.4-nano", { contextWindow: 400_000, capabilities: { image: true, tools: true }, openai: { temperature: 0.7, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
+  model("gpt-5.5", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
+  model("gpt-5.4", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
+  model("gpt-5.4-mini", { contextWindow: 400_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
+  model("gpt-5.4-nano", { contextWindow: 400_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
 ];
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
@@ -209,8 +211,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         protocol: "google",
         baseURL: "https://generativelanguage.googleapis.com",
         models: [
-          model("gemini-3.5-flash", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: 0.7, maxOutputTokens: 64_000, thinking: { include_thoughts: true, level: "medium" } } }),
-          model("gemini-3.1-pro", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: 0.7, maxOutputTokens: 64_000, thinking: { include_thoughts: true, level: "high" } } }),
+          model("gemini-3.5-flash", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: DEFAULT_PRESET_TEMPERATURE, maxOutputTokens: 64_000, thinking: { include_thoughts: true, level: "medium" } } }),
+          model("gemini-3.1-pro", { contextWindow: 1_050_000, capabilities: { image: true, audio: true, tools: true }, google: { temperature: DEFAULT_PRESET_TEMPERATURE, maxOutputTokens: 64_000, thinking: { include_thoughts: true, level: "high" } } }),
         ],
       },
     ],
@@ -255,9 +257,9 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         protocol: "anthropic",
         baseURL: "https://api.anthropic.com",
         models: [
-          model("claude-opus-4-8", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 128_000, temperature: 0.7 } }),
-          model("claude-sonnet-4-6", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 128_000, temperature: 0.7 } }),
-          model("claude-haiku-4-5", { contextWindow: 200_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 64_000, temperature: 0.7 } }),
+          model("claude-opus-4-8", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 128_000, temperature: DEFAULT_PRESET_TEMPERATURE } }),
+          model("claude-sonnet-4-6", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 128_000, temperature: DEFAULT_PRESET_TEMPERATURE } }),
+          model("claude-haiku-4-5", { contextWindow: 200_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 64_000, temperature: DEFAULT_PRESET_TEMPERATURE } }),
         ],
       },
     ],
@@ -334,7 +336,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
           "poolside/laguna-m.1:free",
           "openai/gpt-oss-120b:free",
           "z-ai/glm-4.5-air:free",
-        ].map((id) => model(id, { capabilities: { tools: true }, openai: { temperature: 0.7 } })),
+        ].map((id) => model(id, { capabilities: { tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE } })),
       },
     ],
   },
@@ -620,12 +622,12 @@ function model(id: string, patch: ProviderModelPatch = {}): ProviderModel {
 function providerModelFromCandidate(id: string, protocol: ProviderPresetProtocol): ProviderModel {
   const capabilities = { tools: true };
   if (protocol === "anthropic") {
-    return { id, capabilities, providerOptions: { anthropic: { temperature: 0.7 } } };
+    return { id, capabilities, providerOptions: { anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE } } };
   }
   if (protocol === "google") {
-    return { id, capabilities, providerOptions: { google: { temperature: 0.7, thinking: { include_thoughts: true, level: "low" } } } };
+    return { id, capabilities, providerOptions: { google: { temperature: DEFAULT_PRESET_TEMPERATURE, thinking: { include_thoughts: true, level: "low" } } } };
   }
-  return { id, capabilities, providerOptions: { openai: { temperature: 0.7 } } };
+  return { id, capabilities, providerOptions: { openai: { temperature: DEFAULT_PRESET_TEMPERATURE } } };
 }
 
 function numericOption(value: unknown) {

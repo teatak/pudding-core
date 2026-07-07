@@ -5,6 +5,7 @@ import { consumeLaunchParam } from "@/state/launchParams";
 export type Theme = "light" | "dark" | "system";
 type ResolvedTheme = "light" | "dark";
 type ThemeSnapshot = `${Theme}:${ResolvedTheme}`;
+type NativeThemeState = { theme: Theme; resolved: ResolvedTheme };
 
 const STORAGE_KEY = "pudding.theme";
 const FALLBACK_STYLE_ID = "pudding-theme-fallback";
@@ -24,6 +25,11 @@ export function readStoredTheme(): Theme {
 declare global {
   interface Window {
     __puddingSetThemeState?: (state: unknown) => void;
+    puddingElectronTheme?: {
+      getState: () => Promise<unknown>;
+      setTheme: (theme: Theme) => Promise<unknown>;
+      onUpdated: (listener: (state: unknown) => void) => () => void;
+    };
   }
 }
 
@@ -40,8 +46,10 @@ export function initThemeFromLaunch() {
     return;
   }
   const theme = consumeLaunchParam("theme");
+  const resolvedTheme = consumeLaunchParam("resolvedTheme");
   if (isTheme(theme)) {
-    applyNativeThemeState(theme, theme === "system" ? browserResolvedTheme() : theme);
+    const resolved = isResolvedTheme(resolvedTheme) ? resolvedTheme : theme === "system" ? browserResolvedTheme() : theme;
+    applyNativeThemeState(theme, resolved);
   }
 }
 
@@ -73,6 +81,12 @@ export function startThemeSync() {
     return;
   }
   themeSyncStarted = true;
+  const electronTheme = electronThemeBridge();
+  if (electronTheme) {
+    electronTheme.onUpdated((state) => window.__puddingSetThemeState?.(state));
+    void electronTheme.getState().then((state) => window.__puddingSetThemeState?.(state));
+    return;
+  }
   if (isDesktopThemeControlled()) {
     return;
   }
@@ -82,6 +96,14 @@ export function startThemeSync() {
 }
 
 export function setTheme(theme: Theme) {
+  const electronTheme = electronThemeBridge();
+  if (electronTheme) {
+    electronTheme
+      .setTheme(theme)
+      .then((state) => window.__puddingSetThemeState?.(state))
+      .catch(() => setLocalTheme(theme));
+    return;
+  }
   if (isDesktopThemeControlled()) {
     import("@wailsio/runtime")
       .then(({ Events }) => Events.Emit("desktop:theme-set", theme))
@@ -126,7 +148,7 @@ function applyNativeThemeState(theme: Theme, resolved: ResolvedTheme) {
   }
 }
 
-function normalizeThemeState(state: unknown): { theme: Theme; resolved: ResolvedTheme } | null {
+function normalizeThemeState(state: unknown): NativeThemeState | null {
   if (!state || typeof state !== "object") {
     return null;
   }
@@ -135,6 +157,10 @@ function normalizeThemeState(state: unknown): { theme: Theme; resolved: Resolved
     return null;
   }
   return { theme: record.theme, resolved: record.resolved };
+}
+
+function electronThemeBridge() {
+  return typeof window === "undefined" ? undefined : window.puddingElectronTheme;
 }
 
 function isTheme(value: unknown): value is Theme {
@@ -172,7 +198,7 @@ function applyDocumentTheme(resolved: ResolvedTheme) {
 
 function themeFallbackColors(resolved: ResolvedTheme) {
   return resolved === "dark"
-    ? { bg: "oklch(0.205 0 0)", fg: "oklch(0.95 0 0)" }
+    ? { bg: "#171717", fg: "oklch(0.95 0 0)" }
     : { bg: "oklch(1 0 0)", fg: "oklch(0.18 0 0)" };
 }
 

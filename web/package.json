@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
+    "electron:dev": "electron ../electron/main.cjs",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
@@ -50,6 +51,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
+    "electron": "^43.0.0",
     "typescript": "^6.0.3",
     "vite": "^8.0.16"
   }

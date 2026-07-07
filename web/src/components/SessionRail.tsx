@@ -318,7 +318,7 @@ export function SessionRail({
   const popoverAlignOffset = collapsed ? -(readTrafficInsetPx() + popoverAlignNudgePx) : 0;
   const railButton = (
     <div
-      className="pudding-rail-toggle no-drag-region absolute top-0 left-[11px] z-40 flex items-center"
+      className="pudding-rail-toggle no-drag-region absolute top-0 left-(--rail-toggle-left) z-40 flex items-center"
       style={{
         height: "var(--toolbar-h)",
         marginLeft: "var(--traffic-inset)",
@@ -330,7 +330,7 @@ export function SessionRail({
             <TooltipTrigger asChild>
               <Button
                 aria-label={collapsed ? t("rail.expand") : t("rail.collapse")}
-                size="icon"
+                size="icon-sm"
                 tabIndex={-1}
                 variant="ghost"
                 onClick={() => {

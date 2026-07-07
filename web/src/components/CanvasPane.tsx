@@ -56,6 +56,7 @@ import { toast } from "sonner";
 
 import {
   clearClosedCanvasItems,
+  clearBrowserState,
   closeBrowserSession,
   createClosedCanvasItem,
   deleteCanvasItem,
@@ -73,6 +74,11 @@ import { queryKeys } from "@/api/queryKeys";
 import { BrowserCanvasTabButton } from "@/browser/BrowserCanvasTabButton";
 import { BrowserStream, forgetBrowserCursor } from "@/browser/BrowserStream";
 import { BrowserToolbar } from "@/browser/BrowserToolbar";
+import {
+  electronBrowserSnapshotToTab,
+  electronBrowserSnapshotsToTabs,
+  electronNativeBrowser,
+} from "@/browser/electronBridge";
 import {
   browserCanvasItemID,
   browserBackgroundRefetchIntervalMS,
@@ -435,6 +441,10 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       if (!actorSessionID) {
         throw new Error("browser session id missing");
       }
+      const bridge = electronNativeBrowser();
+      if (bridge) {
+        return bridge.listTabs({ sessionID: actorSessionID }).then((result) => electronBrowserSnapshotsToTabs(result.tabs));
+      }
       return listBrowserTabs(token, actorSessionID);
     },
     refetchInterval: browserRefetchInterval,
@@ -607,11 +617,20 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       }
       const id = browserItem?.id || browserCanvasItemID(targetSessionID);
       const title = t("browser.title");
-      const existingTabs = browserTabsQuery.data || (await listBrowserTabs(token, targetSessionID));
+      const bridge = electronNativeBrowser();
+      const existingTabs =
+        browserTabsQuery.data ||
+        (bridge
+          ? electronBrowserSnapshotsToTabs((await bridge.listTabs({ sessionID: targetSessionID })).tabs)
+          : await listBrowserTabs(token, targetSessionID));
       const payload = browserPayload;
       let tab = preferredBrowserTab(existingTabs.tabs, payload);
       if (!tab && payload?.mode !== "external" && browserPayloadHasRealState(payload) && payload?.url) {
-        tab = await openBrowserURL(token, targetSessionID, { url: payload.url });
+        if (bridge) {
+          tab = electronBrowserSnapshotToTab(await bridge.loadURL({ sessionID: targetSessionID, tabID: payload.tabID, url: payload.url }));
+        } else {
+          tab = await openBrowserURL(token, targetSessionID, { url: payload.url });
+        }
       }
       const itemTitle = tab ? browserTabTitle(tab, title) : title;
       const z = Math.max(maxZ, ...Object.values(draftWindowsRef.current).map((window) => window.z)) + 1;
@@ -741,7 +760,13 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
         throw new Error("browser session id missing");
       }
       const targetItemID = browserItem?.id;
-      await closeBrowserSession(token, targetSessionID);
+      const bridge = electronNativeBrowser();
+      if (bridge) {
+        await bridge.closeSession({ sessionID: targetSessionID });
+        await clearBrowserState(token, targetSessionID);
+      } else {
+        await closeBrowserSession(token, targetSessionID);
+      }
       if (browserItem) {
         await deleteCanvasItem(token, targetSessionID, browserItem.id);
       }
@@ -1003,7 +1028,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
 
   return (
     <aside className="relative flex h-full shrink-0 flex-col bg-[var(--canvas-background)] text-sidebar-foreground">
-      <div className="drag-region relative z-30 flex h-(--toolbar-h) shrink-0 items-center gap-2 overflow-hidden pr-[47px] pl-3">
+      <div className="relative z-30 flex h-(--toolbar-h) shrink-0 items-center gap-2 overflow-hidden pr-(--canvas-toolbar-pr) pl-(--canvas-toolbar-pl)">
         {actorSessionID ? (
           <BrowserCanvasTabButton
             active={browserActive}
@@ -1018,7 +1043,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
           />
         ) : null}
         {items.length > 0 ? (
-          <div className="no-drag-region w-fit max-w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-lg bg-muted p-[3px] text-muted-foreground [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
+          <div className="no-drag-region w-fit max-w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-lg bg-muted p-(--canvas-toolbar-tab-padding) text-muted-foreground [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
             <div className="inline-flex min-w-max items-center gap-1">
               {items.map((item) => {
                 const win = windows[item.id];
@@ -1028,7 +1053,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
                   <button
                     key={item.id}
                     aria-selected={active}
-                    className="group inline-flex h-8 w-40 max-w-[44vw] shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium whitespace-nowrap transition-colors data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm hover:bg-background hover:text-foreground sm:w-48 sm:max-w-52"
+                    className="group inline-flex h-(--canvas-toolbar-tab-h) w-40 max-w-[44vw] shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium whitespace-nowrap transition-colors data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm hover:bg-background hover:text-foreground sm:w-48 sm:max-w-52"
                     data-active={active}
                     title={title}
                     type="button"
@@ -1057,7 +1082,8 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
             </div>
           </div>
         ) : null}
-        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        <div aria-hidden="true" className="pointer-events-none min-w-0 flex-1 self-stretch" />
+        <div className="no-drag-region flex shrink-0 items-center gap-1.5">
           <CanvasLibraryMenu
             closedItems={closedItems}
             onClearClosed={() => clearClosedMutation.mutate()}

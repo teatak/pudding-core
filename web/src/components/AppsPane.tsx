@@ -283,7 +283,7 @@ export function AppsPane({ token }: { token: string }) {
           detailApp || detailCatalogApp ? (
             <Button
               aria-label={t("common.back")}
-              className="size-7"
+              className="pudding-toolbar-icon-button"
               size="icon-xs"
               type="button"
               variant="ghost"

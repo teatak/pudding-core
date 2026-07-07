@@ -19,14 +19,18 @@ export function PageHeader({
 
   return (
     <header
-      className={cn("drag-region relative z-30 flex h-(--toolbar-h) shrink-0 items-center justify-between gap-3 px-6", className)}
+      className={cn("pointer-events-none relative z-30 flex h-(--toolbar-h) shrink-0 items-center justify-between gap-3 px-6", className)}
       style={headerStyle}
     >
-      <div className="flex min-w-0 items-center gap-2">
-        {icon ? <div className="no-drag-region flex shrink-0 items-center text-muted-foreground">{icon}</div> : null}
+      <div className="flex min-w-0 items-center gap-1">
+        {icon ? (
+          <div className="no-drag-region pointer-events-auto flex h-(--toolbar-icon-button-size) w-(--toolbar-icon-button-size) shrink-0 items-center justify-center text-muted-foreground">
+            {icon}
+          </div>
+        ) : null}
         <h1 className="truncate text-sm font-medium">{title}</h1>
       </div>
-      {actions ? <div className="no-drag-region flex shrink-0 items-center gap-2">{actions}</div> : null}
+      {actions ? <div className="no-drag-region pointer-events-auto flex shrink-0 items-center gap-2">{actions}</div> : null}
     </header>
   );
 }

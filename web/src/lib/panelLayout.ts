@@ -84,5 +84,8 @@ export function readPanelLayout(
 }
 
 export function savePanelLayout(key: string, layout: PanelLayout) {
-  localStorage.setItem(key, JSON.stringify(layout))
+  const next = JSON.stringify(layout)
+  if (localStorage.getItem(key) !== next) {
+    localStorage.setItem(key, next)
+  }
 }

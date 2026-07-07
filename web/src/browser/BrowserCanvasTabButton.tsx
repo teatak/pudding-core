@@ -13,14 +13,14 @@ function BrowserTabIcon({ faviconURL }: { faviconURL?: string }) {
 
   if (faviconURL && !failed) {
     return (
-      <span aria-hidden="true" className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center overflow-hidden rounded-[5px]">
+      <span aria-hidden="true" className="inline-flex h-(--canvas-toolbar-tab-icon) w-(--canvas-toolbar-tab-icon) shrink-0 items-center justify-center overflow-hidden rounded-[5px]">
         <img alt="" className="h-full w-full object-cover" draggable={false} src={faviconURL} onError={() => setFailed(true)} />
       </span>
     );
   }
 
   return (
-    <span aria-hidden="true" className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] bg-blue-600 text-white shadow-sm">
+    <span aria-hidden="true" className="inline-flex h-(--canvas-toolbar-tab-icon) w-(--canvas-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[5px] bg-blue-600 text-white shadow-sm">
       <Compass className="h-3.5 w-3.5" />
     </span>
   );
@@ -49,12 +49,12 @@ export function BrowserCanvasTabButton({
 }) {
   const { t } = useI18n();
   return (
-    <div className="no-drag-region w-fit max-w-full min-w-0 shrink-0 overflow-hidden rounded-lg bg-muted p-[3px] text-muted-foreground">
+    <div className="no-drag-region w-fit max-w-full min-w-0 shrink-0 overflow-hidden rounded-lg bg-muted p-(--canvas-toolbar-tab-padding) text-muted-foreground">
       <button
         aria-label={t("browser.title")}
         aria-selected={active}
         className={cn(
-          "group inline-flex h-8 min-w-0 shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium whitespace-nowrap transition-colors data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm hover:bg-background hover:text-foreground",
+          "group inline-flex h-(--canvas-toolbar-tab-h) min-w-0 shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium whitespace-nowrap transition-colors data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm hover:bg-background hover:text-foreground",
           hasTitle ? "max-w-36" : "w-10 justify-center",
         )}
         data-active={active}

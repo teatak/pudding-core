@@ -111,12 +111,16 @@ func Start(opts Options) (*Daemon, error) {
 	hub := event.NewHub()
 	apps := appsvc.NewService(dir, cfg)
 	skills := skillsvc.NewService(dir)
-	browserManager := browser.NewManager(browser.Config{HomeDir: dir, Headless: true})
+	browserService, err := newBrowserService(dir)
+	if err != nil {
+		_ = st.Close()
+		return nil, err
+	}
 	browserMCP := tool.NewBrowserMCPRunner()
 	camera := desktopcamera.New()
 	screen := desktopscreen.New()
 	tools := tool.NewMultiRunner(
-		tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithBrowserState(st), tool.WithHomeDir(dir), tool.WithBrowser(browserManager), tool.WithCamera(camera), tool.WithDesktopScreen(screen)),
+		tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithBrowserState(st), tool.WithHomeDir(dir), tool.WithBrowser(browserService), tool.WithCamera(camera), tool.WithDesktopScreen(screen)),
 		browserMCP,
 	)
 	eng := engine.New(st, hub, resolver, cfg, engine.WithPromptSource(prompt.NewLoader(dir)), engine.WithAttachmentHome(dir), engine.WithTools(tools))
@@ -165,7 +169,7 @@ func Start(opts Options) (*Daemon, error) {
 
 	// request ctx 派生自此:Shutdown 时 SSE 长连接立即退出,不拖优雅关闭
 	sseCtx, stopSSE := context.WithCancel(context.Background())
-	apiServer := api.New(eng, st, cfg, hub).WithHome(dir).WithApps(apps).WithSkills(skills).WithBrowserMCP(browserMCP).WithVoice(voiceService).WithBrowser(browserManager).WithCamera(camera)
+	apiServer := api.New(eng, st, cfg, hub).WithHome(dir).WithApps(apps).WithSkills(skills).WithBrowserMCP(browserMCP).WithVoice(voiceService).WithBrowser(browserService).WithCamera(camera)
 	server := &http.Server{
 		Handler: apiServer.Handler(
 			token,
@@ -186,7 +190,7 @@ func Start(opts Options) (*Daemon, error) {
 		token:     token,
 		homeDir:   dir,
 		voice:     voiceService,
-		browser:   browserManager,
+		browser:   browserService,
 		stopSSE:   stopSSE,
 		serveErr:  make(chan error, 1),
 	}
@@ -203,6 +207,24 @@ func Start(opts Options) (*Daemon, error) {
 		"store", "sqlite")
 	slog.Info("open", "url", d.OpenURL())
 	return d, nil
+}
+
+func newBrowserService(homeDir string) (browser.Service, error) {
+	bridgeURL := strings.TrimSpace(os.Getenv("PUDDING_ELECTRON_BROWSER_BRIDGE_URL"))
+	bridgeToken := strings.TrimSpace(os.Getenv("PUDDING_ELECTRON_BROWSER_BRIDGE_TOKEN"))
+	if bridgeURL != "" || bridgeToken != "" {
+		service, err := browser.NewElectronBridgeService(browser.ElectronBridgeConfig{
+			URL:   bridgeURL,
+			Token: bridgeToken,
+		})
+		if err != nil {
+			return nil, err
+		}
+		slog.Info("browser service", "kind", "electron-bridge")
+		return service, nil
+	}
+	slog.Info("browser service", "kind", "chrome-manager")
+	return browser.NewManager(browser.Config{HomeDir: homeDir, Headless: true}), nil
 }
 
 func (d *Daemon) Addr() string { return d.localAddr }

@@ -16,6 +16,13 @@ import {
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import {
+  cacheElectronBrowserSnapshot,
+  electronBrowserSnapshotToTab,
+  electronBrowserSnapshotsToTabs,
+  electronNativeBrowser,
+  hasElectronNativeBrowser,
+} from "@/browser/electronBridge";
+import {
   browserAddressToURL,
   browserDisplayURL,
   browserForegroundRefetchIntervalMS,
@@ -39,12 +46,17 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
   const payload = browserPayloadForItem(item);
   const ownerSessionID = payload?.sessionID || item.sourceSessionID;
   const [urlDraft, setURLDraft] = useState(browserDisplayURL(payload?.url));
+  const nativeBrowser = hasElectronNativeBrowser();
   const tabsQuery = useQuery({
     enabled: Boolean(token && ownerSessionID),
     queryKey: ownerSessionID ? queryKeys.browserTabs(ownerSessionID) : ["browser", "missing-session"],
     queryFn: () => {
       if (!ownerSessionID) {
         throw new Error("browser session id missing");
+      }
+      const bridge = electronNativeBrowser();
+      if (bridge) {
+        return bridge.listTabs({ sessionID: ownerSessionID }).then((result) => electronBrowserSnapshotsToTabs(result.tabs));
       }
       return listBrowserTabs(token, ownerSessionID);
     },
@@ -56,6 +68,18 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
   const processMode = tabsQuery.data?.processMode || activeTab?.mode || payload?.mode;
   const isExternalBrowser = processMode === "external";
   const actionTabID = activeTab?.id || payload?.tabID;
+
+  useEffect(() => {
+    const bridge = electronNativeBrowser();
+    if (!bridge || !ownerSessionID) {
+      return;
+    }
+    return bridge.onUpdated((snapshot) => {
+      if (snapshot.sessionID === ownerSessionID) {
+        cacheElectronBrowserSnapshot(queryClient, snapshot);
+      }
+    });
+  }, [ownerSessionID, queryClient]);
 
   useEffect(() => {
     if (activeTab?.url) {
@@ -125,6 +149,11 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
         throw new Error("browser is external");
       }
       const url = browserAddressToURL(urlDraft);
+      const bridge = electronNativeBrowser();
+      if (bridge) {
+        const snapshot = await bridge.loadURL({ sessionID: ownerSessionID, tabID: actionTabID, url });
+        return electronBrowserSnapshotToTab(snapshot);
+      }
       if (activeTab) {
         return openBrowserTab(token, ownerSessionID, activeTab.id, { url });
       }
@@ -139,6 +168,18 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
     mutationFn: async (action: BrowserNavigationAction) => {
       if (!ownerSessionID || !activeTab || isExternalBrowser) {
         throw new Error("browser tab missing");
+      }
+      const bridge = electronNativeBrowser();
+      if (bridge) {
+        const request = { sessionID: ownerSessionID, tabID: activeTab.id };
+        switch (action) {
+          case "back":
+            return electronBrowserSnapshotToTab(await bridge.back(request));
+          case "forward":
+            return electronBrowserSnapshotToTab(await bridge.forward(request));
+          case "reload":
+            return electronBrowserSnapshotToTab(await bridge.reload(request));
+        }
       }
       switch (action) {
         case "back":
@@ -178,7 +219,7 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
   const navigationDisabled = !activeTab || isExternalBrowser || tabsQuery.isPending || navigationMutation.isPending;
   const backDisabled = navigationDisabled || !activeTab?.canGoBack;
   const forwardDisabled = navigationDisabled || !activeTab?.canGoForward;
-  const revealDisabled = revealMutation.isPending || tabsQuery.isPending || (!actionTabID && !urlDraft.trim());
+  const revealDisabled = nativeBrowser || revealMutation.isPending || tabsQuery.isPending || (!actionTabID && !urlDraft.trim());
   const pendingNavigationAction = navigationMutation.isPending ? navigationMutation.variables : undefined;
   const navButtonClass =
     "h-7 w-7 rounded-md text-muted-foreground [backface-visibility:hidden] [transform:translateZ(0)] [transition-duration:120ms] [transition-property:background-color,color] hover:text-foreground active:translate-y-0";
