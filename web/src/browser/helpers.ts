@@ -4,8 +4,6 @@ import { apiURL } from "@/state/apiBase";
 
 import type { BrowserCanvasPayload } from "./types";
 
-export const browserForegroundRefetchIntervalMS = 5000;
-export const browserBackgroundRefetchIntervalMS = 10000;
 export const browserQueryStaleTimeMS = 1000;
 
 export function browserCanvasItemID(sessionID: string): string {
@@ -58,13 +56,13 @@ export function browserAddressToURL(value: string): string {
 export function browserTabTitle(tab: BrowserTab, fallback: string): string {
   const title = (tab.title || "").trim();
   const url = (tab.url || "").trim();
-  if (title && !(title === "about:blank" && !browserURLIsBlank(url))) {
+  if (browserURLIsBlank(url)) {
+    return fallback;
+  }
+  if (title && title !== "about:blank") {
     return title;
   }
-  if (!browserURLIsBlank(url)) {
-    return browserTitleFromURL(url) || url;
-  }
-  return fallback;
+  return browserTitleFromURL(url) || url || fallback;
 }
 
 export function browserTabFaviconURL(tab: BrowserTab): string {
@@ -75,12 +73,15 @@ export function browserTabFaviconURL(tab: BrowserTab): string {
 }
 
 export function preferredBrowserTab(tabs: BrowserTab[], payload: BrowserCanvasPayload | null): BrowserTab | undefined {
-  const realTabs = tabs.filter(browserTabIsReal);
-  if (realTabs.length === 0) {
+  if (payload?.closedAt) {
     return undefined;
   }
-  const payloadTab = payload?.tabID ? realTabs.find((tab) => tab.id === payload.tabID) : undefined;
-  const latestTab = realTabs.reduce((latest, tab) => (browserTabTimestamp(tab) > browserTabTimestamp(latest) ? tab : latest), realTabs[0]!);
+  const availableTabs = tabs.filter((tab) => tab.id && tab.sessionID);
+  if (availableTabs.length === 0) {
+    return undefined;
+  }
+  const payloadTab = payload?.tabID ? availableTabs.find((tab) => tab.id === payload.tabID) : undefined;
+  const latestTab = availableTabs.reduce((latest, tab) => (browserTabTimestamp(tab) > browserTabTimestamp(latest) ? tab : latest), availableTabs[0]!);
   if (!payloadTab) {
     return latestTab;
   }
@@ -96,7 +97,11 @@ export function browserTabSwitchKey(tab: BrowserTab | undefined): string {
 }
 
 export function browserPayloadHasRealState(payload: BrowserCanvasPayload | null): boolean {
-  return Boolean(payload && (payload.tabID || payload.url) && !browserURLIsBlank(payload.url));
+  return Boolean(payload && !payload.closedAt && (payload.tabID || payload.url) && !browserURLIsBlank(payload.url));
+}
+
+export function browserPayloadHasBlankTabIntent(payload: BrowserCanvasPayload | null): boolean {
+  return Boolean(payload?.tabID && !payload.closedAt && browserURLIsBlank(payload.url));
 }
 
 export function browserDisplayURL(rawURL?: string): string {
@@ -282,6 +287,7 @@ export function browserPayloadForItem(item: CanvasItem): BrowserCanvasPayload | 
     title: stringValue(payload?.title) || item.title || undefined,
     faviconURL: stringValue(payload?.faviconURL) || undefined,
     mode: payload?.mode === "external" ? "external" : payload?.mode === "headless" ? "headless" : undefined,
+    closedAt: stringValue(payload?.closedAt) || undefined,
   };
 }
 

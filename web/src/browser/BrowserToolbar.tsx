@@ -16,16 +16,12 @@ import {
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import {
-  cacheElectronBrowserSnapshot,
-  electronBrowserSnapshotToTab,
-  electronBrowserSnapshotsToTabs,
-  electronNativeBrowser,
+  allowElectronBrowserTab,
   hasElectronNativeBrowser,
 } from "@/browser/electronBridge";
 import {
   browserAddressToURL,
   browserDisplayURL,
-  browserForegroundRefetchIntervalMS,
   browserPayloadForItem,
   browserPayloadNeedsTabSync,
   browserQueryStaleTimeMS,
@@ -54,32 +50,15 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
       if (!ownerSessionID) {
         throw new Error("browser session id missing");
       }
-      const bridge = electronNativeBrowser();
-      if (bridge) {
-        return bridge.listTabs({ sessionID: ownerSessionID }).then((result) => electronBrowserSnapshotsToTabs(result.tabs));
-      }
       return listBrowserTabs(token, ownerSessionID);
     },
-    refetchInterval: browserForegroundRefetchIntervalMS,
     staleTime: browserQueryStaleTimeMS,
   });
-  const tabs = tabsQuery.data?.tabs || [];
+  const tabs = (tabsQuery.data?.tabs || []).filter((tab) => tab.sessionID === ownerSessionID);
   const activeTab = preferredBrowserTab(tabs, payload);
   const processMode = tabsQuery.data?.processMode || activeTab?.mode || payload?.mode;
   const isExternalBrowser = processMode === "external";
   const actionTabID = activeTab?.id || payload?.tabID;
-
-  useEffect(() => {
-    const bridge = electronNativeBrowser();
-    if (!bridge || !ownerSessionID) {
-      return;
-    }
-    return bridge.onUpdated((snapshot) => {
-      if (snapshot.sessionID === ownerSessionID) {
-        cacheElectronBrowserSnapshot(queryClient, snapshot);
-      }
-    });
-  }, [ownerSessionID, queryClient]);
 
   useEffect(() => {
     if (activeTab?.url) {
@@ -90,10 +69,11 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
   }, [activeTab?.id, activeTab?.url, payload?.url]);
 
   const persistTab = async (tab: BrowserTab) => {
-    if (!ownerSessionID) {
+    if (!ownerSessionID || tab.sessionID !== ownerSessionID) {
       return;
     }
-    const title = browserTabTitle(tab, payload?.title || t("browser.title"));
+    const title = browserTabTitle(tab, payload?.title || t("browser.newTab"));
+    allowElectronBrowserTab(ownerSessionID, tab.id);
     await putCanvasItem(token, ownerSessionID, item.id, {
       id: item.id,
       sourceSessionID: ownerSessionID,
@@ -121,7 +101,7 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
   };
 
   useEffect(() => {
-    if (!activeTab || !browserPayloadNeedsTabSync(item, payload, activeTab, t("browser.title"))) {
+    if (!activeTab || !browserPayloadNeedsTabSync(item, payload, activeTab, t("browser.newTab"))) {
       return;
     }
     void persistTab(activeTab);
@@ -149,11 +129,6 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
         throw new Error("browser is external");
       }
       const url = browserAddressToURL(urlDraft);
-      const bridge = electronNativeBrowser();
-      if (bridge) {
-        const snapshot = await bridge.loadURL({ sessionID: ownerSessionID, tabID: actionTabID, url });
-        return electronBrowserSnapshotToTab(snapshot);
-      }
       if (activeTab) {
         return openBrowserTab(token, ownerSessionID, activeTab.id, { url });
       }
@@ -168,18 +143,6 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
     mutationFn: async (action: BrowserNavigationAction) => {
       if (!ownerSessionID || !activeTab || isExternalBrowser) {
         throw new Error("browser tab missing");
-      }
-      const bridge = electronNativeBrowser();
-      if (bridge) {
-        const request = { sessionID: ownerSessionID, tabID: activeTab.id };
-        switch (action) {
-          case "back":
-            return electronBrowserSnapshotToTab(await bridge.back(request));
-          case "forward":
-            return electronBrowserSnapshotToTab(await bridge.forward(request));
-          case "reload":
-            return electronBrowserSnapshotToTab(await bridge.reload(request));
-        }
       }
       switch (action) {
         case "back":
@@ -237,7 +200,7 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
         }
       }}
     >
-      <div className="grid shrink-0 grid-cols-[repeat(4,28px)] gap-0.5">
+      <div className="grid shrink-0 gap-0.5" style={{ gridTemplateColumns: `repeat(${nativeBrowser ? 3 : 4}, 28px)` }}>
         <Button
           aria-label={t("browser.back")}
           className={navButtonClass}
@@ -271,18 +234,20 @@ export function BrowserToolbar({ token, item }: { token: string; item: CanvasIte
         >
           {pendingNavigationAction === "reload" ? <Loader2 className={`${navIconClass} animate-spin`} /> : <RefreshCw className={navIconClass} />}
         </Button>
-        <Button
-          aria-label={t("browser.reveal")}
-          className={navButtonClass}
-          disabled={revealDisabled}
-          size="icon-sm"
-          title={isExternalBrowser ? t("browser.focusExternal") : t("browser.reveal")}
-          type="button"
-          variant="ghost"
-          onClick={() => revealMutation.mutate()}
-        >
-          {revealMutation.isPending ? <Loader2 className={`${navIconClass} animate-spin`} /> : <ExternalLink className={navIconClass} />}
-        </Button>
+        {nativeBrowser ? null : (
+          <Button
+            aria-label={t("browser.reveal")}
+            className={navButtonClass}
+            disabled={revealDisabled}
+            size="icon-sm"
+            title={isExternalBrowser ? t("browser.focusExternal") : t("browser.reveal")}
+            type="button"
+            variant="ghost"
+            onClick={() => revealMutation.mutate()}
+          >
+            {revealMutation.isPending ? <Loader2 className={`${navIconClass} animate-spin`} /> : <ExternalLink className={navIconClass} />}
+          </Button>
+        )}
       </div>
       <div className="group relative flex h-8 min-w-0 flex-1 items-center rounded-md border border-transparent bg-transparent transition-[background-color,box-shadow] hover:bg-background/45 focus-within:bg-background/45 focus-within:shadow-[0_0_0_1px_hsl(var(--border)/0.7),0_0_0_3px_hsl(var(--ring)/0.12)]">
         <Input

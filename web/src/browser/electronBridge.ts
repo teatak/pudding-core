@@ -77,24 +77,75 @@ export function electronBrowserSnapshotToTab(snapshot: ElectronBrowserSnapshot):
   };
 }
 
-export function electronBrowserSnapshotsToTabs(snapshots: ElectronBrowserSnapshot[]): BrowserTabsData {
-  return {
-    tabs: snapshots.filter((snapshot) => snapshot.status !== "lost").map(electronBrowserSnapshotToTab),
-    processMode: "headless",
-  };
+const electronBrowserSessionGates = new Map<string, Set<string>>();
+
+export function markElectronBrowserSessionClosed(sessionID: string) {
+  const key = sessionID.trim();
+  if (!key) {
+    return;
+  }
+  electronBrowserSessionGates.set(key, new Set());
 }
 
-export function cacheElectronBrowserSnapshot(queryClient: QueryClient, snapshot: ElectronBrowserSnapshot) {
-  if (snapshot.status === "lost") {
-    queryClient.setQueryData(queryKeys.browserTabs(snapshot.sessionID), (current: BrowserTabsData | undefined) => ({
-      tabs: (current?.tabs || []).filter((tab) => tab.id !== snapshot.tabID),
-      processMode: "headless",
-    }));
+export function clearElectronBrowserSessionGate(sessionID: string) {
+  const key = sessionID.trim();
+  if (!key) {
     return;
+  }
+  electronBrowserSessionGates.delete(key);
+}
+
+export function allowElectronBrowserTab(sessionID: string, tabID?: string) {
+  const key = sessionID.trim();
+  const tabKey = (tabID || "").trim();
+  if (!key || !tabKey) {
+    return;
+  }
+  const gate = electronBrowserSessionGates.get(key);
+  if (!gate) {
+    return;
+  }
+  gate.add(tabKey);
+}
+
+function electronBrowserSnapshotAllowed(snapshot: ElectronBrowserSnapshot) {
+  const gate = electronBrowserSessionGates.get(snapshot.sessionID.trim());
+  if (!gate) {
+    return true;
+  }
+  return gate.has((snapshot.tabID || "").trim());
+}
+
+export function cacheElectronBrowserSnapshot(queryClient: QueryClient, snapshot: ElectronBrowserSnapshot): BrowserTab | null {
+  if (!electronBrowserSnapshotAllowed(snapshot)) {
+    return null;
+  }
+  if (snapshot.status === "lost") {
+    queryClient.setQueryData(queryKeys.browserTabs(snapshot.sessionID), (current: BrowserTabsData | undefined) => {
+      const tabs = (current?.tabs || []).filter((tab) => tab.id !== snapshot.tabID);
+      if (tabs.length === 0) {
+        queryClient.setQueryData(queryKeys.browserState(snapshot.sessionID), { hasState: false, sessionID: snapshot.sessionID, processMode: "headless" });
+      }
+      return { tabs, processMode: "headless" };
+    });
+    return null;
   }
   const tab = electronBrowserSnapshotToTab(snapshot);
   queryClient.setQueryData(queryKeys.browserTabs(snapshot.sessionID), (current: BrowserTabsData | undefined) => ({
     tabs: upsertBrowserTab(current?.tabs || [], tab),
     processMode: "headless",
   }));
+  queryClient.setQueryData(queryKeys.browserState(snapshot.sessionID), {
+    hasState: true,
+    sessionID: snapshot.sessionID,
+    tabID: tab.id,
+    url: tab.url,
+    title: tab.title,
+    faviconURL: tab.faviconURL,
+    mode: "headless",
+    processMode: "headless",
+    createdAt: tab.createdAt,
+    updatedAt: tab.updatedAt,
+  });
+  return tab;
 }

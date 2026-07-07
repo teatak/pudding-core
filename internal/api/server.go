@@ -29,20 +29,22 @@ import (
 )
 
 type Server struct {
-	engine     *engine.Engine
-	store      store.Store
-	config     engine.ConfigSource
-	home       string
-	providers  providerWriter
-	apps       appService
-	skills     skillService
-	hub        *event.Hub
-	voice      voiceController
-	browser    browser.Service
-	camera     desktopcamera.Capturer
-	browserMCP browserMCPService
-	oauthMu    sync.Mutex
-	oauth      map[string]oauthStartState
+	engine        *engine.Engine
+	store         store.Store
+	config        engine.ConfigSource
+	home          string
+	providers     providerWriter
+	apps          appService
+	skills        skillService
+	hub           *event.Hub
+	voice         voiceController
+	browser       browser.Service
+	camera        desktopcamera.Capturer
+	browserMCP    browserMCPService
+	browserMu     sync.Mutex
+	browserClosed map[string]map[string]struct{}
+	oauthMu       sync.Mutex
+	oauth         map[string]oauthStartState
 }
 
 type voiceController interface {
@@ -172,6 +174,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/browser/tabs").GET(s.listBrowserTabs).POST(s.createBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID").GET(s.getBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/recover").POST(s.recoverBrowserTab)
+	app.Route("/sessions/:id/browser/tabs/:tabID/sync").POST(s.syncBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/open").POST(s.openBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/reveal").POST(s.revealBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/internal").POST(s.internalBrowserTab)

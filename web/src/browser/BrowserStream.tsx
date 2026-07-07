@@ -24,7 +24,7 @@ import {
   type BrowserTab,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
-import { hasElectronNativeBrowser } from "@/browser/electronBridge";
+import { allowElectronBrowserTab, hasElectronNativeBrowser } from "@/browser/electronBridge";
 import { ElectronNativeBrowser } from "@/browser/electronNative";
 import {
   browserClipboardShortcut,
@@ -67,9 +67,17 @@ export function forgetBrowserCursor(tabID?: string) {
   }
 }
 
-export function BrowserStream({ token, item }: { token: string; item: CanvasItem }) {
+export function BrowserStream({
+  token,
+  item,
+  nativeSuspended = false,
+}: {
+  token: string;
+  item: CanvasItem;
+  nativeSuspended?: boolean;
+}) {
   if (hasElectronNativeBrowser()) {
-    return <ElectronNativeBrowser token={token} item={item} />;
+    return <ElectronNativeBrowser token={token} item={item} suspended={nativeSuspended} />;
   }
   return <ScreencastBrowserStream token={token} item={item} />;
 }
@@ -165,7 +173,7 @@ function ScreencastBrowserStream({ token, item }: { token: string; item: CanvasI
     },
     staleTime: browserQueryStaleTimeMS,
   });
-  const tabs = tabsQuery.data?.tabs || [];
+  const tabs = (tabsQuery.data?.tabs || []).filter((tab) => tab.sessionID === ownerSessionID);
   const activeTab = preferredBrowserTab(tabs, payload);
   const busyTitle = tabsQuery.isPending ? t("browser.loading") : t("browser.empty");
   const hasRealPayloadState = browserPayloadHasRealState(payload);
@@ -203,21 +211,12 @@ function ScreencastBrowserStream({ token, item }: { token: string; item: CanvasI
     setLLMCursorPulse((current) => ({ ...current, visible: false }));
   }, [streamTabID, isExternalBrowser, streamPhase]);
 
-  useEffect(() => {
-    if (!isExternalBrowser) {
-      return;
-    }
-    const id = window.setInterval(() => {
-      void tabsQuery.refetch();
-    }, 1500);
-    return () => window.clearInterval(id);
-  }, [isExternalBrowser, tabsQuery.refetch]);
-
   const persistTab = async (tab: BrowserTab) => {
-    if (!ownerSessionID) {
+    if (!ownerSessionID || tab.sessionID !== ownerSessionID) {
       return;
     }
-    const title = browserTabTitle(tab, payload?.title || t("browser.title"));
+    const title = browserTabTitle(tab, payload?.title || t("browser.newTab"));
+    allowElectronBrowserTab(ownerSessionID, tab.id);
     await putCanvasItem(token, ownerSessionID, item.id, {
       id: item.id,
       sourceSessionID: ownerSessionID,

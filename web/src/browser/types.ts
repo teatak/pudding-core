@@ -8,6 +8,7 @@ export type BrowserCanvasPayload = {
   title?: string;
   faviconURL?: string;
   mode?: BrowserProcessMode;
+  closedAt?: string;
 };
 
 export type BrowserProcessMode = "headless" | "external";

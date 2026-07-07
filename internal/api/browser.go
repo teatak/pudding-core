@@ -20,6 +20,15 @@ type browserOpenReq struct {
 	URL string `json:"url"`
 }
 
+type browserSyncReq struct {
+	TargetID     string `json:"targetID"`
+	URL          string `json:"url"`
+	Title        string `json:"title"`
+	FaviconURL   string `json:"faviconURL"`
+	CanGoBack    bool   `json:"canGoBack"`
+	CanGoForward bool   `json:"canGoForward"`
+}
+
 type browserObserveReq struct {
 	MaxTextChars int `json:"maxTextChars"`
 	MaxElements  int `json:"maxElements"`
@@ -56,11 +65,16 @@ func (s *Server) getBrowserState(c *cart.Context) error {
 		return nil
 	}
 	processMode := s.browserProcessMode(c.Request.Context(), sessionID)
+	if s.browserSessionClosed(sessionID) {
+		c.JSON(http.StatusOK, browserStateResp{HasState: false, SessionID: sessionID, Mode: processMode, ProcessMode: processMode})
+		return nil
+	}
 	if s.browser != nil {
 		tabs, err := s.browser.ListTabs(c.Request.Context(), sessionID)
 		if err != nil {
 			return s.browserError(c, err)
 		}
+		tabs = s.filterBrowserTabs(sessionID, tabs)
 		if tab, ok, err := latestBrowserTab(tabs); err != nil {
 			return s.browserError(c, err)
 		} else if ok {
@@ -85,6 +99,13 @@ func (s *Server) getBrowserState(c *cart.Context) error {
 	}
 	if err != nil {
 		return s.fail(c, err)
+	}
+	if !s.browserTabAllowed(sessionID, state.TabID) {
+		if err := s.store.ClearBrowserState(c.Request.Context(), sessionID); err != nil {
+			return s.fail(c, err)
+		}
+		c.JSON(http.StatusOK, browserStateResp{HasState: false, SessionID: sessionID, Mode: processMode, ProcessMode: processMode})
+		return nil
 	}
 	if tab, ok, err := s.recoverBrowserState(c.Request.Context(), sessionID, state); err != nil {
 		return s.browserError(c, err)
@@ -125,6 +146,7 @@ func (s *Server) closeBrowserSession(c *cart.Context) error {
 	if err := s.store.ClearBrowserState(c.Request.Context(), sessionID); err != nil {
 		return s.fail(c, err)
 	}
+	s.markBrowserSessionClosed(sessionID)
 	c.Response.WriteHeader(http.StatusNoContent)
 	return nil
 }
@@ -134,10 +156,15 @@ func (s *Server) listBrowserTabs(c *cart.Context) error {
 	if !ok {
 		return nil
 	}
+	if s.browserSessionClosed(sessionID) {
+		c.JSON(http.StatusOK, browserTabsResp{Tabs: []browser.TabSnapshot{}, ProcessMode: s.browserProcessMode(c.Request.Context(), sessionID)})
+		return nil
+	}
 	tabs, err := s.browser.ListTabs(c.Request.Context(), sessionID)
 	if err != nil {
 		return s.browserError(c, err)
 	}
+	tabs = s.filterBrowserTabs(sessionID, tabs)
 	c.JSON(http.StatusOK, browserTabsResp{Tabs: tabs, ProcessMode: s.browserProcessMode(c.Request.Context(), sessionID)})
 	return nil
 }
@@ -151,6 +178,7 @@ func (s *Server) createBrowserTab(c *cart.Context) error {
 	if err != nil {
 		return s.browserError(c, err)
 	}
+	s.allowBrowserTab(sessionID, tab.ID)
 	c.JSON(http.StatusCreated, tab)
 	return nil
 }
@@ -161,6 +189,9 @@ func (s *Server) getBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
+	if !s.browserTabAllowed(sessionID, tabID) {
+		return s.browserError(c, browser.ErrTabNotFound)
+	}
 	tab, err := s.browser.GetTab(c.Request.Context(), sessionID, tabID)
 	if err != nil {
 		return s.browserError(c, err)
@@ -175,6 +206,9 @@ func (s *Server) recoverBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
+	if !s.browserTabAllowed(sessionID, tabID) {
+		return s.browserError(c, browser.ErrTabNotFound)
+	}
 	tab, err := s.browser.GetTab(c.Request.Context(), sessionID, tabID)
 	if err != nil {
 		if !errors.Is(err, browser.ErrTabNotFound) {
@@ -232,6 +266,41 @@ func (s *Server) openBrowserTab(c *cart.Context) error {
 	if err != nil {
 		return s.browserError(c, err)
 	}
+	s.allowBrowserTab(sessionID, tab.ID)
+	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
+		return browserStoreError(c, s, err)
+	}
+	c.JSON(http.StatusOK, tab)
+	return nil
+}
+
+func (s *Server) syncBrowserTab(c *cart.Context) error {
+	sessionID, ok := s.browserSession(c)
+	if !ok {
+		return nil
+	}
+	tabID, _ := c.Param("tabID")
+	if !s.browserTabAllowed(sessionID, tabID) {
+		return s.browserError(c, browser.ErrTabNotFound)
+	}
+	var req browserSyncReq
+	if err := decode(c, &req); err != nil {
+		return badRequest(c, "invalid json body")
+	}
+	now := time.Now().UTC()
+	tab := browser.TabSnapshot{
+		ID:           tabID,
+		SessionID:    sessionID,
+		TargetID:     req.TargetID,
+		URL:          strings.TrimSpace(req.URL),
+		Title:        strings.TrimSpace(req.Title),
+		FaviconURL:   strings.TrimSpace(req.FaviconURL),
+		Mode:         "headless",
+		CanGoBack:    req.CanGoBack,
+		CanGoForward: req.CanGoForward,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
 	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
 		return browserStoreError(c, s, err)
 	}
@@ -248,15 +317,114 @@ func (s *Server) openBrowserSession(c *cart.Context) error {
 	if err := decode(c, &req); err != nil {
 		return badRequest(c, "invalid json body")
 	}
-	tab, err := s.browser.Open(c.Request.Context(), sessionID, "", req.URL)
+	tabID := ""
+	if tabID = s.singleAllowedBrowserTabID(sessionID); tabID == "" && s.browserSessionGated(sessionID) {
+		tab, err := s.browser.CreateTab(c.Request.Context(), sessionID)
+		if err != nil {
+			return s.browserError(c, err)
+		}
+		tabID = tab.ID
+	}
+	tab, err := s.browser.Open(c.Request.Context(), sessionID, tabID, req.URL)
 	if err != nil {
 		return s.browserError(c, err)
 	}
+	s.allowBrowserTab(sessionID, tab.ID)
 	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
 		return browserStoreError(c, s, err)
 	}
 	c.JSON(http.StatusOK, tab)
 	return nil
+}
+
+func (s *Server) browserSessionClosed(sessionID string) bool {
+	s.browserMu.Lock()
+	defer s.browserMu.Unlock()
+	allowed, ok := s.browserClosed[strings.TrimSpace(sessionID)]
+	return ok && len(allowed) == 0
+}
+
+func (s *Server) markBrowserSessionClosed(sessionID string) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
+	}
+	s.browserMu.Lock()
+	defer s.browserMu.Unlock()
+	if s.browserClosed == nil {
+		s.browserClosed = map[string]map[string]struct{}{}
+	}
+	s.browserClosed[sessionID] = map[string]struct{}{}
+}
+
+func (s *Server) allowBrowserTab(sessionID, tabID string) {
+	sessionID = strings.TrimSpace(sessionID)
+	tabID = strings.TrimSpace(tabID)
+	if sessionID == "" || tabID == "" {
+		return
+	}
+	s.browserMu.Lock()
+	defer s.browserMu.Unlock()
+	allowed, ok := s.browserClosed[sessionID]
+	if !ok {
+		return
+	}
+	if allowed == nil {
+		allowed = map[string]struct{}{}
+		s.browserClosed[sessionID] = allowed
+	}
+	allowed[tabID] = struct{}{}
+}
+
+func (s *Server) browserSessionGated(sessionID string) bool {
+	s.browserMu.Lock()
+	defer s.browserMu.Unlock()
+	_, ok := s.browserClosed[strings.TrimSpace(sessionID)]
+	return ok
+}
+
+func (s *Server) singleAllowedBrowserTabID(sessionID string) string {
+	s.browserMu.Lock()
+	defer s.browserMu.Unlock()
+	allowed, ok := s.browserClosed[strings.TrimSpace(sessionID)]
+	if !ok || len(allowed) != 1 {
+		return ""
+	}
+	for tabID := range allowed {
+		return tabID
+	}
+	return ""
+}
+
+func (s *Server) browserTabAllowed(sessionID, tabID string) bool {
+	s.browserMu.Lock()
+	defer s.browserMu.Unlock()
+	allowed, ok := s.browserClosed[strings.TrimSpace(sessionID)]
+	if !ok {
+		return true
+	}
+	_, ok = allowed[strings.TrimSpace(tabID)]
+	return ok
+}
+
+func (s *Server) filterBrowserTabs(sessionID string, tabs []browser.TabSnapshot) []browser.TabSnapshot {
+	sessionID = strings.TrimSpace(sessionID)
+	s.browserMu.Lock()
+	allowed, gated := s.browserClosed[sessionID]
+	s.browserMu.Unlock()
+	out := make([]browser.TabSnapshot, 0, len(tabs))
+	for _, tab := range tabs {
+		if strings.TrimSpace(tab.SessionID) != sessionID {
+			continue
+		}
+		if gated {
+			if _, ok := allowed[strings.TrimSpace(tab.ID)]; !ok {
+				continue
+			}
+		}
+		out = append(out, tab)
+	}
+	return out
 }
 
 func (s *Server) revealBrowserTab(c *cart.Context) error {
@@ -265,6 +433,9 @@ func (s *Server) revealBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
+	if !s.browserTabAllowed(sessionID, tabID) {
+		return s.browserError(c, browser.ErrTabNotFound)
+	}
 	tab, err := s.browser.Reveal(c.Request.Context(), sessionID, tabID)
 	if err != nil {
 		if !errors.Is(err, browser.ErrTabNotFound) {
@@ -293,6 +464,9 @@ func (s *Server) internalBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
+	if !s.browserTabAllowed(sessionID, tabID) {
+		return s.browserError(c, browser.ErrTabNotFound)
+	}
 	tab, err := s.browser.Internal(c.Request.Context(), sessionID, tabID)
 	if err != nil {
 		if !errors.Is(err, browser.ErrTabNotFound) {
@@ -321,6 +495,9 @@ func (s *Server) backBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
+	if !s.browserTabAllowed(sessionID, tabID) {
+		return s.browserError(c, browser.ErrTabNotFound)
+	}
 	tab, err := s.browser.Back(c.Request.Context(), sessionID, tabID)
 	if err != nil {
 		return s.browserError(c, err)
@@ -338,6 +515,9 @@ func (s *Server) forwardBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
+	if !s.browserTabAllowed(sessionID, tabID) {
+		return s.browserError(c, browser.ErrTabNotFound)
+	}
 	tab, err := s.browser.Forward(c.Request.Context(), sessionID, tabID)
 	if err != nil {
 		return s.browserError(c, err)
@@ -355,6 +535,9 @@ func (s *Server) reloadBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
+	if !s.browserTabAllowed(sessionID, tabID) {
+		return s.browserError(c, browser.ErrTabNotFound)
+	}
 	tab, err := s.browser.Reload(c.Request.Context(), sessionID, tabID)
 	if err != nil {
 		return s.browserError(c, err)
@@ -372,6 +555,9 @@ func (s *Server) observeBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
+	if !s.browserTabAllowed(sessionID, tabID) {
+		return s.browserError(c, browser.ErrTabNotFound)
+	}
 	var req browserObserveReq
 	if err := decode(c, &req); err != nil && !errors.Is(err, io.EOF) {
 		return badRequest(c, "invalid json body")
@@ -393,6 +579,9 @@ func (s *Server) screenshotBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
+	if !s.browserTabAllowed(sessionID, tabID) {
+		return s.browserError(c, browser.ErrTabNotFound)
+	}
 	var req browserScreenshotReq
 	if err := decode(c, &req); err != nil && !errors.Is(err, io.EOF) {
 		return badRequest(c, "invalid json body")
@@ -411,6 +600,9 @@ func (s *Server) clickBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
+	if !s.browserTabAllowed(sessionID, tabID) {
+		return s.browserError(c, browser.ErrTabNotFound)
+	}
 	var req browser.ClickInput
 	if err := decode(c, &req); err != nil && !errors.Is(err, io.EOF) {
 		return badRequest(c, "invalid json body")
@@ -441,6 +633,9 @@ func (s *Server) typeBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
+	if !s.browserTabAllowed(sessionID, tabID) {
+		return s.browserError(c, browser.ErrTabNotFound)
+	}
 	var req browser.TypeInput
 	if err := decode(c, &req); err != nil {
 		return badRequest(c, "invalid json body")
@@ -465,6 +660,9 @@ func (s *Server) scrollBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
+	if !s.browserTabAllowed(sessionID, tabID) {
+		return s.browserError(c, browser.ErrTabNotFound)
+	}
 	var req browser.ScrollInput
 	if err := decode(c, &req); err != nil && !errors.Is(err, io.EOF) {
 		return badRequest(c, "invalid json body")
@@ -632,7 +830,11 @@ func (s *Server) recoverBrowserState(ctx context.Context, sessionID string, stat
 		return browser.TabSnapshot{}, false, nil
 	}
 	processMode := s.browser.ProcessMode(ctx, sessionID)
-	if state.Mode != "external" && processMode != "external" {
+	recoverMode := ""
+	if state.Mode == "external" || processMode == "external" {
+		recoverMode = "external"
+	}
+	if recoverMode == "" && !browserSupportsMetadataRecovery(s.browser) {
 		return browser.TabSnapshot{}, false, nil
 	}
 	tab, err := s.browser.Recover(ctx, sessionID, browser.RecoverHint{
@@ -640,7 +842,7 @@ func (s *Server) recoverBrowserState(ctx context.Context, sessionID string, stat
 		URL:        state.URL,
 		Title:      state.Title,
 		FaviconURL: state.FaviconURL,
-		Mode:       "external",
+		Mode:       recoverMode,
 	})
 	if errors.Is(err, browser.ErrTabNotFound) {
 		return browser.TabSnapshot{}, false, nil
@@ -649,6 +851,11 @@ func (s *Server) recoverBrowserState(ctx context.Context, sessionID string, stat
 		return browser.TabSnapshot{}, false, err
 	}
 	return tab, true, nil
+}
+
+func browserSupportsMetadataRecovery(service browser.Service) bool {
+	support, ok := service.(browser.MetadataRecoverySupport)
+	return ok && support.SupportsMetadataRecovery()
 }
 
 func browserStateInputFromTab(sessionID string, tab browser.TabSnapshot) (store.BrowserStateInput, bool) {

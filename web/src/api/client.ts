@@ -57,6 +57,7 @@ import {
   browserScreenshot,
   browserScreenshotRequest,
   browserState,
+  browserSyncRequest,
   browserTab,
   browserTypeRequest,
   installAppRequest,
@@ -378,6 +379,18 @@ export function openBrowserTab(
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/open`, browserTab, {
     method: "POST",
     body: JSON.stringify(browserOpenRequest.parse(body)),
+  });
+}
+
+export function syncBrowserTab(
+  token: string,
+  sessionID: string,
+  tabID: string,
+  body: z.infer<typeof browserSyncRequest>,
+): Promise<BrowserTab> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/sync`, browserTab, {
+    method: "POST",
+    body: JSON.stringify(browserSyncRequest.parse(body)),
   });
 }
 

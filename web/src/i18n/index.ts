@@ -169,7 +169,7 @@ const zh: Messages = {
   "browser.controls": "浏览器",
   "browser.controlsActive": "浏览器已连接",
   "browser.title": "浏览器",
-  "browser.newTab": "新建标签",
+  "browser.newTab": "新选项卡",
   "browser.openURL": "打开 URL",
   "browser.back": "后退",
   "browser.forward": "前进",

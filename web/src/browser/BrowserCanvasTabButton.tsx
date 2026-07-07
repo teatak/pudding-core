@@ -1,10 +1,10 @@
-import { Compass, Loader2, X } from "lucide-react";
+import { Compass, Loader2, Plus, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 
-function BrowserTabIcon({ faviconURL }: { faviconURL?: string }) {
+function BrowserTabIcon({ faviconURL, create }: { faviconURL?: string; create?: boolean }) {
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -21,7 +21,7 @@ function BrowserTabIcon({ faviconURL }: { faviconURL?: string }) {
 
   return (
     <span aria-hidden="true" className="inline-flex h-(--canvas-toolbar-tab-icon) w-(--canvas-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[5px] bg-blue-600 text-white shadow-sm">
-      <Compass className="h-3.5 w-3.5" />
+      {create ? <Plus className="h-3.5 w-3.5" /> : <Compass className="h-3.5 w-3.5" />}
     </span>
   );
 }
@@ -48,23 +48,24 @@ export function BrowserCanvasTabButton({
   onClose: () => void;
 }) {
   const { t } = useI18n();
+  const label = title || (hasTitle ? t("browser.title") : t("browser.newTab"));
   return (
     <div className="no-drag-region w-fit max-w-full min-w-0 shrink-0 overflow-hidden rounded-lg bg-muted p-(--canvas-toolbar-tab-padding) text-muted-foreground">
       <button
-        aria-label={t("browser.title")}
+        aria-label={label}
         aria-selected={active}
         className={cn(
           "group inline-flex h-(--canvas-toolbar-tab-h) min-w-0 shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium whitespace-nowrap transition-colors data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm hover:bg-background hover:text-foreground",
-          hasTitle ? "max-w-36" : "w-10 justify-center",
+          hasTitle ? "max-w-36" : "",
         )}
         data-active={active}
         disabled={pending}
-        title={title || t("browser.title")}
+        title={label}
         type="button"
         onClick={onClick}
       >
-        {pending ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <BrowserTabIcon faviconURL={faviconURL} />}
-        {hasTitle ? <span className="min-w-0 max-w-20 truncate text-left">{title || t("browser.title")}</span> : null}
+        {pending ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <BrowserTabIcon create={!hasTitle} faviconURL={faviconURL} />}
+        {hasTitle ? <span className="min-w-0 max-w-20 truncate text-left">{label}</span> : null}
         {closable ? (
           <span
             aria-label={t("canvas.delete")}

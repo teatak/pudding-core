@@ -66,6 +66,10 @@ type Service interface {
 	Close() error
 }
 
+type MetadataRecoverySupport interface {
+	SupportsMetadataRecovery() bool
+}
+
 type Config struct {
 	HomeDir    string
 	ChromePath string

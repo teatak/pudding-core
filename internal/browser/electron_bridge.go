@@ -33,6 +33,44 @@ type electronBridgeRequest struct {
 	URL       string `json:"url,omitempty"`
 }
 
+type electronBridgeObserveRequest struct {
+	SessionID    string `json:"sessionID"`
+	TabID        string `json:"tabID,omitempty"`
+	MaxTextChars int    `json:"maxTextChars,omitempty"`
+	MaxElements  int    `json:"maxElements,omitempty"`
+}
+
+type electronBridgeScreenshotRequest struct {
+	SessionID string `json:"sessionID"`
+	TabID     string `json:"tabID,omitempty"`
+	FullPage  bool   `json:"fullPage,omitempty"`
+}
+
+type electronBridgeClickRequest struct {
+	SessionID string   `json:"sessionID"`
+	TabID     string   `json:"tabID,omitempty"`
+	Selector  string   `json:"selector,omitempty"`
+	X         *float64 `json:"x,omitempty"`
+	Y         *float64 `json:"y,omitempty"`
+	Method    string   `json:"method,omitempty"`
+}
+
+type electronBridgeTypeRequest struct {
+	SessionID string `json:"sessionID"`
+	TabID     string `json:"tabID,omitempty"`
+	Selector  string `json:"selector,omitempty"`
+	Text      string `json:"text"`
+	Clear     bool   `json:"clear,omitempty"`
+}
+
+type electronBridgeScrollRequest struct {
+	SessionID string  `json:"sessionID"`
+	TabID     string  `json:"tabID,omitempty"`
+	Selector  string  `json:"selector,omitempty"`
+	DeltaX    float64 `json:"deltaX,omitempty"`
+	DeltaY    float64 `json:"deltaY,omitempty"`
+}
+
 type electronBridgeTabsResponse struct {
 	Tabs        []electronBridgeSnapshot `json:"tabs"`
 	ProcessMode string                   `json:"processMode,omitempty"`
@@ -52,6 +90,36 @@ type electronBridgeSnapshot struct {
 
 type electronBridgeError struct {
 	Error string `json:"error"`
+}
+
+type electronBridgeObserveResponse struct {
+	Tab        electronBridgeSnapshot `json:"tab"`
+	Title      string                 `json:"title"`
+	URL        string                 `json:"url"`
+	ReadyState string                 `json:"readyState"`
+	Text       string                 `json:"text"`
+	TextChars  int                    `json:"textChars"`
+	Truncated  bool                   `json:"truncated"`
+	Elements   []ObservedElement      `json:"elements"`
+}
+
+type electronBridgeScreenshotResponse struct {
+	Tab               electronBridgeSnapshot `json:"tab"`
+	MIME              string                 `json:"mime"`
+	DataBase64        string                 `json:"dataBase64"`
+	Size              int64                  `json:"size"`
+	Width             int                    `json:"width,omitempty"`
+	Height            int                    `json:"height,omitempty"`
+	ViewportWidth     int                    `json:"viewportWidth,omitempty"`
+	ViewportHeight    int                    `json:"viewportHeight,omitempty"`
+	DeviceScaleFactor float64                `json:"deviceScaleFactor,omitempty"`
+	CapturedAt        time.Time              `json:"capturedAt"`
+}
+
+type electronBridgeActionResponse struct {
+	Tab    electronBridgeSnapshot `json:"tab"`
+	Action string                 `json:"action"`
+	Result map[string]any         `json:"result"`
 }
 
 func NewElectronBridgeService(cfg ElectronBridgeConfig) (*ElectronBridgeService, error) {
@@ -77,6 +145,10 @@ func NewElectronBridgeService(cfg ElectronBridgeConfig) (*ElectronBridgeService,
 
 func (s *ElectronBridgeService) ProcessMode(context.Context, string) string {
 	return "headless"
+}
+
+func (s *ElectronBridgeService) SupportsMetadataRecovery() bool {
+	return true
 }
 
 func (s *ElectronBridgeService) CreateTab(ctx context.Context, sessionID string) (TabSnapshot, error) {
@@ -172,8 +244,8 @@ func (s *ElectronBridgeService) Open(ctx context.Context, sessionID, tabID, rawU
 	return snapshot.tab(), nil
 }
 
-func (s *ElectronBridgeService) Reveal(ctx context.Context, sessionID, tabID string) (TabSnapshot, error) {
-	return s.GetTab(ctx, sessionID, tabID)
+func (s *ElectronBridgeService) Reveal(context.Context, string, string) (TabSnapshot, error) {
+	return TabSnapshot{}, ErrUnavailable
 }
 
 func (s *ElectronBridgeService) Internal(ctx context.Context, sessionID, tabID string) (TabSnapshot, error) {
@@ -192,24 +264,107 @@ func (s *ElectronBridgeService) Reload(ctx context.Context, sessionID, tabID str
 	return s.navigation(ctx, "/browser/tabs/reload", sessionID, tabID)
 }
 
-func (s *ElectronBridgeService) Observe(context.Context, string, string, ObserveOptions) (ObserveResult, error) {
-	return ObserveResult{}, ErrUnavailable
+func (s *ElectronBridgeService) Observe(ctx context.Context, sessionID, tabID string, opts ObserveOptions) (ObserveResult, error) {
+	tabID, err := s.resolveTabID(ctx, sessionID, tabID, false)
+	if err != nil {
+		return ObserveResult{}, err
+	}
+	var out electronBridgeObserveResponse
+	if err := s.post(ctx, "/browser/tabs/observe", electronBridgeObserveRequest{
+		SessionID:    sessionID,
+		TabID:        tabID,
+		MaxTextChars: opts.MaxTextChars,
+		MaxElements:  opts.MaxElements,
+	}, &out); err != nil {
+		return ObserveResult{}, err
+	}
+	return out.result(), nil
 }
 
-func (s *ElectronBridgeService) Screenshot(context.Context, string, string, ScreenshotOptions) (ScreenshotResult, error) {
-	return ScreenshotResult{}, ErrUnavailable
+func (s *ElectronBridgeService) Screenshot(ctx context.Context, sessionID, tabID string, opts ScreenshotOptions) (ScreenshotResult, error) {
+	tabID, err := s.resolveTabID(ctx, sessionID, tabID, false)
+	if err != nil {
+		return ScreenshotResult{}, err
+	}
+	var out electronBridgeScreenshotResponse
+	if err := s.post(ctx, "/browser/tabs/screenshot", electronBridgeScreenshotRequest{
+		SessionID: sessionID,
+		TabID:     tabID,
+		FullPage:  opts.FullPage,
+	}, &out); err != nil {
+		return ScreenshotResult{}, err
+	}
+	return out.result(), nil
 }
 
-func (s *ElectronBridgeService) Click(context.Context, string, string, ClickInput) (ActionResult, error) {
-	return ActionResult{}, ErrUnavailable
+func (s *ElectronBridgeService) Click(ctx context.Context, sessionID, tabID string, in ClickInput) (ActionResult, error) {
+	if tabID == "" {
+		tabID = in.TabID
+	}
+	tabID, err := s.resolveTabID(ctx, sessionID, tabID, false)
+	if err != nil {
+		return ActionResult{}, err
+	}
+	var out electronBridgeActionResponse
+	if err := s.post(ctx, "/browser/tabs/click", electronBridgeClickRequest{
+		SessionID: sessionID,
+		TabID:     tabID,
+		Selector:  in.Selector,
+		X:         in.X,
+		Y:         in.Y,
+		Method:    in.Method,
+	}, &out); err != nil {
+		return ActionResult{}, err
+	}
+	return out.result("click"), nil
 }
 
-func (s *ElectronBridgeService) Type(context.Context, string, string, TypeInput) (ActionResult, error) {
-	return ActionResult{}, ErrUnavailable
+func (s *ElectronBridgeService) Type(ctx context.Context, sessionID, tabID string, in TypeInput) (ActionResult, error) {
+	if tabID == "" {
+		tabID = in.TabID
+	}
+	if in.Text == "" {
+		return ActionResult{}, errors.New("text is required")
+	}
+	tabID, err := s.resolveTabID(ctx, sessionID, tabID, false)
+	if err != nil {
+		return ActionResult{}, err
+	}
+	var out electronBridgeActionResponse
+	if err := s.post(ctx, "/browser/tabs/type", electronBridgeTypeRequest{
+		SessionID: sessionID,
+		TabID:     tabID,
+		Selector:  in.Selector,
+		Text:      in.Text,
+		Clear:     in.Clear,
+	}, &out); err != nil {
+		return ActionResult{}, err
+	}
+	return out.result("type"), nil
 }
 
-func (s *ElectronBridgeService) Scroll(context.Context, string, string, ScrollInput) (ActionResult, error) {
-	return ActionResult{}, ErrUnavailable
+func (s *ElectronBridgeService) Scroll(ctx context.Context, sessionID, tabID string, in ScrollInput) (ActionResult, error) {
+	if tabID == "" {
+		tabID = in.TabID
+	}
+	if in.DeltaX == 0 && in.DeltaY == 0 {
+		in.DeltaY = 600
+	}
+	tabID, err := s.resolveTabID(ctx, sessionID, tabID, false)
+	if err != nil {
+		return ActionResult{}, err
+	}
+	var out electronBridgeActionResponse
+	if err := s.post(ctx, "/browser/tabs/scroll", electronBridgeScrollRequest{
+		SessionID: sessionID,
+		TabID:     tabID,
+		Selector:  in.Selector,
+		DeltaX:    in.DeltaX,
+		DeltaY:    in.DeltaY,
+	}, &out); err != nil {
+		return ActionResult{}, err
+	}
+	return out.result("scroll"), nil
 }
 
 func (s *ElectronBridgeService) Screencast(context.Context, string, string, *websocket.Conn) error {
@@ -337,4 +492,52 @@ func (snapshot electronBridgeSnapshot) tab() TabSnapshot {
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
+}
+
+func (out electronBridgeObserveResponse) result() ObserveResult {
+	return ObserveResult{
+		Tab:        out.Tab.tab(),
+		Title:      out.Title,
+		URL:        out.URL,
+		ReadyState: out.ReadyState,
+		Text:       out.Text,
+		TextChars:  out.TextChars,
+		Truncated:  out.Truncated,
+		Elements:   out.Elements,
+	}
+}
+
+func (out electronBridgeScreenshotResponse) result() ScreenshotResult {
+	capturedAt := out.CapturedAt
+	if capturedAt.IsZero() {
+		capturedAt = time.Now().UTC()
+	}
+	mime := strings.TrimSpace(out.MIME)
+	if mime == "" {
+		mime = "image/png"
+	}
+	return ScreenshotResult{
+		Tab:               out.Tab.tab(),
+		MIME:              mime,
+		DataBase64:        out.DataBase64,
+		Size:              out.Size,
+		Width:             out.Width,
+		Height:            out.Height,
+		ViewportWidth:     out.ViewportWidth,
+		ViewportHeight:    out.ViewportHeight,
+		DeviceScaleFactor: out.DeviceScaleFactor,
+		CapturedAt:        capturedAt,
+	}
+}
+
+func (out electronBridgeActionResponse) result(fallbackAction string) ActionResult {
+	action := strings.TrimSpace(out.Action)
+	if action == "" {
+		action = fallbackAction
+	}
+	result := out.Result
+	if result == nil {
+		result = map[string]any{}
+	}
+	return ActionResult{Tab: out.Tab.tab(), Action: action, Result: result}
 }

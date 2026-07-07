@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -224,6 +225,40 @@ func TestBrowserStateAPIRecoversExternalBinding(t *testing.T) {
 	}
 	if _, ok := browserSvc.tabs["tab_external"]; !ok {
 		t.Fatalf("external tab was not rebound")
+	}
+}
+
+func TestBrowserStateAPIRecoversElectronMetadata(t *testing.T) {
+	srv, st, browserSvc := newBrowserTestServer(t)
+	browserSvc.supportsMetadataRecovery = true
+	ctx := context.Background()
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_electron_restore", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutBrowserState(ctx, store.BrowserStateInput{
+		SessionID: "sess_electron_restore",
+		TabID:     "tab_restored",
+		URL:       "https://example.com/restored",
+		Title:     "Restored",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	type stateResponse struct {
+		HasState bool   `json:"hasState"`
+		TabID    string `json:"tabID"`
+		URL      string `json:"url"`
+		Mode     string `json:"mode"`
+	}
+	resp := req(t, http.MethodGet, srv.URL+"/sessions/sess_electron_restore/browser/state", nil)
+	state := decodeJSON[stateResponse](t, resp)
+	if resp.StatusCode != http.StatusOK || !state.HasState || state.TabID != "tab_restored" || state.URL != "https://example.com/restored" || state.Mode != "headless" {
+		t.Fatalf("electron metadata recovery status=%d state=%+v", resp.StatusCode, state)
+	}
+	if browserSvc.recoverCount != 1 {
+		t.Fatalf("metadata recovery should call browser service once, count=%d", browserSvc.recoverCount)
+	}
+	if tab, ok := browserSvc.tabs["tab_restored"]; !ok || tab.URL != "https://example.com/restored" || tab.Mode != "headless" {
+		t.Fatalf("metadata should rebuild live tab: %+v ok=%v", tab, ok)
 	}
 }
 
@@ -446,6 +481,93 @@ func TestCloseBrowserSessionSucceedsWhenStoredTabIsGone(t *testing.T) {
 	}
 }
 
+func TestCloseBrowserSessionBlocksLiveTabRecovery(t *testing.T) {
+	srv, st, browserSvc := newBrowserTestServer(t)
+	browserSvc.keepTabsOnClose = true
+	ctx := context.Background()
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_live_close", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_live_close/browser/open", map[string]string{"url": "https://example.com/"})
+	opened := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("open status=%d tab=%+v", resp.StatusCode, opened)
+	}
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_live_close/browser/close", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("close status=%d", resp.StatusCode)
+	}
+	if _, ok := browserSvc.tabs[opened.ID]; !ok {
+		t.Fatal("test setup expected live tab to remain after close")
+	}
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_live_close/browser/state", nil)
+	state := decodeJSON[browserStateResp](t, resp)
+	if resp.StatusCode != http.StatusOK || state.HasState {
+		t.Fatalf("state should stay closed despite live tab status=%d state=%+v", resp.StatusCode, state)
+	}
+	var tabs struct {
+		Tabs []browser.TabSnapshot `json:"tabs"`
+	}
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_live_close/browser/tabs", nil)
+	tabs = decodeJSON[struct {
+		Tabs []browser.TabSnapshot `json:"tabs"`
+	}](t, resp)
+	if resp.StatusCode != http.StatusOK || len(tabs.Tabs) != 0 {
+		t.Fatalf("tabs should stay closed despite live tab status=%d tabs=%+v", resp.StatusCode, tabs.Tabs)
+	}
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_live_close/browser/tabs/"+opened.ID+"/sync", map[string]string{"url": "https://example.org/", "title": "Old"})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("syncing a closed tab should fail status=%d", resp.StatusCode)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_live_close/browser/open", map[string]string{"url": "https://fresh.example/"})
+	fresh := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusOK || fresh.ID == "" || fresh.ID == opened.ID || fresh.URL != "https://fresh.example/" {
+		t.Fatalf("fresh open status=%d tab=%+v old=%+v", resp.StatusCode, fresh, opened)
+	}
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_live_close/browser/tabs", nil)
+	tabs = decodeJSON[struct {
+		Tabs []browser.TabSnapshot `json:"tabs"`
+	}](t, resp)
+	if resp.StatusCode != http.StatusOK || len(tabs.Tabs) != 1 || tabs.Tabs[0].ID != fresh.ID {
+		t.Fatalf("tabs should expose only fresh tab status=%d tabs=%+v fresh=%+v", resp.StatusCode, tabs.Tabs, fresh)
+	}
+	stateAfterFresh, err := st.GetBrowserState(ctx, "sess_live_close")
+	if err != nil || stateAfterFresh.TabID != fresh.ID || stateAfterFresh.URL != "https://fresh.example/" {
+		t.Fatalf("fresh state not persisted: state=%+v err=%v", stateAfterFresh, err)
+	}
+}
+
+func TestSyncBrowserTabPersistsState(t *testing.T) {
+	srv, st, _ := newBrowserTestServer(t)
+	ctx := context.Background()
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_sync", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_sync/browser/open", map[string]string{"url": "https://start.example/"})
+	tab := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("open status=%d tab=%+v", resp.StatusCode, tab)
+	}
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_sync/browser/tabs/"+tab.ID+"/sync", map[string]any{
+		"url":          "https://next.example/",
+		"title":        "Next",
+		"faviconURL":   "https://next.example/favicon.ico",
+		"canGoBack":    true,
+		"canGoForward": false,
+	})
+	synced := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusOK || synced.URL != "https://next.example/" || synced.Title != "Next" || !synced.CanGoBack {
+		t.Fatalf("sync status=%d tab=%+v", resp.StatusCode, synced)
+	}
+	state, err := st.GetBrowserState(ctx, "sess_sync")
+	if err != nil || state.TabID != tab.ID || state.URL != "https://next.example/" || state.Title != "Next" {
+		t.Fatalf("state not synced: state=%+v err=%v", state, err)
+	}
+}
+
 func TestReleaseBrowserTabClearsStateWhenTabAlreadyGone(t *testing.T) {
 	srv, st, _ := newBrowserTestServer(t)
 	ctx := context.Background()
@@ -618,21 +740,28 @@ func TestBrowserTestFormIsPublic(t *testing.T) {
 }
 
 type fakeBrowserService struct {
-	tabs                 map[string]browser.TabSnapshot
-	recoverableTabs      map[string]browser.TabSnapshot
-	processMode          string
-	openSession          string
-	releasedSession      string
-	closedBrowserSession string
-	clickSession         string
-	clickMethod          string
-	lastNavigation       string
-	typeText             string
-	scrollY              float64
-	screencastSession    string
-	screencastTab        string
-	screencastDone       chan struct{}
-	recoverCount         int
+	tabs                     map[string]browser.TabSnapshot
+	recoverableTabs          map[string]browser.TabSnapshot
+	processMode              string
+	supportsMetadataRecovery bool
+	openSession              string
+	releasedSession          string
+	closedBrowserSession     string
+	keepTabsOnClose          bool
+	clickSession             string
+	clickMethod              string
+	lastNavigation           string
+	typeText                 string
+	scrollY                  float64
+	screencastSession        string
+	screencastTab            string
+	screencastDone           chan struct{}
+	recoverCount             int
+	nextTab                  int
+}
+
+func (f *fakeBrowserService) SupportsMetadataRecovery() bool {
+	return f.supportsMetadataRecovery
 }
 
 func (f *fakeBrowserService) ProcessMode(_ context.Context, _ string) string {
@@ -647,13 +776,17 @@ func (f *fakeBrowserService) setProcessMode(_ string, mode string) {
 }
 
 func (f *fakeBrowserService) CreateTab(_ context.Context, sessionID string) (browser.TabSnapshot, error) {
-	return f.create(sessionID), nil
+	return f.create(sessionID, ""), nil
 }
 
-func (f *fakeBrowserService) create(sessionID string) browser.TabSnapshot {
+func (f *fakeBrowserService) create(sessionID, tabID string) browser.TabSnapshot {
 	now := time.Now().UTC()
+	if strings.TrimSpace(tabID) == "" {
+		f.nextTab++
+		tabID = "tab_" + sessionID + "_" + strconv.Itoa(f.nextTab)
+	}
 	tab := browser.TabSnapshot{
-		ID:        "tab_" + sessionID,
+		ID:        tabID,
 		SessionID: sessionID,
 		URL:       "about:blank",
 		Title:     "Blank",
@@ -696,7 +829,17 @@ func (f *fakeBrowserService) Recover(_ context.Context, sessionID string, hint b
 		if !ok || tab.SessionID != sessionID {
 			tab, ok = f.recoverableTabs[hint.TabID]
 			if !ok || tab.SessionID != sessionID {
-				return browser.TabSnapshot{}, browser.ErrTabNotFound
+				if !f.supportsMetadataRecovery || hint.URL == "" {
+					return browser.TabSnapshot{}, browser.ErrTabNotFound
+				}
+				tab = browser.TabSnapshot{
+					ID:         hint.TabID,
+					SessionID:  sessionID,
+					URL:        hint.URL,
+					Title:      hint.Title,
+					FaviconURL: hint.FaviconURL,
+					CreatedAt:  now,
+				}
 			}
 		}
 		if hint.URL != "" {
@@ -740,6 +883,9 @@ func (f *fakeBrowserService) ReleaseTab(_ context.Context, sessionID, tabID stri
 
 func (f *fakeBrowserService) CloseSessionBrowser(_ context.Context, sessionID string) error {
 	f.closedBrowserSession = sessionID
+	if f.keepTabsOnClose {
+		return nil
+	}
 	for id, tab := range f.tabs {
 		if tab.SessionID == sessionID {
 			delete(f.tabs, id)
@@ -757,7 +903,7 @@ func (f *fakeBrowserService) Open(_ context.Context, sessionID, tabID, rawURL st
 	f.openSession = sessionID
 	tab, ok := f.tabs[tabID]
 	if !ok {
-		tab = f.create(sessionID)
+		tab = f.create(sessionID, tabID)
 	}
 	if tab.SessionID != sessionID {
 		return browser.TabSnapshot{}, browser.ErrTabNotFound

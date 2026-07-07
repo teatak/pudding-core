@@ -293,7 +293,7 @@ export function App() {
             <SheetTitle>{t("canvas.title")}</SheetTitle>
             <SheetDescription>{t("canvas.empty")}</SheetDescription>
           </SheetHeader>
-          <CanvasPane token={token} sessionID={selectedSessionID} />
+          <CanvasPane key={selectedSessionID || "canvas"} token={token} sessionID={selectedSessionID} />
         </SheetContent>
       </Sheet>
     </>
@@ -351,14 +351,14 @@ export function App() {
           collapsible
           minSize={workspaceLayout.minCanvasPx}
         >
-          {effectiveCanvasOpen ? <CanvasPane token={token} sessionID={selectedSessionID} /> : null}
+          {effectiveCanvasOpen ? <CanvasPane key={selectedSessionID || "canvas"} token={token} sessionID={selectedSessionID} /> : null}
         </ResizablePanel>
       </ResizablePanelGroup>
     );
 
   return (
     <TooltipProvider delayDuration={250}>
-      <div className="relative flex h-[100svh] overflow-hidden">
+      <div className="relative flex h-full overflow-hidden">
         <div aria-hidden="true" className="drag-region absolute inset-x-0 top-0 z-20 h-(--toolbar-h)" />
         <div className="relative h-full min-w-0 flex-1 bg-background">
           {workspaceContent}

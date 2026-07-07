@@ -546,6 +546,14 @@ export const listBrowserTabsResponse = z.object({
   processMode: z.enum(["headless", "external"]).optional(),
 });
 export const browserOpenRequest = z.object({ url: z.string().min(1) });
+export const browserSyncRequest = z.object({
+  targetID: z.string().optional(),
+  url: z.string(),
+  title: z.string().optional(),
+  faviconURL: z.string().optional(),
+  canGoBack: z.boolean().optional(),
+  canGoForward: z.boolean().optional(),
+});
 export const browserObserveRequest = z.object({
   maxTextChars: z.number().optional(),
   maxElements: z.number().optional(),

@@ -73,6 +73,16 @@ class BrowserBridgeServer {
         return this.browserHost.forward(body);
       case "/browser/tabs/reload":
         return this.browserHost.reload(body);
+      case "/browser/tabs/observe":
+        return this.browserHost.observe(body);
+      case "/browser/tabs/screenshot":
+        return this.browserHost.screenshot(body);
+      case "/browser/tabs/click":
+        return this.browserHost.click(body);
+      case "/browser/tabs/type":
+        return this.browserHost.type(body);
+      case "/browser/tabs/scroll":
+        return this.browserHost.scroll(body);
       case "/browser/tabs/close":
         return this.browserHost.closeTab(body);
       case "/browser/session/close":
@@ -123,6 +133,9 @@ function statusForError(error) {
   }
   if (message.includes("missing") || message.includes("required") || message.includes("invalid")) {
     return 400;
+  }
+  if (message.includes("unavailable") || message.includes("destroyed")) {
+    return 503;
   }
   return 500;
 }

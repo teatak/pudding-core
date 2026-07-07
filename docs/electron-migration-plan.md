@@ -1,6 +1,6 @@
 # Electron Migration Plan
 
-> 状态:P3 Go Browser Bridge 基础控制已接入。  
+> 状态:P4 CDP Tool Parity 已接入,P5 Multi-session Lifecycle 进行中。  
 > 日期:2026-07-07。  
 > 决策:迁移到 Electron shell,浏览器显示改为原生 `WebContentsView`;保留 Go daemon 作为业务核心。
 
@@ -245,7 +245,7 @@ Electron 后 external 不再依赖系统 Chrome:
 - Electron BrowserHost 支持 open/state/tabs/close/recover。
 - 当前落点:Electron main 启动 loopback bridge server,daemon 通过 `PUDDING_ELECTRON_BROWSER_BRIDGE_URL/TOKEN` 切换到 `ElectronBridgeService`。
 - 已完成:open/list/get/back/forward/reload/close tab/close session 的基础 bridge。
-- 未完成:observe/screenshot/click/type/scroll 仍返回 unavailable,等待 P4 用 `webContents.debugger` 接入。
+- 已完成:open/list/get/back/forward/reload/close tab/close session/observe/screenshot/click/type/scroll 的基础 bridge。
 
 验收:
 
@@ -258,6 +258,7 @@ Electron 后 external 不再依赖系统 Chrome:
 - 用 `webContents.debugger` 实现 observe/screenshot/click/type/scroll。
 - 错误统一映射到 Go browser error。
 - DevTools detach、webContents destroyed、navigation timeout 都有 recover 路径。
+- 当前落点:Electron BrowserHost 已补齐 observe/screenshot/click/type/scroll;Go `ElectronBridgeService` 已接入并补 bridge fake 测试。
 
 验收:
 
@@ -271,6 +272,12 @@ Electron 后 external 不再依赖系统 Chrome:
 - 非当前 session 的 `webContents` 保活但不显示。
 - tab close 幂等且彻底。
 - app restart 从 metadata 恢复,无真实页面时不显示假内容。
+- 当前落点:
+  - Electron bridge 声明支持 metadata recovery;`/browser/state` 可在 Electron 下从持久 URL 重建真实 tab,旧 Chrome manager 仍不恢复 internal metadata。
+  - Electron native surface 在没有真实 tab/URL 时显示空态,不再自动创建 `about:blank` 假 tab。
+  - BrowserHost attach 时同一窗口只保留当前 slot view,避免 session 快速切换时旧 view 残留盖住当前 session。
+  - `closeTab` 在 Electron Host 内幂等,重复关闭返回 lost snapshot。
+  - 关闭浏览器时前端进入 session-scoped closing guard,清空旧 tab/payload 缓存并丢弃并发创建结果,避免标题/icon 残留和关闭后复活。
 
 验收:
 
@@ -284,6 +291,7 @@ Electron 后 external 不再依赖系统 Chrome:
 - external 打开改为 Electron app-owned window。
 - 同一个 `webContents` 在 internal/external 之间移动。
 - 多 session external 支持多个窗口。
+- P6 完成前,Electron 路径禁用旧外部打开:Toolbar 隐藏按钮,Go `ElectronBridgeService.Reveal` 返回 unavailable。
 
 验收:
 
