@@ -47,6 +47,16 @@ const fallbackSizeClassByToken: Record<IdentityIconSize, string> = {
   hero: "size-7",
 };
 
+const appFallbackSizeClassByToken: Record<IdentityIconSize, string> = {
+  xs: "size-3.5",
+  sm: "size-4",
+  md: "size-5",
+  lg: "size-6",
+  xl: "size-8",
+  "2xl": "size-9",
+  hero: "size-10",
+};
+
 export function identityIconSizeClass(size: IdentityIconSize) {
   return sizeClassByToken[size];
 }
@@ -115,14 +125,13 @@ export function IdentityIcon({
 }
 
 function IdentityIconFallbackView({ fallback, size }: { fallback: IdentityIconFallback; size: IdentityIconSize }) {
-  const className = fallbackSizeClassByToken[size];
   switch (fallback) {
     case "app":
-      return <Package className={className} />;
+      return <Package className={appFallbackSizeClassByToken[size]} />;
     case "skill":
-      return <BookOpenText className={className} strokeWidth={2.25} />;
+      return <BookOpenText className={fallbackSizeClassByToken[size]} strokeWidth={2.25} />;
     case "brand":
     default:
-      return <Box className={className} strokeWidth={2.1} />;
+      return <Box className={fallbackSizeClassByToken[size]} strokeWidth={2.1} />;
   }
 }
