@@ -1907,7 +1907,7 @@ function appAuthMethods(app?: Pick<AppDefinition, "auth"> | null): AppAuthMethod
         provider: method.provider?.trim(),
       };
     })
-    .filter((method) => method.id && method.type && method.type !== "none");
+    .filter((method) => method.id && method.type);
 }
 
 function defaultAppAuthMethod(methods: AppAuthMethod[]) {
