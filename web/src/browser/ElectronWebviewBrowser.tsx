@@ -298,10 +298,10 @@ export function ElectronWebviewBrowser({ token, item }: { token: string; item: C
   }
 
   return (
-    <div className="canvas-window-no-drag relative h-full min-h-0 overflow-hidden bg-card" aria-label={title} role="application">
+    <div className="canvas-window-no-drag relative h-full min-h-0 overflow-hidden bg-[var(--canvas-background)]" aria-label={title} role="application">
       {createElement("webview", {
         ref: setWebviewRef,
-        className: "h-full w-full bg-card",
+        className: "h-full w-full bg-[var(--canvas-background)]",
         src: "about:blank",
         partition: "persist:pudding-default",
         allowpopups: "true",
@@ -315,7 +315,7 @@ export function ElectronWebviewBrowser({ token, item }: { token: string; item: C
 
 function BrowserNavigationLoading({ label }: { label: string }) {
   return (
-    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-card/35 backdrop-blur-[1px]">
+    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-[var(--canvas-background)]/35 backdrop-blur-[1px]">
       <div className="absolute inset-x-0 top-0 h-0.5 overflow-hidden bg-primary/10">
         <div className="h-full w-1/2 animate-pulse bg-primary/80" />
       </div>
@@ -333,7 +333,7 @@ function BrowserLoadErrorPage({ error, onReload }: { error: WebviewLoadError; on
   const message = host ? t("browser.errorHostNotResolved").replace("{host}", host) : t("browser.errorGeneric");
 
   return (
-    <div className="absolute inset-0 z-10 overflow-auto bg-card text-foreground">
+    <div className="absolute inset-0 z-10 overflow-auto bg-[var(--canvas-background)] text-foreground">
       <div className="mx-auto w-full max-w-[520px] px-8 pt-[18vh] pb-12">
         <FileX className="mb-8 h-12 w-12 text-muted-foreground" strokeWidth={1.75} />
         <h2 className="text-2xl leading-8 font-semibold text-foreground">{t("browser.errorTitle")}</h2>

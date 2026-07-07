@@ -1225,7 +1225,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
                   <button
                     key={item.id}
                     aria-selected={active}
-                    className="group inline-flex h-(--canvas-toolbar-tab-h) w-40 max-w-[44vw] shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium whitespace-nowrap transition-colors data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm hover:bg-background hover:text-foreground sm:w-48 sm:max-w-52"
+                    className="group inline-flex h-(--canvas-toolbar-tab-h) min-w-24 max-w-[44vw] shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium whitespace-nowrap transition-colors data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm hover:bg-background hover:text-foreground sm:max-w-40"
                     data-active={active}
                     title={title}
                     type="button"
@@ -1268,17 +1268,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       </div>
       <div className="relative z-0 min-h-0 flex-1 overflow-hidden px-3 pb-3">
         <div ref={containerRef} className="relative isolate z-0 h-full overflow-hidden">
-          {browserActive ? (
-            browserItem ? (
-              <FullscreenBrowserWindow
-                key={browserWindowKey(browserItem)}
-                item={browserItem}
-                token={token}
-              />
-            ) : (
-              <CanvasBrowserLoading />
-            )
-          ) : (!enabled && items.length === 0) || (itemsQuery.isLoading && items.length === 0) ? (
+          {browserActive ? null : (!enabled && items.length === 0) || (itemsQuery.isLoading && items.length === 0) ? (
             <CanvasEmpty />
           ) : items.length === 0 ? (
             <CanvasEmpty />
@@ -1309,6 +1299,17 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
             ))
           )}
         </div>
+        {browserActive ? (
+          browserItem ? (
+            <FullscreenBrowserWindow
+              key={browserWindowKey(browserItem)}
+              item={browserItem}
+              token={token}
+            />
+          ) : (
+            <CanvasBrowserLoading />
+          )
+        ) : null}
       </div>
     </aside>
   );
@@ -1325,7 +1326,7 @@ function CanvasEmpty() {
 function CanvasBrowserLoading() {
   const { t } = useI18n();
   return (
-    <div className="absolute inset-0 flex items-center justify-center rounded-lg border bg-card text-sm text-muted-foreground">
+    <div className="absolute inset-0 flex items-center justify-center bg-[var(--canvas-background)] text-sm text-muted-foreground">
       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
       {t("browser.loading")}
     </div>
@@ -1341,11 +1342,11 @@ function FullscreenBrowserWindow({
 }) {
   const browserKey = browserWindowKey(item);
   return (
-    <div className="absolute inset-0 z-20 flex min-h-0 flex-col overflow-hidden rounded-lg bg-card text-card-foreground shadow-none">
-      <div className="canvas-window-drag-handle flex h-10 shrink-0 cursor-default items-center gap-2 rounded-t-lg border bg-card px-3">
+    <div className="absolute inset-0 z-20 flex min-h-0 flex-col overflow-hidden bg-[var(--canvas-background)] text-card-foreground shadow-none">
+      <div className="canvas-window-drag-handle flex h-10 shrink-0 cursor-default items-center gap-2 border-y bg-card px-3">
         <BrowserToolbar key={`toolbar:${browserKey}`} item={item} token={token} />
       </div>
-      <div className="min-h-0 flex-1 overflow-hidden rounded-b-lg border-x border-b bg-card">
+      <div className="min-h-0 flex-1 overflow-hidden bg-[var(--canvas-background)]">
         <BrowserStream key={`widget:${browserKey}`} item={item} token={token} />
       </div>
     </div>
