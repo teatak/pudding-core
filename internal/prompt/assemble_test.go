@@ -129,6 +129,91 @@ func TestAssembleIncludesAppsIndex(t *testing.T) {
 	}
 }
 
+func TestAssembleSummarizesUnconnectedApp(t *testing.T) {
+	out := Assemble(Input{
+		Mode: "chat",
+		Apps: []*app.Definition{
+			{
+				ID:          "github",
+				Name:        "GitHub",
+				Description: "Access repositories and issues.",
+				Auth:        &app.AuthConfig{Required: true},
+				Endpoints: map[string]app.Endpoint{
+					"github_rest": {Kind: app.EndpointKindREST, Description: "GitHub REST API."},
+				},
+				Skills: []app.SkillRef{{
+					ID:          "github-issues",
+					Description: "Inspect GitHub issues.",
+					Path:        "skills/issues/SKILL.md",
+				}},
+			},
+		},
+	})
+	if !strings.Contains(out.SystemInstruction, "App `github`") || !strings.Contains(out.SystemInstruction, "Status: not connected") {
+		t.Fatalf("assembled prompt should summarize unconnected app:\n%s", out.SystemInstruction)
+	}
+	if strings.Contains(out.SystemInstruction, "Endpoint `github_rest`") || strings.Contains(out.SystemInstruction, "Skill `github-issues`") {
+		t.Fatalf("unconnected app should not expose endpoints or skills:\n%s", out.SystemInstruction)
+	}
+	if strings.Contains(out.SystemInstruction, "builtin_skill_read") {
+		t.Fatalf("prompt should not suggest app skill loading when no app is usable:\n%s", out.SystemInstruction)
+	}
+}
+
+func TestAssembleShowsConnectedAppFully(t *testing.T) {
+	out := Assemble(Input{
+		Mode: "chat",
+		Apps: []*app.Definition{
+			{
+				ID:          "github",
+				Name:        "GitHub",
+				Description: "Access repositories and issues.",
+				Auth:        &app.AuthConfig{Required: true},
+				Endpoints: map[string]app.Endpoint{
+					"github_rest": {Kind: app.EndpointKindREST, Description: "GitHub REST API."},
+				},
+				Skills: []app.SkillRef{{
+					ID:          "github-issues",
+					Description: "Inspect GitHub issues.",
+					Path:        "skills/issues/SKILL.md",
+				}},
+			},
+		},
+		AppConnections: []*app.Connection{{ID: "github-main", AppID: "github"}},
+	})
+	if strings.Contains(out.SystemInstruction, "Status: not connected") {
+		t.Fatalf("connected app should not be marked unavailable:\n%s", out.SystemInstruction)
+	}
+	if !strings.Contains(out.SystemInstruction, "Endpoint `github_rest`") || !strings.Contains(out.SystemInstruction, "Skill `github-issues`") {
+		t.Fatalf("connected app should expose full metadata:\n%s", out.SystemInstruction)
+	}
+}
+
+func TestAssembleShowsConnectionlessSkillsOnlyAppFully(t *testing.T) {
+	out := Assemble(Input{
+		Mode: "chat",
+		Apps: []*app.Definition{
+			{
+				ID:          "notebook-helper",
+				Name:        "Notebook Helper",
+				Description: "Guide notebook workflows.",
+				Auth:        &app.AuthConfig{Required: false},
+				Skills: []app.SkillRef{{
+					ID:          "notebook-review",
+					Description: "Review a notebook.",
+					Path:        "skills/review/SKILL.md",
+				}},
+			},
+		},
+	})
+	if strings.Contains(out.SystemInstruction, "Status: not connected") {
+		t.Fatalf("connectionless skills-only app should be usable:\n%s", out.SystemInstruction)
+	}
+	if !strings.Contains(out.SystemInstruction, "Skill `notebook-review`") {
+		t.Fatalf("connectionless skills-only app should expose skill metadata:\n%s", out.SystemInstruction)
+	}
+}
+
 func TestLoaderIncludesBuiltinSkillsIndex(t *testing.T) {
 	home := t.TempDir()
 	out, err := NewLoader(home).Prompt(context.Background(), "chat")

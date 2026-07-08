@@ -40,6 +40,7 @@ type Input struct {
 	Home            string
 	Skills          []skill.Skill
 	Apps            []*app.Definition
+	AppConnections  []*app.Connection
 	RuntimeNow      time.Time
 }
 
@@ -49,13 +50,18 @@ type Output struct {
 }
 
 type Loader struct {
-	home   string
-	skills SkillLister
-	apps   AppLister
+	home        string
+	skills      SkillLister
+	apps        AppLister
+	connections app.ConnectionSource
 }
 
-func NewLoader(home string) *Loader {
-	return &Loader{home: home, skills: skill.NewService(home), apps: app.NewService(home, nil)}
+func NewLoader(home string, connections ...app.ConnectionSource) *Loader {
+	var source app.ConnectionSource
+	if len(connections) > 0 {
+		source = connections[0]
+	}
+	return &Loader{home: home, skills: skill.NewService(home), apps: app.NewService(home, source), connections: source}
 }
 
 type SkillLister interface {
@@ -89,7 +95,16 @@ func (l *Loader) Prompt(ctx context.Context, mode string) (Output, error) {
 			apps = loaded
 		}
 	}
-	return Assemble(Input{UserInstruction: user, Mode: mode, Home: l.home, Skills: skills, Apps: apps, RuntimeNow: time.Now()}), nil
+	var connections []*app.Connection
+	if l.connections != nil {
+		loaded, err := l.connections.ListAppConnections(ctx)
+		if err != nil {
+			slog.Warn("prompt: load app connections failed", "error", err)
+		} else {
+			connections = loaded
+		}
+	}
+	return Assemble(Input{UserInstruction: user, Mode: mode, Home: l.home, Skills: skills, Apps: apps, AppConnections: connections, RuntimeNow: time.Now()}), nil
 }
 
 func Assemble(input Input) Output {
@@ -103,7 +118,7 @@ func Assemble(input Input) Output {
 	if seg := skillsSegment(input.Skills, input.Home); seg != nil {
 		segments = append(segments, *seg)
 	}
-	if seg := appsSegment(input.Apps); seg != nil {
+	if seg := appsSegment(input.Apps, input.AppConnections); seg != nil {
 		segments = append(segments, *seg)
 	}
 	if user := strings.TrimSpace(input.UserInstruction); user != "" {
@@ -134,16 +149,28 @@ func runtimeSegment(now time.Time) Segment {
 	return Segment{ID: "runtime_context", Layer: "runtime", Content: content}
 }
 
-func appsSegment(list []*app.Definition) *Segment {
+func appsSegment(list []*app.Definition, connections []*app.Connection) *Segment {
 	if len(list) == 0 {
 		return nil
 	}
+	connectionCounts := appConnectionCounts(connections)
+	hasUsable := false
+	for _, item := range list {
+		if appPromptUsable(item, connectionCounts) {
+			hasUsable = true
+			break
+		}
+	}
 	var b strings.Builder
 	b.WriteString("## Installed Apps\n\n")
-	b.WriteString("Installed apps provide configured endpoints and app-scoped skills.\n")
-	b.WriteString("REST and GraphQL endpoint calls use configured app connections. Use the listed REST endpoint names with `builtin_rest_request` and GraphQL endpoint names with `builtin_graphql_request`; omit `connection` unless the tool reports multiple configured connections. MCP endpoints are exposed as dedicated app MCP tools when their server is reachable, not through REST or GraphQL tools.\n")
-	b.WriteString("Full app SKILL.md bodies are not loaded by default. When an app skill matches, call `builtin_skill_read(app_id=\"<app id>\", skill_id=\"<skill id>\")` once, then follow the returned instructions.\n")
-	b.WriteString("Do not proactively load untriggered app skills.\n\n")
+	b.WriteString("Installed apps provide configured endpoints and app-scoped skills when they are connected or do not require a connection.\n")
+	b.WriteString("Apps marked `not connected` are installed but not usable yet; do not call their endpoints or load their app skills until a connection is added.\n")
+	if hasUsable {
+		b.WriteString("REST and GraphQL endpoint calls use configured app connections. Use the listed REST endpoint names with `builtin_rest_request` and GraphQL endpoint names with `builtin_graphql_request`; omit `connection` unless the tool reports multiple configured connections. MCP endpoints are exposed as dedicated app MCP tools when their server is reachable, not through REST or GraphQL tools.\n")
+		b.WriteString("Full app SKILL.md bodies are not loaded by default. When an app skill matches, call `builtin_skill_read(app_id=\"<app id>\", skill_id=\"<skill id>\")` once, then follow the returned instructions.\n")
+		b.WriteString("Do not proactively load untriggered app skills.\n")
+	}
+	b.WriteString("\n")
 	for _, item := range list {
 		if item == nil {
 			continue
@@ -161,6 +188,10 @@ func appsSegment(list []*app.Definition) *Segment {
 			fmt.Fprintf(&b, "- App `%s` (%s) — %s\n", id, name, desc)
 		} else {
 			fmt.Fprintf(&b, "- App `%s` (%s)\n", id, name)
+		}
+		if !appPromptUsable(item, connectionCounts) {
+			fmt.Fprintf(&b, "  - Status: not connected. Add a connection before using this app.\n")
+			continue
 		}
 		if len(item.Endpoints) > 0 {
 			names := make([]string, 0, len(item.Endpoints))
@@ -203,6 +234,47 @@ func appsSegment(list []*app.Definition) *Segment {
 		return nil
 	}
 	return &Segment{ID: "apps_index", Layer: "app", Content: content}
+}
+
+func appPromptUsable(def *app.Definition, connectionCounts map[string]int) bool {
+	if def == nil {
+		return false
+	}
+	if !appRequiresConnection(def) {
+		return true
+	}
+	return connectionCounts[strings.TrimSpace(def.ID)] > 0
+}
+
+func appRequiresConnection(def *app.Definition) bool {
+	if def == nil {
+		return false
+	}
+	if def.Auth != nil && def.Auth.Required {
+		return true
+	}
+	if def.Connection == nil {
+		return false
+	}
+	for _, field := range def.Connection.Fields {
+		if field.Required {
+			return true
+		}
+	}
+	return false
+}
+
+func appConnectionCounts(connections []*app.Connection) map[string]int {
+	out := map[string]int{}
+	for _, conn := range connections {
+		if conn == nil {
+			continue
+		}
+		if appID := strings.TrimSpace(conn.AppID); appID != "" {
+			out[appID]++
+		}
+	}
+	return out
 }
 
 func skillsSegment(list []skill.Skill, homeDir string) *Segment {

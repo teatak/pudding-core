@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/daemon"
 	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/prompt"
@@ -78,7 +79,8 @@ func runPrompt(args []string) error {
 	if err != nil {
 		return err
 	}
-	out, err := prompt.NewLoader(dir).Prompt(context.Background(), *flagMode)
+	cfg := config.NewManager(dir)
+	out, err := prompt.NewLoader(dir, cfg).Prompt(context.Background(), *flagMode)
 	if err != nil {
 		return err
 	}
