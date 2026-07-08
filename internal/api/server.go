@@ -29,22 +29,24 @@ import (
 )
 
 type Server struct {
-	engine        *engine.Engine
-	store         store.Store
-	config        engine.ConfigSource
-	home          string
-	providers     providerWriter
-	apps          appService
-	skills        skillService
-	hub           *event.Hub
-	voice         voiceController
-	browser       browser.Service
-	camera        desktopcamera.Capturer
-	browserMCP    browserMCPService
-	browserMu     sync.Mutex
-	browserClosed map[string]map[string]struct{}
-	oauthMu       sync.Mutex
-	oauth         map[string]oauthStartState
+	engine     *engine.Engine
+	store      store.Store
+	config     engine.ConfigSource
+	home       string
+	providers  providerWriter
+	apps       appService
+	skills     skillService
+	hub        *event.Hub
+	voice      voiceController
+	browser    browser.Service
+	camera     desktopcamera.Capturer
+	browserMCP browserMCPService
+	browserMu  sync.Mutex
+	// browserAllowedTabs is absent until a session's browser surface is explicitly closed or rebound.
+	// Once present, only listed tabs are visible; an empty set means the session has no browser tab.
+	browserAllowedTabs map[string]map[string]struct{}
+	oauthMu            sync.Mutex
+	oauth              map[string]oauthStartState
 }
 
 type voiceController interface {

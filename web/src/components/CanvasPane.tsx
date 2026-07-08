@@ -21,18 +21,13 @@ import { toast } from "sonner";
 
 import {
   clearClosedCanvasItems,
-  closeBrowserSession,
-  createBrowserTab,
   createClosedCanvasItem,
   deleteCanvasItem,
   deleteClosedCanvasItem,
-  getBrowserState,
-  listBrowserTabs,
   listClosedCanvasItems,
   listCanvasItems,
   patchCanvasItemWindow,
   putCanvasItem,
-  syncBrowserTab,
   type BrowserTab,
   type CanvasItemPayload,
 } from "@/api/client";
@@ -41,28 +36,9 @@ import { BrowserCanvasTabButton } from "@/browser/BrowserCanvasTabButton";
 import { BrowserToolbar } from "@/browser/BrowserToolbar";
 import { ElectronWebviewBrowser } from "@/browser/ElectronWebviewBrowser";
 import {
-  allowElectronBrowserTab,
-  cacheElectronBrowserSnapshot,
-  clearElectronBrowserSessionGate,
-  electronBrowserBridge,
-  markElectronBrowserSessionClosed,
-} from "@/browser/electronBridge";
-import {
-  browserPayloadFromState,
-  browserPayloadHasBlankTabIntent,
   browserPayloadForItem,
-  browserPayloadHasRealState,
-  browserQueryStaleTimeMS,
-  browserTabFaviconURL,
-  browserTabTitle,
   faviconURLForPage,
-  preferredBrowserTab,
-  upsertBrowserTab,
 } from "@/browser/helpers";
-import type {
-  BrowserTabsData,
-  CanvasSurface,
-} from "@/browser/types";
 import {
   GalleryLayoutControls,
   MemoCanvasContent,
@@ -72,6 +48,7 @@ import {
   type GalleryLayout,
 } from "@/components/canvas/CanvasItemContent";
 import { asRecord, numberValue, stringValue, titleFromPayload } from "@/components/canvas/canvasPayload";
+import { useCanvasBrowserSurface } from "@/components/canvas/useCanvasBrowserSurface";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -84,7 +61,6 @@ import type { CanvasItem, ClosedCanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { setCanvasOpen } from "@/state/canvasStore";
-import { consumeBrowserReveal, useBrowserRevealEpoch } from "@/state/browserRevealStore";
 
 type CanvasPaneProps = {
   token: string;
@@ -105,7 +81,6 @@ type WindowPosition = Pick<WindowState, "x" | "y">;
 type WindowGeometry = Pick<WindowState, "x" | "y" | "w" | "h">;
 type WindowRestoreState = Pick<WindowState, "x" | "y" | "w" | "h" | "z">;
 
-const SESSION_SURFACE_STORAGE_KEY = "pudding.canvas.sessionSurface.v1";
 const MIN_W = 260;
 const MIN_H = 160;
 const DEFAULT_W = 420;
@@ -200,54 +175,26 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   const queryClient = useQueryClient();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const actorSessionIDRef = useRef("");
-  const currentActorSessionIDRef = useRef("");
   const canvasSessionStateRef = useRef("");
   const draftWindowsRef = useRef<Record<string, WindowState>>({});
   const restoreWindowsRef = useRef<Record<string, WindowState>>({});
   const restoredWindowHydrationRef = useRef("");
   const seenCanvasItemIDsRef = useRef<Set<string>>(new Set());
   const hasSeenCanvasItemsRef = useRef(false);
-  const sessionSurfaceRef = useRef<Record<string, CanvasSurface>>(readSessionSurfaces());
   const resizeStartWindowsRef = useRef<Record<string, WindowState>>({});
   const resizeStartRestoresRef = useRef<Record<string, WindowState | undefined>>({});
-  const browserCloseEpochRef = useRef<Record<string, number>>({});
-  const closingBrowserSessionsRef = useRef<Record<string, boolean>>({});
-  const browserSyncTimersRef = useRef<Record<string, number>>({});
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
   const [draftWindows, setDraftWindows] = useState<Record<string, WindowState>>({});
-  const [browserActive, setBrowserActive] = useState(false);
   const [galleryActiveIndices, setGalleryActiveIndices] = useState<Record<string, number>>({});
   const [restoreWindows, setRestoreWindows] = useState<Record<string, WindowState>>({});
-  const [closingBrowserSessions, setClosingBrowserSessions] = useState<Record<string, boolean>>({});
   const [canvasLibraryOpen, setCanvasLibraryOpen] = useState(false);
-  closingBrowserSessionsRef.current = closingBrowserSessions;
   useEffect(() => {
     if (sessionID) {
       actorSessionIDRef.current = sessionID;
     }
   }, [sessionID]);
   const actorSessionID = sessionID || actorSessionIDRef.current;
-  currentActorSessionIDRef.current = actorSessionID;
   const enabled = Boolean(token && actorSessionID);
-  const rememberSessionSurface = (targetSessionID: string, surface: CanvasSurface) => {
-    sessionSurfaceRef.current = { ...sessionSurfaceRef.current, [targetSessionID]: surface };
-    writeSessionSurfaces(sessionSurfaceRef.current);
-  };
-  const clearBrowserSyncTimers = (targetSessionID: string) => {
-    const prefix = `${targetSessionID}:`;
-    Object.entries(browserSyncTimersRef.current).forEach(([key, timer]) => {
-      if (key.startsWith(prefix)) {
-        window.clearTimeout(timer);
-        delete browserSyncTimersRef.current[key];
-      }
-    });
-  };
-  const setActiveSurface = (surface: CanvasSurface) => {
-    if (actorSessionID) {
-      rememberSessionSurface(actorSessionID, surface);
-    }
-    setBrowserActive(surface === "browser");
-  };
 
   useEffect(() => {
     if (!actorSessionID || canvasSessionStateRef.current === actorSessionID) {
@@ -256,7 +203,6 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     canvasSessionStateRef.current = actorSessionID;
     resizeStartWindowsRef.current = {};
     resizeStartRestoresRef.current = {};
-    setBrowserActive(sessionSurfaceRef.current[actorSessionID] === "browser");
   }, [actorSessionID]);
 
   const itemsQuery = useQuery({
@@ -278,114 +224,26 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     () => (closedItemsQuery.data?.items ?? []).filter((item) => !closedCanvasItemIsBrowser(item)),
     [closedItemsQuery.data?.items],
   );
-  const browserClosing = Boolean(actorSessionID && closingBrowserSessions[actorSessionID]);
-  const browserRevealEpoch = useBrowserRevealEpoch(actorSessionID);
-  const browserStateQuery = useQuery({
+  const {
+    activeBrowserTab,
+    activateBrowserSurface,
+    browserActive,
+    browserButtonPending,
+    browserClosePending,
+    browserSurfacePending,
+    browserSurfaceVisible,
+    browserTabFaviconURLText,
+    browserTabTitleText,
+    closeBrowserSurface,
+    hasBrowserState,
+    hasOpenBrowserWindow,
+    selectCanvasSurface,
+  } = useCanvasBrowserSurface({
     enabled,
-    queryKey: actorSessionID ? queryKeys.browserState(actorSessionID) : ["browser", "missing-session", "state"],
-    queryFn: () => {
-      if (!actorSessionID) {
-        throw new Error("browser session id missing");
-      }
-      return getBrowserState(token, actorSessionID);
-    },
-    staleTime: browserQueryStaleTimeMS,
+    itemsLength: items.length,
+    sessionID: actorSessionID,
+    token,
   });
-  const browserState = browserStateQuery.data?.sessionID === actorSessionID ? browserStateQuery.data : undefined;
-  const browserPayload = browserClosing ? null : browserPayloadFromState(browserState);
-  const browserTabsQuery = useQuery({
-    enabled,
-    queryKey: actorSessionID ? queryKeys.browserTabs(actorSessionID) : ["browser", "missing-session"],
-    queryFn: () => {
-      if (!actorSessionID) {
-        throw new Error("browser session id missing");
-      }
-      return listBrowserTabs(token, actorSessionID);
-    },
-    staleTime: browserQueryStaleTimeMS,
-  });
-  const browserTabs = browserClosing ? [] : (browserTabsQuery.data?.tabs ?? []).filter((tab) => tab.sessionID === actorSessionID);
-  const activeBrowserTab = preferredBrowserTab(browserTabs, browserPayload);
-
-  useEffect(() => {
-    const bridge = electronBrowserBridge();
-    if (!bridge || !enabled || !actorSessionID) {
-      return;
-    }
-    return bridge.onUpdated((snapshot) => {
-      if (snapshot.sessionID !== actorSessionID) {
-        return;
-      }
-      if (closingBrowserSessionsRef.current[snapshot.sessionID]) {
-        return;
-      }
-      const tab = cacheElectronBrowserSnapshot(queryClient, snapshot, actorSessionID);
-      if (!tab) {
-        return;
-      }
-      const key = `${tab.sessionID}:${tab.id}`;
-      window.clearTimeout(browserSyncTimersRef.current[key]);
-      browserSyncTimersRef.current[key] = window.setTimeout(() => {
-        delete browserSyncTimersRef.current[key];
-        if (closingBrowserSessionsRef.current[tab.sessionID]) {
-          return;
-        }
-        void syncBrowserTab(token, tab.sessionID, tab.id, {
-          targetID: tab.targetID,
-          url: tab.url,
-          title: tab.title,
-          faviconURL: tab.faviconURL,
-          canGoBack: tab.canGoBack,
-          canGoForward: tab.canGoForward,
-        }).catch(() => undefined);
-      }, 250);
-    });
-  }, [actorSessionID, enabled, queryClient, token]);
-
-  useEffect(() => {
-    const bridge = electronBrowserBridge();
-    if (!bridge || !enabled || !actorSessionID || browserClosing) {
-      return;
-    }
-    let disposed = false;
-    void bridge
-      .listTabs({ sessionID: actorSessionID })
-      .then((result) => {
-        if (disposed || currentActorSessionIDRef.current !== actorSessionID || closingBrowserSessionsRef.current[actorSessionID]) {
-          return;
-        }
-        result.tabs
-          .filter((snapshot) => snapshot.sessionID === actorSessionID)
-          .forEach((snapshot) => cacheElectronBrowserSnapshot(queryClient, snapshot, actorSessionID));
-      })
-      .catch(() => undefined);
-    return () => {
-      disposed = true;
-    };
-  }, [actorSessionID, browserClosing, enabled, queryClient]);
-
-  useEffect(() => {
-    return () => {
-      Object.values(browserSyncTimersRef.current).forEach((timer) => window.clearTimeout(timer));
-      browserSyncTimersRef.current = {};
-    };
-  }, []);
-
-  const selectCanvasSurface = () => {
-    setActiveSurface("canvas");
-  };
-  const hasBrowserState = Boolean(activeBrowserTab || browserPayloadHasRealState(browserPayload) || browserPayloadHasBlankTabIntent(browserPayload));
-  const hasOpenBrowserWindow = browserActive || hasBrowserState;
-  const browserTabTitleText = activeBrowserTab
-    ? browserTabTitle(activeBrowserTab, browserPayload?.title || t("browser.newTab"), t("browser.newTab"))
-    : hasBrowserState
-      ? browserPayload?.title || t("browser.newTab")
-      : "";
-  const browserTabFaviconURLText = activeBrowserTab
-    ? browserTabFaviconURL(activeBrowserTab)
-    : hasBrowserState
-      ? browserPayload?.faviconURL || (browserPayload?.url ? faviconURLForPage(browserPayload.url) : "")
-      : "";
 
   const windows = useMemo(() => {
     const out: Record<string, WindowState> = {};
@@ -532,182 +390,6 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
     },
   });
-  const createBrowserTabMutation = useMutation({
-    mutationFn: async ({ targetSessionID, fresh }: { targetSessionID: string; fresh?: boolean }) => {
-      if (!targetSessionID) {
-        throw new Error("browser session id missing");
-      }
-      let startCloseEpoch = browserCloseEpochRef.current[targetSessionID] || 0;
-      if (fresh) {
-        startCloseEpoch += 1;
-        browserCloseEpochRef.current = {
-          ...browserCloseEpochRef.current,
-          [targetSessionID]: startCloseEpoch,
-        };
-      }
-      const tab = await createBrowserTab(token, targetSessionID);
-      return { fresh: Boolean(fresh), sessionID: targetSessionID, startCloseEpoch, tab };
-    },
-    onSuccess: ({ fresh, sessionID: targetSessionID, startCloseEpoch, tab }) => {
-      const closedAfterRequest = (browserCloseEpochRef.current[targetSessionID] || 0) > startCloseEpoch;
-      if (closedAfterRequest || (closingBrowserSessionsRef.current[targetSessionID] && !fresh)) {
-        queryClient.setQueryData(queryKeys.browserState(targetSessionID), { hasState: false, sessionID: targetSessionID });
-        queryClient.setQueryData(queryKeys.browserTabs(targetSessionID), { tabs: [], processMode: "headless" });
-        return;
-      }
-      const title = browserTabTitle(tab, t("browser.newTab"), t("browser.newTab"));
-      const faviconURL = browserTabFaviconURL(tab);
-      allowElectronBrowserTab(targetSessionID, tab.id);
-      clearElectronBrowserSessionGate(targetSessionID);
-      setClosingBrowserSessions((prev) => withoutKey(prev, targetSessionID));
-      queryClient.setQueryData(queryKeys.browserTabs(targetSessionID), (current: BrowserTabsData | undefined) => ({
-        tabs: upsertBrowserTab(current?.tabs || [], tab),
-        processMode: tab.mode || current?.processMode || "headless",
-      }));
-      queryClient.setQueryData(queryKeys.browserState(targetSessionID), {
-        hasState: true,
-        sessionID: targetSessionID,
-        tabID: tab.id,
-        url: tab.url,
-        title,
-        faviconURL,
-        mode: tab.mode,
-        processMode: tab.mode || "headless",
-        createdAt: tab.createdAt,
-        updatedAt: tab.updatedAt,
-      });
-      if (currentActorSessionIDRef.current === targetSessionID && sessionSurfaceRef.current[targetSessionID] === "browser") {
-        setBrowserActive(true);
-      }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(targetSessionID) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(targetSessionID) });
-    },
-    onError: () => {
-      toast.error(t("browser.createFailed"));
-    },
-  });
-
-  useEffect(() => {
-    if (
-      !enabled ||
-      !actorSessionID ||
-      !browserActive ||
-      browserClosing ||
-      createBrowserTabMutation.isPending ||
-      browserStateQuery.isFetching ||
-      browserTabsQuery.isFetching ||
-      hasBrowserState
-    ) {
-      return;
-    }
-    rememberSessionSurface(actorSessionID, "canvas");
-    setBrowserActive(false);
-  }, [
-    actorSessionID,
-    browserActive,
-    browserClosing,
-    browserStateQuery.isFetching,
-    browserTabsQuery.isFetching,
-    createBrowserTabMutation.isPending,
-    enabled,
-    hasBrowserState,
-  ]);
-
-  useEffect(() => {
-    if (!enabled || !actorSessionID || browserActive || browserClosing || !hasBrowserState || items.length > 0) {
-      return;
-    }
-    rememberSessionSurface(actorSessionID, "browser");
-    setBrowserActive(true);
-  }, [actorSessionID, browserActive, browserClosing, enabled, hasBrowserState, items.length]);
-
-  const activateBrowserSurface = () => {
-    if (!actorSessionID) {
-      return;
-    }
-    const fresh = Boolean(closingBrowserSessionsRef.current[actorSessionID]);
-    setActiveSurface("browser");
-    if (!activeBrowserTab && !hasBrowserState && !createBrowserTabMutation.isPending) {
-      createBrowserTabMutation.mutate({ targetSessionID: actorSessionID, fresh });
-    }
-  };
-
-  useEffect(() => {
-    if (!enabled || !actorSessionID || browserClosing || browserRevealEpoch <= 0) {
-      return;
-    }
-    setActiveSurface("browser");
-    consumeBrowserReveal(actorSessionID, browserRevealEpoch);
-  }, [actorSessionID, browserClosing, browserRevealEpoch, enabled]);
-
-  const browserCloseMutation = useMutation({
-    mutationFn: async (targetSessionID: string) => {
-      if (!targetSessionID) {
-        throw new Error("browser session id missing");
-      }
-      await closeBrowserSession(token, targetSessionID);
-      return { sessionID: targetSessionID };
-    },
-    onMutate: async (targetSessionID: string) => {
-      if (!targetSessionID) {
-        return;
-      }
-      const closeEpoch = (browserCloseEpochRef.current[targetSessionID] || 0) + 1;
-      browserCloseEpochRef.current = {
-        ...browserCloseEpochRef.current,
-        [targetSessionID]: closeEpoch,
-      };
-      clearBrowserSyncTimers(targetSessionID);
-      await Promise.all([
-        queryClient.cancelQueries({ queryKey: queryKeys.browserState(targetSessionID) }),
-        queryClient.cancelQueries({ queryKey: queryKeys.browserTabs(targetSessionID) }),
-      ]);
-      markElectronBrowserSessionClosed(targetSessionID);
-      setClosingBrowserSessions((prev) => ({ ...prev, [targetSessionID]: true }));
-      rememberSessionSurface(targetSessionID, "canvas");
-      if (currentActorSessionIDRef.current === targetSessionID) {
-        setBrowserActive(false);
-      }
-      queryClient.setQueryData(queryKeys.browserTabs(targetSessionID), { tabs: [], processMode: "headless" });
-      queryClient.setQueryData(queryKeys.browserState(targetSessionID), { hasState: false, sessionID: targetSessionID });
-      return { closeEpoch, sessionID: targetSessionID };
-    },
-    onSuccess: ({ sessionID: targetSessionID }, _targetSessionID, context) => {
-      const closeEpoch = context?.closeEpoch || 0;
-      if ((browserCloseEpochRef.current[targetSessionID] || 0) > closeEpoch) {
-        return;
-      }
-      rememberSessionSurface(targetSessionID, "canvas");
-      if (currentActorSessionIDRef.current === targetSessionID) {
-        setBrowserActive(false);
-      }
-      queryClient.setQueryData(queryKeys.browserTabs(targetSessionID), { tabs: [], processMode: "headless" });
-      queryClient.setQueryData(queryKeys.browserState(targetSessionID), { hasState: false, sessionID: targetSessionID });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(targetSessionID) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(targetSessionID) });
-      setClosingBrowserSessions((prev) => withoutKey(prev, targetSessionID));
-      if (items.length === 0) {
-        setCanvasOpen(false);
-      }
-    },
-    onError: (_error, targetSessionID) => {
-      if (targetSessionID) {
-        clearElectronBrowserSessionGate(targetSessionID);
-        setClosingBrowserSessions((prev) => withoutKey(prev, targetSessionID));
-        void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(targetSessionID) });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(targetSessionID) });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(targetSessionID) });
-      }
-      toast.error(t("browser.releaseFailed"));
-    },
-  });
-
-  useEffect(() => {
-    if (!enabled || !actorSessionID || browserClosing || !activeBrowserTab) {
-      return;
-    }
-    clearElectronBrowserSessionGate(actorSessionID);
-  }, [activeBrowserTab, actorSessionID, browserClosing, enabled]);
 
   useEffect(() => {
     draftWindowsRef.current = draftWindows;
@@ -902,28 +584,20 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     patchWindowMutation.mutate({ itemID, window: windowPayloadForPersist(maximized, restoreWindow) });
   };
 
-  const browserSurfaceVisible = browserActive || hasBrowserState || createBrowserTabMutation.isPending;
-  const browserButtonPending =
-    !activeBrowserTab && (createBrowserTabMutation.isPending || browserStateQuery.isFetching || browserTabsQuery.isFetching);
-
   return (
     <aside className="relative flex h-full shrink-0 flex-col bg-[var(--canvas-background)] text-sidebar-foreground">
       <div className="relative z-30 flex h-(--toolbar-h) shrink-0 items-center gap-2 overflow-hidden pr-(--canvas-toolbar-pr) pl-(--canvas-toolbar-pl)">
         {actorSessionID ? (
           <BrowserCanvasTabButton
             active={browserActive}
-            closePending={browserCloseMutation.isPending}
+            closePending={browserClosePending}
             closable={hasBrowserState}
             faviconURL={browserTabFaviconURLText}
             hasTitle={hasBrowserState}
             pending={browserButtonPending}
             title={browserTabTitleText}
             onClick={activateBrowserSurface}
-            onClose={() => {
-              if (actorSessionID) {
-                browserCloseMutation.mutate(actorSessionID);
-              }
-            }}
+            onClose={closeBrowserSurface}
           />
         ) : null}
         {items.length > 0 ? (
@@ -1015,7 +689,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
           <BrowserSurface
             key={`browser:${actorSessionID}`}
             active={browserActive}
-            pending={createBrowserTabMutation.isPending || browserStateQuery.isFetching || browserTabsQuery.isFetching}
+            pending={browserSurfacePending}
             sessionID={actorSessionID}
             tab={activeBrowserTab}
             token={token}
@@ -1457,39 +1131,6 @@ function serializeWindow(win: WindowState): WindowRestoreState {
 
 function titleForItem(item: CanvasItem, t: (key: string) => string): string {
   return item.title?.trim() || titleFromPayload(item.item) || item.kind || t("canvas.untitled");
-}
-
-function readSessionSurfaces(): Record<string, CanvasSurface> {
-  if (typeof window === "undefined") {
-    return {};
-  }
-  try {
-    const raw = window.localStorage.getItem(SESSION_SURFACE_STORAGE_KEY);
-    if (!raw) {
-      return {};
-    }
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const out: Record<string, CanvasSurface> = {};
-    Object.entries(parsed).forEach(([sessionID, surface]) => {
-      if (surface === "canvas" || surface === "browser") {
-        out[sessionID] = surface;
-      }
-    });
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-function writeSessionSurfaces(surfaces: Record<string, CanvasSurface>) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  try {
-    window.localStorage.setItem(SESSION_SURFACE_STORAGE_KEY, JSON.stringify(surfaces));
-  } catch {
-    // Best-effort UI preference.
-  }
 }
 
 function closedCanvasItemIsBrowser(item: ClosedCanvasItem): boolean {
