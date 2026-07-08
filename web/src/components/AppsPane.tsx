@@ -1556,7 +1556,7 @@ function MCPToolsList({
         <span className="shrink-0">{statusIcon}</span>
         <span className="font-medium">{statusLabel}</span>
         {statusMeta ? <span className="truncate text-muted-foreground">· {statusMeta}</span> : null}
-        <span className="text-muted-foreground">({toolCount})</span>
+        <span className="text-muted-foreground">{toolCount}</span>
         <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
       </summary>
       <div className="mt-2 grid max-h-72 min-w-0 gap-2 overflow-auto border-t border-border/50 pt-2 pr-1">
