@@ -41,7 +41,7 @@ const (
 )
 
 type AppMCPSource interface {
-	ListEndpointBindings(ctx context.Context, sessionID, kind string) ([]*app.EndpointBinding, error)
+	ListEndpointBindings(ctx context.Context, kind string) ([]*app.EndpointBinding, error)
 }
 
 type AppMCPOption func(*AppMCPRunner)
@@ -122,8 +122,8 @@ func WithAppMCPHTTPClient(client *http.Client) AppMCPOption {
 	}
 }
 
-func (r *AppMCPRunner) Definitions(ctx context.Context, sessionID string) ([]provider.ToolDef, error) {
-	bindings, err := r.listBindings(ctx, sessionID)
+func (r *AppMCPRunner) Definitions(ctx context.Context, _ string) ([]provider.ToolDef, error) {
+	bindings, err := r.listBindings(ctx)
 	if err != nil {
 		if defs, tools, ok := r.cached(""); ok {
 			r.mu.Lock()
@@ -201,11 +201,11 @@ func (r *AppMCPRunner) cached(cacheKey string) ([]provider.ToolDef, map[string]a
 	return cloneAppMCPToolDefs(r.cache.defs), cloneAppMCPTools(r.cache.tools), true
 }
 
-func (r *AppMCPRunner) listBindings(ctx context.Context, sessionID string) ([]*app.EndpointBinding, error) {
+func (r *AppMCPRunner) listBindings(ctx context.Context) ([]*app.EndpointBinding, error) {
 	if r == nil || r.source == nil {
 		return nil, nil
 	}
-	bindings, err := r.source.ListEndpointBindings(ctx, sessionID, app.EndpointKindMCP)
+	bindings, err := r.source.ListEndpointBindings(ctx, app.EndpointKindMCP)
 	if err != nil {
 		slog.Warn("app mcp: list endpoint bindings failed", "err", err)
 		return nil, err

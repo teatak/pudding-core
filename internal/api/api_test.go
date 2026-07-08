@@ -814,19 +814,16 @@ skills:
 	}
 }
 
-func TestSessionAppMCPStatusAPI(t *testing.T) {
+func TestAppMCPStatusAPI(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
 	home := t.TempDir()
 	writeMCPStatusTestApp(t, home)
-	if err := ms.CreateSession(context.Background(), &store.Session{ID: "sess_mcp", Provider: "mock", Model: "mock"}); err != nil {
-		t.Fatal(err)
-	}
 	srv := httptest.NewServer(New(eng, ms, ms, hub).WithApps(appsvc.NewService(home, nil)).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 
-	resp := req(t, http.MethodGet, srv.URL+"/sessions/sess_mcp/apps/sequential-thinking/mcp", nil)
+	resp := req(t, http.MethodGet, srv.URL+"/apps/sequential-thinking/mcp", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("want 200, got %d", resp.StatusCode)
 	}

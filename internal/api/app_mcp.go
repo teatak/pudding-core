@@ -13,7 +13,7 @@ import (
 )
 
 type appEndpointBindingService interface {
-	ListEndpointBindings(ctx context.Context, sessionID, kind string) ([]*app.EndpointBinding, error)
+	ListEndpointBindings(ctx context.Context, kind string) ([]*app.EndpointBinding, error)
 }
 
 type appMCPStatusView struct {
@@ -21,16 +21,11 @@ type appMCPStatusView struct {
 	Endpoints []tool.AppMCPProbeEndpoint `json:"endpoints"`
 }
 
-func (s *Server) getSessionAppMCPStatus(c *cart.Context) error {
-	sessionID, _ := c.Param("id")
-	appID, _ := c.Param("appID")
-	sessionID = strings.TrimSpace(sessionID)
+func (s *Server) getAppMCPStatus(c *cart.Context) error {
+	appID, _ := c.Param("id")
 	appID = strings.TrimSpace(appID)
-	if sessionID == "" || appID == "" {
-		return badRequest(c, "session id and app id are required")
-	}
-	if _, err := s.store.GetSession(c.Request.Context(), sessionID); err != nil {
-		return s.fail(c, err)
+	if appID == "" {
+		return badRequest(c, "app id is required")
 	}
 	def, err := s.getAppDefinition(c.Request.Context(), appID)
 	if err != nil {
@@ -45,7 +40,7 @@ func (s *Server) getSessionAppMCPStatus(c *cart.Context) error {
 		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_endpoint_service_unavailable"})
 		return nil
 	}
-	bindings, err := source.ListEndpointBindings(c.Request.Context(), sessionID, app.EndpointKindMCP)
+	bindings, err := source.ListEndpointBindings(c.Request.Context(), app.EndpointKindMCP)
 	if err != nil {
 		return s.fail(c, err)
 	}

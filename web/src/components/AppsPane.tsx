@@ -136,7 +136,7 @@ const OFFICIAL_APP_REGISTRY =
   "https://teatak.github.io/pudding-hub/apps/registry.json";
 const APP_CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
 
-export function AppsPane({ sessionID, token }: { sessionID?: string; token: string }) {
+export function AppsPane({ token }: { token: string }) {
   const { locale, t } = useI18n();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<{ app: AppDefinition; connection?: AppConnection } | null>(null);
@@ -311,7 +311,6 @@ export function AppsPane({ sessionID, token }: { sessionID?: string; token: stri
               app={detailApp}
               catalogApp={detailCatalogForInstalled}
               connections={detailConnections}
-              sessionID={sessionID}
               token={token}
               onAdd={() => setEditing({ app: detailApp })}
               onDelete={setDeleting}
@@ -854,7 +853,6 @@ function AppDetail({
   app,
   catalogApp,
   connections,
-  sessionID,
   onAdd,
   onDelete,
   onEdit,
@@ -865,7 +863,6 @@ function AppDetail({
   app: AppDefinition;
   catalogApp?: AppRegistryItem;
   connections: AppConnection[];
-  sessionID?: string;
   onAdd: () => void;
   onDelete: (connection: AppConnection) => void;
   onEdit: (connection: AppConnection) => void;
@@ -885,9 +882,9 @@ function AppDetail({
   const installedIsPreview = Boolean(app.version && isPreviewVersion(app.version));
   const hasMCPEndpoints = endpoints.some(([, endpoint]) => endpoint.kind === "mcp");
   const mcpStatusQuery = useQuery({
-    queryKey: queryKeys.appMCPStatus(sessionID || "", app.id),
-    queryFn: () => getAppMCPStatus(token, sessionID!, app.id),
-    enabled: Boolean(sessionID && hasMCPEndpoints),
+    queryKey: queryKeys.appMCPStatus(app.id),
+    queryFn: () => getAppMCPStatus(token, app.id),
+    enabled: hasMCPEndpoints,
     retry: false,
     staleTime: 30_000,
   });
@@ -960,7 +957,6 @@ function AppDetail({
           mcpStatusByEndpoint={mcpStatusByEndpoint}
           mcpStatusFailed={mcpStatusQuery.isError}
           mcpStatusLoading={mcpStatusQuery.isLoading}
-          mcpStatusVisible={Boolean(sessionID)}
         />
         <AppSkillsSection icon={icon} iconSrc={iconSrc} skills={skills} onSkillSelect={(skill) => onSkillSelect(skill, icon, iconSrc)} />
       </div>

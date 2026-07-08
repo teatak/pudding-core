@@ -755,8 +755,8 @@ export function listAppConnections(token: string): Promise<{ connections: AppCon
   return request(token, "/app-connections", listAppConnectionsResponse);
 }
 
-export function getAppMCPStatus(token: string, sessionID: string, appID: string): Promise<AppMCPStatusResponse> {
-  return request(token, `/sessions/${encodeURIComponent(sessionID)}/apps/${encodeURIComponent(appID)}/mcp`, appMCPStatusResponse);
+export function getAppMCPStatus(token: string, appID: string): Promise<AppMCPStatusResponse> {
+  return request(token, `/apps/${encodeURIComponent(appID)}/mcp`, appMCPStatusResponse);
 }
 
 export function getAppConnection(token: string, id: string): Promise<AppConnection> {

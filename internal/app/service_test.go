@@ -74,7 +74,7 @@ func TestListEndpointBindingsFiltersKind(t *testing.T) {
 		"github-main": {ID: "github-main", Name: "GitHub", AppID: "github", Auth: Auth{Type: "bearer", Token: "secret"}},
 	}})
 
-	bindings, err := svc.ListEndpointBindings(context.Background(), "session-1", EndpointKindREST)
+	bindings, err := svc.ListEndpointBindings(context.Background(), EndpointKindREST)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestListEndpointBindingsFiltersKind(t *testing.T) {
 		t.Fatalf("unexpected bindings: %+v", bindings)
 	}
 
-	bindings, err = svc.ListEndpointBindings(context.Background(), "session-1", EndpointKindMCP)
+	bindings, err = svc.ListEndpointBindings(context.Background(), EndpointKindMCP)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestListEndpointBindingsIncludesConnectionlessAppWhenAuthNotRequired(t *tes
 	homeDir := writeConnectionlessTestApp(t)
 	svc := NewService(homeDir, nil)
 
-	bindings, err := svc.ListEndpointBindings(context.Background(), "session-1", EndpointKindMCP)
+	bindings, err := svc.ListEndpointBindings(context.Background(), EndpointKindMCP)
 	if err != nil {
 		t.Fatal(err)
 	}

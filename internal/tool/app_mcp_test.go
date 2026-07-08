@@ -227,7 +227,7 @@ type fakeAppMCPSource struct {
 	bindings []*app.EndpointBinding
 }
 
-func (f fakeAppMCPSource) ListEndpointBindings(context.Context, string, string) ([]*app.EndpointBinding, error) {
+func (f fakeAppMCPSource) ListEndpointBindings(context.Context, string) ([]*app.EndpointBinding, error) {
 	return f.bindings, nil
 }
 

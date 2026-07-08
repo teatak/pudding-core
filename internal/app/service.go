@@ -245,14 +245,10 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 	}
 }
 
-func (s *Service) ListEndpointBindings(ctx context.Context, sessionID, kind string) ([]*EndpointBinding, error) {
-	sessionID = strings.TrimSpace(sessionID)
+func (s *Service) ListEndpointBindings(ctx context.Context, kind string) ([]*EndpointBinding, error) {
 	kind = strings.TrimSpace(kind)
 	if s == nil {
 		return nil, errors.New("app service unavailable")
-	}
-	if sessionID == "" {
-		return nil, errors.New("sessionID is required")
 	}
 	defs, err := s.ListDefinitions(ctx)
 	if err != nil {
