@@ -289,11 +289,11 @@ endpoints:
 
 func writeMCPOverride(t *testing.T, homeDir, appID, content string) {
 	t.Helper()
-	dir := home.AppMCPOverridesPath(homeDir)
+	dir := filepath.Join(home.AppsPath(homeDir), appID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, appID+".yaml"), []byte(content), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, MCPOverrideFileName), []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }

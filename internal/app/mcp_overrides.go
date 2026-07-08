@@ -10,6 +10,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const MCPOverrideFileName = ".pudding-mcp-overrides.yaml"
+
 type rawMCPOverrideFile struct {
 	MCP   map[string]MCPEndpointOverride `yaml:"mcp,omitempty"`
 	Extra map[string]interface{}         `yaml:",inline"`

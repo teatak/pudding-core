@@ -54,14 +54,12 @@ func (e *EndpointResolveError) Error() string {
 }
 
 type Service struct {
-	homeDir     string
 	appsRoot    string
 	connections ConnectionSource
 }
 
 func NewService(homeDir string, connections ConnectionSource) *Service {
 	return &Service{
-		homeDir:     homeDir,
 		appsRoot:    home.AppsPath(homeDir),
 		connections: connections,
 	}
@@ -88,10 +86,10 @@ func (s *Service) ListDefinitions(ctx context.Context) ([]*Definition, error) {
 }
 
 func (s *Service) applyMCPOverrides(def *Definition) (*Definition, error) {
-	if def == nil || strings.TrimSpace(s.homeDir) == "" {
+	if def == nil {
 		return def, nil
 	}
-	overrides, err := LoadMCPOverrideFile(filepath.Join(home.AppMCPOverridesPath(s.homeDir), def.ID+".yaml"))
+	overrides, err := LoadMCPOverrideFile(s.mcpOverrideFilePath(def.ID))
 	if err != nil {
 		return nil, err
 	}
@@ -132,9 +130,6 @@ func (s *Service) DeleteDefinition(ctx context.Context, id string) error {
 		return err
 	}
 	if err := os.RemoveAll(target); err != nil {
-		return err
-	}
-	if err := os.Remove(s.mcpOverrideFilePath(id)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return nil
@@ -303,7 +298,7 @@ func (s *Service) resolveMCPOverrideTarget(appID, endpointName string, override 
 }
 
 func (s *Service) mcpOverrideFilePath(appID string) string {
-	return filepath.Join(home.AppMCPOverridesPath(s.homeDir), appID+".yaml")
+	return filepath.Join(s.appsRoot, appID, MCPOverrideFileName)
 }
 
 func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, connectionRef string) (*EndpointBinding, error) {

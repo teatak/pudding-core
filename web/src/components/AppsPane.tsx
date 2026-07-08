@@ -1510,15 +1510,13 @@ function MCPStatusLine({
 
 function MCPToolsList({ tools }: { tools: AppMCPTool[] }) {
   const { t } = useI18n();
-  if (tools.length === 0) {
-    return <div className="text-xs text-muted-foreground">{t("apps.mcpNoTools")}</div>;
-  }
   return (
-    <div className="grid min-w-0 gap-2">
-      <div className="text-xs font-medium text-muted-foreground">
+    <details className="group min-w-0">
+      <summary className="cursor-pointer select-none text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
         {t("apps.mcpTools")} <span className="ml-1 text-muted-foreground/80">{tools.length}</span>
-      </div>
-      <div className="grid min-w-0 gap-2">
+      </summary>
+      <div className="mt-2 grid max-h-72 min-w-0 gap-2 overflow-auto pr-1">
+        {tools.length === 0 ? <div className="text-xs text-muted-foreground">{t("apps.mcpNoTools")}</div> : null}
         {tools.map((tool) => (
           <div key={tool.name} className="grid min-w-0 gap-1.5 border-t border-border/50 pt-2 first:border-t-0 first:pt-0">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -1558,7 +1556,7 @@ function MCPToolsList({ tools }: { tools: AppMCPTool[] }) {
           </div>
         ))}
       </div>
-    </div>
+    </details>
   );
 }
 

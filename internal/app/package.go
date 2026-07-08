@@ -141,8 +141,8 @@ func packageFiles(in []PackageFile) (map[string][]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if cleaned == AppLockFileName {
-			return nil, fmt.Errorf("%s is reserved", AppLockFileName)
+		if cleaned == AppLockFileName || cleaned == MCPOverrideFileName {
+			return nil, fmt.Errorf("%s is reserved", cleaned)
 		}
 		if _, exists := out[cleaned]; exists {
 			return nil, fmt.Errorf("duplicate package file %q", cleaned)
