@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
-    "electron:dev": "electron ../electron/main.cjs",
+    "desktop:dev": "electron ../electron/main.cjs",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
@@ -22,7 +22,6 @@
     "@tailwindcss/vite": "^4",
     "@tanstack/react-query": "^5.101.0",
     "@tanstack/react-router": "^1.170.15",
-    "@wailsio/runtime": "^3.0.0-alpha.79",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.18.0",

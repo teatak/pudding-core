@@ -95,12 +95,8 @@
     --sidebar-accent-foreground: oklch(0.2 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
-    /* macOS 红绿灯横向让位:浏览器 0;壳模式由 data-shell 切换,
-       全屏时红绿灯隐藏、让位归零(design.md 2.3)。
-       72px / 54px 来自旧项目实测的 NSToolbar inset rule 常量
-       (titlebarLeftSafeAreaPx / titlebarChromeHeightPx),
-       --toolbar-h 必须与壳侧双击 zoom 检测高度同值,
-       否则双击区跟视觉工具条割裂 */
+    /* macOS 红绿灯横向让位:浏览器 0;Electron 壳模式由 data-shell 切换,
+       全屏时红绿灯隐藏、让位归零。 */
     --traffic-inset: 0px;
     --toolbar-h: 54px;
     --rail-toggle-left: 11px;
@@ -155,13 +151,6 @@
     --phase-cancelled: var(--muted-foreground);
 }
 
-html[data-shell="mac"] {
-    /* 红绿灯本体占位 ~52px,72px 让折叠按钮更贴近窗口控件 */
-    --traffic-inset: 72px;
-    --toolbar-h: 54px;
-    --rail-left-radius: 18px;
-}
-
 html[data-shell="electron-mac"] {
     /* Electron uses trafficLightPosition { x:18, y:18 }; align toolbar to that visual anchor. */
     --traffic-inset: 72px;
@@ -178,16 +167,13 @@ html[data-shell="electron-mac"] {
     --rail-left-radius: var(--rail-radius);
 }
 
-html[data-shell="mac"][data-fullscreen],
 html[data-shell="electron-mac"][data-fullscreen] {
     --traffic-inset: 0px;
 }
 
-/* 壳模式窗口拖拽区:Wails 按命中元素的 --wails-draggable 判定,
-   自定义属性会被子元素继承,交互控件显式标回 no-drag;
+/* 壳模式窗口拖拽区:Electron 按 -webkit-app-region 判定;
    仅 data-shell 下生效,纯浏览器访问无副作用 */
 html[data-shell] .drag-region {
-    --wails-draggable: drag;
     -webkit-app-region: drag;
     cursor: default;
     user-select: none;
@@ -201,7 +187,6 @@ html[data-shell] body {
 
 html[data-shell] .no-drag-region,
 html[data-shell] .drag-region :where(button, a, input, textarea, select, [role="button"]) {
-    --wails-draggable: no-drag;
     -webkit-app-region: no-drag;
 }
 
@@ -826,8 +811,7 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
        webview 底色(壳模式下尤其可见);overscroll-none 关掉整页橡皮筋——
        trackpad 划到边界整页弹性回弹,会和 absolute/fixed 的 rail 触发器、
        composer 渐变错位撕裂——同时阻断 scroll chaining 传到文档层。
-       macOS WKWebView 无公开 scrollView,native 禁用走不通(iOS/Android 才有),
-       CSS 是正解:Wails 自带 mobile 模板与旧项目同栈实测均如此。 */
+       CSS 是正解。 */
     @apply h-full w-full overflow-hidden overscroll-none bg-background font-sans;
     }
   #root {

@@ -9,13 +9,11 @@ import {
   FolderOpen,
   Loader2,
   MessageSquarePlus,
-  Mic,
   NotebookText,
   Pause,
   PenLine,
   Play,
   ShieldCheck,
-  Volume2,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -37,8 +35,6 @@ import { z } from "zod";
 import {
   APIError,
   approveApproval,
-  bindAudioInput,
-  bindAudioOutput,
   cancelTurn,
   captureDesktopPhoto,
   captureDesktopScreenshot,
@@ -53,7 +49,6 @@ import {
   uploadAttachment,
   revealDesktopPath,
   type Attachment,
-  type AudioBindings,
   type ContentPart,
   type Session,
   type SkillDraft,
@@ -68,6 +63,7 @@ import { ContextUsageRing } from "@/components/ContextUsageRing";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
 import { InputFlowPanel } from "@/components/transcript/InputFlowToolPart";
 import { Mascot, type MascotGaze, type MascotGazePoint, type MascotMood } from "@/components/Mascot";
+import { SessionAudioControls } from "@/components/SessionAudioControls";
 import { SkillDraftDiffDialog } from "@/components/SkillDraftDiffDialog";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
@@ -82,6 +78,7 @@ import { useImeCompositionGuard } from "@/hooks/useImeCompositionGuard";
 import { useI18n } from "@/i18n";
 import { attachmentResourceURL } from "@/lib/attachmentURL";
 import { createPastedTextAttachmentFile, shouldAttachPastedText } from "@/lib/clipboardTextAttachment";
+import { pickDirectories } from "@/lib/desktopBridge";
 import { newClientID } from "@/lib/id";
 import {
   createLocalFolderPath,
@@ -1118,7 +1115,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
                   onResolvedChange={handleResolvedModelChange}
                 />
               </div>
-              <SessionAudioControls bindings={audioBindings} token={token} session={session} />
+              <SessionAudioControls bindings={audioBindings} token={token} sessionID={session.id} />
               {showStopButton ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1229,140 +1226,6 @@ function LocalFolderChip({
         <X className="size-3" />
       </button>
     </div>
-  );
-}
-
-function SessionAudioControls({ bindings, token, session }: { bindings?: AudioBindings; token: string; session: Session }) {
-  const { t } = useI18n();
-  const queryClient = useQueryClient();
-  const inputActive = bindings?.inputOwner === session.id;
-  const outputActive = bindings?.outputOwner === session.id;
-  const inputLevel = inputActive ? bindings?.inputLevel ?? 0 : 0;
-  const invalidateAudioBindings = () => queryClient.invalidateQueries({ queryKey: queryKeys.audioBindings() });
-  const setBindings = (next: AudioBindings) => {
-    queryClient.setQueryData(queryKeys.audioBindings(), { bindings: next });
-    void invalidateAudioBindings();
-  };
-  const inputMutation = useMutation({
-    mutationFn: (enabled: boolean) => bindAudioInput(token, session.id, enabled),
-    onMutate: async (enabled) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.audioBindings() });
-      const previous = queryClient.getQueryData<{ bindings: AudioBindings }>(queryKeys.audioBindings());
-      const current = previous?.bindings ?? { inputOwner: "", outputOwner: "", inputLevel: 0 };
-      queryClient.setQueryData(queryKeys.audioBindings(), {
-        bindings: {
-          ...current,
-          inputOwner: enabled ? session.id : current.inputOwner === session.id ? "" : current.inputOwner,
-          inputLevel: enabled ? 0 : current.inputOwner === session.id ? 0 : current.inputLevel,
-        },
-      });
-      return { previous };
-    },
-    onSuccess: (result) => setBindings(result.bindings),
-    onError: (_error, _enabled, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(queryKeys.audioBindings(), context.previous);
-      }
-      toast.error(t("voice.inputFailed"));
-    },
-  });
-  const outputMutation = useMutation({
-    mutationFn: (enabled: boolean) => bindAudioOutput(token, session.id, enabled),
-    onMutate: async (enabled) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.audioBindings() });
-      const previous = queryClient.getQueryData<{ bindings: AudioBindings }>(queryKeys.audioBindings());
-      const current = previous?.bindings ?? { inputOwner: "", outputOwner: "", inputLevel: 0 };
-      queryClient.setQueryData(queryKeys.audioBindings(), {
-        bindings: {
-          ...current,
-          outputOwner: enabled ? session.id : current.outputOwner === session.id ? "" : current.outputOwner,
-        },
-      });
-      return { previous };
-    },
-    onSuccess: (result) => setBindings(result.bindings),
-    onError: (_error, _enabled, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(queryKeys.audioBindings(), context.previous);
-      }
-      toast.error(t("voice.outputFailed"));
-    },
-  });
-  const inputLabel = inputActive ? t("voice.inputOn") : t("voice.inputOff");
-  const outputLabel = outputActive ? t("voice.outputOn") : t("voice.outputOff");
-
-  return (
-    <div className="flex shrink-0 items-center gap-1" aria-label={t("voice.controls")}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            aria-disabled={inputMutation.isPending}
-            aria-label={inputLabel}
-            aria-pressed={inputActive}
-            className="relative overflow-hidden rounded-full"
-            size="icon"
-            type="button"
-            variant={inputActive ? "default" : "ghost"}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => {
-              if (inputMutation.isPending) {
-                return;
-              }
-              inputMutation.mutate(!inputActive);
-            }}
-          >
-            {inputMutation.isPending ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <MicButtonContent active={inputActive} level={inputLevel} />
-            )}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{inputLabel}</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            aria-disabled={outputMutation.isPending}
-            aria-label={outputLabel}
-            aria-pressed={outputActive}
-            className="rounded-full"
-            size="icon"
-            type="button"
-            variant={outputActive ? "default" : "ghost"}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => {
-              if (outputMutation.isPending) {
-                return;
-              }
-              outputMutation.mutate(!outputActive);
-            }}
-          >
-            {outputMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Volume2 className="size-4" />}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{outputLabel}</TooltipContent>
-      </Tooltip>
-    </div>
-  );
-}
-
-function MicButtonContent({ active, level }: { active: boolean; level: number }) {
-  if (!active) {
-    return <Mic className="size-4" />;
-  }
-  const normalized = Math.max(0, Math.min(1, Math.sqrt(Math.max(0, level)) * 2.2));
-  const profiles = [0.45, 0.75, 1, 0.72, 0.5];
-  return (
-    <span className="pointer-events-none flex h-5 w-5 items-center justify-center gap-0.5">
-      {profiles.map((profile, index) => (
-        <span
-          key={index}
-          className="w-0.5 rounded-full bg-primary-foreground transition-all duration-100 ease-out"
-          style={{ height: `${5 + normalized * profile * 14}px` }}
-        />
-      ))}
-    </span>
   );
 }
 
@@ -2153,17 +2016,11 @@ function formatWorkspaceDirLabel(dir: string) {
 }
 
 async function pickWorkspaceDirectories(t: (key: string) => string) {
-  const { Dialogs } = await import("@wailsio/runtime");
-  const result = await Dialogs.OpenFile({
-    AllowsMultipleSelection: true,
-    ButtonText: t("transcript.approvalWorkspaceDirChoose"),
-    CanChooseDirectories: true,
-    CanChooseFiles: false,
-    CanCreateDirectories: true,
-    Message: t("transcript.approvalWorkspaceDirChooseMessage"),
-    Title: t("transcript.approvalWorkspaceDirChooseTitle"),
+  const dirs = await pickDirectories({
+    buttonLabel: t("transcript.approvalWorkspaceDirChoose"),
+    message: t("transcript.approvalWorkspaceDirChooseMessage"),
+    title: t("transcript.approvalWorkspaceDirChooseTitle"),
   });
-  const dirs = Array.isArray(result) ? result : result ? [result] : [];
   return dedupeStrings(dirs.map((dir) => dir.trim()).filter(Boolean));
 }
 

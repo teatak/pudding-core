@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("puddingElectronTheme", {
   getState: () => ipcRenderer.invoke("pudding:theme:get"),
@@ -19,6 +19,21 @@ contextBridge.exposeInMainWorld("puddingElectronShell", {
   },
 });
 
+contextBridge.exposeInMainWorld("puddingElectronDesktop", {
+  getDroppedFilePath: (file) => {
+    if (!file || !webUtils?.getPathForFile) {
+      return "";
+    }
+    try {
+      return webUtils.getPathForFile(file) || "";
+    } catch {
+      return "";
+    }
+  },
+  openExternal: (url) => ipcRenderer.invoke("pudding:desktop:open-external", url),
+  pickDirectories: (options) => ipcRenderer.invoke("pudding:desktop:pick-directories", options),
+});
+
 contextBridge.exposeInMainWorld("puddingElectronBrowser", {
   ensure: (request) => ipcRenderer.invoke("pudding:browser:ensure", request),
   registerWebview: (request) => ipcRenderer.invoke("pudding:browser:webview-register", request),
@@ -34,6 +49,11 @@ contextBridge.exposeInMainWorld("puddingElectronBrowser", {
     const wrapped = (_event, snapshot) => listener(snapshot);
     ipcRenderer.on("pudding:browser:updated", wrapped);
     return () => ipcRenderer.off("pudding:browser:updated", wrapped);
+  },
+  onCursor: (listener) => {
+    const wrapped = (_event, cursor) => listener(cursor);
+    ipcRenderer.on("pudding:browser:cursor", wrapped);
+    return () => ipcRenderer.off("pudding:browser:cursor", wrapped);
   },
   onWebviewCaptureRequest: (listener) => {
     const wrapped = (_event, request) => listener(request);

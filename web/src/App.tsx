@@ -1,11 +1,8 @@
-import { useQueryClient } from "@tanstack/react-query";
 import { useSearch } from "@tanstack/react-router";
 import { PanelRight } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useGroupRef } from "react-resizable-panels";
-import { toast } from "sonner";
 
-import { queryKeys } from "@/api/queryKeys";
 import { CanvasPane } from "@/components/CanvasPane";
 import { ChatPane } from "@/components/ChatPane";
 import { AppsPane } from "@/components/AppsPane";
@@ -21,7 +18,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { WorkspaceResizableHandle } from "@/components/WorkspaceResizableHandle";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useVisibleSessionEvents } from "@/hooks/useSessionEvents";
-import { translate, useI18n } from "@/i18n";
+import { useI18n } from "@/i18n";
 import {
   layoutStorageKeys,
   resizeTargetMinimumSize,
@@ -35,8 +32,6 @@ import { setCanvasOpen, useCanvasOpen } from "@/state/canvasStore";
 import { setRailLayoutForcedCollapsed } from "@/state/railStore";
 import { clearPendingPairingCode, pendingPairingCode } from "@/state/token";
 import { setToken, useToken } from "@/state/tokenStore";
-
-const APP_OAUTH_CONNECTED_EVENT = "pudding:app-oauth-connected";
 
 function readSavedSplitLayout() {
   return readPanelLayout(layoutStorageKeys.splitRatio, splitLayout.fallback, {
@@ -55,8 +50,7 @@ function readSavedWorkspaceLayout() {
 export function App() {
   const token = useToken();
   const { session: selectedSessionID, draft, split: splitSessionID, view } = useSearch({ from: "/" });
-  const { locale, t } = useI18n();
-  const queryClient = useQueryClient();
+  const { t } = useI18n();
   const isMobile = useIsMobile();
   const canvasOpen = useCanvasOpen();
   const [pairingCode] = useState(() => pendingPairingCode());
@@ -97,37 +91,6 @@ export function App() {
       observer.disconnect();
     };
   }, [leftWorkspaceNode]);
-
-  useEffect(() => {
-    if (!token) {
-      return;
-    }
-    let off: (() => void) | undefined;
-    let cancelled = false;
-    void import("@wailsio/runtime")
-      .then(({ Events }) => {
-        if (cancelled) {
-          return;
-        }
-        off = Events.On(APP_OAUTH_CONNECTED_EVENT, (event) => {
-          const payload = event.data as { ok?: boolean } | undefined;
-          if (payload?.ok === false) {
-            toast.error(translate("apps.oauthFailed", locale));
-          } else {
-            toast.success(translate("apps.oauthConnected", locale));
-          }
-          void Promise.all([
-            queryClient.invalidateQueries({ queryKey: queryKeys.apps() }),
-            queryClient.invalidateQueries({ queryKey: queryKeys.appConnections() }),
-          ]);
-        });
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-      off?.();
-    };
-  }, [locale, queryClient, token]);
 
   useEffect(() => {
     if (token) {

@@ -91,6 +91,7 @@ export function IdentityIcon({
   src?: string;
 }) {
   const [failed, setFailed] = useState(false);
+  const fallbackVisible = !children && (!src || failed);
 
   useEffect(() => {
     setFailed(false);
@@ -101,6 +102,7 @@ export function IdentityIcon({
       {...spanProps}
       className={cn(
         "inline-grid aspect-square shrink-0 place-items-center overflow-hidden bg-muted text-muted-foreground",
+        fallbackVisible && fallback === "skill" && "bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]",
         sizeClassByToken[size],
         shape === "circle" ? "rounded-full" : identityIconRadiusClass(size, radius),
         className,

@@ -1,4 +1,5 @@
 import { newClientID } from "@/lib/id";
+import { getDroppedFilePath, pickDirectories } from "@/lib/desktopBridge";
 
 export type LocalFolderPath = {
   id: string;
@@ -25,17 +26,11 @@ export function createLocalFolderPath(path: string): LocalFolderPath | null {
 }
 
 export async function pickLocalFolderPaths(t: (key: string) => string) {
-  const { Dialogs } = await import("@wailsio/runtime");
-  const result = await Dialogs.OpenFile({
-    AllowsMultipleSelection: true,
-    ButtonText: t("composer.folderPickButton"),
-    CanChooseDirectories: true,
-    CanChooseFiles: false,
-    CanCreateDirectories: false,
-    Message: t("composer.folderPickMessage"),
-    Title: t("composer.folderPickTitle"),
+  const paths = await pickDirectories({
+    buttonLabel: t("composer.folderPickButton"),
+    message: t("composer.folderPickMessage"),
+    title: t("composer.folderPickTitle"),
   });
-  const paths = Array.isArray(result) ? result : result ? [result] : [];
   return dedupeStrings(paths.map((path) => path.trim()).filter(Boolean));
 }
 
@@ -45,6 +40,7 @@ export function droppedLocalItemsFromDataTransfer(dataTransfer: DataTransfer): D
   let folderPathUnavailable = false;
   const uriPaths = parseFileURIList(dataTransfer.getData("text/uri-list"));
   const items = Array.from(dataTransfer.items || []);
+  const droppedFiles = Array.from(dataTransfer.files || []);
 
   if (items.length > 0) {
     for (const item of items) {
@@ -53,7 +49,7 @@ export function droppedLocalItemsFromDataTransfer(dataTransfer: DataTransfer): D
       }
       const entry = (item as WebkitDataTransferItem).webkitGetAsEntry?.();
       if (entry?.isDirectory) {
-        const path = directoryPathFromDroppedItem(item, entry, uriPaths);
+        const path = directoryPathFromDroppedItem(item, entry, uriPaths, droppedFiles);
         if (path) {
           folderPaths.push(path);
         } else {
@@ -92,17 +88,26 @@ function localFolderName(path: string) {
   return parts.at(-1) || normalized || path;
 }
 
-function directoryPathFromDroppedItem(item: DataTransferItem, entry: WebkitFileSystemEntry, uriPaths: string[]) {
+function directoryPathFromDroppedItem(
+  item: DataTransferItem,
+  entry: WebkitFileSystemEntry,
+  uriPaths: string[],
+  droppedFiles: File[],
+) {
   const filePath = nativePath((item.getAsFile?.() || null) as NativePathFile | null);
   if (filePath) {
     return filePath;
+  }
+  const matchingDroppedFilePath = nativePath(droppedFiles.find((file) => file.name === entry.name) as NativePathFile | null);
+  if (matchingDroppedFilePath) {
+    return matchingDroppedFilePath;
   }
   const matchingURIPath = uriPaths.find((path) => localFolderName(path) === entry.name);
   return matchingURIPath || "";
 }
 
 function nativePath(file: NativePathFile | null) {
-  const path = typeof file?.path === "string" ? file.path.trim() : "";
+  const path = (file ? getDroppedFilePath(file) : "") || (typeof file?.path === "string" ? file.path.trim() : "");
   if (/^\/[^/]/.test(path) || /^[A-Za-z]:[\\/]/.test(path)) {
     return path;
   }

@@ -65,12 +65,12 @@ HTTP/SSE/WS 分工:
 
 ## 桌面约束
 
-使用 Wails v3。
+使用 Electron shell + Go daemon。
 
 通讯边界:
 
 - 核心业务协议走 daemon loopback HTTP REST / SSE / WebSocket。
-- desktop native/system capabilities 走 Wails bindings/events。
+- desktop native/system capabilities 走 Electron IPC/preload bridge。
 
 ## 前端技术约束
 

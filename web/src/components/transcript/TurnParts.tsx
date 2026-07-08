@@ -20,6 +20,7 @@ import { PhaseDot } from "@/components/PhaseDot";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
 import { attachmentResourceURL } from "@/lib/attachmentURL";
+import { openExternalURL } from "@/lib/desktopBridge";
 import { cn } from "@/lib/utils";
 import { getShikiCodeRenderer, type CodeBlockRenderer } from "@/lib/shiki";
 import type { AssistantOverlay, AssistantOverlayPart, TurnPhaseState } from "@/state/overlayStore";
@@ -325,10 +326,28 @@ function useLocalDisclosure(defaultOpen: boolean, onOpenChange?: (open: boolean)
 }
 
 function AttachmentPart({ attachment, token }: { attachment: Extract<TurnPartVM, { type: "attachment" }>["attachment"]; token: string }) {
+  const [imagePreviewIndex, setImagePreviewIndex] = useState<number | null>(null);
+  const url = attachmentResourceURL(attachment, token);
+
+  if (isImageAttachment(attachment.mime, attachment.name)) {
+    const image: ImageLightboxItem = {
+      id: attachment.id,
+      name: attachment.name,
+      size: attachment.size,
+      url,
+    };
+    return (
+      <>
+        <MarkdownImageCard image={image} onOpen={() => setImagePreviewIndex(0)} />
+        <ImageLightbox images={[image]} openIndex={imagePreviewIndex} onOpenIndexChange={setImagePreviewIndex} />
+      </>
+    );
+  }
+
   return (
     <a
       className="inline-flex max-w-full items-center gap-1 rounded-md border border-border/70 bg-muted/30 px-2 py-1 text-xs leading-5 text-muted-foreground no-underline hover:bg-muted hover:text-foreground"
-      href={attachmentResourceURL(attachment, token)}
+      href={url}
       rel="noreferrer"
       target="_blank"
     >
@@ -336,6 +355,14 @@ function AttachmentPart({ attachment, token }: { attachment: Extract<TurnPartVM,
       <span className="min-w-0 truncate">{attachment.name}</span>
     </a>
   );
+}
+
+function isImageAttachment(mime: string | undefined, name: string) {
+  const cleaned = (mime || "").toLowerCase();
+  if (cleaned.startsWith("image/") && cleaned !== "image/svg+xml") {
+    return true;
+  }
+  return /\.(png|jpe?g|gif|webp)$/i.test(name);
 }
 
 function ThoughtPart({
@@ -889,14 +916,6 @@ function handleMarkdownLinkClick(event: MouseEvent<HTMLAnchorElement>) {
   }
   event.preventDefault();
   openExternalURL(href);
-}
-
-function openExternalURL(url: string) {
-  void import("@wailsio/runtime")
-    .then(({ Browser }) => Browser.OpenURL(url))
-    .catch(() => {
-      window.open(url, "_blank", "noopener,noreferrer");
-    });
 }
 
 type CodeElementProps = {

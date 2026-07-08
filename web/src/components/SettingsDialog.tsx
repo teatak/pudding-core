@@ -1742,7 +1742,7 @@ function SkillDraftRow({
   return (
     <Item className="items-start gap-3 rounded-lg px-3 py-3" variant="outline">
       <ItemMedia>
-        <IdentityIcon fallback="skill" fit="contain" src={iconURL || undefined} />
+        <IdentityIcon fallback="skill" fit="contain" size="lg" src={iconURL || undefined} />
       </ItemMedia>
       <ItemContent className="min-w-0 gap-1">
         <ItemTitle className="flex max-w-full flex-wrap items-center gap-2">
@@ -1797,7 +1797,7 @@ function SkillRow({ deleting, onDelete, skill, token }: { deleting?: boolean; on
   return (
     <Item className="items-start gap-3 rounded-lg px-3 py-3" variant="outline">
       <ItemMedia>
-        <IdentityIcon fallback="skill" fit="contain" src={iconURL || undefined} />
+        <IdentityIcon fallback="skill" fit="contain" size="lg" src={iconURL || undefined} />
       </ItemMedia>
       <ItemContent className="min-w-0 gap-1">
         <ItemTitle className="flex max-w-full flex-wrap items-center gap-2">

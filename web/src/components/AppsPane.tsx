@@ -61,6 +61,7 @@ import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { translate, useI18n } from "@/i18n";
+import { openExternalURL } from "@/lib/desktopBridge";
 import { shouldKeepDialogOpenForSelectDismiss } from "@/lib/layerGuards";
 import { cn } from "@/lib/utils";
 import { useShowPreviewAppVersions } from "@/state/appCatalogPrefs";
@@ -2614,14 +2615,4 @@ function isPATAuthMethod(method: AppAuthMethod) {
 
 function authTypeLabel(type: AuthType, t: (key: string) => string) {
   return t(`apps.auth.${type}`);
-}
-
-async function openExternalURL(url: string) {
-  try {
-    const { Browser } = await import("@wailsio/runtime");
-    await Browser.OpenURL(url);
-    return;
-  } catch {
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
 }

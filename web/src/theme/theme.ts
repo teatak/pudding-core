@@ -87,9 +87,6 @@ export function startThemeSync() {
     void electronTheme.getState().then((state) => window.__puddingSetThemeState?.(state));
     return;
   }
-  if (isDesktopThemeControlled()) {
-    return;
-  }
   const media = window.matchMedia("(prefers-color-scheme: dark)");
   media.addEventListener("change", notifyThemeChange);
   window.addEventListener("storage", notifyThemeChange);
@@ -101,12 +98,6 @@ export function setTheme(theme: Theme) {
     electronTheme
       .setTheme(theme)
       .then((state) => window.__puddingSetThemeState?.(state))
-      .catch(() => setLocalTheme(theme));
-    return;
-  }
-  if (isDesktopThemeControlled()) {
-    import("@wailsio/runtime")
-      .then(({ Events }) => Events.Emit("desktop:theme-set", theme))
       .catch(() => setLocalTheme(theme));
     return;
   }
@@ -200,8 +191,4 @@ function themeFallbackColors(resolved: ResolvedTheme) {
   return resolved === "dark"
     ? { bg: "#171717", fg: "oklch(0.95 0 0)" }
     : { bg: "oklch(1 0 0)", fg: "oklch(0.18 0 0)" };
-}
-
-function isDesktopThemeControlled() {
-  return typeof document !== "undefined" && Boolean(document.documentElement.dataset.shell);
 }

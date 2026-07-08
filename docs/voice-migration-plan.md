@@ -119,8 +119,8 @@ internal/audio/
 - daemon 默认使用 Edge TTS(`zh-CN-YunxiaNeural`, speed=1.2);构造失败时 macOS 降级为真实 `macsay`(rate=230),非 macOS 降级为 noop。
 - `macsay` 会保留 stderr 到错误日志,便于排查系统 voice / audio device 问题。
 - daemon 默认使用 PortAudio 作为 capture/playback driver;input binding 时才请求并打开麦克风,output 只在收到 Edge PCM 时懒启动 speaker playback。
-- macOS desktop dev/release bundle 已写入 `NSMicrophoneUsageDescription`;PortAudio capture 前会主动请求 mic 权限。
-- `make desktop-dev` 的 macOS dev app 需要稳定本机 code signing identity,默认名称为 `Pudding Dev Local`;没有时先跑一次 `make dev-cert`,避免 TCC 把每次重建的 `.app` 当成新身份反复申请权限。
+- macOS Electron dev/release bundle 需要写入 `NSMicrophoneUsageDescription`;PortAudio capture 前会主动请求 mic 权限。
+- Electron 包装和签名链路待补齐;开发态可先用 `make desktop-dev` 验证语音能力。
 - daemon 只从 `<home>/runtime/models` 加载 sherpa ASR/VAD 模型:
   - `asr/model.int8.onnx`
   - `asr/tokens.txt`
@@ -170,8 +170,7 @@ internal/audio/
 
 ## 剩余风险
 
-- macOS TCC 权限被拒后需要用户在系统设置里重新打开,或开发机执行 `tccutil reset Microphone com.teatak.pudding.dev` 后重启 `make desktop-dev`。
-- 如果 `make desktop-dev` 提示缺少 `Pudding Dev Local`,先跑一次 `make dev-cert`;不需要 Apple 开发者证书。
+- macOS TCC 权限被拒后需要用户在系统设置里重新打开,或开发机执行 `tccutil reset Microphone com.teatak.pudding.dev` 后重启 Electron dev app。
 - PortAudio 默认输入设备受系统当前设备影响;后续需要做设备枚举/选择。
 - Edge TTS 依赖外部网络和非官方 Edge 朗读协议;若 Microsoft 调整协议或 token,需要同步更新常量。
 - AEC/NS 已接 WebRTC bridge,但外放环境仍需真机验证参数;后续如仍误触发,优先调 NS level / AEC reference 时序。

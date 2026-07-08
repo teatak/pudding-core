@@ -31,8 +31,8 @@ go build -tags "$BUILDTAGS" -o bin/puddingd ./cmd/puddingd || exit 1
 ensure_vite
 stop_old_daemon
 
-echo ">> launching Electron shell (Vite :$VITE_PORT, daemon :$DEV_PORT)"
+echo ">> launching desktop shell (Vite :$VITE_PORT, daemon :$DEV_PORT)"
 PUDDING_DAEMON_BIN="$PWD/bin/puddingd" \
 PUDDING_DAEMON_ADDR="127.0.0.1:$DEV_PORT" \
 PUDDING_DEV_URL="http://127.0.0.1:$VITE_PORT" \
-npm --prefix web run electron:dev
+npm --prefix web run desktop:dev

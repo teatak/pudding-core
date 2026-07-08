@@ -20,10 +20,13 @@ import { z } from "zod";
 
 import {
   APIError,
+  bindAudioInput,
+  bindAudioOutput,
   captureDesktopPhoto,
   captureDesktopScreenshot,
   createSession,
   deleteSession,
+  getAudioBindings,
   listApps,
   listSkills,
   listProviders,
@@ -45,6 +48,7 @@ import { useComposerMentions } from "@/components/useComposerMentions";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
 import { Mascot, type MascotGaze, type MascotGazePoint } from "@/components/Mascot";
 import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
+import { AudioControlButtons } from "@/components/SessionAudioControls";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
 import { ProviderProfileEditorDialog } from "@/components/ProviderProfileEditorDialog";
 import { ProviderCustomCard, ProviderPresetCreateDialog, ProviderPresetGrid } from "@/components/ProviderPresetCreateDialog";
@@ -55,10 +59,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useComposerSelectionGuard } from "@/hooks/useComposerSelectionGuard";
 import { useImeCompositionGuard } from "@/hooks/useImeCompositionGuard";
+import { useSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
 import { attachmentResourceURL } from "@/lib/attachmentURL";
 import { createPastedTextAttachmentFile, shouldAttachPastedText } from "@/lib/clipboardTextAttachment";
-import { bindDesktopFileDrop, nativeFileDropLikelyAvailable } from "@/lib/desktopFileDrop";
 import { newClientID } from "@/lib/id";
 import {
   createLocalFolderPath,
@@ -144,23 +148,6 @@ export function DraftConversation({ token }: { token: string }) {
     };
   }, [resetDragState]);
 
-  useEffect(
-    () =>
-      bindDesktopFileDrop({ kind: "draft" }, (drop) => {
-        droppedFilesNonceRef.current += 1;
-        setDroppedFiles({
-          attachments: drop.attachments,
-          failedFiles: drop.failedFiles,
-          failedFileCount: drop.failedFileCount,
-          files: [],
-          folderPathUnavailable: false,
-          folderPaths: drop.directories,
-          nonce: droppedFilesNonceRef.current,
-        });
-      }),
-    [],
-  );
-
   const handleDragEnter = useCallback((event: DragEvent<HTMLDivElement>) => {
     if (!dataTransferHasFiles(event.dataTransfer)) {
       return;
@@ -205,11 +192,6 @@ export function DraftConversation({ token }: { token: string }) {
       event.stopPropagation();
       resetDragState();
       const dropped = droppedLocalItemsFromDataTransfer(event.dataTransfer);
-      if (nativeFileDropLikelyAvailable()) {
-        dropped.files = [];
-        dropped.folderPaths = [];
-        dropped.folderPathUnavailable = false;
-      }
       if (dropped.files.length > 0 || dropped.folderPaths.length > 0 || dropped.folderPathUnavailable) {
         droppedFilesNonceRef.current += 1;
         setDroppedFiles({ ...dropped, nonce: droppedFilesNonceRef.current });
@@ -406,7 +388,15 @@ function DraftComposer({
   const [textFocused, setTextFocused] = useState(false);
   const [pickingAttachment, setPickingAttachment] = useState(false);
   const [pickingLocalFolder, setPickingLocalFolder] = useState(false);
+  const [draftVoiceInputActive, setDraftVoiceInputActive] = useState(false);
+  const [draftVoiceOutputActive, setDraftVoiceOutputActive] = useState(false);
+  const [draftVoiceOutputPending, setDraftVoiceOutputPending] = useState(false);
+  const [draftVoiceSession, setDraftVoiceSession] = useState<Session | null>(null);
   const draftIDRef = useRef<string>(newClientID());
+  const draftVoiceInputActiveRef = useRef(false);
+  const draftVoiceOutputActiveRef = useRef(false);
+  const draftVoiceRevealedRef = useRef(false);
+  const draftVoiceSessionRef = useRef<Session | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const lastDroppedFilesNonceRef = useRef(0);
   const quickSubmitIDRef = useRef<number | null>(null);
@@ -471,7 +461,6 @@ function DraftComposer({
     },
   });
   const mentionMenuOpen = textFocused && mentions.open;
-  const sendEnabled = canSend && modelReady && !mentionMenuOpen;
   const textField = form.register("text");
   const attachmentPreviewItems = useMemo(
     () =>
@@ -491,6 +480,32 @@ function DraftComposer({
   const reasoningOptions = useMemo(() => reasoningEffortOptionsForSelection(resolvedModel), [resolvedModel]);
   const resolvedModelKey = resolvedModel ? `${resolvedModel.provider}:${resolvedModel.model}` : "";
   const reasoningEffort = resolvedModelKey && draftReasoningModelKey === resolvedModelKey ? draftReasoningEffort : "";
+  const draftVoiceSessionID = draftVoiceSession?.id;
+  useSessionEvents(draftVoiceSessionID, token);
+  const draftVoiceBindingsQuery = useQuery({
+    queryKey: queryKeys.audioBindings(),
+    queryFn: () => {
+      if (!draftVoiceSessionID) {
+        throw new APIError(400, "no_session");
+      }
+      return getAudioBindings(token, draftVoiceSessionID);
+    },
+    enabled: Boolean(token && draftVoiceSessionID),
+    staleTime: 30_000,
+  });
+  const draftVoiceBindings = draftVoiceBindingsQuery.data?.bindings;
+  const draftVoiceInputLevel =
+    draftVoiceInputActive && draftVoiceBindings?.inputOwner === draftVoiceSessionID ? draftVoiceBindings?.inputLevel ?? 0 : 0;
+  const draftVoiceHasInput = useOverlayStore((state) => {
+    if (!draftVoiceSessionID) {
+      return false;
+    }
+    return Boolean(
+      state.runningTurns[draftVoiceSessionID] ||
+        state.turnPhases[draftVoiceSessionID] ||
+        (state.pendingUsers[draftVoiceSessionID] || []).length,
+    );
+  });
   const setDraftReasoningEffort = useCallback(
     (value: string) => {
       if (!resolvedModelKey) {
@@ -501,6 +516,147 @@ function DraftComposer({
     },
     [resolvedModelKey],
   );
+
+  const cleanupDraftVoiceSession = useCallback(
+    async (sessionID: string) => {
+      await Promise.all([
+        bindAudioInput(token, sessionID, false).catch(() => undefined),
+        bindAudioOutput(token, sessionID, false).catch(() => undefined),
+      ]);
+      await deleteSession(token, sessionID).catch(() => undefined);
+      removeCachedSession(queryClient, sessionID);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.audioBindings() });
+    },
+    [queryClient, token],
+  );
+
+  const revealDraftVoiceSession = useCallback(
+    async (created: Session) => {
+      if (draftVoiceRevealedRef.current) {
+        return;
+      }
+      draftVoiceRevealedRef.current = true;
+      cacheCreatedSession(queryClient, created);
+      await navigate({
+        to: "/",
+        search: (prev) => {
+          const next = { ...(prev as AppSearch), session: created.id };
+          delete next.draft;
+          return next;
+        },
+        replace: true,
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.turns(created.id) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.messages(created.id) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.queuedInputs(created.id) }),
+      ]);
+    },
+    [navigate, queryClient],
+  );
+
+  const draftVoiceInputMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const current = draftVoiceSessionRef.current;
+      if (!enabled) {
+        setDraftVoiceInputActive(false);
+        draftVoiceInputActiveRef.current = false;
+        if (!current) {
+          return null;
+        }
+        const result = await bindAudioInput(token, current.id, false);
+        queryClient.setQueryData(queryKeys.audioBindings(), { bindings: result.bindings });
+        if (!draftVoiceOutputActiveRef.current) {
+          await cleanupDraftVoiceSession(current.id);
+          draftVoiceSessionRef.current = null;
+          setDraftVoiceSession(null);
+        }
+        return current;
+      }
+      const activeReasoningEffort = reasoningEffort && reasoningOptions.includes(reasoningEffort) ? reasoningEffort : "";
+      if (!modelValue.provider || !modelValue.model) {
+        throw new APIError(400, "no_model");
+      }
+      let created = current;
+      if (!created) {
+        created = await createSession(token, {
+          title: "",
+          provider: modelValue.provider,
+          model: modelValue.model,
+        });
+        if (activeReasoningEffort) {
+          created = await updateSession(token, created.id, { reasoningEffort: activeReasoningEffort });
+        }
+        draftVoiceRevealedRef.current = false;
+        draftVoiceSessionRef.current = created;
+        setDraftVoiceSession(created);
+      }
+      draftVoiceInputActiveRef.current = true;
+      setDraftVoiceInputActive(true);
+      const result = await bindAudioInput(token, created.id, true);
+      queryClient.setQueryData(queryKeys.audioBindings(), { bindings: result.bindings });
+      if (draftVoiceOutputActiveRef.current) {
+        const outputResult = await bindAudioOutput(token, created.id, true);
+        queryClient.setQueryData(queryKeys.audioBindings(), { bindings: outputResult.bindings });
+      }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.audioBindings() });
+      return created;
+    },
+    onError: (error, enabled) => {
+      if (enabled) {
+        draftVoiceInputActiveRef.current = false;
+        setDraftVoiceInputActive(false);
+        const current = draftVoiceSessionRef.current;
+        if (current && !draftVoiceRevealedRef.current) {
+          draftVoiceSessionRef.current = null;
+          setDraftVoiceSession(null);
+          void cleanupDraftVoiceSession(current.id);
+        }
+      }
+      const failure = getSubmitFailure(error, {
+        noModel: t("composer.noModel"),
+        providerConfig: t("composer.providerConfig"),
+        submitFailed: t("voice.inputFailed"),
+        turnRunning: t("composer.turnRunning"),
+      });
+      toast.error(failure.message);
+    },
+  });
+  const handleDraftVoiceInputClick = useCallback(() => {
+    if (!draftVoiceInputActiveRef.current && !modelReady) {
+      toast.error(t("composer.noModel"));
+      return;
+    }
+    draftVoiceInputMutation.mutate(!draftVoiceInputActiveRef.current);
+  }, [draftVoiceInputMutation, modelReady, t]);
+  const handleDraftVoiceOutputClick = useCallback(() => {
+    const nextActive = !draftVoiceOutputActiveRef.current;
+    const current = draftVoiceSessionRef.current;
+    draftVoiceOutputActiveRef.current = nextActive;
+    setDraftVoiceOutputActive(nextActive);
+    if (!current) {
+      return;
+    }
+    setDraftVoiceOutputPending(true);
+    void bindAudioOutput(token, current.id, nextActive)
+      .then(async (result) => {
+        queryClient.setQueryData(queryKeys.audioBindings(), { bindings: result.bindings });
+        await queryClient.invalidateQueries({ queryKey: queryKeys.audioBindings() });
+        if (!nextActive && !draftVoiceInputActiveRef.current) {
+          await cleanupDraftVoiceSession(current.id);
+          draftVoiceSessionRef.current = null;
+          setDraftVoiceSession(null);
+        }
+      })
+      .catch(() => {
+        draftVoiceOutputActiveRef.current = !nextActive;
+        setDraftVoiceOutputActive(!nextActive);
+        toast.error(t("voice.outputFailed"));
+      })
+      .finally(() => setDraftVoiceOutputPending(false));
+  }, [cleanupDraftVoiceSession, queryClient, t, token]);
+  const sendEnabled = canSend && modelReady && !mentionMenuOpen && !draftVoiceInputMutation.isPending;
 
   const updateMascotInputGaze = useCallback(() => {
     const textArea = textAreaRef.current;
@@ -752,6 +908,35 @@ function DraftComposer({
       setDraftReasoningEffort("");
     }
   }, [reasoningEffort, reasoningOptions, setDraftReasoningEffort]);
+
+  useEffect(() => {
+    draftVoiceInputActiveRef.current = draftVoiceInputActive;
+  }, [draftVoiceInputActive]);
+
+  useEffect(() => {
+    draftVoiceOutputActiveRef.current = draftVoiceOutputActive;
+  }, [draftVoiceOutputActive]);
+
+  useEffect(() => {
+    draftVoiceSessionRef.current = draftVoiceSession;
+  }, [draftVoiceSession]);
+
+  useEffect(() => {
+    if (!draftVoiceSession || !draftVoiceHasInput) {
+      return;
+    }
+    void revealDraftVoiceSession(draftVoiceSession);
+  }, [draftVoiceHasInput, draftVoiceSession, revealDraftVoiceSession]);
+
+  useEffect(() => {
+    return () => {
+      const current = draftVoiceSessionRef.current;
+      if (!current || draftVoiceRevealedRef.current) {
+        return;
+      }
+      void cleanupDraftVoiceSession(current.id);
+    };
+  }, [cleanupDraftVoiceSession]);
 
   useEffect(() => {
     return () => {
@@ -1057,6 +1242,19 @@ function DraftComposer({
                 onAfterClose={focusTextarea}
                 onReasoningChange={setDraftReasoningEffort}
                 onResolvedChange={handleResolvedModelChange}
+              />
+              <AudioControlButtons
+                controlsLabel={t("voice.controls")}
+                inputActive={draftVoiceInputActive}
+                inputLabel={draftVoiceInputActive ? t("voice.inputOn") : t("voice.inputOff")}
+                inputLevel={draftVoiceInputLevel}
+                inputBusy={draftVoiceInputMutation.isPending}
+                inputPending={draftVoiceInputMutation.isPending && draftVoiceInputMutation.variables === true}
+                outputActive={draftVoiceOutputActive}
+                outputLabel={draftVoiceOutputActive ? t("voice.outputOn") : t("voice.outputOff")}
+                outputPending={draftVoiceOutputPending}
+                onInputClick={handleDraftVoiceInputClick}
+                onOutputClick={handleDraftVoiceOutputClick}
               />
               <Tooltip>
                 <TooltipTrigger asChild>

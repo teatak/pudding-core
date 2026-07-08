@@ -1,12 +1,12 @@
 # Electron Migration Plan
 
-> 状态:P4 CDP Tool Parity 已接入,P5 Multi-session Lifecycle 进行中。  
-> 日期:2026-07-07。  
+> 状态:P5 Multi-session Lifecycle 已进入手动验收收尾;P7 旧 native/screencast surface 与旧 desktop shell 清理已完成;P6 External Window 仍禁用。
+> 日期:2026-07-08。
 > 决策:迁移到 Electron shell,浏览器显示改为 Electron `<webview>`;保留 Go daemon 作为业务核心。
 
 ## 背景
 
-当前 Wails 方案里的内嵌浏览器本质是:
+旧方案里的内嵌浏览器本质是:
 
 ```text
 Chrome CDP screencast -> WebSocket -> React img/canvas
@@ -198,10 +198,10 @@ model tool call
 
 ### P0 准备
 
-- 冻结当前 Wails browser 重构,不继续深挖 screencast。
-- 梳理 Wails bindings 能力清单,映射到 Electron IPC。
+- 冻结旧 browser 重构,不继续深挖 screencast。
+- 梳理 desktop native 能力清单,映射到 Electron IPC。
 - 明确 BrowserHost bridge 类型和错误码。
-- 更新 `technology-decisions.md`,记录从 Wails 迁到 Electron 的原因。
+- 更新 `technology-decisions.md`,记录迁到 Electron 的原因。
 
 验收:
 
@@ -216,7 +216,7 @@ model tool call
 - renderer 加载现有 Vite/React UI。
 - REST/SSE 仍直连 daemon。
 - macOS 使用隐藏标题栏,红绿灯固定为 `trafficLightPosition: { x: 18, y: 18 }`;会话 toolbar、画布 toolbar、rail toggle、全局拖拽带统一通过 `electron-mac` 的 CSS vars 对齐。
-- 开发入口:`make electron-dev`。
+- 开发入口:`make desktop-dev`。
 
 验收:
 
@@ -277,6 +277,10 @@ model tool call
   - Electron bridge 声明支持 metadata recovery;`/browser/state` 可在 Electron 下从持久 URL 重建真实 tab,旧 Chrome manager 仍不恢复 internal metadata。
   - Electron webview surface 区分无浏览器、显式新选项卡、真实页面;新选项卡以 `about:blank` metadata 持久化。
   - BrowserHost 不再 attach view 到窗口,只维护 webview `webContents` 注册表和 LLM 工具 target。
+  - 浏览器不再作为 canvas item 落库;Canvas 只负责展示 browser surface。
+  - LLM 工具可在画布未打开时通过 BrowserHost 操作 session tab;画布打开后 attach 同一个真实 tab。
+  - transcript 中 browser screenshot 附件复用图片预览/lightbox 展示。
+  - LLM browser click/type/scroll 会在 webview surface 上显示自动化光标。
   - `closeTab` 在 Electron Host 内幂等,重复关闭返回 lost snapshot。
   - 关闭浏览器时前端进入 session-scoped closing guard,清空旧 tab/payload 缓存并丢弃并发创建结果,避免标题/icon 残留和关闭后复活。
 
@@ -301,22 +305,22 @@ model tool call
 - session A external 不影响 session B internal。
 - external 窗口关闭后 slot 状态明确,可恢复或关闭。
 
-### P7 删除 Wails / Screencast
+### P7 删除旧 Desktop Shell / Screencast
 
-- 删除 Wails desktop shell。
+- 删除旧 desktop shell。
 - 删除 screencast route 和前端 stream。已完成前端 fallback、Go route、BrowserService 接口、manager controller/CDP loop 清理。
 - 删除 Chrome process/profile 直接管理代码中不再需要的部分。
 - 保留必要的 browser metadata store 和 Go API facade。
 
-Wails legacy 清理范围:
+Legacy 清理范围:
 
-- `cmd/pudding-desktop/main.go`:启动隐藏窗口、等待 `WebViewDidFinishNavigation` 再显示的 WKWebView 白屏防御,Electron 路径不需要。
-- `cmd/pudding-desktop/chrome_darwin.go`:红绿灯、toolbar、fullscreen、双击 zoom 等 Wails/macOS chrome 补丁,Electron 由 `BrowserWindow` 配置和前端 CSS 处理。
-- `cmd/pudding-desktop/window_preferences.go`:Wails 窗口尺寸记忆,Electron 已由 main process 持久化 window state。
-- `cmd/pudding-desktop/theme.go`:Wails theme bridge,Electron 已由 preload/main IPC 和 `nativeTheme` 负责。
-- `cmd/pudding-desktop/no_zoom_rects.go`:Wails zoom 排除区域,Electron 侧用 drag/no-drag 区域处理。
-- `cmd/pudding-desktop/file_drop.go`、`cmd/pudding-desktop/locale.go`:删除前需要确认 Electron 已补齐文件拖拽和 locale bridge。
-- `web` 中 `@wailsio/runtime` fallback、`internal/api/cors.go` 中 `wails://` origin 特判、`Makefile` 中 `desktop/desktop-dev` 入口,随 Wails shell 一起移除。
+当前盘点(2026-07-08):
+
+- 运行代码中未发现 `BrowserStream`、`Page.startScreencast`、native attach/bounds 等 UI 显示主链路引用。
+- `electron/browser-host.cjs` 仍保留内部 `WebContentsView`,只作为画布未挂载时的 invisible LLM tool target。
+- 已删除旧 desktop shell/runtime、旧 desktop CORS 特判和 Makefile 旧入口。
+- 已删除旧 shell 的窗口白屏防御、macOS chrome 补丁、窗口尺寸记忆、theme bridge、zoom 排除区域、file drop 和 locale bridge。
+- Electron 已接管 theme、locale、window state、external open、directory picker 和 browser webview surface;native file drop 如需恢复,走 Electron IPC 新增。
 
 旧 Electron native browser surface 清理状态:
 
@@ -329,15 +333,15 @@ Wails legacy 清理范围:
 
 清理原则:
 
-- 不再把上述 Wails 防御代码迁移到 Electron。
-- 不零散删除某个补丁,避免留下半残 Wails fallback。
-- Electron packaging、file drop、locale、theme、窗口状态全部稳定后,一次性删除 Wails shell。
+- 不再把上述旧 shell 防御代码迁移到 Electron。
+- 不零散删除某个补丁,避免留下半残 fallback。
+- Electron packaging 后续单独补齐,不阻塞旧 shell 删除。
 - Electron browser surface 切到 webview 后,旧 native surface 也按上面清单一次性删除,避免继续在两套嵌入模型之间打补丁。
 
 验收:
 
 - repo 中没有 UI 显示依赖 screencast。
-- build/test 不引用 Wails browser display 链路。
+- build/test 不引用旧 browser display 链路。
 - screenshot 工具仍可用。
 
 ### P8 Packaging
@@ -369,7 +373,7 @@ Wails legacy 清理范围:
 ## 风险
 
 - Electron 包体会明显变大。
-- Electron native capability 需要替换 Wails bindings。
+- Electron native capability 需要继续收敛到 preload/IPC bridge。
 - BrowserHost bridge 是新边界,需要测试保护。
 - `webContents.debugger` 和 DevTools 互斥场景要重点处理。
 - 外部窗口移动同一个 `webContents` 的边界要做 POC 验证。

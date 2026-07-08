@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, nativeTheme, screen, shell, webContents } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen, shell, webContents } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
@@ -19,13 +19,14 @@ const defaultWindowBounds = { width: 1440, height: 920 };
 const minWindowBounds = { width: 1000, height: 680 };
 let themePreference = normalizeThemePreference(process.env.PUDDING_THEME || "system");
 nativeTheme.themeSource = themePreference;
-const browserHost = new BrowserHost((snapshot) => {
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (!window.webContents.isDestroyed() && isTrustedRendererURL(window.webContents.getURL())) {
-      window.webContents.send("pudding:browser:updated", snapshot);
-    }
-  }
-});
+const browserHost = new BrowserHost(
+  (snapshot) => {
+    broadcastToTrustedRenderers("pudding:browser:updated", snapshot);
+  },
+  (cursor) => {
+    broadcastToTrustedRenderers("pudding:browser:cursor", cursor);
+  },
+);
 browserHost.setWebviewCaptureHandler(captureVisibleWebview);
 const browserBridgeServer = new BrowserBridgeServer(browserHost);
 const webviewCaptureRequests = new Map();
@@ -249,6 +250,14 @@ function rectsIntersect(a, b) {
   return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
 }
 
+function broadcastToTrustedRenderers(channel, payload) {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.webContents.isDestroyed() && isTrustedRendererURL(window.webContents.getURL())) {
+      window.webContents.send(channel, payload);
+    }
+  }
+}
+
 ipcMain.handle("pudding:theme:get", (event) => {
   assertTrustedSender(event);
   return themeState();
@@ -265,6 +274,27 @@ ipcMain.handle("pudding:theme:set", (event, theme) => {
 ipcMain.handle("pudding:shell:is-fullscreen", (event) => {
   const window = assertTrustedSender(event);
   return window.isFullScreen();
+});
+
+ipcMain.handle("pudding:desktop:open-external", async (event, rawURL) => {
+  assertTrustedSender(event);
+  const url = String(rawURL || "").trim();
+  if (!isAllowedExternalURL(url)) {
+    return false;
+  }
+  await shell.openExternal(url);
+  return true;
+});
+
+ipcMain.handle("pudding:desktop:pick-directories", async (event, options) => {
+  const window = assertTrustedSender(event);
+  const result = await dialog.showOpenDialog(window, {
+    buttonLabel: stringOption(options?.buttonLabel),
+    message: stringOption(options?.message),
+    properties: ["openDirectory", "multiSelections", "createDirectory"],
+    title: stringOption(options?.title),
+  });
+  return result.canceled ? [] : result.filePaths;
 });
 
 ipcMain.handle("pudding:browser:ensure", (event, request) => {
@@ -382,7 +412,7 @@ async function ensureDaemon(browserBridge) {
 
   const daemonBin = resolveDaemonBinary();
   if (!daemonBin) {
-    throw new Error("puddingd binary not found. Run `make electron-dev` so the dev binary is built first.");
+    throw new Error("puddingd binary not found. Run `make desktop-dev` so the dev binary is built first.");
   }
 
   daemonProcess = spawn(daemonBin, ["-addr", daemonAddr], {
@@ -528,6 +558,20 @@ function assertTrustedSender(event) {
     throw new Error("untrusted renderer");
   }
   return window;
+}
+
+function isAllowedExternalURL(rawURL) {
+  try {
+    const url = new URL(rawURL);
+    return url.protocol === "http:" || url.protocol === "https:" || url.protocol === "mailto:";
+  } catch {
+    return false;
+  }
+}
+
+function stringOption(value) {
+  const text = String(value || "").trim();
+  return text || undefined;
 }
 
 function trimTrailingSlash(value) {

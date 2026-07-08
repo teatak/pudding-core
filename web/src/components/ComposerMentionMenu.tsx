@@ -31,9 +31,14 @@ export function ComposerMentionMenu({
   const { t } = useI18n();
   const selectedRef = useRef<HTMLButtonElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const pointerSelectedIndexRef = useRef<number | null>(null);
   const sections = buildMentionSections(references, t);
 
   useEffect(() => {
+    if (pointerSelectedIndexRef.current === selectedIndex) {
+      return;
+    }
+    pointerSelectedIndexRef.current = null;
     scrollActiveIntoList(selectedRef.current, listRef.current);
   }, [references, selectedIndex]);
 
@@ -64,7 +69,12 @@ export function ComposerMentionMenu({
                   )}
                   role="option"
                   type="button"
-                  onMouseEnter={() => onHover(index)}
+                  onMouseEnter={() => {
+                    if (index !== selectedIndex) {
+                      pointerSelectedIndexRef.current = index;
+                    }
+                    onHover(index);
+                  }}
                   onMouseDown={(event) => {
                     event.preventDefault();
                     if (event.button !== 0) {

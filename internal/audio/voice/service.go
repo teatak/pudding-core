@@ -54,6 +54,10 @@ type EventBus interface {
 	EventPublisher
 }
 
+type captureHealth interface {
+	CaptureActive() bool
+}
+
 type ServiceConfig struct {
 	Manager   *Manager
 	Submitter Submitter
@@ -202,7 +206,7 @@ func (s *Service) BindInput(sessionID string, enabled bool) (Bindings, error) {
 	before := s.manager.Snapshot()
 	slog.Info("voice: input bind requested", "sessionID", sessionID, "enabled", enabled, "previousOwner", before.InputOwner)
 	if enabled {
-		if before.InputOwner != sessionID {
+		if before.InputOwner != sessionID || !s.inputCaptureActive(sessionID) {
 			s.stopInput()
 			if err := s.startInput(sessionID); err != nil {
 				slog.Warn("voice: input start failed", "sessionID", sessionID, "err", err)
@@ -228,6 +232,21 @@ func (s *Service) BindInput(sessionID string, enabled bool) (Bindings, error) {
 	s.publishAudioBindings(before, bindings)
 	slog.Info("voice: input released", "sessionID", sessionID, "inputOwner", bindings.InputOwner)
 	return bindings, nil
+}
+
+func (s *Service) inputCaptureActive(sessionID string) bool {
+	s.mu.Lock()
+	active := s.inputSession == sessionID && s.inputCancel != nil
+	driver := s.driver
+	s.mu.Unlock()
+	if !active {
+		return false
+	}
+	health, ok := driver.(captureHealth)
+	if !ok {
+		return true
+	}
+	return health.CaptureActive()
 }
 
 func (s *Service) BindOutput(sessionID string, enabled bool) (Bindings, error) {

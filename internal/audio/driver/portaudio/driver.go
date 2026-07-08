@@ -18,9 +18,10 @@ import (
 const (
 	captureStopTimeout = 2 * time.Second
 	deviceCloseTimeout = 2 * time.Second
-	deviceOpenRetry    = 500 * time.Millisecond
+	deviceOpenAttempts = 5
+	deviceOpenRetry    = 300 * time.Millisecond
 	deviceRefreshDelay = 300 * time.Millisecond
-	deviceWatchEvery   = 1500 * time.Millisecond
+	deviceWatchEvery   = 500 * time.Millisecond
 )
 
 type Config struct {
@@ -86,6 +87,7 @@ func (d *Driver) Init(ctx context.Context) error {
 	if err := portaudio.Initialize(); err != nil {
 		return fmt.Errorf("portaudio init: %w", err)
 	}
+	installCoreAudioListener()
 	slog.Info("portaudio: initialized", "input", d.inputFormat, "output", d.outputFormat)
 	d.initialized = true
 	return nil
@@ -109,6 +111,12 @@ func (d *Driver) Close() error {
 
 func (d *Driver) InputFormat() frame.Format  { return d.inputFormat }
 func (d *Driver) OutputFormat() frame.Format { return d.outputFormat }
+
+func (d *Driver) CaptureActive() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.stream != nil && d.done != nil && !isClosed(d.done)
+}
 
 func (d *Driver) InputDeviceName() string {
 	d.mu.Lock()
@@ -304,6 +312,14 @@ func (d *Driver) captureLoop(ctx context.Context, stream *portaudio.Stream, inpu
 				continue
 			}
 			slog.Warn("portaudio capture: read failed", "err", err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-stop:
+				return
+			default:
+			}
+			d.markNeedsRefresh()
 			return
 		}
 		onFrame(frame.PCM16{
@@ -323,24 +339,25 @@ func (d *Driver) openCaptureLocked() error {
 	}
 	framesPerBuffer := d.framesPerBuffer()
 	input := make([]int16, framesPerBuffer*d.inputFormat.Channels)
-	stream, err := portaudio.OpenDefaultStream(
-		d.inputFormat.Channels,
-		0,
-		float64(d.inputFormat.SampleRate),
-		framesPerBuffer,
-		input,
-	)
+	dev, err := portaudio.DefaultInputDevice()
 	if err != nil {
 		return err
 	}
+	params := portaudio.LowLatencyParameters(dev, nil)
+	params.Input.Channels = d.inputFormat.Channels
+	params.Output.Device = nil
+	params.Output.Channels = 0
+	params.SampleRate = float64(d.inputFormat.SampleRate)
+	params.FramesPerBuffer = framesPerBuffer
+	stream, err := portaudio.OpenStream(params, input)
+	if err != nil {
+		return fmt.Errorf("open capture device %q: %w", dev.Name, err)
+	}
 	if err := stream.Start(); err != nil {
 		_ = stream.Close()
-		return err
+		return fmt.Errorf("start capture device %q: %w", dev.Name, err)
 	}
-	deviceName := ""
-	if dev, err := portaudio.DefaultInputDevice(); err == nil && dev != nil {
-		deviceName = dev.Name
-	}
+	deviceName := dev.Name
 
 	stop := make(chan struct{})
 	done := make(chan struct{})
@@ -367,24 +384,25 @@ func (d *Driver) openPlaybackLocked() error {
 	}
 	framesPerBuffer := d.outputFramesPerBuffer()
 	output := make([]int16, framesPerBuffer*d.outputFormat.Channels)
-	stream, err := portaudio.OpenDefaultStream(
-		0,
-		d.outputFormat.Channels,
-		float64(d.outputFormat.SampleRate),
-		framesPerBuffer,
-		output,
-	)
+	dev, err := portaudio.DefaultOutputDevice()
 	if err != nil {
 		return err
 	}
+	params := portaudio.LowLatencyParameters(nil, dev)
+	params.Input.Device = nil
+	params.Input.Channels = 0
+	params.Output.Channels = d.outputFormat.Channels
+	params.SampleRate = float64(d.outputFormat.SampleRate)
+	params.FramesPerBuffer = framesPerBuffer
+	stream, err := portaudio.OpenStream(params, output)
+	if err != nil {
+		return fmt.Errorf("open playback device %q: %w", dev.Name, err)
+	}
 	if err := stream.Start(); err != nil {
 		_ = stream.Close()
-		return err
+		return fmt.Errorf("start playback device %q: %w", dev.Name, err)
 	}
-	deviceName := ""
-	if dev, err := portaudio.DefaultOutputDevice(); err == nil && dev != nil {
-		deviceName = dev.Name
-	}
+	deviceName := dev.Name
 	d.playbackStream = stream
 	d.playbackBuffer = output
 	d.playbackDevName = deviceName
@@ -453,37 +471,45 @@ func (d *Driver) refreshDeviceListLocked(reason string) error {
 }
 
 func (d *Driver) openCaptureWithRetryLocked() error {
-	err := d.openCaptureLocked()
-	if err == nil {
-		return nil
+	var errs []error
+	for attempt := 0; attempt < deviceOpenAttempts; attempt++ {
+		if err := d.openCaptureLocked(); err != nil {
+			errs = append(errs, err)
+		} else {
+			return nil
+		}
+		if attempt == deviceOpenAttempts-1 {
+			break
+		}
+		d.mu.Unlock()
+		time.Sleep(deviceOpenRetry * time.Duration(attempt+1))
+		d.mu.Lock()
+		if !d.initialized || d.captureHandler == nil {
+			return errors.Join(errs...)
+		}
 	}
-	d.mu.Unlock()
-	time.Sleep(deviceOpenRetry)
-	d.mu.Lock()
-	if !d.initialized || d.captureHandler == nil {
-		return err
-	}
-	if retryErr := d.openCaptureLocked(); retryErr != nil {
-		return errors.Join(err, retryErr)
-	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (d *Driver) openPlaybackWithRetryLocked() error {
-	err := d.openPlaybackLocked()
-	if err == nil {
-		return nil
+	var errs []error
+	for attempt := 0; attempt < deviceOpenAttempts; attempt++ {
+		if err := d.openPlaybackLocked(); err != nil {
+			errs = append(errs, err)
+		} else {
+			return nil
+		}
+		if attempt == deviceOpenAttempts-1 {
+			break
+		}
+		d.mu.Unlock()
+		time.Sleep(deviceOpenRetry * time.Duration(attempt+1))
+		d.mu.Lock()
+		if !d.initialized || !d.playbackReady {
+			return errors.Join(errs...)
+		}
 	}
-	d.mu.Unlock()
-	time.Sleep(deviceOpenRetry)
-	d.mu.Lock()
-	if !d.initialized || !d.playbackReady {
-		return err
-	}
-	if retryErr := d.openPlaybackLocked(); retryErr != nil {
-		return errors.Join(err, retryErr)
-	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (d *Driver) detachCaptureLocked() (*portaudio.Stream, chan struct{}, chan struct{}) {
@@ -504,6 +530,12 @@ func (d *Driver) detachPlaybackLocked() *portaudio.Stream {
 	d.playbackBuffer = nil
 	d.playbackDevName = ""
 	return stream
+}
+
+func (d *Driver) markNeedsRefresh() {
+	d.mu.Lock()
+	d.needsRefresh = true
+	d.mu.Unlock()
 }
 
 func stopDetachedCapture(stream *portaudio.Stream, stop chan struct{}, done chan struct{}) error {
@@ -598,7 +630,8 @@ func (d *Driver) checkDeviceChange() {
 	playbackMissing := d.playbackReady && d.playbackStream == nil
 	captureChanged := d.captureHandler != nil && d.deviceName != "" && defaultInputChanged(d.deviceName)
 	playbackChanged := d.playbackReady && d.playbackDevName != "" && defaultOutputChanged(d.playbackDevName)
-	if !d.needsRefresh && !captureDied && !captureMissing && !playbackMissing && !captureChanged && !playbackChanged {
+	coreAudioChanged := coreAudioDeviceChanged()
+	if !d.needsRefresh && !captureDied && !captureMissing && !playbackMissing && !captureChanged && !playbackChanged && !coreAudioChanged {
 		return
 	}
 	slog.Info(
@@ -609,6 +642,7 @@ func (d *Driver) checkDeviceChange() {
 		"captureChanged", captureChanged,
 		"playbackMissing", playbackMissing,
 		"playbackChanged", playbackChanged,
+		"coreAudioChanged", coreAudioChanged,
 	)
 	_, _ = d.fallbackRefreshOpenLocked("device change")
 }

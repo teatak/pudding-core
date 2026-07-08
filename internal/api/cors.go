@@ -36,9 +36,6 @@ func isAllowedCORSOrigin(origin string) bool {
 		return false
 	}
 	host := strings.ToLower(u.Hostname())
-	if u.Scheme == "wails" {
-		return host == "localhost" || host == "127.0.0.1" || host == "::1"
-	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return false
 	}

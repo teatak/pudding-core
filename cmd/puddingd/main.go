@@ -1,5 +1,5 @@
-// puddingd 是 Pudding daemon 的 CLI 入口;启动逻辑在 internal/daemon,
-// 与桌面壳(cmd/pudding-desktop)同源。
+// puddingd 是 Pudding daemon 的 CLI 入口;Electron shell 通过同一个 daemon
+// 二进制提供业务协议。
 package main
 
 import (

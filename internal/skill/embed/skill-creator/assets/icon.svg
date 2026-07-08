@@ -1,14 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" preserveAspectRatio="xMidYMid meet">
-  <rect width="128" height="128" rx="20" fill="#7C3AED"/>
-  <g fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" transform="translate(20 20) scale(3.66667)">
-    <path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"/>
-    <path d="m14 7 3 3"/>
-    <path d="M5 6v4"/>
-    <path d="M19 14v4"/>
-    <path d="M10 2v2"/>
-    <path d="M7 8H3"/>
-    <path d="M21 16h-4"/>
-    <path d="M11 3H9"/>
+  <defs>
+    <linearGradient id="skillCreatorBackground" x1="24" x2="104" y1="16" y2="112" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4F46E5"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="26" fill="url(#skillCreatorBackground)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <path stroke-width="7.5" d="M33 35h21c7.5 0 12 4.5 12 12v46c-3.6-5-9-7.5-16-7.5H33z"/>
+    <path stroke-width="7.5" d="M66 47c0-7.5 4.5-12 12-12h17v50.5H82c-7 0-12.4 2.5-16 7.5z"/>
+    <path stroke-width="5.5" opacity=".82" d="M44 53h12M44 67h12M78 53h9"/>
+    <path stroke-width="7" d="m80 96 20-20 8 8-20 20-11 3z"/>
+    <path stroke-width="5" opacity=".8" d="m95 81 8 8"/>
   </g>
 </svg>
-

@@ -1,10 +1,15 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileX, RefreshCw } from "lucide-react";
-import { createElement, useCallback, useEffect, useRef, useState, type HTMLAttributes } from "react";
+import { FileX, MousePointer2, RefreshCw } from "lucide-react";
+import { createElement, useCallback, useEffect, useRef, useState, type CSSProperties, type HTMLAttributes } from "react";
 
 import { listBrowserTabs, type BrowserTab } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
-import { cacheElectronBrowserSnapshot, electronBrowserBridge, type ElectronWebviewCaptureResponse } from "@/browser/electronBridge";
+import {
+  cacheElectronBrowserSnapshot,
+  electronBrowserBridge,
+  type ElectronBrowserCursorEvent,
+  type ElectronWebviewCaptureResponse,
+} from "@/browser/electronBridge";
 import {
   browserQueryStaleTimeMS,
   browserTargetURL,
@@ -50,6 +55,14 @@ type WebviewProps = HTMLAttributes<HTMLElement> & {
   webpreferences: string;
 };
 
+type BrowserAutomationCursorState = {
+  effectVisible: boolean;
+  id: string;
+  action: ElectronBrowserCursorEvent["action"];
+  x: number;
+  y: number;
+};
+
 export function ElectronWebviewBrowser({
   activeTab: activeTabProp,
   sessionID,
@@ -71,8 +84,10 @@ export function ElectronWebviewBrowser({
   const navigationSeqRef = useRef(0);
   const failedNavigationSeqRef = useRef(0);
   const loadErrorRef = useRef<WebviewLoadError | null>(null);
+  const cursorEffectTimerRef = useRef<number | undefined>(undefined);
   const [loadError, setLoadError] = useState<WebviewLoadError | null>(null);
   const [navigationLoading, setNavigationLoading] = useState(false);
+  const [automationCursor, setAutomationCursor] = useState<BrowserAutomationCursorState | null>(null);
   const ownerSessionID = sessionID;
   const tabsQuery = useQuery({
     enabled: Boolean(token && ownerSessionID),
@@ -209,6 +224,47 @@ export function ElectronWebviewBrowser({
     loadWebviewURL(node, targetURL, lastRequestedURLRef, pendingProgrammaticURLRef);
   }, [targetURL]);
 
+  useEffect(() => {
+    const bridge = electronBrowserBridge();
+    if (!bridge?.onCursor || !ownerSessionID || !tabID) {
+      return;
+    }
+    return bridge.onCursor((event) => {
+      if (event.sessionID !== ownerSessionID || event.tabID !== tabID) {
+        return;
+      }
+      const x = Number(event.x);
+      const y = Number(event.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        return;
+      }
+      window.clearTimeout(cursorEffectTimerRef.current);
+      setAutomationCursor({
+        effectVisible: event.action !== "scroll",
+        id: `${event.createdAt || Date.now()}:${event.version || 0}:${event.action}`,
+        action: event.action,
+        x: Math.max(0, Math.round(x)),
+        y: Math.max(0, Math.round(y)),
+      });
+      if (event.action !== "scroll") {
+        cursorEffectTimerRef.current = window.setTimeout(() => {
+          setAutomationCursor((current) => (current ? { ...current, effectVisible: false } : current));
+        }, 800);
+      }
+    });
+  }, [ownerSessionID, tabID]);
+
+  useEffect(() => {
+    return () => {
+      window.clearTimeout(cursorEffectTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    window.clearTimeout(cursorEffectTimerRef.current);
+    setAutomationCursor(null);
+  }, [ownerSessionID, tabID]);
+
   const reloadAfterError = useCallback(() => {
     const node = webviewRef.current;
     const retryURL = loadError?.url || pendingTargetURLRef.current || targetURL || "about:blank";
@@ -316,6 +372,41 @@ export function ElectronWebviewBrowser({
       } satisfies WebviewProps)}
       {navigationLoading && !loadError ? <BrowserNavigationLoading label={t("browser.loadingPage")} /> : null}
       {loadError ? <BrowserLoadErrorPage error={loadError} onReload={reloadAfterError} /> : null}
+      {automationCursor ? <BrowserAutomationCursor cursor={automationCursor} /> : null}
+    </div>
+  );
+}
+
+function BrowserAutomationCursor({ cursor }: { cursor: BrowserAutomationCursorState }) {
+  const style = {
+    transform: `translate3d(${cursor.x}px, ${cursor.y}px, 0)`,
+  } satisfies CSSProperties;
+  const iconStyle = {
+    filter: "drop-shadow(0 2px 2px rgba(0,0,0,0.5))",
+  } satisfies CSSProperties;
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute top-0 left-0 z-20 transition-transform duration-200 ease-out will-change-transform"
+      style={style}
+    >
+      {cursor.effectVisible && cursor.action === "click" ? (
+        <span
+          key={cursor.id}
+          className="absolute top-0 left-0 h-8 w-8 -translate-x-1/2 -translate-y-1/2 animate-ping rounded-full border border-primary/70"
+        />
+      ) : null}
+      {cursor.effectVisible && cursor.action === "type" ? (
+        <span key={cursor.id} className="absolute top-0 left-1 h-5 w-0.5 animate-pulse rounded-full bg-primary/80" />
+      ) : null}
+      <MousePointer2
+        className="relative h-5 w-5 -translate-x-0.5 -translate-y-0.5 text-neutral-950"
+        fill="currentColor"
+        stroke="white"
+        strokeLinejoin="round"
+        strokeWidth={1.35}
+        style={iconStyle}
+      />
     </div>
   );
 }

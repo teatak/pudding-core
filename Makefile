@@ -2,7 +2,7 @@ MODULE := github.com/teatak/pudding-core
 LDFLAGS_RELEASE := -X $(MODULE)/internal/buildinfo.channel=release
 BUILDTAGS := sqlite_fts5 webrtcaec
 
-.PHONY: test tidy clean embed desktop desktop-dev electron-dev dev-cert daemon daemon-dev daemon-release package prompt
+.PHONY: test tidy clean embed desktop desktop-dev daemon daemon-dev daemon-release prompt
 
 # 共享:构建前端并装填进 daemon 的 embed 目录(产物不进 git)
 embed:
@@ -12,20 +12,14 @@ embed:
 	cp -R web/dist/ internal/webui/dist/
 	touch internal/webui/dist/.gitkeep
 
-# —— 桌面壳(内嵌 daemon + 原生窗口)——
-# 构建(dev 通道;含 embed web)
+# —— 桌面壳(Electron shell + daemon)——
+# 构建(dev 通道;含 embed web 和 daemon binary,打包链路后续补齐)
 desktop: embed
-	go build -tags "$(BUILDTAGS)" -o bin/pudding-desktop ./cmd/pudding-desktop
+	go build -tags "$(BUILDTAGS)" -o bin/puddingd ./cmd/puddingd
 
-# 热更循环:Wails AssetServer 托管 Vite(HMR),业务 API 直连 daemon;停旧实例后 detached 拉起
+# 热更循环:Electron shell + Vite(HMR) + daemon
 desktop-dev:
-	@BUILDTAGS="$(BUILDTAGS)" bash scripts/dev.sh desktop
-
-electron-dev:
-	@BUILDTAGS="$(BUILDTAGS)" bash scripts/electron-dev.sh
-
-dev-cert:
-	@bash scripts/create-dev-codesign-cert.sh
+	@BUILDTAGS="$(BUILDTAGS)" bash scripts/desktop-dev.sh
 
 # —— headless daemon(无窗口,浏览器访问)——
 # 构建(dev 通道;含 embed web)
@@ -42,10 +36,6 @@ prompt:
 # 发布构建(release 通道:端口 9669 / ~/.pudding;含 embed web)
 daemon-release: embed
 	go build -tags "$(BUILDTAGS)" -ldflags "$(LDFLAGS_RELEASE)" -o bin/puddingd ./cmd/puddingd
-
-# 打包桌面壳为 unsigned .app + .dmg(release 通道)。用法: make package VERSION=v0.1.0
-package:
-	@BUILDTAGS="$(BUILDTAGS)" bash scripts/package-macos.sh $(VERSION)
 
 test:
 	go test -tags "$(BUILDTAGS)" ./...

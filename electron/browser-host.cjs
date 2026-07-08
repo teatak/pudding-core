@@ -3,9 +3,10 @@ const { WebContentsView } = require("electron");
 const browserPartition = "persist:pudding-default";
 
 class BrowserHost {
-  constructor(onUpdate) {
+  constructor(onUpdate, onCursor) {
     this.slots = new Map();
     this.onUpdate = typeof onUpdate === "function" ? onUpdate : () => {};
+    this.onCursor = typeof onCursor === "function" ? onCursor : () => {};
     this.captureWebview = null;
   }
 
@@ -151,6 +152,7 @@ class BrowserHost {
       }
     }
     this.noteUpdated(slot);
+    this.noteCursor(slot, "click", result);
     return { tab: snapshot(slot), action: "click", result };
   }
 
@@ -161,6 +163,7 @@ class BrowserHost {
     }
     const result = await evaluateJSON(slot, typeScript(request));
     this.noteUpdated(slot);
+    this.noteCursor(slot, "type", result);
     return { tab: snapshot(slot), action: "type", result };
   }
 
@@ -171,6 +174,7 @@ class BrowserHost {
     }
     const result = await evaluateJSON(slot, scrollScript(request));
     this.noteUpdated(slot);
+    this.noteCursor(slot, "scroll", result);
     return { tab: snapshot(slot), action: "scroll", result };
   }
 
@@ -378,6 +382,22 @@ class BrowserHost {
   noteUpdated(slot) {
     slot.version += 1;
     this.onUpdate(snapshot(slot));
+  }
+
+  noteCursor(slot, action, result) {
+    const point = cursorPoint(result);
+    if (!point) {
+      return;
+    }
+    this.onCursor({
+      sessionID: slot.sessionID,
+      tabID: slot.tabID,
+      action,
+      x: point.x,
+      y: point.y,
+      version: slot.version,
+      createdAt: new Date().toISOString(),
+    });
   }
 
   restoreHeadlessSlot(previous) {
@@ -642,6 +662,23 @@ async function dispatchMouseClick(slot, x, y) {
     slot.webContents.sendInputEvent({ type: "mouseDown", ...point, button: "left", clickCount: 1 });
     slot.webContents.sendInputEvent({ type: "mouseUp", ...point, button: "left", clickCount: 1 });
   }
+}
+
+function cursorPoint(result) {
+  if (!result || typeof result !== "object") {
+    return null;
+  }
+  const rawX = result.cursorX ?? result.x;
+  const rawY = result.cursorY ?? result.y;
+  const x = Number(rawX);
+  const y = Number(rawY);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return null;
+  }
+  return {
+    x: Math.max(0, Math.round(x)),
+    y: Math.max(0, Math.round(y)),
+  };
 }
 
 function slotKey(request) {

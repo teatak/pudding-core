@@ -1,7 +1,8 @@
-# 托管浏览器实施计划
+# 托管浏览器实施计划 (Archived)
 
-> 状态:MVP 实现中。  
-> 范围:Pudding 通过托管浏览器执行网页观察与操作。  
+> 状态:历史 MVP 计划。
+> 当前实现已迁移为 Electron `<webview>` + BrowserHost bridge,不再走独立可见 Chrome/screencast MVP 路线。
+> 范围:Pudding 通过托管浏览器执行网页观察与操作。
 > 目标:先做可见托管浏览器 MVP,验证多 session 架构、用户信任感和工具链路。
 
 ## 1. 定义

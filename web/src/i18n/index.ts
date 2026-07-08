@@ -2385,7 +2385,6 @@ export function setLocale(locale: Locale) {
   current = locale;
   if (typeof window !== "undefined") {
     window.localStorage.setItem(STORAGE_KEY, locale);
-    syncDesktopLocalePreference(locale);
   }
   listeners.forEach((listener) => listener());
 }
@@ -2395,7 +2394,6 @@ export function startLocaleSync() {
     return;
   }
   localeSyncStarted = true;
-  syncDesktopLocalePreference(current);
 }
 
 export function translate(key: string, locale = current) {
@@ -2413,17 +2411,4 @@ export function useI18n() {
 
 function normalizeLocale(value: unknown): Locale | null {
   return value === "zh-CN" || value === "zh-TW" || value === "en" ? value : null;
-}
-
-function syncDesktopLocalePreference(locale: Locale) {
-  if (!isDesktopLocaleControlled()) {
-    return;
-  }
-  import("@wailsio/runtime")
-    .then(({ Events }) => Events.Emit("desktop:locale-set", locale))
-    .catch(() => {});
-}
-
-function isDesktopLocaleControlled() {
-  return typeof document !== "undefined" && Boolean(document.documentElement.dataset.shell);
 }

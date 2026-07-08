@@ -137,20 +137,20 @@ Pudding Core = local-first multi-session AI daemon + app core.
 
 历史选择:
 
-- Wails v3
+- 旧桌面壳(已从主线删除)
 
-迁移决策(2026-07-07):
+桌面决策(2026-07-07):
 
 - 桌面壳迁移到 Electron。
-- 原因:核心浏览器体验需要原生 Chromium `WebContentsView`,当前 Wails + CDP screencast 链路无法稳定解决清晰度、首帧、session 切换和 external/internal 授权回流问题。
+- 原因:核心浏览器体验需要 Electron Chromium `<webview>` / BrowserHost bridge,旧 CDP screencast 链路无法稳定解决清晰度、首帧、session 切换和 external/internal 授权回流问题。
 - Go daemon 继续作为业务核心,Electron 只负责桌面壳、原生窗口和浏览器运行态。
-- 迁移计划见 `docs/electron-migration-plan.md`。
+- 旧 desktop shell、runtime fallback、CORS 特判和构建入口已删除,主线只保留 Electron。
 
 边界:
 
 - Desktop shell 负责启动 daemon、承载 Web UI、提供系统集成。
 - daemon 核心业务协议仍然是 loopback HTTP/SSE/WebSocket。
-- desktop native/system capabilities 迁移期从 Wails bindings 逐步切到 Electron IPC。
+- desktop native/system capabilities 走 Electron IPC/preload bridge。
 - Desktop 不拥有 session runtime。
 - Desktop shell 只托管 Web UI 资源和开发态 Vite/HMR,不充当业务 API 网关。
 
@@ -181,7 +181,7 @@ Pudding Core = local-first multi-session AI daemon + app core.
 
 风险:
 
-- Wails v3 仍处 alpha,API 可能变动。第一阶段不做 desktop packaging,升级风险后置;引入时锁定版本,升级单独走 PR。
+- Electron packaging、签名、公证和自动更新需要单独补齐发布链路。
 
 ## 5. LLM Provider
 
@@ -406,8 +406,8 @@ turn.started → turn.delta* → turn.completed | turn.failed | turn.cancelled
 ## 9. 安全
 
 - daemon 只 bind loopback。
-- daemon 启动时生成 token,所有 HTTP/SSE/WS 请求必须带 token;Wails 壳启动 daemon 后通过启动 URL 注入 token 与 daemon API base,前端读取后从地址栏清掉。
-- 第一阶段 provider API key 存 SQLite 明文,数据库文件权限 0600;后续评估走 Wails bindings 接系统 keychain。
+- daemon 启动时生成 token,所有 HTTP/SSE/WS 请求必须带 token;Electron shell 启动 daemon 后通过启动 URL 注入 token 与 daemon API base,前端读取后从地址栏清掉。
+- 第一阶段 provider API key 存 SQLite 明文,数据库文件权限 0600;后续评估通过 Electron native bridge 接系统 keychain。
 
 ## 10. 数据目录与通道隔离
 

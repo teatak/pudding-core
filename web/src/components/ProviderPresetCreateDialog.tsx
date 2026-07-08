@@ -29,6 +29,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useI18n } from "@/i18n";
+import { openExternalURL } from "@/lib/desktopBridge";
 import { cn } from "@/lib/utils";
 import {
   defaultProviderPresetVariant,
@@ -165,9 +166,7 @@ export function ProviderPresetCreateDialog({
     if (!url) {
       return;
     }
-    void import("@wailsio/runtime").then(({ Browser }) => Browser.OpenURL(url)).catch(() => {
-      window.open(url, "_blank", "noopener,noreferrer");
-    });
+    void openExternalURL(url);
   };
 
   const mutation = useMutation({

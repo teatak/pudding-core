@@ -5,7 +5,6 @@ import type { Session } from "@/api/client";
 import { ChatColumn } from "@/components/ChatColumn";
 import { Composer, type DroppedFilesBatch } from "@/components/Composer";
 import { Transcript } from "@/components/Transcript";
-import { bindDesktopFileDrop, nativeFileDropLikelyAvailable } from "@/lib/desktopFileDrop";
 import { droppedLocalItemsFromDataTransfer } from "@/lib/localFolders";
 
 // 会话体:收口正文(Transcript)+ 输入框(Composer)+ 顶部遮罩,三者共用 ChatColumn
@@ -32,23 +31,6 @@ export function Conversation({ token, session }: { token: string; session: Sessi
       window.removeEventListener("blur", resetDragState);
     };
   }, [resetDragState]);
-
-  useEffect(
-    () =>
-      bindDesktopFileDrop({ kind: "conversation", sessionID: session.id }, (drop) => {
-        droppedFilesNonceRef.current += 1;
-        setDroppedFiles({
-          attachments: drop.attachments,
-          failedFiles: drop.failedFiles,
-          failedFileCount: drop.failedFileCount,
-          files: [],
-          folderPathUnavailable: false,
-          folderPaths: drop.directories,
-          nonce: droppedFilesNonceRef.current,
-        });
-      }),
-    [session.id],
-  );
 
   const handleDragEnter = useCallback((event: DragEvent<HTMLDivElement>) => {
     if (!dataTransferHasFiles(event.dataTransfer)) {
@@ -94,11 +76,6 @@ export function Conversation({ token, session }: { token: string; session: Sessi
       event.stopPropagation();
       resetDragState();
       const dropped = droppedLocalItemsFromDataTransfer(event.dataTransfer);
-      if (nativeFileDropLikelyAvailable()) {
-        dropped.files = [];
-        dropped.folderPaths = [];
-        dropped.folderPathUnavailable = false;
-      }
       if (dropped.files.length > 0 || dropped.folderPaths.length > 0 || dropped.folderPathUnavailable) {
         droppedFilesNonceRef.current += 1;
         setDroppedFiles({ ...dropped, nonce: droppedFilesNonceRef.current });

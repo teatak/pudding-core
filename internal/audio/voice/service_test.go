@@ -114,6 +114,33 @@ func TestBindInputStartsCaptureAndRoutesASR(t *testing.T) {
 	}
 }
 
+func TestBindInputRestartsUnhealthyCapture(t *testing.T) {
+	fakeASR := asr.NewFake(1)
+	drv := &captureDriver{format: frame.Format{SampleRate: 16000, Channels: 1}}
+	svc := NewService(ServiceConfig{
+		Submitter: submitterFunc(func(context.Context, engine.SubmitInput) (*engine.SubmitResult, error) { return nil, nil }),
+		Driver:    drv,
+		ASR:       fakeASR,
+	})
+	defer svc.Close()
+	if _, err := svc.BindInput("sess_input", true); err != nil {
+		t.Fatal(err)
+	}
+	if drv.startCount != 1 {
+		t.Fatalf("startCount = %d, want 1", drv.startCount)
+	}
+	drv.active = false
+	if _, err := svc.BindInput("sess_input", true); err != nil {
+		t.Fatal(err)
+	}
+	if drv.startCount != 2 {
+		t.Fatalf("startCount after unhealthy restart = %d, want 2", drv.startCount)
+	}
+	if got := svc.manager.Snapshot().InputOwner; got != "sess_input" {
+		t.Fatalf("input owner = %q, want sess_input", got)
+	}
+}
+
 func waitMessages(t *testing.T, ctx context.Context, ms *memstore.Memstore, sessionID string, want int) []*store.Message {
 	t.Helper()
 	deadline := time.After(2 * time.Second)
@@ -422,28 +449,35 @@ func (r *submitCancelRecorder) WaitCancel(ctx context.Context) (string, bool) {
 }
 
 type captureDriver struct {
-	format  frame.Format
-	started bool
-	handler driver.CaptureHandler
+	format     frame.Format
+	started    bool
+	active     bool
+	startCount int
+	handler    driver.CaptureHandler
 }
 
 func (d *captureDriver) Name() string               { return "capture-test" }
 func (d *captureDriver) Init(context.Context) error { return nil }
 func (d *captureDriver) Close() error {
 	d.started = false
+	d.active = false
 	return nil
 }
 func (d *captureDriver) InputFormat() frame.Format  { return d.format }
 func (d *captureDriver) OutputFormat() frame.Format { return d.format }
 func (d *captureDriver) StartCapture(_ context.Context, handler driver.CaptureHandler) error {
 	d.started = true
+	d.active = true
+	d.startCount++
 	d.handler = handler
 	return nil
 }
 func (d *captureDriver) StopCapture(context.Context) error {
 	d.started = false
+	d.active = false
 	return nil
 }
+func (d *captureDriver) CaptureActive() bool                              { return d.active }
 func (d *captureDriver) StartPlayback(context.Context) error              { return nil }
 func (d *captureDriver) WritePlayback(context.Context, frame.PCM16) error { return nil }
 func (d *captureDriver) StopPlayback(context.Context) error               { return nil }

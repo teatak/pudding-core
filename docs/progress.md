@@ -3,14 +3,14 @@
 > 单一现状文档:给接手的 agent / 上下文压缩后的自己看,避免重新推导。
 > 已完成只记结论(细节在 git 历史与 commit message);重点是**进行中**与
 > **待决项**。改动时同步更新本文,不积压。
-> 最近更新:2026-06-15。
+> 最近更新:2026-07-08。
 
 ## 现状一句话
 
 local-first 多 session AI daemon + 桌面壳,端到端可用:多会话文本对话
 (SQLite 持久化/恢复/幂等/cancel/SSE 续传)、四类真实 provider
 (openai-responses / openai-compatible / google / anthropic)+ mock,经 registry 按 profile
-路由、agent shell UI、单二进制(embed web + token 握手)、Wails 桌面壳、
+路由、agent shell UI、Electron 桌面壳 + Go daemon(token 握手)、
 LLM 自动标题。
 
 ## 已完成(只记结论)
@@ -32,15 +32,13 @@ LLM 自动标题。
   见 internal/engine/titler.go。
 - 事件协议:per-session seq、SSE tail 语义、Last-Event-ID 续传、events
   retention 1000/session。
-- daemon:internal/daemon 可嵌入启动包;单端口/通道(release 9669 / dev 9679),
-  CLI 与桌面壳共用端口;桌面壳启动时端口被占则退出,不 attach 旧实例。
+- daemon:internal/daemon 启动包;单端口/通道(release 9669 / dev 9679),
+  CLI 与 Electron shell 共用协议;桌面壳启动时端口被占则退出,不 attach 旧实例。
 
-**桌面壳(cmd/pudding-desktop)**
-- Wails v3 alpha;HiddenInset 标题栏 + 红绿灯 inset 让位 + 双击 zoom +
-  全屏检测已接入。
-- 桌面壳由 Wails 托管前端(runtime 可用),业务 API 直连内嵌 daemon
-  HTTP;fullscreen/titlebar 等 desktop 状态走 Wails events。
-- 已定规则:Wails AssetServer 只托管 UI 资源/Vite HMR,不反代业务 API。
+**桌面壳(Electron)**
+- Electron shell 负责窗口、preload IPC、主题/窗口状态、`<webview>` 浏览器承载。
+- 业务 API 直连 daemon HTTP/SSE/WS;desktop native/system capabilities 走 Electron IPC。
+- 已定规则:Electron 只托管 UI 资源/Vite HMR,不反代业务 API。
 
 **Web UI(design.md v2 切片 S1–S8 + E4)** —— 已实现并经 preview / 真实桌面
 窗口验证:
@@ -104,6 +102,6 @@ provider 的 text/thought/tool_use 解析测试。下一步 T2:messages.parts �
 - 决策定形:docs/technology-decisions.md。
 - 字段对照:docs/contracts-checklist.md(改契约必查)。
 - 设计底座:docs/design.md(新组件消费其 token)。
-- 踩坑记忆:`~/.claude/.../memory/`(wails 桥、provider 路由、pre-launch 等)。
+- 踩坑记忆:`~/.claude/.../memory/`(desktop bridge、provider 路由、pre-launch 等)。
 - **老项目 `pudding-core-old` 只读参考**(标题生成、桌面 chrome、compact 等
   有先例),不照搬 Runtime 结构,不修改它。
