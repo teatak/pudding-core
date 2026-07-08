@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CircleAlert, CircleCheck, CircleDashed, Download, Eye, EyeOff, KeyRound, Loader2, Package, Pencil, Plus, Settings2, Trash } from "lucide-react";
+import { ArrowLeft, ChevronRight, CircleAlert, CircleCheck, CircleDashed, Download, Eye, EyeOff, KeyRound, Loader2, Package, Pencil, Plus, Settings2, Trash } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -1469,18 +1469,22 @@ function MCPStatusDetails({
   }
   return (
     <div className="mt-1 grid gap-2 border-t border-border/60 pt-2">
-      {statuses.map((status) => (
-        <div key={`${endpointName}:${status.connectionID || "default"}`} className="grid gap-2">
-          <MCPStatusLine
-            icon={mcpStatusIcon(status.status)}
-            label={mcpStatusLabel(status.status, t)}
-            meta={status.connectionID || undefined}
-            tone={mcpStatusTone(status.status)}
-          />
-          {status.error ? <div className="break-words text-xs text-destructive/90">{status.error}</div> : null}
-          {status.status === "available" ? <MCPToolsList tools={status.tools || []} /> : null}
-        </div>
-      ))}
+      {statuses.map((status) => {
+        const icon = mcpStatusIcon(status.status);
+        const label = mcpStatusLabel(status.status, t);
+        const meta = status.connectionID || undefined;
+        const tone = mcpStatusTone(status.status);
+        return (
+          <div key={`${endpointName}:${status.connectionID || "default"}`} className="grid gap-2">
+            {status.status === "available" ? (
+              <MCPToolsList tools={status.tools || []} statusIcon={icon} statusLabel={label} statusMeta={meta} statusTone={tone} />
+            ) : (
+              <MCPStatusLine icon={icon} label={label} meta={meta} tone={tone} />
+            )}
+            {status.error ? <div className="break-words text-xs text-destructive/90">{status.error}</div> : null}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1512,14 +1516,38 @@ function MCPStatusLine({
   );
 }
 
-function MCPToolsList({ tools }: { tools: AppMCPTool[] }) {
+function MCPToolsList({
+  statusIcon,
+  statusLabel,
+  statusMeta,
+  statusTone,
+  tools,
+}: {
+  statusIcon: ReactNode;
+  statusLabel: string;
+  statusMeta?: string;
+  statusTone: "good" | "bad" | "muted";
+  tools: AppMCPTool[];
+}) {
   const { t } = useI18n();
+  const toolCount = t("apps.mcpToolsCount").replace("{count}", String(tools.length));
   return (
     <details className="group min-w-0">
-      <summary className="cursor-pointer select-none text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
-        {t("apps.mcpTools")} <span className="ml-1 text-muted-foreground/80">{tools.length}</span>
+      <summary
+        className={cn(
+          "flex cursor-pointer list-none items-center gap-1.5 text-xs transition-colors [&::-webkit-details-marker]:hidden",
+          statusTone === "good" && "text-emerald-500",
+          statusTone === "bad" && "text-destructive",
+          statusTone === "muted" && "text-muted-foreground",
+        )}
+      >
+        <span className="shrink-0">{statusIcon}</span>
+        <span className="font-medium">{statusLabel}</span>
+        {statusMeta ? <span className="truncate text-muted-foreground">· {statusMeta}</span> : null}
+        <span className="text-muted-foreground">({toolCount})</span>
+        <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
       </summary>
-      <div className="mt-2 grid max-h-72 min-w-0 gap-2 overflow-auto pr-1">
+      <div className="mt-2 grid max-h-72 min-w-0 gap-2 overflow-auto border-t border-border/50 pt-2 pr-1">
         {tools.length === 0 ? <div className="text-xs text-muted-foreground">{t("apps.mcpNoTools")}</div> : null}
         {tools.map((tool) => (
           <div key={tool.name} className="grid min-w-0 gap-1.5 border-t border-border/50 pt-2 first:border-t-0 first:pt-0">
