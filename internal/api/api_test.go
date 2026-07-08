@@ -1469,6 +1469,9 @@ func TestAttachmentUploadSubmitAndRead(t *testing.T) {
 	if _, err := part.Write([]byte("hello attachment")); err != nil {
 		t.Fatal(err)
 	}
+	if err := writer.WriteField("sourcePath", "/Users/me/Desktop/note.txt"); err != nil {
+		t.Fatal(err)
+	}
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -1488,7 +1491,7 @@ func TestAttachmentUploadSubmitAndRead(t *testing.T) {
 		t.Fatalf("upload status = %d body=%s", resp.StatusCode, string(data))
 	}
 	uploaded := decodeJSON[store.Attachment](t, resp)
-	if uploaded.Name != "note.txt" || uploaded.MIME != "text/plain" || uploaded.AttachmentKey == "" || uploaded.URL == "" {
+	if uploaded.Name != "note.txt" || uploaded.MIME != "text/plain" || uploaded.AttachmentKey == "" || uploaded.URL == "" || uploaded.SourcePath != "/Users/me/Desktop/note.txt" {
 		t.Fatalf("unexpected uploaded attachment: %+v", uploaded)
 	}
 
@@ -1558,6 +1561,18 @@ func TestAttachmentUploadSubmitAndRead(t *testing.T) {
 	attachments := store.AttachmentsFromParts(msg.Parts)
 	if len(attachments) != 1 || attachments[0].AttachmentKey != uploaded.AttachmentKey {
 		t.Fatalf("attachment part not persisted: %+v", msg.Parts)
+	}
+}
+
+func TestCleanAttachmentSourcePathAcceptsPlatformAndWindowsAbsolutePaths(t *testing.T) {
+	if got := cleanAttachmentSourcePath("/Users/me/Desktop/note.txt"); got != "/Users/me/Desktop/note.txt" {
+		t.Fatalf("unix path = %q", got)
+	}
+	if got := cleanAttachmentSourcePath(`C:\Users\me\Desktop\note.txt`); got == "" {
+		t.Fatal("windows absolute path should be accepted")
+	}
+	if got := cleanAttachmentSourcePath("relative/note.txt"); got != "" {
+		t.Fatalf("relative path should be ignored, got %q", got)
 	}
 }
 

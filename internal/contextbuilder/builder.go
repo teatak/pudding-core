@@ -261,11 +261,18 @@ func (b *Builder) providerParts(sessionID string, parts []store.ContentPart, mod
 			})
 		case store.ContentPartAttachment:
 			flushLocalFolders()
+			toolPath := b.attachmentToolPath(sessionID, part)
 			if imagePart, ok := b.imageProviderPart(sessionID, part, cfg); ok {
+				if text := attachmentProviderText(part, toolPath, "image"); text != "" {
+					out = append(out, provider.Part{Type: provider.PartText, Text: text})
+				}
 				out = append(out, imagePart)
 			} else if audioPart, ok := b.audioProviderPart(sessionID, part, cfg); ok {
+				if text := attachmentProviderText(part, toolPath, "audio"); text != "" {
+					out = append(out, provider.Part{Type: provider.PartText, Text: text})
+				}
 				out = append(out, audioPart)
-			} else if text := attachmentProviderText(part, b.attachmentToolPath(sessionID, part)); text != "" {
+			} else if text := attachmentProviderText(part, toolPath, ""); text != "" {
 				out = append(out, provider.Part{Type: provider.PartText, Text: text})
 			}
 		case store.ContentPartLocalFolder:
@@ -349,7 +356,7 @@ func audioAttachmentsAllowed(cfg provider.ModelConfig) bool {
 	return cfg.Capabilities != nil && cfg.Capabilities.Audio
 }
 
-func attachmentProviderText(part store.ContentPart, toolPath string) string {
+func attachmentProviderText(part store.ContentPart, toolPath, mediaKind string) string {
 	var b strings.Builder
 	b.WriteString("[Attachment]\n")
 	if part.Name != "" {
@@ -367,15 +374,35 @@ func attachmentProviderText(part store.ContentPart, toolPath string) string {
 		b.WriteString(strconv.FormatInt(part.Size, 10))
 		b.WriteByte('\n')
 	}
-	if toolPath != "" {
-		b.WriteString("Local path for tools: ")
-		b.WriteString(toolPath)
+	if part.AttachmentKey != "" {
+		b.WriteString("attachmentKey: ")
+		b.WriteString(part.AttachmentKey)
 		b.WriteByte('\n')
-		if part.Origin == attachment.OriginTemp {
-			b.WriteString("File tool scope: temp\n")
-			b.WriteString("File tool path: ")
-			b.WriteString(filepath.ToSlash(filepath.Join("attachments", filepath.Base(filepath.FromSlash(part.AttachmentKey)))))
-			b.WriteByte('\n')
+	}
+	if part.URL != "" {
+		b.WriteString("displayURL (UI only): ")
+		b.WriteString(part.URL)
+		b.WriteByte('\n')
+	}
+	if part.SourcePath != "" {
+		b.WriteString("Source path: ")
+		b.WriteString(part.SourcePath)
+		b.WriteByte('\n')
+	}
+	if toolPath != "" && part.Origin == attachment.OriginTemp {
+		b.WriteString("File tool scope: temp\n")
+		b.WriteString("File tool path: ")
+		b.WriteString(filepath.ToSlash(filepath.Join("attachments", filepath.Base(filepath.FromSlash(part.AttachmentKey)))))
+		b.WriteByte('\n')
+	}
+	switch mediaKind {
+	case "image":
+		b.WriteString("Image content: provided as an image part.\n")
+	case "audio":
+		b.WriteString("Audio content: provided as an audio part.\n")
+	default:
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(part.MIME)), "image/") {
+			b.WriteString("Image content: not provided because the current model does not support image inputs. Do not describe visual details from metadata alone.\n")
 		}
 	}
 	if part.AudioTranscript != "" {

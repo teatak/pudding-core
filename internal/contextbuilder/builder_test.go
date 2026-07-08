@@ -123,7 +123,7 @@ func TestBuildIncludesLocalFoldersTag(t *testing.T) {
 	}
 }
 
-func TestBuildIncludesAttachmentToolPathWhenAvailable(t *testing.T) {
+func TestBuildIncludesAttachmentKeyWhenAvailable(t *testing.T) {
 	ms := memstore.New()
 	ctx := context.Background()
 	home := t.TempDir()
@@ -149,8 +149,11 @@ func TestBuildIncludesAttachmentToolPathWhenAvailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(req.Messages) != 1 || !strings.Contains(req.Messages[0].Text, "Local path for tools: ") || !strings.Contains(req.Messages[0].Text, "demo.wav") {
-		t.Fatalf("attachment tool path missing from fallback: %+v", req.Messages)
+	if len(req.Messages) != 1 || !strings.Contains(req.Messages[0].Text, "attachmentKey: "+stored.AttachmentKey) || !strings.Contains(req.Messages[0].Text, "displayURL (UI only): "+stored.URL) {
+		t.Fatalf("attachment key metadata missing from fallback: %+v", req.Messages)
+	}
+	if strings.Contains(req.Messages[0].Text, "Local path for tools:") {
+		t.Fatalf("fallback should not expose managed absolute paths: %q", req.Messages[0].Text)
 	}
 }
 
@@ -182,6 +185,9 @@ func TestBuildIncludesTempAttachmentToolScope(t *testing.T) {
 	if len(req.Messages) != 1 || !strings.Contains(req.Messages[0].Text, "File tool scope: temp") || !strings.Contains(req.Messages[0].Text, "File tool path: attachments/") {
 		t.Fatalf("temp attachment tool scope missing from fallback: %+v", req.Messages)
 	}
+	if strings.Contains(req.Messages[0].Text, "Local path for tools:") {
+		t.Fatalf("temp attachment should not expose managed absolute paths: %q", req.Messages[0].Text)
+	}
 }
 
 func TestBuildInlinesImageAttachmentWhenSupported(t *testing.T) {
@@ -195,6 +201,7 @@ func TestBuildInlinesImageAttachmentWhenSupported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	stored = attachment.WithSourcePath(stored, "/Users/me/Desktop/image.png")
 	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
 		SessionID:       "s1",
 		TurnID:          "t1",
@@ -214,11 +221,14 @@ func TestBuildInlinesImageAttachmentWhenSupported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 2 || req.Messages[0].Parts[0].Type != provider.PartImage || req.Messages[0].Parts[1].Type != provider.PartText {
+	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 3 || req.Messages[0].Parts[0].Type != provider.PartText || req.Messages[0].Parts[1].Type != provider.PartImage || req.Messages[0].Parts[2].Type != provider.PartText {
 		t.Fatalf("image attachment was not inlined: %+v", req.Messages)
 	}
-	if string(req.Messages[0].Parts[0].Data) != "png bytes" {
-		t.Fatalf("unexpected image bytes: %q", string(req.Messages[0].Parts[0].Data))
+	if !strings.Contains(req.Messages[0].Parts[0].Text, "Source path: /Users/me/Desktop/image.png") || !strings.Contains(req.Messages[0].Parts[0].Text, "Image content: provided as an image part.") {
+		t.Fatalf("image manifest missing: %+v", req.Messages[0].Parts[0])
+	}
+	if string(req.Messages[0].Parts[1].Data) != "png bytes" {
+		t.Fatalf("unexpected image bytes: %q", string(req.Messages[0].Parts[1].Data))
 	}
 }
 
@@ -248,6 +258,9 @@ func TestBuildFallsBackWhenImageCapabilityUnknown(t *testing.T) {
 	}
 	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 1 || req.Messages[0].Parts[0].Type != provider.PartText {
 		t.Fatalf("unknown image capability should fallback to text summary: %+v", req.Messages)
+	}
+	if !strings.Contains(req.Messages[0].Text, "Image content: not provided") {
+		t.Fatalf("image fallback should warn that visual contents are unavailable: %+v", req.Messages)
 	}
 }
 
@@ -324,7 +337,7 @@ func TestBuildReplaysToolImageAttachmentAsUserMessage(t *testing.T) {
 	if len(req.Messages) != 3 {
 		t.Fatalf("tool image should be split into assistant tool result + user image: %+v", req.Messages)
 	}
-	if req.Messages[2].Role != provider.RoleUser || len(req.Messages[2].Parts) != 1 || req.Messages[2].Parts[0].Type != provider.PartImage {
+	if req.Messages[2].Role != provider.RoleUser || len(req.Messages[2].Parts) != 2 || req.Messages[2].Parts[0].Type != provider.PartText || req.Messages[2].Parts[1].Type != provider.PartImage {
 		t.Fatalf("tool image should replay as user image: %+v", req.Messages)
 	}
 }
@@ -359,11 +372,14 @@ func TestBuildInlinesAudioAttachmentWhenSupported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 2 || req.Messages[0].Parts[0].Type != provider.PartAudio || req.Messages[0].Parts[1].Type != provider.PartText {
+	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 3 || req.Messages[0].Parts[0].Type != provider.PartText || req.Messages[0].Parts[1].Type != provider.PartAudio || req.Messages[0].Parts[2].Type != provider.PartText {
 		t.Fatalf("audio attachment was not inlined: %+v", req.Messages)
 	}
-	if string(req.Messages[0].Parts[0].Data) != "wav bytes" {
-		t.Fatalf("unexpected audio bytes: %q", string(req.Messages[0].Parts[0].Data))
+	if !strings.Contains(req.Messages[0].Parts[0].Text, "Audio content: provided as an audio part.") {
+		t.Fatalf("audio manifest missing: %+v", req.Messages[0].Parts[0])
+	}
+	if string(req.Messages[0].Parts[1].Data) != "wav bytes" {
+		t.Fatalf("unexpected audio bytes: %q", string(req.Messages[0].Parts[1].Data))
 	}
 }
 

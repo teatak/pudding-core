@@ -449,7 +449,7 @@ func (r *BuiltinRunner) fileReadImageAttachment(out Result, call Call, scope str
 		"size":          stored.Size,
 		"attachmentKey": stored.AttachmentKey,
 		"url":           stored.URL,
-		"hint":          "image bytes were routed as an attachment for the model; use the returned path metadata for reference only.",
+		"hint":          "image was saved as an attachment; image bytes are visible only to models with image input support. If the current model lacks image support, use the metadata only and do not describe visual contents.",
 	}))
 	out.SummaryKind = SummaryReturnedFields
 	out.SummaryCount = 8

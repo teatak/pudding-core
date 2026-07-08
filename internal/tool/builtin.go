@@ -274,14 +274,14 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        FileRead,
-			Description: "Read one small UTF-8 text file, or route one supported image file as a model-visible attachment, from a Pudding-managed file area or an authorized workspace directory. For large text files use builtin_file_slice or builtin_file_search first.",
+			Description: "Read one small UTF-8 text file, or save one supported image file as an attachment from a Pudding-managed file area or an authorized workspace directory. Image bytes are visible only to models with image input support; otherwise the model sees attachment metadata only. For large text files use builtin_file_slice or builtin_file_search first.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","workspace"],"description":"Target file area. Use workspace for authorized local workspace directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized workspace directories."},"max_chars":{"type":"integer","description":"Optional max characters, default 20000 and cap 100000."}},"required":["scope","path"],"additionalProperties":false}`),
 			Capability:  store.ModeWorkspace,
 		},
 		{
 			Name:        AttachmentReadImage,
-			Description: "Read one captured/uploaded image attachment by attachmentKey or URL and route its image bytes to the model. Capture tools only create displayable images; use this only when you must inspect the image content.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"attachmentKey":{"type":"string","description":"Attachment key returned by a capture/upload tool."},"url":{"type":"string","description":"Attachment URL returned by a capture/upload tool. Used when attachmentKey is omitted."}},"additionalProperties":false}`),
+			Description: "Read one captured/uploaded image attachment by attachmentKey and route it as an image attachment. Image bytes are visible only to models with image input support; otherwise the model sees metadata only. Use only for existing Pudding attachments that are not already provided as image parts; do not pass local filesystem paths.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"attachmentKey":{"type":"string","description":"Attachment key returned by a capture/upload tool, for example sessions/{sessionID}/blobs/name.png. Prefer this field."},"url":{"type":"string","description":"Display URL fallback for older tool results. Prefer attachmentKey when available."}},"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{

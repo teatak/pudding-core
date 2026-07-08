@@ -1,5 +1,5 @@
 import { newClientID } from "@/lib/id";
-import { getDroppedFilePath, pickDirectories } from "@/lib/desktopBridge";
+import { getLocalFilePath, pickDirectories } from "@/lib/desktopBridge";
 
 export type LocalFolderPath = {
   id: string;
@@ -9,6 +9,7 @@ export type LocalFolderPath = {
 
 export type DroppedLocalItems = {
   files: File[];
+  fileSourcePaths: string[];
   folderPathUnavailable: boolean;
   folderPaths: string[];
 };
@@ -36,6 +37,7 @@ export async function pickLocalFolderPaths(t: (key: string) => string) {
 
 export function droppedLocalItemsFromDataTransfer(dataTransfer: DataTransfer): DroppedLocalItems {
   const files: File[] = [];
+  const fileSourcePaths: string[] = [];
   const folderPaths: string[] = [];
   let folderPathUnavailable = false;
   const uriPaths = parseFileURIList(dataTransfer.getData("text/uri-list"));
@@ -60,14 +62,19 @@ export function droppedLocalItemsFromDataTransfer(dataTransfer: DataTransfer): D
       const file = item.getAsFile();
       if (file) {
         files.push(file);
+        fileSourcePaths.push(getLocalFilePath(file));
       }
     }
   } else {
-    files.push(...Array.from(dataTransfer.files || []));
+    for (const file of Array.from(dataTransfer.files || [])) {
+      files.push(file);
+      fileSourcePaths.push(getLocalFilePath(file));
+    }
   }
 
   return {
     files,
+    fileSourcePaths,
     folderPathUnavailable,
     folderPaths: dedupeStrings(folderPaths),
   };
@@ -94,11 +101,11 @@ function directoryPathFromDroppedItem(
   uriPaths: string[],
   droppedFiles: File[],
 ) {
-  const filePath = nativePath((item.getAsFile?.() || null) as NativePathFile | null);
+  const filePath = nativePath(item.getAsFile?.() || null);
   if (filePath) {
     return filePath;
   }
-  const matchingDroppedFilePath = nativePath(droppedFiles.find((file) => file.name === entry.name) as NativePathFile | null);
+  const matchingDroppedFilePath = nativePath(droppedFiles.find((file) => file.name === entry.name) || null);
   if (matchingDroppedFilePath) {
     return matchingDroppedFilePath;
   }
@@ -106,12 +113,8 @@ function directoryPathFromDroppedItem(
   return matchingURIPath || "";
 }
 
-function nativePath(file: NativePathFile | null) {
-  const path = (file ? getDroppedFilePath(file) : "") || (typeof file?.path === "string" ? file.path.trim() : "");
-  if (/^\/[^/]/.test(path) || /^[A-Za-z]:[\\/]/.test(path)) {
-    return path;
-  }
-  return "";
+function nativePath(file: File | null) {
+  return getLocalFilePath(file);
 }
 
 function parseFileURIList(raw: string) {
@@ -135,8 +138,6 @@ function parseFileURIList(raw: string) {
 function dedupeStrings(values: string[]) {
   return Array.from(new Set(values));
 }
-
-type NativePathFile = File & { path?: string };
 
 type WebkitDataTransferItem = DataTransferItem & {
   webkitGetAsEntry?: () => WebkitFileSystemEntry | null;

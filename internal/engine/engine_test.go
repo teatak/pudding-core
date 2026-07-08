@@ -1008,6 +1008,9 @@ func TestSubmitDoesNotRouteFileReadImageWhenCapabilityUnknown(t *testing.T) {
 	if !strings.Contains(imageMsg.Text, "Source path:") {
 		t.Fatalf("fallback should expose source path metadata: %+v", imageMsg)
 	}
+	if !strings.Contains(imageMsg.Text, "Image content: not provided") {
+		t.Fatalf("fallback should warn that visual contents are unavailable: %+v", imageMsg)
+	}
 }
 
 func TestSubmitBlocksToolOutsideCurrentMode(t *testing.T) {

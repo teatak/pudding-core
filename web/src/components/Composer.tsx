@@ -78,7 +78,7 @@ import { useImeCompositionGuard } from "@/hooks/useImeCompositionGuard";
 import { useI18n } from "@/i18n";
 import { attachmentResourceURL } from "@/lib/attachmentURL";
 import { createPastedTextAttachmentFile, shouldAttachPastedText } from "@/lib/clipboardTextAttachment";
-import { pickDirectories } from "@/lib/desktopBridge";
+import { getLocalFilePath, pickDirectories } from "@/lib/desktopBridge";
 import { newClientID } from "@/lib/id";
 import {
   createLocalFolderPath,
@@ -384,13 +384,18 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     }
   }, [clearSessionDraft, ensureSessionDraft, form, sessionID]);
   const addFiles = useCallback(
-    (files: File[], options?: { origin?: "temp"; uploadSessionID?: string }) => {
-      const nextFiles = files.filter((file) => file.size > 0);
+    (files: File[], options?: { origin?: "temp"; sourcePaths?: string[]; uploadSessionID?: string }) => {
+      const nextFiles = files
+        .map((file, index) => ({
+          file,
+          sourcePath: (options?.sourcePaths?.[index] || getLocalFilePath(file)).trim(),
+        }))
+        .filter((item) => item.file.size > 0);
       if (nextFiles.length === 0) {
         return;
       }
       const uploadSessionID = options?.uploadSessionID || sessionID;
-      const items = nextFiles.map((file) => ({
+      const items = nextFiles.map(({ file }) => ({
         id: newClientID(),
         name: file.name,
         previewURL: file.type.toLowerCase().startsWith("image/") ? URL.createObjectURL(file) : undefined,
@@ -400,8 +405,12 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       setSessionDraftAttachments(sessionID, (current) => [...current, ...items]);
       setSessionDraftPartOrder(sessionID, (current) => [...current, ...items.map((item) => ({ type: "attachment" as const, id: item.id }))]);
       items.forEach((item, index) => {
-        const file = nextFiles[index];
-        void uploadAttachment(token, uploadSessionID, file, options?.origin ? { origin: options.origin } : undefined)
+        const { file, sourcePath } = nextFiles[index];
+        const uploadOptions = {
+          ...(options?.origin ? { origin: options.origin } : {}),
+          ...(sourcePath ? { sourcePath } : {}),
+        };
+        void uploadAttachment(token, uploadSessionID, file, uploadOptions)
           .then((attachment) => {
             setSessionDraftAttachments(sessionID, (current) =>
               current.map((currentItem) =>
@@ -843,7 +852,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     }
     lastDroppedFilesNonceRef.current = droppedFiles.nonce;
     if (droppedFiles.files.length > 0) {
-      addFiles(droppedFiles.files);
+      addFiles(droppedFiles.files, { sourcePaths: droppedFiles.fileSourcePaths });
     }
     if (droppedFiles.attachments && droppedFiles.attachments.length > 0) {
       addUploadedAttachments(droppedFiles.attachments);

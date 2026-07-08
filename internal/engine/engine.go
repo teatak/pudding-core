@@ -1647,20 +1647,18 @@ func providerPartsFromStore(parts []store.ContentPart) []provider.Part {
 
 func providerAttachmentPartsFromStore(sessionID string, parts []store.ContentPart, attachmentHome string, cfg provider.ModelConfig) []provider.Part {
 	out := make([]provider.Part, 0, len(parts))
-	mediaStarted := false
 	for _, part := range parts {
 		if part.Type != store.ContentPartAttachment {
 			continue
 		}
 		if imagePart, ok := providerImagePartFromAttachment(sessionID, attachmentHome, part, cfg); ok {
-			if !mediaStarted {
-				out = append(out, provider.Part{Type: provider.PartText, Text: "Image attachment returned by an explicit image read tool."})
-				mediaStarted = true
+			if text := providerAttachmentFallbackText(part, "image"); text != "" {
+				out = append(out, provider.Part{Type: provider.PartText, Text: text})
 			}
 			out = append(out, imagePart)
 			continue
 		}
-		if text := providerAttachmentFallbackText(part); text != "" {
+		if text := providerAttachmentFallbackText(part, ""); text != "" {
 			out = append(out, provider.Part{Type: provider.PartText, Text: text})
 		}
 	}
@@ -1696,7 +1694,7 @@ func attachmentSessionIDForPart(sessionID string, part store.ContentPart) string
 	return sessionID
 }
 
-func providerAttachmentFallbackText(part store.ContentPart) string {
+func providerAttachmentFallbackText(part store.ContentPart, mediaKind string) string {
 	var b strings.Builder
 	b.WriteString("[Attachment]\n")
 	if part.Name != "" {
@@ -1714,15 +1712,25 @@ func providerAttachmentFallbackText(part store.ContentPart) string {
 		b.WriteString(fmt.Sprintf("%d", part.Size))
 		b.WriteByte('\n')
 	}
+	if part.AttachmentKey != "" {
+		b.WriteString("attachmentKey: ")
+		b.WriteString(part.AttachmentKey)
+		b.WriteByte('\n')
+	}
+	if part.URL != "" {
+		b.WriteString("displayURL (UI only): ")
+		b.WriteString(part.URL)
+		b.WriteByte('\n')
+	}
 	if part.SourcePath != "" {
 		b.WriteString("Source path: ")
 		b.WriteString(part.SourcePath)
 		b.WriteByte('\n')
 	}
-	if part.URL != "" {
-		b.WriteString("URL: ")
-		b.WriteString(part.URL)
-		b.WriteByte('\n')
+	if mediaKind == "image" {
+		b.WriteString("Image content: provided as an image part.\n")
+	} else if strings.HasPrefix(strings.ToLower(strings.TrimSpace(part.MIME)), "image/") {
+		b.WriteString("Image content: not provided because the current model does not support image inputs. Do not describe visual details from metadata alone.\n")
 	}
 	return strings.TrimSpace(b.String())
 }

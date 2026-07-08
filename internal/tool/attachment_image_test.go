@@ -64,3 +64,22 @@ func TestBuiltinAttachmentReadImageRejectsOtherSessionURL(t *testing.T) {
 		t.Fatalf("unexpected payload: %+v", payload)
 	}
 }
+
+func TestBuiltinAttachmentReadImageRejectsFilesystemPath(t *testing.T) {
+	args, err := json.Marshal(map[string]string{"attachmentKey": "/Users/me/.pudding-dev/attachments/sessions/sess_img/blobs/photo.png"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := NewBuiltinRunner(WithHomeDir(t.TempDir())).Call(context.Background(), Call{
+		SessionID: "sess_img",
+		Name:      AttachmentReadImage,
+		Args:      args,
+	})
+	if res.Ok {
+		t.Fatalf("filesystem path should not be accepted as attachmentKey: %+v", res)
+	}
+	payload := decodeToolResult(t, res)
+	if payload["reason"] != "invalid_attachment_key" {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+}

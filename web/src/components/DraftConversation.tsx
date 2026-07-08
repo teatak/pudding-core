@@ -63,6 +63,7 @@ import { useSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
 import { attachmentResourceURL } from "@/lib/attachmentURL";
 import { createPastedTextAttachmentFile, shouldAttachPastedText } from "@/lib/clipboardTextAttachment";
+import { getLocalFilePath } from "@/lib/desktopBridge";
 import { newClientID } from "@/lib/id";
 import {
   createLocalFolderPath,
@@ -694,12 +695,17 @@ function DraftComposer({
   }, [attachments, setDraftAttachments, setDraftLocalFolders, setDraftPartOrder]);
 
   const addFiles = useCallback(
-    (files: File[], options?: { origin?: "temp" }) => {
-      const nextFiles = files.filter((file) => file.size > 0);
+    (files: File[], options?: { origin?: "temp"; sourcePaths?: string[] }) => {
+      const nextFiles = files
+        .map((file, index) => ({
+          file,
+          sourcePath: (options?.sourcePaths?.[index] || getLocalFilePath(file)).trim(),
+        }))
+        .filter((item) => item.file.size > 0);
       if (nextFiles.length === 0) {
         return;
       }
-      const items = nextFiles.map((file) => ({
+      const items = nextFiles.map(({ file }) => ({
         id: newClientID(),
         file,
         name: file.name,
@@ -711,8 +717,12 @@ function DraftComposer({
       setDraftPartOrder((current) => [...current, ...items.map((item) => ({ type: "attachment" as const, id: item.id }))]);
       onSubmitError(null);
       items.forEach((item, index) => {
-        const file = nextFiles[index];
-        void uploadAttachment(token, draftAttachmentSessionID, file, options?.origin ? { origin: options.origin } : undefined)
+        const { file, sourcePath } = nextFiles[index];
+        const uploadOptions = {
+          ...(options?.origin ? { origin: options.origin } : {}),
+          ...(sourcePath ? { sourcePath } : {}),
+        };
+        void uploadAttachment(token, draftAttachmentSessionID, file, uploadOptions)
           .then((attachment) => {
             setDraftAttachments((current) =>
               current.map((currentItem) =>
@@ -880,7 +890,7 @@ function DraftComposer({
     }
     lastDroppedFilesNonceRef.current = droppedFiles.nonce;
     if (droppedFiles.files.length > 0) {
-      addFiles(droppedFiles.files);
+      addFiles(droppedFiles.files, { sourcePaths: droppedFiles.fileSourcePaths });
     }
     if (droppedFiles.attachments && droppedFiles.attachments.length > 0) {
       addUploadedAttachments(droppedFiles.attachments);

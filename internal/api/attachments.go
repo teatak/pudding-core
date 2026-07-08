@@ -61,6 +61,7 @@ func (s *Server) uploadAttachment(c *cart.Context) error {
 	if origin == attachment.OriginTemp && sessionID != attachment.DraftSessionID {
 		return badRequest(c, "temp attachments must use draft session")
 	}
+	sourcePath := cleanAttachmentSourcePath(c.Request.FormValue("sourcePath"))
 	mimeType := header.Header.Get("Content-Type")
 	if cleaned, _, err := mime.ParseMediaType(mimeType); err == nil {
 		mimeType = cleaned
@@ -80,8 +81,26 @@ func (s *Server) uploadAttachment(c *cart.Context) error {
 	if origin == attachment.OriginTemp {
 		stored.Origin = attachment.OriginTemp
 	}
+	if sourcePath != "" {
+		stored.SourcePath = sourcePath
+	}
 	c.JSON(http.StatusOK, stored)
 	return nil
+}
+
+func cleanAttachmentSourcePath(raw string) string {
+	path := strings.TrimSpace(raw)
+	if path == "" || !isAbsAttachmentSourcePath(path) {
+		return ""
+	}
+	return filepath.Clean(path)
+}
+
+func isAbsAttachmentSourcePath(path string) bool {
+	if filepath.IsAbs(path) {
+		return true
+	}
+	return len(path) >= 3 && ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) && path[1] == ':' && (path[2] == '\\' || path[2] == '/')
 }
 
 func (s *Server) getAttachment(c *cart.Context) error {

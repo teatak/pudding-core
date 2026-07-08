@@ -36,6 +36,9 @@ func (r *BuiltinRunner) attachmentReadImage(call Call) Result {
 	if key == "" {
 		return toolJSONError(out, "attachment_required", "attachmentKey or url is required")
 	}
+	if filepath.IsAbs(key) {
+		return toolJSONError(out, "invalid_attachment_key", "attachmentKey must be the attachment key, not a local filesystem path")
+	}
 
 	service := attachment.NewService(r.homeDir)
 	path, ok, err := service.Path(sessionID, key)
@@ -84,7 +87,7 @@ func (r *BuiltinRunner) attachmentReadImage(call Call) Result {
 		"size":          item.Size,
 		"attachmentKey": item.AttachmentKey,
 		"url":           item.URL,
-		"hint":          "image bytes were routed to the model for inspection.",
+		"hint":          "image was routed as an attachment; image bytes are visible only to models with image input support. If the current model lacks image support, use the metadata only and do not describe visual contents.",
 	})
 	out.SummaryKind = SummaryReturnedFields
 	out.SummaryCount = 7

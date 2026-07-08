@@ -10,6 +10,8 @@ type ElectronDesktopBridge = {
   pickDirectories: (options?: DirectoryPickerOptions) => Promise<string[]>;
 };
 
+type NativePathFile = File & { path?: string };
+
 declare global {
   interface Window {
     puddingElectronDesktop?: ElectronDesktopBridge;
@@ -44,6 +46,15 @@ export function getDroppedFilePath(file: File) {
   } catch {
     return "";
   }
+}
+
+export function getLocalFilePath(file: File | null) {
+  const nativeFile = file as NativePathFile | null;
+  const path = (file ? getDroppedFilePath(file) : "") || (typeof nativeFile?.path === "string" ? nativeFile.path.trim() : "");
+  if (/^\/[^/]/.test(path) || /^[A-Za-z]:[\\/]/.test(path)) {
+    return path;
+  }
+  return "";
 }
 
 export async function pickDirectories(options?: DirectoryPickerOptions) {

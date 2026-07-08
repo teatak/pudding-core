@@ -609,11 +609,14 @@ export function submitMessage(
   });
 }
 
-export async function uploadAttachment(token: string, sessionID: string, file: File, options?: { origin?: "temp" }): Promise<Attachment> {
+export async function uploadAttachment(token: string, sessionID: string, file: File, options?: { origin?: "temp"; sourcePath?: string }): Promise<Attachment> {
   const form = new FormData();
   form.append("file", file);
   if (options?.origin) {
     form.append("origin", options.origin);
+  }
+  if (options?.sourcePath) {
+    form.append("sourcePath", options.sourcePath);
   }
   const response = await fetch(apiURL(`/sessions/${encodeURIComponent(sessionID)}/attachments`), {
     method: "POST",
