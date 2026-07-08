@@ -153,17 +153,6 @@ func TestElectronBridgeServiceMapsMissingTab(t *testing.T) {
 	}
 }
 
-func TestElectronBridgeServiceRevealUnavailable(t *testing.T) {
-	service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: "http://127.0.0.1:1", Token: "token"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = service.Reveal(context.Background(), "sess_a", "tab_a")
-	if !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("expected ErrUnavailable, got %v", err)
-	}
-}
-
 func TestElectronBridgeServiceToolEndpoints(t *testing.T) {
 	const token = "bridge-token"
 	tab := electronBridgeSnapshot{

@@ -63,14 +63,16 @@ func (s *Server) getBrowserState(c *cart.Context) error {
 		return nil
 	}
 	processMode := s.browserProcessMode(c.Request.Context(), sessionID)
-	if s.browserSessionClosed(sessionID) {
-		c.JSON(http.StatusOK, browserStateResp{HasState: false, SessionID: sessionID, Mode: processMode, ProcessMode: processMode})
-		return nil
-	}
+	closed := s.browserSessionClosed(sessionID)
 	if s.browser != nil {
 		tabs, err := s.browser.ListTabs(c.Request.Context(), sessionID)
 		if err != nil {
 			return s.browserError(c, err)
+		}
+		if closed {
+			if _, err := s.allowStoredLiveBrowserTab(c.Request.Context(), sessionID, tabs); err != nil {
+				return s.fail(c, err)
+			}
 		}
 		tabs = s.filterBrowserTabs(sessionID, tabs)
 		if tab, ok, err := latestBrowserTab(tabs); err != nil {
@@ -89,6 +91,10 @@ func (s *Server) getBrowserState(c *cart.Context) error {
 			c.JSON(http.StatusOK, browserStateResponseFromTab(tab))
 			return nil
 		}
+	}
+	if closed {
+		c.JSON(http.StatusOK, browserStateResp{HasState: false, SessionID: sessionID, Mode: processMode, ProcessMode: processMode})
+		return nil
 	}
 	state, err := s.store.GetBrowserState(c.Request.Context(), sessionID)
 	if errors.Is(err, store.ErrNotFound) {
@@ -194,13 +200,14 @@ func (s *Server) listBrowserTabs(c *cart.Context) error {
 	if !ok {
 		return nil
 	}
-	if s.browserSessionClosed(sessionID) {
-		c.JSON(http.StatusOK, browserTabsResp{Tabs: []browser.TabSnapshot{}, ProcessMode: s.browserProcessMode(c.Request.Context(), sessionID)})
-		return nil
-	}
 	tabs, err := s.browser.ListTabs(c.Request.Context(), sessionID)
 	if err != nil {
 		return s.browserError(c, err)
+	}
+	if s.browserSessionClosed(sessionID) {
+		if _, err := s.allowStoredLiveBrowserTab(c.Request.Context(), sessionID, tabs); err != nil {
+			return s.fail(c, err)
+		}
 	}
 	tabs = s.filterBrowserTabs(sessionID, tabs)
 	c.JSON(http.StatusOK, browserTabsResp{Tabs: tabs, ProcessMode: s.browserProcessMode(c.Request.Context(), sessionID)})
@@ -534,66 +541,21 @@ func (s *Server) filterBrowserTabs(sessionID string, tabs []browser.TabSnapshot)
 	return out
 }
 
-func (s *Server) revealBrowserTab(c *cart.Context) error {
-	sessionID, ok := s.browserSession(c)
-	if !ok {
-		return nil
+func (s *Server) allowStoredLiveBrowserTab(ctx context.Context, sessionID string, tabs []browser.TabSnapshot) (bool, error) {
+	state, err := s.store.GetBrowserState(ctx, sessionID)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
 	}
-	tabID, _ := c.Param("tabID")
-	if !s.browserTabAllowed(sessionID, tabID) {
-		return s.browserError(c, browser.ErrTabNotFound)
-	}
-	tab, err := s.browser.Reveal(c.Request.Context(), sessionID, tabID)
 	if err != nil {
-		if !errors.Is(err, browser.ErrTabNotFound) {
-			return s.browserError(c, err)
-		}
-		if ok, recoverErr := s.recoverStoredBrowserTab(c.Request.Context(), sessionID, tabID); recoverErr != nil {
-			return s.browserError(c, recoverErr)
-		} else if !ok {
-			return s.browserError(c, err)
-		}
-		tab, err = s.browser.Reveal(c.Request.Context(), sessionID, tabID)
-		if err != nil {
-			return s.browserError(c, err)
+		return false, err
+	}
+	for _, tab := range tabs {
+		if strings.TrimSpace(tab.SessionID) == strings.TrimSpace(sessionID) && strings.TrimSpace(tab.ID) == strings.TrimSpace(state.TabID) {
+			s.replaceAllowedBrowserTabs(sessionID, []browser.TabSnapshot{tab})
+			return true, nil
 		}
 	}
-	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
-		return browserStoreError(c, s, err)
-	}
-	c.JSON(http.StatusOK, tab)
-	return nil
-}
-
-func (s *Server) internalBrowserTab(c *cart.Context) error {
-	sessionID, ok := s.browserSession(c)
-	if !ok {
-		return nil
-	}
-	tabID, _ := c.Param("tabID")
-	if !s.browserTabAllowed(sessionID, tabID) {
-		return s.browserError(c, browser.ErrTabNotFound)
-	}
-	tab, err := s.browser.Internal(c.Request.Context(), sessionID, tabID)
-	if err != nil {
-		if !errors.Is(err, browser.ErrTabNotFound) {
-			return s.browserError(c, err)
-		}
-		if ok, recoverErr := s.recoverStoredBrowserTab(c.Request.Context(), sessionID, tabID); recoverErr != nil {
-			return s.browserError(c, recoverErr)
-		} else if !ok {
-			return s.browserError(c, err)
-		}
-		tab, err = s.browser.Internal(c.Request.Context(), sessionID, tabID)
-		if err != nil {
-			return s.browserError(c, err)
-		}
-	}
-	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
-		return browserStoreError(c, s, err)
-	}
-	c.JSON(http.StatusOK, tab)
-	return nil
+	return false, nil
 }
 
 func (s *Server) backBrowserTab(c *cart.Context) error {

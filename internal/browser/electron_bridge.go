@@ -242,14 +242,6 @@ func (s *ElectronBridgeService) Open(ctx context.Context, sessionID, tabID, rawU
 	return snapshot.tab(), nil
 }
 
-func (s *ElectronBridgeService) Reveal(context.Context, string, string) (TabSnapshot, error) {
-	return TabSnapshot{}, ErrUnavailable
-}
-
-func (s *ElectronBridgeService) Internal(ctx context.Context, sessionID, tabID string) (TabSnapshot, error) {
-	return s.GetTab(ctx, sessionID, tabID)
-}
-
 func (s *ElectronBridgeService) Back(ctx context.Context, sessionID, tabID string) (TabSnapshot, error) {
 	return s.navigation(ctx, "/browser/tabs/back", sessionID, tabID)
 }

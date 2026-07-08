@@ -403,18 +403,6 @@ export function syncBrowserTab(
   });
 }
 
-export function revealBrowserTab(token: string, sessionID: string, tabID: string): Promise<BrowserTab> {
-  return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/reveal`, browserTab, {
-    method: "POST",
-  });
-}
-
-export function internalBrowserTab(token: string, sessionID: string, tabID: string): Promise<BrowserTab> {
-  return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/internal`, browserTab, {
-    method: "POST",
-  });
-}
-
 export function backBrowserTab(token: string, sessionID: string, tabID: string): Promise<BrowserTab> {
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs/${encodeURIComponent(tabID)}/back`, browserTab, {
     method: "POST",

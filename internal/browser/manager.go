@@ -52,8 +52,6 @@ type Service interface {
 	ReleaseTab(ctx context.Context, sessionID, tabID string) error
 	ReleaseSession(ctx context.Context, sessionID string) error
 	Open(ctx context.Context, sessionID, tabID, rawURL string) (TabSnapshot, error)
-	Reveal(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
-	Internal(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
 	Back(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
 	Forward(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
 	Reload(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)

@@ -178,7 +178,7 @@ model tool call
 已删除:
 
 - `/sessions/{id}/browser/tabs/{tabID}/screencast`
-- `BrowserStream.tsx` 里的旧 screencast fallback
+- `BrowserStream.tsx` 旧薄壳和其中的 screencast fallback
 - `Page.startScreencast` / `Page.stopScreencast`
 - 首帧超时重连逻辑
 - WebSocket image frame 协议
@@ -230,7 +230,7 @@ model tool call
 - 使用 renderer `<webview>` 打开一个 URL。
 - 使用持久 partition:`persist:pudding-default`。
 - renderer 在 webview ready/navigation/title/favicon 事件后向 main 注册 `webContentsID`。
-- 当前落点:Electron preload 暴露 webview 注册和 browser IPC;前端 `BrowserStream` 已收敛为 `<webview>` surface 薄壳,不再保留 screencast fallback。
+- 当前落点:Electron preload 暴露 webview 注册和 browser IPC;前端 Canvas 直接渲染 `ElectronWebviewBrowser`,不再保留 `BrowserStream` 或 screencast fallback。
 - 暂未迁移:Go browser bridge、LLM CDP 工具仍走旧 API。
 
 验收:
@@ -292,7 +292,8 @@ model tool call
 - external 打开改为 Electron app-owned window。
 - 同一个 `webContents` 在 internal/external 之间移动。
 - 多 session external 支持多个窗口。
-- P6 完成前,Electron 路径禁用旧外部打开:Toolbar 隐藏按钮,Go `ElectronBridgeService.Reveal` 返回 unavailable。
+- P6 完成前,Electron 路径禁用旧外部打开:Toolbar 隐藏按钮,Go 后端不再暴露 reveal/internal route。
+- 当前落点:前端已删除外部打开/回内部入口和对应 client helper;后端 API surface 已移除 reveal/internal。Chrome manager 里未暴露的 internal/external fallback 代码留到最终 native 清理阶段删除。
 
 验收:
 
@@ -320,10 +321,10 @@ Wails legacy 清理范围:
 旧 Electron native browser surface 清理状态:
 
 - 已删除 `web/src/browser/electronNative.tsx` 旧 `WebContentsView` attach/bounds 组件。
-- 已删除 `BrowserStream.tsx` 的 `ElectronNativeBrowser` 分支和前端 screencast fallback;Electron 下只走 `<webview>` surface。
+- 已删除 `BrowserStream.tsx`;Canvas 直接渲染 `ElectronWebviewBrowser`,Electron 下只走 `<webview>` surface。
 - 已删除 `electronBridge.ts` 的 `attach`、`updateBounds`、`detach`、`hasElectronNativeBrowser`、`ElectronBrowserBounds` 等 native surface API。
 - 已删除 `electron/main.cjs` / `preload.cjs` 的 native attach/bounds/detach IPC 和 embed mode fallback;`webviewTag` 固定开启。
-- 已删除 `CanvasPane` -> `BrowserStream` 的 `nativeSuspended` 无效传参。
+- 已删除 `CanvasPane` -> `BrowserStream` 的 `nativeSuspended` 无效传参和 no-op cursor 清理。
 - 保留 `electron/browser-host.cjs` 内部的 `WebContentsView`,但仅作为 UI webview 尚未注册时的 invisible headless tool target,不再 attach 到主窗口。
 
 清理原则:

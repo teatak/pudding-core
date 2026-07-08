@@ -1,11 +1,29 @@
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
-import { getTurn, listPendingApprovals, type AudioBindings, type PendingApproval, type Session } from "@/api/client";
+import {
+  getBrowserState,
+  getTurn,
+  listBrowserTabs,
+  listPendingApprovals,
+  type AudioBindings,
+  type BrowserTab,
+  type PendingApproval,
+  type Session,
+} from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import {
+  allowElectronBrowserTab,
+  clearElectronBrowserSessionGate,
+  electronBrowserSessionHasGate,
+  markElectronBrowserSessionClosed,
+} from "@/browser/electronBridge";
+import { browserTabFaviconURL, browserTabTitle, upsertBrowserTab } from "@/browser/helpers";
+import type { BrowserTabsData } from "@/browser/types";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { sessionEvent, type SessionEvent } from "@/contracts/events";
 import { apiURL } from "@/state/apiBase";
+import { requestBrowserReveal } from "@/state/browserRevealStore";
 import { useOverlayStore } from "@/state/overlayStore";
 
 export function useSessionEvents(sessionID: string | undefined, token: string) {
@@ -84,6 +102,7 @@ function openSessionEventSource({
     }
     applyEvent(parsed.data);
     syncAudioBindingsFromEvent(queryClient, parsed.data);
+    syncBrowserStateFromEvent(queryClient, parsed.data, syncMessages, token);
     syncSessionListFromEvent(queryClient, parsed.data);
     if (parsed.data.kind === "turn.started" || isTurnTerminalEvent(parsed.data)) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessionUsage(sessionID) });
@@ -116,6 +135,190 @@ function openSessionEventSource({
       source.close();
     },
   };
+}
+
+function syncBrowserStateFromEvent(
+  queryClient: QueryClient,
+  event: SessionEvent,
+  revealVisibleSession: boolean,
+  token: string,
+) {
+  if (event.kind !== "turn.tool" || (event.phase !== "ok" && event.phase !== "error")) {
+    return;
+  }
+  if (!event.name?.startsWith("builtin_browser_")) {
+    return;
+  }
+  const syncedFromToolResult = syncBrowserToolResult(queryClient, event);
+  void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(event.sessionID) });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(event.sessionID) });
+  const shouldReveal = revealVisibleSession && shouldRevealBrowserTool(event);
+  if (shouldReveal && syncedFromToolResult) {
+    requestBrowserReveal(event.sessionID);
+  }
+  void hydrateBrowserState(queryClient, token, event.sessionID).then((hasBrowser) => {
+    if (shouldReveal && hasBrowser) {
+      requestBrowserReveal(event.sessionID);
+    }
+  });
+}
+
+function syncBrowserToolResult(queryClient: QueryClient, event: Extract<SessionEvent, { kind: "turn.tool" }>) {
+  if (event.name === "builtin_browser_close" && event.phase === "ok") {
+    markElectronBrowserSessionClosed(event.sessionID);
+    queryClient.setQueryData(queryKeys.browserTabs(event.sessionID), { tabs: [], processMode: "headless" });
+    queryClient.setQueryData(queryKeys.browserState(event.sessionID), { hasState: false, sessionID: event.sessionID, processMode: "headless" });
+    return false;
+  }
+  const tab = browserTabFromToolContent(event.content, event.sessionID);
+  if (!tab) {
+    return false;
+  }
+  if (electronBrowserSessionHasGate(event.sessionID)) {
+    return false;
+  }
+  clearElectronBrowserSessionGate(event.sessionID);
+  allowElectronBrowserTab(event.sessionID, tab.id);
+  queryClient.setQueryData(queryKeys.browserTabs(event.sessionID), (current: BrowserTabsData | undefined) => ({
+    tabs: upsertBrowserTab(current?.tabs || [], tab),
+    processMode: tab.mode || current?.processMode || "headless",
+  }));
+  const title = browserTabTitle(tab, tab.title || tab.url || "about:blank", "about:blank");
+  queryClient.setQueryData(queryKeys.browserState(event.sessionID), {
+    hasState: true,
+    sessionID: event.sessionID,
+    tabID: tab.id,
+    url: tab.url,
+    title,
+    faviconURL: browserTabFaviconURL(tab),
+    mode: tab.mode || "headless",
+    processMode: tab.mode || "headless",
+    createdAt: tab.createdAt,
+    updatedAt: tab.updatedAt,
+  });
+  return true;
+}
+
+function browserTabFromToolContent(content: string | undefined, expectedSessionID: string): BrowserTab | null {
+  if (!content) {
+    return null;
+  }
+  try {
+    const payload = JSON.parse(content);
+    return firstBrowserTab(payload, expectedSessionID);
+  } catch {
+    return null;
+  }
+}
+
+function firstBrowserTab(value: unknown, expectedSessionID: string): BrowserTab | null {
+  const direct = normalizeBrowserTab(value, expectedSessionID);
+  if (direct) {
+    return direct;
+  }
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  for (const key of ["tab", "action", "observation"]) {
+    const tab = firstBrowserTab(record[key], expectedSessionID);
+    if (tab) {
+      return tab;
+    }
+  }
+  if (Array.isArray(record.tabs)) {
+    for (const item of record.tabs) {
+      const tab = firstBrowserTab(item, expectedSessionID);
+      if (tab) {
+        return tab;
+      }
+    }
+  }
+  return null;
+}
+
+function normalizeBrowserTab(value: unknown, expectedSessionID: string): BrowserTab | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const id = stringField(record.id);
+  const sessionID = stringField(record.sessionID) || expectedSessionID;
+  const url = stringField(record.url);
+  if (!id || sessionID !== expectedSessionID || !url) {
+    return null;
+  }
+  const now = new Date().toISOString();
+  return {
+    id,
+    sessionID,
+    targetID: stringField(record.targetID) || undefined,
+    url,
+    title: stringField(record.title),
+    faviconURL: stringField(record.faviconURL) || undefined,
+    mode: record.mode === "external" ? "external" : "headless",
+    canGoBack: booleanField(record.canGoBack),
+    canGoForward: booleanField(record.canGoForward),
+    createdAt: stringField(record.createdAt) || now,
+    updatedAt: stringField(record.updatedAt) || now,
+  };
+}
+
+function stringField(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function booleanField(value: unknown) {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+async function hydrateBrowserState(queryClient: QueryClient, token: string, sessionID: string) {
+  try {
+    const [state, tabs] = await Promise.all([
+      queryClient.fetchQuery({
+        queryKey: queryKeys.browserState(sessionID),
+        queryFn: () => getBrowserState(token, sessionID),
+        staleTime: 0,
+      }),
+      queryClient.fetchQuery({
+        queryKey: queryKeys.browserTabs(sessionID),
+        queryFn: () => listBrowserTabs(token, sessionID),
+        staleTime: 0,
+      }),
+    ]);
+    const liveTab = tabs.tabs.find((tab) => tab.sessionID === sessionID);
+    if (liveTab?.id) {
+      allowElectronBrowserTab(sessionID, liveTab.id);
+    } else if (state.hasState && state.tabID) {
+      allowElectronBrowserTab(sessionID, state.tabID);
+    }
+    return Boolean(state.hasState || liveTab);
+  } catch (error) {
+    console.warn("failed to hydrate browser state from tool event", error);
+    return false;
+  }
+}
+
+function shouldRevealBrowserTool(event: Extract<SessionEvent, { kind: "turn.tool" }>) {
+  if (event.name === "builtin_browser_close") {
+    return false;
+  }
+  if (event.name === "builtin_browser_status") {
+    return browserStatusHasTab(event.content);
+  }
+  return true;
+}
+
+function browserStatusHasTab(content: string | undefined) {
+  if (!content) {
+    return false;
+  }
+  try {
+    const payload = JSON.parse(content) as { has_tab?: unknown; tab?: unknown };
+    return payload.has_tab === true || Boolean(payload.tab);
+  } catch {
+    return false;
+  }
 }
 
 function hydratePendingApprovals(

@@ -55,6 +55,9 @@ func (s *Server) createCanvasItem(c *cart.Context) error {
 	if strings.TrimSpace(req.ID) == "" {
 		req.ID = store.NewID("canvas")
 	}
+	if s.browserCanvasItemWriteBlocked(sessionID, req) {
+		return staleBrowserCanvasItem(c)
+	}
 	item, err := s.store.PutCanvasItem(c.Request.Context(), store.CanvasItemInput{
 		ID:              req.ID,
 		ActorSessionID:  sessionID,
@@ -66,6 +69,10 @@ func (s *Server) createCanvasItem(c *cart.Context) error {
 	})
 	if err != nil {
 		return canvasStoreError(c, s, err)
+	}
+	if s.browserCanvasItemWriteBlocked(sessionID, req) {
+		_ = s.store.DeleteCanvasItem(c.Request.Context(), sessionID, req.ID)
+		return staleBrowserCanvasItem(c)
 	}
 	c.JSON(http.StatusCreated, item)
 	return nil
@@ -84,6 +91,9 @@ func (s *Server) putCanvasItem(c *cart.Context) error {
 	if strings.TrimSpace(req.ID) != itemID {
 		return badRequest(c, "item id mismatch")
 	}
+	if s.browserCanvasItemWriteBlocked(sessionID, req) {
+		return staleBrowserCanvasItem(c)
+	}
 	item, err := s.store.PutCanvasItem(c.Request.Context(), store.CanvasItemInput{
 		ID:              req.ID,
 		ActorSessionID:  sessionID,
@@ -96,7 +106,45 @@ func (s *Server) putCanvasItem(c *cart.Context) error {
 	if err != nil {
 		return canvasStoreError(c, s, err)
 	}
+	if s.browserCanvasItemWriteBlocked(sessionID, req) {
+		_ = s.store.DeleteCanvasItem(c.Request.Context(), sessionID, req.ID)
+		return staleBrowserCanvasItem(c)
+	}
 	c.JSON(http.StatusOK, item)
+	return nil
+}
+
+func (s *Server) browserCanvasItemWriteBlocked(actorSessionID string, req canvasItemRequest) bool {
+	isBrowser, ownerSessionID, tabID := browserCanvasRequestTarget(actorSessionID, req)
+	return isBrowser && !s.browserTabAllowed(ownerSessionID, tabID)
+}
+
+func browserCanvasRequestTarget(actorSessionID string, req canvasItemRequest) (bool, string, string) {
+	var payload struct {
+		Kind      string `json:"kind"`
+		SessionID string `json:"sessionID"`
+		TabID     string `json:"tabID"`
+	}
+	_ = json.Unmarshal(req.Item, &payload)
+	kind := strings.TrimSpace(req.Kind)
+	if kind == "" {
+		kind = strings.TrimSpace(payload.Kind)
+	}
+	if kind != "browser" {
+		return false, "", ""
+	}
+	ownerSessionID := strings.TrimSpace(payload.SessionID)
+	if ownerSessionID == "" {
+		ownerSessionID = strings.TrimSpace(req.SourceSessionID)
+	}
+	if ownerSessionID == "" {
+		ownerSessionID = strings.TrimSpace(actorSessionID)
+	}
+	return true, ownerSessionID, strings.TrimSpace(payload.TabID)
+}
+
+func staleBrowserCanvasItem(c *cart.Context) error {
+	c.JSON(http.StatusConflict, map[string]string{"error": "browser_canvas_stale"})
 	return nil
 }
 

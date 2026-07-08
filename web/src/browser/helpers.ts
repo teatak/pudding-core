@@ -5,16 +5,6 @@ import type { BrowserCanvasPayload } from "./types";
 
 export const browserQueryStaleTimeMS = 1000;
 
-export function browserCanvasItemID(sessionID: string): string {
-  return `browser_${sessionID.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
-}
-
-export function browserWindowKey(item: CanvasItem): string {
-  const payload = browserPayloadForItem(item);
-  const ownerSessionID = payload?.sessionID || item.sourceSessionID || item.id;
-  return `${ownerSessionID}:${payload?.tabID || payload?.url || item.id}`;
-}
-
 export function browserAddressToURL(value: string): string {
   const raw = value.trim();
   if (!raw) {
@@ -81,10 +71,6 @@ export function browserTabIsReal(tab: BrowserTab): boolean {
   return !browserURLIsBlank(tab.url);
 }
 
-export function browserTabSwitchKey(tab: BrowserTab | undefined): string {
-  return tab ? `${tab.id}:${tab.url}` : "";
-}
-
 export function browserTargetURL(tab: BrowserTab | undefined, payload: BrowserCanvasPayload | null, payloadUpdatedAt?: string): string {
   const payloadURL = (payload?.url || "").trim();
   const tabURL = (tab?.url || "").trim();
@@ -95,32 +81,6 @@ export function browserTargetURL(tab: BrowserTab | undefined, payload: BrowserCa
     return payloadURL;
   }
   return browserTabIsNewerThan(tab, payloadUpdatedAt) ? tabURL : payloadURL;
-}
-
-export function browserTabIsNewerThan(tab: BrowserTab | undefined, timestamp?: string): boolean {
-  if (!tab) {
-    return false;
-  }
-  const tabTime = browserTabTimestamp(tab);
-  const compareTime = browserTimestamp(timestamp);
-  return Number.isFinite(tabTime) && (!Number.isFinite(compareTime) || tabTime > compareTime);
-}
-
-export function latestBrowserPayload(
-  state: BrowserState | undefined,
-  item: CanvasItem | undefined,
-  itemPayload: BrowserCanvasPayload | null,
-): BrowserCanvasPayload | null {
-  const statePayload = browserPayloadFromState(state);
-  if (!statePayload) {
-    return itemPayload;
-  }
-  if (!itemPayload || itemPayload.closedAt) {
-    return statePayload;
-  }
-  const stateTime = browserTimestamp(state?.updatedAt);
-  const itemTime = browserTimestamp(item?.updatedAt);
-  return Number.isFinite(itemTime) && (!Number.isFinite(stateTime) || itemTime > stateTime) ? itemPayload : statePayload;
 }
 
 export function browserPayloadHasRealState(payload: BrowserCanvasPayload | null): boolean {
@@ -145,24 +105,6 @@ export function upsertBrowserTab(tabs: BrowserTab[], tab: BrowserTab): BrowserTa
   const next = tabs.filter((item) => item.id !== tab.id);
   next.push(tab);
   return next;
-}
-
-export function browserPayloadNeedsTabSync(
-  item: CanvasItem,
-  payload: BrowserCanvasPayload | null,
-  tab: BrowserTab,
-  fallbackTitle: string,
-): boolean {
-  const title = browserTabTitle(tab, fallbackTitle);
-  const faviconURL = browserTabFaviconURL(tab);
-  return (
-    item.title !== title ||
-    payload?.tabID !== tab.id ||
-    payload?.url !== tab.url ||
-    payload?.title !== title ||
-    (payload?.faviconURL || "") !== faviconURL ||
-    (payload?.mode || "") !== (tab.mode || "")
-  );
 }
 
 export function faviconURLForPage(rawURL: string): string {
@@ -212,6 +154,15 @@ export function browserPayloadFromState(state: BrowserState | undefined): Browse
     faviconURL: state.faviconURL,
     mode: state.processMode || state.mode,
   };
+}
+
+function browserTabIsNewerThan(tab: BrowserTab | undefined, timestamp?: string): boolean {
+  if (!tab) {
+    return false;
+  }
+  const tabTime = browserTabTimestamp(tab);
+  const compareTime = browserTimestamp(timestamp);
+  return Number.isFinite(tabTime) && (!Number.isFinite(compareTime) || tabTime > compareTime);
 }
 
 function browserTabTimestamp(tab: BrowserTab): number {

@@ -1,12 +1,11 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileX, Loader2, RefreshCw } from "lucide-react";
+import { FileX, RefreshCw } from "lucide-react";
 import { createElement, useCallback, useEffect, useRef, useState, type HTMLAttributes } from "react";
 
-import { listBrowserTabs } from "@/api/client";
+import { listBrowserTabs, type BrowserTab } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { cacheElectronBrowserSnapshot, electronBrowserBridge, type ElectronWebviewCaptureResponse } from "@/browser/electronBridge";
 import {
-  browserPayloadForItem,
   browserQueryStaleTimeMS,
   browserTargetURL,
   browserTabTitle,
@@ -14,8 +13,8 @@ import {
   preferredBrowserTab,
 } from "@/browser/helpers";
 import { Button } from "@/components/ui/button";
-import type { CanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
+import type { BrowserCanvasPayload } from "./types";
 
 type CapturedWebviewImage = {
   toDataURL?: () => string;
@@ -51,11 +50,19 @@ type WebviewProps = HTMLAttributes<HTMLElement> & {
   webpreferences: string;
 };
 
-export function ElectronWebviewBrowser({ token, item }: { token: string; item: CanvasItem }) {
+export function ElectronWebviewBrowser({
+  activeTab: activeTabProp,
+  sessionID,
+  token,
+}: {
+  activeTab?: BrowserTab;
+  sessionID: string;
+  token: string;
+}) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const webviewRef = useRef<WebviewElement | null>(null);
-  const payload = browserPayloadForItem(item);
+  const payload = browserPayloadFromTab(activeTabProp);
   const webviewReadyRef = useRef(false);
   const webviewReadyCleanupRef = useRef<(() => void) | null>(null);
   const lastRequestedURLRef = useRef("");
@@ -66,7 +73,7 @@ export function ElectronWebviewBrowser({ token, item }: { token: string; item: C
   const loadErrorRef = useRef<WebviewLoadError | null>(null);
   const [loadError, setLoadError] = useState<WebviewLoadError | null>(null);
   const [navigationLoading, setNavigationLoading] = useState(false);
-  const ownerSessionID = payload?.sessionID || item.sourceSessionID;
+  const ownerSessionID = sessionID;
   const tabsQuery = useQuery({
     enabled: Boolean(token && ownerSessionID),
     queryKey: ownerSessionID ? queryKeys.browserTabs(ownerSessionID) : ["browser", "missing-session"],
@@ -79,10 +86,10 @@ export function ElectronWebviewBrowser({ token, item }: { token: string; item: C
     staleTime: browserQueryStaleTimeMS,
   });
   const tabs = (tabsQuery.data?.tabs || []).filter((tab) => tab.sessionID === ownerSessionID);
-  const activeTab = preferredBrowserTab(tabs, payload);
+  const activeTab = activeTabProp || preferredBrowserTab(tabs, payload);
   const title = activeTab ? browserTabTitle(activeTab, payload?.title || t("browser.newTab"), t("browser.newTab")) : payload?.title || t("browser.newTab");
   const tabID = activeTab?.id || payload?.tabID || "default";
-  const targetURL = normalizeWebviewURL(browserTargetURL(activeTab, payload, item.updatedAt));
+  const targetURL = normalizeWebviewURL(browserTargetURL(activeTab, payload, payload?.updatedAt));
 
   const updateLoadError = useCallback((error: WebviewLoadError | null) => {
     loadErrorRef.current = error;
@@ -315,13 +322,9 @@ export function ElectronWebviewBrowser({ token, item }: { token: string; item: C
 
 function BrowserNavigationLoading({ label }: { label: string }) {
   return (
-    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-[var(--canvas-background)]/35 backdrop-blur-[1px]">
+    <div aria-label={label} className="pointer-events-none absolute inset-x-0 top-0 z-10">
       <div className="absolute inset-x-0 top-0 h-0.5 overflow-hidden bg-primary/10">
         <div className="h-full w-1/2 animate-pulse bg-primary/80" />
-      </div>
-      <div className="inline-flex items-center gap-2 rounded-full border bg-popover/95 px-4 py-2 text-sm font-medium text-popover-foreground shadow-sm">
-        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-        {label}
       </div>
     </div>
   );
@@ -442,6 +445,22 @@ function webviewErrorHost(rawURL: string) {
   } catch {
     return "";
   }
+}
+
+function browserPayloadFromTab(tab: BrowserTab | undefined): (BrowserCanvasPayload & { updatedAt?: string }) | null {
+  if (!tab) {
+    return null;
+  }
+  return {
+    kind: "browser",
+    sessionID: tab.sessionID,
+    tabID: tab.id,
+    url: tab.url,
+    title: tab.title,
+    faviconURL: tab.faviconURL,
+    mode: tab.mode,
+    updatedAt: tab.updatedAt,
+  };
 }
 
 async function captureCurrentWebview(

@@ -17,7 +17,8 @@ class BrowserHost {
     const slot = this.ensureSlot(request);
     const url = normalizeURL(request.url);
     if (url && slot.webContents.getURL() !== url) {
-      await loadSlotURL(slot, url);
+      markSlotNavigationIntent(slot, url);
+      startSlotURL(slot, url);
     }
     return snapshot(slot);
   }
@@ -28,7 +29,8 @@ class BrowserHost {
     if (!url || slot.webContents.getURL() === url) {
       return snapshot(slot);
     }
-    await loadSlotURL(slot, url);
+    markSlotNavigationIntent(slot, url);
+    startSlotURL(slot, url);
     return snapshot(slot);
   }
 
@@ -206,6 +208,7 @@ class BrowserHost {
   }
 
   destroySlot(slot) {
+    slot.disposed = true;
     this.slots.delete(slot.key);
     if (!slot.webContents.isDestroyed()) {
       slot.webContents.destroy();
@@ -244,6 +247,7 @@ class BrowserHost {
       tabID,
       headlessView: null,
       webContents,
+      disposed: false,
       version: 0,
       displayURL: targetURL,
       displayTitle: loadError ? targetURL : "",
@@ -294,6 +298,7 @@ class BrowserHost {
       tabID: normalizeTabID(request.tabID),
       headlessView,
       webContents: headlessView.webContents,
+      disposed: false,
       version: 0,
       displayURL: normalizeURL(request.url) || "about:blank",
       displayTitle: "",
@@ -363,6 +368,9 @@ class BrowserHost {
     slot.webContents.on("destroyed", () => {
       if (this.slots.get(slot.key) === slot) {
         this.slots.delete(slot.key);
+        if (!slot.disposed && !slot.headlessView) {
+          this.restoreHeadlessSlot(slot);
+        }
       }
     });
   }
@@ -370,6 +378,23 @@ class BrowserHost {
   noteUpdated(slot) {
     slot.version += 1;
     this.onUpdate(snapshot(slot));
+  }
+
+  restoreHeadlessSlot(previous) {
+    const url = normalizeURL(previous.displayURL) || "about:blank";
+    const slot = this.ensureSlot({
+      sessionID: previous.sessionID,
+      tabID: previous.tabID,
+      url,
+    });
+    slot.version = previous.version + 1;
+    slot.displayURL = url;
+    slot.displayTitle = browserURLIsBlank(url) ? "" : previous.displayTitle || url;
+    slot.navigationError = previous.navigationError || null;
+    this.onUpdate(snapshot(slot));
+    if (!browserURLIsBlank(url)) {
+      startSlotURL(slot, url);
+    }
   }
 }
 
@@ -409,10 +434,21 @@ async function loadSlotURL(slot, url) {
         slot.displayTitle = targetURL;
       }
       slot.navigationError = normalizeLoadError(error);
-      throw error;
+      return;
     }
     await waitForNavigationToSettle(slot.webContents);
   }
+}
+
+function startSlotURL(slot, url) {
+  void loadSlotURL(slot, url).catch(() => undefined);
+}
+
+function markSlotNavigationIntent(slot, url) {
+  slot.displayURL = url;
+  slot.displayTitle = "";
+  slot.navigationError = null;
+  slot.version += 1;
 }
 
 function isNavigationAbort(error) {
@@ -663,6 +699,11 @@ function normalizeURL(rawURL) {
     return "";
   }
   return "";
+}
+
+function browserURLIsBlank(rawURL) {
+  const url = String(rawURL || "").trim().toLowerCase();
+  return !url || url === "about:blank";
 }
 
 function sameNormalizedURL(left, right) {

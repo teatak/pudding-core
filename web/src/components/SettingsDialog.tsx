@@ -398,7 +398,7 @@ function AboutSettings({ token }: { token: string }) {
     enabled: Boolean(token),
     refetchOnMount: "always",
   });
-  const sections = aboutQuery.data?.sections || [];
+  const sections = (aboutQuery.data?.sections || []).filter((section) => !isVoiceAboutSection(section));
 
   return (
     <div className={cn(SETTINGS_NARROW_CONTENT_CLASS, "gap-4 pt-2")}>
@@ -413,6 +413,12 @@ function AboutSettings({ token }: { token: string }) {
         : null}
     </div>
   );
+}
+
+const VOICE_ABOUT_SECTION_IDS = new Set(["audio_config", "driver", "health", "audio_bindings", "asr", "asr_vad", "aec", "ns", "tts"]);
+
+function isVoiceAboutSection(section: DesktopAboutSection) {
+  return VOICE_ABOUT_SECTION_IDS.has(section.id);
 }
 
 function AboutInfoSection({ section }: { section: DesktopAboutSection }) {
@@ -692,7 +698,22 @@ function VoiceSettings({ token }: { token: string }) {
     enabled: Boolean(token),
     refetchOnMount: "always",
   });
+  const aboutQuery = useQuery({
+    queryKey: queryKeys.desktopAbout(),
+    queryFn: () => getDesktopAbout(token),
+    enabled: Boolean(token),
+    refetchOnMount: "always",
+  });
   const savedConfig = audioQuery.data?.config;
+  const aboutSections = aboutQuery.data?.sections || [];
+  const runtimeReadOnlyRows = voiceRuntimeReadOnlyRows(aboutSections, audioQuery.data?.path || "-", savedConfig?.driver.type || "-");
+  const asrReadOnlyRows = voiceSectionReadOnlyRows(aboutSections, "asr", ["engine", "model_path", "tokens_path", "provider"]);
+  const vadReadOnlyRows = voiceSectionReadOnlyRows(aboutSections, "asr_vad", ["model_path", "window_size"]);
+  const dspReadOnlyRows = [
+    ...voiceSectionReadOnlyRows(aboutSections, "aec", ["model"], "aec"),
+    ...voiceSectionReadOnlyRows(aboutSections, "ns", ["model"], "ns"),
+  ];
+  const ttsReadOnlyRows = voiceSectionReadOnlyRows(aboutSections, "tts", ["backend"]);
 
   useEffect(() => {
     if (savedConfig) {
@@ -757,14 +778,9 @@ function VoiceSettings({ token }: { token: string }) {
           </div>
         ) : (
           <dl className="grid gap-2 rounded-xl border bg-card p-4 text-sm">
-            <SettingsInfoRow label="path" value={audioQuery.data?.path || "-"} />
-            <SettingsInfoRow label="driver" value={savedConfig?.driver.type || "-"} />
-            <SettingsInfoRow label="asr" value={savedConfig?.asr.engine || "-"} />
-            <SettingsInfoRow label="asr_model" value={savedConfig?.asr.modelPath || "-"} />
-            <SettingsInfoRow label="vad_model" value={savedConfig?.asr.vad.modelPath || "-"} />
-            <SettingsInfoRow label="aec" value={savedConfig?.aec.enabled === false ? "off" : savedConfig?.aec.model || "-"} />
-            <SettingsInfoRow label="ns" value={savedConfig?.ns.enabled === false ? "off" : savedConfig?.ns.model || "-"} />
-            <SettingsInfoRow label="tts" value={savedConfig?.tts.profile || "-"} />
+            {runtimeReadOnlyRows.map((row) => (
+              <SettingsInfoRow key={row.id} label={row.label} value={row.value} />
+            ))}
           </dl>
         )}
       </section>
@@ -824,6 +840,7 @@ function VoiceSettings({ token }: { token: string }) {
             onBlur={saveCurrentVoiceForm}
             onChange={(value) => setForm((prev) => ({ ...prev, asrNumThreads: value }))}
           />
+          <SettingsReadOnlyRows rows={asrReadOnlyRows} />
         </div>
       </section>
 
@@ -877,6 +894,7 @@ function VoiceSettings({ token }: { token: string }) {
             onBlur={saveCurrentVoiceForm}
             onChange={(value) => setForm((prev) => ({ ...prev, vadMinSpeechMillis: value }))}
           />
+          <SettingsReadOnlyRows rows={vadReadOnlyRows} />
         </div>
       </section>
 
@@ -924,6 +942,7 @@ function VoiceSettings({ token }: { token: string }) {
               </DialogSelectContent>
             </Select>
           </SettingsControlRow>
+          <SettingsReadOnlyRows rows={dspReadOnlyRows} />
         </div>
       </section>
 
@@ -973,19 +992,90 @@ function VoiceSettings({ token }: { token: string }) {
             onBlur={saveCurrentVoiceForm}
             onChange={(value) => setForm((prev) => ({ ...prev, ttsSpeed: value }))}
           />
+          <SettingsReadOnlyRows rows={ttsReadOnlyRows} />
         </div>
       </section>
     </div>
   );
 }
 
+type SettingsReadOnlyRow = {
+  id: string;
+  label: string;
+  value: string;
+};
+
+function SettingsReadOnlyRows({ rows }: { rows: SettingsReadOnlyRow[] }) {
+  const { t } = useI18n();
+  if (rows.length === 0) {
+    return null;
+  }
+  return (
+    <>
+      {rows.map((row) => (
+        <div
+          key={row.id}
+          className="grid gap-3 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(12rem,18rem)] sm:items-center"
+        >
+          <span className="text-sm font-medium">{voiceReadOnlyLabel(row.label, t)}</span>
+          <span className="min-w-0 break-words text-sm text-foreground sm:text-right">{row.value}</span>
+        </div>
+      ))}
+    </>
+  );
+}
+
 function SettingsInfoRow({ label, value }: { label: string; value: string }) {
+  const { t } = useI18n();
   return (
     <div className="grid min-w-0 grid-cols-[minmax(7rem,12rem)_minmax(0,1fr)] gap-3">
-      <dt className="min-w-0 truncate text-muted-foreground">{label}</dt>
+      <dt className="min-w-0 truncate text-muted-foreground">{voiceReadOnlyLabel(label, t)}</dt>
       <dd className="min-w-0 break-words text-foreground">{value}</dd>
     </div>
   );
+}
+
+function voiceReadOnlyLabel(label: string, t: (key: string) => string) {
+  const key = `settings.voice.readOnly.${label}`;
+  const translated = t(key);
+  return translated === key ? label : translated;
+}
+
+function voiceRuntimeReadOnlyRows(sections: DesktopAboutSection[], path: string, driver: string): SettingsReadOnlyRow[] {
+  const rows: SettingsReadOnlyRow[] = [
+    { id: "path", label: "path", value: path },
+    { id: "driver", label: "driver", value: driver },
+  ];
+  rows.push(...voiceSectionReadOnlyRows(sections, "driver", ["capture_sample_rate", "playback_sample_rate", "channels", "period_millis"]));
+  rows.push(...voiceSectionReadOnlyRows(sections, "health", ["capture", "playback"]));
+  rows.push(...voiceSectionReadOnlyRows(sections, "audio_bindings", ["input_owner", "output_owner"]));
+  return rows;
+}
+
+function voiceSectionReadOnlyRows(
+  sections: DesktopAboutSection[],
+  sectionID: string,
+  keys: string[],
+  labelPrefix = "",
+): SettingsReadOnlyRow[] {
+  const section = sections.find((item) => item.id === sectionID);
+  if (!section) {
+    return [];
+  }
+  return keys
+    .map((key) => {
+      const row = section.rows.find((item) => item.key === key);
+      if (!row) {
+        return null;
+      }
+      const label = labelPrefix ? `${labelPrefix}.${row.key}` : row.key;
+      return {
+        id: `${sectionID}.${row.key}`,
+        label,
+        value: row.value || "-",
+      };
+    })
+    .filter((row): row is SettingsReadOnlyRow => row !== null);
 }
 
 function defaultVoiceForm(): VoiceFormState {
