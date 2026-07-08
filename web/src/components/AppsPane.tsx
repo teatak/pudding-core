@@ -1212,6 +1212,7 @@ function EndpointRows({
 }) {
   const { t } = useI18n();
   const [editingMCP, setEditingMCP] = useState<{ name: string; endpoint: AppEndpoints[string] } | null>(null);
+  const [mcpConfiguredByEndpoint, setMCPConfiguredByEndpoint] = useState<Record<string, boolean | undefined>>({});
   if (endpoints.length === 0) {
     return <EmptyLine>{t("apps.none")}</EmptyLine>;
   }
@@ -1220,7 +1221,8 @@ function EndpointRows({
       <div className="grid gap-2">
         {endpoints.map(([name, endpoint]) => {
           const statuses = mcpStatusByEndpoint?.get(name) || [];
-          const isMCPConfigured = endpoint.kind === "mcp" && statuses.some((status) => status.configured);
+          const statusConfigured = statuses.some((status) => status.configured);
+          const isMCPConfigured = endpoint.kind === "mcp" && (mcpConfiguredByEndpoint[name] ?? statusConfigured);
           return (
             <DetailRow key={name}>
               <div className="flex min-w-0 items-center justify-between gap-3">
@@ -1262,6 +1264,9 @@ function EndpointRows({
           endpointName={editingMCP.name}
           open={Boolean(editingMCP)}
           token={token}
+          onConfiguredChange={(configured) =>
+            setMCPConfiguredByEndpoint((current) => ({ ...current, [editingMCP.name]: configured }))
+          }
           onOpenChange={(open) => {
             if (!open) {
               setEditingMCP(null);
@@ -1291,6 +1296,7 @@ function MCPConfigDialog({
   endpointName,
   open,
   token,
+  onConfiguredChange,
   onOpenChange,
 }: {
   appID: string;
@@ -1298,6 +1304,7 @@ function MCPConfigDialog({
   endpointName: string;
   open: boolean;
   token: string;
+  onConfiguredChange?: (configured: boolean) => void;
   onOpenChange: (open: boolean) => void;
 }) {
   const { t } = useI18n();
@@ -1321,6 +1328,7 @@ function MCPConfigDialog({
   const saveMutation = useMutation({
     mutationFn: (override: AppMCPOverride) => putAppMCPOverride(token, appID, endpointName, override),
     onSuccess: async (data) => {
+      onConfiguredChange?.(true);
       updateMCPOverrideCaches(queryClient, appID, endpointName, data, true);
       toast.success(t("apps.mcpConfigSaved"));
       onOpenChange(false);
@@ -1335,6 +1343,7 @@ function MCPConfigDialog({
   const resetMutation = useMutation({
     mutationFn: () => deleteAppMCPOverride(token, appID, endpointName),
     onSuccess: async () => {
+      onConfiguredChange?.(false);
       updateMCPOverrideCaches(queryClient, appID, endpointName, undefined, false);
       toast.success(t("apps.mcpConfigResetDone"));
       onOpenChange(false);
