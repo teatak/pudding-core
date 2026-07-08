@@ -3,10 +3,11 @@ const { WebContentsView } = require("electron");
 const browserPartition = "persist:pudding-default";
 
 class BrowserHost {
-  constructor(onUpdate, onCursor) {
+  constructor(onUpdate, onCursor, onAutomationStart) {
     this.slots = new Map();
     this.onUpdate = typeof onUpdate === "function" ? onUpdate : () => {};
     this.onCursor = typeof onCursor === "function" ? onCursor : () => {};
+    this.onAutomationStart = typeof onAutomationStart === "function" ? onAutomationStart : () => {};
     this.captureWebview = null;
   }
 
@@ -136,6 +137,7 @@ class BrowserHost {
 
   async click(request) {
     const slot = this.requireLiveSlot(request);
+    this.noteAutomationStart(slot, "click");
     const method = normalizeClickMethod(request.method);
     let result;
     if (method === "dom") {
@@ -161,6 +163,7 @@ class BrowserHost {
     if (!String(request.text || "")) {
       throw new Error("text is required");
     }
+    this.noteAutomationStart(slot, "type");
     const result = await evaluateJSON(slot, typeScript(request));
     this.noteUpdated(slot);
     this.noteCursor(slot, "type", result);
@@ -169,6 +172,7 @@ class BrowserHost {
 
   async scroll(request) {
     const slot = this.requireLiveSlot(request);
+    this.noteAutomationStart(slot, "scroll");
     if (!Number(request.deltaX) && !Number(request.deltaY)) {
       request.deltaY = 600;
     }
@@ -382,6 +386,16 @@ class BrowserHost {
   noteUpdated(slot) {
     slot.version += 1;
     this.onUpdate(snapshot(slot));
+  }
+
+  noteAutomationStart(slot, action) {
+    this.onAutomationStart({
+      sessionID: slot.sessionID,
+      tabID: slot.tabID,
+      action,
+      version: slot.version,
+      createdAt: new Date().toISOString(),
+    });
   }
 
   noteCursor(slot, action, result) {

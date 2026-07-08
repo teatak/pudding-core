@@ -63,6 +63,13 @@ type BrowserAutomationCursorState = {
   y: number;
 };
 
+type ComposerFocusSnapshot = {
+  element: HTMLTextAreaElement;
+  selectionStart: number;
+  selectionEnd: number;
+  selectionDirection: "backward" | "forward" | "none";
+};
+
 export function ElectronWebviewBrowser({
   activeTab: activeTabProp,
   sessionID,
@@ -85,6 +92,7 @@ export function ElectronWebviewBrowser({
   const failedNavigationSeqRef = useRef(0);
   const loadErrorRef = useRef<WebviewLoadError | null>(null);
   const cursorEffectTimerRef = useRef<number | undefined>(undefined);
+  const composerFocusSnapshotRef = useRef<ComposerFocusSnapshot | null>(null);
   const [loadError, setLoadError] = useState<WebviewLoadError | null>(null);
   const [navigationLoading, setNavigationLoading] = useState(false);
   const [automationCursor, setAutomationCursor] = useState<BrowserAutomationCursorState | null>(null);
@@ -226,6 +234,19 @@ export function ElectronWebviewBrowser({
 
   useEffect(() => {
     const bridge = electronBrowserBridge();
+    if (!bridge?.onAutomationStart || !ownerSessionID || !tabID) {
+      return;
+    }
+    return bridge.onAutomationStart((event) => {
+      if (event.sessionID !== ownerSessionID || event.tabID !== tabID) {
+        return;
+      }
+      composerFocusSnapshotRef.current = captureComposerFocusSnapshot();
+    });
+  }, [ownerSessionID, tabID]);
+
+  useEffect(() => {
+    const bridge = electronBrowserBridge();
     if (!bridge?.onCursor || !ownerSessionID || !tabID) {
       return;
     }
@@ -250,6 +271,11 @@ export function ElectronWebviewBrowser({
         cursorEffectTimerRef.current = window.setTimeout(() => {
           setAutomationCursor((current) => (current ? { ...current, effectVisible: false } : current));
         }, 800);
+      }
+      const focusSnapshot = composerFocusSnapshotRef.current;
+      composerFocusSnapshotRef.current = null;
+      if (focusSnapshot) {
+        window.requestAnimationFrame(() => restoreComposerFocusSnapshot(focusSnapshot));
       }
     });
   }, [ownerSessionID, tabID]);
@@ -375,6 +401,41 @@ export function ElectronWebviewBrowser({
       {automationCursor ? <BrowserAutomationCursor cursor={automationCursor} /> : null}
     </div>
   );
+}
+
+function captureComposerFocusSnapshot(): ComposerFocusSnapshot | null {
+  const activeElement = document.activeElement;
+  if (!(activeElement instanceof HTMLTextAreaElement) || activeElement.dataset.composerTextInput !== "true") {
+    return null;
+  }
+  return {
+    element: activeElement,
+    selectionStart: activeElement.selectionStart,
+    selectionEnd: activeElement.selectionEnd,
+    selectionDirection: activeElement.selectionDirection || "none",
+  };
+}
+
+function restoreComposerFocusSnapshot(snapshot: ComposerFocusSnapshot) {
+  if (!snapshot.element.isConnected) {
+    return;
+  }
+  const activeElement = document.activeElement;
+  if (activeElement !== snapshot.element && activeElement instanceof HTMLElement && isEditableHostElement(activeElement)) {
+    return;
+  }
+  snapshot.element.focus({ preventScroll: true });
+  const textLength = snapshot.element.value.length;
+  snapshot.element.setSelectionRange(
+    Math.max(0, Math.min(snapshot.selectionStart, textLength)),
+    Math.max(0, Math.min(snapshot.selectionEnd, textLength)),
+    snapshot.selectionDirection,
+  );
+}
+
+function isEditableHostElement(element: HTMLElement) {
+  const tagName = element.tagName.toLowerCase();
+  return tagName === "input" || tagName === "textarea" || tagName === "select" || element.isContentEditable;
 }
 
 function BrowserAutomationCursor({ cursor }: { cursor: BrowserAutomationCursorState }) {

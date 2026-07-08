@@ -56,6 +56,14 @@ export type ElectronBrowserCursorEvent = {
   createdAt?: string;
 };
 
+export type ElectronBrowserAutomationEvent = {
+  sessionID: string;
+  tabID: string;
+  action: "click" | "type" | "scroll";
+  version?: number;
+  createdAt?: string;
+};
+
 export type ElectronBrowserBridge = {
   ensure: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
   registerWebview: (request: ElectronWebviewRegisterRequest) => Promise<ElectronBrowserSnapshot>;
@@ -69,6 +77,7 @@ export type ElectronBrowserBridge = {
   closeSession: (request: ElectronBrowserRequest) => Promise<void>;
   onUpdated: (listener: (snapshot: ElectronBrowserSnapshot) => void) => () => void;
   onCursor?: (listener: (event: ElectronBrowserCursorEvent) => void) => () => void;
+  onAutomationStart?: (listener: (event: ElectronBrowserAutomationEvent) => void) => () => void;
   onWebviewCaptureRequest?: (listener: (request: ElectronWebviewCaptureRequest) => void) => () => void;
 };
 

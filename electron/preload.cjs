@@ -55,6 +55,11 @@ contextBridge.exposeInMainWorld("puddingElectronBrowser", {
     ipcRenderer.on("pudding:browser:cursor", wrapped);
     return () => ipcRenderer.off("pudding:browser:cursor", wrapped);
   },
+  onAutomationStart: (listener) => {
+    const wrapped = (_event, automation) => listener(automation);
+    ipcRenderer.on("pudding:browser:automation-start", wrapped);
+    return () => ipcRenderer.off("pudding:browser:automation-start", wrapped);
+  },
   onWebviewCaptureRequest: (listener) => {
     const wrapped = (_event, request) => listener(request);
     ipcRenderer.on("pudding:browser:webview-capture-request", wrapped);

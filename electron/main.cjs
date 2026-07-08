@@ -26,6 +26,9 @@ const browserHost = new BrowserHost(
   (cursor) => {
     broadcastToTrustedRenderers("pudding:browser:cursor", cursor);
   },
+  (event) => {
+    broadcastToTrustedRenderers("pudding:browser:automation-start", event);
+  },
 );
 browserHost.setWebviewCaptureHandler(captureVisibleWebview);
 const browserBridgeServer = new BrowserBridgeServer(browserHost);
