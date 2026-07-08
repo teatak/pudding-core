@@ -771,12 +771,7 @@ function appHasPreviewRelease(item: AppRegistryItem) {
 }
 
 function isPreviewRelease(release: AppRegistryRelease) {
-  const channel = release.channel?.trim().toLowerCase();
-  return Boolean(release.preview || channel === "preview" || channel === "dev" || isPreviewVersion(release.version));
-}
-
-function isPreviewVersion(version: string) {
-  return /(?:^|[-.])(?:dev|preview|alpha|beta|rc)(?:[-.]|$)/i.test(version);
+  return release.preview === true;
 }
 
 function appRegistryTitle(item: AppRegistryItem, locale: string) {
@@ -892,7 +887,11 @@ function AppDetail({
   const description = (catalogApp ? appRegistryDescription(catalogApp, locale) : "") || app.description;
   const authMethods = appAuthMethods(app);
   const canManageConnections = appCanManageConnections(app);
-  const installedIsPreview = Boolean(app.version && isPreviewVersion(app.version));
+  const installedIsPreview = Boolean(
+    app.version &&
+      catalogApp &&
+      normalizedAppRegistryReleases(catalogApp).some((release) => release.version === app.version && isPreviewRelease(release)),
+  );
   const hasMCPEndpoints = endpoints.some(([, endpoint]) => endpoint.kind === "mcp");
   const mcpStatusQuery = useQuery({
     queryKey: queryKeys.appMCPStatus(app.id),
