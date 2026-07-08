@@ -826,21 +826,29 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       queryClient.setQueryData(queryKeys.browserState(targetSessionID), { hasState: false, sessionID: targetSessionID });
       void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(targetSessionID) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(targetSessionID) });
+      setClosingBrowserSessions((prev) => withoutKey(prev, targetSessionID));
       if (items.length === 0) {
         setCanvasOpen(false);
       }
     },
-    onError: () => {
-      if (actorSessionID) {
-        clearElectronBrowserSessionGate(actorSessionID);
-        setClosingBrowserSessions((prev) => withoutKey(prev, actorSessionID));
-        void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(actorSessionID) });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(actorSessionID) });
+    onError: (_error, targetSessionID) => {
+      if (targetSessionID) {
+        clearElectronBrowserSessionGate(targetSessionID);
+        setClosingBrowserSessions((prev) => withoutKey(prev, targetSessionID));
+        void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(targetSessionID) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(targetSessionID) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(targetSessionID) });
       }
       toast.error(t("browser.releaseFailed"));
     },
   });
+
+  useEffect(() => {
+    if (!enabled || !actorSessionID || browserClosing || !activeBrowserTab) {
+      return;
+    }
+    clearElectronBrowserSessionGate(actorSessionID);
+  }, [activeBrowserTab, actorSessionID, browserClosing, enabled]);
 
   useEffect(() => {
     draftWindowsRef.current = draftWindows;

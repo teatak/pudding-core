@@ -14,8 +14,6 @@ import {
 import { queryKeys } from "@/api/queryKeys";
 import {
   allowElectronBrowserTab,
-  clearElectronBrowserSessionGate,
-  electronBrowserSessionHasGate,
   markElectronBrowserSessionClosed,
 } from "@/browser/electronBridge";
 import { browserTabFaviconURL, browserTabTitle, upsertBrowserTab } from "@/browser/helpers";
@@ -174,10 +172,6 @@ function syncBrowserToolResult(queryClient: QueryClient, event: Extract<SessionE
   if (!tab) {
     return false;
   }
-  if (electronBrowserSessionHasGate(event.sessionID)) {
-    return false;
-  }
-  clearElectronBrowserSessionGate(event.sessionID);
   allowElectronBrowserTab(event.sessionID, tab.id);
   queryClient.setQueryData(queryKeys.browserTabs(event.sessionID), (current: BrowserTabsData | undefined) => ({
     tabs: upsertBrowserTab(current?.tabs || [], tab),

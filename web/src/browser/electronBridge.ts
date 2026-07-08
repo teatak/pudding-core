@@ -122,11 +122,6 @@ export function clearElectronBrowserSessionGate(sessionID: string) {
   electronBrowserSessionGates.delete(key);
 }
 
-export function electronBrowserSessionHasGate(sessionID: string) {
-  const key = sessionID.trim();
-  return key ? electronBrowserSessionGates.has(key) : false;
-}
-
 export function allowElectronBrowserTab(sessionID: string, tabID?: string) {
   const key = sessionID.trim();
   const tabKey = (tabID || "").trim();
