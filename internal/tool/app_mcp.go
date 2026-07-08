@@ -70,6 +70,7 @@ type AppMCPProbeEndpoint struct {
 	EndpointName string            `json:"endpointName"`
 	ConnectionID string            `json:"connectionID,omitempty"`
 	Transport    string            `json:"transport,omitempty"`
+	Configured   bool              `json:"configured,omitempty"`
 	Status       AppMCPProbeStatus `json:"status"`
 	Error        string            `json:"error,omitempty"`
 	Tools        []AppMCPProbeTool `json:"tools,omitempty"`

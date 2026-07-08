@@ -1217,33 +1217,38 @@ function EndpointRows({
   return (
     <>
       <div className="grid gap-2">
-        {endpoints.map(([name, endpoint]) => (
-          <DetailRow key={name}>
-            <div className="flex min-w-0 items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="truncate text-sm font-medium">{name}</span>
-                <Badge variant="outline">{endpoint.kind}</Badge>
-                {endpoint.kind === "mcp" && endpoint.transport ? <Badge variant="secondary">{endpoint.transport}</Badge> : null}
+        {endpoints.map(([name, endpoint]) => {
+          const statuses = mcpStatusByEndpoint?.get(name) || [];
+          const isMCPConfigured = endpoint.kind === "mcp" && statuses.some((status) => status.configured);
+          return (
+            <DetailRow key={name}>
+              <div className="flex min-w-0 items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="truncate text-sm font-medium">{name}</span>
+                  <Badge variant="outline">{endpoint.kind}</Badge>
+                  {endpoint.kind === "mcp" && endpoint.transport ? <Badge variant="secondary">{endpoint.transport}</Badge> : null}
+                  {isMCPConfigured ? <Badge variant="secondary">{t("apps.mcpCustomized")}</Badge> : null}
+                </div>
+                {appID && token && endpoint.kind === "mcp" ? (
+                  <Button className="h-7 px-2 text-xs" type="button" variant="ghost" onClick={() => setEditingMCP({ name, endpoint })}>
+                    <Settings2 className="size-3.5" />
+                    {t("apps.mcpConfig")}
+                  </Button>
+                ) : null}
               </div>
-              {appID && token && endpoint.kind === "mcp" ? (
-                <Button className="h-7 px-2 text-xs" type="button" variant="ghost" onClick={() => setEditingMCP({ name, endpoint })}>
-                  <Settings2 className="size-3.5" />
-                  {t("apps.mcpConfig")}
-                </Button>
+              <EndpointTarget endpoint={endpoint} />
+              {endpoint.description ? <div className="text-xs text-muted-foreground">{endpoint.description}</div> : null}
+              {endpoint.kind === "mcp" && mcpStatusVisible ? (
+                <MCPStatusDetails
+                  endpointName={name}
+                  failed={mcpStatusFailed}
+                  loading={mcpStatusLoading}
+                  statuses={statuses}
+                />
               ) : null}
-            </div>
-            <EndpointTarget endpoint={endpoint} />
-            {endpoint.description ? <div className="text-xs text-muted-foreground">{endpoint.description}</div> : null}
-            {endpoint.kind === "mcp" && mcpStatusVisible ? (
-              <MCPStatusDetails
-                endpointName={name}
-                failed={mcpStatusFailed}
-                loading={mcpStatusLoading}
-                statuses={mcpStatusByEndpoint?.get(name) || []}
-              />
-            ) : null}
-          </DetailRow>
-        ))}
+            </DetailRow>
+          );
+        })}
       </div>
       {appID && token && editingMCP ? (
         <MCPConfigDialog
@@ -1349,8 +1354,9 @@ function MCPConfigDialog({
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t("apps.mcpConfigTitle")}</DialogTitle>
-          <DialogDescription>
-            {endpointName}
+          <DialogDescription className="grid gap-1">
+            <span>{endpointName}</span>
+            <span>{t("apps.mcpConfigDesc")}</span>
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">

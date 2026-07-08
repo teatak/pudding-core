@@ -928,6 +928,19 @@ func TestAppMCPOverrideAPI(t *testing.T) {
 	if saved["configured"] != true || override["command"] != "docker" {
 		t.Fatalf("unexpected saved override: %+v", saved)
 	}
+	resp = req(t, http.MethodGet, srv.URL+"/apps/sequential-thinking/mcp", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	status := decodeJSON[map[string]any](t, resp)
+	endpoints, _ := status["endpoints"].([]any)
+	if len(endpoints) != 1 {
+		t.Fatalf("unexpected endpoints: %+v", status)
+	}
+	endpointStatus, _ := endpoints[0].(map[string]any)
+	if endpointStatus["configured"] != true {
+		t.Fatalf("expected configured mcp endpoint, got %+v", endpointStatus)
+	}
 
 	resp = req(t, http.MethodGet, path, nil)
 	if resp.StatusCode != http.StatusOK {

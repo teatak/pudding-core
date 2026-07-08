@@ -814,6 +814,7 @@ export const appMCPEndpointStatus = z.object({
   endpointName: z.string(),
   connectionID: z.string().optional(),
   transport: z.string().optional(),
+  configured: z.boolean().optional(),
   status: z.string(),
   error: z.string().optional(),
   tools: z.array(appMCPTool).optional(),
