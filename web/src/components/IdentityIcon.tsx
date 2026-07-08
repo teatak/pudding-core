@@ -1,4 +1,4 @@
-import { BookOpenText, Box, Package } from "lucide-react";
+import { BookmarkCheck, Box, Package } from "lucide-react";
 import { useEffect, useState, type HTMLAttributes, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
@@ -102,7 +102,9 @@ export function IdentityIcon({
       {...spanProps}
       className={cn(
         "inline-grid aspect-square shrink-0 place-items-center overflow-hidden bg-muted text-muted-foreground",
-        fallbackVisible && fallback === "skill" && "bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]",
+        fallbackVisible &&
+          fallback === "skill" &&
+          "bg-violet-500/15 text-violet-700 shadow-none ring-1 ring-inset ring-violet-500/20 dark:bg-violet-300/15 dark:text-violet-100 dark:ring-violet-200/15",
         sizeClassByToken[size],
         shape === "circle" ? "rounded-full" : identityIconRadiusClass(size, radius),
         className,
@@ -131,7 +133,7 @@ function IdentityIconFallbackView({ fallback, size }: { fallback: IdentityIconFa
     case "app":
       return <Package className={appFallbackSizeClassByToken[size]} />;
     case "skill":
-      return <BookOpenText className={fallbackSizeClassByToken[size]} strokeWidth={2.25} />;
+      return <BookmarkCheck className={fallbackSizeClassByToken[size]} strokeWidth={2.25} />;
     case "brand":
     default:
       return <Box className={fallbackSizeClassByToken[size]} strokeWidth={2.1} />;
