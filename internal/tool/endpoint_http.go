@@ -491,7 +491,9 @@ func applyEndpointConnectionEnv(extra map[string]string, fields map[string]strin
 			if !validConnectionEnvName(name) {
 				return nil, fmt.Errorf("connection field %q has invalid env name %q", id, name)
 			}
-			out[name] = value
+			if _, exists := out[name]; !exists {
+				out[name] = value
+			}
 		}
 	}
 	return out, nil

@@ -219,6 +219,32 @@ func TestAppMCPStdioServerHelper(t *testing.T) {
 	}
 }
 
+func TestApplyEndpointConnectionEnvDoesNotOverrideEndpointEnv(t *testing.T) {
+	got, err := applyEndpointConnectionEnv(
+		map[string]string{"FAKE_MCP_TOKEN": "custom", "BASE_ONLY": "base"},
+		map[string]string{"apiKey": "connection", "extra": "extra-value"},
+		[]app.ConnectionField{{
+			ID: "apiKey",
+			Inject: []app.ConnectionFieldInject{{
+				Target: "env",
+				Name:   "FAKE_MCP_TOKEN",
+			}},
+		}, {
+			ID: "extra",
+			Inject: []app.ConnectionFieldInject{{
+				Target: "env",
+				Name:   "EXTRA_ENV",
+			}},
+		}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["FAKE_MCP_TOKEN"] != "custom" || got["BASE_ONLY"] != "base" || got["EXTRA_ENV"] != "extra-value" {
+		t.Fatalf("unexpected env merge: %+v", got)
+	}
+}
+
 func TestReadAppMCPSSEFindsMatchingResponse(t *testing.T) {
 	raw := strings.NewReader("event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"other\",\"result\":{}}\n\n" +
 		"event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"42\",\"result\":{\"ok\":true}}\n\n")

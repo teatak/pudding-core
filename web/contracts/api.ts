@@ -685,6 +685,22 @@ export const appEndpoint = z.object({
 });
 export type AppEndpoint = z.infer<typeof appEndpoint>;
 
+export const appMCPOverride = z.object({
+  transport: z.enum(["stdio", "streamable_http"]).optional(),
+  url: z.string().optional(),
+  command: z.string().optional(),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+});
+export type AppMCPOverride = z.infer<typeof appMCPOverride>;
+
+export const appMCPOverrideResponse = z.object({
+  configured: z.boolean(),
+  override: appMCPOverride,
+});
+export type AppMCPOverrideResponse = z.infer<typeof appMCPOverrideResponse>;
+
 export const appSkillRef = z.object({
   id: z.string().optional(),
   name: z.string().optional(),

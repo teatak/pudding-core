@@ -24,6 +24,7 @@ export const queryKeys = {
   starterPrompts: () => ["starter-prompts"] as const,
   appSkill: (appID: string, path: string) => ["apps", appID, "skill", path] as const,
   appMCPStatus: (appID: string) => ["apps", appID, "mcp"] as const,
+  appMCPOverride: (appID: string, endpointName: string) => ["apps", appID, "mcp-override", endpointName] as const,
   appConnections: () => ["app-connections"] as const,
   builtinTools: () => ["tools", "builtin"] as const,
   webTools: () => ["tools", "web"] as const,

@@ -12,8 +12,9 @@ import (
 )
 
 var (
-	ErrInvalidID = errors.New("app: invalid id")
-	ErrNotFound  = errors.New("app: not found")
+	ErrInvalidID          = errors.New("app: invalid id")
+	ErrInvalidMCPOverride = errors.New("app: invalid mcp override")
+	ErrNotFound           = errors.New("app: not found")
 )
 
 type ConnectionSource interface {
@@ -53,12 +54,14 @@ func (e *EndpointResolveError) Error() string {
 }
 
 type Service struct {
+	homeDir     string
 	appsRoot    string
 	connections ConnectionSource
 }
 
 func NewService(homeDir string, connections ConnectionSource) *Service {
 	return &Service{
+		homeDir:     homeDir,
 		appsRoot:    home.AppsPath(homeDir),
 		connections: connections,
 	}
@@ -74,7 +77,30 @@ func (s *Service) ListDefinitions(ctx context.Context) ([]*Definition, error) {
 	}
 	out := make([]*Definition, 0, len(defs))
 	for _, def := range defs {
-		out = append(out, ResolveDefinitionPlatform(def))
+		resolved := ResolveDefinitionPlatform(def)
+		resolved, err = s.applyMCPOverrides(resolved)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, resolved)
+	}
+	return out, nil
+}
+
+func (s *Service) applyMCPOverrides(def *Definition) (*Definition, error) {
+	if def == nil || strings.TrimSpace(s.homeDir) == "" {
+		return def, nil
+	}
+	overrides, err := LoadMCPOverrideFile(filepath.Join(home.AppMCPOverridesPath(s.homeDir), def.ID+".yaml"))
+	if err != nil {
+		return nil, err
+	}
+	if overrides == nil {
+		return def, nil
+	}
+	out, err := ApplyMCPOverrides(def, overrides)
+	if err != nil {
+		return nil, fmt.Errorf("app %s: %w", def.ID, err)
 	}
 	return out, nil
 }
@@ -108,7 +134,75 @@ func (s *Service) DeleteDefinition(ctx context.Context, id string) error {
 	if err := os.RemoveAll(target); err != nil {
 		return err
 	}
+	if err := os.Remove(s.mcpOverrideFilePath(id)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	return nil
+}
+
+func (s *Service) GetMCPOverride(ctx context.Context, appID, endpointName string) (MCPEndpointOverride, bool, error) {
+	_ = ctx
+	if s == nil {
+		return MCPEndpointOverride{}, false, errors.New("app service unavailable")
+	}
+	def, endpointName, err := s.resolveMCPOverrideTarget(appID, endpointName, nil)
+	if err != nil {
+		return MCPEndpointOverride{}, false, err
+	}
+	overrides, err := LoadMCPOverrideFile(s.mcpOverrideFilePath(def.ID))
+	if err != nil {
+		return MCPEndpointOverride{}, false, err
+	}
+	if overrides == nil {
+		return MCPEndpointOverride{}, false, nil
+	}
+	override, ok := overrides.MCP[endpointName]
+	return CloneMCPEndpointOverride(override), ok, nil
+}
+
+func (s *Service) PutMCPOverride(ctx context.Context, appID, endpointName string, override MCPEndpointOverride) (MCPEndpointOverride, error) {
+	_ = ctx
+	if s == nil {
+		return MCPEndpointOverride{}, errors.New("app service unavailable")
+	}
+	def, endpointName, err := s.resolveMCPOverrideTarget(appID, endpointName, &override)
+	if err != nil {
+		return MCPEndpointOverride{}, err
+	}
+	path := s.mcpOverrideFilePath(def.ID)
+	overrides, err := LoadMCPOverrideFile(path)
+	if err != nil {
+		return MCPEndpointOverride{}, err
+	}
+	if overrides == nil {
+		overrides = &MCPOverrideFile{MCP: map[string]MCPEndpointOverride{}}
+	}
+	overrides.MCP[endpointName] = CloneMCPEndpointOverride(override)
+	if err := WriteMCPOverrideFile(path, overrides); err != nil {
+		return MCPEndpointOverride{}, err
+	}
+	return CloneMCPEndpointOverride(override), nil
+}
+
+func (s *Service) DeleteMCPOverride(ctx context.Context, appID, endpointName string) error {
+	_ = ctx
+	if s == nil {
+		return errors.New("app service unavailable")
+	}
+	def, endpointName, err := s.resolveMCPOverrideTarget(appID, endpointName, nil)
+	if err != nil {
+		return err
+	}
+	path := s.mcpOverrideFilePath(def.ID)
+	overrides, err := LoadMCPOverrideFile(path)
+	if err != nil {
+		return err
+	}
+	if overrides == nil {
+		return nil
+	}
+	delete(overrides.MCP, endpointName)
+	return WriteMCPOverrideFile(path, overrides)
 }
 
 func (s *Service) ReadAsset(ctx context.Context, rel string) ([]byte, string, error) {
@@ -170,6 +264,46 @@ func (s *Service) ReadSkill(ctx context.Context, appID, skillID string) (*SkillD
 		Path:        ref.Path,
 		Content:     string(data),
 	}, nil
+}
+
+func (s *Service) resolveMCPOverrideTarget(appID, endpointName string, override *MCPEndpointOverride) (*Definition, string, error) {
+	appID = strings.TrimSpace(appID)
+	endpointName = strings.TrimSpace(endpointName)
+	if !appIDPattern.MatchString(appID) {
+		return nil, "", ErrInvalidID
+	}
+	if !endpointNamePattern.MatchString(endpointName) {
+		return nil, "", ErrNotFound
+	}
+	def, err := LoadDefinitionDir(filepath.Join(s.appsRoot, appID))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, "", ErrNotFound
+		}
+		return nil, "", err
+	}
+	resolved := ResolveDefinitionPlatform(def)
+	endpoint, ok := resolved.Endpoints[endpointName]
+	if !ok || endpoint.Kind != EndpointKindMCP {
+		return nil, "", ErrNotFound
+	}
+	if override != nil {
+		override.Transport = strings.TrimSpace(override.Transport)
+		override.URL = strings.TrimSpace(override.URL)
+		override.Command = strings.TrimSpace(override.Command)
+		if err := validateMCPEndpointOverride(*override); err != nil {
+			return nil, "", fmt.Errorf("%w: %v", ErrInvalidMCPOverride, err)
+		}
+		merged := applyMCPEndpointOverride(endpoint, *override)
+		if err := ValidateEndpoint(merged); err != nil {
+			return nil, "", fmt.Errorf("%w: %v", ErrInvalidMCPOverride, err)
+		}
+	}
+	return resolved, endpointName, nil
+}
+
+func (s *Service) mcpOverrideFilePath(appID string) string {
+	return filepath.Join(home.AppMCPOverridesPath(s.homeDir), appID+".yaml")
 }
 
 func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, connectionRef string) (*EndpointBinding, error) {

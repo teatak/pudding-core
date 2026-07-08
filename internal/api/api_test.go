@@ -896,6 +896,60 @@ func TestAppMCPStatusAPI(t *testing.T) {
 	}
 }
 
+func TestAppMCPOverrideAPI(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
+	home := t.TempDir()
+	writeMCPStatusTestApp(t, home)
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithApps(appsvc.NewService(home, nil)).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+
+	path := srv.URL + "/apps/sequential-thinking/mcp-overrides/sequential_thinking_mcp"
+	resp := req(t, http.MethodGet, path, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	initial := decodeJSON[map[string]any](t, resp)
+	if initial["configured"] != false {
+		t.Fatalf("unexpected initial override: %+v", initial)
+	}
+
+	resp = req(t, http.MethodPut, path, map[string]any{
+		"command": "docker",
+		"args":    []string{"run", "--rm", "-i", "mcp/sequential-thinking"},
+		"env":     map[string]string{"PUDDING_API_APP_MCP_STDIO_HELPER": "1"},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	saved := decodeJSON[map[string]any](t, resp)
+	override, _ := saved["override"].(map[string]any)
+	if saved["configured"] != true || override["command"] != "docker" {
+		t.Fatalf("unexpected saved override: %+v", saved)
+	}
+
+	resp = req(t, http.MethodGet, path, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	got := decodeJSON[map[string]any](t, resp)
+	override, _ = got["override"].(map[string]any)
+	if got["configured"] != true || override["command"] != "docker" {
+		t.Fatalf("unexpected stored override: %+v", got)
+	}
+
+	resp = req(t, http.MethodDelete, path, nil)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("want 204, got %d", resp.StatusCode)
+	}
+	resp = req(t, http.MethodGet, path, nil)
+	got = decodeJSON[map[string]any](t, resp)
+	if got["configured"] != false {
+		t.Fatalf("unexpected override after delete: %+v", got)
+	}
+}
+
 func writeMCPStatusTestApp(t *testing.T, home string) {
 	t.Helper()
 	appDir := filepath.Join(home, "apps", "sequential-thinking")

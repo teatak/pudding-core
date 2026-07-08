@@ -214,6 +214,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/skill-assets/*path").GET(s.getSkillAsset)
 	app.Route("/apps").GET(s.listApps)
 	app.Route("/apps/install").POST(s.installApp)
+	app.Route("/apps/:id/mcp-overrides/:endpoint").GET(s.getAppMCPOverride).PUT(s.putAppMCPOverride).DELETE(s.deleteAppMCPOverride)
 	app.Route("/apps/:id/mcp").GET(s.getAppMCPStatus)
 	app.Route("/apps/:id").DELETE(s.deleteApp)
 	app.Route("/app-assets/*path").GET(s.getAppAsset)

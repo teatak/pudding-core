@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CircleAlert, CircleCheck, CircleDashed, Download, Eye, EyeOff, KeyRound, Loader2, Package, Pencil, Plus, Trash } from "lucide-react";
+import { ArrowLeft, CircleAlert, CircleCheck, CircleDashed, Download, Eye, EyeOff, KeyRound, Loader2, Package, Pencil, Plus, Settings2, Trash } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -9,18 +9,22 @@ import {
   appIconURL,
   deleteApp,
   deleteAppConnection,
+  deleteAppMCPOverride,
   getAppConnection,
+  getAppMCPOverride,
   getAppMCPStatus,
   getAppSkill,
   installAppPackage,
   listAppConnections,
   listApps,
   putAppConnection,
+  putAppMCPOverride,
   startAppOAuth,
   type AppConnection,
   type AppConnectionPayload,
   type AppDefinition,
   type AppMCPEndpointStatus,
+  type AppMCPOverride,
   type AppMCPTool,
   type AppSkillDetail,
 } from "@/api/client";
@@ -53,6 +57,7 @@ import { Item, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } f
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import { translate, useI18n } from "@/i18n";
 import { shouldKeepDialogOpenForSelectDismiss } from "@/lib/layerGuards";
 import { cn } from "@/lib/utils";
@@ -128,6 +133,14 @@ type ConnectionForm = {
   header: string;
   username: string;
   password: string;
+};
+type MCPConfigForm = {
+  transport: "stdio" | "streamable_http";
+  command: string;
+  args: string;
+  url: string;
+  env: string;
+  headers: string;
 };
 
 const authTypes: AuthType[] = ["none", "bearer", "token", "basic", "header", "oauth2"];
@@ -953,10 +966,12 @@ function AppDetail({
         ) : null}
 
         <AppEndpointsSection
+          appID={app.id}
           endpoints={endpoints}
           mcpStatusByEndpoint={mcpStatusByEndpoint}
           mcpStatusFailed={mcpStatusQuery.isError}
           mcpStatusLoading={mcpStatusQuery.isLoading}
+          token={token}
         />
         <AppSkillsSection icon={icon} iconSrc={iconSrc} skills={skills} onSkillSelect={(skill) => onSkillSelect(skill, icon, iconSrc)} />
       </div>
@@ -1139,6 +1154,7 @@ function CatalogAppDetail({
 }
 
 function AppEndpointsSection({
+  appID,
   children,
   count,
   endpoints,
@@ -1146,7 +1162,9 @@ function AppEndpointsSection({
   mcpStatusFailed,
   mcpStatusLoading,
   mcpStatusVisible = true,
+  token,
 }: {
+  appID?: string;
   children?: ReactNode;
   count?: number;
   endpoints: Array<[string, AppEndpoints[string]]>;
@@ -1154,17 +1172,20 @@ function AppEndpointsSection({
   mcpStatusFailed?: boolean;
   mcpStatusLoading?: boolean;
   mcpStatusVisible?: boolean;
+  token?: string;
 }) {
   const { t } = useI18n();
   return (
     <DetailSection title={t("apps.endpoints")} count={count ?? endpoints.length}>
       {children ?? (
         <EndpointRows
+          appID={appID}
           endpoints={endpoints}
           mcpStatusByEndpoint={mcpStatusByEndpoint}
           mcpStatusFailed={mcpStatusFailed}
           mcpStatusLoading={mcpStatusLoading}
           mcpStatusVisible={mcpStatusVisible}
+          token={token}
         />
       )}
     </DetailSection>
@@ -1172,44 +1193,73 @@ function AppEndpointsSection({
 }
 
 function EndpointRows({
+  appID,
   endpoints,
   mcpStatusByEndpoint,
   mcpStatusFailed,
   mcpStatusLoading,
   mcpStatusVisible = true,
+  token,
 }: {
+  appID?: string;
   endpoints: Array<[string, AppEndpoints[string]]>;
   mcpStatusByEndpoint?: Map<string, AppMCPEndpointStatus[]>;
   mcpStatusFailed?: boolean;
   mcpStatusLoading?: boolean;
   mcpStatusVisible?: boolean;
+  token?: string;
 }) {
   const { t } = useI18n();
+  const [editingMCP, setEditingMCP] = useState<{ name: string; endpoint: AppEndpoints[string] } | null>(null);
   if (endpoints.length === 0) {
     return <EmptyLine>{t("apps.none")}</EmptyLine>;
   }
   return (
-    <div className="grid gap-2">
-      {endpoints.map(([name, endpoint]) => (
-        <DetailRow key={name}>
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-sm font-medium">{name}</span>
-            <Badge variant="outline">{endpoint.kind}</Badge>
-            {endpoint.kind === "mcp" && endpoint.transport ? <Badge variant="secondary">{endpoint.transport}</Badge> : null}
-          </div>
-          <EndpointTarget endpoint={endpoint} />
-          {endpoint.description ? <div className="text-xs text-muted-foreground">{endpoint.description}</div> : null}
-          {endpoint.kind === "mcp" && mcpStatusVisible ? (
-            <MCPStatusDetails
-              endpointName={name}
-              failed={mcpStatusFailed}
-              loading={mcpStatusLoading}
-              statuses={mcpStatusByEndpoint?.get(name) || []}
-            />
-          ) : null}
-        </DetailRow>
-      ))}
-    </div>
+    <>
+      <div className="grid gap-2">
+        {endpoints.map(([name, endpoint]) => (
+          <DetailRow key={name}>
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="truncate text-sm font-medium">{name}</span>
+                <Badge variant="outline">{endpoint.kind}</Badge>
+                {endpoint.kind === "mcp" && endpoint.transport ? <Badge variant="secondary">{endpoint.transport}</Badge> : null}
+              </div>
+              {appID && token && endpoint.kind === "mcp" ? (
+                <Button className="h-7 px-2 text-xs" type="button" variant="ghost" onClick={() => setEditingMCP({ name, endpoint })}>
+                  <Settings2 className="size-3.5" />
+                  {t("apps.mcpConfig")}
+                </Button>
+              ) : null}
+            </div>
+            <EndpointTarget endpoint={endpoint} />
+            {endpoint.description ? <div className="text-xs text-muted-foreground">{endpoint.description}</div> : null}
+            {endpoint.kind === "mcp" && mcpStatusVisible ? (
+              <MCPStatusDetails
+                endpointName={name}
+                failed={mcpStatusFailed}
+                loading={mcpStatusLoading}
+                statuses={mcpStatusByEndpoint?.get(name) || []}
+              />
+            ) : null}
+          </DetailRow>
+        ))}
+      </div>
+      {appID && token && editingMCP ? (
+        <MCPConfigDialog
+          appID={appID}
+          endpoint={editingMCP.endpoint}
+          endpointName={editingMCP.name}
+          open={Boolean(editingMCP)}
+          token={token}
+          onOpenChange={(open) => {
+            if (!open) {
+              setEditingMCP(null);
+            }
+          }}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -1222,6 +1272,167 @@ function EndpointTarget({ endpoint }: { endpoint: AppEndpoints[string] }) {
     <div className="truncate text-xs text-muted-foreground" title={target}>
       {target}
     </div>
+  );
+}
+
+function MCPConfigDialog({
+  appID,
+  endpoint,
+  endpointName,
+  open,
+  token,
+  onOpenChange,
+}: {
+  appID: string;
+  endpoint: AppEndpoints[string];
+  endpointName: string;
+  open: boolean;
+  token: string;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { t } = useI18n();
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState<MCPConfigForm>(() => mcpConfigFormFromEndpoint(endpoint));
+  const [error, setError] = useState("");
+  const overrideQuery = useQuery({
+    queryKey: queryKeys.appMCPOverride(appID, endpointName),
+    queryFn: () => getAppMCPOverride(token, appID, endpointName),
+    enabled: open,
+    retry: false,
+  });
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const effective = overrideQuery.data?.configured ? applyMCPOverrideToEndpoint(endpoint, overrideQuery.data.override) : endpoint;
+    setForm(mcpConfigFormFromEndpoint(effective));
+    setError("");
+  }, [endpoint, open, overrideQuery.data, endpointName]);
+  const saveMutation = useMutation({
+    mutationFn: (override: AppMCPOverride) => putAppMCPOverride(token, appID, endpointName, override),
+    onSuccess: async () => {
+      toast.success(t("apps.mcpConfigSaved"));
+      onOpenChange(false);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.apps() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.appMCPStatus(appID) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.appMCPOverride(appID, endpointName) }),
+      ]);
+    },
+    onError: () => toast.error(t("apps.mcpConfigSaveFailed")),
+  });
+  const resetMutation = useMutation({
+    mutationFn: () => deleteAppMCPOverride(token, appID, endpointName),
+    onSuccess: async () => {
+      toast.success(t("apps.mcpConfigResetDone"));
+      onOpenChange(false);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.apps() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.appMCPStatus(appID) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.appMCPOverride(appID, endpointName) }),
+      ]);
+    },
+    onError: () => toast.error(t("apps.mcpConfigResetFailed")),
+  });
+  const saving = saveMutation.isPending || resetMutation.isPending;
+  const save = () => {
+    try {
+      setError("");
+      saveMutation.mutate(mcpConfigFormToOverride(form, t));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{t("apps.mcpConfigTitle")}</DialogTitle>
+          <DialogDescription>
+            {endpointName}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4">
+          <label className="grid gap-1.5">
+            <span className="text-sm font-medium">{t("apps.mcpTransport")}</span>
+            <Select
+              value={form.transport}
+              onValueChange={(value) => setForm((current) => ({ ...current, transport: value as MCPConfigForm["transport"] }))}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <DialogSelectContent>
+                <SelectItem value="stdio">stdio</SelectItem>
+                <SelectItem value="streamable_http">streamable_http</SelectItem>
+              </DialogSelectContent>
+            </Select>
+          </label>
+          {form.transport === "stdio" ? (
+            <>
+              <label className="grid gap-1.5">
+                <span className="text-sm font-medium">{t("apps.mcpCommand")}</span>
+                <Input value={form.command} onChange={(event) => setForm((current) => ({ ...current, command: event.target.value }))} />
+              </label>
+              <label className="grid gap-1.5">
+                <span className="text-sm font-medium">{t("apps.mcpArgs")}</span>
+                <Textarea
+                  className="min-h-24 font-mono text-xs"
+                  placeholder={t("apps.mcpArgsPlaceholder")}
+                  value={form.args}
+                  onChange={(event) => setForm((current) => ({ ...current, args: event.target.value }))}
+                />
+              </label>
+              <label className="grid gap-1.5">
+                <span className="text-sm font-medium">{t("apps.mcpEnv")}</span>
+                <Textarea
+                  className="min-h-24 font-mono text-xs"
+                  placeholder={t("apps.mcpEnvPlaceholder")}
+                  value={form.env}
+                  onChange={(event) => setForm((current) => ({ ...current, env: event.target.value }))}
+                />
+              </label>
+            </>
+          ) : (
+            <>
+              <label className="grid gap-1.5">
+                <span className="text-sm font-medium">{t("apps.mcpURL")}</span>
+                <Input value={form.url} onChange={(event) => setForm((current) => ({ ...current, url: event.target.value }))} />
+              </label>
+              <label className="grid gap-1.5">
+                <span className="text-sm font-medium">{t("apps.mcpHeaders")}</span>
+                <Textarea
+                  className="min-h-24 font-mono text-xs"
+                  placeholder={t("apps.mcpHeadersPlaceholder")}
+                  value={form.headers}
+                  onChange={(event) => setForm((current) => ({ ...current, headers: event.target.value }))}
+                />
+              </label>
+            </>
+          )}
+          {error ? <div className="text-sm text-destructive">{error}</div> : null}
+        </div>
+        <DialogFooter className="gap-2 sm:justify-between">
+          <Button
+            disabled={saving || !overrideQuery.data?.configured}
+            type="button"
+            variant="ghost"
+            onClick={() => resetMutation.mutate()}
+          >
+            {t("apps.mcpConfigReset")}
+          </Button>
+          <div className="flex gap-2">
+            <Button disabled={saving} type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button disabled={saving} type="button" onClick={save}>
+              {t("common.save")}
+            </Button>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1378,6 +1589,89 @@ function mcpStatusLabel(status: string, t: (key: string) => string) {
     default:
       return status;
   }
+}
+
+function mcpConfigFormFromEndpoint(endpoint: AppEndpoints[string]): MCPConfigForm {
+  return {
+    transport: endpoint.transport === "streamable_http" ? "streamable_http" : "stdio",
+    command: endpoint.command || "",
+    args: (endpoint.args || []).join("\n"),
+    url: endpoint.url || "",
+    env: mapToLines(endpoint.env),
+    headers: mapToLines(endpoint.headers),
+  };
+}
+
+function applyMCPOverrideToEndpoint(endpoint: AppEndpoints[string], override?: AppMCPOverride): AppEndpoints[string] {
+  if (!override) {
+    return endpoint;
+  }
+  return {
+    ...endpoint,
+    transport: override.transport || endpoint.transport,
+    url: override.url || endpoint.url,
+    command: override.command || endpoint.command,
+    args: override.args ?? endpoint.args,
+    env: override.env ? { ...(endpoint.env || {}), ...override.env } : endpoint.env,
+    headers: override.headers ? { ...(endpoint.headers || {}), ...override.headers } : endpoint.headers,
+  };
+}
+
+function mcpConfigFormToOverride(form: MCPConfigForm, t: (key: string) => string): AppMCPOverride {
+  const transport = form.transport;
+  if (transport === "stdio") {
+    const command = form.command.trim();
+    if (!command) {
+      throw new Error(t("apps.mcpConfigCommandRequired"));
+    }
+    return {
+      transport,
+      command,
+      args: linesToList(form.args),
+      env: linesToMap(form.env, t),
+    };
+  }
+  const url = form.url.trim();
+  if (!url) {
+    throw new Error(t("apps.mcpConfigURLRequired"));
+  }
+  return {
+    transport,
+    url,
+    headers: linesToMap(form.headers, t),
+  };
+}
+
+function mapToLines(values?: Record<string, string>) {
+  return Object.entries(values || {})
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+}
+
+function linesToList(text: string) {
+  return text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+}
+
+function linesToMap(text: string, t: (key: string) => string) {
+  const out: Record<string, string> = {};
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    const index = line.indexOf("=");
+    if (index <= 0) {
+      throw new Error(t("apps.mcpConfigInvalidLine"));
+    }
+    const key = line.slice(0, index).trim();
+    const value = line.slice(index + 1).trim();
+    if (!key) {
+      throw new Error(t("apps.mcpConfigInvalidLine"));
+    }
+    out[key] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function formatMCPInputSchema(schema: unknown) {

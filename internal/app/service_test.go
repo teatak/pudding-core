@@ -124,6 +124,88 @@ func TestListEndpointBindingsIncludesConnectionlessAppWhenAuthNotRequired(t *tes
 	}
 }
 
+func TestListDefinitionsAppliesMCPOverride(t *testing.T) {
+	homeDir := writeConnectionlessTestApp(t)
+	writeMCPOverride(t, homeDir, "sequential-thinking", `
+mcp:
+  local_mcp:
+    command: docker
+    args: ["run", "--rm", "-i", "mcp/sequential-thinking"]
+    env:
+      BASE_ENV: custom
+      CUSTOM_ENV: "1"
+`)
+	svc := NewService(homeDir, nil)
+
+	binding, err := svc.ResolveEndpoint(context.Background(), "session-1", "local_mcp", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if binding.Endpoint.Command != "docker" || len(binding.Endpoint.Args) != 4 || binding.Endpoint.Args[0] != "run" {
+		t.Fatalf("mcp override not applied: %+v", binding.Endpoint)
+	}
+	if binding.Endpoint.Env["BASE_ENV"] != "custom" || binding.Endpoint.Env["PLATFORM_ENV"] != runtime.GOOS || binding.Endpoint.Env["CUSTOM_ENV"] != "1" {
+		t.Fatalf("mcp override env not merged: %+v", binding.Endpoint.Env)
+	}
+}
+
+func TestListDefinitionsRejectsMCPOverrideForNonMCPEndpoint(t *testing.T) {
+	homeDir := writeTestApp(t)
+	writeMCPOverride(t, homeDir, "github", `
+mcp:
+  github_rest:
+    command: docker
+`)
+	svc := NewService(homeDir, nil)
+
+	if _, err := svc.ListDefinitions(context.Background()); err == nil {
+		t.Fatal("expected mcp override for non-mcp endpoint to fail")
+	}
+}
+
+func TestPutGetDeleteMCPOverride(t *testing.T) {
+	homeDir := writeConnectionlessTestApp(t)
+	svc := NewService(homeDir, nil)
+
+	_, configured, err := svc.GetMCPOverride(context.Background(), "sequential-thinking", "local_mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configured {
+		t.Fatal("expected no initial mcp override")
+	}
+
+	override, err := svc.PutMCPOverride(context.Background(), "sequential-thinking", "local_mcp", MCPEndpointOverride{
+		Command: "docker",
+		Args:    stringSlicePtr("run", "--rm", "-i", "mcp/sequential-thinking"),
+		Env:     map[string]string{"BASE_ENV": "custom"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if override.Command != "docker" {
+		t.Fatalf("unexpected override: %+v", override)
+	}
+	got, configured, err := svc.GetMCPOverride(context.Background(), "sequential-thinking", "local_mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !configured || got.Command != "docker" || got.Env["BASE_ENV"] != "custom" {
+		t.Fatalf("unexpected stored override configured=%v override=%+v", configured, got)
+	}
+
+	if err := svc.DeleteMCPOverride(context.Background(), "sequential-thinking", "local_mcp"); err != nil {
+		t.Fatal(err)
+	}
+	_, configured, err = svc.GetMCPOverride(context.Background(), "sequential-thinking", "local_mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configured {
+		t.Fatal("expected mcp override to be deleted")
+	}
+}
+
 func TestReadSkillUsesSkillID(t *testing.T) {
 	homeDir := writeTestAppWithSkill(t)
 	svc := NewService(homeDir, nil)
@@ -203,6 +285,22 @@ endpoints:
 		t.Fatal(err)
 	}
 	return homeDir
+}
+
+func writeMCPOverride(t *testing.T, homeDir, appID, content string) {
+	t.Helper()
+	dir := home.AppMCPOverridesPath(homeDir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, appID+".yaml"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func stringSlicePtr(values ...string) *[]string {
+	out := append([]string(nil), values...)
+	return &out
 }
 
 func writeTestAppWithSkill(t *testing.T) string {

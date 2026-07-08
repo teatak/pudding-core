@@ -40,6 +40,8 @@ import {
   userPromptResponse,
   appDefinition,
   appConnection,
+  appMCPOverride,
+  appMCPOverrideResponse,
   appMCPStatusResponse,
   canvasItem,
   closedCanvasItem,
@@ -69,6 +71,8 @@ import {
   type AppConnection,
   type AppDefinition,
   type AppMCPEndpointStatus,
+  type AppMCPOverride,
+  type AppMCPOverrideResponse,
   type AppMCPStatusResponse,
   type AppMCPTool,
   type AppSkillDetail,
@@ -166,6 +170,7 @@ export type AppConnectionPayload = {
   password?: string;
   fields?: Record<string, string>;
 };
+export type { AppMCPOverride, AppMCPOverrideResponse };
 export type CanvasItemPayload = z.infer<typeof putCanvasItemRequest>;
 export type CanvasItemWindowPayload = z.infer<typeof patchCanvasItemRequest>;
 export type ClosedCanvasItemPayload = z.infer<typeof putClosedCanvasItemRequest>;
@@ -757,6 +762,23 @@ export function listAppConnections(token: string): Promise<{ connections: AppCon
 
 export function getAppMCPStatus(token: string, appID: string): Promise<AppMCPStatusResponse> {
   return request(token, `/apps/${encodeURIComponent(appID)}/mcp`, appMCPStatusResponse);
+}
+
+export function getAppMCPOverride(token: string, appID: string, endpointName: string): Promise<AppMCPOverrideResponse> {
+  return request(token, `/apps/${encodeURIComponent(appID)}/mcp-overrides/${encodeURIComponent(endpointName)}`, appMCPOverrideResponse);
+}
+
+export function putAppMCPOverride(token: string, appID: string, endpointName: string, body: AppMCPOverride): Promise<AppMCPOverrideResponse> {
+  return request(token, `/apps/${encodeURIComponent(appID)}/mcp-overrides/${encodeURIComponent(endpointName)}`, appMCPOverrideResponse, {
+    method: "PUT",
+    body: JSON.stringify(appMCPOverride.parse(body)),
+  });
+}
+
+export async function deleteAppMCPOverride(token: string, appID: string, endpointName: string): Promise<void> {
+  await request(token, `/apps/${encodeURIComponent(appID)}/mcp-overrides/${encodeURIComponent(endpointName)}`, z.null(), {
+    method: "DELETE",
+  });
 }
 
 export function getAppConnection(token: string, id: string): Promise<AppConnection> {

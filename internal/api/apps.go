@@ -18,6 +18,12 @@ type appConnectionConfig interface {
 	DeleteAppConnection(ctx context.Context, id string) error
 }
 
+type appMCPOverrideConfig interface {
+	GetMCPOverride(ctx context.Context, appID, endpointName string) (app.MCPEndpointOverride, bool, error)
+	PutMCPOverride(ctx context.Context, appID, endpointName string, override app.MCPEndpointOverride) (app.MCPEndpointOverride, error)
+	DeleteMCPOverride(ctx context.Context, appID, endpointName string) error
+}
+
 type putAppConnectionReq struct {
 	AppID        string            `json:"appID"`
 	Name         string            `json:"name"`
@@ -35,6 +41,11 @@ type installAppReq struct {
 	PackageJSON   string `json:"packageJSON"`
 	PackageSHA256 string `json:"packageSHA256"`
 	SourceURL     string `json:"sourceURL"`
+}
+
+type appMCPOverrideView struct {
+	Configured bool                    `json:"configured"`
+	Override   app.MCPEndpointOverride `json:"override"`
 }
 
 func (s *Server) listApps(c *cart.Context) error {
@@ -109,6 +120,68 @@ func (s *Server) deleteApp(c *cart.Context) error {
 	}
 	c.String(http.StatusNoContent, "")
 	return nil
+}
+
+func (s *Server) getAppMCPOverride(c *cart.Context) error {
+	cfg, ok := s.appMCPOverrideConfig(c)
+	if !ok {
+		return nil
+	}
+	appID, _ := c.Param("id")
+	endpointName, _ := c.Param("endpoint")
+	override, configured, err := cfg.GetMCPOverride(c.Request.Context(), appID, endpointName)
+	if err != nil {
+		return s.handleAppMCPOverrideError(c, err)
+	}
+	c.JSON(http.StatusOK, appMCPOverrideView{Configured: configured, Override: override})
+	return nil
+}
+
+func (s *Server) putAppMCPOverride(c *cart.Context) error {
+	cfg, ok := s.appMCPOverrideConfig(c)
+	if !ok {
+		return nil
+	}
+	appID, _ := c.Param("id")
+	endpointName, _ := c.Param("endpoint")
+	var req app.MCPEndpointOverride
+	if err := decode(c, &req); err != nil {
+		return badRequest(c, "invalid json body")
+	}
+	override, err := cfg.PutMCPOverride(c.Request.Context(), appID, endpointName, req)
+	if err != nil {
+		return s.handleAppMCPOverrideError(c, err)
+	}
+	c.JSON(http.StatusOK, appMCPOverrideView{Configured: true, Override: override})
+	return nil
+}
+
+func (s *Server) deleteAppMCPOverride(c *cart.Context) error {
+	cfg, ok := s.appMCPOverrideConfig(c)
+	if !ok {
+		return nil
+	}
+	appID, _ := c.Param("id")
+	endpointName, _ := c.Param("endpoint")
+	if err := cfg.DeleteMCPOverride(c.Request.Context(), appID, endpointName); err != nil {
+		return s.handleAppMCPOverrideError(c, err)
+	}
+	c.String(http.StatusNoContent, "")
+	return nil
+}
+
+func (s *Server) handleAppMCPOverrideError(c *cart.Context, err error) error {
+	if errors.Is(err, app.ErrInvalidID) {
+		return badRequest(c, "invalid app id")
+	}
+	if errors.Is(err, app.ErrNotFound) {
+		c.JSON(http.StatusNotFound, map[string]string{"error": "app_mcp_endpoint_not_found"})
+		return nil
+	}
+	if errors.Is(err, app.ErrInvalidMCPOverride) {
+		return badRequest(c, err.Error())
+	}
+	return s.fail(c, err)
 }
 
 func (s *Server) getAppAsset(c *cart.Context) error {
@@ -412,6 +485,15 @@ func (s *Server) appConnectionConfig(c *cart.Context) (appConnectionConfig, bool
 	cfg, ok := s.config.(appConnectionConfig)
 	if !ok {
 		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_connection_config_unavailable"})
+		return nil, false
+	}
+	return cfg, true
+}
+
+func (s *Server) appMCPOverrideConfig(c *cart.Context) (appMCPOverrideConfig, bool) {
+	cfg, ok := s.apps.(appMCPOverrideConfig)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_mcp_override_config_unavailable"})
 		return nil, false
 	}
 	return cfg, true

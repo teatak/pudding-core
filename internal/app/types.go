@@ -110,6 +110,19 @@ type EndpointPlatformOverride struct {
 	Headers map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
 }
 
+type MCPOverrideFile struct {
+	MCP map[string]MCPEndpointOverride `json:"mcp,omitempty" yaml:"mcp,omitempty"`
+}
+
+type MCPEndpointOverride struct {
+	Transport string            `json:"transport,omitempty" yaml:"transport,omitempty"`
+	URL       string            `json:"url,omitempty" yaml:"url,omitempty"`
+	Command   string            `json:"command,omitempty" yaml:"command,omitempty"`
+	Args      *[]string         `json:"args,omitempty" yaml:"args,omitempty"`
+	Env       map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
+}
+
 type SkillRef struct {
 	ID          string `json:"id,omitempty" yaml:"-"`
 	Name        string `json:"name,omitempty" yaml:"-"`
@@ -300,6 +313,17 @@ func CloneEndpoint(in Endpoint) Endpoint {
 func CloneEndpointPlatformOverride(in EndpointPlatformOverride) EndpointPlatformOverride {
 	out := in
 	out.Args = append([]string(nil), in.Args...)
+	out.Env = cloneStringMap(in.Env)
+	out.Headers = cloneStringMap(in.Headers)
+	return out
+}
+
+func CloneMCPEndpointOverride(in MCPEndpointOverride) MCPEndpointOverride {
+	out := in
+	if in.Args != nil {
+		args := append([]string(nil), (*in.Args)...)
+		out.Args = &args
+	}
 	out.Env = cloneStringMap(in.Env)
 	out.Headers = cloneStringMap(in.Headers)
 	return out
