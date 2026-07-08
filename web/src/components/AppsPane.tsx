@@ -1227,12 +1227,16 @@ function EndpointRows({
                   <span className="truncate text-sm font-medium">{name}</span>
                   <Badge variant="outline">{endpoint.kind}</Badge>
                   {endpoint.kind === "mcp" && endpoint.transport ? <Badge variant="secondary">{endpoint.transport}</Badge> : null}
-                  {isMCPConfigured ? <Badge variant="secondary">{t("apps.mcpCustomized")}</Badge> : null}
                 </div>
                 {appID && token && endpoint.kind === "mcp" ? (
-                  <Button className="h-7 px-2 text-xs" type="button" variant="ghost" onClick={() => setEditingMCP({ name, endpoint })}>
+                  <Button
+                    size="sm"
+                    type="button"
+                    variant={isMCPConfigured ? "default" : "outline"}
+                    onClick={() => setEditingMCP({ name, endpoint })}
+                  >
                     <Settings2 className="size-3.5" />
-                    {t("apps.mcpConfig")}
+                    {t(isMCPConfigured ? "apps.mcpConfigEdit" : "apps.mcpConfigAdd")}
                   </Button>
                 ) : null}
               </div>
