@@ -375,6 +375,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     setActiveSurface("canvas");
   };
   const hasBrowserState = Boolean(activeBrowserTab || browserPayloadHasRealState(browserPayload) || browserPayloadHasBlankTabIntent(browserPayload));
+  const hasOpenBrowserWindow = browserActive || hasBrowserState;
   const browserTabTitleText = activeBrowserTab
     ? browserTabTitle(activeBrowserTab, browserPayload?.title || t("browser.newTab"), t("browser.newTab"))
     : hasBrowserState
@@ -480,7 +481,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
       }
       const remainingWindowCount = items.filter((entry) => entry.id !== item.id).length;
-      if (remainingWindowCount === 0 && !browserActive) {
+      if (remainingWindowCount === 0 && !hasOpenBrowserWindow) {
         setCanvasOpen(false);
       }
     },
