@@ -1649,7 +1649,7 @@ function ConnectionDialog({
   const [secretVisible, setSecretVisible] = useState(false);
   const [secretLoading, setSecretLoading] = useState(false);
   const authMethods = useMemo(() => appAuthMethods(app), [app]);
-  const selectedAuthMethod = findAppAuthMethod(authMethods, form.authMethodID, form.authType);
+  const selectedAuthMethod = findAppAuthMethod(authMethods, form.authMethodID, form.authType) || appConnectionOnlyAuthMethod(app, authMethods, connectionFields);
   const saveMutation = useMutation({
     mutationFn: () => {
       if (!app) {
@@ -1708,7 +1708,10 @@ function ConnectionDialog({
     }
     setSecretVisible(false);
     const methods = appAuthMethods({ auth: editingAppAuth });
-    const initialMethod = findAppAuthMethod(methods, editingConnectionAuthMethodID, editingConnectionAuthType) || defaultAppAuthMethod(methods);
+    const initialMethod =
+      findAppAuthMethod(methods, editingConnectionAuthMethodID, editingConnectionAuthType) ||
+      defaultAppAuthMethod(methods) ||
+      appConnectionOnlyAuthMethod({ auth: editingAppAuth, connection: editingAppConnection }, methods, appConnectionFields({ connection: editingAppConnection }));
     setForm({
       id: editingConnectionID || nextConnectionID(editingAppID, connections),
       name: editingConnectionName || nextConnectionName(editingAppName || editingAppID, editingAppID, connections),
@@ -1857,7 +1860,7 @@ function ConnectionDialog({
               </Select>
             </div>
           ) : null}
-          {authMethods.length === 0 ? <div className="text-sm text-destructive">{t("apps.authUnavailable")}</div> : null}
+          {authMethods.length === 0 && app.auth?.required ? <div className="text-sm text-destructive">{t("apps.authUnavailable")}</div> : null}
           {form.authType === "token" ? (
             <LabeledInput
               label={t("apps.prefix")}
@@ -2073,6 +2076,8 @@ function connectionFieldInjectTargetLabel(target: string, t: (key: string) => st
   switch (target) {
     case "body":
       return t("apps.fieldInjectTarget.body");
+    case "env":
+      return t("apps.fieldInjectTarget.env");
     case "header":
       return t("apps.fieldInjectTarget.header");
     case "query":
@@ -2144,6 +2149,17 @@ function appAuthMethods(app?: Pick<AppDefinition, "auth"> | null): AppAuthMethod
       };
     })
     .filter((method) => method.id && method.type);
+}
+
+function appConnectionOnlyAuthMethod(
+  app: Pick<AppDefinition, "auth" | "connection"> | null | undefined,
+  methods: AppAuthMethod[],
+  fields: AppConnectionField[],
+): AppAuthMethod | undefined {
+  if (app?.auth?.required || methods.length > 0 || fields.length === 0) {
+    return undefined;
+  }
+  return { id: "", type: "none" } as AppAuthMethod;
 }
 
 function appCanManageConnections(app?: Pick<AppDefinition, "auth" | "connection"> | null) {

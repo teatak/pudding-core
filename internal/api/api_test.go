@@ -295,6 +295,24 @@ endpoints:
     kind: rest
     url: https://test-unicorn-uiserver-server.lumous.cn
 `,
+		"local-config": `
+id: local-config
+name: Local Config
+connection:
+  fields:
+    - id: apiKey
+      label: API Key
+      required: true
+      secret: true
+      inject:
+        - target: env
+          name: LOCAL_CONFIG_API_KEY
+endpoints:
+  local_mcp:
+    kind: mcp
+    transport: stdio
+    command: local-config-mcp
+`,
 	}
 	for id, body := range apps {
 		dir := filepath.Join(homeDir, "apps", id)
@@ -442,6 +460,35 @@ func TestPutAppConnectionStoresConnectionFields(t *testing.T) {
 	}
 	detail := decodeJSON[appsvc.ConnectionDetailView](t, resp)
 	if detail.Fields["hotelCode"] != "H001" {
+		t.Fatalf("connection fields not stored: %+v", detail.Fields)
+	}
+}
+
+func TestPutAppConnectionStoresFieldsWithoutAuth(t *testing.T) {
+	srv, _, _ := newConfigTestServer(t)
+	resp := req(t, http.MethodPut, srv.URL+"/app-connections/local-config-main", map[string]any{
+		"appID": "local-config",
+		"name":  "Local Config",
+		"fields": map[string]string{
+			"apiKey": "secret",
+		},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	payload := decodeJSON[appsvc.ConnectionView](t, resp)
+	if payload.ID != "local-config-main" || payload.AuthType != appsvc.AuthTypeNone || payload.TokenSet {
+		t.Fatalf("unexpected connection view: %+v", payload)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/app-connections/local-config-main", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("detail status = %d", resp.StatusCode)
+	}
+	detail := decodeJSON[appsvc.ConnectionDetailView](t, resp)
+	if detail.Fields["apiKey"] != "secret" {
 		t.Fatalf("connection fields not stored: %+v", detail.Fields)
 	}
 }

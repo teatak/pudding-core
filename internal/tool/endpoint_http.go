@@ -469,6 +469,34 @@ func applyEndpointConnectionHeaders(headers http.Header, method string, fields m
 	return nil
 }
 
+func applyEndpointConnectionEnv(extra map[string]string, fields map[string]string, defs []app.ConnectionField) (map[string]string, error) {
+	out := make(map[string]string, len(extra)+len(fields))
+	for key, value := range extra {
+		out[key] = value
+	}
+	if len(fields) == 0 || len(defs) == 0 {
+		return out, nil
+	}
+	for _, field := range defs {
+		id := strings.TrimSpace(field.ID)
+		value := strings.TrimSpace(fields[id])
+		if id == "" || value == "" {
+			continue
+		}
+		for _, rule := range field.Inject {
+			if strings.TrimSpace(rule.Target) != "env" {
+				continue
+			}
+			name := connectionFieldInjectName(field, rule)
+			if !validConnectionEnvName(name) {
+				return nil, fmt.Errorf("connection field %q has invalid env name %q", id, name)
+			}
+			out[name] = value
+		}
+	}
+	return out, nil
+}
+
 func connectionFieldRuleMatches(rule app.ConnectionFieldInject, target, method string) bool {
 	if strings.TrimSpace(rule.Target) != target {
 		return false
@@ -491,6 +519,11 @@ func connectionFieldInjectName(field app.ConnectionField, rule app.ConnectionFie
 		name = strings.TrimSpace(field.ID)
 	}
 	return name
+}
+
+func validConnectionEnvName(name string) bool {
+	name = strings.TrimSpace(name)
+	return name != "" && !strings.ContainsAny(name, "=\x00")
 }
 
 func buildEndpointRequestBody(args map[string]any) ([]byte, string, error) {

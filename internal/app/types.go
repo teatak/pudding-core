@@ -84,7 +84,7 @@ type ConnectionField struct {
 }
 
 type ConnectionFieldInject struct {
-	Target  string   `json:"target" yaml:"target"` // query | body | header
+	Target  string   `json:"target" yaml:"target"` // query | body | header | env
 	Name    string   `json:"name,omitempty" yaml:"name,omitempty"`
 	Methods []string `json:"methods,omitempty" yaml:"methods,omitempty"`
 }

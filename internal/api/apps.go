@@ -220,7 +220,10 @@ func (s *Server) putAppConnection(c *cart.Context) error {
 	}
 	method, ok := app.FindAuthMethod(def, req.AuthMethodID, req.AuthType)
 	if !ok {
-		return badRequest(c, "auth method is not supported by app")
+		method, ok = appConnectionOnlyAuthMethod(def, req)
+		if !ok {
+			return badRequest(c, "auth method is not supported by app")
+		}
 	}
 	var existing *app.Connection
 	if found, err := cfg.GetAppConnection(c.Request.Context(), id); err == nil {
@@ -281,6 +284,20 @@ func (s *Server) putAppConnection(c *cart.Context) error {
 	}
 	c.JSON(http.StatusOK, app.ViewConnection(updated))
 	return nil
+}
+
+func appConnectionOnlyAuthMethod(def *app.Definition, req putAppConnectionReq) (app.AuthMethod, bool) {
+	if def == nil || (def.Auth != nil && def.Auth.Required) {
+		return app.AuthMethod{}, false
+	}
+	if strings.TrimSpace(req.AuthMethodID) != "" {
+		return app.AuthMethod{}, false
+	}
+	authType := strings.TrimSpace(req.AuthType)
+	if authType != "" && authType != app.AuthTypeNone {
+		return app.AuthMethod{}, false
+	}
+	return app.AuthMethod{Type: app.AuthTypeNone}, true
 }
 
 func sameAppConnectionAuthMethod(auth app.Auth, method app.AuthMethod) bool {

@@ -277,10 +277,14 @@ func ValidateConnectionConfig(connection *ConnectionConfig) error {
 		}
 		seen[id] = struct{}{}
 		for _, rule := range field.Inject {
-			switch strings.TrimSpace(rule.Target) {
-			case "query", "body", "header":
+			target := strings.TrimSpace(rule.Target)
+			switch target {
+			case "query", "body", "header", "env":
 			default:
 				return fmt.Errorf("connection field %q has unsupported inject target %q", id, rule.Target)
+			}
+			if target == "env" && strings.ContainsAny(strings.TrimSpace(rule.Name), "=\x00") {
+				return fmt.Errorf("connection field %q has invalid env name %q", id, rule.Name)
 			}
 			for _, method := range rule.Methods {
 				switch strings.ToUpper(strings.TrimSpace(method)) {

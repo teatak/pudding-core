@@ -652,7 +652,11 @@ func (c *appMCPStdioClient) start(ctx context.Context) error {
 	if command == "" {
 		return errors.New("stdio mcp endpoint command is required")
 	}
-	env := appMCPStdioEnv(c.binding.Endpoint.Env)
+	extraEnv, err := applyEndpointConnectionEnv(c.binding.Endpoint.Env, c.binding.ConnectionFields, c.binding.ConnectionFieldDefs)
+	if err != nil {
+		return err
+	}
+	env := appMCPStdioEnv(extraEnv)
 	commandPath, err := appMCPResolveCommand(command, env)
 	if err != nil {
 		return err

@@ -27,6 +27,13 @@ connection:
           methods: [GET, DELETE]
         - target: body
           methods: [POST, PUT, PATCH]
+    - id: apiKey
+      label: API key
+      required: true
+      secret: true
+      inject:
+        - target: env
+          name: GITHUB_API_KEY
 endpoints:
   github_rest:
     kind: rest
@@ -57,7 +64,7 @@ Use builtin_rest_request with github_rest.
 	if def.ID != "github" || def.Endpoints["github_rest"].Kind != EndpointKindREST {
 		t.Fatalf("unexpected definition: %+v", def)
 	}
-	if def.Connection == nil || len(def.Connection.Fields) != 1 || def.Connection.Fields[0].ID != "hotelCode" {
+	if def.Connection == nil || len(def.Connection.Fields) != 2 || def.Connection.Fields[1].ID != "apiKey" {
 		t.Fatalf("connection fields not loaded: %+v", def.Connection)
 	}
 	if len(def.Skills) != 1 || def.Skills[0].ID != "github-issues" || def.Skills[0].Description == "" {

@@ -140,8 +140,16 @@ func TestAppMCPRunnerDiscoversAndCallsStdioTool(t *testing.T) {
 			Transport: app.EndpointTransportStdio,
 			Command:   os.Args[0],
 			Args:      []string{"-test.run=TestAppMCPStdioServerHelper", "--"},
-			Env:       map[string]string{"PUDDING_APP_MCP_STDIO_HELPER": "1", "FAKE_MCP_TOKEN": "abc"},
+			Env:       map[string]string{"PUDDING_APP_MCP_STDIO_HELPER": "1"},
 		},
+		ConnectionFields: map[string]string{"apiKey": "abc"},
+		ConnectionFieldDefs: []app.ConnectionField{{
+			ID: "apiKey",
+			Inject: []app.ConnectionFieldInject{{
+				Target: "env",
+				Name:   "FAKE_MCP_TOKEN",
+			}},
+		}},
 	}}})
 
 	defs, err := runner.Definitions(ctx, "session-1")
