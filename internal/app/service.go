@@ -74,7 +74,7 @@ func (s *Service) ListDefinitions(ctx context.Context) ([]*Definition, error) {
 	}
 	out := make([]*Definition, 0, len(defs))
 	for _, def := range defs {
-		out = append(out, CloneDefinition(def))
+		out = append(out, ResolveDefinitionPlatform(def))
 	}
 	return out, nil
 }
@@ -293,7 +293,7 @@ func endpointBindingForConnection(def *Definition, endpointName string, endpoint
 		AppID:               def.ID,
 		ConnectionID:        conn.ID,
 		EndpointName:        endpointName,
-		Endpoint:            endpoint,
+		Endpoint:            ResolveEndpointPlatform(endpoint),
 		Auth:                CloneAuth(conn.Auth),
 		ConnectionFields:    cloneStringMap(conn.Fields),
 		ConnectionFieldDefs: connectionFieldDefs(def.Connection),
@@ -307,7 +307,7 @@ func connectionlessEndpointBinding(def *Definition, endpointName string, endpoin
 	return &EndpointBinding{
 		AppID:        def.ID,
 		EndpointName: endpointName,
-		Endpoint:     endpoint,
+		Endpoint:     ResolveEndpointPlatform(endpoint),
 	}, true
 }
 

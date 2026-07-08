@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/home"
@@ -105,6 +106,9 @@ func TestResolveEndpointUsesConnectionlessAppWhenAuthNotRequired(t *testing.T) {
 	if binding.Endpoint.Kind != EndpointKindMCP || binding.Endpoint.Transport != EndpointTransportStdio {
 		t.Fatalf("unexpected endpoint: %+v", binding.Endpoint)
 	}
+	if binding.Endpoint.Command != "platform-command" || len(binding.Endpoint.Args) != 2 || binding.Endpoint.Args[0] != "platform-arg" || binding.Endpoint.Env["PLATFORM_ENV"] != runtime.GOOS {
+		t.Fatalf("platform endpoint override not applied: %+v", binding.Endpoint)
+	}
 }
 
 func TestListEndpointBindingsIncludesConnectionlessAppWhenAuthNotRequired(t *testing.T) {
@@ -187,6 +191,14 @@ endpoints:
     transport: stdio
     command: npx
     args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+    env:
+      BASE_ENV: base
+    platforms:
+      `+runtime.GOOS+`:
+        command: platform-command
+        args: ["platform-arg", "@modelcontextprotocol/server-sequential-thinking"]
+        env:
+          PLATFORM_ENV: `+runtime.GOOS+`
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}

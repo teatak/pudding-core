@@ -4,6 +4,7 @@ package app
 
 import (
 	"encoding/json"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -90,14 +91,23 @@ type ConnectionFieldInject struct {
 }
 
 type Endpoint struct {
-	Kind        string            `json:"kind" yaml:"kind"`
-	Transport   string            `json:"transport,omitempty" yaml:"transport,omitempty"`
-	URL         string            `json:"url,omitempty" yaml:"url,omitempty"`
-	Command     string            `json:"command,omitempty" yaml:"command,omitempty"`
-	Args        []string          `json:"args,omitempty" yaml:"args,omitempty"`
-	Env         map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
-	Headers     map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
-	Description string            `json:"description,omitempty" yaml:"description,omitempty"`
+	Kind        string                              `json:"kind" yaml:"kind"`
+	Transport   string                              `json:"transport,omitempty" yaml:"transport,omitempty"`
+	URL         string                              `json:"url,omitempty" yaml:"url,omitempty"`
+	Command     string                              `json:"command,omitempty" yaml:"command,omitempty"`
+	Args        []string                            `json:"args,omitempty" yaml:"args,omitempty"`
+	Env         map[string]string                   `json:"env,omitempty" yaml:"env,omitempty"`
+	Headers     map[string]string                   `json:"headers,omitempty" yaml:"headers,omitempty"`
+	Platforms   map[string]EndpointPlatformOverride `json:"platforms,omitempty" yaml:"platforms,omitempty"`
+	Description string                              `json:"description,omitempty" yaml:"description,omitempty"`
+}
+
+type EndpointPlatformOverride struct {
+	URL     string            `json:"url,omitempty" yaml:"url,omitempty"`
+	Command string            `json:"command,omitempty" yaml:"command,omitempty"`
+	Args    []string          `json:"args,omitempty" yaml:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
+	Headers map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
 }
 
 type SkillRef struct {
@@ -253,13 +263,76 @@ func CloneDefinition(in *Definition) *Definition {
 	if in.Endpoints != nil {
 		out.Endpoints = make(map[string]Endpoint, len(in.Endpoints))
 		for k, v := range in.Endpoints {
-			out.Endpoints[k] = v
+			out.Endpoints[k] = CloneEndpoint(v)
 		}
 	}
 	if in.Skills != nil {
 		out.Skills = append([]SkillRef(nil), in.Skills...)
 	}
 	return &out
+}
+
+func ResolveDefinitionPlatform(in *Definition) *Definition {
+	out := CloneDefinition(in)
+	if out == nil {
+		return nil
+	}
+	for name, endpoint := range out.Endpoints {
+		out.Endpoints[name] = ResolveEndpointPlatform(endpoint)
+	}
+	return out
+}
+
+func CloneEndpoint(in Endpoint) Endpoint {
+	out := in
+	out.Args = append([]string(nil), in.Args...)
+	out.Env = cloneStringMap(in.Env)
+	out.Headers = cloneStringMap(in.Headers)
+	if in.Platforms != nil {
+		out.Platforms = make(map[string]EndpointPlatformOverride, len(in.Platforms))
+		for key, platform := range in.Platforms {
+			out.Platforms[key] = CloneEndpointPlatformOverride(platform)
+		}
+	}
+	return out
+}
+
+func CloneEndpointPlatformOverride(in EndpointPlatformOverride) EndpointPlatformOverride {
+	out := in
+	out.Args = append([]string(nil), in.Args...)
+	out.Env = cloneStringMap(in.Env)
+	out.Headers = cloneStringMap(in.Headers)
+	return out
+}
+
+func ResolveEndpointPlatform(endpoint Endpoint) Endpoint {
+	return ResolveEndpointPlatformForGOOS(endpoint, runtime.GOOS)
+}
+
+func ResolveEndpointPlatformForGOOS(endpoint Endpoint, goos string) Endpoint {
+	out := CloneEndpoint(endpoint)
+	override, ok := endpoint.Platforms[strings.TrimSpace(goos)]
+	if !ok {
+		out.Platforms = nil
+		return out
+	}
+	if value := strings.TrimSpace(override.URL); value != "" {
+		out.URL = value
+	}
+	if value := strings.TrimSpace(override.Command); value != "" {
+		out.Command = value
+	}
+	if override.Args != nil {
+		out.Args = append([]string(nil), override.Args...)
+	}
+	if override.Env != nil {
+		out.Env = mergeStringMaps(out.Env, override.Env)
+	}
+	if override.Headers != nil {
+		out.Headers = mergeStringMaps(out.Headers, override.Headers)
+	}
+	out.Platforms = nil
+	return out
 }
 
 func DefaultAuthMethod(def *Definition) (AuthMethod, bool) {
@@ -322,6 +395,20 @@ func cloneStringMap(in map[string]string) map[string]string {
 	out := make(map[string]string, len(in))
 	for k, v := range in {
 		out[k] = v
+	}
+	return out
+}
+
+func mergeStringMaps(base, override map[string]string) map[string]string {
+	out := cloneStringMap(base)
+	if len(override) == 0 {
+		return out
+	}
+	if out == nil {
+		out = map[string]string{}
+	}
+	for key, value := range override {
+		out[key] = value
 	}
 	return out
 }

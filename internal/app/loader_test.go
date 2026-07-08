@@ -38,6 +38,20 @@ endpoints:
   github_rest:
     kind: rest
     url: https://api.github.com
+  github_mcp:
+    kind: mcp
+    transport: stdio
+    command: npx
+    args: ["-y", "@example/github-mcp"]
+    env:
+      BASE_ENV: base
+    platforms:
+      windows:
+        command: cmd
+        args: ["/c", "npx", "-y", "@example/github-mcp"]
+        env:
+          BASE_ENV: windows
+          WINDOWS_ENV: "1"
 skills:
   - skills/issues/SKILL.md
 `), 0o600); err != nil {
@@ -63,6 +77,10 @@ Use builtin_rest_request with github_rest.
 	def := defs[0]
 	if def.ID != "github" || def.Endpoints["github_rest"].Kind != EndpointKindREST {
 		t.Fatalf("unexpected definition: %+v", def)
+	}
+	win := ResolveEndpointPlatformForGOOS(def.Endpoints["github_mcp"], "windows")
+	if win.Command != "cmd" || len(win.Args) != 4 || win.Args[0] != "/c" || win.Env["BASE_ENV"] != "windows" || win.Env["WINDOWS_ENV"] != "1" {
+		t.Fatalf("windows platform override not applied: %+v", win)
 	}
 	if def.Connection == nil || len(def.Connection.Fields) != 2 || def.Connection.Fields[1].ID != "apiKey" {
 		t.Fatalf("connection fields not loaded: %+v", def.Connection)

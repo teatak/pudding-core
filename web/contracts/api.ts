@@ -664,6 +664,14 @@ export const webToolsConfig = z.object({
 });
 export type WebToolsConfig = z.infer<typeof webToolsConfig>;
 
+export const appEndpointPlatformOverride = z.object({
+  url: z.string().optional(),
+  command: z.string().optional(),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+});
+
 export const appEndpoint = z.object({
   kind: z.enum(["rest", "graphql", "mcp"]),
   transport: z.enum(["stdio", "streamable_http"]).optional(),
@@ -672,6 +680,7 @@ export const appEndpoint = z.object({
   args: z.array(z.string()).optional(),
   env: z.record(z.string(), z.string()).optional(),
   headers: z.record(z.string(), z.string()).optional(),
+  platforms: z.record(z.string(), appEndpointPlatformOverride).optional(),
   description: z.string().optional(),
 });
 export type AppEndpoint = z.infer<typeof appEndpoint>;

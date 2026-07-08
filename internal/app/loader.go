@@ -22,6 +22,7 @@ const (
 var appIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 var endpointNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 var connectionFieldIDPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
+var endpointPlatformPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
 type fileDefinition struct {
 	ID          string                 `yaml:"id"`
@@ -352,12 +353,26 @@ func ValidateIcon(icon IconSpec) error {
 func ValidateEndpoint(endpoint Endpoint) error {
 	switch strings.TrimSpace(endpoint.Kind) {
 	case EndpointKindREST, EndpointKindGraphQL:
-		return validateEndpointURL(endpoint.URL)
+		if err := validateEndpointURL(endpoint.URL); err != nil {
+			return err
+		}
 	case EndpointKindMCP:
-		return validateMCPEndpoint(endpoint)
+		if err := validateMCPEndpoint(endpoint); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("unsupported kind %q", endpoint.Kind)
 	}
+	for platform, override := range endpoint.Platforms {
+		platform = strings.TrimSpace(platform)
+		if !endpointPlatformPattern.MatchString(platform) {
+			return fmt.Errorf("invalid endpoint platform %q", platform)
+		}
+		if err := validateEndpointPlatformOverride(override); err != nil {
+			return fmt.Errorf("platform %s: %w", platform, err)
+		}
+	}
+	return nil
 }
 
 func validateMCPEndpoint(endpoint Endpoint) error {
@@ -392,6 +407,39 @@ func validateMCPEndpoint(endpoint Endpoint) error {
 		}
 	}
 	return nil
+}
+
+func validateEndpointPlatformOverride(override EndpointPlatformOverride) error {
+	if strings.TrimSpace(override.URL) != "" {
+		if err := validateEndpointURL(override.URL); err != nil {
+			return err
+		}
+	}
+	if err := validateEndpointStringMap("env", override.Env, validEndpointEnvName); err != nil {
+		return err
+	}
+	if err := validateEndpointStringMap("header", override.Headers, validEndpointHeaderName); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateEndpointStringMap(label string, values map[string]string, valid func(string) bool) error {
+	for name := range values {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return fmt.Errorf("endpoint %s name is required", label)
+		}
+		if !valid(name) {
+			return fmt.Errorf("endpoint %s %q is invalid", label, name)
+		}
+	}
+	return nil
+}
+
+func validEndpointEnvName(name string) bool {
+	name = strings.TrimSpace(name)
+	return name != "" && !strings.ContainsAny(name, "=\x00")
 }
 
 func validEndpointHeaderName(name string) bool {
