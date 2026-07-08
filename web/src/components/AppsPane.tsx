@@ -1189,7 +1189,7 @@ function EndpointRows({
     return <EmptyLine>{t("apps.none")}</EmptyLine>;
   }
   return (
-    <div className="grid gap-2 md:grid-cols-2">
+    <div className="grid gap-2">
       {endpoints.map(([name, endpoint]) => (
         <DetailRow key={name}>
           <div className="flex min-w-0 items-center gap-2">
@@ -1297,11 +1297,13 @@ function MCPToolsList({ tools }: { tools: AppMCPTool[] }) {
     return <div className="text-xs text-muted-foreground">{t("apps.mcpNoTools")}</div>;
   }
   return (
-    <div className="grid gap-2">
-      <div className="text-xs font-medium text-muted-foreground">{t("apps.mcpTools")}</div>
-      <div className="grid gap-2">
+    <div className="grid min-w-0 gap-2">
+      <div className="text-xs font-medium text-muted-foreground">
+        {t("apps.mcpTools")} <span className="ml-1 text-muted-foreground/80">{tools.length}</span>
+      </div>
+      <div className="grid min-w-0 gap-2">
         {tools.map((tool) => (
-          <div key={tool.name} className="grid gap-1.5 border-t border-border/50 pt-2 first:border-t-0 first:pt-0">
+          <div key={tool.name} className="grid min-w-0 gap-1.5 border-t border-border/50 pt-2 first:border-t-0 first:pt-0">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <span className="truncate text-sm font-medium">{tool.title || tool.name}</span>
               {tool.title && tool.title !== tool.name ? <Badge variant="outline">{tool.name}</Badge> : null}
@@ -1310,11 +1312,11 @@ function MCPToolsList({ tools }: { tools: AppMCPTool[] }) {
               <>
                 <div className="line-clamp-3 text-xs leading-5 text-muted-foreground">{mcpToolDescriptionSummary(tool.description)}</div>
                 {mcpToolDescriptionNeedsDetails(tool.description) ? (
-                  <details className="group">
+                  <details className="group min-w-0">
                     <summary className="cursor-pointer text-xs text-muted-foreground transition-colors hover:text-foreground">
                       {t("apps.mcpFullDescription")}
                     </summary>
-                    <div className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-background/80 p-2 text-[11px] leading-4 text-muted-foreground">
+                    <div className="mt-1 max-h-40 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-background/80 p-2 text-[11px] leading-4 text-muted-foreground">
                       {tool.description}
                     </div>
                   </details>
@@ -1322,16 +1324,16 @@ function MCPToolsList({ tools }: { tools: AppMCPTool[] }) {
               </>
             ) : null}
             {tool.providerName ? (
-              <div className="truncate font-mono text-[11px] text-muted-foreground" title={tool.providerName}>
+              <div className="min-w-0 truncate font-mono text-[11px] text-muted-foreground" title={tool.providerName}>
                 {t("apps.mcpProviderToolName")}: {tool.providerName}
               </div>
             ) : null}
             {tool.inputSchema ? (
-              <details className="group">
+              <details className="group min-w-0">
                 <summary className="cursor-pointer text-xs text-muted-foreground transition-colors hover:text-foreground">
                   {t("apps.mcpInputSchema")}
                 </summary>
-                <pre className="mt-1 max-h-44 overflow-auto rounded-md bg-background/80 p-2 text-[11px] leading-4 text-muted-foreground">
+                <pre className="mt-1 max-h-44 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-background/80 p-2 text-[11px] leading-4 text-muted-foreground">
                   {formatMCPInputSchema(tool.inputSchema)}
                 </pre>
               </details>
