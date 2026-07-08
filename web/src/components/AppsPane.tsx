@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ChevronRight, CircleAlert, CircleCheck, CircleDashed, Download, Eye, EyeOff, KeyRound, Loader2, Package, Pencil, Plus, Settings2, Trash } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
@@ -25,6 +25,8 @@ import {
   type AppDefinition,
   type AppMCPEndpointStatus,
   type AppMCPOverride,
+  type AppMCPOverrideResponse,
+  type AppMCPStatusResponse,
   type AppMCPTool,
   type AppSkillDetail,
 } from "@/api/client";
@@ -1318,7 +1320,8 @@ function MCPConfigDialog({
   }, [endpoint, open, overrideQuery.data, endpointName]);
   const saveMutation = useMutation({
     mutationFn: (override: AppMCPOverride) => putAppMCPOverride(token, appID, endpointName, override),
-    onSuccess: async () => {
+    onSuccess: async (data) => {
+      updateMCPOverrideCaches(queryClient, appID, endpointName, data, true);
       toast.success(t("apps.mcpConfigSaved"));
       onOpenChange(false);
       await Promise.all([
@@ -1332,6 +1335,7 @@ function MCPConfigDialog({
   const resetMutation = useMutation({
     mutationFn: () => deleteAppMCPOverride(token, appID, endpointName),
     onSuccess: async () => {
+      updateMCPOverrideCaches(queryClient, appID, endpointName, undefined, false);
       toast.success(t("apps.mcpConfigResetDone"));
       onOpenChange(false);
       await Promise.all([
@@ -1675,6 +1679,30 @@ function mcpConfigFormToOverride(form: MCPConfigForm, t: (key: string) => string
     url,
     headers: linesToMap(form.headers, t),
   };
+}
+
+function updateMCPOverrideCaches(
+  queryClient: QueryClient,
+  appID: string,
+  endpointName: string,
+  override: AppMCPOverrideResponse | undefined,
+  configured: boolean,
+) {
+  queryClient.setQueryData<AppMCPOverrideResponse>(
+    queryKeys.appMCPOverride(appID, endpointName),
+    override || { configured: false, override: {} },
+  );
+  queryClient.setQueryData<AppMCPStatusResponse | undefined>(queryKeys.appMCPStatus(appID), (current) => {
+    if (!current) {
+      return current;
+    }
+    return {
+      ...current,
+      endpoints: current.endpoints.map((status) =>
+        status.endpointName === endpointName ? { ...status, configured } : status,
+      ),
+    };
+  });
 }
 
 function mapToLines(values?: Record<string, string>) {
