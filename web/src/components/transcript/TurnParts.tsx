@@ -1,7 +1,6 @@
 import {
   ArrowLeft,
   ArrowRight,
-  Brain,
   Camera,
   Check,
   ChevronDown,
@@ -18,6 +17,7 @@ import {
   MousePointerClick,
   Paperclip,
   RotateCw,
+  Route,
   Search,
   Wrench,
   type LucideIcon,
@@ -611,7 +611,7 @@ function ThoughtPart({
         onClick={handleThoughtSummaryClick}
         onKeyDown={handleThoughtSummaryKeyDown}
       >
-        <PartIcon icon={Brain} />
+        <PartIcon icon={Route} />
         <span className="flex min-w-0 flex-1 items-center gap-1">
           <span className="shrink-0 truncate">{active ? t("transcript.thinking") : t("transcript.thought")}</span>
           {canShowContent ? (

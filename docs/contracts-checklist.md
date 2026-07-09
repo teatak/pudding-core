@@ -16,8 +16,8 @@
 | `turn.cancelled` | ✓ | ✓ | 有半截输出时 `assistantMessageID` + `interrupted` |
 | `audio.bindings` | — | — | `inputOwner`, `outputOwner`, `inputLevel`;音频 owner 快照 |
 | `audio.input_level` | — | — | `inputLevel`;mic owner 的波形音量 |
-| `approval.requested` | — | — | `approvalID`, `approvalKind`, `title`, `reason`, `risk?`, `payload?` |
-| `approval.resolved` | — | — | `approvalID`, `approvalKind`, `status`, `reason?`, `payload?` |
+| `approval.requested` | — | — | `approvalID`, `approvalKind`(`capability`/`skill_draft`/`tool_call`), `title`, `reason`, `risk?`, `payload?` |
+| `approval.resolved` | — | — | `approvalID`, `approvalKind`(`capability`/`skill_draft`/`tool_call`), `status`, `reason?`, `payload?` |
 | `session.titled` | — | — | `title`;自动标题写回(provisional / LLM 各一次),不落库 |
 | `ping` | — | — | — |
 
@@ -59,7 +59,7 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | `POST /sessions/{id}/audio/input` | `{enabled}` | 200 `{ok, bindings}` | 400 / 404 / 503 |
 | `POST /sessions/{id}/audio/output` | `{enabled}` | 200 `{ok, bindings}` | 400 / 404 / 503 |
 | `GET /sessions/{id}/approvals` | — | `{approvals: []}` pending approval 快照 | 404 |
-| `POST /sessions/{id}/approvals/{approvalID}/approve` | `{scope?: "turn" \| "session"}` | 202 `{status}` | 404 |
+| `POST /sessions/{id}/approvals/{approvalID}/approve` | `{scope?: "turn" \| "session", projectDirs?: string[]}` | 202 `{status}` | 404 |
 | `POST /sessions/{id}/approvals/{approvalID}/deny` | `{reason?}` | 202 `{status}` | 404 |
 | `GET /sessions/{id}/events` | SSE | event stream | 404 |
 | `GET /sessions/{id}/turns` | `before?`, `limit?` | `{turns: [], hasMore}` | 404 |
@@ -90,7 +90,8 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | — | 当前无主路径设置键 |
 
 session 创建时必须显式写入 `provider` 与 `model`。能力档为 `chat` / `workspace`;无授权默认 `activeMode=chat, modeLease=none`;
-`request_capability` 审批通过且 scope=session 时写入 `activeMode` 与 `modeLease=session`。
+`request_capability.targetMode` 对模型暴露为 `project`;审批通过且 scope=session 时,
+后端仍写入内部 `activeMode=workspace` 与 `modeLease=session`。
 draft 页可记住"上次选用模型",
 但不影响既有 session。
 历史上的 `model.default` 与 `provider.openai.*` 过渡键已随 registry 收口删除。

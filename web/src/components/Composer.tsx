@@ -40,16 +40,19 @@ import {
   captureDesktopScreenshot,
   compactSession,
   denyApproval,
+  getProject,
   getAudioBindings,
   getTurn,
   listApps,
   listSkills,
   submitMessage,
+  updateProject,
   updateSession,
   uploadAttachment,
   revealDesktopPath,
   type Attachment,
   type ContentPart,
+  type Project,
   type Session,
   type SkillDraft,
 } from "@/api/client";
@@ -160,7 +163,12 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const pendingApproval = useOverlayStore((state) => selectPendingApproval(state.assistants, sessionID, state.runningTurns[sessionID]));
   const pendingInputFlow = useInputFlowStore((state) => state.requests.find((request) => request.sessionID === sessionID));
   const running = overlayRunning || session.running;
-  const currentMode = session.modeLease === "session" ? session.activeMode : "chat";
+  const projectID = session.projectID || "";
+  const projectQuery = useQuery({
+    queryKey: queryKeys.project(projectID),
+    queryFn: () => getProject(token, projectID),
+    enabled: Boolean(token && projectID),
+  });
   const audioBindingsQuery = useQuery({
     queryKey: queryKeys.audioBindings(),
     queryFn: () => getAudioBindings(token, sessionID),
@@ -351,6 +359,34 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     },
     [queryClient, resolvedModelKey, sessionID, token],
   );
+  const updateProjectApprovalMutation = useMutation({
+    mutationFn: (approvalMode: Project["approvalMode"]) => {
+      if (!projectID) {
+        throw new Error("missing project");
+      }
+      return updateProject(token, projectID, { approvalMode });
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData(queryKeys.project(updated.id), updated);
+      queryClient.setQueryData<{ projects: Project[] }>(queryKeys.projects(), (previous) => {
+        if (!previous) {
+          return previous;
+        }
+        return {
+          projects: previous.projects.map((project) => (project.id === updated.id ? updated : project)),
+        };
+      });
+    },
+    onError: () => {
+      toast.error(t("composer.projectApprovalSaveFailed"));
+    },
+    onSettled: (_data, _error, _variables) => {
+      if (projectID) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.project(projectID) });
+      }
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projects() });
+    },
+  });
 
   useEffect(() => {
     if (!slashMenuOpen) {
@@ -1014,7 +1050,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       </div>
       <ChatColumn>
         <div ref={selectionGuardRef} className="relative">
-          <ComposerApprovalBar approval={pendingApproval} token={token} />
+          <ComposerApprovalBar approval={pendingApproval} sessionProjectID={projectID} token={token} />
           {pendingInputFlow ? <InputFlowPanel key={pendingInputFlow.id} request={pendingInputFlow} /> : null}
           {mentionMenuOpen ? (
             <ComposerMentionMenu
@@ -1101,7 +1137,12 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
                 label={t("composer.addMenuTitle")}
                 onClick={openMentionMenuFromButton}
               />
-              {currentMode === "workspace" ? <WorkspaceDirsControl session={session} token={token} /> : null}
+              <ProjectApprovalControl
+                project={projectQuery.data}
+                projectID={projectID}
+                busy={projectQuery.isLoading || updateProjectApprovalMutation.isPending}
+                onChange={(approvalMode) => updateProjectApprovalMutation.mutate(approvalMode)}
+              />
               {compactMutation.isPending ? (
                 <span
                   aria-live="polite"
@@ -1236,6 +1277,77 @@ function LocalFolderChip({
         <X className="size-3" />
       </button>
     </div>
+  );
+}
+
+const projectApprovalModes: Project["approvalMode"][] = ["ask", "auto", "full"];
+
+function ProjectApprovalControl({
+  project,
+  projectID,
+  busy,
+  onChange,
+}: {
+  project: Project | undefined;
+  projectID: string;
+  busy: boolean;
+  onChange: (approvalMode: Project["approvalMode"]) => void;
+}) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  if (!projectID) {
+    return null;
+  }
+  const value = project?.approvalMode || "auto";
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          aria-label={t("composer.projectApproval")}
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={!project || busy}
+          className="h-7 max-w-32 gap-1.5 rounded-full px-2 text-xs font-normal"
+        >
+          {busy ? <Loader2 className="size-3 shrink-0 animate-spin" /> : <ShieldCheck className="size-3 shrink-0 text-muted-foreground" />}
+          <span className="min-w-0 truncate">{t(`composer.projectApproval.${value}`)}</span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="w-56 gap-1 p-1"
+        collisionPadding={12}
+        side="top"
+        sideOffset={8}
+      >
+        {projectApprovalModes.map((mode) => (
+          <button
+            key={mode}
+            aria-label={t("composer.projectApproval")}
+            className={cn(
+              "flex w-full items-start gap-1.5 rounded-md px-2 py-0.5 text-left text-sm hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden",
+              value === mode && "bg-muted",
+            )}
+            type="button"
+            onClick={() => {
+              if (mode !== value) {
+                onChange(mode);
+              }
+              setOpen(false);
+            }}
+          >
+            <span className="mt-0.5 grid size-4 shrink-0 place-items-center">
+              {value === mode ? <Check className="size-3.5" /> : null}
+            </span>
+            <span className="grid min-w-0">
+              <span className="font-medium leading-5">{t(`composer.projectApproval.${mode}`)}</span>
+              <span className="text-[10px] leading-3.5 text-muted-foreground">{t(`composer.projectApproval.${mode}.desc`)}</span>
+            </span>
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -1571,143 +1683,15 @@ function compactErrorMessage(error: unknown, t: (key: string) => string) {
   return t("composer.compactFailed");
 }
 
-function WorkspaceDirsControl({ session, token }: { session: Session; token: string }) {
-  const queryClient = useQueryClient();
-  const { t } = useI18n();
-  const [picking, setPicking] = useState(false);
-  const [savingDir, setSavingDir] = useState("");
-  const dirs = session.workspaceDirs || [];
-  const title = dirs.length > 0
-    ? t("composer.workspaceDirsCount").replace("{count}", String(dirs.length))
-    : t("composer.workspaceDirsEmpty");
-
-  async function saveWorkspaceDirs(nextDirs: string[]) {
-    const normalized = dedupeStrings(nextDirs.map((dir) => dir.trim()).filter(Boolean));
-    setSavingDir("__all__");
-    try {
-      const updated = await updateSession(token, session.id, { workspaceDirs: normalized });
-      updateSessionInCache(queryClient, updated);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
-    } catch {
-      toast.error(t("composer.workspaceDirsSaveFailed"));
-    } finally {
-      setSavingDir("");
-    }
-  }
-
-  async function addWorkspaceDirs() {
-    if (picking || savingDir) {
-      return;
-    }
-    setPicking(true);
-    try {
-      const picked = await pickWorkspaceDirectories(t);
-      if (picked.length > 0) {
-        await saveWorkspaceDirs([...dirs, ...picked]);
-      }
-    } catch {
-      toast.error(t("transcript.approvalWorkspaceDirPickFailed"));
-    } finally {
-      setPicking(false);
-    }
-  }
-
-  async function removeWorkspaceDir(dir: string) {
-    if (savingDir) {
-      return;
-    }
-    setSavingDir(dir);
-    try {
-      const updated = await updateSession(token, session.id, { workspaceDirs: dirs.filter((item) => item !== dir) });
-      updateSessionInCache(queryClient, updated);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
-    } catch {
-      toast.error(t("composer.workspaceDirsSaveFailed"));
-    } finally {
-      setSavingDir("");
-    }
-  }
-
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button
-          aria-label={title}
-          className={cn(
-            "size-6 rounded-full border-0 bg-transparent text-muted-foreground hover:text-foreground",
-            dirs.length === 0 && "text-warning hover:text-warning",
-          )}
-          size="icon-xs"
-          title={title}
-          type="button"
-          variant="ghost"
-        >
-          <FolderOpen className="size-3.5" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="grid w-[min(24rem,calc(100vw-2rem))] gap-2 p-2.5" side="top" sideOffset={8}>
-        <div className="grid gap-0.5">
-          <div className="text-sm font-medium">{t("composer.workspaceDirsTitle")}</div>
-          <div className="text-xs leading-5 text-muted-foreground">{t("composer.workspaceDirsDesc")}</div>
-        </div>
-        {dirs.length > 0 ? (
-          <div className="grid max-h-40 gap-1 overflow-y-auto rounded-md border bg-background/70 p-1.5">
-            {dirs.map((dir) => (
-              <div key={dir} className="flex min-w-0 items-center gap-1 rounded px-1.5 py-1 text-xs" title={dir}>
-                <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground">{formatWorkspaceDirLabel(dir)}</span>
-                <Button
-                  aria-label={t("common.delete")}
-                  className="size-6 shrink-0 text-muted-foreground hover:text-destructive"
-                  disabled={Boolean(savingDir)}
-                  size="icon-xs"
-                  type="button"
-                  variant="ghost"
-                  onClick={() => void removeWorkspaceDir(dir)}
-                >
-                  {savingDir === dir ? <Loader2 className="size-3 animate-spin" /> : <X className="size-3" />}
-                </Button>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="rounded-md border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">{t("composer.workspaceDirsNone")}</div>
-        )}
-        <Button
-          className="h-8 gap-1.5 rounded-full px-3 text-xs"
-          disabled={picking || Boolean(savingDir)}
-          size="sm"
-          type="button"
-          variant="secondary"
-          onClick={() => void addWorkspaceDirs()}
-        >
-          {picking || savingDir === "__all__" ? <Loader2 className="size-3 animate-spin" /> : <FolderOpen className="size-3.5" />}
-          {t("composer.workspaceDirsAdd")}
-        </Button>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-function updateSessionInCache(queryClient: ReturnType<typeof useQueryClient>, updated: Session) {
-  queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), (previous) => {
-    if (!previous) {
-      return previous;
-    }
-    return {
-      sessions: previous.sessions.map((item) => (item.id === updated.id ? updated : item)),
-    };
-  });
-}
-
-function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval; token: string }) {
+function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?: ComposerApproval; sessionProjectID: string; token: string }) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const [pendingAction, setPendingAction] = useState<"turn" | "session" | "deny" | null>(null);
-  const [selectedWorkspaceDirs, setSelectedWorkspaceDirs] = useState<string[]>([]);
-  const [pickingWorkspaceDir, setPickingWorkspaceDir] = useState(false);
+  const [selectedProjectDirs, setSelectedProjectDirs] = useState<string[]>([]);
+  const [pickingProjectDir, setPickingProjectDir] = useState(false);
   const [viewingSkillDraft, setViewingSkillDraft] = useState<SkillDraft | null>(null);
   useEffect(() => {
-    setSelectedWorkspaceDirs([]);
+    setSelectedProjectDirs([]);
     setViewingSkillDraft(null);
   }, [approval?.approvalID]);
   if (!approval) {
@@ -1715,18 +1699,22 @@ function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval;
   }
   const current = approval;
   const isSkillDraftApproval = current.approvalKind === "skill_draft";
+  const isToolCallApproval = current.approvalKind === "tool_call";
   const targetMode = approvalTargetMode(current.payload);
   const title = approvalTitle(current, targetMode, t);
   const pending = pendingAction !== null;
-  const isWorkspaceApproval = targetMode === "workspace";
-  const payloadWorkspaceDirs = workspaceDirsFromPayload(current.payload);
-  const hasPayloadWorkspaceDirs = payloadWorkspaceDirs.length > 0;
-  const workspaceDirs = hasPayloadWorkspaceDirs ? payloadWorkspaceDirs : selectedWorkspaceDirs;
-  const needsWorkspaceDir = needsWorkspaceDirFromPayload(current.payload);
-  const workspaceDirsRequired = isWorkspaceApproval && needsWorkspaceDir && workspaceDirs.length === 0;
+  const isProjectApproval = targetMode === "project";
+  const payloadProjectDirs = projectDirsFromPayload(current.payload);
+  const hasPayloadProjectDirs = payloadProjectDirs.length > 0;
+  const projectDirs = hasPayloadProjectDirs ? payloadProjectDirs : selectedProjectDirs;
+  const needsProjectDir = needsProjectDirFromPayload(current.payload);
+  const projectDirsRequired = isProjectApproval && needsProjectDir && projectDirs.length === 0;
+  const projectDirsRequiredForSession = isProjectApproval && !sessionProjectID && projectDirs.length === 0;
   const suggestedDirName = suggestedWorkspaceDirName(current.payload);
   const skillDraftApproval = skillDraftFromPayload(current.payload);
   const skillDraft = skillDraftApproval?.draft || null;
+  const toolCallApproval = toolCallFromPayload(current.payload);
+  const approvalReason = isToolCallApproval ? toolCallReason(toolCallApproval.operation, t) || current.reason : current.reason;
 
   async function approve(scope: "turn" | "session") {
     if (pending) {
@@ -1734,9 +1722,12 @@ function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval;
     }
     setPendingAction(scope);
     try {
-      await approveApproval(token, current.sessionID, current.approvalID, scope, isWorkspaceApproval ? workspaceDirs : []);
+      await approveApproval(token, current.sessionID, current.approvalID, scope, isProjectApproval ? projectDirs : []);
       if (scope === "session") {
-        await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.projects() }),
+        ]);
       }
       if (isSkillDraftApproval) {
         setViewingSkillDraft(null);
@@ -1750,25 +1741,25 @@ function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval;
     }
   }
 
-  async function pickWorkspaceDirs() {
-    if (pending || pickingWorkspaceDir || hasPayloadWorkspaceDirs) {
+  async function pickProjectDirs() {
+    if (pending || pickingProjectDir || hasPayloadProjectDirs) {
       return;
     }
-    setPickingWorkspaceDir(true);
+    setPickingProjectDir(true);
     try {
-      const dirs = await pickWorkspaceDirectories(t);
+      const dirs = await pickProjectDirectories(t);
       if (dirs.length > 0) {
-        setSelectedWorkspaceDirs((prev) => dedupeStrings([...prev, ...dirs]));
+        setSelectedProjectDirs((prev) => dedupeStrings([...prev, ...dirs]));
       }
     } catch {
       toast.error(t("transcript.approvalWorkspaceDirPickFailed"));
     } finally {
-      setPickingWorkspaceDir(false);
+      setPickingProjectDir(false);
     }
   }
 
-  function removeWorkspaceDir(dir: string) {
-    setSelectedWorkspaceDirs((prev) => prev.filter((item) => item !== dir));
+  function removeProjectDir(dir: string) {
+    setSelectedProjectDirs((prev) => prev.filter((item) => item !== dir));
   }
 
   async function deny() {
@@ -1790,7 +1781,16 @@ function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval;
         <ShieldCheck className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="min-w-0 truncate font-medium">{title}</span>
       </div>
-      {current.reason ? <div className="line-clamp-2 leading-5 text-muted-foreground">{current.reason}</div> : null}
+      {approvalReason ? <div className="line-clamp-2 leading-5 text-muted-foreground">{approvalReason}</div> : null}
+      {isToolCallApproval && toolCallApproval.paths.length > 0 ? (
+        <div className="grid gap-1 rounded-md border border-border/70 bg-background/70 px-2 py-1.5 font-mono text-[11px] leading-4">
+          {toolCallApproval.paths.map((path) => (
+            <div key={path} className="truncate" title={path}>
+              {path}
+            </div>
+          ))}
+        </div>
+      ) : null}
       {isSkillDraftApproval && skillDraft ? (
         <div className="grid gap-1 rounded-md border border-border/70 bg-background/70 px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
           <div className="flex min-w-0 items-center gap-1">
@@ -1802,22 +1802,22 @@ function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval;
           ) : null}
         </div>
       ) : null}
-      {!isSkillDraftApproval && isWorkspaceApproval ? (
+      {!isSkillDraftApproval && isProjectApproval ? (
         <div className="grid gap-1">
           <div className="text-[11px] font-medium text-muted-foreground">
             {t("transcript.approvalWorkspaceDirs")}
           </div>
-          {workspaceDirs.length > 0 ? (
+          {projectDirs.length > 0 ? (
             <div className="grid gap-1 rounded-md border border-border/70 bg-background/70 px-2 py-1.5 font-mono text-[11px] leading-4">
-              {workspaceDirs.map((dir) => (
+              {projectDirs.map((dir) => (
                 <div key={dir} className="flex min-w-0 items-center gap-1" title={dir}>
                   <span className="min-w-0 flex-1 truncate">{dir}</span>
-                  {!hasPayloadWorkspaceDirs ? (
+                  {!hasPayloadProjectDirs ? (
                     <button
                       aria-label={t("common.delete")}
                       className="grid size-4 shrink-0 place-items-center rounded-full text-muted-foreground hover:text-foreground"
                       type="button"
-                      onClick={() => removeWorkspaceDir(dir)}
+                      onClick={() => removeProjectDir(dir)}
                     >
                       <X className="size-3" />
                     </button>
@@ -1826,20 +1826,20 @@ function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval;
               ))}
             </div>
           ) : null}
-          {workspaceDirsRequired ? (
+          {projectDirsRequired || projectDirsRequiredForSession ? (
             <div className="text-[11px] leading-4 text-warning">{t("transcript.approvalWorkspaceDirsRequired")}</div>
           ) : null}
-          {!hasPayloadWorkspaceDirs ? (
+          {!hasPayloadProjectDirs ? (
             <div className="flex flex-wrap items-center gap-1.5">
               <Button
                 className="h-6 gap-1 rounded-full px-2 text-[11px]"
-                disabled={pending || pickingWorkspaceDir}
+                disabled={pending || pickingProjectDir}
                 size="sm"
                 type="button"
                 variant="secondary"
-                onClick={() => void pickWorkspaceDirs()}
+                onClick={() => void pickProjectDirs()}
               >
-                {pickingWorkspaceDir ? <Loader2 className="size-3 animate-spin" /> : <FolderOpen className="size-3" />}
+                {pickingProjectDir ? <Loader2 className="size-3 animate-spin" /> : <FolderOpen className="size-3" />}
                 {t("transcript.approvalWorkspaceDirChoose")}
               </Button>
               {suggestedDirName ? <span className="text-[11px] text-muted-foreground">{t("transcript.approvalWorkspaceDirsSuggested").replace("{name}", suggestedDirName)}</span> : null}
@@ -1848,7 +1848,18 @@ function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval;
         </div>
       ) : null}
       <div className="flex flex-wrap items-center gap-1.5">
-        {isSkillDraftApproval ? (
+        {isToolCallApproval ? (
+          <Button
+            className="h-6 gap-1 rounded-full px-2 text-[11px]"
+            disabled={pending}
+            size="sm"
+            type="button"
+            onClick={() => void approve("turn")}
+          >
+            {pendingAction === "turn" ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
+            {t("transcript.approvalAllowToolCall")}
+          </Button>
+        ) : isSkillDraftApproval ? (
           <>
             <Button
               className="h-6 gap-1 rounded-full px-2 text-[11px]"
@@ -1875,7 +1886,7 @@ function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval;
           <>
             <Button
               className="h-6 gap-1 rounded-full px-2 text-[11px]"
-              disabled={pending || workspaceDirsRequired}
+              disabled={pending || projectDirsRequired}
               size="sm"
               type="button"
               onClick={() => void approve("turn")}
@@ -1885,7 +1896,7 @@ function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval;
             </Button>
             <Button
               className="h-6 gap-1 rounded-full px-2 text-[11px]"
-              disabled={pending || workspaceDirsRequired}
+              disabled={pending || projectDirsRequired || projectDirsRequiredForSession}
               size="sm"
               type="button"
               variant="secondary"
@@ -1966,15 +1977,17 @@ function approvalTargetMode(payload: unknown) {
   return "";
 }
 
-function workspaceDirsFromPayload(payload: unknown) {
-  if (!payload || typeof payload !== "object" || !("workspaceDirs" in payload) || !Array.isArray(payload.workspaceDirs)) {
+function projectDirsFromPayload(payload: unknown) {
+  if (!payload || typeof payload !== "object") {
     return [];
   }
-  return dedupeStrings(payload.workspaceDirs.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean));
+  const data = payload as Record<string, unknown>;
+  const dirs = Array.isArray(data.projectDirs) ? data.projectDirs : Array.isArray(data.rootDirs) ? data.rootDirs : [];
+  return dedupeStrings(dirs.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean));
 }
 
-function needsWorkspaceDirFromPayload(payload: unknown) {
-  return Boolean(payload && typeof payload === "object" && "needsWorkspaceDir" in payload && payload.needsWorkspaceDir === true);
+function needsProjectDirFromPayload(payload: unknown) {
+  return Boolean(payload && typeof payload === "object" && "needsProjectDir" in payload && payload.needsProjectDir === true);
 }
 
 function suggestedWorkspaceDirName(payload: unknown) {
@@ -2012,20 +2025,36 @@ function skillDraftFromPayload(payload: unknown) {
   };
 }
 
+function toolCallFromPayload(payload: unknown) {
+  if (!payload || typeof payload !== "object") {
+    return { operation: "", paths: [] as string[] };
+  }
+  const data = payload as Record<string, unknown>;
+  const operation = typeof data.operation === "string" ? data.operation.trim() : "";
+  const paths = Array.isArray(data.paths)
+    ? data.paths.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean)
+    : [];
+  return { operation, paths: dedupeStrings(paths) };
+}
+
+function toolCallReason(operation: string, t: (key: string) => string) {
+  switch (operation) {
+    case "write":
+    case "patch":
+    case "delete":
+    case "move":
+    case "copy":
+      return t(`transcript.approvalToolCall.${operation}`);
+    default:
+      return "";
+  }
+}
+
 function dedupeStrings(values: string[]) {
   return values.filter((value, index) => values.indexOf(value) === index);
 }
 
-function formatWorkspaceDirLabel(dir: string) {
-  const normalized = dir.trim().replace(/\\/g, "/");
-  const parts = normalized.split("/").filter(Boolean);
-  if (parts.length <= 3) {
-    return dir;
-  }
-  return `.../${parts.slice(-3).join("/")}`;
-}
-
-async function pickWorkspaceDirectories(t: (key: string) => string) {
+async function pickProjectDirectories(t: (key: string) => string) {
   const dirs = await pickDirectories({
     buttonLabel: t("transcript.approvalWorkspaceDirChoose"),
     message: t("transcript.approvalWorkspaceDirChooseMessage"),
@@ -2037,6 +2066,9 @@ async function pickWorkspaceDirectories(t: (key: string) => string) {
 function approvalTitle(approval: ComposerApproval, targetMode: string, t: (key: string) => string) {
   if (approval.approvalKind === "skill_draft") {
     return t("transcript.approvalSkillDraftTitle");
+  }
+  if (approval.approvalKind === "tool_call") {
+    return t("transcript.approvalToolCallTitle");
   }
   if (approval.approvalKind === "capability") {
     const mode = targetMode ? t(`mode.${targetMode}`) : "";

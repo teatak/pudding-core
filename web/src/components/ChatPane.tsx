@@ -43,13 +43,14 @@ type ChatPaneProps = {
   token: string;
   sessionID: string | undefined;
   draftActive?: boolean;
+  draftProjectID?: string;
   reserveTopRightAction?: boolean;
   // primary = 主 pane(承担会话自动跳转、rail 触发器让位);
   // split = 分屏 pane(会话失效时自动收屏,header 带关闭钮)
   role: "primary" | "split";
 };
 
-export function ChatPane({ token, sessionID, draftActive = false, reserveTopRightAction = false, role }: ChatPaneProps) {
+export function ChatPane({ token, sessionID, draftActive = false, draftProjectID, reserveTopRightAction = false, role }: ChatPaneProps) {
   const navigate = useNavigate({ from: "/" });
   const queryClient = useQueryClient();
   const { t } = useI18n();
@@ -99,6 +100,7 @@ export function ChatPane({ token, sessionID, draftActive = false, reserveTopRigh
             const fallback = remaining.find((session) => session.id !== next.split)?.id || remaining[0]?.id;
             if (fallback) {
               next.session = fallback;
+              delete next.project;
             } else {
               delete next.session;
             }
@@ -170,6 +172,7 @@ export function ChatPane({ token, sessionID, draftActive = false, reserveTopRigh
           if (nextSessionID) {
             next.session = nextSessionID;
             delete next.draft;
+            delete next.project;
           } else {
             delete next.session;
             next.draft = "1";
@@ -234,13 +237,13 @@ export function ChatPane({ token, sessionID, draftActive = false, reserveTopRigh
         </div>
       </header>
       {showDraft ? (
-        <DraftConversation token={token} />
+        <DraftConversation token={token} projectID={draftProjectID} />
       ) : selectedSession ? (
         <Conversation token={token} session={selectedSession} />
       ) : sessionsPending ? (
         <LoadingState />
       ) : (
-        <DraftConversation token={token} />
+        <DraftConversation token={token} projectID={draftProjectID} />
       )}
     </section>
   );

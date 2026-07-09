@@ -84,12 +84,12 @@ type Engine struct {
 	auxCtx    context.Context
 	auxCancel context.CancelFunc
 
-	mu                sync.Mutex
-	running           map[string]context.CancelFunc // sessionID → 当前 turn 的 cancel
-	approvals         map[string]*pendingApproval
-	turnWorkspaceDirs map[string][]string // turnID → 本轮临时授权目录
-	wg                sync.WaitGroup
-	compactMu         sync.Mutex
+	mu           sync.Mutex
+	running      map[string]context.CancelFunc // sessionID → 当前 turn 的 cancel
+	approvals    map[string]*pendingApproval
+	turnProjects map[string]*store.Project // turnID → 本轮临时 Project 绑定
+	wg           sync.WaitGroup
+	compactMu    sync.Mutex
 }
 
 type Option func(*Engine)
@@ -124,16 +124,16 @@ func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opt
 	}
 	auxCtx, auxCancel := context.WithCancel(context.Background())
 	e := &Engine{
-		store:             s,
-		config:            cfg,
-		hub:               hub,
-		resolver:          resolver,
-		builder:           contextbuilder.New(s, nil),
-		auxCtx:            auxCtx,
-		auxCancel:         auxCancel,
-		running:           make(map[string]context.CancelFunc),
-		approvals:         make(map[string]*pendingApproval),
-		turnWorkspaceDirs: make(map[string][]string),
+		store:        s,
+		config:       cfg,
+		hub:          hub,
+		resolver:     resolver,
+		builder:      contextbuilder.New(s, nil),
+		auxCtx:       auxCtx,
+		auxCancel:    auxCancel,
+		running:      make(map[string]context.CancelFunc),
+		approvals:    make(map[string]*pendingApproval),
+		turnProjects: make(map[string]*store.Project),
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -831,7 +831,7 @@ func (e *Engine) finishTurn(sessionID, turnID string, mode store.AgentMode, stat
 func (e *Engine) clearRunning(sessionID, turnID string) {
 	e.mu.Lock()
 	delete(e.running, sessionID)
-	delete(e.turnWorkspaceDirs, turnID)
+	delete(e.turnProjects, turnID)
 	e.mu.Unlock()
 }
 
@@ -1263,16 +1263,40 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 		} else if e.tools == nil {
 			result = tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: "tool runner unavailable"}
 		} else {
-			call.WorkspaceDirs = e.workspaceDirsForToolCall(ctx, sessionID, turnID)
-			toolCtx, cancel, timed := toolContext(ctx, call.Name)
-			result = e.tools.Call(toolCtx, call)
-			cancel()
-			if timed && toolCtx.Err() != nil && result.Content == "" {
-				result = tool.Result{
-					CallID:  call.CallID,
-					Name:    call.Name,
-					Ok:      false,
-					Content: "tool timed out",
+			call.WorkspaceDirs = e.projectRootDirsForToolCall(ctx, sessionID, turnID)
+			if risk, ok := tool.ClassifyToolCall(call.Name, call.Args); ok {
+				project, required, err := e.toolCallApprovalRequired(ctx, sessionID, turnID, risk)
+				if err != nil {
+					result = tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: fmt.Sprintf("approval policy: %v", err)}
+				} else if required {
+					var approved bool
+					result, approved = e.requestToolCallApproval(ctx, sessionID, turnID, call, risk, project)
+					if approved {
+						toolCtx, cancel, timed := toolContext(ctx, call.Name)
+						result = e.tools.Call(toolCtx, call)
+						cancel()
+						if timed && toolCtx.Err() != nil && result.Content == "" {
+							result = tool.Result{
+								CallID:  call.CallID,
+								Name:    call.Name,
+								Ok:      false,
+								Content: "tool timed out",
+							}
+						}
+					}
+				}
+			}
+			if result.CallID == "" && result.Name == "" {
+				toolCtx, cancel, timed := toolContext(ctx, call.Name)
+				result = e.tools.Call(toolCtx, call)
+				cancel()
+				if timed && toolCtx.Err() != nil && result.Content == "" {
+					result = tool.Result{
+						CallID:  call.CallID,
+						Name:    call.Name,
+						Ok:      false,
+						Content: "tool timed out",
+					}
 				}
 			}
 		}
@@ -1345,13 +1369,19 @@ func eventAttachmentsFromStore(attachments []store.Attachment) []event.Attachmen
 	return out
 }
 
-func (e *Engine) workspaceDirsForToolCall(ctx context.Context, sessionID, turnID string) []string {
+func (e *Engine) projectRootDirsForToolCall(ctx context.Context, sessionID, turnID string) []string {
 	var dirs []string
 	if sess, err := e.store.GetSession(ctx, sessionID); err == nil {
-		dirs = append(dirs, sess.WorkspaceDirs...)
+		if sess.ProjectID != "" {
+			if project, err := e.store.GetProject(ctx, sess.ProjectID); err == nil {
+				dirs = append(dirs, project.RootDirs...)
+			}
+		}
 	}
 	e.mu.Lock()
-	dirs = append(dirs, e.turnWorkspaceDirs[turnID]...)
+	if project := e.turnProjects[turnID]; project != nil {
+		dirs = append(dirs, project.RootDirs...)
+	}
 	e.mu.Unlock()
 	return store.NormalizeWorkspaceDirs(dirs)
 }

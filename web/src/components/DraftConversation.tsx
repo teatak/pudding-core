@@ -98,7 +98,7 @@ type QuickSubmit = { id: number; text: string };
 const draftAttachmentSessionID = "draft";
 const emptyDraftModel: DraftModelValue = {};
 
-export function DraftConversation({ token }: { token: string }) {
+export function DraftConversation({ token, projectID }: { token: string; projectID?: string }) {
   const { locale, t } = useI18n();
   const [quickSubmit, setQuickSubmit] = useState<QuickSubmit | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -256,6 +256,7 @@ export function DraftConversation({ token }: { token: string }) {
           <DraftComposer
             droppedFiles={droppedFiles}
             quickSubmit={quickSubmit}
+            projectID={projectID}
             token={token}
             modelReady={draftModelIsValid}
             modelValue={composerModelValue}
@@ -348,6 +349,7 @@ function DraftComposer({
   droppedFiles,
   token,
   quickSubmit,
+  projectID,
   modelReady,
   modelValue,
   onModelValueChange,
@@ -357,6 +359,7 @@ function DraftComposer({
   droppedFiles?: DraftDroppedFilesBatch | null;
   token: string;
   quickSubmit: QuickSubmit | null;
+  projectID?: string;
   modelReady: boolean;
   modelValue: DraftModelValue;
   onModelValueChange: (model: DraftModelValue) => void;
@@ -543,6 +546,7 @@ function DraftComposer({
         search: (prev) => {
           const next = { ...(prev as AppSearch), session: created.id };
           delete next.draft;
+          delete next.project;
           return next;
         },
         replace: true,
@@ -585,6 +589,7 @@ function DraftComposer({
           title: "",
           provider: modelValue.provider,
           model: modelValue.model,
+          projectID,
         });
         if (activeReasoningEffort) {
           created = await updateSession(token, created.id, { reasoningEffort: activeReasoningEffort });
@@ -968,6 +973,7 @@ function DraftComposer({
         title: "",
         provider: modelValue.provider,
         model: modelValue.model,
+        projectID,
       });
       if (activeReasoningEffort) {
         created = await updateSession(token, created.id, { reasoningEffort: activeReasoningEffort });
@@ -978,6 +984,7 @@ function DraftComposer({
         search: (prev) => {
           const next = { ...(prev as AppSearch), session: created.id };
           delete next.draft;
+          delete next.project;
           return next;
         },
         replace: true,

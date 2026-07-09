@@ -1,6 +1,6 @@
 # Pudding Code 能力设计与计划
 
-> 状态:设计草案。
+> 状态:C0 Project 收口与 C1 文件写工具审批安全收口已落地;C1.5 命名收口是 C2 前置。
 > 目标:在现有 multi-session / workspace tool 架构上,把 Pudding 从"可读写文件"
 > 推进到"可信的工程协作 agent"。
 
@@ -29,9 +29,10 @@ session submit
 
 已具备:
 
-- session 有 `WorkspaceDirs`、`ActiveMode=workspace`、`ModeLease=session`,
-  但 `WorkspaceDirs` 是待迁移的旧归属。
-- `request_capability` 可请求 workspace 模式和目录授权。
+- Project 已是代码工作区与审批设置的主实体,session 通过 `projectID`
+  绑定 Project。
+- `ActiveMode=workspace`、`ModeLease=session` 仍由 session 承载。
+- `request_capability` 应请求 Project 能力与项目目录授权。
 - engine 已有 tool loop、`turn.tool` 事件、tool_result canonical 落库。
 - `internal/tool` 已有 workspace 路径解析与沙箱校验。
 - 内置文件工具已覆盖 list/read/stat/search/slice/write/patch/delete/move/copy。
@@ -41,7 +42,7 @@ session submit
 
 - 没有 command/PTY/process runner。
 - 没有 git 专用工具。
-- 当前文件写工具授权过粗:一旦授权目录,模型可直接写/删/移。
+- command/git/network 等高风险工具还未接入统一审批策略。
 - 没有 patch proposal / diff review / 局部接受能力。
 - 工具卡片还没有针对 code/git/command 的专门展示与 i18n 命名。
 
@@ -73,7 +74,7 @@ MVP 要做到:
 
 ## 3. 架构原则
 
-### 3.1 Project-owned workspace
+### 3.1 Project-owned code root
 
 Project 是代码工作区与审批设置的唯一事实源,取代 `session.workspaceDirs`:
 
@@ -108,7 +109,25 @@ tool call 每次通过 `sessionID/turnID -> Project binding -> rootDirs + approv
 
 不新增 daemon 级 `currentWorkspace`。
 
-### 3.2 Daemon-owned process
+### 3.2 命名边界
+
+对用户与工具协议来说,应统一使用 Project,不要继续扩散 workspace:
+
+- UI 文案使用"项目 / Project"。
+- 数据模型使用 `Project.rootDirs`、`Session.projectID`。
+- 文件工具的用户可见 scope 应从 `workspace` 改为 `project`。
+- `request_capability.targetMode` 应从 `workspace` 改为 `project`。
+- approval payload 里的目录字段应从 `workspaceDirs` 收口到 `rootDirs` 或
+  `projectDirs`。
+
+但内部能力档与代码字段名暂时保留 `ModeWorkspace` / `activeMode=workspace` /
+`WorkspaceDirs`:
+
+- 它表达的是"会话具备本地代码/文件能力",不是 Project 实体。
+- 改名会牵动 session mode、turn mode、模型能力和历史数据,收益低于风险。
+- 这不是最终命名,后续必须统一改成 Project/code 语义。
+
+### 3.3 Daemon-owned process
 
 command process 是 daemon-owned resource:
 
@@ -116,7 +135,7 @@ command process 是 daemon-owned resource:
 - session/turn 只拥有调用意图和输出上下文。
 - `POST /sessions/{id}/cancel` 必须取消 provider stream 与正在运行的命令。
 
-### 3.3 Canonical 只存结果摘要
+### 3.4 Canonical 只存结果摘要
 
 canonical messages 继续是 context 唯一事实源,但不要把无限日志塞进去:
 
@@ -124,7 +143,7 @@ canonical messages 继续是 context 唯一事实源,但不要把无限日志塞
 - 大 stdout/stderr 可保存为 attachment 或 temp artifact。
 - token delta / command output delta 不落 canonical。
 
-### 3.4 工具优先,REST 兜底
+### 3.5 工具优先,REST 兜底
 
 新增 code 能力优先表现为 tool:
 
@@ -373,6 +392,8 @@ proposal 可先存在 engine memory 或 temp artifact;正式再考虑 SQLite 表
 
 ### C0: Project 收口
 
+当前状态:基础完成。
+
 - 新增 Project 实体与 `sessions.project_id`。
 - Project 承载 `rootDirs` 与 `approvalMode`。
 - 迁移/删除 `session.workspaceDirs`,新代码只读写 Project。
@@ -390,15 +411,56 @@ proposal 可先存在 engine memory 或 temp artifact;正式再考虑 SQLite 表
 
 ### C1: 审批安全收口
 
+当前状态:文件写工具部分完成。
+
 - 给现有文件写工具接入 tool-call approval。
 - 补工具显示名与 i18n。
 - 更新 `docs/contracts-checklist.md` 中 approval kind。
 
 验收:
 
-- 未审批时模型不能写/删/移 Project 文件。
-- approval 通过后同一 turn 可继续。
-- cancel pending approval 能收尾。
+- 已完成:未审批时模型不能写/删/移 Project 文件。
+- 已完成:approval 通过后同一 turn 可继续。
+- 待补:cancel pending approval 的专项测试。
+
+### C1.5: Project 命名收口
+
+时机:在 C2 Command Runner 之前完成。
+
+原因:
+
+- C2 会新增 command 工具;若继续沿用 `workspace` 命名,command/git/file
+  三套工具都会扩散旧概念。
+- 当前 Project 已是目录与审批设置的事实源,用户侧再显示 workspace 会制造两套
+  心智模型。
+- 越早改 tool schema,模型学到旧参数名的成本越低。
+
+改动范围:
+
+- `builtin_file_*` schema 中 `scope:"workspace"` 改为 `scope:"project"`。
+- 文件 resolver 接受 `project` scope,并从当前 session/turn 绑定的 Project
+  读取 `rootDirs`。
+- `request_capability.targetMode:"workspace"` 改为 `targetMode:"project"`;后端仍可
+  映射到内部 `ModeWorkspace` 能力档。
+- approval payload 与文案从 `workspaceDirs` 改成 Project/rootDirs 语义。
+- 前端、测试、文档里的用户可见 workspace 文案改为 project/项目。
+
+暂不改:
+
+- `ModeWorkspace`
+- `activeMode=workspace`
+- 内部 Go 字段/变量名里的 `WorkspaceDirs`
+
+这些属于内部能力档,先保留。`targetMode:"project"` 是工具协议层命名,
+不要求同时改底层 session mode。等 C1.5/C2 稳定后,单独做内部命名统一。
+
+验收:
+
+- 用户界面不再出现"工作区目录"作为主要概念,统一为"项目目录"。
+- 模型调用文件工具时使用 `scope:"project"`。
+- 模型请求项目能力时使用 `request_capability targetMode:"project"`。
+- 旧 `scope:"workspace"` 与 `targetMode:"workspace"` 不兼容,统一改掉。
+- C2 command runner 的 `cwd` 与权限描述全部基于 Project。
 
 ### C2: Command Runner
 

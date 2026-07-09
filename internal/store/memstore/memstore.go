@@ -18,6 +18,7 @@ import (
 type Memstore struct {
 	mu       sync.Mutex
 	sessions map[string]*store.Session
+	projects map[string]*store.Project
 	turns    map[string]*store.Turn
 	messages map[string][]*store.Message // sessionID → 时间升序
 	queued   map[string][]*store.QueuedInput
@@ -35,6 +36,7 @@ type Memstore struct {
 func New() *Memstore {
 	return &Memstore{
 		sessions: make(map[string]*store.Session),
+		projects: make(map[string]*store.Project),
 		turns:    make(map[string]*store.Turn),
 		messages: make(map[string][]*store.Message),
 		queued:   make(map[string][]*store.QueuedInput),
@@ -52,16 +54,99 @@ func New() *Memstore {
 
 var _ store.Store = (*Memstore)(nil)
 
+func (m *Memstore) CreateProject(_ context.Context, p *store.Project) error {
+	if err := store.NormalizeProject(p); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	p.CreatedAt, p.UpdatedAt = now, now
+	m.projects[p.ID] = cloneProject(p)
+	return nil
+}
+
+func (m *Memstore) GetProject(_ context.Context, id string) (*store.Project, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.projects[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	return cloneProject(p), nil
+}
+
+func (m *Memstore) ListProjects(_ context.Context) ([]*store.Project, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]*store.Project, 0, len(m.projects))
+	for _, p := range m.projects {
+		out = append(out, cloneProject(p))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+			return out[i].UpdatedAt.After(out[j].UpdatedAt)
+		}
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	return out, nil
+}
+
+func (m *Memstore) UpdateProject(_ context.Context, id string, upd store.ProjectUpdate) (*store.Project, error) {
+	if err := store.NormalizeProjectUpdate(&upd); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.projects[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	if upd.Name != nil {
+		p.Name = *upd.Name
+	}
+	if upd.RootDirs != nil {
+		p.RootDirs = append([]string(nil), (*upd.RootDirs)...)
+	}
+	if upd.ApprovalMode != nil {
+		p.ApprovalMode = *upd.ApprovalMode
+	}
+	if upd.Temporary != nil {
+		p.Temporary = *upd.Temporary
+	}
+	p.UpdatedAt = time.Now()
+	return cloneProject(p), nil
+}
+
+func (m *Memstore) DeleteProject(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.projects[id]; !ok {
+		return store.ErrNotFound
+	}
+	delete(m.projects, id)
+	for _, session := range m.sessions {
+		if session.ProjectID == id {
+			session.ProjectID = ""
+		}
+	}
+	return nil
+}
+
 func (m *Memstore) CreateSession(_ context.Context, s *store.Session) error {
 	if err := store.NormalizeSessionProviderModel(s); err != nil {
 		return err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if s.ProjectID != "" {
+		if _, ok := m.projects[s.ProjectID]; !ok {
+			return store.ErrNotFound
+		}
+	}
 	now := time.Now()
 	s.CreatedAt, s.UpdatedAt, s.LastActivityAt = now, now, now
 	cp := *s
-	cp.WorkspaceDirs = append([]string(nil), s.WorkspaceDirs...)
 	m.sessions[s.ID] = &cp
 	return nil
 }
@@ -74,7 +159,6 @@ func (m *Memstore) GetSession(_ context.Context, id string) (*store.Session, err
 		return nil, store.ErrNotFound
 	}
 	cp := *s
-	cp.WorkspaceDirs = append([]string(nil), s.WorkspaceDirs...)
 	cp.ActiveMode = store.NormalizeAgentMode(cp.ActiveMode)
 	if cp.ActiveMode == "" {
 		cp.ActiveMode = store.ModeChat
@@ -89,7 +173,6 @@ func (m *Memstore) ListSessions(_ context.Context) ([]*store.Session, error) {
 	out := make([]*store.Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
 		cp := *s
-		cp.WorkspaceDirs = append([]string(nil), s.WorkspaceDirs...)
 		cp.ActiveMode = store.NormalizeAgentMode(cp.ActiveMode)
 		if cp.ActiveMode == "" {
 			cp.ActiveMode = store.ModeChat
@@ -155,8 +238,13 @@ func (m *Memstore) UpdateSession(_ context.Context, id string, upd store.Session
 	if upd.ModeLease != nil {
 		s.ModeLease = *upd.ModeLease
 	}
-	if upd.WorkspaceDirs != nil {
-		s.WorkspaceDirs = append([]string(nil), (*upd.WorkspaceDirs)...)
+	if upd.ProjectID != nil {
+		if *upd.ProjectID != "" {
+			if _, ok := m.projects[*upd.ProjectID]; !ok {
+				return nil, store.ErrNotFound
+			}
+		}
+		s.ProjectID = *upd.ProjectID
 	}
 	if upd.Pinned != nil {
 		s.Pinned = *upd.Pinned
@@ -166,12 +254,20 @@ func (m *Memstore) UpdateSession(_ context.Context, id string, upd store.Session
 	}
 	s.UpdatedAt = time.Now()
 	cp := *s
-	cp.WorkspaceDirs = append([]string(nil), s.WorkspaceDirs...)
 	return &cp, nil
 }
 
 func sessionModelKey(providerName, model string) string {
 	return strings.TrimSpace(providerName) + ":" + strings.TrimSpace(model)
+}
+
+func cloneProject(p *store.Project) *store.Project {
+	if p == nil {
+		return nil
+	}
+	cp := *p
+	cp.RootDirs = append([]string(nil), p.RootDirs...)
+	return &cp
 }
 
 func (m *Memstore) DeleteSession(_ context.Context, id string) error {

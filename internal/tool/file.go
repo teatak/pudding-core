@@ -26,7 +26,7 @@ const (
 	managedScopeSkillDraft     = "skill_draft"
 	managedScopeSkillPublished = "skill_published"
 	managedScopeTemp           = "temp"
-	managedScopeWorkspace      = "workspace"
+	managedScopeProject        = "project"
 
 	defaultFileReadMaxChars = 20000
 	maxFileReadChars        = 100000
@@ -837,7 +837,7 @@ func copyFileDir(src, dst string) error {
 }
 
 func (r *BuiltinRunner) resolveFilePath(call Call, scope, rawPath string, requireWritable, allowRoot, allowMissing bool) (resolvedFilePath, error) {
-	if strings.TrimSpace(scope) == managedScopeWorkspace {
+	if isProjectFileScope(scope) {
 		root, target, rel, err := resolveWorkspacePath(call.WorkspaceDirs, rawPath, allowRoot, allowMissing)
 		if err != nil {
 			return resolvedFilePath{}, err
@@ -856,14 +856,14 @@ func filePathError(out Result, scope string, err error) Result {
 }
 
 func filePathErrorWithReason(out Result, scope, fallbackReason string, err error) Result {
-	if strings.TrimSpace(scope) != managedScopeWorkspace {
+	if !isProjectFileScope(scope) {
 		return toolJSONError(out, fallbackReason, err.Error())
 	}
 	reason := "path_not_authorized"
-	hint := "The path is outside authorized workspace directories. Use request_capability with targetMode=workspace and workspaceDirs containing the directory, then ask the user to approve it for this turn if temporary access is enough."
+	hint := "The path is outside authorized project directories. Use request_capability with targetMode=project and projectDirs containing the directory, then ask the user to approve it for this turn if temporary access is enough."
 	if errors.Is(err, errWorkspaceDirsRequired) {
-		reason = "workspace_dirs_required"
-		hint = "No workspace directories are authorized. Use request_capability with targetMode=workspace and workspaceDirs, then ask the user to approve it for this turn if temporary access is enough."
+		reason = "project_dirs_required"
+		hint = "No project directories are authorized. Use request_capability with targetMode=project and projectDirs, then ask the user to approve it for this turn if temporary access is enough."
 	} else if errors.Is(err, errWorkspaceFilePathRequired) {
 		reason = "path_not_allowed"
 		hint = "A file path is required for this tool."
@@ -873,6 +873,10 @@ func filePathErrorWithReason(out Result, scope, fallbackReason string, err error
 	out.SummaryKind = SummaryReturnedFields
 	out.SummaryCount = 4
 	return out
+}
+
+func isProjectFileScope(scope string) bool {
+	return strings.TrimSpace(scope) == managedScopeProject
 }
 
 func (r *BuiltinRunner) managedRoot(scope string) (string, bool, error) {
@@ -1465,7 +1469,7 @@ func probeBinaryFile(path string) (bool, string, error) {
 	if n == 0 {
 		return false, mt, nil
 	}
-	if !utf8.Valid(buf[:n]) || strings.Contains(string(buf[:n]), "\x00") {
+	if !validUTF8ProbeSample(buf[:n]) || strings.Contains(string(buf[:n]), "\x00") {
 		return true, mt, nil
 	}
 	main := strings.ToLower(strings.TrimSpace(strings.Split(mt, ";")[0]))
@@ -1547,6 +1551,51 @@ func toolJSONError(out Result, reason, detail string) Result {
 
 func isToolText(data []byte) bool {
 	return len(data) == 0 || (utf8.Valid(data) && !strings.Contains(string(data), "\x00"))
+}
+
+func validUTF8ProbeSample(data []byte) bool {
+	if utf8.Valid(data) {
+		return true
+	}
+	for trim := 1; trim < utf8.UTFMax && trim < len(data); trim++ {
+		prefix := data[:len(data)-trim]
+		tail := data[len(data)-trim:]
+		if utf8.Valid(prefix) && incompleteUTF8Tail(tail) {
+			return true
+		}
+	}
+	return false
+}
+
+func incompleteUTF8Tail(tail []byte) bool {
+	if len(tail) == 0 {
+		return false
+	}
+	need := utf8SequenceLen(tail[0])
+	if need == 0 || need <= len(tail) {
+		return false
+	}
+	for _, b := range tail[1:] {
+		if b&0xc0 != 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+func utf8SequenceLen(first byte) int {
+	switch {
+	case first < utf8.RuneSelf:
+		return 1
+	case first >= 0xc2 && first <= 0xdf:
+		return 2
+	case first >= 0xe0 && first <= 0xef:
+		return 3
+	case first >= 0xf0 && first <= 0xf4:
+		return 4
+	default:
+		return 0
+	}
 }
 
 func countLines(text string) int {

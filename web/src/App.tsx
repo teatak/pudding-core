@@ -77,7 +77,7 @@ function saveWorkspaceCanvasRatio(canvasRatio: number) {
 
 export function App() {
   const token = useToken();
-  const { session: selectedSessionID, draft, split: splitSessionID, view } = useSearch({ from: "/" });
+  const { session: selectedSessionID, draft, project: draftProjectID, split: splitSessionID, view } = useSearch({ from: "/" });
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const canvasOpen = useCanvasOpen();
@@ -268,6 +268,7 @@ export function App() {
             token={token}
             sessionID={selectedSessionID}
             draftActive={draftActive}
+            draftProjectID={draftActive ? draftProjectID : undefined}
             role="primary"
           />
         </ResizablePanel>

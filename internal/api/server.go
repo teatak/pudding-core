@@ -106,7 +106,7 @@ func (s *Server) WithCamera(capturer desktopcamera.Capturer) *Server {
 }
 
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
-var apiPrefixes = []string{"/sessions", "/settings", "/providers", "/tools", "/skills", "/skill-drafts", "/skill-assets", "/usage", "/mobile", "/apps", "/app-assets", "/app-skills", "/app-connections", "/app-oauth", "/mcp", "/desktop"}
+var apiPrefixes = []string{"/sessions", "/projects", "/settings", "/providers", "/tools", "/skills", "/skill-drafts", "/skill-assets", "/usage", "/mobile", "/apps", "/app-assets", "/app-skills", "/app-connections", "/app-oauth", "/mcp", "/desktop"}
 
 type appService interface {
 	ListDefinitions(ctx context.Context) ([]*app.Definition, error)
@@ -201,6 +201,8 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/canvas/items/:itemID").PUT(s.putCanvasItem).PATCH(s.patchCanvasItem).DELETE(s.deleteCanvasItem)
 	app.Route("/sessions/:id/canvas/closed").GET(s.listClosedCanvasItems).POST(s.createClosedCanvasItem).DELETE(s.clearClosedCanvasItems)
 	app.Route("/sessions/:id/canvas/closed/:closedID").DELETE(s.deleteClosedCanvasItem)
+	app.Route("/projects").GET(s.listProjects).POST(s.createProject)
+	app.Route("/projects/:id").GET(s.getProject).PATCH(s.patchProject).DELETE(s.deleteProject)
 	app.Route("/settings").GET(s.getSettings).PUT(s.putSettings)
 	app.Route("/settings/audio").GET(s.getAudioConfig).PUT(s.putAudioConfig)
 	app.Route("/settings/audio/runtime").GET(s.getAudioRuntime)
@@ -349,9 +351,10 @@ func requestBaseURL(r *http.Request) string {
 }
 
 type createSessionReq struct {
-	Title    string `json:"title"`
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
+	Title     string `json:"title"`
+	Provider  string `json:"provider"`
+	Model     string `json:"model"`
+	ProjectID string `json:"projectID"`
 }
 
 func (s *Server) createSession(c *cart.Context) error {
@@ -362,15 +365,94 @@ func (s *Server) createSession(c *cart.Context) error {
 	}
 	req.Provider = strings.TrimSpace(req.Provider)
 	req.Model = strings.TrimSpace(req.Model)
+	req.ProjectID = strings.TrimSpace(req.ProjectID)
 	if req.Provider == "" || req.Model == "" {
 		c.JSON(http.StatusBadRequest, map[string]string{"error": "no_model"})
 		return nil
 	}
-	sess := &store.Session{ID: store.NewID("sess"), Title: req.Title, Provider: req.Provider, Model: req.Model}
+	sess := &store.Session{ID: store.NewID("sess"), Title: req.Title, Provider: req.Provider, Model: req.Model, ProjectID: req.ProjectID}
+	if req.ProjectID != "" {
+		sess.ActiveMode = store.ModeWorkspace
+		sess.ModeLease = store.ModeLeaseSession
+	}
 	if err := s.store.CreateSession(c.Request.Context(), sess); err != nil {
 		return s.fail(c, err)
 	}
 	c.JSON(http.StatusCreated, sess)
+	return nil
+}
+
+type createProjectReq struct {
+	Name         string             `json:"name"`
+	RootDirs     []string           `json:"rootDirs"`
+	ApprovalMode store.ApprovalMode `json:"approvalMode"`
+	Temporary    bool               `json:"temporary"`
+}
+
+func (s *Server) createProject(c *cart.Context) error {
+	var req createProjectReq
+	if err := decode(c, &req); err != nil {
+		return badRequest(c, "invalid json body")
+	}
+	project := &store.Project{
+		ID:           store.NewID("proj"),
+		Name:         req.Name,
+		RootDirs:     req.RootDirs,
+		ApprovalMode: req.ApprovalMode,
+		Temporary:    req.Temporary,
+	}
+	if err := s.store.CreateProject(c.Request.Context(), project); err != nil {
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusCreated, project)
+	return nil
+}
+
+func (s *Server) listProjects(c *cart.Context) error {
+	projects, err := s.store.ListProjects(c.Request.Context())
+	if err != nil {
+		return s.fail(c, err)
+	}
+	visible := projects[:0]
+	for _, project := range projects {
+		if project != nil && !project.Temporary {
+			visible = append(visible, project)
+		}
+	}
+	c.JSON(http.StatusOK, map[string]any{"projects": visible})
+	return nil
+}
+
+func (s *Server) getProject(c *cart.Context) error {
+	id, _ := c.Param("id")
+	project, err := s.store.GetProject(c.Request.Context(), id)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, project)
+	return nil
+}
+
+func (s *Server) patchProject(c *cart.Context) error {
+	id, _ := c.Param("id")
+	var upd store.ProjectUpdate
+	if err := decode(c, &upd); err != nil {
+		return badRequest(c, "invalid json body")
+	}
+	project, err := s.store.UpdateProject(c.Request.Context(), id, upd)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, project)
+	return nil
+}
+
+func (s *Server) deleteProject(c *cart.Context) error {
+	id, _ := c.Param("id")
+	if err := s.store.DeleteProject(c.Request.Context(), id); err != nil {
+		return s.fail(c, err)
+	}
+	c.String(http.StatusNoContent, "")
 	return nil
 }
 
@@ -637,8 +719,8 @@ func (s *Server) compactSession(c *cart.Context) error {
 }
 
 type approveApprovalReq struct {
-	Scope         string   `json:"scope"`
-	WorkspaceDirs []string `json:"workspaceDirs"`
+	Scope       string   `json:"scope"`
+	ProjectDirs []string `json:"projectDirs"`
 }
 
 type approvalView struct {
@@ -647,7 +729,7 @@ type approvalView struct {
 	TurnID       string          `json:"turnID"`
 	CallID       string          `json:"callID,omitempty"`
 	ApprovalKind string          `json:"approvalKind"`
-	TargetMode   store.AgentMode `json:"targetMode,omitempty"`
+	TargetMode   string          `json:"targetMode,omitempty"`
 	Title        string          `json:"title,omitempty"`
 	Reason       string          `json:"reason,omitempty"`
 	Risk         string          `json:"risk,omitempty"`
@@ -666,7 +748,7 @@ func (s *Server) listApprovals(c *cart.Context) error {
 			TurnID:       approval.TurnID,
 			CallID:       approval.CallID,
 			ApprovalKind: approval.Kind,
-			TargetMode:   approval.TargetMode,
+			TargetMode:   publicApprovalTargetMode(approval),
 			Title:        approval.Title,
 			Reason:       approval.Reason,
 			Risk:         approval.Risk,
@@ -692,18 +774,25 @@ func (s *Server) approveApproval(c *cart.Context) error {
 	if scope != engine.ApprovalScopeTurn && scope != engine.ApprovalScopeSession {
 		return badRequest(c, "invalid approval scope")
 	}
-	if err := s.engine.ApproveApproval(c.Request.Context(), id, approvalID, scope, req.WorkspaceDirs); err != nil {
+	if err := s.engine.ApproveApproval(c.Request.Context(), id, approvalID, scope, req.ProjectDirs); err != nil {
 		if errors.Is(err, engine.ErrApprovalNotFound) {
 			c.JSON(http.StatusNotFound, map[string]string{"error": "not_found"})
 			return nil
 		}
 		if errors.Is(err, engine.ErrWorkspaceDirsRequired) {
-			return badRequest(c, "workspace_dirs_required")
+			return badRequest(c, "project_dirs_required")
 		}
 		return s.fail(c, err)
 	}
 	c.JSON(http.StatusAccepted, map[string]string{"status": "approved"})
 	return nil
+}
+
+func publicApprovalTargetMode(approval engine.ApprovalRequest) string {
+	if approval.Kind == engine.ApprovalKindCapability && approval.TargetMode == store.ModeWorkspace {
+		return "project"
+	}
+	return string(approval.TargetMode)
 }
 
 type denyApprovalReq struct {
@@ -986,6 +1075,10 @@ func (s *Server) fail(c *cart.Context, err error) error {
 	}
 	if errors.Is(err, store.ErrInvalidSession) {
 		c.JSON(http.StatusBadRequest, map[string]string{"error": "no_model"})
+		return nil
+	}
+	if errors.Is(err, store.ErrInvalidProject) {
+		c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid_project"})
 		return nil
 	}
 	c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})

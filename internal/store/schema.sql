@@ -11,12 +11,22 @@ CREATE TABLE IF NOT EXISTS sessions (
     reasoning_model_key TEXT NOT NULL DEFAULT '',
     active_mode TEXT   NOT NULL DEFAULT 'chat',
     mode_lease  TEXT   NOT NULL DEFAULT 'none',
-    workspace_dirs TEXT NOT NULL DEFAULT '[]',
+    project_id TEXT NOT NULL DEFAULT '',
     pinned     INTEGER NOT NULL DEFAULT 0,
     pinned_order INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL, -- unix ms
     updated_at INTEGER NOT NULL,
     last_activity_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS projects (
+    id            TEXT PRIMARY KEY,
+    name          TEXT    NOT NULL DEFAULT '',
+    root_dirs     TEXT    NOT NULL DEFAULT '[]',
+    approval_mode TEXT    NOT NULL DEFAULT 'auto',
+    temporary     INTEGER NOT NULL DEFAULT 0,
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS turns (

@@ -167,7 +167,7 @@ func TestBuiltinFileWorkspaceScopeReadWrite(t *testing.T) {
 
 	list := runner.Call(context.Background(), Call{
 		Name:          FileList,
-		Args:          json.RawMessage(`{"scope":"workspace","path":"dir"}`),
+		Args:          json.RawMessage(`{"scope":"project","path":"dir"}`),
 		WorkspaceDirs: []string{root},
 	})
 	if !list.Ok {
@@ -184,7 +184,7 @@ func TestBuiltinFileWorkspaceScopeReadWrite(t *testing.T) {
 
 	read := runner.Call(context.Background(), Call{
 		Name:          FileRead,
-		Args:          json.RawMessage(`{"scope":"workspace","path":"` + filepath.ToSlash(notePath) + `"}`),
+		Args:          json.RawMessage(`{"scope":"project","path":"` + filepath.ToSlash(notePath) + `"}`),
 		WorkspaceDirs: []string{root},
 	})
 	if !read.Ok {
@@ -198,7 +198,7 @@ func TestBuiltinFileWorkspaceScopeReadWrite(t *testing.T) {
 	writePath := filepath.Join(root, "nested", "created.txt")
 	write := runner.Call(context.Background(), Call{
 		Name:          FileWrite,
-		Args:          json.RawMessage(`{"scope":"workspace","path":"` + filepath.ToSlash(writePath) + `","content":"created"}`),
+		Args:          json.RawMessage(`{"scope":"project","path":"` + filepath.ToSlash(writePath) + `","content":"created"}`),
 		WorkspaceDirs: []string{root},
 	})
 	if !write.Ok {
@@ -228,7 +228,7 @@ func TestBuiltinFileCopyFileAndDirectory(t *testing.T) {
 
 	fileCopy := runner.Call(context.Background(), Call{
 		Name:          FileCopy,
-		Args:          json.RawMessage(`{"scope":"workspace","from_path":"src/note.txt","to_path":"copy/note.txt"}`),
+		Args:          json.RawMessage(`{"scope":"project","from_path":"src/note.txt","to_path":"copy/note.txt"}`),
 		WorkspaceDirs: []string{root},
 	})
 	if !fileCopy.Ok {
@@ -244,7 +244,7 @@ func TestBuiltinFileCopyFileAndDirectory(t *testing.T) {
 
 	dirWithoutRecursive := runner.Call(context.Background(), Call{
 		Name:          FileCopy,
-		Args:          json.RawMessage(`{"scope":"workspace","from_path":"src","to_path":"copy/src"}`),
+		Args:          json.RawMessage(`{"scope":"project","from_path":"src","to_path":"copy/src"}`),
 		WorkspaceDirs: []string{root},
 	})
 	if dirWithoutRecursive.Ok {
@@ -257,7 +257,7 @@ func TestBuiltinFileCopyFileAndDirectory(t *testing.T) {
 
 	dirCopy := runner.Call(context.Background(), Call{
 		Name:          FileCopy,
-		Args:          json.RawMessage(`{"scope":"workspace","from_path":"src","to_path":"copy/src","recursive":true}`),
+		Args:          json.RawMessage(`{"scope":"project","from_path":"src","to_path":"copy/src","recursive":true}`),
 		WorkspaceDirs: []string{root},
 	})
 	if !dirCopy.Ok {
@@ -280,7 +280,7 @@ func TestBuiltinFileWorkspaceRejectsOutsideRoot(t *testing.T) {
 	}
 	res := NewBuiltinRunner(WithHomeDir(t.TempDir())).Call(context.Background(), Call{
 		Name:          FileRead,
-		Args:          json.RawMessage(`{"scope":"workspace","path":"` + filepath.ToSlash(outside) + `"}`),
+		Args:          json.RawMessage(`{"scope":"project","path":"` + filepath.ToSlash(outside) + `"}`),
 		WorkspaceDirs: []string{root},
 	})
 	if res.Ok {
@@ -295,13 +295,13 @@ func TestBuiltinFileWorkspaceRejectsOutsideRoot(t *testing.T) {
 func TestBuiltinFileWorkspaceRequiresDirs(t *testing.T) {
 	res := NewBuiltinRunner(WithHomeDir(t.TempDir())).Call(context.Background(), Call{
 		Name: FileList,
-		Args: json.RawMessage(`{"scope":"workspace","path":"."}`),
+		Args: json.RawMessage(`{"scope":"project","path":"."}`),
 	})
 	if res.Ok {
 		t.Fatalf("workspace list without dirs should fail: %+v", res)
 	}
 	payload := decodeToolResult(t, res)
-	if payload["reason"] != "workspace_dirs_required" {
+	if payload["reason"] != "project_dirs_required" {
 		t.Fatalf("unexpected reason: %+v", payload)
 	}
 }
@@ -332,7 +332,7 @@ func TestBuiltinFileStatSearchAndSlice(t *testing.T) {
 
 	stat := runner.Call(context.Background(), Call{
 		Name:          FileStat,
-		Args:          json.RawMessage(`{"scope":"workspace","path":"` + filepath.ToSlash(notePath) + `"}`),
+		Args:          json.RawMessage(`{"scope":"project","path":"` + filepath.ToSlash(notePath) + `"}`),
 		WorkspaceDirs: []string{root},
 	})
 	if !stat.Ok {
@@ -345,7 +345,7 @@ func TestBuiltinFileStatSearchAndSlice(t *testing.T) {
 
 	search := runner.Call(context.Background(), Call{
 		Name:          FileSearch,
-		Args:          json.RawMessage(`{"scope":"workspace","path":".","query":"marker"}`),
+		Args:          json.RawMessage(`{"scope":"project","path":".","query":"marker"}`),
 		WorkspaceDirs: []string{root},
 	})
 	if !search.Ok {
@@ -359,7 +359,7 @@ func TestBuiltinFileStatSearchAndSlice(t *testing.T) {
 
 	slice := runner.Call(context.Background(), Call{
 		Name:          FileSlice,
-		Args:          json.RawMessage(`{"scope":"workspace","path":"docs/note.txt","start":2,"end":3}`),
+		Args:          json.RawMessage(`{"scope":"project","path":"docs/note.txt","start":2,"end":3}`),
 		WorkspaceDirs: []string{root},
 	})
 	if !slice.Ok {
@@ -372,7 +372,7 @@ func TestBuiltinFileStatSearchAndSlice(t *testing.T) {
 
 	reverseTail := runner.Call(context.Background(), Call{
 		Name:          FileSlice,
-		Args:          json.RawMessage(`{"scope":"workspace","path":"docs/note.txt","origin":"end","lines":2,"order":"reverse"}`),
+		Args:          json.RawMessage(`{"scope":"project","path":"docs/note.txt","origin":"end","lines":2,"order":"reverse"}`),
 		WorkspaceDirs: []string{root},
 	})
 	if !reverseTail.Ok {
@@ -403,6 +403,29 @@ func TestBuiltinFileReadRejectsLargeText(t *testing.T) {
 	payload := decodeToolResult(t, res)
 	if payload["reason"] != "file_too_large" || payload["hint"] == "" {
 		t.Fatalf("unexpected large read payload: %+v", payload)
+	}
+}
+
+func TestBuiltinFileReadAllowsUTF8RuneAcrossProbeBoundary(t *testing.T) {
+	home := t.TempDir()
+	tempDir := filepath.Join(home, "temp")
+	if err := os.MkdirAll(tempDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	content := strings.Repeat("a", 511) + "中\n"
+	if err := os.WriteFile(filepath.Join(tempDir, "boundary.md"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res := NewBuiltinRunner(WithHomeDir(home)).Call(context.Background(), Call{
+		Name: FileRead,
+		Args: json.RawMessage(`{"scope":"temp","path":"boundary.md"}`),
+	})
+	if !res.Ok {
+		t.Fatalf("utf-8 boundary read should succeed: %+v", res)
+	}
+	payload := decodeToolResult(t, res)
+	if payload["content"] != content {
+		t.Fatalf("unexpected boundary content: %+v", payload)
 	}
 }
 

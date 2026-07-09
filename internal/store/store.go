@@ -19,6 +19,7 @@ var (
 	// API 层映射为 409(docs/technology-decisions.md 第 14 节)。
 	ErrTurnRunning              = errors.New("store: session has a running turn")
 	ErrInvalidSession           = errors.New("store: session provider and model are required")
+	ErrInvalidProject           = errors.New("store: invalid project")
 	ErrQueueBlocked             = errors.New("store: queued input is editing")
 	ErrInvalidCanvas            = errors.New("store: invalid canvas item")
 	ErrInvalidBrowserState      = errors.New("store: invalid browser state")
@@ -40,10 +41,10 @@ type Session struct {
 	ReasoningModelKey string    `json:"reasoningModelKey,omitempty"`
 	ActiveMode        AgentMode `json:"activeMode"`
 	ModeLease         ModeLease `json:"modeLease"`
-	// WorkspaceDirs 是用户授权给本 session 的工作区根目录集合。
-	WorkspaceDirs []string  `json:"workspaceDirs,omitempty"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	// ProjectID 指向代码工作区与审批设置的唯一事实源。
+	ProjectID string    `json:"projectID,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 	// LastActivityAt 只描述会话内容活动时间:用户提交 / assistant 收尾推进。
 	// 列表排序和"最近"时间显示使用它,避免 rename / 改模型把会话顶到最上面。
 	LastActivityAt time.Time `json:"lastActivityAt"`
@@ -61,10 +62,35 @@ type SessionUpdate struct {
 	ReasoningEffort *string    `json:"reasoningEffort"`
 	ActiveMode      *AgentMode `json:"activeMode"`
 	ModeLease       *ModeLease `json:"modeLease"`
-	WorkspaceDirs   *[]string  `json:"workspaceDirs"`
+	ProjectID       *string    `json:"projectID"`
 	Pinned          *bool      `json:"pinned"`
 	// PinnedOrder 仅描述 pinned 组内手动排序,不改变最近会话排序。
 	PinnedOrder *int64 `json:"pinnedOrder"`
+}
+
+type ApprovalMode string
+
+const (
+	ApprovalAsk  ApprovalMode = "ask"
+	ApprovalAuto ApprovalMode = "auto"
+	ApprovalFull ApprovalMode = "full"
+)
+
+type Project struct {
+	ID           string       `json:"id"`
+	Name         string       `json:"name"`
+	RootDirs     []string     `json:"rootDirs"`
+	ApprovalMode ApprovalMode `json:"approvalMode"`
+	Temporary    bool         `json:"temporary,omitempty"`
+	CreatedAt    time.Time    `json:"createdAt"`
+	UpdatedAt    time.Time    `json:"updatedAt"`
+}
+
+type ProjectUpdate struct {
+	Name         *string       `json:"name"`
+	RootDirs     *[]string     `json:"rootDirs"`
+	ApprovalMode *ApprovalMode `json:"approvalMode"`
+	Temporary    *bool         `json:"temporary"`
 }
 
 type AgentMode string
@@ -158,7 +184,7 @@ func NormalizeSessionProviderModel(s *Session) error {
 	if s.ModeLease == ModeLeaseNone {
 		s.ActiveMode = ModeChat
 	}
-	s.WorkspaceDirs = NormalizeWorkspaceDirs(s.WorkspaceDirs)
+	s.ProjectID = strings.TrimSpace(s.ProjectID)
 	return nil
 }
 
@@ -199,11 +225,60 @@ func NormalizeSessionUpdate(upd *SessionUpdate) error {
 			upd.ActiveMode = &mode
 		}
 	}
-	if upd.WorkspaceDirs != nil {
-		dirs := NormalizeWorkspaceDirs(*upd.WorkspaceDirs)
-		upd.WorkspaceDirs = &dirs
+	if upd.ProjectID != nil {
+		projectID := strings.TrimSpace(*upd.ProjectID)
+		upd.ProjectID = &projectID
 	}
 	return nil
+}
+
+func NormalizeProject(project *Project) error {
+	if project == nil {
+		return ErrInvalidProject
+	}
+	project.ID = strings.TrimSpace(project.ID)
+	project.Name = strings.TrimSpace(project.Name)
+	project.RootDirs = NormalizeWorkspaceDirs(project.RootDirs)
+	project.ApprovalMode = NormalizeApprovalMode(project.ApprovalMode)
+	if project.ID == "" || len(project.RootDirs) == 0 {
+		return ErrInvalidProject
+	}
+	if project.Name == "" {
+		project.Name = localFolderName(project.RootDirs[0])
+	}
+	return nil
+}
+
+func NormalizeProjectUpdate(upd *ProjectUpdate) error {
+	if upd.Name != nil {
+		name := strings.TrimSpace(*upd.Name)
+		upd.Name = &name
+	}
+	if upd.RootDirs != nil {
+		dirs := NormalizeWorkspaceDirs(*upd.RootDirs)
+		if len(dirs) == 0 {
+			return ErrInvalidProject
+		}
+		upd.RootDirs = &dirs
+	}
+	if upd.ApprovalMode != nil {
+		mode := NormalizeApprovalMode(*upd.ApprovalMode)
+		upd.ApprovalMode = &mode
+	}
+	return nil
+}
+
+func NormalizeApprovalMode(mode ApprovalMode) ApprovalMode {
+	switch ApprovalMode(strings.TrimSpace(strings.ToLower(string(mode)))) {
+	case ApprovalAsk:
+		return ApprovalAsk
+	case "", ApprovalAuto:
+		return ApprovalAuto
+	case ApprovalFull:
+		return ApprovalFull
+	default:
+		return ApprovalAuto
+	}
 }
 
 func NormalizeWorkspaceDirs(dirs []string) []string {
@@ -1334,6 +1409,12 @@ func normalizeCanvasID(id string) string {
 // 事件 seq 由 Store 在事务内按 session 单调分配。
 // SQLite 实现要求 WAL + 单 writer;schema 契约见 schema.sql。
 type Store interface {
+	CreateProject(ctx context.Context, p *Project) error
+	GetProject(ctx context.Context, id string) (*Project, error)
+	ListProjects(ctx context.Context) ([]*Project, error)
+	UpdateProject(ctx context.Context, id string, upd ProjectUpdate) (*Project, error)
+	DeleteProject(ctx context.Context, id string) error
+
 	CreateSession(ctx context.Context, s *Session) error
 	GetSession(ctx context.Context, id string) (*Session, error)
 	ListSessions(ctx context.Context) ([]*Session, error)

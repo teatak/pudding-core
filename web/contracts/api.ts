@@ -11,7 +11,7 @@ export const session = z.object({
   reasoningModelKey: z.string().optional(),
   activeMode: z.enum(["chat", "workspace"]),
   modeLease: z.enum(["none", "session"]),
-  workspaceDirs: z.array(z.string()).optional(),
+  projectID: z.string().optional(),
   pinned: z.boolean(),
   pinnedOrder: z.number(),
   createdAt: z.string(), // RFC3339
@@ -20,6 +20,38 @@ export const session = z.object({
   running: z.boolean(), // 读取时从 turns 派生,rail 运行态指示
 });
 export type Session = z.infer<typeof session>;
+
+export const approvalMode = z.enum(["ask", "auto", "full"]);
+export type ApprovalMode = z.infer<typeof approvalMode>;
+
+export const project = z.object({
+  id: z.string(),
+  name: z.string(),
+  rootDirs: z.array(z.string()),
+  approvalMode,
+  temporary: z.boolean().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type Project = z.infer<typeof project>;
+
+export const listProjectsResponse = z.object({
+  projects: z.array(project),
+});
+
+export const createProjectRequest = z.object({
+  name: z.string().optional(),
+  rootDirs: z.array(z.string()).min(1),
+  approvalMode: approvalMode.optional(),
+  temporary: z.boolean().optional(),
+});
+
+export const patchProjectRequest = z.object({
+  name: z.string().optional(),
+  rootDirs: z.array(z.string()).optional(),
+  approvalMode: approvalMode.optional(),
+  temporary: z.boolean().optional(),
+});
 
 export const canvasItem = z.object({
   id: z.string(),
@@ -342,7 +374,7 @@ export const pendingApproval = z.object({
   turnID: z.string(),
   callID: z.string().optional(),
   approvalKind: z.string(),
-  targetMode: z.enum(["chat", "workspace"]).optional(),
+  targetMode: z.enum(["chat", "project"]).optional(),
   title: z.string().optional(),
   reason: z.string().optional(),
   risk: z.string().optional(),

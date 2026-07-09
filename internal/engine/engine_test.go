@@ -1274,9 +1274,10 @@ func TestSkillDraftSubmitApprovalAppliesDraft(t *testing.T) {
 	}
 }
 
-func TestWorkspaceApprovalAllowsOptionalDirs(t *testing.T) {
+func TestWorkspaceApprovalSessionScopeCreatesProject(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
+	dir := t.TempDir()
 	client := &workspaceCapabilityClient{}
 	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions()}
 	eng := New(ms, hub, mapResolver{"workspace": client}, ms, WithTools(runner))
@@ -1313,7 +1314,10 @@ func TestWorkspaceApprovalAllowsOptionalDirs(t *testing.T) {
 			t.Fatal("approval request not emitted")
 		}
 	}
-	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeSession, nil); err != nil {
+	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeSession, nil); !errors.Is(err, ErrWorkspaceDirsRequired) {
+		t.Fatalf("expected workspace dirs required, got %v", err)
+	}
+	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeSession, []string{dir}); err != nil {
 		t.Fatal(err)
 	}
 	waitTurnDone(t, ms, sid)
@@ -1325,8 +1329,15 @@ func TestWorkspaceApprovalAllowsOptionalDirs(t *testing.T) {
 	if sess.ActiveMode != store.ModeWorkspace || sess.ModeLease != store.ModeLeaseSession {
 		t.Fatalf("session mode not upgraded: %+v", sess)
 	}
-	if len(sess.WorkspaceDirs) != 0 {
-		t.Fatalf("workspace dirs not stored: %+v", sess.WorkspaceDirs)
+	if sess.ProjectID == "" {
+		t.Fatalf("session project not bound: %+v", sess)
+	}
+	project, err := ms.GetProject(ctx, sess.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := project.RootDirs; len(got) != 1 || got[0] != dir {
+		t.Fatalf("project dirs not stored: %+v", got)
 	}
 	if len(client.requests) != 2 || !hasToolDef(client.requests[1].Tools, tool.FileList) {
 		t.Fatalf("workspace tools not exposed after approval: %+v", client.requests)
@@ -1385,14 +1396,95 @@ func TestWorkspaceApprovalTurnScopeGrantsDirsWithoutPersisting(t *testing.T) {
 		t.Fatalf("expected one file tool call after approval, got %+v", runner.calls)
 	}
 	if got := runner.calls[0].WorkspaceDirs; len(got) != 1 || got[0] != dir {
-		t.Fatalf("turn-scoped workspace dir not passed to tool: %+v", got)
+		t.Fatalf("turn-scoped project dir not passed to tool: %+v", got)
 	}
 	sess, err := ms.GetSession(ctx, sid)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sess.WorkspaceDirs) != 0 {
-		t.Fatalf("turn-scoped approval must not persist dirs: %+v", sess.WorkspaceDirs)
+	if sess.ProjectID != "" {
+		t.Fatalf("turn-scoped approval must not persist project: %+v", sess.ProjectID)
+	}
+}
+
+func TestProjectAutoApprovalRequiresFileWriteApproval(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	dir := t.TempDir()
+	project := &store.Project{
+		ID:           "proj_write_approval",
+		Name:         "write approval",
+		RootDirs:     []string{dir},
+		ApprovalMode: store.ApprovalAuto,
+	}
+	if err := ms.CreateProject(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+	client := &fileWriteApprovalClient{}
+	runner := &recordingToolRunner{
+		defs:   tool.BuiltinDefinitions(),
+		result: tool.Result{Ok: true, Content: `{"ok":true}`},
+	}
+	eng := New(ms, hub, mapResolver{"workspace": client}, ms, WithTools(runner))
+	ctx := context.Background()
+	sid := "sess_project_file_write_approval"
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID:         sid,
+		Title:      "workspace",
+		Provider:   "workspace",
+		Model:      "workspace-model",
+		ActiveMode: store.ModeWorkspace,
+		ModeLease:  store.ModeLeaseSession,
+		ProjectID:  project.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "workspace", Protocol: "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID:           "workspace-model",
+			Capabilities: &store.ModelCaps{Tools: true},
+			Limits:       &store.ModelLimits{MaxToolLoops: 3},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sub, unsub := hub.Subscribe(sid)
+	defer unsub()
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "写文件"}); err != nil {
+		t.Fatal(err)
+	}
+	var approval event.Event
+	deadline := time.After(time.Second)
+	for approval.Kind != event.ApprovalRequested {
+		select {
+		case ev := <-sub:
+			if ev.Kind == event.ApprovalRequested {
+				approval = ev
+			}
+		case <-deadline:
+			t.Fatal("approval request not emitted")
+		}
+	}
+	if approval.ApprovalKind != ApprovalKindToolCall || approval.CallID != "call_file_write" {
+		t.Fatalf("bad tool approval: %+v", approval)
+	}
+	if strings.Contains(string(approval.Payload), "created by tool") {
+		t.Fatalf("tool approval payload must not expose full write content: %s", approval.Payload)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("file tool executed before approval: %+v", runner.calls)
+	}
+	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeTurn, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+	if len(runner.calls) != 1 || runner.calls[0].Name != tool.FileWrite {
+		t.Fatalf("file tool did not execute after approval: %+v", runner.calls)
+	}
+	if got := runner.calls[0].WorkspaceDirs; len(got) != 1 || got[0] != dir {
+		t.Fatalf("project dirs not passed to file tool: %+v", got)
 	}
 }
 
@@ -2164,7 +2256,7 @@ func (c *unauthorizedFileClient) Stream(_ context.Context, req provider.Request)
 			Index:     0,
 			CallID:    "call_file",
 			Name:      tool.FileRead,
-			ArgsDelta: `{"scope":"workspace","path":"/tmp/demo.txt"}`,
+			ArgsDelta: `{"scope":"project","path":"/tmp/demo.txt"}`,
 		}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	} else {
@@ -2214,7 +2306,7 @@ func (c *capabilityClient) Stream(_ context.Context, req provider.Request) (<-ch
 			Index:     0,
 			CallID:    "call_cap",
 			Name:      tool.RequestCapability,
-			ArgsDelta: `{"targetMode":"workspace","reason":"需要读取本地文件","risk":"local file access"}`,
+			ArgsDelta: `{"targetMode":"project","reason":"需要读取本地文件","risk":"local file access"}`,
 		}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	} else {
@@ -2240,7 +2332,7 @@ func (c *capabilityAfterTextClient) Stream(_ context.Context, req provider.Reque
 			Index:     0,
 			CallID:    "call_cap",
 			Name:      tool.RequestCapability,
-			ArgsDelta: `{"targetMode":"workspace","reason":"需要读取本地文件"}`,
+			ArgsDelta: `{"targetMode":"project","reason":"需要读取本地文件"}`,
 		}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	} else {
@@ -2265,7 +2357,7 @@ func (c *workspaceCapabilityClient) Stream(_ context.Context, req provider.Reque
 			Index:     0,
 			CallID:    "call_workspace_cap",
 			Name:      tool.RequestCapability,
-			ArgsDelta: `{"targetMode":"workspace","reason":"需要在工作区创建文件并运行本地命令","needsWorkspaceDir":true,"suggestedDirName":"gomoku"}`,
+			ArgsDelta: `{"targetMode":"project","reason":"需要在项目中创建文件并运行本地命令","needsProjectDir":true,"suggestedDirName":"gomoku"}`,
 		}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	} else {
@@ -2289,9 +2381,9 @@ func (c *workspaceDirGrantClient) Stream(_ context.Context, req provider.Request
 	switch len(c.requests) {
 	case 1:
 		args, _ := json.Marshal(map[string]any{
-			"targetMode":    "workspace",
-			"reason":        "需要读取用户附带的本地目录",
-			"workspaceDirs": []string{c.dir},
+			"targetMode":  "project",
+			"reason":      "需要读取用户附带的本地目录",
+			"projectDirs": []string{c.dir},
 		})
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
 			Index:     0,
@@ -2305,7 +2397,7 @@ func (c *workspaceDirGrantClient) Stream(_ context.Context, req provider.Request
 			Index:     0,
 			CallID:    "call_file_list",
 			Name:      tool.FileList,
-			ArgsDelta: `{"scope":"workspace","path":"."}`,
+			ArgsDelta: `{"scope":"project","path":"."}`,
 		}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	default:
@@ -2335,6 +2427,31 @@ func (c *skillDraftSubmitClient) Stream(_ context.Context, req provider.Request)
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	} else {
 		out <- provider.Chunk{Part: provider.PartText, Delta: "skill 已发布"}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
+	}
+	close(out)
+	return out, nil
+}
+
+type fileWriteApprovalClient struct {
+	requests []provider.Request
+}
+
+func (c *fileWriteApprovalClient) Name() string { return "file-write-approval" }
+
+func (c *fileWriteApprovalClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	c.requests = append(c.requests, req)
+	out := make(chan provider.Chunk, 4)
+	if len(c.requests) == 1 {
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
+			Index:     0,
+			CallID:    "call_file_write",
+			Name:      tool.FileWrite,
+			ArgsDelta: `{"scope":"project","path":"notes.txt","content":"created by tool"}`,
+		}}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	} else {
+		out <- provider.Chunk{Part: provider.PartText, Delta: "文件已写入"}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
 	}
 	close(out)

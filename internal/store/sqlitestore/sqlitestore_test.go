@@ -30,30 +30,45 @@ func createTestSession(t *testing.T, st store.Store, id string) {
 	}
 }
 
-func TestSessionWorkspaceDirsPersist(t *testing.T) {
+func TestSessionProjectPersists(t *testing.T) {
 	st, path := openTestStore(t)
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "project")
-	if err := st.CreateSession(ctx, &store.Session{
-		ID:            "sess_workspace",
-		Title:         "workspace",
-		Provider:      "mock",
-		Model:         "mock",
-		WorkspaceDirs: []string{root, root + "/.", "relative"},
+	if err := st.CreateProject(ctx, &store.Project{
+		ID:           "proj_workspace",
+		Name:         "workspace",
+		RootDirs:     []string{root, root + "/.", "relative"},
+		ApprovalMode: store.ApprovalAuto,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := st.GetSession(ctx, "sess_workspace")
+	project, err := st.GetProject(ctx, "proj_workspace")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sameStrings(got.WorkspaceDirs, []string{root}) {
-		t.Fatalf("workspace dirs not normalized: %+v", got.WorkspaceDirs)
+	if !sameStrings(project.RootDirs, []string{root}) {
+		t.Fatalf("project roots not normalized: %+v", project.RootDirs)
+	}
+	if err := st.CreateSession(ctx, &store.Session{
+		ID:        "sess_project",
+		Title:     "project",
+		Provider:  "mock",
+		Model:     "mock",
+		ProjectID: project.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetSession(ctx, "sess_project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ProjectID != project.ID {
+		t.Fatalf("session project not stored: %+v", got.ProjectID)
 	}
 
 	other := filepath.Join(t.TempDir(), "other")
 	dirs := []string{other, other}
-	if _, err := st.UpdateSession(ctx, "sess_workspace", store.SessionUpdate{WorkspaceDirs: &dirs}); err != nil {
+	if _, err := st.UpdateProject(ctx, project.ID, store.ProjectUpdate{RootDirs: &dirs}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Close(); err != nil {
@@ -64,12 +79,19 @@ func TestSessionWorkspaceDirsPersist(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	got, err = reopened.GetSession(ctx, "sess_workspace")
+	got, err = reopened.GetSession(ctx, "sess_project")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sameStrings(got.WorkspaceDirs, []string{other}) {
-		t.Fatalf("workspace dirs not persisted: %+v", got.WorkspaceDirs)
+	if got.ProjectID != project.ID {
+		t.Fatalf("session project not persisted: %+v", got.ProjectID)
+	}
+	project, err = reopened.GetProject(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameStrings(project.RootDirs, []string{other}) {
+		t.Fatalf("project roots not persisted: %+v", project.RootDirs)
 	}
 }
 

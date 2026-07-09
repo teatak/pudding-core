@@ -10,19 +10,19 @@ import (
 const RequestCapability = "request_capability"
 
 type CapabilityRequest struct {
-	TargetMode        store.AgentMode `json:"targetMode"`
-	Reason            string          `json:"reason"`
-	WorkspaceDirs     []string        `json:"workspaceDirs,omitempty"`
-	NeedsWorkspaceDir bool            `json:"needsWorkspaceDir,omitempty"`
-	SuggestedDirName  string          `json:"suggestedDirName,omitempty"`
-	Risk              string          `json:"risk,omitempty"`
+	TargetMode       store.AgentMode `json:"targetMode"`
+	Reason           string          `json:"reason"`
+	ProjectDirs      []string        `json:"projectDirs,omitempty"`
+	NeedsProjectDir  bool            `json:"needsProjectDir,omitempty"`
+	SuggestedDirName string          `json:"suggestedDirName,omitempty"`
+	Risk             string          `json:"risk,omitempty"`
 }
 
 func RequestCapabilityDefinition() provider.ToolDef {
 	return provider.ToolDef{
 		Name:        RequestCapability,
-		Description: "Request workspace capability, or request additional workspace directories when workspace capability is already active. The user may approve only for the current turn or remember it for the session.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"targetMode":{"type":"string","enum":["workspace"],"description":"Workspace capability is required to inspect or change local files."},"reason":{"type":"string","description":"Why workspace capability or additional workspace directories are needed."},"workspaceDirs":{"type":"array","items":{"type":"string"},"description":"Absolute workspace directories requested. Use attached local folder paths exactly when the user provided them. Leave empty only if the user must choose."},"needsWorkspaceDir":{"type":"boolean","description":"Set true when workspace capability is needed but no concrete directory is known."},"suggestedDirName":{"type":"string","description":"Optional short suggested folder name when asking the user to choose a workspace directory."},"risk":{"type":"string","description":"Potential side effects or privacy/local file risks."}},"required":["targetMode","reason"],"additionalProperties":false}`),
+		Description: "Request project capability, or request additional project directories when project capability is already active. The user may approve only for the current turn or remember it for the session.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"targetMode":{"type":"string","enum":["project"],"description":"Project capability is required to inspect or change local project files."},"reason":{"type":"string","description":"Why project capability or additional project directories are needed."},"projectDirs":{"type":"array","items":{"type":"string"},"description":"Absolute project directories requested. Use attached local folder paths exactly when the user provided them. Leave empty only if the user must choose."},"needsProjectDir":{"type":"boolean","description":"Set true when project capability is needed but no concrete directory is known."},"suggestedDirName":{"type":"string","description":"Optional short suggested folder name when asking the user to choose a project directory."},"risk":{"type":"string","description":"Potential side effects or privacy/local file risks."}},"required":["targetMode","reason"],"additionalProperties":false}`),
 		Capability:  store.ModeChat,
 	}
 }

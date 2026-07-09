@@ -14,18 +14,21 @@ import {
   listMessagesResponse,
   listPendingApprovalsResponse,
   listProvidersResponse,
+  listProjectsResponse,
   listQueuedInputsResponse,
   listSessionsResponse,
   listTurnsResponse,
   message,
   patchQueuedInputRequest,
   patchProviderRequest,
+  patchProjectRequest,
   patchCanvasItemRequest,
   probeProviderModelsRequest,
   putCanvasItemRequest,
   putClosedCanvasItemRequest,
   patchWebToolsRequest,
   providerProfile,
+  project,
   queuedInput,
   session,
   sessionUsage,
@@ -53,6 +56,7 @@ import {
   audioConfigResponse,
   audioRuntimeStatus,
   clearASRRecordingsResponse,
+  createProjectRequest,
   browserActionResult,
   browserClickRequest,
   browserObservation,
@@ -102,6 +106,7 @@ import {
   type ConversationTurn,
   type ProviderModel,
   type ProviderProfile,
+  type Project,
   type QueuedInput,
   type Session,
   type SessionUsage,
@@ -128,6 +133,7 @@ const createSessionRequest = z.object({
   title: z.string().optional(),
   provider: z.string().min(1),
   model: z.string().min(1),
+  projectID: z.string().optional(),
 });
 
 const sessionPatchRequest = z.object({
@@ -137,7 +143,7 @@ const sessionPatchRequest = z.object({
   reasoningEffort: z.string().optional(),
   activeMode: z.enum(["chat", "workspace"]).optional(),
   modeLease: z.enum(["none", "session"]).optional(),
-  workspaceDirs: z.array(z.string()).optional(),
+  projectID: z.string().optional(),
   pinned: z.boolean().optional(),
   pinnedOrder: z.number().optional(),
 });
@@ -264,6 +270,41 @@ export function createMobilePairing(token: string): Promise<MobilePairing> {
 
 export function listSessions(token: string): Promise<{ sessions: Session[] }> {
   return request(token, "/sessions", listSessionsResponse);
+}
+
+export function listProjects(token: string): Promise<{ projects: Project[] }> {
+  return request(token, "/projects", listProjectsResponse);
+}
+
+export function getProject(token: string, projectID: string): Promise<Project> {
+  return request(token, `/projects/${encodeURIComponent(projectID)}`, project);
+}
+
+export function createProject(
+  token: string,
+  body: z.infer<typeof createProjectRequest>,
+): Promise<Project> {
+  return request(token, "/projects", project, {
+    method: "POST",
+    body: JSON.stringify(createProjectRequest.parse(body)),
+  });
+}
+
+export function updateProject(
+  token: string,
+  projectID: string,
+  body: z.infer<typeof patchProjectRequest>,
+): Promise<Project> {
+  return request(token, `/projects/${encodeURIComponent(projectID)}`, project, {
+    method: "PATCH",
+    body: JSON.stringify(patchProjectRequest.parse(body)),
+  });
+}
+
+export async function deleteProject(token: string, projectID: string): Promise<void> {
+  await request(token, `/projects/${encodeURIComponent(projectID)}`, z.null(), {
+    method: "DELETE",
+  });
 }
 
 export function createSession(
@@ -701,11 +742,11 @@ export async function approveApproval(
   sessionID: string,
   approvalID: string,
   scope: "turn" | "session" = "turn",
-  workspaceDirs: string[] = [],
+  projectDirs: string[] = [],
 ): Promise<void> {
   await request(token, `/sessions/${encodeURIComponent(sessionID)}/approvals/${encodeURIComponent(approvalID)}/approve`, z.object({ status: z.string() }), {
     method: "POST",
-    body: JSON.stringify({ scope, workspaceDirs }),
+    body: JSON.stringify({ scope, projectDirs }),
   });
 }
 
@@ -951,5 +992,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BuiltinTool, BrowserActionResult, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
-export { createProviderRequest, patchProviderRequest };
+export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BuiltinTool, BrowserActionResult, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
+export { createProjectRequest, createProviderRequest, patchProjectRequest, patchProviderRequest };

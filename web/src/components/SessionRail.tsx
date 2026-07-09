@@ -9,6 +9,7 @@ import {
   Package,
   PanelLeft,
   Pin,
+  Plus,
   TextCursorInput,
   MessageCirclePlus,
   Search,
@@ -30,8 +31,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-import { deleteSession, getAudioBindings, listSessions, updateSession } from "@/api/client";
-import type { Session } from "@/api/client";
+import { deleteSession, getAudioBindings, listProjects, listSessions, updateSession } from "@/api/client";
+import type { Project, Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { LanguageToggle } from "@/components/LanguageToggle";
 import { PhaseDot } from "@/components/PhaseDot";
@@ -117,7 +118,7 @@ export function SessionRail({
 }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate({ from: "/" });
-  const { view } = useSearch({ from: "/" });
+  const { project: draftProjectID, view } = useSearch({ from: "/" });
   const { t } = useI18n();
   const clearSession = useOverlayStore((state) => state.clearSession);
   const runningTurns = useOverlayStore((state) => state.runningTurns);
@@ -132,7 +133,13 @@ export function SessionRail({
     queryFn: () => listSessions(token),
     enabled: Boolean(token),
   });
+  const projectsQuery = useQuery({
+    queryKey: queryKeys.projects(),
+    queryFn: () => listProjects(token),
+    enabled: Boolean(token),
+  });
   const sessions = sessionsQuery.data?.sessions || [];
+  const projects = projectsQuery.data?.projects || [];
   const audioBindingsSessionID = selectedSessionID || sessions[0]?.id;
   const audioBindingsQuery = useQuery({
     queryKey: queryKeys.audioBindings(),
@@ -244,8 +251,10 @@ export function SessionRail({
         appsActive={appsActive}
         draftActive={draftActive}
         deletePending={deleteMutation.isPending}
+        draftProjectID={draftProjectID}
         isError={sessionsQuery.isError}
-        isLoading={sessionsQuery.isLoading}
+        isLoading={sessionsQuery.isLoading || projectsQuery.isLoading}
+        projects={projects}
         selectedSessionID={selectedSessionID}
         sessions={sessions}
         token={token}
@@ -257,6 +266,7 @@ export function SessionRail({
               delete next.session;
               delete next.split;
               delete next.view;
+              delete next.project;
               return next;
             },
           });
@@ -265,6 +275,21 @@ export function SessionRail({
           }
         }}
         onDelete={(id) => deleteMutation.mutate(id)}
+        onCreateProjectSession={(projectID) => {
+          void navigate({
+            to: "/",
+            search: (prev) => {
+              const next = { ...(prev as AppSearch), draft: "1", project: projectID };
+              delete next.session;
+              delete next.split;
+              delete next.view;
+              return next;
+            },
+          });
+          if (isMobile) {
+            hover.close();
+          }
+        }}
         onRename={(id, title) => renameMutation.mutate({ id, title })}
         onOverlayOpenChange={hover.setClosePaused}
         onOpenSplit={(id) => {
@@ -286,7 +311,10 @@ export function SessionRail({
           }
         }}
         onPinChange={changePinned}
-        onRefetch={() => void sessionsQuery.refetch()}
+        onRefetch={() => {
+          void sessionsQuery.refetch();
+          void projectsQuery.refetch();
+        }}
         onSelect={(id) => {
           void navigate({
             to: "/",
@@ -302,6 +330,7 @@ export function SessionRail({
               const next = { ...search, session: id };
               delete next.draft;
               delete next.view;
+              delete next.project;
               return next;
             },
           });
@@ -458,12 +487,19 @@ function sortSessionsByActivity(sessions: Session[]) {
   return [...sessions].sort((left, right) => sessionActivityTime(right) - sessionActivityTime(left));
 }
 
-function groupProjectSessions(sessions: Session[], fallbackLabel: string): ProjectSessionGroup[] {
+function groupProjectSessions(projects: Project[], sessions: Session[]): ProjectSessionGroup[] {
   const groups = new Map<string, ProjectSessionGroup>();
+  for (const project of projects) {
+    groups.set(project.id, {
+      key: project.id,
+      label: project.name || basename(project.rootDirs[0] || project.id),
+      projectID: project.id,
+      sessions: [],
+      lastActivity: new Date(project.updatedAt || project.createdAt).getTime(),
+    });
+  }
   for (const session of sessions) {
-    const firstDir = (session.workspaceDirs || []).find(Boolean) || "";
-    const label = firstDir ? basename(firstDir) : fallbackLabel;
-    const key = firstDir || "__workspace__";
+    const key = session.projectID || "__missing_project__";
     const existing = groups.get(key);
     if (existing) {
       existing.sessions.push(session);
@@ -472,7 +508,8 @@ function groupProjectSessions(sessions: Session[], fallbackLabel: string): Proje
     }
     groups.set(key, {
       key,
-      label,
+      label: tProjectFallbackLabel(session.projectID),
+      projectID: session.projectID,
       sessions: [session],
       lastActivity: sessionActivityTime(session),
     });
@@ -482,8 +519,8 @@ function groupProjectSessions(sessions: Session[], fallbackLabel: string): Proje
     .sort((left, right) => right.lastActivity - left.lastActivity);
 }
 
-function isWorkspaceSession(session: Session) {
-  return session.activeMode === "workspace" || Boolean(session.workspaceDirs?.length);
+function tProjectFallbackLabel(projectID: string | undefined) {
+  return projectID || "Project";
 }
 
 function sessionActivityTime(session: Session) {
@@ -604,13 +641,16 @@ function useHasHoverInput() {
 type RailPanelProps = {
   token: string;
   sessions: Session[];
+  projects: Project[];
   selectedSessionID: string | undefined;
   appsActive: boolean;
   isLoading: boolean;
   isError: boolean;
   draftActive: boolean;
+  draftProjectID?: string;
   deletePending: boolean;
   onCreate: () => void;
+  onCreateProjectSession: (projectID: string) => void;
   onSelect: (id: string) => void;
   onOpenSplit: (id: string) => void;
   onDelete: (id: string) => void;
@@ -630,6 +670,7 @@ type SessionDropTarget = {
 type ProjectSessionGroup = {
   key: string;
   label: string;
+  projectID?: string;
   sessions: Session[];
   lastActivity: number;
 };
@@ -639,13 +680,16 @@ type ProjectSessionGroup = {
 function RailPanel({
   token,
   sessions,
+  projects,
   selectedSessionID,
   appsActive,
   isLoading,
   isError,
   draftActive,
+  draftProjectID,
   deletePending,
   onCreate,
+  onCreateProjectSession,
   onSelect,
   onOpenSplit,
   onDelete,
@@ -673,11 +717,8 @@ function RailPanel({
   const autoScrollPointerRef = useRef<{ x: number; y: number } | null>(null);
   const pinnedSessions = sortPinnedSessions(sessions.filter((session) => session.pinned));
   const unpinnedSessions = sortSessionsByActivity(sessions.filter((session) => !session.pinned));
-  const chatSessions = unpinnedSessions.filter((session) => !isWorkspaceSession(session));
-  const projectGroups = groupProjectSessions(
-    unpinnedSessions.filter((session) => isWorkspaceSession(session)),
-    t("mode.workspace"),
-  );
+  const chatSessions = unpinnedSessions.filter((session) => !session.projectID);
+  const projectGroups = groupProjectSessions(projects, unpinnedSessions.filter((session) => Boolean(session.projectID)));
   const showPinnedGroup = pinnedSessions.length > 0 || Boolean(draggingSessionID);
   const draggedSession = draggingSessionID ? sessions.find((session) => session.id === draggingSessionID) : undefined;
   const isDraggingPinned = Boolean(draggedSession?.pinned);
@@ -889,7 +930,7 @@ function RailPanel({
             <SidebarMenu className="gap-1">
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  isActive={draftActive}
+                  isActive={draftActive && !draftProjectID}
                   onClick={onCreate}
                 >
                   <MessageCirclePlus />
@@ -919,6 +960,7 @@ function RailPanel({
                         delete next.session;
                         delete next.split;
                         delete next.draft;
+                        delete next.project;
                         return next;
                       },
                     });
@@ -982,7 +1024,7 @@ function RailPanel({
                   )}
                   data-session-drop-group="unpinned"
                 >
-                  {sessions.length === 0 ? (
+                  {sessions.length === 0 && projects.length === 0 ? (
                     <SessionEmptyState />
                   ) : chatSessions.length > 0 || (isDraggingPinned && unpinnedSessions.length === 0) ? (
                     <SidebarGroup className="px-2 py-0.5">
@@ -1023,6 +1065,8 @@ function RailPanel({
                         icon="project"
                         label={group.label}
                         title={group.label}
+                        actionLabel={t("session.create")}
+                        onAction={group.projectID ? () => onCreateProjectSession(group.projectID!) : undefined}
                         onToggle={() => toggleGroupCollapsed(`project:${group.key}`)}
                       />
                       {!collapsedGroups.has(`project:${group.key}`) ? (
@@ -1136,20 +1180,24 @@ function CollapsibleSessionGroupLabel({
   collapsed,
   icon,
   label,
+  actionLabel,
   title,
+  onAction,
   onToggle,
 }: {
   collapsed: boolean;
   icon: "chat" | "pinned" | "project";
   label: string;
+  actionLabel?: string;
   title?: string;
+  onAction?: () => void;
   onToggle: () => void;
 }) {
   const Icon = icon === "pinned" ? Pin : icon === "chat" ? MessageSquareText : FolderCode;
   return (
-    <SidebarGroupLabel asChild className="h-8 px-2 text-[13px]" title={title || label}>
+    <SidebarGroupLabel className="group/project-label h-8 gap-1 px-0 text-[13px]" title={title || label}>
       <button
-        className="group w-full cursor-pointer gap-2 pr-1 text-left hover:text-sidebar-foreground"
+        className="group flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2 pr-1 text-left hover:text-sidebar-foreground"
         type="button"
         onClick={onToggle}
       >
@@ -1162,6 +1210,24 @@ function CollapsibleSessionGroupLabel({
           )}
         />
       </button>
+      {onAction ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              aria-label={actionLabel || label}
+              className="flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/60 opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-focus-within/project-label:opacity-100 group-hover/project-label:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onAction();
+              }}
+            >
+              <Plus className="size-3" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right">{actionLabel || label}</TooltipContent>
+        </Tooltip>
+      ) : null}
     </SidebarGroupLabel>
   );
 }
