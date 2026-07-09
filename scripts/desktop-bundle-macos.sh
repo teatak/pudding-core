@@ -76,6 +76,8 @@ fi
 "$PLIST_BUDDY" -c "Set :CFBundleVersion $VERSION" "$INFO_PLIST"
 "$PLIST_BUDDY" -c "Set :CFBundleIconFile AppIcon.icns" "$INFO_PLIST" 2>/dev/null \
   || "$PLIST_BUDDY" -c "Add :CFBundleIconFile string AppIcon.icns" "$INFO_PLIST"
+"$PLIST_BUDDY" -c "Set :NSMicrophoneUsageDescription Pudding uses the microphone for local dictation." "$INFO_PLIST" 2>/dev/null \
+  || "$PLIST_BUDDY" -c "Add :NSMicrophoneUsageDescription string Pudding uses the microphone for local dictation." "$INFO_PLIST"
 "$PLIST_BUDDY" -c "Delete :CFBundleURLTypes" "$INFO_PLIST" 2>/dev/null || true
 "$PLIST_BUDDY" -c "Add :CFBundleURLTypes array" "$INFO_PLIST"
 "$PLIST_BUDDY" -c "Add :CFBundleURLTypes:0 dict" "$INFO_PLIST"

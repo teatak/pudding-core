@@ -53,7 +53,7 @@ export function SessionAudioControls({ bindings, token, sessionID }: { bindings?
       if (context?.previous) {
         queryClient.setQueryData(queryKeys.audioBindings(), context.previous);
       }
-      toast.error(apiErrorMessage(error, t("voice.inputFailed")));
+      toast.error(apiErrorMessage(error, t("voice.inputFailed"), t));
     },
   });
   const outputMutation = useMutation({
@@ -75,7 +75,7 @@ export function SessionAudioControls({ bindings, token, sessionID }: { bindings?
       if (context?.previous) {
         queryClient.setQueryData(queryKeys.audioBindings(), context.previous);
       }
-      toast.error(apiErrorMessage(error, t("voice.outputFailed")));
+      toast.error(apiErrorMessage(error, t("voice.outputFailed"), t));
     },
   });
   const runtimeQuery = useQuery({
@@ -99,7 +99,7 @@ export function SessionAudioControls({ bindings, token, sessionID }: { bindings?
     },
     onError: (error) => {
       setRuntimeInstallRequested(false);
-      toast.error(apiErrorMessage(error, t("voice.runtimeFailed")));
+      toast.error(apiErrorMessage(error, t("voice.runtimeFailed"), t));
     },
   });
   const runtimeStarting = startRuntimeMutation.isPending;
@@ -142,7 +142,7 @@ export function SessionAudioControls({ bindings, token, sessionID }: { bindings?
       }
       inputMutation.mutate(true);
     } catch (error) {
-      toast.error(apiErrorMessage(error, t("voice.inputFailed")));
+      toast.error(apiErrorMessage(error, t("voice.inputFailed"), t));
     } finally {
       setCheckingRuntime(false);
     }
@@ -239,9 +239,18 @@ export function SessionAudioControls({ bindings, token, sessionID }: { bindings?
   );
 }
 
-function apiErrorMessage(error: unknown, fallback: string) {
+function apiErrorMessage(error: unknown, fallback: string, t: (key: string) => string) {
   if (error instanceof APIError) {
-    return error.detail || error.code || fallback;
+    if (error.code === "audio_input_unavailable") {
+      return t("voice.inputUnavailable");
+    }
+    if (error.code === "audio_unavailable") {
+      return t("voice.audioUnavailable");
+    }
+    if (error.code === "audio_binding_failed") {
+      return fallback;
+    }
+    return fallback;
   }
   if (error instanceof Error && error.message) {
     return error.message;

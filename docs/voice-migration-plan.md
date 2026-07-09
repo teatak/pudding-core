@@ -1,6 +1,8 @@
 # Voice Migration Plan
 
-> 状态:已开始。范围已收敛为单用户语音对话,旧项目只作为参考实现。
+> 状态:语音 runtime 发布链路收尾中。基础 macOS Electron bundle 已接入 daemon 启动前 dylib 打包与麦克风权限描述;Sherpa/模型仍走 runtime 下载。
+> 日期:2026-07-09。
+> 范围已收敛为单用户语音对话,旧项目只作为参考实现。
 
 ## 目标
 
@@ -119,8 +121,8 @@ internal/audio/
 - daemon 默认使用 Edge TTS(`zh-CN-YunxiaNeural`, speed=1.2);构造失败时 macOS 降级为真实 `macsay`(rate=230),非 macOS 降级为 noop。
 - `macsay` 会保留 stderr 到错误日志,便于排查系统 voice / audio device 问题。
 - daemon 默认使用 PortAudio 作为 capture/playback driver;input binding 时才请求并打开麦克风,output 只在收到 Edge PCM 时懒启动 speaker playback。
-- macOS Electron dev/release bundle 需要写入 `NSMicrophoneUsageDescription`;PortAudio capture 前会主动请求 mic 权限。
-- Electron 包装和签名链路待补齐;开发态可先用 `make desktop-dev` 验证语音能力。
+- macOS Electron dev/release bundle 写入 `NSMicrophoneUsageDescription`;PortAudio capture 前会主动请求 mic 权限。
+- `make desktop-bundle` 会生成基础 macOS `.app`,复制 release daemon,把 daemon 启动前需要的 PortAudio / Sherpa ONNX / ONNX Runtime / Abseil 等非系统 dylib 放入 bundle,并做 ad-hoc codesign。正式签名、公证、自动更新仍后置。
 - daemon 只从 `<home>/runtime/models` 加载 sherpa ASR/VAD 模型:
   - `asr/model.int8.onnx`
   - `asr/tokens.txt`
@@ -132,10 +134,12 @@ internal/audio/
   - capture PCM 先过 AEC,再过 NS,最后送入 ASR/VAD。
   - AEC/NS 配置写入 `<home>/config/audio.yaml`,默认 `aec.model=webrtc`,`ns.model=webrtc`,`ns.level=moderate`。
   - WebRTC bridge 静态库是构建输入,不进入 runtime 下载目录;当前仅提供 `darwin-arm64` 产物:`internal/audio/dsp/webrtc_bridge/lib/darwin-arm64/libkopi_webrtc_aec_bridge.a`。
-  - runtime 下载只覆盖运行时资产:Sherpa/ONNX 动态库、ASR 模型、VAD 模型和 tokens。
+  - runtime 下载只覆盖模型资产:ASR 模型、VAD 模型和 tokens;daemon 启动前需要的 native dylib 随 `.app` bundle。
 - 语音运行配置落在 `<home>/config/audio.yaml`;当前可调项包括 PortAudio driver、Sherpa ASR/Silero VAD、WebRTC AEC/NS、Edge TTS。未接入的 KWS/声纹不写入配置。
 - 设置中心「关于」页会展示当前生效的语音配置、配置文件路径和 input/output owner。
 - 找不到模型时不会启用 fake ASR。
+- 找不到模型时,前端点击 mic 会先打开 runtime 下载弹窗,不直接进入 input binding。
+- 取消下载后再次点击 mic 会重新进入下载弹窗;下载失败 UI 只显示通用错误,不暴露路径、manifest 或缺文件细节。
 - 已补诊断日志:
   - mic 权限检查/授权/拒绝/超时。
   - PortAudio 初始化、capture start/stop、读取失败。
@@ -148,6 +152,13 @@ internal/audio/
 
 - `GOCACHE=/tmp/pudding-go-cache go test ./...`
 - `npx tsc -b`
+- 2026-07-09 收尾验证:
+  - `GOCACHE=/tmp/pudding-go-cache go test -tags "sqlite_fts5 webrtcaec" ./internal/audio/runtimeassets ./internal/api`
+  - `npm run build`
+  - `make desktop-bundle`
+  - `codesign --verify --deep --strict --verbose=2 dist/Pudding.app`
+  - 以 `PUDDING_HOME=/tmp/pudding-bundle-smoke-20260709` 短启动 `dist/Pudding.app`;release daemon 正常启动,缺 Sherpa/模型时 runtime status 为 `installed=false`,未因 dylib 或 codesign 退出。
+  - 以缺模型 smoke home 打开 Web UI:点击 mic 弹 runtime 下载弹窗;点击下载后取消,再次点击 mic 可重新进入下载弹窗,未出现“听写开关失败”。
 - `GOCACHE=/tmp/pudding-go-cache go test ./internal/audio/tts ./internal/audio/tts/macsay ./internal/audio/voice ./internal/daemon`
 - `GOCACHE=/tmp/pudding-go-cache go test ./internal/audio/driver/portaudio ./internal/audio/voice ./internal/daemon`
 - 真实 smoke:
@@ -162,6 +173,26 @@ internal/audio/
   - output owner 打开后,正式 `/sessions/{id}/submit` 触发 provider response -> session event -> `macsay` 播放,无 `macsay` 错误。
   - input owner 单独打开复测成功,PortAudio/Sherpa 能在当前机器启动。
   - input/output 复测后已释放 owner。
+
+## 最终手动验收清单草案
+
+浏览器:
+
+- session A 打开 Google,session B 打开 Baidu,来回切换不串页。
+- 关闭浏览器 tab 后当前 session browser surface 清空;切 session / 刷新不复活旧 tab。
+- 重新打开当前 session 浏览器,创建的是新的真实 webview tab,其他 session 不受影响。
+- 关闭/重开 app 后,只显示可恢复或新建成功的真实 browser surface,不显示旧截图或假内容。
+- LLM browser open / observe / click / type / scroll / screenshot 能操作当前 session tab。
+- Canvas 与 browser surface 反复切换,页面 DOM 不重载,自动化光标仍显示在 webview surface 上。
+
+语音 runtime:
+
+- 打包后的 `Pudding.app` 能启动 daemon,不因 dylib 或 ad-hoc codesign 退出。
+- bundle 内包含 daemon 启动前需要的 PortAudio / Sherpa ONNX / ONNX Runtime / Abseil 等非系统 dylib。
+- 缺 Sherpa/模型时点击 mic 弹出下载弹窗,不出现听写开关失败。
+- 下载中取消后再次点击 mic 能重新进入下载弹窗。
+- 下载失败只显示通用失败文案,不暴露本地路径、manifest URL、缺文件名或栈细节。
+- 下载完成后自动重载 ASR backend,再次打开 mic 能进入真实 input binding。
 
 ## 演示口径
 

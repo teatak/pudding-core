@@ -59,15 +59,13 @@ func (s *Server) bindAudio(c *cart.Context, bind func(string, bool) (voice.Bindi
 	}
 	if errors.Is(err, voice.ErrInputUnavailable) {
 		c.JSON(http.StatusServiceUnavailable, map[string]string{
-			"error":  "audio_input_unavailable",
-			"detail": err.Error(),
+			"error": "audio_input_unavailable",
 		})
 		return nil
 	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, map[string]string{
-			"error":  "audio_binding_failed",
-			"detail": err.Error(),
+			"error": "audio_binding_failed",
 		})
 		return nil
 	}

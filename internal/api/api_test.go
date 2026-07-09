@@ -145,6 +145,56 @@ func TestAudioBindingRequiresExistingSession(t *testing.T) {
 	}
 }
 
+func TestAudioBindingErrorDoesNotExposeInternalDetail(t *testing.T) {
+	ms := memstore.New()
+	homeDir := t.TempDir()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好"}))), ms, engine.WithAttachmentHome(homeDir))
+	controller := &failingVoiceController{inputErr: fmt.Errorf("%w: /secret/runtime/model.int8.onnx missing", voice.ErrInputUnavailable)}
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithHome(homeDir).WithVoice(controller).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+	if err := ms.CreateSession(context.Background(), &store.Session{ID: "sess_audio_error", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_audio_error/audio/input", map[string]bool{"enabled": true})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	payload := decodeJSON[map[string]string](t, resp)
+	if payload["error"] != "audio_input_unavailable" {
+		t.Fatalf("payload = %+v", payload)
+	}
+	if payload["detail"] != "" || strings.Contains(fmt.Sprint(payload), "/secret") {
+		t.Fatalf("internal detail leaked: %+v", payload)
+	}
+}
+
+type failingVoiceController struct {
+	inputErr error
+}
+
+func (c *failingVoiceController) Snapshot() voice.Bindings {
+	return voice.Bindings{}
+}
+
+func (c *failingVoiceController) BindInput(string, bool) (voice.Bindings, error) {
+	return voice.Bindings{}, c.inputErr
+}
+
+func (c *failingVoiceController) BindOutput(string, bool) (voice.Bindings, error) {
+	return voice.Bindings{}, nil
+}
+
+func (c *failingVoiceController) CancelSession(context.Context, string) bool {
+	return false
+}
+
+func (c *failingVoiceController) ReleaseSession(string) voice.Bindings {
+	return voice.Bindings{}
+}
+
 func TestDesktopAboutIncludesAudioConfig(t *testing.T) {
 	srv, _, _ := newConfigTestServer(t)
 	resp := req(t, http.MethodGet, srv.URL+"/desktop/about", nil)

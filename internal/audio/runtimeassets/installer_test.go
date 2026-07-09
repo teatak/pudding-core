@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -139,11 +140,43 @@ func TestCancelWaitsForInstallToStop(t *testing.T) {
 	}
 }
 
+func TestStartCanRetryAfterCanceledDownload(t *testing.T) {
+	installer := NewInstaller(t.TempDir(), nil)
+	installer.client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	})}
+	installer.mu.Lock()
+	installer.state = Status{
+		OK:       true,
+		State:    "canceled",
+		Message:  "download canceled",
+		Required: []RequiredFile{},
+		Missing:  []RequiredFile{},
+	}
+	installer.mu.Unlock()
+
+	status := installer.Start(t.Context(), config.DefaultAudioConfig())
+	if !status.Running || status.State != "manifest" {
+		t.Fatalf("Start after cancel status = %+v, want running manifest", status)
+	}
+	status = installer.Cancel()
+	if status.Running || status.State != "canceled" {
+		t.Fatalf("Cancel after retry status = %+v, want canceled and not running", status)
+	}
+}
+
 func TestRuntimeErrorMessageIsGeneric(t *testing.T) {
 	got := runtimeErrorMessage(errors.New("/secret/runtime/path: download failed"))
 	if got != "download failed" {
 		t.Fatalf("runtimeErrorMessage = %q, want generic message", got)
 	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func writeTestFile(t *testing.T, path string) {

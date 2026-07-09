@@ -355,8 +355,9 @@ BrowserHost 生命周期收口审查(2026-07-09):
 - Electron 打包、签名、公证、自动更新。
 - dev/release 数据目录继续隔离。
 - crash/log 收集落本地文件。
-- 当前落点:`make desktop-bundle` 可生成基础 macOS `.app` bundle,内含 Electron shell、Tray、release daemon、Info.plist、icon 和 `pudding://` callback scheme。
-- 签名、公证、自动更新、正式 crash/log 收集后置。
+- 当前落点:`make desktop-bundle` 可生成基础 macOS `.app` bundle,内含 Electron shell、Tray、release daemon、daemon 启动前 dylib、Info.plist、icon、`NSMicrophoneUsageDescription` 和 `pudding://` callback scheme。
+- 当前 bundle 使用 ad-hoc codesign;正式 Developer ID 签名、公证、自动更新、正式 crash/log 收集后置。
+- 2026-07-09 收尾验证:`make desktop-bundle` 成功,`codesign --verify --deep --strict` 通过,短启动 `dist/Pudding.app` 可拉起 release daemon。
 
 验收:
 
@@ -371,10 +372,13 @@ BrowserHost 生命周期收口审查(2026-07-09):
 - canvas/browser 反复切换,页面 DOM 不重载。
 - Google 登录后新 session 打开 Google,保持登录态。
 - close 当前 tab,当前 session 清空,其他 session 不受影响。
-- close 后刷新/切 session 不自动复活旧 tab。
-- app 重启后 metadata 存在但真实页面未恢复时,UI 不显示旧截图。
+- close 后刷新/切 session 不自动复活旧 tab;重新打开会创建新的真实 webview tab。
+- app 关闭/重开后只显示可恢复或新建成功的真实 browser surface,不显示旧截图。
+- LLM browser open / observe / click / type / scroll / screenshot 能操作当前 session tab。
+- 画布开关、普通 canvas item tab 和 browser surface 来回切换不破坏浏览器生命周期。
 - DevTools 打开/关闭后 LLM browser 工具能恢复。
 - 导航超时、webContents destroyed、bridge 断开都有可读错误和 recover。
+- 语音 runtime / bundle 验收见 `docs/voice-migration-plan.md` 的“最终手动验收清单草案”。
 
 ## 风险
 
