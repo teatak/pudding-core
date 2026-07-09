@@ -6,6 +6,7 @@ type DirectoryPickerOptions = {
 
 type ElectronDesktopBridge = {
   getDroppedFilePath?: (file: File) => string;
+  onOAuthConnected?: (listener: (payload: { provider?: string }) => void) => () => void;
   openExternal: (url: string) => Promise<boolean>;
   pickDirectories: (options?: DirectoryPickerOptions) => Promise<string[]>;
 };
@@ -34,6 +35,18 @@ export async function openExternalURL(url: string) {
     }
   }
   window.open(clean, "_blank", "noopener,noreferrer");
+}
+
+export function onOAuthConnected(listener: (payload: { provider?: string }) => void) {
+  const bridge = desktopBridge();
+  if (!bridge?.onOAuthConnected) {
+    return () => {};
+  }
+  try {
+    return bridge.onOAuthConnected(listener);
+  } catch {
+    return () => {};
+  }
 }
 
 export function getDroppedFilePath(file: File) {

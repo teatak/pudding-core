@@ -61,7 +61,7 @@ import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { translate, useI18n } from "@/i18n";
-import { openExternalURL } from "@/lib/desktopBridge";
+import { onOAuthConnected, openExternalURL } from "@/lib/desktopBridge";
 import { shouldKeepDialogOpenForSelectDismiss } from "@/lib/layerGuards";
 import { cn } from "@/lib/utils";
 import { useShowPreviewAppVersions } from "@/state/appCatalogPrefs";
@@ -226,6 +226,12 @@ export function AppsPane({ token }: { token: string }) {
   }, [selectedSkill, selectedSkillQuery.data]);
   const detailConnections = detailApp ? connections.filter((conn) => conn.appID === detailApp.id) : [];
   const loadFailed = appsQuery.isError || connectionsQuery.isError;
+
+  useEffect(() => {
+    return onOAuthConnected(() => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.appConnections() });
+    });
+  }, [queryClient]);
 
   useEffect(() => {
     if (detailAppID && !apps.some((app) => app.id === detailAppID)) {

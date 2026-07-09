@@ -179,14 +179,15 @@ function registerOAuthReturnProtocol() {
 }
 
 function handleOAuthReturnURL(rawURL) {
-  if (!isOAuthReturnURL(rawURL)) {
+  const payload = oauthReturnPayload(rawURL);
+  if (!payload) {
     return false;
   }
   if (!app.isReady()) {
     pendingOAuthReturnURLs.push(rawURL);
     return true;
   }
-  showOAuthReturnWindow();
+  processOAuthReturn(payload);
   return true;
 }
 
@@ -194,23 +195,32 @@ function flushPendingOAuthReturnURLs() {
   if (pendingOAuthReturnURLs.length === 0) {
     return;
   }
-  pendingOAuthReturnURLs.length = 0;
-  showOAuthReturnWindow();
+  const urls = pendingOAuthReturnURLs.splice(0);
+  for (const rawURL of urls) {
+    const payload = oauthReturnPayload(rawURL);
+    if (payload) {
+      processOAuthReturn(payload);
+    }
+  }
 }
 
-function showOAuthReturnWindow() {
+function processOAuthReturn(payload) {
   const window = BrowserWindow.getAllWindows()[0];
   if (window) {
     showMainWindow(window);
   }
+  broadcastToTrustedRenderers("pudding:oauth:connected", payload);
 }
 
-function isOAuthReturnURL(rawURL) {
+function oauthReturnPayload(rawURL) {
   try {
     const url = new URL(String(rawURL || ""));
-    return url.protocol === `${oauthReturnScheme}:` && url.hostname === "oauth" && url.pathname.startsWith("/connected/");
+    if (url.protocol !== `${oauthReturnScheme}:` || url.hostname !== "oauth" || !url.pathname.startsWith("/connected/")) {
+      return null;
+    }
+    return { provider: decodeURIComponent(url.pathname.slice("/connected/".length)) };
   } catch {
-    return false;
+    return null;
   }
 }
 

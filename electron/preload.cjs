@@ -31,6 +31,11 @@ contextBridge.exposeInMainWorld("puddingElectronDesktop", {
     }
   },
   openExternal: (url) => ipcRenderer.invoke("pudding:desktop:open-external", url),
+  onOAuthConnected: (listener) => {
+    const wrapped = (_event, payload) => listener(payload);
+    ipcRenderer.on("pudding:oauth:connected", wrapped);
+    return () => ipcRenderer.off("pudding:oauth:connected", wrapped);
+  },
   pickDirectories: (options) => ipcRenderer.invoke("pudding:desktop:pick-directories", options),
 });
 
