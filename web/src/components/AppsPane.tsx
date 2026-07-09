@@ -229,9 +229,10 @@ export function AppsPane({ token }: { token: string }) {
 
   useEffect(() => {
     return onOAuthConnected(() => {
+      toast.success(t("apps.oauthConnected"));
       void queryClient.invalidateQueries({ queryKey: queryKeys.appConnections() });
     });
-  }, [queryClient]);
+  }, [queryClient, t]);
 
   useEffect(() => {
     if (detailAppID && !apps.some((app) => app.id === detailAppID)) {
