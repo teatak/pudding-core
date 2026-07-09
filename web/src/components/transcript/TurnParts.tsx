@@ -1,4 +1,27 @@
-import { Check, ChevronDown, ChevronRight, Copy, Paperclip } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Brain,
+  Camera,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Database,
+  FileSearch,
+  FileText,
+  FolderOpen,
+  Globe,
+  Keyboard,
+  LayoutGrid,
+  ListChecks,
+  MousePointerClick,
+  Paperclip,
+  RotateCw,
+  Search,
+  Wrench,
+  type LucideIcon,
+} from "lucide-react";
 import {
   Children,
   isValidElement,
@@ -16,7 +39,6 @@ import remarkGfm from "remark-gfm";
 
 import { type ContentPart, type Message } from "@/api/client";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
-import { PhaseDot } from "@/components/PhaseDot";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
 import { attachmentResourceURL } from "@/lib/attachmentURL";
@@ -27,6 +49,14 @@ import type { AssistantOverlay, AssistantOverlayPart, TurnPhaseState } from "@/s
 
 import { useElapsedDuration } from "./time";
 import { textFromContentParts, type TranscriptDisplaySettings, type TurnDisclosureState, type TurnPartVM } from "./types";
+
+type CompactProcessPart = {
+  hiddenParts: TurnPartVM[];
+  key: string;
+  type: "process_compact";
+};
+
+type RenderTurnPart = TurnPartVM | CompactProcessPart;
 
 export function TurnParts({
   disclosure,
@@ -43,45 +73,201 @@ export function TurnParts({
 }) {
   const showReasoningContent = displaySettings?.showReasoning ?? true;
   const showToolDetails = displaySettings?.showToolDetails ?? true;
+  const renderParts = compactProcessRuns(parts);
   return (
     <>
-      {parts.map((part, index) => {
+      {renderParts.map((part, index) => {
         const partKey = part.key || `${part.type}:${index}`;
         const disclosureKey = `${turnID}:${partKey}`;
-        switch (part.type) {
-          case "text":
-            return <MarkdownBody key={partKey} text={part.text} token={token} />;
-          case "attachment":
-            return <AttachmentPart key={partKey} attachment={part.attachment} token={token} />;
-          case "thought":
-            return (
-              <ThoughtPart
-                key={partKey}
-                active={part.active}
-                defaultOpen={disclosure?.isOpen(disclosureKey) || false}
-                showContent={showReasoningContent}
-                text={part.text}
-                onOpenChange={(open) => disclosure?.setOpen(disclosureKey, open)}
-              />
-            );
-          case "approval":
-            return null;
-          case "tool_use":
-            return (
-              <ToolUsePart
-                key={partKey}
-                defaultOpen={disclosure?.isOpen(disclosureKey) || false}
-                part={part}
-                showDetails={showToolDetails}
-                onOpenChange={(open) => disclosure?.setOpen(disclosureKey, open)}
-              />
-            );
-          case "tool_result":
-            return null;
-        }
+        return renderTranscriptPart({
+          disclosure,
+          disclosureKey,
+          part,
+          partKey,
+          showReasoningContent,
+          showToolDetails,
+          token,
+        });
       })}
     </>
   );
+}
+
+function renderTranscriptPart({
+  disclosure,
+  disclosureKey,
+  part,
+  partKey,
+  showReasoningContent,
+  showToolDetails,
+  token,
+}: {
+  disclosure?: TurnDisclosureState;
+  disclosureKey: string;
+  part: RenderTurnPart;
+  partKey: string;
+  showReasoningContent: boolean;
+  showToolDetails: boolean;
+  token: string;
+}) {
+  switch (part.type) {
+    case "text":
+      return <MarkdownBody key={partKey} text={part.text} token={token} />;
+    case "attachment":
+      return <AttachmentPart key={partKey} attachment={part.attachment} token={token} />;
+    case "thought":
+      return (
+        <ThoughtPart
+          key={partKey}
+          active={part.active}
+          defaultOpen={disclosure?.isOpen(disclosureKey) || false}
+          showContent={showReasoningContent}
+          text={part.text}
+          onOpenChange={(open) => disclosure?.setOpen(disclosureKey, open)}
+        />
+      );
+    case "approval":
+      return null;
+    case "tool_use":
+      return (
+        <ToolUsePart
+          key={partKey}
+          defaultOpen={disclosure?.isOpen(disclosureKey) || false}
+          part={part}
+          showDetails={showToolDetails}
+          onOpenChange={(open) => disclosure?.setOpen(disclosureKey, open)}
+        />
+      );
+    case "tool_result":
+      return null;
+    case "process_compact":
+      return (
+        <ProcessCompactPart
+          key={partKey}
+          defaultOpen={disclosure?.isOpen(disclosureKey) || false}
+          hiddenParts={part.hiddenParts}
+          renderPart={(hiddenPart, hiddenIndex) => {
+            const hiddenKey = hiddenPart.key || `${hiddenPart.type}:${hiddenIndex}`;
+            return renderTranscriptPart({
+              disclosure,
+              disclosureKey: `${disclosureKey}:${hiddenKey}`,
+              part: hiddenPart,
+              partKey: hiddenKey,
+              showReasoningContent,
+              showToolDetails,
+              token,
+            });
+          }}
+          onOpenChange={(open) => disclosure?.setOpen(disclosureKey, open)}
+        />
+      );
+  }
+}
+
+function compactProcessRuns(parts: TurnPartVM[]): RenderTurnPart[] {
+  const out: RenderTurnPart[] = [];
+  let processParts: TurnPartVM[] = [];
+  let runIndex = 0;
+
+  const flush = () => {
+    if (processParts.length > 1) {
+      out.push({
+        hiddenParts: processParts,
+        key: `process-compact:${runIndex}:${processParts[0]?.key || 0}`,
+        type: "process_compact",
+      });
+      runIndex += 1;
+    } else {
+      out.push(...processParts);
+    }
+    processParts = [];
+  };
+
+  for (const part of parts) {
+    if (!isProcessPart(part) || shouldKeepProcessPartVisible(part)) {
+      flush();
+      out.push(part);
+      continue;
+    }
+    processParts.push(part);
+  }
+  flush();
+  return out;
+}
+
+function isProcessPart(part: TurnPartVM) {
+  return part.type === "thought" || part.type === "tool_use";
+}
+
+function shouldKeepProcessPartVisible(part: TurnPartVM) {
+  if (part.type === "thought") {
+    return Boolean(part.active);
+  }
+  if (part.type === "tool_use") {
+    return Boolean(part.active || part.resultOk === false || part.phase === "error");
+  }
+  return false;
+}
+
+function PartIcon({ icon: Icon }: { icon: LucideIcon }) {
+  return (
+    <span className="relative z-[1] inline-flex h-6 w-4 shrink-0 items-center justify-center text-muted-foreground/65">
+      <Icon aria-hidden="true" className="size-3.5" strokeWidth={2} />
+    </span>
+  );
+}
+
+function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIcon {
+  const name = part.name || part.resultName || "";
+  if (name.startsWith("canvas_")) {
+    return LayoutGrid;
+  }
+  if (name.startsWith("app_mcp__")) {
+    return Wrench;
+  }
+  const known: Record<string, LucideIcon> = {
+    builtin_attachment_read_image: FileSearch,
+    builtin_browser_back: ArrowLeft,
+    builtin_browser_click: MousePointerClick,
+    builtin_browser_close: Globe,
+    builtin_browser_forward: ArrowRight,
+    builtin_browser_observe: FileSearch,
+    builtin_browser_open: Globe,
+    builtin_browser_reload: RotateCw,
+    builtin_browser_screenshot: Camera,
+    builtin_browser_scroll: MousePointerClick,
+    builtin_browser_status: Globe,
+    builtin_browser_type: Keyboard,
+    builtin_camera_capture: Camera,
+    builtin_desktop_screenshot: Camera,
+    builtin_file_copy: FileText,
+    builtin_file_delete: FileText,
+    builtin_file_list: FolderOpen,
+    builtin_file_move: FileText,
+    builtin_file_patch: FileText,
+    builtin_file_read: FileText,
+    builtin_file_search: Search,
+    builtin_file_slice: FileText,
+    builtin_file_stat: FileText,
+    builtin_file_write: FileText,
+    builtin_graphql_introspect: Database,
+    builtin_graphql_request: Database,
+    builtin_graphql_search: Search,
+    builtin_history_get_message: FileText,
+    builtin_history_search: Search,
+    builtin_rest_request: Database,
+    builtin_skill_read: FileText,
+    builtin_skill_submit: FileText,
+    builtin_skill_validate: FileSearch,
+    builtin_time_get_current: Wrench,
+    builtin_weather_get: Wrench,
+    builtin_web_fetch: FileSearch,
+    builtin_web_search: Search,
+    request_capability: Wrench,
+    ui_confirm: ListChecks,
+    ui_input_flow: ListChecks,
+  };
+  return known[name] || Wrench;
 }
 
 export function partsFromMessages(messages: Message[]): TurnPartVM[] {
@@ -413,7 +599,7 @@ function ThoughtPart({
 
   return (
     <details
-      className="relative text-[12px] leading-[1.5] text-muted-foreground"
+      className="relative text-[13px] leading-[1.5] text-muted-foreground"
       open={canShowContent && open}
       onToggle={handleToggle}
     >
@@ -421,18 +607,16 @@ function ThoughtPart({
         <span aria-hidden="true" className="pointer-events-none absolute top-6 bottom-0 left-[6px] border-l border-border" />
       ) : null}
       <summary
-        className="inline-grid h-6 cursor-default list-none grid-cols-[0.75rem_auto] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden"
+        className="inline-grid h-6 cursor-default list-none grid-cols-[1rem_auto] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden"
         onClick={handleThoughtSummaryClick}
         onKeyDown={handleThoughtSummaryKeyDown}
       >
-        <span className="relative z-[1] inline-flex h-6 w-3 shrink-0 items-center justify-center opacity-90">
-          <PhaseDot active={active} phase="thinking" size="md" />
-        </span>
+        <PartIcon icon={Brain} />
         <span className="flex min-w-0 flex-1 items-center gap-1">
           <span className="shrink-0 truncate">{active ? t("transcript.thinking") : t("transcript.thought")}</span>
           {canShowContent ? (
             <span className="shrink-0 text-muted-foreground/50">
-              {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+              {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
             </span>
           ) : null}
         </span>
@@ -441,7 +625,7 @@ function ThoughtPart({
         <div className="ml-[5px] py-1 pl-2">
           <div
             ref={bodyRef}
-            className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words pr-2 text-[12px] leading-6 text-muted-foreground italic"
+            className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words pr-2 text-[13px] leading-6 text-muted-foreground italic"
           >
             {text}
           </div>
@@ -449,6 +633,107 @@ function ThoughtPart({
       ) : null}
     </details>
   );
+}
+
+function ProcessCompactPart({
+  defaultOpen,
+  hiddenParts,
+  renderPart,
+  onOpenChange,
+}: {
+  defaultOpen: boolean;
+  hiddenParts: TurnPartVM[];
+  renderPart: (part: TurnPartVM, index: number) => ReactNode;
+  onOpenChange?: (open: boolean) => void;
+}) {
+  const { locale, t } = useI18n();
+  const { handleSummaryClick, handleSummaryKeyDown, handleToggle, open } = useLocalDisclosure(defaultOpen, onOpenChange);
+  const label = processCompactLabel(hiddenParts, locale, t);
+  return (
+    <details className="relative text-[13px] leading-[1.5] text-muted-foreground/70" open={open} onToggle={handleToggle}>
+      <summary
+        className="inline-grid h-6 cursor-default list-none grid-cols-[1rem_auto] items-center gap-1 pr-1 outline-none hover:text-muted-foreground [&::-webkit-details-marker]:hidden"
+        onClick={handleSummaryClick}
+        onKeyDown={handleSummaryKeyDown}
+      >
+        <PartIcon icon={ListChecks} />
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          <span className="min-w-0 truncate">{label}</span>
+          <span className="shrink-0 text-muted-foreground/50">
+            {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+          </span>
+        </span>
+      </summary>
+      {open ? <div>{hiddenParts.map(renderPart)}</div> : null}
+    </details>
+  );
+}
+
+function processCompactLabel(parts: TurnPartVM[], locale: string, t: (key: string) => string) {
+  const tools = parts.filter((part): part is Extract<TurnPartVM, { type: "tool_use" }> => part.type === "tool_use");
+  if (tools.length === 0) {
+    const thoughtCount = parts.filter((part) => part.type === "thought").length || parts.length;
+    return t("transcript.processThought").replace("{count}", String(thoughtCount));
+  }
+
+  const groups: ProcessToolGroup[] = [];
+  const groupByKey = new Map<string, ProcessToolGroup>();
+  for (const tool of tools) {
+    const group = processToolGroup(tool, t);
+    const existing = groupByKey.get(group.key);
+    if (existing) {
+      existing.count += 1;
+      continue;
+    }
+    groups.push(group);
+    groupByKey.set(group.key, group);
+  }
+
+  const separator = locale === "en" ? " · " : " ";
+  return groups.map((group) => processToolGroupLabel(group, t)).join(separator);
+}
+
+type ProcessToolGroup = {
+  count: number;
+  fallbackName?: string;
+  i18nKey?: string;
+  key: string;
+};
+
+function processToolGroup(tool: Extract<TurnPartVM, { type: "tool_use" }>, t: (key: string) => string): ProcessToolGroup {
+  const name = tool.name || tool.resultName || "";
+  const fallbackName = toolDisplayName(name, t("transcript.tool"), t);
+  const known: Record<string, string> = {
+    builtin_browser_back: "transcript.processToolBrowserBack",
+    builtin_browser_click: "transcript.processToolBrowserClick",
+    builtin_browser_close: "transcript.processToolBrowserClose",
+    builtin_browser_forward: "transcript.processToolBrowserForward",
+    builtin_browser_observe: "transcript.processToolBrowserObserve",
+    builtin_browser_open: "transcript.processToolBrowserOpen",
+    builtin_browser_reload: "transcript.processToolBrowserReload",
+    builtin_browser_screenshot: "transcript.processToolBrowserScreenshot",
+    builtin_browser_scroll: "transcript.processToolBrowserScroll",
+    builtin_browser_status: "transcript.processToolBrowserStatus",
+    builtin_browser_type: "transcript.processToolBrowserType",
+    builtin_graphql_request: "transcript.processToolData",
+    builtin_rest_request: "transcript.processToolData",
+    builtin_web_fetch: "transcript.processToolWebFetch",
+    builtin_web_search: "transcript.processToolWebSearch",
+  };
+  const i18nKey = known[name];
+  if (i18nKey) {
+    return { count: 1, fallbackName, i18nKey, key: i18nKey };
+  }
+  return { count: 1, fallbackName, key: `tool:${fallbackName}` };
+}
+
+function processToolGroupLabel(group: ProcessToolGroup, t: (key: string) => string) {
+  const translated = group.i18nKey ? t(group.i18nKey) : "";
+  const template =
+    translated && translated !== group.i18nKey
+      ? translated
+      : t("transcript.processToolFallback").replace("{name}", group.fallbackName || "");
+  return template.replace("{count}", String(group.count));
 }
 
 function ToolUsePart({
@@ -471,7 +756,7 @@ function ToolUsePart({
   const active = part.active || part.phase === "streaming_args" || part.phase === "running";
   const elapsed = useElapsedDuration(active && part.phase === "running" ? part.phaseUpdatedAt : undefined, locale);
   const failed = toolFailed(part);
-  const dotPhase = part.dotPhase || (failed ? "error" : toolPhaseDot(part.phase));
+  const Icon = toolPartIcon(part);
   const title = toolTitle(part, liveResult, baseTitle, elapsed, t);
   const copyText = toolCopyText(part, args, liveResult, baseTitle, t);
   const toneClass = failed ? "text-destructive" : "text-muted-foreground";
@@ -479,10 +764,8 @@ function ToolUsePart({
   const hoverClass = failed ? "hover:text-destructive" : "hover:text-foreground";
   if (!showDetails) {
     return (
-      <div className={cn("grid h-6 w-full grid-cols-[0.75rem_minmax(0,1fr)] items-center gap-1 pr-1 text-[12px] leading-[1.5]", toneClass)}>
-        <span className="relative z-[1] inline-flex h-6 w-3 shrink-0 items-center justify-center opacity-90">
-          <PhaseDot active={active} phase={dotPhase} size="md" />
-        </span>
+      <div className={cn("grid h-6 w-full grid-cols-[1rem_minmax(0,1fr)] items-center gap-1 pr-1 text-[13px] leading-[1.5]", toneClass)}>
+        <PartIcon icon={Icon} />
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="shrink-0 truncate">{title.label}</span>
           {title.summary ? <span className={cn("min-w-0 truncate", summaryClass)}>{title.summary}</span> : null}
@@ -492,24 +775,22 @@ function ToolUsePart({
   }
   return (
     <details
-      className={cn("relative text-[12px] leading-[1.5]", toneClass)}
+      className={cn("relative text-[13px] leading-[1.5]", toneClass)}
       open={open}
       onToggle={handleToggle}
     >
       {open ? <span aria-hidden="true" className="pointer-events-none absolute top-6 bottom-0 left-[6px] border-l border-border" /> : null}
       <summary
-        className={cn("inline-grid h-6 cursor-default list-none grid-cols-[0.75rem_auto] items-center gap-1 pr-1 outline-none [&::-webkit-details-marker]:hidden", hoverClass)}
+        className={cn("inline-grid h-6 cursor-default list-none grid-cols-[1rem_auto] items-center gap-1 pr-1 outline-none [&::-webkit-details-marker]:hidden", hoverClass)}
         onClick={handleSummaryClick}
         onKeyDown={handleSummaryKeyDown}
       >
-        <span className="relative z-[1] inline-flex h-6 w-3 shrink-0 items-center justify-center opacity-90">
-          <PhaseDot active={active} phase={dotPhase} size="md" />
-        </span>
+        <PartIcon icon={Icon} />
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="shrink-0 truncate">{title.label}</span>
           {title.summary ? <span className={cn("min-w-0 truncate", summaryClass)}>{title.summary}</span> : null}
           <span className={cn("shrink-0", summaryClass)}>
-            {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+            {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
           </span>
         </span>
       </summary>
@@ -530,8 +811,10 @@ function ToolNameLine({ name }: { name: string }) {
   const { t } = useI18n();
   return (
     <div className="mb-2 flex min-w-0 items-center gap-2 text-[11px] leading-5">
-      <span className="font-medium text-muted-foreground/80">{t("transcript.tool")}</span>
-      <code className="min-w-0 truncate rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">{name}</code>
+      <span className="shrink-0 whitespace-nowrap font-medium text-muted-foreground/80">{t("transcript.tool")}</span>
+      <code className="min-w-0 truncate whitespace-nowrap rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+        {name}
+      </code>
     </div>
   );
 }
@@ -639,7 +922,7 @@ export function MarkdownBody({ allowHtmlImages = true, text, token = "" }: { all
 
   return (
     <>
-      <div className={cn("pudding-markdown", hasHtmlImage && "pudding-markdown-html-images")}>
+      <div className={cn("pudding-markdown py-1.5", hasHtmlImage && "pudding-markdown-html-images")}>
         {segments.map((segment, index) => {
           if (segment.type === "image") {
             return (
