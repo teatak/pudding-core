@@ -3,7 +3,6 @@ import {
   Blocks,
   CalendarDays,
   ChartPie,
-  Compass,
   FileText,
   Image,
   Loader2,
@@ -36,10 +35,6 @@ import { BrowserCanvasTabButton } from "@/browser/BrowserCanvasTabButton";
 import { BrowserToolbar } from "@/browser/BrowserToolbar";
 import { ElectronWebviewBrowser } from "@/browser/ElectronWebviewBrowser";
 import {
-  browserPayloadForItem,
-  faviconURLForPage,
-} from "@/browser/helpers";
-import {
   GalleryLayoutControls,
   MemoCanvasContent,
   TableExportMenu,
@@ -67,6 +62,8 @@ type CanvasPaneProps = {
   sessionID?: string;
 };
 
+const recentClosedCanvasLimit = 8;
+
 type WindowState = {
   x: number;
   y: number;
@@ -88,7 +85,6 @@ const DEFAULT_H = 300;
 const CASCADE = 28;
 const FULLSCREEN_SNAP = 12;
 const KIND_ICON: Record<string, LucideIcon> = {
-  browser: Compass,
   chart: ChartPie,
   form: FileText,
   gallery: Image,
@@ -102,7 +98,6 @@ const KIND_ICON: Record<string, LucideIcon> = {
   widget: Blocks,
 };
 const KIND_TILE_CLASS: Record<string, string> = {
-  browser: "bg-blue-600",
   chart: "bg-amber-600",
   form: "bg-violet-600",
   gallery: "bg-pink-600",
@@ -141,32 +136,6 @@ function CanvasKindIcon({
 }
 
 function CanvasItemIcon({ item, size = "sm" }: { item: CanvasItem; size?: "xs" | "sm" }) {
-  const browserPayload = browserPayloadForItem(item);
-  const faviconURL = browserPayload?.faviconURL || (browserPayload?.url ? faviconURLForPage(browserPayload.url) : "");
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    setFailed(false);
-  }, [faviconURL]);
-
-  if (faviconURL && !failed) {
-    const sizeClass = size === "xs" ? "h-[18px] w-[18px] rounded-[5px]" : "h-5 w-5 rounded-md";
-    return (
-      <span
-        aria-hidden="true"
-        className={cn("inline-flex shrink-0 items-center justify-center overflow-hidden", sizeClass)}
-      >
-        <img
-          alt=""
-          className="h-full w-full object-cover"
-          draggable={false}
-          src={faviconURL}
-          onError={() => setFailed(true)}
-        />
-      </span>
-    );
-  }
-
   return <CanvasKindIcon kind={item.kind} size={size} />;
 }
 
@@ -214,16 +183,12 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   const closedItemsQuery = useQuery({
     enabled,
     queryKey: queryKeys.closedCanvasItems(actorSessionID),
-    queryFn: () => listClosedCanvasItems(token, actorSessionID),
+    queryFn: () => listClosedCanvasItems(token, actorSessionID, recentClosedCanvasLimit),
     staleTime: 30_000,
   });
 
-  const allItems = itemsQuery.data?.items ?? [];
-  const items = useMemo(() => allItems.filter((item) => !canvasItemIsBrowser(item)), [allItems]);
-  const closedItems = useMemo(
-    () => (closedItemsQuery.data?.items ?? []).filter((item) => !closedCanvasItemIsBrowser(item)),
-    [closedItemsQuery.data?.items],
-  );
+  const items = itemsQuery.data?.items ?? [];
+  const closedItems = closedItemsQuery.data?.items ?? [];
   const {
     activeBrowserTab,
     activateBrowserSurface,
@@ -1131,16 +1096,6 @@ function serializeWindow(win: WindowState): WindowRestoreState {
 
 function titleForItem(item: CanvasItem, t: (key: string) => string): string {
   return item.title?.trim() || titleFromPayload(item.item) || item.kind || t("canvas.untitled");
-}
-
-function closedCanvasItemIsBrowser(item: ClosedCanvasItem): boolean {
-  const payload = asRecord(item.item);
-  return (stringValue(payload?.kind) || item.kind) === "browser";
-}
-
-function canvasItemIsBrowser(item: CanvasItem): boolean {
-  const payload = asRecord(item.item);
-  return (stringValue(payload?.kind) || item.kind) === "browser";
 }
 
 function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {

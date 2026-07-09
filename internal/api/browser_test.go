@@ -467,28 +467,6 @@ func TestCloseBrowserSessionIsAtomicAndSessionScoped(t *testing.T) {
 		t.Fatalf("open b status=%d tab=%+v", resp.StatusCode, tabB)
 	}
 	if _, err := st.PutCanvasItem(ctx, store.CanvasItemInput{
-		ID:              "browser_sess_a",
-		ActorSessionID:  "sess_a",
-		SourceSessionID: "sess_a",
-		Kind:            "browser",
-		Title:           "A",
-		Item:            []byte(`{"kind":"browser","sessionID":"sess_a","tabID":"` + tabA.ID + `","url":"https://a.example/"}`),
-		Window:          []byte(`{}`),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.PutCanvasItem(ctx, store.CanvasItemInput{
-		ID:              "browser_sess_b",
-		ActorSessionID:  "sess_b",
-		SourceSessionID: "sess_b",
-		Kind:            "browser",
-		Title:           "B",
-		Item:            []byte(`{"kind":"browser","sessionID":"sess_b","tabID":"` + tabB.ID + `","url":"https://b.example/"}`),
-		Window:          []byte(`{}`),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.PutCanvasItem(ctx, store.CanvasItemInput{
 		ID:             "note_sess_a",
 		ActorSessionID: "sess_a",
 		Kind:           "note",
@@ -527,64 +505,14 @@ func TestCloseBrowserSessionIsAtomicAndSessionScoped(t *testing.T) {
 	for _, item := range items {
 		seen[item.ID] = true
 	}
-	if seen["browser_sess_a"] {
-		t.Fatal("session a browser canvas item should be deleted")
-	}
-	if !seen["browser_sess_b"] {
-		t.Fatal("session b browser canvas item should remain")
-	}
 	if !seen["note_sess_a"] {
-		t.Fatal("non-browser canvas item should remain")
-	}
-
-	resp = req(t, http.MethodPut, srv.URL+"/sessions/sess_a/canvas/items/browser_sess_a", map[string]any{
-		"id":              "browser_sess_a",
-		"sourceSessionID": "sess_a",
-		"kind":            "browser",
-		"title":           "Stale",
-		"item": map[string]any{
-			"kind":      "browser",
-			"sessionID": "sess_a",
-			"tabID":     tabA.ID,
-			"url":       "https://a.example/",
-		},
-		"window": map[string]any{},
-	})
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusConflict {
-		t.Fatalf("stale browser canvas write status=%d", resp.StatusCode)
-	}
-	items, err = st.ListCanvasItems(ctx, "sess_a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, item := range items {
-		if item.ID == "browser_sess_a" {
-			t.Fatal("stale browser canvas write resurrected closed browser item")
-		}
+		t.Fatal("canvas item should remain")
 	}
 
 	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/tabs", nil)
 	newTab := decodeJSON[browser.TabSnapshot](t, resp)
 	if resp.StatusCode != http.StatusCreated || newTab.URL != "about:blank" {
 		t.Fatalf("create new tab after close status=%d tab=%+v", resp.StatusCode, newTab)
-	}
-	resp = req(t, http.MethodPut, srv.URL+"/sessions/sess_a/canvas/items/browser_sess_a", map[string]any{
-		"id":              "browser_sess_a",
-		"sourceSessionID": "sess_a",
-		"kind":            "browser",
-		"title":           "New Tab",
-		"item": map[string]any{
-			"kind":      "browser",
-			"sessionID": "sess_a",
-			"tabID":     newTab.ID,
-			"url":       "about:blank",
-		},
-		"window": map[string]any{},
-	})
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("new browser canvas write status=%d", resp.StatusCode)
 	}
 
 	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/close", nil)

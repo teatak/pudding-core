@@ -196,6 +196,15 @@ html[data-shell] .no-drag-region {
     -webkit-user-select: none;
 }
 
+html[data-workspace-resizing],
+html[data-workspace-resizing] * {
+    cursor: col-resize !important;
+}
+
+html[data-workspace-resizing] .workspace-split-pane {
+    transition: none !important;
+}
+
 html[data-shell] input,
 html[data-shell] textarea,
 html[data-shell] [contenteditable="true"],

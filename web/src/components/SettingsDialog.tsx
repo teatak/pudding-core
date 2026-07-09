@@ -24,6 +24,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 
 import {
   createMobilePairing,
+  clearASRRecordings,
   applySkillDraft,
   deleteSkillDraft,
   deleteProvider,
@@ -670,6 +671,7 @@ function GeneralSettings({ token }: { token: string }) {
 
 type VoiceFormState = {
   asrEnabled: boolean;
+  asrSaveAudio: boolean;
   asrLanguage: string;
   asrNumThreads: string;
   asrUseITN: boolean;
@@ -692,6 +694,7 @@ function VoiceSettings({ token }: { token: string }) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const [form, setForm] = useState<VoiceFormState>(defaultVoiceForm());
+  const [clearRecordingsOpen, setClearRecordingsOpen] = useState(false);
   const audioQuery = useQuery({
     queryKey: queryKeys.audioConfig(),
     queryFn: () => getAudioConfig(token),
@@ -741,6 +744,19 @@ function VoiceSettings({ token }: { token: string }) {
     },
   });
 
+  const clearRecordingsMutation = useMutation({
+    mutationFn: () => clearASRRecordings(token),
+    onSuccess: async (response) => {
+      setClearRecordingsOpen(false);
+      toast.success(t("settings.voice.asrClearAudioSuccess").replace("{count}", String(response.attachments)));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["session"] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.desktopAbout() }),
+      ]);
+    },
+    onError: () => toast.error(t("settings.voice.asrClearAudioFailed")),
+  });
+
   const saveVoiceForm = (nextForm: VoiceFormState) => {
     setForm(nextForm);
     if (!savedConfig) {
@@ -756,6 +772,7 @@ function VoiceSettings({ token }: { token: string }) {
     saveMutation.mutate(form);
   };
   const disabled = audioQuery.isLoading || saveMutation.isPending;
+  const clearDisabled = disabled || clearRecordingsMutation.isPending;
   const edge = savedConfig ? edgeTTSProfile(savedConfig) : {};
 
   return (
@@ -797,6 +814,14 @@ function VoiceSettings({ token }: { token: string }) {
             id="pudding-voice-asr-enabled"
             label={t("settings.voice.asrEnabled")}
             onChange={(next) => saveVoicePatch({ asrEnabled: next })}
+          />
+          <SettingsToggleRow
+            checked={form.asrSaveAudio}
+            description={t("settings.voice.asrSaveAudioDesc")}
+            disabled={disabled}
+            id="pudding-voice-asr-save-audio"
+            label={t("settings.voice.asrSaveAudio")}
+            onChange={(next) => saveVoicePatch({ asrSaveAudio: next })}
           />
           <SettingsToggleRow
             checked={form.asrUseITN}
@@ -841,6 +866,12 @@ function VoiceSettings({ token }: { token: string }) {
             onChange={(value) => setForm((prev) => ({ ...prev, asrNumThreads: value }))}
           />
           <SettingsReadOnlyRows rows={asrReadOnlyRows} />
+          <SettingsActionRow description={t("settings.voice.asrClearAudioDesc")} label={t("settings.voice.asrClearAudio")}>
+            <Button disabled={clearDisabled} size="sm" type="button" variant="outline" onClick={() => setClearRecordingsOpen(true)}>
+              {clearRecordingsMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Trash className="size-4" />}
+              {t("common.clear")}
+            </Button>
+          </SettingsActionRow>
         </div>
       </section>
 
@@ -995,6 +1026,24 @@ function VoiceSettings({ token }: { token: string }) {
           <SettingsReadOnlyRows rows={ttsReadOnlyRows} />
         </div>
       </section>
+      <AlertDialog open={clearRecordingsOpen} onOpenChange={(open) => !open && setClearRecordingsOpen(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("settings.voice.asrClearAudioTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("settings.voice.asrClearAudioConfirm")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={clearRecordingsMutation.isPending}
+              variant="destructive"
+              onClick={() => clearRecordingsMutation.mutate()}
+            >
+              {t("common.clear")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -1081,6 +1130,7 @@ function voiceSectionReadOnlyRows(
 function defaultVoiceForm(): VoiceFormState {
   return {
     asrEnabled: true,
+    asrSaveAudio: false,
     asrLanguage: "zh",
     asrNumThreads: "2",
     asrUseITN: false,
@@ -1101,6 +1151,7 @@ function voiceFormFromConfig(config: AudioConfig): VoiceFormState {
   const edge = edgeTTSProfile(config);
   return {
     asrEnabled: config.asr.enabled ?? true,
+    asrSaveAudio: config.asr.saveAudio ?? false,
     asrLanguage: config.asr.language || "zh",
     asrNumThreads: String(config.asr.numThreads || 2),
     asrUseITN: config.asr.useITN ?? false,
@@ -1124,6 +1175,7 @@ function audioConfigFromForm(config: AudioConfig, form: VoiceFormState): AudioCo
     asr: {
       ...config.asr,
       enabled: form.asrEnabled,
+      saveAudio: form.asrSaveAudio,
       language: form.asrLanguage,
       numThreads: normalizedInteger(form.asrNumThreads, config.asr.numThreads),
       useITN: form.asrUseITN,
@@ -1201,6 +1253,26 @@ function SettingsControlRow({
         <span className="text-xs leading-5 text-muted-foreground">{description}</span>
       </label>
       <div className="min-w-0">{children}</div>
+    </div>
+  );
+}
+
+function SettingsActionRow({
+  children,
+  description,
+  label,
+}: {
+  children: ReactNode;
+  description: string;
+  label: string;
+}) {
+  return (
+    <div className="grid gap-3 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(12rem,18rem)] sm:items-center">
+      <span className="grid min-w-0 gap-1">
+        <span className="text-sm font-medium">{label}</span>
+        <span className="text-xs leading-5 text-muted-foreground">{description}</span>
+      </span>
+      <div className="flex min-w-0 justify-start sm:justify-end">{children}</div>
     </div>
   );
 }

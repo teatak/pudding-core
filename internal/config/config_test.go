@@ -71,6 +71,7 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 	if audio.Driver.Type != "portaudio" ||
 		audio.ASR.Engine != "sherpa-sensevoice" ||
 		audio.ASR.Language != "zh" ||
+		audio.ASRSaveAudio() ||
 		audio.ASRUseITN() ||
 		audio.ASR.VAD.Threshold != 0.6 ||
 		audio.ASR.VAD.PrerollMillis != 500 ||
@@ -90,6 +91,7 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 	for _, want := range []string{
 		"type: portaudio",
 		"engine: sherpa-sensevoice",
+		"save_audio: false",
 		"language: zh",
 		"use_itn: false",
 		"preroll_millis: 500",

@@ -1,8 +1,11 @@
 package voice
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"strings"
@@ -10,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/audio/asr"
 	"github.com/teatak/pudding-core/internal/audio/driver"
 	"github.com/teatak/pudding-core/internal/audio/dsp/aec"
@@ -68,6 +72,8 @@ type ServiceConfig struct {
 	AEC       aec.Processor
 	NS        ns.Processor
 	TTS       tts.Client
+	HomeDir   string
+	SaveAudio bool
 }
 
 // Service is the daemon-owned voice orchestrator. It routes ASR text into the
@@ -85,6 +91,8 @@ type Service struct {
 	aecRender *resample.Linear
 	tts       tts.Client
 	playback  *audioqueue.Queue
+	homeDir   string
+	saveAudio bool
 
 	mu              sync.Mutex
 	driverReady     bool
@@ -134,6 +142,8 @@ func NewService(cfg ServiceConfig) *Service {
 		ns:            cfg.NS,
 		tts:           cfg.TTS,
 		playback:      audioqueue.New(),
+		homeDir:       strings.TrimSpace(cfg.HomeDir),
+		saveAudio:     cfg.SaveAudio,
 		outputCancels: make(map[string]context.CancelFunc),
 		turnBuffers:   make(map[string]*turnBuffer),
 		mutedTurns:    make(map[string]bool),
@@ -360,7 +370,7 @@ func (s *Service) Close() error {
 func (s *Service) HandleASREvent(ctx context.Context, sessionID string, ev asr.Event) (*engine.SubmitResult, error) {
 	switch ev.Kind {
 	case asr.EventSentence:
-		return s.SubmitSentence(ctx, sessionID, ev.Text)
+		return s.submitSentence(ctx, sessionID, ev.Text, ev)
 	case asr.EventError:
 		if ev.Err != nil {
 			return nil, ev.Err
@@ -370,6 +380,10 @@ func (s *Service) HandleASREvent(ctx context.Context, sessionID string, ev asr.E
 }
 
 func (s *Service) SubmitSentence(ctx context.Context, sessionID, text string) (*engine.SubmitResult, error) {
+	return s.submitSentence(ctx, sessionID, text, asr.Event{})
+}
+
+func (s *Service) submitSentence(ctx context.Context, sessionID, text string, ev asr.Event) (*engine.SubmitResult, error) {
 	if s.submitter == nil {
 		return nil, errors.New("voice: submitter unavailable")
 	}
@@ -382,11 +396,13 @@ func (s *Service) SubmitSentence(ctx context.Context, sessionID, text string) (*
 		return nil, ErrNoInputBinding
 	}
 	clientMessageID := store.NewID("audmsg")
+	parts := s.asrAudioParts(sessionID, clientMessageID, text, ev)
 	slog.Info("voice: submitting asr sentence", "sessionID", sessionID, "clientMessageID", clientMessageID, "text", previewText(text, 80))
 	result, err := s.submitter.Submit(ctx, engine.SubmitInput{
 		SessionID:       sessionID,
 		ClientMessageID: clientMessageID,
 		Text:            text,
+		Parts:           parts,
 	})
 	if err != nil {
 		slog.Warn("voice: submit asr sentence failed", "sessionID", sessionID, "clientMessageID", clientMessageID, "err", err)
@@ -404,6 +420,66 @@ func (s *Service) SubmitSentence(ctx context.Context, sessionID, text string) (*
 		)
 	}
 	return result, nil
+}
+
+func (s *Service) asrAudioParts(sessionID, clientMessageID, text string, ev asr.Event) []store.ContentPart {
+	if !s.saveAudio || strings.TrimSpace(s.homeDir) == "" || len(ev.Audio.Data) == 0 || !ev.Audio.Format.Valid() {
+		return nil
+	}
+	wav, err := wavFromPCM16(ev.Audio)
+	if err != nil {
+		slog.Warn("voice: encode asr audio failed", "sessionID", sessionID, "clientMessageID", clientMessageID, "err", err)
+		return nil
+	}
+	name := "asr-" + time.Now().Format("20060102-150405") + ".wav"
+	item, err := attachment.NewService(s.homeDir).StoreReader(sessionID, name, "audio/wav", bytes.NewReader(wav))
+	if err != nil {
+		slog.Warn("voice: store asr audio failed", "sessionID", sessionID, "clientMessageID", clientMessageID, "err", err)
+		return nil
+	}
+	item.Origin = attachment.OriginASRAudio
+	item.AudioTranscript = text
+	return []store.ContentPart{store.AttachmentPart(item)}
+}
+
+func wavFromPCM16(pcm frame.PCM16) ([]byte, error) {
+	if !pcm.Format.Valid() {
+		return nil, errors.New("invalid pcm format")
+	}
+	data := pcm.Data
+	if len(data) == 0 {
+		return nil, errors.New("empty pcm data")
+	}
+	if len(data)%2 != 0 {
+		data = data[:len(data)-1]
+	}
+	if len(data) == 0 {
+		return nil, errors.New("empty pcm data")
+	}
+	channels := pcm.Format.Channels
+	sampleRate := pcm.Format.SampleRate
+	blockAlign := channels * 2
+	byteRate := sampleRate * blockAlign
+	if channels <= 0 || sampleRate <= 0 || blockAlign <= 0 || byteRate <= 0 {
+		return nil, fmt.Errorf("invalid pcm format %dHz %dch", sampleRate, channels)
+	}
+	var buf bytes.Buffer
+	buf.Grow(44 + len(data))
+	buf.WriteString("RIFF")
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(36+len(data)))
+	buf.WriteString("WAVE")
+	buf.WriteString("fmt ")
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(16))
+	_ = binary.Write(&buf, binary.LittleEndian, uint16(1))
+	_ = binary.Write(&buf, binary.LittleEndian, uint16(channels))
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(sampleRate))
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(byteRate))
+	_ = binary.Write(&buf, binary.LittleEndian, uint16(blockAlign))
+	_ = binary.Write(&buf, binary.LittleEndian, uint16(16))
+	buf.WriteString("data")
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(len(data)))
+	buf.Write(data)
+	return buf.Bytes(), nil
 }
 
 func (s *Service) startInput(sessionID string) error {

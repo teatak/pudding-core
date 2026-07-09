@@ -51,6 +51,7 @@ import {
   audioBindingsResponse,
   audioConfig,
   audioConfigResponse,
+  clearASRRecordingsResponse,
   browserActionResult,
   browserClickRequest,
   browserObservation,
@@ -79,6 +80,7 @@ import {
   type AudioBindings,
   type AudioConfig,
   type AudioConfigResponse,
+  type ClearASRRecordingsResponse,
   type Attachment,
   type BuiltinTool,
   type BrowserActionResult,
@@ -157,7 +159,7 @@ export type SubmitPayload = z.input<typeof submitRequest>;
 export type CompactResult = z.infer<typeof compactResponse>;
 export type MobilePairing = z.infer<typeof mobilePairingResponse>;
 export type UserPrompt = z.infer<typeof userPromptResponse>;
-export type { AudioConfig, AudioConfigResponse };
+export type { AudioConfig, AudioConfigResponse, ClearASRRecordingsResponse };
 export type AppConnectionPayload = {
   appID: string;
   name?: string;
@@ -866,6 +868,12 @@ export function putAudioConfig(token: string, body: AudioConfig): Promise<AudioC
   return request(token, "/settings/audio", audioConfigResponse, {
     method: "PUT",
     body: JSON.stringify(audioConfig.parse(body)),
+  });
+}
+
+export function clearASRRecordings(token: string): Promise<ClearASRRecordingsResponse> {
+  return request(token, "/settings/audio/asr-recordings", clearASRRecordingsResponse, {
+    method: "DELETE",
   });
 }
 

@@ -27,6 +27,7 @@ type AudioDriverConfig struct {
 
 type AudioASRConfig struct {
 	Enabled                     *bool             `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	SaveAudio                   *bool             `yaml:"save_audio,omitempty" json:"saveAudio,omitempty"`
 	Engine                      string            `yaml:"engine" json:"engine"`
 	ModelPath                   string            `yaml:"model_path" json:"modelPath"`
 	TokensPath                  string            `yaml:"tokens_path" json:"tokensPath"`
@@ -82,6 +83,7 @@ func DefaultAudioConfig() AudioConfig {
 		},
 		ASR: AudioASRConfig{
 			Enabled:                     &on,
+			SaveAudio:                   &off,
 			Engine:                      "sherpa-sensevoice",
 			ModelPath:                   "runtime/models/asr/model.int8.onnx",
 			TokensPath:                  "runtime/models/asr/tokens.txt",
@@ -161,6 +163,9 @@ func (c AudioConfig) WithDefaults() AudioConfig {
 	}
 	if c.ASR.Enabled == nil {
 		c.ASR.Enabled = d.ASR.Enabled
+	}
+	if c.ASR.SaveAudio == nil {
+		c.ASR.SaveAudio = d.ASR.SaveAudio
 	}
 	if strings.TrimSpace(c.ASR.Engine) == "" {
 		c.ASR.Engine = d.ASR.Engine
@@ -244,6 +249,10 @@ func (c AudioConfig) ASREnabled() bool {
 
 func (c AudioConfig) ASRUseITN() bool {
 	return boolSetting(c.ASR.UseInverseTextNormalization, false)
+}
+
+func (c AudioConfig) ASRSaveAudio() bool {
+	return boolSetting(c.ASR.SaveAudio, false)
 }
 
 func (c AudioConfig) TTSEnabled() bool {

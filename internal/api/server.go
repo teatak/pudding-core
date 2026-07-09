@@ -17,6 +17,7 @@ import (
 
 	"github.com/teatak/cart/v3"
 	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/audio/voice"
 	"github.com/teatak/pudding-core/internal/browser"
 	"github.com/teatak/pudding-core/internal/config"
@@ -195,6 +196,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/canvas/closed/:closedID").DELETE(s.deleteClosedCanvasItem)
 	app.Route("/settings").GET(s.getSettings).PUT(s.putSettings)
 	app.Route("/settings/audio").GET(s.getAudioConfig).PUT(s.putAudioConfig)
+	app.Route("/settings/audio/asr-recordings").DELETE(s.clearASRRecordings)
 	app.Route("/settings/user-prompt").GET(s.getUserPrompt).PUT(s.putUserPrompt)
 	app.Route("/providers").GET(s.listProviders).POST(s.createProvider)
 	app.Route("/providers/models").POST(s.probeProviderModels)
@@ -844,6 +846,44 @@ func (s *Server) putAudioConfig(c *cart.Context) error {
 		return s.fail(c, err)
 	}
 	c.JSON(http.StatusOK, audioConfigView{Path: filepath.Join(s.home, "config", "audio.yaml"), Config: cfg})
+	return nil
+}
+
+type clearASRRecordingsResponse struct {
+	OK           bool `json:"ok"`
+	Attachments  int  `json:"attachments"`
+	Messages     int  `json:"messages"`
+	QueuedInputs int  `json:"queuedInputs"`
+	DeleteErrors int  `json:"deleteErrors,omitempty"`
+}
+
+func (s *Server) clearASRRecordings(c *cart.Context) error {
+	result, err := s.store.RemoveAttachmentsByOrigin(c.Request.Context(), attachment.OriginASRAudio)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	deleteErrors := 0
+	if strings.TrimSpace(s.home) != "" {
+		service := attachment.NewService(s.home)
+		seen := make(map[string]bool, len(result.Attachments))
+		for _, item := range result.Attachments {
+			key := item.SessionID + "\x00" + item.Attachment.AttachmentKey
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			if err := service.Delete(item.SessionID, item.Attachment.AttachmentKey); err != nil {
+				deleteErrors++
+			}
+		}
+	}
+	c.JSON(http.StatusOK, clearASRRecordingsResponse{
+		OK:           true,
+		Attachments:  len(result.Attachments),
+		Messages:     result.MessageCount,
+		QueuedInputs: result.QueuedInputCount,
+		DeleteErrors: deleteErrors,
+	})
 	return nil
 }
 

@@ -23,6 +23,7 @@ const (
 	OriginTemp           = "temp"
 	OriginTool           = "tool"
 	OriginUpload         = "upload"
+	OriginASRAudio       = "asr_audio"
 
 	attachmentsDirName = "attachments"
 	tempDirName        = "temp"
@@ -142,6 +143,17 @@ func (s *Service) StorePath(sessionID, path string) (store.Attachment, error) {
 		}
 	}
 	return s.StoreReader(sessionID, name, mimeType, file)
+}
+
+func (s *Service) Delete(sessionID, key string) error {
+	path, ok, err := s.Path(sessionID, key)
+	if err != nil || !ok {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 func WithSourcePath(item store.Attachment, path string) store.Attachment {

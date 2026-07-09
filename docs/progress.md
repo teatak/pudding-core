@@ -3,7 +3,7 @@
 > 单一现状文档:给接手的 agent / 上下文压缩后的自己看,避免重新推导。
 > 已完成只记结论(细节在 git 历史与 commit message);重点是**进行中**与
 > **待决项**。改动时同步更新本文,不积压。
-> 最近更新:2026-07-08。
+> 最近更新:2026-07-09。
 
 ## 现状一句话
 
@@ -39,6 +39,7 @@ LLM 自动标题。
 - Electron shell 负责窗口、preload IPC、主题/窗口状态、`<webview>` 浏览器承载。
 - 业务 API 直连 daemon HTTP/SSE/WS;desktop native/system capabilities 走 Electron IPC。
 - 已定规则:Electron 只托管 UI 资源/Vite HMR,不反代业务 API。
+- 浏览器 external/passkey 路线暂停,当前主线只收敛 internal `<webview>` + LLM 工具生命周期。
 
 **Web UI(design.md v2 切片 S1–S8 + E4)** —— 已实现并经 preview / 真实桌面
 窗口验证:

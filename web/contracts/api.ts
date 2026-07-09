@@ -425,6 +425,7 @@ export const audioASRVADConfig = z.object({
 });
 export const audioASRConfig = z.object({
   enabled: z.boolean().optional(),
+  saveAudio: z.boolean().optional(),
   engine: z.string(),
   modelPath: z.string(),
   tokensPath: z.string(),
@@ -466,6 +467,14 @@ export const audioConfigResponse = z.object({
   config: audioConfig,
 });
 export type AudioConfigResponse = z.infer<typeof audioConfigResponse>;
+export const clearASRRecordingsResponse = z.object({
+  ok: z.boolean(),
+  attachments: z.number(),
+  messages: z.number(),
+  queuedInputs: z.number(),
+  deleteErrors: z.number().optional(),
+});
+export type ClearASRRecordingsResponse = z.infer<typeof clearASRRecordingsResponse>;
 
 export const desktopAboutRow = z.object({
   key: z.string(),

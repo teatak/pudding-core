@@ -395,6 +395,17 @@ type Attachment struct {
 	AudioTranscript string `json:"audioTranscript,omitempty"`
 }
 
+type AttachmentCleanupItem struct {
+	SessionID  string
+	Attachment Attachment
+}
+
+type AttachmentCleanupResult struct {
+	Attachments      []AttachmentCleanupItem
+	MessageCount     int
+	QueuedInputCount int
+}
+
 type LocalFolder struct {
 	ID     string `json:"id"`
 	Name   string `json:"name"`
@@ -558,6 +569,35 @@ func AttachmentsFromParts(parts []ContentPart) []Attachment {
 		})
 	}
 	return NormalizeAttachments(out)
+}
+
+func RemoveAttachmentPartsByOrigin(parts []ContentPart, origin string) ([]ContentPart, []Attachment, bool) {
+	origin = strings.TrimSpace(origin)
+	if origin == "" {
+		return NormalizeContentParts(parts), nil, false
+	}
+	parts = NormalizeContentParts(parts)
+	next := make([]ContentPart, 0, len(parts))
+	removed := make([]Attachment, 0)
+	for _, part := range parts {
+		if part.Type == ContentPartAttachment && part.Origin == origin {
+			removed = append(removed, Attachment{
+				ID:              part.CallID,
+				Name:            part.Name,
+				AttachmentKey:   part.AttachmentKey,
+				URL:             part.URL,
+				MIME:            part.MIME,
+				Size:            part.Size,
+				Origin:          part.Origin,
+				SourcePath:      part.SourcePath,
+				CreatedAt:       part.AttachmentCreatedAt,
+				AudioTranscript: part.AudioTranscript,
+			})
+			continue
+		}
+		next = append(next, part)
+	}
+	return NormalizeContentParts(next), NormalizeAttachments(removed), len(removed) > 0
 }
 
 func NormalizeLocalFolders(folders []LocalFolder) []LocalFolder {
@@ -1345,6 +1385,9 @@ type Store interface {
 	// SearchMessages 在单个 session 的 canonical message text 上做全文检索。
 	// SQLite 正式实现走 FTS5;未启用 FTS5 时返回 ErrHistorySearchUnavailable。
 	SearchMessages(ctx context.Context, in MessageSearchInput) ([]*Message, error)
+	// RemoveAttachmentsByOrigin 从 canonical messages 和 queued inputs 中移除指定 origin 的附件 parts,
+	// 返回被移除的附件,供调用方清理 blob 文件。不会改动用户文本。
+	RemoveAttachmentsByOrigin(ctx context.Context, origin string) (*AttachmentCleanupResult, error)
 	// ListTurnsPage 按 turn 创建时间升序返回一页完整 turn。beforeTurnID 为空时
 	// 返回最近 limit 个 turn;非空时返回该 turn 之前的 limit 个 turn。
 	ListTurnsPage(ctx context.Context, sessionID string, beforeTurnID string, limit int) (*TurnPage, error)

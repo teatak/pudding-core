@@ -1163,6 +1163,43 @@ func (m *Memstore) SearchMessages(_ context.Context, in store.MessageSearchInput
 	return out, nil
 }
 
+func (m *Memstore) RemoveAttachmentsByOrigin(_ context.Context, origin string) (*store.AttachmentCleanupResult, error) {
+	origin = strings.TrimSpace(origin)
+	out := &store.AttachmentCleanupResult{}
+	if origin == "" {
+		return out, nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for sessionID, messages := range m.messages {
+		for _, msg := range messages {
+			next, removed, changed := store.RemoveAttachmentPartsByOrigin(msg.Parts, origin)
+			if !changed {
+				continue
+			}
+			msg.Parts = next
+			out.MessageCount++
+			for _, item := range removed {
+				out.Attachments = append(out.Attachments, store.AttachmentCleanupItem{SessionID: sessionID, Attachment: item})
+			}
+		}
+	}
+	for sessionID, inputs := range m.queued {
+		for _, input := range inputs {
+			next, removed, changed := store.RemoveAttachmentPartsByOrigin(input.Parts, origin)
+			if !changed {
+				continue
+			}
+			input.Parts = next
+			out.QueuedInputCount++
+			for _, item := range removed {
+				out.Attachments = append(out.Attachments, store.AttachmentCleanupItem{SessionID: sessionID, Attachment: item})
+			}
+		}
+	}
+	return out, nil
+}
+
 func (m *Memstore) ListTurnsPage(_ context.Context, sessionID string, beforeTurnID string, limit int) (*store.TurnPage, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

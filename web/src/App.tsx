@@ -1,6 +1,6 @@
 import { useSearch } from "@tanstack/react-router";
 import { PanelRight } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useGroupRef } from "react-resizable-panels";
 
 import { CanvasPane } from "@/components/CanvasPane";
@@ -47,6 +47,34 @@ function readSavedWorkspaceLayout() {
   });
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function clampWorkspaceCanvasRatio(workspaceWidth: number, canvasRatio: number) {
+  if (workspaceWidth <= 0) {
+    return clamp(canvasRatio, workspaceLayout.minPercent, workspaceLayout.maxPercent);
+  }
+  const maxCanvas = Math.max(0, workspaceWidth - workspaceLayout.minChatPx);
+  const minCanvas = Math.min(
+    maxCanvas,
+    Math.max(workspaceLayout.minCanvasPx, workspaceWidth - workspaceLayout.maxChatPx),
+  );
+  const canvasWidth = clamp((workspaceWidth * canvasRatio) / 100, minCanvas, maxCanvas);
+  return clamp((canvasWidth / workspaceWidth) * 100, workspaceLayout.minPercent, workspaceLayout.maxPercent);
+}
+
+function readSavedWorkspaceCanvasRatio() {
+  return readSavedWorkspaceLayout().canvas;
+}
+
+function saveWorkspaceCanvasRatio(canvasRatio: number) {
+  savePanelLayout(layoutStorageKeys.workspaceRatio, {
+    chat: 100 - canvasRatio,
+    canvas: canvasRatio,
+  });
+}
+
 export function App() {
   const token = useToken();
   const { session: selectedSessionID, draft, split: splitSessionID, view } = useSearch({ from: "/" });
@@ -56,10 +84,12 @@ export function App() {
   const [pairingCode] = useState(() => pendingPairingCode());
   const [pairingFailed, setPairingFailed] = useState(false);
   const [leftWorkspaceNode, setLeftWorkspaceNode] = useState<HTMLDivElement | null>(null);
-  const [workspaceAnimating, setWorkspaceAnimating] = useState(false);
-  const workspaceGroupRef = useGroupRef();
+  const [workspaceNode, setWorkspaceNode] = useState<HTMLDivElement | null>(null);
+  const [canvasRatio, setCanvasRatio] = useState(() => readSavedWorkspaceCanvasRatio());
+  const [workspaceResizing, setWorkspaceResizing] = useState(false);
   const splitGroupRef = useGroupRef();
-  const workspaceLayoutHydratedRef = useRef(false);
+  const canvasRatioRef = useRef(canvasRatio);
+  const workspaceResizeCleanupRef = useRef<(() => void) | null>(null);
   // 上下分屏(docs/design.md 2.2):pane 三件套整体复用,路由是唯一事实源;
   // split 与主 pane 相同的会话不重复渲染
   const appsActive = view === "apps";
@@ -93,6 +123,16 @@ export function App() {
   }, [leftWorkspaceNode]);
 
   useEffect(() => {
+    canvasRatioRef.current = canvasRatio;
+  }, [canvasRatio]);
+
+  useEffect(() => {
+    return () => {
+      workspaceResizeCleanupRef.current?.();
+    };
+  }, []);
+
+  useEffect(() => {
     if (token) {
       return;
     }
@@ -120,37 +160,6 @@ export function App() {
   }, [pairingCode, token]);
 
   useEffect(() => {
-    if (isMobile || !canUseCanvas) {
-      workspaceLayoutHydratedRef.current = false;
-      setWorkspaceAnimating(false);
-      return;
-    }
-    const group = workspaceGroupRef.current;
-    if (!group) {
-      return;
-    }
-    const nextLayout = !effectiveCanvasOpen
-      ? workspaceLayout.closed
-      : readSavedWorkspaceLayout();
-    if (!workspaceLayoutHydratedRef.current) {
-      workspaceLayoutHydratedRef.current = true;
-      group.setLayout(nextLayout);
-      return;
-    }
-    setWorkspaceAnimating(true);
-    const frame = window.requestAnimationFrame(() => {
-      group.setLayout(nextLayout);
-    });
-    const timeout = window.setTimeout(() => {
-      setWorkspaceAnimating(false);
-    }, 240);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.clearTimeout(timeout);
-    };
-  }, [canUseCanvas, effectiveCanvasOpen, isMobile, workspaceGroupRef]);
-
-  useEffect(() => {
     const group = splitGroupRef.current;
     if (!group) {
       return;
@@ -169,6 +178,70 @@ export function App() {
     }
     return <TokenGate />;
   }
+
+  const startWorkspaceResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!effectiveCanvasOpen || event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    const resizeNode = workspaceNode;
+    if (!resizeNode) {
+      return;
+    }
+    const workspaceRect = resizeNode.getBoundingClientRect();
+    if (!workspaceRect || workspaceRect.width <= 0) {
+      return;
+    }
+    workspaceResizeCleanupRef.current?.();
+    const workspaceWidth = Math.round(workspaceRect.width);
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    const previousWorkspaceResizeAttr = document.documentElement.getAttribute("data-workspace-resizing");
+    setWorkspaceResizing(true);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.documentElement.setAttribute("data-workspace-resizing", "true");
+
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) {
+        return;
+      }
+      cleaned = true;
+      document.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+      window.removeEventListener("blur", handlePointerUp);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      if (previousWorkspaceResizeAttr === null) {
+        document.documentElement.removeAttribute("data-workspace-resizing");
+      } else {
+        document.documentElement.setAttribute("data-workspace-resizing", previousWorkspaceResizeAttr);
+      }
+      setWorkspaceResizing(false);
+      setCanvasRatio(canvasRatioRef.current);
+      saveWorkspaceCanvasRatio(canvasRatioRef.current);
+      if (workspaceResizeCleanupRef.current === cleanup) {
+        workspaceResizeCleanupRef.current = null;
+      }
+    };
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const nextCanvasRatio = ((workspaceRect.right - moveEvent.clientX) / workspaceWidth) * 100;
+      const next = clampWorkspaceCanvasRatio(workspaceWidth, nextCanvasRatio);
+      canvasRatioRef.current = next;
+      resizeNode.style.setProperty("--workspace-canvas-ratio", `${next}%`);
+    };
+    const handlePointerUp = () => {
+      cleanup();
+    };
+
+    document.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+    window.addEventListener("blur", handlePointerUp);
+    workspaceResizeCleanupRef.current = cleanup;
+  };
 
   const chatArea = (
     <main className="flex h-full min-w-0 flex-col overflow-hidden bg-background">
@@ -276,47 +349,63 @@ export function App() {
     </div>
   );
 
+  const workspaceCanvasStyle = {
+    "--workspace-canvas-ratio": `${canvasRatio}%`,
+    "--workspace-canvas-max-width": `max(0px, calc(100% - ${workspaceLayout.minChatPx}px))`,
+    "--workspace-canvas-min-width": `min(var(--workspace-canvas-max-width), max(${workspaceLayout.minCanvasPx}px, calc(100% - ${workspaceLayout.maxChatPx}px)))`,
+    "--workspace-canvas-width": "clamp(var(--workspace-canvas-min-width), var(--workspace-canvas-ratio), var(--workspace-canvas-max-width))",
+  } as CSSProperties;
+
   const workspaceContent =
     isMobile || !canUseCanvas ? (
       leftWorkspace
     ) : (
-      <ResizablePanelGroup
-        className={cn("h-full min-w-0", workspaceAnimating && "pudding-workspace-panel-animating")}
-        defaultLayout={effectiveCanvasOpen ? readSavedWorkspaceLayout() : workspaceLayout.closed}
-        groupRef={workspaceGroupRef}
-        id="workspace"
-        orientation="horizontal"
-        resizeTargetMinimumSize={resizeTargetMinimumSize}
-        onLayoutChanged={(layout) => {
-          if (effectiveCanvasOpen && typeof layout.canvas === "number" && layout.canvas > 0) {
-            savePanelLayout(layoutStorageKeys.workspaceRatio, layout);
-          }
-        }}
-      >
-        <ResizablePanel
-          id="chat"
-          className="min-w-0"
-          maxSize={effectiveCanvasOpen ? workspaceLayout.maxChatPx : undefined}
-          minSize={workspaceLayout.minChatPx}
+      <div ref={setWorkspaceNode} className="relative h-full min-w-0 overflow-hidden bg-background" style={workspaceCanvasStyle}>
+        <div
+          className={cn(
+            "workspace-split-pane absolute inset-y-0 left-0 min-w-0 transition-[right] duration-200 ease-out",
+            workspaceResizing && "transition-none",
+          )}
+          style={{ right: effectiveCanvasOpen ? "var(--workspace-canvas-width)" : 0 }}
         >
           {leftWorkspace}
-        </ResizablePanel>
-        <WorkspaceResizableHandle
-          id="chat-canvas"
-          aria-label={t("layout.resizeHint")}
-          className={cn("transition-opacity duration-150", !effectiveCanvasOpen && "pointer-events-none opacity-0")}
-          disabled={!effectiveCanvasOpen}
-        />
-        <ResizablePanel
-          id="canvas"
-          className="min-w-0"
-          collapsedSize="0%"
-          collapsible
-          minSize={workspaceLayout.minCanvasPx}
+        </div>
+        <div
+          aria-hidden={!effectiveCanvasOpen}
+          className={cn(
+            "workspace-split-pane absolute inset-y-0 min-w-0 overflow-visible border-l border-border transition-[right] duration-200 ease-out",
+            workspaceResizing && "transition-none",
+            !effectiveCanvasOpen && "pointer-events-none",
+          )}
+          style={{
+            right: effectiveCanvasOpen ? 0 : "calc(0px - var(--workspace-canvas-width) - 32px)",
+            width: "var(--workspace-canvas-width)",
+          }}
         >
-          {effectiveCanvasOpen ? <CanvasPane key={selectedSessionID || "canvas"} token={token} sessionID={selectedSessionID} /> : null}
-        </ResizablePanel>
-      </ResizablePanelGroup>
+          <div
+            aria-label={t("layout.resizeHint")}
+            aria-orientation="vertical"
+            className="group absolute inset-y-0 left-0 z-40 w-3 -translate-x-1/2 cursor-col-resize bg-transparent"
+            role="separator"
+            tabIndex={effectiveCanvasOpen ? 0 : -1}
+            onPointerDown={startWorkspaceResize}
+          >
+            <div
+              className={cn(
+                "absolute top-1/2 left-1/2 h-8 w-[3px] -translate-x-[calc(50%+1px)] -translate-y-1/2 rounded-lg bg-muted-foreground/55 opacity-0 transition-opacity group-hover:opacity-100",
+                workspaceResizing && "opacity-100",
+              )}
+            />
+          </div>
+          <CanvasPane key={selectedSessionID || "canvas"} token={token} sessionID={selectedSessionID} />
+        </div>
+        {workspaceResizing ? (
+          <div
+            aria-hidden="true"
+            className="no-drag-region fixed inset-0 z-[1000] cursor-col-resize touch-none select-none bg-transparent"
+          />
+        ) : null}
+      </div>
     );
 
   return (

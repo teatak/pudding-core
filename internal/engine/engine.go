@@ -1651,6 +1651,9 @@ func providerAttachmentPartsFromStore(sessionID string, parts []store.ContentPar
 		if part.Type != store.ContentPartAttachment {
 			continue
 		}
+		if part.Origin == attachment.OriginASRAudio {
+			continue
+		}
 		if imagePart, ok := providerImagePartFromAttachment(sessionID, attachmentHome, part, cfg); ok {
 			if text := providerAttachmentFallbackText(part, "image"); text != "" {
 				out = append(out, provider.Part{Type: provider.PartText, Text: text})

@@ -1,5 +1,4 @@
 import type { BrowserState, BrowserTab } from "@/api/client";
-import type { CanvasItem } from "@/contracts/api";
 
 import type { BrowserCanvasPayload } from "./types";
 
@@ -119,28 +118,6 @@ export function faviconURLForPage(rawURL: string): string {
   }
 }
 
-export function browserPayloadForItem(item: CanvasItem): BrowserCanvasPayload | null {
-  const payload = asRecord(item.item);
-  const kind = stringValue(payload?.kind) || item.kind;
-  if (kind !== "browser") {
-    return null;
-  }
-  const sessionID = stringValue(payload?.sessionID) || item.sourceSessionID;
-  if (!sessionID) {
-    return null;
-  }
-  return {
-    kind: "browser",
-    sessionID,
-    tabID: stringValue(payload?.tabID) || undefined,
-    url: stringValue(payload?.url) || undefined,
-    title: stringValue(payload?.title) || item.title || undefined,
-    faviconURL: stringValue(payload?.faviconURL) || undefined,
-    mode: payload?.mode === "external" ? "external" : payload?.mode === "headless" ? "headless" : undefined,
-    closedAt: stringValue(payload?.closedAt) || undefined,
-  };
-}
-
 export function browserPayloadFromState(state: BrowserState | undefined): BrowserCanvasPayload | null {
   if (!state?.hasState || !state.sessionID || !state.url) {
     return null;
@@ -226,12 +203,4 @@ function isLikelyBrowserHost(value: string): boolean {
 
 function isSingleBrowserLabel(value: string): boolean {
   return /^[a-z0-9][a-z0-9-]{1,62}$/i.test(value);
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
-}
-
-function stringValue(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
 }

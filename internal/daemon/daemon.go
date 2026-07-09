@@ -136,6 +136,8 @@ func Start(opts Options) (*Daemon, error) {
 		AEC:       defaultAEC(audioCfg, audioDriver),
 		NS:        defaultNS(audioCfg, audioDriver),
 		TTS:       defaultTTS(audioCfg),
+		HomeDir:   dir,
+		SaveAudio: audioCfg.WithDefaults().ASRSaveAudio(),
 	})
 	if err := eng.Recover(context.Background()); err != nil {
 		_ = st.Close()

@@ -383,6 +383,42 @@ func TestBuildInlinesAudioAttachmentWhenSupported(t *testing.T) {
 	}
 }
 
+func TestBuildSkipsASRAudioAttachment(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	home := t.TempDir()
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := attachment.NewService(home).StoreReader("s1", "asr.wav", "audio/wav", bytes.NewReader([]byte("wav bytes")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored.Origin = attachment.OriginASRAudio
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "s1",
+		TurnID:          "t1",
+		UserMessageID:   "m1",
+		ClientMessageID: "audmsg_test",
+		UserText:        "识别文本",
+		UserParts: []store.ContentPart{
+			store.AttachmentPart(stored),
+			{Type: store.ContentPartText, Text: "识别文本"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req, err := New(ms, nil, WithAttachmentHome(home)).Build(ctx, "s1", "m", string(store.ModeChat), provider.ModelConfig{
+		Capabilities: &provider.ModelCapabilities{Audio: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 1 || req.Messages[0].Parts[0].Type != provider.PartText || req.Messages[0].Parts[0].Text != "识别文本" {
+		t.Fatalf("asr audio should not enter provider context: %+v", req.Messages)
+	}
+}
+
 func TestBuildFallsBackWhenAudioUnsupported(t *testing.T) {
 	ms := memstore.New()
 	ctx := context.Background()

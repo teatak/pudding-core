@@ -1,4 +1,4 @@
-import { Check, FileText, FolderOpen, Loader2, Pause, Play, Pencil, Trash2, X } from "lucide-react";
+import { Captions, Check, FileText, FolderOpen, Loader2, Pause, Play, Pencil, Trash2, X } from "lucide-react";
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
@@ -47,6 +47,7 @@ export const UserInput = memo(function UserInput({
   const canEditQueued =
     Boolean(clientMessageID && user.pending && (user.status === "queued" || user.status === "editing")) &&
     Boolean(onQueuedEditStart && onQueuedSave && onQueuedCancel);
+  const asrInput = isASRClientMessageID(clientMessageID);
 
   useEffect(() => {
     if (!editing) {
@@ -206,7 +207,21 @@ export const UserInput = memo(function UserInput({
                   })}
                 </div>
               ) : null}
-              {user.text ? <div className="min-w-0 max-w-full [overflow-wrap:anywhere]">{user.text}</div> : null}
+              {user.text ? (
+                <div className="min-w-0 max-w-full [overflow-wrap:anywhere]">
+                  {asrInput ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span aria-label={t("transcript.asrInput")} className="mr-1 inline-flex align-[-0.15em] text-muted-foreground" role="img">
+                          <Captions aria-hidden="true" className="size-3.5" strokeWidth={1.8} />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("transcript.asrInput")}</TooltipContent>
+                    </Tooltip>
+                  ) : null}
+                  {user.text}
+                </div>
+              ) : null}
               {user.interrupted ? <InterruptedBadge /> : null}
             </div>
           )}
@@ -217,6 +232,10 @@ export const UserInput = memo(function UserInput({
     </>
   );
 });
+
+function isASRClientMessageID(clientMessageID: string | undefined) {
+  return Boolean(clientMessageID?.startsWith("audmsg"));
+}
 
 type UserAttachment = NonNullable<UserInputVM["attachments"]>[number];
 type UserLocalFolder = NonNullable<UserInputVM["localFolders"]>[number];

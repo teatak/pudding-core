@@ -152,47 +152,8 @@ func (s *Server) closeBrowserSession(c *cart.Context) error {
 	if err := s.store.ClearBrowserState(c.Request.Context(), sessionID); err != nil {
 		return s.fail(c, err)
 	}
-	if err := s.deleteBrowserCanvasItems(c.Request.Context(), sessionID); err != nil {
-		return s.fail(c, err)
-	}
 	c.Response.WriteHeader(http.StatusNoContent)
 	return nil
-}
-
-func (s *Server) deleteBrowserCanvasItems(ctx context.Context, sessionID string) error {
-	items, err := s.store.ListCanvasItems(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	for _, item := range items {
-		if !canvasItemIsBrowserForSession(item, sessionID) {
-			continue
-		}
-		if err := s.store.DeleteCanvasItem(ctx, sessionID, item.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
-			return err
-		}
-	}
-	return nil
-}
-
-func canvasItemIsBrowserForSession(item *store.CanvasItem, sessionID string) bool {
-	if item == nil {
-		return false
-	}
-	var payload struct {
-		Kind      string `json:"kind"`
-		SessionID string `json:"sessionID"`
-	}
-	_ = json.Unmarshal(item.Item, &payload)
-	kind := strings.TrimSpace(payload.Kind)
-	if kind == "" {
-		kind = strings.TrimSpace(item.Kind)
-	}
-	ownerSessionID := strings.TrimSpace(payload.SessionID)
-	if ownerSessionID == "" {
-		ownerSessionID = strings.TrimSpace(item.SourceSessionID)
-	}
-	return kind == "browser" && ownerSessionID == strings.TrimSpace(sessionID)
 }
 
 func (s *Server) listBrowserTabs(c *cart.Context) error {

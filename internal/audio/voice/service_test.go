@@ -1,11 +1,14 @@
 package voice
 
 import (
+	"bytes"
 	"context"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/audio/asr"
 	"github.com/teatak/pudding-core/internal/audio/driver"
 	"github.com/teatak/pudding-core/internal/audio/frame"
@@ -54,6 +57,56 @@ func TestServiceSubmitsSentenceThroughEngine(t *testing.T) {
 	}
 	if msgs[1].Role != store.RoleAssistant || msgs[1].Text != "voice reply" {
 		t.Fatalf("unexpected assistant message: %+v", msgs[1])
+	}
+}
+
+func TestServiceSubmitsSavedASRAudioAttachment(t *testing.T) {
+	ctx := context.Background()
+	drv, fakeASR := testInputBackend()
+	var submitted engine.SubmitInput
+	svc := NewService(ServiceConfig{
+		Submitter: submitterFunc(func(_ context.Context, in engine.SubmitInput) (*engine.SubmitResult, error) {
+			submitted = in
+			return &engine.SubmitResult{TurnID: "turn_audio"}, nil
+		}),
+		Driver:    drv,
+		ASR:       fakeASR,
+		TTS:       ttspkg.NewNoop(),
+		HomeDir:   t.TempDir(),
+		SaveAudio: true,
+	})
+	defer svc.Close()
+	if _, err := svc.BindInput("sess_voice", true); err != nil {
+		t.Fatal(err)
+	}
+	_, err := svc.HandleASREvent(ctx, "sess_voice", asr.Event{
+		Kind: asr.EventSentence,
+		Text: "hello by voice",
+		Audio: frame.PCM16{
+			Format: frame.Format{SampleRate: 16000, Channels: 1},
+			Data:   []byte{0x00, 0x00, 0xff, 0x7f, 0x00, 0x80, 0x00, 0x00},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if submitted.Text != "hello by voice" || len(submitted.Parts) != 1 {
+		t.Fatalf("unexpected submitted input: %+v", submitted)
+	}
+	part := submitted.Parts[0]
+	if part.Type != store.ContentPartAttachment || part.Origin != attachment.OriginASRAudio || part.MIME != "audio/wav" || part.AudioTranscript != "hello by voice" {
+		t.Fatalf("unexpected audio part: %+v", part)
+	}
+	path, ok, err := attachment.NewService(svc.homeDir).Path("sess_voice", part.AttachmentKey)
+	if err != nil || !ok {
+		t.Fatalf("audio path ok=%v err=%v", ok, err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) < 44 || !bytes.Equal(data[:4], []byte("RIFF")) || !bytes.Equal(data[8:12], []byte("WAVE")) {
+		t.Fatalf("saved audio is not wav: %q", data[:min(len(data), 12)])
 	}
 }
 

@@ -236,6 +236,7 @@ function userFromMessages(messages: Message[]): UserInputVM | undefined {
   }
   return {
     attachments: attachmentsFromContentParts(userMessage.parts),
+    clientMessageID: userMessage.clientMessageID,
     createdAt: userMessage.createdAt,
     interrupted: userMessage.interrupted,
     localFolders: localFoldersFromContentParts(userMessage.parts),

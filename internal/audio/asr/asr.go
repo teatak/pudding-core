@@ -21,6 +21,7 @@ type Event struct {
 	Text           string
 	Language       string
 	Emotion        string
+	Audio          frame.PCM16
 	AudioDuration  time.Duration
 	DecodeDuration time.Duration
 	Err            error

@@ -116,6 +116,7 @@ func (s *Server) desktopAbout(c *cart.Context) error {
 		)),
 		aboutSection("asr", "语音识别 (ASR)", aboutRows(
 			"enabled", onOff(audioCfg.ASREnabled()),
+			"save_audio", onOff(audioCfg.ASRSaveAudio()),
 			"engine", audioCfg.ASR.Engine,
 			"language", audioCfg.ASR.Language,
 			"model_path", baseNameOrDash(audioCfg.ASR.ModelPath),

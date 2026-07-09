@@ -3,6 +3,7 @@ package sherpa
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -264,6 +265,7 @@ func (c *Client) decodeSegment(samples []float32) {
 		Text:           strings.TrimSpace(result.Text),
 		Language:       stripSenseVoiceTag(result.Lang),
 		Emotion:        stripSenseVoiceTag(result.Emotion),
+		Audio:          samplesToPCM16(samples),
 		AudioDuration:  audioDur,
 		DecodeDuration: elapsed,
 	}
@@ -282,6 +284,36 @@ func (c *Client) decodeSegment(samples []float32) {
 	case c.events <- ev:
 	case <-c.stopCh:
 	}
+}
+
+func samplesToPCM16(samples []float32) frame.PCM16 {
+	if len(samples) == 0 {
+		return frame.PCM16{}
+	}
+	data := make([]byte, len(samples)*2)
+	for i, sample := range samples {
+		binary.LittleEndian.PutUint16(data[i*2:], uint16(floatSampleToInt16(sample)))
+	}
+	return frame.PCM16{
+		Format: frame.Format{
+			SampleRate: expectedSampleRate,
+			Channels:   expectedChannels,
+		},
+		Data: data,
+	}
+}
+
+func floatSampleToInt16(sample float32) int16 {
+	if sample >= 1 {
+		return 32767
+	}
+	if sample <= -1 {
+		return -32768
+	}
+	if sample < 0 {
+		return int16(sample * 32768)
+	}
+	return int16(sample * 32767)
 }
 
 func (c *Client) decodeSamples(samples []float32) *sherpaonnx.OfflineRecognizerResult {

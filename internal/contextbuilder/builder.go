@@ -260,6 +260,9 @@ func (b *Builder) providerParts(sessionID string, parts []store.ContentPart, mod
 				Content: part.Content,
 			})
 		case store.ContentPartAttachment:
+			if part.Origin == attachment.OriginASRAudio {
+				continue
+			}
 			flushLocalFolders()
 			toolPath := b.attachmentToolPath(sessionID, part)
 			if imagePart, ok := b.imageProviderPart(sessionID, part, cfg); ok {

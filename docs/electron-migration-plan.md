@@ -1,6 +1,6 @@
 # Electron Migration Plan
 
-> 状态:P5 Multi-session Lifecycle 已进入手动验收收尾;P7 旧 native/screencast surface 与旧 desktop shell 清理已完成;P6 External Window 仍禁用。
+> 状态:P5 Multi-session Lifecycle 已进入手动验收收尾;P7 旧 native/screencast surface 与旧 desktop shell 清理已完成;P6 External Window 暂停,不进入当前主线验收。
 > 日期:2026-07-08。
 > 决策:迁移到 Electron shell,浏览器显示改为 Electron `<webview>`;保留 Go daemon 作为业务核心。
 
@@ -291,19 +291,17 @@ model tool call
 - close tab 不复活。
 - 重启后只显示真实恢复出来的页面。
 
-### P6 External Window
+### P6 External Window(暂停)
 
-- external 打开改为 Electron app-owned window。
-- 同一个 `webContents` 在 internal/external 之间移动。
-- 多 session external 支持多个窗口。
-- P6 完成前,Electron 路径禁用旧外部打开:Toolbar 隐藏按钮,Go 后端不再暴露 reveal/internal route。
+- P6 不进入当前主线。GitHub passkey/Touch ID 验证显示 Electron Chromium 只能得到 partial passkey support,无法稳定覆盖“真实浏览器授权”场景。
+- Electron 路径继续禁用旧外部打开:Toolbar 隐藏按钮,Go 后端不暴露 reveal/internal route。
 - 当前落点:前端已删除外部打开/回内部入口和对应 client helper;后端 API surface 已移除 reveal/internal。Chrome manager 里未暴露的 internal/external fallback 代码留到最终 native 清理阶段删除。
+- 后续如恢复外部授权,应走系统真实 Chrome/Safari 或系统浏览器 callback,而不是 Electron app-owned external window。
 
-验收:
+暂停原因:
 
-- Google 登录后切回 internal 仍登录。
-- session A external 不影响 session B internal。
-- external 窗口关闭后 slot 状态明确,可恢复或关闭。
+- passkey/Touch ID 授权不是 Electron `<webview>` / Electron BrowserWindow 当前能可靠承诺的能力。
+- 当前浏览器主线目标是 internal webview + LLM 工具生命周期稳定,不再被 external 授权回流阻塞。
 
 ### P7 删除旧 Desktop Shell / Screencast
 
@@ -362,8 +360,6 @@ Legacy 清理范围:
 - 切到 Widgets 再切回 Browser,画面立即恢复。
 - canvas/browser 反复切换,页面 DOM 不重载。
 - Google 登录后新 session 打开 Google,保持登录态。
-- external 打开授权,回 internal 后 cookie 生效。
-- 两个 session 同时 external,互不抢窗口。
 - close 当前 tab,当前 session 清空,其他 session 不受影响。
 - close 后刷新/切 session 不自动复活旧 tab。
 - app 重启后 metadata 存在但真实页面未恢复时,UI 不显示旧截图。
@@ -376,7 +372,7 @@ Legacy 清理范围:
 - Electron native capability 需要继续收敛到 preload/IPC bridge。
 - BrowserHost bridge 是新边界,需要测试保护。
 - `webContents.debugger` 和 DevTools 互斥场景要重点处理。
-- 外部窗口移动同一个 `webContents` 的边界要做 POC 验证。
+- 外部真实浏览器授权回流如后续恢复,需要单独设计 callback / profile 同步方案。
 
 ## 参考
 
