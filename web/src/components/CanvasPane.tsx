@@ -62,8 +62,6 @@ type CanvasPaneProps = {
   sessionID?: string;
 };
 
-const recentClosedCanvasLimit = 8;
-
 type WindowState = {
   x: number;
   y: number;
@@ -183,7 +181,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   const closedItemsQuery = useQuery({
     enabled,
     queryKey: queryKeys.closedCanvasItems(actorSessionID),
-    queryFn: () => listClosedCanvasItems(token, actorSessionID, recentClosedCanvasLimit),
+    queryFn: () => listClosedCanvasItems(token, actorSessionID),
     staleTime: 30_000,
   });
 

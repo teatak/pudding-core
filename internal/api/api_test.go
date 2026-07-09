@@ -647,6 +647,50 @@ func TestClosedCanvasItemsAPI(t *testing.T) {
 	}
 }
 
+func TestClosedCanvasItemsKeepLimit(t *testing.T) {
+	srv, ms := newTestServer(t)
+	if err := ms.CreateSession(context.Background(), &store.Session{ID: "sess_canvas_limit", Provider: "mock", Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+
+	base := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	for i := 0; i <= store.ClosedCanvasKeepLimit; i++ {
+		resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_canvas_limit/canvas/closed", map[string]any{
+			"id":           fmt.Sprintf("closed_%02d", i),
+			"sourceItemID": fmt.Sprintf("canvas_%02d", i),
+			"kind":         "markdown",
+			"title":        fmt.Sprintf("Item %02d", i),
+			"item":         map[string]any{"kind": "markdown", "content": fmt.Sprintf("Item %02d", i)},
+			"closedAt":     base.Add(time.Duration(i) * time.Minute),
+		})
+		if resp.StatusCode != http.StatusCreated {
+			resp.Body.Close()
+			t.Fatalf("create %d status = %d", i, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+
+	resp := req(t, http.MethodGet, srv.URL+"/sessions/sess_canvas_limit/canvas/closed?limit=50", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list status = %d", resp.StatusCode)
+	}
+	list := decodeJSON[struct {
+		Items []store.ClosedCanvasItem `json:"items"`
+	}](t, resp)
+	if len(list.Items) != store.ClosedCanvasKeepLimit {
+		t.Fatalf("closed items count = %d, want %d", len(list.Items), store.ClosedCanvasKeepLimit)
+	}
+	if list.Items[0].ID != fmt.Sprintf("closed_%02d", store.ClosedCanvasKeepLimit) {
+		t.Fatalf("newest item should be first: %+v", list.Items[0])
+	}
+	for _, item := range list.Items {
+		if item.ID == "closed_00" {
+			t.Fatalf("oldest item should be trimmed: %+v", list.Items)
+		}
+	}
+}
+
 func TestDesktopSaveFileWritesDownload(t *testing.T) {
 	downloads := t.TempDir()
 	t.Setenv("PUDDING_DESKTOP_DOWNLOADS_DIR", downloads)

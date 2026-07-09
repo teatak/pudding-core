@@ -1166,9 +1166,9 @@ func (s SessionUsageStat) CumulativeTotalTokens() int {
 }
 
 const DefaultCanvasID = "default"
-const ClosedCanvasDefaultLimit = 24
-const ClosedCanvasMaxLimit = 50
-const ClosedCanvasKeepLimit = 50
+const ClosedCanvasDefaultLimit = 20
+const ClosedCanvasMaxLimit = 20
+const ClosedCanvasKeepLimit = 20
 
 type CanvasItem struct {
 	ID                 string          `json:"id"`

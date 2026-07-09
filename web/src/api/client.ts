@@ -556,7 +556,7 @@ export async function deleteCanvasItem(token: string, sessionID: string, itemID:
 export function listClosedCanvasItems(
   token: string,
   sessionID: string,
-  limit = 24,
+  limit = 20,
 ): Promise<{ items: ClosedCanvasItem[] }> {
   return request(
     token,
