@@ -1333,6 +1333,7 @@ func TestBuiltinToolsAPI(t *testing.T) {
 		t.Fatalf("web search should declare chat capability: %+v", webSearch)
 	}
 	var fileWrite map[string]any
+	var commandRun map[string]any
 	var skillRead map[string]any
 	var skillSubmit map[string]any
 	var restRequest map[string]any
@@ -1341,6 +1342,8 @@ func TestBuiltinToolsAPI(t *testing.T) {
 		switch item["id"] {
 		case tool.FileWrite:
 			fileWrite = item
+		case tool.CommandRun:
+			commandRun = item
 		case tool.SkillRead:
 			skillRead = item
 		case tool.SkillSubmit:
@@ -1351,14 +1354,17 @@ func TestBuiltinToolsAPI(t *testing.T) {
 			graphqlRequest = item
 		}
 	}
-	if fileWrite == nil || fileWrite["capability"] != string(store.ModeWorkspace) {
-		t.Fatalf("file write should declare workspace capability: %+v", fileWrite)
+	if fileWrite == nil || fileWrite["capability"] != string(store.ModeProject) {
+		t.Fatalf("file write should declare project capability: %+v", fileWrite)
+	}
+	if commandRun == nil || commandRun["capability"] != string(store.ModeProject) {
+		t.Fatalf("command run should declare project capability: %+v", commandRun)
 	}
 	if skillRead == nil || skillRead["capability"] != string(store.ModeChat) {
 		t.Fatalf("skill read should declare chat capability: %+v", skillRead)
 	}
-	if skillSubmit == nil || skillSubmit["capability"] != string(store.ModeWorkspace) {
-		t.Fatalf("skill submit should declare workspace capability: %+v", skillSubmit)
+	if skillSubmit == nil || skillSubmit["capability"] != string(store.ModeProject) {
+		t.Fatalf("skill submit should declare project capability: %+v", skillSubmit)
 	}
 	if restRequest == nil || restRequest["capability"] != string(store.ModeChat) {
 		t.Fatalf("rest request should declare chat capability: %+v", restRequest)

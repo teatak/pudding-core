@@ -69,12 +69,8 @@ func ensureSchema(db *sql.DB) error {
 			return fmt.Errorf("sqlite: migrate sessions.project_id: %w", err)
 		}
 	}
-	if has, err := tableHasColumn(db, "sessions", "workspace_dirs"); err != nil {
+	if err := migrateAgentModeValues(db); err != nil {
 		return err
-	} else if has {
-		if err := migrateSessionWorkspaceDirsToProjects(db); err != nil {
-			return err
-		}
 	}
 	if has, err := tableHasColumn(db, "queued_inputs", "parts"); err != nil {
 		return err
@@ -86,49 +82,15 @@ func ensureSchema(db *sql.DB) error {
 	return nil
 }
 
-func migrateSessionWorkspaceDirsToProjects(db *sql.DB) error {
-	rows, err := db.Query(`SELECT id, workspace_dirs FROM sessions WHERE project_id = '' AND workspace_dirs <> '' AND workspace_dirs <> '[]'`)
-	if err != nil {
-		return fmt.Errorf("sqlite: read legacy workspace dirs: %w", err)
+func migrateAgentModeValues(db *sql.DB) error {
+	statements := []string{
+		`UPDATE sessions SET active_mode='project' WHERE active_mode='workspace'`,
+		`UPDATE turns SET mode='project' WHERE mode='workspace'`,
+		`UPDATE queued_inputs SET mode='project' WHERE mode='workspace'`,
 	}
-	defer rows.Close()
-	type legacySession struct {
-		id   string
-		dirs []string
-	}
-	var sessions []legacySession
-	projectsByKey := map[string]string{}
-	for rows.Next() {
-		var id, raw string
-		if err := rows.Scan(&id, &raw); err != nil {
-			return err
-		}
-		dirs := store.NormalizeWorkspaceDirs(decodeStringSlice(raw))
-		if len(dirs) == 0 {
-			continue
-		}
-		sessions = append(sessions, legacySession{id: id, dirs: dirs})
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for _, sess := range sessions {
-		key := encodeStringSlice(sess.dirs)
-		projectID := projectsByKey[key]
-		if projectID == "" {
-			projectID = store.NewID("proj")
-			projectsByKey[key] = projectID
-			now := time.Now()
-			name := projectNameFromDirs(sess.dirs)
-			if _, err := db.Exec(
-				`INSERT INTO projects(id,name,root_dirs,approval_mode,temporary,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`,
-				projectID, name, key, store.ApprovalAuto, 0, unixMS(now), unixMS(now),
-			); err != nil {
-				return fmt.Errorf("sqlite: migrate project: %w", err)
-			}
-		}
-		if _, err := db.Exec(`UPDATE sessions SET project_id=? WHERE id=?`, projectID, sess.id); err != nil {
-			return fmt.Errorf("sqlite: migrate session project_id: %w", err)
+	for _, statement := range statements {
+		if _, err := db.Exec(statement); err != nil {
+			return fmt.Errorf("sqlite: migrate agent mode to project: %w", err)
 		}
 	}
 	return nil
@@ -200,8 +162,8 @@ func (s *Store) CreateProject(ctx context.Context, project *store.Project) error
 		now := time.Now()
 		project.CreatedAt, project.UpdatedAt = now, now
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO projects(id,name,root_dirs,approval_mode,temporary,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`,
-			project.ID, project.Name, encodeStringSlice(project.RootDirs), project.ApprovalMode, boolInt(project.Temporary), unixMS(now), unixMS(now),
+			`INSERT INTO projects(id,name,root_dirs,approval_mode,created_at,updated_at) VALUES(?,?,?,?,?,?)`,
+			project.ID, project.Name, encodeStringSlice(project.RootDirs), project.ApprovalMode, unixMS(now), unixMS(now),
 		)
 		return err
 	})
@@ -216,7 +178,7 @@ func (s *Store) GetProject(ctx context.Context, id string) (*store.Project, erro
 func (s *Store) ListProjects(ctx context.Context) ([]*store.Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `SELECT id,name,root_dirs,approval_mode,temporary,created_at,updated_at FROM projects ORDER BY updated_at DESC, created_at DESC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,name,root_dirs,approval_mode,created_at,updated_at FROM projects ORDER BY updated_at DESC, created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -254,13 +216,10 @@ func (s *Store) UpdateProject(ctx context.Context, id string, upd store.ProjectU
 		if upd.ApprovalMode != nil {
 			project.ApprovalMode = *upd.ApprovalMode
 		}
-		if upd.Temporary != nil {
-			project.Temporary = *upd.Temporary
-		}
 		project.UpdatedAt = time.Now()
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE projects SET name=?, root_dirs=?, approval_mode=?, temporary=?, updated_at=? WHERE id=?`,
-			project.Name, encodeStringSlice(project.RootDirs), project.ApprovalMode, boolInt(project.Temporary), unixMS(project.UpdatedAt), id,
+			`UPDATE projects SET name=?, root_dirs=?, approval_mode=?, updated_at=? WHERE id=?`,
+			project.Name, encodeStringSlice(project.RootDirs), project.ApprovalMode, unixMS(project.UpdatedAt), id,
 		); err != nil {
 			return err
 		}
@@ -1747,7 +1706,7 @@ func (s *Store) getSessionDB(ctx context.Context, id string) (*store.Session, er
 }
 
 func (s *Store) getProjectDB(ctx context.Context, id string) (*store.Project, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id,name,root_dirs,approval_mode,temporary,created_at,updated_at FROM projects WHERE id=?`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT id,name,root_dirs,approval_mode,created_at,updated_at FROM projects WHERE id=?`, id)
 	project, err := scanProject(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
@@ -1793,7 +1752,7 @@ func getSessionTx(ctx context.Context, tx *sql.Tx, id string) (*store.Session, e
 }
 
 func getProjectTx(ctx context.Context, tx *sql.Tx, id string) (*store.Project, error) {
-	row := tx.QueryRowContext(ctx, `SELECT id,name,root_dirs,approval_mode,temporary,created_at,updated_at FROM projects WHERE id=?`, id)
+	row := tx.QueryRowContext(ctx, `SELECT id,name,root_dirs,approval_mode,created_at,updated_at FROM projects WHERE id=?`, id)
 	project, err := scanProject(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
@@ -1968,14 +1927,12 @@ type messageScanner interface {
 func scanProject(row messageScanner) (*store.Project, error) {
 	var project store.Project
 	var rootDirs string
-	var temporary int
 	var created, updated int64
-	if err := row.Scan(&project.ID, &project.Name, &rootDirs, &project.ApprovalMode, &temporary, &created, &updated); err != nil {
+	if err := row.Scan(&project.ID, &project.Name, &rootDirs, &project.ApprovalMode, &created, &updated); err != nil {
 		return nil, err
 	}
-	project.RootDirs = store.NormalizeWorkspaceDirs(decodeStringSlice(rootDirs))
+	project.RootDirs = store.NormalizeProjectDirs(decodeStringSlice(rootDirs))
 	project.ApprovalMode = store.NormalizeApprovalMode(project.ApprovalMode)
-	project.Temporary = temporary != 0
 	project.CreatedAt, project.UpdatedAt = timeFromMS(created), timeFromMS(updated)
 	return &project, nil
 }

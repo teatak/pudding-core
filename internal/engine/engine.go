@@ -84,12 +84,12 @@ type Engine struct {
 	auxCtx    context.Context
 	auxCancel context.CancelFunc
 
-	mu           sync.Mutex
-	running      map[string]context.CancelFunc // sessionID → 当前 turn 的 cancel
-	approvals    map[string]*pendingApproval
-	turnProjects map[string]*store.Project // turnID → 本轮临时 Project 绑定
-	wg           sync.WaitGroup
-	compactMu    sync.Mutex
+	mu                sync.Mutex
+	running           map[string]context.CancelFunc // sessionID → 当前 turn 的 cancel
+	approvals         map[string]*pendingApproval
+	turnProjectAccess map[string]ProjectAccessGrant // turnID → 本轮临时目录授权
+	wg                sync.WaitGroup
+	compactMu         sync.Mutex
 }
 
 type Option func(*Engine)
@@ -124,16 +124,16 @@ func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opt
 	}
 	auxCtx, auxCancel := context.WithCancel(context.Background())
 	e := &Engine{
-		store:        s,
-		config:       cfg,
-		hub:          hub,
-		resolver:     resolver,
-		builder:      contextbuilder.New(s, nil),
-		auxCtx:       auxCtx,
-		auxCancel:    auxCancel,
-		running:      make(map[string]context.CancelFunc),
-		approvals:    make(map[string]*pendingApproval),
-		turnProjects: make(map[string]*store.Project),
+		store:             s,
+		config:            cfg,
+		hub:               hub,
+		resolver:          resolver,
+		builder:           contextbuilder.New(s, nil),
+		auxCtx:            auxCtx,
+		auxCancel:         auxCancel,
+		running:           make(map[string]context.CancelFunc),
+		approvals:         make(map[string]*pendingApproval),
+		turnProjectAccess: make(map[string]ProjectAccessGrant),
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -831,7 +831,7 @@ func (e *Engine) finishTurn(sessionID, turnID string, mode store.AgentMode, stat
 func (e *Engine) clearRunning(sessionID, turnID string) {
 	e.mu.Lock()
 	delete(e.running, sessionID)
-	delete(e.turnProjects, turnID)
+	delete(e.turnProjectAccess, turnID)
 	e.mu.Unlock()
 }
 
@@ -1263,9 +1263,9 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 		} else if e.tools == nil {
 			result = tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: "tool runner unavailable"}
 		} else {
-			call.WorkspaceDirs = e.projectRootDirsForToolCall(ctx, sessionID, turnID)
+			call.ProjectDirs = e.projectRootDirsForToolCall(ctx, sessionID, turnID)
 			if risk, ok := tool.ClassifyToolCall(call.Name, call.Args); ok {
-				project, required, err := e.toolCallApprovalRequired(ctx, sessionID, turnID, risk)
+				project, required, err := e.toolCallApprovalRequired(ctx, sessionID, risk)
 				if err != nil {
 					result = tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: fmt.Sprintf("approval policy: %v", err)}
 				} else if required {
@@ -1339,7 +1339,7 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 }
 
 func toolContext(ctx context.Context, name string) (context.Context, context.CancelFunc, bool) {
-	if strings.HasPrefix(name, "ui_") {
+	if strings.HasPrefix(name, "ui_") || name == tool.CommandRun {
 		return ctx, func() {}, false
 	}
 	toolCtx, cancel := context.WithTimeout(ctx, toolCallTimeout)
@@ -1379,11 +1379,10 @@ func (e *Engine) projectRootDirsForToolCall(ctx context.Context, sessionID, turn
 		}
 	}
 	e.mu.Lock()
-	if project := e.turnProjects[turnID]; project != nil {
-		dirs = append(dirs, project.RootDirs...)
-	}
+	grant := e.turnProjectAccess[turnID]
 	e.mu.Unlock()
-	return store.NormalizeWorkspaceDirs(dirs)
+	dirs = append(dirs, grant.RootDirs...)
+	return store.NormalizeProjectDirs(dirs)
 }
 
 func (e *Engine) toolNameKnown(ctx context.Context, sessionID, name string) (bool, error) {

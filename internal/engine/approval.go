@@ -14,7 +14,7 @@ import (
 )
 
 var ErrApprovalNotFound = errors.New("engine: approval not found")
-var ErrWorkspaceDirsRequired = errors.New("engine: workspace dirs required")
+var ErrProjectDirsRequired = errors.New("engine: project dirs required")
 var ErrApprovalUnsupported = errors.New("engine: approval unsupported")
 
 const (
@@ -31,25 +31,29 @@ const (
 )
 
 type ApprovalRequest struct {
-	ID            string          `json:"id"`
-	SessionID     string          `json:"sessionID"`
-	TurnID        string          `json:"turnID"`
-	CallID        string          `json:"callID"`
-	Kind          string          `json:"kind"`
-	TargetMode    store.AgentMode `json:"targetMode,omitempty"`
-	WorkspaceDirs []string        `json:"workspaceDirs,omitempty"`
-	Title         string          `json:"title"`
-	Reason        string          `json:"reason"`
-	Risk          string          `json:"risk,omitempty"`
-	Payload       json.RawMessage `json:"payload,omitempty"`
-	CreatedAt     time.Time       `json:"createdAt"`
+	ID          string          `json:"id"`
+	SessionID   string          `json:"sessionID"`
+	TurnID      string          `json:"turnID"`
+	CallID      string          `json:"callID"`
+	Kind        string          `json:"kind"`
+	TargetMode  store.AgentMode `json:"targetMode,omitempty"`
+	ProjectDirs []string        `json:"projectDirs,omitempty"`
+	Title       string          `json:"title"`
+	Reason      string          `json:"reason"`
+	Risk        string          `json:"risk,omitempty"`
+	Payload     json.RawMessage `json:"payload,omitempty"`
+	CreatedAt   time.Time       `json:"createdAt"`
 }
 
 type approvalDecision struct {
-	approved      bool
-	scope         ApprovalScope
-	reason        string
-	workspaceDirs []string
+	approved    bool
+	scope       ApprovalScope
+	reason      string
+	projectDirs []string
+}
+
+type ProjectAccessGrant struct {
+	RootDirs []string
 }
 
 type pendingApproval struct {
@@ -87,7 +91,7 @@ func normalizeApprovalScope(scope ApprovalScope) (ApprovalScope, bool) {
 	}
 }
 
-func (e *Engine) ApproveApproval(ctx context.Context, sessionID, approvalID string, scope ApprovalScope, workspaceDirs []string) error {
+func (e *Engine) ApproveApproval(ctx context.Context, sessionID, approvalID string, scope ApprovalScope, projectDirs []string) error {
 	scope, ok := normalizeApprovalScope(scope)
 	if !ok {
 		return fmt.Errorf("engine: invalid approval scope")
@@ -98,42 +102,41 @@ func (e *Engine) ApproveApproval(ctx context.Context, sessionID, approvalID stri
 	}
 	switch p.req.Kind {
 	case ApprovalKindCapability:
-		workspaceDirs = store.NormalizeWorkspaceDirs(workspaceDirs)
-		if len(workspaceDirs) == 0 {
-			workspaceDirs = append([]string(nil), p.req.WorkspaceDirs...)
+		projectDirs = store.NormalizeProjectDirs(projectDirs)
+		if len(projectDirs) == 0 {
+			projectDirs = append([]string(nil), p.req.ProjectDirs...)
 		}
-		workspaceDirs = store.NormalizeWorkspaceDirs(workspaceDirs)
+		projectDirs = store.NormalizeProjectDirs(projectDirs)
+		if p.req.TargetMode == store.ModeProject && len(projectDirs) == 0 {
+			sess, err := e.store.GetSession(ctx, sessionID)
+			if err != nil {
+				return err
+			}
+			if sess.ProjectID == "" {
+				return ErrProjectDirsRequired
+			}
+		}
 		if scope == ApprovalScopeSession {
 			mode := p.req.TargetMode
 			lease := store.ModeLeaseSession
 			upd := store.SessionUpdate{ActiveMode: &mode, ModeLease: &lease}
-			if p.req.TargetMode == store.ModeWorkspace {
-				if len(workspaceDirs) > 0 {
-					project, err := e.bindSessionProject(ctx, sessionID, workspaceDirs)
+			if p.req.TargetMode == store.ModeProject {
+				if len(projectDirs) > 0 {
+					project, err := e.bindSessionProject(ctx, sessionID, projectDirs)
 					if err != nil {
 						return err
 					}
 					upd.ProjectID = &project.ID
-				} else {
-					sess, err := e.store.GetSession(ctx, sessionID)
-					if err != nil {
-						return err
-					}
-					if sess.ProjectID == "" {
-						return ErrWorkspaceDirsRequired
-					}
 				}
 			}
 			if _, err := e.store.UpdateSession(ctx, sessionID, upd); err != nil {
 				return err
 			}
-		} else if p.req.TargetMode == store.ModeWorkspace && len(workspaceDirs) > 0 {
-			project, err := e.projectForRootDirs(ctx, workspaceDirs, true)
-			if err != nil {
-				return err
-			}
+		} else if p.req.TargetMode == store.ModeProject && len(projectDirs) > 0 {
 			e.mu.Lock()
-			e.turnProjects[p.req.TurnID] = project
+			grant := e.turnProjectAccess[p.req.TurnID]
+			grant.RootDirs = store.NormalizeProjectDirs(append(grant.RootDirs, projectDirs...))
+			e.turnProjectAccess[p.req.TurnID] = grant
 			e.mu.Unlock()
 		}
 	case ApprovalKindSkillDraft:
@@ -151,7 +154,7 @@ func (e *Engine) ApproveApproval(ctx context.Context, sessionID, approvalID stri
 		scope = ApprovalScopeTurn
 	case ApprovalKindToolCall:
 		scope = ApprovalScopeTurn
-		workspaceDirs = nil
+		projectDirs = nil
 	default:
 		return ErrApprovalUnsupported
 	}
@@ -166,23 +169,23 @@ func (e *Engine) ApproveApproval(ctx context.Context, sessionID, approvalID stri
 		ApprovalID:   p.req.ID,
 		ApprovalKind: p.req.Kind,
 		Status:       "approved",
-		Payload:      approvalResolvedPayload(p.req.Kind, scope, workspaceDirs),
+		Payload:      approvalResolvedPayload(p.req.Kind, scope, projectDirs),
 	})
-	p.ch <- approvalDecision{approved: true, scope: scope, workspaceDirs: workspaceDirs}
+	p.ch <- approvalDecision{approved: true, scope: scope, projectDirs: projectDirs}
 	return nil
 }
 
 func (e *Engine) bindSessionProject(ctx context.Context, sessionID string, rootDirs []string) (*store.Project, error) {
-	rootDirs = store.NormalizeWorkspaceDirs(rootDirs)
+	rootDirs = store.NormalizeProjectDirs(rootDirs)
 	if len(rootDirs) == 0 {
-		return nil, ErrWorkspaceDirsRequired
+		return nil, ErrProjectDirsRequired
 	}
 	if sess, err := e.store.GetSession(ctx, sessionID); err == nil && sess.ProjectID != "" {
 		project, err := e.store.GetProject(ctx, sess.ProjectID)
 		if err != nil {
 			return nil, err
 		}
-		merged := store.NormalizeWorkspaceDirs(append(project.RootDirs, rootDirs...))
+		merged := store.NormalizeProjectDirs(append(project.RootDirs, rootDirs...))
 		if !sameStringList(project.RootDirs, merged) {
 			project, err = e.store.UpdateProject(ctx, project.ID, store.ProjectUpdate{RootDirs: &merged})
 			if err != nil {
@@ -191,20 +194,20 @@ func (e *Engine) bindSessionProject(ctx context.Context, sessionID string, rootD
 		}
 		return project, nil
 	}
-	return e.projectForRootDirs(ctx, rootDirs, false)
+	return e.projectForRootDirs(ctx, rootDirs)
 }
 
-func (e *Engine) projectForRootDirs(ctx context.Context, rootDirs []string, temporary bool) (*store.Project, error) {
-	rootDirs = store.NormalizeWorkspaceDirs(rootDirs)
+func (e *Engine) projectForRootDirs(ctx context.Context, rootDirs []string) (*store.Project, error) {
+	rootDirs = store.NormalizeProjectDirs(rootDirs)
 	if len(rootDirs) == 0 {
-		return nil, ErrWorkspaceDirsRequired
+		return nil, ErrProjectDirsRequired
 	}
 	projects, err := e.store.ListProjects(ctx)
 	if err != nil {
 		return nil, err
 	}
 	for _, project := range projects {
-		if project == nil || project.Temporary != temporary {
+		if project == nil {
 			continue
 		}
 		if sameStringList(project.RootDirs, rootDirs) {
@@ -215,7 +218,6 @@ func (e *Engine) projectForRootDirs(ctx context.Context, rootDirs []string, temp
 		ID:           store.NewID("proj"),
 		RootDirs:     rootDirs,
 		ApprovalMode: store.ApprovalAuto,
-		Temporary:    temporary,
 	}
 	if err := e.store.CreateProject(ctx, project); err != nil {
 		return nil, err
@@ -284,32 +286,31 @@ func (e *Engine) requestCapabilityApproval(ctx context.Context, sessionID, turnI
 	}
 	targetMode, publicTargetMode := normalizeCapabilityTargetMode(req.TargetMode)
 	req.TargetMode = targetMode
-	req.ProjectDirs = store.NormalizeWorkspaceDirs(req.ProjectDirs)
+	req.ProjectDirs = store.NormalizeProjectDirs(req.ProjectDirs)
 	req.SuggestedDirName = strings.TrimSpace(req.SuggestedDirName)
-	req.WorkspaceDirs = append([]string(nil), req.ProjectDirs...)
 	currentMode = store.NormalizeAgentMode(currentMode)
-	if req.TargetMode != store.ModeWorkspace {
+	if req.TargetMode != store.ModeProject {
 		return capabilityToolResult(call, false, map[string]any{"ok": false, "reason": "invalid_target_mode"}), currentMode, false
 	}
-	if currentMode == store.ModeWorkspace && len(req.ProjectDirs) == 0 && !req.NeedsProjectDir {
+	if currentMode == store.ModeProject && len(req.ProjectDirs) == 0 && !req.NeedsProjectDir {
 		return capabilityToolResult(call, false, map[string]any{"ok": false, "reason": "project_dirs_required"}), currentMode, false
 	}
-	if currentMode != store.ModeWorkspace && store.AgentModeRank(req.TargetMode) <= store.AgentModeRank(currentMode) {
+	if currentMode != store.ModeProject && store.AgentModeRank(req.TargetMode) <= store.AgentModeRank(currentMode) {
 		return capabilityToolResult(call, false, map[string]any{"ok": false, "reason": "target_mode_not_higher", "currentMode": currentMode, "targetMode": publicTargetMode}), currentMode, false
 	}
 	payload := capabilityApprovalPayload(req, publicTargetMode)
 	approval := ApprovalRequest{
-		ID:            store.NewID("appr"),
-		SessionID:     sessionID,
-		TurnID:        turnID,
-		CallID:        call.CallID,
-		Kind:          ApprovalKindCapability,
-		TargetMode:    req.TargetMode,
-		WorkspaceDirs: req.WorkspaceDirs,
-		Reason:        strings.TrimSpace(req.Reason),
-		Risk:          strings.TrimSpace(req.Risk),
-		Payload:       payload,
-		CreatedAt:     time.Now(),
+		ID:          store.NewID("appr"),
+		SessionID:   sessionID,
+		TurnID:      turnID,
+		CallID:      call.CallID,
+		Kind:        ApprovalKindCapability,
+		TargetMode:  req.TargetMode,
+		ProjectDirs: append([]string(nil), req.ProjectDirs...),
+		Reason:      strings.TrimSpace(req.Reason),
+		Risk:        strings.TrimSpace(req.Risk),
+		Payload:     payload,
+		CreatedAt:   time.Now(),
 	}
 	pending := &pendingApproval{req: approval, ch: make(chan approvalDecision, 1)}
 	e.mu.Lock()
@@ -340,14 +341,14 @@ func (e *Engine) requestCapabilityApproval(ctx context.Context, sessionID, turnI
 		if !decision.approved {
 			return capabilityToolResult(call, false, map[string]any{"ok": false, "status": "denied", "reason": decision.reason}), currentMode, false
 		}
-		return capabilityToolResult(call, true, map[string]any{"ok": true, "status": "approved", "scope": decision.scope, "mode": publicTargetMode, "projectDirs": decision.workspaceDirs}), req.TargetMode, true
+		return capabilityToolResult(call, true, map[string]any{"ok": true, "status": "approved", "scope": decision.scope, "mode": publicTargetMode, "projectDirs": decision.projectDirs}), req.TargetMode, true
 	}
 }
 
 func normalizeCapabilityTargetMode(mode store.AgentMode) (store.AgentMode, string) {
 	switch store.AgentMode(strings.TrimSpace(strings.ToLower(string(mode)))) {
 	case "project":
-		return store.ModeWorkspace, "project"
+		return store.ModeProject, "project"
 	default:
 		return "", ""
 	}
@@ -424,6 +425,7 @@ func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID 
 		"operation": risk.Operation,
 		"scope":     risk.Scope,
 		"paths":     risk.Paths,
+		"lowRisk":   risk.LowRisk,
 	}
 	if project != nil {
 		payload["projectID"] = project.ID
@@ -474,8 +476,8 @@ func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID 
 	}
 }
 
-func (e *Engine) toolCallApprovalRequired(ctx context.Context, sessionID, turnID string, risk tool.ToolRisk) (*store.Project, bool, error) {
-	project, err := e.projectForToolCallPolicy(ctx, sessionID, turnID)
+func (e *Engine) toolCallApprovalRequired(ctx context.Context, sessionID string, risk tool.ToolRisk) (*store.Project, bool, error) {
+	project, err := e.projectForToolCallPolicy(ctx, sessionID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -489,11 +491,18 @@ func (e *Engine) toolCallApprovalRequired(ctx context.Context, sessionID, turnID
 	case store.ApprovalAsk:
 		return project, true, nil
 	default:
-		return project, risk.Class == tool.RiskClassWrite || risk.Class == tool.RiskClassDestructive, nil
+		switch risk.Class {
+		case tool.RiskClassWrite, tool.RiskClassDestructive:
+			return project, true, nil
+		case tool.RiskClassCommand:
+			return project, !risk.LowRisk, nil
+		default:
+			return project, false, nil
+		}
 	}
 }
 
-func (e *Engine) projectForToolCallPolicy(ctx context.Context, sessionID, turnID string) (*store.Project, error) {
+func (e *Engine) projectForToolCallPolicy(ctx context.Context, sessionID string) (*store.Project, error) {
 	if sess, err := e.store.GetSession(ctx, sessionID); err != nil {
 		return nil, err
 	} else if sess.ProjectID != "" {
@@ -503,15 +512,7 @@ func (e *Engine) projectForToolCallPolicy(ctx context.Context, sessionID, turnID
 		}
 		return project, nil
 	}
-	e.mu.Lock()
-	project := e.turnProjects[turnID]
-	e.mu.Unlock()
-	if project == nil {
-		return nil, nil
-	}
-	clone := *project
-	clone.RootDirs = append([]string(nil), project.RootDirs...)
-	return &clone, nil
+	return nil, nil
 }
 
 func capabilityToolResult(call tool.Call, ok bool, payload map[string]any) tool.Result {
@@ -570,14 +571,14 @@ func skillDraftApprovalReason(payload map[string]any) string {
 	return ""
 }
 
-func approvalResolvedPayload(kind string, scope ApprovalScope, workspaceDirs []string) json.RawMessage {
+func approvalResolvedPayload(kind string, scope ApprovalScope, projectDirs []string) json.RawMessage {
 	if kind == ApprovalKindSkillDraft {
 		return mustJSON(map[string]any{"published": true})
 	}
 	if kind == ApprovalKindToolCall {
 		return mustJSON(map[string]any{"scope": ApprovalScopeTurn})
 	}
-	return mustJSON(map[string]any{"scope": scope, "projectDirs": workspaceDirs})
+	return mustJSON(map[string]any{"scope": scope, "projectDirs": projectDirs})
 }
 
 func mustJSON(v any) json.RawMessage {

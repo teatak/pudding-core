@@ -43,14 +43,14 @@ const (
 )
 
 type resolvedFilePath struct {
-	root      string
-	target    string
-	rel       string
-	workspace bool
+	root    string
+	target  string
+	rel     string
+	project bool
 }
 
 func (p resolvedFilePath) outputPath() string {
-	if p.workspace {
+	if p.project {
 		return p.target
 	}
 	return p.rel
@@ -58,7 +58,7 @@ func (p resolvedFilePath) outputPath() string {
 
 func (p resolvedFilePath) payload(base map[string]any) map[string]any {
 	base["path"] = p.outputPath()
-	if p.workspace {
+	if p.project {
 		base["root"] = p.root
 		base["relativePath"] = p.rel
 	}
@@ -111,7 +111,7 @@ func (r *BuiltinRunner) fileList(call Call) Result {
 			break
 		}
 		itemRel := entry.Name()
-		if resolved.workspace {
+		if resolved.project {
 			itemRel = filepath.Join(resolved.target, entry.Name())
 		} else if resolved.rel != "." {
 			itemRel = filepath.ToSlash(filepath.Join(resolved.rel, entry.Name()))
@@ -223,7 +223,7 @@ func (r *BuiltinRunner) fileSearch(call Call) Result {
 	items := make([]map[string]any, 0, len(matches))
 	for _, match := range matches {
 		path := match.path
-		if !resolved.workspace {
+		if !resolved.project {
 			if rel, err := filepath.Rel(resolved.root, match.path); err == nil {
 				path = filepath.ToSlash(rel)
 			}
@@ -629,7 +629,7 @@ func (r *BuiltinRunner) fileMove(call Call) Result {
 	}
 	out.Ok = true
 	payload := map[string]any{"ok": true, "scope": args.Scope, "from": fromResolved.outputPath(), "to": toResolved.outputPath()}
-	if fromResolved.workspace {
+	if fromResolved.project {
 		payload["fromRoot"] = fromResolved.root
 		payload["fromRelativePath"] = fromResolved.rel
 		payload["toRoot"] = toResolved.root
@@ -696,7 +696,7 @@ func (r *BuiltinRunner) fileCopy(call Call) Result {
 			_ = r.removeDraftDelete(toResolved.rel)
 		}
 		payload := map[string]any{"ok": true, "scope": args.Scope, "from": fromResolved.outputPath(), "to": toResolved.outputPath(), "copied": "directory"}
-		if fromResolved.workspace {
+		if fromResolved.project {
 			payload["fromRoot"] = fromResolved.root
 			payload["fromRelativePath"] = fromResolved.rel
 			payload["toRoot"] = toResolved.root
@@ -721,7 +721,7 @@ func (r *BuiltinRunner) fileCopy(call Call) Result {
 		_ = r.removeDraftDelete(toResolved.rel)
 	}
 	payload := map[string]any{"ok": true, "scope": args.Scope, "from": fromResolved.outputPath(), "to": toResolved.outputPath(), "copied": "file", "bytes": info.Size()}
-	if fromResolved.workspace {
+	if fromResolved.project {
 		payload["fromRoot"] = fromResolved.root
 		payload["fromRelativePath"] = fromResolved.rel
 		payload["toRoot"] = toResolved.root
@@ -838,11 +838,11 @@ func copyFileDir(src, dst string) error {
 
 func (r *BuiltinRunner) resolveFilePath(call Call, scope, rawPath string, requireWritable, allowRoot, allowMissing bool) (resolvedFilePath, error) {
 	if isProjectFileScope(scope) {
-		root, target, rel, err := resolveWorkspacePath(call.WorkspaceDirs, rawPath, allowRoot, allowMissing)
+		root, target, rel, err := resolveProjectPath(call.ProjectDirs, rawPath, allowRoot, allowMissing)
 		if err != nil {
 			return resolvedFilePath{}, err
 		}
-		return resolvedFilePath{root: root, target: target, rel: rel, workspace: true}, nil
+		return resolvedFilePath{root: root, target: target, rel: rel, project: true}, nil
 	}
 	root, target, rel, err := r.resolveManagedPath(scope, rawPath, requireWritable, allowRoot)
 	if err != nil {
@@ -861,10 +861,10 @@ func filePathErrorWithReason(out Result, scope, fallbackReason string, err error
 	}
 	reason := "path_not_authorized"
 	hint := "The path is outside authorized project directories. Use request_capability with targetMode=project and projectDirs containing the directory, then ask the user to approve it for this turn if temporary access is enough."
-	if errors.Is(err, errWorkspaceDirsRequired) {
+	if errors.Is(err, errProjectDirsRequired) {
 		reason = "project_dirs_required"
 		hint = "No project directories are authorized. Use request_capability with targetMode=project and projectDirs, then ask the user to approve it for this turn if temporary access is enough."
-	} else if errors.Is(err, errWorkspaceFilePathRequired) {
+	} else if errors.Is(err, errProjectFilePathRequired) {
 		reason = "path_not_allowed"
 		hint = "A file path is required for this tool."
 	}

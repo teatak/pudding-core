@@ -1710,7 +1710,7 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
   const needsProjectDir = needsProjectDirFromPayload(current.payload);
   const projectDirsRequired = isProjectApproval && needsProjectDir && projectDirs.length === 0;
   const projectDirsRequiredForSession = isProjectApproval && !sessionProjectID && projectDirs.length === 0;
-  const suggestedDirName = suggestedWorkspaceDirName(current.payload);
+  const suggestedDirName = suggestedProjectDirName(current.payload);
   const skillDraftApproval = skillDraftFromPayload(current.payload);
   const skillDraft = skillDraftApproval?.draft || null;
   const toolCallApproval = toolCallFromPayload(current.payload);
@@ -1752,7 +1752,7 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
         setSelectedProjectDirs((prev) => dedupeStrings([...prev, ...dirs]));
       }
     } catch {
-      toast.error(t("transcript.approvalWorkspaceDirPickFailed"));
+      toast.error(t("transcript.approvalProjectDirPickFailed"));
     } finally {
       setPickingProjectDir(false);
     }
@@ -1805,7 +1805,7 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
       {!isSkillDraftApproval && isProjectApproval ? (
         <div className="grid gap-1">
           <div className="text-[11px] font-medium text-muted-foreground">
-            {t("transcript.approvalWorkspaceDirs")}
+            {t("transcript.approvalProjectDirs")}
           </div>
           {projectDirs.length > 0 ? (
             <div className="grid gap-1 rounded-md border border-border/70 bg-background/70 px-2 py-1.5 font-mono text-[11px] leading-4">
@@ -1827,7 +1827,7 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
             </div>
           ) : null}
           {projectDirsRequired || projectDirsRequiredForSession ? (
-            <div className="text-[11px] leading-4 text-warning">{t("transcript.approvalWorkspaceDirsRequired")}</div>
+            <div className="text-[11px] leading-4 text-warning">{t("transcript.approvalProjectDirsRequired")}</div>
           ) : null}
           {!hasPayloadProjectDirs ? (
             <div className="flex flex-wrap items-center gap-1.5">
@@ -1840,9 +1840,9 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
                 onClick={() => void pickProjectDirs()}
               >
                 {pickingProjectDir ? <Loader2 className="size-3 animate-spin" /> : <FolderOpen className="size-3" />}
-                {t("transcript.approvalWorkspaceDirChoose")}
+                {t("transcript.approvalProjectDirChoose")}
               </Button>
-              {suggestedDirName ? <span className="text-[11px] text-muted-foreground">{t("transcript.approvalWorkspaceDirsSuggested").replace("{name}", suggestedDirName)}</span> : null}
+              {suggestedDirName ? <span className="text-[11px] text-muted-foreground">{t("transcript.approvalProjectDirsSuggested").replace("{name}", suggestedDirName)}</span> : null}
             </div>
           ) : null}
         </div>
@@ -1990,7 +1990,7 @@ function needsProjectDirFromPayload(payload: unknown) {
   return Boolean(payload && typeof payload === "object" && "needsProjectDir" in payload && payload.needsProjectDir === true);
 }
 
-function suggestedWorkspaceDirName(payload: unknown) {
+function suggestedProjectDirName(payload: unknown) {
   if (payload && typeof payload === "object" && "suggestedDirName" in payload && typeof payload.suggestedDirName === "string") {
     return payload.suggestedDirName.trim();
   }

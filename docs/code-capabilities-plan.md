@@ -1,7 +1,7 @@
 # Pudding Code 能力设计与计划
 
-> 状态:C0 Project 收口与 C1 文件写工具审批安全收口已落地;C1.5 命名收口是 C2 前置。
-> 目标:在现有 multi-session / workspace tool 架构上,把 Pudding 从"可读写文件"
+> 状态:C0、C1、C1.5、C1.6 与 C2 已落地;下一步是 C3 Git Read Tools。
+> 目标:在现有 multi-session / Project tool 架构上,把 Pudding 从"可读写文件"
 > 推进到"可信的工程协作 agent"。
 
 ## 0. 结论
@@ -19,8 +19,8 @@ session submit
 
 原因:
 
-- 当前代码已经有 `session.workspaceDirs`、`activeMode=workspace`、
-  `request_capability`、文件工具和 tool part UI;这些能力要收口到 Project。
+- 当前代码已经有 Project、`activeMode=project`、`request_capability`、文件工具
+  和 tool part UI。
 - code 操作天然属于 session 的上下文与 transport,不是 daemon 全局 focus。
 - REST 继续负责 session / approval / snapshot;具体读文件、改文件、跑命令、
   git 操作都应作为 LLM 可调用工具出现。
@@ -29,12 +29,12 @@ session submit
 
 已具备:
 
-- Project 已是代码工作区与审批设置的主实体,session 通过 `projectID`
+- Project 已是代码目录与审批设置的主实体,session 通过 `projectID`
   绑定 Project。
-- `ActiveMode=workspace`、`ModeLease=session` 仍由 session 承载。
+- `ActiveMode=project`、`ModeLease=session` 由 session 承载。
 - `request_capability` 应请求 Project 能力与项目目录授权。
 - engine 已有 tool loop、`turn.tool` 事件、tool_result canonical 落库。
-- `internal/tool` 已有 workspace 路径解析与沙箱校验。
+- `internal/tool` 已有 Project 路径解析与沙箱校验。
 - 内置文件工具已覆盖 list/read/stat/search/slice/write/patch/delete/move/copy。
 - 前端已有 thought/tool/approval overlay,并能合并 `tool_use` + `tool_result`。
 
@@ -66,7 +66,7 @@ MVP 要做到:
 
 非目标:
 
-- 不做后端全局 current workspace / focus。
+- 不做后端全局 current Project / focus。
 - 不做旧 Runtime 兼容层。
 - 不把 WebSocket 当普通 command/SSE 替代品。
 - 不在第一版做完整 IDE。
@@ -76,7 +76,7 @@ MVP 要做到:
 
 ### 3.1 Project-owned code root
 
-Project 是代码工作区与审批设置的唯一事实源,取代 `session.workspaceDirs`:
+Project 是代码目录与审批设置的唯一事实源:
 
 ```text
 Session.projectID -> Project.rootDirs / approvalMode / code settings
@@ -95,37 +95,31 @@ Session 只承载:
 - provider/model/mode
 - turn 状态
 
-不长期保留 `session.workspaceDirs` 与 `Project.rootDirs` 两套事实源。
-迁移阶段可以一次性 schema/data migration,但 API 与新代码应只读写 Project。
+API 与新代码只读写 Project,不保留第二套目录事实源。
 
-临时访问也不应退回 raw workspace dirs。若需要"仅本轮访问",使用同一 Project
-模型:
+"仅本轮访问"使用独立的 `ProjectAccessGrant`:
 
-- 已存在 Project:创建 turn-scoped project binding。
-- 不存在 Project:创建临时 Project,绑定到当前 turn,turn 结束后归档或清理。
+- grant 只保存授权目录与 turnID,不写入 Project 表。
+- turn 结束时随 engine turn 状态一起清理。
+- 只有 session scope 的"记住授权"才创建或绑定持久 Project。
 
-tool call 每次通过 `sessionID/turnID -> Project binding -> rootDirs + approvalMode`
-解析授权范围。
+tool call 通过持久 Project roots 与当前 turn grant roots 的并集解析授权范围;
+审批策略只来自持久 Project,无 Project 的临时授权使用默认 `auto`。
 
-不新增 daemon 级 `currentWorkspace`。
+不新增 daemon 级 `currentProject`。
 
 ### 3.2 命名边界
 
-对用户与工具协议来说,应统一使用 Project,不要继续扩散 workspace:
+用户、工具协议和内部代码统一使用 Project:
 
 - UI 文案使用"项目 / Project"。
 - 数据模型使用 `Project.rootDirs`、`Session.projectID`。
-- 文件工具的用户可见 scope 应从 `workspace` 改为 `project`。
-- `request_capability.targetMode` 应从 `workspace` 改为 `project`。
-- approval payload 里的目录字段应从 `workspaceDirs` 收口到 `rootDirs` 或
-  `projectDirs`。
-
-但内部能力档与代码字段名暂时保留 `ModeWorkspace` / `activeMode=workspace` /
-`WorkspaceDirs`:
-
-- 它表达的是"会话具备本地代码/文件能力",不是 Project 实体。
-- 改名会牵动 session mode、turn mode、模型能力和历史数据,收益低于风险。
-- 这不是最终命名,后续必须统一改成 Project/code 语义。
+- 文件工具 scope 为 `project`。
+- `request_capability.targetMode` 为 `project`。
+- approval payload 使用 `projectDirs`。
+- 内部能力档为 `ModeProject` / `activeMode=project`;工具调用上下文使用
+  `ProjectDirs`。
+- 旧 mode、scope 与字段名不在运行时兼容。
 
 ### 3.3 Daemon-owned process
 
@@ -184,7 +178,7 @@ REST 只在需要 UI 决策、审批、快照时补充,不新增无 session scop
 
 - daemon 只 bind loopback 且请求带 token。
 - 授权仍显式挂在 Project/session binding 上,不是 daemon 全局 focus;`full` 可表示
-  "all user files" 这种宽授权,不必逐个 workspace 目录确认。
+  "all user files" 这种宽授权,不必逐个项目目录确认。
 - 对明显不可恢复操作可保留二次强确认,但这是产品选择,不是普通审批流。
 
 实现方式:
@@ -210,11 +204,11 @@ REST 只在需要 UI 决策、审批、快照时补充,不新增无 session scop
 {
   "name": "builtin_command_run",
   "input": {
+    "scope": "project",
     "cwd": "relative/or/absolute/path inside authorized Project root",
     "argv": ["go", "test", "./internal/tool"],
     "env": {"KEY": "value"},
-    "timeout_ms": 120000,
-    "max_output_chars": 20000
+    "timeout_ms": 120000
   }
 }
 ```
@@ -223,11 +217,14 @@ REST 只在需要 UI 决策、审批、快照时补充,不新增无 session scop
 
 - 第一版只接受 `argv`,不接受裸 shell 字符串。
 - `cwd` 必须解析到当前 Project 授权范围内。
-- 默认不继承敏感环境变量;只注入最小环境。
-- `timeout_ms` 有上限。
-- stdout/stderr 合并记录时保留 channel 标记。
-- 超出输出上限返回截断标记。
+- 默认只继承 PATH、HOME、临时目录、locale 和常见 toolchain 路径变量;
+  其他变量必须通过 `env` 显式提供。
+- `timeout_ms` 默认 60 秒,上限 10 分钟。
+- stdout/stderr 分开保存,每路最多保留 64 KiB 头尾内容。
+- 超出输出上限返回独立截断标记。
 - cancel 时 kill process group。
+- cwd 校验不是 OS 文件系统沙箱;命令仍拥有 daemon 用户的进程权限,因此必须
+  经过 Project 授权与审批策略。
 
 ### 5.2 Result 形状
 
@@ -240,7 +237,10 @@ REST 只在需要 UI 决策、审批、快照时补充,不新增无 session scop
   "durationMs": 1234,
   "stdout": "...",
   "stderr": "...",
-  "truncated": false
+  "stdoutTruncated": false,
+  "stderrTruncated": false,
+  "timedOut": false,
+  "cancelled": false
 }
 ```
 
@@ -324,7 +324,7 @@ proposal payload:
 ```jsonc
 {
   "proposalID": "patch_...",
-  "workspaceRoot": "...",
+  "projectRoot": "...",
   "files": [
     {
       "path": "internal/foo.go",
@@ -371,9 +371,9 @@ proposal 可先存在 engine memory 或 temp artifact;正式再考虑 SQLite 表
 
 - 新增 `projects` 表。
 - `sessions` 增加 `project_id`。
-- 移除或迁移 `sessions.workspace_dirs`;新 API 不再读写它。
+- session 不保存独立目录列表;新 API 只读写 Project。
 - `POST /sessions` 支持 `projectID`;从 Project section 创建会话时必须显式传入。
-- turn-scoped 临时访问也引用 Project,不保存 raw dirs。
+- turn-scoped 临时访问保存为 `ProjectAccessGrant`,不创建 Project。
 
 第一版可以不改 `turn.tool` 事件协议:
 
@@ -396,17 +396,17 @@ proposal 可先存在 engine memory 或 temp artifact;正式再考虑 SQLite 表
 
 - 新增 Project 实体与 `sessions.project_id`。
 - Project 承载 `rootDirs` 与 `approvalMode`。
-- 迁移/删除 `session.workspaceDirs`,新代码只读写 Project。
+- 删除 session 上的目录字段,新代码只读写 Project。
 - 左侧 Project section 支持从 Project 直接新建 session。
 - composer 显示当前 Project 与三档审批模式。
-- `request_capability` 从"授权 workspaceDirs"改为"创建/绑定 Project"。
+- `request_capability` 改为创建/绑定 Project 或授予本轮目录访问。
 
 验收:
 
 - 同一个 repo 的多个 session 可绑定同一个 Project。
 - 从 Project section 新建的 session 天然带 `projectID`,并继承
   `rootDirs/approvalMode`。
-- session 不再暴露 `workspaceDirs` 作为新契约字段。
+- session 不再暴露独立目录字段。
 - tool resolver 只通过 Project 解析本地文件授权。
 
 ### C1: 审批安全收口
@@ -425,6 +425,8 @@ proposal 可先存在 engine memory 或 temp artifact;正式再考虑 SQLite 表
 
 ### C1.5: Project 命名收口
 
+状态:已完成(2026-07-10)。
+
 时机:在 C2 Command Runner 之前完成。
 
 原因:
@@ -440,19 +442,9 @@ proposal 可先存在 engine memory 或 temp artifact;正式再考虑 SQLite 表
 - `builtin_file_*` schema 中 `scope:"workspace"` 改为 `scope:"project"`。
 - 文件 resolver 接受 `project` scope,并从当前 session/turn 绑定的 Project
   读取 `rootDirs`。
-- `request_capability.targetMode:"workspace"` 改为 `targetMode:"project"`;后端仍可
-  映射到内部 `ModeWorkspace` 能力档。
-- approval payload 与文案从 `workspaceDirs` 改成 Project/rootDirs 语义。
-- 前端、测试、文档里的用户可见 workspace 文案改为 project/项目。
-
-暂不改:
-
-- `ModeWorkspace`
-- `activeMode=workspace`
-- 内部 Go 字段/变量名里的 `WorkspaceDirs`
-
-这些属于内部能力档,先保留。`targetMode:"project"` 是工具协议层命名,
-不要求同时改底层 session mode。等 C1.5/C2 稳定后,单独做内部命名统一。
+- `request_capability.targetMode` 使用 `project`。
+- approval payload 与文案使用 `projectDirs` / Project 语义。
+- 前端、测试、文档里的用户可见文案统一为 project/项目。
 
 验收:
 
@@ -462,18 +454,42 @@ proposal 可先存在 engine memory 或 temp artifact;正式再考虑 SQLite 表
 - 旧 `scope:"workspace"` 与 `targetMode:"workspace"` 不兼容,统一改掉。
 - C2 command runner 的 `cwd` 与权限描述全部基于 Project。
 
-### C2: Command Runner
+### C1.6: Project 与 AccessGrant 分离
 
-- 新增 `builtin_command_run`。
-- 非 shell argv。
-- cwd Project root 沙箱。
-- timeout、截断、process group cancel。
-- 单测覆盖 cwd 越界、timeout、exit code、stdout/stderr 截断。
+状态:已完成(2026-07-10)。
+
+- 内部能力档统一为 `ModeProject` / `activeMode=project`。
+- 内部目录字段与 resolver 统一为 Project 命名。
+- Project 删除 `Temporary`;Project 表只保存持久实体。
+- turn scope 授权保存为 engine 内存中的 `ProjectAccessGrant`,turn 结束即清理。
+- session scope 授权才创建、复用或扩展 Project。
+- SQLite 对旧 mode 值做一次性数据迁移,运行时协议不接受旧值。
 
 验收:
 
-- agent 能运行 `go test ./internal/tool` 这类命令。
-- 用户 cancel 能停止长命令。
+- turn scope 授权后可访问批准目录,但 Project 列表不增加。
+- session scope 授权创建或绑定 Project。
+- Go、API 与 web 契约统一使用 `project`。
+
+### C2: Command Runner
+
+状态:已完成(2026-07-10)。
+
+- 已新增 `builtin_command_run`。
+- 使用非 shell argv 与 Project cwd 约束。
+- 使用最小继承环境,支持显式 `env`。
+- 已实现 timeout、64 KiB 头尾截断、process tree cancel。
+- 已接入 ask/auto/full 审批与 command/destructive 风险分类。
+- `auto` 仅放行常见测试/构建/检查命令;自定义 env、绝对路径或父目录参数会
+  降级为询问。
+- 已补命令显示名、图标与三语 i18n。
+- 单测覆盖 cwd 越界、真实 `go test`、timeout、cancel、exit code、环境隔离和
+  stdout/stderr 截断。
+
+验收:
+
+- 已完成:agent 能运行 `go test ./internal/tool` 这类命令。
+- 已完成:用户 cancel 能停止长命令及其子进程。
 
 ### C3: Git Read Tools
 

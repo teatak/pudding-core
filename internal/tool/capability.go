@@ -52,7 +52,7 @@ func ToolDefAllowedForMode(mode store.AgentMode, def provider.ToolDef) bool {
 	}
 	required := store.NormalizeAgentMode(def.Capability)
 	if required == "" {
-		required = store.ModeWorkspace
+		required = store.ModeProject
 	}
 	return store.AgentModeRank(mode) >= store.AgentModeRank(required)
 }
@@ -70,7 +70,7 @@ func RequiredModeForName(name string) store.AgentMode {
 			break
 		}
 	}
-	return store.ModeWorkspace
+	return store.ModeProject
 }
 
 func NameAllowedForMode(mode store.AgentMode, name string) bool {

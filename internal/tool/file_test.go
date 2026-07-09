@@ -150,7 +150,7 @@ func TestBuiltinFileDeleteRecordsDraftManifest(t *testing.T) {
 	}
 }
 
-func TestBuiltinFileWorkspaceScopeReadWrite(t *testing.T) {
+func TestBuiltinFileProjectScopeReadWrite(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, "dir"), 0o755); err != nil {
 		t.Fatal(err)
@@ -166,50 +166,50 @@ func TestBuiltinFileWorkspaceScopeReadWrite(t *testing.T) {
 	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
 
 	list := runner.Call(context.Background(), Call{
-		Name:          FileList,
-		Args:          json.RawMessage(`{"scope":"project","path":"dir"}`),
-		WorkspaceDirs: []string{root},
+		Name:        FileList,
+		Args:        json.RawMessage(`{"scope":"project","path":"dir"}`),
+		ProjectDirs: []string{root},
 	})
 	if !list.Ok {
-		t.Fatalf("workspace list should succeed: %+v", list)
+		t.Fatalf("project list should succeed: %+v", list)
 	}
 	listPayload := decodeToolResult(t, list)
 	if listPayload["root"] != root || listPayload["relativePath"] != "dir" {
-		t.Fatalf("workspace metadata missing: %+v", listPayload)
+		t.Fatalf("project metadata missing: %+v", listPayload)
 	}
 	entries := listPayload["entries"].([]any)
 	if len(entries) != 1 || entries[0].(map[string]any)["path"] != resolvedNotePath {
-		t.Fatalf("workspace entries should use absolute paths: %+v", entries)
+		t.Fatalf("project entries should use absolute paths: %+v", entries)
 	}
 
 	read := runner.Call(context.Background(), Call{
-		Name:          FileRead,
-		Args:          json.RawMessage(`{"scope":"project","path":"` + filepath.ToSlash(notePath) + `"}`),
-		WorkspaceDirs: []string{root},
+		Name:        FileRead,
+		Args:        json.RawMessage(`{"scope":"project","path":"` + filepath.ToSlash(notePath) + `"}`),
+		ProjectDirs: []string{root},
 	})
 	if !read.Ok {
-		t.Fatalf("workspace read should succeed: %+v", read)
+		t.Fatalf("project read should succeed: %+v", read)
 	}
 	readPayload := decodeToolResult(t, read)
 	if readPayload["content"] != "hello" || readPayload["path"] != resolvedNotePath {
-		t.Fatalf("unexpected workspace read payload: %+v", readPayload)
+		t.Fatalf("unexpected project read payload: %+v", readPayload)
 	}
 
 	writePath := filepath.Join(root, "nested", "created.txt")
 	write := runner.Call(context.Background(), Call{
-		Name:          FileWrite,
-		Args:          json.RawMessage(`{"scope":"project","path":"` + filepath.ToSlash(writePath) + `","content":"created"}`),
-		WorkspaceDirs: []string{root},
+		Name:        FileWrite,
+		Args:        json.RawMessage(`{"scope":"project","path":"` + filepath.ToSlash(writePath) + `","content":"created"}`),
+		ProjectDirs: []string{root},
 	})
 	if !write.Ok {
-		t.Fatalf("workspace write should succeed: %+v", write)
+		t.Fatalf("project write should succeed: %+v", write)
 	}
 	data, err := os.ReadFile(writePath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(data) != "created" {
-		t.Fatalf("workspace write content = %q", data)
+		t.Fatalf("project write content = %q", data)
 	}
 }
 
@@ -227,9 +227,9 @@ func TestBuiltinFileCopyFileAndDirectory(t *testing.T) {
 	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
 
 	fileCopy := runner.Call(context.Background(), Call{
-		Name:          FileCopy,
-		Args:          json.RawMessage(`{"scope":"project","from_path":"src/note.txt","to_path":"copy/note.txt"}`),
-		WorkspaceDirs: []string{root},
+		Name:        FileCopy,
+		Args:        json.RawMessage(`{"scope":"project","from_path":"src/note.txt","to_path":"copy/note.txt"}`),
+		ProjectDirs: []string{root},
 	})
 	if !fileCopy.Ok {
 		t.Fatalf("file copy should succeed: %+v", fileCopy)
@@ -243,9 +243,9 @@ func TestBuiltinFileCopyFileAndDirectory(t *testing.T) {
 	}
 
 	dirWithoutRecursive := runner.Call(context.Background(), Call{
-		Name:          FileCopy,
-		Args:          json.RawMessage(`{"scope":"project","from_path":"src","to_path":"copy/src"}`),
-		WorkspaceDirs: []string{root},
+		Name:        FileCopy,
+		Args:        json.RawMessage(`{"scope":"project","from_path":"src","to_path":"copy/src"}`),
+		ProjectDirs: []string{root},
 	})
 	if dirWithoutRecursive.Ok {
 		t.Fatalf("directory copy without recursive should fail")
@@ -256,9 +256,9 @@ func TestBuiltinFileCopyFileAndDirectory(t *testing.T) {
 	}
 
 	dirCopy := runner.Call(context.Background(), Call{
-		Name:          FileCopy,
-		Args:          json.RawMessage(`{"scope":"project","from_path":"src","to_path":"copy/src","recursive":true}`),
-		WorkspaceDirs: []string{root},
+		Name:        FileCopy,
+		Args:        json.RawMessage(`{"scope":"project","from_path":"src","to_path":"copy/src","recursive":true}`),
+		ProjectDirs: []string{root},
 	})
 	if !dirCopy.Ok {
 		t.Fatalf("directory copy should succeed: %+v", dirCopy)
@@ -272,19 +272,19 @@ func TestBuiltinFileCopyFileAndDirectory(t *testing.T) {
 	}
 }
 
-func TestBuiltinFileWorkspaceRejectsOutsideRoot(t *testing.T) {
+func TestBuiltinFileProjectRejectsOutsideRoot(t *testing.T) {
 	root := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "note.txt")
 	if err := os.WriteFile(outside, []byte("secret"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	res := NewBuiltinRunner(WithHomeDir(t.TempDir())).Call(context.Background(), Call{
-		Name:          FileRead,
-		Args:          json.RawMessage(`{"scope":"project","path":"` + filepath.ToSlash(outside) + `"}`),
-		WorkspaceDirs: []string{root},
+		Name:        FileRead,
+		Args:        json.RawMessage(`{"scope":"project","path":"` + filepath.ToSlash(outside) + `"}`),
+		ProjectDirs: []string{root},
 	})
 	if res.Ok {
-		t.Fatalf("outside workspace read should fail: %+v", res)
+		t.Fatalf("outside project read should fail: %+v", res)
 	}
 	payload := decodeToolResult(t, res)
 	if payload["reason"] != "path_not_authorized" {
@@ -292,13 +292,13 @@ func TestBuiltinFileWorkspaceRejectsOutsideRoot(t *testing.T) {
 	}
 }
 
-func TestBuiltinFileWorkspaceRequiresDirs(t *testing.T) {
+func TestBuiltinFileProjectRequiresDirs(t *testing.T) {
 	res := NewBuiltinRunner(WithHomeDir(t.TempDir())).Call(context.Background(), Call{
 		Name: FileList,
 		Args: json.RawMessage(`{"scope":"project","path":"."}`),
 	})
 	if res.Ok {
-		t.Fatalf("workspace list without dirs should fail: %+v", res)
+		t.Fatalf("project list without dirs should fail: %+v", res)
 	}
 	payload := decodeToolResult(t, res)
 	if payload["reason"] != "project_dirs_required" {
@@ -331,9 +331,9 @@ func TestBuiltinFileStatSearchAndSlice(t *testing.T) {
 	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
 
 	stat := runner.Call(context.Background(), Call{
-		Name:          FileStat,
-		Args:          json.RawMessage(`{"scope":"project","path":"` + filepath.ToSlash(notePath) + `"}`),
-		WorkspaceDirs: []string{root},
+		Name:        FileStat,
+		Args:        json.RawMessage(`{"scope":"project","path":"` + filepath.ToSlash(notePath) + `"}`),
+		ProjectDirs: []string{root},
 	})
 	if !stat.Ok {
 		t.Fatalf("stat should succeed: %+v", stat)
@@ -344,9 +344,9 @@ func TestBuiltinFileStatSearchAndSlice(t *testing.T) {
 	}
 
 	search := runner.Call(context.Background(), Call{
-		Name:          FileSearch,
-		Args:          json.RawMessage(`{"scope":"project","path":".","query":"marker"}`),
-		WorkspaceDirs: []string{root},
+		Name:        FileSearch,
+		Args:        json.RawMessage(`{"scope":"project","path":".","query":"marker"}`),
+		ProjectDirs: []string{root},
 	})
 	if !search.Ok {
 		t.Fatalf("search should succeed: %+v", search)
@@ -358,9 +358,9 @@ func TestBuiltinFileStatSearchAndSlice(t *testing.T) {
 	}
 
 	slice := runner.Call(context.Background(), Call{
-		Name:          FileSlice,
-		Args:          json.RawMessage(`{"scope":"project","path":"docs/note.txt","start":2,"end":3}`),
-		WorkspaceDirs: []string{root},
+		Name:        FileSlice,
+		Args:        json.RawMessage(`{"scope":"project","path":"docs/note.txt","start":2,"end":3}`),
+		ProjectDirs: []string{root},
 	})
 	if !slice.Ok {
 		t.Fatalf("slice should succeed: %+v", slice)
@@ -371,9 +371,9 @@ func TestBuiltinFileStatSearchAndSlice(t *testing.T) {
 	}
 
 	reverseTail := runner.Call(context.Background(), Call{
-		Name:          FileSlice,
-		Args:          json.RawMessage(`{"scope":"project","path":"docs/note.txt","origin":"end","lines":2,"order":"reverse"}`),
-		WorkspaceDirs: []string{root},
+		Name:        FileSlice,
+		Args:        json.RawMessage(`{"scope":"project","path":"docs/note.txt","origin":"end","lines":2,"order":"reverse"}`),
+		ProjectDirs: []string{root},
 	})
 	if !reverseTail.Ok {
 		t.Fatalf("reverse tail slice should succeed: %+v", reverseTail)

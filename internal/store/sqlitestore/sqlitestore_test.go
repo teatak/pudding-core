@@ -35,14 +35,14 @@ func TestSessionProjectPersists(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "project")
 	if err := st.CreateProject(ctx, &store.Project{
-		ID:           "proj_workspace",
-		Name:         "workspace",
+		ID:           "proj_project",
+		Name:         "project",
 		RootDirs:     []string{root, root + "/.", "relative"},
 		ApprovalMode: store.ApprovalAuto,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	project, err := st.GetProject(ctx, "proj_workspace")
+	project, err := st.GetProject(ctx, "proj_project")
 	if err != nil {
 		t.Fatal(err)
 	}

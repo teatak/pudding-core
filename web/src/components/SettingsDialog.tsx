@@ -2229,7 +2229,7 @@ function ToolList({ tools }: { tools: BuiltinTool[] }) {
 type ToolInfo = {
   id: string;
   description?: string;
-  capability?: "chat" | "workspace";
+  capability?: "chat" | "project";
 };
 
 function BrowserMCPToolsPanel({

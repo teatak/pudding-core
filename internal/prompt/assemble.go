@@ -25,8 +25,8 @@ var coreSystemPrompt string
 //go:embed assets/mode_chat.md
 var chatModePrompt string
 
-//go:embed assets/mode_workspace.md
-var workspaceModePrompt string
+//go:embed assets/mode_project.md
+var projectModePrompt string
 
 type Segment struct {
 	ID      string
@@ -345,8 +345,8 @@ func appSkillRealPath(def *app.Definition, ref app.SkillRef) string {
 
 func modePrompt(mode string) string {
 	switch normalizeMode(mode) {
-	case "workspace":
-		return workspaceModePrompt
+	case "project":
+		return projectModePrompt
 	case "chat":
 		fallthrough
 	default:
@@ -356,9 +356,9 @@ func modePrompt(mode string) string {
 
 func normalizeMode(mode string) string {
 	switch strings.TrimSpace(strings.ToLower(mode)) {
-	case "code", "operate", "local", "workspace":
-		return "workspace"
-	case "work", "research", "chat":
+	case "project":
+		return "project"
+	case "chat":
 		fallthrough
 	default:
 		return "chat"

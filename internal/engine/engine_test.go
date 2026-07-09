@@ -835,7 +835,7 @@ func TestSubmitRoutesFileReadImageToNextProviderRequest(t *testing.T) {
 		Title:      "image tool",
 		Provider:   "capture",
 		Model:      "vision-model",
-		ActiveMode: store.ModeWorkspace,
+		ActiveMode: store.ModeProject,
 		ModeLease:  store.ModeLeaseSession,
 	}); err != nil {
 		t.Fatal(err)
@@ -988,7 +988,7 @@ func TestSubmitDoesNotRouteFileReadImageWhenCapabilityUnknown(t *testing.T) {
 		Title:      "image tool",
 		Provider:   "capture",
 		Model:      "tool-model",
-		ActiveMode: store.ModeWorkspace,
+		ActiveMode: store.ModeProject,
 		ModeLease:  store.ModeLeaseSession,
 	}); err != nil {
 		t.Fatal(err)
@@ -1141,6 +1141,15 @@ func TestSubmitMarksUnknownTool(t *testing.T) {
 	}
 }
 
+func TestNormalizeCapabilityTargetModeRejectsLegacyWorkspace(t *testing.T) {
+	if mode, publicMode := normalizeCapabilityTargetMode(store.AgentMode("workspace")); mode != "" || publicMode != "" {
+		t.Fatalf("legacy workspace target must be rejected: mode=%q public=%q", mode, publicMode)
+	}
+	if mode, publicMode := normalizeCapabilityTargetMode(store.AgentMode("project")); mode != store.ModeProject || publicMode != "project" {
+		t.Fatalf("project target must map to internal capability: mode=%q public=%q", mode, publicMode)
+	}
+}
+
 func TestCapabilityApprovalUpgradesTurnTools(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
@@ -1185,10 +1194,10 @@ func TestCapabilityApprovalUpgradesTurnTools(t *testing.T) {
 		t.Fatalf("bad approval event: %+v", approval)
 	}
 	pending := eng.PendingApprovals(sid)
-	if len(pending) != 1 || pending[0].ID != approval.ApprovalID || pending[0].TargetMode != store.ModeWorkspace {
+	if len(pending) != 1 || pending[0].ID != approval.ApprovalID || pending[0].TargetMode != store.ModeProject {
 		t.Fatalf("pending approval not exposed: %+v", pending)
 	}
-	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeTurn, nil); err != nil {
+	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeTurn, []string{t.TempDir()}); err != nil {
 		t.Fatal(err)
 	}
 	if pending := eng.PendingApprovals(sid); len(pending) != 0 {
@@ -1203,13 +1212,13 @@ func TestCapabilityApprovalUpgradesTurnTools(t *testing.T) {
 		t.Fatalf("chat tools wrong: %+v", client.requests[0].Tools)
 	}
 	if !hasToolDef(client.requests[1].Tools, tool.RequestCapability) || !hasToolDef(client.requests[1].Tools, tool.WebSearch) || !hasToolDef(client.requests[1].Tools, tool.WebFetch) || !hasToolDef(client.requests[1].Tools, tool.RESTRequest) || !hasToolDef(client.requests[1].Tools, tool.GraphQLRequest) || !hasToolDef(client.requests[1].Tools, tool.FileRead) {
-		t.Fatalf("workspace tools wrong: %+v", client.requests[1].Tools)
+		t.Fatalf("project tools wrong: %+v", client.requests[1].Tools)
 	}
 	turn, err := ms.GetConversationTurn(ctx, sid, res.TurnID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if turn.Mode != store.ModeWorkspace {
+	if turn.Mode != store.ModeProject {
 		t.Fatalf("turn mode not upgraded: %+v", turn)
 	}
 }
@@ -1274,22 +1283,22 @@ func TestSkillDraftSubmitApprovalAppliesDraft(t *testing.T) {
 	}
 }
 
-func TestWorkspaceApprovalSessionScopeCreatesProject(t *testing.T) {
+func TestProjectApprovalSessionScopeCreatesProject(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
 	dir := t.TempDir()
-	client := &workspaceCapabilityClient{}
+	client := &projectCapabilityClient{}
 	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions()}
-	eng := New(ms, hub, mapResolver{"workspace": client}, ms, WithTools(runner))
+	eng := New(ms, hub, mapResolver{"project": client}, ms, WithTools(runner))
 	ctx := context.Background()
-	sid := "sess_workspace"
-	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "workspace", Provider: "workspace", Model: "workspace-model"}); err != nil {
+	sid := "sess_project"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "project", Provider: "project", Model: "project-model"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
-		DisplayName: "workspace", Protocol: "openai-compatible",
+		DisplayName: "project", Protocol: "openai-compatible",
 		Models: []store.ProviderModel{{
-			ID:           "workspace-model",
+			ID:           "project-model",
 			Capabilities: &store.ModelCaps{Tools: true},
 			Limits:       &store.ModelLimits{MaxToolLoops: 3},
 		}},
@@ -1314,8 +1323,8 @@ func TestWorkspaceApprovalSessionScopeCreatesProject(t *testing.T) {
 			t.Fatal("approval request not emitted")
 		}
 	}
-	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeSession, nil); !errors.Is(err, ErrWorkspaceDirsRequired) {
-		t.Fatalf("expected workspace dirs required, got %v", err)
+	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeSession, nil); !errors.Is(err, ErrProjectDirsRequired) {
+		t.Fatalf("expected project dirs required, got %v", err)
 	}
 	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeSession, []string{dir}); err != nil {
 		t.Fatal(err)
@@ -1326,7 +1335,7 @@ func TestWorkspaceApprovalSessionScopeCreatesProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sess.ActiveMode != store.ModeWorkspace || sess.ModeLease != store.ModeLeaseSession {
+	if sess.ActiveMode != store.ModeProject || sess.ModeLease != store.ModeLeaseSession {
 		t.Fatalf("session mode not upgraded: %+v", sess)
 	}
 	if sess.ProjectID == "" {
@@ -1340,29 +1349,29 @@ func TestWorkspaceApprovalSessionScopeCreatesProject(t *testing.T) {
 		t.Fatalf("project dirs not stored: %+v", got)
 	}
 	if len(client.requests) != 2 || !hasToolDef(client.requests[1].Tools, tool.FileList) {
-		t.Fatalf("workspace tools not exposed after approval: %+v", client.requests)
+		t.Fatalf("project tools not exposed after approval: %+v", client.requests)
 	}
 }
 
-func TestWorkspaceApprovalTurnScopeGrantsDirsWithoutPersisting(t *testing.T) {
+func TestProjectApprovalTurnScopeGrantsDirsWithoutPersisting(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
 	dir := t.TempDir()
-	client := &workspaceDirGrantClient{dir: dir}
+	client := &projectDirGrantClient{dir: dir}
 	runner := &recordingToolRunner{
 		defs:   tool.BuiltinDefinitions(),
 		result: tool.Result{Ok: true, Content: `{"ok":true}`},
 	}
-	eng := New(ms, hub, mapResolver{"workspace": client}, ms, WithTools(runner))
+	eng := New(ms, hub, mapResolver{"project": client}, ms, WithTools(runner))
 	ctx := context.Background()
-	sid := "sess_workspace_turn_dirs"
-	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "workspace", Provider: "workspace", Model: "workspace-model"}); err != nil {
+	sid := "sess_project_turn_dirs"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "project", Provider: "project", Model: "project-model"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
-		DisplayName: "workspace", Protocol: "openai-compatible",
+		DisplayName: "project", Protocol: "openai-compatible",
 		Models: []store.ProviderModel{{
-			ID:           "workspace-model",
+			ID:           "project-model",
 			Capabilities: &store.ModelCaps{Tools: true},
 			Limits:       &store.ModelLimits{MaxToolLoops: 4},
 		}},
@@ -1395,7 +1404,7 @@ func TestWorkspaceApprovalTurnScopeGrantsDirsWithoutPersisting(t *testing.T) {
 	if len(runner.calls) != 1 {
 		t.Fatalf("expected one file tool call after approval, got %+v", runner.calls)
 	}
-	if got := runner.calls[0].WorkspaceDirs; len(got) != 1 || got[0] != dir {
+	if got := runner.calls[0].ProjectDirs; len(got) != 1 || got[0] != dir {
 		t.Fatalf("turn-scoped project dir not passed to tool: %+v", got)
 	}
 	sess, err := ms.GetSession(ctx, sid)
@@ -1404,6 +1413,13 @@ func TestWorkspaceApprovalTurnScopeGrantsDirsWithoutPersisting(t *testing.T) {
 	}
 	if sess.ProjectID != "" {
 		t.Fatalf("turn-scoped approval must not persist project: %+v", sess.ProjectID)
+	}
+	projects, err := ms.ListProjects(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 0 {
+		t.Fatalf("turn-scoped approval must not create a project: %+v", projects)
 	}
 }
 
@@ -1425,24 +1441,24 @@ func TestProjectAutoApprovalRequiresFileWriteApproval(t *testing.T) {
 		defs:   tool.BuiltinDefinitions(),
 		result: tool.Result{Ok: true, Content: `{"ok":true}`},
 	}
-	eng := New(ms, hub, mapResolver{"workspace": client}, ms, WithTools(runner))
+	eng := New(ms, hub, mapResolver{"project": client}, ms, WithTools(runner))
 	ctx := context.Background()
 	sid := "sess_project_file_write_approval"
 	if err := ms.CreateSession(ctx, &store.Session{
 		ID:         sid,
-		Title:      "workspace",
-		Provider:   "workspace",
-		Model:      "workspace-model",
-		ActiveMode: store.ModeWorkspace,
+		Title:      "project",
+		Provider:   "project",
+		Model:      "project-model",
+		ActiveMode: store.ModeProject,
 		ModeLease:  store.ModeLeaseSession,
 		ProjectID:  project.ID,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
-		DisplayName: "workspace", Protocol: "openai-compatible",
+		DisplayName: "project", Protocol: "openai-compatible",
 		Models: []store.ProviderModel{{
-			ID:           "workspace-model",
+			ID:           "project-model",
 			Capabilities: &store.ModelCaps{Tools: true},
 			Limits:       &store.ModelLimits{MaxToolLoops: 3},
 		}},
@@ -1483,8 +1499,50 @@ func TestProjectAutoApprovalRequiresFileWriteApproval(t *testing.T) {
 	if len(runner.calls) != 1 || runner.calls[0].Name != tool.FileWrite {
 		t.Fatalf("file tool did not execute after approval: %+v", runner.calls)
 	}
-	if got := runner.calls[0].WorkspaceDirs; len(got) != 1 || got[0] != dir {
+	if got := runner.calls[0].ProjectDirs; len(got) != 1 || got[0] != dir {
 		t.Fatalf("project dirs not passed to file tool: %+v", got)
+	}
+}
+
+func TestProjectApprovalModesClassifyCommands(t *testing.T) {
+	ctx := context.Background()
+	ms := memstore.New()
+	project := &store.Project{
+		ID:           "proj_command_policy",
+		Name:         "command policy",
+		RootDirs:     []string{t.TempDir()},
+		ApprovalMode: store.ApprovalAuto,
+	}
+	if err := ms.CreateProject(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	sid := "sess_command_policy"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Provider: "mock", Model: "mock", ProjectID: project.ID}); err != nil {
+		t.Fatal(err)
+	}
+	eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms)
+	lowRisk := tool.ToolRisk{Class: tool.RiskClassCommand, LowRisk: true}
+	highRisk := tool.ToolRisk{Class: tool.RiskClassCommand}
+
+	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, lowRisk); err != nil || required {
+		t.Fatalf("auto should allow low-risk command: required=%v err=%v", required, err)
+	}
+	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, highRisk); err != nil || !required {
+		t.Fatalf("auto should ask for other commands: required=%v err=%v", required, err)
+	}
+	ask := store.ApprovalAsk
+	if _, err := ms.UpdateProject(ctx, project.ID, store.ProjectUpdate{ApprovalMode: &ask}); err != nil {
+		t.Fatal(err)
+	}
+	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, lowRisk); err != nil || !required {
+		t.Fatalf("ask should require command approval: required=%v err=%v", required, err)
+	}
+	full := store.ApprovalFull
+	if _, err := ms.UpdateProject(ctx, project.ID, store.ProjectUpdate{ApprovalMode: &full}); err != nil {
+		t.Fatal(err)
+	}
+	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, highRisk); err != nil || required {
+		t.Fatalf("full should allow command: required=%v err=%v", required, err)
 	}
 }
 
@@ -1544,7 +1602,7 @@ func TestCompletedOutputPersistsBeforeTurnFinish(t *testing.T) {
 		t.Fatalf("tool use not persisted: %+v", msgs)
 	}
 
-	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeTurn, nil); err != nil {
+	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeTurn, []string{t.TempDir()}); err != nil {
 		t.Fatal(err)
 	}
 	waitTurnDone(t, ms, sid)
@@ -2343,39 +2401,39 @@ func (c *capabilityAfterTextClient) Stream(_ context.Context, req provider.Reque
 	return out, nil
 }
 
-type workspaceCapabilityClient struct {
+type projectCapabilityClient struct {
 	requests []provider.Request
 }
 
-func (c *workspaceCapabilityClient) Name() string { return "workspace-capability" }
+func (c *projectCapabilityClient) Name() string { return "project-capability" }
 
-func (c *workspaceCapabilityClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+func (c *projectCapabilityClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	c.requests = append(c.requests, req)
 	out := make(chan provider.Chunk, 4)
 	if len(c.requests) == 1 {
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
 			Index:     0,
-			CallID:    "call_workspace_cap",
+			CallID:    "call_project_cap",
 			Name:      tool.RequestCapability,
 			ArgsDelta: `{"targetMode":"project","reason":"需要在项目中创建文件并运行本地命令","needsProjectDir":true,"suggestedDirName":"gomoku"}`,
 		}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	} else {
-		out <- provider.Chunk{Part: provider.PartText, Delta: "已准备好工作区"}
+		out <- provider.Chunk{Part: provider.PartText, Delta: "已准备好项目"}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
 	}
 	close(out)
 	return out, nil
 }
 
-type workspaceDirGrantClient struct {
+type projectDirGrantClient struct {
 	dir      string
 	requests []provider.Request
 }
 
-func (c *workspaceDirGrantClient) Name() string { return "workspace-dir-grant" }
+func (c *projectDirGrantClient) Name() string { return "project-dir-grant" }
 
-func (c *workspaceDirGrantClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+func (c *projectDirGrantClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	c.requests = append(c.requests, req)
 	out := make(chan provider.Chunk, 4)
 	switch len(c.requests) {
@@ -2387,7 +2445,7 @@ func (c *workspaceDirGrantClient) Stream(_ context.Context, req provider.Request
 		})
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
 			Index:     0,
-			CallID:    "call_workspace_dir",
+			CallID:    "call_project_dir",
 			Name:      tool.RequestCapability,
 			ArgsDelta: string(args),
 		}}

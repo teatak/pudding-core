@@ -19,6 +19,7 @@ import {
   RotateCw,
   Route,
   Search,
+  SquareTerminal,
   Wrench,
   type LucideIcon,
 } from "lucide-react";
@@ -239,6 +240,7 @@ function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIc
     builtin_browser_status: Globe,
     builtin_browser_type: Keyboard,
     builtin_camera_capture: Camera,
+    builtin_command_run: SquareTerminal,
     builtin_desktop_screenshot: Camera,
     builtin_file_copy: FileText,
     builtin_file_delete: FileText,
@@ -1360,6 +1362,7 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     builtin_graphql_search: t("transcript.toolGraphQLSearch"),
     builtin_history_get_message: t("transcript.toolHistoryGetMessage"),
     builtin_history_search: t("transcript.toolHistorySearch"),
+    builtin_command_run: t("transcript.toolCommandRun"),
     builtin_file_copy: t("transcript.toolFileCopy"),
     builtin_file_delete: t("transcript.toolFileDelete"),
     builtin_file_list: t("transcript.toolFileList"),

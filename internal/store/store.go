@@ -41,7 +41,7 @@ type Session struct {
 	ReasoningModelKey string    `json:"reasoningModelKey,omitempty"`
 	ActiveMode        AgentMode `json:"activeMode"`
 	ModeLease         ModeLease `json:"modeLease"`
-	// ProjectID 指向代码工作区与审批设置的唯一事实源。
+	// ProjectID 指向项目目录与审批设置的唯一事实源。
 	ProjectID string    `json:"projectID,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -81,7 +81,6 @@ type Project struct {
 	Name         string       `json:"name"`
 	RootDirs     []string     `json:"rootDirs"`
 	ApprovalMode ApprovalMode `json:"approvalMode"`
-	Temporary    bool         `json:"temporary,omitempty"`
 	CreatedAt    time.Time    `json:"createdAt"`
 	UpdatedAt    time.Time    `json:"updatedAt"`
 }
@@ -90,14 +89,13 @@ type ProjectUpdate struct {
 	Name         *string       `json:"name"`
 	RootDirs     *[]string     `json:"rootDirs"`
 	ApprovalMode *ApprovalMode `json:"approvalMode"`
-	Temporary    *bool         `json:"temporary"`
 }
 
 type AgentMode string
 
 const (
-	ModeChat      AgentMode = "chat"
-	ModeWorkspace AgentMode = "workspace"
+	ModeChat    AgentMode = "chat"
+	ModeProject AgentMode = "project"
 )
 
 type ModeLease string
@@ -238,7 +236,7 @@ func NormalizeProject(project *Project) error {
 	}
 	project.ID = strings.TrimSpace(project.ID)
 	project.Name = strings.TrimSpace(project.Name)
-	project.RootDirs = NormalizeWorkspaceDirs(project.RootDirs)
+	project.RootDirs = NormalizeProjectDirs(project.RootDirs)
 	project.ApprovalMode = NormalizeApprovalMode(project.ApprovalMode)
 	if project.ID == "" || len(project.RootDirs) == 0 {
 		return ErrInvalidProject
@@ -255,7 +253,7 @@ func NormalizeProjectUpdate(upd *ProjectUpdate) error {
 		upd.Name = &name
 	}
 	if upd.RootDirs != nil {
-		dirs := NormalizeWorkspaceDirs(*upd.RootDirs)
+		dirs := NormalizeProjectDirs(*upd.RootDirs)
 		if len(dirs) == 0 {
 			return ErrInvalidProject
 		}
@@ -281,7 +279,7 @@ func NormalizeApprovalMode(mode ApprovalMode) ApprovalMode {
 	}
 }
 
-func NormalizeWorkspaceDirs(dirs []string) []string {
+func NormalizeProjectDirs(dirs []string) []string {
 	seen := make(map[string]bool, len(dirs))
 	out := make([]string, 0, len(dirs))
 	for _, dir := range dirs {
@@ -305,11 +303,9 @@ func ValidAgentMode(mode AgentMode) bool {
 
 func NormalizeAgentMode(mode AgentMode) AgentMode {
 	switch AgentMode(strings.TrimSpace(strings.ToLower(string(mode)))) {
-	case "code", "operate", "local":
-		return ModeWorkspace
-	case ModeWorkspace:
-		return ModeWorkspace
-	case "work", "research", ModeChat:
+	case ModeProject:
+		return ModeProject
+	case ModeChat:
 		return ModeChat
 	default:
 		return ""
@@ -322,7 +318,7 @@ func ValidModeLease(lease ModeLease) bool {
 
 func AgentModeRank(mode AgentMode) int {
 	switch NormalizeAgentMode(mode) {
-	case ModeWorkspace:
+	case ModeProject:
 		return 2
 	case ModeChat:
 		fallthrough

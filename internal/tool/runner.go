@@ -10,12 +10,12 @@ import (
 )
 
 type Call struct {
-	SessionID     string
-	TurnID        string
-	CallID        string
-	Name          string
-	Args          json.RawMessage
-	WorkspaceDirs []string
+	SessionID   string
+	TurnID      string
+	CallID      string
+	Name        string
+	Args        json.RawMessage
+	ProjectDirs []string
 }
 
 type Result struct {

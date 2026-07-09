@@ -313,7 +313,7 @@ func TestBuildReplaysToolImageAttachmentAsUserMessage(t *testing.T) {
 		UserMessageID:   "m1",
 		ClientMessageID: "c1",
 		UserText:        "读图",
-		Mode:            store.ModeWorkspace,
+		Mode:            store.ModeProject,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -328,7 +328,7 @@ func TestBuildReplaysToolImageAttachmentAsUserMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req, err := New(ms, nil, WithAttachmentHome(home)).Build(ctx, "s1", "m", string(store.ModeWorkspace), provider.ModelConfig{
+	req, err := New(ms, nil, WithAttachmentHome(home)).Build(ctx, "s1", "m", string(store.ModeProject), provider.ModelConfig{
 		Capabilities: &provider.ModelCapabilities{Image: true},
 	})
 	if err != nil {
@@ -562,13 +562,13 @@ func TestBuildFiltersToolPartsOutsideMode(t *testing.T) {
 		t.Fatalf("chat context should keep endpoint tool history: %+v", chatParts)
 	}
 
-	workspaceReq, err := New(ms, nil).Build(ctx, "s1", "m", string(store.ModeWorkspace))
+	projectReq, err := New(ms, nil).Build(ctx, "s1", "m", string(store.ModeProject))
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspaceParts := workspaceReq.Messages[1].Parts
-	if len(workspaceParts) != 3 || workspaceParts[0].Type != provider.PartToolUse || workspaceParts[1].Type != provider.PartToolResult || workspaceParts[2].Type != provider.PartText {
-		t.Fatalf("workspace context should keep chat tool history: %+v", workspaceParts)
+	projectParts := projectReq.Messages[1].Parts
+	if len(projectParts) != 3 || projectParts[0].Type != provider.PartToolUse || projectParts[1].Type != provider.PartToolResult || projectParts[2].Type != provider.PartText {
+		t.Fatalf("project context should keep chat tool history: %+v", projectParts)
 	}
 }
 

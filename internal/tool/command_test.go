@@ -1,0 +1,235 @@
+package tool
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+)
+
+type commandPayload struct {
+	OK              bool     `json:"ok"`
+	Argv            []string `json:"argv"`
+	CWD             string   `json:"cwd"`
+	ExitCode        int      `json:"exitCode"`
+	Stdout          string   `json:"stdout"`
+	Stderr          string   `json:"stderr"`
+	StdoutTruncated bool     `json:"stdoutTruncated"`
+	StderrTruncated bool     `json:"stderrTruncated"`
+	TimedOut        bool     `json:"timedOut"`
+	Cancelled       bool     `json:"cancelled"`
+	Reason          string   `json:"reason"`
+}
+
+func TestCommandRunUsesProjectCWDAndCapturesOutput(t *testing.T) {
+	root := t.TempDir()
+	cwd := filepath.Join(root, "nested")
+	if err := os.Mkdir(cwd, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	res := commandTestCall(context.Background(), root, map[string]any{
+		"scope": "project",
+		"argv":  commandHelperArgs("report"),
+		"cwd":   "nested",
+	})
+	payload := decodeCommandPayload(t, res)
+	if !res.Ok || !payload.OK || payload.ExitCode != 0 {
+		t.Fatalf("command should succeed: result=%+v payload=%+v", res, payload)
+	}
+	resolvedCWD, err := filepath.EvalSymlinks(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload.CWD != resolvedCWD || !strings.Contains(payload.Stdout, resolvedCWD) || !strings.Contains(payload.Stderr, "helper stderr") {
+		t.Fatalf("unexpected command output: %+v", payload)
+	}
+}
+
+func TestCommandRunRejectsCWDOutsideProject(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	res := commandTestCall(context.Background(), root, map[string]any{
+		"scope": "project",
+		"argv":  commandHelperArgs("report"),
+		"cwd":   outside,
+	})
+	if res.Ok || !strings.Contains(res.Content, `"reason":"path_not_authorized"`) {
+		t.Fatalf("outside cwd must be rejected: %+v", res)
+	}
+}
+
+func TestCommandRunReturnsExitCode(t *testing.T) {
+	res := commandTestCall(context.Background(), t.TempDir(), map[string]any{
+		"scope": "project",
+		"argv":  commandHelperArgs("exit", "7"),
+	})
+	payload := decodeCommandPayload(t, res)
+	if res.Ok || payload.ExitCode != 7 || payload.Reason != "non_zero_exit" || !strings.Contains(payload.Stderr, "exit 7") {
+		t.Fatalf("unexpected non-zero result: %+v", payload)
+	}
+}
+
+func TestCommandRunUsesMinimalEnvironment(t *testing.T) {
+	t.Setenv("PUDDING_COMMAND_SECRET", "do-not-inherit")
+	res := commandTestCall(context.Background(), t.TempDir(), map[string]any{
+		"scope": "project",
+		"argv":  commandHelperArgs("report-env"),
+		"env":   map[string]string{"PUDDING_VISIBLE": "visible"},
+	})
+	payload := decodeCommandPayload(t, res)
+	if !res.Ok || payload.Stdout != "visible|" {
+		t.Fatalf("command environment leaked or custom env missing: %+v", payload)
+	}
+}
+
+func TestCommandRunExecutesGoTest(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/commandtest\n\ngo 1.24\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "command_test.go"), []byte("package commandtest\n\nimport \"testing\"\n\nfunc TestPass(t *testing.T) {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res := commandTestCall(context.Background(), root, map[string]any{
+		"scope":      "project",
+		"argv":       []string{"go", "test", "./..."},
+		"timeout_ms": 30000,
+	})
+	payload := decodeCommandPayload(t, res)
+	if !res.Ok || payload.ExitCode != 0 || !strings.Contains(payload.Stdout, "example.com/commandtest") {
+		t.Fatalf("go test command failed: %+v", payload)
+	}
+}
+
+func TestCommandRunTruncatesStdoutAndStderr(t *testing.T) {
+	res := commandTestCall(context.Background(), t.TempDir(), map[string]any{
+		"scope": "project",
+		"argv":  commandHelperArgs("flood", strconv.Itoa(commandOutputLimitBytes*2)),
+	})
+	payload := decodeCommandPayload(t, res)
+	if !res.Ok || !payload.StdoutTruncated || !payload.StderrTruncated {
+		t.Fatalf("large output must be truncated: %+v", payload)
+	}
+	if !strings.Contains(payload.Stdout, "output truncated") || !strings.HasPrefix(payload.Stdout, "stdout-head") || !strings.HasSuffix(payload.Stdout, "stdout-tail") {
+		t.Fatalf("stdout should preserve head and tail: %q", payload.Stdout)
+	}
+	if !strings.Contains(payload.Stderr, "output truncated") || !strings.HasPrefix(payload.Stderr, "stderr-head") || !strings.HasSuffix(payload.Stderr, "stderr-tail") {
+		t.Fatalf("stderr should preserve head and tail: %q", payload.Stderr)
+	}
+}
+
+func TestCommandRunTimeoutKillsProcessTree(t *testing.T) {
+	root := t.TempDir()
+	marker := filepath.Join(root, "child-finished")
+	res := commandTestCall(context.Background(), root, map[string]any{
+		"scope":      "project",
+		"argv":       commandHelperArgs("spawn-child", marker),
+		"timeout_ms": 150,
+	})
+	payload := decodeCommandPayload(t, res)
+	if res.Ok || !payload.TimedOut || payload.Reason != "timed_out" {
+		t.Fatalf("command should time out: %+v", payload)
+	}
+	time.Sleep(900 * time.Millisecond)
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("child process survived group termination: %v", err)
+	}
+}
+
+func TestCommandRunStopsOnContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan Result, 1)
+	root := t.TempDir()
+	go func() {
+		done <- commandTestCall(ctx, root, map[string]any{
+			"scope": "project",
+			"argv":  commandHelperArgs("sleep", "5000"),
+		})
+	}()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case res := <-done:
+		payload := decodeCommandPayload(t, res)
+		if res.Ok || !payload.Cancelled || payload.Reason != "cancelled" {
+			t.Fatalf("command should be cancelled: %+v", payload)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled command did not stop")
+	}
+}
+
+func TestCommandHelperProcess(t *testing.T) {
+	separator := -1
+	for i, arg := range os.Args {
+		if arg == "--" {
+			separator = i
+			break
+		}
+	}
+	if separator < 0 || separator+1 >= len(os.Args) {
+		return
+	}
+	args := os.Args[separator+1:]
+	switch args[0] {
+	case "report":
+		cwd, _ := os.Getwd()
+		fmt.Fprint(os.Stdout, cwd)
+		fmt.Fprint(os.Stderr, "helper stderr")
+	case "report-env":
+		fmt.Fprintf(os.Stdout, "%s|%s", os.Getenv("PUDDING_VISIBLE"), os.Getenv("PUDDING_COMMAND_SECRET"))
+	case "exit":
+		code, _ := strconv.Atoi(args[1])
+		fmt.Fprintf(os.Stderr, "exit %d", code)
+		os.Exit(code)
+	case "flood":
+		size, _ := strconv.Atoi(args[1])
+		fmt.Fprint(os.Stdout, "stdout-head"+strings.Repeat("o", size)+"stdout-tail")
+		fmt.Fprint(os.Stderr, "stderr-head"+strings.Repeat("e", size)+"stderr-tail")
+	case "sleep":
+		ms, _ := strconv.Atoi(args[1])
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+	case "spawn-child":
+		child := exec.Command(os.Args[0], "-test.run=^TestCommandHelperProcess$", "--", "write-after", args[1])
+		if err := child.Start(); err != nil {
+			os.Exit(2)
+		}
+		_ = child.Wait()
+	case "write-after":
+		time.Sleep(700 * time.Millisecond)
+		_ = os.WriteFile(args[1], []byte("finished"), 0o600)
+	default:
+		os.Exit(2)
+	}
+	os.Exit(0)
+}
+
+func commandTestCall(ctx context.Context, root string, args map[string]any) Result {
+	raw, _ := json.Marshal(args)
+	return NewBuiltinRunner().Call(ctx, Call{
+		CallID:      "call_command",
+		Name:        CommandRun,
+		Args:        raw,
+		ProjectDirs: []string{root},
+	})
+}
+
+func commandHelperArgs(mode string, args ...string) []string {
+	executable, _ := os.Executable()
+	return append([]string{executable, "-test.run=^TestCommandHelperProcess$", "--", mode}, args...)
+}
+
+func decodeCommandPayload(t *testing.T, res Result) commandPayload {
+	t.Helper()
+	var payload commandPayload
+	if err := json.Unmarshal([]byte(res.Content), &payload); err != nil {
+		t.Fatalf("decode command payload: %v content=%q", err, res.Content)
+	}
+	return payload
+}

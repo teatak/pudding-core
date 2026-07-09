@@ -34,6 +34,7 @@ const (
 	FileDelete          = "builtin_file_delete"
 	FileMove            = "builtin_file_move"
 	FileCopy            = "builtin_file_copy"
+	CommandRun          = "builtin_command_run"
 	SkillValidate       = "builtin_skill_validate"
 	SkillSubmit         = "builtin_skill_submit"
 	RESTRequest         = "builtin_rest_request"
@@ -270,13 +271,13 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Name:        FileList,
 			Description: "List files in a Pudding-managed file area or an authorized project directory.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","project"],"description":"Target file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized project directories. Use . to list the root."},"max_entries":{"type":"integer","description":"Optional maximum entries, 1-1000, default 200."}},"required":["scope","path"],"additionalProperties":false}`),
-			Capability:  store.ModeWorkspace,
+			Capability:  store.ModeProject,
 		},
 		{
 			Name:        FileRead,
 			Description: "Read one small UTF-8 text file, or save one supported image file as an attachment from a Pudding-managed file area or an authorized project directory. Image bytes are visible only to models with image input support; otherwise the model sees attachment metadata only. For large text files use builtin_file_slice or builtin_file_search first.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","project"],"description":"Target file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized project directories."},"max_chars":{"type":"integer","description":"Optional max characters, default 20000 and cap 100000."}},"required":["scope","path"],"additionalProperties":false}`),
-			Capability:  store.ModeWorkspace,
+			Capability:  store.ModeProject,
 		},
 		{
 			Name:        AttachmentReadImage,
@@ -288,61 +289,67 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Name:        FileStat,
 			Description: "Return metadata for one file or directory: exists, type, size, mtime, and MIME when available.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","project"],"description":"Target file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized project directories."}},"required":["scope","path"],"additionalProperties":false}`),
-			Capability:  store.ModeWorkspace,
+			Capability:  store.ModeProject,
 		},
 		{
 			Name:        FileSearch,
 			Description: "Search UTF-8 text files by literal case-sensitive substring under one file or directory. Skips binary files and common generated directories.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","project"],"description":"Target file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Search root. Relative path inside a managed area, or an absolute/relative path inside authorized project directories. Use . for the root."},"query":{"type":"string","description":"Literal case-sensitive substring to search for. Not regex."},"max_results":{"type":"integer","description":"Optional maximum matches, default 100 and cap 500."}},"required":["scope","path","query"],"additionalProperties":false}`),
-			Capability:  store.ModeWorkspace,
+			Capability:  store.ModeProject,
 		},
 		{
 			Name:        FileSlice,
 			Description: "Read a focused line slice from a UTF-8 text file. Supports origin=start for line ranges and origin=end for tail-style reads, with optional reverse order.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","project"],"description":"Target file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized project directories."},"origin":{"type":"string","enum":["start","end"],"description":"start reads from a 1-based line range. end reads the last N lines after optional skip. Default start."},"start":{"type":"integer","description":"1-based start line for origin=start. Default 1."},"end":{"type":"integer","description":"Inclusive end line for origin=start. If omitted, lines controls the range length."},"lines":{"type":"integer","description":"Line count for origin=end or when end is omitted. Default 100 and cap 500."},"skip":{"type":"integer","description":"For origin=end, skip this many lines from the file end before taking lines. Default 0."},"order":{"type":"string","enum":["natural","reverse"],"description":"natural returns file order. reverse returns newest/end-most lines first. Default natural."}},"required":["scope","path"],"additionalProperties":false}`),
-			Capability:  store.ModeWorkspace,
+			Capability:  store.ModeProject,
 		},
 		{
 			Name:        FileWrite,
 			Description: "Overwrite one text file in a writable Pudding-managed file area or authorized project directory.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp","project"],"description":"Target writable file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized project directories."},"content":{"type":"string","description":"New file content."}},"required":["scope","path","content"],"additionalProperties":false}`),
-			Capability:  store.ModeWorkspace,
+			Capability:  store.ModeProject,
 		},
 		{
 			Name:        FilePatch,
 			Description: "Replace text in one file in a writable Pudding-managed file area or authorized project directory by exact string match.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp","project"],"description":"Target writable file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized project directories."},"old_string":{"type":"string","description":"Exact text to replace."},"new_string":{"type":"string","description":"Replacement text."},"replace_all":{"type":"boolean","description":"Replace all matches. Defaults false; without this, exactly one match is required."}},"required":["scope","path","old_string","new_string"],"additionalProperties":false}`),
-			Capability:  store.ModeWorkspace,
+			Capability:  store.ModeProject,
 		},
 		{
 			Name:        FileDelete,
 			Description: "Delete a file or, when recursive is true, a directory from a writable Pudding-managed file area or authorized project directory.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp","project"],"description":"Target writable file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized project directories."},"recursive":{"type":"boolean","description":"Required to delete a directory."}},"required":["scope","path"],"additionalProperties":false}`),
-			Capability:  store.ModeWorkspace,
+			Capability:  store.ModeProject,
 		},
 		{
 			Name:        FileMove,
 			Description: "Move or rename a file or directory inside the same writable managed area or authorized project directories.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp","project"]},"from_path":{"type":"string"},"to_path":{"type":"string"}},"required":["scope","from_path","to_path"],"additionalProperties":false}`),
-			Capability:  store.ModeWorkspace,
+			Capability:  store.ModeProject,
 		},
 		{
 			Name:        FileCopy,
 			Description: "Copy a file or directory inside the same writable managed area or authorized project directory. Directories require recursive=true; existing destinations require overwrite=true.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp","project"],"description":"Target writable file area."},"from_path":{"type":"string","description":"Source path in the same scope."},"to_path":{"type":"string","description":"Destination path in the same scope."},"recursive":{"type":"boolean","description":"Required when copying a directory."},"overwrite":{"type":"boolean","description":"Replace an existing destination. Defaults false."}},"required":["scope","from_path","to_path"],"additionalProperties":false}`),
-			Capability:  store.ModeWorkspace,
+			Capability:  store.ModeProject,
+		},
+		{
+			Name:        CommandRun,
+			Description: "Run one local command directly from an argv array in an authorized project directory. This tool does not invoke a shell or interpret shell syntax. Returns exit code, stdout, stderr, duration, timeout, cancellation, and truncation metadata.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Commands can run only with project access."},"argv":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":128,"description":"Executable followed by arguments. Do not pass a shell command string."},"cwd":{"type":"string","description":"Absolute or relative directory inside authorized project roots. Defaults to the first project root."},"env":{"type":"object","additionalProperties":{"type":"string"},"description":"Optional environment values for this command. Pudding otherwise inherits only a minimal safe environment."},"timeout_ms":{"type":"integer","minimum":100,"maximum":600000,"description":"Optional timeout in milliseconds. Defaults to 60000; maximum 600000."}},"required":["scope","argv"],"additionalProperties":false}`),
+			Capability:  store.ModeProject,
 		},
 		{
 			Name:        SkillValidate,
 			Description: "Validate one staged skill package before asking the user to review it.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"draft_id":{"type":"string","description":"Staged skill package id."}},"required":["draft_id"],"additionalProperties":false}`),
-			Capability:  store.ModeWorkspace,
+			Capability:  store.ModeProject,
 		},
 		{
 			Name:        SkillSubmit,
 			Description: "Submit one valid staged skill package for user review in Settings. This does not publish the skill.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"draft_id":{"type":"string","description":"Staged skill package id."}},"required":["draft_id"],"additionalProperties":false}`),
-			Capability:  store.ModeWorkspace,
+			Capability:  store.ModeProject,
 		},
 		{
 			Name:        RESTRequest,
@@ -496,6 +503,8 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.fileMove(call)
 	case FileCopy:
 		return r.fileCopy(call)
+	case CommandRun:
+		return r.commandRun(ctx, call)
 	case SkillValidate:
 		return r.skillValidate(ctx, call)
 	case SkillSubmit:

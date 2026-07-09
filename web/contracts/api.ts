@@ -9,7 +9,7 @@ export const session = z.object({
   model: z.string(),
   reasoningEffort: z.string().optional(),
   reasoningModelKey: z.string().optional(),
-  activeMode: z.enum(["chat", "workspace"]),
+  activeMode: z.enum(["chat", "project"]),
   modeLease: z.enum(["none", "session"]),
   projectID: z.string().optional(),
   pinned: z.boolean(),
@@ -29,7 +29,6 @@ export const project = z.object({
   name: z.string(),
   rootDirs: z.array(z.string()),
   approvalMode,
-  temporary: z.boolean().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -43,14 +42,12 @@ export const createProjectRequest = z.object({
   name: z.string().optional(),
   rootDirs: z.array(z.string()).min(1),
   approvalMode: approvalMode.optional(),
-  temporary: z.boolean().optional(),
 });
 
 export const patchProjectRequest = z.object({
   name: z.string().optional(),
   rootDirs: z.array(z.string()).optional(),
   approvalMode: approvalMode.optional(),
-  temporary: z.boolean().optional(),
 });
 
 export const canvasItem = z.object({
@@ -117,7 +114,7 @@ export const putClosedCanvasItemRequest = z.object({
 export const browserMCPTool = z.object({
   name: z.string(),
   description: z.string().optional(),
-  capability: z.enum(["chat", "workspace"]).optional(),
+  capability: z.enum(["chat", "project"]).optional(),
 });
 export type BrowserMCPTool = z.infer<typeof browserMCPTool>;
 
@@ -303,7 +300,7 @@ export const conversationTurn = z.object({
   status: z.enum(["running", "completed", "failed", "cancelled"]),
   provider: z.string().optional(),
   model: z.string().optional(),
-  mode: z.enum(["chat", "workspace"]).optional(),
+  mode: z.enum(["chat", "project"]).optional(),
   error: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -321,7 +318,7 @@ export const queuedInput = z.object({
   status: queuedInputStatus,
   provider: z.string().optional(),
   model: z.string().optional(),
-  mode: z.enum(["chat", "workspace"]).optional(),
+  mode: z.enum(["chat", "project"]).optional(),
   modelConfig: z.unknown().optional(),
   turnID: z.string().optional(),
   createdAt: z.string(),
@@ -663,7 +660,7 @@ export const userPromptResponse = z.object({
 export const builtinTool = z.object({
   id: z.string(),
   description: z.string(),
-  capability: z.enum(["chat", "workspace"]),
+  capability: z.enum(["chat", "project"]),
   inputSchema: z.unknown().optional(),
 });
 export type BuiltinTool = z.infer<typeof builtinTool>;

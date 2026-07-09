@@ -141,7 +141,7 @@ const sessionPatchRequest = z.object({
   provider: z.string().optional(),
   model: z.string().optional(),
   reasoningEffort: z.string().optional(),
-  activeMode: z.enum(["chat", "workspace"]).optional(),
+  activeMode: z.enum(["chat", "project"]).optional(),
   modeLease: z.enum(["none", "session"]).optional(),
   projectID: z.string().optional(),
   pinned: z.boolean().optional(),

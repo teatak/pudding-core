@@ -372,7 +372,7 @@ func (s *Server) createSession(c *cart.Context) error {
 	}
 	sess := &store.Session{ID: store.NewID("sess"), Title: req.Title, Provider: req.Provider, Model: req.Model, ProjectID: req.ProjectID}
 	if req.ProjectID != "" {
-		sess.ActiveMode = store.ModeWorkspace
+		sess.ActiveMode = store.ModeProject
 		sess.ModeLease = store.ModeLeaseSession
 	}
 	if err := s.store.CreateSession(c.Request.Context(), sess); err != nil {
@@ -386,7 +386,6 @@ type createProjectReq struct {
 	Name         string             `json:"name"`
 	RootDirs     []string           `json:"rootDirs"`
 	ApprovalMode store.ApprovalMode `json:"approvalMode"`
-	Temporary    bool               `json:"temporary"`
 }
 
 func (s *Server) createProject(c *cart.Context) error {
@@ -399,7 +398,6 @@ func (s *Server) createProject(c *cart.Context) error {
 		Name:         req.Name,
 		RootDirs:     req.RootDirs,
 		ApprovalMode: req.ApprovalMode,
-		Temporary:    req.Temporary,
 	}
 	if err := s.store.CreateProject(c.Request.Context(), project); err != nil {
 		return s.fail(c, err)
@@ -413,13 +411,7 @@ func (s *Server) listProjects(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
-	visible := projects[:0]
-	for _, project := range projects {
-		if project != nil && !project.Temporary {
-			visible = append(visible, project)
-		}
-	}
-	c.JSON(http.StatusOK, map[string]any{"projects": visible})
+	c.JSON(http.StatusOK, map[string]any{"projects": projects})
 	return nil
 }
 
@@ -779,7 +771,7 @@ func (s *Server) approveApproval(c *cart.Context) error {
 			c.JSON(http.StatusNotFound, map[string]string{"error": "not_found"})
 			return nil
 		}
-		if errors.Is(err, engine.ErrWorkspaceDirsRequired) {
+		if errors.Is(err, engine.ErrProjectDirsRequired) {
 			return badRequest(c, "project_dirs_required")
 		}
 		return s.fail(c, err)
@@ -789,7 +781,7 @@ func (s *Server) approveApproval(c *cart.Context) error {
 }
 
 func publicApprovalTargetMode(approval engine.ApprovalRequest) string {
-	if approval.Kind == engine.ApprovalKindCapability && approval.TargetMode == store.ModeWorkspace {
+	if approval.Kind == engine.ApprovalKindCapability && approval.TargetMode == store.ModeProject {
 		return "project"
 	}
 	return string(approval.TargetMode)

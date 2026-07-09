@@ -40,3 +40,12 @@ func TestNonToolResultPartOmitsOK(t *testing.T) {
 		t.Fatalf("non tool_result should omit ok, got %s", data)
 	}
 }
+
+func TestNormalizeAgentModeRejectsLegacyWorkspace(t *testing.T) {
+	if mode := NormalizeAgentMode(AgentMode("workspace")); mode != "" {
+		t.Fatalf("legacy workspace mode must be rejected, got %q", mode)
+	}
+	if mode := NormalizeAgentMode(ModeProject); mode != ModeProject {
+		t.Fatalf("project mode must remain valid, got %q", mode)
+	}
+}

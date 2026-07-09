@@ -4,7 +4,7 @@ export type ToolDefinition = {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  capability?: "chat" | "workspace";
+  capability?: "chat" | "project";
   handler: (args: unknown) => unknown | Promise<unknown>;
 };
 

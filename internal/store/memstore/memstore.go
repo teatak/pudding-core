@@ -111,9 +111,6 @@ func (m *Memstore) UpdateProject(_ context.Context, id string, upd store.Project
 	if upd.ApprovalMode != nil {
 		p.ApprovalMode = *upd.ApprovalMode
 	}
-	if upd.Temporary != nil {
-		p.Temporary = *upd.Temporary
-	}
 	p.UpdatedAt = time.Now()
 	return cloneProject(p), nil
 }

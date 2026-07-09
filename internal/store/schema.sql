@@ -24,7 +24,6 @@ CREATE TABLE IF NOT EXISTS projects (
     name          TEXT    NOT NULL DEFAULT '',
     root_dirs     TEXT    NOT NULL DEFAULT '[]',
     approval_mode TEXT    NOT NULL DEFAULT 'auto',
-    temporary     INTEGER NOT NULL DEFAULT 0,
     created_at    INTEGER NOT NULL,
     updated_at    INTEGER NOT NULL
 );

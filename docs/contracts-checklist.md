@@ -31,7 +31,8 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 
 | 实体 | Go | TS | 字段 |
 | --- | --- | --- | --- |
-| Session | `store.Session` | `session` | id, title, provider, model, activeMode(chat/workspace), modeLease, createdAt, updatedAt, running(读取时派生) |
+| Session | `store.Session` | `session` | id, title, provider, model, activeMode(chat/project), modeLease, projectID?, createdAt, updatedAt, running(读取时派生) |
+| Project | `store.Project` | `project` | id, name, rootDirs, approvalMode, createdAt, updatedAt |
 | ConversationTurn | `store.ConversationTurn` | `conversationTurn` | id, sessionID, clientMessageID, status, provider?, model?, mode?, error?, createdAt, updatedAt, messages[] |
 | ContentPart | `store.ContentPart` | `contentPart` | type(text/thought/tool_use/tool_result), text?, id?, name?, args?, ok?, content?, summaryKind?, summaryCount? |
 | Message | `store.Message` | `message` | id, sessionID, turnID, role, kind?, text, parts[], turnIndex?, clientMessageID?, interrupted?, createdAt |
@@ -48,10 +49,10 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 
 | 端点 | 请求 | 响应 | 错误 |
 | --- | --- | --- | --- |
-| `POST /sessions` | `{title?, provider?, model?}` | 201 Session | — |
+| `POST /sessions` | `{title?, provider, model, projectID?}` | 201 Session | — |
 | `GET /sessions` | — | `{sessions: []}` | — |
 | `GET /sessions/{id}` | — | Session | 404 |
-| `PATCH /sessions/{id}` | `{title?, provider?, model?}` | Session | 404 |
+| `PATCH /sessions/{id}` | `{title?, provider?, model?, projectID?, activeMode?, modeLease?}` | Session | 404 |
 | `DELETE /sessions/{id}` | — | 204 | 404 |
 | `POST /sessions/{id}/submit` | `{clientMessageID, text}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_running` |
 | `POST /sessions/{id}/cancel` | — | 202 `{status}` | 404 / 409 `no_running_turn` |
@@ -75,6 +76,16 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 
 鉴权:`Authorization: Bearer <token>` 或 `?token=`(EventSource 用),401 统一 `{"error":"unauthorized"}`。
 
+## LLM Tool 契约
+
+| tool | capability | args | result |
+| --- | --- | --- | --- |
+| `builtin_command_run` | `project` | `{scope:"project", argv:string[], cwd?, env?, timeout_ms?}` | `{ok, argv, cwd, exitCode, stdout, stderr, stdoutTruncated, stderrTruncated, timedOut, cancelled, durationMs, reason?, error?}` |
+
+`builtin_command_run` 不解析 shell 字符串。cwd 必须位于当前 Project/turn grant
+授权目录中;默认 timeout 为 60 秒,最大 10 分钟;stdout/stderr 各保留最多
+64 KiB 头尾内容。命令审批由 Project 的 `ask | auto | full` 决定。
+
 ## settings 约定键
 
 > REST settings 仍是扁平 k=v,value 一律纯字符串;磁盘事实源是
@@ -89,9 +100,9 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | --- | --- |
 | — | 当前无主路径设置键 |
 
-session 创建时必须显式写入 `provider` 与 `model`。能力档为 `chat` / `workspace`;无授权默认 `activeMode=chat, modeLease=none`;
-`request_capability.targetMode` 对模型暴露为 `project`;审批通过且 scope=session 时,
-后端仍写入内部 `activeMode=workspace` 与 `modeLease=session`。
+session 创建时必须显式写入 `provider` 与 `model`。能力档为 `chat` / `project`;
+无授权默认 `activeMode=chat, modeLease=none`;绑定 Project 或 session scope
+审批通过后写入 `activeMode=project, modeLease=session`。
 draft 页可记住"上次选用模型",
 但不影响既有 session。
 历史上的 `model.default` 与 `provider.openai.*` 过渡键已随 registry 收口删除。

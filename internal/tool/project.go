@@ -9,12 +9,12 @@ import (
 )
 
 var (
-	errWorkspaceDirsRequired     = errors.New("workspace directories are required")
-	errWorkspacePathNotAllowed   = errors.New("path is outside authorized workspace directories")
-	errWorkspaceFilePathRequired = errors.New("file path is required")
+	errProjectDirsRequired     = errors.New("project directories are required")
+	errProjectPathNotAllowed   = errors.New("path is outside authorized project directories")
+	errProjectFilePathRequired = errors.New("file path is required")
 )
 
-func normalizeWorkspaceDirs(dirs []string) []string {
+func normalizeProjectDirs(dirs []string) []string {
 	seen := make(map[string]bool, len(dirs))
 	out := make([]string, 0, len(dirs))
 	for _, dir := range dirs {
@@ -32,10 +32,10 @@ func normalizeWorkspaceDirs(dirs []string) []string {
 	return out
 }
 
-func resolveWorkspacePath(roots []string, rawPath string, allowRoot, allowMissing bool) (string, string, string, error) {
-	roots = normalizeWorkspaceDirs(roots)
+func resolveProjectPath(roots []string, rawPath string, allowRoot, allowMissing bool) (string, string, string, error) {
+	roots = normalizeProjectDirs(roots)
 	if len(roots) == 0 {
-		return "", "", "", errWorkspaceDirsRequired
+		return "", "", "", errProjectDirsRequired
 	}
 	rawPath = strings.TrimSpace(rawPath)
 	if rawPath == "" {
@@ -72,7 +72,7 @@ func resolveWorkspacePath(roots []string, rawPath string, allowRoot, allowMissin
 					rel = "."
 				}
 				if rel == "." && !allowRoot {
-					return "", "", "", errWorkspaceFilePathRequired
+					return "", "", "", errProjectFilePathRequired
 				}
 				return root, resolvedCandidate, filepath.ToSlash(rel), nil
 			}
@@ -91,12 +91,12 @@ func resolveWorkspacePath(roots []string, rawPath string, allowRoot, allowMissin
 				rel = "."
 			}
 			if rel == "." && !allowRoot {
-				return "", "", "", errWorkspaceFilePathRequired
+				return "", "", "", errProjectFilePathRequired
 			}
 			return root, candidate, filepath.ToSlash(rel), nil
 		}
 	}
-	return "", "", "", errWorkspacePathNotAllowed
+	return "", "", "", errProjectPathNotAllowed
 }
 
 func resolveExistingParent(path string) (string, error) {
