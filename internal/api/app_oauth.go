@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -399,7 +400,33 @@ func oauthHTML(c *cart.Context, status int, title, detail string) error {
 }
 
 func oauthSuccessHTML(c *cart.Context, providerID string) error {
-	return oauthHTMLPage(c, http.StatusOK, "Connected", "You can return to Pudding.", "pudding://oauth/connected/"+url.PathEscape(providerID))
+	return oauthHTMLPage(c, http.StatusOK, "Connected", "You can return to Pudding.", appOAuthReturnScheme()+"://oauth/connected/"+url.PathEscape(providerID))
+}
+
+func appOAuthReturnScheme() string {
+	scheme := strings.TrimSpace(os.Getenv("PUDDING_OAUTH_RETURN_SCHEME"))
+	if validURLScheme(scheme) {
+		return scheme
+	}
+	return "pudding"
+}
+
+func validURLScheme(scheme string) bool {
+	if scheme == "" || !asciiLetter(scheme[0]) {
+		return false
+	}
+	for i := 1; i < len(scheme); i++ {
+		c := scheme[i]
+		if asciiLetter(c) || ('0' <= c && c <= '9') || c == '+' || c == '-' || c == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func asciiLetter(c byte) bool {
+	return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')
 }
 
 func oauthHTMLPage(c *cart.Context, status int, title, detail, openURL string) error {

@@ -14,6 +14,7 @@ const defaultAddr = "127.0.0.1:9679";
 const daemonAddr = (process.env.PUDDING_DAEMON_ADDR || defaultAddr).trim();
 const apiBase = trimTrailingSlash(process.env.PUDDING_API_BASE || `http://${daemonAddr}`);
 const devURL = trimTrailingSlash(process.env.PUDDING_DEV_URL || "");
+const oauthReturnScheme = normalizeURLScheme(process.env.PUDDING_OAUTH_RETURN_SCHEME || "pudding");
 const macTrafficLightPosition = { x: 18, y: 18 };
 const defaultWindowBounds = { width: 1440, height: 920 };
 const minWindowBounds = { width: 1000, height: 680 };
@@ -37,8 +38,15 @@ let webviewCaptureSeq = 0;
 
 let daemonProcess = null;
 let quitting = false;
+const pendingOAuthReturnURLs = [];
 
 app.setName("Pudding");
+registerOAuthReturnProtocol();
+
+app.on("open-url", (event, rawURL) => {
+  event.preventDefault();
+  handleOAuthReturnURL(rawURL);
+});
 
 app.whenReady().then(async () => {
   try {
@@ -46,6 +54,7 @@ app.whenReady().then(async () => {
     const token = await ensureDaemon(browserBridge);
     const window = createMainWindow();
     await loadRenderer(window, token);
+    flushPendingOAuthReturnURLs();
   } catch (error) {
     console.error("[electron] startup failed", error);
     app.quit();
@@ -63,7 +72,7 @@ app.on("activate", () => {
     .then((browserBridge) => ensureDaemon(browserBridge))
     .then((token) => {
       const window = createMainWindow();
-      return loadRenderer(window, token);
+      return loadRenderer(window, token).then(() => flushPendingOAuthReturnURLs());
     })
     .catch((error) => {
       console.error("[electron] activate failed", error);
@@ -151,6 +160,58 @@ function showMainWindow(window) {
   }
   window.show();
   window.focus();
+}
+
+function registerOAuthReturnProtocol() {
+  if (!oauthReturnScheme) {
+    return;
+  }
+  try {
+    if (process.defaultApp) {
+      const scriptPath = path.resolve(process.argv[1] || path.join(repoRoot, "electron", "main.cjs"));
+      app.setAsDefaultProtocolClient(oauthReturnScheme, process.execPath, [scriptPath]);
+    } else {
+      app.setAsDefaultProtocolClient(oauthReturnScheme);
+    }
+  } catch (error) {
+    console.warn("[electron] register oauth return protocol failed", error);
+  }
+}
+
+function handleOAuthReturnURL(rawURL) {
+  if (!isOAuthReturnURL(rawURL)) {
+    return false;
+  }
+  if (!app.isReady()) {
+    pendingOAuthReturnURLs.push(rawURL);
+    return true;
+  }
+  showOAuthReturnWindow();
+  return true;
+}
+
+function flushPendingOAuthReturnURLs() {
+  if (pendingOAuthReturnURLs.length === 0) {
+    return;
+  }
+  pendingOAuthReturnURLs.length = 0;
+  showOAuthReturnWindow();
+}
+
+function showOAuthReturnWindow() {
+  const window = BrowserWindow.getAllWindows()[0];
+  if (window) {
+    showMainWindow(window);
+  }
+}
+
+function isOAuthReturnURL(rawURL) {
+  try {
+    const url = new URL(String(rawURL || ""));
+    return url.protocol === `${oauthReturnScheme}:` && url.hostname === "oauth" && url.pathname.startsWith("/connected/");
+  } catch {
+    return false;
+  }
 }
 
 function bindWindowState(window) {
@@ -579,6 +640,14 @@ function stringOption(value) {
 
 function trimTrailingSlash(value) {
   return String(value || "").replace(/\/+$/, "");
+}
+
+function normalizeURLScheme(value) {
+  const scheme = String(value || "").trim();
+  if (!/^[A-Za-z][A-Za-z0-9+.-]*$/.test(scheme)) {
+    return "";
+  }
+  return scheme;
 }
 
 function desktopShell() {
