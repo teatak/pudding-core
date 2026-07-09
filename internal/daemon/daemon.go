@@ -26,6 +26,7 @@ import (
 	aecproc "github.com/teatak/pudding-core/internal/audio/dsp/aec"
 	nsproc "github.com/teatak/pudding-core/internal/audio/dsp/ns"
 	"github.com/teatak/pudding-core/internal/audio/frame"
+	"github.com/teatak/pudding-core/internal/audio/runtimeassets"
 	audiotts "github.com/teatak/pudding-core/internal/audio/tts"
 	"github.com/teatak/pudding-core/internal/audio/tts/edgetts"
 	"github.com/teatak/pudding-core/internal/audio/tts/macsay"
@@ -142,6 +143,13 @@ func Start(opts Options) (*Daemon, error) {
 		MinEnergy:         audioCfg.ASR.VAD.MinEnergy,
 		PlaybackMinEnergy: audioCfg.ASR.VAD.PlaybackMinEnergy,
 	})
+	audioRuntime := runtimeassets.NewInstaller(dir, func(ctx context.Context) error {
+		currentAudio, err := cfg.Audio(ctx)
+		if err != nil {
+			return err
+		}
+		return voiceService.ReplaceASR(defaultASR(dir, currentAudio))
+	})
 	if err := eng.Recover(context.Background()); err != nil {
 		_ = st.Close()
 		return nil, fmt.Errorf("recover interrupted turns: %w", err)
@@ -175,7 +183,7 @@ func Start(opts Options) (*Daemon, error) {
 
 	// request ctx 派生自此:Shutdown 时 SSE 长连接立即退出,不拖优雅关闭
 	sseCtx, stopSSE := context.WithCancel(context.Background())
-	apiServer := api.New(eng, st, cfg, hub).WithHome(dir).WithApps(apps).WithSkills(skills).WithBrowserMCP(browserMCP).WithVoice(voiceService).WithBrowser(browserService).WithCamera(camera)
+	apiServer := api.New(eng, st, cfg, hub).WithHome(dir).WithApps(apps).WithSkills(skills).WithBrowserMCP(browserMCP).WithVoice(voiceService).WithAudioRuntime(audioRuntime).WithBrowser(browserService).WithCamera(camera)
 	server := &http.Server{
 		Handler: apiServer.Handler(
 			token,

@@ -250,6 +250,23 @@ func (s *Service) BindInput(sessionID string, enabled bool) (Bindings, error) {
 	return bindings, nil
 }
 
+func (s *Service) ReplaceASR(next asr.Client) error {
+	if next == nil {
+		return fmt.Errorf("%w: ASR backend unavailable", ErrInputUnavailable)
+	}
+	s.stopInput()
+	s.mu.Lock()
+	old := s.asr
+	s.asr = next
+	s.asrStarted = false
+	s.asrLoopStarted = false
+	s.mu.Unlock()
+	if old != nil {
+		_ = old.Stop(context.Background())
+	}
+	return nil
+}
+
 func (s *Service) inputCaptureActive(sessionID string) bool {
 	s.mu.Lock()
 	active := s.inputSession == sessionID && s.inputCancel != nil
@@ -493,8 +510,14 @@ func (s *Service) startInput(sessionID string) error {
 	if sessionID == "" {
 		return ErrSessionRequired
 	}
-	if s.driver == nil || s.asr == nil {
-		return ErrInputUnavailable
+	if s.driver == nil && s.asr == nil {
+		return fmt.Errorf("%w: audio driver and ASR backend unavailable", ErrInputUnavailable)
+	}
+	if s.driver == nil {
+		return fmt.Errorf("%w: audio driver unavailable", ErrInputUnavailable)
+	}
+	if s.asr == nil {
+		return fmt.Errorf("%w: ASR backend unavailable", ErrInputUnavailable)
 	}
 	s.mu.Lock()
 	if !s.asrStarted {
@@ -515,7 +538,7 @@ func (s *Service) startInput(sessionID string) error {
 	}
 	if !s.asrLoopStarted {
 		s.asrLoopStarted = true
-		go s.asrEventLoop()
+		go s.asrEventLoop(s.asr)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.inputSession = sessionID
@@ -575,8 +598,8 @@ func (s *Service) stopInput() {
 	}
 }
 
-func (s *Service) asrEventLoop() {
-	for ev := range s.asr.Events() {
+func (s *Service) asrEventLoop(client asr.Client) {
+	for ev := range client.Events() {
 		owner := s.manager.Snapshot().InputOwner
 		if owner == "" {
 			continue

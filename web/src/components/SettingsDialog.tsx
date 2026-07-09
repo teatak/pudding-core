@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
+  AudioLines,
   BookOpenText,
   Check,
   Copy,
@@ -11,7 +12,6 @@ import {
   Info,
   Loader2,
   MessageSquareText,
-  Mic2,
   Pencil,
   Plus,
   Settings,
@@ -135,7 +135,7 @@ const SETTINGS_SECTIONS: Array<{
 }> = [
   { id: "usage", icon: Activity, labelKey: "settings.section.usage" },
   { id: "dialogue", icon: SlidersHorizontal, labelKey: "settings.section.dialogue" },
-  { id: "voice", icon: Mic2, labelKey: "settings.section.voice" },
+  { id: "voice", icon: AudioLines, labelKey: "settings.section.voice" },
   { id: "model", icon: Sparkles, labelKey: "settings.section.model" },
   { id: "skills", icon: BookOpenText, labelKey: "settings.section.skills" },
   { id: "tools", icon: Globe2, labelKey: "settings.section.tools" },

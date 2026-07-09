@@ -477,6 +477,32 @@ export const clearASRRecordingsResponse = z.object({
   deleteErrors: z.number().optional(),
 });
 export type ClearASRRecordingsResponse = z.infer<typeof clearASRRecordingsResponse>;
+export const audioRuntimeFile = z.object({
+  label: z.string(),
+  path: z.string(),
+  kind: z.string(),
+  exists: z.boolean(),
+});
+export const audioRuntimeStatus = z.object({
+  ok: z.boolean(),
+  installed: z.boolean(),
+  disabled: z.boolean().optional(),
+  running: z.boolean(),
+  state: z.string(),
+  release: z.string(),
+  profile: z.string(),
+  platformKey: z.string(),
+  currentAsset: z.string().optional(),
+  assetIndex: z.number().optional(),
+  assetTotal: z.number().optional(),
+  bytesDownloaded: z.number().optional(),
+  bytesTotal: z.number().optional(),
+  message: z.string().optional(),
+  error: z.string().optional(),
+  required: z.array(audioRuntimeFile),
+  missing: z.array(audioRuntimeFile),
+});
+export type AudioRuntimeStatus = z.infer<typeof audioRuntimeStatus>;
 
 export const desktopAboutRow = z.object({
   key: z.string(),

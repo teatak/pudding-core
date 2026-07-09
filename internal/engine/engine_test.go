@@ -850,11 +850,28 @@ func TestSubmitRoutesFileReadImageToNextProviderRequest(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	sub, cancelSub := hub.Subscribe(sid)
+	defer cancelSub()
 
 	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "看图"}); err != nil {
 		t.Fatal(err)
 	}
 	waitTurnDone(t, ms, sid)
+	var resultEvent event.Event
+	for {
+		select {
+		case ev := <-sub:
+			if ev.Kind == event.TurnTool && ev.Phase == "ok" {
+				resultEvent = ev
+			}
+		default:
+			goto doneDrain
+		}
+	}
+doneDrain:
+	if len(resultEvent.Attachments) != 1 || resultEvent.Attachments[0].AttachmentKey == "" || resultEvent.Attachments[0].MIME != "image/png" {
+		t.Fatalf("tool result event should include routed attachment: %+v", resultEvent)
+	}
 
 	if len(client.requests) != 2 {
 		t.Fatalf("want 2 provider calls, got %d", len(client.requests))

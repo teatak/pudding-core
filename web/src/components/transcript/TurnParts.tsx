@@ -119,15 +119,15 @@ export function partsFromOverlay(
   const lastToolIndex = findLastOverlayPartIndex(overlayParts, "tool");
   const hasTextPart = overlayParts.some((part) => part.type === "text");
   return withPartKeys([
-    ...overlayParts.map((part, index): TurnPartVM => {
+    ...overlayParts.flatMap((part, index): TurnPartVM[] => {
       if (part.type === "text") {
-        return { type: "text", text: part.text };
+        return [{ type: "text", text: part.text }];
       }
       if (part.type === "thought") {
-        return { type: "thought", active: activePhaseName === "thinking" && index === lastThoughtIndex, text: part.text };
+        return [{ type: "thought", active: activePhaseName === "thinking" && index === lastThoughtIndex, text: part.text }];
       }
       if (part.type === "approval") {
-        return {
+        return [{
           type: "approval",
           active: activePhaseName === "awaiting_approval" && !part.status,
           approvalID: part.approvalID,
@@ -138,28 +138,31 @@ export function partsFromOverlay(
           sessionID: part.sessionID,
           status: part.status,
           title: part.title,
-        };
+        }];
       }
       const active =
         index === lastToolIndex &&
         (activePhaseName === "streaming_tool_args" ||
           activePhaseName === "executing_tool" ||
           activePhaseName === "awaiting_followup");
-      return {
-        type: "tool_use",
-        active,
-        argsText: part.argsText,
-        dotPhase: active ? activePhaseName : toolPhaseDot(part.phase),
-        id: part.callID,
-        name: part.name,
-        phase: part.phase,
-        phaseUpdatedAt: active ? activePhaseUpdatedAt : undefined,
-        resultContent: part.resultContent,
-        resultOk: part.resultOk,
-        summary: part.summary,
-        summaryCount: part.summaryCount,
-        summaryKind: part.summaryKind,
-      };
+      return [
+        {
+          type: "tool_use",
+          active,
+          argsText: part.argsText,
+          dotPhase: active ? activePhaseName : toolPhaseDot(part.phase),
+          id: part.callID,
+          name: part.name,
+          phase: part.phase,
+          phaseUpdatedAt: active ? activePhaseUpdatedAt : undefined,
+          resultContent: part.resultContent,
+          resultOk: part.resultOk,
+          summary: part.summary,
+          summaryCount: part.summaryCount,
+          summaryKind: part.summaryKind,
+        },
+        ...(part.attachments || []).map((attachment) => ({ type: "attachment" as const, attachment })),
+      ];
     }),
     ...(hasTextPart ? [] : partsFromText(streamedText)),
   ]);

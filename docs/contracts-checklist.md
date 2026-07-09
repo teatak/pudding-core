@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | `turn.started` | ✓ | ✓ | `clientMessageID`, `userMessageID`, `text` |
 | `turn.delta` | — | — | `part(text/thought)`, `delta` |
-| `turn.tool` | — | — | `callID`, `name`, `phase`, `argsDelta?`, `ok?`, `content?`, `summaryKind?`, `summaryCount?`;最终以 message.parts 兜底 |
+| `turn.tool` | — | — | `callID`, `name`, `phase`, `argsDelta?`, `ok?`, `content?`, `summaryKind?`, `summaryCount?`, `attachments?`;最终以 message.parts 兜底 |
 | `turn.completed` | ✓ | ✓ | `assistantMessageID` |
 | `turn.failed` | ✓ | ✓ | `error`;有半截输出时 `assistantMessageID` + `interrupted` |
 | `turn.cancelled` | ✓ | ✓ | 有半截输出时 `assistantMessageID` + `interrupted` |

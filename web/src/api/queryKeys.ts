@@ -6,6 +6,7 @@ export const queryKeys = {
   turns: (sessionID: string) => ["session", sessionID, "turns", "pages"] as const,
   queuedInputs: (sessionID: string) => ["session", sessionID, "queued-inputs"] as const,
   audioBindings: () => ["audio", "bindings"] as const,
+  audioRuntime: () => ["settings", "audio", "runtime"] as const,
   browserState: (sessionID: string) => ["session", sessionID, "browser", "state"] as const,
   browserTabs: (sessionID: string) => ["session", sessionID, "browser", "tabs"] as const,
   canvasItems: (sessionID: string) => ["session", sessionID, "canvas", "items"] as const,

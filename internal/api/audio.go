@@ -57,8 +57,19 @@ func (s *Server) bindAudio(c *cart.Context, bind func(string, bool) (voice.Bindi
 	if errors.Is(err, voice.ErrSessionRequired) {
 		return badRequest(c, "session id is required")
 	}
+	if errors.Is(err, voice.ErrInputUnavailable) {
+		c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error":  "audio_input_unavailable",
+			"detail": err.Error(),
+		})
+		return nil
+	}
 	if err != nil {
-		return s.fail(c, err)
+		c.JSON(http.StatusInternalServerError, map[string]string{
+			"error":  "audio_binding_failed",
+			"detail": err.Error(),
+		})
+		return nil
 	}
 	c.JSON(http.StatusOK, map[string]any{"ok": true, "bindings": bindings})
 	return nil

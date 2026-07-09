@@ -49,6 +49,7 @@ rm -rf "$APP_ROOT"
 mkdir -p "$APP_ROOT/bin" "$APP_ROOT/desktop"
 cp "$ROOT"/electron/*.cjs "$APP_ROOT/desktop/"
 cp "$DAEMON_BIN" "$APP_ROOT/bin/puddingd"
+bash "$ROOT/scripts/macos-bundle-dylibs.sh" "$APP_ROOT/bin/puddingd" "$APP_ROOT/lib"
 
 cat >"$APP_ROOT/package.json" <<JSON
 {
@@ -83,5 +84,9 @@ fi
 "$PLIST_BUDDY" -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string pudding" "$INFO_PLIST"
 
 touch "$INFO_PLIST" "$APP_PATH"
+
+if command -v codesign >/dev/null 2>&1; then
+  codesign --force --deep --sign - "$APP_PATH" >/dev/null 2>&1
+fi
 
 echo "Created $APP_PATH"

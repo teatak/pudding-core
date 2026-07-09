@@ -18,6 +18,7 @@ import (
 	"github.com/teatak/cart/v3"
 	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/attachment"
+	"github.com/teatak/pudding-core/internal/audio/runtimeassets"
 	"github.com/teatak/pudding-core/internal/audio/voice"
 	"github.com/teatak/pudding-core/internal/browser"
 	"github.com/teatak/pudding-core/internal/config"
@@ -39,6 +40,7 @@ type Server struct {
 	skills     skillService
 	hub        *event.Hub
 	voice      voiceController
+	audioRT    *runtimeassets.Installer
 	browser    browser.Service
 	camera     desktopcamera.Capturer
 	browserMCP browserMCPService
@@ -85,6 +87,11 @@ func (s *Server) WithBrowserMCP(handler browserMCPService) *Server {
 
 func (s *Server) WithVoice(controller voiceController) *Server {
 	s.voice = controller
+	return s
+}
+
+func (s *Server) WithAudioRuntime(installer *runtimeassets.Installer) *Server {
+	s.audioRT = installer
 	return s
 }
 
@@ -196,6 +203,9 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/canvas/closed/:closedID").DELETE(s.deleteClosedCanvasItem)
 	app.Route("/settings").GET(s.getSettings).PUT(s.putSettings)
 	app.Route("/settings/audio").GET(s.getAudioConfig).PUT(s.putAudioConfig)
+	app.Route("/settings/audio/runtime").GET(s.getAudioRuntime)
+	app.Route("/settings/audio/runtime/install").POST(s.startAudioRuntimeInstall)
+	app.Route("/settings/audio/runtime/cancel").POST(s.cancelAudioRuntimeInstall)
 	app.Route("/settings/audio/asr-recordings").DELETE(s.clearASRRecordings)
 	app.Route("/settings/user-prompt").GET(s.getUserPrompt).PUT(s.putUserPrompt)
 	app.Route("/providers").GET(s.listProviders).POST(s.createProvider)
@@ -847,6 +857,52 @@ func (s *Server) putAudioConfig(c *cart.Context) error {
 	}
 	c.JSON(http.StatusOK, audioConfigView{Path: filepath.Join(s.home, "config", "audio.yaml"), Config: cfg})
 	return nil
+}
+
+func (s *Server) getAudioRuntime(c *cart.Context) error {
+	if s.audioRT == nil {
+		return badRequest(c, "audio runtime installer unavailable")
+	}
+	cfg, err := s.currentAudioConfig(c.Request.Context())
+	if err != nil {
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, s.audioRT.Status(c.Request.Context(), cfg))
+	return nil
+}
+
+func (s *Server) startAudioRuntimeInstall(c *cart.Context) error {
+	if s.audioRT == nil {
+		return badRequest(c, "audio runtime installer unavailable")
+	}
+	cfg, err := s.currentAudioConfig(c.Request.Context())
+	if err != nil {
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, s.audioRT.Start(c.Request.Context(), cfg))
+	return nil
+}
+
+func (s *Server) cancelAudioRuntimeInstall(c *cart.Context) error {
+	if s.audioRT == nil {
+		return badRequest(c, "audio runtime installer unavailable")
+	}
+	c.JSON(http.StatusOK, s.audioRT.Cancel())
+	return nil
+}
+
+func (s *Server) currentAudioConfig(ctx context.Context) (config.AudioConfig, error) {
+	audio, ok := s.config.(interface {
+		Audio(context.Context) (config.AudioConfig, error)
+	})
+	if !ok {
+		return config.AudioConfig{}, errors.New("audio config is read-only")
+	}
+	cfg, err := audio.Audio(ctx)
+	if err != nil {
+		return config.AudioConfig{}, err
+	}
+	return cfg.WithDefaults(), nil
 }
 
 type clearASRRecordingsResponse struct {

@@ -1,0 +1,157 @@
+package runtimeassets
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/teatak/pudding-core/internal/config"
+)
+
+func TestRequiredFilesRequireModelsOnly(t *testing.T) {
+	home := t.TempDir()
+	cfg := config.DefaultAudioConfig()
+	required, missing, disabled := RequiredFiles(home, cfg)
+	if disabled {
+		t.Fatal("runtime should not be disabled")
+	}
+	if len(required) != 3 {
+		t.Fatalf("expected only model files, got %d required files: %+v", len(required), required)
+	}
+
+	if len(missing) != 3 {
+		t.Fatalf("expected missing model files, got %d missing files: %+v", len(missing), missing)
+	}
+
+	for _, file := range required {
+		writeTestFile(t, file.Path)
+	}
+	_, missing, _ = RequiredFiles(home, cfg)
+	if len(missing) != 0 {
+		t.Fatalf("expected complete runtime, got %d missing files", len(missing))
+	}
+}
+
+func TestStatusEncodesEmptyFileListsAsArrays(t *testing.T) {
+	home := t.TempDir()
+	cfg := config.DefaultAudioConfig()
+	required, _, _ := RequiredFiles(home, cfg)
+	for _, file := range required {
+		writeTestFile(t, file.Path)
+	}
+
+	status := NewInstaller(home, nil).Status(t.Context(), cfg)
+	if status.Missing == nil {
+		t.Fatal("missing should be an empty slice, got nil")
+	}
+	data, err := json.Marshal(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if string(raw["missing"]) != "[]" {
+		t.Fatalf("missing JSON = %s, want []", raw["missing"])
+	}
+}
+
+func TestRequiredFilesDisabledReturnsEmptyArrays(t *testing.T) {
+	off := false
+	cfg := config.DefaultAudioConfig()
+	cfg.ASR.Enabled = &off
+
+	required, missing, disabled := RequiredFiles(t.TempDir(), cfg)
+	if !disabled {
+		t.Fatal("runtime should be disabled")
+	}
+	if required == nil || len(required) != 0 {
+		t.Fatalf("required = %+v, want empty slice", required)
+	}
+	if missing == nil || len(missing) != 0 {
+		t.Fatalf("missing = %+v, want empty slice", missing)
+	}
+}
+
+func TestVoiceInstallPlanSkipsNativeAssets(t *testing.T) {
+	manifest := Manifest{
+		Native: map[string]Asset{
+			"darwin_arm64": {Asset: "runtime-native-v1_darwin_arm64.tar.gz", InstallDir: "ignored-native"},
+		},
+		Models: map[string]Asset{
+			"vad_silero":     {Asset: "vad.tar.gz", InstallDir: "runtime/models/vad"},
+			"asr_sensevoice": {Asset: "asr.tar.gz", InstallDir: "runtime/models/asr"},
+		},
+	}
+	plans, err := voiceInstallPlan(manifest, "darwin", "arm64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plans) != 2 {
+		t.Fatalf("expected model-only install plan, got %+v", plans)
+	}
+	for _, plan := range plans {
+		if plan.Kind == "native" {
+			t.Fatalf("native asset should not be downloaded: %+v", plan)
+		}
+	}
+}
+
+func TestCancelWaitsForInstallToStop(t *testing.T) {
+	installer := NewInstaller(t.TempDir(), nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+
+	installer.mu.Lock()
+	installer.cancel = cancel
+	installer.done = done
+	installer.state = Status{
+		OK:       true,
+		Running:  true,
+		State:    "downloading",
+		Required: []RequiredFile{},
+		Missing:  []RequiredFile{},
+	}
+	installer.mu.Unlock()
+
+	go func() {
+		<-ctx.Done()
+		installer.mu.Lock()
+		installer.cancel = nil
+		installer.done = nil
+		installer.state.Running = false
+		installer.state.State = "canceled"
+		installer.state.Message = "download canceled"
+		installer.mu.Unlock()
+		close(done)
+	}()
+
+	status := installer.Cancel()
+	if status.Running {
+		t.Fatalf("cancel returned while install was still running: %+v", status)
+	}
+	if status.State != "canceled" {
+		t.Fatalf("state = %q, want canceled", status.State)
+	}
+}
+
+func TestRuntimeErrorMessageIsGeneric(t *testing.T) {
+	got := runtimeErrorMessage(errors.New("/secret/runtime/path: download failed"))
+	if got != "download failed" {
+		t.Fatalf("runtimeErrorMessage = %q, want generic message", got)
+	}
+}
+
+func writeTestFile(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}

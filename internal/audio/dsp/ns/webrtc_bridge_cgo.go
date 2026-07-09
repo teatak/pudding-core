@@ -1,10 +1,10 @@
-//go:build webrtcaec && cgo && darwin
+//go:build webrtcaec && cgo && darwin && arm64
 
 package ns
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../webrtc_bridge/include
-#cgo LDFLAGS: -L${SRCDIR}/../webrtc_bridge/lib -lkopi_webrtc_aec_bridge -lc++ -framework CoreFoundation -framework Foundation
+#cgo LDFLAGS: -L${SRCDIR}/../webrtc_bridge/lib/darwin-arm64 -lkopi_webrtc_aec_bridge -lc++ -framework CoreFoundation -framework Foundation
 #cgo pkg-config: absl_base absl_flags absl_strings absl_numeric absl_synchronization absl_bad_optional_access
 #include "kopi_webrtc_aec_bridge.h"
 */

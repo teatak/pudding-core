@@ -1305,6 +1305,7 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			Content:      result.Content,
 			SummaryKind:  result.SummaryKind,
 			SummaryCount: result.SummaryCount,
+			Attachments:  eventAttachmentsFromStore(result.ContextAttachments),
 		})
 		if ctx.Err() != nil {
 			return store.TurnCancelled, "", nextMode, modeChanged
@@ -1319,6 +1320,29 @@ func toolContext(ctx context.Context, name string) (context.Context, context.Can
 	}
 	toolCtx, cancel := context.WithTimeout(ctx, toolCallTimeout)
 	return toolCtx, cancel, true
+}
+
+func eventAttachmentsFromStore(attachments []store.Attachment) []event.Attachment {
+	attachments = store.NormalizeAttachments(attachments)
+	if len(attachments) == 0 {
+		return nil
+	}
+	out := make([]event.Attachment, 0, len(attachments))
+	for _, item := range attachments {
+		out = append(out, event.Attachment{
+			ID:              item.ID,
+			Name:            item.Name,
+			AttachmentKey:   item.AttachmentKey,
+			URL:             item.URL,
+			MIME:            item.MIME,
+			Size:            item.Size,
+			Origin:          item.Origin,
+			SourcePath:      item.SourcePath,
+			CreatedAt:       item.CreatedAt,
+			AudioTranscript: item.AudioTranscript,
+		})
+	}
+	return out
 }
 
 func (e *Engine) workspaceDirsForToolCall(ctx context.Context, sessionID, turnID string) []string {

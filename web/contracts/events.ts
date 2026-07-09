@@ -3,6 +3,8 @@
 // 本目录在轨道 E 脚手架落地后由前端直接 import。
 import { z } from "zod";
 
+import { attachment } from "./api";
+
 export const turnStartedEvent = z.object({
   kind: z.literal("turn.started"),
   seq: z.number().int().positive(),
@@ -35,6 +37,7 @@ export const turnToolEvent = z.object({
   summary: z.string().optional(),
   summaryKind: z.string().optional(),
   summaryCount: z.number().optional(),
+  attachments: z.array(attachment).optional(),
 });
 
 export const turnCompletedEvent = z.object({

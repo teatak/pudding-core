@@ -78,8 +78,8 @@ type WindowRestoreState = Pick<WindowState, "x" | "y" | "w" | "h" | "z">;
 
 const MIN_W = 260;
 const MIN_H = 160;
-const DEFAULT_W = 420;
-const DEFAULT_H = 300;
+const DEFAULT_W = 680;
+const DEFAULT_H = 480;
 const CASCADE = 28;
 const FULLSCREEN_SNAP = 12;
 const KIND_ICON: Record<string, LucideIcon> = {
@@ -288,7 +288,11 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     onMutate: (item) => {
       restoreWindowsRef.current = withoutKey(restoreWindowsRef.current, item.id);
       setRestoreWindows(restoreWindowsRef.current);
-      setDraftWindows((prev) => withoutKey(prev, item.id));
+      setDraftWindows((prev) => {
+        const next = withoutKey(prev, item.id);
+        draftWindowsRef.current = next;
+        return next;
+      });
       setGalleryActiveIndices((prev) => withoutKey(prev, item.id));
     },
     onError: (_error, item) => {
@@ -315,9 +319,17 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       return item;
     },
     onSuccess: (_item, entry) => {
-      const restoredWindow = clampWindow({ ...windowFromClosedItem(entry), z: maxZ + 1 }, containerSize);
+      const openingWindow = fitOpeningWindow({ ...windowFromClosedItem(entry), z: maxZ + 1 }, containerSize);
+      restoreWindowsRef.current = openingWindow.restore
+        ? { ...restoreWindowsRef.current, [entry.sourceItemID]: openingWindow.restore }
+        : withoutKey(restoreWindowsRef.current, entry.sourceItemID);
+      setRestoreWindows(restoreWindowsRef.current);
       selectCanvasSurface();
-      setDraftWindows((prev) => ({ ...prev, [entry.sourceItemID]: restoredWindow }));
+      setDraftWindows((prev) => {
+        const next = { ...prev, [entry.sourceItemID]: openingWindow.window };
+        draftWindowsRef.current = next;
+        return next;
+      });
       if (actorSessionID) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
         void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
@@ -385,30 +397,52 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       selectCanvasSurface();
     }
 
-    setDraftWindows((prev) => {
-      let changed = false;
-      let nextZ = Math.max(
-        maxZ,
-        ...Object.values(prev).map((window) => window.z),
-        ...items.map((item, index) => windowFromItem(item, index).z),
-      );
-      const next = { ...prev };
-      items.forEach((item, index) => {
-        const current = prev[item.id] || windowFromItem(item, index);
-        let fitted = restoreWindows[item.id]
-          ? clampWindow({ ...current, x: 0, y: 0, w: containerSize.w, h: containerSize.h }, containerSize)
-          : clampWindow(current, containerSize);
-        if (newItemIDs.has(item.id)) {
-          nextZ += 1;
-          fitted = { ...fitted, z: nextZ };
+    const prevDraftWindows = draftWindowsRef.current;
+    let changed = false;
+    let restoreWindowsChanged = false;
+    let nextRestoreWindows = restoreWindowsRef.current;
+    const ensureNextRestoreWindows = () => {
+      if (!restoreWindowsChanged) {
+        nextRestoreWindows = { ...nextRestoreWindows };
+        restoreWindowsChanged = true;
+      }
+      return nextRestoreWindows;
+    };
+    let nextZ = Math.max(
+      maxZ,
+      ...Object.values(prevDraftWindows).map((window) => window.z),
+      ...items.map((item, index) => windowFromItem(item, index).z),
+    );
+    const next = { ...prevDraftWindows };
+    items.forEach((item, index) => {
+      const current = prevDraftWindows[item.id] || windowFromItem(item, index);
+      let fitted: WindowState;
+      if (nextRestoreWindows[item.id]) {
+        fitted = fullscreenWindow(containerSize, current.z);
+      } else {
+        const openingWindow = fitOpeningWindow(current, containerSize);
+        if (openingWindow.restore) {
+          ensureNextRestoreWindows()[item.id] = openingWindow.restore;
         }
-        if (!sameWindow(current, fitted)) {
-          next[item.id] = fitted;
-          changed = true;
-        }
-      });
-      return changed ? next : prev;
+        fitted = openingWindow.window;
+      }
+      if (newItemIDs.has(item.id)) {
+        nextZ += 1;
+        fitted = { ...fitted, z: nextZ };
+      }
+      if (!sameWindow(current, fitted)) {
+        next[item.id] = fitted;
+        changed = true;
+      }
     });
+    if (restoreWindowsChanged) {
+      restoreWindowsRef.current = nextRestoreWindows;
+      setRestoreWindows(nextRestoreWindows);
+    }
+    if (changed) {
+      draftWindowsRef.current = next;
+      setDraftWindows(next);
+    }
   }, [containerSize, items, itemsQuery.isLoading, maxZ, restoreWindows]);
 
   useEffect(() => {
@@ -1120,6 +1154,24 @@ function isNearFullscreenWindow(win: WindowState, bounds = { w: 0, h: 0 }): bool
 
 function fullscreenWindow(bounds: { w: number; h: number }, z: number): WindowState {
   return clampWindow({ x: 0, y: 0, w: bounds.w, h: bounds.h, z }, bounds);
+}
+
+function fitOpeningWindow(win: WindowState, bounds = { w: 0, h: 0 }): { window: WindowState; restore?: WindowState } {
+  const clamped = clampWindow(win, bounds);
+  if (!windowOverflowsBounds(win, bounds)) {
+    return { window: clamped };
+  }
+  return {
+    window: fullscreenWindow(bounds, win.z),
+    restore: clamped,
+  };
+}
+
+function windowOverflowsBounds(win: WindowState, bounds = { w: 0, h: 0 }): boolean {
+  if (bounds.w <= 0 || bounds.h <= 0) {
+    return false;
+  }
+  return win.x < 0 || win.y < 0 || win.w > bounds.w || win.h > bounds.h || win.x + win.w > bounds.w || win.y + win.h > bounds.h;
 }
 
 function clampWindow(win: WindowState, bounds = { w: 0, h: 0 }): WindowState {

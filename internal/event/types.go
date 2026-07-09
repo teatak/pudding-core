@@ -31,7 +31,7 @@ const (
 //
 //	turn.started   seq, turnID, clientMessageID, userMessageID, text
 //	turn.delta     turnID, part, delta      (不落库,无 seq)
-//	turn.tool      turnID, callID, name, phase, argsDelta/ok/content/summaryKind/summaryCount (不落库,无 seq)
+//	turn.tool      turnID, callID, name, phase, argsDelta/ok/content/summaryKind/summaryCount/attachments (不落库,无 seq)
 //	turn.completed seq, turnID, assistantMessageID
 //	turn.failed    seq, turnID, error       (有部分输出时附 assistantMessageID + interrupted)
 //	turn.cancelled seq, turnID              (有部分输出时附 assistantMessageID + interrupted)
@@ -67,6 +67,7 @@ type Event struct {
 	Summary            string          `json:"summary,omitempty"` // 兼容旧前端,新工具摘要走 SummaryKind/SummaryCount
 	SummaryKind        string          `json:"summaryKind,omitempty"`
 	SummaryCount       int             `json:"summaryCount,omitempty"`
+	Attachments        []Attachment    `json:"attachments,omitempty"`
 	ApprovalID         string          `json:"approvalID,omitempty"`
 	ApprovalKind       string          `json:"approvalKind,omitempty"`
 	Title              string          `json:"title,omitempty"`
@@ -76,6 +77,19 @@ type Event struct {
 	AssistantMessageID string          `json:"assistantMessageID,omitempty"`
 	Interrupted        bool            `json:"interrupted,omitempty"`
 	Error              string          `json:"error,omitempty"`
+}
+
+type Attachment struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	AttachmentKey   string `json:"attachmentKey"`
+	URL             string `json:"url"`
+	MIME            string `json:"mime"`
+	Size            int64  `json:"size"`
+	Origin          string `json:"origin,omitempty"`
+	SourcePath      string `json:"sourcePath,omitempty"`
+	CreatedAt       string `json:"createdAt,omitempty"`
+	AudioTranscript string `json:"audioTranscript,omitempty"`
 }
 
 // Persistent 报告该事件是否属于落库的 lifecycle 事件;

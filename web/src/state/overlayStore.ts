@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { ContentPart, Message } from "@/api/client";
+import type { Attachment, ContentPart, Message } from "@/api/client";
 import type { SessionEvent } from "@/contracts/events";
 
 export type PendingUserMessage = {
@@ -56,6 +56,7 @@ export type AssistantOverlayPart =
       summary?: string;
       summaryKind?: string;
       summaryCount?: number;
+      attachments?: Attachment[];
     };
 
 export type TurnPhase =
@@ -216,7 +217,8 @@ function upsertToolPart(
   callID: string,
 ) {
   const index = parts.findIndex((part) => part.type === "tool" && part.callID === callID);
-  const current = index >= 0 && parts[index].type === "tool" ? parts[index] : { type: "tool" as const, callID, argsText: "" };
+  const current: Extract<AssistantOverlayPart, { type: "tool" }> =
+    index >= 0 && parts[index].type === "tool" ? parts[index] : { type: "tool", callID, argsText: "" };
   const next: AssistantOverlayPart = {
     ...current,
     callID,
@@ -227,12 +229,34 @@ function upsertToolPart(
     summary: event.summary || current.summary,
     summaryKind: event.summaryKind || current.summaryKind,
     summaryCount: event.summaryCount ?? current.summaryCount,
+    attachments: mergeToolAttachments(current.attachments, event.attachments),
     argsText: current.argsText + (event.argsDelta || ""),
   };
   if (index < 0) {
     return [...parts, next];
   }
   return parts.map((part, i) => (i === index ? next : part));
+}
+
+function mergeToolAttachments(current: Attachment[] | undefined, incoming: Attachment[] | undefined) {
+  if (!incoming?.length) {
+    return current;
+  }
+  const out = [...(current || [])];
+  const seen = new Set(out.map(toolAttachmentIdentity));
+  for (const attachment of incoming) {
+    const key = toolAttachmentIdentity(attachment);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    out.push(attachment);
+  }
+  return out;
+}
+
+function toolAttachmentIdentity(attachment: Attachment) {
+  return attachment.id || attachment.attachmentKey || attachment.url;
 }
 
 function upsertApprovalPart(

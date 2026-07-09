@@ -51,6 +51,7 @@ import {
   audioBindingsResponse,
   audioConfig,
   audioConfigResponse,
+  audioRuntimeStatus,
   clearASRRecordingsResponse,
   browserActionResult,
   browserClickRequest,
@@ -80,6 +81,7 @@ import {
   type AudioBindings,
   type AudioConfig,
   type AudioConfigResponse,
+  type AudioRuntimeStatus,
   type ClearASRRecordingsResponse,
   type Attachment,
   type BuiltinTool,
@@ -116,8 +118,9 @@ export class APIError extends Error {
   constructor(
     public readonly status: number,
     public readonly code: string,
+    public readonly detail?: string,
   ) {
-    super(code);
+    super(detail || code);
   }
 }
 
@@ -159,7 +162,7 @@ export type SubmitPayload = z.input<typeof submitRequest>;
 export type CompactResult = z.infer<typeof compactResponse>;
 export type MobilePairing = z.infer<typeof mobilePairingResponse>;
 export type UserPrompt = z.infer<typeof userPromptResponse>;
-export type { AudioConfig, AudioConfigResponse, ClearASRRecordingsResponse };
+export type { AudioConfig, AudioConfigResponse, AudioRuntimeStatus, ClearASRRecordingsResponse };
 export type AppConnectionPayload = {
   appID: string;
   name?: string;
@@ -212,7 +215,8 @@ async function request<T>(
       : typeof payload?.error === "string"
         ? payload.error
         : response.statusText;
-    throw new APIError(response.status, code);
+    const detail = typeof payload?.detail === "string" ? payload.detail : undefined;
+    throw new APIError(response.status, code, detail);
   }
   return schema.parse(payload);
 }
@@ -232,7 +236,8 @@ async function publicRequest<T>(
   const payload = await readJSON(response);
   if (!response.ok) {
     const code = typeof payload?.error === "string" ? payload.error : response.statusText;
-    throw new APIError(response.status, code);
+    const detail = typeof payload?.detail === "string" ? payload.detail : undefined;
+    throw new APIError(response.status, code, detail);
   }
   return schema.parse(payload);
 }
@@ -517,6 +522,22 @@ export function bindAudioOutput(
   });
 }
 
+export function getAudioRuntime(token: string): Promise<AudioRuntimeStatus> {
+  return request(token, "/settings/audio/runtime", audioRuntimeStatus);
+}
+
+export function startAudioRuntimeInstall(token: string): Promise<AudioRuntimeStatus> {
+  return request(token, "/settings/audio/runtime/install", audioRuntimeStatus, {
+    method: "POST",
+  });
+}
+
+export function cancelAudioRuntimeInstall(token: string): Promise<AudioRuntimeStatus> {
+  return request(token, "/settings/audio/runtime/cancel", audioRuntimeStatus, {
+    method: "POST",
+  });
+}
+
 export function listCanvasItems(token: string, sessionID: string): Promise<{ items: CanvasItem[] }> {
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/canvas/items`, listCanvasItemsResponse);
 }
@@ -628,7 +649,8 @@ export async function uploadAttachment(token: string, sessionID: string, file: F
   const payload = await readJSON(response);
   if (!response.ok) {
     const code = typeof payload?.error === "string" ? payload.error : response.statusText;
-    throw new APIError(response.status, code);
+    const detail = typeof payload?.detail === "string" ? payload.detail : undefined;
+    throw new APIError(response.status, code, detail);
   }
   return attachment.parse(payload);
 }
