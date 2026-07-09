@@ -1,31 +1,58 @@
 import type { ToolDefinition } from "@/mcp/browserMCP";
-import { waitForInputFlow, waitForUIConfirm } from "@/state/inputFlowStore";
+import { showInputFlow } from "@/state/inputFlowStore";
 
 export function createInputFlowTools(): ToolDefinition[] {
   return [
     {
-      name: "ui_input_flow",
+      name: "collect_user_input",
       description:
-        "Render an interactive, multi-step user input flow above the composer and wait until the user completes or cancels it. Use this when you need the user to choose structured values, such as selecting one or more room types and quantities, then collecting a few follow-up fields. If the options depend on live data, first call the relevant REST/GraphQL/search tool to get the options, then call this tool with those options. Current version supports type='repeat' with repeatSteps of type='option_list' and 'quick_number', plus optional nextSteps of type='text_input', 'phone_input', 'option_list', 'quick_number', or 'confirm'. The tool call blocks until completion; the result is returned as JSON in the tool result.",
+        "Show an interactive UI that collects structured information from the user. Use this instead of asking the user to type answers in chat whenever the answers can be represented as choices, multiple choices, short text, phone, number, date, confirmation, or several form fields. Use type='form' with steps for ordinary questions. Use type='repeat' only when the user may add multiple records with the same fields, such as several room types and quantities. If choices depend on live data, fetch them first and pass the actual options to this tool. This tool returns immediately after showing the UI; the completed answers arrive later as a new user message. Do not continue work that depends on those answers in the current turn.",
       capability: "chat",
       inputSchema: {
         type: "object",
         properties: {
-          title: { type: "string", description: "Short title for the input flow." },
-          description: { type: "string", description: "Optional short helper text." },
-          type: { type: "string", enum: ["repeat"], description: "Only repeat is supported in this version." },
-          resultKey: { type: "string", description: "Key for the returned array. Defaults to items." },
+          title: { type: "string", description: "Short, user-facing title." },
+          description: { type: "string", description: "Optional concise context for the user." },
+          type: {
+            type: "string",
+            enum: ["form", "repeat"],
+            description: "Use form for normal information collection. Use repeat only for multiple same-shaped records.",
+          },
+          steps: {
+            type: "array",
+            description: "Fields shown once. Required when type='form'.",
+            items: inputStepSchema([
+              "single_select",
+              "multi_select",
+              "quick_number",
+              "number_input",
+              "text_input",
+              "phone_input",
+              "date_input",
+              "confirm",
+            ]),
+          },
+          resultKey: { type: "string", description: "Result key for repeated records. Defaults to items." },
           minItems: { type: "number", description: "Minimum items the user should select. Defaults to 1." },
           maxItems: { type: "number", description: "Optional maximum item count." },
           repeatSteps: {
             type: "array",
-            description: "Steps repeated for each item.",
-            items: inputStepSchema(["option_list", "quick_number"]),
+            description: "Fields repeated for every record. Required when type='repeat'.",
+            items: inputStepSchema(["single_select", "quick_number"]),
           },
           nextSteps: {
             type: "array",
-            description: "Steps shown once after the repeated selection is complete.",
-            items: inputStepSchema(["text_input", "phone_input", "option_list", "quick_number", "confirm"]),
+            description: "Optional fields shown once after all repeated records are collected.",
+            items: inputStepSchema([
+              "single_select",
+              "multi_select",
+              "quick_number",
+              "number_input",
+              "text_input",
+              "phone_input",
+              "date_input",
+              "confirm",
+            ]),
           },
           afterItem: {
             type: "object",
@@ -44,71 +71,38 @@ export function createInputFlowTools(): ToolDefinition[] {
                 },
               },
             },
-            additionalProperties: true,
+            additionalProperties: false,
           },
         },
-        required: ["title", "type", "repeatSteps"],
-        additionalProperties: true,
+        required: ["title", "type"],
+        additionalProperties: false,
       },
       handler: async (args) => {
         const record = requiredRecord(args);
         const sessionID = requiredString(record._pudding_session_id, "_pudding_session_id");
         const title = requiredString(record.title, "title");
-        if (record.type !== "repeat") {
-          throw new Error("ui_input_flow only supports type=repeat");
+        if (record.type === "form") {
+          if (!Array.isArray(record.steps) || record.steps.length === 0) {
+            throw new Error("steps is required when type=form");
+          }
+        } else if (record.type === "repeat") {
+          if (!Array.isArray(record.repeatSteps) || record.repeatSteps.length === 0) {
+            throw new Error("repeatSteps is required when type=repeat");
+          }
+        } else {
+          throw new Error("type must be form or repeat");
         }
-        if (!Array.isArray(record.repeatSteps) || record.repeatSteps.length === 0) {
-          throw new Error("repeatSteps is required");
-        }
-        const result = await waitForInputFlow({
+        const request = showInputFlow({
           args: record,
           sessionID,
           title,
         });
-        return jsonToolResult(result);
-      },
-    },
-    {
-      name: "ui_confirm",
-      description:
-        "Show a compact confirmation prompt above the composer and wait until the user confirms or cancels. Use this before irreversible or user-visible actions, such as creating an order after showing a summary from prior tool results. The result is returned as JSON in the tool result.",
-      capability: "chat",
-      inputSchema: {
-        type: "object",
-        properties: {
-          title: { type: "string", description: "Short confirmation title." },
-          description: { type: "string", description: "Optional short helper text." },
-          rows: {
-            type: "array",
-            description: "Optional summary rows to show before confirmation.",
-            items: {
-              type: "object",
-              properties: {
-                label: { type: "string" },
-                value: {},
-                description: { type: "string" },
-              },
-              required: ["label", "value"],
-              additionalProperties: true,
-            },
-          },
-          confirmLabel: { type: "string", description: "Confirm action label. Defaults to Confirm." },
-          cancelLabel: { type: "string", description: "Cancel action label. Defaults to Cancel." },
-          destructive: { type: "boolean", description: "Set true for destructive confirmations." },
-        },
-        required: ["title"],
-        additionalProperties: true,
-      },
-      handler: async (args) => {
-        const record = requiredRecord(args);
-        const sessionID = requiredString(record._pudding_session_id, "_pudding_session_id");
-        const title = requiredString(record.title, "title");
-        const result = await waitForUIConfirm({
-          args: record,
-          sessionID,
+        return jsonToolResult({
+          ok: true,
+          requestID: request.id,
+          status: "awaiting_user",
           title,
         });
-        return jsonToolResult(result);
       },
     },
   ];
@@ -118,14 +112,15 @@ function inputStepSchema(types: string[]) {
   return {
     type: "object",
     properties: {
-      id: { type: "string" },
-      type: { type: "string", enum: types },
-      title: { type: "string" },
-      description: { type: "string" },
-      placeholder: { type: "string" },
-      required: { type: "boolean" },
+      id: { type: "string", description: "Stable key used in the returned result." },
+      type: { type: "string", enum: types, description: "Input control shown to the user." },
+      title: { type: "string", description: "Short question or field label." },
+      description: { type: "string", description: "Optional concise help text." },
+      placeholder: { type: "string", description: "Optional input placeholder." },
+      required: { type: "boolean", description: "Defaults to true. Set false to allow skipping." },
       options: {
         type: "array",
+        description: "Required for select fields; suggested values for quick_number.",
         items: {
           anyOf: [
             { type: "number" },
@@ -144,13 +139,13 @@ function inputStepSchema(types: string[]) {
           ],
         },
       },
-      min: { type: "number" },
-      max: { type: "number" },
+      min: { type: "number", description: "Minimum number, or minimum selections for multi_select." },
+      max: { type: "number", description: "Maximum number, or maximum selections for multi_select." },
       maxFrom: { type: "string", description: "Path from prior selected step, such as room.data.availNum." },
       customLabel: { type: "string", description: "Label for custom numeric input." },
     },
     required: ["id", "type", "title"],
-    additionalProperties: true,
+    additionalProperties: false,
   };
 }
 

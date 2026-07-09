@@ -72,7 +72,7 @@ func TestBrowserMCPRunnerRegistersAndCallsCanvasTool(t *testing.T) {
 func TestBrowserToolArgsInjectsSessionForUITools(t *testing.T) {
 	args, err := browserToolArgs(Call{
 		SessionID: "sess_b",
-		Name:      "ui_input_flow",
+		Name:      "collect_user_input",
 		Args:      json.RawMessage(`{"title":"New order"}`),
 	})
 	if err != nil {

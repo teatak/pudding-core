@@ -4,9 +4,15 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEve
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
-import { cancelInputFlow, completeInputFlow, confirmUIRequest, type InputFlowRequest } from "@/state/inputFlowStore";
+import { dismissInputFlow, type InputFlowRequest } from "@/state/inputFlowStore";
 
-type InputFlowSchema = {
+type FormInputFlowSchema = {
+  description?: string;
+  steps: InputFlowStep[];
+  title: string;
+  type: "form";
+};
+type RepeatInputFlowSchema = {
   afterItem?: InputFlowAfterItem;
   description?: string;
   maxItems?: number;
@@ -17,6 +23,7 @@ type InputFlowSchema = {
   title: string;
   type: "repeat";
 };
+type InputFlowSchema = FormInputFlowSchema | RepeatInputFlowSchema;
 type InputFlowStep = {
   customLabel?: string;
   description?: string;
@@ -28,7 +35,15 @@ type InputFlowStep = {
   placeholder?: string;
   required?: boolean;
   title: string;
-  type: "option_list" | "quick_number" | "text_input" | "phone_input" | "confirm";
+  type:
+    | "single_select"
+    | "multi_select"
+    | "quick_number"
+    | "number_input"
+    | "text_input"
+    | "phone_input"
+    | "date_input"
+    | "confirm";
 };
 type InputFlowAfterItem = {
   actions?: Array<{ id: "continue" | "done"; label: string }>;
@@ -50,32 +65,41 @@ type ChoiceMenuItem<T> = {
   render?: (active: boolean) => ReactNode;
   value: T;
 };
-type UIConfirmSchema = {
-  cancelLabel?: string;
-  confirmLabel?: string;
-  description?: string;
-  destructive?: boolean;
-  rows: UIConfirmRow[];
-  title: string;
-};
-type UIConfirmRow = {
-  description?: string;
-  label: string;
-  value: unknown;
+type Translate = ReturnType<typeof useI18n>["t"];
+export type InputFlowSubmission = {
+  request: InputFlowRequest;
+  result: Record<string, unknown>;
+  text: string;
 };
 
 function noop() {}
 
-export function InputFlowPanel({ request }: { request: InputFlowRequest }) {
-  if (request.kind === "confirm") {
-    return <UIConfirmPanel request={request} />;
-  }
-  return <InputFlowContent request={request} />;
+export function InputFlowPanel({ request, onSubmit }: { request: InputFlowRequest; onSubmit: (submission: InputFlowSubmission) => void }) {
+  return <InputFlowContent request={request} onSubmit={onSubmit} />;
 }
 
-function InputFlowContent({ request }: { request: InputFlowRequest }) {
-  const { t } = useI18n();
+function InputFlowContent({ request, onSubmit }: { request: InputFlowRequest; onSubmit: (submission: InputFlowSubmission) => void }) {
   const flow = useMemo(() => normalizeInputFlow(request.args), [request.args]);
+
+  if (!flow) {
+    return null;
+  }
+  if (flow.schema.type === "form") {
+    return <FormInputFlowContent request={request} schema={flow.schema} onSubmit={onSubmit} />;
+  }
+  return <RepeatInputFlowContent request={request} schema={flow.schema} onSubmit={onSubmit} />;
+}
+
+function RepeatInputFlowContent({
+  request,
+  schema,
+  onSubmit,
+}: {
+  request: InputFlowRequest;
+  schema: RepeatInputFlowSchema;
+  onSubmit: (submission: InputFlowSubmission) => void;
+}) {
+  const { t } = useI18n();
   const [items, setItems] = useState<Array<Record<string, unknown>>>([]);
   const [stepIndex, setStepIndex] = useState(0);
   const [current, setCurrent] = useState<Record<string, unknown>>({});
@@ -86,12 +110,8 @@ function InputFlowContent({ request }: { request: InputFlowRequest }) {
   const [nextStepIndex, setNextStepIndex] = useState(0);
   const [nextValues, setNextValues] = useState<Record<string, unknown>>({});
   const [textValue, setTextValue] = useState("");
+  const [multiSelectedKeys, setMultiSelectedKeys] = useState<string[]>([]);
 
-  if (!flow) {
-    return null;
-  }
-
-  const schema = flow.schema;
   const steps = schema.repeatSteps;
   const activeStep = steps[stepIndex];
   const nextStep = schema.nextSteps[nextStepIndex];
@@ -154,9 +174,10 @@ function InputFlowContent({ request }: { request: InputFlowRequest }) {
   }
 
   function commitNextValue(step: InputFlowStep, value: unknown) {
-    const values = step.type === "confirm" ? nextValues : { ...nextValues, [step.id]: value };
+    const values = { ...nextValues, [step.id]: value };
     setNextValues(values);
     setTextValue("");
+    setMultiSelectedKeys([]);
     const nextIndex = nextStepIndex + 1;
     if (nextIndex >= schema.nextSteps.length) {
       submit(items, values);
@@ -166,7 +187,9 @@ function InputFlowContent({ request }: { request: InputFlowRequest }) {
   }
 
   function submit(finalItems: Array<Record<string, unknown>>, values: Record<string, unknown>) {
-    completeInputFlow(request, resultPayload(schema, finalItems, values));
+    const result = resultPayload(schema, finalItems, values);
+    dismissInputFlow(request);
+    onSubmit({ request, result, text: inputFlowSubmissionText(schema, result, t) });
   }
 
   return (
@@ -174,7 +197,7 @@ function InputFlowContent({ request }: { request: InputFlowRequest }) {
       cancelLabel={t("common.cancel")}
       description={schema.description}
       title={schema.title}
-      onCancel={() => cancelInputFlow(request)}
+      onCancel={() => dismissInputFlow(request)}
     >
       <div className="space-y-3 text-sm text-foreground">
         {items.length > 0 ? <SelectedItems items={items} /> : null}
@@ -195,10 +218,13 @@ function InputFlowContent({ request }: { request: InputFlowRequest }) {
             customOpen={customOpen}
             customValue={customValue}
             max={numberLimit(nextStep, nextValues)}
+            multiSelectedKeys={multiSelectedKeys}
             step={nextStep}
             textValue={textValue}
             onCustomOpen={() => setCustomOpen(true)}
             onCustomValue={setCustomValue}
+            onMultiSelectedKeys={setMultiSelectedKeys}
+            onMultiSubmit={(value) => commitNextValue(nextStep, value)}
             onOptionSelect={(option) => commitNextValue(nextStep, option.value ?? option.title ?? option.label)}
             onTextChange={setTextValue}
             onTextSubmit={(value) => commitNextValue(nextStep, value)}
@@ -215,7 +241,7 @@ function InputFlowContent({ request }: { request: InputFlowRequest }) {
             current={current}
             doneDisabled={doneDisabled}
             schema={schema}
-            onCancel={() => cancelInputFlow(request)}
+            onCancel={() => dismissInputFlow(request)}
             onContinue={commitCurrent}
             onDone={() => {
               const finalItems = commitCurrent();
@@ -228,45 +254,88 @@ function InputFlowContent({ request }: { request: InputFlowRequest }) {
   );
 }
 
-function UIConfirmPanel({ request }: { request: InputFlowRequest }) {
+function FormInputFlowContent({
+  request,
+  schema,
+  onSubmit,
+}: {
+  request: InputFlowRequest;
+  schema: FormInputFlowSchema;
+  onSubmit: (submission: InputFlowSubmission) => void;
+}) {
   const { t } = useI18n();
-  const schema = useMemo(() => normalizeUIConfirm(request.args), [request.args]);
+  const [stepIndex, setStepIndex] = useState(0);
+  const [values, setValues] = useState<Record<string, unknown>>({});
+  const [rawSelections, setRawSelections] = useState<Record<string, unknown>>({});
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customValue, setCustomValue] = useState("");
+  const [textValue, setTextValue] = useState("");
+  const [multiSelectedKeys, setMultiSelectedKeys] = useState<string[]>([]);
+  const activeStep = schema.steps[stepIndex];
 
-  if (!schema) {
+  function resetStepState() {
+    setCustomOpen(false);
+    setCustomValue("");
+    setTextValue("");
+    setMultiSelectedKeys([]);
+  }
+
+  function commitValue(step: InputFlowStep, value: unknown, rawValue: unknown = value) {
+    const nextValues = value === undefined ? values : { ...values, [step.id]: value };
+    setValues(nextValues);
+    if (rawValue !== undefined) {
+      setRawSelections((previous) => ({ ...previous, [step.id]: rawValue }));
+    }
+    resetStepState();
+    if (stepIndex + 1 >= schema.steps.length) {
+      const result = resultPayload(schema, [], nextValues);
+      dismissInputFlow(request);
+      onSubmit({ request, result, text: inputFlowSubmissionText(schema, result, t) });
+      return;
+    }
+    setStepIndex((index) => index + 1);
+  }
+
+  function selectOption(step: InputFlowStep, option: InputFlowOption) {
+    const label = stringValue(option.title) || stringValue(option.label);
+    commitValue(step, option.value ?? option.data ?? label, option);
+  }
+
+  if (!activeStep) {
     return null;
   }
 
   return (
     <FloatingUIPanel
-      cancelLabel={schema.cancelLabel || t("common.cancel")}
+      cancelLabel={t("common.cancel")}
       description={schema.description}
       title={schema.title}
-      onCancel={() => cancelInputFlow(request)}
+      onCancel={() => dismissInputFlow(request)}
     >
       <div className="space-y-3 text-sm text-foreground">
-        {schema.rows.length > 0 ? <ConfirmRows rows={schema.rows} /> : null}
-        <ChoiceMenu
-          maxHeightClassName="max-h-28"
-          items={[
-            {
-              id: "confirm",
-              label: schema.confirmLabel || t("uiConfirm.confirm"),
-              value: "confirm" as const,
-            },
-            {
-              id: "cancel",
-              label: schema.cancelLabel || t("common.cancel"),
-              value: "cancel" as const,
-            },
-          ]}
-          onSelect={(action) => {
-            if (action === "confirm") {
-              confirmUIRequest(request, { type: "ui_confirm_result", confirmed: true });
-              return;
-            }
-            cancelInputFlow(request);
-          }}
+        <ActiveStep
+          customOpen={customOpen}
+          customValue={customValue}
+          max={numberLimit(activeStep, rawSelections)}
+          multiSelectedKeys={multiSelectedKeys}
+          step={activeStep}
+          textValue={textValue}
+          onConfirm={() => commitValue(activeStep, true)}
+          onCustomOpen={() => setCustomOpen(true)}
+          onCustomValue={setCustomValue}
+          onMultiSelectedKeys={setMultiSelectedKeys}
+          onMultiSubmit={(selected) => commitValue(activeStep, selected, selected)}
+          onNumberSelect={(value) => commitValue(activeStep, value)}
+          onOptionSelect={(option) => selectOption(activeStep, option)}
+          onTextChange={setTextValue}
+          onTextSubmit={(value) => commitValue(activeStep, value)}
+          confirmValues={values}
         />
+        {activeStep.required === false && activeStep.type !== "confirm" ? (
+          <Button className="h-7 px-2 text-xs text-muted-foreground" size="sm" type="button" variant="ghost" onClick={() => commitValue(activeStep, undefined)}>
+            {t("inputFlow.skip")}
+          </Button>
+        ) : null}
       </div>
     </FloatingUIPanel>
   );
@@ -337,11 +406,14 @@ function ActiveStep({
   customOpen,
   customValue,
   max,
+  multiSelectedKeys = [],
   step,
   textValue = "",
   onConfirm,
   onCustomOpen,
   onCustomValue,
+  onMultiSelectedKeys,
+  onMultiSubmit,
   onNumberSelect,
   onOptionSelect,
   onTextChange,
@@ -353,21 +425,31 @@ function ActiveStep({
   customOpen: boolean;
   customValue: string;
   max?: number;
+  multiSelectedKeys?: string[];
   step: InputFlowStep;
   textValue?: string;
   onConfirm?: () => void;
   onCustomOpen: () => void;
   onCustomValue: (value: string) => void;
+  onMultiSelectedKeys?: (keys: string[]) => void;
+  onMultiSubmit?: (values: unknown[]) => void;
   onNumberSelect: (value: number) => void;
   onOptionSelect: (option: InputFlowOption) => void;
   onTextChange?: (value: string) => void;
-  onTextSubmit?: (value: string) => void;
+  onTextSubmit?: (value: unknown) => void;
 }) {
   return (
     <div className="space-y-2">
       <StepTitle step={step} />
-      {step.type === "option_list" ? (
+      {step.type === "single_select" ? (
         <OptionList step={step} onSelect={onOptionSelect} />
+      ) : step.type === "multi_select" ? (
+        <MultiSelect
+          selectedKeys={multiSelectedKeys}
+          step={step}
+          onSelectedKeys={onMultiSelectedKeys || noop}
+          onSubmit={onMultiSubmit || noop}
+        />
       ) : step.type === "quick_number" ? (
         <QuickNumber
           customOpen={customOpen}
@@ -378,7 +460,7 @@ function ActiveStep({
           onCustomValue={onCustomValue}
           onSelect={onNumberSelect}
         />
-      ) : step.type === "text_input" || step.type === "phone_input" ? (
+      ) : step.type === "text_input" || step.type === "phone_input" || step.type === "number_input" || step.type === "date_input" ? (
         <TextInputStep step={step} value={textValue} onChange={onTextChange || noop} onSubmit={onTextSubmit || noop} />
       ) : step.type === "confirm" ? (
         <ConfirmStep items={confirmItems} resultKey={confirmResultKey} values={confirmValues} onConfirm={onConfirm || noop} />
@@ -399,7 +481,7 @@ function AfterItemMenu({
   canAddMore: boolean;
   current: Record<string, unknown>;
   doneDisabled: boolean;
-  schema: InputFlowSchema;
+  schema: RepeatInputFlowSchema;
   onCancel: () => void;
   onContinue: () => void;
   onDone: () => void;
@@ -444,22 +526,6 @@ function AfterItemMenu({
   );
 }
 
-function ConfirmRows({ rows }: { rows: UIConfirmRow[] }) {
-  return (
-    <div className="max-h-36 overflow-y-auto rounded-md border border-border/60 text-xs">
-      {rows.map((row, index) => (
-        <div key={`${row.label}:${index}`} className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 border-b border-border/50 px-2 py-1.5 last:border-b-0">
-          <div className="truncate font-medium text-muted-foreground">{row.label}</div>
-          <div className="min-w-0">
-            <div className="truncate text-foreground">{formatConfirmValue(row.value)}</div>
-            {row.description ? <div className="mt-0.5 truncate text-muted-foreground">{row.description}</div> : null}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function StepTitle({ step }: { step: InputFlowStep }) {
   return (
     <div className="min-w-0">
@@ -487,6 +553,81 @@ function OptionList({ step, onSelect }: { step: InputFlowStep; onSelect: (option
       })}
       onSelect={onSelect}
     />
+  );
+}
+
+function MultiSelect({
+  selectedKeys,
+  step,
+  onSelectedKeys,
+  onSubmit,
+}: {
+  selectedKeys: string[];
+  step: InputFlowStep;
+  onSelectedKeys: (keys: string[]) => void;
+  onSubmit: (values: unknown[]) => void;
+}) {
+  const { t } = useI18n();
+  const options = (step.options || []).map(normalizeOption).filter(Boolean) as InputFlowOption[];
+  const entries = options.map((option, index) => ({ key: optionKey(option, index), option }));
+  const selected = new Set(selectedKeys);
+  const min = typeof step.min === "number" ? Math.max(0, Math.floor(step.min)) : step.required === false ? 0 : 1;
+  const max = typeof step.max === "number" && step.max > 0 ? Math.floor(step.max) : undefined;
+  const maxReached = max !== undefined && selected.size >= max;
+
+  function toggle(key: string) {
+    if (selected.has(key)) {
+      onSelectedKeys(selectedKeys.filter((item) => item !== key));
+      return;
+    }
+    if (!maxReached) {
+      onSelectedKeys([...selectedKeys, key]);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <ChoiceMenu
+        items={entries.map(({ key, option }) => {
+          const title = stringValue(option.title) || stringValue(option.label) || String(option.value ?? "");
+          const checked = selected.has(key);
+          return {
+            id: key,
+            label: title,
+            description: option.description,
+            disabled: maxReached && !checked,
+            value: key,
+            render: () => (
+              <div className="flex min-w-0 items-start gap-2">
+                <span className={cn("mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border", checked ? "border-primary bg-primary text-primary-foreground" : "border-border")}>
+                  {checked ? <Check className="size-3" strokeWidth={2.5} /> : null}
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium">{title}</span>
+                  {option.description ? <span className="mt-0.5 block truncate text-xs text-muted-foreground">{option.description}</span> : null}
+                </span>
+              </div>
+            ),
+          };
+        })}
+        onSelect={toggle}
+      />
+      <Button
+        className="h-7 px-3 text-xs"
+        size="sm"
+        type="button"
+        disabled={selected.size < min}
+        onClick={() =>
+          onSubmit(
+            entries
+              .filter(({ key }) => selected.has(key))
+              .map(({ option }) => option.value ?? option.data ?? option.title ?? option.label),
+          )
+        }
+      >
+        {t("inputFlow.confirm")}
+      </Button>
+    </div>
   );
 }
 
@@ -578,17 +719,25 @@ function TextInputStep({
   step: InputFlowStep;
   value: string;
   onChange: (value: string) => void;
-  onSubmit: (value: string) => void;
+  onSubmit: (value: unknown) => void;
 }) {
   const { t } = useI18n();
   const text = value.trim();
   const required = step.required !== false;
-  const valid = !required || text.length > 0;
+  const numericValue = Number(text);
+  const numberValid =
+    step.type !== "number_input" ||
+    (text.length > 0 &&
+      Number.isFinite(numericValue) &&
+      (typeof step.min !== "number" || numericValue >= step.min) &&
+      (typeof step.max !== "number" || numericValue <= step.max));
+  const valid = (!required || text.length > 0) && (text.length === 0 || numberValid);
   function handleSubmit() {
     if (valid) {
-      onSubmit(text);
+      onSubmit(step.type === "number_input" && text ? numericValue : text);
     }
   }
+  const inputType = step.type === "phone_input" ? "tel" : step.type === "number_input" ? "number" : step.type === "date_input" ? "date" : "text";
   return (
     <div className="flex items-center gap-2">
       <input
@@ -597,9 +746,11 @@ function TextInputStep({
           "h-8 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40",
           value && !valid ? "border-destructive" : "",
         )}
-        inputMode={step.type === "phone_input" ? "tel" : "text"}
+        inputMode={step.type === "phone_input" ? "tel" : step.type === "number_input" ? "decimal" : "text"}
+        min={step.type === "number_input" ? step.min : undefined}
+        max={step.type === "number_input" ? step.max : undefined}
         placeholder={step.placeholder || step.title}
-        type={step.type === "phone_input" ? "tel" : "text"}
+        type={inputType}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
@@ -631,14 +782,18 @@ function ConfirmStep({
   return (
     <div className="space-y-3">
       <div className="space-y-1 rounded-md border border-border/60 bg-background/60 p-2 text-xs text-muted-foreground">
-        <div className="font-medium text-foreground">{resultKey}</div>
-        {items.map((item, index) => (
-          <div key={index} className="truncate">
-            {index + 1}. {itemSummary(item)}
-          </div>
-        ))}
+        {items.length > 0 ? (
+          <>
+            <div className="font-medium text-foreground">{resultKey}</div>
+            {items.map((item, index) => (
+              <div key={index} className="truncate">
+                {index + 1}. {itemSummary(item)}
+              </div>
+            ))}
+          </>
+        ) : null}
         {Object.keys(values).length > 0 ? (
-          <div className="border-t border-border/60 pt-1">
+          <div className={cn(items.length > 0 && "border-t border-border/60 pt-1")}>
             <span className="text-foreground">{t("inputFlow.details")}</span> {itemSummary(values)}
           </div>
         ) : null}
@@ -819,48 +974,31 @@ function scrollActiveIntoList(active: HTMLElement | null, list: HTMLElement | nu
   }
 }
 
-function normalizeUIConfirm(value: unknown): UIConfirmSchema | null {
-  const raw = parseRecord(value);
-  if (!raw) {
-    return null;
-  }
-  const title = stringValue(raw.title);
-  if (!title) {
-    return null;
-  }
-  const rows = Array.isArray(raw.rows)
-    ? raw.rows
-        .map((row) => {
-          const record = parseRecord(row);
-          const label = stringValue(record?.label);
-          if (!record || !label) {
-            return null;
-          }
-          return {
-            description: stringValue(record.description),
-            label,
-            value: record.value,
-          };
-        })
-        .filter(Boolean) as UIConfirmRow[]
-    : [];
-  return {
-    cancelLabel: stringValue(raw.cancelLabel),
-    confirmLabel: stringValue(raw.confirmLabel),
-    description: stringValue(raw.description),
-    destructive: raw.destructive === true,
-    rows,
-    title,
-  };
-}
-
 function normalizeInputFlow(value: unknown): { raw: Record<string, unknown>; schema: InputFlowSchema } | null {
   const raw = parseRecord(value);
-  if (!raw || raw.type !== "repeat" || !Array.isArray(raw.repeatSteps)) {
+  if (!raw || (raw.type !== "form" && raw.type !== "repeat")) {
     return null;
   }
   const title = stringValue(raw.title);
   if (!title) {
+    return null;
+  }
+  if (raw.type === "form") {
+    const steps = Array.isArray(raw.steps) ? (raw.steps.map(normalizeStep).filter(Boolean) as InputFlowStep[]) : [];
+    if (steps.length === 0) {
+      return null;
+    }
+    return {
+      raw,
+      schema: {
+        description: stringValue(raw.description),
+        steps,
+        title,
+        type: "form",
+      },
+    };
+  }
+  if (!Array.isArray(raw.repeatSteps)) {
     return null;
   }
   const repeatSteps = raw.repeatSteps.map(normalizeStep).filter(Boolean) as InputFlowStep[];
@@ -889,10 +1027,13 @@ function normalizeStep(value: unknown): InputFlowStep | null {
     return null;
   }
   const type =
-    record.type === "option_list" ||
+    record.type === "single_select" ||
+    record.type === "multi_select" ||
     record.type === "quick_number" ||
+    record.type === "number_input" ||
     record.type === "text_input" ||
     record.type === "phone_input" ||
+    record.type === "date_input" ||
     record.type === "confirm"
       ? record.type
       : "";
@@ -953,6 +1094,15 @@ function normalizeOption(value: unknown): InputFlowOption | null {
   };
 }
 
+function optionKey(option: InputFlowOption, index: number) {
+  const value = option.value ?? option.title ?? option.label ?? option.data;
+  try {
+    return `${index}:${JSON.stringify(value)}`;
+  } catch {
+    return `${index}:${String(value ?? "")}`;
+  }
+}
+
 function numberLimit(step: InputFlowStep, selections: Record<string, unknown>) {
   if (typeof step.max === "number") {
     return step.max;
@@ -976,13 +1126,104 @@ function actionLabel(afterItem: InputFlowAfterItem | undefined, id: "continue" |
 }
 
 function resultPayload(schema: InputFlowSchema, items: Array<Record<string, unknown>>, values: Record<string, unknown>) {
+  if (schema.type === "form") {
+    return {
+      type: "user_input_result",
+      title: schema.title,
+      ...compactRecord(values),
+    };
+  }
   const resultKey = schema.resultKey || "items";
   return {
-    type: "input_flow_result",
+    type: "user_input_result",
     title: schema.title,
     [resultKey]: items,
     ...compactRecord(values),
   };
+}
+
+function inputFlowSubmissionText(schema: InputFlowSchema, result: Record<string, unknown>, t: Translate) {
+  const details: string[] = [];
+  if (schema.type === "form") {
+    for (const step of schema.steps) {
+      if (!Object.prototype.hasOwnProperty.call(result, step.id)) {
+        continue;
+      }
+      details.push(`${step.title}: ${formatStepSubmissionValue(step, result[step.id], t)}`);
+    }
+  } else {
+    const resultKey = schema.resultKey || "items";
+    const items = result[resultKey];
+    if (Array.isArray(items) && items.length > 0) {
+      details.push(`${resultKey}: ${formatSubmissionValue(items)}`);
+    }
+    for (const step of schema.nextSteps) {
+      if (!Object.prototype.hasOwnProperty.call(result, step.id)) {
+        continue;
+      }
+      details.push(`${step.title}: ${formatStepSubmissionValue(step, result[step.id], t)}`);
+    }
+  }
+  return t("inputFlow.response")
+    .replace("{title}", schema.title)
+    .replace("{values}", details.join("；") || t("inputFlow.confirmed"));
+}
+
+function formatStepSubmissionValue(step: InputFlowStep, value: unknown, t: Translate) {
+  if (step.type === "confirm" && value === true) {
+    return t("inputFlow.confirmed");
+  }
+  if (step.type === "single_select" || step.type === "multi_select") {
+    const values = Array.isArray(value) ? value : [value];
+    return values
+      .map((item) => {
+        const raw = formatSubmissionValue(item);
+        const label = selectedOptionLabel(step, item);
+        return label && label !== raw ? `${label}（${raw}）` : label || raw;
+      })
+      .join("、");
+  }
+  return formatSubmissionValue(value);
+}
+
+function selectedOptionLabel(step: InputFlowStep, value: unknown) {
+  const options = (step.options || []).map(normalizeOption).filter(Boolean) as InputFlowOption[];
+  const target = comparableValue(value);
+  for (const option of options) {
+    const optionValue = option.value ?? option.data ?? option.title ?? option.label;
+    if (comparableValue(optionValue) === target) {
+      return stringValue(option.title) || stringValue(option.label) || String(option.value ?? "");
+    }
+  }
+  return "";
+}
+
+function comparableValue(value: unknown) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function formatSubmissionValue(value: unknown): string {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map(formatSubmissionValue).filter(Boolean).join("；");
+  }
+  const record = parseRecord(value);
+  if (record) {
+    return Object.entries(record)
+      .filter(([, item]) => item !== undefined && item !== "")
+      .map(([key, item]) => `${key}: ${formatSubmissionValue(item)}`)
+      .join("，");
+  }
+  return String(value);
 }
 
 function itemSummary(item: Record<string, unknown>) {
@@ -999,28 +1240,6 @@ function itemSummary(item: Record<string, unknown>) {
     .slice(0, 3)
     .map(([, value]) => String(value))
     .join(" · ");
-}
-
-function formatConfirmValue(value: unknown) {
-  if (value === undefined || value === null) {
-    return "";
-  }
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  const record = parseRecord(value);
-  if (record) {
-    return itemSummary(record) || JSON.stringify(record);
-  }
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => {
-        const itemRecord = parseRecord(item);
-        return itemRecord ? itemSummary(itemRecord) || JSON.stringify(itemRecord) : String(item);
-      })
-      .join("、");
-  }
-  return String(value);
 }
 
 function friendlyItemSummary(item: Record<string, unknown>) {

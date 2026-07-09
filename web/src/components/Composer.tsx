@@ -64,7 +64,7 @@ import { ComposerMentionMenu } from "@/components/ComposerMentionMenu";
 import { useComposerMentions } from "@/components/useComposerMentions";
 import { ContextUsageRing } from "@/components/ContextUsageRing";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
-import { InputFlowPanel } from "@/components/transcript/InputFlowToolPart";
+import { InputFlowPanel, type InputFlowSubmission } from "@/components/transcript/InputFlowToolPart";
 import { Mascot, type MascotGaze, type MascotGazePoint, type MascotMood } from "@/components/Mascot";
 import { SessionAudioControls } from "@/components/SessionAudioControls";
 import { SkillDraftDiffDialog } from "@/components/SkillDraftDiffDialog";
@@ -685,6 +685,62 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       showMascotError(failure.message);
     },
   });
+  const inputFlowSubmitMutation = useMutation({
+    mutationFn: async (submission: InputFlowSubmission) => {
+      const clientMessageID = `input-flow-${submission.request.id}`;
+      if (!resolvedModel) {
+        throw new APIError(400, "no_model");
+      }
+      const { provider, model } = resolvedModel;
+      if (session.provider !== provider || session.model !== model) {
+        await updateSession(token, sessionID, { provider, model });
+      }
+      const result = await submitMessage(token, sessionID, {
+        clientMessageID,
+        text: submission.text,
+        parts: [{ type: "text", text: submission.text }],
+      });
+      if (result.queued || !result.turnID) {
+        clearSubmittingTurn(sessionID, clientMessageID);
+      } else {
+        acceptSubmittingTurn(sessionID, clientMessageID, result.turnID);
+      }
+      return result;
+    },
+    onMutate: (submission) => {
+      const clientMessageID = `input-flow-${submission.request.id}`;
+      clearMascotError();
+      onSubmitError?.(null);
+      if (!running) {
+        startSubmittingTurn(sessionID, clientMessageID);
+      }
+      addPendingUser({
+        sessionID,
+        clientMessageID,
+        status: "submitting",
+        text: submission.text,
+        parts: [{ type: "text", text: submission.text }],
+        createdAt: new Date().toISOString(),
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.queuedInputs(sessionID) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+    },
+    onError: (error, submission) => {
+      const clientMessageID = `input-flow-${submission.request.id}`;
+      clearSubmittingTurn(sessionID, clientMessageID);
+      removePendingUser(sessionID, clientMessageID);
+      useInputFlowStore.getState().addRequest(submission.request);
+      const failure = getSubmitFailure(error, {
+        noModel: t("composer.noModel"),
+        providerConfig: t("composer.providerConfig"),
+        submitFailed: t("composer.submitFailed"),
+        turnRunning: t("composer.turnRunning"),
+      });
+      showMascotError(failure.message);
+    },
+  });
   const cancelMutation = useMutation({
     mutationFn: () => cancelTurn(token, sessionID),
   });
@@ -1051,7 +1107,9 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       <ChatColumn>
         <div ref={selectionGuardRef} className="relative">
           <ComposerApprovalBar approval={pendingApproval} sessionProjectID={projectID} token={token} />
-          {pendingInputFlow ? <InputFlowPanel key={pendingInputFlow.id} request={pendingInputFlow} /> : null}
+          {pendingInputFlow ? (
+            <InputFlowPanel key={pendingInputFlow.id} request={pendingInputFlow} onSubmit={(submission) => inputFlowSubmitMutation.mutate(submission)} />
+          ) : null}
           {mentionMenuOpen ? (
             <ComposerMentionMenu
               references={mentions.filtered}
@@ -2056,9 +2114,9 @@ function dedupeStrings(values: string[]) {
 
 async function pickProjectDirectories(t: (key: string) => string) {
   const dirs = await pickDirectories({
-    buttonLabel: t("transcript.approvalWorkspaceDirChoose"),
-    message: t("transcript.approvalWorkspaceDirChooseMessage"),
-    title: t("transcript.approvalWorkspaceDirChooseTitle"),
+    buttonLabel: t("transcript.approvalProjectDirChoose"),
+    message: t("transcript.approvalProjectDirChooseMessage"),
+    title: t("transcript.approvalProjectDirChooseTitle"),
   });
   return dedupeStrings(dirs.map((dir) => dir.trim()).filter(Boolean));
 }

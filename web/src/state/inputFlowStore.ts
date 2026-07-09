@@ -1,21 +1,9 @@
 import { create } from "zustand";
 
-export type InputFlowResult = {
-  confirmed?: boolean;
-  ok: boolean;
-  reason?: string;
-  requestID: string;
-  result?: Record<string, unknown>;
-  sessionID: string;
-  status: "completed" | "cancelled" | "confirmed";
-  title: string;
-};
-
 export type InputFlowRequest = {
   args: Record<string, unknown>;
   createdAt: string;
   id: string;
-  kind: "input_flow" | "confirm";
   sessionID: string;
   title: string;
 };
@@ -26,8 +14,6 @@ type InputFlowState = {
   removeRequest: (id: string) => void;
 };
 
-const resolvers = new Map<string, (result: InputFlowResult) => void>();
-
 export const useInputFlowStore = create<InputFlowState>((set) => ({
   requests: [],
   addRequest: (request) =>
@@ -37,89 +23,32 @@ export const useInputFlowStore = create<InputFlowState>((set) => ({
   removeRequest: (id) => set((state) => ({ requests: state.requests.filter((item) => item.id !== id) })),
 }));
 
-export function waitForInputFlow(input: {
+export function showInputFlow(input: {
   args: Record<string, unknown>;
   sessionID: string;
   title: string;
-}): Promise<InputFlowResult> {
-  return waitForUIRequest({ ...input, kind: "input_flow" });
-}
-
-export function waitForUIConfirm(input: {
-  args: Record<string, unknown>;
-  sessionID: string;
-  title: string;
-}): Promise<InputFlowResult> {
-  return waitForUIRequest({ ...input, kind: "confirm" });
-}
-
-function waitForUIRequest(input: {
-  args: Record<string, unknown>;
-  kind: InputFlowRequest["kind"];
-  sessionID: string;
-  title: string;
-}): Promise<InputFlowResult> {
+}): InputFlowRequest {
   const request: InputFlowRequest = {
     args: input.args,
     createdAt: new Date().toISOString(),
     id: newRequestID(),
-    kind: input.kind,
     sessionID: input.sessionID,
     title: input.title,
   };
-  cancelSessionInputFlows(input.sessionID, "superseded");
+  dismissSessionInputFlows(input.sessionID);
   useInputFlowStore.getState().addRequest(request);
-  return new Promise((resolve) => {
-    resolvers.set(request.id, resolve);
-  });
+  return request;
 }
 
-export function completeInputFlow(request: InputFlowRequest, result: Record<string, unknown>) {
-  resolveInputFlow(request, {
-    ok: true,
-    requestID: request.id,
-    result,
-    sessionID: request.sessionID,
-    status: "completed",
-    title: request.title,
-  });
+export function dismissInputFlow(request: InputFlowRequest) {
+  useInputFlowStore.getState().removeRequest(request.id);
 }
 
-export function confirmUIRequest(request: InputFlowRequest, result: Record<string, unknown> = {}) {
-  resolveInputFlow(request, {
-    confirmed: true,
-    ok: true,
-    requestID: request.id,
-    result,
-    sessionID: request.sessionID,
-    status: "confirmed",
-    title: request.title,
-  });
-}
-
-export function cancelInputFlow(request: InputFlowRequest, reason = "user_cancelled") {
-  resolveInputFlow(request, {
-    ok: false,
-    reason,
-    requestID: request.id,
-    sessionID: request.sessionID,
-    status: "cancelled",
-    title: request.title,
-  });
-}
-
-function cancelSessionInputFlows(sessionID: string, reason: string) {
+function dismissSessionInputFlows(sessionID: string) {
   const existing = useInputFlowStore.getState().requests.filter((request) => request.sessionID === sessionID);
   for (const request of existing) {
-    cancelInputFlow(request, reason);
+    dismissInputFlow(request);
   }
-}
-
-function resolveInputFlow(request: InputFlowRequest, result: InputFlowResult) {
-  useInputFlowStore.getState().removeRequest(request.id);
-  const resolve = resolvers.get(request.id);
-  resolvers.delete(request.id);
-  resolve?.(result);
 }
 
 function newRequestID() {

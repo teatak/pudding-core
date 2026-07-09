@@ -266,8 +266,7 @@ function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIc
     builtin_web_fetch: FileSearch,
     builtin_web_search: Search,
     request_capability: Wrench,
-    ui_confirm: ListChecks,
-    ui_input_flow: ListChecks,
+    collect_user_input: ListChecks,
   };
   return known[name] || Wrench;
 }
@@ -1395,8 +1394,7 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     builtin_weather_get: t("transcript.toolWeatherGet"),
     builtin_web_fetch: t("transcript.toolWebFetch"),
     builtin_web_search: t("transcript.toolWebSearch"),
-    ui_confirm: t("transcript.toolUIConfirm"),
-    ui_input_flow: t("transcript.toolInputFlow"),
+    collect_user_input: t("transcript.toolCollectUserInput"),
     canvas_chart: t("transcript.toolCanvasChart"),
     canvas_doc_read: t("transcript.toolCanvasDocRead"),
     canvas_gallery: t("transcript.toolCanvasGallery"),
@@ -1441,6 +1439,10 @@ function toolTitle(
     const capabilitySummary = capabilityToolSummary(part, result, t);
     return { label: baseTitle, summary: capabilitySummary || t("transcript.toolFailed") };
   }
+  const inputSummary = inputFlowToolSummary(part, result, t);
+  if (inputSummary) {
+    return { label: baseTitle, summary: inputSummary };
+  }
   const capabilitySummary = capabilityToolSummary(part, result, t);
   if (capabilitySummary) {
     return { label: baseTitle, summary: capabilitySummary };
@@ -1454,6 +1456,21 @@ function toolTitle(
     return { label: baseTitle, summary: structuralSummary };
   }
   return { label: baseTitle, summary: "" };
+}
+
+function inputFlowToolSummary(
+  part: Extract<TurnPartVM, { type: "tool_use" }>,
+  result: ReturnType<typeof formatToolResult>,
+  t: (key: string) => string,
+) {
+  if ((part.name || part.resultName) !== "collect_user_input") {
+    return "";
+  }
+  const value = result?.value;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return "";
+  }
+  return (value as Record<string, unknown>).status === "awaiting_user" ? t("transcript.toolAwaitingInput") : "";
 }
 
 function unknownToolName(part: Extract<TurnPartVM, { type: "tool_use" }>, result: ReturnType<typeof formatToolResult>) {

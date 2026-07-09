@@ -2243,8 +2243,8 @@ function BrowserMCPToolsPanel({
   onRetry: () => void;
   sessions: BrowserMCPSession[];
 }) {
-  const canvasTools = useMemo(() => uniqueBrowserTools(sessions, "canvas_"), [sessions]);
-  const uiTools = useMemo(() => uniqueBrowserTools(sessions, "ui_"), [sessions]);
+  const canvasTools = useMemo(() => uniqueBrowserTools(sessions, (name) => name.startsWith("canvas_")), [sessions]);
+  const uiTools = useMemo(() => uniqueBrowserTools(sessions, (name) => name === "collect_user_input"), [sessions]);
   const connected = sessions.length > 0;
 
   return (
@@ -2328,12 +2328,12 @@ function BrowserMCPToolGroup({
   );
 }
 
-function uniqueBrowserTools(sessions: BrowserMCPSession[], prefix: string): ToolInfo[] {
+function uniqueBrowserTools(sessions: BrowserMCPSession[], matches: (name: string) => boolean): ToolInfo[] {
   const seen = new Set<string>();
   const tools: ToolInfo[] = [];
   for (const session of sessions) {
     for (const tool of session.tools) {
-      if (!tool.name.startsWith(prefix) || seen.has(tool.name)) {
+      if (!matches(tool.name) || seen.has(tool.name)) {
         continue;
       }
       seen.add(tool.name);
