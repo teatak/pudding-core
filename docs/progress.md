@@ -36,7 +36,7 @@ LLM 自动标题。
   CLI 与 Electron shell 共用协议;桌面壳启动时端口被占则退出,不 attach 旧实例。
 
 **桌面壳(Electron)**
-- Electron shell 负责窗口、preload IPC、主题/窗口状态、`<webview>` 浏览器承载。
+- Electron shell 负责窗口、Tray/Menu Bar、preload IPC、主题/窗口状态、`<webview>` 浏览器承载。
 - 业务 API 直连 daemon HTTP/SSE/WS;desktop native/system capabilities 走 Electron IPC。
 - 已定规则:Electron 只托管 UI 资源/Vite HMR,不反代业务 API。
 - 浏览器 external/passkey 路线暂停,当前主线只收敛 internal `<webview>` + LLM 工具生命周期。
@@ -86,9 +86,9 @@ provider 的 text/thought/tool_use 解析测试。下一步 T2:messages.parts �
 1. **工具调用 / MCP**(进行中,见上)——agent 工作台核心,所有铺垫已就位。
 2. **compaction**:contextbuilder 现在全量发送 messages,长会话迟早爆 context。
    独立于工具调用;老项目有 `/compact` 摘要先例可移植。
-3. **桌面正式打包**:临时 .app bundle 已验证形态(/tmp/Pudding.app),正式化
-   = Makefile 出 bundle + Info.plist + icon(签名公证后置)。小工程,适合
-   subagent;**注意 subagent 必须显式指定 opus(默认 fable 不可用)**。
+3. **桌面正式打包**:基础 `make desktop-bundle` 已补 macOS `.app`
+   生成入口(Info.plist/icon/release daemon/pudding:// scheme),Electron Tray
+   已补显示/隐藏/退出入口;签名、公证、自动更新和正式 crash/log 收集后置。
 4. **mascot 交互动画重做**:空态静态 mascot 已上;老项目 MascotHint.tsx
    有 680 行状态机(眨眼/打字/说话),需按新架构裁剪移植。
 

@@ -1,6 +1,6 @@
-# Pudding Core
+# Pudding
 
-Pudding Core is the source repository for the next Pudding daemon and app core.
+Pudding is the source repository for the next Pudding daemon and desktop app.
 
 This repo starts from a clean architecture:
 

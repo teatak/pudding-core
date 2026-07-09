@@ -516,45 +516,6 @@ func (m *Manager) Open(ctx context.Context, sessionID, tabID, rawURL string) (Ta
 	return m.snapshotFromLiveTarget(ctx, binding, target), nil
 }
 
-func (m *Manager) Reveal(ctx context.Context, sessionID, tabID string) (TabSnapshot, error) {
-	proc, binding, target, err := m.liveTarget(ctx, sessionID, tabID, false)
-	if err != nil {
-		return TabSnapshot{}, err
-	}
-	if proc.headless {
-		if err := m.switchMode(ctx, sessionID, false); err != nil {
-			return TabSnapshot{}, err
-		}
-	}
-	proc, binding, target, err = m.liveTarget(ctx, sessionID, binding.id, false)
-	if err != nil {
-		return TabSnapshot{}, err
-	}
-	if err := proc.activateTarget(ctx, m.client, binding.targetID); err != nil {
-		return TabSnapshot{}, err
-	}
-	m.touch(binding.id)
-	return m.snapshotFromLiveTarget(ctx, binding, target), nil
-}
-
-func (m *Manager) Internal(ctx context.Context, sessionID, tabID string) (TabSnapshot, error) {
-	binding, err := m.binding(sessionID, tabID)
-	if err != nil {
-		return TabSnapshot{}, err
-	}
-	if proc := m.currentProcess(ctx, sessionID); proc != nil {
-		if target, err := proc.target(ctx, m.client, binding.targetID); err == nil {
-			m.rememberBindingTarget(binding.id, target)
-		} else if !errors.Is(err, ErrTabNotFound) {
-			return TabSnapshot{}, err
-		}
-	}
-	if err := m.switchMode(ctx, sessionID, true); err != nil {
-		return TabSnapshot{}, err
-	}
-	return m.GetTab(ctx, sessionID, binding.id)
-}
-
 func (m *Manager) Back(ctx context.Context, sessionID, tabID string) (TabSnapshot, error) {
 	return m.navigateHistory(ctx, sessionID, tabID, -1)
 }
@@ -1016,34 +977,6 @@ func (m *Manager) setProcess(sessionID string, proc *browserProcess) {
 	}
 	m.processes[globalProcessKey] = proc
 	m.mu.Unlock()
-}
-
-func (m *Manager) switchMode(ctx context.Context, sessionID string, headless bool) error {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return errors.New("session id is required")
-	}
-	m.lifecycleMu.Lock()
-	defer m.lifecycleMu.Unlock()
-	m.mu.Lock()
-	proc := m.processes[globalProcessKey]
-	cfg := m.cfg
-	if proc != nil && proc.headless == headless {
-		m.mu.Unlock()
-		return nil
-	}
-	delete(m.processes, globalProcessKey)
-	m.mu.Unlock()
-	if err := stopBrowserProcess(proc); err != nil {
-		return err
-	}
-	reapStaleProfileOwner(cfg, sessionID)
-	next, err := launchMode(ctx, cfg, sessionID, m.client, headless)
-	if err != nil {
-		return err
-	}
-	m.setProcess(sessionID, next)
-	return nil
 }
 
 func reapStaleProfileOwner(cfg Config, sessionID string) {

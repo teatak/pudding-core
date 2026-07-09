@@ -1,6 +1,7 @@
 # Browser Lifecycle Refactor Plan (Archived)
 
 > 状态:历史计划。Electron `<webview>` 迁移后,本文中的 screencast/WebSocket 首帧恢复路线不再作为当前实施路径。
+> 本文保留为问题背景和验收记忆,不要按 P0-P5 继续拆任务;当前主线以 `docs/electron-migration-plan.md` 为准。
 > 当前事实源:`docs/electron-migration-plan.md`。
 
 ## 目标

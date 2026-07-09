@@ -2034,16 +2034,8 @@ func (b *engineTestBrowser) Open(_ context.Context, sessionID, tabID, rawURL str
 	return browser.TabSnapshot{ID: tabID, SessionID: sessionID, URL: rawURL}, nil
 }
 
-func (b *engineTestBrowser) Reveal(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
-	return browser.TabSnapshot{ID: tabID, SessionID: sessionID}, nil
-}
-
 func (b *engineTestBrowser) Recover(_ context.Context, sessionID string, hint browser.RecoverHint) (browser.TabSnapshot, error) {
 	return browser.TabSnapshot{ID: hint.TabID, SessionID: sessionID, URL: hint.URL, Title: hint.Title, Mode: hint.Mode}, nil
-}
-
-func (b *engineTestBrowser) Internal(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
-	return browser.TabSnapshot{ID: tabID, SessionID: sessionID}, nil
 }
 
 func (b *engineTestBrowser) Back(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {

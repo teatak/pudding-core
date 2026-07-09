@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen, shell, webContents } = require("electron");
+const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, nativeTheme, screen, shell, webContents } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
@@ -10,7 +10,7 @@ const { BrowserBridgeServer } = require("./browser-bridge-server.cjs");
 const { BrowserHost } = require("./browser-host.cjs");
 
 const repoRoot = path.resolve(__dirname, "..");
-const defaultAddr = "127.0.0.1:9679";
+const defaultAddr = app.isPackaged ? "127.0.0.1:9669" : "127.0.0.1:9679";
 const daemonAddr = (process.env.PUDDING_DAEMON_ADDR || defaultAddr).trim();
 const apiBase = trimTrailingSlash(process.env.PUDDING_API_BASE || `http://${daemonAddr}`);
 const devURL = trimTrailingSlash(process.env.PUDDING_DEV_URL || "");
@@ -38,9 +38,12 @@ let webviewCaptureSeq = 0;
 
 let daemonProcess = null;
 let quitting = false;
+let appTray = null;
 const pendingOAuthReturnURLs = [];
 
-app.setName("Pudding");
+const appDisplayName = "Pudding";
+
+app.setName(appDisplayName);
 registerOAuthReturnProtocol();
 
 app.on("open-url", (event, rawURL) => {
@@ -53,6 +56,7 @@ app.whenReady().then(async () => {
     const browserBridge = await browserBridgeServer.start();
     const token = await ensureDaemon(browserBridge);
     const window = createMainWindow();
+    createTray(window);
     await loadRenderer(window, token);
     flushPendingOAuthReturnURLs();
   } catch (error) {
@@ -72,6 +76,7 @@ app.on("activate", () => {
     .then((browserBridge) => ensureDaemon(browserBridge))
     .then((token) => {
       const window = createMainWindow();
+      createTray(window);
       return loadRenderer(window, token).then(() => flushPendingOAuthReturnURLs());
     })
     .catch((error) => {
@@ -105,7 +110,7 @@ function createMainWindow() {
     ...savedBounds,
     minWidth: minWindowBounds.width,
     minHeight: minWindowBounds.height,
-    title: "Pudding",
+    title: appDisplayName,
     backgroundColor: themeBackgroundColor(),
     ...(process.platform === "darwin"
       ? {
@@ -121,6 +126,11 @@ function createMainWindow() {
       webviewTag: true,
     },
   });
+
+  window.on("show", () => updateTrayMenu(window));
+  window.on("hide", () => updateTrayMenu(window));
+  window.on("focus", () => updateTrayMenu(window));
+  window.on("closed", () => updateTrayMenu(null));
 
   window.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
@@ -152,6 +162,86 @@ function createMainWindow() {
   });
 
   return window;
+}
+
+function createTray(window) {
+  if (appTray) {
+    updateTrayMenu(window);
+    return appTray;
+  }
+  const icon = trayIcon();
+  if (icon.isEmpty()) {
+    console.warn("[electron] tray icon not found");
+    return null;
+  }
+  appTray = new Tray(icon);
+  appTray.setToolTip(appDisplayName);
+  appTray.on("click", () => {
+    const current = BrowserWindow.getAllWindows()[0] || window;
+    if (!current || current.isDestroyed()) {
+      return;
+    }
+    if (current.isVisible() && current.isFocused()) {
+      current.hide();
+      return;
+    }
+    showMainWindow(current);
+  });
+  updateTrayMenu(window);
+  return appTray;
+}
+
+function updateTrayMenu(window) {
+  if (!appTray) {
+    return;
+  }
+  const current = window && !window.isDestroyed() ? window : BrowserWindow.getAllWindows()[0];
+  const visible = Boolean(current && !current.isDestroyed() && current.isVisible());
+  appTray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: visible ? "Hide Pudding" : "Show Pudding",
+        click: () => {
+          const target = BrowserWindow.getAllWindows()[0];
+          if (!target || target.isDestroyed()) {
+            return;
+          }
+          if (target.isVisible()) {
+            target.hide();
+            return;
+          }
+          showMainWindow(target);
+        },
+      },
+      { type: "separator" },
+      {
+        label: "Quit Pudding",
+        click: () => {
+          quitting = true;
+          app.quit();
+        },
+      },
+    ]),
+  );
+}
+
+function trayIcon() {
+  const candidates = [
+    process.resourcesPath ? path.join(process.resourcesPath, "TrayTemplate.png") : "",
+    path.join(repoRoot, "build", "macos", "TrayTemplate.png"),
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate)) {
+      continue;
+    }
+    const image = nativeImage.createFromPath(candidate);
+    if (!image.isEmpty()) {
+      const resized = image.resize({ width: 18, height: 18 });
+      resized.setTemplateImage(true);
+      return resized;
+    }
+  }
+  return nativeImage.createEmpty();
 }
 
 function showMainWindow(window) {
@@ -550,7 +640,8 @@ async function readDaemonToken() {
 }
 
 function daemonTokenPath() {
-  const home = (process.env.PUDDING_HOME || path.join(os.homedir(), ".pudding-dev")).trim();
+  const defaultHome = app.isPackaged ? ".pudding" : ".pudding-dev";
+  const home = (process.env.PUDDING_HOME || path.join(os.homedir(), defaultHome)).trim();
   return path.join(home, "daemon.token");
 }
 
@@ -573,11 +664,16 @@ function canConnectToDaemon() {
 
 function resolveDaemonBinary() {
   const exe = process.platform === "win32" ? "puddingd.exe" : "puddingd";
-  const candidates = [
+  const packagedCandidates = [
+    process.env.PUDDING_DAEMON_BIN,
+    path.join(repoRoot, "bin", exe),
+  ].filter(Boolean);
+  const devCandidates = [
     process.env.PUDDING_DAEMON_BIN,
     path.join(repoRoot, "bin", exe),
     process.resourcesPath ? path.join(process.resourcesPath, exe) : "",
   ].filter(Boolean);
+  const candidates = app.isPackaged ? packagedCandidates : devCandidates;
 
   return candidates.find((candidate) => fs.existsSync(candidate)) || "";
 }

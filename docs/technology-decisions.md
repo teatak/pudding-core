@@ -16,7 +16,7 @@
 一句话:
 
 ```text
-Pudding Core = local-first multi-session AI daemon + app core.
+Pudding = local-first multi-session AI daemon + desktop app.
 ```
 
 ## 2. 后端

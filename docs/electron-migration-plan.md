@@ -170,8 +170,8 @@ model tool call
 
 - internal:renderer `<webview>` 显示真实 Chromium 页面。
 - BrowserHost 记录 webview `webContents`,供 Go browser tools 调用 CDP。
-- external 暂时禁用,后续重新设计为同一 Electron profile 下的可恢复窗口能力。
-- 因为 profile 同属 Electron persistent session,后续外部授权 cookie/localStorage 仍应能回到 internal。
+- external 不进入当前主线。Electron app-owned external window 不能稳定覆盖 passkey/Touch ID 授权。
+- 后续如恢复外部授权,应走系统真实 Chrome/Safari 或系统浏览器 callback,再把授权结果带回 internal。
 
 ## Screencast 删除计划
 
@@ -231,7 +231,7 @@ model tool call
 - 使用持久 partition:`persist:pudding-default`。
 - renderer 在 webview ready/navigation/title/favicon 事件后向 main 注册 `webContentsID`。
 - 当前落点:Electron preload 暴露 webview 注册和 browser IPC;前端 Canvas 直接渲染 `ElectronWebviewBrowser`,不再保留 `BrowserStream` 或 screencast fallback。
-- 暂未迁移:Go browser bridge、LLM CDP 工具仍走旧 API。
+- 当前落点:Go browser service 在 Electron 桌面下走 Electron bridge;LLM 工具仍调用 session-scoped browser API,底层转到 BrowserHost/CDP。
 
 验收:
 
@@ -295,7 +295,7 @@ model tool call
 
 - P6 不进入当前主线。GitHub passkey/Touch ID 验证显示 Electron Chromium 只能得到 partial passkey support,无法稳定覆盖“真实浏览器授权”场景。
 - Electron 路径继续禁用旧外部打开:Toolbar 隐藏按钮,Go 后端不暴露 reveal/internal route。
-- 当前落点:前端已删除外部打开/回内部入口和对应 client helper;后端 API surface 已移除 reveal/internal。Chrome manager 里未暴露的 internal/external fallback 代码留到最终 native 清理阶段删除。
+- 当前落点:前端已删除外部打开/回内部入口和对应 client helper;后端 API surface 已移除 reveal/internal;Chrome manager 中无入口的 `Reveal/Internal/switchMode` 旧切换方法已删除。底层 attach/recover 仍保留为非 Electron manager 的恢复路径。
 - 后续如恢复外部授权,应走系统真实 Chrome/Safari 或系统浏览器 callback,而不是 Electron app-owned external window。
 
 暂停原因:
@@ -329,6 +329,14 @@ Legacy 清理范围:
 - 已删除 `CanvasPane` -> `BrowserStream` 的 `nativeSuspended` 无效传参和 no-op cursor 清理。
 - 保留 `electron/browser-host.cjs` 内部的 `WebContentsView`,但仅作为 UI webview 尚未注册时的 invisible headless tool target,不再 attach 到主窗口。
 
+BrowserHost 生命周期收口审查(2026-07-09):
+
+- LLM 工具不依赖画布是否打开:画布未挂载时由 `electron/browser-host.cjs` 的 invisible `WebContentsView` 承载真实 `webContents`;画布挂载后 renderer `<webview>` 注册到同一 `sessionID/tabID` slot。
+- 画布浏览器 tab 是 session browser slot 的 UI 入口,不是 canvas item;点击 tab 只切换到 browser surface,只有当前 session 没有 tab/state 时才创建新 tab。
+- 关闭 tab 等价于关闭当前 session browser slot:`closeSession`/`closeTab` 会销毁 slot webContents 并发出 lost snapshot;前端 close gate 会丢弃并发旧 snapshot,避免关闭后复活。
+- 普通 canvas item tab 与 browser surface 共用同一画布区域,但不拥有浏览器生命周期;切普通小组件只隐藏 browser surface,不以 canvas item 方式恢复或重建浏览器。
+- `requestBrowserReveal` 是“LLM 工具事件触发当前 session 显示浏览器 surface”的前端 UI 事件,不是旧 external reveal/internal 切换。
+
 清理原则:
 
 - 不再把上述旧 shell 防御代码迁移到 Electron。
@@ -347,10 +355,12 @@ Legacy 清理范围:
 - Electron 打包、签名、公证、自动更新。
 - dev/release 数据目录继续隔离。
 - crash/log 收集落本地文件。
+- 当前落点:`make desktop-bundle` 可生成基础 macOS `.app` bundle,内含 Electron shell、Tray、release daemon、Info.plist、icon 和 `pudding://` callback scheme。
+- 签名、公证、自动更新、正式 crash/log 收集后置。
 
 验收:
 
-- macOS dev build 可安装运行。
+- macOS bundle 可安装运行。
 - release profile 不污染 dev profile。
 - 退出 app 后 Go daemon 和 Electron 子进程可控清理。
 

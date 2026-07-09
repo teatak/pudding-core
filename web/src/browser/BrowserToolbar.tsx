@@ -109,8 +109,6 @@ export function BrowserToolbar({
   const tabs = (tabsQuery.data?.tabs || []).filter((tab) => tab.sessionID === sessionID);
   const activeTab = activeTabProp || preferredBrowserTab(tabs, payload);
   const targetURL = browserTargetURL(activeTab, payload, payload?.updatedAt);
-  const processMode = tabsQuery.data?.processMode || activeTab?.mode || payload?.mode;
-  const isExternalBrowser = processMode === "external";
   const refreshBrowserQueries = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(sessionID) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(sessionID) });
@@ -199,9 +197,6 @@ export function BrowserToolbar({
 
   const openMutation = useMutation({
     mutationFn: async (url: string) => {
-      if (isExternalBrowser) {
-        throw new Error("browser is external");
-      }
       lastOpenAttemptRef.current = { url };
       const optimisticTabID = activeTab?.id || payload?.tabID;
       if (embeddedBrowser && optimisticTabID) {
@@ -238,7 +233,7 @@ export function BrowserToolbar({
   });
   const navigationMutation = useMutation({
     mutationFn: async (action: BrowserNavigationAction) => {
-      if (!activeTab || isExternalBrowser) {
+      if (!activeTab) {
         throw new Error("browser tab missing");
       }
       switch (action) {
@@ -261,7 +256,7 @@ export function BrowserToolbar({
       toast.error(t("browser.navigationFailed"), { description: browserOpenErrorDescription(null, error) });
     },
   });
-  const navigationDisabled = !activeTab || isExternalBrowser || tabsQuery.isPending || navigationMutation.isPending;
+  const navigationDisabled = !activeTab || tabsQuery.isPending || navigationMutation.isPending;
   const backDisabled = navigationDisabled || !activeTab?.canGoBack;
   const forwardDisabled = navigationDisabled || !activeTab?.canGoForward;
   const pendingNavigationAction = navigationMutation.isPending ? navigationMutation.variables : undefined;
@@ -276,7 +271,7 @@ export function BrowserToolbar({
       onPointerDown={(event) => event.stopPropagation()}
       onSubmit={(event) => {
         event.preventDefault();
-        if (!isExternalBrowser && urlDraft.trim()) {
+        if (urlDraft.trim()) {
           const url = browserAddressToURL(urlDraft);
           pendingSubmittedURLRef.current = url;
           setURLDraft(browserDisplayURL(url));
@@ -322,7 +317,6 @@ export function BrowserToolbar({
       <div className="group relative flex h-8 min-w-0 flex-1 items-center rounded-md border border-transparent bg-transparent transition-[background-color,box-shadow] hover:bg-background/45 focus-within:bg-background/45 focus-within:shadow-[0_0_0_1px_hsl(var(--border)/0.7),0_0_0_3px_hsl(var(--ring)/0.12)]">
         <Input
           className="h-7 min-w-0 flex-1 border-0 bg-transparent pr-8 shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
-          disabled={isExternalBrowser}
           placeholder={t("browser.urlPlaceholder")}
           value={urlDraft}
           onChange={(event) => setURLDraft(event.target.value)}
@@ -338,7 +332,7 @@ export function BrowserToolbar({
         <Button
           aria-label={t("browser.openURL")}
           className="absolute top-1/2 right-1 h-5 w-5 -translate-y-1/2 rounded-[5px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted/70 hover:text-foreground focus-visible:opacity-100 disabled:opacity-0 group-focus-within:opacity-100"
-          disabled={isExternalBrowser || openMutation.isPending || !urlDraft.trim()}
+          disabled={openMutation.isPending || !urlDraft.trim()}
           size="icon-sm"
           type="submit"
           variant="ghost"
