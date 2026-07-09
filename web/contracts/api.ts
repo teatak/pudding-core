@@ -418,6 +418,8 @@ export const audioDriverConfig = z.object({
 export const audioASRVADConfig = z.object({
   modelPath: z.string(),
   threshold: z.number(),
+  minEnergy: z.number(),
+  playbackMinEnergy: z.number(),
   minSilenceMillis: z.number(),
   minSpeechMillis: z.number(),
   windowSize: z.number(),

@@ -63,36 +63,40 @@ type captureHealth interface {
 }
 
 type ServiceConfig struct {
-	Manager   *Manager
-	Submitter Submitter
-	Canceler  Canceler
-	Events    EventBus
-	Driver    driver.Driver
-	ASR       asr.Client
-	AEC       aec.Processor
-	NS        ns.Processor
-	TTS       tts.Client
-	HomeDir   string
-	SaveAudio bool
+	Manager           *Manager
+	Submitter         Submitter
+	Canceler          Canceler
+	Events            EventBus
+	Driver            driver.Driver
+	ASR               asr.Client
+	AEC               aec.Processor
+	NS                ns.Processor
+	TTS               tts.Client
+	HomeDir           string
+	SaveAudio         bool
+	MinEnergy         float64
+	PlaybackMinEnergy float64
 }
 
 // Service is the daemon-owned voice orchestrator. It routes ASR text into the
 // engine and routes session text deltas into TTS without owning session state.
 type Service struct {
-	manager   *Manager
-	submitter Submitter
-	canceler  Canceler
-	events    EventSubscriber
-	publisher EventPublisher
-	driver    driver.Driver
-	asr       asr.Client
-	aec       aec.Processor
-	ns        ns.Processor
-	aecRender *resample.Linear
-	tts       tts.Client
-	playback  *audioqueue.Queue
-	homeDir   string
-	saveAudio bool
+	manager           *Manager
+	submitter         Submitter
+	canceler          Canceler
+	events            EventSubscriber
+	publisher         EventPublisher
+	driver            driver.Driver
+	asr               asr.Client
+	aec               aec.Processor
+	ns                ns.Processor
+	aecRender         *resample.Linear
+	tts               tts.Client
+	playback          *audioqueue.Queue
+	homeDir           string
+	saveAudio         bool
+	minEnergy         float64
+	playbackMinEnergy float64
 
 	mu              sync.Mutex
 	driverReady     bool
@@ -131,22 +135,24 @@ func NewService(cfg ServiceConfig) *Service {
 		canceler, _ = cfg.Submitter.(Canceler)
 	}
 	svc := &Service{
-		manager:       manager,
-		submitter:     cfg.Submitter,
-		canceler:      canceler,
-		events:        cfg.Events,
-		publisher:     cfg.Events,
-		driver:        cfg.Driver,
-		asr:           cfg.ASR,
-		aec:           cfg.AEC,
-		ns:            cfg.NS,
-		tts:           cfg.TTS,
-		playback:      audioqueue.New(),
-		homeDir:       strings.TrimSpace(cfg.HomeDir),
-		saveAudio:     cfg.SaveAudio,
-		outputCancels: make(map[string]context.CancelFunc),
-		turnBuffers:   make(map[string]*turnBuffer),
-		mutedTurns:    make(map[string]bool),
+		manager:           manager,
+		submitter:         cfg.Submitter,
+		canceler:          canceler,
+		events:            cfg.Events,
+		publisher:         cfg.Events,
+		driver:            cfg.Driver,
+		asr:               cfg.ASR,
+		aec:               cfg.AEC,
+		ns:                cfg.NS,
+		tts:               cfg.TTS,
+		playback:          audioqueue.New(),
+		homeDir:           strings.TrimSpace(cfg.HomeDir),
+		saveAudio:         cfg.SaveAudio,
+		minEnergy:         clamp01(cfg.MinEnergy),
+		playbackMinEnergy: clamp01(cfg.PlaybackMinEnergy),
+		outputCancels:     make(map[string]context.CancelFunc),
+		turnBuffers:       make(map[string]*turnBuffer),
+		mutedTurns:        make(map[string]bool),
 	}
 	if svc.tts != nil {
 		if err := svc.tts.Start(context.Background()); err != nil {
@@ -527,7 +533,9 @@ func (s *Service) startInput(sessionID string) error {
 			slog.Warn("voice: capture dsp failed", "sessionID", sessionID, "err", err)
 			processed = pcm
 		}
-		s.setInputLevel(pcmRMSLevel(processed))
+		level := pcmRMSLevel(processed)
+		s.setInputLevel(level)
+		processed = s.applyCaptureEnergyGate(sessionID, processed, level)
 		if err := s.asr.Feed(ctx, processed); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Warn("voice: asr feed failed", "sessionID", sessionID, "err", err)
 		}
@@ -537,6 +545,11 @@ func (s *Service) startInput(sessionID string) error {
 		s.inputCancel = nil
 		s.inputSession = ""
 		s.mu.Unlock()
+		s.setInputLevel(0)
+		s.resetDSP()
+		if stopErr := s.driver.StopCapture(context.Background()); stopErr != nil && !errors.Is(stopErr, context.Canceled) {
+			slog.Warn("voice: cleanup failed capture after start error", "sessionID", sessionID, "err", stopErr)
+		}
 		return err
 	}
 	slog.Info("voice: input capture started", "sessionID", sessionID, "driver", s.driver.Name(), "asr", s.asr.Name())
@@ -1000,6 +1013,24 @@ func (s *Service) currentInputLevel() float64 {
 	return float64(s.inputLevel.Load()) / inputLevelScale
 }
 
+func (s *Service) applyCaptureEnergyGate(sessionID string, pcm frame.PCM16, level float64) frame.PCM16 {
+	threshold := s.captureEnergyThreshold(sessionID)
+	if threshold <= 0 || level >= threshold || len(pcm.Data) == 0 {
+		return pcm
+	}
+	out := pcm
+	out.Data = make([]byte, len(pcm.Data))
+	return out
+}
+
+func (s *Service) captureEnergyThreshold(sessionID string) float64 {
+	threshold := s.minEnergy
+	if _, playing := s.currentPlayback(sessionID); playing && s.playbackMinEnergy > threshold {
+		threshold = s.playbackMinEnergy
+	}
+	return threshold
+}
+
 func (s *Service) publishInputLevel(level float64) {
 	if s.publisher == nil {
 		return
@@ -1038,6 +1069,16 @@ func pcmRMSLevel(pcm frame.PCM16) float64 {
 		sumSquares += value * value
 	}
 	return math.Sqrt(sumSquares / float64(samples))
+}
+
+func clamp01(value float64) float64 {
+	if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
 }
 
 func previewText(text string, maxRunes int) string {

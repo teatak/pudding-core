@@ -128,6 +128,8 @@ func (s *Server) desktopAbout(c *cart.Context) error {
 		aboutSection("asr_vad", "ASR 内置切句 VAD", aboutRows(
 			"model_path", baseNameOrDash(audioCfg.ASR.VAD.ModelPath),
 			"threshold", floatText(audioCfg.ASR.VAD.Threshold),
+			"min_energy", floatText(audioCfg.ASR.VAD.MinEnergy),
+			"playback_min_energy", floatText(audioCfg.ASR.VAD.PlaybackMinEnergy),
 			"min_silence_millis", intText(audioCfg.ASR.VAD.MinSilenceMillis),
 			"min_speech_millis", intText(audioCfg.ASR.VAD.MinSpeechMillis),
 			"window_size", intText(audioCfg.ASR.VAD.WindowSize),

@@ -33,9 +33,11 @@ export const UserInput = memo(function UserInput({
   const [saving, setSaving] = useState(false);
   const clientMessageID = user.clientMessageID;
   const attachments = user.attachments || [];
-  const imageAttachments = attachments.filter((attachment) => isImageAttachment(attachment.mime, attachment.name));
+  const asrAudioAttachments = attachments.filter((attachment) => isAudioAttachment(attachment.mime, attachment.name) && isASRAudioAttachment(attachment));
+  const contentAttachments = attachments.filter((attachment) => !isASRAudioAttachment(attachment));
+  const imageAttachments = contentAttachments.filter((attachment) => isImageAttachment(attachment.mime, attachment.name));
   const localFolders = user.localFolders || [];
-  const orderedItems = orderedUserInputItems(attachments, localFolders, user.parts);
+  const orderedItems = orderedUserInputItems(contentAttachments, localFolders, user.parts);
   const imagePreviewItems: ImageLightboxItem[] = imageAttachments.map((attachment) => ({
     id: attachment.id,
     name: attachment.name,
@@ -43,7 +45,7 @@ export const UserInput = memo(function UserInput({
     url: attachmentResourceURL(attachment, token),
   }));
   const imagePreviewIndexByID = new Map(imagePreviewItems.map((item, index) => [item.id, index]));
-  const metaText = user.text || attachments.map((attachment) => attachment.name).concat(localFolders.map((folder) => folder.path)).join("\n");
+  const metaText = user.text || contentAttachments.map((attachment) => attachment.name).concat(localFolders.map((folder) => folder.path)).join("\n");
   const canEditQueued =
     Boolean(clientMessageID && user.pending && (user.status === "queued" || user.status === "editing")) &&
     Boolean(onQueuedEditStart && onQueuedSave && onQueuedCancel);
@@ -134,97 +136,92 @@ export const UserInput = memo(function UserInput({
         </MetaIconButton>
       </>
     ) : null;
+  const asrAudioAttachment = !editing ? asrAudioAttachments[0] : undefined;
+  const showASRIndicator = asrInput || Boolean(asrAudioAttachment);
 
   return (
     <>
       <div className={cn("group flex min-w-0 flex-col items-end", user.pending && "opacity-70")}>
-        <div className="pudding-user-message selectable-text min-w-0 max-w-[min(82%,42rem)] overflow-hidden rounded-2xl rounded-br-md border border-border/60 px-3 py-2 text-left text-sm leading-6 break-words whitespace-pre-wrap shadow-sm [overflow-wrap:anywhere]">
-          {editing ? (
-            <div className="grid gap-2">
-              <Textarea
-                className="min-h-20 resize-y border-0 bg-transparent p-0 text-sm leading-6 shadow-none focus-visible:ring-0 md:text-sm dark:bg-transparent"
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-              />
-              <div className="flex justify-end gap-1">
-                <MetaIconButton label={t("common.cancel")} disabled={saving} onClick={discardEdit}>
-                  <X />
-                </MetaIconButton>
-                <MetaIconButton label={t("common.save")} disabled={saving || !draft.trim()} onClick={() => saveEdit(draft)}>
-                  {saving ? <Loader2 className="animate-spin" /> : <Check className="text-success" />}
-                </MetaIconButton>
+        <div className="flex w-full min-w-0 items-start justify-end gap-1">
+          <div className="pudding-user-message selectable-text min-w-0 max-w-[min(82%,42rem)] overflow-hidden rounded-2xl rounded-br-md border border-border/60 px-3 py-2 text-left text-sm leading-6 break-words whitespace-pre-wrap shadow-sm [overflow-wrap:anywhere]">
+            {editing ? (
+              <div className="grid gap-2">
+                <Textarea
+                  className="min-h-20 resize-y border-0 bg-transparent p-0 text-sm leading-6 shadow-none focus-visible:ring-0 md:text-sm dark:bg-transparent"
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                />
+                <div className="flex justify-end gap-1">
+                  <MetaIconButton label={t("common.cancel")} disabled={saving} onClick={discardEdit}>
+                    <X />
+                  </MetaIconButton>
+                  <MetaIconButton label={t("common.save")} disabled={saving || !draft.trim()} onClick={() => saveEdit(draft)}>
+                    {saving ? <Loader2 className="animate-spin" /> : <Check className="text-success" />}
+                  </MetaIconButton>
+                </div>
               </div>
-            </div>
-          ) : (
-            <div className="grid min-w-0 max-w-full gap-2">
-              {orderedItems.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5">
-                  {orderedItems.map((item) => {
-                    if (item.type === "local_folder") {
-                      return (
-                        <LocalFolderCard
-                          key={`folder:${item.item.id}`}
-                          label={t("composer.folderLabel")}
-                          name={item.item.name}
-                          path={item.item.path}
-                          onReveal={() => revealLocalPath(item.item.path)}
-                        />
-                      );
-                    }
-                    const attachment = item.item;
-                    if (isImageAttachment(attachment.mime, attachment.name)) {
-                      const imageIndex = imagePreviewIndexByID.get(attachment.id);
-                      if (imageIndex === undefined) {
-                        return null;
+            ) : (
+              <div className="grid min-w-0 max-w-full gap-2">
+                {orderedItems.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {orderedItems.map((item) => {
+                      if (item.type === "local_folder") {
+                        return (
+                          <LocalFolderCard
+                            key={`folder:${item.item.id}`}
+                            label={t("composer.folderLabel")}
+                            name={item.item.name}
+                            path={item.item.path}
+                            onReveal={() => revealLocalPath(item.item.path)}
+                          />
+                        );
                       }
-                      const image = imagePreviewItems[imageIndex];
-                      return image ? <ImageAttachmentButton key={`attachment:${attachment.id}`} image={image} onOpen={() => setImagePreviewIndex(imageIndex)} /> : null;
-                    }
-                    if (isAudioAttachment(attachment.mime, attachment.name)) {
-                      return <AudioAttachmentCard key={`attachment:${attachment.id}`} attachment={attachment} token={token} />;
-                    }
-                    const content = (
-                      <>
-                        <FileText className="size-3 shrink-0" />
-                        <span className="min-w-0 truncate">{attachment.name}</span>
-                        {attachment.size > 0 ? <span className="shrink-0 text-muted-foreground/70">{formatAttachmentSize(attachment.size)}</span> : null}
-                      </>
-                    );
-                    const className =
-                      "inline-flex max-w-full items-center gap-1 rounded-md border border-border/70 bg-background/70 px-2 py-1 text-xs leading-5 no-underline hover:bg-muted";
-                    if (attachment.sourcePath) {
-                      return (
-                        <button key={`attachment:${attachment.id}`} className={className} type="button" onClick={() => revealLocalPath(attachment.sourcePath || "")}>
-                          {content}
-                        </button>
+                      const attachment = item.item;
+                      if (isImageAttachment(attachment.mime, attachment.name)) {
+                        const imageIndex = imagePreviewIndexByID.get(attachment.id);
+                        if (imageIndex === undefined) {
+                          return null;
+                        }
+                        const image = imagePreviewItems[imageIndex];
+                        return image ? <ImageAttachmentButton key={`attachment:${attachment.id}`} image={image} onOpen={() => setImagePreviewIndex(imageIndex)} /> : null;
+                      }
+                      if (isAudioAttachment(attachment.mime, attachment.name)) {
+                        return <AudioAttachmentCard key={`attachment:${attachment.id}`} attachment={attachment} token={token} />;
+                      }
+                      const content = (
+                        <>
+                          <FileText className="size-3 shrink-0" />
+                          <span className="min-w-0 truncate">{attachment.name}</span>
+                          {attachment.size > 0 ? <span className="shrink-0 text-muted-foreground/70">{formatAttachmentSize(attachment.size)}</span> : null}
+                        </>
                       );
-                    }
-                    return (
-                      <a key={`attachment:${attachment.id}`} className={className} href={attachmentResourceURL(attachment, token)} rel="noreferrer" target="_blank">
-                        {content}
-                      </a>
-                    );
-                  })}
-                </div>
-              ) : null}
-              {user.text ? (
-                <div className="min-w-0 max-w-full [overflow-wrap:anywhere]">
-                  {asrInput ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span aria-label={t("transcript.asrInput")} className="mr-1 inline-flex align-[-0.15em] text-muted-foreground" role="img">
-                          <Captions aria-hidden="true" className="size-3.5" strokeWidth={1.8} />
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("transcript.asrInput")}</TooltipContent>
-                    </Tooltip>
-                  ) : null}
-                  {user.text}
-                </div>
-              ) : null}
-              {user.interrupted ? <InterruptedBadge /> : null}
-            </div>
-          )}
+                      const className =
+                        "inline-flex max-w-full items-center gap-1 rounded-md border border-border/70 bg-background/70 px-2 py-1 text-xs leading-5 no-underline hover:bg-muted";
+                      if (attachment.sourcePath) {
+                        return (
+                          <button key={`attachment:${attachment.id}`} className={className} type="button" onClick={() => revealLocalPath(attachment.sourcePath || "")}>
+                            {content}
+                          </button>
+                        );
+                      }
+                      return (
+                        <a key={`attachment:${attachment.id}`} className={className} href={attachmentResourceURL(attachment, token)} rel="noreferrer" target="_blank">
+                          {content}
+                        </a>
+                      );
+                    })}
+                  </div>
+                ) : null}
+                {user.text || showASRIndicator ? (
+                  <div className="min-w-0 max-w-full [overflow-wrap:anywhere]">
+                    {showASRIndicator ? <ASRIndicator attachment={asrAudioAttachment} token={token} /> : null}
+                    {user.text}
+                  </div>
+                ) : null}
+                {user.interrupted ? <InterruptedBadge /> : null}
+              </div>
+            )}
+          </div>
         </div>
         {user.createdAt ? <MessageMeta actions={actions} align="end" createdAt={user.createdAt} text={metaText} /> : null}
       </div>
@@ -240,6 +237,12 @@ function isASRClientMessageID(clientMessageID: string | undefined) {
 type UserAttachment = NonNullable<UserInputVM["attachments"]>[number];
 type UserLocalFolder = NonNullable<UserInputVM["localFolders"]>[number];
 type OrderedUserItem = { type: "attachment"; item: UserAttachment } | { type: "local_folder"; item: UserLocalFolder };
+
+const ASR_AUDIO_ORIGIN = "asr_audio";
+
+function isASRAudioAttachment(attachment: UserAttachment) {
+  return attachment.origin === ASR_AUDIO_ORIGIN;
+}
 
 function orderedUserInputItems(attachments: UserAttachment[], localFolders: UserLocalFolder[], parts: UserInputVM["parts"]): OrderedUserItem[] {
   if (!parts || parts.length === 0) {
@@ -345,6 +348,67 @@ function AudioAttachmentCard({ attachment, token }: { attachment: UserAttachment
         />
       ) : null}
     </div>
+  );
+}
+
+function ASRIndicator({ attachment, token }: { attachment?: UserAttachment; token: string }) {
+  const { t } = useI18n();
+  const src = attachment ? attachmentResourceURL(attachment, token) : "";
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const label = attachment ? t("transcript.asrAudio") : t("transcript.asrInput");
+  const title = attachment ? `${label} · ${attachment.name}${attachment.size ? ` · ${formatAttachmentSize(attachment.size)}` : ""}` : label;
+  if (!attachment) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span aria-label={title} className="mr-1 inline-flex align-[-0.15em] text-muted-foreground" role="img">
+            <Captions aria-hidden="true" className="size-3.5" strokeWidth={1.8} />
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{title}</TooltipContent>
+      </Tooltip>
+    );
+  }
+  return (
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            aria-label={title}
+            className="mr-1 inline-grid size-5 place-items-center align-[-0.2em] text-muted-foreground transition-colors hover:text-foreground"
+            disabled={!src}
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              const audio = audioRef.current;
+              if (!audio) {
+                return;
+              }
+              if (audio.paused) {
+                void audio.play();
+              } else {
+                audio.pause();
+              }
+            }}
+          >
+            {playing ? <Pause className="size-3.5" fill="currentColor" strokeWidth={1.8} /> : <Play className="size-3.5" fill="currentColor" strokeWidth={1.8} />}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{title}</TooltipContent>
+      </Tooltip>
+      {src ? (
+        <audio
+          ref={audioRef}
+          preload="none"
+          src={src}
+          onEnded={() => setPlaying(false)}
+          onPause={() => setPlaying(false)}
+          onPlay={() => setPlaying(true)}
+        />
+      ) : null}
+    </>
   );
 }
 

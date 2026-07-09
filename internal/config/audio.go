@@ -39,12 +39,14 @@ type AudioASRConfig struct {
 }
 
 type AudioASRVADConfig struct {
-	ModelPath        string  `yaml:"model_path" json:"modelPath"`
-	Threshold        float64 `yaml:"threshold" json:"threshold"`
-	MinSilenceMillis int     `yaml:"min_silence_millis" json:"minSilenceMillis"`
-	MinSpeechMillis  int     `yaml:"min_speech_millis" json:"minSpeechMillis"`
-	WindowSize       int     `yaml:"window_size" json:"windowSize"`
-	PrerollMillis    int     `yaml:"preroll_millis" json:"prerollMillis"`
+	ModelPath         string  `yaml:"model_path" json:"modelPath"`
+	Threshold         float64 `yaml:"threshold" json:"threshold"`
+	MinEnergy         float64 `yaml:"min_energy" json:"minEnergy"`
+	PlaybackMinEnergy float64 `yaml:"playback_min_energy" json:"playbackMinEnergy"`
+	MinSilenceMillis  int     `yaml:"min_silence_millis" json:"minSilenceMillis"`
+	MinSpeechMillis   int     `yaml:"min_speech_millis" json:"minSpeechMillis"`
+	WindowSize        int     `yaml:"window_size" json:"windowSize"`
+	PrerollMillis     int     `yaml:"preroll_millis" json:"prerollMillis"`
 }
 
 type AudioAECConfig struct {
@@ -92,12 +94,14 @@ func DefaultAudioConfig() AudioConfig {
 			NumThreads:                  2,
 			Provider:                    "cpu",
 			VAD: AudioASRVADConfig{
-				ModelPath:        "runtime/models/vad/silero_vad.onnx",
-				Threshold:        0.6,
-				MinSilenceMillis: 400,
-				MinSpeechMillis:  300,
-				WindowSize:       512,
-				PrerollMillis:    500,
+				ModelPath:         "runtime/models/vad/silero_vad.onnx",
+				Threshold:         0.6,
+				MinEnergy:         0.01,
+				PlaybackMinEnergy: 0.015,
+				MinSilenceMillis:  400,
+				MinSpeechMillis:   300,
+				WindowSize:        512,
+				PrerollMillis:     500,
 			},
 		},
 		AEC: AudioAECConfig{
@@ -193,6 +197,12 @@ func (c AudioConfig) WithDefaults() AudioConfig {
 	}
 	if c.ASR.VAD.Threshold <= 0 {
 		c.ASR.VAD.Threshold = d.ASR.VAD.Threshold
+	}
+	if c.ASR.VAD.MinEnergy <= 0 {
+		c.ASR.VAD.MinEnergy = d.ASR.VAD.MinEnergy
+	}
+	if c.ASR.VAD.PlaybackMinEnergy <= 0 {
+		c.ASR.VAD.PlaybackMinEnergy = d.ASR.VAD.PlaybackMinEnergy
 	}
 	if c.ASR.VAD.MinSilenceMillis <= 0 {
 		c.ASR.VAD.MinSilenceMillis = d.ASR.VAD.MinSilenceMillis
@@ -305,6 +315,12 @@ func validateAudio(cfg AudioConfig) error {
 	}
 	if cfg.ASR.VAD.Threshold < 0.01 || cfg.ASR.VAD.Threshold > 0.99 {
 		return fmt.Errorf("%w: vad threshold must be 0.01..0.99", ErrInvalidSetting)
+	}
+	if cfg.ASR.VAD.MinEnergy < 0 || cfg.ASR.VAD.MinEnergy > 1 {
+		return fmt.Errorf("%w: vad min energy must be 0..1", ErrInvalidSetting)
+	}
+	if cfg.ASR.VAD.PlaybackMinEnergy < 0 || cfg.ASR.VAD.PlaybackMinEnergy > 1 {
+		return fmt.Errorf("%w: vad playback min energy must be 0..1", ErrInvalidSetting)
 	}
 	if cfg.ASR.VAD.MinSilenceMillis < 100 || cfg.ASR.VAD.MinSilenceMillis > 5000 {
 		return fmt.Errorf("%w: vad min silence must be 100..5000", ErrInvalidSetting)

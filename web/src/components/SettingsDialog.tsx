@@ -679,6 +679,8 @@ type VoiceFormState = {
   vadMinSpeechMillis: string;
   vadPrerollMillis: string;
   vadThreshold: string;
+  vadMinEnergy: string;
+  vadPlaybackMinEnergy: string;
   aecEnabled: boolean;
   nsEnabled: boolean;
   nsLevel: string;
@@ -902,6 +904,30 @@ function VoiceSettings({ token }: { token: string }) {
             value={form.vadThreshold}
             onBlur={saveCurrentVoiceForm}
             onChange={(value) => setForm((prev) => ({ ...prev, vadThreshold: value }))}
+          />
+          <SettingsNumberField
+            description={t("settings.voice.vadMinEnergyDesc")}
+            disabled={disabled}
+            id="pudding-voice-vad-min-energy"
+            label={t("settings.voice.vadMinEnergy")}
+            max={1}
+            min={0.001}
+            step={0.001}
+            value={form.vadMinEnergy}
+            onBlur={saveCurrentVoiceForm}
+            onChange={(value) => setForm((prev) => ({ ...prev, vadMinEnergy: value }))}
+          />
+          <SettingsNumberField
+            description={t("settings.voice.vadPlaybackMinEnergyDesc")}
+            disabled={disabled}
+            id="pudding-voice-vad-playback-min-energy"
+            label={t("settings.voice.vadPlaybackMinEnergy")}
+            max={1}
+            min={0.001}
+            step={0.001}
+            value={form.vadPlaybackMinEnergy}
+            onBlur={saveCurrentVoiceForm}
+            onChange={(value) => setForm((prev) => ({ ...prev, vadPlaybackMinEnergy: value }))}
           />
           <SettingsNumberField
             description={t("settings.voice.vadMinSilenceDesc")}
@@ -1138,6 +1164,8 @@ function defaultVoiceForm(): VoiceFormState {
     vadMinSpeechMillis: "300",
     vadPrerollMillis: "500",
     vadThreshold: "0.6",
+    vadMinEnergy: "0.01",
+    vadPlaybackMinEnergy: "0.015",
     aecEnabled: true,
     nsEnabled: true,
     nsLevel: "moderate",
@@ -1159,6 +1187,8 @@ function voiceFormFromConfig(config: AudioConfig): VoiceFormState {
     vadMinSpeechMillis: String(config.asr.vad.minSpeechMillis || 300),
     vadPrerollMillis: String(config.asr.vad.prerollMillis || 500),
     vadThreshold: String(config.asr.vad.threshold || 0.6),
+    vadMinEnergy: String(config.asr.vad.minEnergy || 0.01),
+    vadPlaybackMinEnergy: String(config.asr.vad.playbackMinEnergy || 0.015),
     aecEnabled: config.aec.enabled ?? true,
     nsEnabled: config.ns.enabled ?? true,
     nsLevel: config.ns.level || "moderate",
@@ -1182,6 +1212,8 @@ function audioConfigFromForm(config: AudioConfig, form: VoiceFormState): AudioCo
       vad: {
         ...config.asr.vad,
         threshold: normalizedNumber(form.vadThreshold, config.asr.vad.threshold),
+        minEnergy: normalizedNumber(form.vadMinEnergy, config.asr.vad.minEnergy),
+        playbackMinEnergy: normalizedNumber(form.vadPlaybackMinEnergy, config.asr.vad.playbackMinEnergy),
         minSilenceMillis: normalizedInteger(form.vadMinSilenceMillis, config.asr.vad.minSilenceMillis),
         minSpeechMillis: normalizedInteger(form.vadMinSpeechMillis, config.asr.vad.minSpeechMillis),
         prerollMillis: normalizedInteger(form.vadPrerollMillis, config.asr.vad.prerollMillis),

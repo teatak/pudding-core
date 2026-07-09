@@ -98,6 +98,7 @@ func Start(opts Options) (*Daemon, error) {
 		slog.Warn("daemon: audio config unavailable, using defaults", "err", err)
 		audioCfg = config.DefaultAudioConfig()
 	}
+	audioCfg = audioCfg.WithDefaults()
 
 	var resolver engine.Resolver
 	providerLabel := "registry"
@@ -127,17 +128,19 @@ func Start(opts Options) (*Daemon, error) {
 	eng := engine.New(st, hub, resolver, cfg, engine.WithPromptSource(prompt.NewLoader(dir, cfg)), engine.WithAttachmentHome(dir), engine.WithTools(tools))
 	audioDriver := defaultCaptureDriver(audioCfg)
 	voiceService := voice.NewService(voice.ServiceConfig{
-		Manager:   voice.NewManager(),
-		Submitter: eng,
-		Canceler:  eng,
-		Events:    hub,
-		Driver:    audioDriver,
-		ASR:       defaultASR(dir, audioCfg),
-		AEC:       defaultAEC(audioCfg, audioDriver),
-		NS:        defaultNS(audioCfg, audioDriver),
-		TTS:       defaultTTS(audioCfg),
-		HomeDir:   dir,
-		SaveAudio: audioCfg.WithDefaults().ASRSaveAudio(),
+		Manager:           voice.NewManager(),
+		Submitter:         eng,
+		Canceler:          eng,
+		Events:            hub,
+		Driver:            audioDriver,
+		ASR:               defaultASR(dir, audioCfg),
+		AEC:               defaultAEC(audioCfg, audioDriver),
+		NS:                defaultNS(audioCfg, audioDriver),
+		TTS:               defaultTTS(audioCfg),
+		HomeDir:           dir,
+		SaveAudio:         audioCfg.ASRSaveAudio(),
+		MinEnergy:         audioCfg.ASR.VAD.MinEnergy,
+		PlaybackMinEnergy: audioCfg.ASR.VAD.PlaybackMinEnergy,
 	})
 	if err := eng.Recover(context.Background()); err != nil {
 		_ = st.Close()

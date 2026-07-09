@@ -3,7 +3,9 @@ package voice
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -167,6 +169,72 @@ func TestBindInputStartsCaptureAndRoutesASR(t *testing.T) {
 	}
 }
 
+func TestCaptureEnergyGateSuppressesLowEnergyFrames(t *testing.T) {
+	drv := &captureDriver{format: frame.Format{SampleRate: 16000, Channels: 1}}
+	recASR := newRecordingASR()
+	svc := NewService(ServiceConfig{
+		Submitter: submitterFunc(func(context.Context, engine.SubmitInput) (*engine.SubmitResult, error) { return nil, nil }),
+		Driver:    drv,
+		ASR:       recASR,
+		MinEnergy: 0.5,
+	})
+	defer svc.Close()
+	if _, err := svc.BindInput("sess_input", true); err != nil {
+		t.Fatal(err)
+	}
+
+	drv.handler(frame.PCM16{
+		Format: drv.format,
+		Data:   []byte{100, 0, 100, 0, 100, 0, 100, 0},
+	})
+
+	feeds := recASR.Feeds()
+	if len(feeds) != 1 {
+		t.Fatalf("feeds len = %d, want 1", len(feeds))
+	}
+	if !allZero(feeds[0].Data) {
+		t.Fatalf("low energy frame was not silenced: %v", feeds[0].Data)
+	}
+	if got := svc.Snapshot().InputLevel; got <= 0 {
+		t.Fatalf("input level = %v, want visible low-level activity", got)
+	}
+}
+
+func TestCaptureEnergyGateUsesPlaybackThreshold(t *testing.T) {
+	drv := &captureDriver{format: frame.Format{SampleRate: 16000, Channels: 1}}
+	recASR := newRecordingASR()
+	svc := NewService(ServiceConfig{
+		Submitter:         submitterFunc(func(context.Context, engine.SubmitInput) (*engine.SubmitResult, error) { return nil, nil }),
+		Driver:            drv,
+		ASR:               recASR,
+		MinEnergy:         0.01,
+		PlaybackMinEnergy: 0.015,
+	})
+	defer svc.Close()
+	if _, err := svc.BindInput("sess_input", true); err != nil {
+		t.Fatal(err)
+	}
+
+	pcm := frame.PCM16{
+		Format: drv.format,
+		Data:   []byte{0x90, 0x01, 0x90, 0x01, 0x90, 0x01, 0x90, 0x01},
+	}
+	drv.handler(pcm)
+	svc.setCurrentPlayback("sess_input", "turn_playing")
+	drv.handler(pcm)
+
+	feeds := recASR.Feeds()
+	if len(feeds) != 2 {
+		t.Fatalf("feeds len = %d, want 2", len(feeds))
+	}
+	if !bytes.Equal(feeds[0].Data, pcm.Data) {
+		t.Fatalf("normal frame changed: got %v want %v", feeds[0].Data, pcm.Data)
+	}
+	if !allZero(feeds[1].Data) {
+		t.Fatalf("playback-gated frame was not silenced: %v", feeds[1].Data)
+	}
+}
+
 func TestBindInputRestartsUnhealthyCapture(t *testing.T) {
 	fakeASR := asr.NewFake(1)
 	drv := &captureDriver{format: frame.Format{SampleRate: 16000, Channels: 1}}
@@ -194,6 +262,32 @@ func TestBindInputRestartsUnhealthyCapture(t *testing.T) {
 	}
 }
 
+func TestBindInputCleansUpCaptureAfterStartFailure(t *testing.T) {
+	fakeASR := asr.NewFake(1)
+	drv := &captureDriver{
+		format:   frame.Format{SampleRate: 16000, Channels: 1},
+		startErr: errors.New("boom"),
+	}
+	svc := NewService(ServiceConfig{
+		Submitter: submitterFunc(func(context.Context, engine.SubmitInput) (*engine.SubmitResult, error) { return nil, nil }),
+		Driver:    drv,
+		ASR:       fakeASR,
+	})
+	defer svc.Close()
+	if _, err := svc.BindInput("sess_input", true); err == nil {
+		t.Fatal("BindInput error = nil, want start failure")
+	}
+	if drv.stopCount != 2 {
+		t.Fatalf("stopCount = %d, want 2", drv.stopCount)
+	}
+	if drv.started || drv.active {
+		t.Fatalf("driver still active after failed start: started=%v active=%v", drv.started, drv.active)
+	}
+	if got := svc.manager.Snapshot().InputOwner; got != "" {
+		t.Fatalf("input owner = %q, want empty", got)
+	}
+}
+
 func waitMessages(t *testing.T, ctx context.Context, ms *memstore.Memstore, sessionID string, want int) []*store.Message {
 	t.Helper()
 	deadline := time.After(2 * time.Second)
@@ -217,6 +311,54 @@ func waitMessages(t *testing.T, ctx context.Context, ms *memstore.Memstore, sess
 
 func testInputBackend() (*captureDriver, *asr.Fake) {
 	return &captureDriver{format: frame.Format{SampleRate: 16000, Channels: 1}}, asr.NewFake(4)
+}
+
+type recordingASR struct {
+	mu     sync.Mutex
+	events chan asr.Event
+	feeds  []frame.PCM16
+	once   sync.Once
+}
+
+func newRecordingASR() *recordingASR {
+	return &recordingASR{events: make(chan asr.Event)}
+}
+
+func (a *recordingASR) Name() string { return "recording" }
+
+func (a *recordingASR) Start(context.Context) error { return nil }
+
+func (a *recordingASR) Feed(_ context.Context, pcm frame.PCM16) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	copied := pcm
+	copied.Data = append([]byte(nil), pcm.Data...)
+	a.feeds = append(a.feeds, copied)
+	return nil
+}
+
+func (a *recordingASR) Events() <-chan asr.Event { return a.events }
+
+func (a *recordingASR) Stop(context.Context) error {
+	a.once.Do(func() { close(a.events) })
+	return nil
+}
+
+func (a *recordingASR) Feeds() []frame.PCM16 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]frame.PCM16, len(a.feeds))
+	copy(out, a.feeds)
+	return out
+}
+
+func allZero(data []byte) bool {
+	for _, value := range data {
+		if value != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func TestServiceRoutesTextDeltaToTTSOutputOwner(t *testing.T) {
@@ -506,6 +648,8 @@ type captureDriver struct {
 	started    bool
 	active     bool
 	startCount int
+	stopCount  int
+	startErr   error
 	handler    driver.CaptureHandler
 }
 
@@ -523,9 +667,10 @@ func (d *captureDriver) StartCapture(_ context.Context, handler driver.CaptureHa
 	d.active = true
 	d.startCount++
 	d.handler = handler
-	return nil
+	return d.startErr
 }
 func (d *captureDriver) StopCapture(context.Context) error {
+	d.stopCount++
 	d.started = false
 	d.active = false
 	return nil
