@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
@@ -126,6 +127,47 @@ func TestProcessRespondsToServerRequest(t *testing.T) {
 	}
 	if !ok {
 		t.Fatal("server request response was not accepted")
+	}
+}
+
+func TestManagerSynchronizesDocumentVersionsAndDiagnostics(t *testing.T) {
+	manager := newTestManager()
+	t.Cleanup(func() { closeTestManager(t, manager) })
+	spec := testServerSpec(t, "documents")
+	uri := fileURI(filepath.Join(spec.Key.LanguageRoot, "document.go"))
+	first, err := manager.SyncDocument(context.Background(), spec, Document{URI: uri, LanguageID: "go", Text: "package demo\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.Changed || first.Version != 1 || first.PositionEncoding != "utf-8" {
+		t.Fatalf("unexpected first state: %+v", first)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	snapshot, ok, err := manager.PublishedDiagnostics(ctx, spec, uri, first.PreviousDiagnosticGeneration)
+	cancel()
+	if err != nil || !ok || len(snapshot.Diagnostics) != 1 {
+		t.Fatalf("published diagnostics = %+v, %v, %v", snapshot, ok, err)
+	}
+	second, err := manager.SyncDocument(context.Background(), spec, Document{URI: uri, LanguageID: "go", Text: "package demo\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Changed || second.Version != 1 {
+		t.Fatalf("unchanged document state: %+v", second)
+	}
+	third, err := manager.SyncDocument(context.Background(), spec, Document{URI: uri, LanguageID: "go", Text: "package demo\n\nfunc F() {}\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !third.Changed || third.Version != 2 {
+		t.Fatalf("changed document state: %+v", third)
+	}
+	var counts map[string]int
+	if err := manager.Request(context.Background(), spec, "test/documentState", nil, &counts); err != nil {
+		t.Fatal(err)
+	}
+	if counts["opens"] != 1 || counts["changes"] != 1 {
+		t.Fatalf("document notifications = %+v", counts)
 	}
 }
 
@@ -275,13 +317,15 @@ func testServerSpec(t *testing.T, kind string) ServerSpec {
 }
 
 type fakeLSP struct {
-	reader         *frameReader
-	writeMu        sync.Mutex
-	rootURI        string
-	cancelSeen     bool
-	serverRequest  map[string]json.RawMessage
-	nextServerID   int
-	ignoreShutdown bool
+	reader          *frameReader
+	writeMu         sync.Mutex
+	rootURI         string
+	cancelSeen      bool
+	serverRequest   map[string]json.RawMessage
+	nextServerID    int
+	ignoreShutdown  bool
+	documentOpens   int
+	documentChanges int
 }
 
 func runFakeLSP() error {
@@ -366,6 +410,30 @@ func (s *fakeLSP) handleClientMessage(message wireMessage) (bool, error) {
 		})
 	case "test/crash":
 		os.Exit(42)
+	case "textDocument/didOpen":
+		s.documentOpens++
+		var params struct {
+			TextDocument struct {
+				URI string `json:"uri"`
+			} `json:"textDocument"`
+		}
+		if err := json.Unmarshal(message.Params, &params); err != nil {
+			return false, err
+		}
+		return false, s.publishDocumentDiagnostic(params.TextDocument.URI)
+	case "textDocument/didChange":
+		s.documentChanges++
+		var params struct {
+			TextDocument struct {
+				URI string `json:"uri"`
+			} `json:"textDocument"`
+		}
+		if err := json.Unmarshal(message.Params, &params); err != nil {
+			return false, err
+		}
+		return false, s.publishDocumentDiagnostic(params.TextDocument.URI)
+	case "test/documentState":
+		return false, s.respond(message.ID, map[string]int{"opens": s.documentOpens, "changes": s.documentChanges})
 	case "shutdown":
 		if s.ignoreShutdown {
 			return false, nil
@@ -378,6 +446,20 @@ func (s *fakeLSP) handleClientMessage(message wireMessage) (bool, error) {
 		return true, nil
 	}
 	return false, nil
+}
+
+func (s *fakeLSP) publishDocumentDiagnostic(uri string) error {
+	return s.notify("textDocument/publishDiagnostics", map[string]any{
+		"uri": uri,
+		"diagnostics": []map[string]any{{
+			"range": map[string]any{
+				"start": map[string]int{"line": 0, "character": 0},
+				"end":   map[string]int{"line": 0, "character": 1},
+			},
+			"severity": 2,
+			"message":  "document diagnostic",
+		}},
+	})
 }
 
 func (s *fakeLSP) handleClientResponse(message wireMessage) {

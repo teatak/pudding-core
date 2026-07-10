@@ -40,6 +40,8 @@ type Process struct {
 	positionEncoding string
 	diagnostics      *diagnosticsCache
 	stderr           *byteRing
+	documentsMu      sync.Mutex
+	documents        map[string]documentState
 
 	writeMu sync.Mutex
 	mu      sync.Mutex
@@ -93,6 +95,7 @@ func startProcess(ctx context.Context, spec ServerSpec, opts processOptions) (*P
 		positionEncoding: "utf-16",
 		diagnostics:      newDiagnosticsCache(),
 		stderr:           newByteRing(opts.stderrBytes),
+		documents:        map[string]documentState{},
 		pending:          map[string]chan wireMessage{},
 		done:             make(chan struct{}),
 	}
@@ -267,7 +270,7 @@ func (p *Process) handleMessage(message wireMessage) {
 
 func (p *Process) handleServerRequest(message wireMessage) {
 	var result any
-	var responseErr *responseError
+	var responseErr *ResponseError
 	switch message.Method {
 	case "workspace/configuration":
 		var params struct {
@@ -282,9 +285,9 @@ func (p *Process) handleServerRequest(message wireMessage) {
 	case "window/showMessageRequest":
 		result = nil
 	case "workspace/applyEdit":
-		responseErr = &responseError{Code: -32601, Message: "workspace/applyEdit is not supported"}
+		responseErr = &ResponseError{Code: -32601, Message: "workspace/applyEdit is not supported"}
 	default:
-		responseErr = &responseError{Code: -32601, Message: "method not supported"}
+		responseErr = &ResponseError{Code: -32601, Message: "method not supported"}
 	}
 	resultRaw, err := json.Marshal(result)
 	if err != nil {

@@ -61,13 +61,13 @@ type DiagnosticSnapshot struct {
 	UpdatedAt   time.Time
 }
 
-type responseError struct {
+type ResponseError struct {
 	Code    int             `json:"code"`
 	Message string          `json:"message"`
 	Data    json.RawMessage `json:"data,omitempty"`
 }
 
-func (e *responseError) Error() string {
+func (e *ResponseError) Error() string {
 	if e == nil {
 		return ""
 	}
@@ -80,7 +80,21 @@ type wireMessage struct {
 	Method  string          `json:"method,omitempty"`
 	Params  json.RawMessage `json:"params,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *responseError  `json:"error,omitempty"`
+	Error   *ResponseError  `json:"error,omitempty"`
+}
+
+type Document struct {
+	URI        string
+	LanguageID string
+	Text       string
+}
+
+type DocumentState struct {
+	URI                          string
+	Version                      int
+	Changed                      bool
+	PositionEncoding             string
+	PreviousDiagnosticGeneration uint64
 }
 
 type workspaceFolder struct {

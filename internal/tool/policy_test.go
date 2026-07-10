@@ -39,6 +39,23 @@ func TestClassifyToolCallGitReadRisk(t *testing.T) {
 	}
 }
 
+func TestClassifyToolCallCodeReadRisk(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args string
+	}{
+		{name: CodeSymbols, args: `{"scope":"project","path":".","query":"Runner"}`},
+		{name: CodeDefinition, args: `{"scope":"project","path":"main.go","line":1,"column":1}`},
+		{name: CodeReferences, args: `{"scope":"project","path":"main.go","line":1,"column":1}`},
+		{name: CodeDiagnostics, args: `{"scope":"project","paths":["main.go"]}`},
+	} {
+		risk, ok := ClassifyToolCall(test.name, json.RawMessage(test.args))
+		if !ok || risk.Class != RiskClassRead || !risk.LowRisk || risk.Scope != managedScopeProject {
+			t.Fatalf("unexpected code read risk for %s: %+v ok=%v", test.name, risk, ok)
+		}
+	}
+}
+
 func TestClassifyToolCallPatchApplyRisk(t *testing.T) {
 	risk, ok := ClassifyToolCall(PatchApply, json.RawMessage(`{"proposal_id":"patch_123"}`))
 	if !ok || risk.Class != RiskClassWrite || risk.Operation != "patch_apply" || risk.Scope != "project" {

@@ -26,6 +26,10 @@ const (
 	SkillRead           = "builtin_skill_read"
 	ProjectInspect      = "builtin_project_inspect"
 	ProjectInstructions = "builtin_project_instructions"
+	CodeSymbols         = "builtin_code_symbols"
+	CodeDefinition      = "builtin_code_definition"
+	CodeReferences      = "builtin_code_references"
+	CodeDiagnostics     = "builtin_code_diagnostics"
 	FileList            = "builtin_file_list"
 	FileRead            = "builtin_file_read"
 	AttachmentReadImage = "builtin_attachment_read_image"
@@ -110,31 +114,32 @@ type BrowserStateStore interface {
 type BuiltinOption func(*BuiltinRunner)
 
 type BuiltinRunner struct {
-	webConfig       WebConfigSource
-	appEndpoints    AppEndpointSource
-	appSkills       AppSkillReader
-	skillReader     SkillReader
-	skillDrafts     SkillDraftSource
-	history         HistorySearchSource
-	historyMessages HistoryMessageSource
-	browserState    BrowserStateStore
-	browser         browser.Service
-	languageService lsp.Service
-	camera          CameraCapturer
-	screen          DesktopScreenCapturer
-	homeDir         string
-	webHTTPClient   *http.Client
-	tavilySearch    string
-	tavilyExtract   string
-	weatherEndpoint string
-	weatherMu       sync.Mutex
-	weatherCache    map[string]weatherCacheEntry
-	graphqlSchemaMu sync.Mutex
-	graphqlSchemas  map[string]*graphqlSchemaCache
-	patchMu         sync.Mutex
-	patchProposals  map[string]*patchProposal
-	gitApprovalMu   sync.Mutex
-	gitApprovals    map[string]gitCommitApprovalSnapshot
+	webConfig        WebConfigSource
+	appEndpoints     AppEndpointSource
+	appSkills        AppSkillReader
+	skillReader      SkillReader
+	skillDrafts      SkillDraftSource
+	history          HistorySearchSource
+	historyMessages  HistoryMessageSource
+	browserState     BrowserStateStore
+	browser          browser.Service
+	languageService  lsp.Service
+	goServerResolver GoServerResolver
+	camera           CameraCapturer
+	screen           DesktopScreenCapturer
+	homeDir          string
+	webHTTPClient    *http.Client
+	tavilySearch     string
+	tavilyExtract    string
+	weatherEndpoint  string
+	weatherMu        sync.Mutex
+	weatherCache     map[string]weatherCacheEntry
+	graphqlSchemaMu  sync.Mutex
+	graphqlSchemas   map[string]*graphqlSchemaCache
+	patchMu          sync.Mutex
+	patchProposals   map[string]*patchProposal
+	gitApprovalMu    sync.Mutex
+	gitApprovals     map[string]gitCommitApprovalSnapshot
 }
 
 func NewBuiltinRunner(opts ...BuiltinOption) *BuiltinRunner {
@@ -202,6 +207,12 @@ func WithBrowser(service browser.Service) BuiltinOption {
 func WithLanguageService(service lsp.Service) BuiltinOption {
 	return func(r *BuiltinRunner) {
 		r.languageService = service
+	}
+}
+
+func WithGoServerResolver(resolver GoServerResolver) BuiltinOption {
+	return func(r *BuiltinRunner) {
+		r.goServerResolver = resolver
 	}
 }
 
@@ -304,6 +315,30 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Name:        ProjectInstructions,
 			Description: "Read the project instruction files that apply to one or more authorized target paths. Resolves AGENTS.md, CLAUDE.md, and CONTRIBUTING.md from the project root toward each target directory, returning deduplicated content in broad-to-specific order.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Project instructions can be read only from authorized project directories."},"paths":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":32,"description":"Target files or directories whose applicable instructions are needed. Missing future file paths are allowed when their parent remains inside the project."}},"required":["scope","paths"],"additionalProperties":false}`),
+			Capability:  store.ModeProject,
+		},
+		{
+			Name:        CodeSymbols,
+			Description: "Search semantic workspace symbols through the language server. Uses one shared tool contract across languages; the current implementation supports Go through gopls.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"path":{"type":"string","description":"Authorized project file or directory used to resolve the language root. Defaults to the first project root."},"language":{"type":"string","enum":["go"],"description":"Optional language override. Usually inferred from path."},"query":{"type":"string","description":"Non-empty symbol name query."},"max_results":{"type":"integer","minimum":1,"maximum":200,"description":"Default 100, maximum 200."}},"required":["scope","query"],"additionalProperties":false}`),
+			Capability:  store.ModeProject,
+		},
+		{
+			Name:        CodeDefinition,
+			Description: "Find semantic definitions for a 1-based source position through the language server. Project-external locations are counted but not exposed.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"path":{"type":"string","description":"Authorized source file."},"language":{"type":"string","enum":["go"],"description":"Optional language override."},"line":{"type":"integer","minimum":1,"description":"1-based line."},"column":{"type":"integer","minimum":1,"description":"1-based Unicode character column."}},"required":["scope","path","line","column"],"additionalProperties":false}`),
+			Capability:  store.ModeProject,
+		},
+		{
+			Name:        CodeReferences,
+			Description: "Find semantic references for a 1-based source position through the language server. Results are sorted, deduplicated, bounded, and limited to authorized Project roots.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"path":{"type":"string","description":"Authorized source file."},"language":{"type":"string","enum":["go"],"description":"Optional language override."},"line":{"type":"integer","minimum":1},"column":{"type":"integer","minimum":1},"include_declaration":{"type":"boolean","description":"Defaults to true."},"max_results":{"type":"integer","minimum":1,"maximum":500,"description":"Default 100, maximum 500."}},"required":["scope","path","line","column"],"additionalProperties":false}`),
+			Capability:  store.ModeProject,
+		},
+		{
+			Name:        CodeDiagnostics,
+			Description: "Read current semantic language-server diagnostics for up to 32 source files sharing one language root. This is static analysis and does not claim tests or builds passed.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"paths":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":32,"description":"Authorized source files in one language root."},"language":{"type":"string","enum":["go"],"description":"Optional language override."},"severity":{"type":"array","items":{"type":"string","enum":["error","warning","information","hint"]},"description":"Optional severity filter."}},"required":["scope","paths"],"additionalProperties":false}`),
 			Capability:  store.ModeProject,
 		},
 		{
@@ -572,6 +607,14 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.projectInspect(ctx, call)
 	case ProjectInstructions:
 		return r.projectInstructions(call)
+	case CodeSymbols:
+		return r.codeSymbols(ctx, call)
+	case CodeDefinition:
+		return r.codeDefinition(ctx, call)
+	case CodeReferences:
+		return r.codeReferences(ctx, call)
+	case CodeDiagnostics:
+		return r.codeDiagnostics(ctx, call)
 	case FileList:
 		return r.fileList(call)
 	case FileRead:

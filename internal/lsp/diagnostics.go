@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"context"
 	"encoding/json"
 	"sync"
 	"time"
@@ -10,10 +11,11 @@ type diagnosticsCache struct {
 	mu         sync.RWMutex
 	generation uint64
 	byURI      map[string]DiagnosticSnapshot
+	changed    chan struct{}
 }
 
 func newDiagnosticsCache() *diagnosticsCache {
-	return &diagnosticsCache{byURI: map[string]DiagnosticSnapshot{}}
+	return &diagnosticsCache{byURI: map[string]DiagnosticSnapshot{}, changed: make(chan struct{})}
 }
 
 func (c *diagnosticsCache) update(raw json.RawMessage) {
@@ -34,6 +36,8 @@ func (c *diagnosticsCache) update(raw json.RawMessage) {
 		Generation:  c.generation,
 		UpdatedAt:   time.Now(),
 	}
+	close(c.changed)
+	c.changed = make(chan struct{})
 	c.mu.Unlock()
 }
 
@@ -46,4 +50,30 @@ func (c *diagnosticsCache) get(uri string) (DiagnosticSnapshot, bool) {
 	}
 	snapshot.Diagnostics = append([]Diagnostic(nil), snapshot.Diagnostics...)
 	return snapshot, true
+}
+
+func (c *diagnosticsCache) generationForURI(uri string) uint64 {
+	c.mu.RLock()
+	snapshot := c.byURI[uri]
+	c.mu.RUnlock()
+	return snapshot.Generation
+}
+
+func (c *diagnosticsCache) wait(ctx context.Context, uri string, afterGeneration uint64) (DiagnosticSnapshot, bool, error) {
+	for {
+		c.mu.RLock()
+		snapshot, ok := c.byURI[uri]
+		changed := c.changed
+		if ok && snapshot.Generation > afterGeneration {
+			snapshot.Diagnostics = append([]Diagnostic(nil), snapshot.Diagnostics...)
+			c.mu.RUnlock()
+			return snapshot, true, nil
+		}
+		c.mu.RUnlock()
+		select {
+		case <-ctx.Done():
+			return DiagnosticSnapshot{}, false, ctx.Err()
+		case <-changed:
+		}
+	}
 }

@@ -21,6 +21,12 @@ import { openFilePreview } from "@/state/filePreviewStore";
 const commandToolName = "builtin_command_run";
 const projectInspectToolName = "builtin_project_inspect";
 const projectInstructionsToolName = "builtin_project_instructions";
+const languageCodeToolNames = new Set([
+  "builtin_code_symbols",
+  "builtin_code_definition",
+  "builtin_code_references",
+  "builtin_code_diagnostics",
+]);
 const gitToolNames = new Set([
   "builtin_git_status",
   "builtin_git_diff",
@@ -47,7 +53,7 @@ type Translator = (key: string) => string;
 type UnknownRecord = Record<string, unknown>;
 
 export function isCodeToolName(name: string) {
-  return name === commandToolName || name === projectInspectToolName || name === projectInstructionsToolName || gitToolNames.has(name) || patchToolNames.has(name) || fileToolNames.has(name);
+  return name === commandToolName || name === projectInspectToolName || name === projectInstructionsToolName || languageCodeToolNames.has(name) || gitToolNames.has(name) || patchToolNames.has(name) || fileToolNames.has(name);
 }
 
 export function codeToolSummary(name: string, args: unknown, result: unknown, t: Translator) {
@@ -83,6 +89,15 @@ export function codeToolSummary(name: string, args: unknown, result: unknown, t:
   }
   if (name === projectInstructionsToolName) {
     return countSummary(output, "instructionCount", "transcript.codeInstructionFiles", t);
+  }
+  if (name === "builtin_code_symbols") {
+    return countSummary(output, "resultCount", "transcript.codeSymbols", t);
+  }
+  if (name === "builtin_code_diagnostics") {
+    return countSummary(output, "diagnosticCount", "transcript.codeDiagnostics", t);
+  }
+  if (name === "builtin_code_definition" || name === "builtin_code_references") {
+    return countSummary(output, "locationCount", "transcript.codeLocations", t);
   }
   if (name === "builtin_git_status") {
     if (readBoolean(output, "clean")) {
@@ -150,6 +165,8 @@ export function CodeToolDetails({
     body = <ProjectInspectDetails output={output} t={t} />;
   } else if (name === projectInstructionsToolName) {
     body = <ProjectInstructionsDetails output={output} t={t} />;
+  } else if (languageCodeToolNames.has(name)) {
+    body = <LanguageCodeDetails callID={callID} name={name} output={output} sessionID={sessionID} t={t} />;
   } else if (name === "builtin_git_status") {
     body = <GitStatusDetails output={output} t={t} />;
   } else if (name === "builtin_git_diff") {
@@ -164,6 +181,84 @@ export function CodeToolDetails({
     body = <FileDetails callID={callID} input={input} name={name} output={output} locale={locale} sessionID={sessionID} t={t} />;
   }
   return <>{body}</>;
+}
+
+function LanguageCodeDetails({ callID, name, output, sessionID, t }: { callID?: string; name: string; output: UnknownRecord | null; sessionID?: string; t: Translator }) {
+  if (!output) {
+    return <EmptyLine>{t("transcript.codeWaitingResult")}</EmptyLine>;
+  }
+  if (output.ok === false) {
+    return <ErrorDetail output={output} t={t} />;
+  }
+  if (name === "builtin_code_diagnostics") {
+    const diagnostics = readRecordArray(output, "diagnostics");
+    return diagnostics.length > 0
+      ? <CommandDiagnosticList callID={callID} diagnostics={diagnostics} sessionID={sessionID} t={t} />
+      : <EmptyLine>{t("transcript.codeNoSemanticResults")}</EmptyLine>;
+  }
+  const items = name === "builtin_code_symbols" ? readRecordArray(output, "symbols") : readRecordArray(output, "locations");
+  const countKey = name === "builtin_code_symbols" ? "transcript.codeSymbols" : "transcript.codeLocations";
+  const external = readNumber(output, "externalResultCount") ?? 0;
+  return (
+    <div className="space-y-1">
+      <FileResultMeta
+        values={[
+          replace(t(countKey), { count: String(items.length) }),
+          external > 0 ? replace(t("transcript.codeExternalResults"), { count: String(external) }) : "",
+          readBoolean(output, "truncated") ? t("transcript.codePartialResults") : "",
+        ]}
+      />
+      {items.length > 0
+        ? <LanguageCodeLocationList callID={callID} items={items} sessionID={sessionID} symbols={name === "builtin_code_symbols"} />
+        : <EmptyLine>{t("transcript.codeNoSemanticResults")}</EmptyLine>}
+    </div>
+  );
+}
+
+function LanguageCodeLocationList({ callID, items, sessionID, symbols }: { callID?: string; items: UnknownRecord[]; sessionID?: string; symbols: boolean }) {
+  return (
+    <div className="max-h-72 overflow-auto border-t border-border/50 pt-1">
+      {items.slice(0, 200).map((item, index) => {
+        const path = readString(item, "path");
+        const relativePath = readString(item, "relativePath") || path;
+        const line = readNumber(item, "line") ?? 1;
+        const column = readNumber(item, "column") ?? 1;
+        const excerpt = readString(item, "excerpt");
+        const title = symbols ? readString(item, "name") : relativePath;
+        const detail = symbols
+          ? [readString(item, "kind"), readString(item, "containerName")].filter(Boolean).join(" · ")
+          : `${relativePath}:${line}:${column}`;
+        const previewable = Boolean(sessionID && path && excerpt);
+        const content = (
+          <>
+            <span className="min-w-0 truncate font-mono text-[11px] text-foreground/90">{title}</span>
+            <span className="shrink-0 truncate text-[10px] text-muted-foreground">{detail}</span>
+          </>
+        );
+        return previewable ? (
+          <button
+            key={`${path}:${line}:${column}:${index}`}
+            className="grid min-h-7 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-sm px-1 text-left hover:bg-muted/60"
+            type="button"
+            onClick={() => openFilePreview({
+              callID,
+              content: excerpt,
+              lineStart: readNumber(item, "lineStart") ?? line,
+              lineStep: 1,
+              path,
+              sessionID: sessionID!,
+              source: "code-location",
+              truncated: true,
+            })}
+          >
+            {content}
+          </button>
+        ) : (
+          <div key={`${path}:${line}:${column}:${index}`} className="grid min-h-7 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-1">{content}</div>
+        );
+      })}
+    </div>
+  );
 }
 
 function ProjectInstructionsDetails({ output, t }: { output: UnknownRecord | null; t: Translator }) {

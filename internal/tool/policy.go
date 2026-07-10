@@ -25,6 +25,9 @@ type ToolRisk struct {
 }
 
 func ClassifyToolCall(name string, raw json.RawMessage) (ToolRisk, bool) {
+	if name == CodeSymbols || name == CodeDefinition || name == CodeReferences || name == CodeDiagnostics {
+		return classifyCodeReadCall(name, raw)
+	}
 	if name == CommandRun {
 		return classifyCommandCall(raw)
 	}
@@ -87,6 +90,29 @@ func ClassifyToolCall(name string, raw json.RawMessage) (ToolRisk, bool) {
 	default:
 		return ToolRisk{}, false
 	}
+}
+
+func classifyCodeReadCall(name string, raw json.RawMessage) (ToolRisk, bool) {
+	var args struct {
+		Scope string   `json:"scope"`
+		Path  string   `json:"path"`
+		Paths []string `json:"paths"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil || strings.TrimSpace(args.Scope) != managedScopeProject {
+		return ToolRisk{}, false
+	}
+	paths := args.Paths
+	if path := strings.TrimSpace(args.Path); path != "" {
+		paths = append(paths, path)
+	}
+	return ToolRisk{
+		Class:     RiskClassRead,
+		Operation: strings.TrimPrefix(name, "builtin_"),
+		Scope:     managedScopeProject,
+		Paths:     compactRiskPaths(paths...),
+		Summary:   "Read semantic code information from the project language server.",
+		LowRisk:   true,
+	}, true
 }
 
 func classifyGitWriteCall(name string, raw json.RawMessage) (ToolRisk, bool) {

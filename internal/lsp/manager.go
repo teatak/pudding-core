@@ -22,6 +22,18 @@ const (
 // Service is the protocol-level boundary injected into the tool layer.
 type Service interface {
 	Request(ctx context.Context, spec ServerSpec, method string, params, result any) error
+	SyncDocument(ctx context.Context, spec ServerSpec, document Document) (DocumentState, error)
+	PublishedDiagnostics(ctx context.Context, spec ServerSpec, uri string, afterGeneration uint64) (DiagnosticSnapshot, bool, error)
+	PositionEncoding(ctx context.Context, spec ServerSpec) (string, error)
+}
+
+func (m *Manager) PositionEncoding(ctx context.Context, spec ServerSpec) (string, error) {
+	process, err := m.Acquire(ctx, spec)
+	if err != nil {
+		return "", err
+	}
+	m.touch(process.spec.Key, process)
+	return process.PositionEncoding(), nil
 }
 
 type ManagerOption func(*Manager)
@@ -108,6 +120,28 @@ func (m *Manager) Request(ctx context.Context, spec ServerSpec, method string, p
 	err = process.Request(ctx, method, params, result)
 	m.touch(process.spec.Key, process)
 	return err
+}
+
+func (m *Manager) SyncDocument(ctx context.Context, spec ServerSpec, document Document) (DocumentState, error) {
+	process, err := m.Acquire(ctx, spec)
+	if err != nil {
+		return DocumentState{}, err
+	}
+	m.touch(process.spec.Key, process)
+	state, err := process.SyncDocument(document)
+	m.touch(process.spec.Key, process)
+	return state, err
+}
+
+func (m *Manager) PublishedDiagnostics(ctx context.Context, spec ServerSpec, uri string, afterGeneration uint64) (DiagnosticSnapshot, bool, error) {
+	process, err := m.Acquire(ctx, spec)
+	if err != nil {
+		return DiagnosticSnapshot{}, false, err
+	}
+	m.touch(process.spec.Key, process)
+	snapshot, ok, err := process.diagnostics.wait(ctx, uri, afterGeneration)
+	m.touch(process.spec.Key, process)
+	return snapshot, ok, err
 }
 
 // Acquire returns the initialized process for spec, starting it once per key.

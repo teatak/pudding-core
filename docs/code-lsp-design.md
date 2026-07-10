@@ -1,6 +1,6 @@
 # Pudding LSP 语言智能设计
 
-> 状态:实施中,C10.0 已完成(2026-07-10)。
+> 状态:实施中,C10.0 与 C10.1 已完成(2026-07-10)。
 > 对应阶段:C10。  
 > 首版语言:Go、TypeScript / JavaScript。  
 > 目标:在不引入后端 focus、隐式上下文或完整 IDE 状态的前提下,为 Project mode
@@ -686,7 +686,7 @@ PUDDING_LSP_INTEGRATION=1
 
 ### C10.1: Go / gopls
 
-预计 2-3 天。
+状态:已完成(2026-07-10)。
 
 - Go language root resolver。
 - gopls allowlist resolver 与 offline environment。
@@ -694,6 +694,22 @@ PUDDING_LSP_INTEGRATION=1
 - Project path filtering、excerpt、结构化错误。
 
 验收:已有 gopls 环境能完成 Go 定义、引用和诊断;无 gopls 时返回明确 unavailable。
+
+实际落地:
+
+- 注册统一的 symbols、definition、references、diagnostics 四个 Code Tool;语言差异
+  保留在内部 adapter,没有新增 Go 专属工具名。
+- Go resolver 按 `go.work`、最近 `go.mod`、Project root fallback 的顺序解析
+  language root,并固定从 PATH 检测 `gopls`。
+- gopls 使用最小环境以及 `GOPROXY=off`、`GOTOOLCHAIN=local`,不自动安装或下载。
+- 磁盘文档按 hash 与 version 发送 `didOpen` / full-content `didChange`,打开文档数量
+  有界;位置支持 UTF-8 / UTF-16 / UTF-32 转换。
+- 定义、引用、符号和诊断路径再次经过当前 Project roots 校验;Project 外结果只计数,
+  不返回路径。
+- fake service 单测覆盖 root、编码、过滤、去重和 publish diagnostics fallback;
+  `PUDDING_LSP_INTEGRATION=1` 可使用真实 gopls 验证四个工具。
+- transcript 已补统一工具显示名、图标、基础结构化位置/诊断列表和三语 i18n;
+  C10.3 继续完成视觉与可靠性收口。
 
 ### C10.2: TypeScript / JavaScript
 
