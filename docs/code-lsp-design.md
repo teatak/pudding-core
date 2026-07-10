@@ -31,7 +31,8 @@ LLM tool call
 4. daemon 与 language server 使用 stdio JSON-RPC;前端不直接连接 LSP。
 5. LSP 输出只通过正常 tool result 进入 canonical context。
 6. 首版只做只读能力,不做 rename、code action 自动应用和格式化写入。
-7. 只检测已有 language server,不自动下载、安装或联网修复依赖。
+7. Release 使用构建期锁定并打包的 language server;运行时不下载、安装或联网修复
+   依赖。开发模式仍可回退项目本地或 PATH。
 
 ## 2. 产品范围
 
@@ -53,7 +54,7 @@ LLM tool call
 - 不做 completion / signature help。
 - 不做 rename / code action / organize imports。
 - 不允许模型传入任意 language server executable 或启动参数。
-- 不自动安装 `gopls`、`typescript-language-server` 或 npm package。
+- 不在用户运行时安装 `gopls`、`typescript-language-server` 或 npm package。
 - 不把 language server diagnostics 持久化到 SQLite。
 - 不新增无 session scope 的 `/lsp/*` 业务 API。
 
@@ -151,10 +152,13 @@ Project roots 仍是授权事实源。language root 是一次 tool call 内从 t
 language server:
 
 ```text
-executable: gopls from PATH
+executable: Release bundled gopls, then PATH fallback
 args:       serve
 transport:  stdio
 ```
+
+Release 内置 `gopls`,但不内置完整 Go SDK。`gopls` 运行时仍调用 PATH 中的 `go`
+命令;没有可用 Go SDK 时返回语言服务错误,不联网下载 toolchain。
 
 ### 5.2 TypeScript / JavaScript
 
@@ -167,9 +171,10 @@ transport:  stdio
 
 language server 解析顺序:
 
-1. `<languageRoot>/node_modules/.bin/typescript-language-server`。
-2. 授权 Project root 下最近 package 的本地 binary。
-3. PATH 中的 `typescript-language-server`。
+1. Release bundle 中签名的 `typescript-language-server` 启动器。
+2. `<languageRoot>/node_modules/.bin/typescript-language-server`。
+3. 授权 Project root 下最近 package 的本地 binary。
+4. PATH 中的 `typescript-language-server`。
 
 固定参数:
 
@@ -178,6 +183,9 @@ language server 解析顺序:
 ```
 
 不接受 tool input 覆盖 executable 或 args。
+
+Release 同时携带固定 TypeScript fallback。Server 仍可使用项目声明的 TypeScript 版本;
+项目没有 TypeScript 时才使用 bundle 版本。
 
 ### 5.3 多 root Project
 
@@ -197,7 +205,7 @@ target path 必须先由现有 Project resolver 唯一解析到一个授权 root
 | 普通 request timeout | 20 秒 |
 | diagnostics timeout | 30 秒 |
 | idle timeout | 10 分钟 |
-| daemon 最大 LSP process | 6 |
+| daemon 最大 LSP process | 3 |
 | 单条 JSON-RPC message | 8 MiB |
 | stderr ring buffer | 64 KiB |
 | 单次 crash 自动重启 | 最多 1 次 |
@@ -510,7 +518,7 @@ Project approval 是产品信任边界,不是 OS process sandbox。文档和 UI 
   "language": "go",
   "server": "gopls",
   "checked": ["PATH:gopls"],
-  "hint": "Install or configure gopls, then retry. Pudding did not install it automatically."
+  "hint": "Reinstall Pudding or configure gopls in PATH, then retry. Pudding does not download language servers at runtime."
 }
 ```
 
@@ -731,8 +739,8 @@ PUDDING_LSP_INTEGRATION=1
   `typescript`、`typescriptreact`、`javascript`、`javascriptreact` document ID。
 - language root 按 `tsconfig.json`、`jsconfig.json`、`package.json`、Project root
   fallback 解析;目录同时命中等距 Go/TypeScript root 时返回 `language_ambiguous`。
-- server resolver 从 language root 向 Project root 查找最近的
-  `node_modules/.bin/typescript-language-server`,最后回退 PATH;不安装依赖。
+- server resolver 在 Release 中优先使用签名 bundle;开发环境从 language root 向
+  Project root 查找最近的 `node_modules/.bin/typescript-language-server`,最后回退 PATH。
 - TypeScript/JavaScript 复用 UTF-16 转换、Project 二次过滤、diagnostics pull/publish
   fallback、稳定错误和统一 transcript renderer。
 - fake service 测试覆盖 monorepo root、binary 优先级、TSX document ID、统一工具调用和
@@ -765,6 +773,30 @@ PUDDING_LSP_INTEGRATION=1
 - fake LSP race tests 覆盖默认 request timeout 后复用、process exit 后重建、结果大小上限
   与越界 location;真实 gopls 集成继续由 `PUDDING_LSP_INTEGRATION=1` 验证。
 
+### C10.4: Release 内置语言服务
+
+状态:已完成(2026-07-10)。
+
+实际落地:
+
+- `make language-servers` 在构建期准备固定版本:`gopls v0.22.0`、
+  `typescript-language-server 5.3.0` 与 TypeScript `6.0.3`;npm 使用独立 lockfile,
+  用户运行时不联网安装。
+- daemon 根据自身可执行文件定位同级 `language-servers` 目录,固定文件名优先于项目
+  binary 与 PATH。tool input 仍不能指定 executable、args 或 environment。
+- macOS bundle 使用 Electron 的 Node runtime 和 `ELECTRON_RUN_AS_NODE=1` 启动签名的
+  TypeScript server JS;若未来关闭 Electron `runAsNode` fuse,必须同时改为独立 Node
+  runtime 或新的受控 bridge。
+- `.app` 内携带第三方 license;本次实测 language server 资源约 65 MB,全部按需启动。
+- `workspace/symbol` 首次调用会有界扫描最多 2048 个文件,跳过依赖与构建目录,先同步
+  一个 TS/JS seed document,避免 tsserver 的 `No Project`。
+- initialize 明确声明 workspace configuration 与 publish diagnostics capability;
+  TypeScript 首次 publish diagnostics 最多等待 3 秒。
+- 当前 Release 打包脚本仅支持 macOS。resolver 与资源命名已保留 Windows 扩展名规则;
+  Windows/Linux 发布前仍需各自的资源复制和 Node 启动器脚本。
+- `.app` 内 `gopls` 与 Electron TypeScript 启动器均通过 symbols、definition、references、
+  diagnostics 四项真实集成测试,并通过 `codesign --verify --deep --strict`。
+
 C10 至此完成。
 
 ## 17. 验收标准
@@ -778,14 +810,15 @@ C10 至此完成。
 - server 缺失、崩溃、超时都有稳定结构化错误。
 - Go 和 TypeScript 使用同一组用户可见 tool names 与 renderer contract。
 - 首版没有 rename、applyEdit 或隐式文件写入。
-- 默认流程不触发网络安装或依赖下载。
+- 用户运行时不触发 language server 安装或依赖下载。
 - `go test ./...`、Web build 与 `git diff --check` 通过。
 
 ## 18. 后续方向
 
 完成 C10 后再评估:
 
-- 是否随 desktop bundle 分发 language server。
+- Windows/Linux language server 发布资源与启动器。
+- 是否用独立 Node runtime 替代 Electron `runAsNode` fuse 依赖。
 - hover / document symbols / call hierarchy。
 - rename proposal:必须转成 Patch Proposal,不能由 LSP 直接写盘。
 - code action proposal:只接受 WorkspaceEdit,转换为可审阅 diff。

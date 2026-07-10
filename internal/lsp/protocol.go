@@ -121,12 +121,16 @@ type clientCapabilities struct {
 		PositionEncodings []string `json:"positionEncodings"`
 	} `json:"general"`
 	Workspace struct {
-		Symbol struct{} `json:"symbol"`
+		Symbol        struct{} `json:"symbol"`
+		Configuration bool     `json:"configuration"`
 	} `json:"workspace"`
 	TextDocument struct {
-		Definition struct{} `json:"definition"`
-		References struct{} `json:"references"`
-		Diagnostic struct{} `json:"diagnostic"`
+		Definition         struct{} `json:"definition"`
+		References         struct{} `json:"references"`
+		Diagnostic         struct{} `json:"diagnostic"`
+		PublishDiagnostics struct {
+			RelatedInformation bool `json:"relatedInformation"`
+		} `json:"publishDiagnostics"`
 	} `json:"textDocument"`
 }
 

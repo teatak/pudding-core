@@ -51,7 +51,15 @@ func resolveTypeScriptLanguageRoot(start, projectRoot string) (string, bool) {
 }
 
 func defaultTypeScriptServerResolver(languageRoot, projectRoot string) (lsp.ServerSpec, error) {
+	return resolveTypeScriptServer(languageRoot, projectRoot, bundledLanguageServerPath(typeScriptServerKind))
+}
+
+func resolveTypeScriptServer(languageRoot, projectRoot, bundledExecutable string) (lsp.ServerSpec, error) {
 	checked := make([]string, 0)
+	if bundledExecutable != "" {
+		checked = append(checked, "bundled:"+bundledExecutable)
+		return typeScriptServerSpec(bundledExecutable, languageRoot)
+	}
 	for _, candidate := range typeScriptServerCandidates(languageRoot, projectRoot) {
 		checked = append(checked, candidate)
 		if !isExecutableFile(candidate) {
@@ -66,7 +74,7 @@ func defaultTypeScriptServerResolver(languageRoot, projectRoot string) (lsp.Serv
 			language: "typescript",
 			server:   typeScriptServerKind,
 			checked:  checked,
-			hint:     "Install typescript-language-server and TypeScript in the project or PATH, then retry. Pudding did not install them automatically.",
+			hint:     "Reinstall Pudding or configure typescript-language-server and TypeScript in the project or PATH, then retry. Pudding does not download them at runtime.",
 		}
 	}
 	executable, err = filepath.Abs(executable)

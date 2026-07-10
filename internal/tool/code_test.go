@@ -119,6 +119,72 @@ func TestDefaultGoServerResolverUsesOfflineEnvironment(t *testing.T) {
 	}
 }
 
+func TestBundledLanguageServersTakePriority(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("executable fixture uses a POSIX file mode")
+	}
+	appRoot := t.TempDir()
+	daemon := filepath.Join(appRoot, "bin", "puddingd")
+	writeCodeTestFile(t, daemon, "daemon")
+	bundledGopls := filepath.Join(appRoot, bundledLanguageServersDir, "gopls")
+	bundledTypeScript := filepath.Join(appRoot, bundledLanguageServersDir, typeScriptServerKind)
+	for _, executable := range []string{bundledGopls, bundledTypeScript} {
+		writeCodeTestFile(t, executable, "#!/bin/sh\nexit 0\n")
+		if err := os.Chmod(executable, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bundledGopls, err := filepath.EvalSymlinks(bundledGopls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundledTypeScript, err = filepath.EvalSymlinks(bundledTypeScript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := bundledLanguageServerPathForExecutable(daemon, "gopls"); got != bundledGopls {
+		t.Fatalf("bundled gopls = %q", got)
+	}
+	if got := bundledLanguageServerPathForExecutable(daemon, typeScriptServerKind); got != bundledTypeScript {
+		t.Fatalf("bundled TypeScript server = %q", got)
+	}
+
+	languageRoot := t.TempDir()
+	goSpec, err := resolveGoServer(languageRoot, bundledGopls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if goSpec.Command != bundledGopls {
+		t.Fatalf("gopls command = %q", goSpec.Command)
+	}
+
+	projectRoot := t.TempDir()
+	localTypeScript := filepath.Join(projectRoot, "node_modules", ".bin", typeScriptServerKind)
+	writeCodeTestFile(t, localTypeScript, "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(localTypeScript, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	typeScriptSpec, err := resolveTypeScriptServer(projectRoot, projectRoot, bundledTypeScript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if typeScriptSpec.Command != bundledTypeScript {
+		t.Fatalf("TypeScript command = %q", typeScriptSpec.Command)
+	}
+}
+
+func TestBundledLanguageServerNames(t *testing.T) {
+	if got := bundledLanguageServerName("gopls", "windows"); got != "gopls.exe" {
+		t.Fatalf("Windows gopls name = %q", got)
+	}
+	if got := bundledLanguageServerName(typeScriptServerKind, "windows"); got != typeScriptServerKind+".cmd" {
+		t.Fatalf("Windows TypeScript server name = %q", got)
+	}
+	if got := bundledLanguageServerName("gopls", "linux"); got != "gopls" {
+		t.Fatalf("Linux gopls name = %q", got)
+	}
+}
+
 func TestResolveTypeScriptLanguageRootPrecedence(t *testing.T) {
 	t.Run("tsconfig before closer jsconfig", func(t *testing.T) {
 		root := t.TempDir()
@@ -476,6 +542,49 @@ func TestTypeScriptDefinitionUsesUnifiedToolAndDocumentLanguage(t *testing.T) {
 	payload := decodeToolResult(t, result)
 	if payload["language"] != "typescript" || payload["server"] != typeScriptServerKind || payload["locationCount"] != float64(1) {
 		t.Fatalf("unexpected TypeScript result: %+v", payload)
+	}
+}
+
+func TestTypeScriptSymbolsOpenSeedDocumentBeforeWorkspaceQuery(t *testing.T) {
+	root := t.TempDir()
+	writeCodeTestFile(t, filepath.Join(root, "package.json"), `{"private":true}`)
+	writeCodeTestFile(t, filepath.Join(root, "tsconfig.json"), `{"include":["*.ts"]}`)
+	source := filepath.Join(root, "main.ts")
+	writeCodeTestFile(t, source, "export function target() { return 1 }\n")
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolvedSource := filepath.Join(resolvedRoot, "main.ts")
+	synced := false
+	service := &fakeCodeLanguageService{encoding: "utf-16"}
+	service.sync = func(document lsp.Document) (lsp.DocumentState, error) {
+		if document.URI != codeFileURI(resolvedSource) || document.LanguageID != "typescript" {
+			t.Fatalf("seed document = %+v", document)
+		}
+		synced = true
+		return lsp.DocumentState{URI: document.URI, Version: 1, Changed: true, PositionEncoding: "utf-16"}, nil
+	}
+	service.request = func(method string, _ any, result any) error {
+		if method != "workspace/symbol" || !synced {
+			t.Fatalf("workspace symbols requested before seed sync: method=%s synced=%v", method, synced)
+		}
+		return assignCodeTestResult(result, []map[string]any{{
+			"name": "target", "kind": 12, "location": testLocation(resolvedSource, 0, 16, 22),
+		}})
+	}
+	runner := testCodeRunner(service)
+	result := runner.Call(context.Background(), Call{
+		Name:        CodeSymbols,
+		Args:        json.RawMessage(`{"scope":"project","path":".","language":"typescript","query":"target"}`),
+		ProjectDirs: []string{resolvedRoot},
+	})
+	if !result.Ok {
+		t.Fatalf("TypeScript symbols failed: %s", result.Content)
+	}
+	payload := decodeToolResult(t, result)
+	if payload["resultCount"] != float64(1) {
+		t.Fatalf("unexpected symbols payload: %+v", payload)
 	}
 }
 

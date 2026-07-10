@@ -1,6 +1,6 @@
 # Pudding Code 能力设计与计划
 
-> 状态:C0、C1、C1.5、C1.6、C2、C3、C4、C5、C6、C7、C8、C9 与 C10 已落地。
+> 状态:C0、C1、C1.5、C1.6、C2、C3、C4、C5、C6、C7、C8、C9、C10 与 C10.4 已落地。
 > 目标:在现有 multi-session / Project tool 架构上,把 Pudding 从"可读写文件"
 > 推进到"可信的工程协作 agent"。
 
@@ -797,7 +797,7 @@ Project resolver 的安全边界。
 
 明确不做:
 
-- 不自动安装 language server。
+- 不在用户运行时安装 language server。
 - 不做 rename / code action / completion。
 - 不接受模型指定 arbitrary executable、args 或 environment。
 - 不新增 backend focus、隐式 context source 或无 session scope API。
@@ -811,8 +811,9 @@ Project resolver 的安全边界。
 | C10.1 | Go root resolver、gopls、四个只读工具 | 已完成 |
 | C10.2 | TypeScript root/server resolver、位置与诊断适配 | 已完成 |
 | C10.3 | transcript、Canvas 定位、可靠性与全量验证 | 已完成 |
+| C10.4 | Release 内置 gopls、TypeScript Language Server 与离线 resolver | 已完成 |
 
-实际按四个切片完成,未引入语言专属工具、后台 focus 或自动安装流程。
+实际按五个切片完成,未引入语言专属工具、后台 focus 或运行时自动安装流程。
 
 ## 11. 测试策略
 

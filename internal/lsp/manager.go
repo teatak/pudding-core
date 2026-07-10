@@ -18,7 +18,7 @@ const (
 	defaultShutdownTimeout   = 2 * time.Second
 	defaultIdleTimeout       = 10 * time.Minute
 	defaultReapInterval      = time.Minute
-	defaultMaxProcesses      = 6
+	defaultMaxProcesses      = 3
 )
 
 // Service is the protocol-level boundary injected into the tool layer.

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -14,18 +16,20 @@ import (
 )
 
 const (
-	defaultCodeResults       = 100
-	maxCodeSymbols           = 200
-	maxCodeDefinitions       = 20
-	maxCodeReferences        = 500
-	maxCodeDiagnostics       = 500
-	maxCodeDiagnosticTargets = 32
-	maxCodeQueryRunes        = 500
-	maxCodeResultBytes       = 256 << 10
-	maxCodeSymbolTextRunes   = 400
-	maxCodeDiagnosticRunes   = 2000
-	maxCodeMetadataRunes     = 200
-	codeDiagnosticWait       = 750 * time.Millisecond
+	defaultCodeResults           = 100
+	maxCodeSymbols               = 200
+	maxCodeDefinitions           = 20
+	maxCodeReferences            = 500
+	maxCodeDiagnostics           = 500
+	maxCodeDiagnosticTargets     = 32
+	maxCodeQueryRunes            = 500
+	maxCodeResultBytes           = 256 << 10
+	maxCodeSymbolTextRunes       = 400
+	maxCodeDiagnosticRunes       = 2000
+	maxCodeMetadataRunes         = 200
+	maxCodeBootstrapFiles        = 2048
+	codeDiagnosticWait           = 750 * time.Millisecond
+	codeTypeScriptDiagnosticWait = 3 * time.Second
 )
 
 type codeSymbolsArgs struct {
@@ -107,6 +111,14 @@ func (r *BuiltinRunner) codeSymbols(ctx context.Context, call Call) Result {
 	if unavailable := r.codeServiceUnavailable(out); unavailable != nil {
 		return *unavailable
 	}
+	if target.language == "typescript" {
+		if err := r.syncCodeSymbolSeed(ctx, target); err != nil {
+			if strings.Contains(err.Error(), "language_root_not_found") {
+				return toolJSONError(out, "language_root_not_found", err.Error())
+			}
+			return codeServiceError(out, err)
+		}
+	}
 	var rawSymbols []rawCodeSymbol
 	if err := r.languageService.Request(ctx, target.spec, "workspace/symbol", map[string]any{"query": args.Query}, &rawSymbols); err != nil {
 		return codeServiceError(out, err)
@@ -158,6 +170,59 @@ func (r *BuiltinRunner) codeSymbols(ctx context.Context, call Call) Result {
 	symbols, sizeTruncated := boundCodePayloadItems(payload, "symbols", "resultCount", symbols)
 	payload["truncated"] = truncated || sizeTruncated
 	return withResultSummary(toolJSON(out, true, payload), SummaryReturnedItems, len(symbols))
+}
+
+func (r *BuiltinRunner) syncCodeSymbolSeed(ctx context.Context, target resolvedCodeTarget) error {
+	searchRoot := target.path
+	if info, err := os.Stat(searchRoot); err != nil || !info.IsDir() {
+		searchRoot = target.languageRoot
+	}
+	var document lsp.Document
+	filesScanned := 0
+	err := filepath.WalkDir(searchRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		if walkErr != nil {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.IsDir() {
+			if path != searchRoot {
+				if _, skip := fileSearchSkipDirs[entry.Name()]; skip {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		filesScanned++
+		if filesScanned > maxCodeBootstrapFiles {
+			return filepath.SkipAll
+		}
+		language, documentID := codeLanguageForPath(path)
+		if language != target.language {
+			return nil
+		}
+		text, _, readErr := readCodeDocument(path)
+		if readErr != nil {
+			return nil
+		}
+		document = lsp.Document{URI: codeFileURI(path), LanguageID: documentID, Text: text}
+		return filepath.SkipAll
+	})
+	if err != nil {
+		return err
+	}
+	if document.URI == "" {
+		return errors.New("language_root_not_found: no TypeScript or JavaScript source file found in the language root")
+	}
+	_, err = r.languageService.SyncDocument(ctx, target.spec, document)
+	return err
 }
 
 func (r *BuiltinRunner) codeDefinition(ctx context.Context, call Call) Result {
@@ -376,7 +441,11 @@ func (r *BuiltinRunner) codeDocumentDiagnostics(ctx context.Context, target reso
 	if state.Changed {
 		afterGeneration = state.PreviousDiagnosticGeneration
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, codeDiagnosticWait)
+	wait := codeDiagnosticWait
+	if target.language == "typescript" {
+		wait = codeTypeScriptDiagnosticWait
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 	snapshot, ok, waitErr := r.languageService.PublishedDiagnostics(waitCtx, target.spec, uri, afterGeneration)
 	if errors.Is(waitErr, context.DeadlineExceeded) {
@@ -447,7 +516,7 @@ func (r *BuiltinRunner) codeServiceUnavailable(out Result) *Result {
 func codeUnavailableError(out Result, unavailable *languageServerUnavailableError) Result {
 	hint := unavailable.hint
 	if hint == "" {
-		hint = "Install or configure " + unavailable.server + ", then retry. Pudding did not install it automatically."
+		hint = "Reinstall Pudding or configure " + unavailable.server + ", then retry. Pudding does not download language servers at runtime."
 	}
 	payload := map[string]any{
 		"ok":       false,

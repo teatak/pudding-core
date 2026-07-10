@@ -39,17 +39,30 @@ func (e *languageServerUnavailableError) Error() string {
 }
 
 func defaultGoServerResolver(languageRoot string) (lsp.ServerSpec, error) {
+	return resolveGoServer(languageRoot, bundledLanguageServerPath("gopls"))
+}
+
+func resolveGoServer(languageRoot, bundledExecutable string) (lsp.ServerSpec, error) {
 	const server = "gopls"
-	executable, err := exec.LookPath(server)
-	if err != nil {
-		return lsp.ServerSpec{}, &languageServerUnavailableError{
-			language: "go",
-			server:   server,
-			checked:  []string{"PATH:gopls"},
-			hint:     "Install or configure gopls, then retry. Pudding did not install it automatically.",
+	executable := bundledExecutable
+	checked := make([]string, 0, 2)
+	if executable != "" {
+		checked = append(checked, "bundled:"+executable)
+	}
+	if executable == "" {
+		checked = append(checked, "PATH:gopls")
+		var err error
+		executable, err = exec.LookPath(server)
+		if err != nil {
+			return lsp.ServerSpec{}, &languageServerUnavailableError{
+				language: "go",
+				server:   server,
+				checked:  checked,
+				hint:     "Reinstall Pudding or configure gopls in PATH, then retry. Pudding does not download language servers at runtime.",
+			}
 		}
 	}
-	executable, err = filepath.Abs(executable)
+	executable, err := filepath.Abs(executable)
 	if err != nil {
 		return lsp.ServerSpec{}, err
 	}

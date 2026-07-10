@@ -312,6 +312,40 @@ func TestManagerReapsIdleProcess(t *testing.T) {
 	}
 }
 
+func TestManagerDefaultCapacityEvictsToThreeProcesses(t *testing.T) {
+	manager := NewManager(
+		WithInitializeTimeout(time.Second),
+		WithShutdownTimeout(2*time.Second),
+		WithIdleTimeout(0),
+		WithReapInterval(0),
+	)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := manager.Close(ctx); err != nil {
+			t.Errorf("close manager: %v", err)
+		}
+	})
+	var first *Process
+	for index := 0; index < 4; index++ {
+		process, err := manager.Acquire(context.Background(), testServerSpec(t, "capacity-"+strconv.Itoa(index)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if first == nil {
+			first = process
+		}
+	}
+	if manager.ProcessCount() != 3 {
+		t.Fatalf("process count = %d", manager.ProcessCount())
+	}
+	select {
+	case <-first.Done():
+	case <-time.After(time.Second):
+		t.Fatal("least recently used process was not evicted")
+	}
+}
+
 func TestManagerForcesUnresponsiveProcessToExit(t *testing.T) {
 	manager := NewManager(
 		WithInitializeTimeout(time.Second),
@@ -414,6 +448,9 @@ func (s *fakeLSP) handleClientMessage(message wireMessage) (bool, error) {
 		var params initializeParams
 		if err := json.Unmarshal(message.Params, &params); err != nil {
 			return false, err
+		}
+		if !params.Capabilities.Workspace.Configuration || !params.Capabilities.TextDocument.PublishDiagnostics.RelatedInformation {
+			return false, errors.New("client did not advertise required configuration and diagnostics capabilities")
 		}
 		s.rootURI = params.RootURI
 		return false, s.respond(message.ID, map[string]any{

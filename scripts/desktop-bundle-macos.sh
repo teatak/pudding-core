@@ -12,6 +12,10 @@ BUNDLE_ID="${PUDDING_BUNDLE_ID:-com.teatak.pudding}"
 VERSION="${PUDDING_APP_VERSION:-0.1.0}"
 ELECTRON_APP="$ROOT/web/node_modules/electron/dist/Electron.app"
 DAEMON_BIN="$ROOT/bin/puddingd"
+LANGUAGE_SERVERS_DIR="$ROOT/bin/language-servers"
+GOPLS_BIN="$LANGUAGE_SERVERS_DIR/gopls"
+TYPESCRIPT_SERVER_DIR="$LANGUAGE_SERVERS_DIR/typescript"
+TYPESCRIPT_SERVER_JS="$TYPESCRIPT_SERVER_DIR/node_modules/typescript-language-server/lib/cli.mjs"
 ICON="$ROOT/assets/macos/AppIcon.icns"
 TRAY_ICON="$ROOT/assets/macos/TrayTemplate.png"
 OUT_DIR="$ROOT/dist"
@@ -32,6 +36,16 @@ if [[ ! -x "$DAEMON_BIN" ]]; then
   echo "Run: make desktop-release" >&2
   exit 1
 fi
+if [[ ! -x "$GOPLS_BIN" ]]; then
+  echo "bundled gopls not found: $GOPLS_BIN" >&2
+  echo "Run: make language-servers" >&2
+  exit 1
+fi
+if [[ ! -f "$TYPESCRIPT_SERVER_JS" ]]; then
+  echo "bundled TypeScript language server not found: $TYPESCRIPT_SERVER_JS" >&2
+  echo "Run: make language-servers" >&2
+  exit 1
+fi
 if [[ ! -f "$ICON" ]]; then
   echo "app icon not found: $ICON" >&2
   exit 1
@@ -46,10 +60,24 @@ mkdir -p "$OUT_DIR"
 cp -R "$ELECTRON_APP" "$APP_PATH"
 
 rm -rf "$APP_ROOT"
-mkdir -p "$APP_ROOT/bin" "$APP_ROOT/desktop"
+mkdir -p "$APP_ROOT/bin" "$APP_ROOT/desktop" "$APP_ROOT/language-servers/typescript"
 cp "$ROOT"/electron/*.cjs "$APP_ROOT/desktop/"
 cp "$DAEMON_BIN" "$APP_ROOT/bin/puddingd"
+cp "$GOPLS_BIN" "$APP_ROOT/language-servers/gopls"
+cp "$LANGUAGE_SERVERS_DIR/gopls.LICENSE" "$APP_ROOT/language-servers/gopls.LICENSE"
+cp "$TYPESCRIPT_SERVER_DIR/package.json" "$TYPESCRIPT_SERVER_DIR/package-lock.json" "$APP_ROOT/language-servers/typescript/"
+cp -R "$TYPESCRIPT_SERVER_DIR/node_modules" "$APP_ROOT/language-servers/typescript/"
 bash "$ROOT/scripts/macos-bundle-dylibs.sh" "$APP_ROOT/bin/puddingd" "$APP_ROOT/lib"
+
+cat >"$APP_ROOT/language-servers/typescript-language-server" <<'SH'
+#!/bin/sh
+set -eu
+
+SERVER_ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+export ELECTRON_RUN_AS_NODE=1
+exec "$SERVER_ROOT/node" "$SERVER_ROOT/typescript/node_modules/typescript-language-server/lib/cli.mjs" "$@"
+SH
+chmod 755 "$APP_ROOT/language-servers/typescript-language-server"
 
 cat >"$APP_ROOT/package.json" <<JSON
 {
@@ -66,6 +94,7 @@ rm -f "$APP_RESOURCES/electron.icns"
 if [[ -x "$APP_PATH/Contents/MacOS/Electron" ]]; then
   mv "$APP_PATH/Contents/MacOS/Electron" "$APP_PATH/Contents/MacOS/$APP_NAME"
 fi
+ln -s "../../../MacOS/$APP_NAME" "$APP_ROOT/language-servers/node"
 
 "$PLIST_BUDDY" -c "Set :CFBundleExecutable $APP_NAME" "$INFO_PLIST"
 "$PLIST_BUDDY" -c "Set :CFBundleName $APP_NAME" "$INFO_PLIST"
