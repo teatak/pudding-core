@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -55,6 +56,7 @@ type Manager struct {
 	store     store.Store
 	mu        sync.Mutex
 	processes map[string]*process
+	terminals map[string]*store.Terminal
 	closed    bool
 	shellPath string
 	shellArgs []string
@@ -92,10 +94,11 @@ func NewManager(metadata store.Store) (*Manager, error) {
 	if metadata == nil {
 		return nil, errors.New("terminal: metadata store is required")
 	}
-	if err := metadata.ResetRunningTerminals(context.Background()); err != nil {
-		return nil, err
-	}
-	return &Manager{store: metadata, processes: make(map[string]*process)}, nil
+	return &Manager{
+		store:     metadata,
+		processes: make(map[string]*process),
+		terminals: make(map[string]*store.Terminal),
+	}, nil
 }
 
 func (m *Manager) Create(ctx context.Context, sessionID string, options CreateOptions) (*store.Terminal, error) {
@@ -131,12 +134,15 @@ func (m *Manager) Create(ctx context.Context, sessionID string, options CreateOp
 		Shell:     shell,
 		Status:    store.TerminalRunning,
 	}
-	if err := m.store.CreateTerminal(ctx, item); err != nil {
+	if err := store.NormalizeTerminal(item); err != nil {
 		_ = ptmx.Close()
 		_ = terminateTerminalProcess(cmd)
 		_ = cmd.Wait()
 		return nil, err
 	}
+	now := time.Now()
+	item.CreatedAt = now
+	item.UpdatedAt = now
 
 	proc := &process{
 		manager:     m,
@@ -147,16 +153,17 @@ func (m *Manager) Create(ctx context.Context, sessionID string, options CreateOp
 		subscribers: make(map[chan []byte]struct{}),
 		done:        make(chan struct{}),
 	}
+	key := terminalKey(item.SessionID, item.ID)
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
 		_ = ptmx.Close()
 		_ = terminateTerminalProcess(cmd)
 		_ = cmd.Wait()
-		_ = m.store.DeleteTerminal(context.Background(), item.SessionID, item.ID)
 		return nil, ErrUnavailable
 	}
-	m.processes[terminalKey(item.SessionID, item.ID)] = proc
+	m.processes[key] = proc
+	m.terminals[key] = cloneTerminal(item)
 	m.mu.Unlock()
 
 	go proc.readOutput()
@@ -164,28 +171,52 @@ func (m *Manager) Create(ctx context.Context, sessionID string, options CreateOp
 	return item, nil
 }
 
-func (m *Manager) Get(ctx context.Context, sessionID, terminalID string) (*store.Terminal, error) {
-	return m.store.GetTerminal(ctx, strings.TrimSpace(sessionID), strings.TrimSpace(terminalID))
+func (m *Manager) Get(_ context.Context, sessionID, terminalID string) (*store.Terminal, error) {
+	return m.getTerminal(strings.TrimSpace(sessionID), strings.TrimSpace(terminalID))
 }
 
 func (m *Manager) List(ctx context.Context, sessionID string) ([]*store.Terminal, error) {
-	return m.store.ListTerminals(ctx, strings.TrimSpace(sessionID))
+	sessionID = strings.TrimSpace(sessionID)
+	if _, err := m.store.GetSession(ctx, sessionID); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	items := make([]*store.Terminal, 0)
+	for _, item := range m.terminals {
+		if item.SessionID == sessionID {
+			items = append(items, cloneTerminal(item))
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if !items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].CreatedAt.Before(items[j].CreatedAt)
+		}
+		return items[i].ID < items[j].ID
+	})
+	return items, nil
 }
 
-func (m *Manager) Delete(ctx context.Context, sessionID, terminalID string) error {
+func (m *Manager) Delete(_ context.Context, sessionID, terminalID string) error {
 	sessionID = strings.TrimSpace(sessionID)
 	terminalID = strings.TrimSpace(terminalID)
-	if _, err := m.store.GetTerminal(ctx, sessionID, terminalID); err != nil {
-		return err
+	key := terminalKey(sessionID, terminalID)
+	m.mu.Lock()
+	if m.terminals[key] == nil {
+		m.mu.Unlock()
+		return store.ErrNotFound
 	}
-	if proc := m.process(sessionID, terminalID); proc != nil {
+	delete(m.terminals, key)
+	proc := m.processes[key]
+	m.mu.Unlock()
+	if proc != nil {
 		proc.terminate()
 	}
-	return m.store.DeleteTerminal(ctx, sessionID, terminalID)
+	return nil
 }
 
 func (m *Manager) ServeWebSocket(w http.ResponseWriter, request *http.Request, sessionID, terminalID string) {
-	item, err := m.store.GetTerminal(request.Context(), sessionID, terminalID)
+	item, err := m.getTerminal(sessionID, terminalID)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		return
@@ -208,9 +239,15 @@ func (m *Manager) ServeWebSocket(w http.ResponseWriter, request *http.Request, s
 func (m *Manager) CloseSession(sessionID string) {
 	m.mu.Lock()
 	processes := make([]*process, 0)
-	for _, proc := range m.processes {
+	for key, proc := range m.processes {
 		if proc.sessionID == sessionID {
 			processes = append(processes, proc)
+			delete(m.terminals, key)
+		}
+	}
+	for key, item := range m.terminals {
+		if item.SessionID == sessionID {
+			delete(m.terminals, key)
 		}
 	}
 	m.mu.Unlock()
@@ -231,6 +268,7 @@ func (m *Manager) Close() error {
 	for _, proc := range m.processes {
 		processes = append(processes, proc)
 	}
+	m.terminals = make(map[string]*store.Terminal)
 	m.mu.Unlock()
 	for _, proc := range processes {
 		proc.terminate()
@@ -243,6 +281,29 @@ func (m *Manager) process(sessionID, terminalID string) *process {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.processes[terminalKey(sessionID, terminalID)]
+}
+
+func (m *Manager) getTerminal(sessionID, terminalID string) (*store.Terminal, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	item := m.terminals[terminalKey(sessionID, terminalID)]
+	if item == nil {
+		return nil, store.ErrNotFound
+	}
+	return cloneTerminal(item), nil
+}
+
+func (m *Manager) updateTerminalStatus(sessionID, terminalID string, status store.TerminalStatus, exitCode *int) *store.Terminal {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	item := m.terminals[terminalKey(sessionID, terminalID)]
+	if item == nil {
+		return nil
+	}
+	item.Status = status
+	item.ExitCode = cloneInt(exitCode)
+	item.UpdatedAt = time.Now()
+	return cloneTerminal(item)
 }
 
 func (m *Manager) removeProcess(proc *process) {
@@ -334,10 +395,7 @@ func (p *process) wait() {
 	}
 	p.finishOnce.Do(func() {
 		p.manager.removeProcess(p)
-		_, updateErr := p.manager.store.UpdateTerminalStatus(context.Background(), p.sessionID, p.id, store.TerminalExited, &exitCode)
-		if updateErr != nil && !errors.Is(updateErr, store.ErrNotFound) {
-			slog.Warn("terminal: persist exit failed", "sessionID", p.sessionID, "terminalID", p.id, "err", updateErr)
-		}
+		p.manager.updateTerminalStatus(p.sessionID, p.id, store.TerminalExited, &exitCode)
 		close(p.done)
 	})
 }
@@ -406,7 +464,7 @@ func (p *process) serve(parent context.Context, conn *websocket.Conn, item *stor
 					return
 				}
 			case <-p.done:
-				latest, _ := p.manager.store.GetTerminal(context.Background(), p.sessionID, p.id)
+				latest, _ := p.manager.getTerminal(p.sessionID, p.id)
 				if latest != nil {
 					writeStatus(ctx, conn, latest.Status, latest.ExitCode)
 				}
@@ -448,6 +506,23 @@ func (p *process) serve(parent context.Context, conn *websocket.Conn, item *stor
 func writeStatus(ctx context.Context, conn *websocket.Conn, status store.TerminalStatus, exitCode *int) bool {
 	payload, err := json.Marshal(statusMessage{Type: "status", Status: status, ExitCode: exitCode})
 	return err == nil && conn.Write(ctx, websocket.MessageText, payload) == nil
+}
+
+func cloneTerminal(item *store.Terminal) *store.Terminal {
+	if item == nil {
+		return nil
+	}
+	cloned := *item
+	cloned.ExitCode = cloneInt(item.ExitCode)
+	return &cloned
+}
+
+func cloneInt(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func terminalEnvironment(sessionID string) []string {

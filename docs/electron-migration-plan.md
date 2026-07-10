@@ -356,6 +356,8 @@ BrowserHost 生命周期收口审查(2026-07-09):
 - dev/release 数据目录继续隔离。
 - crash/log 收集落本地文件。
 - 当前落点:`make desktop-bundle` 可生成基础 macOS `.app` bundle,内含 Electron shell、Tray、release daemon、daemon 启动前 dylib、Info.plist、icon、`NSMicrophoneUsageDescription` 和 `pudding://` callback scheme。
+- Tray 与原生应用菜单支持简体中文、繁体中文和英文,并通过 preload IPC 跟随 Web
+  语言设置实时切换;开发态 Tray 直接读取仓库 `assets/macos/TrayTemplate.png`。
 - 当前 bundle 使用 ad-hoc codesign;正式 Developer ID 签名、公证、自动更新、正式 crash/log 收集后置。
 - 2026-07-09 收尾验证:`make desktop-bundle` 成功,`codesign --verify --deep --strict` 通过,短启动 `dist/Pudding.app` 可拉起 release daemon。
 

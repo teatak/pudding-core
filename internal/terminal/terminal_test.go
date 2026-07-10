@@ -141,3 +141,38 @@ func TestManagerUsesProjectNameAsTerminalTitle(t *testing.T) {
 		t.Fatalf("terminal title = %q", item.Title)
 	}
 }
+
+func TestManagerDoesNotRestoreTerminalsAcrossRestarts(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("ConPTY is not implemented")
+	}
+	metadata := memstore.New()
+	ctx := context.Background()
+	if err := metadata.CreateSession(ctx, &store.Session{ID: "sess", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.shellPath = "/bin/cat"
+	if _, err := manager.Create(ctx, "sess", CreateOptions{CWD: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted, err := NewManager(metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	items, err := restarted.List(ctx, "sess")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("restarted manager restored temporary terminals: %+v", items)
+	}
+}

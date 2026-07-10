@@ -1,32 +1,17 @@
 package sqlitestore
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
-
-	"github.com/teatak/pudding-core/internal/store"
 )
 
-func TestTerminalMetadataPersistsAndRunningStateResets(t *testing.T) {
+func TestOpenRemovesLegacyTerminalMetadata(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
 	st, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := context.Background()
-	if err := st.CreateSession(ctx, &store.Session{ID: "sess", Provider: "mock", Model: "mock"}); err != nil {
-		t.Fatal(err)
-	}
-	item := &store.Terminal{
-		ID:        "term_1",
-		SessionID: "sess",
-		Title:     "zsh",
-		CWD:       t.TempDir(),
-		Shell:     "/bin/zsh",
-		Status:    store.TerminalRunning,
-	}
-	if err := st.CreateTerminal(ctx, item); err != nil {
+	if _, err := st.db.Exec(`CREATE TABLE session_terminals (terminal_id TEXT PRIMARY KEY)`); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Close(); err != nil {
@@ -38,14 +23,11 @@ func TestTerminalMetadataPersistsAndRunningStateResets(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	if err := reopened.ResetRunningTerminals(ctx); err != nil {
+	var count int
+	if err := reopened.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='session_terminals'`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	items, err := reopened.ListTerminals(ctx, "sess")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != 1 || items[0].ID != item.ID || items[0].Status != store.TerminalExited || items[0].ExitCode != nil {
-		t.Fatalf("terminals = %+v", items)
+	if count != 0 {
+		t.Fatalf("legacy terminal table still exists")
 	}
 }

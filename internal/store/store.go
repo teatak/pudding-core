@@ -1531,12 +1531,5 @@ type Store interface {
 	DeleteBrowserState(ctx context.Context, sessionID, tabID string) error
 	ClearBrowserState(ctx context.Context, sessionID string) error
 
-	CreateTerminal(ctx context.Context, item *Terminal) error
-	GetTerminal(ctx context.Context, sessionID, terminalID string) (*Terminal, error)
-	ListTerminals(ctx context.Context, sessionID string) ([]*Terminal, error)
-	UpdateTerminalStatus(ctx context.Context, sessionID, terminalID string, status TerminalStatus, exitCode *int) (*Terminal, error)
-	DeleteTerminal(ctx context.Context, sessionID, terminalID string) error
-	ResetRunningTerminals(ctx context.Context) error
-
 	Close() error
 }

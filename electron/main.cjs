@@ -8,8 +8,18 @@ const path = require("node:path");
 
 const { BrowserBridgeServer } = require("./browser-bridge-server.cjs");
 const { BrowserHost } = require("./browser-host.cjs");
+const { nativeText, normalizeNativeLocale } = require("./native-i18n.cjs");
 
 const repoRoot = path.resolve(__dirname, "..");
+const appDisplayName = "Pudding";
+
+app.setName(appDisplayName);
+app.setPath("userData", electronUserDataDir());
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
+
 const defaultAddr = app.isPackaged ? "127.0.0.1:9669" : "127.0.0.1:9679";
 const daemonAddr = (process.env.PUDDING_DAEMON_ADDR || defaultAddr).trim();
 const apiBase = trimTrailingSlash(process.env.PUDDING_API_BASE || `http://${daemonAddr}`);
@@ -39,12 +49,12 @@ let webviewCaptureSeq = 0;
 let daemonProcess = null;
 let quitting = false;
 let appTray = null;
+let shellLocale = "en";
 const pendingOAuthReturnURLs = [];
 
-const appDisplayName = "Pudding";
-
-app.setName(appDisplayName);
-registerOAuthReturnProtocol();
+if (hasSingleInstanceLock) {
+  registerOAuthReturnProtocol();
+}
 
 app.on("open-url", (event, rawURL) => {
   event.preventDefault();
@@ -52,6 +62,11 @@ app.on("open-url", (event, rawURL) => {
 });
 
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) {
+    return;
+  }
+  shellLocale = normalizeNativeLocale(process.env.PUDDING_LOCALE || app.getLocale());
+  updateApplicationMenu();
   try {
     const browserBridge = await browserBridgeServer.start();
     const token = await ensureDaemon(browserBridge);
@@ -65,7 +80,17 @@ app.whenReady().then(async () => {
   }
 });
 
+app.on("second-instance", () => {
+  const window = BrowserWindow.getAllWindows()[0];
+  if (window && !window.isDestroyed()) {
+    showMainWindow(window);
+  }
+});
+
 app.on("activate", () => {
+  if (!hasSingleInstanceLock) {
+    return;
+  }
   const window = BrowserWindow.getAllWindows()[0];
   if (window) {
     showMainWindow(window);
@@ -176,17 +201,6 @@ function createTray(window) {
   }
   appTray = new Tray(icon);
   appTray.setToolTip(appDisplayName);
-  appTray.on("click", () => {
-    const current = BrowserWindow.getAllWindows()[0] || window;
-    if (!current || current.isDestroyed()) {
-      return;
-    }
-    if (current.isVisible() && current.isFocused()) {
-      current.hide();
-      return;
-    }
-    showMainWindow(current);
-  });
   updateTrayMenu(window);
   return appTray;
 }
@@ -200,7 +214,7 @@ function updateTrayMenu(window) {
   appTray.setContextMenu(
     Menu.buildFromTemplate([
       {
-        label: visible ? "Hide Pudding" : "Show Pudding",
+        label: nativeMenuText(visible ? "hideApp" : "showApp"),
         click: () => {
           const target = BrowserWindow.getAllWindows()[0];
           if (!target || target.isDestroyed()) {
@@ -215,7 +229,7 @@ function updateTrayMenu(window) {
       },
       { type: "separator" },
       {
-        label: "Quit Pudding",
+        label: nativeMenuText("quitApp"),
         click: () => {
           quitting = true;
           app.quit();
@@ -228,7 +242,7 @@ function updateTrayMenu(window) {
 function trayIcon() {
   const candidates = [
     process.resourcesPath ? path.join(process.resourcesPath, "TrayTemplate.png") : "",
-    path.join(repoRoot, "build", "macos", "TrayTemplate.png"),
+    path.join(repoRoot, "assets", "macos", "TrayTemplate.png"),
   ].filter(Boolean);
   for (const candidate of candidates) {
     if (!fs.existsSync(candidate)) {
@@ -236,12 +250,92 @@ function trayIcon() {
     }
     const image = nativeImage.createFromPath(candidate);
     if (!image.isEmpty()) {
-      const resized = image.resize({ width: 18, height: 18 });
+      const resized = image.resize({ width: 22, height: 22, quality: "best" });
       resized.setTemplateImage(true);
       return resized;
     }
   }
   return nativeImage.createEmpty();
+}
+
+function updateApplicationMenu() {
+  const template = [];
+  if (process.platform === "darwin") {
+    template.push({
+      label: appDisplayName,
+      submenu: [
+        { label: nativeMenuText("about"), role: "about" },
+        { type: "separator" },
+        { label: nativeMenuText("services"), role: "services" },
+        { type: "separator" },
+        { label: nativeMenuText("hideApp"), role: "hide" },
+        { label: nativeMenuText("hideOthers"), role: "hideOthers" },
+        { label: nativeMenuText("showAll"), role: "unhide" },
+        { type: "separator" },
+        { label: nativeMenuText("quitApp"), role: "quit" },
+      ],
+    });
+  }
+
+  const fileSubmenu = [{ label: nativeMenuText("closeWindow"), role: "close" }];
+  if (process.platform !== "darwin") {
+    fileSubmenu.push({ type: "separator" }, { label: nativeMenuText("quitApp"), role: "quit" });
+  }
+  template.push({ label: nativeMenuText("file"), submenu: fileSubmenu });
+  template.push({
+    label: nativeMenuText("edit"),
+    submenu: [
+      { label: nativeMenuText("undo"), role: "undo" },
+      { label: nativeMenuText("redo"), role: "redo" },
+      { type: "separator" },
+      { label: nativeMenuText("cut"), role: "cut" },
+      { label: nativeMenuText("copy"), role: "copy" },
+      { label: nativeMenuText("paste"), role: "paste" },
+      { label: nativeMenuText("pasteAndMatchStyle"), role: "pasteAndMatchStyle" },
+      { label: nativeMenuText("delete"), role: "delete" },
+      { label: nativeMenuText("selectAll"), role: "selectAll" },
+    ],
+  });
+
+  const viewSubmenu = [];
+  if (!app.isPackaged) {
+    viewSubmenu.push(
+      { label: nativeMenuText("reload"), role: "reload" },
+      { label: nativeMenuText("forceReload"), role: "forceReload" },
+      { label: nativeMenuText("toggleDevTools"), role: "toggleDevTools" },
+      { type: "separator" },
+    );
+  }
+  viewSubmenu.push(
+    { label: nativeMenuText("actualSize"), role: "resetZoom" },
+    { label: nativeMenuText("zoomIn"), role: "zoomIn" },
+    { label: nativeMenuText("zoomOut"), role: "zoomOut" },
+    { type: "separator" },
+    { label: nativeMenuText("fullScreen"), role: "togglefullscreen" },
+  );
+  template.push({ label: nativeMenuText("view"), submenu: viewSubmenu });
+
+  const windowSubmenu = [{ label: nativeMenuText("minimize"), role: "minimize" }];
+  if (process.platform === "darwin") {
+    windowSubmenu.push(
+      { label: nativeMenuText("zoomWindow"), role: "zoom" },
+      { type: "separator" },
+      { label: nativeMenuText("bringAllToFront"), role: "front" },
+    );
+  }
+  template.push({ label: nativeMenuText("window"), submenu: windowSubmenu });
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function setShellLocale(locale) {
+  shellLocale = normalizeNativeLocale(locale);
+  updateApplicationMenu();
+  updateTrayMenu(BrowserWindow.getAllWindows()[0]);
+  return shellLocale;
+}
+
+function nativeMenuText(key) {
+  return nativeText(shellLocale, key, { app: appDisplayName });
 }
 
 function showMainWindow(window) {
@@ -450,6 +544,11 @@ ipcMain.handle("pudding:desktop:open-external", async (event, rawURL) => {
   return true;
 });
 
+ipcMain.handle("pudding:desktop:set-locale", (event, locale) => {
+  assertTrustedSender(event);
+  return setShellLocale(locale);
+});
+
 ipcMain.handle("pudding:desktop:pick-directories", async (event, options) => {
   const window = assertTrustedSender(event);
   const result = await dialog.showOpenDialog(window, {
@@ -565,6 +664,7 @@ async function loadRenderer(window, token) {
   const state = themeState();
   url.searchParams.set("theme", state.theme);
   url.searchParams.set("resolvedTheme", state.resolved);
+  url.searchParams.set("locale", shellLocale);
   await window.loadURL(url.toString());
 }
 
@@ -579,7 +679,7 @@ async function ensureDaemon(browserBridge) {
     throw new Error("puddingd binary not found. Run `make desktop-dev` so the dev binary is built first.");
   }
 
-  daemonProcess = spawn(daemonBin, ["-addr", daemonAddr], {
+  daemonProcess = spawn(daemonBin, ["-addr", daemonAddr, "-lan"], {
     cwd: repoRoot,
     env: {
       ...process.env,
@@ -742,6 +842,14 @@ function isAllowedExternalURL(rawURL) {
 function stringOption(value) {
   const text = String(value || "").trim();
   return text || undefined;
+}
+
+function electronUserDataDir() {
+  const configured = String(process.env.PUDDING_ELECTRON_USER_DATA_DIR || "").trim();
+  if (configured) {
+    return path.resolve(configured);
+  }
+  return path.join(app.getPath("appData"), app.isPackaged ? appDisplayName : `${appDisplayName} Dev`);
 }
 
 function trimTrailingSlash(value) {

@@ -9,6 +9,7 @@ type ElectronDesktopBridge = {
   onOAuthConnected?: (listener: (payload: { provider?: string }) => void) => () => void;
   openExternal: (url: string) => Promise<boolean>;
   pickDirectories: (options?: DirectoryPickerOptions) => Promise<string[]>;
+  setLocale?: (locale: "zh-CN" | "zh-TW" | "en") => Promise<string>;
 };
 
 type NativePathFile = File & { path?: string };
@@ -80,6 +81,14 @@ export async function pickDirectories(options?: DirectoryPickerOptions) {
   } catch {
     return [];
   }
+}
+
+export function setDesktopLocale(locale: "zh-CN" | "zh-TW" | "en") {
+  const bridge = desktopBridge();
+  if (!bridge?.setLocale) {
+    return;
+  }
+  void bridge.setLocale(locale).catch(() => {});
 }
 
 function desktopBridge() {

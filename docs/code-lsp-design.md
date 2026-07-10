@@ -782,8 +782,11 @@ PUDDING_LSP_INTEGRATION=1
 - `make language-servers` 在构建期准备固定版本:`gopls v0.22.0`、
   `typescript-language-server 5.3.0` 与 TypeScript `6.0.3`;npm 使用独立 lockfile,
   用户运行时不联网安装。
-- daemon 根据自身可执行文件定位同级 `language-servers` 目录,固定文件名优先于项目
-  binary 与 PATH。tool input 仍不能指定 executable、args 或 environment。
+- daemon 根据自身可执行文件定位语言服务目录:开发态使用 `bin/language-servers`,release
+  使用 app root 下的 `language-servers`;固定文件名优先于项目 binary 与 PATH。tool input
+  仍不能指定 executable、args 或 environment。
+- `make desktop-dev` 依赖轻量 `language-servers-ready` 检查:首次或锁定版本变化时自动准备,
+  已就绪时不执行 npm install 或 go install。
 - macOS bundle 使用 Electron 的 Node runtime 和 `ELECTRON_RUN_AS_NODE=1` 启动签名的
   TypeScript server JS;若未来关闭 Electron `runAsNode` fuse,必须同时改为独立 Node
   runtime 或新的受控 bridge。

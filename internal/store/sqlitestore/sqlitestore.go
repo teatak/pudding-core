@@ -62,6 +62,9 @@ func Open(path string) (*Store, error) {
 }
 
 func ensureSchema(db *sql.DB) error {
+	if err := dropLegacyTerminalTable(db); err != nil {
+		return err
+	}
 	if err := migrateBrowserTabs(db); err != nil {
 		return err
 	}
@@ -84,6 +87,13 @@ func ensureSchema(db *sql.DB) error {
 		if _, err := db.Exec(`ALTER TABLE queued_inputs ADD COLUMN parts TEXT NOT NULL DEFAULT '[]'`); err != nil {
 			return fmt.Errorf("sqlite: migrate queued_inputs.parts: %w", err)
 		}
+	}
+	return nil
+}
+
+func dropLegacyTerminalTable(db *sql.DB) error {
+	if _, err := db.Exec(`DROP TABLE IF EXISTS session_terminals`); err != nil {
+		return fmt.Errorf("sqlite: remove legacy terminal metadata: %w", err)
 	}
 	return nil
 }

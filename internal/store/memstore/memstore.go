@@ -16,41 +16,39 @@ import (
 )
 
 type Memstore struct {
-	mu        sync.Mutex
-	sessions  map[string]*store.Session
-	projects  map[string]*store.Project
-	turns     map[string]*store.Turn
-	messages  map[string][]*store.Message // sessionID → 时间升序
-	queued    map[string][]*store.QueuedInput
-	usage     map[usageKey]*store.UsageHourlyStat       // (UTC hour unix ms, model) → global stats
-	susage    map[string]*store.SessionUsageStat        // sessionID → session stats
-	canvas    map[string]*store.CanvasItem              // itemID → global canvas item
-	closed    map[string]*store.ClosedCanvasItem        // id → recently closed canvas item
-	browser   map[string]map[string]*store.BrowserState // sessionID → tabID → browser state
-	terminals map[string]map[string]*store.Terminal     // sessionID → terminalID → terminal metadata
-	events    map[string][]event.Event                  // sessionID → seq 升序
-	seq       map[string]int64
-	settings  map[string]string
-	profiles  map[string]*store.ProviderProfile
+	mu       sync.Mutex
+	sessions map[string]*store.Session
+	projects map[string]*store.Project
+	turns    map[string]*store.Turn
+	messages map[string][]*store.Message // sessionID → 时间升序
+	queued   map[string][]*store.QueuedInput
+	usage    map[usageKey]*store.UsageHourlyStat       // (UTC hour unix ms, model) → global stats
+	susage   map[string]*store.SessionUsageStat        // sessionID → session stats
+	canvas   map[string]*store.CanvasItem              // itemID → global canvas item
+	closed   map[string]*store.ClosedCanvasItem        // id → recently closed canvas item
+	browser  map[string]map[string]*store.BrowserState // sessionID → tabID → browser state
+	events   map[string][]event.Event                  // sessionID → seq 升序
+	seq      map[string]int64
+	settings map[string]string
+	profiles map[string]*store.ProviderProfile
 }
 
 func New() *Memstore {
 	return &Memstore{
-		sessions:  make(map[string]*store.Session),
-		projects:  make(map[string]*store.Project),
-		turns:     make(map[string]*store.Turn),
-		messages:  make(map[string][]*store.Message),
-		queued:    make(map[string][]*store.QueuedInput),
-		usage:     make(map[usageKey]*store.UsageHourlyStat),
-		susage:    make(map[string]*store.SessionUsageStat),
-		canvas:    make(map[string]*store.CanvasItem),
-		closed:    make(map[string]*store.ClosedCanvasItem),
-		browser:   make(map[string]map[string]*store.BrowserState),
-		terminals: make(map[string]map[string]*store.Terminal),
-		events:    make(map[string][]event.Event),
-		seq:       make(map[string]int64),
-		settings:  make(map[string]string),
-		profiles:  make(map[string]*store.ProviderProfile),
+		sessions: make(map[string]*store.Session),
+		projects: make(map[string]*store.Project),
+		turns:    make(map[string]*store.Turn),
+		messages: make(map[string][]*store.Message),
+		queued:   make(map[string][]*store.QueuedInput),
+		usage:    make(map[usageKey]*store.UsageHourlyStat),
+		susage:   make(map[string]*store.SessionUsageStat),
+		canvas:   make(map[string]*store.CanvasItem),
+		closed:   make(map[string]*store.ClosedCanvasItem),
+		browser:  make(map[string]map[string]*store.BrowserState),
+		events:   make(map[string][]event.Event),
+		seq:      make(map[string]int64),
+		settings: make(map[string]string),
+		profiles: make(map[string]*store.ProviderProfile),
 	}
 }
 
@@ -280,7 +278,6 @@ func (m *Memstore) DeleteSession(_ context.Context, id string) error {
 	delete(m.queued, id)
 	delete(m.susage, id)
 	delete(m.browser, id)
-	delete(m.terminals, id)
 	delete(m.events, id)
 	delete(m.seq, id)
 	for tid, t := range m.turns {

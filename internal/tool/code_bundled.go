@@ -21,15 +21,21 @@ func bundledLanguageServerPathForExecutable(daemonExecutable, server string) str
 		return ""
 	}
 	name := bundledLanguageServerName(server, runtime.GOOS)
-	appRoot := filepath.Dir(filepath.Dir(filepath.Clean(daemonExecutable)))
-	candidate := filepath.Join(appRoot, bundledLanguageServersDir, name)
-	if !isExecutableFile(candidate) {
-		return ""
+	daemonDir := filepath.Dir(filepath.Clean(daemonExecutable))
+	candidates := []string{
+		filepath.Join(daemonDir, bundledLanguageServersDir, name),
+		filepath.Join(filepath.Dir(daemonDir), bundledLanguageServersDir, name),
 	}
-	if resolved, err := filepath.EvalSymlinks(candidate); err == nil {
-		candidate = resolved
+	for _, candidate := range candidates {
+		if !isExecutableFile(candidate) {
+			continue
+		}
+		if resolved, err := filepath.EvalSymlinks(candidate); err == nil {
+			candidate = resolved
+		}
+		return filepath.Clean(candidate)
 	}
-	return filepath.Clean(candidate)
+	return ""
 }
 
 func bundledLanguageServerName(server, goos string) string {

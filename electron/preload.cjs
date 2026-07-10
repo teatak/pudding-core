@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld("puddingElectronDesktop", {
     }
   },
   openExternal: (url) => ipcRenderer.invoke("pudding:desktop:open-external", url),
+  setLocale: (locale) => ipcRenderer.invoke("pudding:desktop:set-locale", locale),
   onOAuthConnected: (listener) => {
     const wrapped = (_event, payload) => listener(payload);
     ipcRenderer.on("pudding:oauth:connected", wrapped);

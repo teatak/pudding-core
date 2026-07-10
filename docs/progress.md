@@ -88,7 +88,8 @@ provider 的 text/thought/tool_use 解析测试。下一步 T2:messages.parts �
    独立于工具调用;老项目有 `/compact` 摘要先例可移植。
 3. **桌面正式打包**:基础 `make desktop-bundle` 已补 macOS `.app`
    生成入口(Info.plist/icon/release daemon/pudding:// scheme),Electron Tray
-   已补显示/隐藏/退出入口;签名、公证、自动更新和正式 crash/log 收集后置。
+   已补显示/隐藏/退出入口;Tray 与原生菜单已支持中/繁/英并跟随 Web 语言切换;
+   签名、公证、自动更新和正式 crash/log 收集后置。
 4. **mascot 交互动画重做**:空态静态 mascot 已上;老项目 MascotHint.tsx
    有 680 行状态机(眨眼/打字/说话),需按新架构裁剪移植。
 

@@ -340,7 +340,6 @@ export function App() {
             <SheetDescription>{t("canvas.empty")}</SheetDescription>
           </SheetHeader>
           <CanvasPane
-            key={selectedSessionID || "canvas"}
             secondarySessionID={showSplit ? splitSessionID : undefined}
             token={token}
             sessionID={selectedSessionID}
@@ -413,7 +412,6 @@ export function App() {
             />
           </div>
           <CanvasPane
-            key={selectedSessionID || "canvas"}
             secondarySessionID={showSplit ? splitSessionID : undefined}
             token={token}
             sessionID={selectedSessionID}

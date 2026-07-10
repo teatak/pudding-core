@@ -2,7 +2,7 @@ MODULE := github.com/teatak/pudding-core
 LDFLAGS_RELEASE := -X $(MODULE)/internal/buildinfo.channel=release
 BUILDTAGS := sqlite_fts5 webrtcaec
 
-.PHONY: test tidy clean embed language-servers desktop desktop-dev desktop-release desktop-bundle daemon daemon-dev daemon-release prompt
+.PHONY: test tidy clean embed language-servers language-servers-ready desktop desktop-dev desktop-release desktop-bundle daemon daemon-dev daemon-release prompt
 
 # 共享:构建前端并装填进 daemon 的 embed 目录(产物不进 git)
 embed:
@@ -17,8 +17,8 @@ embed:
 desktop: embed
 	go build -tags "$(BUILDTAGS)" -o bin/puddingd ./cmd/puddingd
 
-# 热更循环:Electron shell + Vite(HMR) + daemon
-desktop-dev:
+# 热更循环:Electron shell + Vite(HMR) + daemon;首次自动准备固定版本语言服务
+desktop-dev: language-servers-ready
 	@BUILDTAGS="$(BUILDTAGS)" bash scripts/desktop-dev.sh
 
 # 发布桌面 daemon(release 通道:端口 9669 / ~/.pudding;供 .app bundle 使用)
@@ -28,6 +28,10 @@ desktop-release: embed
 # 发布包内置语言服务(固定版本;构建期下载,运行时不联网安装)
 language-servers:
 	@bash scripts/prepare-language-servers.sh
+
+# 开发态只在缺失或版本变化时重新准备,避免每次启动都执行 npm/go install
+language-servers-ready:
+	@bash scripts/prepare-language-servers.sh --ensure
 
 # macOS .app bundle(签名/公证后续补齐)
 desktop-bundle: desktop-release language-servers

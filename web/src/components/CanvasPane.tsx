@@ -36,6 +36,7 @@ import {
   putCanvasItem,
   type BrowserTab,
   type CanvasItemPayload,
+  type Terminal,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { CanvasSurfaceTabs } from "@/browser/BrowserCanvasTabButton";
@@ -156,6 +157,7 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
   const draftWindowsRef = useRef<Record<string, WindowState>>({});
   const restoreWindowsRef = useRef<Record<string, WindowState>>({});
   const restoredWindowHydrationRef = useRef("");
+  const retainedTokenRef = useRef(token);
   const seenCanvasItemIDsRef = useRef<Set<string>>(new Set());
   const hasSeenCanvasItemsRef = useRef(false);
   const resizeStartWindowsRef = useRef<Record<string, WindowState>>({});
@@ -165,6 +167,9 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
   const [galleryActiveIndices, setGalleryActiveIndices] = useState<Record<string, number>>({});
   const [restoreWindows, setRestoreWindows] = useState<Record<string, WindowState>>({});
   const [canvasLibraryOpen, setCanvasLibraryOpen] = useState(false);
+  const [retainedBrowserTabs, setRetainedBrowserTabs] = useState<Record<string, BrowserTab[]>>({});
+  const [retainedTerminals, setRetainedTerminals] = useState<Record<string, Terminal[]>>({});
+  const [retainedFilePreviews, setRetainedFilePreviews] = useState<Record<string, FilePreview>>({});
   const primaryFilePreviews = useFilePreviews(sessionID);
   const secondaryFilePreviews = useFilePreviews(secondarySessionID);
   const filePreviewReveal = useFilePreviewReveal(sessionID, secondarySessionID);
@@ -175,9 +180,46 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
       ),
     [primaryFilePreviews, secondaryFilePreviews],
   );
-  const [activeFilePreviewID, setActiveFilePreviewID] = useState<string | undefined>(
-    () => filePreviews.at(-1)?.id,
-  );
+  const mountedFilePreviews = useMemo(() => {
+    const activeSessionIDs = new Set([sessionID, secondarySessionID].filter(Boolean));
+    return [
+      ...Object.values(retainedFilePreviews).filter((preview) => !activeSessionIDs.has(preview.sessionID)),
+      ...filePreviews,
+    ];
+  }, [filePreviews, retainedFilePreviews, secondarySessionID, sessionID]);
+  const [activeFilePreviewIDs, setActiveFilePreviewIDs] = useState<Record<string, string>>(() => {
+    const initialPreviewID = filePreviews.at(-1)?.id;
+    return sessionID && initialPreviewID ? { [sessionID]: initialPreviewID } : {};
+  });
+  const activeFilePreviewID = sessionID ? activeFilePreviewIDs[sessionID] : undefined;
+  const setActiveFilePreviewID = (previewID: string | undefined) => {
+    if (!sessionID) {
+      return;
+    }
+    setActiveFilePreviewIDs((current) => {
+      if (previewID) {
+        return current[sessionID] === previewID ? current : { ...current, [sessionID]: previewID };
+      }
+      if (!current[sessionID]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[sessionID];
+      return next;
+    });
+  };
+  useEffect(() => {
+    const activeSessionIDs = new Set([sessionID, secondarySessionID].filter(Boolean));
+    setRetainedFilePreviews((current) => {
+      const next = Object.fromEntries(
+        Object.entries(current).filter(([, preview]) => !activeSessionIDs.has(preview.sessionID)),
+      );
+      filePreviews.forEach((preview) => {
+        next[preview.id] = preview;
+      });
+      return sameResourceRecord(current, next) ? current : next;
+    });
+  }, [filePreviews, secondarySessionID, sessionID]);
   useEffect(() => {
     if (sessionID) {
       actorSessionIDRef.current = sessionID;
@@ -197,13 +239,13 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
 
   const itemsQuery = useQuery({
     enabled,
-    queryKey: queryKeys.canvasItems(actorSessionID),
+    queryKey: queryKeys.canvasItems(),
     queryFn: () => listCanvasItems(token, actorSessionID),
     staleTime: Infinity,
   });
   const closedItemsQuery = useQuery({
     enabled,
-    queryKey: queryKeys.closedCanvasItems(actorSessionID),
+    queryKey: queryKeys.closedCanvasItems(),
     queryFn: () => listClosedCanvasItems(token, actorSessionID),
     staleTime: 30_000,
   });
@@ -240,7 +282,6 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
     creatingTerminal,
     selectTerminal,
     terminals,
-    updateTerminalStatus,
   } = useCanvasTerminals({
     active: terminalActive,
     enabled,
@@ -261,6 +302,61 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
       }
     },
   });
+  useEffect(() => {
+    if (!actorSessionID) {
+      return;
+    }
+    setRetainedBrowserTabs((current) =>
+      sameResourceList(current[actorSessionID], browserTabs)
+        ? current
+        : { ...current, [actorSessionID]: browserTabs },
+    );
+  }, [actorSessionID, browserTabs]);
+  useEffect(() => {
+    if (!actorSessionID) {
+      return;
+    }
+    setRetainedTerminals((current) =>
+      sameResourceList(current[actorSessionID], terminals)
+        ? current
+        : { ...current, [actorSessionID]: terminals },
+    );
+  }, [actorSessionID, terminals]);
+  useEffect(() => {
+    if (retainedTokenRef.current === token) {
+      return;
+    }
+    retainedTokenRef.current = token;
+    setRetainedBrowserTabs({});
+    setRetainedTerminals({});
+    setRetainedFilePreviews({});
+    setActiveFilePreviewIDs({});
+  }, [token]);
+  const mountedBrowserTabs = actorSessionID
+    ? { ...retainedBrowserTabs, [actorSessionID]: browserTabs }
+    : retainedBrowserTabs;
+  const mountedTerminals = actorSessionID
+    ? { ...retainedTerminals, [actorSessionID]: terminals }
+    : retainedTerminals;
+  const updateMountedTerminalStatus = (
+    targetSessionID: string,
+    terminalID: string,
+    status: Terminal["status"],
+    exitCode?: number,
+  ) => {
+    const update = (current: Terminal[] | undefined) =>
+      (current || []).map((item) =>
+        item.id === terminalID ? { ...item, status, exitCode, updatedAt: new Date().toISOString() } : item,
+      );
+    const retained = retainedTerminals[targetSessionID];
+    queryClient.setQueryData<{ terminals: Terminal[] }>(queryKeys.terminals(targetSessionID), (current) => ({
+      terminals: update(current?.terminals ?? retained),
+    }));
+    setRetainedTerminals((current) => ({
+      ...current,
+      [targetSessionID]: update(current[targetSessionID]),
+    }));
+  };
   const activeFilePreview = filePreviews.find((preview) => preview.id === activeFilePreviewID);
   const filePreviewActive = Boolean(activeFilePreview && activeSurface === "canvas");
 
@@ -353,7 +449,7 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
       patchCanvasItemWindow(token, actorSessionID, itemID, { window }),
     onSuccess: () => {
       if (actorSessionID) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
       }
     },
   });
@@ -371,7 +467,7 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
       });
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
     },
     onError: () => {
       toast.error(t("canvas.galleryLayoutFailed"));
@@ -401,14 +497,14 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
       setGalleryActiveIndices((prev) => withoutKey(prev, item.id));
     },
     onError: (_error, item) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems() });
       toast.error(t("canvas.closeFailed"));
     },
     onSuccess: (_result, item) => {
       if (actorSessionID) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems() });
       }
     },
   });
@@ -432,8 +528,8 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
         return next;
       });
       if (actorSessionID) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems() });
       }
     },
     onError: () => {
@@ -444,7 +540,7 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
   const restoreClosedItem = (entry: ClosedCanvasItem) => {
     if (windows[entry.sourceItemID]) {
       void deleteClosedCanvasItem(token, actorSessionID, entry.id).then(() =>
-        queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems() }),
       );
       selectPersistentCanvasSurface();
       focusWindow(entry.sourceItemID);
@@ -456,14 +552,14 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
   const removeClosedMutation = useMutation({
     mutationFn: (entry: ClosedCanvasItem) => deleteClosedCanvasItem(token, actorSessionID, entry.id),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems() });
     },
   });
 
   const clearClosedMutation = useMutation({
     mutationFn: () => clearClosedCanvasItems(token, actorSessionID),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems() });
     },
   });
 
@@ -701,6 +797,7 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
               openedAt: preview.openedAt,
               path: preview.path,
             }))}
+            orderScope={actorSessionID}
             terminalTabs={terminals}
             onCloseBrowser={(tabID) => {
               const closingLastActiveBrowser =
@@ -818,31 +915,54 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
             ))
           )}
         </div>
-        {activeFilePreview ? <FilePreviewSurface active={filePreviewActive} preview={activeFilePreview} /> : null}
-        {actorSessionID && browserSurfaceVisible ? (
-          <BrowserSurface
-            key={`browser:${actorSessionID}`}
-            active={browserActive}
-            activeTabID={activeBrowserTabID}
-            pending={browserSurfacePending}
-            sessionID={actorSessionID}
-            tabs={browserTabs}
-            token={token}
+        {mountedFilePreviews.map((preview) => (
+          <FilePreviewSurface
+            key={preview.id}
+            active={filePreviewActive && preview.id === activeFilePreview?.id}
+            preview={preview}
           />
-        ) : null}
-        {actorSessionID && terminals.length > 0 ? (
-          <TerminalSurface
-            active={terminalActive}
-            activeTerminalID={activeTerminalID}
-            sessionID={actorSessionID}
-            terminals={terminals}
-            token={token}
-            onStatus={updateTerminalStatus}
-          />
-        ) : null}
+        ))}
+        {Object.entries(mountedBrowserTabs).map(([targetSessionID, tabs]) =>
+          tabs.length > 0 || (targetSessionID === actorSessionID && browserSurfaceVisible) ? (
+            <BrowserSurface
+              key={`browser:${targetSessionID}`}
+              active={targetSessionID === actorSessionID && browserActive}
+              activeTabID={targetSessionID === actorSessionID ? activeBrowserTabID : undefined}
+              pending={targetSessionID === actorSessionID && browserSurfacePending}
+              sessionID={targetSessionID}
+              tabs={tabs}
+              token={token}
+            />
+          ) : null,
+        )}
+        {Object.entries(mountedTerminals).map(([targetSessionID, sessionTerminals]) =>
+          sessionTerminals.length > 0 ? (
+            <TerminalSurface
+              key={`terminal:${targetSessionID}`}
+              active={targetSessionID === actorSessionID && terminalActive}
+              activeTerminalID={targetSessionID === actorSessionID ? activeTerminalID : undefined}
+              sessionID={targetSessionID}
+              terminals={sessionTerminals}
+              token={token}
+              onStatus={(terminalID, status, exitCode) =>
+                updateMountedTerminalStatus(targetSessionID, terminalID, status, exitCode)
+              }
+            />
+          ) : null,
+        )}
       </div>
     </aside>
   );
+}
+
+function sameResourceList<T>(current: T[] | undefined, next: T[]) {
+  return Boolean(current && current.length === next.length && current.every((item, index) => item === next[index]));
+}
+
+function sameResourceRecord<T>(current: Record<string, T>, next: Record<string, T>) {
+  const currentKeys = Object.keys(current);
+  const nextKeys = Object.keys(next);
+  return currentKeys.length === nextKeys.length && nextKeys.every((key) => current[key] === next[key]);
 }
 
 function CanvasEmpty() {

@@ -173,6 +173,27 @@ func TestBundledLanguageServersTakePriority(t *testing.T) {
 	}
 }
 
+func TestBundledLanguageServersResolveFromDevBin(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("executable fixture uses a POSIX file mode")
+	}
+	appRoot := t.TempDir()
+	daemon := filepath.Join(appRoot, "bin", "puddingd")
+	writeCodeTestFile(t, daemon, "daemon")
+	devServer := filepath.Join(appRoot, "bin", bundledLanguageServersDir, "gopls")
+	writeCodeTestFile(t, devServer, "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(devServer, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(devServer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := bundledLanguageServerPathForExecutable(daemon, "gopls"); got != resolved {
+		t.Fatalf("dev bundled gopls = %q, want %q", got, resolved)
+	}
+}
+
 func TestBundledLanguageServerNames(t *testing.T) {
 	if got := bundledLanguageServerName("gopls", "windows"); got != "gopls.exe" {
 		t.Fatalf("Windows gopls name = %q", got)

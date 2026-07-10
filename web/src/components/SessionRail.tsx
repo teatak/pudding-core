@@ -988,7 +988,7 @@ function RailPanel({
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarHeader>
-          <SidebarContent ref={scrollContainerRef} className="py-2 overscroll-contain">
+          <SidebarContent ref={scrollContainerRef} className="pt-0 pb-2 overscroll-contain">
             {isLoading ? (
               <SessionListSkeleton />
             ) : isError ? (
@@ -1235,7 +1235,7 @@ function CollapsibleSessionGroupLabel({
           <TooltipTrigger asChild>
             <button
               aria-label={actionLabel || label}
-              className="flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/60 opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-focus-within/project-label:opacity-100 group-hover/project-label:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
+              className="flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/60 opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover/project-label:opacity-100 group-has-[[data-state=open]]/project-label:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
               type="button"
               onClick={(event) => {
                 event.stopPropagation();
@@ -1302,7 +1302,7 @@ function ProjectActionsMenu({ project, token }: { project: Project; token: strin
         <DropdownMenuTrigger asChild>
           <button
             aria-label={t("project.actions")}
-            className="flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/60 opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-focus-within/project-label:opacity-100 group-hover/project-label:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
+            className="flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/60 opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover/project-label:opacity-100 data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground data-[state=open]:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
             type="button"
             onClick={(event) => event.stopPropagation()}
           >

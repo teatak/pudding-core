@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 
+import { setDesktopLocale } from "@/lib/desktopBridge";
 import { consumeLaunchParam } from "@/state/launchParams";
 
 export type Locale = "zh-CN" | "zh-TW" | "en";
@@ -3106,6 +3107,7 @@ export function setLocale(locale: Locale) {
   if (typeof window !== "undefined") {
     window.localStorage.setItem(STORAGE_KEY, locale);
   }
+  setDesktopLocale(locale);
   listeners.forEach((listener) => listener());
 }
 
@@ -3114,6 +3116,7 @@ export function startLocaleSync() {
     return;
   }
   localeSyncStarted = true;
+  setDesktopLocale(current);
 }
 
 export function translate(key: string, locale = current) {
