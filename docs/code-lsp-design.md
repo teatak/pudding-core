@@ -1,6 +1,6 @@
 # Pudding LSP 语言智能设计
 
-> 状态:实施中,C10.0、C10.1 与 C10.2 已完成(2026-07-10)。
+> 状态:已完成(2026-07-10)。
 > 对应阶段:C10。  
 > 首版语言:Go、TypeScript / JavaScript。  
 > 目标:在不引入后端 focus、隐式上下文或完整 IDE 状态的前提下,为 Project mode
@@ -524,6 +524,7 @@ Project approval 是产品信任边界,不是 OS process sandbox。文档和 UI 
 - `language_server_initialize_failed`
 - `language_server_crashed`
 - `language_server_timeout`
+- `language_server_capacity`
 - `language_server_protocol_error`
 - `document_too_large`
 - `invalid_position`
@@ -709,7 +710,7 @@ PUDDING_LSP_INTEGRATION=1
 - fake service 单测覆盖 root、编码、过滤、去重和 publish diagnostics fallback;
   `PUDDING_LSP_INTEGRATION=1` 可使用真实 gopls 验证四个工具。
 - transcript 已补统一工具显示名、图标、基础结构化位置/诊断列表和三语 i18n;
-  C10.3 继续完成视觉与可靠性收口。
+  C10.3 已完成视觉与可靠性收口。
 
 ### C10.2: TypeScript / JavaScript
 
@@ -739,14 +740,32 @@ PUDDING_LSP_INTEGRATION=1
 
 ### C10.3: UI 与可靠性
 
-预计 2 天。
+状态:已完成(2026-07-10)。
 
 - transcript code renderers 与三语 i18n。
 - Canvas location jump。
 - diagnostics common row。
 - 全量 Go/Web 测试与文档收口。
 
-总工期预计 8-10 天。
+实际落地:
+
+- Manager 为普通 request 提供 20 秒默认超时,diagnostics request 使用 30 秒;用户
+  cancel 仍只发送 `$/cancelRequest`,不会杀死共享 process。
+- process 在业务 request 尚未发送前已退出时,Manager 丢弃旧实例并安全重建一次;
+  已发送的 request 不透明重试。
+- symbols、definition、references 与 diagnostics 的完整 JSON 结果统一限制为 256 KiB;
+  长 symbol metadata 与 diagnostic message 先做单项截断,再按稳定前缀缩减结果并标记
+  `truncated:true`。
+- 修复 server 返回超出磁盘文件行数的位置时 excerpt 计算越界的问题;异常 location 仍
+  可结构化返回,但不生成伪造 excerpt。
+- transcript 展示语言、server、root fallback、freshness 与稳定本地化错误;技术 detail
+  继续只在独立“原始数据”card 中可见。
+- location 与 diagnostic row 使用统一 hover-only Canvas 入口;点击后复用已有文件 tab,
+  并在 excerpt 中高亮目标行。长列表保持固定最大高度滚动,不静默丢弃 200 项后的结果。
+- fake LSP race tests 覆盖默认 request timeout 后复用、process exit 后重建、结果大小上限
+  与越界 location;真实 gopls 集成继续由 `PUDDING_LSP_INTEGRATION=1` 验证。
+
+C10 至此完成。
 
 ## 17. 验收标准
 

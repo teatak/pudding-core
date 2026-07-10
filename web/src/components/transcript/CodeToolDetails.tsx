@@ -192,9 +192,20 @@ function LanguageCodeDetails({ callID, name, output, sessionID, t }: { callID?: 
   }
   if (name === "builtin_code_diagnostics") {
     const diagnostics = readRecordArray(output, "diagnostics");
-    return diagnostics.length > 0
-      ? <CommandDiagnosticList callID={callID} diagnostics={diagnostics} sessionID={sessionID} t={t} />
-      : <EmptyLine>{t("transcript.codeNoSemanticResults")}</EmptyLine>;
+    return (
+      <div className="space-y-1">
+        <FileResultMeta
+          values={[
+            ...codeLanguageMeta(output, t),
+            readBoolean(output, "fresh") ? "" : t("transcript.codeResultNotFresh"),
+            readBoolean(output, "truncated") ? t("transcript.codePartialResults") : "",
+          ]}
+        />
+        {diagnostics.length > 0
+          ? <CommandDiagnosticList callID={callID} diagnostics={diagnostics} sessionID={sessionID} t={t} />
+          : <EmptyLine>{t("transcript.codeNoSemanticResults")}</EmptyLine>}
+      </div>
+    );
   }
   const items = name === "builtin_code_symbols" ? readRecordArray(output, "symbols") : readRecordArray(output, "locations");
   const countKey = name === "builtin_code_symbols" ? "transcript.codeSymbols" : "transcript.codeLocations";
@@ -203,46 +214,54 @@ function LanguageCodeDetails({ callID, name, output, sessionID, t }: { callID?: 
     <div className="space-y-1">
       <FileResultMeta
         values={[
+          ...codeLanguageMeta(output, t),
           replace(t(countKey), { count: String(items.length) }),
           external > 0 ? replace(t("transcript.codeExternalResults"), { count: String(external) }) : "",
           readBoolean(output, "truncated") ? t("transcript.codePartialResults") : "",
         ]}
       />
       {items.length > 0
-        ? <LanguageCodeLocationList callID={callID} items={items} sessionID={sessionID} symbols={name === "builtin_code_symbols"} />
+        ? <LanguageCodeLocationList callID={callID} items={items} sessionID={sessionID} symbols={name === "builtin_code_symbols"} t={t} />
         : <EmptyLine>{t("transcript.codeNoSemanticResults")}</EmptyLine>}
     </div>
   );
 }
 
-function LanguageCodeLocationList({ callID, items, sessionID, symbols }: { callID?: string; items: UnknownRecord[]; sessionID?: string; symbols: boolean }) {
+function LanguageCodeLocationList({ callID, items, sessionID, symbols, t }: { callID?: string; items: UnknownRecord[]; sessionID?: string; symbols: boolean; t: Translator }) {
   return (
     <div className="max-h-72 overflow-auto border-t border-border/50 pt-1">
-      {items.slice(0, 200).map((item, index) => {
+      {items.slice(0, 500).map((item, index) => {
         const path = readString(item, "path");
         const relativePath = readString(item, "relativePath") || path;
         const line = readNumber(item, "line") ?? 1;
         const column = readNumber(item, "column") ?? 1;
         const excerpt = readString(item, "excerpt");
         const title = symbols ? readString(item, "name") : relativePath;
+        const locationLabel = `${relativePath}:${line}:${column}`;
         const detail = symbols
           ? [readString(item, "kind"), readString(item, "containerName")].filter(Boolean).join(" · ")
-          : `${relativePath}:${line}:${column}`;
+          : `${line}:${column}`;
         const previewable = Boolean(sessionID && path && excerpt);
         const content = (
           <>
-            <span className="min-w-0 truncate font-mono text-[11px] text-foreground/90">{title}</span>
-            <span className="shrink-0 truncate text-[10px] text-muted-foreground">{detail}</span>
+            <span className="min-w-0">
+              <span className="block truncate font-mono text-[11px] text-foreground/90">{title}</span>
+              {symbols ? <span className="block truncate font-mono text-[10px] text-muted-foreground">{locationLabel}</span> : null}
+            </span>
+            <span className="min-w-0 truncate text-right text-[10px] text-muted-foreground">{detail}</span>
+            {previewable ? <PanelRightOpen aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/code-location:opacity-100" /> : <span />}
           </>
         );
         return previewable ? (
           <button
             key={`${path}:${line}:${column}:${index}`}
-            className="grid min-h-7 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-sm px-1 text-left hover:bg-muted/60"
+            aria-label={`${t("transcript.codeOpenInCanvas")} ${locationLabel}`}
+            className="group/code-location grid min-h-9 w-full grid-cols-[minmax(0,1fr)_minmax(0,40%)_1rem] items-center gap-2 rounded-sm px-1 text-left hover:bg-muted/60"
             type="button"
             onClick={() => openFilePreview({
               callID,
               content: excerpt,
+              focusLine: line,
               lineStart: readNumber(item, "lineStart") ?? line,
               lineStep: 1,
               path,
@@ -254,7 +273,7 @@ function LanguageCodeLocationList({ callID, items, sessionID, symbols }: { callI
             {content}
           </button>
         ) : (
-          <div key={`${path}:${line}:${column}:${index}`} className="grid min-h-7 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-1">{content}</div>
+          <div key={`${path}:${line}:${column}:${index}`} className="grid min-h-9 grid-cols-[minmax(0,1fr)_minmax(0,40%)_1rem] items-center gap-2 px-1">{content}</div>
         );
       })}
     </div>
@@ -518,7 +537,7 @@ function CommandDiagnosticList({ callID, diagnostics, sessionID, t }: { callID?:
         {replace(t("transcript.codeDiagnostics"), { count: String(diagnostics.length) })}
       </div>
       <div className="max-h-64 overflow-auto">
-        {diagnostics.slice(0, 200).map((diagnostic, index) => {
+        {diagnostics.slice(0, 500).map((diagnostic, index) => {
           const path = readString(diagnostic, "path");
           const relativePath = readString(diagnostic, "relativePath") || path;
           const line = readNumber(diagnostic, "line") ?? 1;
@@ -543,11 +562,13 @@ function CommandDiagnosticList({ callID, diagnostics, sessionID, t }: { callID?:
           return previewable ? (
             <button
               key={`${path}:${line}:${column ?? 0}:${index}`}
-              className="grid w-full grid-cols-[1rem_minmax(0,1fr)] gap-1.5 rounded-sm px-1 py-1.5 hover:bg-muted/60"
+              aria-label={`${t("transcript.codeOpenInCanvas")} ${relativePath}:${line}:${column ?? 1}`}
+              className="group/code-diagnostic grid w-full grid-cols-[1rem_minmax(0,1fr)_1rem] gap-1.5 rounded-sm px-1 py-1.5 hover:bg-muted/60"
               type="button"
               onClick={() => openFilePreview({
                 callID,
                 content: excerpt,
+                focusLine: line,
                 lineStart: readNumber(diagnostic, "lineStart") ?? line,
                 lineStep: 1,
                 path,
@@ -557,6 +578,7 @@ function CommandDiagnosticList({ callID, diagnostics, sessionID, t }: { callID?:
               })}
             >
               {content}
+              <PanelRightOpen aria-hidden="true" className="mt-0.5 size-3.5 text-muted-foreground opacity-0 transition-opacity group-hover/code-diagnostic:opacity-100" />
             </button>
           ) : (
             <div key={`${path}:${line}:${column ?? 0}:${index}`} className="grid grid-cols-[1rem_minmax(0,1fr)] gap-1.5 px-1 py-1.5">{content}</div>
@@ -1000,16 +1022,63 @@ function FileMatchList({ callID, matches, sessionID, t }: { callID?: string; mat
 function ErrorDetail({ output, t }: { output: UnknownRecord; t: Translator }) {
   const reason = readString(output, "reason");
   const detail = readString(output, "detail") || readString(output, "error") || reason;
-  const hint = readString(output, "hint");
+  const friendlyDetail = codeErrorMessage(output, t);
+  const hint = codeErrorHint(reason, output, t) || readString(output, "hint");
   return (
     <div className="border-t border-destructive/30 pt-2 text-[11px]">
       <div className="flex items-start gap-1.5 text-destructive">
         <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
-        <span className="break-words">{detail || t("transcript.toolFailed")}</span>
+        <span className="break-words">{friendlyDetail || detail || t("transcript.toolFailed")}</span>
       </div>
       {hint ? <div className="mt-1 break-words pl-5 text-muted-foreground">{hint}</div> : null}
     </div>
   );
+}
+
+function codeLanguageMeta(output: UnknownRecord, t: Translator) {
+  const language = readString(output, "language");
+  const server = readString(output, "server");
+  const languageLabel = language === "go" ? "Go" : language === "typescript" ? "TypeScript / JavaScript" : language;
+  return [
+    [languageLabel, server].filter(Boolean).join(" · "),
+    readBoolean(output, "rootFallback") ? t("transcript.codeRootFallback") : "",
+  ].filter(Boolean);
+}
+
+function codeErrorMessage(output: UnknownRecord, t: Translator) {
+  const reason = readString(output, "reason");
+  const server = readString(output, "server") || t("transcript.codeLanguageServer");
+  const keys: Record<string, string> = {
+    cancelled: "transcript.codeErrorCancelled",
+    document_too_large: "transcript.codeErrorDocumentTooLarge",
+    invalid_position: "transcript.codeErrorInvalidPosition",
+    language_ambiguous: "transcript.codeErrorLanguageAmbiguous",
+    language_not_supported: "transcript.codeErrorLanguageUnsupported",
+    language_server_capacity: "transcript.codeErrorServerCapacity",
+    language_server_crashed: "transcript.codeErrorServerCrashed",
+    language_server_initialize_failed: "transcript.codeErrorServerInitialize",
+    language_server_protocol_error: "transcript.codeErrorProtocol",
+    language_server_start_failed: "transcript.codeErrorServerStart",
+    language_server_timeout: "transcript.codeErrorServerTimeout",
+    language_server_unavailable: "transcript.codeErrorServerUnavailable",
+    mixed_language_targets: "transcript.codeErrorMixedTargets",
+    path_not_authorized: "transcript.codeErrorPathUnauthorized",
+  };
+  const key = keys[reason];
+  return key ? replace(t(key), { server }) : "";
+}
+
+function codeErrorHint(reason: string, output: UnknownRecord, t: Translator) {
+  if (reason === "language_server_unavailable") {
+    return replace(t("transcript.codeErrorHintInstall"), { server: readString(output, "server") || t("transcript.codeLanguageServer") });
+  }
+  if (reason === "language_ambiguous") {
+    return t("transcript.codeErrorHintLanguage");
+  }
+  if (reason === "mixed_language_targets") {
+    return t("transcript.codeErrorHintSplitTargets");
+  }
+  return "";
 }
 
 function CodeOutput({ destructive, label, text, truncated }: { destructive?: boolean; label: string; text: string; truncated?: boolean }) {

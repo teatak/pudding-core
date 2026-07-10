@@ -156,7 +156,7 @@ func lspCharacterToColumn(line string, character int, encoding string) int {
 }
 
 func codeExcerpt(lines []string, line int) (int, int, string) {
-	if len(lines) == 0 || line < 1 {
+	if len(lines) == 0 || line < 1 || line > len(lines) {
 		return max(1, line), max(1, line), ""
 	}
 	start := max(1, line-2)

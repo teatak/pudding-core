@@ -14,10 +14,11 @@ const (
 )
 
 var (
-	ErrClosed        = errors.New("lsp manager closed")
-	ErrProcessClosed = errors.New("lsp process closed")
-	ErrCapacity      = errors.New("lsp process capacity reached")
-	ErrSpecConflict  = errors.New("lsp server spec conflicts with running process")
+	ErrClosed         = errors.New("lsp manager closed")
+	ErrProcessClosed  = errors.New("lsp process closed")
+	ErrRequestNotSent = errors.New("lsp request was not sent")
+	ErrCapacity       = errors.New("lsp process capacity reached")
+	ErrSpecConflict   = errors.New("lsp server spec conflicts with running process")
 )
 
 // ProcessKey identifies one daemon-shared language server.

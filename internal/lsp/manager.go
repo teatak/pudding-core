@@ -13,6 +13,8 @@ import (
 
 const (
 	defaultInitializeTimeout = 15 * time.Second
+	defaultRequestTimeout    = 20 * time.Second
+	defaultDiagnosticTimeout = 30 * time.Second
 	defaultShutdownTimeout   = 2 * time.Second
 	defaultIdleTimeout       = 10 * time.Minute
 	defaultReapInterval      = time.Minute
@@ -40,6 +42,14 @@ type ManagerOption func(*Manager)
 
 func WithInitializeTimeout(timeout time.Duration) ManagerOption {
 	return func(m *Manager) { m.opts.initializeTimeout = timeout }
+}
+
+func WithRequestTimeout(timeout time.Duration) ManagerOption {
+	return func(m *Manager) { m.requestTimeout = timeout }
+}
+
+func WithDiagnosticTimeout(timeout time.Duration) ManagerOption {
+	return func(m *Manager) { m.diagnosticTimeout = timeout }
 }
 
 func WithShutdownTimeout(timeout time.Duration) ManagerOption {
@@ -72,24 +82,28 @@ type managerEntry struct {
 
 // Manager owns and shares LSP processes by canonical language root and server kind.
 type Manager struct {
-	mu           sync.Mutex
-	entries      map[ProcessKey]*managerEntry
-	closed       bool
-	stop         chan struct{}
-	stopOnce     sync.Once
-	idleTimeout  time.Duration
-	reapInterval time.Duration
-	maxProcesses int
-	opts         processOptions
+	mu                sync.Mutex
+	entries           map[ProcessKey]*managerEntry
+	closed            bool
+	stop              chan struct{}
+	stopOnce          sync.Once
+	idleTimeout       time.Duration
+	reapInterval      time.Duration
+	maxProcesses      int
+	requestTimeout    time.Duration
+	diagnosticTimeout time.Duration
+	opts              processOptions
 }
 
 func NewManager(options ...ManagerOption) *Manager {
 	m := &Manager{
-		entries:      map[ProcessKey]*managerEntry{},
-		stop:         make(chan struct{}),
-		idleTimeout:  defaultIdleTimeout,
-		reapInterval: defaultReapInterval,
-		maxProcesses: defaultMaxProcesses,
+		entries:           map[ProcessKey]*managerEntry{},
+		stop:              make(chan struct{}),
+		idleTimeout:       defaultIdleTimeout,
+		reapInterval:      defaultReapInterval,
+		maxProcesses:      defaultMaxProcesses,
+		requestTimeout:    defaultRequestTimeout,
+		diagnosticTimeout: defaultDiagnosticTimeout,
 		opts: processOptions{
 			initializeTimeout: defaultInitializeTimeout,
 			shutdownTimeout:   defaultShutdownTimeout,
@@ -112,14 +126,26 @@ func NewManager(options ...ManagerOption) *Manager {
 
 // Request acquires the shared process and forwards one JSON-RPC request.
 func (m *Manager) Request(ctx context.Context, spec ServerSpec, method string, params, result any) error {
-	process, err := m.Acquire(ctx, spec)
-	if err != nil {
-		return err
+	timeout := m.requestTimeout
+	if method == "textDocument/diagnostic" {
+		timeout = m.diagnosticTimeout
 	}
-	m.touch(process.spec.Key, process)
-	err = process.Request(ctx, method, params, result)
-	m.touch(process.spec.Key, process)
-	return err
+	requestCtx, cancel := withTimeout(ctx, timeout)
+	defer cancel()
+	for attempt := 0; attempt < 2; attempt++ {
+		process, err := m.Acquire(requestCtx, spec)
+		if err != nil {
+			return err
+		}
+		m.touch(process.spec.Key, process)
+		err = process.Request(requestCtx, method, params, result)
+		m.touch(process.spec.Key, process)
+		if !errors.Is(err, ErrRequestNotSent) || requestCtx.Err() != nil {
+			return err
+		}
+		m.discard(process.spec.Key, process)
+	}
+	return ErrRequestNotSent
 }
 
 func (m *Manager) SyncDocument(ctx context.Context, spec ServerSpec, document Document) (DocumentState, error) {
@@ -256,6 +282,14 @@ func (m *Manager) touch(key ProcessKey, process *Process) {
 	m.mu.Lock()
 	if entry := m.entries[key]; entry != nil && entry.process == process {
 		entry.lastUsed = time.Now()
+	}
+	m.mu.Unlock()
+}
+
+func (m *Manager) discard(key ProcessKey, process *Process) {
+	m.mu.Lock()
+	if entry := m.entries[key]; entry != nil && entry.process == process {
+		delete(m.entries, key)
 	}
 	m.mu.Unlock()
 }

@@ -324,6 +324,72 @@ func TestCodeDefinitionAndReferencesUseUnifiedLocations(t *testing.T) {
 	}
 }
 
+func TestCodeReferencesBoundsCanonicalResultSize(t *testing.T) {
+	root := t.TempDir()
+	writeCodeTestFile(t, filepath.Join(root, "go.mod"), "module example.com/bounded\n")
+	var sourceText strings.Builder
+	for index := 0; index < maxCodeReferences+10; index++ {
+		sourceText.WriteString(strings.Repeat("x", maxFileSearchExcerptLineChars))
+		sourceText.WriteByte('\n')
+	}
+	source := filepath.Join(root, "main.go")
+	writeCodeTestFile(t, source, sourceText.String())
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolvedSource := filepath.Join(resolvedRoot, "main.go")
+	service := &fakeCodeLanguageService{encoding: "utf-16"}
+	service.request = func(method string, _ any, result any) error {
+		if method != "textDocument/references" {
+			t.Fatalf("unexpected method %s", method)
+		}
+		locations := make([]map[string]any, 0, maxCodeReferences)
+		for line := 0; line < maxCodeReferences; line++ {
+			locations = append(locations, testLocation(resolvedSource, line, 0, 1))
+		}
+		return assignCodeTestResult(result, locations)
+	}
+	runner := testCodeRunner(service)
+	result := runner.Call(context.Background(), Call{
+		Name:        CodeReferences,
+		Args:        json.RawMessage(`{"scope":"project","path":"main.go","line":1,"column":1,"max_results":500}`),
+		ProjectDirs: []string{resolvedRoot},
+	})
+	if !result.Ok {
+		t.Fatalf("references failed: %s", result.Content)
+	}
+	if len(result.Content) > maxCodeResultBytes {
+		t.Fatalf("result size = %d", len(result.Content))
+	}
+	payload := decodeToolResult(t, result)
+	if payload["truncated"] != true || payload["locationCount"].(float64) >= maxCodeReferences {
+		t.Fatalf("result was not size bounded: count=%v truncated=%v", payload["locationCount"], payload["truncated"])
+	}
+}
+
+func TestCodeLocationOutsideFileRangeDoesNotPanic(t *testing.T) {
+	root, source := codeTestProject(t)
+	service := &fakeCodeLanguageService{encoding: "utf-16"}
+	service.request = func(_ string, _ any, result any) error {
+		return assignCodeTestResult(result, testLocation(source, 10_000, 0, 1))
+	}
+	runner := testCodeRunner(service)
+	result := runner.Call(context.Background(), Call{
+		Name:        CodeDefinition,
+		Args:        json.RawMessage(`{"scope":"project","path":"main.go","line":1,"column":1}`),
+		ProjectDirs: []string{root},
+	})
+	if !result.Ok {
+		t.Fatalf("definition failed: %s", result.Content)
+	}
+	payload := decodeToolResult(t, result)
+	location := payload["locations"].([]any)[0].(map[string]any)
+	if location["line"] != float64(10_001) || location["excerpt"] != nil {
+		t.Fatalf("unexpected out-of-range location: %+v", location)
+	}
+}
+
 func TestCodeDiagnosticsFallsBackToPublishedDiagnostics(t *testing.T) {
 	root, source := codeTestProject(t)
 	resolvedSource, err := filepath.EvalSymlinks(source)

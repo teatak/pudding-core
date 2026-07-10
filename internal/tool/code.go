@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/teatak/pudding-core/internal/lsp"
 )
@@ -19,6 +20,11 @@ const (
 	maxCodeReferences        = 500
 	maxCodeDiagnostics       = 500
 	maxCodeDiagnosticTargets = 32
+	maxCodeQueryRunes        = 500
+	maxCodeResultBytes       = 256 << 10
+	maxCodeSymbolTextRunes   = 400
+	maxCodeDiagnosticRunes   = 2000
+	maxCodeMetadataRunes     = 200
 	codeDiagnosticWait       = 750 * time.Millisecond
 )
 
@@ -87,6 +93,9 @@ func (r *BuiltinRunner) codeSymbols(ctx context.Context, call Call) Result {
 	if args.Query == "" {
 		return toolJSONError(out, "invalid_arguments", "query is required")
 	}
+	if utf8.RuneCountInString(args.Query) > maxCodeQueryRunes {
+		return toolJSONError(out, "invalid_arguments", "query must not exceed 500 characters")
+	}
 	maxResults, err := boundedCodeResults(args.MaxResults, maxCodeSymbols)
 	if err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
@@ -117,9 +126,9 @@ func (r *BuiltinRunner) codeSymbols(ctx context.Context, call Call) Result {
 			continue
 		}
 		symbols = append(symbols, codeSymbol{
-			Name:          raw.Name,
+			Name:          truncateDiagnosticText(raw.Name, maxCodeSymbolTextRunes),
 			Kind:          codeSymbolKind(raw.Kind),
-			ContainerName: raw.ContainerName,
+			ContainerName: truncateDiagnosticText(raw.ContainerName, maxCodeSymbolTextRunes),
 			codeLocation:  location,
 		})
 	}
@@ -146,6 +155,8 @@ func (r *BuiltinRunner) codeSymbols(ctx context.Context, call Call) Result {
 	payload["resultCount"] = len(symbols)
 	payload["externalResultCount"] = external
 	payload["truncated"] = truncated
+	symbols, sizeTruncated := boundCodePayloadItems(payload, "symbols", "resultCount", symbols)
+	payload["truncated"] = truncated || sizeTruncated
 	return withResultSummary(toolJSON(out, true, payload), SummaryReturnedItems, len(symbols))
 }
 
@@ -178,6 +189,8 @@ func (r *BuiltinRunner) codeDefinition(ctx context.Context, call Call) Result {
 	payload["locationCount"] = len(locations)
 	payload["externalResultCount"] = external
 	payload["truncated"] = truncated
+	locations, sizeTruncated := boundCodePayloadItems(payload, "locations", "locationCount", locations)
+	payload["truncated"] = truncated || sizeTruncated
 	if len(locations) == 0 && external > 0 {
 		payload["hint"] = "Definition is outside authorized project roots."
 	}
@@ -224,6 +237,8 @@ func (r *BuiltinRunner) codeReferences(ctx context.Context, call Call) Result {
 	payload["locationCount"] = len(locations)
 	payload["externalResultCount"] = external
 	payload["truncated"] = truncated
+	locations, sizeTruncated := boundCodePayloadItems(payload, "locations", "locationCount", locations)
+	payload["truncated"] = truncated || sizeTruncated
 	return withResultSummary(toolJSON(out, true, payload), SummaryReturnedItems, len(locations))
 }
 
@@ -293,10 +308,10 @@ func (r *BuiltinRunner) codeDiagnostics(ctx context.Context, call Call) Result {
 			diagnostics = append(diagnostics, codeDiagnostic{
 				codeLocation: location,
 				Severity:     level,
-				Code:         diagnosticCode(item.Code),
-				Source:       item.Source,
+				Code:         truncateDiagnosticText(diagnosticCode(item.Code), maxCodeMetadataRunes),
+				Source:       truncateDiagnosticText(item.Source, maxCodeMetadataRunes),
 				SourceKind:   "lsp",
-				Message:      item.Message,
+				Message:      truncateDiagnosticText(item.Message, maxCodeDiagnosticRunes),
 			})
 		}
 	}
@@ -315,6 +330,8 @@ func (r *BuiltinRunner) codeDiagnostics(ctx context.Context, call Call) Result {
 	payload["diagnosticCount"] = len(diagnostics)
 	payload["fresh"] = fresh
 	payload["truncated"] = truncated
+	diagnostics, sizeTruncated := boundCodePayloadItems(payload, "diagnostics", "diagnosticCount", diagnostics)
+	payload["truncated"] = truncated || sizeTruncated
 	return withResultSummary(toolJSON(out, true, payload), SummaryReturnedItems, len(diagnostics))
 }
 
@@ -450,7 +467,11 @@ func codeServiceError(out Result, err error) Result {
 		reason = "cancelled"
 	case errors.Is(err, context.DeadlineExceeded):
 		reason = "language_server_timeout"
-	case errors.Is(err, lsp.ErrProcessClosed) || strings.Contains(err.Error(), "language server exited"):
+	case errors.Is(err, lsp.ErrCapacity):
+		reason = "language_server_capacity"
+	case errors.Is(err, lsp.ErrClosed):
+		reason = "language_server_unavailable"
+	case errors.Is(err, lsp.ErrRequestNotSent), errors.Is(err, lsp.ErrProcessClosed), strings.Contains(err.Error(), "language server exited"):
 		reason = "language_server_crashed"
 	case strings.Contains(err.Error(), "initialize language server"):
 		reason = "language_server_initialize_failed"
@@ -486,6 +507,32 @@ func boundedCodeResults(value, maximum int) (int, error) {
 		return 0, fmt.Errorf("max_results must be between 1 and %d", maximum)
 	}
 	return value, nil
+}
+
+func boundCodePayloadItems[T any](payload map[string]any, itemKey, countKey string, items []T) ([]T, bool) {
+	payload[itemKey] = items
+	payload[countKey] = len(items)
+	encoded, err := json.Marshal(payload)
+	if err != nil || len(encoded) <= maxCodeResultBytes {
+		return items, false
+	}
+	payload["truncated"] = true
+	low, high := 0, len(items)
+	for low < high {
+		middle := (low + high + 1) / 2
+		payload[itemKey] = items[:middle]
+		payload[countKey] = middle
+		encoded, err = json.Marshal(payload)
+		if err == nil && len(encoded) <= maxCodeResultBytes {
+			low = middle
+		} else {
+			high = middle - 1
+		}
+	}
+	items = items[:low]
+	payload[itemKey] = items
+	payload[countKey] = len(items)
+	return items, true
 }
 
 func convertCodeLocations(projectDirs []string, encoding string, raw []rawLSPLocation, limit int) ([]codeLocation, int, bool) {

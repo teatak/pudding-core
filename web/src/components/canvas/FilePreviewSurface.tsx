@@ -17,9 +17,10 @@ export function FilePreviewSurface({ active, preview }: { active: boolean; previ
   const characterCount = useMemo(() => Array.from(content).length, [content]);
   const lineCount = useMemo(() => content.split("\n").length, [content]);
   const lineNumbers = useMemo(
-    () => Array.from({ length: lineCount }, (_unused, index) => preview.lineStart + index * preview.lineStep).join("\n"),
+    () => Array.from({ length: lineCount }, (_unused, index) => preview.lineStart + index * preview.lineStep),
     [lineCount, preview.lineStart, preview.lineStep],
   );
+  const focusLineIndex = preview.focusLine == null ? -1 : lineNumbers.indexOf(preview.focusLine);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,17 +84,26 @@ export function FilePreviewSurface({ active, preview }: { active: boolean; previ
         </div>
       ) : null}
       <div className="min-h-0 flex-1 overflow-auto bg-card/50">
-        <div className="flex min-h-full min-w-max items-stretch">
-          <pre
+        <div className="relative flex min-h-full min-w-max items-stretch">
+          {focusLineIndex >= 0 ? (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 z-0 h-6 border-l-2 border-primary/60 bg-primary/[0.06]"
+              style={{ top: `${12 + focusLineIndex * 24}px` }}
+            />
+          ) : null}
+          <div
             aria-hidden="true"
             className="sticky left-0 z-[1] m-0 shrink-0 border-r bg-muted/35 px-3 py-3 text-right font-mono text-[12px] leading-6 text-muted-foreground/60 select-none"
           >
-            {lineNumbers}
-          </pre>
+            {lineNumbers.map((line) => (
+              <div key={line} className={cn("h-6", line === preview.focusLine && "font-semibold text-primary")}>{line}</div>
+            ))}
+          </div>
           {highlighted ? (
-            <div className="pudding-file-preview min-w-max" dangerouslySetInnerHTML={{ __html: highlighted }} />
+            <div className="pudding-file-preview relative z-[1] min-w-max" dangerouslySetInnerHTML={{ __html: highlighted }} />
           ) : (
-            <pre className="m-0 min-w-max px-4 py-3 font-mono text-[12px] leading-6 text-foreground/90">{content}</pre>
+            <pre className="relative z-[1] m-0 min-w-max px-4 py-3 font-mono text-[12px] leading-6 text-foreground/90">{content}</pre>
           )}
         </div>
       </div>

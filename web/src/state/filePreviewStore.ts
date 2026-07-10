@@ -5,6 +5,7 @@ import { setCanvasOpen } from "@/state/canvasStore";
 export type FilePreview = {
   callID?: string;
   content: string;
+  focusLine?: number;
   id: string;
   lineStart: number;
   lineStep: 1 | -1;

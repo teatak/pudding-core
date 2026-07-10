@@ -159,7 +159,7 @@ func (p *Process) Request(ctx context.Context, method string, params, result any
 
 	p.mu.Lock()
 	if !p.aliveLocked() {
-		err := p.processErrorLocked()
+		err := fmt.Errorf("%w: %v", ErrRequestNotSent, p.processErrorLocked())
 		p.mu.Unlock()
 		return err
 	}

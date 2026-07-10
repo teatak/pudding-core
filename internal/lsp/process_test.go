@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -111,6 +112,56 @@ func TestProcessCancelKeepsSharedServerAlive(t *testing.T) {
 	}
 	if echo["value"] != "still-alive" {
 		t.Fatalf("echo = %+v", echo)
+	}
+}
+
+func TestManagerAppliesRequestTimeoutAndKeepsServerAlive(t *testing.T) {
+	manager := NewManager(
+		WithInitializeTimeout(time.Second),
+		WithRequestTimeout(40*time.Millisecond),
+		WithShutdownTimeout(2*time.Second),
+		WithIdleTimeout(0),
+		WithReapInterval(0),
+	)
+	t.Cleanup(func() { closeTestManager(t, manager) })
+	spec := testServerSpec(t, "request-timeout")
+	if err := manager.Request(context.Background(), spec, "test/wait", nil, nil); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("request timeout error = %v", err)
+	}
+	var echo map[string]string
+	if err := manager.Request(context.Background(), spec, "test/echo", map[string]string{"value": "still-alive"}, &echo); err != nil {
+		t.Fatal(err)
+	}
+	if echo["value"] != "still-alive" {
+		t.Fatalf("echo = %+v", echo)
+	}
+}
+
+func TestManagerRequestRestartsExitedProcess(t *testing.T) {
+	manager := newTestManager()
+	t.Cleanup(func() { closeTestManager(t, manager) })
+	spec := testServerSpec(t, "request-restart")
+	process, err := manager.Acquire(context.Background(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid := process.PID()
+	process.forceTerminate()
+	select {
+	case <-process.Done():
+	case <-time.After(time.Second):
+		t.Fatal("terminated process did not exit")
+	}
+	var echo map[string]string
+	if err := manager.Request(context.Background(), spec, "test/echo", map[string]string{"value": "restarted"}, &echo); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := manager.Acquire(context.Background(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restarted.PID() == pid || echo["value"] != "restarted" {
+		t.Fatalf("process was not restarted: pid=%d echo=%+v", restarted.PID(), echo)
 	}
 }
 
