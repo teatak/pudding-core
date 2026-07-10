@@ -11,7 +11,7 @@ export type FilePreview = {
   openedAt: number;
   path: string;
   sessionID: string;
-  source: "read" | "search" | "slice" | "write";
+  source: "diagnostic" | "read" | "search" | "slice" | "write";
   truncated: boolean;
   turnID?: string;
 };

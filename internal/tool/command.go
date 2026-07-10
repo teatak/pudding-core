@@ -78,7 +78,7 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 
 	startedAt := time.Now()
 	if err := cmd.Start(); err != nil {
-		return commandResult(out, args, resolvedCWD, -1, stdout, stderr, false, false, time.Since(startedAt), "start_failed", err)
+		return commandResult(out, args, resolvedCWD, call.ProjectDirs, -1, stdout, stderr, false, false, time.Since(startedAt), "start_failed", err)
 	}
 	waitCh := make(chan error, 1)
 	go func() { waitCh <- cmd.Wait() }()
@@ -113,7 +113,7 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 	case waitErr != nil:
 		reason = "non_zero_exit"
 	}
-	return commandResult(out, args, resolvedCWD, exitCode, stdout, stderr, timedOut, cancelled, time.Since(startedAt), reason, waitErr)
+	return commandResult(out, args, resolvedCWD, call.ProjectDirs, exitCode, stdout, stderr, timedOut, cancelled, time.Since(startedAt), reason, waitErr)
 }
 
 func commandEnvironment(custom map[string]string) ([]string, error) {
@@ -203,16 +203,18 @@ func commandTimeout(timeoutMS int) (time.Duration, error) {
 	return timeout, nil
 }
 
-func commandResult(out Result, args commandRunArgs, cwd string, exitCode int, stdout, stderr *truncatingBuffer, timedOut, cancelled bool, duration time.Duration, reason string, runErr error) Result {
+func commandResult(out Result, args commandRunArgs, cwd string, projectDirs []string, exitCode int, stdout, stderr *truncatingBuffer, timedOut, cancelled bool, duration time.Duration, reason string, runErr error) Result {
 	// A non-zero process exit is a completed command, not a tool transport failure.
 	ok := reason == "" || reason == "non_zero_exit"
+	stdoutText := stdout.String()
+	stderrText := stderr.String()
 	payload := map[string]any{
 		"ok":              ok,
 		"argv":            args.Argv,
 		"cwd":             cwd,
 		"exitCode":        exitCode,
-		"stdout":          stdout.String(),
-		"stderr":          stderr.String(),
+		"stdout":          stdoutText,
+		"stderr":          stderrText,
 		"stdoutTruncated": stdout.Truncated(),
 		"stderrTruncated": stderr.Truncated(),
 		"timedOut":        timedOut,
@@ -224,6 +226,15 @@ func commandResult(out Result, args commandRunArgs, cwd string, exitCode int, st
 	}
 	if runErr != nil && reason != "non_zero_exit" {
 		payload["error"] = runErr.Error()
+	}
+	verificationKind := commandVerificationKind(args.Argv)
+	if verificationKind != "" {
+		verificationStatus := commandVerificationStatus(verificationKind, exitCode, timedOut, cancelled, reason)
+		diagnostics := parseCommandDiagnostics(stdoutText, stderrText, cwd, projectDirs, verificationStatus != "passed")
+		payload["verificationKind"] = verificationKind
+		payload["verificationStatus"] = verificationStatus
+		payload["diagnostics"] = diagnostics
+		payload["diagnosticCount"] = len(diagnostics)
 	}
 	out = toolJSON(out, ok, payload)
 	if ok {

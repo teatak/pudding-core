@@ -1,6 +1,6 @@
 # Pudding Code 能力设计与计划
 
-> 状态:C0、C1、C1.5、C1.6、C2、C3、C4、C5、C6 与 C7 已落地。
+> 状态:C0、C1、C1.5、C1.6、C2、C3、C4、C5、C6、C7 与 C8 已落地。
 > 目标:在现有 multi-session / Project tool 架构上,把 Pudding 从"可读写文件"
 > 推进到"可信的工程协作 agent"。
 
@@ -631,6 +631,81 @@ Project 仍只承载 `rootDirs` 与 `approvalMode`;代码语言、脚本和指�
 - 用户点击搜索命中后,画布打开对应路径并从正确行号显示上下文。
 - agent 可一次读取项目类型、Git root、指令文件和候选验证命令。
 - Go 单测与 Web build 通过。
+
+### C8: 编辑与验证闭环
+
+状态:已完成(2026-07-10)。
+
+目标:
+
+- 降低修改大文件时传输完整 `new_text` 的 token 成本。
+- 继续复用补丁 proposal 的 diff 审批、漂移检测和多文件原子应用。
+- 把测试、lint、build 的结果从原始终端文本提升为可定位的结构化诊断。
+- 不新增绕过 command 审批策略的自动执行路径。
+
+#### C8.1 Patch V2 局部 edits
+
+`builtin_patch_propose.files[]` 支持三种互斥操作:
+
+- `new_text`:创建文件或显式全文替换。
+- `delete:true`:删除已有文本文件。
+- `edits`:对已有文件执行一组有序 exact replacement。
+
+单个 edit 结构:
+
+```jsonc
+{
+  "old_text": "existing text",
+  "new_text": "replacement text",
+  "replace_all": false
+}
+```
+
+约束:
+
+- 每个文件最多 64 个 edits,按数组顺序应用到内存快照。
+- `old_text` 必须非空;默认只能唯一匹配,多处匹配必须显式 `replace_all`。
+- 任意 edit 不匹配或存在歧义时,整个 proposal 生成失败,工作树不变。
+- 后端基于最终内存文本生成 unified diff;apply 流程继续使用原有 hash 校验、
+  backup + rename 与失败回滚。
+- 修改已有文件时优先使用 edits;创建文件或确实需要全文替换时才使用
+  `new_text`。
+
+#### C8.2 Command verification metadata
+
+不新增 `builtin_project_verify`;继续使用 `builtin_command_run`:
+
+- 根据 argv 识别 `test | lint | build | check` 等验证类型。
+- result 增加 `verificationKind`、`verificationStatus` 与 `diagnostics`。
+- 非验证命令保持普通 terminal result,不伪造“已验证”状态。
+- 非零退出码仍是命令正常完成,但验证状态为 `failed`。
+- timeout / cancel 分别映射为 `timed_out` / `cancelled`。
+
+第一版解析以下稳定格式:
+
+- Go / GCC 风格:`path:line:column: message`。
+- TypeScript 风格:`path(line,column): error TSxxxx: message`。
+- ESLint stylish 风格:文件路径行后跟 `line:column severity message rule`。
+
+诊断只接受 Project 内路径,最多返回 200 条。每条诊断携带 `path`、
+`relativePath`、行列、severity、message、可选 code/source,以及文件上下文片段。
+原始 stdout/stderr 继续保留,解析失败不改变命令结果。
+
+#### C8.3 验证 UX
+
+- command 卡片优先展示“测试通过 / 测试失败 / 构建通过”等验证状态。
+- 诊断列表展示文件、行列、severity、message,并限制最大高度。
+- 点击 Project 内诊断后,在画布文件 tab 中打开对应上下文和真实行号。
+- 最终回答仍由 agent 汇报改动和验证;系统不自动 stage 或 commit。
+
+验收:
+
+- agent 可以用局部 edits 提出多文件补丁,无需发送完整旧文件。
+- 任意 edit 冲突时 proposal 不产生,apply 的原子性与漂移保护不退化。
+- 常见 Go、TypeScript、ESLint 错误能转成结构化诊断。
+- 用户点击诊断能在画布定位对应文件行。
+- 普通命令不会被错误标记为验证通过。
+- Go 单测、Web build 与 `git diff --check` 通过。
 
 ## 11. 测试策略
 

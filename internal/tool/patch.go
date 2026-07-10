@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,12 +20,13 @@ import (
 )
 
 const (
-	patchMaxFiles       = 16
-	patchMaxFileBytes   = 512 << 10
-	patchMaxTotalBytes  = 2 << 20
-	patchMaxDiffBytes   = 256 << 10
-	patchProposalTTL    = 2 * time.Hour
-	patchMaxStoredItems = 128
+	patchMaxFiles        = 16
+	patchMaxEditsPerFile = 64
+	patchMaxFileBytes    = 512 << 10
+	patchMaxTotalBytes   = 2 << 20
+	patchMaxDiffBytes    = 256 << 10
+	patchProposalTTL     = 2 * time.Hour
+	patchMaxStoredItems  = 128
 )
 
 type patchProposeArgs struct {
@@ -33,9 +35,16 @@ type patchProposeArgs struct {
 }
 
 type patchProposeFileArg struct {
-	Path    string  `json:"path"`
-	NewText *string `json:"new_text,omitempty"`
-	Delete  bool    `json:"delete,omitempty"`
+	Path    string         `json:"path"`
+	NewText *string        `json:"new_text,omitempty"`
+	Delete  bool           `json:"delete,omitempty"`
+	Edits   []patchEditArg `json:"edits,omitempty"`
+}
+
+type patchEditArg struct {
+	OldText    string `json:"old_text"`
+	NewText    string `json:"new_text"`
+	ReplaceAll bool   `json:"replace_all,omitempty"`
 }
 
 type patchApplyArgs struct {
@@ -176,8 +185,21 @@ func preparePatchProposalFile(projectDirs []string, requested patchProposeFileAr
 	if path == "" {
 		return patchProposalFile{}, "", newPatchError("path_required", "patch file path is required")
 	}
-	if requested.Delete == (requested.NewText != nil) {
-		return patchProposalFile{}, "", newPatchError("invalid_arguments", "each patch file must set exactly one of new_text or delete=true")
+	operationCount := 0
+	if requested.NewText != nil {
+		operationCount++
+	}
+	if requested.Delete {
+		operationCount++
+	}
+	if len(requested.Edits) > 0 {
+		operationCount++
+	}
+	if operationCount != 1 {
+		return patchProposalFile{}, "", newPatchError("invalid_arguments", "each patch file must set exactly one of new_text, edits, or delete=true")
+	}
+	if len(requested.Edits) > patchMaxEditsPerFile {
+		return patchProposalFile{}, "", newPatchError("too_many_edits", "patch files support at most 64 edits: "+path)
 	}
 	root, target, rel, err := resolveProjectPath(projectDirs, path, false, true)
 	if err != nil {
@@ -218,12 +240,22 @@ func preparePatchProposalFile(projectDirs []string, requested patchProposeFileAr
 		if requested.Delete {
 			return patchProposalFile{}, "", newPatchError("file_not_found", "cannot delete a missing file: "+file.Path)
 		}
+		if len(requested.Edits) > 0 {
+			return patchProposalFile{}, "", newPatchError("file_not_found", "cannot apply edits to a missing file: "+file.Path)
+		}
 		file.OldHash = patchContentHash(nil)
 	default:
 		return patchProposalFile{}, "", newPatchError("stat_failed", statErr.Error())
 	}
 	if requested.Delete {
 		file.Operation = "delete"
+	} else if len(requested.Edits) > 0 {
+		next, err := applyPatchEdits(file.OldText, file.Path, requested.Edits)
+		if err != nil {
+			return patchProposalFile{}, "", err
+		}
+		file.NewText = next
+		file.Operation = "update"
 	} else {
 		file.NewText = *requested.NewText
 		if len(file.NewText) > patchMaxFileBytes {
@@ -239,6 +271,37 @@ func preparePatchProposalFile(projectDirs []string, requested patchProposeFileAr
 		}
 	}
 	return file, resolvedRoot, nil
+}
+
+func applyPatchEdits(content, filePath string, edits []patchEditArg) (string, error) {
+	if len(edits) == 0 || len(edits) > patchMaxEditsPerFile {
+		return "", newPatchError("invalid_edits", "patch edits must contain between 1 and 64 entries: "+filePath)
+	}
+	next := content
+	for index, edit := range edits {
+		if edit.OldText == "" {
+			return "", newPatchError("edit_text_required", "edit old_text must not be empty: "+filePath)
+		}
+		if !isToolText([]byte(edit.NewText)) {
+			return "", newPatchError("binary_file", "edit new_text must be UTF-8 text without NUL bytes: "+filePath)
+		}
+		matches := strings.Count(next, edit.OldText)
+		if matches == 0 {
+			return "", newPatchError("edit_text_not_found", "edit "+strconv.Itoa(index+1)+" old_text was not found: "+filePath)
+		}
+		if matches > 1 && !edit.ReplaceAll {
+			return "", newPatchError("edit_text_ambiguous", "edit "+strconv.Itoa(index+1)+" old_text matched more than once: "+filePath)
+		}
+		replaceCount := 1
+		if edit.ReplaceAll {
+			replaceCount = -1
+		}
+		next = strings.Replace(next, edit.OldText, edit.NewText, replaceCount)
+		if len(next) > patchMaxFileBytes {
+			return "", newPatchError("file_too_large", "edited file text must not exceed 512 KiB: "+filePath)
+		}
+	}
+	return next, nil
 }
 
 func (r *BuiltinRunner) patchApply(call Call) Result {

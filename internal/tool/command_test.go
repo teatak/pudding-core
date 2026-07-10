@@ -14,17 +14,21 @@ import (
 )
 
 type commandPayload struct {
-	OK              bool     `json:"ok"`
-	Argv            []string `json:"argv"`
-	CWD             string   `json:"cwd"`
-	ExitCode        int      `json:"exitCode"`
-	Stdout          string   `json:"stdout"`
-	Stderr          string   `json:"stderr"`
-	StdoutTruncated bool     `json:"stdoutTruncated"`
-	StderrTruncated bool     `json:"stderrTruncated"`
-	TimedOut        bool     `json:"timedOut"`
-	Cancelled       bool     `json:"cancelled"`
-	Reason          string   `json:"reason"`
+	OK                 bool                `json:"ok"`
+	Argv               []string            `json:"argv"`
+	CWD                string              `json:"cwd"`
+	ExitCode           int                 `json:"exitCode"`
+	Stdout             string              `json:"stdout"`
+	Stderr             string              `json:"stderr"`
+	StdoutTruncated    bool                `json:"stdoutTruncated"`
+	StderrTruncated    bool                `json:"stderrTruncated"`
+	TimedOut           bool                `json:"timedOut"`
+	Cancelled          bool                `json:"cancelled"`
+	Reason             string              `json:"reason"`
+	VerificationKind   string              `json:"verificationKind"`
+	VerificationStatus string              `json:"verificationStatus"`
+	DiagnosticCount    int                 `json:"diagnosticCount"`
+	Diagnostics        []commandDiagnostic `json:"diagnostics"`
 }
 
 func TestCommandRunUsesProjectCWDAndCapturesOutput(t *testing.T) {
@@ -41,6 +45,9 @@ func TestCommandRunUsesProjectCWDAndCapturesOutput(t *testing.T) {
 	payload := decodeCommandPayload(t, res)
 	if !res.Ok || !payload.OK || payload.ExitCode != 0 {
 		t.Fatalf("command should succeed: result=%+v payload=%+v", res, payload)
+	}
+	if payload.VerificationKind != "" || payload.VerificationStatus != "" {
+		t.Fatalf("ordinary command must not be marked as verification: %+v", payload)
 	}
 	resolvedCWD, err := filepath.EvalSymlinks(cwd)
 	if err != nil {
@@ -104,6 +111,45 @@ func TestCommandRunExecutesGoTest(t *testing.T) {
 	payload := decodeCommandPayload(t, res)
 	if !res.Ok || payload.ExitCode != 0 || !strings.Contains(payload.Stdout, "example.com/commandtest") {
 		t.Fatalf("go test command failed: %+v", payload)
+	}
+	if payload.VerificationKind != "test" || payload.VerificationStatus != "passed" || payload.DiagnosticCount != 0 {
+		t.Fatalf("go test verification metadata missing: %+v", payload)
+	}
+}
+
+func TestCommandRunParsesFailedGoDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	writeCommandTestFile(t, root, "go.mod", "module example.com/commanddiagnostic\n\ngo 1.24\n")
+	writeCommandTestFile(t, root, "broken.go", "package commanddiagnostic\n\nfunc broken() { missingSymbol() }\n")
+	res := commandTestCall(context.Background(), root, map[string]any{
+		"scope":      "project",
+		"argv":       []string{"go", "test", "./..."},
+		"timeout_ms": 30000,
+	})
+	payload := decodeCommandPayload(t, res)
+	if !res.Ok || payload.ExitCode == 0 || payload.VerificationKind != "test" || payload.VerificationStatus != "failed" {
+		t.Fatalf("failed go test metadata missing: %+v", payload)
+	}
+	if payload.DiagnosticCount == 0 || len(payload.Diagnostics) == 0 {
+		t.Fatalf("go diagnostic not parsed: stdout=%q stderr=%q", payload.Stdout, payload.Stderr)
+	}
+	diagnostic := payload.Diagnostics[0]
+	if diagnostic.RelativePath != "broken.go" || diagnostic.Line != 3 || diagnostic.Severity != "error" || !strings.Contains(diagnostic.Message, "missingSymbol") || !strings.Contains(diagnostic.Excerpt, "func broken") {
+		t.Fatalf("unexpected go diagnostic: %+v", diagnostic)
+	}
+}
+
+func TestParseCommandDiagnosticsSupportsTypeScriptAndESLint(t *testing.T) {
+	root := t.TempDir()
+	writeCommandTestFile(t, root, "src/app.ts", "const first = 1;\nconst value: string = 2;\nconsole.log(value);\n")
+	typescript := parseCommandDiagnostics("src/app.ts(2,7): error TS2322: Type 'number' is not assignable to type 'string'.", "", root, []string{root}, true)
+	if len(typescript) != 1 || typescript[0].RelativePath != "src/app.ts" || typescript[0].Line != 2 || typescript[0].Column != 7 || typescript[0].Code != "TS2322" || typescript[0].Source != "typescript" {
+		t.Fatalf("unexpected TypeScript diagnostics: %+v", typescript)
+	}
+	eslintOutput := filepath.Join(root, "src", "app.ts") + "\n  2:7  warning  Unexpected any  @typescript-eslint/no-explicit-any\n"
+	eslint := parseCommandDiagnostics(eslintOutput, "", root, []string{root}, false)
+	if len(eslint) != 1 || eslint[0].Severity != "warning" || eslint[0].Code != "@typescript-eslint/no-explicit-any" || eslint[0].Source != "eslint" {
+		t.Fatalf("unexpected ESLint diagnostics: %+v", eslint)
 	}
 }
 
@@ -218,6 +264,17 @@ func commandTestCall(ctx context.Context, root string, args map[string]any) Resu
 		Args:        raw,
 		ProjectDirs: []string{root},
 	})
+}
+
+func writeCommandTestFile(t *testing.T, root, name, content string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(name))
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func commandHelperArgs(mode string, args ...string) []string {

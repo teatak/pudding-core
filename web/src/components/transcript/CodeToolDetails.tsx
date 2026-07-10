@@ -56,6 +56,11 @@ export function codeToolSummary(name: string, args: unknown, result: unknown, t:
   const input = toRecord(args);
   const output = toRecord(result);
   if (name === commandToolName) {
+    const verificationKind = readString(output, "verificationKind");
+    const verificationStatus = readString(output, "verificationStatus");
+    if (verificationKind && verificationStatus) {
+      return verificationStatusLabel(verificationKind, verificationStatus, t);
+    }
     if (readBoolean(output, "timedOut")) {
       return t("transcript.codeTimedOut");
     }
@@ -136,7 +141,7 @@ export function CodeToolDetails({
   const output = toRecord(result);
   let body: ReactNode;
   if (name === commandToolName) {
-    body = <CommandDetails input={input} output={output} t={t} />;
+    body = <CommandDetails callID={callID} input={input} output={output} sessionID={sessionID} t={t} />;
   } else if (name === projectInspectToolName) {
     body = <ProjectInspectDetails output={output} t={t} />;
   } else if (name === "builtin_git_status") {
@@ -284,7 +289,7 @@ function PatchFileList({ files, t }: { files: UnknownRecord[]; t: Translator }) 
   );
 }
 
-function CommandDetails({ input, output, t }: { input: UnknownRecord | null; output: UnknownRecord | null; t: Translator }) {
+function CommandDetails({ callID, input, output, sessionID, t }: { callID?: string; input: UnknownRecord | null; output: UnknownRecord | null; sessionID?: string; t: Translator }) {
   const argv = readStringArray(output, "argv") || readStringArray(input, "argv") || [];
   const cwd = readString(output, "cwd") || readString(input, "cwd");
   const stdout = readString(output, "stdout");
@@ -294,17 +299,24 @@ function CommandDetails({ input, output, t }: { input: UnknownRecord | null; out
   const duration = readNumber(output, "durationMs");
   const timedOut = readBoolean(output, "timedOut");
   const cancelled = readBoolean(output, "cancelled");
+  const verificationKind = readString(output, "verificationKind");
+  const verificationStatus = readString(output, "verificationStatus");
+  const diagnostics = readRecordArray(output, "diagnostics");
   const processCompleted = exitCode != null && exitCode >= 0 && !timedOut && !cancelled;
   const toolFailed = output?.ok === false && !processCompleted;
   const commandSucceeded = processCompleted && exitCode === 0;
-  const StatusIcon = timedOut || cancelled ? Clock3 : toolFailed ? XCircle : commandSucceeded ? CheckCircle2 : processCompleted ? CircleAlert : Clock3;
-  const statusText = timedOut
-    ? t("transcript.codeTimedOut")
-    : cancelled
-      ? t("transcript.codeCancelled")
-      : exitCode != null
-        ? replace(t("transcript.codeExitCode"), { code: String(exitCode) })
-        : t("transcript.codeRunning");
+  const verificationPassed = verificationStatus === "passed";
+  const verificationFailed = verificationStatus === "failed";
+  const StatusIcon = timedOut || cancelled ? Clock3 : toolFailed ? XCircle : verificationPassed || commandSucceeded ? CheckCircle2 : processCompleted ? CircleAlert : Clock3;
+  const statusText = verificationKind && verificationStatus
+    ? verificationStatusLabel(verificationKind, verificationStatus, t)
+    : timedOut
+      ? t("transcript.codeTimedOut")
+      : cancelled
+        ? t("transcript.codeCancelled")
+        : exitCode != null
+          ? replace(t("transcript.codeExitCode"), { code: String(exitCode) })
+          : t("transcript.codeRunning");
   const command = formatArgv(argv);
   return (
     <div className="overflow-hidden rounded-md border border-border/70 bg-muted/20">
@@ -323,16 +335,73 @@ function CommandDetails({ input, output, t }: { input: UnknownRecord | null; out
         </pre>
         <ToolHoverCopyButton className="absolute top-1.5 right-1.5 group-hover/terminal-copy:opacity-100" text={terminalOutput} />
       </section>
+      {diagnostics.length > 0 ? <CommandDiagnosticList callID={callID} diagnostics={diagnostics} sessionID={sessionID} t={t} /> : null}
       <div className="flex min-w-0 items-center gap-3 border-t border-border/50 px-3 py-2 text-[11px] text-muted-foreground">
         {cwd ? <code className="min-w-0 flex-1 truncate font-mono">{cwd}</code> : <span className="flex-1" />}
         {readBoolean(output, "stdoutTruncated") || readBoolean(output, "stderrTruncated") ? <span className="shrink-0 text-warning">{t("transcript.codeTruncated")}</span> : null}
         {duration != null ? <span className="shrink-0">{formatDuration(duration)}</span> : null}
-        <span className={cn("inline-flex shrink-0 items-center gap-1", toolFailed && "text-destructive", commandSucceeded && "text-success", processCompleted && !commandSucceeded && "text-muted-foreground")}>
+        <span className={cn("inline-flex shrink-0 items-center gap-1", (toolFailed || verificationFailed) && "text-destructive", (verificationPassed || (!verificationKind && commandSucceeded)) && "text-success", processCompleted && !verificationPassed && !verificationFailed && !commandSucceeded && "text-muted-foreground")}>
           <StatusIcon className="size-3.5" />
-          {commandSucceeded ? t("transcript.codeSucceeded") : statusText}
+          {!verificationKind && commandSucceeded ? t("transcript.codeSucceeded") : statusText}
         </span>
       </div>
     </div>
+  );
+}
+
+function CommandDiagnosticList({ callID, diagnostics, sessionID, t }: { callID?: string; diagnostics: UnknownRecord[]; sessionID?: string; t: Translator }) {
+  return (
+    <section className="border-t border-border/50 px-3 py-2">
+      <div className="mb-1 text-[10px] font-medium text-muted-foreground">
+        {replace(t("transcript.codeDiagnostics"), { count: String(diagnostics.length) })}
+      </div>
+      <div className="max-h-64 overflow-auto">
+        {diagnostics.slice(0, 200).map((diagnostic, index) => {
+          const path = readString(diagnostic, "path");
+          const relativePath = readString(diagnostic, "relativePath") || path;
+          const line = readNumber(diagnostic, "line") ?? 1;
+          const column = readNumber(diagnostic, "column");
+          const excerpt = readString(diagnostic, "excerpt");
+          const severity = readString(diagnostic, "severity");
+          const previewable = Boolean(sessionID && path && excerpt);
+          const content = (
+            <>
+              <CircleAlert className={cn("mt-0.5 size-3.5 shrink-0", severity === "error" ? "text-destructive" : severity === "warning" ? "text-warning" : "text-muted-foreground")} />
+              <span className="min-w-0">
+                <code className="block truncate font-mono text-[10px] text-muted-foreground">
+                  {relativePath}:{line}{column != null && column > 0 ? `:${column}` : ""}
+                </code>
+                <span className="block break-words text-left text-[11px] leading-4 text-foreground/85">
+                  {readString(diagnostic, "message")}
+                  {readString(diagnostic, "code") ? <code className="ml-1 text-muted-foreground">{readString(diagnostic, "code")}</code> : null}
+                </span>
+              </span>
+            </>
+          );
+          return previewable ? (
+            <button
+              key={`${path}:${line}:${column ?? 0}:${index}`}
+              className="grid w-full grid-cols-[1rem_minmax(0,1fr)] gap-1.5 rounded-sm px-1 py-1.5 hover:bg-muted/60"
+              type="button"
+              onClick={() => openFilePreview({
+                callID,
+                content: excerpt,
+                lineStart: readNumber(diagnostic, "lineStart") ?? line,
+                lineStep: 1,
+                path,
+                sessionID: sessionID!,
+                source: "diagnostic",
+                truncated: true,
+              })}
+            >
+              {content}
+            </button>
+          ) : (
+            <div key={`${path}:${line}:${column ?? 0}:${index}`} className="grid grid-cols-[1rem_minmax(0,1fr)] gap-1.5 px-1 py-1.5">{content}</div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -982,6 +1051,12 @@ function gitKindTone(kind: string) {
 function countSummary(record: UnknownRecord | null, key: string, messageKey: string, t: Translator) {
   const count = readNumber(record, key);
   return count == null ? "" : replace(t(messageKey), { count: String(count) });
+}
+
+function verificationStatusLabel(kind: string, status: string, t: Translator) {
+  const kindLabel = t(`transcript.codeVerificationKind.${kind}`);
+  const statusKey = status === "timed_out" ? "timedOut" : status;
+  return replace(t(`transcript.codeVerificationStatus.${statusKey}`), { kind: kindLabel });
 }
 
 function replace(template: string, values: Record<string, string>) {

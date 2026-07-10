@@ -98,6 +98,90 @@ func TestPatchProposalDoesNotWriteBeforeApply(t *testing.T) {
 	}
 }
 
+func TestPatchProposalSupportsOrderedEdits(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.go")
+	original := "package main\n\nfunc message() string {\n\treturn \"old\"\n}\n"
+	writePatchTestFile(t, path, original)
+	runner := NewBuiltinRunner()
+	proposal := patchTestCall(runner, "session_a", root, PatchPropose, map[string]any{
+		"scope": "project",
+		"files": []map[string]any{{
+			"path": "main.go",
+			"edits": []map[string]any{
+				{"old_text": "func message() string", "new_text": "func greeting() string"},
+				{"old_text": "return \"old\"", "new_text": "return \"new\""},
+			},
+		}},
+	})
+	payload := decodePatchPayload(t, proposal)
+	if !proposal.Ok || payload.FileCount != 1 || !strings.Contains(payload.Diff, "func greeting() string") {
+		t.Fatalf("unexpected edit proposal: result=%+v payload=%+v", proposal, payload)
+	}
+	if got := readPatchTestFile(t, path); got != original {
+		t.Fatalf("proposal changed file before apply: %q", got)
+	}
+	applied := patchTestCall(runner, "session_a", root, PatchApply, map[string]any{"proposal_id": payload.ProposalID})
+	if !applied.Ok {
+		t.Fatalf("edit proposal apply failed: %+v", applied)
+	}
+	if got := readPatchTestFile(t, path); !strings.Contains(got, "func greeting() string") || !strings.Contains(got, "return \"new\"") {
+		t.Fatalf("ordered edits not applied: %q", got)
+	}
+}
+
+func TestPatchProposalRejectsAmbiguousOrConflictingEdits(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "notes.txt")
+	writePatchTestFile(t, path, "same\nsame\n")
+	runner := NewBuiltinRunner()
+
+	ambiguous := patchTestCall(runner, "session_a", root, PatchPropose, map[string]any{
+		"scope": "project",
+		"files": []map[string]any{{
+			"path":  "notes.txt",
+			"edits": []map[string]any{{"old_text": "same", "new_text": "changed"}},
+		}},
+	})
+	if ambiguous.Ok || !strings.Contains(ambiguous.Content, `"reason":"edit_text_ambiguous"`) {
+		t.Fatalf("ambiguous edit should fail: %+v", ambiguous)
+	}
+
+	conflicting := patchTestCall(runner, "session_a", root, PatchPropose, map[string]any{
+		"scope": "project",
+		"files": []map[string]any{{
+			"path": "notes.txt",
+			"edits": []map[string]any{
+				{"old_text": "same", "new_text": "changed", "replace_all": true},
+				{"old_text": "missing", "new_text": "never"},
+			},
+		}},
+	})
+	if conflicting.Ok || !strings.Contains(conflicting.Content, `"reason":"edit_text_not_found"`) {
+		t.Fatalf("conflicting edit should fail: %+v", conflicting)
+	}
+	if got := readPatchTestFile(t, path); got != "same\nsame\n" {
+		t.Fatalf("failed edits changed worktree: %q", got)
+	}
+}
+
+func TestPatchProposalRequiresOneFileOperation(t *testing.T) {
+	root := t.TempDir()
+	writePatchTestFile(t, filepath.Join(root, "notes.txt"), "old\n")
+	runner := NewBuiltinRunner()
+	result := patchTestCall(runner, "session_a", root, PatchPropose, map[string]any{
+		"scope": "project",
+		"files": []map[string]any{{
+			"path":     "notes.txt",
+			"new_text": "new\n",
+			"edits":    []map[string]any{{"old_text": "old", "new_text": "new"}},
+		}},
+	})
+	if result.Ok || !strings.Contains(result.Content, `"reason":"invalid_arguments"`) {
+		t.Fatalf("multiple file operations should fail: %+v", result)
+	}
+}
+
 func TestPatchApplyRejectsDriftWithoutPartialWrites(t *testing.T) {
 	root := t.TempDir()
 	first := filepath.Join(root, "first.txt")
