@@ -81,10 +81,39 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | tool | capability | args | result |
 | --- | --- | --- | --- |
 | `builtin_command_run` | `project` | `{scope:"project", argv:string[], cwd?, env?, timeout_ms?}` | `{ok, argv, cwd, exitCode, stdout, stderr, stdoutTruncated, stderrTruncated, timedOut, cancelled, durationMs, reason?, error?}` |
+| `builtin_git_status` | `project` | `{scope:"project", cwd?}` | `{ok, cwd, repoRoot, head, branch, upstream, detached, ahead, behind, clean, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |
+| `builtin_git_diff` | `project` | `{scope:"project", cwd?, staged?}` | `{ok, cwd, repoRoot, staged, diff, truncated, files, fileCount, additions, deletions}` |
+| `builtin_git_log` | `project` | `{scope:"project", cwd?, limit?}` | `{ok, cwd, repoRoot, commits, count}` |
+| `builtin_git_stage` | `project` | `{scope:"project", cwd?, paths:string[]}` | `{ok, status:"staged", cwd, repoRoot, paths, pathCount, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |
+| `builtin_git_unstage` | `project` | `{scope:"project", cwd?, paths:string[]}` | `{ok, status:"unstaged", cwd, repoRoot, paths, pathCount, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |
+| `builtin_git_commit` | `project` | `{scope:"project", cwd?, message}` | `{ok, status:"committed", cwd, repoRoot, commit, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |
+| `builtin_patch_propose` | `project` | `{scope:"project", files:[{path, new_text?, delete?}]}` | `{ok, status:"proposed", proposalID, projectRoot, files, fileCount, additions, deletions, diff, expiresAt}` |
+| `builtin_patch_apply` | `project` | `{proposal_id}` | `{ok, status:"applied", proposalID, projectRoot, files, fileCount, additions, deletions, warnings}` |
 
 `builtin_command_run` 不解析 shell 字符串。cwd 必须位于当前 Project/turn grant
 授权目录中;默认 timeout 为 60 秒,最大 10 分钟;stdout/stderr 各保留最多
 64 KiB 头尾内容。命令审批由 Project 的 `ask | auto | full` 决定。
+
+Git 只读工具固定禁用 pager、external diff、textconv 与可选索引写入。工具先解析
+仓库根，并确认仓库根仍在当前 Project 授权目录内。`builtin_git_diff` 的 patch
+最多保留 128 KiB 头尾内容，`files` 与增删统计不随 patch 截断。
+
+Git 写工具只接受固定结构参数和显式 literal file paths,不开放任意 Git 参数。
+写入前必须额外确认 git dir/common dir/index 位于 Project 授权目录。stage 不执行
+仓库 clean filters;commit 不执行 hooks 或签名,且审批 payload 必须包含 staged
+status/diff 摘要。commit 执行前重新校验审批时记录的 HEAD + index 指纹。第一版
+不提供 push/reset/clean/amend。
+
+transcript 对 command、Git、file tool result 使用结构化 renderer。折叠标题必须使用
+i18n 显示名和结构化摘要,不得把内部 snake_case tool name 作为主显示。原始 args /
+result 只在“原始数据”二级 disclosure 展开后渲染。
+
+`builtin_patch_propose` 每个 file 必须且只能提供完整 `new_text` 或
+`delete:true`;第一版只支持同一 Project root 内的 UTF-8 regular file,单次最多
+16 个文件。proposal 为 session-scoped daemon memory,TTL 2 小时。生成 proposal
+不写文件;`builtin_patch_apply` 审批 payload 必须携带完整 unified diff。审批前和
+apply 前均校验源文件 hash;任一文件漂移则整包拒绝。apply 先准备同目录临时文件,
+再通过 backup + rename 提交,失败时逆序回滚。
 
 ## settings 约定键
 

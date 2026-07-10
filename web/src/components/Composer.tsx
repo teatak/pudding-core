@@ -63,9 +63,11 @@ import { buildComposerMentionReferences } from "@/components/composerMentionData
 import { ComposerMentionMenu } from "@/components/ComposerMentionMenu";
 import { useComposerMentions } from "@/components/useComposerMentions";
 import { ContextUsageRing } from "@/components/ContextUsageRing";
+import { GitCommitDiffDialog, type GitCommitApproval } from "@/components/GitCommitDiffDialog";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
 import { InputFlowPanel, type InputFlowSubmission } from "@/components/transcript/InputFlowToolPart";
 import { Mascot, type MascotGaze, type MascotGazePoint, type MascotMood } from "@/components/Mascot";
+import { PatchProposalDiffDialog, type PatchProposalApproval } from "@/components/PatchProposalDiffDialog";
 import { SessionAudioControls } from "@/components/SessionAudioControls";
 import { SkillDraftDiffDialog } from "@/components/SkillDraftDiffDialog";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
@@ -1748,9 +1750,13 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
   const [selectedProjectDirs, setSelectedProjectDirs] = useState<string[]>([]);
   const [pickingProjectDir, setPickingProjectDir] = useState(false);
   const [viewingSkillDraft, setViewingSkillDraft] = useState<SkillDraft | null>(null);
+  const [viewingPatchProposal, setViewingPatchProposal] = useState<PatchProposalApproval | null>(null);
+  const [viewingGitCommit, setViewingGitCommit] = useState<GitCommitApproval | null>(null);
   useEffect(() => {
     setSelectedProjectDirs([]);
     setViewingSkillDraft(null);
+    setViewingPatchProposal(null);
+    setViewingGitCommit(null);
   }, [approval?.approvalID]);
   if (!approval) {
     return null;
@@ -1772,6 +1778,8 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
   const skillDraftApproval = skillDraftFromPayload(current.payload);
   const skillDraft = skillDraftApproval?.draft || null;
   const toolCallApproval = toolCallFromPayload(current.payload);
+  const patchProposal = patchProposalFromPayload(current.payload);
+  const gitCommitApproval = gitCommitFromPayload(current.payload);
   const approvalReason = isToolCallApproval ? toolCallReason(toolCallApproval.operation, t) || current.reason : current.reason;
 
   async function approve(scope: "turn" | "session") {
@@ -1794,6 +1802,8 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
           queryClient.invalidateQueries({ queryKey: queryKeys.skillDrafts() }),
         ]);
       }
+      setViewingPatchProposal(null);
+      setViewingGitCommit(null);
     } finally {
       setPendingAction(null);
     }
@@ -1828,6 +1838,8 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
     try {
       await denyApproval(token, current.sessionID, current.approvalID);
       setViewingSkillDraft(null);
+      setViewingPatchProposal(null);
+      setViewingGitCommit(null);
     } finally {
       setPendingAction(null);
     }
@@ -1840,13 +1852,28 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
         <span className="min-w-0 truncate font-medium">{title}</span>
       </div>
       {approvalReason ? <div className="line-clamp-2 leading-5 text-muted-foreground">{approvalReason}</div> : null}
-      {isToolCallApproval && toolCallApproval.paths.length > 0 ? (
+      {isToolCallApproval && toolCallApproval.paths.length > 0 && !patchProposal && !gitCommitApproval ? (
         <div className="grid gap-1 rounded-md border border-border/70 bg-background/70 px-2 py-1.5 font-mono text-[11px] leading-4">
           {toolCallApproval.paths.map((path) => (
             <div key={path} className="truncate" title={path}>
               {path}
             </div>
           ))}
+        </div>
+      ) : null}
+      {isToolCallApproval && patchProposal ? (
+        <div className="flex min-w-0 items-center gap-3 text-[11px] text-muted-foreground">
+          <span>{t("transcript.approvalPatchFiles").replace("{count}", String(patchProposal.fileCount))}</span>
+          <span className="font-mono text-success">+{patchProposal.additions}</span>
+          <span className="font-mono text-destructive">-{patchProposal.deletions}</span>
+        </div>
+      ) : null}
+      {isToolCallApproval && gitCommitApproval ? (
+        <div className="flex min-w-0 items-center gap-3 text-[11px] text-muted-foreground">
+          <span>{t("transcript.approvalPatchFiles").replace("{count}", String(gitCommitApproval.fileCount))}</span>
+          <span className="font-mono text-success">+{gitCommitApproval.additions}</span>
+          <span className="font-mono text-destructive">-{gitCommitApproval.deletions}</span>
+          <span className="min-w-0 truncate">{gitCommitApproval.commitMessage}</span>
         </div>
       ) : null}
       {isSkillDraftApproval && skillDraft ? (
@@ -1907,16 +1934,48 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
       ) : null}
       <div className="flex flex-wrap items-center gap-1.5">
         {isToolCallApproval ? (
-          <Button
-            className="h-6 gap-1 rounded-full px-2 text-[11px]"
-            disabled={pending}
-            size="sm"
-            type="button"
-            onClick={() => void approve("turn")}
-          >
-            {pendingAction === "turn" ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
-            {t("transcript.approvalAllowToolCall")}
-          </Button>
+          <>
+            {patchProposal ? (
+              <Button
+                className="h-6 gap-1 rounded-full px-2 text-[11px]"
+                disabled={pending}
+                size="sm"
+                type="button"
+                variant="secondary"
+                onClick={() => setViewingPatchProposal(patchProposal)}
+              >
+                <FileText className="size-3" />
+                {t("transcript.approvalPatchReview")}
+              </Button>
+            ) : null}
+            {gitCommitApproval ? (
+              <Button
+                className="h-6 gap-1 rounded-full px-2 text-[11px]"
+                disabled={pending}
+                size="sm"
+                type="button"
+                variant="secondary"
+                onClick={() => setViewingGitCommit(gitCommitApproval)}
+              >
+                <FileText className="size-3" />
+                {t("transcript.approvalGitCommitReview")}
+              </Button>
+            ) : null}
+            <Button
+              className="h-6 gap-1 rounded-full px-2 text-[11px]"
+              disabled={pending}
+              size="sm"
+              type="button"
+              onClick={() => void approve("turn")}
+            >
+              {pendingAction === "turn" ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
+              {patchProposal
+                ? t("transcript.approvalPatchApply")
+                : gitCommitApproval
+                  ? t("transcript.approvalGitCommit")
+                  : t("transcript.approvalAllowToolCall")}
+            </Button>
+          </>
         ) : isSkillDraftApproval ? (
           <>
             <Button
@@ -1984,6 +2043,22 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
         token={token}
         onApply={() => void approve("turn")}
         onOpenChange={(open) => !open && setViewingSkillDraft(null)}
+        onReject={() => void deny()}
+      />
+      <PatchProposalDiffDialog
+        applying={pendingAction === "turn"}
+        proposal={viewingPatchProposal}
+        rejecting={pendingAction === "deny"}
+        onApply={() => void approve("turn")}
+        onOpenChange={(open) => !open && setViewingPatchProposal(null)}
+        onReject={() => void deny()}
+      />
+      <GitCommitDiffDialog
+        approval={viewingGitCommit}
+        committing={pendingAction === "turn"}
+        rejecting={pendingAction === "deny"}
+        onCommit={() => void approve("turn")}
+        onOpenChange={(open) => !open && setViewingGitCommit(null)}
         onReject={() => void deny()}
       />
     </div>
@@ -2095,6 +2170,88 @@ function toolCallFromPayload(payload: unknown) {
   return { operation, paths: dedupeStrings(paths) };
 }
 
+function patchProposalFromPayload(payload: unknown): PatchProposalApproval | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  const data = payload as Record<string, unknown>;
+  const proposalID = typeof data.proposalID === "string" ? data.proposalID.trim() : "";
+  const projectRoot = typeof data.projectRoot === "string" ? data.projectRoot.trim() : "";
+  const diff = typeof data.diff === "string" ? data.diff : "";
+  if (!proposalID || !diff || !Array.isArray(data.files)) {
+    return null;
+  }
+  const files = data.files.flatMap((value) => {
+    if (!value || typeof value !== "object") {
+      return [];
+    }
+    const file = value as Record<string, unknown>;
+    const path = typeof file.path === "string" ? file.path.trim() : "";
+    const operation: PatchProposalApproval["files"][number]["operation"] | null =
+      file.operation === "create" || file.operation === "update" || file.operation === "delete" ? file.operation : null;
+    if (!path || !operation) {
+      return [];
+    }
+    return [{
+      additions: typeof file.additions === "number" ? file.additions : 0,
+      deletions: typeof file.deletions === "number" ? file.deletions : 0,
+      operation,
+      path,
+    }];
+  });
+  if (files.length === 0) {
+    return null;
+  }
+  return {
+    additions: typeof data.additions === "number" ? data.additions : 0,
+    deletions: typeof data.deletions === "number" ? data.deletions : 0,
+    diff,
+    fileCount: typeof data.fileCount === "number" ? data.fileCount : files.length,
+    files,
+    projectRoot,
+    proposalID,
+  };
+}
+
+function gitCommitFromPayload(payload: unknown): GitCommitApproval | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  const data = payload as Record<string, unknown>;
+  if (data.operation !== "git_commit" || typeof data.diff !== "string" || !Array.isArray(data.files)) {
+    return null;
+  }
+  const files = data.files.flatMap((value) => {
+    if (!value || typeof value !== "object") {
+      return [];
+    }
+    const file = value as Record<string, unknown>;
+    const path = typeof file.path === "string" ? file.path.trim() : "";
+    if (!path) {
+      return [];
+    }
+    return [{
+      additions: typeof file.additions === "number" ? file.additions : 0,
+      deletions: typeof file.deletions === "number" ? file.deletions : 0,
+      path,
+    }];
+  });
+  if (files.length === 0) {
+    return null;
+  }
+  return {
+    additions: typeof data.additions === "number" ? data.additions : 0,
+    branch: typeof data.branch === "string" ? data.branch : "",
+    commitMessage: typeof data.commitMessage === "string" ? data.commitMessage : "",
+    deletions: typeof data.deletions === "number" ? data.deletions : 0,
+    diff: data.diff,
+    fileCount: typeof data.fileCount === "number" ? data.fileCount : files.length,
+    files,
+    repoRoot: typeof data.repoRoot === "string" ? data.repoRoot : "",
+    truncated: data.truncated === true,
+  };
+}
+
 function toolCallReason(operation: string, t: (key: string) => string) {
   switch (operation) {
     case "write":
@@ -2102,6 +2259,10 @@ function toolCallReason(operation: string, t: (key: string) => string) {
     case "delete":
     case "move":
     case "copy":
+    case "patch_apply":
+    case "git_stage":
+    case "git_unstage":
+    case "git_commit":
       return t(`transcript.approvalToolCall.${operation}`);
     default:
       return "";

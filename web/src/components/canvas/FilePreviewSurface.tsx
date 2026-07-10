@@ -1,0 +1,135 @@
+import { Check, Copy, FileCode2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import { Button } from "@/components/ui/button";
+import { useI18n } from "@/i18n";
+import { cn } from "@/lib/utils";
+import { getShikiCodeRenderer } from "@/lib/shiki";
+import type { FilePreview } from "@/state/filePreviewStore";
+
+export function FilePreviewSurface({ active, preview }: { active: boolean; preview: FilePreview }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  const [highlighted, setHighlighted] = useState<string | null>(null);
+  const copiedTimerRef = useRef<number | null>(null);
+  const language = useMemo(() => languageFromPath(preview.path), [preview.path]);
+  const content = useMemo(() => preview.content.replace(/\r\n/g, "\n"), [preview.content]);
+  const characterCount = useMemo(() => Array.from(content).length, [content]);
+  const lineCount = useMemo(() => content.split("\n").length, [content]);
+  const lineNumbers = useMemo(
+    () => Array.from({ length: lineCount }, (_unused, index) => preview.lineStart + index * preview.lineStep).join("\n"),
+    [lineCount, preview.lineStart, preview.lineStep],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setHighlighted(null);
+    void getShikiCodeRenderer().then((render) => {
+      if (!cancelled) {
+        setHighlighted(render(content, language));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [content, language]);
+
+  useEffect(
+    () => () => {
+      if (copiedTimerRef.current) {
+        window.clearTimeout(copiedTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  const copyContent = () => {
+    void navigator.clipboard.writeText(preview.content).then(() => {
+      setCopied(true);
+      if (copiedTimerRef.current) {
+        window.clearTimeout(copiedTimerRef.current);
+      }
+      copiedTimerRef.current = window.setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
+  return (
+    <div
+      aria-hidden={!active}
+      className={cn(
+        "absolute inset-0 z-10 flex min-h-0 flex-col overflow-hidden bg-[var(--canvas-background)] text-card-foreground",
+        !active && "pointer-events-none invisible opacity-0",
+      )}
+    >
+      <div className="flex h-10 shrink-0 items-center gap-2 border-y bg-card px-3">
+        <FileCode2 className="size-4 shrink-0 text-muted-foreground" />
+        <code className="min-w-0 flex-1 truncate font-mono text-xs" title={preview.path}>
+          {preview.path}
+        </code>
+        {language ? <span className="shrink-0 text-[10px] uppercase text-muted-foreground">{language}</span> : null}
+        <Button
+          aria-label={copied ? t("common.copied") : t("common.copy")}
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+          onClick={copyContent}
+        >
+          {copied ? <Check className="text-success" /> : <Copy />}
+        </Button>
+      </div>
+      {preview.truncated ? (
+        <div className="shrink-0 border-b bg-warning/10 px-3 py-1.5 text-[11px] text-warning">
+          {t("canvas.filePreviewTruncated")}
+        </div>
+      ) : null}
+      <div className="min-h-0 flex-1 overflow-auto bg-card/50">
+        <div className="flex min-h-full min-w-max items-stretch">
+          <pre
+            aria-hidden="true"
+            className="sticky left-0 z-[1] m-0 shrink-0 border-r bg-muted/35 px-3 py-3 text-right font-mono text-[12px] leading-6 text-muted-foreground/60 select-none"
+          >
+            {lineNumbers}
+          </pre>
+          {highlighted ? (
+            <div className="pudding-file-preview min-w-max" dangerouslySetInnerHTML={{ __html: highlighted }} />
+          ) : (
+            <pre className="m-0 min-w-max px-4 py-3 font-mono text-[12px] leading-6 text-foreground/90">{content}</pre>
+          )}
+        </div>
+      </div>
+      <div className="flex h-8 shrink-0 items-center gap-2 border-t bg-card px-3 text-[10px] text-muted-foreground">
+        <span>{t("canvas.filePreviewSnapshot")}</span>
+        <span aria-hidden="true">·</span>
+        <span>{replace(t("canvas.filePreviewLines"), { count: String(lineCount) })}</span>
+        <span aria-hidden="true">·</span>
+        <span>{replace(t("canvas.filePreviewCharacters"), { count: String(characterCount) })}</span>
+      </div>
+    </div>
+  );
+}
+
+export function filePreviewTitle(path: string) {
+  return path.split(/[\\/]/).filter(Boolean).pop() || path;
+}
+
+function languageFromPath(path: string) {
+  const filename = filePreviewTitle(path).toLowerCase();
+  const extension = filename.includes(".") ? filename.split(".").pop() || "" : "";
+  const aliases: Record<string, string> = {
+    cjs: "javascript",
+    htm: "html",
+    js: "javascript",
+    mjs: "javascript",
+    md: "markdown",
+    py: "python",
+    sh: "shellscript",
+    ts: "typescript",
+    yml: "yaml",
+    zsh: "shellscript",
+  };
+  return aliases[extension] || extension || undefined;
+}
+
+function replace(template: string, values: Record<string, string>) {
+  return Object.entries(values).reduce((text, [key, value]) => text.replaceAll(`{${key}}`, value), template);
+}

@@ -3,7 +3,7 @@ export const SETTINGS_KEYS = {
   compactTailInputTurns: "compact_tail_input_turns",
   showCompactSummary: "show_compact_summary",
   showReasoning: "show_reasoning",
-  showToolDetails: "show_tool_details",
+  showRawToolInfo: "show_raw_tool_info",
 } as const;
 
 export const SETTINGS_DEFAULTS: Record<string, string> = {
@@ -11,13 +11,13 @@ export const SETTINGS_DEFAULTS: Record<string, string> = {
   [SETTINGS_KEYS.compactTailInputTurns]: "2",
   [SETTINGS_KEYS.showCompactSummary]: "true",
   [SETTINGS_KEYS.showReasoning]: "true",
-  [SETTINGS_KEYS.showToolDetails]: "true",
+  [SETTINGS_KEYS.showRawToolInfo]: "true",
 };
 
 export type TranscriptDisplaySettings = {
   showCompactSummary: boolean;
   showReasoning: boolean;
-  showToolDetails: boolean;
+  showRawToolInfo: boolean;
 };
 
 export function settingsWithDefaults(settings?: Record<string, string>) {
@@ -39,6 +39,6 @@ export function transcriptDisplaySettings(settings?: Record<string, string>): Tr
   return {
     showCompactSummary: boolSetting(settings, SETTINGS_KEYS.showCompactSummary),
     showReasoning: boolSetting(settings, SETTINGS_KEYS.showReasoning),
-    showToolDetails: boolSetting(settings, SETTINGS_KEYS.showToolDetails),
+    showRawToolInfo: boolSetting(settings, SETTINGS_KEYS.showRawToolInfo),
   };
 }

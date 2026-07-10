@@ -27,6 +27,49 @@ func TestClassifyToolCallIgnoresManagedWrites(t *testing.T) {
 	}
 }
 
+func TestClassifyToolCallGitReadRisk(t *testing.T) {
+	for _, name := range []string{GitStatus, GitDiff, GitLog} {
+		risk, ok := ClassifyToolCall(name, json.RawMessage(`{"scope":"project","cwd":"."}`))
+		if !ok || risk.Class != RiskClassRead || !risk.LowRisk || risk.Scope != "project" || len(risk.Paths) != 1 || risk.Paths[0] != "." {
+			t.Fatalf("unexpected git read risk for %s: %+v ok=%v", name, risk, ok)
+		}
+	}
+	if risk, ok := ClassifyToolCall(GitStatus, json.RawMessage(`{"scope":"workspace"}`)); ok {
+		t.Fatalf("legacy git scope must be rejected: %+v", risk)
+	}
+}
+
+func TestClassifyToolCallPatchApplyRisk(t *testing.T) {
+	risk, ok := ClassifyToolCall(PatchApply, json.RawMessage(`{"proposal_id":"patch_123"}`))
+	if !ok || risk.Class != RiskClassWrite || risk.Operation != "patch_apply" || risk.Scope != "project" {
+		t.Fatalf("unexpected patch apply risk: %+v ok=%v", risk, ok)
+	}
+	if _, ok := ClassifyToolCall(PatchApply, json.RawMessage(`{"proposal_id":""}`)); ok {
+		t.Fatal("empty patch proposal id must not be classified")
+	}
+}
+
+func TestClassifyToolCallGitWriteRisk(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		args      string
+		operation string
+		paths     int
+	}{
+		{name: GitStage, args: `{"scope":"project","paths":["main.go"]}`, operation: "git_stage", paths: 1},
+		{name: GitUnstage, args: `{"scope":"project","paths":["main.go"]}`, operation: "git_unstage", paths: 1},
+		{name: GitCommit, args: `{"scope":"project","message":"test"}`, operation: "git_commit"},
+	} {
+		risk, ok := ClassifyToolCall(tt.name, json.RawMessage(tt.args))
+		if !ok || risk.Class != RiskClassWrite || risk.Operation != tt.operation || risk.Scope != "project" || len(risk.Paths) != tt.paths {
+			t.Fatalf("unexpected Git write risk for %s: %+v ok=%v", tt.name, risk, ok)
+		}
+	}
+	if _, ok := ClassifyToolCall(GitStage, json.RawMessage(`{"scope":"workspace","paths":["main.go"]}`)); ok {
+		t.Fatal("legacy Git write scope must not be classified")
+	}
+}
+
 func TestClassifyToolCallCommandRisk(t *testing.T) {
 	tests := []struct {
 		name      string

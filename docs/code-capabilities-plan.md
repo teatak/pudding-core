@@ -1,6 +1,6 @@
 # Pudding Code 能力设计与计划
 
-> 状态:C0、C1、C1.5、C1.6 与 C2 已落地;下一步是 C3 Git Read Tools。
+> 状态:C0、C1、C1.5、C1.6、C2、C3、C4、C5 与 C6 已落地;首版 Code 能力计划完成。
 > 目标:在现有 multi-session / Project tool 架构上,把 Pudding 从"可读写文件"
 > 推进到"可信的工程协作 agent"。
 
@@ -493,52 +493,96 @@ proposal 可先存在 engine memory 或 temp artifact;正式再考虑 SQLite 表
 
 ### C3: Git Read Tools
 
-- 新增 git status/diff/log。
-- 只读,Project scoped。
-- diff 输出截断并返回文件统计。
+状态:已完成(2026-07-10)。
+
+- 已新增 `builtin_git_status`、`builtin_git_diff`、`builtin_git_log`。
+- 三个工具只读且 Project scoped;仓库根不得越出授权 Project 目录。
+- Git 子进程使用最小环境,禁用 pager、external diff、textconv、fsmonitor 与
+  optional locks。
+- status 返回分支、upstream、ahead/behind、文件状态和分类计数。
+- diff 同时返回 128 KiB 头尾截断 patch 与不截断的逐文件增删统计。
+- log 返回最多 100 条结构化提交元数据,无提交仓库返回空列表。
+- `ask` 模式请求审批,`auto` 与 `full` 自动允许只读 Git 操作。
+- 已补三语显示名与 Git 图标。
 
 验收:
 
-- agent 能在修改后展示 git diff。
-- 前端 tool card 能读出文件数与 diff。
+- 已完成:agent 能在修改后读取并展示 git diff。
+- 已完成:tool result 提供 `fileCount`、`files` 与 `diff`,供前端卡片读取。
 
 ### C4: Code Tool Renderers
 
-- 前端按 tool name + JSON content 渲染 code 卡片。
-- command/git/file 工具显示结构化摘要。
-- i18n 覆盖所有新旧 code 工具名。
+状态:已完成(2026-07-10)。
+
+- transcript 按 tool name + JSON content 选择 command、Git 或 file renderer。
+- command 展示 argv、cwd、exit code、duration、stdout/stderr 与截断状态。
+- git status 展示分支、ahead/behind、分类计数与文件状态列表。
+- git diff 展示逐文件增删统计、staged 状态与可滚动 unified diff。
+- git log 展示 hash、subject、author 与提交时间。
+- file 工具展示路径、移动/复制方向、读写统计、目录项、搜索命中或文件内容。
+- 列表限制可见项数量,大输出使用稳定高度滚动区;原始 JSON 仅在用户展开
+  “原始数据”后渲染。
+- code 工具详情不再直接显示内部 snake_case 名称,标题和字段使用三语 i18n。
+- 已用真实成功/失败 file tool result 验证 desktop UI,并验证 390px 视口无横向
+  溢出。
 
 验收:
 
-- transcript 不暴露 snake_case 工具名作为主显示。
-- command/git/file 结果可展开查看。
+- 已完成:transcript 不暴露 snake_case 工具名作为主显示。
+- 已完成:command/git/file 结果可展开查看,并保留按需展开的原始数据。
 
 ### C5: Patch Proposal
 
-- 新增 patch proposal/apply 工具。
-- approval payload 带 diff。
-- 前端先支持整包接受/拒绝。
+状态:已完成(2026-07-10)。
+
+- 已新增 `builtin_patch_propose` 与 `builtin_patch_apply`。
+- propose 接受最多 16 个同 Project root 的 UTF-8 regular file 全文更新、创建或
+  删除,只生成 unified diff,不写工作树。
+- proposal 是 session-scoped daemon memory,TTL 2 小时,最多保留 128 个。
+- proposal 记录源文件 SHA-256;approval details 和 apply 前均重新验证授权与漂移。
+- apply 预写同目录临时文件,再通过 backup + rename 应用;中途失败逆序回滚。
+- unified diff 超过 256 KiB 时拒绝生成,要求 agent 拆分,避免用户批准未展示内容。
+- `auto` 与 `ask` 对 apply 请求审批;`full` 跳过普通审批但仍执行 proposal/hash
+  校验。
+- approval payload 包含 proposalID、路径、文件统计和完整 diff。
+- composer 支持查看 diff、整包应用或拒绝;transcript 已补 propose/apply 结构化
+  卡片和三语显示名。
 
 验收:
 
-- agent 可先提出 diff,用户批准后才落盘。
+- 已完成:agent 可先提出 diff,工作树保持不变,用户批准后才落盘。
+- 已完成:文件在等待审批期间发生漂移时,apply 整包拒绝且不产生部分写入。
 
 ### C6: Git Write Workflow
 
-- stage/unstage/commit。
-- 每步 approval。
-- commit 前自动展示 status/diff 摘要。
+状态:已完成(2026-07-10)。
+
+- 已新增 `builtin_git_stage`、`builtin_git_unstage` 与 `builtin_git_commit`。
+- stage/unstage 只接受最多 128 个显式文件路径,统一转成 repository-relative
+  literal path,不接受目录、任意 pathspec 或 Git 参数。
+- Git 写入前校验 worktree root、git dir、common dir 与 index 仍位于 Project
+  授权目录;linked worktree 的元数据越界时拒绝写入。
+- stage 使用 `hash-object` + 单次 `update-index --index-info`,不执行仓库 clean
+  filter;单文件上限 64 MiB,单次总输入上限 256 MiB。
+- commit 禁用 hooks、签名与 auto-gc,不支持 amend;merge/rebase/cherry-pick 等
+  Git operation state 存在时拒绝普通提交。
+- commit 审批自动附带 branch、status 计数、逐文件统计和 staged diff;审批时记录
+  HEAD + index 指纹,审批等待期间发生漂移则拒绝提交。
+- `ask` 与 `auto` 对 stage/unstage/commit 逐步审批;`full` 不弹普通审批,但仍
+  生成和校验 commit staged 快照。
+- composer 支持 commit staged diff 审阅;transcript 已补三个工具的结构化结果、
+  图标与三语显示名。
 
 验收:
 
-- agent 可完成"改代码 -> 跑测试 -> commit"。
-- 不支持 push/reset/clean 等危险动作。
+- 已完成:agent 可完成"改代码 -> 跑测试 -> stage -> commit"。
+- 已完成:不支持 push/reset/clean/amend 等危险 Git 写操作。
 
 ## 11. 测试策略
 
 后端:
 
-- `internal/tool` 单测:路径沙箱、command、git、policy。
+- `internal/tool` 单测:路径沙箱、command、git read/write、patch、policy。
 - `internal/engine` 单测:tool-call approval、cancel、turn 收尾事务。
 - `internal/store` 单测:如新增 proposal 表才补。
 

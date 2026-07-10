@@ -103,6 +103,7 @@ type RecoverHint struct {
 	Title      string
 	FaviconURL string
 	Mode       string
+	CreatedAt  time.Time
 }
 
 type ObserveOptions struct {
@@ -363,6 +364,10 @@ func (m *Manager) recoverExternal(ctx context.Context, sessionID string, hint Re
 		return TabSnapshot{}, ErrTabNotFound
 	}
 	now := time.Now().UTC()
+	createdAt := hint.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = now
+	}
 	tabID := strings.TrimSpace(hint.TabID)
 	if tabID == "" {
 		tabID = newID("tab")
@@ -374,7 +379,7 @@ func (m *Manager) recoverExternal(ctx context.Context, sessionID string, hint Re
 		url:        target.URL,
 		title:      target.Title,
 		faviconURL: target.FaviconURL,
-		createdAt:  now,
+		createdAt:  createdAt,
 		updatedAt:  now,
 	}
 	m.mu.Lock()

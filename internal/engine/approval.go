@@ -418,7 +418,7 @@ func (e *Engine) requestSkillDraftApproval(ctx context.Context, sessionID, turnI
 	return approvalToolResult(call, true, payload)
 }
 
-func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID string, call tool.Call, risk tool.ToolRisk, project *store.Project) (tool.Result, bool) {
+func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID string, call tool.Call, risk tool.ToolRisk, project *store.Project, details map[string]any) (tool.Result, bool) {
 	payload := map[string]any{
 		"toolName":  call.Name,
 		"riskClass": string(risk.Class),
@@ -426,6 +426,9 @@ func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID 
 		"scope":     risk.Scope,
 		"paths":     risk.Paths,
 		"lowRisk":   risk.LowRisk,
+	}
+	for key, value := range details {
+		payload[key] = value
 	}
 	if project != nil {
 		payload["projectID"] = project.ID
@@ -492,6 +495,8 @@ func (e *Engine) toolCallApprovalRequired(ctx context.Context, sessionID string,
 		return project, true, nil
 	default:
 		switch risk.Class {
+		case tool.RiskClassRead:
+			return project, false, nil
 		case tool.RiskClassWrite, tool.RiskClassDestructive:
 			return project, true, nil
 		case tool.RiskClassCommand:

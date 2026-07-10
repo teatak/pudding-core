@@ -2,14 +2,15 @@ import {
   ArrowLeft,
   ArrowRight,
   Camera,
-  Check,
   ChevronDown,
   ChevronRight,
-  Copy,
   Database,
+  FileDiff,
   FileSearch,
   FileText,
   FolderOpen,
+  GitBranch,
+  GitCommitHorizontal,
   Globe,
   Keyboard,
   LayoutGrid,
@@ -48,6 +49,7 @@ import { cn } from "@/lib/utils";
 import { getShikiCodeRenderer, type CodeBlockRenderer } from "@/lib/shiki";
 import type { AssistantOverlay, AssistantOverlayPart, TurnPhaseState } from "@/state/overlayStore";
 
+import { CodeToolDetails, ToolHoverCopyButton, codeToolSummary, isCodeToolName } from "./CodeToolDetails";
 import { useElapsedDuration } from "./time";
 import { textFromContentParts, type TranscriptDisplaySettings, type TurnDisclosureState, type TurnPartVM } from "./types";
 
@@ -63,17 +65,19 @@ export function TurnParts({
   disclosure,
   displaySettings,
   parts,
+  sessionID,
   token = "",
   turnID,
 }: {
   disclosure?: TurnDisclosureState;
   displaySettings?: TranscriptDisplaySettings;
   parts: TurnPartVM[];
+  sessionID?: string;
   token?: string;
   turnID: string;
 }) {
   const showReasoningContent = displaySettings?.showReasoning ?? true;
-  const showToolDetails = displaySettings?.showToolDetails ?? true;
+  const showRawToolInfo = displaySettings?.showRawToolInfo ?? true;
   const renderParts = compactProcessRuns(parts);
   return (
     <>
@@ -85,8 +89,9 @@ export function TurnParts({
           disclosureKey,
           part,
           partKey,
+          sessionID,
           showReasoningContent,
-          showToolDetails,
+          showRawToolInfo,
           token,
         });
       })}
@@ -99,16 +104,18 @@ function renderTranscriptPart({
   disclosureKey,
   part,
   partKey,
+  sessionID,
   showReasoningContent,
-  showToolDetails,
+  showRawToolInfo,
   token,
 }: {
   disclosure?: TurnDisclosureState;
   disclosureKey: string;
   part: RenderTurnPart;
   partKey: string;
+  sessionID?: string;
   showReasoningContent: boolean;
-  showToolDetails: boolean;
+  showRawToolInfo: boolean;
   token: string;
 }) {
   switch (part.type) {
@@ -135,7 +142,8 @@ function renderTranscriptPart({
           key={partKey}
           defaultOpen={disclosure?.isOpen(disclosureKey) || false}
           part={part}
-          showDetails={showToolDetails}
+          sessionID={sessionID}
+          showRawInfo={showRawToolInfo}
           onOpenChange={(open) => disclosure?.setOpen(disclosureKey, open)}
         />
       );
@@ -154,8 +162,9 @@ function renderTranscriptPart({
               disclosureKey: `${disclosureKey}:${hiddenKey}`,
               part: hiddenPart,
               partKey: hiddenKey,
+              sessionID,
               showReasoningContent,
-              showToolDetails,
+              showRawToolInfo,
               token,
             });
           }}
@@ -205,7 +214,7 @@ function shouldKeepProcessPartVisible(part: TurnPartVM) {
     return Boolean(part.active);
   }
   if (part.type === "tool_use") {
-    return Boolean(part.active || part.resultOk === false || part.phase === "error");
+    return Boolean(part.active || toolFailed(part));
   }
   return false;
 }
@@ -252,6 +261,14 @@ function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIc
     builtin_file_slice: FileText,
     builtin_file_stat: FileText,
     builtin_file_write: FileText,
+    builtin_git_diff: FileDiff,
+    builtin_git_log: GitBranch,
+    builtin_git_stage: GitBranch,
+    builtin_git_status: GitBranch,
+    builtin_git_unstage: GitBranch,
+    builtin_git_commit: GitCommitHorizontal,
+    builtin_patch_apply: FileDiff,
+    builtin_patch_propose: FileDiff,
     builtin_graphql_introspect: Database,
     builtin_graphql_request: Database,
     builtin_graphql_search: Search,
@@ -740,12 +757,14 @@ function processToolGroupLabel(group: ProcessToolGroup, t: (key: string) => stri
 function ToolUsePart({
   defaultOpen,
   part,
-  showDetails,
+  sessionID,
+  showRawInfo,
   onOpenChange,
 }: {
   defaultOpen: boolean;
   part: Extract<TurnPartVM, { type: "tool_use" }>;
-  showDetails: boolean;
+  sessionID?: string;
+  showRawInfo: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
   const { locale, t } = useI18n();
@@ -753,13 +772,16 @@ function ToolUsePart({
   const args = formatToolArgs(part.argsText || part.args);
   const result = formatToolResult(part.resultContent);
   const liveResult = result;
-  const baseTitle = toolDisplayName(part.name || part.resultName, t("transcript.tool"), t);
+  const toolName = part.name || part.resultName || "";
+  const baseTitle = toolDisplayName(toolName, t("transcript.tool"), t);
+  const codeTool = isCodeToolName(toolName);
+  const commandTool = toolName === "builtin_command_run";
+  const showDetails = codeTool || showRawInfo;
   const active = part.active || part.phase === "streaming_args" || part.phase === "running";
   const elapsed = useElapsedDuration(active && part.phase === "running" ? part.phaseUpdatedAt : undefined, locale);
   const failed = toolFailed(part);
   const Icon = toolPartIcon(part);
   const title = toolTitle(part, liveResult, baseTitle, elapsed, t);
-  const copyText = toolCopyText(part, args, liveResult, baseTitle, t);
   const toneClass = failed ? "text-destructive" : "text-muted-foreground";
   const summaryClass = failed ? "text-destructive/70" : "text-muted-foreground/50";
   const hoverClass = failed ? "hover:text-destructive" : "hover:text-foreground";
@@ -796,12 +818,25 @@ function ToolUsePart({
         </span>
       </summary>
       <div className="ml-[5px] py-1 pl-2">
-        <div className="relative rounded-md border border-border/50 bg-muted/20 p-2 pr-9">
-          <ToolCopyButton text={copyText} />
-          {part.name || part.resultName ? <ToolNameLine name={part.name || part.resultName || ""} /> : null}
-          {args ? <ToolDetailBlock label={t("transcript.toolArgs")} text={args} /> : null}
-          {liveResult ? <ToolDetailBlock label={t("transcript.toolResult")} text={liveResult.text} /> : null}
-          {!args && !liveResult ? <div className="leading-5">{title.summary || title.label}</div> : null}
+        <div className="grid gap-2">
+          {codeTool ? (
+            <div className={cn(!commandTool && "rounded-md border border-border/50 bg-muted/20 p-2")}>
+              <CodeToolDetails
+                args={part.argsText || part.args}
+                callID={part.id}
+                name={toolName}
+                result={liveResult?.value}
+                sessionID={sessionID}
+              />
+            </div>
+          ) : null}
+          {showRawInfo ? (
+            <RawToolDataCard
+              args={args}
+              result={liveResult?.text || ""}
+              toolName={toolName}
+            />
+          ) : null}
         </div>
       </div>
     </details>
@@ -1373,6 +1408,14 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     builtin_file_slice: t("transcript.toolFileSlice"),
     builtin_file_stat: t("transcript.toolFileStat"),
     builtin_file_write: t("transcript.toolFileWrite"),
+    builtin_git_diff: t("transcript.toolGitDiff"),
+    builtin_git_log: t("transcript.toolGitLog"),
+    builtin_git_stage: t("transcript.toolGitStage"),
+    builtin_git_status: t("transcript.toolGitStatus"),
+    builtin_git_unstage: t("transcript.toolGitUnstage"),
+    builtin_git_commit: t("transcript.toolGitCommit"),
+    builtin_patch_apply: t("transcript.toolPatchApply"),
+    builtin_patch_propose: t("transcript.toolPatchPropose"),
     builtin_camera_capture: t("transcript.toolCameraCapture"),
     builtin_desktop_screenshot: t("transcript.toolDesktopScreenshot"),
     builtin_browser_click: t("transcript.toolBrowserClick"),
@@ -1437,7 +1480,8 @@ function toolTitle(
       return { label: t("transcript.toolUnknown"), summary: unknownName };
     }
     const capabilitySummary = capabilityToolSummary(part, result, t);
-    return { label: baseTitle, summary: capabilitySummary || t("transcript.toolFailed") };
+    const codeSummary = codeToolSummary(part.name || part.resultName || "", part.argsText || part.args, result?.value, t);
+    return { label: baseTitle, summary: capabilitySummary || codeSummary || t("transcript.toolFailed") };
   }
   const inputSummary = inputFlowToolSummary(part, result, t);
   if (inputSummary) {
@@ -1446,6 +1490,10 @@ function toolTitle(
   const capabilitySummary = capabilityToolSummary(part, result, t);
   if (capabilitySummary) {
     return { label: baseTitle, summary: capabilitySummary };
+  }
+  const codeSummary = codeToolSummary(part.name || part.resultName || "", part.argsText || part.args, result?.value, t);
+  if (codeSummary) {
+    return { label: baseTitle, summary: codeSummary };
   }
   const summary = toolProtocolSummary(part, t);
   if (summary) {
@@ -1531,6 +1579,21 @@ function toolProtocolSummary(part: Extract<TurnPartVM, { type: "tool_use" }>, t:
 }
 
 function toolFailed(part: Extract<TurnPartVM, { type: "tool_use" }>) {
+  if ((part.name || part.resultName) === "builtin_command_run") {
+    const value = formatToolResult(part.resultContent)?.value;
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const record = value as Record<string, unknown>;
+      if (
+        record.reason === "non_zero_exit" &&
+        typeof record.exitCode === "number" &&
+        record.exitCode >= 0 &&
+        record.timedOut !== true &&
+        record.cancelled !== true
+      ) {
+        return false;
+      }
+    }
+  }
   return part.resultOk === false || part.phase === "error";
 }
 
@@ -1561,24 +1624,45 @@ function resultRecordCount(value: Record<string, unknown>) {
   return arrays.length === 1 ? arrays[0].length : null;
 }
 
-function toolCopyText(
-  part: Extract<TurnPartVM, { type: "tool_use" }>,
-  args: string,
-  result: ReturnType<typeof formatToolResult>,
-  title: string,
-  t: (key: string) => string,
-) {
-  const lines = [title];
-  if (part.name) {
-    lines.push(`${t("transcript.tool")}: ${part.name}`);
+function rawToolCopyText(toolName: string, args: string, result: string, t: (key: string) => string) {
+  const lines: string[] = [];
+  if (toolName) {
+    lines.push(`${t("transcript.tool")}: ${toolName}`);
   }
   if (args) {
     lines.push("", `${t("transcript.toolArgs")}:`, args);
   }
-  if (result?.text) {
-    lines.push("", `${t("transcript.toolResult")}:`, result.text);
+  if (result) {
+    lines.push("", `${t("transcript.toolResult")}:`, result);
   }
-  return lines.join("\n");
+  return lines.join("\n").trim();
+}
+
+function RawToolDataCard({ args, result, toolName }: { args: string; result: string; toolName: string }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const copyText = rawToolCopyText(toolName, args, result, t);
+  return (
+    <details
+      className="group/raw-data overflow-hidden rounded-md border border-border/50 bg-muted/20 text-[11px] text-muted-foreground"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="flex h-8 cursor-default list-none items-center gap-1 px-2 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden">
+        {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+        <span>{t("transcript.codeRawData")}</span>
+        <span className="min-w-0 flex-1" />
+        <ToolHoverCopyButton className="group-hover/raw-data:opacity-100" text={copyText} />
+      </summary>
+      {open ? (
+        <div className="border-t border-border/50 p-2">
+          {toolName ? <ToolNameLine name={toolName} /> : null}
+          {args ? <ToolDetailBlock label={t("transcript.toolArgs")} text={args} /> : null}
+          {result ? <ToolDetailBlock label={t("transcript.toolResult")} text={result} /> : null}
+        </div>
+      ) : null}
+    </details>
+  );
 }
 
 function ToolDetailBlock({ label, text }: { label: string; text: string }) {
@@ -1589,38 +1673,5 @@ function ToolDetailBlock({ label, text }: { label: string; text: string }) {
         {text}
       </pre>
     </div>
-  );
-}
-
-function ToolCopyButton({ text }: { text: string }) {
-  const { t } = useI18n();
-  const [copied, setCopied] = useState(false);
-  const resetTimer = useRef<number | null>(null);
-  useEffect(() => {
-    return () => {
-      if (resetTimer.current) {
-        window.clearTimeout(resetTimer.current);
-      }
-    };
-  }, []);
-  return (
-    <Button
-      aria-label={t("common.copy")}
-      className="absolute top-1.5 right-1.5 size-6 bg-transparent transition-colors hover:bg-muted dark:hover:bg-muted/50 active:translate-y-0"
-      size="icon-xs"
-      type="button"
-      variant="ghost"
-      onClick={() => {
-        void navigator.clipboard.writeText(text).then(() => {
-          setCopied(true);
-          if (resetTimer.current) {
-            window.clearTimeout(resetTimer.current);
-          }
-          resetTimer.current = window.setTimeout(() => setCopied(false), 1500);
-        });
-      }}
-    >
-      {copied ? <Check className="text-success" /> : <Copy />}
-    </Button>
   );
 }

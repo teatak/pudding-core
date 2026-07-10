@@ -22,12 +22,12 @@ type Memstore struct {
 	turns    map[string]*store.Turn
 	messages map[string][]*store.Message // sessionID → 时间升序
 	queued   map[string][]*store.QueuedInput
-	usage    map[usageKey]*store.UsageHourlyStat // (UTC hour unix ms, model) → global stats
-	susage   map[string]*store.SessionUsageStat  // sessionID → session stats
-	canvas   map[string]*store.CanvasItem        // itemID → global canvas item
-	closed   map[string]*store.ClosedCanvasItem  // id → recently closed canvas item
-	browser  map[string]*store.BrowserState      // sessionID → browser state
-	events   map[string][]event.Event            // sessionID → seq 升序
+	usage    map[usageKey]*store.UsageHourlyStat       // (UTC hour unix ms, model) → global stats
+	susage   map[string]*store.SessionUsageStat        // sessionID → session stats
+	canvas   map[string]*store.CanvasItem              // itemID → global canvas item
+	closed   map[string]*store.ClosedCanvasItem        // id → recently closed canvas item
+	browser  map[string]map[string]*store.BrowserState // sessionID → tabID → browser state
+	events   map[string][]event.Event                  // sessionID → seq 升序
 	seq      map[string]int64
 	settings map[string]string
 	profiles map[string]*store.ProviderProfile
@@ -44,7 +44,7 @@ func New() *Memstore {
 		susage:   make(map[string]*store.SessionUsageStat),
 		canvas:   make(map[string]*store.CanvasItem),
 		closed:   make(map[string]*store.ClosedCanvasItem),
-		browser:  make(map[string]*store.BrowserState),
+		browser:  make(map[string]map[string]*store.BrowserState),
 		events:   make(map[string][]event.Event),
 		seq:      make(map[string]int64),
 		settings: make(map[string]string),
@@ -1065,11 +1065,48 @@ func (m *Memstore) GetBrowserState(_ context.Context, sessionID string) (*store.
 	if _, ok := m.sessions[sessionID]; !ok {
 		return nil, store.ErrNotFound
 	}
-	state := m.browser[sessionID]
+	var latest *store.BrowserState
+	for _, state := range m.browser[sessionID] {
+		if latest == nil || state.UpdatedAt.After(latest.UpdatedAt) {
+			latest = state
+		}
+	}
+	if latest == nil {
+		return nil, store.ErrNotFound
+	}
+	return cloneBrowserState(latest), nil
+}
+
+func (m *Memstore) GetBrowserTabState(_ context.Context, sessionID, tabID string) (*store.BrowserState, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[sessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	state := m.browser[sessionID][tabID]
 	if state == nil {
 		return nil, store.ErrNotFound
 	}
 	return cloneBrowserState(state), nil
+}
+
+func (m *Memstore) ListBrowserStates(_ context.Context, sessionID string) ([]*store.BrowserState, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[sessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	out := make([]*store.BrowserState, 0, len(m.browser[sessionID]))
+	for _, state := range m.browser[sessionID] {
+		out = append(out, cloneBrowserState(state))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+			return out[i].UpdatedAt.After(out[j].UpdatedAt)
+		}
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
+	return out, nil
 }
 
 func (m *Memstore) PutBrowserState(_ context.Context, in store.BrowserStateInput) (*store.BrowserState, error) {
@@ -1083,7 +1120,10 @@ func (m *Memstore) PutBrowserState(_ context.Context, in store.BrowserStateInput
 	}
 	now := time.Now()
 	created := now
-	if existing := m.browser[in.SessionID]; existing != nil {
+	if m.browser[in.SessionID] == nil {
+		m.browser[in.SessionID] = make(map[string]*store.BrowserState)
+	}
+	if existing := m.browser[in.SessionID][in.TabID]; existing != nil {
 		created = existing.CreatedAt
 	}
 	state := &store.BrowserState{
@@ -1096,8 +1136,21 @@ func (m *Memstore) PutBrowserState(_ context.Context, in store.BrowserStateInput
 		CreatedAt:  created,
 		UpdatedAt:  now,
 	}
-	m.browser[in.SessionID] = state
+	m.browser[in.SessionID][in.TabID] = state
 	return cloneBrowserState(state), nil
+}
+
+func (m *Memstore) DeleteBrowserState(_ context.Context, sessionID, tabID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[sessionID]; !ok {
+		return store.ErrNotFound
+	}
+	delete(m.browser[sessionID], tabID)
+	if len(m.browser[sessionID]) == 0 {
+		delete(m.browser, sessionID)
+	}
+	return nil
 }
 
 func (m *Memstore) ClearBrowserState(_ context.Context, sessionID string) error {

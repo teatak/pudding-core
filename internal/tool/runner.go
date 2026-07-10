@@ -42,3 +42,7 @@ type Runner interface {
 	Definitions(ctx context.Context, sessionID string) ([]provider.ToolDef, error)
 	Call(ctx context.Context, call Call) Result
 }
+
+type ApprovalDetailsProvider interface {
+	ApprovalDetails(ctx context.Context, call Call) (map[string]any, error)
+}

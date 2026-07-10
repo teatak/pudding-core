@@ -62,6 +62,12 @@ func Open(path string) (*Store, error) {
 }
 
 func ensureSchema(db *sql.DB) error {
+	if err := migrateBrowserTabs(db); err != nil {
+		return err
+	}
+	if err := pruneDuplicateBlankBrowserTabs(db); err != nil {
+		return err
+	}
 	if has, err := tableHasColumn(db, "sessions", "project_id"); err != nil {
 		return err
 	} else if !has {
@@ -78,6 +84,59 @@ func ensureSchema(db *sql.DB) error {
 		if _, err := db.Exec(`ALTER TABLE queued_inputs ADD COLUMN parts TEXT NOT NULL DEFAULT '[]'`); err != nil {
 			return fmt.Errorf("sqlite: migrate queued_inputs.parts: %w", err)
 		}
+	}
+	return nil
+}
+
+func pruneDuplicateBlankBrowserTabs(db *sql.DB) error {
+	_, err := db.Exec(`
+		WITH ranked AS (
+			SELECT rowid AS tab_rowid,
+			       ROW_NUMBER() OVER (
+			           PARTITION BY session_id
+			           ORDER BY updated_at DESC, rowid DESC
+			       ) AS position
+			FROM session_browser_tabs
+			WHERE lower(trim(url)) = 'about:blank'
+		)
+		DELETE FROM session_browser_tabs
+		WHERE rowid IN (SELECT tab_rowid FROM ranked WHERE position > 1)
+	`)
+	if err != nil {
+		return fmt.Errorf("sqlite: prune duplicate blank browser tabs: %w", err)
+	}
+	return nil
+}
+
+func migrateBrowserTabs(db *sql.DB) error {
+	var legacyTable string
+	err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='session_browser_state'`).Scan(&legacyTable)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("sqlite: inspect legacy browser state: %w", err)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("sqlite: begin browser tabs migration: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`
+		INSERT OR IGNORE INTO session_browser_tabs(
+			session_id,tab_id,url,title,favicon_url,mode,created_at,updated_at
+		)
+		SELECT session_id,tab_id,url,title,favicon_url,mode,created_at,updated_at
+		FROM session_browser_state
+		WHERE trim(tab_id) <> '' AND trim(url) <> ''
+	`); err != nil {
+		return fmt.Errorf("sqlite: migrate browser tabs: %w", err)
+	}
+	if _, err := tx.Exec(`DROP TABLE session_browser_state`); err != nil {
+		return fmt.Errorf("sqlite: remove legacy browser state: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("sqlite: commit browser tabs migration: %w", err)
 	}
 	return nil
 }

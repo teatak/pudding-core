@@ -12,6 +12,7 @@ function TranscriptTurnView({
   onQueuedCancel,
   onQueuedEditStart,
   onQueuedSave,
+  sessionID,
   token,
   turn,
 }: {
@@ -22,6 +23,7 @@ function TranscriptTurnView({
   onQueuedCancel?: (clientMessageID: string) => Promise<unknown>;
   onQueuedEditStart?: (clientMessageID: string) => Promise<unknown>;
   onQueuedSave?: (clientMessageID: string, text: string) => Promise<unknown>;
+  sessionID: string;
   token: string;
   turn: TranscriptTurnVM;
 }) {
@@ -45,6 +47,7 @@ function TranscriptTurnView({
             assistant={turn.assistant}
             disclosure={disclosure}
             displaySettings={displaySettings}
+            sessionID={sessionID}
             token={token}
             turnID={anchorTurnID}
             onContentGrow={onAssistantContentGrow}
@@ -65,6 +68,7 @@ export const TranscriptTurn = memo(TranscriptTurnView, (previous, next) => {
   return (
     previous.disclosure === next.disclosure &&
     previous.displaySettings === next.displaySettings &&
+    previous.sessionID === next.sessionID &&
     previous.token === next.token &&
     transcriptTurnEqual(previous.turn, next.turn)
   );

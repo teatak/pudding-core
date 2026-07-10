@@ -52,3 +52,20 @@ func (r *MultiRunner) Call(ctx context.Context, call Call) Result {
 	}
 	return Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: fmt.Sprintf("unknown tool: %s", call.Name)}
 }
+
+func (r *MultiRunner) ApprovalDetails(ctx context.Context, call Call) (map[string]any, error) {
+	for _, runner := range r.runners {
+		defs, err := runner.Definitions(ctx, call.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		if !HasDefinition(defs, call.Name) {
+			continue
+		}
+		if provider, ok := runner.(ApprovalDetailsProvider); ok {
+			return provider.ApprovalDetails(ctx, call)
+		}
+		return nil, nil
+	}
+	return nil, nil
+}

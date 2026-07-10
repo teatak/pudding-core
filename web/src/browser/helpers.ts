@@ -101,8 +101,12 @@ export function browserURLIsBlank(rawURL?: string): boolean {
 }
 
 export function upsertBrowserTab(tabs: BrowserTab[], tab: BrowserTab): BrowserTab[] {
-  const next = tabs.filter((item) => item.id !== tab.id);
-  next.push(tab);
+  const index = tabs.findIndex((item) => item.id === tab.id);
+  if (index < 0) {
+    return [...tabs, tab];
+  }
+  const next = [...tabs];
+  next[index] = { ...tab, createdAt: tabs[index]!.createdAt || tab.createdAt };
   return next;
 }
 

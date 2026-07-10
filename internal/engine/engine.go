@@ -1265,12 +1265,23 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 		} else {
 			call.ProjectDirs = e.projectRootDirsForToolCall(ctx, sessionID, turnID)
 			if risk, ok := tool.ClassifyToolCall(call.Name, call.Args); ok {
+				var approvalDetails map[string]any
+				var approvalDetailsErr error
+				if tool.RequiresApprovalDetails(call.Name) {
+					if source, ok := e.tools.(tool.ApprovalDetailsProvider); ok {
+						approvalDetails, approvalDetailsErr = source.ApprovalDetails(ctx, call)
+					} else {
+						approvalDetailsErr = errors.New("patch approval details unavailable")
+					}
+				}
 				project, required, err := e.toolCallApprovalRequired(ctx, sessionID, risk)
-				if err != nil {
+				if approvalDetailsErr != nil {
+					result = tool.ApprovalDetailsFailure(call, approvalDetailsErr)
+				} else if err != nil {
 					result = tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: fmt.Sprintf("approval policy: %v", err)}
 				} else if required {
 					var approved bool
-					result, approved = e.requestToolCallApproval(ctx, sessionID, turnID, call, risk, project)
+					result, approved = e.requestToolCallApproval(ctx, sessionID, turnID, call, risk, project, approvalDetails)
 					if approved {
 						toolCtx, cancel, timed := toolContext(ctx, call.Name)
 						result = e.tools.Call(toolCtx, call)

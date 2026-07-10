@@ -25,7 +25,7 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 		settings[SettingCompactAutoThresholdPercent] != "80" ||
 		settings[SettingShowCompactSummary] != "true" ||
 		settings[SettingShowReasoning] != "true" ||
-		settings[SettingShowToolDetails] != "true" {
+		settings[SettingShowRawToolInfo] != "true" {
 		t.Fatalf("unexpected settings: %+v", settings)
 	}
 
@@ -153,7 +153,7 @@ func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {
 		SettingCompactAutoThresholdPercent: "70",
 		SettingShowCompactSummary:          "false",
 		SettingShowReasoning:               "false",
-		SettingShowToolDetails:             "false",
+		SettingShowRawToolInfo:             "false",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {
 		settings[SettingCompactAutoThresholdPercent] != "70" ||
 		settings[SettingShowCompactSummary] != "false" ||
 		settings[SettingShowReasoning] != "false" ||
-		settings[SettingShowToolDetails] != "false" {
+		settings[SettingShowRawToolInfo] != "false" {
 		t.Fatalf("unexpected settings: %+v", settings)
 	}
 	settingsPath := home + "/config/settings.yaml"
@@ -177,7 +177,7 @@ func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {
 	if !strings.Contains(settingsYAML, "tail_input_turns: 3") ||
 		!strings.Contains(settingsYAML, "auto_threshold_percent: 70") ||
 		!strings.Contains(settingsYAML, "reasoning: false") ||
-		!strings.Contains(settingsYAML, "tool_details: false") {
+		!strings.Contains(settingsYAML, "raw_tool_info: false") {
 		t.Fatalf("expected settings in settings.yaml:\n%s", settingsYAML)
 	}
 

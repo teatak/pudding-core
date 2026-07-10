@@ -1334,6 +1334,9 @@ func TestBuiltinToolsAPI(t *testing.T) {
 	}
 	var fileWrite map[string]any
 	var commandRun map[string]any
+	var gitStatus map[string]any
+	var gitCommit map[string]any
+	var patchPropose map[string]any
 	var skillRead map[string]any
 	var skillSubmit map[string]any
 	var restRequest map[string]any
@@ -1344,6 +1347,12 @@ func TestBuiltinToolsAPI(t *testing.T) {
 			fileWrite = item
 		case tool.CommandRun:
 			commandRun = item
+		case tool.GitStatus:
+			gitStatus = item
+		case tool.GitCommit:
+			gitCommit = item
+		case tool.PatchPropose:
+			patchPropose = item
 		case tool.SkillRead:
 			skillRead = item
 		case tool.SkillSubmit:
@@ -1359,6 +1368,15 @@ func TestBuiltinToolsAPI(t *testing.T) {
 	}
 	if commandRun == nil || commandRun["capability"] != string(store.ModeProject) {
 		t.Fatalf("command run should declare project capability: %+v", commandRun)
+	}
+	if gitStatus == nil || gitStatus["capability"] != string(store.ModeProject) {
+		t.Fatalf("git status should declare project capability: %+v", gitStatus)
+	}
+	if gitCommit == nil || gitCommit["capability"] != string(store.ModeProject) {
+		t.Fatalf("git commit should declare project capability: %+v", gitCommit)
+	}
+	if patchPropose == nil || patchPropose["capability"] != string(store.ModeProject) {
+		t.Fatalf("patch propose should declare project capability: %+v", patchPropose)
 	}
 	if skillRead == nil || skillRead["capability"] != string(store.ModeChat) {
 		t.Fatalf("skill read should declare chat capability: %+v", skillRead)

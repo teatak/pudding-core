@@ -9,6 +9,7 @@ import (
 type RiskClass string
 
 const (
+	RiskClassRead        RiskClass = "read"
 	RiskClassWrite       RiskClass = "write"
 	RiskClassDestructive RiskClass = "destructive"
 	RiskClassCommand     RiskClass = "command"
@@ -26,6 +27,24 @@ type ToolRisk struct {
 func ClassifyToolCall(name string, raw json.RawMessage) (ToolRisk, bool) {
 	if name == CommandRun {
 		return classifyCommandCall(raw)
+	}
+	if name == GitStatus || name == GitDiff || name == GitLog {
+		return classifyGitReadCall(name, raw)
+	}
+	if name == GitStage || name == GitUnstage || name == GitCommit {
+		return classifyGitWriteCall(name, raw)
+	}
+	if name == PatchApply {
+		var args patchApplyArgs
+		if len(raw) == 0 || json.Unmarshal(raw, &args) != nil || strings.TrimSpace(args.ProposalID) == "" {
+			return ToolRisk{}, false
+		}
+		return ToolRisk{
+			Class:     RiskClassWrite,
+			Operation: "patch_apply",
+			Scope:     managedScopeProject,
+			Summary:   "Apply a reviewed patch proposal to project files.",
+		}, true
 	}
 	var args struct {
 		Scope     string `json:"scope"`
@@ -68,6 +87,61 @@ func ClassifyToolCall(name string, raw json.RawMessage) (ToolRisk, bool) {
 	default:
 		return ToolRisk{}, false
 	}
+}
+
+func classifyGitWriteCall(name string, raw json.RawMessage) (ToolRisk, bool) {
+	operation := "git_commit"
+	summary := "Create a Git commit from the reviewed staged changes."
+	paths := []string(nil)
+	if name == GitStage || name == GitUnstage {
+		action := "stage"
+		operation = "git_stage"
+		summary = "Stage explicit project files in Git."
+		if name == GitUnstage {
+			action = "unstage"
+			operation = "git_unstage"
+			summary = "Unstage explicit project files without changing the worktree."
+		}
+		args, err := decodeGitPathsArgs(raw, action)
+		if err != nil {
+			return ToolRisk{}, false
+		}
+		paths = compactRiskPaths(args.Paths...)
+	} else if _, err := decodeGitCommitArgs(raw); err != nil {
+		return ToolRisk{}, false
+	}
+	return ToolRisk{
+		Class:     RiskClassWrite,
+		Operation: operation,
+		Scope:     managedScopeProject,
+		Paths:     paths,
+		Summary:   summary,
+	}, true
+}
+
+func classifyGitReadCall(name string, raw json.RawMessage) (ToolRisk, bool) {
+	var args gitBaseArgs
+	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil || strings.TrimSpace(args.Scope) != managedScopeProject {
+		return ToolRisk{}, false
+	}
+	operation := strings.TrimPrefix(name, "builtin_")
+	summary := "Read Git repository data."
+	switch name {
+	case GitStatus:
+		summary = "Read Git worktree status."
+	case GitDiff:
+		summary = "Read Git changes."
+	case GitLog:
+		summary = "Read Git commit history."
+	}
+	return ToolRisk{
+		Class:     RiskClassRead,
+		Operation: operation,
+		Scope:     managedScopeProject,
+		Paths:     compactRiskPaths(args.CWD),
+		Summary:   summary,
+		LowRisk:   true,
+	}, true
 }
 
 func classifyCommandCall(raw json.RawMessage) (ToolRisk, bool) {

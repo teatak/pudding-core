@@ -523,6 +523,7 @@ export const TranscriptList = memo(function TranscriptList({
           key={turn.key}
           disclosure={listDisclosure}
           displaySettings={displaySettings}
+          sessionID={sessionID}
           onAssistantContentGrow={handleAssistantContentGrow}
           onAssistantRevealComplete={onAssistantRevealComplete}
           onQueuedCancel={onQueuedCancel}

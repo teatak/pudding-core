@@ -29,6 +29,7 @@ type electronBridgeRequest struct {
 	SessionID string `json:"sessionID"`
 	TabID     string `json:"tabID,omitempty"`
 	URL       string `json:"url,omitempty"`
+	CreatedAt string `json:"createdAt,omitempty"`
 }
 
 type electronBridgeObserveRequest struct {
@@ -84,6 +85,8 @@ type electronBridgeSnapshot struct {
 	CanGoForward bool   `json:"canGoForward"`
 	RuntimeID    string `json:"runtimeID"`
 	Version      int64  `json:"version"`
+	CreatedAt    string `json:"createdAt"`
+	UpdatedAt    string `json:"updatedAt"`
 }
 
 type electronBridgeError struct {
@@ -151,15 +154,15 @@ func (s *ElectronBridgeService) SupportsMetadataRecovery() bool {
 
 func (s *ElectronBridgeService) CreateTab(ctx context.Context, sessionID string) (TabSnapshot, error) {
 	tabID := newID("tab")
-	now := time.Now().UTC()
-	return TabSnapshot{
-		ID:        tabID,
+	var snapshot electronBridgeSnapshot
+	if err := s.post(ctx, "/browser/tabs/ensure", electronBridgeRequest{
 		SessionID: sessionID,
+		TabID:     tabID,
 		URL:       "about:blank",
-		Mode:      "headless",
-		CreatedAt: now,
-		UpdatedAt: now,
-	}, nil
+	}, &snapshot); err != nil {
+		return TabSnapshot{}, err
+	}
+	return snapshot.tab(), nil
 }
 
 func (s *ElectronBridgeService) ListTabs(ctx context.Context, sessionID string) ([]TabSnapshot, error) {
@@ -203,7 +206,19 @@ func (s *ElectronBridgeService) Recover(ctx context.Context, sessionID string, h
 	if rawURL == "" {
 		return TabSnapshot{}, ErrTabNotFound
 	}
-	return s.Open(ctx, sessionID, tabID, rawURL)
+	normalizedURL, err := normalizeURL(rawURL)
+	if err != nil {
+		return TabSnapshot{}, err
+	}
+	var snapshot electronBridgeSnapshot
+	request := electronBridgeRequest{SessionID: sessionID, TabID: tabID, URL: normalizedURL}
+	if !hint.CreatedAt.IsZero() {
+		request.CreatedAt = hint.CreatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if err := s.post(ctx, "/browser/tabs/open", request, &snapshot); err != nil {
+		return TabSnapshot{}, err
+	}
+	return snapshot.tab(), nil
 }
 
 func (s *ElectronBridgeService) CloseSessionBrowser(ctx context.Context, sessionID string) error {
@@ -458,6 +473,8 @@ func bridgeHTTPError(resp *http.Response) error {
 
 func (snapshot electronBridgeSnapshot) tab() TabSnapshot {
 	now := time.Now().UTC()
+	createdAt := parseElectronBridgeTime(snapshot.CreatedAt, now)
+	updatedAt := parseElectronBridgeTime(snapshot.UpdatedAt, now)
 	rawURL := strings.TrimSpace(snapshot.URL)
 	if rawURL == "" {
 		rawURL = "about:blank"
@@ -477,9 +494,17 @@ func (snapshot electronBridgeSnapshot) tab() TabSnapshot {
 		Mode:         "headless",
 		CanGoBack:    snapshot.CanGoBack,
 		CanGoForward: snapshot.CanGoForward,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		CreatedAt:    createdAt,
+		UpdatedAt:    updatedAt,
 	}
+}
+
+func parseElectronBridgeTime(value string, fallback time.Time) time.Time {
+	parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(value))
+	if err != nil {
+		return fallback
+	}
+	return parsed.UTC()
 }
 
 func (out electronBridgeObserveResponse) result() ObserveResult {

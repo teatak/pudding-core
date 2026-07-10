@@ -69,12 +69,18 @@ func (s *Server) getBrowserState(c *cart.Context) error {
 		if err != nil {
 			return s.browserError(c, err)
 		}
-		if closed {
+		if s.browserTabGateActive(sessionID) {
 			if _, err := s.restoreStoredLiveBrowserTabGate(c.Request.Context(), sessionID, tabs); err != nil {
 				return s.fail(c, err)
 			}
 		}
 		tabs = s.filterBrowserTabs(sessionID, tabs)
+		if !closed {
+			tabs, err = s.recoverStoredBrowserTabs(c.Request.Context(), sessionID, tabs)
+			if err != nil {
+				return s.browserError(c, err)
+			}
+		}
 		if tab, ok, err := latestBrowserTab(tabs); err != nil {
 			return s.browserError(c, err)
 		} else if ok {
@@ -144,6 +150,11 @@ func (s *Server) closeBrowserSession(c *cart.Context) error {
 	if !ok {
 		return nil
 	}
+	tabs, err := s.browser.ListTabs(c.Request.Context(), sessionID)
+	if err != nil {
+		return s.browserError(c, err)
+	}
+	s.rememberClosedBrowserTabs(sessionID, tabs)
 	s.closeBrowserTabGate(sessionID)
 	if err := s.browser.CloseSessionBrowser(c.Request.Context(), sessionID); err != nil {
 		s.clearBrowserTabGate(sessionID)
@@ -165,12 +176,18 @@ func (s *Server) listBrowserTabs(c *cart.Context) error {
 	if err != nil {
 		return s.browserError(c, err)
 	}
-	if s.browserTabGateClosed(sessionID) {
+	if s.browserTabGateActive(sessionID) {
 		if _, err := s.restoreStoredLiveBrowserTabGate(c.Request.Context(), sessionID, tabs); err != nil {
 			return s.fail(c, err)
 		}
 	}
 	tabs = s.filterBrowserTabs(sessionID, tabs)
+	if !s.browserTabGateClosed(sessionID) {
+		tabs, err = s.recoverStoredBrowserTabs(c.Request.Context(), sessionID, tabs)
+		if err != nil {
+			return s.browserError(c, err)
+		}
+	}
 	c.JSON(http.StatusOK, browserTabsResp{Tabs: tabs, ProcessMode: s.browserProcessMode(c.Request.Context(), sessionID)})
 	return nil
 }
@@ -250,6 +267,7 @@ func (s *Server) recoverBrowserTab(c *cart.Context) error {
 		Title:      tab.Title,
 		FaviconURL: tab.FaviconURL,
 		Mode:       tab.Mode,
+		CreatedAt:  tab.CreatedAt,
 	})
 	if err != nil {
 		return s.browserError(c, err)
@@ -323,6 +341,27 @@ func (s *Server) syncBrowserTab(c *cart.Context) error {
 	return nil
 }
 
+func (s *Server) adoptBrowserTab(c *cart.Context) error {
+	sessionID, ok := s.browserSession(c)
+	if !ok {
+		return nil
+	}
+	tabID, _ := c.Param("tabID")
+	if s.browserTabClosed(sessionID, tabID) {
+		return s.browserError(c, browser.ErrTabNotFound)
+	}
+	tab, err := s.browser.GetTab(c.Request.Context(), sessionID, tabID)
+	if err != nil {
+		return s.browserError(c, err)
+	}
+	s.allowBrowserTabInGate(sessionID, tab.ID)
+	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
+		return browserStoreError(c, s, err)
+	}
+	c.JSON(http.StatusOK, tab)
+	return nil
+}
+
 func (s *Server) openBrowserSession(c *cart.Context) error {
 	sessionID, ok := s.browserSession(c)
 	if !ok {
@@ -380,6 +419,7 @@ func (s *Server) clearBrowserTabGate(sessionID string) {
 	s.browserMu.Lock()
 	defer s.browserMu.Unlock()
 	delete(s.browserAllowedTabs, sessionID)
+	delete(s.browserClosedTabs, sessionID)
 }
 
 func (s *Server) allowBrowserTabInGate(sessionID, tabID string) {
@@ -390,6 +430,7 @@ func (s *Server) allowBrowserTabInGate(sessionID, tabID string) {
 	}
 	s.browserMu.Lock()
 	defer s.browserMu.Unlock()
+	delete(s.browserClosedTabs[sessionID], tabID)
 	allowed, ok := s.browserAllowedTabs[sessionID]
 	if !ok {
 		return
@@ -452,11 +493,43 @@ func (s *Server) browserTabAllowed(sessionID, tabID string) bool {
 	return ok
 }
 
+func (s *Server) rememberClosedBrowserTabs(sessionID string, tabs []browser.TabSnapshot) {
+	for _, tab := range tabs {
+		if strings.TrimSpace(tab.SessionID) == strings.TrimSpace(sessionID) {
+			s.rememberClosedBrowserTab(sessionID, tab.ID)
+		}
+	}
+}
+
+func (s *Server) rememberClosedBrowserTab(sessionID, tabID string) {
+	sessionID = strings.TrimSpace(sessionID)
+	tabID = strings.TrimSpace(tabID)
+	if sessionID == "" || tabID == "" {
+		return
+	}
+	s.browserMu.Lock()
+	defer s.browserMu.Unlock()
+	if s.browserClosedTabs == nil {
+		s.browserClosedTabs = map[string]map[string]struct{}{}
+	}
+	if s.browserClosedTabs[sessionID] == nil {
+		s.browserClosedTabs[sessionID] = map[string]struct{}{}
+	}
+	s.browserClosedTabs[sessionID][tabID] = struct{}{}
+}
+
+func (s *Server) browserTabClosed(sessionID, tabID string) bool {
+	s.browserMu.Lock()
+	defer s.browserMu.Unlock()
+	_, closed := s.browserClosedTabs[strings.TrimSpace(sessionID)][strings.TrimSpace(tabID)]
+	return closed
+}
+
 func (s *Server) ignoreTransientBlankSync(ctx context.Context, sessionID string, tab browser.TabSnapshot) (browser.TabSnapshot, bool, error) {
 	if !browserURLIsBlank(tab.URL) {
 		return browser.TabSnapshot{}, false, nil
 	}
-	state, err := s.store.GetBrowserState(ctx, sessionID)
+	state, err := s.store.GetBrowserTabState(ctx, sessionID, tab.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		return browser.TabSnapshot{}, false, nil
 	}
@@ -502,21 +575,69 @@ func (s *Server) filterBrowserTabs(sessionID string, tabs []browser.TabSnapshot)
 	return out
 }
 
-func (s *Server) restoreStoredLiveBrowserTabGate(ctx context.Context, sessionID string, tabs []browser.TabSnapshot) (bool, error) {
-	state, err := s.store.GetBrowserState(ctx, sessionID)
-	if errors.Is(err, store.ErrNotFound) {
-		return false, nil
+func (s *Server) recoverStoredBrowserTabs(ctx context.Context, sessionID string, tabs []browser.TabSnapshot) ([]browser.TabSnapshot, error) {
+	states, err := s.store.ListBrowserStates(ctx, sessionID)
+	if err != nil {
+		return nil, err
 	}
+	live := make(map[string]struct{}, len(tabs))
+	for _, tab := range tabs {
+		live[strings.TrimSpace(tab.ID)] = struct{}{}
+	}
+	out := append([]browser.TabSnapshot(nil), tabs...)
+	for _, state := range states {
+		tabID := strings.TrimSpace(state.TabID)
+		if tabID == "" {
+			continue
+		}
+		if _, ok := live[tabID]; ok {
+			continue
+		}
+		if !s.browserTabAllowed(sessionID, tabID) {
+			continue
+		}
+		tab, ok, err := s.recoverBrowserState(ctx, sessionID, state)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			continue
+		}
+		if err := s.syncBrowserState(ctx, sessionID, tab); err != nil {
+			return nil, err
+		}
+		live[tab.ID] = struct{}{}
+		out = append(out, tab)
+	}
+	return out, nil
+}
+
+func (s *Server) restoreStoredLiveBrowserTabGate(ctx context.Context, sessionID string, tabs []browser.TabSnapshot) (bool, error) {
+	states, err := s.store.ListBrowserStates(ctx, sessionID)
 	if err != nil {
 		return false, err
 	}
+	stored := make(map[string]struct{}, len(states))
+	for _, state := range states {
+		if s.browserTabClosed(sessionID, state.TabID) {
+			continue
+		}
+		stored[strings.TrimSpace(state.TabID)] = struct{}{}
+	}
+	matched := make([]browser.TabSnapshot, 0, len(states))
 	for _, tab := range tabs {
-		if strings.TrimSpace(tab.SessionID) == strings.TrimSpace(sessionID) && strings.TrimSpace(tab.ID) == strings.TrimSpace(state.TabID) {
-			s.replaceBrowserTabGate(sessionID, []browser.TabSnapshot{tab})
-			return true, nil
+		if strings.TrimSpace(tab.SessionID) != strings.TrimSpace(sessionID) {
+			continue
+		}
+		if _, ok := stored[strings.TrimSpace(tab.ID)]; ok {
+			matched = append(matched, tab)
 		}
 	}
-	return false, nil
+	if len(matched) == 0 {
+		return false, nil
+	}
+	s.replaceBrowserTabGate(sessionID, matched)
+	return true, nil
 }
 
 func (s *Server) backBrowserTab(c *cart.Context) error {
@@ -714,6 +835,7 @@ func (s *Server) releaseBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
+	s.rememberClosedBrowserTab(sessionID, tabID)
 	if err := s.browser.ReleaseTab(c.Request.Context(), sessionID, tabID); err != nil {
 		if !errors.Is(err, browser.ErrTabNotFound) {
 			return s.browserError(c, err)
@@ -724,7 +846,7 @@ func (s *Server) releaseBrowserTab(c *cart.Context) error {
 		return s.browserError(c, err)
 	}
 	s.replaceBrowserTabGate(sessionID, tabs)
-	if err := s.store.ClearBrowserState(c.Request.Context(), sessionID); err != nil {
+	if err := s.store.DeleteBrowserState(c.Request.Context(), sessionID, tabID); err != nil {
 		return s.fail(c, err)
 	}
 	c.String(http.StatusNoContent, "")
@@ -766,7 +888,10 @@ func (s *Server) browserStateSession(c *cart.Context) (string, bool) {
 func (s *Server) syncBrowserState(ctx context.Context, sessionID string, tab browser.TabSnapshot) error {
 	in, ok := browserStateInputFromTab(sessionID, tab)
 	if !ok {
-		return s.store.ClearBrowserState(ctx, sessionID)
+		if strings.TrimSpace(tab.ID) == "" {
+			return nil
+		}
+		return s.store.DeleteBrowserState(ctx, sessionID, tab.ID)
 	}
 	_, err := s.store.PutBrowserState(ctx, in)
 	return err
@@ -783,7 +908,7 @@ func (s *Server) recoverStoredBrowserTab(ctx context.Context, sessionID, tabID s
 	if s.browser == nil {
 		return false, nil
 	}
-	state, err := s.store.GetBrowserState(ctx, sessionID)
+	state, err := s.store.GetBrowserTabState(ctx, sessionID, tabID)
 	if errors.Is(err, store.ErrNotFound) {
 		return false, nil
 	}
@@ -821,6 +946,7 @@ func (s *Server) recoverBrowserState(ctx context.Context, sessionID string, stat
 		Title:      state.Title,
 		FaviconURL: state.FaviconURL,
 		Mode:       recoverMode,
+		CreatedAt:  state.CreatedAt,
 	})
 	if errors.Is(err, browser.ErrTabNotFound) {
 		return browser.TabSnapshot{}, false, nil

@@ -123,6 +123,85 @@ func TestBrowserTabsAreSessionScoped(t *testing.T) {
 	}
 }
 
+func TestBrowserTabsPersistAndReleaseIndependently(t *testing.T) {
+	srv, st, _ := newBrowserTestServer(t)
+	ctx := context.Background()
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_multi", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+
+	created := make([]browser.TabSnapshot, 0, 2)
+	for range 2 {
+		resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_multi/browser/tabs", nil)
+		tab := decodeJSON[browser.TabSnapshot](t, resp)
+		if resp.StatusCode != http.StatusCreated || tab.ID == "" {
+			t.Fatalf("create tab status=%d tab=%+v", resp.StatusCode, tab)
+		}
+		created = append(created, tab)
+	}
+	for index, tab := range created {
+		resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_multi/browser/tabs/"+tab.ID+"/open", map[string]string{
+			"url": "https://example.com/" + strconv.Itoa(index+1),
+		})
+		opened := decodeJSON[browser.TabSnapshot](t, resp)
+		if resp.StatusCode != http.StatusOK || opened.ID != tab.ID {
+			t.Fatalf("open tab status=%d tab=%+v", resp.StatusCode, opened)
+		}
+	}
+
+	states, err := st.ListBrowserStates(ctx, "sess_multi")
+	if err != nil || len(states) != 2 {
+		t.Fatalf("expected two stored tabs: states=%+v err=%v", states, err)
+	}
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_multi/browser/tabs/"+created[0].ID+"/release", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("release tab status=%d", resp.StatusCode)
+	}
+	if _, err := st.GetBrowserTabState(ctx, "sess_multi", created[0].ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("released tab state should be deleted: %v", err)
+	}
+	if state, err := st.GetBrowserTabState(ctx, "sess_multi", created[1].ID); err != nil || state == nil {
+		t.Fatalf("remaining tab state should survive: state=%+v err=%v", state, err)
+	}
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_multi/browser/tabs", nil)
+	listed := decodeJSON[struct {
+		Tabs []browser.TabSnapshot `json:"tabs"`
+	}](t, resp)
+	if resp.StatusCode != http.StatusOK || len(listed.Tabs) != 1 || listed.Tabs[0].ID != created[1].ID {
+		t.Fatalf("unexpected remaining tabs status=%d tabs=%+v", resp.StatusCode, listed.Tabs)
+	}
+}
+
+func TestListBrowserTabsRecoversAllStoredTabs(t *testing.T) {
+	srv, st, browserSvc := newBrowserTestServer(t)
+	browserSvc.supportsMetadataRecovery = true
+	ctx := context.Background()
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_restore_multi", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	for index, tabID := range []string{"tab_restore_a", "tab_restore_b"} {
+		if _, err := st.PutBrowserState(ctx, store.BrowserStateInput{
+			SessionID: "sess_restore_multi",
+			TabID:     tabID,
+			URL:       "https://restore.example/" + strconv.Itoa(index+1),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	resp := req(t, http.MethodGet, srv.URL+"/sessions/sess_restore_multi/browser/tabs", nil)
+	listed := decodeJSON[struct {
+		Tabs []browser.TabSnapshot `json:"tabs"`
+	}](t, resp)
+	if resp.StatusCode != http.StatusOK || len(listed.Tabs) != 2 {
+		t.Fatalf("stored tabs were not recovered status=%d tabs=%+v", resp.StatusCode, listed.Tabs)
+	}
+	if browserSvc.recoverCount != 2 {
+		t.Fatalf("expected two recovered tabs, count=%d", browserSvc.recoverCount)
+	}
+}
+
 func TestBrowserRoutesRequireExistingSession(t *testing.T) {
 	srv, _, _ := newBrowserTestServer(t)
 	resp := req(t, http.MethodPost, srv.URL+"/sessions/missing/browser/tabs", nil)
@@ -604,6 +683,55 @@ func TestCloseBrowserSessionBlocksLiveTabRecovery(t *testing.T) {
 	stateAfterFresh, err := st.GetBrowserState(ctx, "sess_live_close")
 	if err != nil || stateAfterFresh.TabID != fresh.ID || stateAfterFresh.URL != "https://fresh.example/" {
 		t.Fatalf("fresh state not persisted: state=%+v err=%v", stateAfterFresh, err)
+	}
+}
+
+func TestAdoptBrowserTabAllowsNewLiveTabAfterSessionReopen(t *testing.T) {
+	srv, st, browserSvc := newBrowserTestServer(t)
+	browserSvc.keepTabsOnClose = true
+	ctx := context.Background()
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_adopt", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_adopt/browser/open", map[string]string{"url": "https://old.example/"})
+	old := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("open old status=%d tab=%+v", resp.StatusCode, old)
+	}
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_adopt/browser/close", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("close status=%d", resp.StatusCode)
+	}
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_adopt/browser/tabs", nil)
+	fresh := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create fresh status=%d tab=%+v", resp.StatusCode, fresh)
+	}
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_adopt/browser/tabs/"+old.ID+"/adopt", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("closed tab adoption status=%d", resp.StatusCode)
+	}
+	popup := browserSvc.create("sess_adopt", "tab_popup")
+	popup.URL = "https://popup.example/"
+	browserSvc.tabs[popup.ID] = popup
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_adopt/browser/tabs/"+popup.ID+"/adopt", nil)
+	adopted := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusOK || adopted.ID != popup.ID {
+		t.Fatalf("adopt status=%d tab=%+v", resp.StatusCode, adopted)
+	}
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_adopt/browser/tabs", nil)
+	listed := decodeJSON[struct {
+		Tabs []browser.TabSnapshot `json:"tabs"`
+	}](t, resp)
+	if resp.StatusCode != http.StatusOK || len(listed.Tabs) != 2 {
+		t.Fatalf("unexpected adopted tabs status=%d tabs=%+v", resp.StatusCode, listed.Tabs)
+	}
+	for _, tab := range listed.Tabs {
+		if tab.ID == old.ID {
+			t.Fatalf("closed tab was revived: %+v", listed.Tabs)
+		}
 	}
 }
 

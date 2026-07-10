@@ -464,7 +464,7 @@ function GeneralSettings({ token }: { token: string }) {
   const [autoThreshold, setAutoThreshold] = useState("80");
   const [showCompactSummary, setShowCompactSummary] = useState(true);
   const [showReasoning, setShowReasoning] = useState(true);
-  const [showToolDetails, setShowToolDetails] = useState(true);
+  const [showRawToolInfo, setShowRawToolInfo] = useState(true);
   const showPreviewAppVersions = useShowPreviewAppVersions();
 
   const settingsQuery = useQuery({
@@ -495,7 +495,7 @@ function GeneralSettings({ token }: { token: string }) {
     setAutoThreshold(savedSettings[SETTINGS_KEYS.compactAutoThresholdPercent]);
     setShowCompactSummary(savedSettings[SETTINGS_KEYS.showCompactSummary] !== "false");
     setShowReasoning(savedSettings[SETTINGS_KEYS.showReasoning] !== "false");
-    setShowToolDetails(savedSettings[SETTINGS_KEYS.showToolDetails] !== "false");
+    setShowRawToolInfo(savedSettings[SETTINGS_KEYS.showRawToolInfo] !== "false");
   }, [savedSettings, settingsQuery.isSuccess]);
 
   const promptMutation = useMutation({
@@ -641,12 +641,12 @@ function GeneralSettings({ token }: { token: string }) {
             onChange={(next) => saveBooleanSetting(SETTINGS_KEYS.showReasoning, next, setShowReasoning)}
           />
           <SettingsToggleRow
-            checked={showToolDetails}
-            description={t("settings.general.showToolDetailsDesc")}
+            checked={showRawToolInfo}
+            description={t("settings.general.showRawToolInfoDesc")}
             disabled={settingsQuery.isLoading}
-            id="pudding-show-tool-details"
-            label={t("settings.general.showToolDetails")}
-            onChange={(next) => saveBooleanSetting(SETTINGS_KEYS.showToolDetails, next, setShowToolDetails)}
+            id="pudding-show-raw-tool-info"
+            label={t("settings.general.showRawToolInfo")}
+            onChange={(next) => saveBooleanSetting(SETTINGS_KEYS.showRawToolInfo, next, setShowRawToolInfo)}
           />
         </div>
       </section>

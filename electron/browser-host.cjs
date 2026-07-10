@@ -1,4 +1,5 @@
 const { WebContentsView } = require("electron");
+const crypto = require("node:crypto");
 
 const browserPartition = "persist:pudding-default";
 
@@ -31,6 +32,7 @@ class BrowserHost {
     if (!url || slot.webContents.getURL() === url) {
       return snapshot(slot);
     }
+    this.noteAutomationStart(slot, "open");
     markSlotNavigationIntent(slot, url);
     startSlotURL(slot, url);
     return snapshot(slot);
@@ -41,6 +43,7 @@ class BrowserHost {
     if (!slot) {
       throw new Error("browser tab not found");
     }
+    this.noteAutomationStart(slot, "back");
     if (!slot.webContents.isDestroyed() && webContentsCanGoBack(slot.webContents)) {
       slot.webContents.goBack();
     }
@@ -52,6 +55,7 @@ class BrowserHost {
     if (!slot) {
       throw new Error("browser tab not found");
     }
+    this.noteAutomationStart(slot, "forward");
     if (!slot.webContents.isDestroyed() && webContentsCanGoForward(slot.webContents)) {
       slot.webContents.goForward();
     }
@@ -63,6 +67,7 @@ class BrowserHost {
     if (!slot) {
       throw new Error("browser tab not found");
     }
+    this.noteAutomationStart(slot, "reload");
     if (!slot.webContents.isDestroyed()) {
       const reloadURL = normalizeURL(request.url) || normalizeURL(slot.displayURL);
       const actualURL = normalizeURL(slot.webContents.getURL());
@@ -244,11 +249,13 @@ class BrowserHost {
       return snapshot(existing);
     }
     const previousURL = existing && !existing.webContents.isDestroyed() ? existing.displayURL || existing.webContents.getURL() : "";
+    const previousCreatedAt = existing?.createdAt;
     if (existing) {
       this.destroySlot(existing);
     }
     const targetURL = normalizeURL(request.url) || normalizeURL(previousURL) || normalizeURL(webContents.getURL()) || "about:blank";
     const loadError = normalizeLoadError(request.loadError);
+    const now = new Date().toISOString();
     const slot = {
       key,
       sessionID,
@@ -257,6 +264,8 @@ class BrowserHost {
       webContents,
       disposed: false,
       version: 0,
+      createdAt: previousCreatedAt || normalizeTimestamp(request.createdAt) || now,
+      updatedAt: now,
       displayURL: targetURL,
       displayTitle: loadError ? targetURL : "",
       navigationError: loadError,
@@ -300,6 +309,7 @@ class BrowserHost {
         sandbox: true,
       },
     });
+    const now = new Date().toISOString();
     const slot = {
       key,
       sessionID: normalizeSessionID(request.sessionID),
@@ -308,6 +318,8 @@ class BrowserHost {
       webContents: headlessView.webContents,
       disposed: false,
       version: 0,
+      createdAt: normalizeTimestamp(request.createdAt) || now,
+      updatedAt: now,
       displayURL: normalizeURL(request.url) || "about:blank",
       displayTitle: "",
       navigationError: null,
@@ -319,7 +331,15 @@ class BrowserHost {
 
   bindSlotEvents(slot) {
     slot.webContents.setWindowOpenHandler(({ url }) => {
-      void loadSlotURL(slot, normalizeURL(url) || "about:blank").catch(() => undefined);
+      const targetURL = normalizeURL(url) || "about:blank";
+      const next = this.ensureSlot({
+        sessionID: slot.sessionID,
+        tabID: newTabID(),
+        url: targetURL,
+      });
+      markSlotNavigationIntent(next, targetURL);
+      startSlotURL(next, targetURL);
+      this.noteUpdated(next);
       return { action: "deny" };
     });
     slot.webContents.on("did-start-navigation", (_event, url, _isInPlace, isMainFrame) => {
@@ -385,6 +405,7 @@ class BrowserHost {
 
   noteUpdated(slot) {
     slot.version += 1;
+    slot.updatedAt = new Date().toISOString();
     this.onUpdate(snapshot(slot));
   }
 
@@ -420,6 +441,7 @@ class BrowserHost {
       sessionID: previous.sessionID,
       tabID: previous.tabID,
       url,
+      createdAt: previous.createdAt,
     });
     slot.version = previous.version + 1;
     slot.displayURL = url;
@@ -483,6 +505,7 @@ function markSlotNavigationIntent(slot, url) {
   slot.displayTitle = "";
   slot.navigationError = null;
   slot.version += 1;
+  slot.updatedAt = new Date().toISOString();
 }
 
 function isNavigationAbort(error) {
@@ -715,6 +738,15 @@ function slotBelongsToSession(slot, sessionID) {
 
 function normalizeTabID(tabID) {
   return String(tabID || "default").trim() || "default";
+}
+
+function normalizeTimestamp(value) {
+  const timestamp = Date.parse(String(value || ""));
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : "";
+}
+
+function newTabID() {
+  return `tab_${crypto.randomUUID().replaceAll("-", "")}`;
 }
 
 function normalizeClickMethod(method) {
@@ -952,6 +984,8 @@ function snapshot(slot) {
     profileID: "default",
     runtimeID: destroyed ? "" : `webContents:${webContents.id}`,
     version: slot.version,
+    createdAt: slot.createdAt,
+    updatedAt: slot.updatedAt,
   };
 }
 
@@ -967,6 +1001,8 @@ function lostSnapshot(slot) {
     profileID: "default",
     runtimeID: "",
     version: slot.version + 1,
+    createdAt: slot.createdAt,
+    updatedAt: new Date().toISOString(),
   };
 }
 
@@ -982,6 +1018,8 @@ function lostSnapshotFromRequest(request) {
     profileID: "default",
     runtimeID: "",
     version: 0,
+    createdAt: "",
+    updatedAt: new Date().toISOString(),
   };
 }
 

@@ -24,6 +24,7 @@ export const AssistantOutput = memo(function AssistantOutput({
   displaySettings,
   onContentGrow,
   onRevealComplete,
+  sessionID,
   token,
   turnID,
 }: {
@@ -32,11 +33,12 @@ export const AssistantOutput = memo(function AssistantOutput({
   displaySettings?: TranscriptDisplaySettings;
   onContentGrow?: () => void;
   onRevealComplete?: (turnID: string) => void;
+  sessionID: string;
   token: string;
   turnID: string;
 }) {
   if (assistant.kind === "canonical") {
-    return <CanonicalAssistantOutput assistant={assistant} disclosure={disclosure} displaySettings={displaySettings} token={token} turnID={turnID} />;
+    return <CanonicalAssistantOutput assistant={assistant} disclosure={disclosure} displaySettings={displaySettings} sessionID={sessionID} token={token} turnID={turnID} />;
   }
   if (assistant.kind === "live") {
     return (
@@ -44,6 +46,7 @@ export const AssistantOutput = memo(function AssistantOutput({
         assistant={assistant}
         disclosure={disclosure}
         displaySettings={displaySettings}
+        sessionID={sessionID}
         token={token}
         turnID={turnID}
         onContentGrow={onContentGrow}
@@ -58,12 +61,14 @@ function CanonicalAssistantOutput({
   assistant,
   disclosure,
   displaySettings,
+  sessionID,
   token,
   turnID,
 }: {
   assistant: Extract<AssistantOutputVM, { kind: "canonical" }>;
   disclosure?: TurnDisclosureState;
   displaySettings?: TranscriptDisplaySettings;
+  sessionID: string;
   token: string;
   turnID: string;
 }) {
@@ -75,12 +80,12 @@ function CanonicalAssistantOutput({
   }
   const compactMessage = assistant.messages.find(isCompactMessage);
   if (compactMessage) {
-    return <CompactMarker message={compactMessage} showSummary={displaySettings?.showCompactSummary ?? true} summaryText={text} />;
+    return <CompactMarker message={compactMessage} sessionID={sessionID} showSummary={displaySettings?.showCompactSummary ?? true} summaryText={text} />;
   }
   return (
     <div className="group flex min-w-0 flex-col">
       <div className="selectable-text min-w-0 text-sm leading-6">
-        <TurnParts disclosure={disclosure} displaySettings={displaySettings} parts={parts} token={token} turnID={turnID} />
+        <TurnParts disclosure={disclosure} displaySettings={displaySettings} parts={parts} sessionID={sessionID} token={token} turnID={turnID} />
         {assistant.messages.some((message) => message.interrupted) ? <InterruptedBadge /> : null}
       </div>
       <MessageMeta createdAt={lastMessage.createdAt} duration={assistant.duration} model={assistant.model} text={text} />
@@ -88,7 +93,7 @@ function CanonicalAssistantOutput({
   );
 }
 
-function CompactMarker({ message, showSummary, summaryText }: { message: Message; showSummary: boolean; summaryText: string }) {
+function CompactMarker({ message, sessionID, showSummary, summaryText }: { message: Message; sessionID: string; showSummary: boolean; summaryText: string }) {
   const { t } = useI18n();
   const compact = compactMetadata(message);
   const sourceCount = compact?.source_message_ids?.length || 0;
@@ -114,7 +119,7 @@ function CompactMarker({ message, showSummary, summaryText }: { message: Message
         <details className="mt-2 text-xs text-muted-foreground">
           <summary className="cursor-pointer select-none">{t("transcript.compactSummary")}</summary>
           <div className="mt-2 border-t pt-2 text-foreground/80">
-            <TurnParts parts={partsFromMessages([message])} token="" turnID={message.turnID} />
+            <TurnParts parts={partsFromMessages([message])} sessionID={sessionID} token="" turnID={message.turnID} />
           </div>
         </details>
       ) : null}
@@ -167,6 +172,7 @@ function LiveAssistantOutput({
   displaySettings,
   onContentGrow,
   onRevealComplete,
+  sessionID,
   token,
   turnID,
 }: {
@@ -175,6 +181,7 @@ function LiveAssistantOutput({
   displaySettings?: TranscriptDisplaySettings;
   onContentGrow?: () => void;
   onRevealComplete?: (turnID: string) => void;
+  sessionID: string;
   token: string;
   turnID: string;
 }) {
@@ -242,7 +249,7 @@ function LiveAssistantOutput({
   return (
     <div className="selectable-text animate-in min-w-0 text-sm leading-6 duration-150 fade-in slide-in-from-bottom-1">
       <div className="min-w-0">
-        {parts.length > 0 ? <TurnParts disclosure={disclosure} displaySettings={displaySettings} parts={parts} token={token} turnID={turnID} /> : null}
+        {parts.length > 0 ? <TurnParts disclosure={disclosure} displaySettings={displaySettings} parts={parts} sessionID={sessionID} token={token} turnID={turnID} /> : null}
       </div>
       {footerPhase ? <AssistantPhaseItem phase={footerPhase} /> : null}
       {overlay.status === "failed" && overlay.error ? (

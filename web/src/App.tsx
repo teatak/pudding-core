@@ -29,6 +29,7 @@ import { readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
 import { cn } from "@/lib/utils";
 import { useCanvasMCP } from "@/mcp/canvasTools";
 import { setCanvasOpen, useCanvasOpen } from "@/state/canvasStore";
+import { clearFilePreviews } from "@/state/filePreviewStore";
 import { setRailLayoutForcedCollapsed } from "@/state/railStore";
 import { clearPendingPairingCode, pendingPairingCode } from "@/state/token";
 import { setToken, useToken } from "@/state/tokenStore";
@@ -89,6 +90,7 @@ export function App() {
   const [workspaceResizing, setWorkspaceResizing] = useState(false);
   const splitGroupRef = useGroupRef();
   const canvasRatioRef = useRef(canvasRatio);
+  const previewTokenRef = useRef(token);
   const workspaceResizeCleanupRef = useRef<(() => void) | null>(null);
   // 上下分屏(docs/design.md 2.2):pane 三件套整体复用,路由是唯一事实源;
   // split 与主 pane 相同的会话不重复渲染
@@ -105,6 +107,13 @@ export function App() {
   // ChatPane 只负责 pane-local UI/滚动状态。
   useVisibleSessionEvents(activeSessionIDs, token);
   useCanvasMCP(token);
+
+  useEffect(() => {
+    if (previewTokenRef.current && previewTokenRef.current !== token) {
+      clearFilePreviews();
+    }
+    previewTokenRef.current = token;
+  }, [token]);
 
   useLayoutEffect(() => {
     if (!leftWorkspaceNode) {
@@ -330,7 +339,12 @@ export function App() {
             <SheetTitle>{t("canvas.title")}</SheetTitle>
             <SheetDescription>{t("canvas.empty")}</SheetDescription>
           </SheetHeader>
-          <CanvasPane key={selectedSessionID || "canvas"} token={token} sessionID={selectedSessionID} />
+          <CanvasPane
+            key={selectedSessionID || "canvas"}
+            secondarySessionID={showSplit ? splitSessionID : undefined}
+            token={token}
+            sessionID={selectedSessionID}
+          />
         </SheetContent>
       </Sheet>
     </>
@@ -398,7 +412,12 @@ export function App() {
               )}
             />
           </div>
-          <CanvasPane key={selectedSessionID || "canvas"} token={token} sessionID={selectedSessionID} />
+          <CanvasPane
+            key={selectedSessionID || "canvas"}
+            secondarySessionID={showSplit ? splitSessionID : undefined}
+            token={token}
+            sessionID={selectedSessionID}
+          />
         </div>
         {workspaceResizing ? (
           <div

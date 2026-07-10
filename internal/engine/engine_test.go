@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1504,6 +1505,154 @@ func TestProjectAutoApprovalRequiresFileWriteApproval(t *testing.T) {
 	}
 }
 
+func TestPatchProposalApprovalCarriesDiffAndAppliesAfterApproval(t *testing.T) {
+	ctx := context.Background()
+	ms := memstore.New()
+	hub := event.NewHub()
+	dir := t.TempDir()
+	target := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(target, []byte("old text\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	project := &store.Project{
+		ID:           "proj_patch_approval",
+		Name:         "patch approval",
+		RootDirs:     []string{dir},
+		ApprovalMode: store.ApprovalAuto,
+	}
+	if err := ms.CreateProject(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	client := &patchApprovalClient{}
+	eng := New(ms, hub, mapResolver{"patch": client}, ms, WithTools(tool.NewBuiltinRunner()))
+	sid := "sess_patch_approval"
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID: sid, Title: "patch", Provider: "patch", Model: "patch-model",
+		ActiveMode: store.ModeProject, ModeLease: store.ModeLeaseSession, ProjectID: project.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "patch", Protocol: "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID: "patch-model", Capabilities: &store.ModelCaps{Tools: true}, Limits: &store.ModelLimits{MaxToolLoops: 4},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sub, unsub := hub.Subscribe(sid)
+	defer unsub()
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c_patch", Text: "更新 notes"}); err != nil {
+		t.Fatal(err)
+	}
+	var approval event.Event
+	deadline := time.After(2 * time.Second)
+	for approval.Kind != event.ApprovalRequested {
+		select {
+		case ev := <-sub:
+			if ev.Kind == event.ApprovalRequested {
+				approval = ev
+			}
+		case <-deadline:
+			t.Fatal("patch approval request not emitted")
+		}
+	}
+	if approval.ApprovalKind != ApprovalKindToolCall || approval.CallID != "call_patch_apply" {
+		t.Fatalf("unexpected patch approval: %+v", approval)
+	}
+	payload := string(approval.Payload)
+	if !strings.Contains(payload, `"toolName":"builtin_patch_apply"`) || !strings.Contains(payload, `"proposalID":"patch_`) || !strings.Contains(payload, `"diff":"`) || !strings.Contains(payload, `-old text`) || !strings.Contains(payload, `+new text`) {
+		t.Fatalf("patch approval payload is missing review data: %s", payload)
+	}
+	if data, err := os.ReadFile(target); err != nil || string(data) != "old text\n" {
+		t.Fatalf("patch changed file before approval: data=%q err=%v", data, err)
+	}
+	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeTurn, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+	if data, err := os.ReadFile(target); err != nil || string(data) != "new text\n" {
+		t.Fatalf("approved patch was not applied: data=%q err=%v", data, err)
+	}
+}
+
+func TestGitCommitApprovalCarriesStagedDiffAndCommitsAfterApproval(t *testing.T) {
+	ctx := context.Background()
+	ms := memstore.New()
+	hub := event.NewHub()
+	dir := t.TempDir()
+	runEngineGitTest(t, dir, "init")
+	runEngineGitTest(t, dir, "config", "user.name", "Pudding Test")
+	runEngineGitTest(t, dir, "config", "user.email", "pudding@example.test")
+	runEngineGitTest(t, dir, "config", "commit.gpgsign", "false")
+	target := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(target, []byte("old text\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runEngineGitTest(t, dir, "add", "notes.txt")
+	runEngineGitTest(t, dir, "commit", "-m", "initial commit")
+	if err := os.WriteFile(target, []byte("reviewed text\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runEngineGitTest(t, dir, "add", "notes.txt")
+	project := &store.Project{
+		ID: "proj_git_commit", Name: "git commit", RootDirs: []string{dir}, ApprovalMode: store.ApprovalAuto,
+	}
+	if err := ms.CreateProject(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	client := &gitCommitApprovalClient{}
+	eng := New(ms, hub, mapResolver{"git": client}, ms, WithTools(tool.NewBuiltinRunner()))
+	sid := "sess_git_commit"
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID: sid, Title: "git", Provider: "git", Model: "git-model",
+		ActiveMode: store.ModeProject, ModeLease: store.ModeLeaseSession, ProjectID: project.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "git", Protocol: "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID: "git-model", Capabilities: &store.ModelCaps{Tools: true}, Limits: &store.ModelLimits{MaxToolLoops: 3},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sub, unsub := hub.Subscribe(sid)
+	defer unsub()
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c_git", Text: "提交已暂存修改"}); err != nil {
+		t.Fatal(err)
+	}
+	var approval event.Event
+	deadline := time.After(2 * time.Second)
+	for approval.Kind != event.ApprovalRequested {
+		select {
+		case ev := <-sub:
+			if ev.Kind == event.ApprovalRequested {
+				approval = ev
+			}
+		case <-deadline:
+			t.Fatal("Git commit approval request not emitted")
+		}
+	}
+	payload := string(approval.Payload)
+	if approval.CallID != "call_git_commit" || !strings.Contains(payload, `"operation":"git_commit"`) || !strings.Contains(payload, `"commitMessage":"reviewed commit"`) || !strings.Contains(payload, `"diff":"`) || !strings.Contains(payload, `+reviewed text`) {
+		t.Fatalf("Git commit approval payload is missing staged review data: %s", payload)
+	}
+	if subject := runEngineGitOutput(t, dir, "log", "-1", "--format=%s"); subject != "initial commit" {
+		t.Fatalf("commit executed before approval: %q", subject)
+	}
+	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeTurn, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+	if subject := runEngineGitOutput(t, dir, "log", "-1", "--format=%s"); subject != "reviewed commit" {
+		t.Fatalf("approved commit was not created: %q", subject)
+	}
+}
+
 func TestProjectApprovalModesClassifyCommands(t *testing.T) {
 	ctx := context.Background()
 	ms := memstore.New()
@@ -1521,9 +1670,13 @@ func TestProjectApprovalModesClassifyCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms)
+	readRisk := tool.ToolRisk{Class: tool.RiskClassRead, LowRisk: true}
 	lowRisk := tool.ToolRisk{Class: tool.RiskClassCommand, LowRisk: true}
 	highRisk := tool.ToolRisk{Class: tool.RiskClassCommand}
 
+	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, readRisk); err != nil || required {
+		t.Fatalf("auto should allow read tools: required=%v err=%v", required, err)
+	}
 	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, lowRisk); err != nil || required {
 		t.Fatalf("auto should allow low-risk command: required=%v err=%v", required, err)
 	}
@@ -1536,6 +1689,9 @@ func TestProjectApprovalModesClassifyCommands(t *testing.T) {
 	}
 	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, lowRisk); err != nil || !required {
 		t.Fatalf("ask should require command approval: required=%v err=%v", required, err)
+	}
+	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, readRisk); err != nil || !required {
+		t.Fatalf("ask should require read approval: required=%v err=%v", required, err)
 	}
 	full := store.ApprovalFull
 	if _, err := ms.UpdateProject(ctx, project.ID, store.ProjectUpdate{ApprovalMode: &full}); err != nil {
@@ -2493,6 +2649,101 @@ func (c *skillDraftSubmitClient) Stream(_ context.Context, req provider.Request)
 
 type fileWriteApprovalClient struct {
 	requests []provider.Request
+}
+
+type patchApprovalClient struct {
+	requests []provider.Request
+}
+
+type gitCommitApprovalClient struct {
+	requests []provider.Request
+}
+
+func (c *gitCommitApprovalClient) Name() string { return "git-commit-approval" }
+
+func (c *gitCommitApprovalClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	c.requests = append(c.requests, req)
+	out := make(chan provider.Chunk, 4)
+	if len(c.requests) == 1 {
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
+			Index: 0, CallID: "call_git_commit", Name: tool.GitCommit,
+			ArgsDelta: `{"scope":"project","message":"reviewed commit"}`,
+		}}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	} else {
+		out <- provider.Chunk{Part: provider.PartText, Delta: "提交完成"}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
+	}
+	close(out)
+	return out, nil
+}
+
+func runEngineGitTest(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
+	}
+}
+
+func runEngineGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func (c *patchApprovalClient) Name() string { return "patch-approval" }
+
+func (c *patchApprovalClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	c.requests = append(c.requests, req)
+	out := make(chan provider.Chunk, 4)
+	switch len(c.requests) {
+	case 1:
+		args, _ := json.Marshal(map[string]any{
+			"scope": "project",
+			"files": []map[string]any{{"path": "notes.txt", "new_text": "new text\n"}},
+		})
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{Index: 0, CallID: "call_patch_propose", Name: tool.PatchPropose, ArgsDelta: string(args)}}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	case 2:
+		proposalID := patchProposalIDFromRequest(req)
+		if proposalID == "" {
+			close(out)
+			return out, nil
+		}
+		args, _ := json.Marshal(map[string]any{"proposal_id": proposalID})
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{Index: 0, CallID: "call_patch_apply", Name: tool.PatchApply, ArgsDelta: string(args)}}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	default:
+		out <- provider.Chunk{Part: provider.PartText, Delta: "补丁已应用"}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
+	}
+	close(out)
+	return out, nil
+}
+
+func patchProposalIDFromRequest(req provider.Request) string {
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		for j := len(req.Messages[i].Parts) - 1; j >= 0; j-- {
+			part := req.Messages[i].Parts[j]
+			if part.Type != provider.PartToolResult || part.Name != tool.PatchPropose {
+				continue
+			}
+			var payload struct {
+				ProposalID string `json:"proposalID"`
+			}
+			if json.Unmarshal([]byte(part.Content), &payload) == nil {
+				return payload.ProposalID
+			}
+		}
+	}
+	return ""
 }
 
 func (c *fileWriteApprovalClient) Name() string { return "file-write-approval" }

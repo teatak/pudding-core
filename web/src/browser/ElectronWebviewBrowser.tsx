@@ -174,7 +174,9 @@ export function ElectronWebviewBrowser({
         return;
       }
       failedNavigationSeqRef.current = navigationSeqRef.current;
-      const failedURL = normalizeWebviewURL(loadEvent.validatedURL || pendingProgrammaticURLRef.current || pendingTargetURLRef.current || node.getURL?.() || "");
+      const failedURL = normalizeWebviewURL(
+        loadEvent.validatedURL || pendingProgrammaticURLRef.current || pendingTargetURLRef.current || webviewCurrentURL(node),
+      );
       const error = {
         code: webviewErrorCode(loadEvent),
         description: loadEvent.errorDescription || "",
@@ -183,7 +185,7 @@ export function ElectronWebviewBrowser({
       setNavigationLoading(false);
       updateLoadError(error);
       const bridge = electronBrowserBridge();
-      const webContentsID = node.getWebContentsId?.();
+      const webContentsID = webviewContentsID(node);
       if (bridge && ownerSessionID && webContentsID && !browserURLIsBlank(failedURL)) {
         void bridge
           .registerWebview({
@@ -224,7 +226,7 @@ export function ElectronWebviewBrowser({
     }
     if (
       !browserURLIsBlank(targetURL) &&
-      !sameWebviewURL(node.getURL?.() || "", targetURL) &&
+      !sameWebviewURL(webviewCurrentURL(node), targetURL) &&
       !sameWebviewURL(lastRequestedURLRef.current, targetURL)
     ) {
       setNavigationLoading(true);
@@ -239,6 +241,9 @@ export function ElectronWebviewBrowser({
     }
     return bridge.onAutomationStart((event) => {
       if (event.sessionID !== ownerSessionID || event.tabID !== tabID) {
+        return;
+      }
+      if (event.action !== "click" && event.action !== "type" && event.action !== "scroll") {
         return;
       }
       composerFocusSnapshotRef.current = captureComposerFocusSnapshot();
@@ -295,7 +300,7 @@ export function ElectronWebviewBrowser({
     const node = webviewRef.current;
     const retryURL = loadError?.url || pendingTargetURLRef.current || targetURL || "about:blank";
     const bridge = electronBrowserBridge();
-    const webContentsID = node?.getWebContentsId?.();
+    const webContentsID = webviewContentsID(node);
     if (bridge && ownerSessionID && webContentsID) {
       void bridge
         .reload({ sessionID: ownerSessionID, tabID, url: retryURL })
@@ -323,14 +328,17 @@ export function ElectronWebviewBrowser({
       if (disposed) {
         return;
       }
-      const webContentsID = node.getWebContentsId?.();
+      if (!webviewReadyRef.current || !node.isConnected) {
+        return;
+      }
+      const webContentsID = webviewContentsID(node);
       if (!webContentsID) {
         return;
       }
       if (loadErrorRef.current) {
         return;
       }
-      const currentURL = normalizeWebviewURL(node.getURL?.() || "");
+      const currentURL = normalizeWebviewURL(webviewCurrentURL(node));
       const pendingProgrammaticURL = pendingProgrammaticURLRef.current;
       if (pendingProgrammaticURL && !sameWebviewURL(currentURL, pendingProgrammaticURL)) {
         return;
@@ -535,7 +543,7 @@ function loadWebviewURL(
   pendingProgrammaticURLRef: { current: string },
   options: { force?: boolean } = {},
 ) {
-  const currentURL = normalizeWebviewURL(node.getURL?.() || "");
+  const currentURL = normalizeWebviewURL(webviewCurrentURL(node));
   if (!options.force && (sameWebviewURL(currentURL, targetURL) || sameWebviewURL(lastRequestedURLRef.current, targetURL))) {
     return;
   }
@@ -548,13 +556,21 @@ function loadWebviewURL(
   }
   try {
     void load(targetURL).catch((error) => {
+      if (isWebviewNotReadyError(error)) {
+        node.setAttribute("src", targetURL);
+        return;
+      }
       if (isWebviewNavigationAbortError(error)) {
         return;
       }
       console.warn("[browser] webview navigation failed", error);
     });
   } catch (error) {
-    if (isWebviewNavigationAbortError(error) || isWebviewNotReadyError(error)) {
+    if (isWebviewNotReadyError(error)) {
+      node.setAttribute("src", targetURL);
+      return;
+    }
+    if (isWebviewNavigationAbortError(error)) {
       lastRequestedURLRef.current = "";
       pendingProgrammaticURLRef.current = "";
       return;
@@ -562,6 +578,34 @@ function loadWebviewURL(
     lastRequestedURLRef.current = "";
     pendingProgrammaticURLRef.current = "";
     console.warn("[browser] webview navigation failed", error);
+  }
+}
+
+function webviewCurrentURL(node: WebviewElement | null | undefined) {
+  if (!node) {
+    return "";
+  }
+  try {
+    return node.getURL?.() || "";
+  } catch (error) {
+    if (!isWebviewNotReadyError(error)) {
+      console.warn("[browser] webview URL read failed", error);
+    }
+    return "";
+  }
+}
+
+function webviewContentsID(node: WebviewElement | null | undefined) {
+  if (!node || !node.isConnected) {
+    return undefined;
+  }
+  try {
+    return node.getWebContentsId?.();
+  } catch (error) {
+    if (!isWebviewNotReadyError(error)) {
+      console.warn("[browser] webview contents id read failed", error);
+    }
+    return undefined;
   }
 }
 

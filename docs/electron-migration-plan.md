@@ -31,7 +31,7 @@ Go daemon -> 继续负责 sessions / messages / tools / storage
 - 去掉 screencast 主链路。
 - 浏览器画面使用 Electron 原生 Chromium 渲染。
 - 所有 session 共用一个持久 profile,登录态全局复用。
-- 每个 session 拥有自己的 browser slot/tab,切 session 不串页。
+- 每个 session 拥有自己的 browser tabs,每个 tab 仍以 `sessionID + tabID` 显式路由,切 session 不串页。
 - tab 切换、小组件切换、canvas/browser 切换不销毁 `webContents`。
 - internal 由 renderer `<webview>` 承载;外部打开先禁用,后续重新设计。
 - LLM 继续能通过 CDP 控制页面。
@@ -332,8 +332,8 @@ Legacy 清理范围:
 BrowserHost 生命周期收口审查(2026-07-09):
 
 - LLM 工具不依赖画布是否打开:画布未挂载时由 `electron/browser-host.cjs` 的 invisible `WebContentsView` 承载真实 `webContents`;画布挂载后 renderer `<webview>` 注册到同一 `sessionID/tabID` slot。
-- 画布浏览器 tab 是 session browser slot 的 UI 入口,不是 canvas item;点击 tab 只切换到 browser surface,只有当前 session 没有 tab/state 时才创建新 tab。
-- 关闭 tab 等价于关闭当前 session browser slot:`closeSession`/`closeTab` 会销毁 slot webContents 并发出 lost snapshot;前端 close gate 会丢弃并发旧 snapshot,避免关闭后复活。
+- 画布浏览器标签栏是 session browser tabs 的 UI 入口,不是 canvas item;本地 `selectedBrowserTabID` 只决定前端展示,不写入后端成为 focus/runtime 状态。
+- `closeTab` 只销毁显式 `sessionID + tabID` 对应的 webContents 与持久化记录;`closeSession` 才关闭该 session 的全部 tabs。关闭后发出 lost snapshot,前端会丢弃并发旧 snapshot,避免标签复活。
 - 普通 canvas item tab 与 browser surface 共用同一画布区域,但不拥有浏览器生命周期;切普通小组件只隐藏 browser surface,不以 canvas item 方式恢复或重建浏览器。
 - `requestBrowserReveal` 是“LLM 工具事件触发当前 session 显示浏览器 surface”的前端 UI 事件,不是旧 external reveal/internal 切换。
 

@@ -28,7 +28,7 @@ const (
 	SettingCompactAutoThresholdPercent = "compact_auto_threshold_percent"
 	SettingShowCompactSummary          = "show_compact_summary"
 	SettingShowReasoning               = "show_reasoning"
-	SettingShowToolDetails             = "show_tool_details"
+	SettingShowRawToolInfo             = "show_raw_tool_info"
 )
 
 const (
@@ -231,7 +231,7 @@ type compactSettingsYAML struct {
 type displaySettingsYAML struct {
 	CompactSummary *bool `yaml:"compact_summary,omitempty"`
 	Reasoning      *bool `yaml:"reasoning,omitempty"`
-	ToolDetails    *bool `yaml:"tool_details,omitempty"`
+	RawToolInfo    *bool `yaml:"raw_tool_info,omitempty"`
 }
 
 func (s settingsYAML) asMap() map[string]string {
@@ -240,7 +240,7 @@ func (s settingsYAML) asMap() map[string]string {
 		SettingCompactAutoThresholdPercent: strconv.Itoa(s.compactAutoThresholdPercent()),
 		SettingShowCompactSummary:          formatBoolSetting(s.showCompactSummary()),
 		SettingShowReasoning:               formatBoolSetting(s.showReasoning()),
-		SettingShowToolDetails:             formatBoolSetting(s.showToolDetails()),
+		SettingShowRawToolInfo:             formatBoolSetting(s.showRawToolInfo()),
 	}
 }
 
@@ -270,12 +270,12 @@ func (s *settingsYAML) set(key, raw string) error {
 			return err
 		}
 		s.Display.Reasoning = &v
-	case SettingShowToolDetails:
+	case SettingShowRawToolInfo:
 		v, err := parseBoolSetting(raw)
 		if err != nil {
 			return err
 		}
-		s.Display.ToolDetails = &v
+		s.Display.RawToolInfo = &v
 	default:
 		return fmt.Errorf("%w %q", ErrInvalidSetting, key)
 	}
@@ -310,9 +310,9 @@ func (s settingsYAML) showReasoning() bool {
 	return true
 }
 
-func (s settingsYAML) showToolDetails() bool {
-	if s.Display.ToolDetails != nil {
-		return *s.Display.ToolDetails
+func (s settingsYAML) showRawToolInfo() bool {
+	if s.Display.RawToolInfo != nil {
+		return *s.Display.RawToolInfo
 	}
 	return true
 }

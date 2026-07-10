@@ -204,7 +204,8 @@ func commandTimeout(timeoutMS int) (time.Duration, error) {
 }
 
 func commandResult(out Result, args commandRunArgs, cwd string, exitCode int, stdout, stderr *truncatingBuffer, timedOut, cancelled bool, duration time.Duration, reason string, runErr error) Result {
-	ok := reason == "" && exitCode == 0
+	// A non-zero process exit is a completed command, not a tool transport failure.
+	ok := reason == "" || reason == "non_zero_exit"
 	payload := map[string]any{
 		"ok":              ok,
 		"argv":            args.Argv,
@@ -221,7 +222,7 @@ func commandResult(out Result, args commandRunArgs, cwd string, exitCode int, st
 	if reason != "" {
 		payload["reason"] = reason
 	}
-	if runErr != nil {
+	if runErr != nil && reason != "non_zero_exit" {
 		payload["error"] = runErr.Error()
 	}
 	out = toolJSON(out, ok, payload)

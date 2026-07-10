@@ -48,8 +48,10 @@ type Server struct {
 	// browserAllowedTabs is absent until a session's browser surface is explicitly closed or rebound.
 	// Once present, only listed tabs are visible; an empty set means the session has no browser tab.
 	browserAllowedTabs map[string]map[string]struct{}
-	oauthMu            sync.Mutex
-	oauth              map[string]oauthStartState
+	// browserClosedTabs prevents delayed live snapshots from re-adopting explicitly closed tab IDs.
+	browserClosedTabs map[string]map[string]struct{}
+	oauthMu           sync.Mutex
+	oauth             map[string]oauthStartState
 }
 
 type voiceController interface {
@@ -184,6 +186,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/browser/tabs").GET(s.listBrowserTabs).POST(s.createBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID").GET(s.getBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/recover").POST(s.recoverBrowserTab)
+	app.Route("/sessions/:id/browser/tabs/:tabID/adopt").POST(s.adoptBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/sync").POST(s.syncBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/open").POST(s.openBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/back").POST(s.backBrowserTab)

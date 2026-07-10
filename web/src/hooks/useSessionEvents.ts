@@ -163,6 +163,12 @@ function syncBrowserStateFromEvent(
 
 function syncBrowserToolResult(queryClient: QueryClient, event: Extract<SessionEvent, { kind: "turn.tool" }>) {
   if (event.name === "builtin_browser_close" && event.phase === "ok") {
+    const remaining = browserTabsFromToolContent(event.content, event.sessionID);
+    if (remaining.length > 0) {
+      remaining.forEach((tab) => allowElectronBrowserTab(event.sessionID, tab.id));
+      queryClient.setQueryData(queryKeys.browserTabs(event.sessionID), { tabs: remaining, processMode: remaining[0]?.mode || "headless" });
+      return true;
+    }
     markElectronBrowserSessionClosed(event.sessionID);
     queryClient.setQueryData(queryKeys.browserTabs(event.sessionID), { tabs: [], processMode: "headless" });
     queryClient.setQueryData(queryKeys.browserState(event.sessionID), { hasState: false, sessionID: event.sessionID, processMode: "headless" });
@@ -191,6 +197,23 @@ function syncBrowserToolResult(queryClient: QueryClient, event: Extract<SessionE
     updatedAt: tab.updatedAt,
   });
   return true;
+}
+
+function browserTabsFromToolContent(content: string | undefined, expectedSessionID: string): BrowserTab[] {
+  if (!content) {
+    return [];
+  }
+  try {
+    const payload = JSON.parse(content) as { tabs?: unknown };
+    if (!Array.isArray(payload.tabs)) {
+      return [];
+    }
+    return payload.tabs
+      .map((item) => normalizeBrowserTab(item, expectedSessionID))
+      .filter((tab): tab is BrowserTab => Boolean(tab));
+  } catch {
+    return [];
+  }
 }
 
 function browserTabFromToolContent(content: string | undefined, expectedSessionID: string): BrowserTab | null {
@@ -280,13 +303,13 @@ async function hydrateBrowserState(queryClient: QueryClient, token: string, sess
         staleTime: 0,
       }),
     ]);
-    const liveTab = tabs.tabs.find((tab) => tab.sessionID === sessionID);
-    if (liveTab?.id) {
-      allowElectronBrowserTab(sessionID, liveTab.id);
+    const liveTabs = tabs.tabs.filter((tab) => tab.sessionID === sessionID);
+    if (liveTabs.length > 0) {
+      liveTabs.forEach((tab) => allowElectronBrowserTab(sessionID, tab.id));
     } else if (state.hasState && state.tabID) {
       allowElectronBrowserTab(sessionID, state.tabID);
     }
-    return Boolean(state.hasState || liveTab);
+    return Boolean(state.hasState || liveTabs.length > 0);
   } catch (error) {
     console.warn("failed to hydrate browser state from tool event", error);
     return false;

@@ -3,11 +3,13 @@ import {
   Blocks,
   CalendarDays,
   ChartPie,
+  FileCode2,
   FileText,
   Image,
   Loader2,
   Maximize2,
   Minimize2,
+  Plus,
   Sheet,
   Trash2,
   Undo2,
@@ -31,7 +33,7 @@ import {
   type CanvasItemPayload,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
-import { BrowserCanvasTabButton } from "@/browser/BrowserCanvasTabButton";
+import { BrowserCanvasTabs } from "@/browser/BrowserCanvasTabButton";
 import { BrowserToolbar } from "@/browser/BrowserToolbar";
 import { ElectronWebviewBrowser } from "@/browser/ElectronWebviewBrowser";
 import {
@@ -42,6 +44,7 @@ import {
   tableExportData,
   type GalleryLayout,
 } from "@/components/canvas/CanvasItemContent";
+import { FilePreviewSurface, filePreviewTitle } from "@/components/canvas/FilePreviewSurface";
 import { asRecord, numberValue, stringValue, titleFromPayload } from "@/components/canvas/canvasPayload";
 import { useCanvasBrowserSurface } from "@/components/canvas/useCanvasBrowserSurface";
 import { Button } from "@/components/ui/button";
@@ -53,13 +56,21 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { CanvasItem, ClosedCanvasItem } from "@/contracts/api";
+import { useHorizontalScrollMask } from "@/hooks/useHorizontalScrollMask";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { setCanvasOpen } from "@/state/canvasStore";
+import {
+  closeFilePreview,
+  consumeFilePreviewReveal,
+  useFilePreview,
+  useFilePreviewReveal,
+} from "@/state/filePreviewStore";
 
 type CanvasPaneProps = {
   token: string;
   sessionID?: string;
+  secondarySessionID?: string;
 };
 
 type WindowState = {
@@ -84,6 +95,7 @@ const CASCADE = 28;
 const FULLSCREEN_SNAP = 12;
 const KIND_ICON: Record<string, LucideIcon> = {
   chart: ChartPie,
+  code: FileCode2,
   form: FileText,
   gallery: Image,
   grid: Blocks,
@@ -97,6 +109,7 @@ const KIND_ICON: Record<string, LucideIcon> = {
 };
 const KIND_TILE_CLASS: Record<string, string> = {
   chart: "bg-amber-600",
+  code: "bg-blue-600",
   form: "bg-violet-600",
   gallery: "bg-pink-600",
   grid: "bg-indigo-600",
@@ -137,7 +150,7 @@ function CanvasItemIcon({ item, size = "sm" }: { item: CanvasItem; size?: "xs" |
   return <CanvasKindIcon kind={item.kind} size={size} />;
 }
 
-export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
+export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneProps) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -155,6 +168,17 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   const [galleryActiveIndices, setGalleryActiveIndices] = useState<Record<string, number>>({});
   const [restoreWindows, setRestoreWindows] = useState<Record<string, WindowState>>({});
   const [canvasLibraryOpen, setCanvasLibraryOpen] = useState(false);
+  const filePreviewTabsScrollMask = useHorizontalScrollMask<HTMLDivElement>();
+  const itemTabsScrollMask = useHorizontalScrollMask<HTMLDivElement>();
+  const primaryFilePreview = useFilePreview(sessionID);
+  const secondaryFilePreview = useFilePreview(secondarySessionID);
+  const filePreviewReveal = useFilePreviewReveal(sessionID, secondarySessionID);
+  const [activeFilePreviewSessionID, setActiveFilePreviewSessionID] = useState<string | undefined>(
+    () => primaryFilePreview?.sessionID || secondaryFilePreview?.sessionID,
+  );
+  const filePreviews = [primaryFilePreview, secondaryFilePreview].filter(
+    (preview, index, all) => preview && all.findIndex((item) => item?.sessionID === preview.sessionID) === index,
+  );
   useEffect(() => {
     if (sessionID) {
       actorSessionIDRef.current = sessionID;
@@ -188,25 +212,64 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   const items = itemsQuery.data?.items ?? [];
   const closedItems = closedItemsQuery.data?.items ?? [];
   const {
-    activeBrowserTab,
-    activateBrowserSurface,
+    activeBrowserTabID,
     browserActive,
-    browserButtonPending,
-    browserClosePending,
+    browserTabs,
     browserSurfacePending,
     browserSurfaceVisible,
-    browserTabFaviconURLText,
-    browserTabTitleText,
-    closeBrowserSurface,
-    hasBrowserState,
+    closeBrowserTab,
+    closingBrowserTabID,
+    createNewBrowserTab,
+    creatingBrowserTab,
     hasOpenBrowserWindow,
     selectCanvasSurface,
+    selectBrowserTab,
   } = useCanvasBrowserSurface({
     enabled,
+    hasTransientSurface: filePreviews.length > 0,
     itemsLength: items.length,
     sessionID: actorSessionID,
     token,
   });
+  const activeFilePreview = filePreviews.find((preview) => preview?.sessionID === activeFilePreviewSessionID);
+  const filePreviewActive = Boolean(activeFilePreview && !browserActive);
+
+  useEffect(() => {
+    if (!filePreviewReveal) {
+      return;
+    }
+    selectCanvasSurface();
+    setActiveFilePreviewSessionID(filePreviewReveal.sessionID);
+    consumeFilePreviewReveal(filePreviewReveal.serial);
+  }, [filePreviewReveal, selectCanvasSurface]);
+
+  useEffect(() => {
+    if (activeFilePreviewSessionID && !filePreviews.some((preview) => preview?.sessionID === activeFilePreviewSessionID)) {
+      setActiveFilePreviewSessionID(undefined);
+    }
+  }, [activeFilePreviewSessionID, filePreviews]);
+
+  const selectPersistentCanvasSurface = () => {
+    setActiveFilePreviewSessionID(undefined);
+    selectCanvasSurface();
+  };
+
+  const selectFilePreview = (previewSessionID: string) => {
+    selectCanvasSurface();
+    setActiveFilePreviewSessionID(previewSessionID);
+  };
+
+  const removeFilePreview = (previewSessionID: string) => {
+    closeFilePreview(previewSessionID);
+    if (activeFilePreviewSessionID !== previewSessionID) {
+      return;
+    }
+    const next = filePreviews.find((preview) => preview?.sessionID !== previewSessionID);
+    setActiveFilePreviewSessionID(next?.sessionID);
+    if (!next && items.length === 0 && !hasOpenBrowserWindow) {
+      setCanvasOpen(false);
+    }
+  };
 
   const windows = useMemo(() => {
     const out: Record<string, WindowState> = {};
@@ -306,7 +369,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
       }
       const remainingWindowCount = items.filter((entry) => entry.id !== item.id).length;
-      if (remainingWindowCount === 0 && !hasOpenBrowserWindow) {
+      if (remainingWindowCount === 0 && !hasOpenBrowserWindow && filePreviews.length === 0) {
         setCanvasOpen(false);
       }
     },
@@ -324,7 +387,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
         ? { ...restoreWindowsRef.current, [entry.sourceItemID]: openingWindow.restore }
         : withoutKey(restoreWindowsRef.current, entry.sourceItemID);
       setRestoreWindows(restoreWindowsRef.current);
-      selectCanvasSurface();
+      selectPersistentCanvasSurface();
       setDraftWindows((prev) => {
         const next = { ...prev, [entry.sourceItemID]: openingWindow.window };
         draftWindowsRef.current = next;
@@ -345,7 +408,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       void deleteClosedCanvasItem(token, actorSessionID, entry.id).then(() =>
         queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) }),
       );
-      selectCanvasSurface();
+      selectPersistentCanvasSurface();
       focusWindow(entry.sourceItemID);
       return;
     }
@@ -394,7 +457,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
     seenCanvasItemIDsRef.current = new Set(items.map((item) => item.id));
     hasSeenCanvasItemsRef.current = true;
     if (newItemIDs.size > 0) {
-      selectCanvasSurface();
+      selectPersistentCanvasSurface();
     }
 
     const prevDraftWindows = draftWindowsRef.current;
@@ -584,25 +647,83 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
   return (
     <aside className="relative flex h-full shrink-0 flex-col bg-[var(--canvas-background)] text-sidebar-foreground">
       <div className="relative z-30 flex h-(--toolbar-h) shrink-0 items-center gap-2 overflow-hidden pr-(--canvas-toolbar-pr) pl-(--canvas-toolbar-pl)">
-        {actorSessionID ? (
-          <BrowserCanvasTabButton
+        {actorSessionID && browserTabs.length > 0 ? (
+          <BrowserCanvasTabs
             active={browserActive}
-            closePending={browserClosePending}
-            closable={hasBrowserState}
-            faviconURL={browserTabFaviconURLText}
-            hasTitle={hasBrowserState}
-            pending={browserButtonPending}
-            title={browserTabTitleText}
-            onClick={activateBrowserSurface}
-            onClose={closeBrowserSurface}
+            activeTabID={activeBrowserTabID}
+            closingTabID={closingBrowserTabID}
+            tabs={browserTabs}
+            onClose={closeBrowserTab}
+            onSelect={selectBrowserTab}
           />
         ) : null}
+        {actorSessionID ? (
+          <Button
+            aria-label={t("canvas.add")}
+            className="no-drag-region h-(--canvas-toolbar-tab-h) w-(--canvas-toolbar-tab-h) shrink-0 rounded-md text-muted-foreground"
+            disabled={creatingBrowserTab}
+            size="icon-sm"
+            title={t("canvas.add")}
+            type="button"
+            variant="ghost"
+            onClick={createNewBrowserTab}
+          >
+            {creatingBrowserTab ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+          </Button>
+        ) : null}
+        {filePreviews.length > 0 ? (
+          <div
+            ref={filePreviewTabsScrollMask.ref}
+            className="no-drag-region w-fit max-w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-lg bg-muted p-(--canvas-toolbar-tab-padding) text-muted-foreground [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden"
+            style={filePreviewTabsScrollMask.style}
+          >
+            <div className="inline-flex min-w-max items-center gap-1">
+              {filePreviews.map((preview) => {
+                if (!preview) {
+                  return null;
+                }
+                const active = !browserActive && activeFilePreviewSessionID === preview.sessionID;
+                const title = filePreviewTitle(preview.path);
+                return (
+                  <button
+                    key={preview.sessionID}
+                    aria-selected={active}
+                    className="group inline-flex h-(--canvas-toolbar-tab-h) min-w-24 max-w-[44vw] shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium whitespace-nowrap transition-colors data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm hover:bg-background hover:text-foreground sm:max-w-40"
+                    data-active={active}
+                    title={preview.path}
+                    type="button"
+                    onClick={() => selectFilePreview(preview.sessionID)}
+                  >
+                    <CanvasKindIcon kind="code" size="xs" />
+                    <span className="min-w-0 flex-1 truncate text-left">{title}</span>
+                    <span
+                      aria-label={t("canvas.filePreviewClose")}
+                      className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded opacity-70 hover:bg-muted-foreground/20 hover:opacity-100"
+                      role="button"
+                      tabIndex={-1}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        removeFilePreview(preview.sessionID);
+                      }}
+                    >
+                      <X className="h-3 w-3" />
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
         {items.length > 0 ? (
-          <div className="no-drag-region w-fit max-w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-lg bg-muted p-(--canvas-toolbar-tab-padding) text-muted-foreground [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
+          <div
+            ref={itemTabsScrollMask.ref}
+            className="no-drag-region w-fit max-w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-lg bg-muted p-(--canvas-toolbar-tab-padding) text-muted-foreground [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden"
+            style={itemTabsScrollMask.style}
+          >
             <div className="inline-flex min-w-max items-center gap-1">
               {items.map((item) => {
                 const win = windows[item.id];
-                const active = !browserActive && win ? win.z === maxZ : false;
+                const active = !browserActive && !filePreviewActive && win ? win.z === maxZ : false;
                 const title = titleForItem(item, t);
                 return (
                   <button
@@ -613,7 +734,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
                     title={title}
                     type="button"
                     onClick={() => {
-                      selectCanvasSurface();
+                      selectPersistentCanvasSurface();
                       focusWindow(item.id);
                     }}
                   >
@@ -651,7 +772,7 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
       </div>
       <div className="relative z-0 min-h-0 flex-1 overflow-hidden px-3 pb-3">
         <div ref={containerRef} className="relative isolate z-0 h-full overflow-hidden">
-          {browserActive ? null : (!enabled && items.length === 0) || (itemsQuery.isLoading && items.length === 0) ? (
+          {browserActive || filePreviewActive ? null : (!enabled && items.length === 0) || (itemsQuery.isLoading && items.length === 0) ? (
             <CanvasEmpty />
           ) : items.length === 0 ? (
             <CanvasEmpty />
@@ -682,13 +803,15 @@ export function CanvasPane({ token, sessionID }: CanvasPaneProps) {
             ))
           )}
         </div>
+        {activeFilePreview ? <FilePreviewSurface active={filePreviewActive} preview={activeFilePreview} /> : null}
         {actorSessionID && browserSurfaceVisible ? (
           <BrowserSurface
             key={`browser:${actorSessionID}`}
             active={browserActive}
+            activeTabID={activeBrowserTabID}
             pending={browserSurfacePending}
             sessionID={actorSessionID}
-            tab={activeBrowserTab}
+            tabs={browserTabs}
             token={token}
           />
         ) : null}
@@ -717,18 +840,21 @@ function CanvasBrowserLoading() {
 
 function BrowserSurface({
   active,
+  activeTabID,
   pending,
   sessionID,
-  tab,
+  tabs,
   token,
 }: {
   active: boolean;
+  activeTabID?: string;
   pending: boolean;
   sessionID: string;
-  tab?: BrowserTab;
+  tabs: BrowserTab[];
   token: string;
 }) {
-  const browserKey = `${sessionID}:${tab?.id || "empty"}`;
+  const activeTab = tabs.find((tab) => tab.id === activeTabID) || tabs[0];
+  const browserKey = `${sessionID}:${activeTab?.id || "empty"}`;
   return (
     <div
       aria-hidden={!active}
@@ -738,16 +864,23 @@ function BrowserSurface({
       )}
     >
       <div className="canvas-window-drag-handle flex h-10 shrink-0 cursor-default items-center gap-2 border-y bg-card px-3">
-        <BrowserToolbar key={`toolbar:${browserKey}`} activeTab={tab} sessionID={sessionID} token={token} />
+        <BrowserToolbar key={`toolbar:${browserKey}`} activeTab={activeTab} sessionID={sessionID} token={token} />
       </div>
-      <div className="min-h-0 flex-1 overflow-hidden bg-[var(--canvas-background)]">
-        {tab ? (
-          <ElectronWebviewBrowser key={`widget:${sessionID}:${tab.id}`} activeTab={tab} sessionID={sessionID} token={token} />
-        ) : pending ? (
+      <div className="relative min-h-0 flex-1 overflow-hidden bg-[var(--canvas-background)]">
+        {tabs.map((tab) => (
+          <div
+            key={`widget:${sessionID}:${tab.id}`}
+            aria-hidden={tab.id !== activeTab?.id}
+            className={cn("absolute inset-0", tab.id !== activeTab?.id && "pointer-events-none invisible")}
+          >
+            <ElectronWebviewBrowser activeTab={tab} sessionID={sessionID} token={token} />
+          </div>
+        ))}
+        {tabs.length === 0 && pending ? (
           <CanvasBrowserLoading />
-        ) : (
+        ) : tabs.length === 0 ? (
           <CanvasEmpty />
-        )}
+        ) : null}
       </div>
     </div>
   );

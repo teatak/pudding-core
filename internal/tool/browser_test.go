@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -71,7 +72,7 @@ func TestBuiltinBrowserMissingService(t *testing.T) {
 	}
 }
 
-func TestBuiltinBrowserStatusUsesLatestSessionSlot(t *testing.T) {
+func TestBuiltinBrowserStatusListsSessionTabs(t *testing.T) {
 	now := time.Now().UTC()
 	runner := NewBuiltinRunner(WithBrowser(&fakeToolBrowser{
 		tabs: []browser.TabSnapshot{
@@ -89,12 +90,12 @@ func TestBuiltinBrowserStatusUsesLatestSessionSlot(t *testing.T) {
 		t.Fatalf("status should succeed: %+v", res)
 	}
 	payload := decodeToolResult(t, res)
-	if payload["has_tab"] != true || payload["tab_id"] != "tab_new" || payload["url"] != "https://new.example" {
+	if payload["has_tab"] != true || payload["tab_count"] != float64(2) || len(payload["tabs"].([]any)) != 2 {
 		t.Fatalf("unexpected status payload: %+v", payload)
 	}
 }
 
-func TestBuiltinBrowserNavigationUsesLatestSessionSlot(t *testing.T) {
+func TestBuiltinBrowserNavigationRequiresTabIDWhenMultipleTabsExist(t *testing.T) {
 	now := time.Now().UTC()
 	fake := &fakeToolBrowser{
 		tabs: []browser.TabSnapshot{
@@ -109,11 +110,70 @@ func TestBuiltinBrowserNavigationUsesLatestSessionSlot(t *testing.T) {
 		Name:      BrowserReload,
 		Args:      json.RawMessage(`{}`),
 	})
+	if res.Ok {
+		t.Fatalf("reload without tabID should fail: %+v", res)
+	}
+	payload := decodeToolResult(t, res)
+	if payload["reason"] != "browser_tab_required" {
+		t.Fatalf("unexpected reload error: %+v", payload)
+	}
+
+	res = runner.Call(context.Background(), Call{
+		SessionID: "sess_browser",
+		Name:      BrowserReload,
+		Args:      json.RawMessage(`{"tabID":"tab_new"}`),
+	})
 	if !res.Ok {
-		t.Fatalf("reload should succeed: %+v", res)
+		t.Fatalf("reload with tabID should succeed: %+v", res)
 	}
 	if fake.reloadTabID != "tab_new" {
 		t.Fatalf("reload used wrong tab: %q", fake.reloadTabID)
+	}
+}
+
+func TestBuiltinBrowserCloseCanCloseOneTab(t *testing.T) {
+	fake := &fakeToolBrowser{
+		tabs: []browser.TabSnapshot{
+			{ID: "tab_a", SessionID: "sess_browser", URL: "https://a.example"},
+			{ID: "tab_b", SessionID: "sess_browser", URL: "https://b.example"},
+		},
+	}
+	runner := NewBuiltinRunner(WithBrowser(fake))
+
+	res := runner.Call(context.Background(), Call{
+		SessionID: "sess_browser",
+		Name:      BrowserClose,
+		Args:      json.RawMessage(`{"tabID":"tab_a"}`),
+	})
+	if !res.Ok {
+		t.Fatalf("close tab should succeed: %+v", res)
+	}
+	payload := decodeToolResult(t, res)
+	if payload["closed"] != float64(1) || payload["has_tab"] != true {
+		t.Fatalf("unexpected close tab payload: %+v", payload)
+	}
+	if len(fake.tabs) != 1 || fake.tabs[0].ID != "tab_b" {
+		t.Fatalf("wrong remaining tabs: %+v", fake.tabs)
+	}
+}
+
+func TestBuiltinBrowserOpenCanCreateNewTab(t *testing.T) {
+	fake := &fakeToolBrowser{
+		tabs: []browser.TabSnapshot{{ID: "tab_existing", SessionID: "sess_browser", URL: "https://existing.example"}},
+	}
+	runner := NewBuiltinRunner(WithBrowser(fake))
+	res := runner.Call(context.Background(), Call{
+		SessionID: "sess_browser",
+		Name:      BrowserOpen,
+		Args:      json.RawMessage(`{"url":"https://new.example","newTab":true}`),
+	})
+	if !res.Ok {
+		t.Fatalf("open new tab should succeed: %+v", res)
+	}
+	payload := decodeToolResult(t, res)
+	tab := payload["tab"].(map[string]any)
+	if tab["id"] != "tab_created_1" || tab["url"] != "https://new.example" {
+		t.Fatalf("unexpected opened tab: %+v", payload)
 	}
 }
 
@@ -149,14 +209,18 @@ type fakeToolBrowser struct {
 	releasedTabIDs []string
 	closedSession  string
 	reloadTabID    string
+	createdTabs    int
 }
 
 func (f *fakeToolBrowser) ProcessMode(context.Context, string) string {
 	return "headless"
 }
 
-func (f *fakeToolBrowser) CreateTab(context.Context, string) (browser.TabSnapshot, error) {
-	return browser.TabSnapshot{}, nil
+func (f *fakeToolBrowser) CreateTab(_ context.Context, sessionID string) (browser.TabSnapshot, error) {
+	f.createdTabs++
+	tab := browser.TabSnapshot{ID: "tab_created_" + strconv.Itoa(f.createdTabs), SessionID: sessionID, URL: "about:blank"}
+	f.tabs = append(f.tabs, tab)
+	return tab, nil
 }
 
 func (f *fakeToolBrowser) ListTabs(context.Context, string) ([]browser.TabSnapshot, error) {
@@ -169,6 +233,12 @@ func (f *fakeToolBrowser) GetTab(context.Context, string, string) (browser.TabSn
 
 func (f *fakeToolBrowser) ReleaseTab(_ context.Context, _ string, tabID string) error {
 	f.releasedTabIDs = append(f.releasedTabIDs, tabID)
+	for index, tab := range f.tabs {
+		if tab.ID == tabID {
+			f.tabs = append(f.tabs[:index], f.tabs[index+1:]...)
+			break
+		}
+	}
 	return nil
 }
 

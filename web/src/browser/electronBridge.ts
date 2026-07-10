@@ -44,6 +44,8 @@ export type ElectronBrowserSnapshot = {
   profileID: string;
   runtimeID: string;
   version: number;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type ElectronBrowserCursorEvent = {
@@ -59,7 +61,7 @@ export type ElectronBrowserCursorEvent = {
 export type ElectronBrowserAutomationEvent = {
   sessionID: string;
   tabID: string;
-  action: "click" | "type" | "scroll";
+  action: "back" | "click" | "forward" | "open" | "reload" | "scroll" | "type";
   version?: number;
   createdAt?: string;
 };
@@ -108,8 +110,8 @@ export function electronBrowserSnapshotToTab(snapshot: ElectronBrowserSnapshot):
     mode: "headless",
     canGoBack: snapshot.canGoBack,
     canGoForward: snapshot.canGoForward,
-    createdAt: now,
-    updatedAt: now,
+    createdAt: snapshot.createdAt || now,
+    updatedAt: snapshot.updatedAt || now,
   };
 }
 

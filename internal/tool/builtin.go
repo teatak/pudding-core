@@ -35,6 +35,14 @@ const (
 	FileMove            = "builtin_file_move"
 	FileCopy            = "builtin_file_copy"
 	CommandRun          = "builtin_command_run"
+	GitStatus           = "builtin_git_status"
+	GitDiff             = "builtin_git_diff"
+	GitLog              = "builtin_git_log"
+	GitStage            = "builtin_git_stage"
+	GitUnstage          = "builtin_git_unstage"
+	GitCommit           = "builtin_git_commit"
+	PatchPropose        = "builtin_patch_propose"
+	PatchApply          = "builtin_patch_apply"
 	SkillValidate       = "builtin_skill_validate"
 	SkillSubmit         = "builtin_skill_submit"
 	RESTRequest         = "builtin_rest_request"
@@ -89,7 +97,10 @@ type HistoryMessageSource interface {
 
 type BrowserStateStore interface {
 	GetBrowserState(ctx context.Context, sessionID string) (*store.BrowserState, error)
+	GetBrowserTabState(ctx context.Context, sessionID, tabID string) (*store.BrowserState, error)
+	ListBrowserStates(ctx context.Context, sessionID string) ([]*store.BrowserState, error)
 	PutBrowserState(ctx context.Context, in store.BrowserStateInput) (*store.BrowserState, error)
+	DeleteBrowserState(ctx context.Context, sessionID, tabID string) error
 	ClearBrowserState(ctx context.Context, sessionID string) error
 }
 
@@ -116,6 +127,10 @@ type BuiltinRunner struct {
 	weatherCache    map[string]weatherCacheEntry
 	graphqlSchemaMu sync.Mutex
 	graphqlSchemas  map[string]*graphqlSchemaCache
+	patchMu         sync.Mutex
+	patchProposals  map[string]*patchProposal
+	gitApprovalMu   sync.Mutex
+	gitApprovals    map[string]gitCommitApprovalSnapshot
 }
 
 func NewBuiltinRunner(opts ...BuiltinOption) *BuiltinRunner {
@@ -126,6 +141,8 @@ func NewBuiltinRunner(opts ...BuiltinOption) *BuiltinRunner {
 		weatherEndpoint: weatherDefaultEndpoint,
 		weatherCache:    map[string]weatherCacheEntry{},
 		graphqlSchemas:  map[string]*graphqlSchemaCache{},
+		patchProposals:  map[string]*patchProposal{},
+		gitApprovals:    map[string]gitCommitApprovalSnapshot{},
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -340,6 +357,54 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Capability:  store.ModeProject,
 		},
 		{
+			Name:        GitStatus,
+			Description: "Read structured Git worktree status for the repository containing an authorized project directory. Returns branch, upstream divergence, file states, and summary counts.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Git tools can read only authorized project repositories."},"cwd":{"type":"string","description":"Absolute or relative directory inside an authorized project root. Defaults to the first project root."}},"required":["scope"],"additionalProperties":false}`),
+			Capability:  store.ModeProject,
+		},
+		{
+			Name:        GitDiff,
+			Description: "Read the unstaged or staged Git diff for an authorized project repository. Returns a bounded patch plus structured per-file additions and deletions.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Git tools can read only authorized project repositories."},"cwd":{"type":"string","description":"Absolute or relative directory inside an authorized project root. Defaults to the first project root."},"staged":{"type":"boolean","description":"When true, read the staged diff. Defaults to false for unstaged changes."}},"required":["scope"],"additionalProperties":false}`),
+			Capability:  store.ModeProject,
+		},
+		{
+			Name:        GitLog,
+			Description: "Read recent commits from an authorized project repository as structured metadata.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Git tools can read only authorized project repositories."},"cwd":{"type":"string","description":"Absolute or relative directory inside an authorized project root. Defaults to the first project root."},"limit":{"type":"integer","minimum":1,"maximum":100,"description":"Maximum commits to return. Defaults to 20."}},"required":["scope"],"additionalProperties":false}`),
+			Capability:  store.ModeProject,
+		},
+		{
+			Name:        GitStage,
+			Description: "Stage explicit project file paths in Git after approval. Paths are literal repository-relative or absolute paths; arbitrary pathspecs and Git options are not accepted.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Git writes can target only authorized project repositories."},"cwd":{"type":"string","description":"Absolute or relative directory inside an authorized project root. Defaults to the first project root."},"paths":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":128,"description":"Explicit files to stage. Paths returned by builtin_git_status are repository-relative and can be passed directly."}},"required":["scope","paths"],"additionalProperties":false}`),
+			Capability:  store.ModeProject,
+		},
+		{
+			Name:        GitUnstage,
+			Description: "Remove explicit project file paths from the Git index after approval without changing worktree files. Arbitrary pathspecs and Git options are not accepted.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Git writes can target only authorized project repositories."},"cwd":{"type":"string","description":"Absolute or relative directory inside an authorized project root. Defaults to the first project root."},"paths":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":128,"description":"Explicit repository files to unstage."}},"required":["scope","paths"],"additionalProperties":false}`),
+			Capability:  store.ModeProject,
+		},
+		{
+			Name:        GitCommit,
+			Description: "Commit the currently staged Git changes after showing their status and diff for approval. The commit is rejected if HEAD or the index changes while approval is pending. Hooks and signing are disabled.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Git writes can target only authorized project repositories."},"cwd":{"type":"string","description":"Absolute or relative directory inside an authorized project root. Defaults to the first project root."},"message":{"type":"string","minLength":1,"maxLength":16384,"description":"Commit message. Amend, signing, hooks, and arbitrary commit options are not supported."}},"required":["scope","message"],"additionalProperties":false}`),
+			Capability:  store.ModeProject,
+		},
+		{
+			Name:        PatchPropose,
+			Description: "Prepare a reviewable multi-file text patch without changing project files. For each file, provide the complete desired new_text or delete=true. The proposal records current file hashes and returns a unified diff for approval.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Patch proposals can target only authorized project files."},"files":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","properties":{"path":{"type":"string","description":"Absolute or relative file path inside one authorized project root."},"new_text":{"type":"string","description":"Complete desired UTF-8 file content. Creates a missing file or replaces an existing file."},"delete":{"type":"boolean","description":"Set true to delete an existing regular text file. Mutually exclusive with new_text."}},"required":["path"],"additionalProperties":false},"description":"All proposed file changes. Every file must resolve inside the same project root."}},"required":["scope","files"],"additionalProperties":false}`),
+			Capability:  store.ModeProject,
+		},
+		{
+			Name:        PatchApply,
+			Description: "Apply one previously generated patch proposal after its unified diff is approved. The apply fails without changing files if any source file has drifted since proposal creation.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"proposal_id":{"type":"string","description":"Proposal id returned by builtin_patch_propose."}},"required":["proposal_id"],"additionalProperties":false}`),
+			Capability:  store.ModeProject,
+		},
+		{
 			Name:        SkillValidate,
 			Description: "Validate one staged skill package before asking the user to review it.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"draft_id":{"type":"string","description":"Staged skill package id."}},"required":["draft_id"],"additionalProperties":false}`),
@@ -395,68 +460,68 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        BrowserStatus,
-			Description: "Return the current session's managed browser slot status. The browser is single-slot per session; this does not switch tabs.",
+			Description: "List the current session's managed browser tabs and their tab IDs. Use the returned tabID for deterministic browser actions when more than one tab exists.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{
 			Name:        BrowserOpen,
-			Description: "Open or replace the current session's single managed browser slot. Creates a browser tab when the session has none.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","description":"URL to open. http and https are supported; scheme defaults to https."}},"required":["url"],"additionalProperties":false}`),
+			Description: "Open a URL in a managed browser tab. Pass tabID to reuse a tab, or newTab=true to create a separate tab. With multiple tabs, omitting both is an error.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","description":"URL to open. http and https are supported; scheme defaults to https."},"tabID":{"type":"string","description":"Existing tab ID returned by builtin_browser_status."},"newTab":{"type":"boolean","description":"Create a new tab before opening the URL."}},"required":["url"],"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{
 			Name:        BrowserObserve,
-			Description: "Observe the current session's managed browser slot: title, URL, visible page text, and interactive elements.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"maxTextChars":{"type":"integer","description":"Optional max page text characters, default 6000, cap 20000."},"maxElements":{"type":"integer","description":"Optional max interactive elements, default 30, cap 100."}},"additionalProperties":false}`),
+			Description: "Observe a managed browser tab: title, URL, visible page text, and interactive elements.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"maxTextChars":{"type":"integer","description":"Optional max page text characters, default 6000, cap 20000."},"maxElements":{"type":"integer","description":"Optional max interactive elements, default 30, cap 100."}},"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{
 			Name:        BrowserScreenshot,
-			Description: "Capture a screenshot of the current session's managed browser slot and route it as an image attachment.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"fullPage":{"type":"boolean","description":"Capture beyond the viewport when supported. Defaults false."}},"additionalProperties":false}`),
+			Description: "Capture a screenshot of a managed browser tab and route it as an image attachment.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"fullPage":{"type":"boolean","description":"Capture beyond the viewport when supported. Defaults false."}},"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{
 			Name:        BrowserBack,
-			Description: "Navigate the current session's managed browser slot back in history.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+			Description: "Navigate a managed browser tab back in history.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."}},"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{
 			Name:        BrowserForward,
-			Description: "Navigate the current session's managed browser slot forward in history.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+			Description: "Navigate a managed browser tab forward in history.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."}},"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{
 			Name:        BrowserReload,
-			Description: "Reload the current session's managed browser slot.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+			Description: "Reload a managed browser tab.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."}},"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{
 			Name:        BrowserClose,
-			Description: "Close the current session's managed browser slot. This only affects the current session.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+			Description: "Close one managed browser tab by tabID, or close all tabs in the current session when tabID is omitted.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Optional tab ID to close. Omit to close all tabs in the session."}},"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{
 			Name:        BrowserClick,
-			Description: "Click an element in the current session's managed browser slot by CSS selector or viewport coordinates. Use method=pointer for real mouse events, method=dom only as a fallback for simple elements.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"selector":{"type":"string","description":"CSS selector to click."},"x":{"type":"number","description":"Viewport X coordinate, used when selector is omitted."},"y":{"type":"number","description":"Viewport Y coordinate, used when selector is omitted."},"method":{"type":"string","enum":["auto","pointer","dom"],"description":"Click implementation. auto defaults to real CDP mouse events and falls back to DOM click; pointer forces real mouse events; dom forces element.click()."}},"additionalProperties":false}`),
+			Description: "Click an element in a managed browser tab by CSS selector or viewport coordinates. Use method=pointer for real mouse events, method=dom only as a fallback for simple elements.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"CSS selector to click."},"x":{"type":"number","description":"Viewport X coordinate, used when selector is omitted."},"y":{"type":"number","description":"Viewport Y coordinate, used when selector is omitted."},"method":{"type":"string","enum":["auto","pointer","dom"],"description":"Click implementation. auto defaults to real CDP mouse events and falls back to DOM click; pointer forces real mouse events; dom forces element.click()."}},"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{
 			Name:        BrowserType,
-			Description: "Type text into an editable element in the current session's managed browser slot.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"selector":{"type":"string","description":"CSS selector for the input. If omitted, uses the active element."},"text":{"type":"string","description":"Text to type."},"clear":{"type":"boolean","description":"Replace existing value before typing."}},"required":["text"],"additionalProperties":false}`),
+			Description: "Type text into an editable element in a managed browser tab.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"CSS selector for the input. If omitted, uses the active element."},"text":{"type":"string","description":"Text to type."},"clear":{"type":"boolean","description":"Replace existing value before typing."}},"required":["text"],"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{
 			Name:        BrowserScroll,
-			Description: "Scroll the current session's managed browser slot or a scrollable element.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"selector":{"type":"string","description":"Optional CSS selector for a scrollable element."},"deltaX":{"type":"number","description":"Horizontal scroll delta in pixels."},"deltaY":{"type":"number","description":"Vertical scroll delta in pixels. Defaults to 600 when both deltas are omitted."}},"additionalProperties":false}`),
+			Description: "Scroll a managed browser tab or one of its scrollable elements.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"Optional CSS selector for a scrollable element."},"deltaX":{"type":"number","description":"Horizontal scroll delta in pixels."},"deltaY":{"type":"number","description":"Vertical scroll delta in pixels. Defaults to 600 when both deltas are omitted."}},"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 	}
@@ -505,6 +570,22 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.fileCopy(call)
 	case CommandRun:
 		return r.commandRun(ctx, call)
+	case GitStatus:
+		return r.gitStatus(ctx, call)
+	case GitDiff:
+		return r.gitDiff(ctx, call)
+	case GitLog:
+		return r.gitLog(ctx, call)
+	case GitStage:
+		return r.gitStage(ctx, call)
+	case GitUnstage:
+		return r.gitUnstage(ctx, call)
+	case GitCommit:
+		return r.gitCommit(ctx, call)
+	case PatchPropose:
+		return r.patchPropose(call)
+	case PatchApply:
+		return r.patchApply(call)
 	case SkillValidate:
 		return r.skillValidate(ctx, call)
 	case SkillSubmit:

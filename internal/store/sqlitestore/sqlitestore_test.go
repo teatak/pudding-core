@@ -2,6 +2,7 @@ package sqlitestore
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"strconv"
@@ -292,11 +293,115 @@ func TestBrowserStatePersistsAndClears(t *testing.T) {
 	if state.TabID != "tab_blank" || state.URL != "about:blank" || state.Title != "" || state.Mode != "headless" {
 		t.Fatalf("browser state not persisted: %+v", state)
 	}
+	states, err := reopened.ListBrowserStates(ctx, "sess_browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(states) != 2 {
+		t.Fatalf("expected two persisted browser tabs: %+v", states)
+	}
+	first, err := reopened.GetBrowserTabState(ctx, "sess_browser", "tab_1")
+	if err != nil || first.URL != "https://www.sohu.com/" {
+		t.Fatalf("first browser tab not persisted: state=%+v err=%v", first, err)
+	}
+	if err := reopened.DeleteBrowserState(ctx, "sess_browser", "tab_blank"); err != nil {
+		t.Fatal(err)
+	}
+	state, err = reopened.GetBrowserState(ctx, "sess_browser")
+	if err != nil || state.TabID != "tab_1" {
+		t.Fatalf("deleting one tab should preserve the other: state=%+v err=%v", state, err)
+	}
 	if err := reopened.ClearBrowserState(ctx, "sess_browser"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := reopened.GetBrowserState(ctx, "sess_browser"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("cleared browser state should be missing: %v", err)
+	}
+}
+
+func TestLegacyBrowserStateMigratesToBrowserTabs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy-browser.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createTestSession(t, st, "sess_legacy_browser")
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		DROP TABLE session_browser_tabs;
+		CREATE TABLE session_browser_state (
+			session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+			tab_id TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '',
+			title TEXT NOT NULL DEFAULT '', favicon_url TEXT NOT NULL DEFAULT '',
+			mode TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+		);
+		INSERT INTO session_browser_state(session_id,tab_id,url,title,favicon_url,mode,created_at,updated_at)
+		VALUES('sess_legacy_browser','tab_legacy','https://legacy.example/','Legacy','','headless',1,2);
+	`); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	state, err := reopened.GetBrowserTabState(context.Background(), "sess_legacy_browser", "tab_legacy")
+	if err != nil || state.URL != "https://legacy.example/" {
+		t.Fatalf("legacy browser state was not migrated: state=%+v err=%v", state, err)
+	}
+}
+
+func TestOpenPrunesDuplicateBlankBrowserTabs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "duplicate-blank-tabs.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createTestSession(t, st, "sess_blank_duplicates")
+	for _, input := range []store.BrowserStateInput{
+		{SessionID: "sess_blank_duplicates", TabID: "tab_real", URL: "https://example.com/"},
+		{SessionID: "sess_blank_duplicates", TabID: "tab_blank_old", URL: "about:blank"},
+		{SessionID: "sess_blank_duplicates", TabID: "tab_blank_new", URL: "about:blank"},
+	} {
+		if _, err := st.PutBrowserState(context.Background(), input); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	states, err := reopened.ListBrowserStates(context.Background(), "sess_blank_duplicates")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(states) != 2 {
+		t.Fatalf("expected one real and one blank tab after restart: %+v", states)
+	}
+	seen := map[string]bool{}
+	for _, state := range states {
+		seen[state.TabID] = true
+	}
+	if !seen["tab_real"] || !seen["tab_blank_new"] || seen["tab_blank_old"] {
+		t.Fatalf("wrong tabs survived blank-tab pruning: %+v", states)
 	}
 }
 

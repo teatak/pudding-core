@@ -70,7 +70,7 @@ func TestCommandRunReturnsExitCode(t *testing.T) {
 		"argv":  commandHelperArgs("exit", "7"),
 	})
 	payload := decodeCommandPayload(t, res)
-	if res.Ok || payload.ExitCode != 7 || payload.Reason != "non_zero_exit" || !strings.Contains(payload.Stderr, "exit 7") {
+	if !res.Ok || !payload.OK || payload.ExitCode != 7 || payload.Reason != "non_zero_exit" || !strings.Contains(payload.Stderr, "exit 7") {
 		t.Fatalf("unexpected non-zero result: %+v", payload)
 	}
 }

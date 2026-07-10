@@ -18,23 +18,42 @@ func (r *BuiltinRunner) browserOpen(ctx context.Context, call Call) Result {
 		return res
 	}
 	var args struct {
-		URL   string `json:"url"`
-		TabID string `json:"tabID"`
+		URL    string `json:"url"`
+		TabID  string `json:"tabID"`
+		NewTab bool   `json:"newTab"`
 	}
 	if err := decodeStructToolArgs(call.Args, &args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
-	if strings.TrimSpace(args.TabID) == "" {
-		tab, ok, err := r.browserCurrentTab(ctx, call.SessionID)
+	if args.NewTab && strings.TrimSpace(args.TabID) != "" {
+		return toolJSONError(out, "invalid_arguments", "tabID and newTab cannot be used together")
+	}
+	createdTabID := ""
+	if args.NewTab {
+		tab, err := r.browser.CreateTab(ctx, call.SessionID)
 		if err != nil {
 			return browserToolError(out, err)
 		}
-		if ok {
-			args.TabID = tab.ID
+		args.TabID = tab.ID
+		createdTabID = tab.ID
+	} else if strings.TrimSpace(args.TabID) == "" {
+		tabs, err := r.browserTabs(ctx, call.SessionID)
+		if err != nil {
+			return browserToolError(out, err)
+		}
+		switch len(tabs) {
+		case 0:
+		case 1:
+			args.TabID = tabs[0].ID
+		default:
+			return browserToolError(out, browser.ErrTabRequired)
 		}
 	}
 	tab, err := r.browser.Open(ctx, call.SessionID, args.TabID, args.URL)
 	if err != nil {
+		if createdTabID != "" {
+			_ = r.browser.ReleaseTab(ctx, call.SessionID, createdTabID)
+		}
 		return browserToolError(out, err)
 	}
 	if err := r.syncBrowserState(ctx, call.SessionID, tab); err != nil {
@@ -219,35 +238,16 @@ func (r *BuiltinRunner) browserStatus(ctx context.Context, call Call) Result {
 	if res, ok := r.browserReady(call, out); !ok {
 		return res
 	}
-	tab, ok, err := r.browserCurrentTab(ctx, call.SessionID)
+	tabs, err := r.browserTabs(ctx, call.SessionID)
 	if err != nil {
 		return browserToolError(out, err)
 	}
 	status := map[string]any{
-		"ok":          true,
-		"single_slot": true,
-		"has_tab":     ok,
-	}
-	if ok {
-		_ = r.syncBrowserState(ctx, call.SessionID, tab)
-		status["tab"] = tab
-		status["tab_id"] = tab.ID
-		status["url"] = tab.URL
-		status["title"] = tab.Title
-		status["mode"] = tab.Mode
-	} else if r.browserState != nil {
-		state, err := r.browserState.GetBrowserState(ctx, call.SessionID)
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			return browserToolError(out, err)
-		}
-		if state != nil {
-			status["has_state"] = true
-			status["recoverable"] = true
-			status["url"] = state.URL
-			status["title"] = state.Title
-			status["favicon_url"] = state.FaviconURL
-			status["mode"] = state.Mode
-		}
+		"ok":           true,
+		"has_tab":      len(tabs) > 0,
+		"tab_count":    len(tabs),
+		"tabs":         tabs,
+		"process_mode": r.browser.ProcessMode(ctx, call.SessionID),
 	}
 	out.Ok = true
 	out.Content = jsonString(status)
@@ -261,7 +261,13 @@ func (r *BuiltinRunner) browserNavigate(ctx context.Context, call Call, action s
 	if res, ok := r.browserReady(call, out); !ok {
 		return res
 	}
-	tabID, err := r.browserResolveTabID(ctx, call.SessionID, "")
+	var args struct {
+		TabID string `json:"tabID"`
+	}
+	if err := decodeStructToolArgs(call.Args, &args); err != nil {
+		return toolJSONError(out, "invalid_arguments", err.Error())
+	}
+	tabID, err := r.browserResolveTabID(ctx, call.SessionID, args.TabID)
 	if err != nil {
 		return browserToolError(out, err)
 	}
@@ -294,9 +300,42 @@ func (r *BuiltinRunner) browserClose(ctx context.Context, call Call) Result {
 	if res, ok := r.browserReady(call, out); !ok {
 		return res
 	}
-	tabs, err := r.browser.ListTabs(ctx, call.SessionID)
+	var args struct {
+		TabID string `json:"tabID"`
+	}
+	if err := decodeStructToolArgs(call.Args, &args); err != nil {
+		return toolJSONError(out, "invalid_arguments", err.Error())
+	}
+	tabs, err := r.browserTabs(ctx, call.SessionID)
 	if err != nil {
 		return browserToolError(out, err)
+	}
+	requestedTabID := strings.TrimSpace(args.TabID)
+	if requestedTabID != "" {
+		closed := 0
+		for _, tab := range tabs {
+			if tab.ID == requestedTabID {
+				closed = 1
+				break
+			}
+		}
+		if err := r.browser.ReleaseTab(ctx, call.SessionID, requestedTabID); err != nil && !errors.Is(err, browser.ErrTabNotFound) {
+			return browserToolError(out, err)
+		}
+		if r.browserState != nil {
+			if err := r.browserState.DeleteBrowserState(ctx, call.SessionID, requestedTabID); err != nil {
+				return browserToolError(out, err)
+			}
+		}
+		remaining, err := r.browser.ListTabs(ctx, call.SessionID)
+		if err != nil {
+			return browserToolError(out, err)
+		}
+		out.Ok = true
+		out.Content = jsonString(map[string]any{"ok": true, "closed": closed, "has_tab": len(remaining) > 0, "tabs": remaining})
+		out.SummaryKind = SummaryReturnedFields
+		out.SummaryCount = 4
+		return out
 	}
 	closed := 0
 	for _, tab := range tabs {
@@ -339,22 +378,55 @@ func (r *BuiltinRunner) browserResolveTabID(ctx context.Context, sessionID, tabI
 	if tabID != "" {
 		return tabID, nil
 	}
-	tab, ok, err := r.browserCurrentTab(ctx, sessionID)
+	tabs, err := r.browserTabs(ctx, sessionID)
 	if err != nil {
 		return "", err
 	}
-	if !ok {
+	if len(tabs) != 1 {
 		return "", browser.ErrTabRequired
 	}
-	return tab.ID, nil
+	return tabs[0].ID, nil
 }
 
-func (r *BuiltinRunner) browserCurrentTab(ctx context.Context, sessionID string) (browser.TabSnapshot, bool, error) {
+func (r *BuiltinRunner) browserTabs(ctx context.Context, sessionID string) ([]browser.TabSnapshot, error) {
 	tabs, err := r.browser.ListTabs(ctx, sessionID)
-	if err != nil {
-		return browser.TabSnapshot{}, false, err
+	if err != nil || r.browserState == nil {
+		return tabs, err
 	}
-	return latestBrowserTab(tabs)
+	support, ok := r.browser.(browser.MetadataRecoverySupport)
+	if !ok || !support.SupportsMetadataRecovery() {
+		return tabs, nil
+	}
+	states, err := r.browserState.ListBrowserStates(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	live := make(map[string]struct{}, len(tabs))
+	for _, tab := range tabs {
+		live[tab.ID] = struct{}{}
+	}
+	for _, state := range states {
+		if _, ok := live[state.TabID]; ok {
+			continue
+		}
+		tab, err := r.browser.Recover(ctx, sessionID, browser.RecoverHint{
+			TabID:      state.TabID,
+			URL:        state.URL,
+			Title:      state.Title,
+			FaviconURL: state.FaviconURL,
+			Mode:       state.Mode,
+			CreatedAt:  state.CreatedAt,
+		})
+		if errors.Is(err, browser.ErrTabNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		live[tab.ID] = struct{}{}
+		tabs = append(tabs, tab)
+	}
+	return tabs, nil
 }
 
 func (r *BuiltinRunner) syncBrowserState(ctx context.Context, sessionID string, tab browser.TabSnapshot) error {
@@ -369,23 +441,13 @@ func (r *BuiltinRunner) syncBrowserState(ctx context.Context, sessionID string, 
 		FaviconURL: tab.FaviconURL,
 	}
 	if err := store.NormalizeBrowserStateInput(&in); err != nil {
-		return r.browserState.ClearBrowserState(ctx, sessionID)
+		if strings.TrimSpace(tab.ID) == "" {
+			return nil
+		}
+		return r.browserState.DeleteBrowserState(ctx, sessionID, tab.ID)
 	}
 	_, err := r.browserState.PutBrowserState(ctx, in)
 	return err
-}
-
-func latestBrowserTab(tabs []browser.TabSnapshot) (browser.TabSnapshot, bool, error) {
-	if len(tabs) == 0 {
-		return browser.TabSnapshot{}, false, nil
-	}
-	latest := tabs[0]
-	for _, tab := range tabs[1:] {
-		if tab.UpdatedAt.After(latest.UpdatedAt) {
-			latest = tab
-		}
-	}
-	return latest, true, nil
 }
 
 func browserToolError(out Result, err error) Result {

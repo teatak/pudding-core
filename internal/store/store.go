@@ -1386,7 +1386,7 @@ func NormalizeBrowserStateInput(in *BrowserStateInput) error {
 	in.Title = strings.TrimSpace(in.Title)
 	in.FaviconURL = strings.TrimSpace(in.FaviconURL)
 	in.Mode = strings.TrimSpace(in.Mode)
-	if in.SessionID == "" || in.URL == "" {
+	if in.SessionID == "" || in.TabID == "" || in.URL == "" {
 		return ErrInvalidBrowserState
 	}
 	return nil
@@ -1487,7 +1487,10 @@ type Store interface {
 	ClearClosedCanvasItems(ctx context.Context, actorSessionID string) error
 
 	GetBrowserState(ctx context.Context, sessionID string) (*BrowserState, error)
+	GetBrowserTabState(ctx context.Context, sessionID, tabID string) (*BrowserState, error)
+	ListBrowserStates(ctx context.Context, sessionID string) ([]*BrowserState, error)
 	PutBrowserState(ctx context.Context, in BrowserStateInput) (*BrowserState, error)
+	DeleteBrowserState(ctx context.Context, sessionID, tabID string) error
 	ClearBrowserState(ctx context.Context, sessionID string) error
 
 	Close() error
