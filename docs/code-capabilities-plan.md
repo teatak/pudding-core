@@ -1,6 +1,6 @@
 # Pudding Code 能力设计与计划
 
-> 状态:C0、C1、C1.5、C1.6、C2、C3、C4、C5、C6、C7、C8 与 C9 已落地。
+> 状态:C0、C1、C1.5、C1.6、C2、C3、C4、C5、C6、C7、C8 与 C9 已落地;C10 设计完成。
 > 目标:在现有 multi-session / Project tool 架构上,把 Pudding 从"可读写文件"
 > 推进到"可信的工程协作 agent"。
 
@@ -779,6 +779,40 @@ Project resolver 的安全边界。
 - missing target 使用最近存在父目录规则,越界 target 被拒绝。
 - 工具结果进入正常 tool loop,不新增 engine 隐式上下文源。
 - Go 单测、Web build 与 `git diff --check` 通过。
+
+### C10: LSP 语言智能
+
+状态:设计完成,尚未实施。
+
+详细设计见 [Pudding LSP 语言智能设计](./code-lsp-design.md)。
+
+首版范围:
+
+- daemon-managed、language-root keyed LSP process manager。
+- Go `gopls` 与 TypeScript language server。
+- symbols、definition、references、diagnostics 四个只读工具。
+- Project path 二次校验、结果截断、外部 location 过滤。
+- transcript 结构化展示和 Canvas 文件定位。
+- cancel、timeout、crash recovery 与 idle eviction。
+
+明确不做:
+
+- 不自动安装 language server。
+- 不做 rename / code action / completion。
+- 不接受模型指定 arbitrary executable、args 或 environment。
+- 不新增 backend focus、隐式 context source 或无 session scope API。
+- 不允许 LSP `workspace/applyEdit` 直接写入工作树。
+
+实施切片:
+
+| 切片 | 内容 | 预计 |
+| --- | --- | --- |
+| C10.0 | stdio JSON-RPC、process manager、cancel、fake server tests | 2 天 |
+| C10.1 | Go root resolver、gopls、四个只读工具 | 2-3 天 |
+| C10.2 | TypeScript root/server resolver、位置与诊断适配 | 2-3 天 |
+| C10.3 | transcript、Canvas 定位、可靠性与全量验证 | 2 天 |
+
+总工期预计 8-10 天。
 
 ## 11. 测试策略
 
