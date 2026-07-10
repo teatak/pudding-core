@@ -51,3 +51,45 @@ func TestCodeToolsWithGopls(t *testing.T) {
 		}
 	}
 }
+
+func TestCodeToolsWithTypeScriptLanguageServer(t *testing.T) {
+	if os.Getenv("PUDDING_LSP_TS_INTEGRATION") != "1" {
+		t.Skip("set PUDDING_LSP_TS_INTEGRATION=1 to test the installed TypeScript language server")
+	}
+	root := t.TempDir()
+	writeCodeTestFile(t, filepath.Join(root, "package.json"), `{"private":true,"devDependencies":{"typescript":"*"}}`)
+	writeCodeTestFile(t, filepath.Join(root, "tsconfig.json"), `{"compilerOptions":{"strict":true},"include":["*.ts"]}`)
+	writeCodeTestFile(t, filepath.Join(root, "main.ts"), "export function target(): number { return 1 }\nexport const use = target()\nexport const broken: string = 1\n")
+	manager := lsp.NewManager(lsp.WithIdleTimeout(0), lsp.WithReapInterval(0))
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = manager.Close(ctx)
+	})
+	runner := NewBuiltinRunner(WithLanguageService(manager))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	for _, call := range []Call{
+		{Name: CodeSymbols, Args: json.RawMessage(`{"scope":"project","path":".","language":"typescript","query":"target"}`), ProjectDirs: []string{root}},
+		{Name: CodeDefinition, Args: json.RawMessage(`{"scope":"project","path":"main.ts","line":2,"column":20}`), ProjectDirs: []string{root}},
+		{Name: CodeReferences, Args: json.RawMessage(`{"scope":"project","path":"main.ts","line":2,"column":20}`), ProjectDirs: []string{root}},
+		{Name: CodeDiagnostics, Args: json.RawMessage(`{"scope":"project","paths":["main.ts"],"severity":["error"]}`), ProjectDirs: []string{root}},
+	} {
+		result := runner.Call(ctx, call)
+		if !result.Ok {
+			t.Fatalf("%s failed: %s", call.Name, result.Content)
+		}
+		payload := decodeToolResult(t, result)
+		count := payload["resultCount"]
+		if call.Name != CodeSymbols {
+			count = payload["locationCount"]
+		}
+		if call.Name == CodeDiagnostics {
+			count = payload["diagnosticCount"]
+		}
+		if number, ok := count.(float64); !ok || number < 1 {
+			t.Fatalf("%s returned no semantic results: %+v", call.Name, payload)
+		}
+	}
+}

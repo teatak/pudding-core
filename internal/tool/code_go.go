@@ -19,17 +19,19 @@ const maxCodeDocumentBytes = 2 << 20
 type GoServerResolver func(languageRoot string) (lsp.ServerSpec, error)
 
 type resolvedCodeTarget struct {
-	path         string
-	language     string
-	languageRoot string
-	rootFallback bool
-	spec         lsp.ServerSpec
+	path               string
+	language           string
+	documentLanguageID string
+	languageRoot       string
+	rootFallback       bool
+	spec               lsp.ServerSpec
 }
 
 type languageServerUnavailableError struct {
 	language string
 	server   string
 	checked  []string
+	hint     string
 }
 
 func (e *languageServerUnavailableError) Error() string {
@@ -44,6 +46,7 @@ func defaultGoServerResolver(languageRoot string) (lsp.ServerSpec, error) {
 			language: "go",
 			server:   server,
 			checked:  []string{"PATH:gopls"},
+			hint:     "Install or configure gopls, then retry. Pudding did not install it automatically.",
 		}
 	}
 	executable, err = filepath.Abs(executable)
@@ -71,7 +74,7 @@ func defaultGoServerResolver(languageRoot string) (lsp.ServerSpec, error) {
 
 func (r *BuiltinRunner) resolveCodeTarget(call Call, rawPath, language string, allowDirectory bool) (resolvedCodeTarget, error) {
 	language = strings.ToLower(strings.TrimSpace(language))
-	if language != "" && language != "go" {
+	if language != "" && language != "go" && language != "typescript" {
 		return resolvedCodeTarget{}, fmt.Errorf("language_not_supported: %s", language)
 	}
 	root, target, _, err := resolveProjectPath(call.ProjectDirs, rawPath, allowDirectory, false)
@@ -84,15 +87,10 @@ func (r *BuiltinRunner) resolveCodeTarget(call Call, rawPath, language string, a
 	}
 	if info.IsDir() {
 		if !allowDirectory {
-			return resolvedCodeTarget{}, errors.New("target must be a Go source file")
+			return resolvedCodeTarget{}, errors.New("target must be a supported source file")
 		}
 	} else if !info.Mode().IsRegular() {
 		return resolvedCodeTarget{}, errors.New("target must be a regular file or directory")
-	} else if filepath.Ext(target) != ".go" {
-		return resolvedCodeTarget{}, errors.New("language_not_supported: target is not a Go source file")
-	}
-	if language == "" {
-		language = "go"
 	}
 	resolvedRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
@@ -103,7 +101,33 @@ func (r *BuiltinRunner) resolveCodeTarget(call Call, rawPath, language string, a
 	if !info.IsDir() {
 		start = filepath.Dir(target)
 	}
-	languageRoot, fallback := resolveGoLanguageRoot(start, resolvedRoot)
+	documentLanguageID := ""
+	if info.IsDir() {
+		if language == "" {
+			language, err = inferCodeDirectoryLanguage(start, resolvedRoot)
+			if err != nil {
+				return resolvedCodeTarget{}, err
+			}
+		}
+	} else {
+		inferredLanguage, inferredDocumentID := codeLanguageForPath(target)
+		if inferredLanguage == "" {
+			return resolvedCodeTarget{}, errors.New("language_not_supported: target is not a supported source file")
+		}
+		if language != "" && language != inferredLanguage {
+			return resolvedCodeTarget{}, fmt.Errorf("language_not_supported: %s does not match %s", language, filepath.Ext(target))
+		}
+		language = inferredLanguage
+		documentLanguageID = inferredDocumentID
+	}
+	if language == "go" {
+		return r.resolveGoCodeTarget(target, documentLanguageID, start, resolvedRoot)
+	}
+	return r.resolveTypeScriptCodeTarget(target, documentLanguageID, start, resolvedRoot)
+}
+
+func (r *BuiltinRunner) resolveGoCodeTarget(target, documentLanguageID, start, projectRoot string) (resolvedCodeTarget, error) {
+	languageRoot, fallback := resolveGoLanguageRoot(start, projectRoot)
 	resolver := r.goServerResolver
 	if resolver == nil {
 		resolver = defaultGoServerResolver
@@ -115,13 +139,107 @@ func (r *BuiltinRunner) resolveCodeTarget(call Call, rawPath, language string, a
 	if filepath.Clean(spec.Key.LanguageRoot) != languageRoot || spec.Key.ServerKind != "gopls" {
 		return resolvedCodeTarget{}, errors.New("Go server resolver returned an invalid process key")
 	}
+	if documentLanguageID == "" {
+		documentLanguageID = "go"
+	}
 	return resolvedCodeTarget{
-		path:         target,
-		language:     language,
-		languageRoot: languageRoot,
-		rootFallback: fallback,
-		spec:         spec,
+		path:               target,
+		language:           "go",
+		documentLanguageID: documentLanguageID,
+		languageRoot:       languageRoot,
+		rootFallback:       fallback,
+		spec:               spec,
 	}, nil
+}
+
+func codeLanguageForPath(path string) (string, string) {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".go":
+		return "go", "go"
+	case ".ts", ".mts", ".cts":
+		return "typescript", "typescript"
+	case ".tsx":
+		return "typescript", "typescriptreact"
+	case ".js", ".mjs", ".cjs":
+		return "typescript", "javascript"
+	case ".jsx":
+		return "typescript", "javascriptreact"
+	default:
+		return "", ""
+	}
+}
+
+func inferCodeDirectoryLanguage(start, projectRoot string) (string, error) {
+	goRoot, _ := resolveGoLanguageRoot(start, projectRoot)
+	if goRoot == projectRoot && !hasGoMarker(projectRoot) {
+		goRoot = ""
+	}
+	typeScriptRoot, typeScriptFallback := resolveTypeScriptLanguageRoot(start, projectRoot)
+	if typeScriptFallback {
+		typeScriptRoot = ""
+	}
+	switch {
+	case goRoot != "" && typeScriptRoot == "":
+		return "go", nil
+	case goRoot == "" && typeScriptRoot != "":
+		return "typescript", nil
+	case goRoot != "" && typeScriptRoot != "":
+		goDistance := ancestorDistance(start, goRoot)
+		typeScriptDistance := ancestorDistance(start, typeScriptRoot)
+		if goDistance < typeScriptDistance {
+			return "go", nil
+		}
+		if typeScriptDistance < goDistance {
+			return "typescript", nil
+		}
+		return "", errors.New("language_ambiguous: directory contains Go and TypeScript project markers; pass language explicitly")
+	}
+	entries, err := os.ReadDir(start)
+	if err == nil {
+		seenGo := false
+		seenTypeScript := false
+		for index, entry := range entries {
+			if index >= 512 {
+				break
+			}
+			if entry.IsDir() {
+				continue
+			}
+			inferred, _ := codeLanguageForPath(entry.Name())
+			seenGo = seenGo || inferred == "go"
+			seenTypeScript = seenTypeScript || inferred == "typescript"
+		}
+		if seenGo != seenTypeScript {
+			if seenGo {
+				return "go", nil
+			}
+			return "typescript", nil
+		}
+	}
+	return "", errors.New("language_ambiguous: cannot infer a supported language from the directory; pass language explicitly")
+}
+
+func hasGoMarker(dir string) bool {
+	for _, marker := range []string{"go.work", "go.mod"} {
+		if info, err := os.Stat(filepath.Join(dir, marker)); err == nil && info.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
+}
+
+func ancestorDistance(start, ancestor string) int {
+	distance := 0
+	for dir := filepath.Clean(start); ; dir = filepath.Dir(dir) {
+		if dir == filepath.Clean(ancestor) {
+			return distance
+		}
+		next := filepath.Dir(dir)
+		if next == dir {
+			return int(^uint(0) >> 1)
+		}
+		distance++
+	}
 }
 
 func resolveGoLanguageRoot(start, projectRoot string) (string, bool) {

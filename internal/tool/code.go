@@ -266,7 +266,7 @@ func (r *BuiltinRunner) codeDiagnostics(ctx context.Context, call Call) Result {
 		if err != nil {
 			return codeDocumentError(out, err)
 		}
-		document := lsp.Document{URI: codeFileURI(target.path), LanguageID: "go", Text: text}
+		document := lsp.Document{URI: codeFileURI(target.path), LanguageID: target.documentLanguageID, Text: text}
 		state, err := r.languageService.SyncDocument(ctx, target.spec, document)
 		if err != nil {
 			return codeServiceError(out, err)
@@ -331,7 +331,7 @@ func (r *BuiltinRunner) prepareCodePosition(ctx context.Context, out Result, cal
 		result := codeDocumentError(out, err)
 		return resolvedCodeTarget{}, lsp.Document{}, nil, lsp.DocumentState{}, &result
 	}
-	document := lsp.Document{URI: codeFileURI(target.path), LanguageID: "go", Text: text}
+	document := lsp.Document{URI: codeFileURI(target.path), LanguageID: target.documentLanguageID, Text: text}
 	state, err := r.languageService.SyncDocument(ctx, target.spec, document)
 	if err != nil {
 		result := codeServiceError(out, err)
@@ -410,7 +410,9 @@ func (r *BuiltinRunner) codeTarget(out Result, call Call, path, language string,
 		return resolvedCodeTarget{}, &result
 	}
 	reason := "language_root_not_found"
-	if strings.Contains(err.Error(), "language_not_supported") {
+	if strings.Contains(err.Error(), "language_ambiguous") {
+		reason = "language_ambiguous"
+	} else if strings.Contains(err.Error(), "language_not_supported") {
 		reason = "language_not_supported"
 	}
 	result := toolJSONError(out, reason, err.Error())
@@ -426,13 +428,17 @@ func (r *BuiltinRunner) codeServiceUnavailable(out Result) *Result {
 }
 
 func codeUnavailableError(out Result, unavailable *languageServerUnavailableError) Result {
+	hint := unavailable.hint
+	if hint == "" {
+		hint = "Install or configure " + unavailable.server + ", then retry. Pudding did not install it automatically."
+	}
 	payload := map[string]any{
 		"ok":       false,
 		"reason":   "language_server_unavailable",
 		"language": unavailable.language,
 		"server":   unavailable.server,
 		"checked":  unavailable.checked,
-		"hint":     "Install or configure gopls, then retry. Pudding did not install it automatically.",
+		"hint":     hint,
 	}
 	return withResultSummary(toolJSON(out, false, payload), SummaryReturnedFields, len(payload))
 }

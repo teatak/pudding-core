@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -115,6 +116,108 @@ func TestDefaultGoServerResolverUsesOfflineEnvironment(t *testing.T) {
 	env := strings.Join(spec.Env, "\n")
 	if !strings.Contains(env, "GOPROXY=off") || !strings.Contains(env, "GOTOOLCHAIN=local") {
 		t.Fatalf("offline environment missing: %s", env)
+	}
+}
+
+func TestResolveTypeScriptLanguageRootPrecedence(t *testing.T) {
+	t.Run("tsconfig before closer jsconfig", func(t *testing.T) {
+		root := t.TempDir()
+		nested := filepath.Join(root, "packages", "app")
+		writeCodeTestFile(t, filepath.Join(root, "tsconfig.json"), `{}`)
+		writeCodeTestFile(t, filepath.Join(nested, "jsconfig.json"), `{}`)
+		got, fallback := resolveTypeScriptLanguageRoot(nested, root)
+		if got != root || fallback {
+			t.Fatalf("root = %q, fallback = %v", got, fallback)
+		}
+	})
+	t.Run("nearest jsconfig", func(t *testing.T) {
+		root := t.TempDir()
+		nested := filepath.Join(root, "packages", "app")
+		writeCodeTestFile(t, filepath.Join(root, "jsconfig.json"), `{}`)
+		writeCodeTestFile(t, filepath.Join(nested, "jsconfig.json"), `{}`)
+		got, fallback := resolveTypeScriptLanguageRoot(nested, root)
+		if got != nested || fallback {
+			t.Fatalf("root = %q, fallback = %v", got, fallback)
+		}
+	})
+	t.Run("package and fallback", func(t *testing.T) {
+		root := t.TempDir()
+		packageDir := filepath.Join(root, "web")
+		writeCodeTestFile(t, filepath.Join(packageDir, "package.json"), `{}`)
+		got, fallback := resolveTypeScriptLanguageRoot(filepath.Join(packageDir, "src"), root)
+		if got != packageDir || fallback {
+			t.Fatalf("package root = %q, fallback = %v", got, fallback)
+		}
+		other := filepath.Join(root, "other")
+		if err := os.MkdirAll(other, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		got, fallback = resolveTypeScriptLanguageRoot(other, root)
+		if got != root || !fallback {
+			t.Fatalf("fallback root = %q, fallback = %v", got, fallback)
+		}
+	})
+}
+
+func TestInferCodeDirectoryLanguageUsesNearestMarkers(t *testing.T) {
+	root := t.TempDir()
+	web := filepath.Join(root, "web")
+	writeCodeTestFile(t, filepath.Join(root, "go.mod"), "module example.com/mixed\n")
+	writeCodeTestFile(t, filepath.Join(root, "package.json"), `{}`)
+	writeCodeTestFile(t, filepath.Join(web, "package.json"), `{}`)
+	language, err := inferCodeDirectoryLanguage(web, root)
+	if err != nil || language != "typescript" {
+		t.Fatalf("web language = %q, err = %v", language, err)
+	}
+	if _, err := inferCodeDirectoryLanguage(root, root); err == nil || !strings.Contains(err.Error(), "language_ambiguous") {
+		t.Fatalf("mixed root should be ambiguous: %v", err)
+	}
+}
+
+func TestTypeScriptServerResolverPrefersProjectLocalBinary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("executable fixture uses a POSIX file mode")
+	}
+	projectRoot := t.TempDir()
+	languageRoot := filepath.Join(projectRoot, "packages", "app")
+	localServer := filepath.Join(projectRoot, "node_modules", ".bin", typeScriptServerKind)
+	writeCodeTestFile(t, localServer, "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(localServer, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	pathServerDir := t.TempDir()
+	writeCodeTestFile(t, filepath.Join(pathServerDir, typeScriptServerKind), "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(filepath.Join(pathServerDir, typeScriptServerKind), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", pathServerDir)
+	spec, err := defaultTypeScriptServerResolver(languageRoot, projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Command != localServer || len(spec.Args) != 1 || spec.Args[0] != "--stdio" {
+		t.Fatalf("unexpected local server spec: %+v", spec)
+	}
+	candidates := typeScriptServerCandidates(languageRoot, projectRoot)
+	if len(candidates) != 3 || candidates[0] != filepath.Join(languageRoot, "node_modules", ".bin", typeScriptServerKind) || candidates[2] != localServer {
+		t.Fatalf("candidate order: %+v", candidates)
+	}
+}
+
+func TestCodeLanguageForTypeScriptAndJavaScriptPaths(t *testing.T) {
+	tests := map[string]string{
+		"app.ts":  "typescript",
+		"app.tsx": "typescriptreact",
+		"app.js":  "javascript",
+		"app.jsx": "javascriptreact",
+		"app.mts": "typescript",
+		"app.cjs": "javascript",
+	}
+	for path, documentID := range tests {
+		language, gotDocumentID := codeLanguageForPath(path)
+		if language != "typescript" || gotDocumentID != documentID {
+			t.Fatalf("%s => %s/%s", path, language, gotDocumentID)
+		}
 	}
 }
 
@@ -270,6 +373,65 @@ func TestCodeDiagnosticsFallsBackToPublishedDiagnostics(t *testing.T) {
 	}
 }
 
+func TestTypeScriptDefinitionUsesUnifiedToolAndDocumentLanguage(t *testing.T) {
+	root := t.TempDir()
+	writeCodeTestFile(t, filepath.Join(root, "package.json"), `{"private":true}`)
+	source := filepath.Join(root, "app.tsx")
+	line := "export const use = () => target()"
+	writeCodeTestFile(t, source, "export function target() { return 1 }\n"+line+"\n")
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolvedSource := filepath.Join(resolvedRoot, "app.tsx")
+	column := len([]rune(line[:strings.Index(line, "target")])) + 1
+	service := &fakeCodeLanguageService{encoding: "utf-16"}
+	service.sync = func(document lsp.Document) (lsp.DocumentState, error) {
+		if document.LanguageID != "typescriptreact" {
+			t.Fatalf("document language = %s", document.LanguageID)
+		}
+		return lsp.DocumentState{URI: document.URI, Version: 1, Changed: true, PositionEncoding: "utf-16"}, nil
+	}
+	service.request = func(method string, _ any, result any) error {
+		if method != "textDocument/definition" {
+			t.Fatalf("unexpected method %s", method)
+		}
+		return assignCodeTestResult(result, testLocation(resolvedSource, 0, 16, 22))
+	}
+	runner := testCodeRunner(service)
+	result := runner.Call(context.Background(), Call{
+		Name:        CodeDefinition,
+		Args:        json.RawMessage(fmt.Sprintf(`{"scope":"project","path":"app.tsx","line":2,"column":%d}`, column)),
+		ProjectDirs: []string{resolvedRoot},
+	})
+	if !result.Ok {
+		t.Fatalf("TypeScript definition failed: %s", result.Content)
+	}
+	payload := decodeToolResult(t, result)
+	if payload["language"] != "typescript" || payload["server"] != typeScriptServerKind || payload["locationCount"] != float64(1) {
+		t.Fatalf("unexpected TypeScript result: %+v", payload)
+	}
+}
+
+func TestTypeScriptToolReportsUnavailableServer(t *testing.T) {
+	root := t.TempDir()
+	writeCodeTestFile(t, filepath.Join(root, "package.json"), `{"private":true}`)
+	t.Setenv("PATH", t.TempDir())
+	runner := NewBuiltinRunner(WithLanguageService(&fakeCodeLanguageService{}))
+	result := runner.Call(context.Background(), Call{
+		Name:        CodeSymbols,
+		Args:        json.RawMessage(`{"scope":"project","path":".","language":"typescript","query":"target"}`),
+		ProjectDirs: []string{root},
+	})
+	if result.Ok {
+		t.Fatalf("unavailable TypeScript server should fail: %+v", result)
+	}
+	payload := decodeToolResult(t, result)
+	if payload["reason"] != "language_server_unavailable" || payload["language"] != "typescript" || payload["server"] != typeScriptServerKind {
+		t.Fatalf("unexpected unavailable payload: %+v", payload)
+	}
+}
+
 func TestCodeToolReportsUnavailableServer(t *testing.T) {
 	root, _ := codeTestProject(t)
 	runner := NewBuiltinRunner(
@@ -297,6 +459,9 @@ func testCodeRunner(service lsp.Service) *BuiltinRunner {
 		WithLanguageService(service),
 		WithGoServerResolver(func(root string) (lsp.ServerSpec, error) {
 			return lsp.ServerSpec{Key: lsp.ProcessKey{LanguageRoot: root, ServerKind: "gopls"}, Command: "fake", Dir: root}, nil
+		}),
+		WithTypeScriptServerResolver(func(root, _ string) (lsp.ServerSpec, error) {
+			return lsp.ServerSpec{Key: lsp.ProcessKey{LanguageRoot: root, ServerKind: typeScriptServerKind}, Command: "fake", Dir: root}, nil
 		}),
 	)
 }

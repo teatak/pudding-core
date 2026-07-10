@@ -114,32 +114,33 @@ type BrowserStateStore interface {
 type BuiltinOption func(*BuiltinRunner)
 
 type BuiltinRunner struct {
-	webConfig        WebConfigSource
-	appEndpoints     AppEndpointSource
-	appSkills        AppSkillReader
-	skillReader      SkillReader
-	skillDrafts      SkillDraftSource
-	history          HistorySearchSource
-	historyMessages  HistoryMessageSource
-	browserState     BrowserStateStore
-	browser          browser.Service
-	languageService  lsp.Service
-	goServerResolver GoServerResolver
-	camera           CameraCapturer
-	screen           DesktopScreenCapturer
-	homeDir          string
-	webHTTPClient    *http.Client
-	tavilySearch     string
-	tavilyExtract    string
-	weatherEndpoint  string
-	weatherMu        sync.Mutex
-	weatherCache     map[string]weatherCacheEntry
-	graphqlSchemaMu  sync.Mutex
-	graphqlSchemas   map[string]*graphqlSchemaCache
-	patchMu          sync.Mutex
-	patchProposals   map[string]*patchProposal
-	gitApprovalMu    sync.Mutex
-	gitApprovals     map[string]gitCommitApprovalSnapshot
+	webConfig                WebConfigSource
+	appEndpoints             AppEndpointSource
+	appSkills                AppSkillReader
+	skillReader              SkillReader
+	skillDrafts              SkillDraftSource
+	history                  HistorySearchSource
+	historyMessages          HistoryMessageSource
+	browserState             BrowserStateStore
+	browser                  browser.Service
+	languageService          lsp.Service
+	goServerResolver         GoServerResolver
+	typeScriptServerResolver TypeScriptServerResolver
+	camera                   CameraCapturer
+	screen                   DesktopScreenCapturer
+	homeDir                  string
+	webHTTPClient            *http.Client
+	tavilySearch             string
+	tavilyExtract            string
+	weatherEndpoint          string
+	weatherMu                sync.Mutex
+	weatherCache             map[string]weatherCacheEntry
+	graphqlSchemaMu          sync.Mutex
+	graphqlSchemas           map[string]*graphqlSchemaCache
+	patchMu                  sync.Mutex
+	patchProposals           map[string]*patchProposal
+	gitApprovalMu            sync.Mutex
+	gitApprovals             map[string]gitCommitApprovalSnapshot
 }
 
 func NewBuiltinRunner(opts ...BuiltinOption) *BuiltinRunner {
@@ -213,6 +214,12 @@ func WithLanguageService(service lsp.Service) BuiltinOption {
 func WithGoServerResolver(resolver GoServerResolver) BuiltinOption {
 	return func(r *BuiltinRunner) {
 		r.goServerResolver = resolver
+	}
+}
+
+func WithTypeScriptServerResolver(resolver TypeScriptServerResolver) BuiltinOption {
+	return func(r *BuiltinRunner) {
+		r.typeScriptServerResolver = resolver
 	}
 }
 
@@ -319,26 +326,26 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        CodeSymbols,
-			Description: "Search semantic workspace symbols through the language server. Uses one shared tool contract across languages; the current implementation supports Go through gopls.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"path":{"type":"string","description":"Authorized project file or directory used to resolve the language root. Defaults to the first project root."},"language":{"type":"string","enum":["go"],"description":"Optional language override. Usually inferred from path."},"query":{"type":"string","description":"Non-empty symbol name query."},"max_results":{"type":"integer","minimum":1,"maximum":200,"description":"Default 100, maximum 200."}},"required":["scope","query"],"additionalProperties":false}`),
+			Description: "Search semantic workspace symbols through the language server. Uses one shared tool contract for Go and TypeScript/JavaScript.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"path":{"type":"string","description":"Authorized project file or directory used to resolve the language root. Defaults to the first project root."},"language":{"type":"string","enum":["go","typescript"],"description":"Optional language override. Use typescript for TypeScript and JavaScript; usually inferred from path."},"query":{"type":"string","description":"Non-empty symbol name query."},"max_results":{"type":"integer","minimum":1,"maximum":200,"description":"Default 100, maximum 200."}},"required":["scope","query"],"additionalProperties":false}`),
 			Capability:  store.ModeProject,
 		},
 		{
 			Name:        CodeDefinition,
 			Description: "Find semantic definitions for a 1-based source position through the language server. Project-external locations are counted but not exposed.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"path":{"type":"string","description":"Authorized source file."},"language":{"type":"string","enum":["go"],"description":"Optional language override."},"line":{"type":"integer","minimum":1,"description":"1-based line."},"column":{"type":"integer","minimum":1,"description":"1-based Unicode character column."}},"required":["scope","path","line","column"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"path":{"type":"string","description":"Authorized source file."},"language":{"type":"string","enum":["go","typescript"],"description":"Optional language override. Use typescript for TypeScript and JavaScript."},"line":{"type":"integer","minimum":1,"description":"1-based line."},"column":{"type":"integer","minimum":1,"description":"1-based Unicode character column."}},"required":["scope","path","line","column"],"additionalProperties":false}`),
 			Capability:  store.ModeProject,
 		},
 		{
 			Name:        CodeReferences,
 			Description: "Find semantic references for a 1-based source position through the language server. Results are sorted, deduplicated, bounded, and limited to authorized Project roots.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"path":{"type":"string","description":"Authorized source file."},"language":{"type":"string","enum":["go"],"description":"Optional language override."},"line":{"type":"integer","minimum":1},"column":{"type":"integer","minimum":1},"include_declaration":{"type":"boolean","description":"Defaults to true."},"max_results":{"type":"integer","minimum":1,"maximum":500,"description":"Default 100, maximum 500."}},"required":["scope","path","line","column"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"path":{"type":"string","description":"Authorized source file."},"language":{"type":"string","enum":["go","typescript"],"description":"Optional language override. Use typescript for TypeScript and JavaScript."},"line":{"type":"integer","minimum":1},"column":{"type":"integer","minimum":1},"include_declaration":{"type":"boolean","description":"Defaults to true."},"max_results":{"type":"integer","minimum":1,"maximum":500,"description":"Default 100, maximum 500."}},"required":["scope","path","line","column"],"additionalProperties":false}`),
 			Capability:  store.ModeProject,
 		},
 		{
 			Name:        CodeDiagnostics,
 			Description: "Read current semantic language-server diagnostics for up to 32 source files sharing one language root. This is static analysis and does not claim tests or builds passed.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"paths":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":32,"description":"Authorized source files in one language root."},"language":{"type":"string","enum":["go"],"description":"Optional language override."},"severity":{"type":"array","items":{"type":"string","enum":["error","warning","information","hint"]},"description":"Optional severity filter."}},"required":["scope","paths"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"paths":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":32,"description":"Authorized source files in one language root."},"language":{"type":"string","enum":["go","typescript"],"description":"Optional language override. Use typescript for TypeScript and JavaScript."},"severity":{"type":"array","items":{"type":"string","enum":["error","warning","information","hint"]},"description":"Optional severity filter."}},"required":["scope","paths"],"additionalProperties":false}`),
 			Capability:  store.ModeProject,
 		},
 		{

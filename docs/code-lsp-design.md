@@ -1,6 +1,6 @@
 # Pudding LSP 语言智能设计
 
-> 状态:实施中,C10.0 与 C10.1 已完成(2026-07-10)。
+> 状态:实施中,C10.0、C10.1 与 C10.2 已完成(2026-07-10)。
 > 对应阶段:C10。  
 > 首版语言:Go、TypeScript / JavaScript。  
 > 目标:在不引入后端 focus、隐式上下文或完整 IDE 状态的前提下,为 Project mode
@@ -713,7 +713,7 @@ PUDDING_LSP_INTEGRATION=1
 
 ### C10.2: TypeScript / JavaScript
 
-预计 2-3 天。
+状态:已完成(2026-07-10)。
 
 - TS language root resolver。
 - project-local / PATH server resolution。
@@ -721,6 +721,21 @@ PUDDING_LSP_INTEGRATION=1
 - 与 Go 共用 tool contracts。
 
 验收:已有 TypeScript server 环境能完成 TS 定义、引用和诊断。
+
+实际落地:
+
+- 四个 Code Tool 的 `language` 扩展为 `go | typescript`;JavaScript 与 JSX 统一使用
+  TypeScript adapter,没有新增语言专属工具。
+- 支持 `.ts`、`.tsx`、`.js`、`.jsx`、`.mts`、`.cts`、`.mjs`、`.cjs`,并发送
+  `typescript`、`typescriptreact`、`javascript`、`javascriptreact` document ID。
+- language root 按 `tsconfig.json`、`jsconfig.json`、`package.json`、Project root
+  fallback 解析;目录同时命中等距 Go/TypeScript root 时返回 `language_ambiguous`。
+- server resolver 从 language root 向 Project root 查找最近的
+  `node_modules/.bin/typescript-language-server`,最后回退 PATH;不安装依赖。
+- TypeScript/JavaScript 复用 UTF-16 转换、Project 二次过滤、diagnostics pull/publish
+  fallback、稳定错误和统一 transcript renderer。
+- fake service 测试覆盖 monorepo root、binary 优先级、TSX document ID、统一工具调用和
+  unavailable;`PUDDING_LSP_TS_INTEGRATION=1` 可在已有 server 环境运行真实集成测试。
 
 ### C10.3: UI 与可靠性
 

@@ -1,6 +1,6 @@
 # Pudding Code 能力设计与计划
 
-> 状态:C0、C1、C1.5、C1.6、C2、C3、C4、C5、C6、C7、C8、C9、C10.0 与 C10.1 已落地。
+> 状态:C0、C1、C1.5、C1.6、C2、C3、C4、C5、C6、C7、C8、C9、C10.0、C10.1 与 C10.2 已落地。
 > 目标:在现有 multi-session / Project tool 架构上,把 Pudding 从"可读写文件"
 > 推进到"可信的工程协作 agent"。
 
@@ -782,7 +782,7 @@ Project resolver 的安全边界。
 
 ### C10: LSP 语言智能
 
-状态:实施中,C10.0 与 C10.1 已完成(2026-07-10),总进度 50%。
+状态:实施中,C10.0、C10.1 与 C10.2 已完成(2026-07-10),总进度 75%。
 
 详细设计见 [Pudding LSP 语言智能设计](./code-lsp-design.md)。
 
@@ -809,10 +809,10 @@ Project resolver 的安全边界。
 | --- | --- | --- |
 | C10.0 | stdio JSON-RPC、process manager、cancel、fake server tests | 已完成 |
 | C10.1 | Go root resolver、gopls、四个只读工具 | 已完成 |
-| C10.2 | TypeScript root/server resolver、位置与诊断适配 | 2-3 天 |
+| C10.2 | TypeScript root/server resolver、位置与诊断适配 | 已完成 |
 | C10.3 | transcript、Canvas 定位、可靠性与全量验证 | 2 天 |
 
-总工期预计 8-10 天;C10.2-C10.3 剩余约 4-5 天。
+总工期预计 8-10 天;C10.3 剩余约 2 天。
 
 ## 11. 测试策略
 
