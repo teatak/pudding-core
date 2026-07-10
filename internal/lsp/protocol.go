@@ -123,10 +123,16 @@ type clientCapabilities struct {
 	Workspace struct {
 		Symbol        struct{} `json:"symbol"`
 		Configuration bool     `json:"configuration"`
+		WorkspaceEdit struct {
+			DocumentChanges bool `json:"documentChanges"`
+		} `json:"workspaceEdit"`
 	} `json:"workspace"`
 	TextDocument struct {
-		Definition         struct{} `json:"definition"`
-		References         struct{} `json:"references"`
+		Definition struct{} `json:"definition"`
+		References struct{} `json:"references"`
+		Rename     struct {
+			PrepareSupport bool `json:"prepareSupport"`
+		} `json:"rename"`
 		Diagnostic         struct{} `json:"diagnostic"`
 		PublishDiagnostics struct {
 			RelatedInformation bool `json:"relatedInformation"`

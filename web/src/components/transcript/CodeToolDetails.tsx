@@ -26,6 +26,7 @@ const languageCodeToolNames = new Set([
   "builtin_code_definition",
   "builtin_code_references",
   "builtin_code_diagnostics",
+  "builtin_code_rename",
 ]);
 const gitToolNames = new Set([
   "builtin_git_status",
@@ -98,6 +99,11 @@ export function codeToolSummary(name: string, args: unknown, result: unknown, t:
   }
   if (name === "builtin_code_definition" || name === "builtin_code_references") {
     return countSummary(output, "locationCount", "transcript.codeLocations", t);
+  }
+  if (name === "builtin_code_rename") {
+    const oldName = readString(output, "oldName");
+    const newName = readString(output, "newName") || readString(input, "new_name");
+    return compactText([oldName, newName].filter(Boolean).join(" → "), 100);
   }
   if (name === "builtin_git_status") {
     if (readBoolean(output, "clean")) {
@@ -190,6 +196,9 @@ function LanguageCodeDetails({ callID, name, output, sessionID, t }: { callID?: 
   if (output.ok === false) {
     return <ErrorDetail output={output} t={t} />;
   }
+  if (name === "builtin_code_rename") {
+    return <LanguageCodeRenameDetails output={output} t={t} />;
+  }
   if (name === "builtin_code_diagnostics") {
     const diagnostics = readRecordArray(output, "diagnostics");
     return (
@@ -223,6 +232,28 @@ function LanguageCodeDetails({ callID, name, output, sessionID, t }: { callID?: 
       {items.length > 0
         ? <LanguageCodeLocationList callID={callID} items={items} sessionID={sessionID} symbols={name === "builtin_code_symbols"} t={t} />
         : <EmptyLine>{t("transcript.codeNoSemanticResults")}</EmptyLine>}
+    </div>
+  );
+}
+
+function LanguageCodeRenameDetails({ output, t }: { output: UnknownRecord; t: Translator }) {
+  const oldName = readString(output, "oldName");
+  const newName = readString(output, "newName");
+  const editCount = readNumber(output, "editCount");
+  return (
+    <div className="space-y-2">
+      <div className="flex min-w-0 items-center gap-2 text-[12px] text-foreground/90">
+        {oldName ? <code className="min-w-0 truncate font-mono">{oldName}</code> : null}
+        {oldName ? <ArrowRight aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" /> : null}
+        <code className="min-w-0 truncate font-mono font-medium">{newName}</code>
+      </div>
+      <FileResultMeta
+        values={[
+          ...codeLanguageMeta(output, t),
+          editCount != null ? replace(t("transcript.codeReplacementCount"), { count: String(editCount) }) : "",
+        ]}
+      />
+      <PatchDetails output={output} t={t} />
     </div>
   );
 }
@@ -1063,6 +1094,13 @@ function codeErrorMessage(output: UnknownRecord, t: Translator) {
     language_server_unavailable: "transcript.codeErrorServerUnavailable",
     mixed_language_targets: "transcript.codeErrorMixedTargets",
     path_not_authorized: "transcript.codeErrorPathUnauthorized",
+    rename_failed: "transcript.codeErrorRenameFailed",
+    rename_no_changes: "transcript.codeErrorRenameNoChanges",
+    rename_not_available: "transcript.codeErrorRenameNotAvailable",
+    rename_outside_project: "transcript.codeErrorRenameOutsideProject",
+    rename_rejected: "transcript.codeErrorRenameRejected",
+    rename_too_large: "transcript.codeErrorRenameTooLarge",
+    unsafe_workspace_edit: "transcript.codeErrorUnsafeWorkspaceEdit",
   };
   const key = keys[reason];
   return key ? replace(t(key), { server }) : "";

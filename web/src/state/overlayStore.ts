@@ -95,12 +95,15 @@ type OverlayState = {
   pendingUsers: Record<string, PendingUserMessage[]>;
   assistants: Record<string, AssistantOverlay>;
   compactRuns: Record<string, CompactRun | undefined>;
+  completedSessions: Record<string, boolean | undefined>;
   runningTurns: Record<string, string | undefined>;
   turnPhases: Record<string, TurnPhaseState | undefined>;
   lastEventSeqs: Record<string, number | undefined>;
   addPendingUser: (message: PendingUserMessage) => void;
   startCompactRun: (sessionID: string) => void;
   finishCompactRun: (sessionID: string) => void;
+  markSessionCompleted: (sessionID: string) => void;
+  clearSessionCompletion: (sessionID: string) => void;
   startSubmittingTurn: (sessionID: string, clientMessageID: string) => void;
   acceptSubmittingTurn: (sessionID: string, clientMessageID: string, turnID: string) => void;
   clearSubmittingTurn: (sessionID: string, clientMessageID: string) => void;
@@ -302,6 +305,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
   pendingUsers: {},
   assistants: {},
   compactRuns: {},
+  completedSessions: {},
   runningTurns: {},
   turnPhases: {},
   lastEventSeqs: {},
@@ -324,6 +328,21 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       const compactRuns = { ...state.compactRuns };
       delete compactRuns[sessionID];
       return { compactRuns };
+    }),
+  markSessionCompleted: (sessionID) =>
+    set((state) =>
+      state.completedSessions[sessionID]
+        ? state
+        : { completedSessions: { ...state.completedSessions, [sessionID]: true } },
+    ),
+  clearSessionCompletion: (sessionID) =>
+    set((state) => {
+      if (!state.completedSessions[sessionID]) {
+        return state;
+      }
+      const completedSessions = { ...state.completedSessions };
+      delete completedSessions[sessionID];
+      return { completedSessions };
     }),
   startSubmittingTurn: (sessionID, clientMessageID) =>
     set((state) => ({
@@ -679,11 +698,13 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       delete turnPhases[sessionID];
       const compactRuns = { ...state.compactRuns };
       delete compactRuns[sessionID];
+      const completedSessions = { ...state.completedSessions };
+      delete completedSessions[sessionID];
       const lastEventSeqs = { ...state.lastEventSeqs };
       delete lastEventSeqs[sessionID];
       const assistants = Object.fromEntries(
         Object.entries(state.assistants).filter(([, overlay]) => overlay.sessionID !== sessionID),
       );
-      return { pendingUsers, runningTurns, turnPhases, compactRuns, lastEventSeqs, assistants };
+      return { pendingUsers, runningTurns, turnPhases, compactRuns, completedSessions, lastEventSeqs, assistants };
     }),
 }));

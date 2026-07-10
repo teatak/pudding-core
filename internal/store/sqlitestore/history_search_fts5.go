@@ -18,7 +18,8 @@ func recoverableHistorySearchError(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "database disk image is malformed") ||
-		strings.Contains(msg, "messages_fts")
+		strings.Contains(msg, "messages_fts") ||
+		strings.Contains(msg, "messages_terms_fts")
 }
 
 func (s *Store) repairHistorySearch(ctx context.Context) error {
@@ -31,37 +32,88 @@ func ensureHistorySearch(db *sql.DB) error {
 	if err := rebuildMessagesFTSIfWrongTokenizer(db); err != nil {
 		return fmt.Errorf("sqlite: rebuild messages fts5: %w", err)
 	}
-	if _, err := db.Exec(messagesFTS5Schema); err != nil {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("sqlite: begin messages fts5 migration: %w", err)
+	}
+	defer tx.Rollback()
+	messagesFTSExists, err := ftsTableExists(tx, "messages_fts")
+	if err != nil {
+		return fmt.Errorf("sqlite: inspect messages fts5: %w", err)
+	}
+	messagesTermsFTSExists, err := ftsTableExists(tx, "messages_terms_fts")
+	if err != nil {
+		return fmt.Errorf("sqlite: inspect message terms fts5: %w", err)
+	}
+	if _, err := tx.Exec(messagesFTS5Schema); err != nil {
 		return fmt.Errorf("sqlite: apply messages fts5 schema: %w", err)
 	}
-	if err := backfillMessagesFTS(db); err != nil {
-		return fmt.Errorf("sqlite: backfill messages fts5: %w", err)
+	if !messagesFTSExists {
+		if _, err := tx.Exec(`INSERT INTO messages_fts(messages_fts) VALUES('rebuild')`); err != nil {
+			return fmt.Errorf("sqlite: populate messages fts5: %w", err)
+		}
+	}
+	if !messagesTermsFTSExists {
+		if _, err := tx.Exec(`INSERT INTO messages_terms_fts(messages_terms_fts) VALUES('rebuild')`); err != nil {
+			return fmt.Errorf("sqlite: populate message terms fts5: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("sqlite: commit messages fts5 migration: %w", err)
 	}
 	return nil
 }
 
 func resetMessagesFTS(ctx context.Context, db *sql.DB) error {
-	if _, err := db.ExecContext(ctx, `
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
 DROP TRIGGER IF EXISTS messages_ai;
 DROP TRIGGER IF EXISTS messages_ad;
 DROP TRIGGER IF EXISTS messages_au;
+DROP TRIGGER IF EXISTS messages_terms_ai;
+DROP TRIGGER IF EXISTS messages_terms_ad;
+DROP TRIGGER IF EXISTS messages_terms_au;
 DROP TABLE IF EXISTS messages_fts;
+DROP TABLE IF EXISTS messages_terms_fts;
 `); err != nil {
 		return err
 	}
-	if _, err := db.ExecContext(ctx, messagesFTS5Schema); err != nil {
+	if _, err := tx.ExecContext(ctx, messagesFTS5Schema); err != nil {
 		return err
 	}
-	_, err := db.ExecContext(ctx, `INSERT INTO messages_fts(messages_fts) VALUES('rebuild')`)
-	return err
+	if _, err := tx.ExecContext(ctx, `INSERT INTO messages_fts(messages_fts) VALUES('rebuild')`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO messages_terms_fts(messages_terms_fts) VALUES('rebuild')`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 const messagesFTS5Schema = `
+DROP TRIGGER IF EXISTS messages_ai;
+DROP TRIGGER IF EXISTS messages_ad;
+DROP TRIGGER IF EXISTS messages_au;
+DROP TRIGGER IF EXISTS messages_terms_ai;
+DROP TRIGGER IF EXISTS messages_terms_ad;
+DROP TRIGGER IF EXISTS messages_terms_au;
+
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
   text,
   content='messages',
   content_rowid='rowid',
   tokenize='trigram'
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_terms_fts USING fts5(
+  search_tokens,
+  content='messages',
+  content_rowid='rowid',
+  tokenize='unicode61 remove_diacritics 2'
 );
 
 CREATE TRIGGER IF NOT EXISTS messages_ai
@@ -75,11 +127,42 @@ CREATE TRIGGER IF NOT EXISTS messages_ad
   END;
 
 CREATE TRIGGER IF NOT EXISTS messages_au
-  AFTER UPDATE ON messages BEGIN
+  AFTER UPDATE OF text ON messages BEGIN
     INSERT INTO messages_fts(messages_fts, rowid, text) VALUES('delete', old.rowid, old.text);
     INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
   END;
+
+CREATE TRIGGER IF NOT EXISTS messages_terms_ai
+  AFTER INSERT ON messages BEGIN
+    INSERT INTO messages_terms_fts(rowid, search_tokens) VALUES (new.rowid, new.search_tokens);
+  END;
+
+CREATE TRIGGER IF NOT EXISTS messages_terms_ad
+  AFTER DELETE ON messages BEGIN
+    INSERT INTO messages_terms_fts(messages_terms_fts, rowid, search_tokens) VALUES('delete', old.rowid, old.search_tokens);
+  END;
+
+CREATE TRIGGER IF NOT EXISTS messages_terms_au
+  AFTER UPDATE OF search_tokens ON messages BEGIN
+    INSERT INTO messages_terms_fts(messages_terms_fts, rowid, search_tokens) VALUES('delete', old.rowid, old.search_tokens);
+    INSERT INTO messages_terms_fts(rowid, search_tokens) VALUES (new.rowid, new.search_tokens);
+  END;
 `
+
+type ftsRowQuerier interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+func ftsTableExists(db ftsRowQuerier, name string) (bool, error) {
+	var count int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`,
+		name,
+	).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
 
 func rebuildMessagesFTSIfWrongTokenizer(db *sql.DB) error {
 	var ftsSQL string
@@ -104,23 +187,4 @@ DROP TABLE messages_fts;
 		return err
 	}
 	return nil
-}
-
-func backfillMessagesFTS(db *sql.DB) error {
-	var ftsCount int
-	if err := db.QueryRow(`SELECT count(*) FROM messages_fts`).Scan(&ftsCount); err != nil {
-		return err
-	}
-	if ftsCount > 0 {
-		return nil
-	}
-	var msgCount int
-	if err := db.QueryRow(`SELECT count(*) FROM messages WHERE text != ''`).Scan(&msgCount); err != nil {
-		return err
-	}
-	if msgCount == 0 {
-		return nil
-	}
-	_, err := db.Exec(`INSERT INTO messages_fts(rowid, text) SELECT rowid, text FROM messages WHERE text != ''`)
-	return err
 }

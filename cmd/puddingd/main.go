@@ -5,8 +5,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -19,6 +21,7 @@ import (
 	"github.com/teatak/pudding-core/internal/prompt"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
+	"github.com/teatak/pudding-core/internal/toolreport"
 )
 
 func main() {
@@ -29,8 +32,13 @@ func main() {
 }
 
 func run() error {
-	if len(os.Args) > 1 && os.Args[1] == "prompt" {
-		return runPrompt(os.Args[2:])
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "prompt":
+			return runPrompt(os.Args[2:])
+		case "tools":
+			return runTools(os.Args[2:], os.Stdout, os.Stderr, time.Now())
+		}
 	}
 
 	var (
@@ -64,6 +72,64 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return d.Shutdown(shutdownCtx)
+}
+
+func runTools(args []string, stdout, stderr io.Writer, now time.Time) error {
+	if len(args) == 0 {
+		return errors.New("usage: puddingd tools report [flags]")
+	}
+	switch args[0] {
+	case "report":
+		return runToolsReport(args[1:], stdout, stderr, now)
+	case "help", "-h", "--help":
+		_, err := fmt.Fprintln(stdout, "usage: puddingd tools report [--days 30] [--home PATH] [--all] [--json]")
+		return err
+	default:
+		return fmt.Errorf("unknown tools command %q; usage: puddingd tools report [flags]", args[0])
+	}
+}
+
+func runToolsReport(args []string, stdout, stderr io.Writer, now time.Time) error {
+	fs := flag.NewFlagSet("tools report", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	flagHome := fs.String("home", "", "data home (default: channel home, see docs)")
+	flagDays := fs.Int("days", 30, "number of recent days to include (1-3650)")
+	flagAll := fs.Bool("all", false, "include current built-in tools with zero calls")
+	flagJSON := fs.Bool("json", false, "print machine-readable JSON")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected tools report arguments: %v", fs.Args())
+	}
+	if *flagDays < 1 || *flagDays > 3650 {
+		return errors.New("tools report --days must be between 1 and 3650")
+	}
+	dir, err := home.Resolve(*flagHome)
+	if err != nil {
+		return err
+	}
+	until := now.UTC()
+	report, err := toolreport.Generate(context.Background(), home.DBPath(dir), toolreport.Options{
+		Since:         until.Add(-time.Duration(*flagDays) * 24 * time.Hour),
+		Until:         until,
+		IncludeUnused: *flagAll,
+	})
+	if err != nil {
+		return err
+	}
+	if *flagJSON {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(report)
+	}
+	if _, err := fmt.Fprintf(stdout, "Data: %s\n", home.DBPath(dir)); err != nil {
+		return err
+	}
+	return toolreport.WriteText(stdout, report)
 }
 
 func runPrompt(args []string) error {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,6 +51,7 @@ func TestCodeToolsWithGopls(t *testing.T) {
 			t.Fatalf("%s returned no semantic results: %+v", call.Name, payload)
 		}
 	}
+	assertRealCodeRename(t, ctx, runner, root, "main.go", 5, 14, "Target", "RenamedTarget")
 }
 
 func TestCodeToolsWithTypeScriptLanguageServer(t *testing.T) {
@@ -91,5 +93,62 @@ func TestCodeToolsWithTypeScriptLanguageServer(t *testing.T) {
 		if number, ok := count.(float64); !ok || number < 1 {
 			t.Fatalf("%s returned no semantic results: %+v", call.Name, payload)
 		}
+	}
+	assertRealCodeRename(t, ctx, runner, root, "main.ts", 2, 20, "target", "renamedTarget")
+}
+
+func assertRealCodeRename(t *testing.T, ctx context.Context, runner *BuiltinRunner, root, path string, line, column int, oldName, newName string) {
+	t.Helper()
+	target := filepath.Join(root, path)
+	before, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawArgs, _ := json.Marshal(map[string]any{
+		"scope":    "project",
+		"path":     path,
+		"line":     line,
+		"column":   column,
+		"new_name": newName,
+	})
+	rename := runner.Call(ctx, Call{
+		SessionID:   "session_integration",
+		TurnID:      "turn_integration",
+		CallID:      "call_rename",
+		Name:        CodeRename,
+		Args:        rawArgs,
+		ProjectDirs: []string{root},
+	})
+	if !rename.Ok {
+		t.Fatalf("real %s rename failed: %s", filepath.Ext(path), rename.Content)
+	}
+	payload := decodeToolResult(t, rename)
+	if payload["operation"] != "rename" || payload["newName"] != newName {
+		t.Fatalf("unexpected real rename payload: %+v", payload)
+	}
+	afterProposal, err := os.ReadFile(target)
+	if err != nil || string(afterProposal) != string(before) {
+		t.Fatalf("real rename changed source before apply: err=%v", err)
+	}
+	proposalID, _ := payload["proposalID"].(string)
+	applyArgs, _ := json.Marshal(map[string]string{"proposal_id": proposalID})
+	applied := runner.Call(ctx, Call{
+		SessionID:   "session_integration",
+		TurnID:      "turn_integration",
+		CallID:      "call_apply",
+		Name:        PatchApply,
+		Args:        applyArgs,
+		ProjectDirs: []string{root},
+	})
+	if !applied.Ok {
+		t.Fatalf("real %s rename apply failed: %s", filepath.Ext(path), applied.Content)
+	}
+	afterApply, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := strings.ReplaceAll(string(before), oldName, newName)
+	if string(afterApply) != expected || strings.Count(string(afterApply), newName) != 2 {
+		t.Fatalf("real rename did not update declaration and reference: %q", afterApply)
 	}
 }

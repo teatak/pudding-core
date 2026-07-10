@@ -812,23 +812,22 @@ C10 至此完成。
 - LSP 结果有界并作为正常 canonical tool result 保存。
 - server 缺失、崩溃、超时都有稳定结构化错误。
 - Go 和 TypeScript 使用同一组用户可见 tool names 与 renderer contract。
-- 首版没有 rename、applyEdit 或隐式文件写入。
+- C10 首版没有 rename、applyEdit 或隐式文件写入。
 - 用户运行时不触发 language server 安装或依赖下载。
 - `go test ./...`、Web build 与 `git diff --check` 通过。
 
 ## 18. 后续方向
 
-完成 C10 后再评估:
+C11 已按 Patch Proposal 路径落地 rename。继续评估:
 
 - Windows/Linux language server 发布资源与启动器。
 - 是否用独立 Node runtime 替代 Electron `runAsNode` fuse 依赖。
 - hover / document symbols / call hierarchy。
-- rename proposal:必须转成 Patch Proposal,不能由 LSP 直接写盘。
 - code action proposal:只接受 WorkspaceEdit,转换为可审阅 diff。
 - LSP progress live event。
 - Project 级 language server 显式配置。
 
-rename 与 code action 即使后续实现,也必须走:
+rename 与后续 code action 必须走:
 
 ```text
 LSP WorkspaceEdit

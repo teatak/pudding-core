@@ -17,6 +17,8 @@ import {
   listProjectsResponse,
   listQueuedInputsResponse,
   listSessionsResponse,
+  searchSessionMessagesRequest,
+  searchSessionMessagesResponse,
   listTurnsResponse,
   message,
   patchQueuedInputRequest,
@@ -274,6 +276,16 @@ export function createMobilePairing(token: string): Promise<MobilePairing> {
 
 export function listSessions(token: string): Promise<{ sessions: Session[] }> {
   return request(token, "/sessions", listSessionsResponse);
+}
+
+export function searchSessionMessages(
+  token: string,
+  body: z.infer<typeof searchSessionMessagesRequest>,
+): Promise<{ messages: Message[] }> {
+  return request(token, "/sessions/search", searchSessionMessagesResponse, {
+    method: "POST",
+    body: JSON.stringify(searchSessionMessagesRequest.parse(body)),
+  });
 }
 
 export function listProjects(token: string): Promise<{ projects: Project[] }> {

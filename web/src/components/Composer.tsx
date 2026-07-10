@@ -7,7 +7,6 @@ import {
   Check,
   FileText,
   FolderOpen,
-  Loader2,
   MessageSquarePlus,
   NotebookText,
   Pause,
@@ -32,6 +31,8 @@ import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 
+import { Spinner } from "@/components/Spinner";
+
 import {
   APIError,
   approveApproval,
@@ -40,19 +41,16 @@ import {
   captureDesktopScreenshot,
   compactSession,
   denyApproval,
-  getProject,
   getAudioBindings,
   getTurn,
   listApps,
   listSkills,
   submitMessage,
-  updateProject,
   updateSession,
   uploadAttachment,
   revealDesktopPath,
   type Attachment,
   type ContentPart,
-  type Project,
   type Session,
   type SkillDraft,
 } from "@/api/client";
@@ -68,6 +66,7 @@ import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbo
 import { InputFlowPanel, type InputFlowSubmission } from "@/components/transcript/InputFlowToolPart";
 import { Mascot, type MascotGaze, type MascotGazePoint, type MascotMood } from "@/components/Mascot";
 import { PatchProposalDiffDialog, type PatchProposalApproval } from "@/components/PatchProposalDiffDialog";
+import { ProjectComposerControls } from "@/components/ProjectComposerControls";
 import { SessionAudioControls } from "@/components/SessionAudioControls";
 import { SkillDraftDiffDialog } from "@/components/SkillDraftDiffDialog";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
@@ -75,7 +74,6 @@ import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
 import { reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useComposerSelectionGuard } from "@/hooks/useComposerSelectionGuard";
@@ -166,11 +164,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const pendingInputFlow = useInputFlowStore((state) => state.requests.find((request) => request.sessionID === sessionID));
   const running = overlayRunning || session.running;
   const projectID = session.projectID || "";
-  const projectQuery = useQuery({
-    queryKey: queryKeys.project(projectID),
-    queryFn: () => getProject(token, projectID),
-    enabled: Boolean(token && projectID),
-  });
   const audioBindingsQuery = useQuery({
     queryKey: queryKeys.audioBindings(),
     queryFn: () => getAudioBindings(token, sessionID),
@@ -361,35 +354,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     },
     [queryClient, resolvedModelKey, sessionID, token],
   );
-  const updateProjectApprovalMutation = useMutation({
-    mutationFn: (approvalMode: Project["approvalMode"]) => {
-      if (!projectID) {
-        throw new Error("missing project");
-      }
-      return updateProject(token, projectID, { approvalMode });
-    },
-    onSuccess: (updated) => {
-      queryClient.setQueryData(queryKeys.project(updated.id), updated);
-      queryClient.setQueryData<{ projects: Project[] }>(queryKeys.projects(), (previous) => {
-        if (!previous) {
-          return previous;
-        }
-        return {
-          projects: previous.projects.map((project) => (project.id === updated.id ? updated : project)),
-        };
-      });
-    },
-    onError: () => {
-      toast.error(t("composer.projectApprovalSaveFailed"));
-    },
-    onSettled: (_data, _error, _variables) => {
-      if (projectID) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.project(projectID) });
-      }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.projects() });
-    },
-  });
-
   useEffect(() => {
     if (!slashMenuOpen) {
       setSlashSelectedIndex(0);
@@ -1197,12 +1161,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
                 label={t("composer.addMenuTitle")}
                 onClick={openMentionMenuFromButton}
               />
-              <ProjectApprovalControl
-                project={projectQuery.data}
-                projectID={projectID}
-                busy={projectQuery.isLoading || updateProjectApprovalMutation.isPending}
-                onChange={(approvalMode) => updateProjectApprovalMutation.mutate(approvalMode)}
-              />
+              <ProjectComposerControls projectID={projectID} token={token} />
               {compactMutation.isPending ? (
                 <span
                   aria-live="polite"
@@ -1245,7 +1204,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
                       }}
                     >
                       {cancelMutation.isPending ? (
-                        <Loader2 className="animate-spin" />
+                        <Spinner />
                       ) : (
                         <span aria-hidden="true" className="size-2.5 rounded-[2px] bg-current" />
                       )}
@@ -1266,7 +1225,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
                       variant={sendEnabled ? "default" : "secondary"}
                     >
                       {submitMutation.isPending || compactMutation.isPending || systemSubmitMutation.isPending || renameMutation.isPending ? (
-                        <Loader2 className="animate-spin" />
+                        <Spinner />
                       ) : (
                         <ArrowUp />
                       )}
@@ -1340,77 +1299,6 @@ function LocalFolderChip({
   );
 }
 
-const projectApprovalModes: Project["approvalMode"][] = ["ask", "auto", "full"];
-
-function ProjectApprovalControl({
-  project,
-  projectID,
-  busy,
-  onChange,
-}: {
-  project: Project | undefined;
-  projectID: string;
-  busy: boolean;
-  onChange: (approvalMode: Project["approvalMode"]) => void;
-}) {
-  const { t } = useI18n();
-  const [open, setOpen] = useState(false);
-  if (!projectID) {
-    return null;
-  }
-  const value = project?.approvalMode || "auto";
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          aria-label={t("composer.projectApproval")}
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={!project || busy}
-          className="h-7 max-w-32 gap-1.5 rounded-full px-2 text-xs font-normal"
-        >
-          {busy ? <Loader2 className="size-3 shrink-0 animate-spin" /> : <ShieldCheck className="size-3 shrink-0 text-muted-foreground" />}
-          <span className="min-w-0 truncate">{t(`composer.projectApproval.${value}`)}</span>
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        className="w-56 gap-1 p-1"
-        collisionPadding={12}
-        side="top"
-        sideOffset={8}
-      >
-        {projectApprovalModes.map((mode) => (
-          <button
-            key={mode}
-            aria-label={t("composer.projectApproval")}
-            className={cn(
-              "flex w-full items-start gap-1.5 rounded-md px-2 py-0.5 text-left text-sm hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden",
-              value === mode && "bg-muted",
-            )}
-            type="button"
-            onClick={() => {
-              if (mode !== value) {
-                onChange(mode);
-              }
-              setOpen(false);
-            }}
-          >
-            <span className="mt-0.5 grid size-4 shrink-0 place-items-center">
-              {value === mode ? <Check className="size-3.5" /> : null}
-            </span>
-            <span className="grid min-w-0">
-              <span className="font-medium leading-5">{t(`composer.projectApproval.${mode}`)}</span>
-              <span className="text-[10px] leading-3.5 text-muted-foreground">{t(`composer.projectApproval.${mode}.desc`)}</span>
-            </span>
-          </button>
-        ))}
-      </PopoverContent>
-    </Popover>
-  );
-}
-
 function ComposerAttachmentChip({
   item,
   previewIndex,
@@ -1454,7 +1342,7 @@ function ComposerAttachmentChip({
         </button>
         {busy ? (
           <span className="absolute inset-0 grid place-items-center bg-background/45">
-            <Loader2 className="size-4 animate-spin text-foreground" />
+            <Spinner className="size-4 text-foreground" />
           </span>
         ) : null}
         <button
@@ -1484,7 +1372,7 @@ function ComposerAttachmentChip({
     >
       <span className="grid size-4 shrink-0 place-items-center text-muted-foreground">
         {busy ? (
-          <Loader2 className="size-4 animate-spin" strokeWidth={1.8} />
+          <Spinner className="size-4" />
         ) : audio ? (
           <AudioPreviewButton label={item.name} src={attachmentResourceURL(item.attachment, token)} />
         ) : (
@@ -1924,7 +1812,7 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
                 variant="secondary"
                 onClick={() => void pickProjectDirs()}
               >
-                {pickingProjectDir ? <Loader2 className="size-3 animate-spin" /> : <FolderOpen className="size-3" />}
+                {pickingProjectDir ? <Spinner className="size-3" /> : <FolderOpen className="size-3" />}
                 {t("transcript.approvalProjectDirChoose")}
               </Button>
               {suggestedDirName ? <span className="text-[11px] text-muted-foreground">{t("transcript.approvalProjectDirsSuggested").replace("{name}", suggestedDirName)}</span> : null}
@@ -1968,7 +1856,7 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
               type="button"
               onClick={() => void approve("turn")}
             >
-              {pendingAction === "turn" ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
+              {pendingAction === "turn" ? <Spinner className="size-3" /> : <Check className="size-3" />}
               {patchProposal
                 ? t("transcript.approvalPatchApply")
                 : gitCommitApproval
@@ -1995,7 +1883,7 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
               type="button"
               onClick={() => void approve("turn")}
             >
-              {pendingAction === "turn" ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
+              {pendingAction === "turn" ? <Spinner className="size-3" /> : <Check className="size-3" />}
               {t("transcript.approvalPublishSkillDraft")}
             </Button>
           </>
@@ -2008,7 +1896,7 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
               type="button"
               onClick={() => void approve("turn")}
             >
-              {pendingAction === "turn" ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
+              {pendingAction === "turn" ? <Spinner className="size-3" /> : <Check className="size-3" />}
               {t("transcript.approvalAllowTurn")}
             </Button>
             <Button
@@ -2019,7 +1907,7 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
               variant="secondary"
               onClick={() => void approve("session")}
             >
-              {pendingAction === "session" ? <Loader2 className="size-3 animate-spin" /> : <ShieldCheck className="size-3" />}
+              {pendingAction === "session" ? <Spinner className="size-3" /> : <ShieldCheck className="size-3" />}
               {t("transcript.approvalAllowSession")}
             </Button>
           </>
@@ -2032,7 +1920,7 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
           variant="ghost"
           onClick={() => void deny()}
         >
-          {pendingAction === "deny" ? <Loader2 className="size-3 animate-spin" /> : <X className="size-3" />}
+          {pendingAction === "deny" ? <Spinner className="size-3" /> : <X className="size-3" />}
           {t("transcript.approvalDeny")}
         </Button>
       </div>

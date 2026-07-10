@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowUp, CircleAlert, FileText, FolderOpen, Loader2, Pause, Play, Upload, X } from "lucide-react";
+import { ArrowUp, CircleAlert, FileText, FolderOpen, Pause, Play, Upload, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -17,6 +17,8 @@ import {
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
+
+import { Spinner } from "@/components/Spinner";
 
 import {
   APIError,
@@ -52,6 +54,7 @@ import { AudioControlButtons } from "@/components/SessionAudioControls";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
 import { ProviderProfileEditorDialog } from "@/components/ProviderProfileEditorDialog";
 import { ProviderCustomCard, ProviderPresetCreateDialog, ProviderPresetGrid } from "@/components/ProviderPresetCreateDialog";
+import { ProjectComposerControls } from "@/components/ProjectComposerControls";
 import { reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -1251,6 +1254,7 @@ function DraftComposer({
                 label={t("composer.addMenuTitle")}
                 onClick={openMentionMenuFromButton}
               />
+              <ProjectComposerControls projectID={projectID || ""} showProjectName token={token} />
               <ModelReasoningPicker
                 className="ml-auto min-w-0"
                 token={token}
@@ -1284,7 +1288,7 @@ function DraftComposer({
                     type="submit"
                     variant={sendEnabled ? "default" : "secondary"}
                   >
-                    {submitMutation.isPending ? <Loader2 className="animate-spin" /> : <ArrowUp />}
+                    {submitMutation.isPending ? <Spinner /> : <ArrowUp />}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>{t("composer.send")}</TooltipContent>
@@ -1410,7 +1414,7 @@ function DraftAttachmentChip({
         </button>
         {busy ? (
           <span className="absolute inset-0 grid place-items-center bg-background/45">
-            <Loader2 className="size-4 animate-spin text-foreground" />
+            <Spinner className="size-4 text-foreground" />
           </span>
         ) : null}
         <button
@@ -1441,7 +1445,7 @@ function DraftAttachmentChip({
     >
       <span className="grid size-4 shrink-0 place-items-center text-muted-foreground">
         {busy ? (
-          <Loader2 className="size-4 animate-spin" strokeWidth={1.8} />
+          <Spinner className="size-4" />
         ) : audio ? (
           <DraftAudioPreviewButton label={item.name} src={draftAttachmentImageSource(item, token)} />
         ) : (

@@ -154,6 +154,7 @@ CREATE TABLE IF NOT EXISTS messages (
     role              TEXT    NOT NULL,
     kind              TEXT    NOT NULL DEFAULT '',
     text              TEXT    NOT NULL,
+    search_tokens     TEXT    NOT NULL DEFAULT '', -- 由应用层分词生成,不进入 canonical context
     parts             TEXT    NOT NULL DEFAULT '[]',
     turn_index        INTEGER NOT NULL DEFAULT 0,
     metadata          TEXT    NOT NULL DEFAULT '{}',

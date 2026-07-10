@@ -16,12 +16,13 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Compass, FileCode2, Loader2, SquareTerminal, X } from "lucide-react";
+import { Compass, FileCode2, SquareTerminal, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import type { BrowserTab, Terminal } from "@/api/client";
 import { browserTabFaviconURL, browserTabTitle } from "@/browser/helpers";
 import type { CanvasSurface } from "@/browser/types";
+import { Spinner } from "@/components/Spinner";
 import { useHorizontalScrollMask } from "@/hooks/useHorizontalScrollMask";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
@@ -321,7 +322,7 @@ function SortableSurfaceTabButton({
           }
         }}
       >
-        {closePending ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
+        {closePending ? <Spinner className="h-3 w-3" /> : <X className="h-3 w-3" />}
       </span>
     </button>
   );

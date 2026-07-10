@@ -507,6 +507,8 @@ type MessageSearchInput struct {
 	SessionID string
 	Query     string
 	Limit     int
+	// Literal treats Query as user-entered text instead of an FTS expression.
+	Literal bool
 }
 
 func TextPart(text string) []ContentPart {

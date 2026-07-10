@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ChevronRight, CircleAlert, CircleCheck, CircleDashed, Download, Eye, EyeOff, KeyRound, Loader2, Package, Pencil, Plus, Settings2, Trash } from "lucide-react";
+import { ArrowLeft, ChevronRight, CircleAlert, CircleCheck, CircleDashed, Download, Eye, EyeOff, KeyRound, Package, Pencil, Plus, Settings2, Trash } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -32,6 +32,7 @@ import {
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { AppIcon, mergeAppIconSpec, type AppIconSpec } from "@/components/AppIcon";
+import { Spinner } from "@/components/Spinner";
 import { DialogSelectContent } from "@/components/DialogSelectContent";
 import { PageHeader } from "@/components/PageHeader";
 import {
@@ -495,7 +496,7 @@ export function AppsPane({ token }: { token: string }) {
                 }
               }}
             >
-              {deleteMutation.isPending ? <Loader2 className="animate-spin" /> : <Trash />}
+              {deleteMutation.isPending ? <Spinner /> : <Trash />}
               {t("common.delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -519,7 +520,7 @@ export function AppsPane({ token }: { token: string }) {
                 }
               }}
             >
-              {uninstallMutation.isPending ? <Loader2 className="animate-spin" /> : <Trash />}
+              {uninstallMutation.isPending ? <Spinner /> : <Trash />}
               {t("apps.uninstall")}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -537,7 +538,7 @@ function SectionSpinner() {
   const { t } = useI18n();
   return (
     <div className="flex h-24 items-center justify-center text-muted-foreground">
-      <Loader2 aria-label={t("common.loading")} className="size-4 animate-spin" />
+      <Spinner aria-label={t("common.loading")} className="size-4" />
     </div>
   );
 }
@@ -1037,7 +1038,7 @@ function CatalogAppItem({
         variant="outline"
         onClick={onInstall}
       >
-        {installing ? <Loader2 className="size-3.5 animate-spin" /> : upgradeAvailable ? <Download className="size-3.5" /> : null}
+        {installing ? <Spinner className="size-3.5" /> : upgradeAvailable ? <Download className="size-3.5" /> : null}
         {alreadyInstalled ? t("apps.installedAction") : upgradeAvailable ? t("apps.upgrade") : t("apps.install")}
       </Button>
     </section>
@@ -1120,7 +1121,7 @@ function CatalogAppDetail({
                   type="button"
                   onClick={onInstall}
                 >
-                  {installing ? <Loader2 className="size-4 animate-spin" /> : upgradeAvailable ? <Download className="size-4" /> : null}
+                  {installing ? <Spinner className="size-4" /> : upgradeAvailable ? <Download className="size-4" /> : null}
                   {alreadyInstalled ? t("apps.installedAction") : upgradeAvailable ? t("apps.upgrade") : t("apps.install")}
                 </Button>
               </div>
@@ -1479,7 +1480,7 @@ function MCPStatusDetails({
 }) {
   const { t } = useI18n();
   if (loading) {
-    return <MCPStatusLine icon={<Loader2 className="size-3.5 animate-spin" />} label={t("apps.mcpStatus.checking")} tone="muted" />;
+    return <MCPStatusLine icon={<Spinner className="size-3.5" />} label={t("apps.mcpStatus.checking")} tone="muted" />;
   }
   if (failed) {
     return <MCPStatusLine icon={<CircleAlert className="size-3.5" />} label={t("apps.mcpStatus.unavailable")} tone="bad" />;
@@ -2320,12 +2321,12 @@ function ConnectionDialog({
           </Button>
           {isOAuth ? (
             <Button disabled={!canStartOAuth} type="button" onClick={() => startOAuthMutation.mutate()}>
-              {startOAuthMutation.isPending ? <Loader2 className="animate-spin" /> : null}
+              {startOAuthMutation.isPending ? <Spinner /> : null}
               {connection ? t("apps.reauthorizeConnection") : t("apps.authorizeConnection")}
             </Button>
           ) : (
             <Button disabled={!canSave} type="button" onClick={() => saveMutation.mutate()}>
-              {saveMutation.isPending ? <Loader2 className="animate-spin" /> : null}
+              {saveMutation.isPending ? <Spinner /> : null}
               {t("common.save")}
             </Button>
           )}

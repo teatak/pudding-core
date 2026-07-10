@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { Check, Loader2, Trash } from "lucide-react";
+import { Check, Trash } from "lucide-react";
 import ReactDiffViewer, { DiffMethod } from "react-diff-viewer-continued";
 
 import { getSkillDraft, type SkillDraft, type SkillDraftDetail } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { Spinner } from "@/components/Spinner";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -64,7 +65,7 @@ export function SkillDraftDiffDialog({
             variant="destructive"
             onClick={() => visibleDraft && onReject(visibleDraft)}
           >
-            {rejecting ? <Loader2 className="animate-spin" /> : <Trash />}
+            {rejecting ? <Spinner /> : <Trash />}
             {t("settings.skills.rejectDraft")}
           </Button>
           <Button
@@ -73,7 +74,7 @@ export function SkillDraftDiffDialog({
             type="button"
             onClick={() => visibleDraft && onApply(visibleDraft)}
           >
-            {applying ? <Loader2 className="animate-spin" /> : <Check />}
+            {applying ? <Spinner /> : <Check />}
             {t("settings.skills.applyDraft")}
           </Button>
         </DialogFooter>

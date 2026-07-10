@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, ChevronDown, Copy, Eye, EyeOff, Loader2, Plus, Trash } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, Copy, Eye, EyeOff, Plus, Trash } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { z } from "zod";
@@ -18,6 +18,7 @@ import {
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { DialogSelectContent } from "@/components/DialogSelectContent";
+import { Spinner } from "@/components/Spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
@@ -459,7 +460,7 @@ export function ProviderProfileEditorDialog({
                           <div className="grid p-1">
                             {candidatesLoading ? (
                               <div className="flex h-24 items-center justify-center gap-2 text-sm text-muted-foreground">
-                                <Loader2 className="size-4 animate-spin" />
+                                <Spinner className="size-4" />
                                 {t("common.loading")}
                               </div>
                             ) : filteredCandidateIDs.length > 0 ? (
@@ -525,7 +526,7 @@ export function ProviderProfileEditorDialog({
               {t("common.cancel")}
             </Button>
             <Button disabled={saving} type="submit">
-              {saving ? <Loader2 className="animate-spin" /> : null}
+              {saving ? <Spinner /> : null}
               {t("common.save")}
             </Button>
           </DialogFooter>

@@ -1,6 +1,6 @@
 module github.com/teatak/pudding-core
 
-go 1.25.0
+go 1.25.1
 
 require github.com/teatak/cart/v3 v3.0.0
 
@@ -16,6 +16,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.45
 	github.com/sergi/go-diff v1.4.0
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
+	github.com/teatak/seg v0.1.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

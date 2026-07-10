@@ -57,6 +57,79 @@ func TestSearchMessagesUsesFTS5AndSessionScope(t *testing.T) {
 			t.Fatalf("search leaked another session: %+v", hit)
 		}
 	}
+
+	literalHits, err := st.SearchMessages(ctx, store.MessageSearchInput{
+		SessionID: "sess_a",
+		Query:     "Device Analytics Dashboard",
+		Limit:     10,
+		Literal:   true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(literalHits) == 0 {
+		t.Fatal("expected literal phrase hit")
+	}
+
+	literalHits, err = st.SearchMessages(ctx, store.MessageSearchInput{
+		SessionID: "sess_a",
+		Query:     `Device "Analytics" Dashboard`,
+		Limit:     10,
+		Literal:   true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(literalHits) == 0 {
+		t.Fatal("punctuation in a natural-language query should not suppress matches")
+	}
+}
+
+func TestLiteralSearchUsesSegmentedTermsAndMixedScript(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, st, "sess_segmented_search")
+
+	if _, err := st.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "sess_segmented_search",
+		TurnID:          "turn_segmented_exact",
+		UserMessageID:   "msg_segmented_exact",
+		ClientMessageID: "client_segmented_exact",
+		UserText:        "DeepSeek模型的GPT4配置已经完成，法国队将在今晚参加一场重要比赛。",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.FinishTurn(ctx, store.FinishTurnInput{
+		TurnID:         "turn_segmented_exact",
+		Status:         store.TurnCompleted,
+		AssistantParts: store.TextPart("配置完成。"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "sess_segmented_search",
+		TurnID:          "turn_segmented_partial",
+		UserMessageID:   "msg_segmented_partial",
+		ClientMessageID: "client_segmented_partial",
+		UserText:        "比赛快开始了。",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, query := range []string{"DeepSeek模型GPT4", "配置DeepSeek", "法国比赛"} {
+		hits, err := st.SearchMessages(ctx, store.MessageSearchInput{
+			SessionID: "sess_segmented_search",
+			Query:     query,
+			Limit:     10,
+			Literal:   true,
+		})
+		if err != nil {
+			t.Fatalf("search %q: %v", query, err)
+		}
+		if len(hits) == 0 || hits[0].ID != "msg_segmented_exact" {
+			t.Fatalf("search %q returned %+v, want exact segmented hit first", query, hits)
+		}
+	}
 }
 
 func TestDeleteSessionRepairsMessagesFTS5(t *testing.T) {

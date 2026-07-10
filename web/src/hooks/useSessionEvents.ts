@@ -98,6 +98,11 @@ function openSessionEventSource({
       console.warn("invalid session event", parsed.error);
       return;
     }
+    if (parsed.data.kind === "turn.started") {
+      useOverlayStore.getState().clearSessionCompletion(parsed.data.sessionID);
+    } else if (!syncMessages && parsed.data.kind === "turn.completed") {
+      useOverlayStore.getState().markSessionCompleted(parsed.data.sessionID);
+    }
     applyEvent(parsed.data);
     syncAudioBindingsFromEvent(queryClient, parsed.data);
     syncBrowserStateFromEvent(queryClient, parsed.data, syncMessages, token);

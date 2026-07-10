@@ -10,7 +10,6 @@ import {
   EyeOff,
   Globe2,
   Info,
-  Loader2,
   MessageSquareText,
   Pencil,
   Plus,
@@ -55,6 +54,7 @@ import {
   type Skill,
   type SkillDraft,
 } from "@/api/client";
+import { Spinner } from "@/components/Spinner";
 import { queryKeys } from "@/api/queryKeys";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import {
@@ -95,8 +95,6 @@ import {
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
-  SidebarHeader,
-  SidebarInput,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -316,9 +314,6 @@ function SettingsSidebar({
 
   return (
     <Sidebar collapsible="none" className="flex shrink-0 border-r">
-      <SidebarHeader className="p-4 pb-0">
-        <SidebarInput aria-label={t("settings.search")} placeholder={t("settings.search")} />
-      </SidebarHeader>
       <SidebarContent>
         <SidebarGroup className="p-3">
           <SidebarGroupLabel>{t("settings.title")}</SidebarGroupLabel>
@@ -582,7 +577,7 @@ function GeneralSettings({ token }: { token: string }) {
               type="button"
               onClick={() => promptMutation.mutate()}
             >
-              {promptMutation.isPending ? <Loader2 className="animate-spin" /> : null}
+              {promptMutation.isPending ? <Spinner /> : null}
               {t("common.save")}
             </Button>
           </div>
@@ -844,7 +839,7 @@ function VoiceSettings({ token }: { token: string }) {
               value={form.asrLanguage}
               onValueChange={(value) => saveVoicePatch({ asrLanguage: value })}
             >
-              <SelectTrigger id="pudding-voice-asr-language" className="w-full">
+              <SelectTrigger id="pudding-voice-asr-language" className="w-48 max-w-full sm:ml-auto">
                 <SelectValue />
               </SelectTrigger>
               <DialogSelectContent>
@@ -870,7 +865,7 @@ function VoiceSettings({ token }: { token: string }) {
           <SettingsReadOnlyRows rows={asrReadOnlyRows} />
           <SettingsActionRow description={t("settings.voice.asrClearAudioDesc")} label={t("settings.voice.asrClearAudio")}>
             <Button disabled={clearDisabled} size="sm" type="button" variant="outline" onClick={() => setClearRecordingsOpen(true)}>
-              {clearRecordingsMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Trash className="size-4" />}
+              {clearRecordingsMutation.isPending ? <Spinner className="size-4" /> : <Trash className="size-4" />}
               {t("common.clear")}
             </Button>
           </SettingsActionRow>
@@ -987,7 +982,7 @@ function VoiceSettings({ token }: { token: string }) {
               value={form.nsLevel}
               onValueChange={(value) => saveVoicePatch({ nsLevel: value })}
             >
-              <SelectTrigger id="pudding-voice-ns-level" className="w-full">
+              <SelectTrigger id="pudding-voice-ns-level" className="w-48 max-w-full sm:ml-auto">
                 <SelectValue />
               </SelectTrigger>
               <DialogSelectContent>
@@ -1023,7 +1018,7 @@ function VoiceSettings({ token }: { token: string }) {
             label={t("settings.voice.ttsVoice")}
           >
             <Input
-              className="w-full"
+              className="w-48 max-w-full sm:ml-auto"
               disabled={disabled}
               id="pudding-voice-tts-voice"
               placeholder={edge.voice || "zh-CN-YunxiaNeural"}
@@ -1336,9 +1331,9 @@ function SettingsNumberField({
 }) {
   return (
     <SettingsControlRow description={description} disabled={disabled} id={id} label={label}>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 sm:justify-end">
         <Input
-          className="min-w-0 flex-1"
+          className="w-28 flex-none"
           disabled={disabled}
           id={id}
           inputMode="numeric"
@@ -1877,7 +1872,7 @@ function SkillDraftRow({
           variant="ghost"
           onClick={onApply}
         >
-          {applying ? <Loader2 className="animate-spin" /> : <Check />}
+          {applying ? <Spinner /> : <Check />}
         </Button>
         <Button
           aria-label={t("settings.skills.rejectDraft")}
@@ -1888,7 +1883,7 @@ function SkillDraftRow({
           variant="ghost"
           onClick={onReject}
         >
-          {rejecting ? <Loader2 className="animate-spin" /> : <Trash />}
+          {rejecting ? <Spinner /> : <Trash />}
         </Button>
       </ItemActions>
     </Item>
@@ -1931,7 +1926,7 @@ function SkillRow({ deleting, onDelete, skill, token }: { deleting?: boolean; on
             variant="ghost"
             onClick={onDelete}
           >
-            {deleting ? <Loader2 className="animate-spin" /> : <Trash />}
+            {deleting ? <Spinner /> : <Trash />}
           </Button>
         </ItemActions>
       ) : null}
@@ -2084,7 +2079,7 @@ function ToolsSettings({ token }: { token: string }) {
               </div>
               <div className="flex gap-2">
                 <Button disabled={saving || loadingTools || !dirty} type="button" onClick={() => mutation.mutate(apiKey.trim())}>
-                  {mutation.isPending ? <Loader2 className="animate-spin" /> : null}
+                  {mutation.isPending ? <Spinner /> : null}
                   {t("common.save")}
                 </Button>
                 <Button disabled={saving || loadingTools || !configured} type="button" variant="outline" onClick={() => mutation.mutate("")}>
@@ -2125,7 +2120,7 @@ function MobileSettings({ token }: { token: string }) {
       <SettingsPanel
         action={
           <Button disabled={mutation.isPending} type="button" onClick={() => mutation.mutate()}>
-            {mutation.isPending ? <Loader2 className="animate-spin" /> : null}
+            {mutation.isPending ? <Spinner /> : null}
             {t("settings.mobile.generate")}
           </Button>
         }
@@ -2189,7 +2184,7 @@ function BuiltinToolsPanel({
       <AccordionItem className="border-b-0" value="builtin-tools">
         <AccordionTrigger className="h-11 items-center rounded-none border-0 px-4 py-0 text-sm font-normal hover:no-underline focus-visible:ring-0">
           <span>{`${t("settings.tools.builtin.title")} (${tools.length})`}</span>
-          {loading ? <Loader2 className="mr-2 size-4 animate-spin text-muted-foreground" /> : null}
+          {loading ? <Spinner className="mr-2 size-4 text-muted-foreground" /> : null}
         </AccordionTrigger>
         <AccordionContent className="p-0">
           {error ? (
@@ -2296,7 +2291,7 @@ function BrowserMCPToolGroup({
               className={cn("size-2 rounded-full", connected ? "bg-success" : "bg-muted-foreground/50")}
             />
           </span>
-          {loading ? <Loader2 className="mr-2 size-4 animate-spin text-muted-foreground" /> : null}
+          {loading ? <Spinner className="mr-2 size-4 text-muted-foreground" /> : null}
         </AccordionTrigger>
         <AccordionContent className="p-0">
           {error ? (

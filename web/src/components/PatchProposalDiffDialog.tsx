@@ -1,5 +1,6 @@
-import { Check, Loader2, X } from "lucide-react";
+import { Check, X } from "lucide-react";
 
+import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useI18n } from "@/i18n";
@@ -72,11 +73,11 @@ export function PatchProposalDiffDialog({
         </div>
         <DialogFooter className="mx-0 mb-0 flex-row items-center justify-end gap-2 rounded-none rounded-b-xl px-4 py-3">
           <Button className="h-8 min-w-20 gap-1.5 px-3 leading-none [&_svg]:size-4" disabled={busy} type="button" variant="ghost" onClick={onReject}>
-            {rejecting ? <Loader2 className="animate-spin" /> : <X />}
+            {rejecting ? <Spinner /> : <X />}
             {t("transcript.approvalDeny")}
           </Button>
           <Button className="h-8 min-w-20 gap-1.5 px-3 leading-none [&_svg]:size-4" disabled={!proposal?.diff || busy} type="button" onClick={onApply}>
-            {applying ? <Loader2 className="animate-spin" /> : <Check />}
+            {applying ? <Spinner /> : <Check />}
             {t("transcript.approvalPatchApply")}
           </Button>
         </DialogFooter>

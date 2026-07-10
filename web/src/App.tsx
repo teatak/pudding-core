@@ -13,7 +13,7 @@ import { claimMobilePairing } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Toaster } from "@/components/ui/sonner";
+import { AppToaster } from "@/components/AppToaster";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceResizableHandle } from "@/components/WorkspaceResizableHandle";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -436,7 +436,7 @@ export function App() {
         </div>
       </div>
       <SettingsDialog token={token} showTrigger={false} />
-      <Toaster />
+      <AppToaster />
     </TooltipProvider>
   );
 }

@@ -1,5 +1,6 @@
-import { Loader2, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 
+import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -27,7 +28,7 @@ export function ComposerAddButton({
       variant="ghost"
       onClick={onClick}
     >
-      {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+      {busy ? <Spinner className="size-4" /> : <Plus className="size-4" />}
     </Button>
   );
 }

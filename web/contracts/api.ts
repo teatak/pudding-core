@@ -293,6 +293,16 @@ export const message = z
   });
 export type Message = z.infer<typeof message>;
 
+export const searchSessionMessagesRequest = z.object({
+  sessionIDs: z.array(z.string().min(1)).min(1).max(200),
+  query: z.string().trim().min(1),
+  limit: z.number().int().min(1).max(100).optional(),
+});
+
+export const searchSessionMessagesResponse = z.object({
+  messages: z.array(message),
+});
+
 export const conversationTurn = z.object({
   id: z.string(),
   sessionID: z.string(),

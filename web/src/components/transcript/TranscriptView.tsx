@@ -1,7 +1,8 @@
-import { ArrowDown, CircleAlert, Loader2 } from "lucide-react";
+import { ArrowDown, CircleAlert } from "lucide-react";
 import { useState } from "react";
 
 import { ChatColumn } from "@/components/ChatColumn";
+import { Spinner } from "@/components/Spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
@@ -66,7 +67,7 @@ export function TranscriptView({
   if (isPending) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
-        <Loader2 className="size-5 animate-spin" aria-label={t("common.loading")} />
+        <Spinner className="size-5" aria-label={t("common.loading")} />
       </div>
     );
   }
@@ -117,7 +118,7 @@ export function TranscriptView({
       {isFetchingNextPage ? (
         <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center text-muted-foreground">
           <div className="rounded-full border border-border bg-card/90 px-2 py-1 shadow-sm">
-            <Loader2 className="size-3.5 animate-spin" aria-label={t("common.loading")} />
+            <Spinner className="size-3.5" aria-label={t("common.loading")} />
           </div>
         </div>
       ) : null}

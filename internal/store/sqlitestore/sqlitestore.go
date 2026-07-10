@@ -16,6 +16,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/teatak/pudding-core/internal/event"
+	"github.com/teatak/pudding-core/internal/searchtext"
 	"github.com/teatak/pudding-core/internal/store"
 )
 
@@ -25,6 +26,9 @@ type Store struct {
 }
 
 func Open(path string) (*Store, error) {
+	if err := searchtext.Prepare(); err != nil {
+		return nil, fmt.Errorf("sqlite: prepare search tokenizer: %w", err)
+	}
 	if err := ensureDBFile(path); err != nil {
 		return nil, err
 	}
@@ -86,6 +90,13 @@ func ensureSchema(db *sql.DB) error {
 	} else if !has {
 		if _, err := db.Exec(`ALTER TABLE queued_inputs ADD COLUMN parts TEXT NOT NULL DEFAULT '[]'`); err != nil {
 			return fmt.Errorf("sqlite: migrate queued_inputs.parts: %w", err)
+		}
+	}
+	if has, err := tableHasColumn(db, "messages", "search_tokens"); err != nil {
+		return err
+	} else if !has {
+		if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN search_tokens TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("sqlite: migrate messages.search_tokens: %w", err)
 		}
 	}
 	return nil
@@ -548,10 +559,7 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 		); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO messages(id,session_id,turn_id,role,kind,text,parts,turn_index,metadata,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-			msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Kind, msg.Text, encodeParts(msg.Parts), msg.TurnIndex, string(normalizeJSON(msg.Metadata)), msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
-		); err != nil {
+		if err := insertMessageTx(ctx, tx, msg); err != nil {
 			return err
 		}
 		ev := event.Event{
@@ -635,10 +643,7 @@ func (s *Store) BeginSystemTurn(ctx context.Context, in store.BeginSystemTurnInp
 		); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO messages(id,session_id,turn_id,role,kind,text,parts,turn_index,metadata,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-			msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Kind, msg.Text, encodeParts(msg.Parts), msg.TurnIndex, string(normalizeJSON(msg.Metadata)), msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
-		); err != nil {
+		if err := insertMessageTx(ctx, tx, msg); err != nil {
 			return err
 		}
 		ev := event.Event{
@@ -874,10 +879,7 @@ func (s *Store) PromoteNextQueuedInput(ctx context.Context, in store.PromoteQueu
 				); err != nil {
 					return err
 				}
-				if _, err := tx.ExecContext(ctx,
-					`INSERT INTO messages(id,session_id,turn_id,role,kind,text,parts,turn_index,metadata,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-					msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Kind, msg.Text, encodeParts(msg.Parts), msg.TurnIndex, string(normalizeJSON(msg.Metadata)), msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
-				); err != nil {
+				if err := insertMessageTx(ctx, tx, msg); err != nil {
 					return err
 				}
 				if _, err := tx.ExecContext(ctx,
@@ -1101,10 +1103,7 @@ func (s *Store) AppendCompactSummary(ctx context.Context, in store.AppendCompact
 		); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO messages(id,session_id,turn_id,role,kind,text,parts,turn_index,metadata,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-			msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Kind, msg.Text, encodeParts(msg.Parts), msg.TurnIndex, string(normalizeJSON(msg.Metadata)), msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
-		); err != nil {
+		if err := insertMessageTx(ctx, tx, msg); err != nil {
 			return err
 		}
 		ev := event.Event{
@@ -1440,7 +1439,7 @@ func (s *Store) GetMessage(ctx context.Context, sessionID string, messageID stri
 }
 
 func (s *Store) SearchMessages(ctx context.Context, in store.MessageSearchInput) ([]*store.Message, error) {
-	if !historySearchAvailable() {
+	if !in.Literal && !historySearchAvailable() {
 		return nil, store.ErrHistorySearchUnavailable
 	}
 	sessionID := strings.TrimSpace(in.SessionID)
@@ -1469,6 +1468,10 @@ func (s *Store) SearchMessages(ctx context.Context, in store.MessageSearchInput)
 	if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
 		return nil, err
 	}
+	if in.Literal {
+		return searchLiteralMessagesTx(ctx, tx, sessionID, query, limit)
+	}
+
 	rows, err := tx.QueryContext(ctx,
 		`SELECT `+messageSelectColumnsAliasM+`
 		FROM messages_fts f
@@ -1481,19 +1484,141 @@ func (s *Store) SearchMessages(ctx context.Context, in store.MessageSearchInput)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: search messages: %w", err)
 	}
+	return collectSearchMessages(rows, nil, nil, limit)
+}
+
+func searchLiteralMessagesTx(ctx context.Context, tx *sql.Tx, sessionID, query string, limit int) ([]*store.Message, error) {
+	out := make([]*store.Message, 0, limit)
+	seen := make(map[string]struct{}, limit)
+	queryTerms := searchtext.QueryTerms(query)
+	termsIndexAvailable := historySearchAvailable() && len(queryTerms) > 0
+
+	searchTerms := func(terms []string, operator string) error {
+		if !termsIndexAvailable || len(terms) == 0 || len(out) >= limit {
+			return nil
+		}
+		rows, err := tx.QueryContext(ctx,
+			`SELECT `+messageSelectColumnsAliasM+`
+			FROM messages_terms_fts
+			JOIN messages m ON m.rowid = messages_terms_fts.rowid
+			WHERE messages_terms_fts MATCH ? AND m.session_id=?
+			ORDER BY bm25(messages_terms_fts), m.created_at DESC, m.rowid DESC
+			LIMIT ?`,
+			ftsTermsExpression(terms, operator), sessionID, limit-len(out),
+		)
+		if err != nil {
+			if recoverableHistorySearchError(err) {
+				termsIndexAvailable = false
+				return nil
+			}
+			return fmt.Errorf("sqlite: search message terms: %w", err)
+		}
+		out, err = collectSearchMessages(rows, out, seen, limit)
+		return err
+	}
+
+	literalTerms := strings.Fields(query)
+	clauses := make([]string, 0, len(literalTerms))
+	args := make([]any, 0, len(literalTerms)+2)
+	args = append(args, sessionID)
+	for _, term := range literalTerms {
+		clauses = append(clauses, `instr(lower(m.text), lower(?)) > 0`)
+		args = append(args, term)
+	}
+	args = append(args, limit-len(out))
+	rows, err := tx.QueryContext(ctx,
+		`SELECT `+messageSelectColumnsAliasM+`
+		FROM messages m
+		WHERE m.session_id=? AND `+strings.Join(clauses, " AND ")+`
+		ORDER BY m.created_at DESC, m.rowid DESC
+		LIMIT ?`,
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: search literal messages: %w", err)
+	}
+	out, err = collectSearchMessages(rows, out, seen, limit)
+	if err != nil {
+		return nil, err
+	}
+	if err := searchTerms(queryTerms, "AND"); err != nil {
+		return nil, err
+	}
+	if !termsIndexAvailable && len(queryTerms) > 0 && len(out) < limit {
+		tokenClauses := make([]string, 0, len(queryTerms))
+		tokenArgs := make([]any, 0, len(queryTerms)+2)
+		tokenArgs = append(tokenArgs, sessionID)
+		for _, term := range queryTerms {
+			tokenClauses = append(tokenClauses, `instr(' ' || coalesce(m.search_tokens, '') || ' ', ' ' || ? || ' ') > 0`)
+			tokenArgs = append(tokenArgs, term)
+		}
+		tokenArgs = append(tokenArgs, limit-len(out))
+		rows, err := tx.QueryContext(ctx,
+			`SELECT `+messageSelectColumnsAliasM+`
+			FROM messages m
+			WHERE m.session_id=? AND `+strings.Join(tokenClauses, " AND ")+`
+			ORDER BY m.created_at DESC, m.rowid DESC
+			LIMIT ?`,
+			tokenArgs...,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("sqlite: scan message search terms: %w", err)
+		}
+		out, err = collectSearchMessages(rows, out, seen, limit)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if len(out) < limit {
+		if err := searchTerms(significantSearchTerms(queryTerms), "OR"); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func collectSearchMessages(rows *sql.Rows, out []*store.Message, seen map[string]struct{}, limit int) ([]*store.Message, error) {
 	defer rows.Close()
-	out := make([]*store.Message, 0)
-	for rows.Next() {
+	if seen == nil {
+		seen = make(map[string]struct{}, limit)
+	}
+	for rows.Next() && len(out) < limit {
 		msg, err := scanMessage(rows)
 		if err != nil {
 			return nil, err
 		}
+		if _, ok := seen[msg.ID]; ok {
+			continue
+		}
+		seen[msg.ID] = struct{}{}
 		out = append(out, msg)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+func ftsTermsExpression(terms []string, operator string) string {
+	quoted := make([]string, 0, len(terms))
+	for _, term := range terms {
+		quoted = append(quoted, `"`+strings.ReplaceAll(term, `"`, `""`)+`"`)
+	}
+	return strings.Join(quoted, " "+operator+" ")
+}
+
+func significantSearchTerms(terms []string) []string {
+	out := make([]string, 0, len(terms))
+	for _, term := range terms {
+		if len([]rune(term)) > 1 {
+			out = append(out, term)
+		}
+	}
+	if len(out) == 0 {
+		return terms
+	}
+	return out
 }
 
 func (s *Store) RemoveAttachmentsByOrigin(ctx context.Context, origin string) (*store.AttachmentCleanupResult, error) {
@@ -2201,10 +2326,7 @@ func appendTurnOutputSegmentsTx(ctx context.Context, tx *sql.Tx, turn *store.Tur
 			Interrupted: interrupted && i == len(segments)-1,
 			CreatedAt:   now,
 		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO messages(id,session_id,turn_id,role,kind,text,parts,turn_index,metadata,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-			msg.ID, msg.SessionID, msg.TurnID, msg.Role, msg.Kind, msg.Text, encodeParts(msg.Parts), msg.TurnIndex, string(normalizeJSON(msg.Metadata)), msg.ClientMessageID, boolInt(msg.Interrupted), unixMS(now),
-		); err != nil {
+		if err := insertMessageTx(ctx, tx, msg); err != nil {
 			return nil, err
 		}
 		out = append(out, msg)
@@ -2222,6 +2344,26 @@ func encodeParts(parts []store.ContentPart) string {
 		return "[]"
 	}
 	return string(data)
+}
+
+func insertMessageTx(ctx context.Context, tx *sql.Tx, msg *store.Message) error {
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO messages(id,session_id,turn_id,role,kind,text,search_tokens,parts,turn_index,metadata,client_message_id,interrupted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		msg.ID,
+		msg.SessionID,
+		msg.TurnID,
+		msg.Role,
+		msg.Kind,
+		msg.Text,
+		searchtext.IndexText(msg.Text),
+		encodeParts(msg.Parts),
+		msg.TurnIndex,
+		string(normalizeJSON(msg.Metadata)),
+		msg.ClientMessageID,
+		boolInt(msg.Interrupted),
+		unixMS(msg.CreatedAt),
+	)
+	return err
 }
 
 func decodeParts(raw string) []store.ContentPart {

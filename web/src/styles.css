@@ -1014,6 +1014,42 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
   text-decoration: var(--shiki-dark-text-decoration) !important;
 }
 
+@keyframes pudding-session-section-open {
+  from {
+    height: 0;
+    opacity: 0;
+  }
+  to {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+  }
+}
+
+@keyframes pudding-session-section-close {
+  from {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+  }
+  to {
+    height: 0;
+    opacity: 0;
+  }
+}
+
+.pudding-session-group-content[data-state="open"] {
+  animation: pudding-session-section-open 160ms ease-out;
+}
+
+.pudding-session-group-content[data-state="closed"] {
+  animation: pudding-session-section-close 140ms ease-in;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pudding-session-group-content {
+    animation: none !important;
+  }
+}
+
 .pudding-markdown .code-block-wrap {
   @apply relative min-w-0 max-w-full;
 }

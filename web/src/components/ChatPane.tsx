@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronDown, Loader2, TextCursorInput, Trash, X } from "lucide-react";
+import { ChevronDown, TextCursorInput, Trash, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import {
@@ -13,6 +13,7 @@ import { queryKeys } from "@/api/queryKeys";
 import { Conversation } from "@/components/Conversation";
 import { DraftConversation } from "@/components/DraftConversation";
 import { PhaseDot } from "@/components/PhaseDot";
+import { Spinner } from "@/components/Spinner";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -448,7 +449,7 @@ function LoadingState() {
   const { t } = useI18n();
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
-      <Loader2 className="size-5 animate-spin" aria-label={t("common.loading")} />
+      <Spinner className="size-5" aria-label={t("common.loading")} />
     </div>
   );
 }

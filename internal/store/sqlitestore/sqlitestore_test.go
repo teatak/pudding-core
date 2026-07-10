@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -471,6 +472,110 @@ func TestGetMessageRequiresSessionScope(t *testing.T) {
 	}
 	if _, err := st.GetMessage(ctx, "sess_2", "msg_1"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("wrong session must not read message: %v", err)
+	}
+}
+
+func TestSearchMessagesLiteralSupportsShortCJKTerms(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, st, "sess_search_literal")
+	if _, err := st.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "sess_search_literal",
+		TurnID:          "turn_search_literal",
+		UserMessageID:   "msg_search_literal",
+		ClientMessageID: "client_search_literal",
+		UserText:        "法国队与西班牙队将在今晚进行比赛。",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, query := range []string{"法国", "西班牙", "法国 比赛"} {
+		hits, err := st.SearchMessages(ctx, store.MessageSearchInput{
+			SessionID: "sess_search_literal",
+			Query:     query,
+			Limit:     10,
+			Literal:   true,
+		})
+		if err != nil {
+			t.Fatalf("literal search %q: %v", query, err)
+		}
+		if len(hits) != 1 || hits[0].ID != "msg_search_literal" {
+			t.Fatalf("literal search %q returned %+v", query, hits)
+		}
+	}
+}
+
+func TestSearchMessagesLiteralSupportsUnspacedMixedTerms(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, st, "sess_search_mixed")
+	if _, err := st.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "sess_search_mixed",
+		TurnID:          "turn_search_mixed",
+		UserMessageID:   "msg_search_mixed",
+		ClientMessageID: "client_search_mixed",
+		UserText:        "DeepSeek模型的GPT4配置已经完成。",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	hits, err := st.SearchMessages(ctx, store.MessageSearchInput{
+		SessionID: "sess_search_mixed",
+		Query:     "DeepSeek模型GPT4",
+		Limit:     10,
+		Literal:   true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].ID != "msg_search_mixed" {
+		t.Fatalf("mixed-script search returned %+v", hits)
+	}
+}
+
+func TestOpenLeavesExistingMessagesUnindexed(t *testing.T) {
+	st, path := openTestStore(t)
+	createTestSession(t, st, "sess_search_forward_only")
+	if _, err := st.db.Exec(`
+		INSERT INTO messages(id,session_id,role,text,created_at)
+		VALUES('msg_search_legacy','sess_search_forward_only','user','DeepSeek模型配置',1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	var tokens string
+	if err := reopened.db.QueryRow(
+		`SELECT search_tokens FROM messages WHERE id='msg_search_legacy'`,
+	).Scan(&tokens); err != nil {
+		t.Fatal(err)
+	}
+	if tokens != "" {
+		t.Fatalf("existing message should remain unindexed: %q", tokens)
+	}
+
+	if _, err := reopened.BeginTurn(context.Background(), store.BeginTurnInput{
+		SessionID:       "sess_search_forward_only",
+		TurnID:          "turn_search_forward_only",
+		UserMessageID:   "msg_search_new",
+		ClientMessageID: "client_search_forward_only",
+		UserText:        "OpenAI模型配置",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.db.QueryRow(
+		`SELECT search_tokens FROM messages WHERE id='msg_search_new'`,
+	).Scan(&tokens); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(tokens, "openai") || !strings.Contains(tokens, "模型") {
+		t.Fatalf("new message should be indexed: %q", tokens)
 	}
 }
 

@@ -1,7 +1,8 @@
-import { Captions, Check, FileText, FolderOpen, Loader2, Pause, Play, Pencil, Trash2, X } from "lucide-react";
+import { Captions, Check, FileText, FolderOpen, Pause, Play, Pencil, Trash2, X } from "lucide-react";
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
+import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -132,7 +133,7 @@ export const UserInput = memo(function UserInput({
           <Pencil />
         </MetaIconButton>
         <MetaIconButton label={t("transcript.cancelQueued")} disabled={saving} onClick={cancelQueued}>
-          {saving ? <Loader2 className="animate-spin" /> : <Trash2 />}
+          {saving ? <Spinner /> : <Trash2 />}
         </MetaIconButton>
       </>
     ) : null;
@@ -156,7 +157,7 @@ export const UserInput = memo(function UserInput({
                     <X />
                   </MetaIconButton>
                   <MetaIconButton label={t("common.save")} disabled={saving || !draft.trim()} onClick={() => saveEdit(draft)}>
-                    {saving ? <Loader2 className="animate-spin" /> : <Check className="text-success" />}
+                    {saving ? <Spinner /> : <Check className="text-success" />}
                   </MetaIconButton>
                 </div>
               </div>

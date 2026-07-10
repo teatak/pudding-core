@@ -1,6 +1,6 @@
 # Pudding Code 能力设计与计划
 
-> 状态:C0、C1、C1.5、C1.6、C2、C3、C4、C5、C6、C7、C8、C9、C10 与 C10.4 已落地。
+> 状态:C0、C1、C1.5、C1.6、C2、C3、C4、C5、C6、C7、C8、C9、C10、C10.4 与 C11 已落地。
 > 目标:在现有 multi-session / Project tool 架构上,把 Pudding 从"可读写文件"
 > 推进到"可信的工程协作 agent"。
 
@@ -814,6 +814,23 @@ Project resolver 的安全边界。
 | C10.4 | Release 内置 gopls、TypeScript Language Server 与离线 resolver | 已完成 |
 
 实际按五个切片完成,未引入语言专属工具、后台 focus 或运行时自动安装流程。
+
+### C11: 安全语义重构
+
+状态:已完成(2026-07-10),总进度 100%。
+
+详细设计见 [Pudding 安全语义重构设计](./code-refactor-design.md)。
+
+首版只增加统一 `builtin_code_rename`,把 Go 与 TypeScript / JavaScript language
+server 返回的 `WorkspaceEdit` 全量验证并转换成现有 Patch Proposal。工具不直接写盘;
+真正应用仍由 `builtin_patch_apply` 展示 diff、请求审批、校验漂移并事务提交。
+
+| 切片 | 内容 | 状态 |
+| --- | --- | --- |
+| C11.0 | 设计、工具与 WorkspaceEdit 安全契约 | 已完成 |
+| C11.1 | LSP rename、WorkspaceEdit 转换与 Patch Proposal 复用 | 已完成 |
+| C11.2 | transcript、图标、三语 i18n 与 Project prompt | 已完成 |
+| C11.3 | fake/真实 server 集成与全量验证 | 已完成 |
 
 ## 11. 测试策略
 

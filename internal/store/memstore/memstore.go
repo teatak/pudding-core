@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/teatak/pudding-core/internal/event"
+	"github.com/teatak/pudding-core/internal/searchtext"
 	"github.com/teatak/pudding-core/internal/store"
 )
 
@@ -1298,11 +1299,38 @@ func (m *Memstore) SearchMessages(_ context.Context, in store.MessageSearchInput
 	if limit > 100 {
 		limit = 100
 	}
-	needle := strings.ToLower(query)
+	needles := []string{strings.ToLower(query)}
+	queryTerms := []string(nil)
+	if in.Literal {
+		needles = strings.Fields(strings.ToLower(query))
+		queryTerms = searchtext.QueryTerms(query)
+	}
 	out := make([]*store.Message, 0)
 	for i := len(m.messages[sessionID]) - 1; i >= 0 && len(out) < limit; i-- {
 		msg := m.messages[sessionID][i]
-		if strings.Contains(strings.ToLower(msg.Text), needle) {
+		text := strings.ToLower(msg.Text)
+		literalMatched := true
+		for _, needle := range needles {
+			if !strings.Contains(text, needle) {
+				literalMatched = false
+				break
+			}
+		}
+		tokenMatched := false
+		if in.Literal && len(queryTerms) > 0 {
+			indexedTerms := make(map[string]struct{})
+			for _, term := range searchtext.Terms(msg.Text) {
+				indexedTerms[term] = struct{}{}
+			}
+			tokenMatched = true
+			for _, term := range queryTerms {
+				if _, ok := indexedTerms[term]; !ok {
+					tokenMatched = false
+					break
+				}
+			}
+		}
+		if literalMatched || tokenMatched {
 			out = append(out, cloneMessage(msg))
 		}
 	}

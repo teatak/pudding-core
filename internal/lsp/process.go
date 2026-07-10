@@ -121,6 +121,8 @@ func (p *Process) initialize(ctx context.Context) error {
 	var capabilities clientCapabilities
 	capabilities.General.PositionEncodings = []string{"utf-16", "utf-8", "utf-32"}
 	capabilities.Workspace.Configuration = true
+	capabilities.Workspace.WorkspaceEdit.DocumentChanges = true
+	capabilities.TextDocument.Rename.PrepareSupport = true
 	capabilities.TextDocument.PublishDiagnostics.RelatedInformation = true
 	params := initializeParams{
 		ProcessID:    os.Getpid(),

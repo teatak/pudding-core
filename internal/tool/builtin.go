@@ -30,6 +30,7 @@ const (
 	CodeDefinition      = "builtin_code_definition"
 	CodeReferences      = "builtin_code_references"
 	CodeDiagnostics     = "builtin_code_diagnostics"
+	CodeRename          = "builtin_code_rename"
 	FileList            = "builtin_file_list"
 	FileRead            = "builtin_file_read"
 	AttachmentReadImage = "builtin_attachment_read_image"
@@ -349,6 +350,12 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Capability:  store.ModeProject,
 		},
 		{
+			Name:        CodeRename,
+			Description: "Prepare a semantic symbol rename through the language server and return a reviewable Patch Proposal without changing project files. Apply the returned proposal separately with builtin_patch_apply.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"path":{"type":"string","description":"Authorized source file containing the symbol."},"language":{"type":"string","enum":["go","typescript"],"description":"Optional language override. Use typescript for TypeScript and JavaScript."},"line":{"type":"integer","minimum":1,"description":"1-based line."},"column":{"type":"integer","minimum":1,"description":"1-based Unicode character column."},"new_name":{"type":"string","minLength":1,"maxLength":256,"description":"New symbol name. Language-specific validity is checked by the language server."}},"required":["scope","path","line","column","new_name"],"additionalProperties":false}`),
+			Capability:  store.ModeProject,
+		},
+		{
 			Name:        FileList,
 			Description: "List files in a Pudding-managed file area or an authorized project directory.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","project"],"description":"Target file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized project directories. Use . to list the root."},"max_entries":{"type":"integer","description":"Optional maximum entries, 1-1000, default 200."}},"required":["scope","path"],"additionalProperties":false}`),
@@ -622,6 +629,8 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.codeReferences(ctx, call)
 	case CodeDiagnostics:
 		return r.codeDiagnostics(ctx, call)
+	case CodeRename:
+		return r.codeRename(ctx, call)
 	case FileList:
 		return r.fileList(call)
 	case FileRead:

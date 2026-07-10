@@ -2080,6 +2080,67 @@ func TestListMessagesPagination(t *testing.T) {
 	}
 }
 
+func TestSearchSessionMessagesUsesExplicitScope(t *testing.T) {
+	srv, st := newTestServer(t)
+	ctx := context.Background()
+	for _, sessionID := range []string{"sess_search_a", "sess_search_b"} {
+		if err := st.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock"}); err != nil {
+			t.Fatal(err)
+		}
+		appendAPITestTurn(t, st, sessionID, 1)
+	}
+
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/search", map[string]any{
+		"sessionIDs": []string{"sess_search_a"},
+		"query":      "assistant",
+		"limit":      10,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	result := decodeJSON[struct {
+		Messages []store.Message `json:"messages"`
+	}](t, resp)
+	if len(result.Messages) != 1 {
+		t.Fatalf("unexpected search hits: %+v", result.Messages)
+	}
+	if result.Messages[0].SessionID != "sess_search_a" || result.Messages[0].Role != store.RoleAssistant {
+		t.Fatalf("search escaped explicit scope: %+v", result.Messages[0])
+	}
+
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_search_cjk", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "sess_search_cjk",
+		TurnID:          "turn_search_cjk",
+		UserMessageID:   "msg_search_cjk",
+		ClientMessageID: "client_search_cjk",
+		UserText:        "法国队与西班牙队将在今晚进行比赛。",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/search", map[string]any{
+		"sessionIDs": []string{"sess_search_cjk"},
+		"query":      "法国",
+	})
+	result = decodeJSON[struct {
+		Messages []store.Message `json:"messages"`
+	}](t, resp)
+	if len(result.Messages) != 1 || result.Messages[0].ID != "msg_search_cjk" {
+		t.Fatalf("short CJK search failed: %+v", result.Messages)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/search", map[string]any{
+		"sessionIDs": []string{},
+		"query":      "assistant",
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("empty session scope must return 400, got %d", resp.StatusCode)
+	}
+}
+
 func TestListTurnsPagination(t *testing.T) {
 	srv, st := newTestServer(t)
 	if err := st.CreateSession(context.Background(), &store.Session{ID: "sess_1", Provider: "mock", Model: "mock"}); err != nil {

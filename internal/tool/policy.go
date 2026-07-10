@@ -25,7 +25,7 @@ type ToolRisk struct {
 }
 
 func ClassifyToolCall(name string, raw json.RawMessage) (ToolRisk, bool) {
-	if name == CodeSymbols || name == CodeDefinition || name == CodeReferences || name == CodeDiagnostics {
+	if name == CodeSymbols || name == CodeDefinition || name == CodeReferences || name == CodeDiagnostics || name == CodeRename {
 		return classifyCodeReadCall(name, raw)
 	}
 	if name == CommandRun {
@@ -105,12 +105,16 @@ func classifyCodeReadCall(name string, raw json.RawMessage) (ToolRisk, bool) {
 	if path := strings.TrimSpace(args.Path); path != "" {
 		paths = append(paths, path)
 	}
+	summary := "Read semantic code information from the project language server."
+	if name == CodeRename {
+		summary = "Prepare a semantic rename proposal without changing project files."
+	}
 	return ToolRisk{
 		Class:     RiskClassRead,
 		Operation: strings.TrimPrefix(name, "builtin_"),
 		Scope:     managedScopeProject,
 		Paths:     compactRiskPaths(paths...),
-		Summary:   "Read semantic code information from the project language server.",
+		Summary:   summary,
 		LowRisk:   true,
 	}, true
 }

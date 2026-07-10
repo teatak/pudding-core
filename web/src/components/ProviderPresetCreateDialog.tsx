@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, Loader2, Plus } from "lucide-react";
+import { ExternalLink, Plus } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import {
@@ -9,6 +9,7 @@ import {
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { BrandIcon } from "@/components/BrandIcons";
+import { Spinner } from "@/components/Spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -302,7 +303,7 @@ export function ProviderPresetCreateDialog({
             {t("common.cancel")}
           </Button>
           <Button disabled={mutation.isPending || !canCreate} type="button" onClick={() => mutation.mutate()}>
-            {mutation.isPending ? <Loader2 className="animate-spin" /> : <Plus />}
+            {mutation.isPending ? <Spinner /> : <Plus />}
             {t("provider.create")}
           </Button>
         </DialogFooter>

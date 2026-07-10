@@ -10,7 +10,6 @@ import {
   FileCode2,
   FileText,
   Image,
-  Loader2,
   Maximize2,
   Minimize2,
   Plus,
@@ -54,6 +53,7 @@ import { FilePreviewSurface, filePreviewTitle } from "@/components/canvas/FilePr
 import { asRecord, numberValue, stringValue, titleFromPayload } from "@/components/canvas/canvasPayload";
 import { useCanvasBrowserSurface } from "@/components/canvas/useCanvasBrowserSurface";
 import { useCanvasTerminals } from "@/components/canvas/useCanvasTerminals";
+import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
@@ -378,6 +378,11 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
   const selectPersistentCanvasSurface = () => {
     setActiveFilePreviewID(undefined);
     selectCanvasSurface();
+  };
+
+  const createBrowserSurface = () => {
+    setActiveFilePreviewID(undefined);
+    createNewBrowserTab();
   };
 
   const selectFilePreview = (previewID: string) => {
@@ -837,7 +842,7 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
                 variant="ghost"
               >
                 {creatingBrowserTab || creatingTerminal ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <Spinner className="h-3.5 w-3.5" />
                 ) : (
                   <Plus className="h-3.5 w-3.5" />
                 )}
@@ -845,10 +850,7 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-44 space-y-1">
               <DropdownMenuItem
-                onSelect={() => {
-                  setActiveFilePreviewID(undefined);
-                  createNewBrowserTab();
-                }}
+                onSelect={createBrowserSurface}
               >
                 <Compass />
                 {t("browser.create")}
@@ -885,9 +887,21 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
       <div className="relative z-0 min-h-0 flex-1 overflow-hidden px-3 pb-3">
         <div ref={containerRef} className="relative isolate z-0 h-full overflow-hidden">
           {browserActive || terminalActive || filePreviewActive ? null : (!enabled && items.length === 0) || (itemsQuery.isLoading && items.length === 0) ? (
-            <CanvasEmpty />
+            <CanvasEmpty
+              disabled={!actorSessionID}
+              creatingBrowser={creatingBrowserTab}
+              creatingTerminal={creatingTerminal}
+              onCreateBrowser={createBrowserSurface}
+              onCreateTerminal={createNewTerminal}
+            />
           ) : items.length === 0 ? (
-            <CanvasEmpty />
+            <CanvasEmpty
+              disabled={!actorSessionID}
+              creatingBrowser={creatingBrowserTab}
+              creatingTerminal={creatingTerminal}
+              onCreateBrowser={createBrowserSurface}
+              onCreateTerminal={createNewTerminal}
+            />
           ) : (
             items.map((item, index) => (
               <CanvasWindow
@@ -965,10 +979,44 @@ function sameResourceRecord<T>(current: Record<string, T>, next: Record<string, 
   return currentKeys.length === nextKeys.length && nextKeys.every((key) => current[key] === next[key]);
 }
 
-function CanvasEmpty() {
+function CanvasEmpty({
+  disabled,
+  creatingBrowser,
+  creatingTerminal,
+  onCreateBrowser,
+  onCreateTerminal,
+}: {
+  disabled: boolean;
+  creatingBrowser: boolean;
+  creatingTerminal: boolean;
+  onCreateBrowser: () => void;
+  onCreateTerminal: () => void;
+}) {
+  const { t } = useI18n();
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-      <Blocks className="h-8 w-8 text-muted-foreground/60" />
+    <div className="flex h-full items-center justify-center p-6">
+      <div className="w-52 space-y-1 text-muted-foreground">
+        <Button
+          className="w-full justify-start rounded-md bg-muted/60 px-2 font-normal hover:bg-muted hover:text-foreground"
+          disabled={disabled || creatingBrowser || creatingTerminal}
+          type="button"
+          variant="ghost"
+          onClick={onCreateBrowser}
+        >
+          {creatingBrowser ? <Spinner /> : <Compass />}
+          {t("browser.create")}
+        </Button>
+        <Button
+          className="w-full justify-start rounded-md bg-muted/60 px-2 font-normal hover:bg-muted hover:text-foreground"
+          disabled={disabled || creatingBrowser || creatingTerminal}
+          type="button"
+          variant="ghost"
+          onClick={onCreateTerminal}
+        >
+          {creatingTerminal ? <Spinner /> : <SquareTerminal />}
+          {t("terminal.create")}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -977,7 +1025,7 @@ function CanvasBrowserLoading() {
   const { t } = useI18n();
   return (
     <div className="absolute inset-0 flex items-center justify-center bg-[var(--canvas-background)] text-sm text-muted-foreground">
-      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+      <Spinner className="mr-2 h-4 w-4" />
       {t("browser.loading")}
     </div>
   );
@@ -1021,11 +1069,7 @@ function BrowserSurface({
             <ElectronWebviewBrowser activeTab={tab} sessionID={sessionID} token={token} />
           </div>
         ))}
-        {tabs.length === 0 && pending ? (
-          <CanvasBrowserLoading />
-        ) : tabs.length === 0 ? (
-          <CanvasEmpty />
-        ) : null}
+        {tabs.length === 0 && pending ? <CanvasBrowserLoading /> : null}
       </div>
     </div>
   );

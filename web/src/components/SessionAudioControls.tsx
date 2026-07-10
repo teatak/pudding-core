@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Mic, Volume2 } from "lucide-react";
+import { Mic, Volume2 } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -14,6 +14,7 @@ import {
   type AudioRuntimeStatus,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -214,7 +215,7 @@ export function SessionAudioControls({ bindings, token, sessionID }: { bindings?
           <DialogFooter>
             {runtimeRunning ? (
               <Button type="button" variant="destructive" onClick={closeRuntimeDialog} disabled={cancelRuntimeMutation.isPending}>
-                {cancelRuntimeMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : null}
+                {cancelRuntimeMutation.isPending ? <Spinner className="size-4" /> : null}
                 {t("voice.runtimeCancel")}
               </Button>
             ) : runtimeStatus?.installed ? (
@@ -227,7 +228,7 @@ export function SessionAudioControls({ bindings, token, sessionID }: { bindings?
                   {t("common.cancel")}
                 </Button>
                 <Button type="button" onClick={() => startRuntimeMutation.mutate()} disabled={startRuntimeMutation.isPending}>
-                  {startRuntimeMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : null}
+                  {startRuntimeMutation.isPending ? <Spinner className="size-4" /> : null}
                   {t("voice.runtimeDownload")}
                 </Button>
               </>
@@ -272,7 +273,7 @@ function RuntimeDownloadBody({ status, t, loading }: { status?: AudioRuntimeStat
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" />
+        <Spinner className="size-4" />
         {t("common.loading")}
       </div>
     );
@@ -385,7 +386,7 @@ export function AudioControlButtons({
               }
             }}
           >
-            {inputPending ? <Loader2 className="size-4 animate-spin" /> : <MicButtonContent active={inputActive} level={inputLevel} />}
+            {inputPending ? <Spinner className="size-4" /> : <MicButtonContent active={inputActive} level={inputLevel} />}
           </Button>
         </TooltipTrigger>
         <TooltipContent>{inputLabel}</TooltipContent>
@@ -407,7 +408,7 @@ export function AudioControlButtons({
               }
             }}
           >
-            {outputPending ? <Loader2 className="size-4 animate-spin" /> : <Volume2 className="size-4" />}
+            {outputPending ? <Spinner className="size-4" /> : <Volume2 className="size-4" />}
           </Button>
         </TooltipTrigger>
         <TooltipContent>{outputLabel}</TooltipContent>

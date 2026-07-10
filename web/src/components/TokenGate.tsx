@@ -1,12 +1,12 @@
 import { useState } from "react";
 
+import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n";
 import { setToken } from "@/state/tokenStore";
-import { Loader2 } from "lucide-react";
 
 export function TokenGate() {
   const [value, setValue] = useState("");
@@ -62,7 +62,7 @@ export function PairingGate({ failed = false }: { failed?: boolean }) {
           <CardDescription>{failed ? t("mobilePairing.failed") : t("mobilePairing.claiming")}</CardDescription>
         </CardHeader>
         <CardContent className="flex items-center gap-2 text-sm text-muted-foreground">
-          {failed ? null : <Loader2 className="size-4 animate-spin" />}
+          {failed ? null : <Spinner className="size-4" />}
           <span>{failed ? t("mobilePairing.retry") : t("common.loading")}</span>
         </CardContent>
       </Card>

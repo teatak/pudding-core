@@ -48,6 +48,7 @@ func TestClassifyToolCallCodeReadRisk(t *testing.T) {
 		{name: CodeDefinition, args: `{"scope":"project","path":"main.go","line":1,"column":1}`},
 		{name: CodeReferences, args: `{"scope":"project","path":"main.go","line":1,"column":1}`},
 		{name: CodeDiagnostics, args: `{"scope":"project","paths":["main.go"]}`},
+		{name: CodeRename, args: `{"scope":"project","path":"main.go","line":1,"column":1,"new_name":"renamed"}`},
 	} {
 		risk, ok := ClassifyToolCall(test.name, json.RawMessage(test.args))
 		if !ok || risk.Class != RiskClassRead || !risk.LowRisk || risk.Scope != managedScopeProject {

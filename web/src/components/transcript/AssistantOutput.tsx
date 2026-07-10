@@ -3,6 +3,7 @@ import { memo, useEffect, useLayoutEffect, useMemo } from "react";
 
 import type { Message } from "@/api/client";
 import { PhaseDot } from "@/components/PhaseDot";
+import { Spinner } from "@/components/Spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useI18n } from "@/i18n";
 import { isTurnPhaseActive, type TurnPhaseState } from "@/state/overlayStore";
@@ -134,10 +135,7 @@ export function CompactPendingMarker() {
       <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
         <Archive className="size-3.5 shrink-0" />
         <span className="shrink-0 font-medium leading-none text-foreground">{t("transcript.compactRunning")}</span>
-        <span
-          aria-hidden="true"
-          className="inline-block size-3.5 shrink-0 rounded-full border-2 border-muted-foreground/25 border-t-muted-foreground align-middle animate-spin"
-        />
+        <Spinner className="size-3.5 align-middle" />
       </div>
     </div>
   );

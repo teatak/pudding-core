@@ -449,8 +449,11 @@ func (s *fakeLSP) handleClientMessage(message wireMessage) (bool, error) {
 		if err := json.Unmarshal(message.Params, &params); err != nil {
 			return false, err
 		}
-		if !params.Capabilities.Workspace.Configuration || !params.Capabilities.TextDocument.PublishDiagnostics.RelatedInformation {
-			return false, errors.New("client did not advertise required configuration and diagnostics capabilities")
+		if !params.Capabilities.Workspace.Configuration ||
+			!params.Capabilities.Workspace.WorkspaceEdit.DocumentChanges ||
+			!params.Capabilities.TextDocument.Rename.PrepareSupport ||
+			!params.Capabilities.TextDocument.PublishDiagnostics.RelatedInformation {
+			return false, errors.New("client did not advertise required configuration, rename, and diagnostics capabilities")
 		}
 		s.rootURI = params.RootURI
 		return false, s.respond(message.ID, map[string]any{

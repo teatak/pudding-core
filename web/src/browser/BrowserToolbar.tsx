@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, CornerDownLeft, Loader2, RefreshCw } from "lucide-react";
+import { ArrowLeft, ArrowRight, CornerDownLeft, RefreshCw } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -27,6 +27,7 @@ import {
   upsertBrowserTab,
 } from "@/browser/helpers";
 import type { BrowserCanvasPayload, BrowserNavigationAction, BrowserTabsData } from "@/browser/types";
+import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n";
@@ -289,7 +290,7 @@ export function BrowserToolbar({
           variant="ghost"
           onClick={() => navigationMutation.mutate("back")}
         >
-          {pendingNavigationAction === "back" ? <Loader2 className={`${navIconClass} animate-spin`} /> : <ArrowLeft className={navIconClass} />}
+          {pendingNavigationAction === "back" ? <Spinner className={`${navIconClass}`} /> : <ArrowLeft className={navIconClass} />}
         </Button>
         <Button
           aria-label={t("browser.forward")}
@@ -300,7 +301,7 @@ export function BrowserToolbar({
           variant="ghost"
           onClick={() => navigationMutation.mutate("forward")}
         >
-          {pendingNavigationAction === "forward" ? <Loader2 className={`${navIconClass} animate-spin`} /> : <ArrowRight className={navIconClass} />}
+          {pendingNavigationAction === "forward" ? <Spinner className={`${navIconClass}`} /> : <ArrowRight className={navIconClass} />}
         </Button>
         <Button
           aria-label={t("browser.reload")}
@@ -311,7 +312,7 @@ export function BrowserToolbar({
           variant="ghost"
           onClick={() => navigationMutation.mutate("reload")}
         >
-          {pendingNavigationAction === "reload" ? <Loader2 className={`${navIconClass} animate-spin`} /> : <RefreshCw className={navIconClass} />}
+          {pendingNavigationAction === "reload" ? <Spinner className={`${navIconClass}`} /> : <RefreshCw className={navIconClass} />}
         </Button>
       </div>
       <div className="group relative flex h-8 min-w-0 flex-1 items-center rounded-md border border-transparent bg-transparent transition-[background-color,box-shadow] hover:bg-background/45 focus-within:bg-background/45 focus-within:shadow-[0_0_0_1px_hsl(var(--border)/0.7),0_0_0_3px_hsl(var(--ring)/0.12)]">
@@ -337,7 +338,7 @@ export function BrowserToolbar({
           type="submit"
           variant="ghost"
         >
-          {openMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CornerDownLeft className="h-3.5 w-3.5" />}
+          {openMutation.isPending ? <Spinner className="h-3.5 w-3.5" /> : <CornerDownLeft className="h-3.5 w-3.5" />}
         </Button>
       </div>
     </form>

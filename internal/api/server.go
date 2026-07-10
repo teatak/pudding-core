@@ -168,6 +168,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	public := cart.New()
 
 	app.Route("/sessions").POST(s.createSession).GET(s.listSessions)
+	app.Route("/sessions/search").POST(s.searchSessionMessages)
 	app.Route("/sessions/:id").GET(s.getSession).PATCH(s.patchSession).DELETE(s.deleteSession)
 	app.Route("/sessions/:id/submit").POST(s.submit)
 	app.Route("/sessions/:id/cancel").POST(s.cancel)
