@@ -39,6 +39,7 @@ import (
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/home"
+	"github.com/teatak/pudding-core/internal/lsp"
 	"github.com/teatak/pudding-core/internal/mobileauth"
 	"github.com/teatak/pudding-core/internal/prompt"
 	"github.com/teatak/pudding-core/internal/provider/mock"
@@ -69,6 +70,7 @@ type Daemon struct {
 	voice     *voice.Service
 	browser   browser.Service
 	terminals *terminal.Manager
+	lsp       *lsp.Manager
 	stopSSE   context.CancelFunc
 	serveErr  chan error
 }
@@ -129,8 +131,9 @@ func Start(opts Options) (*Daemon, error) {
 	appMCP := tool.NewAppMCPRunner(apps)
 	camera := desktopcamera.New()
 	screen := desktopscreen.New()
+	languageServers := lsp.NewManager()
 	tools := tool.NewMultiRunner(
-		tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithBrowserState(st), tool.WithHomeDir(dir), tool.WithBrowser(browserService), tool.WithCamera(camera), tool.WithDesktopScreen(screen)),
+		tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithBrowserState(st), tool.WithHomeDir(dir), tool.WithBrowser(browserService), tool.WithLanguageService(languageServers), tool.WithCamera(camera), tool.WithDesktopScreen(screen)),
 		browserMCP,
 		appMCP,
 	)
@@ -159,6 +162,7 @@ func Start(opts Options) (*Daemon, error) {
 		return voiceService.ReplaceASR(defaultASR(dir, currentAudio))
 	})
 	if err := eng.Recover(context.Background()); err != nil {
+		_ = languageServers.Close(context.Background())
 		_ = st.Close()
 		return nil, fmt.Errorf("recover interrupted turns: %w", err)
 	}
@@ -173,6 +177,7 @@ func Start(opts Options) (*Daemon, error) {
 	}
 	ln, err := net.Listen("tcp", listenAddr)
 	if err != nil {
+		_ = languageServers.Close(context.Background())
 		_ = st.Close()
 		return nil, err
 	}
@@ -183,6 +188,7 @@ func Start(opts Options) (*Daemon, error) {
 	}
 	devices, err := mobileauth.OpenDeviceStore(home.MobileDevicesPath(dir))
 	if err != nil {
+		_ = languageServers.Close(context.Background())
 		_ = st.Close()
 		_ = ln.Close()
 		return nil, err
@@ -214,6 +220,7 @@ func Start(opts Options) (*Daemon, error) {
 		voice:     voiceService,
 		browser:   browserService,
 		terminals: terminalManager,
+		lsp:       languageServers,
 		stopSSE:   stopSSE,
 		serveErr:  make(chan error, 1),
 	}
@@ -534,6 +541,12 @@ func (d *Daemon) Shutdown(ctx context.Context) error {
 	// turn goroutine 仍各自收尾(写完 canonical),由 provider 超时兜底。
 	d.engine.Stop()
 	d.engine.Wait()
+	if d.lsp != nil {
+		if err := d.lsp.Close(ctx); err != nil {
+			_ = d.store.Close()
+			return err
+		}
+	}
 	return d.store.Close()
 }
 

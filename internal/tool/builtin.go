@@ -11,6 +11,7 @@ import (
 
 	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/browser"
+	"github.com/teatak/pudding-core/internal/lsp"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/skill"
 	"github.com/teatak/pudding-core/internal/store"
@@ -118,6 +119,7 @@ type BuiltinRunner struct {
 	historyMessages HistoryMessageSource
 	browserState    BrowserStateStore
 	browser         browser.Service
+	languageService lsp.Service
 	camera          CameraCapturer
 	screen          DesktopScreenCapturer
 	homeDir         string
@@ -194,6 +196,12 @@ func WithHistorySearch(source HistorySearchSource) BuiltinOption {
 func WithBrowser(service browser.Service) BuiltinOption {
 	return func(r *BuiltinRunner) {
 		r.browser = service
+	}
+}
+
+func WithLanguageService(service lsp.Service) BuiltinOption {
+	return func(r *BuiltinRunner) {
+		r.languageService = service
 	}
 }
 

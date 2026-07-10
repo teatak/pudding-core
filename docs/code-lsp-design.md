@@ -1,6 +1,6 @@
 # Pudding LSP 语言智能设计
 
-> 状态:设计完成,尚未实施。  
+> 状态:实施中,C10.0 已完成(2026-07-10)。
 > 对应阶段:C10。  
 > 首版语言:Go、TypeScript / JavaScript。  
 > 目标:在不引入后端 focus、隐式上下文或完整 IDE 状态的前提下,为 Project mode
@@ -663,7 +663,7 @@ PUDDING_LSP_INTEGRATION=1
 
 ### C10.0: Protocol 与 Manager
 
-预计 2 天。
+状态:已完成(2026-07-10)。
 
 - `internal/lsp` JSON-RPC framing。
 - process lifecycle、initialize、pending requests、cancel、idle close。
@@ -671,6 +671,18 @@ PUDDING_LSP_INTEGRATION=1
 - daemon wiring 与 `WithLanguageService`。
 
 验收:fake server 下并发、cancel、crash、shutdown 全部通过。
+
+实际落地:
+
+- `internal/lsp` 提供有界 `Content-Length` framing、initialize、乱序 response
+  routing、server request allowlist 与 diagnostics cache。
+- Manager 按 canonical `languageRoot + serverKind` singleflight 复用进程,支持最大
+  process 数、LRU / idle 回收、crash 后重建和 spec conflict 检查。
+- request context 取消只发送 `$/cancelRequest`,不终止共享进程。
+- daemon 持有 Manager 生命周期,`BuiltinRunner` 通过 `WithLanguageService` 注入协议
+  边界;C10.1 在此边界上增加 Go resolver 与用户可见工具。
+- fake subprocess 覆盖 partial frame、并发乱序响应、server request、diagnostics、
+  cancel 后复用、crash restart、graceful shutdown 与 forced kill。
 
 ### C10.1: Go / gopls
 
