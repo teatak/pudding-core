@@ -20,6 +20,7 @@ import { openFilePreview } from "@/state/filePreviewStore";
 
 const commandToolName = "builtin_command_run";
 const projectInspectToolName = "builtin_project_inspect";
+const projectInstructionsToolName = "builtin_project_instructions";
 const gitToolNames = new Set([
   "builtin_git_status",
   "builtin_git_diff",
@@ -46,7 +47,7 @@ type Translator = (key: string) => string;
 type UnknownRecord = Record<string, unknown>;
 
 export function isCodeToolName(name: string) {
-  return name === commandToolName || name === projectInspectToolName || gitToolNames.has(name) || patchToolNames.has(name) || fileToolNames.has(name);
+  return name === commandToolName || name === projectInspectToolName || name === projectInstructionsToolName || gitToolNames.has(name) || patchToolNames.has(name) || fileToolNames.has(name);
 }
 
 export function codeToolSummary(name: string, args: unknown, result: unknown, t: Translator) {
@@ -79,6 +80,9 @@ export function codeToolSummary(name: string, args: unknown, result: unknown, t:
   if (name === projectInspectToolName) {
     const languages = readRecordArray(output, "languages").map((item) => readString(item, "name")).filter(Boolean);
     return languages.length > 0 ? languages.slice(0, 4).join(" · ") : preferredPath(output) || preferredPath(input);
+  }
+  if (name === projectInstructionsToolName) {
+    return countSummary(output, "instructionCount", "transcript.codeInstructionFiles", t);
   }
   if (name === "builtin_git_status") {
     if (readBoolean(output, "clean")) {
@@ -144,6 +148,8 @@ export function CodeToolDetails({
     body = <CommandDetails callID={callID} input={input} output={output} sessionID={sessionID} t={t} />;
   } else if (name === projectInspectToolName) {
     body = <ProjectInspectDetails output={output} t={t} />;
+  } else if (name === projectInstructionsToolName) {
+    body = <ProjectInstructionsDetails output={output} t={t} />;
   } else if (name === "builtin_git_status") {
     body = <GitStatusDetails output={output} t={t} />;
   } else if (name === "builtin_git_diff") {
@@ -158,6 +164,67 @@ export function CodeToolDetails({
     body = <FileDetails callID={callID} input={input} name={name} output={output} locale={locale} sessionID={sessionID} t={t} />;
   }
   return <>{body}</>;
+}
+
+function ProjectInstructionsDetails({ output, t }: { output: UnknownRecord | null; t: Translator }) {
+  if (!output) {
+    return <EmptyLine>{t("transcript.codeWaitingResult")}</EmptyLine>;
+  }
+  if (output.ok === false) {
+    return <ErrorDetail output={output} t={t} />;
+  }
+  const targets = readRecordArray(output, "targets");
+  const instructions = readRecordArray(output, "instructions");
+  const warnings = readRecordArray(output, "warnings");
+  return (
+    <div className="space-y-2">
+      <MetricRow
+        metrics={[
+          metric(readNumber(output, "targetCount") ?? targets.length, t("transcript.codeTargetsLabel")),
+          metric(readNumber(output, "instructionCount") ?? instructions.length, t("transcript.codeInstructionFilesLabel")),
+          warnings.length > 0 ? metric(warnings.length, t("transcript.codeWarningsLabel"), "text-warning") : null,
+        ]}
+      />
+      {instructions.length > 0 ? <ProjectInstructionFileList instructions={instructions} t={t} /> : <EmptyLine>{t("transcript.codeNoProjectInstructions")}</EmptyLine>}
+      {warnings.length > 0 ? <ProjectInstructionWarningList warnings={warnings} /> : null}
+    </div>
+  );
+}
+
+function ProjectInstructionFileList({ instructions, t }: { instructions: UnknownRecord[]; t: Translator }) {
+  return (
+    <div className="max-h-72 overflow-auto border-t border-border/50 pt-1">
+      {instructions.slice(0, 64).map((instruction, index) => {
+        const appliesTo = readStringArray(instruction, "appliesTo") || [];
+        return (
+          <div key={`${readString(instruction, "projectRoot")}:${readString(instruction, "path")}:${index}`} className="grid min-h-8 grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-1.5 py-1 text-[11px]">
+            <span className="text-right font-mono text-muted-foreground/70">{readNumber(instruction, "order") ?? index + 1}</span>
+            <span className="min-w-0">
+              <code className="block truncate font-mono text-foreground/85">{readString(instruction, "path")}</code>
+              <span className="block truncate text-[10px] text-muted-foreground">
+                {replace(t("transcript.codeInstructionScope"), { scope: readString(instruction, "scopePath") || "." })}
+              </span>
+            </span>
+            <span className="shrink-0 text-right text-[10px] text-muted-foreground">
+              {readBoolean(instruction, "truncated") ? <span className="text-warning">{t("transcript.codeTruncated")}</span> : replace(t("transcript.codeAppliesTargets"), { count: String(appliesTo.length) })}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ProjectInstructionWarningList({ warnings }: { warnings: UnknownRecord[] }) {
+  return (
+    <div className="border-t border-warning/30 pt-1 text-[10px] text-warning">
+      {warnings.slice(0, 20).map((warning, index) => (
+        <div key={`${readString(warning, "path")}:${index}`} className="break-words py-0.5">
+          <code className="font-mono">{readString(warning, "path")}</code>{readString(warning, "detail") ? ` · ${readString(warning, "detail")}` : ""}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function ProjectInspectDetails({ output, t }: { output: UnknownRecord | null; t: Translator }) {

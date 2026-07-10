@@ -24,6 +24,7 @@ const (
 	HistoryGetMessage   = "builtin_history_get_message"
 	SkillRead           = "builtin_skill_read"
 	ProjectInspect      = "builtin_project_inspect"
+	ProjectInstructions = "builtin_project_instructions"
 	FileList            = "builtin_file_list"
 	FileRead            = "builtin_file_read"
 	AttachmentReadImage = "builtin_attachment_read_image"
@@ -292,6 +293,12 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Capability:  store.ModeProject,
 		},
 		{
+			Name:        ProjectInstructions,
+			Description: "Read the project instruction files that apply to one or more authorized target paths. Resolves AGENTS.md, CLAUDE.md, and CONTRIBUTING.md from the project root toward each target directory, returning deduplicated content in broad-to-specific order.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Project instructions can be read only from authorized project directories."},"paths":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":32,"description":"Target files or directories whose applicable instructions are needed. Missing future file paths are allowed when their parent remains inside the project."}},"required":["scope","paths"],"additionalProperties":false}`),
+			Capability:  store.ModeProject,
+		},
+		{
 			Name:        FileList,
 			Description: "List files in a Pudding-managed file area or an authorized project directory.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","project"],"description":"Target file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized project directories. Use . to list the root."},"max_entries":{"type":"integer","description":"Optional maximum entries, 1-1000, default 200."}},"required":["scope","path"],"additionalProperties":false}`),
@@ -555,6 +562,8 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.skillRead(ctx, call)
 	case ProjectInspect:
 		return r.projectInspect(ctx, call)
+	case ProjectInstructions:
+		return r.projectInstructions(call)
 	case FileList:
 		return r.fileList(call)
 	case FileRead:

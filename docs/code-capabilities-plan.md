@@ -1,6 +1,6 @@
 # Pudding Code 能力设计与计划
 
-> 状态:C0、C1、C1.5、C1.6、C2、C3、C4、C5、C6、C7 与 C8 已落地。
+> 状态:C0、C1、C1.5、C1.6、C2、C3、C4、C5、C6、C7、C8 与 C9 已落地。
 > 目标:在现有 multi-session / Project tool 架构上,把 Pudding 从"可读写文件"
 > 推进到"可信的工程协作 agent"。
 
@@ -705,6 +705,79 @@ Project 仍只承载 `rootDirs` 与 `approvalMode`;代码语言、脚本和指�
 - 常见 Go、TypeScript、ESLint 错误能转成结构化诊断。
 - 用户点击诊断能在画布定位对应文件行。
 - 普通命令不会被错误标记为验证通过。
+- Go 单测、Web build 与 `git diff --check` 通过。
+
+### C9: Project Instructions 与目录级作用域
+
+状态:已完成(2026-07-10)。
+
+目标:
+
+- 让 agent 在理解或修改代码前获得目标目录适用的项目规则。
+- 支持 root 指令与子目录指令叠加,避免只读取仓库根规则。
+- 保持“context 只来自 canonical messages”的架构约束。
+
+#### C9.1 Canonical 边界
+
+不由 engine 在 provider 请求前静默读取本地指令并注入 system prompt。新增只读工具
+`builtin_project_instructions`:
+
+```jsonc
+{
+  "scope": "project",
+  "paths": ["internal/tool/patch.go", "web/src/App.tsx"]
+}
+```
+
+工具调用与结果正常进入 canonical message parts。这样:
+
+- 指令内容可被用户查看和追溯。
+- compaction 能保留本轮已经采用的关键规则。
+- provider client 不保存额外的跨 turn 事实源。
+- 工作树中的指令发生变化后,下一次调用自然获得新内容。
+
+#### C9.2 发现与作用域
+
+第一版识别:
+
+- `AGENTS.md`:目录树作用域。
+- `CLAUDE.md`:目录树作用域,作为兼容的 assistant instruction 文件。
+- `CONTRIBUTING.md`:位于目标祖先链时生效。
+
+对每个 target path:
+
+1. 解析其所属授权 Project root。
+2. 从 Project root 到目标文件父目录逐级查找指令文件。
+3. 按“更宽 -> 更具体”的顺序返回;更深目录的规则优先级更高。
+4. 多 target 调用对相同指令文件去重,并记录 `appliesTo`。
+
+目标文件尚未创建时,使用其最近存在父目录的祖先链。符号链接和越界路径继续使用
+Project resolver 的安全边界。
+
+#### C9.3 有界输出
+
+- 单次最多 32 个 target path、64 个指令文件。
+- 单文件最多返回 64 KiB,总内容最多 256 KiB。
+- 仅接受 UTF-8 regular file;二进制、符号链接和不可读文件返回结构化 warning。
+- 超限文件返回截断标记,不静默忽略。
+- 结果包含 `path`、`scopePath`、`kind`、`content`、`chars`、`truncated`、
+  `appliesTo` 与 broad-to-specific `order`。
+
+#### C9.4 Agent 与 UI
+
+- Project prompt 要求在首次修改陌生目录前读取适用指令。
+- target path 或目录发生变化时重新解析,不把旧目录规则错误套到新路径。
+- transcript 卡片展示 target 数、指令文件、作用域和截断状态;内容仍保留在
+  canonical result 与“原始数据”中。
+- 补齐图标、显示名与三语 i18n,不暴露 snake_case 工具名。
+
+验收:
+
+- root 与 nested `AGENTS.md` 能按顺序共同作用于 nested target。
+- sibling target 不会收到其他子树的指令。
+- 多 target 能去重同一个 root 指令并正确标记 `appliesTo`。
+- missing target 使用最近存在父目录规则,越界 target 被拒绝。
+- 工具结果进入正常 tool loop,不新增 engine 隐式上下文源。
 - Go 单测、Web build 与 `git diff --check` 通过。
 
 ## 11. 测试策略
