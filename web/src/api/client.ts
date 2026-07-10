@@ -69,10 +69,13 @@ import {
   browserSyncRequest,
   browserTab,
   browserTypeRequest,
+  createTerminalRequest,
   installAppRequest,
   listBrowserTabsResponse,
+  listTerminalsResponse,
   startAppOAuthRequest,
   startAppOAuthResponse,
+  terminal,
   webToolsConfig,
   type AppConnection,
   type AppDefinition,
@@ -114,6 +117,7 @@ import {
   type SkillDraft,
   type SkillDraftDetail,
   type WebToolsConfig,
+  type Terminal,
 } from "@/contracts/api";
 import { z } from "zod";
 
@@ -414,6 +418,38 @@ export function createBrowserTab(token: string, sessionID: string): Promise<Brow
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs`, browserTab, {
     method: "POST",
   });
+}
+
+export function listTerminals(token: string, sessionID: string): Promise<{ terminals: Terminal[] }> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/terminals`, listTerminalsResponse);
+}
+
+export function createTerminal(
+  token: string,
+  sessionID: string,
+  body: z.infer<typeof createTerminalRequest> = {},
+): Promise<Terminal> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/terminals`, terminal, {
+    method: "POST",
+    body: JSON.stringify(createTerminalRequest.parse(body)),
+  });
+}
+
+export async function deleteTerminal(token: string, sessionID: string, terminalID: string): Promise<void> {
+  await request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/terminals/${encodeURIComponent(terminalID)}`,
+    z.null(),
+    { method: "DELETE" },
+  );
+}
+
+export function terminalWebSocketURL(token: string, sessionID: string, terminalID: string) {
+  const path = `/sessions/${encodeURIComponent(sessionID)}/terminals/${encodeURIComponent(terminalID)}/ws`;
+  const url = new URL(apiURL(path), window.location.href);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.searchParams.set("token", token);
+  return url.toString();
 }
 
 export function openBrowserURL(
@@ -998,5 +1034,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BuiltinTool, BrowserActionResult, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, WebToolsConfig };
+export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BuiltinTool, BrowserActionResult, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, Terminal, WebToolsConfig };
 export { createProjectRequest, createProviderRequest, patchProjectRequest, patchProviderRequest };

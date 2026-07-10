@@ -406,6 +406,84 @@ func TestBuiltinFileReadRejectsLargeText(t *testing.T) {
 	}
 }
 
+func TestBuiltinFileSearchSupportsRegexGlobsAndContext(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"src/main.go":      "package main\n\nfunc RunServer() {}\n\nfunc stop() {}\n",
+		"src/main_test.go": "package main\n\nfunc TestRunServer() {}\n",
+		"docs/readme.md":   "RunServer is documented here\n",
+	}
+	for name, content := range files {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
+	result := runner.Call(context.Background(), Call{
+		Name: FileSearch,
+		Args: json.RawMessage(`{
+			"scope":"project",
+			"path":".",
+			"query":"func\\s+runserver",
+			"mode":"regex",
+			"case_sensitive":false,
+			"include_globs":["**/*.go"],
+			"exclude_globs":["**/*_test.go"],
+			"context_lines":1
+		}`),
+		ProjectDirs: []string{root},
+	})
+	if !result.Ok {
+		t.Fatalf("search should succeed: %+v", result)
+	}
+	payload := decodeToolResult(t, result)
+	matches := payload["matches"].([]any)
+	if len(matches) != 1 {
+		t.Fatalf("expected one filtered match, got %+v", matches)
+	}
+	match := matches[0].(map[string]any)
+	if match["line"] != float64(3) || match["lineStart"] != float64(2) || match["lineEnd"] != float64(4) {
+		t.Fatalf("unexpected match range: %+v", match)
+	}
+	if match["excerpt"] != "\nfunc RunServer() {}\n" {
+		t.Fatalf("unexpected search excerpt: %q", match["excerpt"])
+	}
+	if payload["searchType"] != "regex" || payload["caseSensitive"] != false {
+		t.Fatalf("unexpected search metadata: %+v", payload)
+	}
+}
+
+func TestBuiltinFileSearchRejectsInvalidPatterns(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
+	for _, tt := range []struct {
+		name   string
+		args   string
+		reason string
+	}{
+		{name: "regex", args: `{"scope":"project","path":".","query":"[","mode":"regex"}`, reason: "invalid_regex"},
+		{name: "glob", args: `{"scope":"project","path":".","query":"main","include_globs":["["]}`, reason: "invalid_glob"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			result := runner.Call(context.Background(), Call{Name: FileSearch, Args: json.RawMessage(tt.args), ProjectDirs: []string{root}})
+			if result.Ok {
+				t.Fatalf("invalid pattern should fail: %+v", result)
+			}
+			payload := decodeToolResult(t, result)
+			if payload["reason"] != tt.reason {
+				t.Fatalf("reason=%v want %s", payload["reason"], tt.reason)
+			}
+		})
+	}
+}
+
 func TestBuiltinFileReadAllowsUTF8RuneAcrossProbeBoundary(t *testing.T) {
 	home := t.TempDir()
 	tempDir := filepath.Join(home, "temp")

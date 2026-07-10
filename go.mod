@@ -6,6 +6,7 @@ require github.com/teatak/cart/v3 v3.0.0
 
 require (
 	github.com/coder/websocket v1.8.14
+	github.com/creack/pty v1.1.24
 	github.com/go-git/go-git/v5 v5.19.1
 	github.com/gordonklaus/portaudio v0.0.0-20260203164431-765aa7dfa631
 	github.com/gorilla/websocket v1.5.3

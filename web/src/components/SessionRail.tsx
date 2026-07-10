@@ -4,10 +4,13 @@ import {
   Blocks,
   ChevronRight,
   Ellipsis,
-  FolderCode,
+  FolderClosed,
+  FolderOpen,
+  Loader2,
   MessageSquareText,
   Package,
   PanelLeft,
+  Pencil,
   Pin,
   Plus,
   TextCursorInput,
@@ -22,6 +25,7 @@ import {
   Fragment,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
+  type ReactNode,
   useCallback,
   useContext,
   useEffect,
@@ -30,8 +34,17 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { toast } from "sonner";
 
-import { deleteSession, getAudioBindings, listProjects, listSessions, updateSession } from "@/api/client";
+import {
+  deleteSession,
+  getAudioBindings,
+  listProjects,
+  listSessions,
+  revealDesktopPath,
+  updateProject,
+  updateSession,
+} from "@/api/client";
 import type { Project, Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { LanguageToggle } from "@/components/LanguageToggle";
@@ -48,6 +61,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -493,6 +507,7 @@ function groupProjectSessions(projects: Project[], sessions: Session[]): Project
     groups.set(project.id, {
       key: project.id,
       label: project.name || basename(project.rootDirs[0] || project.id),
+      project,
       projectID: project.id,
       sessions: [],
       lastActivity: new Date(project.updatedAt || project.createdAt).getTime(),
@@ -670,6 +685,7 @@ type SessionDropTarget = {
 type ProjectSessionGroup = {
   key: string;
   label: string;
+  project?: Project;
   projectID?: string;
   sessions: Session[];
   lastActivity: number;
@@ -1061,6 +1077,7 @@ function RailPanel({
                   {projectGroups.map((group) => (
                     <SidebarGroup key={group.key} className="px-2 py-0.5">
                       <CollapsibleSessionGroupLabel
+                        actions={group.project ? <ProjectActionsMenu project={group.project} token={token} /> : undefined}
                         collapsed={collapsedGroups.has(`project:${group.key}`)}
                         icon="project"
                         label={group.label}
@@ -1180,6 +1197,7 @@ function CollapsibleSessionGroupLabel({
   collapsed,
   icon,
   label,
+  actions,
   actionLabel,
   title,
   onAction,
@@ -1188,16 +1206,17 @@ function CollapsibleSessionGroupLabel({
   collapsed: boolean;
   icon: "chat" | "pinned" | "project";
   label: string;
+  actions?: ReactNode;
   actionLabel?: string;
   title?: string;
   onAction?: () => void;
   onToggle: () => void;
 }) {
-  const Icon = icon === "pinned" ? Pin : icon === "chat" ? MessageSquareText : FolderCode;
+  const Icon = icon === "pinned" ? Pin : icon === "chat" ? MessageSquareText : collapsed ? FolderClosed : FolderOpen;
   return (
     <SidebarGroupLabel className="group/project-label h-8 gap-1 px-0 text-[13px]" title={title || label}>
       <button
-        className="group flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2 pr-1 text-left hover:text-sidebar-foreground"
+        className="group flex h-8 min-w-0 flex-1 cursor-default items-center gap-2 rounded-md px-2 pr-1 text-left hover:text-sidebar-foreground"
         type="button"
         onClick={onToggle}
       >
@@ -1210,6 +1229,7 @@ function CollapsibleSessionGroupLabel({
           )}
         />
       </button>
+      {actions}
       {onAction ? (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -1229,6 +1249,113 @@ function CollapsibleSessionGroupLabel({
         </Tooltip>
       ) : null}
     </SidebarGroupLabel>
+  );
+}
+
+function ProjectActionsMenu({ project, token }: { project: Project; token: string }) {
+  const { t } = useI18n();
+  const queryClient = useQueryClient();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [name, setName] = useState(project.name);
+  const rootDir = project.rootDirs[0];
+  const isMac =
+    (typeof document !== "undefined" && document.documentElement.dataset.shell === "electron-mac") ||
+    (typeof navigator !== "undefined" && /Mac/i.test(navigator.platform));
+
+  useRailOverlayHold(menuOpen || renameOpen);
+
+  const revealMutation = useMutation({
+    mutationFn: () => revealDesktopPath(token, rootDir),
+    onError: () => toast.error(t("project.revealFailed")),
+  });
+  const renameMutation = useMutation({
+    mutationFn: (nextName: string) => updateProject(token, project.id, { name: nextName }),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(queryKeys.project(updated.id), updated);
+      queryClient.setQueryData<{ projects: Project[] }>(queryKeys.projects(), (previous) =>
+        previous
+          ? { projects: previous.projects.map((entry) => (entry.id === updated.id ? updated : entry)) }
+          : { projects: [updated] },
+      );
+      setRenameOpen(false);
+    },
+    onError: () => toast.error(t("project.renameFailed")),
+  });
+
+  const openRename = () => {
+    setName(project.name);
+    setRenameOpen(true);
+  };
+  const saveRename = () => {
+    const nextName = name.trim();
+    if (!nextName || nextName === project.name) {
+      setRenameOpen(false);
+      return;
+    }
+    renameMutation.mutate(nextName);
+  };
+
+  return (
+    <>
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+        <DropdownMenuTrigger asChild>
+          <button
+            aria-label={t("project.actions")}
+            className="flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/60 opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-focus-within/project-label:opacity-100 group-hover/project-label:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
+            type="button"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <Ellipsis className="size-3.5" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48 space-y-1">
+          {isMac && rootDir ? (
+            <DropdownMenuItem disabled={revealMutation.isPending} onSelect={() => revealMutation.mutate()}>
+              {revealMutation.isPending ? <Loader2 className="animate-spin" /> : <FolderOpen />}
+              {t("project.revealFinder")}
+            </DropdownMenuItem>
+          ) : null}
+          <DropdownMenuItem onSelect={openRename}>
+            <Pencil />
+            {t("project.rename")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+        <DialogContent>
+          <form
+            className="contents"
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveRename();
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>{t("project.renameTitle")}</DialogTitle>
+              <DialogDescription>{t("project.renameDescription")}</DialogDescription>
+            </DialogHeader>
+            <Input
+              autoFocus
+              aria-label={t("project.name")}
+              disabled={renameMutation.isPending}
+              maxLength={120}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+            <DialogFooter>
+              <Button disabled={renameMutation.isPending} type="button" variant="outline" onClick={() => setRenameOpen(false)}>
+                {t("common.cancel")}
+              </Button>
+              <Button disabled={renameMutation.isPending || !name.trim()} type="submit">
+                {renameMutation.isPending ? <Loader2 className="animate-spin" /> : null}
+                {t("common.save")}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

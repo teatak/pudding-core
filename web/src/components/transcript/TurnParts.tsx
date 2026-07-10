@@ -4,23 +4,29 @@ import {
   Camera,
   ChevronDown,
   ChevronRight,
+  Copy,
   Database,
   FileDiff,
+  FilePenLine,
   FileSearch,
   FileText,
-  FolderOpen,
   GitBranch,
   GitCommitHorizontal,
   Globe,
+  Info,
   Keyboard,
   LayoutGrid,
   ListChecks,
+  ListTree,
   MousePointerClick,
+  MoveRight,
   Paperclip,
   RotateCw,
   Route,
   Search,
+  Save,
   SquareTerminal,
+  Trash2,
   Wrench,
   type LucideIcon,
 } from "lucide-react";
@@ -60,6 +66,19 @@ type CompactProcessPart = {
 };
 
 type RenderTurnPart = TurnPartVM | CompactProcessPart;
+
+const processFileToolNames = new Set([
+  "builtin_file_copy",
+  "builtin_file_delete",
+  "builtin_file_list",
+  "builtin_file_move",
+  "builtin_file_patch",
+  "builtin_file_read",
+  "builtin_file_search",
+  "builtin_file_slice",
+  "builtin_file_stat",
+  "builtin_file_write",
+]);
 
 export function TurnParts({
   disclosure,
@@ -214,7 +233,7 @@ function shouldKeepProcessPartVisible(part: TurnPartVM) {
     return Boolean(part.active);
   }
   if (part.type === "tool_use") {
-    return Boolean(part.active || toolFailed(part));
+    return Boolean(part.active);
   }
   return false;
 }
@@ -251,16 +270,16 @@ function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIc
     builtin_camera_capture: Camera,
     builtin_command_run: SquareTerminal,
     builtin_desktop_screenshot: Camera,
-    builtin_file_copy: FileText,
-    builtin_file_delete: FileText,
-    builtin_file_list: FolderOpen,
-    builtin_file_move: FileText,
-    builtin_file_patch: FileText,
+    builtin_file_copy: Copy,
+    builtin_file_delete: Trash2,
+    builtin_file_list: ListTree,
+    builtin_file_move: MoveRight,
+    builtin_file_patch: FilePenLine,
     builtin_file_read: FileText,
     builtin_file_search: Search,
     builtin_file_slice: FileText,
-    builtin_file_stat: FileText,
-    builtin_file_write: FileText,
+    builtin_file_stat: Info,
+    builtin_file_write: Save,
     builtin_git_diff: FileDiff,
     builtin_git_log: GitBranch,
     builtin_git_stage: GitBranch,
@@ -269,6 +288,7 @@ function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIc
     builtin_git_commit: GitCommitHorizontal,
     builtin_patch_apply: FileDiff,
     builtin_patch_propose: FileDiff,
+    builtin_project_inspect: ListTree,
     builtin_graphql_introspect: Database,
     builtin_graphql_request: Database,
     builtin_graphql_search: Search,
@@ -664,9 +684,10 @@ function ProcessCompactPart({
   renderPart: (part: TurnPartVM, index: number) => ReactNode;
   onOpenChange?: (open: boolean) => void;
 }) {
-  const { locale, t } = useI18n();
+  const { t } = useI18n();
   const { handleSummaryClick, handleSummaryKeyDown, handleToggle, open } = useLocalDisclosure(defaultOpen, onOpenChange);
-  const label = processCompactLabel(hiddenParts, locale, t);
+  const label = processCompactLabel(hiddenParts, t);
+  const hasErrors = hiddenParts.some((part) => part.type === "tool_use" && toolFailed(part));
   return (
     <details className="relative text-[13px] leading-[1.5] text-muted-foreground/70" open={open} onToggle={handleToggle}>
       <summary
@@ -677,6 +698,9 @@ function ProcessCompactPart({
         <PartIcon icon={ListChecks} />
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="min-w-0 truncate">{label}</span>
+          {hasErrors ? (
+            <span className="shrink-0 text-destructive/75">{t("transcript.processHasErrors")}</span>
+          ) : null}
           <span className="shrink-0 text-muted-foreground/50">
             {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
           </span>
@@ -687,11 +711,15 @@ function ProcessCompactPart({
   );
 }
 
-function processCompactLabel(parts: TurnPartVM[], locale: string, t: (key: string) => string) {
+function processCompactLabel(parts: TurnPartVM[], t: (key: string) => string) {
   const tools = parts.filter((part): part is Extract<TurnPartVM, { type: "tool_use" }> => part.type === "tool_use");
   if (tools.length === 0) {
-    const thoughtCount = parts.filter((part) => part.type === "thought").length || parts.length;
-    return t("transcript.processThought").replace("{count}", String(thoughtCount));
+    return t("transcript.processThought");
+  }
+
+  const fileLabel = processFileToolsLabel(tools, t);
+  if (fileLabel) {
+    return fileLabel;
   }
 
   const groups: ProcessToolGroup[] = [];
@@ -700,19 +728,113 @@ function processCompactLabel(parts: TurnPartVM[], locale: string, t: (key: strin
     const group = processToolGroup(tool, t);
     const existing = groupByKey.get(group.key);
     if (existing) {
-      existing.count += 1;
       continue;
     }
     groups.push(group);
     groupByKey.set(group.key, group);
   }
 
-  const separator = locale === "en" ? " · " : " ";
+  const separator = " · ";
   return groups.map((group) => processToolGroupLabel(group, t)).join(separator);
 }
 
+function processFileToolsLabel(
+  tools: Array<Extract<TurnPartVM, { type: "tool_use" }>>,
+  t: (key: string) => string,
+) {
+  const names = tools.map((tool) => tool.name || tool.resultName || "");
+  if (!names.every((name) => processFileToolNames.has(name))) {
+    return "";
+  }
+
+  const paths: string[] = [];
+  tools.forEach((tool) => addUniqueToolPath(paths, fileToolTargetPath(tool)));
+  const multiple = paths.length > 1;
+  const operations = new Set(names.map(fileToolOperation));
+  const operation = operations.size === 1 ? operations.values().next().value : "process";
+  const keys: Record<string, [string, string]> = {
+    copy: ["transcript.processFileCopy", "transcript.processFilesCopy"],
+    delete: ["transcript.processFileDelete", "transcript.processFilesDelete"],
+    list: ["transcript.processFileList", "transcript.processFileList"],
+    move: ["transcript.processFileMove", "transcript.processFilesMove"],
+    process: ["transcript.processFileHandle", "transcript.processFilesHandle"],
+    read: ["transcript.processFileRead", "transcript.processFilesRead"],
+    search: ["transcript.processFileSearch", "transcript.processFileSearch"],
+    stat: ["transcript.processFileStat", "transcript.processFilesStat"],
+    update: ["transcript.processFileUpdate", "transcript.processFilesUpdate"],
+    write: ["transcript.processFileWrite", "transcript.processFilesWrite"],
+  };
+  const pair = keys[operation || "process"] || keys.process;
+  return t(pair[multiple ? 1 : 0]);
+}
+
+function fileToolOperation(name: string) {
+  switch (name) {
+    case "builtin_file_read":
+    case "builtin_file_slice":
+      return "read";
+    case "builtin_file_write":
+      return "write";
+    case "builtin_file_patch":
+      return "update";
+    case "builtin_file_copy":
+      return "copy";
+    case "builtin_file_move":
+      return "move";
+    case "builtin_file_delete":
+      return "delete";
+    case "builtin_file_list":
+      return "list";
+    case "builtin_file_search":
+      return "search";
+    case "builtin_file_stat":
+      return "stat";
+    default:
+      return "process";
+  }
+}
+
+function fileToolTargetPath(tool: Extract<TurnPartVM, { type: "tool_use" }>) {
+  const value = tool.argsText || tool.args;
+  let args: Record<string, unknown> | null = null;
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    args = value as Record<string, unknown>;
+  } else if (typeof value === "string") {
+    const parsed = parseJSON(value.trim());
+    if (parsed.ok && parsed.value && typeof parsed.value === "object" && !Array.isArray(parsed.value)) {
+      args = parsed.value as Record<string, unknown>;
+    }
+  }
+  const key = (tool.name || tool.resultName) === "builtin_file_copy" || (tool.name || tool.resultName) === "builtin_file_move"
+    ? "from_path"
+    : "path";
+  return typeof args?.[key] === "string" ? String(args[key]) : "";
+}
+
+function addUniqueToolPath(paths: string[], value: string) {
+  const normalized = value.trim().replaceAll("\\", "/").replace(/\/{2,}/g, "/").replace(/\/$/, "");
+  if (!normalized) {
+    return;
+  }
+  const absolute = /^(?:[A-Za-z]:\/|\/)/.test(normalized);
+  const duplicate = paths.some((existing) => {
+    if (existing === normalized) {
+      return true;
+    }
+    const existingAbsolute = /^(?:[A-Za-z]:\/|\/)/.test(existing);
+    if (absolute === existingAbsolute) {
+      return false;
+    }
+    const longer = absolute ? normalized : existing;
+    const shorter = absolute ? existing : normalized;
+    return longer.endsWith(`/${shorter}`);
+  });
+  if (!duplicate) {
+    paths.push(normalized);
+  }
+}
+
 type ProcessToolGroup = {
-  count: number;
   fallbackName?: string;
   i18nKey?: string;
   key: string;
@@ -722,36 +844,32 @@ function processToolGroup(tool: Extract<TurnPartVM, { type: "tool_use" }>, t: (k
   const name = tool.name || tool.resultName || "";
   const fallbackName = toolDisplayName(name, t("transcript.tool"), t);
   const known: Record<string, string> = {
-    builtin_browser_back: "transcript.processToolBrowserBack",
-    builtin_browser_click: "transcript.processToolBrowserClick",
-    builtin_browser_close: "transcript.processToolBrowserClose",
-    builtin_browser_forward: "transcript.processToolBrowserForward",
-    builtin_browser_observe: "transcript.processToolBrowserObserve",
-    builtin_browser_open: "transcript.processToolBrowserOpen",
-    builtin_browser_reload: "transcript.processToolBrowserReload",
-    builtin_browser_screenshot: "transcript.processToolBrowserScreenshot",
-    builtin_browser_scroll: "transcript.processToolBrowserScroll",
-    builtin_browser_status: "transcript.processToolBrowserStatus",
-    builtin_browser_type: "transcript.processToolBrowserType",
+    builtin_browser_back: "transcript.processToolBrowser",
+    builtin_browser_click: "transcript.processToolBrowser",
+    builtin_browser_close: "transcript.processToolBrowser",
+    builtin_browser_forward: "transcript.processToolBrowser",
+    builtin_browser_observe: "transcript.processToolBrowser",
+    builtin_browser_open: "transcript.processToolBrowser",
+    builtin_browser_reload: "transcript.processToolBrowser",
+    builtin_browser_screenshot: "transcript.processToolBrowser",
+    builtin_browser_scroll: "transcript.processToolBrowser",
+    builtin_browser_status: "transcript.processToolBrowser",
+    builtin_browser_type: "transcript.processToolBrowser",
     builtin_graphql_request: "transcript.processToolData",
     builtin_rest_request: "transcript.processToolData",
-    builtin_web_fetch: "transcript.processToolWebFetch",
+    builtin_web_fetch: "transcript.processToolBrowser",
     builtin_web_search: "transcript.processToolWebSearch",
   };
   const i18nKey = known[name];
   if (i18nKey) {
-    return { count: 1, fallbackName, i18nKey, key: i18nKey };
+    return { fallbackName, i18nKey, key: i18nKey };
   }
-  return { count: 1, fallbackName, key: `tool:${fallbackName}` };
+  return { fallbackName, key: `tool:${fallbackName}` };
 }
 
 function processToolGroupLabel(group: ProcessToolGroup, t: (key: string) => string) {
   const translated = group.i18nKey ? t(group.i18nKey) : "";
-  const template =
-    translated && translated !== group.i18nKey
-      ? translated
-      : t("transcript.processToolFallback").replace("{name}", group.fallbackName || "");
-  return template.replace("{count}", String(group.count));
+  return translated && translated !== group.i18nKey ? translated : group.fallbackName || t("transcript.tool");
 }
 
 function ToolUsePart({
@@ -1416,6 +1534,7 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     builtin_git_commit: t("transcript.toolGitCommit"),
     builtin_patch_apply: t("transcript.toolPatchApply"),
     builtin_patch_propose: t("transcript.toolPatchPropose"),
+    builtin_project_inspect: t("transcript.toolProjectInspect"),
     builtin_camera_capture: t("transcript.toolCameraCapture"),
     builtin_desktop_screenshot: t("transcript.toolDesktopScreenshot"),
     builtin_browser_click: t("transcript.toolBrowserClick"),

@@ -27,7 +27,6 @@ import {
 } from "@/browser/helpers";
 import type { BrowserTabsData, CanvasSurface } from "@/browser/types";
 import { useI18n } from "@/i18n";
-import { setCanvasOpen } from "@/state/canvasStore";
 import { consumeBrowserReveal, useBrowserRevealEpoch } from "@/state/browserRevealStore";
 
 const SESSION_SURFACE_STORAGE_KEY = "pudding.canvas.sessionSurface.v1";
@@ -49,8 +48,9 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
   const sessionSurfaceRef = useRef<Record<string, CanvasSurface>>(readSessionSurfaces());
   const selectedBrowserTabRef = useRef<Record<string, string>>(readSelectedBrowserTabs());
   const syncTimersRef = useRef<Record<string, number>>({});
-  const [browserActive, setBrowserActive] = useState(false);
+  const [activeSurface, setActiveSurfaceState] = useState<CanvasSurface>("canvas");
   const [selectedBrowserTabs, setSelectedBrowserTabs] = useState<Record<string, string>>(selectedBrowserTabRef.current);
+  const browserActive = activeSurface === "browser";
 
   currentSessionIDRef.current = sessionID;
   selectedBrowserTabRef.current = selectedBrowserTabs;
@@ -76,11 +76,15 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
     if (sessionID) {
       rememberSessionSurface(sessionID, surface);
     }
-    setBrowserActive(surface === "browser");
+    setActiveSurfaceState(surface);
   };
 
   const selectCanvasSurface = () => {
     setActiveSurface("canvas");
+  };
+
+  const selectTerminalSurface = () => {
+    setActiveSurface("terminal");
   };
 
   useEffect(() => {
@@ -88,7 +92,7 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
       return;
     }
     surfaceSessionRef.current = sessionID;
-    setBrowserActive(sessionSurfaceRef.current[sessionID] === "browser");
+    setActiveSurfaceState(sessionSurfaceRef.current[sessionID] || "canvas");
   }, [sessionID]);
 
   const browserRevealEpoch = useBrowserRevealEpoch(sessionID);
@@ -124,8 +128,6 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
   const hasBrowserState = Boolean(
     activeBrowserTab || browserPayloadHasRealState(browserPayload) || browserPayloadHasBlankTabIntent(browserPayload),
   );
-  const hasOpenBrowserWindow = browserActive || hasBrowserState;
-
   useEffect(() => {
     if (sessionID && activeBrowserTab && selectedBrowserTabRef.current[sessionID] !== activeBrowserTab.id) {
       rememberSelectedBrowserTab(sessionID, activeBrowserTab.id);
@@ -150,7 +152,7 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
       if (isNewTab) {
         rememberSelectedBrowserTab(sessionID, tab.id);
         rememberSessionSurface(sessionID, "browser");
-        setBrowserActive(true);
+        setActiveSurfaceState("browser");
         void adoptBrowserTab(token, tab.sessionID, tab.id).catch(() => undefined);
       }
       const key = `${tab.sessionID}:${tab.id}`;
@@ -180,7 +182,7 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
       }
       rememberSelectedBrowserTab(sessionID, event.tabID);
       rememberSessionSurface(sessionID, "browser");
-      setBrowserActive(true);
+      setActiveSurfaceState("browser");
     });
   }, [enabled, sessionID]);
 
@@ -249,7 +251,7 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
         updatedAt: tab.updatedAt,
       });
       if (currentSessionIDRef.current === targetSessionID) {
-        setBrowserActive(true);
+        setActiveSurfaceState("browser");
       }
       void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(targetSessionID) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(targetSessionID) });
@@ -270,7 +272,7 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
       return;
     }
     rememberSessionSurface(sessionID, "canvas");
-    setBrowserActive(false);
+    setActiveSurfaceState("canvas");
   }, [
     browserActive,
     browserStateQuery.isFetching,
@@ -282,11 +284,20 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
   ]);
 
   useEffect(() => {
-    if (!enabled || !sessionID || browserActive || !hasBrowserState || hasTransientSurface || itemsLength > 0) {
+    if (
+      !enabled ||
+      !sessionID ||
+      browserActive ||
+      !hasBrowserState ||
+      hasTransientSurface ||
+      itemsLength > 0 ||
+      sessionSurfaceRef.current[sessionID] === "canvas" ||
+      sessionSurfaceRef.current[sessionID] === "terminal"
+    ) {
       return;
     }
     rememberSessionSurface(sessionID, "browser");
-    setBrowserActive(true);
+    setActiveSurfaceState("browser");
   }, [browserActive, enabled, hasBrowserState, hasTransientSurface, itemsLength, sessionID]);
 
   const createNewBrowserTab = () => {
@@ -359,9 +370,11 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
           : { hasState: false, sessionID: targetSessionID, processMode: previousTabs?.processMode || "headless" },
       );
       if (remaining.length === 0) {
-        rememberSessionSurface(targetSessionID, "canvas");
+        if (sessionSurfaceRef.current[targetSessionID] === "browser") {
+          rememberSessionSurface(targetSessionID, "canvas");
+        }
         if (currentSessionIDRef.current === targetSessionID) {
-          setBrowserActive(false);
+          setActiveSurfaceState((current) => (current === "browser" ? "canvas" : current));
         }
       }
       return { previousSelectedTabID, previousState, previousSurface, previousTabs };
@@ -369,9 +382,6 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
     onSuccess: ({ sessionID: targetSessionID }) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.browserState(targetSessionID) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.browserTabs(targetSessionID) });
-      if (!hasTransientSurface && itemsLength === 0 && (queryClient.getQueryData<BrowserTabsData>(queryKeys.browserTabs(targetSessionID))?.tabs.length || 0) === 0) {
-        setCanvasOpen(false);
-      }
     },
     onError: (_error, variables, context) => {
       if (context?.previousTabs) {
@@ -384,7 +394,7 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
       if (context?.previousSurface) {
         rememberSessionSurface(variables.targetSessionID, context.previousSurface);
         if (currentSessionIDRef.current === variables.targetSessionID) {
-          setBrowserActive(context.previousSurface === "browser");
+          setActiveSurfaceState(context.previousSurface);
         }
       }
       toast.error(t("browser.releaseFailed"));
@@ -401,6 +411,7 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
   return {
     activeBrowserTab,
     activeBrowserTabID: activeBrowserTab?.id,
+    activeSurface,
     browserActive,
     browserTabs,
     closeBrowserTab: (tabID: string) => {
@@ -414,9 +425,9 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
     browserSurfacePending: createBrowserTabMutation.isPending || browserStateQuery.isFetching || browserTabsQuery.isFetching,
     browserSurfaceVisible: browserActive || hasBrowserState || createBrowserTabMutation.isPending,
     hasBrowserState,
-    hasOpenBrowserWindow,
     selectCanvasSurface,
     selectBrowserTab,
+    selectTerminalSurface,
   };
 }
 
@@ -432,7 +443,7 @@ function readSessionSurfaces(): Record<string, CanvasSurface> {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const out: Record<string, CanvasSurface> = {};
     Object.entries(parsed).forEach(([sessionID, surface]) => {
-      if (surface === "canvas" || surface === "browser") {
+      if (surface === "canvas" || surface === "browser" || surface === "terminal") {
         out[sessionID] = surface;
       }
     });

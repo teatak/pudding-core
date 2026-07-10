@@ -147,6 +147,22 @@ CREATE TABLE IF NOT EXISTS session_browser_tabs (
 CREATE INDEX IF NOT EXISTS session_browser_tabs_updated_at
     ON session_browser_tabs(session_id, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS session_terminals (
+    session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    terminal_id TEXT NOT NULL,
+    title       TEXT NOT NULL DEFAULT '',
+    cwd         TEXT NOT NULL,
+    shell       TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    exit_code   INTEGER,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL,
+    PRIMARY KEY (session_id, terminal_id)
+);
+
+CREATE INDEX IF NOT EXISTS session_terminals_created_at
+    ON session_terminals(session_id, created_at ASC);
+
 CREATE TABLE IF NOT EXISTS messages (
     id                TEXT PRIMARY KEY,
     session_id        TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

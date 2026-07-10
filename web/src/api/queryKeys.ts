@@ -11,6 +11,7 @@ export const queryKeys = {
   audioRuntime: () => ["settings", "audio", "runtime"] as const,
   browserState: (sessionID: string) => ["session", sessionID, "browser", "state"] as const,
   browserTabs: (sessionID: string) => ["session", sessionID, "browser", "tabs"] as const,
+  terminals: (sessionID: string) => ["session", sessionID, "terminals"] as const,
   canvasItems: (sessionID: string) => ["session", sessionID, "canvas", "items"] as const,
   closedCanvasItems: (sessionID: string) => ["session", sessionID, "canvas", "closed"] as const,
   settings: () => ["settings"] as const,

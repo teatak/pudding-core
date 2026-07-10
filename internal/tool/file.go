@@ -9,7 +9,9 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,18 +30,23 @@ const (
 	managedScopeTemp           = "temp"
 	managedScopeProject        = "project"
 
-	defaultFileReadMaxChars = 20000
-	maxFileReadChars        = 100000
-	maxFileReadWholeBytes   = 128 * 1024
-	defaultFileListMax      = 200
-	defaultFileSliceLines   = 100
-	maxFileSliceLines       = 500
-	maxFileSliceSkip        = 5000
-	maxFileSlicePayload     = 64 * 1024
-	maxFileSearchBytes      = 1 << 20
-	maxFileSearchLineChars  = 200
-	defaultFileSearchMax    = 100
-	maxFileSearchMax        = 500
+	defaultFileReadMaxChars       = 20000
+	maxFileReadChars              = 100000
+	maxFileReadWholeBytes         = 128 * 1024
+	defaultFileListMax            = 200
+	defaultFileSliceLines         = 100
+	maxFileSliceLines             = 500
+	maxFileSliceSkip              = 5000
+	maxFileSlicePayload           = 64 * 1024
+	maxFileSearchBytes            = 1 << 20
+	maxFileSearchLineChars        = 200
+	maxFileSearchExcerptLineChars = 400
+	defaultFileSearchMax          = 100
+	maxFileSearchMax              = 500
+	maxFileSearchContextLines     = 5
+	maxFileSearchGlobs            = 32
+	maxFileSearchGlobChars        = 256
+	maxFileSearchFiles            = 20000
 )
 
 type resolvedFilePath struct {
@@ -193,17 +200,43 @@ func (r *BuiltinRunner) fileStat(call Call) Result {
 func (r *BuiltinRunner) fileSearch(call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	var args struct {
-		Scope      string `json:"scope"`
-		Path       string `json:"path"`
-		Query      string `json:"query"`
-		MaxResults int    `json:"max_results"`
+		Scope         string   `json:"scope"`
+		Path          string   `json:"path"`
+		Query         string   `json:"query"`
+		Mode          string   `json:"mode"`
+		CaseSensitive *bool    `json:"case_sensitive"`
+		IncludeGlobs  []string `json:"include_globs"`
+		ExcludeGlobs  []string `json:"exclude_globs"`
+		ContextLines  int      `json:"context_lines"`
+		MaxResults    int      `json:"max_results"`
 	}
 	if err := decodeStructToolArgs(call.Args, &args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
 	args.Query = strings.TrimSpace(args.Query)
 	if args.Query == "" {
-		return toolJSONError(out, "query_required", "query must be a non-empty literal string")
+		return toolJSONError(out, "query_required", "query must be a non-empty string")
+	}
+	mode := strings.ToLower(strings.TrimSpace(args.Mode))
+	if mode == "" {
+		mode = "literal"
+	}
+	if mode != "literal" && mode != "regex" {
+		return toolJSONError(out, "invalid_search_mode", "mode must be literal or regex")
+	}
+	caseSensitive := true
+	if args.CaseSensitive != nil {
+		caseSensitive = *args.CaseSensitive
+	}
+	if args.ContextLines < 0 || args.ContextLines > maxFileSearchContextLines {
+		return toolJSONError(out, "invalid_context_lines", "context_lines must be between 0 and 5")
+	}
+	matcher, err := newFileSearchMatcher(mode, args.Query, caseSensitive)
+	if err != nil {
+		return toolJSONError(out, "invalid_regex", err.Error())
+	}
+	if err := validateSearchGlobs(args.IncludeGlobs, args.ExcludeGlobs); err != nil {
+		return toolJSONError(out, "invalid_glob", err.Error())
 	}
 	maxResults := args.MaxResults
 	if maxResults <= 0 {
@@ -216,7 +249,18 @@ func (r *BuiltinRunner) fileSearch(call Call) Result {
 	if err != nil {
 		return filePathError(out, args.Scope, err)
 	}
-	matches, filesScanned, capped, err := searchTextFiles(resolved.target, args.Query, maxResults)
+	searchBaseRoot := resolved.root
+	if evaluated, evaluateErr := filepath.EvalSymlinks(searchBaseRoot); evaluateErr == nil {
+		searchBaseRoot = evaluated
+	}
+	options := fileSearchOptions{
+		baseRoot:     searchBaseRoot,
+		matcher:      matcher,
+		includeGlobs: args.IncludeGlobs,
+		excludeGlobs: args.ExcludeGlobs,
+		contextLines: args.ContextLines,
+	}
+	matches, filesScanned, capped, err := searchTextFiles(resolved.target, options, maxResults)
 	if err != nil {
 		return toolJSONError(out, "search_failed", err.Error())
 	}
@@ -231,7 +275,10 @@ func (r *BuiltinRunner) fileSearch(call Call) Result {
 		items = append(items, map[string]any{
 			"path":      path,
 			"line":      match.line,
+			"lineStart": match.lineStart,
+			"lineEnd":   match.lineEnd,
 			"text":      match.text,
+			"excerpt":   match.excerpt,
 			"truncated": match.truncated,
 		})
 	}
@@ -244,8 +291,11 @@ func (r *BuiltinRunner) fileSearch(call Call) Result {
 		"matchCount":    len(items),
 		"filesScanned":  filesScanned,
 		"resultsCapped": capped,
-		"caseSensitive": true,
-		"searchType":    "literal",
+		"caseSensitive": caseSensitive,
+		"searchType":    mode,
+		"contextLines":  args.ContextLines,
+		"includeGlobs":  args.IncludeGlobs,
+		"excludeGlobs":  args.ExcludeGlobs,
 	}))
 	out.SummaryKind = SummaryReturnedItems
 	out.SummaryCount = len(items)
@@ -1179,8 +1229,25 @@ func updateDeleteManifest(path string, add, remove []string) error {
 type fileSearchMatch struct {
 	path      string
 	line      int
+	lineStart int
+	lineEnd   int
 	text      string
+	excerpt   string
 	truncated bool
+}
+
+type fileSearchMatcher struct {
+	caseSensitive bool
+	literal       string
+	regex         *regexp.Regexp
+}
+
+type fileSearchOptions struct {
+	baseRoot     string
+	matcher      fileSearchMatcher
+	includeGlobs []string
+	excludeGlobs []string
+	contextLines int
 }
 
 var fileSearchSkipDirs = map[string]struct{}{
@@ -1247,7 +1314,64 @@ var binaryFileExts = map[string]string{
 	".zip":   "application/zip",
 }
 
-func searchTextFiles(root, query string, maxResults int) ([]fileSearchMatch, int, bool, error) {
+func newFileSearchMatcher(mode, query string, caseSensitive bool) (fileSearchMatcher, error) {
+	matcher := fileSearchMatcher{caseSensitive: caseSensitive, literal: query}
+	if mode == "regex" {
+		pattern := query
+		if !caseSensitive {
+			pattern = "(?i:" + pattern + ")"
+		}
+		compiled, err := regexp.Compile(pattern)
+		if err != nil {
+			return fileSearchMatcher{}, err
+		}
+		matcher.regex = compiled
+	} else if !caseSensitive {
+		matcher.literal = strings.ToLower(query)
+	}
+	return matcher, nil
+}
+
+func (m fileSearchMatcher) matches(line string) bool {
+	if m.regex != nil {
+		return m.regex.MatchString(line)
+	}
+	if !m.caseSensitive {
+		line = strings.ToLower(line)
+	}
+	return strings.Contains(line, m.literal)
+}
+
+func validateSearchGlobs(groups ...[]string) error {
+	for _, patterns := range groups {
+		if len(patterns) > maxFileSearchGlobs {
+			return errors.New("include_globs and exclude_globs each support at most 32 patterns")
+		}
+		for _, pattern := range patterns {
+			pattern = strings.TrimSpace(strings.ReplaceAll(pattern, "\\", "/"))
+			if pattern == "" {
+				return errors.New("glob patterns must not be empty")
+			}
+			if utf8.RuneCountInString(pattern) > maxFileSearchGlobChars {
+				return errors.New("glob patterns must not exceed 256 characters")
+			}
+			if strings.HasPrefix(pattern, "/") {
+				return errors.New("glob patterns must be project-relative")
+			}
+			for _, segment := range strings.Split(pattern, "/") {
+				if segment == "**" {
+					continue
+				}
+				if _, err := path.Match(segment, ""); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func searchTextFiles(root string, options fileSearchOptions, maxResults int) ([]fileSearchMatch, int, bool, error) {
 	info, err := os.Lstat(root)
 	if err != nil {
 		return nil, 0, false, err
@@ -1256,7 +1380,10 @@ func searchTextFiles(root, query string, maxResults int) ([]fileSearchMatch, int
 		return nil, 0, false, errors.New("symlink search is not supported")
 	}
 	if !info.IsDir() {
-		matches, scanned, err := searchTextFile(root, query, maxResults)
+		if !searchPathAllowed(root, options) {
+			return nil, 0, false, nil
+		}
+		matches, scanned, err := searchTextFile(root, options, maxResults)
 		return matches, scanned, len(matches) >= maxResults, err
 	}
 	var matches []fileSearchMatch
@@ -1274,6 +1401,13 @@ func searchTextFiles(root, query string, maxResults int) ([]fileSearchMatch, int
 			}
 			return nil
 		}
+		if !searchPathAllowed(path, options) {
+			return nil
+		}
+		if filesScanned >= maxFileSearchFiles {
+			capped = true
+			return filepath.SkipAll
+		}
 		info, err := entry.Info()
 		if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() > maxFileSearchBytes {
 			return nil
@@ -1281,7 +1415,7 @@ func searchTextFiles(root, query string, maxResults int) ([]fileSearchMatch, int
 		if isKnownBinaryExt(path) {
 			return nil
 		}
-		fileMatches, scanned, err := searchTextFile(path, query, maxResults-len(matches))
+		fileMatches, scanned, err := searchTextFile(path, options, maxResults-len(matches))
 		filesScanned += scanned
 		if err != nil {
 			return nil
@@ -1299,43 +1433,119 @@ func searchTextFiles(root, query string, maxResults int) ([]fileSearchMatch, int
 	return matches, filesScanned, capped, nil
 }
 
-func searchTextFile(path, query string, remaining int) ([]fileSearchMatch, int, error) {
+func searchPathAllowed(filePath string, options fileSearchOptions) bool {
+	rel, err := filepath.Rel(options.baseRoot, filePath)
+	if err != nil {
+		return false
+	}
+	rel = filepath.ToSlash(rel)
+	if len(options.includeGlobs) > 0 && !matchesAnySearchGlob(options.includeGlobs, rel) {
+		return false
+	}
+	return !matchesAnySearchGlob(options.excludeGlobs, rel)
+}
+
+func matchesAnySearchGlob(patterns []string, rel string) bool {
+	for _, pattern := range patterns {
+		pattern = strings.TrimSpace(strings.ReplaceAll(pattern, "\\", "/"))
+		if !strings.Contains(pattern, "/") {
+			matched, _ := path.Match(pattern, path.Base(rel))
+			if matched {
+				return true
+			}
+			continue
+		}
+		if matchSearchGlob(strings.Split(pattern, "/"), strings.Split(rel, "/")) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchSearchGlob(pattern, value []string) bool {
+	type state struct{ pattern, value int }
+	memo := make(map[state]bool)
+	visited := make(map[state]bool)
+	var match func(int, int) bool
+	match = func(patternIndex, valueIndex int) bool {
+		key := state{pattern: patternIndex, value: valueIndex}
+		if visited[key] {
+			return memo[key]
+		}
+		visited[key] = true
+		matched := false
+		switch {
+		case patternIndex == len(pattern):
+			matched = valueIndex == len(value)
+		case pattern[patternIndex] == "**":
+			matched = match(patternIndex+1, valueIndex) || (valueIndex < len(value) && match(patternIndex, valueIndex+1))
+		case valueIndex < len(value):
+			segmentMatched, err := path.Match(pattern[patternIndex], value[valueIndex])
+			matched = err == nil && segmentMatched && match(patternIndex+1, valueIndex+1)
+		}
+		memo[key] = matched
+		return matched
+	}
+	return match(0, 0)
+}
+
+func searchTextFile(filePath string, options fileSearchOptions, remaining int) ([]fileSearchMatch, int, error) {
 	if remaining <= 0 {
 		return nil, 0, nil
 	}
-	if isBinary, _, err := probeBinaryFile(path); err != nil || isBinary {
+	if isBinary, _, err := probeBinaryFile(filePath); err != nil || isBinary {
 		return nil, 0, err
 	}
-	file, err := os.Open(path)
+	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	lineNo := 0
-	matches := make([]fileSearchMatch, 0)
+	lines := make([]string, 0, 256)
 	for scanner.Scan() {
-		lineNo++
-		line := scanner.Text()
-		if !strings.Contains(line, query) {
+		lines = append(lines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, 1, err
+	}
+	matches := make([]fileSearchMatch, 0)
+	for index, line := range lines {
+		if !options.matcher.matches(line) {
 			continue
 		}
-		text := line
-		truncated := false
-		if utf8.RuneCountInString(text) > maxFileSearchLineChars {
-			text = string([]rune(text)[:maxFileSearchLineChars])
-			truncated = true
+		start := max(0, index-options.contextLines)
+		end := min(len(lines), index+options.contextLines+1)
+		text, textTruncated := truncateSearchLine(line, maxFileSearchLineChars)
+		excerptLines := make([]string, 0, end-start)
+		truncated := textTruncated
+		for _, excerptLine := range lines[start:end] {
+			short, wasTruncated := truncateSearchLine(excerptLine, maxFileSearchExcerptLineChars)
+			excerptLines = append(excerptLines, short)
+			truncated = truncated || wasTruncated
 		}
-		matches = append(matches, fileSearchMatch{path: path, line: lineNo, text: text, truncated: truncated})
+		matches = append(matches, fileSearchMatch{
+			path:      filePath,
+			line:      index + 1,
+			lineStart: start + 1,
+			lineEnd:   end,
+			text:      text,
+			excerpt:   strings.Join(excerptLines, "\n"),
+			truncated: truncated,
+		})
 		if len(matches) >= remaining {
 			break
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return matches, 1, err
-	}
 	return matches, 1, nil
+}
+
+func truncateSearchLine(value string, limit int) (string, bool) {
+	if utf8.RuneCountInString(value) <= limit {
+		return value, false
+	}
+	return string([]rune(value)[:limit]), true
 }
 
 type fileLineRecord struct {

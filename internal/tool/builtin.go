@@ -23,6 +23,7 @@ const (
 	HistorySearch       = "builtin_history_search"
 	HistoryGetMessage   = "builtin_history_get_message"
 	SkillRead           = "builtin_skill_read"
+	ProjectInspect      = "builtin_project_inspect"
 	FileList            = "builtin_file_list"
 	FileRead            = "builtin_file_read"
 	AttachmentReadImage = "builtin_attachment_read_image"
@@ -285,6 +286,12 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Capability:  store.ModeChat,
 		},
 		{
+			Name:        ProjectInspect,
+			Description: "Inspect one authorized project directory using a bounded read-only scan. Returns Git root, detected languages, manifests, project instruction files, and suggested verification commands without executing them.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Project inspection is limited to authorized project directories."},"path":{"type":"string","description":"Optional absolute or relative directory inside an authorized project root. Defaults to the first project root."}},"required":["scope"],"additionalProperties":false}`),
+			Capability:  store.ModeProject,
+		},
+		{
 			Name:        FileList,
 			Description: "List files in a Pudding-managed file area or an authorized project directory.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","project"],"description":"Target file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized project directories. Use . to list the root."},"max_entries":{"type":"integer","description":"Optional maximum entries, 1-1000, default 200."}},"required":["scope","path"],"additionalProperties":false}`),
@@ -310,8 +317,8 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        FileSearch,
-			Description: "Search UTF-8 text files by literal case-sensitive substring under one file or directory. Skips binary files and common generated directories.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","project"],"description":"Target file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Search root. Relative path inside a managed area, or an absolute/relative path inside authorized project directories. Use . for the root."},"query":{"type":"string","description":"Literal case-sensitive substring to search for. Not regex."},"max_results":{"type":"integer","description":"Optional maximum matches, default 100 and cap 500."}},"required":["scope","path","query"],"additionalProperties":false}`),
+			Description: "Search UTF-8 text files by literal text or RE2-compatible regular expression. Supports case control, project-relative include/exclude globs, and bounded context lines. Skips binary files and common generated directories.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","project"],"description":"Target file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Search root. Relative path inside a managed area, or an absolute/relative path inside authorized project directories. Use . for the root."},"query":{"type":"string","description":"Text or regular expression to search for."},"mode":{"type":"string","enum":["literal","regex"],"description":"Search mode. Defaults to literal."},"case_sensitive":{"type":"boolean","description":"Whether matching is case-sensitive. Defaults to true."},"include_globs":{"type":"array","items":{"type":"string"},"maxItems":32,"description":"Optional project-relative path globs to include. Supports ** directory segments."},"exclude_globs":{"type":"array","items":{"type":"string"},"maxItems":32,"description":"Optional project-relative path globs to exclude. Supports ** directory segments."},"context_lines":{"type":"integer","minimum":0,"maximum":5,"description":"Context lines before and after each matching line. Defaults to 0."},"max_results":{"type":"integer","minimum":1,"maximum":500,"description":"Optional maximum matching lines, default 100 and cap 500."}},"required":["scope","path","query"],"additionalProperties":false}`),
 			Capability:  store.ModeProject,
 		},
 		{
@@ -546,6 +553,8 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.historyGetMessage(ctx, call)
 	case SkillRead:
 		return r.skillRead(ctx, call)
+	case ProjectInspect:
+		return r.projectInspect(ctx, call)
 	case FileList:
 		return r.fileList(call)
 	case FileRead:

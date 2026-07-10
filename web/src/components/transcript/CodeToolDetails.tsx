@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { openFilePreview } from "@/state/filePreviewStore";
 
 const commandToolName = "builtin_command_run";
+const projectInspectToolName = "builtin_project_inspect";
 const gitToolNames = new Set([
   "builtin_git_status",
   "builtin_git_diff",
@@ -45,7 +46,7 @@ type Translator = (key: string) => string;
 type UnknownRecord = Record<string, unknown>;
 
 export function isCodeToolName(name: string) {
-  return name === commandToolName || gitToolNames.has(name) || patchToolNames.has(name) || fileToolNames.has(name);
+  return name === commandToolName || name === projectInspectToolName || gitToolNames.has(name) || patchToolNames.has(name) || fileToolNames.has(name);
 }
 
 export function codeToolSummary(name: string, args: unknown, result: unknown, t: Translator) {
@@ -69,6 +70,10 @@ export function codeToolSummary(name: string, args: unknown, result: unknown, t:
     }
     const argv = readStringArray(output, "argv") || readStringArray(input, "argv");
     return argv ? compactText(formatArgv(argv), 100) : "";
+  }
+  if (name === projectInspectToolName) {
+    const languages = readRecordArray(output, "languages").map((item) => readString(item, "name")).filter(Boolean);
+    return languages.length > 0 ? languages.slice(0, 4).join(" · ") : preferredPath(output) || preferredPath(input);
   }
   if (name === "builtin_git_status") {
     if (readBoolean(output, "clean")) {
@@ -100,10 +105,15 @@ export function codeToolSummary(name: string, args: unknown, result: unknown, t:
   }
   const path = preferredPath(output) || preferredPath(input);
   if (name === "builtin_file_search") {
-    return countSummary(output, "matchCount", "transcript.codeMatches", t) || path;
+    return path;
   }
   if (name === "builtin_file_list") {
-    return countSummary(output, "totalCount", "transcript.codeItems", t) || path;
+    return path;
+  }
+  if (name === "builtin_file_copy" || name === "builtin_file_move") {
+    const from = readString(output, "fromRelativePath") || readString(output, "from") || readString(input, "from_path");
+    const to = readString(output, "toRelativePath") || readString(output, "to") || readString(input, "to_path");
+    return from || to ? compactText(`${from} → ${to}`, 100) : "";
   }
   return path;
 }
@@ -127,6 +137,8 @@ export function CodeToolDetails({
   let body: ReactNode;
   if (name === commandToolName) {
     body = <CommandDetails input={input} output={output} t={t} />;
+  } else if (name === projectInspectToolName) {
+    body = <ProjectInspectDetails output={output} t={t} />;
   } else if (name === "builtin_git_status") {
     body = <GitStatusDetails output={output} t={t} />;
   } else if (name === "builtin_git_diff") {
@@ -141,6 +153,92 @@ export function CodeToolDetails({
     body = <FileDetails callID={callID} input={input} name={name} output={output} locale={locale} sessionID={sessionID} t={t} />;
   }
   return <>{body}</>;
+}
+
+function ProjectInspectDetails({ output, t }: { output: UnknownRecord | null; t: Translator }) {
+  if (!output) {
+    return <EmptyLine>{t("transcript.codeWaitingResult")}</EmptyLine>;
+  }
+  if (output.ok === false) {
+    return <ErrorDetail output={output} t={t} />;
+  }
+  const languages = readRecordArray(output, "languages");
+  const manifests = readRecordArray(output, "manifests");
+  const instructions = readRecordArray(output, "instructions");
+  const commands = readRecordArray(output, "suggestedCommands");
+  const gitRoot = readString(output, "gitRoot");
+  return (
+    <div className="space-y-2">
+      <MetricRow
+        metrics={[
+          metric(languages.length, t("transcript.codeLanguagesLabel")),
+          metric(manifests.length, t("transcript.codeManifestsLabel")),
+          metric(instructions.length, t("transcript.codeInstructionsLabel")),
+        ]}
+      />
+      <FileResultMeta
+        values={[
+          replace(t("transcript.codeScannedFiles"), { count: String(readNumber(output, "filesScanned") ?? 0) }),
+          readBoolean(output, "scanCapped") ? t("transcript.codePartialResults") : "",
+        ]}
+      />
+      {gitRoot ? <ProjectInspectPath label={t("transcript.codeGitRoot")} path={gitRoot} /> : null}
+      {languages.length > 0 ? (
+        <ProjectInspectList
+          label={t("transcript.codeLanguages")}
+          items={languages.map((item) => `${readString(item, "name")} · ${readNumber(item, "fileCount") ?? 0}`)}
+        />
+      ) : null}
+      {manifests.length > 0 ? (
+        <ProjectInspectList label={t("transcript.codeManifests")} items={manifests.map((item) => readString(item, "path"))} mono />
+      ) : null}
+      {instructions.length > 0 ? (
+        <ProjectInspectList label={t("transcript.codeInstructions")} items={instructions.map((item) => readString(item, "path"))} mono />
+      ) : null}
+      {commands.length > 0 ? <ProjectCommandList commands={commands} t={t} /> : null}
+    </div>
+  );
+}
+
+function ProjectInspectPath({ label, path }: { label: string; path: string }) {
+  return (
+    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-2 text-[11px]">
+      <DetailLabel>{label}</DetailLabel>
+      <code className="truncate font-mono text-foreground/85" title={path}>{path}</code>
+    </div>
+  );
+}
+
+function ProjectInspectList({ items, label, mono = false }: { items: string[]; label: string; mono?: boolean }) {
+  return (
+    <section className="border-t border-border/50 pt-2">
+      <DetailLabel>{label}</DetailLabel>
+      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-foreground/85">
+        {items.slice(0, 50).map((item, index) => (
+          <span key={`${item}:${index}`} className={cn("min-w-0 break-all", mono && "font-mono")}>{item}</span>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ProjectCommandList({ commands, t }: { commands: UnknownRecord[]; t: Translator }) {
+  return (
+    <section className="border-t border-border/50 pt-2">
+      <DetailLabel>{t("transcript.codeSuggestedCommands")}</DetailLabel>
+      <div className="mt-1 max-h-52 overflow-auto">
+        {commands.slice(0, 50).map((command, index) => {
+          const argv = readStringArray(command, "argv") || [];
+          return (
+            <div key={`${readString(command, "cwd")}:${formatArgv(argv)}:${index}`} className="grid min-h-6 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-[11px]">
+              <code className="min-w-0 truncate font-mono text-foreground/85">$ {formatArgv(argv)}</code>
+              <span className="shrink-0 truncate text-muted-foreground">{readString(command, "cwd")}</span>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
 function PatchDetails({ output, t }: { output: UnknownRecord | null; t: Translator }) {
@@ -478,93 +576,133 @@ function FileDetails({
   if (output?.ok === false) {
     return <ErrorDetail output={output} t={t} />;
   }
-  const from = readString(output, "fromRelativePath") || readString(output, "from") || readString(input, "from_path");
-  const to = readString(output, "toRelativePath") || readString(output, "to") || readString(input, "to_path");
   const path = preferredPath(output) || preferredPath(input);
   const entries = readRecordArray(output, "entries");
   const matches = readRecordArray(output, "matches");
   const content = readString(output, "content");
-  const previewable = Boolean(sessionID && path && content && (name === "builtin_file_read" || name === "builtin_file_slice"));
+  const compactPreviewTool = name === "builtin_file_read" || name === "builtin_file_slice" || name === "builtin_file_write";
+  const previewContent = name === "builtin_file_write" ? readString(input, "content") : content;
+  const previewable = Boolean(sessionID && path && previewContent && compactPreviewTool && output);
   const order = readString(output, "order");
   const lineStart = name === "builtin_file_slice" && order === "reverse"
     ? readNumber(output, "end") ?? 1
     : readNumber(output, "start") ?? 1;
-  return (
-    <div className="space-y-2">
-      {from || to ? (
-        <div className="flex min-w-0 items-center gap-1 font-mono text-[11px] text-foreground/85">
-          <span className="min-w-0 truncate">{from}</span>
-          <ArrowRight className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 truncate">{to}</span>
-        </div>
-      ) : path ? (
-        <div className="flex min-w-0 items-center gap-1.5 font-mono text-[11px] text-foreground/85">
-          {readString(output, "type") === "dir" || name === "builtin_file_list" ? <Folder className="size-3.5 shrink-0 text-muted-foreground" /> : <File className="size-3.5 shrink-0 text-muted-foreground" />}
-          <span className="min-w-0 truncate">{path}</span>
-        </div>
-      ) : null}
-      <FileMetadata name={name} output={output} locale={locale} t={t} />
-      {entries.length > 0 ? <FileEntryList entries={entries} t={t} /> : null}
-      {matches.length > 0 ? <FileMatchList matches={matches} t={t} /> : null}
-      {previewable ? (
-        <Button
-          className="w-fit text-muted-foreground"
-          size="xs"
-          type="button"
-          variant="ghost"
-          onClick={() =>
-            openFilePreview({
-              callID,
-              content,
-              lineStart,
-              lineStep: order === "reverse" ? -1 : 1,
-              path,
-              sessionID: sessionID!,
-              source: name === "builtin_file_slice" ? "slice" : "read",
-              truncated: readBoolean(output, "truncated"),
-            })
-          }
-        >
-          <PanelRightOpen />
-          {t("transcript.codeOpenPreview")}
-        </Button>
-      ) : content ? (
-        <CodeOutput label={t("transcript.codeContent")} text={content} truncated={readBoolean(output, "truncated")} />
-      ) : null}
-      {!output && !path && !from && !to ? <EmptyLine>{t("transcript.codeWaitingResult")}</EmptyLine> : null}
-    </div>
-  );
-}
-
-function FileMetadata({ name, output, locale, t }: { name: string; output: UnknownRecord | null; locale: string; t: Translator }) {
   if (!output) {
-    return null;
+    return <EmptyLine>{t("transcript.codeWaitingResult")}</EmptyLine>;
   }
-  const metrics = [
-    metric(readNumber(output, "bytes"), t("transcript.codeBytes")),
-    metric(readNumber(output, "replacements"), t("transcript.codeReplacements")),
-    metric(readNumber(output, "chars"), t("transcript.codeCharacters")),
-    metric(readNumber(output, "lines"), t("transcript.codeLines")),
-    metric(readNumber(output, "matchCount"), t("transcript.codeMatchesLabel")),
-    metric(readNumber(output, "filesScanned"), t("transcript.codeFilesScanned")),
-  ];
-  const type = readString(output, "type") || readString(output, "copied");
-  const size = readNumber(output, "size");
-  const mtime = readString(output, "mtime");
-  const exists = output.exists;
-  return (
-    <>
-      <MetricRow metrics={metrics} />
-      {name === "builtin_file_stat" ? (
-        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-          {typeof exists === "boolean" ? <span>{exists ? t("transcript.codeExists") : t("transcript.codeMissing")}</span> : null}
-          {type ? <span>{type}</span> : null}
-          {size != null ? <span>{formatBytes(size)}</span> : null}
-          {mtime ? <span>{formatDate(mtime, locale)}</span> : null}
-        </div>
-      ) : null}
-    </>
-  );
+  if (compactPreviewTool) {
+    const fileType = fileTypeLabel(path);
+    const metadata = name === "builtin_file_write"
+      ? [fileType, formatOptionalBytes(readNumber(output, "bytes")), t("transcript.codeSaved")]
+      : [
+          fileType,
+          formatCount(readNumber(output, "chars") ?? Array.from(content).length, t("transcript.codeCharacters"), locale),
+          name === "builtin_file_slice" || readBoolean(output, "truncated")
+            ? t("transcript.codePartialContent")
+            : t("transcript.codeReadOnlySnapshot"),
+        ];
+    return (
+      <div className="flex min-w-0 items-center justify-between gap-3">
+        <FileResultMeta values={metadata} />
+        {previewable ? (
+          <Button
+            className="shrink-0 text-muted-foreground"
+            size="xs"
+            type="button"
+            variant="ghost"
+            onClick={() =>
+              openFilePreview({
+                callID,
+                content: previewContent,
+                lineStart: name === "builtin_file_write" ? 1 : lineStart,
+                lineStep: order === "reverse" ? -1 : 1,
+                path,
+                sessionID: sessionID!,
+                source: name === "builtin_file_slice" ? "slice" : name === "builtin_file_write" ? "write" : "read",
+                truncated: name === "builtin_file_write" ? false : readBoolean(output, "truncated"),
+              })
+            }
+          >
+            <PanelRightOpen />
+            {t("transcript.codeOpenPreview")}
+          </Button>
+        ) : null}
+      </div>
+    );
+  }
+  if (name === "builtin_file_patch") {
+    return (
+      <FileResultMeta
+        values={[
+          replace(t("transcript.codeReplacementCount"), { count: formatNumber(readNumber(output, "replacements") ?? 0, locale) }),
+          t("transcript.codeUpdated"),
+        ]}
+      />
+    );
+  }
+  if (name === "builtin_file_delete") {
+    return <FileResultMeta values={[t("transcript.codeDeleted")]} />;
+  }
+  if (name === "builtin_file_copy") {
+    return (
+      <FileResultMeta
+        values={[
+          fileObjectTypeLabel(readString(output, "copied"), t),
+          formatOptionalBytes(readNumber(output, "bytes")),
+          t("transcript.codeCopied"),
+        ]}
+      />
+    );
+  }
+  if (name === "builtin_file_move") {
+    return <FileResultMeta values={[t("transcript.codeMoved")]} />;
+  }
+  if (name === "builtin_file_stat") {
+    if (output.exists === false) {
+      return <FileResultMeta values={[t("transcript.codeMissing")]} />;
+    }
+    const objectType = readString(output, "type");
+    const mtime = readString(output, "mtime");
+    return (
+      <FileResultMeta
+        values={[
+          fileObjectTypeLabel(objectType, t),
+          formatOptionalBytes(objectType === "file" ? readNumber(output, "size") : null),
+          mtime ? replace(t("transcript.codeModifiedAt"), { time: formatDate(mtime, locale) }) : "",
+        ]}
+      />
+    );
+  }
+  if (name === "builtin_file_list") {
+    return (
+      <div className="space-y-2">
+        <FileResultMeta
+          values={[
+            replace(t("transcript.codeItems"), { count: formatNumber(readNumber(output, "totalCount") ?? entries.length, locale) }),
+            readBoolean(output, "truncated") ? t("transcript.codePartialResults") : "",
+          ]}
+        />
+        {entries.length > 0 ? <FileEntryList entries={entries} t={t} /> : null}
+      </div>
+    );
+  }
+  if (name === "builtin_file_search") {
+    return (
+      <div className="space-y-2">
+        <FileResultMeta
+          values={[
+            replace(t("transcript.codeMatches"), { count: formatNumber(readNumber(output, "matchCount") ?? matches.length, locale) }),
+            replace(t("transcript.codeScannedFiles"), { count: formatNumber(readNumber(output, "filesScanned") ?? 0, locale) }),
+            readString(output, "searchType") === "regex" ? t("transcript.codeRegexSearch") : t("transcript.codeLiteralSearch"),
+            output.caseSensitive === false ? t("transcript.codeCaseInsensitive") : "",
+            readBoolean(output, "resultsCapped") ? t("transcript.codePartialResults") : "",
+          ]}
+        />
+        {matches.length > 0 ? <FileMatchList callID={callID} matches={matches} sessionID={sessionID} t={t} /> : null}
+      </div>
+    );
+  }
+  return null;
 }
 
 function FileEntryList({ entries, t }: { entries: UnknownRecord[]; t: Translator }) {
@@ -586,18 +724,43 @@ function FileEntryList({ entries, t }: { entries: UnknownRecord[]; t: Translator
   );
 }
 
-function FileMatchList({ matches, t }: { matches: UnknownRecord[]; t: Translator }) {
+function FileMatchList({ callID, matches, sessionID, t }: { callID?: string; matches: UnknownRecord[]; sessionID?: string; t: Translator }) {
   const visible = matches.slice(0, 200);
   return (
     <div className="max-h-72 overflow-auto border-t border-border/50 pt-1">
-      {visible.map((match, index) => (
-        <div key={`${readString(match, "path")}:${readNumber(match, "line")}:${index}`} className="grid grid-cols-[minmax(0,1fr)] py-1 text-[11px]">
-          <code className="truncate font-mono text-muted-foreground">
-            {readString(match, "path")}:{readNumber(match, "line") ?? ""}
-          </code>
-          <span className="whitespace-pre-wrap break-words font-mono leading-4 text-foreground/85">{readString(match, "text")}</span>
-        </div>
-      ))}
+      {visible.map((match, index) => {
+        const path = readString(match, "path");
+        const line = readNumber(match, "line") ?? 1;
+        const excerpt = readString(match, "excerpt") || readString(match, "text");
+        const previewable = Boolean(sessionID && path && excerpt);
+        const content = (
+          <>
+            <code className="truncate font-mono text-muted-foreground">{path}:{line}</code>
+            <span className="whitespace-pre-wrap break-words text-left font-mono leading-4 text-foreground/85">{readString(match, "text")}</span>
+          </>
+        );
+        return previewable ? (
+          <button
+            key={`${path}:${line}:${index}`}
+            className="grid w-full grid-cols-[minmax(0,1fr)] rounded-sm px-1 py-1 text-[11px] hover:bg-muted/60"
+            type="button"
+            onClick={() => openFilePreview({
+              callID,
+              content: excerpt,
+              lineStart: readNumber(match, "lineStart") ?? line,
+              lineStep: 1,
+              path,
+              sessionID: sessionID!,
+              source: "search",
+              truncated: true,
+            })}
+          >
+            {content}
+          </button>
+        ) : (
+          <div key={`${path}:${line}:${index}`} className="grid grid-cols-[minmax(0,1fr)] px-1 py-1 text-[11px]">{content}</div>
+        );
+      })}
       <OmittedCount count={matches.length - visible.length} t={t} />
     </div>
   );
@@ -641,6 +804,20 @@ function MetricRow({ metrics }: { metrics: Array<{ className?: string; label: st
       {visible.map((item) => (
         <span key={item.label} className={item.className}>
           <strong className="font-mono font-medium text-foreground/90">{item.value}</strong> {item.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function FileResultMeta({ values }: { values: string[] }) {
+  const visible = values.filter(Boolean);
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-muted-foreground">
+      {visible.map((value, index) => (
+        <span key={`${value}:${index}`} className="inline-flex items-center gap-1.5">
+          {index > 0 ? <span aria-hidden="true">·</span> : null}
+          <span>{value}</span>
         </span>
       ))}
     </div>
@@ -723,6 +900,65 @@ function formatBytes(bytes: number) {
     return `${(bytes / 1024).toFixed(1)} KB`;
   }
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatOptionalBytes(bytes: number | null) {
+  return bytes == null ? "" : formatBytes(bytes);
+}
+
+function formatCount(value: number, label: string, locale: string) {
+  return `${formatNumber(value, locale)} ${label}`;
+}
+
+function formatNumber(value: number, locale: string) {
+  return new Intl.NumberFormat(locale).format(value);
+}
+
+function fileObjectTypeLabel(type: string, t: Translator) {
+  switch (type) {
+    case "file":
+      return t("transcript.codeFile");
+    case "dir":
+    case "directory":
+      return t("transcript.codeDirectory");
+    case "symlink":
+      return t("transcript.codeSymlink");
+    case "other":
+      return t("transcript.codeOtherFileType");
+    default:
+      return "";
+  }
+}
+
+function fileTypeLabel(path: string) {
+  const filename = path.split(/[\\/]/).filter(Boolean).pop() || "";
+  const dot = filename.lastIndexOf(".");
+  if (dot <= 0 || dot === filename.length - 1) {
+    return "";
+  }
+  const extension = filename.slice(dot + 1).toLowerCase();
+  const labels: Record<string, string> = {
+    cjs: "JavaScript",
+    css: "CSS",
+    go: "Go",
+    htm: "HTML",
+    html: "HTML",
+    js: "JavaScript",
+    json: "JSON",
+    jsx: "JSX",
+    markdown: "Markdown",
+    md: "Markdown",
+    mjs: "JavaScript",
+    py: "Python",
+    sh: "Shell",
+    ts: "TypeScript",
+    tsx: "TSX",
+    txt: "Text",
+    yaml: "YAML",
+    yml: "YAML",
+    zsh: "Shell",
+  };
+  return labels[extension] || extension.toUpperCase();
 }
 
 function formatDate(value: string, locale: string) {

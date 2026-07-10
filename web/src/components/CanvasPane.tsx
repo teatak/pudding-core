@@ -3,6 +3,10 @@ import {
   Blocks,
   CalendarDays,
   ChartPie,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Compass,
   FileCode2,
   FileText,
   Image,
@@ -11,6 +15,7 @@ import {
   Minimize2,
   Plus,
   Sheet,
+  SquareTerminal,
   Trash2,
   Undo2,
   X,
@@ -33,7 +38,7 @@ import {
   type CanvasItemPayload,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
-import { BrowserCanvasTabs } from "@/browser/BrowserCanvasTabButton";
+import { CanvasSurfaceTabs } from "@/browser/BrowserCanvasTabButton";
 import { BrowserToolbar } from "@/browser/BrowserToolbar";
 import { ElectronWebviewBrowser } from "@/browser/ElectronWebviewBrowser";
 import {
@@ -47,25 +52,21 @@ import {
 import { FilePreviewSurface, filePreviewTitle } from "@/components/canvas/FilePreviewSurface";
 import { asRecord, numberValue, stringValue, titleFromPayload } from "@/components/canvas/canvasPayload";
 import { useCanvasBrowserSurface } from "@/components/canvas/useCanvasBrowserSurface";
+import { useCanvasTerminals } from "@/components/canvas/useCanvasTerminals";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import type { CanvasItem, ClosedCanvasItem } from "@/contracts/api";
-import { useHorizontalScrollMask } from "@/hooks/useHorizontalScrollMask";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
-import { setCanvasOpen } from "@/state/canvasStore";
 import {
   closeFilePreview,
   consumeFilePreviewReveal,
-  useFilePreview,
+  type FilePreview,
+  useFilePreviews,
   useFilePreviewReveal,
 } from "@/state/filePreviewStore";
+import { TerminalSurface } from "@/terminal/TerminalSurface";
 
 type CanvasPaneProps = {
   token: string;
@@ -146,10 +147,6 @@ function CanvasKindIcon({
   );
 }
 
-function CanvasItemIcon({ item, size = "sm" }: { item: CanvasItem; size?: "xs" | "sm" }) {
-  return <CanvasKindIcon kind={item.kind} size={size} />;
-}
-
 export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneProps) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
@@ -168,16 +165,18 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
   const [galleryActiveIndices, setGalleryActiveIndices] = useState<Record<string, number>>({});
   const [restoreWindows, setRestoreWindows] = useState<Record<string, WindowState>>({});
   const [canvasLibraryOpen, setCanvasLibraryOpen] = useState(false);
-  const filePreviewTabsScrollMask = useHorizontalScrollMask<HTMLDivElement>();
-  const itemTabsScrollMask = useHorizontalScrollMask<HTMLDivElement>();
-  const primaryFilePreview = useFilePreview(sessionID);
-  const secondaryFilePreview = useFilePreview(secondarySessionID);
+  const primaryFilePreviews = useFilePreviews(sessionID);
+  const secondaryFilePreviews = useFilePreviews(secondarySessionID);
   const filePreviewReveal = useFilePreviewReveal(sessionID, secondarySessionID);
-  const [activeFilePreviewSessionID, setActiveFilePreviewSessionID] = useState<string | undefined>(
-    () => primaryFilePreview?.sessionID || secondaryFilePreview?.sessionID,
+  const filePreviews = useMemo(
+    () =>
+      [...primaryFilePreviews, ...secondaryFilePreviews].filter(
+        (preview, index, all) => all.findIndex((entry) => entry.id === preview.id) === index,
+      ),
+    [primaryFilePreviews, secondaryFilePreviews],
   );
-  const filePreviews = [primaryFilePreview, secondaryFilePreview].filter(
-    (preview, index, all) => preview && all.findIndex((item) => item?.sessionID === preview.sessionID) === index,
+  const [activeFilePreviewID, setActiveFilePreviewID] = useState<string | undefined>(
+    () => filePreviews.at(-1)?.id,
   );
   useEffect(() => {
     if (sessionID) {
@@ -213,6 +212,7 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
   const closedItems = closedItemsQuery.data?.items ?? [];
   const {
     activeBrowserTabID,
+    activeSurface,
     browserActive,
     browserTabs,
     browserSurfacePending,
@@ -221,9 +221,9 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
     closingBrowserTabID,
     createNewBrowserTab,
     creatingBrowserTab,
-    hasOpenBrowserWindow,
     selectCanvasSurface,
     selectBrowserTab,
+    selectTerminalSurface,
   } = useCanvasBrowserSurface({
     enabled,
     hasTransientSurface: filePreviews.length > 0,
@@ -231,43 +231,81 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
     sessionID: actorSessionID,
     token,
   });
-  const activeFilePreview = filePreviews.find((preview) => preview?.sessionID === activeFilePreviewSessionID);
-  const filePreviewActive = Boolean(activeFilePreview && !browserActive);
+  const terminalActive = activeSurface === "terminal";
+  const {
+    activeTerminalID,
+    closeTerminal,
+    closingTerminalID,
+    createNewTerminal,
+    creatingTerminal,
+    selectTerminal,
+    terminals,
+    updateTerminalStatus,
+  } = useCanvasTerminals({
+    active: terminalActive,
+    enabled,
+    sessionID: actorSessionID,
+    token,
+    onActivate: () => {
+      setActiveFilePreviewID(undefined);
+      selectTerminalSurface();
+    },
+    onDeactivate: () => {
+      if (browserTabs.length > 0) {
+        selectBrowserTab(activeBrowserTabID || browserTabs[0].id);
+      } else if (filePreviews.length > 0) {
+        setActiveFilePreviewID(filePreviews[0].id);
+        selectCanvasSurface();
+      } else {
+        selectCanvasSurface();
+      }
+    },
+  });
+  const activeFilePreview = filePreviews.find((preview) => preview.id === activeFilePreviewID);
+  const filePreviewActive = Boolean(activeFilePreview && activeSurface === "canvas");
 
   useEffect(() => {
     if (!filePreviewReveal) {
       return;
     }
     selectCanvasSurface();
-    setActiveFilePreviewSessionID(filePreviewReveal.sessionID);
+    setActiveFilePreviewID(filePreviewReveal.previewID);
     consumeFilePreviewReveal(filePreviewReveal.serial);
   }, [filePreviewReveal, selectCanvasSurface]);
 
   useEffect(() => {
-    if (activeFilePreviewSessionID && !filePreviews.some((preview) => preview?.sessionID === activeFilePreviewSessionID)) {
-      setActiveFilePreviewSessionID(undefined);
+    if (activeFilePreviewID && !filePreviews.some((preview) => preview.id === activeFilePreviewID)) {
+      setActiveFilePreviewID(undefined);
     }
-  }, [activeFilePreviewSessionID, filePreviews]);
+  }, [activeFilePreviewID, filePreviews]);
 
   const selectPersistentCanvasSurface = () => {
-    setActiveFilePreviewSessionID(undefined);
+    setActiveFilePreviewID(undefined);
     selectCanvasSurface();
   };
 
-  const selectFilePreview = (previewSessionID: string) => {
+  const selectFilePreview = (previewID: string) => {
     selectCanvasSurface();
-    setActiveFilePreviewSessionID(previewSessionID);
+    setActiveFilePreviewID(previewID);
   };
 
-  const removeFilePreview = (previewSessionID: string) => {
-    closeFilePreview(previewSessionID);
-    if (activeFilePreviewSessionID !== previewSessionID) {
+  const removeFilePreview = (preview: FilePreview) => {
+    closeFilePreview(preview.sessionID, preview.id);
+    if (activeFilePreviewID !== preview.id) {
       return;
     }
-    const next = filePreviews.find((preview) => preview?.sessionID !== previewSessionID);
-    setActiveFilePreviewSessionID(next?.sessionID);
-    if (!next && items.length === 0 && !hasOpenBrowserWindow) {
-      setCanvasOpen(false);
+    const closedIndex = filePreviews.findIndex((entry) => entry.id === preview.id);
+    const next = filePreviews[closedIndex + 1] || filePreviews[closedIndex - 1];
+    if (next) {
+      setActiveFilePreviewID(next.id);
+    } else if (terminals.length > 0) {
+      setActiveFilePreviewID(undefined);
+      selectTerminal(activeTerminalID || terminals[0].id);
+    } else if (browserTabs.length > 0) {
+      setActiveFilePreviewID(undefined);
+      selectBrowserTab(activeBrowserTabID || browserTabs[0].id);
+    } else {
+      setActiveFilePreviewID(undefined);
     }
   };
 
@@ -283,6 +321,10 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
     const zs = Object.values(windows).map((win) => win.z);
     return zs.length > 0 ? Math.max(...zs) : 0;
   }, [windows]);
+  const focusedCanvasItemID = useMemo(
+    () => items.find((item) => windows[item.id]?.z === maxZ)?.id,
+    [items, maxZ, windows],
+  );
 
   useEffect(() => {
     if (
@@ -367,10 +409,6 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
       if (actorSessionID) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
         void queryClient.invalidateQueries({ queryKey: queryKeys.closedCanvasItems(actorSessionID) });
-      }
-      const remainingWindowCount = items.filter((entry) => entry.id !== item.id).length;
-      if (remainingWindowCount === 0 && !hasOpenBrowserWindow && filePreviews.length === 0) {
-        setCanvasOpen(false);
       }
     },
   });
@@ -647,123 +685,100 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
   return (
     <aside className="relative flex h-full shrink-0 flex-col bg-[var(--canvas-background)] text-sidebar-foreground">
       <div className="relative z-30 flex h-(--toolbar-h) shrink-0 items-center gap-2 overflow-hidden pr-(--canvas-toolbar-pr) pl-(--canvas-toolbar-pl)">
-        {actorSessionID && browserTabs.length > 0 ? (
-          <BrowserCanvasTabs
-            active={browserActive}
-            activeTabID={activeBrowserTabID}
-            closingTabID={closingBrowserTabID}
-            tabs={browserTabs}
-            onClose={closeBrowserTab}
-            onSelect={selectBrowserTab}
+        {actorSessionID && browserTabs.length + terminals.length + filePreviews.length > 0 ? (
+          <CanvasSurfaceTabs
+            activeBrowserTabID={activeBrowserTabID}
+            activeFilePreviewID={activeFilePreviewID}
+            activeSurface={activeSurface}
+            activeTerminalID={activeTerminalID}
+            browserTabs={browserTabs}
+            closingBrowserTabID={closingBrowserTabID}
+            closingTerminalID={closingTerminalID}
+            filePreviewActive={filePreviewActive}
+            filePreviewTabs={filePreviews.map((preview) => ({
+              id: preview.id,
+              label: filePreviewTitle(preview.path),
+              openedAt: preview.openedAt,
+              path: preview.path,
+            }))}
+            terminalTabs={terminals}
+            onCloseBrowser={(tabID) => {
+              const closingLastActiveBrowser =
+                activeSurface === "browser" && activeBrowserTabID === tabID && browserTabs.length === 1;
+              closeBrowserTab(tabID);
+              if (closingLastActiveBrowser && terminals.length > 0) {
+                selectTerminal(activeTerminalID || terminals[0].id);
+              } else if (closingLastActiveBrowser && filePreviews.length > 0) {
+                selectFilePreview(activeFilePreviewID || filePreviews[0].id);
+              }
+            }}
+            onCloseFilePreview={(previewID) => {
+              const preview = filePreviews.find((entry) => entry.id === previewID);
+              if (preview) {
+                removeFilePreview(preview);
+              }
+            }}
+            onCloseTerminal={closeTerminal}
+            onSelectBrowser={(tabID) => {
+              setActiveFilePreviewID(undefined);
+              selectBrowserTab(tabID);
+            }}
+            onSelectFilePreview={selectFilePreview}
+            onSelectTerminal={selectTerminal}
           />
         ) : null}
         {actorSessionID ? (
-          <Button
-            aria-label={t("canvas.add")}
-            className="no-drag-region h-(--canvas-toolbar-tab-h) w-(--canvas-toolbar-tab-h) shrink-0 rounded-md text-muted-foreground"
-            disabled={creatingBrowserTab}
-            size="icon-sm"
-            title={t("canvas.add")}
-            type="button"
-            variant="ghost"
-            onClick={createNewBrowserTab}
-          >
-            {creatingBrowserTab ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-          </Button>
-        ) : null}
-        {filePreviews.length > 0 ? (
-          <div
-            ref={filePreviewTabsScrollMask.ref}
-            className="no-drag-region w-fit max-w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-lg bg-muted p-(--canvas-toolbar-tab-padding) text-muted-foreground [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden"
-            style={filePreviewTabsScrollMask.style}
-          >
-            <div className="inline-flex min-w-max items-center gap-1">
-              {filePreviews.map((preview) => {
-                if (!preview) {
-                  return null;
-                }
-                const active = !browserActive && activeFilePreviewSessionID === preview.sessionID;
-                const title = filePreviewTitle(preview.path);
-                return (
-                  <button
-                    key={preview.sessionID}
-                    aria-selected={active}
-                    className="group inline-flex h-(--canvas-toolbar-tab-h) min-w-24 max-w-[44vw] shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium whitespace-nowrap transition-colors data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm hover:bg-background hover:text-foreground sm:max-w-40"
-                    data-active={active}
-                    title={preview.path}
-                    type="button"
-                    onClick={() => selectFilePreview(preview.sessionID)}
-                  >
-                    <CanvasKindIcon kind="code" size="xs" />
-                    <span className="min-w-0 flex-1 truncate text-left">{title}</span>
-                    <span
-                      aria-label={t("canvas.filePreviewClose")}
-                      className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded opacity-70 hover:bg-muted-foreground/20 hover:opacity-100"
-                      role="button"
-                      tabIndex={-1}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        removeFilePreview(preview.sessionID);
-                      }}
-                    >
-                      <X className="h-3 w-3" />
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
-        {items.length > 0 ? (
-          <div
-            ref={itemTabsScrollMask.ref}
-            className="no-drag-region w-fit max-w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-lg bg-muted p-(--canvas-toolbar-tab-padding) text-muted-foreground [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden"
-            style={itemTabsScrollMask.style}
-          >
-            <div className="inline-flex min-w-max items-center gap-1">
-              {items.map((item) => {
-                const win = windows[item.id];
-                const active = !browserActive && !filePreviewActive && win ? win.z === maxZ : false;
-                const title = titleForItem(item, t);
-                return (
-                  <button
-                    key={item.id}
-                    aria-selected={active}
-                    className="group inline-flex h-(--canvas-toolbar-tab-h) min-w-24 max-w-[44vw] shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium whitespace-nowrap transition-colors data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm hover:bg-background hover:text-foreground sm:max-w-40"
-                    data-active={active}
-                    title={title}
-                    type="button"
-                    onClick={() => {
-                      selectPersistentCanvasSurface();
-                      focusWindow(item.id);
-                    }}
-                  >
-                    <CanvasItemIcon item={item} size="xs" />
-                    <span className="min-w-0 flex-1 truncate text-left">{title}</span>
-                    <span
-                      aria-label={t("canvas.delete")}
-                      className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded opacity-70 hover:bg-muted-foreground/20 hover:opacity-100"
-                      role="button"
-                      tabIndex={-1}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        deleteMutation.mutate(item);
-                      }}
-                    >
-                      <X className="h-3 w-3" />
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                aria-label={t("canvas.add")}
+                className="no-drag-region h-(--canvas-toolbar-tab-h) w-(--canvas-toolbar-tab-h) shrink-0 rounded-md text-muted-foreground"
+                disabled={creatingBrowserTab || creatingTerminal}
+                size="icon-sm"
+                title={t("canvas.add")}
+                type="button"
+                variant="ghost"
+              >
+                {creatingBrowserTab || creatingTerminal ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Plus className="h-3.5 w-3.5" />
+                )}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-44 space-y-1">
+              <DropdownMenuItem
+                onSelect={() => {
+                  setActiveFilePreviewID(undefined);
+                  createNewBrowserTab();
+                }}
+              >
+                <Compass />
+                {t("browser.create")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={createNewTerminal}>
+                <SquareTerminal />
+                {t("terminal.create")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         ) : null}
         <div aria-hidden="true" className="pointer-events-none min-w-0 flex-1 self-stretch" />
         <div className="no-drag-region flex shrink-0 items-center gap-1.5">
-          <CanvasLibraryMenu
+          <CanvasWorkspaceControl
+            active={activeSurface === "canvas" && !filePreviewActive}
+            activeItemID={focusedCanvasItemID}
             closedItems={closedItems}
+            items={items}
             open={canvasLibraryOpen}
+            windows={windows}
+            onActivateCanvas={selectPersistentCanvasSurface}
             onClearClosed={() => clearClosedMutation.mutate()}
+            onCloseItem={(item) => deleteMutation.mutate(item)}
+            onFocusItem={(item) => {
+              selectPersistentCanvasSurface();
+              focusWindow(item.id);
+            }}
             onOpenChange={setCanvasLibraryOpen}
             onRemoveClosed={(entry) => removeClosedMutation.mutate(entry)}
             onRestoreClosed={restoreClosedItem}
@@ -772,7 +787,7 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
       </div>
       <div className="relative z-0 min-h-0 flex-1 overflow-hidden px-3 pb-3">
         <div ref={containerRef} className="relative isolate z-0 h-full overflow-hidden">
-          {browserActive || filePreviewActive ? null : (!enabled && items.length === 0) || (itemsQuery.isLoading && items.length === 0) ? (
+          {browserActive || terminalActive || filePreviewActive ? null : (!enabled && items.length === 0) || (itemsQuery.isLoading && items.length === 0) ? (
             <CanvasEmpty />
           ) : items.length === 0 ? (
             <CanvasEmpty />
@@ -813,6 +828,16 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
             sessionID={actorSessionID}
             tabs={browserTabs}
             token={token}
+          />
+        ) : null}
+        {actorSessionID && terminals.length > 0 ? (
+          <TerminalSurface
+            active={terminalActive}
+            activeTerminalID={activeTerminalID}
+            sessionID={actorSessionID}
+            terminals={terminals}
+            token={token}
+            onStatus={updateTerminalStatus}
           />
         ) : null}
       </div>
@@ -942,8 +967,8 @@ function CanvasWindow({
       maxWidth={bounds.w > 0 ? bounds.w : undefined}
       minHeight={Math.min(MIN_H, bounds.h || MIN_H)}
       minWidth={Math.min(MIN_W, bounds.w || MIN_W)}
-      position={{ x: window.x, y: window.y }}
-      size={{ width: window.w, height: window.h }}
+      position={isMaximized ? { x: 0, y: 0 } : { x: window.x, y: window.y }}
+      size={isMaximized ? { width: "100%", height: "100%" } : { width: window.w, height: window.h }}
       style={{
         zIndex: window.z,
       }}
@@ -1051,65 +1076,206 @@ function CanvasWindow({
 }
 
 
-function CanvasLibraryMenu({
+function CanvasWorkspaceControl({
+  active,
+  activeItemID,
   closedItems,
+  items,
   open,
+  windows,
+  onActivateCanvas,
   onClearClosed,
+  onCloseItem,
+  onFocusItem,
   onOpenChange,
   onRemoveClosed,
   onRestoreClosed,
 }: {
+  active: boolean;
+  activeItemID?: string;
   closedItems: ClosedCanvasItem[];
+  items: CanvasItem[];
   open: boolean;
+  windows: Record<string, WindowState>;
+  onActivateCanvas: () => void;
   onClearClosed: () => void;
+  onCloseItem: (item: CanvasItem) => void;
+  onFocusItem: (item: CanvasItem) => void;
   onOpenChange: (open: boolean) => void;
   onRemoveClosed: (entry: ClosedCanvasItem) => void;
   onRestoreClosed: (entry: ClosedCanvasItem) => void;
 }) {
   const { t } = useI18n();
-  const hasEntries = closedItems.length > 0;
+  const [recentOpen, setRecentOpen] = useState(true);
+  const currentItems = [...items].sort((left, right) => (windows[right.id]?.z || 0) - (windows[left.id]?.z || 0));
+  const handleOpenChange = (next: boolean) => {
+    onOpenChange(next);
+    if (!next) {
+      setRecentOpen(true);
+    }
+  };
   return (
-    <DropdownMenu open={open} onOpenChange={onOpenChange}>
-      <DropdownMenuTrigger asChild>
-        <Button aria-label={t("canvas.widgetLibrary")} size="icon-sm" variant="ghost">
-          <Blocks className="h-4 w-4" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-64" collisionPadding={8}>
-        <DropdownMenuLabel>{t("canvas.widgetLibrary")}</DropdownMenuLabel>
-        {!hasEntries ? <div className="px-2 py-3 text-xs text-muted-foreground">{t("canvas.widgetLibraryEmpty")}</div> : null}
-        {hasEntries ? (
-          <>
-            <DropdownMenuSeparator />
-            <div className="flex items-center justify-between px-2 py-1.5">
-              <span className="text-xs font-medium text-muted-foreground">{t("canvas.recentClosed")}</span>
-              <button
-                className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                type="button"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onClearClosed();
-                }}
-              >
-                {t("canvas.clearRecentClosed")}
-              </button>
+    <div className="no-drag-region shrink-0 rounded-lg bg-muted p-(--canvas-toolbar-tab-padding) text-muted-foreground">
+      <Popover open={open} onOpenChange={handleOpenChange}>
+        <PopoverTrigger asChild>
+          <div
+            className="group inline-flex h-(--canvas-toolbar-tab-h) items-center overflow-hidden rounded-md border border-transparent transition-colors data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm hover:bg-background hover:text-foreground"
+            data-active={active}
+          >
+            <button
+              aria-label={t("rail.widgets")}
+              aria-pressed={active}
+              className="inline-flex h-full items-center gap-1.5 px-2 text-xs font-medium whitespace-nowrap focus-visible:outline-none"
+              title={t("rail.widgets")}
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                if (open) {
+                  handleOpenChange(false);
+                }
+                onActivateCanvas();
+              }}
+            >
+              <CanvasKindIcon kind="widget" size="xs" />
+              <span>{t("rail.widgets")}</span>
+            </button>
+            <button
+              aria-label={t("canvas.widgetLibrary")}
+              aria-expanded={open}
+              className="inline-flex h-full w-7 items-center justify-center opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-none"
+              title={t("canvas.widgetLibrary")}
+              type="button"
+            >
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </PopoverTrigger>
+        <PopoverContent
+          align="end"
+          className="max-h-[min(34rem,calc(100vh-4rem))] w-72 gap-0 overflow-hidden p-0"
+          collisionPadding={8}
+        >
+          <div className="border-b px-3 py-2.5">
+            <PopoverTitle className="text-sm">{t("canvas.widgetLibrary")}</PopoverTitle>
+          </div>
+          <div className="p-2">
+            <div className="flex items-center justify-between px-2 py-1 text-xs font-medium text-muted-foreground">
+              <span>{t("canvas.currentWidgets")}</span>
             </div>
-            {closedItems.map((entry) => (
-              <ClosedCanvasItemRow
-                key={entry.id}
-                entry={entry}
-                onRemove={() => onRemoveClosed(entry)}
-                onRestore={() => {
-                  onRestoreClosed(entry);
-                  onOpenChange(false);
-                }}
-              />
-            ))}
-          </>
-        ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
+            {currentItems.length > 0 ? (
+              <div className="max-h-56 overflow-y-auto">
+                {currentItems.map((item) => (
+                  <CurrentCanvasItemRow
+                    key={item.id}
+                    active={item.id === activeItemID}
+                    item={item}
+                    onClose={() => onCloseItem(item)}
+                    onFocus={() => {
+                      onFocusItem(item);
+                      handleOpenChange(false);
+                    }}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="px-2 py-3 text-xs text-muted-foreground">{t("canvas.currentWidgetsEmpty")}</div>
+            )}
+          </div>
+          <div className="border-t p-2">
+            <div className="flex items-center gap-1">
+              <button
+                aria-expanded={recentOpen}
+                className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 text-left text-xs font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                type="button"
+                onClick={() => setRecentOpen((value) => !value)}
+              >
+                <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 transition-transform", recentOpen && "rotate-90")} />
+                <span className="min-w-0 flex-1 truncate">{t("canvas.recentClosed")}</span>
+              </button>
+              {recentOpen && closedItems.length > 0 ? (
+                <button
+                  className="h-7 shrink-0 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  type="button"
+                  onClick={onClearClosed}
+                >
+                  {t("canvas.clearRecentClosed")}
+                </button>
+              ) : null}
+            </div>
+            {recentOpen ? (
+              closedItems.length > 0 ? (
+                <div className="max-h-56 overflow-y-auto pt-1">
+                  {closedItems.map((entry) => (
+                    <ClosedCanvasItemRow
+                      key={entry.id}
+                      entry={entry}
+                      onRemove={() => onRemoveClosed(entry)}
+                      onRestore={() => {
+                        onRestoreClosed(entry);
+                        handleOpenChange(false);
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="px-2 py-3 text-xs text-muted-foreground">{t("canvas.widgetLibraryEmpty")}</div>
+              )
+            ) : null}
+          </div>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
+function CurrentCanvasItemRow({
+  active,
+  item,
+  onClose,
+  onFocus,
+}: {
+  active: boolean;
+  item: CanvasItem;
+  onClose: () => void;
+  onFocus: () => void;
+}) {
+  const { t } = useI18n();
+  const title = titleForItem(item, t);
+  return (
+    <div
+      aria-current={active ? "true" : undefined}
+      className="group/current mx-1 flex h-9 min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+      role="button"
+      tabIndex={0}
+      title={title}
+      onClick={onFocus}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) {
+          return;
+        }
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onFocus();
+        }
+      }}
+    >
+      <CanvasKindIcon kind={item.kind} size="xs" />
+      <span className="min-w-0 flex-1 truncate text-left">{title}</span>
+      <span className="relative flex h-6 w-6 shrink-0 items-center justify-center">
+        {active ? <Check className="h-3.5 w-3.5 text-foreground transition-opacity group-hover/current:opacity-0" /> : null}
+        <button
+          aria-label={t("canvas.delete")}
+          className="absolute inset-0 inline-flex items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-background/80 hover:text-destructive focus-visible:opacity-100 group-hover/current:opacity-100"
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onClose();
+          }}
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </span>
+    </div>
   );
 }
 

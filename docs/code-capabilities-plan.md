@@ -1,6 +1,6 @@
 # Pudding Code 能力设计与计划
 
-> 状态:C0、C1、C1.5、C1.6、C2、C3、C4、C5 与 C6 已落地;首版 Code 能力计划完成。
+> 状态:C0、C1、C1.5、C1.6、C2、C3、C4、C5、C6 与 C7 已落地。
 > 目标:在现有 multi-session / Project tool 架构上,把 Pudding 从"可读写文件"
 > 推进到"可信的工程协作 agent"。
 
@@ -577,6 +577,60 @@ proposal 可先存在 engine memory 或 temp artifact;正式再考虑 SQLite 表
 
 - 已完成:agent 可完成"改代码 -> 跑测试 -> stage -> commit"。
 - 已完成:不支持 push/reset/clean/amend 等危险 Git 写操作。
+
+### C7: Code Search, Project Inspect 与文件定位
+
+状态:已完成(2026-07-10)。
+
+目标:
+
+- 减少 agent 为理解项目而进行的重复 list/read 调用。
+- 让代码搜索覆盖常见工程检索需求,同时保持结构化、只读和有界输出。
+- 让搜索结果从 transcript 直接进入画布对应行,形成“搜索 -> 阅读”短路径。
+
+#### C7.1 增强代码搜索
+
+在现有 `builtin_file_search` 上扩展,不新增语义重复的搜索工具:
+
+- 保留 literal 搜索,新增 `regex` 模式。
+- 支持大小写敏感开关。
+- 支持 `include_globs`、`exclude_globs`,按 Project 相对路径过滤。
+- 支持 0-5 行上下文,每个 match 返回 `lineStart`、`lineEnd` 与有界 excerpt。
+- 继续跳过二进制文件、超限文件和常见生成目录。
+- 非法正则或 glob 返回明确结构化错误,不回退成另一种搜索模式。
+
+搜索结果仍限制最多 500 个命中;上下文只用于定位和预览,不替代
+`builtin_file_read` / `builtin_file_slice`。
+
+#### C7.2 Project Inspect
+
+新增只读工具 `builtin_project_inspect`:
+
+- 输入为 `scope:"project"` 与可选的 Project 内目录 `path`。
+- 返回授权根、检查目录、Git root、语言、manifest、项目指令文件和建议验证命令。
+- 第一版只识别稳定的文件标记,例如 `go.mod`、`package.json`、`Cargo.toml`、
+  `pyproject.toml`、`AGENTS.md`、`CONTRIBUTING.md`。
+- `package.json` 只读取 scripts 名称并生成 argv 建议,不执行脚本。
+- 扫描有固定深度、文件数和字节上限;结果按需生成,不写入 Project 或 SQLite。
+
+Project 仍只承载 `rootDirs` 与 `approvalMode`;代码语言、脚本和指令文件可能随
+工作树变化,不能成为持久事实源。
+
+#### C7.3 文件定位 UX
+
+- file search renderer 展示搜索模式、命中数和扫描文件数。
+- 每个命中可点击,在画布文件 tab 中打开该命中的上下文片段。
+- 预览使用真实起始行号并标记为局部快照;同一路径复用已有文件 tab。
+- `builtin_project_inspect` 使用结构化卡片展示语言、manifest、指令和建议命令;
+  主标题与字段补齐三语 i18n,不暴露 snake_case 工具名。
+
+验收:
+
+- agent 能用 regex + glob 在授权 Project 内搜索,不能越过 Project root。
+- 大仓库搜索有界,非法模式返回可恢复错误。
+- 用户点击搜索命中后,画布打开对应路径并从正确行号显示上下文。
+- agent 可一次读取项目类型、Git root、指令文件和候选验证命令。
+- Go 单测与 Web build 通过。
 
 ## 11. 测试策略
 
