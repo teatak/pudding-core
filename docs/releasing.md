@@ -47,23 +47,14 @@ The public download page is permanently:
 
 https://github.com/teatak/pudding/releases/latest
 
-## Installing an unsigned macOS build
+## Unsigned macOS distribution
 
-Manual update mode prevents Pudding from trying to install an unsigned update automatically. It does not bypass
-macOS Gatekeeper. Until releases use a Developer ID signature and Apple notarization, first launch requires an
-explicit user exception:
+Manual update mode prevents Pudding from installing an unsigned update automatically, but it does not bypass
+macOS Gatekeeper. Changing from DMG to ZIP or PKG does not remove the warning. Automatic update mode must remain
+disabled until releases use a Developer ID Application signature and Apple notarization.
 
-1. Move `Pudding.app` to Applications and try to open it once.
-2. Open **System Settings > Privacy & Security**.
-3. In **Security**, find the blocked Pudding entry and click **Open Anyway**.
-4. Authenticate and confirm **Open**.
-
-The exception is saved for that application. Apple exposes **Open Anyway** for about one hour after the blocked
-launch. Only use it for an artifact downloaded from the official Releases page. See
-[Apple's Gatekeeper instructions](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac/26).
-
-Changing from DMG to ZIP or PKG does not remove this warning. Eliminating it for normal users requires a
-Developer ID Application signature and Apple notarization; automatic update mode must remain disabled until then.
+Keep the user-facing installation instructions in the public
+[`teatak/pudding` README](https://github.com/teatak/pudding#install), next to the release downloads.
 
 ## Failure recovery
 
