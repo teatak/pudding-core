@@ -7,7 +7,7 @@ const requestedUpdateMode = String(process.env.PUDDING_UPDATE_MODE || "").trim()
 if (requestedUpdateMode && requestedUpdateMode !== "manual" && requestedUpdateMode !== "automatic") {
   throw new Error("PUDDING_UPDATE_MODE must be manual or automatic");
 }
-const updateMode = requestedUpdateMode || (signingIdentity === "-" ? "manual" : "automatic");
+const updateMode = requestedUpdateMode || "manual";
 if (process.env.npm_lifecycle_event === "desktop:publish" && updateMode === "automatic" && signingIdentity === "-") {
   throw new Error("PUDDING_MAC_IDENTITY is required for publishable macOS updates");
 }

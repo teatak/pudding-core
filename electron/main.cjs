@@ -383,6 +383,10 @@ function updateApplicationMenu() {
       click: () => void shell.openExternal(repositoryURL),
     },
     {
+      label: nativeMenuText("downloadLatest"),
+      click: () => void openUpdateDownloadPage(),
+    },
+    {
       label: nativeMenuText("reportIssue"),
       click: () => void shell.openExternal(issueTrackerURL),
     },

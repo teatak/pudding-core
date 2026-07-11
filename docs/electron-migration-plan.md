@@ -363,13 +363,14 @@ BrowserHost 生命周期收口审查(2026-07-09):
   语言设置实时切换;开发态 Tray 直接读取仓库 `assets/macos/TrayTemplate.png`。
 - 更新状态由 Electron main 统一管理:启动 15 秒后检查,之后每 6 小时检查;后台无更新或
   检查失败不打扰用户,手动检查明确显示结果。更新支持 `manual` 与 `automatic` 两种构建模式。
-- 无证书/ad-hoc 构建默认写入 `manual`:只检查新版本,不下载更新;侧边栏和原生菜单显示“下载更新”,
+- 所有构建默认写入 `manual`:只检查新版本,不下载更新;侧边栏和原生菜单显示“下载更新”,
   点击后打开 `teatak/pudding` GitHub Releases,由用户手动安装 DMG。
-- 配置 `PUDDING_MAC_IDENTITY` 的签名构建默认写入 `automatic`:后台下载完成后显示“重新启动并更新”;
+- 只有同时显式配置 `PUDDING_UPDATE_MODE=automatic` 与 `PUDDING_MAC_IDENTITY` 才启用自动模式:
+  后台下载完成后显示“重新启动并更新”;
   用户显式点击后先停止 browser bridge,等待 managed daemon 优雅退出,再调用 `quitAndInstall()`。
   前端、daemon 和语言服务始终作为一个完整应用包更新,普通退出不会自动安装。
-- `PUDDING_UPDATE_MODE=manual|automatic` 可显式覆盖构建模式。正式自动更新必须使用 Developer ID
-  签名并完成公证,再用 `make desktop-publish` 上传到 GitHub Releases。
+- 正式自动更新必须使用 Developer ID 签名并完成公证。正式版本号以根目录 `package.json` 为准;
+  `PUDDING_APP_VERSION` 只用于本地跨版本测试。
 - 更新交互无需发布即可测试:`PUDDING_UPDATE_TEST_STATE=downloaded make desktop-dev` 会在开发态
   模拟已下载状态,点击按钮只展示安装中状态并恢复,不会关闭服务。完整检查/下载流程可先安装旧版,
   用更高的 `PUDDING_APP_VERSION` 构建新包,运行 `npm run update:test:serve`,再通过

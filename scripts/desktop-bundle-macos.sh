@@ -15,3 +15,4 @@ fi
 
 cd "$ROOT"
 npm run desktop:package
+node scripts/verify-desktop-release.cjs
