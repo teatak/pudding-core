@@ -2,9 +2,15 @@ const updateStatuses = Object.freeze({
   unavailable: "unavailable",
   idle: "idle",
   checking: "checking",
+  available: "available",
   downloading: "downloading",
   downloaded: "downloaded",
   installing: "installing",
+});
+
+const updateModes = Object.freeze({
+  manual: "manual",
+  automatic: "automatic",
 });
 
 class UpdateManager {
@@ -12,44 +18,58 @@ class UpdateManager {
     updater,
     isPackaged,
     disabled = false,
+    mode = updateModes.manual,
+    feedURL = "",
+    simulatedVersion = "",
     initialDelayMs = 15_000,
     intervalMs = 6 * 60 * 60 * 1_000,
     beforeInstall = async () => {},
     onError = () => {},
     onManualResult = async () => {},
+    onSimulatedInstall = async () => {},
     onStateChange = () => {},
     setTimeoutFn = setTimeout,
     clearTimeoutFn = clearTimeout,
   }) {
     this.updater = updater;
-    this.enabled = Boolean(updater && isPackaged && !disabled);
+    this.feedURL = String(feedURL || "").trim();
+    this.simulatedVersion = cleanVersion(simulatedVersion);
+    this.simulated = Boolean(this.simulatedVersion);
+    this.mode = this.simulated ? updateModes.automatic : normalizeUpdateMode(mode);
+    this.enabled = this.simulated || Boolean(updater && isPackaged && !disabled);
     this.initialDelayMs = initialDelayMs;
     this.intervalMs = intervalMs;
     this.beforeInstall = beforeInstall;
     this.onError = onError;
     this.onManualResult = onManualResult;
+    this.onSimulatedInstall = onSimulatedInstall;
     this.onStateChange = onStateChange;
     this.setTimeoutFn = setTimeoutFn;
     this.clearTimeoutFn = clearTimeoutFn;
     this.timer = null;
     this.started = false;
     this.manualCheck = false;
+    this.manualDownload = false;
     this.state = {
-      status: this.enabled ? updateStatuses.idle : updateStatuses.unavailable,
-      version: "",
-      percent: null,
+      status: this.simulated ? updateStatuses.downloaded : this.enabled ? updateStatuses.idle : updateStatuses.unavailable,
+      mode: this.mode,
+      version: this.simulatedVersion,
+      percent: this.simulated ? 100 : null,
     };
 
-    if (this.enabled) {
+    if (this.enabled && !this.simulated) {
       this.configureUpdater();
       this.bindUpdaterEvents();
     }
   }
 
   configureUpdater() {
-    this.updater.autoDownload = true;
-    this.updater.autoInstallOnAppQuit = true;
+    this.updater.autoDownload = this.mode === updateModes.automatic;
+    this.updater.autoInstallOnAppQuit = false;
     this.updater.allowPrerelease = false;
+    if (this.feedURL) {
+      this.updater.setFeedURL({ provider: "generic", url: this.feedURL });
+    }
   }
 
   bindUpdaterEvents() {
@@ -61,6 +81,15 @@ class UpdateManager {
     this.updater.on("update-available", (info) => {
       const manual = this.takeManualCheck();
       const version = cleanVersion(info?.version);
+      if (this.mode === updateModes.manual) {
+        this.manualDownload = false;
+        this.setState({ status: updateStatuses.available, version, percent: null });
+        if (manual) {
+          void this.onManualResult({ kind: "available", version });
+        }
+        return;
+      }
+      this.manualDownload = manual;
       this.setState({ status: updateStatuses.downloading, version, percent: 0 });
       if (manual) {
         void this.onManualResult({ kind: "downloading", version });
@@ -81,6 +110,7 @@ class UpdateManager {
     });
     this.updater.on("update-downloaded", (info) => {
       this.manualCheck = false;
+      this.manualDownload = false;
       this.setState({
         status: updateStatuses.downloaded,
         version: cleanVersion(info?.version) || this.state.version,
@@ -100,6 +130,9 @@ class UpdateManager {
     }
     this.started = true;
     this.onStateChange(this.getState());
+    if (this.simulated) {
+      return;
+    }
     this.schedule(this.initialDelayMs);
   }
 
@@ -126,6 +159,12 @@ class UpdateManager {
   }
 
   async check(manual = false) {
+    if (this.simulated) {
+      if (manual) {
+        await this.onManualResult({ kind: "downloaded", version: this.state.version });
+      }
+      return true;
+    }
     if (!this.enabled) {
       if (manual) {
         await this.onManualResult({ kind: "development" });
@@ -135,6 +174,12 @@ class UpdateManager {
     if (this.state.status === updateStatuses.downloaded) {
       if (manual) {
         await this.onManualResult({ kind: "downloaded", version: this.state.version });
+      }
+      return true;
+    }
+    if (this.state.status === updateStatuses.available) {
+      if (manual) {
+        await this.onManualResult({ kind: "available", version: this.state.version });
       }
       return true;
     }
@@ -163,11 +208,17 @@ class UpdateManager {
   }
 
   async install() {
-    if (!this.enabled || this.state.status !== updateStatuses.downloaded) {
+    if (this.mode !== updateModes.automatic || !this.enabled || this.state.status !== updateStatuses.downloaded) {
       return false;
     }
     const downloadedState = this.getState();
     this.setState({ status: updateStatuses.installing });
+    if (this.simulated) {
+      await this.onSimulatedInstall(downloadedState);
+      this.state = downloadedState;
+      this.onStateChange(this.getState());
+      return true;
+    }
     this.stop();
     try {
       await this.beforeInstall();
@@ -175,8 +226,7 @@ class UpdateManager {
       return true;
     } catch (error) {
       this.onError(error);
-      this.state = downloadedState;
-      this.onStateChange(this.getState());
+      this.setState({ status: updateStatuses.idle, version: "", percent: null });
       await this.onManualResult({ kind: "install-error", error: errorMessage(error) });
       return false;
     }
@@ -184,11 +234,12 @@ class UpdateManager {
 
   handleError(error) {
     this.onError(error);
-    const manual = this.takeManualCheck();
-    if (this.state.status !== updateStatuses.downloaded && this.state.status !== updateStatuses.installing) {
-      this.setState({ status: updateStatuses.idle, version: "", percent: null });
-    }
-    if (manual) {
+    const installing = this.state.status === updateStatuses.installing;
+    const manual = this.takeManualCheck() || this.takeManualDownload();
+    this.setState({ status: updateStatuses.idle, version: "", percent: null });
+    if (installing) {
+      void this.onManualResult({ kind: "install-error", error: errorMessage(error) });
+    } else if (manual) {
       void this.onManualResult({ kind: "error", error: errorMessage(error) });
     }
   }
@@ -196,6 +247,12 @@ class UpdateManager {
   takeManualCheck() {
     const manual = this.manualCheck;
     this.manualCheck = false;
+    return manual;
+  }
+
+  takeManualDownload() {
+    const manual = this.manualDownload;
+    this.manualDownload = false;
     return manual;
   }
 
@@ -207,6 +264,12 @@ class UpdateManager {
 
 function cleanVersion(value) {
   return String(value || "").trim();
+}
+
+function normalizeUpdateMode(value) {
+  return String(value || "").trim().toLowerCase() === updateModes.automatic
+    ? updateModes.automatic
+    : updateModes.manual;
 }
 
 function clampPercent(value) {
@@ -221,4 +284,4 @@ function errorMessage(error) {
   return String(error?.message || error || "update failed");
 }
 
-module.exports = { UpdateManager, updateStatuses };
+module.exports = { UpdateManager, updateModes, updateStatuses };

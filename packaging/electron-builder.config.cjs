@@ -3,8 +3,18 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 const signingIdentity = String(process.env.PUDDING_MAC_IDENTITY || "-").trim() || "-";
 const requestedVersion = String(process.env.PUDDING_APP_VERSION || "").trim();
-if (process.env.npm_lifecycle_event === "desktop:publish" && signingIdentity === "-") {
+const requestedUpdateMode = String(process.env.PUDDING_UPDATE_MODE || "").trim().toLowerCase();
+if (requestedUpdateMode && requestedUpdateMode !== "manual" && requestedUpdateMode !== "automatic") {
+  throw new Error("PUDDING_UPDATE_MODE must be manual or automatic");
+}
+const updateMode = requestedUpdateMode || (signingIdentity === "-" ? "manual" : "automatic");
+if (process.env.npm_lifecycle_event === "desktop:publish" && updateMode === "automatic" && signingIdentity === "-") {
   throw new Error("PUDDING_MAC_IDENTITY is required for publishable macOS updates");
+}
+
+const extraMetadata = { puddingUpdateMode: updateMode };
+if (requestedVersion) {
+  extraMetadata.version = requestedVersion;
 }
 
 module.exports = {
@@ -13,7 +23,7 @@ module.exports = {
   electronVersion: "43.0.0",
   asar: true,
   artifactName: "${productName}-${version}-${arch}.${ext}",
-  ...(requestedVersion ? { extraMetadata: { version: requestedVersion } } : {}),
+  extraMetadata,
   directories: {
     output: "dist/release",
   },

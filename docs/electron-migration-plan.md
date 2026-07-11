@@ -357,17 +357,26 @@ BrowserHost 生命周期收口审查(2026-07-09):
 - crash/log 收集落本地文件。
 - 当前落点:`make desktop-bundle` 通过 electron-builder 生成 macOS DMG、ZIP、blockmap 和
   `latest-mac.yml`,包内包含 Electron shell、Tray、release daemon、daemon dylib、语言服务、
-  icon、相机/麦克风用途说明和 `pudding://` callback scheme。
+  icon、相机/麦克风用途说明和 `pudding://` callback scheme。打包和发布前会清理 `dist/release`,
+  防止不同版本连续构建时残留旧 `.app` 元数据。
 - Tray 与原生应用菜单支持简体中文、繁体中文和英文,并通过 preload IPC 跟随 Web
   语言设置实时切换;开发态 Tray 直接读取仓库 `assets/macos/TrayTemplate.png`。
 - 更新状态由 Electron main 统一管理:启动 15 秒后检查,之后每 6 小时检查;后台无更新或
-  检查失败不打扰用户,手动检查明确显示结果。更新下载完成后不弹窗,侧边栏显示“重新启动并更新”,
-  原生菜单同步变为“重新启动以更新”。
-- 显式更新会先停止 browser bridge,等待 managed daemon 优雅退出,然后调用 `quitAndInstall()`;
-  前端、daemon 和语言服务始终作为一个完整应用包更新。
-- 本地默认使用 ad-hoc codesign,可验证安装包但不能用于正式 macOS 自动更新。正式发布需通过
-  `PUDDING_MAC_IDENTITY` 配置 Developer ID 并完成公证,再用 `make desktop-publish` 上传到
-  `teatak/pudding` GitHub Releases。
+  检查失败不打扰用户,手动检查明确显示结果。更新支持 `manual` 与 `automatic` 两种构建模式。
+- 无证书/ad-hoc 构建默认写入 `manual`:只检查新版本,不下载更新;侧边栏和原生菜单显示“下载更新”,
+  点击后打开 `teatak/pudding` GitHub Releases,由用户手动安装 DMG。
+- 配置 `PUDDING_MAC_IDENTITY` 的签名构建默认写入 `automatic`:后台下载完成后显示“重新启动并更新”;
+  用户显式点击后先停止 browser bridge,等待 managed daemon 优雅退出,再调用 `quitAndInstall()`。
+  前端、daemon 和语言服务始终作为一个完整应用包更新,普通退出不会自动安装。
+- `PUDDING_UPDATE_MODE=manual|automatic` 可显式覆盖构建模式。正式自动更新必须使用 Developer ID
+  签名并完成公证,再用 `make desktop-publish` 上传到 GitHub Releases。
+- 更新交互无需发布即可测试:`PUDDING_UPDATE_TEST_STATE=downloaded make desktop-dev` 会在开发态
+  模拟已下载状态,点击按钮只展示安装中状态并恢复,不会关闭服务。完整检查/下载流程可先安装旧版,
+  用更高的 `PUDDING_APP_VERSION` 构建新包,运行 `npm run update:test:serve`,再通过
+  `PUDDING_UPDATE_FEED_URL=http://127.0.0.1:8099` 启动旧版。测试服务支持 Range 请求,可覆盖
+  electron-updater 的 ZIP/blockmap 下载路径。自动模式的 ad-hoc 签名包会在 Squirrel 安装校验阶段失败,
+  这可验证检查和下载链路,但只有使用同一 Developer ID 签名的新旧版本才能验证实际替换。
+  `npm run update:test:run` 会先等待本地 feed 可访问再启动 `/Applications/Pudding.app`,避免启动竞态。
 - 2026-07-11 验证:`make desktop-bundle` 成功生成 arm64 DMG/ZIP/update metadata,短启动安装包
   可拉起 release daemon,退出后 daemon 正常关闭。
 

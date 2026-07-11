@@ -33,7 +33,7 @@ contextBridge.exposeInMainWorld("puddingElectronDesktop", {
   openExternal: (url) => ipcRenderer.invoke("pudding:desktop:open-external", url),
   setLocale: (locale) => ipcRenderer.invoke("pudding:desktop:set-locale", locale),
   getUpdateState: () => ipcRenderer.invoke("pudding:desktop:update:get-state"),
-  installUpdate: () => ipcRenderer.invoke("pudding:desktop:update:install"),
+  activateUpdate: () => ipcRenderer.invoke("pudding:desktop:update:activate"),
   onUpdateState: (listener) => {
     const wrapped = (_event, state) => listener(state);
     ipcRenderer.on("pudding:desktop:update-state", wrapped);

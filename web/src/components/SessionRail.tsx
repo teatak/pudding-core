@@ -3,6 +3,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import {
   Blocks,
   ChevronRight,
+  Download,
   Ellipsis,
   FolderClosed,
   FolderOpen,
@@ -95,10 +96,10 @@ import { useBackgroundSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
 import {
   type DesktopUpdateState,
+  activateDesktopUpdate,
   getDesktopUpdateState,
   onDesktopMenuCommand,
   onDesktopUpdateState,
-  restartToInstallUpdate,
 } from "@/lib/desktopBridge";
 import type { AppSearch } from "@/lib/route";
 import { openSettingsDialog } from "@/lib/settingsDialog";
@@ -1243,13 +1244,15 @@ function RailUpdateButton({ serverTurnRunning }: { serverTurnRunning: boolean })
 
   useEffect(() => {
     let active = true;
-    void getDesktopUpdateState().then((next) => {
+    let receivedEvent = false;
+    const unsubscribe = onDesktopUpdateState((next) => {
       if (active) {
+        receivedEvent = true;
         setState(next);
       }
     });
-    const unsubscribe = onDesktopUpdateState((next) => {
-      if (active) {
+    void getDesktopUpdateState().then((next) => {
+      if (active && !receivedEvent) {
         setState(next);
       }
     });
@@ -1259,6 +1262,21 @@ function RailUpdateButton({ serverTurnRunning }: { serverTurnRunning: boolean })
     };
   }, []);
 
+  const manualAvailable = state?.mode === "manual" && state.status === "available";
+  if (manualAvailable) {
+    return (
+      <Button
+        className="mb-1 h-9 w-full justify-start gap-2 px-2 font-normal"
+        title={state.version || undefined}
+        variant="secondary"
+        onClick={() => void activateDesktopUpdate()}
+      >
+        <Download className="size-4" />
+        <span className="truncate">{t("update.download")}</span>
+        <span className="ml-auto size-2 shrink-0 rounded-full bg-blue-500" />
+      </Button>
+    );
+  }
   if (state?.status !== "downloaded" && state?.status !== "installing") {
     return null;
   }
@@ -1267,7 +1285,7 @@ function RailUpdateButton({ serverTurnRunning }: { serverTurnRunning: boolean })
     serverTurnRunning ||
     Object.values(runningTurns).some(Boolean) ||
     Object.values(turnPhases).some((phase) => isTurnPhaseActive(phase));
-  const restart = () => void restartToInstallUpdate();
+  const restart = () => void activateDesktopUpdate();
   return (
     <>
       <Button

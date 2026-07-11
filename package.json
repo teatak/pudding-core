@@ -6,9 +6,12 @@
   "author": "teatak",
   "main": "electron/main.cjs",
   "scripts": {
-    "desktop:package": "electron-builder --config packaging/electron-builder.config.cjs --publish never",
-    "desktop:publish": "electron-builder --config packaging/electron-builder.config.cjs --publish always",
-    "test:electron": "node --test electron/test/*.test.cjs"
+    "desktop:clean": "node scripts/clean-desktop-release.cjs",
+    "desktop:package": "npm run desktop:clean && electron-builder --config packaging/electron-builder.config.cjs --publish never",
+    "desktop:publish": "npm run desktop:clean && electron-builder --config packaging/electron-builder.config.cjs --publish always",
+    "test:electron": "node --test electron/test/*.test.cjs",
+    "update:test:serve": "node scripts/serve-update-feed.cjs",
+    "update:test:run": "node scripts/run-update-test.cjs"
   },
   "dependencies": {
     "electron-updater": "^6.8.9"

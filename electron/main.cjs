@@ -18,16 +18,18 @@ const fsp = require("node:fs/promises");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
+const packageMetadata = require("../package.json");
 
 const { BrowserBridgeServer } = require("./browser-bridge-server.cjs");
 const { BrowserHost } = require("./browser-host.cjs");
 const { nativeText, normalizeNativeLocale } = require("./native-i18n.cjs");
-const { UpdateManager, updateStatuses } = require("./update-manager.cjs");
+const { UpdateManager, updateModes, updateStatuses } = require("./update-manager.cjs");
 
 const repoRoot = app.isPackaged ? path.join(process.resourcesPath, "app") : path.resolve(__dirname, "..");
 const appDisplayName = "Pudding";
 const repositoryURL = "https://github.com/teatak/pudding";
 const issueTrackerURL = `${repositoryURL}/issues`;
+const releasePageURL = normalizeUpdatePageURL(process.env.PUDDING_UPDATE_DOWNLOAD_URL) || `${repositoryURL}/releases/latest`;
 
 app.setName(appDisplayName);
 app.setPath("userData", electronUserDataDir());
@@ -67,13 +69,21 @@ let quitting = false;
 let appTray = null;
 let shellLocale = "en";
 const pendingOAuthReturnURLs = [];
+const updateFeedURL = normalizeUpdateFeedURL(process.env.PUDDING_UPDATE_FEED_URL);
+const updateMode = normalizeUpdateMode(process.env.PUDDING_UPDATE_MODE || packageMetadata.puddingUpdateMode);
+const simulatedUpdateVersion =
+  !app.isPackaged && process.env.PUDDING_UPDATE_TEST_STATE === "downloaded" ? "99.0.0-test" : "";
 const updateManager = new UpdateManager({
   updater: autoUpdater,
   isPackaged: app.isPackaged,
   disabled: process.env.PUDDING_DISABLE_UPDATE_CHECK === "1",
+  mode: updateMode,
+  feedURL: updateFeedURL,
+  simulatedVersion: simulatedUpdateVersion,
   beforeInstall: prepareForUpdateInstall,
   onError: (error) => console.warn("[electron] update failed", error),
   onManualResult: showManualUpdateResult,
+  onSimulatedInstall: showSimulatedUpdateResult,
   onStateChange: (state) => {
     if (app.isReady()) {
       updateApplicationMenu();
@@ -391,11 +401,17 @@ function updateApplicationMenu() {
 
 function updateMenuItem() {
   const state = updateManager.getState();
+  if (state.status === updateStatuses.available && state.mode === updateModes.manual) {
+    return {
+      label: nativeMenuText("downloadUpdate"),
+      click: () => void activateUpdate(),
+    };
+  }
   if (state.status === updateStatuses.downloaded || state.status === updateStatuses.installing) {
     return {
       enabled: state.status === updateStatuses.downloaded,
       label: nativeMenuText(state.status === updateStatuses.installing ? "restartingToUpdate" : "restartToUpdate"),
-      click: () => void updateManager.install(),
+      click: () => void activateUpdate(),
     };
   }
   const busy = state.status === updateStatuses.checking || state.status === updateStatuses.downloading;
@@ -453,6 +469,23 @@ async function showManualUpdateResult(result) {
     );
     return;
   }
+  if (result.kind === "available") {
+    const choice = await showUpdateMessage(
+      {
+        buttons: [nativeMenuText("downloadUpdate"), nativeMenuText("later")],
+        cancelId: 1,
+        defaultId: 0,
+        message: nativeText(shellLocale, "manualUpdateAvailableMessage", { version: result.version }),
+        title: nativeMenuText("updateAvailableTitle"),
+        type: "info",
+      },
+      true,
+    );
+    if (choice.response === 0) {
+      await openUpdateDownloadPage();
+    }
+    return;
+  }
   if (result.kind === "downloading") {
     await showUpdateMessage(
       {
@@ -480,6 +513,23 @@ async function showManualUpdateResult(result) {
     },
     true,
   );
+  if (installError) {
+    quitting = true;
+    app.relaunch();
+    app.exit(1);
+  }
+}
+
+function showSimulatedUpdateResult() {
+  return showUpdateMessage(
+    {
+      buttons: [nativeMenuText("ok")],
+      message: nativeMenuText("updateSimulationMessage"),
+      title: nativeMenuText("updateSimulationTitle"),
+      type: "info",
+    },
+    true,
+  );
 }
 
 function showUpdateMessage(options, bringToFront) {
@@ -491,6 +541,24 @@ function showUpdateMessage(options, bringToFront) {
     return dialog.showMessageBox(window, options);
   }
   return dialog.showMessageBox(options);
+}
+
+async function activateUpdate() {
+  const state = updateManager.getState();
+  if (state.mode === updateModes.manual) {
+    return state.status === updateStatuses.available ? openUpdateDownloadPage() : false;
+  }
+  return updateManager.install();
+}
+
+async function openUpdateDownloadPage() {
+  try {
+    await shell.openExternal(releasePageURL);
+    return true;
+  } catch (error) {
+    console.warn("[electron] open update download page failed", error);
+    return false;
+  }
 }
 
 async function openLogsDirectory() {
@@ -722,9 +790,9 @@ ipcMain.handle("pudding:desktop:update:get-state", (event) => {
   return updateManager.getState();
 });
 
-ipcMain.handle("pudding:desktop:update:install", async (event) => {
+ipcMain.handle("pudding:desktop:update:activate", async (event) => {
   assertTrustedSender(event);
-  return updateManager.install();
+  return activateUpdate();
 });
 
 ipcMain.handle("pudding:desktop:pick-directories", async (event, options) => {
@@ -1070,6 +1138,48 @@ function isAllowedExternalURL(rawURL) {
   } catch {
     return false;
   }
+}
+
+function normalizeUpdateFeedURL(rawURL) {
+  const clean = String(rawURL || "").trim();
+  if (!clean) {
+    return "";
+  }
+  try {
+    const url = new URL(clean);
+    const loopback = url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]";
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
+      throw new Error("update feed must use HTTPS or loopback HTTP");
+    }
+    return url.toString().replace(/\/$/, "");
+  } catch (error) {
+    console.warn("[electron] ignoring invalid PUDDING_UPDATE_FEED_URL", error);
+    return "";
+  }
+}
+
+function normalizeUpdatePageURL(rawURL) {
+  const clean = String(rawURL || "").trim();
+  if (!clean) {
+    return "";
+  }
+  try {
+    const url = new URL(clean);
+    const loopback = url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]";
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
+      throw new Error("update download page must use HTTPS or loopback HTTP");
+    }
+    return url.toString();
+  } catch (error) {
+    console.warn("[electron] ignoring invalid PUDDING_UPDATE_DOWNLOAD_URL", error);
+    return "";
+  }
+}
+
+function normalizeUpdateMode(value) {
+  return String(value || "").trim().toLowerCase() === updateModes.automatic
+    ? updateModes.automatic
+    : updateModes.manual;
 }
 
 function stringOption(value) {
