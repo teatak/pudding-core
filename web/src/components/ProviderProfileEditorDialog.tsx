@@ -44,7 +44,7 @@ import {
   PopoverHeader,
   PopoverTitle,
 } from "@/components/ui/popover";
-import { NeutralRadioGroup, NeutralRadioGroupItem } from "@/components/NeutralRadioGroup";
+import { NeutralRadioCard, NeutralRadioGroup } from "@/components/NeutralRadioGroup";
 import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { useI18n } from "@/i18n";
@@ -69,9 +69,8 @@ const PROVIDER_PROTOCOL_OPTIONS: ProviderPresetProtocol[] = ["openai-compatible"
 const BASE_REASONING_EFFORT_OPTIONS = ["auto", "low", "medium", "high"];
 const OPENAI_REASONING_EFFORT_OPTIONS = [...BASE_REASONING_EFFORT_OPTIONS, "xhigh"];
 const MODEL_ID_REQUIRED = "provider.modelIDRequired";
-const optionSelectedClass = "border-primary/45 bg-primary/10 text-foreground";
+const optionSelectedClass = "border-foreground/20 bg-accent text-foreground";
 const optionIdleClass = "bg-transparent text-muted-foreground hover:bg-transparent";
-const radioOptionSelectedClass = "border-foreground/20 bg-accent text-foreground";
 
 const modelFormSchema = z.object({
   id: z.string(),
@@ -911,17 +910,13 @@ function PresetGroupSwitch({
           const active = item === group;
           const id = `provider-profile-${preset.id}-group-${item}`;
           return (
-            <FieldLabel key={item} className="cursor-default" htmlFor={id}>
-              <Field
-                className={cn("h-9 px-3 py-2", active ? radioOptionSelectedClass : optionIdleClass)}
-                orientation="horizontal"
-              >
-                <FieldContent>
-                  <FieldTitle className="font-medium">{presetGroupLabel(preset, item, t)}</FieldTitle>
-                </FieldContent>
-                <NeutralRadioGroupItem id={id} value={item} />
-              </Field>
-            </FieldLabel>
+            <NeutralRadioCard
+              key={item}
+              id={id}
+              selected={active}
+              title={presetGroupLabel(preset, item, t)}
+              value={item}
+            />
           );
         })}
       </NeutralRadioGroup>

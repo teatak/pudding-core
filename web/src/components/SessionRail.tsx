@@ -1069,7 +1069,7 @@ function RailPanel({
                 {showPinnedGroup ? (
                   <Collapsible asChild open={!pinnedCollapsed}>
                     <SidebarGroup
-                      className="px-2 py-1"
+                      className="px-2 py-0.5"
                       data-session-drop-group="pinned"
                     >
                       <CollapsibleSessionGroupLabel
@@ -1644,11 +1644,10 @@ function SessionItems({
         <SidebarMenuItem>
           <button
             aria-expanded={showAll}
-            className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            className="flex h-7 w-full items-center rounded-md pr-2 pl-7 text-left text-xs text-sidebar-foreground/50 transition-colors hover:text-sidebar-foreground/80"
             type="button"
             onClick={() => setShowAll((current) => !current)}
           >
-            <ChevronRight className={cn("size-3 shrink-0 transition-transform", showAll ? "-rotate-90" : "rotate-90")} />
             <span>
               {showAll
                 ? t("session.showLess")

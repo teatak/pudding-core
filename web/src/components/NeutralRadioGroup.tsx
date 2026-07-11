@@ -1,6 +1,7 @@
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Field, FieldContent, FieldLabel, FieldTitle } from "@/components/ui/field";
 import { cn } from "@/lib/utils";
 
 function NeutralRadioGroup({ className, ...props }: ComponentProps<typeof RadioGroup>) {
@@ -8,15 +9,39 @@ function NeutralRadioGroup({ className, ...props }: ComponentProps<typeof RadioG
 }
 
 function NeutralRadioGroupItem({ className, ...props }: ComponentProps<typeof RadioGroupItem>) {
+  return <RadioGroupItem className={cn("cursor-default", className)} {...props} />;
+}
+
+function NeutralRadioCard({
+  className,
+  id,
+  selected,
+  title,
+  value,
+}: {
+  className?: string;
+  id: string;
+  selected: boolean;
+  title: ReactNode;
+  value: string;
+}) {
   return (
-    <RadioGroupItem
-      className={cn(
-        "cursor-default data-checked:border-foreground/70 data-checked:bg-foreground data-checked:text-background dark:data-checked:bg-foreground [&_[data-slot=radio-group-indicator]>span]:bg-background",
-        className,
-      )}
-      {...props}
-    />
+    <FieldLabel className="cursor-default" htmlFor={id}>
+      <Field
+        className={cn(
+          "min-h-14 items-center justify-start gap-3 rounded-xl px-4 py-3",
+          selected ? "border-foreground/20 bg-accent" : "bg-transparent hover:bg-transparent",
+          className,
+        )}
+        orientation="horizontal"
+      >
+        <NeutralRadioGroupItem id={id} value={value} />
+        <FieldContent>
+          <FieldTitle className="font-medium leading-5">{title}</FieldTitle>
+        </FieldContent>
+      </Field>
+    </FieldLabel>
   );
 }
 
-export { NeutralRadioGroup, NeutralRadioGroupItem };
+export { NeutralRadioCard, NeutralRadioGroup, NeutralRadioGroupItem };

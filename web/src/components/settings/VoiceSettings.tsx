@@ -35,6 +35,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 import {
+  SETTINGS_COMPACT_SELECT_CLASS,
   SETTINGS_NARROW_CONTENT_CLASS,
   SettingsActionRow,
   SettingsControlRow,
@@ -269,7 +270,7 @@ export function VoiceSettings({ token }: { token: string }) {
               value={form.asrLanguage}
               onValueChange={(value) => saveVoicePatch({ asrLanguage: value })}
             >
-              <SelectTrigger id="pudding-voice-asr-language" className="w-48 max-w-full sm:ml-auto">
+              <SelectTrigger id="pudding-voice-asr-language" className={SETTINGS_COMPACT_SELECT_CLASS}>
                 <SelectValue />
               </SelectTrigger>
               <DialogSelectContent>
@@ -406,7 +407,7 @@ export function VoiceSettings({ token }: { token: string }) {
               value={form.nsLevel}
               onValueChange={(value) => saveVoicePatch({ nsLevel: value })}
             >
-              <SelectTrigger id="pudding-voice-ns-level" className="w-48 max-w-full sm:ml-auto">
+              <SelectTrigger id="pudding-voice-ns-level" className={SETTINGS_COMPACT_SELECT_CLASS}>
                 <SelectValue />
               </SelectTrigger>
               <DialogSelectContent>

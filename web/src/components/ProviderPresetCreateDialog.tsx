@@ -21,15 +21,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Field,
-  FieldContent,
-  FieldLabel,
-  FieldTitle,
-} from "@/components/ui/field";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { NeutralRadioGroup, NeutralRadioGroupItem } from "@/components/NeutralRadioGroup";
+import { NeutralRadioCard, NeutralRadioGroup } from "@/components/NeutralRadioGroup";
 import { useI18n } from "@/i18n";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import { openExternalURL } from "@/lib/desktopBridge";
@@ -42,9 +37,6 @@ import {
   type ProviderPreset,
   type ProviderPresetVariant,
 } from "@/provider/presets";
-
-const providerOptionSelectedClass = "border-foreground/20 bg-accent text-foreground";
-const providerOptionIdleClass = "bg-transparent text-muted-foreground hover:bg-transparent";
 
 export function ProviderPresetGrid({
   children,
@@ -352,19 +344,18 @@ function VariantListPicker({
   return (
     <div className="grid gap-2">
       <Label>{t("provider.accessMethod")}</Label>
-      <NeutralRadioGroup value={variantID} onValueChange={onVariantChange}>
+      <NeutralRadioGroup className="sm:grid-cols-2" value={variantID} onValueChange={onVariantChange}>
         {preset.variants.map((item) => {
           const active = item.id === variant?.id;
           const id = `provider-preset-${preset.id}-${item.id}`;
           return (
-            <FieldLabel key={item.id} className="cursor-default" htmlFor={id}>
-              <Field className={cn(active ? providerOptionSelectedClass : providerOptionIdleClass)} orientation="horizontal">
-                <FieldContent>
-                  <FieldTitle>{providerPresetAccessMethodLabel(preset, item, t)}</FieldTitle>
-                </FieldContent>
-                <NeutralRadioGroupItem id={id} value={item.id} />
-              </Field>
-            </FieldLabel>
+            <NeutralRadioCard
+              key={item.id}
+              id={id}
+              selected={active}
+              title={providerPresetAccessMethodLabel(preset, item, t)}
+              value={item.id}
+            />
           );
         })}
       </NeutralRadioGroup>
@@ -410,7 +401,7 @@ function MiMoVariantPicker({
       <div className="grid gap-2">
         <Label>{t("provider.accessMethod")}</Label>
         <NeutralRadioGroup
-          className="grid gap-2"
+          className="sm:grid-cols-2"
           value={current.protocol}
           onValueChange={(value) => onVariantChange(miMoVariantID(current.plan, value as MiMoProtocol))}
         >
@@ -418,14 +409,14 @@ function MiMoVariantPicker({
             const active = item.id === current.protocol;
             const id = `provider-preset-${preset.id}-protocol-${item.id}`;
             return (
-              <FieldLabel key={item.id} className="cursor-default" htmlFor={id}>
-                <Field className={cn("h-full", active ? providerOptionSelectedClass : providerOptionIdleClass)} orientation="horizontal">
-                  <FieldContent>
-                    <FieldTitle>{item.label}</FieldTitle>
-                  </FieldContent>
-                  <NeutralRadioGroupItem id={id} value={item.id} />
-                </Field>
-              </FieldLabel>
+              <NeutralRadioCard
+                key={item.id}
+                className="h-full"
+                id={id}
+                selected={active}
+                title={item.label}
+                value={item.id}
+              />
             );
           })}
         </NeutralRadioGroup>
@@ -434,7 +425,7 @@ function MiMoVariantPicker({
       <div className="grid gap-2">
         <Label>{t("provider.endpointMode")}</Label>
         <NeutralRadioGroup
-          className="grid grid-cols-2 gap-2"
+          className="sm:grid-cols-2"
           value={current.plan}
           onValueChange={(value) => onVariantChange(miMoVariantID(value as MiMoPlan, current.protocol))}
         >
@@ -442,14 +433,14 @@ function MiMoVariantPicker({
             const active = item.id === current.plan;
             const id = `provider-preset-${preset.id}-plan-${item.id}`;
             return (
-              <FieldLabel key={item.id} className="cursor-default" htmlFor={id}>
-                <Field className={cn("h-full", active ? providerOptionSelectedClass : providerOptionIdleClass)} orientation="horizontal">
-                  <FieldContent>
-                    <FieldTitle>{item.label}</FieldTitle>
-                  </FieldContent>
-                  <NeutralRadioGroupItem id={id} value={item.id} />
-                </Field>
-              </FieldLabel>
+              <NeutralRadioCard
+                key={item.id}
+                className="h-full"
+                id={id}
+                selected={active}
+                title={item.label}
+                value={item.id}
+              />
             );
           })}
         </NeutralRadioGroup>

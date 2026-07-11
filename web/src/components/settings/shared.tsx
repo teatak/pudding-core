@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 
 export const SETTINGS_CONTENT_CLASS = "@container mx-auto grid min-w-0 w-full max-w-4xl gap-5";
 export const SETTINGS_NARROW_CONTENT_CLASS = "@container mx-auto grid min-w-0 w-full max-w-3xl gap-5";
+export const SETTINGS_COMPACT_SELECT_CLASS = "w-36 max-w-full";
 
 export function SettingsControlRow({
   children,
@@ -178,7 +179,7 @@ export function SettingsSection({
   title: string;
 }) {
   return (
-    <section className="grid gap-3">
+    <section className="grid min-w-0 gap-3">
       <div className="flex min-h-8 items-center justify-between gap-3">
         <h3 className="text-sm font-normal">{title}</h3>
         {action}

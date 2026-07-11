@@ -198,7 +198,7 @@ function SkillList({
     return <div className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">{t("settings.skills.empty")}</div>;
   }
   return (
-    <ItemGroup className="gap-2">
+    <ItemGroup className="min-w-0 gap-2">
       {skills.map((skill) => (
         <SkillRow
           key={`${skill.source}:${skill.id}`}
@@ -326,39 +326,44 @@ function SkillRow({ deleting, onDelete, skill, token }: { deleting?: boolean; on
   const { t } = useI18n();
   const iconURL = skillIconURL(token, skill);
   return (
-    <Item className="items-start gap-3 rounded-lg px-3 py-3" variant="outline">
-      <ItemMedia>
-        <IdentityIcon fallback="skill" fit="contain" size="lg" src={iconURL || undefined} />
-      </ItemMedia>
-      <ItemContent className="min-w-0 gap-1">
-        <ItemTitle className="flex max-w-full flex-wrap items-center gap-2">
-          <span className="min-w-0 truncate text-sm font-medium">{skill.id}</span>
-          <span className="min-w-0 truncate text-[11px] font-normal text-muted-foreground">
-            {skillDisplayPath(skill)}
-          </span>
-          <span className="rounded border border-border/70 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
-            {t(`settings.skills.source.${skill.source}`)}
-          </span>
-          <span className="rounded border border-border/70 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
-            {t("settings.skills.scope.global")}
-          </span>
-        </ItemTitle>
-        <ItemDescription className="line-clamp-2 text-xs leading-5">
-          {skill.description || t("settings.skills.noDescription")}
-        </ItemDescription>
-      </ItemContent>
+    <Item
+      className="group min-h-16 min-w-0 max-w-full flex-nowrap overflow-hidden rounded-xl bg-card px-4 py-3 hover:bg-accent/50"
+      role="listitem"
+      variant="outline"
+    >
+      <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden text-left">
+        <ItemMedia>
+          <IdentityIcon fallback="skill" fit="contain" size="lg" src={iconURL || undefined} />
+        </ItemMedia>
+        <ItemContent className="min-w-0 gap-0.5">
+          <ItemTitle className="w-full min-w-0 flex-nowrap overflow-hidden font-normal">
+            <span className="min-w-0 truncate text-base font-normal">{skill.id}</span>
+            <span className="min-w-0 truncate text-xs font-normal text-muted-foreground">
+              {skillDisplayPath(skill)}
+            </span>
+            <span className="shrink-0 rounded border border-border/70 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
+              {t(`settings.skills.source.${skill.source}`)}
+            </span>
+            <span className="shrink-0 rounded border border-border/70 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
+              {t("settings.skills.scope.global")}
+            </span>
+          </ItemTitle>
+          <ItemDescription className="truncate text-xs">
+            {skill.description || t("settings.skills.noDescription")}
+          </ItemDescription>
+        </ItemContent>
+      </div>
       {skill.source === "user" ? (
-        <ItemActions className="self-center opacity-0 transition-opacity group-hover/item:opacity-100 group-focus-within/item:opacity-100">
+        <ItemActions className="ml-auto shrink-0 gap-1">
           <Button
             aria-label={t("common.delete")}
-            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
             disabled={deleting}
-            size="icon"
+            size="icon-sm"
             type="button"
             variant="ghost"
             onClick={onDelete}
           >
-            {deleting ? <Spinner /> : <Trash />}
+            {deleting ? <Spinner /> : <Trash className="text-destructive" />}
           </Button>
         </ItemActions>
       ) : null}
@@ -381,4 +386,3 @@ function SkillsSkeleton() {
     </div>
   );
 }
-
