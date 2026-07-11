@@ -29,6 +29,7 @@ import {
   createSession,
   deleteSession,
   getAudioBindings,
+  getAudioRuntime,
   listApps,
   listSkills,
   listProviders,
@@ -37,6 +38,7 @@ import {
   uploadAttachment,
   revealDesktopPath,
   type Attachment,
+  type AudioInputMode,
   type ContentPart,
   type ProviderProfile,
   type Session,
@@ -50,7 +52,7 @@ import { useComposerMentions } from "@/components/useComposerMentions";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
 import { Mascot, type MascotGaze, type MascotGazePoint } from "@/components/Mascot";
 import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
-import { AudioControlButtons } from "@/components/SessionAudioControls";
+import { AudioControlButtons, AudioRuntimeInstallDialog, audioAPIErrorMessage } from "@/components/SessionAudioControls";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
 import { ProviderProfileEditorDialog } from "@/components/ProviderProfileEditorDialog";
 import { ProviderCustomCard, ProviderPresetCreateDialog, ProviderPresetGrid } from "@/components/ProviderPresetCreateDialog";
@@ -396,6 +398,10 @@ function DraftComposer({
   const [pickingAttachment, setPickingAttachment] = useState(false);
   const [pickingLocalFolder, setPickingLocalFolder] = useState(false);
   const [draftVoiceInputActive, setDraftVoiceInputActive] = useState(false);
+  const [draftVoiceSelectedMode, setDraftVoiceSelectedMode] = useState<AudioInputMode>("transcribe");
+  const [draftVoiceRuntimeDialogOpen, setDraftVoiceRuntimeDialogOpen] = useState(false);
+  const [draftVoiceRuntimeMode, setDraftVoiceRuntimeMode] = useState<AudioInputMode>("transcribe");
+  const [draftVoiceRuntimeChecking, setDraftVoiceRuntimeChecking] = useState(false);
   const [draftVoiceOutputActive, setDraftVoiceOutputActive] = useState(false);
   const [draftVoiceOutputPending, setDraftVoiceOutputPending] = useState(false);
   const [draftVoiceSession, setDraftVoiceSession] = useState<Session | null>(null);
@@ -485,6 +491,7 @@ function DraftComposer({
     [attachmentPreviewItems],
   );
   const reasoningOptions = useMemo(() => reasoningEffortOptionsForSelection(resolvedModel), [resolvedModel]);
+  const audioInputSupported = resolvedModel ? resolvedModel.modelConfig?.capabilities?.audio === true : undefined;
   const resolvedModelKey = resolvedModel ? `${resolvedModel.provider}:${resolvedModel.model}` : "";
   const reasoningEffort = resolvedModelKey && draftReasoningModelKey === resolvedModelKey ? draftReasoningEffort : "";
   const draftVoiceSessionID = draftVoiceSession?.id;
@@ -501,8 +508,10 @@ function DraftComposer({
     staleTime: 30_000,
   });
   const draftVoiceBindings = draftVoiceBindingsQuery.data?.bindings;
+  const draftVoiceOwnsInput = draftVoiceBindings?.inputOwner === draftVoiceSessionID;
+  const draftVoiceActiveMode: AudioInputMode = draftVoiceOwnsInput && draftVoiceBindings?.inputMode === "raw" ? "raw" : "transcribe";
   const draftVoiceInputLevel =
-    draftVoiceInputActive && draftVoiceBindings?.inputOwner === draftVoiceSessionID ? draftVoiceBindings?.inputLevel ?? 0 : 0;
+    draftVoiceInputActive && draftVoiceOwnsInput ? draftVoiceBindings?.inputLevel ?? 0 : 0;
   const draftVoiceHasInput = useOverlayStore((state) => {
     if (!draftVoiceSessionID) {
       return false;
@@ -565,7 +574,7 @@ function DraftComposer({
   );
 
   const draftVoiceInputMutation = useMutation({
-    mutationFn: async (enabled: boolean) => {
+    mutationFn: async ({ enabled, mode }: { enabled: boolean; mode: AudioInputMode; keepActiveOnError?: boolean }) => {
       const current = draftVoiceSessionRef.current;
       if (!enabled) {
         setDraftVoiceInputActive(false);
@@ -573,7 +582,7 @@ function DraftComposer({
         if (!current) {
           return null;
         }
-        const result = await bindAudioInput(token, current.id, false);
+        const result = await bindAudioInput(token, current.id, false, mode);
         queryClient.setQueryData(queryKeys.audioBindings(), { bindings: result.bindings });
         if (!draftVoiceOutputActiveRef.current) {
           await cleanupDraftVoiceSession(current.id);
@@ -603,7 +612,7 @@ function DraftComposer({
       }
       draftVoiceInputActiveRef.current = true;
       setDraftVoiceInputActive(true);
-      const result = await bindAudioInput(token, created.id, true);
+      const result = await bindAudioInput(token, created.id, true, mode);
       queryClient.setQueryData(queryKeys.audioBindings(), { bindings: result.bindings });
       if (draftVoiceOutputActiveRef.current) {
         const outputResult = await bindAudioOutput(token, created.id, true);
@@ -612,8 +621,8 @@ function DraftComposer({
       await queryClient.invalidateQueries({ queryKey: queryKeys.audioBindings() });
       return created;
     },
-    onError: (error, enabled) => {
-      if (enabled) {
+    onError: (error, change) => {
+      if (change.enabled && !change.keepActiveOnError) {
         draftVoiceInputActiveRef.current = false;
         setDraftVoiceInputActive(false);
         const current = draftVoiceSessionRef.current;
@@ -629,16 +638,86 @@ function DraftComposer({
         submitFailed: t("voice.inputFailed"),
         turnRunning: t("composer.turnRunning"),
       });
-      toast.error(failure.message);
+      toast.error(audioAPIErrorMessage(error, failure.message, t));
     },
   });
-  const handleDraftVoiceInputClick = useCallback(() => {
-    if (!draftVoiceInputActiveRef.current && !modelReady) {
+  const draftVoiceDisplayMode: AudioInputMode =
+    draftVoiceInputMutation.isPending && draftVoiceInputMutation.variables?.enabled === true
+      ? draftVoiceInputMutation.variables.mode
+      : draftVoiceInputActive && draftVoiceOwnsInput && draftVoiceBindings?.inputMode
+        ? draftVoiceActiveMode
+        : draftVoiceSelectedMode;
+  const openDraftVoiceInput = useCallback(async (mode: AudioInputMode) => {
+    setDraftVoiceRuntimeChecking(true);
+    try {
+      const status = await queryClient.fetchQuery({
+        queryKey: queryKeys.audioRuntime(),
+        queryFn: () => getAudioRuntime(token),
+        staleTime: 0,
+      });
+      queryClient.setQueryData(queryKeys.audioRuntime(), status);
+      if (status.disabled) {
+        toast.error(t("voice.runtimeDisabled"));
+        return;
+      }
+      if (!status.installed) {
+        setDraftVoiceRuntimeMode(mode);
+        setDraftVoiceRuntimeDialogOpen(true);
+        return;
+      }
+      draftVoiceInputMutation.mutate({ enabled: true, mode });
+    } catch (error) {
+      toast.error(audioAPIErrorMessage(error, t("voice.inputFailed"), t));
+    } finally {
+      setDraftVoiceRuntimeChecking(false);
+    }
+  }, [draftVoiceInputMutation, queryClient, t, token]);
+  const handleDraftVoiceInputModeClick = useCallback((mode: AudioInputMode) => {
+    const currentlyActive = draftVoiceInputActiveRef.current;
+    if (!currentlyActive && !modelReady) {
       toast.error(t("composer.noModel"));
       return;
     }
-    draftVoiceInputMutation.mutate(!draftVoiceInputActiveRef.current);
-  }, [draftVoiceInputMutation, modelReady, t]);
+    const currentMode = draftVoiceOwnsInput && draftVoiceBindings?.inputMode ? draftVoiceActiveMode : draftVoiceSelectedMode;
+    setDraftVoiceSelectedMode(mode);
+    if (currentlyActive) {
+      const enabled = currentMode !== mode;
+      draftVoiceInputMutation.mutate({ enabled, mode, keepActiveOnError: enabled });
+      return;
+    }
+    void openDraftVoiceInput(mode);
+  }, [draftVoiceActiveMode, draftVoiceBindings?.inputMode, draftVoiceInputMutation, draftVoiceOwnsInput, draftVoiceSelectedMode, modelReady, openDraftVoiceInput, t]);
+  useEffect(() => {
+    if (
+      !draftVoiceInputActive ||
+      !draftVoiceBindings ||
+      draftVoiceBindings.inputOwner !== draftVoiceSessionID ||
+      !draftVoiceBindings.inputMode ||
+      draftVoiceInputMutation.isPending
+    ) {
+      return;
+    }
+    setDraftVoiceSelectedMode(draftVoiceActiveMode);
+  }, [
+    draftVoiceActiveMode,
+    draftVoiceBindings?.inputMode,
+    draftVoiceBindings?.inputOwner,
+    draftVoiceInputActive,
+    draftVoiceInputMutation.isPending,
+    draftVoiceSessionID,
+  ]);
+  useEffect(() => {
+    if (audioInputSupported !== false || draftVoiceSelectedMode === "transcribe") {
+      return;
+    }
+    setDraftVoiceSelectedMode("transcribe");
+  }, [audioInputSupported, draftVoiceSelectedMode]);
+  useEffect(() => {
+    if (!draftVoiceInputActive || draftVoiceActiveMode !== "raw" || audioInputSupported !== false || draftVoiceInputMutation.isPending) {
+      return;
+    }
+    draftVoiceInputMutation.mutate({ enabled: true, mode: "transcribe", keepActiveOnError: true });
+  }, [audioInputSupported, draftVoiceActiveMode, draftVoiceInputActive, draftVoiceInputMutation]);
   const handleDraftVoiceOutputClick = useCallback(() => {
     const nextActive = !draftVoiceOutputActiveRef.current;
     const current = draftVoiceSessionRef.current;
@@ -1266,16 +1345,20 @@ function DraftComposer({
                 onResolvedChange={handleResolvedModelChange}
               />
               <AudioControlButtons
+                asrInputLabel={draftVoiceInputActive && draftVoiceDisplayMode === "transcribe" ? t("voice.inputASROn") : t("voice.inputASROff")}
                 controlsLabel={t("voice.controls")}
                 inputActive={draftVoiceInputActive}
-                inputLabel={draftVoiceInputActive ? t("voice.inputOn") : t("voice.inputOff")}
+                inputMode={draftVoiceDisplayMode}
                 inputLevel={draftVoiceInputLevel}
-                inputBusy={draftVoiceInputMutation.isPending}
-                inputPending={draftVoiceInputMutation.isPending && draftVoiceInputMutation.variables === true}
+                inputBusy={draftVoiceInputMutation.isPending || draftVoiceRuntimeChecking}
+                inputPending={draftVoiceRuntimeChecking || (draftVoiceInputMutation.isPending && draftVoiceInputMutation.variables?.enabled === true)}
+                inputPendingMode={draftVoiceRuntimeChecking ? draftVoiceSelectedMode : draftVoiceInputMutation.variables?.mode}
+                rawInputLabel={draftVoiceInputActive && draftVoiceDisplayMode === "raw" ? t("voice.inputRawOn") : t("voice.inputRawOff")}
+                rawInputSupported={audioInputSupported === true}
                 outputActive={draftVoiceOutputActive}
                 outputLabel={draftVoiceOutputActive ? t("voice.outputOn") : t("voice.outputOff")}
                 outputPending={draftVoiceOutputPending}
-                onInputClick={handleDraftVoiceInputClick}
+                onInputModeClick={handleDraftVoiceInputModeClick}
                 onOutputClick={handleDraftVoiceOutputClick}
               />
               <Tooltip>
@@ -1298,6 +1381,15 @@ function DraftComposer({
           </div>
         </ChatColumn>
       </form>
+      <AudioRuntimeInstallDialog
+        open={draftVoiceRuntimeDialogOpen}
+        token={token}
+        onOpenChange={setDraftVoiceRuntimeDialogOpen}
+        onInstalled={() => {
+          setDraftVoiceRuntimeDialogOpen(false);
+          draftVoiceInputMutation.mutate({ enabled: true, mode: draftVoiceRuntimeMode });
+        }}
+      />
       <ImageLightbox images={attachmentPreviewItems} openIndex={attachmentPreviewIndex} onOpenIndexChange={setAttachmentPreviewIndex} />
     </>
   );

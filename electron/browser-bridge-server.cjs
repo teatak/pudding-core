@@ -33,12 +33,30 @@ class BrowserBridgeServer {
   }
 
   async stop() {
+    this.browserHost.closeAll?.();
     if (!this.server) {
       return;
     }
     const server = this.server;
     this.server = null;
-    await new Promise((resolve) => server.close(resolve));
+    await new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        server.closeAllConnections?.();
+        finish();
+      }, 2_000);
+      server.close(finish);
+    });
+    this.token = "";
+    this.url = "";
   }
 
   async handle(request, response) {

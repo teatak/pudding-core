@@ -78,6 +78,37 @@ func waitTurnDone(t *testing.T, s store.Store, sessionID string) *store.Turn {
 	}
 }
 
+func TestAudioInputSupportedUsesResolvedModelCapability(t *testing.T) {
+	eng, ms, _, sessionID := newTestEngine(t)
+	ctx := context.Background()
+	supported, err := eng.AudioInputSupported(ctx, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if supported {
+		t.Fatal("model without audio capability should not support original audio input")
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		ID:          "mock",
+		DisplayName: "mock",
+		Protocol:    "openai-compatible",
+		BaseURL:     "http://127.0.0.1:11434/v1",
+		Models: []store.ProviderModel{{
+			ID:           "mock-model",
+			Capabilities: &store.ModelCaps{Audio: true},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	supported, err = eng.AudioInputSupported(ctx, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !supported {
+		t.Fatal("audio-capable model should support original audio input")
+	}
+}
+
 func TestSubmitFallsBackWhenSessionProviderDeleted(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()

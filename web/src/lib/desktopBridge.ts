@@ -4,9 +4,21 @@ type DirectoryPickerOptions = {
   title?: string;
 };
 
+export type DesktopMenuCommand = "new-session" | "search-sessions" | "settings";
+
+export type DesktopUpdateState = {
+  status: "unavailable" | "idle" | "checking" | "downloading" | "downloaded" | "installing";
+  version: string;
+  percent: number | null;
+};
+
 type ElectronDesktopBridge = {
   getDroppedFilePath?: (file: File) => string;
+  getUpdateState?: () => Promise<DesktopUpdateState>;
+  installUpdate?: () => Promise<boolean>;
+  onMenuCommand?: (listener: (command: DesktopMenuCommand) => void) => () => void;
   onOAuthConnected?: (listener: (payload: { provider?: string }) => void) => () => void;
+  onUpdateState?: (listener: (state: DesktopUpdateState) => void) => () => void;
   openExternal: (url: string) => Promise<boolean>;
   pickDirectories: (options?: DirectoryPickerOptions) => Promise<string[]>;
   setLocale?: (locale: "zh-CN" | "zh-TW" | "en") => Promise<string>;
@@ -47,6 +59,54 @@ export function onOAuthConnected(listener: (payload: { provider?: string }) => v
     return bridge.onOAuthConnected(listener);
   } catch {
     return () => {};
+  }
+}
+
+export function onDesktopMenuCommand(listener: (command: DesktopMenuCommand) => void) {
+  const bridge = desktopBridge();
+  if (!bridge?.onMenuCommand) {
+    return () => {};
+  }
+  try {
+    return bridge.onMenuCommand(listener);
+  } catch {
+    return () => {};
+  }
+}
+
+export async function getDesktopUpdateState(): Promise<DesktopUpdateState> {
+  const bridge = desktopBridge();
+  if (!bridge?.getUpdateState) {
+    return { status: "unavailable", version: "", percent: null };
+  }
+  try {
+    return await bridge.getUpdateState();
+  } catch {
+    return { status: "unavailable", version: "", percent: null };
+  }
+}
+
+export function onDesktopUpdateState(listener: (state: DesktopUpdateState) => void) {
+  const bridge = desktopBridge();
+  if (!bridge?.onUpdateState) {
+    return () => {};
+  }
+  try {
+    return bridge.onUpdateState(listener);
+  } catch {
+    return () => {};
+  }
+}
+
+export async function restartToInstallUpdate() {
+  const bridge = desktopBridge();
+  if (!bridge?.installUpdate) {
+    return false;
+  }
+  try {
+    return await bridge.installUpdate();
+  } catch {
+    return false;
   }
 }
 

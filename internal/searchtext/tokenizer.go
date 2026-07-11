@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"unicode"
@@ -98,6 +99,31 @@ func QueryTerms(text string) []string {
 		seen[term] = struct{}{}
 		out = append(out, term)
 	}
+	return out
+}
+
+// HighlightTerms keeps the longest useful query terms for result highlighting.
+func HighlightTerms(text string) []string {
+	terms := QueryTerms(text)
+	out := make([]string, 0, len(terms))
+	for i, term := range terms {
+		contained := false
+		for j, other := range terms {
+			if i == j || len([]rune(other)) <= len([]rune(term)) {
+				continue
+			}
+			if strings.Contains(other, term) {
+				contained = true
+				break
+			}
+		}
+		if !contained {
+			out = append(out, term)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return len([]rune(out[i])) > len([]rune(out[j]))
+	})
 	return out
 }
 

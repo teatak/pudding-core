@@ -88,6 +88,7 @@ import {
   type AppMCPTool,
   type AppSkillDetail,
   type AudioBindings,
+  type AudioInputMode,
   type AudioConfig,
   type AudioConfigResponse,
   type AudioRuntimeStatus,
@@ -174,7 +175,7 @@ export type SubmitPayload = z.input<typeof submitRequest>;
 export type CompactResult = z.infer<typeof compactResponse>;
 export type MobilePairing = z.infer<typeof mobilePairingResponse>;
 export type UserPrompt = z.infer<typeof userPromptResponse>;
-export type { AudioConfig, AudioConfigResponse, AudioRuntimeStatus, ClearASRRecordingsResponse };
+export type { AudioConfig, AudioConfigResponse, AudioInputMode, AudioRuntimeStatus, ClearASRRecordingsResponse };
 export type AppConnectionPayload = {
   appID: string;
   name?: string;
@@ -281,7 +282,7 @@ export function listSessions(token: string): Promise<{ sessions: Session[] }> {
 export function searchSessionMessages(
   token: string,
   body: z.infer<typeof searchSessionMessagesRequest>,
-): Promise<{ messages: Message[] }> {
+): Promise<{ messages: Message[]; matchTerms: string[] }> {
   return request(token, "/sessions/search", searchSessionMessagesResponse, {
     method: "POST",
     body: JSON.stringify(searchSessionMessagesRequest.parse(body)),
@@ -599,10 +600,11 @@ export function bindAudioInput(
   token: string,
   sessionID: string,
   enabled: boolean,
+  mode?: AudioInputMode,
 ): Promise<{ ok: boolean; bindings: AudioBindings }> {
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/audio/input`, audioBindingResponse, {
     method: "POST",
-    body: JSON.stringify(audioBindingRequest.parse({ enabled })),
+    body: JSON.stringify(audioBindingRequest.parse({ enabled, mode })),
   });
 }
 

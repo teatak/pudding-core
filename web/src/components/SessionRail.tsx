@@ -12,6 +12,7 @@ import {
   Pencil,
   Pin,
   Plus,
+  RefreshCw,
   TextCursorInput,
   MessageCirclePlus,
   Search,
@@ -92,6 +93,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useBackgroundSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
+import {
+  type DesktopUpdateState,
+  getDesktopUpdateState,
+  onDesktopMenuCommand,
+  onDesktopUpdateState,
+  restartToInstallUpdate,
+} from "@/lib/desktopBridge";
 import type { AppSearch } from "@/lib/route";
 import { openSettingsDialog } from "@/lib/settingsDialog";
 import { formatRelative } from "@/lib/time";
@@ -146,6 +154,25 @@ export function SessionRail({
   const isMobile = useIsMobile();
   const hover = useHoverPopover();
   const [searchOpen, setSearchOpen] = useState(false);
+
+  useEffect(
+    () =>
+      onDesktopMenuCommand((command) => {
+        if (command === "new-session") {
+          openNewSession();
+          return;
+        }
+        if (command === "search-sessions") {
+          openSessionSearch();
+          return;
+        }
+        if (command === "settings") {
+          hover.close();
+          openSettingsDialog();
+        }
+      }),
+    [hover, isMobile, navigate],
+  );
 
   const sessionsQuery = useQuery({
     queryKey: queryKeys.sessions(),
@@ -274,6 +301,28 @@ export function SessionRail({
     }
   }
 
+  function openSessionSearch() {
+    setSearchOpen(true);
+    hover.close();
+  }
+
+  function openNewSession() {
+    void navigate({
+      to: "/",
+      search: (prev) => {
+        const next = { ...(prev as AppSearch), draft: "1" };
+        delete next.session;
+        delete next.split;
+        delete next.view;
+        delete next.project;
+        return next;
+      },
+    });
+    if (isMobile) {
+      hover.close();
+    }
+  }
+
   function selectSession(id: string) {
     void navigate({
       to: "/",
@@ -306,31 +355,13 @@ export function SessionRail({
         deletePending={deleteMutation.isPending}
         draftProjectID={draftProjectID}
         isError={sessionsQuery.isError}
-        isLoading={sessionsQuery.isLoading || projectsQuery.isLoading}
+        isLoading={sessionsQuery.isLoading}
         projects={projects}
         selectedSessionID={selectedSessionID}
         sessions={sessions}
         token={token}
-        onSearch={() => {
-          setSearchOpen(true);
-          hover.close();
-        }}
-        onCreate={() => {
-          void navigate({
-            to: "/",
-            search: (prev) => {
-              const next = { ...(prev as AppSearch), draft: "1" };
-              delete next.session;
-              delete next.split;
-              delete next.view;
-              delete next.project;
-              return next;
-            },
-          });
-          if (isMobile) {
-            hover.close();
-          }
-        }}
+        onSearch={openSessionSearch}
+        onCreate={openNewSession}
         onDelete={(id) => deleteMutation.mutate(id)}
         onCreateProjectSession={(projectID) => {
           void navigate({
@@ -1171,6 +1202,7 @@ function RailPanel({
             ) : null}
           </SidebarContent>
           <SidebarFooter>
+            <RailUpdateButton serverTurnRunning={sessions.some((session) => session.running)} />
             <div className="flex items-center gap-1">
               <RailThemeToggle />
               <RailLanguageToggle />
@@ -1200,6 +1232,69 @@ function RailThemeToggle() {
   const [open, setOpen] = useState(false);
   useRailOverlayHold(open);
   return <ThemeToggle onOpenChange={setOpen} />;
+}
+
+function RailUpdateButton({ serverTurnRunning }: { serverTurnRunning: boolean }) {
+  const { t } = useI18n();
+  const [state, setState] = useState<DesktopUpdateState | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const runningTurns = useOverlayStore((current) => current.runningTurns);
+  const turnPhases = useOverlayStore((current) => current.turnPhases);
+
+  useEffect(() => {
+    let active = true;
+    void getDesktopUpdateState().then((next) => {
+      if (active) {
+        setState(next);
+      }
+    });
+    const unsubscribe = onDesktopUpdateState((next) => {
+      if (active) {
+        setState(next);
+      }
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
+
+  if (state?.status !== "downloaded" && state?.status !== "installing") {
+    return null;
+  }
+  const installing = state.status === "installing";
+  const hasActiveTurn =
+    serverTurnRunning ||
+    Object.values(runningTurns).some(Boolean) ||
+    Object.values(turnPhases).some((phase) => isTurnPhaseActive(phase));
+  const restart = () => void restartToInstallUpdate();
+  return (
+    <>
+      <Button
+        className="mb-1 h-9 w-full justify-start gap-2 px-2 font-normal"
+        disabled={installing}
+        title={state.version || undefined}
+        variant="secondary"
+        onClick={() => (hasActiveTurn ? setConfirmOpen(true) : restart())}
+      >
+        {installing ? <Spinner className="size-4" /> : <RefreshCw className="size-4" />}
+        <span className="truncate">{t(installing ? "update.restarting" : "update.restart")}</span>
+        {!installing ? <span className="ml-auto size-2 shrink-0 rounded-full bg-blue-500" /> : null}
+      </Button>
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("update.activeTurnTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("update.activeTurnDescription")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={restart}>{t("update.restartAnyway")}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
 }
 
 function RailLanguageToggle() {

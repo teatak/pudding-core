@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/teatak/cart/v3"
+	"github.com/teatak/pudding-core/internal/searchtext"
 	"github.com/teatak/pudding-core/internal/store"
 )
 
@@ -92,6 +93,9 @@ func (s *Server) searchSessionMessages(c *cart.Context) error {
 			break
 		}
 	}
-	c.JSON(http.StatusOK, map[string]any{"messages": messages})
+	c.JSON(http.StatusOK, map[string]any{
+		"messages":   messages,
+		"matchTerms": searchtext.HighlightTerms(query),
+	})
 	return nil
 }

@@ -49,6 +49,7 @@ mic capture -> VAD -> ASR text -> engine.Submit -> assistant delta -> TTS -> pla
 {
   "bindings": {
     "inputOwner": "sess_x",
+    "inputMode": "transcribe",
     "outputOwner": "sess_x"
   }
 }
@@ -57,12 +58,12 @@ mic capture -> VAD -> ASR text -> engine.Submit -> assistant delta -> TTS -> pla
 `POST /sessions/{id}/audio/input`:
 
 ```json
-{ "enabled": true }
+{ "enabled": true, "mode": "transcribe" }
 ```
 
 语义:
 
-- `enabled=true`:抢占 input owner。
+- `enabled=true`:抢占 input owner;`mode` 可选 `transcribe` 或 `raw`。
 - `enabled=false`:仅当当前 owner 是该 session 时释放。
 - 删除 session 时自动释放其 input/output owner。
 - 切前端 selected session 不改变 owner。

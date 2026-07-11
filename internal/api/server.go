@@ -58,7 +58,7 @@ type Server struct {
 
 type voiceController interface {
 	Snapshot() voice.Bindings
-	BindInput(sessionID string, enabled bool) (voice.Bindings, error)
+	BindInput(sessionID string, enabled bool, modes ...voice.InputMode) (voice.Bindings, error)
 	BindOutput(sessionID string, enabled bool) (voice.Bindings, error)
 	CancelSession(ctx context.Context, sessionID string) bool
 	ReleaseSession(sessionID string) voice.Bindings
@@ -1019,15 +1019,27 @@ type clearASRRecordingsResponse struct {
 }
 
 func (s *Server) clearASRRecordings(c *cart.Context) error {
-	result, err := s.store.RemoveAttachmentsByOrigin(c.Request.Context(), attachment.OriginASRAudio)
-	if err != nil {
-		return s.fail(c, err)
+	results := make([]*store.AttachmentCleanupResult, 0, 2)
+	for _, origin := range []string{attachment.OriginASRAudio, attachment.OriginVoiceAudio} {
+		result, err := s.store.RemoveAttachmentsByOrigin(c.Request.Context(), origin)
+		if err != nil {
+			return s.fail(c, err)
+		}
+		results = append(results, result)
+	}
+	attachments := make([]store.AttachmentCleanupItem, 0)
+	messages := 0
+	queuedInputs := 0
+	for _, result := range results {
+		attachments = append(attachments, result.Attachments...)
+		messages += result.MessageCount
+		queuedInputs += result.QueuedInputCount
 	}
 	deleteErrors := 0
 	if strings.TrimSpace(s.home) != "" {
 		service := attachment.NewService(s.home)
-		seen := make(map[string]bool, len(result.Attachments))
-		for _, item := range result.Attachments {
+		seen := make(map[string]bool, len(attachments))
+		for _, item := range attachments {
 			key := item.SessionID + "\x00" + item.Attachment.AttachmentKey
 			if seen[key] {
 				continue
@@ -1040,9 +1052,9 @@ func (s *Server) clearASRRecordings(c *cart.Context) error {
 	}
 	c.JSON(http.StatusOK, clearASRRecordingsResponse{
 		OK:           true,
-		Attachments:  len(result.Attachments),
-		Messages:     result.MessageCount,
-		QueuedInputs: result.QueuedInputCount,
+		Attachments:  len(attachments),
+		Messages:     messages,
+		QueuedInputs: queuedInputs,
 		DeleteErrors: deleteErrors,
 	})
 	return nil

@@ -72,12 +72,14 @@ func (s *Server) desktopAbout(c *cart.Context) error {
 
 	bindings := map[string]string{
 		"input_owner":  "—",
+		"input_mode":   "—",
 		"output_owner": "—",
 	}
 	if s.voice != nil {
 		snap := s.voice.Snapshot()
 		if snap.InputOwner != "" {
 			bindings["input_owner"] = snap.InputOwner
+			bindings["input_mode"] = string(snap.InputMode)
 		}
 		if snap.OutputOwner != "" {
 			bindings["output_owner"] = snap.OutputOwner
@@ -102,6 +104,7 @@ func (s *Server) desktopAbout(c *cart.Context) error {
 		)),
 		aboutSection("audio_bindings", "语音绑定", aboutRows(
 			"input_owner", bindings["input_owner"],
+			"input_mode", bindings["input_mode"],
 			"output_owner", bindings["output_owner"],
 		)),
 		aboutSection("audio_config", "语音配置文件", aboutRows(

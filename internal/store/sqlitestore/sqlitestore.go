@@ -263,7 +263,7 @@ func (s *Store) ListProjects(ctx context.Context) ([]*store.Project, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*store.Project
+	out := make([]*store.Project, 0)
 	for rows.Next() {
 		project, err := scanProject(rows)
 		if err != nil {

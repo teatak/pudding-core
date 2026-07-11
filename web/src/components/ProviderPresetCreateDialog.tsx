@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { NeutralRadioGroup, NeutralRadioGroupItem } from "@/components/NeutralRadioGroup";
 import { useI18n } from "@/i18n";
 import { openExternalURL } from "@/lib/desktopBridge";
 import { cn } from "@/lib/utils";
@@ -41,7 +41,7 @@ import {
   type ProviderPresetVariant,
 } from "@/provider/presets";
 
-const providerOptionSelectedClass = "border-primary/45 bg-primary/10 text-foreground";
+const providerOptionSelectedClass = "border-foreground/20 bg-accent text-foreground";
 const providerOptionIdleClass = "bg-transparent text-muted-foreground hover:bg-transparent";
 
 export function ProviderPresetGrid({
@@ -328,22 +328,22 @@ function VariantListPicker({
   return (
     <div className="grid gap-2">
       <Label>{t("provider.accessMethod")}</Label>
-      <RadioGroup value={variantID} onValueChange={onVariantChange}>
+      <NeutralRadioGroup value={variantID} onValueChange={onVariantChange}>
         {preset.variants.map((item) => {
           const active = item.id === variant?.id;
           const id = `provider-preset-${preset.id}-${item.id}`;
           return (
-            <FieldLabel key={item.id} htmlFor={id}>
+            <FieldLabel key={item.id} className="cursor-default" htmlFor={id}>
               <Field className={cn(active ? providerOptionSelectedClass : providerOptionIdleClass)} orientation="horizontal">
                 <FieldContent>
                   <FieldTitle>{providerPresetAccessMethodLabel(preset, item, t)}</FieldTitle>
                 </FieldContent>
-                <RadioGroupItem id={id} value={item.id} />
+                <NeutralRadioGroupItem id={id} value={item.id} />
               </Field>
             </FieldLabel>
           );
         })}
-      </RadioGroup>
+      </NeutralRadioGroup>
     </div>
   );
 }
@@ -385,7 +385,7 @@ function MiMoVariantPicker({
     <div className="grid gap-3">
       <div className="grid gap-2">
         <Label>{t("provider.accessMethod")}</Label>
-        <RadioGroup
+        <NeutralRadioGroup
           className="grid gap-2"
           value={current.protocol}
           onValueChange={(value) => onVariantChange(miMoVariantID(current.plan, value as MiMoProtocol))}
@@ -394,22 +394,22 @@ function MiMoVariantPicker({
             const active = item.id === current.protocol;
             const id = `provider-preset-${preset.id}-protocol-${item.id}`;
             return (
-              <FieldLabel key={item.id} htmlFor={id}>
+              <FieldLabel key={item.id} className="cursor-default" htmlFor={id}>
                 <Field className={cn("h-full", active ? providerOptionSelectedClass : providerOptionIdleClass)} orientation="horizontal">
                   <FieldContent>
                     <FieldTitle>{item.label}</FieldTitle>
                   </FieldContent>
-                  <RadioGroupItem id={id} value={item.id} />
+                  <NeutralRadioGroupItem id={id} value={item.id} />
                 </Field>
               </FieldLabel>
             );
           })}
-        </RadioGroup>
+        </NeutralRadioGroup>
       </div>
 
       <div className="grid gap-2">
         <Label>{t("provider.endpointMode")}</Label>
-        <RadioGroup
+        <NeutralRadioGroup
           className="grid grid-cols-2 gap-2"
           value={current.plan}
           onValueChange={(value) => onVariantChange(miMoVariantID(value as MiMoPlan, current.protocol))}
@@ -418,17 +418,17 @@ function MiMoVariantPicker({
             const active = item.id === current.plan;
             const id = `provider-preset-${preset.id}-plan-${item.id}`;
             return (
-              <FieldLabel key={item.id} htmlFor={id}>
+              <FieldLabel key={item.id} className="cursor-default" htmlFor={id}>
                 <Field className={cn("h-full", active ? providerOptionSelectedClass : providerOptionIdleClass)} orientation="horizontal">
                   <FieldContent>
                     <FieldTitle>{item.label}</FieldTitle>
                   </FieldContent>
-                  <RadioGroupItem id={id} value={item.id} />
+                  <NeutralRadioGroupItem id={id} value={item.id} />
                 </Field>
               </FieldLabel>
             );
           })}
-        </RadioGroup>
+        </NeutralRadioGroup>
       </div>
     </div>
   );

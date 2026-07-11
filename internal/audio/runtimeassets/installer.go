@@ -368,8 +368,13 @@ func (i *Installer) setProgress(ev progressEvent) {
 	i.state.CurrentAsset = ev.Asset
 	i.state.AssetIndex = ev.Index
 	i.state.AssetTotal = ev.Total
-	i.state.BytesDownloaded = ev.BytesDownloaded
-	i.state.BytesTotal = ev.BytesTotal
+	if ev.Stage == "asset_start" {
+		i.state.BytesDownloaded = 0
+		i.state.BytesTotal = 0
+	} else if ev.Stage == "downloading" || ev.Stage == "downloaded" {
+		i.state.BytesDownloaded = ev.BytesDownloaded
+		i.state.BytesTotal = ev.BytesTotal
+	}
 	switch ev.Stage {
 	case "asset_start":
 		i.state.Message = "starting download"

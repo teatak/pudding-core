@@ -327,6 +327,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   });
   const mentionMenuOpen = textFocused && mentions.open && !slashMenuOpen;
   const reasoningOptions = useMemo(() => reasoningEffortOptionsForSelection(resolvedModel), [resolvedModel]);
+  const audioInputSupported = resolvedModel ? resolvedModel.modelConfig?.capabilities?.audio === true : undefined;
   const resolvedModelKey = resolvedModel ? `${resolvedModel.provider}:${resolvedModel.model}` : "";
   const reasoningEffort = resolvedModelKey && session.reasoningModelKey === resolvedModelKey ? session.reasoningEffort || "" : "";
   const setSessionReasoningEffort = useCallback(
@@ -1185,7 +1186,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
                   onResolvedChange={handleResolvedModelChange}
                 />
               </div>
-              <SessionAudioControls bindings={audioBindings} token={token} sessionID={session.id} />
+              <SessionAudioControls audioInputSupported={audioInputSupported} bindings={audioBindings} token={token} sessionID={session.id} />
               {showStopButton ? (
                 <Tooltip>
                   <TooltipTrigger asChild>

@@ -1,4 +1,4 @@
-import { Captions, Check, FileText, FolderOpen, Pause, Play, Pencil, Trash2, X } from "lucide-react";
+import { Captions, Check, FileText, FolderOpen, Mic, Pause, Play, Pencil, Trash2, X } from "lucide-react";
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
@@ -34,8 +34,8 @@ export const UserInput = memo(function UserInput({
   const [saving, setSaving] = useState(false);
   const clientMessageID = user.clientMessageID;
   const attachments = user.attachments || [];
-  const asrAudioAttachments = attachments.filter((attachment) => isAudioAttachment(attachment.mime, attachment.name) && isASRAudioAttachment(attachment));
-  const contentAttachments = attachments.filter((attachment) => !isASRAudioAttachment(attachment));
+  const voiceAudioAttachments = attachments.filter((attachment) => isAudioAttachment(attachment.mime, attachment.name) && isVoiceAudioAttachment(attachment));
+  const contentAttachments = attachments.filter((attachment) => !isVoiceAudioAttachment(attachment));
   const imageAttachments = contentAttachments.filter((attachment) => isImageAttachment(attachment.mime, attachment.name));
   const localFolders = user.localFolders || [];
   const orderedItems = orderedUserInputItems(contentAttachments, localFolders, user.parts);
@@ -47,10 +47,13 @@ export const UserInput = memo(function UserInput({
   }));
   const imagePreviewIndexByID = new Map(imagePreviewItems.map((item, index) => [item.id, index]));
   const metaText = user.text || contentAttachments.map((attachment) => attachment.name).concat(localFolders.map((folder) => folder.path)).join("\n");
-  const canEditQueued =
+  const canManageQueued =
     Boolean(clientMessageID && user.pending && (user.status === "queued" || user.status === "editing")) &&
     Boolean(onQueuedEditStart && onQueuedSave && onQueuedCancel);
-  const asrInput = isASRClientMessageID(clientMessageID);
+  const voiceAudioAttachment = !editing ? voiceAudioAttachments[0] : undefined;
+  const rawInput = isRawVoiceClientMessageID(clientMessageID) || voiceAudioAttachment?.origin === VOICE_AUDIO_ORIGIN;
+  const asrInput = isASRClientMessageID(clientMessageID) || rawInput;
+  const canEditQueued = canManageQueued && !rawInput;
 
   useEffect(() => {
     if (!editing) {
@@ -126,19 +129,24 @@ export const UserInput = memo(function UserInput({
     void revealDesktopPath(token, path).catch(() => {});
   }
 
-  const actions =
-    canEditQueued && !editing ? (
-      <>
-        <MetaIconButton label={t("transcript.editQueued")} disabled={saving} onClick={startEdit}>
-          <Pencil />
-        </MetaIconButton>
-        <MetaIconButton label={t("transcript.cancelQueued")} disabled={saving} onClick={cancelQueued}>
-          {saving ? <Spinner /> : <Trash2 />}
-        </MetaIconButton>
-      </>
-    ) : null;
-  const asrAudioAttachment = !editing ? asrAudioAttachments[0] : undefined;
-  const showASRIndicator = asrInput || Boolean(asrAudioAttachment);
+  const actions = !editing ? (
+    <>
+      {voiceAudioAttachment ? <VoiceAudioPlaybackButton attachment={voiceAudioAttachment} token={token} /> : null}
+      {canManageQueued ? (
+        <>
+          {canEditQueued ? (
+            <MetaIconButton label={t("transcript.editQueued")} disabled={saving} onClick={startEdit}>
+              <Pencil />
+            </MetaIconButton>
+          ) : null}
+          <MetaIconButton label={t("transcript.cancelQueued")} disabled={saving} onClick={cancelQueued}>
+            {saving ? <Spinner /> : <Trash2 />}
+          </MetaIconButton>
+        </>
+      ) : null}
+    </>
+  ) : null;
+  const showASRIndicator = asrInput || Boolean(voiceAudioAttachment);
 
   return (
     <>
@@ -215,7 +223,7 @@ export const UserInput = memo(function UserInput({
                 ) : null}
                 {user.text || showASRIndicator ? (
                   <div className="min-w-0 max-w-full [overflow-wrap:anywhere]">
-                    {showASRIndicator ? <ASRIndicator attachment={asrAudioAttachment} token={token} /> : null}
+                    {showASRIndicator ? <ASRIndicator rawInput={rawInput} /> : null}
                     {user.text}
                   </div>
                 ) : null}
@@ -235,14 +243,19 @@ function isASRClientMessageID(clientMessageID: string | undefined) {
   return Boolean(clientMessageID?.startsWith("audmsg"));
 }
 
+function isRawVoiceClientMessageID(clientMessageID: string | undefined) {
+  return Boolean(clientMessageID?.startsWith("voicemsg"));
+}
+
 type UserAttachment = NonNullable<UserInputVM["attachments"]>[number];
 type UserLocalFolder = NonNullable<UserInputVM["localFolders"]>[number];
 type OrderedUserItem = { type: "attachment"; item: UserAttachment } | { type: "local_folder"; item: UserLocalFolder };
 
 const ASR_AUDIO_ORIGIN = "asr_audio";
+const VOICE_AUDIO_ORIGIN = "voice_audio";
 
-function isASRAudioAttachment(attachment: UserAttachment) {
-  return attachment.origin === ASR_AUDIO_ORIGIN;
+function isVoiceAudioAttachment(attachment: UserAttachment) {
+  return attachment.origin === ASR_AUDIO_ORIGIN || attachment.origin === VOICE_AUDIO_ORIGIN;
 }
 
 function orderedUserInputItems(attachments: UserAttachment[], localFolders: UserLocalFolder[], parts: UserInputVM["parts"]): OrderedUserItem[] {
@@ -352,53 +365,50 @@ function AudioAttachmentCard({ attachment, token }: { attachment: UserAttachment
   );
 }
 
-function ASRIndicator({ attachment, token }: { attachment?: UserAttachment; token: string }) {
+function ASRIndicator({ rawInput }: { rawInput: boolean }) {
   const { t } = useI18n();
-  const src = attachment ? attachmentResourceURL(attachment, token) : "";
+  const label = rawInput ? t("transcript.rawTranscript") : t("transcript.asrInput");
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span aria-label={label} className="mr-1 inline-flex align-[-0.15em] text-muted-foreground" role="img">
+          {rawInput ? (
+            <Mic aria-hidden="true" className="size-3.5" strokeWidth={1.8} />
+          ) : (
+            <Captions aria-hidden="true" className="size-3.5" strokeWidth={1.8} />
+          )}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function VoiceAudioPlaybackButton({ attachment, token }: { attachment: UserAttachment; token: string }) {
+  const { t } = useI18n();
+  const src = attachmentResourceURL(attachment, token);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
-  const label = attachment ? t("transcript.asrAudio") : t("transcript.asrInput");
-  const title = attachment ? `${label} · ${attachment.name}${attachment.size ? ` · ${formatAttachmentSize(attachment.size)}` : ""}` : label;
-  if (!attachment) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span aria-label={title} className="mr-1 inline-flex align-[-0.15em] text-muted-foreground" role="img">
-            <Captions aria-hidden="true" className="size-3.5" strokeWidth={1.8} />
-          </span>
-        </TooltipTrigger>
-        <TooltipContent>{title}</TooltipContent>
-      </Tooltip>
-    );
-  }
+  const label = playing ? t("transcript.pauseOriginalAudio") : t("transcript.playOriginalAudio");
   return (
     <>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            aria-label={title}
-            className="mr-1 inline-grid size-5 place-items-center align-[-0.2em] text-muted-foreground transition-colors hover:text-foreground"
-            disabled={!src}
-            type="button"
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              const audio = audioRef.current;
-              if (!audio) {
-                return;
-              }
-              if (audio.paused) {
-                void audio.play();
-              } else {
-                audio.pause();
-              }
-            }}
-          >
-            {playing ? <Pause className="size-3.5" fill="currentColor" strokeWidth={1.8} /> : <Play className="size-3.5" fill="currentColor" strokeWidth={1.8} />}
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>{title}</TooltipContent>
-      </Tooltip>
+      <MetaIconButton
+        disabled={!src}
+        label={label}
+        onClick={() => {
+          const audio = audioRef.current;
+          if (!audio) {
+            return;
+          }
+          if (audio.paused) {
+            void audio.play();
+          } else {
+            audio.pause();
+          }
+        }}
+      >
+        {playing ? <Pause fill="currentColor" /> : <Play fill="currentColor" />}
+      </MetaIconButton>
       {src ? (
         <audio
           ref={audioRef}

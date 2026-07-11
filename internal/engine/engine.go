@@ -192,6 +192,18 @@ type SessionUsageInfo struct {
 	UpdatedAt                       time.Time `json:"updatedAt,omitempty"`
 }
 
+func (e *Engine) AudioInputSupported(ctx context.Context, sessionID string) (bool, error) {
+	sess, err := e.store.GetSession(ctx, strings.TrimSpace(sessionID))
+	if err != nil {
+		return false, err
+	}
+	resolved, err := e.resolveModel(ctx, sess)
+	if err != nil {
+		return false, err
+	}
+	return resolved.config.Capabilities != nil && resolved.config.Capabilities.Audio, nil
+}
+
 type resolvedModel struct {
 	providerName  string
 	providerBrand string

@@ -301,6 +301,7 @@ export const searchSessionMessagesRequest = z.object({
 
 export const searchSessionMessagesResponse = z.object({
   messages: z.array(message),
+  matchTerms: z.array(z.string()),
 });
 
 export const conversationTurn = z.object({
@@ -434,14 +435,17 @@ export const dailyUsageStat = z.object({
 export type DailyUsageStat = z.infer<typeof dailyUsageStat>;
 export const dailyUsageResponse = z.object({ days: z.array(dailyUsageStat) });
 
+export const audioInputMode = z.enum(["transcribe", "raw"]);
+export type AudioInputMode = z.infer<typeof audioInputMode>;
 export const audioBindings = z.object({
   inputOwner: z.string(),
+  inputMode: z.union([audioInputMode, z.literal("")]).default(""),
   outputOwner: z.string(),
   inputLevel: z.number().default(0),
 });
 export type AudioBindings = z.infer<typeof audioBindings>;
 export const audioBindingsResponse = z.object({ bindings: audioBindings });
-export const audioBindingRequest = z.object({ enabled: z.boolean() });
+export const audioBindingRequest = z.object({ enabled: z.boolean(), mode: audioInputMode.optional() });
 export const audioBindingResponse = z.object({
   ok: z.boolean(),
   bindings: audioBindings,

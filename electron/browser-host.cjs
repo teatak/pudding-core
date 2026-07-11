@@ -220,6 +220,12 @@ class BrowserHost {
     return lost;
   }
 
+  closeAll() {
+    for (const slot of Array.from(this.slots.values())) {
+      this.destroySlot(slot);
+    }
+  }
+
   destroySlot(slot) {
     slot.disposed = true;
     this.slots.delete(slot.key);

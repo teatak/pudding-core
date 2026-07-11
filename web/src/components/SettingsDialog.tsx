@@ -1118,7 +1118,7 @@ function voiceRuntimeReadOnlyRows(sections: DesktopAboutSection[], path: string,
   ];
   rows.push(...voiceSectionReadOnlyRows(sections, "driver", ["capture_sample_rate", "playback_sample_rate", "channels", "period_millis"]));
   rows.push(...voiceSectionReadOnlyRows(sections, "health", ["capture", "playback"]));
-  rows.push(...voiceSectionReadOnlyRows(sections, "audio_bindings", ["input_owner", "output_owner"]));
+  rows.push(...voiceSectionReadOnlyRows(sections, "audio_bindings", ["input_owner", "input_mode", "output_owner"]));
   return rows;
 }
 

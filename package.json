@@ -1,0 +1,19 @@
+{
+  "name": "pudding",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pudding desktop application",
+  "author": "teatak",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "desktop:package": "electron-builder --config packaging/electron-builder.config.cjs --publish never",
+    "desktop:publish": "electron-builder --config packaging/electron-builder.config.cjs --publish always",
+    "test:electron": "node --test electron/test/*.test.cjs"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "electron-builder": "^26.15.3"
+  }
+}

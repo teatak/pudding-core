@@ -419,6 +419,77 @@ func TestBuildSkipsASRAudioAttachment(t *testing.T) {
 	}
 }
 
+func TestBuildUsesVoiceAudioInsteadOfTranscriptWhenSupported(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	home := t.TempDir()
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := attachment.NewService(home).StoreReader("s1", "voice.wav", "audio/wav", bytes.NewReader([]byte("voice bytes")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored.Origin = attachment.OriginVoiceAudio
+	stored.AudioTranscript = "只用于回显"
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "s1",
+		TurnID:          "t1",
+		UserMessageID:   "m1",
+		ClientMessageID: "voicemsg_test",
+		UserText:        "只用于回显",
+		UserParts:       []store.ContentPart{store.AttachmentPart(stored)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req, err := New(ms, nil, WithAttachmentHome(home)).Build(ctx, "s1", "m", string(store.ModeChat), provider.ModelConfig{
+		Capabilities: &provider.ModelCapabilities{Audio: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 1 || req.Messages[0].Text != "" || len(req.Messages[0].Parts) != 1 || req.Messages[0].Parts[0].Type != provider.PartAudio {
+		t.Fatalf("voice input should contain only original audio: %+v", req.Messages)
+	}
+	if string(req.Messages[0].Parts[0].Data) != "voice bytes" {
+		t.Fatalf("unexpected voice bytes: %q", req.Messages[0].Parts[0].Data)
+	}
+}
+
+func TestBuildFallsBackToVoiceTranscriptWhenAudioUnsupported(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	home := t.TempDir()
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := attachment.NewService(home).StoreReader("s1", "voice.wav", "audio/wav", bytes.NewReader([]byte("voice bytes")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored.Origin = attachment.OriginVoiceAudio
+	stored.AudioTranscript = "降级文字"
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "s1",
+		TurnID:          "t1",
+		UserMessageID:   "m1",
+		ClientMessageID: "voicemsg_test",
+		UserText:        "降级文字",
+		UserParts:       []store.ContentPart{store.AttachmentPart(stored)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req, err := New(ms, nil, WithAttachmentHome(home)).Build(ctx, "s1", "m", string(store.ModeChat), provider.ModelConfig{
+		Capabilities: &provider.ModelCapabilities{Audio: false},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 1 || len(req.Messages[0].Parts) != 1 || req.Messages[0].Parts[0].Type != provider.PartText || req.Messages[0].Parts[0].Text != "降级文字" {
+		t.Fatalf("unsupported voice input should use ASR transcript: %+v", req.Messages)
+	}
+}
+
 func TestBuildFallsBackWhenAudioUnsupported(t *testing.T) {
 	ms := memstore.New()
 	ctx := context.Background()

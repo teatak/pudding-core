@@ -220,6 +220,16 @@ func (staticPrompt) Prompt(_ context.Context, mode string) (prompt.Output, error
 
 func (b *Builder) providerParts(sessionID string, parts []store.ContentPart, mode store.AgentMode, cfg provider.ModelConfig) []provider.Part {
 	out := make([]provider.Part, 0, len(parts))
+	voiceAudioInline := false
+	for _, part := range parts {
+		if part.Type != store.ContentPartAttachment || part.Origin != attachment.OriginVoiceAudio {
+			continue
+		}
+		if _, ok := b.audioProviderPart(sessionID, part, cfg); ok {
+			voiceAudioInline = true
+			break
+		}
+	}
 	localFolders := make([]store.LocalFolder, 0)
 	flushLocalFolders := func() {
 		if text := localFoldersProviderText(localFolders); text != "" {
@@ -231,7 +241,7 @@ func (b *Builder) providerParts(sessionID string, parts []store.ContentPart, mod
 		switch part.Type {
 		case store.ContentPartText:
 			flushLocalFolders()
-			if part.Text != "" {
+			if part.Text != "" && !voiceAudioInline {
 				out = append(out, provider.Part{Type: provider.PartText, Text: part.Text})
 			}
 		case store.ContentPartThought:
@@ -264,6 +274,14 @@ func (b *Builder) providerParts(sessionID string, parts []store.ContentPart, mod
 				continue
 			}
 			flushLocalFolders()
+			if part.Origin == attachment.OriginVoiceAudio {
+				if voiceAudioInline {
+					if audioPart, ok := b.audioProviderPart(sessionID, part, cfg); ok {
+						out = append(out, audioPart)
+					}
+				}
+				continue
+			}
 			toolPath := b.attachmentToolPath(sessionID, part)
 			if imagePart, ok := b.imageProviderPart(sessionID, part, cfg); ok {
 				if text := attachmentProviderText(part, toolPath, "image"); text != "" {

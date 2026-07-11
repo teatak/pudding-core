@@ -43,7 +43,7 @@ import {
   PopoverHeader,
   PopoverTitle,
 } from "@/components/ui/popover";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { NeutralRadioGroup, NeutralRadioGroupItem } from "@/components/NeutralRadioGroup";
 import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { useI18n } from "@/i18n";
@@ -68,6 +68,7 @@ const BASE_REASONING_EFFORT_OPTIONS = ["auto", "low", "medium", "high"];
 const OPENAI_REASONING_EFFORT_OPTIONS = [...BASE_REASONING_EFFORT_OPTIONS, "xhigh"];
 const optionSelectedClass = "border-primary/45 bg-primary/10 text-foreground";
 const optionIdleClass = "bg-transparent text-muted-foreground hover:bg-transparent";
+const radioOptionSelectedClass = "border-foreground/20 bg-accent text-foreground";
 
 const modelFormSchema = z.object({
   id: z.string().trim().min(1),
@@ -870,25 +871,25 @@ function PresetGroupSwitch({
   return (
     <Field className="gap-2 rounded-none border-0 bg-transparent p-0 hover:bg-transparent">
       <FieldLabel className="w-auto cursor-default text-sm font-medium">{t("provider.endpointMode")}</FieldLabel>
-      <RadioGroup className="grid w-full grid-cols-2 gap-2" value={group} onValueChange={onGroupChange}>
+      <NeutralRadioGroup className="grid w-full grid-cols-2 gap-2" value={group} onValueChange={onGroupChange}>
         {groups.map((item) => {
           const active = item === group;
           const id = `provider-profile-${preset.id}-group-${item}`;
           return (
-            <FieldLabel key={item} htmlFor={id}>
+            <FieldLabel key={item} className="cursor-default" htmlFor={id}>
               <Field
-                className={cn("h-9 px-3 py-2", active ? optionSelectedClass : optionIdleClass)}
+                className={cn("h-9 px-3 py-2", active ? radioOptionSelectedClass : optionIdleClass)}
                 orientation="horizontal"
               >
                 <FieldContent>
                   <FieldTitle className="font-medium">{presetGroupLabel(preset, item, t)}</FieldTitle>
                 </FieldContent>
-                <RadioGroupItem id={id} value={item} />
+                <NeutralRadioGroupItem id={id} value={item} />
               </Field>
             </FieldLabel>
           );
         })}
-      </RadioGroup>
+      </NeutralRadioGroup>
     </Field>
   );
 }

@@ -34,3 +34,17 @@ func TestQueryTermsNormalizesLetterNumberBoundaries(t *testing.T) {
 		t.Fatalf("plain terms %v != hyphenated terms %v", plain, hyphenated)
 	}
 }
+
+func TestHighlightTermsPrefersCompleteWords(t *testing.T) {
+	terms := HighlightTerms("法国比赛")
+	for _, want := range []string{"法国", "比赛"} {
+		if !slices.Contains(terms, want) {
+			t.Fatalf("HighlightTerms() = %v, missing %q", terms, want)
+		}
+	}
+	for _, unwanted := range []string{"法", "国", "比", "赛"} {
+		if slices.Contains(terms, unwanted) {
+			t.Fatalf("HighlightTerms() = %v, contains redundant %q", terms, unwanted)
+		}
+	}
+}

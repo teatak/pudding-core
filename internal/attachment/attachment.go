@@ -18,12 +18,13 @@ import (
 )
 
 const (
-	MaxUploadBytes int64 = 20 << 20
-	DraftSessionID       = "draft"
-	OriginTemp           = "temp"
-	OriginTool           = "tool"
-	OriginUpload         = "upload"
-	OriginASRAudio       = "asr_audio"
+	MaxUploadBytes   int64 = 20 << 20
+	DraftSessionID         = "draft"
+	OriginTemp             = "temp"
+	OriginTool             = "tool"
+	OriginUpload           = "upload"
+	OriginASRAudio         = "asr_audio"
+	OriginVoiceAudio       = "voice_audio"
 
 	attachmentsDirName = "attachments"
 	tempDirName        = "temp"

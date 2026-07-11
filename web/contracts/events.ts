@@ -90,6 +90,7 @@ export const audioBindingsEvent = z.object({
   kind: z.literal("audio.bindings"),
   sessionID: z.string(),
   inputOwner: z.string().default(""),
+  inputMode: z.union([z.literal(""), z.literal("transcribe"), z.literal("raw")]).default(""),
   outputOwner: z.string().default(""),
   inputLevel: z.number().default(0),
 });

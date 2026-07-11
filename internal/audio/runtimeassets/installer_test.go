@@ -173,6 +173,35 @@ func TestRuntimeErrorMessageIsGeneric(t *testing.T) {
 	}
 }
 
+func TestProgressKeepsCompletedAssetBytesDuringInstallStages(t *testing.T) {
+	installer := NewInstaller(t.TempDir(), nil)
+	installer.setProgress(progressEvent{
+		Stage:           "downloaded",
+		Asset:           "asr.tar.gz",
+		Index:           1,
+		Total:           2,
+		BytesDownloaded: 100,
+		BytesTotal:      100,
+	})
+	installer.setProgress(progressEvent{Stage: "verifying", Asset: "asr.tar.gz", Index: 1, Total: 2})
+	installer.setProgress(progressEvent{Stage: "extracting", Asset: "asr.tar.gz", Index: 1, Total: 2})
+
+	installer.mu.Lock()
+	status := installer.state
+	installer.mu.Unlock()
+	if status.BytesDownloaded != 100 || status.BytesTotal != 100 {
+		t.Fatalf("completed asset bytes were reset: %+v", status)
+	}
+
+	installer.setProgress(progressEvent{Stage: "asset_start", Asset: "vad.tar.gz", Index: 2, Total: 2})
+	installer.mu.Lock()
+	status = installer.state
+	installer.mu.Unlock()
+	if status.BytesDownloaded != 0 || status.BytesTotal != 0 {
+		t.Fatalf("next asset did not reset byte counters: %+v", status)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {

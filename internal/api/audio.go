@@ -9,7 +9,8 @@ import (
 )
 
 type audioBindingReq struct {
-	Enabled *bool `json:"enabled"`
+	Enabled *bool  `json:"enabled"`
+	Mode    string `json:"mode,omitempty"`
 }
 
 func (s *Server) getAudioBindings(c *cart.Context) error {
@@ -26,9 +27,27 @@ func (s *Server) getAudioBindings(c *cart.Context) error {
 }
 
 func (s *Server) bindAudioInput(c *cart.Context) error {
-	return s.bindAudio(c, func(sessionID string, enabled bool) (voice.Bindings, error) {
-		return s.voice.BindInput(sessionID, enabled)
-	})
+	if s.voice == nil {
+		c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "audio_unavailable"})
+		return nil
+	}
+	id, _ := c.Param("id")
+	if _, err := s.store.GetSession(c.Request.Context(), id); err != nil {
+		return s.fail(c, err)
+	}
+	var req audioBindingReq
+	if err := decode(c, &req); err != nil {
+		return badRequest(c, "invalid json body")
+	}
+	if req.Enabled == nil {
+		return badRequest(c, "enabled is required")
+	}
+	mode, err := voice.NormalizeInputMode(voice.InputMode(req.Mode))
+	if err != nil {
+		return badRequest(c, "invalid input mode")
+	}
+	bindings, err := s.voice.BindInput(id, *req.Enabled, mode)
+	return s.writeAudioBindingResult(c, bindings, err)
 }
 
 func (s *Server) bindAudioOutput(c *cart.Context) error {
@@ -54,8 +73,19 @@ func (s *Server) bindAudio(c *cart.Context, bind func(string, bool) (voice.Bindi
 		return badRequest(c, "enabled is required")
 	}
 	bindings, err := bind(id, *req.Enabled)
+	return s.writeAudioBindingResult(c, bindings, err)
+}
+
+func (s *Server) writeAudioBindingResult(c *cart.Context, bindings voice.Bindings, err error) error {
 	if errors.Is(err, voice.ErrSessionRequired) {
 		return badRequest(c, "session id is required")
+	}
+	if errors.Is(err, voice.ErrInvalidInputMode) {
+		return badRequest(c, "invalid input mode")
+	}
+	if errors.Is(err, voice.ErrRawInputUnsupported) {
+		c.JSON(http.StatusConflict, map[string]string{"error": "audio_input_unsupported"})
+		return nil
 	}
 	if errors.Is(err, voice.ErrInputUnavailable) {
 		c.JSON(http.StatusServiceUnavailable, map[string]string{

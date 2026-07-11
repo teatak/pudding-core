@@ -2,7 +2,7 @@ MODULE := github.com/teatak/pudding-core
 LDFLAGS_RELEASE := -X $(MODULE)/internal/buildinfo.channel=release
 BUILDTAGS := sqlite_fts5 webrtcaec
 
-.PHONY: test tidy clean embed language-servers language-servers-ready desktop desktop-dev desktop-release desktop-bundle daemon daemon-dev daemon-release prompt tools-report
+.PHONY: test tidy clean embed language-servers language-servers-ready desktop desktop-dev desktop-release desktop-bundle desktop-publish daemon daemon-dev daemon-release prompt tools-report
 
 # 共享:构建前端并装填进 daemon 的 embed 目录(产物不进 git)
 embed:
@@ -33,9 +33,13 @@ language-servers:
 language-servers-ready:
 	@bash scripts/prepare-language-servers.sh --ensure
 
-# macOS .app bundle(签名/公证后续补齐)
+# macOS 安装与更新产物(DMG + ZIP + latest-mac.yml;正式自动更新需要签名/公证)
 desktop-bundle: desktop-release language-servers
 	@bash scripts/desktop-bundle-macos.sh
+
+# 签名后发布到 teatak/pudding GitHub Releases(GH_TOKEN 必填)
+desktop-publish: desktop-release language-servers
+	npm run desktop:publish
 
 # —— headless daemon(无窗口,浏览器访问)——
 # 构建(dev 通道;含 embed web)

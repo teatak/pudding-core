@@ -69,6 +69,12 @@ export function SessionSearchDialog({
   });
   const matchingMessages =
     normalizedQuery && normalizedQuery === normalizedDebouncedQuery ? messageSearch.data?.messages || [] : [];
+  const responseMatchTerms =
+    normalizedQuery && normalizedQuery === normalizedDebouncedQuery ? messageSearch.data?.matchTerms : undefined;
+  const highlightTerms = useMemo(
+    () => normalizeHighlightTerms([normalizedQuery, ...searchTerms(normalizedQuery), ...(responseMatchTerms || [])]),
+    [normalizedQuery, responseMatchTerms],
+  );
   const results = useMemo(
     () => buildSearchResults(sessions, projects, matchingMessages, normalizedQuery),
     [matchingMessages, normalizedQuery, projects, sessions],
@@ -150,7 +156,7 @@ export function SessionSearchDialog({
             <div className="space-y-0.5">
               {results.map((result, index) => {
                 const active = index === activeIndex;
-                const secondary = result.message ? searchExcerpt(result.message.text, query) : "";
+                const secondary = result.message ? searchExcerpt(result.message.text, highlightTerms) : "";
                 return (
                   <button
                     key={result.session.id}
@@ -167,10 +173,15 @@ export function SessionSearchDialog({
                   >
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-medium">
-                        {result.session.title || t("session.untitled")}
+                        <HighlightedText
+                          text={result.session.title || t("session.untitled")}
+                          terms={highlightTerms}
+                        />
                       </span>
                       {secondary ? (
-                        <span className="mt-1 block truncate text-sm text-muted-foreground">{secondary}</span>
+                        <span className="mt-1 block truncate text-sm text-muted-foreground">
+                          <HighlightedText text={secondary} terms={highlightTerms} />
+                        </span>
                       ) : null}
                     </span>
                     {result.project ? (
@@ -180,7 +191,7 @@ export function SessionSearchDialog({
                           secondary && "pt-0.5",
                         )}
                       >
-                        {result.project.name}
+                        <HighlightedText text={result.project.name} terms={highlightTerms} />
                       </span>
                     ) : null}
                   </button>
@@ -271,17 +282,67 @@ function sessionActivityTime(session: Session) {
   return new Date(session.lastActivityAt || session.updatedAt || session.createdAt).getTime();
 }
 
-function searchExcerpt(text: string, query: string, maxLength = 120) {
+function searchExcerpt(text: string, terms: string[], maxLength = 120) {
   const compact = text.replace(/\s+/g, " ").trim();
   if (compact.length <= maxLength) {
     return compact;
   }
   const normalizedCompact = compact.toLocaleLowerCase();
-  const matchIndexes = searchTerms(normalizeSearchText(query))
+  const matchIndexes = terms
     .map((term) => normalizedCompact.indexOf(term))
     .filter((index) => index >= 0);
   const matchIndex = matchIndexes.length > 0 ? Math.min(...matchIndexes) : -1;
   const start = Math.max(0, matchIndex < 0 ? 0 : matchIndex - Math.floor(maxLength / 3));
   const excerpt = compact.slice(start, start + maxLength).trim();
   return `${start > 0 ? "…" : ""}${excerpt}${start + maxLength < compact.length ? "…" : ""}`;
+}
+
+function normalizeHighlightTerms(terms: string[]) {
+  return Array.from(new Set(terms.map(normalizeSearchText).filter(Boolean))).sort(
+    (left, right) => right.length - left.length,
+  );
+}
+
+function HighlightedText({ text, terms }: { text: string; terms: string[] }) {
+  const ranges = matchRanges(text, terms);
+  if (ranges.length === 0) {
+    return text;
+  }
+  const content = [];
+  let cursor = 0;
+  for (const range of ranges) {
+    if (range.start > cursor) {
+      content.push(text.slice(cursor, range.start));
+    }
+    content.push(
+      <mark
+        key={`${range.start}-${range.end}`}
+        className="rounded-[2px] bg-amber-200/80 text-inherit dark:bg-amber-400/30"
+      >
+        {text.slice(range.start, range.end)}
+      </mark>,
+    );
+    cursor = range.end;
+  }
+  if (cursor < text.length) {
+    content.push(text.slice(cursor));
+  }
+  return <>{content}</>;
+}
+
+function matchRanges(text: string, terms: string[]) {
+  const normalizedText = text.toLocaleLowerCase();
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const term of terms) {
+    let start = normalizedText.indexOf(term);
+    while (start >= 0) {
+      const candidate = { start, end: start + term.length };
+      const overlaps = ranges.some((range) => candidate.start < range.end && candidate.end > range.start);
+      if (!overlaps) {
+        ranges.push(candidate);
+      }
+      start = normalizedText.indexOf(term, start + Math.max(1, term.length));
+    }
+  }
+  return ranges.sort((left, right) => left.start - right.start);
 }

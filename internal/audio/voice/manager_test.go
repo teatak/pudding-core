@@ -9,7 +9,7 @@ func TestManagerBindsAndReleasesSessionOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bindings.InputOwner != "sess_a" || bindings.OutputOwner != "" {
+	if bindings.InputOwner != "sess_a" || bindings.InputMode != InputModeTranscribe || bindings.OutputOwner != "" {
 		t.Fatalf("unexpected input binding: %+v", bindings)
 	}
 
@@ -21,11 +21,11 @@ func TestManagerBindsAndReleasesSessionOwnership(t *testing.T) {
 		t.Fatalf("unexpected output binding: %+v", bindings)
 	}
 
-	bindings, err = m.BindInput("sess_b", true)
+	bindings, err = m.BindInput("sess_b", true, InputModeRaw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bindings.InputOwner != "sess_b" || bindings.OutputOwner != "sess_a" {
+	if bindings.InputOwner != "sess_b" || bindings.InputMode != InputModeRaw || bindings.OutputOwner != "sess_a" {
 		t.Fatalf("unexpected replacement binding: %+v", bindings)
 	}
 
@@ -43,7 +43,7 @@ func TestManagerBindsAndReleasesSessionOwnership(t *testing.T) {
 	}
 
 	bindings = m.ReleaseSession("sess_b")
-	if bindings.InputOwner != "" || bindings.OutputOwner != "" {
+	if bindings.InputOwner != "" || bindings.InputMode != "" || bindings.OutputOwner != "" {
 		t.Fatalf("release should clear final slot: %+v", bindings)
 	}
 }
@@ -55,5 +55,8 @@ func TestManagerRejectsEmptySessionID(t *testing.T) {
 	}
 	if _, err := m.BindOutput("", true); err != ErrSessionRequired {
 		t.Fatalf("BindOutput err = %v, want %v", err, ErrSessionRequired)
+	}
+	if _, err := m.BindInput("sess", true, InputMode("unknown")); err != ErrInvalidInputMode {
+		t.Fatalf("BindInput mode err = %v, want %v", err, ErrInvalidInputMode)
 	}
 }

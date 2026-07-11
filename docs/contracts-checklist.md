@@ -14,7 +14,7 @@
 | `turn.completed` | ✓ | ✓ | `assistantMessageID` |
 | `turn.failed` | ✓ | ✓ | `error`;有半截输出时 `assistantMessageID` + `interrupted` |
 | `turn.cancelled` | ✓ | ✓ | 有半截输出时 `assistantMessageID` + `interrupted` |
-| `audio.bindings` | — | — | `inputOwner`, `outputOwner`, `inputLevel`;音频 owner 快照 |
+| `audio.bindings` | — | — | `inputOwner`, `inputMode`, `outputOwner`, `inputLevel`;音频 owner 快照 |
 | `audio.input_level` | — | — | `inputLevel`;mic owner 的波形音量 |
 | `approval.requested` | — | — | `approvalID`, `approvalKind`(`capability`/`skill_draft`/`tool_call`), `title`, `reason`, `risk?`, `payload?` |
 | `approval.resolved` | — | — | `approvalID`, `approvalKind`(`capability`/`skill_draft`/`tool_call`), `status`, `reason?`, `payload?` |
@@ -56,8 +56,8 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | `DELETE /sessions/{id}` | — | 204 | 404 |
 | `POST /sessions/{id}/submit` | `{clientMessageID, text}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_running` |
 | `POST /sessions/{id}/cancel` | — | 202 `{status}` | 404 / 409 `no_running_turn` |
-| `GET /sessions/{id}/audio/bindings` | — | `{bindings: {inputOwner, outputOwner, inputLevel}}` | 404 / 503 |
-| `POST /sessions/{id}/audio/input` | `{enabled}` | 200 `{ok, bindings}` | 400 / 404 / 503 |
+| `GET /sessions/{id}/audio/bindings` | — | `{bindings: {inputOwner, inputMode, outputOwner, inputLevel}}` | 404 / 503 |
+| `POST /sessions/{id}/audio/input` | `{enabled, mode?: "transcribe" \| "raw"}` | 200 `{ok, bindings}` | 400 / 404 / 409 / 503 |
 | `POST /sessions/{id}/audio/output` | `{enabled}` | 200 `{ok, bindings}` | 400 / 404 / 503 |
 | `GET /sessions/{id}/approvals` | — | `{approvals: []}` pending approval 快照 | 404 |
 | `POST /sessions/{id}/approvals/{approvalID}/approve` | `{scope?: "turn" \| "session", projectDirs?: string[]}` | 202 `{status}` | 404 |

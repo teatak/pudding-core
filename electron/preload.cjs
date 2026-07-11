@@ -32,6 +32,18 @@ contextBridge.exposeInMainWorld("puddingElectronDesktop", {
   },
   openExternal: (url) => ipcRenderer.invoke("pudding:desktop:open-external", url),
   setLocale: (locale) => ipcRenderer.invoke("pudding:desktop:set-locale", locale),
+  getUpdateState: () => ipcRenderer.invoke("pudding:desktop:update:get-state"),
+  installUpdate: () => ipcRenderer.invoke("pudding:desktop:update:install"),
+  onUpdateState: (listener) => {
+    const wrapped = (_event, state) => listener(state);
+    ipcRenderer.on("pudding:desktop:update-state", wrapped);
+    return () => ipcRenderer.off("pudding:desktop:update-state", wrapped);
+  },
+  onMenuCommand: (listener) => {
+    const wrapped = (_event, command) => listener(command);
+    ipcRenderer.on("pudding:desktop:menu-command", wrapped);
+    return () => ipcRenderer.off("pudding:desktop:menu-command", wrapped);
+  },
   onOAuthConnected: (listener) => {
     const wrapped = (_event, payload) => listener(payload);
     ipcRenderer.on("pudding:oauth:connected", wrapped);

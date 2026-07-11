@@ -32,6 +32,7 @@ import (
 	skillsvc "github.com/teatak/pudding-core/internal/skill"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/memstore"
+	"github.com/teatak/pudding-core/internal/store/sqlitestore"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
@@ -46,6 +47,36 @@ func newTestServer(t *testing.T) (*httptest.Server, store.Store) {
 	srv := httptest.NewServer(New(eng, ms, ms, hub).WithHome(homeDir).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 	return srv, ms
+}
+
+func TestListProjectsReturnsEmptyArrayForSQLiteStore(t *testing.T) {
+	homeDir := t.TempDir()
+	st, err := sqlitestore.Open(filepath.Join(homeDir, "pudding.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	cfg := memstore.New()
+	hub := event.NewHub()
+	eng := engine.New(st, hub, registry.Static(mock.New()), cfg, engine.WithAttachmentHome(homeDir))
+	handler := New(eng, st, cfg, hub).WithHome(homeDir).Handler(testToken, nil)
+	req := httptest.NewRequest(http.MethodGet, "/projects", nil)
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d", recorder.Code)
+	}
+	payload := struct {
+		Projects json.RawMessage `json:"projects"`
+	}{}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if string(payload.Projects) != "[]" {
+		t.Fatalf("projects = %s, want []", payload.Projects)
+	}
 }
 
 func newConfigTestServer(t *testing.T) (*httptest.Server, store.Store, *config.Manager) {
@@ -111,9 +142,9 @@ func TestAudioBindingsAreSessionScoped(t *testing.T) {
 		t.Fatalf("bind output response status=%d body=%+v", resp.StatusCode, bound)
 	}
 
-	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_b/audio/input", map[string]bool{"enabled": true})
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_b/audio/input", map[string]any{"enabled": true, "mode": "raw"})
 	bound = decodeJSON[bindPayload](t, resp)
-	if resp.StatusCode != http.StatusOK || bound.Bindings.InputOwner != "sess_b" || bound.Bindings.OutputOwner != "sess_a" {
+	if resp.StatusCode != http.StatusOK || bound.Bindings.InputOwner != "sess_b" || bound.Bindings.InputMode != voice.InputModeRaw || bound.Bindings.OutputOwner != "sess_a" {
 		t.Fatalf("replace input response status=%d body=%+v", resp.StatusCode, bound)
 	}
 
@@ -179,7 +210,7 @@ func (c *failingVoiceController) Snapshot() voice.Bindings {
 	return voice.Bindings{}
 }
 
-func (c *failingVoiceController) BindInput(string, bool) (voice.Bindings, error) {
+func (c *failingVoiceController) BindInput(string, bool, ...voice.InputMode) (voice.Bindings, error) {
 	return voice.Bindings{}, c.inputErr
 }
 
@@ -2081,6 +2112,10 @@ func TestListMessagesPagination(t *testing.T) {
 }
 
 func TestSearchSessionMessagesUsesExplicitScope(t *testing.T) {
+	type searchResponse struct {
+		Messages   []store.Message `json:"messages"`
+		MatchTerms []string        `json:"matchTerms"`
+	}
 	srv, st := newTestServer(t)
 	ctx := context.Background()
 	for _, sessionID := range []string{"sess_search_a", "sess_search_b"} {
@@ -2098,14 +2133,15 @@ func TestSearchSessionMessagesUsesExplicitScope(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("want 200, got %d", resp.StatusCode)
 	}
-	result := decodeJSON[struct {
-		Messages []store.Message `json:"messages"`
-	}](t, resp)
+	result := decodeJSON[searchResponse](t, resp)
 	if len(result.Messages) != 1 {
 		t.Fatalf("unexpected search hits: %+v", result.Messages)
 	}
 	if result.Messages[0].SessionID != "sess_search_a" || result.Messages[0].Role != store.RoleAssistant {
 		t.Fatalf("search escaped explicit scope: %+v", result.Messages[0])
+	}
+	if len(result.MatchTerms) != 1 || result.MatchTerms[0] != "assistant" {
+		t.Fatalf("unexpected search highlight terms: %+v", result.MatchTerms)
 	}
 
 	if err := st.CreateSession(ctx, &store.Session{ID: "sess_search_cjk", Provider: "mock", Model: "mock"}); err != nil {
@@ -2124,9 +2160,7 @@ func TestSearchSessionMessagesUsesExplicitScope(t *testing.T) {
 		"sessionIDs": []string{"sess_search_cjk"},
 		"query":      "法国",
 	})
-	result = decodeJSON[struct {
-		Messages []store.Message `json:"messages"`
-	}](t, resp)
+	result = decodeJSON[searchResponse](t, resp)
 	if len(result.Messages) != 1 || result.Messages[0].ID != "msg_search_cjk" {
 		t.Fatalf("short CJK search failed: %+v", result.Messages)
 	}

@@ -56,12 +56,13 @@ type Client struct {
 	decodeMu sync.Mutex
 
 	events chan asr.Event
-	segs   chan []float32
+	segs   chan segment
 
 	history        *sampleRing
 	prerollSamples int
 	vadSpeech      bool
 	pendingPreroll []float32
+	streamID       string
 
 	started atomic.Bool
 	stopped atomic.Bool
@@ -70,6 +71,11 @@ type Client struct {
 	stopCh chan struct{}
 
 	droppedSegs atomic.Uint64
+}
+
+type segment struct {
+	samples  []float32
+	streamID string
 }
 
 func New(cfg Config) (*Client, error) {
@@ -81,7 +87,7 @@ func New(cfg Config) (*Client, error) {
 	return &Client{
 		cfg:            cfg,
 		events:         make(chan asr.Event, defaultEventBuf),
-		segs:           make(chan []float32, defaultSegQueueSize),
+		segs:           make(chan segment, defaultSegQueueSize),
 		history:        newSampleRing(historySamples),
 		prerollSamples: prerollSamples,
 		stopCh:         make(chan struct{}),
@@ -179,8 +185,9 @@ func (c *Client) Feed(_ context.Context, f frame.PCM16) error {
 			continue
 		}
 		samples := c.samplesWithPreroll(seg)
+		job := segment{samples: samples, streamID: c.streamID}
 		select {
-		case c.segs <- samples:
+		case c.segs <- job:
 			slog.Debug("sherpa asr: vad segment queued", "samples", len(samples), "prerollSamples", len(samples)-len(seg.Samples), "segmentStart", seg.Start)
 		default:
 			dropped := c.droppedSegs.Add(1)
@@ -190,6 +197,36 @@ func (c *Client) Feed(_ context.Context, f frame.PCM16) error {
 	}
 	c.vadMu.Unlock()
 	return nil
+}
+
+func (c *Client) ResetStream(ctx context.Context, streamID string) error {
+	if !c.started.Load() || c.stopped.Load() {
+		return errors.New("sherpa asr: not started")
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	c.vadMu.Lock()
+	defer c.vadMu.Unlock()
+	if c.vad == nil {
+		return errors.New("sherpa asr: VAD unavailable")
+	}
+	c.vad.Reset()
+	c.vadSpeech = false
+	c.pendingPreroll = nil
+	c.streamID = streamID
+	if c.history != nil {
+		c.history.Reset()
+	}
+	for {
+		select {
+		case <-c.segs:
+		default:
+			return nil
+		}
+	}
 }
 
 func (c *Client) samplesWithPreroll(seg *sherpaonnx.SpeechSegment) []float32 {
@@ -246,13 +283,14 @@ func (c *Client) decodeLoop() {
 		select {
 		case <-c.stopCh:
 			return
-		case samples := <-c.segs:
-			c.decodeSegment(samples)
+		case job := <-c.segs:
+			c.decodeSegment(job)
 		}
 	}
 }
 
-func (c *Client) decodeSegment(samples []float32) {
+func (c *Client) decodeSegment(job segment) {
+	samples := job.samples
 	start := time.Now()
 	result := c.decodeSamples(samples)
 	elapsed := time.Since(start)
@@ -262,6 +300,7 @@ func (c *Client) decodeSegment(samples []float32) {
 	audioDur := time.Duration(float64(len(samples)) / float64(expectedSampleRate) * float64(time.Second))
 	ev := asr.Event{
 		Kind:           asr.EventSentence,
+		StreamID:       job.streamID,
 		Text:           strings.TrimSpace(result.Text),
 		Language:       stripSenseVoiceTag(result.Lang),
 		Emotion:        stripSenseVoiceTag(result.Emotion),
@@ -406,6 +445,16 @@ func (r *sampleRing) Append(samples []float32) {
 		}
 		r.next++
 	}
+}
+
+func (r *sampleRing) Reset() {
+	if r == nil {
+		return
+	}
+	r.start = 0
+	r.length = 0
+	r.base = 0
+	r.next = 0
 }
 
 func (r *sampleRing) Tail(maxSamples int) []float32 {

@@ -28,9 +28,10 @@ import (
 )
 
 var (
-	ErrNoInputBinding   = errors.New("voice: session does not own audio input")
-	ErrInputUnavailable = errors.New("voice: input backend unavailable")
-	ErrEmptySentence    = errors.New("voice: empty sentence")
+	ErrNoInputBinding      = errors.New("voice: session does not own audio input")
+	ErrInputUnavailable    = errors.New("voice: input backend unavailable")
+	ErrRawInputUnsupported = errors.New("voice: current model does not support raw audio input")
+	ErrEmptySentence       = errors.New("voice: empty sentence")
 )
 
 const feedbackSuppressGrace = 1500 * time.Millisecond
@@ -39,6 +40,10 @@ const inputLevelEventInterval = 100 * time.Millisecond
 
 type Submitter interface {
 	Submit(ctx context.Context, in engine.SubmitInput) (*engine.SubmitResult, error)
+}
+
+type AudioInputCapability interface {
+	AudioInputSupported(ctx context.Context, sessionID string) (bool, error)
 }
 
 type Canceler interface {
@@ -83,6 +88,7 @@ type ServiceConfig struct {
 type Service struct {
 	manager           *Manager
 	submitter         Submitter
+	audioCapability   AudioInputCapability
 	canceler          Canceler
 	events            EventSubscriber
 	publisher         EventPublisher
@@ -98,10 +104,12 @@ type Service struct {
 	minEnergy         float64
 	playbackMinEnergy float64
 
+	inputOpMu       sync.Mutex
 	mu              sync.Mutex
 	driverReady     bool
 	asrStarted      bool
 	inputSession    string
+	inputStreamID   string
 	inputCancel     context.CancelFunc
 	asrLoopStarted  bool
 	outputCancels   map[string]context.CancelFunc
@@ -134,9 +142,11 @@ func NewService(cfg ServiceConfig) *Service {
 	if canceler == nil {
 		canceler, _ = cfg.Submitter.(Canceler)
 	}
+	audioCapability, _ := cfg.Submitter.(AudioInputCapability)
 	svc := &Service{
 		manager:           manager,
 		submitter:         cfg.Submitter,
+		audioCapability:   audioCapability,
 		canceler:          canceler,
 		events:            cfg.Events,
 		publisher:         cfg.Events,
@@ -198,6 +208,7 @@ func (s *Service) publishAudioBindings(before, after Bindings) {
 			SessionID:   sessionID,
 			Kind:        event.AudioBindings,
 			InputOwner:  after.InputOwner,
+			InputMode:   string(after.InputMode),
 			OutputOwner: after.OutputOwner,
 			InputLevel:  &level,
 		})
@@ -218,9 +229,29 @@ func audioBindingEventSessionIDs(before, after Bindings) []string {
 	return out
 }
 
-func (s *Service) BindInput(sessionID string, enabled bool) (Bindings, error) {
+func (s *Service) BindInput(sessionID string, enabled bool, modes ...InputMode) (Bindings, error) {
+	s.inputOpMu.Lock()
+	defer s.inputOpMu.Unlock()
+
+	mode := InputModeTranscribe
+	if len(modes) > 0 {
+		var err error
+		mode, err = NormalizeInputMode(modes[0])
+		if err != nil {
+			return Bindings{}, err
+		}
+	}
+	if enabled && mode == InputModeRaw && s.audioCapability != nil {
+		supported, err := s.audioCapability.AudioInputSupported(context.Background(), sessionID)
+		if err != nil {
+			return Bindings{}, err
+		}
+		if !supported {
+			return Bindings{}, ErrRawInputUnsupported
+		}
+	}
 	before := s.manager.Snapshot()
-	slog.Info("voice: input bind requested", "sessionID", sessionID, "enabled", enabled, "previousOwner", before.InputOwner)
+	slog.Info("voice: input bind requested", "sessionID", sessionID, "enabled", enabled, "mode", mode, "previousOwner", before.InputOwner)
 	if enabled {
 		if before.InputOwner != sessionID || !s.inputCaptureActive(sessionID) {
 			s.stopInput()
@@ -229,7 +260,7 @@ func (s *Service) BindInput(sessionID string, enabled bool) (Bindings, error) {
 				return Bindings{}, err
 			}
 		}
-		bindings, err := s.manager.BindInput(sessionID, true)
+		bindings, err := s.manager.BindInput(sessionID, true, mode)
 		if err == nil {
 			bindings = s.withCurrentInputLevel(bindings)
 			s.publishAudioBindings(before, bindings)
@@ -254,6 +285,8 @@ func (s *Service) ReplaceASR(next asr.Client) error {
 	if next == nil {
 		return fmt.Errorf("%w: ASR backend unavailable", ErrInputUnavailable)
 	}
+	s.inputOpMu.Lock()
+	defer s.inputOpMu.Unlock()
 	s.stopInput()
 	s.mu.Lock()
 	old := s.asr
@@ -269,7 +302,7 @@ func (s *Service) ReplaceASR(next asr.Client) error {
 
 func (s *Service) inputCaptureActive(sessionID string) bool {
 	s.mu.Lock()
-	active := s.inputSession == sessionID && s.inputCancel != nil
+	active := s.inputSession == sessionID && s.inputStreamID != "" && s.inputCancel != nil
 	driver := s.driver
 	s.mu.Unlock()
 	if !active {
@@ -304,6 +337,9 @@ func (s *Service) BindOutput(sessionID string, enabled bool) (Bindings, error) {
 }
 
 func (s *Service) ReleaseSession(sessionID string) Bindings {
+	s.inputOpMu.Lock()
+	defer s.inputOpMu.Unlock()
+
 	before := s.manager.Snapshot()
 	bindings := s.manager.ReleaseSession(sessionID)
 	if before.OutputOwner != bindings.OutputOwner && before.OutputOwner != "" {
@@ -331,10 +367,14 @@ func (s *Service) CancelSession(ctx context.Context, sessionID string) bool {
 }
 
 func (s *Service) Close() error {
+	s.inputOpMu.Lock()
+	defer s.inputOpMu.Unlock()
+
 	s.mu.Lock()
 	inputCancel := s.inputCancel
 	s.inputCancel = nil
 	s.inputSession = ""
+	s.inputStreamID = ""
 	cancels := make([]context.CancelFunc, 0, len(s.outputCancels))
 	for sessionID, cancel := range s.outputCancels {
 		cancels = append(cancels, cancel)
@@ -415,12 +455,41 @@ func (s *Service) submitSentence(ctx context.Context, sessionID, text string, ev
 	if text == "" {
 		return nil, ErrEmptySentence
 	}
-	if s.manager.Snapshot().InputOwner != sessionID {
+	bindings := s.manager.Snapshot()
+	if bindings.InputOwner != sessionID {
 		return nil, ErrNoInputBinding
+	}
+	rawInput := bindings.InputMode == InputModeRaw
+	if rawInput && s.audioCapability != nil {
+		supported, err := s.audioCapability.AudioInputSupported(ctx, sessionID)
+		if err != nil {
+			slog.Warn("voice: raw audio capability check failed; falling back to transcript", "sessionID", sessionID, "err", err)
+			rawInput = false
+			s.fallbackInputMode(sessionID)
+		} else if !supported {
+			slog.Info("voice: raw audio no longer supported; falling back to transcript", "sessionID", sessionID)
+			rawInput = false
+			s.fallbackInputMode(sessionID)
+		}
 	}
 	clientMessageID := store.NewID("audmsg")
 	parts := s.asrAudioParts(sessionID, clientMessageID, text, ev)
-	slog.Info("voice: submitting asr sentence", "sessionID", sessionID, "clientMessageID", clientMessageID, "text", previewText(text, 80))
+	if rawInput {
+		clientMessageID = store.NewID("voicemsg")
+		parts = s.voiceAudioParts(sessionID, clientMessageID, text, ev)
+		if len(parts) == 0 {
+			slog.Warn("voice: raw audio unavailable; falling back to transcript", "sessionID", sessionID, "clientMessageID", clientMessageID)
+			clientMessageID = store.NewID("audmsg")
+			parts = s.asrAudioParts(sessionID, clientMessageID, text, ev)
+			rawInput = false
+			s.fallbackInputMode(sessionID)
+		}
+	}
+	inputMode := InputModeTranscribe
+	if rawInput {
+		inputMode = InputModeRaw
+	}
+	slog.Info("voice: submitting sentence", "sessionID", sessionID, "clientMessageID", clientMessageID, "inputMode", inputMode, "text", previewText(text, 80))
 	result, err := s.submitter.Submit(ctx, engine.SubmitInput{
 		SessionID:       sessionID,
 		ClientMessageID: clientMessageID,
@@ -445,22 +514,43 @@ func (s *Service) submitSentence(ctx context.Context, sessionID, text string, ev
 	return result, nil
 }
 
+func (s *Service) fallbackInputMode(sessionID string) {
+	before := s.manager.Snapshot()
+	bindings, err := s.manager.BindInput(sessionID, true, InputModeTranscribe)
+	if err != nil {
+		return
+	}
+	bindings = s.withCurrentInputLevel(bindings)
+	s.publishAudioBindings(before, bindings)
+}
+
 func (s *Service) asrAudioParts(sessionID, clientMessageID, text string, ev asr.Event) []store.ContentPart {
-	if !s.saveAudio || strings.TrimSpace(s.homeDir) == "" || len(ev.Audio.Data) == 0 || !ev.Audio.Format.Valid() {
+	if !s.saveAudio {
+		return nil
+	}
+	return s.storeSentenceAudio(sessionID, clientMessageID, text, ev, attachment.OriginASRAudio, "asr")
+}
+
+func (s *Service) voiceAudioParts(sessionID, clientMessageID, text string, ev asr.Event) []store.ContentPart {
+	return s.storeSentenceAudio(sessionID, clientMessageID, text, ev, attachment.OriginVoiceAudio, "voice")
+}
+
+func (s *Service) storeSentenceAudio(sessionID, clientMessageID, text string, ev asr.Event, origin, namePrefix string) []store.ContentPart {
+	if strings.TrimSpace(s.homeDir) == "" || len(ev.Audio.Data) == 0 || !ev.Audio.Format.Valid() {
 		return nil
 	}
 	wav, err := wavFromPCM16(ev.Audio)
 	if err != nil {
-		slog.Warn("voice: encode asr audio failed", "sessionID", sessionID, "clientMessageID", clientMessageID, "err", err)
+		slog.Warn("voice: encode sentence audio failed", "sessionID", sessionID, "clientMessageID", clientMessageID, "err", err)
 		return nil
 	}
-	name := "asr-" + time.Now().Format("20060102-150405") + ".wav"
+	name := namePrefix + "-" + time.Now().Format("20060102-150405") + ".wav"
 	item, err := attachment.NewService(s.homeDir).StoreReader(sessionID, name, "audio/wav", bytes.NewReader(wav))
 	if err != nil {
-		slog.Warn("voice: store asr audio failed", "sessionID", sessionID, "clientMessageID", clientMessageID, "err", err)
+		slog.Warn("voice: store sentence audio failed", "sessionID", sessionID, "clientMessageID", clientMessageID, "err", err)
 		return nil
 	}
-	item.Origin = attachment.OriginASRAudio
+	item.Origin = origin
 	item.AudioTranscript = text
 	return []store.ContentPart{store.AttachmentPart(item)}
 }
@@ -541,14 +631,22 @@ func (s *Service) startInput(sessionID string) error {
 		go s.asrEventLoop(s.asr)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	streamID := store.NewID("audstream")
 	s.inputSession = sessionID
+	s.inputStreamID = streamID
 	s.inputCancel = cancel
+	client := s.asr
 	s.mu.Unlock()
 
 	s.setInputLevel(0)
-	s.resetDSP()
+	if err := resetASRStream(ctx, client, streamID); err != nil {
+		cancel()
+		s.clearInputStream(streamID)
+		return err
+	}
+	s.resetCaptureDSP()
 	if err := s.driver.StartCapture(ctx, func(pcm frame.PCM16) {
-		if s.manager.Snapshot().InputOwner != sessionID {
+		if !s.inputStreamActive(sessionID, streamID) {
 			return
 		}
 		processed, err := s.processCapture(pcm)
@@ -558,56 +656,84 @@ func (s *Service) startInput(sessionID string) error {
 		}
 		level := pcmRMSLevel(processed)
 		s.setInputLevel(level)
-		processed = s.applyCaptureEnergyGate(sessionID, processed, level)
-		if err := s.asr.Feed(ctx, processed); err != nil && !errors.Is(err, context.Canceled) {
+		if !s.inputStreamActive(sessionID, streamID) {
+			return
+		}
+		if err := client.Feed(ctx, processed); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Warn("voice: asr feed failed", "sessionID", sessionID, "err", err)
 		}
 	}); err != nil {
 		cancel()
-		s.mu.Lock()
-		s.inputCancel = nil
-		s.inputSession = ""
-		s.mu.Unlock()
+		s.clearInputStream(streamID)
 		s.setInputLevel(0)
-		s.resetDSP()
 		if stopErr := s.driver.StopCapture(context.Background()); stopErr != nil && !errors.Is(stopErr, context.Canceled) {
 			slog.Warn("voice: cleanup failed capture after start error", "sessionID", sessionID, "err", stopErr)
 		}
+		s.resetCaptureDSP()
+		if resetErr := resetASRStream(context.Background(), client, ""); resetErr != nil {
+			slog.Warn("voice: reset asr after capture start error failed", "sessionID", sessionID, "err", resetErr)
+		}
 		return err
 	}
-	slog.Info("voice: input capture started", "sessionID", sessionID, "driver", s.driver.Name(), "asr", s.asr.Name())
+	slog.Info("voice: input capture started", "sessionID", sessionID, "streamID", streamID, "driver", s.driver.Name(), "asr", client.Name())
 	return nil
 }
 
 func (s *Service) stopInput() {
 	s.mu.Lock()
 	cancel := s.inputCancel
+	streamID := s.inputStreamID
+	client := s.asr
 	s.inputCancel = nil
 	s.inputSession = ""
+	s.inputStreamID = ""
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
 	s.setInputLevel(0)
-	s.resetDSP()
 	if s.driver != nil {
-		_ = s.driver.StopCapture(context.Background())
+		if err := s.driver.StopCapture(context.Background()); err != nil && !errors.Is(err, context.Canceled) {
+			slog.Warn("voice: stop input capture failed", "streamID", streamID, "err", err)
+		}
+	}
+	if streamID != "" {
+		s.resetCaptureDSP()
+		if err := resetASRStream(context.Background(), client, ""); err != nil {
+			slog.Warn("voice: reset asr after capture stop failed", "streamID", streamID, "err", err)
+		}
 	}
 	if cancel != nil {
-		slog.Info("voice: input capture stopped")
+		slog.Info("voice: input capture stopped", "streamID", streamID)
 	}
 }
 
 func (s *Service) asrEventLoop(client asr.Client) {
 	for ev := range client.Events() {
-		owner := s.manager.Snapshot().InputOwner
-		if owner == "" {
+		owner, currentStreamID, ok := s.inputForASREvent(ev.StreamID)
+		if !ok {
+			if ev.StreamID != "" {
+				slog.Debug("voice: stale asr event dropped", "eventStreamID", ev.StreamID, "currentStreamID", currentStreamID)
+			}
 			continue
 		}
 		if ev.Kind == asr.EventSentence {
+			peakLevel := pcmPeakFrameRMSLevel(ev.Audio, 20*time.Millisecond)
+			threshold := s.captureEnergyThreshold(owner)
+			if len(ev.Audio.Data) > 0 && threshold > 0 && peakLevel < threshold {
+				slog.Info(
+					"voice: low-energy asr sentence suppressed",
+					"sessionID", owner,
+					"streamID", currentStreamID,
+					"peakLevel", peakLevel,
+					"threshold", threshold,
+				)
+				continue
+			}
 			slog.Info(
 				"voice: asr sentence received",
 				"sessionID", owner,
+				"streamID", currentStreamID,
 				"text", previewText(ev.Text, 80),
 				"language", ev.Language,
 				"audioDuration", ev.AudioDuration,
@@ -623,6 +749,43 @@ func (s *Service) asrEventLoop(client asr.Client) {
 			slog.Warn("voice: handle asr event failed", "sessionID", owner, "err", err)
 		}
 	}
+}
+
+func (s *Service) inputStreamActive(sessionID, streamID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return streamID != "" && s.inputSession == sessionID && s.inputStreamID == streamID && s.inputCancel != nil
+}
+
+func (s *Service) clearInputStream(streamID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.inputStreamID != streamID {
+		return
+	}
+	s.inputCancel = nil
+	s.inputSession = ""
+	s.inputStreamID = ""
+}
+
+func (s *Service) inputForASREvent(eventStreamID string) (string, string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.inputSession == "" || s.inputStreamID == "" || s.inputCancel == nil {
+		return "", s.inputStreamID, false
+	}
+	if eventStreamID != "" && eventStreamID != s.inputStreamID {
+		return "", s.inputStreamID, false
+	}
+	return s.inputSession, s.inputStreamID, true
+}
+
+func resetASRStream(ctx context.Context, client asr.Client, streamID string) error {
+	resetter, ok := client.(asr.StreamResetter)
+	if !ok {
+		return nil
+	}
+	return resetter.ResetStream(ctx, streamID)
 }
 
 func (s *Service) bargeInIfPlaying(ctx context.Context, sessionID string) bool {
@@ -1000,15 +1163,11 @@ func (s *Service) pushRenderReference(pcm frame.PCM16) error {
 	return s.aec.PushRender(ref)
 }
 
-func (s *Service) resetDSP() {
-	if s.aec != nil {
-		s.aec.Reset()
-	}
+func (s *Service) resetCaptureDSP() {
+	// WebRTC AEC and its render resampler must remain converged across turns.
+	// Reset only capture-local NS after PortAudio has stopped invoking callbacks.
 	if s.ns != nil {
 		s.ns.Reset()
-	}
-	if s.aecRender != nil {
-		s.aecRender.Reset()
 	}
 }
 
@@ -1034,16 +1193,6 @@ func (s *Service) setInputLevel(level float64) {
 
 func (s *Service) currentInputLevel() float64 {
 	return float64(s.inputLevel.Load()) / inputLevelScale
-}
-
-func (s *Service) applyCaptureEnergyGate(sessionID string, pcm frame.PCM16, level float64) frame.PCM16 {
-	threshold := s.captureEnergyThreshold(sessionID)
-	if threshold <= 0 || level >= threshold || len(pcm.Data) == 0 {
-		return pcm
-	}
-	out := pcm
-	out.Data = make([]byte, len(pcm.Data))
-	return out
 }
 
 func (s *Service) captureEnergyThreshold(sessionID string) float64 {
@@ -1092,6 +1241,30 @@ func pcmRMSLevel(pcm frame.PCM16) float64 {
 		sumSquares += value * value
 	}
 	return math.Sqrt(sumSquares / float64(samples))
+}
+
+func pcmPeakFrameRMSLevel(pcm frame.PCM16, window time.Duration) float64 {
+	if len(pcm.Data) < 2 || !pcm.Format.Valid() || window <= 0 {
+		return 0
+	}
+	samplesPerWindow := pcm.Format.SampleRate * pcm.Format.Channels * int(window) / int(time.Second)
+	if samplesPerWindow <= 0 {
+		return pcmRMSLevel(pcm)
+	}
+	bytesPerWindow := samplesPerWindow * 2
+	peak := 0.0
+	for offset := 0; offset < len(pcm.Data); offset += bytesPerWindow {
+		end := offset + bytesPerWindow
+		if end > len(pcm.Data) {
+			end = len(pcm.Data)
+		}
+		part := pcm
+		part.Data = pcm.Data[offset:end]
+		if level := pcmRMSLevel(part); level > peak {
+			peak = level
+		}
+	}
+	return peak
 }
 
 func clamp01(value float64) float64 {

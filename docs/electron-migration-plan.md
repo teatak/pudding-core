@@ -355,11 +355,21 @@ BrowserHost 生命周期收口审查(2026-07-09):
 - Electron 打包、签名、公证、自动更新。
 - dev/release 数据目录继续隔离。
 - crash/log 收集落本地文件。
-- 当前落点:`make desktop-bundle` 可生成基础 macOS `.app` bundle,内含 Electron shell、Tray、release daemon、daemon 启动前 dylib、Info.plist、icon、`NSMicrophoneUsageDescription` 和 `pudding://` callback scheme。
+- 当前落点:`make desktop-bundle` 通过 electron-builder 生成 macOS DMG、ZIP、blockmap 和
+  `latest-mac.yml`,包内包含 Electron shell、Tray、release daemon、daemon dylib、语言服务、
+  icon、相机/麦克风用途说明和 `pudding://` callback scheme。
 - Tray 与原生应用菜单支持简体中文、繁体中文和英文,并通过 preload IPC 跟随 Web
   语言设置实时切换;开发态 Tray 直接读取仓库 `assets/macos/TrayTemplate.png`。
-- 当前 bundle 使用 ad-hoc codesign;正式 Developer ID 签名、公证、自动更新、正式 crash/log 收集后置。
-- 2026-07-09 收尾验证:`make desktop-bundle` 成功,`codesign --verify --deep --strict` 通过,短启动 `dist/Pudding.app` 可拉起 release daemon。
+- 更新状态由 Electron main 统一管理:启动 15 秒后检查,之后每 6 小时检查;后台无更新或
+  检查失败不打扰用户,手动检查明确显示结果。更新下载完成后不弹窗,侧边栏显示“重新启动并更新”,
+  原生菜单同步变为“重新启动以更新”。
+- 显式更新会先停止 browser bridge,等待 managed daemon 优雅退出,然后调用 `quitAndInstall()`;
+  前端、daemon 和语言服务始终作为一个完整应用包更新。
+- 本地默认使用 ad-hoc codesign,可验证安装包但不能用于正式 macOS 自动更新。正式发布需通过
+  `PUDDING_MAC_IDENTITY` 配置 Developer ID 并完成公证,再用 `make desktop-publish` 上传到
+  `teatak/pudding` GitHub Releases。
+- 2026-07-11 验证:`make desktop-bundle` 成功生成 arm64 DMG/ZIP/update metadata,短启动安装包
+  可拉起 release daemon,退出后 daemon 正常关闭。
 
 验收:
 

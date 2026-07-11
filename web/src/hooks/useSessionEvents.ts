@@ -389,6 +389,7 @@ function syncAudioBindingsFromEvent(queryClient: QueryClient, event: SessionEven
     queryClient.setQueryData<{ bindings: AudioBindings }>(queryKeys.audioBindings(), {
       bindings: {
         inputOwner: event.inputOwner,
+        inputMode: event.inputMode,
         outputOwner: event.outputOwner,
         inputLevel: event.inputLevel,
       },
@@ -397,11 +398,13 @@ function syncAudioBindingsFromEvent(queryClient: QueryClient, event: SessionEven
   }
   if (event.kind === "audio.input_level") {
     queryClient.setQueryData<{ bindings: AudioBindings }>(queryKeys.audioBindings(), (previous) => {
-      const current = previous?.bindings ?? { inputOwner: event.sessionID, outputOwner: "", inputLevel: 0 };
+      const current = previous?.bindings;
+      if (!current || current.inputOwner !== event.sessionID) {
+        return previous;
+      }
       return {
         bindings: {
           ...current,
-          inputOwner: event.sessionID,
           inputLevel: event.inputLevel,
         },
       };

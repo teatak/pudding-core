@@ -1,4 +1,17 @@
-const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, nativeTheme, screen, shell, webContents } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  Menu,
+  Tray,
+  dialog,
+  ipcMain,
+  nativeImage,
+  nativeTheme,
+  screen,
+  shell,
+  webContents,
+} = require("electron");
+const { autoUpdater } = require("electron-updater");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
@@ -9,9 +22,12 @@ const path = require("node:path");
 const { BrowserBridgeServer } = require("./browser-bridge-server.cjs");
 const { BrowserHost } = require("./browser-host.cjs");
 const { nativeText, normalizeNativeLocale } = require("./native-i18n.cjs");
+const { UpdateManager, updateStatuses } = require("./update-manager.cjs");
 
-const repoRoot = path.resolve(__dirname, "..");
+const repoRoot = app.isPackaged ? path.join(process.resourcesPath, "app") : path.resolve(__dirname, "..");
 const appDisplayName = "Pudding";
+const repositoryURL = "https://github.com/teatak/pudding";
+const issueTrackerURL = `${repositoryURL}/issues`;
 
 app.setName(appDisplayName);
 app.setPath("userData", electronUserDataDir());
@@ -51,6 +67,20 @@ let quitting = false;
 let appTray = null;
 let shellLocale = "en";
 const pendingOAuthReturnURLs = [];
+const updateManager = new UpdateManager({
+  updater: autoUpdater,
+  isPackaged: app.isPackaged,
+  disabled: process.env.PUDDING_DISABLE_UPDATE_CHECK === "1",
+  beforeInstall: prepareForUpdateInstall,
+  onError: (error) => console.warn("[electron] update failed", error),
+  onManualResult: showManualUpdateResult,
+  onStateChange: (state) => {
+    if (app.isReady()) {
+      updateApplicationMenu();
+      broadcastToTrustedRenderers("pudding:desktop:update-state", state);
+    }
+  },
+});
 
 if (hasSingleInstanceLock) {
   registerOAuthReturnProtocol();
@@ -71,9 +101,10 @@ app.whenReady().then(async () => {
     const browserBridge = await browserBridgeServer.start();
     const token = await ensureDaemon(browserBridge);
     const window = createMainWindow();
-    createTray(window);
+    createTray();
     await loadRenderer(window, token);
     flushPendingOAuthReturnURLs();
+    updateManager.start();
   } catch (error) {
     console.error("[electron] startup failed", error);
     app.quit();
@@ -101,7 +132,7 @@ app.on("activate", () => {
     .then((browserBridge) => ensureDaemon(browserBridge))
     .then((token) => {
       const window = createMainWindow();
-      createTray(window);
+      createTray();
       return loadRenderer(window, token).then(() => flushPendingOAuthReturnURLs());
     })
     .catch((error) => {
@@ -118,6 +149,7 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   quitting = true;
+  updateManager.stop();
   for (const window of BrowserWindow.getAllWindows()) {
     saveWindowState(window);
   }
@@ -152,11 +184,6 @@ function createMainWindow() {
     },
   });
 
-  window.on("show", () => updateTrayMenu(window));
-  window.on("hide", () => updateTrayMenu(window));
-  window.on("focus", () => updateTrayMenu(window));
-  window.on("closed", () => updateTrayMenu(null));
-
   window.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
     return { action: "deny" };
@@ -172,6 +199,7 @@ function createMainWindow() {
   window.webContents.on("did-finish-load", () => {
     if (isTrustedRendererURL(window.webContents.getURL())) {
       window.webContents.send("pudding:theme:updated", themeState());
+      window.webContents.send("pudding:desktop:update-state", updateManager.getState());
       sendShellFullscreenState(window);
     }
   });
@@ -189,9 +217,9 @@ function createMainWindow() {
   return window;
 }
 
-function createTray(window) {
+function createTray() {
   if (appTray) {
-    updateTrayMenu(window);
+    updateTrayMenu();
     return appTray;
   }
   const icon = trayIcon();
@@ -201,27 +229,21 @@ function createTray(window) {
   }
   appTray = new Tray(icon);
   appTray.setToolTip(appDisplayName);
-  updateTrayMenu(window);
+  updateTrayMenu();
   return appTray;
 }
 
-function updateTrayMenu(window) {
+function updateTrayMenu() {
   if (!appTray) {
     return;
   }
-  const current = window && !window.isDestroyed() ? window : BrowserWindow.getAllWindows()[0];
-  const visible = Boolean(current && !current.isDestroyed() && current.isVisible());
   appTray.setContextMenu(
     Menu.buildFromTemplate([
       {
-        label: nativeMenuText(visible ? "hideApp" : "showApp"),
+        label: nativeMenuText("openApp"),
         click: () => {
           const target = BrowserWindow.getAllWindows()[0];
           if (!target || target.isDestroyed()) {
-            return;
-          }
-          if (target.isVisible()) {
-            target.hide();
             return;
           }
           showMainWindow(target);
@@ -260,11 +282,19 @@ function trayIcon() {
 
 function updateApplicationMenu() {
   const template = [];
+  const updateItem = updateMenuItem();
   if (process.platform === "darwin") {
     template.push({
       label: appDisplayName,
       submenu: [
         { label: nativeMenuText("about"), role: "about" },
+        { type: "separator" },
+        updateItem,
+        {
+          accelerator: "CmdOrCtrl+,",
+          label: nativeMenuText("settings"),
+          click: () => sendDesktopMenuCommand("settings"),
+        },
         { type: "separator" },
         { label: nativeMenuText("services"), role: "services" },
         { type: "separator" },
@@ -277,7 +307,20 @@ function updateApplicationMenu() {
     });
   }
 
-  const fileSubmenu = [{ label: nativeMenuText("closeWindow"), role: "close" }];
+  const fileSubmenu = [
+    {
+      accelerator: "CmdOrCtrl+N",
+      label: nativeMenuText("newSession"),
+      click: () => sendDesktopMenuCommand("new-session"),
+    },
+    {
+      accelerator: "CmdOrCtrl+K",
+      label: nativeMenuText("searchSessions"),
+      click: () => sendDesktopMenuCommand("search-sessions"),
+    },
+    { type: "separator" },
+    { label: nativeMenuText("closeWindow"), role: "close" },
+  ];
   if (process.platform !== "darwin") {
     fileSubmenu.push({ type: "separator" }, { label: nativeMenuText("quitApp"), role: "quit" });
   }
@@ -324,18 +367,143 @@ function updateApplicationMenu() {
     );
   }
   template.push({ label: nativeMenuText("window"), submenu: windowSubmenu });
+  const helpSubmenu = [
+    {
+      label: nativeMenuText("puddingHelp"),
+      click: () => void shell.openExternal(repositoryURL),
+    },
+    {
+      label: nativeMenuText("reportIssue"),
+      click: () => void shell.openExternal(issueTrackerURL),
+    },
+    { type: "separator" },
+    {
+      label: nativeMenuText("showLogs"),
+      click: () => void openLogsDirectory(),
+    },
+  ];
+  if (process.platform !== "darwin") {
+    helpSubmenu.unshift(updateItem, { type: "separator" });
+  }
+  template.push({ label: nativeMenuText("help"), role: "help", submenu: helpSubmenu });
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function updateMenuItem() {
+  const state = updateManager.getState();
+  if (state.status === updateStatuses.downloaded || state.status === updateStatuses.installing) {
+    return {
+      enabled: state.status === updateStatuses.downloaded,
+      label: nativeMenuText(state.status === updateStatuses.installing ? "restartingToUpdate" : "restartToUpdate"),
+      click: () => void updateManager.install(),
+    };
+  }
+  const busy = state.status === updateStatuses.checking || state.status === updateStatuses.downloading;
+  return {
+    enabled: !busy,
+    label: nativeMenuText(state.status === updateStatuses.downloading ? "downloadingUpdate" : busy ? "checkingForUpdates" : "checkForUpdates"),
+    click: () => void updateManager.check(true),
+  };
 }
 
 function setShellLocale(locale) {
   shellLocale = normalizeNativeLocale(locale);
   updateApplicationMenu();
-  updateTrayMenu(BrowserWindow.getAllWindows()[0]);
+  updateTrayMenu();
   return shellLocale;
 }
 
 function nativeMenuText(key) {
   return nativeText(shellLocale, key, { app: appDisplayName });
+}
+
+function sendDesktopMenuCommand(command) {
+  const window = BrowserWindow.getAllWindows()[0];
+  if (!window || window.isDestroyed()) {
+    return;
+  }
+  showMainWindow(window);
+  if (isTrustedRendererURL(window.webContents.getURL())) {
+    window.webContents.send("pudding:desktop:menu-command", command);
+  }
+}
+
+async function showManualUpdateResult(result) {
+  if (result.kind === "development") {
+    await showUpdateMessage(
+      {
+        buttons: [nativeMenuText("ok")],
+        message: nativeMenuText("updatesDevOnlyMessage"),
+        title: nativeMenuText("updatesDevOnlyTitle"),
+        type: "info",
+      },
+      true,
+    );
+    return;
+  }
+  if (result.kind === "up-to-date") {
+    await showUpdateMessage(
+      {
+        buttons: [nativeMenuText("ok")],
+        message: nativeText(shellLocale, "upToDateMessage", { version: app.getVersion() }),
+        title: nativeMenuText("upToDateTitle"),
+        type: "info",
+      },
+      true,
+    );
+    return;
+  }
+  if (result.kind === "downloading") {
+    await showUpdateMessage(
+      {
+        buttons: [nativeMenuText("ok")],
+        message: nativeText(shellLocale, "updateDownloadStartedMessage", { version: result.version }),
+        title: nativeMenuText("updateAvailableTitle"),
+        type: "info",
+      },
+      true,
+    );
+    return;
+  }
+  if (result.kind === "downloaded") {
+    return;
+  }
+  const installError = result.kind === "install-error";
+  console.warn(`[electron] ${installError ? "update install" : "update check"} failed`, result.error || result.kind);
+  await showUpdateMessage(
+    {
+      buttons: [nativeMenuText("ok")],
+      detail: String(result.error || ""),
+      message: nativeMenuText(installError ? "updateInstallFailedMessage" : "updateCheckFailedMessage"),
+      title: nativeMenuText(installError ? "updateInstallFailedTitle" : "updateCheckFailedTitle"),
+      type: "warning",
+    },
+    true,
+  );
+}
+
+function showUpdateMessage(options, bringToFront) {
+  const window = BrowserWindow.getAllWindows()[0];
+  if (window && !window.isDestroyed() && (bringToFront || window.isVisible())) {
+    if (bringToFront) {
+      showMainWindow(window);
+    }
+    return dialog.showMessageBox(window, options);
+  }
+  return dialog.showMessageBox(options);
+}
+
+async function openLogsDirectory() {
+  const logsDir = path.join(puddingHomePath(), "logs");
+  try {
+    await fsp.mkdir(logsDir, { recursive: true });
+    const error = await shell.openPath(logsDir);
+    if (error) {
+      throw new Error(error);
+    }
+  } catch (error) {
+    console.warn("[electron] open logs directory failed", error);
+  }
 }
 
 function showMainWindow(window) {
@@ -549,6 +717,16 @@ ipcMain.handle("pudding:desktop:set-locale", (event, locale) => {
   return setShellLocale(locale);
 });
 
+ipcMain.handle("pudding:desktop:update:get-state", (event) => {
+  assertTrustedSender(event);
+  return updateManager.getState();
+});
+
+ipcMain.handle("pudding:desktop:update:install", async (event) => {
+  assertTrustedSender(event);
+  return updateManager.install();
+});
+
 ipcMain.handle("pudding:desktop:pick-directories", async (event, options) => {
   const window = assertTrustedSender(event);
   const result = await dialog.showOpenDialog(window, {
@@ -740,9 +918,12 @@ async function readDaemonToken() {
 }
 
 function daemonTokenPath() {
+  return path.join(puddingHomePath(), "daemon.token");
+}
+
+function puddingHomePath() {
   const defaultHome = app.isPackaged ? ".pudding" : ".pudding-dev";
-  const home = (process.env.PUDDING_HOME || path.join(os.homedir(), defaultHome)).trim();
-  return path.join(home, "daemon.token");
+  return (process.env.PUDDING_HOME || path.join(os.homedir(), defaultHome)).trim();
 }
 
 function canConnectToDaemon() {
@@ -779,10 +960,62 @@ function resolveDaemonBinary() {
 }
 
 function stopManagedDaemon() {
-  if (!daemonProcess || daemonProcess.killed) {
+  if (!daemonProcess || daemonProcess.exitCode !== null) {
     return;
   }
   daemonProcess.kill("SIGTERM");
+}
+
+async function prepareForUpdateInstall() {
+  quitting = true;
+  updateManager.stop();
+  for (const window of BrowserWindow.getAllWindows()) {
+    saveWindowState(window);
+  }
+  await browserBridgeServer.stop();
+  await stopManagedDaemonAndWait();
+}
+
+function stopManagedDaemonAndWait(graceMs = 7_000) {
+  const child = daemonProcess;
+  if (!child || child.exitCode !== null) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    let forceTimer = null;
+    let failureTimer = null;
+    let settled = false;
+    const cleanup = () => {
+      clearTimeout(forceTimer);
+      clearTimeout(failureTimer);
+      child.off("exit", finish);
+    };
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    child.once("exit", finish);
+    child.kill("SIGTERM");
+    forceTimer = setTimeout(() => {
+      if (child.exitCode !== null) {
+        finish();
+        return;
+      }
+      child.kill("SIGKILL");
+      failureTimer = setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        reject(new Error("managed daemon did not stop before update"));
+      }, 1_000);
+    }, graceMs);
+  });
 }
 
 function themeState() {

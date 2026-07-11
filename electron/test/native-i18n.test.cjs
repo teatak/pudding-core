@@ -11,7 +11,9 @@ test("normalizes supported native locales", () => {
 });
 
 test("translates and interpolates native menu labels", () => {
-  assert.equal(nativeText("zh-CN", "showApp", { app: "Pudding" }), "显示 Pudding");
+  assert.equal(nativeText("zh-CN", "openApp", { app: "Pudding" }), "打开 Pudding");
+  assert.equal(nativeText("en", "openApp", { app: "Pudding" }), "Open Pudding");
   assert.equal(nativeText("zh-TW", "quitApp", { app: "Pudding" }), "結束 Pudding");
   assert.equal(nativeText("en", "about", { app: "Pudding" }), "About Pudding");
+  assert.equal(nativeText("zh-CN", "restartToUpdate"), "重新启动以更新");
 });

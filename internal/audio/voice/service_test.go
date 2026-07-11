@@ -3,8 +3,10 @@ package voice
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -112,6 +114,44 @@ func TestServiceSubmitsSavedASRAudioAttachment(t *testing.T) {
 	}
 }
 
+func TestServiceSubmitsRawVoiceAudioWithASRTranscript(t *testing.T) {
+	ctx := context.Background()
+	drv, fakeASR := testInputBackend()
+	var submitted engine.SubmitInput
+	svc := NewService(ServiceConfig{
+		Submitter: submitterFunc(func(_ context.Context, in engine.SubmitInput) (*engine.SubmitResult, error) {
+			submitted = in
+			return &engine.SubmitResult{TurnID: "turn_voice"}, nil
+		}),
+		Driver:  drv,
+		ASR:     fakeASR,
+		TTS:     ttspkg.NewNoop(),
+		HomeDir: t.TempDir(),
+	})
+	defer svc.Close()
+	if _, err := svc.BindInput("sess_voice", true, InputModeRaw); err != nil {
+		t.Fatal(err)
+	}
+	_, err := svc.HandleASREvent(ctx, "sess_voice", asr.Event{
+		Kind: asr.EventSentence,
+		Text: "原音回显",
+		Audio: frame.PCM16{
+			Format: frame.Format{SampleRate: 16000, Channels: 1},
+			Data:   []byte{0x00, 0x00, 0xff, 0x7f},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if submitted.Text != "原音回显" || !strings.HasPrefix(submitted.ClientMessageID, "voicemsg") || len(submitted.Parts) != 1 {
+		t.Fatalf("unexpected raw voice input: %+v", submitted)
+	}
+	part := submitted.Parts[0]
+	if part.Origin != attachment.OriginVoiceAudio || part.AudioTranscript != "原音回显" || part.MIME != "audio/wav" {
+		t.Fatalf("unexpected raw voice attachment: %+v", part)
+	}
+}
+
 func TestServiceRejectsSentenceWithoutInputOwner(t *testing.T) {
 	svc := NewService(ServiceConfig{Submitter: submitterFunc(func(context.Context, engine.SubmitInput) (*engine.SubmitResult, error) {
 		t.Fatal("submit should not be called")
@@ -169,7 +209,7 @@ func TestBindInputStartsCaptureAndRoutesASR(t *testing.T) {
 	}
 }
 
-func TestCaptureEnergyGateSuppressesLowEnergyFrames(t *testing.T) {
+func TestCaptureFeedsLowEnergyFramesToVAD(t *testing.T) {
 	drv := &captureDriver{format: frame.Format{SampleRate: 16000, Channels: 1}}
 	recASR := newRecordingASR()
 	svc := NewService(ServiceConfig{
@@ -192,21 +232,61 @@ func TestCaptureEnergyGateSuppressesLowEnergyFrames(t *testing.T) {
 	if len(feeds) != 1 {
 		t.Fatalf("feeds len = %d, want 1", len(feeds))
 	}
-	if !allZero(feeds[0].Data) {
-		t.Fatalf("low energy frame was not silenced: %v", feeds[0].Data)
+	if !bytes.Equal(feeds[0].Data, []byte{100, 0, 100, 0, 100, 0, 100, 0}) {
+		t.Fatalf("low energy frame changed before VAD: %v", feeds[0].Data)
 	}
 	if got := svc.Snapshot().InputLevel; got <= 0 {
 		t.Fatalf("input level = %v, want visible low-level activity", got)
 	}
 }
 
-func TestCaptureEnergyGateUsesPlaybackThreshold(t *testing.T) {
+func TestASRSentenceEnergyGateSuppressesOnlyCompletedLowEnergyAudio(t *testing.T) {
 	drv := &captureDriver{format: frame.Format{SampleRate: 16000, Channels: 1}}
-	recASR := newRecordingASR()
+	fakeASR := asr.NewFake(4)
+	submits := make(chan engine.SubmitInput, 2)
 	svc := NewService(ServiceConfig{
-		Submitter:         submitterFunc(func(context.Context, engine.SubmitInput) (*engine.SubmitResult, error) { return nil, nil }),
+		Submitter: submitterFunc(func(_ context.Context, input engine.SubmitInput) (*engine.SubmitResult, error) {
+			submits <- input
+			return &engine.SubmitResult{}, nil
+		}),
+		Driver:    drv,
+		ASR:       fakeASR,
+		MinEnergy: 0.5,
+	})
+	defer svc.Close()
+	if _, err := svc.BindInput("sess_input", true); err != nil {
+		t.Fatal(err)
+	}
+
+	fakeASR.Emit(asr.Event{Kind: asr.EventSentence, Text: "quiet", Audio: constantPCM16(drv.format, 100, 500*time.Millisecond)})
+	select {
+	case input := <-submits:
+		t.Fatalf("low energy sentence was submitted: %+v", input)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	fakeASR.Emit(asr.Event{Kind: asr.EventSentence, Text: "loud", Audio: constantPCM16(drv.format, 20000, 500*time.Millisecond)})
+	select {
+	case input := <-submits:
+		if input.Text != "loud" {
+			t.Fatalf("submitted text = %q, want loud", input.Text)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("high energy sentence was not submitted")
+	}
+}
+
+func TestASRSentenceEnergyGateUsesPlaybackThreshold(t *testing.T) {
+	drv := &captureDriver{format: frame.Format{SampleRate: 16000, Channels: 1}}
+	fakeASR := asr.NewFake(4)
+	submits := make(chan engine.SubmitInput, 1)
+	svc := NewService(ServiceConfig{
+		Submitter: submitterFunc(func(_ context.Context, input engine.SubmitInput) (*engine.SubmitResult, error) {
+			submits <- input
+			return &engine.SubmitResult{}, nil
+		}),
 		Driver:            drv,
-		ASR:               recASR,
+		ASR:               fakeASR,
 		MinEnergy:         0.01,
 		PlaybackMinEnergy: 0.015,
 	})
@@ -215,23 +295,127 @@ func TestCaptureEnergyGateUsesPlaybackThreshold(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pcm := frame.PCM16{
-		Format: drv.format,
-		Data:   []byte{0x90, 0x01, 0x90, 0x01, 0x90, 0x01, 0x90, 0x01},
-	}
-	drv.handler(pcm)
+	pcm := constantPCM16(drv.format, 400, 500*time.Millisecond)
 	svc.setCurrentPlayback("sess_input", "turn_playing")
-	drv.handler(pcm)
+	fakeASR.Emit(asr.Event{Kind: asr.EventSentence, Text: "feedback", Audio: pcm})
+	select {
+	case input := <-submits:
+		t.Fatalf("playback-threshold sentence was submitted: %+v", input)
+	case <-time.After(100 * time.Millisecond):
+	}
 
-	feeds := recASR.Feeds()
-	if len(feeds) != 2 {
-		t.Fatalf("feeds len = %d, want 2", len(feeds))
+	svc.clearCurrentPlayback("sess_input", "turn_playing")
+	fakeASR.Emit(asr.Event{Kind: asr.EventSentence, Text: "normal", Audio: pcm})
+	select {
+	case input := <-submits:
+		if input.Text != "normal" {
+			t.Fatalf("submitted text = %q, want normal", input.Text)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("normal-threshold sentence was not submitted")
 	}
-	if !bytes.Equal(feeds[0].Data, pcm.Data) {
-		t.Fatalf("normal frame changed: got %v want %v", feeds[0].Data, pcm.Data)
+}
+
+func TestInputRestartDropsStaleASREvents(t *testing.T) {
+	drv := &captureDriver{format: frame.Format{SampleRate: 16000, Channels: 1}}
+	fakeASR := asr.NewFake(4)
+	submits := make(chan engine.SubmitInput, 1)
+	svc := NewService(ServiceConfig{
+		Submitter: submitterFunc(func(_ context.Context, input engine.SubmitInput) (*engine.SubmitResult, error) {
+			submits <- input
+			return &engine.SubmitResult{}, nil
+		}),
+		Driver: drv,
+		ASR:    fakeASR,
+	})
+	defer svc.Close()
+	if _, err := svc.BindInput("sess_input", true); err != nil {
+		t.Fatal(err)
 	}
-	if !allZero(feeds[1].Data) {
-		t.Fatalf("playback-gated frame was not silenced: %v", feeds[1].Data)
+	oldStreamID := svc.inputStreamID
+	if _, err := svc.BindInput("sess_input", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.BindInput("sess_input", true); err != nil {
+		t.Fatal(err)
+	}
+	if oldStreamID == "" || oldStreamID == svc.inputStreamID {
+		t.Fatalf("stream IDs were not rotated: old=%q new=%q", oldStreamID, svc.inputStreamID)
+	}
+
+	fakeASR.Emit(asr.Event{Kind: asr.EventSentence, StreamID: oldStreamID, Text: "stale"})
+	select {
+	case input := <-submits:
+		t.Fatalf("stale ASR event was submitted: %+v", input)
+	case <-time.After(100 * time.Millisecond):
+	}
+	fakeASR.EmitSentence("current")
+	select {
+	case input := <-submits:
+		if input.Text != "current" {
+			t.Fatalf("submitted text = %q, want current", input.Text)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("current ASR event was not submitted")
+	}
+}
+
+func TestInputRestartDropsStaleCaptureCallbacks(t *testing.T) {
+	drv := &captureDriver{format: frame.Format{SampleRate: 16000, Channels: 1}}
+	recASR := newRecordingASR()
+	svc := NewService(ServiceConfig{
+		Submitter: submitterFunc(func(context.Context, engine.SubmitInput) (*engine.SubmitResult, error) { return nil, nil }),
+		Driver:    drv,
+		ASR:       recASR,
+	})
+	defer svc.Close()
+	if _, err := svc.BindInput("sess_input", true); err != nil {
+		t.Fatal(err)
+	}
+	staleHandler := drv.handler
+	if _, err := svc.BindInput("sess_input", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.BindInput("sess_input", true); err != nil {
+		t.Fatal(err)
+	}
+	currentHandler := drv.handler
+	pcm := constantPCM16(drv.format, 1000, 20*time.Millisecond)
+	staleHandler(pcm)
+	currentHandler(pcm)
+	if feeds := recASR.Feeds(); len(feeds) != 1 {
+		t.Fatalf("feeds len = %d, want only current callback", len(feeds))
+	}
+}
+
+func TestInputRestartPreservesAECAndResetsNSOnlyWhileCaptureStopped(t *testing.T) {
+	drv := &captureDriver{format: frame.Format{SampleRate: 16000, Channels: 1}}
+	aecProcessor := &lifecycleAEC{}
+	nsProcessor := &lifecycleNS{driver: drv}
+	svc := NewService(ServiceConfig{
+		Submitter: submitterFunc(func(context.Context, engine.SubmitInput) (*engine.SubmitResult, error) { return nil, nil }),
+		Driver:    drv,
+		ASR:       asr.NewFake(1),
+		AEC:       aecProcessor,
+		NS:        nsProcessor,
+	})
+	defer svc.Close()
+	for i := 0; i < 2; i++ {
+		if _, err := svc.BindInput("sess_input", true); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.BindInput("sess_input", false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := aecProcessor.resetCount.Load(); got != 0 {
+		t.Fatalf("AEC reset count = %d, want 0 to preserve convergence", got)
+	}
+	if got := nsProcessor.resetCount.Load(); got != 4 {
+		t.Fatalf("NS reset count = %d, want 4", got)
+	}
+	if nsProcessor.resetWhileActive.Load() {
+		t.Fatal("NS was reset while the capture callback could still be running")
 	}
 }
 
@@ -320,6 +504,32 @@ type recordingASR struct {
 	once   sync.Once
 }
 
+type lifecycleAEC struct {
+	resetCount atomic.Int32
+}
+
+func (*lifecycleAEC) Name() string                                        { return "lifecycle-aec" }
+func (*lifecycleAEC) PushRender(frame.PCM16) error                        { return nil }
+func (*lifecycleAEC) ProcessCapture(pcm frame.PCM16) (frame.PCM16, error) { return pcm, nil }
+func (p *lifecycleAEC) Reset()                                            { p.resetCount.Add(1) }
+
+type lifecycleNS struct {
+	driver           *captureDriver
+	resetCount       atomic.Int32
+	resetWhileActive atomic.Bool
+}
+
+func (*lifecycleNS) Name() string { return "lifecycle-ns" }
+func (*lifecycleNS) Process(pcm frame.PCM16) (frame.PCM16, error) {
+	return pcm, nil
+}
+func (p *lifecycleNS) Reset() {
+	p.resetCount.Add(1)
+	if p.driver != nil && p.driver.active {
+		p.resetWhileActive.Store(true)
+	}
+}
+
 func newRecordingASR() *recordingASR {
 	return &recordingASR{events: make(chan asr.Event)}
 }
@@ -352,13 +562,13 @@ func (a *recordingASR) Feeds() []frame.PCM16 {
 	return out
 }
 
-func allZero(data []byte) bool {
-	for _, value := range data {
-		if value != 0 {
-			return false
-		}
+func constantPCM16(format frame.Format, sample int16, duration time.Duration) frame.PCM16 {
+	samples := format.SampleRate * format.Channels * int(duration) / int(time.Second)
+	data := make([]byte, samples*2)
+	for i := 0; i < samples; i++ {
+		binary.LittleEndian.PutUint16(data[i*2:], uint16(sample))
 	}
-	return true
+	return frame.PCM16{Format: format, Data: data}
 }
 
 func TestServiceRoutesTextDeltaToTTSOutputOwner(t *testing.T) {

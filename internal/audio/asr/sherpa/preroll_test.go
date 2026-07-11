@@ -23,3 +23,16 @@ func TestSampleRingSliceAndTail(t *testing.T) {
 		t.Fatalf("tail after wrap = %v", got)
 	}
 }
+
+func TestSampleRingResetStartsANewTimeline(t *testing.T) {
+	ring := newSampleRing(5)
+	ring.Append([]float32{1, 2, 3})
+	ring.Reset()
+	if got := ring.Tail(5); got != nil {
+		t.Fatalf("tail after reset = %v, want nil", got)
+	}
+	ring.Append([]float32{4, 5})
+	if got := ring.Slice(0, 2); !reflect.DeepEqual(got, []float32{4, 5}) {
+		t.Fatalf("slice after reset = %v", got)
+	}
+}
