@@ -1337,38 +1337,38 @@ func (m *Memstore) SearchMessages(_ context.Context, in store.MessageSearchInput
 	return out, nil
 }
 
-func (m *Memstore) RemoveAttachmentsByOrigin(_ context.Context, origin string) (*store.AttachmentCleanupResult, error) {
+func (m *Memstore) RemoveAttachmentsByOrigin(_ context.Context, sessionID, origin string) (*store.AttachmentCleanupResult, error) {
+	sessionID = strings.TrimSpace(sessionID)
 	origin = strings.TrimSpace(origin)
 	out := &store.AttachmentCleanupResult{}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[sessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
 	if origin == "" {
 		return out, nil
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for sessionID, messages := range m.messages {
-		for _, msg := range messages {
-			next, removed, changed := store.RemoveAttachmentPartsByOrigin(msg.Parts, origin)
-			if !changed {
-				continue
-			}
-			msg.Parts = next
-			out.MessageCount++
-			for _, item := range removed {
-				out.Attachments = append(out.Attachments, store.AttachmentCleanupItem{SessionID: sessionID, Attachment: item})
-			}
+	for _, msg := range m.messages[sessionID] {
+		next, removed, changed := store.RemoveAttachmentPartsByOrigin(msg.Parts, origin)
+		if !changed {
+			continue
+		}
+		msg.Parts = next
+		out.MessageCount++
+		for _, item := range removed {
+			out.Attachments = append(out.Attachments, store.AttachmentCleanupItem{SessionID: sessionID, Attachment: item})
 		}
 	}
-	for sessionID, inputs := range m.queued {
-		for _, input := range inputs {
-			next, removed, changed := store.RemoveAttachmentPartsByOrigin(input.Parts, origin)
-			if !changed {
-				continue
-			}
-			input.Parts = next
-			out.QueuedInputCount++
-			for _, item := range removed {
-				out.Attachments = append(out.Attachments, store.AttachmentCleanupItem{SessionID: sessionID, Attachment: item})
-			}
+	for _, input := range m.queued[sessionID] {
+		next, removed, changed := store.RemoveAttachmentPartsByOrigin(input.Parts, origin)
+		if !changed {
+			continue
+		}
+		input.Parts = next
+		out.QueuedInputCount++
+		for _, item := range removed {
+			out.Attachments = append(out.Attachments, store.AttachmentCleanupItem{SessionID: sessionID, Attachment: item})
 		}
 	}
 	return out, nil

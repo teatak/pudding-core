@@ -29,6 +29,7 @@ const (
 	SettingShowCompactSummary          = "show_compact_summary"
 	SettingShowReasoning               = "show_reasoning"
 	SettingShowRawToolInfo             = "show_raw_tool_info"
+	SettingShowAppPreviewVersions      = "show_app_preview_versions"
 )
 
 const (
@@ -53,7 +54,7 @@ func (m *Manager) Prepare() error {
 		return fmt.Errorf("config: mkdir %s: %w", m.dir, err)
 	}
 	if _, err := os.Stat(m.path(settingsFile)); errors.Is(err, os.ErrNotExist) {
-		if err := m.writeSettings(settingsYAML{Version: 1}); err != nil {
+		if err := m.writeSettings(defaultSettingsYAML()); err != nil {
 			return err
 		}
 	} else if err != nil {
@@ -102,6 +103,18 @@ func (m *Manager) SetSettings(_ context.Context, kv map[string]string) error {
 		cfg.Version = 1
 	}
 	return m.writeSettings(cfg)
+}
+
+// ResetSettings restores settings.yaml to the defaults owned by this manager.
+// Other configuration files, including pudding.md, are intentionally untouched.
+func (m *Manager) ResetSettings(_ context.Context) (map[string]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cfg := defaultSettingsYAML()
+	if err := m.writeSettings(cfg); err != nil {
+		return nil, err
+	}
+	return cfg.asMap(), nil
 }
 
 type UserPromptView struct {
@@ -221,6 +234,7 @@ type settingsYAML struct {
 	Version int                 `yaml:"version"`
 	Compact compactSettingsYAML `yaml:"compact,omitempty"`
 	Display displaySettingsYAML `yaml:"display,omitempty"`
+	Apps    appsSettingsYAML    `yaml:"apps,omitempty"`
 }
 
 type compactSettingsYAML struct {
@@ -234,6 +248,14 @@ type displaySettingsYAML struct {
 	RawToolInfo    *bool `yaml:"raw_tool_info,omitempty"`
 }
 
+type appsSettingsYAML struct {
+	ShowPreviewVersions *bool `yaml:"show_preview_versions,omitempty"`
+}
+
+func defaultSettingsYAML() settingsYAML {
+	return settingsYAML{Version: 1}
+}
+
 func (s settingsYAML) asMap() map[string]string {
 	return map[string]string{
 		SettingCompactTailInputTurns:       strconv.Itoa(s.compactTailInputTurns()),
@@ -241,6 +263,7 @@ func (s settingsYAML) asMap() map[string]string {
 		SettingShowCompactSummary:          formatBoolSetting(s.showCompactSummary()),
 		SettingShowReasoning:               formatBoolSetting(s.showReasoning()),
 		SettingShowRawToolInfo:             formatBoolSetting(s.showRawToolInfo()),
+		SettingShowAppPreviewVersions:      formatBoolSetting(s.showAppPreviewVersions()),
 	}
 }
 
@@ -276,6 +299,12 @@ func (s *settingsYAML) set(key, raw string) error {
 			return err
 		}
 		s.Display.RawToolInfo = &v
+	case SettingShowAppPreviewVersions:
+		v, err := parseBoolSetting(raw)
+		if err != nil {
+			return err
+		}
+		s.Apps.ShowPreviewVersions = &v
 	default:
 		return fmt.Errorf("%w %q", ErrInvalidSetting, key)
 	}
@@ -315,6 +344,13 @@ func (s settingsYAML) showRawToolInfo() bool {
 		return *s.Display.RawToolInfo
 	}
 	return true
+}
+
+func (s settingsYAML) showAppPreviewVersions() bool {
+	if s.Apps.ShowPreviewVersions != nil {
+		return *s.Apps.ShowPreviewVersions
+	}
+	return false
 }
 
 func parseIntSetting(raw string, min, max int) (int, error) {

@@ -4,6 +4,7 @@ export const SETTINGS_KEYS = {
   showCompactSummary: "show_compact_summary",
   showReasoning: "show_reasoning",
   showRawToolInfo: "show_raw_tool_info",
+  showAppPreviewVersions: "show_app_preview_versions",
 } as const;
 
 export const SETTINGS_DEFAULTS: Record<string, string> = {
@@ -12,6 +13,7 @@ export const SETTINGS_DEFAULTS: Record<string, string> = {
   [SETTINGS_KEYS.showCompactSummary]: "true",
   [SETTINGS_KEYS.showReasoning]: "true",
   [SETTINGS_KEYS.showRawToolInfo]: "true",
+  [SETTINGS_KEYS.showAppPreviewVersions]: "false",
 };
 
 export type TranscriptDisplaySettings = {

@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -25,7 +26,8 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 		settings[SettingCompactAutoThresholdPercent] != "80" ||
 		settings[SettingShowCompactSummary] != "true" ||
 		settings[SettingShowReasoning] != "true" ||
-		settings[SettingShowRawToolInfo] != "true" {
+		settings[SettingShowRawToolInfo] != "true" ||
+		settings[SettingShowAppPreviewVersions] != "false" {
 		t.Fatalf("unexpected settings: %+v", settings)
 	}
 
@@ -154,6 +156,7 @@ func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {
 		SettingShowCompactSummary:          "false",
 		SettingShowReasoning:               "false",
 		SettingShowRawToolInfo:             "false",
+		SettingShowAppPreviewVersions:      "true",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +168,8 @@ func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {
 		settings[SettingCompactAutoThresholdPercent] != "70" ||
 		settings[SettingShowCompactSummary] != "false" ||
 		settings[SettingShowReasoning] != "false" ||
-		settings[SettingShowRawToolInfo] != "false" {
+		settings[SettingShowRawToolInfo] != "false" ||
+		settings[SettingShowAppPreviewVersions] != "true" {
 		t.Fatalf("unexpected settings: %+v", settings)
 	}
 	settingsPath := home + "/config/settings.yaml"
@@ -177,8 +181,28 @@ func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {
 	if !strings.Contains(settingsYAML, "tail_input_turns: 3") ||
 		!strings.Contains(settingsYAML, "auto_threshold_percent: 70") ||
 		!strings.Contains(settingsYAML, "reasoning: false") ||
-		!strings.Contains(settingsYAML, "raw_tool_info: false") {
+		!strings.Contains(settingsYAML, "raw_tool_info: false") ||
+		!strings.Contains(settingsYAML, "show_preview_versions: true") {
 		t.Fatalf("expected settings in settings.yaml:\n%s", settingsYAML)
+	}
+	reloaded := NewManager(home)
+	reloadedSettings, err := reloaded.Settings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloadedSettings[SettingShowAppPreviewVersions] != "true" {
+		t.Fatalf("reloaded preview setting = %q", reloadedSettings[SettingShowAppPreviewVersions])
+	}
+	if err := reloaded.SetSettings(ctx, map[string]string{SettingShowAppPreviewVersions: "false"}); err != nil {
+		t.Fatal(err)
+	}
+	reloadedSettings, err = reloaded.Settings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloadedSettings[SettingShowAppPreviewVersions] != "false" ||
+		reloadedSettings[SettingCompactTailInputTurns] != "3" {
+		t.Fatalf("unexpected settings after preview toggle: %+v", reloadedSettings)
 	}
 
 	initialPrompt, err := m.UserPrompt(ctx)
@@ -201,6 +225,178 @@ func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {
 	}
 	if string(b) != "short replies" {
 		t.Fatalf("unexpected pudding.md content: %q", b)
+	}
+}
+
+func TestManagerResetSettingsOnlyRewritesSettingsYAML(t *testing.T) {
+	home := t.TempDir()
+	m := NewManager(home)
+	if err := m.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := m.SetSettings(ctx, map[string]string{
+		SettingCompactTailInputTurns:       "9",
+		SettingCompactAutoThresholdPercent: "65",
+		SettingShowCompactSummary:          "false",
+		SettingShowReasoning:               "false",
+		SettingShowRawToolInfo:             "false",
+		SettingShowAppPreviewVersions:      "true",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.SetUserPrompt(ctx, "keep this prompt"); err != nil {
+		t.Fatal(err)
+	}
+	audio, err := m.Audio(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	audio.ASR.Language = "en"
+	if _, err := m.SetAudio(ctx, audio); err != nil {
+		t.Fatal(err)
+	}
+
+	reset, err := m.ResetSettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reset[SettingCompactTailInputTurns] != "2" ||
+		reset[SettingCompactAutoThresholdPercent] != "80" ||
+		reset[SettingShowCompactSummary] != "true" ||
+		reset[SettingShowReasoning] != "true" ||
+		reset[SettingShowRawToolInfo] != "true" ||
+		reset[SettingShowAppPreviewVersions] != "false" {
+		t.Fatalf("unexpected reset settings: %+v", reset)
+	}
+	reloaded, err := m.Settings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(reset, reloaded) {
+		t.Fatalf("persisted settings differ from reset result: reset=%+v reloaded=%+v", reset, reloaded)
+	}
+	prompt, err := m.UserPrompt(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !prompt.Exists || prompt.Content != "keep this prompt" {
+		t.Fatalf("settings reset must preserve pudding.md: %+v", prompt)
+	}
+	persistedAudio, err := m.Audio(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persistedAudio.ASR.Language != "en" {
+		t.Fatalf("settings reset must preserve audio.yaml: %+v", persistedAudio.ASR)
+	}
+	b, err := os.ReadFile(home + "/config/settings.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	settingsYAML := string(b)
+	if !strings.Contains(settingsYAML, "version: 1") ||
+		strings.Contains(settingsYAML, "tail_input_turns: 9") ||
+		strings.Contains(settingsYAML, "show_preview_versions: true") {
+		t.Fatalf("settings.yaml was not rewritten to defaults:\n%s", settingsYAML)
+	}
+}
+
+func TestManagerResetAudioOnlyRewritesAudioYAML(t *testing.T) {
+	home := t.TempDir()
+	m := NewManager(home)
+	if err := m.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := m.SetSettings(ctx, map[string]string{SettingCompactTailInputTurns: "9"}); err != nil {
+		t.Fatal(err)
+	}
+	audio, err := m.Audio(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabled := true
+	audio.ASR.Language = "en"
+	audio.ASR.SaveAudio = &enabled
+	audio.ASR.VAD.Threshold = 0.42
+	edge := audio.TTS.Profiles["edge"]
+	edge.Voice = "en-US-AriaNeural"
+	edge.Speed = 1.7
+	audio.TTS.Profiles["edge"] = edge
+	audio.TTS.Profiles["extra"] = AudioTTSProfile{Voice: "en-GB-SoniaNeural", Speed: 1.1}
+	if _, err := m.SetAudio(ctx, audio); err != nil {
+		t.Fatal(err)
+	}
+
+	reset, err := m.ResetAudio(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := DefaultAudioConfig()
+	if !reflect.DeepEqual(reset, want) {
+		t.Fatalf("unexpected reset audio:\n got: %+v\nwant: %+v", reset, want)
+	}
+	if _, ok := reset.TTS.Profiles["extra"]; ok {
+		t.Fatalf("audio reset kept an extra TTS profile: %+v", reset.TTS.Profiles)
+	}
+	reloaded, err := m.Audio(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(reloaded, want) {
+		t.Fatalf("persisted audio differs from defaults:\n got: %+v\nwant: %+v", reloaded, want)
+	}
+	settings, err := m.Settings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings[SettingCompactTailInputTurns] != "9" {
+		t.Fatalf("audio reset must preserve settings.yaml: %+v", settings)
+	}
+}
+
+func TestManagerResetReportsWriteErrors(t *testing.T) {
+	tests := []struct {
+		name  string
+		file  string
+		reset func(*Manager) error
+	}{
+		{
+			name: "settings",
+			file: settingsFile,
+			reset: func(m *Manager) error {
+				_, err := m.ResetSettings(context.Background())
+				return err
+			},
+		},
+		{
+			name: "audio",
+			file: audioFile,
+			reset: func(m *Manager) error {
+				_, err := m.ResetAudio(context.Background())
+				return err
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			m := NewManager(home)
+			if err := m.Prepare(); err != nil {
+				t.Fatal(err)
+			}
+			path := home + "/config/" + tt.file
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(path, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := tt.reset(m); err == nil {
+				t.Fatal("reset succeeded despite an unwritable destination")
+			}
+		})
 	}
 }
 

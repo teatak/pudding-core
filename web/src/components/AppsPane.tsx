@@ -14,6 +14,7 @@ import {
   getAppMCPOverride,
   getAppMCPStatus,
   getAppSkill,
+  getSettings,
   installAppPackage,
   listAppConnections,
   listApps,
@@ -62,10 +63,10 @@ import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { translate, useI18n } from "@/i18n";
+import { boolSetting, SETTINGS_KEYS } from "@/lib/appSettings";
 import { onOAuthConnected, openExternalURL } from "@/lib/desktopBridge";
 import { shouldKeepDialogOpenForSelectDismiss } from "@/lib/layerGuards";
 import { cn } from "@/lib/utils";
-import { useShowPreviewAppVersions } from "@/state/appCatalogPrefs";
 
 type AuthType = AppConnectionPayload["authType"];
 type LocalizedText = string | Record<string, string>;
@@ -162,7 +163,17 @@ export function AppsPane({ token }: { token: string }) {
   const [detailAppID, setDetailAppID] = useState<string | null>(null);
   const [detailCatalogID, setDetailCatalogID] = useState<string | null>(null);
   const [catalogReleaseByID, setCatalogReleaseByID] = useState<Record<string, string>>({});
-  const showPreviewVersions = useShowPreviewAppVersions();
+  const settingsQuery = useQuery({
+    queryKey: queryKeys.settings(),
+    queryFn: () => getSettings(token),
+    enabled: Boolean(token),
+    staleTime: 30_000,
+  });
+  const showPreviewVersions = boolSetting(
+    settingsQuery.data?.settings,
+    SETTINGS_KEYS.showAppPreviewVersions,
+    false,
+  );
   const [selectedSkill, setSelectedSkill] = useState<SelectedSkill | null>(null);
   const appsQuery = useQuery({
     queryKey: queryKeys.apps(),

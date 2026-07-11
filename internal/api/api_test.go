@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -307,6 +308,150 @@ func TestAudioConfigAPI(t *testing.T) {
 	reloaded := decodeJSON[audioPayload](t, resp)
 	if reloaded.Config.ASR.Language != "en" || reloaded.Config.NS.Level != "high" || reloaded.Config.TTS.Profiles["edge"].Voice != "zh-CN-XiaoxiaoNeural" {
 		t.Fatalf("audio config was not persisted: %+v", reloaded.Config)
+	}
+}
+
+func TestSettingsAppPreviewAPI(t *testing.T) {
+	srv, _, cfg := newConfigTestServer(t)
+	type settingsPayload struct {
+		Settings map[string]string `json:"settings"`
+	}
+
+	initial := decodeJSON[settingsPayload](t, req(t, http.MethodGet, srv.URL+"/settings", nil))
+	if initial.Settings[config.SettingShowAppPreviewVersions] != "false" {
+		t.Fatalf("initial preview setting = %q", initial.Settings[config.SettingShowAppPreviewVersions])
+	}
+
+	resp := req(t, http.MethodPut, srv.URL+"/settings", map[string]string{
+		config.SettingCompactTailInputTurns:  "3",
+		config.SettingShowAppPreviewVersions: "true",
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("PUT status = %d", resp.StatusCode)
+	}
+
+	updated := decodeJSON[settingsPayload](t, req(t, http.MethodGet, srv.URL+"/settings", nil))
+	if updated.Settings[config.SettingShowAppPreviewVersions] != "true" ||
+		updated.Settings[config.SettingCompactTailInputTurns] != "3" ||
+		updated.Settings[config.SettingShowReasoning] != "true" {
+		t.Fatalf("unexpected updated settings: %+v", updated.Settings)
+	}
+
+	resp = req(t, http.MethodPut, srv.URL+"/settings", map[string]string{
+		config.SettingShowAppPreviewVersions: "not-a-bool",
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid preview setting status = %d", resp.StatusCode)
+	}
+	persisted, err := cfg.Settings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted[config.SettingShowAppPreviewVersions] != "true" {
+		t.Fatalf("invalid update changed preview setting: %+v", persisted)
+	}
+}
+
+func TestSettingsResetAPIs(t *testing.T) {
+	srv, _, cfg := newConfigTestServer(t)
+	ctx := context.Background()
+	if err := cfg.SetSettings(ctx, map[string]string{
+		config.SettingCompactTailInputTurns:  "9",
+		config.SettingShowReasoning:          "false",
+		config.SettingShowAppPreviewVersions: "true",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cfg.SetUserPrompt(ctx, "keep this prompt"); err != nil {
+		t.Fatal(err)
+	}
+	audio, err := cfg.Audio(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	audio.ASR.Language = "en"
+	audio.ASR.VAD.Threshold = 0.42
+	if _, err := cfg.SetAudio(ctx, audio); err != nil {
+		t.Fatal(err)
+	}
+
+	type settingsPayload struct {
+		Settings map[string]string `json:"settings"`
+	}
+	resp := req(t, http.MethodDelete, srv.URL+"/settings", nil)
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("DELETE /settings status = %d", resp.StatusCode)
+	}
+	resetSettings := decodeJSON[settingsPayload](t, resp).Settings
+	if resetSettings[config.SettingCompactTailInputTurns] != "2" ||
+		resetSettings[config.SettingCompactAutoThresholdPercent] != "80" ||
+		resetSettings[config.SettingShowReasoning] != "true" ||
+		resetSettings[config.SettingShowAppPreviewVersions] != "false" {
+		t.Fatalf("unexpected reset settings: %+v", resetSettings)
+	}
+	reloadedSettings := decodeJSON[settingsPayload](t, req(t, http.MethodGet, srv.URL+"/settings", nil)).Settings
+	if !reflect.DeepEqual(reloadedSettings, resetSettings) {
+		t.Fatalf("GET /settings differs after reset: reset=%+v reloaded=%+v", resetSettings, reloadedSettings)
+	}
+	prompt, err := cfg.UserPrompt(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !prompt.Exists || prompt.Content != "keep this prompt" {
+		t.Fatalf("DELETE /settings must preserve pudding.md: %+v", prompt)
+	}
+	persistedAudio, err := cfg.Audio(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persistedAudio.ASR.Language != "en" || persistedAudio.ASR.VAD.Threshold != 0.42 {
+		t.Fatalf("DELETE /settings must preserve audio.yaml: %+v", persistedAudio.ASR)
+	}
+
+	if err := cfg.SetSettings(ctx, map[string]string{config.SettingCompactTailInputTurns: "7"}); err != nil {
+		t.Fatal(err)
+	}
+	type audioPayload struct {
+		Path   string             `json:"path"`
+		Config config.AudioConfig `json:"config"`
+	}
+	resp = req(t, http.MethodDelete, srv.URL+"/settings/audio", nil)
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("DELETE /settings/audio status = %d", resp.StatusCode)
+	}
+	resetAudio := decodeJSON[audioPayload](t, resp)
+	if !strings.HasSuffix(resetAudio.Path, filepath.Join("config", "audio.yaml")) {
+		t.Fatalf("audio config path = %q", resetAudio.Path)
+	}
+	wantAudio := config.DefaultAudioConfig()
+	if !reflect.DeepEqual(resetAudio.Config, wantAudio) {
+		t.Fatalf("unexpected reset audio:\n got: %+v\nwant: %+v", resetAudio.Config, wantAudio)
+	}
+	reloadedAudio := decodeJSON[audioPayload](t, req(t, http.MethodGet, srv.URL+"/settings/audio", nil))
+	if !reflect.DeepEqual(reloadedAudio.Config, wantAudio) {
+		t.Fatalf("GET /settings/audio differs after reset:\n got: %+v\nwant: %+v", reloadedAudio.Config, wantAudio)
+	}
+	persistedSettings, err := cfg.Settings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persistedSettings[config.SettingCompactTailInputTurns] != "7" {
+		t.Fatalf("DELETE /settings/audio must preserve settings.yaml: %+v", persistedSettings)
+	}
+}
+
+func TestSettingsResetUnavailable(t *testing.T) {
+	srv, _ := newTestServer(t)
+	for _, path := range []string{"/settings", "/settings/audio"} {
+		resp := req(t, http.MethodDelete, srv.URL+path, nil)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("DELETE %s status = %d, want 400", path, resp.StatusCode)
+		}
 	}
 }
 
@@ -2349,11 +2494,11 @@ func readSSE(t *testing.T, url string, stopKind string, timeout time.Duration) [
 }
 
 func TestProvidersCRUDReturnsEditableAPIKey(t *testing.T) {
-	srv, _ := newTestServer(t)
+	srv, _, _ := newConfigTestServer(t)
 
-	resp := req(t, http.MethodPost, srv.URL+"/providers", map[string]string{
+	resp := req(t, http.MethodPost, srv.URL+"/providers", map[string]any{
 		"id": "work", "displayName": "Work", "protocol": "openai-compatible",
-		"baseURL": "https://example.com/v1/", "apiKey": "sk-secret",
+		"baseURL": "https://example.com/v1/", "apiKey": "sk-secret", "models": []any{},
 	})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("want 201, got %d", resp.StatusCode)
@@ -2367,6 +2512,9 @@ func TestProvidersCRUDReturnsEditableAPIKey(t *testing.T) {
 	}
 	if created["baseURL"] != "https://example.com/v1" {
 		t.Fatalf("baseURL must be trimmed: %+v", created)
+	}
+	if models, ok := created["models"].([]any); !ok || len(models) != 0 {
+		t.Fatalf("provider without models must return an empty model list: %+v", created)
 	}
 
 	// 重名 409
@@ -2403,6 +2551,24 @@ func TestProvidersCRUDReturnsEditableAPIKey(t *testing.T) {
 	}
 	if patched["apiKey"] != "g-key" {
 		t.Fatalf("apiKey patch failed: %+v", patched)
+	}
+
+	// 空模型列表必须可显式保存,再次读取时不能恢复默认模型。
+	resp = req(t, http.MethodPatch, srv.URL+"/providers/work", map[string]any{
+		"models": []map[string]any{{"id": "temporary"}},
+	})
+	patched = decodeJSON[map[string]any](t, resp)
+	if models, ok := patched["models"].([]any); !ok || len(models) != 1 {
+		t.Fatalf("model patch failed: %+v", patched)
+	}
+	resp = req(t, http.MethodPatch, srv.URL+"/providers/work", map[string]any{"models": []any{}})
+	patched = decodeJSON[map[string]any](t, resp)
+	if models, ok := patched["models"].([]any); !ok || len(models) != 0 {
+		t.Fatalf("clearing models must preserve an empty model list: %+v", patched)
+	}
+	got := decodeJSON[map[string]any](t, req(t, http.MethodGet, srv.URL+"/providers/work", nil))
+	if models, ok := got["models"].([]any); !ok || len(models) != 0 {
+		t.Fatalf("reloaded provider must stay model-free: %+v", got)
 	}
 
 	// 列表 + 删除

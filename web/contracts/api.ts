@@ -161,7 +161,7 @@ export const providerModelOptions = z.object({
 });
 
 export const providerModel = z.object({
-  id: z.string(),
+  id: z.string().trim().min(1),
   displayName: z.string().optional(),
   contextWindow: z.number().optional(),
   capabilities: z

@@ -831,12 +831,20 @@ export function getSettings(token: string): Promise<{ settings: Record<string, s
   return request(token, "/settings", settingsResponse);
 }
 
+export function resetSettings(token: string): Promise<{ settings: Record<string, string> }> {
+  return request(token, "/settings", settingsResponse, { method: "DELETE" });
+}
+
 export function getDesktopAbout(token: string): Promise<{ sections: DesktopAboutSection[] }> {
   return request(token, "/desktop/about", desktopAboutResponse);
 }
 
 export function getAudioConfig(token: string): Promise<AudioConfigResponse> {
   return request(token, "/settings/audio", audioConfigResponse);
+}
+
+export function resetAudioConfig(token: string): Promise<AudioConfigResponse> {
+  return request(token, "/settings/audio", audioConfigResponse, { method: "DELETE" });
 }
 
 export function getUserPrompt(token: string): Promise<UserPrompt> {
@@ -990,8 +998,8 @@ export function putAudioConfig(token: string, body: AudioConfig): Promise<AudioC
   });
 }
 
-export function clearASRRecordings(token: string): Promise<ClearASRRecordingsResponse> {
-  return request(token, "/settings/audio/asr-recordings", clearASRRecordingsResponse, {
+export function clearASRRecordings(token: string, sessionID: string): Promise<ClearASRRecordingsResponse> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/audio/asr-recordings`, clearASRRecordingsResponse, {
     method: "DELETE",
   });
 }

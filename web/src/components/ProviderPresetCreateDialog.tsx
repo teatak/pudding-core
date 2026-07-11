@@ -10,6 +10,7 @@ import {
 import { queryKeys } from "@/api/queryKeys";
 import { BrandIcon } from "@/components/BrandIcons";
 import { Spinner } from "@/components/Spinner";
+import { UnsavedChangesAlert } from "@/components/UnsavedChangesAlert";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NeutralRadioGroup, NeutralRadioGroupItem } from "@/components/NeutralRadioGroup";
 import { useI18n } from "@/i18n";
+import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import { openExternalURL } from "@/lib/desktopBridge";
 import { cn } from "@/lib/utils";
 import {
@@ -156,6 +158,14 @@ export function ProviderPresetCreateDialog({
   const activeModels = variant?.dynamicModels ? [] : variant?.models || [];
   const baseURLReady = !variant?.baseURLEditable || Boolean(activeBaseURL);
   const canCreate = Boolean(preset && variant && profileID && baseURLReady && (!apiKeyRequired || apiKey.trim()));
+  const initialVariant = preset ? defaultProviderPresetVariant(preset) : null;
+  const dirty = Boolean(
+    open &&
+    preset &&
+    initializedPresetIDRef.current === preset.id &&
+    (apiKey.trim() || variantID !== initialVariant?.id || (variant?.baseURLEditable && baseURL !== variant.baseURL)),
+  );
+  const unsavedChanges = useUnsavedChangesGuard(dirty);
   const handleVariantChange = (value: string) => {
     setVariantID(value);
     const nextVariant = preset ? providerPresetVariant(preset, value) : null;
@@ -205,13 +215,21 @@ export function ProviderPresetCreateDialog({
     },
   });
 
+  function handleDialogOpenChange(nextOpen: boolean) {
+    if (mutation.isPending) {
+      return;
+    }
+    if (nextOpen) {
+      onOpenChange(true);
+      return;
+    }
+    unsavedChanges.request(() => onOpenChange(false));
+  }
+
   return (
-    <Dialog open={open} onOpenChange={(next) => {
-      if (!mutation.isPending) {
-        onOpenChange(next);
-      }
-    }}>
-      <DialogContent className="sm:max-w-lg">
+    <>
+      <Dialog open={open} onOpenChange={handleDialogOpenChange}>
+        <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{presetTitle}</DialogTitle>
           <DialogDescription>{presetDescription}</DialogDescription>
@@ -299,7 +317,7 @@ export function ProviderPresetCreateDialog({
         </div>
 
         <DialogFooter>
-          <Button disabled={mutation.isPending} type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+          <Button disabled={mutation.isPending} type="button" variant="ghost" onClick={() => handleDialogOpenChange(false)}>
             {t("common.cancel")}
           </Button>
           <Button disabled={mutation.isPending || !canCreate} type="button" onClick={() => mutation.mutate()}>
@@ -307,8 +325,14 @@ export function ProviderPresetCreateDialog({
             {t("provider.create")}
           </Button>
         </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+      <UnsavedChangesAlert
+        open={unsavedChanges.confirmationOpen}
+        onDiscard={unsavedChanges.discard}
+        onOpenChange={unsavedChanges.setConfirmationOpen}
+      />
+    </>
   );
 }
 

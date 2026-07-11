@@ -1502,9 +1502,10 @@ type Store interface {
 	// SearchMessages 在单个 session 的 canonical message text 上做全文检索。
 	// SQLite 正式实现走 FTS5;未启用 FTS5 时返回 ErrHistorySearchUnavailable。
 	SearchMessages(ctx context.Context, in MessageSearchInput) ([]*Message, error)
-	// RemoveAttachmentsByOrigin 从 canonical messages 和 queued inputs 中移除指定 origin 的附件 parts,
-	// 返回被移除的附件,供调用方清理 blob 文件。不会改动用户文本。
-	RemoveAttachmentsByOrigin(ctx context.Context, origin string) (*AttachmentCleanupResult, error)
+	// RemoveAttachmentsByOrigin 从指定 session 的 canonical messages 和 queued inputs 中
+	// 移除指定 origin 的附件 parts,返回被移除的附件供调用方清理 blob 文件。
+	// 不会改动用户文本。
+	RemoveAttachmentsByOrigin(ctx context.Context, sessionID, origin string) (*AttachmentCleanupResult, error)
 	// ListTurnsPage 按 turn 创建时间升序返回一页完整 turn。beforeTurnID 为空时
 	// 返回最近 limit 个 turn;非空时返回该 turn 之前的 limit 个 turn。
 	ListTurnsPage(ctx context.Context, sessionID string, beforeTurnID string, limit int) (*TurnPage, error)

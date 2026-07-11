@@ -17,6 +17,7 @@ import { AppToaster } from "@/components/AppToaster";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceResizableHandle } from "@/components/WorkspaceResizableHandle";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useAppSettingsMigration } from "@/hooks/useAppSettingsMigration";
 import { useVisibleSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
 import {
@@ -107,6 +108,7 @@ export function App() {
   // ChatPane 只负责 pane-local UI/滚动状态。
   useVisibleSessionEvents(activeSessionIDs, token);
   useCanvasMCP(token);
+  useAppSettingsMigration(token);
 
   useEffect(() => {
     if (previewTokenRef.current && previewTokenRef.current !== token) {

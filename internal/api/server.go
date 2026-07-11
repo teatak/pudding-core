@@ -188,6 +188,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/audio/bindings").GET(s.getAudioBindings)
 	app.Route("/sessions/:id/audio/input").POST(s.bindAudioInput)
 	app.Route("/sessions/:id/audio/output").POST(s.bindAudioOutput)
+	app.Route("/sessions/:id/audio/asr-recordings").DELETE(s.clearASRRecordings)
 	app.Route("/sessions/:id/browser/state").GET(s.getBrowserState).DELETE(s.clearBrowserState)
 	app.Route("/sessions/:id/browser/close").POST(s.closeBrowserSession)
 	app.Route("/sessions/:id/browser/open").POST(s.openBrowserSession)
@@ -216,12 +217,11 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/canvas/closed/:closedID").DELETE(s.deleteClosedCanvasItem)
 	app.Route("/projects").GET(s.listProjects).POST(s.createProject)
 	app.Route("/projects/:id").GET(s.getProject).PATCH(s.patchProject).DELETE(s.deleteProject)
-	app.Route("/settings").GET(s.getSettings).PUT(s.putSettings)
-	app.Route("/settings/audio").GET(s.getAudioConfig).PUT(s.putAudioConfig)
+	app.Route("/settings").GET(s.getSettings).PUT(s.putSettings).DELETE(s.resetSettings)
+	app.Route("/settings/audio").GET(s.getAudioConfig).PUT(s.putAudioConfig).DELETE(s.resetAudioConfig)
 	app.Route("/settings/audio/runtime").GET(s.getAudioRuntime)
 	app.Route("/settings/audio/runtime/install").POST(s.startAudioRuntimeInstall)
 	app.Route("/settings/audio/runtime/cancel").POST(s.cancelAudioRuntimeInstall)
-	app.Route("/settings/audio/asr-recordings").DELETE(s.clearASRRecordings)
 	app.Route("/settings/user-prompt").GET(s.getUserPrompt).PUT(s.putUserPrompt)
 	app.Route("/providers").GET(s.listProviders).POST(s.createProvider)
 	app.Route("/providers/models").POST(s.probeProviderModels)
@@ -922,6 +922,21 @@ func (s *Server) putSettings(c *cart.Context) error {
 	return nil
 }
 
+func (s *Server) resetSettings(c *cart.Context) error {
+	settings, ok := s.config.(interface {
+		ResetSettings(context.Context) (map[string]string, error)
+	})
+	if !ok {
+		return badRequest(c, "settings reset is unavailable")
+	}
+	kv, err := settings.ResetSettings(c.Request.Context())
+	if err != nil {
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, map[string]any{"settings": kv})
+	return nil
+}
+
 type audioConfigView struct {
 	Path   string             `json:"path"`
 	Config config.AudioConfig `json:"config"`
@@ -958,6 +973,21 @@ func (s *Server) putAudioConfig(c *cart.Context) error {
 		if errors.Is(err, config.ErrInvalidSetting) {
 			return badRequest(c, err.Error())
 		}
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, audioConfigView{Path: filepath.Join(s.home, "config", "audio.yaml"), Config: cfg})
+	return nil
+}
+
+func (s *Server) resetAudioConfig(c *cart.Context) error {
+	audio, ok := s.config.(interface {
+		ResetAudio(context.Context) (config.AudioConfig, error)
+	})
+	if !ok {
+		return badRequest(c, "audio config reset is unavailable")
+	}
+	cfg, err := audio.ResetAudio(c.Request.Context())
+	if err != nil {
 		return s.fail(c, err)
 	}
 	c.JSON(http.StatusOK, audioConfigView{Path: filepath.Join(s.home, "config", "audio.yaml"), Config: cfg})
@@ -1019,9 +1049,14 @@ type clearASRRecordingsResponse struct {
 }
 
 func (s *Server) clearASRRecordings(c *cart.Context) error {
+	sessionID, _ := c.Param("id")
+	sessionID = strings.TrimSpace(sessionID)
+	if _, err := s.store.GetSession(c.Request.Context(), sessionID); err != nil {
+		return s.fail(c, err)
+	}
 	results := make([]*store.AttachmentCleanupResult, 0, 2)
 	for _, origin := range []string{attachment.OriginASRAudio, attachment.OriginVoiceAudio} {
-		result, err := s.store.RemoveAttachmentsByOrigin(c.Request.Context(), origin)
+		result, err := s.store.RemoveAttachmentsByOrigin(c.Request.Context(), sessionID, origin)
 		if err != nil {
 			return s.fail(c, err)
 		}

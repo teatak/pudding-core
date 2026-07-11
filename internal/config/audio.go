@@ -145,6 +145,20 @@ func (m *Manager) SetAudio(_ context.Context, cfg AudioConfig) (AudioConfig, err
 	return next, nil
 }
 
+// ResetAudio rewrites audio.yaml with the defaults owned by this manager.
+func (m *Manager) ResetAudio(_ context.Context) (AudioConfig, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	next := DefaultAudioConfig()
+	if err := validateAudio(next); err != nil {
+		return AudioConfig{}, err
+	}
+	if err := m.writeAudio(next); err != nil {
+		return AudioConfig{}, err
+	}
+	return next, nil
+}
+
 func (c AudioConfig) WithDefaults() AudioConfig {
 	d := DefaultAudioConfig()
 	if c.Version == 0 {

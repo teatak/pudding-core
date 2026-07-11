@@ -1621,14 +1621,18 @@ func significantSearchTerms(terms []string) []string {
 	return out
 }
 
-func (s *Store) RemoveAttachmentsByOrigin(ctx context.Context, origin string) (*store.AttachmentCleanupResult, error) {
+func (s *Store) RemoveAttachmentsByOrigin(ctx context.Context, sessionID, origin string) (*store.AttachmentCleanupResult, error) {
+	sessionID = strings.TrimSpace(sessionID)
 	origin = strings.TrimSpace(origin)
 	out := &store.AttachmentCleanupResult{}
-	if origin == "" {
-		return out, nil
-	}
 	err := s.tx(ctx, func(tx *sql.Tx) error {
-		messageUpdates, err := cleanupMessageAttachmentParts(ctx, tx, origin, out)
+		if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
+			return err
+		}
+		if origin == "" {
+			return nil
+		}
+		messageUpdates, err := cleanupMessageAttachmentParts(ctx, tx, sessionID, origin, out)
 		if err != nil {
 			return err
 		}
@@ -1637,7 +1641,7 @@ func (s *Store) RemoveAttachmentsByOrigin(ctx context.Context, origin string) (*
 				return err
 			}
 		}
-		queuedUpdates, err := cleanupQueuedAttachmentParts(ctx, tx, origin, out)
+		queuedUpdates, err := cleanupQueuedAttachmentParts(ctx, tx, sessionID, origin, out)
 		if err != nil {
 			return err
 		}
@@ -1662,16 +1666,16 @@ type queuedPartsUpdate struct {
 	parts           []store.ContentPart
 }
 
-func cleanupMessageAttachmentParts(ctx context.Context, tx *sql.Tx, origin string, out *store.AttachmentCleanupResult) ([]messagePartsUpdate, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id,session_id,parts FROM messages WHERE parts LIKE ?`, "%\"origin\":\""+origin+"\"%")
+func cleanupMessageAttachmentParts(ctx context.Context, tx *sql.Tx, sessionID, origin string, out *store.AttachmentCleanupResult) ([]messagePartsUpdate, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id,parts FROM messages WHERE session_id=? AND parts LIKE ?`, sessionID, "%\"origin\":\""+origin+"\"%")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	updates := make([]messagePartsUpdate, 0)
 	for rows.Next() {
-		var id, sessionID, rawParts string
-		if err := rows.Scan(&id, &sessionID, &rawParts); err != nil {
+		var id, rawParts string
+		if err := rows.Scan(&id, &rawParts); err != nil {
 			return nil, err
 		}
 		next, removed, changed := store.RemoveAttachmentPartsByOrigin(decodeParts(rawParts), origin)
@@ -1687,16 +1691,16 @@ func cleanupMessageAttachmentParts(ctx context.Context, tx *sql.Tx, origin strin
 	return updates, rows.Err()
 }
 
-func cleanupQueuedAttachmentParts(ctx context.Context, tx *sql.Tx, origin string, out *store.AttachmentCleanupResult) ([]queuedPartsUpdate, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT session_id,client_message_id,parts FROM queued_inputs WHERE parts LIKE ?`, "%\"origin\":\""+origin+"\"%")
+func cleanupQueuedAttachmentParts(ctx context.Context, tx *sql.Tx, sessionID, origin string, out *store.AttachmentCleanupResult) ([]queuedPartsUpdate, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT client_message_id,parts FROM queued_inputs WHERE session_id=? AND parts LIKE ?`, sessionID, "%\"origin\":\""+origin+"\"%")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	updates := make([]queuedPartsUpdate, 0)
 	for rows.Next() {
-		var sessionID, clientMessageID, rawParts string
-		if err := rows.Scan(&sessionID, &clientMessageID, &rawParts); err != nil {
+		var clientMessageID, rawParts string
+		if err := rows.Scan(&clientMessageID, &rawParts); err != nil {
 			return nil, err
 		}
 		next, removed, changed := store.RemoveAttachmentPartsByOrigin(decodeParts(rawParts), origin)

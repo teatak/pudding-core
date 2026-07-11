@@ -929,7 +929,7 @@ async function ensureDaemon(browserBridge) {
     throw new Error("puddingd binary not found. Run `make desktop-dev` so the dev binary is built first.");
   }
 
-  daemonProcess = spawn(daemonBin, ["-addr", daemonAddr, "-lan"], {
+  daemonProcess = spawn(daemonBin, ["-addr", daemonAddr], {
     cwd: repoRoot,
     env: {
       ...process.env,

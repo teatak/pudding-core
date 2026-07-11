@@ -19,6 +19,7 @@ import {
 import { queryKeys } from "@/api/queryKeys";
 import { DialogSelectContent } from "@/components/DialogSelectContent";
 import { Spinner } from "@/components/Spinner";
+import { UnsavedChangesAlert } from "@/components/UnsavedChangesAlert";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
@@ -47,6 +48,7 @@ import { NeutralRadioGroup, NeutralRadioGroupItem } from "@/components/NeutralRa
 import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { useI18n } from "@/i18n";
+import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import { shouldKeepDialogOpenForSelectDismiss } from "@/lib/layerGuards";
 import { cn } from "@/lib/utils";
 import {
@@ -66,12 +68,13 @@ const providerProtocolSchema = z.enum(["openai-compatible", "openai-responses", 
 const PROVIDER_PROTOCOL_OPTIONS: ProviderPresetProtocol[] = ["openai-compatible", "openai-responses", "google", "anthropic"];
 const BASE_REASONING_EFFORT_OPTIONS = ["auto", "low", "medium", "high"];
 const OPENAI_REASONING_EFFORT_OPTIONS = [...BASE_REASONING_EFFORT_OPTIONS, "xhigh"];
+const MODEL_ID_REQUIRED = "provider.modelIDRequired";
 const optionSelectedClass = "border-primary/45 bg-primary/10 text-foreground";
 const optionIdleClass = "bg-transparent text-muted-foreground hover:bg-transparent";
 const radioOptionSelectedClass = "border-foreground/20 bg-accent text-foreground";
 
 const modelFormSchema = z.object({
-  id: z.string().trim().min(1),
+  id: z.string(),
   displayName: z.string().optional(),
   contextWindow: z.string().optional(),
   image: z.boolean(),
@@ -82,6 +85,10 @@ const modelFormSchema = z.object({
   maxCompletionTokens: z.string().optional(),
   maxToolLoops: z.string().optional(),
   anthropicMaxTokens: z.string().optional(),
+}).superRefine((value, context) => {
+  if (!value.id.trim() && !isBlankModel(value)) {
+    context.addIssue({ code: "custom", path: ["id"], message: MODEL_ID_REQUIRED });
+  }
 });
 
 const providerFormSchema = z.object({
@@ -92,7 +99,7 @@ const providerFormSchema = z.object({
   protocol: providerProtocolSchema,
   baseURL: z.string().optional(),
   apiKey: z.string().optional(),
-  models: z.array(modelFormSchema),
+  models: z.array(modelFormSchema).transform((models) => models.filter((model) => model.id.trim() !== "")),
 });
 
 export type ProviderProfileEditorValue = z.infer<typeof providerFormSchema>;
@@ -314,22 +321,35 @@ export function ProviderProfileEditorDialog({
   }
 
   const saving = createMutation.isPending || patchMutation.isPending;
+  const unsavedChanges = useUnsavedChangesGuard(form.formState.isDirty);
+
+  function handleDialogOpenChange(nextOpen: boolean) {
+    if (saving) {
+      return;
+    }
+    if (nextOpen) {
+      onOpenChange(true);
+      return;
+    }
+    unsavedChanges.request(() => onOpenChange(false));
+  }
 
   return (
-    <Dialog open={open} onOpenChange={saving ? undefined : onOpenChange}>
-      <DialogContent
-        className="top-[calc(var(--toolbar-h)+(100svh-var(--toolbar-h))/2)] grid h-[min(900px,calc(100svh-var(--toolbar-h)-1.5rem))] w-[min(680px,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-none"
-        onPointerDownOutside={(event) => {
-          if (shouldKeepDialogOpenForSelectDismiss(event.target)) {
-            event.preventDefault();
-          }
-        }}
-        onInteractOutside={(event) => {
-          if (shouldKeepDialogOpenForSelectDismiss(event.target)) {
-            event.preventDefault();
-          }
-        }}
-      >
+    <>
+      <Dialog open={open} onOpenChange={handleDialogOpenChange}>
+        <DialogContent
+          className="top-[calc(var(--toolbar-h)+(100svh-var(--toolbar-h))/2)] grid h-[min(900px,calc(100svh-var(--toolbar-h)-1.5rem))] w-[min(680px,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-none"
+          onPointerDownOutside={(event) => {
+            if (shouldKeepDialogOpenForSelectDismiss(event.target)) {
+              event.preventDefault();
+            }
+          }}
+          onInteractOutside={(event) => {
+            if (shouldKeepDialogOpenForSelectDismiss(event.target)) {
+              event.preventDefault();
+            }
+          }}
+        >
         <DialogHeader className="px-5 py-4 pr-14">
           <DialogTitle>{editingID ? t("provider.edit") : t("provider.create")}</DialogTitle>
           <DialogDescription>{t("provider.keyHint")}</DialogDescription>
@@ -500,30 +520,36 @@ export function ProviderProfileEditorDialog({
                     </Button>
                   </div>
                 </div>
-                <Accordion className="overflow-hidden rounded-lg border bg-card" type="multiple">
-                  {fields.fields.map((field, index) => (
-                    <ModelEditor
-                      key={field.id}
-                      canMoveDown={index < fields.fields.length - 1}
-                      canMoveUp={index > 0}
-                      canRemove={fields.fields.length > 1}
-                      form={form}
-                      index={index}
-                      providerBrand={providerBrand}
-                      providerProtocol={providerProtocol}
-                      value={field.id}
-                      onDuplicate={() => fields.insert(index + 1, { ...form.getValues(`models.${index}`) })}
-                      onMoveDown={() => fields.move(index, index + 1)}
-                      onMoveUp={() => fields.move(index, index - 1)}
-                      onRemove={() => fields.remove(index)}
-                    />
-                  ))}
-                </Accordion>
+                {fields.fields.length > 0 ? (
+                  <Accordion className="overflow-hidden rounded-lg border bg-card" type="multiple">
+                    {fields.fields.map((field, index) => (
+                      <ModelEditor
+                        key={field.id}
+                        canMoveDown={index < fields.fields.length - 1}
+                        canMoveUp={index > 0}
+                        canRemove
+                        form={form}
+                        index={index}
+                        providerBrand={providerBrand}
+                        providerProtocol={providerProtocol}
+                        value={field.id}
+                        onDuplicate={() => fields.insert(index + 1, { ...form.getValues(`models.${index}`) })}
+                        onMoveDown={() => fields.move(index, index + 1)}
+                        onMoveUp={() => fields.move(index, index - 1)}
+                        onRemove={() => fields.remove(index)}
+                      />
+                    ))}
+                  </Accordion>
+                ) : (
+                  <div className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+                    {t("picker.noModels")}
+                  </div>
+                )}
               </div>
             </div>
           </div>
           <DialogFooter className="m-0 rounded-none">
-            <Button disabled={saving} type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button disabled={saving} type="button" variant="outline" onClick={() => handleDialogOpenChange(false)}>
               {t("common.cancel")}
             </Button>
             <Button disabled={saving} type="submit">
@@ -532,8 +558,14 @@ export function ProviderProfileEditorDialog({
             </Button>
           </DialogFooter>
         </form>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+      <UnsavedChangesAlert
+        open={unsavedChanges.confirmationOpen}
+        onDiscard={unsavedChanges.discard}
+        onOpenChange={unsavedChanges.setConfirmationOpen}
+      />
+    </>
   );
 }
 
@@ -610,6 +642,9 @@ function ModelEditor({
           <div className="grid gap-3 sm:grid-cols-2">
             <PlainField label={t("provider.modelID")}>
               <Input {...form.register(`${prefix}.id`)} />
+              {form.formState.errors.models?.[index]?.id?.message ? (
+                <div className="text-xs text-destructive">{t(form.formState.errors.models[index]?.id?.message || "")}</div>
+              ) : null}
             </PlainField>
             <PlainField label={t("provider.modelName")}>
               <Input {...form.register(`${prefix}.displayName`)} />
@@ -938,6 +973,22 @@ function emptyModel(id = ""): ModelFormValue {
   };
 }
 
+function isBlankModel(value: ModelFormValue) {
+  return (
+    !value.id.trim() &&
+    !value.displayName?.trim() &&
+    !value.contextWindow?.trim() &&
+    !value.temperature?.trim() &&
+    !value.reasoningEffort?.trim() &&
+    !value.maxCompletionTokens?.trim() &&
+    !value.maxToolLoops?.trim() &&
+    !value.anthropicMaxTokens?.trim() &&
+    !value.image &&
+    !value.audio &&
+    value.tools
+  );
+}
+
 function providerToForm(profile: ProviderProfile): ProviderProfileEditorValue {
   const variant = providerPresetVariantForSelection(providerPresetForBrand(profile.brand), profile.group, profile.protocol);
   return {
@@ -978,7 +1029,7 @@ function cleanCreateProvider(value: ProviderProfileEditorValue) {
     protocol: value.protocol,
     baseURL: value.baseURL?.trim(),
     apiKey: value.apiKey?.trim(),
-    models: value.models.map((model) => cleanModel(model, value.protocol, value.brand)),
+    models: cleanModels(value),
   });
 }
 
@@ -990,8 +1041,14 @@ function cleanPatchProvider(value: ProviderProfileEditorValue) {
     protocol: value.protocol,
     baseURL: value.baseURL?.trim(),
     apiKey: value.apiKey?.trim() || undefined,
-    models: value.models.map((model) => cleanModel(model, value.protocol, value.brand)),
+    models: cleanModels(value),
   });
+}
+
+function cleanModels(value: ProviderProfileEditorValue) {
+  return value.models
+    .filter((model) => model.id.trim() !== "")
+    .map((model) => cleanModel(model, value.protocol, value.brand));
 }
 
 function cleanModel(value: ModelFormValue, providerProtocol: ProviderProfileEditorValue["protocol"], providerBrand?: string): ProviderModel {
