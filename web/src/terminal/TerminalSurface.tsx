@@ -7,6 +7,11 @@ import { terminalWebSocketURL, type Terminal } from "@/api/client";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/theme/theme";
+import {
+  DEFAULT_TERMINAL_DIMENSIONS,
+  normalizeTerminalDimensions,
+  type TerminalDimensions,
+} from "@/terminal/terminalDimensions";
 
 type TerminalStatusMessage = {
   type: "status";
@@ -17,6 +22,8 @@ type TerminalStatusMessage = {
 export function TerminalSurface({
   active,
   activeTerminalID,
+  fallbackDimensions = DEFAULT_TERMINAL_DIMENSIONS,
+  initialDimensionsByID = {},
   sessionID,
   terminals,
   token,
@@ -24,6 +31,8 @@ export function TerminalSurface({
 }: {
   active: boolean;
   activeTerminalID?: string;
+  fallbackDimensions?: TerminalDimensions;
+  initialDimensionsByID?: Record<string, TerminalDimensions>;
   sessionID: string;
   terminals: Terminal[];
   token: string;
@@ -43,6 +52,7 @@ export function TerminalSurface({
         <TerminalPane
           key={item.id}
           active={active && item.id === activeTerminalID}
+          initialDimensions={initialDimensionsByID[item.id] || fallbackDimensions}
           item={item}
           resolvedTheme={resolved}
           sessionID={sessionID}
@@ -56,6 +66,7 @@ export function TerminalSurface({
 
 function TerminalPane({
   active,
+  initialDimensions,
   item,
   resolvedTheme,
   sessionID,
@@ -63,6 +74,7 @@ function TerminalPane({
   onStatus,
 }: {
   active: boolean;
+  initialDimensions: TerminalDimensions;
   item: Terminal;
   resolvedTheme: "light" | "dark";
   sessionID: string;
@@ -79,6 +91,7 @@ function TerminalPane({
   const exitWrittenRef = useRef(false);
   const statusCallbackRef = useRef(onStatus);
   const exitLabelRef = useRef(t("terminal.exited"));
+  const initialDimensionsRef = useRef(normalizeTerminalDimensions(initialDimensions));
   activeRef.current = active;
   statusCallbackRef.current = onStatus;
   exitLabelRef.current = t("terminal.exited");
@@ -93,13 +106,15 @@ function TerminalPane({
     let reconnectAttempt = 0;
     const terminal = new XTerm({
       allowProposedApi: false,
+      cols: initialDimensionsRef.current.columns,
       convertEol: false,
       cursorBlink: true,
       cursorStyle: "bar",
-      fontFamily: '"SFMono-Regular", "Cascadia Code", "Liberation Mono", Menlo, monospace',
-      fontSize: 13,
-      lineHeight: 1.25,
-      scrollback: 10_000,
+      fontFamily: TERMINAL_FONT_FAMILY,
+      fontSize: TERMINAL_FONT_SIZE,
+      lineHeight: TERMINAL_LINE_HEIGHT,
+      rows: initialDimensionsRef.current.rows,
+      scrollback: TERMINAL_SCROLLBACK,
       theme: terminalTheme(resolvedTheme),
     });
     const fit = new FitAddon();
@@ -256,6 +271,70 @@ function TerminalPane({
     </div>
   );
 }
+
+export function TerminalSizeProbe({
+  onDimensionsChange,
+}: {
+  onDimensionsChange: (dimensions: TerminalDimensions) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const callbackRef = useRef(onDimensionsChange);
+  callbackRef.current = onDimensionsChange;
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+    const terminal = new XTerm({
+      cols: DEFAULT_TERMINAL_DIMENSIONS.columns,
+      cursorBlink: false,
+      fontFamily: TERMINAL_FONT_FAMILY,
+      fontSize: TERMINAL_FONT_SIZE,
+      lineHeight: TERMINAL_LINE_HEIGHT,
+      rows: DEFAULT_TERMINAL_DIMENSIONS.rows,
+      scrollback: TERMINAL_SCROLLBACK,
+    });
+    const fit = new FitAddon();
+    terminal.loadAddon(fit);
+    terminal.open(container);
+
+    let frame = 0;
+    const reportDimensions = () => {
+      frame = 0;
+      try {
+        fit.fit();
+      } catch {
+        return;
+      }
+      callbackRef.current(normalizeTerminalDimensions({ columns: terminal.cols, rows: terminal.rows }));
+    };
+    const scheduleReport = () => {
+      globalThis.cancelAnimationFrame(frame);
+      frame = globalThis.requestAnimationFrame(reportDimensions);
+    };
+    const observer = new ResizeObserver(scheduleReport);
+    observer.observe(container);
+    scheduleReport();
+
+    return () => {
+      globalThis.cancelAnimationFrame(frame);
+      observer.disconnect();
+      terminal.dispose();
+    };
+  }, []);
+
+  return (
+    <div aria-hidden="true" className="pointer-events-none invisible absolute inset-0 p-2" inert>
+      <div ref={containerRef} className="h-full w-full overflow-hidden" />
+    </div>
+  );
+}
+
+const TERMINAL_FONT_FAMILY = '"SFMono-Regular", "Cascadia Code", "Liberation Mono", Menlo, monospace';
+const TERMINAL_FONT_SIZE = 13;
+const TERMINAL_LINE_HEIGHT = 1.25;
+const TERMINAL_SCROLLBACK = 10_000;
 
 function terminalTheme(resolvedTheme: "light" | "dark") {
   if (resolvedTheme === "light") {

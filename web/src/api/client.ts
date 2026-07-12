@@ -129,6 +129,7 @@ import {
 import { z } from "zod";
 
 import { apiURL } from "@/state/apiBase";
+import { runtimeRequestHeaders } from "@/state/runtime";
 
 export class APIError extends Error {
   constructor(
@@ -200,6 +201,7 @@ export type ClosedCanvasItemPayload = z.infer<typeof putClosedCanvasItemRequest>
 function authHeaders(token: string) {
   return {
     Authorization: `Bearer ${token}`,
+    ...runtimeRequestHeaders(),
   };
 }
 

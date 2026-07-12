@@ -5,14 +5,36 @@ export type ToolDefinition = {
   description: string;
   inputSchema: Record<string, unknown>;
   capability?: "chat" | "work" | "code";
+  appID?: string;
   handler: (args: unknown) => unknown | Promise<unknown>;
+};
+
+export type RuntimeAppSkillDefinition = {
+  id: string;
+  name: string;
+  description?: string;
+  path: string;
+  content: string;
+};
+
+export type RuntimeAppDefinition = {
+  id: string;
+  name: string;
+  version?: string;
+  description?: string;
+  requiredMode: "chat" | "work" | "code";
+  defaultSkillID?: string;
+  skills?: RuntimeAppSkillDefinition[];
 };
 
 type BrowserMCPOptions = {
   endpoint: string;
   enabled: boolean;
   tools: ToolDefinition[];
+  apps?: RuntimeAppDefinition[];
+  runtimeInfo: { id: string; type: string };
   serverInfo?: { name: string; version: string };
+  onRegistryChanged?: () => void;
 };
 
 type JSONRPCMessage = {
@@ -24,15 +46,18 @@ type JSONRPCMessage = {
   error?: { code: number; message: string };
 };
 
-export function useBrowserMCP({ endpoint, enabled, serverInfo, tools }: BrowserMCPOptions) {
+export function useBrowserMCP({ apps, endpoint, enabled, onRegistryChanged, runtimeInfo, serverInfo, tools }: BrowserMCPOptions) {
   useEffect(() => {
     if (!enabled || !endpoint) {
       return;
     }
     const server = new BrowserMCPServer({
       endpoint,
+      apps: apps ?? [],
+      runtimeInfo,
       serverInfo: serverInfo ?? { name: "pudding-ui", version: "1.0" },
       tools,
+      onRegistryChanged,
     });
     let cancelled = false;
     queueMicrotask(() => {
@@ -44,7 +69,7 @@ export function useBrowserMCP({ endpoint, enabled, serverInfo, tools }: BrowserM
       cancelled = true;
       server.close();
     };
-  }, [enabled, endpoint, serverInfo, tools]);
+  }, [apps, enabled, endpoint, onRegistryChanged, runtimeInfo, serverInfo, tools]);
 }
 
 class BrowserMCPServer {
@@ -57,8 +82,11 @@ class BrowserMCPServer {
   constructor(
     private readonly options: {
       endpoint: string;
+      apps: RuntimeAppDefinition[];
+      runtimeInfo: { id: string; type: string };
       serverInfo: { name: string; version: string };
       tools: ToolDefinition[];
+      onRegistryChanged?: () => void;
     },
   ) {
     for (const tool of options.tools) {
@@ -82,6 +110,7 @@ class BrowserMCPServer {
       if (this.socket === socket) {
         this.socket = null;
       }
+      this.options.onRegistryChanged?.();
       this.scheduleReconnect();
     };
     socket.onerror = () => {
@@ -122,6 +151,9 @@ class BrowserMCPServer {
       if (hasID) {
         this.send(socket, { jsonrpc: "2.0", id: message.id, result });
       }
+      if (message.method === "apps/list") {
+        window.setTimeout(() => this.options.onRegistryChanged?.(), 100);
+      }
     } catch (error) {
       if (hasID) {
         this.send(socket, {
@@ -138,18 +170,41 @@ class BrowserMCPServer {
       return {
         protocolVersion: "2024-11-05",
         serverInfo: this.options.serverInfo,
-        capabilities: { tools: {} },
+        runtimeInfo: this.options.runtimeInfo,
+        capabilities: { apps: {}, tools: {} },
       };
     }
     if (method === "tools/list") {
       return {
-        tools: this.options.tools.map(({ name, description, inputSchema, capability }) => ({
+        tools: this.options.tools.map(({ name, description, inputSchema, capability, appID }) => ({
           name,
           description,
           inputSchema,
           capability,
+          appID,
         })),
       };
+    }
+    if (method === "apps/list") {
+      return {
+        apps: this.options.apps.map(({ skills, ...app }) => ({
+          ...app,
+          skills: skills?.map(({ content: _content, ...skill }) => skill),
+        })),
+      };
+    }
+    if (method === "apps/skills/read") {
+      const request = asRecord(params);
+      const appID = stringValue(request?.appID);
+      const skillID = stringValue(request?.skillID);
+      const app = this.options.apps.find((item) => item.id === appID);
+      const skill = app?.skills?.find(
+        (item) => item.id === skillID || item.name === skillID || item.path === skillID,
+      );
+      if (!skill) {
+        throw new Error(`unknown runtime app skill: ${appID}/${skillID}`);
+      }
+      return skill;
     }
     if (method === "tools/call") {
       const call = asRecord(params);

@@ -256,29 +256,21 @@ function BrowserMCPToolsPanel({
   onRetry: () => void;
   sessions: BrowserMCPSession[];
 }) {
-  const canvasTools = useMemo(() => uniqueBrowserTools(sessions, (name) => name.startsWith("canvas_")), [sessions]);
-  const uiTools = useMemo(() => uniqueBrowserTools(sessions, (name) => name === "collect_user_input"), [sessions]);
+  const uiTools = useMemo(
+    () => uniqueBrowserTools(sessions, (name, appID) => !appID && name === "collect_user_input"),
+    [sessions],
+  );
   const connected = sessions.length > 0;
 
   return (
-    <>
-      <BrowserMCPToolGroup
-        connected={connected && canvasTools.length > 0}
-        error={error}
-        group="canvas"
-        loading={loading}
-        tools={canvasTools}
-        onRetry={onRetry}
-      />
-      <BrowserMCPToolGroup
-        connected={connected && uiTools.length > 0}
-        error={error}
-        group="ui"
-        loading={loading}
-        tools={uiTools}
-        onRetry={onRetry}
-      />
-    </>
+    <BrowserMCPToolGroup
+      connected={connected && uiTools.length > 0}
+      error={error}
+      group="ui"
+      loading={loading}
+      tools={uiTools}
+      onRetry={onRetry}
+    />
   );
 }
 
@@ -292,7 +284,7 @@ function BrowserMCPToolGroup({
 }: {
   connected: boolean;
   error: boolean;
-  group: "canvas" | "ui";
+  group: "ui";
   loading: boolean;
   onRetry: () => void;
   tools: ToolInfo[];
@@ -341,12 +333,15 @@ function BrowserMCPToolGroup({
   );
 }
 
-function uniqueBrowserTools(sessions: BrowserMCPSession[], matches: (name: string) => boolean): ToolInfo[] {
+function uniqueBrowserTools(
+  sessions: BrowserMCPSession[],
+  matches: (name: string, appID: string | undefined) => boolean,
+): ToolInfo[] {
   const seen = new Set<string>();
   const tools: ToolInfo[] = [];
   for (const session of sessions) {
     for (const tool of session.tools) {
-      if (!matches(tool.name) || seen.has(tool.name)) {
+      if (!matches(tool.name, tool.appID) || seen.has(tool.name)) {
         continue;
       }
       seen.add(tool.name);

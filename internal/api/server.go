@@ -337,6 +337,10 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 func withAuth(token string, devices deviceTokenValidator, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if validBearerToken(r, token, devices) {
+			runtimeID := strings.TrimSpace(r.Header.Get(app.RuntimeIDHeader))
+			if runtimeID != "" {
+				r = r.WithContext(app.WithRuntimeID(r.Context(), runtimeID))
+			}
 			next.ServeHTTP(w, r)
 			return
 		}

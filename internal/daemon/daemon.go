@@ -123,6 +123,7 @@ func Start(opts Options) (*Daemon, error) {
 		return nil, err
 	}
 	browserMCP := tool.NewBrowserMCPRunner()
+	apps.WithRuntimeSource(browserMCP)
 	terminalManager, err := terminal.NewManager(st)
 	if err != nil {
 		_ = browserService.Close()
@@ -161,7 +162,7 @@ func Start(opts Options) (*Daemon, error) {
 		browserMCP,
 		appMCP,
 	)
-	eng := engine.New(st, hub, resolver, cfg, engine.WithPromptSource(prompt.NewLoader(dir, cfg)), engine.WithAttachmentHome(dir), engine.WithTools(tools), engine.WithApps(apps))
+	eng := engine.New(st, hub, resolver, cfg, engine.WithPromptSource(prompt.NewLoaderWithApps(dir, apps, cfg)), engine.WithAttachmentHome(dir), engine.WithTools(tools), engine.WithApps(apps))
 	audioDriver := defaultCaptureDriver(audioCfg)
 	voiceService := voice.NewService(voice.ServiceConfig{
 		Manager:           voice.NewManager(),

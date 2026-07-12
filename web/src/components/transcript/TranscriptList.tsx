@@ -187,6 +187,21 @@ export const TranscriptList = memo(function TranscriptList({
     setLatestState(true);
   }, [releaseViewportResizeAnchor, scrollElement, setLatestState]);
 
+  const syncPinnedBottom = useCallback(() => {
+    if (!scrollElement) {
+      return;
+    }
+    releaseViewportResizeAnchor();
+    const nextScrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
+    if (Math.abs(scrollElement.scrollTop - nextScrollTop) > ANCHOR_RESTORE_EPSILON_PX) {
+      markProgrammaticScroll(programmaticScrollIgnoreUntilRef);
+      scrollElement.scrollTop = nextScrollTop;
+    }
+    lastScrollTopRef.current = scrollElement.scrollTop;
+    autoStickRef.current = true;
+    setLatestState(true);
+  }, [releaseViewportResizeAnchor, scrollElement, setLatestState]);
+
   const stickToLatestIfPinned = useCallback(
     (frames = 1, options: { deferFirstFrame?: boolean } = {}) => {
       if (!autoStickRef.current) {
@@ -255,13 +270,20 @@ export const TranscriptList = memo(function TranscriptList({
       }
 
       if (open) {
+        const openedAtLatest = scrollElement
+          ? distanceFromBottom(scrollElement) <= SCROLL_END_THRESHOLD_PX
+          : isAtLatestRef.current;
         disclosureOpenStateRef.current.set(key, {
-          openedAtLatest: scrollElement
-            ? distanceFromBottom(scrollElement) <= SCROLL_END_THRESHOLD_PX || isAtLatestRef.current
-            : isAtLatestRef.current,
+          openedAtLatest,
           userScrollSeq: userScrollSeqRef.current,
         });
-        disableAutoStick();
+        if (openedAtLatest) {
+          autoStickRef.current = true;
+          setLatestState(true);
+        } else {
+          disableAutoStick();
+          setLatestState(false);
+        }
         disclosure.setOpen(key, true);
         return;
       }
@@ -269,13 +291,13 @@ export const TranscriptList = memo(function TranscriptList({
       const openState = disclosureOpenStateRef.current.get(key);
       disclosureOpenStateRef.current.delete(key);
       const currentlyAtLatest = scrollElement
-        ? distanceFromBottom(scrollElement) <= SCROLL_END_THRESHOLD_PX || isAtLatestRef.current
+        ? distanceFromBottom(scrollElement) <= SCROLL_END_THRESHOLD_PX
         : isAtLatestRef.current;
       disclosure.setOpen(key, false);
       const userScrolledDuringDisclosure = openState ? userScrollSeqRef.current !== openState.userScrollSeq : false;
       settleAfterDisclosureClose(currentlyAtLatest || (Boolean(openState?.openedAtLatest) && !userScrolledDuringDisclosure));
     },
-    [disableAutoStick, disclosure, scrollElement, settleAfterDisclosureClose],
+    [disableAutoStick, disclosure, scrollElement, setLatestState, settleAfterDisclosureClose],
   );
 
   const listDisclosure = useMemo<TurnDisclosureState | undefined>(() => {
@@ -323,11 +345,10 @@ export const TranscriptList = memo(function TranscriptList({
   }, [scrollElement]);
 
   const handleContentResize = useCallback(() => {
-    // Opening a disclosure intentionally pauses auto-stick. Respect that hold so the
-    // ResizeObserver does not snap the viewport, then sync the physical latest state below.
+    // ResizeObserver runs before paint. Compensate synchronously so pinned disclosures
+    // visually grow upward instead of rendering first and snapping on the next frame.
     if (autoStickRef.current) {
-      autoStickRef.current = true;
-      stickToLatestIfPinned(CONTENT_STICK_STABILIZE_FRAMES, { deferFirstFrame: true });
+      syncPinnedBottom();
       return;
     }
     if (scrollElement && distanceFromBottom(scrollElement) > SCROLL_END_THRESHOLD_PX) {
@@ -337,7 +358,7 @@ export const TranscriptList = memo(function TranscriptList({
       restoreResizeAnchorIfDetached(resizeAnchorRef.current);
       return;
     }
-  }, [restoreResizeAnchorIfDetached, scrollElement, setLatestState, stickToLatestIfPinned]);
+  }, [restoreResizeAnchorIfDetached, scrollElement, setLatestState, syncPinnedBottom]);
 
   useEffect(() => {
     if (!scrollElement) {

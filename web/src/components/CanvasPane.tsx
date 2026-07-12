@@ -67,7 +67,11 @@ import {
   useFilePreviews,
   useFilePreviewReveal,
 } from "@/state/filePreviewStore";
-import { TerminalSurface } from "@/terminal/TerminalSurface";
+import { TerminalSizeProbe, TerminalSurface } from "@/terminal/TerminalSurface";
+import {
+  DEFAULT_TERMINAL_DIMENSIONS,
+  type TerminalDimensions,
+} from "@/terminal/terminalDimensions";
 
 type CanvasPaneProps = {
   token: string;
@@ -152,6 +156,7 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const terminalDimensionsRef = useRef<TerminalDimensions>({ ...DEFAULT_TERMINAL_DIMENSIONS });
   const actorSessionIDRef = useRef("");
   const canvasSessionStateRef = useRef("");
   const draftWindowsRef = useRef<Record<string, WindowState>>({});
@@ -282,9 +287,11 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
     creatingTerminal,
     selectTerminal,
     terminals,
+    terminalInitialDimensions,
   } = useCanvasTerminals({
     active: terminalActive,
     enabled,
+    getInitialDimensions: () => terminalDimensionsRef.current,
     sessionID: actorSessionID,
     token,
     onActivate: () => {
@@ -885,6 +892,11 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
         </div>
       </div>
       <div className="relative z-0 min-h-0 flex-1 overflow-hidden px-3 pb-3">
+        <TerminalSizeProbe
+          onDimensionsChange={(dimensions) => {
+            terminalDimensionsRef.current = dimensions;
+          }}
+        />
         <div ref={containerRef} className="relative isolate z-0 h-full overflow-hidden">
           {browserActive || terminalActive || filePreviewActive ? null : (!enabled && items.length === 0) || (itemsQuery.isLoading && items.length === 0) ? (
             <CanvasEmpty
@@ -955,6 +967,8 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
               key={`terminal:${targetSessionID}`}
               active={targetSessionID === actorSessionID && terminalActive}
               activeTerminalID={targetSessionID === actorSessionID ? activeTerminalID : undefined}
+              fallbackDimensions={terminalDimensionsRef.current}
+              initialDimensionsByID={terminalInitialDimensions}
               sessionID={targetSessionID}
               terminals={sessionTerminals}
               token={token}

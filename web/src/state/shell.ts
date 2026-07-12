@@ -32,6 +32,10 @@ export function initShellMode() {
   }
 }
 
+export function isElectronShell() {
+  return normalizeShell(document.documentElement.dataset.shell || null) !== "";
+}
+
 async function initElectronFullscreenTracking() {
   const bridge = typeof window === "undefined" ? undefined : window.puddingElectronShell;
   if (!bridge) {

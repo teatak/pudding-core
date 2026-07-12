@@ -25,9 +25,20 @@ type webToolsConfig interface {
 }
 
 func (s *Server) listBuiltinTools(c *cart.Context) error {
-	defs := append([]provider.ToolDef{tool.RequestCapabilityDefinition()}, tool.BuiltinDefinitions()...)
+	defs := settingsBuiltinToolDefinitions()
 	c.JSON(http.StatusOK, map[string]any{"tools": viewBuiltinTools(defs)})
 	return nil
+}
+
+func settingsBuiltinToolDefinitions() []provider.ToolDef {
+	defs := []provider.ToolDef{tool.RequestCapabilityDefinition(), tool.AppLoadDefinition()}
+	for _, def := range tool.BuiltinDefinitions() {
+		if _, appTool := tool.BuiltinAppIDForTool(def.Name); appTool || tool.IsAppAPITool(def.Name) || def.AppID != "" {
+			continue
+		}
+		defs = append(defs, def)
+	}
+	return defs
 }
 
 func (s *Server) getWebTools(c *cart.Context) error {

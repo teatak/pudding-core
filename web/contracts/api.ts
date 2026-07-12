@@ -116,11 +116,14 @@ export const browserMCPTool = z.object({
   name: z.string(),
   description: z.string().optional(),
   capability: z.enum(["chat", "work", "code"]).optional(),
+  appID: z.string().optional(),
 });
 export type BrowserMCPTool = z.infer<typeof browserMCPTool>;
 
 export const browserMCPSession = z.object({
   id: z.string(),
+  runtimeID: z.string(),
+  runtime: z.string(),
   connectedAt: z.string(),
   serverName: z.string().optional(),
   serverVersion: z.string().optional(),
@@ -859,6 +862,12 @@ export const appSkillDetail = appSkillRef.extend({
 });
 export type AppSkillDetail = z.infer<typeof appSkillDetail>;
 
+export const appToolRef = z.object({
+  name: z.string(),
+  description: z.string().optional(),
+});
+export type AppToolRef = z.infer<typeof appToolRef>;
+
 export const appIconThemeColor = z.object({
   light: z.string().optional(),
   dark: z.string().optional(),
@@ -915,10 +924,12 @@ export const appDefinition = z.object({
   connection: appConnectionConfig.optional(),
   endpoints: z.record(z.string(), appEndpoint).optional(),
   skills: z.array(appSkillRef).optional(),
+  tools: z.array(appToolRef).optional(),
   path: z.string().optional(),
   sourceURL: z.string().optional(),
   packageSHA256: z.string().optional(),
   source: z.enum(["builtin", "installed"]),
+  runtime: z.string().optional(),
   enabled: z.boolean(),
   canUninstall: z.boolean(),
   requiredMode: z.enum(["chat", "work", "code"]),

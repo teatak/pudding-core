@@ -84,10 +84,6 @@ type AppEndpointSource interface {
 	ResolveEndpoint(ctx context.Context, sessionID, endpointName, connection string) (*app.EndpointBinding, error)
 }
 
-type AppSkillReader interface {
-	ReadSkill(ctx context.Context, appID, skillID string) (*app.SkillDetail, error)
-}
-
 type SkillReader interface {
 	ReadSkill(ctx context.Context, id string) (*skill.Document, error)
 }
@@ -120,7 +116,6 @@ type BuiltinOption func(*BuiltinRunner)
 type BuiltinRunner struct {
 	webConfig                WebConfigSource
 	appEndpoints             AppEndpointSource
-	appSkills                AppSkillReader
 	skillReader              SkillReader
 	skillDrafts              SkillDraftSource
 	history                  HistorySearchSource
@@ -175,15 +170,6 @@ func WithWebConfig(source WebConfigSource) BuiltinOption {
 func WithAppEndpoints(source AppEndpointSource) BuiltinOption {
 	return func(r *BuiltinRunner) {
 		r.appEndpoints = source
-		if skills, ok := source.(AppSkillReader); ok {
-			r.appSkills = skills
-		}
-	}
-}
-
-func WithAppSkills(source AppSkillReader) BuiltinOption {
-	return func(r *BuiltinRunner) {
-		r.appSkills = source
 	}
 }
 
@@ -320,8 +306,8 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        SkillRead,
-			Description: "Read the full SKILL.md body for one registered global skill or one installed app skill after the user's intent clearly matches the prompt index.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"skill_id":{"type":"string","description":"Skill id from Available Skills or Installed Apps. Do not pass the display path."},"app_id":{"type":"string","description":"Optional installed app id. Set this when reading an app-scoped skill."}},"required":["skill_id"],"additionalProperties":false}`),
+			Description: "Read the full SKILL.md body for one registered global skill after the user's intent clearly matches Available Skills. This does not load Apps; use builtin_app_load for an App.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"skill_id":{"type":"string","description":"Skill id from Available Skills. Do not pass the display path."}},"required":["skill_id"],"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
 		{

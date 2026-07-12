@@ -120,8 +120,11 @@ func TestAssembleIncludesAppsIndex(t *testing.T) {
 	if !strings.Contains(out.SystemInstruction, "App `github`") || !strings.Contains(out.SystemInstruction, "requires Work") {
 		t.Fatalf("assembled prompt missing compact app metadata:\n%s", out.SystemInstruction)
 	}
-	if !strings.Contains(out.SystemInstruction, `builtin_skill_read(app_id="<app id>", skill_id="<default skill id>")`) {
-		t.Fatalf("assembled prompt missing app skill read instruction:\n%s", out.SystemInstruction)
+	if !strings.Contains(out.SystemInstruction, `builtin_app_load(app_id="<app id>")`) {
+		t.Fatalf("assembled prompt missing explicit app load instruction:\n%s", out.SystemInstruction)
+	}
+	if !strings.Contains(out.SystemInstruction, "Never use `builtin_toolkit_load` or `builtin_skill_read` to load an App") {
+		t.Fatalf("assembled prompt missing App/Toolkit loading boundary:\n%s", out.SystemInstruction)
 	}
 	if !strings.Contains(out.SystemInstruction, "Default skill `github-issues`") {
 		t.Fatalf("assembled prompt missing default app skill:\n%s", out.SystemInstruction)
@@ -234,12 +237,15 @@ func TestAssembleModeLayersAndAllModesShowApps(t *testing.T) {
 	if !strings.Contains(chat.SystemInstruction, "## Available Apps") || !strings.Contains(chat.SystemInstruction, "requires Work") {
 		t.Fatalf("chat prompt must expose compact app capability metadata:\n%s", chat.SystemInstruction)
 	}
+	if !strings.Contains(chat.SystemInstruction, `builtin_app_load(app_id="canvas")`) {
+		t.Fatalf("chat prompt missing explicit Canvas load guidance:\n%s", chat.SystemInstruction)
+	}
 	work := Assemble(Input{Mode: "work", Apps: apps})
-	if !strings.Contains(work.SystemInstruction, "## Work Mode") || !hasSegment(work.Segments, "mode_work") || !hasSegment(work.Segments, "apps_index") {
+	if !strings.Contains(work.SystemInstruction, "## Work Mode") || !strings.Contains(work.SystemInstruction, `builtin_app_load(app_id="browser")`) || !hasSegment(work.Segments, "mode_work") || !hasSegment(work.Segments, "apps_index") {
 		t.Fatalf("work prompt missing mode or apps segments: %+v", work.Segments)
 	}
 	code := Assemble(Input{Mode: "code", Apps: apps})
-	if !strings.Contains(code.SystemInstruction, "## Code Mode") || !hasSegment(code.Segments, "mode_code") || !hasSegment(code.Segments, "apps_index") {
+	if !strings.Contains(code.SystemInstruction, "## Code Mode") || !strings.Contains(code.SystemInstruction, `builtin_app_load(app_id="terminal")`) || !hasSegment(code.Segments, "mode_code") || !hasSegment(code.Segments, "apps_index") {
 		t.Fatalf("code prompt missing mode or apps segments: %+v", code.Segments)
 	}
 }

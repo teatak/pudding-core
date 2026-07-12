@@ -84,6 +84,7 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 
 | tool | capability | args | result |
 | --- | --- | --- | --- |
+| `builtin_app_load` | `chat` | `{app_id, skill_id?}` | `{ok, appID, skillID, content, newlyLoaded, alreadyLoaded}`;显式加载 App，失败不修改 session |
 | `builtin_toolkit_load` | `chat` | `{toolkit_ids:string[1..4]}` | `{ok, loaded, alreadyActive, activeToolkits, tools, loadsRemaining}`;turn-scoped,每 turn 最多扩展 2 次 |
 | `builtin_command_run` | `code` | `{scope:"project", argv:string[] \| script:string, cwd?, env?, timeout_ms?}`(argv/script 互斥) | `{ok, argv? \| script+shell, cwd, exitCode, stdout, stderr, stdoutTruncated, stderrTruncated, timedOut, cancelled, durationMs, reason?, error?}` |
 | `builtin_command_start` | `code` | `{scope:"project", argv:string[] \| script:string, cwd?, env?}`(argv/script 互斥) | `{ok, processID, status, running, argv? \| script+shell, cwd, startedAt}` |

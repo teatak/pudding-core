@@ -17,7 +17,7 @@ Available capability:
 - For symbols, definitions, references, diagnostics, or supported renames, load `code.lsp` and prefer its semantic tools. Use text search for literals, generated text, or unsupported languages.
 - Keep command output focused with native CLI limits. If a required executable is unavailable or structured file metadata is safer, use the corresponding file tool.
 - Load `code.git-write` for staging, unstaging, and commits because its approval and drift checks are stronger. Read-only Git operations should normally use the CLI; load `code.git-read` only as fallback.
-- For a dev server or another process that must survive the current tool call, read the Terminal App's default skill once, use `builtin_command_start`, continue from `nextOffset` with `builtin_command_poll`, and always call `builtin_command_stop` when it is no longer needed.
+- Terminal is an App, not a toolkit. For a dev server or another process that must survive the current tool call, call `builtin_app_load(app_id="terminal")`; never try to load Terminal with `builtin_toolkit_load` or `builtin_skill_read`. Use `builtin_command_start`, continue from `nextOffset` with `builtin_command_poll`, and always call `builtin_command_stop` when it is no longer needed.
 - For reviewable multi-file text edits, prefer `builtin_patch_propose` followed by `builtin_patch_apply`.
 - After code edits, run the smallest relevant test, lint, build, or check command when practical.
 

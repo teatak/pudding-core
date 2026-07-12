@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 
 import {
   createCanvasItem,
@@ -12,15 +12,28 @@ import { queryKeys } from "@/api/queryKeys";
 import type { CanvasItem } from "@/contracts/api";
 import { apiURL } from "@/state/apiBase";
 import { setCanvasOpen } from "@/state/canvasStore";
-import { useBrowserMCP, type ToolDefinition } from "@/mcp/browserMCP";
+import { useBrowserMCP, type RuntimeAppDefinition, type ToolDefinition } from "@/mcp/browserMCP";
 import { createInputFlowTools } from "@/mcp/inputFlowTools";
+import { getRuntimeID, getRuntimeType } from "@/state/runtime";
+import { isElectronShell } from "@/state/shell";
+
+const CANVAS_APP_ID = "canvas";
 
 export function useCanvasMCP(token: string) {
   const queryClient = useQueryClient();
+  const desktopRuntime = isElectronShell();
   const endpoint = useMemo(() => (token ? mcpWebSocketURL(token) : ""), [token]);
-  const serverInfo = useMemo(() => ({ name: "pudding-ui", version: "1.0" }), []);
-  const tools = useMemo<ToolDefinition[]>(
-    () => [
+  const runtimeInfo = useMemo(() => ({ id: getRuntimeID(), type: getRuntimeType() }), []);
+  const serverInfo = useMemo(
+    () => ({ name: desktopRuntime ? "pudding-desktop" : "pudding-web", version: "1.0" }),
+    [desktopRuntime],
+  );
+  const apps = useMemo<RuntimeAppDefinition[]>(
+    () => (desktopRuntime ? [canvasRuntimeAppDefinition()] : []),
+    [desktopRuntime],
+  );
+  const canvasTools = useMemo<ToolDefinition[]>(
+    () => ([
       {
         name: "canvas_doc_read",
         description: "Read concise on-demand docs for canvas tools. Use when a canvas workflow/schema detail is unclear, or before presenting complex structured query results.",
@@ -342,8 +355,8 @@ export function useCanvasMCP(token: string) {
             title: { type: "string", description: "Grid widget title." },
             items: {
               type: "array",
-              description: "Internal content blocks.",
-              items: gridItemSchema(0),
+              description: "Compact content blocks. Put kind-specific fields under data.",
+              items: gridItemInputSchema(true),
             },
             columns: { type: "string", enum: ["auto", "1", "2", "3"], description: "Default layout columns." },
             layout: gridLayoutSchema(),
@@ -378,7 +391,7 @@ export function useCanvasMCP(token: string) {
       {
         name: "canvas_grid_patch",
         description:
-          "Patch an existing grid widget without resending the full items array. Use after canvas_item_list when updating metadata, upserting/replacing/removing blocks by stable item.id, or changing block order. For first render or intentional full replacement, use canvas_grid.",
+          "Patch an existing grid widget without resending the full items array. Use after canvas_item_list when updating metadata, upserting/replacing/removing blocks by stable item.id, or changing block order. For complex item changes call canvas_doc_read(ref='canvas_grid'). For first render or intentional full replacement, use canvas_grid.",
         capability: "chat",
         inputSchema: {
           type: "object",
@@ -403,7 +416,7 @@ export function useCanvasMCP(token: string) {
                 type: "object",
                 properties: {
                   op: { type: "string", enum: ["upsert", "replace", "remove", "move", "reorder"] },
-                  item: gridItemSchema(0),
+                  item: gridItemInputSchema(false),
                   itemId: { type: "string", description: "Required for remove and move." },
                   targetId: { type: "string", description: "Required for move." },
                   position: { type: "string", enum: ["before", "after"], description: "Defaults to before." },
@@ -422,14 +435,24 @@ export function useCanvasMCP(token: string) {
           return patchGridItem({ token, queryClient, args: record });
         },
       },
-      ...createInputFlowTools(),
-    ],
+    ] satisfies ToolDefinition[]).map((tool) => ({ ...tool, appID: CANVAS_APP_ID })),
     [queryClient, token],
   );
+  const tools = useMemo(
+    () => [...(desktopRuntime ? canvasTools : []), ...createInputFlowTools()],
+    [canvasTools, desktopRuntime],
+  );
+  const handleRegistryChanged = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.apps() });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.browserMCPSessions() });
+  }, [queryClient]);
 
   useBrowserMCP({
+    apps,
     endpoint,
     enabled: Boolean(token),
+    onRegistryChanged: handleRegistryChanged,
+    runtimeInfo,
     serverInfo,
     tools,
   });
@@ -629,7 +652,7 @@ async function patchGridItem({
       continue;
     }
     if (opKind === "upsert" || opKind === "replace") {
-      const itemRecord = requiredRecord(operation.item);
+      const itemRecord = gridItemInputRecord(operation.item);
       const itemID = requiredString(itemRecord.id, "item.id");
       const hasKind = Boolean(stringValue(itemRecord.kind));
       if (opKind === "replace" && !hasKind) {
@@ -800,17 +823,42 @@ const CANVAS_DOCS: Record<string, string> = {
     "- Prefer canvas_grid for complex query results that combine summary metrics, detail tables, charts, timelines, galleries, or nested sections.",
     "- In chat, summarize the grid briefly instead of duplicating all block content.",
     "- Required fields: title, items.",
-    "- Supported item kinds: markdown, metric, table, gallery, chart, timeline, grid.",
+    "- Every item uses the compact shape {id?, kind, title?, variant?, surface?, span?, data}. Put kind-specific fields only inside data.",
+    "- markdown data: {content}. metric data: {value, description?, icon?, color?}. table data: {columns, rows, caption?}.",
+    "- chart data: {type, data, x_key?, name_key?, value_key?, series?}. gallery data: {items, layout?, caption?}. timeline data: {items, caption?}.",
+    "- grid data: {items, layout?}; its child items use the same compact shape. Supported item kinds are markdown, metric, table, gallery, chart, timeline, and grid.",
+    "- Create example: {id: 'sales', kind: 'table', title: 'Sales', data: {columns: ['region', 'amount'], rows: [{region: 'APAC', amount: 42}]}}.",
     "- Nested grid is only one level deep. Do not put kind=grid inside a nested grid.",
     "- Use item.id as a stable block id when future updates may need to target the block.",
-    "- For partial updates to an existing grid, call canvas_item_list first, then use canvas_grid_patch with stable item.id. Use upsert for shallow updates, replace for full block replacement, remove/move/reorder for layout changes.",
+    "- For partial updates to an existing grid, call canvas_item_list first, then use canvas_grid_patch with stable item.id. Patch item uses the same compact shape. Existing-item upsert may omit kind and include only changed fields in data; replace and new upsert require kind.",
+    "- Patch example: {op: 'upsert', item: {id: 'sales', data: {rows: [{region: 'APAC', amount: 43}]}}}.",
     "- Use item.span.xs/sm/md/lg with values 1-12 to control width in the 12-column layout.",
-    "- Metric items render as KPI cards. Use title, value, optional description, optional icon, and optional color: default, green, amber, red, sky, or violet. Unrecognized metric fields are appended to description.",
-    "- Table, gallery, chart, and timeline item schemas match their standalone tools.",
+    "- Metric items render as KPI cards. Use item.title plus data.value, optional data.description, data.icon, and data.color: default, green, amber, red, sky, or violet. Unrecognized metric data fields are appended to description.",
+    "- Table, gallery, chart, and timeline data fields match their standalone tools.",
     "- Optional columns can be auto, 1, 2, or 3. Optional layout.gap controls inner gap.",
     "- If the user asks for later incremental updates, call canvas_item_list first and reuse the existing grid id.",
   ].join("\n"),
 };
+
+function canvasRuntimeAppDefinition(): RuntimeAppDefinition {
+  return {
+    id: CANVAS_APP_ID,
+    name: "Canvas",
+    version: "1.0",
+    description: "Create and manage visual widgets in the connected Pudding desktop canvas.",
+    requiredMode: "chat",
+    defaultSkillID: CANVAS_APP_ID,
+    skills: [
+      {
+        id: CANVAS_APP_ID,
+        name: "Canvas",
+        description: "Present structured or visual results on the desktop canvas.",
+        path: "skills/canvas/SKILL.md",
+        content: CANVAS_DOCS.canvas_overview || "",
+      },
+    ],
+  };
+}
 
 function canvasWindowSchema() {
   return {
@@ -904,94 +952,31 @@ function gridLayoutSchema() {
   };
 }
 
-function gridSpanSchema() {
-  const spanValue = { type: "number", enum: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] };
+function gridItemInputSchema(requireKind: boolean): Record<string, unknown> {
   return {
     type: "object",
+    description: requireKind
+      ? "Compact grid block. Put kind-specific fields under data."
+      : "Compact patch block. Existing upsert may omit kind; replace and new upsert require it.",
     properties: {
-      xs: spanValue,
-      sm: spanValue,
-      md: spanValue,
-      lg: spanValue,
-    },
-    additionalProperties: false,
-  };
-}
-
-function gridItemSchema(depth: number): Record<string, unknown> {
-  return {
-    type: "object",
-    properties: {
-      id: { type: "string", description: "Stable block id." },
-      kind: {
-        type: "string",
-        enum: depth > 0
-          ? ["markdown", "metric", "table", "gallery", "chart", "timeline"]
-          : ["markdown", "metric", "table", "gallery", "chart", "timeline", "grid"],
-      },
-      title: { type: "string", description: "Block title." },
+      id: { type: "string", description: "Stable block id. Required for patch items." },
+      kind: { type: "string", enum: ["markdown", "metric", "table", "gallery", "chart", "timeline", "grid"] },
+      title: { type: "string", description: "Optional block title." },
       variant: { type: "string", enum: ["hero", "normal", "compact", "subtle"] },
       surface: { type: "string", enum: ["default", "tinted"] },
-      span: gridSpanSchema(),
-      text: { type: "string", description: "Markdown body." },
-      content: { type: "string", description: "Markdown body." },
-      value: { type: ["string", "number", "boolean"], description: "Metric value." },
-      description: { type: "string", description: "Metric description." },
-      icon: {
-        type: "string",
-        enum: ["activity", "calendar", "clock", "gauge", "hash", "money", "percent", "users"],
-        description: "Metric icon shown before the title.",
+      span: {
+        type: "object",
+        description: "Optional responsive xs/sm/md/lg widths from 1 to 12.",
+        additionalProperties: { type: "integer", minimum: 1, maximum: 12 },
       },
-      color: { type: "string", enum: ["default", "green", "amber", "red", "sky", "violet"], description: "Metric value color." },
-      columns: {
-        type: "array",
-        description: "Table columns.",
-        items: {
-          anyOf: [
-            { type: "string" },
-            {
-              type: "object",
-              properties: {
-                key: { type: "string" },
-                label: { type: "string" },
-              },
-              required: ["key"],
-              additionalProperties: true,
-            },
-          ],
-        },
+      data: {
+        type: "object",
+        description: "Kind-specific fields. Call canvas_doc_read(ref='canvas_grid') for the compact data contract.",
+        additionalProperties: true,
       },
-      rows: { type: "array", description: "Table rows.", items: { type: "object", additionalProperties: true } },
-      type: { type: "string", enum: ["bar", "line", "area", "pie", "donut"], description: "Chart type for kind=chart." },
-      x_key: { type: "string", description: "Chart category/time key for kind=chart." },
-      name_key: { type: "string", description: "Chart name key for kind=chart pie/donut." },
-      value_key: { type: "string", description: "Chart value key for kind=chart." },
-      series: {
-        type: "array",
-        description: "Chart series for kind=chart.",
-        items: {
-          type: "object",
-          properties: {
-            key: { type: "string" },
-            label: { type: "string" },
-            color: { type: "string" },
-          },
-          required: ["key"],
-          additionalProperties: false,
-        },
-      },
-      data: { type: "array", description: "Chart rows for kind=chart.", items: { type: "object", additionalProperties: true } },
-      items: {
-        type: "array",
-        description: depth > 0 ? "Gallery image items or timeline entries." : "Gallery image items, timeline entries, or nested grid blocks.",
-        items: depth > 0 ? { anyOf: [galleryItemSchema(), timelineItemSchema()] } : { anyOf: [galleryItemSchema(), timelineItemSchema(), gridItemSchema(depth + 1)] },
-      },
-      chart: chartSchema(),
-      layout: { anyOf: [gridLayoutSchema(), { type: "string", enum: ["grid", "row", "column"] }] },
-      caption: { type: "string" },
     },
-    required: ["kind"],
-    additionalProperties: true,
+    required: requireKind ? ["kind", "data"] : ["id"],
+    additionalProperties: false,
   };
 }
 
@@ -1124,7 +1109,7 @@ function gridColumnsValue(value: unknown): string {
 
 function normalizeGridItems(value: unknown[], depth: number): Array<Record<string, unknown>> {
   return value.map((item, index) => {
-    const record = requiredRecord(item);
+    const record = gridItemInputRecord(item);
     const kind = gridItemKind(record.kind, depth);
     const title = stringValue(record.title);
     const base: Record<string, unknown> = {
@@ -1181,6 +1166,17 @@ function normalizeGridItems(value: unknown[], depth: number): Array<Record<strin
       ...(asRecord(record.layout) ? { layout: asRecord(record.layout) } : {}),
     };
   });
+}
+
+function gridItemInputRecord(value: unknown): Record<string, unknown> {
+  const record = requiredRecord(value);
+  const data = asRecord(record.data);
+  if (!data) {
+    return record;
+  }
+  const metadata = { ...record };
+  delete metadata.data;
+  return { ...data, ...metadata };
 }
 
 function updateGridItemList(
@@ -1303,13 +1299,19 @@ function mergeGridItemPatch(existing: Record<string, unknown>, patch: Record<str
 }
 
 function gridItemKind(value: unknown, depth: number): string {
+  if (value === undefined || value === "" || value === "markdown") {
+    return "markdown";
+  }
   if (value === "metric" || value === "table" || value === "gallery" || value === "chart" || value === "timeline") {
     return value;
   }
-  if (value === "grid" && depth === 0) {
-    return "grid";
+  if (value === "grid") {
+    if (depth === 0) {
+      return "grid";
+    }
+    throw new Error("canvas_grid: nested grid blocks support only one level");
   }
-  return "markdown";
+  throw new Error(`canvas_grid: unsupported item kind ${String(value)}`);
 }
 
 function gridVariantValue(value: unknown): string {

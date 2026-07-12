@@ -94,7 +94,7 @@ var builtinToolkitTemplates = []ToolkitManifest{
 func ToolkitLoadDefinition() provider.ToolDef {
 	return provider.ToolDef{
 		Name:        ToolkitLoad,
-		Description: "Load one or more toolkits for the current turn. Use the short Available Toolkits index in the system prompt, load only toolkits needed for the task, and then call tools advertised in the next model step. Loaded toolkits remain active only for this turn.",
+		Description: "Load one or more non-App toolkits for the current turn. Use only ids from the Available Toolkits index, then call tools advertised in the next model step. This never loads Apps such as Browser, Terminal, or Canvas; use builtin_app_load for an App. Loaded toolkits remain active only for this turn.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"toolkit_ids":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":4,"description":"Toolkit ids from the Available Toolkits index."}},"required":["toolkit_ids"],"additionalProperties":false}`),
 		Capability:  store.ModeChat,
 	}
@@ -145,6 +145,9 @@ func BuildToolkitCatalog(defs []provider.ToolDef) []ToolkitManifest {
 	dynamic := make(map[string]*ToolkitManifest)
 	for name, def := range definitions {
 		if assigned[name] || name == RequestCapability || name == ToolkitLoad {
+			continue
+		}
+		if strings.HasPrefix(name, "canvas_") {
 			continue
 		}
 		if _, appTool := BuiltinAppIDForTool(name); appTool || IsAppAPITool(name) || def.AppID != "" || strings.HasPrefix(name, appMCPToolPrefix) {
@@ -240,7 +243,7 @@ func ToolkitIndex(mode store.AgentMode, catalog []ToolkitManifest) string {
 	if len(lines) == 0 {
 		return ""
 	}
-	return "## Available Toolkits\n\nLoad a toolkit with `builtin_toolkit_load` only when the task needs it. Loaded tools appear on the next model step.\n\n" + strings.Join(lines, "\n")
+	return "## Available Toolkits\n\nLoad a listed non-App toolkit with `builtin_toolkit_load` only when the task needs it. Loaded tools appear on the next model step and reset after this turn. `builtin_toolkit_load` never loads Apps, including Browser, Terminal, and Canvas; use `builtin_app_load` with an id from Available Apps.\n\n" + strings.Join(lines, "\n")
 }
 
 func ActiveToolkitIDs(active map[string]bool) []string {
@@ -275,8 +278,8 @@ func existingToolNames(names []string, defs map[string]provider.ToolDef, assigne
 
 func dynamicToolkit(name string, def provider.ToolDef) (string, string, bool) {
 	switch {
-	case strings.HasPrefix(name, "canvas_"), strings.HasPrefix(name, "ui_"), name == "collect_user_input":
-		return "ui.canvas", "Session canvas and structured interaction tools exposed by the current UI.", true
+	case strings.HasPrefix(name, "ui_"), name == "collect_user_input":
+		return "ui.core", "Structured interaction tools exposed by the current UI.", true
 	default:
 		mode := normalizedToolCapability(def)
 		return "external." + string(mode), "Other connected tools available in " + string(mode) + " capability.", false

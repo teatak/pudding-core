@@ -21,6 +21,7 @@ import {
   ListTree,
   MousePointerClick,
   MoveRight,
+  PackageOpen,
   Paperclip,
   RotateCw,
   Route,
@@ -258,6 +259,7 @@ function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIc
   }
   const known: Record<string, LucideIcon> = {
     builtin_attachment_read_image: FileSearch,
+    builtin_app_load: PackageOpen,
     builtin_browser_back: ArrowLeft,
     builtin_browser_click: MousePointerClick,
     builtin_browser_close: Globe,
@@ -1531,6 +1533,7 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     builtin_history_get_message: t("transcript.toolHistoryGetMessage"),
     builtin_history_search: t("transcript.toolHistorySearch"),
     builtin_toolkit_load: t("transcript.toolToolkitLoad"),
+    builtin_app_load: t("transcript.toolAppLoad"),
     builtin_command_poll: t("transcript.toolCommandPoll"),
     builtin_command_run: t("transcript.toolCommandRun"),
     builtin_command_start: t("transcript.toolCommandStart"),

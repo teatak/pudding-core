@@ -44,10 +44,12 @@ type Definition struct {
 	Connection     *ConnectionConfig   `json:"connection,omitempty" yaml:"connection,omitempty"`
 	Endpoints      map[string]Endpoint `json:"endpoints,omitempty" yaml:"endpoints,omitempty"`
 	Skills         []SkillRef          `json:"skills,omitempty" yaml:"skills,omitempty"`
+	Tools          []ToolRef           `json:"tools,omitempty" yaml:"-"`
 	Path           string              `json:"path,omitempty" yaml:"-"`
 	SourceURL      string              `json:"sourceURL,omitempty" yaml:"-"`
 	PackageSHA256  string              `json:"packageSHA256,omitempty" yaml:"-"`
 	Source         string              `json:"source" yaml:"-"`
+	Runtime        string              `json:"runtime,omitempty" yaml:"-"`
 	Enabled        bool                `json:"enabled" yaml:"-"`
 	CanUninstall   bool                `json:"canUninstall" yaml:"-"`
 	RequiredMode   string              `json:"requiredMode" yaml:"-"`
@@ -138,6 +140,11 @@ type SkillRef struct {
 	Name        string `json:"name,omitempty" yaml:"-"`
 	Description string `json:"description,omitempty" yaml:"-"`
 	Path        string `json:"path" yaml:"-"`
+}
+
+type ToolRef struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 type SkillDetail struct {
@@ -291,6 +298,9 @@ func CloneDefinition(in *Definition) *Definition {
 	}
 	if in.Skills != nil {
 		out.Skills = append([]SkillRef(nil), in.Skills...)
+	}
+	if in.Tools != nil {
+		out.Tools = append([]ToolRef(nil), in.Tools...)
 	}
 	return &out
 }

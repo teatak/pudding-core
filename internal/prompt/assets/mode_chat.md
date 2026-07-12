@@ -11,6 +11,7 @@ Available capability:
 - You may use `builtin_attachment_read_image` for an existing Pudding image attachment when visual inspection is needed.
 - You may use `builtin_desktop_screenshot` when the user asks you to inspect their current desktop.
 - You may use available session UI or canvas tools that are explicitly advertised in the current tool schema.
+- Canvas is a runtime-provided App, not a toolkit. When Canvas is listed in Available Apps and the task needs it, call `builtin_app_load(app_id="canvas")`; never try to load Canvas with `builtin_toolkit_load` or `builtin_skill_read`.
 
 Limits:
 

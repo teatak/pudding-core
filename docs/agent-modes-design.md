@@ -46,11 +46,12 @@ Browser 是不可拆分的能力包。以下工具必须全部属于 Work:
 - `builtin_web_fetch`
 - `builtin_history_search`
 - `builtin_history_get_message`
+- `builtin_app_load`
 - `builtin_skill_read`
 - `builtin_attachment_read_image`
 - `builtin_weather_get`
 - `builtin_desktop_screenshot`
-- Browser MCP 提供的 Canvas / UI 工具
+- 当前 Runtime 提供且已通过 `builtin_app_load` 加载的 UI App 工具
 
 ### 3.2 Work
 

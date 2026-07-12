@@ -811,7 +811,7 @@ func TestToolkitLoadEnforcesCapabilityAndPerTurnLimit(t *testing.T) {
 	}
 }
 
-func TestAppSkillReadLoadsAppToolsForSession(t *testing.T) {
+func TestExplicitAppLoadLoadsToolsForSession(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
 	client := &appLoadClient{}
@@ -845,13 +845,13 @@ func TestAppSkillReadLoadsAppToolsForSession(t *testing.T) {
 	if len(client.requests) != 3 {
 		t.Fatalf("provider requests = %d, want 3", len(client.requests))
 	}
-	if hasToolDef(client.requests[0].Tools, tool.BrowserOpen) || !hasToolDef(client.requests[0].Tools, tool.SkillRead) {
+	if hasToolDef(client.requests[0].Tools, tool.BrowserOpen) || !hasToolDef(client.requests[0].Tools, tool.AppLoad) {
 		t.Fatalf("browser must start unloaded: %+v", client.requests[0].Tools)
 	}
 	if !hasToolDef(client.requests[1].Tools, tool.BrowserOpen) {
 		t.Fatalf("browser tools missing after app skill read: %+v", client.requests[1].Tools)
 	}
-	if len(runner.calls) != 2 || runner.calls[0].Name != tool.SkillRead || runner.calls[1].Name != tool.BrowserOpen {
+	if len(runner.calls) != 1 || runner.calls[0].Name != tool.BrowserOpen {
 		t.Fatalf("unexpected app tool calls: %+v", runner.calls)
 	}
 	sess, err := ms.GetSession(ctx, sid)
@@ -889,7 +889,7 @@ func TestAppSkillReadLoadsAppToolsForSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitTurnDone(t, ms, sid)
-	if len(runner.calls) != 2 {
+	if len(runner.calls) != 1 {
 		t.Fatalf("disabled app tool reached runner: %+v", runner.calls)
 	}
 	messages, err := ms.ListMessages(ctx, sid, 0)
@@ -913,6 +913,50 @@ func TestAppSkillReadLoadsAppToolsForSession(t *testing.T) {
 	}
 	if !sameStrings(sess.LoadedAppIDs, []string{app.BuiltinBrowserID}) {
 		t.Fatalf("mode or enablement change cleared loaded app ids: %+v", sess.LoadedAppIDs)
+	}
+}
+
+func TestAppLoadIsExplicitAndAtomic(t *testing.T) {
+	ctx := context.Background()
+	ms := memstore.New()
+	apps := app.NewService(t.TempDir(), nil)
+	eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms, WithApps(apps))
+	sid := "sess_app_load_atomic"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Provider: "mock", Model: "mock-model"}); err != nil {
+		t.Fatal(err)
+	}
+
+	call := tool.Call{CallID: "load_browser", Name: tool.AppLoad, Args: json.RawMessage(`{"app_id":"browser"}`)}
+	result, changed := eng.loadApp(ctx, sid, call, store.ModeChat)
+	if result.Ok || changed || !strings.Contains(result.Content, `"reason":"capability_required"`) {
+		t.Fatalf("Chat loaded Browser: %+v", result)
+	}
+	sess, err := ms.GetSession(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sess.LoadedAppIDs) != 0 {
+		t.Fatalf("failed load mutated session: %+v", sess.LoadedAppIDs)
+	}
+
+	call.Args = json.RawMessage(`{"app_id":"browser","skill_id":"missing"}`)
+	result, changed = eng.loadApp(ctx, sid, call, store.ModeWork)
+	if result.Ok || changed || !strings.Contains(result.Content, `"reason":"app_skill_not_found"`) {
+		t.Fatalf("missing App skill loaded Browser: %+v", result)
+	}
+	sess, _ = ms.GetSession(ctx, sid)
+	if len(sess.LoadedAppIDs) != 0 {
+		t.Fatalf("skill failure mutated session: %+v", sess.LoadedAppIDs)
+	}
+
+	call.Args = json.RawMessage(`{"app_id":"browser"}`)
+	result, changed = eng.loadApp(ctx, sid, call, store.ModeWork)
+	if !result.Ok || !changed || !strings.Contains(result.Content, `"newlyLoaded":true`) {
+		t.Fatalf("explicit App load failed: %+v", result)
+	}
+	result, changed = eng.loadApp(ctx, sid, call, store.ModeWork)
+	if !result.Ok || changed || !strings.Contains(result.Content, `"alreadyLoaded":true`) {
+		t.Fatalf("repeated App load should be idempotent: %+v", result)
 	}
 }
 
@@ -1172,7 +1216,7 @@ func TestSubmitRunsBuiltinBrowserToolLoop(t *testing.T) {
 	browserSvc := &engineTestBrowser{}
 	apps := app.NewService(t.TempDir(), nil)
 	eng := New(ms, hub, mapResolver{"capture": client}, ms,
-		WithTools(tool.NewBuiltinRunner(tool.WithBrowser(browserSvc), tool.WithAppSkills(apps))),
+		WithTools(tool.NewBuiltinRunner(tool.WithBrowser(browserSvc))),
 		WithApps(apps),
 	)
 	ctx := context.Background()
@@ -1199,7 +1243,7 @@ func TestSubmitRunsBuiltinBrowserToolLoop(t *testing.T) {
 	if len(client.requests) != 3 {
 		t.Fatalf("want 3 provider calls, got %d", len(client.requests))
 	}
-	if hasToolDef(client.requests[0].Tools, tool.BrowserObserve) || !hasToolDef(client.requests[0].Tools, tool.SkillRead) {
+	if hasToolDef(client.requests[0].Tools, tool.BrowserObserve) || !hasToolDef(client.requests[0].Tools, tool.AppLoad) {
 		t.Fatalf("browser app must start unloaded: %+v", client.requests[0].Tools)
 	}
 	if !hasToolDef(client.requests[1].Tools, tool.BrowserObserve) {
@@ -2905,7 +2949,7 @@ func (c *appLoadClient) Stream(_ context.Context, req provider.Request) (<-chan 
 	switch len(c.requests) {
 	case 1:
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
-			Index: 0, CallID: "call_browser_skill", Name: tool.SkillRead, ArgsDelta: `{"app_id":"browser","skill_id":"browser"}`,
+			Index: 0, CallID: "call_browser_load", Name: tool.AppLoad, ArgsDelta: `{"app_id":"browser"}`,
 		}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	case 2:
@@ -2932,6 +2976,26 @@ func (s *mutableAppSource) ListDefinitions(context.Context) ([]*app.Definition, 
 		out = append(out, app.CloneDefinition(definition))
 	}
 	return out, nil
+}
+
+func (s *mutableAppSource) ReadSkill(_ context.Context, appID, skillID string) (*app.SkillDetail, error) {
+	if detail, ok := app.ReadBuiltinSkill(appID, skillID); ok {
+		return detail, nil
+	}
+	for _, definition := range s.defs {
+		if definition == nil || definition.ID != appID {
+			continue
+		}
+		if !definition.Enabled {
+			return nil, app.ErrDisabled
+		}
+		for _, skill := range definition.Skills {
+			if skillID == skill.ID || skillID == skill.Name || skillID == skill.Path {
+				return &app.SkillDetail{ID: skill.ID, Name: skill.Name, Description: skill.Description, Path: skill.Path, Content: "# " + definition.Name}, nil
+			}
+		}
+	}
+	return nil, app.ErrNotFound
 }
 
 func (s *mutableAppSource) ResolveEndpoint(_ context.Context, _ string, endpointName, _ string) (*app.EndpointBinding, error) {
@@ -2997,7 +3061,7 @@ func (c *browserToolLoopClient) Stream(_ context.Context, req provider.Request) 
 	switch len(c.requests) {
 	case 1:
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
-			Index: 0, CallID: "call_browser_skill", Name: tool.SkillRead, ArgsDelta: `{"app_id":"browser","skill_id":"browser"}`,
+			Index: 0, CallID: "call_browser_load", Name: tool.AppLoad, ArgsDelta: `{"app_id":"browser"}`,
 		}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	case 2:

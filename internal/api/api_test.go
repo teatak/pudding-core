@@ -1558,12 +1558,15 @@ func TestBuiltinToolsAPI(t *testing.T) {
 	var gitStatus map[string]any
 	var gitCommit map[string]any
 	var patchPropose map[string]any
+	var appLoad map[string]any
 	var skillRead map[string]any
 	var skillSubmit map[string]any
-	var restRequest map[string]any
-	var graphqlRequest map[string]any
 	for _, item := range tools {
-		switch item["id"] {
+		id, _ := item["id"].(string)
+		if _, appTool := tool.BuiltinAppIDForTool(id); appTool || tool.IsAppAPITool(id) {
+			t.Fatalf("App-owned tool must not appear in settings: %+v", item)
+		}
+		switch id {
 		case tool.FileWrite:
 			fileWrite = item
 		case tool.CommandRun:
@@ -1574,14 +1577,12 @@ func TestBuiltinToolsAPI(t *testing.T) {
 			gitCommit = item
 		case tool.PatchPropose:
 			patchPropose = item
+		case tool.AppLoad:
+			appLoad = item
 		case tool.SkillRead:
 			skillRead = item
 		case tool.SkillSubmit:
 			skillSubmit = item
-		case tool.RESTRequest:
-			restRequest = item
-		case tool.GraphQLRequest:
-			graphqlRequest = item
 		}
 	}
 	if fileWrite == nil || fileWrite["capability"] != string(store.ModeCode) {
@@ -1599,17 +1600,14 @@ func TestBuiltinToolsAPI(t *testing.T) {
 	if patchPropose == nil || patchPropose["capability"] != string(store.ModeCode) {
 		t.Fatalf("patch propose should declare code capability: %+v", patchPropose)
 	}
+	if appLoad == nil || appLoad["capability"] != string(store.ModeChat) {
+		t.Fatalf("app load should declare chat capability: %+v", appLoad)
+	}
 	if skillRead == nil || skillRead["capability"] != string(store.ModeChat) {
 		t.Fatalf("skill read should declare chat capability: %+v", skillRead)
 	}
 	if skillSubmit == nil || skillSubmit["capability"] != string(store.ModeCode) {
 		t.Fatalf("skill submit should declare code capability: %+v", skillSubmit)
-	}
-	if restRequest == nil || restRequest["capability"] != string(store.ModeWork) {
-		t.Fatalf("rest request should declare work capability: %+v", restRequest)
-	}
-	if graphqlRequest == nil || graphqlRequest["capability"] != string(store.ModeWork) {
-		t.Fatalf("graphql request should declare work capability: %+v", graphqlRequest)
 	}
 }
 

@@ -7,6 +7,27 @@ const (
 	BuiltinTerminalID = "terminal"
 )
 
+const (
+	toolBrowserStatus     = "builtin_browser_status"
+	toolBrowserOpen       = "builtin_browser_open"
+	toolBrowserObserve    = "builtin_browser_observe"
+	toolBrowserScreenshot = "builtin_browser_screenshot"
+	toolBrowserBack       = "builtin_browser_back"
+	toolBrowserForward    = "builtin_browser_forward"
+	toolBrowserReload     = "builtin_browser_reload"
+	toolBrowserClose      = "builtin_browser_close"
+	toolBrowserClick      = "builtin_browser_click"
+	toolBrowserType       = "builtin_browser_type"
+	toolBrowserScroll     = "builtin_browser_scroll"
+	toolCommandStart      = "builtin_command_start"
+	toolCommandPoll       = "builtin_command_poll"
+	toolCommandStop       = "builtin_command_stop"
+	toolRESTRequest       = "builtin_rest_request"
+	toolGraphQLRequest    = "builtin_graphql_request"
+	toolGraphQLIntrospect = "builtin_graphql_introspect"
+	toolGraphQLSearch     = "builtin_graphql_search"
+)
+
 type builtinDefinition struct {
 	definition *Definition
 	skills     map[string]SkillDetail
@@ -23,6 +44,19 @@ var builtinDefinitions = []builtinDefinition{
 			CanUninstall:   false,
 			RequiredMode:   "work",
 			DefaultSkillID: BuiltinBrowserID,
+			Tools: []ToolRef{
+				{Name: toolBrowserStatus},
+				{Name: toolBrowserOpen},
+				{Name: toolBrowserObserve},
+				{Name: toolBrowserScreenshot},
+				{Name: toolBrowserBack},
+				{Name: toolBrowserForward},
+				{Name: toolBrowserReload},
+				{Name: toolBrowserClose},
+				{Name: toolBrowserClick},
+				{Name: toolBrowserType},
+				{Name: toolBrowserScroll},
+			},
 			Skills: []SkillRef{{
 				ID:          BuiltinBrowserID,
 				Name:        "Browser",
@@ -58,6 +92,11 @@ Use Pudding's built-in browser for webpages that require navigation or interacti
 			CanUninstall:   false,
 			RequiredMode:   "code",
 			DefaultSkillID: BuiltinTerminalID,
+			Tools: []ToolRef{
+				{Name: toolCommandStart},
+				{Name: toolCommandPoll},
+				{Name: toolCommandStop},
+			},
 			Skills: []SkillRef{{
 				ID:          BuiltinTerminalID,
 				Name:        "Terminal",

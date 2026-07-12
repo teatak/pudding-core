@@ -57,6 +57,7 @@ type ConfigSource interface {
 
 type AppSource interface {
 	ListDefinitions(ctx context.Context) ([]*app.Definition, error)
+	ReadSkill(ctx context.Context, appID, skillID string) (*app.SkillDetail, error)
 }
 
 type appEndpointResolver interface {
@@ -100,6 +101,7 @@ type Engine struct {
 	running           map[string]context.CancelFunc // sessionID → 当前 turn 的 cancel
 	approvals         map[string]*pendingApproval
 	turnProjectAccess map[string]ProjectAccessGrant // turnID → 本轮临时目录授权
+	queuedRuntimeIDs  map[string]string             // queued input → originating UI runtime
 	wg                sync.WaitGroup
 	compactMu         sync.Mutex
 	toolCloseOnce     sync.Once
@@ -153,6 +155,7 @@ func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opt
 		running:           make(map[string]context.CancelFunc),
 		approvals:         make(map[string]*pendingApproval),
 		turnProjectAccess: make(map[string]ProjectAccessGrant),
+		queuedRuntimeIDs:  make(map[string]string),
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -174,6 +177,13 @@ func (e *Engine) Stop() {
 }
 
 func (e *Engine) ReleaseSessionResources(sessionID string) {
+	e.mu.Lock()
+	for key := range e.queuedRuntimeIDs {
+		if strings.HasPrefix(key, strings.TrimSpace(sessionID)+"\x00") {
+			delete(e.queuedRuntimeIDs, key)
+		}
+	}
+	e.mu.Unlock()
 	if cleaner, ok := e.tools.(tool.SessionResourceCleaner); ok {
 		cleaner.CloseSession(strings.TrimSpace(sessionID))
 	}
@@ -359,7 +369,7 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	// 先注册 cancel 再 publish started:否则收到 turn.started 立刻 cancel 的
 	// 客户端可能落在注册之前,错拿 no_running_turn。turn 生命周期长于 HTTP
 	// 请求,不继承请求 ctx;取消只走 Cancel()。
-	turnCtx, cancel := context.WithCancel(context.Background())
+	turnCtx, cancel := context.WithCancel(app.WithRuntimeID(context.Background(), app.RuntimeIDFromContext(ctx)))
 	e.mu.Lock()
 	e.running[in.SessionID] = cancel
 	e.mu.Unlock()
@@ -406,7 +416,7 @@ func (e *Engine) submitSystem(ctx context.Context, in SubmitInput, resolved *res
 	if res.Duplicate {
 		return &SubmitResult{Duplicate: true, TurnID: res.Turn.ID}, nil
 	}
-	turnCtx, cancel := context.WithCancel(context.Background())
+	turnCtx, cancel := context.WithCancel(app.WithRuntimeID(context.Background(), app.RuntimeIDFromContext(ctx)))
 	e.mu.Lock()
 	e.running[in.SessionID] = cancel
 	e.mu.Unlock()
@@ -501,6 +511,7 @@ func (e *Engine) queueSubmit(ctx context.Context, in SubmitInput, resolved *reso
 	if res.ExistingTurn != nil {
 		return &SubmitResult{Duplicate: true, TurnID: res.ExistingTurn.ID}, nil
 	}
+	e.rememberQueuedRuntime(in.SessionID, in.ClientMessageID, app.RuntimeIDFromContext(ctx))
 	if res.QueuedEvent != nil {
 		e.hub.Publish(*res.QueuedEvent)
 	}
@@ -512,6 +523,33 @@ func (e *Engine) queueSubmit(ctx context.Context, in SubmitInput, resolved *reso
 		out.Status = string(res.Input.Status)
 	}
 	return out, nil
+}
+
+func queuedRuntimeKey(sessionID, clientMessageID string) string {
+	return strings.TrimSpace(sessionID) + "\x00" + strings.TrimSpace(clientMessageID)
+}
+
+func (e *Engine) rememberQueuedRuntime(sessionID, clientMessageID, runtimeID string) {
+	key := queuedRuntimeKey(sessionID, clientMessageID)
+	if key == "\x00" {
+		return
+	}
+	e.mu.Lock()
+	if runtimeID = strings.TrimSpace(runtimeID); runtimeID != "" {
+		e.queuedRuntimeIDs[key] = runtimeID
+	} else {
+		delete(e.queuedRuntimeIDs, key)
+	}
+	e.mu.Unlock()
+}
+
+func (e *Engine) takeQueuedRuntime(sessionID, clientMessageID string) string {
+	key := queuedRuntimeKey(sessionID, clientMessageID)
+	e.mu.Lock()
+	runtimeID := e.queuedRuntimeIDs[key]
+	delete(e.queuedRuntimeIDs, key)
+	e.mu.Unlock()
+	return runtimeID
 }
 
 func (e *Engine) resolveModel(ctx context.Context, sess *store.Session) (*resolvedModel, error) {
@@ -932,7 +970,8 @@ func (e *Engine) TryDrainQueued(sessionID string) {
 	if res == nil || res.Turn == nil || res.Input == nil || res.StartedEvent == nil {
 		return
 	}
-	turnCtx, cancel := context.WithCancel(context.Background())
+	runtimeID := e.takeQueuedRuntime(sessionID, res.Input.ClientMessageID)
+	turnCtx, cancel := context.WithCancel(app.WithRuntimeID(context.Background(), runtimeID))
 	e.mu.Lock()
 	e.running[sessionID] = cancel
 	e.mu.Unlock()
@@ -1133,6 +1172,7 @@ func (e *Engine) toolDefinitions(ctx context.Context, sessionID string, mode sto
 	}
 	catalog := tool.BuildToolkitCatalog(toolkitDefs)
 	out := tool.DefinitionsFromCatalog(mode, toolkitDefs, catalog, active)
+	out = append(out, tool.AppLoadDefinition())
 	sort.Slice(appDefs, func(i, j int) bool { return appDefs[i].Name < appDefs[j].Name })
 	out = append(out, appDefs...)
 	return out, catalog, nil
@@ -1473,6 +1513,10 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			var changed bool
 			result, changed = loadTurnToolkits(call, nextMode, toolkits)
 			toolsChanged = toolsChanged || changed
+		} else if call.Name == tool.AppLoad {
+			var changed bool
+			result, changed = e.loadApp(ctx, sessionID, call, nextMode)
+			toolsChanged = toolsChanged || changed
 		} else if appID, appTool := tool.BuiltinAppIDForTool(call.Name); appTool && e.apps != nil {
 			if !tool.NameAllowedForMode(nextMode, call.Name) {
 				result = toolNotAllowedResult(call, nextMode)
@@ -1516,14 +1560,6 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			}
 		} else {
 			result = e.executeAllowedTool(ctx, sessionID, turnID, call)
-		}
-		if result.Ok && call.Name == tool.SkillRead {
-			changed, err := e.loadAppFromSkillRead(ctx, sessionID, call)
-			if err != nil {
-				result = appLoadFailure(call, err)
-			} else {
-				toolsChanged = toolsChanged || changed
-			}
 		}
 		if ctx.Err() != nil {
 			return store.TurnCancelled, "", nextMode, modeChanged
@@ -1602,57 +1638,128 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 	return result
 }
 
-func (e *Engine) loadAppFromSkillRead(ctx context.Context, sessionID string, call tool.Call) (bool, error) {
+func (e *Engine) loadApp(ctx context.Context, sessionID string, call tool.Call, mode store.AgentMode) (tool.Result, bool) {
 	if e.apps == nil {
-		return false, nil
+		return appLoadFailure(call, "app_service_unavailable", "App loading is unavailable", nil), false
 	}
-	var args struct {
-		AppID string `json:"app_id"`
-	}
-	if len(call.Args) == 0 || json.Unmarshal(call.Args, &args) != nil {
-		return false, nil
-	}
-	appID := strings.TrimSpace(args.AppID)
-	if appID == "" {
-		return false, nil
+	request, err := tool.DecodeAppLoadRequest(call.Args)
+	if err != nil {
+		return appLoadFailure(call, "invalid_arguments", err.Error(), nil), false
 	}
 	definitions, err := e.apps.ListDefinitions(ctx)
 	if err != nil {
-		return false, fmt.Errorf("list apps: %w", err)
+		return appLoadFailure(call, "app_state_unavailable", err.Error(), nil), false
 	}
-	available := false
-	for _, definition := range definitions {
-		if definition != nil && definition.ID == appID && definition.Enabled {
-			available = true
+	var definition *app.Definition
+	for _, candidate := range definitions {
+		if candidate != nil && candidate.ID == request.AppID {
+			definition = candidate
 			break
 		}
 	}
-	if !available {
-		return false, fmt.Errorf("app %q is disabled or unavailable", appID)
+	if definition == nil {
+		return appLoadFailure(call, "app_unavailable", "the App is not available in the current runtime", map[string]any{"appID": request.AppID}), false
+	}
+	if !definition.Enabled {
+		return appLoadFailure(call, "app_disabled", "the App is disabled", map[string]any{"appID": request.AppID}), false
+	}
+	requiredMode := requiredAppMode(definition)
+	if store.AgentModeRank(mode) < store.AgentModeRank(requiredMode) {
+		return appLoadFailure(call, "capability_required", "the App requires a higher capability", map[string]any{
+			"appID":        request.AppID,
+			"currentMode":  store.NormalizeAgentMode(mode),
+			"requiredMode": requiredMode,
+		}), false
+	}
+	skillID := request.SkillID
+	if skillID == "" {
+		skillID = defaultAppSkillID(definition)
+	}
+	if skillID == "" {
+		return appLoadFailure(call, "app_skill_unavailable", "the App has no default skill", map[string]any{"appID": request.AppID}), false
+	}
+	detail, err := e.apps.ReadSkill(ctx, request.AppID, skillID)
+	if err != nil {
+		reason := "app_skill_read_failed"
+		switch {
+		case errors.Is(err, app.ErrInvalidID):
+			reason = "invalid_app_id"
+		case errors.Is(err, app.ErrNotFound):
+			reason = "app_skill_not_found"
+		case errors.Is(err, app.ErrDisabled):
+			reason = "app_disabled"
+		}
+		return appLoadFailure(call, reason, err.Error(), map[string]any{"appID": request.AppID, "skillID": skillID}), false
 	}
 	sess, err := e.store.GetSession(ctx, sessionID)
 	if err != nil {
-		return false, err
+		return appLoadFailure(call, "app_state_unavailable", err.Error(), map[string]any{"appID": request.AppID}), false
 	}
+	alreadyLoaded := false
 	for _, loadedID := range sess.LoadedAppIDs {
-		if loadedID == appID {
-			return false, nil
+		if loadedID == request.AppID {
+			alreadyLoaded = true
+			break
 		}
 	}
-	loaded := append(append([]string(nil), sess.LoadedAppIDs...), appID)
-	loaded = store.NormalizeAppIDs(loaded)
-	if _, err := e.store.UpdateSession(ctx, sessionID, store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
-		return false, err
+	if !alreadyLoaded {
+		loaded := store.NormalizeAppIDs(append(append([]string(nil), sess.LoadedAppIDs...), request.AppID))
+		if _, err := e.store.UpdateSession(ctx, sessionID, store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
+			return appLoadFailure(call, "app_state_unavailable", err.Error(), map[string]any{"appID": request.AppID}), false
+		}
 	}
-	return true, nil
+	resolvedSkillID := strings.TrimSpace(detail.ID)
+	if resolvedSkillID == "" {
+		resolvedSkillID = skillID
+	}
+	payload := map[string]any{
+		"ok":            true,
+		"appID":         request.AppID,
+		"skillID":       resolvedSkillID,
+		"name":          detail.Name,
+		"description":   detail.Description,
+		"path":          detail.Path,
+		"content":       detail.Content,
+		"newlyLoaded":   !alreadyLoaded,
+		"alreadyLoaded": alreadyLoaded,
+		"message":       "the App is loaded; its tools are available on the next model step",
+	}
+	content, _ := json.Marshal(payload)
+	return tool.Result{
+		CallID:       call.CallID,
+		Name:         call.Name,
+		Ok:           true,
+		Content:      string(content),
+		SummaryKind:  tool.SummaryReadChars,
+		SummaryCount: len(detail.Content),
+	}, !alreadyLoaded
 }
 
-func appLoadFailure(call tool.Call, err error) tool.Result {
-	payload := map[string]any{
-		"ok":      false,
-		"reason":  "app_load_failed",
-		"detail":  err.Error(),
-		"message": "the app skill was read but its session load state could not be saved",
+func defaultAppSkillID(definition *app.Definition) string {
+	if definition == nil {
+		return ""
+	}
+	if skillID := strings.TrimSpace(definition.DefaultSkillID); skillID != "" {
+		return skillID
+	}
+	for _, skill := range definition.Skills {
+		if id := strings.TrimSpace(skill.ID); id != "" {
+			return id
+		}
+		if name := strings.TrimSpace(skill.Name); name != "" {
+			return name
+		}
+		if path := strings.TrimSpace(skill.Path); path != "" {
+			return path
+		}
+	}
+	return ""
+}
+
+func appLoadFailure(call tool.Call, reason, message string, extra map[string]any) tool.Result {
+	payload := map[string]any{"ok": false, "reason": reason, "message": message}
+	for key, value := range extra {
+		payload[key] = value
 	}
 	content, _ := json.Marshal(payload)
 	return tool.Result{
@@ -1827,7 +1934,7 @@ func (e *Engine) projectRootDirsForToolCall(ctx context.Context, sessionID, turn
 }
 
 func (e *Engine) toolNameKnown(ctx context.Context, sessionID, name string) (bool, error) {
-	if name == tool.RequestCapability || name == tool.ToolkitLoad {
+	if name == tool.RequestCapability || name == tool.ToolkitLoad || (name == tool.AppLoad && e.apps != nil) {
 		return true, nil
 	}
 	if e.tools == nil {
@@ -1846,7 +1953,7 @@ func (e *Engine) appToolUnavailableResult(ctx context.Context, sessionID string,
 		"appID":   appID,
 		"tool":    call.Name,
 		"reason":  "app_not_loaded",
-		"message": "read the app's default skill with builtin_skill_read before using its tools",
+		"message": "load the App with builtin_app_load before using its tools",
 	}
 	states, err := e.sessionAppStates(ctx, sessionID)
 	if err != nil {
@@ -1931,7 +2038,7 @@ func appAPINotLoadedResult(call tool.Call) tool.Result {
 		"ok":      false,
 		"reason":  "app_not_loaded",
 		"tool":    call.Name,
-		"message": "read the target app's default skill before using its API tools",
+		"message": "load the target App with builtin_app_load before using its API tools",
 	}
 	content, _ := json.Marshal(payload)
 	return tool.Result{

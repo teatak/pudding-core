@@ -1,5 +1,32 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ChevronRight, CircleAlert, CircleCheck, CircleDashed, Compass, Download, Eye, EyeOff, KeyRound, Package, Pencil, Plus, Settings2, SquareTerminal, Trash } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Camera,
+  ChevronRight,
+  CircleAlert,
+  CircleCheck,
+  CircleDashed,
+  Compass,
+  Download,
+  Eye,
+  EyeOff,
+  FileSearch,
+  Keyboard,
+  KeyRound,
+  MousePointerClick,
+  Package,
+  PanelsTopLeft,
+  Pencil,
+  Plus,
+  RotateCw,
+  Route,
+  Settings2,
+  SquareTerminal,
+  Trash,
+  Wrench,
+  type LucideIcon,
+} from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -29,11 +56,11 @@ import {
   type AppMCPOverride,
   type AppMCPOverrideResponse,
   type AppMCPStatusResponse,
-  type AppMCPTool,
   type AppSkillDetail,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { AppIcon, mergeAppIconSpec, type AppIconSpec } from "@/components/AppIcon";
+import { IdentityIcon, type IdentityIconSize } from "@/components/IdentityIcon";
 import { Spinner } from "@/components/Spinner";
 import { DialogSelectContent } from "@/components/DialogSelectContent";
 import { PageHeader } from "@/components/PageHeader";
@@ -105,12 +132,21 @@ type AppEndpoints = NonNullable<AppDefinition["endpoints"]>;
 type AppSkills = NonNullable<AppDefinition["skills"]>;
 type AppSkillItem = AppSkills[number] & { content?: string };
 type AppSkillItems = AppSkillItem[];
+type AppToolItem = {
+  key: string;
+  name: string;
+  title?: string;
+  description?: string;
+  inputSchema?: unknown;
+  kind: "builtin" | "api" | "mcp";
+};
 type CatalogAppContent = {
   endpoints: AppEndpoints;
   skills: AppSkillItems;
 };
 type SelectedSkill = {
   appID?: string;
+  appSource?: AppDefinition["source"];
   appName: string;
   icon?: AppIconSpec;
   iconSrc?: string;
@@ -381,6 +417,7 @@ export function AppsPane({ token }: { token: string }) {
               onSkillSelect={(skill, icon, iconSrc) =>
                 setSelectedSkill({
                   appID: detailApp.id,
+                  appSource: detailApp.source,
                   appName: detailCatalogForInstalled ? appRegistryTitle(detailCatalogForInstalled, locale) : appDisplayName(detailApp, t),
                   icon,
                   iconSrc,
@@ -435,13 +472,12 @@ export function AppsPane({ token }: { token: string }) {
                   <div className="flex items-center justify-between border-b pb-4">
                     <h2 className="text-xl font-semibold tracking-normal">{t("apps.builtinTitle")}</h2>
                   </div>
-                  <div className="grid gap-2">
+                  <div className="flex min-w-0 flex-wrap gap-x-5 gap-y-4">
                     {builtinApps.map((app) => (
-                      <BuiltinAppRow
+                      <ManagedAppTile
                         key={app.id}
                         app={app}
-                        pending={enableMutation.isPending && enableMutation.variables?.id === app.id}
-                        onEnabledChange={(enabled) => enableMutation.mutate({ id: app.id, enabled })}
+                        token={token}
                         onSelect={() => setDetailAppID(app.id)}
                       />
                     ))}
@@ -453,9 +489,9 @@ export function AppsPane({ token }: { token: string }) {
                   <div className="flex items-center justify-between border-b pb-4">
                     <h2 className="text-xl font-semibold tracking-normal">{t("apps.installedShort")}</h2>
                   </div>
-                  <div className="flex min-w-0 flex-wrap gap-4">
+                  <div className="flex min-w-0 flex-wrap gap-x-5 gap-y-4">
                     {installedApps.map((app) => (
-                      <InstalledAppTile
+                      <ManagedAppTile
                         key={app.id}
                         app={app}
                         token={token}
@@ -527,6 +563,8 @@ export function AppsPane({ token }: { token: string }) {
         }}
       />
       <SkillDetailDialog
+        appID={selectedSkill?.appID}
+        appSource={selectedSkill?.appSource}
         failed={selectedSkillQuery.isError}
         icon={selectedSkill?.icon}
         iconSrc={selectedSkill?.iconSrc}
@@ -910,6 +948,9 @@ function appDisplayName(app: AppDefinition, t: I18nTranslate) {
   if (app.id === "terminal") {
     return t("apps.builtin.terminal.name");
   }
+  if (app.id === "canvas") {
+    return t("apps.builtin.canvas.name");
+  }
   return app.name;
 }
 
@@ -923,64 +964,51 @@ function appDisplayDescription(app: AppDefinition, t: I18nTranslate) {
   if (app.id === "terminal") {
     return t("apps.builtin.terminal.desc");
   }
+  if (app.id === "canvas") {
+    return t("apps.builtin.canvas.desc");
+  }
   return app.description || "";
 }
 
-function BuiltinAppIcon({ appID, size = "md" }: { appID: string; size?: "md" | "hero" }) {
-  const Icon = appID === "terminal" ? SquareTerminal : Compass;
+function BuiltinAppIcon({ appID, size = "md" }: { appID: string; size?: IdentityIconSize }) {
+  const Icon = appID === "terminal" ? SquareTerminal : appID === "canvas" ? PanelsTopLeft : Compass;
   return (
-    <span
+    <IdentityIcon
       aria-hidden="true"
       className={cn(
-        "grid shrink-0 place-items-center rounded-lg text-white shadow-sm",
-        appID === "terminal" ? "bg-amber-500 dark:bg-amber-500" : "bg-sky-500 dark:bg-sky-500",
-        size === "hero" ? "size-16" : "size-10",
+        "shadow-none",
+        appID === "terminal"
+          ? "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
+          : appID === "canvas"
+            ? "bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300"
+            : "bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300",
       )}
+      size={size}
     >
-      <Icon className={size === "hero" ? "size-8" : "size-5"} strokeWidth={2} />
-    </span>
+      <Icon className="size-[68%]" strokeWidth={2.15} />
+    </IdentityIcon>
   );
 }
 
-function BuiltinAppRow({
+function AppIdentityIcon({
   app,
-  pending,
-  onEnabledChange,
-  onSelect,
+  icon,
+  iconSrc,
+  size = "md",
 }: {
   app: AppDefinition;
-  pending: boolean;
-  onEnabledChange: (enabled: boolean) => void;
-  onSelect: () => void;
+  icon?: AppIconSpec;
+  iconSrc?: string;
+  size?: IdentityIconSize;
 }) {
-  const { t } = useI18n();
-  const name = appDisplayName(app, t);
-  const mode = app.requiredMode.charAt(0).toUpperCase() + app.requiredMode.slice(1);
-  return (
-    <div className="flex min-w-0 items-center gap-3 rounded-lg border px-3 py-3">
-      <button className="flex min-w-0 flex-1 items-center gap-3 text-left" type="button" onClick={onSelect}>
-        <BuiltinAppIcon appID={app.id} />
-        <span className="min-w-0 flex-1">
-          <span className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="truncate text-sm font-medium">{name}</span>
-            <Badge variant="outline">{t("apps.requiresMode").replace("{mode}", mode)}</Badge>
-          </span>
-          <span className="mt-0.5 block line-clamp-1 text-xs leading-5 text-muted-foreground">
-            {appDisplayDescription(app, t)}
-          </span>
-        </span>
-      </button>
-      <Switch
-        aria-label={t("apps.enableToggle").replace("{name}", name)}
-        checked={app.enabled}
-        disabled={pending}
-        onCheckedChange={onEnabledChange}
-      />
-    </div>
+  return app.source === "builtin" ? (
+    <BuiltinAppIcon appID={app.id} size={size} />
+  ) : (
+    <AppIcon icon={icon ?? app.icon} size={size} src={iconSrc} />
   );
 }
 
-function InstalledAppTile({
+function ManagedAppTile({
   app,
   onSelect,
   token,
@@ -989,20 +1017,29 @@ function InstalledAppTile({
   onSelect: () => void;
   token: string;
 }) {
-  const src = appIconURL(token, app);
+  const { t } = useI18n();
+  const name = appDisplayName(app, t);
+  const iconSrc = app.source === "installed" ? appIconURL(token, app) : undefined;
   return (
     <button
       className="group grid w-20 justify-items-center gap-2 text-center"
       type="button"
       onClick={onSelect}
     >
-      <AppIcon
-        className="transition-transform group-hover:scale-105"
-        icon={app.icon}
-        size="2xl"
-        src={src}
-      />
-      <div className="w-full truncate text-center text-xs text-muted-foreground">{app.name}</div>
+      <span className="relative grid size-14 place-items-center transition-transform group-hover:scale-105">
+        <AppIdentityIcon app={app} iconSrc={iconSrc} size="2xl" />
+        <span
+          aria-hidden="true"
+          className={cn(
+            "absolute -right-1 -bottom-1 size-3 rounded-full border-2 border-background",
+            app.enabled ? "bg-emerald-500" : "bg-muted-foreground/45",
+          )}
+        />
+        <span className="sr-only">{app.enabled ? t("apps.enabled") : t("apps.disabled")}</span>
+      </span>
+      <span className={cn("w-full truncate text-xs", app.enabled ? "text-muted-foreground" : "text-muted-foreground/60")}>
+        {name}
+      </span>
     </button>
   );
 }
@@ -1058,12 +1095,16 @@ function AppDetail({
     () => groupMCPStatusByEndpoint(mcpStatusQuery.data?.endpoints || []),
     [mcpStatusQuery.data?.endpoints],
   );
+  const tools = useMemo(
+    () => collectAppTools(app, mcpStatusQuery.data?.endpoints || []),
+    [app, mcpStatusQuery.data?.endpoints],
+  );
 
   return (
     <section className="grid gap-8">
       <div className="min-w-0 border-b pb-6">
         <div className="flex min-w-0 items-start gap-4">
-          {app.source === "builtin" ? <BuiltinAppIcon appID={app.id} size="hero" /> : <AppIcon icon={icon} size="hero" src={iconSrc} />}
+          <AppIdentityIcon app={app} icon={icon} iconSrc={iconSrc} size="hero" />
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-start justify-between gap-4">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -1081,17 +1122,16 @@ function AppDetail({
                 ))}
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                {app.source === "builtin" ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">{app.enabled ? t("apps.enabled") : t("apps.disabled")}</span>
-                    <Switch
-                      aria-label={t("apps.enableToggle").replace("{name}", title)}
-                      checked={app.enabled}
-                      disabled={enablePending}
-                      onCheckedChange={onEnabledChange}
-                    />
-                  </div>
-                ) : app.canUninstall ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">{app.enabled ? t("apps.enabled") : t("apps.disabled")}</span>
+                  <Switch
+                    aria-label={t("apps.enableToggle").replace("{name}", title)}
+                    checked={app.enabled}
+                    disabled={enablePending}
+                    onCheckedChange={onEnabledChange}
+                  />
+                </div>
+                {app.canUninstall ? (
                   <Button className="text-destructive hover:text-destructive" type="button" variant="ghost" onClick={onUninstall}>
                     <Trash className="size-3.5" />
                     {t("apps.uninstall")}
@@ -1134,15 +1174,24 @@ function AppDetail({
           </DetailSection>
         ) : null}
 
-        <AppEndpointsSection
-          appID={app.id}
-          endpoints={endpoints}
-          mcpStatusByEndpoint={mcpStatusByEndpoint}
-          mcpStatusFailed={mcpStatusQuery.isError}
-          mcpStatusLoading={mcpStatusQuery.isLoading}
-          token={token}
+        {endpoints.length > 0 ? (
+          <AppEndpointsSection
+            appID={app.id}
+            endpoints={endpoints}
+            mcpStatusByEndpoint={mcpStatusByEndpoint}
+            mcpStatusFailed={mcpStatusQuery.isError}
+            mcpStatusLoading={mcpStatusQuery.isLoading}
+            token={token}
+          />
+        ) : null}
+        <AppToolsSection tools={tools} />
+        <AppSkillsSection
+          app={app}
+          icon={icon}
+          iconSrc={iconSrc}
+          skills={skills}
+          onSkillSelect={(skill) => onSkillSelect(skill, icon, iconSrc)}
         />
-        <AppSkillsSection icon={icon} iconSrc={iconSrc} skills={skills} onSkillSelect={(skill) => onSkillSelect(skill, icon, iconSrc)} />
       </div>
     </section>
   );
@@ -1289,15 +1338,17 @@ function CatalogAppDetail({
           </div>
         </div>
       </div>
-      <AppEndpointsSection count={detail ? endpoints.length : undefined} endpoints={endpoints}>
-        {detailLoading ? (
-          <DetailSkeletonRows />
-        ) : detailFailed ? (
-          <ContentLoadFailed error={detailError} />
-        ) : (
-          <EndpointRows endpoints={endpoints} />
-        )}
-      </AppEndpointsSection>
+      {detailLoading || detailFailed || endpoints.length > 0 ? (
+        <AppEndpointsSection count={detail ? endpoints.length : undefined} endpoints={endpoints}>
+          {detailLoading ? (
+            <DetailSkeletonRows />
+          ) : detailFailed ? (
+            <ContentLoadFailed error={detailError} />
+          ) : (
+            <EndpointRows endpoints={endpoints} />
+          )}
+        </AppEndpointsSection>
+      ) : null}
       <AppSkillsSection
         count={detail ? skills.length : undefined}
         icon={app.icon}
@@ -1652,15 +1703,13 @@ function MCPStatusDetails({
       {statuses.map((status) => {
         const icon = mcpStatusIcon(status.status);
         const label = mcpStatusLabel(status.status, t);
-        const meta = status.connectionID || undefined;
+        const tools = status.tools || [];
+        const toolCount = tools.length > 0 ? t("apps.mcpToolsCount").replace("{count}", String(tools.length)) : "";
+        const meta = [status.connectionID, toolCount].filter(Boolean).join(" · ") || undefined;
         const tone = mcpStatusTone(status.status);
         return (
           <div key={`${endpointName}:${status.connectionID || "default"}`} className="grid gap-2">
-            {status.status === "available" ? (
-              <MCPToolsList tools={status.tools || []} statusIcon={icon} statusLabel={label} statusMeta={meta} statusTone={tone} />
-            ) : (
-              <MCPStatusLine icon={icon} label={label} meta={meta} tone={tone} />
-            )}
+            <MCPStatusLine icon={icon} label={label} meta={meta} tone={tone} />
             {status.error ? <div className="break-words text-xs text-destructive/90">{status.error}</div> : null}
           </div>
         );
@@ -1693,82 +1742,6 @@ function MCPStatusLine({
       <span className="font-medium">{label}</span>
       {meta ? <span className="truncate text-muted-foreground">· {meta}</span> : null}
     </div>
-  );
-}
-
-function MCPToolsList({
-  statusIcon,
-  statusLabel,
-  statusMeta,
-  statusTone,
-  tools,
-}: {
-  statusIcon: ReactNode;
-  statusLabel: string;
-  statusMeta?: string;
-  statusTone: "good" | "bad" | "muted";
-  tools: AppMCPTool[];
-}) {
-  const { t } = useI18n();
-  const toolCount = t("apps.mcpToolsCount").replace("{count}", String(tools.length));
-  return (
-    <details className="group min-w-0">
-      <summary
-        className={cn(
-          "flex cursor-pointer list-none items-center gap-1.5 text-xs transition-colors [&::-webkit-details-marker]:hidden",
-          statusTone === "good" && "text-emerald-500",
-          statusTone === "bad" && "text-destructive",
-          statusTone === "muted" && "text-muted-foreground",
-        )}
-      >
-        <span className="shrink-0">{statusIcon}</span>
-        <span className="font-medium">{statusLabel}</span>
-        {statusMeta ? <span className="truncate text-muted-foreground">· {statusMeta}</span> : null}
-        <span className="text-muted-foreground">{toolCount}</span>
-        <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
-      </summary>
-      <div className="mt-2 grid max-h-72 min-w-0 gap-2 overflow-auto border-t border-border/50 pt-2 pr-1">
-        {tools.length === 0 ? <div className="text-xs text-muted-foreground">{t("apps.mcpNoTools")}</div> : null}
-        {tools.map((tool) => (
-          <div key={tool.name} className="grid min-w-0 gap-1.5 border-t border-border/50 pt-2 first:border-t-0 first:pt-0">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <span className="truncate text-sm font-medium">{tool.title || tool.name}</span>
-              {tool.title && tool.title !== tool.name ? <Badge variant="outline">{tool.name}</Badge> : null}
-            </div>
-            {tool.description ? (
-              <>
-                <div className="line-clamp-3 text-xs leading-5 text-muted-foreground">{mcpToolDescriptionSummary(tool.description)}</div>
-                {mcpToolDescriptionNeedsDetails(tool.description) ? (
-                  <details className="group min-w-0">
-                    <summary className="cursor-pointer text-xs text-muted-foreground transition-colors hover:text-foreground">
-                      {t("apps.mcpFullDescription")}
-                    </summary>
-                    <div className="mt-1 max-h-40 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-background/80 p-2 text-[11px] leading-4 text-muted-foreground">
-                      {tool.description}
-                    </div>
-                  </details>
-                ) : null}
-              </>
-            ) : null}
-            {tool.providerName ? (
-              <div className="min-w-0 truncate font-mono text-[11px] text-muted-foreground" title={tool.providerName}>
-                {t("apps.mcpProviderToolName")}: {tool.providerName}
-              </div>
-            ) : null}
-            {tool.inputSchema ? (
-              <details className="group min-w-0">
-                <summary className="cursor-pointer text-xs text-muted-foreground transition-colors hover:text-foreground">
-                  {t("apps.mcpInputSchema")}
-                </summary>
-                <pre className="mt-1 max-h-44 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-background/80 p-2 text-[11px] leading-4 text-muted-foreground">
-                  {formatMCPInputSchema(tool.inputSchema)}
-                </pre>
-              </details>
-            ) : null}
-          </div>
-        ))}
-      </div>
-    </details>
   );
 }
 
@@ -1934,7 +1907,164 @@ function mcpToolDescriptionNeedsDetails(description: string) {
   return description.replace(/\s+/g, " ").trim().length > 260 || description.includes("\n");
 }
 
+function collectAppTools(app: AppDefinition, statuses: AppMCPEndpointStatus[]): AppToolItem[] {
+  const tools: AppToolItem[] = (app.tools || []).map((tool) => ({
+    key: `static:${tool.name}`,
+    name: tool.name,
+    description: tool.description,
+    kind: app.source === "builtin" ? "builtin" : "api",
+  }));
+  const seen = new Set(tools.map((tool) => tool.key));
+  for (const status of statuses) {
+    for (const tool of status.tools || []) {
+      const key = `mcp:${tool.providerName || `${status.endpointName}:${status.connectionID || "default"}:${tool.name}`}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      tools.push({
+        key,
+        name: tool.name,
+        title: tool.title,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        kind: "mcp",
+      });
+    }
+  }
+  return tools;
+}
+
+function AppToolsSection({ tools }: { tools: AppToolItem[] }) {
+  const { t } = useI18n();
+  if (tools.length === 0) {
+    return null;
+  }
+  return (
+    <DetailSection title={t("apps.tools")} count={tools.length}>
+      <div className="grid min-w-0 gap-2 sm:grid-cols-2">
+        {tools.map((tool) => (
+          <div key={tool.key} className="flex min-w-0 items-start gap-3 rounded-lg border px-3 py-2.5">
+            <AppToolGlyph kind={tool.kind} name={tool.name} />
+            <div className="grid min-w-0 flex-1 gap-1">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="truncate text-sm font-medium">{tool.title || appToolDisplayName(tool.name, t)}</span>
+                <Badge className="shrink-0" variant="outline">
+                  {tool.kind === "builtin" ? t("apps.builtinBadge") : tool.kind.toUpperCase()}
+                </Badge>
+              </div>
+              {tool.description ? (
+                <>
+                  <div className="line-clamp-2 text-xs leading-5 text-muted-foreground">
+                    {mcpToolDescriptionSummary(tool.description)}
+                  </div>
+                  {mcpToolDescriptionNeedsDetails(tool.description) ? (
+                    <details className="group min-w-0">
+                      <summary className="cursor-pointer text-xs text-muted-foreground transition-colors hover:text-foreground">
+                        {t("apps.mcpFullDescription")}
+                      </summary>
+                      <div className="mt-1 max-h-40 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/35 p-2 text-[11px] leading-4 text-muted-foreground">
+                        {tool.description}
+                      </div>
+                    </details>
+                  ) : null}
+                </>
+              ) : null}
+              {tool.inputSchema ? (
+                <details className="group min-w-0">
+                  <summary className="cursor-pointer text-xs text-muted-foreground transition-colors hover:text-foreground">
+                    {t("apps.mcpInputSchema")}
+                  </summary>
+                  <pre className="mt-1 max-h-44 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/35 p-2 text-[11px] leading-4 text-muted-foreground">
+                    {formatMCPInputSchema(tool.inputSchema)}
+                  </pre>
+                </details>
+              ) : null}
+            </div>
+          </div>
+        ))}
+      </div>
+    </DetailSection>
+  );
+}
+
+function AppToolGlyph({ kind, name }: { kind: AppToolItem["kind"]; name: string }) {
+  const Icon = appToolIcon(name, kind);
+  return (
+    <span className="grid size-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
+      <Icon className="size-4" />
+    </span>
+  );
+}
+
+function appToolIcon(name: string, kind: AppToolItem["kind"]): LucideIcon {
+  const icons: Record<string, LucideIcon> = {
+    builtin_browser_back: ArrowLeft,
+    builtin_browser_click: MousePointerClick,
+    builtin_browser_forward: ArrowRight,
+    builtin_browser_observe: FileSearch,
+    builtin_browser_reload: RotateCw,
+    builtin_browser_screenshot: Camera,
+    builtin_browser_scroll: MousePointerClick,
+    builtin_browser_type: Keyboard,
+  };
+  if (icons[name]) {
+    return icons[name];
+  }
+  if (name.startsWith("builtin_browser_")) {
+    return Compass;
+  }
+  if (name.startsWith("builtin_command_")) {
+    return SquareTerminal;
+  }
+  if (name.startsWith("canvas_")) {
+    return PanelsTopLeft;
+  }
+  return kind === "api" ? Route : Wrench;
+}
+
+function appToolDisplayName(name: string, t: I18nTranslate) {
+  const labels: Record<string, string> = {
+    builtin_browser_status: t("transcript.toolBrowserStatus"),
+    builtin_browser_open: t("transcript.toolBrowserOpen"),
+    builtin_browser_observe: t("transcript.toolBrowserObserve"),
+    builtin_browser_screenshot: t("transcript.toolBrowserScreenshot"),
+    builtin_browser_back: t("transcript.toolBrowserBack"),
+    builtin_browser_forward: t("transcript.toolBrowserForward"),
+    builtin_browser_reload: t("transcript.toolBrowserReload"),
+    builtin_browser_close: t("transcript.toolBrowserClose"),
+    builtin_browser_click: t("transcript.toolBrowserClick"),
+    builtin_browser_type: t("transcript.toolBrowserType"),
+    builtin_browser_scroll: t("transcript.toolBrowserScroll"),
+    builtin_command_start: t("transcript.toolCommandStart"),
+    builtin_command_poll: t("transcript.toolCommandPoll"),
+    builtin_command_stop: t("transcript.toolCommandStop"),
+    builtin_rest_request: t("apps.tool.restRequest"),
+    builtin_graphql_request: t("apps.tool.graphqlRequest"),
+    builtin_graphql_introspect: t("apps.tool.graphqlIntrospect"),
+    builtin_graphql_search: t("apps.tool.graphqlSearch"),
+    canvas_chart: t("transcript.toolCanvasChart"),
+    canvas_doc_read: t("transcript.toolCanvasDocRead"),
+    canvas_gallery: t("transcript.toolCanvasGallery"),
+    canvas_grid: t("transcript.toolCanvasGrid"),
+    canvas_grid_patch: t("transcript.toolCanvasGridPatch"),
+    canvas_item_clear: t("transcript.toolCanvasItemClear"),
+    canvas_item_inspect: t("transcript.toolCanvasItemInspect"),
+    canvas_item_list: t("transcript.toolCanvasItemList"),
+    canvas_item_remove: t("transcript.toolCanvasItemRemove"),
+    canvas_markdown: t("transcript.toolCanvasMarkdown"),
+    canvas_table: t("transcript.toolCanvasTable"),
+    canvas_timeline: t("transcript.toolCanvasTimeline"),
+  };
+  if (labels[name]) {
+    return labels[name];
+  }
+  const readable = name.replace(/^builtin_/, "").replace(/^app_mcp__/, "").replace(/__[^_]+$/, "").replaceAll("_", " ").trim();
+  return readable ? readable.charAt(0).toUpperCase() + readable.slice(1) : name;
+}
+
 function AppSkillsSection({
+  app,
   children,
   count,
   icon,
@@ -1942,6 +2072,7 @@ function AppSkillsSection({
   onSkillSelect,
   skills,
 }: {
+  app?: AppDefinition;
   children?: ReactNode;
   count?: number;
   icon?: AppIconSpec;
@@ -1952,17 +2083,19 @@ function AppSkillsSection({
   const { t } = useI18n();
   return (
     <DetailSection title={t("apps.skills")} count={count ?? skills.length}>
-      {children ?? <SkillRows icon={icon} iconSrc={iconSrc} skills={skills} onSkillSelect={onSkillSelect} />}
+      {children ?? <SkillRows app={app} icon={icon} iconSrc={iconSrc} skills={skills} onSkillSelect={onSkillSelect} />}
     </DetailSection>
   );
 }
 
 function SkillRows({
+  app,
   icon,
   iconSrc,
   onSkillSelect,
   skills,
 }: {
+  app?: AppDefinition;
   icon?: AppIconSpec;
   iconSrc?: string;
   onSkillSelect?: (skill: AppSkillItem) => void;
@@ -1978,7 +2111,7 @@ function SkillRows({
         <Item key={skill.path} asChild className="items-start gap-3 rounded-lg px-3 py-3 hover:bg-muted/35" variant="outline">
           <button type="button" onClick={() => onSkillSelect?.(skill)}>
             <ItemMedia>
-              <AppIcon icon={icon} size="md" src={iconSrc} />
+              {app ? <AppIdentityIcon app={app} icon={icon} iconSrc={iconSrc} size="md" /> : <AppIcon icon={icon} size="md" src={iconSrc} />}
             </ItemMedia>
             <ItemContent className="min-w-0 gap-1">
               <ItemTitle className="flex max-w-full flex-wrap items-center gap-2">
@@ -1994,6 +2127,8 @@ function SkillRows({
 }
 
 function SkillDetailDialog({
+  appID,
+  appSource,
   failed,
   icon,
   iconSrc,
@@ -2002,6 +2137,8 @@ function SkillDetailDialog({
   skill,
   onOpenChange,
 }: {
+  appID?: string;
+  appSource?: AppDefinition["source"];
   failed: boolean;
   icon?: AppIconSpec;
   iconSrc?: string;
@@ -2018,7 +2155,11 @@ function SkillDetailDialog({
       <DialogContent className="flex h-[82vh] max-h-[760px] flex-col overflow-hidden sm:max-w-3xl">
         <DialogHeader className="shrink-0">
           <div className="mb-3">
-            <AppIcon className="size-10" icon={icon} size="lg" src={iconSrc} />
+            {appSource === "builtin" && appID ? (
+              <BuiltinAppIcon appID={appID} size="xl" />
+            ) : (
+              <AppIcon className="size-10" icon={icon} size="lg" src={iconSrc} />
+            )}
           </div>
           <DialogTitle className="flex min-w-0 flex-wrap items-baseline gap-2 text-xl">
             <span className="truncate">{title}</span>

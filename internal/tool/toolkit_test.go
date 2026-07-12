@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
 )
@@ -31,6 +32,34 @@ func TestBuiltinToolsBelongToExactlyOneToolkit(t *testing.T) {
 		if counts[def.Name] != 1 {
 			t.Fatalf("tool %s belongs to %d toolkits", def.Name, counts[def.Name])
 		}
+	}
+}
+
+func TestBuiltinAppDefinitionsListOwnedTools(t *testing.T) {
+	definitions := make(map[string]provider.ToolDef)
+	for _, def := range BuiltinDefinitions() {
+		definitions[def.Name] = def
+	}
+	seen := make(map[string]bool)
+	for _, def := range app.BuiltinDefinitions() {
+		requiredMode := store.NormalizeAgentMode(store.AgentMode(def.RequiredMode))
+		for _, ref := range def.Tools {
+			owner, ok := BuiltinAppIDForTool(ref.Name)
+			if !ok || owner != def.ID {
+				t.Fatalf("app %s lists unowned tool %s", def.ID, ref.Name)
+			}
+			toolDef, ok := definitions[ref.Name]
+			if !ok {
+				t.Fatalf("app %s lists undefined tool %s", def.ID, ref.Name)
+			}
+			if mode := store.NormalizeAgentMode(toolDef.Capability); mode != requiredMode {
+				t.Fatalf("app %s requires %s but tool %s requires %s", def.ID, requiredMode, ref.Name, mode)
+			}
+			seen[ref.Name] = true
+		}
+	}
+	if len(seen) != len(builtinAppTools) {
+		t.Fatalf("app definitions list %d tools, ownership map has %d", len(seen), len(builtinAppTools))
 	}
 }
 
@@ -97,16 +126,17 @@ func TestToolkitCatalogGroupsDynamicUIAndExcludesApps(t *testing.T) {
 	defs := []provider.ToolDef{
 		{Name: "canvas_markdown", Capability: store.ModeChat},
 		{Name: "ui_confirm", Capability: store.ModeChat},
+		{Name: "collect_user_input", Capability: store.ModeChat},
 		{Name: "app_mcp__search__hash", Capability: store.ModeWork, AppID: "github"},
 	}
 	catalog := BuildToolkitCatalog(defs)
-	ui, ok := ToolkitByID(catalog, "ui.canvas")
+	ui, ok := ToolkitByID(catalog, "ui.core")
 	if !ok || !ui.Default || len(ui.ToolNames) != 2 {
 		t.Fatalf("UI toolkit wrong: %+v", ui)
 	}
 	for _, manifest := range catalog {
-		if strings.HasPrefix(manifest.ID, "app.") || slicesContain(manifest.ToolNames, "app_mcp__search__hash") {
-			t.Fatalf("app tool leaked into toolkit: %+v", manifest)
+		if strings.HasPrefix(manifest.ID, "app.") || slicesContain(manifest.ToolNames, "app_mcp__search__hash") || slicesContain(manifest.ToolNames, "canvas_markdown") {
+			t.Fatalf("App or Canvas tool leaked into toolkit: %+v", manifest)
 		}
 	}
 }

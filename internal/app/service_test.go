@@ -28,6 +28,30 @@ type fakeAppConfig struct {
 	enabled map[string]bool
 }
 
+type fakeRuntimeSource struct{}
+
+func (fakeRuntimeSource) ListRuntimeDefinitions(_ context.Context, runtimeID string) ([]*Definition, error) {
+	if runtimeID != "desktop_a" {
+		return nil, nil
+	}
+	return []*Definition{{
+		ID:             "canvas",
+		Name:           "Canvas",
+		Runtime:        "desktop",
+		RequiredMode:   "chat",
+		DefaultSkillID: "canvas",
+		Skills:         []SkillRef{{ID: "canvas", Name: "Canvas", Path: "skills/canvas/SKILL.md"}},
+		Tools:          []ToolRef{{Name: "canvas_markdown"}},
+	}}, nil
+}
+
+func (fakeRuntimeSource) ReadRuntimeSkill(_ context.Context, runtimeID, appID, skillID string) (*SkillDetail, error) {
+	if runtimeID != "desktop_a" || appID != "canvas" || skillID != "canvas" {
+		return nil, ErrNotFound
+	}
+	return &SkillDetail{ID: "canvas", Name: "Canvas", Path: "skills/canvas/SKILL.md", Content: "# Canvas"}, nil
+}
+
 func (f *fakeAppConfig) ListAppEnablement(context.Context) (map[string]bool, error) {
 	out := make(map[string]bool, len(f.enabled))
 	for id, enabled := range f.enabled {
@@ -58,6 +82,9 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 	if defs[0].Source != SourceBuiltin || !defs[0].Enabled || defs[0].CanUninstall || defs[0].RequiredMode != "work" || defs[0].DefaultSkillID != BuiltinBrowserID {
 		t.Fatalf("unexpected browser definition: %+v", defs[0])
 	}
+	if len(defs[0].Tools) != 11 || defs[0].Tools[0].Name != toolBrowserStatus || len(defs[1].Tools) != 3 {
+		t.Fatalf("unexpected builtin tools: browser=%+v terminal=%+v", defs[0].Tools, defs[1].Tools)
+	}
 
 	updated, err := svc.SetEnabled(context.Background(), BuiltinBrowserID, false)
 	if err != nil {
@@ -81,6 +108,81 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 	}
 	if err := svc.DeleteDefinition(context.Background(), BuiltinBrowserID); !errors.Is(err, ErrBuiltinApp) {
 		t.Fatalf("delete builtin err = %v", err)
+	}
+}
+
+func TestRuntimeAppIsScopedToOriginRuntime(t *testing.T) {
+	config := &fakeAppConfig{}
+	svc := NewService(t.TempDir(), config).WithRuntimeSource(fakeRuntimeSource{})
+
+	defs, err := svc.ListDefinitions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) != 2 {
+		t.Fatalf("runtime app leaked without runtime identity: %+v", defs)
+	}
+
+	ctx := WithRuntimeID(context.Background(), "desktop_a")
+	defs, err = svc.ListDefinitions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) != 3 || defs[2].ID != "canvas" || defs[2].Source != SourceBuiltin || defs[2].Runtime != "desktop" || defs[2].CanUninstall {
+		t.Fatalf("unexpected runtime app definition: %+v", defs)
+	}
+	if _, err := svc.SetEnabled(ctx, "canvas", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ReadSkill(ctx, "canvas", "canvas"); !errors.Is(err, ErrDisabled) {
+		t.Fatalf("disabled runtime skill err = %v", err)
+	}
+	if _, err := svc.SetEnabled(ctx, "canvas", true); err != nil {
+		t.Fatal(err)
+	}
+	detail, err := svc.ReadSkill(ctx, "canvas", "canvas")
+	if err != nil || detail.Content != "# Canvas" {
+		t.Fatalf("unexpected runtime skill: detail=%+v err=%v", detail, err)
+	}
+}
+
+func TestDecorateInstalledDefinitionInfersAPITools(t *testing.T) {
+	def := &Definition{Endpoints: map[string]Endpoint{
+		"rest":    {Kind: EndpointKindREST},
+		"graphql": {Kind: EndpointKindGraphQL},
+		"mcp":     {Kind: EndpointKindMCP},
+	}}
+	decorateInstalledDefinition(def)
+	want := []string{toolRESTRequest, toolGraphQLRequest, toolGraphQLIntrospect, toolGraphQLSearch}
+	if len(def.Tools) != len(want) {
+		t.Fatalf("tools = %+v, want %v", def.Tools, want)
+	}
+	for i, name := range want {
+		if def.Tools[i].Name != name {
+			t.Fatalf("tools[%d] = %q, want %q", i, def.Tools[i].Name, name)
+		}
+	}
+}
+
+func TestInstalledAppCanBeTemporarilyDisabled(t *testing.T) {
+	config := &fakeAppConfig{}
+	svc := NewService(writeTestApp(t), config)
+
+	updated, err := svc.SetEnabled(context.Background(), "github", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Enabled || config.enabled["github"] {
+		t.Fatalf("installed app enablement was not updated: %+v", updated)
+	}
+	defs, err := svc.ListDefinitions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, def := range defs {
+		if def.ID == "github" && def.Enabled {
+			t.Fatalf("installed app was enabled after reload: %+v", def)
+		}
 	}
 }
 

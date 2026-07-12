@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
 )
@@ -26,6 +27,8 @@ type BrowserMCPRunner struct {
 
 type BrowserMCPSessionSnapshot struct {
 	ID            string                   `json:"id"`
+	RuntimeID     string                   `json:"runtimeID"`
+	Runtime       string                   `json:"runtime"`
 	ConnectedAt   time.Time                `json:"connectedAt"`
 	ServerName    string                   `json:"serverName"`
 	ServerVersion string                   `json:"serverVersion"`
@@ -36,6 +39,7 @@ type BrowserMCPToolSnapshot struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Capability  store.AgentMode `json:"capability,omitempty"`
+	AppID       string          `json:"appID,omitempty"`
 }
 
 func NewBrowserMCPRunner() *BrowserMCPRunner {
@@ -73,29 +77,56 @@ func (r *BrowserMCPRunner) BrowserSessions() []BrowserMCPSessionSnapshot {
 	return out
 }
 
-func (r *BrowserMCPRunner) Definitions(context.Context, string) ([]provider.ToolDef, error) {
-	r.mu.Lock()
-	sessions := append([]*browserMCPSession(nil), r.sessions...)
-	r.mu.Unlock()
-
-	seen := map[string]bool{}
-	var defs []provider.ToolDef
-	for i := len(sessions) - 1; i >= 0; i-- {
-		for _, def := range sessions[i].definitions() {
-			if def.Name == "" || seen[def.Name] {
-				continue
-			}
-			seen[def.Name] = true
-			defs = append(defs, def)
-		}
+func (r *BrowserMCPRunner) ListRuntimeDefinitions(_ context.Context, runtimeID string) ([]*app.Definition, error) {
+	session := r.sessionForRuntime(runtimeID)
+	if session == nil {
+		return nil, nil
 	}
-	return defs, nil
+	return session.runtimeDefinitions(), nil
+}
+
+func (r *BrowserMCPRunner) ReadRuntimeSkill(ctx context.Context, runtimeID, appID, skillID string) (*app.SkillDetail, error) {
+	session := r.sessionForRuntime(runtimeID)
+	if session == nil || !session.hasApp(appID) {
+		return nil, app.ErrNotFound
+	}
+	raw, err := session.call(ctx, "apps/skills/read", map[string]any{
+		"appID":   strings.TrimSpace(appID),
+		"skillID": strings.TrimSpace(skillID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	var detail app.SkillDetail
+	if err := json.Unmarshal(raw, &detail); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(detail.Content) == "" {
+		return nil, app.ErrNotFound
+	}
+	return &detail, nil
+}
+
+func (r *BrowserMCPRunner) Definitions(ctx context.Context, _ string) ([]provider.ToolDef, error) {
+	runtimeID := app.RuntimeIDFromContext(ctx)
+	if runtimeID == "" {
+		return nil, nil
+	}
+	session := r.sessionForRuntime(runtimeID)
+	if session == nil {
+		return nil, nil
+	}
+	return session.definitions(), nil
 }
 
 func (r *BrowserMCPRunner) Call(ctx context.Context, call Call) Result {
-	session := r.latestSessionWithTool(call.Name)
-	if session == nil {
-		return Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: fmt.Sprintf("unknown tool: %s", call.Name)}
+	runtimeID := app.RuntimeIDFromContext(ctx)
+	if runtimeID == "" {
+		return Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: "UI runtime unavailable for this turn"}
+	}
+	session := r.sessionForRuntime(runtimeID)
+	if session == nil || !session.hasTool(call.Name) {
+		return Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: fmt.Sprintf("tool %s is unavailable in runtime %s", call.Name, runtimeID)}
 	}
 	args, err := browserToolArgs(call)
 	if err != nil {
@@ -128,12 +159,16 @@ func (r *BrowserMCPRunner) removeSession(session *browserMCPSession) {
 	}
 }
 
-func (r *BrowserMCPRunner) latestSessionWithTool(name string) *browserMCPSession {
+func (r *BrowserMCPRunner) sessionForRuntime(runtimeID string) *browserMCPSession {
+	runtimeID = strings.TrimSpace(runtimeID)
+	if runtimeID == "" {
+		return nil
+	}
 	r.mu.Lock()
 	sessions := append([]*browserMCPSession(nil), r.sessions...)
 	r.mu.Unlock()
 	for i := len(sessions) - 1; i >= 0; i-- {
-		if sessions[i].hasTool(name) {
+		if sessions[i].runtimeIdentity() == runtimeID {
 			return sessions[i]
 		}
 	}
@@ -150,7 +185,10 @@ type browserMCPSession struct {
 	mu            sync.Mutex
 	serverName    string
 	serverVersion string
+	runtimeID     string
+	runtime       string
 	tools         []provider.ToolDef
+	apps          []*app.Definition
 	pending       map[string]chan rpcEnvelope
 	done          chan struct{}
 }
@@ -172,9 +210,20 @@ func (s *browserMCPSession) run(parent context.Context) {
 		<-s.done
 		return
 	}
-	s.setServerInfo(raw)
+	if err := s.setInitialization(raw); err != nil {
+		slog.Warn("browser mcp: invalid runtime identity", "err", err)
+		_ = s.conn.Close(websocket.StatusProtocolError, err.Error())
+		<-s.done
+		return
+	}
 	if err := s.refreshTools(ctx); err != nil {
 		slog.Warn("browser mcp: tools/list failed", "err", err)
+		_ = s.conn.Close(websocket.StatusProtocolError, err.Error())
+		<-s.done
+		return
+	}
+	if err := s.refreshApps(ctx); err != nil {
+		slog.Warn("browser mcp: apps/list failed", "err", err)
 		_ = s.conn.Close(websocket.StatusProtocolError, err.Error())
 		<-s.done
 		return
@@ -188,6 +237,39 @@ func (s *browserMCPSession) definitions() []provider.ToolDef {
 	return append([]provider.ToolDef(nil), s.tools...)
 }
 
+func (s *browserMCPSession) runtimeDefinitions() []*app.Definition {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*app.Definition, 0, len(s.apps))
+	for _, definition := range s.apps {
+		if definition == nil {
+			continue
+		}
+		cloned := app.CloneDefinition(definition)
+		cloned.Runtime = s.runtime
+		cloned.Tools = nil
+		for _, def := range s.tools {
+			if def.AppID == cloned.ID {
+				cloned.Tools = append(cloned.Tools, app.ToolRef{Name: def.Name, Description: def.Description})
+			}
+		}
+		out = append(out, cloned)
+	}
+	return out
+}
+
+func (s *browserMCPSession) hasApp(appID string) bool {
+	appID = strings.TrimSpace(appID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, definition := range s.apps {
+		if definition != nil && definition.ID == appID {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *browserMCPSession) snapshot() BrowserMCPSessionSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -197,15 +279,24 @@ func (s *browserMCPSession) snapshot() BrowserMCPSessionSnapshot {
 			Name:        def.Name,
 			Description: def.Description,
 			Capability:  def.Capability,
+			AppID:       def.AppID,
 		})
 	}
 	return BrowserMCPSessionSnapshot{
 		ID:            s.id,
+		RuntimeID:     s.runtimeID,
+		Runtime:       s.runtime,
 		ConnectedAt:   s.connectedAt,
 		ServerName:    s.serverName,
 		ServerVersion: s.serverVersion,
 		Tools:         tools,
 	}
+}
+
+func (s *browserMCPSession) runtimeIdentity() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.runtimeID
 }
 
 func (s *browserMCPSession) hasTool(name string) bool {
@@ -219,20 +310,32 @@ func (s *browserMCPSession) hasTool(name string) bool {
 	return false
 }
 
-func (s *browserMCPSession) setServerInfo(raw json.RawMessage) {
+func (s *browserMCPSession) setInitialization(raw json.RawMessage) error {
 	var out struct {
 		ServerInfo struct {
 			Name    string `json:"name"`
 			Version string `json:"version"`
 		} `json:"serverInfo"`
+		RuntimeInfo struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+		} `json:"runtimeInfo"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return
+		return err
+	}
+	runtimeID := strings.TrimSpace(out.RuntimeInfo.ID)
+	runtimeType := strings.TrimSpace(out.RuntimeInfo.Type)
+	if runtimeID == "" || runtimeType == "" {
+		return errors.New("runtimeInfo.id and runtimeInfo.type are required")
 	}
 	s.mu.Lock()
 	s.serverName = strings.TrimSpace(out.ServerInfo.Name)
 	s.serverVersion = strings.TrimSpace(out.ServerInfo.Version)
+	s.runtimeID = runtimeID
+	s.runtime = runtimeType
 	s.mu.Unlock()
+	return nil
 }
 
 func (s *browserMCPSession) refreshTools(ctx context.Context) error {
@@ -246,6 +349,7 @@ func (s *browserMCPSession) refreshTools(ctx context.Context) error {
 			Description string          `json:"description"`
 			InputSchema json.RawMessage `json:"inputSchema"`
 			Capability  store.AgentMode `json:"capability"`
+			AppID       string          `json:"appID"`
 		} `json:"tools"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
@@ -266,10 +370,35 @@ func (s *browserMCPSession) refreshTools(ctx context.Context) error {
 			Description: tool.Description,
 			InputSchema: tool.InputSchema,
 			Capability:  capability,
+			AppID:       strings.TrimSpace(tool.AppID),
 		})
 	}
 	s.mu.Lock()
 	s.tools = defs
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *browserMCPSession) refreshApps(ctx context.Context) error {
+	raw, err := s.call(ctx, "apps/list", map[string]any{})
+	if err != nil {
+		return err
+	}
+	var out struct {
+		Apps []*app.Definition `json:"apps"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return err
+	}
+	apps := make([]*app.Definition, 0, len(out.Apps))
+	for _, definition := range out.Apps {
+		if definition == nil || strings.TrimSpace(definition.ID) == "" || strings.TrimSpace(definition.Name) == "" {
+			continue
+		}
+		apps = append(apps, app.CloneDefinition(definition))
+	}
+	s.mu.Lock()
+	s.apps = apps
 	s.mu.Unlock()
 	return nil
 }
@@ -345,6 +474,15 @@ func (s *browserMCPSession) readLoop(ctx context.Context) {
 				defer cancel()
 				if err := s.refreshTools(refreshCtx); err != nil {
 					slog.Warn("browser mcp: refresh tools failed", "err", err)
+				}
+			}()
+		}
+		if envelope.Method == "notifications/apps/list_changed" {
+			go func() {
+				refreshCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := s.refreshApps(refreshCtx); err != nil {
+					slog.Warn("browser mcp: refresh apps failed", "err", err)
 				}
 			}()
 		}

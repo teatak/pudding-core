@@ -65,6 +65,7 @@ type Service struct {
 	appsRoot    string
 	connections ConnectionSource
 	enablement  EnablementSource
+	runtime     RuntimeSource
 }
 
 func NewService(homeDir string, connections ConnectionSource) *Service {
@@ -74,6 +75,13 @@ func NewService(homeDir string, connections ConnectionSource) *Service {
 	}
 	service.enablement, _ = connections.(EnablementSource)
 	return service
+}
+
+func (s *Service) WithRuntimeSource(source RuntimeSource) *Service {
+	if s != nil {
+		s.runtime = source
+	}
+	return s
 }
 
 func (s *Service) ListDefinitions(ctx context.Context) ([]*Definition, error) {
@@ -94,12 +102,32 @@ func (s *Service) ListDefinitions(ctx context.Context) ([]*Definition, error) {
 	}
 	builtins := BuiltinDefinitions()
 	out := make([]*Definition, 0, len(builtins)+len(defs))
+	seen := make(map[string]bool, len(builtins)+len(defs))
 	for _, def := range builtins {
 		applyEnabledOverride(def, enabled)
 		out = append(out, def)
+		seen[def.ID] = true
+	}
+	if s.runtime != nil {
+		runtimeID := RuntimeIDFromContext(ctx)
+		if runtimeID != "" {
+			runtimeDefs, err := s.runtime.ListRuntimeDefinitions(ctx, runtimeID)
+			if err != nil {
+				return nil, err
+			}
+			for _, def := range runtimeDefs {
+				resolved := decorateRuntimeDefinition(def)
+				if resolved == nil || seen[resolved.ID] {
+					continue
+				}
+				applyEnabledOverride(resolved, enabled)
+				out = append(out, resolved)
+				seen[resolved.ID] = true
+			}
+		}
 	}
 	for _, def := range defs {
-		if IsBuiltinID(def.ID) {
+		if IsBuiltinID(def.ID) || seen[def.ID] {
 			continue
 		}
 		resolved := ResolveDefinitionPlatform(def)
@@ -110,8 +138,34 @@ func (s *Service) ListDefinitions(ctx context.Context) ([]*Definition, error) {
 		decorateInstalledDefinition(resolved)
 		applyEnabledOverride(resolved, enabled)
 		out = append(out, resolved)
+		seen[resolved.ID] = true
 	}
 	return out, nil
+}
+
+func decorateRuntimeDefinition(def *Definition) *Definition {
+	resolved := CloneDefinition(def)
+	if resolved == nil {
+		return nil
+	}
+	resolved.ID = strings.TrimSpace(resolved.ID)
+	resolved.Name = strings.TrimSpace(resolved.Name)
+	if !appIDPattern.MatchString(resolved.ID) || resolved.Name == "" {
+		return nil
+	}
+	resolved.Source = SourceBuiltin
+	resolved.Enabled = true
+	resolved.CanUninstall = false
+	resolved.Auth = nil
+	resolved.Connection = nil
+	resolved.Endpoints = nil
+	resolved.Path = ""
+	resolved.SourceURL = ""
+	resolved.PackageSHA256 = ""
+	if mode := strings.TrimSpace(resolved.RequiredMode); mode != "chat" && mode != "work" && mode != "code" {
+		resolved.RequiredMode = "work"
+	}
+	return resolved
 }
 
 func decorateInstalledDefinition(def *Definition) {
@@ -122,6 +176,7 @@ func decorateInstalledDefinition(def *Definition) {
 	def.Enabled = true
 	def.CanUninstall = true
 	def.RequiredMode = "work"
+	def.Tools = inferredEndpointTools(def.Endpoints)
 	if len(def.Skills) > 0 {
 		def.DefaultSkillID = def.Skills[0].ID
 		if def.DefaultSkillID == "" {
@@ -131,6 +186,31 @@ func decorateInstalledDefinition(def *Definition) {
 			def.DefaultSkillID = def.Skills[0].Path
 		}
 	}
+}
+
+func inferredEndpointTools(endpoints map[string]Endpoint) []ToolRef {
+	hasREST := false
+	hasGraphQL := false
+	for _, endpoint := range endpoints {
+		switch endpoint.Kind {
+		case EndpointKindREST:
+			hasREST = true
+		case EndpointKindGraphQL:
+			hasGraphQL = true
+		}
+	}
+	tools := make([]ToolRef, 0, 4)
+	if hasREST {
+		tools = append(tools, ToolRef{Name: toolRESTRequest})
+	}
+	if hasGraphQL {
+		tools = append(tools,
+			ToolRef{Name: toolGraphQLRequest},
+			ToolRef{Name: toolGraphQLIntrospect},
+			ToolRef{Name: toolGraphQLSearch},
+		)
+	}
+	return tools
 }
 
 func applyEnabledOverride(def *Definition, enabled map[string]bool) {
@@ -325,7 +405,7 @@ func (s *Service) ReadSkill(ctx context.Context, appID, skillID string) (*SkillD
 	if !def.Enabled {
 		return nil, ErrDisabled
 	}
-	return s.readSkill(appID, skillID)
+	return s.readSkill(ctx, appID, skillID)
 }
 
 func (s *Service) ReadSkillDetail(ctx context.Context, appID, skillID string) (*SkillDetail, error) {
@@ -339,16 +419,28 @@ func (s *Service) ReadSkillDetail(ctx context.Context, appID, skillID string) (*
 	if _, err := s.definition(ctx, appID); err != nil {
 		return nil, err
 	}
-	return s.readSkill(appID, skillID)
+	return s.readSkill(ctx, appID, skillID)
 }
 
-func (s *Service) readSkill(appID, skillID string) (*SkillDetail, error) {
+func (s *Service) readSkill(ctx context.Context, appID, skillID string) (*SkillDetail, error) {
 	if IsBuiltinID(appID) {
 		detail, ok := ReadBuiltinSkill(appID, skillID)
 		if !ok {
 			return nil, ErrNotFound
 		}
 		return detail, nil
+	}
+	if s.runtime != nil {
+		runtimeID := RuntimeIDFromContext(ctx)
+		if runtimeID != "" {
+			detail, err := s.runtime.ReadRuntimeSkill(ctx, runtimeID, appID, skillID)
+			if err == nil {
+				return detail, nil
+			}
+			if !errors.Is(err, ErrNotFound) {
+				return nil, err
+			}
+		}
 	}
 	diskDef, err := LoadDefinitionDir(filepath.Join(s.appsRoot, appID))
 	if err != nil {

@@ -66,6 +66,10 @@ func NewLoader(home string, connections ...app.ConnectionSource) *Loader {
 	return &Loader{home: home, skills: skill.NewService(home), apps: app.NewService(home, source), connections: source}
 }
 
+func NewLoaderWithApps(home string, apps AppLister, connections app.ConnectionSource) *Loader {
+	return &Loader{home: home, skills: skill.NewService(home), apps: apps, connections: connections}
+}
+
 type SkillLister interface {
 	ListSkills(ctx context.Context) ([]skill.Skill, error)
 }
@@ -159,7 +163,8 @@ func appsSegment(list []*app.Definition, connections []*app.Connection) *Segment
 	var b strings.Builder
 	b.WriteString("## Available Apps\n\n")
 	b.WriteString("Enabled apps are listed here as a compact capability index. Their tools are not loaded by default.\n")
-	b.WriteString("When an app matches the user's request, first request its required capability if needed, then call `builtin_skill_read(app_id=\"<app id>\", skill_id=\"<default skill id>\")`. Follow the returned instructions; the app's tools become available on the next model step and remain loaded for this session.\n")
+	b.WriteString("When an app matches the user's request, first request its required capability if needed, then call `builtin_app_load(app_id=\"<app id>\")`. The call returns the App's default skill instructions and explicitly loads its tools for the session; the tools become available on the next model step. Pass `skill_id` only when a listed non-default App skill clearly matches better.\n")
+	b.WriteString("Apps, toolkits, and global skills use separate paths. Never use `builtin_toolkit_load` or `builtin_skill_read` to load an App, including Browser, Terminal, or Canvas.\n")
 	b.WriteString("Do not load unrelated apps. Apps marked `not connected` cannot be loaded until a connection is added.\n\n")
 	for _, item := range list {
 		if item == nil || !item.Enabled {

@@ -5,6 +5,10 @@ import { toast } from "sonner";
 import { createTerminal, deleteTerminal, listTerminals, type Terminal } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { useI18n } from "@/i18n";
+import {
+  normalizeTerminalDimensions,
+  type TerminalDimensions,
+} from "@/terminal/terminalDimensions";
 
 const SELECTED_TERMINAL_STORAGE_KEY = "pudding.terminal.selected.v1";
 
@@ -13,6 +17,7 @@ type TerminalData = { terminals: Terminal[] };
 export function useCanvasTerminals({
   active,
   enabled,
+  getInitialDimensions,
   onActivate,
   onDeactivate,
   sessionID,
@@ -20,6 +25,7 @@ export function useCanvasTerminals({
 }: {
   active: boolean;
   enabled: boolean;
+  getInitialDimensions: () => TerminalDimensions;
   onActivate: () => void;
   onDeactivate: () => void;
   sessionID: string;
@@ -28,6 +34,7 @@ export function useCanvasTerminals({
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const selectedRef = useRef<Record<string, string>>(readSelectedTerminals());
+  const initialDimensionsRef = useRef<Record<string, TerminalDimensions>>({});
   const [selectedBySession, setSelectedBySession] = useState(selectedRef.current);
   selectedRef.current = selectedBySession;
 
@@ -68,8 +75,16 @@ export function useCanvasTerminals({
   }, [active, enabled, onDeactivate, query.isFetching, terminals.length]);
 
   const createMutation = useMutation({
-    mutationFn: () => createTerminal(token, sessionID),
-    onSuccess: (item) => {
+    mutationFn: async () => {
+      const dimensions = normalizeTerminalDimensions(getInitialDimensions());
+      const item = await createTerminal(token, sessionID, dimensions);
+      return { dimensions, item };
+    },
+    onSuccess: ({ dimensions, item }) => {
+      initialDimensionsRef.current = {
+        ...initialDimensionsRef.current,
+        [item.id]: dimensions,
+      };
       queryClient.setQueryData<TerminalData>(queryKeys.terminals(sessionID), (current) => ({
         terminals: upsertTerminal(current?.terminals || [], item),
       }));
@@ -98,7 +113,10 @@ export function useCanvasTerminals({
       }
       return { previous, previousSelectedID };
     },
-    onSuccess: () => {
+    onSuccess: (_data, terminalID) => {
+      const nextDimensions = { ...initialDimensionsRef.current };
+      delete nextDimensions[terminalID];
+      initialDimensionsRef.current = nextDimensions;
       void queryClient.invalidateQueries({ queryKey: queryKeys.terminals(sessionID) });
     },
     onError: (_error, _terminalID, context) => {
@@ -139,6 +157,7 @@ export function useCanvasTerminals({
       }
     },
     terminals,
+    terminalInitialDimensions: initialDimensionsRef.current,
     terminalsPending: query.isFetching || createMutation.isPending,
     updateTerminalStatus: updateStatus,
   };

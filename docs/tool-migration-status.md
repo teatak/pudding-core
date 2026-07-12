@@ -34,6 +34,7 @@ Rules for new tools:
 | `builtin_browser_scroll` | chat | New managed browser tool | Done, basic page/element scroll | Yes | Yes |
 | `builtin_history_search` | chat | `builtin_history_search` | Done, semantics changed to current-session default | Yes | Yes |
 | `builtin_history_get_message` | chat | `builtin_history_get_message` | Done, session-scoped | Yes | Yes |
+| `builtin_app_load` | chat | New explicit App loader | Done, returns App Skill and updates session load state atomically | Yes | Yes |
 | `builtin_skill_read` | chat | New on-demand skill body reader | Done | Yes | Yes |
 | `builtin_file_list` | workspace | `builtin_files_list` | Done, renamed and scope-based | Partial | Yes |
 | `builtin_file_read` | workspace | `builtin_files_read` | Done, text-focused | Partial | Yes |
@@ -120,6 +121,7 @@ Current new builtins have transcript display names and i18n entries:
 - `builtin_browser_scroll`
 - `builtin_history_search`
 - `builtin_history_get_message`
+- `builtin_app_load`
 - `builtin_skill_read`
 - `builtin_file_list`
 - `builtin_file_read`
