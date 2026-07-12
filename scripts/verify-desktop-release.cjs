@@ -10,6 +10,10 @@ const outputDir = path.join(root, "dist", "release");
 const version = String(process.env.PUDDING_APP_VERSION || packageMetadata.version || "").trim();
 const mode = String(process.env.PUDDING_UPDATE_MODE || "manual").trim().toLowerCase();
 const signingIdentity = String(process.env.PUDDING_MAC_IDENTITY || "-").trim() || "-";
+const signingAuthority =
+  signingIdentity === "-" || /^Developer ID Application:/i.test(signingIdentity)
+    ? signingIdentity
+    : `Developer ID Application: ${signingIdentity}`;
 const appPath = path.join(outputDir, "mac-arm64", "Pudding.app");
 const infoPlist = path.join(appPath, "Contents", "Info.plist");
 const asarPath = path.join(appPath, "Contents", "Resources", "app.asar");
@@ -74,8 +78,8 @@ if (signingIdentity === "-") {
     fail("manual ad-hoc build is not marked as ad-hoc signed");
   }
 } else {
-  if (!signatureDetails.includes(`Authority=${signingIdentity}`)) {
-    fail(`app is not signed by ${signingIdentity}`);
+  if (!signatureDetails.includes(`Authority=${signingAuthority}`)) {
+    fail(`app is not signed by ${signingAuthority}`);
   }
   if (signatureDetails.includes("Signature=adhoc") || !signatureDetails.includes("TeamIdentifier=")) {
     fail("Developer ID build has an invalid signing identity");

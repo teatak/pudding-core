@@ -1,7 +1,8 @@
 const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
-const signingIdentity = String(process.env.PUDDING_MAC_IDENTITY || "-").trim() || "-";
+const requestedSigningIdentity = String(process.env.PUDDING_MAC_IDENTITY || "-").trim() || "-";
+const signingIdentity = normalizeSigningIdentity(requestedSigningIdentity);
 const requestedVersion = String(process.env.PUDDING_APP_VERSION || "").trim();
 const requestedUpdateMode = String(process.env.PUDDING_UPDATE_MODE || "").trim().toLowerCase();
 if (requestedUpdateMode && requestedUpdateMode !== "manual" && requestedUpdateMode !== "automatic") {
@@ -89,3 +90,10 @@ module.exports = {
     },
   ],
 };
+
+function normalizeSigningIdentity(identity) {
+  if (identity === "-") {
+    return identity;
+  }
+  return identity.replace(/^Developer ID Application:\s*/i, "");
+}

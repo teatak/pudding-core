@@ -37,8 +37,22 @@ test("Developer ID builds require notarization credentials", () => {
   );
 });
 
+test("strips the Developer ID prefix before invoking Electron Builder", () => {
+  assert.equal(
+    loadConfigValue("mac.identity", {
+      PUDDING_MAC_IDENTITY: "Developer ID Application: Test (TEAMID)",
+      APPLE_KEYCHAIN_PROFILE: "test-notary",
+    }),
+    "Test (TEAMID)",
+  );
+});
+
 function loadUpdateMode(overrides = {}) {
-  const script = "process.stdout.write(require('./packaging/electron-builder.config.cjs').extraMetadata.puddingUpdateMode)";
+  return loadConfigValue("extraMetadata.puddingUpdateMode", overrides);
+}
+
+function loadConfigValue(pathExpression, overrides = {}) {
+  const script = `process.stdout.write(require('./packaging/electron-builder.config.cjs').${pathExpression})`;
   return execFileSync(process.execPath, ["-e", script], {
     cwd: root,
     encoding: "utf8",
