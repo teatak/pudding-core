@@ -50,7 +50,7 @@ export type LocalizedUserMessage = {
 
 export const OFFICIAL_USER_MESSAGES_URL =
   import.meta.env.VITE_PUDDING_USER_MESSAGES_URL ||
-  "https://cdn.jsdelivr.net/gh/teatak/pudding@main/catalog/user-messages.json";
+  "https://raw.githubusercontent.com/teatak/pudding/main/catalog/user-messages.json";
 
 export const USER_MESSAGES_STALE_TIME_MS = 15 * 60 * 1000;
 
