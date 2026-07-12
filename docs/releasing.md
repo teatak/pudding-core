@@ -35,8 +35,12 @@ Automatic updates remain opt-in for a future signed release:
 ```bash
 PUDDING_UPDATE_MODE=automatic \
 PUDDING_MAC_IDENTITY="Developer ID Application: ..." \
+APPLE_KEYCHAIN_PROFILE="pudding-notary" \
 make desktop-bundle
 ```
+
+Developer ID builds require notarization credentials. The release verifier rejects an ad-hoc automatic build,
+an unstapled app, an unexpected signing authority, or an app that fails Gatekeeper assessment.
 
 ## Publish
 

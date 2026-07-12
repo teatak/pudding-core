@@ -177,7 +177,7 @@ function createMainWindow() {
     ...savedBounds,
     minWidth: minWindowBounds.width,
     minHeight: minWindowBounds.height,
-    title: appDisplayName,
+    title: nativeAppName(),
     backgroundColor: themeBackgroundColor(),
     ...(process.platform === "darwin"
       ? {
@@ -238,7 +238,7 @@ function createTray() {
     return null;
   }
   appTray = new Tray(icon);
-  appTray.setToolTip(appDisplayName);
+  appTray.setToolTip(nativeAppName());
   updateTrayMenu();
   return appTray;
 }
@@ -295,7 +295,7 @@ function updateApplicationMenu() {
   const updateItem = updateMenuItem();
   if (process.platform === "darwin") {
     template.push({
-      label: appDisplayName,
+      label: nativeAppName(),
       submenu: [
         { label: nativeMenuText("about"), role: "about" },
         { type: "separator" },
@@ -428,13 +428,23 @@ function updateMenuItem() {
 
 function setShellLocale(locale) {
   shellLocale = normalizeNativeLocale(locale);
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.setTitle(nativeAppName());
+    }
+  }
+  appTray?.setToolTip(nativeAppName());
   updateApplicationMenu();
   updateTrayMenu();
   return shellLocale;
 }
 
+function nativeAppName() {
+  return nativeText(shellLocale, "appName");
+}
+
 function nativeMenuText(key) {
-  return nativeText(shellLocale, key, { app: appDisplayName });
+  return nativeText(shellLocale, key, { app: nativeAppName() });
 }
 
 function sendDesktopMenuCommand(command) {

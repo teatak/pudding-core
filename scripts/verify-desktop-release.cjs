@@ -1,4 +1,4 @@
-const { execFileSync } = require("node:child_process");
+const { execFileSync, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -68,8 +68,31 @@ for (const artifactName of [path.basename(dmgPath), path.basename(zipPath)]) {
 }
 
 execFileSync("codesign", ["--verify", "--deep", "--strict", appPath], { stdio: "inherit" });
+const signatureDetails = commandOutput("codesign", ["-dv", "--verbose=4", appPath]);
+if (signingIdentity === "-") {
+  if (!signatureDetails.includes("Signature=adhoc")) {
+    fail("manual ad-hoc build is not marked as ad-hoc signed");
+  }
+} else {
+  if (!signatureDetails.includes(`Authority=${signingIdentity}`)) {
+    fail(`app is not signed by ${signingIdentity}`);
+  }
+  if (signatureDetails.includes("Signature=adhoc") || !signatureDetails.includes("TeamIdentifier=")) {
+    fail("Developer ID build has an invalid signing identity");
+  }
+  execFileSync("xcrun", ["stapler", "validate", appPath], { stdio: "inherit" });
+  execFileSync("spctl", ["--assess", "--type", "execute", "--verbose=4", appPath], { stdio: "inherit" });
+}
 execFileSync("hdiutil", ["verify", dmgPath], { stdio: "inherit" });
 console.log(`Verified desktop release: version=${version} mode=${mode}`);
+
+function commandOutput(command, args) {
+  const result = spawnSync(command, args, { encoding: "utf8" });
+  if (result.status !== 0) {
+    fail(`${command} ${args.join(" ")} failed: ${(result.stderr || result.stdout || "").trim()}`);
+  }
+  return `${result.stdout || ""}\n${result.stderr || ""}`;
+}
 
 function fail(message) {
   console.error(`Desktop release verification failed: ${message}`);
