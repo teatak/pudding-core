@@ -681,6 +681,14 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
     @apply text-2xl leading-tight font-medium text-foreground;
 }
 
+.pudding-draft-subtitle-slot {
+    @apply mt-3 min-h-5 px-4 text-center;
+}
+
+.pudding-draft-subtitle {
+    @apply text-sm leading-5 text-muted-foreground;
+}
+
 .pudding-draft-stack {
     @apply mt-8 flex flex-col;
 }

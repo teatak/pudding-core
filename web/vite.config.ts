@@ -3,12 +3,15 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
 import { defineConfig, loadEnv } from "vite";
 
+import packageMetadata from "../package.json";
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const daemon = env.PUDDING_DAEMON_URL || "http://127.0.0.1:9679";
 
   return {
     define: {
+      __PUDDING_APP_VERSION__: JSON.stringify(packageMetadata.version),
       "process.env.DRAGGABLE_DEBUG": "false",
     },
     plugins: [react(), tailwindcss()],

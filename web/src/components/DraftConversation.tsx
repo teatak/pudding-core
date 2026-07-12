@@ -60,6 +60,7 @@ import { ProjectComposerControls } from "@/components/ProjectComposerControls";
 import { reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useComposerSelectionGuard } from "@/hooks/useComposerSelectionGuard";
@@ -68,7 +69,7 @@ import { useSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
 import { attachmentResourceURL } from "@/lib/attachmentURL";
 import { createPastedTextAttachmentFile, shouldAttachPastedText } from "@/lib/clipboardTextAttachment";
-import { getLocalFilePath } from "@/lib/desktopBridge";
+import { getLocalFilePath, openExternalURL } from "@/lib/desktopBridge";
 import { newClientID } from "@/lib/id";
 import {
   createLocalFolderPath,
@@ -82,6 +83,7 @@ import { fetchStarterPromptCatalog, localizeStarterPrompts, STARTER_PROMPTS_CACH
 import { getSubmitFailure } from "@/lib/submitFailure";
 import { buildDraftSubmitParts, orderedDraftItems } from "@/lib/submitParts";
 import { getTextAreaCaretClientPoint } from "@/lib/textCaret";
+import { fetchUserMessageCatalog, localizeUserMessage, USER_MESSAGES_STALE_TIME_MS } from "@/lib/userMessages";
 import { cn } from "@/lib/utils";
 import { getOrderedProviderPresets, type ProviderPreset } from "@/provider/presets";
 import { useDraftStore, type DraftAttachment, type DraftModelValue } from "@/state/draftStore";
@@ -123,6 +125,12 @@ export function DraftConversation({ token, projectID }: { token: string; project
     retry: false,
     staleTime: STARTER_PROMPTS_CACHE_TTL_MS,
   });
+  const userMessagesQuery = useQuery({
+    queryKey: queryKeys.userMessages(),
+    queryFn: () => fetchUserMessageCatalog(),
+    retry: false,
+    staleTime: USER_MESSAGES_STALE_TIME_MS,
+  });
   const profiles = providersQuery.data?.providers || [];
   const hasConfiguredModel = profiles.some((profile) => profile.models.some((model) => model.id));
   const draftModelIsValid = providersQuery.isSuccess && isDraftModelAvailable(profiles, modelValue);
@@ -131,6 +139,10 @@ export function DraftConversation({ token, projectID }: { token: string; project
   const starterPrompts = useMemo(
     () => localizeStarterPrompts(starterPromptsQuery.data?.items || [], locale),
     [locale, starterPromptsQuery.data?.items],
+  );
+  const userMessage = useMemo(
+    () => (userMessagesQuery.data ? localizeUserMessage(userMessagesQuery.data, locale, "draft") : null),
+    [locale, userMessagesQuery.data],
   );
   const [mascotGaze, setMascotGaze] = useState<MascotGaze>({ type: "pointer" });
   const setMascotPointerGaze = useCallback(() => {
@@ -228,15 +240,47 @@ export function DraftConversation({ token, projectID }: { token: string; project
       onDrop={handleDrop}
     >
       <div className="pudding-draft-body">
-        <div className="pudding-draft-title">
+        <div className="pudding-draft-title" aria-busy={userMessagesQuery.isPending}>
           <Mascot
             className="pudding-draft-mascot"
             gaze={mascotGaze}
             mood="idle"
             onPointerGaze={setMascotPointerGaze}
           />
-          <h1 className="pudding-draft-heading">{t("draft.title")}</h1>
+          {userMessagesQuery.isPending ? (
+            <Skeleton className="h-8 w-72 max-w-[60vw]" />
+          ) : (
+            <h1 className="pudding-draft-heading">{userMessage?.title || t("draft.title")}</h1>
+          )}
         </div>
+        {userMessagesQuery.isPending || userMessage?.subtitle || userMessage?.link ? (
+          <div className="pudding-draft-subtitle-slot">
+            {userMessagesQuery.isPending ? (
+              <Skeleton className="mx-auto h-4 w-96 max-w-[70vw]" />
+            ) : (
+              <p className="pudding-draft-subtitle" data-user-message-id={userMessage?.id}>
+                {userMessage?.subtitle}
+                {userMessage?.link ? (
+                  <>
+                    {userMessage.subtitle ? " " : null}
+                    <a
+                      className="text-foreground/75 underline decoration-border underline-offset-4 transition-colors hover:text-foreground"
+                      href={userMessage.link.url}
+                      rel="noreferrer noopener"
+                      target="_blank"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        void openExternalURL(event.currentTarget.href);
+                      }}
+                    >
+                      {userMessage.link.label}
+                    </a>
+                  </>
+                ) : null}
+              </p>
+            )}
+          </div>
+        ) : null}
         <div className={cn("pudding-draft-stack", showPresetSetup && "pudding-draft-stack-with-setup")}>
           {submitError ? (
             <ChatColumn className="mb-3">

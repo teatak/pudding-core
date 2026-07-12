@@ -29,6 +29,7 @@ export const queryKeys = {
   appCatalog: () => ["apps", "catalog"] as const,
   appCatalogDetail: (id: string, version: string) => ["apps", "catalog", id, version] as const,
   starterPrompts: () => ["starter-prompts"] as const,
+  userMessages: () => ["user-messages"] as const,
   appSkill: (appID: string, path: string) => ["apps", appID, "skill", path] as const,
   appMCPStatus: (appID: string) => ["apps", appID, "mcp"] as const,
   appMCPOverride: (appID: string, endpointName: string) => ["apps", appID, "mcp-override", endpointName] as const,
