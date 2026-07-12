@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/teatak/pudding-core/internal/provider"
@@ -9,6 +10,76 @@ import (
 
 type MultiRunner struct {
 	runners []Runner
+}
+
+func (r *MultiRunner) CloseSession(sessionID string) {
+	for _, runner := range r.runners {
+		if cleaner, ok := runner.(SessionResourceCleaner); ok {
+			cleaner.CloseSession(sessionID)
+		}
+	}
+}
+
+func (r *MultiRunner) Close() error {
+	var errs []error
+	for _, runner := range r.runners {
+		if closer, ok := runner.(ResourceCloser); ok {
+			if err := closer.Close(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (r *MultiRunner) ListBackgroundProcesses(sessionID string) []BackgroundProcessSnapshot {
+	items := make([]BackgroundProcessSnapshot, 0)
+	for _, runner := range r.runners {
+		if controller, ok := runner.(BackgroundProcessController); ok {
+			items = append(items, controller.ListBackgroundProcesses(sessionID)...)
+		}
+	}
+	return items
+}
+
+func (r *MultiRunner) BackgroundProcessCount(sessionID string) int {
+	count := 0
+	for _, runner := range r.runners {
+		if controller, ok := runner.(BackgroundProcessController); ok {
+			count += controller.BackgroundProcessCount(sessionID)
+		}
+	}
+	return count
+}
+
+func (r *MultiRunner) ReadBackgroundProcess(sessionID, processID string, offset int64, maxBytes, tailBytes int) (BackgroundProcessLogSnapshot, error) {
+	for _, runner := range r.runners {
+		controller, ok := runner.(BackgroundProcessController)
+		if !ok {
+			continue
+		}
+		item, err := controller.ReadBackgroundProcess(sessionID, processID, offset, maxBytes, tailBytes)
+		if errors.Is(err, ErrBackgroundProcessNotFound) {
+			continue
+		}
+		return item, err
+	}
+	return BackgroundProcessLogSnapshot{}, ErrBackgroundProcessNotFound
+}
+
+func (r *MultiRunner) StopBackgroundProcess(sessionID, processID string) (BackgroundProcessSnapshot, error) {
+	for _, runner := range r.runners {
+		controller, ok := runner.(BackgroundProcessController)
+		if !ok {
+			continue
+		}
+		item, err := controller.StopBackgroundProcess(sessionID, processID)
+		if errors.Is(err, ErrBackgroundProcessNotFound) {
+			continue
+		}
+		return item, err
+	}
+	return BackgroundProcessSnapshot{}, ErrBackgroundProcessNotFound
 }
 
 func NewMultiRunner(runners ...Runner) *MultiRunner {

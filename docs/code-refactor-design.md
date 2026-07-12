@@ -154,8 +154,9 @@ proposal,与 `builtin_patch_propose` 使用同一存储、diff、漂移检测和
 
 - rename proposal generation 是低风险语义分析;Auto 模式自动执行,Ask 模式沿用
   Project 的读操作审批规则。
-- `builtin_patch_apply` 仍是 write risk,审批 payload 必须包含完整 diff、文件路径与
-  additions / deletions。
+- `builtin_patch_apply` 仍是 Project write risk;Auto 对已验证且不含文件删除的
+  proposal 自动放行,删除仍请求审批。Ask 的审批 payload 必须包含完整 diff、
+  文件路径与 additions / deletions。
 - Full Access 可以跳过普通审批,但仍执行 Project path、proposal hash 与事务校验。
 
 ## 9. Transcript

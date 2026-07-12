@@ -6,8 +6,10 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -16,12 +18,17 @@ const (
 	commandMaxTimeout       = 10 * time.Minute
 	commandMinTimeout       = 100 * time.Millisecond
 	commandOutputLimitBytes = 64 << 10
+	commandLiveOutputLimit  = 1 << 20
+	commandLiveFlushBytes   = 8 << 10
+	commandLiveFlushDelay   = 75 * time.Millisecond
 	commandMaxArgs          = 128
+	commandMaxScriptBytes   = 64 << 10
 )
 
 type commandRunArgs struct {
 	Scope     string            `json:"scope"`
-	Argv      []string          `json:"argv"`
+	Argv      []string          `json:"argv,omitempty"`
+	Script    string            `json:"script,omitempty"`
 	CWD       string            `json:"cwd,omitempty"`
 	Env       map[string]string `json:"env,omitempty"`
 	TimeoutMS int               `json:"timeout_ms,omitempty"`
@@ -37,7 +44,7 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 	if args.Scope != managedScopeProject {
 		return toolJSONError(out, "invalid_scope", "command scope must be project")
 	}
-	if err := validateCommandArgv(args.Argv); err != nil {
+	if err := validateCommandInput(args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
 
@@ -64,7 +71,8 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.Command(args.Argv[0], args.Argv[1:]...)
+	executable, commandArgs, shell := commandInvocation(args)
+	cmd := exec.Command(executable, commandArgs...)
 	cmd.Dir = resolvedCWD
 	cmd.Env, err = commandEnvironment(args.Env)
 	if err != nil {
@@ -73,12 +81,16 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 	configureCommandProcess(cmd)
 	stdout := newTruncatingBuffer(commandOutputLimitBytes)
 	stderr := newTruncatingBuffer(commandOutputLimitBytes)
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
+	stdoutWriter := newCommandProgressWriter(ctx, ProgressStdout, stdout)
+	stderrWriter := newCommandProgressWriter(ctx, ProgressStderr, stderr)
+	cmd.Stdout = stdoutWriter
+	cmd.Stderr = stderrWriter
+	defer stdoutWriter.Close()
+	defer stderrWriter.Close()
 
 	startedAt := time.Now()
 	if err := cmd.Start(); err != nil {
-		return commandResult(out, args, resolvedCWD, call.ProjectDirs, -1, stdout, stderr, false, false, time.Since(startedAt), "start_failed", err)
+		return commandResult(out, args, shell, resolvedCWD, call.ProjectDirs, -1, stdout, stderr, false, false, time.Since(startedAt), "start_failed", err)
 	}
 	waitCh := make(chan error, 1)
 	go func() { waitCh <- cmd.Wait() }()
@@ -113,7 +125,53 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 	case waitErr != nil:
 		reason = "non_zero_exit"
 	}
-	return commandResult(out, args, resolvedCWD, call.ProjectDirs, exitCode, stdout, stderr, timedOut, cancelled, time.Since(startedAt), reason, waitErr)
+	stdoutWriter.Close()
+	stderrWriter.Close()
+	return commandResult(out, args, shell, resolvedCWD, call.ProjectDirs, exitCode, stdout, stderr, timedOut, cancelled, time.Since(startedAt), reason, waitErr)
+}
+
+func commandInvocation(args commandRunArgs) (string, []string, string) {
+	if args.Script == "" {
+		return args.Argv[0], args.Argv[1:], ""
+	}
+	if runtime.GOOS == "windows" {
+		return "powershell.exe", []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", args.Script}, "powershell"
+	}
+	return "/bin/sh", []string{"-lc", args.Script}, "sh"
+}
+
+func commandApprovalDetails(call Call) (map[string]any, error) {
+	var args commandRunArgs
+	if len(call.Args) == 0 || json.Unmarshal(call.Args, &args) != nil {
+		return nil, errors.New("command arguments must be a JSON object")
+	}
+	if strings.TrimSpace(args.Scope) != managedScopeProject {
+		return nil, errors.New("command scope must be project")
+	}
+	if err := validateCommandInput(args); err != nil {
+		return nil, err
+	}
+	details := map[string]any{}
+	if len(args.Argv) > 0 {
+		details["argv"] = args.Argv
+	} else {
+		details["script"] = args.Script
+	}
+	if cwd := strings.TrimSpace(args.CWD); cwd != "" {
+		details["cwd"] = cwd
+	}
+	if len(args.Env) > 0 {
+		keys := make([]string, 0, len(args.Env))
+		for key := range args.Env {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		details["envKeys"] = keys
+	}
+	if args.TimeoutMS > 0 {
+		details["timeoutMS"] = args.TimeoutMS
+	}
+	return details, nil
 }
 
 func commandEnvironment(custom map[string]string) ([]string, error) {
@@ -192,6 +250,24 @@ func validateCommandArgv(argv []string) error {
 	return nil
 }
 
+func validateCommandInput(args commandRunArgs) error {
+	hasArgv := len(args.Argv) > 0
+	hasScript := strings.TrimSpace(args.Script) != ""
+	if hasArgv == hasScript {
+		return errors.New("exactly one of argv or script is required")
+	}
+	if hasArgv {
+		return validateCommandArgv(args.Argv)
+	}
+	if strings.ContainsRune(args.Script, 0) {
+		return errors.New("script must not contain NUL bytes")
+	}
+	if len(args.Script) > commandMaxScriptBytes {
+		return errors.New("script is too large")
+	}
+	return nil
+}
+
 func commandTimeout(timeoutMS int) (time.Duration, error) {
 	if timeoutMS == 0 {
 		return commandDefaultTimeout, nil
@@ -203,14 +279,13 @@ func commandTimeout(timeoutMS int) (time.Duration, error) {
 	return timeout, nil
 }
 
-func commandResult(out Result, args commandRunArgs, cwd string, projectDirs []string, exitCode int, stdout, stderr *truncatingBuffer, timedOut, cancelled bool, duration time.Duration, reason string, runErr error) Result {
+func commandResult(out Result, args commandRunArgs, shell, cwd string, projectDirs []string, exitCode int, stdout, stderr *truncatingBuffer, timedOut, cancelled bool, duration time.Duration, reason string, runErr error) Result {
 	// A non-zero process exit is a completed command, not a tool transport failure.
 	ok := reason == "" || reason == "non_zero_exit"
 	stdoutText := stdout.String()
 	stderrText := stderr.String()
 	payload := map[string]any{
 		"ok":              ok,
-		"argv":            args.Argv,
 		"cwd":             cwd,
 		"exitCode":        exitCode,
 		"stdout":          stdoutText,
@@ -221,13 +296,22 @@ func commandResult(out Result, args commandRunArgs, cwd string, projectDirs []st
 		"cancelled":       cancelled,
 		"durationMs":      duration.Milliseconds(),
 	}
+	if len(args.Argv) > 0 {
+		payload["argv"] = args.Argv
+	} else {
+		payload["script"] = args.Script
+		payload["shell"] = shell
+	}
 	if reason != "" {
 		payload["reason"] = reason
 	}
 	if runErr != nil && reason != "non_zero_exit" {
 		payload["error"] = runErr.Error()
 	}
-	verificationKind := commandVerificationKind(args.Argv)
+	verificationKind := ""
+	if len(args.Argv) > 0 {
+		verificationKind = commandVerificationKind(args.Argv)
+	}
 	if verificationKind != "" {
 		verificationStatus := commandVerificationStatus(verificationKind, exitCode, timedOut, cancelled, reason)
 		diagnostics := parseCommandDiagnostics(stdoutText, stderrText, cwd, projectDirs, verificationStatus != "passed")
@@ -242,6 +326,81 @@ func commandResult(out Result, args commandRunArgs, cwd string, projectDirs []st
 		out.SummaryCount = len(payload)
 	}
 	return out
+}
+
+type commandProgressWriter struct {
+	ctx         context.Context
+	stream      string
+	destination *truncatingBuffer
+
+	mu        sync.Mutex
+	pending   []byte
+	timer     *time.Timer
+	accepted  int
+	truncated bool
+	closed    bool
+}
+
+func newCommandProgressWriter(ctx context.Context, stream string, destination *truncatingBuffer) *commandProgressWriter {
+	return &commandProgressWriter{ctx: ctx, stream: stream, destination: destination}
+}
+
+func (w *commandProgressWriter) Write(p []byte) (int, error) {
+	written, err := w.destination.Write(p)
+	if written == 0 {
+		return written, err
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return written, err
+	}
+	remaining := commandLiveOutputLimit - w.accepted
+	if remaining > 0 {
+		count := min(written, remaining)
+		w.pending = append(w.pending, p[:count]...)
+		w.accepted += count
+	}
+	if written > remaining && !w.truncated {
+		w.pending = append(w.pending, []byte("\n... live output truncated ...\n")...)
+		w.truncated = true
+	}
+	if len(w.pending) >= commandLiveFlushBytes {
+		w.flushLocked()
+	} else if len(w.pending) > 0 && w.timer == nil {
+		w.timer = time.AfterFunc(commandLiveFlushDelay, w.flush)
+	}
+	return written, err
+}
+
+func (w *commandProgressWriter) Close() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return
+	}
+	w.closed = true
+	if w.timer != nil {
+		w.timer.Stop()
+		w.timer = nil
+	}
+	w.flushLocked()
+}
+
+func (w *commandProgressWriter) flush() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.timer = nil
+	w.flushLocked()
+}
+
+func (w *commandProgressWriter) flushLocked() {
+	if len(w.pending) == 0 {
+		return
+	}
+	content := strings.ToValidUTF8(string(w.pending), "�")
+	w.pending = nil
+	EmitProgress(w.ctx, Progress{Stream: w.stream, Content: content})
 }
 
 type truncatingBuffer struct {

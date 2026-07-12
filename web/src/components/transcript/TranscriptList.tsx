@@ -323,16 +323,21 @@ export const TranscriptList = memo(function TranscriptList({
   }, [scrollElement]);
 
   const handleContentResize = useCallback(() => {
-    if (autoStickRef.current || isAtLatestRef.current) {
+    // Opening a disclosure intentionally pauses auto-stick. Respect that hold so the
+    // ResizeObserver does not snap the viewport, then sync the physical latest state below.
+    if (autoStickRef.current) {
       autoStickRef.current = true;
       stickToLatestIfPinned(CONTENT_STICK_STABILIZE_FRAMES, { deferFirstFrame: true });
       return;
+    }
+    if (scrollElement && distanceFromBottom(scrollElement) > SCROLL_END_THRESHOLD_PX) {
+      setLatestState(false);
     }
     if (resizeAnchorRef.current) {
       restoreResizeAnchorIfDetached(resizeAnchorRef.current);
       return;
     }
-  }, [restoreResizeAnchorIfDetached, stickToLatestIfPinned]);
+  }, [restoreResizeAnchorIfDetached, scrollElement, setLatestState, stickToLatestIfPinned]);
 
   useEffect(() => {
     if (!scrollElement) {

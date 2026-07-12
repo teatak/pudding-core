@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/teatak/pudding-core/internal/prompt"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
+	"github.com/teatak/pudding-core/internal/tooleval"
 	"github.com/teatak/pudding-core/internal/toolreport"
 )
 
@@ -81,12 +83,39 @@ func runTools(args []string, stdout, stderr io.Writer, now time.Time) error {
 	switch args[0] {
 	case "report":
 		return runToolsReport(args[1:], stdout, stderr, now)
+	case "eval":
+		return runToolsEval(args[1:], stdout, stderr, now)
 	case "help", "-h", "--help":
-		_, err := fmt.Fprintln(stdout, "usage: puddingd tools report [--days 30] [--home PATH] [--all] [--json]")
+		_, err := fmt.Fprintln(stdout, "usage: puddingd tools <report|eval> [flags]")
 		return err
 	default:
-		return fmt.Errorf("unknown tools command %q; usage: puddingd tools report [flags]", args[0])
+		return fmt.Errorf("unknown tools command %q; usage: puddingd tools <report|eval> [flags]", args[0])
 	}
+}
+
+func runToolsEval(args []string, stdout, stderr io.Writer, now time.Time) error {
+	fs := flag.NewFlagSet("tools eval", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	flagJSON := fs.Bool("json", false, "print machine-readable JSON")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected tools eval arguments: %v", fs.Args())
+	}
+	report, err := tooleval.Run(context.Background(), now)
+	if err != nil {
+		return err
+	}
+	if *flagJSON {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(report)
+	}
+	return tooleval.WriteText(stdout, report)
 }
 
 func runToolsReport(args []string, stdout, stderr io.Writer, now time.Time) error {
@@ -135,7 +164,7 @@ func runToolsReport(args []string, stdout, stderr io.Writer, now time.Time) erro
 func runPrompt(args []string) error {
 	fs := flag.NewFlagSet("prompt", flag.ExitOnError)
 	flagHome := fs.String("home", "", "data home (default: channel home, see docs)")
-	flagMode := fs.String("mode", "chat", "agent mode: chat, workspace")
+	flagMode := fs.String("mode", "chat", "agent mode: chat, work, code")
 	flagSegments := fs.Bool("segments", false, "print prompt segments with headers")
 	flagTools := fs.Bool("tools", false, "print provider-neutral tool schemas for the mode")
 	if err := fs.Parse(args); err != nil {
@@ -150,6 +179,11 @@ func runPrompt(args []string) error {
 	if err != nil {
 		return err
 	}
+	mode := store.NormalizeAgentMode(store.AgentMode(*flagMode))
+	if !store.ValidAgentMode(mode) {
+		mode = store.ModeChat
+	}
+	toolkitIndex := tool.ToolkitIndex(mode, tool.BuildToolkitCatalog(tool.BuiltinDefinitions()))
 	if *flagSegments {
 		for i, seg := range out.Segments {
 			if i > 0 {
@@ -157,8 +191,15 @@ func runPrompt(args []string) error {
 			}
 			fmt.Printf("===== %s (%s) =====\n%s\n", seg.ID, seg.Layer, seg.Content)
 		}
+		if toolkitIndex != "" {
+			fmt.Printf("\n===== toolkits (runtime) =====\n%s\n", toolkitIndex)
+		}
 	} else {
-		fmt.Printf("===== system prompt =====\n%s\n", out.SystemInstruction)
+		system := out.SystemInstruction
+		if toolkitIndex != "" {
+			system = strings.TrimRight(system, "\n") + "\n\n" + toolkitIndex
+		}
+		fmt.Printf("===== system prompt =====\n%s\n", system)
 	}
 	if *flagTools {
 		printPromptTools(store.AgentMode(*flagMode))

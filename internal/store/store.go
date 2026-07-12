@@ -54,6 +54,9 @@ type Session struct {
 	// Running 是读取时从 turns 派生的运行态(不落库,turns 仍是唯一事实源),
 	// 服务会话栏"哪个 session 正在干活"的指示。
 	Running bool `json:"running"`
+	// BackgroundProcessCount 由 daemon 内存中的 session process manager 派生,
+	// 不写入 SQLite。
+	BackgroundProcessCount int `json:"backgroundProcessCount"`
 }
 
 type SessionUpdate struct {
@@ -95,8 +98,9 @@ type ProjectUpdate struct {
 type AgentMode string
 
 const (
-	ModeChat    AgentMode = "chat"
-	ModeProject AgentMode = "project"
+	ModeChat AgentMode = "chat"
+	ModeWork AgentMode = "work"
+	ModeCode AgentMode = "code"
 )
 
 type ModeLease string
@@ -304,8 +308,10 @@ func ValidAgentMode(mode AgentMode) bool {
 
 func NormalizeAgentMode(mode AgentMode) AgentMode {
 	switch AgentMode(strings.TrimSpace(strings.ToLower(string(mode)))) {
-	case ModeProject:
-		return ModeProject
+	case ModeCode:
+		return ModeCode
+	case ModeWork:
+		return ModeWork
 	case ModeChat:
 		return ModeChat
 	default:
@@ -319,7 +325,9 @@ func ValidModeLease(lease ModeLease) bool {
 
 func AgentModeRank(mode AgentMode) int {
 	switch NormalizeAgentMode(mode) {
-	case ModeProject:
+	case ModeCode:
+		return 3
+	case ModeWork:
 		return 2
 	case ModeChat:
 		fallthrough

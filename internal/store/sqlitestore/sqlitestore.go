@@ -54,126 +54,11 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("sqlite: apply schema: %w", err)
 	}
-	if err := ensureSchema(db); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
 	if err := ensureHistorySearch(db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return s, nil
-}
-
-func ensureSchema(db *sql.DB) error {
-	if err := dropLegacyTerminalTable(db); err != nil {
-		return err
-	}
-	if err := migrateBrowserTabs(db); err != nil {
-		return err
-	}
-	if err := pruneDuplicateBlankBrowserTabs(db); err != nil {
-		return err
-	}
-	if has, err := tableHasColumn(db, "sessions", "project_id"); err != nil {
-		return err
-	} else if !has {
-		if _, err := db.Exec(`ALTER TABLE sessions ADD COLUMN project_id TEXT NOT NULL DEFAULT ''`); err != nil {
-			return fmt.Errorf("sqlite: migrate sessions.project_id: %w", err)
-		}
-	}
-	if err := migrateAgentModeValues(db); err != nil {
-		return err
-	}
-	if has, err := tableHasColumn(db, "queued_inputs", "parts"); err != nil {
-		return err
-	} else if !has {
-		if _, err := db.Exec(`ALTER TABLE queued_inputs ADD COLUMN parts TEXT NOT NULL DEFAULT '[]'`); err != nil {
-			return fmt.Errorf("sqlite: migrate queued_inputs.parts: %w", err)
-		}
-	}
-	if has, err := tableHasColumn(db, "messages", "search_tokens"); err != nil {
-		return err
-	} else if !has {
-		if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN search_tokens TEXT NOT NULL DEFAULT ''`); err != nil {
-			return fmt.Errorf("sqlite: migrate messages.search_tokens: %w", err)
-		}
-	}
-	return nil
-}
-
-func dropLegacyTerminalTable(db *sql.DB) error {
-	if _, err := db.Exec(`DROP TABLE IF EXISTS session_terminals`); err != nil {
-		return fmt.Errorf("sqlite: remove legacy terminal metadata: %w", err)
-	}
-	return nil
-}
-
-func pruneDuplicateBlankBrowserTabs(db *sql.DB) error {
-	_, err := db.Exec(`
-		WITH ranked AS (
-			SELECT rowid AS tab_rowid,
-			       ROW_NUMBER() OVER (
-			           PARTITION BY session_id
-			           ORDER BY updated_at DESC, rowid DESC
-			       ) AS position
-			FROM session_browser_tabs
-			WHERE lower(trim(url)) = 'about:blank'
-		)
-		DELETE FROM session_browser_tabs
-		WHERE rowid IN (SELECT tab_rowid FROM ranked WHERE position > 1)
-	`)
-	if err != nil {
-		return fmt.Errorf("sqlite: prune duplicate blank browser tabs: %w", err)
-	}
-	return nil
-}
-
-func migrateBrowserTabs(db *sql.DB) error {
-	var legacyTable string
-	err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='session_browser_state'`).Scan(&legacyTable)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("sqlite: inspect legacy browser state: %w", err)
-	}
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("sqlite: begin browser tabs migration: %w", err)
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec(`
-		INSERT OR IGNORE INTO session_browser_tabs(
-			session_id,tab_id,url,title,favicon_url,mode,created_at,updated_at
-		)
-		SELECT session_id,tab_id,url,title,favicon_url,mode,created_at,updated_at
-		FROM session_browser_state
-		WHERE trim(tab_id) <> '' AND trim(url) <> ''
-	`); err != nil {
-		return fmt.Errorf("sqlite: migrate browser tabs: %w", err)
-	}
-	if _, err := tx.Exec(`DROP TABLE session_browser_state`); err != nil {
-		return fmt.Errorf("sqlite: remove legacy browser state: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("sqlite: commit browser tabs migration: %w", err)
-	}
-	return nil
-}
-
-func migrateAgentModeValues(db *sql.DB) error {
-	statements := []string{
-		`UPDATE sessions SET active_mode='project' WHERE active_mode='workspace'`,
-		`UPDATE turns SET mode='project' WHERE mode='workspace'`,
-		`UPDATE queued_inputs SET mode='project' WHERE mode='workspace'`,
-	}
-	for _, statement := range statements {
-		if _, err := db.Exec(statement); err != nil {
-			return fmt.Errorf("sqlite: migrate agent mode to project: %w", err)
-		}
-	}
-	return nil
 }
 
 func projectNameFromDirs(dirs []string) string {
@@ -185,28 +70,6 @@ func projectNameFromDirs(dirs []string) string {
 		return dirs[0]
 	}
 	return name
-}
-
-func tableHasColumn(db *sql.DB, table, column string) (bool, error) {
-	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
-	if err != nil {
-		return false, fmt.Errorf("sqlite: inspect table %s: %w", table, err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid int
-		var name, typ string
-		var notNull int
-		var defaultValue any
-		var pk int
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
-			return false, err
-		}
-		if name == column {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
 }
 
 func ensureDBFile(path string) error {

@@ -5,7 +5,6 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 )
@@ -28,13 +27,12 @@ func (s *Store) repairHistorySearch(ctx context.Context) error {
 	return resetMessagesFTS(ctx, s.db)
 }
 
+// ensureHistorySearch initializes only the current FTS schema. It does not
+// inspect or transform older database layouts.
 func ensureHistorySearch(db *sql.DB) error {
-	if err := rebuildMessagesFTSIfWrongTokenizer(db); err != nil {
-		return fmt.Errorf("sqlite: rebuild messages fts5: %w", err)
-	}
 	tx, err := db.Begin()
 	if err != nil {
-		return fmt.Errorf("sqlite: begin messages fts5 migration: %w", err)
+		return fmt.Errorf("sqlite: begin messages fts5 setup: %w", err)
 	}
 	defer tx.Rollback()
 	messagesFTSExists, err := ftsTableExists(tx, "messages_fts")
@@ -59,11 +57,13 @@ func ensureHistorySearch(db *sql.DB) error {
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("sqlite: commit messages fts5 migration: %w", err)
+		return fmt.Errorf("sqlite: commit messages fts5 setup: %w", err)
 	}
 	return nil
 }
 
+// resetMessagesFTS repairs current-version derived indexes from canonical
+// messages. The canonical tables are never rewritten here.
 func resetMessagesFTS(ctx context.Context, db *sql.DB) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -162,29 +162,4 @@ func ftsTableExists(db ftsRowQuerier, name string) (bool, error) {
 		return false, err
 	}
 	return count > 0, nil
-}
-
-func rebuildMessagesFTSIfWrongTokenizer(db *sql.DB) error {
-	var ftsSQL string
-	err := db.QueryRow(
-		`SELECT sql FROM sqlite_master WHERE type='table' AND name='messages_fts'`,
-	).Scan(&ftsSQL)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if strings.Contains(strings.ToLower(ftsSQL), "trigram") {
-		return nil
-	}
-	if _, err := db.Exec(`
-DROP TRIGGER IF EXISTS messages_ai;
-DROP TRIGGER IF EXISTS messages_ad;
-DROP TRIGGER IF EXISTS messages_au;
-DROP TABLE messages_fts;
-`); err != nil {
-		return err
-	}
-	return nil
 }

@@ -67,6 +67,7 @@ import { InputFlowPanel, type InputFlowSubmission } from "@/components/transcrip
 import { Mascot, type MascotGaze, type MascotGazePoint, type MascotMood } from "@/components/Mascot";
 import { PatchProposalDiffDialog, type PatchProposalApproval } from "@/components/PatchProposalDiffDialog";
 import { ProjectComposerControls } from "@/components/ProjectComposerControls";
+import { BackgroundProcessControl } from "@/components/BackgroundProcessControl";
 import { SessionAudioControls } from "@/components/SessionAudioControls";
 import { SkillDraftDiffDialog } from "@/components/SkillDraftDiffDialog";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
@@ -1163,6 +1164,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
                 onClick={openMentionMenuFromButton}
               />
               <ProjectComposerControls projectID={projectID} token={token} />
+              <BackgroundProcessControl sessionID={sessionID} token={token} />
               {compactMutation.isPending ? (
                 <span
                   aria-live="polite"
@@ -1173,7 +1175,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
                 </span>
               ) : null}
               <div className="ml-auto flex min-w-0 items-center gap-1">
-                <ContextUsageRing token={token} sessionID={sessionID} />
+                <ContextUsageRing mode={session.activeMode} token={token} sessionID={sessionID} />
                 <ModelReasoningPicker
                   className="min-w-0"
                   token={token}
@@ -1656,13 +1658,13 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
   const targetMode = approvalTargetMode(current.payload);
   const title = approvalTitle(current, targetMode, t);
   const pending = pendingAction !== null;
-  const isProjectApproval = targetMode === "project";
+  const isCodeApproval = targetMode === "code";
   const payloadProjectDirs = projectDirsFromPayload(current.payload);
   const hasPayloadProjectDirs = payloadProjectDirs.length > 0;
   const projectDirs = hasPayloadProjectDirs ? payloadProjectDirs : selectedProjectDirs;
   const needsProjectDir = needsProjectDirFromPayload(current.payload);
-  const projectDirsRequired = isProjectApproval && needsProjectDir && projectDirs.length === 0;
-  const projectDirsRequiredForSession = isProjectApproval && !sessionProjectID && projectDirs.length === 0;
+  const projectDirsRequired = isCodeApproval && needsProjectDir && projectDirs.length === 0;
+  const projectDirsRequiredForSession = isCodeApproval && !sessionProjectID && projectDirs.length === 0;
   const suggestedDirName = suggestedProjectDirName(current.payload);
   const skillDraftApproval = skillDraftFromPayload(current.payload);
   const skillDraft = skillDraftApproval?.draft || null;
@@ -1677,7 +1679,7 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
     }
     setPendingAction(scope);
     try {
-      await approveApproval(token, current.sessionID, current.approvalID, scope, isProjectApproval ? projectDirs : []);
+      await approveApproval(token, current.sessionID, current.approvalID, scope, isCodeApproval ? projectDirs : []);
       if (scope === "session") {
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
@@ -1741,6 +1743,11 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
         <span className="min-w-0 truncate font-medium">{title}</span>
       </div>
       {approvalReason ? <div className="line-clamp-2 leading-5 text-muted-foreground">{approvalReason}</div> : null}
+      {isToolCallApproval && toolCallApproval.command ? (
+        <div className="max-h-28 overflow-auto rounded-md border border-border/70 bg-background/70 px-2 py-1.5 font-mono text-[11px] leading-4">
+          <pre className="whitespace-pre-wrap break-words"><span className="select-none text-muted-foreground">$ </span>{toolCallApproval.command}</pre>
+        </div>
+      ) : null}
       {isToolCallApproval && toolCallApproval.paths.length > 0 && !patchProposal && !gitCommitApproval ? (
         <div className="grid gap-1 rounded-md border border-border/70 bg-background/70 px-2 py-1.5 font-mono text-[11px] leading-4">
           {toolCallApproval.paths.map((path) => (
@@ -1776,7 +1783,7 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
           ) : null}
         </div>
       ) : null}
-      {!isSkillDraftApproval && isProjectApproval ? (
+      {!isSkillDraftApproval && isCodeApproval ? (
         <div className="grid gap-1">
           <div className="text-[11px] font-medium text-muted-foreground">
             {t("transcript.approvalProjectDirs")}
@@ -2049,14 +2056,21 @@ function skillDraftFromPayload(payload: unknown) {
 
 function toolCallFromPayload(payload: unknown) {
   if (!payload || typeof payload !== "object") {
-    return { operation: "", paths: [] as string[] };
+    return { command: "", operation: "", paths: [] as string[] };
   }
   const data = payload as Record<string, unknown>;
   const operation = typeof data.operation === "string" ? data.operation.trim() : "";
+  const script = typeof data.script === "string" ? data.script : "";
+  const argv = Array.isArray(data.argv) ? data.argv.filter((value): value is string => typeof value === "string") : [];
+  const command = script || argv.map(formatApprovalArg).join(" ");
   const paths = Array.isArray(data.paths)
     ? data.paths.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean)
     : [];
-  return { operation, paths: dedupeStrings(paths) };
+  return { command, operation, paths: dedupeStrings(paths) };
+}
+
+function formatApprovalArg(value: string) {
+  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(value) ? value : JSON.stringify(value);
 }
 
 function patchProposalFromPayload(payload: unknown): PatchProposalApproval | null {
@@ -2152,6 +2166,8 @@ function toolCallReason(operation: string, t: (key: string) => string) {
     case "git_stage":
     case "git_unstage":
     case "git_commit":
+    case "shell":
+    case "process_start":
       return t(`transcript.approvalToolCall.${operation}`);
     default:
       return "";

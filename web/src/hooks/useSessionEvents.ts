@@ -8,6 +8,7 @@ import {
   listPendingApprovals,
   type AudioBindings,
   type BrowserTab,
+  type BackgroundProcess,
   type PendingApproval,
   type Session,
 } from "@/api/client";
@@ -85,6 +86,10 @@ function openSessionEventSource({
     params.set("after", String(after));
   }
   const source = new EventSource(apiURL(`/sessions/${encodeURIComponent(sessionID)}/events?${params.toString()}`));
+  source.onopen = () => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.backgroundProcesses(sessionID) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+  };
   const handleMessage = (event: MessageEvent<string>) => {
     let payload: unknown;
     try {
@@ -106,6 +111,7 @@ function openSessionEventSource({
     applyEvent(parsed.data);
     syncAudioBindingsFromEvent(queryClient, parsed.data);
     syncBrowserStateFromEvent(queryClient, parsed.data, syncMessages, token);
+    syncBackgroundProcessFromEvent(queryClient, parsed.data);
     syncSessionListFromEvent(queryClient, parsed.data);
     if (parsed.data.kind === "turn.started" || isTurnTerminalEvent(parsed.data)) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessionUsage(sessionID) });
@@ -130,6 +136,10 @@ function openSessionEventSource({
   source.addEventListener("audio.input_level", handleMessage);
   source.addEventListener("approval.requested", handleMessage);
   source.addEventListener("approval.resolved", handleMessage);
+  source.addEventListener("process.started", handleMessage);
+  source.addEventListener("process.finished", handleMessage);
+  source.addEventListener("process.stopped", handleMessage);
+  source.addEventListener("process.removed", handleMessage);
   source.addEventListener("session.titled", handleMessage);
   source.addEventListener("ping", handleMessage);
   hydratePendingApprovals(applyEvent, token, sessionID);
@@ -428,6 +438,37 @@ function syncSessionListFromEvent(queryClient: QueryClient, event: SessionEvent)
   if (event.kind === "session.titled") {
     patchSessionInList(queryClient, event.sessionID, { title: event.title });
   }
+}
+
+function syncBackgroundProcessFromEvent(queryClient: QueryClient, event: SessionEvent) {
+  if (event.kind !== "process.started" && event.kind !== "process.finished" && event.kind !== "process.stopped" && event.kind !== "process.removed") {
+    return;
+  }
+  if (event.kind === "process.removed") {
+    queryClient.setQueryData<{ processes: BackgroundProcess[] }>(
+      queryKeys.backgroundProcesses(event.sessionID),
+      (previous) => ({
+        processes: (previous?.processes ?? []).filter((process) => process.processID !== event.payload.processID),
+      }),
+    );
+    queryClient.removeQueries({ queryKey: queryKeys.backgroundProcess(event.sessionID, event.payload.processID) });
+    return;
+  }
+  queryClient.setQueryData<{ processes: BackgroundProcess[] }>(
+    queryKeys.backgroundProcesses(event.sessionID),
+    (previous) => {
+      const current = previous?.processes ?? [];
+      const index = current.findIndex((process) => process.processID === event.payload.processID);
+      if (index < 0) {
+        return { processes: [event.payload, ...current] };
+      }
+      const processes = [...current];
+      processes[index] = event.payload;
+      return { processes };
+    },
+  );
+  void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.backgroundProcess(event.sessionID, event.payload.processID) });
 }
 
 function isTurnTerminalEvent(

@@ -46,3 +46,18 @@ type Runner interface {
 type ApprovalDetailsProvider interface {
 	ApprovalDetails(ctx context.Context, call Call) (map[string]any, error)
 }
+
+type SessionResourceCleaner interface {
+	CloseSession(sessionID string)
+}
+
+type ResourceCloser interface {
+	Close() error
+}
+
+type BackgroundProcessController interface {
+	ListBackgroundProcesses(sessionID string) []BackgroundProcessSnapshot
+	BackgroundProcessCount(sessionID string) int
+	ReadBackgroundProcess(sessionID, processID string, offset int64, maxBytes, tailBytes int) (BackgroundProcessLogSnapshot, error)
+	StopBackgroundProcess(sessionID, processID string) (BackgroundProcessSnapshot, error)
+}

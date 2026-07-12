@@ -1539,32 +1539,32 @@ func TestBuiltinToolsAPI(t *testing.T) {
 			graphqlRequest = item
 		}
 	}
-	if fileWrite == nil || fileWrite["capability"] != string(store.ModeProject) {
-		t.Fatalf("file write should declare project capability: %+v", fileWrite)
+	if fileWrite == nil || fileWrite["capability"] != string(store.ModeCode) {
+		t.Fatalf("file write should declare code capability: %+v", fileWrite)
 	}
-	if commandRun == nil || commandRun["capability"] != string(store.ModeProject) {
-		t.Fatalf("command run should declare project capability: %+v", commandRun)
+	if commandRun == nil || commandRun["capability"] != string(store.ModeCode) {
+		t.Fatalf("command run should declare code capability: %+v", commandRun)
 	}
-	if gitStatus == nil || gitStatus["capability"] != string(store.ModeProject) {
-		t.Fatalf("git status should declare project capability: %+v", gitStatus)
+	if gitStatus == nil || gitStatus["capability"] != string(store.ModeCode) {
+		t.Fatalf("git status should declare code capability: %+v", gitStatus)
 	}
-	if gitCommit == nil || gitCommit["capability"] != string(store.ModeProject) {
-		t.Fatalf("git commit should declare project capability: %+v", gitCommit)
+	if gitCommit == nil || gitCommit["capability"] != string(store.ModeCode) {
+		t.Fatalf("git commit should declare code capability: %+v", gitCommit)
 	}
-	if patchPropose == nil || patchPropose["capability"] != string(store.ModeProject) {
-		t.Fatalf("patch propose should declare project capability: %+v", patchPropose)
+	if patchPropose == nil || patchPropose["capability"] != string(store.ModeCode) {
+		t.Fatalf("patch propose should declare code capability: %+v", patchPropose)
 	}
 	if skillRead == nil || skillRead["capability"] != string(store.ModeChat) {
 		t.Fatalf("skill read should declare chat capability: %+v", skillRead)
 	}
-	if skillSubmit == nil || skillSubmit["capability"] != string(store.ModeProject) {
-		t.Fatalf("skill submit should declare project capability: %+v", skillSubmit)
+	if skillSubmit == nil || skillSubmit["capability"] != string(store.ModeCode) {
+		t.Fatalf("skill submit should declare code capability: %+v", skillSubmit)
 	}
-	if restRequest == nil || restRequest["capability"] != string(store.ModeChat) {
-		t.Fatalf("rest request should declare chat capability: %+v", restRequest)
+	if restRequest == nil || restRequest["capability"] != string(store.ModeWork) {
+		t.Fatalf("rest request should declare work capability: %+v", restRequest)
 	}
-	if graphqlRequest == nil || graphqlRequest["capability"] != string(store.ModeChat) {
-		t.Fatalf("graphql request should declare chat capability: %+v", graphqlRequest)
+	if graphqlRequest == nil || graphqlRequest["capability"] != string(store.ModeWork) {
+		t.Fatalf("graphql request should declare work capability: %+v", graphqlRequest)
 	}
 }
 
@@ -2631,12 +2631,21 @@ func TestCreateSessionCarriesProviderAndModel(t *testing.T) {
 	srv, _ := newTestServer(t)
 	sess := decodeJSON[store.Session](t, req(t, http.MethodPost, srv.URL+"/sessions",
 		map[string]string{"title": "x", "provider": "gem", "model": "m1"}))
-	if sess.Provider != "gem" || sess.Model != "m1" {
+	if sess.Provider != "gem" || sess.Model != "m1" || sess.ActiveMode != store.ModeChat || sess.ModeLease != store.ModeLeaseNone {
 		t.Fatalf("create must persist provider/model: %+v", sess)
 	}
 	got := decodeJSON[store.Session](t, req(t, http.MethodGet, srv.URL+"/sessions/"+sess.ID, nil))
 	if got.Provider != "gem" {
 		t.Fatalf("provider lost on read: %+v", got)
+	}
+	project := decodeJSON[store.Project](t, req(t, http.MethodPost, srv.URL+"/projects", map[string]any{
+		"name": "demo", "rootDirs": []string{t.TempDir()}, "approvalMode": "auto",
+	}))
+	projectSession := decodeJSON[store.Session](t, req(t, http.MethodPost, srv.URL+"/sessions", map[string]string{
+		"title": "project", "provider": "gem", "model": "m1", "projectID": project.ID,
+	}))
+	if projectSession.ActiveMode != store.ModeCode || projectSession.ModeLease != store.ModeLeaseSession || projectSession.ProjectID != project.ID {
+		t.Fatalf("project session must start in Code mode: %+v", projectSession)
 	}
 }
 

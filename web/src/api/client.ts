@@ -74,6 +74,8 @@ import {
   createTerminalRequest,
   installAppRequest,
   listBrowserTabsResponse,
+  listBackgroundProcessesResponse,
+  backgroundProcessLog,
   listTerminalsResponse,
   startAppOAuthRequest,
   startAppOAuthResponse,
@@ -101,6 +103,8 @@ import {
   type BrowserScreenshot,
   type BrowserState,
   type BrowserTab,
+  type BackgroundProcess,
+  type BackgroundProcessLog,
   type CanvasItem,
   type ClosedCanvasItem,
   type ContentPart,
@@ -148,7 +152,7 @@ const sessionPatchRequest = z.object({
   provider: z.string().optional(),
   model: z.string().optional(),
   reasoningEffort: z.string().optional(),
-  activeMode: z.enum(["chat", "project"]).optional(),
+  activeMode: z.enum(["chat", "work", "code"]).optional(),
   modeLease: z.enum(["none", "session"]).optional(),
   projectID: z.string().optional(),
   pinned: z.boolean().optional(),
@@ -435,6 +439,33 @@ export function createBrowserTab(token: string, sessionID: string): Promise<Brow
 
 export function listTerminals(token: string, sessionID: string): Promise<{ terminals: Terminal[] }> {
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/terminals`, listTerminalsResponse);
+}
+
+export function listBackgroundProcesses(token: string, sessionID: string): Promise<{ processes: BackgroundProcess[] }> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/processes`, listBackgroundProcessesResponse);
+}
+
+export function getBackgroundProcess(
+  token: string,
+  sessionID: string,
+  processID: string,
+  tailBytes = 65_536,
+): Promise<BackgroundProcessLog> {
+  const params = new URLSearchParams({ tail_bytes: String(tailBytes) });
+  return request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/processes/${encodeURIComponent(processID)}?${params.toString()}`,
+    backgroundProcessLog,
+  );
+}
+
+export async function stopBackgroundProcess(token: string, sessionID: string, processID: string): Promise<void> {
+  await request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/processes/${encodeURIComponent(processID)}`,
+    z.null(),
+    { method: "DELETE" },
+  );
 }
 
 export function createTerminal(
@@ -1056,5 +1087,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BuiltinTool, BrowserActionResult, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, Terminal, WebToolsConfig };
+export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BackgroundProcess, BackgroundProcessLog, BuiltinTool, BrowserActionResult, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, Terminal, WebToolsConfig };
 export { createProjectRequest, createProviderRequest, patchProjectRequest, patchProviderRequest };

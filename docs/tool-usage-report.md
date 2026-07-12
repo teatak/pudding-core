@@ -43,9 +43,9 @@ make tools-report RUNARGS="--days 30"
 | `CLI-FB%` | 专用工具失败后,同一 Turn 改用同领域 CLI / 失败调用数 |
 | `P95 RESULT` | canonical tool result UTF-8 字节数的 P95 |
 
-Turn 分母按当前工具 capability 计算:Chat 工具使用全部 Turn,Project 工具只使用
-Project Turn。已经不在当前内置工具定义中的历史、App 或 UI 工具仍统计调用数,但
-`TURN%` 显示 `-`,避免猜测其历史可见范围。
+Turn 分母按当前工具 capability 累积计算:Chat 工具使用全部 Turn,Work 工具使用
+Work + Code Turn,Code 工具只使用 Code Turn。已经不在当前内置工具定义中的历史、
+App 或 UI 工具仍统计调用数,但 `TURN%` 显示 `-`,避免猜测其历史可见范围。
 
 CLI 回退只识别明确的同领域命令:
 
@@ -54,6 +54,9 @@ CLI 回退只识别明确的同领域命令:
 - Code:`gopls`、`typescript-language-server`、`tsserver`
 
 这个指标用于发现专用工具失败后的替代路径,不是所有命令调用的等价性证明。
+
+`builtin_command_run/start/poll/stop` 统一归入 `command` 组;
+`builtin_toolkit_load` 单列为 `toolkit` 组,便于观察 CLI 使用与按需扩展频率。
 
 ## 使用原则
 

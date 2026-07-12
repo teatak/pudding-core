@@ -20,6 +20,10 @@ const (
 	AudioInputLevel   Kind = "audio.input_level"
 	ApprovalRequested Kind = "approval.requested"
 	ApprovalResolved  Kind = "approval.resolved"
+	ProcessStarted    Kind = "process.started"
+	ProcessFinished   Kind = "process.finished"
+	ProcessStopped    Kind = "process.stopped"
+	ProcessRemoved    Kind = "process.removed"
 	// SessionTitled:自动标题写回(provisional 与 LLM 正式标题各发一次),
 	// 前端据此刷新会话列表。不落库:标题事实源是 sessions 表,丢事件由
 	// sessions 轮询兜底。
@@ -31,7 +35,7 @@ const (
 //
 //	turn.started   seq, turnID, clientMessageID, userMessageID, text
 //	turn.delta     turnID, part, delta      (不落库,无 seq)
-//	turn.tool      turnID, callID, name, phase, argsDelta/ok/content/summaryKind/summaryCount/attachments (不落库,无 seq)
+//	turn.tool      turnID, callID, name, phase, argsDelta/stream/content/ok/summaryKind/summaryCount/attachments (不落库,无 seq)
 //	turn.completed seq, turnID, assistantMessageID
 //	turn.failed    seq, turnID, error       (有部分输出时附 assistantMessageID + interrupted)
 //	turn.cancelled seq, turnID              (有部分输出时附 assistantMessageID + interrupted)
@@ -41,6 +45,7 @@ const (
 //	audio.input_level inputLevel
 //	approval.requested turnID, callID, approvalID, approvalKind, title, reason, risk, payload
 //	approval.resolved  turnID, callID, approvalID, approvalKind, status
+//	process.*         turnID, callID, payload(background process snapshot)
 //	ping           —                        (心跳,不落库,无 seq)
 type Event struct {
 	// Seq 是 per-session 单调递增序号,仅落库的 lifecycle 事件持有(>0),
@@ -63,6 +68,7 @@ type Event struct {
 	Name               string          `json:"name,omitempty"`
 	Phase              string          `json:"phase,omitempty"`
 	ArgsDelta          string          `json:"argsDelta,omitempty"`
+	Stream             string          `json:"stream,omitempty"`
 	Ok                 *bool           `json:"ok,omitempty"`
 	Content            string          `json:"content,omitempty"`
 	Summary            string          `json:"summary,omitempty"` // 兼容旧前端,新工具摘要走 SummaryKind/SummaryCount
@@ -100,6 +106,10 @@ func (e Event) Persistent() bool {
 		e.Kind != TurnTool &&
 		e.Kind != ApprovalRequested &&
 		e.Kind != ApprovalResolved &&
+		e.Kind != ProcessStarted &&
+		e.Kind != ProcessFinished &&
+		e.Kind != ProcessStopped &&
+		e.Kind != ProcessRemoved &&
 		e.Kind != AudioBindings &&
 		e.Kind != AudioInputLevel &&
 		e.Kind != Ping &&

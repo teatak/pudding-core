@@ -9,7 +9,7 @@ export const session = z.object({
   model: z.string(),
   reasoningEffort: z.string().optional(),
   reasoningModelKey: z.string().optional(),
-  activeMode: z.enum(["chat", "project"]),
+  activeMode: z.enum(["chat", "work", "code"]),
   modeLease: z.enum(["none", "session"]),
   projectID: z.string().optional(),
   pinned: z.boolean(),
@@ -18,6 +18,7 @@ export const session = z.object({
   updatedAt: z.string(),
   lastActivityAt: z.string(),
   running: z.boolean(), // 读取时从 turns 派生,rail 运行态指示
+  backgroundProcessCount: z.number().int().nonnegative(),
 });
 export type Session = z.infer<typeof session>;
 
@@ -114,7 +115,7 @@ export const putClosedCanvasItemRequest = z.object({
 export const browserMCPTool = z.object({
   name: z.string(),
   description: z.string().optional(),
-  capability: z.enum(["chat", "project"]).optional(),
+  capability: z.enum(["chat", "work", "code"]).optional(),
 });
 export type BrowserMCPTool = z.infer<typeof browserMCPTool>;
 
@@ -311,7 +312,7 @@ export const conversationTurn = z.object({
   status: z.enum(["running", "completed", "failed", "cancelled"]),
   provider: z.string().optional(),
   model: z.string().optional(),
-  mode: z.enum(["chat", "project"]).optional(),
+  mode: z.enum(["chat", "work", "code"]).optional(),
   error: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -329,7 +330,7 @@ export const queuedInput = z.object({
   status: queuedInputStatus,
   provider: z.string().optional(),
   model: z.string().optional(),
-  mode: z.enum(["chat", "project"]).optional(),
+  mode: z.enum(["chat", "work", "code"]).optional(),
   modelConfig: z.unknown().optional(),
   turnID: z.string().optional(),
   createdAt: z.string(),
@@ -382,7 +383,7 @@ export const pendingApproval = z.object({
   turnID: z.string(),
   callID: z.string().optional(),
   approvalKind: z.string(),
-  targetMode: z.enum(["chat", "project"]).optional(),
+  targetMode: z.enum(["work", "code"]).optional(),
   title: z.string().optional(),
   reason: z.string().optional(),
   risk: z.string().optional(),
@@ -644,6 +645,45 @@ export const listTerminalsResponse = z.object({
   terminals: z.array(terminal),
 });
 
+export const backgroundProcess = z.object({
+  processID: z.string(),
+  turnID: z.string().optional(),
+  callID: z.string().optional(),
+  status: z.string(),
+  running: z.boolean(),
+  cwd: z.string(),
+  argv: z.array(z.string()).optional(),
+  script: z.string().optional(),
+  shell: z.string().optional(),
+  exitCode: z.number().optional(),
+  startedAt: z.string(),
+  finishedAt: z.string().optional(),
+  reason: z.string().optional(),
+  error: z.string().optional(),
+});
+export type BackgroundProcess = z.infer<typeof backgroundProcess>;
+
+export const listBackgroundProcessesResponse = z.object({
+  processes: z.array(backgroundProcess),
+});
+
+export const backgroundProcessOutputChunk = z.object({
+  offset: z.number().int().nonnegative(),
+  stream: z.enum(["stdout", "stderr"]),
+  content: z.string(),
+});
+
+export const backgroundProcessLog = z.object({
+  process: backgroundProcess,
+  output: z.array(backgroundProcessOutputChunk),
+  oldestOffset: z.number().int().nonnegative(),
+  nextOffset: z.number().int().nonnegative(),
+  tailOffset: z.number().int().nonnegative(),
+  truncated: z.boolean(),
+  hasMore: z.boolean(),
+});
+export type BackgroundProcessLog = z.infer<typeof backgroundProcessLog>;
+
 export const createTerminalRequest = z.object({
   cwd: z.string().optional(),
   columns: z.number().int().positive().optional(),
@@ -699,7 +739,7 @@ export const userPromptResponse = z.object({
 export const builtinTool = z.object({
   id: z.string(),
   description: z.string(),
-  capability: z.enum(["chat", "project"]),
+  capability: z.enum(["chat", "work", "code"]),
   inputSchema: z.unknown().optional(),
 });
 export type BuiltinTool = z.infer<typeof builtinTool>;

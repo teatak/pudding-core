@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | `turn.started` | ✓ | ✓ | `clientMessageID`, `userMessageID`, `text` |
 | `turn.delta` | — | — | `part(text/thought)`, `delta` |
-| `turn.tool` | — | — | `callID`, `name`, `phase`, `argsDelta?`, `ok?`, `content?`, `summaryKind?`, `summaryCount?`, `attachments?`;最终以 message.parts 兜底 |
+| `turn.tool` | — | — | `callID`, `name`, `phase`, `argsDelta?`, `stream?`, `content?`, `ok?`, `summaryKind?`, `summaryCount?`, `attachments?`;`phase=output` 的 stdout/stderr 只进前端 overlay,最终以 message.parts 兜底 |
 | `turn.completed` | ✓ | ✓ | `assistantMessageID` |
 | `turn.failed` | ✓ | ✓ | `error`;有半截输出时 `assistantMessageID` + `interrupted` |
 | `turn.cancelled` | ✓ | ✓ | 有半截输出时 `assistantMessageID` + `interrupted` |
@@ -18,6 +18,7 @@
 | `audio.input_level` | — | — | `inputLevel`;mic owner 的波形音量 |
 | `approval.requested` | — | — | `approvalID`, `approvalKind`(`capability`/`skill_draft`/`tool_call`), `title`, `reason`, `risk?`, `payload?` |
 | `approval.resolved` | — | — | `approvalID`, `approvalKind`(`capability`/`skill_draft`/`tool_call`), `status`, `reason?`, `payload?` |
+| `process.started/finished/stopped/removed` | — | — | `turnID?`, `callID?`, `payload`(BackgroundProcess 快照);前端刷新 REST 快照,不落库 |
 | `session.titled` | — | — | `title`;自动标题写回(provisional / LLM 各一次),不落库 |
 | `ping` | — | — | — |
 
@@ -31,7 +32,7 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 
 | 实体 | Go | TS | 字段 |
 | --- | --- | --- | --- |
-| Session | `store.Session` | `session` | id, title, provider, model, activeMode(chat/project), modeLease, projectID?, createdAt, updatedAt, running(读取时派生) |
+| Session | `store.Session` | `session` | id, title, provider, model, activeMode(chat/work/code), modeLease, projectID?, createdAt, updatedAt, running(读取时派生), backgroundProcessCount(读取时派生) |
 | Project | `store.Project` | `project` | id, name, rootDirs, approvalMode, createdAt, updatedAt |
 | ConversationTurn | `store.ConversationTurn` | `conversationTurn` | id, sessionID, clientMessageID, status, provider?, model?, mode?, error?, createdAt, updatedAt, messages[] |
 | ContentPart | `store.ContentPart` | `contentPart` | type(text/thought/tool_use/tool_result), text?, id?, name?, args?, ok?, content?, summaryKind?, summaryCount? |
@@ -65,6 +66,9 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | `GET /sessions/{id}/events` | SSE | event stream | 404 |
 | `GET /sessions/{id}/turns` | `before?`, `limit?` | `{turns: [], hasMore}` | 404 |
 | `GET /sessions/{id}/messages` | — | `{messages: []}` | 404 |
+| `GET /sessions/{id}/processes` | — | `{processes: [{processID,turnID?,callID?,status,running,cwd,argv?,script?,shell?,exitCode?,startedAt,finishedAt?,reason?,error?}]}` | 404 |
+| `GET /sessions/{id}/processes/{processID}` | `offset?`, `max_bytes?`, `tail_bytes?` | `{process,output,oldestOffset,nextOffset,tailOffset,truncated,hasMore}` | 400 / 404 |
+| `DELETE /sessions/{id}/processes/{processID}` | — | 204 | 404 |
 | `GET /settings` | — | `{settings: {}}` | — |
 | `PUT /settings` | `{k: v}` | 204 | 400 |
 | `GET /providers` | — | `{providers: []}` | — |
@@ -80,19 +84,31 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 
 | tool | capability | args | result |
 | --- | --- | --- | --- |
-| `builtin_command_run` | `project` | `{scope:"project", argv:string[], cwd?, env?, timeout_ms?}` | `{ok, argv, cwd, exitCode, stdout, stderr, stdoutTruncated, stderrTruncated, timedOut, cancelled, durationMs, reason?, error?}` |
-| `builtin_git_status` | `project` | `{scope:"project", cwd?}` | `{ok, cwd, repoRoot, head, branch, upstream, detached, ahead, behind, clean, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |
-| `builtin_git_diff` | `project` | `{scope:"project", cwd?, staged?}` | `{ok, cwd, repoRoot, staged, diff, truncated, files, fileCount, additions, deletions}` |
-| `builtin_git_log` | `project` | `{scope:"project", cwd?, limit?}` | `{ok, cwd, repoRoot, commits, count}` |
-| `builtin_git_stage` | `project` | `{scope:"project", cwd?, paths:string[]}` | `{ok, status:"staged", cwd, repoRoot, paths, pathCount, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |
-| `builtin_git_unstage` | `project` | `{scope:"project", cwd?, paths:string[]}` | `{ok, status:"unstaged", cwd, repoRoot, paths, pathCount, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |
-| `builtin_git_commit` | `project` | `{scope:"project", cwd?, message}` | `{ok, status:"committed", cwd, repoRoot, commit, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |
-| `builtin_patch_propose` | `project` | `{scope:"project", files:[{path, new_text?, delete?}]}` | `{ok, status:"proposed", proposalID, projectRoot, files, fileCount, additions, deletions, diff, expiresAt}` |
-| `builtin_patch_apply` | `project` | `{proposal_id}` | `{ok, status:"applied", proposalID, projectRoot, files, fileCount, additions, deletions, warnings}` |
+| `builtin_toolkit_load` | `chat` | `{toolkit_ids:string[1..4]}` | `{ok, loaded, alreadyActive, activeToolkits, tools, loadsRemaining}`;turn-scoped,每 turn 最多扩展 2 次 |
+| `builtin_command_run` | `code` | `{scope:"project", argv:string[] \| script:string, cwd?, env?, timeout_ms?}`(argv/script 互斥) | `{ok, argv? \| script+shell, cwd, exitCode, stdout, stderr, stdoutTruncated, stderrTruncated, timedOut, cancelled, durationMs, reason?, error?}` |
+| `builtin_command_start` | `code` | `{scope:"project", argv:string[] \| script:string, cwd?, env?}`(argv/script 互斥) | `{ok, processID, status, running, argv? \| script+shell, cwd, startedAt}` |
+| `builtin_command_poll` | `code` | `{process_id, offset?, max_bytes?}` | `{ok, processID, status, running, exitCode?, output:[{offset,stream,content}], oldestOffset, nextOffset, tailOffset, truncated, hasMore}` |
+| `builtin_command_stop` | `code` | `{process_id}` | `{ok, processID, status, running:false, exitCode?, reason?, finishedAt?}` |
+| `builtin_git_status` | `code` | `{scope:"project", cwd?}` | `{ok, cwd, repoRoot, head, branch, upstream, detached, ahead, behind, clean, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |
+| `builtin_git_diff` | `code` | `{scope:"project", cwd?, staged?}` | `{ok, cwd, repoRoot, staged, diff, truncated, files, fileCount, additions, deletions}` |
+| `builtin_git_log` | `code` | `{scope:"project", cwd?, limit?}` | `{ok, cwd, repoRoot, commits, count}` |
+| `builtin_git_stage` | `code` | `{scope:"project", cwd?, paths:string[]}` | `{ok, status:"staged", cwd, repoRoot, paths, pathCount, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |
+| `builtin_git_unstage` | `code` | `{scope:"project", cwd?, paths:string[]}` | `{ok, status:"unstaged", cwd, repoRoot, paths, pathCount, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |
+| `builtin_git_commit` | `code` | `{scope:"project", cwd?, message}` | `{ok, status:"committed", cwd, repoRoot, commit, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |
+| `builtin_patch_propose` | `code` | `{scope:"project", files:[{path, new_text?, delete?}]}` | `{ok, status:"proposed", proposalID, projectRoot, files, fileCount, additions, deletions, diff, expiresAt}` |
+| `builtin_patch_apply` | `code` | `{proposal_id}` | `{ok, status:"applied", proposalID, projectRoot, files, fileCount, additions, deletions, warnings}` |
 
-`builtin_command_run` 不解析 shell 字符串。cwd 必须位于当前 Project/turn grant
-授权目录中;默认 timeout 为 60 秒,最大 10 分钟;stdout/stderr 各保留最多
-64 KiB 头尾内容。命令审批由 Project 的 `ask | auto | full` 决定。
+`builtin_command_run` 的 argv 直接执行;script 由固定平台 shell 执行,模型不能指定
+shell executable。cwd 必须位于当前 Project/turn grant 授权目录中;默认 timeout
+为 60 秒,最大 10 分钟;stdout/stderr 各保留最多 64 KiB 头尾内容。script 一律
+`LowRisk=false`;命令审批由 Project 的 `ask | auto | full` 决定。`auto` 自动放行
+Project 内常规文件写入和已识别的低风险 argv;删除、Git 写入、后台进程、越界参数、
+自定义环境及无法判定的 script 仍请求审批。
+
+后台进程归属 session,每 session 最多 4 个、全局最多 32 个;无 stdin/PTY。
+stdout/stderr 共用 1 MiB 有界 ring buffer,通过 offset 增量读取。运行中的进程不因
+无 poll 过期;结束结果保留 30 分钟。显式 stop、session 删除与 daemon shutdown
+会终止整个子进程组。
 
 Git 只读工具固定禁用 pager、external diff、textconv 与可选索引写入。工具先解析
 仓库根，并确认仓库根仍在当前 Project 授权目录内。`builtin_git_diff` 的 patch
@@ -129,9 +145,10 @@ apply 前均校验源文件 hash;任一文件漂移则整包拒绝。apply 先�
 | --- | --- |
 | — | 当前无主路径设置键 |
 
-session 创建时必须显式写入 `provider` 与 `model`。能力档为 `chat` / `project`;
-无授权默认 `activeMode=chat, modeLease=none`;绑定 Project 或 session scope
-审批通过后写入 `activeMode=project, modeLease=session`。
+session 创建时必须显式写入 `provider` 与 `model`。能力档为
+`chat < work < code`;普通会话默认 `activeMode=chat, modeLease=none`,由 Project
+创建的会话默认 `activeMode=code, modeLease=session`。session scope 能力审批持久更新
+activeMode,turn scope 只影响当前 turn。
 draft 页可记住"上次选用模型",
 但不影响既有 session。
 历史上的 `model.default` 与 `provider.openai.*` 过渡键已随 registry 收口删除。

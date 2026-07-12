@@ -48,7 +48,7 @@ api → event ← engine
 
 | 轨道 | 内容 | 解耦手段 | 人日 |
 | --- | --- | --- | --- |
-| A. store | SQLite 实现、迁移、WAL、单 writer、事务规则 | 只依赖 schema | 2 |
+| A. store | SQLite 实现、当前 schema 初始化、WAL、单 writer、事务规则 | 只依赖 schema | 2 |
 | B. provider | OpenAI streaming、cancel、mock provider | 只依赖 `provider.Client` 接口 | 2–3 |
 | C. api + event | 路由、REST/SSE handler、hub、seq、`Last-Event-ID` 续传、token | engine/store 用 fake 实现顶着 | 3–4 |
 | D. engine | per-session turn 状态机、submit→stream→落库、cancel、`clientMessageID` 幂等、并发 409 | 单测全部跑在 mock provider + 内存 store 上 | 4–5 |

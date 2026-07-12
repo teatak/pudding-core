@@ -10,7 +10,7 @@ func WriteText(w io.Writer, report Report) error {
 	if _, err := fmt.Fprintf(w, "Tool usage report (%s to %s)\n", report.Since.Format("2006-01-02"), report.Until.Format("2006-01-02")); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "Turns: %d (project %d, chat %d) | Calls: %d\n", report.TotalTurns, report.ProjectTurns, report.ChatTurns, report.Calls); err != nil {
+	if _, err := fmt.Fprintf(w, "Turns: %d (code %d, work %d, chat %d) | Calls: %d\n", report.TotalTurns, report.CodeTurns, report.WorkTurns, report.ChatTurns, report.Calls); err != nil {
 		return err
 	}
 	if report.SkippedMessages > 0 {

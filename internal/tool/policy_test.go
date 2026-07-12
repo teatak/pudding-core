@@ -5,13 +5,25 @@ import (
 	"testing"
 )
 
-func TestClassifyToolCallProjectFileWrite(t *testing.T) {
-	risk, ok := ClassifyToolCall(FilePatch, json.RawMessage(`{"scope":"project","path":"main.go","old_string":"a","new_string":"b"}`))
-	if !ok {
-		t.Fatal("project file patch should be classified")
+func TestClassifyToolCallProjectFileWrites(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		args      string
+		operation string
+	}{
+		{name: FileWrite, args: `{"scope":"project","path":"main.go","content":"x"}`, operation: "write"},
+		{name: FilePatch, args: `{"scope":"project","path":"main.go","old_string":"a","new_string":"b"}`, operation: "patch"},
+		{name: FileMove, args: `{"scope":"project","from_path":"old.go","to_path":"new.go"}`, operation: "move"},
+		{name: FileCopy, args: `{"scope":"project","from_path":"main.go","to_path":"copy.go"}`, operation: "copy"},
+	} {
+		risk, ok := ClassifyToolCall(test.name, json.RawMessage(test.args))
+		if !ok || risk.Class != RiskClassWrite || risk.Operation != test.operation || !risk.LowRisk {
+			t.Fatalf("unexpected project write risk for %s: %+v ok=%v", test.name, risk, ok)
+		}
 	}
-	if risk.Class != RiskClassWrite || risk.Operation != "patch" || len(risk.Paths) != 1 || risk.Paths[0] != "main.go" {
-		t.Fatalf("bad risk: %+v", risk)
+	deleteRisk, ok := ClassifyToolCall(FileDelete, json.RawMessage(`{"scope":"project","path":"main.go"}`))
+	if !ok || deleteRisk.Class != RiskClassDestructive || deleteRisk.LowRisk {
+		t.Fatalf("file delete must remain protected: %+v ok=%v", deleteRisk, ok)
 	}
 }
 
@@ -59,7 +71,7 @@ func TestClassifyToolCallCodeReadRisk(t *testing.T) {
 
 func TestClassifyToolCallPatchApplyRisk(t *testing.T) {
 	risk, ok := ClassifyToolCall(PatchApply, json.RawMessage(`{"proposal_id":"patch_123"}`))
-	if !ok || risk.Class != RiskClassWrite || risk.Operation != "patch_apply" || risk.Scope != "project" {
+	if !ok || risk.Class != RiskClassWrite || risk.Operation != "patch_apply" || risk.Scope != "project" || !risk.LowRisk {
 		t.Fatalf("unexpected patch apply risk: %+v ok=%v", risk, ok)
 	}
 	if _, ok := ClassifyToolCall(PatchApply, json.RawMessage(`{"proposal_id":""}`)); ok {
@@ -79,7 +91,7 @@ func TestClassifyToolCallGitWriteRisk(t *testing.T) {
 		{name: GitCommit, args: `{"scope":"project","message":"test"}`, operation: "git_commit"},
 	} {
 		risk, ok := ClassifyToolCall(tt.name, json.RawMessage(tt.args))
-		if !ok || risk.Class != RiskClassWrite || risk.Operation != tt.operation || risk.Scope != "project" || len(risk.Paths) != tt.paths {
+		if !ok || risk.Class != RiskClassWrite || risk.Operation != tt.operation || risk.Scope != "project" || risk.LowRisk || len(risk.Paths) != tt.paths {
 			t.Fatalf("unexpected Git write risk for %s: %+v ok=%v", tt.name, risk, ok)
 		}
 	}
@@ -97,9 +109,15 @@ func TestClassifyToolCallCommandRisk(t *testing.T) {
 		lowRisk   bool
 	}{
 		{name: "test", args: `{"scope":"project","argv":["go","test","./..."]}`, class: RiskClassCommand, operation: "go", lowRisk: true},
+		{name: "search", args: `{"scope":"project","argv":["rg","TODO","internal"]}`, class: RiskClassCommand, operation: "rg", lowRisk: true},
+		{name: "slice", args: `{"scope":"project","argv":["sed","-n","1,80p","main.go"]}`, class: RiskClassCommand, operation: "sed", lowRisk: true},
+		{name: "find", args: `{"scope":"project","argv":["find",".","-name","*.go"]}`, class: RiskClassCommand, operation: "find", lowRisk: true},
+		{name: "find delete", args: `{"scope":"project","argv":["find",".","-delete"]}`, class: RiskClassCommand, operation: "find", lowRisk: false},
+		{name: "fd exec", args: `{"scope":"project","argv":["fd","--exec=rm","{}"]}`, class: RiskClassCommand, operation: "fd", lowRisk: false},
 		{name: "test with env", args: `{"scope":"project","argv":["go","test","./..."],"env":{"GOFLAGS":"-race"}}`, class: RiskClassCommand, operation: "go", lowRisk: false},
 		{name: "test outside project", args: `{"scope":"project","argv":["go","test","../other"]}`, class: RiskClassCommand, operation: "go", lowRisk: false},
 		{name: "arbitrary", args: `{"scope":"project","argv":["python3","script.py"]}`, class: RiskClassCommand, operation: "python3", lowRisk: false},
+		{name: "shell", args: `{"scope":"project","script":"go test ./... | tee test.log"}`, class: RiskClassCommand, operation: "shell", lowRisk: false},
 		{name: "destructive", args: `{"scope":"project","argv":["rm","-rf","build"]}`, class: RiskClassDestructive, operation: "rm", lowRisk: false},
 	}
 	for _, tt := range tests {

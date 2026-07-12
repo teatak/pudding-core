@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
-import { getSessionUsage, type SessionUsage } from "@/api/client";
+import { getSessionUsage, type Session, type SessionUsage } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -10,11 +10,12 @@ import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 type ContextUsageRingProps = {
+  mode: Session["activeMode"];
   token: string;
   sessionID: string;
 };
 
-export function ContextUsageRing({ token, sessionID }: ContextUsageRingProps) {
+export function ContextUsageRing({ mode, token, sessionID }: ContextUsageRingProps) {
   const { t } = useI18n();
   const usageQuery = useQuery({
     queryKey: queryKeys.sessionUsage(sessionID),
@@ -28,17 +29,18 @@ export function ContextUsageRing({ token, sessionID }: ContextUsageRingProps) {
   const currentPercent = usage && usage.contextWindow > 0 ? Math.min(100, (currentTokens / usage.contextWindow) * 100) : 0;
   const estimatedPercent = usage && usage.contextWindow > 0 ? Math.min(100, (estimatedTokens / usage.contextWindow) * 100) : 0;
   const tone = Math.max(currentPercent, estimatedPercent) >= 95 ? "danger" : Math.max(currentPercent, estimatedPercent) >= 80 ? "warning" : "ok";
+  const capabilityLabel = t("mode.current").replace("{mode}", t(`mode.${mode}`));
 
   return (
     <Popover>
       <PopoverTrigger asChild>
         <Button
-          aria-label={t("usage.contextWindow")}
+          aria-label={`${capabilityLabel} · ${t("usage.contextWindow")}`}
           className="relative h-5 w-5 shrink-0 rounded-full border-0 bg-transparent p-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
           type="button"
           variant="ghost"
         >
-          <Ring current={usageQuery.isLoading ? 0 : currentPercent} estimate={usageQuery.isLoading ? 0 : estimatedPercent} tone={tone} />
+          <Ring current={usageQuery.isLoading ? 0 : currentPercent} estimate={usageQuery.isLoading ? 0 : estimatedPercent} mode={mode} tone={tone} />
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -48,6 +50,10 @@ export function ContextUsageRing({ token, sessionID }: ContextUsageRingProps) {
         sideOffset={10}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
+        <div className="flex h-9 items-center gap-2 border-b px-3 font-medium text-muted-foreground">
+          <ModeDot mode={mode} />
+          <span>{capabilityLabel}</span>
+        </div>
         {usage ? (
           <UsagePanel
             currentPercent={currentPercent}
@@ -257,7 +263,7 @@ function UsageRow({
   );
 }
 
-function Ring({ current, estimate, tone }: { current: number; estimate: number; tone: "ok" | "warning" | "danger" }) {
+function Ring({ current, estimate, mode, tone }: { current: number; estimate: number; mode: Session["activeMode"]; tone: "ok" | "warning" | "danger" }) {
   const radius = 8;
   const circumference = 2 * Math.PI * radius;
   const currentOffset = circumference - (Math.min(100, current) / 100) * circumference;
@@ -290,8 +296,20 @@ function Ring({ current, estimate, tone }: { current: number; estimate: number; 
         strokeLinecap="round"
         strokeWidth="2.4"
       />
+      {mode === "chat" ? null : <circle className={cn("fill-current", modeToneClass(mode))} cx="12" cy="12" r="2.5" />}
     </svg>
   );
+}
+
+function ModeDot({ mode }: { mode: Session["activeMode"] }) {
+  if (mode === "chat") {
+    return null;
+  }
+  return <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full bg-current", modeToneClass(mode))} />;
+}
+
+function modeToneClass(mode: Session["activeMode"]) {
+  return mode === "work" ? "text-blue-500 dark:text-blue-400" : "text-yellow-500 dark:text-yellow-400";
 }
 
 function strokeClass(tone: "ok" | "warning" | "danger") {

@@ -2,6 +2,7 @@ package tool
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
@@ -21,25 +22,14 @@ type CapabilityRequest struct {
 func RequestCapabilityDefinition() provider.ToolDef {
 	return provider.ToolDef{
 		Name:        RequestCapability,
-		Description: "Request project capability, or request additional project directories when project capability is already active. The user may approve only for the current turn or remember it for the session.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"targetMode":{"type":"string","enum":["project"],"description":"Project capability is required to inspect or change local project files."},"reason":{"type":"string","description":"Why project capability or additional project directories are needed."},"projectDirs":{"type":"array","items":{"type":"string"},"description":"Absolute project directories requested. Use attached local folder paths exactly when the user provided them. Leave empty only if the user must choose."},"needsProjectDir":{"type":"boolean","description":"Set true when project capability is needed but no concrete directory is known."},"suggestedDirName":{"type":"string","description":"Optional short suggested folder name when asking the user to choose a project directory."},"risk":{"type":"string","description":"Potential side effects or privacy/local file risks."}},"required":["targetMode","reason"],"additionalProperties":false}`),
+		Description: "Request Work capability for browser and connected-service operations, or Code capability for local project files, commands, tests, and Git. The user may approve only for the current turn or remember it for the session.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"targetMode":{"type":"string","enum":["work","code"],"description":"Use work for browser or connected-service operations. Use code for local project files, commands, tests, or Git."},"reason":{"type":"string","description":"Why the higher capability is needed."},"projectDirs":{"type":"array","items":{"type":"string"},"description":"Code mode only: absolute project directories requested. Use attached local folder paths exactly when the user provided them. Leave empty only if the user must choose."},"needsProjectDir":{"type":"boolean","description":"Code mode only: set true when project access is needed but no concrete directory is known."},"suggestedDirName":{"type":"string","description":"Code mode only: optional short suggested folder name when asking the user to choose a project directory."},"risk":{"type":"string","description":"Potential side effects or privacy/local file risks."}},"required":["targetMode","reason"],"additionalProperties":false}`),
 		Capability:  store.ModeChat,
 	}
 }
 
 func DefinitionsForMode(mode store.AgentMode, defs []provider.ToolDef) []provider.ToolDef {
-	mode = store.NormalizeAgentMode(mode)
-	if !store.ValidAgentMode(mode) {
-		mode = store.ModeChat
-	}
-	out := make([]provider.ToolDef, 0, len(defs)+1)
-	out = append(out, RequestCapabilityDefinition())
-	for _, def := range defs {
-		if ToolDefAllowedForMode(mode, def) {
-			out = append(out, def)
-		}
-	}
-	return out
+	return DefinitionsForTurn(mode, defs, nil)
 }
 
 func ToolDefAllowedForMode(mode store.AgentMode, def provider.ToolDef) bool {
@@ -52,13 +42,19 @@ func ToolDefAllowedForMode(mode store.AgentMode, def provider.ToolDef) bool {
 	}
 	required := store.NormalizeAgentMode(def.Capability)
 	if required == "" {
-		required = store.ModeProject
+		required = store.ModeCode
 	}
 	return store.AgentModeRank(mode) >= store.AgentModeRank(required)
 }
 
 func RequiredModeForName(name string) store.AgentMode {
-	if name == RequestCapability {
+	if name == RequestCapability || name == ToolkitLoad {
+		return store.ModeChat
+	}
+	if strings.HasPrefix(name, appMCPToolPrefix) {
+		return store.ModeWork
+	}
+	if strings.HasPrefix(name, "canvas_") || name == "collect_user_input" {
 		return store.ModeChat
 	}
 	for _, def := range BuiltinDefinitions() {
@@ -70,7 +66,7 @@ func RequiredModeForName(name string) store.AgentMode {
 			break
 		}
 	}
-	return store.ModeProject
+	return store.ModeCode
 }
 
 func NameAllowedForMode(mode store.AgentMode, name string) bool {
@@ -78,7 +74,7 @@ func NameAllowedForMode(mode store.AgentMode, name string) bool {
 	if !store.ValidAgentMode(mode) {
 		mode = store.ModeChat
 	}
-	if name == RequestCapability {
+	if name == RequestCapability || name == ToolkitLoad {
 		return true
 	}
 	return store.AgentModeRank(mode) >= store.AgentModeRank(RequiredModeForName(name))

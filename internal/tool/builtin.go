@@ -43,6 +43,9 @@ const (
 	FileMove            = "builtin_file_move"
 	FileCopy            = "builtin_file_copy"
 	CommandRun          = "builtin_command_run"
+	CommandStart        = "builtin_command_start"
+	CommandPoll         = "builtin_command_poll"
+	CommandStop         = "builtin_command_stop"
 	GitStatus           = "builtin_git_status"
 	GitDiff             = "builtin_git_diff"
 	GitLog              = "builtin_git_log"
@@ -142,6 +145,7 @@ type BuiltinRunner struct {
 	patchProposals           map[string]*patchProposal
 	gitApprovalMu            sync.Mutex
 	gitApprovals             map[string]gitCommitApprovalSnapshot
+	processes                *backgroundProcessManager
 }
 
 func NewBuiltinRunner(opts ...BuiltinOption) *BuiltinRunner {
@@ -154,6 +158,7 @@ func NewBuiltinRunner(opts ...BuiltinOption) *BuiltinRunner {
 		graphqlSchemas:  map[string]*graphqlSchemaCache{},
 		patchProposals:  map[string]*patchProposal{},
 		gitApprovals:    map[string]gitCommitApprovalSnapshot{},
+		processes:       newBackgroundProcessManager(backgroundProcessRetentionTTL),
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -248,6 +253,12 @@ func WithHomeDir(dir string) BuiltinOption {
 	}
 }
 
+func WithBackgroundProcessEvents(events func(BackgroundProcessEvent)) BuiltinOption {
+	return func(r *BuiltinRunner) {
+		r.processes.events = events
+	}
+}
+
 func WithWebHTTPClient(client *http.Client) BuiltinOption {
 	return func(r *BuiltinRunner) {
 		if client != nil {
@@ -317,55 +328,55 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Name:        ProjectInspect,
 			Description: "Inspect one authorized project directory using a bounded read-only scan. Returns Git root, detected languages, manifests, project instruction files, and suggested verification commands without executing them.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Project inspection is limited to authorized project directories."},"path":{"type":"string","description":"Optional absolute or relative directory inside an authorized project root. Defaults to the first project root."}},"required":["scope"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        ProjectInstructions,
 			Description: "Read the project instruction files that apply to one or more authorized target paths. Resolves AGENTS.md, CLAUDE.md, and CONTRIBUTING.md from the project root toward each target directory, returning deduplicated content in broad-to-specific order.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Project instructions can be read only from authorized project directories."},"paths":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":32,"description":"Target files or directories whose applicable instructions are needed. Missing future file paths are allowed when their parent remains inside the project."}},"required":["scope","paths"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        CodeSymbols,
 			Description: "Search semantic workspace symbols through the language server. Uses one shared tool contract for Go and TypeScript/JavaScript.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"path":{"type":"string","description":"Authorized project file or directory used to resolve the language root. Defaults to the first project root."},"language":{"type":"string","enum":["go","typescript"],"description":"Optional language override. Use typescript for TypeScript and JavaScript; usually inferred from path."},"query":{"type":"string","maxLength":500,"description":"Non-empty symbol name query."},"max_results":{"type":"integer","minimum":1,"maximum":200,"description":"Default 100, maximum 200."}},"required":["scope","query"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        CodeDefinition,
 			Description: "Find semantic definitions for a 1-based source position through the language server. Project-external locations are counted but not exposed.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"path":{"type":"string","description":"Authorized source file."},"language":{"type":"string","enum":["go","typescript"],"description":"Optional language override. Use typescript for TypeScript and JavaScript."},"line":{"type":"integer","minimum":1,"description":"1-based line."},"column":{"type":"integer","minimum":1,"description":"1-based Unicode character column."}},"required":["scope","path","line","column"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        CodeReferences,
 			Description: "Find semantic references for a 1-based source position through the language server. Results are sorted, deduplicated, bounded, and limited to authorized Project roots.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"path":{"type":"string","description":"Authorized source file."},"language":{"type":"string","enum":["go","typescript"],"description":"Optional language override. Use typescript for TypeScript and JavaScript."},"line":{"type":"integer","minimum":1},"column":{"type":"integer","minimum":1},"include_declaration":{"type":"boolean","description":"Defaults to true."},"max_results":{"type":"integer","minimum":1,"maximum":500,"description":"Default 100, maximum 500."}},"required":["scope","path","line","column"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        CodeDiagnostics,
 			Description: "Read current semantic language-server diagnostics for up to 32 source files sharing one language root. This is static analysis and does not claim tests or builds passed.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"paths":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":32,"description":"Authorized source files in one language root."},"language":{"type":"string","enum":["go","typescript"],"description":"Optional language override. Use typescript for TypeScript and JavaScript."},"severity":{"type":"array","items":{"type":"string","enum":["error","warning","information","hint"]},"description":"Optional severity filter."}},"required":["scope","paths"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        CodeRename,
 			Description: "Prepare a semantic symbol rename through the language server and return a reviewable Patch Proposal without changing project files. Apply the returned proposal separately with builtin_patch_apply.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"path":{"type":"string","description":"Authorized source file containing the symbol."},"language":{"type":"string","enum":["go","typescript"],"description":"Optional language override. Use typescript for TypeScript and JavaScript."},"line":{"type":"integer","minimum":1,"description":"1-based line."},"column":{"type":"integer","minimum":1,"description":"1-based Unicode character column."},"new_name":{"type":"string","minLength":1,"maxLength":256,"description":"New symbol name. Language-specific validity is checked by the language server."}},"required":["scope","path","line","column","new_name"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FileList,
 			Description: "List files in a Pudding-managed file area or an authorized project directory.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","project"],"description":"Target file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized project directories. Use . to list the root."},"max_entries":{"type":"integer","description":"Optional maximum entries, 1-1000, default 200."}},"required":["scope","path"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FileRead,
 			Description: "Read one small UTF-8 text file, or save one supported image file as an attachment from a Pudding-managed file area or an authorized project directory. Image bytes are visible only to models with image input support; otherwise the model sees attachment metadata only. For large text files use builtin_file_slice or builtin_file_search first.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","project"],"description":"Target file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized project directories."},"max_chars":{"type":"integer","description":"Optional max characters, default 20000 and cap 100000."}},"required":["scope","path"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        AttachmentReadImage,
@@ -377,139 +388,157 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Name:        FileStat,
 			Description: "Return metadata for one file or directory: exists, type, size, mtime, and MIME when available.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","project"],"description":"Target file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized project directories."}},"required":["scope","path"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FileSearch,
 			Description: "Search UTF-8 text files by literal text or RE2-compatible regular expression. Supports case control, project-relative include/exclude globs, and bounded context lines. Skips binary files and common generated directories.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","project"],"description":"Target file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Search root. Relative path inside a managed area, or an absolute/relative path inside authorized project directories. Use . for the root."},"query":{"type":"string","description":"Text or regular expression to search for."},"mode":{"type":"string","enum":["literal","regex"],"description":"Search mode. Defaults to literal."},"case_sensitive":{"type":"boolean","description":"Whether matching is case-sensitive. Defaults to true."},"include_globs":{"type":"array","items":{"type":"string"},"maxItems":32,"description":"Optional project-relative path globs to include. Supports ** directory segments."},"exclude_globs":{"type":"array","items":{"type":"string"},"maxItems":32,"description":"Optional project-relative path globs to exclude. Supports ** directory segments."},"context_lines":{"type":"integer","minimum":0,"maximum":5,"description":"Context lines before and after each matching line. Defaults to 0."},"max_results":{"type":"integer","minimum":1,"maximum":500,"description":"Optional maximum matching lines, default 100 and cap 500."}},"required":["scope","path","query"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FileSlice,
 			Description: "Read a focused line slice from a UTF-8 text file. Supports origin=start for line ranges and origin=end for tail-style reads, with optional reverse order.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","project"],"description":"Target file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized project directories."},"origin":{"type":"string","enum":["start","end"],"description":"start reads from a 1-based line range. end reads the last N lines after optional skip. Default start."},"start":{"type":"integer","description":"1-based start line for origin=start. Default 1."},"end":{"type":"integer","description":"Inclusive end line for origin=start. If omitted, lines controls the range length."},"lines":{"type":"integer","description":"Line count for origin=end or when end is omitted. Default 100 and cap 500."},"skip":{"type":"integer","description":"For origin=end, skip this many lines from the file end before taking lines. Default 0."},"order":{"type":"string","enum":["natural","reverse"],"description":"natural returns file order. reverse returns newest/end-most lines first. Default natural."}},"required":["scope","path"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FileWrite,
 			Description: "Overwrite one text file in a writable Pudding-managed file area or authorized project directory.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp","project"],"description":"Target writable file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized project directories."},"content":{"type":"string","description":"New file content."}},"required":["scope","path","content"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FilePatch,
 			Description: "Replace text in one file in a writable Pudding-managed file area or authorized project directory by exact string match.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp","project"],"description":"Target writable file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized project directories."},"old_string":{"type":"string","description":"Exact text to replace."},"new_string":{"type":"string","description":"Replacement text."},"replace_all":{"type":"boolean","description":"Replace all matches. Defaults false; without this, exactly one match is required."}},"required":["scope","path","old_string","new_string"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FileDelete,
 			Description: "Delete a file or, when recursive is true, a directory from a writable Pudding-managed file area or authorized project directory.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp","project"],"description":"Target writable file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized project directories."},"recursive":{"type":"boolean","description":"Required to delete a directory."}},"required":["scope","path"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FileMove,
 			Description: "Move or rename a file or directory inside the same writable managed area or authorized project directories.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp","project"]},"from_path":{"type":"string"},"to_path":{"type":"string"}},"required":["scope","from_path","to_path"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FileCopy,
 			Description: "Copy a file or directory inside the same writable managed area or authorized project directory. Directories require recursive=true; existing destinations require overwrite=true.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp","project"],"description":"Target writable file area."},"from_path":{"type":"string","description":"Source path in the same scope."},"to_path":{"type":"string","description":"Destination path in the same scope."},"recursive":{"type":"boolean","description":"Required when copying a directory."},"overwrite":{"type":"boolean","description":"Replace an existing destination. Defaults false."}},"required":["scope","from_path","to_path"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        CommandRun,
-			Description: "Run one local command directly from an argv array in an authorized project directory. This tool does not invoke a shell or interpret shell syntax. Returns exit code, bounded output, duration, timeout and cancellation metadata; recognized test, lint, build, and check commands also return verification status and project-scoped diagnostics.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Commands can run only with project access."},"argv":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":128,"description":"Executable followed by arguments. Do not pass a shell command string."},"cwd":{"type":"string","description":"Absolute or relative directory inside authorized project roots. Defaults to the first project root."},"env":{"type":"object","additionalProperties":{"type":"string"},"description":"Optional environment values for this command. Pudding otherwise inherits only a minimal safe environment."},"timeout_ms":{"type":"integer","minimum":100,"maximum":600000,"description":"Optional timeout in milliseconds. Defaults to 60000; maximum 600000."}},"required":["scope","argv"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Description: "Run one local command in an authorized project directory. Pass either argv for direct execution or script for fixed-shell pipelines, redirects, and compound commands; never pass both. Shell scripts always require risk approval unless the project uses full access. Returns exit code, bounded output, duration, timeout and cancellation metadata; recognized direct test, lint, build, and check commands also return verification status and project-scoped diagnostics.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Commands can run only with project access."},"argv":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":128,"description":"Executable followed by arguments for direct execution. Mutually exclusive with script."},"script":{"type":"string","minLength":1,"maxLength":65536,"description":"A fixed-shell script for pipelines, redirects, variable expansion, or compound commands. Mutually exclusive with argv and always treated as risky."},"cwd":{"type":"string","description":"Absolute or relative directory inside authorized project roots. Defaults to the first project root."},"env":{"type":"object","additionalProperties":{"type":"string"},"description":"Optional environment values for this command. Pudding otherwise inherits only a minimal safe environment."},"timeout_ms":{"type":"integer","minimum":100,"maximum":600000,"description":"Optional timeout in milliseconds. Defaults to 60000; maximum 600000."}},"required":["scope"],"additionalProperties":false}`),
+			Capability:  store.ModeCode,
+		},
+		{
+			Name:        CommandStart,
+			Description: "Start one non-interactive background process in an authorized project directory. Pass exactly one of argv or script. Returns a session-owned process_id; use builtin_command_poll to read bounded output and builtin_command_stop when finished. Background starts always require risk approval unless the project uses full access.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Background processes can start only with project access."},"argv":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":128,"description":"Executable followed by arguments for direct execution. Mutually exclusive with script."},"script":{"type":"string","minLength":1,"maxLength":65536,"description":"A fixed-shell script. Mutually exclusive with argv."},"cwd":{"type":"string","description":"Absolute or relative directory inside authorized project roots. Defaults to the first project root."},"env":{"type":"object","additionalProperties":{"type":"string"},"description":"Optional environment values. Pudding otherwise inherits only a minimal safe environment."}},"required":["scope"],"additionalProperties":false}`),
+			Capability:  store.ModeCode,
+		},
+		{
+			Name:        CommandPoll,
+			Description: "Poll one session-owned background process. Pass the previous next_offset to continue reading its ordered stdout/stderr ring buffer. Returns process status, output chunks, the next offset, truncation, and whether more buffered output remains.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by builtin_command_start."},"offset":{"type":"integer","minimum":0,"description":"Output offset returned as nextOffset by the previous poll. Defaults to the oldest retained output."},"max_bytes":{"type":"integer","minimum":1024,"maximum":262144,"description":"Maximum output bytes returned by this poll. Defaults to 65536."}},"required":["process_id"],"additionalProperties":false}`),
+			Capability:  store.ModeCode,
+		},
+		{
+			Name:        CommandStop,
+			Description: "Stop one session-owned background process and its child process group. This operation is idempotent for a process that already exited.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by builtin_command_start."}},"required":["process_id"],"additionalProperties":false}`),
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        GitStatus,
 			Description: "Read structured Git worktree status for the repository containing an authorized project directory. Returns branch, upstream divergence, file states, and summary counts.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Git tools can read only authorized project repositories."},"cwd":{"type":"string","description":"Absolute or relative directory inside an authorized project root. Defaults to the first project root."}},"required":["scope"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        GitDiff,
 			Description: "Read the unstaged or staged Git diff for an authorized project repository. Returns a bounded patch plus structured per-file additions and deletions.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Git tools can read only authorized project repositories."},"cwd":{"type":"string","description":"Absolute or relative directory inside an authorized project root. Defaults to the first project root."},"staged":{"type":"boolean","description":"When true, read the staged diff. Defaults to false for unstaged changes."}},"required":["scope"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        GitLog,
 			Description: "Read recent commits from an authorized project repository as structured metadata.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Git tools can read only authorized project repositories."},"cwd":{"type":"string","description":"Absolute or relative directory inside an authorized project root. Defaults to the first project root."},"limit":{"type":"integer","minimum":1,"maximum":100,"description":"Maximum commits to return. Defaults to 20."}},"required":["scope"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        GitStage,
 			Description: "Stage explicit project file paths in Git after approval. Paths are literal repository-relative or absolute paths; arbitrary pathspecs and Git options are not accepted.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Git writes can target only authorized project repositories."},"cwd":{"type":"string","description":"Absolute or relative directory inside an authorized project root. Defaults to the first project root."},"paths":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":128,"description":"Explicit files to stage. Paths returned by builtin_git_status are repository-relative and can be passed directly."}},"required":["scope","paths"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        GitUnstage,
 			Description: "Remove explicit project file paths from the Git index after approval without changing worktree files. Arbitrary pathspecs and Git options are not accepted.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Git writes can target only authorized project repositories."},"cwd":{"type":"string","description":"Absolute or relative directory inside an authorized project root. Defaults to the first project root."},"paths":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":128,"description":"Explicit repository files to unstage."}},"required":["scope","paths"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        GitCommit,
 			Description: "Commit the currently staged Git changes after showing their status and diff for approval. The commit is rejected if HEAD or the index changes while approval is pending. Hooks and signing are disabled.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Git writes can target only authorized project repositories."},"cwd":{"type":"string","description":"Absolute or relative directory inside an authorized project root. Defaults to the first project root."},"message":{"type":"string","minLength":1,"maxLength":16384,"description":"Commit message. Amend, signing, hooks, and arbitrary commit options are not supported."}},"required":["scope","message"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        PatchPropose,
 			Description: "Prepare a reviewable multi-file text patch without changing project files. Prefer ordered exact-match edits for existing files; use new_text for creates or intentional full replacement, and delete=true for deletion. The proposal records current file hashes and returns a unified diff for approval.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Patch proposals can target only authorized project files."},"files":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","properties":{"path":{"type":"string","description":"Absolute or relative file path inside one authorized project root."},"new_text":{"type":"string","description":"Complete desired UTF-8 file content. Use for creating a file or an intentional full replacement."},"edits":{"type":"array","minItems":1,"maxItems":64,"items":{"type":"object","properties":{"old_text":{"type":"string","minLength":1,"description":"Exact existing text to replace in the current in-memory snapshot."},"new_text":{"type":"string","description":"Replacement UTF-8 text."},"replace_all":{"type":"boolean","description":"Replace every exact match. Defaults to false and requires old_text to be unique."}},"required":["old_text","new_text"],"additionalProperties":false},"description":"Ordered exact replacements for an existing file. Mutually exclusive with new_text and delete."},"delete":{"type":"boolean","description":"Set true to delete an existing regular text file. Mutually exclusive with new_text and edits."}},"required":["path"],"additionalProperties":false},"description":"All proposed file changes. Every file must resolve inside the same project root."}},"required":["scope","files"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        PatchApply,
 			Description: "Apply one previously generated patch proposal after its unified diff is approved. The apply fails without changing files if any source file has drifted since proposal creation.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"proposal_id":{"type":"string","description":"Proposal id returned by builtin_patch_propose."}},"required":["proposal_id"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        SkillValidate,
 			Description: "Validate one staged skill package before asking the user to review it.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"draft_id":{"type":"string","description":"Staged skill package id."}},"required":["draft_id"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        SkillSubmit,
 			Description: "Submit one valid staged skill package for user review in Settings. This does not publish the skill.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"draft_id":{"type":"string","description":"Staged skill package id."}},"required":["draft_id"],"additionalProperties":false}`),
-			Capability:  store.ModeProject,
+			Capability:  store.ModeCode,
 		},
 		{
 			Name:        RESTRequest,
 			Description: "Send one HTTP request to a configured REST endpoint. Pass an endpoint name plus a relative path; authorization and configured headers are injected by Pudding. Omit connection when there is one configured connection.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"endpoint":{"type":"string","description":"Configured endpoint name, for example github_rest. Required; there is no default endpoint."},"connection":{"type":"string","description":"Optional connection name or id. Only pass this when the endpoint reports multiple configured connections."},"method":{"type":"string","enum":["GET","POST","PUT","PATCH","DELETE"],"description":"HTTP method. Defaults to GET."},"path":{"type":"string","description":"Relative path under the endpoint base URL, for example /repos/owner/repo/issues. Must not be a full URL."},"query":{"type":"object","additionalProperties":{"type":["string","number","boolean"]},"description":"Optional query parameters."},"body_json":{"description":"Optional JSON body. Mutually exclusive with body_text."},"body_text":{"type":"string","description":"Optional text body. Mutually exclusive with body_json."}},"required":["endpoint","path"],"additionalProperties":false}`),
-			Capability:  store.ModeChat,
+			Capability:  store.ModeWork,
 		},
 		{
 			Name:        GraphQLRequest,
 			Description: "Send one GraphQL query or mutation to a configured GraphQL endpoint. Authorization is injected by Pudding. Omit connection when there is one configured connection.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"endpoint":{"type":"string","description":"Configured GraphQL endpoint name. Required; there is no default endpoint."},"connection":{"type":"string","description":"Optional connection name or id. Only pass this when the endpoint reports multiple configured connections."},"query":{"type":"string","description":"GraphQL query or mutation text."},"variables":{"description":"Optional GraphQL variables object or JSON object string."}},"required":["endpoint","query"],"additionalProperties":false}`),
-			Capability:  store.ModeChat,
+			Capability:  store.ModeWork,
 		},
 		{
 			Name:        GraphQLIntrospect,
 			Description: "Inspect a configured GraphQL endpoint schema. Without type_name returns Query/Mutation/Subscription fields; with type_name returns that type's one-level structure.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"endpoint":{"type":"string","description":"Configured GraphQL endpoint name."},"connection":{"type":"string","description":"Optional connection name or id."},"type_name":{"type":"string","description":"Optional GraphQL type name to inspect, for example Query, User, or UserInput."},"force_refresh":{"type":"boolean","description":"Ignore cached schema and fetch again."}},"required":["endpoint"],"additionalProperties":false}`),
-			Capability:  store.ModeChat,
+			Capability:  store.ModeWork,
 		},
 		{
 			Name:        GraphQLSearch,
 			Description: "Search names and descriptions in a configured GraphQL endpoint schema. Use before writing GraphQL when field/type names are uncertain.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"endpoint":{"type":"string","description":"Configured GraphQL endpoint name."},"connection":{"type":"string","description":"Optional connection name or id."},"query":{"type":"string","description":"Case-insensitive keywords. Space-separated keywords are ANDed."},"max_results":{"type":"integer","description":"Optional result count, default 30 and cap 50."},"force_refresh":{"type":"boolean","description":"Ignore cached schema and fetch again."}},"required":["endpoint","query"],"additionalProperties":false}`),
-			Capability:  store.ModeChat,
+			Capability:  store.ModeWork,
 		},
 		{
 			Name:        WeatherGet,
@@ -521,7 +550,7 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Name:        CameraCapture,
 			Description: "Take one photo from the local camera and return a displayable attachment URL. The photo bytes are not routed to the model; call builtin_attachment_read_image only if the image content must be inspected.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
-			Capability:  store.ModeChat,
+			Capability:  store.ModeWork,
 		},
 		{
 			Name:        DesktopScreenshot,
@@ -533,67 +562,67 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Name:        BrowserStatus,
 			Description: "List the current session's managed browser tabs and their tab IDs. Use the returned tabID for deterministic browser actions when more than one tab exists.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
-			Capability:  store.ModeChat,
+			Capability:  store.ModeWork,
 		},
 		{
 			Name:        BrowserOpen,
 			Description: "Open a URL in a managed browser tab. Pass tabID to reuse a tab, or newTab=true to create a separate tab. With multiple tabs, omitting both is an error.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","description":"URL to open. http and https are supported; scheme defaults to https."},"tabID":{"type":"string","description":"Existing tab ID returned by builtin_browser_status."},"newTab":{"type":"boolean","description":"Create a new tab before opening the URL."}},"required":["url"],"additionalProperties":false}`),
-			Capability:  store.ModeChat,
+			Capability:  store.ModeWork,
 		},
 		{
 			Name:        BrowserObserve,
 			Description: "Observe a managed browser tab: title, URL, visible page text, and interactive elements.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"maxTextChars":{"type":"integer","description":"Optional max page text characters, default 6000, cap 20000."},"maxElements":{"type":"integer","description":"Optional max interactive elements, default 30, cap 100."}},"additionalProperties":false}`),
-			Capability:  store.ModeChat,
+			Capability:  store.ModeWork,
 		},
 		{
 			Name:        BrowserScreenshot,
 			Description: "Capture a screenshot of a managed browser tab and route it as an image attachment.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"fullPage":{"type":"boolean","description":"Capture beyond the viewport when supported. Defaults false."}},"additionalProperties":false}`),
-			Capability:  store.ModeChat,
+			Capability:  store.ModeWork,
 		},
 		{
 			Name:        BrowserBack,
 			Description: "Navigate a managed browser tab back in history.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."}},"additionalProperties":false}`),
-			Capability:  store.ModeChat,
+			Capability:  store.ModeWork,
 		},
 		{
 			Name:        BrowserForward,
 			Description: "Navigate a managed browser tab forward in history.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."}},"additionalProperties":false}`),
-			Capability:  store.ModeChat,
+			Capability:  store.ModeWork,
 		},
 		{
 			Name:        BrowserReload,
 			Description: "Reload a managed browser tab.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."}},"additionalProperties":false}`),
-			Capability:  store.ModeChat,
+			Capability:  store.ModeWork,
 		},
 		{
 			Name:        BrowserClose,
 			Description: "Close one managed browser tab by tabID, or close all tabs in the current session when tabID is omitted.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Optional tab ID to close. Omit to close all tabs in the session."}},"additionalProperties":false}`),
-			Capability:  store.ModeChat,
+			Capability:  store.ModeWork,
 		},
 		{
 			Name:        BrowserClick,
 			Description: "Click an element in a managed browser tab by CSS selector or viewport coordinates. Use method=pointer for real mouse events, method=dom only as a fallback for simple elements.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"CSS selector to click."},"x":{"type":"number","description":"Viewport X coordinate, used when selector is omitted."},"y":{"type":"number","description":"Viewport Y coordinate, used when selector is omitted."},"method":{"type":"string","enum":["auto","pointer","dom"],"description":"Click implementation. auto defaults to real CDP mouse events and falls back to DOM click; pointer forces real mouse events; dom forces element.click()."}},"additionalProperties":false}`),
-			Capability:  store.ModeChat,
+			Capability:  store.ModeWork,
 		},
 		{
 			Name:        BrowserType,
 			Description: "Type text into an editable element in a managed browser tab.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"CSS selector for the input. If omitted, uses the active element."},"text":{"type":"string","description":"Text to type."},"clear":{"type":"boolean","description":"Replace existing value before typing."}},"required":["text"],"additionalProperties":false}`),
-			Capability:  store.ModeChat,
+			Capability:  store.ModeWork,
 		},
 		{
 			Name:        BrowserScroll,
 			Description: "Scroll a managed browser tab or one of its scrollable elements.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"Optional CSS selector for a scrollable element."},"deltaX":{"type":"number","description":"Horizontal scroll delta in pixels."},"deltaY":{"type":"number","description":"Vertical scroll delta in pixels. Defaults to 600 when both deltas are omitted."}},"additionalProperties":false}`),
-			Capability:  store.ModeChat,
+			Capability:  store.ModeWork,
 		},
 	}
 }
@@ -655,6 +684,12 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.fileCopy(call)
 	case CommandRun:
 		return r.commandRun(ctx, call)
+	case CommandStart:
+		return r.commandStart(call)
+	case CommandPoll:
+		return r.commandPoll(call)
+	case CommandStop:
+		return r.commandStop(call)
 	case GitStatus:
 		return r.gitStatus(ctx, call)
 	case GitDiff:

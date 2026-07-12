@@ -362,7 +362,12 @@ func decodePatchApplyArgs(raw json.RawMessage) (patchApplyArgs, error) {
 }
 
 func (r *BuiltinRunner) ApprovalDetails(ctx context.Context, call Call) (map[string]any, error) {
-	if call.Name != PatchApply {
+	switch call.Name {
+	case CommandRun:
+		return commandApprovalDetails(call)
+	case CommandStart:
+		return commandStartApprovalDetails(call)
+	case GitStage, GitUnstage, GitCommit:
 		return r.gitWriteApprovalDetails(ctx, call)
 	}
 	args, err := decodePatchApplyArgs(call.Args)
@@ -399,7 +404,9 @@ func (r *BuiltinRunner) cleanupPatchProposalsLocked(now time.Time) {
 
 func patchProposalPayload(proposal *patchProposal) map[string]any {
 	files := make([]patchProposalFileView, 0, len(proposal.Files))
+	destructive := false
 	for _, file := range proposal.Files {
+		destructive = destructive || file.Delete
 		files = append(files, patchProposalFileView{
 			Path:      file.Path,
 			Operation: file.Operation,
@@ -414,6 +421,7 @@ func patchProposalPayload(proposal *patchProposal) map[string]any {
 		"fileCount":   len(files),
 		"additions":   proposal.Additions,
 		"deletions":   proposal.Deletions,
+		"destructive": destructive,
 		"diff":        proposal.Diff,
 		"expiresAt":   proposal.ExpiresAt.UTC().Format(time.RFC3339),
 	}

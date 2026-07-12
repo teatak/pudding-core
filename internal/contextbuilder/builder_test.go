@@ -313,7 +313,7 @@ func TestBuildReplaysToolImageAttachmentAsUserMessage(t *testing.T) {
 		UserMessageID:   "m1",
 		ClientMessageID: "c1",
 		UserText:        "读图",
-		Mode:            store.ModeProject,
+		Mode:            store.ModeCode,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -328,7 +328,7 @@ func TestBuildReplaysToolImageAttachmentAsUserMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req, err := New(ms, nil, WithAttachmentHome(home)).Build(ctx, "s1", "m", string(store.ModeProject), provider.ModelConfig{
+	req, err := New(ms, nil, WithAttachmentHome(home)).Build(ctx, "s1", "m", string(store.ModeCode), provider.ModelConfig{
 		Capabilities: &provider.ModelCapabilities{Image: true},
 	})
 	if err != nil {
@@ -629,17 +629,26 @@ func TestBuildFiltersToolPartsOutsideMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	chatParts := chatReq.Messages[1].Parts
-	if len(chatParts) != 3 || chatParts[0].Type != provider.PartToolUse || chatParts[1].Type != provider.PartToolResult || chatParts[2].Type != provider.PartText {
-		t.Fatalf("chat context should keep endpoint tool history: %+v", chatParts)
+	if len(chatParts) != 1 || chatParts[0].Type != provider.PartText {
+		t.Fatalf("chat context should hide Work tool history: %+v", chatParts)
 	}
 
-	projectReq, err := New(ms, nil).Build(ctx, "s1", "m", string(store.ModeProject))
+	workReq, err := New(ms, nil).Build(ctx, "s1", "m", string(store.ModeWork))
 	if err != nil {
 		t.Fatal(err)
 	}
-	projectParts := projectReq.Messages[1].Parts
-	if len(projectParts) != 3 || projectParts[0].Type != provider.PartToolUse || projectParts[1].Type != provider.PartToolResult || projectParts[2].Type != provider.PartText {
-		t.Fatalf("project context should keep chat tool history: %+v", projectParts)
+	workParts := workReq.Messages[1].Parts
+	if len(workParts) != 3 || workParts[0].Type != provider.PartToolUse || workParts[1].Type != provider.PartToolResult || workParts[2].Type != provider.PartText {
+		t.Fatalf("work context should keep Work tool history: %+v", workParts)
+	}
+
+	codeReq, err := New(ms, nil).Build(ctx, "s1", "m", string(store.ModeCode))
+	if err != nil {
+		t.Fatal(err)
+	}
+	codeParts := codeReq.Messages[1].Parts
+	if len(codeParts) != 3 || codeParts[0].Type != provider.PartToolUse || codeParts[1].Type != provider.PartToolResult || codeParts[2].Type != provider.PartText {
+		t.Fatalf("code context should inherit Work tool history: %+v", codeParts)
 	}
 }
 

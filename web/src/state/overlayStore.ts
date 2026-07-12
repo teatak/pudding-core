@@ -51,6 +51,8 @@ export type AssistantOverlayPart =
       name?: string;
       argsText: string;
       phase?: "streaming_args" | "running" | "ok" | "error";
+      liveStdout?: string;
+      liveStderr?: string;
       resultContent?: string;
       resultOk?: boolean;
       summary?: string;
@@ -222,13 +224,25 @@ function upsertToolPart(
   const index = parts.findIndex((part) => part.type === "tool" && part.callID === callID);
   const current: Extract<AssistantOverlayPart, { type: "tool" }> =
     index >= 0 && parts[index].type === "tool" ? parts[index] : { type: "tool", callID, argsText: "" };
+  const outputEvent = event.phase === "output";
+  const finished = event.phase === "ok" || event.phase === "error";
   const next: AssistantOverlayPart = {
     ...current,
     callID,
     name: event.name || current.name,
-    phase: event.phase || current.phase,
-    resultContent: event.content ?? current.resultContent,
+    phase: event.phase === "output" ? current.phase || "running" : event.phase || current.phase,
+    resultContent: outputEvent ? current.resultContent : event.content ?? current.resultContent,
     resultOk: event.ok ?? current.resultOk,
+    liveStdout: finished
+      ? undefined
+      : event.stream === "stdout"
+        ? appendLiveToolOutput(current.liveStdout, event.content)
+        : current.liveStdout,
+    liveStderr: finished
+      ? undefined
+      : event.stream === "stderr"
+        ? appendLiveToolOutput(current.liveStderr, event.content)
+        : current.liveStderr,
     summary: event.summary || current.summary,
     summaryKind: event.summaryKind || current.summaryKind,
     summaryCount: event.summaryCount ?? current.summaryCount,
@@ -239,6 +253,15 @@ function upsertToolPart(
     return [...parts, next];
   }
   return parts.map((part, i) => (i === index ? next : part));
+}
+
+function appendLiveToolOutput(current = "", incoming = "") {
+  const maxChars = 1_100_000;
+  const combined = current + incoming;
+  if (combined.length <= maxChars) {
+    return combined;
+  }
+  return combined.slice(0, maxChars) + "\n... live output truncated ...\n";
 }
 
 function mergeToolAttachments(current: Attachment[] | undefined, incoming: Attachment[] | undefined) {
@@ -396,6 +419,9 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       if (event.kind === "audio.bindings" || event.kind === "audio.input_level") {
         return state;
       }
+      if (event.kind === "process.started" || event.kind === "process.finished" || event.kind === "process.stopped" || event.kind === "process.removed") {
+        return state;
+      }
       if (event.kind === "input.queued" || event.kind === "input.updated") {
         const lastEventSeqs = recordEventSeq(state.lastEventSeqs, event);
         if (event.status === "cancelled" || event.status === "promoted") {
@@ -496,7 +522,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
         let phase: TurnPhaseState["phase"] = "awaiting_followup";
         if (event.phase === "streaming_args") {
           phase = "streaming_tool_args";
-        } else if (event.phase === "running") {
+        } else if (event.phase === "running" || event.phase === "output") {
           phase = "executing_tool";
         } else if (event.phase === "error") {
           phase = "error";

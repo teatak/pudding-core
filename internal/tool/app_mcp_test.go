@@ -13,6 +13,28 @@ import (
 	"github.com/teatak/pudding-core/internal/app"
 )
 
+func TestAppMCPProviderToolNameUsesToolAndHash(t *testing.T) {
+	binding := &app.EndpointBinding{
+		AppID:        "sequential-thinking",
+		EndpointName: "sequential_thinking_mcp",
+	}
+	got := appMCPProviderToolName(binding, "sequentialthinking")
+	if want := "app_mcp__sequentialthinking__66e7fc2f"; got != want {
+		t.Fatalf("unexpected provider tool name: got %q want %q", got, want)
+	}
+
+	otherConnection := *binding
+	otherConnection.ConnectionID = "secondary"
+	if other := appMCPProviderToolName(&otherConnection, "sequentialthinking"); other == got {
+		t.Fatalf("connection must contribute to provider tool name hash: %q", other)
+	}
+
+	longName := appMCPProviderToolName(binding, strings.Repeat("tool", 20))
+	if len(longName) != appMCPMaxToolNameLen {
+		t.Fatalf("long provider tool name must be capped at %d bytes: %q (%d)", appMCPMaxToolNameLen, longName, len(longName))
+	}
+}
+
 func TestAppMCPRunnerDiscoversAndCallsStreamableHTTPTool(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()

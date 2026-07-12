@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -132,8 +133,31 @@ func Start(opts Options) (*Daemon, error) {
 	camera := desktopcamera.New()
 	screen := desktopscreen.New()
 	languageServers := lsp.NewManager()
+	backgroundProcessEvents := func(processEvent tool.BackgroundProcessEvent) {
+		kind := event.ProcessFinished
+		switch processEvent.Phase {
+		case tool.BackgroundProcessStarted:
+			kind = event.ProcessStarted
+		case tool.BackgroundProcessStopped:
+			kind = event.ProcessStopped
+		case tool.BackgroundProcessRemoved:
+			kind = event.ProcessRemoved
+		}
+		payload, err := json.Marshal(processEvent.Process)
+		if err != nil {
+			slog.Warn("daemon: encode background process event", "err", err)
+			return
+		}
+		hub.Publish(event.Event{
+			SessionID: processEvent.SessionID,
+			Kind:      kind,
+			TurnID:    processEvent.Process.TurnID,
+			CallID:    processEvent.Process.CallID,
+			Payload:   payload,
+		})
+	}
 	tools := tool.NewMultiRunner(
-		tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithBrowserState(st), tool.WithHomeDir(dir), tool.WithBrowser(browserService), tool.WithLanguageService(languageServers), tool.WithCamera(camera), tool.WithDesktopScreen(screen)),
+		tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithBrowserState(st), tool.WithHomeDir(dir), tool.WithBrowser(browserService), tool.WithLanguageService(languageServers), tool.WithCamera(camera), tool.WithDesktopScreen(screen), tool.WithBackgroundProcessEvents(backgroundProcessEvents)),
 		browserMCP,
 		appMCP,
 	)

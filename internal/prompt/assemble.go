@@ -25,8 +25,11 @@ var coreSystemPrompt string
 //go:embed assets/mode_chat.md
 var chatModePrompt string
 
-//go:embed assets/mode_project.md
-var projectModePrompt string
+//go:embed assets/mode_work.md
+var workModePrompt string
+
+//go:embed assets/mode_code.md
+var codeModePrompt string
 
 type Segment struct {
 	ID      string
@@ -118,8 +121,10 @@ func Assemble(input Input) Output {
 	if seg := skillsSegment(input.Skills, input.Home); seg != nil {
 		segments = append(segments, *seg)
 	}
-	if seg := appsSegment(input.Apps, input.AppConnections); seg != nil {
-		segments = append(segments, *seg)
+	if normalizeMode(input.Mode) != "chat" {
+		if seg := appsSegment(input.Apps, input.AppConnections); seg != nil {
+			segments = append(segments, *seg)
+		}
 	}
 	if user := strings.TrimSpace(input.UserInstruction); user != "" {
 		segments = append(segments, Segment{
@@ -166,7 +171,7 @@ func appsSegment(list []*app.Definition, connections []*app.Connection) *Segment
 	b.WriteString("Installed apps provide configured endpoints and app-scoped skills when they are connected or do not require a connection.\n")
 	b.WriteString("Apps marked `not connected` are installed but not usable yet; do not call their endpoints or load their app skills until a connection is added.\n")
 	if hasUsable {
-		b.WriteString("REST and GraphQL endpoint calls use configured app connections. Use the listed REST endpoint names with `builtin_rest_request` and GraphQL endpoint names with `builtin_graphql_request`; omit `connection` unless the tool reports multiple configured connections. MCP endpoints are exposed as dedicated app MCP tools when their server is reachable, not through REST or GraphQL tools.\n")
+		b.WriteString("REST and GraphQL endpoint calls use configured app connections. Load `work.api`, then use the listed REST endpoint names with `builtin_rest_request` and GraphQL endpoint names with `builtin_graphql_request`; omit `connection` unless the tool reports multiple configured connections. Reachable MCP endpoints appear as `app.*` toolkits; load the matching app toolkit instead of routing them through REST or GraphQL tools.\n")
 		b.WriteString("Full app SKILL.md bodies are not loaded by default. When an app skill matches, call `builtin_skill_read(app_id=\"<app id>\", skill_id=\"<skill id>\")` once, then follow the returned instructions.\n")
 		b.WriteString("Do not proactively load untriggered app skills.\n")
 	}
@@ -345,8 +350,10 @@ func appSkillRealPath(def *app.Definition, ref app.SkillRef) string {
 
 func modePrompt(mode string) string {
 	switch normalizeMode(mode) {
-	case "project":
-		return projectModePrompt
+	case "code":
+		return codeModePrompt
+	case "work":
+		return workModePrompt
 	case "chat":
 		fallthrough
 	default:
@@ -356,8 +363,10 @@ func modePrompt(mode string) string {
 
 func normalizeMode(mode string) string {
 	switch strings.TrimSpace(strings.ToLower(mode)) {
-	case "project":
-		return "project"
+	case "code":
+		return "code"
+	case "work":
+		return "work"
 	case "chat":
 		fallthrough
 	default:

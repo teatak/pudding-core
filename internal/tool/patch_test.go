@@ -68,7 +68,7 @@ func TestPatchProposalDoesNotWriteBeforeApply(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if details["diff"] != payload.Diff || details["fileCount"] != 3 {
+	if details["diff"] != payload.Diff || details["fileCount"] != 3 || details["destructive"] != true {
 		t.Fatalf("approval details must carry the review diff: %+v", details)
 	}
 	paths, _ := details["paths"].([]string)

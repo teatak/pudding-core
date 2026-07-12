@@ -18,7 +18,6 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { clearLegacyAppSettingsPreference } from "@/hooks/useAppSettingsMigration";
 import { useI18n } from "@/i18n";
 import { SETTINGS_KEYS, settingsWithDefaults } from "@/lib/appSettings";
 import { cn } from "@/lib/utils";
@@ -110,7 +109,6 @@ export function GeneralSettings({
     mutationFn: () => resetSettings(token),
     onSuccess: async (response) => {
       setResetOpen(false);
-      clearLegacyAppSettingsPreference();
       queryClient.setQueryData(queryKeys.settings(), response);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.settings() }),

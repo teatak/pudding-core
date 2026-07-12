@@ -45,7 +45,16 @@ func TestNormalizeAgentModeRejectsLegacyWorkspace(t *testing.T) {
 	if mode := NormalizeAgentMode(AgentMode("workspace")); mode != "" {
 		t.Fatalf("legacy workspace mode must be rejected, got %q", mode)
 	}
-	if mode := NormalizeAgentMode(ModeProject); mode != ModeProject {
-		t.Fatalf("project mode must remain valid, got %q", mode)
+	if mode := NormalizeAgentMode(AgentMode("project")); mode != "" {
+		t.Fatalf("legacy project mode must be rejected, got %q", mode)
+	}
+	if mode := NormalizeAgentMode(ModeWork); mode != ModeWork {
+		t.Fatalf("work mode must remain valid, got %q", mode)
+	}
+	if mode := NormalizeAgentMode(ModeCode); mode != ModeCode {
+		t.Fatalf("code mode must remain valid, got %q", mode)
+	}
+	if AgentModeRank(ModeChat) >= AgentModeRank(ModeWork) || AgentModeRank(ModeWork) >= AgentModeRank(ModeCode) {
+		t.Fatalf("agent mode ordering must be chat < work < code")
 	}
 }

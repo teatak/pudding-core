@@ -63,7 +63,7 @@ func newGitWriteError(reason, detail string) error {
 
 func RequiresApprovalDetails(name string) bool {
 	switch name {
-	case PatchApply, GitStage, GitUnstage, GitCommit:
+	case CommandRun, CommandStart, PatchApply, GitStage, GitUnstage, GitCommit:
 		return true
 	default:
 		return false

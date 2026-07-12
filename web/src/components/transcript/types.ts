@@ -78,6 +78,8 @@ export type TurnPartVM =
       dotPhase?: TurnPhaseState["phase"];
       id?: string;
       key?: string;
+      liveStderr?: string;
+      liveStdout?: string;
       name?: string;
       phase?: "streaming_args" | "running" | "ok" | "error";
       phaseUpdatedAt?: string;

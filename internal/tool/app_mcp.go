@@ -262,7 +262,7 @@ func (r *AppMCPRunner) discoverBinding(ctx context.Context, binding *app.Endpoin
 			Name:        name,
 			Description: description,
 			InputSchema: appMCPInputSchema(inputSchema),
-			Capability:  store.ModeChat,
+			Capability:  store.ModeWork,
 		})
 		tools = append(tools, appMCPDiscoveredTool{
 			binding:    cloneAppMCPBinding(binding),
@@ -1080,19 +1080,11 @@ func validAppMCPHeaderName(name string) bool {
 }
 
 func appMCPProviderToolName(binding *app.EndpointBinding, remoteName string) string {
-	appID := appMCPSanitizeNameSegment(binding.AppID, 10)
-	endpoint := appMCPSanitizeNameSegment(binding.EndpointName, 14)
-	tool := appMCPSanitizeNameSegment(remoteName, 24)
+	// Keep provider-visible names compact; app, connection, and endpoint identity remain in the hash.
 	hash := appMCPToolHash(binding, remoteName)
-	name := appMCPToolPrefix + appID + "__" + endpoint + "__" + tool + "__" + hash
-	if len(name) <= appMCPMaxToolNameLen {
-		return name
-	}
-	over := len(name) - appMCPMaxToolNameLen
-	if len(tool) > over+3 {
-		tool = strings.TrimRight(tool[:len(tool)-over], "_")
-	}
-	return appMCPToolPrefix + appID + "__" + endpoint + "__" + tool + "__" + hash
+	maxToolLen := appMCPMaxToolNameLen - len(appMCPToolPrefix) - len("__") - len(hash)
+	tool := appMCPSanitizeNameSegment(remoteName, maxToolLen)
+	return appMCPToolPrefix + tool + "__" + hash
 }
 
 func appMCPSanitizeNameSegment(value string, maxLen int) string {

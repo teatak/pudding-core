@@ -3,7 +3,7 @@
 // 本目录在轨道 E 脚手架落地后由前端直接 import。
 import { z } from "zod";
 
-import { attachment } from "./api";
+import { attachment, backgroundProcess } from "./api";
 
 export const turnStartedEvent = z.object({
   kind: z.literal("turn.started"),
@@ -30,8 +30,9 @@ export const turnToolEvent = z.object({
   turnID: z.string(),
   callID: z.string(),
   name: z.string().optional(),
-  phase: z.enum(["streaming_args", "running", "ok", "error"]),
+  phase: z.enum(["streaming_args", "running", "output", "ok", "error"]),
   argsDelta: z.string().optional(),
+  stream: z.enum(["stdout", "stderr"]).optional(),
   ok: z.boolean().optional(),
   content: z.string().optional(),
   summary: z.string().optional(),
@@ -126,6 +127,33 @@ export const approvalResolvedEvent = z.object({
   payload: z.unknown().optional(),
 });
 
+const backgroundProcessEventFields = {
+  sessionID: z.string(),
+  turnID: z.string().optional(),
+  callID: z.string().optional(),
+  payload: backgroundProcess,
+};
+
+export const processStartedEvent = z.object({
+  kind: z.literal("process.started"),
+  ...backgroundProcessEventFields,
+});
+
+export const processFinishedEvent = z.object({
+  kind: z.literal("process.finished"),
+  ...backgroundProcessEventFields,
+});
+
+export const processStoppedEvent = z.object({
+  kind: z.literal("process.stopped"),
+  ...backgroundProcessEventFields,
+});
+
+export const processRemovedEvent = z.object({
+  kind: z.literal("process.removed"),
+  ...backgroundProcessEventFields,
+});
+
 // session.titled 不落库、无 seq:自动标题写回(provisional / LLM 各一次),
 // 丢失由 sessions 轮询兜底
 export const sessionTitledEvent = z.object({
@@ -152,6 +180,10 @@ export const sessionEvent = z.discriminatedUnion("kind", [
   audioInputLevelEvent,
   approvalRequestedEvent,
   approvalResolvedEvent,
+  processStartedEvent,
+  processFinishedEvent,
+  processStoppedEvent,
+  processRemovedEvent,
   sessionTitledEvent,
   pingEvent,
 ]);

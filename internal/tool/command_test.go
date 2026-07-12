@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -16,6 +20,8 @@ import (
 type commandPayload struct {
 	OK                 bool                `json:"ok"`
 	Argv               []string            `json:"argv"`
+	Script             string              `json:"script"`
+	Shell              string              `json:"shell"`
 	CWD                string              `json:"cwd"`
 	ExitCode           int                 `json:"exitCode"`
 	Stdout             string              `json:"stdout"`
@@ -55,6 +61,67 @@ func TestCommandRunUsesProjectCWDAndCapturesOutput(t *testing.T) {
 	}
 	if payload.CWD != resolvedCWD || !strings.Contains(payload.Stdout, resolvedCWD) || !strings.Contains(payload.Stderr, "helper stderr") {
 		t.Fatalf("unexpected command output: %+v", payload)
+	}
+}
+
+func TestCommandRunExecutesFixedShellScript(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix shell syntax")
+	}
+	res := commandTestCall(context.Background(), t.TempDir(), map[string]any{
+		"scope":  "project",
+		"script": `printf "shell-out" | tr 'a-z' 'A-Z'; printf "shell-err" >&2`,
+	})
+	payload := decodeCommandPayload(t, res)
+	if !res.Ok || !payload.OK || payload.ExitCode != 0 || payload.Shell != "sh" || payload.Stdout != "SHELL-OUT" || payload.Stderr != "shell-err" {
+		t.Fatalf("fixed shell script failed: result=%+v payload=%+v", res, payload)
+	}
+	if payload.Script == "" || len(payload.Argv) != 0 || payload.VerificationKind != "" {
+		t.Fatalf("script result must preserve script without direct-command verification: %+v", payload)
+	}
+}
+
+func TestCommandRunRequiresExactlyOneCommandInput(t *testing.T) {
+	root := t.TempDir()
+	for _, args := range []map[string]any{
+		{"scope": "project"},
+		{"scope": "project", "argv": commandHelperArgs("report"), "script": "printf duplicate"},
+	} {
+		res := commandTestCall(context.Background(), root, args)
+		if res.Ok || !strings.Contains(res.Content, "exactly one of argv or script is required") {
+			t.Fatalf("invalid command input must be rejected: args=%+v result=%+v", args, res)
+		}
+	}
+}
+
+func TestCommandRunStreamsStdoutAndStderr(t *testing.T) {
+	var mu sync.Mutex
+	progress := make([]Progress, 0, 2)
+	ctx := WithProgressSink(context.Background(), func(item Progress) {
+		mu.Lock()
+		progress = append(progress, item)
+		mu.Unlock()
+	})
+	res := commandTestCall(ctx, t.TempDir(), map[string]any{
+		"scope": "project",
+		"argv":  commandHelperArgs("report"),
+	})
+	if !res.Ok {
+		t.Fatalf("command failed: %+v", res)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	var stdout, stderr string
+	for _, item := range progress {
+		switch item.Stream {
+		case ProgressStdout:
+			stdout += item.Content
+		case ProgressStderr:
+			stderr += item.Content
+		}
+	}
+	if stdout == "" || stderr != "helper stderr" {
+		t.Fatalf("missing live command output: %+v", progress)
 	}
 }
 
@@ -241,6 +308,21 @@ func TestCommandHelperProcess(t *testing.T) {
 	case "sleep":
 		ms, _ := strconv.Atoi(args[1])
 		time.Sleep(time.Duration(ms) * time.Millisecond)
+	case "background-stream":
+		fmt.Fprintln(os.Stdout, "ready")
+		fmt.Fprintln(os.Stderr, "warning")
+		time.Sleep(500 * time.Millisecond)
+		fmt.Fprintln(os.Stdout, "done")
+	case "http-server":
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		fmt.Fprintln(os.Stdout, "LISTEN "+listener.Addr().String())
+		_ = http.Serve(listener, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("ok"))
+		}))
 	case "spawn-child":
 		child := exec.Command(os.Args[0], "-test.run=^TestCommandHelperProcess$", "--", "write-after", args[1])
 		if err := child.Start(); err != nil {

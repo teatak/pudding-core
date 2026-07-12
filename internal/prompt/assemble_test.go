@@ -88,7 +88,7 @@ func TestAssembleIncludesAppsIndex(t *testing.T) {
 	appPath := filepath.Join(t.TempDir(), "apps", "github", app.AppFileName)
 	realSkillPath := filepath.Join(filepath.Dir(appPath), "skills", "issues", "SKILL.md")
 	out := Assemble(Input{
-		Mode: "chat",
+		Mode: "work",
 		Apps: []*app.Definition{
 			{
 				ID:          "github",
@@ -131,7 +131,7 @@ func TestAssembleIncludesAppsIndex(t *testing.T) {
 
 func TestAssembleSummarizesUnconnectedApp(t *testing.T) {
 	out := Assemble(Input{
-		Mode: "chat",
+		Mode: "work",
 		Apps: []*app.Definition{
 			{
 				ID:          "github",
@@ -162,7 +162,7 @@ func TestAssembleSummarizesUnconnectedApp(t *testing.T) {
 
 func TestAssembleShowsConnectedAppFully(t *testing.T) {
 	out := Assemble(Input{
-		Mode: "chat",
+		Mode: "work",
 		Apps: []*app.Definition{
 			{
 				ID:          "github",
@@ -191,7 +191,7 @@ func TestAssembleShowsConnectedAppFully(t *testing.T) {
 
 func TestAssembleShowsConnectionlessSkillsOnlyAppFully(t *testing.T) {
 	out := Assemble(Input{
-		Mode: "chat",
+		Mode: "work",
 		Apps: []*app.Definition{
 			{
 				ID:          "notebook-helper",
@@ -212,6 +212,31 @@ func TestAssembleShowsConnectionlessSkillsOnlyAppFully(t *testing.T) {
 	if !strings.Contains(out.SystemInstruction, "Skill `notebook-review`") {
 		t.Fatalf("connectionless skills-only app should expose skill metadata:\n%s", out.SystemInstruction)
 	}
+}
+
+func TestAssembleModeLayersAndChatHidesApps(t *testing.T) {
+	apps := []*app.Definition{{ID: "github", Name: "GitHub"}}
+	chat := Assemble(Input{Mode: "chat", Apps: apps})
+	if strings.Contains(chat.SystemInstruction, "## Installed Apps") {
+		t.Fatalf("chat prompt must not expose installed apps:\n%s", chat.SystemInstruction)
+	}
+	work := Assemble(Input{Mode: "work", Apps: apps})
+	if !strings.Contains(work.SystemInstruction, "## Work Mode") || !hasSegment(work.Segments, "mode_work") || !hasSegment(work.Segments, "apps_index") {
+		t.Fatalf("work prompt missing mode or apps segments: %+v", work.Segments)
+	}
+	code := Assemble(Input{Mode: "code", Apps: apps})
+	if !strings.Contains(code.SystemInstruction, "## Code Mode") || !hasSegment(code.Segments, "mode_code") || !hasSegment(code.Segments, "apps_index") {
+		t.Fatalf("code prompt missing mode or apps segments: %+v", code.Segments)
+	}
+}
+
+func hasSegment(segments []Segment, id string) bool {
+	for _, segment := range segments {
+		if segment.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func TestLoaderIncludesBuiltinSkillsIndex(t *testing.T) {

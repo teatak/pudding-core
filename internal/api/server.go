@@ -181,6 +181,8 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/turns").GET(s.listTurns)
 	app.Route("/sessions/:id/turns/:turnID").GET(s.getTurn)
 	app.Route("/sessions/:id/messages").GET(s.listMessages)
+	app.Route("/sessions/:id/processes").GET(s.listBackgroundProcesses)
+	app.Route("/sessions/:id/processes/:processID").GET(s.getBackgroundProcess).DELETE(s.stopBackgroundProcess)
 	app.Route("/sessions/:id/attachments").POST(s.uploadAttachment)
 	app.Route("/sessions/:id/attachments/*path").GET(s.getAttachment)
 	app.Route("/sessions/:id/desktop/screenshot").POST(s.desktopScreenshot)
@@ -393,12 +395,13 @@ func (s *Server) createSession(c *cart.Context) error {
 	}
 	sess := &store.Session{ID: store.NewID("sess"), Title: req.Title, Provider: req.Provider, Model: req.Model, ProjectID: req.ProjectID}
 	if req.ProjectID != "" {
-		sess.ActiveMode = store.ModeProject
+		sess.ActiveMode = store.ModeCode
 		sess.ModeLease = store.ModeLeaseSession
 	}
 	if err := s.store.CreateSession(c.Request.Context(), sess); err != nil {
 		return s.fail(c, err)
 	}
+	s.enrichSessionProcesses(sess)
 	c.JSON(http.StatusCreated, sess)
 	return nil
 }
@@ -474,6 +477,9 @@ func (s *Server) listSessions(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
+	for _, session := range sessions {
+		s.enrichSessionProcesses(session)
+	}
 	c.JSON(http.StatusOK, map[string]any{"sessions": sessions})
 	return nil
 }
@@ -484,6 +490,7 @@ func (s *Server) getSession(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
+	s.enrichSessionProcesses(sess)
 	c.JSON(http.StatusOK, sess)
 	return nil
 }
@@ -522,6 +529,7 @@ func (s *Server) patchSession(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
+	s.enrichSessionProcesses(sess)
 	c.JSON(http.StatusOK, sess)
 	return nil
 }
@@ -540,6 +548,7 @@ func (s *Server) deleteSession(c *cart.Context) error {
 	if s.terminals != nil {
 		s.terminals.CloseSession(id)
 	}
+	s.engine.ReleaseSessionResources(id)
 	if err := s.store.DeleteSession(c.Request.Context(), id); err != nil {
 		return s.fail(c, err)
 	}
@@ -805,9 +814,6 @@ func (s *Server) approveApproval(c *cart.Context) error {
 }
 
 func publicApprovalTargetMode(approval engine.ApprovalRequest) string {
-	if approval.Kind == engine.ApprovalKindCapability && approval.TargetMode == store.ModeProject {
-		return "project"
-	}
 	return string(approval.TargetMode)
 }
 

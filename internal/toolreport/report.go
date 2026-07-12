@@ -33,7 +33,8 @@ type Report struct {
 	Until            time.Time  `json:"until"`
 	TotalTurns       int        `json:"totalTurns"`
 	ChatTurns        int        `json:"chatTurns"`
-	ProjectTurns     int        `json:"projectTurns"`
+	WorkTurns        int        `json:"workTurns"`
+	CodeTurns        int        `json:"codeTurns"`
 	UnknownModeTurns int        `json:"unknownModeTurns,omitempty"`
 	Calls            int        `json:"calls"`
 	SkippedMessages  int        `json:"skippedMessages,omitempty"`
@@ -175,8 +176,10 @@ func loadTurns(ctx context.Context, db *sql.DB, options Options, report *Report)
 		switch mode {
 		case store.ModeChat:
 			report.ChatTurns++
-		case store.ModeProject:
-			report.ProjectTurns++
+		case store.ModeWork:
+			report.WorkTurns++
+		case store.ModeCode:
+			report.CodeTurns++
 		default:
 			report.UnknownModeTurns++
 		}
@@ -330,8 +333,10 @@ func aggregate(calls []*callRecord, turnCalls map[turnKey][]*callRecord, report 
 			switch required {
 			case store.ModeChat:
 				acc.stat.EligibleTurns = report.TotalTurns
-			case store.ModeProject:
-				acc.stat.EligibleTurns = report.ProjectTurns
+			case store.ModeWork:
+				acc.stat.EligibleTurns = report.WorkTurns + report.CodeTurns
+			case store.ModeCode:
+				acc.stat.EligibleTurns = report.CodeTurns
 			}
 			acc.stat.TurnCoverageRate = ratioPointer(acc.stat.Turns, acc.stat.EligibleTurns)
 		}
@@ -355,11 +360,11 @@ func aggregate(calls []*callRecord, turnCalls map[turnKey][]*callRecord, report 
 }
 
 func currentRequiredModes() map[string]store.AgentMode {
-	modes := map[string]store.AgentMode{tool.RequestCapability: store.ModeChat}
+	modes := map[string]store.AgentMode{tool.RequestCapability: store.ModeChat, tool.ToolkitLoad: store.ModeChat}
 	for _, definition := range tool.BuiltinDefinitions() {
 		mode := store.NormalizeAgentMode(definition.Capability)
 		if mode == "" {
-			mode = store.ModeProject
+			mode = store.ModeCode
 		}
 		modes[definition.Name] = mode
 	}
@@ -389,8 +394,10 @@ func percentile95(values []int) int {
 
 func toolGroup(name string) string {
 	switch {
-	case name == tool.CommandRun:
+	case strings.HasPrefix(name, "builtin_command_"):
 		return "command"
+	case name == tool.ToolkitLoad:
+		return "toolkit"
 	case name == tool.RequestCapability, strings.HasPrefix(name, "builtin_project_"):
 		return "project"
 	case strings.HasPrefix(name, "builtin_code_"):

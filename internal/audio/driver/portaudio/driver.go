@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gordonklaus/portaudio"
@@ -16,20 +17,31 @@ import (
 )
 
 const (
-	captureStopTimeout = 2 * time.Second
-	captureFrameQueue  = 16
-	deviceCloseTimeout = 2 * time.Second
-	deviceOpenAttempts = 5
-	deviceOpenRetry    = 300 * time.Millisecond
-	deviceRefreshDelay = 300 * time.Millisecond
-	deviceWatchEvery   = 500 * time.Millisecond
+	captureStopTimeout     = 2 * time.Second
+	captureFrameQueue      = 16
+	captureStallAfter      = 2 * time.Second
+	capturePressureLogStep = 100
+	deviceCloseTimeout     = 2 * time.Second
+	deviceOpenAttempts     = 5
+	deviceOpenRetry        = 300 * time.Millisecond
+	deviceRefreshDelay     = 300 * time.Millisecond
+	deviceWatchEvery       = 500 * time.Millisecond
 )
+
+var captureClockOrigin = time.Now()
 
 type Config struct {
 	Format       frame.Format
 	InputFormat  frame.Format
 	OutputFormat frame.Format
 	FrameMillis  int
+}
+
+type captureHealth struct {
+	startedAt    atomic.Int64
+	lastCallback atomic.Int64
+	overflows    atomic.Uint64
+	queueDrops   atomic.Uint64
 }
 
 type Driver struct {
@@ -39,20 +51,23 @@ type Driver struct {
 	frameMillis  int
 	initialized  bool
 
-	stream          *portaudio.Stream
-	captureCtx      context.Context
-	captureHandler  driver.CaptureHandler
-	stop            chan struct{}
-	done            chan struct{}
-	closeCapture    func()
-	deviceName      string
-	playbackStream  *portaudio.Stream
-	playbackBuffer  []int16
-	playbackReady   bool
-	playbackDevName string
-	needsRefresh    bool
-	watcherStop     chan struct{}
-	watcherDone     chan struct{}
+	stream             *portaudio.Stream
+	captureCtx         context.Context
+	captureHandler     driver.CaptureHandler
+	stop               chan struct{}
+	done               chan struct{}
+	closeCapture       func()
+	deviceName         string
+	captureHealth      *captureHealth
+	reportedOverflows  uint64
+	reportedQueueDrops uint64
+	playbackStream     *portaudio.Stream
+	playbackBuffer     []int16
+	playbackReady      bool
+	playbackDevName    string
+	needsRefresh       bool
+	watcherStop        chan struct{}
+	watcherDone        chan struct{}
 }
 
 func New(cfg Config) *Driver {
@@ -150,9 +165,10 @@ func (d *Driver) StartCapture(ctx context.Context, onFrame driver.CaptureHandler
 	}
 	if d.stream != nil {
 		captureDied := d.done != nil && isClosed(d.done)
+		captureStalled := d.captureHealth == nil || d.captureHealth.stalled(captureClockNow())
 		captureChanged := d.deviceName != "" && defaultInputChanged(d.deviceName)
 		coreAudioChanged := coreAudioDeviceChanged()
-		if !d.needsRefresh && !captureDied && !captureChanged && !coreAudioChanged {
+		if !d.needsRefresh && !captureDied && !captureStalled && !captureChanged && !coreAudioChanged {
 			slog.Info("portaudio capture: already running", "device", d.deviceName)
 			return nil
 		}
@@ -163,6 +179,7 @@ func (d *Driver) StartCapture(ctx context.Context, onFrame driver.CaptureHandler
 			"device", d.deviceName,
 			"pending", d.needsRefresh,
 			"captureDied", captureDied,
+			"captureStalled", captureStalled,
 			"captureChanged", captureChanged,
 			"coreAudioChanged", coreAudioChanged,
 		)
@@ -318,8 +335,9 @@ func (d *Driver) StopPlayback(context.Context) error {
 	return nil
 }
 
-func (d *Driver) captureLoop(ctx context.Context, frames <-chan []int16, stop <-chan struct{}, done chan<- struct{}, onFrame driver.CaptureHandler) {
+func (d *Driver) captureLoop(ctx context.Context, frames <-chan []int16, stop <-chan struct{}, done chan<- struct{}, onFrame driver.CaptureHandler, health *captureHealth) {
 	defer close(done)
+	firstFrame := true
 	for {
 		select {
 		case <-ctx.Done():
@@ -327,6 +345,15 @@ func (d *Driver) captureLoop(ctx context.Context, frames <-chan []int16, stop <-
 		case <-stop:
 			return
 		case samples := <-frames:
+			if firstFrame {
+				firstFrame = false
+				startupDelay := time.Duration(captureClockNow() - health.startedAt.Load())
+				slog.Info(
+					"portaudio capture: first frame received",
+					"startupDelay", startupDelay,
+					"overflows", health.overflows.Load(),
+				)
+			}
 			onFrame(frame.PCM16{
 				Format:    d.inputFormat,
 				Data:      int16ToBytes(samples),
@@ -355,16 +382,9 @@ func (d *Driver) openCaptureLocked() error {
 	params.SampleRate = float64(d.inputFormat.SampleRate)
 	params.FramesPerBuffer = framesPerBuffer
 	frameCh := make(chan []int16, captureFrameQueue)
+	health := &captureHealth{}
 	stream, err := portaudio.OpenStream(params, func(in []int16, _ portaudio.StreamCallbackTimeInfo, flags portaudio.StreamCallbackFlags) {
-		if flags&portaudio.InputOverflow != 0 {
-			return
-		}
-		samples := make([]int16, len(in))
-		copy(samples, in)
-		select {
-		case frameCh <- samples:
-		default:
-		}
+		enqueueCaptureFrame(health, frameCh, in, flags, captureClockNow())
 	})
 	if err != nil {
 		return fmt.Errorf("open capture device %q: %w", dev.Name, err)
@@ -373,6 +393,7 @@ func (d *Driver) openCaptureLocked() error {
 		_ = stream.Close()
 		return fmt.Errorf("start capture device %q: %w", dev.Name, err)
 	}
+	health.startedAt.Store(captureClockNow())
 	deviceName := dev.Name
 
 	stop := make(chan struct{})
@@ -383,7 +404,10 @@ func (d *Driver) openCaptureLocked() error {
 	d.done = done
 	d.closeCapture = closeCapture
 	d.deviceName = deviceName
-	go d.captureLoop(d.captureCtx, frameCh, stop, done, d.captureHandler)
+	d.captureHealth = health
+	d.reportedOverflows = 0
+	d.reportedQueueDrops = 0
+	go d.captureLoop(d.captureCtx, frameCh, stop, done, d.captureHandler, health)
 	slog.Info(
 		"portaudio capture: started",
 		"device", deviceName,
@@ -539,6 +563,7 @@ func (d *Driver) detachCaptureLocked() (*portaudio.Stream, chan struct{}, chan s
 	d.done = nil
 	d.closeCapture = nil
 	d.deviceName = ""
+	d.captureHealth = nil
 	return stream, stop, done, closeCapture
 }
 
@@ -691,7 +716,11 @@ func (d *Driver) checkDeviceChange() {
 	captureChanged := d.captureHandler != nil && d.deviceName != "" && defaultInputChanged(d.deviceName)
 	playbackChanged := d.playbackReady && d.playbackDevName != "" && defaultOutputChanged(d.playbackDevName)
 	coreAudioChanged := coreAudioDeviceChanged()
-	if !d.needsRefresh && !captureDied && !captureMissing && !playbackMissing && !captureChanged && !playbackChanged && !coreAudioChanged {
+	captureStalled := d.captureHandler != nil && d.stream != nil && (d.captureHealth == nil || d.captureHealth.stalled(captureClockNow()))
+	if d.captureHandler != nil {
+		d.logCapturePressureLocked()
+	}
+	if !d.needsRefresh && !captureDied && !captureMissing && !captureStalled && !playbackMissing && !captureChanged && !playbackChanged && !coreAudioChanged {
 		return
 	}
 	slog.Info(
@@ -699,12 +728,65 @@ func (d *Driver) checkDeviceChange() {
 		"pending", d.needsRefresh,
 		"captureDied", captureDied,
 		"captureMissing", captureMissing,
+		"captureStalled", captureStalled,
 		"captureChanged", captureChanged,
 		"playbackMissing", playbackMissing,
 		"playbackChanged", playbackChanged,
 		"coreAudioChanged", coreAudioChanged,
 	)
 	_, _ = d.fallbackRefreshOpenLocked("device change")
+}
+
+func captureClockNow() int64 {
+	return time.Since(captureClockOrigin).Nanoseconds() + 1
+}
+
+func enqueueCaptureFrame(health *captureHealth, frameCh chan<- []int16, in []int16, flags portaudio.StreamCallbackFlags, now int64) {
+	if flags&portaudio.InputOverflow != 0 {
+		// Overflow means samples before this buffer were lost; the current
+		// buffer is still valid and must continue through the capture pipeline.
+		health.overflows.Add(1)
+	}
+	if len(in) == 0 {
+		return
+	}
+	health.lastCallback.Store(now)
+	samples := make([]int16, len(in))
+	copy(samples, in)
+	select {
+	case frameCh <- samples:
+	default:
+		health.queueDrops.Add(1)
+	}
+}
+
+func (d *Driver) logCapturePressureLocked() {
+	if d.captureHealth == nil {
+		return
+	}
+	overflows := d.captureHealth.overflows.Load()
+	queueDrops := d.captureHealth.queueDrops.Load()
+	overflowReportDue := overflows > 0 && (d.reportedOverflows == 0 || overflows-d.reportedOverflows >= capturePressureLogStep)
+	queueDropReportDue := queueDrops > 0 && (d.reportedQueueDrops == 0 || queueDrops-d.reportedQueueDrops >= capturePressureLogStep)
+	if overflowReportDue || queueDropReportDue {
+		slog.Warn(
+			"portaudio capture: input pressure detected",
+			"device", d.deviceName,
+			"overflows", overflows,
+			"queueDrops", queueDrops,
+		)
+		d.reportedOverflows = overflows
+		d.reportedQueueDrops = queueDrops
+	}
+}
+
+func (h *captureHealth) stalled(now int64) bool {
+	startedAt := h.startedAt.Load()
+	if startedAt <= 0 || now-startedAt < captureStallAfter.Nanoseconds() {
+		return false
+	}
+	lastCallback := h.lastCallback.Load()
+	return lastCallback <= 0 || now-lastCallback >= captureStallAfter.Nanoseconds()
 }
 
 func defaultInputChanged(current string) bool {

@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { openFilePreview } from "@/state/filePreviewStore";
 
 const commandToolName = "builtin_command_run";
+const backgroundProcessToolNames = new Set(["builtin_command_start", "builtin_command_poll", "builtin_command_stop"]);
 const projectInspectToolName = "builtin_project_inspect";
 const projectInstructionsToolName = "builtin_project_instructions";
 const languageCodeToolNames = new Set([
@@ -54,7 +55,7 @@ type Translator = (key: string) => string;
 type UnknownRecord = Record<string, unknown>;
 
 export function isCodeToolName(name: string) {
-  return name === commandToolName || name === projectInspectToolName || name === projectInstructionsToolName || languageCodeToolNames.has(name) || gitToolNames.has(name) || patchToolNames.has(name) || fileToolNames.has(name);
+  return name === commandToolName || backgroundProcessToolNames.has(name) || name === projectInspectToolName || name === projectInstructionsToolName || languageCodeToolNames.has(name) || gitToolNames.has(name) || patchToolNames.has(name) || fileToolNames.has(name);
 }
 
 export function codeToolSummary(name: string, args: unknown, result: unknown, t: Translator) {
@@ -83,6 +84,16 @@ export function codeToolSummary(name: string, args: unknown, result: unknown, t:
     }
     const argv = readStringArray(output, "argv") || readStringArray(input, "argv");
     return argv ? compactText(formatArgv(argv), 100) : "";
+  }
+  if (backgroundProcessToolNames.has(name)) {
+    const status = readString(output, "status");
+    const processID = readString(output, "processID");
+    if (status) {
+      return [processStatusLabel(status, t), processID ? compactText(processID, 24) : ""].filter(Boolean).join(" · ");
+    }
+    const script = readString(input, "script");
+    const argv = readStringArray(input, "argv");
+    return compactText(script || (argv ? formatArgv(argv) : ""), 100);
   }
   if (name === projectInspectToolName) {
     const languages = readRecordArray(output, "languages").map((item) => readString(item, "name")).filter(Boolean);
@@ -151,12 +162,16 @@ export function codeToolSummary(name: string, args: unknown, result: unknown, t:
 export function CodeToolDetails({
   args,
   callID,
+  liveStderr,
+  liveStdout,
   name,
   result,
   sessionID,
 }: {
   args: unknown;
   callID?: string;
+  liveStderr?: string;
+  liveStdout?: string;
   name: string;
   result: unknown;
   sessionID?: string;
@@ -166,7 +181,9 @@ export function CodeToolDetails({
   const output = toRecord(result);
   let body: ReactNode;
   if (name === commandToolName) {
-    body = <CommandDetails callID={callID} input={input} output={output} sessionID={sessionID} t={t} />;
+    body = <CommandDetails callID={callID} input={input} liveStderr={liveStderr} liveStdout={liveStdout} output={output} sessionID={sessionID} t={t} />;
+  } else if (backgroundProcessToolNames.has(name)) {
+    body = <BackgroundProcessDetails input={input} output={output} t={t} />;
   } else if (name === projectInspectToolName) {
     body = <ProjectInspectDetails output={output} t={t} />;
   } else if (name === projectInstructionsToolName) {
@@ -187,6 +204,65 @@ export function CodeToolDetails({
     body = <FileDetails callID={callID} input={input} name={name} output={output} locale={locale} sessionID={sessionID} t={t} />;
   }
   return <>{body}</>;
+}
+
+function BackgroundProcessDetails({ input, output, t }: { input: UnknownRecord | null; output: UnknownRecord | null; t: Translator }) {
+  if (!output) {
+    return <EmptyLine>{t("transcript.codeWaitingResult")}</EmptyLine>;
+  }
+  if (output.ok === false) {
+    return <ErrorDetail output={output} t={t} />;
+  }
+  const argv = readStringArray(output, "argv") || readStringArray(input, "argv") || [];
+  const script = readString(output, "script") || readString(input, "script");
+  const command = script || formatArgv(argv);
+  const chunks = readRecordArray(output, "output");
+  const outputText = chunks.map((chunk) => readString(chunk, "content")).join("");
+  const status = readString(output, "status") || "running";
+  const processID = readString(output, "processID") || readString(input, "process_id");
+  const cwd = readString(output, "cwd");
+  const exitCode = readNumber(output, "exitCode");
+  const running = readBoolean(output, "running");
+  const StatusIcon = running ? Clock3 : status === "exited" && exitCode === 0 ? CheckCircle2 : status === "stopped" ? CheckCircle2 : CircleAlert;
+  return (
+    <div className="overflow-hidden rounded-md border border-border/70 bg-muted/20">
+      <div className="px-3 pt-2 text-[11px] font-medium text-muted-foreground">{t("transcript.codeBackgroundProcess")}</div>
+      {command ? (
+        <section className="group/process-copy relative px-3 py-2 pr-10">
+          <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-foreground/85">
+            <span className="select-none text-muted-foreground">$ </span>{command}
+          </pre>
+          <ToolHoverCopyButton className="absolute top-1.5 right-1.5 group-hover/process-copy:opacity-100" text={command} />
+        </section>
+      ) : null}
+      {chunks.length > 0 ? (
+        <section className="group/process-copy relative min-h-12 px-3 pt-1 pb-2 pr-10">
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-foreground/80">
+            {chunks.map((chunk, index) => (
+              <span key={`${readNumber(chunk, "offset") ?? index}:${index}`} className={readString(chunk, "stream") === "stderr" ? "text-destructive/85" : undefined}>
+                {readString(chunk, "content")}
+              </span>
+            ))}
+          </pre>
+          <ToolHoverCopyButton className="absolute top-1.5 right-1.5 group-hover/process-copy:opacity-100" text={outputText} />
+        </section>
+      ) : null}
+      <div className="flex min-w-0 items-center gap-3 border-t border-border/50 px-3 py-2 text-[11px] text-muted-foreground">
+        {cwd ? <code className="min-w-0 flex-1 truncate font-mono">{cwd}</code> : <span className="flex-1" />}
+        {processID ? <code className="max-w-48 shrink truncate font-mono">{processID}</code> : null}
+        <span className={cn("inline-flex shrink-0 items-center gap-1", !running && status !== "stopped" && status !== "exited" && "text-warning", status === "exited" && exitCode === 0 && "text-success")}>
+          <StatusIcon className="size-3.5" />
+          {processStatusLabel(status, t)}{exitCode != null ? ` · ${replace(t("transcript.codeExitCode"), { code: String(exitCode) })}` : ""}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function processStatusLabel(status: string, t: Translator) {
+  const key = `transcript.codeProcessStatus.${status}`;
+  const translated = t(key);
+  return translated === key ? status : translated;
 }
 
 function LanguageCodeDetails({ callID, name, output, sessionID, t }: { callID?: string; name: string; output: UnknownRecord | null; sessionID?: string; t: Translator }) {
@@ -501,11 +577,12 @@ function PatchFileList({ files, t }: { files: UnknownRecord[]; t: Translator }) 
   );
 }
 
-function CommandDetails({ callID, input, output, sessionID, t }: { callID?: string; input: UnknownRecord | null; output: UnknownRecord | null; sessionID?: string; t: Translator }) {
+function CommandDetails({ callID, input, liveStderr = "", liveStdout = "", output, sessionID, t }: { callID?: string; input: UnknownRecord | null; liveStderr?: string; liveStdout?: string; output: UnknownRecord | null; sessionID?: string; t: Translator }) {
   const argv = readStringArray(output, "argv") || readStringArray(input, "argv") || [];
+  const script = readString(output, "script") || readString(input, "script");
   const cwd = readString(output, "cwd") || readString(input, "cwd");
-  const stdout = readString(output, "stdout");
-  const stderr = readString(output, "stderr");
+  const stdout = output ? readString(output, "stdout") : liveStdout;
+  const stderr = output ? readString(output, "stderr") : liveStderr;
   const terminalOutput = joinTerminalOutput(stdout, stderr);
   const exitCode = readNumber(output, "exitCode");
   const duration = readNumber(output, "durationMs");
@@ -529,7 +606,13 @@ function CommandDetails({ callID, input, output, sessionID, t }: { callID?: stri
         : exitCode != null
           ? replace(t("transcript.codeExitCode"), { code: String(exitCode) })
           : t("transcript.codeRunning");
-  const command = formatArgv(argv);
+  const command = script || formatArgv(argv);
+  const outputRef = useRef<HTMLPreElement | null>(null);
+  useEffect(() => {
+    if (outputRef.current && !output) {
+      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    }
+  }, [output, terminalOutput]);
   return (
     <div className="overflow-hidden rounded-md border border-border/70 bg-muted/20">
       <div className="px-3 pt-2 text-[11px] font-medium text-muted-foreground">{t("transcript.codeTerminal")}</div>
@@ -542,8 +625,8 @@ function CommandDetails({ callID, input, output, sessionID, t }: { callID?: stri
         </section>
       ) : null}
       <section className="group/terminal-copy relative min-h-12 px-3 pt-1 pb-2 pr-10">
-        <pre className={cn("max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-foreground/80", toolFailed && "text-destructive/90")}>
-          {terminalOutput || t("transcript.codeNoOutput")}
+        <pre ref={outputRef} className={cn("max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-foreground/80", toolFailed && "text-destructive/90")}>
+          {terminalOutput || (output ? t("transcript.codeNoOutput") : t("transcript.codeRunning"))}
         </pre>
         <ToolHoverCopyButton className="absolute top-1.5 right-1.5 group-hover/terminal-copy:opacity-100" text={terminalOutput} />
       </section>

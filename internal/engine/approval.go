@@ -102,12 +102,16 @@ func (e *Engine) ApproveApproval(ctx context.Context, sessionID, approvalID stri
 	}
 	switch p.req.Kind {
 	case ApprovalKindCapability:
-		projectDirs = store.NormalizeProjectDirs(projectDirs)
-		if len(projectDirs) == 0 {
-			projectDirs = append([]string(nil), p.req.ProjectDirs...)
+		if p.req.TargetMode == store.ModeCode {
+			projectDirs = store.NormalizeProjectDirs(projectDirs)
+			if len(projectDirs) == 0 {
+				projectDirs = append([]string(nil), p.req.ProjectDirs...)
+			}
+			projectDirs = store.NormalizeProjectDirs(projectDirs)
+		} else {
+			projectDirs = nil
 		}
-		projectDirs = store.NormalizeProjectDirs(projectDirs)
-		if p.req.TargetMode == store.ModeProject && len(projectDirs) == 0 {
+		if p.req.TargetMode == store.ModeCode && len(projectDirs) == 0 {
 			sess, err := e.store.GetSession(ctx, sessionID)
 			if err != nil {
 				return err
@@ -120,7 +124,7 @@ func (e *Engine) ApproveApproval(ctx context.Context, sessionID, approvalID stri
 			mode := p.req.TargetMode
 			lease := store.ModeLeaseSession
 			upd := store.SessionUpdate{ActiveMode: &mode, ModeLease: &lease}
-			if p.req.TargetMode == store.ModeProject {
+			if p.req.TargetMode == store.ModeCode {
 				if len(projectDirs) > 0 {
 					project, err := e.bindSessionProject(ctx, sessionID, projectDirs)
 					if err != nil {
@@ -132,7 +136,7 @@ func (e *Engine) ApproveApproval(ctx context.Context, sessionID, approvalID stri
 			if _, err := e.store.UpdateSession(ctx, sessionID, upd); err != nil {
 				return err
 			}
-		} else if p.req.TargetMode == store.ModeProject && len(projectDirs) > 0 {
+		} else if p.req.TargetMode == store.ModeCode && len(projectDirs) > 0 {
 			e.mu.Lock()
 			grant := e.turnProjectAccess[p.req.TurnID]
 			grant.RootDirs = store.NormalizeProjectDirs(append(grant.RootDirs, projectDirs...))
@@ -289,14 +293,29 @@ func (e *Engine) requestCapabilityApproval(ctx context.Context, sessionID, turnI
 	req.ProjectDirs = store.NormalizeProjectDirs(req.ProjectDirs)
 	req.SuggestedDirName = strings.TrimSpace(req.SuggestedDirName)
 	currentMode = store.NormalizeAgentMode(currentMode)
-	if req.TargetMode != store.ModeProject {
+	if currentMode == "" {
+		currentMode = store.ModeChat
+	}
+	if req.TargetMode != store.ModeWork && req.TargetMode != store.ModeCode {
 		return capabilityToolResult(call, false, map[string]any{"ok": false, "reason": "invalid_target_mode"}), currentMode, false
 	}
-	if currentMode == store.ModeProject && len(req.ProjectDirs) == 0 && !req.NeedsProjectDir {
+	if req.TargetMode == store.ModeWork && (len(req.ProjectDirs) > 0 || req.NeedsProjectDir || req.SuggestedDirName != "") {
+		return capabilityToolResult(call, false, map[string]any{"ok": false, "reason": "project_dirs_not_allowed"}), currentMode, false
+	}
+	if currentMode == store.ModeCode && req.TargetMode == store.ModeCode && len(req.ProjectDirs) == 0 && !req.NeedsProjectDir {
 		return capabilityToolResult(call, false, map[string]any{"ok": false, "reason": "project_dirs_required"}), currentMode, false
 	}
-	if currentMode != store.ModeProject && store.AgentModeRank(req.TargetMode) <= store.AgentModeRank(currentMode) {
+	if !(currentMode == store.ModeCode && req.TargetMode == store.ModeCode) && store.AgentModeRank(req.TargetMode) <= store.AgentModeRank(currentMode) {
 		return capabilityToolResult(call, false, map[string]any{"ok": false, "reason": "target_mode_not_higher", "currentMode": currentMode, "targetMode": publicTargetMode}), currentMode, false
+	}
+	if req.TargetMode == store.ModeCode && len(req.ProjectDirs) == 0 {
+		sess, err := e.store.GetSession(ctx, sessionID)
+		if err != nil {
+			return capabilityToolResult(call, false, map[string]any{"ok": false, "reason": "session_unavailable", "error": err.Error()}), currentMode, false
+		}
+		if sess.ProjectID == "" {
+			req.NeedsProjectDir = true
+		}
 	}
 	payload := capabilityApprovalPayload(req, publicTargetMode)
 	approval := ApprovalRequest{
@@ -347,8 +366,10 @@ func (e *Engine) requestCapabilityApproval(ctx context.Context, sessionID, turnI
 
 func normalizeCapabilityTargetMode(mode store.AgentMode) (store.AgentMode, string) {
 	switch store.AgentMode(strings.TrimSpace(strings.ToLower(string(mode)))) {
-	case "project":
-		return store.ModeProject, "project"
+	case store.ModeWork:
+		return store.ModeWork, string(store.ModeWork)
+	case store.ModeCode:
+		return store.ModeCode, string(store.ModeCode)
 	default:
 		return "", ""
 	}
@@ -497,7 +518,9 @@ func (e *Engine) toolCallApprovalRequired(ctx context.Context, sessionID string,
 		switch risk.Class {
 		case tool.RiskClassRead:
 			return project, false, nil
-		case tool.RiskClassWrite, tool.RiskClassDestructive:
+		case tool.RiskClassWrite:
+			return project, !risk.LowRisk, nil
+		case tool.RiskClassDestructive:
 			return project, true, nil
 		case tool.RiskClassCommand:
 			return project, !risk.LowRisk, nil
@@ -505,6 +528,17 @@ func (e *Engine) toolCallApprovalRequired(ctx context.Context, sessionID string,
 			return project, false, nil
 		}
 	}
+}
+
+func refineToolRisk(name string, risk tool.ToolRisk, details map[string]any) tool.ToolRisk {
+	if name == tool.PatchApply {
+		if destructive, _ := details["destructive"].(bool); destructive {
+			risk.Class = tool.RiskClassDestructive
+			risk.LowRisk = false
+			risk.Summary = "Apply a patch proposal that deletes project files."
+		}
+	}
+	return risk
 }
 
 func (e *Engine) projectForToolCallPolicy(ctx context.Context, sessionID string) (*store.Project, error) {

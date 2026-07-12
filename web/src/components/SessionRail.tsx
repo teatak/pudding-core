@@ -19,6 +19,7 @@ import {
   Search,
   Rows2,
   Settings,
+  SquareTerminal,
   Trash,
 } from "lucide-react";
 import {
@@ -112,7 +113,8 @@ const popoverAlignNudgePx = 3;
 const dragAutoScrollEdgePx = 44;
 const dragAutoScrollMaxStepPx = 14;
 const collapsedSessionGroupsStorageKey = "pudding.sessionRail.collapsedGroups";
-const sessionDisplayLimit = 6;
+const sessionCollapseThreshold = 6;
+const collapsedSessionDisplayLimit = 5;
 const RailOverlayHoldContext = createContext<((id: string, open: boolean) => void) | null>(null);
 
 function useRailOverlayHold(open: boolean) {
@@ -207,7 +209,7 @@ export function SessionRail({
   }, [activeSessionIDsKey, clearSessionCompletion, completedSessions]);
   const audioInputOwner = audioBindingsQuery.data?.bindings.inputOwner;
   const backgroundSessionIDs = [
-    ...sessions.filter((session) => session.running).map((session) => session.id),
+    ...sessions.filter((session) => session.running || session.backgroundProcessCount > 0).map((session) => session.id),
     ...(audioInputOwner ? [audioInputOwner] : []),
     ...Object.entries(runningTurns)
       .filter(([, turnID]) => Boolean(turnID))
@@ -1599,11 +1601,12 @@ function SessionItems({
   if (sessions.length === 0 && showEmptyState) {
     return <SessionEmptyState />;
   }
-  const cappedSessions = showAll || draggingSessionID
+  const canCollapse = sessions.length > sessionCollapseThreshold;
+  const cappedSessions = showAll || draggingSessionID || !canCollapse
     ? sessions
-    : visibleSessionSubset(sessions, selectedSessionID, sessionDisplayLimit);
+    : visibleSessionSubset(sessions, selectedSessionID, collapsedSessionDisplayLimit);
   const visibleSessions = cappedSessions.filter((session) => session.id !== draggingSessionID);
-  const hiddenSessionCount = Math.max(0, sessions.length - sessionDisplayLimit);
+  const hiddenSessionCount = canCollapse ? sessions.length - collapsedSessionDisplayLimit : 0;
   if (visibleSessions.length === 0 && (dropIndex !== null || showEmptyDropTarget)) {
     return (
       <SidebarMenu className="gap-1">
@@ -1982,6 +1985,14 @@ function SessionItem({
                 <Spinner className="size-3" />
                 {t("session.processing")}
               </span>
+            ) : session.backgroundProcessCount > 0 ? (
+              <span
+                aria-label={t("session.backgroundTasks").replace("{count}", String(session.backgroundProcessCount))}
+                className="flex items-center gap-1 whitespace-nowrap"
+              >
+                <SquareTerminal className="size-3" />
+                <span className="tabular-nums">{session.backgroundProcessCount}</span>
+              </span>
             ) : completed ? (
               <span aria-label={t("session.completed")} className="size-2 rounded-full bg-blue-500" />
             ) : (
@@ -2052,7 +2063,11 @@ function SessionItem({
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>{t("deleteSession.title")}</AlertDialogTitle>
-                <AlertDialogDescription>{t("deleteSession.description")}</AlertDialogDescription>
+                <AlertDialogDescription>
+                  {session.backgroundProcessCount > 0
+                    ? t("deleteSession.descriptionWithProcesses").replace("{count}", String(session.backgroundProcessCount))
+                    : t("deleteSession.description")}
+                </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>

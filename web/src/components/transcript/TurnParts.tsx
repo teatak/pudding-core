@@ -1,6 +1,7 @@
 import {
   ArrowLeft,
   ArrowRight,
+  Boxes,
   Camera,
   ChevronDown,
   ChevronRight,
@@ -269,7 +270,11 @@ function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIc
     builtin_browser_status: Globe,
     builtin_browser_type: Keyboard,
     builtin_camera_capture: Camera,
+    builtin_command_poll: SquareTerminal,
     builtin_command_run: SquareTerminal,
+    builtin_command_start: SquareTerminal,
+    builtin_command_stop: SquareTerminal,
+    builtin_toolkit_load: Boxes,
     builtin_code_symbols: Search,
     builtin_code_definition: Route,
     builtin_code_references: ListTree,
@@ -383,6 +388,8 @@ export function partsFromOverlay(
           argsText: part.argsText,
           dotPhase: active ? activePhaseName : toolPhaseDot(part.phase),
           id: part.callID,
+          liveStderr: part.liveStderr,
+          liveStdout: part.liveStdout,
           name: part.name,
           phase: part.phase,
           phaseUpdatedAt: active ? activePhaseUpdatedAt : undefined,
@@ -900,7 +907,7 @@ function ToolUsePart({
   const toolName = part.name || part.resultName || "";
   const baseTitle = toolDisplayName(toolName, t("transcript.tool"), t);
   const codeTool = isCodeToolName(toolName);
-  const commandTool = toolName === "builtin_command_run";
+  const terminalTool = toolName === "builtin_command_run" || toolName === "builtin_command_start" || toolName === "builtin_command_poll" || toolName === "builtin_command_stop";
   const showDetails = codeTool || showRawInfo;
   const active = part.active || part.phase === "streaming_args" || part.phase === "running";
   const elapsed = useElapsedDuration(active && part.phase === "running" ? part.phaseUpdatedAt : undefined, locale);
@@ -945,10 +952,12 @@ function ToolUsePart({
       <div className="ml-[5px] py-1 pl-2">
         <div className="grid gap-2">
           {codeTool ? (
-            <div className={cn(!commandTool && "rounded-md border border-border/50 bg-muted/20 p-2")}>
+            <div className={cn(!terminalTool && "rounded-md border border-border/50 bg-muted/20 p-2")}>
               <CodeToolDetails
                 args={part.argsText || part.args}
                 callID={part.id}
+                liveStderr={part.liveStderr}
+                liveStdout={part.liveStdout}
                 name={toolName}
                 result={liveResult?.value}
                 sessionID={sessionID}
@@ -1521,7 +1530,11 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     builtin_graphql_search: t("transcript.toolGraphQLSearch"),
     builtin_history_get_message: t("transcript.toolHistoryGetMessage"),
     builtin_history_search: t("transcript.toolHistorySearch"),
+    builtin_toolkit_load: t("transcript.toolToolkitLoad"),
+    builtin_command_poll: t("transcript.toolCommandPoll"),
     builtin_command_run: t("transcript.toolCommandRun"),
+    builtin_command_start: t("transcript.toolCommandStart"),
+    builtin_command_stop: t("transcript.toolCommandStop"),
     builtin_code_symbols: t("transcript.toolCodeSymbols"),
     builtin_code_definition: t("transcript.toolCodeDefinition"),
     builtin_code_references: t("transcript.toolCodeReferences"),
@@ -1627,6 +1640,10 @@ function toolTitle(
   if (codeSummary) {
     return { label: baseTitle, summary: codeSummary };
   }
+  const toolkitSummary = toolkitLoadSummary(part, result, t);
+  if (toolkitSummary) {
+    return { label: baseTitle, summary: toolkitSummary };
+  }
   const summary = toolProtocolSummary(part, t);
   if (summary) {
     return { label: baseTitle, summary };
@@ -1636,6 +1653,27 @@ function toolTitle(
     return { label: baseTitle, summary: structuralSummary };
   }
   return { label: baseTitle, summary: "" };
+}
+
+function toolkitLoadSummary(
+  part: Extract<TurnPartVM, { type: "tool_use" }>,
+  result: ReturnType<typeof formatToolResult>,
+  t: (key: string) => string,
+) {
+  if ((part.name || part.resultName) !== "builtin_toolkit_load") {
+    return "";
+  }
+  const value = result?.value;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return "";
+  }
+  const record = value as Record<string, unknown>;
+  const loaded = Array.isArray(record.loaded) ? record.loaded.filter((item): item is string => typeof item === "string") : [];
+  if (loaded.length > 0) {
+    return t("transcript.toolkitLoaded").replace("{names}", loaded.join(", "));
+  }
+  const active = Array.isArray(record.alreadyActive) ? record.alreadyActive.filter((item): item is string => typeof item === "string") : [];
+  return active.length > 0 ? t("transcript.toolkitAlreadyActive") : "";
 }
 
 function inputFlowToolSummary(

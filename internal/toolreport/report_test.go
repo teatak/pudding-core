@@ -31,14 +31,14 @@ func TestGenerateAggregatesCanonicalToolUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.TotalTurns != 3 || report.ProjectTurns != 2 || report.ChatTurns != 1 || report.Calls != 5 {
+	if report.TotalTurns != 4 || report.CodeTurns != 2 || report.WorkTurns != 1 || report.ChatTurns != 1 || report.Calls != 6 {
 		t.Fatalf("unexpected report totals: %+v", report)
 	}
 	search := findToolStat(t, report, tool.FileSearch)
 	if search.Group != "file" || search.Calls != 3 || search.Turns != 2 || search.Sessions != 1 {
 		t.Fatalf("unexpected file search counts: %+v", search)
 	}
-	if search.RequiredMode != store.ModeProject || search.EligibleTurns != 2 || !near(search.TurnCoverageRate, 1) {
+	if search.RequiredMode != store.ModeCode || search.EligibleTurns != 2 || !near(search.TurnCoverageRate, 1) {
 		t.Fatalf("unexpected file search coverage: %+v", search)
 	}
 	if search.CompletedCalls != 3 || search.SuccessfulCalls != 2 || search.FailedCalls != 1 || !near(search.SuccessRate, 2.0/3.0) {
@@ -52,8 +52,12 @@ func TestGenerateAggregatesCanonicalToolUsage(t *testing.T) {
 	}
 
 	web := findToolStat(t, report, tool.WebSearch)
-	if web.RequiredMode != store.ModeChat || web.EligibleTurns != 3 || !near(web.TurnCoverageRate, 1.0/3.0) {
+	if web.RequiredMode != store.ModeChat || web.EligibleTurns != 4 || !near(web.TurnCoverageRate, 0.25) {
 		t.Fatalf("unexpected web search coverage: %+v", web)
+	}
+	rest := findToolStat(t, report, tool.RESTRequest)
+	if rest.RequiredMode != store.ModeWork || rest.EligibleTurns != 3 || !near(rest.TurnCoverageRate, 1.0/3.0) {
+		t.Fatalf("unexpected REST request coverage: %+v", rest)
 	}
 
 	var output bytes.Buffer
@@ -92,8 +96,12 @@ func TestGenerateCanIncludeUnusedBuiltinTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	rename := findToolStat(t, report, tool.CodeRename)
-	if rename.Calls != 0 || rename.RequiredMode != store.ModeProject || rename.EligibleTurns != 2 || !near(rename.TurnCoverageRate, 0) {
+	if rename.Calls != 0 || rename.RequiredMode != store.ModeCode || rename.EligibleTurns != 2 || !near(rename.TurnCoverageRate, 0) {
 		t.Fatalf("unexpected unused rename stat: %+v", rename)
+	}
+	process := findToolStat(t, report, tool.CommandStart)
+	if process.Group != "command" || process.RequiredMode != store.ModeCode {
+		t.Fatalf("unexpected background command stat: %+v", process)
 	}
 }
 
@@ -115,10 +123,11 @@ func seedToolReportDB(t *testing.T, path string, now time.Time) {
 	if _, err := db.Exec(`INSERT INTO sessions(id,provider,model,created_at,updated_at,last_activity_at) VALUES('session_1','test','test',?,?,?)`, createdAt, createdAt, createdAt); err != nil {
 		t.Fatal(err)
 	}
-	insertTurn(t, db, "turn_project_1", "session_1", store.ModeProject, now.Add(-3*time.Hour))
-	insertTurn(t, db, "turn_project_2", "session_1", store.ModeProject, now.Add(-2*time.Hour))
+	insertTurn(t, db, "turn_project_1", "session_1", store.ModeCode, now.Add(-3*time.Hour))
+	insertTurn(t, db, "turn_project_2", "session_1", store.ModeCode, now.Add(-2*time.Hour))
+	insertTurn(t, db, "turn_work", "session_1", store.ModeWork, now.Add(-90*time.Minute))
 	insertTurn(t, db, "turn_chat", "session_1", store.ModeChat, now.Add(-time.Hour))
-	insertTurn(t, db, "turn_old", "session_1", store.ModeProject, now.Add(-40*24*time.Hour))
+	insertTurn(t, db, "turn_old", "session_1", store.ModeCode, now.Add(-40*24*time.Hour))
 
 	index := 0
 	insertToolCall(t, db, "session_1", "turn_project_1", &index, "search_1", tool.FileSearch, map[string]any{"scope": "project", "query": "needle"}, false, "failed")
@@ -126,6 +135,8 @@ func seedToolReportDB(t *testing.T, path string, now time.Time) {
 	index = 0
 	insertToolCall(t, db, "session_1", "turn_project_2", &index, "search_2", tool.FileSearch, map[string]any{"scope": "project", "query": "first"}, true, strings.Repeat("x", 100))
 	insertToolCall(t, db, "session_1", "turn_project_2", &index, "search_3", tool.FileSearch, map[string]any{"scope": "project", "query": "second"}, true, strings.Repeat("y", 2000))
+	index = 0
+	insertToolCall(t, db, "session_1", "turn_work", &index, "rest_1", tool.RESTRequest, map[string]any{"endpoint": "demo", "path": "/items"}, true, "result")
 	index = 0
 	insertToolCall(t, db, "session_1", "turn_chat", &index, "web_1", tool.WebSearch, map[string]any{"query": "news"}, true, "result")
 	index = 0

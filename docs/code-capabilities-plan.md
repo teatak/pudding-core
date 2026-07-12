@@ -3,6 +3,8 @@
 > 状态:C0、C1、C1.5、C1.6、C2、C3、C4、C5、C6、C7、C8、C9、C10、C10.4 与 C11 已落地。
 > 目标:在现有 multi-session / Project tool 架构上,把 Pudding 从"可读写文件"
 > 推进到"可信的工程协作 agent"。
+> 注:第 1 节记录立项时基线;CLI-first 收敛后的当前事实见
+> `docs/code-cli-first-consolidation-plan.md`。
 
 ## 0. 结论
 
@@ -11,7 +13,7 @@ Code 能力不新增一套 `/code/*` 主路径 API,而是继续走现有 tool lo
 ```text
 session submit
   -> engine turn loop
-  -> project capability approval
+  -> Code capability approval
   -> internal/tool Runner
   -> canonical messages.parts + turn.tool events
   -> transcript / activity UI
@@ -19,26 +21,26 @@ session submit
 
 原因:
 
-- 当前代码已经有 Project、`activeMode=project`、`request_capability`、文件工具
+- 当前代码已经有 Project、`activeMode=code`、`request_capability`、文件工具
   和 tool part UI。
 - code 操作天然属于 session 的上下文与 transport,不是 daemon 全局 focus。
 - REST 继续负责 session / approval / snapshot;具体读文件、改文件、跑命令、
   git 操作都应作为 LLM 可调用工具出现。
 
-## 1. 当前地基
+## 1. 实施前基线
 
 已具备:
 
 - Project 已是代码目录与审批设置的主实体,session 通过 `projectID`
   绑定 Project。
-- `ActiveMode=project`、`ModeLease=session` 由 session 承载。
-- `request_capability` 应请求 Project 能力与项目目录授权。
+- `ActiveMode=code`、`ModeLease=session` 由 session 承载。
+- `request_capability` 应请求 Code 能力与项目目录授权。
 - engine 已有 tool loop、`turn.tool` 事件、tool_result canonical 落库。
 - `internal/tool` 已有 Project 路径解析与沙箱校验。
 - 内置文件工具已覆盖 list/read/stat/search/slice/write/patch/delete/move/copy。
 - 前端已有 thought/tool/approval overlay,并能合并 `tool_use` + `tool_result`。
 
-主要缺口:
+立项时的主要缺口如下,现均已按后续章节落地;PTY 仍是明确非目标:
 
 - 没有 command/PTY/process runner。
 - 没有 git 专用工具。
@@ -115,9 +117,9 @@ tool call 通过持久 Project roots 与当前 turn grant roots 的并集解析�
 - UI 文案使用"项目 / Project"。
 - 数据模型使用 `Project.rootDirs`、`Session.projectID`。
 - 文件工具 scope 为 `project`。
-- `request_capability.targetMode` 为 `project`。
+- `request_capability.targetMode` 为 `code`。
 - approval payload 使用 `projectDirs`。
-- 内部能力档为 `ModeProject` / `activeMode=project`;工具调用上下文使用
+- 内部能力档为 `ModeCode` / `activeMode=code`;工具调用上下文使用
   `ProjectDirs`。
 - 旧 mode、scope 与字段名不在运行时兼容。
 
@@ -168,10 +170,11 @@ REST 只在需要 UI 决策、审批、快照时补充,不新增无 session scop
 | 内部风险 | 示例 | `ask` | `auto` | `full` |
 | --- | --- | --- | --- | --- |
 | `read` | file read/search/stat, git status/diff/log | 问 | 放行 | 放行 |
-| `write` | file write/patch/move/delete, git stage | 问 | 问 | 放行 |
+| `write(low risk)` | Project 内 file write/patch/move/copy、patch apply | 问 | 放行 | 放行 |
+| `write(protected)` | git stage/unstage/commit | 问 | 问 | 放行 |
 | `command` | test/build/lint/format/codegen | 问 | 低风险放行,其余问 | 放行 |
 | `network` | web fetch, install/download/push | 问 | 问 | 放行 |
-| `destructive` | rm, reset, clean,覆盖式 checkout | 问或拒绝 | 问或拒绝 | 放行或强确认 |
+| `destructive` | delete/rm, reset, clean,覆盖式 checkout | 问或拒绝 | 问或拒绝 | 放行或强确认 |
 
 `full` 是用户明确选择的高权限模式,不是"最危险的模式不需要设计"。它仍需保留
 基础边界:
@@ -185,8 +188,8 @@ REST 只在需要 UI 决策、审批、快照时补充,不新增无 session scop
 
 - 在 Project 上增加 `approvalMode = ask | auto | full`。
 - composer 展示当前 session 绑定 Project 的审批模式;切换即更新 Project。
-- chat 尚未绑定 Project 时,composer 显示"无项目",需要 code 能力时走创建/绑定
-  Project 的 approval flow。
+- 未绑定 Project 时不显示 Project 控件;需要 Code 能力时走创建/绑定 Project 的
+  approval flow。
 - 在 `internal/tool` 增加 `ClassifyToolCall(name,args)`。
 - engine 在真正 `Runner.Call` 前用 `project.approvalMode + risk` 决策:
   - allow:直接执行。
@@ -207,6 +210,7 @@ REST 只在需要 UI 决策、审批、快照时补充,不新增无 session scop
     "scope": "project",
     "cwd": "relative/or/absolute/path inside authorized Project root",
     "argv": ["go", "test", "./internal/tool"],
+    // 或使用 "script": "go test ./internal/tool";二者互斥
     "env": {"KEY": "value"},
     "timeout_ms": 120000
   }
@@ -215,7 +219,9 @@ REST 只在需要 UI 决策、审批、快照时补充,不新增无 session scop
 
 约束:
 
-- 第一版只接受 `argv`,不接受裸 shell 字符串。
+- `argv` 直接执行且是默认路径;`script` 由平台固定的非交互 shell 执行,
+  两者必须且只能提供一个。
+- 模型不能指定 shell executable 或启动参数;script 统一按高风险路径审批。
 - `cwd` 必须解析到当前 Project 授权范围内。
 - 默认只继承 PATH、HOME、临时目录、locale 和常见 toolchain 路径变量;
   其他变量必须通过 `env` 显式提供。
@@ -442,7 +448,7 @@ proposal 可先存在 engine memory 或 temp artifact;正式再考虑 SQLite 表
 - `builtin_file_*` schema 中 `scope:"workspace"` 改为 `scope:"project"`。
 - 文件 resolver 接受 `project` scope,并从当前 session/turn 绑定的 Project
   读取 `rootDirs`。
-- `request_capability.targetMode` 使用 `project`。
+- `request_capability.targetMode` 使用 `code`。
 - approval payload 与文案使用 `projectDirs` / Project 语义。
 - 前端、测试、文档里的用户可见文案统一为 project/项目。
 
@@ -450,7 +456,7 @@ proposal 可先存在 engine memory 或 temp artifact;正式再考虑 SQLite 表
 
 - 用户界面不再出现"工作区目录"作为主要概念,统一为"项目目录"。
 - 模型调用文件工具时使用 `scope:"project"`。
-- 模型请求项目能力时使用 `request_capability targetMode:"project"`。
+- 模型请求 Code 能力时使用 `request_capability targetMode:"code"`。
 - 旧 `scope:"workspace"` 与 `targetMode:"workspace"` 不兼容,统一改掉。
 - C2 command runner 的 `cwd` 与权限描述全部基于 Project。
 
@@ -458,12 +464,12 @@ proposal 可先存在 engine memory 或 temp artifact;正式再考虑 SQLite 表
 
 状态:已完成(2026-07-10)。
 
-- 内部能力档统一为 `ModeProject` / `activeMode=project`。
+- 内部能力档统一为 `ModeCode` / `activeMode=code`。
 - 内部目录字段与 resolver 统一为 Project 命名。
 - Project 删除 `Temporary`;Project 表只保存持久实体。
 - turn scope 授权保存为 engine 内存中的 `ProjectAccessGrant`,turn 结束即清理。
 - session scope 授权才创建、复用或扩展 Project。
-- SQLite 对旧 mode 值做一次性数据迁移,运行时协议不接受旧值。
+- 开发库直接执行一次性 mode 数据迁移,仓库不保留迁移函数;运行时协议不接受旧值。
 
 验收:
 
@@ -542,15 +548,16 @@ proposal 可先存在 engine memory 或 temp artifact;正式再考虑 SQLite 表
 - proposal 记录源文件 SHA-256;approval details 和 apply 前均重新验证授权与漂移。
 - apply 预写同目录临时文件,再通过 backup + rename 应用;中途失败逆序回滚。
 - unified diff 超过 256 KiB 时拒绝生成,要求 agent 拆分,避免用户批准未展示内容。
-- `auto` 与 `ask` 对 apply 请求审批;`full` 跳过普通审批但仍执行 proposal/hash
-  校验。
+- `auto` 对已验证且不含文件删除的 Project 内 apply 自动放行;删除仍请求审批;
+  `ask` 请求审批;`full` 跳过普通审批。三档都继续执行 proposal/hash 校验。
 - approval payload 包含 proposalID、路径、文件统计和完整 diff。
 - composer 支持查看 diff、整包应用或拒绝;transcript 已补 propose/apply 结构化
   卡片和三语显示名。
 
 验收:
 
-- 已完成:agent 可先提出 diff,工作树保持不变,用户批准后才落盘。
+- 已完成:agent 可先提出 diff,工作树保持不变;`ask` 用户批准后落盘,
+  `auto/full` 按策略自动落盘。
 - 已完成:文件在等待审批期间发生漂移时,apply 整包拒绝且不产生部分写入。
 
 ### C6: Git Write Workflow

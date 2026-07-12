@@ -910,10 +910,10 @@ func filePathErrorWithReason(out Result, scope, fallbackReason string, err error
 		return toolJSONError(out, fallbackReason, err.Error())
 	}
 	reason := "path_not_authorized"
-	hint := "The path is outside authorized project directories. Use request_capability with targetMode=project and projectDirs containing the directory, then ask the user to approve it for this turn if temporary access is enough."
+	hint := "The path is outside authorized project directories. Use request_capability with targetMode=code and projectDirs containing the directory, then ask the user to approve it for this turn if temporary access is enough."
 	if errors.Is(err, errProjectDirsRequired) {
 		reason = "project_dirs_required"
-		hint = "No project directories are authorized. Use request_capability with targetMode=project and projectDirs, then ask the user to approve it for this turn if temporary access is enough."
+		hint = "No project directories are authorized. Use request_capability with targetMode=code and projectDirs, then ask the user to approve it for this turn if temporary access is enough."
 	} else if errors.Is(err, errProjectFilePathRequired) {
 		reason = "path_not_allowed"
 		hint = "A file path is required for this tool."

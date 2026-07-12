@@ -31,6 +31,9 @@ func ClassifyToolCall(name string, raw json.RawMessage) (ToolRisk, bool) {
 	if name == CommandRun {
 		return classifyCommandCall(raw)
 	}
+	if name == CommandStart {
+		return classifyCommandStartCall(raw)
+	}
 	if name == GitStatus || name == GitDiff || name == GitLog {
 		return classifyGitReadCall(name, raw)
 	}
@@ -47,6 +50,7 @@ func ClassifyToolCall(name string, raw json.RawMessage) (ToolRisk, bool) {
 			Operation: "patch_apply",
 			Scope:     managedScopeProject,
 			Summary:   "Apply a reviewed patch proposal to project files.",
+			LowRisk:   true,
 		}, true
 	}
 	var args struct {
@@ -68,10 +72,10 @@ func ClassifyToolCall(name string, raw json.RawMessage) (ToolRisk, bool) {
 	switch name {
 	case FileWrite:
 		path := strings.TrimSpace(args.Path)
-		return ToolRisk{Class: RiskClassWrite, Operation: "write", Scope: args.Scope, Paths: compactRiskPaths(path), Summary: "Overwrite a project file."}, true
+		return ToolRisk{Class: RiskClassWrite, Operation: "write", Scope: args.Scope, Paths: compactRiskPaths(path), Summary: "Overwrite a project file.", LowRisk: true}, true
 	case FilePatch:
 		path := strings.TrimSpace(args.Path)
-		return ToolRisk{Class: RiskClassWrite, Operation: "patch", Scope: args.Scope, Paths: compactRiskPaths(path), Summary: "Modify a project file."}, true
+		return ToolRisk{Class: RiskClassWrite, Operation: "patch", Scope: args.Scope, Paths: compactRiskPaths(path), Summary: "Modify a project file.", LowRisk: true}, true
 	case FileDelete:
 		path := strings.TrimSpace(args.Path)
 		summary := "Delete a project file."
@@ -80,16 +84,44 @@ func ClassifyToolCall(name string, raw json.RawMessage) (ToolRisk, bool) {
 		}
 		return ToolRisk{Class: RiskClassDestructive, Operation: "delete", Scope: args.Scope, Paths: compactRiskPaths(path), Summary: summary}, true
 	case FileMove:
-		return ToolRisk{Class: RiskClassWrite, Operation: "move", Scope: args.Scope, Paths: compactRiskPaths(args.FromPath, args.ToPath), Summary: "Move or rename a project path."}, true
+		return ToolRisk{Class: RiskClassWrite, Operation: "move", Scope: args.Scope, Paths: compactRiskPaths(args.FromPath, args.ToPath), Summary: "Move or rename a project path.", LowRisk: true}, true
 	case FileCopy:
 		summary := "Copy a project path."
 		if args.Overwrite {
 			summary = "Copy a project path and overwrite the destination if it exists."
 		}
-		return ToolRisk{Class: RiskClassWrite, Operation: "copy", Scope: args.Scope, Paths: compactRiskPaths(args.FromPath, args.ToPath), Summary: summary}, true
+		return ToolRisk{Class: RiskClassWrite, Operation: "copy", Scope: args.Scope, Paths: compactRiskPaths(args.FromPath, args.ToPath), Summary: summary, LowRisk: true}, true
 	default:
 		return ToolRisk{}, false
 	}
+}
+
+func classifyCommandStartCall(raw json.RawMessage) (ToolRisk, bool) {
+	args, err := decodeCommandStartArgs(raw)
+	if err != nil {
+		return ToolRisk{}, false
+	}
+	command := commandRunArgs{Scope: args.Scope, Argv: args.Argv, Script: args.Script, CWD: args.CWD, Env: args.Env}
+	risk, ok := classifyCommandCall(mustMarshalCommandRisk(command))
+	if !ok {
+		return ToolRisk{}, false
+	}
+	if risk.Class != RiskClassDestructive {
+		risk.Class = RiskClassCommand
+	}
+	risk.Operation = "process_start"
+	risk.LowRisk = false
+	if args.Script != "" {
+		risk.Summary = "Start background project shell script: " + compactScript(args.Script)
+	} else {
+		risk.Summary = "Start background project command: " + compactCommand(args.Argv)
+	}
+	return risk, true
+}
+
+func mustMarshalCommandRisk(args commandRunArgs) json.RawMessage {
+	raw, _ := json.Marshal(args)
+	return raw
 }
 
 func classifyCodeReadCall(name string, raw json.RawMessage) (ToolRisk, bool) {
@@ -176,8 +208,22 @@ func classifyGitReadCall(name string, raw json.RawMessage) (ToolRisk, bool) {
 
 func classifyCommandCall(raw json.RawMessage) (ToolRisk, bool) {
 	var args commandRunArgs
-	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil || strings.TrimSpace(args.Scope) != managedScopeProject || validateCommandArgv(args.Argv) != nil {
+	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil || strings.TrimSpace(args.Scope) != managedScopeProject || validateCommandInput(args) != nil {
 		return ToolRisk{}, false
+	}
+	if args.Script != "" {
+		summary := "Run project shell script: " + compactScript(args.Script)
+		if len(args.Env) > 0 {
+			summary = "Run project shell script with custom environment: " + compactScript(args.Script)
+		}
+		return ToolRisk{
+			Class:     RiskClassCommand,
+			Operation: "shell",
+			Scope:     managedScopeProject,
+			Paths:     compactRiskPaths(args.CWD),
+			Summary:   summary,
+			LowRisk:   false,
+		}, true
 	}
 	operation := commandOperation(args.Argv[0])
 	risk := ToolRisk{
@@ -198,6 +244,10 @@ func classifyCommandCall(raw json.RawMessage) (ToolRisk, bool) {
 		risk.Summary = "Run destructive project command: " + compactCommand(args.Argv)
 	}
 	return risk, true
+}
+
+func compactScript(script string) string {
+	return compactCommand([]string{strings.Join(strings.Fields(script), " ")})
 }
 
 func commandArgsEscapeProject(args []string) bool {
@@ -243,6 +293,20 @@ func isLowRiskCommand(argv []string) bool {
 		first = strings.ToLower(strings.TrimSpace(args[0]))
 	}
 	switch op {
+	case "pwd", "ls", "cat", "head", "tail", "wc", "stat", "file", "du", "realpath", "basename", "dirname", "which":
+		return true
+	case "rg":
+		return !containsArgPrefix(args, "--pre", "--hostname-bin")
+	case "grep", "egrep", "fgrep":
+		return true
+	case "find":
+		return isReadOnlyFind(args)
+	case "fd", "fdfind":
+		return !containsAnyArg(args, "-x", "-X") && !containsArgPrefix(args, "--exec", "--exec-batch")
+	case "sed":
+		return isReadOnlySed(args)
+	case "gofmt", "goimports":
+		return true
 	case "go":
 		switch first {
 		case "test", "vet", "build", "list", "version":
@@ -270,9 +334,89 @@ func isLowRiskCommand(argv []string) bool {
 	case "dotnet":
 		return first == "test" || first == "build"
 	case "git":
-		return first == "status" || first == "diff" || first == "log" || first == "show"
+		switch first {
+		case "status", "diff", "log", "show", "rev-parse", "ls-files", "grep", "blame", "describe", "shortlog":
+			return true
+		}
 	}
 	return false
+}
+
+func containsArgPrefix(args []string, prefixes ...string) bool {
+	for _, arg := range args {
+		arg = strings.ToLower(strings.TrimSpace(arg))
+		for _, prefix := range prefixes {
+			if arg == strings.ToLower(prefix) || strings.HasPrefix(arg, strings.ToLower(prefix)+"=") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isReadOnlyFind(args []string) bool {
+	for _, arg := range args {
+		arg = strings.ToLower(strings.TrimSpace(arg))
+		switch arg {
+		case "-delete", "-exec", "-execdir", "-ok", "-okdir", "-fls":
+			return false
+		}
+		if strings.HasPrefix(arg, "-fprint") {
+			return false
+		}
+	}
+	return true
+}
+
+func isReadOnlySed(args []string) bool {
+	expression := ""
+	for i := 0; i < len(args); i++ {
+		arg := strings.TrimSpace(args[i])
+		switch arg {
+		case "-n", "--quiet", "--silent":
+			continue
+		case "-e", "--expression":
+			if expression != "" || i+1 >= len(args) {
+				return false
+			}
+			i++
+			expression = strings.TrimSpace(args[i])
+			continue
+		}
+		if strings.HasPrefix(arg, "-") {
+			return false
+		}
+		if expression == "" {
+			expression = arg
+		}
+	}
+	return isSedSliceExpression(expression)
+}
+
+func isSedSliceExpression(expression string) bool {
+	expression = strings.TrimSpace(expression)
+	if !strings.HasSuffix(expression, "p") {
+		return false
+	}
+	addresses := strings.Split(strings.TrimSuffix(expression, "p"), ",")
+	if len(addresses) < 1 || len(addresses) > 2 {
+		return false
+	}
+	for _, address := range addresses {
+		address = strings.TrimSpace(address)
+		if address == "$" {
+			continue
+		}
+		if address == "" {
+			return false
+		}
+		for _, r := range address {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func containsAnyArg(args []string, values ...string) bool {

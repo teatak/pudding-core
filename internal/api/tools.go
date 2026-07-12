@@ -74,7 +74,7 @@ func viewBuiltinTools(defs []provider.ToolDef) []builtinToolView {
 	for _, def := range defs {
 		capability := store.NormalizeAgentMode(def.Capability)
 		if capability == "" {
-			capability = store.ModeProject
+			capability = store.ModeCode
 		}
 		views = append(views, builtinToolView{
 			ID:          def.Name,

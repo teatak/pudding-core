@@ -2,7 +2,6 @@ package sqlitestore
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"path/filepath"
 	"strconv"
@@ -320,92 +319,6 @@ func TestBrowserStatePersistsAndClears(t *testing.T) {
 	}
 }
 
-func TestLegacyBrowserStateMigratesToBrowserTabs(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "legacy-browser.db")
-	st, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	createTestSession(t, st, "sess_legacy_browser")
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	db, err := sql.Open("sqlite3", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`
-		DROP TABLE session_browser_tabs;
-		CREATE TABLE session_browser_state (
-			session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
-			tab_id TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '',
-			title TEXT NOT NULL DEFAULT '', favicon_url TEXT NOT NULL DEFAULT '',
-			mode TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
-		);
-		INSERT INTO session_browser_state(session_id,tab_id,url,title,favicon_url,mode,created_at,updated_at)
-		VALUES('sess_legacy_browser','tab_legacy','https://legacy.example/','Legacy','','headless',1,2);
-	`); err != nil {
-		_ = db.Close()
-		t.Fatal(err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	reopened, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.Close()
-	state, err := reopened.GetBrowserTabState(context.Background(), "sess_legacy_browser", "tab_legacy")
-	if err != nil || state.URL != "https://legacy.example/" {
-		t.Fatalf("legacy browser state was not migrated: state=%+v err=%v", state, err)
-	}
-}
-
-func TestOpenPrunesDuplicateBlankBrowserTabs(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "duplicate-blank-tabs.db")
-	st, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	createTestSession(t, st, "sess_blank_duplicates")
-	for _, input := range []store.BrowserStateInput{
-		{SessionID: "sess_blank_duplicates", TabID: "tab_real", URL: "https://example.com/"},
-		{SessionID: "sess_blank_duplicates", TabID: "tab_blank_old", URL: "about:blank"},
-		{SessionID: "sess_blank_duplicates", TabID: "tab_blank_new", URL: "about:blank"},
-	} {
-		if _, err := st.PutBrowserState(context.Background(), input); err != nil {
-			t.Fatal(err)
-		}
-		time.Sleep(time.Millisecond)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	reopened, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.Close()
-	states, err := reopened.ListBrowserStates(context.Background(), "sess_blank_duplicates")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(states) != 2 {
-		t.Fatalf("expected one real and one blank tab after restart: %+v", states)
-	}
-	seen := map[string]bool{}
-	for _, state := range states {
-		seen[state.TabID] = true
-	}
-	if !seen["tab_real"] || !seen["tab_blank_new"] || seen["tab_blank_old"] {
-		t.Fatalf("wrong tabs survived blank-tab pruning: %+v", states)
-	}
-}
-
 func TestRenameDoesNotAffectRecentOrdering(t *testing.T) {
 	st, _ := openTestStore(t)
 	createTestSession(t, st, "older")
@@ -538,7 +451,7 @@ func TestOpenLeavesExistingMessagesUnindexed(t *testing.T) {
 	createTestSession(t, st, "sess_search_forward_only")
 	if _, err := st.db.Exec(`
 		INSERT INTO messages(id,session_id,role,text,created_at)
-		VALUES('msg_search_legacy','sess_search_forward_only','user','DeepSeek模型配置',1)`); err != nil {
+		VALUES('msg_search_existing','sess_search_forward_only','user','DeepSeek模型配置',1)`); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Close(); err != nil {
@@ -552,7 +465,7 @@ func TestOpenLeavesExistingMessagesUnindexed(t *testing.T) {
 	defer reopened.Close()
 	var tokens string
 	if err := reopened.db.QueryRow(
-		`SELECT search_tokens FROM messages WHERE id='msg_search_legacy'`,
+		`SELECT search_tokens FROM messages WHERE id='msg_search_existing'`,
 	).Scan(&tokens); err != nil {
 		t.Fatal(err)
 	}

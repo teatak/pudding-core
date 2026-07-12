@@ -247,14 +247,10 @@ Provider 路由:
   `contextWindow/capabilities/openai/google/anthropic`。各 provider 只消费
   自己支持的字段;未知字段保留在 turn snapshot 中。
 
-表结构与 API 定形(随 registry 落地,pre-launch 直接改 schema 不留迁移):
-
-```sql
--- 既有表加列;provider profile 不再进 SQLite
-ALTER TABLE sessions ADD COLUMN provider TEXT NOT NULL;
-ALTER TABLE turns    ADD COLUMN provider TEXT NOT NULL DEFAULT ''; -- BeginTurn 快照
-ALTER TABLE turns    ADD COLUMN model    TEXT NOT NULL DEFAULT '';
-```
+表结构与 API 已定形。pre-launch 阶段直接维护 `internal/store/schema.sql`,不在
+运行时代码中保留旧表、旧列或旧数据值的识别与迁移分支。开发数据需要调整时只做
+一次性离线处理,完成后立即删除处理代码。`sessions.provider`、`turns.provider`、
+`turns.model` 已属于当前 schema。
 
 ```text
 GET    /providers            # 列表,返回本地配置中的 apiKey 与 apiKeySet
@@ -270,6 +266,15 @@ DELETE /providers/{name}
 - 不存在默认 profile 或 profile 默认模型;新建 draft 只使用前端本地的"上次选用模型"。
 - (已完成)单 provider 阶段的 `provider.openai.*` 与全局 `model.default`
   过渡键已随 registry 收口删除,registry 不再有任何隐式回落。
+- LLM 工具实现继续编译进 daemon;provider 每轮收到的 schema 由固定 Toolkit
+  Catalog 选择,不是动态加载二进制。
+- `builtin_toolkit_load` 只扩展当前 turn 的 active set,同一 turn 单调增加、最多
+  扩展 2 次,turn 结束后重置;不写 SQLite 或 session。
+- Toolkit load 不授予 capability 或审批权限。隐藏但已知的工具返回
+  `tool_not_loaded`,越级 toolkit 返回 `capability_required`,实际工具调用仍走
+  Project path 与 `ask | auto | full`。
+- ToolDef 固定按 Toolkit id 与 tool name 排序。默认 Code 为 17/58 个 schema
+  (含继承 Chat 的 9 个),当前 schema JSON 比全量减少 67.6%。
 
 ## 6. 存储
 
