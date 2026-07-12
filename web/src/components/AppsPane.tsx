@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ChevronRight, CircleAlert, CircleCheck, CircleDashed, Download, Eye, EyeOff, KeyRound, Package, Pencil, Plus, Settings2, Trash } from "lucide-react";
+import { ArrowLeft, ChevronRight, CircleAlert, CircleCheck, CircleDashed, Compass, Download, Eye, EyeOff, KeyRound, Package, Pencil, Plus, Settings2, SquareTerminal, Trash } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -20,6 +20,7 @@ import {
   listApps,
   putAppConnection,
   putAppMCPOverride,
+  setAppEnabled,
   startAppOAuth,
   type AppConnection,
   type AppConnectionPayload,
@@ -61,6 +62,7 @@ import { Item, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } f
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { translate, useI18n } from "@/i18n";
 import { boolSetting, SETTINGS_KEYS } from "@/lib/appSettings";
@@ -70,6 +72,7 @@ import { cn } from "@/lib/utils";
 
 type AuthType = AppConnectionPayload["authType"];
 type LocalizedText = string | Record<string, string>;
+type I18nTranslate = ReturnType<typeof useI18n>["t"];
 type AppRegistryRelease = {
   version: string;
   manifest?: string;
@@ -190,10 +193,12 @@ export function AppsPane({ token }: { token: string }) {
     queryFn: () => listAppConnections(token),
   });
   const apps = useMemo(
-    () => [...(appsQuery.data?.apps || [])].sort((a, b) => a.name.localeCompare(b.name)),
-    [appsQuery.data?.apps],
+    () => [...(appsQuery.data?.apps || [])].sort((a, b) => appDisplayName(a, t).localeCompare(appDisplayName(b, t))),
+    [appsQuery.data?.apps, t],
   );
-  const installedByID = useMemo(() => new Map(apps.map((app) => [app.id, app])), [apps]);
+  const builtinApps = useMemo(() => apps.filter((app) => app.source === "builtin"), [apps]);
+  const installedApps = useMemo(() => apps.filter((app) => app.source === "installed"), [apps]);
+  const installedByID = useMemo(() => new Map(installedApps.map((app) => [app.id, app])), [installedApps]);
   const catalogApps = useMemo(
     () =>
       [...(catalogQuery.data?.items || [])].sort((a, b) =>
@@ -315,6 +320,29 @@ export function AppsPane({ token }: { token: string }) {
     },
     onError: () => toast.error(t("apps.uninstallFailed")),
   });
+  const enableMutation = useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => setAppEnabled(token, id, enabled),
+    onMutate: async ({ id, enabled }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.apps() });
+      const previous = queryClient.getQueryData<{ apps: AppDefinition[] }>(queryKeys.apps());
+      queryClient.setQueryData<{ apps: AppDefinition[] }>(queryKeys.apps(), (current) => ({
+        apps: (current?.apps || []).map((app) => (app.id === id ? { ...app, enabled } : app)),
+      }));
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.apps(), context.previous);
+      }
+      toast.error(t("apps.enableFailed"));
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData<{ apps: AppDefinition[] }>(queryKeys.apps(), (current) => ({
+        apps: (current?.apps || []).map((app) => (app.id === updated.id ? updated : app)),
+      }));
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.apps() }),
+  });
   return (
     <main className="flex h-full min-w-0 flex-col overflow-hidden bg-background">
       <PageHeader
@@ -337,7 +365,7 @@ export function AppsPane({ token }: { token: string }) {
             <Package className="size-4" />
           )
         }
-        title={detailApp ? detailApp.name : detailCatalogApp ? appRegistryTitle(detailCatalogApp, locale) : t("apps.title")}
+        title={detailApp ? appDisplayName(detailApp, t) : detailCatalogApp ? appRegistryTitle(detailCatalogApp, locale) : t("apps.title")}
       />
       <div className="min-h-0 flex-1 overflow-auto">
         <div className="mx-auto grid w-full max-w-5xl gap-8 px-6 pt-4 pb-10">
@@ -353,13 +381,15 @@ export function AppsPane({ token }: { token: string }) {
               onSkillSelect={(skill, icon, iconSrc) =>
                 setSelectedSkill({
                   appID: detailApp.id,
-                  appName: detailCatalogForInstalled ? appRegistryTitle(detailCatalogForInstalled, locale) : detailApp.name,
+                  appName: detailCatalogForInstalled ? appRegistryTitle(detailCatalogForInstalled, locale) : appDisplayName(detailApp, t),
                   icon,
                   iconSrc,
                   skill,
                 })
               }
               onUninstall={() => setUninstalling(detailApp)}
+              enablePending={enableMutation.isPending && enableMutation.variables?.id === detailApp.id}
+              onEnabledChange={(enabled) => enableMutation.mutate({ id: detailApp.id, enabled })}
             />
           ) : detailCatalogApp ? (
             <CatalogAppDetail
@@ -400,13 +430,31 @@ export function AppsPane({ token }: { token: string }) {
             </div>
           ) : (
             <>
-              {apps.length > 0 ? (
+              {builtinApps.length > 0 ? (
+                <section className="grid gap-4">
+                  <div className="flex items-center justify-between border-b pb-4">
+                    <h2 className="text-xl font-semibold tracking-normal">{t("apps.builtinTitle")}</h2>
+                  </div>
+                  <div className="grid gap-2">
+                    {builtinApps.map((app) => (
+                      <BuiltinAppRow
+                        key={app.id}
+                        app={app}
+                        pending={enableMutation.isPending && enableMutation.variables?.id === app.id}
+                        onEnabledChange={(enabled) => enableMutation.mutate({ id: app.id, enabled })}
+                        onSelect={() => setDetailAppID(app.id)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+              {installedApps.length > 0 ? (
                 <section className="grid gap-4">
                   <div className="flex items-center justify-between border-b pb-4">
                     <h2 className="text-xl font-semibold tracking-normal">{t("apps.installedShort")}</h2>
                   </div>
                   <div className="flex min-w-0 flex-wrap gap-4">
-                    {apps.map((app) => (
+                    {installedApps.map((app) => (
                       <InstalledAppTile
                         key={app.id}
                         app={app}
@@ -852,6 +900,86 @@ async function sha256Hex(text: string) {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+function appDisplayName(app: AppDefinition, t: I18nTranslate) {
+  if (app.source !== "builtin") {
+    return app.name;
+  }
+  if (app.id === "browser") {
+    return t("apps.builtin.browser.name");
+  }
+  if (app.id === "terminal") {
+    return t("apps.builtin.terminal.name");
+  }
+  return app.name;
+}
+
+function appDisplayDescription(app: AppDefinition, t: I18nTranslate) {
+  if (app.source !== "builtin") {
+    return app.description || "";
+  }
+  if (app.id === "browser") {
+    return t("apps.builtin.browser.desc");
+  }
+  if (app.id === "terminal") {
+    return t("apps.builtin.terminal.desc");
+  }
+  return app.description || "";
+}
+
+function BuiltinAppIcon({ appID, size = "md" }: { appID: string; size?: "md" | "hero" }) {
+  const Icon = appID === "terminal" ? SquareTerminal : Compass;
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "grid shrink-0 place-items-center rounded-lg text-white shadow-sm",
+        appID === "terminal" ? "bg-amber-500 dark:bg-amber-500" : "bg-sky-500 dark:bg-sky-500",
+        size === "hero" ? "size-16" : "size-10",
+      )}
+    >
+      <Icon className={size === "hero" ? "size-8" : "size-5"} strokeWidth={2} />
+    </span>
+  );
+}
+
+function BuiltinAppRow({
+  app,
+  pending,
+  onEnabledChange,
+  onSelect,
+}: {
+  app: AppDefinition;
+  pending: boolean;
+  onEnabledChange: (enabled: boolean) => void;
+  onSelect: () => void;
+}) {
+  const { t } = useI18n();
+  const name = appDisplayName(app, t);
+  const mode = app.requiredMode.charAt(0).toUpperCase() + app.requiredMode.slice(1);
+  return (
+    <div className="flex min-w-0 items-center gap-3 rounded-lg border px-3 py-3">
+      <button className="flex min-w-0 flex-1 items-center gap-3 text-left" type="button" onClick={onSelect}>
+        <BuiltinAppIcon appID={app.id} />
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="truncate text-sm font-medium">{name}</span>
+            <Badge variant="outline">{t("apps.requiresMode").replace("{mode}", mode)}</Badge>
+          </span>
+          <span className="mt-0.5 block line-clamp-1 text-xs leading-5 text-muted-foreground">
+            {appDisplayDescription(app, t)}
+          </span>
+        </span>
+      </button>
+      <Switch
+        aria-label={t("apps.enableToggle").replace("{name}", name)}
+        checked={app.enabled}
+        disabled={pending}
+        onCheckedChange={onEnabledChange}
+      />
+    </div>
+  );
+}
+
 function InstalledAppTile({
   app,
   onSelect,
@@ -883,9 +1011,11 @@ function AppDetail({
   app,
   catalogApp,
   connections,
+  enablePending,
   onAdd,
   onDelete,
   onEdit,
+  onEnabledChange,
   onSkillSelect,
   onUninstall,
   token,
@@ -893,9 +1023,11 @@ function AppDetail({
   app: AppDefinition;
   catalogApp?: AppRegistryItem;
   connections: AppConnection[];
+  enablePending: boolean;
   onAdd: () => void;
   onDelete: (connection: AppConnection) => void;
   onEdit: (connection: AppConnection) => void;
+  onEnabledChange: (enabled: boolean) => void;
   onSkillSelect: (skill: AppSkillItem, icon?: AppIconSpec, iconSrc?: string) => void;
   onUninstall: () => void;
   token: string;
@@ -905,8 +1037,8 @@ function AppDetail({
   const skills = (app.skills || []) as AppSkillItems;
   const icon = mergeAppIconSpec(app.icon, catalogApp?.icon);
   const iconSrc = appIconURL(token, app) || (catalogApp ? appRegistryIconURL(catalogApp, OFFICIAL_APP_REGISTRY) : undefined);
-  const title = catalogApp ? appRegistryTitle(catalogApp, locale) : app.name;
-  const description = (catalogApp ? appRegistryDescription(catalogApp, locale) : "") || app.description;
+  const title = catalogApp ? appRegistryTitle(catalogApp, locale) : appDisplayName(app, t);
+  const description = (catalogApp ? appRegistryDescription(catalogApp, locale) : "") || appDisplayDescription(app, t);
   const authMethods = appAuthMethods(app);
   const canManageConnections = appCanManageConnections(app);
   const installedIsPreview = Boolean(
@@ -931,12 +1063,16 @@ function AppDetail({
     <section className="grid gap-8">
       <div className="min-w-0 border-b pb-6">
         <div className="flex min-w-0 items-start gap-4">
-          <AppIcon icon={icon} size="hero" src={iconSrc} />
+          {app.source === "builtin" ? <BuiltinAppIcon appID={app.id} size="hero" /> : <AppIcon icon={icon} size="hero" src={iconSrc} />}
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-start justify-between gap-4">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <h2 className="truncate text-2xl font-semibold tracking-normal">{title}</h2>
+                {app.source === "builtin" ? <Badge variant="secondary">{t("apps.builtinBadge")}</Badge> : null}
                 {app.version ? <Badge variant="outline">v{app.version}</Badge> : null}
+                <Badge variant="outline">
+                  {t("apps.requiresMode").replace("{mode}", app.requiredMode.charAt(0).toUpperCase() + app.requiredMode.slice(1))}
+                </Badge>
                 {installedIsPreview ? <Badge variant="secondary">{t("apps.previewVersion")}</Badge> : null}
                 {catalogApp?.tags?.map((tag) => (
                   <Badge key={tag} variant="outline">
@@ -945,10 +1081,22 @@ function AppDetail({
                 ))}
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <Button className="text-destructive hover:text-destructive" type="button" variant="ghost" onClick={onUninstall}>
-                  <Trash className="size-3.5" />
-                  {t("apps.uninstall")}
-                </Button>
+                {app.source === "builtin" ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">{app.enabled ? t("apps.enabled") : t("apps.disabled")}</span>
+                    <Switch
+                      aria-label={t("apps.enableToggle").replace("{name}", title)}
+                      checked={app.enabled}
+                      disabled={enablePending}
+                      onCheckedChange={onEnabledChange}
+                    />
+                  </div>
+                ) : app.canUninstall ? (
+                  <Button className="text-destructive hover:text-destructive" type="button" variant="ghost" onClick={onUninstall}>
+                    <Trash className="size-3.5" />
+                    {t("apps.uninstall")}
+                  </Button>
+                ) : null}
               </div>
             </div>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">{description || t("apps.noDescription")}</p>

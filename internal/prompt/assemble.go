@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -121,10 +120,8 @@ func Assemble(input Input) Output {
 	if seg := skillsSegment(input.Skills, input.Home); seg != nil {
 		segments = append(segments, *seg)
 	}
-	if normalizeMode(input.Mode) != "chat" {
-		if seg := appsSegment(input.Apps, input.AppConnections); seg != nil {
-			segments = append(segments, *seg)
-		}
+	if seg := appsSegment(input.Apps, input.AppConnections); seg != nil {
+		segments = append(segments, *seg)
 	}
 	if user := strings.TrimSpace(input.UserInstruction); user != "" {
 		segments = append(segments, Segment{
@@ -159,25 +156,13 @@ func appsSegment(list []*app.Definition, connections []*app.Connection) *Segment
 		return nil
 	}
 	connectionCounts := appConnectionCounts(connections)
-	hasUsable := false
-	for _, item := range list {
-		if appPromptUsable(item, connectionCounts) {
-			hasUsable = true
-			break
-		}
-	}
 	var b strings.Builder
-	b.WriteString("## Installed Apps\n\n")
-	b.WriteString("Installed apps provide configured endpoints and app-scoped skills when they are connected or do not require a connection.\n")
-	b.WriteString("Apps marked `not connected` are installed but not usable yet; do not call their endpoints or load their app skills until a connection is added.\n")
-	if hasUsable {
-		b.WriteString("REST and GraphQL endpoint calls use configured app connections. Load `work.api`, then use the listed REST endpoint names with `builtin_rest_request` and GraphQL endpoint names with `builtin_graphql_request`; omit `connection` unless the tool reports multiple configured connections. Reachable MCP endpoints appear as `app.*` toolkits; load the matching app toolkit instead of routing them through REST or GraphQL tools.\n")
-		b.WriteString("Full app SKILL.md bodies are not loaded by default. When an app skill matches, call `builtin_skill_read(app_id=\"<app id>\", skill_id=\"<skill id>\")` once, then follow the returned instructions.\n")
-		b.WriteString("Do not proactively load untriggered app skills.\n")
-	}
-	b.WriteString("\n")
+	b.WriteString("## Available Apps\n\n")
+	b.WriteString("Enabled apps are listed here as a compact capability index. Their tools are not loaded by default.\n")
+	b.WriteString("When an app matches the user's request, first request its required capability if needed, then call `builtin_skill_read(app_id=\"<app id>\", skill_id=\"<default skill id>\")`. Follow the returned instructions; the app's tools become available on the next model step and remain loaded for this session.\n")
+	b.WriteString("Do not load unrelated apps. Apps marked `not connected` cannot be loaded until a connection is added.\n\n")
 	for _, item := range list {
-		if item == nil {
+		if item == nil || !item.Enabled {
 			continue
 		}
 		id := strings.TrimSpace(item.ID)
@@ -189,49 +174,27 @@ func appsSegment(list []*app.Definition, connections []*app.Connection) *Segment
 			name = id
 		}
 		desc := strings.TrimSpace(item.Description)
+		requiredMode := normalizeMode(item.RequiredMode)
+		if strings.TrimSpace(item.RequiredMode) == "" {
+			requiredMode = "work"
+		}
+		modeLabel := strings.ToUpper(requiredMode[:1]) + requiredMode[1:]
 		if desc != "" {
-			fmt.Fprintf(&b, "- App `%s` (%s) — %s\n", id, name, desc)
+			fmt.Fprintf(&b, "- App `%s` (%s), requires %s — %s\n", id, name, modeLabel, desc)
 		} else {
-			fmt.Fprintf(&b, "- App `%s` (%s)\n", id, name)
+			fmt.Fprintf(&b, "- App `%s` (%s), requires %s\n", id, name, modeLabel)
 		}
 		if !appPromptUsable(item, connectionCounts) {
 			fmt.Fprintf(&b, "  - Status: not connected. Add a connection before using this app.\n")
 			continue
 		}
-		if len(item.Endpoints) > 0 {
-			names := make([]string, 0, len(item.Endpoints))
-			for name := range item.Endpoints {
-				names = append(names, name)
+		skillID, skillDescription := defaultAppSkill(item)
+		if skillID != "" {
+			fmt.Fprintf(&b, "  - Default skill `%s`", skillID)
+			if skillDescription != "" {
+				fmt.Fprintf(&b, " — %s", skillDescription)
 			}
-			sort.Strings(names)
-			for _, name := range names {
-				endpoint := item.Endpoints[name]
-				kind := strings.TrimSpace(endpoint.Kind)
-				if kind == "" {
-					kind = "endpoint"
-				}
-				if endpoint.Description != "" {
-					fmt.Fprintf(&b, "  - Endpoint `%s` (%s) — %s\n", name, kind, endpoint.Description)
-				} else {
-					fmt.Fprintf(&b, "  - Endpoint `%s` (%s)\n", name, kind)
-				}
-			}
-		}
-		for _, sk := range item.Skills {
-			id := strings.TrimSpace(sk.ID)
-			if id == "" {
-				id = strings.TrimSpace(sk.Name)
-			}
-			path := appSkillRealPath(item, sk)
-			desc := strings.TrimSpace(sk.Description)
-			if id == "" || desc == "" {
-				continue
-			}
-			if path != "" {
-				fmt.Fprintf(&b, "  - Skill `%s` (path: `%s`) — %s\n", id, path, desc)
-			} else {
-				fmt.Fprintf(&b, "  - Skill `%s` — %s\n", id, desc)
-			}
+			b.WriteByte('\n')
 		}
 	}
 	content := strings.TrimSpace(b.String())
@@ -242,13 +205,35 @@ func appsSegment(list []*app.Definition, connections []*app.Connection) *Segment
 }
 
 func appPromptUsable(def *app.Definition, connectionCounts map[string]int) bool {
-	if def == nil {
+	if def == nil || !def.Enabled {
 		return false
 	}
 	if !appRequiresConnection(def) {
 		return true
 	}
 	return connectionCounts[strings.TrimSpace(def.ID)] > 0
+}
+
+func defaultAppSkill(def *app.Definition) (string, string) {
+	if def == nil {
+		return "", ""
+	}
+	id := strings.TrimSpace(def.DefaultSkillID)
+	if id == "" && len(def.Skills) > 0 {
+		id = strings.TrimSpace(def.Skills[0].ID)
+		if id == "" {
+			id = strings.TrimSpace(def.Skills[0].Name)
+		}
+		if id == "" {
+			id = strings.TrimSpace(def.Skills[0].Path)
+		}
+	}
+	for _, item := range def.Skills {
+		if id == item.ID || id == item.Name || id == item.Path {
+			return id, strings.TrimSpace(item.Description)
+		}
+	}
+	return id, ""
 }
 
 func appRequiresConnection(def *app.Definition) bool {
@@ -329,21 +314,6 @@ func skillRealPath(item skill.Skill, homeDir string) string {
 		if strings.TrimSpace(homeDir) != "" {
 			return filepath.Join(homeDir, "skills", filepath.FromSlash(raw))
 		}
-	}
-	return ""
-}
-
-func appSkillRealPath(def *app.Definition, ref app.SkillRef) string {
-	raw := strings.TrimSpace(ref.Path)
-	if raw == "" {
-		return ""
-	}
-	if filepath.IsAbs(raw) {
-		return raw
-	}
-	appFile := strings.TrimSpace(def.Path)
-	if filepath.IsAbs(appFile) {
-		return filepath.Join(filepath.Dir(appFile), filepath.FromSlash(raw))
 	}
 	return ""
 }

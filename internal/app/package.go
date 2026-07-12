@@ -78,6 +78,9 @@ func InstallPackage(root string, packageJSON []byte, expectedSHA256, sourceURL s
 	if !appIDPattern.MatchString(appID) {
 		return nil, fmt.Errorf("invalid app id %q", pkg.App.ID)
 	}
+	if IsBuiltinID(appID) {
+		return nil, fmt.Errorf("%w: %s", ErrBuiltinApp, appID)
+	}
 	appVersion := strings.TrimSpace(pkg.App.Version)
 	if appVersion == "" {
 		return nil, errors.New("app package version is required")

@@ -21,6 +21,13 @@ func TestBuiltinToolsBelongToExactlyOneToolkit(t *testing.T) {
 		}
 	}
 	for _, def := range defs {
+		_, builtinAppTool := BuiltinAppIDForTool(def.Name)
+		if builtinAppTool || IsAppAPITool(def.Name) {
+			if counts[def.Name] != 0 {
+				t.Fatalf("app tool %s leaked into a toolkit", def.Name)
+			}
+			continue
+		}
 		if counts[def.Name] != 1 {
 			t.Fatalf("tool %s belongs to %d toolkits", def.Name, counts[def.Name])
 		}
@@ -86,31 +93,32 @@ func TestDefinitionsForTurnLoadsToolkitMonotonically(t *testing.T) {
 	}
 }
 
-func TestToolkitCatalogGroupsDynamicUIAndApps(t *testing.T) {
+func TestToolkitCatalogGroupsDynamicUIAndExcludesApps(t *testing.T) {
 	defs := []provider.ToolDef{
 		{Name: "canvas_markdown", Capability: store.ModeChat},
 		{Name: "ui_confirm", Capability: store.ModeChat},
-		{Name: "app_mcp__github__default__search__hash", Capability: store.ModeWork},
+		{Name: "app_mcp__search__hash", Capability: store.ModeWork, AppID: "github"},
 	}
 	catalog := BuildToolkitCatalog(defs)
 	ui, ok := ToolkitByID(catalog, "ui.canvas")
 	if !ok || !ui.Default || len(ui.ToolNames) != 2 {
 		t.Fatalf("UI toolkit wrong: %+v", ui)
 	}
-	app, ok := ToolkitByID(catalog, "app.github")
-	if !ok || app.Default || len(app.ToolNames) != 1 || app.Capability != store.ModeWork {
-		t.Fatalf("app toolkit wrong: %+v", app)
+	for _, manifest := range catalog {
+		if strings.HasPrefix(manifest.ID, "app.") || slicesContain(manifest.ToolNames, "app_mcp__search__hash") {
+			t.Fatalf("app tool leaked into toolkit: %+v", manifest)
+		}
 	}
 }
 
 func TestToolkitIndexIsCapabilityScopedAndStable(t *testing.T) {
 	catalog := BuildToolkitCatalog(BuiltinDefinitions())
 	work := ToolkitIndex(store.ModeWork, catalog)
-	if !strings.Contains(work, "work.browser") || strings.Contains(work, "code.lsp") {
+	if strings.Contains(work, "work.browser") || strings.Contains(work, "work.api") || strings.Contains(work, "code.lsp") {
 		t.Fatalf("Work toolkit index wrong: %s", work)
 	}
 	code := ToolkitIndex(store.ModeCode, catalog)
-	if !strings.Contains(code, "work.browser") || !strings.Contains(code, "code.lsp") {
+	if strings.Contains(code, "work.browser") || strings.Contains(code, "code.process") || !strings.Contains(code, "code.lsp") {
 		t.Fatalf("Code toolkit index wrong: %s", code)
 	}
 	ids := make([]string, len(catalog))
@@ -135,4 +143,13 @@ func toolNames(defs []provider.ToolDef) []string {
 		names[index] = def.Name
 	}
 	return names
+}
+
+func slicesContain(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }

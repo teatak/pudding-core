@@ -86,15 +86,17 @@ func TestAssembleDoesNotShowPseudoPathForBuiltinSkill(t *testing.T) {
 
 func TestAssembleIncludesAppsIndex(t *testing.T) {
 	appPath := filepath.Join(t.TempDir(), "apps", "github", app.AppFileName)
-	realSkillPath := filepath.Join(filepath.Dir(appPath), "skills", "issues", "SKILL.md")
 	out := Assemble(Input{
 		Mode: "work",
 		Apps: []*app.Definition{
 			{
-				ID:          "github",
-				Name:        "GitHub",
-				Description: "Access repositories and issues.",
-				Path:        appPath,
+				ID:             "github",
+				Name:           "GitHub",
+				Description:    "Access repositories and issues.",
+				Enabled:        true,
+				RequiredMode:   "work",
+				DefaultSkillID: "github-issues",
+				Path:           appPath,
 				Endpoints: map[string]app.Endpoint{
 					"github_rest": {
 						Kind:        app.EndpointKindREST,
@@ -112,17 +114,20 @@ func TestAssembleIncludesAppsIndex(t *testing.T) {
 			},
 		},
 	})
-	if !strings.Contains(out.SystemInstruction, "## Installed Apps") {
+	if !strings.Contains(out.SystemInstruction, "## Available Apps") {
 		t.Fatalf("assembled prompt missing apps index:\n%s", out.SystemInstruction)
 	}
-	if !strings.Contains(out.SystemInstruction, "App `github`") || !strings.Contains(out.SystemInstruction, "Endpoint `github_rest`") {
-		t.Fatalf("assembled prompt missing app endpoint metadata:\n%s", out.SystemInstruction)
+	if !strings.Contains(out.SystemInstruction, "App `github`") || !strings.Contains(out.SystemInstruction, "requires Work") {
+		t.Fatalf("assembled prompt missing compact app metadata:\n%s", out.SystemInstruction)
 	}
-	if !strings.Contains(out.SystemInstruction, `builtin_skill_read(app_id="<app id>", skill_id="<skill id>")`) {
+	if !strings.Contains(out.SystemInstruction, `builtin_skill_read(app_id="<app id>", skill_id="<default skill id>")`) {
 		t.Fatalf("assembled prompt missing app skill read instruction:\n%s", out.SystemInstruction)
 	}
-	if !strings.Contains(out.SystemInstruction, "Skill `github-issues`") || !strings.Contains(out.SystemInstruction, realSkillPath) {
-		t.Fatalf("assembled prompt missing app skill id or real path %q:\n%s", realSkillPath, out.SystemInstruction)
+	if !strings.Contains(out.SystemInstruction, "Default skill `github-issues`") {
+		t.Fatalf("assembled prompt missing default app skill:\n%s", out.SystemInstruction)
+	}
+	if strings.Contains(out.SystemInstruction, "Endpoint `github_rest`") || strings.Contains(out.SystemInstruction, "skills/issues/SKILL.md") {
+		t.Fatalf("compact app index must not expose endpoint or path details:\n%s", out.SystemInstruction)
 	}
 	if strings.Contains(out.SystemInstruction, "# GitHub Issues") {
 		t.Fatalf("assembled prompt should not inline app skill body:\n%s", out.SystemInstruction)
@@ -134,10 +139,13 @@ func TestAssembleSummarizesUnconnectedApp(t *testing.T) {
 		Mode: "work",
 		Apps: []*app.Definition{
 			{
-				ID:          "github",
-				Name:        "GitHub",
-				Description: "Access repositories and issues.",
-				Auth:        &app.AuthConfig{Required: true},
+				ID:             "github",
+				Name:           "GitHub",
+				Description:    "Access repositories and issues.",
+				Enabled:        true,
+				RequiredMode:   "work",
+				DefaultSkillID: "github-issues",
+				Auth:           &app.AuthConfig{Required: true},
 				Endpoints: map[string]app.Endpoint{
 					"github_rest": {Kind: app.EndpointKindREST, Description: "GitHub REST API."},
 				},
@@ -155,8 +163,8 @@ func TestAssembleSummarizesUnconnectedApp(t *testing.T) {
 	if strings.Contains(out.SystemInstruction, "Endpoint `github_rest`") || strings.Contains(out.SystemInstruction, "Skill `github-issues`") {
 		t.Fatalf("unconnected app should not expose endpoints or skills:\n%s", out.SystemInstruction)
 	}
-	if strings.Contains(out.SystemInstruction, "builtin_skill_read") {
-		t.Fatalf("prompt should not suggest app skill loading when no app is usable:\n%s", out.SystemInstruction)
+	if strings.Contains(out.SystemInstruction, "Default skill `github-issues`") {
+		t.Fatalf("unconnected app should not advertise its default skill:\n%s", out.SystemInstruction)
 	}
 }
 
@@ -165,10 +173,13 @@ func TestAssembleShowsConnectedAppFully(t *testing.T) {
 		Mode: "work",
 		Apps: []*app.Definition{
 			{
-				ID:          "github",
-				Name:        "GitHub",
-				Description: "Access repositories and issues.",
-				Auth:        &app.AuthConfig{Required: true},
+				ID:             "github",
+				Name:           "GitHub",
+				Description:    "Access repositories and issues.",
+				Enabled:        true,
+				RequiredMode:   "work",
+				DefaultSkillID: "github-issues",
+				Auth:           &app.AuthConfig{Required: true},
 				Endpoints: map[string]app.Endpoint{
 					"github_rest": {Kind: app.EndpointKindREST, Description: "GitHub REST API."},
 				},
@@ -184,8 +195,8 @@ func TestAssembleShowsConnectedAppFully(t *testing.T) {
 	if strings.Contains(out.SystemInstruction, "Status: not connected") {
 		t.Fatalf("connected app should not be marked unavailable:\n%s", out.SystemInstruction)
 	}
-	if !strings.Contains(out.SystemInstruction, "Endpoint `github_rest`") || !strings.Contains(out.SystemInstruction, "Skill `github-issues`") {
-		t.Fatalf("connected app should expose full metadata:\n%s", out.SystemInstruction)
+	if !strings.Contains(out.SystemInstruction, "Default skill `github-issues`") || strings.Contains(out.SystemInstruction, "Endpoint `github_rest`") {
+		t.Fatalf("connected app should expose only compact loading metadata:\n%s", out.SystemInstruction)
 	}
 }
 
@@ -194,10 +205,13 @@ func TestAssembleShowsConnectionlessSkillsOnlyAppFully(t *testing.T) {
 		Mode: "work",
 		Apps: []*app.Definition{
 			{
-				ID:          "notebook-helper",
-				Name:        "Notebook Helper",
-				Description: "Guide notebook workflows.",
-				Auth:        &app.AuthConfig{Required: false},
+				ID:             "notebook-helper",
+				Name:           "Notebook Helper",
+				Description:    "Guide notebook workflows.",
+				Enabled:        true,
+				RequiredMode:   "work",
+				DefaultSkillID: "notebook-review",
+				Auth:           &app.AuthConfig{Required: false},
 				Skills: []app.SkillRef{{
 					ID:          "notebook-review",
 					Description: "Review a notebook.",
@@ -209,16 +223,16 @@ func TestAssembleShowsConnectionlessSkillsOnlyAppFully(t *testing.T) {
 	if strings.Contains(out.SystemInstruction, "Status: not connected") {
 		t.Fatalf("connectionless skills-only app should be usable:\n%s", out.SystemInstruction)
 	}
-	if !strings.Contains(out.SystemInstruction, "Skill `notebook-review`") {
+	if !strings.Contains(out.SystemInstruction, "Default skill `notebook-review`") {
 		t.Fatalf("connectionless skills-only app should expose skill metadata:\n%s", out.SystemInstruction)
 	}
 }
 
-func TestAssembleModeLayersAndChatHidesApps(t *testing.T) {
-	apps := []*app.Definition{{ID: "github", Name: "GitHub"}}
+func TestAssembleModeLayersAndAllModesShowApps(t *testing.T) {
+	apps := []*app.Definition{{ID: "github", Name: "GitHub", Enabled: true, RequiredMode: "work"}}
 	chat := Assemble(Input{Mode: "chat", Apps: apps})
-	if strings.Contains(chat.SystemInstruction, "## Installed Apps") {
-		t.Fatalf("chat prompt must not expose installed apps:\n%s", chat.SystemInstruction)
+	if !strings.Contains(chat.SystemInstruction, "## Available Apps") || !strings.Contains(chat.SystemInstruction, "requires Work") {
+		t.Fatalf("chat prompt must expose compact app capability metadata:\n%s", chat.SystemInstruction)
 	}
 	work := Assemble(Input{Mode: "work", Apps: apps})
 	if !strings.Contains(work.SystemInstruction, "## Work Mode") || !hasSegment(work.Segments, "mode_work") || !hasSegment(work.Segments, "apps_index") {

@@ -1327,6 +1327,51 @@ func TestDeleteAppAPI(t *testing.T) {
 	}
 }
 
+func TestBuiltinAppEnablementAPI(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	home := t.TempDir()
+	cfg := config.NewManager(home)
+	if err := cfg.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	eng := engine.New(ms, hub, registry.Static(mock.New()), cfg)
+	srv := httptest.NewServer(New(eng, ms, cfg, hub).WithApps(appsvc.NewService(home, cfg)).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+
+	resp := req(t, http.MethodPut, srv.URL+"/apps/browser/enabled", map[string]bool{"enabled": false})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("disable builtin app: want 200, got %d", resp.StatusCode)
+	}
+	updated := decodeJSON[appsvc.Definition](t, resp)
+	if updated.ID != appsvc.BuiltinBrowserID || updated.Enabled || updated.CanUninstall {
+		t.Fatalf("unexpected updated app: %+v", updated)
+	}
+
+	enabled, err := cfg.ListAppEnablement(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled[appsvc.BuiltinBrowserID] {
+		t.Fatalf("browser enablement was not persisted: %+v", enabled)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/app-skills/browser/skills/browser/SKILL.md", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("disabled app management skill: want 200, got %d", resp.StatusCode)
+	}
+	detail := decodeJSON[appsvc.SkillDetail](t, resp)
+	if detail.ID != appsvc.BuiltinBrowserID || detail.Content == "" {
+		t.Fatalf("unexpected disabled app management skill: %+v", detail)
+	}
+
+	resp = req(t, http.MethodDelete, srv.URL+"/apps/browser", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("delete builtin app: want 409, got %d", resp.StatusCode)
+	}
+}
+
 func TestDeleteAppRemovesConnections(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()

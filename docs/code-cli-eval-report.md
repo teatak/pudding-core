@@ -55,7 +55,7 @@ make tools-report RUNARGS="--days 30 --all"
 | Git status/diff/log | `code.git-read` | 默认隐藏,CLI 失败时加载 |
 | Git stage/unstage/commit | `code.git-write` | 默认隐藏,保留结构化审批 |
 | LSP tools | `code.lsp` | 默认隐藏,语义任务时加载 |
-| background process | `code.process` | 默认隐藏,dev server 等任务时加载 |
+| background process | Terminal App | 默认隐藏,dev server 等任务时加载 |
 | skill validate/submit | `code.skill` | 默认隐藏 |
 
 ## 5. M5 删除结论

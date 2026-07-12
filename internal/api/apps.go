@@ -43,6 +43,10 @@ type installAppReq struct {
 	SourceURL     string `json:"sourceURL"`
 }
 
+type putAppEnabledReq struct {
+	Enabled *bool `json:"enabled"`
+}
+
 type appMCPOverrideView struct {
 	Configured bool                    `json:"configured"`
 	Override   app.MCPEndpointOverride `json:"override"`
@@ -75,6 +79,36 @@ func (s *Server) installApp(c *cart.Context) error {
 	}
 	def, err := s.apps.InstallPackage(c.Request.Context(), []byte(req.PackageJSON), req.PackageSHA256, req.SourceURL)
 	if err != nil {
+		if errors.Is(err, app.ErrBuiltinApp) {
+			c.JSON(http.StatusConflict, map[string]string{"error": "builtin_app_id_reserved"})
+			return nil
+		}
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, def)
+	return nil
+}
+
+func (s *Server) putAppEnabled(c *cart.Context) error {
+	apps, ok := s.apps.(appEnableService)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_enablement_unavailable"})
+		return nil
+	}
+	var req putAppEnabledReq
+	if err := decode(c, &req); err != nil || req.Enabled == nil {
+		return badRequest(c, "enabled is required")
+	}
+	id, _ := c.Param("id")
+	def, err := apps.SetEnabled(c.Request.Context(), id, *req.Enabled)
+	if errors.Is(err, app.ErrInvalidID) {
+		return badRequest(c, "invalid app id")
+	}
+	if errors.Is(err, app.ErrNotFound) {
+		c.JSON(http.StatusNotFound, map[string]string{"error": "app_not_found"})
+		return nil
+	}
+	if err != nil {
 		return s.fail(c, err)
 	}
 	c.JSON(http.StatusOK, def)
@@ -104,6 +138,10 @@ func (s *Server) deleteApp(c *cart.Context) error {
 		}
 		if errors.Is(err, app.ErrNotFound) {
 			c.JSON(http.StatusNotFound, map[string]string{"error": "app_not_found"})
+			return nil
+		}
+		if errors.Is(err, app.ErrBuiltinApp) {
+			c.JSON(http.StatusConflict, map[string]string{"error": "builtin_app_cannot_be_uninstalled"})
 			return nil
 		}
 		return s.fail(c, err)
@@ -215,7 +253,7 @@ func (s *Server) getAppSkill(c *cart.Context) error {
 	}
 	id := parts[0]
 	skillPath := parts[1]
-	detail, err := s.apps.ReadSkill(c.Request.Context(), id, skillPath)
+	detail, err := s.apps.ReadSkillDetail(c.Request.Context(), id, skillPath)
 	if err != nil {
 		if errors.Is(err, app.ErrInvalidID) {
 			return badRequest(c, "invalid app id")

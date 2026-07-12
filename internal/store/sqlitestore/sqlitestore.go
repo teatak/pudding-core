@@ -205,8 +205,8 @@ func (s *Store) CreateSession(ctx context.Context, sess *store.Session) error {
 		now := time.Now()
 		sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = now, now, now
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO sessions(id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,pinned,pinned_order,created_at,updated_at,last_activity_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			sess.ID, sess.Title, sess.Provider, sess.Model, sess.ReasoningEffort, sess.ReasoningModelKey, sess.ActiveMode, sess.ModeLease, sess.ProjectID, boolInt(sess.Pinned), sess.PinnedOrder, unixMS(now), unixMS(now), unixMS(now),
+			`INSERT INTO sessions(id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,loaded_app_ids,pinned,pinned_order,created_at,updated_at,last_activity_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			sess.ID, sess.Title, sess.Provider, sess.Model, sess.ReasoningEffort, sess.ReasoningModelKey, sess.ActiveMode, sess.ModeLease, sess.ProjectID, encodeStringList(sess.LoadedAppIDs), boolInt(sess.Pinned), sess.PinnedOrder, unixMS(now), unixMS(now), unixMS(now),
 		)
 		return err
 	})
@@ -218,13 +218,17 @@ func (s *Store) GetSession(ctx context.Context, id string) (*store.Session, erro
 
 	var sess store.Session
 	var created, updated, lastActivity int64
+	var loadedAppIDs string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ReasoningEffort, &sess.ReasoningModelKey, &sess.ActiveMode, &sess.ModeLease, &sess.ProjectID, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
+		`SELECT id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,loaded_app_ids,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ReasoningEffort, &sess.ReasoningModelKey, &sess.ActiveMode, &sess.ModeLease, &sess.ProjectID, &loadedAppIDs, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := decodeStringList(loadedAppIDs, &sess.LoadedAppIDs); err != nil {
 		return nil, err
 	}
 	sess.ActiveMode = store.NormalizeAgentMode(sess.ActiveMode)
@@ -239,7 +243,7 @@ func (s *Store) ListSessions(ctx context.Context) ([]*store.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.QueryContext(ctx, `SELECT id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions ORDER BY last_activity_at DESC, created_at DESC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,loaded_app_ids,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions ORDER BY last_activity_at DESC, created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +253,11 @@ func (s *Store) ListSessions(ctx context.Context) ([]*store.Session, error) {
 	for rows.Next() {
 		var sess store.Session
 		var created, updated, lastActivity int64
-		if err := rows.Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ReasoningEffort, &sess.ReasoningModelKey, &sess.ActiveMode, &sess.ModeLease, &sess.ProjectID, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running); err != nil {
+		var loadedAppIDs string
+		if err := rows.Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ReasoningEffort, &sess.ReasoningModelKey, &sess.ActiveMode, &sess.ModeLease, &sess.ProjectID, &loadedAppIDs, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running); err != nil {
+			return nil, err
+		}
+		if err := decodeStringList(loadedAppIDs, &sess.LoadedAppIDs); err != nil {
 			return nil, err
 		}
 		sess.ActiveMode = store.NormalizeAgentMode(sess.ActiveMode)
@@ -309,6 +317,9 @@ func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionU
 			}
 			sess.ProjectID = *upd.ProjectID
 		}
+		if upd.LoadedAppIDs != nil {
+			sess.LoadedAppIDs = append([]string(nil), (*upd.LoadedAppIDs)...)
+		}
 		if upd.Pinned != nil {
 			sess.Pinned = *upd.Pinned
 		}
@@ -317,8 +328,8 @@ func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionU
 		}
 		sess.UpdatedAt = time.Now()
 		_, err = tx.ExecContext(ctx,
-			`UPDATE sessions SET title=?, provider=?, model=?, reasoning_effort=?, reasoning_model_key=?, active_mode=?, mode_lease=?, project_id=?, pinned=?, pinned_order=?, updated_at=? WHERE id=?`,
-			sess.Title, sess.Provider, sess.Model, sess.ReasoningEffort, sess.ReasoningModelKey, sess.ActiveMode, sess.ModeLease, sess.ProjectID, boolInt(sess.Pinned), sess.PinnedOrder, unixMS(sess.UpdatedAt), id,
+			`UPDATE sessions SET title=?, provider=?, model=?, reasoning_effort=?, reasoning_model_key=?, active_mode=?, mode_lease=?, project_id=?, loaded_app_ids=?, pinned=?, pinned_order=?, updated_at=? WHERE id=?`,
+			sess.Title, sess.Provider, sess.Model, sess.ReasoningEffort, sess.ReasoningModelKey, sess.ActiveMode, sess.ModeLease, sess.ProjectID, encodeStringList(sess.LoadedAppIDs), boolInt(sess.Pinned), sess.PinnedOrder, unixMS(sess.UpdatedAt), id,
 		)
 		if err != nil {
 			return err
@@ -1749,13 +1760,17 @@ func (s *Store) LatestSeq(ctx context.Context, sessionID string) (int64, error) 
 func (s *Store) getSessionDB(ctx context.Context, id string) (*store.Session, error) {
 	var sess store.Session
 	var created, updated, lastActivity int64
+	var loadedAppIDs string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ReasoningEffort, &sess.ReasoningModelKey, &sess.ActiveMode, &sess.ModeLease, &sess.ProjectID, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
+		`SELECT id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,loaded_app_ids,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ReasoningEffort, &sess.ReasoningModelKey, &sess.ActiveMode, &sess.ModeLease, &sess.ProjectID, &loadedAppIDs, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := decodeStringList(loadedAppIDs, &sess.LoadedAppIDs); err != nil {
 		return nil, err
 	}
 	sess.ActiveMode = store.NormalizeAgentMode(sess.ActiveMode)
@@ -1795,13 +1810,17 @@ func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 func getSessionTx(ctx context.Context, tx *sql.Tx, id string) (*store.Session, error) {
 	var sess store.Session
 	var created, updated, lastActivity int64
+	var loadedAppIDs string
 	err := tx.QueryRowContext(ctx,
-		`SELECT id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
-	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ReasoningEffort, &sess.ReasoningModelKey, &sess.ActiveMode, &sess.ModeLease, &sess.ProjectID, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
+		`SELECT id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,loaded_app_ids,pinned,pinned_order,created_at,updated_at,last_activity_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=sessions.id AND t.status='running') FROM sessions WHERE id=?`, id,
+	).Scan(&sess.ID, &sess.Title, &sess.Provider, &sess.Model, &sess.ReasoningEffort, &sess.ReasoningModelKey, &sess.ActiveMode, &sess.ModeLease, &sess.ProjectID, &loadedAppIDs, &sess.Pinned, &sess.PinnedOrder, &created, &updated, &lastActivity, &sess.Running)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := decodeStringList(loadedAppIDs, &sess.LoadedAppIDs); err != nil {
 		return nil, err
 	}
 	sess.ActiveMode = store.NormalizeAgentMode(sess.ActiveMode)
@@ -2280,6 +2299,20 @@ func normalizeMessageMetadata(raw string) json.RawMessage {
 		return nil
 	}
 	return normalizeJSON(json.RawMessage(raw))
+}
+
+func encodeStringList(values []string) string {
+	data, _ := json.Marshal(store.NormalizeAppIDs(values))
+	return string(data)
+}
+
+func decodeStringList(raw string, target *[]string) error {
+	var values []string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return fmt.Errorf("decode string list: %w", err)
+	}
+	*target = store.NormalizeAppIDs(values)
+	return nil
 }
 
 func unixMS(t time.Time) int64 { return t.UnixNano() / int64(time.Millisecond) }

@@ -907,6 +907,13 @@ export async function deleteApp(token: string, id: string): Promise<void> {
   });
 }
 
+export function setAppEnabled(token: string, id: string, enabled: boolean): Promise<AppDefinition> {
+  return request(token, `/apps/${encodeURIComponent(id)}/enabled`, appDefinition, {
+    method: "PUT",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
 export function listAppConnections(token: string): Promise<{ connections: AppConnection[] }> {
   return request(token, "/app-connections", listAppConnectionsResponse);
 }

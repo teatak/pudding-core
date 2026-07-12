@@ -43,6 +43,10 @@ type Runner interface {
 	Call(ctx context.Context, call Call) Result
 }
 
+type AppScopedDefinitionRunner interface {
+	DefinitionsForApps(ctx context.Context, sessionID string, appIDs []string) ([]provider.ToolDef, error)
+}
+
 type ApprovalDetailsProvider interface {
 	ApprovalDetails(ctx context.Context, call Call) (map[string]any, error)
 }

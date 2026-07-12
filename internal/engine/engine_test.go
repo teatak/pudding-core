@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/browser"
 	"github.com/teatak/pudding-core/internal/config"
@@ -788,67 +789,10 @@ func TestToolkitLoadRebuildsToolsAndResetsNextTurn(t *testing.T) {
 	}
 }
 
-func TestKnownUnloadedToolAutoActivatesToolkit(t *testing.T) {
-	ms := memstore.New()
-	hub := event.NewHub()
-	client := &implicitToolkitClient{}
-	runner := &recordingToolRunner{
-		defs:   tool.BuiltinDefinitions(),
-		result: tool.Result{Ok: true, Content: `{"ok":true,"tab":{"id":"tab_1"}}`},
-	}
-	eng := New(ms, hub, mapResolver{"implicit-toolkit": client}, ms, WithTools(runner))
-	ctx := context.Background()
-	sid := "sess_implicit_toolkit"
-	if err := ms.CreateSession(ctx, &store.Session{
-		ID: sid, Title: "implicit toolkit", Provider: "implicit-toolkit", Model: "toolkit-model",
-		ActiveMode: store.ModeWork, ModeLease: store.ModeLeaseSession,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
-		DisplayName: "implicit-toolkit", Protocol: "openai-compatible",
-		Models: []store.ProviderModel{{
-			ID: "toolkit-model", Capabilities: &store.ModelCaps{Tools: true}, Limits: &store.ModelLimits{MaxToolLoops: 3},
-		}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c_implicit_toolkit", Text: "打开网页"}); err != nil {
-		t.Fatal(err)
-	}
-	waitTurnDone(t, ms, sid)
-	if len(client.requests) != 2 {
-		t.Fatalf("provider requests = %d, want 2", len(client.requests))
-	}
-	if hasToolDef(client.requests[0].Tools, tool.BrowserOpen) {
-		t.Fatal("browser tool must begin unloaded")
-	}
-	if !hasToolDef(client.requests[1].Tools, tool.BrowserOpen) {
-		t.Fatal("implicit toolkit activation did not rebuild browser tools")
-	}
-	if len(runner.calls) != 1 || runner.calls[0].Name != tool.BrowserOpen {
-		t.Fatalf("known unloaded tool was not executed: %+v", runner.calls)
-	}
-	msgs, err := ms.ListMessages(ctx, sid, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, message := range msgs {
-		for _, part := range message.Parts {
-			if part.Type == store.ContentPartToolResult && part.Name == tool.BrowserOpen && !part.Ok {
-				t.Fatalf("implicit activation surfaced a tool_not_loaded error: %+v", part)
-			}
-		}
-	}
-}
-
 func TestToolkitLoadEnforcesCapabilityAndPerTurnLimit(t *testing.T) {
 	catalog := tool.BuildToolkitCatalog(tool.BuiltinDefinitions())
 	state := newTurnToolkitState()
 	state.catalog = catalog
-	if available, changed := activateTurnToolkitForTool(tool.CodeDiagnostics, store.ModeWork, state); available || changed {
-		t.Fatal("implicit toolkit activation bypassed Work capability")
-	}
 	call := func(id, toolkitID string, mode store.AgentMode) (tool.Result, bool) {
 		args, _ := json.Marshal(map[string]any{"toolkit_ids": []string{toolkitID}})
 		return loadTurnToolkits(tool.Call{CallID: id, Name: tool.ToolkitLoad, Args: args}, mode, state)
@@ -862,8 +806,267 @@ func TestToolkitLoadEnforcesCapabilityAndPerTurnLimit(t *testing.T) {
 	if result, changed := call("load_2", "code.lsp", store.ModeCode); !result.Ok || !changed {
 		t.Fatalf("second toolkit load failed: %+v", result)
 	}
-	if result, changed := call("load_3", "code.process", store.ModeCode); result.Ok || changed || !strings.Contains(result.Content, `"reason":"toolkit_load_limit"`) {
+	if result, changed := call("load_3", "code.skill", store.ModeCode); result.Ok || changed || !strings.Contains(result.Content, `"reason":"toolkit_load_limit"`) {
 		t.Fatalf("third toolkit load was not rejected: %+v", result)
+	}
+}
+
+func TestAppSkillReadLoadsAppToolsForSession(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	client := &appLoadClient{}
+	runner := &recordingToolRunner{
+		defs:   tool.BuiltinDefinitions(),
+		result: tool.Result{Ok: true, Content: `{"ok":true}`},
+	}
+	apps := &mutableAppSource{defs: app.BuiltinDefinitions()}
+	eng := New(ms, hub, mapResolver{"app-load": client}, ms, WithTools(runner), WithApps(apps))
+	ctx := context.Background()
+	sid := "sess_app_load"
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID: sid, Title: "app load", Provider: "app-load", Model: "app-model",
+		ActiveMode: store.ModeWork, ModeLease: store.ModeLeaseSession,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "app-load", Protocol: "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID: "app-model", Capabilities: &store.ModelCaps{Tools: true}, Limits: &store.ModelLimits{MaxToolLoops: 4},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c_app_load_1", Text: "打开网页"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+	if len(client.requests) != 3 {
+		t.Fatalf("provider requests = %d, want 3", len(client.requests))
+	}
+	if hasToolDef(client.requests[0].Tools, tool.BrowserOpen) || !hasToolDef(client.requests[0].Tools, tool.SkillRead) {
+		t.Fatalf("browser must start unloaded: %+v", client.requests[0].Tools)
+	}
+	if !hasToolDef(client.requests[1].Tools, tool.BrowserOpen) {
+		t.Fatalf("browser tools missing after app skill read: %+v", client.requests[1].Tools)
+	}
+	if len(runner.calls) != 2 || runner.calls[0].Name != tool.SkillRead || runner.calls[1].Name != tool.BrowserOpen {
+		t.Fatalf("unexpected app tool calls: %+v", runner.calls)
+	}
+	sess, err := ms.GetSession(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameStrings(sess.LoadedAppIDs, []string{app.BuiltinBrowserID}) {
+		t.Fatalf("loaded app ids = %+v", sess.LoadedAppIDs)
+	}
+
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c_app_load_2", Text: "继续"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+	if len(client.requests) != 4 || !hasToolDef(client.requests[3].Tools, tool.BrowserOpen) {
+		t.Fatalf("loaded app did not persist across turns: %+v", client.requests)
+	}
+	chatDefs, _, err := eng.toolDefinitions(ctx, sid, store.ModeChat, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasToolDef(chatDefs, tool.BrowserOpen) {
+		t.Fatal("mode downgrade must hide loaded browser tools")
+	}
+	apps.defs[0].Enabled = false
+	workDefs, _, err := eng.toolDefinitions(ctx, sid, store.ModeWork, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasToolDef(workDefs, tool.BrowserOpen) {
+		t.Fatal("disabled app must hide loaded browser tools")
+	}
+	client.forceBrowser = true
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c_app_load_3", Text: "再打开一次"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+	if len(runner.calls) != 2 {
+		t.Fatalf("disabled app tool reached runner: %+v", runner.calls)
+	}
+	messages, err := ms.ListMessages(ctx, sid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundDisabled := false
+	for _, message := range messages {
+		for _, part := range message.Parts {
+			if part.Type == store.ContentPartToolResult && part.Name == tool.BrowserOpen && !part.Ok && strings.Contains(part.Content, `"reason":"app_disabled"`) {
+				foundDisabled = true
+			}
+		}
+	}
+	if !foundDisabled {
+		t.Fatal("disabled app call did not return app_disabled")
+	}
+	sess, err = ms.GetSession(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameStrings(sess.LoadedAppIDs, []string{app.BuiltinBrowserID}) {
+		t.Fatalf("mode or enablement change cleared loaded app ids: %+v", sess.LoadedAppIDs)
+	}
+}
+
+func TestTerminalAppToolsRequireLoadedCodeMode(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions()}
+	apps := &mutableAppSource{defs: app.BuiltinDefinitions()}
+	eng := New(ms, hub, registry.Static(mock.New()), ms, WithTools(runner), WithApps(apps))
+	ctx := context.Background()
+	sid := "sess_terminal_app"
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID: sid, Provider: "mock", Model: "mock-model",
+		ActiveMode: store.ModeCode, ModeLease: store.ModeLeaseSession,
+		LoadedAppIDs: []string{app.BuiltinTerminalID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	codeDefs, _, err := eng.toolDefinitions(ctx, sid, store.ModeCode, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{tool.CommandRun, tool.CommandStart, tool.CommandPoll, tool.CommandStop} {
+		if !hasToolDef(codeDefs, name) {
+			t.Fatalf("loaded Terminal missing %s", name)
+		}
+	}
+	workDefs, _, err := eng.toolDefinitions(ctx, sid, store.ModeWork, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasToolDef(workDefs, tool.CommandStart) || hasToolDef(workDefs, tool.CommandPoll) || hasToolDef(workDefs, tool.CommandStop) {
+		t.Fatal("mode downgrade exposed Terminal tools")
+	}
+
+	loaded := []string{}
+	if _, err := ms.UpdateSession(ctx, sid, store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
+		t.Fatal(err)
+	}
+	codeDefs, _, err = eng.toolDefinitions(ctx, sid, store.ModeCode, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasToolDef(codeDefs, tool.CommandRun) || hasToolDef(codeDefs, tool.CommandStart) {
+		t.Fatalf("Code Core and Terminal boundary is wrong: %+v", codeDefs)
+	}
+}
+
+func TestInstalledAppToolsBypassToolkitOnlyWhenLoaded(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	defs := append(tool.BuiltinDefinitions(), provider.ToolDef{
+		Name: "app_mcp__search__hash", Description: "Search GitHub", Capability: store.ModeWork, AppID: "github",
+	})
+	runner := &recordingToolRunner{defs: defs}
+	apps := &mutableAppSource{defs: []*app.Definition{{
+		ID: "github", Name: "GitHub", Source: app.SourceInstalled, Enabled: true, RequiredMode: "work", DefaultSkillID: "github",
+		Endpoints: map[string]app.Endpoint{
+			"github_rest": {Kind: app.EndpointKindREST},
+		},
+	}}}
+	eng := New(ms, hub, registry.Static(mock.New()), ms, WithTools(runner), WithApps(apps))
+	ctx := context.Background()
+	sid := "sess_installed_app"
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID: sid, Provider: "mock", Model: "mock-model", ActiveMode: store.ModeWork, ModeLease: store.ModeLeaseSession,
+		LoadedAppIDs: []string{"github"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	loadedDefs, catalog, err := eng.toolDefinitions(ctx, sid, store.ModeWork, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasToolDef(loadedDefs, tool.RESTRequest) || hasToolDef(loadedDefs, tool.GraphQLRequest) || !hasToolDef(loadedDefs, "app_mcp__search__hash") {
+		t.Fatalf("installed app tools not routed directly: %+v", loadedDefs)
+	}
+	if len(runner.definitionAppIDs) == 0 || !sameStrings(runner.definitionAppIDs[len(runner.definitionAppIDs)-1], []string{"github"}) {
+		t.Fatalf("scoped definitions received app ids: %+v", runner.definitionAppIDs)
+	}
+	for _, manifest := range catalog {
+		if manifest.ID == "work.api" || strings.HasPrefix(manifest.ID, "app.") {
+			t.Fatalf("legacy App toolkit remained: %+v", manifest)
+		}
+	}
+
+	loaded := []string{}
+	if _, err := ms.UpdateSession(ctx, sid, store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
+		t.Fatal(err)
+	}
+	unloadedDefs, _, err := eng.toolDefinitions(ctx, sid, store.ModeWork, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasToolDef(unloadedDefs, tool.RESTRequest) || hasToolDef(unloadedDefs, "app_mcp__search__hash") {
+		t.Fatalf("unloaded installed app exposed tools: %+v", unloadedDefs)
+	}
+}
+
+func TestLoadedAppCannotCallAnotherAppsEndpoint(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	client := &crossAppAPIClient{}
+	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions(), result: tool.Result{Ok: true, Content: `{"ok":true}`}}
+	apps := &mutableAppSource{
+		defs: []*app.Definition{
+			{ID: "github", Name: "GitHub", Source: app.SourceInstalled, Enabled: true, RequiredMode: "work", Endpoints: map[string]app.Endpoint{"github_rest": {Kind: app.EndpointKindREST}}},
+			{ID: "jira", Name: "Jira", Source: app.SourceInstalled, Enabled: true, RequiredMode: "work", Endpoints: map[string]app.Endpoint{"jira_rest": {Kind: app.EndpointKindREST}}},
+		},
+		endpointApps: map[string]string{"github_rest": "github", "jira_rest": "jira"},
+	}
+	eng := New(ms, hub, mapResolver{"cross-app-api": client}, ms, WithTools(runner), WithApps(apps))
+	ctx := context.Background()
+	sid := "sess_cross_app_api"
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID: sid, Title: "cross app", Provider: "cross-app-api", Model: "app-model", ActiveMode: store.ModeWork, ModeLease: store.ModeLeaseSession,
+		LoadedAppIDs: []string{"github"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		DisplayName: "cross-app-api", Protocol: "openai-compatible",
+		Models: []store.ProviderModel{{ID: "app-model", Capabilities: &store.ModelCaps{Tools: true}, Limits: &store.ModelLimits{MaxToolLoops: 2}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c_cross_app", Text: "读取 Jira"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTurnDone(t, ms, sid)
+	if len(runner.calls) != 0 {
+		t.Fatalf("unloaded App endpoint reached runner: %+v", runner.calls)
+	}
+	messages, err := ms.ListMessages(ctx, sid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundBlocked := false
+	var toolResults []string
+	for _, message := range messages {
+		for _, part := range message.Parts {
+			if part.Type == store.ContentPartToolResult {
+				toolResults = append(toolResults, part.Name+":"+part.Content)
+			}
+			if part.Type == store.ContentPartToolResult && part.Name == tool.RESTRequest && !part.Ok && strings.Contains(part.Content, `"appID":"jira"`) && strings.Contains(part.Content, `"reason":"app_not_loaded"`) {
+				foundBlocked = true
+			}
+		}
+	}
+	if !foundBlocked {
+		events, _ := ms.EventsAfter(ctx, sid, 0, 0)
+		t.Fatalf("cross-App API call was not blocked as app_not_loaded: results=%+v requests=%d events=%+v", toolResults, len(client.requests), events)
 	}
 }
 
@@ -967,7 +1170,11 @@ func TestSubmitRunsBuiltinBrowserToolLoop(t *testing.T) {
 	hub := event.NewHub()
 	client := &browserToolLoopClient{}
 	browserSvc := &engineTestBrowser{}
-	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithTools(tool.NewBuiltinRunner(tool.WithBrowser(browserSvc))))
+	apps := app.NewService(t.TempDir(), nil)
+	eng := New(ms, hub, mapResolver{"capture": client}, ms,
+		WithTools(tool.NewBuiltinRunner(tool.WithBrowser(browserSvc), tool.WithAppSkills(apps))),
+		WithApps(apps),
+	)
 	ctx := context.Background()
 	sid := "sess_browser_tool"
 	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "browser", Provider: "capture", Model: "tool-model", ActiveMode: store.ModeWork, ModeLease: store.ModeLeaseSession}); err != nil {
@@ -992,8 +1199,8 @@ func TestSubmitRunsBuiltinBrowserToolLoop(t *testing.T) {
 	if len(client.requests) != 3 {
 		t.Fatalf("want 3 provider calls, got %d", len(client.requests))
 	}
-	if hasToolDef(client.requests[0].Tools, tool.BrowserObserve) || !hasToolDef(client.requests[0].Tools, tool.ToolkitLoad) {
-		t.Fatalf("browser toolkit must start unloaded: %+v", client.requests[0].Tools)
+	if hasToolDef(client.requests[0].Tools, tool.BrowserObserve) || !hasToolDef(client.requests[0].Tools, tool.SkillRead) {
+		t.Fatalf("browser app must start unloaded: %+v", client.requests[0].Tools)
 	}
 	if !hasToolDef(client.requests[1].Tools, tool.BrowserObserve) {
 		t.Fatalf("browser tool definitions not injected after load: %+v", client.requests[1].Tools)
@@ -2676,22 +2883,81 @@ type toolkitLoopClient struct {
 	requests []provider.Request
 }
 
-type implicitToolkitClient struct {
-	requests []provider.Request
+type appLoadClient struct {
+	requests     []provider.Request
+	forceBrowser bool
 }
 
-func (c *implicitToolkitClient) Name() string { return "implicit-toolkit" }
+func (c *appLoadClient) Name() string { return "app-load" }
 
-func (c *implicitToolkitClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+func (c *appLoadClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	c.requests = append(c.requests, req)
 	out := make(chan provider.Chunk, 3)
-	if len(c.requests) == 1 {
+	if c.forceBrowser {
+		c.forceBrowser = false
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
+			Index: 0, CallID: "call_browser_disabled", Name: tool.BrowserOpen, ArgsDelta: `{"url":"https://example.com"}`,
+		}}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+		close(out)
+		return out, nil
+	}
+	switch len(c.requests) {
+	case 1:
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
+			Index: 0, CallID: "call_browser_skill", Name: tool.SkillRead, ArgsDelta: `{"app_id":"browser","skill_id":"browser"}`,
+		}}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	case 2:
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
 			Index: 0, CallID: "call_browser_open", Name: tool.BrowserOpen, ArgsDelta: `{"url":"https://example.com"}`,
 		}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	default:
+		out <- provider.Chunk{Part: provider.PartText, Delta: "完成"}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
+	}
+	close(out)
+	return out, nil
+}
+
+type mutableAppSource struct {
+	defs         []*app.Definition
+	endpointApps map[string]string
+}
+
+func (s *mutableAppSource) ListDefinitions(context.Context) ([]*app.Definition, error) {
+	out := make([]*app.Definition, 0, len(s.defs))
+	for _, definition := range s.defs {
+		out = append(out, app.CloneDefinition(definition))
+	}
+	return out, nil
+}
+
+func (s *mutableAppSource) ResolveEndpoint(_ context.Context, _ string, endpointName, _ string) (*app.EndpointBinding, error) {
+	appID := s.endpointApps[endpointName]
+	if appID == "" {
+		return nil, &app.EndpointResolveError{Reason: "endpoint_not_found", Endpoint: endpointName}
+	}
+	return &app.EndpointBinding{AppID: appID, EndpointName: endpointName}, nil
+}
+
+type crossAppAPIClient struct {
+	requests []provider.Request
+}
+
+func (c *crossAppAPIClient) Name() string { return "cross-app-api" }
+
+func (c *crossAppAPIClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	c.requests = append(c.requests, req)
+	out := make(chan provider.Chunk, 3)
+	if len(c.requests) == 1 {
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
+			Index: 0, CallID: "call_jira_rest", Name: tool.RESTRequest, ArgsDelta: `{"endpoint":"jira_rest","path":"/issues"}`,
+		}}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	} else {
-		out <- provider.Chunk{Part: provider.PartText, Delta: "网页已打开"}
+		out <- provider.Chunk{Part: provider.PartText, Delta: "未执行"}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
 	}
 	close(out)
@@ -2730,7 +2996,9 @@ func (c *browserToolLoopClient) Stream(_ context.Context, req provider.Request) 
 	out := make(chan provider.Chunk, 4)
 	switch len(c.requests) {
 	case 1:
-		out <- toolkitLoadChunk("call_browser_toolkit", "work.browser")
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
+			Index: 0, CallID: "call_browser_skill", Name: tool.SkillRead, ArgsDelta: `{"app_id":"browser","skill_id":"browser"}`,
+		}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	case 2:
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
@@ -3219,13 +3487,14 @@ func (c *fileWriteApprovalClient) Stream(_ context.Context, req provider.Request
 }
 
 type recordingToolRunner struct {
-	defs           []provider.ToolDef
-	result         tool.Result
-	progress       []tool.Progress
-	calls          []tool.Call
-	appliedDrafts  []string
-	closedSessions []string
-	closeCount     int
+	defs             []provider.ToolDef
+	result           tool.Result
+	progress         []tool.Progress
+	calls            []tool.Call
+	appliedDrafts    []string
+	closedSessions   []string
+	closeCount       int
+	definitionAppIDs [][]string
 }
 
 func (r *recordingToolRunner) CloseSession(sessionID string) {
@@ -3238,6 +3507,11 @@ func (r *recordingToolRunner) Close() error {
 }
 
 func (r *recordingToolRunner) Definitions(context.Context, string) ([]provider.ToolDef, error) {
+	return r.defs, nil
+}
+
+func (r *recordingToolRunner) DefinitionsForApps(_ context.Context, _ string, appIDs []string) ([]provider.ToolDef, error) {
+	r.definitionAppIDs = append(r.definitionAppIDs, append([]string(nil), appIDs...))
 	return r.defs, nil
 }
 

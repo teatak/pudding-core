@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"unicode"
 
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
@@ -79,31 +78,10 @@ var builtinToolkitTemplates = []ToolkitManifest{
 		ToolNames: []string{CodeSymbols, CodeDefinition, CodeReferences, CodeDiagnostics, CodeRename},
 	},
 	{
-		ID: "code.process", Capability: store.ModeCode,
-		Summary:   "Session-owned background process start, output polling, and stop for dev servers and watchers.",
-		Keywords:  []string{"process", "server", "watch", "background", "poll"},
-		ToolNames: []string{CommandStart, CommandPoll, CommandStop},
-	},
-	{
 		ID: "code.skill", Capability: store.ModeCode,
 		Summary:   "Validate and submit staged skill packages for user review.",
 		Keywords:  []string{"skill", "validate", "publish"},
 		ToolNames: []string{SkillValidate, SkillSubmit},
-	},
-	{
-		ID: "work.api", Capability: store.ModeWork,
-		Summary:   "Configured REST and GraphQL requests, schema introspection, and schema search.",
-		Keywords:  []string{"rest", "graphql", "api", "schema"},
-		ToolNames: []string{RESTRequest, GraphQLRequest, GraphQLIntrospect, GraphQLSearch},
-	},
-	{
-		ID: "work.browser", Capability: store.ModeWork,
-		Summary:  "Managed browser tabs, observation, screenshots, navigation, clicking, typing, and scrolling.",
-		Keywords: []string{"browser", "page", "tab", "click", "type", "screenshot"},
-		ToolNames: []string{
-			BrowserStatus, BrowserOpen, BrowserObserve, BrowserScreenshot, BrowserBack, BrowserForward,
-			BrowserReload, BrowserClose, BrowserClick, BrowserType, BrowserScroll,
-		},
 	},
 	{
 		ID: "work.camera", Capability: store.ModeWork,
@@ -167,6 +145,9 @@ func BuildToolkitCatalog(defs []provider.ToolDef) []ToolkitManifest {
 	dynamic := make(map[string]*ToolkitManifest)
 	for name, def := range definitions {
 		if assigned[name] || name == RequestCapability || name == ToolkitLoad {
+			continue
+		}
+		if _, appTool := BuiltinAppIDForTool(name); appTool || IsAppAPITool(name) || def.AppID != "" || strings.HasPrefix(name, appMCPToolPrefix) {
 			continue
 		}
 		id, summary, defaultToolkit := dynamicToolkit(name, def)
@@ -296,30 +277,10 @@ func dynamicToolkit(name string, def provider.ToolDef) (string, string, bool) {
 	switch {
 	case strings.HasPrefix(name, "canvas_"), strings.HasPrefix(name, "ui_"), name == "collect_user_input":
 		return "ui.canvas", "Session canvas and structured interaction tools exposed by the current UI.", true
-	case strings.HasPrefix(name, appMCPToolPrefix):
-		appID := strings.SplitN(strings.TrimPrefix(name, appMCPToolPrefix), "__", 2)[0]
-		appID = toolkitIDPart(appID)
-		return "app." + appID, "Tools from the connected " + appID + " app.", false
 	default:
 		mode := normalizedToolCapability(def)
 		return "external." + string(mode), "Other connected tools available in " + string(mode) + " capability.", false
 	}
-}
-
-func toolkitIDPart(value string) string {
-	value = strings.TrimSpace(strings.ToLower(value))
-	var out strings.Builder
-	for _, r := range value {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' {
-			out.WriteRune(r)
-		} else if out.Len() > 0 {
-			out.WriteByte('-')
-		}
-	}
-	if out.Len() == 0 {
-		return "connected"
-	}
-	return strings.Trim(out.String(), "-")
 }
 
 func normalizedToolCapability(def provider.ToolDef) store.AgentMode {

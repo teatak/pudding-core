@@ -124,14 +124,14 @@ func TestAppMCPRunnerDiscoversAndCallsStreamableHTTPTool(t *testing.T) {
 		}},
 	}}})
 
-	defs, err := runner.Definitions(ctx, "session-1")
+	defs, err := runner.DefinitionsForApps(ctx, "session-1", []string{"linear"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(defs) != 1 {
 		t.Fatalf("expected one tool, got %+v", defs)
 	}
-	if !strings.HasPrefix(defs[0].Name, appMCPToolPrefix) || !strings.Contains(defs[0].Description, "linear") {
+	if !strings.HasPrefix(defs[0].Name, appMCPToolPrefix) || !strings.Contains(defs[0].Description, "linear") || defs[0].AppID != "linear" {
 		t.Fatalf("unexpected definition: %+v", defs[0])
 	}
 	if !sawInitialized {
@@ -146,6 +146,10 @@ func TestAppMCPRunnerDiscoversAndCallsStreamableHTTPTool(t *testing.T) {
 	})
 	if !res.Ok || !strings.Contains(res.Content, `"ok":true`) || !sawCall {
 		t.Fatalf("unexpected result: %+v sawCall=%v", res, sawCall)
+	}
+	other := runner.Call(ctx, Call{SessionID: "session-2", CallID: "call-other", Name: defs[0].Name, Args: json.RawMessage(`{}`)})
+	if other.Ok || !strings.Contains(other.Content, `"reason":"unknown_tool"`) {
+		t.Fatalf("app MCP tool leaked across sessions: %+v", other)
 	}
 }
 
@@ -174,7 +178,7 @@ func TestAppMCPRunnerDiscoversAndCallsStdioTool(t *testing.T) {
 		}},
 	}}})
 
-	defs, err := runner.Definitions(ctx, "session-1")
+	defs, err := runner.DefinitionsForApps(ctx, "session-1", []string{"local"})
 	if err != nil {
 		t.Fatal(err)
 	}

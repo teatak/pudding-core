@@ -88,6 +88,8 @@ func (r *BuiltinRunner) appSkillRead(ctx context.Context, out Result, appID, ski
 			reason = "invalid_app_id"
 		case errors.Is(err, app.ErrNotFound):
 			reason = "app_skill_not_found"
+		case errors.Is(err, app.ErrDisabled):
+			reason = "app_disabled"
 		}
 		payload, _ := json.Marshal(map[string]any{"ok": false, "reason": reason, "detail": err.Error()})
 		out.Ok = false

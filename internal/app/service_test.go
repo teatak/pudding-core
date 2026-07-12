@@ -23,6 +23,74 @@ func (f fakeConnectionStore) ListAppConnections(context.Context) ([]*Connection,
 	return out, nil
 }
 
+type fakeAppConfig struct {
+	fakeConnectionStore
+	enabled map[string]bool
+}
+
+func (f *fakeAppConfig) ListAppEnablement(context.Context) (map[string]bool, error) {
+	out := make(map[string]bool, len(f.enabled))
+	for id, enabled := range f.enabled {
+		out[id] = enabled
+	}
+	return out, nil
+}
+
+func (f *fakeAppConfig) SetAppEnabled(_ context.Context, id string, enabled bool) error {
+	if f.enabled == nil {
+		f.enabled = make(map[string]bool)
+	}
+	f.enabled[id] = enabled
+	return nil
+}
+
+func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
+	config := &fakeAppConfig{}
+	svc := NewService(t.TempDir(), config)
+
+	defs, err := svc.ListDefinitions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) != 2 || defs[0].ID != BuiltinBrowserID || defs[1].ID != BuiltinTerminalID {
+		t.Fatalf("unexpected builtin definitions: %+v", defs)
+	}
+	if defs[0].Source != SourceBuiltin || !defs[0].Enabled || defs[0].CanUninstall || defs[0].RequiredMode != "work" || defs[0].DefaultSkillID != BuiltinBrowserID {
+		t.Fatalf("unexpected browser definition: %+v", defs[0])
+	}
+
+	updated, err := svc.SetEnabled(context.Background(), BuiltinBrowserID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Enabled || config.enabled[BuiltinBrowserID] {
+		t.Fatalf("browser enablement was not updated: %+v", updated)
+	}
+	if _, err := svc.ReadSkill(context.Background(), BuiltinBrowserID, BuiltinBrowserID); !errors.Is(err, ErrDisabled) {
+		t.Fatalf("disabled builtin skill err = %v", err)
+	}
+	if _, err := svc.SetEnabled(context.Background(), BuiltinBrowserID, true); err != nil {
+		t.Fatal(err)
+	}
+	detail, err := svc.ReadSkill(context.Background(), BuiltinBrowserID, BuiltinBrowserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.ID != BuiltinBrowserID || detail.Content == "" {
+		t.Fatalf("unexpected builtin skill: %+v", detail)
+	}
+	if err := svc.DeleteDefinition(context.Background(), BuiltinBrowserID); !errors.Is(err, ErrBuiltinApp) {
+		t.Fatalf("delete builtin err = %v", err)
+	}
+}
+
+func TestInstallPackageRejectsBuiltinAppID(t *testing.T) {
+	packageJSON := []byte(`{"kind":"pudding.app.package","schema_version":1,"app":{"id":"browser"}}`)
+	if _, err := InstallPackage(t.TempDir(), packageJSON, "", ""); !errors.Is(err, ErrBuiltinApp) {
+		t.Fatalf("install builtin app id err = %v", err)
+	}
+}
+
 func TestResolveEndpointUsesOnlyConfiguredConnection(t *testing.T) {
 	homeDir := writeTestApp(t)
 	svc := NewService(homeDir, fakeConnectionStore{items: map[string]*Connection{

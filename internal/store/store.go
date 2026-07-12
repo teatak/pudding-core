@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -43,9 +44,10 @@ type Session struct {
 	ActiveMode        AgentMode `json:"activeMode"`
 	ModeLease         ModeLease `json:"modeLease"`
 	// ProjectID 指向项目目录与审批设置的唯一事实源。
-	ProjectID string    `json:"projectID,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ProjectID    string    `json:"projectID,omitempty"`
+	LoadedAppIDs []string  `json:"-"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 	// LastActivityAt 只描述会话内容活动时间:用户提交 / assistant 收尾推进。
 	// 列表排序和"最近"时间显示使用它,避免 rename / 改模型把会话顶到最上面。
 	LastActivityAt time.Time `json:"lastActivityAt"`
@@ -67,6 +69,7 @@ type SessionUpdate struct {
 	ActiveMode      *AgentMode `json:"activeMode"`
 	ModeLease       *ModeLease `json:"modeLease"`
 	ProjectID       *string    `json:"projectID"`
+	LoadedAppIDs    *[]string  `json:"-"`
 	Pinned          *bool      `json:"pinned"`
 	// PinnedOrder 仅描述 pinned 组内手动排序,不改变最近会话排序。
 	PinnedOrder *int64 `json:"pinnedOrder"`
@@ -188,6 +191,7 @@ func NormalizeSessionProviderModel(s *Session) error {
 		s.ActiveMode = ModeChat
 	}
 	s.ProjectID = strings.TrimSpace(s.ProjectID)
+	s.LoadedAppIDs = NormalizeAppIDs(s.LoadedAppIDs)
 	return nil
 }
 
@@ -232,7 +236,26 @@ func NormalizeSessionUpdate(upd *SessionUpdate) error {
 		projectID := strings.TrimSpace(*upd.ProjectID)
 		upd.ProjectID = &projectID
 	}
+	if upd.LoadedAppIDs != nil {
+		ids := NormalizeAppIDs(*upd.LoadedAppIDs)
+		upd.LoadedAppIDs = &ids
+	}
 	return nil
+}
+
+func NormalizeAppIDs(ids []string) []string {
+	seen := make(map[string]bool, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func NormalizeProject(project *Project) error {

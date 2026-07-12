@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/contextbuilder"
 	"github.com/teatak/pudding-core/internal/event"
@@ -54,6 +55,14 @@ type ConfigSource interface {
 	GetProviderProfile(ctx context.Context, name string) (*store.ProviderProfile, error)
 }
 
+type AppSource interface {
+	ListDefinitions(ctx context.Context) ([]*app.Definition, error)
+}
+
+type appEndpointResolver interface {
+	ResolveEndpoint(ctx context.Context, sessionID, endpointName, connectionRef string) (*app.EndpointBinding, error)
+}
+
 type emptyConfig struct{}
 
 func (emptyConfig) Settings(context.Context) (map[string]string, error) {
@@ -75,6 +84,7 @@ type Engine struct {
 	resolver Resolver
 	builder  *contextbuilder.Builder
 	tools    tool.Runner
+	apps     AppSource
 
 	promptSource   contextbuilder.PromptSource
 	attachmentHome string
@@ -100,6 +110,12 @@ type Option func(*Engine)
 func WithTools(runner tool.Runner) Option {
 	return func(e *Engine) {
 		e.tools = runner
+	}
+}
+
+func WithApps(source AppSource) Option {
+	return func(e *Engine) {
+		e.apps = source
 	}
 }
 
@@ -1061,16 +1077,137 @@ func (e *Engine) buildProviderRequest(ctx context.Context, sessionID string, res
 }
 
 func (e *Engine) toolDefinitions(ctx context.Context, sessionID string, mode store.AgentMode, active map[string]bool) ([]provider.ToolDef, []tool.ToolkitManifest, error) {
+	if e.apps == nil {
+		var defs []provider.ToolDef
+		if e.tools != nil {
+			runnerDefs, err := e.tools.Definitions(ctx, sessionID)
+			if err != nil {
+				return nil, nil, fmt.Errorf("list tools: %w", err)
+			}
+			defs = runnerDefs
+		}
+		catalog := tool.BuildToolkitCatalog(defs)
+		return tool.DefinitionsFromCatalog(mode, defs, catalog, active), catalog, nil
+	}
+	appStates, err := e.sessionAppStates(ctx, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	loadedAppIDs := callableAppIDs(appStates, mode)
 	var defs []provider.ToolDef
 	if e.tools != nil {
-		runnerDefs, err := e.tools.Definitions(ctx, sessionID)
+		var runnerDefs []provider.ToolDef
+		if scoped, ok := e.tools.(tool.AppScopedDefinitionRunner); ok {
+			runnerDefs, err = scoped.DefinitionsForApps(ctx, sessionID, loadedAppIDs)
+		} else {
+			runnerDefs, err = e.tools.Definitions(ctx, sessionID)
+		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("list tools: %w", err)
 		}
 		defs = runnerDefs
 	}
-	catalog := tool.BuildToolkitCatalog(defs)
-	return tool.DefinitionsFromCatalog(mode, defs, catalog, active), catalog, nil
+	toolkitDefs := make([]provider.ToolDef, 0, len(defs))
+	appDefs := make([]provider.ToolDef, 0)
+	for _, def := range defs {
+		appID, appTool := tool.BuiltinAppIDForTool(def.Name)
+		if appTool {
+			if appDefinitionCallable(appStates[appID], mode) && tool.ToolDefAllowedForMode(mode, def) {
+				appDefs = append(appDefs, def)
+			}
+			continue
+		}
+		if def.AppID != "" {
+			if appDefinitionCallable(appStates[def.AppID], mode) && tool.ToolDefAllowedForMode(mode, def) {
+				appDefs = append(appDefs, def)
+			}
+			continue
+		}
+		if tool.IsAppAPITool(def.Name) {
+			if appAPIToolCallable(def.Name, appStates, mode) && tool.ToolDefAllowedForMode(mode, def) {
+				appDefs = append(appDefs, def)
+			}
+			continue
+		}
+		toolkitDefs = append(toolkitDefs, def)
+	}
+	catalog := tool.BuildToolkitCatalog(toolkitDefs)
+	out := tool.DefinitionsFromCatalog(mode, toolkitDefs, catalog, active)
+	sort.Slice(appDefs, func(i, j int) bool { return appDefs[i].Name < appDefs[j].Name })
+	out = append(out, appDefs...)
+	return out, catalog, nil
+}
+
+func callableAppIDs(states map[string]sessionAppState, mode store.AgentMode) []string {
+	ids := make([]string, 0, len(states))
+	for id, state := range states {
+		if appDefinitionCallable(state, mode) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func appDefinitionCallable(state sessionAppState, mode store.AgentMode) bool {
+	return state.definition != nil && state.definition.Enabled && state.loaded && store.AgentModeRank(mode) >= store.AgentModeRank(requiredAppMode(state.definition))
+}
+
+func appAPIToolCallable(name string, states map[string]sessionAppState, mode store.AgentMode) bool {
+	kind := app.EndpointKindREST
+	if name != tool.RESTRequest {
+		kind = app.EndpointKindGraphQL
+	}
+	for _, state := range states {
+		if !appDefinitionCallable(state, mode) {
+			continue
+		}
+		for _, endpoint := range state.definition.Endpoints {
+			if endpoint.Kind == kind {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+type sessionAppState struct {
+	definition *app.Definition
+	loaded     bool
+}
+
+func (e *Engine) sessionAppStates(ctx context.Context, sessionID string) (map[string]sessionAppState, error) {
+	sess, err := e.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	definitions, err := e.apps.ListDefinitions(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list apps: %w", err)
+	}
+	loaded := make(map[string]bool, len(sess.LoadedAppIDs))
+	for _, id := range sess.LoadedAppIDs {
+		loaded[id] = true
+	}
+	out := make(map[string]sessionAppState, len(definitions))
+	for _, definition := range definitions {
+		if definition == nil || strings.TrimSpace(definition.ID) == "" {
+			continue
+		}
+		out[definition.ID] = sessionAppState{definition: definition, loaded: loaded[definition.ID]}
+	}
+	return out, nil
+}
+
+func requiredAppMode(definition *app.Definition) store.AgentMode {
+	if definition == nil {
+		return store.ModeWork
+	}
+	mode := store.NormalizeAgentMode(store.AgentMode(definition.RequiredMode))
+	if !store.ValidAgentMode(mode) {
+		return store.ModeWork
+	}
+	return mode
 }
 
 func appendToolkitIndex(system, index string) string {
@@ -1311,7 +1448,7 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 	}
 	nextMode := currentMode
 	modeChanged := false
-	toolkitsChanged := false
+	toolsChanged := false
 	for _, call := range calls {
 		call.SessionID = sessionID
 		call.TurnID = turnID
@@ -1335,17 +1472,39 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 		} else if call.Name == tool.ToolkitLoad {
 			var changed bool
 			result, changed = loadTurnToolkits(call, nextMode, toolkits)
-			toolkitsChanged = toolkitsChanged || changed
+			toolsChanged = toolsChanged || changed
+		} else if appID, appTool := tool.BuiltinAppIDForTool(call.Name); appTool && e.apps != nil {
+			if !tool.NameAllowedForMode(nextMode, call.Name) {
+				result = toolNotAllowedResult(call, nextMode)
+			} else if !tool.HasDefinition(allowedTools, call.Name) || !e.appToolCallable(ctx, sessionID, appID, nextMode) {
+				result = e.appToolUnavailableResult(ctx, sessionID, call, appID)
+			} else {
+				result = e.executeAllowedTool(ctx, sessionID, turnID, call)
+			}
+		} else if definition, ok := providerToolDefinition(allowedTools, call.Name); ok && definition.AppID != "" && e.apps != nil {
+			if !e.appToolCallable(ctx, sessionID, definition.AppID, nextMode) {
+				result = e.appToolUnavailableResult(ctx, sessionID, call, definition.AppID)
+			} else {
+				result = e.executeAllowedTool(ctx, sessionID, turnID, call)
+			}
+		} else if tool.IsAppAPITool(call.Name) && e.apps != nil {
+			appID, resolved := e.appEndpointTarget(ctx, sessionID, call)
+			switch {
+			case resolved && !e.appToolCallable(ctx, sessionID, appID, nextMode):
+				result = e.appToolUnavailableResult(ctx, sessionID, call, appID)
+			case !tool.HasDefinition(allowedTools, call.Name):
+				result = appAPINotLoadedResult(call)
+			default:
+				result = e.executeAllowedTool(ctx, sessionID, turnID, call)
+			}
 		} else if !tool.HasDefinition(allowedTools, call.Name) {
 			known, err := e.toolNameKnown(ctx, sessionID, call.Name)
 			if err != nil {
 				result = tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: fmt.Sprintf("list tools: %v", err)}
 			} else if known {
 				if tool.NameAllowedForMode(nextMode, call.Name) {
-					available, changed := activateTurnToolkitForTool(call.Name, nextMode, toolkits)
-					if available {
-						toolkitsChanged = toolkitsChanged || changed
-						result = e.executeAllowedTool(ctx, sessionID, turnID, call)
+					if appID, appTool := tool.BuiltinAppIDForTool(call.Name); appTool && e.apps != nil {
+						result = e.appToolUnavailableResult(ctx, sessionID, call, appID)
 					} else {
 						result = toolNotLoadedResult(call, toolkits.catalog)
 					}
@@ -1357,6 +1516,14 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			}
 		} else {
 			result = e.executeAllowedTool(ctx, sessionID, turnID, call)
+		}
+		if result.Ok && call.Name == tool.SkillRead {
+			changed, err := e.loadAppFromSkillRead(ctx, sessionID, call)
+			if err != nil {
+				result = appLoadFailure(call, err)
+			} else {
+				toolsChanged = toolsChanged || changed
+			}
 		}
 		if ctx.Err() != nil {
 			return store.TurnCancelled, "", nextMode, modeChanged
@@ -1393,7 +1560,7 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			return store.TurnCancelled, "", nextMode, modeChanged
 		}
 	}
-	return store.TurnRunning, "", nextMode, modeChanged || toolkitsChanged
+	return store.TurnRunning, "", nextMode, modeChanged || toolsChanged
 }
 
 func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID string, call tool.Call) tool.Result {
@@ -1433,6 +1600,69 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 		result = e.callTool(ctx, sessionID, turnID, call)
 	}
 	return result
+}
+
+func (e *Engine) loadAppFromSkillRead(ctx context.Context, sessionID string, call tool.Call) (bool, error) {
+	if e.apps == nil {
+		return false, nil
+	}
+	var args struct {
+		AppID string `json:"app_id"`
+	}
+	if len(call.Args) == 0 || json.Unmarshal(call.Args, &args) != nil {
+		return false, nil
+	}
+	appID := strings.TrimSpace(args.AppID)
+	if appID == "" {
+		return false, nil
+	}
+	definitions, err := e.apps.ListDefinitions(ctx)
+	if err != nil {
+		return false, fmt.Errorf("list apps: %w", err)
+	}
+	available := false
+	for _, definition := range definitions {
+		if definition != nil && definition.ID == appID && definition.Enabled {
+			available = true
+			break
+		}
+	}
+	if !available {
+		return false, fmt.Errorf("app %q is disabled or unavailable", appID)
+	}
+	sess, err := e.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	for _, loadedID := range sess.LoadedAppIDs {
+		if loadedID == appID {
+			return false, nil
+		}
+	}
+	loaded := append(append([]string(nil), sess.LoadedAppIDs...), appID)
+	loaded = store.NormalizeAppIDs(loaded)
+	if _, err := e.store.UpdateSession(ctx, sessionID, store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func appLoadFailure(call tool.Call, err error) tool.Result {
+	payload := map[string]any{
+		"ok":      false,
+		"reason":  "app_load_failed",
+		"detail":  err.Error(),
+		"message": "the app skill was read but its session load state could not be saved",
+	}
+	content, _ := json.Marshal(payload)
+	return tool.Result{
+		CallID:       call.CallID,
+		Name:         call.Name,
+		Ok:           false,
+		Content:      string(content),
+		SummaryKind:  tool.SummaryReturnedFields,
+		SummaryCount: len(payload),
+	}
 }
 
 type turnToolkitState struct {
@@ -1504,25 +1734,6 @@ func loadTurnToolkits(call tool.Call, mode store.AgentMode, state *turnToolkitSt
 		SummaryKind:  tool.SummaryReturnedItems,
 		SummaryCount: len(tools),
 	}, len(loaded) > 0
-}
-
-func activateTurnToolkitForTool(name string, mode store.AgentMode, state *turnToolkitState) (bool, bool) {
-	if state == nil {
-		return false, false
-	}
-	manifest, ok := tool.ToolkitForTool(state.catalog, name)
-	if !ok || store.AgentModeRank(mode) < store.AgentModeRank(manifest.Capability) {
-		return false, false
-	}
-	if manifest.Default || state.active[manifest.ID] {
-		return true, false
-	}
-	if state.loads >= maxToolkitLoads {
-		return false, false
-	}
-	state.loads++
-	state.active[manifest.ID] = true
-	return true, true
 }
 
 func toolkitLoadFailure(call tool.Call, reason, message string, extra map[string]any) tool.Result {
@@ -1627,6 +1838,110 @@ func (e *Engine) toolNameKnown(ctx context.Context, sessionID, name string) (boo
 		return false, err
 	}
 	return tool.HasDefinition(defs, name), nil
+}
+
+func (e *Engine) appToolUnavailableResult(ctx context.Context, sessionID string, call tool.Call, appID string) tool.Result {
+	payload := map[string]any{
+		"ok":      false,
+		"appID":   appID,
+		"tool":    call.Name,
+		"reason":  "app_not_loaded",
+		"message": "read the app's default skill with builtin_skill_read before using its tools",
+	}
+	states, err := e.sessionAppStates(ctx, sessionID)
+	if err != nil {
+		payload["reason"] = "app_state_unavailable"
+		payload["message"] = err.Error()
+	} else if state, ok := states[appID]; !ok || !state.definition.Enabled {
+		payload["reason"] = "app_disabled"
+		payload["message"] = "the app is disabled or unavailable"
+	} else {
+		if state.definition.DefaultSkillID != "" {
+			payload["defaultSkillID"] = state.definition.DefaultSkillID
+		}
+		if state.loaded {
+			payload["reason"] = "app_tool_unavailable"
+			payload["message"] = "the app is loaded but this tool is not available in the current request"
+		}
+	}
+	content, _ := json.Marshal(payload)
+	return tool.Result{
+		CallID:       call.CallID,
+		Name:         call.Name,
+		Ok:           false,
+		Content:      string(content),
+		SummaryKind:  tool.SummaryReturnedFields,
+		SummaryCount: len(payload),
+	}
+}
+
+func (e *Engine) appToolCallable(ctx context.Context, sessionID, appID string, mode store.AgentMode) bool {
+	states, err := e.sessionAppStates(ctx, sessionID)
+	if err != nil {
+		return false
+	}
+	state, ok := states[appID]
+	return ok && state.definition.Enabled && state.loaded && store.AgentModeRank(mode) >= store.AgentModeRank(requiredAppMode(state.definition))
+}
+
+func (e *Engine) appEndpointTarget(ctx context.Context, sessionID string, call tool.Call) (string, bool) {
+	resolver, ok := e.apps.(appEndpointResolver)
+	if !ok {
+		return "", false
+	}
+	var args struct {
+		Endpoint   string `json:"endpoint"`
+		Connection string `json:"connection"`
+	}
+	if len(call.Args) == 0 || json.Unmarshal(call.Args, &args) != nil || strings.TrimSpace(args.Endpoint) == "" {
+		return "", false
+	}
+	binding, err := resolver.ResolveEndpoint(ctx, sessionID, args.Endpoint, args.Connection)
+	if err == nil && binding != nil && strings.TrimSpace(binding.AppID) != "" {
+		return binding.AppID, true
+	}
+	states, stateErr := e.sessionAppStates(ctx, sessionID)
+	if stateErr != nil {
+		return "", false
+	}
+	matched := ""
+	for appID, state := range states {
+		if _, ok := state.definition.Endpoints[strings.TrimSpace(args.Endpoint)]; !ok {
+			continue
+		}
+		if matched != "" && matched != appID {
+			return "", false
+		}
+		matched = appID
+	}
+	return matched, matched != ""
+}
+
+func providerToolDefinition(defs []provider.ToolDef, name string) (provider.ToolDef, bool) {
+	for _, definition := range defs {
+		if definition.Name == name {
+			return definition, true
+		}
+	}
+	return provider.ToolDef{}, false
+}
+
+func appAPINotLoadedResult(call tool.Call) tool.Result {
+	payload := map[string]any{
+		"ok":      false,
+		"reason":  "app_not_loaded",
+		"tool":    call.Name,
+		"message": "read the target app's default skill before using its API tools",
+	}
+	content, _ := json.Marshal(payload)
+	return tool.Result{
+		CallID:       call.CallID,
+		Name:         call.Name,
+		Ok:           false,
+		Content:      string(content),
+		SummaryKind:  tool.SummaryReturnedFields,
+		SummaryCount: len(payload),
+	}
 }
 
 func toolNotLoadedResult(call tool.Call, catalog []tool.ToolkitManifest) tool.Result {

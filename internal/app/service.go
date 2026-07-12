@@ -15,10 +15,18 @@ var (
 	ErrInvalidID          = errors.New("app: invalid id")
 	ErrInvalidMCPOverride = errors.New("app: invalid mcp override")
 	ErrNotFound           = errors.New("app: not found")
+	ErrBuiltinApp         = errors.New("app: builtin app cannot be uninstalled")
+	ErrDisabled           = errors.New("app: disabled")
+	ErrEnablementConfig   = errors.New("app: enablement config unavailable")
 )
 
 type ConnectionSource interface {
 	ListAppConnections(ctx context.Context) ([]*Connection, error)
+}
+
+type EnablementSource interface {
+	ListAppEnablement(ctx context.Context) (map[string]bool, error)
+	SetAppEnabled(ctx context.Context, id string, enabled bool) error
 }
 
 type ConnectionChoice struct {
@@ -56,33 +64,117 @@ func (e *EndpointResolveError) Error() string {
 type Service struct {
 	appsRoot    string
 	connections ConnectionSource
+	enablement  EnablementSource
 }
 
 func NewService(homeDir string, connections ConnectionSource) *Service {
-	return &Service{
+	service := &Service{
 		appsRoot:    home.AppsPath(homeDir),
 		connections: connections,
 	}
+	service.enablement, _ = connections.(EnablementSource)
+	return service
 }
 
 func (s *Service) ListDefinitions(ctx context.Context) ([]*Definition, error) {
 	if s == nil {
 		return nil, errors.New("app service unavailable")
 	}
+	enabled := map[string]bool{}
+	if s.enablement != nil {
+		var err error
+		enabled, err = s.enablement.ListAppEnablement(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
 	defs, err := LoadUserDefinitions(s.appsRoot)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]*Definition, 0, len(defs))
+	builtins := BuiltinDefinitions()
+	out := make([]*Definition, 0, len(builtins)+len(defs))
+	for _, def := range builtins {
+		applyEnabledOverride(def, enabled)
+		out = append(out, def)
+	}
 	for _, def := range defs {
+		if IsBuiltinID(def.ID) {
+			continue
+		}
 		resolved := ResolveDefinitionPlatform(def)
 		resolved, err = s.applyMCPOverrides(resolved)
 		if err != nil {
 			return nil, err
 		}
+		decorateInstalledDefinition(resolved)
+		applyEnabledOverride(resolved, enabled)
 		out = append(out, resolved)
 	}
 	return out, nil
+}
+
+func decorateInstalledDefinition(def *Definition) {
+	if def == nil {
+		return
+	}
+	def.Source = SourceInstalled
+	def.Enabled = true
+	def.CanUninstall = true
+	def.RequiredMode = "work"
+	if len(def.Skills) > 0 {
+		def.DefaultSkillID = def.Skills[0].ID
+		if def.DefaultSkillID == "" {
+			def.DefaultSkillID = def.Skills[0].Name
+		}
+		if def.DefaultSkillID == "" {
+			def.DefaultSkillID = def.Skills[0].Path
+		}
+	}
+}
+
+func applyEnabledOverride(def *Definition, enabled map[string]bool) {
+	if def == nil {
+		return
+	}
+	if value, ok := enabled[def.ID]; ok {
+		def.Enabled = value
+	}
+}
+
+func (s *Service) definition(ctx context.Context, id string) (*Definition, error) {
+	id = strings.TrimSpace(id)
+	if !appIDPattern.MatchString(id) {
+		return nil, ErrInvalidID
+	}
+	defs, err := s.ListDefinitions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, def := range defs {
+		if def != nil && def.ID == id {
+			return def, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (s *Service) SetEnabled(ctx context.Context, id string, enabled bool) (*Definition, error) {
+	if s == nil {
+		return nil, errors.New("app service unavailable")
+	}
+	def, err := s.definition(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if s.enablement == nil {
+		return nil, ErrEnablementConfig
+	}
+	if err := s.enablement.SetAppEnabled(ctx, def.ID, enabled); err != nil {
+		return nil, err
+	}
+	def.Enabled = enabled
+	return def, nil
 }
 
 func (s *Service) applyMCPOverrides(def *Definition) (*Definition, error) {
@@ -111,6 +203,14 @@ func (s *Service) InstallPackage(ctx context.Context, packageJSON []byte, expect
 	if err != nil {
 		return nil, err
 	}
+	decorateInstalledDefinition(def)
+	if s.enablement != nil {
+		enabled, err := s.enablement.ListAppEnablement(ctx)
+		if err != nil {
+			return nil, err
+		}
+		applyEnabledOverride(def, enabled)
+	}
 	return CloneDefinition(def), nil
 }
 
@@ -121,6 +221,9 @@ func (s *Service) DeleteDefinition(ctx context.Context, id string) error {
 	id = strings.TrimSpace(id)
 	if !appIDPattern.MatchString(id) {
 		return ErrInvalidID
+	}
+	if IsBuiltinID(id) {
+		return ErrBuiltinApp
 	}
 	target := filepath.Join(s.appsRoot, id)
 	if _, err := os.Stat(filepath.Join(target, AppFileName)); err != nil {
@@ -215,7 +318,39 @@ func (s *Service) ReadSkill(ctx context.Context, appID, skillID string) (*SkillD
 	if !appIDPattern.MatchString(appID) {
 		return nil, ErrInvalidID
 	}
-	def, err := LoadDefinitionDir(filepath.Join(s.appsRoot, appID))
+	def, err := s.definition(ctx, appID)
+	if err != nil {
+		return nil, err
+	}
+	if !def.Enabled {
+		return nil, ErrDisabled
+	}
+	return s.readSkill(appID, skillID)
+}
+
+func (s *Service) ReadSkillDetail(ctx context.Context, appID, skillID string) (*SkillDetail, error) {
+	if s == nil {
+		return nil, errors.New("app service unavailable")
+	}
+	appID = strings.TrimSpace(appID)
+	if !appIDPattern.MatchString(appID) {
+		return nil, ErrInvalidID
+	}
+	if _, err := s.definition(ctx, appID); err != nil {
+		return nil, err
+	}
+	return s.readSkill(appID, skillID)
+}
+
+func (s *Service) readSkill(appID, skillID string) (*SkillDetail, error) {
+	if IsBuiltinID(appID) {
+		detail, ok := ReadBuiltinSkill(appID, skillID)
+		if !ok {
+			return nil, ErrNotFound
+		}
+		return detail, nil
+	}
+	diskDef, err := LoadDefinitionDir(filepath.Join(s.appsRoot, appID))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, ErrNotFound
@@ -235,10 +370,10 @@ func (s *Service) ReadSkill(ctx context.Context, appID, skillID string) (*SkillD
 		cleanedPath = cleaned
 	}
 	var ref *SkillRef
-	for i := range def.Skills {
-		item := &def.Skills[i]
+	for i := range diskDef.Skills {
+		item := &diskDef.Skills[i]
 		if selector == item.ID || selector == item.Name || (cleanedPath != "" && item.Path == cleanedPath) {
-			ref = &def.Skills[i]
+			ref = &diskDef.Skills[i]
 			break
 		}
 	}
@@ -326,7 +461,7 @@ func (s *Service) ResolveEndpoint(ctx context.Context, sessionID, endpointName, 
 	allChoices := make([]ConnectionChoice, 0)
 	endpointSeen := false
 	for _, def := range defs {
-		if def == nil {
+		if def == nil || !def.Enabled {
 			continue
 		}
 		endpoint, ok := def.Endpoints[endpointName]
@@ -392,7 +527,7 @@ func (s *Service) ListEndpointBindings(ctx context.Context, kind string) ([]*End
 	}
 	out := make([]*EndpointBinding, 0)
 	for _, def := range defs {
-		if def == nil {
+		if def == nil || !def.Enabled {
 			continue
 		}
 		for endpointName, endpoint := range def.Endpoints {

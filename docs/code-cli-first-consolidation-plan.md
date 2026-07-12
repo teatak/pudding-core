@@ -114,7 +114,7 @@ M2 后剩余主要缺口:
 
 ### 4.3 后台进程
 
-后台能力放入后续 `code.process` Toolkit,不进入默认工具集:
+后台能力属于 Terminal 内置 App,不进入默认工具集:
 
 - `builtin_command_start`
 - `builtin_command_poll`
@@ -157,8 +157,8 @@ M2 后剩余主要缺口:
 | `patch_propose/apply` | 保留 | Core | diff review、hash 漂移与原子应用 |
 | `code_symbols/definition/references/diagnostics/rename` | 保留 | `code.lsp` | 语义结果和 WorkspaceEdit 安全校验不可由通用 shell 等价替代 |
 | `skill_validate/submit` | 保留 | `code.skill` | 属于独立产品工作流 |
-| Browser | 保留 | `work.browser` | 非本地 CLI 能力 |
-| REST/GraphQL | 保留 | `work.api` | 连接配置、凭据注入与结构化请求 |
+| Browser | 保留 | Browser 内置 App | 非本地 CLI 能力 |
+| REST/GraphQL | 保留 | 对应安装 App | 连接配置、凭据注入与结构化请求 |
 | Apps/MCP | 保留 | 按 App 动态加载 | 外部系统能力 |
 | Canvas/UI | 保留 | UI Toolkit | 需要结构化前端协议 |
 
@@ -197,12 +197,10 @@ type ToolPluginManifest struct {
 - `code.git-read`
 - `code.git-write`
 - `code.lsp`
-- `code.process`
 - `code.skill`
-- `work.browser`
-- `work.api`
 - `work.camera`
-- `app.<id>`
+
+Browser、Terminal 以及安装 App 的 API/MCP 工具使用 session 级 App 加载,不再属于 Toolkit。
 
 ### 6.3 默认 Code coding 工具集
 

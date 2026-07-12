@@ -161,7 +161,7 @@ func Start(opts Options) (*Daemon, error) {
 		browserMCP,
 		appMCP,
 	)
-	eng := engine.New(st, hub, resolver, cfg, engine.WithPromptSource(prompt.NewLoader(dir, cfg)), engine.WithAttachmentHome(dir), engine.WithTools(tools))
+	eng := engine.New(st, hub, resolver, cfg, engine.WithPromptSource(prompt.NewLoader(dir, cfg)), engine.WithAttachmentHome(dir), engine.WithTools(tools), engine.WithApps(apps))
 	audioDriver := defaultCaptureDriver(audioCfg)
 	voiceService := voice.NewService(voice.ServiceConfig{
 		Manager:           voice.NewManager(),

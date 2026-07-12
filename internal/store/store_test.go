@@ -58,3 +58,24 @@ func TestNormalizeAgentModeRejectsLegacyWorkspace(t *testing.T) {
 		t.Fatalf("agent mode ordering must be chat < work < code")
 	}
 }
+
+func TestSessionLoadedAppsAreNormalizedAndInternal(t *testing.T) {
+	sess := &Session{
+		Provider:     "mock",
+		Model:        "mock",
+		LoadedAppIDs: []string{" terminal ", "browser", "browser", ""},
+	}
+	if err := NormalizeSessionProviderModel(sess); err != nil {
+		t.Fatal(err)
+	}
+	if len(sess.LoadedAppIDs) != 2 || sess.LoadedAppIDs[0] != "browser" || sess.LoadedAppIDs[1] != "terminal" {
+		t.Fatalf("loaded app ids = %+v", sess.LoadedAppIDs)
+	}
+	data, err := json.Marshal(sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "loadedApp") {
+		t.Fatalf("loaded app ids must remain internal: %s", data)
+	}
+}

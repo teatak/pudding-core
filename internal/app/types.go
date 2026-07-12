@@ -29,19 +29,29 @@ const (
 	AuthTypeOAuth2 = "oauth2"
 )
 
+const (
+	SourceBuiltin   = "builtin"
+	SourceInstalled = "installed"
+)
+
 type Definition struct {
-	ID            string              `json:"id" yaml:"id"`
-	Name          string              `json:"name" yaml:"name"`
-	Version       string              `json:"version,omitempty" yaml:"version,omitempty"`
-	Description   string              `json:"description,omitempty" yaml:"description,omitempty"`
-	Icon          *IconSpec           `json:"icon,omitempty" yaml:"icon,omitempty"`
-	Auth          *AuthConfig         `json:"auth,omitempty" yaml:"auth,omitempty"`
-	Connection    *ConnectionConfig   `json:"connection,omitempty" yaml:"connection,omitempty"`
-	Endpoints     map[string]Endpoint `json:"endpoints,omitempty" yaml:"endpoints,omitempty"`
-	Skills        []SkillRef          `json:"skills,omitempty" yaml:"skills,omitempty"`
-	Path          string              `json:"path,omitempty" yaml:"-"`
-	SourceURL     string              `json:"sourceURL,omitempty" yaml:"-"`
-	PackageSHA256 string              `json:"packageSHA256,omitempty" yaml:"-"`
+	ID             string              `json:"id" yaml:"id"`
+	Name           string              `json:"name" yaml:"name"`
+	Version        string              `json:"version,omitempty" yaml:"version,omitempty"`
+	Description    string              `json:"description,omitempty" yaml:"description,omitempty"`
+	Icon           *IconSpec           `json:"icon,omitempty" yaml:"icon,omitempty"`
+	Auth           *AuthConfig         `json:"auth,omitempty" yaml:"auth,omitempty"`
+	Connection     *ConnectionConfig   `json:"connection,omitempty" yaml:"connection,omitempty"`
+	Endpoints      map[string]Endpoint `json:"endpoints,omitempty" yaml:"endpoints,omitempty"`
+	Skills         []SkillRef          `json:"skills,omitempty" yaml:"skills,omitempty"`
+	Path           string              `json:"path,omitempty" yaml:"-"`
+	SourceURL      string              `json:"sourceURL,omitempty" yaml:"-"`
+	PackageSHA256  string              `json:"packageSHA256,omitempty" yaml:"-"`
+	Source         string              `json:"source" yaml:"-"`
+	Enabled        bool                `json:"enabled" yaml:"-"`
+	CanUninstall   bool                `json:"canUninstall" yaml:"-"`
+	RequiredMode   string              `json:"requiredMode" yaml:"-"`
+	DefaultSkillID string              `json:"defaultSkillID,omitempty" yaml:"-"`
 }
 
 type IconSpec struct {

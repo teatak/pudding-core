@@ -51,9 +51,10 @@ type AppMCPRunner struct {
 	httpClient *http.Client
 	nextID     atomic.Int64
 
-	mu    sync.Mutex
-	tools map[string]appMCPDiscoveredTool
-	cache appMCPToolCache
+	mu           sync.Mutex
+	sessionDefs  map[string][]provider.ToolDef
+	sessionTools map[string]map[string]appMCPDiscoveredTool
+	caches       map[string]appMCPToolCache
 }
 
 type AppMCPProbeStatus string
@@ -105,9 +106,11 @@ type appMCPToolCache struct {
 
 func NewAppMCPRunner(source AppMCPSource, opts ...AppMCPOption) *AppMCPRunner {
 	r := &AppMCPRunner{
-		source:     source,
-		httpClient: &http.Client{Timeout: appMCPRequestTimeout},
-		tools:      map[string]appMCPDiscoveredTool{},
+		source:       source,
+		httpClient:   &http.Client{Timeout: appMCPRequestTimeout},
+		sessionDefs:  map[string][]provider.ToolDef{},
+		sessionTools: map[string]map[string]appMCPDiscoveredTool{},
+		caches:       map[string]appMCPToolCache{},
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -123,28 +126,31 @@ func WithAppMCPHTTPClient(client *http.Client) AppMCPOption {
 	}
 }
 
-func (r *AppMCPRunner) Definitions(ctx context.Context, _ string) ([]provider.ToolDef, error) {
-	bindings, err := r.listBindings(ctx)
-	if err != nil {
-		if defs, tools, ok := r.cached(""); ok {
-			r.mu.Lock()
-			r.tools = tools
-			r.mu.Unlock()
-			return defs, nil
-		}
+func (r *AppMCPRunner) Definitions(_ context.Context, sessionID string) ([]provider.ToolDef, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return cloneAppMCPToolDefs(r.sessionDefs[sessionID]), nil
+}
+
+func (r *AppMCPRunner) DefinitionsForApps(ctx context.Context, sessionID string, appIDs []string) ([]provider.ToolDef, error) {
+	appIDs = normalizeAppIDs(appIDs)
+	if len(appIDs) == 0 {
 		return nil, nil
 	}
+	bindings, err := r.listBindings(ctx)
+	if err != nil {
+		return r.Definitions(ctx, sessionID)
+	}
+	bindings = filterAppMCPBindings(bindings, appIDs)
 	cacheKey := appMCPBindingsCacheKey(bindings)
 	if defs, tools, ok := r.cached(cacheKey); ok {
-		r.mu.Lock()
-		r.tools = tools
-		r.mu.Unlock()
+		r.setSessionTools(sessionID, defs, tools)
 		return defs, nil
 	}
 	defs, tools := r.discoverBindings(ctx, bindings)
+	r.setSessionTools(sessionID, defs, tools)
 	r.mu.Lock()
-	r.tools = tools
-	r.cache = appMCPToolCache{
+	r.caches[cacheKey] = appMCPToolCache{
 		key:       cacheKey,
 		expiresAt: time.Now().Add(appMCPCacheTTL(defs)),
 		defs:      cloneAppMCPToolDefs(defs),
@@ -156,11 +162,7 @@ func (r *AppMCPRunner) Definitions(ctx context.Context, _ string) ([]provider.To
 
 func (r *AppMCPRunner) Call(ctx context.Context, call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
-	tool, ok := r.lookup(call.Name)
-	if !ok {
-		_, _ = r.Definitions(ctx, call.SessionID)
-		tool, ok = r.lookup(call.Name)
-	}
+	tool, ok := r.lookup(call.SessionID, call.Name)
 	if !ok {
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "unknown_tool", "tool": call.Name})
 	}
@@ -186,20 +188,65 @@ func (r *AppMCPRunner) Call(ctx context.Context, call Call) Result {
 	return appMCPToolResult(call, raw)
 }
 
-func (r *AppMCPRunner) lookup(name string) (appMCPDiscoveredTool, bool) {
+func (r *AppMCPRunner) lookup(sessionID, name string) (appMCPDiscoveredTool, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	tool, ok := r.tools[name]
+	tool, ok := r.sessionTools[sessionID][name]
 	return tool, ok
+}
+
+func (r *AppMCPRunner) setSessionTools(sessionID string, defs []provider.ToolDef, tools map[string]appMCPDiscoveredTool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sessionDefs[sessionID] = cloneAppMCPToolDefs(defs)
+	r.sessionTools[sessionID] = cloneAppMCPTools(tools)
+}
+
+func (r *AppMCPRunner) CloseSession(sessionID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.sessionDefs, sessionID)
+	delete(r.sessionTools, sessionID)
 }
 
 func (r *AppMCPRunner) cached(cacheKey string) ([]provider.ToolDef, map[string]appMCPDiscoveredTool, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.cache.key == "" || (cacheKey != "" && r.cache.key != cacheKey) || time.Now().After(r.cache.expiresAt) {
+	cache, ok := r.caches[cacheKey]
+	if !ok || cache.key == "" || time.Now().After(cache.expiresAt) {
+		delete(r.caches, cacheKey)
 		return nil, nil, false
 	}
-	return cloneAppMCPToolDefs(r.cache.defs), cloneAppMCPTools(r.cache.tools), true
+	return cloneAppMCPToolDefs(cache.defs), cloneAppMCPTools(cache.tools), true
+}
+
+func normalizeAppIDs(appIDs []string) []string {
+	seen := make(map[string]bool, len(appIDs))
+	out := make([]string, 0, len(appIDs))
+	for _, appID := range appIDs {
+		appID = strings.TrimSpace(appID)
+		if appID == "" || seen[appID] {
+			continue
+		}
+		seen[appID] = true
+		out = append(out, appID)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func filterAppMCPBindings(bindings []*app.EndpointBinding, appIDs []string) []*app.EndpointBinding {
+	allowed := make(map[string]bool, len(appIDs))
+	for _, appID := range appIDs {
+		allowed[appID] = true
+	}
+	out := make([]*app.EndpointBinding, 0, len(bindings))
+	for _, binding := range bindings {
+		if binding != nil && allowed[binding.AppID] {
+			out = append(out, binding)
+		}
+	}
+	return out
 }
 
 func (r *AppMCPRunner) listBindings(ctx context.Context) ([]*app.EndpointBinding, error) {
@@ -263,6 +310,7 @@ func (r *AppMCPRunner) discoverBinding(ctx context.Context, binding *app.Endpoin
 			Description: description,
 			InputSchema: appMCPInputSchema(inputSchema),
 			Capability:  store.ModeWork,
+			AppID:       binding.AppID,
 		})
 		tools = append(tools, appMCPDiscoveredTool{
 			binding:    cloneAppMCPBinding(binding),

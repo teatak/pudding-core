@@ -142,6 +142,40 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 	}
 }
 
+func TestManagerPersistsAppEnablement(t *testing.T) {
+	home := t.TempDir()
+	manager := NewManager(home)
+	if err := manager.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := manager.SetAppEnabled(ctx, "browser", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetAppEnabled(ctx, "terminal", true); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded := NewManager(home)
+	enabled, err := reloaded.ListAppEnablement(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value, ok := enabled["browser"]; !ok || value {
+		t.Fatalf("browser enablement = %v, present = %v", value, ok)
+	}
+	if !enabled["terminal"] {
+		t.Fatalf("terminal enablement = %v", enabled["terminal"])
+	}
+	data, err := os.ReadFile(home + "/config/settings.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "browser: false") || !strings.Contains(string(data), "terminal: true") {
+		t.Fatalf("app enablement missing from settings.yaml:\n%s", data)
+	}
+}
+
 func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {
 	home := t.TempDir()
 	m := NewManager(home)

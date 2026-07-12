@@ -135,6 +135,43 @@ func TestSessionReasoningEffortPersistsAndClearsOnModelChange(t *testing.T) {
 	}
 }
 
+func TestSessionLoadedAppIDsPersist(t *testing.T) {
+	st, path := openTestStore(t)
+	ctx := context.Background()
+	if err := st.CreateSession(ctx, &store.Session{
+		ID: "sess_apps", Provider: "mock", Model: "mock",
+		LoadedAppIDs: []string{"terminal", "browser", "browser"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetSession(ctx, "sess_apps")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameStrings(got.LoadedAppIDs, []string{"browser", "terminal"}) {
+		t.Fatalf("created loaded app ids = %+v", got.LoadedAppIDs)
+	}
+	loaded := []string{"browser"}
+	if _, err := st.UpdateSession(ctx, "sess_apps", store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	got, err = reopened.GetSession(ctx, "sess_apps")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameStrings(got.LoadedAppIDs, []string{"browser"}) {
+		t.Fatalf("persisted loaded app ids = %+v", got.LoadedAppIDs)
+	}
+}
+
 func TestCanvasItemsAreGlobalWithSessionActor(t *testing.T) {
 	st, path := openTestStore(t)
 	ctx := context.Background()

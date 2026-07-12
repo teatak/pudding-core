@@ -249,7 +249,43 @@ type displaySettingsYAML struct {
 }
 
 type appsSettingsYAML struct {
-	ShowPreviewVersions *bool `yaml:"show_preview_versions,omitempty"`
+	ShowPreviewVersions *bool           `yaml:"show_preview_versions,omitempty"`
+	Enabled             map[string]bool `yaml:"enabled,omitempty"`
+}
+
+func (m *Manager) ListAppEnablement(_ context.Context) (map[string]bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cfg, err := m.readSettings()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(cfg.Apps.Enabled))
+	for id, enabled := range cfg.Apps.Enabled {
+		out[id] = enabled
+	}
+	return out, nil
+}
+
+func (m *Manager) SetAppEnabled(_ context.Context, id string, enabled bool) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("%w %q", ErrInvalidSetting, id)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cfg, err := m.readSettings()
+	if err != nil {
+		return err
+	}
+	if cfg.Apps.Enabled == nil {
+		cfg.Apps.Enabled = make(map[string]bool)
+	}
+	cfg.Apps.Enabled[id] = enabled
+	if cfg.Version == 0 {
+		cfg.Version = 1
+	}
+	return m.writeSettings(cfg)
 }
 
 func defaultSettingsYAML() settingsYAML {

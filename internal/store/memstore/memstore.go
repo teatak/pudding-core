@@ -144,8 +144,7 @@ func (m *Memstore) CreateSession(_ context.Context, s *store.Session) error {
 	}
 	now := time.Now()
 	s.CreatedAt, s.UpdatedAt, s.LastActivityAt = now, now, now
-	cp := *s
-	m.sessions[s.ID] = &cp
+	m.sessions[s.ID] = cloneSession(s)
 	return nil
 }
 
@@ -156,13 +155,13 @@ func (m *Memstore) GetSession(_ context.Context, id string) (*store.Session, err
 	if !ok {
 		return nil, store.ErrNotFound
 	}
-	cp := *s
+	cp := cloneSession(s)
 	cp.ActiveMode = store.NormalizeAgentMode(cp.ActiveMode)
 	if cp.ActiveMode == "" {
 		cp.ActiveMode = store.ModeChat
 	}
 	cp.Running = m.runningLocked(id)
-	return &cp, nil
+	return cp, nil
 }
 
 func (m *Memstore) ListSessions(_ context.Context) ([]*store.Session, error) {
@@ -170,13 +169,13 @@ func (m *Memstore) ListSessions(_ context.Context) ([]*store.Session, error) {
 	defer m.mu.Unlock()
 	out := make([]*store.Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
-		cp := *s
+		cp := cloneSession(s)
 		cp.ActiveMode = store.NormalizeAgentMode(cp.ActiveMode)
 		if cp.ActiveMode == "" {
 			cp.ActiveMode = store.ModeChat
 		}
 		cp.Running = m.runningLocked(s.ID)
-		out = append(out, &cp)
+		out = append(out, cp)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if !out[i].LastActivityAt.Equal(out[j].LastActivityAt) {
@@ -244,6 +243,9 @@ func (m *Memstore) UpdateSession(_ context.Context, id string, upd store.Session
 		}
 		s.ProjectID = *upd.ProjectID
 	}
+	if upd.LoadedAppIDs != nil {
+		s.LoadedAppIDs = append([]string(nil), (*upd.LoadedAppIDs)...)
+	}
 	if upd.Pinned != nil {
 		s.Pinned = *upd.Pinned
 	}
@@ -251,8 +253,7 @@ func (m *Memstore) UpdateSession(_ context.Context, id string, upd store.Session
 		s.PinnedOrder = *upd.PinnedOrder
 	}
 	s.UpdatedAt = time.Now()
-	cp := *s
-	return &cp, nil
+	return cloneSession(s), nil
 }
 
 func sessionModelKey(providerName, model string) string {
@@ -265,6 +266,15 @@ func cloneProject(p *store.Project) *store.Project {
 	}
 	cp := *p
 	cp.RootDirs = append([]string(nil), p.RootDirs...)
+	return &cp
+}
+
+func cloneSession(s *store.Session) *store.Session {
+	if s == nil {
+		return nil
+	}
+	cp := *s
+	cp.LoadedAppIDs = append([]string(nil), s.LoadedAppIDs...)
 	return &cp
 }
 

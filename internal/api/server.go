@@ -123,6 +123,11 @@ type appService interface {
 	DeleteDefinition(ctx context.Context, id string) error
 	ReadAsset(ctx context.Context, rel string) ([]byte, string, error)
 	ReadSkill(ctx context.Context, appID, skillID string) (*app.SkillDetail, error)
+	ReadSkillDetail(ctx context.Context, appID, skillID string) (*app.SkillDetail, error)
+}
+
+type appEnableService interface {
+	SetEnabled(ctx context.Context, id string, enabled bool) (*app.Definition, error)
 }
 
 type browserMCPService interface {
@@ -243,6 +248,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/skill-assets/*path").GET(s.getSkillAsset)
 	app.Route("/apps").GET(s.listApps)
 	app.Route("/apps/install").POST(s.installApp)
+	app.Route("/apps/:id/enabled").PUT(s.putAppEnabled)
 	app.Route("/apps/:id/mcp-overrides/:endpoint").GET(s.getAppMCPOverride).PUT(s.putAppMCPOverride).DELETE(s.deleteAppMCPOverride)
 	app.Route("/apps/:id/mcp").GET(s.getAppMCPStatus)
 	app.Route("/apps/:id").DELETE(s.deleteApp)

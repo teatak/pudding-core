@@ -918,6 +918,11 @@ export const appDefinition = z.object({
   path: z.string().optional(),
   sourceURL: z.string().optional(),
   packageSHA256: z.string().optional(),
+  source: z.enum(["builtin", "installed"]),
+  enabled: z.boolean(),
+  canUninstall: z.boolean(),
+  requiredMode: z.enum(["chat", "work", "code"]),
+  defaultSkillID: z.string().optional(),
 });
 export type AppDefinition = z.infer<typeof appDefinition>;
 
