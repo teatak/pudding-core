@@ -3,6 +3,9 @@ package contextbuilder
 import (
 	"bytes"
 	"context"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -229,6 +232,36 @@ func TestBuildInlinesImageAttachmentWhenSupported(t *testing.T) {
 	}
 	if string(req.Messages[0].Parts[1].Data) != "png bytes" {
 		t.Fatalf("unexpected image bytes: %q", string(req.Messages[0].Parts[1].Data))
+	}
+}
+
+func TestImageProviderPartUsesBoundedDerivative(t *testing.T) {
+	home := t.TempDir()
+	img := image.NewNRGBA(image.Rect(0, 0, 2400, 120))
+	for x := 0; x < 2400; x++ {
+		for y := 0; y < 120; y++ {
+			img.SetNRGBA(x, y, color.NRGBA{R: uint8(x % 251), G: uint8(y % 241), B: 80, A: 0xff})
+		}
+	}
+	var source bytes.Buffer
+	if err := png.Encode(&source, img); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := attachment.NewService(home).StoreReader("s1", "wide.png", "image/png", bytes.NewReader(source.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	part, ok := (&Builder{attachmentHome: home}).imageProviderPart("s1", store.AttachmentPart(stored), provider.ModelConfig{
+		Capabilities: &provider.ModelCapabilities{Image: true},
+	})
+	if !ok {
+		t.Fatal("expected provider image part")
+	}
+	if part.MIME != "image/png" || part.Width != attachment.ModelImageMaxDimension || part.Height != 102 {
+		t.Fatalf("unexpected provider derivative: type=%s mime=%s size=%dx%d", part.Type, part.MIME, part.Width, part.Height)
+	}
+	if bytes.Equal(part.Data, source.Bytes()) {
+		t.Fatal("provider received original oversized image")
 	}
 }
 

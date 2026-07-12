@@ -77,7 +77,12 @@ func estimatePartTokens(part provider.Part) int {
 	switch part.Type {
 	case provider.PartText, provider.PartThought:
 		return EstimateTextTokens(part.Text)
-	case provider.PartImage, provider.PartAudio:
+	case provider.PartImage:
+		if len(part.Data) == 0 {
+			return 0
+		}
+		return EstimateImageTokens(part.Width, part.Height)
+	case provider.PartAudio:
 		if len(part.Data) == 0 {
 			return 0
 		}
@@ -89,6 +94,22 @@ func estimatePartTokens(part provider.Part) int {
 	default:
 		return 0
 	}
+}
+
+func EstimateImageTokens(width, height int) int {
+	if width <= 0 || height <= 0 {
+		return 1024
+	}
+	// Provider billing formulas differ. One token per 1024 pixels is a bounded,
+	// provider-neutral estimate; provider-reported usage remains authoritative.
+	tokens := int((int64(width)*int64(height) + 1023) / 1024)
+	if tokens < 256 {
+		return 256
+	}
+	if tokens > 8192 {
+		return 8192
+	}
+	return tokens
 }
 
 func ceilDiv(n, d int) int {

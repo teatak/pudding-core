@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -2408,15 +2407,17 @@ func providerImagePartFromAttachment(sessionID, attachmentHome string, part stor
 	if !strings.HasPrefix(mime, "image/") || mime == "image/svg+xml" {
 		return provider.Part{}, false
 	}
-	path, ok, err := attachment.NewService(attachmentHome).Path(attachmentSessionIDForPart(sessionID, part), part.AttachmentKey)
-	if err != nil || !ok {
+	modelImage, err := attachment.NewService(attachmentHome).ModelImageForProvider(attachmentSessionIDForPart(sessionID, part), part.AttachmentKey, mime)
+	if err != nil || len(modelImage.Data) == 0 {
 		return provider.Part{}, false
 	}
-	data, err := os.ReadFile(path)
-	if err != nil || len(data) == 0 {
-		return provider.Part{}, false
-	}
-	return provider.Part{Type: provider.PartImage, MIME: mime, Data: data}, true
+	return provider.Part{
+		Type:   provider.PartImage,
+		MIME:   modelImage.MIME,
+		Data:   modelImage.Data,
+		Width:  modelImage.Width,
+		Height: modelImage.Height,
+	}, true
 }
 
 func attachmentSessionIDForPart(sessionID string, part store.ContentPart) string {

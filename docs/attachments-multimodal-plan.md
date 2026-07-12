@@ -1,6 +1,6 @@
 # 附件与多模态输入实施计划
 
-> 状态:计划 + M0/M1 后端基础已落地。  
+> 状态:实施中,图片主链路与多模态 provider 投递已落地。
 > 范围:图片、音频文件、PDF、txt/文本类附件。  
 > 目标:在 `pudding-core` 新架构里实现 session-scoped 附件上传、canonical message 附件事实源、provider 多模态投递与 transcript 展示。
 
@@ -32,6 +32,10 @@
 - Composer 支持文件选择、粘贴、拖拽上传、上传态 chip、纯附件提交。
 - Composer 和 transcript 可展示图片缩略图,其它附件展示 chip。
 - contextbuilder 在模型支持图片时把图片附件转成 provider `image` part;不支持时 fallback 文本摘要。
+- 原图继续作为 canonical attachment 供 UI 预览和下载;发送模型前按需生成最长边 2048px 的派生图,并在原 blob 旁缓存。
+- 4 MiB 内且最长边不超过 2048px 的图片直接复用;超限 PNG/GIF 保真缩放为 PNG,JPEG 照片以质量 85 重编码,大体积不透明 PNG 可降为 JPEG。
+- 模型图片处理覆盖历史附件与同一 turn 的 Tool 图片;派生图删除随原附件清理,原图内容不改写。
+- 图片 usage 估算使用派生图宽高,不再固定按 1024 tokens/张计算;provider 上报 usage 仍是最终事实源。
 - OpenAI Chat Completions / Responses、Google Gemini、Anthropic Messages 已支持图片附件 wire format。
 - 测试覆盖 API 上传/读取/submit、SQLite queue promote、contextbuilder 附件摘要/图片 inline、provider 图片 wire format。
 
@@ -183,7 +187,7 @@ const (
 
 | MIME | Context 投影 |
 | --- | --- |
-| `image/*` | 模型支持 image 时读 bytes → image part;否则引用 |
+| `image/*` | 模型支持 image 时读取或生成有界模型派生图 → image part;否则引用 |
 | `audio/*` | 模型支持 audio 时读 bytes → audio part;否则引用 / transcript |
 | `application/pdf` | 支持 PDF inline 时 document part;否则引用 / 文本提取 |
 | `text/*`, json, xml, yaml | 小文件内联文本块 |
@@ -262,9 +266,8 @@ Attachments are available on @message(msg_xxx).
 
 ```text
 internal/attachment/
-  store.go       # StoreAttachmentReader / path normalize / URL
-  mime.go        # whitelist / ext fallback / size limit
-  service.go     # session scoped service
+  attachment.go  # session scoped store / MIME / path normalize / URL
+  model_image.go # model-only resize / encode / disk cache
 internal/api/attachments.go
 ```
 
@@ -331,6 +334,7 @@ web/src/components/transcript/*
 
 - text/json/md/csv 小文件内联。
 - image hot window inline。
+- 模型图片最长边限制、派生缓存和尺寸化 token 估算。
 - 超预算/不支持附件引用提示。
 - usage 估算纳入附件粗略 token 成本。
 

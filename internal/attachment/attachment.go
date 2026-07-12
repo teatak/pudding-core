@@ -154,7 +154,7 @@ func (s *Service) Delete(sessionID, key string) error {
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	return nil
+	return removeModelImageCache(path)
 }
 
 func WithSourcePath(item store.Attachment, path string) store.Attachment {

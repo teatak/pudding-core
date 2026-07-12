@@ -135,6 +135,8 @@ type Part struct {
 	Content string          `json:"content,omitempty"`
 	MIME    string          `json:"mime,omitempty"`
 	Data    []byte          `json:"-"`
+	Width   int             `json:"-"`
+	Height  int             `json:"-"`
 }
 
 func ImageDataURL(mime string, data []byte) string {
