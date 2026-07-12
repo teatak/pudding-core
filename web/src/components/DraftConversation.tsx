@@ -253,32 +253,28 @@ export function DraftConversation({ token, projectID }: { token: string; project
             <h1 className="pudding-draft-heading">{userMessage?.title || t("draft.title")}</h1>
           )}
         </div>
-        {userMessagesQuery.isPending || userMessage?.subtitle || userMessage?.link ? (
+        {userMessage?.subtitle || userMessage?.link ? (
           <div className="pudding-draft-subtitle-slot">
-            {userMessagesQuery.isPending ? (
-              <Skeleton className="mx-auto h-4 w-96 max-w-[70vw]" />
-            ) : (
-              <p className="pudding-draft-subtitle" data-user-message-id={userMessage?.id}>
-                {userMessage?.subtitle}
-                {userMessage?.link ? (
-                  <>
-                    {userMessage.subtitle ? " " : null}
-                    <a
-                      className="text-foreground/75 underline decoration-border underline-offset-4 transition-colors hover:text-foreground"
-                      href={userMessage.link.url}
-                      rel="noreferrer noopener"
-                      target="_blank"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        void openExternalURL(event.currentTarget.href);
-                      }}
-                    >
-                      {userMessage.link.label}
-                    </a>
-                  </>
-                ) : null}
-              </p>
-            )}
+            <p className="pudding-draft-subtitle" data-user-message-id={userMessage?.id}>
+              {userMessage?.subtitle}
+              {userMessage?.link ? (
+                <>
+                  {userMessage.subtitle ? " " : null}
+                  <a
+                    className="text-foreground/75 underline decoration-border underline-offset-4 transition-colors hover:text-foreground"
+                    href={userMessage.link.url}
+                    rel="noreferrer noopener"
+                    target="_blank"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      void openExternalURL(event.currentTarget.href);
+                    }}
+                  >
+                    {userMessage.link.label}
+                  </a>
+                </>
+              ) : null}
+            </p>
           </div>
         ) : null}
         <div className={cn("pudding-draft-stack", showPresetSetup && "pudding-draft-stack-with-setup")}>
