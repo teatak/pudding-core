@@ -2003,7 +2003,7 @@ function SessionItem({
                 showOnHover={!actionsAlwaysVisible}
                 tabIndex={-1}
               >
-                <Ellipsis />
+                <Ellipsis className="size-3.5!" />
               </SidebarMenuAction>
             </DropdownMenuTrigger>
             <DropdownMenuContent
