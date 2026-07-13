@@ -8,6 +8,7 @@ const {
   nativeImage,
   nativeTheme,
   screen,
+  session,
   shell,
   webContents,
 } = require("electron");
@@ -22,6 +23,7 @@ const packageMetadata = require("../package.json");
 
 const { BrowserBridgeServer } = require("./browser-bridge-server.cjs");
 const { BrowserHost } = require("./browser-host.cjs");
+const { configureManagedBrowserPermissions, managedBrowserPartition } = require("./browser-permissions.cjs");
 const { buildEditContextMenuTemplate } = require("./context-menu.cjs");
 const { nativeText, normalizeNativeLocale } = require("./native-i18n.cjs");
 const { ProjectFileWatcher } = require("./project-file-watcher.cjs");
@@ -117,6 +119,7 @@ app.whenReady().then(async () => {
   shellLocale = normalizeNativeLocale(process.env.PUDDING_LOCALE || app.getLocale());
   updateApplicationMenu();
   try {
+    configureManagedBrowserPermissions(session.fromPartition(managedBrowserPartition));
     const browserBridge = await browserBridgeServer.start();
     const token = await ensureDaemon(browserBridge);
     const window = createMainWindow();

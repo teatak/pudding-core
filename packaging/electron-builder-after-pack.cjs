@@ -9,6 +9,7 @@ module.exports = async function afterPack(context) {
   const root = path.resolve(__dirname, "..");
   const appName = context.packager.appInfo.productFilename;
   const appPath = path.join(context.appOutDir, `${appName}.app`);
+  const infoPlistPath = path.join(appPath, "Contents", "Info.plist");
   const appRoot = path.join(appPath, "Contents", "Resources", "app");
   const daemonPath = path.join(appRoot, "bin", "puddingd");
   const languageServersPath = path.join(appRoot, "language-servers");
@@ -35,8 +36,22 @@ exec "$SERVER_ROOT/node" "$SERVER_ROOT/typescript/node_modules/typescript-langua
   fs.rmSync(electronNodePath, { force: true });
   fs.symlinkSync(`../../../MacOS/${appName}`, electronNodePath);
   fs.chmodSync(daemonPath, 0o755);
+  removeUnusedPrivacyUsageDescriptions(infoPlistPath);
   makeBundleOwnerWritable(appPath);
 };
+
+function removeUnusedPrivacyUsageDescriptions(infoPlistPath) {
+  const contents = execFileSync("plutil", ["-p", infoPlistPath], { encoding: "utf8" });
+  for (const key of [
+    "NSAudioCaptureUsageDescription",
+    "NSBluetoothAlwaysUsageDescription",
+    "NSBluetoothPeripheralUsageDescription",
+  ]) {
+    if (contents.includes(`"${key}" =>`)) {
+      execFileSync("plutil", ["-remove", key, infoPlistPath]);
+    }
+  }
+}
 
 function makeBundleOwnerWritable(rootPath) {
   const pending = [rootPath];
@@ -62,3 +77,4 @@ function makeBundleOwnerWritable(rootPath) {
 }
 
 module.exports.makeBundleOwnerWritable = makeBundleOwnerWritable;
+module.exports.removeUnusedPrivacyUsageDescriptions = removeUnusedPrivacyUsageDescriptions;

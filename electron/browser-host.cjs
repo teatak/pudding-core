@@ -630,6 +630,10 @@ class BrowserHost {
 
   bindSlotEvents(slot) {
     const webContents = slot.webContents;
+    webContents.on("select-bluetooth-device", (event, _devices, callback) => {
+      event.preventDefault();
+      callback("");
+    });
     webContents.setWindowOpenHandler(({ url }) => {
       const targetURL = normalizeURL(url, slot.fileRoots);
       if (!targetURL) {

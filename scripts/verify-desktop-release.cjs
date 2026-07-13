@@ -149,6 +149,16 @@ function verifyUsageDescriptions(bundlePath, label) {
       fail(`${label} is missing ${usageDescription}`);
     }
   }
+  const infoPlist = commandOutput("plutil", ["-p", infoPlistPath]);
+  for (const unusedDescription of [
+    "NSAudioCaptureUsageDescription",
+    "NSBluetoothAlwaysUsageDescription",
+    "NSBluetoothPeripheralUsageDescription",
+  ]) {
+    if (infoPlist.includes(`"${unusedDescription}" =>`)) {
+      fail(`${label} contains unused privacy declaration ${unusedDescription}`);
+    }
+  }
 }
 
 function verifySignedCode(codePath, label, deep) {

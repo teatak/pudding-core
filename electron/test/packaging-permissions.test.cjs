@@ -4,7 +4,10 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { makeBundleOwnerWritable } = require("../../packaging/electron-builder-after-pack.cjs");
+const {
+  makeBundleOwnerWritable,
+  removeUnusedPrivacyUsageDescriptions,
+} = require("../../packaging/electron-builder-after-pack.cjs");
 
 test("packaging makes bundled regular files owner-writable without replacing symlinks", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "pudding-packaging-permissions-"));
@@ -23,6 +26,35 @@ test("packaging makes bundled regular files owner-writable without replacing sym
     assert.notEqual(fs.statSync(license).mode & 0o200, 0);
     assert.notEqual(fs.statSync(nested).mode & 0o200, 0);
     assert.equal(fs.lstatSync(link).isSymbolicLink(), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("packaging removes privacy declarations for unsupported capabilities", {
+  skip: process.platform !== "darwin",
+}, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pudding-packaging-plist-"));
+  const infoPlistPath = path.join(root, "Info.plist");
+  try {
+    fs.writeFileSync(
+      infoPlistPath,
+      `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>NSAudioCaptureUsageDescription</key><string>audio</string>
+<key>NSBluetoothAlwaysUsageDescription</key><string>bluetooth</string>
+<key>NSBluetoothPeripheralUsageDescription</key><string>bluetooth</string>
+<key>NSCameraUsageDescription</key><string>camera</string>
+</dict></plist>`,
+    );
+
+    removeUnusedPrivacyUsageDescriptions(infoPlistPath);
+
+    const contents = fs.readFileSync(infoPlistPath, "utf8");
+    assert.doesNotMatch(contents, /NSAudioCaptureUsageDescription/);
+    assert.doesNotMatch(contents, /NSBluetooth/);
+    assert.match(contents, /NSCameraUsageDescription/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

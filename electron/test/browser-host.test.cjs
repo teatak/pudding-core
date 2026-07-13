@@ -148,6 +148,28 @@ test("waits for a renderer webview and navigates it through persistent CDP", asy
   host.closeAll();
 });
 
+test("managed browser cancels Web Bluetooth device selection", async () => {
+  const required = [];
+  const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));
+  const opening = host.ensure({ sessionID: "session-bluetooth", tabID: "tab-bluetooth" });
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(43);
+  await host.registerWebContents(required[0], webContents);
+  await opening;
+
+  let prevented = false;
+  let selectedDevice = "device-1";
+  webContents.emit(
+    "select-bluetooth-device",
+    { preventDefault: () => { prevented = true; } },
+    [{ deviceId: "device-1" }],
+    (deviceID) => { selectedDevice = deviceID; },
+  );
+  assert.equal(prevented, true);
+  assert.equal(selectedDevice, "");
+  host.closeAll();
+});
+
 test("rejects a stale renderer registration", async () => {
   let required;
   const host = new BrowserHost(undefined, undefined, undefined, (request) => {
