@@ -71,25 +71,6 @@ test("preview packaging publishes beta metadata as a GitHub prerelease", () => {
   assert.equal(loadConfigValue("publish[0].releaseType", overrides), "prerelease");
 });
 
-test("local publishing can stage stable and preview packages as draft releases", () => {
-  assert.equal(
-    loadConfigValue("publish[0].releaseType", {
-      PUDDING_RELEASE_DRAFT: "1",
-      PUDDING_UPDATE_MODE: "manual",
-    }),
-    "draft",
-  );
-  assert.equal(
-    loadConfigValue("publish[0].releaseType", {
-      PUDDING_APP_VERSION: "0.1.2-beta.1",
-      PUDDING_RELEASE_CHANNEL: "preview",
-      PUDDING_RELEASE_DRAFT: "1",
-      PUDDING_UPDATE_MODE: "manual",
-    }),
-    "draft",
-  );
-});
-
 test("release channel rejects mismatched versions", () => {
   assert.throws(
     () => loadConfigValue("publish[0].channel", { PUDDING_RELEASE_CHANNEL: "preview" }),
@@ -116,7 +97,6 @@ function loadConfigValue(pathExpression, overrides = {}) {
       PUDDING_MAC_IDENTITY: "",
       PUDDING_APP_VERSION: "",
       PUDDING_RELEASE_CHANNEL: "",
-      PUDDING_RELEASE_DRAFT: "",
       PUDDING_UPDATE_MODE: "",
       APPLE_KEYCHAIN_PROFILE: "",
       APPLE_ID: "",

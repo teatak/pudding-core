@@ -97,6 +97,9 @@ identity, and notarization setup. They run Go and Electron tests, create and pus
 Draft Release in `teatak/pudding`. A single valid Developer ID Application identity is detected automatically;
 set `PUDDING_MAC_IDENTITY` only when the keychain contains more than one.
 
+Packaging and uploading are separate phases. The app is fully built and verified first; the release script then
+creates one draft and uploads its five assets sequentially. This avoids partially published or duplicate drafts.
+
 The draft is not visible to update clients. The publish command verifies it automatically; it can also be
 checked again with:
 
@@ -117,7 +120,7 @@ GitHub Prerelease without changing latest. Stable clients keep `allowPrerelease=
 preview package. Publishing fails before building if the public repository already contains that release or
 tag.
 
-The source tag lives in `teatak/pudding-core`; Electron Builder creates the matching public release in
+The source tag lives in `teatak/pudding-core`; the local release script creates the matching public release in
 `teatak/pudding`. Keep previous public releases available for rollback.
 
 The developer setting **Receive Pudding preview releases** opts the existing app into the beta channel. Preview
@@ -145,8 +148,9 @@ Keep the user-facing installation instructions in the public
 - If publishing fails after the source tag is pushed but before creating a draft, rerun
   `PUDDING_RELEASE_CHANNEL=stable make desktop-publish-from-tag`. Use `preview` for a beta tag. Do not move the
   source tag.
-- If the draft is incomplete, delete that draft and its matching public tag, then run the same from-tag recovery
-  command. Never replace assets after final publication.
+- If uploading is interrupted, run the same from-tag recovery command. It reuses the draft, skips complete
+  assets, and uploads the missing ones. Delete a draft only when it is corrupt or duplicated. Never replace
+  assets after final publication.
 - If the tagged source itself is wrong, bump the version and create a new tag.
 - The from-tag target refuses an untagged or dirty checkout.
 - The Help menu always contains `Download Latest Version...`, independently of update-check state.

@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { validateDraftRelease } = require("../../scripts/release-draft.cjs");
+const { expectedAssetNames, validateDraftRelease } = require("../../scripts/release-draft.cjs");
 
 function draft(version = "0.1.2", updateInfo = "latest-mac.yml") {
   const names = [
@@ -23,6 +23,17 @@ test("accepts complete stable and preview draft releases", () => {
   assert.doesNotThrow(() =>
     validateDraftRelease(draft("0.1.3-beta.1", "beta-mac.yml"), "v0.1.3-beta.1", "preview"),
   );
+});
+
+test("lists the complete channel-specific release assets", () => {
+  assert.deepEqual(expectedAssetNames("v0.1.2", "stable"), [
+    "Pudding-0.1.2-arm64.dmg",
+    "Pudding-0.1.2-arm64.dmg.blockmap",
+    "Pudding-0.1.2-arm64.zip",
+    "Pudding-0.1.2-arm64.zip.blockmap",
+    "latest-mac.yml",
+  ]);
+  assert.equal(expectedAssetNames("v0.1.3-beta.1", "preview").at(-1), "beta-mac.yml");
 });
 
 test("rejects incomplete or already published releases", () => {

@@ -38,11 +38,10 @@ test("release gate rejects malformed release tags", () => {
   }
 });
 
-test("local bundles stay tag-free while publishing is gated", () => {
+test("local bundles stay tag-free and raw builder publishing stays disabled", () => {
   const scripts = require("../../package.json").scripts;
   assert.doesNotMatch(scripts["desktop:package"], /release-gate/);
-  assert.match(scripts["desktop:publish"], /release-gate\.cjs check/);
-  assert.match(scripts["desktop:publish"], /check-public-release\.cjs/);
+  assert.equal(scripts["desktop:publish"], undefined);
 });
 
 test("public release gate only accepts unused versions", () => {

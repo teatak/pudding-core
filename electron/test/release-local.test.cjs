@@ -16,14 +16,13 @@ test("finds a single valid Developer ID identity", () => {
   ]);
 });
 
-test("local releases default to a draft and the local notary profile", () => {
+test("local releases default to the local notary profile", () => {
   const env = buildReleaseEnvironment(
     {},
     "stable",
     "Developer ID Application: Gang Yang (7K47HJ79JA)",
     "token",
   );
-  assert.equal(env.PUDDING_RELEASE_DRAFT, "1");
   assert.equal(env.PUDDING_RELEASE_CHANNEL, "stable");
   assert.equal(env.APPLE_KEYCHAIN_PROFILE, "pudding-notary");
   assert.equal(env.GH_TOKEN, "token");

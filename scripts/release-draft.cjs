@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 
 const { spawnSync } = require("node:child_process");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const packageMetadata = require("../package.json");
 const { inferReleaseChannelFromTag } = require("./release-gate.cjs");
 
 const repository = "teatak/pudding";
+const root = path.resolve(__dirname, "..");
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch((error) => {
@@ -16,15 +19,24 @@ if (require.main === module) {
 
 async function main(argv, env) {
   const [command, requestedTag] = argv;
-  if (command !== "status" && command !== "publish") {
-    throw new Error("usage: release-draft.cjs <status|publish> [vX.Y.Z[-beta.N]]");
+  if (command !== "create" && command !== "status" && command !== "publish") {
+    throw new Error("usage: release-draft.cjs <create|status|publish> [vX.Y.Z[-beta.N]]");
   }
 
   const tag = String(requestedTag || `v${packageMetadata.version}`).trim();
   const channel = inferReleaseChannelFromTag(tag);
   const token = resolveGitHubToken(env);
   const releases = await githubRequest("GET", `/repos/${repository}/releases?per_page=100`, token);
-  const release = releases.find((candidate) => candidate.tag_name === tag);
+  const matching = releases.filter((candidate) => candidate.tag_name === tag);
+  if (matching.length > 1) {
+    throw new Error(`multiple drafts exist for ${tag}; consolidate them before continuing`);
+  }
+  if (command === "create") {
+    await createDraftRelease(matching[0], tag, channel, token, env);
+    return;
+  }
+
+  const release = matching[0];
   if (!release) {
     throw new Error(`draft ${tag} is not ready; signing or notarization may still be running`);
   }
@@ -55,20 +67,54 @@ async function main(argv, env) {
   console.log(`Release published: ${tag} ${published.html_url}`);
 }
 
+async function createDraftRelease(existingRelease, tag, channel, token, env) {
+  const assets = expectedAssetNames(tag, channel).map((name) => {
+    const filePath = path.join(root, "dist", "release", name);
+    const stat = fs.statSync(filePath, { throwIfNoEntry: false });
+    if (!stat?.isFile() || stat.size <= 0) {
+      throw new Error(`local release asset is missing or empty: ${filePath}`);
+    }
+    return { name, filePath, size: stat.size };
+  });
+
+  let release = existingRelease;
+  if (!release) {
+    runGh(
+      ["release", "create", tag, "--repo", repository, "--draft", "--title", tag.slice(1)],
+      token,
+      env,
+    );
+    const releases = await githubRequest("GET", `/repos/${repository}/releases?per_page=100`, token);
+    release = releases.find((candidate) => candidate.tag_name === tag);
+  }
+  if (!release?.draft) {
+    throw new Error(`draft ${tag} could not be created`);
+  }
+
+  const remoteAssets = new Map((release.assets || []).map((asset) => [asset.name, asset]));
+  for (const asset of assets) {
+    const remote = remoteAssets.get(asset.name);
+    if (remote?.state === "uploaded" && Number(remote.size) === asset.size) {
+      continue;
+    }
+    const args = ["release", "upload", tag, asset.filePath, "--repo", repository];
+    if (remote) {
+      args.push("--clobber");
+    }
+    runGh(args, token, env);
+  }
+
+  release = await githubRequest("GET", `/repos/${repository}/releases/${release.id}`, token);
+  validateDraftRelease(release, tag, channel);
+  console.log(`Draft release assets ready: ${tag} ${release.html_url}`);
+}
+
 function validateDraftRelease(release, tag, channel) {
   if (release.tag_name !== tag || release.draft !== true) {
     throw new Error(`release ${tag} is not a draft`);
   }
 
-  const version = tag.slice(1);
-  const updateInfo = channel === "preview" ? "beta-mac.yml" : "latest-mac.yml";
-  const expectedAssets = [
-    `Pudding-${version}-arm64.dmg`,
-    `Pudding-${version}-arm64.dmg.blockmap`,
-    `Pudding-${version}-arm64.zip`,
-    `Pudding-${version}-arm64.zip.blockmap`,
-    updateInfo,
-  ];
+  const expectedAssets = expectedAssetNames(tag, channel);
   const assets = new Map((release.assets || []).map((asset) => [asset.name, asset]));
   for (const name of expectedAssets) {
     const asset = assets.get(name);
@@ -76,6 +122,18 @@ function validateDraftRelease(release, tag, channel) {
       throw new Error(`draft ${tag} is missing a complete ${name} asset`);
     }
   }
+}
+
+function expectedAssetNames(tag, channel) {
+  const version = tag.slice(1);
+  const updateInfo = channel === "preview" ? "beta-mac.yml" : "latest-mac.yml";
+  return [
+    `Pudding-${version}-arm64.dmg`,
+    `Pudding-${version}-arm64.dmg.blockmap`,
+    `Pudding-${version}-arm64.zip`,
+    `Pudding-${version}-arm64.zip.blockmap`,
+    updateInfo,
+  ];
 }
 
 function resolveGitHubToken(env) {
@@ -89,6 +147,17 @@ function resolveGitHubToken(env) {
     throw new Error("GH_TOKEN or an authenticated gh CLI is required");
   }
   return token;
+}
+
+function runGh(args, token, env) {
+  const result = spawnSync("gh", args, {
+    cwd: root,
+    env: { ...env, GH_TOKEN: token },
+    stdio: "inherit",
+  });
+  if (result.status !== 0) {
+    throw new Error(`gh ${args.join(" ")} failed`);
+  }
 }
 
 async function githubRequest(method, endpoint, token, body) {
@@ -110,4 +179,4 @@ async function githubRequest(method, endpoint, token, body) {
   return payload;
 }
 
-module.exports = { validateDraftRelease };
+module.exports = { expectedAssetNames, validateDraftRelease };

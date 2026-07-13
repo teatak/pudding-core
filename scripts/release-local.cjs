@@ -40,8 +40,9 @@ function main(argv, env) {
   run("npm", ["run", "test:electron"], releaseEnv);
   run("node", ["scripts/release-gate.cjs", command === "start" ? "tag" : "check"], releaseEnv);
   run("make", ["desktop-release", "language-servers"], releaseEnv);
-  run("npm", ["run", "desktop:publish"], releaseEnv);
+  run("npm", ["run", "desktop:package"], releaseEnv);
   run("node", ["scripts/verify-desktop-release.cjs"], releaseEnv);
+  run("node", ["scripts/release-draft.cjs", "create", tag], releaseEnv);
   run("node", ["scripts/release-draft.cjs", "status", tag], releaseEnv);
   console.log("Draft is ready. Publish it with: make desktop-release-finalize");
 }
@@ -52,7 +53,6 @@ function buildReleaseEnvironment(env, channel, identity, token) {
     GH_TOKEN: token,
     PUDDING_MAC_IDENTITY: identity,
     PUDDING_RELEASE_CHANNEL: channel,
-    PUDDING_RELEASE_DRAFT: "1",
   };
   const hasAppleIDCredentials = Boolean(
     result.APPLE_ID && result.APPLE_APP_SPECIFIC_PASSWORD && result.APPLE_TEAM_ID,

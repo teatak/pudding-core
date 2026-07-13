@@ -9,11 +9,6 @@ const signingIdentity = normalizeSigningIdentity(requestedSigningIdentity);
 const requestedVersion = String(process.env.PUDDING_APP_VERSION || "").trim();
 const releaseVersion = requestedVersion || packageMetadata.version;
 const releaseChannel = resolveReleaseChannel(process.env.PUDDING_RELEASE_CHANNEL, releaseVersion);
-const requestedReleaseDraft = String(process.env.PUDDING_RELEASE_DRAFT || "").trim();
-if (requestedReleaseDraft && requestedReleaseDraft !== "0" && requestedReleaseDraft !== "1") {
-  throw new Error("PUDDING_RELEASE_DRAFT must be 0 or 1");
-}
-const publishAsDraft = requestedReleaseDraft === "1";
 const requestedUpdateMode = String(process.env.PUDDING_UPDATE_MODE || "").trim().toLowerCase();
 if (requestedUpdateMode && requestedUpdateMode !== "manual" && requestedUpdateMode !== "automatic") {
   throw new Error("PUDDING_UPDATE_MODE must be manual or automatic");
@@ -100,7 +95,7 @@ module.exports = {
       owner: "teatak",
       repo: "pudding",
       channel: releaseChannel.updateChannel,
-      releaseType: publishAsDraft ? "draft" : releaseChannel.releaseType,
+      releaseType: releaseChannel.releaseType,
     },
   ],
 };
