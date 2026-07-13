@@ -370,7 +370,7 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
     --dropdown-destructive-hover: var(--destructive-hover);
     --menu-surface: oklch(0.295 0 0);
     --menu-outline: oklch(1 0 0 / 16%);
-    --menu-shadow: 0 18px 44px oklch(0 0 0 / 55%), 0 4px 12px oklch(0 0 0 / 36%);
+    --menu-shadow: 0 8px 20px oklch(0 0 0 / 22%), 0 1px 5px oklch(0 0 0 / 12%);
     --confirm-destructive: color-mix(in oklch, var(--destructive), black 22%);
     --confirm-destructive-hover: color-mix(in oklch, var(--destructive-hover), black 14%);
     --mascot-body-top: oklch(0.72 0.16 277);
