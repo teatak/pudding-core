@@ -90,10 +90,25 @@ state, and remote tag; create an annotated tag such as `v0.1.2` or `v0.1.3-beta.
 `origin`. Pushing the tag starts [the desktop release workflow](../.github/workflows/desktop-release.yml).
 
 The workflow runs on macOS arm64, validates that the tag and package version match, runs Go and Electron tests,
-signs and notarizes the app, and publishes to `teatak/pudding`. Stable tags produce a normal GitHub Release with
-`latest-mac.yml`; beta tags produce a GitHub Prerelease with `beta-mac.yml`. Stable clients keep
-`allowPrerelease=false` and never receive a preview package. The workflow fails before building if the public
-repository already contains that release or tag.
+signs and notarizes the app, then uploads the verified assets to a Draft Release in `teatak/pudding`. The draft
+is not visible to update clients. Check it with:
+
+```bash
+make desktop-release-status
+```
+
+The status command succeeds only when the DMG, ZIP, both blockmaps, and channel metadata are fully uploaded.
+It accepts `RELEASE_TAG=v0.1.2` when checking a version other than the current `package.json`. After inspection,
+publish explicitly with:
+
+```bash
+make desktop-release-finalize
+```
+
+Finalizing a stable tag publishes a normal GitHub Release and marks it latest. Finalizing a beta tag publishes a
+GitHub Prerelease without changing latest. Stable clients keep `allowPrerelease=false` and never receive a
+preview package. The workflow fails before building if the public repository already contains that release or
+tag.
 
 Configure these Actions secrets in `teatak/pudding-core` before the first tag-driven release:
 
@@ -131,9 +146,11 @@ Keep the user-facing installation instructions in the public
 ## Failure recovery
 
 - Automatic mode downloads in the background but never installs until the user chooses **Restart to Update**.
-- If the tag workflow fails before publishing public assets, fix the workflow or secret and rerun the same
-  Actions job. Do not move the tag.
-- If public assets already exist or the tagged source itself is wrong, bump the version and create a new tag.
+- If the tag workflow fails before creating the draft, fix the workflow or secret and rerun the same Actions
+  job. Do not move the tag.
+- If the draft is incomplete, delete that draft and its public tag before rerunning the same source-tag job.
+  Never replace assets after final publication.
+- If the tagged source itself is wrong, bump the version and create a new tag.
 - As an emergency fallback, check out the existing tag and run
   `PUDDING_RELEASE_CHANNEL=stable make desktop-publish-from-tag` with all signing, notarization, and GitHub
   credentials configured. Use `preview` for a beta tag. This target refuses an untagged or dirty checkout.

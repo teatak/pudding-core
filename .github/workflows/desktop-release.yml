@@ -91,7 +91,8 @@ jobs:
           make test
           npm run test:electron
 
-      - name: Sign, notarize, and publish
+      - name: Sign, notarize, and create draft release
         env:
           PUDDING_RELEASE_CHANNEL: ${{ steps.release.outputs.channel }}
+          PUDDING_RELEASE_DRAFT: "1"
         run: make desktop-publish-from-tag

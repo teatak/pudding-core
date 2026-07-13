@@ -2,7 +2,7 @@ MODULE := github.com/teatak/pudding-core
 LDFLAGS_RELEASE := -X $(MODULE)/internal/buildinfo.channel=release
 BUILDTAGS := sqlite_fts5 webrtcaec
 
-.PHONY: test schema-check tidy clean embed language-servers language-servers-ready desktop desktop-dev desktop-release desktop-bundle desktop-publish desktop-preview-bundle desktop-preview-publish desktop-publish-from-tag daemon daemon-dev daemon-release prompt tools-report tools-eval
+.PHONY: test schema-check tidy clean embed language-servers language-servers-ready desktop desktop-dev desktop-release desktop-bundle desktop-publish desktop-preview-bundle desktop-preview-publish desktop-publish-from-tag desktop-release-status desktop-release-finalize daemon daemon-dev daemon-release prompt tools-report tools-eval
 
 # 共享:构建前端并装填进 daemon 的 embed 目录(产物不进 git)
 embed:
@@ -55,6 +55,13 @@ desktop-publish-from-tag:
 	@node scripts/release-gate.cjs check
 	@$(MAKE) desktop-release language-servers
 	@npm run desktop:publish
+
+# Draft 出现即表示签名、公证和产物上传均已完成；显式确认后才公开 Release。
+desktop-release-status:
+	@node scripts/release-draft.cjs status $(RELEASE_TAG)
+
+desktop-release-finalize:
+	@node scripts/release-draft.cjs publish $(RELEASE_TAG)
 
 # —— headless daemon(无窗口,浏览器访问)——
 # 构建(dev 通道;含 embed web)
