@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+import { setCanvasOpen } from "@/state/canvasStore";
+
 type BrowserRevealState = {
   epochs: Record<string, number | undefined>;
   consumeReveal: (sessionID: string, epoch: number) => void;
@@ -27,6 +29,7 @@ export const useBrowserRevealStore = create<BrowserRevealState>((set) => ({
 
 export function requestBrowserReveal(sessionID: string) {
   useBrowserRevealStore.getState().requestReveal(sessionID);
+  setCanvasOpen(true);
 }
 
 export function consumeBrowserReveal(sessionID: string, epoch: number) {

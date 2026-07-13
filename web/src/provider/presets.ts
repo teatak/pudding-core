@@ -48,22 +48,26 @@ type ProviderModelPatch = Omit<ProviderModel, "id" | "limits" | "providerOptions
 const DEFAULT_PRESET_TEMPERATURE = 0.2;
 
 const DEEPSEEK_OPENAI_MODELS = [
-  model("deepseek-v4-flash", { contextWindow: 1_050_000, capabilities: { tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 384_000, max_tool_loops: 64, reasoning_effort: "high" } }),
-  model("deepseek-v4-pro", { contextWindow: 1_050_000, capabilities: { tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 384_000, max_tool_loops: 64, reasoning_effort: "high" } }),
+  model("deepseek-v4-flash", { contextWindow: 1_050_000, capabilities: { tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 384_000, max_tool_loops: 64 } }),
+  model("deepseek-v4-pro", { contextWindow: 1_050_000, capabilities: { tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 384_000, max_tool_loops: 64 } }),
 ];
 
 const DEEPSEEK_ANTHROPIC_MODELS = [
-  model("deepseek-v4-flash", { contextWindow: 1_050_000, capabilities: { tools: true }, anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE, max_tokens: 384_000, output_config: { effort: "high" } } }),
-  model("deepseek-v4-pro", { contextWindow: 1_050_000, capabilities: { tools: true }, anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE, max_tokens: 384_000, output_config: { effort: "high" } } }),
+  model("deepseek-v4-flash", { contextWindow: 1_050_000, capabilities: { tools: true }, anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE, max_tokens: 384_000 } }),
+  model("deepseek-v4-pro", { contextWindow: 1_050_000, capabilities: { tools: true }, anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE, max_tokens: 384_000 } }),
 ];
 
 const MIMO_OPENAI_MODELS = ["mimo-v2.5", "mimo-v2.5-pro"].map((id) =>
-  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 131_072 } }),
+  model(id, { contextWindow: 1_000_000, capabilities: mimoCapabilities(id), openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 131_072 } }),
 );
 
 const MIMO_ANTHROPIC_MODELS = ["mimo-v2.5", "mimo-v2.5-pro"].map((id) =>
-  model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE, max_tokens: 131_072 } }),
+  model(id, { contextWindow: 1_000_000, capabilities: mimoCapabilities(id), anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE, max_tokens: 131_072 } }),
 );
+
+function mimoCapabilities(id: string) {
+  return id === "mimo-v2.5" ? { image: true, audio: true, tools: true } : { tools: true };
+}
 
 const QWEN_MODEL_IDS = ["qwen3.6-flash", "qwen3.7-max", "qwen3.6-plus", "qwen3-max"];
 const QWEN_OPENAI_MODELS = QWEN_MODEL_IDS.map((id) =>

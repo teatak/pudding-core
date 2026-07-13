@@ -111,6 +111,47 @@ func TestElectronBridgeServiceCreateTabEnsuresNativeSlot(t *testing.T) {
 	}
 }
 
+func TestElectronBridgeServiceOpenNewTabUsesSingleOpenRequest(t *testing.T) {
+	var opened electronBridgeRequest
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if r.URL.Path != "/browser/tabs/open" {
+			t.Fatalf("unexpected bridge path: %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&opened); err != nil {
+			t.Fatal(err)
+		}
+		writeElectronBridgeTestJSON(w, electronBridgeSnapshot{
+			SessionID: opened.SessionID,
+			TabID:     opened.TabID,
+			Status:    "detached",
+			URL:       opened.URL,
+			Title:     "Example",
+			RuntimeID: "webContents:3",
+		})
+	}))
+	defer server.Close()
+
+	service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: "bridge-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tab, err := service.OpenNewTab(context.Background(), "sess_new", "https://example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 1 || paths[0] != "/browser/tabs/open" {
+		t.Fatalf("new tab should use one atomic open request, got %v", paths)
+	}
+	if opened.SessionID != "sess_new" || opened.TabID == "" || opened.URL != "https://example.com" {
+		t.Fatalf("unexpected open request: %+v", opened)
+	}
+	if tab.ID != opened.TabID || tab.URL != opened.URL {
+		t.Fatalf("unexpected opened tab: %+v", tab)
+	}
+}
+
 func TestElectronBridgeServiceListTabsFiltersLostAndCrossSessionSnapshots(t *testing.T) {
 	const token = "bridge-token"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -165,6 +165,26 @@ func (s *ElectronBridgeService) CreateTab(ctx context.Context, sessionID string)
 	return snapshot.tab(), nil
 }
 
+func (s *ElectronBridgeService) OpenNewTab(ctx context.Context, sessionID, rawURL string) (TabSnapshot, error) {
+	normalizedURL, err := normalizeURL(rawURL)
+	if err != nil {
+		return TabSnapshot{}, err
+	}
+	tabID := newID("tab")
+	var snapshot electronBridgeSnapshot
+	if err := s.post(ctx, "/browser/tabs/open", electronBridgeRequest{
+		SessionID: sessionID,
+		TabID:     tabID,
+		URL:       normalizedURL,
+	}, &snapshot); err != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = s.post(cleanupCtx, "/browser/tabs/close", electronBridgeRequest{SessionID: sessionID, TabID: tabID}, nil)
+		return TabSnapshot{}, err
+	}
+	return snapshot.tab(), nil
+}
+
 func (s *ElectronBridgeService) ListTabs(ctx context.Context, sessionID string) ([]TabSnapshot, error) {
 	var out electronBridgeTabsResponse
 	if err := s.post(ctx, "/browser/tabs/list", electronBridgeRequest{SessionID: sessionID}, &out); err != nil {

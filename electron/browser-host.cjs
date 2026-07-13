@@ -19,7 +19,10 @@ class BrowserHost {
   async ensure(request) {
     const slot = this.ensureSlot(request);
     const url = normalizeURL(request.url);
-    if (url && slot.webContents.getURL() !== url) {
+    // A fresh WebContents is already blank. Starting an asynchronous
+    // about:blank load here can race with an immediate tool navigation and
+    // overwrite the requested URL when its late navigation events arrive.
+    if (url && !browserURLIsBlank(url) && slot.webContents.getURL() !== url) {
       markSlotNavigationIntent(slot, url);
       startSlotURL(slot, url);
     }
@@ -169,7 +172,23 @@ class BrowserHost {
       throw new Error("text is required");
     }
     this.noteAutomationStart(slot, "type");
-    const result = await evaluateJSON(slot, typeScript(request));
+    await evaluateJSON(slot, typePrepareScript(request));
+    let keyboardError = null;
+    try {
+      await withDebugger(slot, (send) => send("Input.insertText", { text: String(request.text) }));
+    } catch (error) {
+      keyboardError = error;
+    }
+    let result;
+    if (!keyboardError) {
+      result = await evaluateJSON(slot, typeResultScript(request, "keyboard"));
+    } else {
+      try {
+        result = await evaluateJSON(slot, typeDOMScript(request));
+      } catch (error) {
+        throw new Error(`browser keyboard input failed: ${errorMessage(keyboardError)}; DOM fallback failed: ${errorMessage(error)}`);
+      }
+    }
     this.noteUpdated(slot);
     this.noteCursor(slot, "type", result);
     return { tab: snapshot(slot), action: "type", result };
@@ -910,7 +929,64 @@ function clickResolveScript(input, method, useDOMClick) {
 })()`;
 }
 
-function typeScript(input) {
+function typePrepareScript(input) {
+  return `(() => {
+  const selector = ${JSON.stringify(String(input.selector || ""))};
+  const clear = ${JSON.stringify(Boolean(input.clear))};
+  let el = selector ? document.querySelector(selector) : document.activeElement;
+  if (!el || el === document.body) throw new Error("target input not found");
+  if (!("value" in el) && !el.isContentEditable) throw new Error("target is not editable");
+  el.scrollIntoView({block: "center", inline: "center"});
+  el.focus();
+  if ("value" in el) {
+    let positioned = false;
+    try {
+      if (clear && typeof el.select === "function") {
+        el.select();
+        positioned = true;
+      } else if (!clear && typeof el.setSelectionRange === "function") {
+        const end = String(el.value || "").length;
+        el.setSelectionRange(end, end);
+        positioned = true;
+      }
+    } catch (_) {}
+    if (clear && !positioned) {
+      let proto = Object.getPrototypeOf(el);
+      let setter = null;
+      while (proto && !setter) {
+        setter = Object.getOwnPropertyDescriptor(proto, "value")?.set || null;
+        proto = Object.getPrototypeOf(proto);
+      }
+      if (setter) setter.call(el, "");
+      else el.value = "";
+    }
+  } else {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    if (!clear) range.collapse(false);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  const rect = el.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + Math.min(rect.height / 2, 18);
+  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), cursorX: cx, cursorY: cy});
+})()`;
+}
+
+function typeResultScript(input, method) {
+  return `(() => {
+  const selector = ${JSON.stringify(String(input.selector || ""))};
+  const el = selector ? document.querySelector(selector) : document.activeElement;
+  if (!el || el === document.body) throw new Error("target input not found after typing");
+  const rect = el.getBoundingClientRect();
+  const value = "value" in el ? String(el.value || "") : String(el.textContent || "");
+  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), textLength: ${JSON.stringify(Array.from(String(input.text || "")).length)}, valueLength: value.length, cursorX: rect.left + rect.width / 2, cursorY: rect.top + Math.min(rect.height / 2, 18), method: ${JSON.stringify(method)}});
+})()`;
+}
+
+function typeDOMScript(input) {
   return `(() => {
   const selector = ${JSON.stringify(String(input.selector || ""))};
   const text = ${JSON.stringify(String(input.text || ""))};
@@ -920,7 +996,15 @@ function typeScript(input) {
   el.scrollIntoView({block: "center", inline: "center"});
   el.focus();
   if ("value" in el) {
-    el.value = clear ? text : String(el.value || "") + text;
+    const nextValue = clear ? text : String(el.value || "") + text;
+    let proto = Object.getPrototypeOf(el);
+    let setter = null;
+    while (proto && !setter) {
+      setter = Object.getOwnPropertyDescriptor(proto, "value")?.set || null;
+      proto = Object.getPrototypeOf(proto);
+    }
+    if (setter) setter.call(el, nextValue);
+    else el.value = nextValue;
     el.dispatchEvent(new InputEvent("input", {bubbles: true, inputType: "insertText", data: text}));
     el.dispatchEvent(new Event("change", {bubbles: true}));
   } else if (el.isContentEditable) {
@@ -930,10 +1014,10 @@ function typeScript(input) {
   } else {
     throw new Error("target is not editable");
   }
-  const rect = el.getBoundingClientRect();
-  const cx = rect.left + rect.width / 2;
-  const cy = rect.top + Math.min(rect.height / 2, 18);
-  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), textLength: text.length, cursorX: cx, cursorY: cy});
+  const current = selector ? document.querySelector(selector) : el;
+  const rect = current.getBoundingClientRect();
+  const value = "value" in current ? String(current.value || "") : String(current.textContent || "");
+  return JSON.stringify({ok: true, tag: current.tagName.toLowerCase(), textLength: ${JSON.stringify(Array.from(String(input.text || "")).length)}, valueLength: value.length, cursorX: rect.left + rect.width / 2, cursorY: rect.top + Math.min(rect.height / 2, 18), method: "dom"});
 })()`;
 }
 

@@ -28,14 +28,10 @@ func (r *BuiltinRunner) browserOpen(ctx context.Context, call Call) Result {
 	if args.NewTab && strings.TrimSpace(args.TabID) != "" {
 		return toolJSONError(out, "invalid_arguments", "tabID and newTab cannot be used together")
 	}
-	createdTabID := ""
+	var tab browser.TabSnapshot
+	var err error
 	if args.NewTab {
-		tab, err := r.browser.CreateTab(ctx, call.SessionID)
-		if err != nil {
-			return browserToolError(out, err)
-		}
-		args.TabID = tab.ID
-		createdTabID = tab.ID
+		tab, err = r.browser.OpenNewTab(ctx, call.SessionID, args.URL)
 	} else if strings.TrimSpace(args.TabID) == "" {
 		tabs, err := r.browserTabs(ctx, call.SessionID)
 		if err != nil {
@@ -48,12 +44,11 @@ func (r *BuiltinRunner) browserOpen(ctx context.Context, call Call) Result {
 		default:
 			return browserToolError(out, browser.ErrTabRequired)
 		}
+		tab, err = r.browser.Open(ctx, call.SessionID, args.TabID, args.URL)
+	} else {
+		tab, err = r.browser.Open(ctx, call.SessionID, args.TabID, args.URL)
 	}
-	tab, err := r.browser.Open(ctx, call.SessionID, args.TabID, args.URL)
 	if err != nil {
-		if createdTabID != "" {
-			_ = r.browser.ReleaseTab(ctx, call.SessionID, createdTabID)
-		}
 		return browserToolError(out, err)
 	}
 	if err := r.syncBrowserState(ctx, call.SessionID, tab); err != nil {

@@ -3101,6 +3101,10 @@ func (b *engineTestBrowser) CreateTab(_ context.Context, sessionID string) (brow
 	return browser.TabSnapshot{ID: "tab_1", SessionID: sessionID}, nil
 }
 
+func (b *engineTestBrowser) OpenNewTab(_ context.Context, sessionID, rawURL string) (browser.TabSnapshot, error) {
+	return browser.TabSnapshot{ID: "tab_1", SessionID: sessionID, URL: rawURL}, nil
+}
+
 func (b *engineTestBrowser) ListTabs(context.Context, string) ([]browser.TabSnapshot, error) {
 	return nil, nil
 }

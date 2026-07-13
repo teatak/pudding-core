@@ -986,6 +986,15 @@ func (f *fakeBrowserService) CreateTab(_ context.Context, sessionID string) (bro
 	return f.create(sessionID, ""), nil
 }
 
+func (f *fakeBrowserService) OpenNewTab(_ context.Context, sessionID, rawURL string) (browser.TabSnapshot, error) {
+	tab := f.create(sessionID, "")
+	tab.URL = rawURL
+	tab.Title = rawURL
+	tab.UpdatedAt = time.Now().UTC()
+	f.tabs[tab.ID] = tab
+	return tab, nil
+}
+
 func (f *fakeBrowserService) create(sessionID, tabID string) browser.TabSnapshot {
 	now := time.Now().UTC()
 	if strings.TrimSpace(tabID) == "" {

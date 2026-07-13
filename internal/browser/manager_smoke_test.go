@@ -19,14 +19,35 @@ func TestBrowserActionsSmoke(t *testing.T) {
 		_, _ = w.Write([]byte(`<!doctype html>
 <html>
 <head><title>Pudding Browser Smoke</title></head>
-<body>
-  <label>Name <input id="name" /></label>
-  <button id="save" onclick="document.getElementById('status').textContent='Saved:' + document.getElementById('name').value">Save</button>
-  <p id="status">Waiting</p>
-  <div style="height: 2000px"></div>
-  <p id="bottom">Bottom</p>
-</body>
-</html>`))
+	<body>
+	  <label>Name <input id="name" /></label>
+	  <label>Controlled <input id="controlled" /></label>
+	  <button id="save" onclick="document.getElementById('status').textContent='Saved:' + document.getElementById('name').value">Save</button>
+	  <p id="status">Waiting</p>
+	  <p id="controlled-status">Controlled:Waiting</p>
+	  <div style="height: 2000px"></div>
+	  <p id="bottom">Bottom</p>
+	  <script>
+	    const controlled = document.getElementById('controlled');
+	    const nativeValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+	    let trackedValue = nativeValue.get.call(controlled);
+	    Object.defineProperty(controlled, 'value', {
+	      configurable: true,
+	      get() { return nativeValue.get.call(this); },
+	      set(value) {
+	        trackedValue = String(value);
+	        nativeValue.set.call(this, value);
+	      }
+	    });
+	    controlled.addEventListener('input', () => {
+	      const current = controlled.value;
+	      if (current === trackedValue) return;
+	      trackedValue = current;
+	      document.getElementById('controlled-status').textContent = 'Controlled:' + current;
+	    });
+	  </script>
+	</body>
+	</html>`))
 	}))
 	defer page.Close()
 
@@ -45,6 +66,9 @@ func TestBrowserActionsSmoke(t *testing.T) {
 	if _, err := mgr.Type(ctx, "sess_smoke", tab.ID, TypeInput{Selector: "#name", Text: "Pudding", Clear: true}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := mgr.Type(ctx, "sess_smoke", tab.ID, TypeInput{Selector: "#controlled", Text: "React", Clear: true}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := mgr.Click(ctx, "sess_smoke", tab.ID, ClickInput{Selector: "#save"}); err != nil {
 		t.Fatal(err)
 	}
@@ -61,5 +85,8 @@ func TestBrowserActionsSmoke(t *testing.T) {
 	}
 	if !strings.Contains(obs.Text, "Saved:Pudding") {
 		t.Fatalf("typed/clicked state missing from observation: %q", obs.Text)
+	}
+	if !strings.Contains(obs.Text, "Controlled:React") {
+		t.Fatalf("controlled input state missing from observation: %q", obs.Text)
 	}
 }

@@ -175,6 +175,9 @@ func TestBuiltinBrowserOpenCanCreateNewTab(t *testing.T) {
 	if tab["id"] != "tab_created_1" || tab["url"] != "https://new.example" {
 		t.Fatalf("unexpected opened tab: %+v", payload)
 	}
+	if fake.blankTabs != 0 || fake.openNewTabURL != "https://new.example" {
+		t.Fatalf("new tab should open its URL atomically: blankTabs=%d openNewTabURL=%q", fake.blankTabs, fake.openNewTabURL)
+	}
 }
 
 func TestBuiltinBrowserCloseClosesSessionBrowser(t *testing.T) {
@@ -210,6 +213,8 @@ type fakeToolBrowser struct {
 	closedSession  string
 	reloadTabID    string
 	createdTabs    int
+	blankTabs      int
+	openNewTabURL  string
 }
 
 func (f *fakeToolBrowser) ProcessMode(context.Context, string) string {
@@ -218,7 +223,16 @@ func (f *fakeToolBrowser) ProcessMode(context.Context, string) string {
 
 func (f *fakeToolBrowser) CreateTab(_ context.Context, sessionID string) (browser.TabSnapshot, error) {
 	f.createdTabs++
+	f.blankTabs++
 	tab := browser.TabSnapshot{ID: "tab_created_" + strconv.Itoa(f.createdTabs), SessionID: sessionID, URL: "about:blank"}
+	f.tabs = append(f.tabs, tab)
+	return tab, nil
+}
+
+func (f *fakeToolBrowser) OpenNewTab(_ context.Context, sessionID, rawURL string) (browser.TabSnapshot, error) {
+	f.createdTabs++
+	f.openNewTabURL = rawURL
+	tab := browser.TabSnapshot{ID: "tab_created_" + strconv.Itoa(f.createdTabs), SessionID: sessionID, URL: rawURL}
 	f.tabs = append(f.tabs, tab)
 	return tab, nil
 }

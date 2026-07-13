@@ -714,7 +714,7 @@ function ProcessCompactPart({
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="min-w-0 truncate">{label}</span>
           {hasErrors ? (
-            <span className="shrink-0 text-destructive/75">{t("transcript.processHasErrors")}</span>
+            <span className="shrink-0 text-muted-foreground/60">{t("transcript.processHasErrors")}</span>
           ) : null}
           <span className="shrink-0 text-muted-foreground/50">
             {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
@@ -915,9 +915,9 @@ function ToolUsePart({
   const failed = toolFailed(part);
   const Icon = toolPartIcon(part);
   const title = toolTitle(part, liveResult, baseTitle, elapsed, t);
-  const toneClass = failed ? "text-destructive" : "text-muted-foreground";
-  const summaryClass = failed ? "text-destructive/70" : "text-muted-foreground/50";
-  const hoverClass = failed ? "hover:text-destructive" : "hover:text-foreground";
+  const toneClass = "text-muted-foreground";
+  const summaryClass = failed ? "text-muted-foreground/70" : "text-muted-foreground/50";
+  const hoverClass = "hover:text-foreground";
   if (!showDetails) {
     return (
       <div className={cn("grid h-6 w-full grid-cols-[1rem_minmax(0,1fr)] items-center gap-1 pr-1 text-[13px] leading-[1.5]", toneClass)}>

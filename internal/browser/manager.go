@@ -45,6 +45,7 @@ var (
 type Service interface {
 	ProcessMode(ctx context.Context, sessionID string) string
 	CreateTab(ctx context.Context, sessionID string) (TabSnapshot, error)
+	OpenNewTab(ctx context.Context, sessionID, rawURL string) (TabSnapshot, error)
 	ListTabs(ctx context.Context, sessionID string) ([]TabSnapshot, error)
 	GetTab(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
 	Recover(ctx context.Context, sessionID string, hint RecoverHint) (TabSnapshot, error)
@@ -237,6 +238,32 @@ func (m *Manager) CreateTab(ctx context.Context, sessionID string) (TabSnapshot,
 	if err != nil {
 		return TabSnapshot{}, err
 	}
+	return m.snapshotFromLiveTarget(ctx, binding, target), nil
+}
+
+func (m *Manager) OpenNewTab(ctx context.Context, sessionID, rawURL string) (TabSnapshot, error) {
+	normalizedURL, err := normalizeURL(rawURL)
+	if err != nil {
+		return TabSnapshot{}, err
+	}
+	proc, binding, target, err := m.createTab(ctx, sessionID, normalizedURL)
+	if err != nil {
+		return TabSnapshot{}, err
+	}
+	succeeded := false
+	defer func() {
+		if !succeeded {
+			_ = m.ReleaseTab(context.Background(), sessionID, binding.id)
+		}
+	}()
+	_ = proc.waitReady(ctx, m.client, binding.targetID)
+	if current, targetErr := proc.target(ctx, m.client, binding.targetID); targetErr == nil {
+		target = current
+	} else {
+		return TabSnapshot{}, targetErr
+	}
+	m.touch(binding.id)
+	succeeded = true
 	return m.snapshotFromLiveTarget(ctx, binding, target), nil
 }
 
@@ -689,7 +716,19 @@ func (m *Manager) Type(ctx context.Context, sessionID, tabID string, in TypeInpu
 	if err != nil {
 		return ActionResult{}, err
 	}
-	raw, err := proc.evaluateJSON(ctx, m.client, binding.targetID, typeScript(in))
+	if _, err := proc.evaluateJSON(ctx, m.client, binding.targetID, typePrepareScript(in)); err != nil {
+		return ActionResult{}, err
+	}
+	_, keyboardErr := proc.cdpCall(ctx, m.client, binding.targetID, "Input.insertText", map[string]any{"text": in.Text})
+	var raw json.RawMessage
+	if keyboardErr == nil {
+		raw, err = proc.evaluateJSON(ctx, m.client, binding.targetID, typeResultScript(in, "keyboard"))
+	} else {
+		raw, err = proc.evaluateJSON(ctx, m.client, binding.targetID, typeDOMScript(in))
+		if err != nil {
+			return ActionResult{}, fmt.Errorf("browser keyboard input failed: %v; DOM fallback failed: %w", keyboardErr, err)
+		}
+	}
 	if err != nil {
 		return ActionResult{}, err
 	}
@@ -1939,31 +1978,96 @@ func clickScript(in ClickInput, method string) string {
 })()`, selector, x, y, methodValue)
 }
 
-func typeScript(in TypeInput) string {
+func typePrepareScript(in TypeInput) string {
 	return fmt.Sprintf(`(() => {
-  const selector = %s;
-  const text = %s;
-  const clear = %t;
-  let el = selector ? document.querySelector(selector) : document.activeElement;
-  if (!el || el === document.body) throw new Error("target input not found");
-  el.scrollIntoView({block: "center", inline: "center"});
-  el.focus();
-  if ("value" in el) {
-    el.value = clear ? text : String(el.value || "") + text;
-    el.dispatchEvent(new InputEvent("input", {bubbles: true, inputType: "insertText", data: text}));
-    el.dispatchEvent(new Event("change", {bubbles: true}));
-  } else if (el.isContentEditable) {
-    if (clear) el.textContent = "";
-    el.textContent = String(el.textContent || "") + text;
-    el.dispatchEvent(new InputEvent("input", {bubbles: true, inputType: "insertText", data: text}));
-  } else {
-    throw new Error("target is not editable");
-  }
-  const rect = el.getBoundingClientRect();
-  const cx = rect.left + rect.width / 2;
-  const cy = rect.top + Math.min(rect.height / 2, 18);
-  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), textLength: text.length, cursorX: cx, cursorY: cy});
-})()`, jsString(in.Selector), jsString(in.Text), in.Clear)
+	  const selector = %s;
+	  const clear = %t;
+	  let el = selector ? document.querySelector(selector) : document.activeElement;
+	  if (!el || el === document.body) throw new Error("target input not found");
+	  if (!("value" in el) && !el.isContentEditable) throw new Error("target is not editable");
+	  el.scrollIntoView({block: "center", inline: "center"});
+	  el.focus();
+	  if ("value" in el) {
+	    let positioned = false;
+	    try {
+	      if (clear && typeof el.select === "function") {
+	        el.select();
+	        positioned = true;
+	      } else if (!clear && typeof el.setSelectionRange === "function") {
+	        const end = String(el.value || "").length;
+	        el.setSelectionRange(end, end);
+	        positioned = true;
+	      }
+	    } catch (_) {}
+	    if (clear && !positioned) {
+	      let proto = Object.getPrototypeOf(el);
+	      let setter = null;
+	      while (proto && !setter) {
+	        setter = Object.getOwnPropertyDescriptor(proto, "value")?.set || null;
+	        proto = Object.getPrototypeOf(proto);
+	      }
+	      if (setter) setter.call(el, "");
+	      else el.value = "";
+	    }
+	  } else {
+	    const range = document.createRange();
+	    range.selectNodeContents(el);
+	    if (!clear) range.collapse(false);
+	    const selection = window.getSelection();
+	    selection.removeAllRanges();
+	    selection.addRange(range);
+	  }
+	  const rect = el.getBoundingClientRect();
+	  const cx = rect.left + rect.width / 2;
+	  const cy = rect.top + Math.min(rect.height / 2, 18);
+	  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), cursorX: cx, cursorY: cy});
+	})()`, jsString(in.Selector), in.Clear)
+}
+
+func typeResultScript(in TypeInput, method string) string {
+	return fmt.Sprintf(`(() => {
+	  const selector = %s;
+	  const el = selector ? document.querySelector(selector) : document.activeElement;
+	  if (!el || el === document.body) throw new Error("target input not found after typing");
+	  const rect = el.getBoundingClientRect();
+	  const value = "value" in el ? String(el.value || "") : String(el.textContent || "");
+	  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), textLength: %d, valueLength: value.length, cursorX: rect.left + rect.width / 2, cursorY: rect.top + Math.min(rect.height / 2, 18), method: %s});
+	})()`, jsString(in.Selector), len([]rune(in.Text)), jsString(method))
+}
+
+func typeDOMScript(in TypeInput) string {
+	return fmt.Sprintf(`(() => {
+	  const selector = %s;
+	  const text = %s;
+	  const clear = %t;
+	  let el = selector ? document.querySelector(selector) : document.activeElement;
+	  if (!el || el === document.body) throw new Error("target input not found");
+	  el.scrollIntoView({block: "center", inline: "center"});
+	  el.focus();
+	  if ("value" in el) {
+	    const nextValue = clear ? text : String(el.value || "") + text;
+	    let proto = Object.getPrototypeOf(el);
+	    let setter = null;
+	    while (proto && !setter) {
+	      setter = Object.getOwnPropertyDescriptor(proto, "value")?.set || null;
+	      proto = Object.getPrototypeOf(proto);
+	    }
+	    if (setter) setter.call(el, nextValue);
+	    else el.value = nextValue;
+	    el.dispatchEvent(new InputEvent("input", {bubbles: true, inputType: "insertText", data: text}));
+	    el.dispatchEvent(new Event("change", {bubbles: true}));
+	  } else if (el.isContentEditable) {
+	    if (clear) el.textContent = "";
+	    el.textContent = String(el.textContent || "") + text;
+	    el.dispatchEvent(new InputEvent("input", {bubbles: true, inputType: "insertText", data: text}));
+	  } else {
+	    throw new Error("target is not editable");
+	  }
+	  const current = selector ? document.querySelector(selector) : el;
+	  const rect = current.getBoundingClientRect();
+	  const value = "value" in current ? String(current.value || "") : String(current.textContent || "");
+	  return JSON.stringify({ok: true, tag: current.tagName.toLowerCase(), textLength: %d, valueLength: value.length, cursorX: rect.left + rect.width / 2, cursorY: rect.top + Math.min(rect.height / 2, 18), method: "dom"});
+	})()`, jsString(in.Selector), jsString(in.Text), in.Clear, len([]rune(in.Text)))
 }
 
 func scrollScript(in ScrollInput) string {
