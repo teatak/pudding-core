@@ -4,6 +4,7 @@ node_modules/
 .codex-tmp/
 .pnpm-store/
 dist/
+internal/audio/dsp/webrtc_bridge/lib/darwin-amd64/
 *.db
 *.db-wal
 *.db-shm

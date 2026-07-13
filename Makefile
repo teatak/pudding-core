@@ -2,7 +2,7 @@ MODULE := github.com/teatak/pudding-core
 LDFLAGS_RELEASE := -X $(MODULE)/internal/buildinfo.channel=release
 BUILDTAGS := sqlite_fts5 webrtcaec
 
-.PHONY: test schema-check tidy clean embed language-servers language-servers-ready desktop desktop-dev desktop-release desktop-bundle desktop-verify desktop-update-test desktop-publish desktop-preview-bundle desktop-preview-verify desktop-preview-publish desktop-publish-from-tag desktop-publish-upload-resume desktop-release-status desktop-release-finalize daemon daemon-dev daemon-release prompt tools-report tools-eval
+.PHONY: test schema-check tidy clean embed language-servers language-servers-ready desktop desktop-dev desktop-release desktop-runtime-arm64 desktop-runtime-x64 desktop-runtimes desktop-bundle desktop-verify desktop-update-test desktop-publish desktop-preview-bundle desktop-preview-verify desktop-preview-publish desktop-publish-from-tag desktop-publish-upload-resume desktop-release-status desktop-release-finalize daemon daemon-dev daemon-release prompt tools-report tools-eval
 
 # 共享:构建前端并装填进 daemon 的 embed 目录(产物不进 git)
 embed:
@@ -33,8 +33,19 @@ language-servers:
 language-servers-ready:
 	@bash scripts/prepare-language-servers.sh --ensure
 
-# macOS 安装与更新产物(DMG + ZIP + latest-mac.yml;正式自动更新需要签名/公证)
-desktop-bundle: desktop-release language-servers
+# 分架构准备发布 runtime。x64 在 Apple Silicon 上交叉编译。
+desktop-runtime-arm64: schema-check embed
+	@PUDDING_PACKAGING_PIPELINE=1 bash packaging/macos/prepare-runtime.sh arm64
+
+desktop-runtime-x64: schema-check embed
+	@PUDDING_PACKAGING_PIPELINE=1 bash packaging/macos/prepare-runtime.sh x64
+
+desktop-runtimes: schema-check embed
+	@PUDDING_PACKAGING_PIPELINE=1 bash packaging/macos/prepare-runtime.sh arm64
+	@PUDDING_PACKAGING_PIPELINE=1 bash packaging/macos/prepare-runtime.sh x64
+
+# macOS 双架构安装与更新产物(DMG + ZIP + latest-mac.yml;正式自动更新需要签名/公证)
+desktop-bundle: desktop-runtimes
 	@PUDDING_PACKAGING_PIPELINE=1 PUDDING_RELEASE_CHANNEL=stable node scripts/package-desktop.cjs
 
 desktop-verify:
@@ -48,7 +59,7 @@ desktop-publish:
 	@PUDDING_RELEASE_CHANNEL=stable node scripts/release-local.cjs start
 
 # Preview 与正式版共用 Pudding.app / appId / ~/.pudding,仅发布为 GitHub Prerelease beta 通道。
-desktop-preview-bundle: desktop-release language-servers
+desktop-preview-bundle: desktop-runtimes
 	@PUDDING_PACKAGING_PIPELINE=1 PUDDING_RELEASE_CHANNEL=preview node scripts/package-desktop.cjs
 
 desktop-preview-verify:

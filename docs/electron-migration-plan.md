@@ -356,8 +356,9 @@ BrowserHost 生命周期收口审查(更新于 2026-07-13):
 - Electron 打包、签名、公证、自动更新。
 - dev/release 数据目录继续隔离。
 - crash/log 收集落本地文件。
-- 当前落点:`make desktop-bundle` 通过 electron-builder 生成 macOS DMG、ZIP、blockmap 和
-  `latest-mac.yml`,包内包含 Electron shell、Tray、release daemon、daemon dylib、语言服务、
+- 当前落点:`make desktop-bundle` 通过 electron-builder 分别生成 arm64/x64 macOS DMG、ZIP、
+  blockmap 和共用 `latest-mac.yml`,包内包含 Electron shell、Tray、对应架构 release daemon、
+  daemon dylib、语言服务、
   icon、相机/麦克风用途说明和 `pudding://` callback scheme。打包和发布前会清理 `dist/release`,
   防止不同版本连续构建时残留旧 `.app` 元数据。
 - Tray 与原生应用菜单支持简体中文、繁体中文和英文,并通过 preload IPC 跟随 Web
@@ -374,8 +375,8 @@ BrowserHost 生命周期收口审查(更新于 2026-07-13):
   用更高的 `PUDDING_APP_VERSION` 构建新包,再运行 `make desktop-update-test`。该命令会启动本地
   Range feed、拉起 `/Applications/Pudding.app`,并在用户点击“重新启动并更新”后自动检查安装版本、
   Developer ID 签名、公证票据、Gatekeeper 和包内权限。新旧版本必须使用同一 Developer ID。
-- 2026-07-11 验证:`make desktop-bundle` 成功生成 arm64 DMG/ZIP/update metadata,短启动安装包
-  可拉起 release daemon,退出后 daemon 正常关闭。
+- 2026-07-14 验证:Apple Silicon 可交叉编译 arm64/x64 daemon、WebRTC、PortAudio 和 gopls;
+  完整发布门禁会继续逐架构校验 DMG/ZIP/update metadata、签名、公证和 Gatekeeper。
 
 验收:
 

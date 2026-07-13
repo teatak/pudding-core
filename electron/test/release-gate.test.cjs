@@ -45,7 +45,9 @@ test("desktop packaging is only exposed through the complete Make pipeline", () 
   const makefile = fs.readFileSync(path.resolve(__dirname, "..", "..", "Makefile"), "utf8");
   assert.equal(scripts["desktop:package"], undefined);
   assert.equal(scripts["desktop:publish"], undefined);
-  assert.match(makefile, /desktop-bundle: desktop-release language-servers/);
+  assert.match(makefile, /desktop-bundle: desktop-runtimes/);
+  assert.match(makefile, /prepare-runtime\.sh arm64/);
+  assert.match(makefile, /prepare-runtime\.sh x64/);
   assert.match(makefile, /PUDDING_PACKAGING_PIPELINE=1/);
 });
 

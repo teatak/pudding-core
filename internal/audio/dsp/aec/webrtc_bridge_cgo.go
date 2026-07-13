@@ -1,11 +1,13 @@
-//go:build webrtcaec && cgo && darwin && arm64
+//go:build webrtcaec && cgo && darwin && (arm64 || amd64)
 
 package aec
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../webrtc_bridge/include
-#cgo LDFLAGS: -L${SRCDIR}/../webrtc_bridge/lib/darwin-arm64 -lkopi_webrtc_aec_bridge -lc++ -framework CoreFoundation -framework Foundation
-#cgo pkg-config: absl_base absl_flags absl_strings absl_numeric absl_synchronization absl_bad_optional_access
+#cgo arm64 LDFLAGS: -L${SRCDIR}/../webrtc_bridge/lib/darwin-arm64
+#cgo amd64 LDFLAGS: -L${SRCDIR}/../webrtc_bridge/lib/darwin-amd64
+#cgo LDFLAGS: -lkopi_webrtc_aec_bridge -lc++ -framework CoreFoundation -framework Foundation
+#cgo arm64 pkg-config: absl_base absl_flags absl_strings absl_numeric absl_synchronization absl_bad_optional_access
 #include "kopi_webrtc_aec_bridge.h"
 */
 import "C"

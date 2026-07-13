@@ -134,7 +134,8 @@ internal/audio/
   - playback PCM 会作为 AEC render reference 注入。
   - capture PCM 先过 AEC,再过 NS,最后送入 ASR/VAD。
   - AEC/NS 配置写入 `<home>/config/audio.yaml`,默认 `aec.model=webrtc`,`ns.model=webrtc`,`ns.level=moderate`。
-  - WebRTC bridge 静态库是构建输入,不进入 runtime 下载目录;当前仅提供 `darwin-arm64` 产物:`internal/audio/dsp/webrtc_bridge/lib/darwin-arm64/libkopi_webrtc_aec_bridge.a`。
+  - WebRTC bridge 静态库是构建输入,不进入 runtime 下载目录;arm64 使用仓库内构建输入,x64
+    在 Apple Silicon 上由固定版本 WebRTC/Abseil 源码交叉编译并缓存到忽略的 `dist/` 目录。
   - runtime 下载只覆盖模型资产:ASR 模型、VAD 模型和 tokens;daemon 启动前需要的 native dylib 随 `.app` bundle。
 - 语音运行配置落在 `<home>/config/audio.yaml`;当前可调项包括 PortAudio driver、Sherpa ASR/Silero VAD、WebRTC AEC/NS、Edge TTS。未接入的 KWS/声纹不写入配置。
 - 设置中心「关于」页会展示当前生效的语音配置、配置文件路径和 input/output owner。

@@ -13,6 +13,10 @@ function draft(version = "0.1.2", updateInfo = "latest-mac.yml") {
     `Pudding-${version}-arm64.dmg.blockmap`,
     `Pudding-${version}-arm64.zip`,
     `Pudding-${version}-arm64.zip.blockmap`,
+    `Pudding-${version}-x64.dmg`,
+    `Pudding-${version}-x64.dmg.blockmap`,
+    `Pudding-${version}-x64.zip`,
+    `Pudding-${version}-x64.zip.blockmap`,
     updateInfo,
   ];
   return {
@@ -35,6 +39,10 @@ test("lists the complete channel-specific release assets", () => {
     "Pudding-0.1.2-arm64.dmg.blockmap",
     "Pudding-0.1.2-arm64.zip",
     "Pudding-0.1.2-arm64.zip.blockmap",
+    "Pudding-0.1.2-x64.dmg",
+    "Pudding-0.1.2-x64.dmg.blockmap",
+    "Pudding-0.1.2-x64.zip",
+    "Pudding-0.1.2-x64.zip.blockmap",
     "latest-mac.yml",
   ]);
   assert.equal(expectedAssetNames("v0.1.3-beta.1", "preview").at(-1), "beta-mac.yml");

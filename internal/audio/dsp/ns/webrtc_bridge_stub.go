@@ -1,4 +1,4 @@
-//go:build !webrtcaec || !cgo || !darwin
+//go:build !webrtcaec || !cgo || !darwin || (!arm64 && !amd64)
 
 package ns
 

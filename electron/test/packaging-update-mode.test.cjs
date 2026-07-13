@@ -20,6 +20,7 @@ test("desktop packaging always requires a Developer ID certificate", () => {
 test("signed desktop packaging always enables hardened code signing", () => {
   assert.equal(loadConfigValue("forceCodeSigning", signedBuildEnv()), "true");
   assert.equal(loadConfigValue("mac.hardenedRuntime", signedBuildEnv()), "true");
+  assert.equal(loadConfigValue("mac.extendInfo.LSMinimumSystemVersion", signedBuildEnv()), "14.0");
 });
 
 test("signed desktop packaging grants camera and microphone access", () => {

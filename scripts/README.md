@@ -24,9 +24,10 @@ The release path is fixed:
 
 1. Verify a clean checkout that exactly matches its upstream.
 2. Run Go and Electron tests.
-3. Build, sign, notarize, and verify the app, ZIP, DMG, daemon, language server, dylibs, and bundle permissions.
+3. Build separate arm64 and x64 runtimes and apps, then sign, notarize, and verify both ZIPs, both DMGs, nested
+   code, update metadata, and bundle permissions.
 4. Create and push the immutable source tag only after the package passes.
-5. Upload all artifacts to a Draft Release and verify the complete asset set.
+5. Upload all nine artifacts to a Draft Release and verify the complete asset set.
 6. Publish the draft explicitly.
 
 Packaging helpers belong under `packaging/`; Electron smoke fixtures belong under `electron/smoke/`. Do not add

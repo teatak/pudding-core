@@ -47,17 +47,25 @@ make desktop-bundle
 
 This is the only supported packaging entry point. Do not invoke Electron Builder or files under `scripts/`
 directly. The target builds the web UI, release daemon, and language server before packaging, then runs the full
-release verifier. Direct Electron Builder configuration loads are rejected by a pipeline guard.
+release verifier. It cross-compiles a separate Intel runtime on Apple Silicon and produces independent `arm64`
+and `x64` apps; it does not create a universal app. Direct Electron Builder configuration loads are rejected by
+a pipeline guard.
+
+The first x64 build downloads checksum-pinned WebRTC Audio Processing and PortAudio sources, then caches their
+build inputs under ignored `dist/` directories. Xcode command-line tools, Meson, Ninja, and pkg-config are
+required. The current Sherpa ONNX binaries set the effective minimum versions to macOS 14.0 for arm64 and macOS
+15.5 for x64; the verifier checks that each app advertises the matching requirement.
 
 For a preview version, use `make desktop-preview-bundle`. Stable builds require an `x.y.z` version and preview
 builds require `x.y.z-beta.n`; packaging fails when the version and release channel disagree.
 
 Desktop updates are always automatic: they check in the background, download a signed update, and wait for the
 user to choose **Restart to Update**. Every package therefore requires a Developer ID identity and notarization
-credentials. It produces the DMG, ZIP, blockmaps, and `latest-mac.yml` under `dist/release`, then verifies:
+credentials. It produces arm64 and x64 DMGs, ZIPs, their blockmaps, and one combined `latest-mac.yml` under
+`dist/release`, then verifies:
 
 - `Info.plist`, bundled `package.json`, and `latest-mac.yml` use the canonical version.
-- All release artifacts exist.
+- All nine release artifacts exist and the update metadata references both architectures.
 - The staged app plus the apps extracted from ZIP and DMG contain no read-only files that can block Squirrel.Mac.
 - The app, daemon, language server, and bundled dylibs use the expected Developer ID and portable dependencies.
 - The app and daemon retain camera/audio-input entitlements, and the bundle declares camera, microphone, screen
@@ -100,8 +108,9 @@ binary, and permission checks does the script create and push an annotated tag s
 `v0.1.3-beta.1` to `teatak/pudding-core`. It then uploads the already verified artifacts to a Draft Release in
 `teatak/pudding`.
 
-Packaging and uploading are separate phases. The app is fully built and verified first; the release script then
-creates one draft and uploads its five assets sequentially. This avoids partially published or duplicate drafts.
+Packaging and uploading are separate phases. The apps are fully built and verified first; the release script
+then creates one draft and uploads its nine assets sequentially. This avoids partially published or duplicate
+drafts.
 
 The draft is not visible to update clients. The publish command verifies it automatically; it can also be
 checked again with:
@@ -110,7 +119,8 @@ checked again with:
 make desktop-release-status
 ```
 
-The status command succeeds only when the DMG, ZIP, both blockmaps, and channel metadata are fully uploaded.
+The status command succeeds only when both DMGs, both ZIPs, their four blockmaps, and channel metadata are fully
+uploaded.
 It accepts `RELEASE_TAG=v0.1.2` when checking a version other than the current `package.json`. After inspection,
 publish explicitly with:
 

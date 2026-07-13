@@ -1,4 +1,5 @@
 const { execFileSync } = require("node:child_process");
+const { Arch } = require("builder-util");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -11,10 +12,22 @@ module.exports = async function afterPack(context) {
   const appPath = path.join(context.appOutDir, `${appName}.app`);
   const infoPlistPath = path.join(appPath, "Contents", "Info.plist");
   const appRoot = path.join(appPath, "Contents", "Resources", "app");
+  const arch = Arch[context.arch];
+  if (arch !== "arm64" && arch !== "x64") {
+    throw new Error(`unsupported macOS desktop architecture: ${arch}`);
+  }
+  const runtimeRoot = path.join(root, "dist", "runtime", arch);
   const daemonPath = path.join(appRoot, "bin", "puddingd");
   const languageServersPath = path.join(appRoot, "language-servers");
   const launcherPath = path.join(languageServersPath, "typescript-language-server");
   const electronNodePath = path.join(languageServersPath, "node");
+
+  fs.mkdirSync(path.dirname(daemonPath), { recursive: true });
+  fs.copyFileSync(path.join(runtimeRoot, "puddingd"), daemonPath);
+  fs.cpSync(path.join(runtimeRoot, "language-servers"), languageServersPath, {
+    recursive: true,
+  });
+  setMinimumSystemVersion(infoPlistPath, arch);
 
   execFileSync("bash", [
     path.join(root, "packaging", "macos", "bundle-dylibs.sh"),
@@ -39,6 +52,17 @@ exec "$SERVER_ROOT/node" "$SERVER_ROOT/typescript/node_modules/typescript-langua
   removeUnusedPrivacyUsageDescriptions(infoPlistPath);
   makeBundleOwnerWritable(appPath);
 };
+
+function setMinimumSystemVersion(infoPlistPath, arch) {
+  const minimumVersion = arch === "x64" ? "15.5" : "14.0";
+  execFileSync("plutil", [
+    "-replace",
+    "LSMinimumSystemVersion",
+    "-string",
+    minimumVersion,
+    infoPlistPath,
+  ]);
+}
 
 function removeUnusedPrivacyUsageDescriptions(infoPlistPath) {
   const contents = execFileSync("plutil", ["-p", infoPlistPath], { encoding: "utf8" });
@@ -78,3 +102,4 @@ function makeBundleOwnerWritable(rootPath) {
 
 module.exports.makeBundleOwnerWritable = makeBundleOwnerWritable;
 module.exports.removeUnusedPrivacyUsageDescriptions = removeUnusedPrivacyUsageDescriptions;
+module.exports.setMinimumSystemVersion = setMinimumSystemVersion;

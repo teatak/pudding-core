@@ -16,11 +16,15 @@ const signingAuthority =
   signingIdentity === "-" || /^Developer ID Application:/i.test(signingIdentity)
     ? signingIdentity
     : `Developer ID Application: ${signingIdentity}`;
-const appPath = path.join(outputDir, "mac-arm64", "Pudding.app");
-const infoPlist = path.join(appPath, "Contents", "Info.plist");
-const asarPath = path.join(appPath, "Contents", "Resources", "app.asar");
-const dmgPath = path.join(outputDir, `Pudding-${version}-arm64.dmg`);
-const zipPath = path.join(outputDir, `Pudding-${version}-arm64.zip`);
+const builds = [
+  { arch: "arm64", machOArch: "arm64", appDirectory: "mac-arm64", minimumSystemVersion: "14.0" },
+  { arch: "x64", machOArch: "x86_64", appDirectory: "mac", minimumSystemVersion: "15.5" },
+].map((build) => ({
+  ...build,
+  appPath: path.join(outputDir, build.appDirectory, "Pudding.app"),
+  dmgPath: path.join(outputDir, `Pudding-${version}-${build.arch}.dmg`),
+  zipPath: path.join(outputDir, `Pudding-${version}-${build.arch}.zip`),
+}));
 const latestPath = path.join(outputDir, releaseChannel.updateInfoFile);
 
 if (!version) {
@@ -33,35 +37,56 @@ if (signingIdentity === "-") {
   fail("desktop releases require PUDDING_MAC_IDENTITY");
 }
 
-for (const filePath of [
-  infoPlist,
-  asarPath,
-  dmgPath,
-  `${dmgPath}.blockmap`,
-  zipPath,
-  `${zipPath}.blockmap`,
-  latestPath,
-]) {
+const requiredFiles = [latestPath];
+for (const build of builds) {
+  requiredFiles.push(
+    path.join(build.appPath, "Contents", "Info.plist"),
+    path.join(build.appPath, "Contents", "Resources", "app.asar"),
+    build.dmgPath,
+    `${build.dmgPath}.blockmap`,
+    build.zipPath,
+    `${build.zipPath}.blockmap`,
+  );
+}
+for (const filePath of requiredFiles) {
   if (!fs.existsSync(filePath)) {
     fail(`missing release artifact: ${filePath}`);
   }
 }
 
-const plistVersion = execFileSync("plutil", ["-extract", "CFBundleShortVersionString", "raw", infoPlist], {
-  encoding: "utf8",
-}).trim();
-if (plistVersion !== version) {
-  fail(`Info.plist version ${plistVersion} does not match ${version}`);
-}
+for (const build of builds) {
+  const infoPlist = path.join(build.appPath, "Contents", "Info.plist");
+  const asarPath = path.join(build.appPath, "Contents", "Resources", "app.asar");
+  const plistVersion = execFileSync(
+    "plutil",
+    ["-extract", "CFBundleShortVersionString", "raw", infoPlist],
+    { encoding: "utf8" },
+  ).trim();
+  if (plistVersion !== version) {
+    fail(`${build.arch} Info.plist version ${plistVersion} does not match ${version}`);
+  }
+  const minimumSystemVersion = execFileSync(
+    "plutil",
+    ["-extract", "LSMinimumSystemVersion", "raw", infoPlist],
+    { encoding: "utf8" },
+  ).trim();
+  if (minimumSystemVersion !== build.minimumSystemVersion) {
+    fail(
+      `${build.arch} minimum system version ${minimumSystemVersion} ` +
+        `does not match ${build.minimumSystemVersion}`,
+    );
+  }
 
-const bundledMetadata = JSON.parse(asar.extractFile(asarPath, "package.json").toString());
-if (bundledMetadata.version !== version) {
-  fail(`bundled package version ${bundledMetadata.version} does not match ${version}`);
-}
-if (bundledMetadata.puddingReleaseChannel !== releaseChannel.channel) {
-  fail(
-    `bundled release channel ${bundledMetadata.puddingReleaseChannel} does not match ${releaseChannel.channel}`,
-  );
+  const bundledMetadata = JSON.parse(asar.extractFile(asarPath, "package.json").toString());
+  if (bundledMetadata.version !== version) {
+    fail(`${build.arch} bundled package version ${bundledMetadata.version} does not match ${version}`);
+  }
+  if (bundledMetadata.puddingReleaseChannel !== releaseChannel.channel) {
+    fail(
+      `${build.arch} bundled release channel ${bundledMetadata.puddingReleaseChannel} ` +
+        `does not match ${releaseChannel.channel}`,
+    );
+  }
 }
 
 const latestMetadata = fs.readFileSync(latestPath, "utf8");
@@ -69,17 +94,24 @@ const latestVersion = latestMetadata.match(/^version:\s*['"]?([^'"\s]+)['"]?\s*$
 if (latestVersion !== version) {
   fail(`${releaseChannel.updateInfoFile} version ${latestVersion || "<missing>"} does not match ${version}`);
 }
-for (const artifactName of [path.basename(dmgPath), path.basename(zipPath)]) {
-  if (!latestMetadata.includes(artifactName)) {
-    fail(`${releaseChannel.updateInfoFile} does not reference ${artifactName}`);
+for (const build of builds) {
+  for (const artifactName of [path.basename(build.dmgPath), path.basename(build.zipPath)]) {
+    if (!latestMetadata.includes(artifactName)) {
+      fail(`${releaseChannel.updateInfoFile} does not reference ${artifactName}`);
+    }
   }
 }
 
-verifyAppBundle(appPath, "staged app", true);
-execFileSync("hdiutil", ["verify", dmgPath], { stdio: "inherit" });
-verifyZipArtifact(zipPath);
-verifyDmgArtifact(dmgPath);
-console.log(`Verified desktop release: version=${version} channel=${releaseChannel.channel} mode=automatic`);
+for (const build of builds) {
+  verifyAppBundle(build.appPath, `${build.arch} staged app`, build.machOArch, true);
+  execFileSync("hdiutil", ["verify", build.dmgPath], { stdio: "inherit" });
+  verifyZipArtifact(build.zipPath, build.machOArch, build.arch);
+  verifyDmgArtifact(build.dmgPath, build.machOArch, build.arch);
+}
+console.log(
+  `Verified desktop release: version=${version} channel=${releaseChannel.channel} ` +
+    `architectures=${builds.map((build) => build.arch).join(",")} mode=automatic`,
+);
 
 function commandOutput(command, args) {
   const result = spawnSync(command, args, { encoding: "utf8" });
@@ -89,7 +121,7 @@ function commandOutput(command, args) {
   return `${result.stdout || ""}\n${result.stderr || ""}`;
 }
 
-function verifyAppBundle(bundlePath, label, verifyCustomCode = false) {
+function verifyAppBundle(bundlePath, label, expectedArch, verifyCustomCode = false) {
   const readOnlyBundleEntries = findReadOnlyEntries(bundlePath);
   if (readOnlyBundleEntries.length > 0) {
     fail(
@@ -101,6 +133,7 @@ function verifyAppBundle(bundlePath, label, verifyCustomCode = false) {
   }
 
   verifySignedCode(bundlePath, label, true);
+  verifyMachOArchitecture(path.join(bundlePath, "Contents", "MacOS", "Pudding"), label, expectedArch);
   verifyHardwareEntitlements(bundlePath, label);
   verifyUsageDescriptions(bundlePath, label);
   if (verifyCustomCode) {
@@ -116,12 +149,23 @@ function verifyAppBundle(bundlePath, label, verifyCustomCode = false) {
         fail(`${label} is missing signed runtime code: ${path.relative(bundlePath, codePath)}`);
       }
       verifySignedCode(codePath, `${label}:${path.relative(bundlePath, codePath)}`, false);
+      verifyMachOArchitecture(codePath, label, expectedArch);
       verifyPortableDependencies(codePath, label);
     }
     verifyHardwareEntitlements(daemonPath, `${label}:puddingd`);
   }
   execFileSync("xcrun", ["stapler", "validate", bundlePath], { stdio: "inherit" });
   execFileSync("spctl", ["--assess", "--type", "execute", "--verbose=4", bundlePath], { stdio: "inherit" });
+}
+
+function verifyMachOArchitecture(codePath, label, expectedArch) {
+  const architectures = commandOutput("lipo", ["-archs", codePath]).trim().split(/\s+/);
+  if (architectures.length !== 1 || architectures[0] !== expectedArch) {
+    fail(
+      `${label}:${path.basename(codePath)} has architecture ${architectures.join(",") || "<unknown>"}; ` +
+        `expected ${expectedArch}`,
+    );
+  }
 }
 
 function verifyHardwareEntitlements(codePath, label) {
@@ -183,17 +227,17 @@ function verifyPortableDependencies(codePath, label) {
   }
 }
 
-function verifyZipArtifact(artifactPath) {
+function verifyZipArtifact(artifactPath, expectedArch, arch) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pudding-release-zip-"));
   try {
     execFileSync("ditto", ["-x", "-k", artifactPath, tempDir], { stdio: "inherit" });
-    verifyAppBundle(path.join(tempDir, "Pudding.app"), "ZIP app");
+    verifyAppBundle(path.join(tempDir, "Pudding.app"), `${arch} ZIP app`, expectedArch);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 }
 
-function verifyDmgArtifact(artifactPath) {
+function verifyDmgArtifact(artifactPath, expectedArch, arch) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pudding-release-dmg-"));
   const mountPoint = path.join(tempDir, "mount");
   fs.mkdirSync(mountPoint);
@@ -203,7 +247,7 @@ function verifyDmgArtifact(artifactPath) {
       stdio: "inherit",
     });
     mounted = true;
-    verifyAppBundle(path.join(mountPoint, "Pudding.app"), "DMG app");
+    verifyAppBundle(path.join(mountPoint, "Pudding.app"), `${arch} DMG app`, expectedArch);
   } finally {
     if (mounted) {
       execFileSync("hdiutil", ["detach", mountPoint], { stdio: "inherit" });

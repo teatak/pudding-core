@@ -50,8 +50,6 @@ module.exports = {
     "package.json",
   ],
   extraResources: [
-    { from: "bin/puddingd", to: "app/bin/puddingd" },
-    { from: "bin/language-servers", to: "app/language-servers" },
     { from: "assets/macos/TrayTemplate.png", to: "TrayTemplate.png" },
     { from: "packaging/macos/zh-Hans.lproj", to: "zh-Hans.lproj" },
     { from: "packaging/macos/zh-Hant.lproj", to: "zh-Hant.lproj" },
@@ -67,6 +65,7 @@ module.exports = {
     target: ["dmg", "zip"],
     extendInfo: {
       LSHasLocalizedDisplayName: true,
+      LSMinimumSystemVersion: "14.0",
       NSCameraUsageDescription: "Pudding uses the camera when you choose to capture a photo.",
       NSLocalNetworkUsageDescription:
         "Pudding uses your local network so your other devices can connect to it.",

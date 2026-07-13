@@ -49,9 +49,15 @@ function main(argv, env) {
 
   const builder = path.join(root, "node_modules", ".bin", "electron-builder");
   requireExecutable(builder, "electron-builder is missing; run npm install");
-  requireExecutable(path.join(root, "bin", "puddingd"), "release daemon is missing");
-  requireExecutable(path.join(root, "bin", "language-servers", "gopls"), "gopls is missing");
-  requireFile(path.join(root, "bin", "language-servers", "gopls.LICENSE"), "gopls license is missing");
+  for (const arch of ["arm64", "x64"]) {
+    const runtime = path.join(root, "dist", "runtime", arch);
+    requireExecutable(path.join(runtime, "puddingd"), `${arch} release daemon is missing`);
+    requireExecutable(path.join(runtime, "language-servers", "gopls"), `${arch} gopls is missing`);
+    requireFile(
+      path.join(runtime, "language-servers", "gopls.LICENSE"),
+      `${arch} gopls license is missing`,
+    );
+  }
 
   const output = path.join(root, "dist", "release");
   fs.rmSync(output, { force: true, recursive: true });
@@ -59,7 +65,18 @@ function main(argv, env) {
     `Packaging desktop release: version=${releaseEnv.PUDDING_APP_VERSION || version} ` +
       `channel=${releaseEnv.PUDDING_RELEASE_CHANNEL || "stable"}`,
   );
-  run(builder, ["--config", "packaging/electron-builder.config.cjs", "--publish", "never"], releaseEnv);
+  run(
+    builder,
+    [
+      "--config",
+      "packaging/electron-builder.config.cjs",
+      "--arm64",
+      "--x64",
+      "--publish",
+      "never",
+    ],
+    releaseEnv,
+  );
   run(process.execPath, ["scripts/verify-desktop-release.cjs"], releaseEnv);
 }
 

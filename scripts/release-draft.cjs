@@ -141,6 +141,10 @@ function expectedAssetNames(tag, channel) {
     `Pudding-${version}-arm64.dmg.blockmap`,
     `Pudding-${version}-arm64.zip`,
     `Pudding-${version}-arm64.zip.blockmap`,
+    `Pudding-${version}-x64.dmg`,
+    `Pudding-${version}-x64.dmg.blockmap`,
+    `Pudding-${version}-x64.zip`,
+    `Pudding-${version}-x64.zip.blockmap`,
     updateInfo,
   ];
 }
