@@ -71,7 +71,7 @@ test("preview packaging publishes beta metadata as a GitHub prerelease", () => {
   assert.equal(loadConfigValue("publish[0].releaseType", overrides), "prerelease");
 });
 
-test("tag workflow can stage stable and preview packages as draft releases", () => {
+test("local publishing can stage stable and preview packages as draft releases", () => {
   assert.equal(
     loadConfigValue("publish[0].releaseType", {
       PUDDING_RELEASE_DRAFT: "1",

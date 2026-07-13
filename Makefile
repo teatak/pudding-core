@@ -37,24 +37,20 @@ language-servers-ready:
 desktop-bundle: desktop-release language-servers
 	@PUDDING_RELEASE_CHANNEL=stable bash scripts/desktop-bundle-macos.sh
 
-# 校验版本和工作区后创建并推送正式 tag；GitHub Actions 负责打包和发布。
+# 本机完成测试、tag、签名、公证，并上传 Draft Release。
 desktop-publish:
-	@node scripts/check-public-release.cjs
-	@PUDDING_RELEASE_CHANNEL=stable node scripts/release-gate.cjs tag
+	@PUDDING_RELEASE_CHANNEL=stable node scripts/release-local.cjs start
 
 # Preview 与正式版共用 Pudding.app / appId / ~/.pudding,仅发布为 GitHub Prerelease beta 通道。
 desktop-preview-bundle: desktop-release language-servers
 	@PUDDING_RELEASE_CHANNEL=preview bash scripts/desktop-bundle-macos.sh
 
 desktop-preview-publish:
-	@node scripts/check-public-release.cjs
-	@PUDDING_RELEASE_CHANNEL=preview node scripts/release-gate.cjs tag
+	@PUDDING_RELEASE_CHANNEL=preview node scripts/release-local.cjs start
 
-# CI / 故障恢复入口：只允许从与 package.json 完全一致的 annotated tag 发布产物。
+# tag 已推送但本地发布中断时，从同一提交恢复。
 desktop-publish-from-tag:
-	@node scripts/release-gate.cjs check
-	@$(MAKE) desktop-release language-servers
-	@npm run desktop:publish
+	@node scripts/release-local.cjs resume
 
 # Draft 出现即表示签名、公证和产物上传均已完成；显式确认后才公开 Release。
 desktop-release-status:

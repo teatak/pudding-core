@@ -34,7 +34,7 @@ function main(argv, env) {
   assertCleanWorktree(root);
 
   if (command === "check") {
-    assertReleaseTag(root, metadata.tag, env);
+    assertReleaseTag(root, metadata.tag);
     console.log(
       `Release tag verified: tag=${metadata.tag} channel=${metadata.releaseChannel.channel}`,
     );
@@ -141,7 +141,7 @@ function assertPublishCheckout(projectRoot) {
   }
 }
 
-function assertReleaseTag(projectRoot, tag, env) {
+function assertReleaseTag(projectRoot, tag) {
   const type = git(projectRoot, ["cat-file", "-t", `refs/tags/${tag}`], { allowFailure: true });
   if (!type.ok) {
     throw new Error(`missing release tag ${tag}`);
@@ -155,12 +155,6 @@ function assertReleaseTag(projectRoot, tag, env) {
   if (taggedCommit !== head) {
     throw new Error(`release tag ${tag} does not point to HEAD`);
   }
-  if (env.GITHUB_REF_TYPE && env.GITHUB_REF_TYPE !== "tag") {
-    throw new Error("release workflow must run from a tag ref");
-  }
-  if (env.GITHUB_REF_NAME && env.GITHUB_REF_NAME !== tag) {
-    throw new Error(`workflow tag ${env.GITHUB_REF_NAME} does not match ${tag}`);
-  }
 }
 
 function createAndPushReleaseTag(projectRoot, tag) {
@@ -173,7 +167,7 @@ function createAndPushReleaseTag(projectRoot, tag) {
     allowFailure: true,
   });
   if (localType.ok) {
-    assertReleaseTag(projectRoot, tag, {});
+    assertReleaseTag(projectRoot, tag);
   } else {
     git(projectRoot, ["tag", "--annotate", tag, "--message", `Pudding ${tag}`]);
   }

@@ -75,7 +75,13 @@ testing only, an unsigned manual build remains available via `PUDDING_UPDATE_MOD
 
 ## Publish
 
-Publishing is tag-driven. After changing the version, commit and push the version commit, then run one of:
+Publishing is local and tag-driven. Before the first release on a Mac:
+
+- Install a valid Developer ID Application certificate and private key in the login keychain.
+- Store notarization credentials as the `pudding-notary` keychain profile.
+- Run `gh auth login` with an account that can create Releases in `teatak/pudding`.
+
+After changing the version, commit and push the version commit, then run one of:
 
 ```bash
 # x.y.z
@@ -85,13 +91,14 @@ make desktop-publish
 make desktop-preview-publish
 ```
 
-These commands do not build on the developer machine. They validate the version, clean worktree, upstream
-state, and remote tag; create an annotated tag such as `v0.1.2` or `v0.1.3-beta.1`; then push that tag to
-`origin`. Pushing the tag starts [the desktop release workflow](../.github/workflows/desktop-release.yml).
+These commands validate the version, public release state, clean worktree, upstream state, GitHub login, signing
+identity, and notarization setup. They run Go and Electron tests, create and push an annotated tag such as
+`v0.1.2` or `v0.1.3-beta.1` to `teatak/pudding-core`, then build, sign, notarize, and upload the artifacts to a
+Draft Release in `teatak/pudding`. A single valid Developer ID Application identity is detected automatically;
+set `PUDDING_MAC_IDENTITY` only when the keychain contains more than one.
 
-The workflow runs on macOS arm64, validates that the tag and package version match, runs Go and Electron tests,
-signs and notarizes the app, then uploads the verified assets to a Draft Release in `teatak/pudding`. The draft
-is not visible to update clients. Check it with:
+The draft is not visible to update clients. The publish command verifies it automatically; it can also be
+checked again with:
 
 ```bash
 make desktop-release-status
@@ -107,20 +114,8 @@ make desktop-release-finalize
 
 Finalizing a stable tag publishes a normal GitHub Release and marks it latest. Finalizing a beta tag publishes a
 GitHub Prerelease without changing latest. Stable clients keep `allowPrerelease=false` and never receive a
-preview package. The workflow fails before building if the public repository already contains that release or
+preview package. Publishing fails before building if the public repository already contains that release or
 tag.
-
-Configure these Actions secrets in `teatak/pudding-core` before the first tag-driven release:
-
-| Secret | Purpose |
-| --- | --- |
-| `PUDDING_RELEASE_TOKEN` | Fine-grained token allowed to create Releases in `teatak/pudding` |
-| `MACOS_CERTIFICATE_P12` | Base64-encoded Developer ID Application `.p12` |
-| `MACOS_CERTIFICATE_PASSWORD` | Password for the `.p12` |
-| `PUDDING_MAC_IDENTITY` | Developer ID identity, including the Team ID |
-| `APPLE_ID` | Apple Developer account used for notarization |
-| `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password for notarization |
-| `APPLE_TEAM_ID` | Apple Developer Team ID |
 
 The source tag lives in `teatak/pudding-core`; Electron Builder creates the matching public release in
 `teatak/pudding`. Keep previous public releases available for rollback.
@@ -146,14 +141,14 @@ Keep the user-facing installation instructions in the public
 ## Failure recovery
 
 - Automatic mode downloads in the background but never installs until the user chooses **Restart to Update**.
-- If the tag workflow fails before creating the draft, fix the workflow or secret and rerun the same Actions
-  job. Do not move the tag.
-- If the draft is incomplete, delete that draft and its public tag before rerunning the same source-tag job.
-  Never replace assets after final publication.
+- If publishing fails before the source tag is pushed, fix the problem and rerun the original publish command.
+- If publishing fails after the source tag is pushed but before creating a draft, rerun
+  `PUDDING_RELEASE_CHANNEL=stable make desktop-publish-from-tag`. Use `preview` for a beta tag. Do not move the
+  source tag.
+- If the draft is incomplete, delete that draft and its matching public tag, then run the same from-tag recovery
+  command. Never replace assets after final publication.
 - If the tagged source itself is wrong, bump the version and create a new tag.
-- As an emergency fallback, check out the existing tag and run
-  `PUDDING_RELEASE_CHANNEL=stable make desktop-publish-from-tag` with all signing, notarization, and GitHub
-  credentials configured. Use `preview` for a beta tag. This target refuses an untagged or dirty checkout.
+- The from-tag target refuses an untagged or dirty checkout.
 - The Help menu always contains `Download Latest Version...`, independently of update-check state.
 - If update checking breaks but Pudding still opens, use that permanent menu item.
 - If Pudding cannot start, download the latest or a previous DMG directly from the public Releases page.
