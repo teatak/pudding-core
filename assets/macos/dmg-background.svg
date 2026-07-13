@@ -10,15 +10,7 @@
     font-weight="600"
     text-anchor="middle"
   >Pudding</text>
-  <text
-    x="320"
-    y="79"
-    fill="#777780"
-    font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif"
-    font-size="12"
-    text-anchor="middle"
-  >Local-first AI workspace</text>
-  <line x1="56" y1="105" x2="584" y2="105" stroke="#e2e2e8"/>
+  <line x1="56" y1="88" x2="584" y2="88" stroke="#e2e2e8"/>
   <path d="M272 210H364" fill="none" stroke="#6558f5" stroke-linecap="round" stroke-width="3"/>
   <path d="M354 200L364 210L354 220" fill="none" stroke="#6558f5" stroke-linecap="round" stroke-linejoin="round" stroke-width="3"/>
   <text
