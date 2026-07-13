@@ -130,7 +130,7 @@ function verifyHardwareEntitlements(codePath, label) {
     "com.apple.security.device.audio-input",
     "com.apple.security.device.camera",
   ]) {
-    if (!entitlements.includes(`<key>${entitlement}</key>`)) {
+    if (!entitlements.includes(entitlement)) {
       fail(`${label} is missing ${entitlement}`);
     }
   }
