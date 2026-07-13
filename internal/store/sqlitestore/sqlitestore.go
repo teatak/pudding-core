@@ -50,9 +50,9 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("sqlite: enable wal: %w", err)
 	}
-	if _, err := db.Exec(store.SchemaSQL); err != nil {
+	if err := prepareSchema(db, path); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("sqlite: apply schema: %w", err)
+		return nil, err
 	}
 	if err := ensureHistorySearch(db); err != nil {
 		_ = db.Close()

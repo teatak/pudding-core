@@ -1472,9 +1472,6 @@ func mergeStreamEvents(previous, next event.Event) (event.Event, bool) {
 		if previous.Name == "" {
 			previous.Name = next.Name
 		}
-		if next.Summary != "" {
-			previous.Summary = next.Summary
-		}
 		return previous, true
 	}
 	return event.Event{}, false

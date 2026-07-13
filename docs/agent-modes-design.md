@@ -115,10 +115,10 @@ Composer 只显示当前 session 持久模式的弱提示图标,不提供点击�
 - Code prompt 增加 Project 本地开发规则。
 - Installed Apps 索引只在 Work / Code prompt 中出现;Chat 不暴露不可调用的 App 工具。
 
-## 7. 一次性数据迁移
+## 7. 数据升级边界
 
-项目尚未发布,不在运行代码中保留 migration 或兼容别名。本机开发数据库直接执行
-一次性迁移:
+正式版本不接受旧 mode 名称作为运行时兼容别名。SQLite 结构升级统一走版本化迁移；
+正式 schema v1 之前的以下名称转换仅保留为历史记录:
 
 ```text
 旧 chat      -> work
@@ -126,13 +126,13 @@ Composer 只显示当前 session 持久模式的弱提示图标,不提供点击�
 旧 workspace -> code
 ```
 
-迁移覆盖 `sessions.active_mode`、`turns.mode`、`queued_inputs.mode` 与历史
-`request_capability` 消息。开发库同时删除 `workspace_dirs`、`projects.temporary`、
-queued input 旧附件列和已废弃空表。迁移完成后删除所有启动迁移函数;Normalize、API
-schema、prompt 和工具协议均不接受 `workspace` 或 `project` mode。
+上述 pre-v1 离线处理曾覆盖 `sessions.active_mode`、`turns.mode`、
+`queued_inputs.mode` 与历史 `request_capability` 消息，并清除了开发库中的旧字段和
+废弃表。这些一次性处理不进入正式迁移链；Normalize、API schema、prompt 和工具协议
+均不接受 `workspace` 或 `project` mode。
 
-新数据库继续以 `chat` 为默认值。迁移命令与兼容别名不进入仓库;FTS 等当前 schema
-初始化不承担旧结构升级。
+新数据库继续以 `chat` 为默认值。v1 之后的结构变化统一进入正式 SQLite 迁移链；
+FTS 初始化只管理派生索引，不承担 canonical schema 升级。
 
 ## 8. 验收标准
 

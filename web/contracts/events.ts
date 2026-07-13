@@ -35,7 +35,6 @@ export const turnToolEvent = z.object({
   stream: z.enum(["stdout", "stderr"]).optional(),
   ok: z.boolean().optional(),
   content: z.string().optional(),
-  summary: z.string().optional(),
   summaryKind: z.string().optional(),
   summaryCount: z.number().optional(),
   attachments: z.array(attachment).optional(),

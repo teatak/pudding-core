@@ -150,7 +150,7 @@ App 加载、能力模式和操作审批相互独立:
 - session `loadedAppIDs`: SQLite session 正式 schema。
 - Runtime App 注册: 仅存在于当前 UI MCP 连接和 turn context，不持久化。
 
-首个版本尚未发布，schema 直接采用最终结构；不添加运行时迁移、旧字段兼容或双写逻辑。开发数据需要时一次性重建。
+SQLite schema v1 已随正式签名的 `0.1.1` 固化。后续调整 `loadedAppIDs` 或其他持久化字段时必须增加逐版本迁移；不通过双写或旧字段别名维持兼容。
 
 ## API
 

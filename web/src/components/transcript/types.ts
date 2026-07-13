@@ -86,7 +86,6 @@ export type TurnPartVM =
       resultContent?: string;
       resultName?: string;
       resultOk?: boolean;
-      summary?: string;
       summaryCount?: number;
       summaryKind?: string;
       type: "tool_use";

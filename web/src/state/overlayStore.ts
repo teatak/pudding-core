@@ -55,7 +55,6 @@ export type AssistantOverlayPart =
       liveStderr?: string;
       resultContent?: string;
       resultOk?: boolean;
-      summary?: string;
       summaryKind?: string;
       summaryCount?: number;
       attachments?: Attachment[];
@@ -243,7 +242,6 @@ function upsertToolPart(
       : event.stream === "stderr"
         ? appendLiveToolOutput(current.liveStderr, event.content)
         : current.liveStderr,
-    summary: event.summary || current.summary,
     summaryKind: event.summaryKind || current.summaryKind,
     summaryCount: event.summaryCount ?? current.summaryCount,
     attachments: mergeToolAttachments(current.attachments, event.attachments),

@@ -247,10 +247,10 @@ Provider 路由:
   `contextWindow/capabilities/openai/google/anthropic`。各 provider 只消费
   自己支持的字段;未知字段保留在 turn snapshot 中。
 
-表结构与 API 已定形。pre-launch 阶段直接维护 `internal/store/schema.sql`,不在
-运行时代码中保留旧表、旧列或旧数据值的识别与迁移分支。开发数据需要调整时只做
-一次性离线处理,完成后立即删除处理代码。`sessions.provider`、`turns.provider`、
-`turns.model` 已属于当前 schema。
+正式签名的 `0.1.1` 数据结构定义为 SQLite schema v1。数据库通过
+`PRAGMA user_version` 记录版本；新版本的结构变化必须提供逐版本、事务化迁移，
+迁移前生成数据库备份。`schema.sql` 只负责创建全新数据库，不能替代升级迁移。
+早于该基线的 pre-release 数据库不属于正式升级支持范围。
 
 ```text
 GET    /providers            # 列表,返回本地配置中的 apiKey 与 apiKeySet
@@ -412,7 +412,7 @@ turn.started → turn.delta* → turn.completed | turn.failed | turn.cancelled
 
 - daemon 只 bind loopback。
 - daemon 启动时生成 token,所有 HTTP/SSE/WS 请求必须带 token;Electron shell 启动 daemon 后通过启动 URL 注入 token 与 daemon API base,前端读取后从地址栏清掉。
-- 第一阶段 provider API key 存 SQLite 明文,数据库文件权限 0600;后续评估通过 Electron native bridge 接系统 keychain。
+- provider API key 存 `<home>/config/profiles.yaml` 明文，配置文件权限 0600；后续评估通过 Electron native bridge 接系统 keychain。
 
 ## 10. 数据目录与通道隔离
 
@@ -426,7 +426,7 @@ turn.started → turn.delta* → turn.completed | turn.failed | turn.cancelled
 与旧版的关系:
 
 - 旧版 dev 目录已改名为 `~/.pudding-dev-old`;新项目开发期一律落在 `~/.pudding-dev`。
-- release 通道的 `~/.pudding` 只在新版正式替换旧版时启用;届时旧数据按 pre-launch 策略处理(不做迁移,显式切换)。
+- release 通道的 `~/.pudding` 从正式签名的 `0.1.1` 起进入版本化升级；后续版本必须保留从当前最低支持版本开始的连续迁移链。
 
 home 解析顺序:
 

@@ -2,7 +2,7 @@ MODULE := github.com/teatak/pudding-core
 LDFLAGS_RELEASE := -X $(MODULE)/internal/buildinfo.channel=release
 BUILDTAGS := sqlite_fts5 webrtcaec
 
-.PHONY: test tidy clean embed language-servers language-servers-ready desktop desktop-dev desktop-release desktop-bundle desktop-publish daemon daemon-dev daemon-release prompt tools-report tools-eval
+.PHONY: test schema-check tidy clean embed language-servers language-servers-ready desktop desktop-dev desktop-release desktop-bundle desktop-publish daemon daemon-dev daemon-release prompt tools-report tools-eval
 
 # 共享:构建前端并装填进 daemon 的 embed 目录(产物不进 git)
 embed:
@@ -22,7 +22,7 @@ desktop-dev: language-servers-ready
 	@BUILDTAGS="$(BUILDTAGS)" bash scripts/desktop-dev.sh
 
 # 发布桌面 daemon(release 通道:端口 9669 / ~/.pudding;供 .app bundle 使用)
-desktop-release: embed
+desktop-release: schema-check embed
 	go build -tags "$(BUILDTAGS)" -ldflags "$(LDFLAGS_RELEASE)" -o bin/puddingd ./cmd/puddingd
 
 # 发布包内置语言服务(固定版本;构建期下载,运行时不联网安装)
@@ -60,11 +60,15 @@ tools-eval:
 	go run -tags "$(BUILDTAGS)" ./cmd/puddingd tools eval $(RUNARGS)
 
 # 发布构建(release 通道:端口 9669 / ~/.pudding;含 embed web)
-daemon-release: embed
+daemon-release: schema-check embed
 	go build -tags "$(BUILDTAGS)" -ldflags "$(LDFLAGS_RELEASE)" -o bin/puddingd ./cmd/puddingd
 
 test:
 	go test -tags "$(BUILDTAGS)" ./...
+
+# 发布门禁:schema.sql 一旦变化,必须同步增加版本、迁移和发布指纹。
+schema-check:
+	go test -tags "$(BUILDTAGS)" ./internal/store/sqlitestore -run '^TestSchemaReleaseContract$$'
 
 tidy:
 	go mod tidy

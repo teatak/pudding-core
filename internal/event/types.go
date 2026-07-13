@@ -71,7 +71,6 @@ type Event struct {
 	Stream             string          `json:"stream,omitempty"`
 	Ok                 *bool           `json:"ok,omitempty"`
 	Content            string          `json:"content,omitempty"`
-	Summary            string          `json:"summary,omitempty"` // 兼容旧前端,新工具摘要走 SummaryKind/SummaryCount
 	SummaryKind        string          `json:"summaryKind,omitempty"`
 	SummaryCount       int             `json:"summaryCount,omitempty"`
 	Attachments        []Attachment    `json:"attachments,omitempty"`
