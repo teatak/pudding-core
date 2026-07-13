@@ -101,10 +101,13 @@ function verifyAppBundle(bundlePath, label, verifyCustomCode = false) {
   }
 
   verifySignedCode(bundlePath, label, true);
+  verifyHardwareEntitlements(bundlePath, label);
+  verifyUsageDescriptions(bundlePath, label);
   if (verifyCustomCode) {
     const appRoot = path.join(bundlePath, "Contents", "Resources", "app");
+    const daemonPath = path.join(appRoot, "bin", "puddingd");
     const customCode = [
-      path.join(appRoot, "bin", "puddingd"),
+      daemonPath,
       path.join(appRoot, "language-servers", "gopls"),
       ...findFiles(path.join(appRoot, "lib"), (filePath) => filePath.endsWith(".dylib")),
     ];
@@ -115,9 +118,37 @@ function verifyAppBundle(bundlePath, label, verifyCustomCode = false) {
       verifySignedCode(codePath, `${label}:${path.relative(bundlePath, codePath)}`, false);
       verifyPortableDependencies(codePath, label);
     }
+    verifyHardwareEntitlements(daemonPath, `${label}:puddingd`);
   }
   execFileSync("xcrun", ["stapler", "validate", bundlePath], { stdio: "inherit" });
   execFileSync("spctl", ["--assess", "--type", "execute", "--verbose=4", bundlePath], { stdio: "inherit" });
+}
+
+function verifyHardwareEntitlements(codePath, label) {
+  const entitlements = commandOutput("codesign", ["-d", "--entitlements", "-", codePath]);
+  for (const entitlement of [
+    "com.apple.security.device.audio-input",
+    "com.apple.security.device.camera",
+  ]) {
+    if (!entitlements.includes(`<key>${entitlement}</key>`)) {
+      fail(`${label} is missing ${entitlement}`);
+    }
+  }
+}
+
+function verifyUsageDescriptions(bundlePath, label) {
+  const infoPlistPath = path.join(bundlePath, "Contents", "Info.plist");
+  for (const usageDescription of [
+    "NSCameraUsageDescription",
+    "NSLocalNetworkUsageDescription",
+    "NSMicrophoneUsageDescription",
+    "NSScreenCaptureUsageDescription",
+  ]) {
+    const value = commandOutput("plutil", ["-extract", usageDescription, "raw", infoPlistPath]).trim();
+    if (!value) {
+      fail(`${label} is missing ${usageDescription}`);
+    }
+  }
 }
 
 function verifySignedCode(codePath, label, deep) {

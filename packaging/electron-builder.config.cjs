@@ -62,11 +62,17 @@ module.exports = {
     icon: "assets/macos/AppIcon.icns",
     identity: signingIdentity,
     hardenedRuntime: true,
+    entitlements: "packaging/macos/entitlements.plist",
+    entitlementsInherit: "packaging/macos/entitlements.plist",
     target: ["dmg", "zip"],
     extendInfo: {
       LSHasLocalizedDisplayName: true,
       NSCameraUsageDescription: "Pudding uses the camera when you choose to capture a photo.",
+      NSLocalNetworkUsageDescription:
+        "Pudding uses your local network so your other devices can connect to it.",
       NSMicrophoneUsageDescription: "Pudding uses the microphone for local dictation.",
+      NSScreenCaptureUsageDescription:
+        "Pudding captures the screen only when you choose to take a desktop screenshot.",
     },
   },
   protocols: [

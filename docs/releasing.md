@@ -60,6 +60,8 @@ credentials. It produces the DMG, ZIP, blockmaps, and `latest-mac.yml` under `di
 - All release artifacts exist.
 - The staged app plus the apps extracted from ZIP and DMG contain no read-only files that can block Squirrel.Mac.
 - The app, daemon, language server, and bundled dylibs use the expected Developer ID and portable dependencies.
+- The app and daemon retain camera/audio-input entitlements, and the bundle declares camera, microphone, screen
+  capture, and local-network usage descriptions.
 - ZIP/DMG signatures, notarization tickets, Gatekeeper assessments, and the DMG checksum are valid.
 
 The packaging pipeline automatically selects the only installed Developer ID Application identity and defaults

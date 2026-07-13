@@ -1,4 +1,6 @@
 "CFBundleDisplayName" = "布丁";
 "CFBundleName" = "布丁";
 "NSCameraUsageDescription" = "布丁仅在你选择拍照时使用相机。";
+"NSLocalNetworkUsageDescription" = "布丁使用本地网络，让同一网络中的设备连接到布丁。";
 "NSMicrophoneUsageDescription" = "布丁使用麦克风进行本地听写和语音输入。";
+"NSScreenCaptureUsageDescription" = "布丁仅在你选择截取桌面画面时使用屏幕录制权限。";

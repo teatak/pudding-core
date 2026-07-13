@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
+const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 
@@ -19,6 +20,18 @@ test("desktop packaging always requires a Developer ID certificate", () => {
 test("signed desktop packaging always enables hardened code signing", () => {
   assert.equal(loadConfigValue("forceCodeSigning", signedBuildEnv()), "true");
   assert.equal(loadConfigValue("mac.hardenedRuntime", signedBuildEnv()), "true");
+});
+
+test("signed desktop packaging grants camera and microphone access", () => {
+  const entitlements = loadConfigValue("mac.entitlements", signedBuildEnv());
+  assert.equal(loadConfigValue("mac.entitlementsInherit", signedBuildEnv()), entitlements);
+  const contents = fs.readFileSync(path.join(root, entitlements), "utf8");
+  assert.match(contents, /com\.apple\.security\.device\.camera/);
+  assert.match(contents, /com\.apple\.security\.device\.audio-input/);
+  assert.match(loadConfigValue("mac.extendInfo.NSCameraUsageDescription", signedBuildEnv()), /camera/i);
+  assert.match(loadConfigValue("mac.extendInfo.NSMicrophoneUsageDescription", signedBuildEnv()), /microphone/i);
+  assert.match(loadConfigValue("mac.extendInfo.NSScreenCaptureUsageDescription", signedBuildEnv()), /screen/i);
+  assert.match(loadConfigValue("mac.extendInfo.NSLocalNetworkUsageDescription", signedBuildEnv()), /local network/i);
 });
 
 test("legacy update mode overrides are rejected", () => {
