@@ -16,6 +16,7 @@
 - no backend focus state
 - daemon-owned hardware resources
 - session-owned transports and context
+- desktop-only product surface
 
 旧项目 `pudding-core-old` 只能作为参考实现和踩坑记录,不要直接搬旧 `Runtime` 大结构。
 
@@ -43,6 +44,7 @@
 17. provider 只产出模型流(delta / finish / error);turn lifecycle 事件由 engine 生成。
 18. dev 与 release 数据目录严格隔离:dev 用 `~/.pudding-dev`,release 用 `~/.pudding`(仅发布构建);本地构建默认 dev 通道;测试只用临时目录。
 19. provider profiles / model metadata 的事实源是 `<home>/config/*.yaml`,不是 SQLite;SQLite 只承载运行数据。
+20. 产品只支持 Electron 桌面端,停止移动端产品开发与兼容;新功能不得新增移动端专用分支,改动触及现有移动端兼容代码时可直接删除。
 
 ## 后端技术约束
 

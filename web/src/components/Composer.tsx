@@ -56,7 +56,9 @@ import {
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
+import { ChoiceMenu, type ChoiceMenuItem } from "@/components/ChoiceMenu";
 import { ComposerAddButton } from "@/components/ComposerAddMenu";
+import { ComposerFloatingPanel } from "@/components/ComposerFloatingPanel";
 import { buildComposerMentionReferences } from "@/components/composerMentionData";
 import { ComposerMentionMenu } from "@/components/ComposerMentionMenu";
 import { useComposerMentions } from "@/components/useComposerMentions";
@@ -121,6 +123,7 @@ export type DroppedFilesBatch = DroppedLocalItems & {
 };
 
 type ComposerApproval = Extract<AssistantOverlayPart, { type: "approval" }>;
+type ApprovalMenuAction = "approve-session" | "approve-turn" | "deny" | "review-git" | "review-patch" | "review-skill";
 type SlashCommand = {
   command: string;
   description: string;
@@ -1062,7 +1065,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   return (
     <>
       <form
-        className={cn("relative shrink-0 pb-4", pendingApproval ? "pt-36" : "pt-2")}
+        className="relative shrink-0 pt-2 pb-4"
         onSubmit={form.handleSubmit(submitDraft)}
       >
       {/* 底部遮罩:滚动内容贴近输入区时淡出,随 composer 定位、宽度走 ChatColumn。
@@ -1736,8 +1739,136 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
     }
   }
 
+  const approvalMenuItems: Array<ChoiceMenuItem<ApprovalMenuAction>> = [];
+  if (isToolCallApproval) {
+    approvalMenuItems.push({
+      id: "approve-turn",
+      label: approvalToolActionLabel(toolCallApproval.operation, Boolean(patchProposal), Boolean(gitCommitApproval), t),
+      value: "approve-turn",
+      render: () => (
+        <ApprovalMenuOption
+          description={t("transcript.approvalAllowToolCallDesc")}
+          icon={Check}
+          label={approvalToolActionLabel(toolCallApproval.operation, Boolean(patchProposal), Boolean(gitCommitApproval), t)}
+          loading={pendingAction === "turn"}
+        />
+      ),
+    });
+    if (patchProposal) {
+      approvalMenuItems.push({
+        id: "review-patch",
+        label: t("transcript.approvalPatchReview"),
+        value: "review-patch",
+        render: () => <ApprovalMenuOption description={t("transcript.approvalReviewDesc")} icon={FileText} label={t("transcript.approvalPatchReview")} />,
+      });
+    }
+    if (gitCommitApproval) {
+      approvalMenuItems.push({
+        id: "review-git",
+        label: t("transcript.approvalGitCommitReview"),
+        value: "review-git",
+        render: () => <ApprovalMenuOption description={t("transcript.approvalReviewDesc")} icon={FileText} label={t("transcript.approvalGitCommitReview")} />,
+      });
+    }
+  } else if (isSkillDraftApproval) {
+    approvalMenuItems.push({
+      disabled: !skillDraft,
+      id: "approve-turn",
+      label: t("transcript.approvalPublishSkillDraft"),
+      value: "approve-turn",
+      render: () => (
+        <ApprovalMenuOption
+          description={t("transcript.approvalPublishSkillDraftDesc")}
+          icon={Check}
+          label={t("transcript.approvalPublishSkillDraft")}
+          loading={pendingAction === "turn"}
+        />
+      ),
+    });
+    if (skillDraft) {
+      approvalMenuItems.push({
+        id: "review-skill",
+        label: t("settings.skills.viewDiff"),
+        value: "review-skill",
+        render: () => <ApprovalMenuOption description={t("transcript.approvalReviewDesc")} icon={FileText} label={t("settings.skills.viewDiff")} />,
+      });
+    }
+  } else {
+    approvalMenuItems.push(
+      {
+        disabled: projectDirsRequired,
+        id: "approve-turn",
+        label: t("transcript.approvalAllowTurn"),
+        value: "approve-turn",
+        render: () => (
+          <ApprovalMenuOption
+            description={t("transcript.approvalAllowTurnDesc")}
+            icon={Check}
+            label={t("transcript.approvalAllowTurn")}
+            loading={pendingAction === "turn"}
+          />
+        ),
+      },
+      {
+        disabled: projectDirsRequired || projectDirsRequiredForSession,
+        id: "approve-session",
+        label: t("transcript.approvalAllowSession"),
+        value: "approve-session",
+        render: () => (
+          <ApprovalMenuOption
+            description={t("transcript.approvalAllowSessionDesc")}
+            icon={ShieldCheck}
+            label={t("transcript.approvalAllowSession")}
+            loading={pendingAction === "session"}
+          />
+        ),
+      },
+    );
+  }
+  approvalMenuItems.push({
+    id: "deny",
+    label: approvalDenyLabel(isSkillDraftApproval, toolCallApproval.operation, Boolean(patchProposal), Boolean(gitCommitApproval), t),
+    value: "deny",
+    render: () => (
+      <ApprovalMenuOption
+        description={t("transcript.approvalDenyDesc")}
+        icon={X}
+        label={approvalDenyLabel(isSkillDraftApproval, toolCallApproval.operation, Boolean(patchProposal), Boolean(gitCommitApproval), t)}
+        loading={pendingAction === "deny"}
+      />
+    ),
+  });
+
+  function selectApprovalAction(action: ApprovalMenuAction) {
+    switch (action) {
+      case "approve-turn":
+        void approve("turn");
+        return;
+      case "approve-session":
+        void approve("session");
+        return;
+      case "deny":
+        void deny();
+        return;
+      case "review-patch":
+        if (patchProposal) {
+          setViewingPatchProposal(patchProposal);
+        }
+        return;
+      case "review-git":
+        if (gitCommitApproval) {
+          setViewingGitCommit(gitCommitApproval);
+        }
+        return;
+      case "review-skill":
+        if (skillDraft) {
+          setViewingSkillDraft(skillDraft);
+        }
+    }
+  }
+
   return (
-    <div className="absolute right-8 bottom-full left-16 z-0 grid gap-1 rounded-t-lg border border-border/70 bg-popover/95 px-3 py-2 text-xs text-popover-foreground shadow-sm backdrop-blur">
+    <ComposerFloatingPanel className="right-4 grid gap-1 overflow-y-auto px-3 py-2 text-xs sm:right-8">
       <div className="flex min-w-0 items-center gap-1.5">
         <ShieldCheck className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="min-w-0 truncate font-medium">{title}</span>
@@ -1828,110 +1959,15 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
           ) : null}
         </div>
       ) : null}
-      <div className="flex flex-wrap items-center gap-1.5">
-        {isToolCallApproval ? (
-          <>
-            {patchProposal ? (
-              <Button
-                className="h-6 gap-1 rounded-full px-2 text-[11px]"
-                disabled={pending}
-                size="sm"
-                type="button"
-                variant="secondary"
-                onClick={() => setViewingPatchProposal(patchProposal)}
-              >
-                <FileText className="size-3" />
-                {t("transcript.approvalPatchReview")}
-              </Button>
-            ) : null}
-            {gitCommitApproval ? (
-              <Button
-                className="h-6 gap-1 rounded-full px-2 text-[11px]"
-                disabled={pending}
-                size="sm"
-                type="button"
-                variant="secondary"
-                onClick={() => setViewingGitCommit(gitCommitApproval)}
-              >
-                <FileText className="size-3" />
-                {t("transcript.approvalGitCommitReview")}
-              </Button>
-            ) : null}
-            <Button
-              className="h-6 gap-1 rounded-full px-2 text-[11px]"
-              disabled={pending}
-              size="sm"
-              type="button"
-              onClick={() => void approve("turn")}
-            >
-              {pendingAction === "turn" ? <Spinner className="size-3" /> : <Check className="size-3" />}
-              {patchProposal
-                ? t("transcript.approvalPatchApply")
-                : gitCommitApproval
-                  ? t("transcript.approvalGitCommit")
-                  : t("transcript.approvalAllowToolCall")}
-            </Button>
-          </>
-        ) : isSkillDraftApproval ? (
-          <>
-            <Button
-              className="h-6 gap-1 rounded-full px-2 text-[11px]"
-              disabled={pending || !skillDraft}
-              size="sm"
-              type="button"
-              variant="secondary"
-              onClick={() => skillDraft && setViewingSkillDraft(skillDraft)}
-            >
-              {t("settings.skills.viewDiff")}
-            </Button>
-            <Button
-              className="h-6 gap-1 rounded-full px-2 text-[11px]"
-              disabled={pending}
-              size="sm"
-              type="button"
-              onClick={() => void approve("turn")}
-            >
-              {pendingAction === "turn" ? <Spinner className="size-3" /> : <Check className="size-3" />}
-              {t("transcript.approvalPublishSkillDraft")}
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button
-              className="h-6 gap-1 rounded-full px-2 text-[11px]"
-              disabled={pending || projectDirsRequired}
-              size="sm"
-              type="button"
-              onClick={() => void approve("turn")}
-            >
-              {pendingAction === "turn" ? <Spinner className="size-3" /> : <Check className="size-3" />}
-              {t("transcript.approvalAllowTurn")}
-            </Button>
-            <Button
-              className="h-6 gap-1 rounded-full px-2 text-[11px]"
-              disabled={pending || projectDirsRequired || projectDirsRequiredForSession}
-              size="sm"
-              type="button"
-              variant="secondary"
-              onClick={() => void approve("session")}
-            >
-              {pendingAction === "session" ? <Spinner className="size-3" /> : <ShieldCheck className="size-3" />}
-              {t("transcript.approvalAllowSession")}
-            </Button>
-          </>
-        )}
-        <Button
-          className="h-6 gap-1 rounded-full px-1.5 text-[11px]"
-          disabled={pending}
-          size="sm"
-          type="button"
-          variant="ghost"
-          onClick={() => void deny()}
-        >
-          {pendingAction === "deny" ? <Spinner className="size-3" /> : <X className="size-3" />}
-          {t("transcript.approvalDeny")}
-        </Button>
-      </div>
+      <ChoiceMenu
+        busy={pending}
+        className="mt-0.5 border-t border-border/60 pt-1"
+        focusMode="when-idle"
+        items={approvalMenuItems}
+        maxHeightClassName="max-h-44"
+        onEscape={() => void deny()}
+        onSelect={selectApprovalAction}
+      />
       <SkillDraftDiffDialog
         applying={pendingAction === "turn"}
         draft={viewingSkillDraft}
@@ -1957,8 +1993,74 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
         onOpenChange={(open) => !open && setViewingGitCommit(null)}
         onReject={() => void deny()}
       />
+    </ComposerFloatingPanel>
+  );
+}
+
+function ApprovalMenuOption({
+  description,
+  icon: Icon,
+  label,
+  loading = false,
+}: {
+  description: string;
+  icon: LucideIcon;
+  label: string;
+  loading?: boolean;
+}) {
+  return (
+    <div className="flex min-w-0 items-start gap-2 py-0.5">
+      <span className="mt-0.5 grid size-4 shrink-0 place-items-center text-muted-foreground">
+        {loading ? <Spinner className="size-3.5" /> : <Icon className="size-3.5" />}
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-xs font-medium text-foreground">{label}</span>
+        <span className="mt-0.5 block truncate text-[11px] leading-4 text-muted-foreground">{description}</span>
+      </span>
     </div>
   );
+}
+
+function approvalToolActionLabel(operation: string, patchProposal: boolean, gitCommit: boolean, t: (key: string) => string) {
+  if (patchProposal) {
+    return t("transcript.approvalPatchApply");
+  }
+  if (gitCommit) {
+    return t("transcript.approvalGitCommit");
+  }
+  switch (operation) {
+    case "shell":
+      return t("transcript.approvalRunCommand");
+    case "process_start":
+      return t("transcript.approvalStartProcess");
+    default:
+      return t("transcript.approvalAllowToolCall");
+  }
+}
+
+function approvalDenyLabel(
+  skillDraft: boolean,
+  operation: string,
+  patchProposal: boolean,
+  gitCommit: boolean,
+  t: (key: string) => string,
+) {
+  if (skillDraft) {
+    return t("transcript.approvalDoNotPublish");
+  }
+  if (patchProposal) {
+    return t("transcript.approvalDoNotApply");
+  }
+  if (gitCommit) {
+    return t("transcript.approvalDoNotCommit");
+  }
+  if (operation === "shell" || operation === "process_start") {
+    return t("transcript.approvalDoNotRun");
+  }
+  if (operation) {
+    return t("transcript.approvalDoNotExecute");
+  }
+  return t("transcript.approvalDoNotAllow");
 }
 
 function selectPendingApproval(assistants: Record<string, AssistantOverlay>, sessionID: string, runningTurnID?: string): ComposerApproval | undefined {

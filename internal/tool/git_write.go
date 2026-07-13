@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/teatak/pudding-core/internal/projectgit"
 )
 
 const (
@@ -501,16 +503,13 @@ func stageGitPaths(ctx context.Context, repo gitWriteRepository, paths []string)
 }
 
 func readGitWriteStatus(ctx context.Context, repo gitRepository) (gitStatusSnapshot, error) {
-	result := runGitWithoutExternalFilters(ctx, repo.Root, gitMetadataLimitBytes, "status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all")
-	if result.err != nil {
-		return gitStatusSnapshot{}, newGitWriteError(gitFailureReason(ctx, result.err, "git_status_failed"), gitExecDetail(result))
-	}
-	if result.stdout.Truncated() {
-		return gitStatusSnapshot{}, newGitWriteError("git_output_too_large", "git status output exceeded the safety limit")
-	}
-	snapshot, err := parseGitStatus(result.stdout.String())
+	snapshot, err := projectgit.ReadStatus(ctx, projectgit.Repository{ProjectRoot: repo.ProjectRoot, Root: repo.Root})
 	if err != nil {
-		return gitStatusSnapshot{}, newGitWriteError("git_parse_failed", err.Error())
+		code := projectgit.ErrorCode(err)
+		if code == "" {
+			code = "git_status_failed"
+		}
+		return gitStatusSnapshot{}, newGitWriteError(code, err.Error())
 	}
 	return snapshot, nil
 }
@@ -524,27 +523,20 @@ type gitWriteDiffSnapshot struct {
 }
 
 func readGitWriteDiff(ctx context.Context, repo gitRepository) (gitWriteDiffSnapshot, error) {
-	baseArgs := []string{"diff", "--no-ext-diff", "--no-textconv", "--no-color", "--find-renames=50%", "--cached"}
-	statsArgs := append(append([]string(nil), baseArgs...), "--numstat", "-z")
-	statsResult := runGit(ctx, repo.Root, gitMetadataLimitBytes, statsArgs...)
-	if statsResult.err != nil || statsResult.stdout.Truncated() {
-		return gitWriteDiffSnapshot{}, newGitWriteError(gitFailureReason(ctx, statsResult.err, "git_diff_failed"), gitExecDetail(statsResult))
-	}
-	files, additions, deletions, err := parseGitNumstat(statsResult.stdout.String())
+	diff, err := projectgit.ReadPatchDiff(ctx, projectgit.Repository{ProjectRoot: repo.ProjectRoot, Root: repo.Root}, true, gitDiffOutputLimitBytes)
 	if err != nil {
-		return gitWriteDiffSnapshot{}, newGitWriteError("git_parse_failed", err.Error())
-	}
-	patchArgs := append(append([]string(nil), baseArgs...), "--src-prefix=a/", "--dst-prefix=b/")
-	patchResult := runGit(ctx, repo.Root, gitDiffOutputLimitBytes, patchArgs...)
-	if patchResult.err != nil {
-		return gitWriteDiffSnapshot{}, newGitWriteError(gitFailureReason(ctx, patchResult.err, "git_diff_failed"), gitExecDetail(patchResult))
+		code := projectgit.ErrorCode(err)
+		if code == "" {
+			code = "git_diff_failed"
+		}
+		return gitWriteDiffSnapshot{}, newGitWriteError(code, err.Error())
 	}
 	return gitWriteDiffSnapshot{
-		Diff:      patchResult.stdout.String(),
-		Truncated: patchResult.stdout.Truncated(),
-		Files:     files,
-		Additions: additions,
-		Deletions: deletions,
+		Diff:      diff.Patch,
+		Truncated: diff.Truncated,
+		Files:     diff.Files,
+		Additions: diff.Additions,
+		Deletions: diff.Deletions,
 	}, nil
 }
 

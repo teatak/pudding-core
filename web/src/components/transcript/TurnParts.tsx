@@ -37,6 +37,7 @@ import {
   Children,
   isValidElement,
   useEffect,
+  useId,
   useRef,
   useState,
   type CSSProperties,
@@ -50,6 +51,7 @@ import remarkGfm from "remark-gfm";
 
 import { type ContentPart, type Message } from "@/api/client";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
+import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
 import { attachmentResourceURL } from "@/lib/attachmentURL";
@@ -702,7 +704,6 @@ function ProcessCompactPart({
   const { t } = useI18n();
   const { handleSummaryClick, handleSummaryKeyDown, handleToggle, open } = useLocalDisclosure(defaultOpen, onOpenChange);
   const label = processCompactLabel(hiddenParts, t);
-  const hasErrors = hiddenParts.some((part) => part.type === "tool_use" && toolFailed(part));
   return (
     <details className="relative text-[13px] leading-[1.5] text-muted-foreground/70" open={open} onToggle={handleToggle}>
       <summary
@@ -713,9 +714,6 @@ function ProcessCompactPart({
         <PartIcon icon={ListChecks} />
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="min-w-0 truncate">{label}</span>
-          {hasErrors ? (
-            <span className="shrink-0 text-muted-foreground/60">{t("transcript.processHasErrors")}</span>
-          ) : null}
           <span className="shrink-0 text-muted-foreground/50">
             {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
           </span>
@@ -1003,7 +1001,23 @@ type MarkdownImageItem = ImageLightboxItem & {
   sourceKey: string;
 };
 
-export function MarkdownBody({ allowHtmlImages = true, text, token = "" }: { allowHtmlImages?: boolean; text: string; token?: string }) {
+export function MarkdownBody({
+  allowHtmlImages = true,
+  enableMermaid = false,
+  onResolvedLinkClick,
+  resolveImageURL,
+  resolveLinkURL,
+  text,
+  token = "",
+}: {
+  allowHtmlImages?: boolean;
+  enableMermaid?: boolean;
+  onResolvedLinkClick?: (href: string) => boolean;
+  resolveImageURL?: (raw: string) => string;
+  resolveLinkURL?: (raw: string) => string;
+  text: string;
+  token?: string;
+}) {
   const { t } = useI18n();
   const [codeRenderer, setCodeRenderer] = useState<CodeBlockRenderer | null>(null);
   const [imagePreviewIndex, setImagePreviewIndex] = useState<number | null>(null);
@@ -1023,7 +1037,19 @@ export function MarkdownBody({ allowHtmlImages = true, text, token = "" }: { all
   const components: Components = {
     a({ children, href, node: _node, ...props }) {
       return (
-        <a {...props} href={href} target="_blank" rel="noreferrer noopener" onClick={handleMarkdownLinkClick}>
+        <a
+          {...props}
+          href={href}
+          target="_blank"
+          rel="noreferrer noopener"
+          onClick={(event) => {
+            if (href && onResolvedLinkClick?.(href)) {
+              event.preventDefault();
+              return;
+            }
+            handleMarkdownLinkClick(event);
+          }}
+        >
           {children}
         </a>
       );
@@ -1032,6 +1058,17 @@ export function MarkdownBody({ allowHtmlImages = true, text, token = "" }: { all
       const label = alt || src || "";
       if (!src) {
         return label ? <span>{label}</span> : null;
+      }
+      if (resolveImageURL) {
+        return (
+          <img
+            alt={label}
+            className="my-3 max-h-[70vh] max-w-full rounded-md border object-contain"
+            decoding="async"
+            loading="lazy"
+            src={src}
+          />
+        );
       }
       const sourceKey = attachmentPathFromMarkdownURL(src);
       if (sourceKey) {
@@ -1069,6 +1106,9 @@ export function MarkdownBody({ allowHtmlImages = true, text, token = "" }: { all
       if (!block) {
         return <pre>{children}</pre>;
       }
+      if (enableMermaid && block.lang?.trim().toLowerCase() === "mermaid") {
+        return <MermaidBlock code={block.code} />;
+      }
       return (
         <CodeBlock
           code={block.code}
@@ -1090,6 +1130,15 @@ export function MarkdownBody({ allowHtmlImages = true, text, token = "" }: { all
 
   const segments = allowHtmlImages ? splitMarkdownHtmlImages(text) : [{ type: "markdown" as const, text }];
   const hasHtmlImage = segments.some((segment) => segment.type === "image");
+  const urlTransform: UrlTransform = (raw, key, node) => {
+    if ((key === "src" || node.tagName === "img") && resolveImageURL) {
+      return resolveImageURL(raw);
+    }
+    if (key === "href" && resolveLinkURL) {
+      return resolveLinkURL(raw);
+    }
+    return markdownUrlTransform(raw, key, node);
+  };
 
   return (
     <>
@@ -1112,7 +1161,7 @@ export function MarkdownBody({ allowHtmlImages = true, text, token = "" }: { all
             return null;
           }
           return (
-            <ReactMarkdown key={`md-${index}`} components={components} remarkPlugins={[remarkGfm]} urlTransform={markdownUrlTransform}>
+            <ReactMarkdown key={`md-${index}`} components={components} remarkPlugins={[remarkGfm]} urlTransform={urlTransform}>
               {segment.text}
             </ReactMarkdown>
           );
@@ -1121,6 +1170,84 @@ export function MarkdownBody({ allowHtmlImages = true, text, token = "" }: { all
       <ImageLightbox images={markdownImages} openIndex={imagePreviewIndex} onOpenIndexChange={setImagePreviewIndex} />
     </>
   );
+}
+
+const MAX_MERMAID_CHARS = 50_000;
+let mermaidRenderQueue: Promise<void> = Promise.resolve();
+
+function MermaidBlock({ code }: { code: string }) {
+  const { t } = useI18n();
+  const reactID = useId();
+  const [svg, setSVG] = useState("");
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSVG("");
+    setFailed(false);
+    if (code.length > MAX_MERMAID_CHARS) {
+      setFailed(true);
+      return () => {
+        cancelled = true;
+      };
+    }
+    const id = `pudding-mermaid-${reactID.replace(/[^a-zA-Z0-9_-]/g, "")}`;
+    const dark = document.documentElement.classList.contains("dark");
+    void renderMermaidSVG(id, code, dark)
+      .then((rendered) => {
+        if (!cancelled) {
+          setSVG(rendered);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFailed(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [code, reactID]);
+
+  if (failed) {
+    return (
+      <div className="mermaid-block mermaid-block-error">
+        <div className="border-b px-3 py-2 text-xs text-destructive">{code.length > MAX_MERMAID_CHARS ? t("project.browserMermaidTooLarge") : t("project.browserMermaidFailed")}</div>
+        <pre><code>{code}</code></pre>
+      </div>
+    );
+  }
+  if (!svg) {
+    return (
+      <div className="mermaid-block flex min-h-32 items-center justify-center text-sm text-muted-foreground">
+        <Spinner className="mr-2" />
+        {t("common.loading")}
+      </div>
+    );
+  }
+  return <div className="mermaid-block" dangerouslySetInnerHTML={{ __html: svg }} />;
+}
+
+function renderMermaidSVG(id: string, code: string, dark: boolean) {
+  const render = mermaidRenderQueue.then(async () => {
+    const [{ default: mermaid }, { default: DOMPurify }] = await Promise.all([
+      import("mermaid"),
+      import("dompurify"),
+    ]);
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      suppressErrorRendering: true,
+      theme: dark ? "dark" : "default",
+      maxTextSize: MAX_MERMAID_CHARS,
+    });
+    const result = await mermaid.render(id, code);
+    return DOMPurify.sanitize(result.svg, {
+      USE_PROFILES: { svg: true, svgFilters: true },
+    });
+  });
+  mermaidRenderQueue = render.then(() => undefined, () => undefined);
+  return render;
 }
 
 function MarkdownImageCard({ image, onOpen }: { image: ImageLightboxItem; onOpen: () => void }) {

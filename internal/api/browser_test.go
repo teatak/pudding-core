@@ -92,6 +92,12 @@ func TestBrowserTabsAreSessionScoped(t *testing.T) {
 		t.Fatalf("click status=%d result=%+v session=%q method=%q", resp.StatusCode, clicked, browserSvc.clickSession, browserSvc.clickMethod)
 	}
 
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/tabs/"+tab.ID+"/click", map[string]string{"selector": "#save", "method": "dom"})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("DOM click method status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+
 	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/tabs/"+tab.ID+"/type", map[string]any{"selector": "#name", "text": "Pudding", "clear": true})
 	typed := decodeJSON[browser.ActionResult](t, resp)
 	if resp.StatusCode != http.StatusOK || typed.Action != "type" || browserSvc.typeText != "Pudding" {
@@ -949,6 +955,59 @@ func TestBrowserTestFormIsPublic(t *testing.T) {
 	}
 }
 
+func TestProjectChangesRevokeLiveBrowserFileAccess(t *testing.T) {
+	srv, st, browserSvc := newBrowserTestServer(t)
+	ctx := context.Background()
+	for _, project := range []*store.Project{
+		{ID: "project_old", Name: "old", RootDirs: []string{t.TempDir()}},
+		{ID: "project_new", Name: "new", RootDirs: []string{t.TempDir()}},
+	} {
+		if err := st.CreateProject(ctx, project); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.CreateSession(ctx, &store.Session{ID: "session_project_change", Provider: "mock", Model: "mock", ProjectID: "project_old"}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	browserSvc.tabs["tab_file"] = browser.TabSnapshot{ID: "tab_file", SessionID: "session_project_change", URL: "file:///old/index.html", CreatedAt: now, UpdatedAt: now}
+	browserSvc.tabs["tab_web"] = browser.TabSnapshot{ID: "tab_web", SessionID: "session_project_change", URL: "https://example.com/", CreatedAt: now, UpdatedAt: now.Add(time.Second)}
+	for _, state := range []store.BrowserStateInput{
+		{SessionID: "session_project_change", TabID: "tab_file", URL: "file:///old/index.html"},
+		{SessionID: "session_project_change", TabID: "tab_orphan_file", URL: "file:///old/orphan.html"},
+		{SessionID: "session_project_change", TabID: "tab_web", URL: "https://example.com/"},
+	} {
+		if _, err := st.PutBrowserState(ctx, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	resp := req(t, http.MethodPatch, srv.URL+"/sessions/session_project_change", map[string]string{"projectID": "project_new"})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("patch session status = %d", resp.StatusCode)
+	}
+	if len(browserSvc.revokedSessions) != 1 || browserSvc.revokedSessions[0] != "session_project_change" {
+		t.Fatalf("revoked sessions = %v", browserSvc.revokedSessions)
+	}
+	if _, err := st.GetBrowserTabState(ctx, "session_project_change", "tab_file"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("file browser state should be removed: %v", err)
+	}
+	if _, err := st.GetBrowserTabState(ctx, "session_project_change", "tab_orphan_file"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("orphan file browser state should be removed: %v", err)
+	}
+	if _, err := st.GetBrowserTabState(ctx, "session_project_change", "tab_web"); err != nil {
+		t.Fatalf("ordinary web browser state should remain: %v", err)
+	}
+
+	newRoots := []string{t.TempDir()}
+	resp = req(t, http.MethodPatch, srv.URL+"/projects/project_new", map[string]any{"rootDirs": newRoots})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || len(browserSvc.revokedSessions) != 2 {
+		t.Fatalf("patch project status=%d revoked=%v", resp.StatusCode, browserSvc.revokedSessions)
+	}
+}
+
 type fakeBrowserService struct {
 	tabs                     map[string]browser.TabSnapshot
 	recoverableTabs          map[string]browser.TabSnapshot
@@ -965,6 +1024,7 @@ type fakeBrowserService struct {
 	scrollY                  float64
 	recoverCount             int
 	nextTab                  int
+	revokedSessions          []string
 }
 
 func (f *fakeBrowserService) SupportsMetadataRecovery() bool {
@@ -1108,6 +1168,18 @@ func (f *fakeBrowserService) CloseSessionBrowser(_ context.Context, sessionID st
 		}
 	}
 	return nil
+}
+
+func (f *fakeBrowserService) RevokeFileAccess(_ context.Context, sessionID string) ([]string, error) {
+	f.revokedSessions = append(f.revokedSessions, sessionID)
+	closed := make([]string, 0)
+	for id, tab := range f.tabs {
+		if tab.SessionID == sessionID && strings.HasPrefix(strings.ToLower(strings.TrimSpace(tab.URL)), "file:") {
+			closed = append(closed, id)
+			delete(f.tabs, id)
+		}
+	}
+	return closed, nil
 }
 
 func (f *fakeBrowserService) ReleaseSession(_ context.Context, sessionID string) error {

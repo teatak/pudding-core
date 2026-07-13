@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import { useGroupRef } from "react-resizable-panels";
 
 import { CanvasPane } from "@/components/CanvasPane";
+import { hasElectronWebviewBrowser } from "@/browser/electronBridge";
 import { ChatPane } from "@/components/ChatPane";
 import { AppsPane } from "@/components/AppsPane";
 import { SessionRail } from "@/components/SessionRail";
@@ -76,11 +77,66 @@ function saveWorkspaceCanvasRatio(canvasRatio: number) {
   });
 }
 
+function ElectronCanvasHost({
+  active,
+  secondarySessionID,
+  sessionID,
+  token,
+  workspaceResizing,
+  onResizeStart,
+}: {
+  active: boolean;
+  secondarySessionID?: string;
+  sessionID?: string;
+  token: string;
+  workspaceResizing: boolean;
+  onResizeStart: (event: ReactPointerEvent<HTMLDivElement>) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div
+      aria-hidden={!active}
+      inert={!active}
+      className={cn(
+        "workspace-split-pane absolute inset-y-0 min-w-0 overflow-visible border-l border-border transition-[right] duration-200 ease-out",
+        workspaceResizing && "transition-none",
+        !active && "pointer-events-none",
+      )}
+      style={{
+        right: active ? 0 : "calc(0px - var(--workspace-canvas-width) - 32px)",
+        width: "var(--workspace-canvas-width)",
+      }}
+    >
+      <div
+        aria-label={t("layout.resizeHint")}
+        aria-orientation="vertical"
+        className="group absolute inset-y-0 left-0 z-40 w-3 -translate-x-1/2 cursor-col-resize bg-transparent"
+        role="separator"
+        tabIndex={active ? 0 : -1}
+        onPointerDown={onResizeStart}
+      >
+        <div
+          className={cn(
+            "absolute top-1/2 left-1/2 h-8 w-[3px] -translate-x-[calc(50%+1px)] -translate-y-1/2 rounded-lg bg-muted-foreground/55 opacity-0 transition-opacity group-hover:opacity-100",
+            workspaceResizing && "opacity-100",
+          )}
+        />
+      </div>
+      <CanvasPane
+        secondarySessionID={secondarySessionID}
+        token={token}
+        sessionID={sessionID}
+      />
+    </div>
+  );
+}
+
 export function App() {
   const token = useToken();
   const { session: selectedSessionID, draft, project: draftProjectID, split: splitSessionID, view } = useSearch({ from: "/" });
   const { t } = useI18n();
   const isMobile = useIsMobile();
+  const electronWebviewBrowser = hasElectronWebviewBrowser();
   const canvasOpen = useCanvasOpen();
   const [pairingCode] = useState(() => pendingPairingCode());
   const [pairingFailed, setPairingFailed] = useState(false);
@@ -329,22 +385,24 @@ export function App() {
   ) : isMobile ? (
     <>
       {chatArea}
-      <Sheet open={effectiveCanvasOpen} onOpenChange={setCanvasOpen}>
-        <SheetContent
-          className="w-[min(28rem,92vw)] max-w-none gap-0 p-0"
-          side="right"
-        >
-          <SheetHeader className="sr-only">
-            <SheetTitle>{t("canvas.title")}</SheetTitle>
-            <SheetDescription>{t("canvas.empty")}</SheetDescription>
-          </SheetHeader>
-          <CanvasPane
-            secondarySessionID={showSplit ? splitSessionID : undefined}
-            token={token}
-            sessionID={selectedSessionID}
-          />
-        </SheetContent>
-      </Sheet>
+      {!electronWebviewBrowser ? (
+        <Sheet open={effectiveCanvasOpen} onOpenChange={setCanvasOpen}>
+          <SheetContent
+            className="w-[min(28rem,92vw)] max-w-none gap-0 p-0"
+            side="right"
+          >
+            <SheetHeader className="sr-only">
+              <SheetTitle>{t("canvas.title")}</SheetTitle>
+              <SheetDescription>{t("canvas.empty")}</SheetDescription>
+            </SheetHeader>
+            <CanvasPane
+              secondarySessionID={showSplit ? splitSessionID : undefined}
+              token={token}
+              sessionID={selectedSessionID}
+            />
+          </SheetContent>
+        </Sheet>
+      ) : null}
     </>
   ) : (
     chatArea
@@ -369,8 +427,33 @@ export function App() {
     "--workspace-canvas-width": "clamp(var(--workspace-canvas-min-width), var(--workspace-canvas-ratio), var(--workspace-canvas-max-width))",
   } as CSSProperties;
 
-  const workspaceContent =
-    isMobile || !canUseCanvas ? (
+  const workspaceContent = electronWebviewBrowser ? (
+    <div ref={setWorkspaceNode} className="relative h-full min-w-0 overflow-hidden bg-background" style={workspaceCanvasStyle}>
+      <div
+        className={cn(
+          "workspace-split-pane absolute inset-y-0 left-0 h-full min-w-0 transition-[right] duration-200 ease-out",
+          workspaceResizing && "transition-none",
+        )}
+        style={{ right: effectiveCanvasOpen ? "var(--workspace-canvas-width)" : 0 }}
+      >
+        {leftWorkspace}
+      </div>
+      <ElectronCanvasHost
+        active={effectiveCanvasOpen}
+        secondarySessionID={showSplit ? splitSessionID : undefined}
+        sessionID={selectedSessionID}
+        token={token}
+        workspaceResizing={workspaceResizing}
+        onResizeStart={startWorkspaceResize}
+      />
+      {workspaceResizing ? (
+        <div
+          aria-hidden="true"
+          className="no-drag-region fixed inset-0 z-[1000] cursor-col-resize touch-none select-none bg-transparent"
+        />
+      ) : null}
+    </div>
+  ) : isMobile || !canUseCanvas ? (
       leftWorkspace
     ) : (
       <div ref={setWorkspaceNode} className="relative h-full min-w-0 overflow-hidden bg-background" style={workspaceCanvasStyle}>

@@ -1,0 +1,97 @@
+name: Desktop release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ secrets.PUDDING_RELEASE_TOKEN }}
+      CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+      CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      PUDDING_MAC_IDENTITY: ${{ secrets.PUDDING_MAC_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve and verify release
+        id: release
+        shell: bash
+        run: |
+          channel="$(node scripts/release-gate.cjs channel "$GITHUB_REF_NAME")"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          PUDDING_RELEASE_CHANNEL="$channel" node scripts/release-gate.cjs check
+
+      - name: Validate release credentials
+        shell: bash
+        run: |
+          for name in \
+            GH_TOKEN \
+            CSC_LINK \
+            CSC_KEY_PASSWORD \
+            PUDDING_MAC_IDENTITY \
+            APPLE_ID \
+            APPLE_APP_SPECIFIC_PASSWORD \
+            APPLE_TEAM_ID
+          do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing required Actions secret for $name."
+              exit 1
+            fi
+          done
+
+      - name: Ensure public version is unused
+        run: node scripts/check-public-release.cjs
+
+      - name: Verify runner architecture
+        run: test "$(uname -m)" = "arm64"
+
+      - name: Install native build dependencies
+        run: brew install abseil pkg-config portaudio
+
+      - name: Install JavaScript dependencies
+        run: |
+          npm ci
+          npm --prefix web ci
+
+      - name: Run release tests
+        run: |
+          make test
+          npm run test:electron
+
+      - name: Sign, notarize, and publish
+        env:
+          PUDDING_RELEASE_CHANNEL: ${{ steps.release.outputs.channel }}
+        run: make desktop-publish-from-tag

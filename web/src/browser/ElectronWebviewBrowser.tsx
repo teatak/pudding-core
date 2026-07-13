@@ -8,8 +8,8 @@ import {
   cacheElectronBrowserSnapshot,
   electronBrowserBridge,
   type ElectronBrowserCursorEvent,
-  type ElectronWebviewCaptureResponse,
 } from "@/browser/electronBridge";
+import type { ElectronBrowserSurfaceTab } from "@/browser/useElectronRequiredBrowserTabs";
 import {
   browserQueryStaleTimeMS,
   browserTargetURL,
@@ -21,17 +21,9 @@ import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
 import type { BrowserCanvasPayload } from "./types";
 
-type CapturedWebviewImage = {
-  toDataURL?: () => string;
-  toPNG?: () => Uint8Array | ArrayBuffer | number[];
-  getSize?: () => { width?: number; height?: number };
-};
-
 type WebviewElement = HTMLElement & {
-  capturePage?: () => Promise<CapturedWebviewImage>;
   getWebContentsId?: () => number;
   getURL?: () => string;
-  loadURL?: (url: string) => Promise<void>;
 };
 
 type WebviewLoadError = {
@@ -75,7 +67,7 @@ export function ElectronWebviewBrowser({
   sessionID,
   token,
 }: {
-  activeTab?: BrowserTab;
+  activeTab?: ElectronBrowserSurfaceTab;
   sessionID: string;
   token: string;
 }) {
@@ -85,9 +77,9 @@ export function ElectronWebviewBrowser({
   const payload = browserPayloadFromTab(activeTabProp);
   const webviewReadyRef = useRef(false);
   const webviewReadyCleanupRef = useRef<(() => void) | null>(null);
-  const lastRequestedURLRef = useRef("");
-  const pendingProgrammaticURLRef = useRef("");
   const pendingTargetURLRef = useRef("");
+  const webviewRequestIDRef = useRef("");
+  const tabCreatedAtRef = useRef<string | undefined>(undefined);
   const navigationSeqRef = useRef(0);
   const failedNavigationSeqRef = useRef(0);
   const loadErrorRef = useRef<WebviewLoadError | null>(null);
@@ -113,6 +105,10 @@ export function ElectronWebviewBrowser({
   const title = activeTab ? browserTabTitle(activeTab, payload?.title || t("browser.newTab"), t("browser.newTab")) : payload?.title || t("browser.newTab");
   const tabID = activeTab?.id || payload?.tabID || "default";
   const targetURL = normalizeWebviewURL(browserTargetURL(activeTab, payload, payload?.updatedAt));
+  const webviewRequestID = activeTabProp?.webviewRequestID || "";
+  pendingTargetURLRef.current = targetURL;
+  webviewRequestIDRef.current = webviewRequestID;
+  tabCreatedAtRef.current = activeTab?.createdAt;
 
   const updateLoadError = useCallback((error: WebviewLoadError | null) => {
     loadErrorRef.current = error;
@@ -124,8 +120,6 @@ export function ElectronWebviewBrowser({
     webviewReadyCleanupRef.current = null;
     webviewRef.current = node;
     webviewReadyRef.current = false;
-    lastRequestedURLRef.current = "";
-    pendingProgrammaticURLRef.current = "";
     navigationSeqRef.current = 0;
     failedNavigationSeqRef.current = 0;
     setNavigationLoading(false);
@@ -138,7 +132,6 @@ export function ElectronWebviewBrowser({
       if (!browserURLIsBlank(pendingTargetURLRef.current)) {
         setNavigationLoading(true);
       }
-      loadWebviewURL(node, pendingTargetURLRef.current || "about:blank", lastRequestedURLRef, pendingProgrammaticURLRef);
     };
     const handleStartLoading = () => {
       if (!browserURLIsBlank(pendingTargetURLRef.current)) {
@@ -162,7 +155,6 @@ export function ElectronWebviewBrowser({
       updateLoadError(null);
     };
     const handleFinishLoad = () => {
-      pendingProgrammaticURLRef.current = "";
       setNavigationLoading(false);
       if (navigationSeqRef.current > failedNavigationSeqRef.current) {
         updateLoadError(null);
@@ -175,7 +167,7 @@ export function ElectronWebviewBrowser({
       }
       failedNavigationSeqRef.current = navigationSeqRef.current;
       const failedURL = normalizeWebviewURL(
-        loadEvent.validatedURL || pendingProgrammaticURLRef.current || pendingTargetURLRef.current || webviewCurrentURL(node),
+        loadEvent.validatedURL || pendingTargetURLRef.current || webviewCurrentURL(node),
       );
       const error = {
         code: webviewErrorCode(loadEvent),
@@ -193,6 +185,8 @@ export function ElectronWebviewBrowser({
             tabID,
             url: failedURL,
             webContentsID,
+            requestID: webviewRequestIDRef.current || undefined,
+            createdAt: tabCreatedAtRef.current,
             loadError: { code: error.code, description: error.description },
           })
           .then((snapshot) => cacheElectronBrowserSnapshot(queryClient, snapshot, ownerSessionID))
@@ -217,22 +211,6 @@ export function ElectronWebviewBrowser({
       }
     };
   }, [ownerSessionID, queryClient, tabID, updateLoadError]);
-
-  useEffect(() => {
-    pendingTargetURLRef.current = targetURL;
-    const node = webviewRef.current;
-    if (!node || !webviewReadyRef.current) {
-      return;
-    }
-    if (
-      !browserURLIsBlank(targetURL) &&
-      !sameWebviewURL(webviewCurrentURL(node), targetURL) &&
-      !sameWebviewURL(lastRequestedURLRef.current, targetURL)
-    ) {
-      setNavigationLoading(true);
-    }
-    loadWebviewURL(node, targetURL, lastRequestedURLRef, pendingProgrammaticURLRef);
-  }, [targetURL]);
 
   useEffect(() => {
     const bridge = electronBrowserBridge();
@@ -297,11 +275,9 @@ export function ElectronWebviewBrowser({
   }, [ownerSessionID, tabID]);
 
   const reloadAfterError = useCallback(() => {
-    const node = webviewRef.current;
     const retryURL = loadError?.url || pendingTargetURLRef.current || targetURL || "about:blank";
     const bridge = electronBrowserBridge();
-    const webContentsID = webviewContentsID(node);
-    if (bridge && ownerSessionID && webContentsID) {
+    if (bridge && ownerSessionID) {
       void bridge
         .reload({ sessionID: ownerSessionID, tabID, url: retryURL })
         .then((snapshot) => cacheElectronBrowserSnapshot(queryClient, snapshot, ownerSessionID))
@@ -310,10 +286,6 @@ export function ElectronWebviewBrowser({
             console.warn("[browser] webview reload failed", error);
           }
         });
-      return;
-    }
-    if (node) {
-      loadWebviewURL(node, retryURL, lastRequestedURLRef, pendingProgrammaticURLRef, { force: true });
     }
   }, [loadError?.url, ownerSessionID, queryClient, tabID, targetURL]);
 
@@ -324,8 +296,22 @@ export function ElectronWebviewBrowser({
       return;
     }
     let disposed = false;
+    let registered = false;
+    let registrationInFlight = false;
+    let retryDelayMS = 100;
+    let retryTimer: number | undefined;
+    const scheduleRetry = () => {
+      if (disposed || registered || retryTimer !== undefined) {
+        return;
+      }
+      retryTimer = window.setTimeout(() => {
+        retryTimer = undefined;
+        register();
+      }, retryDelayMS);
+      retryDelayMS = Math.min(retryDelayMS * 2, 1_500);
+    };
     const register = () => {
-      if (disposed) {
+      if (disposed || registered || registrationInFlight) {
         return;
       }
       if (!webviewReadyRef.current || !node.isConnected) {
@@ -333,27 +319,38 @@ export function ElectronWebviewBrowser({
       }
       const webContentsID = webviewContentsID(node);
       if (!webContentsID) {
+        scheduleRetry();
         return;
       }
       if (loadErrorRef.current) {
         return;
       }
       const currentURL = normalizeWebviewURL(webviewCurrentURL(node));
-      const pendingProgrammaticURL = pendingProgrammaticURLRef.current;
-      if (pendingProgrammaticURL && !sameWebviewURL(currentURL, pendingProgrammaticURL)) {
-        return;
-      }
-      if (browserURLIsBlank(currentURL) && !browserURLIsBlank(targetURL)) {
-        return;
-      }
+      const registrationURL = browserURLIsBlank(currentURL) && !browserURLIsBlank(targetURL) ? targetURL : currentURL;
+      registrationInFlight = true;
       void bridge
-        .registerWebview({ sessionID: ownerSessionID, tabID, url: currentURL, webContentsID })
+        .registerWebview({
+          sessionID: ownerSessionID,
+          tabID,
+          url: registrationURL,
+          webContentsID,
+          requestID: webviewRequestID || undefined,
+          createdAt: activeTab?.createdAt,
+        })
         .then((snapshot) => {
           if (!disposed) {
+            registered = true;
+            window.clearTimeout(retryTimer);
+            retryTimer = undefined;
             cacheElectronBrowserSnapshot(queryClient, snapshot, ownerSessionID);
           }
         })
-        .catch(() => undefined);
+        .catch(() => {
+          scheduleRetry();
+        })
+        .finally(() => {
+          registrationInFlight = false;
+        });
     };
     const listener = () => register();
     node.addEventListener("dom-ready", listener);
@@ -367,6 +364,7 @@ export function ElectronWebviewBrowser({
     }
     return () => {
       disposed = true;
+      window.clearTimeout(retryTimer);
       node.removeEventListener("dom-ready", listener);
       node.removeEventListener("did-finish-load", listener);
       node.removeEventListener("did-navigate", listener);
@@ -374,21 +372,7 @@ export function ElectronWebviewBrowser({
       node.removeEventListener("page-title-updated", listener);
       node.removeEventListener("page-favicon-updated", listener);
     };
-  }, [ownerSessionID, queryClient, targetURL, tabID]);
-
-  useEffect(() => {
-    const bridge = electronBrowserBridge();
-    if (!bridge?.onWebviewCaptureRequest || !bridge.resolveWebviewCapture || !ownerSessionID) {
-      return;
-    }
-    const resolveWebviewCapture = bridge.resolveWebviewCapture;
-    return bridge.onWebviewCaptureRequest((request) => {
-      if (request.sessionID !== ownerSessionID || request.tabID !== tabID) {
-        return;
-      }
-      void captureCurrentWebview(webviewRef.current, request.captureID, resolveWebviewCapture);
-    });
-  }, [ownerSessionID, tabID]);
+  }, [activeTab?.createdAt, ownerSessionID, queryClient, targetURL, tabID, webviewRequestID]);
 
   if (!ownerSessionID) {
     return <div className="p-3 text-sm text-muted-foreground">{t("browser.loadFailed")}</div>;
@@ -523,64 +507,6 @@ function normalizeWebviewURL(rawURL: string) {
   return !value || browserURLIsBlank(value) ? "about:blank" : value;
 }
 
-function sameWebviewURL(left: string, right: string) {
-  return comparableWebviewURL(left) === comparableWebviewURL(right);
-}
-
-function comparableWebviewURL(rawURL: string) {
-  const value = normalizeWebviewURL(rawURL);
-  try {
-    return new URL(value).toString();
-  } catch {
-    return value;
-  }
-}
-
-function loadWebviewURL(
-  node: WebviewElement,
-  targetURL: string,
-  lastRequestedURLRef: { current: string },
-  pendingProgrammaticURLRef: { current: string },
-  options: { force?: boolean } = {},
-) {
-  const currentURL = normalizeWebviewURL(webviewCurrentURL(node));
-  if (!options.force && (sameWebviewURL(currentURL, targetURL) || sameWebviewURL(lastRequestedURLRef.current, targetURL))) {
-    return;
-  }
-  lastRequestedURLRef.current = targetURL;
-  pendingProgrammaticURLRef.current = targetURL;
-  const load = node.loadURL?.bind(node);
-  if (!load) {
-    node.setAttribute("src", targetURL);
-    return;
-  }
-  try {
-    void load(targetURL).catch((error) => {
-      if (isWebviewNotReadyError(error)) {
-        node.setAttribute("src", targetURL);
-        return;
-      }
-      if (isWebviewNavigationAbortError(error)) {
-        return;
-      }
-      console.warn("[browser] webview navigation failed", error);
-    });
-  } catch (error) {
-    if (isWebviewNotReadyError(error)) {
-      node.setAttribute("src", targetURL);
-      return;
-    }
-    if (isWebviewNavigationAbortError(error)) {
-      lastRequestedURLRef.current = "";
-      pendingProgrammaticURLRef.current = "";
-      return;
-    }
-    lastRequestedURLRef.current = "";
-    pendingProgrammaticURLRef.current = "";
-    console.warn("[browser] webview navigation failed", error);
-  }
-}
-
 function webviewCurrentURL(node: WebviewElement | null | undefined) {
   if (!node) {
     return "";
@@ -657,56 +583,4 @@ function browserPayloadFromTab(tab: BrowserTab | undefined): (BrowserCanvasPaylo
     mode: tab.mode,
     updatedAt: tab.updatedAt,
   };
-}
-
-async function captureCurrentWebview(
-  node: WebviewElement | null,
-  captureID: string,
-  resolveCapture: (response: ElectronWebviewCaptureResponse) => Promise<void>,
-) {
-  try {
-    if (!node) {
-      throw new Error("webview is not mounted");
-    }
-    const capturePage = node.capturePage?.bind(node);
-    if (!capturePage) {
-      throw new Error("webview.capturePage is unavailable");
-    }
-    const image = await capturePage();
-    const dataBase64 = dataURLToBase64(image?.toDataURL?.() || "") || pngBytesToBase64(image?.toPNG?.());
-    if (!dataBase64) {
-      throw new Error("webview.capturePage returned empty image");
-    }
-    const size = image?.getSize?.();
-    await resolveCapture({
-      captureID,
-      dataBase64,
-      width: Math.max(0, Math.round(Number(size?.width) || 0)),
-      height: Math.max(0, Math.round(Number(size?.height) || 0)),
-    });
-  } catch (error) {
-    await resolveCapture({
-      captureID,
-      error: error instanceof Error ? error.message : String(error || "webview capture failed"),
-    });
-  }
-}
-
-function dataURLToBase64(dataURL: string) {
-  const marker = "base64,";
-  const index = dataURL.indexOf(marker);
-  return index >= 0 ? dataURL.slice(index + marker.length) : "";
-}
-
-function pngBytesToBase64(value: Uint8Array | ArrayBuffer | number[] | undefined) {
-  if (!value) {
-    return "";
-  }
-  const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-  }
-  return btoa(binary);
 }

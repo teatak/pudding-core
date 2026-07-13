@@ -4,11 +4,13 @@ const path = require("node:path");
 
 const asar = require("@electron/asar");
 const packageMetadata = require("../package.json");
+const { resolveReleaseChannel } = require("../packaging/release-channel.cjs");
 
 const root = path.resolve(__dirname, "..");
 const outputDir = path.join(root, "dist", "release");
 const version = String(process.env.PUDDING_APP_VERSION || packageMetadata.version || "").trim();
-const mode = String(process.env.PUDDING_UPDATE_MODE || "manual").trim().toLowerCase();
+const releaseChannel = resolveReleaseChannel(process.env.PUDDING_RELEASE_CHANNEL, version);
+const mode = String(process.env.PUDDING_UPDATE_MODE || "automatic").trim().toLowerCase();
 const signingIdentity = String(process.env.PUDDING_MAC_IDENTITY || "-").trim() || "-";
 const signingAuthority =
   signingIdentity === "-" || /^Developer ID Application:/i.test(signingIdentity)
@@ -19,7 +21,7 @@ const infoPlist = path.join(appPath, "Contents", "Info.plist");
 const asarPath = path.join(appPath, "Contents", "Resources", "app.asar");
 const dmgPath = path.join(outputDir, `Pudding-${version}-arm64.dmg`);
 const zipPath = path.join(outputDir, `Pudding-${version}-arm64.zip`);
-const latestPath = path.join(outputDir, "latest-mac.yml");
+const latestPath = path.join(outputDir, releaseChannel.updateInfoFile);
 
 if (!version) {
   fail("package version is empty");
@@ -59,15 +61,20 @@ if (bundledMetadata.version !== version) {
 if (bundledMetadata.puddingUpdateMode !== mode) {
   fail(`bundled update mode ${bundledMetadata.puddingUpdateMode} does not match ${mode}`);
 }
+if (bundledMetadata.puddingReleaseChannel !== releaseChannel.channel) {
+  fail(
+    `bundled release channel ${bundledMetadata.puddingReleaseChannel} does not match ${releaseChannel.channel}`,
+  );
+}
 
 const latestMetadata = fs.readFileSync(latestPath, "utf8");
 const latestVersion = latestMetadata.match(/^version:\s*['"]?([^'"\s]+)['"]?\s*$/m)?.[1] || "";
 if (latestVersion !== version) {
-  fail(`latest-mac.yml version ${latestVersion || "<missing>"} does not match ${version}`);
+  fail(`${releaseChannel.updateInfoFile} version ${latestVersion || "<missing>"} does not match ${version}`);
 }
 for (const artifactName of [path.basename(dmgPath), path.basename(zipPath)]) {
   if (!latestMetadata.includes(artifactName)) {
-    fail(`latest-mac.yml does not reference ${artifactName}`);
+    fail(`${releaseChannel.updateInfoFile} does not reference ${artifactName}`);
   }
 }
 
@@ -88,7 +95,7 @@ if (signingIdentity === "-") {
   execFileSync("spctl", ["--assess", "--type", "execute", "--verbose=4", appPath], { stdio: "inherit" });
 }
 execFileSync("hdiutil", ["verify", dmgPath], { stdio: "inherit" });
-console.log(`Verified desktop release: version=${version} mode=${mode}`);
+console.log(`Verified desktop release: version=${version} channel=${releaseChannel.channel} mode=${mode}`);
 
 function commandOutput(command, args) {
   const result = spawnSync(command, args, { encoding: "utf8" });

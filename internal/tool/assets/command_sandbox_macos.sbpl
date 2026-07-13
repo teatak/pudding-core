@@ -1,0 +1,59 @@
+(version 1)
+
+; Closed by default. Project and toolchain grants are appended per command.
+(deny default)
+
+; Child processes inherit the same sandbox.
+(allow process-exec)
+(allow process-fork)
+(allow signal (target same-sandbox))
+(allow process-info* (target same-sandbox))
+
+; Basic runtime and loader access.
+(allow file-read* file-test-existence file-map-executable
+  (subpath "/System")
+  (subpath "/Library")
+  (subpath "/usr")
+  (subpath "/bin")
+  (subpath "/sbin")
+  (subpath "/Applications")
+  (subpath "/opt/homebrew")
+  (subpath "/private/etc")
+  (subpath "/private/var/db"))
+
+(allow file-read* file-test-existence file-write-data
+  (literal "/dev/null")
+  (literal "/dev/zero"))
+(allow file-read* file-test-existence
+  (literal "/dev/random")
+  (literal "/dev/urandom"))
+(allow file-read-data file-test-existence file-write-data
+  (subpath "/dev/fd"))
+(allow file-read-metadata file-test-existence
+  (literal "/etc")
+  (literal "/tmp")
+  (literal "/var")
+  (literal "/private")
+  (subpath "/private/var"))
+(allow file-read* file-test-existence (literal "/"))
+
+; Runtime services used by common CLI tools.
+(allow mach-lookup
+  (global-name "com.apple.PowerManagement.control")
+  (global-name "com.apple.bsd.dirhelper")
+  (global-name "com.apple.logd")
+  (global-name "com.apple.system.opendirectoryd.libinfo")
+  (global-name "com.apple.system.opendirectoryd.membership"))
+(allow ipc-posix-sem)
+
+(allow sysctl-read
+  (sysctl-name-prefix "hw.")
+  (sysctl-name-prefix "kern.")
+  (sysctl-name-prefix "machdep.cpu.")
+  (sysctl-name-prefix "sysctl.proc_")
+  (sysctl-name-prefix "vm."))
+
+; Approved commands may use outbound networking. Listening remains loopback-only.
+(allow network-bind (local ip "localhost:*"))
+(allow network-inbound (local ip "localhost:*"))
+(allow network-outbound)

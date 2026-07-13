@@ -173,7 +173,8 @@ REST 只在需要 UI 决策、审批、快照时补充,不新增无 session scop
 | `write(low risk)` | Project 内 file write/patch/move/copy、patch apply | 问 | 放行 | 放行 |
 | `write(protected)` | git stage/unstage/commit | 问 | 问 | 放行 |
 | `command` | test/build/lint/format/codegen | 问 | 低风险放行,其余问 | 放行 |
-| `network` | web fetch, install/download/push | 问 | 问 | 放行 |
+| `network(read)` | install/download、git clone/fetch/pull | 问 | 放行 | 放行 |
+| `network(write)` | git push、publish/upload/login、显式 curl/wget | 问 | 问 | 放行 |
 | `destructive` | delete/rm, reset, clean,覆盖式 checkout | 问或拒绝 | 问或拒绝 | 放行或强确认 |
 
 `full` 是用户明确选择的高权限模式,不是"最危险的模式不需要设计"。它仍需保留
@@ -861,7 +862,7 @@ server 返回的 `WorkspaceEdit` 全量验证并转换成现有 Patch Proposal�
 
 - tool-call approval 的 session 级记忆是否落 SQLite,还是只在运行内存?
 - command runner 是否允许继承用户 shell PATH?
-- 对 `npm install`、`go get` 等网络写操作是否完全禁止,还是逐次审批?
+- `npm install`、`go get` 等依赖下载是否应在 `auto` 中直接运行?
 - patch proposal 是否先用 temp artifact,还是直接建 SQLite 表?
 - Code Activity Panel 放 transcript 内,还是 canvas/right pane?
 
@@ -869,6 +870,7 @@ server 返回的 `WorkspaceEdit` 全量验证并转换成现有 Patch Proposal�
 
 - 第一版 approval 记忆只做 turn/session 内存态,避免长期策略复杂化。
 - PATH 可继承,但 env 白名单化。
-- 网络写操作先逐次审批。
+- 依赖下载和 Git 网络读取在 `auto` 中直接运行;push、发布、上传、登录及显式
+  网络工具逐次审批。审批通过后文件沙箱不再二次阻止外部出站网络。
 - patch proposal 先 temp artifact,等 UI 稳定再落表。
 - 先 transcript renderer,再抽 Code Activity Panel。

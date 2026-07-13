@@ -51,6 +51,7 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
   const [activeSurface, setActiveSurfaceState] = useState<CanvasSurface>("canvas");
   const [selectedBrowserTabs, setSelectedBrowserTabs] = useState<Record<string, string>>(selectedBrowserTabRef.current);
   const browserActive = activeSurface === "browser";
+  const processModeFallback = electronBrowserBridge() ? "webview" : "headless";
 
   currentSessionIDRef.current = sessionID;
   selectedBrowserTabRef.current = selectedBrowserTabs;
@@ -85,6 +86,10 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
 
   const selectTerminalSurface = () => {
     setActiveSurface("terminal");
+  };
+
+  const selectProjectSurface = () => {
+    setActiveSurface("project");
   };
 
   useEffect(() => {
@@ -236,7 +241,7 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
       rememberSessionSurface(targetSessionID, "browser");
       queryClient.setQueryData(queryKeys.browserTabs(targetSessionID), (current: BrowserTabsData | undefined) => ({
         tabs: upsertBrowserTab(current?.tabs || [], tab),
-        processMode: tab.mode || current?.processMode || "headless",
+        processMode: tab.mode || current?.processMode || processModeFallback,
       }));
       queryClient.setQueryData(queryKeys.browserState(targetSessionID), {
         hasState: true,
@@ -246,7 +251,7 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
         title: tab.title,
         faviconURL: tab.faviconURL,
         mode: tab.mode,
-        processMode: tab.mode || "headless",
+        processMode: tab.mode || processModeFallback,
         createdAt: tab.createdAt,
         updatedAt: tab.updatedAt,
       });
@@ -292,6 +297,7 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
       hasTransientSurface ||
       itemsLength > 0 ||
       sessionSurfaceRef.current[sessionID] === "canvas" ||
+      sessionSurfaceRef.current[sessionID] === "project" ||
       sessionSurfaceRef.current[sessionID] === "terminal"
     ) {
       return;
@@ -350,7 +356,7 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
       }
       queryClient.setQueryData(queryKeys.browserTabs(targetSessionID), {
         tabs: remaining,
-        processMode: previousTabs?.processMode || "headless",
+        processMode: previousTabs?.processMode || processModeFallback,
       });
       queryClient.setQueryData(
         queryKeys.browserState(targetSessionID),
@@ -363,11 +369,11 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
               title: replacement.title,
               faviconURL: replacement.faviconURL,
               mode: replacement.mode,
-              processMode: replacement.mode || previousTabs?.processMode || "headless",
+              processMode: replacement.mode || previousTabs?.processMode || processModeFallback,
               createdAt: replacement.createdAt,
               updatedAt: replacement.updatedAt,
             }
-          : { hasState: false, sessionID: targetSessionID, processMode: previousTabs?.processMode || "headless" },
+          : { hasState: false, sessionID: targetSessionID, processMode: previousTabs?.processMode || processModeFallback },
       );
       if (remaining.length === 0) {
         if (sessionSurfaceRef.current[targetSessionID] === "browser") {
@@ -427,6 +433,7 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
     hasBrowserState,
     selectCanvasSurface,
     selectBrowserTab,
+    selectProjectSurface,
     selectTerminalSurface,
   };
 }
@@ -443,7 +450,7 @@ function readSessionSurfaces(): Record<string, CanvasSurface> {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const out: Record<string, CanvasSurface> = {};
     Object.entries(parsed).forEach(([sessionID, surface]) => {
-      if (surface === "canvas" || surface === "browser" || surface === "terminal") {
+      if (surface === "canvas" || surface === "browser" || surface === "project" || surface === "terminal") {
         out[sessionID] = surface;
       }
     });

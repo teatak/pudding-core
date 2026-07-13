@@ -5,6 +5,7 @@ import { ChatColumn } from "@/components/ChatColumn";
 import { Spinner } from "@/components/Spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { useScopedSelectAll } from "@/hooks/useScopedSelectAll";
 import { useI18n } from "@/i18n";
 
 import { TranscriptList } from "./TranscriptList";
@@ -61,6 +62,7 @@ export function TranscriptView({
 }) {
   const { t } = useI18n();
   const [viewportNode, setViewportNode] = useState<HTMLDivElement | null>(null);
+  useScopedSelectAll(viewportNode);
   const jumpLatestLabel =
     newMessageCount > 0 ? t("transcript.newMessages").replace("{count}", String(newMessageCount)) : t("transcript.jumpLatest");
 
@@ -81,6 +83,7 @@ export function TranscriptView({
       <div
         ref={setViewportNode}
         className="pudding-transcript-viewport h-full overflow-y-auto overscroll-none [contain:strict] [overflow-anchor:none]"
+        data-select-all-scope="transcript"
         data-transcript-viewport
       >
         <ChatColumn>

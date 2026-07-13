@@ -117,7 +117,7 @@ func Start(opts Options) (*Daemon, error) {
 	hub := event.NewHub()
 	apps := appsvc.NewService(dir, cfg)
 	skills := skillsvc.NewService(dir)
-	browserService, err := newBrowserService(dir)
+	browserService, err := newBrowserService(dir, st)
 	if err != nil {
 		_ = st.Close()
 		return nil, err
@@ -158,7 +158,7 @@ func Start(opts Options) (*Daemon, error) {
 		})
 	}
 	tools := tool.NewMultiRunner(
-		tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithBrowserState(st), tool.WithHomeDir(dir), tool.WithBrowser(browserService), tool.WithLanguageService(languageServers), tool.WithCamera(camera), tool.WithDesktopScreen(screen), tool.WithBackgroundProcessEvents(backgroundProcessEvents)),
+		tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithBrowserState(st), tool.WithHomeDir(dir), tool.WithCommandSandbox(dir), tool.WithBrowser(browserService), tool.WithLanguageService(languageServers), tool.WithCamera(camera), tool.WithDesktopScreen(screen), tool.WithBackgroundProcessEvents(backgroundProcessEvents)),
 		browserMCP,
 		appMCP,
 	)
@@ -264,13 +264,15 @@ func Start(opts Options) (*Daemon, error) {
 	return d, nil
 }
 
-func newBrowserService(homeDir string) (browser.Service, error) {
+func newBrowserService(homeDir string, projectFiles browser.ProjectFileScope) (browser.Service, error) {
+	fileURLs := browser.ProjectFileURLAuthorizer(projectFiles)
 	bridgeURL := strings.TrimSpace(os.Getenv("PUDDING_ELECTRON_BROWSER_BRIDGE_URL"))
 	bridgeToken := strings.TrimSpace(os.Getenv("PUDDING_ELECTRON_BROWSER_BRIDGE_TOKEN"))
 	if bridgeURL != "" || bridgeToken != "" {
 		service, err := browser.NewElectronBridgeService(browser.ElectronBridgeConfig{
-			URL:   bridgeURL,
-			Token: bridgeToken,
+			URL:               bridgeURL,
+			Token:             bridgeToken,
+			FileURLAuthorizer: fileURLs,
 		})
 		if err != nil {
 			return nil, err
@@ -279,7 +281,7 @@ func newBrowserService(homeDir string) (browser.Service, error) {
 		return service, nil
 	}
 	slog.Info("browser service", "kind", "chrome-manager")
-	return browser.NewManager(browser.Config{HomeDir: homeDir, Headless: true}), nil
+	return browser.NewManager(browser.Config{HomeDir: homeDir, Headless: true, FileURLAuthorizer: fileURLs}), nil
 }
 
 func (d *Daemon) Addr() string { return d.localAddr }

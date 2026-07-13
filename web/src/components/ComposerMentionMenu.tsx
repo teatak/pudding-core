@@ -1,4 +1,14 @@
-import { Camera, FolderOpen, Package, Paperclip, ScanLine, WandSparkles } from "lucide-react";
+import {
+  Camera,
+  Compass,
+  FolderOpen,
+  Package,
+  PanelsTopLeft,
+  Paperclip,
+  ScanLine,
+  SquareTerminal,
+  WandSparkles,
+} from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 
 import { AppIcon } from "@/components/AppIcon";
@@ -116,6 +126,15 @@ function MentionIcon({ reference }: { reference: ComposerMentionReference }) {
     return <IdentityIcon fallback={reference.kind === "skill" ? "skill" : "app"} fit="contain" size="xs" src={reference.iconURL} />;
   }
   if (reference.kind === "app") {
+    if (reference.id === "browser") {
+      return <ColoredMentionIcon tone="sky" icon={<Compass className="size-3.5" />} />;
+    }
+    if (reference.id === "terminal") {
+      return <ColoredMentionIcon tone="amber" icon={<SquareTerminal className="size-3.5" />} />;
+    }
+    if (reference.id === "canvas") {
+      return <ColoredMentionIcon tone="rose" icon={<PanelsTopLeft className="size-3.5" />} />;
+    }
     return <ColoredMentionIcon tone="teal" icon={<Package className="size-3.5" />} />;
   }
   if (reference.kind === "skill") {
@@ -133,11 +152,12 @@ function MentionIcon({ reference }: { reference: ComposerMentionReference }) {
   return <ColoredMentionIcon tone="sky" icon={<Paperclip className="size-3.5" />} />;
 }
 
-function ColoredMentionIcon({ icon, tone }: { icon: ReactNode; tone: "amber" | "emerald" | "indigo" | "sky" | "slate" | "teal" | "violet" }) {
+function ColoredMentionIcon({ icon, tone }: { icon: ReactNode; tone: "amber" | "emerald" | "indigo" | "rose" | "sky" | "slate" | "teal" | "violet" }) {
   const toneClass = {
     amber: "bg-amber-600 text-white",
     emerald: "bg-emerald-600 text-white",
     indigo: "bg-indigo-600 text-white",
+    rose: "bg-rose-600 text-white",
     sky: "bg-sky-600 text-white",
     slate: "bg-slate-600 text-white",
     teal: "bg-teal-600 text-white",

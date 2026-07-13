@@ -10,6 +10,17 @@ class FakeUpdater extends EventEmitter {
     this.checks = 0;
     this.installs = 0;
     this.feed = null;
+    this._channel = null;
+    this.allowDowngrade = false;
+  }
+
+  get channel() {
+    return this._channel;
+  }
+
+  set channel(value) {
+    this._channel = value;
+    this.allowDowngrade = true;
   }
 
   async checkForUpdates() {
@@ -141,6 +152,39 @@ test("uses an explicit generic feed for local packaged update tests", () => {
   assert.deepEqual(updater.feed, { provider: "generic", url: "http://127.0.0.1:8099" });
   assert.equal(updater.autoDownload, false);
   assert.equal(updater.autoInstallOnAppQuit, false);
+  assert.equal(updater.channel, "latest");
+  assert.equal(updater.allowPrerelease, false);
+  assert.equal(updater.allowDowngrade, false);
+});
+
+test("preview updates use the beta channel without enabling downgrades", () => {
+  const updater = new FakeUpdater();
+  const manager = new UpdateManager({
+    updater,
+    isPackaged: true,
+    receivePreviewUpdates: true,
+  });
+
+  assert.equal(updater.channel, "beta");
+  assert.equal(updater.allowPrerelease, true);
+  assert.equal(updater.allowDowngrade, false);
+  assert.equal(manager.getState().receivePreviewUpdates, true);
+
+  const state = manager.setReceivePreviewUpdates(false);
+  assert.equal(updater.channel, "latest");
+  assert.equal(updater.allowPrerelease, false);
+  assert.equal(updater.allowDowngrade, false);
+  assert.equal(state.receivePreviewUpdates, false);
+});
+
+test("cannot change update channel while an update is active", async () => {
+  const manager = new UpdateManager({ updater: new FakeUpdater(), isPackaged: true });
+
+  await manager.check(false);
+  assert.throws(
+    () => manager.setReceivePreviewUpdates(true),
+    /update channel cannot change while an update is active/,
+  );
 });
 
 test("manual mode reports an available update without downloading it", async () => {
@@ -160,6 +204,7 @@ test("manual mode reports an available update without downloading it", async () 
   assert.deepEqual(manager.getState(), {
     status: "available",
     mode: "manual",
+    receivePreviewUpdates: false,
     version: "1.2.0",
     percent: null,
   });

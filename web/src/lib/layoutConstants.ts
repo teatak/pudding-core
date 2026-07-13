@@ -1,4 +1,6 @@
 export const layoutStorageKeys = {
+  projectBrowserRatio: "pudding.projectBrowserRatio",
+  projectSidebarRatio: "pudding.projectSidebarRatio",
   splitRatio: "pudding.splitRatio",
   workspaceRatio: "pudding.workspaceRatio",
 } as const;

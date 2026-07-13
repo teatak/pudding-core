@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
 	"runtime"
 	"sort"
 	"strings"
@@ -72,13 +71,22 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 	defer cancel()
 
 	executable, commandArgs, shell := commandInvocation(args)
-	cmd := exec.Command(executable, commandArgs...)
-	cmd.Dir = resolvedCWD
-	cmd.Env, err = commandEnvironment(args.Env)
+	env, err := commandEnvironment(args.Env)
 	if err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
-	configureCommandProcess(cmd)
+	execution, err := r.commands.Prepare(commandSpec{
+		Executable:  executable,
+		Args:        commandArgs,
+		CWD:         resolvedCWD,
+		Env:         env,
+		ProjectDirs: call.ProjectDirs,
+		SandboxMode: call.CommandSandbox,
+	})
+	if err != nil {
+		return toolJSONError(out, "command_prepare_failed", err.Error())
+	}
+	cmd := execution.Cmd
 	stdout := newTruncatingBuffer(commandOutputLimitBytes)
 	stderr := newTruncatingBuffer(commandOutputLimitBytes)
 	stdoutWriter := newCommandProgressWriter(ctx, ProgressStdout, stdout)
@@ -90,7 +98,7 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 
 	startedAt := time.Now()
 	if err := cmd.Start(); err != nil {
-		return commandResult(out, args, shell, resolvedCWD, call.ProjectDirs, -1, stdout, stderr, false, false, time.Since(startedAt), "start_failed", err)
+		return commandResult(out, args, shell, resolvedCWD, call.ProjectDirs, execution, -1, stdout, stderr, false, false, time.Since(startedAt), "start_failed", err)
 	}
 	waitCh := make(chan error, 1)
 	go func() { waitCh <- cmd.Wait() }()
@@ -127,7 +135,7 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 	}
 	stdoutWriter.Close()
 	stderrWriter.Close()
-	return commandResult(out, args, shell, resolvedCWD, call.ProjectDirs, exitCode, stdout, stderr, timedOut, cancelled, time.Since(startedAt), reason, waitErr)
+	return commandResult(out, args, shell, resolvedCWD, call.ProjectDirs, execution, exitCode, stdout, stderr, timedOut, cancelled, time.Since(startedAt), reason, waitErr)
 }
 
 func commandInvocation(args commandRunArgs) (string, []string, string) {
@@ -279,7 +287,7 @@ func commandTimeout(timeoutMS int) (time.Duration, error) {
 	return timeout, nil
 }
 
-func commandResult(out Result, args commandRunArgs, shell, cwd string, projectDirs []string, exitCode int, stdout, stderr *truncatingBuffer, timedOut, cancelled bool, duration time.Duration, reason string, runErr error) Result {
+func commandResult(out Result, args commandRunArgs, shell, cwd string, projectDirs []string, execution *commandExecution, exitCode int, stdout, stderr *truncatingBuffer, timedOut, cancelled bool, duration time.Duration, reason string, runErr error) Result {
 	// A non-zero process exit is a completed command, not a tool transport failure.
 	ok := reason == "" || reason == "non_zero_exit"
 	stdoutText := stdout.String()
@@ -295,6 +303,13 @@ func commandResult(out Result, args commandRunArgs, shell, cwd string, projectDi
 		"timedOut":        timedOut,
 		"cancelled":       cancelled,
 		"durationMs":      duration.Milliseconds(),
+		"sandboxed":       execution != nil && execution.Sandboxed,
+	}
+	if execution != nil && execution.SandboxKind != "" {
+		payload["sandboxKind"] = execution.SandboxKind
+	}
+	if execution != nil && execution.Sandboxed {
+		payload["sandboxDenied"] = commandSandboxDenied(stdoutText+"\n"+stderrText, runErr)
 	}
 	if len(args.Argv) > 0 {
 		payload["argv"] = args.Argv

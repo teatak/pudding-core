@@ -20,6 +20,12 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useI18n } from "@/i18n";
 import { SETTINGS_KEYS, settingsWithDefaults } from "@/lib/appSettings";
+import {
+  type DesktopUpdateState,
+  getDesktopUpdateState,
+  onDesktopUpdateState,
+  setDesktopPreviewUpdatesEnabled,
+} from "@/lib/desktopBridge";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -47,6 +53,7 @@ export function GeneralSettings({
   const [showReasoning, setShowReasoning] = useState(true);
   const [showRawToolInfo, setShowRawToolInfo] = useState(true);
   const [showPreviewAppVersions, setShowPreviewAppVersions] = useState(false);
+  const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
 
   const settingsQuery = useQuery({
@@ -62,6 +69,31 @@ export function GeneralSettings({
 
   const savedSettings = useMemo(() => settingsWithDefaults(settingsQuery.data?.settings), [settingsQuery.data?.settings]);
   const savedPrompt = userPromptQuery.data?.content || "";
+  const previewUpdateBusy =
+    desktopUpdateState?.status === "checking" ||
+    desktopUpdateState?.status === "downloading" ||
+    desktopUpdateState?.status === "downloaded" ||
+    desktopUpdateState?.status === "installing";
+
+  useEffect(() => {
+    let active = true;
+    let receivedEvent = false;
+    const unsubscribe = onDesktopUpdateState((state) => {
+      if (active) {
+        receivedEvent = true;
+        setDesktopUpdateState(state);
+      }
+    });
+    void getDesktopUpdateState().then((state) => {
+      if (active && !receivedEvent) {
+        setDesktopUpdateState(state);
+      }
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     if (userPromptQuery.isSuccess) {
@@ -105,10 +137,50 @@ export function GeneralSettings({
     },
   });
 
+  const previewUpdatesMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const state = await setDesktopPreviewUpdatesEnabled(enabled);
+      if (!state) {
+        throw new Error("desktop update bridge unavailable");
+      }
+      return state;
+    },
+    onSuccess: setDesktopUpdateState,
+    onError: () => toast.error(t("settings.general.previewUpdatesSaveFailed")),
+  });
+
   const resetMutation = useMutation({
-    mutationFn: () => resetSettings(token),
-    onSuccess: async (response) => {
+    mutationFn: async () => {
+      const previousPreviewSetting = desktopUpdateState?.receivePreviewUpdates === true;
+      let updateState: DesktopUpdateState | null = null;
+      if (previousPreviewSetting) {
+        updateState = await setDesktopPreviewUpdatesEnabled(false);
+        if (!updateState) {
+          throw new Error("desktop update bridge unavailable");
+        }
+      }
+      try {
+        const response = await resetSettings(token);
+        return { response, updateState };
+      } catch (error) {
+        if (previousPreviewSetting) {
+          try {
+            const restored = await setDesktopPreviewUpdatesEnabled(true);
+            if (restored) {
+              setDesktopUpdateState(restored);
+            }
+          } catch {
+            // The original reset error remains the actionable failure.
+          }
+        }
+        throw error;
+      }
+    },
+    onSuccess: async ({ response, updateState }) => {
       setResetOpen(false);
+      if (updateState) {
+        setDesktopUpdateState(updateState);
+      }
       queryClient.setQueryData(queryKeys.settings(), response);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.settings() }),
@@ -265,6 +337,19 @@ export function GeneralSettings({
         </div>
         <div className="divide-y overflow-hidden rounded-xl border bg-card">
           <SettingsToggleRow
+            checked={desktopUpdateState?.receivePreviewUpdates === true}
+            description={t("settings.general.receivePreviewUpdatesDesc")}
+            disabled={
+              !desktopUpdateState ||
+              desktopUpdateState.status === "unavailable" ||
+              previewUpdateBusy ||
+              previewUpdatesMutation.isPending
+            }
+            id="pudding-receive-preview-updates"
+            label={t("settings.general.receivePreviewUpdates")}
+            onChange={(next) => previewUpdatesMutation.mutate(next)}
+          />
+          <SettingsToggleRow
             checked={showPreviewAppVersions}
             description={t("settings.general.showPreviewAppVersionsDesc")}
             disabled={settingsDisabled}
@@ -283,7 +368,7 @@ export function GeneralSettings({
           label={t("settings.general.resetDefaults")}
         >
           <Button
-            disabled={settingsDisabled}
+            disabled={settingsDisabled || previewUpdateBusy || previewUpdatesMutation.isPending}
             size="sm"
             type="button"
             variant="outline"
@@ -311,7 +396,7 @@ export function GeneralSettings({
           <AlertDialogFooter>
             <AlertDialogCancel disabled={resetMutation.isPending}>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
-              disabled={settingsMutation.isPending || resetMutation.isPending}
+              disabled={settingsMutation.isPending || resetMutation.isPending || previewUpdateBusy}
               variant="destructive"
               onClick={(event) => {
                 event.preventDefault();

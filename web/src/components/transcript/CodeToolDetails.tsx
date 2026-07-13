@@ -65,6 +65,9 @@ export function codeToolSummary(name: string, args: unknown, result: unknown, t:
   const input = toRecord(args);
   const output = toRecord(result);
   if (name === commandToolName) {
+    if (readBoolean(output, "sandboxDenied")) {
+      return t("transcript.codeSandboxDenied");
+    }
     const verificationKind = readString(output, "verificationKind");
     const verificationStatus = readString(output, "verificationStatus");
     if (verificationKind && verificationStatus) {
@@ -86,6 +89,9 @@ export function codeToolSummary(name: string, args: unknown, result: unknown, t:
     return argv ? compactText(formatArgv(argv), 100) : "";
   }
   if (backgroundProcessToolNames.has(name)) {
+    if (readBoolean(output, "sandboxDenied")) {
+      return t("transcript.codeSandboxDenied");
+    }
     const status = readString(output, "status");
     const processID = readString(output, "processID");
     if (status) {
@@ -223,7 +229,8 @@ function BackgroundProcessDetails({ input, output, t }: { input: UnknownRecord |
   const cwd = readString(output, "cwd");
   const exitCode = readNumber(output, "exitCode");
   const running = readBoolean(output, "running");
-  const StatusIcon = running ? Clock3 : status === "exited" && exitCode === 0 ? CheckCircle2 : status === "stopped" ? CheckCircle2 : CircleAlert;
+  const sandboxDenied = readBoolean(output, "sandboxDenied");
+  const StatusIcon = sandboxDenied ? CircleAlert : running ? Clock3 : status === "exited" && exitCode === 0 ? CheckCircle2 : status === "stopped" ? CheckCircle2 : CircleAlert;
   return (
     <div className="overflow-hidden rounded-md border border-border/70 bg-muted/20">
       <div className="px-3 pt-2 text-[11px] font-medium text-muted-foreground">{t("transcript.codeBackgroundProcess")}</div>
@@ -247,12 +254,14 @@ function BackgroundProcessDetails({ input, output, t }: { input: UnknownRecord |
           <ToolHoverCopyButton className="absolute top-1.5 right-1.5 group-hover/process-copy:opacity-100" text={outputText} />
         </section>
       ) : null}
+      {sandboxDenied ? <SandboxDeniedNotice t={t} /> : null}
       <div className="flex min-w-0 items-center gap-3 border-t border-border/50 px-3 py-2 text-[11px] text-muted-foreground">
         {cwd ? <code className="min-w-0 flex-1 truncate font-mono">{cwd}</code> : <span className="flex-1" />}
         {processID ? <code className="max-w-48 shrink truncate font-mono">{processID}</code> : null}
-        <span className={cn("inline-flex shrink-0 items-center gap-1", !running && status !== "stopped" && status !== "exited" && "text-warning", status === "exited" && exitCode === 0 && "text-success")}>
+        <span className={cn("inline-flex shrink-0 items-center gap-1", sandboxDenied && "text-warning", !sandboxDenied && !running && status !== "stopped" && status !== "exited" && "text-warning", !sandboxDenied && status === "exited" && exitCode === 0 && "text-success")}>
           <StatusIcon className="size-3.5" />
-          {processStatusLabel(status, t)}{exitCode != null ? ` · ${replace(t("transcript.codeExitCode"), { code: String(exitCode) })}` : ""}
+          {sandboxDenied ? t("transcript.codeSandboxDenied") : processStatusLabel(status, t)}
+          {exitCode != null ? ` · ${replace(t("transcript.codeExitCode"), { code: String(exitCode) })}` : ""}
         </span>
       </div>
     </div>
@@ -583,29 +592,35 @@ function CommandDetails({ callID, input, liveStderr = "", liveStdout = "", outpu
   const cwd = readString(output, "cwd") || readString(input, "cwd");
   const stdout = output ? readString(output, "stdout") : liveStdout;
   const stderr = output ? readString(output, "stderr") : liveStderr;
-  const terminalOutput = joinTerminalOutput(stdout, stderr);
+  const processOutput = joinTerminalOutput(stdout, stderr);
   const exitCode = readNumber(output, "exitCode");
   const duration = readNumber(output, "durationMs");
   const timedOut = readBoolean(output, "timedOut");
   const cancelled = readBoolean(output, "cancelled");
+  const sandboxDenied = readBoolean(output, "sandboxDenied");
   const verificationKind = readString(output, "verificationKind");
   const verificationStatus = readString(output, "verificationStatus");
   const diagnostics = readRecordArray(output, "diagnostics");
   const processCompleted = exitCode != null && exitCode >= 0 && !timedOut && !cancelled;
   const toolFailed = output?.ok === false && !processCompleted;
+  const terminalOutput = processOutput || (toolFailed ? readString(output, "detail") || readString(output, "error") || readString(output, "reason") : "");
   const commandSucceeded = processCompleted && exitCode === 0;
   const verificationPassed = verificationStatus === "passed";
   const verificationFailed = verificationStatus === "failed";
-  const StatusIcon = timedOut || cancelled ? Clock3 : toolFailed ? XCircle : verificationPassed || commandSucceeded ? CheckCircle2 : processCompleted ? CircleAlert : Clock3;
-  const statusText = verificationKind && verificationStatus
-    ? verificationStatusLabel(verificationKind, verificationStatus, t)
-    : timedOut
-      ? t("transcript.codeTimedOut")
-      : cancelled
-        ? t("transcript.codeCancelled")
-        : exitCode != null
-          ? replace(t("transcript.codeExitCode"), { code: String(exitCode) })
-          : t("transcript.codeRunning");
+  const StatusIcon = sandboxDenied ? CircleAlert : timedOut || cancelled ? Clock3 : toolFailed ? XCircle : verificationPassed || commandSucceeded ? CheckCircle2 : processCompleted ? CircleAlert : Clock3;
+  const statusText = sandboxDenied
+    ? t("transcript.codeSandboxDenied")
+    : verificationKind && verificationStatus
+      ? verificationStatusLabel(verificationKind, verificationStatus, t)
+      : timedOut
+        ? t("transcript.codeTimedOut")
+        : cancelled
+          ? t("transcript.codeCancelled")
+          : exitCode != null
+            ? replace(t("transcript.codeExitCode"), { code: String(exitCode) })
+            : toolFailed
+              ? t("transcript.toolFailed")
+              : t("transcript.codeRunning");
   const command = script || formatArgv(argv);
   const outputRef = useRef<HTMLPreElement | null>(null);
   useEffect(() => {
@@ -625,21 +640,31 @@ function CommandDetails({ callID, input, liveStderr = "", liveStdout = "", outpu
         </section>
       ) : null}
       <section className="group/terminal-copy relative min-h-12 px-3 pt-1 pb-2 pr-10">
-        <pre ref={outputRef} className={cn("max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-foreground/80", toolFailed && "text-destructive/90")}>
+        <pre ref={outputRef} className={cn("max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-foreground/80", toolFailed && !sandboxDenied && "text-destructive/90")}>
           {terminalOutput || (output ? t("transcript.codeNoOutput") : t("transcript.codeRunning"))}
         </pre>
         <ToolHoverCopyButton className="absolute top-1.5 right-1.5 group-hover/terminal-copy:opacity-100" text={terminalOutput} />
       </section>
+      {sandboxDenied ? <SandboxDeniedNotice t={t} /> : null}
       {diagnostics.length > 0 ? <CommandDiagnosticList callID={callID} diagnostics={diagnostics} sessionID={sessionID} t={t} /> : null}
       <div className="flex min-w-0 items-center gap-3 border-t border-border/50 px-3 py-2 text-[11px] text-muted-foreground">
         {cwd ? <code className="min-w-0 flex-1 truncate font-mono">{cwd}</code> : <span className="flex-1" />}
         {readBoolean(output, "stdoutTruncated") || readBoolean(output, "stderrTruncated") ? <span className="shrink-0 text-warning">{t("transcript.codeTruncated")}</span> : null}
         {duration != null ? <span className="shrink-0">{formatDuration(duration)}</span> : null}
-        <span className={cn("inline-flex shrink-0 items-center gap-1", (toolFailed || verificationFailed) && "text-destructive", (verificationPassed || (!verificationKind && commandSucceeded)) && "text-success", processCompleted && !verificationPassed && !verificationFailed && !commandSucceeded && "text-muted-foreground")}>
+        <span className={cn("inline-flex shrink-0 items-center gap-1", sandboxDenied && "text-warning", !sandboxDenied && (toolFailed || verificationFailed) && "text-destructive", !sandboxDenied && (verificationPassed || (!verificationKind && commandSucceeded)) && "text-success", !sandboxDenied && processCompleted && !verificationPassed && !verificationFailed && !commandSucceeded && "text-muted-foreground")}>
           <StatusIcon className="size-3.5" />
-          {!verificationKind && commandSucceeded ? t("transcript.codeSucceeded") : statusText}
+          {!sandboxDenied && !verificationKind && commandSucceeded ? t("transcript.codeSucceeded") : statusText}
         </span>
       </div>
+    </div>
+  );
+}
+
+function SandboxDeniedNotice({ t }: { t: Translator }) {
+  return (
+    <div className="flex items-start gap-1.5 border-t border-warning/30 bg-warning/5 px-3 py-2 text-[11px] text-warning">
+      <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
+      <span>{t("transcript.codeSandboxDeniedHint")}</span>
     </div>
   );
 }

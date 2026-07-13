@@ -26,7 +26,7 @@ func TestElectronBridgeServiceOpenListAndRelease(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/browser/tabs/list":
-			writeElectronBridgeTestJSON(w, electronBridgeTabsResponse{Tabs: tabsBySession[req.SessionID], ProcessMode: "headless"})
+			writeElectronBridgeTestJSON(w, electronBridgeTabsResponse{Tabs: tabsBySession[req.SessionID], ProcessMode: "webview"})
 		case "/browser/tabs/open":
 			if req.SessionID == "" || req.TabID == "" || req.URL != "https://example.com" {
 				t.Fatalf("unexpected open request: %+v", req)
@@ -58,7 +58,7 @@ func TestElectronBridgeServiceOpenListAndRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tab.SessionID != "sess_a" || tab.ID == "" || tab.URL != "https://example.com" || tab.Mode != "headless" {
+	if tab.SessionID != "sess_a" || tab.ID == "" || tab.URL != "https://example.com" || tab.Mode != "webview" {
 		t.Fatalf("unexpected tab snapshot: %+v", tab)
 	}
 	tabs, err := service.ListTabs(context.Background(), "sess_a")
@@ -205,6 +205,70 @@ func TestElectronBridgeServiceMapsMissingTab(t *testing.T) {
 	}
 }
 
+func TestElectronBridgeServicePreservesStructuredOperationErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    int
+		body      string
+		code      string
+		retryable bool
+		cause     error
+	}{
+		{
+			name:   "element failure is not a missing tab",
+			status: http.StatusUnprocessableEntity,
+			body:   `{"error":"target element not found","code":"element_not_found","retryable":false}`,
+			code:   "element_not_found",
+		},
+		{
+			name:   "project file scope is preserved",
+			status: http.StatusForbidden,
+			body:   `{"error":"file URL is outside the session project","code":"file_url_not_allowed","retryable":false}`,
+			code:   "file_url_not_allowed",
+			cause:  ErrFileURLNotAllowed,
+		},
+		{
+			name:   "persistent webview limit is preserved",
+			status: http.StatusTooManyRequests,
+			body:   `{"error":"browser tab limit reached","code":"browser_tab_limit_reached","retryable":false}`,
+			code:   "browser_tab_limit_reached",
+			cause:  ErrTabLimit,
+		},
+		{
+			name:      "webview readiness is retryable",
+			status:    http.StatusServiceUnavailable,
+			body:      `{"error":"browser_webview_not_ready","code":"browser_webview_not_ready","retryable":true}`,
+			code:      "browser_webview_not_ready",
+			retryable: true,
+			cause:     ErrUnavailable,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: "token"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = service.Click(context.Background(), "sess_a", "tab_a", ClickInput{Selector: "#missing"})
+			if err == nil || ErrorCode(err) != tt.code || ErrorRetryable(err) != tt.retryable {
+				t.Fatalf("unexpected structured error: err=%v code=%q retryable=%v", err, ErrorCode(err), ErrorRetryable(err))
+			}
+			if tt.cause != nil && !errors.Is(err, tt.cause) {
+				t.Fatalf("expected cause %v, got %v", tt.cause, err)
+			}
+			if tt.cause == nil && errors.Is(err, ErrTabNotFound) {
+				t.Fatalf("element failure must not map to ErrTabNotFound: %v", err)
+			}
+		})
+	}
+}
+
 func TestElectronBridgeServiceToolEndpoints(t *testing.T) {
 	const token = "bridge-token"
 	tab := electronBridgeSnapshot{
@@ -259,7 +323,7 @@ func TestElectronBridgeServiceToolEndpoints(t *testing.T) {
 				Height:     1,
 			})
 		case "/browser/tabs/click":
-			if req["selector"] != "#go" || req["method"] != "dom" {
+			if req["selector"] != "#go" || req["method"] != "pointer" {
 				t.Fatalf("unexpected click request: %+v", req)
 			}
 			writeElectronBridgeTestJSON(w, electronBridgeActionResponse{
@@ -301,7 +365,7 @@ func TestElectronBridgeServiceToolEndpoints(t *testing.T) {
 	if got, err := service.Screenshot(context.Background(), "sess_a", "tab_a", ScreenshotOptions{FullPage: true}); err != nil || got.MIME != "image/png" || got.Width != 1 {
 		t.Fatalf("unexpected screenshot result: got=%+v err=%v", got, err)
 	}
-	if got, err := service.Click(context.Background(), "sess_a", "tab_a", ClickInput{Selector: "#go", Method: "dom"}); err != nil || got.Action != "click" {
+	if got, err := service.Click(context.Background(), "sess_a", "tab_a", ClickInput{Selector: "#go", Method: "pointer"}); err != nil || got.Action != "click" {
 		t.Fatalf("unexpected click result: got=%+v err=%v", got, err)
 	}
 	if got, err := service.Type(context.Background(), "sess_a", "tab_a", TypeInput{Selector: "#q", Text: "hello", Clear: true}); err != nil || got.Action != "type" {
@@ -314,6 +378,31 @@ func TestElectronBridgeServiceToolEndpoints(t *testing.T) {
 		if !paths[path] {
 			t.Fatalf("expected request to %s", path)
 		}
+	}
+}
+
+func TestElectronBridgeServiceRevokesFileAccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/browser/session/revoke-file-access" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		var req electronBridgeRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatal(err)
+		}
+		if req.SessionID != "sess_revoke" {
+			t.Fatalf("unexpected request: %+v", req)
+		}
+		writeElectronBridgeTestJSON(w, electronBridgeRevokeFileAccessResponse{ClosedTabIDs: []string{"tab_file"}})
+	}))
+	defer server.Close()
+	service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: "token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed, err := service.RevokeFileAccess(context.Background(), "sess_revoke")
+	if err != nil || len(closed) != 1 || closed[0] != "tab_file" {
+		t.Fatalf("closed=%v err=%v", closed, err)
 	}
 }
 

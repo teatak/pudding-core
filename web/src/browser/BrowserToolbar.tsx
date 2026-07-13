@@ -101,6 +101,7 @@ export function BrowserToolbar({
   const lastOpenAttemptRef = useRef<BrowserOpenAttempt | null>(null);
   const pendingSubmittedURLRef = useRef("");
   const embeddedBrowser = hasElectronWebviewBrowser();
+  const processModeFallback = embeddedBrowser ? "webview" : "headless";
   const tabsQuery = useQuery({
     enabled: Boolean(token && sessionID),
     queryKey: queryKeys.browserTabs(sessionID),
@@ -144,7 +145,7 @@ export function BrowserToolbar({
       title,
       faviconURL,
       mode: tab.mode,
-      processMode: tab.mode || "headless",
+      processMode: tab.mode || processModeFallback,
       createdAt: tab.createdAt,
       updatedAt: tab.updatedAt,
     });
@@ -171,7 +172,7 @@ export function BrowserToolbar({
         title,
         faviconURL,
         mode: syncedTab.mode,
-        processMode: syncedTab.mode || "headless",
+        processMode: syncedTab.mode || processModeFallback,
         createdAt: syncedTab.createdAt,
         updatedAt: syncedTab.updatedAt,
       });
@@ -199,23 +200,6 @@ export function BrowserToolbar({
   const openMutation = useMutation({
     mutationFn: async (url: string) => {
       lastOpenAttemptRef.current = { url };
-      const optimisticTabID = activeTab?.id || payload?.tabID;
-      if (embeddedBrowser && optimisticTabID) {
-        const now = new Date().toISOString();
-        return {
-          id: optimisticTabID,
-          sessionID,
-          targetID: activeTab?.targetID,
-          url,
-          title: url,
-          faviconURL: "",
-          mode: activeTab?.mode || payload?.mode || "headless",
-          canGoBack: activeTab?.canGoBack,
-          canGoForward: activeTab?.canGoForward,
-          createdAt: activeTab?.createdAt || now,
-          updatedAt: now,
-        } satisfies BrowserTab;
-      }
       if (activeTab) {
         return openBrowserTab(token, sessionID, activeTab.id, { url });
       }

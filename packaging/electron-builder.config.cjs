@@ -1,14 +1,19 @@
 const path = require("node:path");
 
+const packageMetadata = require("../package.json");
+const { resolveReleaseChannel } = require("./release-channel.cjs");
+
 const root = path.resolve(__dirname, "..");
 const requestedSigningIdentity = String(process.env.PUDDING_MAC_IDENTITY || "-").trim() || "-";
 const signingIdentity = normalizeSigningIdentity(requestedSigningIdentity);
 const requestedVersion = String(process.env.PUDDING_APP_VERSION || "").trim();
+const releaseVersion = requestedVersion || packageMetadata.version;
+const releaseChannel = resolveReleaseChannel(process.env.PUDDING_RELEASE_CHANNEL, releaseVersion);
 const requestedUpdateMode = String(process.env.PUDDING_UPDATE_MODE || "").trim().toLowerCase();
 if (requestedUpdateMode && requestedUpdateMode !== "manual" && requestedUpdateMode !== "automatic") {
   throw new Error("PUDDING_UPDATE_MODE must be manual or automatic");
 }
-const updateMode = requestedUpdateMode || "manual";
+const updateMode = requestedUpdateMode || "automatic";
 const notarizationConfigured =
   Boolean(String(process.env.APPLE_KEYCHAIN_PROFILE || "").trim()) ||
   Boolean(process.env.APPLE_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD && process.env.APPLE_TEAM_ID) ||
@@ -20,7 +25,10 @@ if (signingIdentity !== "-" && !notarizationConfigured) {
   throw new Error("Developer ID builds require Apple notarization credentials");
 }
 
-const extraMetadata = { puddingUpdateMode: updateMode };
+const extraMetadata = {
+  puddingReleaseChannel: releaseChannel.channel,
+  puddingUpdateMode: updateMode,
+};
 if (requestedVersion) {
   extraMetadata.version = requestedVersion;
 }
@@ -86,7 +94,8 @@ module.exports = {
       provider: "github",
       owner: "teatak",
       repo: "pudding",
-      releaseType: "release",
+      channel: releaseChannel.updateChannel,
+      releaseType: releaseChannel.releaseType,
     },
   ],
 };

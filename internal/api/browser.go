@@ -322,7 +322,7 @@ func (s *Server) syncBrowserTab(c *cart.Context) error {
 		URL:          strings.TrimSpace(req.URL),
 		Title:        strings.TrimSpace(req.Title),
 		FaviconURL:   strings.TrimSpace(req.FaviconURL),
-		Mode:         "headless",
+		Mode:         s.browserProcessMode(c.Request.Context(), sessionID),
 		CanGoBack:    req.CanGoBack,
 		CanGoForward: req.CanGoForward,
 		CreatedAt:    now,
@@ -516,6 +516,55 @@ func (s *Server) rememberClosedBrowserTab(sessionID, tabID string) {
 		s.browserClosedTabs[sessionID] = map[string]struct{}{}
 	}
 	s.browserClosedTabs[sessionID][tabID] = struct{}{}
+	if allowed, ok := s.browserAllowedTabs[sessionID]; ok {
+		delete(allowed, tabID)
+	}
+}
+
+func (s *Server) revokeBrowserFileAccess(ctx context.Context, sessionID string) error {
+	if s.browser == nil {
+		return s.clearStoredBrowserFileStates(ctx, sessionID)
+	}
+	revoker, ok := s.browser.(browser.FileAccessRevoker)
+	if !ok {
+		tabs, err := s.browser.ListTabs(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		s.rememberClosedBrowserTabs(sessionID, tabs)
+		if err := s.browser.CloseSessionBrowser(ctx, sessionID); err != nil {
+			return err
+		}
+		return s.store.ClearBrowserState(ctx, sessionID)
+	}
+	closedTabIDs, revokeErr := revoker.RevokeFileAccess(ctx, sessionID)
+	for _, tabID := range closedTabIDs {
+		s.rememberClosedBrowserTab(sessionID, tabID)
+		if err := s.store.DeleteBrowserState(ctx, sessionID, tabID); err != nil {
+			return err
+		}
+	}
+	if err := s.clearStoredBrowserFileStates(ctx, sessionID); err != nil {
+		return err
+	}
+	return revokeErr
+}
+
+func (s *Server) clearStoredBrowserFileStates(ctx context.Context, sessionID string) error {
+	states, err := s.store.ListBrowserStates(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	for _, state := range states {
+		if state == nil || !strings.HasPrefix(strings.ToLower(strings.TrimSpace(state.URL)), "file:") {
+			continue
+		}
+		s.rememberClosedBrowserTab(sessionID, state.TabID)
+		if err := s.store.DeleteBrowserState(ctx, sessionID, state.TabID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Server) browserTabClosed(sessionID, tabID string) bool {
@@ -763,7 +812,7 @@ func (s *Server) clickBrowserTab(c *cart.Context) error {
 	}
 	req.Method = strings.ToLower(strings.TrimSpace(req.Method))
 	switch req.Method {
-	case "", "auto", "pointer", "dom":
+	case "", "auto", "pointer":
 	default:
 		return badRequest(c, "invalid click method")
 	}
@@ -1033,12 +1082,16 @@ func latestBrowserTab(tabs []browser.TabSnapshot) (browser.TabSnapshot, bool, er
 
 func writeBrowserHTTPError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, browser.ErrFileURLNotAllowed):
+		writeJSONError(w, http.StatusForbidden, "file_url_not_allowed")
 	case errors.Is(err, browser.ErrUnavailable):
 		writeJSONError(w, http.StatusServiceUnavailable, "browser_unavailable")
 	case errors.Is(err, browser.ErrTabNotFound):
 		writeJSONError(w, http.StatusNotFound, "browser_tab_not_found")
 	case errors.Is(err, browser.ErrTabRequired):
 		writeJSONError(w, http.StatusBadRequest, "browser tab id is required")
+	case errors.Is(err, browser.ErrTabLimit):
+		writeJSONError(w, http.StatusTooManyRequests, "browser_tab_limit_reached")
 	default:
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 	}
@@ -1071,6 +1124,9 @@ func writeJSONError(w http.ResponseWriter, status int, code string) {
 
 func (s *Server) browserError(c *cart.Context, err error) error {
 	switch {
+	case errors.Is(err, browser.ErrFileURLNotAllowed):
+		c.JSON(http.StatusForbidden, map[string]string{"error": "file_url_not_allowed"})
+		return nil
 	case errors.Is(err, browser.ErrUnavailable):
 		c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "browser_unavailable"})
 		return nil
@@ -1079,6 +1135,9 @@ func (s *Server) browserError(c *cart.Context, err error) error {
 		return nil
 	case errors.Is(err, browser.ErrTabRequired):
 		return badRequest(c, "browser tab id is required")
+	case errors.Is(err, browser.ErrTabLimit):
+		c.JSON(http.StatusTooManyRequests, map[string]string{"error": "browser_tab_limit_reached"})
+		return nil
 	default:
 		return s.fail(c, err)
 	}

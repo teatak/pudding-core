@@ -140,10 +140,12 @@ type BuiltinRunner struct {
 	patchProposals           map[string]*patchProposal
 	gitApprovalMu            sync.Mutex
 	gitApprovals             map[string]gitCommitApprovalSnapshot
+	commands                 commandRunner
 	processes                *backgroundProcessManager
 }
 
 func NewBuiltinRunner(opts ...BuiltinOption) *BuiltinRunner {
+	commands := newDirectCommandRunner()
 	r := &BuiltinRunner{
 		webHTTPClient:   &http.Client{Timeout: webDefaultTimeout},
 		tavilySearch:    tavilySearchEndpoint,
@@ -153,7 +155,8 @@ func NewBuiltinRunner(opts ...BuiltinOption) *BuiltinRunner {
 		graphqlSchemas:  map[string]*graphqlSchemaCache{},
 		patchProposals:  map[string]*patchProposal{},
 		gitApprovals:    map[string]gitCommitApprovalSnapshot{},
-		processes:       newBackgroundProcessManager(backgroundProcessRetentionTTL),
+		commands:        commands,
+		processes:       newBackgroundProcessManager(backgroundProcessRetentionTTL, commands),
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -236,6 +239,12 @@ func WithDesktopScreen(capturer DesktopScreenCapturer) BuiltinOption {
 func WithHomeDir(dir string) BuiltinOption {
 	return func(r *BuiltinRunner) {
 		r.homeDir = dir
+	}
+}
+
+func WithCommandSandbox(dir string) BuiltinOption {
+	return func(r *BuiltinRunner) {
+		r.setCommandRunner(newPlatformCommandRunner(dir))
 	}
 }
 
@@ -420,20 +429,20 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        CommandRun,
-			Description: "Run one local command in an authorized project directory. Pass either argv for direct execution or script for fixed-shell pipelines, redirects, and compound commands; never pass both. Shell scripts always require risk approval unless the project uses full access. Returns exit code, bounded output, duration, timeout and cancellation metadata; recognized direct test, lint, build, and check commands also return verification status and project-scoped diagnostics.",
+			Description: "Run one local command in an authorized project directory. Pass either argv for direct execution or script for fixed-shell pipelines, redirects, and compound commands; never pass both. In Auto, direct argv runs inside the project sandbox unless it matches an explicit risk rule such as destructive, external, publishing, credential, privilege, Git-write, or inline-code behavior. Unknown command names are not risky by themselves. Returns exit code, bounded output, duration, timeout, cancellation, and sandbox metadata; recognized verification commands also return project-scoped diagnostics.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Commands can run only with project access."},"argv":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":128,"description":"Executable followed by arguments for direct execution. Mutually exclusive with script."},"script":{"type":"string","minLength":1,"maxLength":65536,"description":"A fixed-shell script for pipelines, redirects, variable expansion, or compound commands. Mutually exclusive with argv and always treated as risky."},"cwd":{"type":"string","description":"Absolute or relative directory inside authorized project roots. Defaults to the first project root."},"env":{"type":"object","additionalProperties":{"type":"string"},"description":"Optional environment values for this command. Pudding otherwise inherits only a minimal safe environment."},"timeout_ms":{"type":"integer","minimum":100,"maximum":600000,"description":"Optional timeout in milliseconds. Defaults to 60000; maximum 600000."}},"required":["scope"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
 			Name:        CommandStart,
-			Description: "Start one non-interactive background process in an authorized project directory. Pass exactly one of argv or script. Returns a session-owned process_id; use builtin_command_poll to read bounded output and builtin_command_stop when finished. Background starts always require risk approval unless the project uses full access.",
+			Description: "Start one non-interactive background process in an authorized project directory. Pass exactly one of argv or script. Direct argv uses the same Auto risk rules and project sandbox as foreground commands; merely being long-running or unknown does not require approval. Returns a session-owned process_id; use builtin_command_poll to read bounded output and builtin_command_stop when finished.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Background processes can start only with project access."},"argv":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":128,"description":"Executable followed by arguments for direct execution. Mutually exclusive with script."},"script":{"type":"string","minLength":1,"maxLength":65536,"description":"A fixed-shell script. Mutually exclusive with argv."},"cwd":{"type":"string","description":"Absolute or relative directory inside authorized project roots. Defaults to the first project root."},"env":{"type":"object","additionalProperties":{"type":"string"},"description":"Optional environment values. Pudding otherwise inherits only a minimal safe environment."}},"required":["scope"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
 			Name:        CommandPoll,
-			Description: "Poll one session-owned background process. Pass the previous next_offset to continue reading its ordered stdout/stderr ring buffer. Returns process status, output chunks, the next offset, truncation, and whether more buffered output remains.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by builtin_command_start."},"offset":{"type":"integer","minimum":0,"description":"Output offset returned as nextOffset by the previous poll. Defaults to the oldest retained output."},"max_bytes":{"type":"integer","minimum":1024,"maximum":262144,"description":"Maximum output bytes returned by this poll. Defaults to 65536."}},"required":["process_id"],"additionalProperties":false}`),
+			Description: "Poll one session-owned background process. Pass the previous next_offset to continue reading its ordered stdout/stderr ring buffer. Optionally wait up to 10 minutes for the process to exit; output is buffered during the wait. Returns process status, output chunks, the next offset, truncation, and whether more buffered output remains.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by builtin_command_start."},"offset":{"type":"integer","minimum":0,"description":"Output offset returned as nextOffset by the previous poll. Defaults to the oldest retained output."},"max_bytes":{"type":"integer","minimum":1024,"maximum":262144,"description":"Maximum output bytes returned by this poll. Defaults to 65536."},"wait_ms":{"type":"integer","minimum":0,"maximum":600000,"description":"Optional time to wait for process exit before returning the latest status and buffered output. Defaults to 0 for an immediate poll; maximum 600000 (10 minutes)."}},"required":["process_id"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
@@ -553,7 +562,7 @@ func BuiltinDefinitions() []provider.ToolDef {
 		{
 			Name:        BrowserOpen,
 			Description: "Open a URL in a managed browser tab. Pass tabID to reuse a tab, or newTab=true to create a separate tab. With multiple tabs, omitting both is an error.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","description":"URL to open. http and https are supported; scheme defaults to https."},"tabID":{"type":"string","description":"Existing tab ID returned by builtin_browser_status."},"newTab":{"type":"boolean","description":"Create a new tab before opening the URL."}},"required":["url"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","description":"URL to open. http and https are supported; scheme defaults to https. file:// is allowed only for an existing regular file inside the current session project."},"tabID":{"type":"string","description":"Existing tab ID returned by builtin_browser_status."},"newTab":{"type":"boolean","description":"Create a new tab before opening the URL."}},"required":["url"],"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
 		{
@@ -594,8 +603,8 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        BrowserClick,
-			Description: "Click an element in a managed browser tab by CSS selector or viewport coordinates. Use method=pointer for real mouse events, method=dom only as a fallback for simple elements.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"CSS selector to click."},"x":{"type":"number","description":"Viewport X coordinate, used when selector is omitted."},"y":{"type":"number","description":"Viewport Y coordinate, used when selector is omitted."},"method":{"type":"string","enum":["auto","pointer","dom"],"description":"Click implementation. auto defaults to real CDP mouse events and falls back to DOM click; pointer forces real mouse events; dom forces element.click()."}},"additionalProperties":false}`),
+			Description: "Click an element in a managed browser tab by CSS selector or viewport coordinates using CDP mouse events.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"CSS selector to click."},"x":{"type":"number","description":"Viewport X coordinate, used when selector is omitted."},"y":{"type":"number","description":"Viewport Y coordinate, used when selector is omitted."},"method":{"type":"string","enum":["auto","pointer"],"description":"Click implementation. Both values use real CDP mouse events; auto is the default."}},"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
 		{
@@ -673,7 +682,7 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 	case CommandStart:
 		return r.commandStart(call)
 	case CommandPoll:
-		return r.commandPoll(call)
+		return r.commandPoll(ctx, call)
 	case CommandStop:
 		return r.commandStop(call)
 	case GitStatus:

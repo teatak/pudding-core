@@ -14,15 +14,17 @@ import (
 )
 
 type ElectronBridgeConfig struct {
-	URL        string
-	Token      string
-	HTTPClient *http.Client
+	URL               string
+	Token             string
+	HTTPClient        *http.Client
+	FileURLAuthorizer FileURLAuthorizer
 }
 
 type ElectronBridgeService struct {
 	endpoint string
 	token    string
 	client   *http.Client
+	fileURLs FileURLAuthorizer
 }
 
 type electronBridgeRequest struct {
@@ -30,6 +32,7 @@ type electronBridgeRequest struct {
 	TabID     string `json:"tabID,omitempty"`
 	URL       string `json:"url,omitempty"`
 	CreatedAt string `json:"createdAt,omitempty"`
+	FileRoot  string `json:"fileRoot,omitempty"`
 }
 
 type electronBridgeObserveRequest struct {
@@ -75,12 +78,17 @@ type electronBridgeTabsResponse struct {
 	ProcessMode string                   `json:"processMode,omitempty"`
 }
 
+type electronBridgeRevokeFileAccessResponse struct {
+	ClosedTabIDs []string `json:"closedTabIDs"`
+}
+
 type electronBridgeSnapshot struct {
 	SessionID    string `json:"sessionID"`
 	TabID        string `json:"tabID"`
 	Status       string `json:"status"`
 	URL          string `json:"url"`
 	Title        string `json:"title"`
+	FaviconURL   string `json:"faviconURL"`
 	CanGoBack    bool   `json:"canGoBack"`
 	CanGoForward bool   `json:"canGoForward"`
 	RuntimeID    string `json:"runtimeID"`
@@ -90,7 +98,42 @@ type electronBridgeSnapshot struct {
 }
 
 type electronBridgeError struct {
-	Error string `json:"error"`
+	Error     string `json:"error"`
+	Code      string `json:"code"`
+	Retryable bool   `json:"retryable"`
+}
+
+type bridgeOperationError struct {
+	code      string
+	message   string
+	retryable bool
+	cause     error
+}
+
+func (e *bridgeOperationError) Error() string { return e.message }
+func (e *bridgeOperationError) Unwrap() error { return e.cause }
+
+// ErrorCode returns a stable browser operation error code when the active
+// browser implementation provides one.
+func ErrorCode(err error) string {
+	if errors.Is(err, ErrFileURLNotAllowed) {
+		return "file_url_not_allowed"
+	}
+	if errors.Is(err, ErrTabLimit) {
+		return "browser_tab_limit_reached"
+	}
+	var operationErr *bridgeOperationError
+	if errors.As(err, &operationErr) {
+		return operationErr.code
+	}
+	return ""
+}
+
+// ErrorRetryable reports whether a failed operation is safe for the caller to
+// retry explicitly. The browser service never retries write operations itself.
+func ErrorRetryable(err error) bool {
+	var operationErr *bridgeOperationError
+	return errors.As(err, &operationErr) && operationErr.retryable
 }
 
 type electronBridgeObserveResponse struct {
@@ -135,17 +178,20 @@ func NewElectronBridgeService(cfg ElectronBridgeConfig) (*ElectronBridgeService,
 	}
 	client := cfg.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
+		// A first open can spend up to 10s waiting for the renderer webview and
+		// another 15s waiting for the main-frame CDP navigation commit.
+		client = &http.Client{Timeout: 35 * time.Second}
 	}
 	return &ElectronBridgeService{
 		endpoint: endpoint,
 		token:    token,
 		client:   client,
+		fileURLs: cfg.FileURLAuthorizer,
 	}, nil
 }
 
 func (s *ElectronBridgeService) ProcessMode(context.Context, string) string {
-	return "headless"
+	return "webview"
 }
 
 func (s *ElectronBridgeService) SupportsMetadataRecovery() bool {
@@ -166,7 +212,7 @@ func (s *ElectronBridgeService) CreateTab(ctx context.Context, sessionID string)
 }
 
 func (s *ElectronBridgeService) OpenNewTab(ctx context.Context, sessionID, rawURL string) (TabSnapshot, error) {
-	normalizedURL, err := normalizeURL(rawURL)
+	authorizedURL, err := normalizeAuthorizedURL(ctx, sessionID, rawURL, s.fileURLs)
 	if err != nil {
 		return TabSnapshot{}, err
 	}
@@ -175,7 +221,8 @@ func (s *ElectronBridgeService) OpenNewTab(ctx context.Context, sessionID, rawUR
 	if err := s.post(ctx, "/browser/tabs/open", electronBridgeRequest{
 		SessionID: sessionID,
 		TabID:     tabID,
-		URL:       normalizedURL,
+		URL:       authorizedURL.URL,
+		FileRoot:  authorizedURL.FileRoot,
 	}, &snapshot); err != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -226,12 +273,12 @@ func (s *ElectronBridgeService) Recover(ctx context.Context, sessionID string, h
 	if rawURL == "" {
 		return TabSnapshot{}, ErrTabNotFound
 	}
-	normalizedURL, err := normalizeURL(rawURL)
+	authorizedURL, err := normalizeAuthorizedURL(ctx, sessionID, rawURL, s.fileURLs)
 	if err != nil {
 		return TabSnapshot{}, err
 	}
 	var snapshot electronBridgeSnapshot
-	request := electronBridgeRequest{SessionID: sessionID, TabID: tabID, URL: normalizedURL}
+	request := electronBridgeRequest{SessionID: sessionID, TabID: tabID, URL: authorizedURL.URL, FileRoot: authorizedURL.FileRoot}
 	if !hint.CreatedAt.IsZero() {
 		request.CreatedAt = hint.CreatedAt.UTC().Format(time.RFC3339Nano)
 	}
@@ -243,6 +290,14 @@ func (s *ElectronBridgeService) Recover(ctx context.Context, sessionID string, h
 
 func (s *ElectronBridgeService) CloseSessionBrowser(ctx context.Context, sessionID string) error {
 	return s.post(ctx, "/browser/session/close", electronBridgeRequest{SessionID: sessionID}, nil)
+}
+
+func (s *ElectronBridgeService) RevokeFileAccess(ctx context.Context, sessionID string) ([]string, error) {
+	var out electronBridgeRevokeFileAccessResponse
+	if err := s.post(ctx, "/browser/session/revoke-file-access", electronBridgeRequest{SessionID: sessionID}, &out); err != nil {
+		return nil, err
+	}
+	return out.ClosedTabIDs, nil
 }
 
 func (s *ElectronBridgeService) ReleaseTab(ctx context.Context, sessionID, tabID string) error {
@@ -262,7 +317,7 @@ func (s *ElectronBridgeService) Open(ctx context.Context, sessionID, tabID, rawU
 	if err != nil {
 		return TabSnapshot{}, err
 	}
-	normalizedURL, err := normalizeURL(rawURL)
+	authorizedURL, err := normalizeAuthorizedURL(ctx, sessionID, rawURL, s.fileURLs)
 	if err != nil {
 		return TabSnapshot{}, err
 	}
@@ -270,7 +325,8 @@ func (s *ElectronBridgeService) Open(ctx context.Context, sessionID, tabID, rawU
 	if err := s.post(ctx, "/browser/tabs/open", electronBridgeRequest{
 		SessionID: sessionID,
 		TabID:     tabID,
-		URL:       normalizedURL,
+		URL:       authorizedURL.URL,
+		FileRoot:  authorizedURL.FileRoot,
 	}, &snapshot); err != nil {
 		return TabSnapshot{}, err
 	}
@@ -476,18 +532,25 @@ func bridgeHTTPError(resp *http.Response) error {
 	if payload.Error == "" {
 		payload.Error = resp.Status
 	}
-	switch resp.StatusCode {
-	case http.StatusNotFound:
-		return fmt.Errorf("%w: %s", ErrTabNotFound, payload.Error)
-	case http.StatusBadRequest:
-		if strings.Contains(payload.Error, "tab id") {
-			return fmt.Errorf("%w: %s", ErrTabRequired, payload.Error)
-		}
-		return errors.New(payload.Error)
-	case http.StatusServiceUnavailable:
-		return fmt.Errorf("%w: %s", ErrUnavailable, payload.Error)
-	default:
-		return errors.New(payload.Error)
+	code := strings.TrimSpace(payload.Code)
+	var cause error
+	switch {
+	case code == "file_url_not_allowed":
+		cause = ErrFileURLNotAllowed
+	case code == "browser_tab_limit_reached" || (code == "" && resp.StatusCode == http.StatusTooManyRequests):
+		cause = ErrTabLimit
+	case code == "browser_tab_not_found" || (code == "" && resp.StatusCode == http.StatusNotFound):
+		cause = ErrTabNotFound
+	case code == "browser_webview_not_ready" || code == "cdp_detached" || (code == "" && resp.StatusCode == http.StatusServiceUnavailable):
+		cause = ErrUnavailable
+	case code == "browser_tab_required" || (code == "" && resp.StatusCode == http.StatusBadRequest && strings.Contains(payload.Error, "tab id")):
+		cause = ErrTabRequired
+	}
+	return &bridgeOperationError{
+		code:      code,
+		message:   payload.Error,
+		retryable: payload.Retryable,
+		cause:     cause,
 	}
 }
 
@@ -511,7 +574,8 @@ func (snapshot electronBridgeSnapshot) tab() TabSnapshot {
 		TargetID:     strings.TrimSpace(snapshot.RuntimeID),
 		URL:          rawURL,
 		Title:        title,
-		Mode:         "headless",
+		FaviconURL:   strings.TrimSpace(snapshot.FaviconURL),
+		Mode:         "webview",
 		CanGoBack:    snapshot.CanGoBack,
 		CanGoForward: snapshot.CanGoForward,
 		CreatedAt:    createdAt,

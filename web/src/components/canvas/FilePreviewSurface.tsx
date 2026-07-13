@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
+import { fileNameFromPath, languageFromPath } from "@/lib/fileLanguage";
 import { cn } from "@/lib/utils";
 import { getShikiCodeRenderer } from "@/lib/shiki";
 import type { FilePreview } from "@/state/filePreviewStore";
@@ -64,7 +65,7 @@ export function FilePreviewSurface({ active, preview }: { active: boolean; previ
     >
       <div className="flex h-10 shrink-0 items-center gap-2 border-y bg-card px-3">
         <FileCode2 className="size-4 shrink-0 text-muted-foreground" />
-        <code className="min-w-0 flex-1 truncate font-mono text-xs" title={preview.path}>
+        <code className="min-w-0 flex-1 cursor-text select-text truncate font-mono text-xs" title={preview.path}>
           {preview.path}
         </code>
         {language ? <span className="shrink-0 text-[10px] uppercase text-muted-foreground">{language}</span> : null}
@@ -119,25 +120,7 @@ export function FilePreviewSurface({ active, preview }: { active: boolean; previ
 }
 
 export function filePreviewTitle(path: string) {
-  return path.split(/[\\/]/).filter(Boolean).pop() || path;
-}
-
-function languageFromPath(path: string) {
-  const filename = filePreviewTitle(path).toLowerCase();
-  const extension = filename.includes(".") ? filename.split(".").pop() || "" : "";
-  const aliases: Record<string, string> = {
-    cjs: "javascript",
-    htm: "html",
-    js: "javascript",
-    mjs: "javascript",
-    md: "markdown",
-    py: "python",
-    sh: "shellscript",
-    ts: "typescript",
-    yml: "yaml",
-    zsh: "shellscript",
-  };
-  return aliases[extension] || extension || undefined;
+  return fileNameFromPath(path);
 }
 
 function replace(template: string, values: Record<string, string>) {

@@ -9,6 +9,7 @@ import {
   Compass,
   FileCode2,
   FileText,
+  FolderTree,
   Image,
   Maximize2,
   Minimize2,
@@ -31,6 +32,7 @@ import {
   deleteClosedCanvasItem,
   listClosedCanvasItems,
   listCanvasItems,
+  getSession,
   patchCanvasItemWindow,
   putCanvasItem,
   type BrowserTab,
@@ -41,6 +43,11 @@ import { queryKeys } from "@/api/queryKeys";
 import { CanvasSurfaceTabs } from "@/browser/BrowserCanvasTabButton";
 import { BrowserToolbar } from "@/browser/BrowserToolbar";
 import { ElectronWebviewBrowser } from "@/browser/ElectronWebviewBrowser";
+import { electronBrowserBridge } from "@/browser/electronBridge";
+import {
+  useElectronRequiredBrowserTabs,
+  type ElectronBrowserSurfaceTab,
+} from "@/browser/useElectronRequiredBrowserTabs";
 import {
   GalleryLayoutControls,
   MemoCanvasContent,
@@ -54,6 +61,7 @@ import { asRecord, numberValue, stringValue, titleFromPayload } from "@/componen
 import { useCanvasBrowserSurface } from "@/components/canvas/useCanvasBrowserSurface";
 import { useCanvasTerminals } from "@/components/canvas/useCanvasTerminals";
 import { Spinner } from "@/components/Spinner";
+import { ProjectBrowserSurface } from "@/components/project/ProjectBrowserSurface";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
@@ -178,6 +186,7 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
   const primaryFilePreviews = useFilePreviews(sessionID);
   const secondaryFilePreviews = useFilePreviews(secondarySessionID);
   const filePreviewReveal = useFilePreviewReveal(sessionID, secondarySessionID);
+  const requiredBrowserTabs = useElectronRequiredBrowserTabs(token);
   const filePreviews = useMemo(
     () =>
       [...primaryFilePreviews, ...secondaryFilePreviews].filter(
@@ -270,6 +279,7 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
     creatingBrowserTab,
     selectCanvasSurface,
     selectBrowserTab,
+    selectProjectSurface,
     selectTerminalSurface,
   } = useCanvasBrowserSurface({
     enabled,
@@ -279,6 +289,14 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
     token,
   });
   const terminalActive = activeSurface === "terminal";
+  const sessionQuery = useQuery({
+    enabled,
+    queryKey: queryKeys.session(actorSessionID),
+    queryFn: () => getSession(token, actorSessionID),
+    staleTime: 10_000,
+  });
+  const hasProject = Boolean(sessionQuery.data?.projectID);
+  const projectActive = activeSurface === "project" && hasProject;
   const {
     activeTerminalID,
     closeTerminal,
@@ -320,6 +338,31 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
     );
   }, [actorSessionID, browserTabs]);
   useEffect(() => {
+    const bridge = electronBrowserBridge();
+    if (!bridge) {
+      return;
+    }
+    return bridge.onUpdated((snapshot) => {
+      if (snapshot.status !== "lost") {
+        return;
+      }
+      setRetainedBrowserTabs((current) => {
+        const tabs = current[snapshot.sessionID];
+        if (!tabs?.some((tab) => tab.id === snapshot.tabID)) {
+          return current;
+        }
+        const next = { ...current };
+        const remaining = tabs.filter((tab) => tab.id !== snapshot.tabID);
+        if (remaining.length > 0) {
+          next[snapshot.sessionID] = remaining;
+        } else {
+          delete next[snapshot.sessionID];
+        }
+        return next;
+      });
+    });
+  }, []);
+  useEffect(() => {
     if (!actorSessionID) {
       return;
     }
@@ -339,9 +382,16 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
     setRetainedFilePreviews({});
     setActiveFilePreviewIDs({});
   }, [token]);
-  const mountedBrowserTabs = actorSessionID
-    ? { ...retainedBrowserTabs, [actorSessionID]: browserTabs }
-    : retainedBrowserTabs;
+  const mountedBrowserTabs = useMemo(() => {
+    const mounted: Record<string, ElectronBrowserSurfaceTab[]> = { ...retainedBrowserTabs };
+    if (actorSessionID) {
+      mounted[actorSessionID] = browserTabs;
+    }
+    Object.entries(requiredBrowserTabs).forEach(([targetSessionID, requiredTabs]) => {
+      mounted[targetSessionID] = mergeBrowserSurfaceTabs(mounted[targetSessionID], requiredTabs);
+    });
+    return mounted;
+  }, [actorSessionID, browserTabs, requiredBrowserTabs, retainedBrowserTabs]);
   const mountedTerminals = actorSessionID
     ? { ...retainedTerminals, [actorSessionID]: terminals }
     : retainedTerminals;
@@ -391,6 +441,20 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
     setActiveFilePreviewID(undefined);
     createNewBrowserTab();
   };
+
+  const activateProjectSurface = () => {
+    if (!hasProject) {
+      return;
+    }
+    setActiveFilePreviewID(undefined);
+    selectProjectSurface();
+  };
+
+  useEffect(() => {
+    if (activeSurface === "project" && !sessionQuery.isLoading && !hasProject) {
+      selectCanvasSurface();
+    }
+  }, [activeSurface, hasProject, selectCanvasSurface, sessionQuery.isLoading]);
 
   const selectFilePreview = (previewID: string) => {
     selectCanvasSurface();
@@ -871,6 +935,7 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
         ) : null}
         <div aria-hidden="true" className="pointer-events-none min-w-0 flex-1 self-stretch" />
         <div className="no-drag-region flex shrink-0 items-center gap-1.5">
+          {hasProject ? <ProjectSurfaceControl active={projectActive} onActivate={activateProjectSurface} /> : null}
           <CanvasWorkspaceControl
             active={activeSurface === "canvas" && !filePreviewActive}
             activeItemID={focusedCanvasItemID}
@@ -898,7 +963,7 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
           }}
         />
         <div ref={containerRef} className="relative isolate z-0 h-full overflow-hidden">
-          {browserActive || terminalActive || filePreviewActive ? null : (!enabled && items.length === 0) || (itemsQuery.isLoading && items.length === 0) ? (
+          {browserActive || terminalActive || projectActive || filePreviewActive ? null : (!enabled && items.length === 0) || (itemsQuery.isLoading && items.length === 0) ? (
             <CanvasEmpty
               disabled={!actorSessionID}
               creatingBrowser={creatingBrowserTab}
@@ -941,6 +1006,9 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
             ))
           )}
         </div>
+        {actorSessionID ? (
+          <ProjectBrowserSurface active={projectActive} sessionID={actorSessionID} token={token} />
+        ) : null}
         {mountedFilePreviews.map((preview) => (
           <FilePreviewSurface
             key={preview.id}
@@ -985,6 +1053,22 @@ export function CanvasPane({ token, sessionID, secondarySessionID }: CanvasPaneP
 
 function sameResourceList<T>(current: T[] | undefined, next: T[]) {
   return Boolean(current && current.length === next.length && current.every((item, index) => item === next[index]));
+}
+
+function mergeBrowserSurfaceTabs(
+  current: ElectronBrowserSurfaceTab[] | undefined,
+  required: ElectronBrowserSurfaceTab[],
+) {
+  const next = [...(current || [])];
+  required.forEach((tab) => {
+    const index = next.findIndex((entry) => entry.id === tab.id);
+    if (index >= 0) {
+      next[index] = tab;
+    } else {
+      next.push(tab);
+    }
+  });
+  return next;
 }
 
 function sameResourceRecord<T>(current: Record<string, T>, next: Record<string, T>) {
@@ -1057,7 +1141,7 @@ function BrowserSurface({
   activeTabID?: string;
   pending: boolean;
   sessionID: string;
-  tabs: BrowserTab[];
+  tabs: ElectronBrowserSurfaceTab[];
   token: string;
 }) {
   const activeTab = tabs.find((tab) => tab.id === activeTabID) || tabs[0];
@@ -1250,6 +1334,24 @@ function CanvasWindow({
         ) : null}
       </div>
     </Rnd>
+  );
+}
+
+function ProjectSurfaceControl({ active, onActivate }: { active: boolean; onActivate: () => void }) {
+  const { t } = useI18n();
+  return (
+    <button
+      aria-pressed={active}
+      className="inline-flex h-(--canvas-toolbar-tab-h) items-center gap-1.5 rounded-md border border-transparent bg-muted px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-background hover:text-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm"
+      title={t("project.browser")}
+      type="button"
+      onClick={onActivate}
+    >
+      <span className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] bg-amber-600 text-white shadow-sm">
+        <FolderTree className="h-3.5 w-3.5" />
+      </span>
+      <span>{t("project.browser")}</span>
+    </button>
   );
 }
 

@@ -10,13 +10,22 @@ import (
 )
 
 type Call struct {
-	SessionID   string
-	TurnID      string
-	CallID      string
-	Name        string
-	Args        json.RawMessage
-	ProjectDirs []string
+	SessionID      string
+	TurnID         string
+	CallID         string
+	Name           string
+	Args           json.RawMessage
+	ProjectDirs    []string
+	CommandSandbox CommandSandboxMode
 }
+
+type CommandSandboxMode string
+
+const (
+	// The zero value requests the project sandbox so production runners fail closed.
+	CommandSandboxEnforce CommandSandboxMode = ""
+	CommandSandboxBypass  CommandSandboxMode = "bypass"
+)
 
 type Result struct {
 	CallID      string

@@ -12,6 +12,8 @@ export type ElectronBrowserRequest = {
 };
 
 export type ElectronWebviewRegisterRequest = ElectronBrowserRequest & {
+  requestID?: string;
+  createdAt?: string;
   webContentsID: number;
   loadError?: {
     code?: string;
@@ -19,26 +21,18 @@ export type ElectronWebviewRegisterRequest = ElectronBrowserRequest & {
   };
 };
 
-export type ElectronWebviewCaptureRequest = ElectronBrowserRequest & {
-  captureID: string;
-  fullPage?: boolean;
-};
-
-export type ElectronWebviewCaptureResponse = {
-  captureID: string;
-  dataBase64?: string;
-  dataURL?: string;
-  width?: number;
-  height?: number;
-  error?: string;
+export type ElectronWebviewRequiredEvent = Required<Pick<ElectronBrowserRequest, "sessionID" | "tabID" | "url">> & {
+  requestID: string;
+  createdAt?: string;
 };
 
 export type ElectronBrowserSnapshot = {
   sessionID: string;
   tabID: string;
-  status: "live_internal" | "detached" | "lost";
+  status: "live_internal" | "pending" | "detached" | "lost";
   url: string;
   title: string;
+  faviconURL?: string;
   canGoBack: boolean;
   canGoForward: boolean;
   profileID: string;
@@ -69,18 +63,17 @@ export type ElectronBrowserAutomationEvent = {
 export type ElectronBrowserBridge = {
   ensure: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
   registerWebview: (request: ElectronWebviewRegisterRequest) => Promise<ElectronBrowserSnapshot>;
-  resolveWebviewCapture?: (response: ElectronWebviewCaptureResponse) => Promise<void>;
   loadURL: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
   back: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
   forward: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
   reload: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
-  listTabs: (request: ElectronBrowserRequest) => Promise<{ tabs: ElectronBrowserSnapshot[]; processMode: "headless" }>;
+  listTabs: (request: ElectronBrowserRequest) => Promise<{ tabs: ElectronBrowserSnapshot[]; processMode: "webview" }>;
   closeTab: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
   closeSession: (request: ElectronBrowserRequest) => Promise<void>;
   onUpdated: (listener: (snapshot: ElectronBrowserSnapshot) => void) => () => void;
   onCursor?: (listener: (event: ElectronBrowserCursorEvent) => void) => () => void;
   onAutomationStart?: (listener: (event: ElectronBrowserAutomationEvent) => void) => () => void;
-  onWebviewCaptureRequest?: (listener: (request: ElectronWebviewCaptureRequest) => void) => () => void;
+  onWebviewRequired?: (listener: (request: ElectronWebviewRequiredEvent) => void) => () => void;
 };
 
 declare global {
@@ -107,7 +100,8 @@ export function electronBrowserSnapshotToTab(snapshot: ElectronBrowserSnapshot):
     targetID: snapshot.runtimeID,
     url,
     title,
-    mode: "headless",
+    faviconURL: snapshot.faviconURL || undefined,
+    mode: "webview",
     canGoBack: snapshot.canGoBack,
     canGoForward: snapshot.canGoForward,
     createdAt: snapshot.createdAt || now,
@@ -171,16 +165,16 @@ export function cacheElectronBrowserSnapshot(
     queryClient.setQueryData(queryKeys.browserTabs(snapshot.sessionID), (current: BrowserTabsData | undefined) => {
       const tabs = (current?.tabs || []).filter((tab) => tab.id !== snapshot.tabID);
       if (tabs.length === 0) {
-        queryClient.setQueryData(queryKeys.browserState(snapshot.sessionID), { hasState: false, sessionID: snapshot.sessionID, processMode: "headless" });
+        queryClient.setQueryData(queryKeys.browserState(snapshot.sessionID), { hasState: false, sessionID: snapshot.sessionID, processMode: "webview" });
       }
-      return { tabs, processMode: "headless" };
+      return { tabs, processMode: "webview" };
     });
     return null;
   }
   const tab = electronBrowserSnapshotToTab(snapshot);
   queryClient.setQueryData(queryKeys.browserTabs(snapshot.sessionID), (current: BrowserTabsData | undefined) => ({
     tabs: upsertBrowserTab(current?.tabs || [], tab),
-    processMode: "headless",
+    processMode: "webview",
   }));
   queryClient.setQueryData(queryKeys.browserState(snapshot.sessionID), {
     hasState: true,
@@ -189,8 +183,8 @@ export function cacheElectronBrowserSnapshot(
     url: tab.url,
     title: tab.title,
     faviconURL: tab.faviconURL,
-    mode: "headless",
-    processMode: "headless",
+    mode: "webview",
+    processMode: "webview",
     createdAt: tab.createdAt,
     updatedAt: tab.updatedAt,
   });

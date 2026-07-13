@@ -53,7 +53,7 @@ Electron main
   │   ├─ global persistent profile: persist:pudding-default
   │   ├─ sessionID -> BrowserSlot
   │   ├─ tabID -> registered webview webContents
-  │   └─ headless webContents for LLM tools before UI mounts
+  │   └─ pending slot waits for renderer webview registration
   └─ Go daemon child process
 
 Renderer React
@@ -312,10 +312,10 @@ model tool call
 
 Legacy 清理范围:
 
-当前盘点(2026-07-08):
+当前盘点(更新于 2026-07-13):
 
 - 运行代码中未发现 `BrowserStream`、`Page.startScreencast`、native attach/bounds 等 UI 显示主链路引用。
-- `electron/browser-host.cjs` 仍保留内部 `WebContentsView`,只作为画布未挂载时的 invisible LLM tool target。
+- `electron/browser-host.cjs` 已移除内部 `WebContentsView`;renderer webview 未注册时明确返回 not-ready,不创建 headless 替代 target。
 - 已删除旧 desktop shell/runtime、旧 desktop CORS 特判和 Makefile 旧入口。
 - 已删除旧 shell 的窗口白屏防御、macOS chrome 补丁、窗口尺寸记忆、theme bridge、zoom 排除区域、file drop 和 locale bridge。
 - Electron 已接管 theme、locale、window state、external open、directory picker 和 browser webview surface;native file drop 如需恢复,走 Electron IPC 新增。
@@ -327,11 +327,12 @@ Legacy 清理范围:
 - 已删除 `electronBridge.ts` 的 `attach`、`updateBounds`、`detach`、`hasElectronNativeBrowser`、`ElectronBrowserBounds` 等 native surface API。
 - 已删除 `electron/main.cjs` / `preload.cjs` 的 native attach/bounds/detach IPC 和 embed mode fallback;`webviewTag` 固定开启。
 - 已删除 `CanvasPane` -> `BrowserStream` 的 `nativeSuspended` 无效传参和 no-op cursor 清理。
-- 保留 `electron/browser-host.cjs` 内部的 `WebContentsView`,但仅作为 UI webview 尚未注册时的 invisible headless tool target,不再 attach 到主窗口。
+- BrowserHost 只绑定 renderer 持久 `<webview>`;Canvas/session 切换只改变可见性,不卸载 webview。
 
-BrowserHost 生命周期收口审查(2026-07-09):
+BrowserHost 生命周期收口审查(更新于 2026-07-13):
 
-- LLM 工具不依赖画布是否打开:画布未挂载时由 `electron/browser-host.cjs` 的 invisible `WebContentsView` 承载真实 `webContents`;画布挂载后 renderer `<webview>` 注册到同一 `sessionID/tabID` slot。
+- LLM 工具只操作已注册的持久 renderer `<webview>`;首次创建通过 pending slot 请求 renderer 挂载,未就绪时明确失败。
+- 常驻 webview 单 session 最多 8 个、全局最多 16 个;超限明确失败,不自动卸载或替换已有 tab。
 - 画布浏览器标签栏是 session browser tabs 的 UI 入口,不是 canvas item;本地 `selectedBrowserTabID` 只决定前端展示,不写入后端成为 focus/runtime 状态。
 - `closeTab` 只销毁显式 `sessionID + tabID` 对应的 webContents 与持久化记录;`closeSession` 才关闭该 session 的全部 tabs。关闭后发出 lost snapshot,前端会丢弃并发旧 snapshot,避免标签复活。
 - 普通 canvas item tab 与 browser surface 共用同一画布区域,但不拥有浏览器生命周期;切普通小组件只隐藏 browser surface,不以 canvas item 方式恢复或重建浏览器。
@@ -412,7 +413,5 @@ BrowserHost 生命周期收口审查(2026-07-09):
 
 ## 参考
 
-- Electron `WebContentsView`: https://www.electronjs.org/docs/latest/api/web-contents-view
-- Electron `BrowserView` deprecation: https://www.electronjs.org/docs/latest/api/browser-view
 - Electron `Debugger`: https://www.electronjs.org/docs/latest/api/debugger
 - Electron persistent session partition: https://www.electronjs.org/docs/latest/api/session

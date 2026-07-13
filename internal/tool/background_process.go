@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -21,6 +22,7 @@ const (
 	backgroundProcessPollDefault     = 64 << 10
 	backgroundProcessPollMin         = 1 << 10
 	backgroundProcessPollMax         = 256 << 10
+	backgroundProcessPollWaitMax     = 10 * time.Minute
 	backgroundProcessRetentionTTL    = 30 * time.Minute
 	backgroundProcessStopWait        = 2 * time.Second
 )
@@ -28,20 +30,23 @@ const (
 var ErrBackgroundProcessNotFound = errors.New("background process not found")
 
 type BackgroundProcessSnapshot struct {
-	ProcessID  string     `json:"processID"`
-	TurnID     string     `json:"turnID,omitempty"`
-	CallID     string     `json:"callID,omitempty"`
-	Status     string     `json:"status"`
-	Running    bool       `json:"running"`
-	CWD        string     `json:"cwd"`
-	Argv       []string   `json:"argv,omitempty"`
-	Script     string     `json:"script,omitempty"`
-	Shell      string     `json:"shell,omitempty"`
-	ExitCode   *int       `json:"exitCode,omitempty"`
-	StartedAt  time.Time  `json:"startedAt"`
-	FinishedAt *time.Time `json:"finishedAt,omitempty"`
-	Reason     string     `json:"reason,omitempty"`
-	Error      string     `json:"error,omitempty"`
+	ProcessID     string     `json:"processID"`
+	TurnID        string     `json:"turnID,omitempty"`
+	CallID        string     `json:"callID,omitempty"`
+	Status        string     `json:"status"`
+	Running       bool       `json:"running"`
+	CWD           string     `json:"cwd"`
+	Argv          []string   `json:"argv,omitempty"`
+	Script        string     `json:"script,omitempty"`
+	Shell         string     `json:"shell,omitempty"`
+	ExitCode      *int       `json:"exitCode,omitempty"`
+	StartedAt     time.Time  `json:"startedAt"`
+	FinishedAt    *time.Time `json:"finishedAt,omitempty"`
+	Reason        string     `json:"reason,omitempty"`
+	Error         string     `json:"error,omitempty"`
+	Sandboxed     bool       `json:"sandboxed"`
+	SandboxKind   string     `json:"sandboxKind,omitempty"`
+	SandboxDenied bool       `json:"sandboxDenied,omitempty"`
 }
 
 type BackgroundProcessOutputChunk struct {
@@ -85,6 +90,7 @@ type commandPollArgs struct {
 	ProcessID string `json:"process_id"`
 	Offset    int64  `json:"offset,omitempty"`
 	MaxBytes  int    `json:"max_bytes,omitempty"`
+	WaitMS    int    `json:"wait_ms,omitempty"`
 }
 
 type commandStopArgs struct {
@@ -93,6 +99,7 @@ type commandStopArgs struct {
 
 type backgroundProcessManager struct {
 	mu               sync.Mutex
+	commands         commandRunner
 	processes        map[string]*backgroundProcess
 	runningBySession map[string]int
 	runningTotal     int
@@ -102,28 +109,33 @@ type backgroundProcessManager struct {
 }
 
 type backgroundProcess struct {
-	manager   *backgroundProcessManager
-	id        string
-	sessionID string
-	turnID    string
-	callID    string
-	cwd       string
-	argv      []string
-	script    string
-	shell     string
-	cmd       *exec.Cmd
-	done      chan struct{}
+	manager     *backgroundProcessManager
+	id          string
+	sessionID   string
+	turnID      string
+	callID      string
+	cwd         string
+	argv        []string
+	script      string
+	shell       string
+	cmd         *exec.Cmd
+	done        chan struct{}
+	sandboxed   bool
+	sandboxKind string
 
-	mu                  sync.Mutex
-	running             bool
-	exitCode            *int
-	reason              string
-	errorText           string
-	startedAt           time.Time
-	finishedAt          time.Time
-	expiryTimer         *time.Timer
-	requestedStopReason string
-	output              backgroundProcessOutputBuffer
+	mu                   sync.Mutex
+	running              bool
+	exitCode             *int
+	reason               string
+	errorText            string
+	sandboxDenied        bool
+	sandboxDenialOutput  bool
+	sandboxDetectionTail string
+	startedAt            time.Time
+	finishedAt           time.Time
+	expiryTimer          *time.Timer
+	requestedStopReason  string
+	output               backgroundProcessOutputBuffer
 
 	counted bool // guarded by manager.mu
 }
@@ -142,11 +154,16 @@ type backgroundProcessWriter struct {
 	stream  string
 }
 
-func newBackgroundProcessManager(retentionTTL time.Duration) *backgroundProcessManager {
+func newBackgroundProcessManager(retentionTTL time.Duration, runners ...commandRunner) *backgroundProcessManager {
 	if retentionTTL <= 0 {
 		retentionTTL = backgroundProcessRetentionTTL
 	}
+	commands := newDirectCommandRunner()
+	if len(runners) > 0 && runners[0] != nil {
+		commands = runners[0]
+	}
 	return &backgroundProcessManager{
+		commands:         commands,
 		processes:        make(map[string]*backgroundProcess),
 		runningBySession: make(map[string]int),
 		retentionTTL:     retentionTTL,
@@ -184,7 +201,7 @@ func (r *BuiltinRunner) commandStart(call Call) Result {
 	}
 	commandArgs := commandRunArgs{Scope: args.Scope, Argv: args.Argv, Script: args.Script, CWD: args.CWD, Env: args.Env}
 	executable, invocationArgs, shell := commandInvocation(commandArgs)
-	process, err := r.processes.Start(call.SessionID, call.TurnID, call.CallID, resolvedCWD, env, executable, invocationArgs, args.Argv, args.Script, shell)
+	process, err := r.processes.Start(call.SessionID, call.TurnID, call.CallID, resolvedCWD, call.ProjectDirs, call.CommandSandbox, env, executable, invocationArgs, args.Argv, args.Script, shell)
 	if err != nil {
 		return backgroundProcessError(out, err)
 	}
@@ -195,7 +212,7 @@ func (r *BuiltinRunner) commandStart(call Call) Result {
 	return out
 }
 
-func (r *BuiltinRunner) commandPoll(call Call) Result {
+func (r *BuiltinRunner) commandPoll(ctx context.Context, call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	args, err := decodeCommandPollArgs(call.Args)
 	if err != nil {
@@ -205,6 +222,7 @@ func (r *BuiltinRunner) commandPoll(call Call) Result {
 	if process == nil {
 		return toolJSONError(out, "process_not_found", "background process was not found for this session")
 	}
+	process.waitForPoll(ctx, time.Duration(args.WaitMS)*time.Millisecond)
 	payload := process.pollPayload(args.Offset, args.MaxBytes)
 	out = toolJSON(out, true, payload)
 	out.SummaryKind = SummaryReturnedItems
@@ -267,6 +285,9 @@ func decodeCommandPollArgs(raw json.RawMessage) (commandPollArgs, error) {
 	if args.MaxBytes < backgroundProcessPollMin || args.MaxBytes > backgroundProcessPollMax {
 		return args, errors.New("max_bytes must be between 1024 and 262144")
 	}
+	if args.WaitMS < 0 || args.WaitMS > int(backgroundProcessPollWaitMax/time.Millisecond) {
+		return args, errors.New("wait_ms must be between 0 and 600000")
+	}
 	return args, nil
 }
 
@@ -282,25 +303,35 @@ func decodeCommandStopArgs(raw json.RawMessage) (commandStopArgs, error) {
 	return args, nil
 }
 
-func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, env []string, executable string, invocationArgs, argv []string, script, shell string) (*backgroundProcess, error) {
-	cmd := exec.Command(executable, invocationArgs...)
-	cmd.Dir = cwd
-	cmd.Env = env
-	configureCommandProcess(cmd)
+func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, projectDirs []string, sandboxMode CommandSandboxMode, env []string, executable string, invocationArgs, argv []string, script, shell string) (*backgroundProcess, error) {
+	execution, err := m.commands.Prepare(commandSpec{
+		Executable:  executable,
+		Args:        invocationArgs,
+		CWD:         cwd,
+		Env:         env,
+		ProjectDirs: projectDirs,
+		SandboxMode: sandboxMode,
+	})
+	if err != nil {
+		return nil, err
+	}
+	cmd := execution.Cmd
 	process := &backgroundProcess{
-		manager:   m,
-		id:        store.NewID("proc"),
-		sessionID: sessionID,
-		turnID:    strings.TrimSpace(turnID),
-		callID:    strings.TrimSpace(callID),
-		cwd:       cwd,
-		argv:      append([]string(nil), argv...),
-		script:    script,
-		shell:     shell,
-		cmd:       cmd,
-		done:      make(chan struct{}),
-		running:   true,
-		startedAt: time.Now(),
+		manager:     m,
+		id:          store.NewID("proc"),
+		sessionID:   sessionID,
+		turnID:      strings.TrimSpace(turnID),
+		callID:      strings.TrimSpace(callID),
+		cwd:         cwd,
+		argv:        append([]string(nil), argv...),
+		script:      script,
+		shell:       shell,
+		cmd:         cmd,
+		done:        make(chan struct{}),
+		sandboxed:   execution.Sandboxed,
+		sandboxKind: execution.SandboxKind,
+		running:     true,
+		startedAt:   time.Now(),
 	}
 	cmd.Stdout = backgroundProcessWriter{process: process, stream: ProgressStdout}
 	cmd.Stderr = backgroundProcessWriter{process: process, stream: ProgressStderr}
@@ -552,6 +583,9 @@ func (p *backgroundProcess) wait() {
 	if waitErr != nil && p.cmd.ProcessState == nil {
 		p.errorText = waitErr.Error()
 	}
+	if p.sandboxed && (commandSandboxDenied(p.sandboxDetectionTail+"\n"+p.errorText, waitErr) || (waitErr != nil && p.sandboxDenialOutput)) {
+		p.sandboxDenied = true
+	}
 	p.scheduleRetentionLocked()
 	stopped := p.requestedStopReason != ""
 	p.mu.Unlock()
@@ -589,6 +623,26 @@ func (p *backgroundProcess) stop(reason string) error {
 		return nil
 	case <-time.After(backgroundProcessStopWait):
 		return errors.New("background process did not stop in time")
+	}
+}
+
+func (p *backgroundProcess) waitForPoll(ctx context.Context, wait time.Duration) {
+	if wait <= 0 {
+		return
+	}
+	p.mu.Lock()
+	running := p.running
+	done := p.done
+	p.mu.Unlock()
+	if !running {
+		return
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	case <-timer.C:
 	}
 }
 
@@ -643,6 +697,13 @@ func (p *backgroundProcess) statePayloadLocked() map[string]any {
 		"running":   p.running,
 		"cwd":       p.cwd,
 		"startedAt": p.startedAt.UTC().Format(time.RFC3339Nano),
+		"sandboxed": p.sandboxed,
+	}
+	if p.sandboxKind != "" {
+		payload["sandboxKind"] = p.sandboxKind
+	}
+	if p.sandboxDenied {
+		payload["sandboxDenied"] = true
 	}
 	if p.turnID != "" {
 		payload["turnID"] = p.turnID
@@ -679,18 +740,21 @@ func (p *backgroundProcess) snapshot() BackgroundProcessSnapshot {
 
 func (p *backgroundProcess) snapshotLocked() BackgroundProcessSnapshot {
 	item := BackgroundProcessSnapshot{
-		ProcessID: p.id,
-		TurnID:    p.turnID,
-		CallID:    p.callID,
-		Status:    p.statusLocked(),
-		Running:   p.running,
-		CWD:       p.cwd,
-		Argv:      append([]string(nil), p.argv...),
-		Script:    p.script,
-		Shell:     p.shell,
-		StartedAt: p.startedAt,
-		Reason:    p.reason,
-		Error:     p.errorText,
+		ProcessID:     p.id,
+		TurnID:        p.turnID,
+		CallID:        p.callID,
+		Status:        p.statusLocked(),
+		Running:       p.running,
+		CWD:           p.cwd,
+		Argv:          append([]string(nil), p.argv...),
+		Script:        p.script,
+		Shell:         p.shell,
+		StartedAt:     p.startedAt,
+		Reason:        p.reason,
+		Error:         p.errorText,
+		Sandboxed:     p.sandboxed,
+		SandboxKind:   p.sandboxKind,
+		SandboxDenied: p.sandboxDenied,
 	}
 	if p.exitCode != nil {
 		exitCode := *p.exitCode
@@ -732,6 +796,17 @@ func (p *backgroundProcess) cancelExpiry() {
 func (w backgroundProcessWriter) Write(data []byte) (int, error) {
 	w.process.mu.Lock()
 	w.process.output.Append(w.stream, data)
+	if w.process.sandboxed {
+		const detectionTailLimit = 256
+		scan := w.process.sandboxDetectionTail + string(data)
+		if commandSandboxDenialOutput(scan) {
+			w.process.sandboxDenialOutput = true
+		}
+		if len(scan) > detectionTailLimit {
+			scan = scan[len(scan)-detectionTailLimit:]
+		}
+		w.process.sandboxDetectionTail = scan
+	}
 	w.process.mu.Unlock()
 	return len(data), nil
 }

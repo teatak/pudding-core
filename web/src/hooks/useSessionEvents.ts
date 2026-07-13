@@ -15,6 +15,7 @@ import {
 import { queryKeys } from "@/api/queryKeys";
 import {
   allowElectronBrowserTab,
+  hasElectronWebviewBrowser,
   markElectronBrowserSessionClosed,
 } from "@/browser/electronBridge";
 import { browserTabFaviconURL, browserTabTitle, upsertBrowserTab } from "@/browser/helpers";
@@ -111,6 +112,7 @@ function openSessionEventSource({
     applyEvent(parsed.data);
     syncAudioBindingsFromEvent(queryClient, parsed.data);
     syncBrowserStateFromEvent(queryClient, parsed.data, syncMessages, token);
+    syncProjectGitFromEvent(queryClient, parsed.data);
     syncBackgroundProcessFromEvent(queryClient, parsed.data);
     syncSessionListFromEvent(queryClient, parsed.data);
     if (parsed.data.kind === "turn.started" || isTurnTerminalEvent(parsed.data)) {
@@ -150,6 +152,19 @@ function openSessionEventSource({
   };
 }
 
+function syncProjectGitFromEvent(queryClient: QueryClient, event: SessionEvent) {
+  if (event.kind === "turn.tool" && (event.phase === "ok" || event.phase === "error")) {
+    const name = event.name || "";
+    if (["builtin_file_", "builtin_patch_", "builtin_git_", "builtin_command_"].some((prefix) => name.startsWith(prefix))) {
+      void queryClient.invalidateQueries({ queryKey: ["session", event.sessionID, "project", "git"] });
+    }
+    return;
+  }
+  if (event.kind === "process.finished" || event.kind === "process.stopped") {
+    void queryClient.invalidateQueries({ queryKey: ["session", event.sessionID, "project", "git"] });
+  }
+}
+
 function syncBrowserStateFromEvent(
   queryClient: QueryClient,
   event: SessionEvent,
@@ -177,16 +192,17 @@ function syncBrowserStateFromEvent(
 }
 
 function syncBrowserToolResult(queryClient: QueryClient, event: Extract<SessionEvent, { kind: "turn.tool" }>) {
+  const processModeFallback = hasElectronWebviewBrowser() ? "webview" : "headless";
   if (event.name === "builtin_browser_close" && event.phase === "ok") {
     const remaining = browserTabsFromToolContent(event.content, event.sessionID);
     if (remaining.length > 0) {
       remaining.forEach((tab) => allowElectronBrowserTab(event.sessionID, tab.id));
-      queryClient.setQueryData(queryKeys.browserTabs(event.sessionID), { tabs: remaining, processMode: remaining[0]?.mode || "headless" });
+      queryClient.setQueryData(queryKeys.browserTabs(event.sessionID), { tabs: remaining, processMode: remaining[0]?.mode || processModeFallback });
       return true;
     }
     markElectronBrowserSessionClosed(event.sessionID);
-    queryClient.setQueryData(queryKeys.browserTabs(event.sessionID), { tabs: [], processMode: "headless" });
-    queryClient.setQueryData(queryKeys.browserState(event.sessionID), { hasState: false, sessionID: event.sessionID, processMode: "headless" });
+    queryClient.setQueryData(queryKeys.browserTabs(event.sessionID), { tabs: [], processMode: processModeFallback });
+    queryClient.setQueryData(queryKeys.browserState(event.sessionID), { hasState: false, sessionID: event.sessionID, processMode: processModeFallback });
     return false;
   }
   const tab = browserTabFromToolContent(event.content, event.sessionID);
@@ -196,7 +212,7 @@ function syncBrowserToolResult(queryClient: QueryClient, event: Extract<SessionE
   allowElectronBrowserTab(event.sessionID, tab.id);
   queryClient.setQueryData(queryKeys.browserTabs(event.sessionID), (current: BrowserTabsData | undefined) => ({
     tabs: upsertBrowserTab(current?.tabs || [], tab),
-    processMode: tab.mode || current?.processMode || "headless",
+    processMode: tab.mode || current?.processMode || processModeFallback,
   }));
   const title = browserTabTitle(tab, tab.title || tab.url || "about:blank", "about:blank");
   queryClient.setQueryData(queryKeys.browserState(event.sessionID), {
@@ -206,8 +222,8 @@ function syncBrowserToolResult(queryClient: QueryClient, event: Extract<SessionE
     url: tab.url,
     title,
     faviconURL: browserTabFaviconURL(tab),
-    mode: tab.mode || "headless",
-    processMode: tab.mode || "headless",
+    mode: tab.mode || processModeFallback,
+    processMode: tab.mode || processModeFallback,
     createdAt: tab.createdAt,
     updatedAt: tab.updatedAt,
   });
@@ -288,7 +304,7 @@ function normalizeBrowserTab(value: unknown, expectedSessionID: string): Browser
     url,
     title: stringField(record.title),
     faviconURL: stringField(record.faviconURL) || undefined,
-    mode: record.mode === "external" ? "external" : "headless",
+    mode: record.mode === "external" ? "external" : record.mode === "webview" ? "webview" : hasElectronWebviewBrowser() ? "webview" : "headless",
     canGoBack: booleanField(record.canGoBack),
     canGoForward: booleanField(record.canGoForward),
     createdAt: stringField(record.createdAt) || now,

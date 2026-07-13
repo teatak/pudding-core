@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pudding browser dev smoke</title>
+    <style>
+      html, body, #tabs { width: 100%; height: 100%; margin: 0; }
+      webview { position: absolute; inset: 0; width: 800px; height: 600px; }
+    </style>
+  </head>
+  <body>
+    <div id="tabs"></div>
+    <script>
+      const tabs = new Map();
+      window.puddingBrowserSmoke.onWebviewRequired((request) => {
+        const key = `${request.sessionID}:${request.tabID}`;
+        const existing = tabs.get(key);
+        if (existing) {
+          existing.request = request;
+          if (existing.ready) {
+            window.puddingBrowserSmoke.registerWebview(request, existing.webview.getWebContentsId());
+          }
+          return;
+        }
+        const webview = document.createElement("webview");
+        const state = { request, webview, ready: false };
+        tabs.set(key, state);
+        webview.setAttribute("partition", "persist:pudding-browser-smoke");
+        webview.setAttribute("src", "about:blank");
+        webview.addEventListener("dom-ready", () => {
+          state.ready = true;
+          window.puddingBrowserSmoke.registerWebview(state.request, webview.getWebContentsId());
+        });
+        document.getElementById("tabs").appendChild(webview);
+      });
+    </script>
+  </body>
+</html>

@@ -8,8 +8,9 @@
   "scripts": {
     "desktop:clean": "node scripts/clean-desktop-release.cjs",
     "desktop:package": "npm run desktop:clean && electron-builder --config packaging/electron-builder.config.cjs --publish never",
-    "desktop:publish": "npm run desktop:clean && electron-builder --config packaging/electron-builder.config.cjs --publish always",
+    "desktop:publish": "node scripts/release-gate.cjs check && node scripts/check-public-release.cjs && npm run desktop:clean && electron-builder --config packaging/electron-builder.config.cjs --publish always",
     "test:electron": "node --test electron/test/*.test.cjs",
+    "smoke:electron-browser": "npm --prefix web run smoke:electron-browser",
     "update:test:serve": "node scripts/serve-update-feed.cjs",
     "update:test:run": "node scripts/run-update-test.cjs"
   },

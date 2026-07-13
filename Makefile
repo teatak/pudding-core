@@ -2,7 +2,7 @@ MODULE := github.com/teatak/pudding-core
 LDFLAGS_RELEASE := -X $(MODULE)/internal/buildinfo.channel=release
 BUILDTAGS := sqlite_fts5 webrtcaec
 
-.PHONY: test schema-check tidy clean embed language-servers language-servers-ready desktop desktop-dev desktop-release desktop-bundle desktop-publish daemon daemon-dev daemon-release prompt tools-report tools-eval
+.PHONY: test schema-check tidy clean embed language-servers language-servers-ready desktop desktop-dev desktop-release desktop-bundle desktop-publish desktop-preview-bundle desktop-preview-publish desktop-publish-from-tag daemon daemon-dev daemon-release prompt tools-report tools-eval
 
 # 共享:构建前端并装填进 daemon 的 embed 目录(产物不进 git)
 embed:
@@ -35,11 +35,26 @@ language-servers-ready:
 
 # macOS 安装与更新产物(DMG + ZIP + latest-mac.yml;正式自动更新需要签名/公证)
 desktop-bundle: desktop-release language-servers
-	@bash scripts/desktop-bundle-macos.sh
+	@PUDDING_RELEASE_CHANNEL=stable bash scripts/desktop-bundle-macos.sh
 
-# 签名后发布到 teatak/pudding GitHub Releases(GH_TOKEN 必填)
-desktop-publish: desktop-release language-servers
-	npm run desktop:publish
+# 校验版本和工作区后创建并推送正式 tag；GitHub Actions 负责打包和发布。
+desktop-publish:
+	@node scripts/check-public-release.cjs
+	@PUDDING_RELEASE_CHANNEL=stable node scripts/release-gate.cjs tag
+
+# Preview 与正式版共用 Pudding.app / appId / ~/.pudding,仅发布为 GitHub Prerelease beta 通道。
+desktop-preview-bundle: desktop-release language-servers
+	@PUDDING_RELEASE_CHANNEL=preview bash scripts/desktop-bundle-macos.sh
+
+desktop-preview-publish:
+	@node scripts/check-public-release.cjs
+	@PUDDING_RELEASE_CHANNEL=preview node scripts/release-gate.cjs tag
+
+# CI / 故障恢复入口：只允许从与 package.json 完全一致的 annotated tag 发布产物。
+desktop-publish-from-tag:
+	@node scripts/release-gate.cjs check
+	@$(MAKE) desktop-release language-servers
+	@npm run desktop:publish
 
 # —— headless daemon(无窗口,浏览器访问)——
 # 构建(dev 通道;含 embed web)

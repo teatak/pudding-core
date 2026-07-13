@@ -1603,19 +1603,21 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 		return tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: "tool runner unavailable"}
 	}
 	call.ProjectDirs = e.projectRootDirsForToolCall(ctx, sessionID, turnID)
+	call.CommandSandbox = commandSandboxModeForProject(nil)
 	var result tool.Result
-	if risk, ok := tool.ClassifyToolCall(call.Name, call.Args); ok {
+	if risk, ok := tool.ClassifyToolCallForProject(call.Name, call.Args, call.ProjectDirs); ok {
 		var approvalDetails map[string]any
 		var approvalDetailsErr error
 		if tool.RequiresApprovalDetails(call.Name) {
 			if source, ok := e.tools.(tool.ApprovalDetailsProvider); ok {
 				approvalDetails, approvalDetailsErr = source.ApprovalDetails(ctx, call)
 			} else {
-				approvalDetailsErr = errors.New("patch approval details unavailable")
+				approvalDetailsErr = errors.New("tool approval details unavailable")
 			}
 		}
 		risk = refineToolRisk(call.Name, risk, approvalDetails)
 		project, required, err := e.toolCallApprovalRequired(ctx, sessionID, risk)
+		call.CommandSandbox = commandSandboxModeForProject(project)
 		if approvalDetailsErr != nil {
 			result = tool.ApprovalDetailsFailure(call, approvalDetailsErr)
 		} else if err != nil {

@@ -11,17 +11,20 @@ import (
 )
 
 type backgroundProcessPayload struct {
-	OK           bool                           `json:"ok"`
-	ProcessID    string                         `json:"processID"`
-	Status       string                         `json:"status"`
-	Running      bool                           `json:"running"`
-	ExitCode     *int                           `json:"exitCode"`
-	Output       []backgroundProcessOutputChunk `json:"output"`
-	OldestOffset int64                          `json:"oldestOffset"`
-	NextOffset   int64                          `json:"nextOffset"`
-	TailOffset   int64                          `json:"tailOffset"`
-	Truncated    bool                           `json:"truncated"`
-	HasMore      bool                           `json:"hasMore"`
+	OK            bool                           `json:"ok"`
+	ProcessID     string                         `json:"processID"`
+	Status        string                         `json:"status"`
+	Running       bool                           `json:"running"`
+	ExitCode      *int                           `json:"exitCode"`
+	Output        []backgroundProcessOutputChunk `json:"output"`
+	OldestOffset  int64                          `json:"oldestOffset"`
+	NextOffset    int64                          `json:"nextOffset"`
+	TailOffset    int64                          `json:"tailOffset"`
+	Truncated     bool                           `json:"truncated"`
+	HasMore       bool                           `json:"hasMore"`
+	Sandboxed     bool                           `json:"sandboxed"`
+	SandboxKind   string                         `json:"sandboxKind"`
+	SandboxDenied bool                           `json:"sandboxDenied"`
 }
 
 func TestBackgroundProcessStartPollStop(t *testing.T) {
@@ -99,6 +102,76 @@ func TestBackgroundProcessKeepsLaunchAuthorizationSnapshot(t *testing.T) {
 	})
 	if !stop.Ok {
 		t.Fatalf("stop approved process without current project context: %+v", stop)
+	}
+}
+
+func TestBackgroundProcessPollWaitsForExit(t *testing.T) {
+	runner := NewBuiltinRunner()
+	t.Cleanup(func() { _ = runner.Close() })
+	root := t.TempDir()
+	start := backgroundToolCall(runner, "sess_wait_exit", root, CommandStart, map[string]any{
+		"scope": "project",
+		"argv":  commandHelperArgs("sleep", "80"),
+	})
+	started := decodeBackgroundProcessPayload(t, start)
+	begin := time.Now()
+	poll := backgroundToolCall(runner, "sess_wait_exit", root, CommandPoll, map[string]any{
+		"process_id": started.ProcessID,
+		"wait_ms":    1000,
+	})
+	elapsed := time.Since(begin)
+	payload := decodeBackgroundProcessPayload(t, poll)
+	if !poll.Ok || payload.Running || payload.Status != "exited" {
+		t.Fatalf("long poll did not return the completed process: result=%+v payload=%+v", poll, payload)
+	}
+	if elapsed >= 750*time.Millisecond {
+		t.Fatalf("long poll did not return early after process exit: %s", elapsed)
+	}
+}
+
+func TestBackgroundProcessPollWaitTimeoutAndCancellation(t *testing.T) {
+	runner := NewBuiltinRunner()
+	t.Cleanup(func() { _ = runner.Close() })
+	root := t.TempDir()
+	start := backgroundToolCall(runner, "sess_wait_timeout", root, CommandStart, map[string]any{
+		"scope": "project",
+		"argv":  commandHelperArgs("sleep", "1000"),
+	})
+	started := decodeBackgroundProcessPayload(t, start)
+	begin := time.Now()
+	timed := backgroundToolCall(runner, "sess_wait_timeout", root, CommandPoll, map[string]any{
+		"process_id": started.ProcessID,
+		"wait_ms":    50,
+	})
+	if elapsed := time.Since(begin); elapsed < 35*time.Millisecond || elapsed > 500*time.Millisecond {
+		t.Fatalf("long poll timeout duration is unexpected: %s", elapsed)
+	}
+	if payload := decodeBackgroundProcessPayload(t, timed); !timed.Ok || !payload.Running {
+		t.Fatalf("timed poll should return a running process: result=%+v payload=%+v", timed, payload)
+	}
+
+	raw, _ := json.Marshal(map[string]any{"process_id": started.ProcessID, "wait_ms": 1000})
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(40*time.Millisecond, cancel)
+	begin = time.Now()
+	cancelled := runner.Call(ctx, Call{
+		SessionID: "sess_wait_timeout",
+		CallID:    "call_poll_cancelled",
+		Name:      CommandPoll,
+		Args:      raw,
+	})
+	if elapsed := time.Since(begin); elapsed > 500*time.Millisecond {
+		t.Fatalf("cancelled long poll did not return promptly: %s", elapsed)
+	}
+	if payload := decodeBackgroundProcessPayload(t, cancelled); !cancelled.Ok || !payload.Running {
+		t.Fatalf("cancelled poll should return the current process state: result=%+v payload=%+v", cancelled, payload)
+	}
+}
+
+func TestBackgroundProcessPollRejectsExcessiveWait(t *testing.T) {
+	_, err := decodeCommandPollArgs(json.RawMessage(`{"process_id":"proc_test","wait_ms":600001}`))
+	if err == nil || !strings.Contains(err.Error(), "wait_ms must be between 0 and 600000") {
+		t.Fatalf("expected wait_ms validation error, got %v", err)
 	}
 }
 
@@ -275,9 +348,26 @@ func TestBackgroundProcessOutputRingUsesOffsetsAndTruncates(t *testing.T) {
 	}
 }
 
-func TestBackgroundProcessStartIsAlwaysRisky(t *testing.T) {
+func TestBackgroundProcessDetectsSplitSandboxDenial(t *testing.T) {
+	process := &backgroundProcess{sandboxed: true}
+	writer := backgroundProcessWriter{process: process, stream: ProgressStderr}
+	if _, err := writer.Write([]byte("operation not")); err != nil {
+		t.Fatal(err)
+	}
+	if process.sandboxDenialOutput {
+		t.Fatal("partial marker must not report a sandbox denial")
+	}
+	if _, err := writer.Write([]byte(" permitted")); err != nil {
+		t.Fatal(err)
+	}
+	if !process.sandboxDenialOutput {
+		t.Fatal("sandbox denial split across output chunks was not detected")
+	}
+}
+
+func TestBackgroundProcessStartUsesForegroundRiskRules(t *testing.T) {
 	risk, ok := ClassifyToolCall(CommandStart, json.RawMessage(`{"scope":"project","argv":["go","test","./..."]}`))
-	if !ok || risk.Class != RiskClassCommand || risk.Operation != "process_start" || risk.LowRisk {
+	if !ok || risk.Class != RiskClassCommand || risk.Operation != "process_start" || !risk.LowRisk {
 		t.Fatalf("background start risk is wrong: %+v ok=%v", risk, ok)
 	}
 }

@@ -73,16 +73,21 @@ class BrowserBridgeServer {
       const result = await this.route(request.url || "", body || {});
       writeJSON(response, 200, result || { ok: true });
     } catch (error) {
-      writeJSON(response, statusForError(error), { error: error?.message || "browser_bridge_error" });
+      const failure = classifyError(error);
+      writeJSON(response, failure.status, {
+        error: failure.message,
+        code: failure.code,
+        retryable: failure.retryable,
+      });
     }
   }
 
   route(path, body) {
     switch (path) {
       case "/browser/tabs/ensure":
-        return this.browserHost.ensure(body);
+        return this.browserHost.ensure(trustedBrowserRequest(body));
       case "/browser/tabs/open":
-        return this.browserHost.loadURL(body);
+        return this.browserHost.loadURL(trustedBrowserRequest(body));
       case "/browser/tabs/list":
         return this.browserHost.listTabs(body);
       case "/browser/tabs/back":
@@ -107,6 +112,8 @@ class BrowserBridgeServer {
       case "/browser/session/release":
         this.browserHost.closeSession(body);
         return { ok: true };
+      case "/browser/session/revoke-file-access":
+        return this.browserHost.revokeFileAccess(body);
       default:
         throw new Error("browser bridge route not found");
     }
@@ -144,18 +151,68 @@ function writeJSON(response, status, payload) {
   response.end(JSON.stringify(payload));
 }
 
-function statusForError(error) {
+function classifyError(error) {
   const message = String(error?.message || "");
-  if (message.includes("not found")) {
-    return 404;
+  if (message.includes("file URL is outside the session project")) {
+    return { status: 403, code: "file_url_not_allowed", retryable: false, message };
+  }
+  if (message === "browser tab not found") {
+    return { status: 404, code: "browser_tab_not_found", retryable: false, message };
+  }
+  if (message === "browser tab limit reached") {
+    return { status: 429, code: "browser_tab_limit_reached", retryable: false, message };
+  }
+  if (message === "browser bridge route not found") {
+    return { status: 404, code: "browser_bridge_route_not_found", retryable: false, message };
+  }
+  if (
+    message.includes("target element not found") ||
+    message.includes("target input not found") ||
+    message.includes("scroll target not found")
+  ) {
+    return { status: 422, code: "element_not_found", retryable: false, message };
+  }
+  if (
+    message.includes("not visible") ||
+    message.includes("not hittable") ||
+    message.includes("not interactable") ||
+    message.includes("outside the viewport")
+  ) {
+    return { status: 422, code: "element_not_interactable", retryable: false, message };
+  }
+  if (
+    message.includes("not editable") ||
+    message.includes("could not be focused") ||
+    message.includes("did not produce the expected value")
+  ) {
+    return { status: 422, code: "element_not_editable", retryable: false, message };
   }
   if (message.includes("missing") || message.includes("required") || message.includes("invalid")) {
-    return 400;
+    return { status: 400, code: "invalid_request", retryable: false, message };
   }
-  if (message.includes("unavailable") || message.includes("destroyed")) {
-    return 503;
+  if (message.includes("unavailable") || message.includes("destroyed") || message.includes("not_ready")) {
+    return { status: 503, code: "browser_webview_not_ready", retryable: true, message };
   }
-  return 500;
+  if (message.includes("cdp detached")) {
+    return { status: 503, code: "cdp_detached", retryable: true, message };
+  }
+  if (message.includes("navigation timed out")) {
+    return { status: 504, code: "navigation_timeout", retryable: true, message };
+  }
+  if (message.includes("navigation failed") || message.includes("navigation did not commit")) {
+    return { status: 502, code: "navigation_failed", retryable: false, message };
+  }
+  if (message.includes("timed out")) {
+    return { status: 504, code: "cdp_command_timeout", retryable: true, message };
+  }
+  if (message.includes("screenshot")) {
+    return { status: 500, code: "screenshot_failed", retryable: false, message };
+  }
+  return { status: 500, code: "cdp_command_failed", retryable: false, message: message || "browser_bridge_error" };
 }
 
-module.exports = { BrowserBridgeServer };
+function trustedBrowserRequest(body) {
+  return { ...(body || {}), _fileAuthorized: true };
+}
+
+module.exports = { BrowserBridgeServer, classifyError };

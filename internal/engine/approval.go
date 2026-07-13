@@ -530,6 +530,13 @@ func (e *Engine) toolCallApprovalRequired(ctx context.Context, sessionID string,
 	}
 }
 
+func commandSandboxModeForProject(project *store.Project) tool.CommandSandboxMode {
+	if project != nil && store.NormalizeApprovalMode(project.ApprovalMode) == store.ApprovalFull {
+		return tool.CommandSandboxBypass
+	}
+	return tool.CommandSandboxEnforce
+}
+
 func refineToolRisk(name string, risk tool.ToolRisk, details map[string]any) tool.ToolRisk {
 	if name == tool.PatchApply {
 		if destructive, _ := details["destructive"].(bool); destructive {

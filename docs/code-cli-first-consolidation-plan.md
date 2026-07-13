@@ -86,13 +86,14 @@ M2 后剩余主要缺口:
 规则:
 
 - `argv` 与 `script` 必须且只能提供一个。
-- argv 保持默认推荐路径,已识别的低风险验证命令可由 `auto` 放行。
+- argv 保持默认推荐路径;`auto` 使用负面风险规则,未知命令名本身不触发审批。
 - script 使用平台固定 shell,模型不能提供 shell executable 或启动参数。
 - Unix 使用 `/bin/sh -lc`;Windows 后续使用 PowerShell 非交互模式。
 - script 无法可靠静态解析,统一标记 `LowRisk=false`;`ask/auto` 请求审批,
   `full` 才可自动执行。
 - approval 展示完整 script、cwd、env key、timeout 与风险说明。
-- Project cwd 不是 OS 文件系统沙箱;审批文案必须明确 shell 仍拥有 daemon 用户权限。
+- macOS 的 `ask/auto` 在审批后仍使用 Project CLI 沙箱;`full` 才绕过该沙箱。
+  其他平台的沙箱适配另行验收。
 
 ### 4.2 实时输出
 

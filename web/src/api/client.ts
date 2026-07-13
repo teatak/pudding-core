@@ -24,6 +24,15 @@ import {
   patchQueuedInputRequest,
   patchProviderRequest,
   patchProjectRequest,
+  projectBrowserRootsResponse,
+  projectEntryMutation,
+  projectFile,
+  projectGitDiff,
+  projectGitStatus,
+  projectTreeResponse,
+  createProjectEntryRequest,
+  renameProjectEntryRequest,
+  saveProjectFileRequest,
   patchCanvasItemRequest,
   probeProviderModelsRequest,
   putCanvasItemRequest,
@@ -117,6 +126,14 @@ import {
   type ProviderModel,
   type ProviderProfile,
   type Project,
+  type ProjectBrowserRoot,
+  type ProjectEntryMutation,
+  type ProjectFile,
+  type ProjectGitDiff,
+  type ProjectGitStatus,
+  type ProjectGitStatusFile,
+  type ProjectTreeEntry,
+  type ProjectTreeResponse,
   type QueuedInput,
   type Session,
   type SessionUsage,
@@ -194,6 +211,16 @@ export type AppConnectionPayload = {
   fields?: Record<string, string>;
 };
 export type { AppMCPOverride, AppMCPOverrideResponse };
+export type {
+  ProjectBrowserRoot,
+  ProjectEntryMutation,
+  ProjectFile,
+  ProjectGitDiff,
+  ProjectGitStatus,
+  ProjectGitStatusFile,
+  ProjectTreeEntry,
+  ProjectTreeResponse,
+};
 export type CanvasItemPayload = z.infer<typeof putCanvasItemRequest>;
 export type CanvasItemWindowPayload = z.infer<typeof patchCanvasItemRequest>;
 export type ClosedCanvasItemPayload = z.infer<typeof putClosedCanvasItemRequest>;
@@ -303,6 +330,122 @@ export function getProject(token: string, projectID: string): Promise<Project> {
   return request(token, `/projects/${encodeURIComponent(projectID)}`, project);
 }
 
+export function listProjectBrowserRoots(token: string, sessionID: string): Promise<{ projectID: string; roots: ProjectBrowserRoot[] }> {
+  return request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/project/tree`,
+    projectBrowserRootsResponse,
+  );
+}
+
+export function listProjectTree(
+  token: string,
+  sessionID: string,
+  rootID: string,
+  path: string,
+): Promise<ProjectTreeResponse> {
+  const query = new URLSearchParams({ rootID, path });
+  return request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/project/tree?${query.toString()}`,
+    projectTreeResponse,
+  );
+}
+
+export function getProjectFile(token: string, sessionID: string, rootID: string, path: string): Promise<ProjectFile> {
+  const query = new URLSearchParams({ rootID, path });
+  return request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/project/file?${query.toString()}`,
+    projectFile,
+  );
+}
+
+export function getProjectGitStatus(token: string, sessionID: string, rootID: string): Promise<ProjectGitStatus> {
+  const query = new URLSearchParams({ rootID });
+  return request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/project/git/status?${query.toString()}`,
+    projectGitStatus,
+  );
+}
+
+export function getProjectGitDiff(
+  token: string,
+  sessionID: string,
+  rootID: string,
+  path: string,
+  staged: boolean,
+): Promise<ProjectGitDiff> {
+  const query = new URLSearchParams({ rootID, path, staged: String(staged) });
+  return request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/project/git/diff?${query.toString()}`,
+    projectGitDiff,
+  );
+}
+
+export function createProjectEntry(
+  token: string,
+  sessionID: string,
+  body: z.infer<typeof createProjectEntryRequest>,
+): Promise<ProjectEntryMutation> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/project/entries`, projectEntryMutation, {
+    method: "POST",
+    body: JSON.stringify(createProjectEntryRequest.parse(body)),
+  });
+}
+
+export function renameProjectEntry(
+  token: string,
+  sessionID: string,
+  body: z.infer<typeof renameProjectEntryRequest>,
+): Promise<ProjectEntryMutation> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/project/entries`, projectEntryMutation, {
+    method: "PATCH",
+    body: JSON.stringify(renameProjectEntryRequest.parse(body)),
+  });
+}
+
+export function saveProjectFile(
+  token: string,
+  sessionID: string,
+  body: z.infer<typeof saveProjectFileRequest>,
+): Promise<ProjectFile> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/project/file`, projectFile, {
+    method: "PUT",
+    body: JSON.stringify(saveProjectFileRequest.parse(body)),
+  });
+}
+
+export async function deleteProjectEntry(token: string, sessionID: string, rootID: string, path: string): Promise<void> {
+  const query = new URLSearchParams({ rootID, path });
+  await request(token, `/sessions/${encodeURIComponent(sessionID)}/project/entries?${query.toString()}`, z.null(), {
+    method: "DELETE",
+  });
+}
+
+export function projectResourceURL(token: string, sessionID: string, rootID: string, path: string) {
+  const encodedPath = path
+    .split("/")
+    .filter(Boolean)
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  const href = apiURL(
+    `/sessions/${encodeURIComponent(sessionID)}/project/resources/${encodeURIComponent(rootID)}/${encodedPath}`,
+  );
+  if (!token) {
+    return href;
+  }
+  try {
+    const url = new URL(href, window.location.href);
+    url.searchParams.set("token", token);
+    return url.toString();
+  } catch {
+    return `${href}?token=${encodeURIComponent(token)}`;
+  }
+}
+
 export function createProject(
   token: string,
   body: z.infer<typeof createProjectRequest>,
@@ -338,6 +481,10 @@ export function createSession(
     method: "POST",
     body: JSON.stringify(createSessionRequest.parse(body)),
   });
+}
+
+export function getSession(token: string, sessionID: string): Promise<Session> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}`, session);
 }
 
 export function updateSession(
@@ -413,7 +560,7 @@ export function getAudioBindings(token: string, sessionID: string): Promise<{ bi
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/audio/bindings`, audioBindingsResponse);
 }
 
-export function listBrowserTabs(token: string, sessionID: string): Promise<{ tabs: BrowserTab[]; processMode?: "headless" | "external" }> {
+export function listBrowserTabs(token: string, sessionID: string): Promise<{ tabs: BrowserTab[]; processMode?: "headless" | "webview" | "external" }> {
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/tabs`, listBrowserTabsResponse);
 }
 

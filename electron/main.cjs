@@ -22,14 +22,18 @@ const packageMetadata = require("../package.json");
 
 const { BrowserBridgeServer } = require("./browser-bridge-server.cjs");
 const { BrowserHost } = require("./browser-host.cjs");
+const { buildEditContextMenuTemplate } = require("./context-menu.cjs");
 const { nativeText, normalizeNativeLocale } = require("./native-i18n.cjs");
+const { ProjectFileWatcher } = require("./project-file-watcher.cjs");
 const { UpdateManager, updateModes, updateStatuses } = require("./update-manager.cjs");
+const { readPreviewUpdatePreference, writePreviewUpdatePreference } = require("./update-preferences.cjs");
 
 const repoRoot = app.isPackaged ? path.join(process.resourcesPath, "app") : path.resolve(__dirname, "..");
 const appDisplayName = "Pudding";
 const repositoryURL = "https://github.com/teatak/pudding";
 const issueTrackerURL = `${repositoryURL}/issues`;
-const releasePageURL = normalizeUpdatePageURL(process.env.PUDDING_UPDATE_DOWNLOAD_URL) || `${repositoryURL}/releases/latest`;
+const releasePageOverride = normalizeUpdatePageURL(process.env.PUDDING_UPDATE_DOWNLOAD_URL);
+const releasePageURL = releasePageOverride || `${repositoryURL}/releases/latest`;
 
 app.setName(appDisplayName);
 app.setPath("userData", electronUserDataDir());
@@ -58,11 +62,12 @@ const browserHost = new BrowserHost(
   (event) => {
     broadcastToTrustedRenderers("pudding:browser:automation-start", event);
   },
+  (request) => {
+    broadcastToTrustedRenderers("pudding:browser:webview-required", request);
+  },
 );
-browserHost.setWebviewCaptureHandler(captureVisibleWebview);
 const browserBridgeServer = new BrowserBridgeServer(browserHost);
-const webviewCaptureRequests = new Map();
-let webviewCaptureSeq = 0;
+const projectFileWatcher = new ProjectFileWatcher();
 
 let daemonProcess = null;
 let quitting = false;
@@ -71,6 +76,11 @@ let shellLocale = "en";
 const pendingOAuthReturnURLs = [];
 const updateFeedURL = normalizeUpdateFeedURL(process.env.PUDDING_UPDATE_FEED_URL);
 const updateMode = normalizeUpdateMode(process.env.PUDDING_UPDATE_MODE || packageMetadata.puddingUpdateMode);
+const storedPreviewUpdatePreference = readPreviewUpdatePreference(previewUpdatePreferencePath());
+const receivePreviewUpdates =
+  normalizeOptionalBoolean(process.env.PUDDING_RECEIVE_PREVIEW_UPDATES) ??
+  storedPreviewUpdatePreference ??
+  packageMetadata.puddingReleaseChannel === "preview";
 const simulatedUpdateVersion =
   !app.isPackaged && process.env.PUDDING_UPDATE_TEST_STATE === "downloaded" ? "99.0.0-test" : "";
 const updateManager = new UpdateManager({
@@ -78,6 +88,7 @@ const updateManager = new UpdateManager({
   isPackaged: app.isPackaged,
   disabled: process.env.PUDDING_DISABLE_UPDATE_CHECK === "1",
   mode: updateMode,
+  receivePreviewUpdates,
   feedURL: updateFeedURL,
   simulatedVersion: simulatedUpdateVersion,
   beforeInstall: prepareForUpdateInstall,
@@ -164,6 +175,7 @@ app.on("before-quit", () => {
     saveWindowState(window);
   }
   stopManagedDaemon();
+  projectFileWatcher.closeAll();
   void browserBridgeServer.stop();
 });
 
@@ -192,6 +204,11 @@ function createMainWindow() {
       sandbox: true,
       webviewTag: true,
     },
+  });
+
+  bindEditContextMenu(window.webContents, window);
+  window.webContents.on("did-attach-webview", (_event, guestContents) => {
+    bindEditContextMenu(guestContents, window);
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -225,6 +242,24 @@ function createMainWindow() {
   });
 
   return window;
+}
+
+function bindEditContextMenu(contents, ownerWindow) {
+  contents.on("context-menu", (event, params) => {
+    event.preventDefault();
+    const template = buildEditContextMenuTemplate(contents, params, nativeMenuText, {
+      platform: process.platform,
+      openExternal: (url) => void shell.openExternal(url),
+    });
+    if (template.length === 0 || ownerWindow.isDestroyed()) {
+      return;
+    }
+    Menu.buildFromTemplate(template).popup({
+      window: ownerWindow,
+      ...(params.frame ? { frame: params.frame } : {}),
+      ...(process.platform !== "darwin" && params.menuSourceType ? { sourceType: params.menuSourceType } : {}),
+    });
+  });
 }
 
 function createTray() {
@@ -443,8 +478,8 @@ function nativeAppName() {
   return nativeText(shellLocale, "appName");
 }
 
-function nativeMenuText(key) {
-  return nativeText(shellLocale, key, { app: nativeAppName() });
+function nativeMenuText(key, values = {}) {
+  return nativeText(shellLocale, key, { app: nativeAppName(), ...values });
 }
 
 function sendDesktopMenuCommand(command) {
@@ -567,7 +602,7 @@ async function activateUpdate() {
 
 async function openUpdateDownloadPage() {
   try {
-    await shell.openExternal(releasePageURL);
+    await shell.openExternal(updateDownloadPageURL(updateManager.getState()));
     return true;
   } catch (error) {
     console.warn("[electron] open update download page failed", error);
@@ -809,6 +844,22 @@ ipcMain.handle("pudding:desktop:update:activate", async (event) => {
   return activateUpdate();
 });
 
+ipcMain.handle("pudding:desktop:update:set-preview", async (event, enabled) => {
+  assertTrustedSender(event);
+  const previous = updateManager.getState().receivePreviewUpdates;
+  const next = updateManager.setReceivePreviewUpdates(Boolean(enabled));
+  try {
+    writePreviewUpdatePreference(previewUpdatePreferencePath(), next.receivePreviewUpdates);
+  } catch (error) {
+    updateManager.setReceivePreviewUpdates(previous);
+    throw error;
+  }
+  if (next.receivePreviewUpdates !== previous && next.status === updateStatuses.idle) {
+    void updateManager.check(false);
+  }
+  return next;
+});
+
 ipcMain.handle("pudding:desktop:pick-directories", async (event, options) => {
   const window = assertTrustedSender(event);
   const result = await dialog.showOpenDialog(window, {
@@ -820,25 +871,33 @@ ipcMain.handle("pudding:desktop:pick-directories", async (event, options) => {
   return result.canceled ? [] : result.filePaths;
 });
 
+ipcMain.handle("pudding:project-file:watch", (event, request) => {
+  assertTrustedSender(event);
+  return projectFileWatcher.subscribe(event.sender, request);
+});
+
+ipcMain.handle("pudding:project-file:unwatch", (event, request) => {
+  assertTrustedSender(event);
+  return projectFileWatcher.unsubscribe(event.sender, request);
+});
+
 ipcMain.handle("pudding:browser:ensure", (event, request) => {
   assertTrustedSender(event);
-  return browserHost.ensure(request || {});
+  return browserHost.ensure(untrustedBrowserRequest(request));
 });
 
 ipcMain.handle("pudding:browser:webview-register", (event, request) => {
   assertTrustedSender(event);
   const target = webContents.fromId(Number(request?.webContentsID));
-  return browserHost.registerWebContents(request || {}, target);
-});
-
-ipcMain.handle("pudding:browser:webview-capture-result", (event, response) => {
-  assertTrustedSender(event);
-  return settleWebviewCapture(response || {});
+  if (!target || target.getType() !== "webview" || target.hostWebContents !== event.sender) {
+    throw new Error("browser webview target not found");
+  }
+  return browserHost.registerWebContents(untrustedBrowserRequest(request), target);
 });
 
 ipcMain.handle("pudding:browser:load-url", (event, request) => {
   assertTrustedSender(event);
-  return browserHost.loadURL(request || {});
+  return browserHost.loadURL(untrustedBrowserRequest(request));
 });
 
 ipcMain.handle("pudding:browser:back", (event, request) => {
@@ -870,49 +929,6 @@ ipcMain.handle("pudding:browser:close-tab", (event, request) => {
   assertTrustedSender(event);
   return browserHost.closeTab(request || {});
 });
-
-function captureVisibleWebview(request) {
-  const windows = BrowserWindow.getAllWindows().filter(
-    (window) => !window.webContents.isDestroyed() && isTrustedRendererURL(window.webContents.getURL()),
-  );
-  if (windows.length === 0) {
-    return Promise.reject(new Error("no renderer window available"));
-  }
-  const captureID = `capture_${Date.now()}_${++webviewCaptureSeq}`;
-  const payload = {
-    captureID,
-    sessionID: String(request?.sessionID || ""),
-    tabID: String(request?.tabID || ""),
-    fullPage: Boolean(request?.fullPage),
-  };
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      webviewCaptureRequests.delete(captureID);
-      reject(new Error("renderer webview capture timed out"));
-    }, 5000);
-    webviewCaptureRequests.set(captureID, { resolve, reject, timer });
-    for (const window of windows) {
-      window.webContents.send("pudding:browser:webview-capture-request", payload);
-    }
-  });
-}
-
-function settleWebviewCapture(response) {
-  const captureID = String(response?.captureID || "");
-  const pending = webviewCaptureRequests.get(captureID);
-  if (!pending) {
-    return { ok: false };
-  }
-  clearTimeout(pending.timer);
-  webviewCaptureRequests.delete(captureID);
-  const error = String(response?.error || "");
-  if (error) {
-    pending.reject(new Error(error));
-    return { ok: true };
-  }
-  pending.resolve(response);
-  return { ok: true };
-}
 
 async function loadRenderer(window, token) {
   const rendererBase = devURL || apiBase;
@@ -1006,6 +1022,10 @@ function daemonTokenPath() {
 function puddingHomePath() {
   const defaultHome = app.isPackaged ? ".pudding" : ".pudding-dev";
   return (process.env.PUDDING_HOME || path.join(os.homedir(), defaultHome)).trim();
+}
+
+function previewUpdatePreferencePath() {
+  return path.join(puddingHomePath(), "config", "desktop-preferences.json");
 }
 
 function canConnectToDaemon() {
@@ -1145,6 +1165,10 @@ function assertTrustedSender(event) {
   return window;
 }
 
+function untrustedBrowserRequest(request) {
+  return { ...(request || {}), _fileAuthorized: false, fileRoot: "", fileRoots: [] };
+}
+
 function isAllowedExternalURL(rawURL) {
   try {
     const url = new URL(rawURL);
@@ -1194,6 +1218,28 @@ function normalizeUpdateMode(value) {
   return String(value || "").trim().toLowerCase() === updateModes.automatic
     ? updateModes.automatic
     : updateModes.manual;
+}
+
+function normalizeOptionalBoolean(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "1" || normalized === "true") {
+    return true;
+  }
+  if (normalized === "0" || normalized === "false") {
+    return false;
+  }
+  return null;
+}
+
+function updateDownloadPageURL(state) {
+  if (releasePageOverride) {
+    return releasePageOverride;
+  }
+  const version = String(state?.version || "").trim();
+  if (state?.receivePreviewUpdates && /^\d+\.\d+\.\d+-beta\.\d+$/.test(version)) {
+    return `${repositoryURL}/releases/tag/v${encodeURIComponent(version)}`;
+  }
+  return releasePageURL;
 }
 
 function stringOption(value) {

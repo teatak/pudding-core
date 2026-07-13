@@ -1,0 +1,128 @@
+package tool
+
+import (
+	"context"
+	"encoding/json"
+	"sync"
+	"testing"
+)
+
+type recordingCommandRunner struct {
+	mu          sync.Mutex
+	specs       []commandSpec
+	sandboxed   bool
+	sandboxKind string
+}
+
+func (r *recordingCommandRunner) Prepare(spec commandSpec) (*commandExecution, error) {
+	r.mu.Lock()
+	r.specs = append(r.specs, commandSpec{
+		Executable:  spec.Executable,
+		Args:        append([]string(nil), spec.Args...),
+		CWD:         spec.CWD,
+		Env:         append([]string(nil), spec.Env...),
+		ProjectDirs: append([]string(nil), spec.ProjectDirs...),
+		SandboxMode: spec.SandboxMode,
+	})
+	r.mu.Unlock()
+	execution, err := newDirectCommandRunner().Prepare(spec)
+	if execution != nil {
+		execution.Sandboxed = r.sandboxed
+		execution.SandboxKind = r.sandboxKind
+	}
+	return execution, err
+}
+
+func TestCommandResultsExposeSandboxMetadata(t *testing.T) {
+	runner := NewBuiltinRunner()
+	t.Cleanup(func() { _ = runner.Close() })
+	runner.setCommandRunner(&recordingCommandRunner{sandboxed: true, sandboxKind: "test-sandbox"})
+	root := t.TempDir()
+
+	raw, _ := json.Marshal(map[string]any{
+		"scope": "project",
+		"argv":  commandHelperArgs("sandbox-denied"),
+	})
+	foreground := runner.Call(context.Background(), Call{
+		CallID:      "call_sandbox_metadata",
+		Name:        CommandRun,
+		Args:        raw,
+		ProjectDirs: []string{root},
+	})
+	payload := decodeCommandPayload(t, foreground)
+	if !payload.Sandboxed || payload.SandboxKind != "test-sandbox" || !payload.SandboxDenied {
+		t.Fatalf("foreground sandbox metadata missing: %+v", payload)
+	}
+
+	background := backgroundToolCall(runner, "sess_sandbox_metadata", root, CommandStart, map[string]any{
+		"scope": "project",
+		"argv":  commandHelperArgs("sleep", "100"),
+	})
+	started := decodeBackgroundProcessPayload(t, background)
+	if !started.Sandboxed || started.SandboxKind != "test-sandbox" {
+		t.Fatalf("background sandbox metadata missing: %+v", started)
+	}
+
+	deniedBackground := backgroundToolCall(runner, "sess_sandbox_metadata", root, CommandStart, map[string]any{
+		"scope": "project",
+		"argv":  commandHelperArgs("sandbox-denied"),
+	})
+	deniedStarted := decodeBackgroundProcessPayload(t, deniedBackground)
+	deniedPoll := backgroundToolCall(runner, "sess_sandbox_metadata", root, CommandPoll, map[string]any{
+		"process_id": deniedStarted.ProcessID,
+		"wait_ms":    1000,
+	})
+	deniedFinished := decodeBackgroundProcessPayload(t, deniedPoll)
+	if deniedFinished.Running || !deniedFinished.SandboxDenied {
+		t.Fatalf("background sandbox denial metadata missing: %+v", deniedFinished)
+	}
+}
+
+func (r *recordingCommandRunner) snapshot() []commandSpec {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]commandSpec(nil), r.specs...)
+}
+
+func TestForegroundAndBackgroundCommandsShareRunner(t *testing.T) {
+	runner := NewBuiltinRunner()
+	t.Cleanup(func() { _ = runner.Close() })
+	recording := &recordingCommandRunner{}
+	runner.setCommandRunner(recording)
+	root := t.TempDir()
+
+	raw, _ := json.Marshal(map[string]any{
+		"scope": "project",
+		"argv":  commandHelperArgs("report"),
+	})
+	foreground := runner.Call(context.Background(), Call{
+		CallID:      "call_foreground_runner",
+		Name:        CommandRun,
+		Args:        raw,
+		ProjectDirs: []string{root},
+	})
+	if !foreground.Ok {
+		t.Fatalf("foreground command failed: %+v", foreground)
+	}
+
+	background := backgroundToolCall(runner, "sess_runner", root, CommandStart, map[string]any{
+		"scope": "project",
+		"argv":  commandHelperArgs("report"),
+	})
+	if !background.Ok {
+		t.Fatalf("background command failed: %+v", background)
+	}
+
+	specs := recording.snapshot()
+	if len(specs) != 2 {
+		t.Fatalf("shared runner prepared %d commands, want 2", len(specs))
+	}
+	for _, spec := range specs {
+		if len(spec.ProjectDirs) != 1 || spec.ProjectDirs[0] != root {
+			t.Fatalf("runner lost project authorization snapshot: %+v", spec.ProjectDirs)
+		}
+		if spec.SandboxMode != CommandSandboxEnforce {
+			t.Fatalf("runner lost sandbox policy snapshot: %q", spec.SandboxMode)
+		}
+	}
+}

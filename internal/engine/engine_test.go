@@ -2315,6 +2315,73 @@ func TestProjectApprovalModesClassifyCommands(t *testing.T) {
 	}
 }
 
+func TestCommandSandboxModeFollowsProjectApprovalMode(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		project *store.Project
+		want    tool.CommandSandboxMode
+	}{
+		{name: "no project", want: tool.CommandSandboxEnforce},
+		{name: "ask", project: &store.Project{ApprovalMode: store.ApprovalAsk}, want: tool.CommandSandboxEnforce},
+		{name: "auto", project: &store.Project{ApprovalMode: store.ApprovalAuto}, want: tool.CommandSandboxEnforce},
+		{name: "full", project: &store.Project{ApprovalMode: store.ApprovalFull}, want: tool.CommandSandboxBypass},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := commandSandboxModeForProject(test.project); got != test.want {
+				t.Fatalf("sandbox mode = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestExecuteAllowedCommandPropagatesProjectSandboxMode(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		mode store.ApprovalMode
+		want tool.CommandSandboxMode
+	}{
+		{name: "auto", mode: store.ApprovalAuto, want: tool.CommandSandboxEnforce},
+		{name: "full", mode: store.ApprovalFull, want: tool.CommandSandboxBypass},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			ms := memstore.New()
+			root := t.TempDir()
+			project := &store.Project{
+				ID:           "proj_sandbox_" + test.name,
+				Name:         "sandbox " + test.name,
+				RootDirs:     []string{root},
+				ApprovalMode: test.mode,
+			}
+			if err := ms.CreateProject(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			sessionID := "sess_sandbox_" + test.name
+			if err := ms.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock", ProjectID: project.ID}); err != nil {
+				t.Fatal(err)
+			}
+			calls := &recordingToolRunner{
+				defs:   tool.BuiltinDefinitions(),
+				result: tool.Result{Ok: true, Content: `{"ok":true}`},
+			}
+			runner := &approvalDetailsRecordingToolRunner{recordingToolRunner: calls}
+			eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms, WithTools(runner))
+			raw := json.RawMessage(`{"scope":"project","argv":["go","version"]}`)
+			result := eng.executeAllowedTool(ctx, sessionID, "turn_sandbox", tool.Call{CallID: "call_sandbox", Name: tool.CommandRun, Args: raw})
+			if !result.Ok || len(calls.calls) != 1 {
+				t.Fatalf("command was not executed once: result=%+v calls=%d", result, len(calls.calls))
+			}
+			call := calls.calls[0]
+			if call.CommandSandbox != test.want {
+				t.Fatalf("sandbox mode = %q, want %q", call.CommandSandbox, test.want)
+			}
+			if len(call.ProjectDirs) != 1 || call.ProjectDirs[0] != root {
+				t.Fatalf("project roots were not propagated: %+v", call.ProjectDirs)
+			}
+		})
+	}
+}
+
 func TestRefineToolRiskKeepsPatchDeletionProtected(t *testing.T) {
 	risk := tool.ToolRisk{Class: tool.RiskClassWrite, LowRisk: true}
 	regular := refineToolRisk(tool.PatchApply, risk, map[string]any{"destructive": false})
@@ -3563,6 +3630,14 @@ type recordingToolRunner struct {
 	closedSessions   []string
 	closeCount       int
 	definitionAppIDs [][]string
+}
+
+type approvalDetailsRecordingToolRunner struct {
+	*recordingToolRunner
+}
+
+func (r *approvalDetailsRecordingToolRunner) ApprovalDetails(context.Context, tool.Call) (map[string]any, error) {
+	return map[string]any{}, nil
 }
 
 func (r *recordingToolRunner) CloseSession(sessionID string) {

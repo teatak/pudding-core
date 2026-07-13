@@ -5,13 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/teatak/pudding-core/internal/projectgit"
 )
 
 const (
@@ -51,35 +52,9 @@ type gitExecResult struct {
 	err    error
 }
 
-type gitStatusFile struct {
-	Path           string `json:"path"`
-	OriginalPath   string `json:"originalPath,omitempty"`
-	Kind           string `json:"kind"`
-	IndexStatus    string `json:"indexStatus"`
-	WorktreeStatus string `json:"worktreeStatus"`
-}
-
-type gitStatusSnapshot struct {
-	Head       string
-	Branch     string
-	Upstream   string
-	Detached   bool
-	Ahead      int
-	Behind     int
-	Files      []gitStatusFile
-	Staged     int
-	Unstaged   int
-	Untracked  int
-	Conflicted int
-}
-
-type gitDiffFile struct {
-	Path         string `json:"path"`
-	OriginalPath string `json:"originalPath,omitempty"`
-	Additions    int    `json:"additions"`
-	Deletions    int    `json:"deletions"`
-	Binary       bool   `json:"binary,omitempty"`
-}
+type gitStatusFile = projectgit.StatusFile
+type gitStatusSnapshot = projectgit.Status
+type gitDiffFile = projectgit.DiffFile
 
 type gitCommit struct {
 	Hash        string   `json:"hash"`
@@ -101,16 +76,9 @@ func (r *BuiltinRunner) gitStatus(ctx context.Context, call Call) Result {
 	if failed != nil {
 		return gitRepositoryFailure(out, args.Scope, failed)
 	}
-	result := runGitWithoutExternalFilters(ctx, repo.Root, gitMetadataLimitBytes, "status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all")
-	if result.err != nil {
-		return gitExecFailure(out, ctx, result, "git_status_failed")
-	}
-	if result.stdout.Truncated() {
-		return toolJSONError(out, "git_output_too_large", "git status output exceeded the safety limit")
-	}
-	snapshot, err := parseGitStatus(result.stdout.String())
+	snapshot, err := projectgit.ReadStatus(ctx, projectgit.Repository{ProjectRoot: repo.ProjectRoot, Root: repo.Root})
 	if err != nil {
-		return toolJSONError(out, "git_parse_failed", err.Error())
+		return projectGitFailure(out, err, "git_status_failed")
 	}
 	payload := map[string]any{
 		"ok":              true,
@@ -143,40 +111,31 @@ func (r *BuiltinRunner) gitDiff(ctx context.Context, call Call) Result {
 	if failed != nil {
 		return gitRepositoryFailure(out, args.Scope, failed)
 	}
-	baseArgs := []string{"diff", "--no-ext-diff", "--no-textconv", "--no-color", "--find-renames=50%"}
-	if args.Staged {
-		baseArgs = append(baseArgs, "--cached")
-	}
-	numstatArgs := append(append([]string(nil), baseArgs...), "--numstat", "-z")
-	statsResult := runGitWithoutExternalFilters(ctx, repo.Root, gitMetadataLimitBytes, numstatArgs...)
-	if statsResult.err != nil {
-		return gitExecFailure(out, ctx, statsResult, "git_diff_failed")
-	}
-	if statsResult.stdout.Truncated() {
-		return toolJSONError(out, "git_output_too_large", "git diff statistics exceeded the safety limit")
-	}
-	files, additions, deletions, err := parseGitNumstat(statsResult.stdout.String())
+	diff, err := projectgit.ReadPatchDiff(ctx, projectgit.Repository{ProjectRoot: repo.ProjectRoot, Root: repo.Root}, args.Staged, gitDiffOutputLimitBytes)
 	if err != nil {
-		return toolJSONError(out, "git_parse_failed", err.Error())
-	}
-	patchArgs := append(append([]string(nil), baseArgs...), "--src-prefix=a/", "--dst-prefix=b/")
-	patchResult := runGitWithoutExternalFilters(ctx, repo.Root, gitDiffOutputLimitBytes, patchArgs...)
-	if patchResult.err != nil {
-		return gitExecFailure(out, ctx, patchResult, "git_diff_failed")
+		return projectGitFailure(out, err, "git_diff_failed")
 	}
 	payload := map[string]any{
 		"ok":        true,
 		"cwd":       repo.CWD,
 		"repoRoot":  repo.Root,
 		"staged":    args.Staged,
-		"diff":      patchResult.stdout.String(),
-		"truncated": patchResult.stdout.Truncated(),
-		"files":     files,
-		"fileCount": len(files),
-		"additions": additions,
-		"deletions": deletions,
+		"diff":      diff.Patch,
+		"truncated": diff.Truncated,
+		"files":     diff.Files,
+		"fileCount": len(diff.Files),
+		"additions": diff.Additions,
+		"deletions": diff.Deletions,
 	}
-	return withResultSummary(toolJSON(out, true, payload), SummaryChangedLines, additions+deletions)
+	return withResultSummary(toolJSON(out, true, payload), SummaryChangedLines, diff.Additions+diff.Deletions)
+}
+
+func projectGitFailure(out Result, err error, fallback string) Result {
+	code := projectgit.ErrorCode(err)
+	if code == "" {
+		code = fallback
+	}
+	return toolJSONError(out, code, err.Error())
 }
 
 func (r *BuiltinRunner) gitLog(ctx context.Context, call Call) Result {
@@ -372,160 +331,6 @@ func gitExitCode(err error) int {
 		return exitErr.ExitCode()
 	}
 	return -1
-}
-
-func parseGitStatus(raw string) (gitStatusSnapshot, error) {
-	var snapshot gitStatusSnapshot
-	records := strings.Split(raw, "\x00")
-	for i := 0; i < len(records); i++ {
-		record := records[i]
-		if record == "" {
-			continue
-		}
-		switch {
-		case strings.HasPrefix(record, "# branch.oid "):
-			oid := strings.TrimPrefix(record, "# branch.oid ")
-			if oid != "(initial)" {
-				snapshot.Head = oid
-			}
-		case strings.HasPrefix(record, "# branch.head "):
-			head := strings.TrimPrefix(record, "# branch.head ")
-			if head == "(detached)" {
-				snapshot.Detached = true
-			} else {
-				snapshot.Branch = head
-			}
-		case strings.HasPrefix(record, "# branch.upstream "):
-			snapshot.Upstream = strings.TrimPrefix(record, "# branch.upstream ")
-		case strings.HasPrefix(record, "# branch.ab "):
-			if _, err := fmt.Sscanf(strings.TrimPrefix(record, "# branch.ab "), "+%d -%d", &snapshot.Ahead, &snapshot.Behind); err != nil {
-				return snapshot, fmt.Errorf("parse branch divergence: %w", err)
-			}
-		case strings.HasPrefix(record, "1 "):
-			fields := strings.SplitN(record, " ", 9)
-			if len(fields) != 9 || len(fields[1]) != 2 {
-				return snapshot, errors.New("malformed ordinary git status entry")
-			}
-			snapshot.Files = append(snapshot.Files, newGitStatusFile(fields[8], "", fields[1], false))
-		case strings.HasPrefix(record, "2 "):
-			fields := strings.SplitN(record, " ", 10)
-			if len(fields) != 10 || len(fields[1]) != 2 || i+1 >= len(records) {
-				return snapshot, errors.New("malformed renamed git status entry")
-			}
-			i++
-			snapshot.Files = append(snapshot.Files, newGitStatusFile(fields[9], records[i], fields[1], false))
-		case strings.HasPrefix(record, "u "):
-			fields := strings.SplitN(record, " ", 11)
-			if len(fields) != 11 || len(fields[1]) != 2 {
-				return snapshot, errors.New("malformed conflicted git status entry")
-			}
-			snapshot.Files = append(snapshot.Files, newGitStatusFile(fields[10], "", fields[1], true))
-		case strings.HasPrefix(record, "? "):
-			snapshot.Files = append(snapshot.Files, newGitStatusFile(strings.TrimPrefix(record, "? "), "", "??", false))
-		case strings.HasPrefix(record, "! "):
-			continue
-		default:
-			return snapshot, errors.New("unknown git status entry")
-		}
-	}
-	for _, file := range snapshot.Files {
-		switch file.Kind {
-		case "untracked":
-			snapshot.Untracked++
-		case "conflicted":
-			snapshot.Conflicted++
-		default:
-			if file.IndexStatus != "." {
-				snapshot.Staged++
-			}
-			if file.WorktreeStatus != "." {
-				snapshot.Unstaged++
-			}
-		}
-	}
-	return snapshot, nil
-}
-
-func newGitStatusFile(path, originalPath, status string, conflicted bool) gitStatusFile {
-	indexStatus := status[:1]
-	worktreeStatus := status[1:]
-	kind := gitStatusKind(indexStatus, worktreeStatus, conflicted)
-	return gitStatusFile{
-		Path:           strings.ToValidUTF8(path, "\uFFFD"),
-		OriginalPath:   strings.ToValidUTF8(originalPath, "\uFFFD"),
-		Kind:           kind,
-		IndexStatus:    indexStatus,
-		WorktreeStatus: worktreeStatus,
-	}
-}
-
-func gitStatusKind(indexStatus, worktreeStatus string, conflicted bool) string {
-	if conflicted || strings.Contains(indexStatus+worktreeStatus, "U") {
-		return "conflicted"
-	}
-	if indexStatus == "?" {
-		return "untracked"
-	}
-	for _, candidate := range []struct {
-		code string
-		kind string
-	}{{"R", "renamed"}, {"C", "copied"}, {"D", "deleted"}, {"A", "added"}, {"T", "type_changed"}, {"M", "modified"}} {
-		if indexStatus == candidate.code || worktreeStatus == candidate.code {
-			return candidate.kind
-		}
-	}
-	return "changed"
-}
-
-func parseGitNumstat(raw string) ([]gitDiffFile, int, int, error) {
-	records := strings.Split(raw, "\x00")
-	files := make([]gitDiffFile, 0, len(records))
-	totalAdditions := 0
-	totalDeletions := 0
-	for i := 0; i < len(records); i++ {
-		record := records[i]
-		if record == "" {
-			continue
-		}
-		fields := strings.SplitN(record, "\t", 3)
-		if len(fields) != 3 {
-			return nil, 0, 0, errors.New("malformed git numstat entry")
-		}
-		path := fields[2]
-		originalPath := ""
-		if path == "" {
-			if i+2 >= len(records) {
-				return nil, 0, 0, errors.New("malformed renamed git numstat entry")
-			}
-			originalPath = records[i+1]
-			path = records[i+2]
-			i += 2
-		}
-		binary := fields[0] == "-" || fields[1] == "-"
-		additions := 0
-		deletions := 0
-		var err error
-		if !binary {
-			additions, err = strconv.Atoi(fields[0])
-			if err != nil {
-				return nil, 0, 0, errors.New("invalid git numstat additions")
-			}
-			deletions, err = strconv.Atoi(fields[1])
-			if err != nil {
-				return nil, 0, 0, errors.New("invalid git numstat deletions")
-			}
-		}
-		totalAdditions += additions
-		totalDeletions += deletions
-		files = append(files, gitDiffFile{
-			Path:         strings.ToValidUTF8(path, "\uFFFD"),
-			OriginalPath: strings.ToValidUTF8(originalPath, "\uFFFD"),
-			Additions:    additions,
-			Deletions:    deletions,
-			Binary:       binary,
-		})
-	}
-	return files, totalAdditions, totalDeletions, nil
 }
 
 func parseGitLog(raw string) ([]gitCommit, error) {

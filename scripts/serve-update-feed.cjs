@@ -2,12 +2,17 @@ const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
 
+const packageMetadata = require("../package.json");
+const { resolveReleaseChannel } = require("../packaging/release-channel.cjs");
+
 const root = path.resolve(process.argv[2] || path.join(__dirname, "..", "dist", "release"));
 const port = positiveInt(process.argv[3] || process.env.PUDDING_UPDATE_TEST_PORT, 8099);
 const host = "127.0.0.1";
+const version = String(process.env.PUDDING_APP_VERSION || packageMetadata.version || "").trim();
+const releaseChannel = resolveReleaseChannel(process.env.PUDDING_RELEASE_CHANNEL, version);
 
-if (!fs.existsSync(path.join(root, "latest-mac.yml"))) {
-  console.error(`latest-mac.yml not found in ${root}`);
+if (!fs.existsSync(path.join(root, releaseChannel.updateInfoFile))) {
+  console.error(`${releaseChannel.updateInfoFile} not found in ${root}`);
   process.exit(1);
 }
 

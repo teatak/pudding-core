@@ -2,6 +2,8 @@ package tool
 
 import (
 	"encoding/json"
+	"net"
+	"net/url"
 	"path/filepath"
 	"strings"
 )
@@ -25,14 +27,24 @@ type ToolRisk struct {
 }
 
 func ClassifyToolCall(name string, raw json.RawMessage) (ToolRisk, bool) {
+	return classifyToolCall(name, raw, nil)
+}
+
+// ClassifyToolCallForProject uses the authorized roots to distinguish an
+// in-project absolute path from a real project escape.
+func ClassifyToolCallForProject(name string, raw json.RawMessage, projectDirs []string) (ToolRisk, bool) {
+	return classifyToolCall(name, raw, projectDirs)
+}
+
+func classifyToolCall(name string, raw json.RawMessage, projectDirs []string) (ToolRisk, bool) {
 	if name == CodeSymbols || name == CodeDefinition || name == CodeReferences || name == CodeDiagnostics || name == CodeRename {
 		return classifyCodeReadCall(name, raw)
 	}
 	if name == CommandRun {
-		return classifyCommandCall(raw)
+		return classifyCommandCall(raw, projectDirs)
 	}
 	if name == CommandStart {
-		return classifyCommandStartCall(raw)
+		return classifyCommandStartCall(raw, projectDirs)
 	}
 	if name == GitStatus || name == GitDiff || name == GitLog {
 		return classifyGitReadCall(name, raw)
@@ -96,13 +108,13 @@ func ClassifyToolCall(name string, raw json.RawMessage) (ToolRisk, bool) {
 	}
 }
 
-func classifyCommandStartCall(raw json.RawMessage) (ToolRisk, bool) {
+func classifyCommandStartCall(raw json.RawMessage, projectDirs []string) (ToolRisk, bool) {
 	args, err := decodeCommandStartArgs(raw)
 	if err != nil {
 		return ToolRisk{}, false
 	}
 	command := commandRunArgs{Scope: args.Scope, Argv: args.Argv, Script: args.Script, CWD: args.CWD, Env: args.Env}
-	risk, ok := classifyCommandCall(mustMarshalCommandRisk(command))
+	risk, ok := classifyCommandCall(mustMarshalCommandRisk(command), projectDirs)
 	if !ok {
 		return ToolRisk{}, false
 	}
@@ -110,7 +122,6 @@ func classifyCommandStartCall(raw json.RawMessage) (ToolRisk, bool) {
 		risk.Class = RiskClassCommand
 	}
 	risk.Operation = "process_start"
-	risk.LowRisk = false
 	if args.Script != "" {
 		risk.Summary = "Start background project shell script: " + compactScript(args.Script)
 	} else {
@@ -206,7 +217,7 @@ func classifyGitReadCall(name string, raw json.RawMessage) (ToolRisk, bool) {
 	}, true
 }
 
-func classifyCommandCall(raw json.RawMessage) (ToolRisk, bool) {
+func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, bool) {
 	var args commandRunArgs
 	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil || strings.TrimSpace(args.Scope) != managedScopeProject || validateCommandInput(args) != nil {
 		return ToolRisk{}, false
@@ -226,17 +237,25 @@ func classifyCommandCall(raw json.RawMessage) (ToolRisk, bool) {
 		}, true
 	}
 	operation := commandOperation(args.Argv[0])
+	lowRisk := commandExecutableAllowedForAuto(args.Argv[0], args.CWD, projectDirs) &&
+		!commandRequiresApproval(args.Argv) &&
+		!commandArgsEscapeProject(args.Argv[1:], args.CWD, projectDirs)
+	if lowRisk && isProjectFilesystemCommand(operation) {
+		lowRisk = commandFilesystemArgsInsideProject(args.Argv[1:], args.CWD, projectDirs)
+	}
 	risk := ToolRisk{
 		Class:     RiskClassCommand,
 		Operation: operation,
 		Scope:     managedScopeProject,
 		Paths:     compactRiskPaths(args.CWD),
 		Summary:   "Run project command: " + compactCommand(args.Argv),
-		LowRisk:   isLowRiskCommand(args.Argv) && !commandArgsEscapeProject(args.Argv[1:]),
+		LowRisk:   lowRisk,
 	}
 	if len(args.Env) > 0 {
-		risk.LowRisk = false
 		risk.Summary = "Run project command with custom environment: " + compactCommand(args.Argv)
+		if commandEnvironmentRequiresApproval(args.Env) {
+			risk.LowRisk = false
+		}
 	}
 	if isDestructiveCommand(operation) {
 		risk.Class = RiskClassDestructive
@@ -250,7 +269,12 @@ func compactScript(script string) string {
 	return compactCommand([]string{strings.Join(strings.Fields(script), " ")})
 }
 
-func commandArgsEscapeProject(args []string) bool {
+func commandArgsEscapeProject(args []string, cwd string, projectDirs []string) bool {
+	roots := normalizeProjectDirs(projectDirs)
+	resolvedCWD := ""
+	if len(roots) > 0 {
+		_, resolvedCWD, _, _ = resolveProjectPath(roots, cwd, true, false)
+	}
 	for _, arg := range args {
 		candidate := strings.TrimSpace(arg)
 		if index := strings.IndexByte(candidate, '='); index >= 0 {
@@ -262,10 +286,52 @@ func commandArgsEscapeProject(args []string) bool {
 		}
 		cleaned := filepath.Clean(candidate)
 		if filepath.IsAbs(candidate) || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
-			return true
+			if resolvedCWD == "" || !commandPathInsideProject(candidate, resolvedCWD, roots) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+func commandFilesystemArgsInsideProject(args []string, cwd string, projectDirs []string) bool {
+	roots := normalizeProjectDirs(projectDirs)
+	if len(roots) == 0 {
+		return !commandArgsEscapeProject(args, cwd, nil)
+	}
+	_, resolvedCWD, _, err := resolveProjectPath(roots, cwd, true, false)
+	if err != nil {
+		return false
+	}
+	for _, arg := range args {
+		candidate := strings.Trim(strings.TrimSpace(arg), "\"'")
+		if candidate == "" || candidate == "--" {
+			continue
+		}
+		if strings.HasPrefix(candidate, "-") {
+			if index := strings.IndexByte(candidate, '='); index >= 0 {
+				candidate = strings.Trim(candidate[index+1:], "\"'")
+			} else {
+				if strings.ContainsAny(candidate, `/\\`) {
+					return false
+				}
+				continue
+			}
+		}
+		if candidate != "" && !commandPathInsideProject(candidate, resolvedCWD, roots) {
+			return false
+		}
+	}
+	return true
+}
+
+func commandPathInsideProject(rawPath, resolvedCWD string, projectDirs []string) bool {
+	target := rawPath
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(resolvedCWD, target)
+	}
+	_, _, _, err := resolveProjectPath(projectDirs, target, true, true)
+	return err == nil
 }
 
 func commandOperation(executable string) string {
@@ -275,68 +341,326 @@ func commandOperation(executable string) string {
 
 func isDestructiveCommand(operation string) bool {
 	switch operation {
-	case "rm", "rmdir", "unlink", "shred", "dd", "mkfs", "diskutil", "format", "del", "erase", "shutdown", "reboot", "kill", "pkill", "taskkill":
+	case "rm", "rmdir", "unlink", "shred", "truncate", "dd", "mkfs", "diskutil", "format", "del", "erase", "shutdown", "reboot", "kill", "pkill", "taskkill":
 		return true
 	default:
 		return false
 	}
 }
 
-func isLowRiskCommand(argv []string) bool {
+func commandRequiresApproval(argv []string) bool {
 	if len(argv) == 0 {
+		return true
+	}
+	operation := commandOperation(argv[0])
+	args := argv[1:]
+	if isDestructiveCommand(operation) || isAlwaysRiskyCommand(operation) || commandRequestsWildcardBind(args) {
+		return true
+	}
+	switch operation {
+	case "git":
+		return !isLowRiskGitCommand(args)
+	case "find":
+		return !isReadOnlyFind(args)
+	case "fd", "fdfind":
+		return containsAnyArg(args, "-x", "-X") || containsArgPrefix(args, "--exec", "--exec-batch")
+	case "rg":
+		return containsArgPrefix(args, "--pre", "--hostname-bin")
+	case "go":
+		return commandSubcommand(args) == "env" && containsAnyArg(args, "-w", "-u")
+	case "npm", "pnpm", "yarn", "bun", "cargo":
+		return commandHasPublishingArgument(args)
+	case "gem":
+		return commandSubcommand(args) == "push"
+	case "twine":
+		return commandSubcommand(args) == "upload"
+	case "curl", "wget":
+		return !commandUsesOnlyLoopbackURLs(args)
+	case "sh", "bash", "zsh", "dash", "ksh", "fish", "python", "python3", "py", "node", "deno", "ruby", "perl", "php",
+		"lua", "luajit", "julia", "elixir", "swift", "r", "rscript", "awk", "gawk", "mawk", "nawk", "powershell", "pwsh", "cmd":
+		return commandUsesInlineCode(operation, args)
+	default:
 		return false
 	}
-	op := commandOperation(argv[0])
-	args := argv[1:]
-	first := ""
-	if len(args) > 0 {
-		first = strings.ToLower(strings.TrimSpace(args[0]))
+}
+
+func commandExecutableAllowedForAuto(executable, cwd string, projectDirs []string) bool {
+	if isBareCommand(executable) {
+		return true
 	}
-	switch op {
-	case "pwd", "ls", "cat", "head", "tail", "wc", "stat", "file", "du", "realpath", "basename", "dirname", "which":
-		return true
-	case "rg":
-		return !containsArgPrefix(args, "--pre", "--hostname-bin")
-	case "grep", "egrep", "fgrep":
-		return true
-	case "find":
-		return isReadOnlyFind(args)
-	case "fd", "fdfind":
-		return !containsAnyArg(args, "-x", "-X") && !containsArgPrefix(args, "--exec", "--exec-batch")
-	case "sed":
-		return isReadOnlySed(args)
-	case "gofmt", "goimports":
-		return true
-	case "go":
-		switch first {
-		case "test", "vet", "build", "list", "version":
-			return true
-		case "env":
-			return !containsAnyArg(args[1:], "-w", "-u")
-		}
-	case "npm", "pnpm", "yarn", "bun":
-		if first == "test" {
+	roots := normalizeProjectDirs(projectDirs)
+	if len(roots) > 0 {
+		_, resolvedCWD, _, err := resolveProjectPath(roots, cwd, true, false)
+		if err == nil && commandPathInsideProject(executable, resolvedCWD, roots) {
 			return true
 		}
-		if first == "run" && len(args) > 1 {
-			return isVerificationTarget(args[1])
+	}
+	if !filepath.IsAbs(executable) {
+		return false
+	}
+	cleaned := filepath.Clean(executable)
+	for _, root := range []string{"/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/local/bin", "/opt/homebrew/bin"} {
+		if pathInsideRoot(cleaned, root) {
+			return true
 		}
-	case "cargo":
-		return first == "test" || first == "check" || first == "build" || first == "clippy"
-	case "pytest":
+	}
+	return false
+}
+
+func isAlwaysRiskyCommand(operation string) bool {
+	switch operation {
+	case "sudo", "doas", "su", "launchctl", "systemsetup", "networksetup", "scutil", "csrutil", "nvram",
+		"mount", "umount", "hdiutil", "chmod", "chown", "chgrp", "security", "ssh-add", "gpg", "pass",
+		"open", "osascript", "pbcopy", "pbpaste", "ssh", "scp", "sftp", "ftp", "nc", "ncat", "socat", "rsync",
+		"gh", "glab", "docker", "podman", "kubectl", "helm", "terraform", "tofu", "ansible", "ansible-playbook",
+		"brew", "port", "xargs", "parallel", "env", "nice", "nohup", "time", "command", "arch", "caffeinate",
+		"script", "timeout", "gtimeout", "xcrun", "setsid", "stdbuf", "unbuffer", "daemon", "chronic", "chpst",
+		"ionice", "taskset", "watch", "busybox", "toybox":
 		return true
+	default:
+		return false
+	}
+}
+
+func commandEnvironmentRequiresApproval(env map[string]string) bool {
+	for key, value := range env {
+		key = strings.ToUpper(strings.TrimSpace(key))
+		if commandBindEnvironmentKey(key) && isWildcardBindAddress(value) {
+			return true
+		}
+		switch key {
+		case "PATH", "HOME", "SHELL", "BASH_ENV", "ENV", "ZDOTDIR", "PYTHONPATH", "NODE_OPTIONS", "RUBYOPT", "PERL5OPT", "SSH_AUTH_SOCK":
+			return true
+		case "CC", "CXX", "CPP", "LD", "AR", "RANLIB", "STRIP", "OBJCOPY", "OBJDUMP", "NM", "PKG_CONFIG",
+			"RUSTC", "RUSTDOC", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER", "CARGO_BUILD_RUSTC_WRAPPER",
+			"RUSTFLAGS", "RUSTDOCFLAGS", "CARGO_ENCODED_RUSTFLAGS", "CARGO_HOME", "RUSTUP_HOME",
+			"GOENV", "GOROOT", "JAVA_HOME", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "CLASSPATH",
+			"MAKEFLAGS", "MFLAGS", "MAKEFILES", "CMAKE_TOOLCHAIN_FILE", "CMAKE_PROJECT_INCLUDE", "CMAKE_PROJECT_INCLUDE_BEFORE", "CMAKE_MAKE_PROGRAM",
+			"NPM_CONFIG_SCRIPT_SHELL", "NPM_CONFIG_USERCONFIG", "YARN_RC_FILENAME", "PNPM_HOME", "BUN_INSTALL",
+			"PYTHONSTARTUP", "PYTHONHOME", "PIP_CONFIG_FILE", "VIRTUAL_ENV",
+			"RUBYLIB", "GEM_HOME", "GEM_PATH", "BUNDLE_GEMFILE", "PERL5LIB", "LUA_PATH", "LUA_CPATH", "PHPRC", "PHP_INI_SCAN_DIR":
+			return true
+		}
+		if strings.HasPrefix(key, "CARGO_TARGET_") &&
+			(strings.HasSuffix(key, "_LINKER") || strings.HasSuffix(key, "_RUNNER") || strings.HasSuffix(key, "_RUSTFLAGS")) {
+			return true
+		}
+		if strings.HasPrefix(key, "DYLD_") || strings.HasPrefix(key, "LD_") || strings.HasPrefix(key, "GIT_") {
+			return true
+		}
+		if key == "GOFLAGS" && strings.Contains(strings.ToLower(value), "-toolexec") {
+			return true
+		}
+		switch key {
+		case "PAGER", "MANPAGER", "LESSOPEN", "EDITOR", "VISUAL":
+			return true
+		}
+	}
+	return false
+}
+
+func commandRequestsWildcardBind(args []string) bool {
+	for index, arg := range args {
+		arg = strings.TrimSpace(arg)
+		lower := strings.ToLower(arg)
+		switch lower {
+		case "--host", "--hostname", "--bind", "--listen", "--listen-address":
+			if index+1 < len(args) && isWildcardBindAddress(args[index+1]) {
+				return true
+			}
+		}
+		for _, prefix := range []string{"--host=", "--hostname=", "--bind=", "--listen=", "--listen-address="} {
+			if strings.HasPrefix(lower, prefix) && isWildcardBindAddress(arg[len(prefix):]) {
+				return true
+			}
+		}
+		if isWildcardBindEndpoint(arg) {
+			return true
+		}
+	}
+	return false
+}
+
+func commandBindEnvironmentKey(key string) bool {
+	switch key {
+	case "HOST", "HOSTNAME", "BIND", "BIND_ADDRESS", "LISTEN", "LISTEN_ADDRESS":
+		return true
+	default:
+		return strings.HasSuffix(key, "_HOST") || strings.HasSuffix(key, "_BIND_ADDRESS") || strings.HasSuffix(key, "_LISTEN_ADDRESS")
+	}
+}
+
+func isWildcardBindAddress(value string) bool {
+	value = strings.ToLower(strings.Trim(strings.TrimSpace(value), "\"'"))
+	switch value {
+	case "*", "0.0.0.0", "::", "[::]":
+		return true
+	}
+	return strings.HasPrefix(value, "*:") || strings.HasPrefix(value, "0.0.0.0:") || strings.HasPrefix(value, "[::]:")
+}
+
+func isWildcardBindEndpoint(value string) bool {
+	value = strings.ToLower(strings.Trim(strings.TrimSpace(value), "\"'"))
+	return strings.HasPrefix(value, "*:") || strings.HasPrefix(value, "0.0.0.0:") || strings.HasPrefix(value, "[::]:")
+}
+
+func commandSubcommand(args []string) string {
+	for _, arg := range args {
+		arg = strings.ToLower(strings.TrimSpace(arg))
+		if arg == "" || strings.HasPrefix(arg, "-") {
+			continue
+		}
+		return arg
+	}
+	return ""
+}
+
+func commandHasPublishingArgument(args []string) bool {
+	for _, arg := range args {
+		switch strings.ToLower(strings.TrimSpace(arg)) {
+		case "publish", "unpublish", "login", "logout", "owner", "token", "yank":
+			return true
+		}
+	}
+	return false
+}
+
+func commandUsesInlineCode(operation string, args []string) bool {
+	switch operation {
+	case "sh", "bash", "zsh", "dash", "ksh", "fish":
+		return containsAnyArg(args, "-c", "-lc") || containsAttachedShortOption(args, "-c", "-lc")
 	case "python", "python3", "py":
-		return len(args) > 1 && first == "-m" && strings.EqualFold(args[1], "pytest")
-	case "make", "gmake":
-		return len(args) > 0 && isVerificationTarget(args[len(args)-1])
-	case "mvn", "mvnw", "gradle", "gradlew":
-		return containsVerificationTarget(args)
-	case "dotnet":
-		return first == "test" || first == "build"
-	case "git":
-		switch first {
-		case "status", "diff", "log", "show", "rev-parse", "ls-files", "grep", "blame", "describe", "shortlog":
-			return true
+		return containsAnyArg(args, "-c") || containsAttachedShortOption(args, "-c")
+	case "node", "deno":
+		return containsAnyArg(args, "-e", "--eval", "-p", "--print") ||
+			containsArgPrefix(args, "-e", "--eval", "-p", "--print") ||
+			containsAttachedShortOption(args, "-e", "-p") ||
+			commandSubcommand(args) == "eval"
+	case "ruby", "perl", "php", "lua", "luajit", "julia", "elixir", "swift", "r", "rscript":
+		return containsAnyArg(args, "-e", "-r", "--eval") ||
+			containsArgPrefix(args, "--eval") ||
+			containsAttachedShortOption(args, "-e", "-r")
+	case "awk", "gawk", "mawk", "nawk":
+		return !containsAnyArg(args, "-f", "--file") && !containsArgPrefix(args, "--file")
+	case "powershell", "pwsh":
+		return containsAnyArg(args, "-c", "-command", "-encodedcommand") ||
+			containsAttachedShortOption(args, "-c", "-command", "-encodedcommand")
+	case "cmd":
+		return containsAnyArg(args, "/c", "/k") || containsAttachedShortOption(args, "/c", "/k")
+	default:
+		return false
+	}
+}
+
+func containsAttachedShortOption(args []string, options ...string) bool {
+	for _, arg := range args {
+		arg = strings.ToLower(strings.TrimSpace(arg))
+		for _, option := range options {
+			option = strings.ToLower(option)
+			if len(arg) > len(option) && strings.HasPrefix(arg, option) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func commandUsesOnlyLoopbackURLs(args []string) bool {
+	found := false
+	for _, arg := range args {
+		arg = strings.TrimSpace(arg)
+		if arg == "" || strings.HasPrefix(arg, "-") {
+			continue
+		}
+		host := ""
+		if parsed, err := url.Parse(arg); err == nil && parsed.Hostname() != "" {
+			host = parsed.Hostname()
+		} else {
+			candidate := strings.TrimPrefix(arg, "//")
+			candidate = strings.SplitN(candidate, "/", 2)[0]
+			if parsedHost, _, err := net.SplitHostPort(candidate); err == nil {
+				host = strings.Trim(parsedHost, "[]")
+			} else if strings.EqualFold(candidate, "localhost") {
+				host = candidate
+			}
+		}
+		if host == "" {
+			continue
+		}
+		found = true
+		if !strings.EqualFold(host, "localhost") {
+			ip := net.ParseIP(host)
+			if ip == nil || !ip.IsLoopback() {
+				return false
+			}
+		}
+	}
+	return found
+}
+
+func isBareCommand(executable string) bool {
+	executable = strings.TrimSpace(executable)
+	return executable != "" && executable == filepath.Base(executable) && !strings.ContainsAny(executable, `/\\`)
+}
+
+func isProjectFilesystemCommand(operation string) bool {
+	switch operation {
+	case "mkdir", "touch", "cp", "mv":
+		return true
+	default:
+		return false
+	}
+}
+
+func isLowRiskGitCommand(args []string) bool {
+	for len(args) > 0 {
+		rawArg := strings.TrimSpace(args[0])
+		arg := strings.ToLower(rawArg)
+		switch {
+		case rawArg == "-C" || arg == "--git-dir" || arg == "--work-tree" || arg == "--namespace":
+			if len(args) < 2 {
+				return false
+			}
+			args = args[2:]
+		case rawArg == "-c":
+			return false
+		case strings.HasPrefix(arg, "--git-dir=") || strings.HasPrefix(arg, "--work-tree=") || strings.HasPrefix(arg, "--namespace="):
+			args = args[1:]
+		case arg == "--no-pager" || arg == "--paginate" || arg == "--literal-pathspecs" || arg == "--no-literal-pathspecs" || arg == "--no-optional-locks":
+			args = args[1:]
+		case strings.HasPrefix(arg, "-"):
+			return false
+		default:
+			switch arg {
+			case "status", "diff", "log", "show", "rev-parse", "ls-files", "grep", "blame", "describe", "shortlog", "ls-remote":
+				return true
+			case "clone", "fetch":
+				return !gitArgsRequireApproval(arg, args[1:])
+			case "pull":
+				return !gitArgsRequireApproval(arg, args[1:])
+			default:
+				return false
+			}
+		}
+	}
+	return false
+}
+
+func gitArgsRequireApproval(command string, args []string) bool {
+	for _, rawArg := range args {
+		rawArg = strings.TrimSpace(rawArg)
+		arg := strings.ToLower(rawArg)
+		switch command {
+		case "clone", "fetch":
+			if arg == "-u" || strings.HasPrefix(arg, "-u") || arg == "--upload-pack" || strings.HasPrefix(arg, "--upload-pack=") ||
+				arg == "-c" || strings.HasPrefix(arg, "-c") || arg == "--config" || strings.HasPrefix(arg, "--config=") {
+				return true
+			}
+		case "pull":
+			if rawArg == "-x" || strings.HasPrefix(rawArg, "-x") || arg == "--exec" || strings.HasPrefix(arg, "--exec=") ||
+				arg == "--upload-pack" || strings.HasPrefix(arg, "--upload-pack=") {
+				return true
+			}
 		}
 	}
 	return false
@@ -368,57 +692,6 @@ func isReadOnlyFind(args []string) bool {
 	return true
 }
 
-func isReadOnlySed(args []string) bool {
-	expression := ""
-	for i := 0; i < len(args); i++ {
-		arg := strings.TrimSpace(args[i])
-		switch arg {
-		case "-n", "--quiet", "--silent":
-			continue
-		case "-e", "--expression":
-			if expression != "" || i+1 >= len(args) {
-				return false
-			}
-			i++
-			expression = strings.TrimSpace(args[i])
-			continue
-		}
-		if strings.HasPrefix(arg, "-") {
-			return false
-		}
-		if expression == "" {
-			expression = arg
-		}
-	}
-	return isSedSliceExpression(expression)
-}
-
-func isSedSliceExpression(expression string) bool {
-	expression = strings.TrimSpace(expression)
-	if !strings.HasSuffix(expression, "p") {
-		return false
-	}
-	addresses := strings.Split(strings.TrimSuffix(expression, "p"), ",")
-	if len(addresses) < 1 || len(addresses) > 2 {
-		return false
-	}
-	for _, address := range addresses {
-		address = strings.TrimSpace(address)
-		if address == "$" {
-			continue
-		}
-		if address == "" {
-			return false
-		}
-		for _, r := range address {
-			if r < '0' || r > '9' {
-				return false
-			}
-		}
-	}
-	return true
-}
-
 func containsAnyArg(args []string, values ...string) bool {
 	for _, arg := range args {
 		for _, value := range values {
@@ -428,24 +701,6 @@ func containsAnyArg(args []string, values ...string) bool {
 		}
 	}
 	return false
-}
-
-func containsVerificationTarget(args []string) bool {
-	for _, arg := range args {
-		if isVerificationTarget(arg) {
-			return true
-		}
-	}
-	return false
-}
-
-func isVerificationTarget(value string) bool {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "test", "tests", "check", "lint", "build", "typecheck", "type-check", "verify":
-		return true
-	default:
-		return false
-	}
 }
 
 func compactCommand(argv []string) string {

@@ -222,6 +222,12 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/canvas/items/:itemID").PUT(s.putCanvasItem).PATCH(s.patchCanvasItem).DELETE(s.deleteCanvasItem)
 	app.Route("/sessions/:id/canvas/closed").GET(s.listClosedCanvasItems).POST(s.createClosedCanvasItem).DELETE(s.clearClosedCanvasItems)
 	app.Route("/sessions/:id/canvas/closed/:closedID").DELETE(s.deleteClosedCanvasItem)
+	app.Route("/sessions/:id/project/tree").GET(s.listProjectTree)
+	app.Route("/sessions/:id/project/file").GET(s.getProjectFile).PUT(s.putProjectFile)
+	app.Route("/sessions/:id/project/entries").POST(s.createProjectEntry).PATCH(s.renameProjectEntry).DELETE(s.deleteProjectEntry)
+	app.Route("/sessions/:id/project/git/status").GET(s.getProjectGitStatus)
+	app.Route("/sessions/:id/project/git/diff").GET(s.getProjectGitDiff)
+	app.Route("/sessions/:id/project/resources/:rootID/*path").GET(s.getProjectResource)
 	app.Route("/projects").GET(s.listProjects).POST(s.createProject)
 	app.Route("/projects/:id").GET(s.getProject).PATCH(s.patchProject).DELETE(s.deleteProject)
 	app.Route("/settings").GET(s.getSettings).PUT(s.putSettings).DELETE(s.resetSettings)
@@ -469,16 +475,63 @@ func (s *Server) patchProject(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
+	if upd.RootDirs != nil {
+		if err := s.revokeProjectBrowserFileAccess(c.Request.Context(), project.ID); err != nil {
+			return s.browserError(c, err)
+		}
+	}
 	c.JSON(http.StatusOK, project)
 	return nil
 }
 
 func (s *Server) deleteProject(c *cart.Context) error {
 	id, _ := c.Param("id")
+	sessionIDs, err := s.projectSessionIDs(c.Request.Context(), id)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	for _, sessionID := range sessionIDs {
+		if err := s.revokeBrowserFileAccess(c.Request.Context(), sessionID); err != nil {
+			return s.browserError(c, err)
+		}
+	}
 	if err := s.store.DeleteProject(c.Request.Context(), id); err != nil {
 		return s.fail(c, err)
 	}
+	for _, sessionID := range sessionIDs {
+		if err := s.revokeBrowserFileAccess(c.Request.Context(), sessionID); err != nil {
+			return s.browserError(c, err)
+		}
+	}
 	c.String(http.StatusNoContent, "")
+	return nil
+}
+
+func (s *Server) projectSessionIDs(ctx context.Context, projectID string) ([]string, error) {
+	sessions, err := s.store.ListSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	projectID = strings.TrimSpace(projectID)
+	out := make([]string, 0)
+	for _, session := range sessions {
+		if session != nil && strings.TrimSpace(session.ProjectID) == projectID {
+			out = append(out, session.ID)
+		}
+	}
+	return out, nil
+}
+
+func (s *Server) revokeProjectBrowserFileAccess(ctx context.Context, projectID string) error {
+	sessionIDs, err := s.projectSessionIDs(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	for _, sessionID := range sessionIDs {
+		if err := s.revokeBrowserFileAccess(ctx, sessionID); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -535,9 +588,18 @@ func (s *Server) patchSession(c *cart.Context) error {
 		}
 		upd.Model = &model
 	}
+	if upd.ProjectID != nil {
+		projectID := strings.TrimSpace(*upd.ProjectID)
+		upd.ProjectID = &projectID
+	}
 	sess, err := s.store.UpdateSession(c.Request.Context(), id, upd)
 	if err != nil {
 		return s.fail(c, err)
+	}
+	if upd.ProjectID != nil {
+		if err := s.revokeBrowserFileAccess(c.Request.Context(), id); err != nil {
+			return s.browserError(c, err)
+		}
 	}
 	s.enrichSessionProcesses(sess)
 	c.JSON(http.StatusOK, sess)

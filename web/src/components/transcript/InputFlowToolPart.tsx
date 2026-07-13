@@ -1,6 +1,8 @@
 import { Check, ChevronRight, TextCursorInput, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 
+import { ChoiceMenu, type ChoiceMenuItem } from "@/components/ChoiceMenu";
+import { ComposerFloatingPanel } from "@/components/ComposerFloatingPanel";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
@@ -55,15 +57,6 @@ type InputFlowOption = {
   label?: string;
   title?: string;
   value?: unknown;
-};
-type ChoiceMenuItem<T> = {
-  description?: string;
-  disabled?: boolean;
-  id: string;
-  label: string;
-  noActiveStyle?: boolean;
-  render?: (active: boolean) => ReactNode;
-  value: T;
 };
 type Translate = ReturnType<typeof useI18n>["t"];
 export type InputFlowSubmission = {
@@ -355,8 +348,8 @@ function FloatingUIPanel({
   onCancel: () => void;
 }) {
   return (
-    <div
-      className="absolute bottom-full left-4 z-20 flex max-h-[min(20rem,calc(100vh-12rem))] w-[min(34rem,calc(100%-2rem))] flex-col overflow-hidden rounded-t-lg border border-border/70 bg-popover/95 text-popover-foreground shadow-sm backdrop-blur sm:left-16 sm:w-[min(34rem,calc(100%-5rem))]"
+    <ComposerFloatingPanel
+      className="flex w-[min(34rem,calc(100%-2rem))] flex-col overflow-hidden sm:w-[min(34rem,calc(100%-5rem))]"
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -382,7 +375,7 @@ function FloatingUIPanel({
         </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-2">{children}</div>
-    </div>
+    </ComposerFloatingPanel>
   );
 }
 
@@ -801,177 +794,6 @@ function ConfirmStep({
       <ChoiceMenu items={[{ id: "confirm", label: t("inputFlow.confirm"), value: true }]} onSelect={onConfirm} />
     </div>
   );
-}
-
-function ChoiceMenu<T>({
-  items,
-  maxHeightClassName = "max-h-56",
-  onSelect,
-}: {
-  items: Array<ChoiceMenuItem<T>>;
-  maxHeightClassName?: string;
-  onSelect: (value: T) => void;
-}) {
-  const listRef = useRef<HTMLDivElement | null>(null);
-  const selectedRef = useRef<HTMLElement | null>(null);
-  const signature = items.map((item) => `${item.id}:${item.disabled ? "0" : "1"}`).join("|");
-  const [selectedIndex, setSelectedIndex] = useState(() => firstEnabledIndex(items));
-
-  useEffect(() => {
-    setSelectedIndex(firstEnabledIndex(items));
-  }, [signature]);
-
-  useEffect(() => {
-    listRef.current?.focus();
-  }, [signature]);
-
-  useEffect(() => {
-    scrollActiveIntoList(selectedRef.current, listRef.current);
-  }, [selectedIndex, signature]);
-
-  function move(delta: number) {
-    setSelectedIndex((current) => nextEnabledIndex(items, current, delta));
-  }
-
-  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault();
-        move(1);
-        return;
-      case "ArrowUp":
-        event.preventDefault();
-        move(-1);
-        return;
-      case "Home":
-        event.preventDefault();
-        setSelectedIndex(firstEnabledIndex(items));
-        return;
-      case "End":
-        event.preventDefault();
-        setSelectedIndex(lastEnabledIndex(items));
-        return;
-      case "Enter":
-      case " ":
-        event.preventDefault();
-        if (items[selectedIndex] && !items[selectedIndex].disabled) {
-          onSelect(items[selectedIndex].value);
-        }
-        return;
-      default:
-        return;
-    }
-  }
-
-  return (
-    <div
-      ref={listRef}
-      className={cn("grid gap-0.5 overflow-y-auto pr-1 outline-none", maxHeightClassName)}
-      role="listbox"
-      tabIndex={0}
-      onKeyDown={handleKeyDown}
-    >
-      {items.map((item, index) => {
-        const itemClassName = cn(
-          "min-w-0 rounded-md px-2.5 py-1.5 text-left transition disabled:opacity-50",
-          !item.noActiveStyle && "hover:bg-muted",
-          index === selectedIndex && !item.noActiveStyle && "bg-muted text-foreground",
-          item.noActiveStyle && "px-0 py-0.5",
-        );
-        const commonProps = {
-          "aria-selected": index === selectedIndex,
-          className: itemClassName,
-          onMouseEnter: () => {
-            if (!item.disabled) {
-              setSelectedIndex(index);
-            }
-          },
-          onMouseDown: (event: MouseEvent) => {
-            event.preventDefault();
-            if (!item.disabled && !item.noActiveStyle) {
-              onSelect(item.value);
-            }
-          },
-          role: "option",
-          tabIndex: -1,
-        };
-        if (item.render) {
-          return (
-            <div
-              key={item.id}
-              ref={(node) => {
-                if (index === selectedIndex) {
-                  selectedRef.current = node;
-                }
-              }}
-              aria-disabled={item.disabled || undefined}
-              {...commonProps}
-            >
-              {item.render(index === selectedIndex)}
-            </div>
-          );
-        }
-        return (
-          <button
-            key={item.id}
-            ref={(node) => {
-              if (index === selectedIndex) {
-                selectedRef.current = node;
-              }
-            }}
-            {...commonProps}
-            disabled={item.disabled}
-            type="button"
-          >
-            <div className="truncate text-sm font-medium">{item.label}</div>
-            {item.description ? <div className="mt-0.5 truncate text-xs text-muted-foreground">{item.description}</div> : null}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function firstEnabledIndex(items: Array<{ disabled?: boolean }>) {
-  const index = items.findIndex((item) => !item.disabled);
-  return index >= 0 ? index : 0;
-}
-
-function lastEnabledIndex(items: Array<{ disabled?: boolean }>) {
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    if (!items[index]?.disabled) {
-      return index;
-    }
-  }
-  return 0;
-}
-
-function nextEnabledIndex(items: Array<{ disabled?: boolean }>, current: number, delta: number) {
-  if (items.length === 0) {
-    return 0;
-  }
-  let index = current;
-  for (let count = 0; count < items.length; count += 1) {
-    index = (index + delta + items.length) % items.length;
-    if (!items[index]?.disabled) {
-      return index;
-    }
-  }
-  return current;
-}
-
-function scrollActiveIntoList(active: HTMLElement | null, list: HTMLElement | null) {
-  if (!active || !list) {
-    return;
-  }
-  const activeRect = active.getBoundingClientRect();
-  const listRect = list.getBoundingClientRect();
-  const padding = 4;
-  if (activeRect.top < listRect.top + padding) {
-    list.scrollTop -= listRect.top + padding - activeRect.top;
-  } else if (activeRect.bottom > listRect.bottom - padding) {
-    list.scrollTop += activeRect.bottom - (listRect.bottom - padding);
-  }
 }
 
 function normalizeInputFlow(value: unknown): { raw: Record<string, unknown>; schema: InputFlowSchema } | null {

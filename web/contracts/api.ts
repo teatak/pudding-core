@@ -51,6 +51,116 @@ export const patchProjectRequest = z.object({
   approvalMode: approvalMode.optional(),
 });
 
+export const projectBrowserRoot = z.object({
+  id: z.string(),
+  name: z.string(),
+  path: z.string(),
+});
+export type ProjectBrowserRoot = z.infer<typeof projectBrowserRoot>;
+
+export const projectBrowserRootsResponse = z.object({
+  projectID: z.string(),
+  roots: z.array(projectBrowserRoot),
+});
+
+export const projectTreeEntry = z.object({
+  name: z.string(),
+  path: z.string(),
+  type: z.enum(["dir", "file", "symlink", "other"]),
+  size: z.number().int().nonnegative().optional(),
+  mtime: z.string().optional(),
+});
+export type ProjectTreeEntry = z.infer<typeof projectTreeEntry>;
+
+export const projectTreeResponse = z.object({
+  rootID: z.string(),
+  path: z.string(),
+  entries: z.array(projectTreeEntry),
+  truncated: z.boolean(),
+  totalCount: z.number().int().nonnegative(),
+});
+export type ProjectTreeResponse = z.infer<typeof projectTreeResponse>;
+
+export const projectFile = z.object({
+  rootID: z.string(),
+  path: z.string(),
+  name: z.string(),
+  content: z.string(),
+  mime: z.string(),
+  size: z.number().int().nonnegative(),
+  mtime: z.string(),
+  revision: z.string().min(1),
+});
+export type ProjectFile = z.infer<typeof projectFile>;
+
+export const projectGitStatusFile = z.object({
+  path: z.string(),
+  originalPath: z.string().optional(),
+  kind: z.enum(["modified", "added", "deleted", "renamed", "copied", "type_changed", "untracked", "conflicted", "changed"]),
+  indexStatus: z.string().length(1),
+  worktreeStatus: z.string().length(1),
+});
+export type ProjectGitStatusFile = z.infer<typeof projectGitStatusFile>;
+
+export const projectGitStatus = z.object({
+  rootID: z.string(),
+  available: z.boolean(),
+  head: z.string().optional(),
+  branch: z.string().optional(),
+  upstream: z.string().optional(),
+  detached: z.boolean(),
+  ahead: z.number().int().nonnegative(),
+  behind: z.number().int().nonnegative(),
+  clean: z.boolean(),
+  files: z.array(projectGitStatusFile),
+  fileCount: z.number().int().nonnegative(),
+  stagedCount: z.number().int().nonnegative(),
+  unstagedCount: z.number().int().nonnegative(),
+  untrackedCount: z.number().int().nonnegative(),
+  conflictedCount: z.number().int().nonnegative(),
+});
+export type ProjectGitStatus = z.infer<typeof projectGitStatus>;
+
+export const projectGitDiff = z.object({
+  rootID: z.string(),
+  path: z.string(),
+  originalPath: z.string().optional(),
+  staged: z.boolean(),
+  oldContent: z.string(),
+  newContent: z.string(),
+  binary: z.boolean(),
+  tooLarge: z.boolean(),
+});
+export type ProjectGitDiff = z.infer<typeof projectGitDiff>;
+
+export const projectEntryMutation = z.object({
+  rootID: z.string(),
+  name: z.string(),
+  path: z.string(),
+  type: z.enum(["dir", "file"]),
+});
+export type ProjectEntryMutation = z.infer<typeof projectEntryMutation>;
+
+export const createProjectEntryRequest = z.object({
+  rootID: z.string().min(1),
+  parentPath: z.string().min(1),
+  name: z.string().min(1),
+  type: z.enum(["dir", "file"]),
+});
+
+export const renameProjectEntryRequest = z.object({
+  rootID: z.string().min(1),
+  path: z.string().min(1),
+  name: z.string().min(1),
+});
+
+export const saveProjectFileRequest = z.object({
+  rootID: z.string().min(1),
+  path: z.string().min(1),
+  content: z.string(),
+  expectedRevision: z.string().min(1),
+});
+
 export const canvasItem = z.object({
   id: z.string(),
   canvasID: z.string(),
@@ -142,8 +252,8 @@ export const browserState = z.object({
   url: z.string().optional(),
   title: z.string().optional(),
   faviconURL: z.string().optional(),
-  mode: z.enum(["headless", "external"]).optional(),
-  processMode: z.enum(["headless", "external"]).optional(),
+  mode: z.enum(["headless", "webview", "external"]).optional(),
+  processMode: z.enum(["headless", "webview", "external"]).optional(),
   recoverable: z.boolean().optional(),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
@@ -572,7 +682,7 @@ export const browserTab = z.object({
   url: z.string(),
   title: z.string(),
   faviconURL: z.string().optional(),
-  mode: z.enum(["headless", "external"]).optional(),
+  mode: z.enum(["headless", "webview", "external"]).optional(),
   canGoBack: z.boolean().optional(),
   canGoForward: z.boolean().optional(),
   createdAt: z.string(),
@@ -627,7 +737,7 @@ export type BrowserActionResult = z.infer<typeof browserActionResult>;
 
 export const listBrowserTabsResponse = z.object({
   tabs: z.array(browserTab),
-  processMode: z.enum(["headless", "external"]).optional(),
+  processMode: z.enum(["headless", "webview", "external"]).optional(),
 });
 
 export const terminalStatus = z.enum(["running", "exited"]);
@@ -663,6 +773,9 @@ export const backgroundProcess = z.object({
   finishedAt: z.string().optional(),
   reason: z.string().optional(),
   error: z.string().optional(),
+  sandboxed: z.boolean(),
+  sandboxKind: z.string().optional(),
+  sandboxDenied: z.boolean().optional(),
 });
 export type BackgroundProcess = z.infer<typeof backgroundProcess>;
 
@@ -711,7 +824,7 @@ export const browserClickRequest = z.object({
   selector: z.string().optional(),
   x: z.number().optional(),
   y: z.number().optional(),
-  method: z.enum(["auto", "pointer", "dom"]).optional(),
+  method: z.enum(["auto", "pointer"]).optional(),
 });
 export const browserTypeRequest = z.object({
   selector: z.string().optional(),

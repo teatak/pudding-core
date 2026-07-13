@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld("puddingElectronDesktop", {
   openExternal: (url) => ipcRenderer.invoke("pudding:desktop:open-external", url),
   setLocale: (locale) => ipcRenderer.invoke("pudding:desktop:set-locale", locale),
   getUpdateState: () => ipcRenderer.invoke("pudding:desktop:update:get-state"),
+  setPreviewUpdatesEnabled: (enabled) => ipcRenderer.invoke("pudding:desktop:update:set-preview", enabled),
   activateUpdate: () => ipcRenderer.invoke("pudding:desktop:update:activate"),
   onUpdateState: (listener) => {
     const wrapped = (_event, state) => listener(state);
@@ -52,10 +53,19 @@ contextBridge.exposeInMainWorld("puddingElectronDesktop", {
   pickDirectories: (options) => ipcRenderer.invoke("pudding:desktop:pick-directories", options),
 });
 
+contextBridge.exposeInMainWorld("puddingElectronProjectFiles", {
+  watch: (request) => ipcRenderer.invoke("pudding:project-file:watch", request),
+  unwatch: (request) => ipcRenderer.invoke("pudding:project-file:unwatch", request),
+  onChanged: (listener) => {
+    const wrapped = (_event, change) => listener(change);
+    ipcRenderer.on("pudding:project-file:changed", wrapped);
+    return () => ipcRenderer.off("pudding:project-file:changed", wrapped);
+  },
+});
+
 contextBridge.exposeInMainWorld("puddingElectronBrowser", {
   ensure: (request) => ipcRenderer.invoke("pudding:browser:ensure", request),
   registerWebview: (request) => ipcRenderer.invoke("pudding:browser:webview-register", request),
-  resolveWebviewCapture: (response) => ipcRenderer.invoke("pudding:browser:webview-capture-result", response),
   loadURL: (request) => ipcRenderer.invoke("pudding:browser:load-url", request),
   back: (request) => ipcRenderer.invoke("pudding:browser:back", request),
   forward: (request) => ipcRenderer.invoke("pudding:browser:forward", request),
@@ -78,9 +88,9 @@ contextBridge.exposeInMainWorld("puddingElectronBrowser", {
     ipcRenderer.on("pudding:browser:automation-start", wrapped);
     return () => ipcRenderer.off("pudding:browser:automation-start", wrapped);
   },
-  onWebviewCaptureRequest: (listener) => {
+  onWebviewRequired: (listener) => {
     const wrapped = (_event, request) => listener(request);
-    ipcRenderer.on("pudding:browser:webview-capture-request", wrapped);
-    return () => ipcRenderer.off("pudding:browser:webview-capture-request", wrapped);
+    ipcRenderer.on("pudding:browser:webview-required", wrapped);
+    return () => ipcRenderer.off("pudding:browser:webview-required", wrapped);
   },
 });

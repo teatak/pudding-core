@@ -35,6 +35,9 @@ type commandPayload struct {
 	VerificationStatus string              `json:"verificationStatus"`
 	DiagnosticCount    int                 `json:"diagnosticCount"`
 	Diagnostics        []commandDiagnostic `json:"diagnostics"`
+	Sandboxed          bool                `json:"sandboxed"`
+	SandboxKind        string              `json:"sandboxKind"`
+	SandboxDenied      bool                `json:"sandboxDenied"`
 }
 
 func TestCommandRunUsesProjectCWDAndCapturesOutput(t *testing.T) {
@@ -301,6 +304,9 @@ func TestCommandHelperProcess(t *testing.T) {
 		code, _ := strconv.Atoi(args[1])
 		fmt.Fprintf(os.Stderr, "exit %d", code)
 		os.Exit(code)
+	case "sandbox-denied":
+		fmt.Fprint(os.Stderr, "operation not permitted")
+		os.Exit(1)
 	case "flood":
 		size, _ := strconv.Atoi(args[1])
 		fmt.Fprint(os.Stdout, "stdout-head"+strings.Repeat("o", size)+"stdout-tail")

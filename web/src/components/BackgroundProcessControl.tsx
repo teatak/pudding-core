@@ -152,7 +152,7 @@ function BackgroundProcessRow({
         <button className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left" type="button" onClick={onToggle}>
           <span
             aria-hidden="true"
-            className={cn("size-1.5 shrink-0 rounded-full", process.running ? "bg-emerald-500" : "bg-muted-foreground/40")}
+            className={cn("size-1.5 shrink-0 rounded-full", process.sandboxDenied ? "bg-amber-500" : process.running ? "bg-emerald-500" : "bg-muted-foreground/40")}
           />
           <div className="min-w-0 flex-1">
             <div className="truncate font-mono text-xs" title={command}>{command}</div>
@@ -197,6 +197,9 @@ function BackgroundProcessRow({
 }
 
 function processStatus(process: BackgroundProcess, t: (key: string) => string) {
+  if (process.sandboxDenied) {
+    return t("composer.backgroundProcessSandboxDenied");
+  }
   if (process.running) {
     return t("composer.backgroundProcessRunning");
   }

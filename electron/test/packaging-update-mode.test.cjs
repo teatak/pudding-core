@@ -5,28 +5,32 @@ const test = require("node:test");
 
 const root = path.resolve(__dirname, "..", "..");
 
-test("desktop packaging defaults to manual updates without a certificate", () => {
-  assert.equal(loadUpdateMode(), "manual");
+test("desktop packaging defaults to automatic updates and requires a certificate", () => {
+  assert.throws(() => loadUpdateMode(), /PUDDING_MAC_IDENTITY is required for automatic macOS updates/);
 });
 
-test("a signing identity does not implicitly enable automatic updates", () => {
+test("signed desktop packaging defaults to automatic updates", () => {
   assert.equal(
     loadUpdateMode({
       PUDDING_MAC_IDENTITY: "Developer ID Application: Test (TEAMID)",
-      APPLE_KEYCHAIN_PROFILE: "test-notary",
-    }),
-    "manual",
-  );
-});
-
-test("automatic updates require an explicit build mode", () => {
-  assert.equal(
-    loadUpdateMode({
-      PUDDING_MAC_IDENTITY: "Developer ID Application: Test (TEAMID)",
-      PUDDING_UPDATE_MODE: "automatic",
       APPLE_KEYCHAIN_PROFILE: "test-notary",
     }),
     "automatic",
+  );
+});
+
+test("unsigned local packaging requires an explicit manual mode", () => {
+  assert.equal(loadUpdateMode({ PUDDING_UPDATE_MODE: "manual" }), "manual");
+});
+
+test("a signed build can explicitly use manual mode for recovery testing", () => {
+  assert.equal(
+    loadUpdateMode({
+      PUDDING_MAC_IDENTITY: "Developer ID Application: Test (TEAMID)",
+      PUDDING_UPDATE_MODE: "manual",
+      APPLE_KEYCHAIN_PROFILE: "test-notary",
+    }),
+    "manual",
   );
 });
 
@@ -47,6 +51,37 @@ test("strips the Developer ID prefix before invoking Electron Builder", () => {
   );
 });
 
+test("desktop packaging defaults to the stable GitHub update channel", () => {
+  const overrides = { PUDDING_UPDATE_MODE: "manual" };
+  assert.equal(loadConfigValue("extraMetadata.puddingReleaseChannel", overrides), "stable");
+  assert.equal(loadConfigValue("publish[0].channel", overrides), "latest");
+  assert.equal(loadConfigValue("publish[0].releaseType", overrides), "release");
+});
+
+test("preview packaging publishes beta metadata as a GitHub prerelease", () => {
+  const overrides = {
+    PUDDING_APP_VERSION: "0.1.2-beta.1",
+    PUDDING_RELEASE_CHANNEL: "preview",
+    PUDDING_UPDATE_MODE: "manual",
+  };
+  assert.equal(loadConfigValue("appId", overrides), "com.teatak.pudding");
+  assert.equal(loadConfigValue("productName", overrides), "Pudding");
+  assert.equal(loadConfigValue("extraMetadata.puddingReleaseChannel", overrides), "preview");
+  assert.equal(loadConfigValue("publish[0].channel", overrides), "beta");
+  assert.equal(loadConfigValue("publish[0].releaseType", overrides), "prerelease");
+});
+
+test("release channel rejects mismatched versions", () => {
+  assert.throws(
+    () => loadConfigValue("publish[0].channel", { PUDDING_RELEASE_CHANNEL: "preview" }),
+    /preview release version must match x\.y\.z-beta\.n/,
+  );
+  assert.throws(
+    () => loadConfigValue("publish[0].channel", { PUDDING_APP_VERSION: "0.1.2-beta.1" }),
+    /stable release version must match x\.y\.z/,
+  );
+});
+
 function loadUpdateMode(overrides = {}) {
   return loadConfigValue("extraMetadata.puddingUpdateMode", overrides);
 }
@@ -60,6 +95,8 @@ function loadConfigValue(pathExpression, overrides = {}) {
     env: {
       ...process.env,
       PUDDING_MAC_IDENTITY: "",
+      PUDDING_APP_VERSION: "",
+      PUDDING_RELEASE_CHANNEL: "",
       PUDDING_UPDATE_MODE: "",
       APPLE_KEYCHAIN_PROFILE: "",
       APPLE_ID: "",

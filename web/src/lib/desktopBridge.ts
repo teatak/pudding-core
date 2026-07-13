@@ -9,6 +9,7 @@ export type DesktopMenuCommand = "new-session" | "search-sessions" | "settings";
 export type DesktopUpdateState = {
   status: "unavailable" | "idle" | "checking" | "available" | "downloading" | "downloaded" | "installing";
   mode: "manual" | "automatic";
+  receivePreviewUpdates: boolean;
   version: string;
   percent: number | null;
 };
@@ -16,6 +17,7 @@ export type DesktopUpdateState = {
 type ElectronDesktopBridge = {
   getDroppedFilePath?: (file: File) => string;
   getUpdateState?: () => Promise<DesktopUpdateState>;
+  setPreviewUpdatesEnabled?: (enabled: boolean) => Promise<DesktopUpdateState>;
   activateUpdate?: () => Promise<boolean>;
   onMenuCommand?: (listener: (command: DesktopMenuCommand) => void) => () => void;
   onOAuthConnected?: (listener: (payload: { provider?: string }) => void) => () => void;
@@ -78,13 +80,21 @@ export function onDesktopMenuCommand(listener: (command: DesktopMenuCommand) => 
 export async function getDesktopUpdateState(): Promise<DesktopUpdateState> {
   const bridge = desktopBridge();
   if (!bridge?.getUpdateState) {
-    return { status: "unavailable", mode: "manual", version: "", percent: null };
+    return { status: "unavailable", mode: "manual", receivePreviewUpdates: false, version: "", percent: null };
   }
   try {
     return await bridge.getUpdateState();
   } catch {
-    return { status: "unavailable", mode: "manual", version: "", percent: null };
+    return { status: "unavailable", mode: "manual", receivePreviewUpdates: false, version: "", percent: null };
   }
+}
+
+export async function setDesktopPreviewUpdatesEnabled(enabled: boolean) {
+  const bridge = desktopBridge();
+  if (!bridge?.setPreviewUpdatesEnabled) {
+    return null;
+  }
+  return bridge.setPreviewUpdatesEnabled(enabled);
 }
 
 export function onDesktopUpdateState(listener: (state: DesktopUpdateState) => void) {

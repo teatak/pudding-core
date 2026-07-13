@@ -1,14 +1,14 @@
 # Browser CDP Unification Plan
 
-> 状态:Proposed
+> 状态:Implemented
 > 日期:2026-07-13
-> 范围:Electron `<webview>` 主路径与 Go browser fallback 路径。
+> 范围:Electron `<webview>` 路径与 Go browser manager 路径。
 > 目标:所有网页导航、观察、截图和交互统一通过 CDP 执行。
 > 架构决策:移除临时 headless `WebContentsView`,复用当前不会随 tab/session/Canvas 切换卸载的持久 `<webview>`。
 
 ## 1. 背景
 
-当前 browser 实现混合使用以下机制:
+改造前 browser 实现混合使用以下机制:
 
 - CDP:`Page`、`Runtime`、`Input`。
 - Electron:`webContents.loadURL()`、`goBack()`、`reload()`、`capturePage()`、`sendInputEvent()`。
@@ -86,6 +86,7 @@ session + tab
 - Canvas 只切换布局和可见性,不创建、替换或销毁 webview。
 - session 切换后,后台 tab 的 webview 仍由现有 retained browser surface 保留。
 - webview 销毁时,取消 pending command、detach CDP 并将 slot 标记为 lost。
+- Go manager 同样按 target 复用持久 WebSocket CDP session,关闭 tab/process 时统一释放。
 
 ### 3.1 新 tab 创建握手
 
@@ -111,7 +112,7 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 - Canvas 关闭时使用 CSS 隐藏,不能从 DOM 移除。
 - session 切换继续通过 `retainedBrowserTabs` 保留已挂载 webview。
 - renderer reload、Apps 视图或其他导致 CanvasPane 不存在的状态下,工具返回 `browser_webview_not_ready`,不创建替代 target。
-- 需要限制常驻 tab 数量和内存。
+- 常驻 tab 采用硬上限:单 session 8 个、全局 16 个;超限返回 `browser_tab_limit_reached`,不隐式淘汰或卸载旧 webview。
 
 ## 4. 操作映射
 
@@ -123,7 +124,7 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 | observe | `Runtime.evaluate` | 返回当前 document 快照 |
 | screenshot | `Page.getLayoutMetrics` + `Page.captureScreenshot` | 返回有效 PNG |
 | click | `Runtime.evaluate` 定位 + `Input.dispatchMouseEvent` | mouseReleased 命令成功 |
-| type | `Runtime.evaluate` 聚焦/选区 + `Input.insertText` | 输入命令成功并读取最终长度 |
+| type | `Runtime.evaluate` 聚焦 + `Input.dispatchKeyEvent` | 真实键盘序列成功且最终值指纹与预期完全一致 |
 | clear / shortcut | `Input.dispatchKeyEvent` | 完整 keyDown/keyUp 序列成功 |
 | scroll | `Input.dispatchMouseEvent(type="mouseWheel")` | wheel 命令成功 |
 
@@ -144,22 +145,24 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 
 ### 5.2 错误码
 
-建议统一为:
+当前统一为:
 
 - `browser_webview_not_ready`
-- `browser_webview_create_timeout`
-- `cdp_attach_failed`
 - `cdp_detached`
 - `cdp_command_failed`
-- `execution_context_destroyed`
+- `cdp_command_timeout`
 - `navigation_timeout`
 - `navigation_failed`
-- `target_not_found`
 - `element_not_found`
+- `element_not_interactable`
 - `element_not_editable`
 - `screenshot_failed`
+- `file_url_not_allowed`
+- `browser_tab_limit_reached`
 
 错误结果应携带 `retryable`。只有调用方明确发起新一次工具调用时才执行重试。
+
+`file://` 仅允许访问当前 session 所属 Project 根目录内已存在的 regular file。daemon 负责解析 symlink 和签发根目录授权,Electron 只接受带 bridge token 的授权,并在页面跳转、历史导航和新窗口时持续校验同一范围。session 切换 Project、Project 根目录更新或 Project 删除时,宿主立即清除旧授权;仍停留在 `file://` 的 tab 关闭,普通 HTTP(S) tab 保留。
 
 ## 6. 实施阶段
 
@@ -172,7 +175,7 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 
 验收:
 
-- 单元测试能区分 CDP 路径和 Electron/DOM fallback。
+- 单元测试能断言只执行 CDP,失败后没有 Electron/DOM fallback。
 - 不改变用户可见行为。
 
 ### C1 持久 CDP session
@@ -233,7 +236,7 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 ### C5 Click、Type 与 Scroll
 
 - pointer click 只使用 `Input.dispatchMouseEvent`。
-- type 使用 `Input.insertText`,clear/快捷键使用 `Input.dispatchKeyEvent`。
+- type / clear / 快捷键统一使用 `Input.dispatchKeyEvent`。
 - scroll 使用 `mouseWheel`。
 - 删除 `el.click()`、DOM value setter、`scrollBy()` 和 `sendInputEvent()` fallback。
 - 命令响应不确定时返回错误,不执行第二种实现。
@@ -241,6 +244,7 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 验收:
 
 - React 受控 input 正常更新。
+- 输入后按长度和哈希校验完整预期值,拒绝受控组件回滚造成的假成功。
 - CDP 响应失败时不会重复点击或重复输入。
 - selector scroll 与页面 scroll 均产生真实 wheel 行为。
 
@@ -267,6 +271,8 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
   - `webContents.loadURL/goBack/goForward/reload`
   - `el.click()` / value setter / `scrollBy()`
 - 补 Electron dev smoke test。
+- 为常驻 webview 增加单 session 8、全局 16 的硬上限。
+- Project scope 变化时撤销旧 `file://` grant,并阻止历史记录回到旧文件。
 - 跑全量 Go、Web build、Electron tests。
 - 更新 browser 架构文档和故障排查说明。
 
@@ -303,7 +309,7 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 - `go test ./...`
 - Web `npm run build`
 - Electron tests。
-- Electron dev 手动 smoke checklist。
+- `npm run smoke:electron-browser`:真实 Electron `<webview>` + CDP 自动 smoke。
 
 ## 8. 时间评估
 
@@ -332,7 +338,7 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 - 含风险缓冲:约 11-16 个工作日。
 - 一人日历时间:约 2-3.5 周。
 
-若只改 Electron dev 主路径、暂不对齐 Go fallback,可缩短到约 6-9 个工作日,但会留下两套行为语义,不建议作为最终状态。
+若只改 Electron dev 主路径、暂不对齐 Go manager,可缩短到约 6-9 个工作日,但会留下两套行为语义,不建议作为最终状态。
 
 ## 9. 主要风险
 
@@ -359,3 +365,15 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 6. 工具成功表示目标操作已达到定义的完成条件。
 7. 新 tab、连续导航、React 输入、滚动和截图场景通过。
 8. 全量测试、Web build 和 Electron dev smoke 通过。
+9. `file://` 只在当前 session 的 Project 根目录内生效,symlink 越界与未授权 renderer 请求均被拒绝;Project scope 变化后旧 grant 同步撤销。
+10. 常驻 webview 超过单 session 8 个或全局 16 个时明确失败,不卸载已有 tab。
+
+## 11. 实施验证
+
+- `go test ./...`
+- `go test -race ./internal/browser ./internal/api`
+- `npm run test:electron`
+- `npm run smoke:electron-browser`
+- `npm run build` (`web/`)
+
+自动 Electron dev smoke 覆盖 `file://`、多 tab、多 session 保活、back/forward、screenshot 和 Project grant 撤销。Google/Baidu 外网导航仅保留为发布前人工网络验收,不作为可重复测试的依赖。

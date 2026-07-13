@@ -447,7 +447,9 @@ func (r *BuiltinRunner) syncBrowserState(ctx context.Context, sessionID string, 
 
 func browserToolError(out Result, err error) Result {
 	reason := "browser_error"
-	if errors.Is(err, browser.ErrUnavailable) {
+	if code := browser.ErrorCode(err); code != "" {
+		reason = code
+	} else if errors.Is(err, browser.ErrUnavailable) {
 		reason = "browser_unavailable"
 	} else if errors.Is(err, browser.ErrTabRequired) {
 		reason = "browser_tab_required"

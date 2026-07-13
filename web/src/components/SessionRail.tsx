@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import {
-  Blocks,
   ChevronRight,
+  Copy,
   Download,
   Ellipsis,
   FolderClosed,
   FolderOpen,
+  FolderPlus,
   MessageSquareText,
   Package,
   PanelLeft,
@@ -39,6 +40,8 @@ import { createPortal } from "react-dom";
 import { toast } from "sonner";
 
 import {
+  createProject,
+  deleteProject,
   deleteSession,
   getAudioBindings,
   listProjects,
@@ -71,6 +74,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -103,6 +109,7 @@ import {
   onDesktopUpdateState,
 } from "@/lib/desktopBridge";
 import type { AppSearch } from "@/lib/route";
+import { pickDirectories } from "@/lib/desktopBridge";
 import { openSettingsDialog } from "@/lib/settingsDialog";
 import { formatRelative } from "@/lib/time";
 import { cn } from "@/lib/utils";
@@ -295,6 +302,18 @@ export function SessionRail({
     },
   });
 
+  const createProjectMutation = useMutation({
+    mutationFn: (rootDirs: string[]) => createProject(token, { rootDirs }),
+    onSuccess: (created) => {
+      queryClient.setQueryData<{ projects: Project[] }>(queryKeys.projects(), (previous) => ({
+        projects: [...(previous?.projects.filter((project) => project.id !== created.id) || []), created],
+      }));
+      openProjectDraft(created.id);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projects() });
+    },
+    onError: () => toast.error(t("project.createFailed")),
+  });
+
   function collapse(next: boolean) {
     setRailCollapsed(next);
     hover.close();
@@ -324,6 +343,47 @@ export function SessionRail({
     if (isMobile) {
       hover.close();
     }
+  }
+
+  function openProjectDraft(projectID: string) {
+    void navigate({
+      to: "/",
+      search: (prev) => {
+        const next = { ...(prev as AppSearch), draft: "1", project: projectID };
+        delete next.session;
+        delete next.split;
+        delete next.view;
+        return next;
+      },
+    });
+    if (isMobile) {
+      hover.close();
+    }
+  }
+
+  async function createNewProject() {
+    const rootDirs = Array.from(
+      new Set(
+        (await pickDirectories({
+          buttonLabel: t("project.createPickButton"),
+          message: t("project.createPickMessage"),
+          title: t("project.create"),
+        }))
+          .map((path) => path.trim())
+          .filter(Boolean),
+      ),
+    );
+    if (rootDirs.length === 0) {
+      return;
+    }
+    const existing = projects.find(
+      (project) => project.rootDirs.length === rootDirs.length && project.rootDirs.every((path, index) => path === rootDirs[index]),
+    );
+    if (existing) {
+      openProjectDraft(existing.id);
+      return;
+    }
+    createProjectMutation.mutate(rootDirs);
   }
 
   function selectSession(id: string) {
@@ -356,6 +416,7 @@ export function SessionRail({
         appsActive={appsActive}
         draftActive={draftActive}
         deletePending={deleteMutation.isPending}
+        createProjectPending={createProjectMutation.isPending}
         draftProjectID={draftProjectID}
         isError={sessionsQuery.isError}
         isLoading={sessionsQuery.isLoading}
@@ -365,22 +426,9 @@ export function SessionRail({
         token={token}
         onSearch={openSessionSearch}
         onCreate={openNewSession}
+        onCreateProject={() => void createNewProject()}
         onDelete={(id) => deleteMutation.mutate(id)}
-        onCreateProjectSession={(projectID) => {
-          void navigate({
-            to: "/",
-            search: (prev) => {
-              const next = { ...(prev as AppSearch), draft: "1", project: projectID };
-              delete next.session;
-              delete next.split;
-              delete next.view;
-              return next;
-            },
-          });
-          if (isMobile) {
-            hover.close();
-          }
-        }}
+        onCreateProjectSession={openProjectDraft}
         onRename={(id, title) => renameMutation.mutate({ id, title })}
         onOverlayOpenChange={hover.setClosePaused}
         onOpenSplit={(id) => {
@@ -735,7 +783,9 @@ type RailPanelProps = {
   draftActive: boolean;
   draftProjectID?: string;
   deletePending: boolean;
+  createProjectPending: boolean;
   onCreate: () => void;
+  onCreateProject: () => void;
   onSearch: () => void;
   onCreateProjectSession: (projectID: string) => void;
   onSelect: (id: string) => void;
@@ -776,7 +826,9 @@ function RailPanel({
   draftActive,
   draftProjectID,
   deletePending,
+  createProjectPending,
   onCreate,
+  onCreateProject,
   onSearch,
   onCreateProjectSession,
   onSelect,
@@ -1027,15 +1079,15 @@ function RailPanel({
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton onClick={onSearch}>
-                  <Search />
-                  <span>{t("rail.search")}</span>
+                <SidebarMenuButton disabled={createProjectPending} onClick={onCreateProject}>
+                  {createProjectPending ? <Spinner /> : <FolderPlus />}
+                  <span>{t("project.create")}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton>
-                  <Blocks />
-                  <span>{t("rail.widgets")}</span>
+                <SidebarMenuButton onClick={onSearch}>
+                  <Search />
+                  <span>{t("rail.search")}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
@@ -1274,7 +1326,10 @@ function RailUpdateButton({ serverTurnRunning }: { serverTurnRunning: boolean })
         onClick={() => void activateDesktopUpdate()}
       >
         <Download className="size-4" />
-        <span className="truncate">{t("update.download")}</span>
+        <span className="truncate">
+          {t("update.download")}
+          {state.version ? ` ${state.version}` : ""}
+        </span>
         <span className="ml-auto size-2 shrink-0 rounded-full bg-blue-500" />
       </Button>
     );
@@ -1298,7 +1353,10 @@ function RailUpdateButton({ serverTurnRunning }: { serverTurnRunning: boolean })
         onClick={() => (hasActiveTurn ? setConfirmOpen(true) : restart())}
       >
         {installing ? <Spinner className="size-4" /> : <RefreshCw className="size-4" />}
-        <span className="truncate">{t(installing ? "update.restarting" : "update.restart")}</span>
+        <span className="truncate">
+          {t(installing ? "update.restarting" : "update.restart")}
+          {state.version ? ` ${state.version}` : ""}
+        </span>
         {!installing ? <span className="ml-auto size-2 shrink-0 rounded-full bg-blue-500" /> : null}
       </Button>
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
@@ -1426,19 +1484,21 @@ function CollapsibleSessionGroupLabel({
 
 function ProjectActionsMenu({ project, token }: { project: Project; token: string }) {
   const { t } = useI18n();
+  const navigate = useNavigate({ from: "/" });
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [name, setName] = useState(project.name);
   const rootDir = project.rootDirs[0];
   const isMac =
     (typeof document !== "undefined" && document.documentElement.dataset.shell === "electron-mac") ||
     (typeof navigator !== "undefined" && /Mac/i.test(navigator.platform));
 
-  useRailOverlayHold(menuOpen || renameOpen);
+  useRailOverlayHold(menuOpen || renameOpen || deleteOpen);
 
   const revealMutation = useMutation({
-    mutationFn: () => revealDesktopPath(token, rootDir),
+    mutationFn: (path: string) => revealDesktopPath(token, path),
     onError: () => toast.error(t("project.revealFailed")),
   });
   const renameMutation = useMutation({
@@ -1454,6 +1514,46 @@ function ProjectActionsMenu({ project, token }: { project: Project; token: strin
     },
     onError: () => toast.error(t("project.renameFailed")),
   });
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteProject(token, project.id),
+    onSuccess: async () => {
+      const previousSessions = queryClient.getQueryData<{ sessions: Session[] }>(queryKeys.sessions());
+      const attachedSessions = previousSessions?.sessions.filter((session) => session.projectID === project.id) || [];
+      queryClient.setQueryData<{ projects: Project[] }>(queryKeys.projects(), (previous) => ({
+        projects: previous?.projects.filter((entry) => entry.id !== project.id) || [],
+      }));
+      if (previousSessions) {
+        queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), {
+          sessions: previousSessions.sessions.map((session) =>
+            session.projectID === project.id ? { ...session, projectID: undefined } : session,
+          ),
+        });
+      }
+      for (const session of attachedSessions) {
+        queryClient.setQueryData<Session>(queryKeys.session(session.id), (previous) =>
+          previous ? { ...previous, projectID: undefined } : previous,
+        );
+      }
+      queryClient.removeQueries({ queryKey: queryKeys.project(project.id), exact: true });
+      setDeleteOpen(false);
+      await navigate({
+        to: "/",
+        search: (previous) => {
+          const next = { ...(previous as AppSearch) };
+          if (next.project === project.id) {
+            delete next.project;
+          }
+          return next;
+        },
+        replace: true,
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
+      ]);
+    },
+    onError: () => toast.error(t("project.deleteFailed")),
+  });
 
   const openRename = () => {
     setName(project.name);
@@ -1466,6 +1566,12 @@ function ProjectActionsMenu({ project, token }: { project: Project; token: strin
       return;
     }
     renameMutation.mutate(nextName);
+  };
+  const copyPaths = (paths: string[]) => {
+    void navigator.clipboard.writeText(paths.join("\n")).then(
+      () => toast.success(t(paths.length > 1 ? "project.pathsCopied" : "project.pathCopied")),
+      () => toast.error(t("project.pathCopyFailed")),
+    );
   };
 
   return (
@@ -1483,15 +1589,59 @@ function ProjectActionsMenu({ project, token }: { project: Project; token: strin
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48 space-y-1">
-          {isMac && rootDir ? (
-            <DropdownMenuItem disabled={revealMutation.isPending} onSelect={() => revealMutation.mutate()}>
-              {revealMutation.isPending ? <Spinner /> : <FolderOpen />}
-              {t("project.revealFinder")}
-            </DropdownMenuItem>
-          ) : null}
+          {project.rootDirs.length > 1 ? (
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <FolderOpen />
+                {t("project.directories")}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-64 max-w-[calc(100vw-2rem)]">
+                {project.rootDirs.map((path) => (
+                  <DropdownMenuItem
+                    key={path}
+                    disabled={!isMac || revealMutation.isPending}
+                    title={path}
+                    onSelect={() => revealMutation.mutate(path)}
+                  >
+                    <FolderOpen />
+                    <span className="min-w-0 truncate">{projectDirectoryLabel(path, project.rootDirs)}</span>
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => copyPaths(project.rootDirs)}>
+                  <Copy />
+                  {t("project.copyAllPaths")}
+                </DropdownMenuItem>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          ) : (
+            <>
+              {isMac && rootDir ? (
+                <DropdownMenuItem disabled={revealMutation.isPending} onSelect={() => revealMutation.mutate(rootDir)}>
+                  {revealMutation.isPending ? <Spinner /> : <FolderOpen />}
+                  {t("project.revealFinder")}
+                </DropdownMenuItem>
+              ) : null}
+              {rootDir ? (
+                <DropdownMenuItem title={rootDir} onSelect={() => copyPaths([rootDir])}>
+                  <Copy />
+                  {t("project.copyPath")}
+                </DropdownMenuItem>
+              ) : null}
+            </>
+          )}
           <DropdownMenuItem onSelect={openRename}>
             <Pencil />
             {t("project.rename")}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            disabled={deleteMutation.isPending}
+            variant="destructive"
+            onSelect={() => setDeleteOpen(true)}
+          >
+            <Trash />
+            {t("project.delete")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -1528,6 +1678,25 @@ function ProjectActionsMenu({ project, token }: { project: Project; token: strin
           </form>
         </DialogContent>
       </Dialog>
+      <AlertDialog open={deleteOpen} onOpenChange={(open) => !deleteMutation.isPending && setDeleteOpen(open)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("project.deleteTitle").replace("{name}", project.name)}</AlertDialogTitle>
+            <AlertDialogDescription>{t("project.deleteDescription")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleteMutation.isPending}
+              variant="destructive"
+              onClick={() => deleteMutation.mutate()}
+            >
+              {deleteMutation.isPending ? <Spinner /> : null}
+              {t("project.delete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -1855,6 +2024,12 @@ function SessionItem({
     onPointerDragCancel();
   }
 
+  function releasePointerFocus(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (document.activeElement === event.currentTarget && !event.currentTarget.matches(":focus-visible")) {
+      event.currentTarget.blur();
+    }
+  }
+
   function bindWindowPointerDrag(pointerID: number) {
     const drag = pointerDragRef.current;
     if (!drag || drag.cleanup) {
@@ -1958,6 +2133,7 @@ function SessionItem({
             }}
             onPointerCancel={cancelPointerDrag}
             onPointerDown={handlePointerDown}
+            onPointerLeave={releasePointerFocus}
             onPointerMove={handlePointerMove}
             onPointerUp={finishPointerDrag}
           >
@@ -2086,4 +2262,14 @@ function SessionItem({
 function basename(path: string) {
   const normalized = path.replace(/\/+$/, "");
   return normalized.split(/[\\/]/).filter(Boolean).pop() || path;
+}
+
+function projectDirectoryLabel(path: string, paths: string[]) {
+  const name = basename(path);
+  if (paths.filter((candidate) => basename(candidate) === name).length < 2) {
+    return name;
+  }
+  const normalized = path.replace(/[\\/]+$/, "");
+  const parts = normalized.split(/[\\/]/).filter(Boolean);
+  return parts.slice(-2).join("/") || path;
 }

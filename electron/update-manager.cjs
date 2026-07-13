@@ -19,6 +19,7 @@ class UpdateManager {
     isPackaged,
     disabled = false,
     mode = updateModes.manual,
+    receivePreviewUpdates = false,
     feedURL = "",
     simulatedVersion = "",
     initialDelayMs = 15_000,
@@ -36,6 +37,7 @@ class UpdateManager {
     this.simulatedVersion = cleanVersion(simulatedVersion);
     this.simulated = Boolean(this.simulatedVersion);
     this.mode = this.simulated ? updateModes.automatic : normalizeUpdateMode(mode);
+    this.receivePreviewUpdates = Boolean(receivePreviewUpdates);
     this.enabled = this.simulated || Boolean(updater && isPackaged && !disabled);
     this.initialDelayMs = initialDelayMs;
     this.intervalMs = intervalMs;
@@ -53,6 +55,7 @@ class UpdateManager {
     this.state = {
       status: this.simulated ? updateStatuses.downloaded : this.enabled ? updateStatuses.idle : updateStatuses.unavailable,
       mode: this.mode,
+      receivePreviewUpdates: this.receivePreviewUpdates,
       version: this.simulatedVersion,
       percent: this.simulated ? 100 : null,
     };
@@ -66,10 +69,17 @@ class UpdateManager {
   configureUpdater() {
     this.updater.autoDownload = this.mode === updateModes.automatic;
     this.updater.autoInstallOnAppQuit = false;
-    this.updater.allowPrerelease = false;
+    this.configureUpdaterChannel();
     if (this.feedURL) {
       this.updater.setFeedURL({ provider: "generic", url: this.feedURL });
     }
+  }
+
+  configureUpdaterChannel() {
+    this.updater.channel = this.receivePreviewUpdates ? "beta" : "latest";
+    this.updater.allowPrerelease = this.receivePreviewUpdates;
+    // electron-updater enables downgrades whenever channel is assigned.
+    this.updater.allowDowngrade = false;
   }
 
   bindUpdaterEvents() {
@@ -122,6 +132,35 @@ class UpdateManager {
 
   getState() {
     return { ...this.state };
+  }
+
+  setReceivePreviewUpdates(enabled) {
+    const next = Boolean(enabled);
+    if (next === this.receivePreviewUpdates) {
+      return this.getState();
+    }
+    if (
+      this.state.status === updateStatuses.checking ||
+      this.state.status === updateStatuses.downloading ||
+      this.state.status === updateStatuses.downloaded ||
+      this.state.status === updateStatuses.installing
+    ) {
+      throw new Error("update channel cannot change while an update is active");
+    }
+
+    this.receivePreviewUpdates = next;
+    this.manualCheck = false;
+    this.manualDownload = false;
+    if (this.enabled && !this.simulated) {
+      this.configureUpdaterChannel();
+    }
+    this.setState({
+      status: this.enabled ? updateStatuses.idle : updateStatuses.unavailable,
+      receivePreviewUpdates: next,
+      version: "",
+      percent: null,
+    });
+    return this.getState();
   }
 
   start() {

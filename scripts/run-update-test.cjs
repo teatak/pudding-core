@@ -3,9 +3,14 @@ const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
 
+const packageMetadata = require("../package.json");
+const { resolveReleaseChannel } = require("../packaging/release-channel.cjs");
+
 const root = path.resolve(process.argv[2] || path.join(__dirname, "..", "dist", "release"));
 const port = positiveInt(process.env.PUDDING_UPDATE_TEST_PORT, 8099);
 const feedURL = `http://127.0.0.1:${port}`;
+const version = String(process.env.PUDDING_APP_VERSION || packageMetadata.version || "").trim();
+const releaseChannel = resolveReleaseChannel(process.env.PUDDING_RELEASE_CHANNEL, version);
 const appExecutable =
   process.env.PUDDING_UPDATE_TEST_APP || "/Applications/Pudding.app/Contents/MacOS/Pudding";
 
@@ -25,8 +30,8 @@ async function main() {
   if (!fs.existsSync(appExecutable)) {
     throw new Error(`Pudding executable not found: ${appExecutable}`);
   }
-  if (!fs.existsSync(path.join(root, "latest-mac.yml"))) {
-    throw new Error(`latest-mac.yml not found in ${root}`);
+  if (!fs.existsSync(path.join(root, releaseChannel.updateInfoFile))) {
+    throw new Error(`${releaseChannel.updateInfoFile} not found in ${root}`);
   }
 
   warnForOldInstalledBuild(appExecutable);
@@ -39,7 +44,11 @@ async function main() {
 
   console.log(`Launching Pudding with update feed ${feedURL}`);
   appProcess = spawn(appExecutable, [], {
-    env: { ...process.env, PUDDING_UPDATE_FEED_URL: feedURL },
+    env: {
+      ...process.env,
+      PUDDING_RECEIVE_PREVIEW_UPDATES: releaseChannel.channel === "preview" ? "1" : "0",
+      PUDDING_UPDATE_FEED_URL: feedURL,
+    },
     stdio: "inherit",
   });
   appProcess.on("error", (error) => {
@@ -60,7 +69,7 @@ async function waitForFeed() {
 
 function feedReady() {
   return new Promise((resolve) => {
-    const request = http.get(`${feedURL}/latest-mac.yml`, (response) => {
+    const request = http.get(`${feedURL}/${releaseChannel.updateInfoFile}`, (response) => {
       response.resume();
       resolve(response.statusCode === 200);
     });
