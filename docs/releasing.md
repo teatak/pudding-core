@@ -45,33 +45,31 @@ The supported macOS packaging command is:
 make desktop-bundle
 ```
 
+This is the only supported packaging entry point. Do not invoke Electron Builder or files under `scripts/`
+directly. The target builds the web UI, release daemon, and language server before packaging, then runs the full
+release verifier. Direct Electron Builder configuration loads are rejected by a pipeline guard.
+
 For a preview version, use `make desktop-preview-bundle`. Stable builds require an `x.y.z` version and preview
 builds require `x.y.z-beta.n`; packaging fails when the version and release channel disagree.
 
-Release builds default to `automatic`: they check in the background, download a signed update, and wait for the
-user to choose **Restart to Update**. The build therefore requires a Developer ID identity and notarization
+Desktop updates are always automatic: they check in the background, download a signed update, and wait for the
+user to choose **Restart to Update**. Every package therefore requires a Developer ID identity and notarization
 credentials. It produces the DMG, ZIP, blockmaps, and `latest-mac.yml` under `dist/release`, then verifies:
 
 - `Info.plist`, bundled `package.json`, and `latest-mac.yml` use the canonical version.
-- The bundled update mode matches the requested mode.
 - All release artifacts exist.
-- The app code-signature structure and DMG checksum are valid.
-- An unsigned build cannot accidentally use automatic updates.
+- The staged app plus the apps extracted from ZIP and DMG contain no read-only files that can block Squirrel.Mac.
+- The app, daemon, language server, and bundled dylibs use the expected Developer ID and portable dependencies.
+- ZIP/DMG signatures, notarization tickets, Gatekeeper assessments, and the DMG checksum are valid.
 
-Build a signed automatic release with:
-
-```bash
-PUDDING_MAC_IDENTITY="Certificate Name (TEAMID)" \
-APPLE_KEYCHAIN_PROFILE="pudding-notary" \
-make desktop-bundle
-```
-
-Use the same signing and notarization variables with `make desktop-preview-bundle` for a preview package.
+The packaging pipeline automatically selects the only installed Developer ID Application identity and defaults
+to the `pudding-notary` keychain profile. Set `PUDDING_MAC_IDENTITY` only when the keychain contains multiple
+Developer ID identities. Alternative complete Apple ID or App Store Connect API notarization credentials are
+also accepted; partial or competing credential methods are rejected.
 
 The optional `Developer ID Application:` prefix is accepted and stripped before invoking Electron Builder.
-Developer ID builds require notarization credentials. The release verifier rejects an unsigned automatic build,
-an unstapled app, an unexpected signing authority, or an app that fails Gatekeeper assessment. For local package
-testing only, an unsigned manual build remains available via `PUDDING_UPDATE_MODE=manual make desktop-bundle`.
+`PUDDING_UPDATE_MODE` is no longer supported. The release verifier rejects unsigned or unstapled apps, unexpected
+signing authorities, non-portable dylib paths, read-only bundle files, and artifacts that fail Gatekeeper.
 
 ## Publish
 
@@ -92,10 +90,11 @@ make desktop-preview-publish
 ```
 
 These commands validate the version, public release state, clean worktree, upstream state, GitHub login, signing
-identity, and notarization setup. They run Go and Electron tests, create and push an annotated tag such as
-`v0.1.2` or `v0.1.3-beta.1` to `teatak/pudding-core`, then build, sign, notarize, and upload the artifacts to a
-Draft Release in `teatak/pudding`. A single valid Developer ID Application identity is detected automatically;
-set `PUDDING_MAC_IDENTITY` only when the keychain contains more than one.
+identity, and notarization setup. They verify the clean pushed checkout, run Go and Electron tests, then call the
+same complete bundle pipeline used above. Only after that package passes signing, notarization, ZIP, DMG, nested
+binary, and permission checks does the script create and push an annotated tag such as `v0.1.2` or
+`v0.1.3-beta.1` to `teatak/pudding-core`. It then uploads the already verified artifacts to a Draft Release in
+`teatak/pudding`.
 
 Packaging and uploading are separate phases. The app is fully built and verified first; the release script then
 creates one draft and uploads its five assets sequentially. This avoids partially published or duplicate drafts.
@@ -133,17 +132,28 @@ The public download page is permanently:
 
 https://github.com/teatak/pudding/releases/latest
 
-## Unsigned local builds
+## Local package tests
 
-Unsigned builds are for local testing only and must not be published. Manual mode prevents them from installing
-an update automatically, but it does not bypass macOS Gatekeeper.
+Local DMG/ZIP tests use the same Developer ID signing, notarization, and automatic-update configuration as a
+published release. Use the build command above; unsigned desktop packages are intentionally unsupported.
+
+To test a real update from an older installed version, close Pudding and run:
+
+```bash
+make desktop-update-test
+```
+
+The command starts a loopback update feed, launches `/Applications/Pudding.app`, and waits for the installed app
+to reach the package version. After choosing **Restart to Update**, it verifies the installed version, signature,
+notarization ticket, Gatekeeper assessment, and bundle permissions before reporting success. Use
+`make desktop-verify` to recheck existing artifacts without rebuilding them.
 
 Keep the user-facing installation instructions in the public
 [`teatak/pudding` README](https://github.com/teatak/pudding#install), next to the release downloads.
 
 ## Failure recovery
 
-- Automatic mode downloads in the background but never installs until the user chooses **Restart to Update**.
+- Updates download in the background but never install until the user chooses **Restart to Update**.
 - If publishing fails before the source tag is pushed, fix the problem and rerun the original publish command.
 - If publishing fails after the source tag is pushed but before creating a draft, rerun
   `PUDDING_RELEASE_CHANNEL=stable make desktop-publish-from-tag`. Use `preview` for a beta tag. Do not move the

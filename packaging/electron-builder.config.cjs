@@ -4,30 +4,30 @@ const packageMetadata = require("../package.json");
 const { resolveReleaseChannel } = require("./release-channel.cjs");
 
 const root = path.resolve(__dirname, "..");
+if (process.env.PUDDING_PACKAGING_PIPELINE !== "1") {
+  throw new Error("direct Electron Builder packaging is unsupported; run make desktop-bundle");
+}
 const requestedSigningIdentity = String(process.env.PUDDING_MAC_IDENTITY || "-").trim() || "-";
 const signingIdentity = normalizeSigningIdentity(requestedSigningIdentity);
+if (String(process.env.PUDDING_UPDATE_MODE || "").trim()) {
+  throw new Error("PUDDING_UPDATE_MODE is no longer supported; desktop updates are always automatic");
+}
 const requestedVersion = String(process.env.PUDDING_APP_VERSION || "").trim();
 const releaseVersion = requestedVersion || packageMetadata.version;
 const releaseChannel = resolveReleaseChannel(process.env.PUDDING_RELEASE_CHANNEL, releaseVersion);
-const requestedUpdateMode = String(process.env.PUDDING_UPDATE_MODE || "").trim().toLowerCase();
-if (requestedUpdateMode && requestedUpdateMode !== "manual" && requestedUpdateMode !== "automatic") {
-  throw new Error("PUDDING_UPDATE_MODE must be manual or automatic");
-}
-const updateMode = requestedUpdateMode || "automatic";
 const notarizationConfigured =
   Boolean(String(process.env.APPLE_KEYCHAIN_PROFILE || "").trim()) ||
   Boolean(process.env.APPLE_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD && process.env.APPLE_TEAM_ID) ||
   Boolean(process.env.APPLE_API_KEY && process.env.APPLE_API_KEY_ID && process.env.APPLE_API_ISSUER);
-if (updateMode === "automatic" && signingIdentity === "-") {
-  throw new Error("PUDDING_MAC_IDENTITY is required for automatic macOS updates");
+if (signingIdentity === "-") {
+  throw new Error("PUDDING_MAC_IDENTITY is required for macOS desktop packaging");
 }
-if (signingIdentity !== "-" && !notarizationConfigured) {
+if (!notarizationConfigured) {
   throw new Error("Developer ID builds require Apple notarization credentials");
 }
 
 const extraMetadata = {
   puddingReleaseChannel: releaseChannel.channel,
-  puddingUpdateMode: updateMode,
 };
 if (requestedVersion) {
   extraMetadata.version = requestedVersion;
@@ -37,7 +37,7 @@ module.exports = {
   appId: "com.teatak.pudding",
   productName: "Pudding",
   electronVersion: "43.0.0",
-  forceCodeSigning: signingIdentity !== "-",
+  forceCodeSigning: true,
   asar: true,
   artifactName: "${productName}-${version}-${arch}.${ext}",
   extraMetadata,
@@ -61,7 +61,7 @@ module.exports = {
     category: "public.app-category.productivity",
     icon: "assets/macos/AppIcon.icns",
     identity: signingIdentity,
-    hardenedRuntime: signingIdentity !== "-",
+    hardenedRuntime: true,
     target: ["dmg", "zip"],
     extendInfo: {
       LSHasLocalizedDisplayName: true,

@@ -5,38 +5,32 @@ const test = require("node:test");
 
 const root = path.resolve(__dirname, "..", "..");
 
-test("desktop packaging defaults to automatic updates and requires a certificate", () => {
-  assert.throws(() => loadUpdateMode(), /PUDDING_MAC_IDENTITY is required for automatic macOS updates/);
-});
-
-test("signed desktop packaging defaults to automatic updates", () => {
-  assert.equal(
-    loadUpdateMode({
-      PUDDING_MAC_IDENTITY: "Developer ID Application: Test (TEAMID)",
-      APPLE_KEYCHAIN_PROFILE: "test-notary",
-    }),
-    "automatic",
+test("direct Electron Builder packaging is rejected", () => {
+  assert.throws(
+    () => loadConfigValue("appId", { PUDDING_PACKAGING_PIPELINE: "" }),
+    /run make desktop-bundle/,
   );
 });
 
-test("unsigned local packaging requires an explicit manual mode", () => {
-  assert.equal(loadUpdateMode({ PUDDING_UPDATE_MODE: "manual" }), "manual");
+test("desktop packaging always requires a Developer ID certificate", () => {
+  assert.throws(() => loadConfigValue("forceCodeSigning"), /PUDDING_MAC_IDENTITY is required/);
 });
 
-test("a signed build can explicitly use manual mode for recovery testing", () => {
-  assert.equal(
-    loadUpdateMode({
-      PUDDING_MAC_IDENTITY: "Developer ID Application: Test (TEAMID)",
-      PUDDING_UPDATE_MODE: "manual",
-      APPLE_KEYCHAIN_PROFILE: "test-notary",
-    }),
-    "manual",
+test("signed desktop packaging always enables hardened code signing", () => {
+  assert.equal(loadConfigValue("forceCodeSigning", signedBuildEnv()), "true");
+  assert.equal(loadConfigValue("mac.hardenedRuntime", signedBuildEnv()), "true");
+});
+
+test("legacy update mode overrides are rejected", () => {
+  assert.throws(
+    () => loadConfigValue("forceCodeSigning", signedBuildEnv({ PUDDING_UPDATE_MODE: "manual" })),
+    /PUDDING_UPDATE_MODE is no longer supported/,
   );
 });
 
 test("Developer ID builds require notarization credentials", () => {
   assert.throws(
-    () => loadUpdateMode({ PUDDING_MAC_IDENTITY: "Developer ID Application: Test (TEAMID)" }),
+    () => loadConfigValue("forceCodeSigning", { PUDDING_MAC_IDENTITY: "Developer ID Application: Test (TEAMID)" }),
     /Developer ID builds require Apple notarization credentials/,
   );
 });
@@ -52,7 +46,7 @@ test("strips the Developer ID prefix before invoking Electron Builder", () => {
 });
 
 test("desktop packaging defaults to the stable GitHub update channel", () => {
-  const overrides = { PUDDING_UPDATE_MODE: "manual" };
+  const overrides = signedBuildEnv();
   assert.equal(loadConfigValue("extraMetadata.puddingReleaseChannel", overrides), "stable");
   assert.equal(loadConfigValue("publish[0].channel", overrides), "latest");
   assert.equal(loadConfigValue("publish[0].releaseType", overrides), "release");
@@ -60,9 +54,9 @@ test("desktop packaging defaults to the stable GitHub update channel", () => {
 
 test("preview packaging publishes beta metadata as a GitHub prerelease", () => {
   const overrides = {
+    ...signedBuildEnv(),
     PUDDING_APP_VERSION: "0.1.2-beta.1",
     PUDDING_RELEASE_CHANNEL: "preview",
-    PUDDING_UPDATE_MODE: "manual",
   };
   assert.equal(loadConfigValue("appId", overrides), "com.teatak.pudding");
   assert.equal(loadConfigValue("productName", overrides), "Pudding");
@@ -73,27 +67,24 @@ test("preview packaging publishes beta metadata as a GitHub prerelease", () => {
 
 test("release channel rejects mismatched versions", () => {
   assert.throws(
-    () => loadConfigValue("publish[0].channel", { PUDDING_RELEASE_CHANNEL: "preview" }),
+    () => loadConfigValue("publish[0].channel", signedBuildEnv({ PUDDING_RELEASE_CHANNEL: "preview" })),
     /preview release version must match x\.y\.z-beta\.n/,
   );
   assert.throws(
-    () => loadConfigValue("publish[0].channel", { PUDDING_APP_VERSION: "0.1.2-beta.1" }),
+    () => loadConfigValue("publish[0].channel", signedBuildEnv({ PUDDING_APP_VERSION: "0.1.2-beta.1" })),
     /stable release version must match x\.y\.z/,
   );
 });
 
-function loadUpdateMode(overrides = {}) {
-  return loadConfigValue("extraMetadata.puddingUpdateMode", overrides);
-}
-
 function loadConfigValue(pathExpression, overrides = {}) {
-  const script = `process.stdout.write(require('./packaging/electron-builder.config.cjs').${pathExpression})`;
+  const script = `process.stdout.write(String(require('./packaging/electron-builder.config.cjs').${pathExpression}))`;
   return execFileSync(process.execPath, ["-e", script], {
     cwd: root,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     env: {
       ...process.env,
+      PUDDING_PACKAGING_PIPELINE: "1",
       PUDDING_MAC_IDENTITY: "",
       PUDDING_APP_VERSION: "",
       PUDDING_RELEASE_CHANNEL: "",
@@ -108,4 +99,12 @@ function loadConfigValue(pathExpression, overrides = {}) {
       ...overrides,
     },
   }).trim();
+}
+
+function signedBuildEnv(overrides = {}) {
+  return {
+    PUDDING_MAC_IDENTITY: "Developer ID Application: Test (TEAMID)",
+    APPLE_KEYCHAIN_PROFILE: "test-notary",
+    ...overrides,
+  };
 }

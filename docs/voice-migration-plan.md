@@ -123,7 +123,7 @@ internal/audio/
 - `macsay` 会保留 stderr 到错误日志,便于排查系统 voice / audio device 问题。
 - daemon 默认使用 PortAudio 作为 capture/playback driver;input binding 时才请求并打开麦克风,output 只在收到 Edge PCM 时懒启动 speaker playback。
 - macOS Electron dev/release bundle 写入 `NSMicrophoneUsageDescription`;PortAudio capture 前会主动请求 mic 权限。
-- `make desktop-bundle` 会生成基础 macOS `.app`,复制 release daemon,把 daemon 启动前需要的 PortAudio / Sherpa ONNX / ONNX Runtime / Abseil 等非系统 dylib 放入 bundle,并做 ad-hoc codesign。正式签名、公证、自动更新仍后置。
+- `make desktop-bundle` 会复制 release daemon,把 daemon 启动前需要的 PortAudio / Sherpa ONNX / ONNX Runtime / Abseil 等非系统 dylib 放入 bundle,随后完成 Developer ID 签名、公证、ZIP/DMG 生成和完整发布校验;不再支持 ad-hoc 发布包。
 - daemon 只从 `<home>/runtime/models` 加载 sherpa ASR/VAD 模型:
   - `asr/model.int8.onnx`
   - `asr/tokens.txt`

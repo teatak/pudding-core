@@ -9,15 +9,13 @@ const { resolveReleaseChannel } = require("../packaging/release-channel.cjs");
 const root = path.resolve(__dirname, "..");
 
 if (require.main === module) {
-  try {
-    main(process.argv.slice(2), process.env);
-  } catch (error) {
+  main(process.argv.slice(2), process.env).catch((error) => {
     console.error(`Release gate failed: ${error.message}`);
     process.exitCode = 1;
-  }
+  });
 }
 
-function main(argv, env) {
+async function main(argv, env) {
   const [command, ...args] = argv;
   if (command === "channel") {
     const tag = args[0] || env.GITHUB_REF_NAME || "";
@@ -25,8 +23,8 @@ function main(argv, env) {
     return;
   }
 
-  if (command !== "check" && command !== "tag") {
-    throw new Error("usage: release-gate.cjs <check|tag|channel> [--channel stable|preview]");
+  if (command !== "prepare" && command !== "check" && command !== "tag") {
+    throw new Error("usage: release-gate.cjs <prepare|check|tag|channel> [--channel stable|preview]");
   }
 
   const channel = readOption(args, "--channel") || env.PUDDING_RELEASE_CHANNEL || "stable";
@@ -42,10 +40,57 @@ function main(argv, env) {
   }
 
   assertPublishCheckout(root);
+  await assertPublicVersionUnused(metadata.tag, env);
+  if (command === "prepare") {
+    console.log(
+      `Release checkout ready: tag=${metadata.tag} channel=${metadata.releaseChannel.channel}`,
+    );
+    return;
+  }
+
   createAndPushReleaseTag(root, metadata.tag);
   console.log(
     `Release started: tag=${metadata.tag} channel=${metadata.releaseChannel.channel}`,
   );
+}
+
+async function assertPublicVersionUnused(tag, env, fetchImpl = fetch) {
+  const repository = "teatak/pudding";
+  const token = String(env.GH_TOKEN || "").trim();
+  const headers = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "pudding-release-gate",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const encodedTag = encodeURIComponent(tag);
+  const statuses = [];
+  for (const [label, endpoint] of [
+    ["release", `releases/tags/${encodedTag}`],
+    ["tag", `git/ref/tags/${encodedTag}`],
+  ]) {
+    const response = await fetchImpl(`https://api.github.com/repos/${repository}/${endpoint}`, {
+      headers,
+    });
+    statuses.push({ label, status: response.status });
+    await response.body?.cancel();
+  }
+  assertUnusedStatuses(tag, statuses, repository);
+}
+
+function assertUnusedStatuses(tag, statuses, repository = "teatak/pudding") {
+  for (const { label, status } of statuses) {
+    if (status === 404) {
+      continue;
+    }
+    if (status === 200) {
+      throw new Error(`${label} ${tag} already exists in ${repository}`);
+    }
+    throw new Error(`could not verify ${label} ${tag}: GitHub returned HTTP ${status}`);
+  }
 }
 
 function readReleaseMetadata(projectRoot, channel, versionOverride) {
@@ -208,6 +253,8 @@ function git(projectRoot, args, options = {}) {
 }
 
 module.exports = {
+  assertPublicVersionUnused,
+  assertUnusedStatuses,
   expectedTagForVersion,
   inferReleaseChannelFromTag,
   readReleaseMetadata,

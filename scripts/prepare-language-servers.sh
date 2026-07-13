@@ -28,6 +28,7 @@ fi
 
 GOEXE="$(go env GOEXE)"
 GOPLS_BIN="$OUT_DIR/gopls$GOEXE"
+GOPLS_LICENSE="$OUT_DIR/gopls.LICENSE"
 TYPESCRIPT_LAUNCHER="$OUT_DIR/typescript-language-server"
 TYPESCRIPT_SERVER_JS="$TYPESCRIPT_OUT/node_modules/typescript-language-server/lib/cli.mjs"
 if [[ "$GOEXE" == ".exe" ]]; then
@@ -53,7 +54,8 @@ SH
 }
 
 GOPLS_READY=false
-if [[ -x "$GOPLS_BIN" ]] && "$GOPLS_BIN" version 2>/dev/null | grep -Fq "$GOPLS_VERSION"; then
+if [[ -x "$GOPLS_BIN" ]] && [[ -f "$GOPLS_LICENSE" ]] \
+  && "$GOPLS_BIN" version 2>/dev/null | grep -Fq "$GOPLS_VERSION"; then
   GOPLS_READY=true
 fi
 
@@ -66,6 +68,7 @@ fi
 
 if $ENSURE_ONLY && $GOPLS_READY && $TYPESCRIPT_READY; then
   mkdir -p "$OUT_DIR"
+  chmod 644 "$GOPLS_LICENSE"
   write_typescript_launcher
   echo "Bundled language servers are ready."
   exit 0
@@ -83,8 +86,9 @@ if ! $ENSURE_ONLY || ! $GOPLS_READY; then
   GOBIN="$OUT_DIR" GOTOOLCHAIN=local go install "golang.org/x/tools/gopls@$GOPLS_VERSION"
 fi
 GOPLS_MODULE_DIR="$(go env GOMODCACHE)/golang.org/x/tools/gopls@$GOPLS_VERSION"
-rm -f "$OUT_DIR/gopls.LICENSE"
-cp "$GOPLS_MODULE_DIR/LICENSE" "$OUT_DIR/gopls.LICENSE"
+rm -f "$GOPLS_LICENSE"
+cp "$GOPLS_MODULE_DIR/LICENSE" "$GOPLS_LICENSE"
+chmod 644 "$GOPLS_LICENSE"
 
 write_typescript_launcher
 

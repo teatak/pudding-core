@@ -5,6 +5,12 @@ const path = require("node:path");
 
 const packageMetadata = require("../package.json");
 const { resolveReleaseChannel } = require("../packaging/release-channel.cjs");
+const {
+  buildMacPackagingEnvironment,
+  parseDeveloperIdentities,
+  resolveSigningIdentity,
+  validateNotaryCredentials,
+} = require("../packaging/macos-release-env.cjs");
 
 const root = path.resolve(__dirname, "..");
 
@@ -35,56 +41,36 @@ function main(argv, env) {
   console.log(`Preparing local release: tag=${tag} channel=${release.channel}`);
   validateGitHubAccess(releaseEnv);
   validateNotaryCredentials(releaseEnv);
-  run("node", ["scripts/check-public-release.cjs"], releaseEnv);
-  run("make", ["test"], releaseEnv);
-  run("npm", ["run", "test:electron"], releaseEnv);
-  run("node", ["scripts/release-gate.cjs", command === "start" ? "tag" : "check"], releaseEnv);
-  run("make", ["desktop-release", "language-servers"], releaseEnv);
-  run("npm", ["run", "desktop:package"], releaseEnv);
-  run("node", ["scripts/verify-desktop-release.cjs"], releaseEnv);
-  run("node", ["scripts/release-draft.cjs", "create", tag], releaseEnv);
-  run("node", ["scripts/release-draft.cjs", "status", tag], releaseEnv);
+  for (const [step, args] of buildReleaseSteps(command, release.channel, tag)) {
+    run(step, args, releaseEnv);
+  }
   console.log("Draft is ready. Publish it with: make desktop-release-finalize");
 }
 
 function buildReleaseEnvironment(env, channel, identity, token) {
-  const result = {
+  return buildMacPackagingEnvironment({
     ...env,
     GH_TOKEN: token,
-    PUDDING_MAC_IDENTITY: identity,
     PUDDING_RELEASE_CHANNEL: channel,
-  };
-  const hasAppleIDCredentials = Boolean(
-    result.APPLE_ID && result.APPLE_APP_SPECIFIC_PASSWORD && result.APPLE_TEAM_ID,
+  }, identity);
+}
+
+function buildReleaseSteps(command, channel, tag) {
+  const bundleTarget = channel === "preview" ? "desktop-preview-bundle" : "desktop-bundle";
+  const steps = [
+    ["node", ["scripts/release-gate.cjs", command === "start" ? "prepare" : "check"]],
+    ["make", ["test"]],
+    ["npm", ["run", "test:electron"]],
+    ["make", [bundleTarget]],
+  ];
+  if (command === "start") {
+    steps.push(["node", ["scripts/release-gate.cjs", "tag"]]);
+  }
+  steps.push(
+    ["node", ["scripts/release-draft.cjs", "create", tag]],
+    ["node", ["scripts/release-draft.cjs", "status", tag]],
   );
-  if (!String(result.APPLE_KEYCHAIN_PROFILE || "").trim() && !hasAppleIDCredentials) {
-    result.APPLE_KEYCHAIN_PROFILE = "pudding-notary";
-  }
-  return result;
-}
-
-function resolveSigningIdentity(env) {
-  const configured = String(env.PUDDING_MAC_IDENTITY || "").trim();
-  if (configured) {
-    return configured;
-  }
-  const output = capture("security", ["find-identity", "-v", "-p", "codesigning"]);
-  const identities = parseDeveloperIdentities(output);
-  if (identities.length === 0) {
-    throw new Error("no valid Developer ID Application identity was found");
-  }
-  if (identities.length > 1) {
-    throw new Error("multiple Developer ID identities found; set PUDDING_MAC_IDENTITY explicitly");
-  }
-  return identities[0];
-}
-
-function parseDeveloperIdentities(output) {
-  const identities = new Set();
-  for (const match of String(output || "").matchAll(/"(Developer ID Application:[^"]+)"/g)) {
-    identities.add(match[1].trim());
-  }
-  return [...identities];
+  return steps;
 }
 
 function resolveGitHubToken(env) {
@@ -110,18 +96,6 @@ function validateGitHubAccess(env) {
   }
 }
 
-function validateNotaryCredentials(env) {
-  const profile = String(env.APPLE_KEYCHAIN_PROFILE || "").trim();
-  if (!profile) {
-    return;
-  }
-  capture(
-    "xcrun",
-    ["notarytool", "history", "--keychain-profile", profile, "--output-format", "json"],
-    env,
-  );
-}
-
 function capture(command, args, env = process.env) {
   const result = spawnSync(command, args, { cwd: root, env, encoding: "utf8" });
   if (result.status !== 0) {
@@ -138,4 +112,4 @@ function run(command, args, env) {
   }
 }
 
-module.exports = { buildReleaseEnvironment, parseDeveloperIdentities };
+module.exports = { buildReleaseEnvironment, buildReleaseSteps, parseDeveloperIdentities };

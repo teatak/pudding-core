@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const test = require("node:test");
 
-const { UpdateManager, updateModes } = require("../update-manager.cjs");
+const { UpdateManager } = require("../update-manager.cjs");
 
 class FakeUpdater extends EventEmitter {
   constructor() {
@@ -42,7 +42,6 @@ test("schedules the first check and repeats every six hours", async () => {
   const manager = new UpdateManager({
     updater,
     isPackaged: true,
-    mode: updateModes.automatic,
     setTimeoutFn: (callback, delay) => {
       const timer = { callback, delay, unref() {} };
       timers.push(timer);
@@ -58,13 +57,13 @@ test("schedules the first check and repeats every six hours", async () => {
   assert.equal(timers[1].delay, 6 * 60 * 60 * 1_000);
 });
 
-test("background checks stay silent while manual checks report their result", async () => {
+test("background checks stay silent while interactive checks report their result", async () => {
   const updater = new FakeUpdater();
   const results = [];
   const manager = new UpdateManager({
     updater,
     isPackaged: true,
-    onManualResult: async (result) => results.push(result),
+    onInteractiveResult: async (result) => results.push(result),
   });
 
   await manager.check(false);
@@ -84,9 +83,8 @@ test("download completion exposes a restart state without a completion dialog", 
   const manager = new UpdateManager({
     updater,
     isPackaged: true,
-    mode: updateModes.automatic,
     beforeInstall: async () => calls.push("stop-services"),
-    onManualResult: async (result) => results.push(result),
+    onInteractiveResult: async (result) => results.push(result),
     onStateChange: (state) => states.push(state),
   });
 
@@ -111,7 +109,7 @@ test("development builds explain why update checks are unavailable", async () =>
   const manager = new UpdateManager({
     updater: new FakeUpdater(),
     isPackaged: false,
-    onManualResult: async (result) => results.push(result),
+    onInteractiveResult: async (result) => results.push(result),
   });
 
   assert.equal(await manager.check(true), false);
@@ -150,7 +148,7 @@ test("uses an explicit generic feed for local packaged update tests", () => {
   });
 
   assert.deepEqual(updater.feed, { provider: "generic", url: "http://127.0.0.1:8099" });
-  assert.equal(updater.autoDownload, false);
+  assert.equal(updater.autoDownload, true);
   assert.equal(updater.autoInstallOnAppQuit, false);
   assert.equal(updater.channel, "latest");
   assert.equal(updater.allowPrerelease, false);
@@ -187,39 +185,13 @@ test("cannot change update channel while an update is active", async () => {
   );
 });
 
-test("manual mode reports an available update without downloading it", async () => {
+test("reports an interactively started download that later fails", async () => {
   const updater = new FakeUpdater();
   const results = [];
   const manager = new UpdateManager({
     updater,
     isPackaged: true,
-    mode: updateModes.manual,
-    onManualResult: async (result) => results.push(result),
-  });
-
-  await manager.check(true);
-  updater.emit("update-available", { version: "1.2.0" });
-
-  assert.equal(updater.autoDownload, false);
-  assert.deepEqual(manager.getState(), {
-    status: "available",
-    mode: "manual",
-    receivePreviewUpdates: false,
-    version: "1.2.0",
-    percent: null,
-  });
-  assert.deepEqual(results, [{ kind: "available", version: "1.2.0" }]);
-  assert.equal(await manager.install(), false);
-});
-
-test("reports a manually started download that later fails", async () => {
-  const updater = new FakeUpdater();
-  const results = [];
-  const manager = new UpdateManager({
-    updater,
-    isPackaged: true,
-    mode: updateModes.automatic,
-    onManualResult: async (result) => results.push(result),
+    onInteractiveResult: async (result) => results.push(result),
   });
 
   await manager.check(true);
@@ -239,8 +211,7 @@ test("an asynchronous install error clears the installing state", async () => {
   const manager = new UpdateManager({
     updater,
     isPackaged: true,
-    mode: updateModes.automatic,
-    onManualResult: async (result) => results.push(result),
+    onInteractiveResult: async (result) => results.push(result),
   });
 
   updater.emit("update-available", { version: "1.2.0" });

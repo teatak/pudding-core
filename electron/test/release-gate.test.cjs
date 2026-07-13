@@ -1,12 +1,14 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 
 const {
+  assertUnusedStatuses,
   expectedTagForVersion,
   inferReleaseChannelFromTag,
   validateManifestVersions,
 } = require("../../scripts/release-gate.cjs");
-const { assertUnusedStatuses } = require("../../scripts/check-public-release.cjs");
 
 test("release gate requires package and lock versions to match", () => {
   assert.equal(
@@ -38,10 +40,13 @@ test("release gate rejects malformed release tags", () => {
   }
 });
 
-test("local bundles stay tag-free and raw builder publishing stays disabled", () => {
+test("desktop packaging is only exposed through the complete Make pipeline", () => {
   const scripts = require("../../package.json").scripts;
-  assert.doesNotMatch(scripts["desktop:package"], /release-gate/);
+  const makefile = fs.readFileSync(path.resolve(__dirname, "..", "..", "Makefile"), "utf8");
+  assert.equal(scripts["desktop:package"], undefined);
   assert.equal(scripts["desktop:publish"], undefined);
+  assert.match(makefile, /desktop-bundle: desktop-release language-servers/);
+  assert.match(makefile, /PUDDING_PACKAGING_PIPELINE=1/);
 });
 
 test("public release gate only accepts unused versions", () => {

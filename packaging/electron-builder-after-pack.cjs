@@ -16,7 +16,7 @@ module.exports = async function afterPack(context) {
   const electronNodePath = path.join(languageServersPath, "node");
 
   execFileSync("bash", [
-    path.join(root, "scripts", "macos-bundle-dylibs.sh"),
+    path.join(root, "packaging", "macos", "bundle-dylibs.sh"),
     daemonPath,
     path.join(appRoot, "lib"),
   ]);
@@ -35,4 +35,30 @@ exec "$SERVER_ROOT/node" "$SERVER_ROOT/typescript/node_modules/typescript-langua
   fs.rmSync(electronNodePath, { force: true });
   fs.symlinkSync(`../../../MacOS/${appName}`, electronNodePath);
   fs.chmodSync(daemonPath, 0o755);
+  makeBundleOwnerWritable(appPath);
 };
+
+function makeBundleOwnerWritable(rootPath) {
+  const pending = [rootPath];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    const stat = fs.lstatSync(current);
+    if (stat.isSymbolicLink()) {
+      continue;
+    }
+    if (stat.isDirectory()) {
+      if ((stat.mode & 0o200) === 0) {
+        fs.chmodSync(current, stat.mode | 0o200);
+      }
+      for (const entry of fs.readdirSync(current)) {
+        pending.push(path.join(current, entry));
+      }
+      continue;
+    }
+    if (stat.isFile() && (stat.mode & 0o200) === 0) {
+      fs.chmodSync(current, stat.mode | 0o200);
+    }
+  }
+}
+
+module.exports.makeBundleOwnerWritable = makeBundleOwnerWritable;

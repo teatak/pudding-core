@@ -7,8 +7,7 @@ type DirectoryPickerOptions = {
 export type DesktopMenuCommand = "new-session" | "search-sessions" | "settings";
 
 export type DesktopUpdateState = {
-  status: "unavailable" | "idle" | "checking" | "available" | "downloading" | "downloaded" | "installing";
-  mode: "manual" | "automatic";
+  status: "unavailable" | "idle" | "checking" | "downloading" | "downloaded" | "installing";
   receivePreviewUpdates: boolean;
   version: string;
   percent: number | null;
@@ -80,12 +79,12 @@ export function onDesktopMenuCommand(listener: (command: DesktopMenuCommand) => 
 export async function getDesktopUpdateState(): Promise<DesktopUpdateState> {
   const bridge = desktopBridge();
   if (!bridge?.getUpdateState) {
-    return { status: "unavailable", mode: "manual", receivePreviewUpdates: false, version: "", percent: null };
+    return { status: "unavailable", receivePreviewUpdates: false, version: "", percent: null };
   }
   try {
     return await bridge.getUpdateState();
   } catch {
-    return { status: "unavailable", mode: "manual", receivePreviewUpdates: false, version: "", percent: null };
+    return { status: "unavailable", receivePreviewUpdates: false, version: "", percent: null };
   }
 }
 

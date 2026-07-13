@@ -25,7 +25,7 @@ const { BrowserHost } = require("./browser-host.cjs");
 const { buildEditContextMenuTemplate } = require("./context-menu.cjs");
 const { nativeText, normalizeNativeLocale } = require("./native-i18n.cjs");
 const { ProjectFileWatcher } = require("./project-file-watcher.cjs");
-const { UpdateManager, updateModes, updateStatuses } = require("./update-manager.cjs");
+const { UpdateManager, updateStatuses } = require("./update-manager.cjs");
 const { readPreviewUpdatePreference, writePreviewUpdatePreference } = require("./update-preferences.cjs");
 
 const repoRoot = app.isPackaged ? path.join(process.resourcesPath, "app") : path.resolve(__dirname, "..");
@@ -75,7 +75,6 @@ let appTray = null;
 let shellLocale = "en";
 const pendingOAuthReturnURLs = [];
 const updateFeedURL = normalizeUpdateFeedURL(process.env.PUDDING_UPDATE_FEED_URL);
-const updateMode = normalizeUpdateMode(process.env.PUDDING_UPDATE_MODE || packageMetadata.puddingUpdateMode);
 const storedPreviewUpdatePreference = readPreviewUpdatePreference(previewUpdatePreferencePath());
 const receivePreviewUpdates =
   normalizeOptionalBoolean(process.env.PUDDING_RECEIVE_PREVIEW_UPDATES) ??
@@ -87,13 +86,12 @@ const updateManager = new UpdateManager({
   updater: autoUpdater,
   isPackaged: app.isPackaged,
   disabled: process.env.PUDDING_DISABLE_UPDATE_CHECK === "1",
-  mode: updateMode,
   receivePreviewUpdates,
   feedURL: updateFeedURL,
   simulatedVersion: simulatedUpdateVersion,
   beforeInstall: prepareForUpdateInstall,
   onError: (error) => console.warn("[electron] update failed", error),
-  onManualResult: showManualUpdateResult,
+  onInteractiveResult: showInteractiveUpdateResult,
   onSimulatedInstall: showSimulatedUpdateResult,
   onStateChange: (state) => {
     if (app.isReady()) {
@@ -440,12 +438,6 @@ function updateApplicationMenu() {
 
 function updateMenuItem() {
   const state = updateManager.getState();
-  if (state.status === updateStatuses.available && state.mode === updateModes.manual) {
-    return {
-      label: nativeMenuText("downloadUpdate"),
-      click: () => void activateUpdate(),
-    };
-  }
   if (state.status === updateStatuses.downloaded || state.status === updateStatuses.installing) {
     return {
       enabled: state.status === updateStatuses.downloaded,
@@ -493,7 +485,7 @@ function sendDesktopMenuCommand(command) {
   }
 }
 
-async function showManualUpdateResult(result) {
+async function showInteractiveUpdateResult(result) {
   if (result.kind === "development") {
     await showUpdateMessage(
       {
@@ -516,23 +508,6 @@ async function showManualUpdateResult(result) {
       },
       true,
     );
-    return;
-  }
-  if (result.kind === "available") {
-    const choice = await showUpdateMessage(
-      {
-        buttons: [nativeMenuText("downloadUpdate"), nativeMenuText("later")],
-        cancelId: 1,
-        defaultId: 0,
-        message: nativeText(shellLocale, "manualUpdateAvailableMessage", { version: result.version }),
-        title: nativeMenuText("updateAvailableTitle"),
-        type: "info",
-      },
-      true,
-    );
-    if (choice.response === 0) {
-      await openUpdateDownloadPage();
-    }
     return;
   }
   if (result.kind === "downloading") {
@@ -593,10 +568,6 @@ function showUpdateMessage(options, bringToFront) {
 }
 
 async function activateUpdate() {
-  const state = updateManager.getState();
-  if (state.mode === updateModes.manual) {
-    return state.status === updateStatuses.available ? openUpdateDownloadPage() : false;
-  }
   return updateManager.install();
 }
 
@@ -1212,12 +1183,6 @@ function normalizeUpdatePageURL(rawURL) {
     console.warn("[electron] ignoring invalid PUDDING_UPDATE_DOWNLOAD_URL", error);
     return "";
   }
-}
-
-function normalizeUpdateMode(value) {
-  return String(value || "").trim().toLowerCase() === updateModes.automatic
-    ? updateModes.automatic
-    : updateModes.manual;
 }
 
 function normalizeOptionalBoolean(value) {

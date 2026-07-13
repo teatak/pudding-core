@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SOURCE="$ROOT/assets/macos/dmg-background.svg"
 OUTPUT="$ROOT/assets/macos/dmg-background.tiff"
 WORK="$(mktemp -d)"

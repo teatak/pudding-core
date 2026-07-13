@@ -6,7 +6,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
     "desktop:dev": "electron ../electron/main.cjs",
-    "smoke:electron-browser": "electron ../scripts/browser-dev-smoke.cjs",
+    "smoke:electron-browser": "electron ../electron/smoke/browser-dev-smoke.cjs",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {

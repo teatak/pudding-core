@@ -3,7 +3,6 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import {
   ChevronRight,
   Copy,
-  Download,
   Ellipsis,
   FolderClosed,
   FolderOpen,
@@ -1316,24 +1315,6 @@ function RailUpdateButton({ serverTurnRunning }: { serverTurnRunning: boolean })
     };
   }, []);
 
-  const manualAvailable = state?.mode === "manual" && state.status === "available";
-  if (manualAvailable) {
-    return (
-      <Button
-        className="mb-1 h-9 w-full justify-start gap-2 px-2 font-normal"
-        title={state.version || undefined}
-        variant="secondary"
-        onClick={() => void activateDesktopUpdate()}
-      >
-        <Download className="size-4" />
-        <span className="truncate">
-          {t("update.download")}
-          {state.version ? ` ${state.version}` : ""}
-        </span>
-        <span className="ml-auto size-2 shrink-0 rounded-full bg-blue-500" />
-      </Button>
-    );
-  }
   if (state?.status !== "downloaded" && state?.status !== "installing") {
     return null;
   }

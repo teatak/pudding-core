@@ -6,7 +6,7 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { app, BrowserWindow, ipcMain, webContents } = require("electron");
 
-const { BrowserHost } = require("../electron/browser-host.cjs");
+const { BrowserHost } = require("../browser-host.cjs");
 
 const smokeHome = fs.mkdtempSync(path.join(os.tmpdir(), "pudding-electron-browser-smoke-"));
 app.setPath("userData", path.join(smokeHome, "user-data"));
