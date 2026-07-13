@@ -49,6 +49,7 @@ async function main() {
   if (installed.version === expectedVersion) {
     throw new Error(`installed Pudding is already ${expectedVersion}; install an older version first`);
   }
+  assertBundleWritable(installedAppPath(appExecutable), "installed source bundle");
   console.log(`Installed Pudding: version=${installed.version} channel=${installed.channel}`);
   if (!(await feedReady())) {
     feedProcess = spawn(process.execPath, [path.join(__dirname, "serve-update-feed.cjs"), root, String(port)], {
@@ -162,10 +163,7 @@ function readInstalledVersion(executable) {
 }
 
 function verifyInstalledApp(appPath) {
-  const readOnly = findReadOnlyEntries(appPath);
-  if (readOnly.length > 0) {
-    throw new Error(`installed bundle contains read-only entries: ${readOnly.slice(0, 3).join(", ")}`);
-  }
+  assertBundleWritable(appPath, "installed update bundle");
   runCheck("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath]);
   runCheck("xcrun", ["stapler", "validate", appPath]);
   runCheck("spctl", ["--assess", "--type", "execute", "--verbose=2", appPath]);
@@ -175,14 +173,25 @@ function installedAppPath(executable) {
   return path.resolve(path.dirname(executable), "..", "..");
 }
 
-function findReadOnlyEntries(rootPath) {
+function assertBundleWritable(rootPath, label) {
+  const unwritable = findUnwritableEntries(rootPath);
+  if (unwritable.length > 0) {
+    throw new Error(
+      `${label} is not writable by the current user: ${unwritable.slice(0, 3).join(", ")}`,
+    );
+  }
+}
+
+function findUnwritableEntries(rootPath) {
   const found = [];
   const visit = (current) => {
     const stat = fs.lstatSync(current);
     if (stat.isSymbolicLink()) {
       return;
     }
-    if ((stat.mode & 0o200) === 0) {
+    try {
+      fs.accessSync(current, fs.constants.W_OK);
+    } catch {
       found.push(current);
     }
     if (stat.isDirectory()) {
@@ -225,7 +234,8 @@ function positiveInt(value, fallback) {
 }
 
 module.exports = {
-  findReadOnlyEntries,
+  assertBundleWritable,
+  findUnwritableEntries,
   installedAppPath,
   readInstalledBuild,
   readInstalledVersion,

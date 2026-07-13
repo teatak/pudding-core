@@ -5,12 +5,13 @@ const path = require("node:path");
 const test = require("node:test");
 
 const {
-  findReadOnlyEntries,
+  assertBundleWritable,
+  findUnwritableEntries,
   installedAppPath,
   readInstalledVersion,
 } = require("../../scripts/run-update-test.cjs");
 
-test("update verification resolves the app root and rejects read-only bundle entries", (t) => {
+test("update verification resolves the app root and rejects entries the current user cannot write", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "pudding-update-runner-"));
   t.after(() => fs.rmSync(root, { force: true, recursive: true }));
 
@@ -31,8 +32,13 @@ test("update verification resolves the app root and rejects read-only bundle ent
 
   assert.equal(installedAppPath(executable), app);
   assert.equal(readInstalledVersion(executable), "0.1.2");
-  assert.deepEqual(findReadOnlyEntries(app), [resource]);
+  assert.deepEqual(findUnwritableEntries(app), [resource]);
+  assert.throws(
+    () => assertBundleWritable(app, "test bundle"),
+    /test bundle is not writable by the current user/,
+  );
 
   fs.chmodSync(resource, 0o644);
-  assert.deepEqual(findReadOnlyEntries(app), []);
+  assert.deepEqual(findUnwritableEntries(app), []);
+  assert.doesNotThrow(() => assertBundleWritable(app, "test bundle"));
 });
