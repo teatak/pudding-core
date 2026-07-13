@@ -110,7 +110,7 @@ function readInstalledBuild(executable) {
     const asar = require("@electron/asar");
     const metadata = JSON.parse(asar.extractFile(asarPath, "package.json").toString());
     return {
-      version: String(metadata.version || ""),
+      version: readInstalledVersion(executable),
       channel: String(metadata.puddingReleaseChannel || "stable"),
     };
   } catch (error) {
@@ -130,7 +130,7 @@ function checkInstalledUpdate() {
   if (stopping) {
     return;
   }
-  if (readInstalledBuild(appExecutable).version !== expectedVersion) {
+  if (readInstalledVersion(appExecutable) !== expectedVersion) {
     expectedVersionSeenAt = 0;
     return;
   }
@@ -149,6 +149,16 @@ function checkInstalledUpdate() {
     console.error(`Installed update verification failed: ${error.message}`);
     shutdown(1);
   }
+}
+
+function readInstalledVersion(executable) {
+  const infoPlist = path.join(installedAppPath(executable), "Contents", "Info.plist");
+  const result = spawnSync(
+    "plutil",
+    ["-extract", "CFBundleShortVersionString", "raw", infoPlist],
+    { encoding: "utf8" },
+  );
+  return result.status === 0 ? String(result.stdout || "").trim() : "";
 }
 
 function verifyInstalledApp(appPath) {
@@ -214,4 +224,9 @@ function positiveInt(value, fallback) {
   return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= 65535 ? parsed : fallback;
 }
 
-module.exports = { findReadOnlyEntries, installedAppPath, readInstalledBuild };
+module.exports = {
+  findReadOnlyEntries,
+  installedAppPath,
+  readInstalledBuild,
+  readInstalledVersion,
+};

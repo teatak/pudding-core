@@ -41,11 +41,11 @@ function main(argv, env) {
     ...buildMacPackagingEnvironment(env),
     PUDDING_PACKAGING_PIPELINE: "1",
   };
-  validateNotaryCredentials(releaseEnv);
   if (verifyOnly) {
     run(process.execPath, ["scripts/verify-desktop-release.cjs"], releaseEnv);
     return;
   }
+  validateNotaryCredentials(releaseEnv);
 
   const builder = path.join(root, "node_modules", ".bin", "electron-builder");
   requireExecutable(builder, "electron-builder is missing; run npm install");

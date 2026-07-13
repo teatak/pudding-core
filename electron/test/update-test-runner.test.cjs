@@ -7,6 +7,7 @@ const test = require("node:test");
 const {
   findReadOnlyEntries,
   installedAppPath,
+  readInstalledVersion,
 } = require("../../scripts/run-update-test.cjs");
 
 test("update verification resolves the app root and rejects read-only bundle entries", (t) => {
@@ -19,10 +20,17 @@ test("update verification resolves the app root and rejects read-only bundle ent
   fs.mkdirSync(path.dirname(executable), { recursive: true });
   fs.mkdirSync(path.dirname(resource), { recursive: true });
   fs.writeFileSync(executable, "binary");
+  fs.writeFileSync(
+    path.join(app, "Contents", "Info.plist"),
+    `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>0.1.2</string></dict></plist>`,
+  );
   fs.writeFileSync(resource, "license");
   fs.chmodSync(resource, 0o444);
 
   assert.equal(installedAppPath(executable), app);
+  assert.equal(readInstalledVersion(executable), "0.1.2");
   assert.deepEqual(findReadOnlyEntries(app), [resource]);
 
   fs.chmodSync(resource, 0o644);
