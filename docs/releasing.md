@@ -162,9 +162,12 @@ Keep the user-facing installation instructions in the public
 - If publishing fails after the source tag is pushed but before creating a draft, rerun
   `PUDDING_RELEASE_CHANNEL=stable make desktop-publish-from-tag`. Use `preview` for a beta tag. Do not move the
   source tag.
-- If uploading is interrupted, run the same from-tag recovery command. It reuses the draft, skips complete
-  assets, and uploads the missing ones. Delete a draft only when it is corrupt or duplicated. Never replace
-  assets after final publication.
+- If the local artifacts already passed the complete verifier and only Draft creation or uploading failed, run
+  `PUDDING_RELEASE_CHANNEL=stable make desktop-publish-upload-resume`. Use `preview` for a beta tag. It verifies
+  the existing package again, reuses the draft, skips complete assets, and uploads only missing assets without
+  rebuilding or repeating notarization.
+- Use the full from-tag recovery command when verified local artifacts are unavailable. Delete a draft only when
+  it is corrupt or duplicated. Never replace assets after final publication.
 - If the tagged source itself is wrong, bump the version and create a new tag.
 - The from-tag target refuses an untagged or dirty checkout.
 - The Help menu always contains `Download Latest Version...`, independently of update-check state.

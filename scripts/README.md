@@ -14,6 +14,7 @@ called directly unless debugging the pipeline itself.
 | Test an older installed app updating to the built version | `make desktop-update-test` |
 | Create a stable Draft Release | `make desktop-publish` |
 | Create a preview Draft Release | `make desktop-preview-publish` |
+| Resume only Draft creation or asset upload | `make desktop-publish-upload-resume` |
 | Publish a verified Draft Release | `make desktop-release-finalize` |
 
 `package-desktop.cjs` is guarded by `PUDDING_PACKAGING_PIPELINE=1`; only the matching Make targets set it. The

@@ -1,7 +1,11 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { expectedAssetNames, validateDraftRelease } = require("../../scripts/release-draft.cjs");
+const {
+  createDraftMetadata,
+  expectedAssetNames,
+  validateDraftRelease,
+} = require("../../scripts/release-draft.cjs");
 
 function draft(version = "0.1.2", updateInfo = "latest-mac.yml") {
   const names = [
@@ -34,6 +38,17 @@ test("lists the complete channel-specific release assets", () => {
     "latest-mac.yml",
   ]);
   assert.equal(expectedAssetNames("v0.1.3-beta.1", "preview").at(-1), "beta-mac.yml");
+});
+
+test("creates drafts through non-interactive GitHub API metadata", () => {
+  assert.deepEqual(createDraftMetadata("v0.1.3", "stable"), {
+    tag_name: "v0.1.3",
+    name: "0.1.3",
+    body: "",
+    draft: true,
+    prerelease: false,
+  });
+  assert.equal(createDraftMetadata("v0.1.4-beta.1", "preview").prerelease, true);
 });
 
 test("rejects incomplete or already published releases", () => {

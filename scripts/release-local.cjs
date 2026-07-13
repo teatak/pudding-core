@@ -25,8 +25,8 @@ if (require.main === module) {
 
 function main(argv, env) {
   const [command] = argv;
-  if (command !== "start" && command !== "resume") {
-    throw new Error("usage: release-local.cjs <start|resume>");
+  if (command !== "start" && command !== "resume" && command !== "upload") {
+    throw new Error("usage: release-local.cjs <start|resume|upload>");
   }
   if (process.platform !== "darwin") {
     throw new Error("desktop releases must run on macOS");
@@ -57,6 +57,15 @@ function buildReleaseEnvironment(env, channel, identity, token) {
 
 function buildReleaseSteps(command, channel, tag) {
   const bundleTarget = channel === "preview" ? "desktop-preview-bundle" : "desktop-bundle";
+  const verifyTarget = channel === "preview" ? "desktop-preview-verify" : "desktop-verify";
+  if (command === "upload") {
+    return [
+      ["node", ["scripts/release-gate.cjs", "check"]],
+      ["make", [verifyTarget]],
+      ["node", ["scripts/release-draft.cjs", "create", tag]],
+      ["node", ["scripts/release-draft.cjs", "status", tag]],
+    ];
+  }
   const steps = [
     ["node", ["scripts/release-gate.cjs", command === "start" ? "prepare" : "check"]],
     ["make", ["test"]],

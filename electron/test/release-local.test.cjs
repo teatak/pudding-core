@@ -81,3 +81,13 @@ test("resumed releases rebuild from the existing tag without moving it", () => {
   assert.deepEqual(steps[3], ["make", ["desktop-preview-bundle"]]);
   assert.equal(steps.some(([, args]) => args.includes("tag")), false);
 });
+
+test("upload-only recovery verifies existing artifacts without rebuilding or notarizing", () => {
+  const steps = buildReleaseSteps("upload", "stable", "v0.1.3");
+  assert.deepEqual(steps, [
+    ["node", ["scripts/release-gate.cjs", "check"]],
+    ["make", ["desktop-verify"]],
+    ["node", ["scripts/release-draft.cjs", "create", "v0.1.3"]],
+    ["node", ["scripts/release-draft.cjs", "status", "v0.1.3"]],
+  ]);
+});

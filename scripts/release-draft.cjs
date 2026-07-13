@@ -79,13 +79,12 @@ async function createDraftRelease(existingRelease, tag, channel, token, env) {
 
   let release = existingRelease;
   if (!release) {
-    runGh(
-      ["release", "create", tag, "--repo", repository, "--draft", "--title", tag.slice(1)],
+    release = await githubRequest(
+      "POST",
+      `/repos/${repository}/releases`,
       token,
-      env,
+      createDraftMetadata(tag, channel),
     );
-    const releases = await githubRequest("GET", `/repos/${repository}/releases?per_page=100`, token);
-    release = releases.find((candidate) => candidate.tag_name === tag);
   }
   if (!release?.draft) {
     throw new Error(`draft ${tag} could not be created`);
@@ -107,6 +106,16 @@ async function createDraftRelease(existingRelease, tag, channel, token, env) {
   release = await githubRequest("GET", `/repos/${repository}/releases/${release.id}`, token);
   validateDraftRelease(release, tag, channel);
   console.log(`Draft release assets ready: ${tag} ${release.html_url}`);
+}
+
+function createDraftMetadata(tag, channel) {
+  return {
+    tag_name: tag,
+    name: tag.slice(1),
+    body: "",
+    draft: true,
+    prerelease: channel === "preview",
+  };
 }
 
 function validateDraftRelease(release, tag, channel) {
@@ -179,4 +188,4 @@ async function githubRequest(method, endpoint, token, body) {
   return payload;
 }
 
-module.exports = { expectedAssetNames, validateDraftRelease };
+module.exports = { createDraftMetadata, expectedAssetNames, validateDraftRelease };

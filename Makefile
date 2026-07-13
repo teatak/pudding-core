@@ -2,7 +2,7 @@ MODULE := github.com/teatak/pudding-core
 LDFLAGS_RELEASE := -X $(MODULE)/internal/buildinfo.channel=release
 BUILDTAGS := sqlite_fts5 webrtcaec
 
-.PHONY: test schema-check tidy clean embed language-servers language-servers-ready desktop desktop-dev desktop-release desktop-bundle desktop-verify desktop-update-test desktop-publish desktop-preview-bundle desktop-preview-publish desktop-publish-from-tag desktop-release-status desktop-release-finalize daemon daemon-dev daemon-release prompt tools-report tools-eval
+.PHONY: test schema-check tidy clean embed language-servers language-servers-ready desktop desktop-dev desktop-release desktop-bundle desktop-verify desktop-update-test desktop-publish desktop-preview-bundle desktop-preview-verify desktop-preview-publish desktop-publish-from-tag desktop-publish-upload-resume desktop-release-status desktop-release-finalize daemon daemon-dev daemon-release prompt tools-report tools-eval
 
 # 共享:构建前端并装填进 daemon 的 embed 目录(产物不进 git)
 embed:
@@ -51,12 +51,19 @@ desktop-publish:
 desktop-preview-bundle: desktop-release language-servers
 	@PUDDING_PACKAGING_PIPELINE=1 PUDDING_RELEASE_CHANNEL=preview node scripts/package-desktop.cjs
 
+desktop-preview-verify:
+	@PUDDING_PACKAGING_PIPELINE=1 PUDDING_RELEASE_CHANNEL=preview node scripts/package-desktop.cjs --verify-only
+
 desktop-preview-publish:
 	@PUDDING_RELEASE_CHANNEL=preview node scripts/release-local.cjs start
 
 # tag 已推送但本地发布中断时，从同一提交恢复。
 desktop-publish-from-tag:
 	@node scripts/release-local.cjs resume
+
+# 本地产物已完整验证、仅 Draft 创建或上传失败时续传,不重复构建和公证。
+desktop-publish-upload-resume:
+	@node scripts/release-local.cjs upload
 
 # Draft 出现即表示签名、公证和产物上传均已完成；显式确认后才公开 Release。
 desktop-release-status:
