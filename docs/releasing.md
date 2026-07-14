@@ -37,6 +37,27 @@ Ship the preview-channel setting in stable `0.1.2` first. The first preview offe
 - `main` remains the development line. Use short-lived feature branches and temporary hotfix branches rather
   than permanent stable/preview branches.
 
+## Pre-release assessment
+
+Every stable or preview release must complete the same assessment before changing the version or creating a tag:
+
+1. Use the latest published tag as the baseline and review the complete commit range plus uncommitted changes.
+2. Review `internal/store/schema.sql`, `internal/store/sqlitestore/migrations.go`, migration tests, and all changed
+   persistence call sites.
+3. Compare the schema fingerprint with the baseline. A schema change must increment `currentSchemaVersion`, add
+   one transactional forward migration, append the immutable released fingerprint, and test rollback plus backup.
+   When the schema is unchanged, do not add an empty migration or increment `PRAGMA user_version`.
+4. Open the local release database read-only and check `PRAGMA user_version`, `PRAGMA quick_check`, and the current
+   schema contract. Never test a migration directly against `~/.pudding/data/pudding.db`; copy it to a temporary
+   directory when a real migration rehearsal is required.
+5. Run the tagged Go tests, Electron tests, web production build, and `git diff --check`.
+6. Create `docs/release-report-<version>.md` with the baseline, change summary, impact matrix, database analysis,
+   compatibility, completed verification, remaining release gates, and user-facing release notes.
+
+The report must explicitly state whether the release rewrites canonical data, rebuilds derived indexes, creates a
+migration backup, changes downgrade behavior, or leaves the database untouched. Resolve every blocking item in
+the report before starting the packaging and publishing flow below.
+
 ## Build
 
 The supported macOS packaging command is:
