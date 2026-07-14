@@ -12,7 +12,6 @@ import {
   PanelLeft,
   Pencil,
   Pin,
-  Plus,
   RefreshCw,
   TextCursorInput,
   MessageCirclePlus,
@@ -1453,7 +1452,7 @@ function CollapsibleSessionGroupLabel({
                 onAction();
               }}
             >
-              <Plus className="size-3" />
+              <MessageCirclePlus className="size-3.5" />
             </button>
           </TooltipTrigger>
           <TooltipContent side="right">{actionLabel || label}</TooltipContent>
@@ -1618,7 +1617,6 @@ function ProjectActionsMenu({ project, token }: { project: Project; token: strin
           <DropdownMenuSeparator />
           <DropdownMenuItem
             disabled={deleteMutation.isPending}
-            variant="destructive"
             onSelect={() => setDeleteOpen(true)}
           >
             <Trash />
@@ -1669,7 +1667,6 @@ function ProjectActionsMenu({ project, token }: { project: Project; token: strin
             <AlertDialogCancel disabled={deleteMutation.isPending}>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               disabled={deleteMutation.isPending}
-              variant="destructive"
               onClick={() => deleteMutation.mutate()}
             >
               {deleteMutation.isPending ? <Spinner /> : null}
