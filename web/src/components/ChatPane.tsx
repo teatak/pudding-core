@@ -13,6 +13,7 @@ import { queryKeys } from "@/api/queryKeys";
 import { Conversation } from "@/components/Conversation";
 import { DraftConversation } from "@/components/DraftConversation";
 import { PhaseDot } from "@/components/PhaseDot";
+import { SessionAppsControl } from "@/components/SessionAppsControl";
 import { Spinner } from "@/components/Spinner";
 import {
   AlertDialog,
@@ -212,6 +213,7 @@ export function ChatPane({ token, sessionID, draftActive = false, draftProjectID
           )}
         </div>
         <div className="no-drag-region relative z-30 flex shrink-0 items-center gap-2">
+          {selectedSession ? <SessionAppsControl session={selectedSession} token={token} /> : null}
           {!isPrimary ? (
             <Tooltip>
               <TooltipTrigger asChild>

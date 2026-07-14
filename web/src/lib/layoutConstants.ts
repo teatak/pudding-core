@@ -5,15 +5,25 @@ export const layoutStorageKeys = {
   workspaceRatio: "pudding.workspaceRatio",
 } as const;
 
+export const sessionRailLayout = {
+  expandedWidthPx: 268,
+} as const;
+
+export const chatLayout = {
+  minimumContentWidthPx: 480,
+  horizontalGutterPx: 40,
+} as const;
+
 export const workspaceLayout = {
-  fallback: { chat: 30, canvas: 70 },
-  closed: { chat: 100, canvas: 0 },
+  fallback: { chat: 30, workspace: 70 },
+  closed: { chat: 100, workspace: 0 },
   minPercent: 1,
   maxPercent: 99,
-  minChatPx: 480,
+  minChatPx: chatLayout.minimumContentWidthPx + chatLayout.horizontalGutterPx,
   maxChatPx: 920,
-  minCanvasPx: 320,
-  railAutoCollapsePx: 660,
+  minWorkspacePx: 320,
+  railAutoCollapsePx:
+    chatLayout.minimumContentWidthPx + chatLayout.horizontalGutterPx + sessionRailLayout.expandedWidthPx,
 } as const;
 
 export const resizeTargetMinimumSize = {

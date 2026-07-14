@@ -112,7 +112,8 @@ function userEqual(previous: TranscriptTurnVM["user"], next: TranscriptTurnVM["u
     previous.text === next.text &&
     partsEqual(previous.parts, next.parts) &&
     attachmentsEqual(previous.attachments, next.attachments) &&
-    localFoldersEqual(previous.localFolders, next.localFolders)
+    localFoldersEqual(previous.localFolders, next.localFolders) &&
+    projectReferencesEqual(previous.projectReferences, next.projectReferences)
   );
 }
 
@@ -137,8 +138,29 @@ function partsEqual(previous: NonNullable<TranscriptTurnVM["user"]>["parts"], ne
     if (part.type === "local_folder" && other.type === "local_folder") {
       return part.id === other.id && part.path === other.path;
     }
+    if (part.type === "project_reference" && other.type === "project_reference") {
+      return (
+        part.id === other.id &&
+        part.rootID === other.rootID &&
+        part.path === other.path &&
+        part.sourcePath === other.sourcePath &&
+        part.kind === other.kind
+      );
+    }
     if (part.type === "text" && other.type === "text") {
       return part.text === other.text;
+    }
+    if (part.type === "ui_context" && other.type === "ui_context") {
+      return (
+        part.surface === other.surface &&
+        part.resource === other.resource &&
+        part.id === other.id &&
+        part.name === other.name &&
+        part.path === other.path &&
+        part.url === other.url &&
+        part.kind === other.kind &&
+        part.rootID === other.rootID
+      );
     }
     return true;
   });
@@ -179,6 +201,29 @@ function localFoldersEqual(
   return previous.every((item, index) => {
     const other = next[index];
     return item.id === other.id && item.name === other.name && item.path === other.path;
+  });
+}
+
+function projectReferencesEqual(
+  previous: NonNullable<TranscriptTurnVM["user"]>["projectReferences"],
+  next: NonNullable<TranscriptTurnVM["user"]>["projectReferences"],
+) {
+  if (previous === next) {
+    return true;
+  }
+  if (!previous || !next || previous.length !== next.length) {
+    return false;
+  }
+  return previous.every((item, index) => {
+    const other = next[index];
+    return (
+      item.id === other.id &&
+      item.name === other.name &&
+      item.path === other.path &&
+      item.sourcePath === other.sourcePath &&
+      item.rootID === other.rootID &&
+      item.kind === other.kind
+    );
   });
 }
 

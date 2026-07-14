@@ -60,7 +60,7 @@ import {
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { AppIcon, mergeAppIconSpec, type AppIconSpec } from "@/components/AppIcon";
-import { IdentityIcon, type IdentityIconSize } from "@/components/IdentityIcon";
+import { AppIdentityIcon, BuiltinAppIcon, appDisplayDescription, appDisplayName } from "@/components/AppIdentity";
 import { Spinner } from "@/components/Spinner";
 import { DialogSelectContent } from "@/components/DialogSelectContent";
 import { PageHeader } from "@/components/PageHeader";
@@ -936,76 +936,6 @@ async function sha256Hex(text: string) {
   const bytes = new TextEncoder().encode(text);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function appDisplayName(app: AppDefinition, t: I18nTranslate) {
-  if (app.source !== "builtin") {
-    return app.name;
-  }
-  if (app.id === "browser") {
-    return t("apps.builtin.browser.name");
-  }
-  if (app.id === "terminal") {
-    return t("apps.builtin.terminal.name");
-  }
-  if (app.id === "canvas") {
-    return t("apps.builtin.canvas.name");
-  }
-  return app.name;
-}
-
-function appDisplayDescription(app: AppDefinition, t: I18nTranslate) {
-  if (app.source !== "builtin") {
-    return app.description || "";
-  }
-  if (app.id === "browser") {
-    return t("apps.builtin.browser.desc");
-  }
-  if (app.id === "terminal") {
-    return t("apps.builtin.terminal.desc");
-  }
-  if (app.id === "canvas") {
-    return t("apps.builtin.canvas.desc");
-  }
-  return app.description || "";
-}
-
-function BuiltinAppIcon({ appID, size = "md" }: { appID: string; size?: IdentityIconSize }) {
-  const Icon = appID === "terminal" ? SquareTerminal : appID === "canvas" ? PanelsTopLeft : Compass;
-  return (
-    <IdentityIcon
-      aria-hidden="true"
-      className={cn(
-        "shadow-none",
-        appID === "terminal"
-          ? "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
-          : appID === "canvas"
-            ? "bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300"
-            : "bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300",
-      )}
-      size={size}
-    >
-      <Icon className="size-[68%]" strokeWidth={2.15} />
-    </IdentityIcon>
-  );
-}
-
-function AppIdentityIcon({
-  app,
-  icon,
-  iconSrc,
-  size = "md",
-}: {
-  app: AppDefinition;
-  icon?: AppIconSpec;
-  iconSrc?: string;
-  size?: IdentityIconSize;
-}) {
-  return app.source === "builtin" ? (
-    <BuiltinAppIcon appID={app.id} size={size} />
-  ) : (
-    <AppIcon icon={icon ?? app.icon} size={size} src={iconSrc} />
-  );
 }
 
 function ManagedAppTile({

@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 
-const STORAGE_KEY = "pudding.canvasTabOrder.v1";
+const STORAGE_KEY = "pudding.workspaceTabOrder.v1";
+const LEGACY_STORAGE_KEY = "pudding.canvasTabOrder.v1";
 const EMPTY_ORDER: string[] = [];
 
 let orders = readOrders();
@@ -15,7 +16,7 @@ function subscribe(listener: () => void) {
   return () => listeners.delete(listener);
 }
 
-export function useCanvasTabOrder(scope: string) {
+export function useWorkspaceTabOrder(scope: string) {
   return useSyncExternalStore(
     subscribe,
     () => orders[scope] || EMPTY_ORDER,
@@ -23,22 +24,22 @@ export function useCanvasTabOrder(scope: string) {
   );
 }
 
-export function reconcileCanvasTabOrder(scope: string, availableIDs: string[]) {
-  const next = mergeCanvasTabOrder(orders[scope], availableIDs);
+export function reconcileWorkspaceTabOrder(scope: string, availableIDs: string[]) {
+  const next = mergeWorkspaceTabOrder(orders[scope], availableIDs);
   if (sameOrder(orders[scope], next)) {
     return;
   }
   writeScope(scope, next);
 }
 
-export function setCanvasTabOrder(scope: string, next: string[]) {
+export function setWorkspaceTabOrder(scope: string, next: string[]) {
   if (sameOrder(orders[scope], next)) {
     return;
   }
   writeScope(scope, next);
 }
 
-export function mergeCanvasTabOrder(saved: string[] | undefined, availableIDs: string[]) {
+export function mergeWorkspaceTabOrder(saved: string[] | undefined, availableIDs: string[]) {
   const available = new Set(availableIDs);
   const seen = new Set<string>();
   const next: string[] = [];
@@ -61,6 +62,7 @@ function writeScope(scope: string, order: string[]) {
   orders = { ...orders, [scope]: order };
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(orders));
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
   } catch {
     // Best-effort UI preference.
   }
@@ -73,7 +75,7 @@ function sameOrder(current: string[] | undefined, next: string[]) {
 
 function readOrders(): Record<string, string[]> {
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") as Record<string, unknown>;
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY) || "{}") as Record<string, unknown>;
     return Object.fromEntries(
       Object.entries(parsed).flatMap(([scope, value]) => {
         if (!Array.isArray(value)) {

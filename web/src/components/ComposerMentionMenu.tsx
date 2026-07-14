@@ -1,17 +1,15 @@
 import {
   Camera,
-  Compass,
   FolderOpen,
   Package,
-  PanelsTopLeft,
   Paperclip,
   ScanLine,
-  SquareTerminal,
   WandSparkles,
 } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 
 import { AppIcon } from "@/components/AppIcon";
+import { BuiltinAppIcon } from "@/components/AppIdentity";
 import { IdentityIcon } from "@/components/IdentityIcon";
 import { type ComposerMentionReference } from "@/components/composerMentionReferences";
 import { useI18n } from "@/i18n";
@@ -126,14 +124,8 @@ function MentionIcon({ reference }: { reference: ComposerMentionReference }) {
     return <IdentityIcon fallback={reference.kind === "skill" ? "skill" : "app"} fit="contain" size="xs" src={reference.iconURL} />;
   }
   if (reference.kind === "app") {
-    if (reference.id === "browser") {
-      return <ColoredMentionIcon tone="sky" icon={<Compass className="size-3.5" />} />;
-    }
-    if (reference.id === "terminal") {
-      return <ColoredMentionIcon tone="amber" icon={<SquareTerminal className="size-3.5" />} />;
-    }
-    if (reference.id === "canvas") {
-      return <ColoredMentionIcon tone="rose" icon={<PanelsTopLeft className="size-3.5" />} />;
+    if (reference.id === "browser" || reference.id === "terminal" || reference.id === "canvas") {
+      return <BuiltinAppIcon appID={reference.id} size="xs" />;
     }
     return <ColoredMentionIcon tone="teal" icon={<Package className="size-3.5" />} />;
   }

@@ -231,23 +231,34 @@ func (b *Builder) providerParts(sessionID string, parts []store.ContentPart, mod
 		}
 	}
 	localFolders := make([]store.LocalFolder, 0)
+	projectReferences := make([]store.ProjectReference, 0)
 	flushLocalFolders := func() {
 		if text := localFoldersProviderText(localFolders); text != "" {
 			out = append(out, provider.Part{Type: provider.PartText, Text: text})
 		}
 		localFolders = localFolders[:0]
 	}
+	flushProjectReferences := func() {
+		if text := projectReferencesProviderText(projectReferences); text != "" {
+			out = append(out, provider.Part{Type: provider.PartText, Text: text})
+		}
+		projectReferences = projectReferences[:0]
+	}
+	flushReferences := func() {
+		flushLocalFolders()
+		flushProjectReferences()
+	}
 	for _, part := range parts {
 		switch part.Type {
 		case store.ContentPartText:
-			flushLocalFolders()
+			flushReferences()
 			if part.Text != "" && !voiceAudioInline {
 				out = append(out, provider.Part{Type: provider.PartText, Text: part.Text})
 			}
 		case store.ContentPartThought:
 			continue
 		case store.ContentPartToolUse:
-			flushLocalFolders()
+			flushReferences()
 			if !tool.NameAllowedForMode(mode, part.Name) {
 				continue
 			}
@@ -258,7 +269,7 @@ func (b *Builder) providerParts(sessionID string, parts []store.ContentPart, mod
 				Args:   append([]byte(nil), part.Args...),
 			})
 		case store.ContentPartToolResult:
-			flushLocalFolders()
+			flushReferences()
 			if !tool.NameAllowedForMode(mode, part.Name) {
 				continue
 			}
@@ -273,7 +284,7 @@ func (b *Builder) providerParts(sessionID string, parts []store.ContentPart, mod
 			if part.Origin == attachment.OriginASRAudio {
 				continue
 			}
-			flushLocalFolders()
+			flushReferences()
 			if part.Origin == attachment.OriginVoiceAudio {
 				if voiceAudioInline {
 					if audioPart, ok := b.audioProviderPart(sessionID, part, cfg); ok {
@@ -303,10 +314,54 @@ func (b *Builder) providerParts(sessionID string, parts []store.ContentPart, mod
 				Path:   part.Path,
 				Origin: part.Origin,
 			})
+		case store.ContentPartProjectRef:
+			projectReferences = append(projectReferences, store.ProjectReference{
+				ID:         part.CallID,
+				Name:       part.Name,
+				Path:       part.Path,
+				SourcePath: part.SourcePath,
+				RootID:     part.RootID,
+				Kind:       part.ResourceKind,
+			})
+		case store.ContentPartUIContext:
+			flushReferences()
+			if text := uiContextProviderText(part); text != "" {
+				out = append(out, provider.Part{Type: provider.PartText, Text: text})
+			}
 		}
 	}
-	flushLocalFolders()
+	flushReferences()
 	return out
+}
+
+func uiContextProviderText(part store.ContentPart) string {
+	type payload struct {
+		Surface  string `json:"surface"`
+		Resource string `json:"resource,omitempty"`
+		ID       string `json:"id,omitempty"`
+		Name     string `json:"name,omitempty"`
+		Path     string `json:"path,omitempty"`
+		URL      string `json:"url,omitempty"`
+		Kind     string `json:"kind,omitempty"`
+		RootID   string `json:"rootID,omitempty"`
+	}
+	if strings.TrimSpace(part.Surface) == "" {
+		return ""
+	}
+	raw, err := json.Marshal(payload{
+		Surface:  part.Surface,
+		Resource: part.Resource,
+		ID:       part.CallID,
+		Name:     part.Name,
+		Path:     part.Path,
+		URL:      part.URL,
+		Kind:     part.ResourceKind,
+		RootID:   part.RootID,
+	})
+	if err != nil {
+		return ""
+	}
+	return "<ui-context>" + string(raw) + "</ui-context>"
 }
 
 func (b *Builder) imageProviderPart(sessionID string, part store.ContentPart, cfg provider.ModelConfig) (provider.Part, bool) {
@@ -449,6 +504,21 @@ func localFoldersProviderText(folders []store.LocalFolder) string {
 		return ""
 	}
 	return "<pudding-local-folders version=\"1\">\n" + string(data) + "\n</pudding-local-folders>\n"
+}
+
+func projectReferencesProviderText(references []store.ProjectReference) string {
+	references = store.NormalizeProjectReferences(references)
+	if len(references) == 0 {
+		return ""
+	}
+	payload := struct {
+		References []store.ProjectReference `json:"references"`
+	}{References: references}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	return "<pudding-project-references version=\"1\">\n" + string(data) + "\n</pudding-project-references>\n"
 }
 
 func textFromProviderParts(parts []provider.Part) string {

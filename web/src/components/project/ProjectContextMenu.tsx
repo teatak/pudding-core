@@ -5,6 +5,7 @@ import {
   FolderPlus,
   LocateFixed,
   PanelRightClose,
+  Paperclip,
   Pencil,
   RefreshCw,
   Trash2,
@@ -47,6 +48,7 @@ export function ProjectEntryContextMenu({
   onCreate,
   onDelete,
   onRefresh,
+  onReference,
   onRename,
 }: {
   children: ReactNode;
@@ -57,6 +59,7 @@ export function ProjectEntryContextMenu({
   onCreate: (target: ProjectEntryTarget, type: "dir" | "file") => void;
   onDelete: (target: ProjectEntryTarget) => void;
   onRefresh: (target: ProjectEntryTarget) => void;
+  onReference: (target: ProjectEntryTarget) => void;
   onRename: (target: ProjectEntryTarget) => void;
 }) {
   const { t } = useI18n();
@@ -64,6 +67,8 @@ export function ProjectEntryContextMenu({
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ProjectMenuContent>
+        <ProjectMenuItem onSelect={() => onReference(target)}><Paperclip />{t("project.browserReferenceSession")}</ProjectMenuItem>
+        <ContextMenuSeparator />
         {target.type === "dir" ? (
           <>
             <ProjectMenuItem onSelect={() => onCreate(target, "file")}><FilePlus2 />{t("project.browserNewFile")}</ProjectMenuItem>

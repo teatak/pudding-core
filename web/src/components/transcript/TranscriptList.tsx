@@ -193,8 +193,12 @@ export const TranscriptList = memo(function TranscriptList({
     }
     releaseViewportResizeAnchor();
     const nextScrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
-    if (Math.abs(scrollElement.scrollTop - nextScrollTop) > ANCHOR_RESTORE_EPSILON_PX) {
+    const browserClampedScrollTop =
+      Math.abs(scrollElement.scrollTop - lastScrollTopRef.current) > ANCHOR_RESTORE_EPSILON_PX;
+    if (browserClampedScrollTop || Math.abs(scrollElement.scrollTop - nextScrollTop) > ANCHOR_RESTORE_EPSILON_PX) {
       markProgrammaticScroll(programmaticScrollIgnoreUntilRef);
+    }
+    if (Math.abs(scrollElement.scrollTop - nextScrollTop) > ANCHOR_RESTORE_EPSILON_PX) {
       scrollElement.scrollTop = nextScrollTop;
     }
     lastScrollTopRef.current = scrollElement.scrollTop;
@@ -426,16 +430,23 @@ export const TranscriptList = memo(function TranscriptList({
       if (!autoStickRef.current && !isProgrammaticScroll && (movingUp || movingDown)) {
         userScrollSeqRef.current += 1;
       }
-      if (!isProgrammaticScroll && movingUp) {
-        historyLoader.request();
-        disableAutoStick();
-      }
+      // Content can shrink while pinned (for example when completed thought/tool rows
+      // collapse into a process summary). Chromium then clamps scrollTop downward and
+      // emits a scroll event that looks like an upward user scroll. Preserve the pinned
+      // state before interpreting direction; real wheel/key upward intent disables it
+      // before this scroll event arrives.
       if (bottomDistance <= SCROLL_END_THRESHOLD_PX && (movingDown || autoStickRef.current)) {
         releaseViewportResizeAnchor();
         autoStickRef.current = true;
         setLatestState(true);
-      } else if ((movingUp || nearTop) && bottomDistance > SCROLL_END_THRESHOLD_PX) {
-        setLatestState(false);
+      } else {
+        if (!isProgrammaticScroll && movingUp) {
+          historyLoader.request();
+          disableAutoStick();
+        }
+        if ((movingUp || nearTop) && bottomDistance > SCROLL_END_THRESHOLD_PX) {
+          setLatestState(false);
+        }
       }
       historyLoader.check();
     };

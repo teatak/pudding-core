@@ -16,7 +16,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
-import { openFilePreview } from "@/state/filePreviewStore";
+import { requestProjectFileReveal } from "@/state/projectRevealStore";
 
 const commandToolName = "builtin_command_run";
 const backgroundProcessToolNames = new Set(["builtin_command_start", "builtin_command_poll", "builtin_command_stop"]);
@@ -348,7 +348,8 @@ function LanguageCodeLocationList({ callID, items, sessionID, symbols, t }: { ca
     <div className="max-h-72 overflow-auto border-t border-border/50 pt-1">
       {items.slice(0, 500).map((item, index) => {
         const path = readString(item, "path");
-        const relativePath = readString(item, "relativePath") || path;
+        const providedRelativePath = readString(item, "relativePath");
+        const relativePath = providedRelativePath || path;
         const line = readNumber(item, "line") ?? 1;
         const column = readNumber(item, "column") ?? 1;
         const excerpt = readString(item, "excerpt");
@@ -374,16 +375,23 @@ function LanguageCodeLocationList({ callID, items, sessionID, symbols, t }: { ca
             aria-label={`${t("transcript.codeOpenInCanvas")} ${locationLabel}`}
             className="group/code-location grid min-h-9 w-full grid-cols-[minmax(0,1fr)_minmax(0,40%)_1rem] items-center gap-2 rounded-sm px-1 text-left hover:bg-muted/60"
             type="button"
-            onClick={() => openFilePreview({
-              callID,
-              content: excerpt,
-              focusLine: line,
-              lineStart: readNumber(item, "lineStart") ?? line,
-              lineStep: 1,
-              path,
+            onClick={() => requestProjectFileReveal({
+              absolutePath: path,
+              column,
+              fallback: {
+                callID,
+                content: excerpt,
+                focusLine: line,
+                lineStart: readNumber(item, "lineStart") ?? line,
+                lineStep: 1,
+                path,
+                sessionID: sessionID!,
+                source: "code-location",
+                truncated: true,
+              },
+              line,
+              relativePath: providedRelativePath,
               sessionID: sessionID!,
-              source: "code-location",
-              truncated: true,
             })}
           >
             {content}
@@ -678,7 +686,8 @@ function CommandDiagnosticList({ callID, diagnostics, sessionID, t }: { callID?:
       <div className="max-h-64 overflow-auto">
         {diagnostics.slice(0, 500).map((diagnostic, index) => {
           const path = readString(diagnostic, "path");
-          const relativePath = readString(diagnostic, "relativePath") || path;
+          const providedRelativePath = readString(diagnostic, "relativePath");
+          const relativePath = providedRelativePath || path;
           const line = readNumber(diagnostic, "line") ?? 1;
           const column = readNumber(diagnostic, "column");
           const excerpt = readString(diagnostic, "excerpt");
@@ -704,16 +713,23 @@ function CommandDiagnosticList({ callID, diagnostics, sessionID, t }: { callID?:
               aria-label={`${t("transcript.codeOpenInCanvas")} ${relativePath}:${line}:${column ?? 1}`}
               className="group/code-diagnostic grid w-full grid-cols-[1rem_minmax(0,1fr)_1rem] gap-1.5 rounded-sm px-1 py-1.5 hover:bg-muted/60"
               type="button"
-              onClick={() => openFilePreview({
-                callID,
-                content: excerpt,
-                focusLine: line,
-                lineStart: readNumber(diagnostic, "lineStart") ?? line,
-                lineStep: 1,
-                path,
+              onClick={() => requestProjectFileReveal({
+                absolutePath: path,
+                column: column ?? undefined,
+                fallback: {
+                  callID,
+                  content: excerpt,
+                  focusLine: line,
+                  lineStart: readNumber(diagnostic, "lineStart") ?? line,
+                  lineStep: 1,
+                  path,
+                  sessionID: sessionID!,
+                  source: "diagnostic",
+                  truncated: true,
+                },
+                line,
+                relativePath: providedRelativePath,
                 sessionID: sessionID!,
-                source: "diagnostic",
-                truncated: true,
               })}
             >
               {content}
@@ -1003,15 +1019,22 @@ function FileDetails({
             type="button"
             variant="ghost"
             onClick={() =>
-              openFilePreview({
-                callID,
-                content: previewContent,
-                lineStart: name === "builtin_file_write" ? 1 : lineStart,
-                lineStep: order === "reverse" ? -1 : 1,
-                path,
+              requestProjectFileReveal({
+                absolutePath: readString(output, "path") || readString(input, "path"),
+                fallback: {
+                  callID,
+                  content: previewContent,
+                  lineStart: name === "builtin_file_write" ? 1 : lineStart,
+                  lineStep: order === "reverse" ? -1 : 1,
+                  path,
+                  sessionID: sessionID!,
+                  source: name === "builtin_file_slice" ? "slice" : name === "builtin_file_write" ? "write" : "read",
+                  truncated: name === "builtin_file_write" ? false : readBoolean(output, "truncated"),
+                },
+                line: name === "builtin_file_write" ? 1 : lineStart,
+                relativePath: readString(output, "relativePath"),
+                rootPath: readString(output, "root"),
                 sessionID: sessionID!,
-                source: name === "builtin_file_slice" ? "slice" : name === "builtin_file_write" ? "write" : "read",
-                truncated: name === "builtin_file_write" ? false : readBoolean(output, "truncated"),
               })
             }
           >
@@ -1090,7 +1113,15 @@ function FileDetails({
             readBoolean(output, "resultsCapped") ? t("transcript.codePartialResults") : "",
           ]}
         />
-        {matches.length > 0 ? <FileMatchList callID={callID} matches={matches} sessionID={sessionID} t={t} /> : null}
+        {matches.length > 0 ? (
+          <FileMatchList
+            callID={callID}
+            matches={matches}
+            rootPath={readString(output, "root")}
+            sessionID={sessionID}
+            t={t}
+          />
+        ) : null}
       </div>
     );
   }
@@ -1116,7 +1147,7 @@ function FileEntryList({ entries, t }: { entries: UnknownRecord[]; t: Translator
   );
 }
 
-function FileMatchList({ callID, matches, sessionID, t }: { callID?: string; matches: UnknownRecord[]; sessionID?: string; t: Translator }) {
+function FileMatchList({ callID, matches, rootPath, sessionID, t }: { callID?: string; matches: UnknownRecord[]; rootPath?: string; sessionID?: string; t: Translator }) {
   const visible = matches.slice(0, 200);
   return (
     <div className="max-h-72 overflow-auto border-t border-border/50 pt-1">
@@ -1136,15 +1167,22 @@ function FileMatchList({ callID, matches, sessionID, t }: { callID?: string; mat
             key={`${path}:${line}:${index}`}
             className="grid w-full grid-cols-[minmax(0,1fr)] rounded-sm px-1 py-1 text-[11px] hover:bg-muted/60"
             type="button"
-            onClick={() => openFilePreview({
-              callID,
-              content: excerpt,
-              lineStart: readNumber(match, "lineStart") ?? line,
-              lineStep: 1,
-              path,
+            onClick={() => requestProjectFileReveal({
+              absolutePath: path,
+              fallback: {
+                callID,
+                content: excerpt,
+                lineStart: readNumber(match, "lineStart") ?? line,
+                lineStep: 1,
+                path,
+                sessionID: sessionID!,
+                source: "search",
+                truncated: true,
+              },
+              line,
+              relativePath: rootPath ? path : undefined,
+              rootPath,
               sessionID: sessionID!,
-              source: "search",
-              truncated: true,
             })}
           >
             {content}

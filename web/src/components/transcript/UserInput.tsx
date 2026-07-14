@@ -12,7 +12,7 @@ import { attachmentResourceURL } from "@/lib/attachmentURL";
 import { cn } from "@/lib/utils";
 
 import { InterruptedBadge, MessageMeta } from "./MessageMeta";
-import type { UserInputVM } from "./types";
+import { uiContextFromContentParts, type UserInputVM } from "./types";
 
 export const UserInput = memo(function UserInput({
   onQueuedCancel,
@@ -38,7 +38,9 @@ export const UserInput = memo(function UserInput({
   const contentAttachments = attachments.filter((attachment) => !isVoiceAudioAttachment(attachment));
   const imageAttachments = contentAttachments.filter((attachment) => isImageAttachment(attachment.mime, attachment.name));
   const localFolders = user.localFolders || [];
-  const orderedItems = orderedUserInputItems(contentAttachments, localFolders, user.parts);
+  const projectReferences = user.projectReferences || [];
+  const orderedItems = orderedUserInputItems(contentAttachments, localFolders, projectReferences, user.parts);
+  const uiContext = uiContextFromContentParts(user.parts);
   const imagePreviewItems: ImageLightboxItem[] = imageAttachments.map((attachment) => ({
     id: attachment.id,
     name: attachment.name,
@@ -46,7 +48,12 @@ export const UserInput = memo(function UserInput({
     url: attachmentResourceURL(attachment, token),
   }));
   const imagePreviewIndexByID = new Map(imagePreviewItems.map((item, index) => [item.id, index]));
-  const metaText = user.text || contentAttachments.map((attachment) => attachment.name).concat(localFolders.map((folder) => folder.path)).join("\n");
+  const metaText =
+    user.text ||
+    contentAttachments
+      .map((attachment) => attachment.name)
+      .concat(localFolders.map((folder) => folder.path), projectReferences.map((reference) => reference.path))
+      .join("\n");
   const canManageQueued =
     Boolean(clientMessageID && user.pending && (user.status === "queued" || user.status === "editing")) &&
     Boolean(onQueuedEditStart && onQueuedSave && onQueuedCancel);
@@ -185,6 +192,16 @@ export const UserInput = memo(function UserInput({
                           />
                         );
                       }
+                      if (item.type === "project_reference") {
+                        return (
+                          <ProjectReferenceCard
+                            key={`project-reference:${item.item.id}`}
+                            reference={item.item}
+                            fileLabel={t("composer.projectFileLabel")}
+                            folderLabel={t("composer.projectFolderLabel")}
+                          />
+                        );
+                      }
                       const attachment = item.item;
                       if (isImageAttachment(attachment.mime, attachment.name)) {
                         const imageIndex = imagePreviewIndexByID.get(attachment.id);
@@ -232,7 +249,7 @@ export const UserInput = memo(function UserInput({
             )}
           </div>
         </div>
-        {user.createdAt ? <MessageMeta actions={actions} align="end" createdAt={user.createdAt} text={metaText} /> : null}
+        {user.createdAt ? <MessageMeta actions={actions} align="end" createdAt={user.createdAt} text={metaText} uiContext={uiContext} /> : null}
       </div>
       <ImageLightbox images={imagePreviewItems} openIndex={imagePreviewIndex} onOpenIndexChange={setImagePreviewIndex} />
     </>
@@ -249,7 +266,11 @@ function isRawVoiceClientMessageID(clientMessageID: string | undefined) {
 
 type UserAttachment = NonNullable<UserInputVM["attachments"]>[number];
 type UserLocalFolder = NonNullable<UserInputVM["localFolders"]>[number];
-type OrderedUserItem = { type: "attachment"; item: UserAttachment } | { type: "local_folder"; item: UserLocalFolder };
+type UserProjectReference = NonNullable<UserInputVM["projectReferences"]>[number];
+type OrderedUserItem =
+  | { type: "attachment"; item: UserAttachment }
+  | { type: "local_folder"; item: UserLocalFolder }
+  | { type: "project_reference"; item: UserProjectReference };
 
 const ASR_AUDIO_ORIGIN = "asr_audio";
 const VOICE_AUDIO_ORIGIN = "voice_audio";
@@ -258,17 +279,25 @@ function isVoiceAudioAttachment(attachment: UserAttachment) {
   return attachment.origin === ASR_AUDIO_ORIGIN || attachment.origin === VOICE_AUDIO_ORIGIN;
 }
 
-function orderedUserInputItems(attachments: UserAttachment[], localFolders: UserLocalFolder[], parts: UserInputVM["parts"]): OrderedUserItem[] {
+function orderedUserInputItems(
+  attachments: UserAttachment[],
+  localFolders: UserLocalFolder[],
+  projectReferences: UserProjectReference[],
+  parts: UserInputVM["parts"],
+): OrderedUserItem[] {
   if (!parts || parts.length === 0) {
     return [
       ...attachments.map((item) => ({ type: "attachment" as const, item })),
       ...localFolders.map((item) => ({ type: "local_folder" as const, item })),
+      ...projectReferences.map((item) => ({ type: "project_reference" as const, item })),
     ];
   }
   const attachmentsByID = new Map(attachments.map((item) => [item.id, item]));
   const foldersByID = new Map(localFolders.map((item) => [item.id, item]));
+  const projectReferencesByID = new Map(projectReferences.map((item) => [item.id, item]));
   const seenAttachments = new Set<string>();
   const seenFolders = new Set<string>();
+  const seenProjectReferences = new Set<string>();
   const out: OrderedUserItem[] = [];
   for (const part of parts) {
     if (part.type === "attachment") {
@@ -285,6 +314,14 @@ function orderedUserInputItems(attachments: UserAttachment[], localFolders: User
         seenFolders.add(folder.id);
         out.push({ type: "local_folder", item: folder });
       }
+      continue;
+    }
+    if (part.type === "project_reference") {
+      const reference = projectReferencesByID.get(part.id);
+      if (reference && !seenProjectReferences.has(reference.id)) {
+        seenProjectReferences.add(reference.id);
+        out.push({ type: "project_reference", item: reference });
+      }
     }
   }
   for (const item of attachments) {
@@ -297,7 +334,36 @@ function orderedUserInputItems(attachments: UserAttachment[], localFolders: User
       out.push({ type: "local_folder", item });
     }
   }
+  for (const item of projectReferences) {
+    if (!seenProjectReferences.has(item.id)) {
+      out.push({ type: "project_reference", item });
+    }
+  }
   return out;
+}
+
+function ProjectReferenceCard({
+  reference,
+  fileLabel,
+  folderLabel,
+}: {
+  reference: UserProjectReference;
+  fileLabel: string;
+  folderLabel: string;
+}) {
+  const Icon = reference.kind === "dir" ? FolderOpen : FileText;
+  return (
+    <div
+      className="inline-flex h-8 max-w-full items-center gap-1.5 rounded-md border border-border/70 bg-background/70 px-2 text-xs leading-5 whitespace-nowrap"
+      title={reference.path}
+    >
+      <Icon className="size-3 shrink-0 text-muted-foreground" strokeWidth={1.8} />
+      <span className="min-w-0 truncate whitespace-nowrap">{reference.name}</span>
+      <span className="shrink-0 whitespace-nowrap text-muted-foreground/70">
+        {reference.kind === "dir" ? folderLabel : fileLabel}
+      </span>
+    </div>
+  );
 }
 
 function LocalFolderCard({ label, name, path, onReveal }: { label: string; name: string; path: string; onReveal: () => void }) {

@@ -1,0 +1,80 @@
+import { Blocks, Compass, SquareTerminal } from "lucide-react";
+
+import { type AppDefinition } from "@/api/client";
+import { AppIcon, type AppIconSpec } from "@/components/AppIcon";
+import { IdentityIcon, type IdentityIconSize } from "@/components/IdentityIcon";
+
+type Translate = (key: string) => string;
+
+export function appDisplayName(app: AppDefinition, t: Translate) {
+  if (app.source !== "builtin") {
+    return app.name;
+  }
+  if (app.id === "browser") {
+    return t("apps.builtin.browser.name");
+  }
+  if (app.id === "terminal") {
+    return t("apps.builtin.terminal.name");
+  }
+  if (app.id === "canvas") {
+    return t("apps.builtin.canvas.name");
+  }
+  return app.name;
+}
+
+export function appDisplayDescription(app: AppDefinition, t: Translate) {
+  if (app.source !== "builtin") {
+    return app.description || "";
+  }
+  if (app.id === "browser") {
+    return t("apps.builtin.browser.desc");
+  }
+  if (app.id === "terminal") {
+    return t("apps.builtin.terminal.desc");
+  }
+  if (app.id === "canvas") {
+    return t("apps.builtin.canvas.desc");
+  }
+  return app.description || "";
+}
+
+export function BuiltinAppIcon({ appID, size = "md" }: { appID: string; size?: IdentityIconSize }) {
+  const Icon = appID === "terminal" ? SquareTerminal : appID === "canvas" ? Blocks : Compass;
+  return (
+    <IdentityIcon
+      aria-hidden="true"
+      className={builtinAppIconClass(appID)}
+      size={size}
+    >
+      <Icon className="size-[68%]" strokeWidth={2.15} />
+    </IdentityIcon>
+  );
+}
+
+export function builtinAppIconClass(appID: string) {
+  if (appID === "terminal") {
+    return "bg-amber-50 text-amber-700 shadow-none dark:bg-amber-400/15 dark:text-amber-300";
+  }
+  if (appID === "canvas") {
+    return "bg-orange-50 text-orange-700 shadow-none dark:bg-orange-400/15 dark:text-orange-300";
+  }
+  return "bg-blue-50 text-blue-700 shadow-none dark:bg-blue-400/15 dark:text-blue-300";
+}
+
+export function AppIdentityIcon({
+  app,
+  icon,
+  iconSrc,
+  size = "md",
+}: {
+  app: AppDefinition;
+  icon?: AppIconSpec;
+  iconSrc?: string;
+  size?: IdentityIconSize;
+}) {
+  return app.source === "builtin" ? (
+    <BuiltinAppIcon appID={app.id} size={size} />
+  ) : (
+    <AppIcon icon={icon ?? app.icon} size={size} src={iconSrc} />
+  );
+}

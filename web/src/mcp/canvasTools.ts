@@ -11,7 +11,7 @@ import {
 import { queryKeys } from "@/api/queryKeys";
 import type { CanvasItem } from "@/contracts/api";
 import { apiURL } from "@/state/apiBase";
-import { setCanvasOpen } from "@/state/canvasStore";
+import { setWorkspaceOpen } from "@/state/workspaceStore";
 import { useBrowserMCP, type RuntimeAppDefinition, type ToolDefinition } from "@/mcp/browserMCP";
 import { createInputFlowTools } from "@/mcp/inputFlowTools";
 import { getRuntimeID, getRuntimeType } from "@/state/runtime";
@@ -127,7 +127,7 @@ export function useCanvasMCP(token: string) {
           const sessionID = sessionIDFromArgs(record);
           const id = requiredString(record.id, "id");
           await deleteCanvasItem(token, sessionID, id);
-          await queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
+          await queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(sessionID) });
           return jsonToolResult({ ok: true, removed: id });
         },
       },
@@ -145,7 +145,7 @@ export function useCanvasMCP(token: string) {
           const sessionID = sessionIDFromArgs(args);
           const { items } = await listCanvasItems(token, sessionID);
           await Promise.all(items.map((item) => deleteCanvasItem(token, sessionID, item.id)));
-          await queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
+          await queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(sessionID) });
           return jsonToolResult({ ok: true, cleared: items.length, ids: items.map((item) => item.id) });
         },
       },
@@ -485,8 +485,8 @@ async function saveCanvasItem({
   const saved = id
     ? await putCanvasItem(token, sessionID, id, body)
     : await createCanvasItem(token, sessionID, body);
-  await queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
-  setCanvasOpen(true);
+  await queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(sessionID) });
+  setWorkspaceOpen(true);
   return jsonToolResult({
     ok: true,
     id: saved.id,
@@ -549,8 +549,8 @@ async function saveGalleryItem({
   const saved = id
     ? await putCanvasItem(token, sessionID, id, body)
     : await createCanvasItem(token, sessionID, body);
-  await queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
-  setCanvasOpen(true);
+  await queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(sessionID) });
+  setWorkspaceOpen(true);
   return jsonToolResult({
     ok: true,
     id: saved.id,
@@ -698,8 +698,8 @@ async function patchGridItem({
     window: existing.window,
   };
   const saved = await putCanvasItem(token, sessionID, id, body);
-  await queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems() });
-  setCanvasOpen(true);
+  await queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(sessionID) });
+  setWorkspaceOpen(true);
   return jsonToolResult({
     ok: true,
     id: saved.id,

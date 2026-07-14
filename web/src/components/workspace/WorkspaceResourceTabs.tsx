@@ -21,17 +21,18 @@ import { useEffect, useState } from "react";
 
 import type { BrowserTab, Terminal } from "@/api/client";
 import { browserTabFaviconURL, browserTabTitle } from "@/browser/helpers";
-import type { CanvasSurface } from "@/browser/types";
+import { builtinAppIconClass } from "@/components/AppIdentity";
+import type { WorkspaceSurface } from "@/components/workspace/types";
 import { Spinner } from "@/components/Spinner";
 import { useHorizontalScrollMask } from "@/hooks/useHorizontalScrollMask";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 import {
-  mergeCanvasTabOrder,
-  reconcileCanvasTabOrder,
-  setCanvasTabOrder,
-  useCanvasTabOrder,
-} from "@/state/canvasTabOrderStore";
+  mergeWorkspaceTabOrder,
+  reconcileWorkspaceTabOrder,
+  setWorkspaceTabOrder,
+  useWorkspaceTabOrder,
+} from "@/state/workspaceTabOrderStore";
 
 function BrowserTabIcon({ faviconURL }: { faviconURL?: string }) {
   const [failed, setFailed] = useState(false);
@@ -42,14 +43,20 @@ function BrowserTabIcon({ faviconURL }: { faviconURL?: string }) {
 
   if (faviconURL && !failed) {
     return (
-      <span aria-hidden="true" className="inline-flex h-(--canvas-toolbar-tab-icon) w-(--canvas-toolbar-tab-icon) shrink-0 items-center justify-center overflow-hidden rounded-[5px]">
+      <span aria-hidden="true" className="inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center overflow-hidden rounded-[5px]">
         <img alt="" className="h-full w-full object-cover" draggable={false} src={faviconURL} onError={() => setFailed(true)} />
       </span>
     );
   }
 
   return (
-    <span aria-hidden="true" className="inline-flex h-(--canvas-toolbar-tab-icon) w-(--canvas-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[5px] bg-blue-600 text-white shadow-sm">
+    <span
+      aria-hidden="true"
+      className={cn(
+        "inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[5px]",
+        builtinAppIconClass("browser"),
+      )}
+    >
       <Compass className="h-3.5 w-3.5" />
     </span>
   );
@@ -59,7 +66,10 @@ function TerminalTabIcon({ exited }: { exited: boolean }) {
   return (
     <span
       aria-hidden="true"
-      className="inline-flex h-(--canvas-toolbar-tab-icon) w-(--canvas-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[5px] bg-zinc-900 text-white shadow-sm dark:bg-zinc-100 dark:text-zinc-900"
+      className={cn(
+        "inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[5px]",
+        builtinAppIconClass("terminal"),
+      )}
       data-exited={exited}
     >
       <SquareTerminal className="h-3.5 w-3.5" />
@@ -71,14 +81,14 @@ function FilePreviewTabIcon() {
   return (
     <span
       aria-hidden="true"
-      className="inline-flex h-(--canvas-toolbar-tab-icon) w-(--canvas-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[5px] bg-blue-600 text-white shadow-sm"
+      className="inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[5px] bg-blue-50 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300"
     >
       <FileCode2 className="h-3.5 w-3.5" />
     </span>
   );
 }
 
-export type CanvasFilePreviewTab = {
+export type WorkspaceFilePreviewTab = {
   id: string;
   label: string;
   openedAt: number;
@@ -88,9 +98,9 @@ export type CanvasFilePreviewTab = {
 type SurfaceTab =
   | { kind: "browser"; id: string; sortAt: number; browser: BrowserTab }
   | { kind: "terminal"; id: string; sortAt: number; terminal: Terminal }
-  | { kind: "file"; id: string; sortAt: number; file: CanvasFilePreviewTab };
+  | { kind: "file"; id: string; sortAt: number; file: WorkspaceFilePreviewTab };
 
-export function CanvasSurfaceTabs({
+export function WorkspaceResourceTabs({
   activeBrowserTabID,
   activeFilePreviewID,
   activeSurface,
@@ -111,13 +121,13 @@ export function CanvasSurfaceTabs({
 }: {
   activeBrowserTabID?: string;
   activeFilePreviewID?: string;
-  activeSurface: CanvasSurface;
+  activeSurface: WorkspaceSurface;
   activeTerminalID?: string;
   browserTabs: BrowserTab[];
   closingBrowserTabID?: string;
   closingTerminalID?: string;
   filePreviewActive: boolean;
-  filePreviewTabs: CanvasFilePreviewTab[];
+  filePreviewTabs: WorkspaceFilePreviewTab[];
   orderScope: string;
   terminalTabs: Terminal[];
   onCloseBrowser: (tabID: string) => void;
@@ -142,8 +152,8 @@ export function CanvasSurfaceTabs({
     ...filePreviewTabs.map((file) => ({ kind: "file" as const, id: file.id, sortAt: file.openedAt, file })),
   ].sort((left, right) => left.sortAt - right.sortAt || left.id.localeCompare(right.id));
   const createdTabIDs = createdTabs.map(surfaceTabID);
-  const savedOrder = useCanvasTabOrder(orderScope);
-  const orderedIDs = mergeCanvasTabOrder(savedOrder, createdTabIDs);
+  const savedOrder = useWorkspaceTabOrder(orderScope);
+  const orderedIDs = mergeWorkspaceTabOrder(savedOrder, createdTabIDs);
   const tabByID = new Map(createdTabs.map((tab) => [surfaceTabID(tab), tab]));
   const tabs = orderedIDs.flatMap((id) => {
     const tab = tabByID.get(id);
@@ -152,7 +162,7 @@ export function CanvasSurfaceTabs({
   const orderSignature = createdTabIDs.join("\u0000");
 
   useEffect(() => {
-    reconcileCanvasTabOrder(orderScope, createdTabIDs);
+    reconcileWorkspaceTabOrder(orderScope, createdTabIDs);
   }, [orderScope, orderSignature]);
 
   const handleDragEnd = ({ active, over }: DragEndEvent) => {
@@ -164,7 +174,7 @@ export function CanvasSurfaceTabs({
     if (from < 0 || to < 0) {
       return;
     }
-    setCanvasTabOrder(orderScope, arrayMove(orderedIDs, from, to));
+    setWorkspaceTabOrder(orderScope, arrayMove(orderedIDs, from, to));
   };
 
   return (
@@ -176,7 +186,7 @@ export function CanvasSurfaceTabs({
     >
       <div
         ref={scrollMask.ref}
-        className="no-drag-region w-fit max-w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-lg bg-muted p-(--canvas-toolbar-tab-padding) text-muted-foreground [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden"
+        className="no-drag-region w-fit max-w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-lg bg-muted p-(--workspace-toolbar-tab-padding) text-muted-foreground [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden"
         style={scrollMask.style}
       >
         <SortableContext items={orderedIDs} strategy={horizontalListSortingStrategy}>
@@ -225,7 +235,7 @@ function SortableSurfaceTabButton({
 }: {
   activeBrowserTabID?: string;
   activeFilePreviewID?: string;
-  activeSurface: CanvasSurface;
+  activeSurface: WorkspaceSurface;
   activeTerminalID?: string;
   closingBrowserTabID?: string;
   closingTerminalID?: string;
@@ -269,7 +279,7 @@ function SortableSurfaceTabButton({
       aria-label={label}
       aria-selected={selected}
       className={cn(
-        "group relative inline-flex h-(--canvas-toolbar-tab-h) min-w-24 max-w-[44vw] shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium whitespace-nowrap transition-colors data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm hover:bg-background hover:text-foreground sm:max-w-40",
+        "group relative inline-flex h-(--workspace-toolbar-tab-h) min-w-24 max-w-[44vw] shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium whitespace-nowrap transition-colors data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm hover:bg-background hover:text-foreground sm:max-w-40",
         isDragging && "cursor-grabbing opacity-80 shadow-md",
       )}
       data-active={selected}
@@ -307,7 +317,8 @@ function SortableSurfaceTabButton({
               ? t("terminal.close")
               : t("canvas.filePreviewClose")
         }
-        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded opacity-70 hover:bg-muted-foreground/20 hover:opacity-100"
+        className="pointer-events-none inline-flex h-5 w-5 shrink-0 items-center justify-center rounded opacity-0 transition-opacity hover:bg-muted-foreground/20 hover:opacity-100 group-hover:pointer-events-auto group-hover:opacity-70 group-focus-within:pointer-events-auto group-focus-within:opacity-70 data-[pending=true]:pointer-events-auto data-[pending=true]:opacity-100"
+        data-pending={closePending}
         role="button"
         tabIndex={-1}
         onPointerDown={(event) => event.stopPropagation()}

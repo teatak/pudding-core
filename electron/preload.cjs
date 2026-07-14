@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer, webUtils } = require("electron");
+const { contextBridge, ipcRenderer, webFrame, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("puddingElectronTheme", {
   getState: () => ipcRenderer.invoke("pudding:theme:get"),
@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("puddingElectronTheme", {
 });
 
 contextBridge.exposeInMainWorld("puddingElectronShell", {
+  getZoomFactor: () => webFrame.getZoomFactor(),
   isFullscreen: () => ipcRenderer.invoke("pudding:shell:is-fullscreen"),
   onFullscreenChanged: (listener) => {
     const wrapped = (_event, fullscreen) => listener(Boolean(fullscreen));

@@ -101,14 +101,14 @@
     --toolbar-h: 54px;
     --rail-toggle-left: 11px;
     --rail-title-gap: 6px;
-    --canvas-toggle-right: 13px;
-    --canvas-toolbar-pl: 0.75rem;
-    --canvas-toolbar-pr: 47px;
+    --workspace-toggle-right: 13px;
+    --workspace-toolbar-pl: 0.75rem;
+    --workspace-toolbar-pr: 47px;
     --toolbar-icon-button-size: 2rem;
     --toolbar-icon-size: 1rem;
-    --canvas-toolbar-tab-h: 2rem;
-    --canvas-toolbar-tab-padding: 3px;
-    --canvas-toolbar-tab-icon: 18px;
+    --workspace-toolbar-tab-h: 2rem;
+    --workspace-toolbar-tab-padding: 3px;
+    --workspace-toolbar-tab-icon: 18px;
     --rail-content-align-gap: 0px;
     --rail-radius: 8px;
     --rail-left-radius: var(--rail-radius);
@@ -119,7 +119,7 @@
     --chrome-edit-background: color-mix(in oklch, var(--background), var(--card) 76%);
     --message-user-background: color-mix(in oklch, var(--background), var(--muted) 70%);
     --rail-drop-target-background: color-mix(in oklch, var(--sidebar), var(--sidebar-accent) 42%);
-    --canvas-background: var(--sidebar);
+    --workspace-background: var(--sidebar);
     --chat-title-max-w: min(42rem, 100%);
     --success: oklch(0.62 0.12 175);
     --warning: oklch(0.72 0.14 75);
@@ -156,14 +156,14 @@ html[data-shell="electron-mac"] {
     --traffic-inset: 72px;
     --toolbar-h: 50px;
     --rail-toggle-left: 11px;
-    --canvas-toggle-right: 13px;
-    --canvas-toolbar-pl: 0.75rem;
-    --canvas-toolbar-pr: 47px;
+    --workspace-toggle-right: 13px;
+    --workspace-toolbar-pl: 0.75rem;
+    --workspace-toolbar-pr: 47px;
     --toolbar-icon-button-size: 1.75rem;
     --toolbar-icon-size: 0.95rem;
-    --canvas-toolbar-tab-h: 1.75rem;
-    --canvas-toolbar-tab-padding: 2px;
-    --canvas-toolbar-tab-icon: 16px;
+    --workspace-toolbar-tab-h: 1.75rem;
+    --workspace-toolbar-tab-padding: 2px;
+    --workspace-toolbar-tab-icon: 16px;
     --rail-left-radius: var(--rail-radius);
 }
 
@@ -241,6 +241,37 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
 @keyframes composer-mic-rotate {
     to {
         --composer-mic-angle: 1turn;
+    }
+}
+
+.pudding-composer-shell {
+    container-type: inline-size;
+}
+
+@container (max-width: 36rem) {
+    .pudding-composer-project-name,
+    .pudding-composer-approval-label,
+    .pudding-composer-reasoning-detail {
+        display: none;
+    }
+
+    .pudding-composer-approval-control {
+        width: 2rem;
+        height: 2rem;
+        max-width: none;
+        padding-inline: 0;
+    }
+}
+
+@container (max-width: 28rem) {
+    .pudding-composer-model-label {
+        display: none;
+    }
+
+    .pudding-composer-model-picker {
+        width: 2.75rem;
+        max-width: 2.75rem;
+        flex-shrink: 0;
     }
 }
 
@@ -359,7 +390,7 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
     --sidebar-accent-foreground: oklch(0.95 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.56 0 0);
-    --canvas-background: color-mix(in oklch, var(--sidebar), var(--background) 45%);
+    --workspace-background: color-mix(in oklch, var(--sidebar), var(--background) 45%);
     --success: oklch(0.7 0.11 175);
     --warning: oklch(0.76 0.12 75);
     --overlay: oklch(0 0 0 / 22%);
@@ -474,27 +505,27 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
 }
 
 .pudding-rail-toggle [data-slot="button"],
-.pudding-canvas-toggle [data-slot="button"],
+.pudding-workspace-toggle [data-slot="button"],
 .pudding-session-rail [data-slot="sidebar-footer"] :where([data-slot="button"], [data-slot="dropdown-menu-trigger"]) {
     font-weight: 400;
 }
 
 .pudding-rail-toggle [data-slot="button"],
-.pudding-canvas-toggle [data-slot="button"],
+.pudding-workspace-toggle [data-slot="button"],
 .pudding-toolbar-icon-button {
     width: var(--toolbar-icon-button-size) !important;
     height: var(--toolbar-icon-button-size) !important;
 }
 
 .pudding-rail-toggle [data-slot="button"] svg,
-.pudding-canvas-toggle [data-slot="button"] svg,
+.pudding-workspace-toggle [data-slot="button"] svg,
 .pudding-toolbar-icon-button svg {
     width: var(--toolbar-icon-size) !important;
     height: var(--toolbar-icon-size) !important;
 }
 
 .pudding-rail-toggle,
-.pudding-canvas-toggle {
+.pudding-workspace-toggle {
     color: var(--rail-icon-button-foreground);
 }
 
@@ -508,7 +539,7 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
 }
 
 .pudding-rail-toggle [data-slot="button"]:is(:hover, :focus-visible),
-.pudding-canvas-toggle [data-slot="button"]:is(:hover, :focus-visible),
+.pudding-workspace-toggle [data-slot="button"]:is(:hover, :focus-visible),
 .pudding-session-rail [data-slot="sidebar-footer"] :where([data-slot="button"], [data-slot="dropdown-menu-trigger"]):is(:hover, [aria-expanded="true"], [data-state="open"]) {
     background-color: var(--accent);
     color: var(--foreground);
@@ -1093,7 +1124,7 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
 }
 
 .pudding-markdown .code-block-wrap pre {
-  padding-right: 3rem;
+  padding-right: 2.25rem;
 }
 
 .pudding-markdown .mermaid-block {
@@ -1117,20 +1148,13 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
 }
 
 .pudding-markdown .code-copy-btn {
-  @apply absolute top-2 right-2 z-10 inline-flex size-6 items-center justify-center rounded-md border border-border/70 bg-background/85 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-background hover:text-foreground dark:bg-background/80 dark:hover:bg-background;
+  @apply absolute top-2 right-2 z-10 size-5 rounded-md text-muted-foreground opacity-0 transition-opacity hover:opacity-100 focus-visible:opacity-100;
 }
 
-.pudding-markdown .code-copy-btn::before {
-  content: "";
-  width: 13px;
-  height: 13px;
-  background-color: currentColor;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='14' height='14' x='8' y='8' rx='2' ry='2'/%3E%3Cpath d='M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2'/%3E%3C/svg%3E") center / contain no-repeat;
-}
-
-.pudding-markdown .code-copy-btn[data-copied="1"]::before {
-  background-color: var(--success);
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+.pudding-markdown .code-block-wrap:hover .code-copy-btn,
+.pudding-markdown .code-block-wrap:focus-within .code-copy-btn,
+.pudding-markdown .code-copy-btn[data-copied="1"] {
+  opacity: 1;
 }
 
 /* wrapper 负责圆角边框与横向滚动;table 本体保持 table 布局并 w-full,

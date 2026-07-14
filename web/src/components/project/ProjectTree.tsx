@@ -11,11 +11,13 @@ import {
 import { queryKeys } from "@/api/queryKeys";
 import { Spinner } from "@/components/Spinner";
 import { useI18n } from "@/i18n";
+import { writeProjectReferenceDrag } from "@/lib/projectReferences";
 import { cn } from "@/lib/utils";
 
 import { ProjectEntryContextMenu } from "./ProjectContextMenu";
 import { projectGitFileKey, projectGitStatusLabel, projectGitStatusTone } from "./git/gitStatus";
 import { projectBrowserError } from "./projectErrors";
+import { projectAbsolutePath } from "./projectPaths";
 import type { ProjectEntryTarget, ProjectSelection } from "./types";
 
 type TreeActions = {
@@ -24,6 +26,7 @@ type TreeActions = {
   onCreate: (target: ProjectEntryTarget, type: "dir" | "file") => void;
   onDelete: (target: ProjectEntryTarget) => void;
   onRefresh: (target: ProjectEntryTarget) => void;
+  onReference: (target: ProjectEntryTarget) => void;
   onRename: (target: ProjectEntryTarget) => void;
 };
 
@@ -138,8 +141,16 @@ function ProjectDirectoryNode({
           className="flex h-7 w-full min-w-0 items-center gap-1 pr-2 text-left text-xs hover:bg-accent hover:text-accent-foreground"
           style={{ paddingLeft: `${8 + depth * 14}px` }}
           title={isRoot ? root.path : path}
+          draggable
           type="button"
           onClick={() => onToggle(root.id, path)}
+          onDragStart={(event) => writeProjectReferenceDrag(event.dataTransfer, {
+            name: target.name,
+            path: target.path,
+            sourcePath: projectAbsolutePath(root.path, target.path),
+            rootID: target.rootID,
+            kind: "dir",
+          })}
         >
           <ChevronRight className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-90")} />
           {expanded ? <FolderOpen className="size-4 shrink-0 text-amber-500" /> : <Folder className="size-4 shrink-0 text-amber-500" />}
@@ -180,6 +191,7 @@ function ProjectDirectoryNode({
                 depth={depth + 1}
                 entry={entry}
                 rootID={root.id}
+                rootPath={root.path}
                 selected={selected?.rootID === root.id && selected.path === entry.path}
                 status={gitStatuses?.get(projectGitFileKey(root.id, entry.path))}
                 onOpenPinned={() => onOpenPinned({ rootID: root.id, path: entry.path })}
@@ -202,6 +214,7 @@ function ProjectFileNode({
   depth,
   entry,
   rootID,
+  rootPath,
   selected,
   status,
   onOpenPinned,
@@ -211,12 +224,14 @@ function ProjectFileNode({
   depth: number;
   entry: ProjectTreeEntry;
   rootID: string;
+  rootPath: string;
   selected: boolean;
   status?: ProjectGitStatusFile;
   onOpenPinned: () => void;
   onOpenPreview: () => void;
 }) {
   const disabled = entry.type !== "file";
+  const target: ProjectEntryTarget = { rootID, path: entry.path, name: entry.name, type: "file" };
   const button = (
     <button
       aria-current={selected ? "page" : undefined}
@@ -225,11 +240,23 @@ function ProjectFileNode({
         disabled && "cursor-default text-muted-foreground/60 hover:bg-transparent",
       )}
       disabled={disabled}
+      draggable={!disabled}
       style={{ paddingLeft: `${26 + depth * 14}px` }}
       title={entry.path}
       type="button"
       onClick={onOpenPreview}
       onDoubleClick={onOpenPinned}
+      onDragStart={(event) => {
+        if (!disabled) {
+          writeProjectReferenceDrag(event.dataTransfer, {
+            name: target.name,
+            path: target.path,
+            sourcePath: projectAbsolutePath(rootPath, target.path),
+            rootID: target.rootID,
+            kind: "file",
+          });
+        }
+      }}
     >
       {entry.type === "file" ? <FileCode2 className="size-3.5 shrink-0 text-muted-foreground" /> : <File className="size-3.5 shrink-0" />}
       <span className="min-w-0 flex-1 truncate">{entry.name}</span>
@@ -243,7 +270,6 @@ function ProjectFileNode({
   if (disabled) {
     return button;
   }
-  const target: ProjectEntryTarget = { rootID, path: entry.path, name: entry.name, type: "file" };
   return <ProjectEntryContextMenu {...actions} target={target}>{button}</ProjectEntryContextMenu>;
 }
 

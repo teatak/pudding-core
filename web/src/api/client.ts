@@ -132,6 +132,7 @@ import {
   type ProjectGitDiff,
   type ProjectGitStatus,
   type ProjectGitStatusFile,
+  type ProjectReference,
   type ProjectTreeEntry,
   type ProjectTreeResponse,
   type QueuedInput,
@@ -502,6 +503,15 @@ export async function deleteSession(token: string, sessionID: string): Promise<v
   await request(token, `/sessions/${encodeURIComponent(sessionID)}`, z.null(), {
     method: "DELETE",
   });
+}
+
+export function unloadSessionApp(token: string, sessionID: string, appID: string): Promise<Session> {
+  return request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/apps/${encodeURIComponent(appID)}`,
+    session,
+    { method: "DELETE" },
+  );
 }
 
 export function listMessages(
@@ -1243,5 +1253,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BackgroundProcess, BackgroundProcessLog, BuiltinTool, BrowserActionResult, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, Terminal, WebToolsConfig };
+export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BackgroundProcess, BackgroundProcessLog, BuiltinTool, BrowserActionResult, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProjectReference, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, Terminal, WebToolsConfig };
 export { createProjectRequest, createProviderRequest, patchProjectRequest, patchProviderRequest };

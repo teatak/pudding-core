@@ -59,7 +59,7 @@ export function FilePreviewSurface({ active, preview }: { active: boolean; previ
     <div
       aria-hidden={!active}
       className={cn(
-        "absolute inset-0 z-10 flex min-h-0 flex-col overflow-hidden bg-[var(--canvas-background)] text-card-foreground",
+        "absolute inset-0 z-10 flex min-h-0 flex-col overflow-hidden bg-[var(--workspace-background)] text-card-foreground",
         !active && "pointer-events-none invisible opacity-0",
       )}
     >

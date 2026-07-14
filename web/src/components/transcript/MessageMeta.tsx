@@ -1,12 +1,15 @@
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, SquareMousePointer } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { uiContextLabel } from "@/components/UIContextControl";
 import { useI18n } from "@/i18n";
 import { formatModelLabel } from "@/lib/model";
 import { formatClock } from "@/lib/time";
 import { cn } from "@/lib/utils";
+import type { UIContextPart } from "@/state/uiContextStore";
 
 import type { TurnModelVM } from "./types";
 
@@ -26,6 +29,7 @@ export function MessageMeta({
   duration,
   model,
   text,
+  uiContext,
 }: {
   actions?: ReactNode;
   align?: "start" | "end";
@@ -33,6 +37,7 @@ export function MessageMeta({
   duration?: string;
   model?: TurnModelVM;
   text: string;
+  uiContext?: UIContextPart;
 }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
@@ -73,6 +78,16 @@ export function MessageMeta({
       >
         {copied ? <Check className="text-success" /> : <Copy />}
       </Button>
+      {uiContext ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="grid size-5 place-items-center text-muted-foreground/60">
+              <SquareMousePointer className="size-3.5" />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{uiContextLabel(uiContext, t)}</TooltipContent>
+        </Tooltip>
+      ) : null}
       <span>{formatClock(createdAt)}</span>
       {duration ? <span className="text-muted-foreground/70">{t("transcript.turnDuration").replace("{duration}", duration)}</span> : null}
       {model ? (

@@ -126,6 +126,82 @@ func TestBuildIncludesLocalFoldersTag(t *testing.T) {
 	}
 }
 
+func TestBuildIncludesProjectReferencesTag(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "s1",
+		TurnID:          "t1",
+		UserMessageID:   "m1",
+		ClientMessageID: "c1",
+		UserText:        "check this",
+		UserParts: []store.ContentPart{
+			store.ProjectReferencePart(store.ProjectReference{
+				ID:         "ref_1",
+				Name:       "README.md",
+				Path:       "tutorials/README.md",
+				SourcePath: "/workspace/tutorials/README.md",
+				RootID:     "root_1",
+				Kind:       "file",
+			}),
+			{Type: store.ContentPartText, Text: "check this"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req, err := New(ms, nil).Build(ctx, "s1", "m", string(store.ModeChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 1 || !strings.Contains(req.Messages[0].Text, "<pudding-project-references version=\"1\">") || !strings.Contains(req.Messages[0].Text, `"rootID":"root_1"`) || !strings.Contains(req.Messages[0].Text, `"path":"tutorials/README.md"`) || !strings.Contains(req.Messages[0].Text, `"sourcePath":"/workspace/tutorials/README.md"`) {
+		t.Fatalf("project reference tag missing from provider context: %+v", req.Messages)
+	}
+	if strings.Index(req.Messages[0].Text, "<pudding-project-references version=\"1\">") > strings.Index(req.Messages[0].Text, "check this") {
+		t.Fatalf("project reference tag should stay before user text: %q", req.Messages[0].Text)
+	}
+}
+
+func TestBuildIncludesNeutralUIContext(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "s1",
+		TurnID:          "t1",
+		UserMessageID:   "m1",
+		ClientMessageID: "c1",
+		UserText:        "分析一下",
+		UserParts: []store.ContentPart{
+			{Type: store.ContentPartText, Text: "分析一下"},
+			{
+				Type:         store.ContentPartUIContext,
+				Surface:      "canvas",
+				Resource:     "canvas_item",
+				CallID:       "item_1",
+				Name:         "2026 World Cup",
+				ResourceKind: "grid",
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req, err := New(ms, nil).Build(ctx, "s1", "m", string(store.ModeChat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 1 || !strings.Contains(req.Messages[0].Text, `<ui-context>{"surface":"canvas","resource":"canvas_item","id":"item_1","name":"2026 World Cup","kind":"grid"}</ui-context>`) {
+		t.Fatalf("ui context missing from provider input: %+v", req.Messages)
+	}
+	if strings.Contains(req.Messages[0].Text, "unrelated") || strings.Contains(req.Messages[0].Text, "目标") {
+		t.Fatalf("ui context should stay neutral: %q", req.Messages[0].Text)
+	}
+}
+
 func TestBuildIncludesAttachmentKeyWhenAvailable(t *testing.T) {
 	ms := memstore.New()
 	ctx := context.Background()

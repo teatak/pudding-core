@@ -1,4 +1,4 @@
-import { Upload } from "lucide-react";
+import { Paperclip, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 
 import type { Session } from "@/api/client";
@@ -6,6 +6,8 @@ import { ChatColumn } from "@/components/ChatColumn";
 import { Composer, type DroppedFilesBatch } from "@/components/Composer";
 import { Transcript } from "@/components/Transcript";
 import { droppedLocalItemsFromDataTransfer } from "@/lib/localFolders";
+import { dataTransferHasProjectReference, readProjectReferenceDrag } from "@/lib/projectReferences";
+import { addProjectReferenceToSessionDraft } from "@/state/sessionDraftStore";
 
 // 会话体:收口正文(Transcript)+ 输入框(Composer)+ 顶部遮罩,三者共用 ChatColumn
 // 同一条内容列,等宽对齐由结构保证。
@@ -13,12 +15,12 @@ import { droppedLocalItemsFromDataTransfer } from "@/lib/localFolders";
 //   - 底部遮罩随 Composer(其高度随输入变化),放在 Composer 内,但宽度同样走 ChatColumn。
 export function Conversation({ token, session }: { token: string; session: Session }) {
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [dragActive, setDragActive] = useState(false);
+  const [dragMode, setDragMode] = useState<"files" | "project_reference" | null>(null);
   const [droppedFiles, setDroppedFiles] = useState<DroppedFilesBatch | null>(null);
   const droppedFilesNonceRef = useRef(0);
 
   const resetDragState = useCallback(() => {
-    setDragActive(false);
+    setDragMode(null);
   }, []);
 
   useEffect(() => {
@@ -33,27 +35,29 @@ export function Conversation({ token, session }: { token: string; session: Sessi
   }, [resetDragState]);
 
   const handleDragEnter = useCallback((event: DragEvent<HTMLDivElement>) => {
-    if (!dataTransferHasFiles(event.dataTransfer)) {
+    const mode = composerDragMode(event.dataTransfer);
+    if (!mode) {
       return;
     }
     event.preventDefault();
     event.stopPropagation();
-    setDragActive(true);
+    setDragMode(mode);
   }, []);
 
   const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
-    if (!dataTransferHasFiles(event.dataTransfer)) {
+    const mode = composerDragMode(event.dataTransfer);
+    if (!mode) {
       return;
     }
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = "copy";
-    setDragActive(true);
+    setDragMode(mode);
   }, []);
 
   const handleDragLeave = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
-      if (!dataTransferHasFiles(event.dataTransfer)) {
+      if (!composerDragMode(event.dataTransfer)) {
         return;
       }
       event.preventDefault();
@@ -69,19 +73,24 @@ export function Conversation({ token, session }: { token: string; session: Sessi
 
   const handleDrop = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
-      if (!dataTransferHasFiles(event.dataTransfer)) {
+      if (!composerDragMode(event.dataTransfer)) {
         return;
       }
       event.preventDefault();
       event.stopPropagation();
       resetDragState();
+      const projectReference = readProjectReferenceDrag(event.dataTransfer);
+      if (projectReference) {
+        addProjectReferenceToSessionDraft(session.id, projectReference);
+        return;
+      }
       const dropped = droppedLocalItemsFromDataTransfer(event.dataTransfer);
       if (dropped.files.length > 0 || dropped.folderPaths.length > 0 || dropped.folderPathUnavailable) {
         droppedFilesNonceRef.current += 1;
         setDroppedFiles({ ...dropped, nonce: droppedFilesNonceRef.current });
       }
     },
-    [resetDragState],
+    [resetDragState, session.id],
   );
 
   return (
@@ -102,22 +111,23 @@ export function Conversation({ token, session }: { token: string; session: Sessi
       </div>
       <Transcript token={token} sessionID={session.id} sessionRunning={session.running} submitError={submitError} />
       <Composer droppedFiles={droppedFiles} token={token} session={session} onSubmitError={setSubmitError} />
-      <ChatDropOverlay active={dragActive} />
+      <ChatDropOverlay mode={dragMode} />
     </div>
   );
 }
 
-function ChatDropOverlay({ active }: { active: boolean }) {
+function ChatDropOverlay({ mode }: { mode: "files" | "project_reference" | null }) {
+  const Icon = mode === "project_reference" ? Paperclip : Upload;
   return (
     <div
       className={
         "pudding-drop-overlay pointer-events-none absolute inset-0 z-30 bg-primary/[0.055] backdrop-blur-[1px] transition-opacity dark:bg-primary/[0.08] " +
-        (active ? "opacity-100" : "opacity-0")
+        (mode ? "opacity-100" : "opacity-0")
       }
     >
       <div className="absolute inset-0 flex items-center justify-center">
         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-background/90 text-primary shadow-sm ring-1 ring-border/80">
-          <Upload className="h-5 w-5" strokeWidth={1.9} />
+          <Icon className="h-5 w-5" strokeWidth={1.9} />
         </div>
       </div>
     </div>
@@ -126,4 +136,11 @@ function ChatDropOverlay({ active }: { active: boolean }) {
 
 function dataTransferHasFiles(dataTransfer: DataTransfer) {
   return Array.from(dataTransfer.types || []).includes("Files");
+}
+
+function composerDragMode(dataTransfer: DataTransfer): "files" | "project_reference" | null {
+  if (dataTransferHasProjectReference(dataTransfer)) {
+    return "project_reference";
+  }
+  return dataTransferHasFiles(dataTransfer) ? "files" : null;
 }

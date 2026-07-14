@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { Attachment } from "@/api/client";
+import type { Attachment, ProjectReference } from "@/api/client";
 import { newClientID } from "@/lib/id";
 import type { LocalFolderPath } from "@/lib/localFolders";
 import type { DraftPartOrderItem } from "@/lib/submitParts";
@@ -19,6 +19,7 @@ type SessionDraft = {
   clientMessageID: string;
   localFolders: LocalFolderPath[];
   partOrder: DraftPartOrderItem[];
+  projectReferences: ProjectReference[];
   text: string;
 };
 
@@ -31,6 +32,7 @@ type SessionDraftState = {
   setAttachments: (sessionID: string, update: DraftListUpdate<SessionDraftAttachment>) => void;
   setLocalFolders: (sessionID: string, update: DraftListUpdate<LocalFolderPath>) => void;
   setPartOrder: (sessionID: string, update: DraftListUpdate<DraftPartOrderItem>) => void;
+  setProjectReferences: (sessionID: string, update: DraftListUpdate<ProjectReference>) => void;
   setText: (sessionID: string, text: string) => void;
 };
 
@@ -40,6 +42,7 @@ function newSessionDraft(text = ""): SessionDraft {
     clientMessageID: newClientID(),
     localFolders: [],
     partOrder: [],
+    projectReferences: [],
     text,
   };
 }
@@ -112,6 +115,20 @@ export const useSessionDraftStore = create<SessionDraftState>((set, get) => ({
       };
     });
   },
+  setProjectReferences: (sessionID, update) => {
+    set((state) => {
+      const current = state.drafts[sessionID] ?? newSessionDraft();
+      return {
+        drafts: {
+          ...state.drafts,
+          [sessionID]: {
+            ...current,
+            projectReferences: applyDraftListUpdate(current.projectReferences ?? [], update),
+          },
+        },
+      };
+    });
+  },
   setText: (sessionID, text) => {
     set((state) => {
       const current = state.drafts[sessionID] ?? newSessionDraft();
@@ -130,4 +147,24 @@ export const useSessionDraftStore = create<SessionDraftState>((set, get) => ({
 
 function applyDraftListUpdate<T>(current: T[], update: DraftListUpdate<T>) {
   return typeof update === "function" ? update(current) : update;
+}
+
+export function addProjectReferenceToSessionDraft(
+  sessionID: string,
+  input: Omit<ProjectReference, "id">,
+) {
+  const state = useSessionDraftStore.getState();
+  const draft = state.ensure(sessionID);
+  if (
+    (draft.projectReferences ?? []).some(
+      (reference) =>
+        reference.rootID === input.rootID && reference.path === input.path && reference.kind === input.kind,
+    )
+  ) {
+    return false;
+  }
+  const reference: ProjectReference = { ...input, id: newClientID() };
+  state.setProjectReferences(sessionID, (current) => [...current, reference]);
+  state.setPartOrder(sessionID, (current) => [...current, { type: "project_reference", id: reference.id }]);
+  return true;
 }

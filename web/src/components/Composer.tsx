@@ -51,6 +51,7 @@ import {
   revealDesktopPath,
   type Attachment,
   type ContentPart,
+  type ProjectReference,
   type Session,
   type SkillDraft,
 } from "@/api/client";
@@ -72,6 +73,7 @@ import { ProjectComposerControls } from "@/components/ProjectComposerControls";
 import { BackgroundProcessControl } from "@/components/BackgroundProcessControl";
 import { SessionAudioControls } from "@/components/SessionAudioControls";
 import { SkillDraftDiffDialog } from "@/components/SkillDraftDiffDialog";
+import { UIContextControl } from "@/components/UIContextControl";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
@@ -100,6 +102,12 @@ import { cn } from "@/lib/utils";
 import { useOverlayStore, type AssistantOverlay, type AssistantOverlayPart, type TurnPhaseState } from "@/state/overlayStore";
 import { useInputFlowStore } from "@/state/inputFlowStore";
 import { useSessionDraftStore, type SessionDraftAttachment } from "@/state/sessionDraftStore";
+import {
+  setUIContextEnabled,
+  useUIContextEnabled,
+  useVisibleUIContext,
+} from "@/state/uiContextStore";
+import { useWorkspaceOpen } from "@/state/workspaceStore";
 
 const composerSchema = z.object({
   text: z.string(),
@@ -142,6 +150,7 @@ type ComposerAttachment = SessionDraftAttachment;
 const emptyComposerAttachments: ComposerAttachment[] = [];
 const emptyLocalFolders: LocalFolderPath[] = [];
 const emptyPartOrder: DraftPartOrderItem[] = [];
+const emptyProjectReferences: ProjectReference[] = [];
 
 export function Composer({ droppedFiles, token, session, onSubmitError }: ComposerProps) {
   const sessionID = session.id;
@@ -186,6 +195,10 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const [pickingAttachment, setPickingAttachment] = useState(false);
   const [pickingLocalFolder, setPickingLocalFolder] = useState(false);
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
+  const workspaceOpen = useWorkspaceOpen();
+  const uiContextEnabled = useUIContextEnabled();
+  const visibleUIContext = useVisibleUIContext(sessionID);
+  const draftUIContext = workspaceOpen && uiContextEnabled ? visibleUIContext : undefined;
   // clientMessageID 按"草稿"生成而不是按请求生成:失败重试和快速双击
   // 复用同一个 ID,服务端幂等去重才生效;成功后才轮换到下一个草稿 ID。
   const draftIDRef = useRef<string>(newClientID());
@@ -201,9 +214,13 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const attachments = useSessionDraftStore((state) => state.drafts[sessionID]?.attachments ?? emptyComposerAttachments);
   const localFolders = useSessionDraftStore((state) => state.drafts[sessionID]?.localFolders ?? emptyLocalFolders);
   const partOrder = useSessionDraftStore((state) => state.drafts[sessionID]?.partOrder ?? emptyPartOrder);
+  const projectReferences = useSessionDraftStore(
+    (state) => state.drafts[sessionID]?.projectReferences ?? emptyProjectReferences,
+  );
   const setSessionDraftAttachments = useSessionDraftStore((state) => state.setAttachments);
   const setSessionDraftLocalFolders = useSessionDraftStore((state) => state.setLocalFolders);
   const setSessionDraftPartOrder = useSessionDraftStore((state) => state.setPartOrder);
+  const setSessionDraftProjectReferences = useSessionDraftStore((state) => state.setProjectReferences);
   const selectionGuardRef = useComposerSelectionGuard<HTMLDivElement>();
   useEffect(() => {
     const draft = ensureSessionDraft(sessionID);
@@ -222,6 +239,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const hasFailedAttachments = attachments.some((item) => item.status === "error");
   const hasAttachments = attachments.length > 0;
   const hasLocalFolders = localFolders.length > 0;
+  const hasProjectReferences = projectReferences.length > 0;
   const attachmentPreviewItems = useMemo(
     () =>
       attachments.flatMap((item): ImageLightboxItem[] => {
@@ -237,8 +255,8 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     () => new Map(attachmentPreviewItems.map((item, index) => [item.id, index])),
     [attachmentPreviewItems],
   );
-  const draftSlashCommand = hasAttachments || hasLocalFolders ? null : parseSlashSubmitCommand(trimmedDraftText);
-  const canSend = Boolean(trimmedDraftText || uploadedAttachments.length || hasLocalFolders) && !hasPendingAttachments && !hasFailedAttachments;
+  const draftSlashCommand = hasAttachments || hasLocalFolders || hasProjectReferences ? null : parseSlashSubmitCommand(trimmedDraftText);
+  const canSend = Boolean(trimmedDraftText || uploadedAttachments.length || hasLocalFolders || hasProjectReferences) && !hasPendingAttachments && !hasFailedAttachments;
   const textField = form.register("text");
   const slashCommands: SlashCommand[] = [
     {
@@ -551,6 +569,12 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     setSessionDraftLocalFolders(sessionID, (current) => current.filter((folder) => folder.id !== id));
     setSessionDraftPartOrder(sessionID, (current) => current.filter((item) => item.type !== "local_folder" || item.id !== id));
   }, [sessionID, setSessionDraftLocalFolders, setSessionDraftPartOrder]);
+  const removeProjectReference = useCallback((id: string) => {
+    setSessionDraftProjectReferences(sessionID, (current) => current.filter((reference) => reference.id !== id));
+    setSessionDraftPartOrder(sessionID, (current) =>
+      current.filter((item) => item.type !== "project_reference" || item.id !== id),
+    );
+  }, [sessionID, setSessionDraftPartOrder, setSessionDraftProjectReferences]);
   const revealLocalPath = useCallback((path: string) => {
     if (!path.trim()) {
       return;
@@ -816,8 +840,9 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     const attachmentItemsToSubmit = attachments.filter((item) => item.status === "uploaded" && item.attachment);
     const attachmentsToSubmit = attachmentItemsToSubmit.flatMap((item) => (item.attachment ? [item.attachment] : []));
     const localFoldersToSubmit = localFolders;
+    const projectReferencesToSubmit = projectReferences;
     if (
-      (!text && attachmentsToSubmit.length === 0 && localFoldersToSubmit.length === 0) ||
+      (!text && attachmentsToSubmit.length === 0 && localFoldersToSubmit.length === 0 && projectReferencesToSubmit.length === 0) ||
       submitMutation.isPending ||
       compactMutation.isPending ||
       systemSubmitMutation.isPending ||
@@ -827,7 +852,10 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     ) {
       return;
     }
-    const slashCommand = attachmentsToSubmit.length === 0 && localFoldersToSubmit.length === 0 ? parseSlashSubmitCommand(text) : null;
+    const slashCommand =
+      attachmentsToSubmit.length === 0 && localFoldersToSubmit.length === 0 && projectReferencesToSubmit.length === 0
+        ? parseSlashSubmitCommand(text)
+        : null;
     if (slashCommand?.id === "clear") {
       runClearCommand();
       return;
@@ -858,9 +886,16 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     if (!running) {
       startSubmittingTurn(sessionID, draftIDRef.current);
     }
+    const inputParts = buildDraftSubmitParts(
+      text,
+      attachmentItemsToSubmit,
+      localFoldersToSubmit,
+      partOrder,
+      projectReferencesToSubmit,
+    );
     submitMutation.mutate({
       text,
-      parts: buildDraftSubmitParts(text, attachmentItemsToSubmit, localFoldersToSubmit, partOrder),
+      parts: draftUIContext ? [...inputParts, draftUIContext] : inputParts,
     });
   };
 
@@ -1111,9 +1146,9 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
               type="file"
               onChange={handleAttachmentInputChange}
             />
-            {attachments.length > 0 || localFolders.length > 0 ? (
+            {attachments.length > 0 || localFolders.length > 0 || projectReferences.length > 0 ? (
               <div className="flex flex-wrap gap-2 px-3 pt-3">
-                {orderedDraftItems(attachments, localFolders, partOrder).map((orderedItem) =>
+                {orderedDraftItems(attachments, localFolders, partOrder, projectReferences).map((orderedItem) =>
                   orderedItem.type === "attachment" ? (
                     <ComposerAttachmentChip
                       key={`attachment:${orderedItem.item.id}`}
@@ -1125,7 +1160,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
                       onRevealSource={revealLocalPath}
                       onRemove={() => removeAttachment(orderedItem.item.id)}
                     />
-                  ) : (
+                  ) : orderedItem.type === "local_folder" ? (
                     <LocalFolderChip
                       key={`folder:${orderedItem.item.id}`}
                       folder={orderedItem.item}
@@ -1133,6 +1168,15 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
                       removeLabel={t("composer.removeFolder")}
                       onReveal={() => revealLocalPath(orderedItem.item.path)}
                       onRemove={() => removeLocalFolder(orderedItem.item.id)}
+                    />
+                  ) : (
+                    <ProjectReferenceChip
+                      key={`project-reference:${orderedItem.item.id}`}
+                      reference={orderedItem.item}
+                      fileLabel={t("composer.projectFileLabel")}
+                      folderLabel={t("composer.projectFolderLabel")}
+                      removeLabel={t("composer.removeProjectReference")}
+                      onRemove={() => removeProjectReference(orderedItem.item.id)}
                     />
                   ),
                 )}
@@ -1167,6 +1211,13 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
                 onClick={openMentionMenuFromButton}
               />
               <ProjectComposerControls projectID={projectID} token={token} />
+              {workspaceOpen && visibleUIContext ? (
+                <UIContextControl
+                  context={visibleUIContext}
+                  enabled={uiContextEnabled}
+                  onEnabledChange={setUIContextEnabled}
+                />
+              ) : null}
               <BackgroundProcessControl sessionID={sessionID} token={token} />
               {compactMutation.isPending ? (
                 <span
@@ -1293,6 +1344,42 @@ function LocalFolderChip({
         <span className="min-w-0 truncate font-medium leading-5 text-foreground">{folder.name}</span>
         <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">{label}</span>
       </button>
+      <button
+        aria-label={removeLabel}
+        className="absolute top-2 right-1.5 grid size-5 place-items-center rounded-full bg-foreground text-background shadow-sm focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+        type="button"
+        onClick={onRemove}
+      >
+        <X className="size-3" />
+      </button>
+    </div>
+  );
+}
+
+function ProjectReferenceChip({
+  reference,
+  fileLabel,
+  folderLabel,
+  removeLabel,
+  onRemove,
+}: {
+  reference: ProjectReference;
+  fileLabel: string;
+  folderLabel: string;
+  removeLabel: string;
+  onRemove: () => void;
+}) {
+  const Icon = reference.kind === "dir" ? FolderOpen : FileText;
+  return (
+    <div
+      className="relative inline-flex h-10 max-w-full items-center gap-1.5 rounded-lg border border-border/70 bg-card pr-7 pl-2.5 text-sm whitespace-nowrap shadow-sm"
+      title={reference.path}
+    >
+      <Icon className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.8} />
+      <span className="min-w-0 truncate font-medium leading-5 text-foreground">{reference.name}</span>
+      <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
+        {reference.kind === "dir" ? folderLabel : fileLabel}
+      </span>
       <button
         aria-label={removeLabel}
         className="absolute top-2 right-1.5 grid size-5 place-items-center rounded-full bg-foreground text-background shadow-sm focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"

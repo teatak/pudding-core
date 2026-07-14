@@ -115,6 +115,13 @@ function openSessionEventSource({
     syncProjectGitFromEvent(queryClient, parsed.data);
     syncBackgroundProcessFromEvent(queryClient, parsed.data);
     syncSessionListFromEvent(queryClient, parsed.data);
+    if (
+      parsed.data.kind === "turn.tool" &&
+      parsed.data.name === "builtin_app_load" &&
+      (parsed.data.phase === "ok" || parsed.data.phase === "error")
+    ) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+    }
     if (parsed.data.kind === "turn.started" || isTurnTerminalEvent(parsed.data)) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessionUsage(sessionID) });
     }

@@ -8,13 +8,17 @@ import { useEffect, useMemo, useRef } from "react";
 
 import { useTheme } from "@/theme/theme";
 
+import type { ProjectEditorReveal } from "./projectReveal";
+
 export function ProjectEditor({
   path,
+  reveal,
   value,
   onChange,
   onSave,
 }: {
   path: string;
+  reveal?: ProjectEditorReveal;
   value: string;
   onChange: (value: string) => void;
   onSave: () => void;
@@ -90,6 +94,21 @@ export function ProjectEditor({
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } });
     syncingRef.current = false;
   }, [value]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || !reveal || reveal.line <= 0) {
+      return;
+    }
+    const lineNumber = Math.min(reveal.line, view.state.doc.lines);
+    const line = view.state.doc.line(lineNumber);
+    const columnOffset = Math.max(0, Math.min((reveal.column || 1) - 1, line.length));
+    const position = line.from + columnOffset;
+    view.dispatch({
+      selection: { anchor: position },
+      effects: EditorView.scrollIntoView(position, { y: "center" }),
+    });
+  }, [reveal?.serial]);
 
   return <div ref={hostRef} className="h-full min-h-0 overflow-hidden" />;
 }

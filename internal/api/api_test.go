@@ -2692,6 +2692,37 @@ func TestCreateSessionCarriesProviderAndModel(t *testing.T) {
 	}
 }
 
+func TestUnloadSessionAppIsSessionScopedAndIdempotent(t *testing.T) {
+	srv, st := newTestServer(t)
+	ctx := context.Background()
+	if err := st.CreateSession(ctx, &store.Session{
+		ID: "sess_apps_a", Provider: "mock", Model: "m", LoadedAppIDs: []string{"browser", "terminal"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateSession(ctx, &store.Session{
+		ID: "sess_apps_b", Provider: "mock", Model: "m", LoadedAppIDs: []string{"browser"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := decodeJSON[store.Session](t, req(t, http.MethodDelete, srv.URL+"/sessions/sess_apps_a/apps/browser", nil))
+	if !reflect.DeepEqual(got.LoadedAppIDs, []string{"terminal"}) {
+		t.Fatalf("loaded apps after unload = %+v", got.LoadedAppIDs)
+	}
+	got = decodeJSON[store.Session](t, req(t, http.MethodDelete, srv.URL+"/sessions/sess_apps_a/apps/browser", nil))
+	if !reflect.DeepEqual(got.LoadedAppIDs, []string{"terminal"}) {
+		t.Fatalf("idempotent unload changed loaded apps = %+v", got.LoadedAppIDs)
+	}
+	other, err := st.GetSession(ctx, "sess_apps_b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(other.LoadedAppIDs, []string{"browser"}) {
+		t.Fatalf("unload leaked into another session: %+v", other.LoadedAppIDs)
+	}
+}
+
 func TestGetSessionUsage(t *testing.T) {
 	srv, st := newTestServer(t)
 	sess := decodeJSON[store.Session](t, req(t, http.MethodPost, srv.URL+"/sessions",

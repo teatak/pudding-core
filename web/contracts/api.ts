@@ -12,6 +12,7 @@ export const session = z.object({
   activeMode: z.enum(["chat", "work", "code"]),
   modeLease: z.enum(["none", "session"]),
   projectID: z.string().optional(),
+  loadedAppIDs: z.array(z.string()).optional(),
   pinned: z.boolean(),
   pinnedOrder: z.number(),
   createdAt: z.string(), // RFC3339
@@ -358,9 +359,30 @@ export const localFolder = z.object({
 });
 export type LocalFolder = z.infer<typeof localFolder>;
 
+export const projectReference = z.object({
+  id: z.string(),
+  name: z.string(),
+  path: z.string(),
+  sourcePath: z.string(),
+  rootID: z.string(),
+  kind: z.enum(["file", "dir"]),
+});
+export type ProjectReference = z.infer<typeof projectReference>;
+
 export const contentPart = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), text: z.string() }),
   z.object({ type: z.literal("thought"), text: z.string() }),
+  z.object({
+    type: z.literal("ui_context"),
+    surface: z.enum(["project", "canvas", "browser", "terminal", "file_preview"]),
+    resource: z.enum(["project_file", "project_diff", "canvas_item", "browser_tab", "terminal", "file"]).optional(),
+    id: z.string().optional(),
+    name: z.string().optional(),
+    path: z.string().optional(),
+    url: z.string().optional(),
+    kind: z.string().optional(),
+    rootID: z.string().optional(),
+  }),
   z.object({
     type: z.literal("tool_use"),
     id: z.string().optional(),
@@ -378,6 +400,7 @@ export const contentPart = z.discriminatedUnion("type", [
   }),
   attachment.extend({ type: z.literal("attachment") }),
   localFolder.extend({ type: z.literal("local_folder") }),
+  projectReference.extend({ type: z.literal("project_reference") }),
 ]);
 export type ContentPart = z.infer<typeof contentPart>;
 

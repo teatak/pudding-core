@@ -49,12 +49,12 @@ border 在暗色套用白色 alpha,跨不同亮度表面观感一致。
 - 字体:`"Inter Variable", "PingFang SC", "Noto Sans SC", system-ui`;
   正文 14px/1.65,辅助 12px,标题 16/18 两档;代码用 mono 栈。
 
-## 2. Shell 骨架:可收起 rail + 会话区(可分屏) + canvas 栏
+## 2. Shell 骨架:可收起 rail + 会话区(可分屏) + 工作区
 
 ```text
-┌─[rail 268px,可收起]─┬─ 会话区(1–2 个 pane,上下分屏)─┬─[canvas 栏,默认收起]─┐
-│ 新建会话             │ pane = header + 任务流 + composer │ 将来:小组件/产物/  │
-│ 会话列表(带运行态)  │                                   │ 工具大块输出        │
+┌─[rail 268px,可收起]─┬─ 会话区(1–2 个 pane,上下分屏)─┬─[工作区,可收起]─────┐
+│ 新建会话             │ pane = header + 任务流 + composer │ 项目/画布/浏览器/终端│
+│ 会话列表(带运行态)  │                                   │                     │
 │ …                   │ ──────── 分屏分隔条 ────────      │                     │
 │ 脚部:主题/语言/设置 │ pane 2(可选)                     │                     │
 └─────────────────────┴───────────────────────────────────┴─────────────────────┘
@@ -111,13 +111,18 @@ border 在暗色套用白色 alpha,跨不同亮度表面观感一致。
   其中的按钮/输入显式 no-drag;浏览器模式下该样式无效且无害。
 - Windows/Linux 后续按同机制扩展(`data-shell="win"` 走右上控件,无左上 inset)。
 
-### 2.4 canvas 栏(预留)
+### 2.4 工作区
 
-- 第三栏,默认收起(完全隐藏),由 pane header 最右的开关按钮开合
-  (与第 5 节一致;常驻窄条方案弃用——空插槽阶段不值得占 40px 视觉位);
-  开合偏好存 localStorage。是将来 canvas / 小组件 / 工具大块输出 /
-  artifacts 的展示位(暂缓清单里的 canvas/widgets 解封时落位)。
-- 本版只交付:布局插槽、展开/收起交互、空态占位;不做内容。
+- 第三栏由 pane header 最右的按钮开合,开合和宽度偏好只存 localStorage。
+- 工作区是前端容器,包含项目、画布、浏览器和终端;画布不再代表整个右栏。
+- 项目与画布是固定入口,浏览器与终端是 session-scoped 动态资源。
+- 没有活动资源时显示工作区空态;进入空画布后不再显示浏览器/终端的新建引导。
+- 画布保留多小组件自由窗口,支持拖拽、缩放、最大化与层级调整。
+- Workspace 顶栏与自由画布之间设置独立的小组件导航栏;标签只负责聚焦并置顶窗口,不替代画布内容。
+- 小组件导航栏右侧固定“小组件”菜单,管理已关闭的小组件,并为后续“已保存”小组件预留分区。
+- 工作区显式记录目标 session;分屏中的打开请求携带 sessionID,不写入后端 focus 状态。
+- 当前可见的项目文件、画布小组件、浏览器页或终端只作为前端 UI 状态;用户发送消息时快照为中性的 `ui_context` content part,随 canonical user message 保存,不形成后端 focus 状态。
+- Electron 浏览器节点在工作区收起、切换 surface 或切换 session 时保持挂载。
 
 ## 3. 任务流(代替"聊天气泡")
 
@@ -168,7 +173,7 @@ text:      markdown 正文(无气泡直接排版)…▍    ← streaming 光标
 - **步数进度**:协议预留——将来由工具让 LLM 每 turn 预估步数,
   事件带 `estimatedSteps / currentStep`,header 渲染细进度条;
   字段未出现时只显示状态点 + 文案,布局不变。
-- canvas 栏开关按钮在 header 最右。
+- 工作区开关按钮在 header 最右。
 
 ## 6. composer
 
@@ -212,7 +217,7 @@ text:      markdown 正文(无气泡直接排版)…▍    ← streaming 光标
 | S4 任务流 | parts 渲染模型、用户消息块、header 单行状态 | S2 |
 | S5 选择器 | 两层 Accordion 模型选择(只读 profile.models)+ 配置表单模型导入 | — |
 | S6 分屏 | pane 容器抽象、`?split=`、上下分屏 | S3 S4 |
-| S7 canvas 栏 | 插槽 + 收起/展开 + 空态 | S3 |
+| S7 工作区 | 项目/画布/浏览器/终端 + 收起/展开 | S3 |
 | S8 窗口 chrome | Electron shell + `?shell=electron-mac`/`?api=` + 全屏事件 + 拖拽区 | S3 |
 
 S1–S5 为一批(核心形态),S6–S7 紧随;细碎(mascot、动效细节、

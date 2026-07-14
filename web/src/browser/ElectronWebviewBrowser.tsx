@@ -379,10 +379,10 @@ export function ElectronWebviewBrowser({
   }
 
   return (
-    <div className="canvas-window-no-drag relative h-full min-h-0 overflow-hidden bg-[var(--canvas-background)]" aria-label={title} role="application">
+    <div className="canvas-window-no-drag relative h-full min-h-0 overflow-hidden bg-[var(--workspace-background)]" aria-label={title} role="application">
       {createElement("webview", {
         ref: setWebviewRef,
-        className: "h-full w-full bg-[var(--canvas-background)]",
+        className: "h-full w-full bg-[var(--workspace-background)]",
         src: "about:blank",
         partition: "persist:pudding-default",
         allowpopups: "true",
@@ -480,7 +480,7 @@ function BrowserLoadErrorPage({ error, onReload }: { error: WebviewLoadError; on
   const message = host ? t("browser.errorHostNotResolved").replace("{host}", host) : t("browser.errorGeneric");
 
   return (
-    <div className="absolute inset-0 z-10 overflow-auto bg-[var(--canvas-background)] text-foreground">
+    <div className="absolute inset-0 z-10 overflow-auto bg-[var(--workspace-background)] text-foreground">
       <div className="mx-auto w-full max-w-[520px] px-8 pt-[18vh] pb-12">
         <FileX className="mb-8 h-12 w-12 text-muted-foreground" strokeWidth={1.75} />
         <h2 className="text-2xl leading-8 font-semibold text-foreground">{t("browser.errorTitle")}</h2>

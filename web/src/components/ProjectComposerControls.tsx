@@ -65,7 +65,7 @@ export function ProjectComposerControls({
     <>
       {showProjectName ? (
         <span
-          className="flex h-7 min-w-0 max-w-36 shrink items-center gap-1.5 rounded-full bg-muted/60 px-2 text-xs font-normal text-foreground"
+          className="pudding-composer-project-name flex h-7 min-w-0 max-w-36 shrink items-center gap-1.5 rounded-full bg-muted/60 px-2 text-xs font-normal text-foreground"
           title={projectName}
         >
           {projectQuery.isLoading ? (
@@ -107,15 +107,16 @@ function ProjectApprovalControl({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
-          aria-label={t("composer.projectApproval")}
-          className="h-7 max-w-32 gap-1.5 rounded-full px-2 text-xs font-normal"
+          aria-label={`${t("composer.projectApproval")}: ${t(`composer.projectApproval.${value}`)}`}
+          className="pudding-composer-approval-control h-8 max-w-32 gap-1.5 rounded-full px-2 text-[13px] font-normal"
           disabled={!project || busy}
           size="sm"
+          title={`${t("composer.projectApproval")}: ${t(`composer.projectApproval.${value}`)}`}
           type="button"
           variant="ghost"
         >
-          {busy ? <Spinner className="size-3" /> : <ShieldCheck className="size-3 shrink-0 text-muted-foreground" />}
-          <span className="min-w-0 truncate">{t(`composer.projectApproval.${value}`)}</span>
+          {busy ? <Spinner className="size-4" /> : <ShieldCheck className="size-4 shrink-0 text-muted-foreground" />}
+          <span className="pudding-composer-approval-label min-w-0 truncate">{t(`composer.projectApproval.${value}`)}</span>
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-56 gap-1 p-1" collisionPadding={12} side="top" sideOffset={8}>

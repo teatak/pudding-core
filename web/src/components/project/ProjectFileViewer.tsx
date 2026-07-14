@@ -16,6 +16,7 @@ import { ProjectGitDiffViewer } from "./git/ProjectGitDiffViewer";
 import { ProjectMarkdownPreview } from "./ProjectMarkdownPreview";
 import { projectBrowserError } from "./projectErrors";
 import { projectSelectionKey } from "./projectPaths";
+import type { ProjectEditorReveal } from "./projectReveal";
 import { isProjectGitDiffTab, type ProjectSelection, type ProjectTab } from "./types";
 
 const ProjectEditor = lazy(() => import("./ProjectEditor").then((module) => ({ default: module.ProjectEditor })));
@@ -39,6 +40,7 @@ export function ProjectFileViewer({
   absolutePath,
   dirtyKeys,
   discardRequest,
+  reveal,
   selection,
   sessionID,
   tabs,
@@ -54,6 +56,7 @@ export function ProjectFileViewer({
   absolutePath?: string;
   dirtyKeys: ReadonlySet<string>;
   discardRequest?: { id: number; keys: string[]; sessionID: string };
+  reveal?: ProjectEditorReveal;
   selection?: ProjectTab;
   sessionID: string;
   tabs: ProjectTab[];
@@ -99,6 +102,13 @@ export function ProjectFileViewer({
   const externalConflict = Boolean(draft?.externalRevision);
   const isMarkdown = file?.mime === "text/markdown" || /\.(?:md|markdown)$/i.test(file?.name || "");
   const showPreview = Boolean(isMarkdown && draftKey && previewMode[draftKey] !== false);
+
+  useEffect(() => {
+    if (!reveal || reveal.key !== selectionKey || !draftKey) {
+      return;
+    }
+    setPreviewMode((current) => ({ ...current, [draftKey]: false }));
+  }, [draftKey, reveal?.serial, selectionKey]);
 
   useEffect(() => {
     if (!active || !absolutePath || !fileSelection) {
@@ -294,7 +304,14 @@ export function ProjectFileViewer({
           <ProjectMarkdownPreview file={previewFile} sessionID={sessionID} token={token} onOpenPreview={onOpenPreview} />
         ) : previewFile ? (
           <Suspense fallback={<ProjectViewerStatus icon={<Spinner className="size-6" />}>{t("common.loading")}</ProjectViewerStatus>}>
-            <ProjectEditor key={draftKey} path={previewFile.path} value={content} onChange={changeContent} onSave={() => save()} />
+            <ProjectEditor
+              key={draftKey}
+              path={previewFile.path}
+              reveal={reveal?.key === selectionKey ? reveal : undefined}
+              value={content}
+              onChange={changeContent}
+              onSave={() => save()}
+            />
           </Suspense>
         ) : null}
       </div>

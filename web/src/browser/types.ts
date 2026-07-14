@@ -13,6 +13,4 @@ export type BrowserCanvasPayload = {
 
 export type BrowserProcessMode = "headless" | "webview" | "external";
 export type BrowserTabsData = { tabs: BrowserTab[]; processMode?: BrowserProcessMode };
-export type CanvasSurface = "canvas" | "browser" | "project" | "terminal";
-
 export type BrowserNavigationAction = "back" | "forward" | "reload";

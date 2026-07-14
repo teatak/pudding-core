@@ -175,6 +175,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions").POST(s.createSession).GET(s.listSessions)
 	app.Route("/sessions/search").POST(s.searchSessionMessages)
 	app.Route("/sessions/:id").GET(s.getSession).PATCH(s.patchSession).DELETE(s.deleteSession)
+	app.Route("/sessions/:id/apps/:appID").DELETE(s.unloadSessionApp)
 	app.Route("/sessions/:id/submit").POST(s.submit)
 	app.Route("/sessions/:id/cancel").POST(s.cancel)
 	app.Route("/sessions/:id/compact").POST(s.compactSession)
@@ -599,6 +600,34 @@ func (s *Server) patchSession(c *cart.Context) error {
 	if upd.ProjectID != nil {
 		if err := s.revokeBrowserFileAccess(c.Request.Context(), id); err != nil {
 			return s.browserError(c, err)
+		}
+	}
+	s.enrichSessionProcesses(sess)
+	c.JSON(http.StatusOK, sess)
+	return nil
+}
+
+func (s *Server) unloadSessionApp(c *cart.Context) error {
+	id, _ := c.Param("id")
+	appID, _ := c.Param("appID")
+	appID = strings.TrimSpace(appID)
+	if appID == "" {
+		return badRequest(c, "app id is required")
+	}
+	sess, err := s.store.GetSession(c.Request.Context(), id)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	loaded := make([]string, 0, len(sess.LoadedAppIDs))
+	for _, loadedID := range sess.LoadedAppIDs {
+		if loadedID != appID {
+			loaded = append(loaded, loadedID)
+		}
+	}
+	if len(loaded) != len(sess.LoadedAppIDs) {
+		sess, err = s.store.UpdateSession(c.Request.Context(), id, store.SessionUpdate{LoadedAppIDs: &loaded})
+		if err != nil {
+			return s.fail(c, err)
 		}
 	}
 	s.enrichSessionProcesses(sess)

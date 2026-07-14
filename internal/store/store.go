@@ -44,8 +44,10 @@ type Session struct {
 	ActiveMode        AgentMode `json:"activeMode"`
 	ModeLease         ModeLease `json:"modeLease"`
 	// ProjectID 指向项目目录与审批设置的唯一事实源。
-	ProjectID    string    `json:"projectID,omitempty"`
-	LoadedAppIDs []string  `json:"-"`
+	ProjectID string `json:"projectID,omitempty"`
+	// LoadedAppIDs 是当前会话已经加载、会向后续 turn 提供工具的 App。
+	// 对客户端只读；写入仍只允许通过显式的 session App 接口。
+	LoadedAppIDs []string  `json:"loadedAppIDs,omitempty"`
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
 	// LastActivityAt 只描述会话内容活动时间:用户提交 / assistant 收尾推进。
@@ -414,6 +416,8 @@ const (
 	ContentPartToolResult  ContentPartType = "tool_result"
 	ContentPartAttachment  ContentPartType = "attachment"
 	ContentPartLocalFolder ContentPartType = "local_folder"
+	ContentPartProjectRef  ContentPartType = "project_reference"
+	ContentPartUIContext   ContentPartType = "ui_context"
 )
 
 type ContentPart struct {
@@ -435,6 +439,10 @@ type ContentPart struct {
 	Origin              string          `json:"origin,omitempty"`
 	AttachmentCreatedAt string          `json:"createdAt,omitempty"`
 	AudioTranscript     string          `json:"audioTranscript,omitempty"`
+	Surface             string          `json:"surface,omitempty"`
+	Resource            string          `json:"resource,omitempty"`
+	ResourceKind        string          `json:"kind,omitempty"`
+	RootID              string          `json:"rootID,omitempty"`
 }
 
 func (p ContentPart) MarshalJSON() ([]byte, error) {
@@ -457,6 +465,10 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 		Origin          string          `json:"origin,omitempty"`
 		CreatedAt       string          `json:"createdAt,omitempty"`
 		AudioTranscript string          `json:"audioTranscript,omitempty"`
+		Surface         string          `json:"surface,omitempty"`
+		Resource        string          `json:"resource,omitempty"`
+		ResourceKind    string          `json:"kind,omitempty"`
+		RootID          string          `json:"rootID,omitempty"`
 	}
 	out := contentPartJSON{
 		Type:            p.Type,
@@ -474,6 +486,10 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 		Origin:          p.Origin,
 		CreatedAt:       p.AttachmentCreatedAt,
 		AudioTranscript: p.AudioTranscript,
+		Surface:         p.Surface,
+		Resource:        p.Resource,
+		ResourceKind:    p.ResourceKind,
+		RootID:          p.RootID,
 	}
 	if p.Type == ContentPartToolResult {
 		out.Ok = &p.Ok
@@ -514,6 +530,15 @@ type LocalFolder struct {
 	Name   string `json:"name"`
 	Path   string `json:"path"`
 	Origin string `json:"origin,omitempty"`
+}
+
+type ProjectReference struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	SourcePath string `json:"sourcePath"`
+	RootID     string `json:"rootID"`
+	Kind       string `json:"kind"`
 }
 
 type Message struct {
@@ -557,7 +582,7 @@ func UserInputParts(text string, parts []ContentPart) []ContentPart {
 	}
 	for _, part := range parts {
 		switch part.Type {
-		case ContentPartAttachment, ContentPartLocalFolder:
+		case ContentPartAttachment, ContentPartLocalFolder, ContentPartProjectRef, ContentPartUIContext:
 			out = append(out, part)
 		}
 	}
@@ -624,6 +649,18 @@ func LocalFolderPart(folder LocalFolder) ContentPart {
 		Name:   folder.Name,
 		Path:   folder.Path,
 		Origin: folder.Origin,
+	}
+}
+
+func ProjectReferencePart(reference ProjectReference) ContentPart {
+	return ContentPart{
+		Type:         ContentPartProjectRef,
+		CallID:       reference.ID,
+		Name:         reference.Name,
+		Path:         reference.Path,
+		SourcePath:   reference.SourcePath,
+		RootID:       reference.RootID,
+		ResourceKind: reference.Kind,
 	}
 }
 
@@ -739,6 +776,47 @@ func LocalFoldersFromParts(parts []ContentPart) []LocalFolder {
 	return NormalizeLocalFolders(out)
 }
 
+func NormalizeProjectReferences(references []ProjectReference) []ProjectReference {
+	out := make([]ProjectReference, 0, len(references))
+	for _, reference := range references {
+		reference.ID = strings.TrimSpace(reference.ID)
+		reference.Name = strings.TrimSpace(reference.Name)
+		reference.Path = strings.TrimSpace(reference.Path)
+		reference.SourcePath = strings.TrimSpace(reference.SourcePath)
+		reference.RootID = strings.TrimSpace(reference.RootID)
+		reference.Kind = strings.TrimSpace(reference.Kind)
+		if reference.ID == "" || reference.Name == "" || reference.Path == "" || reference.SourcePath == "" || reference.RootID == "" {
+			continue
+		}
+		if !filepath.IsAbs(reference.SourcePath) {
+			continue
+		}
+		if reference.Kind != "file" && reference.Kind != "dir" {
+			continue
+		}
+		out = append(out, reference)
+	}
+	return out
+}
+
+func ProjectReferencesFromParts(parts []ContentPart) []ProjectReference {
+	out := make([]ProjectReference, 0, len(parts))
+	for _, part := range NormalizeContentParts(parts) {
+		if part.Type != ContentPartProjectRef {
+			continue
+		}
+		out = append(out, ProjectReference{
+			ID:         part.CallID,
+			Name:       part.Name,
+			Path:       part.Path,
+			SourcePath: part.SourcePath,
+			RootID:     part.RootID,
+			Kind:       part.ResourceKind,
+		})
+	}
+	return NormalizeProjectReferences(out)
+}
+
 func localFolderName(path string) string {
 	normalized := strings.TrimRight(strings.ReplaceAll(strings.TrimSpace(path), "\\", "/"), "/")
 	if normalized == "" {
@@ -850,6 +928,10 @@ func MessageTextFromParts(parts []ContentPart) string {
 			continue
 		case ContentPartLocalFolder:
 			continue
+		case ContentPartProjectRef:
+			continue
+		case ContentPartUIContext:
+			continue
 		}
 	}
 	return b.String()
@@ -860,6 +942,12 @@ func NormalizeContentParts(parts []ContentPart) []ContentPart {
 	for _, part := range parts {
 		if part.Type == "" {
 			part.Type = ContentPartText
+		}
+		if part.Type != ContentPartUIContext {
+			part.Surface, part.Resource = "", ""
+		}
+		if part.Type != ContentPartUIContext && part.Type != ContentPartProjectRef {
+			part.ResourceKind, part.RootID = "", ""
 		}
 		switch part.Type {
 		case ContentPartText, ContentPartThought:
@@ -930,6 +1018,55 @@ func NormalizeContentParts(parts []ContentPart) []ContentPart {
 			part.Text, part.Args, part.Content = "", nil, ""
 			part.AttachmentKey, part.URL, part.MIME = "", "", ""
 			part.SourcePath = ""
+			part.Size = 0
+			part.AttachmentCreatedAt, part.AudioTranscript = "", ""
+			part.Ok = false
+			part.SummaryKind, part.SummaryCount = "", 0
+		case ContentPartProjectRef:
+			reference := NormalizeProjectReferences([]ProjectReference{{
+				ID:         part.CallID,
+				Name:       part.Name,
+				Path:       part.Path,
+				SourcePath: part.SourcePath,
+				RootID:     part.RootID,
+				Kind:       part.ResourceKind,
+			}})
+			if len(reference) == 0 {
+				continue
+			}
+			part.CallID = reference[0].ID
+			part.Name = reference[0].Name
+			part.Path = reference[0].Path
+			part.SourcePath = reference[0].SourcePath
+			part.RootID = reference[0].RootID
+			part.ResourceKind = reference[0].Kind
+			part.Text, part.Args, part.Content = "", nil, ""
+			part.AttachmentKey, part.URL, part.MIME, part.Origin = "", "", "", ""
+			part.Size = 0
+			part.AttachmentCreatedAt, part.AudioTranscript = "", ""
+			part.Ok = false
+			part.SummaryKind, part.SummaryCount = "", 0
+		case ContentPartUIContext:
+			part.Surface = strings.TrimSpace(part.Surface)
+			switch part.Surface {
+			case "project", "canvas", "browser", "terminal", "file_preview":
+			default:
+				continue
+			}
+			part.Resource = strings.TrimSpace(part.Resource)
+			switch part.Resource {
+			case "", "project_file", "project_diff", "canvas_item", "browser_tab", "terminal", "file":
+			default:
+				part.Resource = ""
+			}
+			part.CallID = strings.TrimSpace(part.CallID)
+			part.Name = strings.TrimSpace(part.Name)
+			part.Path = strings.TrimSpace(part.Path)
+			part.URL = strings.TrimSpace(part.URL)
+			part.ResourceKind = strings.TrimSpace(part.ResourceKind)
+			part.RootID = strings.TrimSpace(part.RootID)
+			part.Text, part.Args, part.Content = "", nil, ""
+			part.AttachmentKey, part.SourcePath, part.MIME, part.Origin = "", "", "", ""
 			part.Size = 0
 			part.AttachmentCreatedAt, part.AudioTranscript = "", ""
 			part.Ok = false

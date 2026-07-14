@@ -41,6 +41,74 @@ func TestNonToolResultPartOmitsOK(t *testing.T) {
 	}
 }
 
+func TestUserInputPartsPreserveUIContext(t *testing.T) {
+	parts := UserInputParts("检查这个", []ContentPart{
+		{
+			Type:         ContentPartUIContext,
+			Surface:      "canvas",
+			Resource:     "canvas_item",
+			CallID:       "item_1",
+			Name:         "2026 World Cup",
+			ResourceKind: "grid",
+		},
+	})
+	if len(parts) != 2 || parts[0].Type != ContentPartUIContext || parts[1].Type != ContentPartText {
+		t.Fatalf("unexpected user parts: %+v", parts)
+	}
+	if parts[0].Surface != "canvas" || parts[0].CallID != "item_1" || parts[0].Name != "2026 World Cup" {
+		t.Fatalf("ui context not preserved: %+v", parts[0])
+	}
+	data, err := json.Marshal(parts[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"surface":"canvas"`) || !strings.Contains(string(data), `"kind":"grid"`) {
+		t.Fatalf("ui context json missing fields: %s", data)
+	}
+}
+
+func TestUserInputPartsPreserveProjectReference(t *testing.T) {
+	parts := UserInputParts("检查这个文件", []ContentPart{
+		ProjectReferencePart(ProjectReference{
+			ID:         "ref_1",
+			Name:       "README.md",
+			Path:       "tutorials/README.md",
+			SourcePath: "/workspace/tutorials/README.md",
+			RootID:     "root_1",
+			Kind:       "file",
+		}),
+	})
+	if len(parts) != 2 || parts[0].Type != ContentPartProjectRef || parts[1].Type != ContentPartText {
+		t.Fatalf("unexpected user parts: %+v", parts)
+	}
+	references := ProjectReferencesFromParts(parts)
+	if len(references) != 1 || references[0].RootID != "root_1" || references[0].Path != "tutorials/README.md" || references[0].Kind != "file" {
+		t.Fatalf("project reference not preserved: %+v", references)
+	}
+}
+
+func TestNormalizeContentPartsRejectsInvalidProjectReference(t *testing.T) {
+	parts := NormalizeContentParts([]ContentPart{{
+		Type:         ContentPartProjectRef,
+		CallID:       "ref_1",
+		Name:         "README.md",
+		Path:         "README.md",
+		SourcePath:   "/workspace/README.md",
+		RootID:       "root_1",
+		ResourceKind: "other",
+	}})
+	if len(parts) != 0 {
+		t.Fatalf("invalid project reference should be dropped: %+v", parts)
+	}
+}
+
+func TestNormalizeContentPartsRejectsUnknownUIContextSurface(t *testing.T) {
+	parts := NormalizeContentParts([]ContentPart{{Type: ContentPartUIContext, Surface: "unknown"}})
+	if len(parts) != 0 {
+		t.Fatalf("unknown ui context surface should be dropped: %+v", parts)
+	}
+}
+
 func TestNormalizeAgentModeRejectsLegacyWorkspace(t *testing.T) {
 	if mode := NormalizeAgentMode(AgentMode("workspace")); mode != "" {
 		t.Fatalf("legacy workspace mode must be rejected, got %q", mode)
@@ -59,7 +127,7 @@ func TestNormalizeAgentModeRejectsLegacyWorkspace(t *testing.T) {
 	}
 }
 
-func TestSessionLoadedAppsAreNormalizedAndInternal(t *testing.T) {
+func TestSessionLoadedAppsAreNormalizedAndReadable(t *testing.T) {
 	sess := &Session{
 		Provider:     "mock",
 		Model:        "mock",
@@ -75,7 +143,7 @@ func TestSessionLoadedAppsAreNormalizedAndInternal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(data), "loadedApp") {
-		t.Fatalf("loaded app ids must remain internal: %s", data)
+	if !strings.Contains(string(data), `"loadedAppIDs":["browser","terminal"]`) {
+		t.Fatalf("loaded app ids must be readable: %s", data)
 	}
 }

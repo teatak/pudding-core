@@ -14,7 +14,7 @@ const SELECTED_TERMINAL_STORAGE_KEY = "pudding.terminal.selected.v1";
 
 type TerminalData = { terminals: Terminal[] };
 
-export function useCanvasTerminals({
+export function useWorkspaceTerminals({
   active,
   enabled,
   getInitialDimensions,

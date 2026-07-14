@@ -12,6 +12,7 @@ import {
 import {
   attachmentsFromContentParts,
   localFoldersFromContentParts,
+  projectReferencesFromContentParts,
   textFromContentParts,
   transcriptPhaseKey,
   type TranscriptTurnVM,
@@ -240,6 +241,7 @@ function userFromMessages(messages: Message[]): UserInputVM | undefined {
     createdAt: userMessage.createdAt,
     interrupted: userMessage.interrupted,
     localFolders: localFoldersFromContentParts(userMessage.parts),
+    projectReferences: projectReferencesFromContentParts(userMessage.parts),
     parts: userMessage.parts,
     text: textFromContentParts(userMessage.parts),
   };
@@ -252,6 +254,7 @@ function userFromPending(message: PendingUserMessage, options: { pending?: boole
     clientMessageID: message.clientMessageID,
     createdAt: message.createdAt,
     localFolders: localFoldersFromContentParts(parts),
+    projectReferences: projectReferencesFromContentParts(parts),
     pending: options.pending ?? true,
     parts,
     status: options.pending === false ? undefined : message.status,

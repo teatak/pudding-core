@@ -1,35 +1,63 @@
 import {
   ArrowLeft,
   ArrowRight,
-  Boxes,
+  Blocks,
+  BookOpen,
+  BookOpenCheck,
+  Braces,
   Camera,
+  Check,
   ChevronDown,
   ChevronRight,
+  CircleAlert,
+  CircleX,
+  Clock3,
+  CloudSun,
   Copy,
-  Database,
+  Download,
+  FileCheck,
   FileDiff,
+  FileInput,
+  FileOutput,
   FilePenLine,
   FileSearch,
-  FileText,
+  FolderSearch,
   GitBranch,
   GitCommitHorizontal,
+  GitCompareArrows,
   Globe,
+  History,
+  Image,
   Info,
   Keyboard,
   LayoutGrid,
+  Lightbulb,
   ListChecks,
   ListTree,
+  LocateFixed,
+  MessageSquareMore,
+  MessageSquareText,
   MousePointerClick,
   MoveRight,
+  MoveVertical,
   PackageOpen,
+  PanelTop,
   Paperclip,
+  Play,
+  Plug,
+  RefreshCw,
   RotateCw,
-  Route,
   Search,
-  Save,
+  ScanSearch,
+  ScrollText,
+  Send,
+  ShieldCheck,
+  Square,
   SquareTerminal,
   TextCursorInput,
   Trash2,
+  Upload,
+  Waypoints,
   Wrench,
   type LucideIcon,
 } from "lucide-react";
@@ -257,32 +285,32 @@ function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIc
     return LayoutGrid;
   }
   if (name.startsWith("app_mcp__")) {
-    return Wrench;
+    return Plug;
   }
   const known: Record<string, LucideIcon> = {
-    builtin_attachment_read_image: FileSearch,
+    builtin_attachment_read_image: Image,
     builtin_app_load: PackageOpen,
     builtin_browser_back: ArrowLeft,
     builtin_browser_click: MousePointerClick,
-    builtin_browser_close: Globe,
+    builtin_browser_close: CircleX,
     builtin_browser_forward: ArrowRight,
     builtin_browser_observe: FileSearch,
     builtin_browser_open: Globe,
     builtin_browser_reload: RotateCw,
     builtin_browser_screenshot: Camera,
-    builtin_browser_scroll: MousePointerClick,
-    builtin_browser_status: Globe,
+    builtin_browser_scroll: MoveVertical,
+    builtin_browser_status: PanelTop,
     builtin_browser_type: Keyboard,
     builtin_camera_capture: Camera,
-    builtin_command_poll: SquareTerminal,
+    builtin_command_poll: RefreshCw,
     builtin_command_run: SquareTerminal,
-    builtin_command_start: SquareTerminal,
-    builtin_command_stop: SquareTerminal,
-    builtin_toolkit_load: Boxes,
-    builtin_code_symbols: Search,
-    builtin_code_definition: Route,
-    builtin_code_references: ListTree,
-    builtin_code_diagnostics: ListChecks,
+    builtin_command_start: Play,
+    builtin_command_stop: Square,
+    builtin_toolkit_load: Blocks,
+    builtin_code_symbols: Braces,
+    builtin_code_definition: LocateFixed,
+    builtin_code_references: Waypoints,
+    builtin_code_diagnostics: CircleAlert,
     builtin_code_rename: TextCursorInput,
     builtin_desktop_screenshot: Camera,
     builtin_file_copy: Copy,
@@ -290,36 +318,36 @@ function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIc
     builtin_file_list: ListTree,
     builtin_file_move: MoveRight,
     builtin_file_patch: FilePenLine,
-    builtin_file_read: FileText,
+    builtin_file_read: BookOpenCheck,
     builtin_file_search: Search,
-    builtin_file_slice: FileText,
+    builtin_file_slice: BookOpenCheck,
     builtin_file_stat: Info,
-    builtin_file_write: Save,
-    builtin_git_diff: FileDiff,
-    builtin_git_log: GitBranch,
-    builtin_git_stage: GitBranch,
+    builtin_file_write: FilePenLine,
+    builtin_git_diff: GitCompareArrows,
+    builtin_git_log: History,
+    builtin_git_stage: FileInput,
     builtin_git_status: GitBranch,
-    builtin_git_unstage: GitBranch,
+    builtin_git_unstage: FileOutput,
     builtin_git_commit: GitCommitHorizontal,
-    builtin_patch_apply: FileDiff,
+    builtin_patch_apply: FileCheck,
     builtin_patch_propose: FileDiff,
-    builtin_project_inspect: ListTree,
-    builtin_project_instructions: FileText,
-    builtin_graphql_introspect: Database,
-    builtin_graphql_request: Database,
+    builtin_project_inspect: FolderSearch,
+    builtin_project_instructions: ScrollText,
+    builtin_graphql_introspect: ScanSearch,
+    builtin_graphql_request: Braces,
     builtin_graphql_search: Search,
-    builtin_history_get_message: FileText,
-    builtin_history_search: Search,
-    builtin_rest_request: Database,
-    builtin_skill_read: FileText,
-    builtin_skill_submit: FileText,
-    builtin_skill_validate: FileSearch,
-    builtin_time_get_current: Wrench,
-    builtin_weather_get: Wrench,
-    builtin_web_fetch: FileSearch,
+    builtin_history_get_message: MessageSquareText,
+    builtin_history_search: History,
+    builtin_rest_request: Send,
+    builtin_skill_read: BookOpen,
+    builtin_skill_submit: Upload,
+    builtin_skill_validate: BookOpenCheck,
+    builtin_time_get_current: Clock3,
+    builtin_weather_get: CloudSun,
+    builtin_web_fetch: Download,
     builtin_web_search: Search,
-    request_capability: Wrench,
-    collect_user_input: ListChecks,
+    request_capability: ShieldCheck,
+    collect_user_input: MessageSquareMore,
   };
   return known[name] || Wrench;
 }
@@ -448,6 +476,8 @@ function partFromContentPart(part: ContentPart): TurnPartVM | null {
     case "attachment":
       return { type: "attachment", attachment: part };
     case "local_folder":
+    case "project_reference":
+    case "ui_context":
       return null;
   }
 }
@@ -666,7 +696,7 @@ function ThoughtPart({
         onClick={handleThoughtSummaryClick}
         onKeyDown={handleThoughtSummaryKeyDown}
       >
-        <PartIcon icon={Route} />
+        <PartIcon icon={Lightbulb} />
         <span className="flex min-w-0 flex-1 items-center gap-1">
           <span className="shrink-0 truncate">{active ? t("transcript.thinking") : t("transcript.thought")}</span>
           {canShowContent ? (
@@ -1550,11 +1580,13 @@ function CodeBlock({
   const highlighted = codeRenderer?.(code, lang);
   return (
     <div className="code-block-wrap">
-      <button
+      <Button
         aria-label={copied ? codeCopiedLabel : codeCopyLabel}
         className="code-copy-btn"
         data-copied={copied ? "1" : undefined}
+        size="icon-xs"
         type="button"
+        variant="ghost"
         onClick={() => {
           void navigator.clipboard.writeText(code).then(() => {
             setCopied(true);
@@ -1564,7 +1596,9 @@ function CodeBlock({
             resetTimer.current = window.setTimeout(() => setCopied(false), 1500);
           });
         }}
-      />
+      >
+        {copied ? <Check className="size-3 text-success" /> : <Copy className="size-3" />}
+      </Button>
       {highlighted ? (
         <div dangerouslySetInnerHTML={{ __html: highlighted }} />
       ) : (

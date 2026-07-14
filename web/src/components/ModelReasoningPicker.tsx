@@ -153,7 +153,7 @@ export function ModelReasoningPicker({
         <Button
           aria-label={t("session.model")}
           className={cn(
-            "group/model-picker h-6 min-w-0 max-w-[9.5rem] shrink gap-0.5 rounded-full border-0 bg-muted py-0 pr-1.5 text-xs font-normal text-foreground transition-none hover:bg-accent aria-expanded:bg-accent data-[state=open]:bg-accent sm:max-w-[12rem] dark:hover:bg-accent dark:aria-expanded:bg-accent dark:data-[state=open]:bg-accent",
+            "pudding-composer-model-picker group/model-picker h-6 min-w-0 max-w-[9.5rem] shrink gap-0.5 rounded-full border-0 bg-muted py-0 pr-1.5 text-xs font-normal text-foreground transition-none hover:bg-accent aria-expanded:bg-accent data-[state=open]:bg-accent sm:max-w-[12rem] dark:hover:bg-accent dark:aria-expanded:bg-accent dark:data-[state=open]:bg-accent",
             visibleModel ? "pl-0.5" : "pl-2",
             className,
           )}
@@ -167,9 +167,9 @@ export function ModelReasoningPicker({
               : <span className="grid size-5 shrink-0 place-items-center rounded-full bg-background/60 text-[10px] text-foreground">{(activeProfile?.displayName || selectedProvider).slice(0, 1).toUpperCase()}</span>
           ) : null}
           <span className="flex h-5 min-w-0 flex-1 items-center gap-1 overflow-hidden text-foreground/75">
-            <span className="min-w-0 flex-1 truncate">{label}</span>
-            {reasoningLabel ? <span className="shrink-0 text-muted-foreground/70">·</span> : null}
-            {reasoningLabel ? <span className="shrink-0">{reasoningLabel}</span> : null}
+            <span className="pudding-composer-model-label min-w-0 flex-1 truncate">{label}</span>
+            {reasoningLabel ? <span className="pudding-composer-reasoning-detail shrink-0 text-muted-foreground/70">·</span> : null}
+            {reasoningLabel ? <span className="pudding-composer-reasoning-detail shrink-0">{reasoningLabel}</span> : null}
             <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
           </span>
         </Button>

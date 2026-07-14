@@ -25,30 +25,34 @@ import {
   preferredBrowserTab,
   upsertBrowserTab,
 } from "@/browser/helpers";
-import type { BrowserTabsData, CanvasSurface } from "@/browser/types";
+import type { BrowserTabsData } from "@/browser/types";
+import type { WorkspaceSurface } from "@/components/workspace/types";
 import { useI18n } from "@/i18n";
 import { consumeBrowserReveal, useBrowserRevealEpoch } from "@/state/browserRevealStore";
 
-const SESSION_SURFACE_STORAGE_KEY = "pudding.canvas.sessionSurface.v1";
+const SESSION_SURFACE_STORAGE_KEY = "pudding.workspace.sessionSurface.v2";
+const LEGACY_WORKSPACE_SURFACE_STORAGE_KEY = "pudding.workspace.sessionSurface.v1";
+const LEGACY_CANVAS_SURFACE_STORAGE_KEY = "pudding.canvas.sessionSurface.v1";
 const SELECTED_BROWSER_TAB_STORAGE_KEY = "pudding.browser.selectedTab.v1";
 
-type UseCanvasBrowserSurfaceArgs = {
+type UseWorkspaceBrowserSurfaceArgs = {
   token: string;
   sessionID: string;
   enabled: boolean;
   hasTransientSurface?: boolean;
   itemsLength: number;
+  itemsPending: boolean;
 };
 
-export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransientSurface = false, itemsLength }: UseCanvasBrowserSurfaceArgs) {
+export function useWorkspaceBrowserSurface({ token, sessionID, enabled, hasTransientSurface = false, itemsLength, itemsPending }: UseWorkspaceBrowserSurfaceArgs) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const currentSessionIDRef = useRef("");
   const surfaceSessionRef = useRef("");
-  const sessionSurfaceRef = useRef<Record<string, CanvasSurface>>(readSessionSurfaces());
+  const sessionSurfaceRef = useRef<Record<string, WorkspaceSurface>>(readSessionSurfaces());
   const selectedBrowserTabRef = useRef<Record<string, string>>(readSelectedBrowserTabs());
   const syncTimersRef = useRef<Record<string, number>>({});
-  const [activeSurface, setActiveSurfaceState] = useState<CanvasSurface>("canvas");
+  const [activeSurface, setActiveSurfaceState] = useState<WorkspaceSurface>("workspace");
   const [selectedBrowserTabs, setSelectedBrowserTabs] = useState<Record<string, string>>(selectedBrowserTabRef.current);
   const browserActive = activeSurface === "browser";
   const processModeFallback = electronBrowserBridge() ? "webview" : "headless";
@@ -56,7 +60,7 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
   currentSessionIDRef.current = sessionID;
   selectedBrowserTabRef.current = selectedBrowserTabs;
 
-  const rememberSessionSurface = (targetSessionID: string, surface: CanvasSurface) => {
+  const rememberSessionSurface = (targetSessionID: string, surface: WorkspaceSurface) => {
     sessionSurfaceRef.current = { ...sessionSurfaceRef.current, [targetSessionID]: surface };
     writeSessionSurfaces(sessionSurfaceRef.current);
   };
@@ -73,7 +77,7 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
     writeSelectedBrowserTabs(next);
   };
 
-  const setActiveSurface = (surface: CanvasSurface) => {
+  const setActiveSurface = (surface: WorkspaceSurface) => {
     if (sessionID) {
       rememberSessionSurface(sessionID, surface);
     }
@@ -82,6 +86,10 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
 
   const selectCanvasSurface = () => {
     setActiveSurface("canvas");
+  };
+
+  const selectWorkspaceSurface = () => {
+    setActiveSurface("workspace");
   };
 
   const selectTerminalSurface = () => {
@@ -97,7 +105,7 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
       return;
     }
     surfaceSessionRef.current = sessionID;
-    setActiveSurfaceState(sessionSurfaceRef.current[sessionID] || "canvas");
+    setActiveSurfaceState(sessionSurfaceRef.current[sessionID] || "workspace");
   }, [sessionID]);
 
   const browserRevealEpoch = useBrowserRevealEpoch(sessionID);
@@ -276,8 +284,9 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
     ) {
       return;
     }
-    rememberSessionSurface(sessionID, "canvas");
-    setActiveSurfaceState("canvas");
+    const fallback = itemsLength > 0 || hasTransientSurface ? "canvas" : "workspace";
+    rememberSessionSurface(sessionID, fallback);
+    setActiveSurfaceState(fallback);
   }, [
     browserActive,
     browserStateQuery.isFetching,
@@ -285,8 +294,18 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
     createBrowserTabMutation.isPending,
     enabled,
     hasBrowserState,
+    hasTransientSurface,
+    itemsLength,
     sessionID,
   ]);
+
+  useEffect(() => {
+    if (!enabled || !sessionID || itemsPending || itemsLength === 0 || activeSurface !== "workspace") {
+      return;
+    }
+    rememberSessionSurface(sessionID, "canvas");
+    setActiveSurfaceState("canvas");
+  }, [activeSurface, enabled, itemsLength, itemsPending, sessionID]);
 
   useEffect(() => {
     if (
@@ -376,11 +395,12 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
           : { hasState: false, sessionID: targetSessionID, processMode: previousTabs?.processMode || processModeFallback },
       );
       if (remaining.length === 0) {
+        const fallback = itemsLength > 0 || hasTransientSurface ? "canvas" : "workspace";
         if (sessionSurfaceRef.current[targetSessionID] === "browser") {
-          rememberSessionSurface(targetSessionID, "canvas");
+          rememberSessionSurface(targetSessionID, fallback);
         }
         if (currentSessionIDRef.current === targetSessionID) {
-          setActiveSurfaceState((current) => (current === "browser" ? "canvas" : current));
+          setActiveSurfaceState((current) => (current === "browser" ? fallback : current));
         }
       }
       return { previousSelectedTabID, previousState, previousSurface, previousTabs };
@@ -435,23 +455,27 @@ export function useCanvasBrowserSurface({ token, sessionID, enabled, hasTransien
     selectBrowserTab,
     selectProjectSurface,
     selectTerminalSurface,
+    selectWorkspaceSurface,
   };
 }
 
-function readSessionSurfaces(): Record<string, CanvasSurface> {
+function readSessionSurfaces(): Record<string, WorkspaceSurface> {
   if (typeof window === "undefined") {
     return {};
   }
   try {
-    const raw = window.localStorage.getItem(SESSION_SURFACE_STORAGE_KEY);
+    const currentRaw = window.localStorage.getItem(SESSION_SURFACE_STORAGE_KEY);
+    const raw = currentRaw
+      || window.localStorage.getItem(LEGACY_WORKSPACE_SURFACE_STORAGE_KEY)
+      || window.localStorage.getItem(LEGACY_CANVAS_SURFACE_STORAGE_KEY);
     if (!raw) {
       return {};
     }
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const out: Record<string, CanvasSurface> = {};
+    const out: Record<string, WorkspaceSurface> = {};
     Object.entries(parsed).forEach(([sessionID, surface]) => {
-      if (surface === "canvas" || surface === "browser" || surface === "project" || surface === "terminal") {
-        out[sessionID] = surface;
+      if (surface === "workspace" || surface === "canvas" || surface === "browser" || surface === "project" || surface === "terminal") {
+        out[sessionID] = !currentRaw && surface === "canvas" ? "workspace" : surface;
       }
     });
     return out;
@@ -460,12 +484,14 @@ function readSessionSurfaces(): Record<string, CanvasSurface> {
   }
 }
 
-function writeSessionSurfaces(surfaces: Record<string, CanvasSurface>) {
+function writeSessionSurfaces(surfaces: Record<string, WorkspaceSurface>) {
   if (typeof window === "undefined") {
     return;
   }
   try {
     window.localStorage.setItem(SESSION_SURFACE_STORAGE_KEY, JSON.stringify(surfaces));
+    window.localStorage.removeItem(LEGACY_WORKSPACE_SURFACE_STORAGE_KEY);
+    window.localStorage.removeItem(LEGACY_CANVAS_SURFACE_STORAGE_KEY);
   } catch {
     // Best-effort UI preference.
   }

@@ -51,7 +51,7 @@
 明确禁止:
 
 - BrowserHost 创建临时或隐藏 `WebContentsView`。
-- Canvas 收起、session 切换时卸载 live tab 的 `<webview>`。
+- 工作区收起、session 切换时卸载 live tab 的 `<webview>`。
 - browser 工具在对应 `<webview>` 尚未注册时创建替代 target。
 
 当前桌面实现已经满足 webview 持久挂载的主体条件:
@@ -59,7 +59,7 @@
 - `BrowserSurface` 会为所有 live tab 持续渲染 `<ElectronWebviewBrowser>`。
 - 非活动 tab 只通过 CSS `invisible` 隐藏,不会卸载。
 - `retainedBrowserTabs` 会保留切换 session 前已经挂载的 browser surface。
-- 桌面 Canvas 收起时 `CanvasPane` 仍保持挂载。
+- 桌面工作区收起时 `WorkspacePane` 仍保持挂载。
 
 因此本计划不新增另一套 `BrowserWebviewPool`;只补齐首次创建握手和 renderer 不可用时的明确失败语义。
 
@@ -83,7 +83,7 @@ session + tab
 - BrowserHost 在注册完成后 attach 一次。
 - 同一 tab 的写操作串行执行。
 - 导航使用单调递增 generation,旧事件不能覆盖新导航。
-- Canvas 只切换布局和可见性,不创建、替换或销毁 webview。
+- 工作区只切换布局和可见性,不创建、替换或销毁 webview。
 - session 切换后,后台 tab 的 webview 仍由现有 retained browser surface 保留。
 - webview 销毁时,取消 pending command、detach CDP 并将 slot 标记为 lost。
 - Go manager 同样按 target 复用持久 WebSocket CDP session,关闭 tab/process 时统一释放。
@@ -106,12 +106,12 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 
 ### 3.2 常驻与显示
 
-- 复用当前 CanvasPane/BrowserSurface 的持久渲染机制。
+- 复用当前 WorkspacePane/BrowserWorkspaceSurface 的持久渲染机制。
 - `<webview>` DOM 节点在 tab 生命周期内保持挂载。
-- Canvas 打开时只把对应 webview 切换到可见布局。
-- Canvas 关闭时使用 CSS 隐藏,不能从 DOM 移除。
+- 工作区打开时只把对应 webview 切换到可见布局。
+- 工作区关闭时使用 CSS 隐藏,不能从 DOM 移除。
 - session 切换继续通过 `retainedBrowserTabs` 保留已挂载 webview。
-- renderer reload、Apps 视图或其他导致 CanvasPane 不存在的状态下,工具返回 `browser_webview_not_ready`,不创建替代 target。
+- renderer reload、Apps 视图或其他导致 WorkspacePane 不存在的状态下,工具返回 `browser_webview_not_ready`,不创建替代 target。
 - 常驻 tab 采用硬上限:单 session 8 个、全局 16 个;超限返回 `browser_tab_limit_reached`,不隐式淘汰或卸载旧 webview。
 
 ## 4. 操作映射
@@ -193,7 +193,7 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 
 ### C2 持久 webview 创建握手
 
-- 复用现有 `CanvasPane`、`BrowserSurface` 和 `retainedBrowserTabs`。
+- 复用现有 `WorkspacePane`、`BrowserWorkspaceSurface` 和 `retainedBrowserTabs`。
 - 移除 BrowserHost 的临时 `WebContentsView`、`headlessView` 和恢复逻辑。
 - 新 tab 先建立 pending slot,再通过 IPC 通知 renderer 挂载 `<webview>`。
 - `<webview>` 初始只挂载 `about:blank`,`dom-ready` 后立即注册。

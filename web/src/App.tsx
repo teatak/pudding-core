@@ -3,7 +3,7 @@ import { PanelRight } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useGroupRef } from "react-resizable-panels";
 
-import { CanvasPane } from "@/components/CanvasPane";
+import { WorkspacePane } from "@/components/workspace/WorkspacePane";
 import { hasElectronWebviewBrowser } from "@/browser/electronBridge";
 import { ChatPane } from "@/components/ChatPane";
 import { AppsPane } from "@/components/AppsPane";
@@ -13,11 +13,9 @@ import { PairingGate, TokenGate } from "@/components/TokenGate";
 import { claimMobilePairing } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { AppToaster } from "@/components/AppToaster";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceResizableHandle } from "@/components/WorkspaceResizableHandle";
-import { useIsMobile } from "@/hooks/use-mobile";
 import { useVisibleSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
 import {
@@ -26,12 +24,13 @@ import {
   splitLayout,
   workspaceLayout,
 } from "@/lib/layoutConstants";
-import { readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
+import { readOptionalPanelLayout, readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
 import { cn } from "@/lib/utils";
 import { useCanvasMCP } from "@/mcp/canvasTools";
-import { setCanvasOpen, useCanvasOpen } from "@/state/canvasStore";
+import { setWorkspaceOpen, useWorkspaceOpen } from "@/state/workspaceStore";
 import { clearFilePreviews } from "@/state/filePreviewStore";
 import { setRailLayoutForcedCollapsed } from "@/state/railStore";
+import { getElectronZoomFactor } from "@/state/shell";
 import { clearPendingPairingCode, pendingPairingCode } from "@/state/token";
 import { setToken, useToken } from "@/state/tokenStore";
 
@@ -53,31 +52,36 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-function clampWorkspaceCanvasRatio(workspaceWidth: number, canvasRatio: number) {
+function clampWorkspacePanelRatio(workspaceWidth: number, panelRatio: number) {
   if (workspaceWidth <= 0) {
-    return clamp(canvasRatio, workspaceLayout.minPercent, workspaceLayout.maxPercent);
+    return clamp(panelRatio, workspaceLayout.minPercent, workspaceLayout.maxPercent);
   }
-  const maxCanvas = Math.max(0, workspaceWidth - workspaceLayout.minChatPx);
-  const minCanvas = Math.min(
-    maxCanvas,
-    Math.max(workspaceLayout.minCanvasPx, workspaceWidth - workspaceLayout.maxChatPx),
+  const maxPanel = Math.max(0, workspaceWidth - workspaceLayout.minChatPx);
+  const minPanel = Math.min(
+    maxPanel,
+    Math.max(workspaceLayout.minWorkspacePx, workspaceWidth - workspaceLayout.maxChatPx),
   );
-  const canvasWidth = clamp((workspaceWidth * canvasRatio) / 100, minCanvas, maxCanvas);
-  return clamp((canvasWidth / workspaceWidth) * 100, workspaceLayout.minPercent, workspaceLayout.maxPercent);
+  const panelWidth = clamp((workspaceWidth * panelRatio) / 100, minPanel, maxPanel);
+  return clamp((panelWidth / workspaceWidth) * 100, workspaceLayout.minPercent, workspaceLayout.maxPercent);
 }
 
-function readSavedWorkspaceCanvasRatio() {
-  return readSavedWorkspaceLayout().canvas;
+function readSavedWorkspacePanelRatio() {
+  const saved = readOptionalPanelLayout(layoutStorageKeys.workspaceRatio);
+  if (saved?.workspace === undefined && saved?.canvas !== undefined) {
+    const chat = saved.chat || Math.max(1, 100 - saved.canvas);
+    return (saved.canvas / (chat + saved.canvas)) * 100;
+  }
+  return readSavedWorkspaceLayout().workspace;
 }
 
-function saveWorkspaceCanvasRatio(canvasRatio: number) {
+function saveWorkspacePanelRatio(panelRatio: number) {
   savePanelLayout(layoutStorageKeys.workspaceRatio, {
-    chat: 100 - canvasRatio,
-    canvas: canvasRatio,
+    chat: 100 - panelRatio,
+    workspace: panelRatio,
   });
 }
 
-function ElectronCanvasHost({
+function ElectronWorkspaceHost({
   active,
   secondarySessionID,
   sessionID,
@@ -103,8 +107,8 @@ function ElectronCanvasHost({
         !active && "pointer-events-none",
       )}
       style={{
-        right: active ? 0 : "calc(0px - var(--workspace-canvas-width) - 32px)",
-        width: "var(--workspace-canvas-width)",
+        right: active ? 0 : "calc(0px - var(--workspace-panel-width) - 32px)",
+        width: "var(--workspace-panel-width)",
       }}
     >
       <div
@@ -122,7 +126,7 @@ function ElectronCanvasHost({
           )}
         />
       </div>
-      <CanvasPane
+      <WorkspacePane
         secondarySessionID={secondarySessionID}
         token={token}
         sessionID={sessionID}
@@ -135,17 +139,16 @@ export function App() {
   const token = useToken();
   const { session: selectedSessionID, draft, project: draftProjectID, split: splitSessionID, view } = useSearch({ from: "/" });
   const { t } = useI18n();
-  const isMobile = useIsMobile();
   const electronWebviewBrowser = hasElectronWebviewBrowser();
-  const canvasOpen = useCanvasOpen();
+  const workspaceOpen = useWorkspaceOpen();
   const [pairingCode] = useState(() => pendingPairingCode());
   const [pairingFailed, setPairingFailed] = useState(false);
   const [leftWorkspaceNode, setLeftWorkspaceNode] = useState<HTMLDivElement | null>(null);
   const [workspaceNode, setWorkspaceNode] = useState<HTMLDivElement | null>(null);
-  const [canvasRatio, setCanvasRatio] = useState(() => readSavedWorkspaceCanvasRatio());
+  const [workspaceRatio, setWorkspaceRatio] = useState(() => readSavedWorkspacePanelRatio());
   const [workspaceResizing, setWorkspaceResizing] = useState(false);
   const splitGroupRef = useGroupRef();
-  const canvasRatioRef = useRef(canvasRatio);
+  const workspaceRatioRef = useRef(workspaceRatio);
   const previewTokenRef = useRef(token);
   const workspaceResizeCleanupRef = useRef<(() => void) | null>(null);
   // 上下分屏(docs/design.md 2.2):pane 三件套整体复用,路由是唯一事实源;
@@ -153,8 +156,8 @@ export function App() {
   const appsActive = view === "apps";
   const showSplit = !appsActive && Boolean(splitSessionID && splitSessionID !== selectedSessionID);
   const draftActive = !appsActive && draft === "1" && !selectedSessionID;
-  const canUseCanvas = !appsActive && Boolean(selectedSessionID);
-  const effectiveCanvasOpen = canUseCanvas && canvasOpen;
+  const canUseWorkspace = !appsActive && Boolean(selectedSessionID);
+  const effectiveWorkspaceOpen = canUseWorkspace && workspaceOpen;
   const activeSessionIDs = (appsActive ? [] : [selectedSessionID, showSplit ? splitSessionID : undefined]).filter(
     (sessionID): sessionID is string => Boolean(sessionID),
   );
@@ -176,7 +179,8 @@ export function App() {
       return;
     }
     const update = () => {
-      setRailLayoutForcedCollapsed(leftWorkspaceNode.getBoundingClientRect().width < workspaceLayout.railAutoCollapsePx);
+      const visualWidth = leftWorkspaceNode.getBoundingClientRect().width * getElectronZoomFactor();
+      setRailLayoutForcedCollapsed(visualWidth < workspaceLayout.railAutoCollapsePx);
     };
     update();
     const observer = new ResizeObserver(update);
@@ -187,8 +191,8 @@ export function App() {
   }, [leftWorkspaceNode]);
 
   useEffect(() => {
-    canvasRatioRef.current = canvasRatio;
-  }, [canvasRatio]);
+    workspaceRatioRef.current = workspaceRatio;
+  }, [workspaceRatio]);
 
   useEffect(() => {
     return () => {
@@ -244,7 +248,7 @@ export function App() {
   }
 
   const startWorkspaceResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!effectiveCanvasOpen || event.button !== 0) {
+    if (!effectiveWorkspaceOpen || event.button !== 0) {
       return;
     }
     event.preventDefault();
@@ -284,17 +288,17 @@ export function App() {
         document.documentElement.setAttribute("data-workspace-resizing", previousWorkspaceResizeAttr);
       }
       setWorkspaceResizing(false);
-      setCanvasRatio(canvasRatioRef.current);
-      saveWorkspaceCanvasRatio(canvasRatioRef.current);
+      setWorkspaceRatio(workspaceRatioRef.current);
+      saveWorkspacePanelRatio(workspaceRatioRef.current);
       if (workspaceResizeCleanupRef.current === cleanup) {
         workspaceResizeCleanupRef.current = null;
       }
     };
     const handlePointerMove = (moveEvent: PointerEvent) => {
-      const nextCanvasRatio = ((workspaceRect.right - moveEvent.clientX) / workspaceWidth) * 100;
-      const next = clampWorkspaceCanvasRatio(workspaceWidth, nextCanvasRatio);
-      canvasRatioRef.current = next;
-      resizeNode.style.setProperty("--workspace-canvas-ratio", `${next}%`);
+      const nextWorkspaceRatio = ((workspaceRect.right - moveEvent.clientX) / workspaceWidth) * 100;
+      const next = clampWorkspacePanelRatio(workspaceWidth, nextWorkspaceRatio);
+      workspaceRatioRef.current = next;
+      resizeNode.style.setProperty("--workspace-panel-ratio", `${next}%`);
     };
     const handlePointerUp = () => {
       cleanup();
@@ -328,7 +332,7 @@ export function App() {
           minSize={splitLayout.minPanePx}
         >
           <ChatPane
-            reserveTopRightAction={canUseCanvas && !effectiveCanvasOpen}
+            reserveTopRightAction={canUseWorkspace && !effectiveWorkspaceOpen}
             token={token}
             sessionID={selectedSessionID}
             draftActive={draftActive}
@@ -354,59 +358,31 @@ export function App() {
     </main>
   );
 
-  const canvasToggle = canUseCanvas ? (
-    <div className="pudding-canvas-toggle no-drag-region pointer-events-auto absolute top-0 right-(--canvas-toggle-right) z-[100] flex h-(--toolbar-h) items-center">
+  const workspaceToggle = canUseWorkspace ? (
+    <div className="pudding-workspace-toggle no-drag-region pointer-events-auto absolute top-0 right-(--workspace-toggle-right) z-[100] flex h-(--toolbar-h) items-center">
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
-            aria-label={t("canvas.toggle")}
-            aria-pressed={effectiveCanvasOpen}
+            aria-label={t("workspace.toggle")}
+            aria-pressed={effectiveWorkspaceOpen}
             className="no-drag-region pointer-events-auto aria-pressed:bg-muted aria-pressed:text-foreground dark:aria-pressed:bg-muted/50"
             size="icon-sm"
             tabIndex={-1}
             type="button"
             variant="ghost"
-            onClick={() => setCanvasOpen(!canvasOpen)}
+            onClick={() => setWorkspaceOpen(!workspaceOpen)}
           >
             <PanelRight />
           </Button>
         </TooltipTrigger>
         <TooltipContent align="end" side="bottom">
-          {t("canvas.toggle")}
+          {t("workspace.toggle")}
         </TooltipContent>
       </Tooltip>
     </div>
   ) : null;
 
-  const mainPane = appsActive ? (
-    <AppsPane token={token} />
-  ) : !canUseCanvas ? (
-    chatArea
-  ) : isMobile ? (
-    <>
-      {chatArea}
-      {!electronWebviewBrowser ? (
-        <Sheet open={effectiveCanvasOpen} onOpenChange={setCanvasOpen}>
-          <SheetContent
-            className="w-[min(28rem,92vw)] max-w-none gap-0 p-0"
-            side="right"
-          >
-            <SheetHeader className="sr-only">
-              <SheetTitle>{t("canvas.title")}</SheetTitle>
-              <SheetDescription>{t("canvas.empty")}</SheetDescription>
-            </SheetHeader>
-            <CanvasPane
-              secondarySessionID={showSplit ? splitSessionID : undefined}
-              token={token}
-              sessionID={selectedSessionID}
-            />
-          </SheetContent>
-        </Sheet>
-      ) : null}
-    </>
-  ) : (
-    chatArea
-  );
+  const mainPane = appsActive ? <AppsPane token={token} /> : chatArea;
 
   const leftWorkspace = (
     <div ref={setLeftWorkspaceNode} className="relative flex h-full min-w-0 bg-background">
@@ -420,26 +396,26 @@ export function App() {
     </div>
   );
 
-  const workspaceCanvasStyle = {
-    "--workspace-canvas-ratio": `${canvasRatio}%`,
-    "--workspace-canvas-max-width": `max(0px, calc(100% - ${workspaceLayout.minChatPx}px))`,
-    "--workspace-canvas-min-width": `min(var(--workspace-canvas-max-width), max(${workspaceLayout.minCanvasPx}px, calc(100% - ${workspaceLayout.maxChatPx}px)))`,
-    "--workspace-canvas-width": "clamp(var(--workspace-canvas-min-width), var(--workspace-canvas-ratio), var(--workspace-canvas-max-width))",
+  const workspacePanelStyle = {
+    "--workspace-panel-ratio": `${workspaceRatio}%`,
+    "--workspace-panel-max-width": `max(0px, calc(100% - ${workspaceLayout.minChatPx}px))`,
+    "--workspace-panel-min-width": `min(var(--workspace-panel-max-width), max(${workspaceLayout.minWorkspacePx}px, calc(100% - ${workspaceLayout.maxChatPx}px)))`,
+    "--workspace-panel-width": "clamp(var(--workspace-panel-min-width), var(--workspace-panel-ratio), var(--workspace-panel-max-width))",
   } as CSSProperties;
 
   const workspaceContent = electronWebviewBrowser ? (
-    <div ref={setWorkspaceNode} className="relative h-full min-w-0 overflow-hidden bg-background" style={workspaceCanvasStyle}>
+    <div ref={setWorkspaceNode} className="relative h-full min-w-0 overflow-hidden bg-background" style={workspacePanelStyle}>
       <div
         className={cn(
           "workspace-split-pane absolute inset-y-0 left-0 h-full min-w-0 transition-[right] duration-200 ease-out",
           workspaceResizing && "transition-none",
         )}
-        style={{ right: effectiveCanvasOpen ? "var(--workspace-canvas-width)" : 0 }}
+        style={{ right: effectiveWorkspaceOpen ? "var(--workspace-panel-width)" : 0 }}
       >
         {leftWorkspace}
       </div>
-      <ElectronCanvasHost
-        active={effectiveCanvasOpen}
+      <ElectronWorkspaceHost
+        active={effectiveWorkspaceOpen}
         secondarySessionID={showSplit ? splitSessionID : undefined}
         sessionID={selectedSessionID}
         token={token}
@@ -453,29 +429,29 @@ export function App() {
         />
       ) : null}
     </div>
-  ) : isMobile || !canUseCanvas ? (
+  ) : !canUseWorkspace ? (
       leftWorkspace
     ) : (
-      <div ref={setWorkspaceNode} className="relative h-full min-w-0 overflow-hidden bg-background" style={workspaceCanvasStyle}>
+      <div ref={setWorkspaceNode} className="relative h-full min-w-0 overflow-hidden bg-background" style={workspacePanelStyle}>
         <div
           className={cn(
             "workspace-split-pane absolute inset-y-0 left-0 min-w-0 transition-[right] duration-200 ease-out",
             workspaceResizing && "transition-none",
           )}
-          style={{ right: effectiveCanvasOpen ? "var(--workspace-canvas-width)" : 0 }}
+          style={{ right: effectiveWorkspaceOpen ? "var(--workspace-panel-width)" : 0 }}
         >
           {leftWorkspace}
         </div>
         <div
-          aria-hidden={!effectiveCanvasOpen}
+          aria-hidden={!effectiveWorkspaceOpen}
           className={cn(
             "workspace-split-pane absolute inset-y-0 min-w-0 overflow-visible border-l border-border transition-[right] duration-200 ease-out",
             workspaceResizing && "transition-none",
-            !effectiveCanvasOpen && "pointer-events-none",
+            !effectiveWorkspaceOpen && "pointer-events-none",
           )}
           style={{
-            right: effectiveCanvasOpen ? 0 : "calc(0px - var(--workspace-canvas-width) - 32px)",
-            width: "var(--workspace-canvas-width)",
+            right: effectiveWorkspaceOpen ? 0 : "calc(0px - var(--workspace-panel-width) - 32px)",
+            width: "var(--workspace-panel-width)",
           }}
         >
           <div
@@ -483,7 +459,7 @@ export function App() {
             aria-orientation="vertical"
             className="group absolute inset-y-0 left-0 z-40 w-3 -translate-x-1/2 cursor-col-resize bg-transparent"
             role="separator"
-            tabIndex={effectiveCanvasOpen ? 0 : -1}
+            tabIndex={effectiveWorkspaceOpen ? 0 : -1}
             onPointerDown={startWorkspaceResize}
           >
             <div
@@ -493,7 +469,7 @@ export function App() {
               )}
             />
           </div>
-          <CanvasPane
+          <WorkspacePane
             secondarySessionID={showSplit ? splitSessionID : undefined}
             token={token}
             sessionID={selectedSessionID}
@@ -514,7 +490,7 @@ export function App() {
         <div aria-hidden="true" className="drag-region absolute inset-x-0 top-0 z-20 h-(--toolbar-h)" />
         <div className="relative h-full min-w-0 flex-1 bg-background">
           {workspaceContent}
-          {canvasToggle}
+          {workspaceToggle}
         </div>
       </div>
       <SettingsDialog token={token} showTrigger={false} />

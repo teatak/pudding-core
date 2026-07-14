@@ -15,6 +15,10 @@ import { useI18n } from "@/i18n";
 import { layoutStorageKeys } from "@/lib/layoutConstants";
 import { readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
 import { cn } from "@/lib/utils";
+import { openFilePreview } from "@/state/filePreviewStore";
+import { consumeProjectFileReveal, useProjectFileReveal } from "@/state/projectRevealStore";
+import { addProjectReferenceToSessionDraft } from "@/state/sessionDraftStore";
+import type { UIContextPart } from "@/state/uiContextStore";
 
 import { ProjectDeleteDialog, ProjectNameDialog, ProjectUnsavedCloseDialog } from "./ProjectDialogs";
 import { ProjectFileViewer } from "./ProjectFileViewer";
@@ -25,6 +29,7 @@ import { ProjectSidebar } from "./ProjectSidebar";
 import { ProjectTree } from "./ProjectTree";
 import { projectBrowserError } from "./projectErrors";
 import { projectAbsolutePath, projectParentPath, projectPathContains, projectSelectionKey, projectTabKey } from "./projectPaths";
+import { resolveProjectFileReveal, type ProjectEditorReveal } from "./projectReveal";
 import { isProjectGitDiffTab, type ProjectEntryTarget, type ProjectSelection } from "./types";
 import { useProjectWorkspace } from "./useProjectWorkspace";
 
@@ -34,10 +39,21 @@ type NameRequest =
 
 type DiscardRequest = { id: number; keys: string[]; sessionID: string };
 
-export function ProjectBrowserSurface({ active, sessionID, token }: { active: boolean; sessionID: string; token: string }) {
+export function ProjectBrowserSurface({
+  active,
+  sessionID,
+  token,
+  onVisibleContextChange,
+}: {
+  active: boolean;
+  sessionID: string;
+  token: string;
+  onVisibleContextChange?: (context?: UIContextPart) => void;
+}) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const workspace = useProjectWorkspace(sessionID);
+  const fileReveal = useProjectFileReveal(sessionID);
   const currentSessionIDRef = useRef(sessionID);
   currentSessionIDRef.current = sessionID;
   const [nameRequest, setNameRequest] = useState<NameRequest>();
@@ -45,9 +61,10 @@ export function ProjectBrowserSurface({ active, sessionID, token }: { active: bo
   const [pendingCloseKeys, setPendingCloseKeys] = useState<string[]>([]);
   const [discardRequest, setDiscardRequest] = useState<DiscardRequest>();
   const [dirtyBySession, setDirtyBySession] = useState<Record<string, string[]>>({});
+  const [editorReveal, setEditorReveal] = useState<ProjectEditorReveal>();
   const dirtyKeys = useMemo(() => new Set(dirtyBySession[sessionID] || []), [dirtyBySession, sessionID]);
   const rootsQuery = useQuery({
-    enabled: active && Boolean(sessionID && token),
+    enabled: (active || Boolean(fileReveal)) && Boolean(sessionID && token),
     queryKey: queryKeys.projectBrowserRoots(sessionID),
     queryFn: () => listProjectBrowserRoots(token, sessionID),
     staleTime: 10_000,
@@ -79,6 +96,27 @@ export function ProjectBrowserSurface({ active, sessionID, token }: { active: bo
     const root = roots.find((candidate) => candidate.id === workspace.selected?.rootID);
     return root ? projectAbsolutePath(root.path, workspace.selected.path) : undefined;
   }, [roots, workspace.selected]);
+  const visibleContext = useMemo<UIContextPart>(() => {
+    const selected = workspace.selected;
+    if (!selected) {
+      return { type: "ui_context", surface: "project" };
+    }
+    const diff = isProjectGitDiffTab(selected);
+    return {
+      type: "ui_context",
+      surface: "project",
+      resource: diff ? "project_diff" : "project_file",
+      id: projectSelectionKey(selected),
+      name: projectFileName(selected.path),
+      path: selected.path,
+      rootID: selected.rootID,
+      kind: diff ? (selected.staged ? "staged" : "unstaged") : undefined,
+    };
+  }, [workspace.selected]);
+
+  useEffect(() => {
+    onVisibleContextChange?.(active ? visibleContext : undefined);
+  }, [active, onVisibleContextChange, visibleContext]);
 
   useEffect(() => workspace.ensureRootExpanded(roots), [roots.length, sessionID]);
   useEffect(() => workspace.removeUnavailableRoots(roots), [roots.map((root) => root.id).join("\n"), sessionID]);
@@ -93,6 +131,26 @@ export function ProjectBrowserSurface({ active, sessionID, token }: { active: bo
     window.addEventListener("focus", refreshGit);
     return () => window.removeEventListener("focus", refreshGit);
   }, [active, queryClient, sessionID]);
+  useEffect(() => {
+    if (!fileReveal || rootsQuery.isLoading || rootsQuery.isFetching) {
+      return;
+    }
+    const selection = resolveProjectFileReveal(roots, fileReveal);
+    if (selection) {
+      workspace.openPreview(selection);
+      setEditorReveal(fileReveal.line && fileReveal.line > 0 ? {
+        column: fileReveal.column,
+        key: projectSelectionKey(selection),
+        line: fileReveal.line,
+        serial: fileReveal.serial,
+      } : undefined);
+    } else if (fileReveal.fallback) {
+      openFilePreview(fileReveal.fallback);
+    } else {
+      toast.warning(t("project.browserRevealUnavailable"));
+    }
+    consumeProjectFileReveal(sessionID, fileReveal.serial);
+  }, [fileReveal?.serial, rootsQuery.isFetching, rootsQuery.isLoading, sessionID]);
 
   const invalidateProject = (targetSessionID: string) => queryClient.invalidateQueries({ queryKey: ["session", targetSessionID, "project"] });
   const createMutation = useMutation({
@@ -204,11 +262,29 @@ export function ProjectBrowserSurface({ active, sessionID, token }: { active: bo
     );
   };
 
+  const referenceEntry = (target: ProjectEntryTarget) => {
+    const root = roots.find((candidate) => candidate.id === target.rootID);
+    if (!root) {
+      toast.error(t("project.browserPathCopyFailed"));
+      return;
+    }
+    const added = addProjectReferenceToSessionDraft(sessionID, {
+      name: target.name,
+      path: target.path,
+      sourcePath: projectAbsolutePath(root.path, target.path),
+      rootID: target.rootID,
+      kind: target.type,
+    });
+    if (added) {
+      toast.success(t("project.browserReferenced"), { description: target.path });
+    }
+  };
+
   const namePending = (createMutation.isPending && createMutation.variables?.targetSessionID === sessionID)
     || (renameMutation.isPending && renameMutation.variables?.targetSessionID === sessionID);
   const deletePending = deleteMutation.isPending && deleteMutation.variables?.targetSessionID === sessionID;
   return (
-    <div aria-hidden={!active} className={cn("absolute inset-0 z-20 min-h-0 overflow-hidden bg-[var(--canvas-background)] text-card-foreground", !active && "pointer-events-none invisible opacity-0")}>
+    <div aria-hidden={!active} className={cn("absolute inset-0 z-20 min-h-0 overflow-hidden bg-[var(--workspace-background)] text-card-foreground", !active && "pointer-events-none invisible opacity-0")}>
       <ResizablePanelGroup
         className="h-full min-h-0 overflow-hidden border-t bg-card"
         defaultLayout={readPanelLayout(layoutStorageKeys.projectBrowserRatio, { tree: 28, viewer: 72 }, { minPercent: 15, maxPercent: 85 })}
@@ -238,6 +314,7 @@ export function ProjectBrowserSurface({ active, sessionID, token }: { active: bo
                 onOpenPinned={workspace.openPinned}
                 onOpenPreview={workspace.openPreview}
                 onRefresh={refreshEntry}
+                onReference={referenceEntry}
                 onRename={requestRename}
                 onToggle={workspace.toggleDirectory}
               />
@@ -252,6 +329,7 @@ export function ProjectBrowserSurface({ active, sessionID, token }: { active: bo
             absolutePath={selectedAbsolutePath}
             dirtyKeys={dirtyKeys}
             discardRequest={discardRequest}
+            reveal={editorReveal}
             selection={workspace.selected}
             sessionID={sessionID}
             tabs={workspace.tabs}
@@ -302,4 +380,8 @@ export function ProjectBrowserSurface({ active, sessionID, token }: { active: bo
       />
     </div>
   );
+}
+
+function projectFileName(path: string) {
+  return path.split(/[\\/]/).filter(Boolean).at(-1) || path;
 }

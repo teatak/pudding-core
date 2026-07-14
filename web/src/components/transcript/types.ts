@@ -1,6 +1,7 @@
-import type { Attachment, ContentPart, LocalFolder, Message } from "@/api/client";
+import type { Attachment, ContentPart, LocalFolder, Message, ProjectReference } from "@/api/client";
 import type { TranscriptDisplaySettings } from "@/lib/appSettings";
 import type { AssistantOverlay, CompactRun, TurnPhaseState } from "@/state/overlayStore";
+import type { UIContextPart } from "@/state/uiContextStore";
 
 export type { TranscriptDisplaySettings };
 
@@ -13,6 +14,7 @@ export type UserInputVM = {
   text: string;
   attachments?: Attachment[];
   localFolders?: LocalFolder[];
+  projectReferences?: ProjectReference[];
   parts?: ContentPart[];
 };
 
@@ -134,6 +136,23 @@ export function localFoldersFromContentParts(parts: ContentPart[]): LocalFolder[
       path: part.path,
       origin: part.origin,
     }));
+}
+
+export function projectReferencesFromContentParts(parts: ContentPart[]): ProjectReference[] {
+  return parts
+    .filter((part) => part.type === "project_reference")
+    .map((part) => ({
+      id: part.id,
+      name: part.name,
+      path: part.path,
+      sourcePath: part.sourcePath,
+      rootID: part.rootID,
+      kind: part.kind,
+    }));
+}
+
+export function uiContextFromContentParts(parts: ContentPart[] | undefined): UIContextPart | undefined {
+  return parts?.find((part): part is UIContextPart => part.type === "ui_context");
 }
 
 export function transcriptPhaseKey(phase: TurnPhaseState) {

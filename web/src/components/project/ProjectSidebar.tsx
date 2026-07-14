@@ -10,7 +10,7 @@ import { layoutStorageKeys } from "@/lib/layoutConstants";
 import { readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
 import { cn } from "@/lib/utils";
 
-const collapsedPanelPixels = 32;
+const collapsedPanelPixels = 40;
 const minimumPanelPixels = 120;
 const maximumRememberedPercent = 85;
 
@@ -29,25 +29,17 @@ export function ProjectSidebar({ files, git, refreshing, onRefresh }: {
   const [gitCollapsed, setGitCollapsed] = useState(false);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-muted/20">
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
-        <FolderTree className="size-4 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate text-xs font-medium">{t("project.browser")}</span>
-        <Button aria-label={t("common.refresh")} disabled={refreshing} size="icon-sm" type="button" variant="ghost" onClick={onRefresh}>
-          {refreshing ? <Spinner /> : <RefreshCw />}
-        </Button>
-      </div>
-      <ResizablePanelGroup
-        className="min-h-0 flex-1"
-        defaultLayout={readPanelLayout(layoutStorageKeys.projectSidebarRatio, { files: 62, git: 38 }, { minPercent: 4, maxPercent: 96 })}
-        id="project-sidebar-layout"
-        orientation="vertical"
-        onLayoutChanged={(layout) => savePanelLayout(layoutStorageKeys.projectSidebarRatio, layout)}
-      >
+    <ResizablePanelGroup
+      className="h-full min-h-0 bg-muted/20"
+      defaultLayout={readPanelLayout(layoutStorageKeys.projectSidebarRatio, { files: 62, git: 38 }, { minPercent: 4, maxPercent: 96 })}
+      id="project-sidebar-layout"
+      orientation="vertical"
+      onLayoutChanged={(layout) => savePanelLayout(layoutStorageKeys.projectSidebarRatio, layout)}
+    >
         <ResizablePanel
           id="files"
           className="min-h-0"
-          collapsedSize="32px"
+          collapsedSize="40px"
           collapsible
           minSize="120px"
           panelRef={filesRef}
@@ -58,7 +50,17 @@ export function ProjectSidebar({ files, git, refreshing, onRefresh }: {
             }
           }}
         >
-          <ProjectSidebarSection collapsed={filesCollapsed} icon={<FolderTree />} label={t("project.browserFiles")} onToggle={() => togglePanel(filesRef.current, gitRef.current, filesCollapsed, filesExpandedSize.current)}>
+          <ProjectSidebarSection
+            action={(
+              <Button aria-label={t("common.refresh")} disabled={refreshing} size="icon-sm" type="button" variant="ghost" onClick={onRefresh}>
+                {refreshing ? <Spinner /> : <RefreshCw />}
+              </Button>
+            )}
+            collapsed={filesCollapsed}
+            icon={<FolderTree />}
+            label={t("project.browserFiles")}
+            onToggle={() => togglePanel(filesRef.current, gitRef.current, filesCollapsed, filesExpandedSize.current)}
+          >
             {files}
           </ProjectSidebarSection>
         </ResizablePanel>
@@ -66,7 +68,7 @@ export function ProjectSidebar({ files, git, refreshing, onRefresh }: {
         <ResizablePanel
           id="git"
           className="min-h-0"
-          collapsedSize="32px"
+          collapsedSize="40px"
           collapsible
           minSize="120px"
           panelRef={gitRef}
@@ -81,12 +83,12 @@ export function ProjectSidebar({ files, git, refreshing, onRefresh }: {
             {git}
           </ProjectSidebarSection>
         </ResizablePanel>
-      </ResizablePanelGroup>
-    </div>
+    </ResizablePanelGroup>
   );
 }
 
-function ProjectSidebarSection({ children, collapsed, icon, label, onToggle }: {
+function ProjectSidebarSection({ action, children, collapsed, icon, label, onToggle }: {
+  action?: ReactNode;
   children: ReactNode;
   collapsed: boolean;
   icon: ReactNode;
@@ -95,12 +97,15 @@ function ProjectSidebarSection({ children, collapsed, icon, label, onToggle }: {
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <button className={cn("flex h-8 w-full shrink-0 items-center gap-1.5 px-2 text-left text-[11px] font-semibold uppercase tracking-wide hover:bg-accent", !collapsed && "border-b")} type="button" onClick={onToggle}>
-        <ChevronDown className={cn("size-3.5 shrink-0 transition-transform", collapsed && "-rotate-90")} />
-        <span className="[&>svg]:size-3.5 [&>svg]:text-muted-foreground">{icon}</span>
-        <span className="min-w-0 flex-1 truncate">{label}</span>
-      </button>
-      {!collapsed ? <div className="min-h-0 flex-1 overflow-auto">{children}</div> : null}
+      <div className="flex h-10 shrink-0 items-center hover:bg-accent">
+        <button className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-left text-xs font-medium" type="button" onClick={onToggle}>
+          <ChevronDown className={cn("size-4 shrink-0 transition-transform", collapsed && "-rotate-90")} />
+          <span className="[&>svg]:size-4 [&>svg]:text-muted-foreground">{icon}</span>
+          <span className="min-w-0 flex-1 truncate">{label}</span>
+        </button>
+        {action ? <div className="mr-2 shrink-0">{action}</div> : null}
+      </div>
+      {!collapsed ? <div className="min-h-0 flex-1 overflow-auto border-t">{children}</div> : null}
     </div>
   );
 }

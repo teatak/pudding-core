@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import { setCanvasOpen } from "@/state/canvasStore";
+import { setWorkspaceOpen } from "@/state/workspaceStore";
 
 export type FilePreview = {
   callID?: string;
@@ -86,10 +86,10 @@ const useFilePreviewStore = create<FilePreviewState>((set) => ({
 
 export function openFilePreview(preview: FilePreviewInput) {
   const previewID = useFilePreviewStore.getState().openPreview(preview);
-  setCanvasOpen(true);
+  setWorkspaceOpen(true);
   window.requestAnimationFrame(() => {
     if (useFilePreviewStore.getState().previews[preview.sessionID]?.some((entry) => entry.id === previewID)) {
-      setCanvasOpen(true);
+      setWorkspaceOpen(true);
     }
   });
 }
