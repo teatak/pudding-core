@@ -82,7 +82,7 @@ export function TranscriptView({
     <div className="relative min-h-0 flex-1 overflow-hidden">
       <div
         ref={setViewportNode}
-        className="pudding-transcript-viewport h-full overflow-y-auto overscroll-none [contain:strict] [overflow-anchor:none]"
+        className="pudding-transcript-viewport h-full overflow-x-hidden overflow-y-auto overscroll-none [contain:strict] [overflow-anchor:none]"
         data-select-all-scope="transcript"
         data-transcript-viewport
       >

@@ -684,7 +684,7 @@ function ThoughtPart({
 
   return (
     <details
-      className="relative text-[13px] leading-[1.5] text-muted-foreground"
+      className="relative min-w-0 max-w-full overflow-hidden text-[13px] leading-[1.5] text-muted-foreground"
       open={canShowContent && open}
       onToggle={handleToggle}
     >
@@ -707,7 +707,7 @@ function ThoughtPart({
         </span>
       </summary>
       {canShowContent && open ? (
-        <div className="ml-[5px] py-1 pl-2">
+        <div className="ml-[5px] min-w-0 max-w-full py-1 pl-2">
           <div
             ref={bodyRef}
             className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words pr-2 text-[13px] leading-6 text-muted-foreground italic"
@@ -735,7 +735,7 @@ function ProcessCompactPart({
   const { handleSummaryClick, handleSummaryKeyDown, handleToggle, open } = useLocalDisclosure(defaultOpen, onOpenChange);
   const label = processCompactLabel(hiddenParts, t);
   return (
-    <details className="relative text-[13px] leading-[1.5] text-muted-foreground/70" open={open} onToggle={handleToggle}>
+    <details className="relative min-w-0 max-w-full overflow-hidden text-[13px] leading-[1.5] text-muted-foreground/70" open={open} onToggle={handleToggle}>
       <summary
         className="inline-grid h-6 cursor-default list-none grid-cols-[1rem_auto] items-center gap-1 pr-1 outline-none hover:text-muted-foreground [&::-webkit-details-marker]:hidden"
         onClick={handleSummaryClick}
@@ -749,7 +749,7 @@ function ProcessCompactPart({
           </span>
         </span>
       </summary>
-      {open ? <div>{hiddenParts.map(renderPart)}</div> : null}
+      {open ? <div className="min-w-0 max-w-full">{hiddenParts.map(renderPart)}</div> : null}
     </details>
   );
 }
@@ -959,7 +959,7 @@ function ToolUsePart({
   }
   return (
     <details
-      className={cn("relative text-[13px] leading-[1.5]", toneClass)}
+      className={cn("relative min-w-0 max-w-full overflow-hidden text-[13px] leading-[1.5]", toneClass)}
       open={open}
       onToggle={handleToggle}
     >
@@ -978,10 +978,10 @@ function ToolUsePart({
           </span>
         </span>
       </summary>
-      <div className="ml-[5px] py-1 pl-2">
-        <div className="grid gap-2">
+      <div className="ml-[5px] min-w-0 max-w-full py-1 pl-2">
+        <div className="grid min-w-0 max-w-full gap-2">
           {codeTool ? (
-            <div className={cn(!terminalTool && "rounded-md border border-border/50 bg-muted/20 p-2")}>
+            <div className={cn("min-w-0 max-w-full overflow-hidden", !terminalTool && "rounded-md border border-border/50 bg-muted/20 p-2")}>
               <CodeToolDetails
                 args={part.argsText || part.args}
                 callID={part.id}
@@ -1977,7 +1977,7 @@ function RawToolDataCard({ args, result, toolName }: { args: string; result: str
   const copyText = rawToolCopyText(toolName, args, result, t);
   return (
     <details
-      className="group/raw-data overflow-hidden rounded-md border border-border/50 bg-muted/20 text-[11px] text-muted-foreground"
+      className="group/raw-data min-w-0 max-w-full overflow-hidden rounded-md border border-border/50 bg-muted/20 text-[11px] text-muted-foreground"
       open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
@@ -1988,7 +1988,7 @@ function RawToolDataCard({ args, result, toolName }: { args: string; result: str
         <ToolHoverCopyButton className="group-hover/raw-data:opacity-100" text={copyText} />
       </summary>
       {open ? (
-        <div className="border-t border-border/50 p-2">
+        <div className="min-w-0 max-w-full border-t border-border/50 p-2">
           {toolName ? <ToolNameLine name={toolName} /> : null}
           {args ? <ToolDetailBlock label={t("transcript.toolArgs")} text={args} /> : null}
           {result ? <ToolDetailBlock label={t("transcript.toolResult")} text={result} /> : null}
@@ -2000,9 +2000,9 @@ function RawToolDataCard({ args, result, toolName }: { args: string; result: str
 
 function ToolDetailBlock({ label, text }: { label: string; text: string }) {
   return (
-    <div className="mb-2 last:mb-0">
+    <div className="mb-2 min-w-0 max-w-full last:mb-0">
       <div className="mb-1 text-[11px] font-medium text-muted-foreground/80">{label}</div>
-      <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-muted-foreground">
+      <pre className="block max-h-56 w-full min-w-0 max-w-full overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-muted-foreground">
         {text}
       </pre>
     </div>

@@ -57,9 +57,9 @@ export function GitCommitDiffDialog({
             {approval.truncated ? <span className="text-warning">{t("transcript.codeTruncated")}</span> : null}
           </div>
         ) : null}
-        <div className="min-h-0 overflow-y-auto px-4 py-3">
+        <div className="min-h-0 min-w-0 overflow-y-auto px-4 py-3">
           {approval ? (
-            <div className="grid gap-3">
+            <div className="grid min-w-0 gap-3">
               <div className="grid gap-0.5">
                 {approval.files.map((file) => (
                   <div key={file.path} className="grid min-h-7 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border/40 text-[11px] last:border-b-0">
@@ -71,7 +71,7 @@ export function GitCommitDiffDialog({
                   </div>
                 ))}
               </div>
-              <pre className="max-h-[520px] overflow-auto whitespace-pre border-t border-border/60 pt-3 font-mono text-[11px] leading-4 text-foreground/85">{approval.diff}</pre>
+              <pre className="block max-h-[520px] w-full min-w-0 max-w-full overflow-auto whitespace-pre border-t border-border/60 pt-3 font-mono text-[11px] leading-4 text-foreground/85">{approval.diff}</pre>
             </div>
           ) : null}
         </div>

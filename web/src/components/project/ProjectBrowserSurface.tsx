@@ -268,16 +268,13 @@ export function ProjectBrowserSurface({
       toast.error(t("project.browserPathCopyFailed"));
       return;
     }
-    const added = addProjectReferenceToSessionDraft(sessionID, {
+    addProjectReferenceToSessionDraft(sessionID, {
       name: target.name,
       path: target.path,
       sourcePath: projectAbsolutePath(root.path, target.path),
       rootID: target.rootID,
       kind: target.type,
     });
-    if (added) {
-      toast.success(t("project.browserReferenced"), { description: target.path });
-    }
   };
 
   const namePending = (createMutation.isPending && createMutation.variables?.targetSessionID === sessionID)

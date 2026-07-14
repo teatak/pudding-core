@@ -209,7 +209,7 @@ export function CodeToolDetails({
   } else {
     body = <FileDetails callID={callID} input={input} name={name} output={output} locale={locale} sessionID={sessionID} t={t} />;
   }
-  return <>{body}</>;
+  return <div className="min-w-0 max-w-full overflow-hidden">{body}</div>;
 }
 
 function BackgroundProcessDetails({ input, output, t }: { input: UnknownRecord | null; output: UnknownRecord | null; t: Translator }) {
@@ -521,7 +521,7 @@ function ProjectInspectPath({ label, path }: { label: string; path: string }) {
 
 function ProjectInspectList({ items, label, mono = false }: { items: string[]; label: string; mono?: boolean }) {
   return (
-    <section className="border-t border-border/50 pt-2">
+    <section className="min-w-0 max-w-full border-t border-border/50 pt-2">
       <DetailLabel>{label}</DetailLabel>
       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-foreground/85">
         {items.slice(0, 50).map((item, index) => (
@@ -1273,7 +1273,7 @@ function CodeOutput({ destructive, label, text, truncated }: { destructive?: boo
         <DetailLabel>{label}</DetailLabel>
         {truncated ? <span className="text-[10px] text-warning">{t("transcript.codeTruncated")}</span> : null}
       </div>
-      <pre className={cn("max-h-80 overflow-auto whitespace-pre font-mono text-[11px] leading-4 text-foreground/80", destructive && "text-destructive/90")}>{text}</pre>
+      <pre className={cn("block max-h-80 w-full min-w-0 max-w-full overflow-auto whitespace-pre font-mono text-[11px] leading-4 text-foreground/80", destructive && "text-destructive/90")}>{text}</pre>
     </section>
   );
 }
