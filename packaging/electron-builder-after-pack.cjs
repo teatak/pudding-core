@@ -24,9 +24,10 @@ module.exports = async function afterPack(context) {
 
   fs.mkdirSync(path.dirname(daemonPath), { recursive: true });
   fs.copyFileSync(path.join(runtimeRoot, "puddingd"), daemonPath);
-  fs.cpSync(path.join(runtimeRoot, "language-servers"), languageServersPath, {
-    recursive: true,
-  });
+  copyDirectoryWithPortableSymlinks(
+    path.join(runtimeRoot, "language-servers"),
+    languageServersPath,
+  );
   setMinimumSystemVersion(infoPlistPath, arch);
 
   execFileSync("bash", [
@@ -62,6 +63,52 @@ function setMinimumSystemVersion(infoPlistPath, arch) {
     minimumVersion,
     infoPlistPath,
   ]);
+}
+
+function copyDirectoryWithPortableSymlinks(sourceRoot, destinationRoot) {
+  fs.cpSync(sourceRoot, destinationRoot, {
+    recursive: true,
+    verbatimSymlinks: true,
+  });
+  const sourceBase = path.resolve(sourceRoot);
+  const destinationBase = path.resolve(destinationRoot);
+  const pending = [destinationBase];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    const stat = fs.lstatSync(current);
+    if (stat.isSymbolicLink()) {
+      const target = fs.readlinkSync(current);
+      if (!path.isAbsolute(target)) {
+        continue;
+      }
+      const sourceTarget = path.resolve(target);
+      const relativeTarget = path.relative(sourceBase, sourceTarget);
+      if (!isPathInside(relativeTarget)) {
+        throw new Error(`runtime symlink points outside its source directory: ${current} -> ${target}`);
+      }
+      const copiedTarget = path.join(destinationBase, relativeTarget);
+      if (!fs.existsSync(copiedTarget)) {
+        throw new Error(`runtime symlink target was not copied: ${current} -> ${target}`);
+      }
+      const portableTarget = path.relative(path.dirname(current), copiedTarget) || ".";
+      fs.rmSync(current);
+      fs.symlinkSync(portableTarget, current);
+      continue;
+    }
+    if (stat.isDirectory()) {
+      for (const entry of fs.readdirSync(current)) {
+        pending.push(path.join(current, entry));
+      }
+    }
+  }
+}
+
+function isPathInside(relativePath) {
+  return relativePath === "" || (
+    relativePath !== ".." &&
+    !relativePath.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relativePath)
+  );
 }
 
 function removeUnusedPrivacyUsageDescriptions(infoPlistPath) {
@@ -101,5 +148,6 @@ function makeBundleOwnerWritable(rootPath) {
 }
 
 module.exports.makeBundleOwnerWritable = makeBundleOwnerWritable;
+module.exports.copyDirectoryWithPortableSymlinks = copyDirectoryWithPortableSymlinks;
 module.exports.removeUnusedPrivacyUsageDescriptions = removeUnusedPrivacyUsageDescriptions;
 module.exports.setMinimumSystemVersion = setMinimumSystemVersion;

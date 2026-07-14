@@ -6,10 +6,53 @@ const path = require("node:path");
 const test = require("node:test");
 
 const {
+  copyDirectoryWithPortableSymlinks,
   makeBundleOwnerWritable,
   removeUnusedPrivacyUsageDescriptions,
   setMinimumSystemVersion,
 } = require("../../packaging/electron-builder-after-pack.cjs");
+
+test("packaging rewrites copied runtime symlinks to stay inside the app", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pudding-packaging-symlinks-"));
+  try {
+    const source = path.join(root, "runtime", "language-servers");
+    const target = path.join(source, "typescript", "node_modules", "typescript", "bin", "tsc");
+    const link = path.join(source, "typescript", "node_modules", ".bin", "tsc");
+    const destination = path.join(root, "Pudding.app", "Contents", "Resources", "app", "language-servers");
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.mkdirSync(path.dirname(link), { recursive: true });
+    fs.writeFileSync(target, "#!/bin/sh\n");
+    fs.symlinkSync(target, link);
+
+    copyDirectoryWithPortableSymlinks(source, destination);
+
+    const copiedLink = path.join(destination, path.relative(source, link));
+    const copiedTarget = path.join(destination, path.relative(source, target));
+    assert.equal(path.isAbsolute(fs.readlinkSync(copiedLink)), false);
+    assert.equal(fs.realpathSync(copiedLink), fs.realpathSync(copiedTarget));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("packaging rejects runtime symlinks that point outside their source", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pudding-packaging-external-symlink-"));
+  try {
+    const source = path.join(root, "runtime");
+    const destination = path.join(root, "Pudding.app", "runtime");
+    const external = path.join(root, "external");
+    fs.mkdirSync(source);
+    fs.writeFileSync(external, "external");
+    fs.symlinkSync(external, path.join(source, "external-link"));
+
+    assert.throws(
+      () => copyDirectoryWithPortableSymlinks(source, destination),
+      /runtime symlink points outside its source directory/,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("packaging makes bundled regular files owner-writable without replacing symlinks", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "pudding-packaging-permissions-"));

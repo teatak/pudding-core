@@ -2,7 +2,7 @@
 
 日期：2026-07-14  
 对比基线：`v0.1.3`（`ee6cfa09`）  
-审查版本：`49c92742` 加当前未提交 UI 改动
+审查版本：`91f25b90` 加打包符号链接修复
 
 ## 发版结论
 
@@ -16,8 +16,8 @@ UI 改动，并让双架构签名包通过现有发版流水线。
 - 会话提交新增项目引用和当前 UI 上下文。
 - 会话 API 返回已加载 App，并支持从单个会话卸载 App。
 - macOS 新增 Apple Silicon 与 Intel 两套独立安装包。
+- 打包时将 runtime 内部绝对符号链接转换为 App 内相对链接，避免签名越出 bundle。
 - 简化 DMG 背景，调整会话操作和删除操作样式。
-- 当前未提交改动移除了项目引用成功提示，并修复工具输出横向溢出。
 
 ## 影响范围
 
@@ -66,7 +66,7 @@ UI 改动，并让双架构签名包通过现有发版流水线。
 ## 已完成验证
 
 - `go test -tags "sqlite_fts5 webrtcaec" ./...`
-- `npm run test:electron`：74 项通过
+- `npm run test:electron`：76 项通过
 - `web/` 下执行 `npm run build`
 - `git diff --check`
 - 对比 `v0.1.2`、`v0.1.3` 的 schema 指纹
