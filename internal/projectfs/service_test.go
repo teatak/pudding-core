@@ -157,6 +157,36 @@ func TestCopyAndMoveProjectEntries(t *testing.T) {
 	}
 }
 
+func TestCrossRootMoveKeepsCompletedCopyWhenSourceRemovalFails(t *testing.T) {
+	sourceRoot := t.TempDir()
+	targetRoot := t.TempDir()
+	source := filepath.Join(sourceRoot, "guide.md")
+	target := filepath.Join(targetRoot, "guide.md")
+	if err := os.WriteFile(source, []byte("guide"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removeErr := errors.New("source removal failed")
+	err = moveAcrossRoots(source, target, info, func(path string) error {
+		if path != source {
+			t.Fatalf("remove source path = %q", path)
+		}
+		return removeErr
+	})
+	if !errors.Is(err, removeErr) {
+		t.Fatalf("move error = %v", err)
+	}
+	for _, path := range []string{source, target} {
+		content, readErr := os.ReadFile(path)
+		if readErr != nil || string(content) != "guide" {
+			t.Fatalf("%s = %q, %v", path, content, readErr)
+		}
+	}
+}
+
 func TestCopyAndMoveRejectUnsafeTargets(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "docs", "nested"), 0o755); err != nil {

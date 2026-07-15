@@ -63,7 +63,8 @@ type GitChangeGroup = "conflicted" | "staged" | "working";
 type GitPathMutation = { paths: string[]; rootID: string };
 type GitDiscardRequest = { files: ProjectGitStatusFile[]; rootID: string };
 
-export function ProjectGitSection({ repositories, sessionID, token, onOpenDiff }: {
+export function ProjectGitSection({ dirtyRootIDs, repositories, sessionID, token, onOpenDiff }: {
+  dirtyRootIDs: ReadonlySet<string>;
   repositories: ProjectGitRepositoryState[];
   sessionID: string;
   token: string;
@@ -172,15 +173,23 @@ export function ProjectGitSection({ repositories, sessionID, token, onOpenDiff }
           if (repository.error) {
             return (
               <div key={repository.root.id}>
-                <ProjectGitRepositoryHeader disabled={repositoryPending} repository={repository} sessionID={sessionID} token={token} onStatus={applyStatus} />
+                <ProjectGitRepositoryHeader disabled={repositoryPending} hasUnsavedChanges={dirtyRootIDs.has(repository.root.id)} repository={repository} sessionID={sessionID} token={token} onStatus={applyStatus} />
                 <ProjectGitMessage>{projectGitReadError(repository.error, t)}</ProjectGitMessage>
+              </div>
+            );
+          }
+          if (repository.loading && !status) {
+            return (
+              <div key={repository.root.id}>
+                <ProjectGitRepositoryHeader disabled={repositoryPending} hasUnsavedChanges={dirtyRootIDs.has(repository.root.id)} repository={repository} sessionID={sessionID} token={token} onStatus={applyStatus} />
+                <ProjectGitMessage><Spinner />{t("common.loading")}</ProjectGitMessage>
               </div>
             );
           }
           if (!status?.available) {
             return (
               <div key={repository.root.id} className="pb-2">
-                <ProjectGitRepositoryHeader disabled={repositoryPending} repository={repository} sessionID={sessionID} token={token} onStatus={applyStatus} />
+                <ProjectGitRepositoryHeader disabled={repositoryPending} hasUnsavedChanges={dirtyRootIDs.has(repository.root.id)} repository={repository} sessionID={sessionID} token={token} onStatus={applyStatus} />
                 <div className="space-y-2 px-3 py-3">
                   <p className="text-[11px] text-muted-foreground">{t("project.gitUnavailable")}</p>
                   <Button
@@ -211,7 +220,7 @@ export function ProjectGitSection({ repositories, sessionID, token, onOpenDiff }
           };
           return (
             <div key={repository.root.id} className="pb-1">
-              <ProjectGitRepositoryHeader disabled={repositoryPending} repository={repository} sessionID={sessionID} token={token} onStatus={applyStatus} />
+              <ProjectGitRepositoryHeader disabled={repositoryPending} hasUnsavedChanges={dirtyRootIDs.has(repository.root.id)} repository={repository} sessionID={sessionID} token={token} onStatus={applyStatus} />
               <form
                 className="space-y-1.5 border-y px-2 py-2"
                 onSubmit={(event) => {
@@ -337,8 +346,9 @@ export function ProjectGitSection({ repositories, sessionID, token, onOpenDiff }
   );
 }
 
-function ProjectGitRepositoryHeader({ disabled, repository, sessionID, token, onStatus }: {
+function ProjectGitRepositoryHeader({ disabled, hasUnsavedChanges, repository, sessionID, token, onStatus }: {
   disabled: boolean;
+  hasUnsavedChanges: boolean;
   repository: ProjectGitRepositoryState;
   sessionID: string;
   token: string;
@@ -355,7 +365,7 @@ function ProjectGitRepositoryHeader({ disabled, repository, sessionID, token, on
           {status.detached || !status.branch ? (
             <span className="max-w-28 truncate text-[11px] text-muted-foreground">{status.head || t("project.gitDetached")}</span>
           ) : (
-            <ProjectGitBranchPicker branch={status.branch} disabled={disabled} rootID={repository.root.id} sessionID={sessionID} token={token} onStatus={onStatus} />
+            <ProjectGitBranchPicker branch={status.branch} disabled={disabled} hasUnsavedChanges={hasUnsavedChanges} rootID={repository.root.id} sessionID={sessionID} token={token} onStatus={onStatus} />
           )}
           {status.ahead ? <span className="text-[10px] text-muted-foreground">↑{status.ahead}</span> : null}
           {status.behind ? <span className="text-[10px] text-muted-foreground">↓{status.behind}</span> : null}
@@ -380,7 +390,7 @@ function ProjectGitChangeGroup({ files, group, label, pending, rootID, onDiscard
   const [open, setOpen] = useState(true);
   if (files.length === 0) return null;
   const staged = group === "staged";
-  const paths = files.map((file) => file.path);
+  const paths = projectGitMutationPaths(files);
   return (
     <div>
       <div className="group/git-heading flex h-7 items-center hover:bg-accent">
@@ -449,7 +459,7 @@ function ProjectGitChangeGroup({ files, group, label, pending, rootID, onDiscard
                     title={staged ? t("project.gitUnstage") : t("project.gitStage")}
                     type="button"
                     variant="ghost"
-                    onClick={() => staged ? onUnstage([file.path]) : onStage([file.path])}
+                    onClick={() => staged ? onUnstage(projectGitMutationPaths([file])) : onStage(projectGitMutationPaths([file]))}
                   >
                     {staged ? <Minus /> : <Plus />}
                   </Button>
@@ -474,7 +484,7 @@ function ProjectGitChangeGroup({ files, group, label, pending, rootID, onDiscard
               </div>
             </ContextMenuTrigger>
             <AppContextMenuContent>
-              <AppContextMenuItem disabled={pending} onSelect={() => staged ? onUnstage([file.path]) : onStage([file.path])}>
+              <AppContextMenuItem disabled={pending} onSelect={() => staged ? onUnstage(projectGitMutationPaths([file])) : onStage(projectGitMutationPaths([file]))}>
                 {staged ? <Minus /> : <Plus />}
                 {staged ? t("project.gitUnstage") : t("project.gitStage")}
               </AppContextMenuItem>
@@ -493,6 +503,12 @@ function ProjectGitChangeGroup({ files, group, label, pending, rootID, onDiscard
       }) : null}
     </div>
   );
+}
+
+function projectGitMutationPaths(files: ProjectGitStatusFile[]) {
+  return Array.from(new Set(files.flatMap((file) => (
+    file.originalPath ? [file.path, file.originalPath] : [file.path]
+  ))));
 }
 
 function GitDiscardDialog({ pending, request, onCancel, onConfirm }: {

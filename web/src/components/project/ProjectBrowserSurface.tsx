@@ -73,6 +73,9 @@ export function ProjectBrowserSurface({
   const [resourceClipboard, setResourceClipboard] = useState<ResourceClipboard>();
   const [dragMoveRequest, setDragMoveRequest] = useState<{ destination: ProjectEntryTarget; source: ProjectEntryTarget }>();
   const dirtyKeys = useMemo(() => new Set(dirtyBySession[sessionID] || []), [dirtyBySession, sessionID]);
+  const dirtyRootIDs = useMemo(() => new Set(workspace.tabs.flatMap((tab) => (
+    !isProjectGitDiffTab(tab) && dirtyKeys.has(projectSelectionKey(tab)) ? [tab.rootID] : []
+  ))), [dirtyKeys, workspace.tabs]);
   const rootsQuery = useQuery({
     enabled: (active || Boolean(fileReveal)) && Boolean(sessionID && token),
     queryKey: queryKeys.projectBrowserRoots(sessionID),
@@ -466,6 +469,7 @@ export function ProjectBrowserSurface({
             )}
             git={(
               <ProjectGitSection
+                dirtyRootIDs={dirtyRootIDs}
                 repositories={gitRepositories}
                 sessionID={sessionID}
                 token={token}

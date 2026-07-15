@@ -52,6 +52,7 @@ const branchSuccessMessage = {
 export function ProjectGitBranchPicker({
   branch,
   disabled,
+  hasUnsavedChanges,
   rootID,
   sessionID,
   token,
@@ -59,6 +60,7 @@ export function ProjectGitBranchPicker({
 }: {
   branch: string;
   disabled: boolean;
+  hasUnsavedChanges: boolean;
   rootID: string;
   sessionID: string;
   token: string;
@@ -70,6 +72,7 @@ export function ProjectGitBranchPicker({
   const [search, setSearch] = useState("");
   const [dialog, setDialog] = useState<BranchDialog>();
   const [deleteBranch, setDeleteBranch] = useState<string>();
+  const [switchBranch, setSwitchBranch] = useState<string>();
   const branchesQuery = useQuery({
     enabled: open,
     queryKey: queryKeys.projectGitBranches(sessionID, rootID),
@@ -88,6 +91,7 @@ export function ProjectGitBranchPicker({
       void queryClient.invalidateQueries({ queryKey: queryKeys.projectGitBranches(sessionID, rootID) });
       setDialog(undefined);
       setDeleteBranch(undefined);
+      setSwitchBranch(undefined);
       setOpen(false);
       toast.success(t(branchSuccessMessage[variables.mode]));
     },
@@ -99,6 +103,14 @@ export function ProjectGitBranchPicker({
   }, [branchesQuery.data?.branches, search]);
   const local = filtered.filter((candidate) => !candidate.remote);
   const remote = filtered.filter((candidate) => candidate.remote);
+  const requestSwitch = (name: string) => {
+    if (hasUnsavedChanges) {
+      setSwitchBranch(name);
+      setOpen(false);
+      return;
+    }
+    mutation.mutate({ mode: "switch", name });
+  };
 
   return (
     <>
@@ -127,8 +139,8 @@ export function ProjectGitBranchPicker({
               <div className="px-2 py-3 text-xs text-muted-foreground">{projectGitReadError(branchesQuery.error, t)}</div>
             ) : (
               <>
-                <BranchGroup label={t("project.gitLocalBranches")} branches={local} pending={mutation.isPending} onDelete={setDeleteBranch} onSwitch={(name) => mutation.mutate({ mode: "switch", name })} />
-                <BranchGroup label={t("project.gitRemoteBranches")} branches={remote} pending={mutation.isPending} onDelete={setDeleteBranch} onSwitch={(name) => mutation.mutate({ mode: "switch", name })} />
+                <BranchGroup label={t("project.gitLocalBranches")} branches={local} pending={mutation.isPending} onDelete={setDeleteBranch} onSwitch={requestSwitch} />
+                <BranchGroup label={t("project.gitRemoteBranches")} branches={remote} pending={mutation.isPending} onDelete={setDeleteBranch} onSwitch={requestSwitch} />
               </>
             )}
           </div>
@@ -153,6 +165,20 @@ export function ProjectGitBranchPicker({
             <AlertDialogCancel disabled={mutation.isPending}>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction disabled={mutation.isPending} variant="destructive" onClick={() => deleteBranch && mutation.mutate({ mode: "delete", name: deleteBranch })}>
               {mutation.isPending ? <Spinner /> : null}{t("project.gitDeleteBranch")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={Boolean(switchBranch)} onOpenChange={(next) => !next && !mutation.isPending && setSwitchBranch(undefined)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("project.gitSwitchBranchUnsavedTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("project.gitSwitchBranchUnsavedDescription").replace("{name}", switchBranch || "")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={mutation.isPending}>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction disabled={mutation.isPending} onClick={() => switchBranch && mutation.mutate({ mode: "switch", name: switchBranch })}>
+              {mutation.isPending ? <Spinner /> : null}{t("project.gitSwitchBranchUnsavedConfirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -195,15 +195,20 @@ func Move(sourceRoot, sourcePath, targetRoot, targetParentPath, requestedName st
 			return Entry{}, err
 		}
 	} else {
-		if err := copyEntryNoReplace(source, target, info); err != nil {
-			return Entry{}, err
-		}
-		if err := os.RemoveAll(source); err != nil {
-			_ = os.RemoveAll(target)
+		if err := moveAcrossRoots(source, target, info, os.RemoveAll); err != nil {
 			return Entry{}, err
 		}
 	}
 	return Entry{Name: name, Path: joinRelative(parentRel, name), Type: entryType}, nil
+}
+
+func moveAcrossRoots(source, target string, info os.FileInfo, removeSource func(string) error) error {
+	if err := copyEntryNoReplace(source, target, info); err != nil {
+		return err
+	}
+	// Removing a directory can fail after deleting only part of its contents.
+	// Keep the completed destination as a recovery copy instead of rolling it back.
+	return removeSource(source)
 }
 
 func Remove(root, path string) error {
