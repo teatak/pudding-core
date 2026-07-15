@@ -28,6 +28,8 @@ import {
   projectEntryMutation,
   projectFile,
   projectGitDiff,
+  projectGitBranches,
+  projectGitBranchRequest,
   projectGitCommitRequest,
   projectGitPathsRequest,
   projectGitRootRequest,
@@ -134,6 +136,8 @@ import {
   type ProjectEntryMutation,
   type ProjectFile,
   type ProjectGitDiff,
+  type ProjectGitBranch,
+  type ProjectGitBranches,
   type ProjectGitStatus,
   type ProjectGitStatusFile,
   type ProjectReference,
@@ -220,6 +224,8 @@ export type {
   ProjectBrowserRoot,
   ProjectEntryMutation,
   ProjectFile,
+  ProjectGitBranch,
+  ProjectGitBranches,
   ProjectGitDiff,
   ProjectGitStatus,
   ProjectGitStatusFile,
@@ -390,6 +396,15 @@ export function getProjectGitDiff(
   );
 }
 
+export function getProjectGitBranches(token: string, sessionID: string, rootID: string): Promise<ProjectGitBranches> {
+  const query = new URLSearchParams({ rootID });
+  return request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/project/git/branches?${query.toString()}`,
+    projectGitBranches,
+  );
+}
+
 export function initializeProjectGit(token: string, sessionID: string, rootID: string): Promise<ProjectGitStatus> {
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/project/git/init`, projectGitStatus, {
     method: "POST",
@@ -422,10 +437,66 @@ function mutateProjectGitPaths(
   });
 }
 
-export function commitProjectGit(token: string, sessionID: string, rootID: string, message: string): Promise<ProjectGitStatus> {
+export function commitProjectGit(
+  token: string,
+  sessionID: string,
+  rootID: string,
+  message: string,
+  stageAll = false,
+): Promise<ProjectGitStatus> {
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/project/git/commit`, projectGitStatus, {
     method: "POST",
-    body: JSON.stringify(projectGitCommitRequest.parse({ message, rootID })),
+    body: JSON.stringify(projectGitCommitRequest.parse({ message, rootID, stageAll })),
+  });
+}
+
+export function syncProjectGit(token: string, sessionID: string, rootID: string): Promise<ProjectGitStatus> {
+  return mutateProjectGitRoot(token, sessionID, "sync", rootID);
+}
+
+export function publishProjectGit(token: string, sessionID: string, rootID: string): Promise<ProjectGitStatus> {
+  return mutateProjectGitRoot(token, sessionID, "publish", rootID);
+}
+
+function mutateProjectGitRoot(
+  token: string,
+  sessionID: string,
+  operation: "publish" | "sync",
+  rootID: string,
+): Promise<ProjectGitStatus> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/project/git/${operation}`, projectGitStatus, {
+    method: "POST",
+    body: JSON.stringify(projectGitRootRequest.parse({ rootID })),
+  });
+}
+
+export function createProjectGitBranch(token: string, sessionID: string, rootID: string, name: string): Promise<ProjectGitStatus> {
+  return mutateProjectGitBranch(token, sessionID, "", rootID, name);
+}
+
+export function switchProjectGitBranch(token: string, sessionID: string, rootID: string, name: string): Promise<ProjectGitStatus> {
+  return mutateProjectGitBranch(token, sessionID, "switch", rootID, name);
+}
+
+export function renameProjectGitBranch(token: string, sessionID: string, rootID: string, name: string): Promise<ProjectGitStatus> {
+  return mutateProjectGitBranch(token, sessionID, "rename", rootID, name);
+}
+
+export function deleteProjectGitBranch(token: string, sessionID: string, rootID: string, name: string): Promise<ProjectGitStatus> {
+  return mutateProjectGitBranch(token, sessionID, "delete", rootID, name);
+}
+
+function mutateProjectGitBranch(
+  token: string,
+  sessionID: string,
+  operation: "" | "delete" | "rename" | "switch",
+  rootID: string,
+  name: string,
+): Promise<ProjectGitStatus> {
+  const suffix = operation ? `/${operation}` : "";
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/project/git/branches${suffix}`, projectGitStatus, {
+    method: "POST",
+    body: JSON.stringify(projectGitBranchRequest.parse({ name, rootID })),
   });
 }
 

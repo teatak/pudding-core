@@ -27,8 +27,18 @@ export function projectBrowserError(error: unknown, t: (key: string) => string) 
       "git_discard_failed",
       "git_init_failed",
       "git_no_staged_changes",
+      "git_no_upstream",
+      "git_publish_failed",
+      "git_remote_unavailable",
       "git_stage_failed",
+      "git_sync_failed",
       "git_unstage_failed",
+      "git_branch_create_failed",
+      "git_branch_delete_failed",
+      "git_branch_list_failed",
+      "git_branch_rename_failed",
+      "git_branch_switch_failed",
+      "git_invalid_branch",
     ].includes(error.code)) {
       return t("project.gitOperationFailed");
     }
@@ -37,4 +47,18 @@ export function projectBrowserError(error: unknown, t: (key: string) => string) 
     }
   }
   return t("project.browserLoadFailed");
+}
+
+export function projectGitReadError(error: unknown, t: (key: string) => string) {
+  if (error instanceof APIError && error.code === "session_has_no_project") {
+    return t("project.browserNoProject");
+  }
+  return t("project.gitLoadFailed");
+}
+
+export function projectGitOperationError(error: unknown, t: (key: string) => string) {
+  if (error instanceof APIError && error.code === "session_has_no_project") {
+    return t("project.browserNoProject");
+  }
+  return t("project.gitOperationFailed");
 }

@@ -8,7 +8,7 @@ import { queryKeys } from "@/api/queryKeys";
 import { Spinner } from "@/components/Spinner";
 import { useI18n } from "@/i18n";
 
-import { projectBrowserError } from "../projectErrors";
+import { projectGitReadError } from "../projectErrors";
 import type { ProjectGitDiffTab } from "../types";
 
 export function ProjectGitDiffViewer({ active, selection, sessionID, token }: {
@@ -41,7 +41,7 @@ export function ProjectGitDiffViewer({ active, selection, sessionID, token }: {
         {diffQuery.isLoading ? (
           <ProjectGitDiffStatus><Spinner className="size-6" />{t("common.loading")}</ProjectGitDiffStatus>
         ) : diffQuery.isError ? (
-          <ProjectGitDiffStatus>{projectBrowserError(diffQuery.error, t)}</ProjectGitDiffStatus>
+          <ProjectGitDiffStatus>{projectGitReadError(diffQuery.error, t)}</ProjectGitDiffStatus>
         ) : diff?.binary ? (
           <ProjectGitDiffStatus>{t("project.gitBinary")}</ProjectGitDiffStatus>
         ) : diff?.tooLarge ? (

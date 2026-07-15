@@ -7,6 +7,7 @@ export const queryKeys = {
   projectTree: (sessionID: string, rootID: string, path: string) => ["session", sessionID, "project", "tree", rootID, path] as const,
   projectFile: (sessionID: string, rootID: string, path: string) => ["session", sessionID, "project", "file", rootID, path] as const,
   projectGitStatus: (sessionID: string, rootID: string) => ["session", sessionID, "project", "git", "status", rootID] as const,
+  projectGitBranches: (sessionID: string, rootID: string) => ["session", sessionID, "project", "git", "branches", rootID] as const,
   projectGitDiff: (sessionID: string, rootID: string, path: string, staged: boolean) => ["session", sessionID, "project", "git", "diff", rootID, path, staged] as const,
   session: (sessionID: string) => ["session", sessionID] as const,
   sessionUsage: (sessionID: string) => ["session", sessionID, "usage"] as const,

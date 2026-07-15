@@ -1,11 +1,14 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  ChevronDown,
   ChevronRight,
+  CloudUpload,
   GitBranch,
   GitCommitHorizontal,
   Minus,
   Plus,
-  RotateCcw,
+  RefreshCw,
+  Undo2,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -14,13 +17,21 @@ import {
   commitProjectGit,
   discardProjectGit,
   initializeProjectGit,
+  publishProjectGit,
   stageProjectGit,
+  syncProjectGit,
   unstageProjectGit,
   type ProjectGitStatus,
   type ProjectGitStatusFile,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
-import { AppContextMenuContent, AppContextMenuItem, AppContextMenuSeparator } from "@/components/AppMenu";
+import {
+  AppContextMenuContent,
+  AppContextMenuItem,
+  AppContextMenuSeparator,
+  AppDropdownMenuContent,
+  AppDropdownMenuItem,
+} from "@/components/AppMenu";
 import { Spinner } from "@/components/Spinner";
 import {
   AlertDialog,
@@ -33,15 +44,19 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
+import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 import { projectFileName } from "../projectPaths";
+import { ProjectFileTypeIcon } from "../ProjectFileTypeIcon";
 import type { ProjectGitDiffSelection } from "../types";
-import { projectBrowserError } from "../projectErrors";
+import { projectGitOperationError, projectGitReadError } from "../projectErrors";
 import { isProjectGitStaged, isProjectGitWorking, projectGitStatusLabel, projectGitStatusTone } from "./gitStatus";
+import { ProjectGitBranchPicker } from "./ProjectGitBranchPicker";
 import type { ProjectGitRepositoryState } from "./types";
 
 type GitChangeGroup = "conflicted" | "staged" | "working";
@@ -75,17 +90,17 @@ export function ProjectGitSection({ repositories, sessionID, token, onOpenDiff }
       applyStatus(status);
       toast.success(t("project.gitInitialized"));
     },
-    onError: (error) => toast.error(projectBrowserError(error, t)),
+    onError: (error) => toast.error(projectGitOperationError(error, t)),
   });
   const stageMutation = useMutation({
     mutationFn: (request: GitPathMutation) => runGitPathMutation(request.paths, (paths) => stageProjectGit(token, sessionID, request.rootID, paths)),
     onSuccess: (status) => applyStatus(status),
-    onError: (error) => toast.error(projectBrowserError(error, t)),
+    onError: (error) => toast.error(projectGitOperationError(error, t)),
   });
   const unstageMutation = useMutation({
     mutationFn: (request: GitPathMutation) => runGitPathMutation(request.paths, (paths) => unstageProjectGit(token, sessionID, request.rootID, paths)),
     onSuccess: (status) => applyStatus(status),
-    onError: (error) => toast.error(projectBrowserError(error, t)),
+    onError: (error) => toast.error(projectGitOperationError(error, t)),
   });
   const discardMutation = useMutation({
     mutationFn: (request: GitPathMutation) => runGitPathMutation(request.paths, (paths) => discardProjectGit(token, sessionID, request.rootID, paths)),
@@ -94,16 +109,39 @@ export function ProjectGitSection({ repositories, sessionID, token, onOpenDiff }
       setDiscardRequest(undefined);
       toast.success(t("project.gitDiscarded"));
     },
-    onError: (error) => toast.error(projectBrowserError(error, t)),
+    onError: (error) => toast.error(projectGitOperationError(error, t)),
   });
   const commitMutation = useMutation({
-    mutationFn: ({ message, rootID }: { message: string; rootID: string }) => commitProjectGit(token, sessionID, rootID, message),
+    mutationFn: ({ message, rootID, stageAll }: { message: string; rootID: string; stageAll: boolean }) => (
+      commitProjectGit(token, sessionID, rootID, message, stageAll)
+    ),
     onSuccess: (status) => {
       applyStatus(status);
       setCommitMessages((current) => ({ ...current, [status.rootID]: "" }));
       toast.success(t("project.gitCommitted"));
     },
-    onError: (error) => toast.error(projectBrowserError(error, t)),
+    onError: (error) => toast.error(projectGitOperationError(error, t)),
+  });
+  const syncMutation = useMutation({
+    mutationFn: (rootID: string) => syncProjectGit(token, sessionID, rootID),
+    onSuccess: (status) => {
+      applyStatus(status, true);
+      toast.success(t("project.gitSynced"));
+    },
+    onError: (error) => toast.error(projectGitOperationError(error, t)),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["session", sessionID, "project", "git"] });
+      void queryClient.invalidateQueries({ queryKey: ["session", sessionID, "project", "file"] });
+      void queryClient.invalidateQueries({ queryKey: ["session", sessionID, "project", "tree"] });
+    },
+  });
+  const publishMutation = useMutation({
+    mutationFn: (rootID: string) => publishProjectGit(token, sessionID, rootID),
+    onSuccess: (status) => {
+      applyStatus(status);
+      toast.success(t("project.gitPublished"));
+    },
+    onError: (error) => toast.error(projectGitOperationError(error, t)),
   });
 
   if (loading) {
@@ -124,6 +162,8 @@ export function ProjectGitSection({ repositories, sessionID, token, onOpenDiff }
             unstageMutation,
             discardMutation,
             commitMutation,
+            syncMutation,
+            publishMutation,
           ].some((mutation) => mutation.isPending && mutation.variables && (
             typeof mutation.variables === "string"
               ? mutation.variables === repository.root.id
@@ -132,15 +172,15 @@ export function ProjectGitSection({ repositories, sessionID, token, onOpenDiff }
           if (repository.error) {
             return (
               <div key={repository.root.id}>
-                <ProjectGitRepositoryHeader repository={repository} />
-                <ProjectGitMessage>{projectBrowserError(repository.error, t)}</ProjectGitMessage>
+                <ProjectGitRepositoryHeader disabled={repositoryPending} repository={repository} sessionID={sessionID} token={token} onStatus={applyStatus} />
+                <ProjectGitMessage>{projectGitReadError(repository.error, t)}</ProjectGitMessage>
               </div>
             );
           }
           if (!status?.available) {
             return (
               <div key={repository.root.id} className="pb-2">
-                <ProjectGitRepositoryHeader repository={repository} />
+                <ProjectGitRepositoryHeader disabled={repositoryPending} repository={repository} sessionID={sessionID} token={token} onStatus={applyStatus} />
                 <div className="space-y-2 px-3 py-3">
                   <p className="text-[11px] text-muted-foreground">{t("project.gitUnavailable")}</p>
                   <Button
@@ -162,15 +202,26 @@ export function ProjectGitSection({ repositories, sessionID, token, onOpenDiff }
           const staged = status.files.filter(isProjectGitStaged);
           const working = status.files.filter((file) => file.kind !== "conflicted" && isProjectGitWorking(file));
           const message = commitMessages[repository.root.id] || "";
+          const syncCount = status.ahead + status.behind;
+          const canCommit = Boolean(message.trim()) && status.fileCount > 0 && status.conflictedCount === 0 && !repositoryPending;
+          const commit = (stageAll: boolean) => {
+            if (canCommit) {
+              commitMutation.mutate({ message: message.trim(), rootID: repository.root.id, stageAll });
+            }
+          };
           return (
             <div key={repository.root.id} className="pb-1">
-              <ProjectGitRepositoryHeader repository={repository} />
+              <ProjectGitRepositoryHeader disabled={repositoryPending} repository={repository} sessionID={sessionID} token={token} onStatus={applyStatus} />
               <form
                 className="space-y-1.5 border-y px-2 py-2"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  if (message.trim() && status.stagedCount > 0 && status.conflictedCount === 0 && !repositoryPending) {
-                    commitMutation.mutate({ message: message.trim(), rootID: repository.root.id });
+                  if (!status.clean) {
+                    commit(status.stagedCount === 0);
+                  } else if (status.upstream && syncCount > 0 && !repositoryPending) {
+                    syncMutation.mutate(repository.root.id);
+                  } else if (!status.upstream && status.head && !repositoryPending) {
+                    publishMutation.mutate(repository.root.id);
                   }
                 }}
               >
@@ -183,15 +234,52 @@ export function ProjectGitSection({ repositories, sessionID, token, onOpenDiff }
                   value={message}
                   onChange={(event) => setCommitMessages((current) => ({ ...current, [repository.root.id]: event.target.value }))}
                 />
-                <Button
-                  className="h-7 w-full text-xs"
-                  disabled={!message.trim() || status.stagedCount === 0 || status.conflictedCount > 0 || repositoryPending}
-                  size="sm"
-                  type="submit"
-                >
-                  {commitMutation.isPending && commitMutation.variables?.rootID === repository.root.id ? <Spinner /> : <GitCommitHorizontal />}
-                  {t("project.gitCommit")}
-                </Button>
+                {!status.clean ? (
+                  <ButtonGroup className="w-full">
+                    <Button
+                      className="h-7 flex-1 border-r-0 text-xs"
+                      disabled={!canCommit}
+                      size="sm"
+                      type="submit"
+                    >
+                      {commitMutation.isPending && commitMutation.variables?.rootID === repository.root.id ? <Spinner /> : <GitCommitHorizontal />}
+                      {t("project.gitCommit")}
+                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          aria-label={t("project.gitMoreActions")}
+                          className="h-7 w-8 px-0"
+                          disabled={repositoryPending}
+                          size="sm"
+                          type="button"
+                        >
+                          <ChevronDown />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <AppDropdownMenuContent align="end">
+                        <AppDropdownMenuItem disabled={!message.trim() || status.stagedCount === 0} onSelect={() => commit(false)}>
+                          <GitCommitHorizontal />
+                          {t("project.gitCommitStaged")}
+                        </AppDropdownMenuItem>
+                        <AppDropdownMenuItem disabled={!message.trim() || status.fileCount === 0 || status.conflictedCount > 0} onSelect={() => commit(true)}>
+                          <Plus />
+                          {t("project.gitCommitAll")}
+                        </AppDropdownMenuItem>
+                      </AppDropdownMenuContent>
+                    </DropdownMenu>
+                  </ButtonGroup>
+                ) : status.upstream && syncCount > 0 ? (
+                  <Button className="h-7 w-full text-xs" disabled={repositoryPending} size="sm" type="submit">
+                    {syncMutation.isPending && syncMutation.variables === repository.root.id ? <Spinner /> : <RefreshCw />}
+                    {t("project.gitSyncCount").replace("{count}", String(syncCount))}
+                  </Button>
+                ) : !status.upstream && status.head ? (
+                  <Button className="h-7 w-full text-xs" disabled={repositoryPending} size="sm" type="submit">
+                    {publishMutation.isPending && publishMutation.variables === repository.root.id ? <Spinner /> : <CloudUpload />}
+                    {t("project.gitPublishBranch")}
+                  </Button>
+                ) : null}
               </form>
               {status.clean ? (
                 <div className="px-7 py-3 text-[11px] text-muted-foreground">{t("project.gitClean")}</div>
@@ -249,7 +337,13 @@ export function ProjectGitSection({ repositories, sessionID, token, onOpenDiff }
   );
 }
 
-function ProjectGitRepositoryHeader({ repository }: { repository: ProjectGitRepositoryState }) {
+function ProjectGitRepositoryHeader({ disabled, repository, sessionID, token, onStatus }: {
+  disabled: boolean;
+  repository: ProjectGitRepositoryState;
+  sessionID: string;
+  token: string;
+  onStatus: (status: ProjectGitStatus, worktreeChanged?: boolean) => void;
+}) {
   const { t } = useI18n();
   const status = repository.status;
   return (
@@ -258,9 +352,11 @@ function ProjectGitRepositoryHeader({ repository }: { repository: ProjectGitRepo
       <span className="min-w-0 flex-1 truncate font-medium">{repository.root.name}</span>
       {status?.available ? (
         <>
-          <span className="max-w-28 truncate text-[11px] text-muted-foreground">
-            {status.detached ? status.head || t("project.gitDetached") : status.branch || t("project.gitDetached")}
-          </span>
+          {status.detached || !status.branch ? (
+            <span className="max-w-28 truncate text-[11px] text-muted-foreground">{status.head || t("project.gitDetached")}</span>
+          ) : (
+            <ProjectGitBranchPicker branch={status.branch} disabled={disabled} rootID={repository.root.id} sessionID={sessionID} token={token} onStatus={onStatus} />
+          )}
           {status.ahead ? <span className="text-[10px] text-muted-foreground">↑{status.ahead}</span> : null}
           {status.behind ? <span className="text-[10px] text-muted-foreground">↓{status.behind}</span> : null}
         </>
@@ -290,9 +386,24 @@ function ProjectGitChangeGroup({ files, group, label, pending, rootID, onDiscard
       <div className="group/git-heading flex h-7 items-center hover:bg-accent">
         <button className="flex h-full min-w-0 flex-1 items-center gap-1 px-2 text-left text-[11px] font-medium" type="button" onClick={() => setOpen((value) => !value)}>
           <ChevronRight className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
-          <span className="min-w-0 flex-1 truncate uppercase tracking-wide">{label}</span>
+          <span className="min-w-0 truncate uppercase tracking-wide">{label}</span>
           <span className="text-muted-foreground">{files.length}</span>
+          <span className="min-w-0 flex-1" />
         </button>
+        {group === "working" ? (
+          <Button
+            aria-label={t("project.gitDiscardAll")}
+            className="size-6 opacity-0 group-hover/git-heading:opacity-100 focus-visible:opacity-100"
+            disabled={pending}
+            size="icon-xs"
+            title={t("project.gitDiscardAll")}
+            type="button"
+            variant="ghost"
+            onClick={() => onDiscard({ files, rootID })}
+          >
+            <Undo2 />
+          </Button>
+        ) : null}
         <Button
           aria-label={staged ? t("project.gitUnstageAll") : t("project.gitStageAll")}
           className="mr-1 size-6 opacity-0 group-hover/git-heading:opacity-100 focus-visible:opacity-100"
@@ -325,7 +436,7 @@ function ProjectGitChangeGroup({ files, group, label, pending, rootID, onDiscard
                   onClick={() => onOpenDiff(selection, false)}
                   onDoubleClick={() => onOpenDiff(selection, true)}
                 >
-                  <GitCommitHorizontal className="size-3.5 shrink-0 text-muted-foreground" />
+                  <ProjectFileTypeIcon className="size-3.5" path={file.path} />
                   <span className="min-w-0 flex-1 truncate">{projectFileName(file.path)}</span>
                   <span className="min-w-0 max-w-20 truncate text-[10px] text-muted-foreground">{file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : ""}</span>
                 </button>
@@ -353,7 +464,7 @@ function ProjectGitChangeGroup({ files, group, label, pending, rootID, onDiscard
                       variant="ghost"
                       onClick={() => onDiscard({ files: [file], rootID })}
                     >
-                      <RotateCcw />
+                      <Undo2 />
                     </Button>
                   ) : null}
                 </div>
@@ -371,7 +482,7 @@ function ProjectGitChangeGroup({ files, group, label, pending, rootID, onDiscard
                 <>
                   <AppContextMenuSeparator />
                   <AppContextMenuItem disabled={pending} variant="destructive" onSelect={() => onDiscard({ files: [file], rootID })}>
-                    <RotateCcw />
+                    <Undo2 />
                     {t("project.gitDiscard")}
                   </AppContextMenuItem>
                 </>
@@ -380,17 +491,6 @@ function ProjectGitChangeGroup({ files, group, label, pending, rootID, onDiscard
           </ContextMenu>
         );
       }) : null}
-      {open && group === "working" && files.length > 1 ? (
-        <button
-          className="flex h-7 w-full items-center gap-1.5 pl-7 pr-2 text-left text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
-          disabled={pending}
-          type="button"
-          onClick={() => onDiscard({ files, rootID })}
-        >
-          <RotateCcw className="size-3.5" />
-          {t("project.gitDiscardAll")}
-        </button>
-      ) : null}
     </div>
   );
 }

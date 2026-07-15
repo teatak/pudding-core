@@ -6,6 +6,11 @@ import (
 )
 
 const (
+	CodeBranchCreateFailed    = "git_branch_create_failed"
+	CodeBranchDeleteFailed    = "git_branch_delete_failed"
+	CodeBranchListFailed      = "git_branch_list_failed"
+	CodeBranchRenameFailed    = "git_branch_rename_failed"
+	CodeBranchSwitchFailed    = "git_branch_switch_failed"
 	CodeCommitFailed          = "git_commit_failed"
 	CodeCommitMessageRequired = "git_commit_message_required"
 	CodeConflicts             = "git_conflicts"
@@ -14,13 +19,18 @@ const (
 	CodeGitUnavailable        = "git_unavailable"
 	CodeInitFailed            = "git_init_failed"
 	CodeInvalidPath           = "path_not_authorized"
+	CodeInvalidBranch         = "git_invalid_branch"
 	CodeNoStagedChanges       = "git_no_staged_changes"
+	CodeNoUpstream            = "git_no_upstream"
 	CodeNotRepository         = "not_git_repository"
 	CodeOutputTooLarge        = "git_output_too_large"
 	CodeParseFailed           = "git_parse_failed"
+	CodePublishFailed         = "git_publish_failed"
+	CodeRemoteUnavailable     = "git_remote_unavailable"
 	CodeRepositoryOutsideRoot = "repository_outside_project"
 	CodeStageFailed           = "git_stage_failed"
 	CodeStatusFailed          = "git_status_failed"
+	CodeSyncFailed            = "git_sync_failed"
 	CodeTimedOut              = "timed_out"
 	CodeUnstageFailed         = "git_unstage_failed"
 )

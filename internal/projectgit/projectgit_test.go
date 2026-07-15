@@ -123,7 +123,7 @@ func TestInitializeStageUnstageDiscardAndCommit(t *testing.T) {
 	if err != nil || status.Staged != 1 {
 		t.Fatalf("stage initial file: status=%+v err=%v", status, err)
 	}
-	if _, err := Commit(ctx, repo, "initial"); err != nil {
+	if _, err := Commit(ctx, repo, "initial", false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -152,9 +152,95 @@ func TestInitializeStageUnstageDiscardAndCommit(t *testing.T) {
 	if status.Staged != 1 || status.Unstaged != 0 || status.Untracked != 0 {
 		t.Fatalf("unexpected status after discard: %+v", status)
 	}
-	status, err = Commit(ctx, repo, "update tracked")
+	status, err = Commit(ctx, repo, "update tracked", false)
 	if err != nil || !statusIsClean(status) {
 		t.Fatalf("commit changes: status=%+v err=%v", status, err)
+	}
+}
+
+func TestSmartCommitPublishAndSync(t *testing.T) {
+	requireGit(t)
+	ctx := context.Background()
+	root := newRepository(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	git(t, filepath.Dir(remote), "init", "--bare", "--quiet", remote)
+	git(t, root, "remote", "add", "origin", remote)
+	writeFile(t, root, "first.txt", "first\n")
+
+	repo, err := Discover(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := Commit(ctx, repo, "initial", true)
+	if err != nil || !statusIsClean(status) {
+		t.Fatalf("smart commit: status=%+v err=%v", status, err)
+	}
+	status, err = Publish(ctx, repo)
+	if err != nil || status.Upstream == "" || status.Ahead != 0 {
+		t.Fatalf("publish: status=%+v err=%v", status, err)
+	}
+
+	writeFile(t, root, "second.txt", "second\n")
+	status, err = Commit(ctx, repo, "second", true)
+	if err != nil || status.Ahead != 1 {
+		t.Fatalf("second smart commit: status=%+v err=%v", status, err)
+	}
+	status, err = Sync(ctx, repo)
+	if err != nil || status.Ahead != 0 || status.Behind != 0 {
+		t.Fatalf("sync: status=%+v err=%v", status, err)
+	}
+	primaryBranch := status.Branch
+	git(t, root, "switch", "-c", "remote-only")
+	git(t, root, "push", "origin", "remote-only")
+	git(t, root, "switch", primaryBranch)
+	git(t, root, "branch", "-d", "remote-only")
+	status, err = SwitchBranch(ctx, repo, "origin/remote-only")
+	if err != nil || status.Branch != "remote-only" || status.Upstream != "origin/remote-only" {
+		t.Fatalf("switch remote branch: status=%+v err=%v", status, err)
+	}
+}
+
+func TestBranchManagement(t *testing.T) {
+	requireGit(t)
+	ctx := context.Background()
+	root := newRepository(t)
+	writeFile(t, root, "tracked.txt", "base\n")
+	git(t, root, "add", "tracked.txt")
+	git(t, root, "commit", "-m", "initial")
+	repo, err := Discover(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := ReadStatus(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := CreateBranch(ctx, repo, "feature/test")
+	if err != nil || status.Branch != "feature/test" {
+		t.Fatalf("create branch: status=%+v err=%v", status, err)
+	}
+	status, err = RenameCurrentBranch(ctx, repo, "feature/renamed")
+	if err != nil || status.Branch != "feature/renamed" {
+		t.Fatalf("rename branch: status=%+v err=%v", status, err)
+	}
+	status, err = SwitchBranch(ctx, repo, original.Branch)
+	if err != nil || status.Branch != original.Branch {
+		t.Fatalf("switch branch: status=%+v err=%v", status, err)
+	}
+	branches, err := ListBranches(ctx, repo)
+	if err != nil || len(branches) != 2 {
+		t.Fatalf("list branches: branches=%+v err=%v", branches, err)
+	}
+	if branches[0].Name != "feature/renamed" || branches[1].Name != original.Branch {
+		t.Fatalf("branches should keep name order: %+v", branches)
+	}
+	status, err = DeleteBranch(ctx, repo, "feature/renamed")
+	if err != nil || status.Branch != original.Branch {
+		t.Fatalf("delete branch: status=%+v err=%v", status, err)
+	}
+	branches, err = ListBranches(ctx, repo)
+	if err != nil || len(branches) != 1 {
+		t.Fatalf("branches after delete: branches=%+v err=%v", branches, err)
 	}
 }
 

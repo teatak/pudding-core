@@ -122,6 +122,20 @@ export const projectGitStatus = z.object({
 });
 export type ProjectGitStatus = z.infer<typeof projectGitStatus>;
 
+export const projectGitBranch = z.object({
+  name: z.string(),
+  upstream: z.string().optional(),
+  current: z.boolean(),
+  remote: z.boolean(),
+});
+export type ProjectGitBranch = z.infer<typeof projectGitBranch>;
+
+export const projectGitBranches = z.object({
+  rootID: z.string(),
+  branches: z.array(projectGitBranch),
+});
+export type ProjectGitBranches = z.infer<typeof projectGitBranches>;
+
 export const projectGitDiff = z.object({
   rootID: z.string(),
   path: z.string(),
@@ -144,6 +158,11 @@ export const projectGitPathsRequest = projectGitRootRequest.extend({
 
 export const projectGitCommitRequest = projectGitRootRequest.extend({
   message: z.string().trim().min(1).max(16 * 1024),
+  stageAll: z.boolean().default(false),
+});
+
+export const projectGitBranchRequest = projectGitRootRequest.extend({
+  name: z.string().trim().min(1).max(1024),
 });
 
 export const projectEntryMutation = z.object({

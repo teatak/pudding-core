@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/teatak/pudding-core/internal/projectpath"
@@ -16,6 +17,7 @@ import (
 const (
 	writeMaxPaths         = 512
 	commitMaxMessageBytes = 16 << 10
+	remoteCommandTimeout  = 2 * time.Minute
 )
 
 var repositoryLocks sync.Map
@@ -164,7 +166,7 @@ func Discard(ctx context.Context, repo Repository, rawPaths []string) (Status, e
 }
 
 // Commit creates a normal commit from the current index with hooks and signing disabled.
-func Commit(ctx context.Context, repo Repository, message string) (Status, error) {
+func Commit(ctx context.Context, repo Repository, message string, stageAll bool) (Status, error) {
 	message = strings.TrimSpace(message)
 	if message == "" {
 		return Status{}, newError(CodeCommitMessageRequired, "Commit message is required", nil)
@@ -179,6 +181,15 @@ func Commit(ctx context.Context, repo Repository, message string) (Status, error
 		}
 		if status.Conflicted > 0 {
 			return newError(CodeConflicts, "Resolve Git conflicts before committing", nil)
+		}
+		if stageAll {
+			if err := stageStatusFiles(ctx, repo, status.Files); err != nil {
+				return err
+			}
+			status, err = ReadStatus(ctx, repo)
+			if err != nil {
+				return err
+			}
 		}
 		if status.Staged == 0 {
 			return newError(CodeNoStagedChanges, "There are no staged changes to commit", nil)
@@ -200,6 +211,132 @@ func Commit(ctx context.Context, repo Repository, message string) (Status, error
 		return Status{}, err
 	}
 	return ReadStatus(ctx, repo)
+}
+
+// Sync fast-forwards from the configured upstream and then pushes local commits.
+func Sync(ctx context.Context, repo Repository) (Status, error) {
+	err := withRepositoryLock(repo.Root, func() error {
+		status, err := ReadStatus(ctx, repo)
+		if err != nil {
+			return err
+		}
+		if status.Upstream == "" {
+			return newError(CodeNoUpstream, "The current branch has no upstream", nil)
+		}
+		if status.Conflicted > 0 {
+			return newError(CodeConflicts, "Resolve Git conflicts before syncing", nil)
+		}
+		commandCtx, cancel := context.WithTimeout(ctx, remoteCommandTimeout)
+		defer cancel()
+		pull := runWithoutExternalFilters(commandCtx, repo.Root, metadataLimitBytes,
+			"-c", "core.hooksPath="+os.DevNull,
+			"-c", "gc.auto=0",
+			"pull", "--ff-only", "--no-edit",
+		)
+		if pull.err != nil {
+			return commandError(commandCtx, CodeSyncFailed, pull)
+		}
+		push := run(commandCtx, repo.Root, metadataLimitBytes,
+			"-c", "core.hooksPath="+os.DevNull,
+			"-c", "gc.auto=0",
+			"push",
+		)
+		if push.err != nil {
+			return commandError(commandCtx, CodeSyncFailed, push)
+		}
+		return nil
+	})
+	if err != nil {
+		return Status{}, err
+	}
+	return ReadStatus(ctx, repo)
+}
+
+// Publish pushes the current branch to the preferred remote and configures its upstream.
+func Publish(ctx context.Context, repo Repository) (Status, error) {
+	err := withRepositoryLock(repo.Root, func() error {
+		status, err := ReadStatus(ctx, repo)
+		if err != nil {
+			return err
+		}
+		if status.Detached || status.Branch == "" {
+			return newError(CodePublishFailed, "A detached HEAD cannot be published", nil)
+		}
+		if status.Upstream != "" {
+			return newError(CodePublishFailed, "The current branch already has an upstream", nil)
+		}
+		commandCtx, cancel := context.WithTimeout(ctx, remoteCommandTimeout)
+		defer cancel()
+		remote, err := preferredRemote(commandCtx, repo.Root)
+		if err != nil {
+			return err
+		}
+		result := run(commandCtx, repo.Root, metadataLimitBytes,
+			"-c", "core.hooksPath="+os.DevNull,
+			"-c", "gc.auto=0",
+			"push", "--set-upstream", remote, "HEAD",
+		)
+		if result.err != nil {
+			return commandError(commandCtx, CodePublishFailed, result)
+		}
+		return nil
+	})
+	if err != nil {
+		return Status{}, err
+	}
+	return ReadStatus(ctx, repo)
+}
+
+func stageStatusFiles(ctx context.Context, repo Repository, files []StatusFile) error {
+	rawPaths := make([]string, 0, len(files)*2)
+	for _, file := range files {
+		if file.Kind == "conflicted" {
+			return newError(CodeConflicts, "Resolve Git conflicts before committing", nil)
+		}
+		rawPaths = append(rawPaths, file.Path)
+		if file.OriginalPath != "" {
+			rawPaths = append(rawPaths, file.OriginalPath)
+		}
+	}
+	if len(rawPaths) == 0 {
+		return nil
+	}
+	for offset := 0; offset < len(rawPaths); offset += writeMaxPaths {
+		end := min(offset+writeMaxPaths, len(rawPaths))
+		paths, err := normalizeWritePaths(repo, rawPaths[offset:end])
+		if err != nil {
+			return err
+		}
+		commandCtx, cancel := context.WithTimeout(ctx, commandTimeout)
+		args := []string{"--literal-pathspecs", "add", "--all", "--"}
+		args = append(args, paths...)
+		result := runWithoutExternalFilters(commandCtx, repo.Root, metadataLimitBytes, args...)
+		cancel()
+		if result.err != nil {
+			return commandError(commandCtx, CodeStageFailed, result)
+		}
+	}
+	return nil
+}
+
+func preferredRemote(ctx context.Context, root string) (string, error) {
+	result := run(ctx, root, metadataLimitBytes, "remote")
+	if result.err != nil {
+		return "", commandError(ctx, CodeRemoteUnavailable, result)
+	}
+	remotes := strings.Fields(result.stdout)
+	for _, remote := range remotes {
+		if remote == "origin" {
+			return remote, nil
+		}
+	}
+	if len(remotes) == 1 {
+		return remotes[0], nil
+	}
+	if len(remotes) == 0 {
+		return "", newError(CodeRemoteUnavailable, "No Git remote is configured", nil)
+	}
+	return "", newError(CodeRemoteUnavailable, "Multiple Git remotes are configured and none is named origin", nil)
 }
 
 func normalizeWritePaths(repo Repository, rawPaths []string) ([]string, error) {

@@ -27,6 +27,13 @@ type Status struct {
 	Conflicted int
 }
 
+type Branch struct {
+	Name     string `json:"name"`
+	Upstream string `json:"upstream,omitempty"`
+	Current  bool   `json:"current"`
+	Remote   bool   `json:"remote"`
+}
+
 type DiffFile struct {
 	Path         string `json:"path"`
 	OriginalPath string `json:"originalPath,omitempty"`

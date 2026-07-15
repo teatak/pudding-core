@@ -52,8 +52,19 @@ type projectGitPathsReq struct {
 }
 
 type projectGitCommitReq struct {
-	RootID  string `json:"rootID"`
-	Message string `json:"message"`
+	RootID   string `json:"rootID"`
+	Message  string `json:"message"`
+	StageAll bool   `json:"stageAll"`
+}
+
+type projectGitBranchReq struct {
+	RootID string `json:"rootID"`
+	Name   string `json:"name"`
+}
+
+type projectGitBranchesView struct {
+	RootID   string              `json:"rootID"`
+	Branches []projectgit.Branch `json:"branches"`
 }
 
 func (s *Server) getProjectGitStatus(c *cart.Context) error {
@@ -145,7 +156,84 @@ func (s *Server) commitProjectGit(c *cart.Context) error {
 	if !ok {
 		return nil
 	}
-	status, err := projectgit.Commit(c.Request.Context(), repo, req.Message)
+	status, err := projectgit.Commit(c.Request.Context(), repo, req.Message, req.StageAll)
+	if err != nil {
+		return projectGitError(c, err)
+	}
+	c.JSON(http.StatusOK, projectGitStatusResponse(root.ID, status))
+	return nil
+}
+
+func (s *Server) listProjectGitBranches(c *cart.Context) error {
+	root, repo, ok := s.projectGitRepository(c, c.Request.URL.Query().Get("rootID"))
+	if !ok {
+		return nil
+	}
+	branches, err := projectgit.ListBranches(c.Request.Context(), repo)
+	if err != nil {
+		return projectGitError(c, err)
+	}
+	c.JSON(http.StatusOK, projectGitBranchesView{RootID: root.ID, Branches: branches})
+	return nil
+}
+
+func (s *Server) createProjectGitBranch(c *cart.Context) error {
+	return s.mutateProjectGitBranch(c, projectgit.CreateBranch)
+}
+
+func (s *Server) switchProjectGitBranch(c *cart.Context) error {
+	return s.mutateProjectGitBranch(c, projectgit.SwitchBranch)
+}
+
+func (s *Server) renameProjectGitBranch(c *cart.Context) error {
+	return s.mutateProjectGitBranch(c, projectgit.RenameCurrentBranch)
+}
+
+func (s *Server) deleteProjectGitBranch(c *cart.Context) error {
+	return s.mutateProjectGitBranch(c, projectgit.DeleteBranch)
+}
+
+func (s *Server) mutateProjectGitBranch(
+	c *cart.Context,
+	operation func(context.Context, projectgit.Repository, string) (projectgit.Status, error),
+) error {
+	var req projectGitBranchReq
+	if err := decode(c, &req); err != nil {
+		return badRequest(c, "invalid json body")
+	}
+	root, repo, ok := s.projectGitRepository(c, req.RootID)
+	if !ok {
+		return nil
+	}
+	status, err := operation(c.Request.Context(), repo, req.Name)
+	if err != nil {
+		return projectGitError(c, err)
+	}
+	c.JSON(http.StatusOK, projectGitStatusResponse(root.ID, status))
+	return nil
+}
+
+func (s *Server) syncProjectGit(c *cart.Context) error {
+	return s.mutateProjectGitRoot(c, projectgit.Sync)
+}
+
+func (s *Server) publishProjectGit(c *cart.Context) error {
+	return s.mutateProjectGitRoot(c, projectgit.Publish)
+}
+
+func (s *Server) mutateProjectGitRoot(
+	c *cart.Context,
+	operation func(context.Context, projectgit.Repository) (projectgit.Status, error),
+) error {
+	var req projectGitRootReq
+	if err := decode(c, &req); err != nil {
+		return badRequest(c, "invalid json body")
+	}
+	root, repo, ok := s.projectGitRepository(c, req.RootID)
+	if !ok {
+		return nil
+	}
+	status, err := operation(c.Request.Context(), repo)
 	if err != nil {
 		return projectGitError(c, err)
 	}
@@ -180,11 +268,15 @@ func (s *Server) projectGitRepository(c *cart.Context, rootID string) (projectRo
 }
 
 func projectGitStatusResponse(rootID string, status projectgit.Status) projectGitStatusView {
+	files := status.Files
+	if files == nil {
+		files = []projectgit.StatusFile{}
+	}
 	return projectGitStatusView{
 		RootID: rootID, Available: true,
 		Head: status.Head, Branch: status.Branch, Upstream: status.Upstream,
 		Detached: status.Detached, Ahead: status.Ahead, Behind: status.Behind,
-		Clean: len(status.Files) == 0, Files: status.Files, FileCount: len(status.Files),
+		Clean: len(files) == 0, Files: files, FileCount: len(files),
 		StagedCount: status.Staged, UnstagedCount: status.Unstaged,
 		UntrackedCount: status.Untracked, ConflictedCount: status.Conflicted,
 	}
@@ -226,9 +318,13 @@ func projectGitError(c *cart.Context, err error) error {
 		return projectFileError(c, http.StatusInternalServerError, "git_operation_failed")
 	}
 	switch gitErr.Code {
+	case projectgit.CodeInvalidBranch:
+		return projectFileError(c, http.StatusBadRequest, gitErr.Code)
+	case projectgit.CodeBranchDeleteFailed:
+		return projectFileError(c, http.StatusConflict, gitErr.Code)
 	case projectgit.CodeCommitMessageRequired:
 		return projectFileError(c, http.StatusBadRequest, gitErr.Code)
-	case projectgit.CodeConflicts, projectgit.CodeNoStagedChanges:
+	case projectgit.CodeConflicts, projectgit.CodeNoStagedChanges, projectgit.CodeNoUpstream:
 		return projectFileError(c, http.StatusConflict, gitErr.Code)
 	case projectgit.CodeInvalidPath:
 		return projectFileError(c, http.StatusForbidden, gitErr.Code)
@@ -238,6 +334,10 @@ func projectGitError(c *cart.Context, err error) error {
 		return projectFileError(c, http.StatusForbidden, gitErr.Code)
 	case projectgit.CodeGitUnavailable:
 		return projectFileError(c, http.StatusServiceUnavailable, gitErr.Code)
+	case projectgit.CodeRemoteUnavailable:
+		return projectFileError(c, http.StatusUnprocessableEntity, gitErr.Code)
+	case projectgit.CodePublishFailed, projectgit.CodeSyncFailed:
+		return projectFileError(c, http.StatusBadGateway, gitErr.Code)
 	case projectgit.CodeTimedOut:
 		return projectFileError(c, http.StatusGatewayTimeout, gitErr.Code)
 	default:

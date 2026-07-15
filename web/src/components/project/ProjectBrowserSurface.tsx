@@ -93,7 +93,8 @@ export function ProjectBrowserSurface({
     })),
   });
   const gitRepositories: ProjectGitRepositoryState[] = roots.map((root, index) => ({
-    error: gitQueries[index]?.error,
+    // A failed background refresh must not replace the last successful status.
+    error: gitQueries[index]?.data ? undefined : gitQueries[index]?.error,
     loading: gitQueries[index]?.isLoading || false,
     root,
     status: gitQueries[index]?.data,
@@ -173,6 +174,11 @@ export function ProjectBrowserSurface({
   }, [fileReveal?.serial, rootsQuery.isFetching, rootsQuery.isLoading, sessionID]);
 
   const invalidateProject = (targetSessionID: string) => queryClient.invalidateQueries({ queryKey: ["session", targetSessionID, "project"] });
+  const refreshGitRoots = async (targetSessionID: string, rootIDs: string[]) => {
+    const uniqueRootIDs = Array.from(new Set(rootIDs));
+    const statuses = await Promise.all(uniqueRootIDs.map((rootID) => getProjectGitStatus(token, targetSessionID, rootID)));
+    statuses.forEach((status) => queryClient.setQueryData(queryKeys.projectGitStatus(targetSessionID, status.rootID), status));
+  };
   const createMutation = useMutation({
     mutationFn: ({ name, request, targetSessionID }: { name: string; request: NameRequest; targetSessionID: string }) => createProjectEntry(token, targetSessionID, {
       rootID: request.target.rootID,
@@ -251,11 +257,12 @@ export function ProjectBrowserSurface({
       targetRootID: destination.rootID,
       targetParentPath: destination.path,
     }),
-    onSuccess: (entry, variables) => {
+    onSuccess: async (entry, variables) => {
       workspace.moveUnderInSession(variables.targetSessionID, variables.source, entry);
       if (variables.clearClipboard) setResourceClipboard(undefined);
       if (variables.fromDrag) setDragMoveRequest(undefined);
-      void invalidateProject(variables.targetSessionID);
+      await invalidateProject(variables.targetSessionID);
+      await refreshGitRoots(variables.targetSessionID, [variables.source.rootID, variables.destination.rootID]).catch(() => undefined);
       toast.success(t("project.browserMoveDone"));
     },
     onError: (error) => toast.error(projectBrowserError(error, t)),

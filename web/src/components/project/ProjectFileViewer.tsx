@@ -279,20 +279,22 @@ export function ProjectFileViewer({
         <div className="flex h-9 shrink-0 items-center gap-2 bg-background px-3 dark:bg-[#171717]">
           <ProjectFileTypeIcon path={file?.path || fileSelection.path} />
           <code className="min-w-0 flex-1 cursor-text select-text truncate font-mono text-xs" title={file?.path || fileSelection.path}>{file?.path || fileSelection.path}</code>
-          {isMarkdown ? (
-            <div className="flex shrink-0 items-center">
-              <Button aria-label={t("project.browserPreview")} aria-pressed={showPreview} className="h-7 px-2 text-muted-foreground hover:bg-transparent hover:text-foreground aria-pressed:text-foreground" size="sm" type="button" variant="ghost" onClick={() => setPreviewMode((current) => ({ ...current, [draftKey]: true }))}>
-                <BookOpen />
-              </Button>
-              <Button aria-label={t("project.browserSource")} aria-pressed={!showPreview} className="h-7 px-2 text-muted-foreground hover:bg-transparent hover:text-foreground aria-pressed:text-foreground" size="sm" type="button" variant="ghost" onClick={() => setPreviewMode((current) => ({ ...current, [draftKey]: false }))}>
-                <FileCode2 />
+          {!isImage ? (
+            <div className="flex shrink-0 items-center gap-1">
+              {isMarkdown ? (
+                <>
+                  <Button aria-label={t("project.browserPreview")} aria-pressed={showPreview} className="text-muted-foreground hover:bg-muted/60 hover:text-foreground aria-pressed:bg-muted aria-pressed:text-foreground" size="icon-sm" type="button" variant="ghost" onClick={() => setPreviewMode((current) => ({ ...current, [draftKey]: true }))}>
+                    <BookOpen />
+                  </Button>
+                  <Button aria-label={t("project.browserSource")} aria-pressed={!showPreview} className="text-muted-foreground hover:bg-muted/60 hover:text-foreground aria-pressed:bg-muted aria-pressed:text-foreground" size="icon-sm" type="button" variant="ghost" onClick={() => setPreviewMode((current) => ({ ...current, [draftKey]: false }))}>
+                    <FileCode2 />
+                  </Button>
+                </>
+              ) : null}
+              <Button aria-label={t("project.browserSave")} disabled={!dirty || saveMutation.isPending || externalConflict || fileQuery.isError} size="icon-sm" title={`${t("project.browserSave")} (⌘S)`} type="button" variant="ghost" onClick={() => save()}>
+                {saveMutation.isPending ? <Spinner /> : <Save />}
               </Button>
             </div>
-          ) : null}
-          {!isImage ? (
-            <Button aria-label={t("project.browserSave")} disabled={!dirty || saveMutation.isPending || externalConflict || fileQuery.isError} size="icon-sm" title={`${t("project.browserSave")} (⌘S)`} type="button" variant="ghost" onClick={() => save()}>
-              {saveMutation.isPending ? <Spinner /> : <Save />}
-            </Button>
           ) : null}
         </div>
       ) : null}
@@ -319,7 +321,6 @@ export function ProjectFileViewer({
             sessionID={sessionID}
             token={token}
             onOpenPreview={onOpenPreview}
-            onReferenceSelection={(range) => fileSelection && onReference(fileSelection, range)}
           />
         ) : previewFile ? (
           <Suspense fallback={<ProjectViewerStatus icon={<Spinner className="size-6" />}>{t("common.loading")}</ProjectViewerStatus>}>
