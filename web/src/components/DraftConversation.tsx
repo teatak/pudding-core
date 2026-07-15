@@ -1308,7 +1308,7 @@ function DraftComposer({
                 onSelect={mentions.select}
               />
             ) : null}
-            <div className="pudding-composer-shell relative z-10 rounded-3xl border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/25">
+            <div className="pudding-composer-shell relative z-10 rounded-3xl border bg-card transition-shadow">
             <input
               ref={fileInputRef}
               className="sr-only"

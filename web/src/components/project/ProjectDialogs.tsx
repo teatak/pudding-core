@@ -115,6 +115,42 @@ export function ProjectDeleteDialog({
   );
 }
 
+export function ProjectMoveDialog({
+  destination,
+  source,
+  pending,
+  onCancel,
+  onConfirm,
+}: {
+  destination?: ProjectEntryTarget;
+  source?: ProjectEntryTarget;
+  pending: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <AlertDialog open={Boolean(source && destination)} onOpenChange={(open) => !open && !pending && onCancel()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t("project.browserMoveTitle")}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t("project.browserMoveDescription")
+              .replace("{name}", source?.name || "")
+              .replace("{destination}", destination?.name || destination?.path || "")}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={pending}>{t("common.cancel")}</AlertDialogCancel>
+          <AlertDialogAction disabled={pending} onClick={onConfirm}>
+            {pending ? <Spinner /> : null}{t("project.browserMoveConfirm")}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 export function ProjectUnsavedCloseDialog({
   count,
   open,

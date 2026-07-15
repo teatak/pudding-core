@@ -549,7 +549,37 @@ export function mergeProviderModelCandidate(
   if (presetModel) {
     return { ...presetModel };
   }
-  return providerModelFromCandidate(trimmedID, protocol);
+  const fallback = providerModelFromCandidate(trimmedID, protocol);
+  const globalModel = globalPresetModel(trimmedID, protocol);
+  if (!globalModel) {
+    return fallback;
+  }
+  // 端点通常只给模型 ID。能力和限制可跨供应商复用；请求参数必须继续
+  // 使用当前协议的默认值，避免把 OpenAI options 带到 Anthropic / Google。
+  return {
+    ...fallback,
+    displayName: globalModel.displayName,
+    contextWindow: globalModel.contextWindow,
+    capabilities: globalModel.capabilities ? { ...globalModel.capabilities } : fallback.capabilities,
+    limits: globalModel.limits ? { ...globalModel.limits } : undefined,
+  };
+}
+
+function globalPresetModel(id: string, protocol: ProviderPresetProtocol): ProviderModel | undefined {
+  let crossProtocolFallback: ProviderModel | undefined;
+  for (const preset of PROVIDER_PRESETS) {
+    for (const variant of preset.variants) {
+      const matched = variant.models.find((model) => model.id === id);
+      if (!matched) {
+        continue;
+      }
+      if (variant.protocol === protocol) {
+        return matched;
+      }
+      crossProtocolFallback ||= matched;
+    }
+  }
+  return crossProtocolFallback;
 }
 
 export function providerPresetProfileName(preset: ProviderPreset, variant: ProviderPresetVariant) {

@@ -11,6 +11,13 @@ import {
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { BrandIcon } from "@/components/BrandIcons";
+import {
+  AppDropdownMenuContent as DropdownMenuContent,
+  AppDropdownMenuRadioItem as DropdownMenuRadioItem,
+  AppDropdownMenuSeparator as DropdownMenuSeparator,
+  AppDropdownMenuSubContent as DropdownMenuSubContent,
+  AppDropdownMenuSubTrigger as DropdownMenuSubTrigger,
+} from "@/components/AppMenu";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
 import {
   defaultReasoningEffortForSelection,
@@ -20,14 +27,9 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
   DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useI18n } from "@/i18n";

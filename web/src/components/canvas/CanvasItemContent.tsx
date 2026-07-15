@@ -45,6 +45,10 @@ import { MarkdownBody } from "@/components/transcript/TurnParts";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import {
+  AppDropdownMenuContent as DropdownMenuContent,
+  AppDropdownMenuItem as DropdownMenuItem,
+} from "@/components/AppMenu";
+import {
   ChartContainer,
   ChartLegend as RechartsChartLegend,
   ChartLegendContent,
@@ -54,8 +58,6 @@ import {
 } from "@/components/ui/chart";
 import {
   DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useI18n } from "@/i18n";

@@ -3,15 +3,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
+  copyProjectEntry,
   createProjectEntry,
   deleteProjectEntry,
   getProjectGitStatus,
   listProjectBrowserRoots,
+  moveProjectEntry,
   renameProjectEntry,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { watchElectronProjectDirectories } from "@/desktop/projectFileWatcher";
 import { useI18n } from "@/i18n";
+import { revealDesktopPath } from "@/lib/desktopBridge";
 import { layoutStorageKeys } from "@/lib/layoutConstants";
 import { readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
 import { cn } from "@/lib/utils";
@@ -20,8 +24,9 @@ import { consumeProjectFileReveal, useProjectFileReveal } from "@/state/projectR
 import { addProjectReferenceToSessionDraft } from "@/state/sessionDraftStore";
 import type { UIContextPart } from "@/state/uiContextStore";
 
-import { ProjectDeleteDialog, ProjectNameDialog, ProjectUnsavedCloseDialog } from "./ProjectDialogs";
+import { ProjectDeleteDialog, ProjectMoveDialog, ProjectNameDialog, ProjectUnsavedCloseDialog } from "./ProjectDialogs";
 import { ProjectFileViewer } from "./ProjectFileViewer";
+import type { ProjectEditorSelection } from "./ProjectEditor";
 import { ProjectGitSection } from "./git/ProjectGitSection";
 import { projectGitFileKey } from "./git/gitStatus";
 import type { ProjectGitRepositoryState } from "./git/types";
@@ -38,16 +43,19 @@ type NameRequest =
   | { mode: "rename"; target: ProjectEntryTarget };
 
 type DiscardRequest = { id: number; keys: string[]; sessionID: string };
+type ResourceClipboard = { mode: "copy" | "cut"; sessionID: string; target: ProjectEntryTarget };
 
 export function ProjectBrowserSurface({
   active,
   sessionID,
   token,
+  onOpenTerminal,
   onVisibleContextChange,
 }: {
   active: boolean;
   sessionID: string;
   token: string;
+  onOpenTerminal: (cwd: string) => void;
   onVisibleContextChange?: (context?: UIContextPart) => void;
 }) {
   const { t } = useI18n();
@@ -62,6 +70,8 @@ export function ProjectBrowserSurface({
   const [discardRequest, setDiscardRequest] = useState<DiscardRequest>();
   const [dirtyBySession, setDirtyBySession] = useState<Record<string, string[]>>({});
   const [editorReveal, setEditorReveal] = useState<ProjectEditorReveal>();
+  const [resourceClipboard, setResourceClipboard] = useState<ResourceClipboard>();
+  const [dragMoveRequest, setDragMoveRequest] = useState<{ destination: ProjectEntryTarget; source: ProjectEntryTarget }>();
   const dirtyKeys = useMemo(() => new Set(dirtyBySession[sessionID] || []), [dirtyBySession, sessionID]);
   const rootsQuery = useQuery({
     enabled: (active || Boolean(fileReveal)) && Boolean(sessionID && token),
@@ -70,6 +80,7 @@ export function ProjectBrowserSurface({
     staleTime: 10_000,
   });
   const roots = rootsQuery.data?.roots || [];
+  const rootPaths = roots.map((root) => root.path);
   const gitQueries = useQueries({
     queries: roots.map((root) => ({
       enabled: active && Boolean(sessionID && token),
@@ -124,6 +135,8 @@ export function ProjectBrowserSurface({
     setNameRequest(undefined);
     setDeleteTarget(undefined);
     setPendingCloseKeys([]);
+    setResourceClipboard((current) => current?.sessionID === sessionID ? current : undefined);
+    setDragMoveRequest(undefined);
   }, [sessionID]);
   useEffect(() => {
     if (!active) return;
@@ -131,6 +144,12 @@ export function ProjectBrowserSurface({
     window.addEventListener("focus", refreshGit);
     return () => window.removeEventListener("focus", refreshGit);
   }, [active, queryClient, sessionID]);
+  useEffect(() => {
+    if (!active || rootPaths.length === 0) return;
+    return watchElectronProjectDirectories(rootPaths, () => {
+      void queryClient.invalidateQueries({ queryKey: ["session", sessionID, "project"] });
+    });
+  }, [active, queryClient, sessionID, rootPaths.join("\n")]);
   useEffect(() => {
     if (!fileReveal || rootsQuery.isLoading || rootsQuery.isFetching) {
       return;
@@ -197,6 +216,49 @@ export function ProjectBrowserSurface({
     },
     onError: (error) => toast.error(projectBrowserError(error, t)),
   });
+  const copyMutation = useMutation({
+    mutationFn: ({ destination, source, targetSessionID, unique }: {
+      destination: ProjectEntryTarget;
+      open: boolean;
+      source: ProjectEntryTarget;
+      targetSessionID: string;
+      unique: boolean;
+    }) => copyProjectEntry(token, targetSessionID, {
+      sourceRootID: source.rootID,
+      sourcePath: source.path,
+      targetRootID: destination.rootID,
+      targetParentPath: destination.path,
+      unique,
+    }),
+    onSuccess: (entry, variables) => {
+      void invalidateProject(variables.targetSessionID);
+      if (variables.open && entry.type === "file") workspace.openPinnedInSession(variables.targetSessionID, entry);
+      toast.success(t("project.browserCopyDone"));
+    },
+    onError: (error) => toast.error(projectBrowserError(error, t)),
+  });
+  const moveMutation = useMutation({
+    mutationFn: ({ destination, source, targetSessionID }: {
+      clearClipboard: boolean;
+      destination: ProjectEntryTarget;
+      fromDrag: boolean;
+      source: ProjectEntryTarget;
+      targetSessionID: string;
+    }) => moveProjectEntry(token, targetSessionID, {
+      sourceRootID: source.rootID,
+      sourcePath: source.path,
+      targetRootID: destination.rootID,
+      targetParentPath: destination.path,
+    }),
+    onSuccess: (entry, variables) => {
+      workspace.moveUnderInSession(variables.targetSessionID, variables.source, entry);
+      if (variables.clearClipboard) setResourceClipboard(undefined);
+      if (variables.fromDrag) setDragMoveRequest(undefined);
+      void invalidateProject(variables.targetSessionID);
+      toast.success(t("project.browserMoveDone"));
+    },
+    onError: (error) => toast.error(projectBrowserError(error, t)),
+  });
 
   const setDirty = (targetSessionID: string, selection: ProjectSelection, dirty: boolean) => {
     const key = projectSelectionKey(selection);
@@ -235,12 +297,69 @@ export function ProjectBrowserSurface({
     setNameRequest({ mode: "rename", target });
   };
 
-  const refreshEntry = (target: ProjectEntryTarget) => {
-    const path = target.type === "dir" ? target.path : projectParentPath(target.path);
-    void queryClient.invalidateQueries({ queryKey: queryKeys.projectTree(sessionID, target.rootID, path) });
-    if (target.type === "file") {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.projectFile(sessionID, target.rootID, target.path) });
+  const hasDirtyUnder = (target: ProjectEntryTarget) => workspace.tabs.some(
+    (tab) => dirtyKeys.has(projectSelectionKey(tab)) && projectPathContains(target, tab),
+  );
+
+  const copyEntry = (target: ProjectEntryTarget) => {
+    setResourceClipboard({ mode: "copy", sessionID, target });
+    toast.success(t("project.browserCopiedEntry"));
+  };
+
+  const cutEntry = (target: ProjectEntryTarget) => {
+    if (hasDirtyUnder(target)) {
+      toast.warning(t("project.browserSaveBeforeMove"));
+      return;
     }
+    setResourceClipboard({ mode: "cut", sessionID, target });
+    toast.success(t("project.browserCutEntryReady"));
+  };
+
+  const pasteEntry = (destination: ProjectEntryTarget) => {
+    if (!resourceClipboard || resourceClipboard.sessionID !== sessionID || destination.type !== "dir") return;
+    const variables = { destination, source: resourceClipboard.target, targetSessionID: sessionID };
+    if (resourceClipboard.mode === "cut") {
+      if (hasDirtyUnder(resourceClipboard.target)) {
+        toast.warning(t("project.browserSaveBeforeMove"));
+        return;
+      }
+      moveMutation.mutate({ ...variables, clearClipboard: true, fromDrag: false });
+    } else {
+      copyMutation.mutate({ ...variables, open: false, unique: false });
+    }
+  };
+
+  const duplicateEntry = (target: ProjectEntryTarget) => {
+    const destination: ProjectEntryTarget = {
+      name: projectParentPath(target.path),
+      path: projectParentPath(target.path),
+      rootID: target.rootID,
+      type: "dir",
+    };
+    copyMutation.mutate({ destination, open: true, source: target, targetSessionID: sessionID, unique: true });
+  };
+
+  const moveEntry = (source: ProjectEntryTarget, destination: ProjectEntryTarget) => {
+    if (hasDirtyUnder(source)) {
+      toast.warning(t("project.browserSaveBeforeMove"));
+      return;
+    }
+    setDragMoveRequest({ destination, source });
+  };
+
+  const revealEntry = (target: ProjectEntryTarget) => {
+    const root = roots.find((candidate) => candidate.id === target.rootID);
+    if (!root) return;
+    void revealDesktopPath(projectAbsolutePath(root.path, target.path)).then((revealed) => {
+      if (!revealed) toast.error(t("project.revealFailed"));
+    });
+  };
+
+  const openEntryTerminal = (target: ProjectEntryTarget) => {
+    const root = roots.find((candidate) => candidate.id === target.rootID);
+    if (!root) return;
+    const directory = target.type === "dir" ? target.path : projectParentPath(target.path);
+    onOpenTerminal(projectAbsolutePath(root.path, directory));
   };
 
   const copyPath = (target: ProjectEntryTarget) => {
@@ -277,13 +396,29 @@ export function ProjectBrowserSurface({
     });
   };
 
+  const referenceSelection = (selection: ProjectSelection, range: ProjectEditorSelection) => {
+    const root = roots.find((candidate) => candidate.id === selection.rootID);
+    if (!root) {
+      toast.error(t("project.browserPathCopyFailed"));
+      return;
+    }
+    addProjectReferenceToSessionDraft(sessionID, {
+      name: projectFileName(selection.path),
+      path: selection.path,
+      sourcePath: projectAbsolutePath(root.path, selection.path),
+      rootID: selection.rootID,
+      kind: "file",
+      ...range,
+    });
+  };
+
   const namePending = (createMutation.isPending && createMutation.variables?.targetSessionID === sessionID)
     || (renameMutation.isPending && renameMutation.variables?.targetSessionID === sessionID);
   const deletePending = deleteMutation.isPending && deleteMutation.variables?.targetSessionID === sessionID;
   return (
-    <div aria-hidden={!active} className={cn("absolute inset-0 z-20 min-h-0 overflow-hidden bg-[var(--workspace-background)] text-card-foreground", !active && "pointer-events-none invisible opacity-0")}>
+    <div aria-hidden={!active} className={cn("absolute inset-0 z-20 min-h-0 overflow-hidden bg-[var(--workspace-background)] text-card-foreground dark:bg-[#1c1c1c]", !active && "pointer-events-none invisible opacity-0")}>
       <ResizablePanelGroup
-        className="h-full min-h-0 overflow-hidden border-t bg-card"
+        className="h-full min-h-0 overflow-hidden border-t bg-card dark:bg-[#1c1c1c]"
         defaultLayout={readPanelLayout(layoutStorageKeys.projectBrowserRatio, { tree: 28, viewer: 72 }, { minPercent: 15, maxPercent: 85 })}
         id="project-browser-layout"
         orientation="horizontal"
@@ -291,11 +426,10 @@ export function ProjectBrowserSurface({
       >
         <ResizablePanel id="tree" className="min-w-0" minSize={180} maxSize="45%">
           <ProjectSidebar
-            refreshing={rootsQuery.isFetching || gitQueries.some((query) => query.isFetching)}
-            onRefresh={() => void invalidateProject(sessionID)}
             files={(
               <ProjectTree
                 active={active}
+                canPaste={resourceClipboard?.sessionID === sessionID}
                 error={rootsQuery.error}
                 expandedKeys={workspace.expandedKeys}
                 gitStatuses={gitStatuses}
@@ -305,14 +439,20 @@ export function ProjectBrowserSurface({
                 sessionID={sessionID}
                 token={token}
                 onCopyAbsolutePath={copyAbsolutePath}
+                onCopyEntry={copyEntry}
                 onCopyPath={copyPath}
                 onCreate={(target, type) => setNameRequest({ mode: type === "dir" ? "newFolder" : "newFile", target })}
+                onCutEntry={cutEntry}
                 onDelete={setDeleteTarget}
+                onDuplicate={duplicateEntry}
+                onMove={moveEntry}
                 onOpenPinned={workspace.openPinned}
                 onOpenPreview={workspace.openPreview}
-                onRefresh={refreshEntry}
+                onOpenTerminal={openEntryTerminal}
+                onPaste={pasteEntry}
                 onReference={referenceEntry}
                 onRename={requestRename}
+                onRevealInFinder={revealEntry}
                 onToggle={workspace.toggleDirectory}
               />
             )}
@@ -335,6 +475,7 @@ export function ProjectBrowserSurface({
             onDirtyChange={setDirty}
             onOpenPreview={workspace.openPreview}
             onPin={workspace.pinTab}
+            onReference={referenceSelection}
             onRequestClose={requestClose}
             onReveal={workspace.reveal}
           />
@@ -363,6 +504,19 @@ export function ProjectBrowserSurface({
         onConfirm={() => deleteTarget && deleteMutation.mutate({
           closingKeys: workspace.tabs.filter((tab) => projectPathContains(deleteTarget, tab)).map(projectTabKey),
           target: deleteTarget,
+          targetSessionID: sessionID,
+        })}
+      />
+      <ProjectMoveDialog
+        destination={dragMoveRequest?.destination}
+        pending={moveMutation.isPending && moveMutation.variables?.fromDrag === true}
+        source={dragMoveRequest?.source}
+        onCancel={() => setDragMoveRequest(undefined)}
+        onConfirm={() => dragMoveRequest && moveMutation.mutate({
+          clearClipboard: false,
+          destination: dragMoveRequest.destination,
+          fromDrag: true,
+          source: dragMoveRequest.source,
           targetSessionID: sessionID,
         })}
       />

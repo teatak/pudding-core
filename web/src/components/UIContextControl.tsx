@@ -39,7 +39,8 @@ export function UIContextControl({
           <SquareMousePointer
             className={cn(
               "size-4",
-              enabled && "[&_path:first-child]:fill-primary [&_path:first-child]:stroke-primary",
+              enabled &&
+                "[&_path:first-child]:fill-primary [&_path:first-child]:stroke-primary dark:[&_path:first-child]:fill-indigo-400 dark:[&_path:first-child]:stroke-indigo-400",
             )}
           />
         </Button>

@@ -1,9 +1,10 @@
-import { FileCode2, FileDiff, X } from "lucide-react";
+import { FileDiff, X } from "lucide-react";
 
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 import { ProjectTabContextMenu } from "./ProjectContextMenu";
+import { ProjectFileTypeIcon } from "./ProjectFileTypeIcon";
 import { projectFileName, projectSelectionKey, projectTabKey } from "./projectPaths";
 import { isProjectGitDiffTab, type ProjectSelection, type ProjectTab } from "./types";
 
@@ -28,7 +29,7 @@ export function ProjectFileTabs({
   const activeKey = active ? projectTabKey(active) : undefined;
 
   return (
-    <div className="flex h-10 shrink-0 items-stretch overflow-x-auto border-b bg-muted/20">
+    <div className="flex h-10 shrink-0 items-stretch overflow-x-auto border-b bg-muted/20 dark:bg-[#1c1c1c]">
       {tabs.map((tab, index) => {
         const key = projectTabKey(tab);
         const selected = key === activeKey;
@@ -47,7 +48,7 @@ export function ProjectFileTabs({
             <div
               className={cn(
                 "group flex h-full min-w-28 max-w-56 shrink-0 items-center border-r text-xs text-muted-foreground",
-                selected && "bg-card text-foreground",
+                selected && "bg-card text-foreground dark:bg-[#242424]",
               )}
             >
               <button
@@ -58,7 +59,7 @@ export function ProjectFileTabs({
                 onClick={() => onActivate(tab)}
                 onDoubleClick={() => onPin(tab)}
               >
-                {gitDiff ? <FileDiff className="size-3.5 shrink-0 text-muted-foreground" /> : <FileCode2 className="size-3.5 shrink-0 text-muted-foreground" />}
+                {gitDiff ? <FileDiff className="size-3.5 shrink-0 text-muted-foreground" /> : <ProjectFileTypeIcon path={tab.path} />}
                 <span className={cn("min-w-0 flex-1 truncate", !tab.pinned && "italic")}>{name}</span>
                 {dirty ? <span aria-label={t("project.browserUnsaved")} className="size-1.5 shrink-0 rounded-full bg-foreground/70" /> : null}
               </button>

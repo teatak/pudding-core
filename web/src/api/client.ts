@@ -32,6 +32,7 @@ import {
   projectTreeResponse,
   createProjectEntryRequest,
   renameProjectEntryRequest,
+  transferProjectEntryRequest,
   saveProjectFileRequest,
   patchCanvasItemRequest,
   probeProviderModelsRequest,
@@ -405,6 +406,28 @@ export function renameProjectEntry(
   return request(token, `/sessions/${encodeURIComponent(sessionID)}/project/entries`, projectEntryMutation, {
     method: "PATCH",
     body: JSON.stringify(renameProjectEntryRequest.parse(body)),
+  });
+}
+
+export function copyProjectEntry(
+  token: string,
+  sessionID: string,
+  body: z.infer<typeof transferProjectEntryRequest>,
+): Promise<ProjectEntryMutation> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/project/entries/copy`, projectEntryMutation, {
+    method: "POST",
+    body: JSON.stringify(transferProjectEntryRequest.parse(body)),
+  });
+}
+
+export function moveProjectEntry(
+  token: string,
+  sessionID: string,
+  body: z.infer<typeof transferProjectEntryRequest>,
+): Promise<ProjectEntryMutation> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/project/entries/move`, projectEntryMutation, {
+    method: "POST",
+    body: JSON.stringify(transferProjectEntryRequest.parse(body)),
   });
 }
 

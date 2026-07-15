@@ -10,10 +10,11 @@ import {
   type BackgroundProcess,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { AppPopoverContent as PopoverContent } from "@/components/AppPopover";
 import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 

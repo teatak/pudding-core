@@ -10,7 +10,7 @@ export const sessionRailLayout = {
 } as const;
 
 export const chatLayout = {
-  minimumContentWidthPx: 480,
+  minimumContentWidthPx: 380,
   horizontalGutterPx: 40,
 } as const;
 

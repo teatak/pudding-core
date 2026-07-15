@@ -4,6 +4,7 @@ package projectfs
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -104,12 +105,268 @@ func Rename(root, path, newName string) (Entry, error) {
 	}, nil
 }
 
+// Copy copies a regular file or directory between authorized project roots.
+// Symlinks and special files are intentionally rejected.
+func Copy(sourceRoot, sourcePath, targetRoot, targetParentPath, requestedName string, unique bool) (Entry, error) {
+	source, _, info, err := existingPath(sourceRoot, sourcePath, false)
+	if err != nil {
+		return Entry{}, err
+	}
+	entryType, err := supportedEntryType(info)
+	if err != nil {
+		return Entry{}, err
+	}
+	parent, parentRel, parentInfo, err := existingPath(targetRoot, targetParentPath, true)
+	if err != nil {
+		return Entry{}, err
+	}
+	if !parentInfo.IsDir() {
+		return Entry{}, ErrNotDirectory
+	}
+	name := strings.TrimSpace(requestedName)
+	if name == "" {
+		name = filepath.Base(source)
+	}
+	name, err = validateName(name)
+	if err != nil {
+		return Entry{}, err
+	}
+	if unique {
+		name, err = availableCopyName(parent, name, info.IsDir())
+		if err != nil {
+			return Entry{}, err
+		}
+	}
+	target := filepath.Join(parent, name)
+	if err := authorizeParent(targetRoot, target); err != nil {
+		return Entry{}, err
+	}
+	if samePath(source, target) {
+		return Entry{}, ErrConflict
+	}
+	if info.IsDir() && pathContains(source, target) {
+		return Entry{}, ErrPathNotAllowed
+	}
+	if err := copyEntryNoReplace(source, target, info); err != nil {
+		return Entry{}, err
+	}
+	return Entry{Name: name, Path: joinRelative(parentRel, name), Type: entryType}, nil
+}
+
+// Move moves a regular file or directory between authorized project roots.
+// Moves within one root use an atomic no-replace rename. Cross-root moves copy
+// first and remove the source only after the destination is complete.
+func Move(sourceRoot, sourcePath, targetRoot, targetParentPath, requestedName string) (Entry, error) {
+	source, sourceRel, info, err := existingPath(sourceRoot, sourcePath, false)
+	if err != nil {
+		return Entry{}, err
+	}
+	entryType, err := supportedEntryType(info)
+	if err != nil {
+		return Entry{}, err
+	}
+	parent, parentRel, parentInfo, err := existingPath(targetRoot, targetParentPath, true)
+	if err != nil {
+		return Entry{}, err
+	}
+	if !parentInfo.IsDir() {
+		return Entry{}, ErrNotDirectory
+	}
+	name := strings.TrimSpace(requestedName)
+	if name == "" {
+		name = filepath.Base(source)
+	}
+	name, err = validateName(name)
+	if err != nil {
+		return Entry{}, err
+	}
+	target := filepath.Join(parent, name)
+	if err := authorizeParent(targetRoot, target); err != nil {
+		return Entry{}, err
+	}
+	if samePath(source, target) {
+		return Entry{Name: name, Path: sourceRel, Type: entryType}, nil
+	}
+	if info.IsDir() && pathContains(source, target) {
+		return Entry{}, ErrPathNotAllowed
+	}
+	if filepath.Clean(sourceRoot) == filepath.Clean(targetRoot) {
+		if err := renameNoReplace(source, target); err != nil {
+			return Entry{}, err
+		}
+	} else {
+		if err := copyEntryNoReplace(source, target, info); err != nil {
+			return Entry{}, err
+		}
+		if err := os.RemoveAll(source); err != nil {
+			_ = os.RemoveAll(target)
+			return Entry{}, err
+		}
+	}
+	return Entry{Name: name, Path: joinRelative(parentRel, name), Type: entryType}, nil
+}
+
 func Remove(root, path string) error {
 	target, _, _, err := existingPath(root, path, false)
 	if err != nil {
 		return err
 	}
 	return os.RemoveAll(target)
+}
+
+func supportedEntryType(info os.FileInfo) (string, error) {
+	if info.IsDir() {
+		return "dir", nil
+	}
+	if info.Mode().IsRegular() {
+		return "file", nil
+	}
+	return "", ErrNotFile
+}
+
+func availableCopyName(parent, original string, directory bool) (string, error) {
+	ext := ""
+	base := original
+	if !directory {
+		ext = filepath.Ext(original)
+		base = strings.TrimSuffix(original, ext)
+	}
+	for index := 1; ; index++ {
+		suffix := " copy"
+		if index > 1 {
+			suffix = fmt.Sprintf(" copy %d", index)
+		}
+		candidate := base + suffix + ext
+		if _, err := os.Lstat(filepath.Join(parent, candidate)); errors.Is(err, os.ErrNotExist) {
+			return candidate, nil
+		} else if err != nil {
+			return "", err
+		}
+	}
+}
+
+func copyEntryNoReplace(source, target string, info os.FileInfo) error {
+	if _, err := os.Lstat(target); err == nil {
+		return ErrConflict
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	parent := filepath.Dir(target)
+	if info.IsDir() {
+		temporary, err := os.MkdirTemp(parent, ".pudding-copy-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(temporary)
+		if err := copyDirectoryContents(source, temporary); err != nil {
+			return err
+		}
+		if err := os.Chmod(temporary, info.Mode().Perm()); err != nil {
+			return err
+		}
+		return renameNoReplace(temporary, target)
+	}
+	if !info.Mode().IsRegular() {
+		return ErrNotFile
+	}
+	temporary, err := os.CreateTemp(parent, ".pudding-copy-")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := copyRegularFile(source, temporary, info.Mode().Perm()); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return renameNoReplace(temporaryPath, target)
+}
+
+func copyDirectoryContents(source, target string) error {
+	type directoryMode struct {
+		mode os.FileMode
+		path string
+	}
+	directories := make([]directoryMode, 0)
+	err := filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == source {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return ErrSymlink
+		}
+		rel, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		destination := filepath.Join(target, rel)
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if err := os.Mkdir(destination, info.Mode().Perm()|0o700); err != nil {
+				return err
+			}
+			directories = append(directories, directoryMode{mode: info.Mode().Perm(), path: destination})
+			return nil
+		}
+		if !entry.Type().IsRegular() {
+			return ErrNotFile
+		}
+		file, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
+		if err != nil {
+			return err
+		}
+		if err := copyRegularFile(path, file, info.Mode().Perm()); err != nil {
+			file.Close()
+			return err
+		}
+		return file.Close()
+	})
+	if err != nil {
+		return err
+	}
+	for index := len(directories) - 1; index >= 0; index-- {
+		if err := os.Chmod(directories[index].path, directories[index].mode); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyRegularFile(source string, destination *os.File, mode os.FileMode) error {
+	input, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	if _, err := io.Copy(destination, input); err != nil {
+		return err
+	}
+	return destination.Chmod(mode)
+}
+
+func samePath(left, right string) bool {
+	leftAbs, leftErr := filepath.Abs(left)
+	rightAbs, rightErr := filepath.Abs(right)
+	return leftErr == nil && rightErr == nil && filepath.Clean(leftAbs) == filepath.Clean(rightAbs)
+}
+
+func pathContains(parent, child string) bool {
+	parentAbs, parentErr := filepath.Abs(parent)
+	childAbs, childErr := filepath.Abs(child)
+	if parentErr != nil || childErr != nil {
+		return false
+	}
+	rel, err := filepath.Rel(filepath.Clean(parentAbs), filepath.Clean(childAbs))
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func existingPath(root, rawPath string, allowRoot bool) (string, string, os.FileInfo, error) {

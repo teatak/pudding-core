@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, File, FileCode2, Folder, FolderOpen } from "lucide-react";
-import type { ReactNode } from "react";
+import { ChevronRight, File } from "lucide-react";
+import { useState, type ReactNode } from "react";
 
 import {
   listProjectTree,
@@ -11,23 +11,35 @@ import {
 import { queryKeys } from "@/api/queryKeys";
 import { Spinner } from "@/components/Spinner";
 import { useI18n } from "@/i18n";
-import { writeProjectReferenceDrag } from "@/lib/projectReferences";
+import {
+  dataTransferHasProjectEntry,
+  readProjectEntryDrag,
+  writeProjectReferenceDrag,
+} from "@/lib/projectReferences";
 import { cn } from "@/lib/utils";
 
 import { ProjectEntryContextMenu } from "./ProjectContextMenu";
+import { ProjectFileTypeIcon, ProjectFolderTypeIcon } from "./ProjectFileTypeIcon";
 import { projectGitFileKey, projectGitStatusLabel, projectGitStatusTone } from "./git/gitStatus";
 import { projectBrowserError } from "./projectErrors";
-import { projectAbsolutePath } from "./projectPaths";
+import { projectAbsolutePath, projectParentPath } from "./projectPaths";
 import type { ProjectEntryTarget, ProjectSelection } from "./types";
 
 type TreeActions = {
+  canPaste: boolean;
   onCopyAbsolutePath: (target: ProjectEntryTarget) => void;
+  onCopyEntry: (target: ProjectEntryTarget) => void;
   onCopyPath: (target: ProjectEntryTarget) => void;
   onCreate: (target: ProjectEntryTarget, type: "dir" | "file") => void;
+  onCutEntry: (target: ProjectEntryTarget) => void;
   onDelete: (target: ProjectEntryTarget) => void;
-  onRefresh: (target: ProjectEntryTarget) => void;
+  onDuplicate: (target: ProjectEntryTarget) => void;
+  onMove: (source: ProjectEntryTarget, destination: ProjectEntryTarget) => void;
+  onOpenTerminal: (target: ProjectEntryTarget) => void;
+  onPaste: (target: ProjectEntryTarget) => void;
   onReference: (target: ProjectEntryTarget) => void;
   onRename: (target: ProjectEntryTarget) => void;
+  onRevealInFinder: (target: ProjectEntryTarget) => void;
 };
 
 export function ProjectTree({
@@ -60,7 +72,7 @@ export function ProjectTree({
 }) {
   const { t } = useI18n();
   return (
-    <div className="py-1.5">
+    <div className="py-1">
         {loading ? (
           <ProjectTreeStatus><Spinner />{t("common.loading")}</ProjectTreeStatus>
         ) : error ? (
@@ -126,6 +138,7 @@ function ProjectDirectoryNode({
   const { t } = useI18n();
   const key = `${root.id}:${path}`;
   const expanded = expandedKeys.includes(key);
+  const [dropActive, setDropActive] = useState(false);
   const target: ProjectEntryTarget = { rootID: root.id, path, name: label, type: "dir" };
   const treeQuery = useQuery({
     enabled: active && expanded,
@@ -138,8 +151,11 @@ function ProjectDirectoryNode({
     <div>
       <ProjectEntryContextMenu {...actions} isRoot={isRoot} target={target}>
         <button
-          className="flex h-7 w-full min-w-0 items-center gap-1 pr-2 text-left text-xs hover:bg-accent hover:text-accent-foreground"
-          style={{ paddingLeft: `${8 + depth * 14}px` }}
+          className={cn(
+            "flex h-6 w-full min-w-0 items-center gap-1 pr-2 text-left text-xs hover:bg-accent hover:text-accent-foreground dark:hover:bg-white/[0.05]",
+            dropActive && "bg-primary/10 text-foreground ring-1 ring-inset ring-primary/40",
+          )}
+          style={{ paddingLeft: `${7 + depth * 13}px` }}
           title={isRoot ? root.path : path}
           draggable
           type="button"
@@ -151,21 +167,56 @@ function ProjectDirectoryNode({
             rootID: target.rootID,
             kind: "dir",
           })}
+          onDragEnd={() => setDropActive(false)}
+          onDragEnter={(event) => {
+            if (dataTransferHasProjectEntry(event.dataTransfer)) setDropActive(true);
+          }}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropActive(false);
+          }}
+          onDragOver={(event) => {
+            if (!dataTransferHasProjectEntry(event.dataTransfer)) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+            setDropActive(true);
+          }}
+          onDrop={(event) => {
+            const source = readProjectEntryDrag(event.dataTransfer);
+            setDropActive(false);
+            if (!source) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const sourceTarget: ProjectEntryTarget = {
+              name: source.name,
+              path: source.path,
+              rootID: source.rootID,
+              type: source.kind,
+            };
+            if (canMoveProjectEntry(sourceTarget, target)) actions.onMove(sourceTarget, target);
+          }}
         >
           <ChevronRight className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-90")} />
-          {expanded ? <FolderOpen className="size-4 shrink-0 text-amber-500" /> : <Folder className="size-4 shrink-0 text-amber-500" />}
+          <ProjectFolderTypeIcon name={label} open={expanded} root={isRoot} />
           <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
         </button>
       </ProjectEntryContextMenu>
       {expanded ? (
-        treeQuery.isLoading ? (
-          null
-        ) : treeQuery.isError ? (
-          <div className="px-3 py-1.5 text-[11px] text-destructive" style={{ paddingLeft: `${36 + depth * 14}px` }}>
-            {projectBrowserError(treeQuery.error, t)}
-          </div>
-        ) : (
-          <>
+        <div className="relative">
+          {!isRoot ? (
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 w-px bg-border/70"
+              style={{ left: `${14 + depth * 13}px` }}
+            />
+          ) : null}
+          {treeQuery.isLoading ? (
+            null
+          ) : treeQuery.isError ? (
+            <div className="px-3 py-1 text-[11px] text-destructive" style={{ paddingLeft: `${33 + depth * 13}px` }}>
+              {projectBrowserError(treeQuery.error, t)}
+            </div>
+          ) : (
+            <>
             {treeQuery.data?.entries.map((entry) => entry.type === "dir" ? (
               <ProjectDirectoryNode
                 key={entry.path}
@@ -199,12 +250,13 @@ function ProjectDirectoryNode({
               />
             ))}
             {treeQuery.data?.truncated ? (
-              <div className="px-3 py-1.5 text-[11px] text-warning" style={{ paddingLeft: `${36 + depth * 14}px` }}>
+              <div className="px-3 py-1 text-[11px] text-warning" style={{ paddingLeft: `${33 + depth * 13}px` }}>
                 {t("project.browserTreeTruncated")}
               </div>
             ) : null}
-          </>
-        )
+            </>
+          )}
+        </div>
       ) : null}
     </div>
   );
@@ -230,18 +282,26 @@ function ProjectFileNode({
   onOpenPinned: () => void;
   onOpenPreview: () => void;
 }) {
+  const [dropActive, setDropActive] = useState(false);
   const disabled = entry.type !== "file";
   const target: ProjectEntryTarget = { rootID, path: entry.path, name: entry.name, type: "file" };
+  const destination: ProjectEntryTarget = {
+    rootID,
+    path: projectParentPath(entry.path),
+    name: projectParentPath(entry.path),
+    type: "dir",
+  };
   const button = (
     <button
       aria-current={selected ? "page" : undefined}
       className={cn(
-        "flex h-7 w-full min-w-0 select-none items-center gap-1.5 pr-2 text-left text-xs hover:bg-accent hover:text-accent-foreground aria-[current=page]:bg-accent aria-[current=page]:text-accent-foreground",
+        "flex h-6 w-full min-w-0 select-none items-center gap-1.5 pr-2 text-left text-xs hover:bg-accent hover:text-accent-foreground aria-[current=page]:bg-accent aria-[current=page]:text-accent-foreground dark:hover:bg-white/[0.05] dark:aria-[current=page]:bg-white/[0.08]",
         disabled && "cursor-default text-muted-foreground/60 hover:bg-transparent",
+        dropActive && "bg-primary/10 text-foreground ring-1 ring-inset ring-primary/40",
       )}
       disabled={disabled}
       draggable={!disabled}
-      style={{ paddingLeft: `${26 + depth * 14}px` }}
+      style={{ paddingLeft: `${25 + depth * 13}px` }}
       title={entry.path}
       type="button"
       onClick={onOpenPreview}
@@ -257,8 +317,35 @@ function ProjectFileNode({
           });
         }
       }}
+      onDragEnd={() => setDropActive(false)}
+      onDragEnter={(event) => {
+        if (dataTransferHasProjectEntry(event.dataTransfer)) setDropActive(true);
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropActive(false);
+      }}
+      onDragOver={(event) => {
+        if (!dataTransferHasProjectEntry(event.dataTransfer)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        setDropActive(true);
+      }}
+      onDrop={(event) => {
+        const source = readProjectEntryDrag(event.dataTransfer);
+        setDropActive(false);
+        if (!source) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const sourceTarget: ProjectEntryTarget = {
+          name: source.name,
+          path: source.path,
+          rootID: source.rootID,
+          type: source.kind,
+        };
+        if (canMoveProjectEntry(sourceTarget, destination)) actions.onMove(sourceTarget, destination);
+      }}
     >
-      {entry.type === "file" ? <FileCode2 className="size-3.5 shrink-0 text-muted-foreground" /> : <File className="size-3.5 shrink-0" />}
+      {entry.type === "file" ? <ProjectFileTypeIcon path={entry.path} /> : <File className="size-3.5 shrink-0" />}
       <span className="min-w-0 flex-1 truncate">{entry.name}</span>
       {status ? (
         <span className={cn("w-3 shrink-0 text-center font-mono text-[11px] font-semibold", projectGitStatusTone(status))}>
@@ -275,4 +362,12 @@ function ProjectFileNode({
 
 function ProjectTreeStatus({ children }: { children: ReactNode }) {
   return <div className="flex items-center gap-2 px-3 py-4 text-xs text-muted-foreground">{children}</div>;
+}
+
+function canMoveProjectEntry(source: ProjectEntryTarget, destination: ProjectEntryTarget) {
+  if (destination.type !== "dir" || source.path === ".") return false;
+  if (source.rootID !== destination.rootID) return true;
+  if (source.path === destination.path) return false;
+  if (projectParentPath(source.path) === destination.path) return false;
+  return source.type !== "dir" || !destination.path.startsWith(`${source.path}/`);
 }

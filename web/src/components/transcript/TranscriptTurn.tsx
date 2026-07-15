@@ -144,7 +144,11 @@ function partsEqual(previous: NonNullable<TranscriptTurnVM["user"]>["parts"], ne
         part.rootID === other.rootID &&
         part.path === other.path &&
         part.sourcePath === other.sourcePath &&
-        part.kind === other.kind
+        part.kind === other.kind &&
+        part.startLine === other.startLine &&
+        part.startColumn === other.startColumn &&
+        part.endLine === other.endLine &&
+        part.endColumn === other.endColumn
       );
     }
     if (part.type === "text" && other.type === "text") {
@@ -222,7 +226,11 @@ function projectReferencesEqual(
       item.path === other.path &&
       item.sourcePath === other.sourcePath &&
       item.rootID === other.rootID &&
-      item.kind === other.kind
+      item.kind === other.kind &&
+      item.startLine === other.startLine &&
+      item.startColumn === other.startColumn &&
+      item.endLine === other.endLine &&
+      item.endColumn === other.endColumn
     );
   });
 }

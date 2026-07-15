@@ -62,6 +62,40 @@ test("watches the parent directory and debounces changes for the selected file",
   service.closeAll();
 });
 
+test("watches project directories recursively and ignores hidden or generated paths", async () => {
+  const watched = [];
+  const service = new ProjectFileWatcher({
+    debounceMs: 5,
+    watchDirectory: (directory, options, listener) => {
+      const watcher = new FakeWatcher();
+      watched.push({ directory, listener, options, watcher });
+      return watcher;
+    },
+  });
+  const sender = new FakeSender(6);
+  const projectPath = path.resolve("/tmp/project");
+
+  service.subscribe(sender, { id: "project", kind: "directory", path: projectPath });
+  assert.equal(watched[0].directory, projectPath);
+  assert.deepEqual(watched[0].options, { encoding: "utf8", persistent: false, recursive: true });
+
+  watched[0].listener("change", "node_modules/pkg/index.js");
+  watched[0].listener("change", ".git/index");
+  watched[0].listener("rename", "src/main.go");
+  await new Promise((resolve) => setTimeout(resolve, 15));
+
+  assert.deepEqual(sender.events, [{
+    channel: projectFileChangedChannel,
+    payload: {
+      eventType: "rename",
+      id: "project",
+      path: projectPath,
+      changedPath: path.join(projectPath, "src/main.go"),
+    },
+  }]);
+  service.closeAll();
+});
+
 test("unsubscribe and renderer destruction close native watchers", () => {
   const watchers = [];
   const service = new ProjectFileWatcher({
@@ -137,6 +171,6 @@ test("rejects relative paths and invalid subscription ids", () => {
   const service = new ProjectFileWatcher({ watchDirectory: () => new FakeWatcher() });
   const sender = new FakeSender(3);
 
-  assert.throws(() => service.subscribe(sender, { id: "active", path: "relative.txt" }), /invalid project file watch path/);
+  assert.throws(() => service.subscribe(sender, { id: "active", path: "relative.txt" }), /invalid project watch path/);
   assert.throws(() => service.subscribe(sender, { id: "", path: path.resolve("/tmp/file.txt") }), /invalid project file subscription id/);
 });

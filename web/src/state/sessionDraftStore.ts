@@ -158,7 +158,13 @@ export function addProjectReferenceToSessionDraft(
   if (
     (draft.projectReferences ?? []).some(
       (reference) =>
-        reference.rootID === input.rootID && reference.path === input.path && reference.kind === input.kind,
+        reference.rootID === input.rootID &&
+        reference.path === input.path &&
+        reference.kind === input.kind &&
+        reference.startLine === input.startLine &&
+        reference.startColumn === input.startColumn &&
+        reference.endLine === input.endLine &&
+        reference.endColumn === input.endColumn,
     )
   ) {
     return false;

@@ -1,24 +1,20 @@
-import { ChevronDown, FolderTree, GitBranch, RefreshCw } from "lucide-react";
+import { ChevronDown, Folders, GitBranch } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import { usePanelRef } from "react-resizable-panels";
 
-import { Spinner } from "@/components/Spinner";
-import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useI18n } from "@/i18n";
 import { layoutStorageKeys } from "@/lib/layoutConstants";
 import { readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
 import { cn } from "@/lib/utils";
 
-const collapsedPanelPixels = 40;
+const collapsedPanelPixels = 39;
 const minimumPanelPixels = 120;
 const maximumRememberedPercent = 85;
 
-export function ProjectSidebar({ files, git, refreshing, onRefresh }: {
+export function ProjectSidebar({ files, git }: {
   files: ReactNode;
   git: ReactNode;
-  refreshing: boolean;
-  onRefresh: () => void;
 }) {
   const { t } = useI18n();
   const filesRef = usePanelRef();
@@ -30,7 +26,7 @@ export function ProjectSidebar({ files, git, refreshing, onRefresh }: {
 
   return (
     <ResizablePanelGroup
-      className="h-full min-h-0 bg-muted/20"
+      className="h-full min-h-0 bg-muted/20 dark:bg-[#1c1c1c]"
       defaultLayout={readPanelLayout(layoutStorageKeys.projectSidebarRatio, { files: 62, git: 38 }, { minPercent: 4, maxPercent: 96 })}
       id="project-sidebar-layout"
       orientation="vertical"
@@ -39,7 +35,7 @@ export function ProjectSidebar({ files, git, refreshing, onRefresh }: {
         <ResizablePanel
           id="files"
           className="min-h-0"
-          collapsedSize="40px"
+          collapsedSize="39px"
           collapsible
           minSize="120px"
           panelRef={filesRef}
@@ -51,13 +47,8 @@ export function ProjectSidebar({ files, git, refreshing, onRefresh }: {
           }}
         >
           <ProjectSidebarSection
-            action={(
-              <Button aria-label={t("common.refresh")} disabled={refreshing} size="icon-sm" type="button" variant="ghost" onClick={onRefresh}>
-                {refreshing ? <Spinner /> : <RefreshCw />}
-              </Button>
-            )}
             collapsed={filesCollapsed}
-            icon={<FolderTree />}
+            icon={<Folders />}
             label={t("project.browserFiles")}
             onToggle={() => togglePanel(filesRef.current, gitRef.current, filesCollapsed, filesExpandedSize.current)}
           >
@@ -68,7 +59,7 @@ export function ProjectSidebar({ files, git, refreshing, onRefresh }: {
         <ResizablePanel
           id="git"
           className="min-h-0"
-          collapsedSize="40px"
+          collapsedSize="39px"
           collapsible
           minSize="120px"
           panelRef={gitRef}
@@ -97,7 +88,7 @@ function ProjectSidebarSection({ action, children, collapsed, icon, label, onTog
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="flex h-10 shrink-0 items-center hover:bg-accent">
+      <div className="flex h-[39px] shrink-0 items-center hover:bg-accent dark:hover:bg-white/[0.05]">
         <button className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-left text-xs font-medium" type="button" onClick={onToggle}>
           <ChevronDown className={cn("size-4 shrink-0 transition-transform", collapsed && "-rotate-90")} />
           <span className="[&>svg]:size-4 [&>svg]:text-muted-foreground">{icon}</span>

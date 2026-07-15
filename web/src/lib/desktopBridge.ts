@@ -22,6 +22,7 @@ type ElectronDesktopBridge = {
   onOAuthConnected?: (listener: (payload: { provider?: string }) => void) => () => void;
   onUpdateState?: (listener: (state: DesktopUpdateState) => void) => () => void;
   openExternal: (url: string) => Promise<boolean>;
+  revealPath?: (path: string) => Promise<boolean>;
   pickDirectories: (options?: DirectoryPickerOptions) => Promise<string[]>;
   setLocale?: (locale: "zh-CN" | "zh-TW" | "en") => Promise<string>;
 };
@@ -50,6 +51,19 @@ export async function openExternalURL(url: string) {
     }
   }
   window.open(clean, "_blank", "noopener,noreferrer");
+}
+
+export async function revealDesktopPath(path: string) {
+  const clean = path.trim();
+  const bridge = desktopBridge();
+  if (!clean || !bridge?.revealPath) {
+    return false;
+  }
+  try {
+    return await bridge.revealPath(clean);
+  } catch {
+    return false;
+  }
 }
 
 export function onOAuthConnected(listener: (payload: { provider?: string }) => void) {

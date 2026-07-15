@@ -443,6 +443,10 @@ type ContentPart struct {
 	Resource            string          `json:"resource,omitempty"`
 	ResourceKind        string          `json:"kind,omitempty"`
 	RootID              string          `json:"rootID,omitempty"`
+	StartLine           int             `json:"startLine,omitempty"`
+	StartColumn         int             `json:"startColumn,omitempty"`
+	EndLine             int             `json:"endLine,omitempty"`
+	EndColumn           int             `json:"endColumn,omitempty"`
 }
 
 func (p ContentPart) MarshalJSON() ([]byte, error) {
@@ -469,6 +473,10 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 		Resource        string          `json:"resource,omitempty"`
 		ResourceKind    string          `json:"kind,omitempty"`
 		RootID          string          `json:"rootID,omitempty"`
+		StartLine       int             `json:"startLine,omitempty"`
+		StartColumn     int             `json:"startColumn,omitempty"`
+		EndLine         int             `json:"endLine,omitempty"`
+		EndColumn       int             `json:"endColumn,omitempty"`
 	}
 	out := contentPartJSON{
 		Type:            p.Type,
@@ -490,6 +498,10 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 		Resource:        p.Resource,
 		ResourceKind:    p.ResourceKind,
 		RootID:          p.RootID,
+		StartLine:       p.StartLine,
+		StartColumn:     p.StartColumn,
+		EndLine:         p.EndLine,
+		EndColumn:       p.EndColumn,
 	}
 	if p.Type == ContentPartToolResult {
 		out.Ok = &p.Ok
@@ -533,12 +545,16 @@ type LocalFolder struct {
 }
 
 type ProjectReference struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Path       string `json:"path"`
-	SourcePath string `json:"sourcePath"`
-	RootID     string `json:"rootID"`
-	Kind       string `json:"kind"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	SourcePath  string `json:"sourcePath"`
+	RootID      string `json:"rootID"`
+	Kind        string `json:"kind"`
+	StartLine   int    `json:"startLine,omitempty"`
+	StartColumn int    `json:"startColumn,omitempty"`
+	EndLine     int    `json:"endLine,omitempty"`
+	EndColumn   int    `json:"endColumn,omitempty"`
 }
 
 type Message struct {
@@ -661,6 +677,10 @@ func ProjectReferencePart(reference ProjectReference) ContentPart {
 		SourcePath:   reference.SourcePath,
 		RootID:       reference.RootID,
 		ResourceKind: reference.Kind,
+		StartLine:    reference.StartLine,
+		StartColumn:  reference.StartColumn,
+		EndLine:      reference.EndLine,
+		EndColumn:    reference.EndColumn,
 	}
 }
 
@@ -794,9 +814,33 @@ func NormalizeProjectReferences(references []ProjectReference) []ProjectReferenc
 		if reference.Kind != "file" && reference.Kind != "dir" {
 			continue
 		}
+		if !validProjectReferenceRange(reference) {
+			continue
+		}
 		out = append(out, reference)
 	}
 	return out
+}
+
+func validProjectReferenceRange(reference ProjectReference) bool {
+	values := []int{reference.StartLine, reference.StartColumn, reference.EndLine, reference.EndColumn}
+	set := 0
+	for _, value := range values {
+		if value < 0 {
+			return false
+		}
+		if value != 0 {
+			set++
+		}
+	}
+	if set == 0 {
+		return true
+	}
+	if reference.Kind != "file" || set != len(values) {
+		return false
+	}
+	return reference.EndLine > reference.StartLine ||
+		(reference.EndLine == reference.StartLine && reference.EndColumn >= reference.StartColumn)
 }
 
 func ProjectReferencesFromParts(parts []ContentPart) []ProjectReference {
@@ -806,12 +850,16 @@ func ProjectReferencesFromParts(parts []ContentPart) []ProjectReference {
 			continue
 		}
 		out = append(out, ProjectReference{
-			ID:         part.CallID,
-			Name:       part.Name,
-			Path:       part.Path,
-			SourcePath: part.SourcePath,
-			RootID:     part.RootID,
-			Kind:       part.ResourceKind,
+			ID:          part.CallID,
+			Name:        part.Name,
+			Path:        part.Path,
+			SourcePath:  part.SourcePath,
+			RootID:      part.RootID,
+			Kind:        part.ResourceKind,
+			StartLine:   part.StartLine,
+			StartColumn: part.StartColumn,
+			EndLine:     part.EndLine,
+			EndColumn:   part.EndColumn,
 		})
 	}
 	return NormalizeProjectReferences(out)
@@ -949,6 +997,9 @@ func NormalizeContentParts(parts []ContentPart) []ContentPart {
 		if part.Type != ContentPartUIContext && part.Type != ContentPartProjectRef {
 			part.ResourceKind, part.RootID = "", ""
 		}
+		if part.Type != ContentPartProjectRef {
+			part.StartLine, part.StartColumn, part.EndLine, part.EndColumn = 0, 0, 0, 0
+		}
 		switch part.Type {
 		case ContentPartText, ContentPartThought:
 			if part.Text == "" {
@@ -1024,12 +1075,16 @@ func NormalizeContentParts(parts []ContentPart) []ContentPart {
 			part.SummaryKind, part.SummaryCount = "", 0
 		case ContentPartProjectRef:
 			reference := NormalizeProjectReferences([]ProjectReference{{
-				ID:         part.CallID,
-				Name:       part.Name,
-				Path:       part.Path,
-				SourcePath: part.SourcePath,
-				RootID:     part.RootID,
-				Kind:       part.ResourceKind,
+				ID:          part.CallID,
+				Name:        part.Name,
+				Path:        part.Path,
+				SourcePath:  part.SourcePath,
+				RootID:      part.RootID,
+				Kind:        part.ResourceKind,
+				StartLine:   part.StartLine,
+				StartColumn: part.StartColumn,
+				EndLine:     part.EndLine,
+				EndColumn:   part.EndColumn,
 			}})
 			if len(reference) == 0 {
 				continue
@@ -1040,6 +1095,10 @@ func NormalizeContentParts(parts []ContentPart) []ContentPart {
 			part.SourcePath = reference[0].SourcePath
 			part.RootID = reference[0].RootID
 			part.ResourceKind = reference[0].Kind
+			part.StartLine = reference[0].StartLine
+			part.StartColumn = reference[0].StartColumn
+			part.EndLine = reference[0].EndLine
+			part.EndColumn = reference[0].EndColumn
 			part.Text, part.Args, part.Content = "", nil, ""
 			part.AttachmentKey, part.URL, part.MIME, part.Origin = "", "", "", ""
 			part.Size = 0

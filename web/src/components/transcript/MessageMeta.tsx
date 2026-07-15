@@ -81,7 +81,7 @@ export function MessageMeta({
       {uiContext ? (
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="grid size-5 place-items-center text-muted-foreground/60">
+            <span className="grid size-5 place-items-center text-muted-foreground">
               <SquareMousePointer className="size-3.5" />
             </span>
           </TooltipTrigger>

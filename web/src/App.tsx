@@ -30,7 +30,6 @@ import { useCanvasMCP } from "@/mcp/canvasTools";
 import { setWorkspaceOpen, useWorkspaceOpen } from "@/state/workspaceStore";
 import { clearFilePreviews } from "@/state/filePreviewStore";
 import { setRailLayoutForcedCollapsed } from "@/state/railStore";
-import { getElectronZoomFactor } from "@/state/shell";
 import { clearPendingPairingCode, pendingPairingCode } from "@/state/token";
 import { setToken, useToken } from "@/state/tokenStore";
 
@@ -179,8 +178,7 @@ export function App() {
       return;
     }
     const update = () => {
-      const visualWidth = leftWorkspaceNode.getBoundingClientRect().width * getElectronZoomFactor();
-      setRailLayoutForcedCollapsed(visualWidth < workspaceLayout.railAutoCollapsePx);
+      setRailLayoutForcedCollapsed(leftWorkspaceNode.getBoundingClientRect().width < workspaceLayout.railAutoCollapsePx);
     };
     update();
     const observer = new ResizeObserver(update);

@@ -1,12 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { FileDiff, RefreshCw } from "lucide-react";
+import { FileDiff } from "lucide-react";
 import { useTheme } from "next-themes";
 import ReactDiffViewer, { DiffMethod } from "react-diff-viewer-continued";
 
 import { getProjectGitDiff } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { Spinner } from "@/components/Spinner";
-import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
 
 import { projectBrowserError } from "../projectErrors";
@@ -37,9 +36,6 @@ export function ProjectGitDiffViewer({ active, selection, sessionID, token }: {
         <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
           {selection.staged ? t("project.gitStaged") : t("project.gitWorkingTree")}
         </span>
-        <Button aria-label={t("common.refresh")} disabled={diffQuery.isFetching} size="icon-sm" type="button" variant="ghost" onClick={() => void diffQuery.refetch()}>
-          {diffQuery.isFetching ? <Spinner /> : <RefreshCw />}
-        </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto bg-background">
         {diffQuery.isLoading ? (

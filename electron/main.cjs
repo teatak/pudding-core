@@ -803,6 +803,25 @@ ipcMain.handle("pudding:desktop:open-external", async (event, rawURL) => {
   return true;
 });
 
+ipcMain.handle("pudding:desktop:reveal-path", async (event, rawPath) => {
+  assertTrustedSender(event);
+  const target = String(rawPath || "").trim();
+  if (!path.isAbsolute(target)) {
+    return false;
+  }
+  let info;
+  try {
+    info = await fsp.stat(target);
+  } catch {
+    return false;
+  }
+  if (info.isDirectory()) {
+    return (await shell.openPath(target)) === "";
+  }
+  shell.showItemInFolder(target);
+  return true;
+});
+
 ipcMain.handle("pudding:desktop:set-locale", (event, locale) => {
   assertTrustedSender(event);
   return setShellLocale(locale);

@@ -12,9 +12,10 @@ type ProjectWorkspace = {
 };
 
 const EMPTY_WORKSPACE: ProjectWorkspace = { expandedKeys: [], tabs: [] };
+const PROJECT_WORKSPACE_STORAGE_KEY = "pudding.project.workspace.v1";
 
 export function useProjectWorkspace(sessionID: string) {
-  const [bySession, setBySession] = useState<Record<string, ProjectWorkspace>>({});
+  const [bySession, setBySession] = useState<Record<string, ProjectWorkspace>>(readProjectWorkspaces);
   const workspace = bySession[sessionID] || EMPTY_WORKSPACE;
   const selected = useMemo(
     () => workspace.tabs.find((tab) => projectTabKey(tab) === workspace.activeKey),
@@ -22,7 +23,11 @@ export function useProjectWorkspace(sessionID: string) {
   );
 
   const updateSession = (targetSessionID: string, change: (current: ProjectWorkspace) => ProjectWorkspace) => {
-    setBySession((current) => ({ ...current, [targetSessionID]: change(current[targetSessionID] || EMPTY_WORKSPACE) }));
+    setBySession((current) => {
+      const next = { ...current, [targetSessionID]: change(current[targetSessionID] || EMPTY_WORKSPACE) };
+      writeProjectWorkspaces(next);
+      return next;
+    });
   };
 
   const update = (change: (current: ProjectWorkspace) => ProjectWorkspace) => updateSession(sessionID, change);
@@ -109,6 +114,26 @@ export function useProjectWorkspace(sessionID: string) {
     });
   };
 
+  const moveUnderInSession = (targetSessionID: string, target: ProjectSelection, destination: ProjectSelection) => {
+    updateSession(targetSessionID, (current) => {
+      const relocate = <T extends ProjectTab>(tab: T): T => projectPathContains(target, tab)
+        ? { ...tab, rootID: destination.rootID, path: replaceProjectPath(tab.path, target.path, destination.path) }
+        : tab;
+      const tabs = current.tabs.map(relocate);
+      const activeTab = current.tabs.find((tab) => projectTabKey(tab) === current.activeKey);
+      const activeKey = activeTab ? projectTabKey(relocate(activeTab)) : current.activeKey;
+      const expandedKeys = current.expandedKeys.map((key) => {
+        const separator = key.indexOf(":");
+        if (separator < 0) return key;
+        const rootID = key.slice(0, separator);
+        const path = key.slice(separator + 1);
+        if (!projectPathContains(target, { rootID, path })) return key;
+        return `${destination.rootID}:${replaceProjectPath(path, target.path, destination.path)}`;
+      });
+      return { ...current, activeKey, expandedKeys: Array.from(new Set(expandedKeys)), tabs };
+    });
+  };
+
   return {
     ...workspace,
     selected,
@@ -132,19 +157,22 @@ export function useProjectWorkspace(sessionID: string) {
         return;
       }
       const allowed = new Set(roots.map((root) => root.id));
-      if (workspace.tabs.every((tab) => allowed.has(tab.rootID))) {
+      const expandedAvailable = workspace.expandedKeys.every((key) => allowed.has(key.slice(0, key.indexOf(":"))));
+      if (workspace.tabs.every((tab) => allowed.has(tab.rootID)) && expandedAvailable) {
         return;
       }
       update((current) => {
         const tabs = current.tabs.filter((tab) => allowed.has(tab.rootID));
+        const expandedKeys = current.expandedKeys.filter((key) => allowed.has(key.slice(0, key.indexOf(":"))));
         const activeKey = tabs.some((tab) => projectTabKey(tab) === current.activeKey)
           ? current.activeKey
           : tabs.at(-1) ? projectTabKey(tabs.at(-1)!) : undefined;
-        return { ...current, activeKey, tabs };
+        return { ...current, activeKey, expandedKeys, tabs };
       });
     },
     renameUnder: (target: ProjectSelection, nextPath: string) => renameUnderInSession(sessionID, target, nextPath),
     renameUnderInSession,
+    moveUnderInSession,
     reveal,
     toggleDirectory: (rootID: string, path: string) => update((current) => {
       const key = `${rootID}:${path}`;
@@ -154,4 +182,43 @@ export function useProjectWorkspace(sessionID: string) {
       return { ...current, expandedKeys };
     }),
   };
+}
+
+function readProjectWorkspaces(): Record<string, ProjectWorkspace> {
+  if (typeof window === "undefined") return {};
+  try {
+    const value = JSON.parse(window.localStorage.getItem(PROJECT_WORKSPACE_STORAGE_KEY) || "{}") as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).flatMap(([sessionID, raw]) => {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+      const candidate = raw as Partial<ProjectWorkspace>;
+      const tabs = Array.isArray(candidate.tabs) ? candidate.tabs.filter(isProjectTab).slice(-50) : [];
+      const expandedKeys = Array.isArray(candidate.expandedKeys)
+        ? candidate.expandedKeys.filter((key): key is string => typeof key === "string").slice(-500)
+        : [];
+      const activeKey = typeof candidate.activeKey === "string" && tabs.some((tab) => projectTabKey(tab) === candidate.activeKey)
+        ? candidate.activeKey
+        : tabs.at(-1) ? projectTabKey(tabs.at(-1)!) : undefined;
+      return [[sessionID, { activeKey, expandedKeys, tabs }]];
+    }));
+  } catch {
+    return {};
+  }
+}
+
+function writeProjectWorkspaces(value: Record<string, ProjectWorkspace>) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(PROJECT_WORKSPACE_STORAGE_KEY, JSON.stringify(value));
+  } catch {
+    // Best-effort UI preference only.
+  }
+}
+
+function isProjectTab(value: unknown): value is ProjectTab {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const tab = value as Partial<ProjectTab> & { view?: unknown; staged?: unknown };
+  if (typeof tab.rootID !== "string" || typeof tab.path !== "string" || typeof tab.pinned !== "boolean") return false;
+  if (tab.view === undefined) return true;
+  return tab.view === "git-diff" && typeof tab.staged === "boolean";
 }

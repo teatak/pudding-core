@@ -124,3 +124,56 @@ func TestRenameDoesNotReplaceExistingTarget(t *testing.T) {
 		}
 	}
 }
+
+func TestCopyAndMoveProjectEntries(t *testing.T) {
+	sourceRoot := t.TempDir()
+	targetRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(sourceRoot, "docs", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceRoot, "docs", "nested", "guide.md"), []byte("guide"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	copied, err := Copy(sourceRoot, "docs", sourceRoot, ".", "", true)
+	if err != nil || copied.Path != "docs copy" || copied.Type != "dir" {
+		t.Fatalf("copy = %+v, %v", copied, err)
+	}
+	content, err := os.ReadFile(filepath.Join(sourceRoot, "docs copy", "nested", "guide.md"))
+	if err != nil || string(content) != "guide" {
+		t.Fatalf("copied content = %q, %v", content, err)
+	}
+
+	moved, err := Move(sourceRoot, "docs/nested/guide.md", targetRoot, ".", "moved.md")
+	if err != nil || moved.Path != "moved.md" || moved.Type != "file" {
+		t.Fatalf("move = %+v, %v", moved, err)
+	}
+	if _, err := os.Stat(filepath.Join(sourceRoot, "docs", "nested", "guide.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("source remains after move: %v", err)
+	}
+	content, err = os.ReadFile(filepath.Join(targetRoot, "moved.md"))
+	if err != nil || string(content) != "guide" {
+		t.Fatalf("moved content = %q, %v", content, err)
+	}
+}
+
+func TestCopyAndMoveRejectUnsafeTargets(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Move(root, "docs", root, "docs/nested", "docs"); !errors.Is(err, ErrPathNotAllowed) {
+		t.Fatalf("descendant move error = %v", err)
+	}
+	if _, err := Copy(root, "docs", root, "docs/nested", "copy", false); !errors.Is(err, ErrPathNotAllowed) {
+		t.Fatalf("descendant copy error = %v", err)
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Symlink(t.TempDir(), filepath.Join(root, "docs", "outside")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Copy(root, "docs", root, ".", "docs-copy", false); !errors.Is(err, ErrSymlink) {
+			t.Fatalf("nested symlink copy error = %v", err)
+		}
+	}
+}

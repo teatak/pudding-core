@@ -1,11 +1,13 @@
 import { Languages } from "lucide-react";
 
+import {
+  AppDropdownMenuContent as DropdownMenuContent,
+  AppDropdownMenuRadioItem as DropdownMenuRadioItem,
+} from "@/components/AppMenu";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useI18n, type Locale } from "@/i18n";
@@ -25,7 +27,7 @@ export function LanguageToggle({ onOpenChange }: { onOpenChange?: (open: boolean
           <Languages />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" collisionPadding={8} className="w-32">
+      <DropdownMenuContent align="end" className="w-32">
         <DropdownMenuRadioGroup value={locale} onValueChange={(value) => setLocale(value as Locale)}>
           {options.map((option) => (
             <DropdownMenuRadioItem key={option.value} value={option.value}>

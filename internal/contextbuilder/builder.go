@@ -316,12 +316,16 @@ func (b *Builder) providerParts(sessionID string, parts []store.ContentPart, mod
 			})
 		case store.ContentPartProjectRef:
 			projectReferences = append(projectReferences, store.ProjectReference{
-				ID:         part.CallID,
-				Name:       part.Name,
-				Path:       part.Path,
-				SourcePath: part.SourcePath,
-				RootID:     part.RootID,
-				Kind:       part.ResourceKind,
+				ID:          part.CallID,
+				Name:        part.Name,
+				Path:        part.Path,
+				SourcePath:  part.SourcePath,
+				RootID:      part.RootID,
+				Kind:        part.ResourceKind,
+				StartLine:   part.StartLine,
+				StartColumn: part.StartColumn,
+				EndLine:     part.EndLine,
+				EndColumn:   part.EndColumn,
 			})
 		case store.ContentPartUIContext:
 			flushReferences()

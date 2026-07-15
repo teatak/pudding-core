@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer, webFrame, webUtils } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("puddingElectronTheme", {
   getState: () => ipcRenderer.invoke("pudding:theme:get"),
@@ -11,7 +11,6 @@ contextBridge.exposeInMainWorld("puddingElectronTheme", {
 });
 
 contextBridge.exposeInMainWorld("puddingElectronShell", {
-  getZoomFactor: () => webFrame.getZoomFactor(),
   isFullscreen: () => ipcRenderer.invoke("pudding:shell:is-fullscreen"),
   onFullscreenChanged: (listener) => {
     const wrapped = (_event, fullscreen) => listener(Boolean(fullscreen));
@@ -32,6 +31,7 @@ contextBridge.exposeInMainWorld("puddingElectronDesktop", {
     }
   },
   openExternal: (url) => ipcRenderer.invoke("pudding:desktop:open-external", url),
+  revealPath: (path) => ipcRenderer.invoke("pudding:desktop:reveal-path", path),
   setLocale: (locale) => ipcRenderer.invoke("pudding:desktop:set-locale", locale),
   getUpdateState: () => ipcRenderer.invoke("pudding:desktop:update:get-state"),
   setPreviewUpdatesEnabled: (enabled) => ipcRenderer.invoke("pudding:desktop:update:set-preview", enabled),

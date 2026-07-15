@@ -2,7 +2,11 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const projectFileChangedChannel = "pudding:project-file:changed";
-const maxSubscriptionsPerRenderer = 8;
+const maxSubscriptionsPerRenderer = 32;
+const ignoredProjectDirectoryNames = new Set([
+  ".cache", ".git", ".hg", ".next", ".pytest_cache", ".svn", ".turbo",
+  "__pycache__", "build", "dist", "node_modules",
+]);
 
 class ProjectFileWatcher {
   constructor(options = {}) {
@@ -20,16 +24,24 @@ class ProjectFileWatcher {
       throw new Error("too many project file subscriptions");
     }
 
-    const directory = path.dirname(request.path);
-    const filename = path.basename(request.path);
+    const directory = request.kind === "directory" ? request.path : path.dirname(request.path);
+    const filename = request.kind === "file" ? path.basename(request.path) : "";
+    const options = {
+      encoding: "utf8",
+      persistent: false,
+      ...(request.kind === "directory" ? { recursive: true } : {}),
+    };
     let entry;
-    const watcher = this.watchDirectory(directory, { encoding: "utf8", persistent: false }, (eventType, changedName) => {
-      if (!entry || !matchesFilename(changedName, filename)) {
+    const watcher = this.watchDirectory(directory, options, (eventType, changedName) => {
+      if (!entry || (request.kind === "file" && !matchesFilename(changedName, filename))) {
         return;
       }
-      this.schedule(entry, eventType);
+      if (request.kind === "directory" && ignoredProjectChange(changedName)) {
+        return;
+      }
+      this.schedule(entry, eventType, changedName);
     });
-    entry = { id: request.id, path: request.path, sender, timer: null, watcher };
+    entry = { id: request.id, kind: request.kind, path: request.path, sender, timer: null, watcher };
     if (!entries) {
       entries = new Map();
       this.subscriptions.set(sender.id, entries);
@@ -45,10 +57,14 @@ class ProjectFileWatcher {
     return this.remove(sender.id, id);
   }
 
-  schedule(entry, eventType) {
+  schedule(entry, eventType, changedName) {
     if (entry.timer) {
       clearTimeout(entry.timer);
     }
+    entry.eventType = eventType === "rename" ? "rename" : "change";
+    entry.changedPath = entry.kind === "directory" && changedName
+      ? path.join(entry.path, String(changedName))
+      : undefined;
     entry.timer = setTimeout(() => {
       entry.timer = null;
       const current = this.subscriptions.get(entry.sender.id)?.get(entry.id);
@@ -61,9 +77,10 @@ class ProjectFileWatcher {
       }
       try {
         entry.sender.send(projectFileChangedChannel, {
-          eventType: eventType === "rename" ? "rename" : "change",
+          eventType: entry.eventType,
           id: entry.id,
           path: entry.path,
+          ...(entry.changedPath ? { changedPath: entry.changedPath } : {}),
         });
       } catch {
         this.closeSender(entry.sender.id);
@@ -134,10 +151,11 @@ class ProjectFileWatcher {
 function normalizeWatchRequest(rawRequest) {
   const id = normalizeSubscriptionID(rawRequest?.id);
   const filePath = String(rawRequest?.path || "").trim();
+  const kind = rawRequest?.kind === "directory" ? "directory" : "file";
   if (!filePath || filePath.length > 4096 || filePath.includes("\0") || !path.isAbsolute(filePath)) {
-    throw new Error("invalid project file watch path");
+    throw new Error("invalid project watch path");
   }
-  return { id, path: path.normalize(filePath) };
+  return { id, kind, path: path.normalize(filePath) };
 }
 
 function normalizeSubscriptionID(rawID) {
@@ -153,6 +171,16 @@ function matchesFilename(rawName, expected) {
     return true;
   }
   return path.basename(String(rawName)) === expected;
+}
+
+function ignoredProjectChange(rawName) {
+  if (rawName == null || String(rawName) === "") {
+    return false;
+  }
+  return String(rawName)
+    .split(/[\\/]+/)
+    .filter(Boolean)
+    .some((segment) => segment.startsWith(".") || ignoredProjectDirectoryNames.has(segment));
 }
 
 module.exports = { ProjectFileWatcher, projectFileChangedChannel };

@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, BookOpen, FileCode2, FolderTree, RefreshCw, Save } from "lucide-react";
+import { AlertTriangle, BookOpen, FileCode2, Folders, Save } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
-import { APIError, getProjectFile, saveProjectFile, type ProjectFile } from "@/api/client";
+import { APIError, getProjectFile, projectResourceURL, saveProjectFile, type ProjectFile } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,8 @@ import { watchElectronProjectFile } from "@/desktop/projectFileWatcher";
 import { languageFromPath } from "@/lib/fileLanguage";
 
 import { ProjectFileTabs } from "./ProjectFileTabs";
+import { ProjectFileTypeIcon } from "./ProjectFileTypeIcon";
+import type { ProjectEditorSelection } from "./ProjectEditor";
 import { ProjectGitDiffViewer } from "./git/ProjectGitDiffViewer";
 import { ProjectMarkdownPreview } from "./ProjectMarkdownPreview";
 import { projectBrowserError } from "./projectErrors";
@@ -49,6 +51,7 @@ export function ProjectFileViewer({
   onDirtyChange,
   onOpenPreview,
   onPin,
+  onReference,
   onRequestClose,
   onReveal,
 }: {
@@ -65,6 +68,7 @@ export function ProjectFileViewer({
   onDirtyChange: (targetSessionID: string, selection: ProjectSelection, dirty: boolean) => void;
   onOpenPreview: (selection: ProjectSelection) => void;
   onPin: (selection: ProjectTab) => void;
+  onReference: (selection: ProjectSelection, range: ProjectEditorSelection) => void;
   onRequestClose: (keys: string[]) => void;
   onReveal: (selection: ProjectSelection) => void;
 }) {
@@ -79,12 +83,14 @@ export function ProjectFileViewer({
     setDrafts(next);
   };
   const [previewMode, setPreviewMode] = useState<Record<string, boolean>>({});
+  const [imageRevision, setImageRevision] = useState(0);
   const gitDiffSelection = selection && isProjectGitDiffTab(selection) ? selection : undefined;
   const fileSelection = selection && !isProjectGitDiffTab(selection) ? selection : undefined;
   const selectionKey = fileSelection ? projectSelectionKey(fileSelection) : "";
   const draftKey = selectionKey ? `${sessionID}:${selectionKey}` : "";
+  const isImage = Boolean(fileSelection && isProjectImagePath(fileSelection.path));
   const fileQuery = useQuery({
-    enabled: active && Boolean(fileSelection),
+    enabled: active && Boolean(fileSelection) && !isImage,
     queryKey: fileSelection
       ? queryKeys.projectFile(sessionID, fileSelection.rootID, fileSelection.path)
       : ["session", sessionID, "project", "file", "none"],
@@ -102,6 +108,11 @@ export function ProjectFileViewer({
   const externalConflict = Boolean(draft?.externalRevision);
   const isMarkdown = file?.mime === "text/markdown" || /\.(?:md|markdown)$/i.test(file?.name || "");
   const showPreview = Boolean(isMarkdown && draftKey && previewMode[draftKey] !== false);
+  const imageURL = useMemo(() => {
+    if (!isImage || !fileSelection) return "";
+    const url = projectResourceURL(token, sessionID, fileSelection.rootID, fileSelection.path);
+    return `${url}${url.includes("?") ? "&" : "?"}v=${imageRevision}`;
+  }, [fileSelection?.path, fileSelection?.rootID, imageRevision, isImage, sessionID, token]);
 
   useEffect(() => {
     if (!reveal || reveal.key !== selectionKey || !draftKey) {
@@ -115,11 +126,12 @@ export function ProjectFileViewer({
       return;
     }
     const refetch = () => {
-      void fileQuery.refetch();
+      if (isImage) setImageRevision((current) => current + 1);
+      else void fileQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ["session", sessionID, "project", "git"] });
     };
     return watchElectronProjectFile(absolutePath, refetch, refetch);
-  }, [absolutePath, active, draftKey]);
+  }, [absolutePath, active, draftKey, isImage]);
 
   useEffect(() => {
     if (!discardRequest) return;
@@ -249,7 +261,7 @@ export function ProjectFileViewer({
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-card">
+    <div className="flex h-full min-h-0 flex-col bg-card dark:bg-[#1c1c1c]">
       <ProjectFileTabs
         active={selection}
         dirtyKeys={dirtyKeys}
@@ -264,25 +276,24 @@ export function ProjectFileViewer({
       ) : (
       <>
       {fileSelection ? (
-        <div className="flex h-9 shrink-0 items-center gap-2 border-b px-3">
-          <FileCode2 className="size-4 shrink-0 text-muted-foreground" />
+        <div className="flex h-9 shrink-0 items-center gap-2 bg-background px-3 dark:bg-[#171717]">
+          <ProjectFileTypeIcon path={file?.path || fileSelection.path} />
           <code className="min-w-0 flex-1 cursor-text select-text truncate font-mono text-xs" title={file?.path || fileSelection.path}>{file?.path || fileSelection.path}</code>
           {isMarkdown ? (
-            <div className="flex shrink-0 items-center rounded-md bg-muted p-0.5">
-              <Button aria-label={t("project.browserPreview")} aria-pressed={showPreview} className="h-7 px-2 aria-pressed:bg-background aria-pressed:shadow-sm" size="sm" type="button" variant="ghost" onClick={() => setPreviewMode((current) => ({ ...current, [draftKey]: true }))}>
+            <div className="flex shrink-0 items-center">
+              <Button aria-label={t("project.browserPreview")} aria-pressed={showPreview} className="h-7 px-2 text-muted-foreground hover:bg-transparent hover:text-foreground aria-pressed:text-foreground" size="sm" type="button" variant="ghost" onClick={() => setPreviewMode((current) => ({ ...current, [draftKey]: true }))}>
                 <BookOpen />
               </Button>
-              <Button aria-label={t("project.browserSource")} aria-pressed={!showPreview} className="h-7 px-2 aria-pressed:bg-background aria-pressed:shadow-sm" size="sm" type="button" variant="ghost" onClick={() => setPreviewMode((current) => ({ ...current, [draftKey]: false }))}>
+              <Button aria-label={t("project.browserSource")} aria-pressed={!showPreview} className="h-7 px-2 text-muted-foreground hover:bg-transparent hover:text-foreground aria-pressed:text-foreground" size="sm" type="button" variant="ghost" onClick={() => setPreviewMode((current) => ({ ...current, [draftKey]: false }))}>
                 <FileCode2 />
               </Button>
             </div>
           ) : null}
-          <Button aria-label={t("project.browserSave")} disabled={!dirty || saveMutation.isPending || externalConflict || fileQuery.isError} size="icon-sm" title={`${t("project.browserSave")} (⌘S)`} type="button" variant="ghost" onClick={() => save()}>
-            {saveMutation.isPending ? <Spinner /> : <Save />}
-          </Button>
-          <Button aria-label={t("common.refresh")} disabled={fileQuery.isFetching} size="icon-sm" type="button" variant="ghost" onClick={() => void fileQuery.refetch()}>
-            {fileQuery.isFetching ? <Spinner /> : <RefreshCw />}
-          </Button>
+          {!isImage ? (
+            <Button aria-label={t("project.browserSave")} disabled={!dirty || saveMutation.isPending || externalConflict || fileQuery.isError} size="icon-sm" title={`${t("project.browserSave")} (⌘S)`} type="button" variant="ghost" onClick={() => save()}>
+              {saveMutation.isPending ? <Spinner /> : <Save />}
+            </Button>
+          ) : null}
         </div>
       ) : null}
       {externalConflict && !fileQuery.isError ? (
@@ -295,13 +306,21 @@ export function ProjectFileViewer({
       ) : null}
       <div className="min-h-0 flex-1 overflow-auto">
         {!fileSelection ? (
-          <ProjectViewerStatus icon={<FolderTree className="size-8" />}>{t("project.browserSelectFile")}</ProjectViewerStatus>
+          <ProjectViewerStatus icon={<Folders className="size-8" />}>{t("project.browserSelectFile")}</ProjectViewerStatus>
+        ) : isImage ? (
+          <ProjectImagePreview key={imageURL} alt={fileSelection.path} src={imageURL} />
         ) : fileQuery.isError ? (
           <ProjectViewerStatus>{projectBrowserError(fileQuery.error, t)}</ProjectViewerStatus>
         ) : fileQuery.isLoading && !file ? (
           <ProjectViewerStatus icon={<Spinner className="size-6" />}>{t("common.loading")}</ProjectViewerStatus>
         ) : previewFile && showPreview ? (
-          <ProjectMarkdownPreview file={previewFile} sessionID={sessionID} token={token} onOpenPreview={onOpenPreview} />
+          <ProjectMarkdownPreview
+            file={previewFile}
+            sessionID={sessionID}
+            token={token}
+            onOpenPreview={onOpenPreview}
+            onReferenceSelection={(range) => fileSelection && onReference(fileSelection, range)}
+          />
         ) : previewFile ? (
           <Suspense fallback={<ProjectViewerStatus icon={<Spinner className="size-6" />}>{t("common.loading")}</ProjectViewerStatus>}>
             <ProjectEditor
@@ -311,6 +330,7 @@ export function ProjectFileViewer({
               value={content}
               onChange={changeContent}
               onSave={() => save()}
+              onReferenceSelection={(range) => fileSelection && onReference(fileSelection, range)}
             />
           </Suspense>
         ) : null}
@@ -331,6 +351,21 @@ export function ProjectFileViewer({
 
 function ProjectViewerStatus({ children, icon }: { children: ReactNode; icon?: ReactNode }) {
   return <div className="flex h-full min-h-64 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-muted-foreground">{icon}<span>{children}</span></div>;
+}
+
+function ProjectImagePreview({ alt, src }: { alt: string; src: string }) {
+  const { t } = useI18n();
+  const [failed, setFailed] = useState(false);
+  if (failed) return <ProjectViewerStatus>{t("project.browserUnsupportedFile")}</ProjectViewerStatus>;
+  return (
+    <div className="flex h-full min-h-0 items-center justify-center overflow-auto p-6">
+      <img alt={alt} className="max-h-full max-w-full object-contain" src={src} onError={() => setFailed(true)} />
+    </div>
+  );
+}
+
+function isProjectImagePath(path: string) {
+  return /\.(?:avif|gif|jpe?g|png|svg|webp)$/i.test(path);
 }
 
 function formatBytes(bytes: number) {

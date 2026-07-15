@@ -5,7 +5,6 @@ import { consumeLaunchParam } from "@/state/launchParams";
 const SHELL_KEY = "pudding.shell";
 
 type ElectronShellBridge = {
-  getZoomFactor?: () => number;
   isFullscreen: () => Promise<boolean>;
   onFullscreenChanged: (listener: (fullscreen: boolean) => void) => () => void;
 };
@@ -35,11 +34,6 @@ export function initShellMode() {
 
 export function isElectronShell() {
   return normalizeShell(document.documentElement.dataset.shell || null) !== "";
-}
-
-export function getElectronZoomFactor() {
-  const factor = window.puddingElectronShell?.getZoomFactor?.() ?? 1;
-  return Number.isFinite(factor) && factor > 0 ? factor : 1;
 }
 
 async function initElectronFullscreenTracking() {

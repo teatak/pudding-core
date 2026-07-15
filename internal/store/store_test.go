@@ -70,19 +70,23 @@ func TestUserInputPartsPreserveUIContext(t *testing.T) {
 func TestUserInputPartsPreserveProjectReference(t *testing.T) {
 	parts := UserInputParts("检查这个文件", []ContentPart{
 		ProjectReferencePart(ProjectReference{
-			ID:         "ref_1",
-			Name:       "README.md",
-			Path:       "tutorials/README.md",
-			SourcePath: "/workspace/tutorials/README.md",
-			RootID:     "root_1",
-			Kind:       "file",
+			ID:          "ref_1",
+			Name:        "README.md",
+			Path:        "tutorials/README.md",
+			SourcePath:  "/workspace/tutorials/README.md",
+			RootID:      "root_1",
+			Kind:        "file",
+			StartLine:   3,
+			StartColumn: 2,
+			EndLine:     5,
+			EndColumn:   8,
 		}),
 	})
 	if len(parts) != 2 || parts[0].Type != ContentPartProjectRef || parts[1].Type != ContentPartText {
 		t.Fatalf("unexpected user parts: %+v", parts)
 	}
 	references := ProjectReferencesFromParts(parts)
-	if len(references) != 1 || references[0].RootID != "root_1" || references[0].Path != "tutorials/README.md" || references[0].Kind != "file" {
+	if len(references) != 1 || references[0].RootID != "root_1" || references[0].Path != "tutorials/README.md" || references[0].Kind != "file" || references[0].StartLine != 3 || references[0].EndLine != 5 {
 		t.Fatalf("project reference not preserved: %+v", references)
 	}
 }

@@ -155,6 +155,15 @@ export const renameProjectEntryRequest = z.object({
   name: z.string().min(1),
 });
 
+export const transferProjectEntryRequest = z.object({
+  sourceRootID: z.string().min(1),
+  sourcePath: z.string().min(1),
+  targetRootID: z.string().min(1),
+  targetParentPath: z.string().min(1),
+  name: z.string().min(1).optional(),
+  unique: z.boolean().optional(),
+});
+
 export const saveProjectFileRequest = z.object({
   rootID: z.string().min(1),
   path: z.string().min(1),
@@ -366,6 +375,10 @@ export const projectReference = z.object({
   sourcePath: z.string(),
   rootID: z.string(),
   kind: z.enum(["file", "dir"]),
+  startLine: z.number().int().positive().optional(),
+  startColumn: z.number().int().positive().optional(),
+  endLine: z.number().int().positive().optional(),
+  endColumn: z.number().int().positive().optional(),
 });
 export type ProjectReference = z.infer<typeof projectReference>;
 

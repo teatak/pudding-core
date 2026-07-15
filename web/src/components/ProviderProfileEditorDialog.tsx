@@ -23,6 +23,7 @@ import { UnsavedChangesAlert } from "@/components/UnsavedChangesAlert";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
+import { AppPopoverContent as PopoverContent } from "@/components/AppPopover";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -39,7 +40,6 @@ import { Label } from "@/components/ui/label";
 import {
   Popover,
   PopoverAnchor,
-  PopoverContent,
   PopoverDescription,
   PopoverHeader,
   PopoverTitle,

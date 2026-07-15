@@ -10,6 +10,11 @@ import {
   type Session,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import {
+  AppDropdownMenuContent as DropdownMenuContent,
+  AppDropdownMenuItem as DropdownMenuItem,
+  AppDropdownMenuSeparator as DropdownMenuSeparator,
+} from "@/components/AppMenu";
 import { Conversation } from "@/components/Conversation";
 import { DraftConversation } from "@/components/DraftConversation";
 import { PhaseDot } from "@/components/PhaseDot";
@@ -28,9 +33,6 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -401,7 +403,6 @@ function HeaderSessionTitle({
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="start"
-              collisionPadding={8}
               className="w-36"
               onCloseAutoFocus={(event) => {
                 if (!editAfterMenuCloseRef.current) {

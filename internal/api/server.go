@@ -226,6 +226,8 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/project/tree").GET(s.listProjectTree)
 	app.Route("/sessions/:id/project/file").GET(s.getProjectFile).PUT(s.putProjectFile)
 	app.Route("/sessions/:id/project/entries").POST(s.createProjectEntry).PATCH(s.renameProjectEntry).DELETE(s.deleteProjectEntry)
+	app.Route("/sessions/:id/project/entries/copy").POST(s.copyProjectEntry)
+	app.Route("/sessions/:id/project/entries/move").POST(s.moveProjectEntry)
 	app.Route("/sessions/:id/project/git/status").GET(s.getProjectGitStatus)
 	app.Route("/sessions/:id/project/git/diff").GET(s.getProjectGitDiff)
 	app.Route("/sessions/:id/project/resources/:rootID/*path").GET(s.getProjectResource)

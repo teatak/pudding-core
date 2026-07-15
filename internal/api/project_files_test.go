@@ -216,6 +216,35 @@ func TestProjectBrowserFileMutations(t *testing.T) {
 	}
 }
 
+func TestProjectBrowserCopyAndMoveEntries(t *testing.T) {
+	srv, st := newTestServer(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "guide.md"), []byte("guide"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	createProjectSession(t, st, "proj_transfer", "sess_transfer", root)
+	roots := decodeJSON[struct {
+		Roots []projectRootView `json:"roots"`
+	}](t, req(t, http.MethodGet, srv.URL+"/sessions/sess_transfer/project/tree", nil))
+	rootID := roots.Roots[0].ID
+
+	copied := decodeJSON[projectEntryMutationView](t, req(t, http.MethodPost, srv.URL+"/sessions/sess_transfer/project/entries/copy", map[string]any{
+		"sourceRootID": rootID, "sourcePath": "docs/guide.md", "targetRootID": rootID, "targetParentPath": "docs", "unique": true,
+	}))
+	if copied.Path != "docs/guide copy.md" {
+		t.Fatalf("copied = %+v", copied)
+	}
+	moved := decodeJSON[projectEntryMutationView](t, req(t, http.MethodPost, srv.URL+"/sessions/sess_transfer/project/entries/move", map[string]any{
+		"sourceRootID": rootID, "sourcePath": copied.Path, "targetRootID": rootID, "targetParentPath": ".", "name": "moved.md",
+	}))
+	if moved.Path != "moved.md" {
+		t.Fatalf("moved = %+v", moved)
+	}
+}
+
 func createProjectSession(t *testing.T, st store.Store, projectID, sessionID, root string) {
 	t.Helper()
 	ctx := context.Background()

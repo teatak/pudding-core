@@ -1,12 +1,14 @@
 import { ChevronDown } from "lucide-react";
 
+import {
+  AppDropdownMenuContent as DropdownMenuContent,
+  AppDropdownMenuRadioItem as DropdownMenuRadioItem,
+} from "@/components/AppMenu";
 import type { ResolvedModelSelection } from "@/lib/modelSelection";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useI18n } from "@/i18n";

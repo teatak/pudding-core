@@ -17,7 +17,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Compass, FileCode2, SquareTerminal, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import type { BrowserTab, Terminal } from "@/api/client";
 import { browserTabFaviconURL, browserTabTitle } from "@/browser/helpers";
@@ -110,6 +110,7 @@ export function WorkspaceResourceTabs({
   closingTerminalID,
   filePreviewActive,
   filePreviewTabs,
+  leadingTabs,
   orderScope,
   terminalTabs,
   onCloseBrowser,
@@ -128,6 +129,7 @@ export function WorkspaceResourceTabs({
   closingTerminalID?: string;
   filePreviewActive: boolean;
   filePreviewTabs: WorkspaceFilePreviewTab[];
+  leadingTabs?: ReactNode;
   orderScope: string;
   terminalTabs: Terminal[];
   onCloseBrowser: (tabID: string) => void;
@@ -186,11 +188,12 @@ export function WorkspaceResourceTabs({
     >
       <div
         ref={scrollMask.ref}
-        className="no-drag-region w-fit max-w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-lg bg-muted p-(--workspace-toolbar-tab-padding) text-muted-foreground [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden"
+        className="no-drag-region w-fit max-w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-lg bg-muted p-(--workspace-toolbar-tab-padding) text-muted-foreground [scrollbar-width:none] [-webkit-overflow-scrolling:touch] dark:bg-white/[0.07] [&::-webkit-scrollbar]:hidden"
         style={scrollMask.style}
       >
         <SortableContext items={orderedIDs} strategy={horizontalListSortingStrategy}>
-          <div className="inline-flex min-w-max items-center gap-1">
+          <div className="inline-flex min-w-max items-center">
+            {leadingTabs}
             {tabs.map((tab) => (
               <SortableSurfaceTabButton
                 key={surfaceTabID(tab)}
@@ -279,7 +282,7 @@ function SortableSurfaceTabButton({
       aria-label={label}
       aria-selected={selected}
       className={cn(
-        "group relative inline-flex h-(--workspace-toolbar-tab-h) min-w-24 max-w-[44vw] shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium whitespace-nowrap transition-colors data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm hover:bg-background hover:text-foreground sm:max-w-40",
+        "group relative inline-flex h-(--workspace-toolbar-tab-h) min-w-24 max-w-[44vw] shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium whitespace-nowrap transition-colors hover:text-foreground data-[active=true]:border-border data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm dark:data-[active=true]:border-white/20 dark:data-[active=true]:bg-[#303030] sm:max-w-40",
         isDragging && "cursor-grabbing opacity-80 shadow-md",
       )}
       data-active={selected}
@@ -310,6 +313,14 @@ function SortableSurfaceTabButton({
       )}
       <span className="min-w-0 max-w-24 flex-1 truncate text-left">{label}</span>
       <span
+        aria-hidden="true"
+        className={cn(
+          "pointer-events-none absolute inset-y-px right-px w-8 rounded-r-md bg-gradient-to-r from-transparent via-25% opacity-0 transition-opacity group-hover:opacity-100",
+          selected ? "via-background to-background dark:via-[#303030] dark:to-[#303030]" : "via-muted to-muted dark:via-[#2c2c2c] dark:to-[#2c2c2c]",
+          closePending && "opacity-100",
+        )}
+      />
+      <span
         aria-label={
           tab.kind === "browser"
             ? t("browser.release")
@@ -317,7 +328,7 @@ function SortableSurfaceTabButton({
               ? t("terminal.close")
               : t("canvas.filePreviewClose")
         }
-        className="pointer-events-none inline-flex h-5 w-5 shrink-0 items-center justify-center rounded opacity-0 transition-opacity hover:bg-muted-foreground/20 hover:opacity-100 group-hover:pointer-events-auto group-hover:opacity-70 group-focus-within:pointer-events-auto group-focus-within:opacity-70 data-[pending=true]:pointer-events-auto data-[pending=true]:opacity-100"
+        className="pointer-events-none absolute right-1 top-1/2 z-10 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded-full bg-transparent opacity-0 transition-colors hover:bg-accent group-hover:pointer-events-auto group-hover:opacity-100 dark:hover:bg-[#474747] data-[pending=true]:pointer-events-auto data-[pending=true]:opacity-100"
         data-pending={closePending}
         role="button"
         tabIndex={-1}

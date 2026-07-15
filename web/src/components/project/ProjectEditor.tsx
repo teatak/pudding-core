@@ -1,14 +1,68 @@
-import { HighlightStyle, LanguageDescription, syntaxHighlighting } from "@codemirror/language";
-import { languages } from "@codemirror/language-data";
-import { Compartment } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
-import { tags } from "@lezer/highlight";
-import { basicSetup } from "codemirror";
-import { useEffect, useMemo, useRef } from "react";
+import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
+import * as monaco from "monaco-editor/esm/vs/editor/editor.api.js";
+import { useEffect, useRef, useState } from "react";
 
+import { useI18n } from "@/i18n";
+import { languageFromPath } from "@/lib/fileLanguage";
 import { useTheme } from "@/theme/theme";
 
 import type { ProjectEditorReveal } from "./projectReveal";
+
+type MonacoScope = typeof self & {
+  MonacoEnvironment?: { getWorker: () => Worker };
+};
+
+(self as MonacoScope).MonacoEnvironment = {
+  getWorker: () => new EditorWorker(),
+};
+
+const lightTheme = "pudding-project-light";
+const darkTheme = "pudding-project-dark";
+
+monaco.editor.defineTheme(lightTheme, {
+  base: "vs",
+  inherit: true,
+  rules: [],
+  colors: {
+    "editor.background": "#ffffff",
+    "editorGutter.background": "#ffffff",
+    "editor.lineHighlightBackground": "#f4f4f5",
+    "editor.selectionBackground": "#add6ff",
+    "editor.inactiveSelectionBackground": "#add6ff",
+    "editor.selectionHighlightBackground": "#00000000",
+    "editorLineNumber.foreground": "#71717a",
+    "editorLineNumber.activeForeground": "#27272a",
+  },
+});
+
+monaco.editor.defineTheme(darkTheme, {
+  base: "vs-dark",
+  inherit: true,
+  rules: [],
+  colors: {
+    "editor.background": "#171717",
+    "editorGutter.background": "#171717",
+    "editor.lineHighlightBackground": "#ffffff08",
+    "editor.selectionBackground": "#264f78",
+    "editor.inactiveSelectionBackground": "#264f78",
+    "editor.selectionHighlightBackground": "#00000000",
+    "editorLineNumber.foreground": "#a1a1aa",
+    "editorLineNumber.activeForeground": "#e4e4e7",
+  },
+});
+
+export type ProjectEditorSelection = {
+  startLine: number;
+  startColumn: number;
+  endLine: number;
+  endColumn: number;
+};
+
+type SelectionAction = {
+  range: ProjectEditorSelection;
+  x: number;
+  y: number;
+};
 
 export function ProjectEditor({
   path,
@@ -16,172 +70,237 @@ export function ProjectEditor({
   value,
   onChange,
   onSave,
+  onReferenceSelection,
 }: {
   path: string;
   reveal?: ProjectEditorReveal;
   value: string;
   onChange: (value: string) => void;
   onSave: () => void;
+  onReferenceSelection?: (selection: ProjectEditorSelection) => void;
 }) {
+  const { t } = useI18n();
   const { resolved } = useTheme();
   const dark = resolved === "dark";
+  const containerRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
-  const viewRef = useRef<EditorView | null>(null);
+  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const darkRef = useRef(dark);
   const onChangeRef = useRef(onChange);
   const onSaveRef = useRef(onSave);
+  const onReferenceSelectionRef = useRef(onReferenceSelection);
+  const revealRef = useRef(reveal);
   const syncingRef = useRef(false);
-  const themeCompartment = useMemo(() => new Compartment(), []);
+  const valueRef = useRef(value);
+  const [selectionAction, setSelectionAction] = useState<SelectionAction>();
+  darkRef.current = dark;
   onChangeRef.current = onChange;
   onSaveRef.current = onSave;
+  onReferenceSelectionRef.current = onReferenceSelection;
+  revealRef.current = reveal;
+  valueRef.current = value;
 
   useEffect(() => {
-    if (!hostRef.current) {
-      return;
-    }
+    if (!hostRef.current) return;
     let cancelled = false;
-    const languageCompartment = new Compartment();
-    const view = new EditorView({
-      doc: value,
-      parent: hostRef.current,
-      extensions: [
-        basicSetup,
-        themeCompartment.of(editorThemeExtensions(dark)),
-        EditorView.lineWrapping,
-        languageCompartment.of([]),
-        keymap.of([{
-          key: "Mod-s",
-          preventDefault: true,
-          run: () => {
-            onSaveRef.current();
-            return true;
-          },
-        }]),
-        EditorView.updateListener.of((update) => {
-          if (update.docChanged && !syncingRef.current) {
-            onChangeRef.current(update.state.doc.toString());
-          }
+    let editor: monaco.editor.IStandaloneCodeEditor | undefined;
+    let model: monaco.editor.ITextModel | undefined;
+    const disposables: monaco.IDisposable[] = [];
+    const language = monacoLanguageFromPath(path);
+
+    void ensureMonacoLanguage(language).then(() => {
+      if (cancelled || !hostRef.current) return;
+      model = monaco.editor.createModel(valueRef.current, language);
+      editor = monaco.editor.create(hostRef.current, {
+        model,
+        theme: darkRef.current ? darkTheme : lightTheme,
+        automaticLayout: true,
+        bracketPairColorization: { enabled: true },
+        contextmenu: true,
+        folding: true,
+        fontFamily: "var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+        fontSize: 12,
+        glyphMargin: false,
+        hideCursorInOverviewRuler: true,
+        lineHeight: 20,
+        lineNumbersMinChars: 3,
+        minimap: { enabled: false },
+        occurrencesHighlight: "off",
+        overviewRulerBorder: false,
+        overviewRulerLanes: 0,
+        padding: { top: 12, bottom: 12 },
+        renderLineHighlight: "all",
+        scrollBeyondLastLine: false,
+        selectionHighlight: false,
+        showFoldingControls: "mouseover",
+        stickyScroll: { enabled: false },
+        wordWrap: "off",
+      });
+      editorRef.current = editor;
+      disposables.push(
+        editor.onDidChangeModelContent(() => {
+          if (!syncingRef.current) onChangeRef.current(editor?.getValue() || "");
         }),
-      ],
+        editor.onDidChangeCursorSelection(() => updateSelectionAction(editor, containerRef.current, setSelectionAction)),
+        editor.onDidScrollChange(() => updateSelectionAction(editor, containerRef.current, setSelectionAction)),
+        editor.onDidLayoutChange(() => updateSelectionAction(editor, containerRef.current, setSelectionAction)),
+      );
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => onSaveRef.current());
+      revealEditorPosition(editor, revealRef.current);
     });
-    viewRef.current = view;
-    const language = languageForPath(path);
-    if (language) {
-      void language.load().then((support) => {
-        if (!cancelled && viewRef.current === view) {
-          view.dispatch({ effects: languageCompartment.reconfigure(support) });
-        }
-      }).catch(() => undefined);
-    }
+
     return () => {
       cancelled = true;
-      view.destroy();
-      viewRef.current = null;
+      disposables.forEach((disposable) => disposable.dispose());
+      editor?.dispose();
+      model?.dispose();
+      if (editorRef.current === editor) editorRef.current = null;
     };
-  }, [path, themeCompartment]);
+  }, [path]);
 
   useEffect(() => {
-    viewRef.current?.dispatch({
-      effects: themeCompartment.reconfigure(editorThemeExtensions(dark)),
-    });
-  }, [dark, themeCompartment]);
+    if (!editorRef.current) return;
+    monaco.editor.setTheme(dark ? darkTheme : lightTheme);
+  }, [dark]);
 
   useEffect(() => {
-    const view = viewRef.current;
-    if (!view || view.state.doc.toString() === value) {
-      return;
-    }
+    const editor = editorRef.current;
+    if (!editor || editor.getValue() === value) return;
     syncingRef.current = true;
-    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } });
+    editor.setValue(value);
     syncingRef.current = false;
   }, [value]);
 
   useEffect(() => {
-    const view = viewRef.current;
-    if (!view || !reveal || reveal.line <= 0) {
-      return;
-    }
-    const lineNumber = Math.min(reveal.line, view.state.doc.lines);
-    const line = view.state.doc.line(lineNumber);
-    const columnOffset = Math.max(0, Math.min((reveal.column || 1) - 1, line.length));
-    const position = line.from + columnOffset;
-    view.dispatch({
-      selection: { anchor: position },
-      effects: EditorView.scrollIntoView(position, { y: "center" }),
-    });
+    const editor = editorRef.current;
+    if (!editor) return;
+    revealEditorPosition(editor, reveal);
   }, [reveal?.serial]);
 
-  return <div ref={hostRef} className="h-full min-h-0 overflow-hidden" />;
+  return (
+    <div ref={containerRef} className="relative h-full min-h-0 overflow-hidden bg-background dark:bg-[#171717]">
+      <div ref={hostRef} className="h-full min-h-0 overflow-hidden" />
+      {selectionAction ? (
+        <button
+          aria-label={t("project.browserReferenceSelection")}
+          className="absolute z-30 inline-flex h-8 items-center rounded-md border border-border bg-popover px-3 text-xs font-medium text-popover-foreground shadow-lg shadow-black/20 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none dark:shadow-black/50"
+          style={{ left: selectionAction.x, top: selectionAction.y }}
+          title={t("project.browserReferenceSelection")}
+          type="button"
+          onClick={() => {
+            onReferenceSelectionRef.current?.(selectionAction.range);
+            setSelectionAction(undefined);
+          }}
+          onMouseDown={(event) => event.preventDefault()}
+        >
+          {t("project.browserReferenceSelectionShort")}
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
-function editorThemeExtensions(dark: boolean) {
-  return [dark ? darkEditorTheme : lightEditorTheme, syntaxHighlighting(dark ? darkHighlightStyle : lightHighlightStyle)];
+function revealEditorPosition(editor: monaco.editor.IStandaloneCodeEditor, reveal?: ProjectEditorReveal) {
+  const model = editor.getModel();
+  if (!model || !reveal || reveal.line <= 0) return;
+  const lineNumber = Math.min(reveal.line, model.getLineCount());
+  const column = Math.max(1, Math.min(reveal.column || 1, model.getLineMaxColumn(lineNumber)));
+  const position = { lineNumber, column };
+  editor.setPosition(position);
+  editor.revealPositionInCenter(position, monaco.editor.ScrollType.Smooth);
 }
 
-const editorThemeSpec = {
-  "&": {
-    height: "100%",
-    backgroundColor: "var(--card)",
-    color: "var(--foreground)",
-    fontSize: "12px",
-  },
-  "&.cm-focused": { outline: "none" },
-  ".cm-content": { caretColor: "var(--foreground)", padding: "12px 0" },
-  ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--foreground)" },
-  ".cm-gutters": {
-    backgroundColor: "color-mix(in srgb, var(--muted) 35%, transparent)",
-    borderRight: "1px solid var(--border)",
-    color: "var(--muted-foreground)",
-  },
-  ".cm-activeLine, .cm-activeLineGutter": {
-    backgroundColor: "color-mix(in srgb, var(--muted) 45%, transparent)",
-  },
-  ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
-    backgroundColor: "color-mix(in srgb, var(--primary) 22%, transparent)",
-  },
-  ".cm-scroller": { fontFamily: "var(--font-mono), ui-monospace, monospace", overflow: "auto" },
+function selectedProjectRange(editor: monaco.editor.IStandaloneCodeEditor): ProjectEditorSelection | undefined {
+  const selection = editor.getSelection();
+  const model = editor.getModel();
+  if (!selection || selection.isEmpty() || !model) return undefined;
+  const start = selection.getStartPosition();
+  const endOffset = Math.max(model.getOffsetAt(start), model.getOffsetAt(selection.getEndPosition()) - 1);
+  const end = model.getPositionAt(endOffset);
+  return {
+    startLine: start.lineNumber,
+    startColumn: start.column,
+    endLine: end.lineNumber,
+    endColumn: end.column,
+  };
+}
+
+function updateSelectionAction(
+  editor: monaco.editor.IStandaloneCodeEditor | undefined,
+  container: HTMLDivElement | null,
+  setSelectionAction: (action?: SelectionAction) => void,
+) {
+  if (!editor || !container) {
+    setSelectionAction(undefined);
+    return;
+  }
+  const selection = editor.getSelection();
+  const range = selectedProjectRange(editor);
+  const position = selection?.getPosition();
+  const visible = position ? editor.getScrolledVisiblePosition(position) : null;
+  if (!range || !visible) {
+    setSelectionAction(undefined);
+    return;
+  }
+  const width = 116;
+  const x = Math.max(8, Math.min(visible.left, container.clientWidth - width - 8));
+  const above = visible.top - 38;
+  const y = above >= 8 ? above : visible.top + visible.height + 6;
+  setSelectionAction({ range, x, y });
+}
+
+function monacoLanguageFromPath(path: string) {
+  const filename = path.split(/[\\/]/).filter(Boolean).pop()?.toLowerCase() || "";
+  if (filename === "dockerfile" || filename.startsWith("dockerfile.")) return "dockerfile";
+  if (filename === ".env" || filename.startsWith(".env.")) return "ini";
+  const language = languageFromPath(path) || "plaintext";
+  if (language === "shellscript") return "shell";
+  if (language === "json" || language === "jsonc") return "javascript";
+  if (language === "jsx") return "javascript";
+  if (language === "tsx") return "typescript";
+  return language;
+}
+
+const languageLoaders: Partial<Record<string, () => Promise<unknown>>> = {
+  c: () => import("monaco-editor/esm/vs/basic-languages/cpp/cpp.contribution.js"),
+  cpp: () => import("monaco-editor/esm/vs/basic-languages/cpp/cpp.contribution.js"),
+  csharp: () => import("monaco-editor/esm/vs/basic-languages/csharp/csharp.contribution.js"),
+  css: () => import("monaco-editor/esm/vs/basic-languages/css/css.contribution.js"),
+  dockerfile: () => import("monaco-editor/esm/vs/basic-languages/dockerfile/dockerfile.contribution.js"),
+  go: () => import("monaco-editor/esm/vs/basic-languages/go/go.contribution.js"),
+  graphql: () => import("monaco-editor/esm/vs/basic-languages/graphql/graphql.contribution.js"),
+  hcl: () => import("monaco-editor/esm/vs/basic-languages/hcl/hcl.contribution.js"),
+  html: () => import("monaco-editor/esm/vs/basic-languages/html/html.contribution.js"),
+  ini: () => import("monaco-editor/esm/vs/basic-languages/ini/ini.contribution.js"),
+  java: () => import("monaco-editor/esm/vs/basic-languages/java/java.contribution.js"),
+  javascript: () => import("monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution.js"),
+  kotlin: () => import("monaco-editor/esm/vs/basic-languages/kotlin/kotlin.contribution.js"),
+  lua: () => import("monaco-editor/esm/vs/basic-languages/lua/lua.contribution.js"),
+  markdown: () => import("monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution.js"),
+  "objective-c": () => import("monaco-editor/esm/vs/basic-languages/objective-c/objective-c.contribution.js"),
+  perl: () => import("monaco-editor/esm/vs/basic-languages/perl/perl.contribution.js"),
+  php: () => import("monaco-editor/esm/vs/basic-languages/php/php.contribution.js"),
+  powershell: () => import("monaco-editor/esm/vs/basic-languages/powershell/powershell.contribution.js"),
+  protobuf: () => import("monaco-editor/esm/vs/basic-languages/protobuf/protobuf.contribution.js"),
+  python: () => import("monaco-editor/esm/vs/basic-languages/python/python.contribution.js"),
+  ruby: () => import("monaco-editor/esm/vs/basic-languages/ruby/ruby.contribution.js"),
+  rust: () => import("monaco-editor/esm/vs/basic-languages/rust/rust.contribution.js"),
+  shell: () => import("monaco-editor/esm/vs/basic-languages/shell/shell.contribution.js"),
+  sql: () => import("monaco-editor/esm/vs/basic-languages/sql/sql.contribution.js"),
+  swift: () => import("monaco-editor/esm/vs/basic-languages/swift/swift.contribution.js"),
+  typescript: () => import("monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution.js"),
+  xml: () => import("monaco-editor/esm/vs/basic-languages/xml/xml.contribution.js"),
+  yaml: () => import("monaco-editor/esm/vs/basic-languages/yaml/yaml.contribution.js"),
 };
 
-const lightEditorTheme = EditorView.theme(editorThemeSpec, { dark: false });
-const darkEditorTheme = EditorView.theme(editorThemeSpec, { dark: true });
+const loadingLanguages = new Map<string, Promise<unknown>>();
 
-const lightHighlightStyle = HighlightStyle.define([
-  { tag: [tags.keyword, tags.modifier, tags.operatorKeyword], color: "#0000ff" },
-  { tag: [tags.string, tags.special(tags.string), tags.inserted], color: "#a31515" },
-  { tag: [tags.number, tags.bool, tags.null], color: "#098658" },
-  { tag: [tags.comment, tags.meta], color: "#008000", fontStyle: "italic" },
-  { tag: [tags.function(tags.variableName), tags.labelName], color: "#795e26" },
-  { tag: [tags.typeName, tags.className, tags.namespace], color: "#267f99" },
-  { tag: [tags.propertyName, tags.attributeName, tags.definition(tags.variableName)], color: "#001080" },
-  { tag: [tags.regexp, tags.escape], color: "#811f3f" },
-  { tag: tags.invalid, color: "#cd3131", textDecoration: "underline" },
-]);
-
-const darkHighlightStyle = HighlightStyle.define([
-  { tag: [tags.keyword, tags.modifier, tags.operatorKeyword], color: "#c586c0" },
-  { tag: [tags.string, tags.special(tags.string), tags.inserted], color: "#ce9178" },
-  { tag: [tags.number, tags.bool, tags.null], color: "#b5cea8" },
-  { tag: [tags.comment, tags.meta], color: "#6a9955", fontStyle: "italic" },
-  { tag: [tags.function(tags.variableName), tags.labelName], color: "#dcdcaa" },
-  { tag: [tags.typeName, tags.className, tags.namespace], color: "#4ec9b0" },
-  { tag: [tags.propertyName, tags.attributeName, tags.definition(tags.variableName)], color: "#9cdcfe" },
-  { tag: [tags.regexp, tags.escape], color: "#d16969" },
-  { tag: tags.invalid, color: "#f44747", textDecoration: "underline" },
-]);
-
-function languageForPath(path: string) {
-  const filename = path.split(/[\\/]/).filter(Boolean).pop() || path;
-  const alias = languageAliasForFilename(filename);
-  return alias
-    ? LanguageDescription.matchLanguageName(languages, alias)
-    : LanguageDescription.matchFilename(languages, filename);
-}
-
-function languageAliasForFilename(filename: string) {
-  const lower = filename.toLowerCase();
-  if (lower === ".env" || lower.startsWith(".env.")) return "properties";
-  if (lower === "dockerfile" || lower.startsWith("dockerfile.")) return "dockerfile";
-  if (lower.endsWith(".jsonc")) return "json";
-  if (lower.endsWith(".pyi")) return "python";
-  if (lower.endsWith(".zsh")) return "shell";
-  return "";
+function ensureMonacoLanguage(language: string) {
+  const loader = languageLoaders[language];
+  if (!loader) return Promise.resolve();
+  const existing = loadingLanguages.get(language);
+  if (existing) return existing;
+  const loading = loader();
+  loadingLanguages.set(language, loading);
+  return loading;
 }

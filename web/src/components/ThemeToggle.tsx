@@ -1,11 +1,13 @@
 import { Monitor, Moon, Sun } from "lucide-react";
 
+import {
+  AppDropdownMenuContent as DropdownMenuContent,
+  AppDropdownMenuRadioItem as DropdownMenuRadioItem,
+} from "@/components/AppMenu";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useI18n } from "@/i18n";
@@ -28,7 +30,7 @@ export function ThemeToggle({ onOpenChange }: { onOpenChange?: (open: boolean) =
           <Icon />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" collisionPadding={8} className="w-36">
+      <DropdownMenuContent align="end" className="w-36">
         <DropdownMenuRadioGroup value={theme} onValueChange={(value) => setTheme(value as Theme)}>
           {options.map(({ value, label, icon: OptionIcon }) => (
             <DropdownMenuRadioItem key={value} value={value}>

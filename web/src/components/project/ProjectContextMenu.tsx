@@ -1,73 +1,77 @@
 import {
+  ClipboardPaste,
   Copy,
   CopyX,
+  Files,
   FilePlus2,
+  FolderOpen,
   FolderPlus,
   LocateFixed,
+  MessageSquarePlus,
   PanelRightClose,
-  Paperclip,
   Pencil,
-  RefreshCw,
+  Scissors,
+  SquareTerminal,
   Trash2,
   X,
 } from "lucide-react";
-import type { ComponentProps, ReactNode } from "react";
+import type { ReactNode } from "react";
+
+import {
+  AppContextMenuContent as ProjectMenuContent,
+  AppContextMenuItem as ProjectMenuItem,
+  AppContextMenuSeparator as ContextMenuSeparator,
+} from "@/components/AppMenu";
 
 import {
   ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { useI18n } from "@/i18n";
-import { cn } from "@/lib/utils";
 
 import type { ProjectEntryTarget, ProjectTab } from "./types";
-
-function ProjectMenuContent({ className, ...props }: ComponentProps<typeof ContextMenuContent>) {
-  return (
-    <ContextMenuContent
-      collisionPadding={8}
-      className={cn("min-w-36 w-max", className)}
-      {...props}
-    />
-  );
-}
-
-function ProjectMenuItem({ className, ...props }: ComponentProps<typeof ContextMenuItem>) {
-  return <ContextMenuItem className={cn("whitespace-nowrap", className)} {...props} />;
-}
 
 export function ProjectEntryContextMenu({
   children,
   isRoot = false,
   target,
+  canPaste,
   onCopyAbsolutePath,
+  onCopyEntry,
   onCopyPath,
   onCreate,
+  onCutEntry,
   onDelete,
-  onRefresh,
+  onDuplicate,
+  onOpenTerminal,
+  onPaste,
   onReference,
   onRename,
+  onRevealInFinder,
 }: {
   children: ReactNode;
   isRoot?: boolean;
   target: ProjectEntryTarget;
+  canPaste: boolean;
   onCopyAbsolutePath: (target: ProjectEntryTarget) => void;
+  onCopyEntry: (target: ProjectEntryTarget) => void;
   onCopyPath: (target: ProjectEntryTarget) => void;
   onCreate: (target: ProjectEntryTarget, type: "dir" | "file") => void;
+  onCutEntry: (target: ProjectEntryTarget) => void;
   onDelete: (target: ProjectEntryTarget) => void;
-  onRefresh: (target: ProjectEntryTarget) => void;
+  onDuplicate: (target: ProjectEntryTarget) => void;
+  onOpenTerminal: (target: ProjectEntryTarget) => void;
+  onPaste: (target: ProjectEntryTarget) => void;
   onReference: (target: ProjectEntryTarget) => void;
   onRename: (target: ProjectEntryTarget) => void;
+  onRevealInFinder: (target: ProjectEntryTarget) => void;
 }) {
   const { t } = useI18n();
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ProjectMenuContent>
-        <ProjectMenuItem onSelect={() => onReference(target)}><Paperclip />{t("project.browserReferenceSession")}</ProjectMenuItem>
+        <ProjectMenuItem onSelect={() => onReference(target)}><MessageSquarePlus />{t("project.browserReferenceSession")}</ProjectMenuItem>
         <ContextMenuSeparator />
         {target.type === "dir" ? (
           <>
@@ -77,11 +81,22 @@ export function ProjectEntryContextMenu({
           </>
         ) : null}
         {!isRoot ? (
-          <ProjectMenuItem onSelect={() => onRename(target)}><Pencil />{t("common.rename")}</ProjectMenuItem>
+          <>
+            <ProjectMenuItem onSelect={() => onCopyEntry(target)}><Copy />{t("project.browserCopyEntry")}</ProjectMenuItem>
+            <ProjectMenuItem onSelect={() => onCutEntry(target)}><Scissors />{t("project.browserCutEntry")}</ProjectMenuItem>
+            <ProjectMenuItem onSelect={() => onDuplicate(target)}><Files />{t("project.browserDuplicateEntry")}</ProjectMenuItem>
+          </>
         ) : null}
+        {target.type === "dir" ? (
+          <ProjectMenuItem disabled={!canPaste} onSelect={() => onPaste(target)}><ClipboardPaste />{t("project.browserPasteEntry")}</ProjectMenuItem>
+        ) : null}
+        {!isRoot ? <ProjectMenuItem onSelect={() => onRename(target)}><Pencil />{t("common.rename")}</ProjectMenuItem> : null}
+        <ContextMenuSeparator />
+        <ProjectMenuItem onSelect={() => onRevealInFinder(target)}><FolderOpen />{t("project.browserRevealFinder")}</ProjectMenuItem>
+        <ProjectMenuItem onSelect={() => onOpenTerminal(target)}><SquareTerminal />{t("project.browserOpenTerminal")}</ProjectMenuItem>
+        <ContextMenuSeparator />
         <ProjectMenuItem onSelect={() => onCopyPath(target)}><Copy />{t("project.browserCopyRelativePath")}</ProjectMenuItem>
         <ProjectMenuItem onSelect={() => onCopyAbsolutePath(target)}><Copy />{t("project.browserCopyAbsolutePath")}</ProjectMenuItem>
-        <ProjectMenuItem onSelect={() => onRefresh(target)}><RefreshCw />{t("common.refresh")}</ProjectMenuItem>
         {!isRoot ? (
           <>
             <ContextMenuSeparator />

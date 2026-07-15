@@ -27,12 +27,16 @@ import type { GalleryLayout } from "@/components/canvas/CanvasItemContent";
 import { CanvasFreeformSurface } from "@/components/canvas/CanvasFreeformSurface";
 import { titleForCanvasItem } from "@/components/canvas/CanvasKindIcon";
 import { CanvasToolbar } from "@/components/canvas/CanvasToolbar";
+import {
+  AppDropdownMenuContent as DropdownMenuContent,
+  AppDropdownMenuItem as DropdownMenuItem,
+} from "@/components/AppMenu";
 import { FilePreviewSurface, filePreviewTitle } from "@/components/canvas/FilePreviewSurface";
 import { asRecord, numberValue, stringValue } from "@/components/canvas/canvasPayload";
 import { Spinner } from "@/components/Spinner";
 import { ProjectBrowserSurface } from "@/components/project/ProjectBrowserSurface";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import type { CanvasItem, ClosedCanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
@@ -243,6 +247,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     closeTerminal,
     closingTerminalID,
     createNewTerminal,
+    createNewTerminalAt,
     creatingTerminal,
     selectTerminal,
     terminals,
@@ -656,15 +661,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
   return (
     <aside className="relative flex h-full shrink-0 flex-col bg-[var(--workspace-background)] text-sidebar-foreground">
       <div className="relative z-30 flex h-(--toolbar-h) shrink-0 items-center gap-2 overflow-hidden pr-(--workspace-toolbar-pr) pl-(--workspace-toolbar-pl)">
-        <div className="no-drag-region flex shrink-0 items-center gap-1.5">
-          {hasProject ? <ProjectSurfaceControl active={projectActive} onActivate={activateProjectSurface} /> : null}
-          <CanvasSurfaceControl
-            active={activeSurface === "canvas" && !filePreviewActive}
-            onActivate={selectPersistentCanvasSurface}
-          />
-        </div>
-        {actorSessionID && browserTabs.length + terminals.length + filePreviews.length > 0 ? (
-          <WorkspaceResourceTabs
+        <WorkspaceResourceTabs
             activeBrowserTabID={activeBrowserTabID}
             activeFilePreviewID={activeFilePreviewID}
             activeSurface={activeSurface}
@@ -679,7 +676,16 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
               openedAt: preview.openedAt,
               path: preview.path,
             }))}
-            orderScope={actorSessionID}
+            leadingTabs={(
+              <>
+                {hasProject ? <ProjectSurfaceControl active={projectActive} onActivate={activateProjectSurface} /> : null}
+                <CanvasSurfaceControl
+                  active={activeSurface === "canvas" && !filePreviewActive}
+                  onActivate={selectPersistentCanvasSurface}
+                />
+              </>
+            )}
+            orderScope={actorSessionID || "workspace"}
             terminalTabs={terminals}
             onCloseBrowser={(tabID) => {
               const closingLastActiveBrowser =
@@ -704,8 +710,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
             }}
             onSelectFilePreview={selectFilePreview}
             onSelectTerminal={selectTerminal}
-          />
-        ) : null}
+        />
         {actorSessionID ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -802,6 +807,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
             active={projectActive}
             sessionID={actorSessionID}
             token={token}
+            onOpenTerminal={createNewTerminalAt}
             onVisibleContextChange={setProjectUIContext}
           />
         ) : null}

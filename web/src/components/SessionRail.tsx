@@ -68,17 +68,20 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
+  AppDropdownMenuContent as DropdownMenuContent,
+  AppDropdownMenuItem as DropdownMenuItem,
+  AppDropdownMenuSeparator as DropdownMenuSeparator,
+  AppDropdownMenuSubContent as DropdownMenuSubContent,
+  AppDropdownMenuSubTrigger as DropdownMenuSubTrigger,
+} from "@/components/AppMenu";
+import { AppPopoverContent as PopoverContent } from "@/components/AppPopover";
+import {
   DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
+import { Popover, PopoverAnchor } from "@/components/ui/popover";
 import {
   Sidebar,
   SidebarContent,
@@ -2173,8 +2176,6 @@ function SessionItem({
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
-              collisionPadding={8}
-              className="min-w-36 w-max"
               onCloseAutoFocus={(event) => {
                 event.preventDefault();
                 if (!editAfterMenuCloseRef.current) {
@@ -2184,16 +2185,15 @@ function SessionItem({
                 startEditing();
               }}
             >
-              <DropdownMenuItem className="whitespace-nowrap" onSelect={() => onPinChange(!session.pinned)}>
+              <DropdownMenuItem onSelect={() => onPinChange(!session.pinned)}>
                 <Pin className="rotate-45" />
                 {session.pinned ? t("session.unpin") : t("session.pin")}
               </DropdownMenuItem>
-              <DropdownMenuItem className="whitespace-nowrap" onSelect={onOpenSplit}>
+              <DropdownMenuItem onSelect={onOpenSplit}>
                 <Rows2 />
                 {t("session.openSplit")}
               </DropdownMenuItem>
               <DropdownMenuItem
-                className="whitespace-nowrap"
                 onSelect={() => {
                   editAfterMenuCloseRef.current = true;
                 }}
@@ -2203,7 +2203,6 @@ function SessionItem({
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                className="whitespace-nowrap"
                 disabled={deletePending}
                 variant="destructive"
                 onSelect={() => setDeleteOpen(true)}

@@ -13,11 +13,11 @@ import {
 import { queryKeys } from "@/api/queryKeys";
 import { AppIdentityIcon, appDisplayName } from "@/components/AppIdentity";
 import { AppIcon } from "@/components/AppIcon";
+import { AppPopoverContent as PopoverContent } from "@/components/AppPopover";
 import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
-  PopoverContent,
   PopoverHeader,
   PopoverTitle,
   PopoverTrigger,

@@ -53,10 +53,10 @@ export function BuiltinAppIcon({ appID, size = "md" }: { appID: string; size?: I
 
 export function builtinAppIconClass(appID: string) {
   if (appID === "terminal") {
-    return "bg-amber-50 text-amber-700 shadow-none dark:bg-amber-400/15 dark:text-amber-300";
+    return "bg-emerald-50 text-emerald-700 shadow-none dark:bg-emerald-400/15 dark:text-emerald-300";
   }
   if (appID === "canvas") {
-    return "bg-orange-50 text-orange-700 shadow-none dark:bg-orange-400/15 dark:text-orange-300";
+    return "bg-violet-50 text-violet-700 shadow-none dark:bg-violet-400/15 dark:text-violet-300";
   }
   return "bg-blue-50 text-blue-700 shadow-none dark:bg-blue-400/15 dark:text-blue-300";
 }

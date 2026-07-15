@@ -148,6 +148,10 @@ export function projectReferencesFromContentParts(parts: ContentPart[]): Project
       sourcePath: part.sourcePath,
       rootID: part.rootID,
       kind: part.kind,
+      startLine: part.startLine,
+      startColumn: part.startColumn,
+      endLine: part.endLine,
+      endColumn: part.endColumn,
     }));
 }
 

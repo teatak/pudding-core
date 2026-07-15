@@ -140,12 +140,16 @@ func TestBuildIncludesProjectReferencesTag(t *testing.T) {
 		UserText:        "check this",
 		UserParts: []store.ContentPart{
 			store.ProjectReferencePart(store.ProjectReference{
-				ID:         "ref_1",
-				Name:       "README.md",
-				Path:       "tutorials/README.md",
-				SourcePath: "/workspace/tutorials/README.md",
-				RootID:     "root_1",
-				Kind:       "file",
+				ID:          "ref_1",
+				Name:        "README.md",
+				Path:        "tutorials/README.md",
+				SourcePath:  "/workspace/tutorials/README.md",
+				RootID:      "root_1",
+				Kind:        "file",
+				StartLine:   3,
+				StartColumn: 2,
+				EndLine:     5,
+				EndColumn:   8,
 			}),
 			{Type: store.ContentPartText, Text: "check this"},
 		},
@@ -156,7 +160,7 @@ func TestBuildIncludesProjectReferencesTag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(req.Messages) != 1 || !strings.Contains(req.Messages[0].Text, "<pudding-project-references version=\"1\">") || !strings.Contains(req.Messages[0].Text, `"rootID":"root_1"`) || !strings.Contains(req.Messages[0].Text, `"path":"tutorials/README.md"`) || !strings.Contains(req.Messages[0].Text, `"sourcePath":"/workspace/tutorials/README.md"`) {
+	if len(req.Messages) != 1 || !strings.Contains(req.Messages[0].Text, "<pudding-project-references version=\"1\">") || !strings.Contains(req.Messages[0].Text, `"rootID":"root_1"`) || !strings.Contains(req.Messages[0].Text, `"path":"tutorials/README.md"`) || !strings.Contains(req.Messages[0].Text, `"sourcePath":"/workspace/tutorials/README.md"`) || !strings.Contains(req.Messages[0].Text, `"startLine":3`) || !strings.Contains(req.Messages[0].Text, `"endLine":5`) {
 		t.Fatalf("project reference tag missing from provider context: %+v", req.Messages)
 	}
 	if strings.Index(req.Messages[0].Text, "<pudding-project-references version=\"1\">") > strings.Index(req.Messages[0].Text, "check this") {

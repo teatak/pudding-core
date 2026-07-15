@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useI18n } from "@/i18n";
 import { revealDesktopPath } from "@/api/client";
 import { attachmentResourceURL } from "@/lib/attachmentURL";
+import { projectReferenceRangeLabel } from "@/lib/projectReferences";
 import { cn } from "@/lib/utils";
 
 import { InterruptedBadge, MessageMeta } from "./MessageMeta";
@@ -352,6 +353,7 @@ function ProjectReferenceCard({
   folderLabel: string;
 }) {
   const Icon = reference.kind === "dir" ? FolderOpen : FileText;
+  const range = projectReferenceRangeLabel(reference);
   return (
     <div
       className="inline-flex h-8 max-w-full items-center gap-1.5 rounded-md border border-border/70 bg-background/70 px-2 text-xs leading-5 whitespace-nowrap"
@@ -360,7 +362,7 @@ function ProjectReferenceCard({
       <Icon className="size-3 shrink-0 text-muted-foreground" strokeWidth={1.8} />
       <span className="min-w-0 truncate whitespace-nowrap">{reference.name}</span>
       <span className="shrink-0 whitespace-nowrap text-muted-foreground/70">
-        {reference.kind === "dir" ? folderLabel : fileLabel}
+        {range || (reference.kind === "dir" ? folderLabel : fileLabel)}
       </span>
     </div>
   );

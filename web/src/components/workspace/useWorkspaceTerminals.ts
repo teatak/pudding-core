@@ -75,9 +75,9 @@ export function useWorkspaceTerminals({
   }, [active, enabled, onDeactivate, query.isFetching, terminals.length]);
 
   const createMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (cwd?: string) => {
       const dimensions = normalizeTerminalDimensions(getInitialDimensions());
-      const item = await createTerminal(token, sessionID, dimensions);
+      const item = await createTerminal(token, sessionID, { ...dimensions, cwd });
       return { dimensions, item };
     },
     onSuccess: ({ dimensions, item }) => {
@@ -146,7 +146,12 @@ export function useWorkspaceTerminals({
     closingTerminalID: closeMutation.isPending ? closeMutation.variables : undefined,
     createNewTerminal: () => {
       if (enabled && sessionID && !createMutation.isPending) {
-        createMutation.mutate();
+        createMutation.mutate(undefined);
+      }
+    },
+    createNewTerminalAt: (cwd: string) => {
+      if (enabled && sessionID && cwd && !createMutation.isPending) {
+        createMutation.mutate(cwd);
       }
     },
     creatingTerminal: createMutation.isPending,

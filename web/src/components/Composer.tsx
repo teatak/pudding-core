@@ -88,6 +88,7 @@ import { attachmentResourceURL } from "@/lib/attachmentURL";
 import { createPastedTextAttachmentFile, shouldAttachPastedText } from "@/lib/clipboardTextAttachment";
 import { getLocalFilePath, pickDirectories } from "@/lib/desktopBridge";
 import { newClientID } from "@/lib/id";
+import { projectReferenceRangeLabel } from "@/lib/projectReferences";
 import {
   createLocalFolderPath,
   type DroppedLocalItems,
@@ -1134,7 +1135,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
           ) : null}
           <div
             className={cn(
-              "pudding-composer-shell relative isolate z-10 rounded-3xl border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/25",
+              "pudding-composer-shell relative isolate z-10 rounded-3xl border bg-card transition-shadow",
               micActive && "is-mic-active",
             )}
           >
@@ -1370,6 +1371,7 @@ function ProjectReferenceChip({
   onRemove: () => void;
 }) {
   const Icon = reference.kind === "dir" ? FolderOpen : FileText;
+  const range = projectReferenceRangeLabel(reference);
   return (
     <div
       className="relative inline-flex h-10 max-w-full items-center gap-1.5 rounded-lg border border-border/70 bg-card pr-7 pl-2.5 text-sm whitespace-nowrap shadow-sm"
@@ -1378,7 +1380,7 @@ function ProjectReferenceChip({
       <Icon className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.8} />
       <span className="min-w-0 truncate font-medium leading-5 text-foreground">{reference.name}</span>
       <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
-        {reference.kind === "dir" ? folderLabel : fileLabel}
+        {range || (reference.kind === "dir" ? folderLabel : fileLabel)}
       </span>
       <button
         aria-label={removeLabel}
@@ -1552,7 +1554,7 @@ function SlashCommandMenu({
   return (
     <div
       ref={listRef}
-      className="absolute bottom-full left-16 z-20 max-h-64 w-[min(30rem,calc(100%-6rem))] overflow-y-auto rounded-t-lg border border-border/70 bg-popover/95 p-1 text-sm text-popover-foreground shadow-sm backdrop-blur"
+      className="pudding-composer-suggestion absolute bottom-[calc(100%-3px)] left-16 z-[5] max-h-64 w-[min(30rem,calc(100%-6rem))] overflow-y-auto rounded-t-lg border border-b-0 bg-popover/95 p-1 text-sm text-popover-foreground backdrop-blur"
       role="listbox"
     >
       {commands.map((command, index) => (

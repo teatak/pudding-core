@@ -1,7 +1,8 @@
-import { ChevronDown, FolderTree, Trash2, Undo2 } from "lucide-react";
+import { ChevronDown, Folders, Trash2, Undo2 } from "lucide-react";
 
+import { AppPopoverContent as PopoverContent } from "@/components/AppPopover";
 import { CanvasKindIcon } from "@/components/canvas/CanvasKindIcon";
-import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import type { ClosedCanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
 
@@ -10,13 +11,13 @@ export function ProjectSurfaceControl({ active, onActivate }: { active: boolean;
   return (
     <button
       aria-pressed={active}
-      className="inline-flex h-(--workspace-toolbar-tab-h) items-center gap-1.5 rounded-md border border-transparent bg-muted px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-background hover:text-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm"
+      className="inline-flex h-(--workspace-toolbar-tab-h) items-center gap-1.5 rounded-md border border-transparent bg-transparent px-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground aria-pressed:border-border aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm dark:aria-pressed:border-white/20 dark:aria-pressed:bg-[#303030]"
       title={t("workspace.project")}
       type="button"
       onClick={onActivate}
     >
       <span className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] bg-amber-50 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300">
-        <FolderTree className="h-3.5 w-3.5" />
+        <Folders className="h-3.5 w-3.5" />
       </span>
       <span>{t("workspace.project")}</span>
     </button>
@@ -28,7 +29,7 @@ export function CanvasSurfaceControl({ active, onActivate }: { active: boolean; 
   return (
     <button
       aria-pressed={active}
-      className="inline-flex h-(--workspace-toolbar-tab-h) items-center gap-1.5 rounded-md border border-transparent bg-muted px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-background hover:text-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm"
+      className="inline-flex h-(--workspace-toolbar-tab-h) items-center gap-1.5 rounded-md border border-transparent bg-transparent px-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground aria-pressed:border-border aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm dark:aria-pressed:border-white/20 dark:aria-pressed:bg-[#303030]"
       title={t("canvas.title")}
       type="button"
       onClick={onActivate}

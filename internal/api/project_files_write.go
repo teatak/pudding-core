@@ -24,6 +24,15 @@ type renameProjectEntryReq struct {
 	Name   string `json:"name"`
 }
 
+type transferProjectEntryReq struct {
+	SourceRootID     string `json:"sourceRootID"`
+	SourcePath       string `json:"sourcePath"`
+	TargetRootID     string `json:"targetRootID"`
+	TargetParentPath string `json:"targetParentPath"`
+	Name             string `json:"name,omitempty"`
+	Unique           bool   `json:"unique,omitempty"`
+}
+
 type saveProjectFileReq struct {
 	RootID           string `json:"rootID"`
 	Path             string `json:"path"`
@@ -96,6 +105,72 @@ func (s *Server) renameProjectEntry(c *cart.Context) error {
 		Type:   entry.Type,
 	})
 	return nil
+}
+
+func (s *Server) copyProjectEntry(c *cart.Context) error {
+	var req transferProjectEntryReq
+	if err := decode(c, &req); err != nil {
+		return badRequest(c, "invalid json body")
+	}
+	_, roots, ok := s.sessionProject(c)
+	if !ok {
+		return nil
+	}
+	sourceRoot, sourcePath, targetRoot, targetParentPath, ok := resolveProjectTransfer(c, roots, req)
+	if !ok {
+		return nil
+	}
+	entry, err := projectfs.Copy(sourceRoot.Path, sourcePath, targetRoot.Path, targetParentPath, req.Name, req.Unique)
+	if err != nil {
+		return s.projectMutationError(c, err)
+	}
+	c.JSON(http.StatusCreated, projectEntryMutationView{RootID: targetRoot.ID, Name: entry.Name, Path: entry.Path, Type: entry.Type})
+	return nil
+}
+
+func (s *Server) moveProjectEntry(c *cart.Context) error {
+	var req transferProjectEntryReq
+	if err := decode(c, &req); err != nil {
+		return badRequest(c, "invalid json body")
+	}
+	_, roots, ok := s.sessionProject(c)
+	if !ok {
+		return nil
+	}
+	sourceRoot, sourcePath, targetRoot, targetParentPath, ok := resolveProjectTransfer(c, roots, req)
+	if !ok {
+		return nil
+	}
+	entry, err := projectfs.Move(sourceRoot.Path, sourcePath, targetRoot.Path, targetParentPath, req.Name)
+	if err != nil {
+		return s.projectMutationError(c, err)
+	}
+	c.JSON(http.StatusOK, projectEntryMutationView{RootID: targetRoot.ID, Name: entry.Name, Path: entry.Path, Type: entry.Type})
+	return nil
+}
+
+func resolveProjectTransfer(c *cart.Context, roots []projectRootView, req transferProjectEntryReq) (projectRootView, string, projectRootView, string, bool) {
+	sourceRoot, ok := projectRootByID(roots, strings.TrimSpace(req.SourceRootID))
+	if !ok {
+		_ = projectFileError(c, http.StatusBadRequest, "invalid_project_root")
+		return projectRootView{}, "", projectRootView{}, "", false
+	}
+	targetRoot, ok := projectRootByID(roots, strings.TrimSpace(req.TargetRootID))
+	if !ok {
+		_ = projectFileError(c, http.StatusBadRequest, "invalid_project_root")
+		return projectRootView{}, "", projectRootView{}, "", false
+	}
+	sourcePath, err := cleanProjectRelativePath(req.SourcePath, false)
+	if err != nil {
+		_ = projectFileError(c, http.StatusForbidden, "path_not_authorized")
+		return projectRootView{}, "", projectRootView{}, "", false
+	}
+	targetParentPath, err := cleanProjectRelativePath(req.TargetParentPath, true)
+	if err != nil {
+		_ = projectFileError(c, http.StatusForbidden, "path_not_authorized")
+		return projectRootView{}, "", projectRootView{}, "", false
+	}
+	return sourceRoot, sourcePath, targetRoot, targetParentPath, true
 }
 
 func (s *Server) deleteProjectEntry(c *cart.Context) error {
