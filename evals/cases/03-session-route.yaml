@@ -1,0 +1,10 @@
+name: session-route
+description: Preserve split-pane routing state while selecting a session.
+fixture: ../fixtures/session-route
+prompt: |
+  Fix selectSessionURL. Selecting a session must replace the session query value, preserve a valid split value, remove transient draft state, and safely encode the session ID.
+verify:
+  command: ["node", "--test"]
+  timeout: 2m
+  baseline_must_fail: true
+  allowed_paths: ["route.js"]

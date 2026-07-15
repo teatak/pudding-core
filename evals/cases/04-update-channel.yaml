@@ -1,0 +1,10 @@
+name: update-channel
+description: Normalize persisted desktop update preferences safely.
+fixture: ../fixtures/update-channel
+prompt: |
+  Harden normalizeUpdatePreferences. Only stable and preview are supported channels. Invalid or missing input must fall back to stable, and enabled defaults to true unless it is explicitly false.
+verify:
+  command: ["node", "--test"]
+  timeout: 2m
+  baseline_must_fail: true
+  allowed_paths: ["update-preferences.js"]

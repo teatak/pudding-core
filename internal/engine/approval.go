@@ -303,6 +303,13 @@ func (e *Engine) requestCapabilityApproval(ctx context.Context, sessionID, turnI
 		return capabilityToolResult(call, false, map[string]any{"ok": false, "reason": "project_dirs_not_allowed"}), currentMode, false
 	}
 	if currentMode == store.ModeCode && req.TargetMode == store.ModeCode && len(req.ProjectDirs) == 0 && !req.NeedsProjectDir {
+		if len(e.projectRootDirsForToolCall(ctx, sessionID, turnID)) > 0 {
+			return capabilityToolResult(call, true, map[string]any{
+				"ok":     true,
+				"status": "already_available",
+				"mode":   string(store.ModeCode),
+			}), currentMode, false
+		}
 		return capabilityToolResult(call, false, map[string]any{"ok": false, "reason": "project_dirs_required"}), currentMode, false
 	}
 	if !(currentMode == store.ModeCode && req.TargetMode == store.ModeCode) && store.AgentModeRank(req.TargetMode) <= store.AgentModeRank(currentMode) {

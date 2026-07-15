@@ -1756,6 +1756,134 @@ func TestWorkCapabilityRejectsProjectDirectoryFields(t *testing.T) {
 	}
 }
 
+func TestCodeCapabilityNoopReturnsAlreadyAvailableForAuthorizedProject(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	eng := New(ms, hub, mapResolver{}, ms)
+	ctx := context.Background()
+	project := &store.Project{
+		ID:           "proj_code_available",
+		Name:         "code available",
+		RootDirs:     []string{t.TempDir()},
+		ApprovalMode: store.ApprovalAuto,
+	}
+	if err := ms.CreateProject(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	sid := "sess_code_available"
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID: sid, Provider: "test", Model: "test", ActiveMode: store.ModeCode,
+		ModeLease: store.ModeLeaseSession, ProjectID: project.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, mode, upgraded := eng.requestCapabilityApproval(ctx, sid, "turn_code", tool.Call{
+		SessionID: sid,
+		TurnID:    "turn_code",
+		CallID:    "call_code",
+		Name:      tool.RequestCapability,
+		Args:      json.RawMessage(`{"targetMode":"code","reason":"确认代码权限"}`),
+	}, store.ModeCode)
+	if !result.Ok || upgraded || mode != store.ModeCode || !strings.Contains(result.Content, `"status":"already_available"`) {
+		t.Fatalf("unexpected Code no-op result: result=%+v mode=%q upgraded=%t", result, mode, upgraded)
+	}
+	if pending := eng.PendingApprovals(sid); len(pending) != 0 {
+		t.Fatalf("Code no-op must not request approval: %+v", pending)
+	}
+}
+
+func TestCodeCapabilityNoopStillRequiresProjectDirectoryWithoutAccess(t *testing.T) {
+	ms := memstore.New()
+	eng := New(ms, event.NewHub(), mapResolver{}, ms)
+	ctx := context.Background()
+	sid := "sess_code_without_project"
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID: sid, Provider: "test", Model: "test", ActiveMode: store.ModeCode,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, mode, upgraded := eng.requestCapabilityApproval(ctx, sid, "turn_code", tool.Call{
+		SessionID: sid,
+		TurnID:    "turn_code",
+		CallID:    "call_code",
+		Name:      tool.RequestCapability,
+		Args:      json.RawMessage(`{"targetMode":"code","reason":"需要代码权限"}`),
+	}, store.ModeCode)
+	if result.Ok || upgraded || mode != store.ModeCode || !strings.Contains(result.Content, "project_dirs_required") {
+		t.Fatalf("unexpected Code no-project result: result=%+v mode=%q upgraded=%t", result, mode, upgraded)
+	}
+}
+
+func TestCodeCapabilityAdditionalDirectoryStillRequiresApproval(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	eng := New(ms, hub, mapResolver{}, ms)
+	ctx := context.Background()
+	project := &store.Project{
+		ID:           "proj_code_existing",
+		Name:         "code existing",
+		RootDirs:     []string{t.TempDir()},
+		ApprovalMode: store.ApprovalAuto,
+	}
+	if err := ms.CreateProject(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	sid := "sess_code_additional_dir"
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID: sid, Provider: "test", Model: "test", ActiveMode: store.ModeCode,
+		ModeLease: store.ModeLeaseSession, ProjectID: project.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	additionalDir := t.TempDir()
+	sub, unsub := hub.Subscribe(sid)
+	defer unsub()
+
+	type response struct {
+		result   tool.Result
+		mode     store.AgentMode
+		upgraded bool
+	}
+	done := make(chan response, 1)
+	go func() {
+		result, mode, upgraded := eng.requestCapabilityApproval(ctx, sid, "turn_code", tool.Call{
+			SessionID: sid,
+			TurnID:    "turn_code",
+			CallID:    "call_code",
+			Name:      tool.RequestCapability,
+			Args:      mustJSON(map[string]any{"targetMode": "code", "reason": "需要额外目录", "projectDirs": []string{additionalDir}}),
+		}, store.ModeCode)
+		done <- response{result: result, mode: mode, upgraded: upgraded}
+	}()
+
+	var approval event.Event
+	select {
+	case approval = <-sub:
+	case <-time.After(time.Second):
+		t.Fatal("additional Code directory approval request not emitted")
+	}
+	if approval.Kind != event.ApprovalRequested || approval.ApprovalKind != ApprovalKindCapability {
+		t.Fatalf("unexpected approval event: %+v", approval)
+	}
+	pending := eng.PendingApprovals(sid)
+	if len(pending) != 1 || len(pending[0].ProjectDirs) != 1 || pending[0].ProjectDirs[0] != additionalDir {
+		t.Fatalf("unexpected additional directory approval: %+v", pending)
+	}
+	if err := eng.DenyApproval(ctx, sid, approval.ApprovalID, "not approved"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-done:
+		if got.result.Ok || got.upgraded || got.mode != store.ModeCode || !strings.Contains(got.result.Content, `"status":"denied"`) {
+			t.Fatalf("unexpected denied additional directory result: %+v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("additional Code directory request did not resume")
+	}
+}
+
 func TestCapabilityApprovalUpgradesTurnTools(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()

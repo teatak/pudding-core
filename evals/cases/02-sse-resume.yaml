@@ -1,0 +1,10 @@
+name: sse-resume
+description: Respect Last-Event-ID exclusive replay semantics.
+fixture: ../fixtures/sse-resume
+prompt: |
+  Fix ReplayAfter so reconnecting with Last-Event-ID only replays events strictly after the acknowledged sequence. Preserve ordering and handle a zero cursor.
+verify:
+  command: ["go", "test", "./..."]
+  timeout: 2m
+  baseline_must_fail: true
+  allowed_paths: ["replay.go"]

@@ -60,3 +60,13 @@ func TestRunToolsReportHelp(t *testing.T) {
 		t.Fatalf("unexpected report help: %s", stderr.String())
 	}
 }
+
+func TestRunAgentEvalHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := runAgent([]string{"eval", "--help"}, &stdout, &stderr, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr.String(), "provider profile ID") || !strings.Contains(stderr.String(), "runs per case") {
+		t.Fatalf("unexpected agent eval help: %s", stderr.String())
+	}
+}

@@ -1,0 +1,10 @@
+name: git-rename
+description: Parse Git porcelain rename destinations correctly.
+fixture: ../fixtures/git-rename
+prompt: |
+  Fix ChangedPaths for Git porcelain v1 output. Ordinary entries should keep their path; rename and copy entries written as `old -> new` must report only the destination. Ignore malformed lines and return sorted unique paths.
+verify:
+  command: ["go", "test", "./..."]
+  timeout: 2m
+  baseline_must_fail: true
+  allowed_paths: ["porcelain.go"]

@@ -2,6 +2,7 @@ package tool
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/provider"
@@ -37,17 +38,25 @@ func TestDefinitionsForTurnUsesCumulativeCapabilityLevels(t *testing.T) {
 }
 
 func TestRequestCapabilitySchemaOnlyExposesWorkAndCode(t *testing.T) {
+	definition := RequestCapabilityDefinition()
+	if !strings.Contains(definition.Description, "do not call this tool") {
+		t.Fatalf("definition must discourage redundant Code requests: %q", definition.Description)
+	}
 	var schema struct {
 		Properties map[string]struct {
-			Enum []string `json:"enum"`
+			Enum        []string `json:"enum"`
+			Description string   `json:"description"`
 		} `json:"properties"`
 	}
-	if err := json.Unmarshal(RequestCapabilityDefinition().InputSchema, &schema); err != nil {
+	if err := json.Unmarshal(definition.InputSchema, &schema); err != nil {
 		t.Fatal(err)
 	}
 	got := schema.Properties["targetMode"].Enum
 	if len(got) != 2 || got[0] != "work" || got[1] != "code" {
 		t.Fatalf("targetMode enum = %+v", got)
+	}
+	if !strings.Contains(schema.Properties["projectDirs"].Description, "do not call with an empty list") {
+		t.Fatalf("projectDirs description must discourage redundant Code requests: %q", schema.Properties["projectDirs"].Description)
 	}
 }
 

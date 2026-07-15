@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -75,6 +76,34 @@ func TestProjectInspectRejectsPathOutsideProject(t *testing.T) {
 	})
 	if result.Ok {
 		t.Fatalf("outside inspection should fail: %+v", result)
+	}
+}
+
+func TestProjectInspectDefaultsMissingScopeToProject(t *testing.T) {
+	root := t.TempDir()
+	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
+	result := runner.Call(context.Background(), Call{
+		Name:        ProjectInspect,
+		Args:        json.RawMessage(`{}`),
+		ProjectDirs: []string{root},
+	})
+	if !result.Ok {
+		t.Fatalf("missing scope should use the only supported project scope: %+v", result)
+	}
+	if payload := decodeToolResult(t, result); payload["scope"] != managedScopeProject {
+		t.Fatalf("unexpected default scope: %+v", payload)
+	}
+}
+
+func TestProjectInspectStillRejectsExplicitInvalidScope(t *testing.T) {
+	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
+	result := runner.Call(context.Background(), Call{
+		Name:        ProjectInspect,
+		Args:        json.RawMessage(`{"scope":"work"}`),
+		ProjectDirs: []string{t.TempDir()},
+	})
+	if result.Ok || !strings.Contains(result.Content, `"reason":"invalid_scope"`) {
+		t.Fatalf("explicit invalid scope should fail: %+v", result)
 	}
 }
 

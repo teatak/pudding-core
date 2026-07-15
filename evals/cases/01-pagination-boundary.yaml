@@ -1,0 +1,10 @@
+name: pagination-boundary
+description: Fix a one-based pagination boundary bug without changing tests.
+fixture: ../fixtures/pagination-boundary
+prompt: |
+  The pager uses one-based page numbers, but the current implementation returns the wrong items and mishandles invalid input. Fix the implementation while preserving the public function signature.
+verify:
+  command: ["go", "test", "./..."]
+  timeout: 2m
+  baseline_must_fail: true
+  allowed_paths: ["pagination.go"]

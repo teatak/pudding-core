@@ -205,6 +205,23 @@ func TestClassifyToolCallCommandUsesAuthorizedProjectPaths(t *testing.T) {
 	}
 }
 
+func TestClassifyToolCallCommandAcceptsCanonicalProjectRootAlias(t *testing.T) {
+	base := t.TempDir()
+	realRoot := filepath.Join(base, "real")
+	if err := os.MkdirAll(realRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	aliasRoot := filepath.Join(base, "alias")
+	if err := os.Symlink(realRoot, aliasRoot); err != nil {
+		t.Fatal(err)
+	}
+	raw := json.RawMessage(`{"scope":"project","argv":["find","` + realRoot + `","-type","f","-name","*.go"]}`)
+	risk, ok := ClassifyToolCallForProject(CommandRun, raw, []string{aliasRoot})
+	if !ok || !risk.LowRisk {
+		t.Fatalf("read-only find through canonical project alias should be low risk: %+v ok=%v", risk, ok)
+	}
+}
+
 func TestClassifyToolCallCommandExecutableBoundary(t *testing.T) {
 	risk, ok := ClassifyToolCall(CommandRun, json.RawMessage(`{"scope":"project","argv":["/tmp/go","test","./..."]}`))
 	if !ok || risk.LowRisk {

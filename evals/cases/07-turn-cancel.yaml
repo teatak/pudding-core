@@ -1,0 +1,10 @@
+name: turn-cancel
+description: Preserve terminal turn states during cancellation.
+fixture: ../fixtures/turn-cancel
+prompt: |
+  Fix Cancel. A running turn should become cancelled. Cancelling an already terminal turn must leave its status unchanged, and a missing turn should return false.
+verify:
+  command: ["go", "test", "./..."]
+  timeout: 2m
+  baseline_must_fail: true
+  allowed_paths: ["turns.go"]

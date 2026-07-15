@@ -1,0 +1,10 @@
+name: compaction-tail
+description: Build effective context from the latest compact summary.
+fixture: ../fixtures/compaction-tail
+prompt: |
+  Fix EffectiveMessages. When summaries exist, context starts at the latest summary and includes all following messages. Without a summary, return all messages. Do not mutate the input slice.
+verify:
+  command: ["go", "test", "./..."]
+  timeout: 2m
+  baseline_must_fail: true
+  allowed_paths: ["builder.go"]

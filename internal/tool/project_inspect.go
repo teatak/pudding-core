@@ -59,7 +59,11 @@ func (r *BuiltinRunner) projectInspect(ctx context.Context, call Call) Result {
 	if err := decodeStructToolArgs(call.Args, &args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
-	if strings.TrimSpace(args.Scope) != managedScopeProject {
+	scope := strings.TrimSpace(args.Scope)
+	if scope == "" {
+		scope = managedScopeProject
+	}
+	if scope != managedScopeProject {
 		return toolJSONError(out, "invalid_scope", "project inspection scope must be project")
 	}
 	root, target, rel, err := resolveProjectPath(call.ProjectDirs, args.Path, true, false)

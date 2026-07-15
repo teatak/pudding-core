@@ -1,0 +1,10 @@
+name: tool-model-selection
+description: Select a tool-capable model deterministically.
+fixture: ../fixtures/tool-model-selection
+prompt: |
+  Fix SelectForCode. It must return the first configured model that supports tools, without reordering the input. Return false when no model is suitable.
+verify:
+  command: ["go", "test", "./..."]
+  timeout: 2m
+  baseline_must_fail: true
+  allowed_paths: ["select.go"]

@@ -1,0 +1,10 @@
+name: attachment-cleanup
+description: Keep attachment references from canonical and queued inputs.
+fixture: ../fixtures/attachment-cleanup
+prompt: |
+  Fix ReferencedKeys so attachment cleanup sees references from both canonical messages and queued inputs, ignores empty keys, and returns each key once in stable sorted order.
+verify:
+  command: ["go", "test", "./..."]
+  timeout: 2m
+  baseline_must_fail: true
+  allowed_paths: ["cleanup.go"]

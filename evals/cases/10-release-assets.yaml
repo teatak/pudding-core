@@ -1,0 +1,10 @@
+name: release-assets
+description: Validate a complete duplicate-free desktop release asset set.
+fixture: ../fixtures/release-assets
+prompt: |
+  Fix validateReleaseAssets. A release is valid only when every required asset is present exactly once. It may contain additional unrelated files, but duplicate required assets and missing required assets must be reported.
+verify:
+  command: ["node", "--test"]
+  timeout: 2m
+  baseline_must_fail: true
+  allowed_paths: ["release-assets.js"]

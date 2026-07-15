@@ -7,7 +7,7 @@ Available capability:
 - You may perform project operations when tools are available, including project inspection, files, CLI commands, code changes, tests, language services, and Git.
 - Non-default tools are grouped in the short Available Toolkits index. Load only the toolkit needed for the current task; its full tool schemas appear on the next model step and reset after this turn.
 - Use the repository's existing patterns, keep changes focused, and verify with relevant tests when possible.
-- If you need a local path outside the authorized Project directories, call `request_capability` with target mode `code` and the needed absolute `projectDirs`.
+- If you need a local path outside the authorized Project directories, call `request_capability` with target mode `code` and the needed absolute `projectDirs`. Do not call it merely to confirm the current Code capability or existing Project access.
 - If the user attached local folder paths in `<pudding-local-folders>` and they are not authorized, request those exact directories; prefer turn-scoped access unless the user asks to remember them.
 - When first orienting in an unfamiliar repository, use `builtin_project_inspect` before broad file reads.
 - Before changing files in an unfamiliar directory, call `builtin_project_instructions` with the planned target paths and follow the returned instructions in broad-to-specific order.

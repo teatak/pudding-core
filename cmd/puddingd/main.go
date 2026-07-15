@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,10 +13,12 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/teatak/pudding-core/internal/agenteval"
 	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/daemon"
 	"github.com/teatak/pudding-core/internal/home"
@@ -40,6 +43,8 @@ func run() error {
 			return runPrompt(os.Args[2:])
 		case "tools":
 			return runTools(os.Args[2:], os.Stdout, os.Stderr, time.Now())
+		case "agent":
+			return runAgent(os.Args[2:], os.Stdout, os.Stderr, time.Now())
 		}
 	}
 
@@ -74,6 +79,91 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return d.Shutdown(shutdownCtx)
+}
+
+func runAgent(args []string, stdout, stderr io.Writer, now time.Time) error {
+	if len(args) == 0 {
+		return errors.New("usage: puddingd agent eval [flags]")
+	}
+	switch args[0] {
+	case "eval":
+		return runAgentEval(args[1:], stdout, stderr, now)
+	case "help", "-h", "--help":
+		_, err := fmt.Fprintln(stdout, "usage: puddingd agent eval [flags]")
+		return err
+	default:
+		return fmt.Errorf("unknown agent command %q; usage: puddingd agent eval [flags]", args[0])
+	}
+}
+
+func runAgentEval(args []string, stdout, stderr io.Writer, now time.Time) error {
+	fs := flag.NewFlagSet("agent eval", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	flagHome := fs.String("home", "", "source Pudding home containing provider profiles")
+	flagCases := fs.String("cases", "evals/cases", "directory containing eval case YAML files")
+	flagCase := fs.String("case", "", "comma-separated case names (default: all)")
+	flagProvider := fs.String("provider", "buzzhive", "provider profile ID or display name")
+	flagModel := fs.String("model", "", "model ID (default: DeepSeek then MiMo under the provider)")
+	flagRuns := fs.Int("runs", 1, "runs per case (1-10)")
+	flagKeep := fs.Bool("keep", false, "keep isolated fixtures and include their paths in the report")
+	flagMock := fs.Bool("mock", false, "use the local mock provider for runner smoke testing")
+	flagJSON := fs.Bool("json", false, "print machine-readable JSON")
+	flagOutput := fs.String("output", "", "also write the JSON report to this path")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected agent eval arguments: %v", fs.Args())
+	}
+	var selectedCases []string
+	for _, name := range strings.Split(*flagCase, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			selectedCases = append(selectedCases, name)
+		}
+	}
+	report, err := agenteval.Run(context.Background(), agenteval.Options{
+		SourceHome: *flagHome,
+		CasesDir:   *flagCases,
+		Provider:   *flagProvider,
+		Model:      *flagModel,
+		CaseNames:  selectedCases,
+		Runs:       *flagRuns,
+		Keep:       *flagKeep,
+		Mock:       *flagMock,
+		Now:        func() time.Time { return now },
+	})
+	if err != nil {
+		return err
+	}
+	var encoded bytes.Buffer
+	encoder := json.NewEncoder(&encoded)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(report); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*flagOutput) != "" {
+		path, err := filepath.Abs(*flagOutput)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, encoded.Bytes(), 0o600); err != nil {
+			return err
+		}
+		if !*flagJSON {
+			defer fmt.Fprintf(stdout, "\nJSON: %s\n", path)
+		}
+	}
+	if *flagJSON {
+		_, err := stdout.Write(encoded.Bytes())
+		return err
+	}
+	return agenteval.WriteText(stdout, report)
 }
 
 func runTools(args []string, stdout, stderr io.Writer, now time.Time) error {

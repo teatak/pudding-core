@@ -55,9 +55,6 @@ func Resolve(roots []string, rawPath string, allowRoot, allowMissing bool) (stri
 		candidate = filepath.Clean(candidate)
 		for _, root := range roots {
 			root = filepath.Clean(root)
-			if !Inside(candidate, root) {
-				continue
-			}
 			resolvedRoot, err := filepath.EvalSymlinks(root)
 			if err != nil {
 				continue
@@ -81,11 +78,19 @@ func Resolve(roots []string, rawPath string, allowRoot, allowMissing bool) (stri
 			if !allowMissing {
 				continue
 			}
-			resolvedParent, err := ResolveExistingParent(candidate)
+			rawParent, resolvedParent, err := resolveExistingParent(candidate)
 			if err != nil || !Inside(resolvedParent, resolvedRoot) {
 				continue
 			}
-			rel, err := filepath.Rel(root, candidate)
+			missingSuffix, err := filepath.Rel(rawParent, candidate)
+			if err != nil {
+				continue
+			}
+			resolvedCandidate := filepath.Join(resolvedParent, missingSuffix)
+			if !Inside(resolvedCandidate, resolvedRoot) {
+				continue
+			}
+			rel, err := filepath.Rel(resolvedRoot, resolvedCandidate)
 			if err != nil {
 				continue
 			}
@@ -95,7 +100,7 @@ func Resolve(roots []string, rawPath string, allowRoot, allowMissing bool) (stri
 			if rel == "." && !allowRoot {
 				return "", "", "", ErrFileRequired
 			}
-			return root, candidate, filepath.ToSlash(rel), nil
+			return root, resolvedCandidate, filepath.ToSlash(rel), nil
 		}
 	}
 	return "", "", "", ErrPathNotAllowed
@@ -112,14 +117,20 @@ func Inside(path, root string) bool {
 }
 
 func ResolveExistingParent(path string) (string, error) {
+	_, resolved, err := resolveExistingParent(path)
+	return resolved, err
+}
+
+func resolveExistingParent(path string) (string, string, error) {
 	parent := filepath.Dir(filepath.Clean(path))
 	for {
 		if _, err := os.Stat(parent); err == nil {
-			return filepath.EvalSymlinks(parent)
+			resolved, err := filepath.EvalSymlinks(parent)
+			return parent, resolved, err
 		}
 		next := filepath.Dir(parent)
 		if next == parent {
-			return "", os.ErrNotExist
+			return "", "", os.ErrNotExist
 		}
 		parent = next
 	}
