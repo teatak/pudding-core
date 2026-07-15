@@ -478,7 +478,7 @@ export function ProjectBrowserSurface({
             )}
           />
         </ResizablePanel>
-        <ResizableHandle withHandle />
+        <ResizableHandle />
         <ResizablePanel id="viewer" className="min-w-0" minSize={280}>
           <ProjectFileViewer
             active={active}

@@ -45,11 +45,12 @@ type captureHealth struct {
 }
 
 type Driver struct {
-	mu           sync.Mutex
-	inputFormat  frame.Format
-	outputFormat frame.Format
-	frameMillis  int
-	initialized  bool
+	mu                 sync.Mutex
+	captureLifecycleMu sync.Mutex
+	inputFormat        frame.Format
+	outputFormat       frame.Format
+	frameMillis        int
+	initialized        bool
 
 	stream             *portaudio.Stream
 	captureCtx         context.Context
@@ -61,6 +62,7 @@ type Driver struct {
 	captureHealth      *captureHealth
 	reportedOverflows  uint64
 	reportedQueueDrops uint64
+	routingArbitrating bool
 	playbackStream     *portaudio.Stream
 	playbackBuffer     []int16
 	playbackReady      bool
@@ -141,6 +143,9 @@ func (d *Driver) InputDeviceName() string {
 }
 
 func (d *Driver) StartCapture(ctx context.Context, onFrame driver.CaptureHandler) error {
+	d.captureLifecycleMu.Lock()
+	defer d.captureLifecycleMu.Unlock()
+
 	if onFrame == nil {
 		return driver.ErrNilHandler
 	}
@@ -190,6 +195,7 @@ func (d *Driver) StartCapture(ctx context.Context, onFrame driver.CaptureHandler
 		if captureErr != nil {
 			d.captureCtx = nil
 			d.captureHandler = nil
+			d.leaveCaptureRoutingArbitrationLocked()
 			return fmt.Errorf("portaudio capture open: %w", captureErr)
 		}
 		return nil
@@ -197,10 +203,14 @@ func (d *Driver) StartCapture(ctx context.Context, onFrame driver.CaptureHandler
 
 	d.captureCtx = ctx
 	d.captureHandler = onFrame
+	if err := d.arbitrateCaptureRoutingLocked(ctx); err != nil {
+		slog.Warn("portaudio capture: audio routing arbitration failed; continuing", "err", err)
+	}
 	if d.needsRefresh {
 		if err := d.refreshDeviceListLocked("pending refresh"); err != nil {
 			d.captureCtx = nil
 			d.captureHandler = nil
+			d.leaveCaptureRoutingArbitrationLocked()
 			return err
 		}
 	}
@@ -216,6 +226,7 @@ func (d *Driver) StartCapture(ctx context.Context, onFrame driver.CaptureHandler
 	if err != nil {
 		d.captureCtx = nil
 		d.captureHandler = nil
+		d.leaveCaptureRoutingArbitrationLocked()
 		return fmt.Errorf("portaudio capture open: %w", err)
 	}
 	d.ensureWatcherLocked()
@@ -223,13 +234,23 @@ func (d *Driver) StartCapture(ctx context.Context, onFrame driver.CaptureHandler
 }
 
 func (d *Driver) StopCapture(context.Context) error {
+	d.captureLifecycleMu.Lock()
+	defer d.captureLifecycleMu.Unlock()
+
 	d.mu.Lock()
 	d.captureCtx = nil
 	d.captureHandler = nil
 	stream, stop, done, closeCapture := d.detachCaptureLocked()
+	wasArbitrating := d.routingArbitrating
+	d.routingArbitrating = false
 	d.mu.Unlock()
 
-	if err := stopDetachedCapture(stream, stop, done, closeCapture); err != nil {
+	err := stopDetachedCapture(stream, stop, done, closeCapture)
+	if wasArbitrating {
+		leaveCaptureRoutingArbitration()
+		slog.Info("portaudio capture: audio routing arbitration left")
+	}
+	if err != nil {
 		d.mu.Lock()
 		d.needsRefresh = true
 		d.mu.Unlock()
@@ -459,6 +480,11 @@ func (d *Driver) openPlaybackLocked() error {
 }
 
 func (d *Driver) fallbackRefreshOpenLocked(reason string) (error, error) {
+	if d.captureHandler != nil {
+		if err := d.arbitrateCaptureRoutingLocked(d.captureCtx); err != nil {
+			slog.Warn("portaudio capture: audio routing re-arbitration failed; continuing", "reason", reason, "err", err)
+		}
+	}
 	if err := d.refreshDeviceListLocked(reason); err != nil {
 		return err, err
 	}
@@ -477,6 +503,34 @@ func (d *Driver) fallbackRefreshOpenLocked(reason string) (error, error) {
 		}
 	}
 	return captureErr, playbackErr
+}
+
+func (d *Driver) arbitrateCaptureRoutingLocked(ctx context.Context) error {
+	if !captureRoutingArbitrationNeeded() {
+		d.leaveCaptureRoutingArbitrationLocked()
+		return nil
+	}
+	changed, err := beginCaptureRoutingArbitration(ctx)
+	if err != nil {
+		// The Darwin bridge leaves arbitration on failure or timeout.
+		d.routingArbitrating = false
+		return err
+	}
+	d.routingArbitrating = true
+	if changed {
+		d.needsRefresh = true
+	}
+	slog.Info("portaudio capture: audio routing arbitration completed", "defaultDeviceChanged", changed)
+	return nil
+}
+
+func (d *Driver) leaveCaptureRoutingArbitrationLocked() {
+	if !d.routingArbitrating {
+		return
+	}
+	d.routingArbitrating = false
+	leaveCaptureRoutingArbitration()
+	slog.Info("portaudio capture: audio routing arbitration left")
 }
 
 func (d *Driver) refreshDeviceListLocked(reason string) error {

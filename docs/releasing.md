@@ -52,7 +52,8 @@ Every stable or preview release must complete the same assessment before changin
    directory when a real migration rehearsal is required.
 5. Run the tagged Go tests, Electron tests, web production build, and `git diff --check`.
 6. Create `docs/release-report-<version>.md` with the baseline, change summary, impact matrix, database analysis,
-   compatibility, completed verification, remaining release gates, and user-facing release notes.
+   compatibility, completed verification, remaining release gates, and a grouped `## Release Notes 草案`
+   section. The release gate rejects a missing or empty feature list.
 
 The report must explicitly state whether the release rewrites canonical data, rebuilds derived indexes, creates a
 migration backup, changes downgrade behavior, or leaves the database untouched. Resolve every blocking item in
@@ -129,6 +130,12 @@ binary, and permission checks does the script create and push an annotated tag s
 `v0.1.3-beta.1` to `teatak/pudding-core`. It then uploads the already verified artifacts to a Draft Release in
 `teatak/pudding`.
 
+Before creating the public Draft Release, the script commits `releases/v<version>.json` to the public repository.
+The manifest records the source tag and commit, channel, user-facing feature list, and SHA-256 plus size of every
+release asset. The public tag points to that unique manifest commit, so public tags are meaningful release
+anchors and GitHub can order releases consistently. The Release title keeps the full `v<version>` form and its
+body is generated from the report's feature list.
+
 Packaging and uploading are separate phases. The apps are fully built and verified first; the release script
 then creates one draft and uploads its nine assets sequentially. This avoids partially published or duplicate
 drafts.
@@ -154,8 +161,9 @@ GitHub Prerelease without changing latest. Stable clients keep `allowPrerelease=
 preview package. Publishing fails before building if the public repository already contains that release or
 tag.
 
-The source tag lives in `teatak/pudding-core`; the local release script creates the matching public release in
-`teatak/pudding`. Keep previous public releases available for rollback.
+The source tag in `teatak/pudding-core` identifies the exact private source commit. The matching public tag in
+`teatak/pudding` identifies that version's public manifest commit. Keep previous public releases available for
+rollback.
 
 The developer setting **Receive Pudding preview releases** opts the existing app into the beta channel. Preview
 and stable builds intentionally share `Pudding.app`, the bundle identifier, and `~/.pudding`. Turning the setting

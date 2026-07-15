@@ -3,9 +3,12 @@ const test = require("node:test");
 
 const {
   createDraftMetadata,
+  ensureVersionManifest,
   expectedAssetNames,
   validateDraftRelease,
 } = require("../../scripts/release-draft.cjs");
+
+const releaseBody = "## 功能清单\n\n### 新增\n\n- 新功能。\n";
 
 function draft(version = "0.1.2", updateInfo = "latest-mac.yml") {
   const names = [
@@ -21,15 +24,22 @@ function draft(version = "0.1.2", updateInfo = "latest-mac.yml") {
   ];
   return {
     tag_name: `v${version}`,
+    name: `v${version}`,
+    body: releaseBody,
     draft: true,
     assets: names.map((name) => ({ name, state: "uploaded", size: 10 })),
   };
 }
 
 test("accepts complete stable and preview draft releases", () => {
-  assert.doesNotThrow(() => validateDraftRelease(draft(), "v0.1.2", "stable"));
+  assert.doesNotThrow(() => validateDraftRelease(draft(), "v0.1.2", "stable", releaseBody));
   assert.doesNotThrow(() =>
-    validateDraftRelease(draft("0.1.3-beta.1", "beta-mac.yml"), "v0.1.3-beta.1", "preview"),
+    validateDraftRelease(
+      draft("0.1.3-beta.1", "beta-mac.yml"),
+      "v0.1.3-beta.1",
+      "preview",
+      releaseBody,
+    ),
   );
 });
 
@@ -49,22 +59,74 @@ test("lists the complete channel-specific release assets", () => {
 });
 
 test("creates drafts through non-interactive GitHub API metadata", () => {
-  assert.deepEqual(createDraftMetadata("v0.1.3", "stable"), {
+  assert.deepEqual(createDraftMetadata("v0.1.3", "stable", "public-commit", releaseBody), {
     tag_name: "v0.1.3",
-    name: "0.1.3",
-    body: "",
+    target_commitish: "public-commit",
+    name: "v0.1.3",
+    body: releaseBody,
     draft: true,
     prerelease: false,
   });
-  assert.equal(createDraftMetadata("v0.1.4-beta.1", "preview").prerelease, true);
+  assert.equal(
+    createDraftMetadata("v0.1.4-beta.1", "preview", "public-commit", releaseBody).prerelease,
+    true,
+  );
 });
 
 test("rejects incomplete or already published releases", () => {
   const incomplete = draft();
   incomplete.assets.pop();
-  assert.throws(() => validateDraftRelease(incomplete, "v0.1.2", "stable"), /missing a complete/);
   assert.throws(
-    () => validateDraftRelease({ ...draft(), draft: false }, "v0.1.2", "stable"),
+    () => validateDraftRelease(incomplete, "v0.1.2", "stable", releaseBody),
+    /missing a complete/,
+  );
+  assert.throws(
+    () => validateDraftRelease({ ...draft(), draft: false }, "v0.1.2", "stable", releaseBody),
     /not a draft/,
   );
 });
+
+test("rejects drafts with inconsistent titles or feature lists", () => {
+  assert.throws(
+    () => validateDraftRelease({ ...draft(), name: "0.1.2" }, "v0.1.2", "stable", releaseBody),
+    /must use v0\.1\.2 as its title/,
+  );
+  assert.throws(
+    () => validateDraftRelease({ ...draft(), body: "" }, "v0.1.2", "stable", releaseBody),
+    /expected feature list/,
+  );
+});
+
+test("commits a version manifest to the public repository", async (context) => {
+  const originalFetch = global.fetch;
+  const requests = [];
+  context.after(() => {
+    global.fetch = originalFetch;
+  });
+  global.fetch = async (url, options) => {
+    requests.push({ url, options });
+    if (options.method === "GET") {
+      return mockResponse(404, { message: "Not Found" });
+    }
+    return mockResponse(201, { commit: { sha: "manifest-commit" } });
+  };
+
+  const commit = await ensureVersionManifest("v0.1.6", "{\n  \"version\": \"0.1.6\"\n}\n", "token");
+  assert.equal(commit, "manifest-commit");
+  assert.equal(requests.length, 2);
+  assert.match(requests[0].url, /contents\/releases\/v0\.1\.6\.json\?ref=main$/);
+  const body = JSON.parse(requests[1].options.body);
+  assert.equal(body.message, "release: add v0.1.6 manifest");
+  assert.equal(
+    Buffer.from(body.content, "base64").toString("utf8"),
+    "{\n  \"version\": \"0.1.6\"\n}\n",
+  );
+});
+
+function mockResponse(status, payload) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => payload,
+  };
+}

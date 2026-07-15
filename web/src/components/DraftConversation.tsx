@@ -1308,7 +1308,12 @@ function DraftComposer({
                 onSelect={mentions.select}
               />
             ) : null}
-            <div className="pudding-composer-shell relative z-10 rounded-3xl border bg-card transition-shadow">
+            <div
+              className={cn(
+                "pudding-composer-shell relative isolate z-10 rounded-3xl border bg-card transition-shadow",
+                draftVoiceInputActive && "is-mic-active",
+              )}
+            >
             <input
               ref={fileInputRef}
               className="sr-only"

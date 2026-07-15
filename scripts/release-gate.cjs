@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const { resolveReleaseChannel } = require("../packaging/release-channel.cjs");
+const { readReleaseNotes } = require("./release-metadata.cjs");
 
 const root = path.resolve(__dirname, "..");
 
@@ -29,6 +30,7 @@ async function main(argv, env) {
 
   const channel = readOption(args, "--channel") || env.PUDDING_RELEASE_CHANNEL || "stable";
   const metadata = readReleaseMetadata(root, channel, env.PUDDING_APP_VERSION);
+  readReleaseNotes(root, metadata.tag);
   assertCleanWorktree(root);
 
   if (command === "check") {

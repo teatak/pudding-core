@@ -64,6 +64,24 @@ void installCADeviceListener() {
 int checkAndResetCADeviceChanged() {
 	return atomic_exchange(&caDeviceChanged, 0);
 }
+
+// Returns 1 for Bluetooth, 0 for a known non-Bluetooth device, and -1 when
+// CoreAudio temporarily has no default input or its transport cannot be read.
+int captureRoutingArbitrationState() {
+	AudioObjectID deviceID = queryDefaultDeviceID(kAudioHardwarePropertyDefaultInputDevice);
+	if (deviceID == kAudioObjectUnknown) return -1;
+
+	AudioObjectPropertyAddress addr;
+	addr.mSelector = kAudioDevicePropertyTransportType;
+	addr.mScope = kAudioObjectPropertyScopeGlobal;
+	addr.mElement = kAudioObjectPropertyElementMain;
+	UInt32 transportType = 0;
+	UInt32 size = sizeof(transportType);
+	OSStatus err = AudioObjectGetPropertyData(deviceID, &addr, 0, NULL, &size, &transportType);
+	if (err != noErr) return -1;
+	return transportType == kAudioDeviceTransportTypeBluetooth ||
+		transportType == kAudioDeviceTransportTypeBluetoothLE;
+}
 */
 import "C"
 import "sync"
@@ -78,4 +96,8 @@ func installCoreAudioListener() {
 
 func coreAudioDeviceChanged() bool {
 	return C.checkAndResetCADeviceChanged() != 0
+}
+
+func captureRoutingArbitrationNeeded() bool {
+	return C.captureRoutingArbitrationState() != 0
 }

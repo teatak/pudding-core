@@ -37,7 +37,8 @@ export function ContextUsageRing({ mode, token, sessionID }: ContextUsageRingPro
       <PopoverTrigger asChild>
         <Button
           aria-label={`${capabilityLabel} · ${t("usage.contextWindow")}`}
-          className="relative h-5 w-5 shrink-0 rounded-full border-0 bg-transparent p-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
+          className="relative rounded-full text-muted-foreground"
+          size="icon"
           type="button"
           variant="ghost"
         >

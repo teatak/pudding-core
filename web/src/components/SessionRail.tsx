@@ -193,6 +193,23 @@ export function SessionRail({
   });
   const sessions = sessionsQuery.data?.sessions || [];
   const projects = projectsQuery.data?.projects || [];
+  useEffect(() => {
+    if (!draftActive || !draftProjectID || !projectsQuery.isSuccess) {
+      return;
+    }
+    if (projects.some((project) => project.id === draftProjectID)) {
+      return;
+    }
+    void navigate({
+      to: "/",
+      search: (previous) => {
+        const next = { ...(previous as AppSearch) };
+        delete next.project;
+        return next;
+      },
+      replace: true,
+    });
+  }, [draftActive, draftProjectID, navigate, projects, projectsQuery.isSuccess]);
   const audioBindingsSessionID = selectedSessionID || sessions[0]?.id;
   const audioBindingsQuery = useQuery({
     queryKey: queryKeys.audioBindings(),
@@ -1746,7 +1763,7 @@ function SessionItems({
   const canCollapse = sessions.length > sessionCollapseThreshold;
   const cappedSessions = showAll || draggingSessionID || !canCollapse
     ? sessions
-    : visibleSessionSubset(sessions, selectedSessionID, collapsedSessionDisplayLimit);
+    : sessions.slice(0, collapsedSessionDisplayLimit);
   const visibleSessions = cappedSessions.filter((session) => session.id !== draggingSessionID);
   const hiddenSessionCount = canCollapse ? sessions.length - collapsedSessionDisplayLimit : 0;
   if (visibleSessions.length === 0 && (dropIndex !== null || showEmptyDropTarget)) {
@@ -1803,15 +1820,6 @@ function SessionItems({
       ) : null}
     </SidebarMenu>
   );
-}
-
-function visibleSessionSubset(sessions: Session[], selectedSessionID: string | undefined, limit: number) {
-  const leading = sessions.slice(0, limit);
-  if (!selectedSessionID || leading.some((session) => session.id === selectedSessionID)) {
-    return leading;
-  }
-  const selected = sessions.find((session) => session.id === selectedSessionID);
-  return selected ? [...leading.slice(0, Math.max(0, limit - 1)), selected] : leading;
 }
 
 function SessionEmptyState() {

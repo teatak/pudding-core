@@ -5,15 +5,13 @@ import { useSyncExternalStore, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 type IconLookup = Record<string, string>;
-type LookupName = "fileExtensions" | "fileNames" | "folderNames" | "folderNamesExpanded" | "rootFolderNames" | "rootFolderNamesExpanded";
+type LookupName = "fileExtensions" | "fileNames" | "folderNames" | "folderNamesExpanded";
 
 type MaterialIconManifest = Record<LookupName, IconLookup> & {
   file: string;
   folder: string;
   folderExpanded: string;
   light?: Partial<Record<LookupName, IconLookup>>;
-  rootFolder: string;
-  rootFolderExpanded: string;
 };
 
 type MaterialIconBundle = {
@@ -39,17 +37,15 @@ export function ProjectFolderTypeIcon({
   className,
   name,
   open = false,
-  root = false,
 }: {
   className?: string;
   name: string;
   open?: boolean;
-  root?: boolean;
 }) {
   const resources = useMaterialIconTheme();
   const { resolvedTheme } = useTheme();
   const iconName = resources
-    ? resolveFolderIcon(resources.manifest, name, open, root, resolvedTheme === "light")
+    ? resolveFolderIcon(resources.manifest, name, open, resolvedTheme === "light")
     : undefined;
   return (
     <ProjectEntrySvg
@@ -101,15 +97,11 @@ function resolveFileIcon(manifest: MaterialIconManifest, path: string, light: bo
   return manifest.file;
 }
 
-function resolveFolderIcon(manifest: MaterialIconManifest, name: string, open: boolean, root: boolean, light: boolean) {
+function resolveFolderIcon(manifest: MaterialIconManifest, name: string, open: boolean, light: boolean) {
   const key = name.toLowerCase();
-  const lookupName = root
-    ? (open ? "rootFolderNamesExpanded" : "rootFolderNames")
-    : (open ? "folderNamesExpanded" : "folderNames");
+  const lookupName = open ? "folderNamesExpanded" : "folderNames";
   return lookupIcon(manifest, lookupName, key, light)
-    || (root
-      ? (open ? manifest.rootFolderExpanded : manifest.rootFolder)
-      : (open ? manifest.folderExpanded : manifest.folder));
+    || (open ? manifest.folderExpanded : manifest.folder);
 }
 
 function lookupIcon(manifest: MaterialIconManifest, lookupName: LookupName, key: string, light: boolean) {

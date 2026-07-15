@@ -25,6 +25,7 @@ import {
   workspaceLayout,
 } from "@/lib/layoutConstants";
 import { readOptionalPanelLayout, readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
+import { saveLastAppRoute } from "@/lib/route";
 import { cn } from "@/lib/utils";
 import { useCanvasMCP } from "@/mcp/canvasTools";
 import { setWorkspaceOpen, useWorkspaceOpen } from "@/state/workspaceStore";
@@ -160,6 +161,16 @@ export function App() {
   const activeSessionIDs = (appsActive ? [] : [selectedSessionID, showSplit ? splitSessionID : undefined]).filter(
     (sessionID): sessionID is string => Boolean(sessionID),
   );
+
+  useEffect(() => {
+    saveLastAppRoute({
+      session: selectedSessionID,
+      draft,
+      project: draftProjectID,
+      split: splitSessionID,
+      view,
+    });
+  }, [draft, draftProjectID, selectedSessionID, splitSessionID, view]);
 
   // SSE 是 session-scoped,不是 pane-scoped。visible sessions 在 App 层统一去重订阅,
   // ChatPane 只负责 pane-local UI/滚动状态。

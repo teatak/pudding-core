@@ -7,6 +7,7 @@ import { z } from "zod";
 import { App } from "@/App";
 import "@/styles.css";
 import { startLocaleSync } from "@/i18n";
+import { restoreInitialAppRoute } from "@/lib/route";
 import { initAPIBase } from "@/state/apiBase";
 import { initShellMode } from "@/state/shell";
 import { applyTheme, initThemeFromLaunch, readStoredTheme, startThemeSync } from "@/theme/theme";
@@ -18,6 +19,7 @@ initThemeFromLaunch();
 applyTheme(readStoredTheme());
 startThemeSync();
 startLocaleSync();
+restoreInitialAppRoute();
 
 const queryClient = new QueryClient({
   defaultOptions: {

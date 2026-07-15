@@ -6,6 +6,14 @@ const path = require("node:path");
 
 const packageMetadata = require("../package.json");
 const { inferReleaseChannelFromTag } = require("./release-gate.cjs");
+const {
+  buildReleaseBody,
+  buildVersionManifest,
+  describeReleaseAssets,
+  readReleaseNotes,
+  serializeVersionManifest,
+  versionManifestPath,
+} = require("./release-metadata.cjs");
 
 const repository = "teatak/pudding";
 const root = path.resolve(__dirname, "..");
@@ -48,7 +56,8 @@ async function main(argv, env) {
     throw new Error(`release ${tag} is already published`);
   }
 
-  validateDraftRelease(release, tag, channel);
+  const releaseBody = buildReleaseBody(readReleaseNotes(root, tag));
+  validateDraftRelease(release, tag, channel, releaseBody);
   if (command === "status") {
     console.log(`Draft release is ready: ${tag} assets=${release.assets.length} ${release.html_url}`);
     return;
@@ -76,6 +85,19 @@ async function createDraftRelease(existingRelease, tag, channel, token, env) {
     }
     return { name, filePath, size: stat.size };
   });
+  const releaseNotes = readReleaseNotes(root, tag);
+  const releaseBody = buildReleaseBody(releaseNotes);
+  const sourceCommit = gitOutput(["rev-list", "-n", "1", tag]);
+  const manifest = serializeVersionManifest(
+    buildVersionManifest({
+      tag,
+      channel,
+      sourceCommit,
+      releaseNotes,
+      assets: describeReleaseAssets(assets),
+    }),
+  );
+  const manifestCommit = await ensureVersionManifest(tag, manifest, token);
 
   let release = existingRelease;
   if (!release) {
@@ -83,12 +105,24 @@ async function createDraftRelease(existingRelease, tag, channel, token, env) {
       "POST",
       `/repos/${repository}/releases`,
       token,
-      createDraftMetadata(tag, channel),
+      createDraftMetadata(tag, channel, manifestCommit, releaseBody),
+    );
+  } else if (release.draft) {
+    release = await githubRequest(
+      "PATCH",
+      `/repos/${repository}/releases/${release.id}`,
+      token,
+      {
+        name: tag,
+        body: releaseBody,
+        prerelease: channel === "preview",
+      },
     );
   }
   if (!release?.draft) {
     throw new Error(`draft ${tag} could not be created`);
   }
+  await assertPublicTagTarget(tag, manifestCommit, token);
 
   const remoteAssets = new Map((release.assets || []).map((asset) => [asset.name, asset]));
   for (const asset of assets) {
@@ -104,23 +138,30 @@ async function createDraftRelease(existingRelease, tag, channel, token, env) {
   }
 
   release = await githubRequest("GET", `/repos/${repository}/releases/${release.id}`, token);
-  validateDraftRelease(release, tag, channel);
+  validateDraftRelease(release, tag, channel, releaseBody);
   console.log(`Draft release assets ready: ${tag} ${release.html_url}`);
 }
 
-function createDraftMetadata(tag, channel) {
+function createDraftMetadata(tag, channel, targetCommitish, body) {
   return {
     tag_name: tag,
-    name: tag.slice(1),
-    body: "",
+    target_commitish: targetCommitish,
+    name: tag,
+    body,
     draft: true,
     prerelease: channel === "preview",
   };
 }
 
-function validateDraftRelease(release, tag, channel) {
+function validateDraftRelease(release, tag, channel, expectedBody) {
   if (release.tag_name !== tag || release.draft !== true) {
     throw new Error(`release ${tag} is not a draft`);
+  }
+  if (release.name !== tag) {
+    throw new Error(`draft ${tag} must use ${tag} as its title`);
+  }
+  if (expectedBody && release.body !== expectedBody) {
+    throw new Error(`draft ${tag} does not contain the expected feature list`);
   }
 
   const expectedAssets = expectedAssetNames(tag, channel);
@@ -130,6 +171,75 @@ function validateDraftRelease(release, tag, channel) {
     if (!asset || asset.state !== "uploaded" || Number(asset.size) <= 0) {
       throw new Error(`draft ${tag} is missing a complete ${name} asset`);
     }
+  }
+}
+
+async function ensureVersionManifest(tag, manifest, token) {
+  const manifestPath = versionManifestPath(tag);
+  const encodedPath = manifestPath.split("/").map(encodeURIComponent).join("/");
+  const endpoint = `/repos/${repository}/contents/${encodedPath}`;
+  const existing = await githubRequest("GET", `${endpoint}?ref=main`, token, undefined, {
+    allowNotFound: true,
+  });
+
+  if (existing) {
+    const remoteManifest = Buffer.from(String(existing.content || "").replace(/\s+/g, ""), "base64").toString(
+      "utf8",
+    );
+    if (remoteManifest !== manifest) {
+      const publicTag = await githubRequest(
+        "GET",
+        `/repos/${repository}/git/ref/tags/${encodeURIComponent(tag)}`,
+        token,
+        undefined,
+        { allowNotFound: true },
+      );
+      if (publicTag) {
+        throw new Error(`public version manifest already exists with different content: ${manifestPath}`);
+      }
+      const updated = await githubRequest("PUT", endpoint, token, {
+        message: `release: update ${tag} manifest before draft`,
+        content: Buffer.from(manifest, "utf8").toString("base64"),
+        branch: "main",
+        sha: existing.sha,
+      });
+      if (!updated.commit?.sha) {
+        throw new Error(`GitHub did not return an updated commit for ${manifestPath}`);
+      }
+      return updated.commit.sha;
+    }
+    const commits = await githubRequest(
+      "GET",
+      `/repos/${repository}/commits?path=${encodeURIComponent(manifestPath)}&sha=main&per_page=1`,
+      token,
+    );
+    if (!commits[0]?.sha) {
+      throw new Error(`could not resolve the public commit for ${manifestPath}`);
+    }
+    return commits[0].sha;
+  }
+
+  const created = await githubRequest("PUT", endpoint, token, {
+    message: `release: add ${tag} manifest`,
+    content: Buffer.from(manifest, "utf8").toString("base64"),
+    branch: "main",
+  });
+  if (!created.commit?.sha) {
+    throw new Error(`GitHub did not return a commit for ${manifestPath}`);
+  }
+  return created.commit.sha;
+}
+
+async function assertPublicTagTarget(tag, expectedCommit, token) {
+  const encodedTag = encodeURIComponent(tag);
+  const ref = await githubRequest("GET", `/repos/${repository}/git/ref/tags/${encodedTag}`, token);
+  let target = ref.object;
+  if (target?.type === "tag") {
+    const annotatedTag = await githubRequest("GET", `/repos/${repository}/git/tags/${target.sha}`, token);
+    target = annotatedTag.object;
+  }
+  if (target?.type !== "commit" || target.sha !== expectedCommit) {
+    throw new Error(`public tag ${tag} does not point to its version manifest commit`);
   }
 }
 
@@ -173,7 +283,20 @@ function runGh(args, token, env) {
   }
 }
 
-async function githubRequest(method, endpoint, token, body) {
+function gitOutput(args) {
+  const result = spawnSync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+  });
+  const output = String(result.stdout || "").trim();
+  if (result.status !== 0 || !output) {
+    const detail = String(result.stderr || result.error?.message || "").trim();
+    throw new Error(`git ${args.join(" ")} failed${detail ? `: ${detail}` : ""}`);
+  }
+  return output;
+}
+
+async function githubRequest(method, endpoint, token, body, options = {}) {
   const response = await fetch(`https://api.github.com${endpoint}`, {
     method,
     headers: {
@@ -186,10 +309,18 @@ async function githubRequest(method, endpoint, token, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const payload = await response.json().catch(() => ({}));
+  if (options.allowNotFound && response.status === 404) {
+    return null;
+  }
   if (!response.ok) {
     throw new Error(`GitHub API ${method} ${endpoint} failed (${response.status}): ${payload.message || "unknown error"}`);
   }
   return payload;
 }
 
-module.exports = { createDraftMetadata, expectedAssetNames, validateDraftRelease };
+module.exports = {
+  createDraftMetadata,
+  ensureVersionManifest,
+  expectedAssetNames,
+  validateDraftRelease,
+};

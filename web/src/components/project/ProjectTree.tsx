@@ -196,7 +196,7 @@ function ProjectDirectoryNode({
           }}
         >
           <ChevronRight className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-90")} />
-          <ProjectFolderTypeIcon name={label} open={expanded} root={isRoot} />
+          <ProjectFolderTypeIcon name={label} open={expanded} />
           <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
         </button>
       </ProjectEntryContextMenu>
