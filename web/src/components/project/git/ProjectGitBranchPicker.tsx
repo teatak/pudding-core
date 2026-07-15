@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, Plus, TextCursorInput, Trash2 } from "lucide-react";
+import { Check, ChevronDown, Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -149,7 +149,7 @@ export function ProjectGitBranchPicker({
               <Plus className="size-3.5" />{t("project.gitCreateBranch")}
             </button>
             <button className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-accent" type="button" onClick={() => setDialog({ mode: "rename", name: branch })}>
-              <TextCursorInput className="size-3.5" />{t("project.gitRenameBranch")}
+              {t("project.gitRenameBranch")}
             </button>
           </div>
         </AppPopoverContent>

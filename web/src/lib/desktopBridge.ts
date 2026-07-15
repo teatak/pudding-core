@@ -5,6 +5,17 @@ type DirectoryPickerOptions = {
 };
 
 export type DesktopMenuCommand = "new-session" | "search-sessions" | "settings";
+export type DesktopEditorCommand = "copy" | "cut" | "delete" | "paste" | "pasteAndMatchStyle" | "redo" | "selectAll" | "undo";
+
+export type DesktopEditorContextMenuRequest = {
+  canCopy: boolean;
+  canCut: boolean;
+  canDelete: boolean;
+  canRedo: boolean;
+  canSelectAll: boolean;
+  canUndo: boolean;
+  selectionText: string;
+};
 
 export type DesktopUpdateState = {
   status: "unavailable" | "idle" | "checking" | "downloading" | "downloaded" | "installing";
@@ -23,6 +34,7 @@ type ElectronDesktopBridge = {
   onUpdateState?: (listener: (state: DesktopUpdateState) => void) => () => void;
   openExternal: (url: string) => Promise<boolean>;
   revealPath?: (path: string) => Promise<boolean>;
+  showEditorContextMenu?: (request: DesktopEditorContextMenuRequest) => Promise<DesktopEditorCommand | null>;
   pickDirectories: (options?: DirectoryPickerOptions) => Promise<string[]>;
   setLocale?: (locale: "zh-CN" | "zh-TW" | "en") => Promise<string>;
 };
@@ -63,6 +75,18 @@ export async function revealDesktopPath(path: string) {
     return await bridge.revealPath(clean);
   } catch {
     return false;
+  }
+}
+
+export async function showDesktopEditorContextMenu(request: DesktopEditorContextMenuRequest) {
+  const bridge = desktopBridge();
+  if (!bridge?.showEditorContextMenu) {
+    return null;
+  }
+  try {
+    return await bridge.showEditorContextMenu(request);
+  } catch {
+    return null;
   }
 }
 

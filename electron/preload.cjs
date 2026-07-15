@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld("puddingElectronDesktop", {
   },
   openExternal: (url) => ipcRenderer.invoke("pudding:desktop:open-external", url),
   revealPath: (path) => ipcRenderer.invoke("pudding:desktop:reveal-path", path),
+  showEditorContextMenu: (request) => ipcRenderer.invoke("pudding:desktop:editor-context-menu", request),
   setLocale: (locale) => ipcRenderer.invoke("pudding:desktop:set-locale", locale),
   getUpdateState: () => ipcRenderer.invoke("pudding:desktop:update:get-state"),
   setPreviewUpdatesEnabled: (enabled) => ipcRenderer.invoke("pudding:desktop:update:set-preview", enabled),

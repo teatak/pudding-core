@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronDown, TextCursorInput, Trash, X } from "lucide-react";
+import { ChevronDown, Trash, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import {
@@ -416,7 +416,6 @@ function HeaderSessionTitle({
               <DropdownMenuItem onSelect={() => {
                 editAfterMenuCloseRef.current = true;
               }}>
-                <TextCursorInput />
                 {t("session.rename")}
               </DropdownMenuItem>
               <DropdownMenuSeparator />

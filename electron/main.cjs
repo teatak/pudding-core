@@ -822,6 +822,40 @@ ipcMain.handle("pudding:desktop:reveal-path", async (event, rawPath) => {
   return true;
 });
 
+ipcMain.handle("pudding:desktop:editor-context-menu", (event, request) => {
+  const window = assertTrustedSender(event);
+  const selectionText = String(request?.selectionText || "").slice(0, 16 * 1024);
+  let command = null;
+  const template = buildEditContextMenuTemplate(event.sender, {
+    editFlags: {
+      canCopy: Boolean(request?.canCopy),
+      canCut: Boolean(request?.canCut),
+      canDelete: Boolean(request?.canDelete),
+      canPaste: true,
+      canRedo: Boolean(request?.canRedo),
+      canSelectAll: Boolean(request?.canSelectAll),
+      canUndo: Boolean(request?.canUndo),
+    },
+    isEditable: true,
+    selectionText,
+  }, nativeMenuText, {
+    platform: process.platform,
+    openExternal: (url) => void shell.openExternal(url),
+    runEditCommand: (next) => {
+      command = next;
+    },
+  });
+  if (template.length === 0 || window.isDestroyed()) {
+    return null;
+  }
+  return new Promise((resolve) => {
+    Menu.buildFromTemplate(template).popup({
+      window,
+      callback: () => resolve(command),
+    });
+  });
+});
+
 ipcMain.handle("pudding:desktop:set-locale", (event, locale) => {
   assertTrustedSender(event);
   return setShellLocale(locale);

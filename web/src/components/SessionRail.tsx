@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import {
   ChevronRight,
-  Copy,
   Ellipsis,
   FolderClosed,
   FolderOpen,
@@ -10,13 +9,10 @@ import {
   MessageSquareText,
   Package,
   PanelLeft,
-  Pencil,
   Pin,
   RefreshCw,
-  TextCursorInput,
   MessageCirclePlus,
   Search,
-  Rows2,
   Settings,
   SquareTerminal,
   Trash,
@@ -1586,13 +1582,11 @@ function ProjectActionsMenu({ project, token }: { project: Project; token: strin
                     title={path}
                     onSelect={() => revealMutation.mutate(path)}
                   >
-                    <FolderOpen />
                     <span className="min-w-0 truncate">{projectDirectoryLabel(path, project.rootDirs)}</span>
                   </DropdownMenuItem>
                 ))}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={() => copyPaths(project.rootDirs)}>
-                  <Copy />
                   {t("project.copyAllPaths")}
                 </DropdownMenuItem>
               </DropdownMenuSubContent>
@@ -1601,20 +1595,18 @@ function ProjectActionsMenu({ project, token }: { project: Project; token: strin
             <>
               {isMac && rootDir ? (
                 <DropdownMenuItem disabled={revealMutation.isPending} onSelect={() => revealMutation.mutate(rootDir)}>
-                  {revealMutation.isPending ? <Spinner /> : <FolderOpen />}
+                  {revealMutation.isPending ? <Spinner /> : null}
                   {t("project.revealFinder")}
                 </DropdownMenuItem>
               ) : null}
               {rootDir ? (
                 <DropdownMenuItem title={rootDir} onSelect={() => copyPaths([rootDir])}>
-                  <Copy />
                   {t("project.copyPath")}
                 </DropdownMenuItem>
               ) : null}
             </>
           )}
           <DropdownMenuItem onSelect={openRename}>
-            <Pencil />
             {t("project.rename")}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
@@ -2190,7 +2182,6 @@ function SessionItem({
                 {session.pinned ? t("session.unpin") : t("session.pin")}
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={onOpenSplit}>
-                <Rows2 />
                 {t("session.openSplit")}
               </DropdownMenuItem>
               <DropdownMenuItem
@@ -2198,7 +2189,6 @@ function SessionItem({
                   editAfterMenuCloseRef.current = true;
                 }}
               >
-                <TextCursorInput />
                 {t("session.rename")}
               </DropdownMenuItem>
               <DropdownMenuSeparator />

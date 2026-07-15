@@ -3,6 +3,7 @@ import * as monaco from "monaco-editor/esm/vs/editor/editor.api.js";
 import { useEffect, useRef, useState } from "react";
 
 import { useI18n } from "@/i18n";
+import { showDesktopEditorContextMenu, type DesktopEditorCommand } from "@/lib/desktopBridge";
 import { languageFromPath } from "@/lib/fileLanguage";
 import { useTheme } from "@/theme/theme";
 
@@ -116,7 +117,7 @@ export function ProjectEditor({
         theme: darkRef.current ? darkTheme : lightTheme,
         automaticLayout: true,
         bracketPairColorization: { enabled: true },
-        contextmenu: true,
+        contextmenu: false, // Delegate right-clicks to Electron's native edit menu.
         folding: true,
         fontFamily: "var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
         fontSize: 12,
@@ -134,6 +135,7 @@ export function ProjectEditor({
         selectionHighlight: false,
         showFoldingControls: "mouseover",
         stickyScroll: { enabled: false },
+        unicodeHighlight: { ambiguousCharacters: false },
         wordWrap: "off",
       });
       editorRef.current = editor;
@@ -178,7 +180,28 @@ export function ProjectEditor({
   }, [reveal?.serial]);
 
   return (
-    <div ref={containerRef} className="relative h-full min-h-0 overflow-hidden bg-background dark:bg-[#171717]">
+    <div
+      ref={containerRef}
+      className="relative h-full min-h-0 overflow-hidden bg-background dark:bg-[#171717]"
+      onContextMenu={(event) => {
+        const editor = editorRef.current;
+        const model = editor?.getModel();
+        if (!editor || !model) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const selection = editor.getSelection();
+        const hasSelection = Boolean(selection && !selection.isEmpty());
+        void showDesktopEditorContextMenu({
+          canCopy: hasSelection,
+          canCut: hasSelection,
+          canDelete: hasSelection,
+          canRedo: model.canRedo(),
+          canSelectAll: model.getValueLength() > 0,
+          canUndo: model.canUndo(),
+          selectionText: selection ? model.getValueInRange(selection) : "",
+        }).then((command) => runNativeEditorCommand(editor, command));
+      }}
+    >
       <div ref={hostRef} className="h-full min-h-0 overflow-hidden" />
       {selectionAction ? (
         <button
@@ -198,6 +221,22 @@ export function ProjectEditor({
       ) : null}
     </div>
   );
+}
+
+function runNativeEditorCommand(editor: monaco.editor.IStandaloneCodeEditor, command: DesktopEditorCommand | null) {
+  if (!command) return;
+  editor.focus();
+  const editorCommand = {
+    copy: "editor.action.clipboardCopyAction",
+    cut: "editor.action.clipboardCutAction",
+    delete: "deleteLeft",
+    paste: "editor.action.clipboardPasteAction",
+    pasteAndMatchStyle: "editor.action.clipboardPasteAction",
+    redo: "redo",
+    selectAll: "editor.action.selectAll",
+    undo: "undo",
+  } satisfies Record<DesktopEditorCommand, string>;
+  editor.trigger("nativeContextMenu", editorCommand[command], null);
 }
 
 function revealEditorPosition(editor: monaco.editor.IStandaloneCodeEditor, reveal?: ProjectEditorReveal) {

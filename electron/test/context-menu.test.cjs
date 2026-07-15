@@ -69,6 +69,23 @@ test("editable text offers the complete edit menu with native enablement", () =>
   assert.deepEqual(calls, ["cut"]);
 });
 
+test("editable menu can delegate commands back to a custom editor", () => {
+  const calls = [];
+  const template = buildEditContextMenuTemplate(
+    fakeContents([]),
+    {
+      editFlags: { canCopy: true, canCut: true, canSelectAll: true, canUndo: true },
+      isEditable: true,
+    },
+    undefined,
+    { platform: "linux", runEditCommand: (command) => calls.push(command) },
+  );
+
+  template.find((item) => item.label === "undo").click();
+  template.find((item) => item.label === "cut").click();
+  assert.deepEqual(calls, ["undo", "cut"]);
+});
+
 test("blank read-only content does not open an empty menu", () => {
   assert.deepEqual(
     buildEditContextMenuTemplate(fakeContents([]), { editFlags: { canSelectAll: true }, isEditable: false }, undefined, {

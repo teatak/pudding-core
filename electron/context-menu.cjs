@@ -5,7 +5,13 @@ function buildEditContextMenuTemplate(contents, params = {}, text = (key) => key
   const item = (key, command, enabled) => ({
     label: text(key),
     enabled: Boolean(enabled),
-    click: () => runEditCommand(contents, command),
+    click: () => {
+      if (typeof options.runEditCommand === "function") {
+        options.runEditCommand(command);
+      } else {
+        runEditCommand(contents, command);
+      }
+    },
   });
   const template = [];
 

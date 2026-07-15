@@ -272,7 +272,6 @@ export function ProjectGitSection({ dirtyRootIDs, repositories, sessionID, token
                           {t("project.gitCommitStaged")}
                         </AppDropdownMenuItem>
                         <AppDropdownMenuItem disabled={!message.trim() || status.fileCount === 0 || status.conflictedCount > 0} onSelect={() => commit(true)}>
-                          <Plus />
                           {t("project.gitCommitAll")}
                         </AppDropdownMenuItem>
                       </AppDropdownMenuContent>
@@ -485,7 +484,7 @@ function ProjectGitChangeGroup({ files, group, label, pending, rootID, onDiscard
             </ContextMenuTrigger>
             <AppContextMenuContent>
               <AppContextMenuItem disabled={pending} onSelect={() => staged ? onUnstage(projectGitMutationPaths([file])) : onStage(projectGitMutationPaths([file]))}>
-                {staged ? <Minus /> : <Plus />}
+                {staged ? null : <Plus />}
                 {staged ? t("project.gitUnstage") : t("project.gitStage")}
               </AppContextMenuItem>
               {group === "working" ? (
