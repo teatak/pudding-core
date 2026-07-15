@@ -6,15 +6,23 @@ import (
 )
 
 const (
+	CodeCommitFailed          = "git_commit_failed"
+	CodeCommitMessageRequired = "git_commit_message_required"
+	CodeConflicts             = "git_conflicts"
+	CodeDiscardFailed         = "git_discard_failed"
 	CodeDiffFailed            = "git_diff_failed"
 	CodeGitUnavailable        = "git_unavailable"
+	CodeInitFailed            = "git_init_failed"
 	CodeInvalidPath           = "path_not_authorized"
+	CodeNoStagedChanges       = "git_no_staged_changes"
 	CodeNotRepository         = "not_git_repository"
 	CodeOutputTooLarge        = "git_output_too_large"
 	CodeParseFailed           = "git_parse_failed"
 	CodeRepositoryOutsideRoot = "repository_outside_project"
+	CodeStageFailed           = "git_stage_failed"
 	CodeStatusFailed          = "git_status_failed"
 	CodeTimedOut              = "timed_out"
+	CodeUnstageFailed         = "git_unstage_failed"
 )
 
 type Error struct {

@@ -28,6 +28,9 @@ import {
   projectEntryMutation,
   projectFile,
   projectGitDiff,
+  projectGitCommitRequest,
+  projectGitPathsRequest,
+  projectGitRootRequest,
   projectGitStatus,
   projectTreeResponse,
   createProjectEntryRequest,
@@ -385,6 +388,45 @@ export function getProjectGitDiff(
     `/sessions/${encodeURIComponent(sessionID)}/project/git/diff?${query.toString()}`,
     projectGitDiff,
   );
+}
+
+export function initializeProjectGit(token: string, sessionID: string, rootID: string): Promise<ProjectGitStatus> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/project/git/init`, projectGitStatus, {
+    method: "POST",
+    body: JSON.stringify(projectGitRootRequest.parse({ rootID })),
+  });
+}
+
+export function stageProjectGit(token: string, sessionID: string, rootID: string, paths: string[]): Promise<ProjectGitStatus> {
+  return mutateProjectGitPaths(token, sessionID, "stage", rootID, paths);
+}
+
+export function unstageProjectGit(token: string, sessionID: string, rootID: string, paths: string[]): Promise<ProjectGitStatus> {
+  return mutateProjectGitPaths(token, sessionID, "unstage", rootID, paths);
+}
+
+export function discardProjectGit(token: string, sessionID: string, rootID: string, paths: string[]): Promise<ProjectGitStatus> {
+  return mutateProjectGitPaths(token, sessionID, "discard", rootID, paths);
+}
+
+function mutateProjectGitPaths(
+  token: string,
+  sessionID: string,
+  operation: "stage" | "unstage" | "discard",
+  rootID: string,
+  paths: string[],
+): Promise<ProjectGitStatus> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/project/git/${operation}`, projectGitStatus, {
+    method: "POST",
+    body: JSON.stringify(projectGitPathsRequest.parse({ paths, rootID })),
+  });
+}
+
+export function commitProjectGit(token: string, sessionID: string, rootID: string, message: string): Promise<ProjectGitStatus> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/project/git/commit`, projectGitStatus, {
+    method: "POST",
+    body: JSON.stringify(projectGitCommitRequest.parse({ message, rootID })),
+  });
 }
 
 export function createProjectEntry(

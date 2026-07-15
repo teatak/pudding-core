@@ -20,6 +20,18 @@ export function projectBrowserError(error: unknown, t: (key: string) => string) 
     if (error.code === "project_file_revision_conflict") {
       return t("project.browserExternalChange");
     }
+    if ([
+      "git_commit_failed",
+      "git_commit_message_required",
+      "git_conflicts",
+      "git_discard_failed",
+      "git_init_failed",
+      "git_no_staged_changes",
+      "git_stage_failed",
+      "git_unstage_failed",
+    ].includes(error.code)) {
+      return t("project.gitOperationFailed");
+    }
     if (error.code.startsWith("git_") || error.code === "not_git_repository" || error.code === "repository_outside_project") {
       return t("project.gitLoadFailed");
     }

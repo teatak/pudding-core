@@ -298,14 +298,14 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
         conic-gradient(
             from var(--composer-mic-angle) at 50% 50%,
             var(--conic-neutral-color) 0deg,
-            var(--conic-neutral-color) 72deg,
-            var(--conic-violet-subtle) 108deg,
-            var(--conic-indigo-subtle) 142deg,
-            var(--conic-cyan-subtle) 178deg,
-            var(--conic-mint-subtle) 226deg,
-            var(--conic-neutral-color) 286deg,
-            var(--conic-warm-subtle) 318deg,
-            var(--conic-violet-subtle) 342deg,
+            var(--conic-violet-subtle) 40deg,
+            var(--conic-indigo-subtle) 80deg,
+            var(--conic-neutral-color) 120deg,
+            var(--conic-cyan-subtle) 160deg,
+            var(--conic-mint-subtle) 200deg,
+            var(--conic-neutral-color) 240deg,
+            var(--conic-warm-subtle) 280deg,
+            var(--conic-violet-subtle) 320deg,
             var(--conic-neutral-color) 1turn
         )
         border-box;
@@ -333,13 +333,14 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
     background: conic-gradient(
         from var(--composer-mic-angle) at 50% 50%,
         transparent 0deg,
-        rgba(124, 92, 255, 0.34) 108deg,
-        rgba(99, 102, 241, 0.28) 142deg,
-        rgba(34, 211, 238, 0.22) 178deg,
-        rgba(52, 211, 153, 0.18) 226deg,
-        transparent 286deg,
-        rgba(245, 158, 11, 0.12) 318deg,
-        rgba(124, 92, 255, 0.22) 342deg,
+        rgba(124, 92, 255, 0.34) 40deg,
+        rgba(99, 102, 241, 0.28) 80deg,
+        transparent 120deg,
+        rgba(34, 211, 238, 0.22) 160deg,
+        rgba(52, 211, 153, 0.18) 200deg,
+        transparent 240deg,
+        rgba(245, 158, 11, 0.12) 280deg,
+        rgba(124, 92, 255, 0.22) 320deg,
         transparent 1turn
     );
 }

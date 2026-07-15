@@ -63,6 +63,69 @@ func TestProjectGitStatusGracefullyHandlesNonRepository(t *testing.T) {
 	}
 }
 
+func TestProjectGitWriteOperations(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	srv, st := newTestServer(t)
+	root := t.TempDir()
+	createProjectSession(t, st, "proj_git_write", "sess_git_write", root)
+	roots := decodeJSON[struct {
+		Roots []projectRootView `json:"roots"`
+	}](t, req(t, http.MethodGet, srv.URL+"/sessions/sess_git_write/project/tree", nil))
+	rootID := roots.Roots[0].ID
+	endpoint := srv.URL + "/sessions/sess_git_write/project/git/"
+
+	status := decodeJSON[projectGitStatusView](t, req(t, http.MethodPost, endpoint+"init", map[string]any{"rootID": rootID}))
+	if !status.Available || !status.Clean {
+		t.Fatalf("unexpected initialized status: %+v", status)
+	}
+	runProjectGit(t, root, "config", "user.name", "Pudding Test")
+	runProjectGit(t, root, "config", "user.email", "pudding@example.test")
+	if err := os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	status = decodeJSON[projectGitStatusView](t, req(t, http.MethodPost, endpoint+"stage", map[string]any{
+		"rootID": rootID, "paths": []string{"tracked.txt"},
+	}))
+	if status.StagedCount != 1 {
+		t.Fatalf("unexpected staged status: %+v", status)
+	}
+	status = decodeJSON[projectGitStatusView](t, req(t, http.MethodPost, endpoint+"commit", map[string]any{
+		"rootID": rootID, "message": "initial",
+	}))
+	if !status.Clean {
+		t.Fatalf("unexpected committed status: %+v", status)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("changed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "untracked.txt"), []byte("new\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{"tracked.txt", "untracked.txt"}
+	status = decodeJSON[projectGitStatusView](t, req(t, http.MethodPost, endpoint+"stage", map[string]any{"rootID": rootID, "paths": paths}))
+	if status.StagedCount != 2 {
+		t.Fatalf("unexpected staged changes: %+v", status)
+	}
+	status = decodeJSON[projectGitStatusView](t, req(t, http.MethodPost, endpoint+"unstage", map[string]any{"rootID": rootID, "paths": paths}))
+	if status.UnstagedCount != 1 || status.UntrackedCount != 1 {
+		t.Fatalf("unexpected unstaged changes: %+v", status)
+	}
+	status = decodeJSON[projectGitStatusView](t, req(t, http.MethodPost, endpoint+"discard", map[string]any{"rootID": rootID, "paths": paths}))
+	if !status.Clean {
+		t.Fatalf("unexpected discarded status: %+v", status)
+	}
+	content, err := os.ReadFile(filepath.Join(root, "tracked.txt"))
+	if err != nil || string(content) != "base\n" {
+		t.Fatalf("tracked content = %q, err = %v", content, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "untracked.txt")); !os.IsNotExist(err) {
+		t.Fatalf("untracked file should be removed: %v", err)
+	}
+}
+
 func runProjectGit(t *testing.T, root string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)

@@ -108,6 +108,60 @@ func TestStatusParsesRenameAndStagedDeletion(t *testing.T) {
 	}
 }
 
+func TestInitializeStageUnstageDiscardAndCommit(t *testing.T) {
+	requireGit(t)
+	ctx := context.Background()
+	root := t.TempDir()
+	repo, err := Initialize(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "config", "user.name", "Pudding Test")
+	git(t, root, "config", "user.email", "pudding@example.test")
+	writeFile(t, root, "tracked.txt", "base\n")
+	status, err := Stage(ctx, repo, []string{"tracked.txt"})
+	if err != nil || status.Staged != 1 {
+		t.Fatalf("stage initial file: status=%+v err=%v", status, err)
+	}
+	if _, err := Commit(ctx, repo, "initial"); err != nil {
+		t.Fatal(err)
+	}
+
+	writeFile(t, root, "tracked.txt", "staged\n")
+	writeFile(t, root, "untracked.txt", "new\n")
+	status, err = Stage(ctx, repo, []string{"tracked.txt", "untracked.txt"})
+	if err != nil || status.Staged != 2 {
+		t.Fatalf("stage changes: status=%+v err=%v", status, err)
+	}
+	status, err = Unstage(ctx, repo, []string{"untracked.txt"})
+	if err != nil || status.Staged != 1 || status.Untracked != 1 {
+		t.Fatalf("unstage file: status=%+v err=%v", status, err)
+	}
+	writeFile(t, root, "tracked.txt", "working\n")
+	status, err = Discard(ctx, repo, []string{"tracked.txt", "untracked.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(root, "tracked.txt"))
+	if err != nil || string(content) != "staged\n" {
+		t.Fatalf("discard should restore index content: %q err=%v", content, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "untracked.txt")); !os.IsNotExist(err) {
+		t.Fatalf("untracked file should be removed: %v", err)
+	}
+	if status.Staged != 1 || status.Unstaged != 0 || status.Untracked != 0 {
+		t.Fatalf("unexpected status after discard: %+v", status)
+	}
+	status, err = Commit(ctx, repo, "update tracked")
+	if err != nil || !statusIsClean(status) {
+		t.Fatalf("commit changes: status=%+v err=%v", status, err)
+	}
+}
+
+func statusIsClean(status Status) bool {
+	return len(status.Files) == 0 && status.Staged == 0 && status.Unstaged == 0 && status.Untracked == 0 && status.Conflicted == 0
+}
+
 func requireGit(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {

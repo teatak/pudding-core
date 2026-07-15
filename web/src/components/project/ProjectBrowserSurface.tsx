@@ -86,13 +86,14 @@ export function ProjectBrowserSurface({
       enabled: active && Boolean(sessionID && token),
       queryKey: queryKeys.projectGitStatus(sessionID, root.id),
       queryFn: () => getProjectGitStatus(token, sessionID, root.id),
+      refetchInterval: active ? 5_000 : false,
+      refetchIntervalInBackground: false,
       retry: false,
       staleTime: 5_000,
     })),
   });
   const gitRepositories: ProjectGitRepositoryState[] = roots.map((root, index) => ({
     error: gitQueries[index]?.error,
-    fetching: gitQueries[index]?.isFetching || false,
     loading: gitQueries[index]?.isLoading || false,
     root,
     status: gitQueries[index]?.data,
@@ -456,7 +457,14 @@ export function ProjectBrowserSurface({
                 onToggle={workspace.toggleDirectory}
               />
             )}
-            git={<ProjectGitSection repositories={gitRepositories} onOpenDiff={workspace.openGitDiff} />}
+            git={(
+              <ProjectGitSection
+                repositories={gitRepositories}
+                sessionID={sessionID}
+                token={token}
+                onOpenDiff={workspace.openGitDiff}
+              />
+            )}
           />
         </ResizablePanel>
         <ResizableHandle withHandle />

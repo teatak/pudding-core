@@ -134,6 +134,18 @@ export const projectGitDiff = z.object({
 });
 export type ProjectGitDiff = z.infer<typeof projectGitDiff>;
 
+export const projectGitRootRequest = z.object({
+  rootID: z.string().min(1),
+});
+
+export const projectGitPathsRequest = projectGitRootRequest.extend({
+  paths: z.array(z.string().min(1)).min(1).max(512),
+});
+
+export const projectGitCommitRequest = projectGitRootRequest.extend({
+  message: z.string().trim().min(1).max(16 * 1024),
+});
+
 export const projectEntryMutation = z.object({
   rootID: z.string(),
   name: z.string(),

@@ -36,9 +36,29 @@ export function ProjectMarkdownPreview({
 
   useEffect(() => {
     if (!previewNode) return;
-    const updateSelection = () => setSelectionAction(markdownSelectionAction(previewNode, file.content));
+    let frame = 0;
+    const updateSelection = () => {
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        setSelectionAction(markdownSelectionAction(previewNode, file.content));
+      });
+    };
     document.addEventListener("selectionchange", updateSelection);
-    return () => document.removeEventListener("selectionchange", updateSelection);
+    previewNode.addEventListener("dblclick", updateSelection);
+    previewNode.addEventListener("pointerup", updateSelection);
+    previewNode.addEventListener("keyup", updateSelection);
+    return () => {
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+      document.removeEventListener("selectionchange", updateSelection);
+      previewNode.removeEventListener("dblclick", updateSelection);
+      previewNode.removeEventListener("pointerup", updateSelection);
+      previewNode.removeEventListener("keyup", updateSelection);
+    };
   }, [file.content, previewNode]);
 
   return (
@@ -99,15 +119,36 @@ function markdownSelectionAction(container: HTMLDivElement, source: string): Sel
   const range = projectMarkdownSelectionRange(source, selection.toString());
   if (!range || selection.rangeCount === 0) return undefined;
   const browserRange = selection.getRangeAt(0);
-  const rects = Array.from(browserRange.getClientRects());
-  const rect = rects.at(-1) || browserRange.getBoundingClientRect();
   const containerRect = container.getBoundingClientRect();
+  const rect = selectionClientRect(browserRange, containerRect);
+  if (!rect) return undefined;
   const width = 116;
   const preferredX = rect.right - containerRect.left + 8;
   const x = Math.max(8, Math.min(preferredX, container.clientWidth - width - 8));
   const above = rect.top - containerRect.top - 38;
   const y = above >= 8 ? above : rect.bottom - containerRect.top + 6;
   return { range, x, y };
+}
+
+function selectionClientRect(range: Range, containerRect: DOMRect): DOMRect | undefined {
+  const rects = Array.from(range.getClientRects()).filter((rect) => {
+    return (
+      rect.width > 0 &&
+      rect.height > 0 &&
+      rect.bottom >= containerRect.top &&
+      rect.top <= containerRect.bottom &&
+      rect.right >= containerRect.left &&
+      rect.left <= containerRect.right
+    );
+  });
+  if (rects.length > 0) {
+    return rects.at(-1);
+  }
+  const fallback = range.getBoundingClientRect();
+  if (fallback.width > 0 && fallback.height > 0) {
+    return fallback;
+  }
+  return undefined;
 }
 
 export function projectMarkdownSelectionRange(source: string, selectedText: string): ProjectEditorSelection | undefined {
@@ -120,11 +161,34 @@ export function projectMarkdownSelectionRange(source: string, selectedText: stri
   const selectedProjection = markdownTextProjection(selected);
   if (!selectedProjection.text) return undefined;
   const projectedStart = sourceProjection.text.indexOf(selectedProjection.text);
-  if (projectedStart < 0) return undefined;
-  const start = sourceProjection.offsets[projectedStart];
-  const end = sourceProjection.offsets[projectedStart + selectedProjection.text.length - 1];
+  if (projectedStart >= 0) {
+    const start = sourceProjection.offsets[projectedStart];
+    const end = sourceProjection.offsets[projectedStart + selectedProjection.text.length - 1];
+    if (start === undefined || end === undefined) return undefined;
+    return sourceOffsetsToRange(source, start, end);
+  }
+
+  const sourceCompact = compactTextProjection(sourceProjection);
+  const selectedCompact = compactTextProjection(selectedProjection);
+  if (!selectedCompact.text) return undefined;
+  const compactStart = sourceCompact.text.indexOf(selectedCompact.text);
+  if (compactStart < 0) return undefined;
+  const start = sourceCompact.offsets[compactStart];
+  const end = sourceCompact.offsets[compactStart + selectedCompact.text.length - 1];
   if (start === undefined || end === undefined) return undefined;
   return sourceOffsetsToRange(source, start, end);
+}
+
+function compactTextProjection(projection: ReturnType<typeof markdownTextProjection>) {
+  let text = "";
+  const offsets: number[] = [];
+  for (let index = 0; index < projection.text.length; index += 1) {
+    const character = projection.text[index];
+    if (!character || /\s/.test(character)) continue;
+    text += character;
+    offsets.push(projection.offsets[index]);
+  }
+  return { offsets, text };
 }
 
 function markdownTextProjection(value: string) {
@@ -136,6 +200,7 @@ function markdownTextProjection(value: string) {
   };
   for (let index = 0; index < value.length; index += 1) {
     const character = value[index];
+    if (/[\u200B-\u200D\uFEFF]/.test(character)) continue;
     if (character === "]" && value[index + 1] === "(") {
       const close = value.indexOf(")", index + 2);
       if (close >= 0) {
@@ -144,7 +209,7 @@ function markdownTextProjection(value: string) {
       }
     }
     if ("[]*_~`#>|-+".includes(character)) continue;
-    if (/\s/.test(character)) {
+    if (/\s/.test(character) || character === "\u00a0") {
       if (text && text.at(-1) !== " ") append(" ", index);
       continue;
     }
