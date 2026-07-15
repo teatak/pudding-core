@@ -22,6 +22,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { BrowserTab, Terminal } from "@/api/client";
 import { browserTabFaviconURL, browserTabTitle } from "@/browser/helpers";
 import { builtinAppIconClass } from "@/components/AppIdentity";
+import { workspaceTabActiveClassName, workspaceTabClassName } from "@/components/workspace/WorkspaceSurfaceControls";
 import type { WorkspaceSurface } from "@/components/workspace/types";
 import { Spinner } from "@/components/Spinner";
 import { useHorizontalScrollMask } from "@/hooks/useHorizontalScrollMask";
@@ -188,11 +189,11 @@ export function WorkspaceResourceTabs({
     >
       <div
         ref={scrollMask.ref}
-        className="no-drag-region w-fit max-w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-lg bg-muted p-(--workspace-toolbar-tab-padding) text-muted-foreground [scrollbar-width:none] [-webkit-overflow-scrolling:touch] dark:bg-white/[0.07] [&::-webkit-scrollbar]:hidden"
+        className="no-drag-region w-fit max-w-full min-w-0 overflow-x-auto overflow-y-hidden text-muted-foreground [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden"
         style={scrollMask.style}
       >
         <SortableContext items={orderedIDs} strategy={horizontalListSortingStrategy}>
-          <div className="inline-flex min-w-max items-center">
+          <div className="flex w-fit max-w-full min-w-0 items-center gap-0.5">
             {leadingTabs}
             {tabs.map((tab) => (
               <SortableSurfaceTabButton
@@ -282,7 +283,9 @@ function SortableSurfaceTabButton({
       aria-label={label}
       aria-selected={selected}
       className={cn(
-        "group relative inline-flex h-(--workspace-toolbar-tab-h) min-w-24 max-w-[44vw] shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium whitespace-nowrap transition-colors hover:text-foreground data-[active=true]:border-border data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm dark:data-[active=true]:border-white/20 dark:data-[active=true]:bg-[#303030] sm:max-w-40",
+        workspaceTabClassName,
+        "group relative w-36 min-w-24 max-w-none shrink pr-6 pl-2 whitespace-nowrap",
+        selected && workspaceTabActiveClassName,
         isDragging && "cursor-grabbing opacity-80 shadow-md",
       )}
       data-active={selected}
@@ -312,14 +315,6 @@ function SortableSurfaceTabButton({
         <FilePreviewTabIcon />
       )}
       <span className="min-w-0 max-w-24 flex-1 truncate text-left">{label}</span>
-      <span
-        aria-hidden="true"
-        className={cn(
-          "pointer-events-none absolute inset-y-px right-px w-8 rounded-r-md bg-gradient-to-r from-transparent via-25% opacity-0 transition-opacity group-hover:opacity-100",
-          selected ? "via-background to-background dark:via-[#303030] dark:to-[#303030]" : "via-muted to-muted dark:via-[#2c2c2c] dark:to-[#2c2c2c]",
-          closePending && "opacity-100",
-        )}
-      />
       <span
         aria-label={
           tab.kind === "browser"

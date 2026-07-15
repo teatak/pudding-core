@@ -5,13 +5,17 @@ import { CanvasKindIcon } from "@/components/canvas/CanvasKindIcon";
 import { Popover, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import type { ClosedCanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
+import { cn } from "@/lib/utils";
+
+export const workspaceTabClassName = "inline-flex h-(--workspace-toolbar-tab-h) items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground";
+export const workspaceTabActiveClassName = "bg-muted text-foreground hover:bg-muted dark:bg-white/[0.10] dark:hover:bg-white/[0.12]";
 
 export function ProjectSurfaceControl({ active, onActivate }: { active: boolean; onActivate: () => void }) {
   const { t } = useI18n();
   return (
     <button
       aria-pressed={active}
-      className="inline-flex h-(--workspace-toolbar-tab-h) items-center gap-1.5 rounded-md border border-transparent bg-transparent px-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground aria-pressed:border-border aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm dark:aria-pressed:border-white/20 dark:aria-pressed:bg-[#303030]"
+      className={cn(workspaceTabClassName, "shrink-0", active && workspaceTabActiveClassName)}
       title={t("workspace.project")}
       type="button"
       onClick={onActivate}
@@ -29,7 +33,7 @@ export function CanvasSurfaceControl({ active, onActivate }: { active: boolean; 
   return (
     <button
       aria-pressed={active}
-      className="inline-flex h-(--workspace-toolbar-tab-h) items-center gap-1.5 rounded-md border border-transparent bg-transparent px-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground aria-pressed:border-border aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm dark:aria-pressed:border-white/20 dark:aria-pressed:bg-[#303030]"
+      className={cn(workspaceTabClassName, "shrink-0", active && workspaceTabActiveClassName)}
       title={t("canvas.title")}
       type="button"
       onClick={onActivate}
