@@ -1081,10 +1081,11 @@ function RailPanel({
     <RailOverlayHoldContext.Provider value={setOverlayHold}>
       <SidebarProvider className="pudding-session-rail !contents">
         <Sidebar className="min-h-0 w-full flex-1 bg-transparent" collapsible="none">
-          <SidebarHeader>
-            <SidebarMenu className="gap-1">
+          <SidebarHeader className="px-2 py-1.5">
+            <SidebarMenu className="gap-0.5">
               <SidebarMenuItem>
                 <SidebarMenuButton
+                  className="h-7 px-2 py-1"
                   isActive={draftActive && !draftProjectID}
                   onClick={onCreate}
                 >
@@ -1093,19 +1094,20 @@ function RailPanel({
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton disabled={createProjectPending} onClick={onCreateProject}>
+                <SidebarMenuButton className="h-7 px-2 py-1" disabled={createProjectPending} onClick={onCreateProject}>
                   {createProjectPending ? <Spinner /> : <FolderPlus />}
                   <span>{t("project.create")}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton onClick={onSearch}>
+                <SidebarMenuButton className="h-7 px-2 py-1" onClick={onSearch}>
                   <Search />
                   <span>{t("rail.search")}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
+                  className="h-7 px-2 py-1"
                   isActive={appsActive}
                   onClick={() => {
                     void navigate({
@@ -1127,6 +1129,7 @@ function RailPanel({
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarHeader>
+          <div aria-hidden="true" className="mx-4 mb-1.5 h-px shrink-0 bg-sidebar-border/70" />
           <SidebarContent ref={scrollContainerRef} className="pt-0 pb-2 overscroll-contain">
             {isLoading ? (
               <SessionListSkeleton />
@@ -1137,7 +1140,7 @@ function RailPanel({
                 {showPinnedGroup ? (
                   <Collapsible asChild open={!pinnedCollapsed}>
                     <SidebarGroup
-                      className="px-2 py-0.5"
+                      className="px-2 py-0"
                       data-session-drop-group="pinned"
                     >
                       <CollapsibleSessionGroupLabel
@@ -1147,7 +1150,7 @@ function RailPanel({
                         onToggle={() => toggleGroupCollapsed("pinned")}
                       />
                       <CollapsibleContent className="pudding-session-group-content overflow-hidden">
-                        <SidebarGroupContent className="pt-1">
+                        <SidebarGroupContent className="pt-0.5">
                           <SessionItems
                             deletePending={deletePending}
                             selectedSessionID={selectedSessionID}
@@ -1185,7 +1188,7 @@ function RailPanel({
                     <SessionEmptyState />
                   ) : chatSessions.length > 0 || (isDraggingPinned && unpinnedSessions.length === 0) ? (
                     <Collapsible asChild open={!chatCollapsed}>
-                      <SidebarGroup className="px-2 py-0.5">
+                      <SidebarGroup className="px-2 py-0">
                         <CollapsibleSessionGroupLabel
                           collapsed={chatCollapsed}
                           icon="chat"
@@ -1193,7 +1196,7 @@ function RailPanel({
                           onToggle={() => toggleGroupCollapsed("chat")}
                         />
                         <CollapsibleContent className="pudding-session-group-content overflow-hidden">
-                          <SidebarGroupContent className={cn("pt-1", isDraggingPinned && chatSessions.length === 0 && "min-h-8")}>
+                          <SidebarGroupContent className={cn("pt-0.5", isDraggingPinned && chatSessions.length === 0 && "min-h-8")}>
                             <SessionItems
                               deletePending={deletePending}
                               selectedSessionID={selectedSessionID}
@@ -1221,7 +1224,7 @@ function RailPanel({
                     const projectCollapsed = collapsedGroups.has(`project:${group.key}`);
                     return (
                       <Collapsible key={group.key} asChild open={!projectCollapsed}>
-                        <SidebarGroup className="px-2 py-0.5">
+                        <SidebarGroup className="px-2 py-0">
                           <CollapsibleSessionGroupLabel
                             active={draftActive && draftProjectID === group.projectID}
                             actions={group.project ? <ProjectActionsMenu project={group.project} token={token} /> : undefined}
@@ -1234,7 +1237,7 @@ function RailPanel({
                             onToggle={() => toggleGroupCollapsed(`project:${group.key}`)}
                           />
                           <CollapsibleContent className="pudding-session-group-content overflow-hidden">
-                            <SidebarGroupContent className="pt-1">
+                            <SidebarGroupContent className="pt-0.5">
                               <SessionItems
                                 deletePending={deletePending}
                                 selectedSessionID={selectedSessionID}
@@ -1436,7 +1439,7 @@ function CollapsibleSessionGroupLabel({
   return (
     <SidebarGroupLabel
       className={cn(
-        "group/project-label h-8 min-h-8 gap-1 px-0 text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground has-[[data-project-actions-open=true]]:bg-sidebar-accent has-[[data-project-actions-open=true]]:text-sidebar-accent-foreground",
+        "group/project-label h-7 min-h-7 gap-1 px-0 text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground has-[[data-project-actions-open=true]]:bg-sidebar-accent has-[[data-project-actions-open=true]]:text-sidebar-accent-foreground",
         active && "bg-sidebar-accent text-sidebar-accent-foreground",
       )}
       title={title || label}
@@ -1712,10 +1715,10 @@ type SessionItemsProps = {
 
 function SessionListSkeleton() {
   return (
-    <div className="grid gap-1 p-2">
-      <Skeleton className="h-8 rounded-md" />
-      <Skeleton className="h-8 rounded-md" />
-      <Skeleton className="h-8 rounded-md" />
+    <div className="grid gap-0.5 p-2">
+      <Skeleton className="h-7 rounded-md" />
+      <Skeleton className="h-7 rounded-md" />
+      <Skeleton className="h-7 rounded-md" />
     </div>
   );
 }
@@ -1768,7 +1771,7 @@ function SessionItems({
   const hiddenSessionCount = canCollapse ? sessions.length - collapsedSessionDisplayLimit : 0;
   if (visibleSessions.length === 0 && (dropIndex !== null || showEmptyDropTarget)) {
     return (
-      <SidebarMenu className="gap-1">
+      <SidebarMenu className="gap-0.5">
         <SessionDropIndicator active={dropIndex !== null} />
       </SidebarMenu>
     );
@@ -1778,7 +1781,7 @@ function SessionItems({
   }
 
   return (
-    <SidebarMenu className="gap-1">
+    <SidebarMenu className="gap-0.5">
       {visibleSessions.map((session, index) => (
         <Fragment key={session.id}>
           {dropIndex === index ? <SessionDropIndicator active /> : null}
@@ -1837,7 +1840,7 @@ function SessionDropIndicator({ active }: { active: boolean }) {
     <li
       aria-hidden="true"
       className={cn(
-        "h-8 rounded-md ring-1 ring-inset transition-colors",
+        "h-7 rounded-md ring-1 ring-inset transition-colors",
         active ? "pudding-session-drop-indicator-active ring-sidebar-ring/70" : "ring-sidebar-border/70",
       )}
     />
@@ -2056,6 +2059,7 @@ function SessionItem({
       {editing ? (
         <SidebarMenuButton
           asChild
+          className="h-7 px-2 py-1"
           isActive
         >
           <div className="cursor-text">
@@ -2085,6 +2089,7 @@ function SessionItem({
         <SidebarMenuButton
           asChild
           className={cn(
+            "h-7 px-2 py-1",
             running
               ? "pr-24 data-active:font-normal group-has-data-[sidebar=menu-action]/menu-item:pr-24"
               : actionsAlwaysVisible
