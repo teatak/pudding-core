@@ -2,8 +2,8 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  assertPublicTagTarget,
   createDraftMetadata,
-  ensurePublicTagTarget,
   ensureVersionManifest,
   expectedAssetNames,
   validateDraftRelease,
@@ -124,7 +124,7 @@ test("commits a version manifest to the public repository", async (context) => {
   );
 });
 
-test("creates the public tag at the version manifest commit", async (context) => {
+test("verifies the published tag points to the version manifest commit", async (context) => {
   const originalFetch = global.fetch;
   const requests = [];
   context.after(() => {
@@ -132,28 +132,15 @@ test("creates the public tag at the version manifest commit", async (context) =>
   });
   global.fetch = async (url, options) => {
     requests.push({ url, options });
-    if (options.method === "GET" && requests.length === 1) {
-      return mockResponse(404, { message: "Not Found" });
-    }
-    if (options.method === "POST") {
-      return mockResponse(201, {
-        ref: "refs/tags/v0.1.6",
-        object: { type: "commit", sha: "manifest-commit" },
-      });
-    }
     return mockResponse(200, {
       ref: "refs/tags/v0.1.6",
       object: { type: "commit", sha: "manifest-commit" },
     });
   };
 
-  await ensurePublicTagTarget("v0.1.6", "manifest-commit", "token");
-  assert.equal(requests.length, 3);
-  assert.equal(requests[1].options.method, "POST");
-  assert.deepEqual(JSON.parse(requests[1].options.body), {
-    ref: "refs/tags/v0.1.6",
-    sha: "manifest-commit",
-  });
+  await assertPublicTagTarget("v0.1.6", "manifest-commit", "token");
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].options.method, "GET");
 });
 
 function mockResponse(status, payload) {

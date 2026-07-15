@@ -73,6 +73,7 @@ async function main(argv, env) {
       make_latest: channel === "stable" ? "true" : "false",
     },
   );
+  await assertPublicTagTarget(tag, release.target_commitish, token);
   console.log(`Release published: ${tag} ${published.html_url}`);
 }
 
@@ -98,7 +99,6 @@ async function createDraftRelease(existingRelease, tag, channel, token, env) {
     }),
   );
   const manifestCommit = await ensureVersionManifest(tag, manifest, token);
-  await ensurePublicTagTarget(tag, manifestCommit, token);
 
   let release = existingRelease;
   if (!release) {
@@ -123,7 +123,6 @@ async function createDraftRelease(existingRelease, tag, channel, token, env) {
   if (!release?.draft) {
     throw new Error(`draft ${tag} could not be created`);
   }
-  await assertPublicTagTarget(tag, manifestCommit, token);
 
   const remoteAssets = new Map((release.assets || []).map((asset) => [asset.name, asset]));
   for (const asset of assets) {
@@ -244,24 +243,6 @@ async function assertPublicTagTarget(tag, expectedCommit, token) {
   }
 }
 
-async function ensurePublicTagTarget(tag, expectedCommit, token) {
-  const encodedTag = encodeURIComponent(tag);
-  const ref = await githubRequest(
-    "GET",
-    `/repos/${repository}/git/ref/tags/${encodedTag}`,
-    token,
-    undefined,
-    { allowNotFound: true },
-  );
-  if (!ref) {
-    await githubRequest("POST", `/repos/${repository}/git/refs`, token, {
-      ref: `refs/tags/${tag}`,
-      sha: expectedCommit,
-    });
-  }
-  await assertPublicTagTarget(tag, expectedCommit, token);
-}
-
 function expectedAssetNames(tag, channel) {
   const version = tag.slice(1);
   const updateInfo = channel === "preview" ? "beta-mac.yml" : "latest-mac.yml";
@@ -338,8 +319,8 @@ async function githubRequest(method, endpoint, token, body, options = {}) {
 }
 
 module.exports = {
+  assertPublicTagTarget,
   createDraftMetadata,
-  ensurePublicTagTarget,
   ensureVersionManifest,
   expectedAssetNames,
   validateDraftRelease,

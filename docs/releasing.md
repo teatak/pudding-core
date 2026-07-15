@@ -132,9 +132,10 @@ binary, and permission checks does the script create and push an annotated tag s
 
 Before creating the public Draft Release, the script commits `releases/v<version>.json` to the public repository.
 The manifest records the source tag and commit, channel, user-facing feature list, and SHA-256 plus size of every
-release asset. The public tag points to that unique manifest commit, so public tags are meaningful release
-anchors and GitHub can order releases consistently. The Release title keeps the full `v<version>` form and its
-body is generated from the report's feature list.
+release asset. Publishing the Draft creates the public tag at that unique manifest commit, so public tags are
+meaningful release anchors and GitHub can order releases consistently. Do not create the public tag before the
+Draft is published; GitHub detaches drafts that collide with an existing tag. The Release title keeps the full
+`v<version>` form and its body is generated from the report's feature list.
 
 Packaging and uploading are separate phases. The apps are fully built and verified first; the release script
 then creates one draft and uploads its nine assets sequentially. This avoids partially published or duplicate

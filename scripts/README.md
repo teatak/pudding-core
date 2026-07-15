@@ -28,9 +28,10 @@ The release path is fixed:
    code, update metadata, and bundle permissions.
 4. Create and push the immutable source tag only after the package passes.
 5. Commit `releases/v<version>.json` to `teatak/pudding`, including the feature list and artifact hashes.
-6. Create a `v<version>` titled Draft Release at that public commit, upload all nine artifacts, and verify the
-   complete asset set plus generated feature list.
-7. Publish the draft explicitly.
+6. Create a `v<version>` titled Draft Release targeting that public commit, upload all nine artifacts, and verify
+   the complete asset set plus generated feature list. GitHub does not create the real tag while the release is a
+   draft.
+7. Publish the draft explicitly, then verify that the resulting public tag points to the manifest commit.
 
 Packaging helpers belong under `packaging/`; Electron smoke fixtures belong under `electron/smoke/`. Do not add
 one-off asset or test helpers back to this directory.
