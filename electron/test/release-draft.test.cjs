@@ -3,12 +3,13 @@ const test = require("node:test");
 
 const {
   createDraftMetadata,
+  ensurePublicTagTarget,
   ensureVersionManifest,
   expectedAssetNames,
   validateDraftRelease,
 } = require("../../scripts/release-draft.cjs");
 
-const releaseBody = "## 功能清单\n\n### 新增\n\n- 新功能。\n";
+const releaseBody = "## What's New\n\n### Added\n\n- New feature.\n";
 
 function draft(version = "0.1.2", updateInfo = "latest-mac.yml") {
   const names = [
@@ -121,6 +122,38 @@ test("commits a version manifest to the public repository", async (context) => {
     Buffer.from(body.content, "base64").toString("utf8"),
     "{\n  \"version\": \"0.1.6\"\n}\n",
   );
+});
+
+test("creates the public tag at the version manifest commit", async (context) => {
+  const originalFetch = global.fetch;
+  const requests = [];
+  context.after(() => {
+    global.fetch = originalFetch;
+  });
+  global.fetch = async (url, options) => {
+    requests.push({ url, options });
+    if (options.method === "GET" && requests.length === 1) {
+      return mockResponse(404, { message: "Not Found" });
+    }
+    if (options.method === "POST") {
+      return mockResponse(201, {
+        ref: "refs/tags/v0.1.6",
+        object: { type: "commit", sha: "manifest-commit" },
+      });
+    }
+    return mockResponse(200, {
+      ref: "refs/tags/v0.1.6",
+      object: { type: "commit", sha: "manifest-commit" },
+    });
+  };
+
+  await ensurePublicTagTarget("v0.1.6", "manifest-commit", "token");
+  assert.equal(requests.length, 3);
+  assert.equal(requests[1].options.method, "POST");
+  assert.deepEqual(JSON.parse(requests[1].options.body), {
+    ref: "refs/tags/v0.1.6",
+    sha: "manifest-commit",
+  });
 });
 
 function mockResponse(status, payload) {

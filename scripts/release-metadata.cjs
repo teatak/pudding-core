@@ -42,7 +42,7 @@ function readReleaseNotes(projectRoot, tag) {
 }
 
 function buildReleaseBody(releaseNotes) {
-  return `## 功能清单\n\n${String(releaseNotes || "").trim()}\n`;
+  return `## What's New\n\n${String(releaseNotes || "").trim()}\n`;
 }
 
 function describeReleaseAssets(assets) {

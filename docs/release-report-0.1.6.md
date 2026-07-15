@@ -82,18 +82,18 @@
 
 ## Release Notes 草案
 
-### 新增
+### Added
 
-- 重新打开 Pudding 时恢复上次使用的会话、项目或应用页面。
+- Restore the last active session, project, or app page when reopening Pudding.
 
-### 改进
+### Improvements
 
-- 改进 macOS 录音时的音频设备路由和切换稳定性。
-- 减少 Code 模式下重复的项目访问确认。
-- 统一画布、项目和浏览器工作区的标签及操作区样式，优化侧边栏信息密度。
-- 加强项目路径边界检查和发版资产追溯。
+- Improve audio device routing and switching reliability while recording on macOS.
+- Reduce repeated project access confirmations in Code mode.
+- Unify tabs and controls across canvas, project, and browser workspaces, with a denser sidebar layout.
+- Strengthen project path boundary checks and release asset traceability.
 
-### 数据安全
+### Data Safety
 
-本次更新不修改 SQLite schema，不执行数据库迁移，也不重建搜索索引。现有会话、消息、画布和
-项目内容不会被后台改写。
+This update does not change the SQLite schema, run database migrations, or rebuild search indexes. Existing
+sessions, messages, canvases, and project content are not rewritten in the background.

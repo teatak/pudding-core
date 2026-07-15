@@ -34,7 +34,7 @@ test("extracts the release feature groups from a release report", () => {
   assert.equal(notes, "### 新增\n\n- 新功能。\n\n### 改进\n\n- 更稳定。");
   assert.equal(
     buildReleaseBody(notes),
-    "## 功能清单\n\n### 新增\n\n- 新功能。\n\n### 改进\n\n- 更稳定。\n",
+    "## What's New\n\n### 新增\n\n- 新功能。\n\n### 改进\n\n- 更稳定。\n",
   );
 });
 

@@ -98,6 +98,7 @@ async function createDraftRelease(existingRelease, tag, channel, token, env) {
     }),
   );
   const manifestCommit = await ensureVersionManifest(tag, manifest, token);
+  await ensurePublicTagTarget(tag, manifestCommit, token);
 
   let release = existingRelease;
   if (!release) {
@@ -243,6 +244,24 @@ async function assertPublicTagTarget(tag, expectedCommit, token) {
   }
 }
 
+async function ensurePublicTagTarget(tag, expectedCommit, token) {
+  const encodedTag = encodeURIComponent(tag);
+  const ref = await githubRequest(
+    "GET",
+    `/repos/${repository}/git/ref/tags/${encodedTag}`,
+    token,
+    undefined,
+    { allowNotFound: true },
+  );
+  if (!ref) {
+    await githubRequest("POST", `/repos/${repository}/git/refs`, token, {
+      ref: `refs/tags/${tag}`,
+      sha: expectedCommit,
+    });
+  }
+  await assertPublicTagTarget(tag, expectedCommit, token);
+}
+
 function expectedAssetNames(tag, channel) {
   const version = tag.slice(1);
   const updateInfo = channel === "preview" ? "beta-mac.yml" : "latest-mac.yml";
@@ -320,6 +339,7 @@ async function githubRequest(method, endpoint, token, body, options = {}) {
 
 module.exports = {
   createDraftMetadata,
+  ensurePublicTagTarget,
   ensureVersionManifest,
   expectedAssetNames,
   validateDraftRelease,
