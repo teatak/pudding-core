@@ -480,6 +480,26 @@ export const message = z
   });
 export type Message = z.infer<typeof message>;
 
+export const turnFileChange = z.object({
+  id: z.string(),
+  sessionID: z.string(),
+  turnID: z.string(),
+  rootPath: z.string(),
+  path: z.string(),
+  originalPath: z.string().optional(),
+  kind: z.enum(["added", "modified", "deleted", "renamed"]),
+  additions: z.number().int().nonnegative(),
+  deletions: z.number().int().nonnegative(),
+  binary: z.boolean(),
+  tooLarge: z.boolean(),
+  oldSize: z.number().int().nonnegative(),
+  newSize: z.number().int().nonnegative(),
+  oldContent: z.string().optional(),
+  newContent: z.string().optional(),
+  createdAt: z.string(),
+});
+export type TurnFileChange = z.infer<typeof turnFileChange>;
+
 export const searchSessionMessagesRequest = z.object({
   sessionIDs: z.array(z.string().min(1)).min(1).max(200),
   query: z.string().trim().min(1),
@@ -503,6 +523,7 @@ export const conversationTurn = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   messages: z.array(message),
+  fileChanges: z.array(turnFileChange).optional(),
 });
 export type ConversationTurn = z.infer<typeof conversationTurn>;
 

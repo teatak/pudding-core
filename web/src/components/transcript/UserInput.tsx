@@ -164,7 +164,7 @@ export const UserInput = memo(function UserInput({
         <div className="flex w-full min-w-0 items-start justify-end gap-1">
           <div
             className={cn(
-              "pudding-user-message selectable-text min-w-0 overflow-hidden rounded-2xl rounded-br-md border border-border/60 px-3 py-2 text-left text-sm leading-6 break-words whitespace-pre-wrap shadow-sm [overflow-wrap:anywhere]",
+              "pudding-user-message selectable-text min-w-0 overflow-hidden rounded-[14px] rounded-br-[5px] border-0 px-3.5 py-2 text-left text-sm leading-6 break-words whitespace-pre-wrap shadow-none [overflow-wrap:anywhere]",
               formResult ? "w-[min(82%,42rem)]" : "max-w-[min(82%,42rem)]",
             )}
           >

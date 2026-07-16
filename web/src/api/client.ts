@@ -53,6 +53,7 @@ import {
   submitRequest,
   submitResponse,
   conversationTurn,
+  turnFileChange,
   dailyUsageResponse,
   desktopAboutResponse,
   userPromptResponse,
@@ -130,6 +131,7 @@ import {
   type Message,
   type PendingApproval,
   type ConversationTurn,
+  type TurnFileChange,
   type ProviderModel,
   type ProviderProfile,
   type Project,
@@ -686,6 +688,14 @@ export function getTurn(token: string, sessionID: string, turnID: string): Promi
     token,
     `/sessions/${encodeURIComponent(sessionID)}/turns/${encodeURIComponent(turnID)}`,
     conversationTurn,
+  );
+}
+
+export function getTurnFileChange(token: string, sessionID: string, turnID: string, changeID: string): Promise<TurnFileChange> {
+  return request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/turns/${encodeURIComponent(turnID)}/file-changes/${encodeURIComponent(changeID)}`,
+    turnFileChange,
   );
 }
 
@@ -1395,5 +1405,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BackgroundProcess, BackgroundProcessLog, BuiltinTool, BrowserActionResult, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProjectReference, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, Terminal, WebToolsConfig };
+export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BackgroundProcess, BackgroundProcessLog, BuiltinTool, BrowserActionResult, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProjectReference, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, Terminal, TurnFileChange, WebToolsConfig };
 export { createProjectRequest, createProviderRequest, patchProjectRequest, patchProviderRequest };

@@ -878,6 +878,9 @@ func (s *Store) FinishTurn(ctx context.Context, in store.FinishTurnInput) (*stor
 			}
 			res.AssistantMessages = append(res.AssistantMessages, msg)
 		}
+		if err := insertTurnFileChangesTx(ctx, tx, turn, in.FileChanges, now); err != nil {
+			return err
+		}
 		if err := insertEventTx(ctx, tx, &ev); err != nil {
 			return err
 		}
@@ -1668,7 +1671,11 @@ func (s *Store) ListTurnsPage(ctx context.Context, sessionID string, beforeTurnI
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, conversationTurnFromSQL(turn, messages))
+		fileChanges, err := turnFileChangesForTurnTx(ctx, tx, turn.SessionID, turn.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, conversationTurnFromSQL(turn, messages, fileChanges))
 	}
 	return &store.TurnPage{Turns: out, HasMore: hasMore}, nil
 }
@@ -1699,7 +1706,11 @@ func (s *Store) GetConversationTurn(ctx context.Context, sessionID string, turnI
 	if err != nil {
 		return nil, err
 	}
-	return conversationTurnFromSQL(turn, messages), nil
+	fileChanges, err := turnFileChangesForTurnTx(ctx, tx, turn.SessionID, turn.ID)
+	if err != nil {
+		return nil, err
+	}
+	return conversationTurnFromSQL(turn, messages, fileChanges), nil
 }
 
 func (s *Store) EventsAfter(ctx context.Context, sessionID string, afterSeq int64, limit int) ([]event.Event, error) {
@@ -1952,7 +1963,7 @@ func messagesForTurnTx(ctx context.Context, tx *sql.Tx, sessionID, turnID string
 	return out, rows.Err()
 }
 
-func conversationTurnFromSQL(turn *store.Turn, messages []*store.Message) *store.ConversationTurn {
+func conversationTurnFromSQL(turn *store.Turn, messages []*store.Message, fileChanges []*store.TurnFileChange) *store.ConversationTurn {
 	return &store.ConversationTurn{
 		ID:              turn.ID,
 		SessionID:       turn.SessionID,
@@ -1965,6 +1976,7 @@ func conversationTurnFromSQL(turn *store.Turn, messages []*store.Message) *store
 		CreatedAt:       turn.CreatedAt,
 		UpdatedAt:       turn.UpdatedAt,
 		Messages:        messages,
+		FileChanges:     fileChanges,
 	}
 }
 

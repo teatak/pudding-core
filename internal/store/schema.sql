@@ -49,6 +49,28 @@ CREATE TABLE IF NOT EXISTS turns (
 CREATE UNIQUE INDEX IF NOT EXISTS turns_one_running
     ON turns(session_id) WHERE status = 'running';
 
+CREATE TABLE IF NOT EXISTS turn_file_changes (
+    id            TEXT PRIMARY KEY,
+    session_id    TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    turn_id       TEXT    NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
+    root_path     TEXT    NOT NULL,
+    path          TEXT    NOT NULL,
+    original_path TEXT    NOT NULL DEFAULT '',
+    kind          TEXT    NOT NULL,
+    additions     INTEGER NOT NULL DEFAULT 0,
+    deletions     INTEGER NOT NULL DEFAULT 0,
+    binary        INTEGER NOT NULL DEFAULT 0,
+    too_large     INTEGER NOT NULL DEFAULT 0,
+    old_size      INTEGER NOT NULL DEFAULT 0,
+    new_size      INTEGER NOT NULL DEFAULT 0,
+    old_content   TEXT    NOT NULL DEFAULT '',
+    new_content   TEXT    NOT NULL DEFAULT '',
+    created_at    INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS turn_file_changes_turn
+    ON turn_file_changes(session_id, turn_id, path);
+
 CREATE TABLE IF NOT EXISTS queued_inputs (
     session_id        TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     client_message_id TEXT    NOT NULL,

@@ -128,6 +128,7 @@ export function useTranscriptViewModel({
         kind: phaseForTurn && outputMessages.length === 0 ? "phase" : "canonical",
         turnID: turn.id,
         user,
+        fileChanges: turn.fileChanges,
       };
       seenCanonicalTurnIDs.add(turn.id);
       canonicalTurnCache.set(turn.id, { duration, item, phase: phaseForTurn, turn });

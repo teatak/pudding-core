@@ -375,6 +375,18 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
       return projectUIContext || { type: "ui_context", surface: "project" };
     }
     if (filePreviewActive && activeFilePreview) {
+      const selectedChange = activeFilePreview.fileChanges?.find((change) => change.id === activeFilePreview.selectedFileChangeID) || activeFilePreview.fileChanges?.[0];
+      if (activeFilePreview.source === "turn-diff" && selectedChange) {
+        return {
+          type: "ui_context",
+          surface: "file_preview",
+          resource: "project_diff",
+          id: selectedChange.id,
+          name: selectedChange.path,
+          path: selectedChange.path,
+          kind: selectedChange.kind,
+        };
+      }
       return {
         type: "ui_context",
         surface: "file_preview",
@@ -672,9 +684,12 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
             filePreviewActive={filePreviewActive}
             filePreviewTabs={filePreviews.map((preview) => ({
               id: preview.id,
-              label: filePreviewTitle(preview.path),
+              kind: preview.source === "turn-diff" ? "diff" : "file",
+              label: preview.source === "turn-diff" ? t("turnFiles.tab") : filePreviewTitle(preview.path),
               openedAt: preview.openedAt,
-              path: preview.path,
+              path: preview.source === "turn-diff"
+                ? preview.fileChanges?.find((change) => change.id === preview.selectedFileChangeID)?.path || t("turnFiles.tab")
+                : preview.path,
             }))}
             leadingTabs={(
               <>
@@ -816,6 +831,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
             key={preview.id}
             active={filePreviewActive && preview.id === activeFilePreview?.id}
             preview={preview}
+            token={token}
           />
         ))}
         {Object.entries(mountedBrowserTabs).map(([targetSessionID, tabs]) =>

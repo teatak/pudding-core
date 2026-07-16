@@ -17,6 +17,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 	// currentSchemaVersion, add a migration, and append a new fingerprint.
 	releasedFingerprints := map[int]string{
 		1: "8c5dc7392f4b5bdc77a1edb38c193789a24a1292defa9bf99b1effd96fbaea3d",
+		2: "e48dbb97a116c7dd69130b48d3dcc6eae8bc5e628ff27ca586e70f7000e1e0c4",
 	}
 	want, ok := releasedFingerprints[currentSchemaVersion]
 	if !ok {
@@ -88,6 +89,43 @@ func TestOpenStampsUnversionedCurrentSchema(t *testing.T) {
 	}
 }
 
+func TestOpenMigratesVersionOneFileChangesTable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pudding.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateSession(context.Background(), &store.Session{ID: "sess_v1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db := openMigrationTestDB(t, path)
+	if _, err := db.Exec(`DROP TABLE turn_file_changes; PRAGMA user_version = 1`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if _, err := reopened.GetSession(context.Background(), "sess_v1"); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := reopened.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='turn_file_changes'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("turn_file_changes table count = %d", count)
+	}
+}
+
 func TestOpenRejectsUnsupportedUnversionedSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pudding.db")
 	db := openMigrationTestDB(t, path)
@@ -110,7 +148,7 @@ func TestOpenRejectsUnsupportedUnversionedSchema(t *testing.T) {
 func TestOpenRejectsNewerSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pudding.db")
 	db := openMigrationTestDB(t, path)
-	if _, err := db.Exec(`PRAGMA user_version = 2`); err != nil {
+	if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, currentSchemaVersion+1)); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
@@ -160,7 +198,7 @@ func TestBackupDatabaseBeforeMigrationPreservesData(t *testing.T) {
 	if err := backupDatabaseBeforeMigration(st.db, path, currentSchemaVersion); err != nil {
 		t.Fatal(err)
 	}
-	backups, err := filepath.Glob(path + ".backup-v1-*")
+	backups, err := filepath.Glob(fmt.Sprintf("%s.backup-v%d-*", path, currentSchemaVersion))
 	if err != nil {
 		t.Fatal(err)
 	}

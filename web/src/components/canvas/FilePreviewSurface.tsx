@@ -7,8 +7,16 @@ import { fileNameFromPath, languageFromPath } from "@/lib/fileLanguage";
 import { cn } from "@/lib/utils";
 import { getShikiCodeRenderer } from "@/lib/shiki";
 import type { FilePreview } from "@/state/filePreviewStore";
+import { TurnFileDiffSurface } from "./TurnFileDiffSurface";
 
-export function FilePreviewSurface({ active, preview }: { active: boolean; preview: FilePreview }) {
+export function FilePreviewSurface({ active, preview, token }: { active: boolean; preview: FilePreview; token: string }) {
+  if (preview.source === "turn-diff") {
+    return <TurnFileDiffSurface active={active} preview={preview} token={token} />;
+  }
+  return <TextFilePreviewSurface active={active} preview={preview} />;
+}
+
+function TextFilePreviewSurface({ active, preview }: { active: boolean; preview: FilePreview }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const [highlighted, setHighlighted] = useState<string | null>(null);

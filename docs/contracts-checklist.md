@@ -34,7 +34,8 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 | --- | --- | --- | --- |
 | Session | `store.Session` | `session` | id, title, provider, model, activeMode(chat/work/code), modeLease, projectID?, createdAt, updatedAt, running(读取时派生), backgroundProcessCount(读取时派生) |
 | Project | `store.Project` | `project` | id, name, rootDirs, approvalMode, createdAt, updatedAt |
-| ConversationTurn | `store.ConversationTurn` | `conversationTurn` | id, sessionID, clientMessageID, status, provider?, model?, mode?, error?, createdAt, updatedAt, messages[] |
+| ConversationTurn | `store.ConversationTurn` | `conversationTurn` | id, sessionID, clientMessageID, status, provider?, model?, mode?, error?, createdAt, updatedAt, messages[], fileChanges[] |
+| TurnFileChange | `store.TurnFileChange` | `turnFileChange` | id, sessionID, turnID, rootPath, kind(added/modified/deleted/renamed), originalPath?, path, additions, deletions, binary, tooLarge, oldSize, newSize, oldContent?, newContent? |
 | ContentPart | `store.ContentPart` | `contentPart` | type(text/thought/tool_use/tool_result), text?, id?, name?, args?, ok?, content?, summaryKind?, summaryCount? |
 | Message | `store.Message` | `message` | id, sessionID, turnID, role, kind?, text, parts[], turnIndex?, clientMessageID?, interrupted?, createdAt |
 | QueuedInput | `store.QueuedInput` | `queuedInput` | sessionID, clientMessageID, text, status, provider?, model?, mode?, modelConfig?, turnID?, createdAt, updatedAt |
@@ -65,6 +66,7 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | `POST /sessions/{id}/approvals/{approvalID}/deny` | `{reason?}` | 202 `{status}` | 404 |
 | `GET /sessions/{id}/events` | SSE | event stream | 404 |
 | `GET /sessions/{id}/turns` | `before?`, `limit?` | `{turns: [], hasMore}` | 404 |
+| `GET /sessions/{id}/turns/{turnID}/file-changes/{changeID}` | — | TurnFileChange;按需返回旧/新正文 | 404 |
 | `GET /sessions/{id}/messages` | — | `{messages: []}` | 404 |
 | `GET /sessions/{id}/processes` | — | `{processes: [{processID,turnID?,callID?,status,running,cwd,argv?,script?,shell?,exitCode?,startedAt,finishedAt?,reason?,error?}]}` | 404 |
 | `GET /sessions/{id}/processes/{processID}` | `offset?`, `max_bytes?`, `tail_bytes?` | `{process,output,oldestOffset,nextOffset,tailOffset,truncated,hasMore}` | 400 / 404 |

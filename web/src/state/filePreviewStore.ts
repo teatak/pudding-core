@@ -1,5 +1,6 @@
 import { create } from "zustand";
 
+import type { TurnFileChange } from "@/api/client";
 import { setWorkspaceOpen } from "@/state/workspaceStore";
 
 export type FilePreview = {
@@ -12,9 +13,11 @@ export type FilePreview = {
   openedAt: number;
   path: string;
   sessionID: string;
-  source: "code-location" | "diagnostic" | "read" | "search" | "slice" | "write";
+  source: "code-location" | "diagnostic" | "read" | "search" | "slice" | "write" | "turn-diff";
   truncated: boolean;
   turnID?: string;
+  fileChanges?: TurnFileChange[];
+  selectedFileChangeID?: string;
 };
 
 export type FilePreviewInput = Omit<FilePreview, "id" | "openedAt">;
@@ -32,6 +35,7 @@ type FilePreviewState = {
   closePreview: (sessionID: string, previewID: string) => void;
   consumeReveal: (serial: number) => void;
   openPreview: (preview: FilePreviewInput) => string;
+  selectFileChange: (sessionID: string, previewID: string, changeID: string) => void;
 };
 
 let revealSerial = 0;
@@ -82,6 +86,15 @@ const useFilePreviewStore = create<FilePreviewState>((set) => ({
     });
     return openedPreviewID;
   },
+  selectFileChange: (sessionID, previewID, changeID) =>
+    set((state) => ({
+      previews: {
+        ...state.previews,
+        [sessionID]: (state.previews[sessionID] || []).map((preview) =>
+          preview.id === previewID ? { ...preview, selectedFileChangeID: changeID } : preview,
+        ),
+      },
+    })),
 }));
 
 export function openFilePreview(preview: FilePreviewInput) {
@@ -92,6 +105,28 @@ export function openFilePreview(preview: FilePreviewInput) {
       setWorkspaceOpen(true);
     }
   });
+}
+
+export function openTurnFileChanges(sessionID: string, turnID: string, changes: TurnFileChange[], selectedChangeID?: string) {
+  if (!changes.length) {
+    return;
+  }
+  openFilePreview({
+    content: "",
+    fileChanges: changes,
+    lineStart: 1,
+    lineStep: 1,
+    path: `turn-diff://${turnID}`,
+    selectedFileChangeID: selectedChangeID || changes[0].id,
+    sessionID,
+    source: "turn-diff",
+    truncated: false,
+    turnID,
+  });
+}
+
+export function selectTurnFileChange(sessionID: string, previewID: string, changeID: string) {
+  useFilePreviewStore.getState().selectFileChange(sessionID, previewID, changeID);
 }
 
 export function closeFilePreview(sessionID: string, previewID: string) {

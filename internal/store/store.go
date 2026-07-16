@@ -1307,17 +1307,18 @@ type PromoteQueuedInputResult struct {
 }
 
 type ConversationTurn struct {
-	ID              string     `json:"id"`
-	SessionID       string     `json:"sessionID"`
-	ClientMessageID string     `json:"clientMessageID"`
-	Status          TurnStatus `json:"status"`
-	Provider        string     `json:"provider,omitempty"`
-	Model           string     `json:"model,omitempty"`
-	Mode            AgentMode  `json:"mode,omitempty"`
-	Error           string     `json:"error,omitempty"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	UpdatedAt       time.Time  `json:"updatedAt"`
-	Messages        []*Message `json:"messages"`
+	ID              string            `json:"id"`
+	SessionID       string            `json:"sessionID"`
+	ClientMessageID string            `json:"clientMessageID"`
+	Status          TurnStatus        `json:"status"`
+	Provider        string            `json:"provider,omitempty"`
+	Model           string            `json:"model,omitempty"`
+	Mode            AgentMode         `json:"mode,omitempty"`
+	Error           string            `json:"error,omitempty"`
+	CreatedAt       time.Time         `json:"createdAt"`
+	UpdatedAt       time.Time         `json:"updatedAt"`
+	Messages        []*Message        `json:"messages"`
+	FileChanges     []*TurnFileChange `json:"fileChanges,omitempty"`
 }
 
 type TurnPage struct {
@@ -1402,6 +1403,50 @@ type FinishTurnInput struct {
 	AssistantParts []ContentPart
 	Interrupted    bool
 	Error          string
+	FileChanges    []TurnFileChangeInput
+}
+
+type FileChangeKind string
+
+const (
+	FileChangeAdded    FileChangeKind = "added"
+	FileChangeModified FileChangeKind = "modified"
+	FileChangeDeleted  FileChangeKind = "deleted"
+	FileChangeRenamed  FileChangeKind = "renamed"
+)
+
+type TurnFileChangeInput struct {
+	RootPath     string
+	Path         string
+	OriginalPath string
+	Kind         FileChangeKind
+	Additions    int
+	Deletions    int
+	Binary       bool
+	TooLarge     bool
+	OldSize      int64
+	NewSize      int64
+	OldContent   string
+	NewContent   string
+}
+
+type TurnFileChange struct {
+	ID           string         `json:"id"`
+	SessionID    string         `json:"sessionID"`
+	TurnID       string         `json:"turnID"`
+	RootPath     string         `json:"rootPath"`
+	Path         string         `json:"path"`
+	OriginalPath string         `json:"originalPath,omitempty"`
+	Kind         FileChangeKind `json:"kind"`
+	Additions    int            `json:"additions"`
+	Deletions    int            `json:"deletions"`
+	Binary       bool           `json:"binary"`
+	TooLarge     bool           `json:"tooLarge"`
+	OldSize      int64          `json:"oldSize"`
+	NewSize      int64          `json:"newSize"`
+	OldContent   string         `json:"oldContent,omitempty"`
+	NewContent   string         `json:"newContent,omitempty"`
+	CreatedAt    time.Time      `json:"createdAt"`
 }
 
 type AppendTurnOutputInput struct {
@@ -1773,6 +1818,9 @@ type Store interface {
 	ListTurnsPage(ctx context.Context, sessionID string, beforeTurnID string, limit int) (*TurnPage, error)
 	// GetConversationTurn 返回单个完整 turn,用于 lifecycle 终态后精确对账。
 	GetConversationTurn(ctx context.Context, sessionID string, turnID string) (*ConversationTurn, error)
+	// GetTurnFileChange returns one historical file diff and always verifies the
+	// explicit session and turn scope before exposing snapshot content.
+	GetTurnFileChange(ctx context.Context, sessionID string, turnID string, changeID string) (*TurnFileChange, error)
 	// EventsAfter 返回 seq > afterSeq 的 lifecycle 事件,按 seq 升序,
 	// 承载 SSE Last-Event-ID 续传;limit <= 0 表示全部。
 	EventsAfter(ctx context.Context, sessionID string, afterSeq int64, limit int) ([]event.Event, error)

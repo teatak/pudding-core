@@ -580,12 +580,12 @@ export function SessionRail({
   return (
     <>
       {railButton}
-      <aside className="relative h-full w-[268px] shrink-0 bg-background text-sidebar-foreground">
+      <aside className="relative h-full w-[268px] shrink-0 border-r border-sidebar-border/70 bg-sidebar text-sidebar-foreground">
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute top-2 right-0 bottom-2 left-2 z-0 rounded-[var(--rail-radius)] rounded-tl-[var(--rail-left-radius)] rounded-bl-[var(--rail-left-radius)] border border-sidebar-border bg-sidebar"
+          className="pointer-events-none absolute inset-0 z-0 bg-sidebar"
         />
-        <div className="absolute top-0 right-0 bottom-2 left-2 z-10 flex min-h-0 flex-col gap-(--rail-content-align-gap)">
+        <div className="absolute inset-0 z-10 flex min-h-0 flex-col gap-(--rail-content-align-gap)">
           {/* 顶行是 --toolbar-h 工具条占位;窗口拖拽由 App 根部统一透明拖拽带承载 */}
           <div
             className="h-(--toolbar-h) shrink-0 transition-[padding] duration-200"
@@ -1081,11 +1081,11 @@ function RailPanel({
     <RailOverlayHoldContext.Provider value={setOverlayHold}>
       <SidebarProvider className="pudding-session-rail !contents">
         <Sidebar className="min-h-0 w-full flex-1 bg-transparent" collapsible="none">
-          <SidebarHeader className="px-2 py-1.5">
+          <SidebarHeader className="px-2.5 py-2">
             <SidebarMenu className="gap-0.5">
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  className="h-7 px-2 py-1"
+                  className="h-8 px-2.5 py-1"
                   isActive={draftActive && !draftProjectID}
                   onClick={onCreate}
                 >
@@ -1094,20 +1094,20 @@ function RailPanel({
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton className="h-7 px-2 py-1" disabled={createProjectPending} onClick={onCreateProject}>
+                <SidebarMenuButton className="h-8 px-2.5 py-1" disabled={createProjectPending} onClick={onCreateProject}>
                   {createProjectPending ? <Spinner /> : <FolderPlus />}
                   <span>{t("project.create")}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton className="h-7 px-2 py-1" onClick={onSearch}>
+                <SidebarMenuButton className="h-8 px-2.5 py-1" onClick={onSearch}>
                   <Search />
                   <span>{t("rail.search")}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  className="h-7 px-2 py-1"
+                  className="h-8 px-2.5 py-1"
                   isActive={appsActive}
                   onClick={() => {
                     void navigate({
@@ -1129,7 +1129,7 @@ function RailPanel({
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarHeader>
-          <div aria-hidden="true" className="mx-4 mb-1.5 h-px shrink-0 bg-sidebar-border/70" />
+          <div aria-hidden="true" className="mx-4 mb-2 h-px shrink-0 bg-sidebar-border/60" />
           <SidebarContent ref={scrollContainerRef} className="pt-0 pb-2 overscroll-contain">
             {isLoading ? (
               <SessionListSkeleton />

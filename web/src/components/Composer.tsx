@@ -1134,7 +1134,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
           ) : null}
           <div
             className={cn(
-              "pudding-composer-shell relative isolate z-10 rounded-3xl border bg-card transition-shadow",
+              "pudding-composer-shell relative isolate z-10 rounded-[18px] border border-border/70 bg-card/95 transition-shadow",
               micActive && "is-mic-active",
             )}
           >
@@ -1182,7 +1182,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
                 )}
               </div>
             ) : null}
-            <div className="px-4 pt-4 pb-2">
+            <div className="px-4 pt-3.5 pb-2.5">
               <Textarea
                 data-composer-text-input="true"
                 className="block max-h-36 min-h-6 resize-none overflow-y-auto rounded-none border-0 bg-transparent p-0 text-base leading-6 shadow-none focus-visible:ring-0 md:text-sm dark:bg-transparent"

@@ -22,6 +22,7 @@ import (
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
+	"github.com/teatak/pudding-core/internal/turnfiles"
 )
 
 const defaultMaxToolLoops = 16
@@ -79,13 +80,14 @@ func (emptyConfig) GetProviderProfile(context.Context, string) (*store.ProviderP
 }
 
 type Engine struct {
-	store    store.Store
-	config   ConfigSource
-	hub      *event.Hub
-	resolver Resolver
-	builder  *contextbuilder.Builder
-	tools    tool.Runner
-	apps     AppSource
+	store     store.Store
+	config    ConfigSource
+	hub       *event.Hub
+	resolver  Resolver
+	builder   *contextbuilder.Builder
+	tools     tool.Runner
+	apps      AppSource
+	turnFiles *turnfiles.Tracker
 
 	promptSource   contextbuilder.PromptSource
 	attachmentHome string
@@ -156,6 +158,7 @@ func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opt
 		approvals:         make(map[string]*pendingApproval),
 		turnProjectAccess: make(map[string]ProjectAccessGrant),
 		queuedRuntimeIDs:  make(map[string]string),
+		turnFiles:         turnfiles.New(),
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -914,6 +917,14 @@ func (e *Engine) runTurn(ctx context.Context, sessionID, turnID string, resolved
 
 func (e *Engine) finishTurn(sessionID, turnID string, mode store.AgentMode, status store.TurnStatus, errMsg string, assistantParts []store.ContentPart) {
 	in := store.FinishTurnInput{TurnID: turnID, Status: status, Mode: mode, Error: errMsg}
+	if e.turnFiles != nil {
+		changes, err := e.turnFiles.Finish(turnID)
+		if err != nil {
+			slog.Warn("engine: collect turn file changes failed", "turnID", turnID, "err", err)
+		} else {
+			in.FileChanges = changes
+		}
+	}
 	if len(assistantParts) > 0 {
 		in.AssistantParts = assistantParts
 	}
@@ -1631,12 +1642,12 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 				if call.Name == tool.CommandRun || call.Name == tool.CommandStart {
 					call.CommandSandbox = tool.CommandSandboxBypass
 				}
-				result = e.callTool(ctx, sessionID, turnID, call)
+				result = e.callTrackedTool(ctx, sessionID, turnID, mode, call)
 			}
 		}
 	}
 	if result.CallID == "" && result.Name == "" {
-		result = e.callTool(ctx, sessionID, turnID, call)
+		result = e.callTrackedTool(ctx, sessionID, turnID, mode, call)
 	}
 	return result
 }
@@ -1894,6 +1905,15 @@ func (e *Engine) callTool(ctx context.Context, sessionID, turnID string, call to
 		}
 	}
 	return result
+}
+
+func (e *Engine) callTrackedTool(ctx context.Context, sessionID, turnID string, mode store.AgentMode, call tool.Call) tool.Result {
+	if mode == store.ModeCode && e.turnFiles != nil && len(call.ProjectDirs) > 0 {
+		if err := e.turnFiles.EnsureBaseline(turnID, call.ProjectDirs); err != nil {
+			slog.Warn("engine: capture turn file baseline failed", "turnID", turnID, "tool", call.Name, "err", err)
+		}
+	}
+	return e.callTool(ctx, sessionID, turnID, call)
 }
 
 func toolContext(ctx context.Context, name string) (context.Context, context.CancelFunc, bool) {

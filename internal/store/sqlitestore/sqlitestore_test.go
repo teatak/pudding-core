@@ -737,6 +737,46 @@ func TestListTurnsPageUsesStableOrder(t *testing.T) {
 	}
 }
 
+func TestFinishTurnPersistsHistoricalFileChanges(t *testing.T) {
+	st, _ := openTestStore(t)
+	createTestSession(t, st, "sess_changes")
+	beginTestTurn(t, st, "sess_changes", "turn_changes", "msg_changes", "client_changes")
+
+	if _, err := st.FinishTurn(context.Background(), store.FinishTurnInput{
+		TurnID: "turn_changes",
+		Status: store.TurnCompleted,
+		FileChanges: []store.TurnFileChangeInput{{
+			RootPath: "/tmp/project", Path: "main.go", Kind: store.FileChangeModified,
+			Additions: 1, Deletions: 1, OldSize: 12, NewSize: 11,
+			OldContent: "package old\n", NewContent: "package new\n",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	turn, err := st.GetConversationTurn(context.Background(), "sess_changes", "turn_changes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turn.FileChanges) != 1 {
+		t.Fatalf("file changes = %+v", turn.FileChanges)
+	}
+	summary := turn.FileChanges[0]
+	if summary.Path != "main.go" || summary.Kind != store.FileChangeModified || summary.OldContent != "" || summary.NewContent != "" {
+		t.Fatalf("file change summary = %+v", summary)
+	}
+	detail, err := st.GetTurnFileChange(context.Background(), "sess_changes", "turn_changes", summary.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.OldContent != "package old\n" || detail.NewContent != "package new\n" {
+		t.Fatalf("file change detail = %+v", detail)
+	}
+	if _, err := st.GetTurnFileChange(context.Background(), "other_session", "turn_changes", summary.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("cross-session file change error = %v", err)
+	}
+}
+
 func TestFinishTurnTerminalStatesAndEventsAfter(t *testing.T) {
 	st, _ := openTestStore(t)
 

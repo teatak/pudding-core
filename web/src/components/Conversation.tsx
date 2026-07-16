@@ -95,7 +95,7 @@ export function Conversation({ token, session }: { token: string; session: Sessi
 
   return (
     <div
-      className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background [&.file-drop-target-active_.pudding-drop-overlay]:opacity-100"
+      className="pudding-conversation relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background [&.file-drop-target-active_.pudding-drop-overlay]:opacity-100"
       data-file-drop-target=""
       data-pudding-drop-target="conversation"
       data-session-id={session.id}

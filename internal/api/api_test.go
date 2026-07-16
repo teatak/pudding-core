@@ -84,6 +84,61 @@ func TestListProjectsReturnsEmptyArrayForSQLiteStore(t *testing.T) {
 	}
 }
 
+func TestGetTurnFileChangeIsSessionScoped(t *testing.T) {
+	ms := memstore.New()
+	homeDir := t.TempDir()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New()), ms, engine.WithAttachmentHome(homeDir))
+	handler := New(eng, ms, ms, hub).WithHome(homeDir).Handler(testToken, nil)
+	ctx := context.Background()
+	if err := ms.CreateSession(ctx, &store.Session{ID: "sess_changes", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID: "sess_changes", TurnID: "turn_changes", UserMessageID: "msg_changes",
+		ClientMessageID: "client_changes", UserText: "change it",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.FinishTurn(ctx, store.FinishTurnInput{
+		TurnID: "turn_changes", Status: store.TurnCompleted,
+		FileChanges: []store.TurnFileChangeInput{{
+			RootPath: "/tmp/project", Path: "main.go", Kind: store.FileChangeModified,
+			OldContent: "old\n", NewContent: "new\n", Additions: 1, Deletions: 1,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	turn, err := ms.GetConversationTurn(ctx, "sess_changes", "turn_changes")
+	if err != nil || len(turn.FileChanges) != 1 {
+		t.Fatalf("turn file changes = %+v, err=%v", turn.FileChanges, err)
+	}
+
+	path := fmt.Sprintf("/sessions/sess_changes/turns/turn_changes/file-changes/%s", turn.FileChanges[0].ID)
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var change store.TurnFileChange
+	if err := json.Unmarshal(recorder.Body.Bytes(), &change); err != nil {
+		t.Fatal(err)
+	}
+	if change.OldContent != "old\n" || change.NewContent != "new\n" {
+		t.Fatalf("change = %+v", change)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, strings.Replace(path, "sess_changes", "sess_other", 1), nil)
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("cross-session status = %d", recorder.Code)
+	}
+}
+
 func newConfigTestServer(t *testing.T) (*httptest.Server, store.Store, *config.Manager) {
 	t.Helper()
 	ms := memstore.New()

@@ -14,7 +14,7 @@ import (
 
 const (
 	baselineSchemaVersion = 1
-	currentSchemaVersion  = 1
+	currentSchemaVersion  = 2
 )
 
 var (
@@ -26,7 +26,32 @@ type schemaMigration func(*sql.Tx) error
 
 // schemaMigrations is keyed by the destination version. Version 1 is the
 // signed 0.1.1 baseline and is bootstrapped separately for existing databases.
-var schemaMigrations = map[int]schemaMigration{}
+var schemaMigrations = map[int]schemaMigration{
+	2: func(tx *sql.Tx) error {
+		_, err := tx.Exec(`
+			CREATE TABLE turn_file_changes (
+				id TEXT PRIMARY KEY,
+				session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+				turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
+				root_path TEXT NOT NULL,
+				path TEXT NOT NULL,
+				original_path TEXT NOT NULL DEFAULT '',
+				kind TEXT NOT NULL,
+				additions INTEGER NOT NULL DEFAULT 0,
+				deletions INTEGER NOT NULL DEFAULT 0,
+				binary INTEGER NOT NULL DEFAULT 0,
+				too_large INTEGER NOT NULL DEFAULT 0,
+				old_size INTEGER NOT NULL DEFAULT 0,
+				new_size INTEGER NOT NULL DEFAULT 0,
+				old_content TEXT NOT NULL DEFAULT '',
+				new_content TEXT NOT NULL DEFAULT '',
+				created_at INTEGER NOT NULL
+			);
+			CREATE INDEX turn_file_changes_turn ON turn_file_changes(session_id, turn_id, path);
+		`)
+		return err
+	},
+}
 
 func prepareSchema(db *sql.DB, path string) error {
 	version, err := schemaVersion(db)
@@ -47,13 +72,20 @@ func prepareSchema(db *sql.DB, path string) error {
 			}
 			version = currentSchemaVersion
 		} else {
-			if err := validateSchema(db, schemaV1Contract); err != nil {
-				return fmt.Errorf("%w: unversioned database does not match the signed 0.1.1 baseline: %v", ErrUnsupportedSchema, err)
+			if err := validateSchema(db, currentSchemaContract); err == nil {
+				if err := setSchemaVersion(db, currentSchemaVersion); err != nil {
+					return err
+				}
+				version = currentSchemaVersion
+			} else {
+				if err := validateSchema(db, schemaV1Contract); err != nil {
+					return fmt.Errorf("%w: unversioned database does not match the signed 0.1.1 baseline: %v", ErrUnsupportedSchema, err)
+				}
+				if err := setSchemaVersion(db, baselineSchemaVersion); err != nil {
+					return err
+				}
+				version = baselineSchemaVersion
 			}
-			if err := setSchemaVersion(db, baselineSchemaVersion); err != nil {
-				return err
-			}
-			version = baselineSchemaVersion
 		}
 	}
 	if version < currentSchemaVersion {
@@ -202,7 +234,21 @@ var schemaV1Contract = schemaContract{
 	},
 }
 
-var currentSchemaContract = schemaV1Contract
+var currentSchemaContract = extendSchemaContract(schemaV1Contract, map[string][]string{
+	"turn_file_changes": {"id", "session_id", "turn_id", "root_path", "path", "original_path", "kind", "additions", "deletions", "binary", "too_large", "old_size", "new_size", "old_content", "new_content", "created_at"},
+}, "turn_file_changes_turn")
+
+func extendSchemaContract(base schemaContract, tables map[string][]string, indexes ...string) schemaContract {
+	out := schemaContract{tables: make(map[string][]string, len(base.tables)+len(tables))}
+	for name, columns := range base.tables {
+		out.tables[name] = append([]string(nil), columns...)
+	}
+	for name, columns := range tables {
+		out.tables[name] = append([]string(nil), columns...)
+	}
+	out.indexes = append(append([]string(nil), base.indexes...), indexes...)
+	return out
+}
 
 func validateCurrentSchema(db *sql.DB) error {
 	return validateSchema(db, currentSchemaContract)

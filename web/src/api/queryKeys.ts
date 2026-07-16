@@ -15,6 +15,7 @@ export const queryKeys = {
   backgroundProcess: (sessionID: string, processID: string) => ["session", sessionID, "processes", processID] as const,
   messages: (sessionID: string) => ["session", sessionID, "messages", "pages"] as const,
   turns: (sessionID: string) => ["session", sessionID, "turns", "pages"] as const,
+  turnFileChange: (sessionID: string, turnID: string, changeID: string) => ["session", sessionID, "turn", turnID, "file-change", changeID] as const,
   queuedInputs: (sessionID: string) => ["session", sessionID, "queued-inputs"] as const,
   audioBindings: () => ["audio", "bindings"] as const,
   audioRuntime: () => ["settings", "audio", "runtime"] as const,

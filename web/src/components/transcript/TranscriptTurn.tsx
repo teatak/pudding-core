@@ -1,6 +1,7 @@
 import { memo } from "react";
 
 import { AssistantOutput, CompactPendingMarker } from "./AssistantOutput";
+import { TurnFileChanges } from "./TurnFileChanges";
 import type { TranscriptDisplaySettings, TranscriptTurnVM, TurnDisclosureState } from "./types";
 import { UserInput } from "./UserInput";
 
@@ -29,7 +30,7 @@ function TranscriptTurnView({
 }) {
   const anchorTurnID = turn.turnID || turn.key;
   return (
-    <div className="grid min-w-0 gap-4" data-transcript-turn-id={anchorTurnID}>
+    <div className="grid min-w-0 gap-3" data-transcript-turn-id={anchorTurnID}>
       {turn.user ? (
         <div className="min-w-0">
           <UserInput
@@ -53,7 +54,15 @@ function TranscriptTurnView({
             onContentGrow={onAssistantContentGrow}
             onRevealComplete={onAssistantRevealComplete}
           />
+          {turn.turnID && turn.fileChanges?.length ? (
+            <div className="mt-2">
+              <TurnFileChanges changes={turn.fileChanges} sessionID={sessionID} turnID={turn.turnID} />
+            </div>
+          ) : null}
         </div>
+      ) : null}
+      {!turn.assistant && turn.turnID && turn.fileChanges?.length ? (
+        <TurnFileChanges changes={turn.fileChanges} sessionID={sessionID} turnID={turn.turnID} />
       ) : null}
       {turn.compact ? (
         <div className="min-w-0" data-transcript-ai-anchor={anchorTurnID}>
@@ -80,6 +89,7 @@ function transcriptTurnEqual(previous: TranscriptTurnVM, next: TranscriptTurnVM)
     previous.kind === next.kind &&
     previous.turnID === next.turnID &&
     previous.clientMessageID === next.clientMessageID &&
+    previous.fileChanges === next.fileChanges &&
     compactEqual(previous.compact, next.compact) &&
     userEqual(previous.user, next.user) &&
     assistantEqual(previous.assistant, next.assistant)

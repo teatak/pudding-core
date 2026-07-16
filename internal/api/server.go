@@ -188,6 +188,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/usage").GET(s.getSessionUsage)
 	app.Route("/sessions/:id/turns").GET(s.listTurns)
 	app.Route("/sessions/:id/turns/:turnID").GET(s.getTurn)
+	app.Route("/sessions/:id/turns/:turnID/file-changes/:changeID").GET(s.getTurnFileChange)
 	app.Route("/sessions/:id/messages").GET(s.listMessages)
 	app.Route("/sessions/:id/processes").GET(s.listBackgroundProcesses)
 	app.Route("/sessions/:id/processes/:processID").GET(s.getBackgroundProcess).DELETE(s.stopBackgroundProcess)
@@ -1000,6 +1001,18 @@ func (s *Server) getTurn(c *cart.Context) error {
 		return s.fail(c, err)
 	}
 	c.JSON(http.StatusOK, turn)
+	return nil
+}
+
+func (s *Server) getTurnFileChange(c *cart.Context) error {
+	id, _ := c.Param("id")
+	turnID, _ := c.Param("turnID")
+	changeID, _ := c.Param("changeID")
+	change, err := s.store.GetTurnFileChange(c.Request.Context(), id, turnID, changeID)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, change)
 	return nil
 }
 

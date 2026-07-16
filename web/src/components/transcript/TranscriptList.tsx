@@ -4,9 +4,9 @@ import { TranscriptTurn } from "./TranscriptTurn";
 import type { TranscriptDisplaySettings, TranscriptTurnVM, TurnDisclosureState } from "./types";
 
 const HISTORY_LOAD_SCROLL_TOP_PX = 120;
-const LIST_PADDING_BOTTOM_PX = 32;
-const LIST_PADDING_TOP_PX = 16;
-const TURN_GAP_PX = 16;
+const LIST_PADDING_BOTTOM_PX = 36;
+const LIST_PADDING_TOP_PX = 22;
+const TURN_GAP_PX = 22;
 const LIST_BOTTOM_SPACER_PX = Math.max(0, LIST_PADDING_BOTTOM_PX - TURN_GAP_PX);
 const SCROLL_END_THRESHOLD_PX = 8;
 const ANCHOR_RESTORE_EPSILON_PX = 0.75;

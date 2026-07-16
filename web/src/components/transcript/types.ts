@@ -1,4 +1,4 @@
-import type { Attachment, ContentPart, LocalFolder, Message, ProjectReference } from "@/api/client";
+import type { Attachment, ContentPart, LocalFolder, Message, ProjectReference, TurnFileChange } from "@/api/client";
 import type { TranscriptDisplaySettings } from "@/lib/appSettings";
 import type { AssistantOverlay, CompactRun, TurnPhaseState } from "@/state/overlayStore";
 import type { UIContextPart } from "@/state/uiContextStore";
@@ -44,6 +44,7 @@ export type TranscriptTurnVM = {
   kind: "canonical" | "compact" | "live" | "pending" | "phase";
   turnID?: string;
   user?: UserInputVM;
+  fileChanges?: TurnFileChange[];
 };
 
 export type TurnModelVM = {

@@ -16,7 +16,7 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Compass, FileCode2, SquareTerminal, X } from "lucide-react";
+import { Compass, FileCode2, FileDiff, SquareTerminal, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import type { BrowserTab, Terminal } from "@/api/client";
@@ -78,19 +78,20 @@ function TerminalTabIcon({ exited }: { exited: boolean }) {
   );
 }
 
-function FilePreviewTabIcon() {
+function FilePreviewTabIcon({ kind }: { kind: WorkspaceFilePreviewTab["kind"] }) {
   return (
     <span
       aria-hidden="true"
       className="inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[5px] bg-blue-50 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300"
     >
-      <FileCode2 className="h-3.5 w-3.5" />
+      {kind === "diff" ? <FileDiff className="h-3.5 w-3.5" /> : <FileCode2 className="h-3.5 w-3.5" />}
     </span>
   );
 }
 
 export type WorkspaceFilePreviewTab = {
   id: string;
+  kind: "diff" | "file";
   label: string;
   openedAt: number;
   path: string;
@@ -312,7 +313,7 @@ function SortableSurfaceTabButton({
       ) : terminal ? (
         <TerminalTabIcon exited={exited} />
       ) : (
-        <FilePreviewTabIcon />
+        <FilePreviewTabIcon kind={file?.kind || "file"} />
       )}
       <span className="min-w-0 max-w-24 flex-1 truncate text-left">{label}</span>
       <span

@@ -2652,6 +2652,70 @@ func TestExecuteAllowedCodeToolUsesSessionScratchWithoutProject(t *testing.T) {
 	}
 }
 
+func TestCallTrackedToolCapturesCommandFileChanges(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.go")
+	if err := os.WriteFile(path, []byte("package old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := &recordingToolRunner{
+		result: tool.Result{Ok: true},
+		callFunc: func(tool.Call) {
+			if err := os.WriteFile(path, []byte("package new\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	eng := New(memstore.New(), event.NewHub(), registry.Static(mock.New()), nil, WithTools(runner))
+	result := eng.callTrackedTool(context.Background(), "sess_changes", "turn_changes", store.ModeCode, tool.Call{
+		CallID: "call_changes", Name: tool.CommandRun, ProjectDirs: []string{root},
+	})
+	if !result.Ok {
+		t.Fatalf("result = %+v", result)
+	}
+	changes, err := eng.turnFiles.Finish("turn_changes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 || changes[0].Path != "main.go" || changes[0].OldContent != "package old\n" || changes[0].NewContent != "package new\n" {
+		t.Fatalf("changes = %+v", changes)
+	}
+}
+
+func TestFinishFailedTurnPersistsTrackedFileChanges(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.go")
+	if err := os.WriteFile(path, []byte("package old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ms := memstore.New()
+	if err := ms.CreateSession(context.Background(), &store.Session{ID: "sess_failed_changes", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.BeginTurn(context.Background(), store.BeginTurnInput{
+		SessionID: "sess_failed_changes", TurnID: "turn_failed_changes", UserMessageID: "msg_failed_changes",
+		ClientMessageID: "client_failed_changes", UserText: "change it",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	eng := New(ms, event.NewHub(), registry.Static(mock.New()), nil)
+	if err := eng.turnFiles.EnsureBaseline("turn_failed_changes", []string{root}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("package new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	eng.finishTurn("sess_failed_changes", "turn_failed_changes", store.ModeCode, store.TurnFailed, "tool failed", nil)
+	turn, err := ms.GetConversationTurn(context.Background(), "sess_failed_changes", "turn_failed_changes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn.Status != store.TurnFailed || len(turn.FileChanges) != 1 || turn.FileChanges[0].Path != "main.go" {
+		t.Fatalf("turn = %+v", turn)
+	}
+}
+
 func TestApprovedCommandBypassesSandboxForExactInvocation(t *testing.T) {
 	ctx := context.Background()
 	ms := memstore.New()
@@ -3930,6 +3994,7 @@ type recordingToolRunner struct {
 	closedSessions   []string
 	closeCount       int
 	definitionAppIDs [][]string
+	callFunc         func(tool.Call)
 }
 
 type approvalDetailsRecordingToolRunner struct {
@@ -3960,6 +4025,9 @@ func (r *recordingToolRunner) DefinitionsForApps(_ context.Context, _ string, ap
 
 func (r *recordingToolRunner) Call(ctx context.Context, call tool.Call) tool.Result {
 	r.calls = append(r.calls, call)
+	if r.callFunc != nil {
+		r.callFunc(call)
+	}
 	for _, progress := range r.progress {
 		tool.EmitProgress(ctx, progress)
 	}
