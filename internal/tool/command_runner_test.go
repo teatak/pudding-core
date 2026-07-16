@@ -3,6 +3,11 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"runtime"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -12,6 +17,58 @@ type recordingCommandRunner struct {
 	specs       []commandSpec
 	sandboxed   bool
 	sandboxKind string
+}
+
+func TestCommandEnvironmentIncludesDesktopToolchainPaths(t *testing.T) {
+	t.Setenv("PATH", filepath.Join(t.TempDir(), "custom-bin"))
+	env, err := commandEnvironment(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pathValue := sandboxEnvValue(env, "PATH")
+	parts := filepath.SplitList(pathValue)
+	if len(parts) == 0 || parts[0] != os.Getenv("PATH") {
+		t.Fatalf("original PATH must remain first: %q", pathValue)
+	}
+	for _, want := range commonExecutableDirs() {
+		if !slices.Contains(parts, want) {
+			t.Fatalf("PATH %q does not contain %q", pathValue, want)
+		}
+	}
+	if strings.Count(pathValue, "/usr/bin") != 1 {
+		t.Fatalf("PATH contains duplicate standard directories: %q", pathValue)
+	}
+}
+
+func TestDirectCommandRunnerResolvesExecutableFromCommandEnvironment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses a POSIX shell script")
+	}
+	binDir := t.TempDir()
+	executable := filepath.Join(binDir, "pudding-path-fixture")
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\nprintf resolved"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", "/usr/bin:/bin")
+	env, err := commandEnvironment(map[string]string{"PATH": binDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, err := newDirectCommandRunner().Prepare(commandSpec{
+		Executable: "pudding-path-fixture",
+		CWD:        t.TempDir(),
+		Env:        env,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := execution.Cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(output) != "resolved" {
+		t.Fatalf("output = %q, want resolved", output)
+	}
 }
 
 func (r *recordingCommandRunner) Prepare(spec commandSpec) (*commandExecution, error) {

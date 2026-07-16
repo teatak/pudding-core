@@ -34,6 +34,14 @@ func LoadBuiltinSkills() ([]Skill, error) {
 }
 
 func LoadUserSkills(root string) ([]Skill, error) {
+	resolvedRoot, err := resolveUserSkillsRoot(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	root = resolvedRoot
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -55,6 +63,21 @@ func LoadUserSkills(root string) ([]Skill, error) {
 	}
 	sortSkills(out)
 	return out, nil
+}
+
+func resolveUserSkillsRoot(root string) (string, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return "", errors.New("skill: user root is required")
+	}
+	info, err := os.Lstat(root)
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return "", errors.New("skill: user root must be a directory, not a symlink")
+	}
+	return filepath.Clean(root), nil
 }
 
 func loadEmbeddedSkills(fsys fs.FS, root string) ([]Skill, error) {
@@ -88,12 +111,72 @@ func loadEmbeddedSkillDir(fsys fs.FS, root, dir string) (Skill, error) {
 }
 
 func loadUserSkillDir(root, dir string) (Skill, error) {
-	rel := filepath.Join(root, dir, SkillFileName)
-	data, err := os.ReadFile(rel)
+	if isBuiltinSkillID(dir) {
+		return Skill{}, ErrBuiltin
+	}
+	skillDir := filepath.Join(root, dir)
+	file, err := resolveUserSkillRegularFile(skillDir, SkillFileName)
 	if err != nil {
 		return Skill{}, err
 	}
-	return skillFromData(data, dir, path.Join(dir, SkillFileName), probeIconDisk(filepath.Join(root, dir), dir), SourceUser, false)
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return Skill{}, err
+	}
+	if validation := validateSkillData(data, dir); !validation.OK {
+		return Skill{}, fmt.Errorf("skill: validation failed: %s", strings.Join(validation.Errors, "; "))
+	}
+	return skillFromData(data, dir, path.Join(dir, SkillFileName), probeIconDisk(skillDir, dir), SourceUser, false)
+}
+
+func isBuiltinSkillID(id string) bool {
+	if !skillIDPattern.MatchString(strings.TrimSpace(id)) {
+		return false
+	}
+	info, err := fs.Stat(builtinFS, path.Join("embed", id, SkillFileName))
+	return err == nil && info.Mode().IsRegular()
+}
+
+func IsBuiltinID(id string) bool {
+	return isBuiltinSkillID(id)
+}
+
+func resolveUserSkillRegularFile(skillDir, name string) (string, error) {
+	info, err := os.Lstat(skillDir)
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return "", errors.New("skill: user Skill directory must be a directory, not a symlink")
+	}
+	root, err := filepath.EvalSymlinks(skillDir)
+	if err != nil {
+		return "", err
+	}
+	targetPath := filepath.Join(root, name)
+	targetInfo, err := os.Lstat(targetPath)
+	if err != nil {
+		return "", err
+	}
+	if targetInfo.Mode()&os.ModeSymlink != 0 || !targetInfo.Mode().IsRegular() {
+		return "", errors.New("skill: user Skill file must be a regular file, not a symlink")
+	}
+	target, err := filepath.EvalSymlinks(targetPath)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", errors.New("skill: user Skill file escapes its directory")
+	}
+	info, err = os.Stat(target)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", errors.New("skill: user Skill file must be a regular file")
+	}
+	return target, nil
 }
 
 func skillFromData(data []byte, fallbackID, filePath, iconPath, source string, system bool) (Skill, error) {
@@ -153,7 +236,7 @@ func sortSkills(skills []Skill) {
 func probeIconDisk(skillDir, relDir string) string {
 	for _, ext := range []string{"png", "jpg", "svg"} {
 		name := "icon." + ext
-		if _, err := os.Stat(filepath.Join(skillDir, "assets", name)); err == nil {
+		if _, err := resolveUserAsset(skillDir, name); err == nil {
 			return path.Join(relDir, "assets", name)
 		}
 	}

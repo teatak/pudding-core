@@ -2,7 +2,10 @@ package api
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +28,7 @@ import (
 )
 
 const desktopSaveBodyLimit = 80 * 1024 * 1024
+const daemonProtocolVersion = 1
 
 var (
 	errDesktopScreenshotUnsupported = errors.New("desktop screenshot unsupported")
@@ -39,6 +43,12 @@ type desktopSaveFileRequest struct {
 
 type desktopRevealFileRequest struct {
 	Path string `json:"path"`
+}
+
+type desktopHealthResponse struct {
+	Service         string `json:"service"`
+	ProtocolVersion int    `json:"protocolVersion"`
+	Proof           string `json:"proof"`
 }
 
 type desktopAboutResponse struct {
@@ -58,6 +68,26 @@ type desktopAboutRow struct {
 
 type audioConfigReader interface {
 	Audio(context.Context) (config.AudioConfig, error)
+}
+
+func desktopHealth(token string) func(*cart.Context) error {
+	return func(c *cart.Context) error {
+		// 用随机 challenge 证明监听者持有 daemon token，但不要求 Electron
+		// 先把 token 发给尚未确认身份的固定端口占用者。
+		challenge := strings.TrimSpace(c.Request.URL.Query().Get("challenge"))
+		decoded, err := hex.DecodeString(challenge)
+		if err != nil || len(decoded) != 32 {
+			return badRequest(c, "invalid health challenge")
+		}
+		mac := hmac.New(sha256.New, []byte(token))
+		_, _ = mac.Write([]byte(challenge))
+		c.JSON(http.StatusOK, desktopHealthResponse{
+			Service:         "puddingd",
+			ProtocolVersion: daemonProtocolVersion,
+			Proof:           hex.EncodeToString(mac.Sum(nil)),
+		})
+		return nil
+	}
 }
 
 func (s *Server) desktopAbout(c *cart.Context) error {

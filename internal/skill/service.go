@@ -13,6 +13,7 @@ import (
 var ErrInvalidID = errors.New("skill: invalid id")
 var ErrInvalidAsset = errors.New("skill: invalid asset")
 var ErrNotFound = errors.New("skill: not found")
+var ErrBuiltin = errors.New("skill: builtin skill cannot be modified")
 
 type Service struct {
 	homeDir string
@@ -55,10 +56,20 @@ func (s *Service) DeleteSkill(_ context.Context, id string) error {
 	if !skillIDPattern.MatchString(id) {
 		return ErrInvalidID
 	}
+	if isBuiltinSkillID(id) {
+		return ErrBuiltin
+	}
 	if s.homeDir == "" {
 		return errors.New("skill: home dir is required")
 	}
-	return os.RemoveAll(filepath.Join(s.homeDir, "skills", id))
+	root, err := resolveUserSkillsRoot(filepath.Join(s.homeDir, "skills"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return os.RemoveAll(filepath.Join(root, id))
 }
 
 func (s *Service) ReadSkill(ctx context.Context, id string) (*Document, error) {
@@ -98,7 +109,21 @@ func (s *Service) readSkillContent(item Skill) (string, error) {
 		if s.homeDir == "" {
 			return "", ErrNotFound
 		}
-		data, err := os.ReadFile(filepath.Join(s.homeDir, "skills", item.ID, SkillFileName))
+		root, err := resolveUserSkillsRoot(filepath.Join(s.homeDir, "skills"))
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return "", ErrNotFound
+			}
+			return "", err
+		}
+		file, err := resolveUserSkillRegularFile(filepath.Join(root, item.ID), SkillFileName)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return "", ErrNotFound
+			}
+			return "", err
+		}
+		data, err := os.ReadFile(file)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				return "", ErrNotFound
@@ -119,18 +144,11 @@ func (s *Service) ReadAsset(_ context.Context, rel string) ([]byte, string, erro
 	parts := strings.Split(rel, "/")
 	offset := 0
 	system := false
-	draft := false
 	if parts[0] == BuiltinSubdir {
 		if len(parts) != 4 {
 			return nil, "", ErrInvalidAsset
 		}
 		system = true
-		offset = 1
-	} else if parts[0] == DraftDirName {
-		if len(parts) != 4 {
-			return nil, "", ErrInvalidAsset
-		}
-		draft = true
 		offset = 1
 	} else if len(parts) != 3 {
 		return nil, "", ErrInvalidAsset
@@ -157,11 +175,15 @@ func (s *Service) ReadAsset(_ context.Context, rel string) ([]byte, string, erro
 	if s.homeDir == "" {
 		return nil, "", ErrInvalidAsset
 	}
-	root := "skills"
-	if draft {
-		root = DraftDirName
+	root, err := resolveUserSkillsRoot(filepath.Join(s.homeDir, "skills"))
+	if err != nil {
+		return nil, "", ErrInvalidAsset
 	}
-	data, err := os.ReadFile(filepath.Join(s.homeDir, root, id, "assets", name))
+	asset, err := resolveUserAsset(filepath.Join(root, id), name)
+	if err != nil {
+		return nil, "", ErrInvalidAsset
+	}
+	data, err := os.ReadFile(asset)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, "", ErrInvalidAsset
@@ -169,6 +191,30 @@ func (s *Service) ReadAsset(_ context.Context, rel string) ([]byte, string, erro
 		return nil, "", err
 	}
 	return data, contentType, nil
+}
+
+func resolveUserAsset(skillDir, name string) (string, error) {
+	info, err := os.Lstat(skillDir)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return "", ErrInvalidAsset
+	}
+	root, err := filepath.EvalSymlinks(skillDir)
+	if err != nil {
+		return "", ErrInvalidAsset
+	}
+	target, err := filepath.EvalSymlinks(filepath.Join(root, "assets", name))
+	if err != nil {
+		return "", ErrInvalidAsset
+	}
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", ErrInvalidAsset
+	}
+	info, err = os.Stat(target)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", ErrInvalidAsset
+	}
+	return target, nil
 }
 
 func iconContentType(name string) (string, bool) {

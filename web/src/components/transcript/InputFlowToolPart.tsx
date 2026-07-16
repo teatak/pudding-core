@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { dismissInputFlow, type InputFlowRequest } from "@/state/inputFlowStore";
+import type { ContentPart } from "@/api/client";
 
 type FormInputFlowSchema = {
   description?: string;
@@ -60,6 +61,7 @@ type InputFlowOption = {
 };
 type Translate = ReturnType<typeof useI18n>["t"];
 export type InputFlowSubmission = {
+  formResult: Extract<ContentPart, { type: "form_result" }>;
   request: InputFlowRequest;
   result: Record<string, unknown>;
   text: string;
@@ -182,7 +184,7 @@ function RepeatInputFlowContent({
   function submit(finalItems: Array<Record<string, unknown>>, values: Record<string, unknown>) {
     const result = resultPayload(schema, finalItems, values);
     dismissInputFlow(request);
-    onSubmit({ request, result, text: inputFlowSubmissionText(schema, result, t) });
+    onSubmit({ formResult: formResultPart(schema, result), request, result, text: inputFlowSubmissionText(schema, result, t) });
   }
 
   return (
@@ -283,7 +285,7 @@ function FormInputFlowContent({
     if (stepIndex + 1 >= schema.steps.length) {
       const result = resultPayload(schema, [], nextValues);
       dismissInputFlow(request);
-      onSubmit({ request, result, text: inputFlowSubmissionText(schema, result, t) });
+      onSubmit({ formResult: formResultPart(schema, result), request, result, text: inputFlowSubmissionText(schema, result, t) });
       return;
     }
     setStepIndex((index) => index + 1);
@@ -961,6 +963,18 @@ function resultPayload(schema: InputFlowSchema, items: Array<Record<string, unkn
     title: schema.title,
     [resultKey]: items,
     ...compactRecord(values),
+  };
+}
+
+function formResultPart(
+  schema: InputFlowSchema,
+  result: Record<string, unknown>,
+): Extract<ContentPart, { type: "form_result" }> {
+  return {
+    type: "form_result",
+    title: schema.title,
+    schema: schema as unknown as Record<string, unknown>,
+    result,
   };
 }
 

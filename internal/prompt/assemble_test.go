@@ -231,6 +231,17 @@ func TestAssembleShowsConnectionlessSkillsOnlyAppFully(t *testing.T) {
 	}
 }
 
+func TestAssembleOmitsAppsIndexWhenAllAppsAreDisabled(t *testing.T) {
+	out := Assemble(Input{Mode: "chat", Apps: []*app.Definition{{
+		ID:      "browser",
+		Name:    "Browser",
+		Enabled: false,
+	}}})
+	if strings.Contains(out.SystemInstruction, "## Available Apps") || hasSegment(out.Segments, "apps_index") {
+		t.Fatalf("disabled Apps should not leave an empty prompt index:\n%s", out.SystemInstruction)
+	}
+}
+
 func TestAssembleModeLayersAndAllModesShowApps(t *testing.T) {
 	apps := []*app.Definition{{ID: "github", Name: "GitHub", Enabled: true, RequiredMode: "work"}}
 	chat := Assemble(Input{Mode: "chat", Apps: apps})

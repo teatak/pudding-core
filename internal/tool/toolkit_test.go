@@ -148,7 +148,7 @@ func TestToolkitIndexIsCapabilityScopedAndStable(t *testing.T) {
 		t.Fatalf("Work toolkit index wrong: %s", work)
 	}
 	code := ToolkitIndex(store.ModeCode, catalog)
-	if strings.Contains(code, "work.browser") || strings.Contains(code, "code.process") || !strings.Contains(code, "code.lsp") {
+	if strings.Contains(code, "work.browser") || strings.Contains(code, "code.process") || !strings.Contains(code, "code.lsp") || !strings.Contains(code, "code.app") {
 		t.Fatalf("Code toolkit index wrong: %s", code)
 	}
 	ids := make([]string, len(catalog))
@@ -157,6 +157,18 @@ func TestToolkitIndexIsCapabilityScopedAndStable(t *testing.T) {
 	}
 	if !sort.StringsAreSorted(ids) {
 		t.Fatalf("catalog is not sorted: %v", ids)
+	}
+}
+
+func TestCodeAppToolkitLoadsOnlyAppSave(t *testing.T) {
+	catalog := BuildToolkitCatalog(BuiltinDefinitions())
+	manifest, ok := ToolkitByID(catalog, "code.app")
+	if !ok || manifest.Default || !reflect.DeepEqual(manifest.ToolNames, []string{AppSave}) {
+		t.Fatalf("unexpected code.app toolkit: %+v", manifest)
+	}
+	loaded := DefinitionsForTurn(store.ModeCode, BuiltinDefinitions(), map[string]bool{"code.app": true})
+	if !HasDefinition(loaded, AppSave) {
+		t.Fatalf("code.app did not load %s", AppSave)
 	}
 }
 

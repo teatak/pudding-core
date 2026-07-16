@@ -156,24 +156,24 @@ func runtimeSegment(now time.Time) Segment {
 }
 
 func appsSegment(list []*app.Definition, connections []*app.Connection) *Segment {
-	if len(list) == 0 {
+	enabled := make([]*app.Definition, 0, len(list))
+	for _, item := range list {
+		if item != nil && item.Enabled && strings.TrimSpace(item.ID) != "" {
+			enabled = append(enabled, item)
+		}
+	}
+	if len(enabled) == 0 {
 		return nil
 	}
 	connectionCounts := appConnectionCounts(connections)
 	var b strings.Builder
 	b.WriteString("## Available Apps\n\n")
 	b.WriteString("Enabled apps are listed here as a compact capability index. Their tools are not loaded by default.\n")
-	b.WriteString("When an app matches the user's request, first request its required capability if needed, then call `builtin_app_load(app_id=\"<app id>\")`. The call returns the App's default skill instructions and explicitly loads its tools for the session; the tools become available on the next model step. Pass `skill_id` only when a listed non-default App skill clearly matches better.\n")
+	b.WriteString("When an app matches the user's request, first request its required capability if needed, then call `builtin_app_load(app_id=\"<app id>\")`. The call returns the App's default skill instructions when available and explicitly loads its tools for the session; the tools become available on the next model step. Pass `skill_id` only when a listed non-default App skill clearly matches better.\n")
 	b.WriteString("Apps, toolkits, and global skills use separate paths. Never use `builtin_toolkit_load` or `builtin_skill_read` to load an App, including Browser, Terminal, or Canvas.\n")
 	b.WriteString("Do not load unrelated apps. Apps marked `not connected` cannot be loaded until a connection is added.\n\n")
-	for _, item := range list {
-		if item == nil || !item.Enabled {
-			continue
-		}
+	for _, item := range enabled {
 		id := strings.TrimSpace(item.ID)
-		if id == "" {
-			continue
-		}
 		name := strings.TrimSpace(item.Name)
 		if name == "" {
 			name = id

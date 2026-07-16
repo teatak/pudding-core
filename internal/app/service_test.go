@@ -25,7 +25,8 @@ func (f fakeConnectionStore) ListAppConnections(context.Context) ([]*Connection,
 
 type fakeAppConfig struct {
 	fakeConnectionStore
-	enabled map[string]bool
+	enabled       map[string]bool
+	enablementErr error
 }
 
 type fakeRuntimeSource struct{}
@@ -53,6 +54,9 @@ func (fakeRuntimeSource) ReadRuntimeSkill(_ context.Context, runtimeID, appID, s
 }
 
 func (f *fakeAppConfig) ListAppEnablement(context.Context) (map[string]bool, error) {
+	if f.enablementErr != nil {
+		return nil, f.enablementErr
+	}
 	out := make(map[string]bool, len(f.enabled))
 	for id, enabled := range f.enabled {
 		out[id] = enabled
@@ -186,10 +190,75 @@ func TestInstalledAppCanBeTemporarilyDisabled(t *testing.T) {
 	}
 }
 
-func TestInstallPackageRejectsBuiltinAppID(t *testing.T) {
-	packageJSON := []byte(`{"kind":"pudding.app.package","schema_version":1,"app":{"id":"browser"}}`)
-	if _, err := InstallPackage(t.TempDir(), packageJSON, "", ""); !errors.Is(err, ErrBuiltinApp) {
-		t.Fatalf("install builtin app id err = %v", err)
+func TestInstallPackageRejectsReservedAppIDs(t *testing.T) {
+	for _, appID := range []string{BuiltinBrowserID, BuiltinTerminalID, RuntimeCanvasID} {
+		t.Run(appID, func(t *testing.T) {
+			packageJSON := []byte(`{"kind":"pudding.app.package","schema_version":1,"app":{"id":"` + appID + `"}}`)
+			if _, err := InstallPackage(t.TempDir(), packageJSON, "", ""); !errors.Is(err, ErrBuiltinApp) {
+				t.Fatalf("install reserved app id err = %v", err)
+			}
+		})
+	}
+}
+
+func TestSaveAuthoredPackageEnforcesCreateAndUpdate(t *testing.T) {
+	svc := NewService(t.TempDir(), nil)
+	pkg := Package{
+		Kind:          AppPackageKind,
+		SchemaVersion: AppPackageSchemaVersion,
+		App:           PackageApp{ID: "example", Version: "0.1.0"},
+		Files: []PackageFile{{
+			Path:    AppFileName,
+			Content: "id: example\nname: Example\nversion: 0.1.0\n",
+		}},
+	}
+	raw := marshalTestAppPackage(t, pkg)
+	if _, err := svc.SaveAuthoredPackage(context.Background(), raw, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SaveAuthoredPackage(context.Background(), raw, false); !errors.Is(err, ErrAlreadyExists) {
+		t.Fatalf("second create err = %v", err)
+	}
+	missing := pkg
+	missing.App.ID = "missing"
+	missing.Files = []PackageFile{{Path: AppFileName, Content: "id: missing\nname: Missing\nversion: 0.1.0\n"}}
+	if _, err := svc.SaveAuthoredPackage(context.Background(), marshalTestAppPackage(t, missing), true); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing update err = %v", err)
+	}
+}
+
+func TestSaveAuthoredPackageRejectsRuntimeAppID(t *testing.T) {
+	svc := NewService(t.TempDir(), nil)
+	pkg := Package{
+		Kind:          AppPackageKind,
+		SchemaVersion: AppPackageSchemaVersion,
+		App:           PackageApp{ID: RuntimeCanvasID, Version: "0.1.0"},
+	}
+	if _, err := svc.SaveAuthoredPackage(context.Background(), marshalTestAppPackage(t, pkg), false); !errors.Is(err, ErrBuiltinApp) {
+		t.Fatalf("save runtime app id err = %v", err)
+	}
+	if err := svc.DeleteDefinition(context.Background(), RuntimeCanvasID); !errors.Is(err, ErrBuiltinApp) {
+		t.Fatalf("delete runtime app id err = %v", err)
+	}
+}
+
+func TestSaveAuthoredPackageDoesNotCommitWhenEnablementReadFails(t *testing.T) {
+	homeDir := t.TempDir()
+	svc := NewService(homeDir, &fakeAppConfig{enablementErr: errors.New("enablement unavailable")})
+	pkg := Package{
+		Kind:          AppPackageKind,
+		SchemaVersion: AppPackageSchemaVersion,
+		App:           PackageApp{ID: "example", Version: "0.1.0"},
+		Files: []PackageFile{{
+			Path:    AppFileName,
+			Content: "id: example\nname: Example\nversion: 0.1.0\n",
+		}},
+	}
+	if _, err := svc.SaveAuthoredPackage(context.Background(), marshalTestAppPackage(t, pkg), false); err == nil || err.Error() != "enablement unavailable" {
+		t.Fatalf("save err = %v, want enablement unavailable", err)
+	}
+	if _, err := os.Stat(filepath.Join(home.AppsPath(homeDir), "example")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("App was committed after enablement failure: %v", err)
 	}
 }
 
@@ -373,6 +442,34 @@ func TestPutGetDeleteMCPOverride(t *testing.T) {
 	}
 	if configured {
 		t.Fatal("expected mcp override to be deleted")
+	}
+}
+
+func TestMCPOverrideRejectsSymlinkWithoutTouchingTarget(t *testing.T) {
+	homeDir := writeConnectionlessTestApp(t)
+	outside := filepath.Join(t.TempDir(), "outside.yaml")
+	original := []byte("outside content")
+	if err := os.WriteFile(outside, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	overridePath := filepath.Join(home.AppsPath(homeDir), "sequential-thinking", MCPOverrideFileName)
+	if err := os.Symlink(outside, overridePath); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	svc := NewService(homeDir, nil)
+
+	if _, _, err := svc.GetMCPOverride(context.Background(), "sequential-thinking", "local_mcp"); err == nil {
+		t.Fatal("expected symlinked mcp override read to fail")
+	}
+	if _, err := svc.PutMCPOverride(context.Background(), "sequential-thinking", "local_mcp", MCPEndpointOverride{Command: "docker"}); err == nil {
+		t.Fatal("expected symlinked mcp override write to fail")
+	}
+	data, err := os.ReadFile(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(original) {
+		t.Fatalf("outside target changed: %q", data)
 	}
 }
 

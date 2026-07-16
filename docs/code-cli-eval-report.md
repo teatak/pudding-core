@@ -56,7 +56,8 @@ make tools-report RUNARGS="--days 30 --all"
 | Git stage/unstage/commit | `code.git-write` | 默认隐藏,保留结构化审批 |
 | LSP tools | `code.lsp` | 默认隐藏,语义任务时加载 |
 | background process | Terminal App | 默认隐藏,dev server 等任务时加载 |
-| skill validate/submit | `code.skill` | 默认隐藏 |
+| skill validate | `code.skill` | 默认隐藏 |
+| App save | `code.app` | 默认隐藏 |
 
 ## 5. M5 删除结论
 
@@ -65,5 +66,5 @@ M5 不删除现有专用工具实现。确定性 Eval 支持把文件与 Git 只
 lazy toolkit,默认不占工具 schema;后续积累至少 10 个真实模型固定任务后再重新评估。
 
 可执行文件缺失必须返回正常 CLI 结果并通过 lazy toolkit fallback 恢复,不能成为
-turn 级错误。当前默认 Code 暴露 17/58 个 schema,JSON 从 41941 B 降至
-13574 B,减少 67.6%。
+turn 级错误。加入 `code.app` 后,当前默认 Code 暴露 17/40 个非 App schema,
+JSON 从 32585 B 降至 14082 B,减少 56.8%。

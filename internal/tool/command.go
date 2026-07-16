@@ -205,6 +205,10 @@ func commandEnvironment(custom map[string]string) ([]string, error) {
 		}
 		values[strings.ToUpper(key)] = envValue{key: key, value: value}
 	}
+	path := values["PATH"]
+	path.key = "PATH"
+	path.value = mergedExecutablePATH(path.value)
+	values["PATH"] = path
 	keys := make([]string, 0, len(values))
 	for key := range values {
 		keys = append(keys, key)

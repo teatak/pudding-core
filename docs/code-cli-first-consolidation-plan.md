@@ -92,8 +92,9 @@ M2 后剩余主要缺口:
 - script 无法可靠静态解析,统一标记 `LowRisk=false`;`ask/auto` 请求审批,
   `full` 才可自动执行。
 - approval 展示完整 script、cwd、env key、timeout 与风险说明。
-- macOS 的 `ask/auto` 在审批后仍使用 Project CLI 沙箱;`full` 才绕过该沙箱。
-  其他平台的沙箱适配另行验收。
+- macOS 的 `ask/auto` 默认使用 Project 或 session 临时工作区 CLI 沙箱;风险命令
+  经用户批准后仅该次原始调用绕过沙箱。`full` 始终绕过沙箱。其他平台的沙箱
+  适配另行验收。
 
 ### 4.2 实时输出
 
@@ -157,7 +158,7 @@ M2 后剩余主要缺口:
 | `git_stage/unstage/commit` | 保留 | `code.git-write` | 需要结构化审批和漂移检查 |
 | `patch_propose/apply` | 保留 | Core | diff review、hash 漂移与原子应用 |
 | `code_symbols/definition/references/diagnostics/rename` | 保留 | `code.lsp` | 语义结果和 WorkspaceEdit 安全校验不可由通用 shell 等价替代 |
-| `skill_validate/submit` | 保留 | `code.skill` | 属于独立产品工作流 |
+| `skill_validate` | 保留 | `code.skill` | 直接创建或编辑 Skill 后执行校验 |
 | Browser | 保留 | Browser 内置 App | 非本地 CLI 能力 |
 | REST/GraphQL | 保留 | 对应安装 App | 连接配置、凭据注入与结构化请求 |
 | Apps/MCP | 保留 | 按 App 动态加载 | 外部系统能力 |
@@ -199,6 +200,7 @@ type ToolPluginManifest struct {
 - `code.git-write`
 - `code.lsp`
 - `code.skill`
+- `code.app`
 - `work.camera`
 
 Browser、Terminal 以及安装 App 的 API/MCP 工具使用 session 级 App 加载,不再属于 Toolkit。
@@ -353,8 +355,8 @@ Provider adapter 不需要新的协议;OpenAI、Anthropic、Google 继续消费�
 
 ### M4:Toolkit 动态加载,3-4 天
 
-状态:已完成(2026-07-12)。默认 Code 为 17/58 个 schema(含继承的 9 个
-Chat 工具);schema JSON 从 41941 B 降到 13574 B,减少 67.6%。
+状态:已完成(2026-07-12)。加入 `code.app` 后默认 Code 为 17/40 个非 App
+schema;schema JSON 从 32585 B 降到 14082 B,减少 56.8%。
 
 - Manifest/Catalog/loader。
 - turn active set 与稳定排序。
@@ -374,8 +376,8 @@ Chat 工具);schema JSON 从 41941 B 降到 13574 B,减少 67.6%。
 - 全量 Go 测试、真实 LSP 集成、Web build、desktop build。
 - CLI fixture 与当前仓库构建完成自动验收;真实模型固定任务继续作为后续删除门槛。
 
-验收:无兼容别名、无 migration、无未使用工具展示映射;默认 Code schema
-减少 67.6%,现有专用能力可通过 Toolkit 按需恢复。
+验收:无兼容别名、无 migration、无未使用工具展示映射;加入 `code.app` 后默认
+Code schema 仍减少 56.8%,现有专用能力可通过 Toolkit 按需恢复。
 
 ## 10. 总工期与进度汇报
 

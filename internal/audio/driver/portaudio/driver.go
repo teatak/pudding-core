@@ -20,6 +20,7 @@ const (
 	captureStopTimeout     = 2 * time.Second
 	captureFrameQueue      = 16
 	captureStallAfter      = 2 * time.Second
+	captureSignalTimeout   = 500 * time.Millisecond
 	capturePressureLogStep = 100
 	deviceCloseTimeout     = 2 * time.Second
 	deviceOpenAttempts     = 5
@@ -40,9 +41,20 @@ type Config struct {
 type captureHealth struct {
 	startedAt    atomic.Int64
 	lastCallback atomic.Int64
+	firstNonZero atomic.Int64
 	overflows    atomic.Uint64
 	queueDrops   atomic.Uint64
+	nonZeroReady chan struct{}
+	nonZeroOnce  sync.Once
 }
+
+type captureSignalState uint8
+
+const (
+	captureSignalReady captureSignalState = iota
+	captureSignalNoCallback
+	captureSignalDigitalSilence
+)
 
 type Driver struct {
 	mu                 sync.Mutex
@@ -168,6 +180,7 @@ func (d *Driver) StartCapture(ctx context.Context, onFrame driver.CaptureHandler
 	if !d.initialized {
 		return driver.ErrNotStarted
 	}
+	checkStartupSignal := captureRoutingArbitrationNeeded()
 	if d.stream != nil {
 		captureDied := d.done != nil && isClosed(d.done)
 		captureStalled := d.captureHealth == nil || d.captureHealth.stalled(captureClockNow())
@@ -197,6 +210,11 @@ func (d *Driver) StartCapture(ctx context.Context, onFrame driver.CaptureHandler
 			d.captureHandler = nil
 			d.leaveCaptureRoutingArbitrationLocked()
 			return fmt.Errorf("portaudio capture open: %w", captureErr)
+		}
+		if checkStartupSignal {
+			if err := d.ensureCaptureSignalLocked(ctx); err != nil {
+				return d.abortCaptureStartLocked(err)
+			}
 		}
 		return nil
 	}
@@ -228,6 +246,11 @@ func (d *Driver) StartCapture(ctx context.Context, onFrame driver.CaptureHandler
 		d.captureHandler = nil
 		d.leaveCaptureRoutingArbitrationLocked()
 		return fmt.Errorf("portaudio capture open: %w", err)
+	}
+	if checkStartupSignal {
+		if err := d.ensureCaptureSignalLocked(ctx); err != nil {
+			return d.abortCaptureStartLocked(err)
+		}
 	}
 	d.ensureWatcherLocked()
 	return nil
@@ -403,7 +426,7 @@ func (d *Driver) openCaptureLocked() error {
 	params.SampleRate = float64(d.inputFormat.SampleRate)
 	params.FramesPerBuffer = framesPerBuffer
 	frameCh := make(chan []int16, captureFrameQueue)
-	health := &captureHealth{}
+	health := newCaptureHealth()
 	stream, err := portaudio.OpenStream(params, func(in []int16, _ portaudio.StreamCallbackTimeInfo, flags portaudio.StreamCallbackFlags) {
 		enqueueCaptureFrame(health, frameCh, in, flags, captureClockNow())
 	})
@@ -505,9 +528,74 @@ func (d *Driver) fallbackRefreshOpenLocked(reason string) (error, error) {
 	return captureErr, playbackErr
 }
 
+func (d *Driver) ensureCaptureSignalLocked(ctx context.Context) error {
+	state, err := d.captureHealth.waitForSignal(ctx, captureSignalTimeout)
+	if err != nil {
+		return err
+	}
+	if state == captureSignalReady {
+		return nil
+	}
+
+	deviceName := d.deviceName
+	slog.Warn(
+		"portaudio capture: startup stream has no valid PCM, rebuilding",
+		"device", deviceName,
+		"state", state.String(),
+		"wait", captureSignalTimeout,
+	)
+	captureErr, playbackErr := d.fallbackRefreshOpenLocked("capture startup has no valid PCM")
+	if playbackErr != nil {
+		slog.Warn("portaudio playback: recovery reopen failed", "err", playbackErr)
+	}
+	if captureErr != nil {
+		return fmt.Errorf("%w: recovery reopen failed: %v", driver.ErrCaptureNoSignal, captureErr)
+	}
+
+	state, err = d.captureHealth.waitForSignal(ctx, captureSignalTimeout)
+	if err != nil {
+		return err
+	}
+	if state == captureSignalReady {
+		slog.Info("portaudio capture: startup signal recovered", "device", d.deviceName)
+		return nil
+	}
+	slog.Warn(
+		"portaudio capture: no valid PCM after recovery",
+		"device", d.deviceName,
+		"state", state.String(),
+	)
+	return fmt.Errorf("%w: device %q remained %s after recovery", driver.ErrCaptureNoSignal, d.deviceName, state.String())
+}
+
+// abortCaptureStartLocked leaves d.mu locked for StartCapture's deferred unlock.
+func (d *Driver) abortCaptureStartLocked(startErr error) error {
+	d.captureCtx = nil
+	d.captureHandler = nil
+	stream, stop, done, closeCapture := d.detachCaptureLocked()
+	wasArbitrating := d.routingArbitrating
+	d.routingArbitrating = false
+	d.needsRefresh = true
+
+	d.mu.Unlock()
+	cleanupErr := stopDetachedCapture(stream, stop, done, closeCapture)
+	if wasArbitrating {
+		leaveCaptureRoutingArbitration()
+		slog.Info("portaudio capture: audio routing arbitration left")
+	}
+	d.mu.Lock()
+	if cleanupErr != nil {
+		return errors.Join(startErr, cleanupErr)
+	}
+	return startErr
+}
+
 func (d *Driver) arbitrateCaptureRoutingLocked(ctx context.Context) error {
 	if !captureRoutingArbitrationNeeded() {
 		d.leaveCaptureRoutingArbitrationLocked()
+		return nil
+	}
+	if d.routingArbitrating {
 		return nil
 	}
 	changed, err := beginCaptureRoutingArbitration(ctx)
@@ -805,12 +893,74 @@ func enqueueCaptureFrame(health *captureHealth, frameCh chan<- []int16, in []int
 		return
 	}
 	health.lastCallback.Store(now)
+	health.markNonZero(in, now)
 	samples := make([]int16, len(in))
 	copy(samples, in)
 	select {
 	case frameCh <- samples:
 	default:
 		health.queueDrops.Add(1)
+	}
+}
+
+func newCaptureHealth() *captureHealth {
+	return &captureHealth{nonZeroReady: make(chan struct{})}
+}
+
+func (h *captureHealth) markNonZero(samples []int16, now int64) {
+	if h == nil || h.firstNonZero.Load() > 0 {
+		return
+	}
+	for _, sample := range samples {
+		if sample == 0 {
+			continue
+		}
+		h.nonZeroOnce.Do(func() {
+			h.firstNonZero.Store(now)
+			if h.nonZeroReady != nil {
+				close(h.nonZeroReady)
+			}
+		})
+		return
+	}
+}
+
+func (h *captureHealth) waitForSignal(ctx context.Context, timeout time.Duration) (captureSignalState, error) {
+	if h == nil {
+		return captureSignalNoCallback, nil
+	}
+	if h.firstNonZero.Load() > 0 {
+		return captureSignalReady, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-h.nonZeroReady:
+		return captureSignalReady, nil
+	case <-ctx.Done():
+		return captureSignalNoCallback, ctx.Err()
+	case <-timer.C:
+		if h.firstNonZero.Load() > 0 {
+			return captureSignalReady, nil
+		}
+		if h.lastCallback.Load() > 0 {
+			return captureSignalDigitalSilence, nil
+		}
+		return captureSignalNoCallback, nil
+	}
+}
+
+func (s captureSignalState) String() string {
+	switch s {
+	case captureSignalReady:
+		return "ready"
+	case captureSignalDigitalSilence:
+		return "digital silence"
+	default:
+		return "no callback"
 	}
 }
 

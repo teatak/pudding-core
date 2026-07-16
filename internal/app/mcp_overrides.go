@@ -18,11 +18,15 @@ type rawMCPOverrideFile struct {
 }
 
 func LoadMCPOverrideFile(path string) (*MCPOverrideFile, error) {
+	exists, err := inspectMCPOverrideFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, nil
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
 		return nil, err
 	}
 	var raw rawMCPOverrideFile
@@ -53,24 +57,66 @@ func LoadMCPOverrideFile(path string) (*MCPOverrideFile, error) {
 }
 
 func WriteMCPOverrideFile(path string, overrides *MCPOverrideFile) error {
+	exists, err := inspectMCPOverrideFile(path)
+	if err != nil {
+		return err
+	}
 	if overrides == nil || len(overrides.MCP) == 0 {
+		if !exists {
+			return nil
+		}
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
+	}
+	dirInfo, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if dirInfo.Mode()&os.ModeSymlink != 0 || !dirInfo.IsDir() {
+		return errors.New("app: mcp override directory must be a directory, not a symlink")
 	}
 	data, err := yaml.Marshal(overrides)
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
+}
+
+func inspectMCPOverrideFile(path string) (bool, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return false, errors.New("app: mcp override must be a regular file, not a symlink")
+	}
+	return true, nil
 }
 
 func ApplyMCPOverrides(def *Definition, overrides *MCPOverrideFile) (*Definition, error) {
@@ -133,7 +179,7 @@ func validateMCPEndpointOverride(override MCPEndpointOverride) error {
 	if err := validateEndpointStringMap("env", override.Env, validEndpointEnvName); err != nil {
 		return err
 	}
-	if err := validateEndpointStringMap("header", override.Headers, validEndpointHeaderName); err != nil {
+	if err := validateEndpointStringMap("header", override.Headers, IsAllowedRequestHeaderName); err != nil {
 		return err
 	}
 	return nil

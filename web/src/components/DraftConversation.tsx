@@ -1230,6 +1230,7 @@ function DraftComposer({
   };
   const handleTextBlur = (event: FocusEvent<HTMLTextAreaElement>) => {
     textField.onBlur(event);
+    mentions.close();
     setTextFocused(false);
     onMascotInputGazeChange(null);
   };

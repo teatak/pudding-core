@@ -14,6 +14,7 @@ export type ComposerMentionState = {
   activeIndex: number;
   query: string;
   setActiveIndex: (index: number) => void;
+  close: () => void;
   openManual: () => void;
   select: (reference: ComposerMentionReference) => void;
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => boolean;
@@ -97,6 +98,12 @@ export function useComposerMentions({
     setCursor(nextCursor);
   };
 
+  const close = () => {
+    setManualTrigger(null);
+    setOpen(false);
+    userClosedRef.current = true;
+  };
+
   const openManual = () => {
     const textArea = textAreaRef.current;
     const position = Math.max(0, Math.min(textArea?.selectionStart ?? cursor, text.length));
@@ -173,6 +180,7 @@ export function useComposerMentions({
     activeIndex,
     query: trigger?.query ?? "",
     setActiveIndex,
+    close,
     openManual,
     select,
     onKeyDown,

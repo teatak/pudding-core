@@ -5,7 +5,6 @@ import {
   listCanvasItemsResponse,
   listClosedCanvasItemsResponse,
   listAppsResponse,
-  listSkillDraftsResponse,
   listSkillsResponse,
   compactResponse,
   conflictResponse,
@@ -50,7 +49,6 @@ import {
   session,
   sessionUsage,
   settingsResponse,
-  skillDraftDetail,
   attachment,
   submitRequest,
   submitResponse,
@@ -60,6 +58,8 @@ import {
   userPromptResponse,
   appDefinition,
   appConnection,
+  appMCPConfigRequest,
+  appMCPConfigResponse,
   appMCPOverride,
   appMCPOverrideResponse,
   appMCPStatusResponse,
@@ -88,6 +88,7 @@ import {
   browserTypeRequest,
   createTerminalRequest,
   installAppRequest,
+  importMCPAppsResponse,
   listBrowserTabsResponse,
   listBackgroundProcessesResponse,
   backgroundProcessLog,
@@ -147,8 +148,6 @@ import {
   type Session,
   type SessionUsage,
   type Skill,
-  type SkillDraft,
-  type SkillDraftDetail,
   type WebToolsConfig,
   type Terminal,
 } from "@/contracts/api";
@@ -1196,10 +1195,37 @@ export function installAppPackage(token: string, body: z.infer<typeof installApp
   });
 }
 
-export async function deleteApp(token: string, id: string): Promise<void> {
-  await request(token, `/apps/${encodeURIComponent(id)}`, z.null(), {
-    method: "DELETE",
+export function importMCPApps(token: string, configJSON: string, name?: string): Promise<{ apps: AppDefinition[] }> {
+  return request(token, "/apps/mcp", importMCPAppsResponse, {
+    method: "POST",
+    body: JSON.stringify(appMCPConfigRequest.parse({ configJSON, name })),
   });
+}
+
+export function getMCPAppConfig(token: string, id: string): Promise<{ configJSON: string }> {
+  return request(token, `/apps/${encodeURIComponent(id)}/mcp-config`, appMCPConfigResponse);
+}
+
+export function putMCPAppConfig(token: string, id: string, configJSON: string, name?: string): Promise<AppDefinition> {
+  return request(token, `/apps/${encodeURIComponent(id)}/mcp-config`, appDefinition, {
+    method: "PUT",
+    body: JSON.stringify(appMCPConfigRequest.parse({ configJSON, name })),
+  });
+}
+
+export async function deleteApp(token: string, id: string): Promise<void> {
+  try {
+    await request(token, `/apps/${encodeURIComponent(id)}`, z.null(), {
+      method: "DELETE",
+    });
+  } catch (error) {
+    // DELETE is idempotent from the desktop client's perspective. A retry may
+    // finish stale connection/session cleanup after the App directory was
+    // already removed by the first attempt.
+    if (!(error instanceof APIError) || error.status !== 404) {
+      throw error;
+    }
+  }
 }
 
 export function setAppEnabled(token: string, id: string, enabled: boolean): Promise<AppDefinition> {
@@ -1280,26 +1306,6 @@ export function appIconURL(token: string, app: { id: string; icon?: { svg?: stri
 
 export function listSkills(token: string): Promise<{ skills: Skill[] }> {
   return request(token, "/skills", listSkillsResponse);
-}
-
-export function listSkillDrafts(token: string): Promise<{ drafts: SkillDraft[] }> {
-  return request(token, "/skill-drafts", listSkillDraftsResponse);
-}
-
-export function getSkillDraft(token: string, id: string): Promise<SkillDraftDetail> {
-  return request(token, `/skill-drafts/${encodeURIComponent(id)}`, skillDraftDetail);
-}
-
-export async function applySkillDraft(token: string, id: string): Promise<void> {
-  await request(token, `/skill-drafts/${encodeURIComponent(id)}/apply`, z.object({ status: z.string() }), {
-    method: "POST",
-  });
-}
-
-export async function deleteSkillDraft(token: string, id: string): Promise<void> {
-  await request(token, `/skill-drafts/${encodeURIComponent(id)}`, z.null(), {
-    method: "DELETE",
-  });
 }
 
 export function skillIconURL(token: string, skill: { iconPath?: string }): string | undefined {
@@ -1389,5 +1395,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BackgroundProcess, BackgroundProcessLog, BuiltinTool, BrowserActionResult, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProjectReference, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, SkillDraft, SkillDraftDetail, Terminal, WebToolsConfig };
+export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BackgroundProcess, BackgroundProcessLog, BuiltinTool, BrowserActionResult, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProjectReference, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, Terminal, WebToolsConfig };
 export { createProjectRequest, createProviderRequest, patchProjectRequest, patchProviderRequest };

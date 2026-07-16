@@ -3,6 +3,35 @@ const test = require("node:test");
 
 const { BrowserBridgeServer, classifyError } = require("../browser-bridge-server.cjs");
 
+test("concurrent bridge starts share one listener and complete identity", async (t) => {
+  const server = new BrowserBridgeServer({});
+  t.after(() => server.stop());
+
+  const first = server.start();
+  const second = server.start();
+  assert.equal(first, second);
+  const [left, right] = await Promise.all([first, second]);
+  assert.deepEqual(left, right);
+  assert.match(left.url, /^http:\/\/127\.0\.0\.1:\d+$/);
+  assert.equal(left.token.length, 48);
+});
+
+test("a bridge start requested during stop waits for the old listener", async (t) => {
+  const server = new BrowserBridgeServer({});
+  t.after(() => server.stop());
+
+  const first = await server.start();
+  const stopping = server.stop();
+  const restarted = server.start();
+  await stopping;
+  const second = await restarted;
+
+  assert.notEqual(second.url, first.url);
+  assert.notEqual(second.token, first.token);
+  assert.equal(server.url, second.url);
+  assert.equal(server.token, second.token);
+});
+
 test("classifies page element failures separately from missing tabs", () => {
   assert.deepEqual(classifyError(new Error("target element not found")), {
     status: 422,

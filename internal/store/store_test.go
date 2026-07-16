@@ -91,6 +91,39 @@ func TestUserInputPartsPreserveProjectReference(t *testing.T) {
 	}
 }
 
+func TestUserInputPartsPreserveFormResult(t *testing.T) {
+	parts := UserInputParts("已填写数据库连接信息", []ContentPart{
+		{
+			Type:   ContentPartFormResult,
+			Title:  "数据库连接信息",
+			Schema: json.RawMessage(`{"type":"form","steps":[{"id":"host","type":"text_input","title":"主机"}]}`),
+			Result: json.RawMessage(`{"host":"127.0.0.1"}`),
+		},
+	})
+	if len(parts) != 2 || parts[0].Type != ContentPartFormResult || parts[1].Type != ContentPartText {
+		t.Fatalf("unexpected user parts: %+v", parts)
+	}
+	data, err := json.Marshal(parts[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"title":"数据库连接信息"`) || !strings.Contains(string(data), `"result":{"host":"127.0.0.1"}`) {
+		t.Fatalf("form result json missing fields: %s", data)
+	}
+}
+
+func TestNormalizeContentPartsRejectsInvalidFormResult(t *testing.T) {
+	parts := NormalizeContentParts([]ContentPart{{
+		Type:   ContentPartFormResult,
+		Title:  "数据库连接信息",
+		Schema: json.RawMessage(`{"type":"form"}`),
+		Result: json.RawMessage(`null`),
+	}})
+	if len(parts) != 0 {
+		t.Fatalf("invalid form result should be dropped: %+v", parts)
+	}
+}
+
 func TestNormalizeContentPartsRejectsInvalidProjectReference(t *testing.T) {
 	parts := NormalizeContentParts([]ContentPart{{
 		Type:         ContentPartProjectRef,

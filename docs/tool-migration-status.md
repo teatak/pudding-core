@@ -46,8 +46,8 @@ Rules for new tools:
 | `builtin_file_delete` | workspace | `builtin_files_delete` | Done | Skill prompt | Yes |
 | `builtin_file_move` | workspace | `builtin_files_move` | Done | Skill prompt | Yes |
 | `builtin_file_copy` | workspace | `builtin_files_copy` | Done | Schema | Yes |
-| `builtin_skill_validate` | workspace | `builtin_skill_validate` | Done, draft-id based | Skill prompt | Yes |
-| `builtin_skill_submit` | workspace | `builtin_skill_install_from_draft` | Done, submits for Settings review instead of installing directly | Skill prompt | Yes |
+| `builtin_skill_validate` | workspace | `builtin_skill_validate` | Done, validates a directly written user Skill by `skill_id` | Skill prompt | Yes |
+| `builtin_app_save` | New | `builtin_app_save` | Done, creates or updates one validated local App package atomically | App Creator Skill | Yes |
 | `builtin_rest_request` | chat | `builtin_http_request` | Done, app endpoint based | Yes | Yes |
 | `builtin_graphql_request` | chat | `builtin_graphql_request` | Done, app endpoint based | Yes | Yes |
 | `builtin_graphql_introspect` | chat | `builtin_graphql_introspect` | Done, app endpoint based with in-process schema cache | Yes | Yes |
@@ -82,9 +82,9 @@ Notes:
 | `builtin_files_head` | Folded into `builtin_file_slice` | Use `origin=start`. |
 | `builtin_files_tail` | Folded into `builtin_file_slice` | Use `origin=end`; reverse order supported. |
 | `builtin_files_slice` | Migrated as `builtin_file_slice` | Supports start/end and tail-style reads. |
-| `builtin_skill_validate` | Migrated | New tool validates staged skill draft by `draft_id`. |
+| `builtin_skill_validate` | Migrated | Validates a directly written global user Skill by `skill_id`. |
+| `builtin_app_save` | Added | Saves a complete App package through the lazy `code.app` Toolkit. |
 | `builtin_skill_status` | Not migrated | Consider later for Settings/skill authoring UX; not required for basic skill creation. |
-| `builtin_skill_install_from_draft` | Replaced by `builtin_skill_submit` | New flow asks Settings/user review; no direct install. |
 | `builtin_tool_doc_read` | Not migrated | Current tool schemas are inline; add only if builtin tool docs grow again. |
 | `builtin_speaker_get_current` | Not migrated | Depends on voice/speaker identity subsystem. |
 | `builtin_fact` | Not migrated | Depends on speaker profile / memory design. |
@@ -134,7 +134,6 @@ Current new builtins have transcript display names and i18n entries:
 - `builtin_file_move`
 - `builtin_file_copy`
 - `builtin_skill_validate`
-- `builtin_skill_submit`
 - `builtin_rest_request`
 - `builtin_graphql_request`
 - `builtin_graphql_introspect`

@@ -273,8 +273,8 @@ DELETE /providers/{name}
 - Toolkit load 不授予 capability 或审批权限。隐藏但已知的工具返回
   `tool_not_loaded`,越级 toolkit 返回 `capability_required`,实际工具调用仍走
   Project path 与 `ask | auto | full`。
-- ToolDef 固定按 Toolkit id 与 tool name 排序。默认 Code 为 17/58 个 schema
-  (含继承 Chat 的 9 个),当前 schema JSON 比全量减少 67.6%。
+- ToolDef 固定按 Toolkit id 与 tool name 排序。加入 `code.app` 后默认 Code 为
+  17/40 个非 App schema,当前 schema JSON 为 14082/32585 B,比全量减少 56.8%。
 
 ## 6. 存储
 

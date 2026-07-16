@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -85,6 +86,30 @@ func Start(opts Options) (*Daemon, error) {
 	if err := home.Prepare(dir); err != nil {
 		return nil, err
 	}
+	addr := opts.Addr
+	if addr == "" {
+		addr = home.DefaultAddr()
+	}
+	listenAddr := addr
+	if opts.MobileLAN {
+		listenAddr = lanListenAddr(addr)
+	}
+	ln, err := net.Listen("tcp", listenAddr)
+	if err != nil {
+		return nil, err
+	}
+	listenerOwned := false
+	defer func() {
+		if !listenerOwned {
+			_ = ln.Close()
+		}
+	}()
+	localAddr := localAddrFor(addr, ln.Addr().String(), opts.MobileLAN)
+	var lanURLs []string
+	if opts.MobileLAN {
+		lanURLs = lanURLsFor(ln.Addr().String())
+	}
+
 	token, err := loadOrCreateToken(home.TokenPath(dir))
 	if err != nil {
 		return nil, err
@@ -158,7 +183,7 @@ func Start(opts Options) (*Daemon, error) {
 		})
 	}
 	tools := tool.NewMultiRunner(
-		tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithBrowserState(st), tool.WithHomeDir(dir), tool.WithCommandSandbox(dir), tool.WithBrowser(browserService), tool.WithLanguageService(languageServers), tool.WithCamera(camera), tool.WithDesktopScreen(screen), tool.WithBackgroundProcessEvents(backgroundProcessEvents)),
+		tool.NewBuiltinRunner(tool.WithWebConfig(cfg), tool.WithAppEndpoints(apps), tool.WithAppAuthoring(apps), tool.WithSkills(skills), tool.WithHistorySearch(st), tool.WithBrowserState(st), tool.WithHomeDir(dir), tool.WithCommandSandbox(dir), tool.WithBrowser(browserService), tool.WithLanguageService(languageServers), tool.WithCamera(camera), tool.WithDesktopScreen(screen), tool.WithBackgroundProcessEvents(backgroundProcessEvents)),
 		browserMCP,
 		appMCP,
 	)
@@ -192,30 +217,10 @@ func Start(opts Options) (*Daemon, error) {
 		return nil, fmt.Errorf("recover interrupted turns: %w", err)
 	}
 
-	addr := opts.Addr
-	if addr == "" {
-		addr = home.DefaultAddr()
-	}
-	listenAddr := addr
-	if opts.MobileLAN {
-		listenAddr = lanListenAddr(addr)
-	}
-	ln, err := net.Listen("tcp", listenAddr)
-	if err != nil {
-		_ = languageServers.Close(context.Background())
-		_ = st.Close()
-		return nil, err
-	}
-	localAddr := localAddrFor(addr, ln.Addr().String(), opts.MobileLAN)
-	var lanURLs []string
-	if opts.MobileLAN {
-		lanURLs = lanURLsFor(ln.Addr().String())
-	}
 	devices, err := mobileauth.OpenDeviceStore(home.MobileDevicesPath(dir))
 	if err != nil {
 		_ = languageServers.Close(context.Background())
 		_ = st.Close()
-		_ = ln.Close()
 		return nil, err
 	}
 	pairing := mobileauth.NewManager(devices, append(lanURLs, "http://"+localAddr+"/"))
@@ -249,6 +254,7 @@ func Start(opts Options) (*Daemon, error) {
 		stopSSE:   stopSSE,
 		serveErr:  make(chan error, 1),
 	}
+	listenerOwned = true
 	go func() { d.serveErr <- server.Serve(ln) }()
 
 	slog.Info("puddingd starting",
@@ -260,7 +266,7 @@ func Start(opts Options) (*Daemon, error) {
 		"lanURLs", d.LANURLs(),
 		"provider", providerLabel,
 		"store", "sqlite")
-	slog.Info("open", "url", d.OpenURL())
+	slog.Info("puddingd ready", "url", fmt.Sprintf("http://%s/", d.Addr()))
 	return d, nil
 }
 
@@ -580,16 +586,132 @@ func (d *Daemon) Shutdown(ctx context.Context) error {
 // loadOrCreateToken 读取或生成 daemon token(0600);
 // 所有 API 请求都必须带它(docs/technology-decisions.md 第 9 节)。
 func loadOrCreateToken(path string) (string, error) {
-	if b, err := os.ReadFile(path); err == nil && len(b) > 0 {
-		return string(b), nil
+	const maxTokenFileBytes = 4 << 10
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		b, info, err := readTokenFile(path, maxTokenFileBytes)
+		if err == nil {
+			if token := strings.TrimSpace(string(b)); token != "" {
+				return token, nil
+			}
+			if time.Since(info.ModTime()) >= 2*time.Second {
+				if removeErr := removeTokenFileIfSame(path, info); removeErr != nil {
+					return "", fmt.Errorf("remove stale token: %w", removeErr)
+				}
+				continue
+			}
+			if time.Now().After(deadline) {
+				return "", errors.New("daemon token remained empty during startup")
+			}
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
+		if errors.Is(err, errTokenFileChanged) {
+			if time.Now().After(deadline) {
+				return "", errors.New("daemon token kept changing during startup")
+			}
+			time.Sleep(time.Millisecond)
+			continue
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("read token: %w", err)
+		}
+
+		candidate, token, err := createTokenCandidate(filepath.Dir(path))
+		if err != nil {
+			return "", err
+		}
+		if err := os.Link(candidate, path); errors.Is(err, os.ErrExist) {
+			_ = os.Remove(candidate)
+			continue
+		} else if err != nil {
+			_ = os.Remove(candidate)
+			return "", fmt.Errorf("publish token: %w", err)
+		}
+		_ = os.Remove(candidate)
+		return token, nil
 	}
-	b := make([]byte, 24)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
+}
+
+var errTokenFileChanged = errors.New("daemon token changed while opening")
+
+func readTokenFile(path string, maxBytes int64) ([]byte, os.FileInfo, error) {
+	pathInfo, err := os.Lstat(path)
+	if err != nil {
+		return nil, nil, err
 	}
-	token := hex.EncodeToString(b)
-	if err := os.WriteFile(path, []byte(token), 0o600); err != nil {
-		return "", fmt.Errorf("write token: %w", err)
+	if pathInfo.Mode()&os.ModeSymlink != 0 || !pathInfo.Mode().IsRegular() {
+		return nil, nil, errors.New("daemon token must be a regular file, not a symlink")
 	}
-	return token, nil
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer f.Close()
+	openInfo, err := f.Stat()
+	if err != nil {
+		return nil, nil, err
+	}
+	if !openInfo.Mode().IsRegular() {
+		return nil, nil, errors.New("daemon token must be a regular file")
+	}
+	if !os.SameFile(pathInfo, openInfo) {
+		return nil, nil, errTokenFileChanged
+	}
+	if err := f.Chmod(0o600); err != nil {
+		return nil, nil, fmt.Errorf("secure token permissions: %w", err)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, nil, errors.New("daemon token file is too large")
+	}
+	return data, openInfo, nil
+}
+
+func removeTokenFileIfSame(path string, expected os.FileInfo) error {
+	current, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if current.Mode()&os.ModeSymlink != 0 || !os.SameFile(current, expected) {
+		return nil
+	}
+	return os.Remove(path)
+}
+
+func createTokenCandidate(dir string) (string, string, error) {
+	random := make([]byte, 24)
+	if _, err := rand.Read(random); err != nil {
+		return "", "", err
+	}
+	token := hex.EncodeToString(random)
+	f, err := os.CreateTemp(dir, ".daemon-token-")
+	if err != nil {
+		return "", "", fmt.Errorf("create token candidate: %w", err)
+	}
+	path := f.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = f.Close()
+			_ = os.Remove(path)
+		}
+	}()
+	if _, err := f.WriteString(token); err != nil {
+		return "", "", fmt.Errorf("write token: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		return "", "", fmt.Errorf("sync token: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return "", "", fmt.Errorf("close token: %w", err)
+	}
+	committed = true
+	return path, token, nil
 }

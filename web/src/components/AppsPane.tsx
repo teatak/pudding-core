@@ -11,6 +11,7 @@ import {
   Download,
   Eye,
   EyeOff,
+  FileJson2,
   FileSearch,
   Keyboard,
   KeyRound,
@@ -40,13 +41,16 @@ import {
   getAppConnection,
   getAppMCPOverride,
   getAppMCPStatus,
+  getMCPAppConfig,
   getAppSkill,
   getSettings,
   installAppPackage,
+  importMCPApps,
   listAppConnections,
   listApps,
   putAppConnection,
   putAppMCPOverride,
+  putMCPAppConfig,
   setAppEnabled,
   startAppOAuth,
   type AppConnection,
@@ -57,6 +61,7 @@ import {
   type AppMCPOverrideResponse,
   type AppMCPStatusResponse,
   type AppSkillDetail,
+  type Session,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { AppIcon, mergeAppIconSpec, type AppIconSpec } from "@/components/AppIcon";
@@ -186,6 +191,7 @@ type MCPConfigForm = {
   env: string;
   headers: string;
 };
+type MCPAppConfigEditor = { app?: AppDefinition };
 
 const authTypes: AuthType[] = ["none", "bearer", "token", "basic", "header", "oauth2"];
 const OFFICIAL_APP_REGISTRY =
@@ -199,6 +205,7 @@ export function AppsPane({ token }: { token: string }) {
   const [editing, setEditing] = useState<{ app: AppDefinition; connection?: AppConnection } | null>(null);
   const [deleting, setDeleting] = useState<AppConnection | null>(null);
   const [uninstalling, setUninstalling] = useState<AppDefinition | null>(null);
+  const [mcpConfigEditor, setMCPConfigEditor] = useState<MCPAppConfigEditor | null>(null);
   const [detailAppID, setDetailAppID] = useState<string | null>(null);
   const [detailCatalogID, setDetailCatalogID] = useState<string | null>(null);
   const [catalogReleaseByID, setCatalogReleaseByID] = useState<Record<string, string>>({});
@@ -232,9 +239,8 @@ export function AppsPane({ token }: { token: string }) {
     () => [...(appsQuery.data?.apps || [])].sort((a, b) => appDisplayName(a, t).localeCompare(appDisplayName(b, t))),
     [appsQuery.data?.apps, t],
   );
-  const builtinApps = useMemo(() => apps.filter((app) => app.source === "builtin"), [apps]);
-  const installedApps = useMemo(() => apps.filter((app) => app.source === "installed"), [apps]);
-  const installedByID = useMemo(() => new Map(installedApps.map((app) => [app.id, app])), [installedApps]);
+  const allInstalledApps = useMemo(() => apps.filter((app) => app.source === "installed"), [apps]);
+  const installedByID = useMemo(() => new Map(allInstalledApps.map((app) => [app.id, app])), [allInstalledApps]);
   const catalogApps = useMemo(
     () =>
       [...(catalogQuery.data?.items || [])].sort((a, b) =>
@@ -349,9 +355,29 @@ export function AppsPane({ token }: { token: string }) {
       queryClient.setQueryData<{ apps: AppDefinition[] }>(queryKeys.apps(), (current) => ({
         apps: (current?.apps || []).filter((app) => app.id !== id),
       }));
+      queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), (current) =>
+        current
+          ? {
+              sessions: current.sessions.map((session) => ({
+                ...session,
+                loadedAppIDs: session.loadedAppIDs?.filter((appID) => appID !== id),
+              })),
+            }
+          : current,
+      );
+      queryClient.setQueriesData<Session>(
+        {
+          predicate: (query) => query.queryKey[0] === "session" && query.queryKey.length === 2,
+        },
+        (current) =>
+          current
+            ? { ...current, loadedAppIDs: current.loadedAppIDs?.filter((appID) => appID !== id) }
+            : current,
+      );
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.apps() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.appCatalog() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
       ]);
     },
     onError: () => toast.error(t("apps.uninstallFailed")),
@@ -425,6 +451,7 @@ export function AppsPane({ token }: { token: string }) {
                 })
               }
               onUninstall={() => setUninstalling(detailApp)}
+              onEditMCPConfig={() => setMCPConfigEditor({ app: detailApp })}
               enablePending={enableMutation.isPending && enableMutation.variables?.id === detailApp.id}
               onEnabledChange={(enabled) => enableMutation.mutate({ id: detailApp.id, enabled })}
             />
@@ -467,40 +494,30 @@ export function AppsPane({ token }: { token: string }) {
             </div>
           ) : (
             <>
-              {builtinApps.length > 0 ? (
-                <section className="grid gap-4">
-                  <div className="flex items-center justify-between border-b pb-4">
-                    <h2 className="text-xl font-semibold tracking-normal">{t("apps.builtinTitle")}</h2>
-                  </div>
-                  <div className="flex min-w-0 flex-wrap gap-x-5 gap-y-4">
-                    {builtinApps.map((app) => (
-                      <ManagedAppTile
-                        key={app.id}
-                        app={app}
-                        token={token}
-                        onSelect={() => setDetailAppID(app.id)}
-                      />
-                    ))}
-                  </div>
-                </section>
-              ) : null}
-              {installedApps.length > 0 ? (
-                <section className="grid gap-4">
-                  <div className="flex items-center justify-between border-b pb-4">
-                    <h2 className="text-xl font-semibold tracking-normal">{t("apps.installedShort")}</h2>
-                  </div>
-                  <div className="flex min-w-0 flex-wrap gap-x-5 gap-y-4">
-                    {installedApps.map((app) => (
-                      <ManagedAppTile
-                        key={app.id}
-                        app={app}
-                        token={token}
-                        onSelect={() => setDetailAppID(app.id)}
-                      />
-                    ))}
-                  </div>
-                </section>
-              ) : null}
+              <section className="grid gap-4">
+                <div className="flex items-center justify-between border-b pb-4">
+                  <h2 className="text-xl font-semibold tracking-normal">{t("apps.installedShort")}</h2>
+                  <Button
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setMCPConfigEditor({})}
+                  >
+                    <Plus className="size-3.5" />
+                    {t("apps.mcpAppAdd")}
+                  </Button>
+                </div>
+                <div className="flex min-w-0 flex-wrap gap-x-5 gap-y-4">
+                  {apps.map((app) => (
+                    <ManagedAppTile
+                      key={app.id}
+                      app={app}
+                      token={token}
+                      onSelect={() => setDetailAppID(app.id)}
+                    />
+                  ))}
+                </div>
+              </section>
               <section className="grid gap-4">
                 <div className="border-b pb-4">
                   <h2 className="text-lg font-semibold tracking-normal">{t("apps.availableTitle")}</h2>
@@ -559,6 +576,20 @@ export function AppsPane({ token }: { token: string }) {
         onOpenChange={(open) => {
           if (!open) {
             setEditing(null);
+          }
+        }}
+      />
+      <MCPAppConfigDialog
+        editor={mcpConfigEditor}
+        token={token}
+        onSaved={(savedApps) => {
+          if (savedApps.length === 1) {
+            setDetailAppID(savedApps[0].id);
+          }
+        }}
+        onOpenChange={(open) => {
+          if (!open) {
+            setMCPConfigEditor(null);
           }
         }}
       />
@@ -624,6 +655,146 @@ export function AppsPane({ token }: { token: string }) {
         </AlertDialogContent>
       </AlertDialog>
     </main>
+  );
+}
+
+const MCP_APP_CONFIG_SAMPLE = `{
+  "mcpServers": {
+    "Local MCP": {
+      "command": "path-to-server",
+      "args": []
+    }
+  }
+}`;
+
+function MCPAppConfigDialog({
+  editor,
+  token,
+  onOpenChange,
+  onSaved,
+}: {
+  editor: MCPAppConfigEditor | null;
+  token: string;
+  onOpenChange: (open: boolean) => void;
+  onSaved: (apps: AppDefinition[]) => void;
+}) {
+  const { t } = useI18n();
+  const queryClient = useQueryClient();
+  const app = editor?.app;
+  const open = Boolean(editor);
+  const [name, setName] = useState("");
+  const [configJSON, setConfigJSON] = useState(MCP_APP_CONFIG_SAMPLE);
+  const [error, setError] = useState("");
+  const configQuery = useQuery({
+    queryKey: queryKeys.appMCPConfig(app?.id || ""),
+    queryFn: () => getMCPAppConfig(token, app!.id),
+    enabled: open && Boolean(app),
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    setError("");
+    if (!app) {
+      setName("");
+      setConfigJSON(MCP_APP_CONFIG_SAMPLE);
+      return;
+    }
+    setName(app.name || "");
+    if (configQuery.data?.configJSON) {
+      setConfigJSON(configQuery.data.configJSON);
+    }
+  }, [app, configQuery.data?.configJSON, open]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      JSON.parse(configJSON);
+      if (app) {
+        return { apps: [await putMCPAppConfig(token, app.id, configJSON, name.trim() || undefined)] };
+      }
+      return importMCPApps(token, configJSON, name.trim() || undefined);
+    },
+    onSuccess: async ({ apps }) => {
+      queryClient.setQueryData<{ apps: AppDefinition[] }>(queryKeys.apps(), (current) => {
+        const savedByID = new Map(apps.map((item) => [item.id, item]));
+        const existing = (current?.apps || []).filter((item) => !savedByID.has(item.id));
+        return { apps: [...existing, ...apps].sort((a, b) => a.name.localeCompare(b.name)) };
+      });
+      for (const saved of apps) {
+        queryClient.removeQueries({ queryKey: queryKeys.appMCPStatus(saved.id) });
+        queryClient.removeQueries({ queryKey: queryKeys.appMCPConfig(saved.id) });
+      }
+      toast.success(t(app ? "apps.mcpAppUpdated" : "apps.mcpAppImported"));
+      onSaved(apps);
+      onOpenChange(false);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.apps() });
+    },
+    onError: (cause) => {
+      setError(cause instanceof Error ? cause.message : t("apps.mcpAppSaveFailed"));
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{t(app ? "apps.mcpAppEditTitle" : "apps.mcpAppAddTitle")}</DialogTitle>
+          <DialogDescription>{app?.name || t("apps.mcpAppJSONFormat")}</DialogDescription>
+        </DialogHeader>
+        {configQuery.isLoading && app ? (
+          <SectionSpinner />
+        ) : configQuery.isError && app ? (
+          <div className="rounded-md bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            {t("apps.mcpAppLoadFailed")}
+          </div>
+        ) : (
+          <div className="grid gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="mcp-app-name">{t("apps.mcpAppName")}</Label>
+              <Input
+                id="mcp-app-name"
+                maxLength={128}
+                value={name}
+                placeholder={t("apps.mcpAppNamePlaceholder")}
+                onChange={(event) => {
+                  setName(event.target.value);
+                  setError("");
+                }}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="mcp-app-config-json">JSON</Label>
+              <Textarea
+                id="mcp-app-config-json"
+                className="min-h-72 max-h-[55vh] resize-y overflow-auto font-mono text-xs leading-5"
+                spellCheck={false}
+                value={configJSON}
+                onChange={(event) => {
+                  setConfigJSON(event.target.value);
+                  setError("");
+                }}
+              />
+            </div>
+            {error ? <div className="text-sm text-destructive">{error}</div> : null}
+          </div>
+        )}
+        <DialogFooter>
+          <Button disabled={saveMutation.isPending} type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            {t("common.cancel")}
+          </Button>
+          <Button
+            disabled={saveMutation.isPending || Boolean(app && (configQuery.isLoading || configQuery.isError))}
+            type="button"
+            onClick={() => saveMutation.mutate()}
+          >
+            {saveMutation.isPending ? <Spinner /> : app ? <FileJson2 /> : <Plus />}
+            {t(app ? "common.save" : "apps.mcpAppImport")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -982,6 +1153,7 @@ function AppDetail({
   onAdd,
   onDelete,
   onEdit,
+  onEditMCPConfig,
   onEnabledChange,
   onSkillSelect,
   onUninstall,
@@ -994,6 +1166,7 @@ function AppDetail({
   onAdd: () => void;
   onDelete: (connection: AppConnection) => void;
   onEdit: (connection: AppConnection) => void;
+  onEditMCPConfig: () => void;
   onEnabledChange: (enabled: boolean) => void;
   onSkillSelect: (skill: AppSkillItem, icon?: AppIconSpec, iconSrc?: string) => void;
   onUninstall: () => void;
@@ -1017,7 +1190,7 @@ function AppDetail({
   const mcpStatusQuery = useQuery({
     queryKey: queryKeys.appMCPStatus(app.id),
     queryFn: () => getAppMCPStatus(token, app.id),
-    enabled: hasMCPEndpoints,
+    enabled: hasMCPEndpoints && app.enabled,
     retry: false,
     staleTime: 30_000,
   });
@@ -1040,6 +1213,7 @@ function AppDetail({
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <h2 className="truncate text-2xl font-semibold tracking-normal">{title}</h2>
                 {app.source === "builtin" ? <Badge variant="secondary">{t("apps.builtinBadge")}</Badge> : null}
+                {app.kind === "mcp" ? <Badge variant="secondary">MCP</Badge> : null}
                 {app.version ? <Badge variant="outline">v{app.version}</Badge> : null}
                 <Badge variant="outline">
                   {t("apps.requiresMode").replace("{mode}", app.requiredMode.charAt(0).toUpperCase() + app.requiredMode.slice(1))}
@@ -1108,20 +1282,25 @@ function AppDetail({
           <AppEndpointsSection
             appID={app.id}
             endpoints={endpoints}
+            mcpConfigurable={app.kind !== "mcp"}
             mcpStatusByEndpoint={mcpStatusByEndpoint}
             mcpStatusFailed={mcpStatusQuery.isError}
             mcpStatusLoading={mcpStatusQuery.isLoading}
+            mcpStatusVisible={app.enabled}
+            onEditMCPConfig={app.kind === "mcp" ? onEditMCPConfig : undefined}
             token={token}
           />
         ) : null}
         <AppToolsSection tools={tools} />
-        <AppSkillsSection
-          app={app}
-          icon={icon}
-          iconSrc={iconSrc}
-          skills={skills}
-          onSkillSelect={(skill) => onSkillSelect(skill, icon, iconSrc)}
-        />
+        {skills.length > 0 ? (
+          <AppSkillsSection
+            app={app}
+            icon={icon}
+            iconSrc={iconSrc}
+            skills={skills}
+            onSkillSelect={(skill) => onSkillSelect(skill, icon, iconSrc)}
+          />
+        ) : null}
       </div>
     </section>
   );
@@ -1279,26 +1458,28 @@ function CatalogAppDetail({
           )}
         </AppEndpointsSection>
       ) : null}
-      <AppSkillsSection
-        count={detail ? skills.length : undefined}
-        icon={app.icon}
-        iconSrc={appRegistryIconURL(app, OFFICIAL_APP_REGISTRY)}
-        skills={skills}
-        onSkillSelect={onSkillSelect}
-      >
-        {detailLoading ? (
-          <DetailSkeletonRows />
-        ) : detailFailed ? (
-          <ContentLoadFailed error={detailError} />
-        ) : (
-          <SkillRows
-            icon={app.icon}
-            iconSrc={appRegistryIconURL(app, OFFICIAL_APP_REGISTRY)}
-            skills={skills}
-            onSkillSelect={onSkillSelect}
-          />
-        )}
-      </AppSkillsSection>
+      {detailLoading || detailFailed || skills.length > 0 ? (
+        <AppSkillsSection
+          count={detail ? skills.length : undefined}
+          icon={app.icon}
+          iconSrc={appRegistryIconURL(app, OFFICIAL_APP_REGISTRY)}
+          skills={skills}
+          onSkillSelect={onSkillSelect}
+        >
+          {detailLoading ? (
+            <DetailSkeletonRows />
+          ) : detailFailed ? (
+            <ContentLoadFailed error={detailError} />
+          ) : (
+            <SkillRows
+              icon={app.icon}
+              iconSrc={appRegistryIconURL(app, OFFICIAL_APP_REGISTRY)}
+              skills={skills}
+              onSkillSelect={onSkillSelect}
+            />
+          )}
+        </AppSkillsSection>
+      ) : null}
     </section>
   );
 }
@@ -1308,20 +1489,24 @@ function AppEndpointsSection({
   children,
   count,
   endpoints,
+  mcpConfigurable = true,
   mcpStatusByEndpoint,
   mcpStatusFailed,
   mcpStatusLoading,
   mcpStatusVisible = true,
+  onEditMCPConfig,
   token,
 }: {
   appID?: string;
   children?: ReactNode;
   count?: number;
   endpoints: Array<[string, AppEndpoints[string]]>;
+  mcpConfigurable?: boolean;
   mcpStatusByEndpoint?: Map<string, AppMCPEndpointStatus[]>;
   mcpStatusFailed?: boolean;
   mcpStatusLoading?: boolean;
   mcpStatusVisible?: boolean;
+  onEditMCPConfig?: () => void;
   token?: string;
 }) {
   const { t } = useI18n();
@@ -1331,10 +1516,12 @@ function AppEndpointsSection({
         <EndpointRows
           appID={appID}
           endpoints={endpoints}
+          mcpConfigurable={mcpConfigurable}
           mcpStatusByEndpoint={mcpStatusByEndpoint}
           mcpStatusFailed={mcpStatusFailed}
           mcpStatusLoading={mcpStatusLoading}
           mcpStatusVisible={mcpStatusVisible}
+          onEditMCPConfig={onEditMCPConfig}
           token={token}
         />
       )}
@@ -1345,18 +1532,22 @@ function AppEndpointsSection({
 function EndpointRows({
   appID,
   endpoints,
+  mcpConfigurable = true,
   mcpStatusByEndpoint,
   mcpStatusFailed,
   mcpStatusLoading,
   mcpStatusVisible = true,
+  onEditMCPConfig,
   token,
 }: {
   appID?: string;
   endpoints: Array<[string, AppEndpoints[string]]>;
+  mcpConfigurable?: boolean;
   mcpStatusByEndpoint?: Map<string, AppMCPEndpointStatus[]>;
   mcpStatusFailed?: boolean;
   mcpStatusLoading?: boolean;
   mcpStatusVisible?: boolean;
+  onEditMCPConfig?: () => void;
   token?: string;
 }) {
   const { t } = useI18n();
@@ -1380,7 +1571,12 @@ function EndpointRows({
                   <Badge variant="outline">{endpoint.kind}</Badge>
                   {endpoint.kind === "mcp" && endpoint.transport ? <Badge variant="secondary">{endpoint.transport}</Badge> : null}
                 </div>
-                {appID && token && endpoint.kind === "mcp" ? (
+                {endpoint.kind === "mcp" && onEditMCPConfig ? (
+                  <Button size="sm" type="button" variant="secondary" onClick={onEditMCPConfig}>
+                    <FileJson2 className="size-3.5" />
+                    {t("apps.mcpAppEdit")}
+                  </Button>
+                ) : mcpConfigurable && appID && token && endpoint.kind === "mcp" ? (
                   <Button
                     size="sm"
                     type="button"

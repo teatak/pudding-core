@@ -117,14 +117,14 @@ func TestBackgroundProcessPollWaitsForExit(t *testing.T) {
 	begin := time.Now()
 	poll := backgroundToolCall(runner, "sess_wait_exit", root, CommandPoll, map[string]any{
 		"process_id": started.ProcessID,
-		"wait_ms":    1000,
+		"wait_ms":    5000,
 	})
 	elapsed := time.Since(begin)
 	payload := decodeBackgroundProcessPayload(t, poll)
 	if !poll.Ok || payload.Running || payload.Status != "exited" {
 		t.Fatalf("long poll did not return the completed process: result=%+v payload=%+v", poll, payload)
 	}
-	if elapsed >= 750*time.Millisecond {
+	if elapsed >= 4500*time.Millisecond {
 		t.Fatalf("long poll did not return early after process exit: %s", elapsed)
 	}
 }

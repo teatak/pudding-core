@@ -53,7 +53,6 @@ import {
   type ContentPart,
   type ProjectReference,
   type Session,
-  type SkillDraft,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ChatColumn } from "@/components/ChatColumn";
@@ -72,7 +71,6 @@ import { PatchProposalDiffDialog, type PatchProposalApproval } from "@/component
 import { ProjectComposerControls } from "@/components/ProjectComposerControls";
 import { BackgroundProcessControl } from "@/components/BackgroundProcessControl";
 import { SessionAudioControls } from "@/components/SessionAudioControls";
-import { SkillDraftDiffDialog } from "@/components/SkillDraftDiffDialog";
 import { UIContextControl } from "@/components/UIContextControl";
 import { upsertTurnIntoPages, type TurnsInfiniteData } from "@/components/transcript/useTranscriptTurns";
 import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
@@ -132,7 +130,7 @@ export type DroppedFilesBatch = DroppedLocalItems & {
 };
 
 type ComposerApproval = Extract<AssistantOverlayPart, { type: "approval" }>;
-type ApprovalMenuAction = "approve-session" | "approve-turn" | "deny" | "review-git" | "review-patch" | "review-skill";
+type ApprovalMenuAction = "approve-session" | "approve-turn" | "deny" | "review-git" | "review-patch";
 type SlashCommand = {
   command: string;
   description: string;
@@ -694,7 +692,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       const result = await submitMessage(token, sessionID, {
         clientMessageID,
         text: submission.text,
-        parts: [{ type: "text", text: submission.text }],
+        parts: [submission.formResult, { type: "text", text: submission.text }],
       });
       if (result.queued || !result.turnID) {
         clearSubmittingTurn(sessionID, clientMessageID);
@@ -715,7 +713,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
         clientMessageID,
         status: "submitting",
         text: submission.text,
-        parts: [{ type: "text", text: submission.text }],
+        parts: [submission.formResult, { type: "text", text: submission.text }],
         createdAt: new Date().toISOString(),
       });
     },
@@ -979,6 +977,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   };
   const handleTextBlur = (event: FocusEvent<HTMLTextAreaElement>) => {
     textField.onBlur(event);
+    mentions.close();
     setTextFocused(false);
     setMascotInputGaze(null);
   };
@@ -1113,7 +1112,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       </div>
       <ChatColumn>
         <div ref={selectionGuardRef} className="relative">
-          <ComposerApprovalBar approval={pendingApproval} sessionProjectID={projectID} token={token} />
+          <ComposerApprovalBar approval={pendingApproval} token={token} />
           {pendingInputFlow ? (
             <InputFlowPanel key={pendingInputFlow.id} request={pendingInputFlow} onSubmit={(submission) => inputFlowSubmitMutation.mutate(submission)} />
           ) : null}
@@ -1726,18 +1725,16 @@ function compactErrorMessage(error: unknown, t: (key: string) => string) {
   return t("composer.compactFailed");
 }
 
-function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?: ComposerApproval; sessionProjectID: string; token: string }) {
+function ComposerApprovalBar({ approval, token }: { approval?: ComposerApproval; token: string }) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const [pendingAction, setPendingAction] = useState<"turn" | "session" | "deny" | null>(null);
   const [selectedProjectDirs, setSelectedProjectDirs] = useState<string[]>([]);
   const [pickingProjectDir, setPickingProjectDir] = useState(false);
-  const [viewingSkillDraft, setViewingSkillDraft] = useState<SkillDraft | null>(null);
   const [viewingPatchProposal, setViewingPatchProposal] = useState<PatchProposalApproval | null>(null);
   const [viewingGitCommit, setViewingGitCommit] = useState<GitCommitApproval | null>(null);
   useEffect(() => {
     setSelectedProjectDirs([]);
-    setViewingSkillDraft(null);
     setViewingPatchProposal(null);
     setViewingGitCommit(null);
   }, [approval?.approvalID]);
@@ -1745,7 +1742,6 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
     return null;
   }
   const current = approval;
-  const isSkillDraftApproval = current.approvalKind === "skill_draft";
   const isToolCallApproval = current.approvalKind === "tool_call";
   const targetMode = approvalTargetMode(current.payload);
   const title = approvalTitle(current, targetMode, t);
@@ -1754,12 +1750,7 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
   const payloadProjectDirs = projectDirsFromPayload(current.payload);
   const hasPayloadProjectDirs = payloadProjectDirs.length > 0;
   const projectDirs = hasPayloadProjectDirs ? payloadProjectDirs : selectedProjectDirs;
-  const needsProjectDir = needsProjectDirFromPayload(current.payload);
-  const projectDirsRequired = isCodeApproval && needsProjectDir && projectDirs.length === 0;
-  const projectDirsRequiredForSession = isCodeApproval && !sessionProjectID && projectDirs.length === 0;
   const suggestedDirName = suggestedProjectDirName(current.payload);
-  const skillDraftApproval = skillDraftFromPayload(current.payload);
-  const skillDraft = skillDraftApproval?.draft || null;
   const toolCallApproval = toolCallFromPayload(current.payload);
   const patchProposal = patchProposalFromPayload(current.payload);
   const gitCommitApproval = gitCommitFromPayload(current.payload);
@@ -1776,13 +1767,6 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
           queryClient.invalidateQueries({ queryKey: queryKeys.projects() }),
-        ]);
-      }
-      if (isSkillDraftApproval) {
-        setViewingSkillDraft(null);
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: queryKeys.skills() }),
-          queryClient.invalidateQueries({ queryKey: queryKeys.skillDrafts() }),
         ]);
       }
       setViewingPatchProposal(null);
@@ -1820,7 +1804,6 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
     setPendingAction("deny");
     try {
       await denyApproval(token, current.sessionID, current.approvalID);
-      setViewingSkillDraft(null);
       setViewingPatchProposal(null);
       setViewingGitCommit(null);
     } finally {
@@ -1859,33 +1842,9 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
         render: () => <ApprovalMenuOption description={t("transcript.approvalReviewDesc")} icon={FileText} label={t("transcript.approvalGitCommitReview")} />,
       });
     }
-  } else if (isSkillDraftApproval) {
-    approvalMenuItems.push({
-      disabled: !skillDraft,
-      id: "approve-turn",
-      label: t("transcript.approvalPublishSkillDraft"),
-      value: "approve-turn",
-      render: () => (
-        <ApprovalMenuOption
-          description={t("transcript.approvalPublishSkillDraftDesc")}
-          icon={Check}
-          label={t("transcript.approvalPublishSkillDraft")}
-          loading={pendingAction === "turn"}
-        />
-      ),
-    });
-    if (skillDraft) {
-      approvalMenuItems.push({
-        id: "review-skill",
-        label: t("settings.skills.viewDiff"),
-        value: "review-skill",
-        render: () => <ApprovalMenuOption description={t("transcript.approvalReviewDesc")} icon={FileText} label={t("settings.skills.viewDiff")} />,
-      });
-    }
   } else {
     approvalMenuItems.push(
       {
-        disabled: projectDirsRequired,
         id: "approve-turn",
         label: t("transcript.approvalAllowTurn"),
         value: "approve-turn",
@@ -1899,7 +1858,6 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
         ),
       },
       {
-        disabled: projectDirsRequired || projectDirsRequiredForSession,
         id: "approve-session",
         label: t("transcript.approvalAllowSession"),
         value: "approve-session",
@@ -1916,13 +1874,13 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
   }
   approvalMenuItems.push({
     id: "deny",
-    label: approvalDenyLabel(isSkillDraftApproval, toolCallApproval.operation, Boolean(patchProposal), Boolean(gitCommitApproval), t),
+    label: approvalDenyLabel(toolCallApproval.operation, Boolean(patchProposal), Boolean(gitCommitApproval), t),
     value: "deny",
     render: () => (
       <ApprovalMenuOption
         description={t("transcript.approvalDenyDesc")}
         icon={X}
-        label={approvalDenyLabel(isSkillDraftApproval, toolCallApproval.operation, Boolean(patchProposal), Boolean(gitCommitApproval), t)}
+        label={approvalDenyLabel(toolCallApproval.operation, Boolean(patchProposal), Boolean(gitCommitApproval), t)}
         loading={pendingAction === "deny"}
       />
     ),
@@ -1949,10 +1907,6 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
           setViewingGitCommit(gitCommitApproval);
         }
         return;
-      case "review-skill":
-        if (skillDraft) {
-          setViewingSkillDraft(skillDraft);
-        }
     }
   }
 
@@ -1992,18 +1946,7 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
           <span className="min-w-0 truncate">{gitCommitApproval.commitMessage}</span>
         </div>
       ) : null}
-      {isSkillDraftApproval && skillDraft ? (
-        <div className="grid gap-1 rounded-md border border-border/70 bg-background/70 px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
-          <div className="flex min-w-0 items-center gap-1">
-            <span className="shrink-0 font-medium text-foreground">{skillDraft.id}</span>
-            {skillDraft.path ? <span className="min-w-0 truncate font-mono">{skillDraft.path}</span> : null}
-          </div>
-          {typeof skillDraftApproval?.fileCount === "number" ? (
-            <div>{t("transcript.approvalSkillDraftFiles").replace("{count}", String(skillDraftApproval.fileCount))}</div>
-          ) : null}
-        </div>
-      ) : null}
-      {!isSkillDraftApproval && isCodeApproval ? (
+      {isCodeApproval ? (
         <div className="grid gap-1">
           <div className="text-[11px] font-medium text-muted-foreground">
             {t("transcript.approvalProjectDirs")}
@@ -2027,8 +1970,8 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
               ))}
             </div>
           ) : null}
-          {projectDirsRequired || projectDirsRequiredForSession ? (
-            <div className="text-[11px] leading-4 text-warning">{t("transcript.approvalProjectDirsRequired")}</div>
+          {projectDirs.length === 0 ? (
+            <div className="text-[11px] leading-4 text-muted-foreground">{t("transcript.approvalProjectDirsOptional")}</div>
           ) : null}
           {!hasPayloadProjectDirs ? (
             <div className="flex flex-wrap items-center gap-1.5">
@@ -2056,15 +1999,6 @@ function ComposerApprovalBar({ approval, sessionProjectID, token }: { approval?:
         maxHeightClassName="max-h-44"
         onEscape={() => void deny()}
         onSelect={selectApprovalAction}
-      />
-      <SkillDraftDiffDialog
-        applying={pendingAction === "turn"}
-        draft={viewingSkillDraft}
-        rejecting={pendingAction === "deny"}
-        token={token}
-        onApply={() => void approve("turn")}
-        onOpenChange={(open) => !open && setViewingSkillDraft(null)}
-        onReject={() => void deny()}
       />
       <PatchProposalDiffDialog
         applying={pendingAction === "turn"}
@@ -2127,16 +2061,7 @@ function approvalToolActionLabel(operation: string, patchProposal: boolean, gitC
   }
 }
 
-function approvalDenyLabel(
-  skillDraft: boolean,
-  operation: string,
-  patchProposal: boolean,
-  gitCommit: boolean,
-  t: (key: string) => string,
-) {
-  if (skillDraft) {
-    return t("transcript.approvalDoNotPublish");
-  }
+function approvalDenyLabel(operation: string, patchProposal: boolean, gitCommit: boolean, t: (key: string) => string) {
   if (patchProposal) {
     return t("transcript.approvalDoNotApply");
   }
@@ -2180,7 +2105,7 @@ function firstPendingApproval(overlay: AssistantOverlay | undefined): ComposerAp
   if (!approval) {
     return undefined;
   }
-  if (overlay.status === "streaming" || approval.approvalKind === "skill_draft") {
+  if (overlay.status === "streaming") {
     return approval;
   }
   return undefined;
@@ -2206,43 +2131,11 @@ function projectDirsFromPayload(payload: unknown) {
   return dedupeStrings(dirs.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean));
 }
 
-function needsProjectDirFromPayload(payload: unknown) {
-  return Boolean(payload && typeof payload === "object" && "needsProjectDir" in payload && payload.needsProjectDir === true);
-}
-
 function suggestedProjectDirName(payload: unknown) {
   if (payload && typeof payload === "object" && "suggestedDirName" in payload && typeof payload.suggestedDirName === "string") {
     return payload.suggestedDirName.trim();
   }
   return "";
-}
-
-function skillDraftFromPayload(payload: unknown) {
-  if (!payload || typeof payload !== "object") {
-    return null;
-  }
-  const data = payload as Record<string, unknown>;
-  const draft = data.draft && typeof data.draft === "object" ? (data.draft as Record<string, unknown>) : {};
-  const id = typeof data.draft_id === "string" ? data.draft_id.trim() : typeof draft.id === "string" ? draft.id.trim() : "";
-  const path = typeof draft.path === "string" ? draft.path.trim() : "";
-  const description = typeof draft.description === "string" ? draft.description : "";
-  const change: SkillDraft["change"] = draft.change === "modified" ? "modified" : "added";
-  const validation = draft.validation && typeof draft.validation === "object" ? (draft.validation as SkillDraft["validation"]) : { ok: true };
-  const fileCount = typeof data.fileCount === "number" ? data.fileCount : undefined;
-  if (!id) {
-    return null;
-  }
-  return {
-    draft: {
-      change,
-      description,
-      id,
-      name: typeof draft.name === "string" ? draft.name : id,
-      path,
-      validation,
-    },
-    fileCount,
-  };
 }
 
 function toolCallFromPayload(payload: unknown) {
@@ -2357,6 +2250,7 @@ function toolCallReason(operation: string, t: (key: string) => string) {
     case "git_stage":
     case "git_unstage":
     case "git_commit":
+    case "app_save":
     case "shell":
     case "process_start":
       return t(`transcript.approvalToolCall.${operation}`);
@@ -2379,9 +2273,6 @@ async function pickProjectDirectories(t: (key: string) => string) {
 }
 
 function approvalTitle(approval: ComposerApproval, targetMode: string, t: (key: string) => string) {
-  if (approval.approvalKind === "skill_draft") {
-    return t("transcript.approvalSkillDraftTitle");
-  }
   if (approval.approvalKind === "tool_call") {
     return t("transcript.approvalToolCallTitle");
   }

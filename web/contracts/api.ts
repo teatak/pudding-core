@@ -442,6 +442,12 @@ export const contentPart = z.discriminatedUnion("type", [
     summaryKind: z.string().optional(),
     summaryCount: z.number().optional(),
   }),
+  z.object({
+    type: z.literal("form_result"),
+    title: z.string(),
+    schema: z.record(z.string(), z.unknown()),
+    result: z.record(z.string(), z.unknown()),
+  }),
   attachment.extend({ type: z.literal("attachment") }),
   localFolder.extend({ type: z.literal("local_folder") }),
   projectReference.extend({ type: z.literal("project_reference") }),
@@ -943,41 +949,6 @@ export type Skill = z.infer<typeof skill>;
 
 export const listSkillsResponse = z.object({ skills: z.array(skill) });
 
-export const skillValidation = z.object({
-  ok: z.boolean(),
-  errors: z.array(z.string()).optional(),
-  warnings: z.array(z.string()).optional(),
-});
-export type SkillValidation = z.infer<typeof skillValidation>;
-
-export const skillDraft = z.object({
-  id: z.string(),
-  name: z.string(),
-  description: z.string().optional(),
-  path: z.string(),
-  iconPath: z.string().optional(),
-  change: z.enum(["added", "modified"]),
-  validation: skillValidation,
-});
-export type SkillDraft = z.infer<typeof skillDraft>;
-
-export const skillFileDiff = z.object({
-  path: z.string(),
-  change: z.enum(["added", "modified", "deleted"]),
-  old: z.string().optional(),
-  new: z.string().optional(),
-  unifiedDiff: z.string().optional(),
-});
-export type SkillFileDiff = z.infer<typeof skillFileDiff>;
-
-export const skillDraftDetail = z.object({
-  draft: skillDraft,
-  files: z.array(skillFileDiff),
-});
-export type SkillDraftDetail = z.infer<typeof skillDraftDetail>;
-
-export const listSkillDraftsResponse = z.object({ drafts: z.array(skillDraft) });
-
 export const webToolProvider = z.object({
   name: z.string(),
   apiKey: z.string().optional(),
@@ -1095,6 +1066,7 @@ export const appConnectionConfig = z.object({
 });
 
 export const appDefinition = z.object({
+  kind: z.enum(["app", "mcp"]),
   id: z.string(),
   name: z.string(),
   version: z.string().optional(),
@@ -1169,6 +1141,12 @@ export const appMCPStatusResponse = z.object({
 export type AppMCPStatusResponse = z.infer<typeof appMCPStatusResponse>;
 
 export const listAppsResponse = z.object({ apps: z.array(appDefinition) });
+export const appMCPConfigRequest = z.object({
+  configJSON: z.string().min(1),
+  name: z.string().optional(),
+});
+export const appMCPConfigResponse = z.object({ configJSON: z.string() });
+export const importMCPAppsResponse = z.object({ apps: z.array(appDefinition) });
 export const listAppConnectionsResponse = z.object({ connections: z.array(appConnection) });
 
 export const startAppOAuthRequest = z.object({

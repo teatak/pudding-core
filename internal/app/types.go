@@ -34,7 +34,13 @@ const (
 	SourceInstalled = "installed"
 )
 
+const (
+	KindApp = "app"
+	KindMCP = "mcp"
+)
+
 type Definition struct {
+	Kind           string              `json:"kind" yaml:"kind,omitempty"`
 	ID             string              `json:"id" yaml:"id"`
 	Name           string              `json:"name" yaml:"name"`
 	Version        string              `json:"version,omitempty" yaml:"version,omitempty"`

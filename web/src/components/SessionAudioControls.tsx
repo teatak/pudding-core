@@ -324,6 +324,9 @@ export function audioAPIErrorMessage(error: unknown, fallback: string, t: (key: 
     if (error.code === "audio_input_unavailable") {
       return t("voice.inputUnavailable");
     }
+    if (error.code === "audio_input_route_unavailable") {
+      return t("voice.inputRouteUnavailable");
+    }
     if (error.code === "audio_input_unsupported") {
       return t("voice.inputRawUnsupported");
     }

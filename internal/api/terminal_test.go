@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -69,3 +70,44 @@ func (fakeTerminalService) ServeWebSocket(w http.ResponseWriter, request *http.R
 
 func (fakeTerminalService) CloseSession(string) {}
 func (fakeTerminalService) Close() error        { return nil }
+
+type failingDeleteStore struct {
+	store.Store
+	err error
+}
+
+func (s failingDeleteStore) DeleteSession(context.Context, string) error { return s.err }
+
+type trackingTerminalService struct {
+	fakeTerminalService
+	closed []string
+}
+
+func (s *trackingTerminalService) CloseSession(sessionID string) {
+	s.closed = append(s.closed, sessionID)
+}
+
+func TestDeleteSessionKeepsTerminalWhenStoreDeleteFails(t *testing.T) {
+	metadata := memstore.New()
+	if err := metadata.CreateSession(context.Background(), &store.Session{ID: "sess", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	hub := event.NewHub()
+	eng := engine.New(metadata, hub, registry.Static(mock.New()), metadata)
+	terminalService := &trackingTerminalService{}
+	storeErr := errors.New("delete failed")
+	server := httptest.NewServer(New(eng, failingDeleteStore{Store: metadata, err: storeErr}, metadata, hub).WithTerminals(terminalService).Handler(testToken, nil))
+	defer server.Close()
+
+	resp := req(t, http.MethodDelete, server.URL+"/sessions/sess", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", resp.StatusCode)
+	}
+	if len(terminalService.closed) != 0 {
+		t.Fatalf("terminal closed before session deletion committed: %v", terminalService.closed)
+	}
+	if _, err := metadata.GetSession(context.Background(), "sess"); err != nil {
+		t.Fatalf("session should remain after failed deletion: %v", err)
+	}
+}

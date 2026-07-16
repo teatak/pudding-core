@@ -37,6 +37,23 @@ func ClassifyToolCallForProject(name string, raw json.RawMessage, projectDirs []
 }
 
 func classifyToolCall(name string, raw json.RawMessage, projectDirs []string) (ToolRisk, bool) {
+	if name == AppSave {
+		request, err := decodeAppSaveRequest(raw)
+		if err != nil {
+			return ToolRisk{}, false
+		}
+		summary := "Create an installed App package."
+		if request.Operation == "update" {
+			summary = "Replace an installed App package."
+		}
+		return ToolRisk{
+			Class:     RiskClassWrite,
+			Operation: "app_save",
+			Scope:     "app",
+			Paths:     compactRiskPaths(request.AppID),
+			Summary:   summary,
+		}, true
+	}
 	if name == CodeSymbols || name == CodeDefinition || name == CodeReferences || name == CodeDiagnostics || name == CodeRename {
 		return classifyCodeReadCall(name, raw)
 	}

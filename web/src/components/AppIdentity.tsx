@@ -72,9 +72,10 @@ export function AppIdentityIcon({
   iconSrc?: string;
   size?: IdentityIconSize;
 }) {
+  const resolvedIcon = icon ?? app.icon;
   return app.source === "builtin" ? (
     <BuiltinAppIcon appID={app.id} size={size} />
   ) : (
-    <AppIcon icon={icon ?? app.icon} size={size} src={iconSrc} />
+    <AppIcon icon={resolvedIcon} size={size} src={iconSrc} />
   );
 }

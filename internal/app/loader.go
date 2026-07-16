@@ -25,6 +25,7 @@ var connectionFieldIDPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 var endpointPlatformPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
 type fileDefinition struct {
+	Kind        string                 `yaml:"kind,omitempty"`
 	ID          string                 `yaml:"id"`
 	Name        string                 `yaml:"name"`
 	Version     string                 `yaml:"version,omitempty"`
@@ -65,6 +66,14 @@ type skillFrontmatter struct {
 }
 
 func LoadUserDefinitions(root string) ([]*Definition, error) {
+	resolvedRoot, err := resolveAppRoot(root, false)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	root = resolvedRoot
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -87,9 +96,33 @@ func LoadUserDefinitions(root string) ([]*Definition, error) {
 	return out, nil
 }
 
+func resolveAppRoot(root string, create bool) (string, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return "", errors.New("app root is required")
+	}
+	if create {
+		if err := os.MkdirAll(root, 0o700); err != nil {
+			return "", err
+		}
+	}
+	info, err := os.Lstat(root)
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return "", errors.New("app root must be a directory, not a symlink")
+	}
+	return filepath.Clean(root), nil
+}
+
 func LoadDefinitionDir(dir string) (*Definition, error) {
 	path := filepath.Join(dir, AppFileName)
-	data, err := os.ReadFile(path)
+	resolvedPath, err := resolveAppRegularFile(dir, AppFileName)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(resolvedPath)
 	if err != nil {
 		return nil, err
 	}
@@ -98,6 +131,7 @@ func LoadDefinitionDir(dir string) (*Definition, error) {
 		return nil, fmt.Errorf("app: parse %s: %w", path, err)
 	}
 	def := &Definition{
+		Kind:        normalizedDefinitionKind(raw.Kind),
 		ID:          strings.TrimSpace(raw.ID),
 		Name:        strings.TrimSpace(raw.Name),
 		Version:     strings.TrimSpace(raw.Version),
@@ -124,6 +158,11 @@ func LoadDefinitionDir(dir string) (*Definition, error) {
 	}
 	if err := ValidateDefinition(def); err != nil {
 		return nil, fmt.Errorf("app: validate %s: %w", path, err)
+	}
+	if def.Icon != nil {
+		if _, err := resolveAppRegularFile(dir, def.Icon.SVG); err != nil {
+			return nil, fmt.Errorf("app: validate %s: icon %q is not a regular file inside the App: %w", path, def.Icon.SVG, err)
+		}
 	}
 	applyDefinitionLock(dir, def)
 	return def, nil
@@ -223,7 +262,7 @@ func normalizeConnectionConfig(raw *ConnectionConfig) *ConnectionConfig {
 
 func defaultAppIconPath(appDir string) string {
 	name := "icon.svg"
-	if _, err := os.Stat(filepath.Join(appDir, "assets", name)); err == nil {
+	if _, err := resolveAppRegularFile(appDir, filepath.ToSlash(filepath.Join("assets", name))); err == nil {
 		return filepath.ToSlash(filepath.Join("assets", name))
 	}
 	return ""
@@ -232,6 +271,19 @@ func defaultAppIconPath(appDir string) string {
 func ValidateDefinition(def *Definition) error {
 	if def == nil {
 		return errors.New("definition is nil")
+	}
+	def.Kind = normalizedDefinitionKind(def.Kind)
+	switch def.Kind {
+	case KindApp:
+	case KindMCP:
+		if len(def.Endpoints) != 1 {
+			return errors.New("mcp app must define exactly one endpoint")
+		}
+		if len(def.Skills) > 0 {
+			return errors.New("mcp app cannot define skills")
+		}
+	default:
+		return fmt.Errorf("unsupported app kind %q", def.Kind)
 	}
 	if !appIDPattern.MatchString(strings.TrimSpace(def.ID)) {
 		return fmt.Errorf("invalid id %q", def.ID)
@@ -242,6 +294,9 @@ func ValidateDefinition(def *Definition) error {
 		}
 		if err := ValidateEndpoint(endpoint); err != nil {
 			return fmt.Errorf("endpoint %s: %w", name, err)
+		}
+		if def.Kind == KindMCP && endpoint.Kind != EndpointKindMCP {
+			return fmt.Errorf("mcp app endpoint %s must use kind %q", name, EndpointKindMCP)
 		}
 	}
 	for _, skill := range def.Skills {
@@ -261,6 +316,14 @@ func ValidateDefinition(def *Definition) error {
 		return err
 	}
 	return nil
+}
+
+func normalizedDefinitionKind(kind string) string {
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		return KindApp
+	}
+	return kind
 }
 
 func ValidateConnectionConfig(connection *ConnectionConfig) error {
@@ -284,8 +347,23 @@ func ValidateConnectionConfig(connection *ConnectionConfig) error {
 			default:
 				return fmt.Errorf("connection field %q has unsupported inject target %q", id, rule.Target)
 			}
-			if target == "env" && strings.ContainsAny(strings.TrimSpace(rule.Name), "=\x00") {
-				return fmt.Errorf("connection field %q has invalid env name %q", id, rule.Name)
+			if target == "env" {
+				name := strings.TrimSpace(rule.Name)
+				if name == "" {
+					name = id
+				}
+				if !validEndpointEnvName(name) {
+					return fmt.Errorf("connection field %q has invalid env name %q", id, name)
+				}
+			}
+			if target == "header" {
+				name := strings.TrimSpace(rule.Name)
+				if name == "" {
+					name = id
+				}
+				if !IsAllowedRequestHeaderName(name) {
+					return fmt.Errorf("connection field %q has invalid or forbidden header name %q", id, name)
+				}
 			}
 			for _, method := range rule.Methods {
 				switch strings.ToUpper(strings.TrimSpace(method)) {
@@ -325,8 +403,17 @@ func ValidateAuthConfig(auth *AuthConfig) error {
 		default:
 			return fmt.Errorf("unsupported auth method type %q", method.Type)
 		}
-		if method.Type == AuthTypeHeader && strings.TrimSpace(method.Header) == "" {
-			return fmt.Errorf("auth method %q header is required", id)
+		if method.Type == AuthTypeHeader {
+			header := strings.TrimSpace(method.Header)
+			if header == "" {
+				return fmt.Errorf("auth method %q header is required", id)
+			}
+			if !IsAllowedRequestHeaderName(header) {
+				return fmt.Errorf("auth method %q has invalid or forbidden header %q", id, header)
+			}
+		}
+		if method.Type == AuthTypeToken && !IsAllowedRequestHeaderValue(method.Prefix) {
+			return fmt.Errorf("auth method %q has invalid token prefix", id)
 		}
 	}
 	return nil
@@ -390,21 +477,11 @@ func validateMCPEndpoint(endpoint Endpoint) error {
 	default:
 		return fmt.Errorf("unsupported mcp transport %q", endpoint.Transport)
 	}
-	for name := range endpoint.Headers {
-		if strings.TrimSpace(name) == "" {
-			return errors.New("mcp endpoint header name is required")
-		}
-		if !validEndpointHeaderName(name) {
-			return fmt.Errorf("mcp endpoint header %q is invalid", name)
-		}
+	if err := validateEndpointStringMap("env", endpoint.Env, validEndpointEnvName); err != nil {
+		return err
 	}
-	for name := range endpoint.Env {
-		if strings.TrimSpace(name) == "" {
-			return errors.New("mcp endpoint env name is required")
-		}
-		if strings.ContainsAny(name, "\x00=") {
-			return fmt.Errorf("mcp endpoint env name %q is invalid", name)
-		}
+	if err := validateEndpointStringMap("header", endpoint.Headers, IsAllowedRequestHeaderName); err != nil {
+		return err
 	}
 	return nil
 }
@@ -418,14 +495,14 @@ func validateEndpointPlatformOverride(override EndpointPlatformOverride) error {
 	if err := validateEndpointStringMap("env", override.Env, validEndpointEnvName); err != nil {
 		return err
 	}
-	if err := validateEndpointStringMap("header", override.Headers, validEndpointHeaderName); err != nil {
+	if err := validateEndpointStringMap("header", override.Headers, IsAllowedRequestHeaderName); err != nil {
 		return err
 	}
 	return nil
 }
 
 func validateEndpointStringMap(label string, values map[string]string, valid func(string) bool) error {
-	for name := range values {
+	for name, value := range values {
 		name = strings.TrimSpace(name)
 		if name == "" {
 			return fmt.Errorf("endpoint %s name is required", label)
@@ -433,18 +510,38 @@ func validateEndpointStringMap(label string, values map[string]string, valid fun
 		if !valid(name) {
 			return fmt.Errorf("endpoint %s %q is invalid", label, name)
 		}
+		if strings.ContainsRune(value, 0) {
+			return fmt.Errorf("endpoint %s %q contains a NUL byte", label, name)
+		}
+		if label == "header" && !IsAllowedRequestHeaderValue(value) {
+			return fmt.Errorf("endpoint header %q contains a newline", name)
+		}
 	}
 	return nil
 }
 
 func validEndpointEnvName(name string) bool {
 	name = strings.TrimSpace(name)
-	return name != "" && !strings.ContainsAny(name, "=\x00")
+	if name == "" {
+		return false
+	}
+	for index, r := range name {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r == '_' || index > 0 && r >= '0' && r <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
-func validEndpointHeaderName(name string) bool {
+// IsAllowedRequestHeaderName reports whether an App may inject the header into
+// an outbound request. Keep this shared by manifest validation and execution.
+func IsAllowedRequestHeaderName(name string) bool {
 	name = strings.TrimSpace(name)
 	if name == "" {
+		return false
+	}
+	if _, forbidden := forbiddenRequestHeaders[strings.ToLower(name)]; forbidden {
 		return false
 	}
 	for _, r := range name {
@@ -457,6 +554,25 @@ func validEndpointHeaderName(name string) bool {
 		return false
 	}
 	return true
+}
+
+// IsAllowedRequestHeaderValue reports whether a value can be safely copied
+// into an outbound HTTP header.
+func IsAllowedRequestHeaderValue(value string) bool {
+	return !strings.ContainsAny(value, "\x00\r\n")
+}
+
+var forbiddenRequestHeaders = map[string]struct{}{
+	"host":                {},
+	"content-length":      {},
+	"connection":          {},
+	"transfer-encoding":   {},
+	"expect":              {},
+	"upgrade":             {},
+	"proxy-connection":    {},
+	"proxy-authorization": {},
+	"te":                  {},
+	"trailer":             {},
 }
 
 func validateEndpointURL(rawURL string) error {
@@ -474,15 +590,20 @@ func validateEndpointURL(rawURL string) error {
 }
 
 func loadSkillRef(appDir, rel string) (SkillRef, error) {
-	if filepath.IsAbs(rel) || strings.Contains(rel, "..") {
-		return SkillRef{}, fmt.Errorf("invalid skill path %q", rel)
+	cleaned, err := cleanRelativeSlashPath(rel)
+	if err != nil {
+		return SkillRef{}, fmt.Errorf("invalid skill path %q: %w", rel, err)
 	}
-	path := filepath.Join(appDir, filepath.FromSlash(rel))
-	data, err := os.ReadFile(path)
+	resolvedPath, err := resolveAppRegularFile(appDir, cleaned)
+	if err != nil {
+		return SkillRef{}, err
+	}
+	data, err := os.ReadFile(resolvedPath)
 	if err != nil {
 		return SkillRef{}, err
 	}
 	meta, _ := parseSkillFrontmatter(data)
+	path := filepath.Join(appDir, filepath.FromSlash(cleaned))
 	id := strings.TrimSuffix(filepath.Base(filepath.Dir(path)), filepath.Ext(filepath.Base(path)))
 	if strings.TrimSpace(meta.Name) != "" {
 		id = strings.TrimSpace(meta.Name)
@@ -491,8 +612,42 @@ func loadSkillRef(appDir, rel string) (SkillRef, error) {
 		ID:          id,
 		Name:        strings.TrimSpace(meta.Name),
 		Description: strings.TrimSpace(meta.Description),
-		Path:        filepath.ToSlash(rel),
+		Path:        cleaned,
 	}, nil
+}
+
+func resolveAppRegularFile(appDir, rel string) (string, error) {
+	info, err := os.Lstat(appDir)
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return "", errors.New("app directory must be a directory, not a symlink")
+	}
+	cleaned, err := cleanRelativeSlashPath(rel)
+	if err != nil {
+		return "", err
+	}
+	root, err := filepath.EvalSymlinks(appDir)
+	if err != nil {
+		return "", err
+	}
+	target, err := filepath.EvalSymlinks(filepath.Join(root, filepath.FromSlash(cleaned)))
+	if err != nil {
+		return "", err
+	}
+	relative, err := filepath.Rel(root, target)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", errors.New("app file escapes the App directory")
+	}
+	info, err = os.Stat(target)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", errors.New("app file must be a regular file")
+	}
+	return target, nil
 }
 
 func cleanRelativeSlashPath(rel string) (string, error) {

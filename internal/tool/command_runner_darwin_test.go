@@ -4,6 +4,7 @@ package tool
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -110,6 +111,31 @@ func TestMacOSCommandSandboxFullBypassesBoundary(t *testing.T) {
 	})
 	if result.exitCode != 0 || strings.TrimSpace(result.stdout) != "private" || result.sandboxed {
 		t.Fatalf("full access did not bypass the sandbox: %+v", result)
+	}
+}
+
+func TestMacOSCommandSandboxTrustsCommonUserExecutableDirs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	project := t.TempDir()
+
+	for _, relativeDir := range []string{
+		filepath.Join(".local", "bin"),
+		filepath.Join(".cargo", "bin"),
+		filepath.Join("go", "bin"),
+		filepath.Join("Library", "pnpm"),
+	} {
+		dir := filepath.Join(home, relativeDir)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		executable := filepath.Join(dir, "pudding-tool")
+		if err := os.WriteFile(executable, []byte("#!/bin/sh\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := sandboxExecutableRoot(executable, []string{project}); err != nil {
+			t.Fatalf("common executable dir %q was rejected: %v", relativeDir, err)
+		}
 	}
 }
 
@@ -305,6 +331,44 @@ func TestMacOSCommandSandboxEnvironmentIsolatesGitConfig(t *testing.T) {
 		if got, want := sandboxEnvValue(env, key), filepath.Join(stateRoot, "tmp"); got != want {
 			t.Fatalf("%s = %q, want %q", key, got, want)
 		}
+	}
+	wantPaths := map[string]string{
+		"GOPATH":               filepath.Join(stateRoot, "go"),
+		"GOMODCACHE":           filepath.Join(stateRoot, "go", "pkg", "mod"),
+		"GOCACHE":              filepath.Join(stateRoot, "cache", "go-build"),
+		"NPM_CONFIG_CACHE":     filepath.Join(stateRoot, "cache", "npm"),
+		"npm_config_store_dir": filepath.Join(stateRoot, "cache", "pnpm-store"),
+		"YARN_CACHE_FOLDER":    filepath.Join(stateRoot, "cache", "yarn"),
+		"PIP_CACHE_DIR":        filepath.Join(stateRoot, "cache", "pip"),
+		"UV_CACHE_DIR":         filepath.Join(stateRoot, "cache", "uv"),
+	}
+	for key, want := range wantPaths {
+		if got := sandboxEnvValue(env, key); got != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
+
+func TestMacOSCommandSandboxRejectsSymlinkedStateRoot(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	runner := &macOSCommandRunner{homeDir: home}
+	stateRoot, err := runner.prepareStateRoot([]string{project})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(stateRoot); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.Symlink(outside, stateRoot); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if _, err := runner.prepareStateRoot([]string{project}); err == nil {
+		t.Fatal("expected symlinked sandbox state root to be rejected")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "cache")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("sandbox state escaped into symlink target, err=%v", err)
 	}
 }
 

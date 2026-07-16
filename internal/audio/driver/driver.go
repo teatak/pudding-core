@@ -9,8 +9,9 @@ import (
 )
 
 var (
-	ErrNotStarted = errors.New("audio driver: not started")
-	ErrNilHandler = errors.New("audio driver: nil capture handler")
+	ErrNotStarted      = errors.New("audio driver: not started")
+	ErrNilHandler      = errors.New("audio driver: nil capture handler")
+	ErrCaptureNoSignal = errors.New("audio driver: capture has no signal")
 )
 
 type CaptureHandler func(frame.PCM16)

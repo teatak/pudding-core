@@ -16,7 +16,6 @@ const { autoUpdater } = require("electron-updater");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
-const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
 const packageMetadata = require("../package.json");
@@ -24,6 +23,8 @@ const packageMetadata = require("../package.json");
 const { BrowserBridgeServer } = require("./browser-bridge-server.cjs");
 const { BrowserHost } = require("./browser-host.cjs");
 const { configureManagedBrowserPermissions, managedBrowserPartition } = require("./browser-permissions.cjs");
+const { probePuddingDaemon } = require("./daemon-health.cjs");
+const { installConsoleFileLogging } = require("./file-logger.cjs");
 const { buildEditContextMenuTemplate } = require("./context-menu.cjs");
 const { nativeText, normalizeNativeLocale } = require("./native-i18n.cjs");
 const { ProjectFileWatcher } = require("./project-file-watcher.cjs");
@@ -34,6 +35,10 @@ const repoRoot = app.isPackaged ? path.join(process.resourcesPath, "app") : path
 const appDisplayName = "Pudding";
 const repositoryURL = "https://github.com/teatak/pudding";
 const issueTrackerURL = `${repositoryURL}/issues`;
+installConsoleFileLogging({ logsDir: path.join(puddingHomePath(), "logs"), prefix: "electron" });
+process.on("uncaughtExceptionMonitor", (error, origin) => {
+  console.error(`[electron] uncaught exception origin=${origin}`, error);
+});
 const releasePageOverride = normalizeUpdatePageURL(process.env.PUDDING_UPDATE_DOWNLOAD_URL);
 const releasePageURL = releasePageOverride || `${repositoryURL}/releases/latest`;
 
@@ -48,6 +53,13 @@ const defaultAddr = app.isPackaged ? "127.0.0.1:9669" : "127.0.0.1:9679";
 const daemonAddr = (process.env.PUDDING_DAEMON_ADDR || defaultAddr).trim();
 const apiBase = trimTrailingSlash(process.env.PUDDING_API_BASE || `http://${daemonAddr}`);
 const devURL = trimTrailingSlash(process.env.PUDDING_DEV_URL || "");
+console.info("[electron] starting", {
+  version: packageMetadata.version,
+  channel: packageMetadata.puddingReleaseChannel || (app.isPackaged ? "stable" : "dev"),
+  packaged: app.isPackaged,
+  home: puddingHomePath(),
+  daemonAddr,
+});
 const oauthReturnScheme = normalizeURLScheme(process.env.PUDDING_OAUTH_RETURN_SCHEME || "pudding");
 const macTrafficLightPosition = { x: 18, y: 18 };
 const defaultWindowBounds = { width: 1440, height: 920 };
@@ -72,7 +84,10 @@ const browserBridgeServer = new BrowserBridgeServer(browserHost);
 const projectFileWatcher = new ProjectFileWatcher();
 
 let daemonProcess = null;
+let daemonStartupPromise = null;
 let quitting = false;
+let shutdownPromise = null;
+let shutdownComplete = false;
 let appTray = null;
 let shellLocale = "en";
 const pendingOAuthReturnURLs = [];
@@ -125,8 +140,10 @@ app.whenReady().then(async () => {
     const window = createMainWindow();
     createTray();
     await loadRenderer(window, token);
+    console.info("[electron] ready");
     flushPendingOAuthReturnURLs();
     updateManager.start();
+    app.on("activate", activateApplication);
   } catch (error) {
     console.error("[electron] startup failed", error);
     app.quit();
@@ -140,7 +157,7 @@ app.on("second-instance", () => {
   }
 });
 
-app.on("activate", () => {
+function activateApplication() {
   if (!hasSingleInstanceLock) {
     return;
   }
@@ -161,7 +178,7 @@ app.on("activate", () => {
       console.error("[electron] activate failed", error);
       app.quit();
     });
-});
+}
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
@@ -169,15 +186,27 @@ app.on("window-all-closed", () => {
   }
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
   quitting = true;
   updateManager.stop();
   for (const window of BrowserWindow.getAllWindows()) {
     saveWindowState(window);
   }
-  stopManagedDaemon();
   projectFileWatcher.closeAll();
-  void browserBridgeServer.stop();
+  if (shutdownComplete) {
+    return;
+  }
+  event.preventDefault();
+  if (shutdownPromise) {
+    return;
+  }
+  console.info("[electron] shutting down");
+  shutdownPromise = stopDesktopResources()
+    .catch((error) => console.error("[electron] shutdown failed", error))
+    .finally(() => {
+      shutdownComplete = true;
+      app.quit();
+    });
 });
 
 nativeTheme.on("updated", () => {
@@ -972,8 +1001,24 @@ async function loadRenderer(window, token) {
 }
 
 async function ensureDaemon(browserBridge) {
+  if (daemonStartupPromise) {
+    return daemonStartupPromise;
+  }
+  const attempt = startOrAttachDaemon(browserBridge);
+  daemonStartupPromise = attempt;
+  try {
+    return await attempt;
+  } finally {
+    if (daemonStartupPromise === attempt) {
+      daemonStartupPromise = null;
+    }
+  }
+}
+
+async function startOrAttachDaemon(browserBridge) {
   const attachedToken = await readUsableToken();
   if (attachedToken) {
+    console.info(`[electron] attached to daemon addr=${daemonAddr}`);
     return attachedToken;
   }
 
@@ -982,27 +1027,72 @@ async function ensureDaemon(browserBridge) {
     throw new Error("puddingd binary not found. Run `make desktop-dev` so the dev binary is built first.");
   }
 
-  daemonProcess = spawn(daemonBin, ["-addr", daemonAddr], {
+  console.info(`[electron] starting managed daemon addr=${daemonAddr} binary=${daemonBin}`);
+  const child = spawn(daemonBin, ["-addr", daemonAddr], {
     cwd: repoRoot,
     env: {
       ...process.env,
+      PUDDING_ELECTRON_MANAGED: "1",
       PUDDING_ELECTRON_BROWSER_BRIDGE_URL: browserBridge?.url || "",
       PUDDING_ELECTRON_BROWSER_BRIDGE_TOKEN: browserBridge?.token || "",
     },
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  daemonProcess = child;
+  child.stdin.on("error", () => {});
+
+  let ready = false;
+  let stderrTail = "";
+  child.stdout.on("data", (chunk) => process.stdout.write(`[puddingd] ${chunk}`));
+  child.stderr.on("data", (chunk) => {
+    stderrTail = `${stderrTail}${chunk}`.slice(-4_000);
+    process.stderr.write(`[puddingd] ${chunk}`);
+  });
+  const exited = new Promise((_, reject) => {
+    child.once("error", (error) => {
+      if (daemonProcess === child) {
+        daemonProcess = null;
+      }
+      reject(new Error(`failed to start puddingd: ${error.message}`));
+    });
+    child.once("exit", (code, signal) => {
+      if (daemonProcess === child) {
+        daemonProcess = null;
+      }
+      const error = daemonExitError(code, signal, stderrTail);
+      if (!ready) {
+        reject(error);
+        return;
+      }
+      if (!quitting) {
+        console.error(`[electron] ${error.message}`);
+        app.quit();
+      } else {
+        console.info(`[electron] managed daemon exited code=${code} signal=${signal}`);
+      }
+    });
   });
 
-  daemonProcess.stdout.on("data", (chunk) => process.stdout.write(`[puddingd] ${chunk}`));
-  daemonProcess.stderr.on("data", (chunk) => process.stderr.write(`[puddingd] ${chunk}`));
-  daemonProcess.on("exit", (code, signal) => {
-    daemonProcess = null;
-    if (!quitting) {
-      console.error(`[electron] managed daemon exited code=${code} signal=${signal}`);
-      app.quit();
+  try {
+    const token = await Promise.race([waitForDaemon(), exited]);
+    if (child.exitCode !== null) {
+      throw daemonExitError(child.exitCode, child.signalCode, stderrTail);
     }
-  });
+    ready = true;
+    console.info(`[electron] managed daemon ready addr=${daemonAddr}`);
+    return token;
+  } catch (error) {
+    if (daemonProcess === child && child.exitCode === null) {
+      child.kill("SIGTERM");
+    }
+    throw error;
+  }
+}
 
-  return waitForDaemon();
+function daemonExitError(code, signal, stderr) {
+  const detail = String(stderr || "").trim();
+  const suffix = detail ? `: ${detail}` : "";
+  return new Error(`managed daemon exited code=${code} signal=${signal}${suffix}`);
 }
 
 async function readUsableToken() {
@@ -1011,7 +1101,7 @@ async function readUsableToken() {
     if (!token) {
       return "";
     }
-    if (await canConnectToDaemon()) {
+    if (await probePuddingDaemon(apiBase, token)) {
       return token;
     }
   } catch {
@@ -1026,7 +1116,7 @@ async function waitForDaemon() {
   while (Date.now() - started < 15000) {
     try {
       const token = await readDaemonToken();
-      if (token && (await canConnectToDaemon())) {
+      if (token && (await probePuddingDaemon(apiBase, token))) {
         return token;
       }
     } catch (error) {
@@ -1055,23 +1145,6 @@ function previewUpdatePreferencePath() {
   return path.join(puddingHomePath(), "config", "desktop-preferences.json");
 }
 
-function canConnectToDaemon() {
-  const { hostname, port } = new URL(apiBase);
-  return new Promise((resolve) => {
-    const socket = net.connect({ host: hostname, port: Number(port) || 80 });
-    socket.setTimeout(500);
-    socket.once("connect", () => {
-      socket.destroy();
-      resolve(true);
-    });
-    socket.once("timeout", () => {
-      socket.destroy();
-      resolve(false);
-    });
-    socket.once("error", () => resolve(false));
-  });
-}
-
 function resolveDaemonBinary() {
   const exe = process.platform === "win32" ? "puddingd.exe" : "puddingd";
   const packagedCandidates = [
@@ -1088,21 +1161,24 @@ function resolveDaemonBinary() {
   return candidates.find((candidate) => fs.existsSync(candidate)) || "";
 }
 
-function stopManagedDaemon() {
-  if (!daemonProcess || daemonProcess.exitCode !== null) {
-    return;
-  }
-  daemonProcess.kill("SIGTERM");
-}
-
 async function prepareForUpdateInstall() {
   quitting = true;
   updateManager.stop();
   for (const window of BrowserWindow.getAllWindows()) {
     saveWindowState(window);
   }
-  await browserBridgeServer.stop();
-  await stopManagedDaemonAndWait();
+  await stopDesktopResources();
+  // quitAndInstall owns the following quit/relaunch sequence. Do not turn it
+  // into the ordinary delayed app.quit path in the before-quit handler.
+  shutdownComplete = true;
+}
+
+async function stopDesktopResources() {
+  const results = await Promise.allSettled([stopManagedDaemonAndWait(), browserBridgeServer.stop()]);
+  const failure = results.find((result) => result.status === "rejected");
+  if (failure) {
+    throw failure.reason;
+  }
 }
 
 function stopManagedDaemonAndWait(graceMs = 7_000) {
@@ -1141,7 +1217,7 @@ function stopManagedDaemonAndWait(graceMs = 7_000) {
         }
         settled = true;
         cleanup();
-        reject(new Error("managed daemon did not stop before update"));
+        reject(new Error("managed daemon did not stop before shutdown"));
       }, 1_000);
     }, graceMs);
   });

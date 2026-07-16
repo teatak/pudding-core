@@ -28,10 +28,11 @@ import (
 )
 
 var (
-	ErrNoInputBinding      = errors.New("voice: session does not own audio input")
-	ErrInputUnavailable    = errors.New("voice: input backend unavailable")
-	ErrRawInputUnsupported = errors.New("voice: current model does not support raw audio input")
-	ErrEmptySentence       = errors.New("voice: empty sentence")
+	ErrNoInputBinding        = errors.New("voice: session does not own audio input")
+	ErrInputUnavailable      = errors.New("voice: input backend unavailable")
+	ErrInputRouteUnavailable = errors.New("voice: input route unavailable")
+	ErrRawInputUnsupported   = errors.New("voice: current model does not support raw audio input")
+	ErrEmptySentence         = errors.New("voice: empty sentence")
 )
 
 const feedbackSuppressGrace = 1500 * time.Millisecond
@@ -489,7 +490,7 @@ func (s *Service) submitSentence(ctx context.Context, sessionID, text string, ev
 	if rawInput {
 		inputMode = InputModeRaw
 	}
-	slog.Info("voice: submitting sentence", "sessionID", sessionID, "clientMessageID", clientMessageID, "inputMode", inputMode, "text", previewText(text, 80))
+	slog.Info("voice: submitting sentence", "sessionID", sessionID, "clientMessageID", clientMessageID, "inputMode", inputMode, "textLength", len([]rune(text)))
 	result, err := s.submitter.Submit(ctx, engine.SubmitInput{
 		SessionID:       sessionID,
 		ClientMessageID: clientMessageID,
@@ -673,6 +674,9 @@ func (s *Service) startInput(sessionID string) error {
 		if resetErr := resetASRStream(context.Background(), client, ""); resetErr != nil {
 			slog.Warn("voice: reset asr after capture start error failed", "sessionID", sessionID, "err", resetErr)
 		}
+		if errors.Is(err, driver.ErrCaptureNoSignal) {
+			return fmt.Errorf("%w: %v", ErrInputRouteUnavailable, err)
+		}
 		return err
 	}
 	slog.Info("voice: input capture started", "sessionID", sessionID, "streamID", streamID, "driver", s.driver.Name(), "asr", client.Name())
@@ -734,7 +738,7 @@ func (s *Service) asrEventLoop(client asr.Client) {
 				"voice: asr sentence received",
 				"sessionID", owner,
 				"streamID", currentStreamID,
-				"text", previewText(ev.Text, 80),
+				"textLength", len([]rune(ev.Text)),
 				"language", ev.Language,
 				"audioDuration", ev.AudioDuration,
 				"decodeDuration", ev.DecodeDuration,
@@ -1275,16 +1279,4 @@ func clamp01(value float64) float64 {
 		return 1
 	}
 	return value
-}
-
-func previewText(text string, maxRunes int) string {
-	text = strings.TrimSpace(text)
-	if maxRunes <= 0 {
-		return ""
-	}
-	runes := []rune(text)
-	if len(runes) <= maxRunes {
-		return text
-	}
-	return string(runes[:maxRunes]) + "..."
 }

@@ -3,6 +3,42 @@
 Apps are local packages under `<home>/apps/<id>/`. Each app declares endpoints,
 auth methods, skills, and optional connection fields in `app.yaml`.
 
+## MCP Apps
+
+Ordinary MCP servers are managed as simplified Apps with `kind: mcp`; there is
+no separate MCP registry or loader. The Apps page imports the standard
+`mcpServers` JSON format through **Add MCP App**, and lists built-in, installed,
+and MCP Apps together under Installed.
+
+Each MCP App has exactly one MCP endpoint and does not require an App
+connection. `stdio` servers require Code mode, while streamable HTTP servers
+require Work mode. Environment variables and HTTP headers are stored in the
+private MCP override file rather than `app.yaml`. Enabled MCP Apps appear in the
+compact Available Apps prompt and are loaded on demand with
+`builtin_app_load`; there is no `builtin_mcp_load` tool.
+
+## LLM Authoring
+
+App creation follows the same on-demand pattern as Skill creation:
+
+1. Read the builtin `app-creator` Skill when the user explicitly asks to create
+   or update an App.
+2. Enter Code mode and load the `code.app` Toolkit.
+3. For updates, inspect visible package files through the read-only `app` file
+   scope. Hidden connection and MCP override files are never exposed there.
+4. Call `builtin_app_save` with a complete UTF-8 package and either `create` or
+   `update`.
+
+There is no Draft or publish step. The save tool builds and validates a hidden
+candidate directory, then replaces the installed directory. Validation or write
+failure leaves the previous installed App unchanged. Creation refuses an
+existing id; updates refuse builtin and runtime Apps. Saving is a persistent App
+write, so Ask and Auto approval modes request confirmation; Full Access does not.
+
+`builtin_app_save` accepts text files only, so authored icons use SVG. Secrets
+and connection values are configured through App Connections and must never be
+written into the package.
+
 ## Endpoint Kinds
 
 Apps can declare REST, GraphQL, and MCP endpoints under `endpoints`.
@@ -23,9 +59,9 @@ endpoints:
 
 For MCP endpoints, use `transport: streamable_http` with `url`, or
 `transport: stdio` with `command` and optional `args` / `env`. Runtime tool
-discovery currently exposes `streamable_http` MCP endpoints as model-callable
-tools after the app has a configured connection. `stdio` is a package schema
-target and is not started by the daemon yet.
+discovery exposes configured MCP endpoints as model-callable tools after the App
+is loaded. The daemon starts `stdio` endpoints on demand and stops their process
+when the session App binding is cleared or the daemon exits.
 
 ## Connection Fields
 

@@ -36,8 +36,25 @@ func TestClassifyToolCallRejectsLegacyWorkspaceScope(t *testing.T) {
 }
 
 func TestClassifyToolCallIgnoresManagedWrites(t *testing.T) {
-	if risk, ok := ClassifyToolCall(FileWrite, json.RawMessage(`{"scope":"skill_draft","path":"demo/SKILL.md","content":"x"}`)); ok {
+	if risk, ok := ClassifyToolCall(FileWrite, json.RawMessage(`{"scope":"skill","path":"demo/SKILL.md","content":"x"}`)); ok {
 		t.Fatalf("managed writes should not use project approval: %+v", risk)
+	}
+}
+
+func TestClassifyToolCallAppSaveRisk(t *testing.T) {
+	for _, operation := range []string{"create", "update"} {
+		risk, ok := ClassifyToolCall(AppSave, json.RawMessage(`{
+			"operation":"`+operation+`",
+			"app_id":"demo-app",
+			"version":"0.1.0",
+			"files":[{"path":"app.yaml","content":"id: demo-app"}]
+		}`))
+		if !ok || risk.Class != RiskClassWrite || risk.Operation != "app_save" || risk.Scope != "app" || risk.LowRisk || len(risk.Paths) != 1 || risk.Paths[0] != "demo-app" {
+			t.Fatalf("unexpected App save risk for %s: %+v ok=%v", operation, risk, ok)
+		}
+	}
+	if _, ok := ClassifyToolCall(AppSave, json.RawMessage(`{"operation":"create"}`)); ok {
+		t.Fatal("invalid App save must not be classified")
 	}
 }
 

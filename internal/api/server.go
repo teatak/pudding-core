@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -25,6 +26,7 @@ import (
 	"github.com/teatak/pudding-core/internal/desktopcamera"
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
+	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/mobileauth"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/terminal"
@@ -115,7 +117,7 @@ func (s *Server) WithCamera(capturer desktopcamera.Capturer) *Server {
 }
 
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
-var apiPrefixes = []string{"/sessions", "/projects", "/settings", "/providers", "/tools", "/skills", "/skill-drafts", "/skill-assets", "/usage", "/mobile", "/apps", "/app-assets", "/app-skills", "/app-connections", "/app-oauth", "/mcp", "/desktop"}
+var apiPrefixes = []string{"/sessions", "/projects", "/settings", "/providers", "/tools", "/skills", "/skill-assets", "/usage", "/mobile", "/apps", "/app-assets", "/app-skills", "/app-connections", "/app-oauth", "/mcp", "/desktop"}
 
 type appService interface {
 	ListDefinitions(ctx context.Context) ([]*app.Definition, error)
@@ -262,13 +264,12 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/mcp/browser-sessions").GET(s.listBrowserMCPSessions)
 	app.Route("/skills").GET(s.listSkills)
 	app.Route("/skills/:id").DELETE(s.deleteSkill)
-	app.Route("/skill-drafts").GET(s.listSkillDrafts)
-	app.Route("/skill-drafts/:id").GET(s.getSkillDraft).DELETE(s.deleteSkillDraft)
-	app.Route("/skill-drafts/:id/apply").POST(s.applySkillDraft)
 	app.Route("/skill-assets/*path").GET(s.getSkillAsset)
 	app.Route("/apps").GET(s.listApps)
 	app.Route("/apps/install").POST(s.installApp)
+	app.Route("/apps/mcp").POST(s.importMCPApps)
 	app.Route("/apps/:id/enabled").PUT(s.putAppEnabled)
+	app.Route("/apps/:id/mcp-config").GET(s.getMCPAppConfig).PUT(s.putMCPAppConfig)
 	app.Route("/apps/:id/mcp-overrides/:endpoint").GET(s.getAppMCPOverride).PUT(s.putAppMCPOverride).DELETE(s.deleteAppMCPOverride)
 	app.Route("/apps/:id/mcp").GET(s.getAppMCPStatus)
 	app.Route("/apps/:id").DELETE(s.deleteApp)
@@ -278,6 +279,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/app-connections/:id").GET(s.getAppConnection).PUT(s.putAppConnection).DELETE(s.deleteAppConnection)
 	app.Route("/app-oauth/start").POST(s.startAppOAuth)
 	public.Route("/oauth/callback/:provider").GET(s.appOAuthCallback)
+	public.Route("/desktop/health").GET(desktopHealth(token))
 	app.Route("/usage/daily").GET(s.getDailyUsage)
 	if cfg.pairing != nil {
 		app.Route("/mobile/pairings").POST(func(c *cart.Context) error {
@@ -336,6 +338,10 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 			return
 		}
 		if isPublicOAuthPath(r.URL.Path) {
+			public.ServeHTTP(w, r)
+			return
+		}
+		if r.URL.Path == "/desktop/health" {
 			public.ServeHTTP(w, r)
 			return
 		}
@@ -659,12 +665,15 @@ func (s *Server) deleteSession(c *cart.Context) error {
 	if err := s.engine.Cancel(id); err != nil && !errors.Is(err, engine.ErrNoRunningTurn) {
 		return s.fail(c, err)
 	}
+	if err := s.store.DeleteSession(c.Request.Context(), id); err != nil {
+		return s.fail(c, err)
+	}
 	if s.terminals != nil {
 		s.terminals.CloseSession(id)
 	}
 	s.engine.ReleaseSessionResources(id)
-	if err := s.store.DeleteSession(c.Request.Context(), id); err != nil {
-		return s.fail(c, err)
+	if err := home.RemoveCodeScratch(s.home, id); err != nil {
+		slog.Warn("remove session code scratch failed", "sessionID", id, "err", err)
 	}
 	if s.voice != nil {
 		s.voice.ReleaseSession(id)

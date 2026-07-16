@@ -94,6 +94,9 @@ const ZHIPU_ANTHROPIC_MODELS = ZHIPU_MODEL_IDS.map((id) =>
 );
 
 const OPENAI_MODELS = [
+  model("gpt-5.6-sol", { contextWindow: 1_050_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
+  model("gpt-5.6-terra", { contextWindow: 1_050_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
+  model("gpt-5.6-luna", { contextWindow: 1_050_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
   model("gpt-5.5", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
   model("gpt-5.4", { contextWindow: 1_000_000, capabilities: { image: true, audio: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
   model("gpt-5.4-mini", { contextWindow: 400_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE, max_completion_tokens: 128_000, reasoning_effort: "medium" } }),
@@ -261,6 +264,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         protocol: "anthropic",
         baseURL: "https://api.anthropic.com",
         models: [
+          model("claude-fable-5", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 128_000, temperature: DEFAULT_PRESET_TEMPERATURE } }),
           model("claude-opus-4-8", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 128_000, temperature: DEFAULT_PRESET_TEMPERATURE } }),
           model("claude-sonnet-4-6", { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 128_000, temperature: DEFAULT_PRESET_TEMPERATURE } }),
           model("claude-haiku-4-5", { contextWindow: 200_000, capabilities: { image: true, tools: true }, anthropic: { max_tokens: 64_000, temperature: DEFAULT_PRESET_TEMPERATURE } }),
@@ -338,7 +342,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
           "openrouter/owl-alpha",
           "nvidia/nemotron-3-super-120b-a12b:free",
           "poolside/laguna-m.1:free",
-          "openai/gpt-oss-120b:free",
           "z-ai/glm-4.5-air:free",
         ].map((id) => model(id, { capabilities: { tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE } })),
       },

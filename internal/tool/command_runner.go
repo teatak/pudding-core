@@ -38,7 +38,11 @@ func (r *BuiltinRunner) setCommandRunner(commands commandRunner) {
 }
 
 func (directCommandRunner) Prepare(spec commandSpec) (*commandExecution, error) {
-	cmd := exec.Command(spec.Executable, spec.Args...)
+	executable, err := resolveExecutableFromEnv(spec.Executable, spec.CWD, spec.Env)
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(executable, spec.Args...)
 	cmd.Dir = spec.CWD
 	cmd.Env = append([]string(nil), spec.Env...)
 	configureCommandProcess(cmd)

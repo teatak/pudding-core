@@ -13,6 +13,7 @@ import { projectReferenceRangeLabel } from "@/lib/projectReferences";
 import { cn } from "@/lib/utils";
 
 import { InterruptedBadge, MessageMeta } from "./MessageMeta";
+import { FormResultCard, formResultFromContentParts } from "./FormResultCard";
 import { uiContextFromContentParts, type UserInputVM } from "./types";
 
 export const UserInput = memo(function UserInput({
@@ -41,6 +42,7 @@ export const UserInput = memo(function UserInput({
   const localFolders = user.localFolders || [];
   const projectReferences = user.projectReferences || [];
   const orderedItems = orderedUserInputItems(contentAttachments, localFolders, projectReferences, user.parts);
+  const formResult = formResultFromContentParts(user.parts);
   const uiContext = uiContextFromContentParts(user.parts);
   const imagePreviewItems: ImageLightboxItem[] = imageAttachments.map((attachment) => ({
     id: attachment.id,
@@ -61,7 +63,7 @@ export const UserInput = memo(function UserInput({
   const voiceAudioAttachment = !editing ? voiceAudioAttachments[0] : undefined;
   const rawInput = isRawVoiceClientMessageID(clientMessageID) || voiceAudioAttachment?.origin === VOICE_AUDIO_ORIGIN;
   const asrInput = isASRClientMessageID(clientMessageID) || rawInput;
-  const canEditQueued = canManageQueued && !rawInput;
+  const canEditQueued = canManageQueued && !rawInput && !formResult;
 
   useEffect(() => {
     if (!editing) {
@@ -160,7 +162,12 @@ export const UserInput = memo(function UserInput({
     <>
       <div className={cn("group flex min-w-0 flex-col items-end", user.pending && "opacity-70")}>
         <div className="flex w-full min-w-0 items-start justify-end gap-1">
-          <div className="pudding-user-message selectable-text min-w-0 max-w-[min(82%,42rem)] overflow-hidden rounded-2xl rounded-br-md border border-border/60 px-3 py-2 text-left text-sm leading-6 break-words whitespace-pre-wrap shadow-sm [overflow-wrap:anywhere]">
+          <div
+            className={cn(
+              "pudding-user-message selectable-text min-w-0 overflow-hidden rounded-2xl rounded-br-md border border-border/60 px-3 py-2 text-left text-sm leading-6 break-words whitespace-pre-wrap shadow-sm [overflow-wrap:anywhere]",
+              formResult ? "w-[min(82%,42rem)]" : "max-w-[min(82%,42rem)]",
+            )}
+          >
             {editing ? (
               <div className="grid gap-2">
                 <Textarea
@@ -179,6 +186,7 @@ export const UserInput = memo(function UserInput({
               </div>
             ) : (
               <div className="grid min-w-0 max-w-full gap-2">
+                {formResult ? <FormResultCard part={formResult} /> : null}
                 {orderedItems.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5">
                     {orderedItems.map((item) => {
@@ -239,10 +247,10 @@ export const UserInput = memo(function UserInput({
                     })}
                   </div>
                 ) : null}
-                {user.text || showASRIndicator ? (
+                {(!formResult && user.text) || showASRIndicator ? (
                   <div className="min-w-0 max-w-full [overflow-wrap:anywhere]">
                     {showASRIndicator ? <ASRIndicator rawInput={rawInput} /> : null}
-                    {user.text}
+                    {!formResult ? user.text : null}
                   </div>
                 ) : null}
                 {user.interrupted ? <InterruptedBadge /> : null}

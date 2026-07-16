@@ -36,6 +36,7 @@ type builtinDefinition struct {
 var builtinDefinitions = []builtinDefinition{
 	{
 		definition: &Definition{
+			Kind:           KindApp,
 			ID:             BuiltinBrowserID,
 			Name:           "Browser",
 			Description:    "Browse and operate webpages in Pudding's built-in browser.",
@@ -84,6 +85,7 @@ Use Pudding's built-in browser for webpages that require navigation or interacti
 	},
 	{
 		definition: &Definition{
+			Kind:           KindApp,
 			ID:             BuiltinTerminalID,
 			Name:           "Terminal",
 			Description:    "Run and manage interactive terminals and background processes.",
@@ -144,6 +146,11 @@ func BuiltinDefinition(id string) (*Definition, bool) {
 func IsBuiltinID(id string) bool {
 	_, ok := BuiltinDefinition(id)
 	return ok
+}
+
+func IsReservedID(id string) bool {
+	id = strings.TrimSpace(id)
+	return IsBuiltinID(id) || id == RuntimeCanvasID
 }
 
 func ReadBuiltinSkill(appID, selector string) (*SkillDetail, bool) {

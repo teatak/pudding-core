@@ -26,7 +26,7 @@ chat < work < code
 | --- | --- | --- |
 | Chat | 查询与观察 | 对话、历史、附件、Skills、Web Search/Fetch、Weather、Desktop Screenshot、Canvas/UI |
 | Work | 操作外部系统 | Chat + 完整 Browser、Apps/MCP、REST/GraphQL、Camera |
-| Code | 操作本地项目 | Work + Project、File、Command、Git、LSP、Patch、Skill Draft |
+| Code | 操作本地项目 | Work + Project、File、Command、Git、LSP、Patch、Skill 创作与校验 |
 
 Browser 是不可拆分的能力包。以下工具必须全部属于 Work:
 
@@ -72,7 +72,7 @@ Browser 是不可拆分的能力包。以下工具必须全部属于 Work:
 - `builtin_git_*`
 - `builtin_patch_*`
 - `builtin_skill_validate`
-- `builtin_skill_submit`
+- `builtin_app_save`
 
 工具可见性按最低模式累积。Code 因此继承 Work 与 Chat;工具名称收敛是后续独立工作。
 
@@ -89,11 +89,13 @@ work | code
 - 模型不能请求降级。
 - Code 可再次请求 Code,但只用于追加 Project 目录授权。
 - Work 不接受 `projectDirs`。
-- Code 没有持久 Project 或当前 turn grant 时必须选择目录。
+- Code 不强制绑定 Project。没有持久 Project 或当前 turn grant 时,项目工具使用
+  session 隔离的 Pudding 临时工作区;只有访问已有本地目录时才需要追加授权。
 - turn scope 只影响当前 turn;session scope 更新 `Session.activeMode`。
 
 普通新会话默认 Chat。由 Project 创建的会话默认 Code。Project 绑定不因切换到
-Chat 或 Work 而删除。
+Chat 或 Work 而删除。临时工作区不创建 Project,不出现在侧边栏,删除 session 时
+一并清理。
 
 ## 5. Composer
 

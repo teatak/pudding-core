@@ -55,8 +55,8 @@ func TestRequestCapabilitySchemaOnlyExposesWorkAndCode(t *testing.T) {
 	if len(got) != 2 || got[0] != "work" || got[1] != "code" {
 		t.Fatalf("targetMode enum = %+v", got)
 	}
-	if !strings.Contains(schema.Properties["projectDirs"].Description, "do not call with an empty list") {
-		t.Fatalf("projectDirs description must discourage redundant Code requests: %q", schema.Properties["projectDirs"].Description)
+	if !strings.Contains(schema.Properties["projectDirs"].Description, "session-isolated temporary workspace") || !strings.Contains(schema.Properties["projectDirs"].Description, "do not call with an empty list") {
+		t.Fatalf("projectDirs description must explain scratch access and discourage redundant Code requests: %q", schema.Properties["projectDirs"].Description)
 	}
 }
 

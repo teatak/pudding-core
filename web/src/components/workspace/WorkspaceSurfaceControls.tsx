@@ -1,4 +1,4 @@
-import { ChevronDown, Folders, Trash2, Undo2 } from "lucide-react";
+import { ChevronDown, Folders, GalleryVerticalEnd, Trash2, Undo2 } from "lucide-react";
 
 import { AppPopoverContent as PopoverContent } from "@/components/AppPopover";
 import { CanvasKindIcon } from "@/components/canvas/CanvasKindIcon";
@@ -7,8 +7,8 @@ import type { ClosedCanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 
-export const workspaceTabClassName = "inline-flex h-(--workspace-toolbar-tab-h) items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground";
-export const workspaceTabActiveClassName = "bg-muted text-foreground hover:bg-muted dark:bg-white/[0.10] dark:hover:bg-white/[0.12]";
+export const workspaceTabClassName = "inline-flex h-(--workspace-toolbar-tab-h) items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground";
+export const workspaceTabActiveClassName = "bg-sidebar-accent text-foreground hover:bg-sidebar-accent";
 
 export function ProjectSurfaceControl({ active, onActivate }: { active: boolean; onActivate: () => void }) {
   const { t } = useI18n();
@@ -71,7 +71,9 @@ export function CanvasLibraryControl({
             title={t("canvas.widgetLibrary")}
             type="button"
           >
-            <CanvasKindIcon kind="widget" size="xs" />
+            <span className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] bg-violet-50 text-violet-700 dark:bg-violet-400/15 dark:text-violet-300">
+              <GalleryVerticalEnd className="h-3.5 w-3.5" />
+            </span>
             <span>{t("canvas.widgetLibrary")}</span>
             <ChevronDown className="h-3.5 w-3.5" />
           </button>

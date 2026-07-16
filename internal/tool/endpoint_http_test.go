@@ -299,6 +299,52 @@ func TestGraphQLSearchFindsSchemaFields(t *testing.T) {
 	}
 }
 
+func TestEndpointRequestMetadataRejectsInvalidValues(t *testing.T) {
+	t.Run("auth", func(t *testing.T) {
+		err := applyEndpointAuth(http.Header{}, app.Auth{
+			Type:  app.AuthTypeBearer,
+			Token: "secret\r\nX-Injected: true",
+		})
+		if err == nil {
+			t.Fatal("invalid auth header value should be rejected")
+		}
+	})
+
+	t.Run("connection header", func(t *testing.T) {
+		err := applyEndpointConnectionHeaders(
+			http.Header{},
+			http.MethodGet,
+			map[string]string{"credential": "secret\r\nX-Injected: true"},
+			[]app.ConnectionField{{
+				ID: "credential",
+				Inject: []app.ConnectionFieldInject{{
+					Target: "header",
+					Name:   "X-Credential",
+				}},
+			}},
+		)
+		if err == nil {
+			t.Fatal("invalid connection header value should be rejected")
+		}
+	})
+
+	t.Run("endpoint env", func(t *testing.T) {
+		_, err := applyEndpointConnectionEnv(map[string]string{"APP_TOKEN": "secret\x00suffix"}, nil, nil)
+		if err == nil {
+			t.Fatal("invalid endpoint env value should be rejected")
+		}
+	})
+
+	t.Run("mcp header", func(t *testing.T) {
+		err := applyAppMCPHeaders(http.Header{}, map[string]string{
+			"X-Credential": "secret\r\nX-Injected: true",
+		})
+		if err == nil {
+			t.Fatal("invalid MCP header value should be rejected")
+		}
+	})
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {

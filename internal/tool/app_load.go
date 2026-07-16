@@ -19,7 +19,7 @@ type AppLoadRequest struct {
 func AppLoadDefinition() provider.ToolDef {
 	return provider.ToolDef{
 		Name:        AppLoad,
-		Description: "Explicitly load one enabled App for this session and return its selected or default skill instructions. Use only app ids from Available Apps. The App's tools become available on the next model step when its required capability and runtime are available.",
+		Description: "Explicitly load one enabled App for this session and return its selected or default skill instructions when available. Use only app ids from Available Apps. The App's tools become available on the next model step when its required capability and runtime are available.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"app_id":{"type":"string","description":"App id from Available Apps."},"skill_id":{"type":"string","description":"Optional App skill id. Defaults to the App's default skill."}},"required":["app_id"],"additionalProperties":false}`),
 		Capability:  store.ModeChat,
 	}

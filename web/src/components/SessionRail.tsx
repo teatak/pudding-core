@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import {
+  ArrowRight,
   ChevronRight,
   Ellipsis,
   FolderClosed,
@@ -10,7 +11,6 @@ import {
   Package,
   PanelLeft,
   Pin,
-  RefreshCw,
   MessageCirclePlus,
   Search,
   Settings,
@@ -1351,12 +1351,11 @@ function RailUpdateButton({ serverTurnRunning }: { serverTurnRunning: boolean })
         variant="secondary"
         onClick={() => (hasActiveTurn ? setConfirmOpen(true) : restart())}
       >
-        {installing ? <Spinner className="size-4" /> : <RefreshCw className="size-4" />}
         <span className="truncate">
           {t(installing ? "update.restarting" : "update.restart")}
           {state.version ? ` ${state.version}` : ""}
         </span>
-        {!installing ? <span className="ml-auto size-2 shrink-0 rounded-full bg-blue-500" /> : null}
+        {installing ? <Spinner className="ml-auto size-4 shrink-0" /> : <ArrowRight className="ml-auto size-4 shrink-0" />}
       </Button>
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>

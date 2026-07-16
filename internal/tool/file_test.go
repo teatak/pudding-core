@@ -12,31 +12,31 @@ import (
 	"github.com/teatak/pudding-core/internal/attachment"
 )
 
-func TestBuiltinFileDraftWriteReadPatch(t *testing.T) {
+func TestBuiltinFileSkillWriteReadPatch(t *testing.T) {
 	home := t.TempDir()
 	runner := NewBuiltinRunner(WithHomeDir(home))
 
 	write := runner.Call(context.Background(), Call{
 		Name: FileWrite,
-		Args: json.RawMessage(`{"scope":"skill_draft","path":"demo/SKILL.md","content":"hello\nworld\n"}`),
+		Args: json.RawMessage(`{"scope":"skill","path":"demo/SKILL.md","content":"hello\nworld\n"}`),
 	})
 	if !write.Ok {
 		t.Fatalf("write should succeed: %+v", write)
 	}
-	if _, err := os.Stat(filepath.Join(home, "skills-draft", "demo", "SKILL.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(home, "skills", "demo", "SKILL.md")); err != nil {
 		t.Fatalf("file missing: %v", err)
 	}
 
 	patch := runner.Call(context.Background(), Call{
 		Name: FilePatch,
-		Args: json.RawMessage(`{"scope":"skill_draft","path":"demo/SKILL.md","old_string":"world","new_string":"pudding"}`),
+		Args: json.RawMessage(`{"scope":"skill","path":"demo/SKILL.md","old_string":"world","new_string":"pudding"}`),
 	})
 	if !patch.Ok {
 		t.Fatalf("patch should succeed: %+v", patch)
 	}
 	read := runner.Call(context.Background(), Call{
 		Name: FileRead,
-		Args: json.RawMessage(`{"scope":"skill_draft","path":"demo/SKILL.md"}`),
+		Args: json.RawMessage(`{"scope":"skill","path":"demo/SKILL.md"}`),
 	})
 	if !read.Ok {
 		t.Fatalf("read should succeed: %+v", read)
@@ -47,18 +47,18 @@ func TestBuiltinFileDraftWriteReadPatch(t *testing.T) {
 	}
 }
 
-func TestBuiltinFileListAllowsSkillDraftRoot(t *testing.T) {
+func TestBuiltinFileListAllowsSkillRoot(t *testing.T) {
 	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(home, "skills-draft", "demo"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, "skills", "demo"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(home, "skills-draft", ".reserved"), []byte("hidden"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "skills", ".reserved"), []byte("hidden"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	for _, args := range []string{
-		`{"scope":"skill_draft","path":"."}`,
-		`{"scope":"skill_draft"}`,
+		`{"scope":"skill","path":"."}`,
+		`{"scope":"skill"}`,
 	} {
 		res := NewBuiltinRunner(WithHomeDir(home)).Call(context.Background(), Call{
 			Name: FileList,
@@ -79,13 +79,64 @@ func TestBuiltinFileListAllowsSkillDraftRoot(t *testing.T) {
 	}
 }
 
-func TestBuiltinFileRejectsPublishedWrite(t *testing.T) {
+func TestBuiltinFileAppScopeIsReadOnlyAndHidesRuntimeFiles(t *testing.T) {
+	home := t.TempDir()
+	appDir := filepath.Join(home, "apps", "example")
+	if err := os.MkdirAll(appDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "app.yaml"), []byte("id: example\nname: Example\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, ".pudding-mcp-overrides.yaml"), []byte("secret: hidden\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewBuiltinRunner(WithHomeDir(home))
+
+	read := runner.Call(context.Background(), Call{
+		Name: FileRead,
+		Args: json.RawMessage(`{"scope":"app","path":"example/app.yaml"}`),
+	})
+	if !read.Ok || !strings.Contains(read.Content, "Example") {
+		t.Fatalf("read App manifest: %+v", read)
+	}
+	list := runner.Call(context.Background(), Call{
+		Name: FileList,
+		Args: json.RawMessage(`{"scope":"app","path":"example"}`),
+	})
+	if !list.Ok || strings.Contains(list.Content, ".pudding-mcp-overrides.yaml") {
+		t.Fatalf("hidden App file leaked from list: %+v", list)
+	}
+	hidden := runner.Call(context.Background(), Call{
+		Name: FileRead,
+		Args: json.RawMessage(`{"scope":"app","path":"example/.pudding-mcp-overrides.yaml"}`),
+	})
+	if hidden.Ok {
+		t.Fatalf("hidden App file should not be readable: %+v", hidden)
+	}
+	search := runner.Call(context.Background(), Call{
+		Name: FileSearch,
+		Args: json.RawMessage(`{"scope":"app","path":"example","query":"hidden"}`),
+	})
+	if !search.Ok || strings.Contains(search.Content, ".pudding-mcp-overrides.yaml") || strings.Contains(search.Content, "secret: hidden") {
+		t.Fatalf("hidden App file leaked from search: %+v", search)
+	}
+	write := runner.Call(context.Background(), Call{
+		Name: FileWrite,
+		Args: json.RawMessage(`{"scope":"app","path":"example/app.yaml","content":"changed"}`),
+	})
+	if write.Ok {
+		t.Fatalf("App scope should be read-only: %+v", write)
+	}
+}
+
+func TestBuiltinFileRejectsUnknownManagedScope(t *testing.T) {
 	res := NewBuiltinRunner(WithHomeDir(t.TempDir())).Call(context.Background(), Call{
 		Name: FileWrite,
-		Args: json.RawMessage(`{"scope":"skill_published","path":"demo/SKILL.md","content":"x"}`),
+		Args: json.RawMessage(`{"scope":"unknown","path":"demo/SKILL.md","content":"x"}`),
 	})
 	if res.Ok {
-		t.Fatalf("published write should fail: %+v", res)
+		t.Fatalf("unknown scope should fail: %+v", res)
 	}
 	payload := decodeToolResult(t, res)
 	if payload["reason"] != "path_not_allowed" {
@@ -93,7 +144,66 @@ func TestBuiltinFileRejectsPublishedWrite(t *testing.T) {
 	}
 }
 
-func TestBuiltinFilePatchUsesPublishedFileIncrementally(t *testing.T) {
+func TestBuiltinFileRejectsSymlinkedManagedRoot(t *testing.T) {
+	home := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(home, "skills")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	res := NewBuiltinRunner(WithHomeDir(home)).Call(context.Background(), Call{
+		Name: FileWrite,
+		Args: json.RawMessage(`{"scope":"skill","path":"demo/SKILL.md","content":"outside"}`),
+	})
+	if res.Ok {
+		t.Fatalf("symlinked skill root should fail: %+v", res)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "demo", "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatalf("write escaped managed root: %v", err)
+	}
+}
+
+func TestBuiltinFileRejectsWritesToBuiltinSkillID(t *testing.T) {
+	homeDir := t.TempDir()
+	result := NewBuiltinRunner(WithHomeDir(homeDir)).Call(context.Background(), Call{
+		Name: FileWrite,
+		Args: json.RawMessage(`{"scope":"skill","path":"skill-creator/SKILL.md","content":"shadow"}`),
+	})
+	if result.Ok {
+		t.Fatalf("write to builtin Skill id should fail: %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(homeDir, "skills", "skill-creator")); !os.IsNotExist(err) {
+		t.Fatalf("shadow builtin Skill directory was created: %v", err)
+	}
+}
+
+func TestBuiltinFileTempScopeHidesCodeScratch(t *testing.T) {
+	homeDir := t.TempDir()
+	scratch := filepath.Join(homeDir, "temp", ".code", "sess_other")
+	if err := os.MkdirAll(scratch, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scratch, "secret.txt"), []byte("private session data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewBuiltinRunner(WithHomeDir(homeDir))
+
+	list := runner.Call(context.Background(), Call{
+		Name: FileList,
+		Args: json.RawMessage(`{"scope":"temp","path":"."}`),
+	})
+	if !list.Ok || strings.Contains(list.Content, ".code") {
+		t.Fatalf("temp list exposed code scratch: %+v", list)
+	}
+	read := runner.Call(context.Background(), Call{
+		Name: FileRead,
+		Args: json.RawMessage(`{"scope":"temp","path":".code/sess_other/secret.txt"}`),
+	})
+	if read.Ok || strings.Contains(read.Content, "private session data") {
+		t.Fatalf("temp read exposed code scratch: %+v", read)
+	}
+}
+
+func TestBuiltinFileSkillPatchPreservesOtherFiles(t *testing.T) {
 	home := t.TempDir()
 	publishedDir := filepath.Join(home, "skills", "demo", "assets")
 	if err := os.MkdirAll(publishedDir, 0o700); err != nil {
@@ -108,20 +218,21 @@ func TestBuiltinFilePatchUsesPublishedFileIncrementally(t *testing.T) {
 
 	res := NewBuiltinRunner(WithHomeDir(home)).Call(context.Background(), Call{
 		Name: FilePatch,
-		Args: json.RawMessage(`{"scope":"skill_draft","path":"demo/SKILL.md","old_string":"old","new_string":"new"}`),
+		Args: json.RawMessage(`{"scope":"skill","path":"demo/SKILL.md","old_string":"old","new_string":"new"}`),
 	})
 	if !res.Ok {
 		t.Fatalf("patch should succeed: %+v", res)
 	}
-	if _, err := os.Stat(filepath.Join(home, "skills-draft", "demo", "SKILL.md")); err != nil {
-		t.Fatalf("patched file should exist in draft: %v", err)
+	data, err := os.ReadFile(filepath.Join(home, "skills", "demo", "SKILL.md"))
+	if err != nil || string(data) != "new" {
+		t.Fatalf("skill should be patched directly: %q %v", data, err)
 	}
-	if _, err := os.Stat(filepath.Join(home, "skills-draft", "demo", "assets", "icon.svg")); !os.IsNotExist(err) {
-		t.Fatalf("published icon should not be copied into draft, stat err=%v", err)
+	if _, err := os.Stat(filepath.Join(home, "skills", "demo", "assets", "icon.svg")); err != nil {
+		t.Fatalf("existing icon should be preserved: %v", err)
 	}
 }
 
-func TestBuiltinFileDeleteRecordsDraftManifest(t *testing.T) {
+func TestBuiltinFileSkillDeleteIsDirect(t *testing.T) {
 	home := t.TempDir()
 	publishedDir := filepath.Join(home, "skills", "demo", "assets")
 	if err := os.MkdirAll(publishedDir, 0o700); err != nil {
@@ -136,17 +247,36 @@ func TestBuiltinFileDeleteRecordsDraftManifest(t *testing.T) {
 
 	res := NewBuiltinRunner(WithHomeDir(home)).Call(context.Background(), Call{
 		Name: FileDelete,
-		Args: json.RawMessage(`{"scope":"skill_draft","path":"demo/assets/icon.svg"}`),
+		Args: json.RawMessage(`{"scope":"skill","path":"demo/assets/icon.svg"}`),
 	})
 	if !res.Ok {
 		t.Fatalf("delete should succeed: %+v", res)
 	}
-	data, err := os.ReadFile(filepath.Join(home, "skills-draft", "demo", ".delete"))
-	if err != nil {
+	if _, err := os.Stat(filepath.Join(home, "skills", "demo", "assets", "icon.svg")); !os.IsNotExist(err) {
+		t.Fatalf("icon should be deleted directly, stat err=%v", err)
+	}
+}
+
+func TestBuiltinFileSkillWriteRejectsMissingPathThroughEscapingSymlink(t *testing.T) {
+	homeDir := t.TempDir()
+	skillsRoot := filepath.Join(homeDir, "skills")
+	outside := t.TempDir()
+	if err := os.MkdirAll(skillsRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "assets/icon.svg") {
-		t.Fatalf("delete manifest missing icon: %q", data)
+	if err := os.Symlink(outside, filepath.Join(skillsRoot, "outside-link")); err != nil {
+		t.Fatal(err)
+	}
+
+	result := NewBuiltinRunner(WithHomeDir(homeDir)).Call(context.Background(), Call{
+		Name: FileWrite,
+		Args: json.RawMessage(`{"scope":"skill","path":"outside-link/new/demo.txt","content":"escaped"}`),
+	})
+	if result.Ok {
+		t.Fatalf("write through escaping symlink should fail: %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "new", "demo.txt")); !os.IsNotExist(err) {
+		t.Fatalf("write escaped the Skill root: %v", err)
 	}
 }
 

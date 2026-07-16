@@ -16,8 +16,8 @@
 | `turn.cancelled` | ✓ | ✓ | 有半截输出时 `assistantMessageID` + `interrupted` |
 | `audio.bindings` | — | — | `inputOwner`, `inputMode`, `outputOwner`, `inputLevel`;音频 owner 快照 |
 | `audio.input_level` | — | — | `inputLevel`;mic owner 的波形音量 |
-| `approval.requested` | — | — | `approvalID`, `approvalKind`(`capability`/`skill_draft`/`tool_call`), `title`, `reason`, `risk?`, `payload?` |
-| `approval.resolved` | — | — | `approvalID`, `approvalKind`(`capability`/`skill_draft`/`tool_call`), `status`, `reason?`, `payload?` |
+| `approval.requested` | — | — | `approvalID`, `approvalKind`(`capability`/`tool_call`), `title`, `reason`, `risk?`, `payload?` |
+| `approval.resolved` | — | — | `approvalID`, `approvalKind`(`capability`/`tool_call`), `status`, `reason?`, `payload?` |
 | `process.started/finished/stopped/removed` | — | — | `turnID?`, `callID?`, `payload`(BackgroundProcess 快照);前端刷新 REST 快照,不落库 |
 | `session.titled` | — | — | `title`;自动标题写回(provisional / LLM 各一次),不落库 |
 | `ping` | — | — | — |
@@ -92,6 +92,7 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | tool | capability | args | result |
 | --- | --- | --- | --- |
 | `builtin_app_load` | `chat` | `{app_id, skill_id?}` | `{ok, appID, skillID, content, newlyLoaded, alreadyLoaded}`;显式加载 App，失败不修改 session |
+| `builtin_app_save` | `code` | `{operation:create|update,app_id,version,files[]}` | 完整文本包经隔离校验后替换已安装 App；失败保留旧版本；不接受凭据 |
 | `builtin_toolkit_load` | `chat` | `{toolkit_ids:string[1..4]}` | `{ok, loaded, alreadyActive, activeToolkits, tools, loadsRemaining}`;turn-scoped,每 turn 最多扩展 2 次 |
 | `builtin_command_run` | `code` | `{scope:"project", argv:string[] \| script:string, cwd?, env?, timeout_ms?}`(argv/script 互斥) | `{ok, argv? \| script+shell, cwd, exitCode, stdout, stderr, stdoutTruncated, stderrTruncated, timedOut, cancelled, durationMs, sandboxed, sandboxKind?, sandboxDenied?, reason?, error?}` |
 | `builtin_command_start` | `code` | `{scope:"project", argv:string[] \| script:string, cwd?, env?}`(argv/script 互斥) | `{ok, processID, status, running, argv? \| script+shell, cwd, startedAt, sandboxed, sandboxKind?, sandboxDenied?}` |
@@ -115,13 +116,22 @@ shell executable。cwd 必须位于当前 Project/turn grant 授权目录中;默
 Git `clone/fetch/pull` 与依赖下载自动允许。安全的
 自定义环境和后台命令沿用同一套 argv 风险判断,不额外强制审批。
 
-`ask` 和 `auto` 下,前台与后台 CLI 均在当前 Project 沙箱中运行;批准只允许启动,
-不会绕过沙箱。`full` 不套 CLI 沙箱。沙箱拒绝是普通命令结果,通过
+命令环境的 `PATH` 在 desktop daemon 原有值后补充 Homebrew 与常见用户工具链目录;
+direct/sandbox runner 均必须按这份合并后的 `PATH` 解析可执行文件,不能依赖 Electron
+进程启动时的精简 `PATH`。
+
+`ask` 和 `auto` 下,低风险前台与后台 CLI 默认在当前 Project 或 session 临时工作区
+沙箱中运行;风险命令经用户批准后,仅该次原始调用绕过 CLI 沙箱。`full` 不套 CLI
+沙箱。沙箱拒绝是普通命令结果,通过
 `sandboxDenied=true` 展示,不得静默用 `full` 重跑。当前 macOS 实现允许 Project
 读写、受控缓存读写、工具链只读、外部出站网络以及本地开发服务器;用户其他目录仍
 拒绝,服务监听仅允许 loopback。显式通配监听在 `auto` 下需要审批。
 非 macOS 平台在 `ask` / `auto` 下明确返回不支持,不会静默退回直接执行;`full`
 保持完整访问语义。
+
+Code 不要求预先绑定 Project。没有 Project 或 turn grant 时,engine 为 session
+懒创建 `<home>/temp/code/<sessionID>` 作为唯一项目作用域;它不创建 Project 记录,
+并在删除 session 时清理。
 
 后台进程归属 session,每 session 最多 4 个、全局最多 32 个;无 stdin/PTY。
 stdout/stderr 共用 1 MiB 有界 ring buffer,通过 offset 增量读取。运行中的进程不因

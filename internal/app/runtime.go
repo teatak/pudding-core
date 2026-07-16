@@ -7,6 +7,11 @@ import (
 
 const RuntimeIDHeader = "X-Pudding-Runtime-ID"
 
+// RuntimeCanvasID is product-owned even when no desktop runtime is connected.
+// Reserving it prevents an installed App from changing identity when Canvas
+// later appears for the same session.
+const RuntimeCanvasID = "canvas"
+
 type runtimeIDContextKey struct{}
 
 // WithRuntimeID scopes runtime-provided Apps and tools to the client that

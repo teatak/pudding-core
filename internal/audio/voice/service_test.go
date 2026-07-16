@@ -472,6 +472,25 @@ func TestBindInputCleansUpCaptureAfterStartFailure(t *testing.T) {
 	}
 }
 
+func TestBindInputClassifiesCaptureWithoutSignal(t *testing.T) {
+	fakeASR := asr.NewFake(1)
+	drv := &captureDriver{
+		format:   frame.Format{SampleRate: 16000, Channels: 1},
+		startErr: driver.ErrCaptureNoSignal,
+	}
+	svc := NewService(ServiceConfig{
+		Submitter: submitterFunc(func(context.Context, engine.SubmitInput) (*engine.SubmitResult, error) { return nil, nil }),
+		Driver:    drv,
+		ASR:       fakeASR,
+	})
+	defer svc.Close()
+
+	_, err := svc.BindInput("sess_input", true)
+	if !errors.Is(err, ErrInputRouteUnavailable) {
+		t.Fatalf("BindInput error = %v, want ErrInputRouteUnavailable", err)
+	}
+}
+
 func waitMessages(t *testing.T, ctx context.Context, ms *memstore.Memstore, sessionID string, want int) []*store.Message {
 	t.Helper()
 	deadline := time.After(2 * time.Second)

@@ -2,11 +2,13 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/teatak/pudding-core/internal/home"
 )
@@ -15,6 +17,7 @@ var (
 	ErrInvalidID          = errors.New("app: invalid id")
 	ErrInvalidMCPOverride = errors.New("app: invalid mcp override")
 	ErrNotFound           = errors.New("app: not found")
+	ErrAlreadyExists      = errors.New("app: already exists")
 	ErrBuiltinApp         = errors.New("app: builtin app cannot be uninstalled")
 	ErrDisabled           = errors.New("app: disabled")
 	ErrEnablementConfig   = errors.New("app: enablement config unavailable")
@@ -66,6 +69,7 @@ type Service struct {
 	connections ConnectionSource
 	enablement  EnablementSource
 	runtime     RuntimeSource
+	packageMu   sync.RWMutex
 }
 
 func NewService(homeDir string, connections ConnectionSource) *Service {
@@ -88,6 +92,8 @@ func (s *Service) ListDefinitions(ctx context.Context) ([]*Definition, error) {
 	if s == nil {
 		return nil, errors.New("app service unavailable")
 	}
+	s.packageMu.RLock()
+	defer s.packageMu.RUnlock()
 	enabled := map[string]bool{}
 	if s.enablement != nil {
 		var err error
@@ -127,7 +133,7 @@ func (s *Service) ListDefinitions(ctx context.Context) ([]*Definition, error) {
 		}
 	}
 	for _, def := range defs {
-		if IsBuiltinID(def.ID) || seen[def.ID] {
+		if IsReservedID(def.ID) || seen[def.ID] {
 			continue
 		}
 		resolved := ResolveDefinitionPlatform(def)
@@ -150,6 +156,7 @@ func decorateRuntimeDefinition(def *Definition) *Definition {
 	}
 	resolved.ID = strings.TrimSpace(resolved.ID)
 	resolved.Name = strings.TrimSpace(resolved.Name)
+	resolved.Kind = normalizedDefinitionKind(resolved.Kind)
 	if !appIDPattern.MatchString(resolved.ID) || resolved.Name == "" {
 		return nil
 	}
@@ -173,9 +180,16 @@ func decorateInstalledDefinition(def *Definition) {
 		return
 	}
 	def.Source = SourceInstalled
+	def.Kind = normalizedDefinitionKind(def.Kind)
 	def.Enabled = true
 	def.CanUninstall = true
 	def.RequiredMode = "work"
+	for _, endpoint := range def.Endpoints {
+		if endpoint.Kind == EndpointKindMCP && endpoint.Transport == EndpointTransportStdio {
+			def.RequiredMode = "code"
+			break
+		}
+	}
 	def.Tools = inferredEndpointTools(def.Endpoints)
 	if len(def.Skills) > 0 {
 		def.DefaultSkillID = def.Skills[0].ID
@@ -279,16 +293,57 @@ func (s *Service) InstallPackage(ctx context.Context, packageJSON []byte, expect
 	if s == nil {
 		return nil, errors.New("app service unavailable")
 	}
+	s.packageMu.Lock()
+	defer s.packageMu.Unlock()
+	return s.installPackageLocked(ctx, packageJSON, expectedSHA256, sourceURL)
+}
+
+func (s *Service) SaveAuthoredPackage(ctx context.Context, packageJSON []byte, update bool) (*Definition, error) {
+	if s == nil {
+		return nil, errors.New("app service unavailable")
+	}
+	var pkg Package
+	if err := json.Unmarshal(packageJSON, &pkg); err != nil {
+		return nil, fmt.Errorf("app package: parse: %w", err)
+	}
+	appID := strings.TrimSpace(pkg.App.ID)
+	if !appIDPattern.MatchString(appID) {
+		return nil, ErrInvalidID
+	}
+	if IsReservedID(appID) {
+		return nil, ErrBuiltinApp
+	}
+	s.packageMu.Lock()
+	defer s.packageMu.Unlock()
+	_, statErr := os.Lstat(filepath.Join(s.appsRoot, appID))
+	exists := statErr == nil
+	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return nil, statErr
+	}
+	if update && !exists {
+		return nil, ErrNotFound
+	}
+	if !update && exists {
+		return nil, ErrAlreadyExists
+	}
+	return s.installPackageLocked(ctx, packageJSON, "", "")
+}
+
+func (s *Service) installPackageLocked(ctx context.Context, packageJSON []byte, expectedSHA256, sourceURL string) (*Definition, error) {
+	enabled := map[string]bool{}
+	if s.enablement != nil {
+		var err error
+		enabled, err = s.enablement.ListAppEnablement(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
 	def, err := InstallPackage(s.appsRoot, packageJSON, expectedSHA256, sourceURL)
 	if err != nil {
 		return nil, err
 	}
 	decorateInstalledDefinition(def)
 	if s.enablement != nil {
-		enabled, err := s.enablement.ListAppEnablement(ctx)
-		if err != nil {
-			return nil, err
-		}
 		applyEnabledOverride(def, enabled)
 	}
 	return CloneDefinition(def), nil
@@ -302,10 +357,19 @@ func (s *Service) DeleteDefinition(ctx context.Context, id string) error {
 	if !appIDPattern.MatchString(id) {
 		return ErrInvalidID
 	}
-	if IsBuiltinID(id) {
+	if IsReservedID(id) {
 		return ErrBuiltinApp
 	}
-	target := filepath.Join(s.appsRoot, id)
+	s.packageMu.Lock()
+	defer s.packageMu.Unlock()
+	root, err := resolveAppRoot(s.appsRoot, false)
+	if errors.Is(err, os.ErrNotExist) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	target := filepath.Join(root, id)
 	if _, err := os.Stat(filepath.Join(target, AppFileName)); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return ErrNotFound
@@ -323,6 +387,8 @@ func (s *Service) GetMCPOverride(ctx context.Context, appID, endpointName string
 	if s == nil {
 		return MCPEndpointOverride{}, false, errors.New("app service unavailable")
 	}
+	s.packageMu.RLock()
+	defer s.packageMu.RUnlock()
 	def, endpointName, err := s.resolveMCPOverrideTarget(appID, endpointName, nil)
 	if err != nil {
 		return MCPEndpointOverride{}, false, err
@@ -343,6 +409,8 @@ func (s *Service) PutMCPOverride(ctx context.Context, appID, endpointName string
 	if s == nil {
 		return MCPEndpointOverride{}, errors.New("app service unavailable")
 	}
+	s.packageMu.Lock()
+	defer s.packageMu.Unlock()
 	def, endpointName, err := s.resolveMCPOverrideTarget(appID, endpointName, &override)
 	if err != nil {
 		return MCPEndpointOverride{}, err
@@ -367,6 +435,8 @@ func (s *Service) DeleteMCPOverride(ctx context.Context, appID, endpointName str
 	if s == nil {
 		return errors.New("app service unavailable")
 	}
+	s.packageMu.Lock()
+	defer s.packageMu.Unlock()
 	def, endpointName, err := s.resolveMCPOverrideTarget(appID, endpointName, nil)
 	if err != nil {
 		return err
@@ -387,6 +457,8 @@ func (s *Service) ReadAsset(ctx context.Context, rel string) ([]byte, string, er
 	if s == nil {
 		return nil, "", errors.New("app service unavailable")
 	}
+	s.packageMu.RLock()
+	defer s.packageMu.RUnlock()
 	return ReadAsset(s.appsRoot, rel)
 }
 
@@ -442,7 +514,17 @@ func (s *Service) readSkill(ctx context.Context, appID, skillID string) (*SkillD
 			}
 		}
 	}
-	diskDef, err := LoadDefinitionDir(filepath.Join(s.appsRoot, appID))
+	s.packageMu.RLock()
+	defer s.packageMu.RUnlock()
+	root, err := resolveAppRoot(s.appsRoot, false)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	appDir := filepath.Join(root, appID)
+	diskDef, err := LoadDefinitionDir(appDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, ErrNotFound
@@ -472,7 +554,14 @@ func (s *Service) readSkill(ctx context.Context, appID, skillID string) (*SkillD
 	if ref == nil {
 		return nil, ErrNotFound
 	}
-	data, err := os.ReadFile(filepath.Join(s.appsRoot, appID, filepath.FromSlash(ref.Path)))
+	resolvedPath, err := resolveAppRegularFile(appDir, ref.Path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	data, err := os.ReadFile(resolvedPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, ErrNotFound
@@ -497,7 +586,14 @@ func (s *Service) resolveMCPOverrideTarget(appID, endpointName string, override 
 	if !endpointNamePattern.MatchString(endpointName) {
 		return nil, "", ErrNotFound
 	}
-	def, err := LoadDefinitionDir(filepath.Join(s.appsRoot, appID))
+	root, err := resolveAppRoot(s.appsRoot, false)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, "", ErrNotFound
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	def, err := LoadDefinitionDir(filepath.Join(root, appID))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, "", ErrNotFound
@@ -668,7 +764,15 @@ func connectionlessEndpointBinding(def *Definition, endpointName string, endpoin
 }
 
 func allowsConnectionlessEndpoint(def *Definition) bool {
-	return def != nil && def.Auth != nil && !def.Auth.Required && !hasRequiredConnectionFields(def.Connection)
+	if def == nil || hasRequiredConnectionFields(def.Connection) {
+		return false
+	}
+	// A simplified MCP App carries its complete server configuration in the
+	// endpoint and never requires a separate App connection.
+	if def.Kind == KindMCP {
+		return true
+	}
+	return def.Auth != nil && !def.Auth.Required
 }
 
 func hasRequiredConnectionFields(config *ConnectionConfig) bool {

@@ -10,6 +10,11 @@ import (
 var ErrInvalidAsset = errors.New("app: invalid asset")
 
 func ReadAsset(root, rel string) ([]byte, string, error) {
+	resolvedRoot, err := resolveAppRoot(root, false)
+	if err != nil {
+		return nil, "", ErrInvalidAsset
+	}
+	root = resolvedRoot
 	rel = strings.TrimPrefix(filepath.ToSlash(strings.TrimSpace(rel)), "/")
 	cleaned, err := cleanRelativeSlashPath(rel)
 	if err != nil {
@@ -23,7 +28,11 @@ func ReadAsset(root, rel string) ([]byte, string, error) {
 	if !ok {
 		return nil, "", ErrInvalidAsset
 	}
-	data, err := os.ReadFile(filepath.Join(root, parts[0], "assets", parts[2]))
+	target, err := resolveAppRegularFile(filepath.Join(root, parts[0]), filepath.ToSlash(filepath.Join("assets", parts[2])))
+	if err != nil {
+		return nil, "", ErrInvalidAsset
+	}
+	data, err := os.ReadFile(target)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, "", ErrInvalidAsset

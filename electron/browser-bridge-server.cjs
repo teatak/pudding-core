@@ -5,35 +5,85 @@ class BrowserBridgeServer {
   constructor(browserHost) {
     this.browserHost = browserHost;
     this.server = null;
+    this.startPromise = null;
+    this.stopPromise = null;
     this.token = "";
     this.url = "";
   }
 
-  async start() {
-    if (this.server) {
-      return { url: this.url, token: this.token };
+  start() {
+    if (this.stopPromise) {
+      return this.stopPromise.then(() => this.start());
     }
+    if (this.server && this.url) {
+      return Promise.resolve({ url: this.url, token: this.token });
+    }
+    if (this.startPromise) {
+      return this.startPromise;
+    }
+    const attempt = this.startServer();
+    this.startPromise = attempt;
+    const clearAttempt = () => {
+      if (this.startPromise === attempt) {
+        this.startPromise = null;
+      }
+    };
+    void attempt.then(clearAttempt, clearAttempt);
+    return attempt;
+  }
+
+  async startServer() {
     this.token = crypto.randomBytes(24).toString("hex");
     this.server = http.createServer((request, response) => {
       void this.handle(request, response);
     });
-    await new Promise((resolve, reject) => {
-      this.server.once("error", reject);
-      this.server.listen(0, "127.0.0.1", () => {
-        this.server.off("error", reject);
-        resolve();
+    try {
+      await new Promise((resolve, reject) => {
+        this.server.once("error", reject);
+        this.server.listen(0, "127.0.0.1", () => {
+          this.server.off("error", reject);
+          resolve();
+        });
       });
-    });
-    const address = this.server.address();
-    if (!address || typeof address === "string") {
-      throw new Error("browser bridge failed to bind loopback");
+      const address = this.server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("browser bridge failed to bind loopback");
+      }
+      this.url = `http://127.0.0.1:${address.port}`;
+      return { url: this.url, token: this.token };
+    } catch (error) {
+      this.server?.close();
+      this.server = null;
+      this.token = "";
+      this.url = "";
+      throw error;
     }
-    this.url = `http://127.0.0.1:${address.port}`;
-    return { url: this.url, token: this.token };
   }
 
-  async stop() {
+  stop() {
+    if (this.stopPromise) {
+      return this.stopPromise;
+    }
+    const attempt = this.stopServer();
+    this.stopPromise = attempt;
+    const clearAttempt = () => {
+      if (this.stopPromise === attempt) {
+        this.stopPromise = null;
+      }
+    };
+    void attempt.then(clearAttempt, clearAttempt);
+    return attempt;
+  }
+
+  async stopServer() {
     this.browserHost.closeAll?.();
+    if (this.startPromise) {
+      try {
+        await this.startPromise;
+      } catch {
+        return;
+      }
+    }
     if (!this.server) {
       return;
     }

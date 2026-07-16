@@ -34,19 +34,6 @@ var endpointAllowedMethods = map[string]struct{}{
 	"DELETE": {},
 }
 
-var endpointForbiddenRequestHeaders = map[string]struct{}{
-	"host":                {},
-	"content-length":      {},
-	"connection":          {},
-	"transfer-encoding":   {},
-	"expect":              {},
-	"upgrade":             {},
-	"proxy-connection":    {},
-	"proxy-authorization": {},
-	"te":                  {},
-	"trailer":             {},
-}
-
 var endpointSensitiveResponseHeaders = map[string]struct{}{
 	"set-cookie":           {},
 	"set-cookie2":          {},
@@ -458,8 +445,11 @@ func applyEndpointConnectionHeaders(headers http.Header, method string, fields m
 			if name == "" {
 				return fmt.Errorf("connection field %q has empty header name", id)
 			}
-			if _, forbidden := endpointForbiddenRequestHeaders[strings.ToLower(name)]; forbidden {
+			if !app.IsAllowedRequestHeaderName(name) {
 				return fmt.Errorf("connection field %q targets forbidden header %q", id, name)
+			}
+			if !app.IsAllowedRequestHeaderValue(value) {
+				return fmt.Errorf("connection field %q contains an invalid header value", id)
 			}
 			if headers.Get(name) == "" {
 				headers.Set(name, value)
@@ -472,6 +462,12 @@ func applyEndpointConnectionHeaders(headers http.Header, method string, fields m
 func applyEndpointConnectionEnv(extra map[string]string, fields map[string]string, defs []app.ConnectionField) (map[string]string, error) {
 	out := make(map[string]string, len(extra)+len(fields))
 	for key, value := range extra {
+		if !validConnectionEnvName(key) {
+			return nil, fmt.Errorf("endpoint env name %q is invalid", key)
+		}
+		if strings.ContainsRune(value, 0) {
+			return nil, fmt.Errorf("endpoint env %q contains a NUL byte", key)
+		}
 		out[key] = value
 	}
 	if len(fields) == 0 || len(defs) == 0 {
@@ -490,6 +486,9 @@ func applyEndpointConnectionEnv(extra map[string]string, fields map[string]strin
 			name := connectionFieldInjectName(field, rule)
 			if !validConnectionEnvName(name) {
 				return nil, fmt.Errorf("connection field %q has invalid env name %q", id, name)
+			}
+			if strings.ContainsRune(value, 0) {
+				return nil, fmt.Errorf("connection field %q contains a NUL byte", id)
 			}
 			if _, exists := out[name]; !exists {
 				out[name] = value
@@ -525,7 +524,16 @@ func connectionFieldInjectName(field app.ConnectionField, rule app.ConnectionFie
 
 func validConnectionEnvName(name string) bool {
 	name = strings.TrimSpace(name)
-	return name != "" && !strings.ContainsAny(name, "=\x00")
+	if name == "" {
+		return false
+	}
+	for index, r := range name {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r == '_' || index > 0 && r >= '0' && r <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func buildEndpointRequestBody(args map[string]any) ([]byte, string, error) {
@@ -645,10 +653,14 @@ func applyEndpointAuth(headers http.Header, auth app.Auth) error {
 	case "", "none":
 		return nil
 	case "bearer":
-		if strings.TrimSpace(auth.Token) == "" {
+		token := strings.TrimSpace(auth.Token)
+		if token == "" {
 			return errors.New("bearer token is empty")
 		}
-		headers.Set("Authorization", "Bearer "+strings.TrimSpace(auth.Token))
+		if !app.IsAllowedRequestHeaderValue(token) {
+			return errors.New("bearer token contains an invalid header value")
+		}
+		headers.Set("Authorization", "Bearer "+token)
 	case "oauth2":
 		token := strings.TrimSpace(auth.AccessToken)
 		if token == "" {
@@ -658,19 +670,23 @@ func applyEndpointAuth(headers http.Header, auth app.Auth) error {
 		if tokenType == "" || strings.EqualFold(tokenType, "bearer") {
 			tokenType = "Bearer"
 		}
-		if strings.ContainsAny(tokenType, "\r\n ") {
+		if strings.ContainsAny(tokenType, "\r\n \t") || !app.IsAllowedRequestHeaderValue(token) {
 			return errors.New("oauth2 token type is invalid")
 		}
 		headers.Set("Authorization", tokenType+" "+token)
 	case "token":
-		if strings.TrimSpace(auth.Token) == "" {
+		token := strings.TrimSpace(auth.Token)
+		if token == "" {
 			return errors.New("token is empty")
 		}
 		prefix := strings.TrimSpace(auth.Prefix)
 		if prefix == "" {
 			prefix = "Token"
 		}
-		headers.Set("Authorization", prefix+" "+strings.TrimSpace(auth.Token))
+		if !app.IsAllowedRequestHeaderValue(prefix) || !app.IsAllowedRequestHeaderValue(token) {
+			return errors.New("token contains an invalid header value")
+		}
+		headers.Set("Authorization", prefix+" "+token)
 	case "basic":
 		if auth.Username == "" && auth.Password == "" {
 			return errors.New("basic auth username/password are empty")
@@ -681,8 +697,11 @@ func applyEndpointAuth(headers http.Header, auth app.Auth) error {
 		if name == "" || auth.Token == "" {
 			return errors.New("header auth name/token are required")
 		}
-		if _, bad := endpointForbiddenRequestHeaders[strings.ToLower(name)]; bad {
+		if !app.IsAllowedRequestHeaderName(name) {
 			return fmt.Errorf("auth header %q is not allowed", name)
+		}
+		if !app.IsAllowedRequestHeaderValue(auth.Token) {
+			return errors.New("header auth token contains an invalid header value")
 		}
 		headers.Set(name, auth.Token)
 	default:

@@ -418,6 +418,7 @@ const (
 	ContentPartLocalFolder ContentPartType = "local_folder"
 	ContentPartProjectRef  ContentPartType = "project_reference"
 	ContentPartUIContext   ContentPartType = "ui_context"
+	ContentPartFormResult  ContentPartType = "form_result"
 )
 
 type ContentPart struct {
@@ -447,6 +448,9 @@ type ContentPart struct {
 	StartColumn         int             `json:"startColumn,omitempty"`
 	EndLine             int             `json:"endLine,omitempty"`
 	EndColumn           int             `json:"endColumn,omitempty"`
+	Title               string          `json:"title,omitempty"`
+	Schema              json.RawMessage `json:"schema,omitempty"`
+	Result              json.RawMessage `json:"result,omitempty"`
 }
 
 func (p ContentPart) MarshalJSON() ([]byte, error) {
@@ -477,6 +481,9 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 		StartColumn     int             `json:"startColumn,omitempty"`
 		EndLine         int             `json:"endLine,omitempty"`
 		EndColumn       int             `json:"endColumn,omitempty"`
+		Title           string          `json:"title,omitempty"`
+		Schema          json.RawMessage `json:"schema,omitempty"`
+		Result          json.RawMessage `json:"result,omitempty"`
 	}
 	out := contentPartJSON{
 		Type:            p.Type,
@@ -502,6 +509,9 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 		StartColumn:     p.StartColumn,
 		EndLine:         p.EndLine,
 		EndColumn:       p.EndColumn,
+		Title:           p.Title,
+		Schema:          p.Schema,
+		Result:          p.Result,
 	}
 	if p.Type == ContentPartToolResult {
 		out.Ok = &p.Ok
@@ -598,7 +608,7 @@ func UserInputParts(text string, parts []ContentPart) []ContentPart {
 	}
 	for _, part := range parts {
 		switch part.Type {
-		case ContentPartAttachment, ContentPartLocalFolder, ContentPartProjectRef, ContentPartUIContext:
+		case ContentPartAttachment, ContentPartLocalFolder, ContentPartProjectRef, ContentPartUIContext, ContentPartFormResult:
 			out = append(out, part)
 		}
 	}
@@ -937,6 +947,12 @@ func CloneContentParts(parts []ContentPart) []ContentPart {
 		if part.Args != nil {
 			cp.Args = append(json.RawMessage(nil), part.Args...)
 		}
+		if part.Schema != nil {
+			cp.Schema = append(json.RawMessage(nil), part.Schema...)
+		}
+		if part.Result != nil {
+			cp.Result = append(json.RawMessage(nil), part.Result...)
+		}
 		out = append(out, cp)
 	}
 	return out
@@ -980,6 +996,8 @@ func MessageTextFromParts(parts []ContentPart) string {
 			continue
 		case ContentPartUIContext:
 			continue
+		case ContentPartFormResult:
+			continue
 		}
 	}
 	return b.String()
@@ -999,6 +1017,9 @@ func NormalizeContentParts(parts []ContentPart) []ContentPart {
 		}
 		if part.Type != ContentPartProjectRef {
 			part.StartLine, part.StartColumn, part.EndLine, part.EndColumn = 0, 0, 0, 0
+		}
+		if part.Type != ContentPartFormResult {
+			part.Title, part.Schema, part.Result = "", nil, nil
 		}
 		switch part.Type {
 		case ContentPartText, ContentPartThought:
@@ -1128,6 +1149,20 @@ func NormalizeContentParts(parts []ContentPart) []ContentPart {
 			part.AttachmentKey, part.SourcePath, part.MIME, part.Origin = "", "", "", ""
 			part.Size = 0
 			part.AttachmentCreatedAt, part.AudioTranscript = "", ""
+			part.Ok = false
+			part.SummaryKind, part.SummaryCount = "", 0
+		case ContentPartFormResult:
+			part.Title = strings.TrimSpace(part.Title)
+			var schemaValue, resultValue map[string]any
+			if part.Title == "" || json.Unmarshal(part.Schema, &schemaValue) != nil || schemaValue == nil || json.Unmarshal(part.Result, &resultValue) != nil || resultValue == nil {
+				continue
+			}
+			part.Text, part.CallID, part.Name, part.Args, part.Content = "", "", "", nil, ""
+			part.AttachmentKey, part.URL, part.Path, part.SourcePath, part.MIME, part.Origin = "", "", "", "", "", ""
+			part.AttachmentCreatedAt, part.AudioTranscript = "", ""
+			part.Size = 0
+			part.Surface, part.Resource, part.ResourceKind, part.RootID = "", "", "", ""
+			part.StartLine, part.StartColumn, part.EndLine, part.EndColumn = 0, 0, 0, 0
 			part.Ok = false
 			part.SummaryKind, part.SummaryCount = "", 0
 		default:

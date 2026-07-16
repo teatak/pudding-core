@@ -87,6 +87,12 @@ func (s *Server) writeAudioBindingResult(c *cart.Context, bindings voice.Binding
 		c.JSON(http.StatusConflict, map[string]string{"error": "audio_input_unsupported"})
 		return nil
 	}
+	if errors.Is(err, voice.ErrInputRouteUnavailable) {
+		c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": "audio_input_route_unavailable",
+		})
+		return nil
+	}
 	if errors.Is(err, voice.ErrInputUnavailable) {
 		c.JSON(http.StatusServiceUnavailable, map[string]string{
 			"error": "audio_input_unavailable",

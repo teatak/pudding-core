@@ -24,6 +24,16 @@ type appMCPOverrideConfig interface {
 	DeleteMCPOverride(ctx context.Context, appID, endpointName string) error
 }
 
+type appMCPConfigService interface {
+	ImportMCPApps(ctx context.Context, configJSON []byte, displayName string) ([]*app.Definition, error)
+	GetMCPAppConfig(ctx context.Context, id string) ([]byte, error)
+	UpdateMCPApp(ctx context.Context, id string, configJSON []byte, displayName string) (*app.Definition, error)
+}
+
+type appEnablementConfig interface {
+	DeleteAppEnablement(ctx context.Context, id string) error
+}
+
 type putAppConnectionReq struct {
 	AppID        string            `json:"appID"`
 	Name         string            `json:"name"`
@@ -47,10 +57,18 @@ type putAppEnabledReq struct {
 	Enabled *bool `json:"enabled"`
 }
 
+type appMCPConfigReq struct {
+	ConfigJSON string `json:"configJSON"`
+	Name       string `json:"name,omitempty"`
+}
+
 type appMCPOverrideView struct {
 	Configured bool                    `json:"configured"`
 	Override   app.MCPEndpointOverride `json:"override"`
 }
+
+const maxInstallAppRequestBytes = 2*app.MaxPackageJSONBytes + 64<<10
+const maxMCPAppConfigRequestBytes = 2 << 20
 
 func (s *Server) listApps(c *cart.Context) error {
 	if s.apps == nil {
@@ -70,8 +88,14 @@ func (s *Server) installApp(c *cart.Context) error {
 		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_service_unavailable"})
 		return nil
 	}
+	c.Request.Body = http.MaxBytesReader(c.Response, c.Request.Body, maxInstallAppRequestBytes)
 	var req installAppReq
 	if err := decode(c, &req); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "app_package_too_large"})
+			return nil
+		}
 		return badRequest(c, "invalid json body")
 	}
 	if strings.TrimSpace(req.PackageJSON) == "" {
@@ -79,6 +103,10 @@ func (s *Server) installApp(c *cart.Context) error {
 	}
 	def, err := s.apps.InstallPackage(c.Request.Context(), []byte(req.PackageJSON), req.PackageSHA256, req.SourceURL)
 	if err != nil {
+		if errors.Is(err, app.ErrPackageTooLarge) {
+			c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "app_package_too_large"})
+			return nil
+		}
 		if errors.Is(err, app.ErrBuiltinApp) {
 			c.JSON(http.StatusConflict, map[string]string{"error": "builtin_app_id_reserved"})
 			return nil
@@ -87,6 +115,92 @@ func (s *Server) installApp(c *cart.Context) error {
 	}
 	c.JSON(http.StatusOK, def)
 	return nil
+}
+
+func (s *Server) importMCPApps(c *cart.Context) error {
+	apps, ok := s.apps.(appMCPConfigService)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_mcp_config_unavailable"})
+		return nil
+	}
+	req, ok := decodeAppMCPConfigRequest(c)
+	if !ok {
+		return nil
+	}
+	definitions, err := apps.ImportMCPApps(c.Request.Context(), []byte(req.ConfigJSON), req.Name)
+	if err != nil {
+		return s.handleAppMCPConfigError(c, err)
+	}
+	c.JSON(http.StatusOK, map[string]any{"apps": definitions})
+	return nil
+}
+
+func (s *Server) getMCPAppConfig(c *cart.Context) error {
+	apps, ok := s.apps.(appMCPConfigService)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_mcp_config_unavailable"})
+		return nil
+	}
+	id, _ := c.Param("id")
+	configJSON, err := apps.GetMCPAppConfig(c.Request.Context(), id)
+	if err != nil {
+		return s.handleAppMCPConfigError(c, err)
+	}
+	c.JSON(http.StatusOK, map[string]string{"configJSON": string(configJSON)})
+	return nil
+}
+
+func (s *Server) putMCPAppConfig(c *cart.Context) error {
+	apps, ok := s.apps.(appMCPConfigService)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "app_mcp_config_unavailable"})
+		return nil
+	}
+	req, ok := decodeAppMCPConfigRequest(c)
+	if !ok {
+		return nil
+	}
+	id, _ := c.Param("id")
+	definition, err := apps.UpdateMCPApp(c.Request.Context(), id, []byte(req.ConfigJSON), req.Name)
+	if err != nil {
+		return s.handleAppMCPConfigError(c, err)
+	}
+	c.JSON(http.StatusOK, definition)
+	return nil
+}
+
+func decodeAppMCPConfigRequest(c *cart.Context) (appMCPConfigReq, bool) {
+	c.Request.Body = http.MaxBytesReader(c.Response, c.Request.Body, maxMCPAppConfigRequestBytes)
+	var req appMCPConfigReq
+	if err := decode(c, &req); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "app_mcp_config_too_large"})
+			return appMCPConfigReq{}, false
+		}
+		_ = badRequest(c, "invalid json body")
+		return appMCPConfigReq{}, false
+	}
+	if strings.TrimSpace(req.ConfigJSON) == "" {
+		_ = badRequest(c, "configJSON is required")
+		return appMCPConfigReq{}, false
+	}
+	return req, true
+}
+
+func (s *Server) handleAppMCPConfigError(c *cart.Context, err error) error {
+	if errors.Is(err, app.ErrInvalidID) || errors.Is(err, app.ErrInvalidMCPAppConfig) {
+		return badRequest(c, err.Error())
+	}
+	if errors.Is(err, app.ErrNotFound) {
+		c.JSON(http.StatusNotFound, map[string]string{"error": "mcp_app_not_found"})
+		return nil
+	}
+	if errors.Is(err, app.ErrAlreadyExists) || errors.Is(err, app.ErrBuiltinApp) {
+		c.JSON(http.StatusConflict, map[string]string{"error": "mcp_app_conflict"})
+		return nil
+	}
+	return s.fail(c, err)
 }
 
 func (s *Server) putAppEnabled(c *cart.Context) error {
@@ -132,29 +246,60 @@ func (s *Server) deleteApp(c *cart.Context) error {
 			return s.fail(c, err)
 		}
 	}
-	if err := s.apps.DeleteDefinition(c.Request.Context(), id); err != nil {
-		if errors.Is(err, app.ErrInvalidID) {
+	sessions, err := s.store.ListSessions(c.Request.Context())
+	if err != nil {
+		return s.fail(c, err)
+	}
+	deleteErr := s.apps.DeleteDefinition(c.Request.Context(), id)
+	if deleteErr != nil && !errors.Is(deleteErr, app.ErrNotFound) {
+		if errors.Is(deleteErr, app.ErrInvalidID) {
 			return badRequest(c, "invalid app id")
 		}
-		if errors.Is(err, app.ErrNotFound) {
-			c.JSON(http.StatusNotFound, map[string]string{"error": "app_not_found"})
-			return nil
-		}
-		if errors.Is(err, app.ErrBuiltinApp) {
+		if errors.Is(deleteErr, app.ErrBuiltinApp) {
 			c.JSON(http.StatusConflict, map[string]string{"error": "builtin_app_cannot_be_uninstalled"})
 			return nil
 		}
-		return s.fail(c, err)
+		return s.fail(c, deleteErr)
 	}
+	var cleanupErr error
 	if cfg != nil {
 		for _, conn := range conns {
 			if conn == nil || conn.AppID != id {
 				continue
 			}
 			if err := cfg.DeleteAppConnection(c.Request.Context(), conn.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
-				return s.fail(c, err)
+				cleanupErr = errors.Join(cleanupErr, err)
 			}
 		}
+	}
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+		loaded := make([]string, 0, len(session.LoadedAppIDs))
+		for _, loadedID := range session.LoadedAppIDs {
+			if loadedID != id {
+				loaded = append(loaded, loadedID)
+			}
+		}
+		if len(loaded) == len(session.LoadedAppIDs) {
+			continue
+		}
+		if _, err := s.store.UpdateSession(c.Request.Context(), session.ID, store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+		}
+	}
+	if cfg, ok := s.config.(appEnablementConfig); ok {
+		if err := cfg.DeleteAppEnablement(c.Request.Context(), id); err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+		}
+	}
+	if cleanupErr != nil {
+		return s.fail(c, cleanupErr)
+	}
+	if errors.Is(deleteErr, app.ErrNotFound) {
+		c.JSON(http.StatusNotFound, map[string]string{"error": "app_not_found"})
+		return nil
 	}
 	c.String(http.StatusNoContent, "")
 	return nil
@@ -443,6 +588,18 @@ func normalizeAppConnectionFields(config *app.ConnectionConfig, values map[strin
 			return nil, errors.New("connection field " + id + " is required")
 		}
 		if value != "" {
+			for _, rule := range field.Inject {
+				switch strings.TrimSpace(rule.Target) {
+				case "header":
+					if !app.IsAllowedRequestHeaderValue(value) {
+						return nil, errors.New("connection field " + id + " contains an invalid header value")
+					}
+				case "env":
+					if strings.ContainsRune(value, 0) {
+						return nil, errors.New("connection field " + id + " contains a NUL byte")
+					}
+				}
+			}
 			out[id] = value
 		}
 	}
@@ -465,16 +622,25 @@ func validateAppConnectionAuth(auth app.Auth) error {
 		if strings.TrimSpace(auth.Token) == "" {
 			return errors.New("bearer token is required")
 		}
+		if !app.IsAllowedRequestHeaderValue(auth.Token) {
+			return errors.New("bearer token contains an invalid header value")
+		}
 	case app.AuthTypeToken:
 		if strings.TrimSpace(auth.Token) == "" {
 			return errors.New("token is required")
 		}
+		if !app.IsAllowedRequestHeaderValue(auth.Token) || !app.IsAllowedRequestHeaderValue(auth.Prefix) {
+			return errors.New("token contains an invalid header value")
+		}
 	case app.AuthTypeHeader:
-		if strings.TrimSpace(auth.Header) == "" {
-			return errors.New("header is required")
+		if !app.IsAllowedRequestHeaderName(auth.Header) {
+			return errors.New("header is invalid or not allowed")
 		}
 		if strings.TrimSpace(auth.Token) == "" {
 			return errors.New("header token is required")
+		}
+		if !app.IsAllowedRequestHeaderValue(auth.Token) {
+			return errors.New("header token contains an invalid header value")
 		}
 	case app.AuthTypeBasic:
 		if strings.TrimSpace(auth.Username) == "" && strings.TrimSpace(auth.Password) == "" {
@@ -483,6 +649,9 @@ func validateAppConnectionAuth(auth app.Auth) error {
 	case app.AuthTypeOAuth2:
 		if strings.TrimSpace(auth.AccessToken) == "" {
 			return errors.New("oauth2 access token is required")
+		}
+		if !app.IsAllowedRequestHeaderValue(auth.AccessToken) || strings.ContainsAny(strings.TrimSpace(auth.TokenType), "\r\n \t") {
+			return errors.New("oauth2 token contains an invalid header value")
 		}
 	default:
 		return errors.New("auth type is not supported")

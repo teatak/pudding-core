@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/teatak/pudding-core/internal/app"
+	"github.com/teatak/pudding-core/internal/provider"
 )
 
 func TestAppMCPProviderToolNameUsesToolAndHash(t *testing.T) {
@@ -32,6 +34,68 @@ func TestAppMCPProviderToolNameUsesToolAndHash(t *testing.T) {
 	longName := appMCPProviderToolName(binding, strings.Repeat("tool", 20))
 	if len(longName) != appMCPMaxToolNameLen {
 		t.Fatalf("long provider tool name must be capped at %d bytes: %q (%d)", appMCPMaxToolNameLen, longName, len(longName))
+	}
+}
+
+func TestAppMCPCacheKeyChangesWithCredentialsAndInjectionRules(t *testing.T) {
+	binding := &app.EndpointBinding{
+		AppID:        "example",
+		ConnectionID: "primary",
+		EndpointName: "example_mcp",
+		Endpoint: app.Endpoint{
+			Kind:      app.EndpointKindMCP,
+			Transport: app.EndpointTransportStreamableHTTP,
+			URL:       "https://example.test/mcp",
+		},
+		Auth: app.Auth{Type: app.AuthTypeBearer, Token: "first-secret"},
+		ConnectionFieldDefs: []app.ConnectionField{{
+			ID: "team",
+			Inject: []app.ConnectionFieldInject{{
+				Target: "header",
+				Name:   "X-Team",
+			}},
+		}},
+	}
+	initial := appMCPBindingsCacheKey([]*app.EndpointBinding{binding})
+	binding.Auth.Token = "second-secret"
+	if rotated := appMCPBindingsCacheKey([]*app.EndpointBinding{binding}); rotated == initial {
+		t.Fatal("credential rotation reused the stale MCP cache entry")
+	}
+	binding.Auth.Token = "first-secret"
+	binding.ConnectionFieldDefs[0].Inject[0].Name = "X-Workspace"
+	if changed := appMCPBindingsCacheKey([]*app.EndpointBinding{binding}); changed == initial {
+		t.Fatal("connection injection change reused the stale MCP cache entry")
+	}
+	if strings.Contains(initial, "first-secret") {
+		t.Fatal("MCP cache key exposed credential material")
+	}
+}
+
+func TestAppMCPRunnerClearsStaleSessionTools(t *testing.T) {
+	staleDef := provider.ToolDef{Name: "app_mcp__stale", AppID: "old-app"}
+	staleTool := appMCPDiscoveredTool{
+		binding:    &app.EndpointBinding{AppID: "old-app"},
+		remoteName: "stale",
+	}
+
+	runner := NewAppMCPRunner(fakeAppMCPSource{})
+	runner.setSessionTools("session-1", []provider.ToolDef{staleDef}, map[string]appMCPDiscoveredTool{staleDef.Name: staleTool})
+	defs, err := runner.DefinitionsForApps(context.Background(), "session-1", nil)
+	if err != nil || len(defs) != 0 {
+		t.Fatalf("empty App scope definitions = %+v, err = %v", defs, err)
+	}
+	if _, ok := runner.lookup("session-1", staleDef.Name); ok {
+		t.Fatal("stale MCP route survived an empty App scope")
+	}
+
+	runner.source = fakeAppMCPSource{err: errors.New("connection config unavailable")}
+	runner.setSessionTools("session-1", []provider.ToolDef{staleDef}, map[string]appMCPDiscoveredTool{staleDef.Name: staleTool})
+	defs, err = runner.DefinitionsForApps(context.Background(), "session-1", []string{"new-app"})
+	if err != nil || len(defs) != 0 {
+		t.Fatalf("failed binding lookup definitions = %+v, err = %v", defs, err)
+	}
+	if _, ok := runner.lookup("session-1", staleDef.Name); ok {
+		t.Fatal("stale MCP route survived a binding lookup failure")
 	}
 }
 
@@ -271,6 +335,31 @@ func TestApplyEndpointConnectionEnvDoesNotOverrideEndpointEnv(t *testing.T) {
 	}
 }
 
+func TestAppMCPStdioEnvDoesNotInheritDaemonSecrets(t *testing.T) {
+	t.Setenv("PUDDING_DAEMON_TOKEN", "daemon-secret")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "cloud-secret")
+
+	env, err := appMCPStdioEnv(map[string]string{
+		"PUDDING_APP_MCP_STDIO_HELPER": "1",
+		"FAKE_MCP_TOKEN":               "connection-secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := appMCPEnvValue(env, "PUDDING_DAEMON_TOKEN"); got != "" {
+		t.Fatalf("daemon token leaked to App MCP process: %q", got)
+	}
+	if got := appMCPEnvValue(env, "AWS_SECRET_ACCESS_KEY"); got != "" {
+		t.Fatalf("cloud credential leaked to App MCP process: %q", got)
+	}
+	if got := appMCPEnvValue(env, "FAKE_MCP_TOKEN"); got != "connection-secret" {
+		t.Fatalf("explicit connection env = %q", got)
+	}
+	if got := appMCPEnvValue(env, "PATH"); got == "" {
+		t.Fatal("App MCP PATH is empty")
+	}
+}
+
 func TestReadAppMCPSSEFindsMatchingResponse(t *testing.T) {
 	raw := strings.NewReader("event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"other\",\"result\":{}}\n\n" +
 		"event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"42\",\"result\":{\"ok\":true}}\n\n")
@@ -283,12 +372,21 @@ func TestReadAppMCPSSEFindsMatchingResponse(t *testing.T) {
 	}
 }
 
+func TestReadAppMCPSSELimitsCombinedDataLines(t *testing.T) {
+	line := strings.Repeat("x", appMCPMaxResponseBytes/2+1)
+	raw := strings.NewReader("data: " + line + "\ndata: " + line + "\n\n")
+	if _, err := readAppMCPSSE(context.Background(), raw, "42"); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("oversized SSE event error = %v", err)
+	}
+}
+
 type fakeAppMCPSource struct {
 	bindings []*app.EndpointBinding
+	err      error
 }
 
 func (f fakeAppMCPSource) ListEndpointBindings(context.Context, string) ([]*app.EndpointBinding, error) {
-	return f.bindings, nil
+	return f.bindings, f.err
 }
 
 func writeAppMCPTestResponse(t *testing.T, w http.ResponseWriter, id string, result any) {

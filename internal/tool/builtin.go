@@ -55,7 +55,7 @@ const (
 	PatchPropose        = "builtin_patch_propose"
 	PatchApply          = "builtin_patch_apply"
 	SkillValidate       = "builtin_skill_validate"
-	SkillSubmit         = "builtin_skill_submit"
+	AppSave             = "builtin_app_save"
 	RESTRequest         = "builtin_rest_request"
 	GraphQLRequest      = "builtin_graphql_request"
 	GraphQLIntrospect   = "builtin_graphql_introspect"
@@ -84,14 +84,17 @@ type AppEndpointSource interface {
 	ResolveEndpoint(ctx context.Context, sessionID, endpointName, connection string) (*app.EndpointBinding, error)
 }
 
+type AppAuthoringSource interface {
+	ListDefinitions(ctx context.Context) ([]*app.Definition, error)
+	SaveAuthoredPackage(ctx context.Context, packageJSON []byte, update bool) (*app.Definition, error)
+}
+
 type SkillReader interface {
 	ReadSkill(ctx context.Context, id string) (*skill.Document, error)
 }
 
-type SkillDraftSource interface {
-	ValidateDraft(ctx context.Context, id string) (*skill.Validation, error)
-	DraftDetail(ctx context.Context, id string) (*skill.DraftDetail, error)
-	ApplyDraft(ctx context.Context, id string) error
+type SkillValidator interface {
+	ValidateSkill(ctx context.Context, id string) (*skill.Validation, error)
 }
 
 type HistorySearchSource interface {
@@ -116,8 +119,9 @@ type BuiltinOption func(*BuiltinRunner)
 type BuiltinRunner struct {
 	webConfig                WebConfigSource
 	appEndpoints             AppEndpointSource
+	appAuthoring             AppAuthoringSource
 	skillReader              SkillReader
-	skillDrafts              SkillDraftSource
+	skillValidator           SkillValidator
 	history                  HistorySearchSource
 	historyMessages          HistoryMessageSource
 	browserState             BrowserStateStore
@@ -176,11 +180,17 @@ func WithAppEndpoints(source AppEndpointSource) BuiltinOption {
 	}
 }
 
+func WithAppAuthoring(source AppAuthoringSource) BuiltinOption {
+	return func(r *BuiltinRunner) {
+		r.appAuthoring = source
+	}
+}
+
 func WithSkills(source SkillReader) BuiltinOption {
 	return func(r *BuiltinRunner) {
 		r.skillReader = source
-		if drafts, ok := source.(SkillDraftSource); ok {
-			r.skillDrafts = drafts
+		if validator, ok := source.(SkillValidator); ok {
+			r.skillValidator = validator
 		}
 	}
 }
@@ -364,13 +374,13 @@ func BuiltinDefinitions() []provider.ToolDef {
 		{
 			Name:        FileList,
 			Description: "List files in a Pudding-managed file area or an authorized project directory.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","project"],"description":"Target file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized project directories. Use . to list the root."},"max_entries":{"type":"integer","description":"Optional maximum entries, 1-1000, default 200."}},"required":["scope","path"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["app","skill","temp","project"],"description":"Target file area. Use app to inspect installed App package files, skill for global user Skills, and project for authorized local project directories."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized project directories. Use . to list the root."},"max_entries":{"type":"integer","description":"Optional maximum entries, 1-1000, default 200."}},"required":["scope","path"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FileRead,
 			Description: "Read one small UTF-8 text file, or save one supported image file as an attachment from a Pudding-managed file area or an authorized project directory. Image bytes are visible only to models with image input support; otherwise the model sees attachment metadata only. For large text files use builtin_file_slice or builtin_file_search first.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","project"],"description":"Target file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized project directories."},"max_chars":{"type":"integer","description":"Optional max characters, default 20000 and cap 100000."}},"required":["scope","path"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["app","skill","temp","project"],"description":"Target file area. Use app to inspect installed App package files, skill for global user Skills, and project for authorized local project directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized project directories."},"max_chars":{"type":"integer","description":"Optional max characters, default 20000 and cap 100000."}},"required":["scope","path"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
@@ -382,49 +392,49 @@ func BuiltinDefinitions() []provider.ToolDef {
 		{
 			Name:        FileStat,
 			Description: "Return metadata for one file or directory: exists, type, size, mtime, and MIME when available.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","project"],"description":"Target file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized project directories."}},"required":["scope","path"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["app","skill","temp","project"],"description":"Target file area. The app scope is read-only and excludes connection data and hidden runtime overrides."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized project directories."}},"required":["scope","path"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FileSearch,
 			Description: "Search UTF-8 text files by literal text or RE2-compatible regular expression. Supports case control, project-relative include/exclude globs, and bounded context lines. Skips binary files and common generated directories.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","project"],"description":"Target file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Search root. Relative path inside a managed area, or an absolute/relative path inside authorized project directories. Use . for the root."},"query":{"type":"string","description":"Text or regular expression to search for."},"mode":{"type":"string","enum":["literal","regex"],"description":"Search mode. Defaults to literal."},"case_sensitive":{"type":"boolean","description":"Whether matching is case-sensitive. Defaults to true."},"include_globs":{"type":"array","items":{"type":"string"},"maxItems":32,"description":"Optional project-relative path globs to include. Supports ** directory segments."},"exclude_globs":{"type":"array","items":{"type":"string"},"maxItems":32,"description":"Optional project-relative path globs to exclude. Supports ** directory segments."},"context_lines":{"type":"integer","minimum":0,"maximum":5,"description":"Context lines before and after each matching line. Defaults to 0."},"max_results":{"type":"integer","minimum":1,"maximum":500,"description":"Optional maximum matching lines, default 100 and cap 500."}},"required":["scope","path","query"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["app","skill","temp","project"],"description":"Target file area. Use app to search visible installed App package files."},"path":{"type":"string","description":"Search root. Relative path inside a managed area, or an absolute/relative path inside authorized project directories. Use . for the root."},"query":{"type":"string","description":"Text or regular expression to search for."},"mode":{"type":"string","enum":["literal","regex"],"description":"Search mode. Defaults to literal."},"case_sensitive":{"type":"boolean","description":"Whether matching is case-sensitive. Defaults to true."},"include_globs":{"type":"array","items":{"type":"string"},"maxItems":32,"description":"Optional project-relative path globs to include. Supports ** directory segments."},"exclude_globs":{"type":"array","items":{"type":"string"},"maxItems":32,"description":"Optional project-relative path globs to exclude. Supports ** directory segments."},"context_lines":{"type":"integer","minimum":0,"maximum":5,"description":"Context lines before and after each matching line. Defaults to 0."},"max_results":{"type":"integer","minimum":1,"maximum":500,"description":"Optional maximum matching lines, default 100 and cap 500."}},"required":["scope","path","query"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FileSlice,
 			Description: "Read a focused line slice from a UTF-8 text file. Supports origin=start for line ranges and origin=end for tail-style reads, with optional reverse order.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","skill_published","temp","project"],"description":"Target file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized project directories."},"origin":{"type":"string","enum":["start","end"],"description":"start reads from a 1-based line range. end reads the last N lines after optional skip. Default start."},"start":{"type":"integer","description":"1-based start line for origin=start. Default 1."},"end":{"type":"integer","description":"Inclusive end line for origin=start. If omitted, lines controls the range length."},"lines":{"type":"integer","description":"Line count for origin=end or when end is omitted. Default 100 and cap 500."},"skip":{"type":"integer","description":"For origin=end, skip this many lines from the file end before taking lines. Default 0."},"order":{"type":"string","enum":["natural","reverse"],"description":"natural returns file order. reverse returns newest/end-most lines first. Default natural."}},"required":["scope","path"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["app","skill","temp","project"],"description":"Target file area. Use app to inspect visible installed App package files."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized project directories."},"origin":{"type":"string","enum":["start","end"],"description":"start reads from a 1-based line range. end reads the last N lines after optional skip. Default start."},"start":{"type":"integer","description":"1-based start line for origin=start. Default 1."},"end":{"type":"integer","description":"Inclusive end line for origin=start. If omitted, lines controls the range length."},"lines":{"type":"integer","description":"Line count for origin=end or when end is omitted. Default 100 and cap 500."},"skip":{"type":"integer","description":"For origin=end, skip this many lines from the file end before taking lines. Default 0."},"order":{"type":"string","enum":["natural","reverse"],"description":"natural returns file order. reverse returns newest/end-most lines first. Default natural."}},"required":["scope","path"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FileWrite,
 			Description: "Overwrite one text file in a writable Pudding-managed file area or authorized project directory.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp","project"],"description":"Target writable file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized project directories."},"content":{"type":"string","description":"New file content."}},"required":["scope","path","content"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill","temp","project"],"description":"Target writable file area. Use skill for global user Skills and project for authorized local project directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized project directories."},"content":{"type":"string","description":"New file content."}},"required":["scope","path","content"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FilePatch,
 			Description: "Replace text in one file in a writable Pudding-managed file area or authorized project directory by exact string match.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp","project"],"description":"Target writable file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized project directories."},"old_string":{"type":"string","description":"Exact text to replace."},"new_string":{"type":"string","description":"Replacement text."},"replace_all":{"type":"boolean","description":"Replace all matches. Defaults false; without this, exactly one match is required."}},"required":["scope","path","old_string","new_string"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill","temp","project"],"description":"Target writable file area. Use skill for global user Skills and project for authorized local project directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized project directories."},"old_string":{"type":"string","description":"Exact text to replace."},"new_string":{"type":"string","description":"Replacement text."},"replace_all":{"type":"boolean","description":"Replace all matches. Defaults false; without this, exactly one match is required."}},"required":["scope","path","old_string","new_string"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FileDelete,
 			Description: "Delete a file or, when recursive is true, a directory from a writable Pudding-managed file area or authorized project directory.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp","project"],"description":"Target writable file area. Use project for authorized local project directories."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized project directories."},"recursive":{"type":"boolean","description":"Required to delete a directory."}},"required":["scope","path"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill","temp","project"],"description":"Target writable file area. Use skill for global user Skills and project for authorized local project directories."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized project directories."},"recursive":{"type":"boolean","description":"Required to delete a directory."}},"required":["scope","path"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FileMove,
 			Description: "Move or rename a file or directory inside the same writable managed area or authorized project directories.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp","project"]},"from_path":{"type":"string"},"to_path":{"type":"string"}},"required":["scope","from_path","to_path"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill","temp","project"]},"from_path":{"type":"string"},"to_path":{"type":"string"}},"required":["scope","from_path","to_path"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FileCopy,
 			Description: "Copy a file or directory inside the same writable managed area or authorized project directory. Directories require recursive=true; existing destinations require overwrite=true.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill_draft","temp","project"],"description":"Target writable file area."},"from_path":{"type":"string","description":"Source path in the same scope."},"to_path":{"type":"string","description":"Destination path in the same scope."},"recursive":{"type":"boolean","description":"Required when copying a directory."},"overwrite":{"type":"boolean","description":"Replace an existing destination. Defaults false."}},"required":["scope","from_path","to_path"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill","temp","project"],"description":"Target writable file area."},"from_path":{"type":"string","description":"Source path in the same scope."},"to_path":{"type":"string","description":"Destination path in the same scope."},"recursive":{"type":"boolean","description":"Required when copying a directory."},"overwrite":{"type":"boolean","description":"Replace an existing destination. Defaults false."}},"required":["scope","from_path","to_path"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
@@ -501,14 +511,14 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        SkillValidate,
-			Description: "Validate one staged skill package before asking the user to review it.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"draft_id":{"type":"string","description":"Staged skill package id."}},"required":["draft_id"],"additionalProperties":false}`),
+			Description: "Validate one global user Skill after creating or editing it in the skill file scope.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"skill_id":{"type":"string","description":"Global user Skill id and directory name."}},"required":["skill_id"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
-			Name:        SkillSubmit,
-			Description: "Submit one valid staged skill package for user review in Settings. This does not publish the skill.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"draft_id":{"type":"string","description":"Staged skill package id."}},"required":["draft_id"],"additionalProperties":false}`),
+			Name:        AppSave,
+			Description: "Create or update one installed Pudding App from a complete text package. The package is validated in isolation and replaces the installed version only after validation succeeds. Use only when the user explicitly asks to create or modify an App; never include credentials or connection secrets.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"operation":{"type":"string","enum":["create","update"],"description":"create refuses to replace an installed App; update requires an existing installed App."},"app_id":{"type":"string","description":"Lowercase kebab-case App id. It must match id in app.yaml."},"version":{"type":"string","description":"Non-empty App package version. It must match version in app.yaml when declared."},"files":{"type":"array","minItems":1,"maxItems":64,"description":"Complete set of package-managed UTF-8 text files. app.yaml is required. Include every App file that should remain managed after this save.","items":{"type":"object","properties":{"path":{"type":"string","description":"Relative package path such as app.yaml, assets/icon.svg, or skills/issues/SKILL.md."},"content":{"type":"string","description":"Complete UTF-8 file content."}},"required":["path","content"],"additionalProperties":false}}},"required":["operation","app_id","version","files"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
@@ -703,8 +713,8 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.patchApply(call)
 	case SkillValidate:
 		return r.skillValidate(ctx, call)
-	case SkillSubmit:
-		return r.skillSubmit(ctx, call)
+	case AppSave:
+		return r.appSave(ctx, call)
 	case RESTRequest:
 		return r.restRequest(ctx, call)
 	case GraphQLRequest:

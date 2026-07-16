@@ -1,7 +1,6 @@
 import {
   Camera,
   FolderOpen,
-  Package,
   Paperclip,
   ScanLine,
   WandSparkles,
@@ -117,17 +116,17 @@ function buildMentionSections(references: ComposerMentionReference[], t: (key: s
 }
 
 function MentionIcon({ reference }: { reference: ComposerMentionReference }) {
+  if (reference.kind === "app") {
+    if (reference.id === "browser" || reference.id === "terminal" || reference.id === "canvas") {
+      return <BuiltinAppIcon appID={reference.id} size="xs" />;
+    }
+    return <AppIcon icon={reference.appIcon} size="xs" src={reference.iconURL} />;
+  }
   if (reference.iconURL && reference.appIcon) {
     return <AppIcon icon={reference.appIcon} size="xs" src={reference.iconURL} />;
   }
   if (reference.iconURL) {
     return <IdentityIcon fallback={reference.kind === "skill" ? "skill" : "app"} fit="contain" size="xs" src={reference.iconURL} />;
-  }
-  if (reference.kind === "app") {
-    if (reference.id === "browser" || reference.id === "terminal" || reference.id === "canvas") {
-      return <BuiltinAppIcon appID={reference.id} size="xs" />;
-    }
-    return <ColoredMentionIcon tone="teal" icon={<Package className="size-3.5" />} />;
   }
   if (reference.kind === "skill") {
     return <ColoredMentionIcon tone="violet" icon={<WandSparkles className="size-3.5" />} />;
@@ -144,7 +143,7 @@ function MentionIcon({ reference }: { reference: ComposerMentionReference }) {
   return <ColoredMentionIcon tone="sky" icon={<Paperclip className="size-3.5" />} />;
 }
 
-function ColoredMentionIcon({ icon, tone }: { icon: ReactNode; tone: "amber" | "emerald" | "indigo" | "rose" | "sky" | "slate" | "teal" | "violet" }) {
+function ColoredMentionIcon({ icon, tone }: { icon: ReactNode; tone: "amber" | "emerald" | "indigo" | "rose" | "sky" | "slate" | "violet" }) {
   const toneClass = {
     amber: "bg-amber-600 text-white",
     emerald: "bg-emerald-600 text-white",
@@ -152,7 +151,6 @@ function ColoredMentionIcon({ icon, tone }: { icon: ReactNode; tone: "amber" | "
     rose: "bg-rose-600 text-white",
     sky: "bg-sky-600 text-white",
     slate: "bg-slate-600 text-white",
-    teal: "bg-teal-600 text-white",
     violet: "bg-violet-600 text-white",
   }[tone];
   return <span className={cn("grid size-5 shrink-0 place-items-center rounded", toneClass)}>{icon}</span>;

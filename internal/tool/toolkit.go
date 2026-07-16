@@ -40,6 +40,12 @@ var builtinToolkitTemplates = []ToolkitManifest{
 		},
 	},
 	{
+		ID: "code.app", Capability: store.ModeCode,
+		Summary:   "Create or update local Pudding Apps through validated package replacement.",
+		Keywords:  []string{"app", "create", "update", "integration", "endpoint"},
+		ToolNames: []string{AppSave},
+	},
+	{
 		ID: "code.core", Capability: store.ModeCode, Default: true,
 		Summary:  "Project orientation, CLI, focused file reading, and reviewable patch application.",
 		Keywords: []string{"project", "instructions", "command", "read", "patch", "test", "build"},
@@ -79,9 +85,9 @@ var builtinToolkitTemplates = []ToolkitManifest{
 	},
 	{
 		ID: "code.skill", Capability: store.ModeCode,
-		Summary:   "Validate and submit staged skill packages for user review.",
-		Keywords:  []string{"skill", "validate", "publish"},
-		ToolNames: []string{SkillValidate, SkillSubmit},
+		Summary:   "Validate global user Skills after creating or editing them directly.",
+		Keywords:  []string{"skill", "validate", "create", "edit"},
+		ToolNames: []string{SkillValidate},
 	},
 	{
 		ID: "work.camera", Capability: store.ModeWork,

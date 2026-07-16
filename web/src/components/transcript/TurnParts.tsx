@@ -41,6 +41,7 @@ import {
   MoveRight,
   MoveVertical,
   PackageOpen,
+  PackagePlus,
   PanelTop,
   Paperclip,
   Play,
@@ -56,7 +57,6 @@ import {
   SquareTerminal,
   TextCursorInput,
   Trash2,
-  Upload,
   Waypoints,
   Wrench,
   type LucideIcon,
@@ -290,6 +290,7 @@ function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIc
   const known: Record<string, LucideIcon> = {
     builtin_attachment_read_image: Image,
     builtin_app_load: PackageOpen,
+    builtin_app_save: PackagePlus,
     builtin_browser_back: ArrowLeft,
     builtin_browser_click: MousePointerClick,
     builtin_browser_close: CircleX,
@@ -340,7 +341,6 @@ function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIc
     builtin_history_search: History,
     builtin_rest_request: Send,
     builtin_skill_read: BookOpen,
-    builtin_skill_submit: Upload,
     builtin_skill_validate: BookOpenCheck,
     builtin_time_get_current: Clock3,
     builtin_weather_get: CloudSun,
@@ -478,6 +478,7 @@ function partFromContentPart(part: ContentPart): TurnPartVM | null {
     case "local_folder":
     case "project_reference":
     case "ui_context":
+    case "form_result":
       return null;
   }
 }
@@ -1694,6 +1695,7 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     builtin_history_search: t("transcript.toolHistorySearch"),
     builtin_toolkit_load: t("transcript.toolToolkitLoad"),
     builtin_app_load: t("transcript.toolAppLoad"),
+    builtin_app_save: t("transcript.toolAppSave"),
     builtin_command_poll: t("transcript.toolCommandPoll"),
     builtin_command_run: t("transcript.toolCommandRun"),
     builtin_command_start: t("transcript.toolCommandStart"),
@@ -1739,7 +1741,6 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     builtin_browser_type: t("transcript.toolBrowserType"),
     builtin_rest_request: t("transcript.toolRESTRequest"),
     builtin_skill_read: t("transcript.toolSkillRead"),
-    builtin_skill_submit: t("transcript.toolSkillSubmit"),
     builtin_skill_validate: t("transcript.toolSkillValidate"),
     builtin_time_get_current: t("transcript.toolTimeCurrent"),
     builtin_weather_get: t("transcript.toolWeatherGet"),

@@ -18,6 +18,7 @@ import (
 	"github.com/teatak/pudding-core/internal/browser"
 	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/event"
+	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
@@ -728,7 +729,7 @@ func TestToolkitLoadRebuildsToolsAndResetsNextTurn(t *testing.T) {
 		defs:   tool.BuiltinDefinitions(),
 		result: tool.Result{Ok: true, Content: `{"ok":true,"clean":true,"fileCount":0}`},
 	}
-	eng := New(ms, hub, mapResolver{"toolkit": client}, ms, WithTools(runner))
+	eng := New(ms, hub, mapResolver{"toolkit": client}, ms, WithAttachmentHome(t.TempDir()), WithTools(runner))
 	ctx := context.Background()
 	sid := "sess_toolkit"
 	if err := ms.CreateSession(ctx, &store.Session{
@@ -957,6 +958,41 @@ func TestAppLoadIsExplicitAndAtomic(t *testing.T) {
 	result, changed = eng.loadApp(ctx, sid, call, store.ModeWork)
 	if !result.Ok || changed || !strings.Contains(result.Content, `"alreadyLoaded":true`) {
 		t.Fatalf("repeated App load should be idempotent: %+v", result)
+	}
+}
+
+func TestAppLoadAllowsToolOnlyAppWithoutSkill(t *testing.T) {
+	ctx := context.Background()
+	ms := memstore.New()
+	apps := &mutableAppSource{defs: []*app.Definition{{
+		ID:           "tool-only",
+		Name:         "Tool Only",
+		Enabled:      true,
+		RequiredMode: string(store.ModeWork),
+		Endpoints: map[string]app.Endpoint{
+			"tool_only_rest": {Kind: app.EndpointKindREST, URL: "https://example.test"},
+		},
+	}}}
+	eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms, WithApps(apps))
+	sid := "sess_tool_only_app"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Provider: "mock", Model: "mock-model"}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, changed := eng.loadApp(ctx, sid, tool.Call{
+		CallID: "load_tool_only",
+		Name:   tool.AppLoad,
+		Args:   json.RawMessage(`{"app_id":"tool-only"}`),
+	}, store.ModeWork)
+	if !result.Ok || !changed || !strings.Contains(result.Content, `"instructionsLoaded":false`) {
+		t.Fatalf("tool-only App load failed: %+v", result)
+	}
+	sess, err := ms.GetSession(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sess.LoadedAppIDs) != 1 || sess.LoadedAppIDs[0] != "tool-only" {
+		t.Fatalf("tool-only App was not persisted as loaded: %+v", sess.LoadedAppIDs)
 	}
 }
 
@@ -1736,6 +1772,111 @@ func TestWorkCapabilityApprovalPersistsForSession(t *testing.T) {
 	}
 }
 
+func TestCodeCapabilityApprovalWithoutProjectUsesSessionScratch(t *testing.T) {
+	ctx := context.Background()
+	ms := memstore.New()
+	hub := event.NewHub()
+	homeDir := t.TempDir()
+	eng := New(ms, hub, mapResolver{}, ms, WithAttachmentHome(homeDir))
+	sessionID := "sess_code_scratch_approval"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "test", Model: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	sub, unsub := hub.Subscribe(sessionID)
+	defer unsub()
+
+	type response struct {
+		result   tool.Result
+		mode     store.AgentMode
+		upgraded bool
+	}
+	done := make(chan response, 1)
+	go func() {
+		result, mode, upgraded := eng.requestCapabilityApproval(ctx, sessionID, "turn_code_scratch", tool.Call{
+			SessionID: sessionID,
+			TurnID:    "turn_code_scratch",
+			CallID:    "call_code_scratch",
+			Name:      tool.RequestCapability,
+			Args:      json.RawMessage(`{"targetMode":"code","reason":"需要运行代码"}`),
+		}, store.ModeChat)
+		done <- response{result: result, mode: mode, upgraded: upgraded}
+	}()
+
+	var approval event.Event
+	select {
+	case approval = <-sub:
+	case <-time.After(time.Second):
+		t.Fatal("code approval request not emitted")
+	}
+	if err := eng.ApproveApproval(ctx, sessionID, approval.ApprovalID, ApprovalScopeSession, nil); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-done:
+		if !got.result.Ok || !got.upgraded || got.mode != store.ModeCode {
+			t.Fatalf("unexpected code approval result: %+v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("code capability request did not resume")
+	}
+
+	sess, err := ms.GetSession(ctx, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess.ActiveMode != store.ModeCode || sess.ModeLease != store.ModeLeaseSession || sess.ProjectID != "" {
+		t.Fatalf("code scratch approval persisted unexpected session state: %+v", sess)
+	}
+	projects, err := ms.ListProjects(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 0 {
+		t.Fatalf("scratch approval must not create a Project: %+v", projects)
+	}
+	dirs, err := eng.projectRootDirsForToolCall(ctx, sessionID, "turn_code_scratch", store.ModeCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(home.CodeScratchPath(homeDir, sessionID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dirs) != 1 || dirs[0] != want {
+		t.Fatalf("code scratch dirs = %+v, want %q", dirs, want)
+	}
+}
+
+func TestProjectRootDirsDoNotFallBackToScratchWhenSessionIsMissing(t *testing.T) {
+	ctx := context.Background()
+	ms := memstore.New()
+	homeDir := t.TempDir()
+	eng := New(ms, event.NewHub(), mapResolver{}, ms, WithAttachmentHome(homeDir))
+
+	if _, err := eng.projectRootDirsForToolCall(ctx, "sess_missing", "turn_missing", store.ModeCode); err == nil {
+		t.Fatal("missing Session must fail instead of silently using scratch")
+	}
+	if _, err := os.Stat(home.CodeScratchPath(homeDir, "sess_missing")); !os.IsNotExist(err) {
+		t.Fatalf("scratch should not be created after Session lookup failure: %v", err)
+	}
+}
+
+func TestBindSessionProjectDoesNotCreateProjectForMissingSession(t *testing.T) {
+	ctx := context.Background()
+	ms := memstore.New()
+	eng := New(ms, event.NewHub(), mapResolver{}, ms)
+	if _, err := eng.bindSessionProject(ctx, "sess_missing", []string{t.TempDir()}); err == nil {
+		t.Fatal("missing Session should reject Project binding")
+	}
+	projects, err := ms.ListProjects(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 0 {
+		t.Fatalf("failed Project binding created orphan records: %+v", projects)
+	}
+}
+
 func TestWorkCapabilityRejectsProjectDirectoryFields(t *testing.T) {
 	ms := memstore.New()
 	eng := New(ms, event.NewHub(), mapResolver{}, ms)
@@ -1793,7 +1934,7 @@ func TestCodeCapabilityNoopReturnsAlreadyAvailableForAuthorizedProject(t *testin
 	}
 }
 
-func TestCodeCapabilityNoopStillRequiresProjectDirectoryWithoutAccess(t *testing.T) {
+func TestCodeCapabilityNoopIsAvailableWithoutProject(t *testing.T) {
 	ms := memstore.New()
 	eng := New(ms, event.NewHub(), mapResolver{}, ms)
 	ctx := context.Background()
@@ -1811,7 +1952,7 @@ func TestCodeCapabilityNoopStillRequiresProjectDirectoryWithoutAccess(t *testing
 		Name:      tool.RequestCapability,
 		Args:      json.RawMessage(`{"targetMode":"code","reason":"需要代码权限"}`),
 	}, store.ModeCode)
-	if result.Ok || upgraded || mode != store.ModeCode || !strings.Contains(result.Content, "project_dirs_required") {
+	if !result.Ok || upgraded || mode != store.ModeCode || !strings.Contains(result.Content, `"status":"already_available"`) {
 		t.Fatalf("unexpected Code no-project result: result=%+v mode=%q upgraded=%t", result, mode, upgraded)
 	}
 }
@@ -1957,66 +2098,6 @@ func TestCapabilityApprovalUpgradesTurnTools(t *testing.T) {
 	}
 }
 
-func TestSkillDraftSubmitApprovalAppliesDraft(t *testing.T) {
-	ms := memstore.New()
-	hub := event.NewHub()
-	client := &skillDraftSubmitClient{}
-	runner := &recordingToolRunner{
-		defs: tool.BuiltinDefinitions(),
-		result: tool.Result{
-			Ok:      true,
-			Content: `{"ok":true,"status":"pending_user_review","draft":{"id":"demo-skill","description":"Demo skill ready for review.","path":"skills-draft/demo-skill","validation":{"ok":true}},"fileCount":1}`,
-		},
-	}
-	eng := New(ms, hub, mapResolver{"skill": client}, ms, WithTools(runner))
-	ctx := context.Background()
-	sid := "sess_skill_draft"
-	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "skill", Provider: "skill", Model: "skill-model", ActiveMode: store.ModeCode, ModeLease: store.ModeLeaseSession}); err != nil {
-		t.Fatal(err)
-	}
-	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
-		DisplayName: "skill", Protocol: "openai-compatible",
-		Models: []store.ProviderModel{{
-			ID:           "skill-model",
-			Capabilities: &store.ModelCaps{Tools: true},
-			Limits:       &store.ModelLimits{MaxToolLoops: 3},
-		}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	sub, unsub := hub.Subscribe(sid)
-	defer unsub()
-
-	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "创建 skill"}); err != nil {
-		t.Fatal(err)
-	}
-	var approval event.Event
-	deadline := time.After(time.Second)
-	for approval.Kind != event.ApprovalRequested {
-		select {
-		case ev := <-sub:
-			if ev.Kind == event.ApprovalRequested {
-				approval = ev
-			}
-		case <-deadline:
-			t.Fatal("approval request not emitted")
-		}
-	}
-	if approval.ApprovalKind != ApprovalKindSkillDraft || !strings.Contains(string(approval.Payload), `"draft_id":"demo-skill"`) {
-		t.Fatalf("bad skill draft approval: %+v", approval)
-	}
-	waitTurnDone(t, ms, sid)
-	if pending := eng.PendingApprovals(sid); len(pending) != 1 || pending[0].ID != approval.ApprovalID {
-		t.Fatalf("skill draft approval should remain pending after turn finishes: %+v", pending)
-	}
-	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeTurn, nil); err != nil {
-		t.Fatal(err)
-	}
-	if len(runner.appliedDrafts) != 1 || runner.appliedDrafts[0] != "demo-skill" {
-		t.Fatalf("draft not applied: %+v", runner.appliedDrafts)
-	}
-}
-
 func TestProjectApprovalSessionScopeCreatesProject(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
@@ -2056,9 +2137,6 @@ func TestProjectApprovalSessionScopeCreatesProject(t *testing.T) {
 		case <-deadline:
 			t.Fatal("approval request not emitted")
 		}
-	}
-	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeSession, nil); !errors.Is(err, ErrProjectDirsRequired) {
-		t.Fatalf("expected project dirs required, got %v", err)
 	}
 	if err := eng.ApproveApproval(ctx, sid, approval.ApprovalID, ApprovalScopeSession, []string{dir}); err != nil {
 		t.Fatal(err)
@@ -2462,6 +2540,30 @@ func TestCommandSandboxModeFollowsProjectApprovalMode(t *testing.T) {
 	}
 }
 
+func TestLongRunningCommandToolsUseOwnTimeout(t *testing.T) {
+	for _, name := range []string{tool.CommandRun, tool.CommandPoll} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel, timed := toolContext(context.Background(), name)
+			defer cancel()
+			if timed {
+				t.Fatalf("%s should use its own timeout", name)
+			}
+			if _, ok := ctx.Deadline(); ok {
+				t.Fatalf("%s should not inherit the generic tool deadline", name)
+			}
+		})
+	}
+
+	ctx, cancel, timed := toolContext(context.Background(), tool.FileRead)
+	defer cancel()
+	if !timed {
+		t.Fatal("ordinary tools should keep the generic tool timeout")
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		t.Fatal("ordinary tool context should have a deadline")
+	}
+}
+
 func TestExecuteAllowedCommandPropagatesProjectSandboxMode(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -2495,7 +2597,7 @@ func TestExecuteAllowedCommandPropagatesProjectSandboxMode(t *testing.T) {
 			runner := &approvalDetailsRecordingToolRunner{recordingToolRunner: calls}
 			eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms, WithTools(runner))
 			raw := json.RawMessage(`{"scope":"project","argv":["go","version"]}`)
-			result := eng.executeAllowedTool(ctx, sessionID, "turn_sandbox", tool.Call{CallID: "call_sandbox", Name: tool.CommandRun, Args: raw})
+			result := eng.executeAllowedTool(ctx, sessionID, "turn_sandbox", store.ModeCode, tool.Call{CallID: "call_sandbox", Name: tool.CommandRun, Args: raw})
 			if !result.Ok || len(calls.calls) != 1 {
 				t.Fatalf("command was not executed once: result=%+v calls=%d", result, len(calls.calls))
 			}
@@ -2507,6 +2609,106 @@ func TestExecuteAllowedCommandPropagatesProjectSandboxMode(t *testing.T) {
 				t.Fatalf("project roots were not propagated: %+v", call.ProjectDirs)
 			}
 		})
+	}
+}
+
+func TestExecuteAllowedCodeToolUsesSessionScratchWithoutProject(t *testing.T) {
+	ctx := context.Background()
+	ms := memstore.New()
+	homeDir := t.TempDir()
+	sessionID := "sess_scratch"
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID: sessionID, Provider: "mock", Model: "mock", ActiveMode: store.ModeCode, ModeLease: store.ModeLeaseSession,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	calls := &recordingToolRunner{
+		defs:   tool.BuiltinDefinitions(),
+		result: tool.Result{Ok: true, Content: `{"ok":true}`},
+	}
+	runner := &approvalDetailsRecordingToolRunner{recordingToolRunner: calls}
+	eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms, WithAttachmentHome(homeDir), WithTools(runner))
+	raw := json.RawMessage(`{"scope":"project","argv":["go","version"]}`)
+	result := eng.executeAllowedTool(ctx, sessionID, "turn_scratch", store.ModeCode, tool.Call{CallID: "call_scratch", Name: tool.CommandRun, Args: raw})
+	if !result.Ok || len(calls.calls) != 1 {
+		t.Fatalf("scratch command was not executed once: result=%+v calls=%d", result, len(calls.calls))
+	}
+	want, err := filepath.EvalSymlinks(home.CodeScratchPath(homeDir, sessionID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := calls.calls[0].ProjectDirs; len(got) != 1 || got[0] != want {
+		t.Fatalf("scratch root = %+v, want %q", got, want)
+	}
+	if info, err := os.Stat(want); err != nil || !info.IsDir() {
+		t.Fatalf("scratch root was not created: info=%v err=%v", info, err)
+	}
+	sess, err := ms.GetSession(ctx, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess.ProjectID != "" {
+		t.Fatalf("scratch workspace must not create a Project: %+v", sess)
+	}
+}
+
+func TestApprovedCommandBypassesSandboxForExactInvocation(t *testing.T) {
+	ctx := context.Background()
+	ms := memstore.New()
+	hub := event.NewHub()
+	root := t.TempDir()
+	project := &store.Project{ID: "proj_brew", RootDirs: []string{root}, ApprovalMode: store.ApprovalAuto}
+	if err := ms.CreateProject(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	sessionID := "sess_brew"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock", ActiveMode: store.ModeCode, ProjectID: project.ID}); err != nil {
+		t.Fatal(err)
+	}
+	calls := &recordingToolRunner{
+		defs:   tool.BuiltinDefinitions(),
+		result: tool.Result{Ok: true, Content: `{"ok":true}`},
+	}
+	runner := &approvalDetailsRecordingToolRunner{recordingToolRunner: calls}
+	eng := New(ms, hub, registry.Static(mock.New()), ms, WithTools(runner))
+	sub, unsub := hub.Subscribe(sessionID)
+	defer unsub()
+
+	done := make(chan tool.Result, 1)
+	go func() {
+		raw := json.RawMessage(`{"scope":"project","argv":["brew","install","mysql-client"]}`)
+		done <- eng.executeAllowedTool(ctx, sessionID, "turn_brew", store.ModeCode, tool.Call{CallID: "call_brew", Name: tool.CommandRun, Args: raw})
+	}()
+
+	var approval event.Event
+	select {
+	case approval = <-sub:
+	case <-time.After(time.Second):
+		t.Fatal("brew approval request not emitted")
+	}
+	if approval.Kind != event.ApprovalRequested || approval.ApprovalKind != ApprovalKindToolCall {
+		t.Fatalf("unexpected approval event: %+v", approval)
+	}
+	if err := eng.ApproveApproval(ctx, sessionID, approval.ApprovalID, ApprovalScopeTurn, nil); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case result := <-done:
+		if !result.Ok {
+			t.Fatalf("approved command failed: %+v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("approved command did not resume")
+	}
+	if len(calls.calls) != 1 {
+		t.Fatalf("approved command calls = %d", len(calls.calls))
+	}
+	call := calls.calls[0]
+	if call.CommandSandbox != tool.CommandSandboxBypass {
+		t.Fatalf("approved command sandbox = %q, want bypass", call.CommandSandbox)
+	}
+	if string(call.Args) != `{"scope":"project","argv":["brew","install","mysql-client"]}` {
+		t.Fatalf("approved command invocation changed: %s", call.Args)
 	}
 }
 
@@ -3592,35 +3794,6 @@ func (c *projectDirGrantClient) Stream(_ context.Context, req provider.Request) 
 	return out, nil
 }
 
-type skillDraftSubmitClient struct {
-	requests []provider.Request
-}
-
-func (c *skillDraftSubmitClient) Name() string { return "skill-draft-submit" }
-
-func (c *skillDraftSubmitClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
-	c.requests = append(c.requests, req)
-	out := make(chan provider.Chunk, 4)
-	switch len(c.requests) {
-	case 1:
-		out <- toolkitLoadChunk("call_skill_toolkit", "code.skill")
-		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
-	case 2:
-		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
-			Index:     0,
-			CallID:    "call_skill_submit",
-			Name:      tool.SkillSubmit,
-			ArgsDelta: `{"draft_id":"demo-skill"}`,
-		}}
-		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
-	default:
-		out <- provider.Chunk{Part: provider.PartText, Delta: "skill 已发布"}
-		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
-	}
-	close(out)
-	return out, nil
-}
-
 type fileWriteApprovalClient struct {
 	requests []provider.Request
 }
@@ -3754,7 +3927,6 @@ type recordingToolRunner struct {
 	result           tool.Result
 	progress         []tool.Progress
 	calls            []tool.Call
-	appliedDrafts    []string
 	closedSessions   []string
 	closeCount       int
 	definitionAppIDs [][]string
@@ -3795,11 +3967,6 @@ func (r *recordingToolRunner) Call(ctx context.Context, call tool.Call) tool.Res
 	result.CallID = call.CallID
 	result.Name = call.Name
 	return result
-}
-
-func (r *recordingToolRunner) ApplySkillDraft(_ context.Context, id string) error {
-	r.appliedDrafts = append(r.appliedDrafts, id)
-	return nil
 }
 
 func hasProviderPart(parts []provider.Part, typ provider.PartType) bool {

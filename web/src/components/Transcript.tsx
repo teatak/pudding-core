@@ -186,5 +186,11 @@ function contentPartHasVisibleOutput(part: ContentPart) {
     case "tool_use":
     case "tool_result":
       return true;
+    case "attachment":
+    case "local_folder":
+    case "project_reference":
+    case "ui_context":
+    case "form_result":
+      return false;
   }
 }

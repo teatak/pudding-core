@@ -18,6 +18,7 @@ import (
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/contextbuilder"
 	"github.com/teatak/pudding-core/internal/event"
+	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
@@ -1519,13 +1520,13 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			} else if !tool.HasDefinition(allowedTools, call.Name) || !e.appToolCallable(ctx, sessionID, appID, nextMode) {
 				result = e.appToolUnavailableResult(ctx, sessionID, call, appID)
 			} else {
-				result = e.executeAllowedTool(ctx, sessionID, turnID, call)
+				result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
 			}
 		} else if definition, ok := providerToolDefinition(allowedTools, call.Name); ok && definition.AppID != "" && e.apps != nil {
 			if !e.appToolCallable(ctx, sessionID, definition.AppID, nextMode) {
 				result = e.appToolUnavailableResult(ctx, sessionID, call, definition.AppID)
 			} else {
-				result = e.executeAllowedTool(ctx, sessionID, turnID, call)
+				result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
 			}
 		} else if tool.IsAppAPITool(call.Name) && e.apps != nil {
 			appID, resolved := e.appEndpointTarget(ctx, sessionID, call)
@@ -1535,7 +1536,7 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			case !tool.HasDefinition(allowedTools, call.Name):
 				result = appAPINotLoadedResult(call)
 			default:
-				result = e.executeAllowedTool(ctx, sessionID, turnID, call)
+				result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
 			}
 		} else if !tool.HasDefinition(allowedTools, call.Name) {
 			known, err := e.toolNameKnown(ctx, sessionID, call.Name)
@@ -1555,7 +1556,7 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 				result = unknownToolResult(call)
 			}
 		} else {
-			result = e.executeAllowedTool(ctx, sessionID, turnID, call)
+			result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
 		}
 		if ctx.Err() != nil {
 			return store.TurnCancelled, "", nextMode, modeChanged
@@ -1595,14 +1596,15 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 	return store.TurnRunning, "", nextMode, modeChanged || toolsChanged
 }
 
-func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID string, call tool.Call) tool.Result {
-	if call.Name == tool.SkillSubmit {
-		return e.requestSkillDraftApproval(ctx, sessionID, turnID, call)
-	}
+func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID string, mode store.AgentMode, call tool.Call) tool.Result {
 	if e.tools == nil {
 		return tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: "tool runner unavailable"}
 	}
-	call.ProjectDirs = e.projectRootDirsForToolCall(ctx, sessionID, turnID)
+	projectDirs, err := e.projectRootDirsForToolCall(ctx, sessionID, turnID, mode)
+	if err != nil {
+		return tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: fmt.Sprintf("prepare code workspace: %v", err)}
+	}
+	call.ProjectDirs = projectDirs
 	call.CommandSandbox = commandSandboxModeForProject(nil)
 	var result tool.Result
 	if risk, ok := tool.ClassifyToolCallForProject(call.Name, call.Args, call.ProjectDirs); ok {
@@ -1626,6 +1628,9 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 			var approved bool
 			result, approved = e.requestToolCallApproval(ctx, sessionID, turnID, call, risk, project, approvalDetails)
 			if approved {
+				if call.Name == tool.CommandRun || call.Name == tool.CommandStart {
+					call.CommandSandbox = tool.CommandSandboxBypass
+				}
 				result = e.callTool(ctx, sessionID, turnID, call)
 			}
 		}
@@ -1673,21 +1678,21 @@ func (e *Engine) loadApp(ctx context.Context, sessionID string, call tool.Call, 
 	if skillID == "" {
 		skillID = defaultAppSkillID(definition)
 	}
-	if skillID == "" {
-		return appLoadFailure(call, "app_skill_unavailable", "the App has no default skill", map[string]any{"appID": request.AppID}), false
-	}
-	detail, err := e.apps.ReadSkill(ctx, request.AppID, skillID)
-	if err != nil {
-		reason := "app_skill_read_failed"
-		switch {
-		case errors.Is(err, app.ErrInvalidID):
-			reason = "invalid_app_id"
-		case errors.Is(err, app.ErrNotFound):
-			reason = "app_skill_not_found"
-		case errors.Is(err, app.ErrDisabled):
-			reason = "app_disabled"
+	var detail *app.SkillDetail
+	if skillID != "" {
+		detail, err = e.apps.ReadSkill(ctx, request.AppID, skillID)
+		if err != nil {
+			reason := "app_skill_read_failed"
+			switch {
+			case errors.Is(err, app.ErrInvalidID):
+				reason = "invalid_app_id"
+			case errors.Is(err, app.ErrNotFound):
+				reason = "app_skill_not_found"
+			case errors.Is(err, app.ErrDisabled):
+				reason = "app_disabled"
+			}
+			return appLoadFailure(call, reason, err.Error(), map[string]any{"appID": request.AppID, "skillID": skillID}), false
 		}
-		return appLoadFailure(call, reason, err.Error(), map[string]any{"appID": request.AppID, "skillID": skillID}), false
 	}
 	sess, err := e.store.GetSession(ctx, sessionID)
 	if err != nil {
@@ -1706,21 +1711,28 @@ func (e *Engine) loadApp(ctx context.Context, sessionID string, call tool.Call, 
 			return appLoadFailure(call, "app_state_unavailable", err.Error(), map[string]any{"appID": request.AppID}), false
 		}
 	}
-	resolvedSkillID := strings.TrimSpace(detail.ID)
-	if resolvedSkillID == "" {
-		resolvedSkillID = skillID
-	}
 	payload := map[string]any{
-		"ok":            true,
-		"appID":         request.AppID,
-		"skillID":       resolvedSkillID,
-		"name":          detail.Name,
-		"description":   detail.Description,
-		"path":          detail.Path,
-		"content":       detail.Content,
-		"newlyLoaded":   !alreadyLoaded,
-		"alreadyLoaded": alreadyLoaded,
-		"message":       "the App is loaded; its tools are available on the next model step",
+		"ok":                 true,
+		"appID":              request.AppID,
+		"instructionsLoaded": detail != nil,
+		"newlyLoaded":        !alreadyLoaded,
+		"alreadyLoaded":      alreadyLoaded,
+		"message":            "the App is loaded; its tools are available on the next model step",
+	}
+	summaryKind := tool.SummaryReturnedFields
+	summaryCount := len(payload)
+	if detail != nil {
+		resolvedSkillID := strings.TrimSpace(detail.ID)
+		if resolvedSkillID == "" {
+			resolvedSkillID = skillID
+		}
+		payload["skillID"] = resolvedSkillID
+		payload["name"] = detail.Name
+		payload["description"] = detail.Description
+		payload["path"] = detail.Path
+		payload["content"] = detail.Content
+		summaryKind = tool.SummaryReadChars
+		summaryCount = len(detail.Content)
 	}
 	content, _ := json.Marshal(payload)
 	return tool.Result{
@@ -1728,8 +1740,8 @@ func (e *Engine) loadApp(ctx context.Context, sessionID string, call tool.Call, 
 		Name:         call.Name,
 		Ok:           true,
 		Content:      string(content),
-		SummaryKind:  tool.SummaryReadChars,
-		SummaryCount: len(detail.Content),
+		SummaryKind:  summaryKind,
+		SummaryCount: summaryCount,
 	}, !alreadyLoaded
 }
 
@@ -1885,7 +1897,7 @@ func (e *Engine) callTool(ctx context.Context, sessionID, turnID string, call to
 }
 
 func toolContext(ctx context.Context, name string) (context.Context, context.CancelFunc, bool) {
-	if strings.HasPrefix(name, "ui_") || name == tool.CommandRun {
+	if strings.HasPrefix(name, "ui_") || name == tool.CommandRun || name == tool.CommandPoll {
 		return ctx, func() {}, false
 	}
 	toolCtx, cancel := context.WithTimeout(ctx, toolCallTimeout)
@@ -1915,20 +1927,32 @@ func eventAttachmentsFromStore(attachments []store.Attachment) []event.Attachmen
 	return out
 }
 
-func (e *Engine) projectRootDirsForToolCall(ctx context.Context, sessionID, turnID string) []string {
+func (e *Engine) projectRootDirsForToolCall(ctx context.Context, sessionID, turnID string, mode store.AgentMode) ([]string, error) {
 	var dirs []string
-	if sess, err := e.store.GetSession(ctx, sessionID); err == nil {
-		if sess.ProjectID != "" {
-			if project, err := e.store.GetProject(ctx, sess.ProjectID); err == nil {
-				dirs = append(dirs, project.RootDirs...)
-			}
+	sess, err := e.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if sess.ProjectID != "" {
+		project, err := e.store.GetProject(ctx, sess.ProjectID)
+		if err != nil {
+			return nil, err
 		}
+		dirs = append(dirs, project.RootDirs...)
 	}
 	e.mu.Lock()
 	grant := e.turnProjectAccess[turnID]
 	e.mu.Unlock()
 	dirs = append(dirs, grant.RootDirs...)
-	return store.NormalizeProjectDirs(dirs)
+	dirs = store.NormalizeProjectDirs(dirs)
+	if len(dirs) > 0 || store.NormalizeAgentMode(mode) != store.ModeCode {
+		return dirs, nil
+	}
+	root, err := home.PrepareCodeScratch(e.attachmentHome, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return []string{root}, nil
 }
 
 func (e *Engine) toolNameKnown(ctx context.Context, sessionID, name string) (bool, error) {

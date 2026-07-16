@@ -1,12 +1,41 @@
 package portaudio
 
 import (
+	"context"
 	"reflect"
 	"testing"
 	"time"
 
 	pa "github.com/gordonklaus/portaudio"
 )
+
+func TestCaptureSignalRequiresNonZeroPCM(t *testing.T) {
+	health := newCaptureHealth()
+	frames := make(chan []int16, 1)
+	enqueueCaptureFrame(health, frames, []int16{0, 0, 0}, 0, 100)
+
+	state, err := health.waitForSignal(context.Background(), time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != captureSignalDigitalSilence {
+		t.Fatalf("signal state = %s, want digital silence", state.String())
+	}
+}
+
+func TestCaptureSignalAcceptsFirstNonZeroPCMImmediately(t *testing.T) {
+	health := newCaptureHealth()
+	frames := make(chan []int16, 1)
+	enqueueCaptureFrame(health, frames, []int16{0, -1, 0}, 0, 100)
+
+	state, err := health.waitForSignal(context.Background(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != captureSignalReady {
+		t.Fatalf("signal state = %s, want ready", state.String())
+	}
+}
 
 func TestCaptureCallbackKeepsCurrentBufferAfterInputOverflow(t *testing.T) {
 	health := &captureHealth{}

@@ -6,7 +6,7 @@ export function createInputFlowTools(): ToolDefinition[] {
     {
       name: "collect_user_input",
       description:
-        "Show an interactive UI that collects structured information from the user. Use this instead of asking the user to type answers in chat whenever the answers can be represented as choices, multiple choices, short text, phone, number, date, confirmation, or several form fields. Use type='form' with steps for ordinary questions. Use type='repeat' only when the user may add multiple records with the same fields, such as several room types and quantities. If choices depend on live data, fetch them first and pass the actual options to this tool. This tool returns immediately after showing the UI; the completed answers arrive later as a new user message. Do not continue work that depends on those answers in the current turn.",
+        "Show an interactive UI that collects structured non-secret information from the user. Use this instead of asking the user to type answers in chat whenever the answers can be represented as choices, multiple choices, short text, phone, number, date, confirmation, or several form fields. Never use this tool for passwords, tokens, API keys, private keys, or other credentials because submitted values become part of the conversation. Use the dedicated App connection or settings flow for credentials. Use type='form' with steps for ordinary questions. Use type='repeat' only when the user may add multiple records with the same fields, such as several room types and quantities. If choices depend on live data, fetch them first and pass the actual options to this tool. This tool returns immediately after showing the UI; the completed answers arrive later as a new user message. Do not continue work that depends on those answers in the current turn.",
       capability: "chat",
       inputSchema: {
         type: "object",
@@ -92,6 +92,7 @@ export function createInputFlowTools(): ToolDefinition[] {
         } else {
           throw new Error("type must be form or repeat");
         }
+        assertNoSensitiveInputSteps(record);
         const request = showInputFlow({
           args: record,
           sessionID,
@@ -108,12 +109,39 @@ export function createInputFlowTools(): ToolDefinition[] {
   ];
 }
 
+const sensitiveInputPattern = /password|passwd|passcode|secret|api[\s_-]*key|access[\s_-]*token|refresh[\s_-]*token|private[\s_-]*key|密码|口令|密钥|令牌/i;
+
+function assertNoSensitiveInputSteps(record: Record<string, unknown>) {
+  for (const field of ["steps", "repeatSteps", "nextSteps"]) {
+    const steps = record[field];
+    if (!Array.isArray(steps)) {
+      continue;
+    }
+    for (const value of steps) {
+      const step = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+      if (!step) {
+        continue;
+      }
+      const searchable = [step.id, step.title, step.description, step.placeholder]
+        .filter((item): item is string => typeof item === "string")
+        .join(" ");
+      if (sensitiveInputPattern.test(searchable)) {
+        throw new Error("credential fields must use the dedicated App connection or settings flow");
+      }
+    }
+  }
+}
+
 function inputStepSchema(types: string[]) {
   return {
     type: "object",
     properties: {
       id: { type: "string", description: "Stable key used in the returned result." },
-      type: { type: "string", enum: types, description: "Input control shown to the user." },
+      type: {
+        type: "string",
+        enum: types,
+        description: "Non-secret input control shown to the user.",
+      },
       title: { type: "string", description: "Short question or field label." },
       description: { type: "string", description: "Optional concise help text." },
       placeholder: { type: "string", description: "Optional input placeholder." },

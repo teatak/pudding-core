@@ -25,10 +25,10 @@ import (
 )
 
 const (
-	managedScopeSkillDraft     = "skill_draft"
-	managedScopeSkillPublished = "skill_published"
-	managedScopeTemp           = "temp"
-	managedScopeProject        = "project"
+	managedScopeApp     = "app"
+	managedScopeSkill   = "skill"
+	managedScopeTemp    = "temp"
+	managedScopeProject = "project"
 
 	defaultFileReadMaxChars       = 20000
 	maxFileReadChars              = 100000
@@ -97,7 +97,7 @@ func (r *BuiltinRunner) fileList(call Call) Result {
 	if err != nil {
 		return toolJSONError(out, "read_dir_failed", err.Error())
 	}
-	if args.Scope == managedScopeSkillDraft {
+	if args.Scope == managedScopeSkill || args.Scope == managedScopeApp || args.Scope == managedScopeTemp {
 		visible := entries[:0]
 		for _, entry := range entries {
 			if !strings.HasPrefix(entry.Name(), ".") {
@@ -259,6 +259,7 @@ func (r *BuiltinRunner) fileSearch(call Call) Result {
 		includeGlobs: args.IncludeGlobs,
 		excludeGlobs: args.ExcludeGlobs,
 		contextLines: args.ContextLines,
+		skipHidden:   args.Scope == managedScopeSkill || args.Scope == managedScopeApp || args.Scope == managedScopeTemp,
 	}
 	matches, filesScanned, capped, err := searchTextFiles(resolved.target, options, maxResults)
 	if err != nil {
@@ -526,9 +527,6 @@ func (r *BuiltinRunner) fileWrite(call Call) Result {
 	if err := os.WriteFile(resolved.target, []byte(args.Content), 0o600); err != nil {
 		return toolJSONError(out, "write_failed", err.Error())
 	}
-	if args.Scope == managedScopeSkillDraft {
-		_ = r.removeDraftDelete(resolved.rel)
-	}
 	out.Ok = true
 	out.Content = jsonString(resolved.payload(map[string]any{"ok": true, "scope": args.Scope, "bytes": len([]byte(args.Content))}))
 	out.SummaryKind = SummaryChangedLines
@@ -555,11 +553,6 @@ func (r *BuiltinRunner) filePatch(call Call) Result {
 	if err != nil {
 		return filePathError(out, args.Scope, err)
 	}
-	if args.Scope == managedScopeSkillDraft {
-		if err := r.copyPublishedFileForDraftPatch(resolved.rel, resolved.target); err != nil {
-			return toolJSONError(out, "read_failed", err.Error())
-		}
-	}
 	data, err := os.ReadFile(resolved.target)
 	if err != nil {
 		return toolJSONError(out, "read_failed", err.Error())
@@ -582,9 +575,6 @@ func (r *BuiltinRunner) filePatch(call Call) Result {
 	next := strings.Replace(content, args.OldString, args.NewString, replaceN)
 	if err := os.WriteFile(resolved.target, []byte(next), 0o600); err != nil {
 		return toolJSONError(out, "write_failed", err.Error())
-	}
-	if args.Scope == managedScopeSkillDraft {
-		_ = r.removeDraftDelete(resolved.rel)
 	}
 	changed := matches
 	if !args.ReplaceAll {
@@ -613,9 +603,6 @@ func (r *BuiltinRunner) fileDelete(call Call) Result {
 	}
 	if resolved.rel == "." {
 		return toolJSONError(out, "refuse_root_delete", "deleting a scope root is not allowed")
-	}
-	if args.Scope == managedScopeSkillDraft {
-		return r.fileDeleteSkillDraft(out, resolved.rel, resolved.target, args.Recursive)
 	}
 	info, err := os.Stat(resolved.target)
 	if err != nil {
@@ -660,22 +647,11 @@ func (r *BuiltinRunner) fileMove(call Call) Result {
 	if fromResolved.rel == "." || toResolved.rel == "." {
 		return toolJSONError(out, "refuse_root_move", "moving a scope root is not allowed")
 	}
-	if args.Scope == managedScopeSkillDraft {
-		if err := r.copyPublishedFileForDraftPatch(fromResolved.rel, fromResolved.target); err != nil {
-			return toolJSONError(out, "move_failed", err.Error())
-		}
-	}
 	if err := os.MkdirAll(filepath.Dir(toResolved.target), 0o700); err != nil {
 		return toolJSONError(out, "mkdir_failed", err.Error())
 	}
 	if err := os.Rename(fromResolved.target, toResolved.target); err != nil {
 		return toolJSONError(out, "move_failed", err.Error())
-	}
-	if args.Scope == managedScopeSkillDraft {
-		if publishedDeletes, err := r.publishedDeletePaths(fromResolved.rel, false); err == nil {
-			_ = r.addDraftDeletes(publishedDeletes)
-		}
-		_ = r.removeDraftDelete(toResolved.rel)
 	}
 	out.Ok = true
 	payload := map[string]any{"ok": true, "scope": args.Scope, "from": fromResolved.outputPath(), "to": toResolved.outputPath()}
@@ -742,9 +718,6 @@ func (r *BuiltinRunner) fileCopy(call Call) Result {
 		if err := copyFileDir(fromResolved.target, toResolved.target); err != nil {
 			return toolJSONError(out, "copy_failed", err.Error())
 		}
-		if args.Scope == managedScopeSkillDraft {
-			_ = r.removeDraftDelete(toResolved.rel)
-		}
 		payload := map[string]any{"ok": true, "scope": args.Scope, "from": fromResolved.outputPath(), "to": toResolved.outputPath(), "copied": "directory"}
 		if fromResolved.project {
 			payload["fromRoot"] = fromResolved.root
@@ -766,9 +739,6 @@ func (r *BuiltinRunner) fileCopy(call Call) Result {
 	}
 	if err := copyFileBytes(fromResolved.target, toResolved.target, info); err != nil {
 		return toolJSONError(out, "copy_failed", err.Error())
-	}
-	if args.Scope == managedScopeSkillDraft {
-		_ = r.removeDraftDelete(toResolved.rel)
 	}
 	payload := map[string]any{"ok": true, "scope": args.Scope, "from": fromResolved.outputPath(), "to": toResolved.outputPath(), "copied": "file", "bytes": info.Size()}
 	if fromResolved.project {
@@ -934,10 +904,10 @@ func (r *BuiltinRunner) managedRoot(scope string) (string, bool, error) {
 		return "", false, errors.New("home directory is not configured")
 	}
 	switch scope {
-	case managedScopeSkillDraft:
-		return home.SkillsDraftPath(r.homeDir), true, nil
-	case managedScopeSkillPublished:
-		return home.SkillsPath(r.homeDir), false, nil
+	case managedScopeApp:
+		return home.AppsPath(r.homeDir), false, nil
+	case managedScopeSkill:
+		return home.SkillsPath(r.homeDir), true, nil
 	case managedScopeTemp:
 		return home.TempPath(r.homeDir), true, nil
 	default:
@@ -958,9 +928,16 @@ func (r *BuiltinRunner) resolveManagedPath(scope, rawPath string, requireWritabl
 			return "", "", "", err
 		}
 	}
-	resolvedRoot := root
-	if evaluatedRoot, err := filepath.EvalSymlinks(root); err == nil {
-		resolvedRoot = evaluatedRoot
+	rootInfo, err := os.Lstat(root)
+	if err != nil {
+		return "", "", "", err
+	}
+	if rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
+		return "", "", "", errors.New("managed scope root must be a directory, not a symlink")
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", "", "", err
 	}
 	rawPath = strings.TrimSpace(rawPath)
 	if rawPath == "" {
@@ -976,8 +953,11 @@ func (r *BuiltinRunner) resolveManagedPath(scope, rawPath string, requireWritabl
 	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
 		return "", "", "", errors.New("parent traversal is not allowed")
 	}
-	if scope == managedScopeSkillDraft && hasHiddenPathComponent(cleaned) {
+	if (scope == managedScopeSkill || scope == managedScopeApp || scope == managedScopeTemp) && hasHiddenPathComponent(cleaned) {
 		return "", "", "", errors.New("path is reserved")
+	}
+	if requireWritable && scope == managedScopeSkill && skill.IsBuiltinID(firstPathComponent(cleaned)) {
+		return "", "", "", errors.New("builtin Skill paths are read-only")
 	}
 	target := filepath.Join(root, cleaned)
 	if !pathInsideRoot(target, root) {
@@ -994,15 +974,12 @@ func (r *BuiltinRunner) resolveManagedPath(scope, rawPath string, requireWritabl
 		target = resolved
 	}
 	if cleaned != "." {
-		parent := filepath.Dir(target)
-		if _, err := os.Stat(parent); err == nil {
-			resolvedParent, err := filepath.EvalSymlinks(parent)
-			if err != nil {
-				return "", "", "", err
-			}
-			if !pathInsideRoot(resolvedParent, resolvedRoot) {
-				return "", "", "", errors.New("parent escapes scope")
-			}
+		resolvedParent, err := resolveExistingParent(target)
+		if err != nil {
+			return "", "", "", err
+		}
+		if !pathInsideRoot(resolvedParent, resolvedRoot) {
+			return "", "", "", errors.New("parent escapes scope")
 		}
 	}
 	rel, err := filepath.Rel(root, target)
@@ -1038,194 +1015,6 @@ func hasHiddenPathComponent(cleaned string) bool {
 	return false
 }
 
-func (r *BuiltinRunner) fileDeleteSkillDraft(out Result, rel, target string, recursive bool) Result {
-	if _, item, err := splitDraftRel(rel); err != nil || item == "" {
-		return toolJSONError(out, "refuse_root_delete", "deleting a draft root is not allowed")
-	}
-	deletes := []string{}
-	info, draftErr := os.Stat(target)
-	if draftErr == nil {
-		if info.IsDir() && !recursive {
-			return toolJSONError(out, "recursive_required", "recursive=true is required to delete a directory")
-		}
-		if recursive {
-			draftErr = os.RemoveAll(target)
-		} else {
-			draftErr = os.Remove(target)
-		}
-		if draftErr != nil {
-			return toolJSONError(out, "delete_failed", draftErr.Error())
-		}
-	} else if !errors.Is(draftErr, os.ErrNotExist) {
-		return toolJSONError(out, "stat_failed", draftErr.Error())
-	}
-	publishedDeletes, pubErr := r.publishedDeletePaths(rel, recursive)
-	if pubErr != nil {
-		if draftErr != nil {
-			return toolJSONError(out, "stat_failed", pubErr.Error())
-		}
-	} else {
-		deletes = append(deletes, publishedDeletes...)
-	}
-	if len(deletes) > 0 {
-		if err := r.addDraftDeletes(deletes); err != nil {
-			return toolJSONError(out, "delete_failed", err.Error())
-		}
-	}
-	out.Ok = true
-	out.Content = jsonString(map[string]any{"ok": true, "scope": managedScopeSkillDraft, "path": rel})
-	out.SummaryKind = SummaryReturnedFields
-	out.SummaryCount = 3
-	return out
-}
-
-func (r *BuiltinRunner) publishedDeletePaths(rel string, recursive bool) ([]string, error) {
-	id, item, err := splitDraftRel(rel)
-	if err != nil || item == "" {
-		return nil, errors.New("draft file path is required")
-	}
-	publishedRoot := filepath.Join(home.SkillsPath(r.homeDir), id)
-	target := filepath.Join(publishedRoot, filepath.FromSlash(item))
-	info, err := os.Stat(target)
-	if err != nil {
-		return nil, err
-	}
-	if !info.IsDir() {
-		return []string{rel}, nil
-	}
-	if !recursive {
-		return nil, errors.New("recursive=true is required to delete a directory")
-	}
-	var out []string
-	err = filepath.WalkDir(target, func(p string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil || !info.Mode().IsRegular() {
-			return err
-		}
-		itemRel, err := filepath.Rel(publishedRoot, p)
-		if err != nil {
-			return err
-		}
-		out = append(out, filepath.ToSlash(filepath.Join(id, itemRel)))
-		return nil
-	})
-	return out, err
-}
-
-func (r *BuiltinRunner) copyPublishedFileForDraftPatch(rel, target string) error {
-	if _, err := os.Stat(target); err == nil {
-		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	id, item, err := splitDraftRel(rel)
-	if err != nil || item == "" {
-		return errors.New("draft file path is required")
-	}
-	published := filepath.Join(home.SkillsPath(r.homeDir), id, filepath.FromSlash(item))
-	info, err := os.Stat(published)
-	if err != nil {
-		return err
-	}
-	if info.IsDir() {
-		return errors.New("path is a directory")
-	}
-	data, err := os.ReadFile(published)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-		return err
-	}
-	return os.WriteFile(target, data, info.Mode().Perm())
-}
-
-func (r *BuiltinRunner) addDraftDeletes(rels []string) error {
-	grouped := map[string][]string{}
-	for _, rel := range rels {
-		id, item, err := splitDraftRel(rel)
-		if err != nil || item == "" {
-			continue
-		}
-		grouped[id] = append(grouped[id], item)
-	}
-	for id, items := range grouped {
-		if err := updateDeleteManifest(filepath.Join(home.SkillsDraftPath(r.homeDir), id, skill.DraftDeleteFileName), items, nil); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (r *BuiltinRunner) removeDraftDelete(rel string) error {
-	id, item, err := splitDraftRel(rel)
-	if err != nil || item == "" {
-		return err
-	}
-	return updateDeleteManifest(filepath.Join(home.SkillsDraftPath(r.homeDir), id, skill.DraftDeleteFileName), nil, []string{item})
-}
-
-func splitDraftRel(rel string) (string, string, error) {
-	parts := strings.SplitN(filepath.ToSlash(strings.TrimSpace(rel)), "/", 2)
-	if len(parts) == 0 || parts[0] == "" || parts[0] == "." || parts[0] == ".." {
-		return "", "", errors.New("draft id is required")
-	}
-	if len(parts) == 1 {
-		return parts[0], "", nil
-	}
-	item := strings.TrimSpace(parts[1])
-	if item == "" || item == "." || item == ".." || strings.HasPrefix(item, "../") {
-		return "", "", errors.New("draft file path is required")
-	}
-	return parts[0], item, nil
-}
-
-func updateDeleteManifest(path string, add, remove []string) error {
-	items := map[string]bool{}
-	data, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			item := strings.TrimSpace(line)
-			if item != "" && !strings.HasPrefix(item, "#") {
-				items[item] = true
-			}
-		}
-	}
-	for _, item := range remove {
-		delete(items, filepath.ToSlash(filepath.Clean(item)))
-	}
-	for _, item := range add {
-		clean := filepath.ToSlash(filepath.Clean(item))
-		if clean != "." && clean != ".." && !strings.HasPrefix(clean, "../") {
-			items[clean] = true
-		}
-	}
-	if len(items) == 0 {
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		return nil
-	}
-	var lines []string
-	for item := range items {
-		lines = append(lines, item)
-	}
-	sort.Strings(lines)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600)
-}
-
 type fileSearchMatch struct {
 	path      string
 	line      int
@@ -1248,6 +1037,7 @@ type fileSearchOptions struct {
 	includeGlobs []string
 	excludeGlobs []string
 	contextLines int
+	skipHidden   bool
 }
 
 var fileSearchSkipDirs = map[string]struct{}{
@@ -1395,10 +1185,16 @@ func searchTextFiles(root string, options fileSearchOptions, maxResults int) ([]
 		}
 		if entry.IsDir() {
 			if path != root {
+				if options.skipHidden && strings.HasPrefix(entry.Name(), ".") {
+					return filepath.SkipDir
+				}
 				if _, skip := fileSearchSkipDirs[entry.Name()]; skip {
 					return filepath.SkipDir
 				}
 			}
+			return nil
+		}
+		if options.skipHidden && strings.HasPrefix(entry.Name(), ".") {
 			return nil
 		}
 		if !searchPathAllowed(path, options) {

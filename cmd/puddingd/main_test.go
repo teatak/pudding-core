@@ -12,6 +12,23 @@ import (
 	"github.com/teatak/pudding-core/internal/store/sqlitestore"
 )
 
+func TestElectronParentDoneTracksManagedStdinEOF(t *testing.T) {
+	t.Setenv("PUDDING_ELECTRON_MANAGED", "1")
+	done := electronParentDone(strings.NewReader(""))
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("managed parent EOF was not observed")
+	}
+}
+
+func TestElectronParentDoneDisabledOutsideElectron(t *testing.T) {
+	t.Setenv("PUDDING_ELECTRON_MANAGED", "")
+	if done := electronParentDone(strings.NewReader("")); done != nil {
+		t.Fatal("unmanaged daemon should not watch stdin")
+	}
+}
+
 func TestRunToolsReportJSON(t *testing.T) {
 	dir := t.TempDir()
 	if err := home.Prepare(dir); err != nil {

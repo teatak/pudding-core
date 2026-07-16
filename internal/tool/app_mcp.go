@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -21,7 +22,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode"
 
 	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/provider"
@@ -135,11 +135,13 @@ func (r *AppMCPRunner) Definitions(_ context.Context, sessionID string) ([]provi
 func (r *AppMCPRunner) DefinitionsForApps(ctx context.Context, sessionID string, appIDs []string) ([]provider.ToolDef, error) {
 	appIDs = normalizeAppIDs(appIDs)
 	if len(appIDs) == 0 {
+		r.setSessionTools(sessionID, nil, nil)
 		return nil, nil
 	}
 	bindings, err := r.listBindings(ctx)
 	if err != nil {
-		return r.Definitions(ctx, sessionID)
+		r.setSessionTools(sessionID, nil, nil)
+		return nil, nil
 	}
 	bindings = filterAppMCPBindings(bindings, appIDs)
 	cacheKey := appMCPBindingsCacheKey(bindings)
@@ -705,7 +707,10 @@ func (c *appMCPStdioClient) start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	env := appMCPStdioEnv(extraEnv)
+	env, err := appMCPStdioEnv(extraEnv)
+	if err != nil {
+		return err
+	}
 	commandPath, err := appMCPResolveCommand(command, env)
 	if err != nil {
 		return err
@@ -859,91 +864,11 @@ func (c *appMCPStdioClient) stderrText() string {
 	return strings.TrimSpace(c.stderr.String())
 }
 
-func appMCPStdioEnv(extra map[string]string) []string {
-	env := map[string]string{}
-	for _, item := range os.Environ() {
-		key, value, ok := strings.Cut(item, "=")
-		if !ok || key == "" {
-			continue
-		}
-		env[key] = value
-	}
-	for key, value := range extra {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		env[key] = value
-	}
-	env["PATH"] = appMCPMergedPATH(env["PATH"])
-	keys := make([]string, 0, len(env))
-	for key := range env {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	out := make([]string, 0, len(keys))
-	for _, key := range keys {
-		out = append(out, key+"="+env[key])
-	}
-	return out
-}
-
-func appMCPMergedPATH(current string) string {
-	seen := map[string]struct{}{}
-	dirs := make([]string, 0)
-	add := func(dir string) {
-		dir = strings.TrimSpace(dir)
-		if dir == "" {
-			return
-		}
-		if _, ok := seen[dir]; ok {
-			return
-		}
-		seen[dir] = struct{}{}
-		dirs = append(dirs, dir)
-	}
-	for _, dir := range filepath.SplitList(current) {
-		add(dir)
-	}
-	for _, dir := range appMCPCommonExecutableDirs() {
-		add(dir)
-	}
-	return strings.Join(dirs, string(os.PathListSeparator))
-}
-
-func appMCPCommonExecutableDirs() []string {
-	dirs := []string{
-		"/opt/homebrew/bin",
-		"/usr/local/bin",
-		"/usr/bin",
-		"/bin",
-		"/usr/sbin",
-		"/sbin",
-	}
-	homeDir, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(homeDir) == "" {
-		return dirs
-	}
-	dirs = append(dirs,
-		filepath.Join(homeDir, ".volta", "bin"),
-		filepath.Join(homeDir, ".npm-global", "bin"),
-		filepath.Join(homeDir, ".local", "bin"),
-		filepath.Join(homeDir, "Library", "pnpm"),
-	)
-	nodeRoot := filepath.Join(homeDir, ".nvm", "versions", "node")
-	if entries, err := os.ReadDir(nodeRoot); err == nil {
-		names := make([]string, 0, len(entries))
-		for _, entry := range entries {
-			if entry.IsDir() {
-				names = append(names, entry.Name())
-			}
-		}
-		sort.Sort(sort.Reverse(sort.StringSlice(names)))
-		for _, name := range names {
-			dirs = append(dirs, filepath.Join(nodeRoot, name, "bin"))
-		}
-	}
-	return dirs
+func appMCPStdioEnv(extra map[string]string) ([]string, error) {
+	// App processes receive only the ordinary command baseline plus values
+	// explicitly declared by the endpoint/connection. Do not leak daemon
+	// tokens, provider credentials, or unrelated parent-process secrets.
+	return commandEnvironment(extra)
 }
 
 func appMCPResolveCommand(command string, env []string) (string, error) {
@@ -1007,12 +932,14 @@ func readAppMCPSSE(ctx context.Context, body io.Reader, id string) (json.RawMess
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), appMCPMaxResponseBytes)
 	var dataLines []string
+	dataBytes := 0
 	flush := func() (json.RawMessage, bool, error) {
 		if len(dataLines) == 0 {
 			return nil, false, nil
 		}
 		data := strings.Join(dataLines, "\n")
 		dataLines = nil
+		dataBytes = 0
 		raw, err := appMCPEnvelopeResult([]byte(data), id)
 		if err != nil {
 			var mismatch appMCPIDMismatchError
@@ -1039,7 +966,15 @@ func readAppMCPSSE(ctx context.Context, body io.Reader, id string) (json.RawMess
 		if strings.HasPrefix(line, "data:") {
 			data := strings.TrimPrefix(line, "data:")
 			data = strings.TrimPrefix(data, " ")
+			separator := 0
+			if len(dataLines) > 0 {
+				separator = 1
+			}
+			if dataBytes+separator+len(data) > appMCPMaxResponseBytes {
+				return nil, fmt.Errorf("mcp response exceeds %d bytes", appMCPMaxResponseBytes)
+			}
 			dataLines = append(dataLines, data)
+			dataBytes += separator + len(data)
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -1103,28 +1038,15 @@ func applyAppMCPHeaders(headers http.Header, configured map[string]string) error
 		if name == "" {
 			continue
 		}
-		if _, forbidden := endpointForbiddenRequestHeaders[strings.ToLower(name)]; forbidden {
-			return fmt.Errorf("mcp endpoint header %q is not allowed", name)
-		}
-		if !validAppMCPHeaderName(name) {
+		if !app.IsAllowedRequestHeaderName(name) {
 			return fmt.Errorf("mcp endpoint header %q is invalid", name)
+		}
+		if !app.IsAllowedRequestHeaderValue(value) {
+			return fmt.Errorf("mcp endpoint header %q has an invalid value", name)
 		}
 		headers.Set(name, value)
 	}
 	return nil
-}
-
-func validAppMCPHeaderName(name string) bool {
-	for _, r := range name {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			continue
-		}
-		if strings.ContainsRune("!#$%&'*+-.^_`|~", r) {
-			continue
-		}
-		return false
-	}
-	return name != ""
 }
 
 func appMCPProviderToolName(binding *app.EndpointBinding, remoteName string) string {
@@ -1206,6 +1128,8 @@ func appMCPBindingsCacheKey(bindings []*app.EndpointBinding) string {
 		headers := appMCPMapSignature(binding.Endpoint.Headers)
 		env := appMCPMapSignature(binding.Endpoint.Env)
 		args := appMCPSliceSignature(binding.Endpoint.Args)
+		auth := appMCPAuthSignature(binding.Auth)
+		fieldDefs, _ := json.Marshal(binding.ConnectionFieldDefs)
 		parts = append(parts, strings.Join([]string{
 			binding.AppID,
 			binding.ConnectionID,
@@ -1215,18 +1139,36 @@ func appMCPBindingsCacheKey(bindings []*app.EndpointBinding) string {
 			binding.Endpoint.Command,
 			args,
 			env,
-			strings.TrimSpace(binding.Auth.Type),
+			auth,
 			fields,
+			string(fieldDefs),
 			headers,
 		}, "\x00"))
 	}
 	sort.Strings(parts)
-	h := fnv.New64a()
+	h := sha256.New()
 	for _, part := range parts {
 		_, _ = h.Write([]byte(part))
 		_, _ = h.Write([]byte{0})
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+func appMCPAuthSignature(auth app.Auth) string {
+	return strings.Join([]string{
+		strings.TrimSpace(auth.MethodID),
+		strings.TrimSpace(auth.Type),
+		auth.Token,
+		auth.AccessToken,
+		auth.RefreshToken,
+		strings.TrimSpace(auth.TokenType),
+		auth.ExpiresAt.UTC().Format(time.RFC3339Nano),
+		strings.Join(auth.Scopes, "\x00"),
+		auth.Prefix,
+		auth.Header,
+		auth.Username,
+		auth.Password,
+	}, "\x00")
 }
 
 func appMCPSupportedTransport(transport string) bool {

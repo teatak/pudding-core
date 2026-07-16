@@ -314,7 +314,7 @@ func (c *Client) decodeSegment(job segment) {
 	}
 	slog.Info(
 		"sherpa asr: sentence decoded",
-		"text", previewText(ev.Text, 80),
+		"textLength", len([]rune(ev.Text)),
 		"language", ev.Language,
 		"audioDuration", audioDur,
 		"decodeDuration", elapsed,
@@ -511,16 +511,4 @@ func boolToInt(v bool) int {
 		return 1
 	}
 	return 0
-}
-
-func previewText(text string, maxRunes int) string {
-	text = strings.TrimSpace(text)
-	if maxRunes <= 0 {
-		return ""
-	}
-	runes := []rune(text)
-	if len(runes) <= maxRunes {
-		return text
-	}
-	return string(runes[:maxRunes]) + "..."
 }

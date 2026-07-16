@@ -189,8 +189,8 @@ REST 只在需要 UI 决策、审批、快照时补充,不新增无 session scop
 
 - 在 Project 上增加 `approvalMode = ask | auto | full`。
 - composer 展示当前 session 绑定 Project 的审批模式;切换即更新 Project。
-- 未绑定 Project 时不显示 Project 控件;需要 Code 能力时走创建/绑定 Project 的
-  approval flow。
+- 未绑定 Project 时不显示 Project 控件;Code 能力可以直接获批并使用 session 隔离
+  的临时工作区。只有访问已有本地目录时才选择并绑定 Project。
 - 在 `internal/tool` 增加 `ClassifyToolCall(name,args)`。
 - engine 在真正 `Runner.Call` 前用 `project.approvalMode + risk` 决策:
   - allow:直接执行。
@@ -224,8 +224,9 @@ REST 只在需要 UI 决策、审批、快照时补充,不新增无 session scop
   两者必须且只能提供一个。
 - 模型不能指定 shell executable 或启动参数;script 统一按高风险路径审批。
 - `cwd` 必须解析到当前 Project 授权范围内。
-- 默认只继承 PATH、HOME、临时目录、locale 和常见 toolchain 路径变量;
-  其他变量必须通过 `env` 显式提供。
+- 默认只继承 PATH、HOME、临时目录、locale 和常见 toolchain 路径变量;desktop
+  daemon 会在 PATH 后补充 Homebrew 与常见用户工具链目录,runner 按合并值解析
+  executable。其他变量必须通过 `env` 显式提供。
 - `timeout_ms` 默认 60 秒,上限 10 分钟。
 - stdout/stderr 分开保存,每路最多保留 64 KiB 头尾内容。
 - 超出输出上限返回独立截断标记。

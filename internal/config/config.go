@@ -288,6 +288,27 @@ func (m *Manager) SetAppEnabled(_ context.Context, id string, enabled bool) erro
 	return m.writeSettings(cfg)
 }
 
+func (m *Manager) DeleteAppEnablement(_ context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("%w %q", ErrInvalidSetting, id)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cfg, err := m.readSettings()
+	if err != nil {
+		return err
+	}
+	if _, ok := cfg.Apps.Enabled[id]; !ok {
+		return nil
+	}
+	delete(cfg.Apps.Enabled, id)
+	if cfg.Version == 0 {
+		cfg.Version = 1
+	}
+	return m.writeSettings(cfg)
+}
+
 func defaultSettingsYAML() settingsYAML {
 	return settingsYAML{Version: 1}
 }
@@ -481,11 +502,24 @@ func writeYAML(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(b); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
 func cloneProfile(id string, p *store.ProviderProfile) *store.ProviderProfile {

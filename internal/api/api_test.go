@@ -4,7 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +30,7 @@ import (
 	"github.com/teatak/pudding-core/internal/desktopcamera"
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
+	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/mobileauth"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
@@ -203,6 +207,32 @@ func TestAudioBindingErrorDoesNotExposeInternalDetail(t *testing.T) {
 	}
 }
 
+func TestAudioBindingReportsUnavailableInputRoute(t *testing.T) {
+	ms := memstore.New()
+	homeDir := t.TempDir()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"你好"}))), ms, engine.WithAttachmentHome(homeDir))
+	controller := &failingVoiceController{inputErr: fmt.Errorf("%w: internal route detail", voice.ErrInputRouteUnavailable)}
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithHome(homeDir).WithVoice(controller).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+	if err := ms.CreateSession(context.Background(), &store.Session{ID: "sess_audio_route", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_audio_route/audio/input", map[string]bool{"enabled": true})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	payload := decodeJSON[map[string]string](t, resp)
+	if payload["error"] != "audio_input_route_unavailable" {
+		t.Fatalf("payload = %+v", payload)
+	}
+	if payload["detail"] != "" || strings.Contains(fmt.Sprint(payload), "internal route detail") {
+		t.Fatalf("internal detail leaked: %+v", payload)
+	}
+}
+
 type failingVoiceController struct {
 	inputErr error
 }
@@ -258,6 +288,30 @@ func TestDesktopAboutIncludesAudioConfig(t *testing.T) {
 	}
 	if !strings.HasSuffix(rows["audio_config.path"], filepath.Join("config", "audio.yaml")) {
 		t.Fatalf("audio config path = %q", rows["audio_config.path"])
+	}
+}
+
+func TestDesktopHealthIdentifiesAuthenticatedDaemon(t *testing.T) {
+	srv, _ := newTestServer(t)
+	challenge := strings.Repeat("ab", 32)
+	resp, err := http.Get(srv.URL + "/desktop/health?challenge=" + challenge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := decodeJSON[desktopHealthResponse](t, resp)
+	mac := hmac.New(sha256.New, []byte(testToken))
+	_, _ = mac.Write([]byte(challenge))
+	if payload.Service != "puddingd" || payload.ProtocolVersion != daemonProtocolVersion || payload.Proof != hex.EncodeToString(mac.Sum(nil)) {
+		t.Fatalf("unexpected desktop health: %+v", payload)
+	}
+
+	resp, err = http.Get(srv.URL + "/desktop/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("health without challenge status = %d, want 400", resp.StatusCode)
 	}
 }
 
@@ -658,6 +712,63 @@ func TestPutAppConnectionRejectsEmptyGitHubPAT(t *testing.T) {
 	}
 }
 
+func TestPutAppConnectionRejectsInvalidHeaderAuth(t *testing.T) {
+	srv, _, _ := newConfigTestServer(t)
+	resp := req(t, http.MethodPut, srv.URL+"/app-connections/unicorn-main", map[string]any{
+		"appID":        "unicorn",
+		"name":         "Unicorn",
+		"authMethodID": "unicorn-header",
+		"authType":     "header",
+		"header":       "Host",
+		"token":        "secret",
+		"fields":       map[string]string{"hotelCode": "H001"},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestPutAppConnectionRejectsInvalidAuthValue(t *testing.T) {
+	srv, _, _ := newConfigTestServer(t)
+	resp := req(t, http.MethodPut, srv.URL+"/app-connections/github-pat", map[string]string{
+		"appID":        "github",
+		"name":         "GitHub PAT",
+		"authMethodID": "github-pat",
+		"authType":     "bearer",
+		"token":        "ghp_test\r\nX-Injected: true",
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestNormalizeAppConnectionFieldsRejectsUnsafeInjectionValues(t *testing.T) {
+	tests := []struct {
+		name   string
+		target string
+		value  string
+	}{
+		{name: "header newline", target: "header", value: "value\r\nX-Injected: true"},
+		{name: "env NUL", target: "env", value: "value\x00suffix"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := normalizeAppConnectionFields(&appsvc.ConnectionConfig{Fields: []appsvc.ConnectionField{{
+				ID: "credential",
+				Inject: []appsvc.ConnectionFieldInject{{
+					Target: tt.target,
+					Name:   "X-Credential",
+				}},
+			}}}, map[string]string{"credential": tt.value}, nil)
+			if err == nil {
+				t.Fatal("unsafe connection value should be rejected")
+			}
+		})
+	}
+}
+
 func TestPutAppConnectionStoresConnectionFields(t *testing.T) {
 	srv, _, _ := newConfigTestServer(t)
 	resp := req(t, http.MethodPut, srv.URL+"/app-connections/unicorn-main", map[string]any{
@@ -1050,13 +1161,19 @@ func TestSkillsAPI(t *testing.T) {
 		t.Fatalf("want 200, got %d", resp.StatusCode)
 	}
 	got := decodeJSON[map[string][]map[string]any](t, resp)
-	var foundBuiltin, foundUser bool
+	var foundSkillCreator, foundAppCreator, foundUser bool
 	for _, item := range got["skills"] {
 		if item["id"] == "skill-creator" {
 			if item["scope"] != "global" || item["source"] != "builtin" || item["system"] != true || item["iconPath"] != "builtin/skill-creator/assets/icon.svg" {
 				t.Fatalf("unexpected skill-creator view: %+v", item)
 			}
-			foundBuiltin = true
+			foundSkillCreator = true
+		}
+		if item["id"] == "app-creator" {
+			if item["scope"] != "global" || item["source"] != "builtin" || item["system"] != true || item["iconPath"] != "builtin/app-creator/assets/icon.svg" {
+				t.Fatalf("unexpected app-creator view: %+v", item)
+			}
+			foundAppCreator = true
 		}
 		if item["id"] == "test-skill" {
 			if item["scope"] != "global" || item["source"] != "user" || item["system"] != false || item["iconPath"] != "test-skill/assets/icon.svg" {
@@ -1065,7 +1182,7 @@ func TestSkillsAPI(t *testing.T) {
 			foundUser = true
 		}
 	}
-	if !foundBuiltin || !foundUser {
+	if !foundSkillCreator || !foundAppCreator || !foundUser {
 		t.Fatalf("expected builtin and user skills, got: %+v", got)
 	}
 }
@@ -1090,6 +1207,23 @@ func TestAppAssetAPI(t *testing.T) {
 	}
 	if got := resp.Header.Get("Content-Type"); got != "image/svg+xml" {
 		t.Fatalf("unexpected content type: %s", got)
+	}
+}
+
+func TestInstallAppRejectsOversizedPackage(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
+	homeDir := t.TempDir()
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithApps(appsvc.NewService(homeDir, nil)).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+
+	resp := req(t, http.MethodPost, srv.URL+"/apps/install", map[string]string{
+		"packageJSON": strings.Repeat("x", appsvc.MaxPackageJSONBytes+1),
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("want 413, got %d", resp.StatusCode)
 	}
 }
 
@@ -1230,6 +1364,55 @@ func TestAppMCPOverrideAPI(t *testing.T) {
 	got = decodeJSON[map[string]any](t, resp)
 	if got["configured"] != false {
 		t.Fatalf("unexpected override after delete: %+v", got)
+	}
+}
+
+func TestMCPAppConfigAPI(t *testing.T) {
+	ms := memstore.New()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
+	home := t.TempDir()
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithApps(appsvc.NewService(home, nil)).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+
+	configJSON := fmt.Sprintf(`{"mcpServers":{"Local tools":{"command":%q,"args":["-test.run=TestAPIAppMCPStdioHelper","--"],"env":{"PUDDING_API_APP_MCP_STDIO_HELPER":"1","TOKEN":"secret"}}}}`, os.Args[0])
+	resp := req(t, http.MethodPost, srv.URL+"/apps/mcp", map[string]string{"configJSON": configJSON, "name": "My local tools"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("import status = %d", resp.StatusCode)
+	}
+	imported := decodeJSON[struct {
+		Apps []appsvc.Definition `json:"apps"`
+	}](t, resp)
+	if len(imported.Apps) != 1 || imported.Apps[0].Name != "My local tools" || imported.Apps[0].Kind != appsvc.KindMCP || imported.Apps[0].RequiredMode != "code" {
+		t.Fatalf("unexpected imported Apps: %+v", imported.Apps)
+	}
+	id := imported.Apps[0].ID
+	resp = req(t, http.MethodGet, srv.URL+"/apps/"+id+"/mcp", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("MCP status = %d", resp.StatusCode)
+	}
+	status := decodeJSON[appMCPStatusView](t, resp)
+	if len(status.Endpoints) != 1 || status.Endpoints[0].Status != tool.AppMCPProbeAvailable || len(status.Endpoints[0].Tools) != 1 {
+		t.Fatalf("imported MCP App should be connectionless and available: %+v", status)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/apps/"+id+"/mcp-config", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get config status = %d", resp.StatusCode)
+	}
+	config := decodeJSON[map[string]string](t, resp)
+	if !strings.Contains(config["configJSON"], `"TOKEN": "secret"`) {
+		t.Fatalf("unexpected config JSON: %s", config["configJSON"])
+	}
+
+	updatedJSON := `{"mcpServers":{"Remote tools":{"url":"https://example.test/mcp"}}}`
+	resp = req(t, http.MethodPut, srv.URL+"/apps/"+id+"/mcp-config", map[string]string{"configJSON": updatedJSON, "name": "Renamed MCP"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("update status = %d", resp.StatusCode)
+	}
+	updated := decodeJSON[appsvc.Definition](t, resp)
+	if updated.ID != id || updated.Name != "Renamed MCP" || updated.RequiredMode != "work" {
+		t.Fatalf("unexpected updated App: %+v", updated)
 	}
 }
 
@@ -1396,6 +1579,19 @@ func TestDeleteAppRemovesConnections(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := cfg.SetAppEnabled(context.Background(), "github", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.CreateSession(context.Background(), &store.Session{
+		ID: "sess_github", Provider: "mock", Model: "mock", LoadedAppIDs: []string{"github", "other"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.CreateSession(context.Background(), &store.Session{
+		ID: "sess_other", Provider: "mock", Model: "mock", LoadedAppIDs: []string{"other"},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := cfg.PutAppConnection(context.Background(), &appsvc.Connection{
 		ID:    "other-main",
 		Name:  "Other Main",
@@ -1416,6 +1612,61 @@ func TestDeleteAppRemovesConnections(t *testing.T) {
 	}
 	if _, err := cfg.GetAppConnection(context.Background(), "other-main"); err != nil {
 		t.Fatalf("other connection should remain: %v", err)
+	}
+	enabled, err := cfg.ListAppEnablement(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := enabled["github"]; ok {
+		t.Fatalf("deleted app enablement should be removed: %+v", enabled)
+	}
+	githubSession, err := ms.GetSession(context.Background(), "sess_github")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(githubSession.LoadedAppIDs, []string{"other"}) {
+		t.Fatalf("deleted app should be unloaded from sessions: %+v", githubSession.LoadedAppIDs)
+	}
+	otherSession, err := ms.GetSession(context.Background(), "sess_other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(otherSession.LoadedAppIDs, []string{"other"}) {
+		t.Fatalf("unrelated session apps changed: %+v", otherSession.LoadedAppIDs)
+	}
+
+	if err := cfg.PutAppConnection(context.Background(), &appsvc.Connection{
+		ID: "github-stale", Name: "GitHub Stale", AppID: "github",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SetAppEnabled(context.Background(), "github", false); err != nil {
+		t.Fatal(err)
+	}
+	loaded := []string{"github", "other"}
+	if _, err := ms.UpdateSession(context.Background(), "sess_github", store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
+		t.Fatal(err)
+	}
+	resp = req(t, http.MethodDelete, srv.URL+"/apps/github", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("retry deleted app: want 404, got %d", resp.StatusCode)
+	}
+	if _, err := cfg.GetAppConnection(context.Background(), "github-stale"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("retry should remove stale connection, err=%v", err)
+	}
+	enabled, err = cfg.ListAppEnablement(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := enabled["github"]; ok {
+		t.Fatalf("retry should remove stale enablement: %+v", enabled)
+	}
+	githubSession, err = ms.GetSession(context.Background(), "sess_github")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(githubSession.LoadedAppIDs, []string{"other"}) {
+		t.Fatalf("retry should unload stale app: %+v", githubSession.LoadedAppIDs)
 	}
 }
 
@@ -1440,53 +1691,6 @@ func TestDeleteSkillAPI(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, "skills", "test-skill")); !os.IsNotExist(err) {
 		t.Fatalf("skill dir should be removed, stat err=%v", err)
-	}
-}
-
-func TestSkillDraftsAPI(t *testing.T) {
-	ms := memstore.New()
-	hub := event.NewHub()
-	eng := engine.New(ms, hub, registry.Static(mock.New()), ms)
-	home := t.TempDir()
-	draftDir := filepath.Join(home, "skills-draft", "test-skill")
-	if err := os.MkdirAll(draftDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(draftDir, "SKILL.md"), []byte("---\nname: test-skill\ndescription: Test skill draft.\n---\nBody\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	srv := httptest.NewServer(New(eng, ms, ms, hub).WithSkills(skillsvc.NewService(home)).Handler(testToken, nil))
-	t.Cleanup(srv.Close)
-
-	resp := req(t, http.MethodGet, srv.URL+"/skill-drafts", nil)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("want 200, got %d", resp.StatusCode)
-	}
-	list := decodeJSON[map[string][]map[string]any](t, resp)
-	if len(list["drafts"]) != 1 || list["drafts"][0]["id"] != "test-skill" {
-		t.Fatalf("unexpected drafts: %+v", list)
-	}
-
-	resp = req(t, http.MethodGet, srv.URL+"/skill-drafts/test-skill", nil)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("want 200, got %d", resp.StatusCode)
-	}
-	detail := decodeJSON[map[string]any](t, resp)
-	files := detail["files"].([]any)
-	if len(files) != 1 {
-		t.Fatalf("unexpected draft detail: %+v", detail)
-	}
-
-	resp = req(t, http.MethodPost, srv.URL+"/skill-drafts/test-skill/apply", nil)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("want 200, got %d", resp.StatusCode)
-	}
-	if _, err := os.Stat(filepath.Join(home, "skills", "test-skill", "SKILL.md")); err != nil {
-		t.Fatalf("published skill missing: %v", err)
-	}
-	if _, err := os.Stat(draftDir); !os.IsNotExist(err) {
-		t.Fatalf("draft should be removed, stat err=%v", err)
 	}
 }
 
@@ -1560,7 +1764,7 @@ func TestBuiltinToolsAPI(t *testing.T) {
 	var patchPropose map[string]any
 	var appLoad map[string]any
 	var skillRead map[string]any
-	var skillSubmit map[string]any
+	var skillValidate map[string]any
 	for _, item := range tools {
 		id, _ := item["id"].(string)
 		if _, appTool := tool.BuiltinAppIDForTool(id); appTool || tool.IsAppAPITool(id) {
@@ -1581,8 +1785,8 @@ func TestBuiltinToolsAPI(t *testing.T) {
 			appLoad = item
 		case tool.SkillRead:
 			skillRead = item
-		case tool.SkillSubmit:
-			skillSubmit = item
+		case tool.SkillValidate:
+			skillValidate = item
 		}
 	}
 	if fileWrite == nil || fileWrite["capability"] != string(store.ModeCode) {
@@ -1606,8 +1810,8 @@ func TestBuiltinToolsAPI(t *testing.T) {
 	if skillRead == nil || skillRead["capability"] != string(store.ModeChat) {
 		t.Fatalf("skill read should declare chat capability: %+v", skillRead)
 	}
-	if skillSubmit == nil || skillSubmit["capability"] != string(store.ModeCode) {
-		t.Fatalf("skill submit should declare code capability: %+v", skillSubmit)
+	if skillValidate == nil || skillValidate["capability"] != string(store.ModeCode) {
+		t.Fatalf("skill validate should declare code capability: %+v", skillValidate)
 	}
 }
 
@@ -2856,6 +3060,37 @@ func TestDeleteSessionCancelsRunningTurn(t *testing.T) {
 	case <-waited:
 	case <-time.After(1 * time.Second):
 		t.Fatal("delete did not cancel the running turn; goroutine still streaming")
+	}
+}
+
+func TestDeleteSessionRemovesCodeScratch(t *testing.T) {
+	ctx := context.Background()
+	homeDir := t.TempDir()
+	ms := memstore.New()
+	hub := event.NewHub()
+	eng := engine.New(ms, hub, registry.Static(mock.New()), ms, engine.WithAttachmentHome(homeDir))
+	srv := httptest.NewServer(New(eng, ms, ms, hub).WithHome(homeDir).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+
+	sessionID := "sess_scratch_cleanup"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock", ActiveMode: store.ModeCode}); err != nil {
+		t.Fatal(err)
+	}
+	scratch, err := home.PrepareCodeScratch(homeDir, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scratch, "main.go"), []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := req(t, http.MethodDelete, srv.URL+"/sessions/"+sessionID, nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete status = %d", resp.StatusCode)
+	}
+	if _, err := os.Stat(scratch); !os.IsNotExist(err) {
+		t.Fatalf("scratch still exists after session deletion: %v", err)
 	}
 }
 

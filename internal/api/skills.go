@@ -13,10 +13,6 @@ type skillService interface {
 	ListSkills(context.Context) ([]skill.Skill, error)
 	DeleteSkill(context.Context, string) error
 	ReadAsset(context.Context, string) ([]byte, string, error)
-	ListDrafts(context.Context) ([]skill.Draft, error)
-	DraftDetail(context.Context, string) (*skill.DraftDetail, error)
-	ApplyDraft(context.Context, string) error
-	DeleteDraft(context.Context, string) error
 }
 
 func (s *Server) listSkills(c *cart.Context) error {
@@ -42,75 +38,9 @@ func (s *Server) deleteSkill(c *cart.Context) error {
 		if errors.Is(err, skill.ErrInvalidID) {
 			return badRequest(c, "invalid skill id")
 		}
-		return s.fail(c, err)
-	}
-	c.String(http.StatusNoContent, "")
-	return nil
-}
-
-func (s *Server) listSkillDrafts(c *cart.Context) error {
-	if s.skills == nil {
-		c.JSON(http.StatusInternalServerError, map[string]string{"error": "skill_service_unavailable"})
-		return nil
-	}
-	drafts, err := s.skills.ListDrafts(c.Request.Context())
-	if err != nil {
-		return s.fail(c, err)
-	}
-	c.JSON(http.StatusOK, map[string]any{"drafts": drafts})
-	return nil
-}
-
-func (s *Server) getSkillDraft(c *cart.Context) error {
-	if s.skills == nil {
-		c.JSON(http.StatusInternalServerError, map[string]string{"error": "skill_service_unavailable"})
-		return nil
-	}
-	id, _ := c.Param("id")
-	draft, err := s.skills.DraftDetail(c.Request.Context(), id)
-	if err != nil {
-		if errors.Is(err, skill.ErrInvalidID) {
-			return badRequest(c, "invalid draft id")
-		}
-		if errors.Is(err, skill.ErrNotFound) {
-			c.JSON(http.StatusNotFound, map[string]string{"error": "skill_draft_not_found"})
+		if errors.Is(err, skill.ErrBuiltin) {
+			c.JSON(http.StatusConflict, map[string]string{"error": "builtin_skill_cannot_be_deleted"})
 			return nil
-		}
-		return s.fail(c, err)
-	}
-	c.JSON(http.StatusOK, draft)
-	return nil
-}
-
-func (s *Server) applySkillDraft(c *cart.Context) error {
-	if s.skills == nil {
-		c.JSON(http.StatusInternalServerError, map[string]string{"error": "skill_service_unavailable"})
-		return nil
-	}
-	id, _ := c.Param("id")
-	if err := s.skills.ApplyDraft(c.Request.Context(), id); err != nil {
-		if errors.Is(err, skill.ErrInvalidID) || errors.Is(err, skill.ErrInvalidDraft) {
-			return badRequest(c, err.Error())
-		}
-		if errors.Is(err, skill.ErrNotFound) {
-			c.JSON(http.StatusNotFound, map[string]string{"error": "skill_draft_not_found"})
-			return nil
-		}
-		return s.fail(c, err)
-	}
-	c.JSON(http.StatusOK, map[string]string{"status": "applied"})
-	return nil
-}
-
-func (s *Server) deleteSkillDraft(c *cart.Context) error {
-	if s.skills == nil {
-		c.JSON(http.StatusInternalServerError, map[string]string{"error": "skill_service_unavailable"})
-		return nil
-	}
-	id, _ := c.Param("id")
-	if err := s.skills.DeleteDraft(c.Request.Context(), id); err != nil {
-		if errors.Is(err, skill.ErrInvalidID) {
-			return badRequest(c, "invalid draft id")
 		}
 		return s.fail(c, err)
 	}

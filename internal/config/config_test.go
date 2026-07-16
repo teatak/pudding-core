@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -173,6 +174,19 @@ func TestManagerPersistsAppEnablement(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "browser: false") || !strings.Contains(string(data), "terminal: true") {
 		t.Fatalf("app enablement missing from settings.yaml:\n%s", data)
+	}
+	if err := manager.DeleteAppEnablement(ctx, "browser"); err != nil {
+		t.Fatal(err)
+	}
+	enabled, err = manager.ListAppEnablement(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := enabled["browser"]; ok {
+		t.Fatalf("browser enablement should be removed: %+v", enabled)
+	}
+	if !enabled["terminal"] {
+		t.Fatalf("unrelated app enablement changed: %+v", enabled)
 	}
 }
 
@@ -515,5 +529,27 @@ func TestManagerPersistsWebTools(t *testing.T) {
 	}
 	if strings.Contains(string(b), "tvly-secret") || strings.Contains(string(b), "api_key:") {
 		t.Fatalf("cleared web.yaml must not keep api key:\n%s", b)
+	}
+}
+
+func TestWriteYAMLDoesNotFollowPredictableTempSymlink(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.yaml")
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(outside, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, path+".tmp"); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if err := writeYAML(path, map[string]any{"version": 1}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "keep" {
+		t.Fatalf("predictable temp target changed: %q", data)
 	}
 }

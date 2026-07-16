@@ -90,14 +90,26 @@ func (r *macOSCommandRunner) Prepare(spec commandSpec) (*commandExecution, error
 }
 
 func (r *macOSCommandRunner) prepareStateRoot(projectRoots []string) (string, error) {
+	homeRoot, err := filepath.EvalSymlinks(r.homeDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve command sandbox home: %w", err)
+	}
+	homeInfo, err := os.Stat(homeRoot)
+	if err != nil || !homeInfo.IsDir() {
+		return "", errors.New("command sandbox home must be a directory")
+	}
 	hash := sha256.Sum256([]byte(strings.Join(projectRoots, "\x00")))
-	stateRoot := filepath.Join(r.homeDir, "runtime", "command-sandbox", hex.EncodeToString(hash[:]))
+	runtimeRoot := filepath.Join(homeRoot, "runtime")
+	sandboxRoot := filepath.Join(runtimeRoot, "command-sandbox")
+	stateRoot := filepath.Join(sandboxRoot, hex.EncodeToString(hash[:]))
 	for _, dir := range []string{
+		runtimeRoot,
+		sandboxRoot,
 		stateRoot,
 		filepath.Join(stateRoot, "cache"),
 		filepath.Join(stateRoot, "tmp"),
 	} {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
+		if err := ensureSandboxStateDir(dir); err != nil {
 			return "", fmt.Errorf("prepare command sandbox state: %w", err)
 		}
 	}
@@ -105,7 +117,24 @@ func (r *macOSCommandRunner) prepareStateRoot(projectRoots []string) (string, er
 	if err != nil {
 		return "", fmt.Errorf("resolve command sandbox state: %w", err)
 	}
+	if !pathInsideRoot(resolved, homeRoot) {
+		return "", errors.New("command sandbox state escapes Pudding home")
+	}
 	return resolved, nil
+}
+
+func ensureSandboxStateDir(path string) error {
+	if err := os.Mkdir(path, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return errors.New("sandbox state path must be a directory, not a symlink")
+	}
+	return nil
 }
 
 func sandboxCanonicalRoots(roots []string) ([]string, error) {
@@ -216,13 +245,22 @@ func sandboxKnownReadRoots() []string {
 func sandboxToolchainCandidates(home string) []string {
 	return []string{
 		filepath.Join(home, ".asdf", "installs"),
+		filepath.Join(home, ".asdf", "shims"),
+		filepath.Join(home, ".cargo", "bin"),
 		filepath.Join(home, ".nvm", "versions"),
+		filepath.Join(home, ".npm-global"),
+		filepath.Join(home, ".local", "bin"),
+		filepath.Join(home, ".local", "share", "pipx", "venvs"),
 		filepath.Join(home, ".volta", "tools", "image"),
+		filepath.Join(home, ".volta", "bin"),
 		filepath.Join(home, ".pyenv", "versions"),
 		filepath.Join(home, ".rustup", "toolchains"),
 		filepath.Join(home, ".sdkman", "candidates"),
 		filepath.Join(home, ".local", "share", "mise", "installs"),
+		filepath.Join(home, ".local", "share", "mise", "shims"),
+		filepath.Join(home, "go", "bin"),
 		filepath.Join(home, "Library", "Android", "sdk"),
+		filepath.Join(home, "Library", "pnpm"),
 	}
 }
 
@@ -308,11 +346,20 @@ func sandboxAncestorPaths(paths []string) []string {
 func sandboxEnvironment(env []string, stateRoot string) []string {
 	out := append([]string(nil), env...)
 	tmpDir := filepath.Join(stateRoot, "tmp")
+	cacheDir := filepath.Join(stateRoot, "cache")
+	goPath := filepath.Join(stateRoot, "go")
 	out = sandboxSetEnv(out, "TMPDIR", tmpDir+string(filepath.Separator))
 	out = sandboxSetEnv(out, "TMP", tmpDir)
 	out = sandboxSetEnv(out, "TEMP", tmpDir)
-	out = sandboxSetEnv(out, "GOCACHE", filepath.Join(stateRoot, "cache", "go-build"))
-	out = sandboxSetEnv(out, "XDG_CACHE_HOME", filepath.Join(stateRoot, "cache"))
+	out = sandboxSetEnv(out, "XDG_CACHE_HOME", cacheDir)
+	out = sandboxSetEnv(out, "GOPATH", goPath)
+	out = sandboxSetEnv(out, "GOMODCACHE", filepath.Join(goPath, "pkg", "mod"))
+	out = sandboxSetEnv(out, "GOCACHE", filepath.Join(cacheDir, "go-build"))
+	out = sandboxSetEnv(out, "NPM_CONFIG_CACHE", filepath.Join(cacheDir, "npm"))
+	out = sandboxSetEnv(out, "npm_config_store_dir", filepath.Join(cacheDir, "pnpm-store"))
+	out = sandboxSetEnv(out, "YARN_CACHE_FOLDER", filepath.Join(cacheDir, "yarn"))
+	out = sandboxSetEnv(out, "PIP_CACHE_DIR", filepath.Join(cacheDir, "pip"))
+	out = sandboxSetEnv(out, "UV_CACHE_DIR", filepath.Join(cacheDir, "uv"))
 	out = sandboxSetEnv(out, "GIT_CONFIG_GLOBAL", "/dev/null")
 	out = sandboxSetEnv(out, "GIT_CONFIG_NOSYSTEM", "1")
 	return out

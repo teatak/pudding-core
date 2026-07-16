@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/teatak/pudding-core/internal/agenteval"
+	"github.com/teatak/pudding-core/internal/applog"
 	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/daemon"
 	"github.com/teatak/pudding-core/internal/home"
@@ -55,30 +56,63 @@ func run() error {
 		flagLAN  = flag.Bool("lan", false, "listen on LAN interfaces for mobile pairing")
 	)
 	flag.Parse()
+	resolvedHome, err := home.Resolve(*flagHome)
+	if err != nil {
+		return err
+	}
+	if err := home.Prepare(resolvedHome); err != nil {
+		return err
+	}
+	if err := applog.Install(filepath.Join(resolvedHome, "logs"), "puddingd"); err != nil {
+		slog.Warn("puddingd file logging unavailable", "err", err)
+	}
 
 	d, err := daemon.Start(daemon.Options{
-		Home:      *flagHome,
+		Home:      resolvedHome,
 		Addr:      *flagAddr,
 		Mock:      *flagMock,
 		MobileLAN: *flagLAN,
 	})
 	if err != nil {
+		slog.Error("puddingd startup failed", "addr", *flagAddr, "err", err)
 		return err
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	parentDone := electronParentDone(os.Stdin)
 
 	select {
 	case err := <-d.ServeErr():
+		slog.Error("puddingd serve failed", "err", err)
 		return err
 	case <-ctx.Done():
+	case <-parentDone:
+		slog.Info("puddingd managed parent exited")
 	}
 
 	slog.Info("puddingd shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return d.Shutdown(shutdownCtx)
+	if err := d.Shutdown(shutdownCtx); err != nil {
+		slog.Error("puddingd shutdown failed", "err", err)
+		return err
+	}
+	return nil
+}
+
+func electronParentDone(stdin io.Reader) <-chan struct{} {
+	if os.Getenv("PUDDING_ELECTRON_MANAGED") != "1" {
+		return nil
+	}
+	// Electron 异常退出时写端会由 OS 关闭；stdin EOF 是跨平台的父进程
+	// 生命周期信号，弥补 before-quit / SIGTERM 可能来不及执行的路径。
+	done := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(io.Discard, stdin)
+		close(done)
+	}()
+	return done
 }
 
 func runAgent(args []string, stdout, stderr io.Writer, now time.Time) error {

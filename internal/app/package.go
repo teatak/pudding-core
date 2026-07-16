@@ -18,7 +18,11 @@ const (
 	AppPackageSchemaVersion = 1
 	AppLockFileName         = ".pudding-app-lock.json"
 	AppLockKind             = "pudding.app.lock"
+	MaxPackageJSONBytes     = 8 << 20
+	MaxPackageFiles         = 512
 )
+
+var ErrPackageTooLarge = errors.New("app package is too large")
 
 type Package struct {
 	Kind          string        `json:"kind"`
@@ -58,6 +62,9 @@ func InstallPackage(root string, packageJSON []byte, expectedSHA256, sourceURL s
 	if len(packageJSON) == 0 {
 		return nil, errors.New("app package is required")
 	}
+	if len(packageJSON) > MaxPackageJSONBytes {
+		return nil, ErrPackageTooLarge
+	}
 	actualSHA := sha256Bytes(packageJSON)
 	expectedSHA256 = strings.ToLower(strings.TrimSpace(expectedSHA256))
 	if expectedSHA256 != "" && actualSHA != expectedSHA256 {
@@ -78,7 +85,7 @@ func InstallPackage(root string, packageJSON []byte, expectedSHA256, sourceURL s
 	if !appIDPattern.MatchString(appID) {
 		return nil, fmt.Errorf("invalid app id %q", pkg.App.ID)
 	}
-	if IsBuiltinID(appID) {
+	if IsReservedID(appID) {
 		return nil, fmt.Errorf("%w: %s", ErrBuiltinApp, appID)
 	}
 	appVersion := strings.TrimSpace(pkg.App.Version)
@@ -93,7 +100,8 @@ func InstallPackage(root string, packageJSON []byte, expectedSHA256, sourceURL s
 		return nil, fmt.Errorf("%s is required", AppFileName)
 	}
 
-	if err := os.MkdirAll(root, 0o700); err != nil {
+	root, err = resolveAppRoot(root, true)
+	if err != nil {
 		return nil, err
 	}
 	tempDir, err := os.MkdirTemp(root, ".app-install-"+appID+"-")
@@ -102,7 +110,26 @@ func InstallPackage(root string, packageJSON []byte, expectedSHA256, sourceURL s
 	}
 	defer os.RemoveAll(tempDir)
 
+	dest := filepath.Join(root, appID)
+	oldLock, _ := readPackageLock(dest)
+	if info, statErr := os.Lstat(dest); statErr == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return nil, fmt.Errorf("app destination %s is not a directory", dest)
+		}
+		if err := copyPackageTree(dest, tempDir); err != nil {
+			return nil, err
+		}
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return nil, statErr
+	}
+	if err := removeOldPackageFiles(tempDir, oldLock, files); err != nil {
+		return nil, err
+	}
 	if err := writePackageFiles(tempDir, files); err != nil {
+		return nil, err
+	}
+	lock := buildPackageLock(files, appVersion, actualSHA, sourceURL)
+	if err := writePackageLock(tempDir, lock); err != nil {
 		return nil, err
 	}
 	tempDef, err := LoadDefinitionDir(tempDir)
@@ -115,28 +142,82 @@ func InstallPackage(root string, packageJSON []byte, expectedSHA256, sourceURL s
 	if tempDef.Version != "" && tempDef.Version != appVersion {
 		return nil, fmt.Errorf("package version %q does not match %s version %q", appVersion, AppFileName, tempDef.Version)
 	}
-
-	dest := filepath.Join(root, appID)
-	oldLock, _ := readPackageLock(dest)
-	if err := os.MkdirAll(dest, 0o700); err != nil {
+	overrides, err := LoadMCPOverrideFile(filepath.Join(tempDir, MCPOverrideFileName))
+	if err != nil {
 		return nil, err
 	}
-	if err := writePackageFiles(dest, files); err != nil {
-		return nil, err
+	if _, err := ApplyMCPOverrides(tempDef, overrides); err != nil {
+		return nil, fmt.Errorf("app %s: %w", appID, err)
 	}
-	if err := removeOldPackageFiles(dest, oldLock, files); err != nil {
-		return nil, err
-	}
-	lock := buildPackageLock(files, appVersion, actualSHA, sourceURL)
-	if err := writePackageLock(dest, lock); err != nil {
+	if err := replacePackageDir(dest, tempDir); err != nil {
 		return nil, err
 	}
 	return LoadDefinitionDir(dest)
 }
 
+func copyPackageTree(src, dst string) error {
+	return filepath.WalkDir(src, func(current string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(src, current)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("app package contains unsupported symlink %s", filepath.ToSlash(rel))
+		}
+		target := filepath.Join(dst, rel)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o700)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("app package contains unsupported file %s", filepath.ToSlash(rel))
+		}
+		data, err := os.ReadFile(current)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o600)
+	})
+}
+
+func replacePackageDir(dest, candidate string) error {
+	if _, err := os.Lstat(dest); errors.Is(err, os.ErrNotExist) {
+		return os.Rename(candidate, dest)
+	} else if err != nil {
+		return err
+	}
+	backup := candidate + ".backup"
+	if err := os.Rename(dest, backup); err != nil {
+		return err
+	}
+	if err := os.Rename(candidate, dest); err != nil {
+		if restoreErr := os.Rename(backup, dest); restoreErr != nil {
+			return fmt.Errorf("replace app package: %w; restore previous package: %v", err, restoreErr)
+		}
+		return err
+	}
+	_ = os.RemoveAll(backup)
+	return nil
+}
+
 func packageFiles(in []PackageFile) (map[string][]byte, error) {
 	if len(in) == 0 {
 		return nil, errors.New("app package files are required")
+	}
+	if len(in) > MaxPackageFiles {
+		return nil, fmt.Errorf("app package contains more than %d files", MaxPackageFiles)
 	}
 	out := make(map[string][]byte, len(in))
 	for _, file := range in {
@@ -149,6 +230,9 @@ func packageFiles(in []PackageFile) (map[string][]byte, error) {
 		}
 		if _, exists := out[cleaned]; exists {
 			return nil, fmt.Errorf("duplicate package file %q", cleaned)
+		}
+		if file.Content != "" && file.ContentBase64 != "" {
+			return nil, fmt.Errorf("package file %q has both content and content_base64", cleaned)
 		}
 		data := []byte(file.Content)
 		if file.ContentBase64 != "" {
