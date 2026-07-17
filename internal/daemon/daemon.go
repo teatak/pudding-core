@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/teatak/pudding-core/internal/api"
@@ -585,7 +586,12 @@ func (d *Daemon) Shutdown(ctx context.Context) error {
 
 // loadOrCreateToken 读取或生成 daemon token(0600);
 // 所有 API 请求都必须带它(docs/technology-decisions.md 第 9 节)。
+var tokenFileMu sync.Mutex
+
 func loadOrCreateToken(path string) (string, error) {
+	tokenFileMu.Lock()
+	defer tokenFileMu.Unlock()
+
 	const maxTokenFileBytes = 4 << 10
 	deadline := time.Now().Add(5 * time.Second)
 	for {
