@@ -58,6 +58,7 @@ function BrowserTabIcon({ faviconURL }: { faviconURL?: string }) {
       className={cn(
         "inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[5px]",
         builtinAppIconClass("browser"),
+        "!bg-transparent",
       )}
     >
       <Compass className="h-3.5 w-3.5" />
@@ -72,6 +73,7 @@ function TerminalTabIcon({ exited }: { exited: boolean }) {
       className={cn(
         "inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[5px]",
         builtinAppIconClass("terminal"),
+        "!bg-transparent",
       )}
       data-exited={exited}
     >
@@ -84,7 +86,7 @@ function FilePreviewTabIcon({ kind }: { kind: WorkspaceFilePreviewTab["kind"] })
   return (
     <span
       aria-hidden="true"
-      className="inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[5px] bg-blue-50 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300"
+      className="inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[5px] text-blue-700 dark:text-blue-300"
     >
       {kind === "diff" ? <FileDiff className="h-3.5 w-3.5" /> : <FileCode2 className="h-3.5 w-3.5" />}
     </span>
@@ -350,7 +352,7 @@ function SortableSurfaceTabButton({
       ) : terminal ? (
         <TerminalTabIcon exited={exited} />
       ) : widget ? (
-        <CanvasKindIcon kind={widget.kind} size="xs" />
+        <CanvasKindIcon className="!bg-transparent" kind={widget.kind} size="xs" />
       ) : (
         <FilePreviewTabIcon kind={file?.kind || "file"} />
       )}

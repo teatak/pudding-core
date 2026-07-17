@@ -150,7 +150,7 @@ function ColoredMentionIcon({ icon, tone }: { icon: ReactNode; tone: "amber" | "
     indigo: "bg-indigo-600 text-white",
     rose: "bg-rose-600 text-white",
     sky: "bg-sky-600 text-white",
-    slate: "bg-slate-600 text-white",
+    slate: "bg-neutral-600 text-white",
     violet: "bg-violet-600 text-white",
   }[tone];
   return <span className={cn("grid size-5 shrink-0 place-items-center rounded", toneClass)}>{icon}</span>;

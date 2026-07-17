@@ -530,9 +530,9 @@ export function SessionRail({
             align="start"
             alignOffset={popoverAlignOffset}
             className={cn(
-              "flex w-[260px] flex-col !bg-sidebar p-0 text-sidebar-foreground",
+              "flex w-[260px] flex-col !bg-sidebar p-0 text-sidebar-foreground shadow-[0_8px_20px_-16px_rgb(0_0_0/0.14)] border-0 ring-0 outline-none",
               isMobile
-                ? "h-[calc(100svh-var(--toolbar-h)-1rem)] max-h-[calc(100svh-var(--toolbar-h)-1rem)] w-[min(20rem,calc(100vw-1rem))]"
+                ? "h-[min(48rem,calc(100svh-var(--toolbar-h)-1rem))] max-h-[calc(100svh-var(--toolbar-h)-1rem)] w-[min(260px,calc(100vw-1rem))]"
                 : "h-[min(48rem,calc(100vh-var(--toolbar-h)-1.5rem))] max-h-[calc(100vh-var(--toolbar-h)-1.5rem)]",
             )}
             side="bottom"
@@ -1130,7 +1130,7 @@ function RailPanel({
             </SidebarMenu>
           </SidebarHeader>
           <div aria-hidden="true" className="mx-4 mb-2 h-px shrink-0 bg-sidebar-border/60" />
-          <SidebarContent ref={scrollContainerRef} className="pt-0 pb-2 overscroll-contain">
+          <SidebarContent ref={scrollContainerRef} className="gap-0.5 pt-0 pb-2 overscroll-contain">
             {isLoading ? (
               <SessionListSkeleton />
             ) : isError ? (
@@ -1140,7 +1140,7 @@ function RailPanel({
                 {showPinnedGroup ? (
                   <Collapsible asChild open={!pinnedCollapsed}>
                     <SidebarGroup
-                      className="px-2 py-0"
+                      className="px-2.5 py-0"
                       data-session-drop-group="pinned"
                     >
                       <CollapsibleSessionGroupLabel
@@ -1176,7 +1176,7 @@ function RailPanel({
                 ) : null}
                 <div
                   className={cn(
-                    "rounded-md transition-colors",
+                    "flex flex-col gap-0.5 rounded-md transition-colors",
                     isDraggingPinned && "min-h-10",
                     isDraggingPinned &&
                     dragTarget?.group === "unpinned" &&
@@ -1188,7 +1188,7 @@ function RailPanel({
                     <SessionEmptyState />
                   ) : chatSessions.length > 0 || (isDraggingPinned && unpinnedSessions.length === 0) ? (
                     <Collapsible asChild open={!chatCollapsed}>
-                      <SidebarGroup className="px-2 py-0">
+                      <SidebarGroup className="px-2.5 py-0">
                         <CollapsibleSessionGroupLabel
                           collapsed={chatCollapsed}
                           icon="chat"
@@ -1224,7 +1224,7 @@ function RailPanel({
                     const projectCollapsed = collapsedGroups.has(`project:${group.key}`);
                     return (
                       <Collapsible key={group.key} asChild open={!projectCollapsed}>
-                        <SidebarGroup className="px-2 py-0">
+                        <SidebarGroup className="px-2.5 py-0">
                           <CollapsibleSessionGroupLabel
                             active={draftActive && draftProjectID === group.projectID}
                             actions={group.project ? <ProjectActionsMenu project={group.project} token={token} /> : undefined}
@@ -1444,11 +1444,11 @@ function CollapsibleSessionGroupLabel({
       title={title || label}
     >
       <button
-        className="group flex h-full min-w-0 flex-1 cursor-default items-center gap-2 rounded-md px-2 pr-1 text-left"
+        className="group flex h-full min-w-0 flex-1 cursor-default items-center gap-2 rounded-md px-2.5 pr-1 text-left"
         type="button"
         onClick={onToggle}
       >
-        <Icon className={cn("size-3.5 shrink-0 text-sidebar-foreground/60", icon === "pinned" && "rotate-45")} />
+        <Icon className={cn("size-4 shrink-0 text-sidebar-foreground/60", icon === "pinned" && "rotate-45")} />
         <span className="min-w-0 truncate">{label}</span>
         <ChevronRight
           className={cn(
@@ -1808,7 +1808,7 @@ function SessionItems({
         <SidebarMenuItem>
           <button
             aria-expanded={showAll}
-            className="flex h-7 w-full items-center rounded-md pr-2 pl-7 text-left text-xs text-sidebar-foreground/50 transition-colors hover:text-sidebar-foreground/80"
+            className="flex h-7 w-full items-center rounded-md pr-2 pl-[34px] text-left text-xs text-sidebar-foreground/50 transition-colors hover:text-sidebar-foreground/80"
             type="button"
             onClick={() => setShowAll((current) => !current)}
           >
@@ -2062,7 +2062,7 @@ function SessionItem({
           isActive
         >
           <div className="cursor-text">
-            <span aria-hidden="true" className="size-3 shrink-0" />
+            <span aria-hidden="true" className="w-[18px] shrink-0" />
             <Input
               ref={inputRef}
               aria-label={t("session.rename")}
@@ -2122,7 +2122,7 @@ function SessionItem({
             onPointerMove={handlePointerMove}
             onPointerUp={finishPointerDrag}
           >
-            <span aria-hidden="true" className="size-3 shrink-0" />
+            <span aria-hidden="true" className="w-[18px] shrink-0" />
             <span className="min-w-0 flex-1 truncate" title={session.title || undefined}>
               {title}
             </span>

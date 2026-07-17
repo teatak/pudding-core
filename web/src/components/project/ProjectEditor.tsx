@@ -28,12 +28,12 @@ monaco.editor.defineTheme(lightTheme, {
   colors: {
     "editor.background": "#ffffff",
     "editorGutter.background": "#ffffff",
-    "editor.lineHighlightBackground": "#f4f4f5",
+    "editor.lineHighlightBackground": "#f5f5f5",
     "editor.selectionBackground": "#add6ff",
     "editor.inactiveSelectionBackground": "#add6ff",
     "editor.selectionHighlightBackground": "#00000000",
-    "editorLineNumber.foreground": "#71717a",
-    "editorLineNumber.activeForeground": "#27272a",
+    "editorLineNumber.foreground": "#737373",
+    "editorLineNumber.activeForeground": "#262626",
   },
 });
 
@@ -48,8 +48,8 @@ monaco.editor.defineTheme(darkTheme, {
     "editor.selectionBackground": "#264f78",
     "editor.inactiveSelectionBackground": "#264f78",
     "editor.selectionHighlightBackground": "#00000000",
-    "editorLineNumber.foreground": "#a1a1aa",
-    "editorLineNumber.activeForeground": "#e4e4e7",
+    "editorLineNumber.foreground": "#a3a3a3",
+    "editorLineNumber.activeForeground": "#e5e5e5",
   },
 });
 

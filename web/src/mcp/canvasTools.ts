@@ -823,7 +823,7 @@ const CANVAS_DOCS: Record<string, string> = {
     "- Prefer canvas_grid for complex query results that combine summary metrics, detail tables, charts, timelines, galleries, or nested sections.",
     "- In chat, summarize the grid briefly instead of duplicating all block content.",
     "- Required fields: title, items.",
-    "- Every item uses the compact shape {id?, kind, title?, variant?, surface?, span?, data}. Put kind-specific fields only inside data.",
+    "- Every item uses the compact shape {id?, kind, title?, span?, data}. Put kind-specific fields only inside data.",
     "- markdown data: {content}. metric data: {value, description?, icon?, color?}. table data: {columns, rows, caption?}.",
     "- chart data: {type, data, x_key?, name_key?, value_key?, series?}. gallery data: {items, layout?, caption?}. timeline data: {items, caption?}.",
     "- grid data: {items, layout?}; its child items use the same compact shape. Supported item kinds are markdown, metric, table, gallery, chart, timeline, and grid.",
@@ -962,8 +962,6 @@ function gridItemInputSchema(requireKind: boolean): Record<string, unknown> {
       id: { type: "string", description: "Stable block id. Required for patch items." },
       kind: { type: "string", enum: ["markdown", "metric", "table", "gallery", "chart", "timeline", "grid"] },
       title: { type: "string", description: "Optional block title." },
-      variant: { type: "string", enum: ["hero", "normal", "compact", "subtle"] },
-      surface: { type: "string", enum: ["default", "tinted"] },
       span: {
         type: "object",
         description: "Optional responsive xs/sm/md/lg widths from 1 to 12.",
@@ -1116,8 +1114,6 @@ function normalizeGridItems(value: unknown[], depth: number): Array<Record<strin
       ...(stringValue(record.id) ? { id: stringValue(record.id) } : { id: `${kind}-${index + 1}` }),
       kind,
       ...(title ? { title } : {}),
-      ...(gridVariantValue(record.variant) ? { variant: gridVariantValue(record.variant) } : {}),
-      ...(gridSurfaceValue(record.surface) ? { surface: gridSurfaceValue(record.surface) } : {}),
       ...(normalizeSpan(record.span) ? { span: normalizeSpan(record.span) } : {}),
       ...(stringValue(record.caption) ? { caption: stringValue(record.caption) } : {}),
     };
@@ -1312,14 +1308,6 @@ function gridItemKind(value: unknown, depth: number): string {
     throw new Error("canvas_grid: nested grid blocks support only one level");
   }
   throw new Error(`canvas_grid: unsupported item kind ${String(value)}`);
-}
-
-function gridVariantValue(value: unknown): string {
-  return value === "hero" || value === "compact" || value === "subtle" || value === "normal" ? value : "";
-}
-
-function gridSurfaceValue(value: unknown): string {
-  return value === "tinted" || value === "default" ? value : "";
 }
 
 function metricColorValue(value: unknown): string {

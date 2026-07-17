@@ -32,14 +32,18 @@ export function CanvasItemSurface({
   onGalleryLayoutChange: (layout: GalleryLayout) => void;
 }) {
   const contentKind = stringValue(asRecord(item.item)?.kind) || item.kind;
-  const usesWorkspaceBackground = contentKind === "grid" || contentKind === "gallery";
+  const backgroundClass = contentKind === "grid"
+    ? "bg-[var(--workspace-chrome-background)]"
+    : contentKind === "gallery"
+      ? "bg-[var(--workspace-background)]"
+      : "bg-card";
   return (
     <div
       aria-hidden={!active}
       className={cn(
         "absolute inset-0 min-h-0 overflow-auto",
         active ? "z-10" : "pointer-events-none invisible z-0",
-        usesWorkspaceBackground ? "bg-[var(--workspace-background)]" : "bg-card",
+        backgroundClass,
       )}
     >
       <MemoCanvasContent

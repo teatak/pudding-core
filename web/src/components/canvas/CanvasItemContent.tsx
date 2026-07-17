@@ -128,15 +128,7 @@ const BADGE_COLOR_CLASS: Record<SemanticColor, string> = {
   green: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200",
   sky: "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-200",
   violet: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-200",
-  gray: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200",
-};
-const GRID_COLOR_CLASS: Record<string, string> = {
-  default: "bg-muted/40 text-foreground",
-  green: "bg-green-50 text-green-800 dark:bg-green-950/40 dark:text-green-100",
-  amber: "bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-100",
-  red: "bg-red-50 text-red-800 dark:bg-red-950/40 dark:text-red-100",
-  sky: "bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-100",
-  violet: "bg-violet-50 text-violet-800 dark:bg-violet-950/40 dark:text-violet-100",
+  gray: "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200",
 };
 const METRIC_VALUE_COLOR_CLASS: Record<string, string> = {
   default: "text-foreground",
@@ -353,7 +345,7 @@ function CanvasContent({
   }
   if (kind === "grid") {
     return (
-      <div className="px-3 pb-3">
+      <div className="p-3">
         <CanvasGrid payload={payload} token={token} />
       </div>
     );
@@ -417,10 +409,9 @@ function CanvasGrid({ payload, token, nested = false }: { payload: Record<string
               key={stringValue(record.id) || `${kind}-${index}`}
               className={cn(
                 "min-w-0 overflow-hidden rounded-lg",
-                isMetric ? "border-0 bg-transparent shadow-none" : "border",
-                !isMetric ? gridItemSurfaceClass(record) : null,
-                !isMetric && stringValue(record.variant) === "subtle" ? "shadow-none" : null,
-                !isMetric && stringValue(record.variant) !== "subtle" ? "shadow-sm" : null,
+                isMetric
+                  ? "border-0 bg-transparent shadow-none"
+                  : "border border-border/60 bg-card shadow-sm",
               )}
               style={{ gridColumn: `span ${span} / span ${span}` }}
             >
@@ -436,9 +427,7 @@ function CanvasGrid({ payload, token, nested = false }: { payload: Record<string
                     ? "flex min-h-24"
                     : kind === "chart"
                       ? "h-64 p-3"
-                      : stringValue(record.variant) === "compact"
-                        ? "p-2"
-                        : "p-3",
+                      : "p-3",
                 )}
               >
                 <GridItemContent item={record} kind={kind} token={token} />
@@ -494,13 +483,6 @@ function gridItemSpan(item: Record<string, unknown>, columns: string, nested: bo
   }
   const kind = stringValue(item.kind);
   return kind === "metric" || kind === "chart" ? 6 : 12;
-}
-
-function gridItemSurfaceClass(item: Record<string, unknown>): string {
-  if (stringValue(item.surface) === "tinted") {
-    return GRID_COLOR_CLASS[stringValue(item.color)] || GRID_COLOR_CLASS.default;
-  }
-  return stringValue(item.variant) === "subtle" ? "border-border/40 bg-card" : "border-border/60 bg-card";
 }
 
 function CanvasMetric({ item }: { item: Record<string, unknown> }) {

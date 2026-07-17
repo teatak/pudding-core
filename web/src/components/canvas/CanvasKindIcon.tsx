@@ -44,7 +44,7 @@ const KIND_TILE_CLASS: Record<string, string> = {
   timeline: "bg-cyan-50 text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-300",
 };
 
-export function CanvasKindIcon({ kind, size = "sm" }: { kind?: string; size?: "xs" | "sm" }) {
+export function CanvasKindIcon({ className, kind, size = "sm" }: { className?: string; kind?: string; size?: "xs" | "sm" }) {
   const Icon = KIND_ICON[kind || ""] || Blocks;
   const sizeClass = size === "xs" ? "h-[18px] w-[18px] rounded-[5px]" : "h-5 w-5 rounded-md";
   const iconClass = size === "xs" ? "h-3.5 w-3.5" : "h-4 w-4";
@@ -57,6 +57,7 @@ export function CanvasKindIcon({ kind, size = "sm" }: { kind?: string; size?: "x
         kind === "widget"
           ? builtinAppIconClass("canvas")
           : KIND_TILE_CLASS[kind || ""] || "bg-muted text-muted-foreground",
+        className,
       )}
     >
       <Icon className={iconClass} />

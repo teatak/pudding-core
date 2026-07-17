@@ -205,7 +205,7 @@ function ProjectDirectoryNode({
           {!isRoot ? (
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute inset-y-0 w-px bg-border/70"
+              className="pointer-events-none absolute inset-y-0 z-10 w-px bg-foreground/15"
               style={{ left: `${14 + depth * 13}px` }}
             />
           ) : null}

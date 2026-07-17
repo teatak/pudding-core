@@ -5,8 +5,8 @@ import type { ClosedCanvasItem, SavedCanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 
-export const workspaceTabClassName = "inline-flex h-(--workspace-toolbar-tab-h) items-center gap-1.5 rounded-[7px] px-2 text-xs font-medium text-[var(--workspace-tab-foreground)] transition-[background-color,color,box-shadow] hover:bg-[var(--workspace-tab-hover-background)] hover:text-foreground hover:ring-1 hover:ring-inset hover:ring-[var(--workspace-border-subtle)]";
-export const workspaceTabActiveClassName = "bg-[var(--workspace-tab-active-background)] text-foreground ring-1 ring-inset ring-[var(--workspace-tab-border)] hover:bg-[var(--workspace-tab-active-background)] hover:ring-[var(--workspace-tab-border)]";
+export const workspaceTabClassName = "inline-flex h-(--workspace-toolbar-tab-h) items-center gap-1.5 rounded-[7px] px-2 text-xs font-medium text-[var(--workspace-tab-foreground)] transition-colors hover:bg-[var(--workspace-tab-hover-background)] hover:text-foreground";
+export const workspaceTabActiveClassName = "bg-[var(--workspace-tab-active-background)] text-foreground hover:bg-[var(--workspace-tab-active-background)]";
 
 export function ProjectSurfaceControl({ active, onActivate }: { active: boolean; onActivate: () => void }) {
   const { t } = useI18n();
@@ -18,7 +18,7 @@ export function ProjectSurfaceControl({ active, onActivate }: { active: boolean;
       type="button"
       onClick={onActivate}
     >
-      <span className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] bg-amber-50 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300">
+      <span className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] text-amber-700 dark:text-amber-300">
         <Folders className="h-3.5 w-3.5" />
       </span>
       <span>{t("workspace.project")}</span>
@@ -105,7 +105,7 @@ function SavedCanvasItemRow({ entry, onOpen, onRemove }: { entry: SavedCanvasIte
   return (
     <div className="group/saved mx-0.5 flex h-8 min-w-0 items-center rounded-md hover:bg-accent focus-within:bg-accent">
       <button className="flex h-full min-w-0 flex-1 items-center gap-2 px-2 text-sm focus-visible:outline-none" title={title} type="button" onClick={onOpen}>
-        <CanvasKindIcon kind={entry.kind} size="xs" />
+        <CanvasKindIcon className="!bg-transparent" kind={entry.kind} size="xs" />
         <span className="min-w-0 flex-1 truncate text-left">{title}</span>
       </button>
       <span className="flex items-center gap-1 opacity-0 transition-opacity group-hover/saved:opacity-100 group-focus-within/saved:opacity-100">
@@ -123,7 +123,7 @@ function ClosedCanvasItemRow({ entry, onRemove, onRestore }: { entry: ClosedCanv
   return (
     <div className="group/closed mx-0.5 flex h-8 min-w-0 items-center rounded-md hover:bg-accent focus-within:bg-accent">
       <button className="flex h-full min-w-0 flex-1 items-center gap-2 px-2 text-sm focus-visible:outline-none" title={title} type="button" onClick={onRestore}>
-        <CanvasKindIcon kind={entry.kind} size="xs" />
+        <CanvasKindIcon className="!bg-transparent" kind={entry.kind} size="xs" />
         <span className="min-w-0 flex-1 truncate text-left">{title}</span>
       </button>
       <div className="relative flex h-6 w-12 shrink-0 items-center justify-end">
