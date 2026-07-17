@@ -10,6 +10,7 @@
     </style>
   </head>
   <body>
+    <textarea id="host-composer" data-composer-text-input="true"></textarea>
     <div id="tabs"></div>
     <script>
       const tabs = new Map();
@@ -24,6 +25,7 @@
           return;
         }
         const webview = document.createElement("webview");
+        webview.dataset.browserKey = key;
         const state = { request, webview, ready: false };
         tabs.set(key, state);
         webview.setAttribute("partition", "persist:pudding-browser-smoke");

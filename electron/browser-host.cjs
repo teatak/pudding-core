@@ -13,12 +13,15 @@ const maxTabsPerSession = 8;
 const maxTabsTotal = 16;
 
 class BrowserHost {
-  constructor(onUpdate, onCursor, onAutomationStart, onWebviewRequired) {
+  constructor(onUpdate, onCursor, onAutomationStart, onWebviewRequired, onAutomationEnd, onWebviewFocusRequired) {
     this.slots = new Map();
+    this.inputQueue = Promise.resolve();
     this.onUpdate = typeof onUpdate === "function" ? onUpdate : () => {};
     this.onCursor = typeof onCursor === "function" ? onCursor : () => {};
     this.onAutomationStart = typeof onAutomationStart === "function" ? onAutomationStart : () => {};
     this.onWebviewRequired = typeof onWebviewRequired === "function" ? onWebviewRequired : () => {};
+    this.onAutomationEnd = typeof onAutomationEnd === "function" ? onAutomationEnd : () => {};
+    this.onWebviewFocusRequired = typeof onWebviewFocusRequired === "function" ? onWebviewFocusRequired : async () => false;
   }
 
   async ensure(request) {
@@ -144,16 +147,21 @@ class BrowserHost {
 
   async click(request) {
     const slot = this.requireLiveSlot(request);
-    this.noteAutomationStart(slot, "click");
     normalizeClickMethod(request.method);
-    const result = await this.runCommand(slot, async () => {
-      const target = await evaluateJSON(slot, clickTargetScript(request, "pointer"));
-      await dispatchMouseClick(slot, target.x, target.y);
-      return target;
-    });
-    this.noteUpdated(slot);
-    this.noteCursor(slot, "click", result);
-    return { tab: snapshot(slot), action: "click", result };
+    return this.runInputCommand(() =>
+      this.runCommand(slot, async () => {
+        this.noteAutomationStart(slot, "click");
+        try {
+          const target = await evaluateJSON(slot, clickTargetScript(request, "pointer"));
+          await dispatchMouseClick(slot, target.x, target.y);
+          this.noteUpdated(slot);
+          this.noteCursor(slot, "click", target);
+          return { tab: snapshot(slot), action: "click", result: target };
+        } finally {
+          this.noteAutomationEnd(slot, "click");
+        }
+      }),
+    );
   }
 
   async type(request) {
@@ -161,45 +169,58 @@ class BrowserHost {
     if (!String(request.text || "")) {
       throw new Error("text is required");
     }
-    this.noteAutomationStart(slot, "type");
-    const result = await this.runCommand(slot, async () => {
-      const expectation = await evaluateJSON(slot, typePrepareScript(request));
-      if (request.clear) {
-        await dispatchKeyboardClear(slot);
-      }
-      await dispatchKeyboardText(slot, String(request.text));
-      const typed = await evaluateJSON(slot, typeResultScript(request, "keyboard", expectation));
-      if (!typed.matchesExpected) {
-        throw new Error("browser keyboard input did not produce the expected value");
-      }
-      delete typed.matchesExpected;
-      return typed;
-    });
-    this.noteUpdated(slot);
-    this.noteCursor(slot, "type", result);
-    return { tab: snapshot(slot), action: "type", result };
+    return this.runInputCommand(() =>
+      this.runCommand(slot, async () => {
+        this.noteAutomationStart(slot, "type");
+        try {
+          const expectation = await evaluateJSON(slot, typePrepareScript(request));
+          const focused = await this.onWebviewFocusRequired({ sessionID: slot.sessionID, tabID: slot.tabID }, slot.webContents);
+          if (!focused) {
+            throw new Error("browser_webview_not_ready: focus confirmation failed");
+          }
+          await this.sendCDP(slot, "Page.bringToFront");
+          await dispatchKeyboardText(slot, String(request.text));
+          const typed = await evaluateJSON(slot, typeResultScript(request, "keyboard", expectation));
+          if (!typed.matchesExpected) {
+            throw new Error("browser keyboard input did not produce the expected value");
+          }
+          delete typed.matchesExpected;
+          this.noteUpdated(slot);
+          this.noteCursor(slot, "type", typed);
+          return { tab: snapshot(slot), action: "type", result: typed };
+        } finally {
+          this.noteAutomationEnd(slot, "type");
+        }
+      }),
+    );
   }
 
   async scroll(request) {
     const slot = this.requireLiveSlot(request);
-    this.noteAutomationStart(slot, "scroll");
     if (!Number(request.deltaX) && !Number(request.deltaY)) {
       request.deltaY = 600;
     }
-    const result = await this.runCommand(slot, async () => {
-      const target = await evaluateJSON(slot, scrollTargetScript(request));
-      await this.sendCDP(slot, "Input.dispatchMouseEvent", {
-        type: "mouseWheel",
-        x: target.x,
-        y: target.y,
-        deltaX: Number(request.deltaX) || 0,
-        deltaY: Number(request.deltaY) || 0,
-      });
-      return waitForScrollResult(slot, request, target);
-    });
-    this.noteUpdated(slot);
-    this.noteCursor(slot, "scroll", result);
-    return { tab: snapshot(slot), action: "scroll", result };
+    return this.runInputCommand(() =>
+      this.runCommand(slot, async () => {
+        this.noteAutomationStart(slot, "scroll");
+        try {
+          const target = await evaluateJSON(slot, scrollTargetScript(request));
+          await this.sendCDP(slot, "Input.dispatchMouseEvent", {
+            type: "mouseWheel",
+            x: target.x,
+            y: target.y,
+            deltaX: Number(request.deltaX) || 0,
+            deltaY: Number(request.deltaY) || 0,
+          });
+          const result = await waitForScrollResult(slot, request, target);
+          this.noteUpdated(slot);
+          this.noteCursor(slot, "scroll", result);
+          return { tab: snapshot(slot), action: "scroll", result };
+        } finally {
+          this.noteAutomationEnd(slot, "scroll");
+        }
+      }),
+    );
   }
 
   listTabs(request) {
@@ -531,6 +552,12 @@ class BrowserHost {
     return result;
   }
 
+  runInputCommand(operation) {
+    const result = this.inputQueue.then(operation, operation);
+    this.inputQueue = result.catch(() => undefined);
+    return result;
+  }
+
   async refreshMetadata(slot) {
     const metadata = await evaluateJSON(slot, `(() => JSON.stringify({
       url: String(location.href || ""),
@@ -749,6 +776,16 @@ class BrowserHost {
 
   noteAutomationStart(slot, action) {
     this.onAutomationStart({
+      sessionID: slot.sessionID,
+      tabID: slot.tabID,
+      action,
+      version: slot.version,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  noteAutomationEnd(slot, action) {
+    this.onAutomationEnd({
       sessionID: slot.sessionID,
       tabID: slot.tabID,
       action,
@@ -979,29 +1016,8 @@ async function dispatchMouseClick(slot, x, y) {
   }
 }
 
-async function dispatchKeyboardClear(slot) {
-  const modifier = process.platform === "darwin" ? 4 : 2;
-  for (const event of [
-    { type: "rawKeyDown", modifiers: modifier, key: "a", code: "KeyA", windowsVirtualKeyCode: 65, commands: ["selectAll"] },
-    { type: "keyUp", modifiers: modifier, key: "a", code: "KeyA", windowsVirtualKeyCode: 65 },
-    { type: "rawKeyDown", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 },
-    { type: "keyUp", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 },
-  ]) {
-    await slot.sendCDP("Input.dispatchKeyEvent", event);
-  }
-}
-
 async function dispatchKeyboardText(slot, text) {
-  for (const character of Array.from(text)) {
-    await slot.sendCDP("Input.dispatchKeyEvent", { type: "rawKeyDown", key: character });
-    await slot.sendCDP("Input.dispatchKeyEvent", {
-      type: "char",
-      key: character,
-      text: character,
-      unmodifiedText: character,
-    });
-    await slot.sendCDP("Input.dispatchKeyEvent", { type: "keyUp", key: character });
-  }
+  await slot.sendCDP("Input.insertText", { text });
 }
 
 function cursorPoint(result) {
@@ -1310,13 +1326,13 @@ function typePrepareScript(input) {
     try {
       if (typeof el.setSelectionRange === "function") {
         const end = String(el.value || "").length;
-        el.setSelectionRange(end, end);
+        el.setSelectionRange(clear ? 0 : end, end);
       }
     } catch (_) {}
   } else {
     const range = document.createRange();
     range.selectNodeContents(el);
-    range.collapse(false);
+    range.collapse(!clear);
     const selection = window.getSelection();
     selection.removeAllRanges();
     selection.addRange(range);

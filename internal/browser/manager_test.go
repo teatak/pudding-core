@@ -149,7 +149,7 @@ func TestSingletonLockPID(t *testing.T) {
 	}
 }
 
-func TestTypeUsesCDPKeyboardEvents(t *testing.T) {
+func TestTypeUsesCDPInsertText(t *testing.T) {
 	evaluateCount := 0
 	manager, calls := newCDPTestManager(t, func(request cdpTestRequest) cdpTestReply {
 		switch request.Method {
@@ -159,7 +159,9 @@ func TestTypeUsesCDPKeyboardEvents(t *testing.T) {
 				return jsonValueReply(`{"ok":true,"tag":"input","expectedValueLength":1,"expectedValueHash":"12345678"}`)
 			}
 			return jsonValueReply(`{"ok":true,"tag":"input","textLength":1,"valueLength":1,"matchesExpected":true,"cursorX":10,"cursorY":10,"method":"keyboard"}`)
-		case "Input.dispatchKeyEvent":
+		case "Input.insertText":
+			return cdpTestReply{}
+		case "Page.bringToFront":
 			return cdpTestReply{}
 		case "Page.getNavigationHistory":
 			return navigationHistoryReply()
@@ -179,7 +181,7 @@ func TestTypeUsesCDPKeyboardEvents(t *testing.T) {
 		t.Fatalf("internal verification field leaked into result: %+v", result.Result)
 	}
 	gotCalls := calls()
-	if got := strings.Join(cdpTestMethods(gotCalls), ","); got != "Runtime.evaluate,Runtime.evaluate,Input.dispatchKeyEvent,Input.dispatchKeyEvent,Input.dispatchKeyEvent,Input.dispatchKeyEvent,Input.dispatchKeyEvent,Input.dispatchKeyEvent,Input.dispatchKeyEvent,Runtime.evaluate,Runtime.evaluate,Page.getNavigationHistory" {
+	if got := strings.Join(cdpTestMethods(gotCalls), ","); got != "Runtime.evaluate,Runtime.evaluate,Page.bringToFront,Input.insertText,Runtime.evaluate,Runtime.evaluate,Page.getNavigationHistory" {
 		t.Fatalf("unexpected CDP calls: %s", got)
 	}
 	proc := manager.processes[globalProcessKey]
@@ -195,33 +197,19 @@ func TestTypeUsesCDPKeyboardEvents(t *testing.T) {
 	if !connected || nextID != len(gotCalls) {
 		t.Fatalf("CDP session was not reused: connected=%v nextID=%d calls=%d", connected, nextID, len(gotCalls))
 	}
-	keyCalls := gotCalls[2:6]
-	if keyCalls[0].Params["type"] != "rawKeyDown" || keyCalls[0].Params["key"] != "a" {
-		t.Fatalf("unexpected select-all keydown: %+v", keyCalls[0].Params)
-	}
-	commands, _ := keyCalls[0].Params["commands"].([]any)
-	if len(commands) != 1 || commands[0] != "selectAll" {
-		t.Fatalf("select-all command missing: %+v", keyCalls[0].Params)
-	}
-	if keyCalls[2].Params["type"] != "rawKeyDown" || keyCalls[2].Params["key"] != "Backspace" {
-		t.Fatalf("unexpected clear keydown: %+v", keyCalls[2].Params)
-	}
-	if gotCalls[6].Params["type"] != "rawKeyDown" || gotCalls[7].Params["type"] != "char" || gotCalls[7].Params["text"] != "P" || gotCalls[8].Params["type"] != "keyUp" {
-		t.Fatalf("unexpected text key sequence: %+v", gotCalls[6:9])
+	if gotCalls[3].Params["text"] != "P" {
+		t.Fatalf("unexpected inserted text: %+v", gotCalls[3].Params)
 	}
 }
 
 func TestTypeCDPFailureDoesNotFallBackToDOM(t *testing.T) {
-	keyEventCount := 0
 	manager, calls := newCDPTestManager(t, func(request cdpTestRequest) cdpTestReply {
 		switch request.Method {
 		case "Runtime.evaluate":
 			return jsonValueReply(`{"ok":true,"tag":"input","expectedValueLength":7,"expectedValueHash":"12345678"}`)
-		case "Input.dispatchKeyEvent":
-			keyEventCount++
-			if keyEventCount == 5 {
-				return cdpTestReply{ErrorMessage: "keyboard text failed"}
-			}
+		case "Input.insertText":
+			return cdpTestReply{ErrorMessage: "keyboard text failed"}
+		case "Page.bringToFront":
 			return cdpTestReply{}
 		default:
 			t.Errorf("unexpected CDP method after input failure: %s", request.Method)
@@ -232,7 +220,7 @@ func TestTypeCDPFailureDoesNotFallBackToDOM(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "browser keyboard input failed") {
 		t.Fatalf("expected direct CDP input error, got %v", err)
 	}
-	if got := strings.Join(cdpTestMethods(calls()), ","); got != "Runtime.evaluate,Runtime.evaluate,Input.dispatchKeyEvent,Input.dispatchKeyEvent,Input.dispatchKeyEvent,Input.dispatchKeyEvent,Input.dispatchKeyEvent" {
+	if got := strings.Join(cdpTestMethods(calls()), ","); got != "Runtime.evaluate,Runtime.evaluate,Page.bringToFront,Input.insertText" {
 		t.Fatalf("unexpected CDP calls: %s", got)
 	}
 }
@@ -247,7 +235,9 @@ func TestTypeRejectsUnchangedControlledValue(t *testing.T) {
 				return jsonValueReply(`{"ok":true,"tag":"input","expectedValueLength":1,"expectedValueHash":"12345678"}`)
 			}
 			return jsonValueReply(`{"ok":true,"tag":"input","valueLength":1,"matchesExpected":false,"method":"keyboard"}`)
-		case "Input.dispatchKeyEvent":
+		case "Input.insertText":
+			return cdpTestReply{}
+		case "Page.bringToFront":
 			return cdpTestReply{}
 		default:
 			t.Errorf("unexpected CDP method: %s", request.Method)

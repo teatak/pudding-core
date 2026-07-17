@@ -124,8 +124,8 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 | observe | `Runtime.evaluate` | 返回当前 document 快照 |
 | screenshot | `Page.getLayoutMetrics` + `Page.captureScreenshot` | 返回有效 PNG |
 | click | `Runtime.evaluate` 定位 + `Input.dispatchMouseEvent` | mouseReleased 命令成功 |
-| type | `Runtime.evaluate` 聚焦 + `Input.dispatchKeyEvent` | 真实键盘序列成功且最终值指纹与预期完全一致 |
-| clear / shortcut | `Input.dispatchKeyEvent` | 完整 keyDown/keyUp 序列成功 |
+| type / clear | renderer 聚焦对应 `<webview>` + `Runtime.evaluate` 选择目标 + `Input.insertText` | 文字只进入目标 guest,且最终值指纹与预期完全一致 |
+| shortcut | `Input.dispatchKeyEvent` | 完整 keyDown/keyUp 序列成功 |
 | scroll | `Input.dispatchMouseEvent(type="mouseWheel")` | wheel 命令成功 |
 
 `Runtime.evaluate` 属于 CDP。允许它读取 DOM、聚焦元素和计算坐标,但不再通过它执行 `el.click()`、value setter 或 `scrollBy()` 等写操作。
@@ -236,7 +236,9 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 ### C5 Click、Type 与 Scroll
 
 - pointer click 只使用 `Input.dispatchMouseEvent`。
-- type / clear / 快捷键统一使用 `Input.dispatchKeyEvent`。
+- type / clear 使用 `Input.insertText`;clear 由目标元素选区决定替换范围。
+- 快捷键使用 `Input.dispatchKeyEvent`。
+- Electron 输入前必须由 renderer 确认对应 `<webview>` 已获得宿主焦点;不同 tab 的 Input 操作全局串行。
 - scroll 使用 `mouseWheel`。
 - 删除 `el.click()`、DOM value setter、`scrollBy()` 和 `sendInputEvent()` fallback。
 - 命令响应不确定时返回错误,不执行第二种实现。
@@ -244,6 +246,7 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 验收:
 
 - React 受控 input 正常更新。
+- Composer 已聚焦时,自动输入不会写入 Composer;完成后恢复其焦点与选区。
 - 输入后按长度和哈希校验完整预期值,拒绝受控组件回滚造成的假成功。
 - CDP 响应失败时不会重复点击或重复输入。
 - selector scroll 与页面 scroll 均产生真实 wheel 行为。

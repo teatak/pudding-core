@@ -40,9 +40,28 @@ async function run() {
       preload: path.join(__dirname, "browser-dev-smoke-preload.cjs"),
     },
   });
-  host = new BrowserHost(undefined, undefined, undefined, (request) => {
-    window.webContents.send("pudding-browser-smoke:webview-required", request);
-  });
+  host = new BrowserHost(
+    undefined,
+    undefined,
+    undefined,
+    (request) => {
+      window.webContents.send("pudding-browser-smoke:webview-required", request);
+    },
+    undefined,
+    ({ sessionID, tabID }) => window.webContents.executeJavaScript(`(() => {
+      const target = document.querySelector(${JSON.stringify(`webview[data-browser-key="${sessionID}:${tabID}"]`)});
+      if (!target) return false;
+      for (let ancestor = target.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        if (ancestor.inert) ancestor.inert = false;
+      }
+      if (getComputedStyle(target).visibility === "hidden") {
+        target.style.opacity = "0";
+        target.style.visibility = "visible";
+      }
+      target.focus();
+      return document.activeElement === target;
+    })()`),
+  );
   ipcMain.on("pudding-browser-smoke:webview-register", (_event, payload) => {
     const target = webContents.fromId(Number(payload?.webContentsID));
     void host.registerWebContents(payload?.request || {}, target).catch(finish);
@@ -64,6 +83,35 @@ async function run() {
   assert.equal((await host.back({ sessionID: webTab.sessionID, tabID: webTab.tabID })).url, `${pageBaseURL}/one`);
   assert.equal((await host.forward({ sessionID: webTab.sessionID, tabID: webTab.tabID })).url, `${pageBaseURL}/two`);
 
+  await host.loadURL({ sessionID: webTab.sessionID, tabID: webTab.tabID, url: `${pageBaseURL}/form` });
+  await window.webContents.executeJavaScript(`(() => {
+    const composer = document.getElementById("host-composer");
+    const tabs = document.getElementById("tabs");
+    const target = document.querySelector('webview[data-browser-key="smoke-session-a:smoke-web"]');
+    tabs.inert = true;
+    target.style.visibility = "hidden";
+    composer.value = "host-draft";
+    composer.focus();
+    return document.activeElement === composer;
+  })()`);
+  let typed;
+  try {
+    typed = await host.type({ sessionID: webTab.sessionID, tabID: webTab.tabID, selector: "#target", text: "webview-only", clear: true });
+  } catch (error) {
+    const observation = await host.observe({ sessionID: webTab.sessionID, tabID: webTab.tabID });
+    const hostDraft = await window.webContents.executeJavaScript(`document.getElementById("host-composer").value`);
+    console.error(JSON.stringify({ hostDraft, target: observation.elements.find((element) => element.selector === "#target") }));
+    throw error;
+  }
+  assert.equal(typed.result.valueLength, "webview-only".length);
+  assert.equal(await window.webContents.executeJavaScript(`document.getElementById("host-composer").value`), "host-draft");
+  await window.webContents.executeJavaScript(`(() => {
+    const target = document.querySelector('webview[data-browser-key="smoke-session-a:smoke-web"]');
+    document.getElementById("tabs").inert = false;
+    target.style.opacity = "";
+    target.style.visibility = "";
+  })()`);
+
   const otherTab = await host.ensure({ sessionID: "smoke-session-b", tabID: "smoke-other", url: `${pageBaseURL}/other` });
   assert.equal(host.listTabs({ sessionID: "smoke-session-a" }).tabs.length, 2);
   assert.equal(host.listTabs({ sessionID: "smoke-session-b" }).tabs.length, 1);
@@ -76,7 +124,7 @@ async function run() {
   assert.deepEqual(await host.revokeFileAccess({ sessionID: "smoke-session-a" }), { closedTabIDs: ["smoke-file"] });
   assert.equal(host.listTabs({ sessionID: "smoke-session-a" }).tabs.length, 1);
 
-  process.stdout.write(JSON.stringify({ ok: true, checks: ["file", "multi-tab", "multi-session", "history", "screenshot", "revoke"] }) + "\n");
+  process.stdout.write(JSON.stringify({ ok: true, checks: ["file", "multi-tab", "multi-session", "history", "focus-isolation", "screenshot", "revoke"] }) + "\n");
   finish();
 }
 
@@ -86,6 +134,7 @@ function startPageServer() {
       "/one": "<!doctype html><title>One</title><main>Page one</main>",
       "/two": "<!doctype html><title>Two</title><main>Page two</main>",
       "/other": "<!doctype html><title>Other</title><main>Other session</main>",
+      "/form": "<!doctype html><title>Form</title><label>Target <input id=\"target\"></label>",
     };
     const body = pages[request.url];
     if (!body) {

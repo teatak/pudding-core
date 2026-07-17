@@ -85,6 +85,7 @@ export function ElectronWebviewBrowser({
   const loadErrorRef = useRef<WebviewLoadError | null>(null);
   const cursorEffectTimerRef = useRef<number | undefined>(undefined);
   const composerFocusSnapshotRef = useRef<ComposerFocusSnapshot | null>(null);
+  const webviewFocusLeaseRef = useRef<(() => void) | null>(null);
   const [loadError, setLoadError] = useState<WebviewLoadError | null>(null);
   const [navigationLoading, setNavigationLoading] = useState(false);
   const [automationCursor, setAutomationCursor] = useState<BrowserAutomationCursorState | null>(null);
@@ -224,7 +225,58 @@ export function ElectronWebviewBrowser({
       if (event.action !== "click" && event.action !== "type" && event.action !== "scroll") {
         return;
       }
-      composerFocusSnapshotRef.current = captureComposerFocusSnapshot();
+      const focusSnapshot = captureComposerFocusSnapshot();
+      composerFocusSnapshotRef.current = focusSnapshot;
+      if (event.action === "type" && focusSnapshot) {
+        focusSnapshot.element.blur();
+      }
+    });
+  }, [ownerSessionID, tabID]);
+
+  useEffect(() => {
+    const bridge = electronBrowserBridge();
+    if (!bridge?.onWebviewFocusRequired || !bridge.completeWebviewFocus || !ownerSessionID || !tabID) {
+      return;
+    }
+    const completeWebviewFocus = bridge.completeWebviewFocus;
+    return bridge.onWebviewFocusRequired((request) => {
+      if (request.sessionID !== ownerSessionID || request.tabID !== tabID) {
+        return;
+      }
+      const node = webviewRef.current;
+      let focused = false;
+      if (node?.isConnected) {
+        webviewFocusLeaseRef.current?.();
+        const releaseFocusLease = acquireWebviewFocusLease(node);
+        node.focus({ preventScroll: true });
+        focused = document.activeElement === node;
+        if (focused) {
+          webviewFocusLeaseRef.current = releaseFocusLease;
+        } else {
+          releaseFocusLease();
+          webviewFocusLeaseRef.current = null;
+        }
+      }
+      void completeWebviewFocus({ ...request, focused }).catch(() => undefined);
+    });
+  }, [ownerSessionID, tabID]);
+
+  useEffect(() => {
+    const bridge = electronBrowserBridge();
+    if (!bridge?.onAutomationEnd || !ownerSessionID || !tabID) {
+      return;
+    }
+    return bridge.onAutomationEnd((event) => {
+      if (event.sessionID !== ownerSessionID || event.tabID !== tabID) {
+        return;
+      }
+      webviewFocusLeaseRef.current?.();
+      webviewFocusLeaseRef.current = null;
+      const focusSnapshot = composerFocusSnapshotRef.current;
+      composerFocusSnapshotRef.current = null;
+      if (focusSnapshot) {
+        restoreComposerFocusSnapshot(focusSnapshot);
+      }
     });
   }, [ownerSessionID, tabID]);
 
@@ -255,17 +307,14 @@ export function ElectronWebviewBrowser({
           setAutomationCursor((current) => (current ? { ...current, effectVisible: false } : current));
         }, 800);
       }
-      const focusSnapshot = composerFocusSnapshotRef.current;
-      composerFocusSnapshotRef.current = null;
-      if (focusSnapshot) {
-        window.requestAnimationFrame(() => restoreComposerFocusSnapshot(focusSnapshot));
-      }
     });
   }, [ownerSessionID, tabID]);
 
   useEffect(() => {
     return () => {
       window.clearTimeout(cursorEffectTimerRef.current);
+      webviewFocusLeaseRef.current?.();
+      webviewFocusLeaseRef.current = null;
     };
   }, []);
 
@@ -405,6 +454,37 @@ function captureComposerFocusSnapshot(): ComposerFocusSnapshot | null {
     selectionStart: activeElement.selectionStart,
     selectionEnd: activeElement.selectionEnd,
     selectionDirection: activeElement.selectionDirection || "none",
+  };
+}
+
+function acquireWebviewFocusLease(node: HTMLElement) {
+  const inertAncestors: Array<{ ariaHidden: string | null; element: HTMLElement }> = [];
+  for (let ancestor = node.parentElement; ancestor; ancestor = ancestor.parentElement) {
+    if (ancestor.inert) {
+      inertAncestors.push({ ariaHidden: ancestor.getAttribute("aria-hidden"), element: ancestor });
+      ancestor.inert = false;
+    }
+  }
+  const hidden = window.getComputedStyle(node).visibility === "hidden";
+  const previousStyle = hidden
+    ? { opacity: node.style.opacity, pointerEvents: node.style.pointerEvents, visibility: node.style.visibility }
+    : null;
+  if (previousStyle) {
+    node.style.opacity = "0";
+    node.style.pointerEvents = "none";
+    node.style.visibility = "visible";
+  }
+  return () => {
+    if (previousStyle) {
+      node.style.opacity = previousStyle.opacity;
+      node.style.pointerEvents = previousStyle.pointerEvents;
+      node.style.visibility = previousStyle.visibility;
+    }
+    for (const { ariaHidden, element } of inertAncestors) {
+      if (element.isConnected && element.getAttribute("aria-hidden") === ariaHidden) {
+        element.inert = true;
+      }
+    }
   };
 }
 

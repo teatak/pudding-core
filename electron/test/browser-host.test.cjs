@@ -268,9 +268,20 @@ test("rejects a second live webview for the same session tab", async () => {
 
 test("click type and scroll use only the expected CDP command sequences", async () => {
   let required;
-  const host = new BrowserHost(undefined, undefined, undefined, (request) => {
-    required = request;
-  });
+  const focusRequests = [];
+  const host = new BrowserHost(
+    undefined,
+    undefined,
+    undefined,
+    (request) => {
+      required = request;
+    },
+    undefined,
+    async (request) => {
+      focusRequests.push(request);
+      return true;
+    },
+  );
   const opening = host.ensure({ sessionID: "session-actions", tabID: "tab-actions", url: "about:blank" });
   await new Promise((resolve) => setImmediate(resolve));
   const webContents = new FakeWebContents(50);
@@ -290,26 +301,24 @@ test("click type and scroll use only the expected CDP command sequences", async 
   await host.scroll({ sessionID: "session-actions", tabID: "tab-actions", deltaY: 600 });
 
   const methods = webContents.debugger.commands.map(({ method }) => method);
-  assert.equal(methods.length, 34);
-  assert.deepEqual(methods.slice(0, 5), [
+  assert.deepEqual(methods, [
     "Runtime.evaluate",
     "Input.dispatchMouseEvent",
     "Input.dispatchMouseEvent",
     "Input.dispatchMouseEvent",
     "Runtime.evaluate",
-  ]);
-  assert.equal(methods.slice(5, 30).every((method) => method === "Input.dispatchKeyEvent"), true);
-  assert.deepEqual(methods.slice(30), [
+    "Page.bringToFront",
+    "Input.insertText",
     "Runtime.evaluate",
     "Runtime.evaluate",
     "Input.dispatchMouseEvent",
     "Runtime.evaluate",
   ]);
+  assert.deepEqual(focusRequests, [{ sessionID: "session-actions", tabID: "tab-actions" }]);
   assert.equal(webContents.debugger.commands[2].params.type, "mousePressed");
   assert.equal(webContents.debugger.commands[3].params.type, "mouseReleased");
-  assert.equal(webContents.debugger.commands[5].params.commands[0], "selectAll");
-  assert.equal(webContents.debugger.commands[10].params.text, "P");
-  assert.equal(webContents.debugger.commands[32].params.type, "mouseWheel");
+  assert.equal(webContents.debugger.commands[6].params.text, "Pudding");
+  assert.equal(webContents.debugger.commands[9].params.type, "mouseWheel");
   assert.match(webContents.debugger.commands[0].params.expression, /elementFromPoint/);
   assert.match(webContents.debugger.commands[0].params.expression, /not hittable/);
   host.closeAll();
@@ -317,9 +326,17 @@ test("click type and scroll use only the expected CDP command sequences", async 
 
 test("rejects keyboard input when a controlled value does not match the expected result", async () => {
   let required;
-  const host = new BrowserHost(undefined, undefined, undefined, (request) => {
-    required = request;
-  });
+  const completed = [];
+  const host = new BrowserHost(
+    undefined,
+    undefined,
+    undefined,
+    (request) => {
+      required = request;
+    },
+    (event) => completed.push(event),
+    async () => true,
+  );
   const opening = host.ensure({ sessionID: "session-controlled", tabID: "tab-controlled", url: "about:blank" });
   await new Promise((resolve) => setImmediate(resolve));
   const webContents = new FakeWebContents(51);
@@ -334,6 +351,38 @@ test("rejects keyboard input when a controlled value does not match the expected
     host.type({ sessionID: "session-controlled", tabID: "tab-controlled", selector: "#name", text: "P" }),
     /did not produce the expected value/,
   );
+  assert.equal(completed.length, 1);
+  assert.equal(completed[0].action, "type");
+  host.closeAll();
+});
+
+test("does not dispatch keyboard input when the renderer cannot focus the target webview", async () => {
+  let required;
+  const host = new BrowserHost(
+    undefined,
+    undefined,
+    undefined,
+    (request) => {
+      required = request;
+    },
+    undefined,
+    async () => false,
+  );
+  const opening = host.ensure({ sessionID: "session-unfocused", tabID: "tab-unfocused", url: "about:blank" });
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(54);
+  await host.registerWebContents(required, webContents);
+  await opening;
+  webContents.debugger.commands = [];
+  webContents.debugger.evaluateValues = [
+    '{"ok":true,"tag":"input","expectedValueLength":1,"expectedValueHash":"12345678"}',
+  ];
+
+  await assert.rejects(
+    host.type({ sessionID: "session-unfocused", tabID: "tab-unfocused", selector: "#name", text: "P" }),
+    /browser_webview_not_ready/,
+  );
+  assert.deepEqual(webContents.debugger.commands.map(({ method }) => method), ["Runtime.evaluate"]);
   host.closeAll();
 });
 

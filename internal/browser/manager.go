@@ -1028,10 +1028,8 @@ func (m *Manager) Type(ctx context.Context, sessionID, tabID string, in TypeInpu
 	if err := json.Unmarshal(preparedRaw, &expectation); err != nil {
 		return ActionResult{}, err
 	}
-	if in.Clear {
-		if err := proc.dispatchKeyboardClear(ctx, m.client, binding.targetID); err != nil {
-			return ActionResult{}, fmt.Errorf("browser keyboard clear failed: %w", err)
-		}
+	if _, err := proc.cdpCall(ctx, m.client, binding.targetID, "Page.bringToFront", nil); err != nil {
+		return ActionResult{}, fmt.Errorf("browser target focus failed: %w", err)
 	}
 	if err := proc.dispatchKeyboardText(ctx, m.client, binding.targetID, in.Text); err != nil {
 		return ActionResult{}, fmt.Errorf("browser keyboard input failed: %w", err)
@@ -2324,63 +2322,9 @@ func (p *browserProcess) dispatchMouseClick(ctx context.Context, client *http.Cl
 	return nil
 }
 
-func (p *browserProcess) dispatchKeyboardClear(ctx context.Context, client *http.Client, targetID string) error {
-	modifier := 2 // Ctrl
-	if runtime.GOOS == "darwin" {
-		modifier = 4 // Meta
-	}
-	events := []map[string]any{
-		{
-			"type":                  "rawKeyDown",
-			"modifiers":             modifier,
-			"key":                   "a",
-			"code":                  "KeyA",
-			"windowsVirtualKeyCode": 65,
-			"commands":              []string{"selectAll"},
-		},
-		{
-			"type":                  "keyUp",
-			"modifiers":             modifier,
-			"key":                   "a",
-			"code":                  "KeyA",
-			"windowsVirtualKeyCode": 65,
-		},
-		{
-			"type":                  "rawKeyDown",
-			"key":                   "Backspace",
-			"code":                  "Backspace",
-			"windowsVirtualKeyCode": 8,
-		},
-		{
-			"type":                  "keyUp",
-			"key":                   "Backspace",
-			"code":                  "Backspace",
-			"windowsVirtualKeyCode": 8,
-		},
-	}
-	for _, event := range events {
-		if _, err := p.cdpCall(ctx, client, targetID, "Input.dispatchKeyEvent", event); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (p *browserProcess) dispatchKeyboardText(ctx context.Context, client *http.Client, targetID, text string) error {
-	for _, character := range text {
-		key := string(character)
-		events := []map[string]any{
-			{"type": "rawKeyDown", "key": key},
-			{"type": "char", "key": key, "text": key, "unmodifiedText": key},
-			{"type": "keyUp", "key": key},
-		}
-		for _, event := range events {
-			if _, err := p.cdpCall(ctx, client, targetID, "Input.dispatchKeyEvent", event); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	_, err := p.cdpCall(ctx, client, targetID, "Input.insertText", map[string]any{"text": text})
+	return err
 }
 
 func (p *browserProcess) dispatchMouseWheel(ctx context.Context, client *http.Client, targetID string, x, y, deltaX, deltaY float64) error {
@@ -2731,13 +2675,13 @@ func typePrepareScript(in TypeInput) string {
 	    try {
 	      if (typeof el.setSelectionRange === "function") {
 	        const end = String(el.value || "").length;
-	        el.setSelectionRange(end, end);
+	        el.setSelectionRange(clear ? 0 : end, end);
 	      }
 	    } catch (_) {}
 	  } else {
 	    const range = document.createRange();
 	    range.selectNodeContents(el);
-	    range.collapse(false);
+	    range.collapse(!clear);
 	    const selection = window.getSelection();
 	    selection.removeAllRanges();
 	    selection.addRange(range);
