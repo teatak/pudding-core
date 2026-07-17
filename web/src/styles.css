@@ -113,6 +113,7 @@
     --rail-radius: 8px;
     --rail-left-radius: var(--rail-radius);
     --rail-item-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 42%);
+    --rail-section-foreground: color-mix(in oklch, var(--muted-foreground), var(--background) 10%);
     --chrome-icon-button-foreground: var(--rail-item-foreground);
     --rail-icon-button-foreground: var(--chrome-icon-button-foreground);
     --surface-subtle: color-mix(in oklch, var(--card), var(--muted) 32%);
@@ -455,6 +456,7 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.56 0 0);
     --rail-item-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 42%);
+    --rail-section-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 6%);
     --workspace-background: color-mix(in oklch, var(--sidebar), var(--background) 45%);
     --workspace-chrome-background: color-mix(in oklch, var(--workspace-background), var(--background) 48%);
     --workspace-panel-background: color-mix(in oklch, var(--background), var(--card) 14%);
@@ -659,24 +661,25 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
 }
 
 .pudding-session-rail {
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     letter-spacing: -0.006em;
 }
 
 .pudding-session-rail [data-slot="sidebar-menu-button"] {
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
+    font-weight: 500;
 }
 
 .pudding-session-rail [data-slot="sidebar-menu-button"][data-active="true"] {
-    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--sidebar-foreground), transparent 92%);
+    color: var(--foreground);
     font-weight: 500;
 }
 
 .pudding-session-rail [data-slot="sidebar-group-label"] {
-    color: var(--rail-item-foreground);
-    font-size: 0.75rem;
+    color: var(--rail-section-foreground);
+    font-size: 0.8125rem;
     font-weight: 500;
-    letter-spacing: 0;
+    letter-spacing: 0.006em;
 }
 
 .pudding-session-rail [data-slot="sidebar-footer"] {
@@ -838,29 +841,29 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
 }
 
 .pudding-session-rail [data-slot="sidebar-header"] [data-slot="sidebar-menu-button"] {
-    font-weight: 400;
+    font-weight: 500;
 }
 
 .pudding-session-rail [data-slot="sidebar-header"] [data-slot="sidebar-menu-button"]:is(:hover, :focus-visible) {
     background-color: var(--accent);
     color: var(--foreground);
-    font-weight: 400;
+    font-weight: 500;
 }
 
 .pudding-session-rail [data-slot="sidebar-header"] [data-slot="sidebar-menu-button"][data-active="true"] {
     background-color: var(--accent);
     color: var(--foreground);
-    font-weight: 400;
+    font-weight: 500;
 }
 
 .pudding-session-rail [data-slot="sidebar-content"] [data-slot="sidebar-menu-button"] {
-    font-weight: 400;
+    font-weight: 500;
 }
 
 .pudding-session-rail [data-slot="sidebar-content"] [data-slot="sidebar-menu-button"]:is(:hover, :focus-visible),
 .pudding-session-rail [data-slot="sidebar-content"] [data-slot="sidebar-menu-button"][data-active="true"] {
     color: var(--foreground);
-    font-weight: 400;
+    font-weight: 500;
 }
 
 .pudding-session-rail [data-slot="sidebar-content"] [data-slot="sidebar-menu-badge"] {
@@ -870,8 +873,8 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
 }
 
 .pudding-session-rail [data-slot="sidebar-group-label"] {
-    color: color-mix(in oklch, var(--muted-foreground), var(--background) 18%);
-    font-size: 12px;
+    color: var(--rail-section-foreground);
+    font-size: 13px;
     font-weight: 500;
 }
 

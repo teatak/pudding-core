@@ -1,4 +1,5 @@
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
+import "monaco-editor/esm/vs/editor/edcore.main.js";
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api.js";
 import { useEffect, useRef, useState } from "react";
 

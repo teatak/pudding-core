@@ -1438,13 +1438,13 @@ function CollapsibleSessionGroupLabel({
   return (
     <SidebarGroupLabel
       className={cn(
-        "group/project-label h-7 min-h-7 gap-1 px-0 text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground has-[[data-project-actions-open=true]]:bg-sidebar-accent has-[[data-project-actions-open=true]]:text-sidebar-accent-foreground",
+        "group/project-label h-7 min-h-7 gap-1 px-0 text-sm transition-colors hover:bg-sidebar-accent has-[[data-project-actions-open=true]]:bg-sidebar-accent has-[[data-project-actions-open=true]]:text-sidebar-accent-foreground",
         active && "bg-sidebar-accent text-sidebar-accent-foreground",
       )}
       title={title || label}
     >
       <button
-        className="group flex h-full min-w-0 flex-1 cursor-default items-center gap-2 rounded-md px-2 pr-1 text-left hover:text-sidebar-accent-foreground"
+        className="group flex h-full min-w-0 flex-1 cursor-default items-center gap-2 rounded-md px-2 pr-1 text-left"
         type="button"
         onClick={onToggle}
       >
