@@ -2,12 +2,13 @@
 
 日期：2026-07-17  
 对比基线：`v0.1.8`（`4f02e8e1`）  
-审查版本：`11cda53f` 的 WebView 输入与焦点修复及 `0.1.9` 版本提交
+审查版本：`33c68fab` 的 WebView 输入、焦点与地址栏状态修复及 `0.1.9` 版本提交
 
 ## 发版结论
 
 **可以按浏览器稳定性修复发布。** 本次修复浏览器自动化输入可能落入错误窗口、并发操作相互干扰，
-以及自动化结束后编辑器焦点恢复不稳定的问题。SQLite schema 与迁移代码均未改变，不新增数据库迁移。
+自动化结束后编辑器焦点恢复不稳定，以及地址栏提交后被旧 URL 回写的问题。SQLite schema 与迁移代码
+均未改变，不新增数据库迁移。
 
 ## 改动摘要
 
@@ -18,6 +19,8 @@
 - 清空输入框时直接设置选区，兼容普通输入框和 `contenteditable` 元素。
 - 补充焦点门控、输入完成通知、串行输入和开发态浏览器 smoke 覆盖。
 - 简化 daemon 浏览器输入实现，使 Electron WebView 与 headless 浏览器采用一致的 CDP 文本输入路径。
+- 将地址栏待提交 URL 纳入 React 状态，在导航完成前阻止旧标签 URL 覆盖用户刚提交的地址。
+- 导航成功后显示最终 URL；失败或中止后清理待提交状态并恢复当前标签地址。
 
 ## 影响范围
 
@@ -28,6 +31,7 @@
 | 会话输入框 | 中 | 自动化期间临时释放焦点，结束后恢复焦点与选区。 |
 | headless 浏览器 | 中 | 文本输入改用 `Input.insertText`，清空语义保持不变。 |
 | Electron IPC | 中 | 新增焦点请求完成与自动化结束事件。 |
+| 浏览器地址栏 | 中 | 导航期间保留已提交地址，成功或失败后同步最终状态。 |
 | SQLite | 无 | schema、迁移和持久化语义均未变化。 |
 | 自动更新与打包 | 无 | 双架构签名、公证和资产格式不变。 |
 
@@ -61,6 +65,8 @@
 - Serialize browser click, type, and scroll actions to avoid overlapping input operations.
 - Restore the previous composer focus and selection after browser automation completes.
 - Stop keyboard input safely when the target WebView cannot be focused.
+- Keep the submitted address visible while navigation is pending instead of reverting to the previous URL.
+- Restore the current tab address after failed or aborted navigation.
 
 ### Improvements
 
