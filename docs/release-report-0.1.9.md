@@ -2,13 +2,13 @@
 
 日期：2026-07-17  
 对比基线：`v0.1.8`（`4f02e8e1`）  
-审查版本：`33c68fab` 的 WebView 输入、焦点与地址栏状态修复及 `0.1.9` 版本提交
+审查版本：`13c582a2` 的 WebView 稳定性修复与侧边栏界面调整及 `0.1.9` 版本提交
 
 ## 发版结论
 
 **可以按浏览器稳定性修复发布。** 本次修复浏览器自动化输入可能落入错误窗口、并发操作相互干扰，
 自动化结束后编辑器焦点恢复不稳定，以及地址栏提交后被旧 URL 回写的问题。SQLite schema 与迁移代码
-均未改变，不新增数据库迁移。
+均未改变，不新增数据库迁移。侧边栏仅调整配色、菜单高度和水平间距。
 
 ## 改动摘要
 
@@ -21,6 +21,7 @@
 - 简化 daemon 浏览器输入实现，使 Electron WebView 与 headless 浏览器采用一致的 CDP 文本输入路径。
 - 将地址栏待提交 URL 纳入 React 状态，在导航完成前阻止旧标签 URL 覆盖用户刚提交的地址。
 - 导航成功后显示最终 URL；失败或中止后清理待提交状态并恢复当前标签地址。
+- 收紧侧边栏菜单高度与水平间距，并优化暗色主题下的背景、悬停和文字对比度。
 
 ## 影响范围
 
@@ -32,6 +33,7 @@
 | headless 浏览器 | 中 | 文本输入改用 `Input.insertText`，清空语义保持不变。 |
 | Electron IPC | 中 | 新增焦点请求完成与自动化结束事件。 |
 | 浏览器地址栏 | 中 | 导航期间保留已提交地址，成功或失败后同步最终状态。 |
+| 侧边栏界面 | 低 | 调整菜单尺寸、间距和灰阶配色，不改变交互与数据。 |
 | SQLite | 无 | schema、迁移和持久化语义均未变化。 |
 | 自动更新与打包 | 无 | 双架构签名、公证和资产格式不变。 |
 
@@ -72,6 +74,7 @@
 
 - Use the browser's native CDP text insertion path for more reliable input across standard and rich-text fields.
 - Improve WebView focus coordination between Electron and the renderer.
+- Refine sidebar spacing, menu density, and dark-theme contrast.
 
 ### Data Safety
 
