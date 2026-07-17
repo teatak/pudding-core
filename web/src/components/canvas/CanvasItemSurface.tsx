@@ -1,0 +1,94 @@
+import { useMemo } from "react";
+import { Star } from "lucide-react";
+
+import {
+  GalleryLayoutControls,
+  MemoCanvasContent,
+  TableExportMenu,
+  galleryLayoutForItem,
+  tableExportData,
+  type GalleryLayout,
+} from "@/components/canvas/CanvasItemContent";
+import { asRecord, stringValue } from "@/components/canvas/canvasPayload";
+import type { CanvasItem } from "@/contracts/api";
+import { useI18n } from "@/i18n";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/Spinner";
+
+export function CanvasItemSurface({
+  active,
+  activeIndex,
+  item,
+  token,
+  onActiveIndexChange,
+  onGalleryLayoutChange,
+}: {
+  active: boolean;
+  activeIndex: number;
+  item: CanvasItem;
+  token: string;
+  onActiveIndexChange: (activeIndex: number) => void;
+  onGalleryLayoutChange: (layout: GalleryLayout) => void;
+}) {
+  const contentKind = stringValue(asRecord(item.item)?.kind) || item.kind;
+  const usesWorkspaceBackground = contentKind === "grid" || contentKind === "gallery";
+  return (
+    <div
+      aria-hidden={!active}
+      className={cn(
+        "absolute inset-0 min-h-0 overflow-auto",
+        active ? "z-10" : "pointer-events-none invisible z-0",
+        usesWorkspaceBackground ? "bg-[var(--workspace-background)]" : "bg-card",
+      )}
+    >
+      <MemoCanvasContent
+        galleryActiveIndex={activeIndex}
+        item={item}
+        token={token}
+        onGalleryActiveIndexChange={onActiveIndexChange}
+        onGalleryLayoutChange={onGalleryLayoutChange}
+      />
+    </div>
+  );
+}
+
+export function CanvasItemActions({
+  item,
+  saving,
+  token,
+  onSave,
+  onGalleryLayoutChange,
+}: {
+  item?: CanvasItem;
+  saving: boolean;
+  token: string;
+  onSave: () => void;
+  onGalleryLayoutChange: (layout: GalleryLayout) => void;
+}) {
+  const { t } = useI18n();
+  const table = useMemo(() => item ? tableExportData(item, t) : null, [item, t]);
+  const galleryLayout = item ? galleryLayoutForItem(item) : null;
+  const showSave = Boolean(item && (!item.sourceSavedItemID || item.savedDirty));
+  if (!galleryLayout && !table && !showSave) return null;
+
+  return (
+    <div className="no-drag-region flex shrink-0 items-center gap-1">
+      {galleryLayout ? <GalleryLayoutControls layout={galleryLayout} onLayoutChange={onGalleryLayoutChange} /> : null}
+      {table ? <TableExportMenu table={table} token={token} /> : null}
+      {showSave ? (
+        <Button
+          aria-label={item?.sourceSavedItemID ? t("canvas.saveChanges") : t("canvas.saveWidget")}
+          disabled={saving}
+          size="icon-sm"
+          title={item?.sourceSavedItemID ? t("canvas.saveChanges") : t("canvas.saveWidget")}
+          type="button"
+          variant="ghost"
+          onClick={onSave}
+        >
+          {saving ? <Spinner className="size-3.5" /> : <Star className="size-3.5" />}
+        </Button>
+      ) : null}
+    </div>
+  );
+}

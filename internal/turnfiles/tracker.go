@@ -1,8 +1,11 @@
 package turnfiles
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -22,15 +25,25 @@ const (
 )
 
 var ignoredDirectories = map[string]struct{}{
-	".git":         {},
-	".next":        {},
-	".nuxt":        {},
-	".turbo":       {},
-	".cache":       {},
-	"coverage":     {},
-	"dist":         {},
-	"build":        {},
-	"node_modules": {},
+	".cache":        {},
+	".git":          {},
+	".gradle":       {},
+	".mypy_cache":   {},
+	".next":         {},
+	".nuxt":         {},
+	".pytest_cache": {},
+	".ruff_cache":   {},
+	".tox":          {},
+	".turbo":        {},
+	".venv":         {},
+	"__pycache__":   {},
+	"build":         {},
+	"coverage":      {},
+	"dist":          {},
+	"node_modules":  {},
+	"target":        {},
+	"vendor":        {},
+	"venv":          {},
 }
 
 type Tracker struct {
@@ -196,6 +209,11 @@ func snapshotRoots(roots []string) (map[fileKey]fileSnapshot, error) {
 	for _, root := range roots {
 		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 			if walkErr != nil {
+				// A tool may intentionally remove the project root. Treat a missing
+				// root as an empty after-snapshot so baseline files become deletions.
+				if path == root && errors.Is(walkErr, os.ErrNotExist) {
+					return nil
+				}
 				if path == root {
 					return walkErr
 				}
@@ -213,7 +231,7 @@ func snapshotRoots(roots []string) (map[fileKey]fileSnapshot, error) {
 			if err != nil || relative == "." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 				return nil
 			}
-			file, ok := readSnapshotFile(path, entry, &remainingContentBytes)
+			file, ok := readSnapshotFile(path, &remainingContentBytes)
 			if !ok {
 				return nil
 			}
@@ -227,8 +245,8 @@ func snapshotRoots(roots []string) (map[fileKey]fileSnapshot, error) {
 	return out, nil
 }
 
-func readSnapshotFile(path string, entry os.DirEntry, remainingContentBytes *int64) (fileSnapshot, bool) {
-	info, err := entry.Info()
+func readSnapshotFile(path string, remainingContentBytes *int64) (fileSnapshot, bool) {
+	info, err := os.Lstat(path)
 	if err != nil {
 		return fileSnapshot{}, false
 	}
@@ -243,30 +261,47 @@ func readSnapshotFile(path string, entry os.DirEntry, remainingContentBytes *int
 	if !info.Mode().IsRegular() {
 		return fileSnapshot{}, false
 	}
-	if info.Size() > maxSnapshotContentBytes {
-		identity := fmt.Sprintf("large:%d:%d", info.Size(), info.ModTime().UnixNano())
-		return fileSnapshot{digest: identity, size: info.Size(), tooLarge: true}, true
-	}
-	if info.Size() > *remainingContentBytes {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return fileSnapshot{}, false
-		}
-		file := snapshotFromBytes(data, nil)
-		file.content = ""
-		file.tooLarge = true
-		return file, true
-	}
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return fileSnapshot{}, false
+	}
+	defer file.Close()
+	openedInfo, err := file.Stat()
+	if err != nil || !openedInfo.Mode().IsRegular() {
+		return fileSnapshot{}, false
+	}
+	currentInfo, err := os.Lstat(path)
+	if err != nil || currentInfo.Mode()&os.ModeSymlink != 0 || !os.SameFile(currentInfo, openedInfo) {
+		return fileSnapshot{}, false
+	}
+	if openedInfo.Size() > maxSnapshotContentBytes {
+		identity := fmt.Sprintf("large:%d:%d", openedInfo.Size(), openedInfo.ModTime().UnixNano())
+		return fileSnapshot{digest: identity, size: openedInfo.Size(), tooLarge: true}, true
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxSnapshotContentBytes+1))
+	if err != nil {
+		return fileSnapshot{}, false
+	}
+	if len(data) > maxSnapshotContentBytes {
+		latestInfo, statErr := file.Stat()
+		if statErr != nil {
+			latestInfo = openedInfo
+		}
+		identity := fmt.Sprintf("large:%d:%d", latestInfo.Size(), latestInfo.ModTime().UnixNano())
+		return fileSnapshot{digest: identity, size: latestInfo.Size(), tooLarge: true}, true
+	}
+	if int64(len(data)) > *remainingContentBytes {
+		snapshot := snapshotFromBytes(data, nil)
+		snapshot.content = ""
+		snapshot.tooLarge = true
+		return snapshot, true
 	}
 	return snapshotFromBytes(data, remainingContentBytes), true
 }
 
 func snapshotFromBytes(data []byte, remainingContentBytes *int64) fileSnapshot {
 	sum := sha256.Sum256(data)
-	binary := !utf8.Valid(data) || strings.IndexByte(string(data), 0) >= 0
+	binary := !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0
 	file := fileSnapshot{binary: binary, digest: fmt.Sprintf("%x", sum), size: int64(len(data))}
 	if !binary {
 		if remainingContentBytes == nil || int64(len(data)) <= *remainingContentBytes {

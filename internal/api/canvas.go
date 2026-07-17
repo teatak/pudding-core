@@ -129,6 +129,48 @@ func (s *Server) deleteCanvasItem(c *cart.Context) error {
 	return nil
 }
 
+func (s *Server) listSavedCanvasItems(c *cart.Context) error {
+	sessionID, _ := c.Param("id")
+	items, err := s.store.ListSavedCanvasItems(c.Request.Context(), sessionID)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, map[string]any{"items": items})
+	return nil
+}
+
+func (s *Server) saveCanvasItem(c *cart.Context) error {
+	sessionID, _ := c.Param("id")
+	itemID, _ := c.Param("itemID")
+	result, err := s.store.SaveCanvasItem(c.Request.Context(), sessionID, itemID, store.NewID("saved_canvas"))
+	if err != nil {
+		return canvasStoreError(c, s, err)
+	}
+	c.JSON(http.StatusOK, result)
+	return nil
+}
+
+func (s *Server) openSavedCanvasItem(c *cart.Context) error {
+	sessionID, _ := c.Param("id")
+	savedID, _ := c.Param("savedID")
+	item, err := s.store.OpenSavedCanvasItem(c.Request.Context(), sessionID, savedID, store.NewID("canvas"))
+	if err != nil {
+		return canvasStoreError(c, s, err)
+	}
+	c.JSON(http.StatusOK, item)
+	return nil
+}
+
+func (s *Server) deleteSavedCanvasItem(c *cart.Context) error {
+	sessionID, _ := c.Param("id")
+	savedID, _ := c.Param("savedID")
+	if err := s.store.DeleteSavedCanvasItem(c.Request.Context(), sessionID, savedID); err != nil {
+		return canvasStoreError(c, s, err)
+	}
+	c.Response.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
 func (s *Server) listClosedCanvasItems(c *cart.Context) error {
 	sessionID, _ := c.Param("id")
 	limit, err := closedCanvasLimit(c.Request.URL.Query().Get("limit"))
@@ -189,6 +231,10 @@ func (s *Server) clearClosedCanvasItems(c *cart.Context) error {
 }
 
 func canvasStoreError(c *cart.Context, s *Server, err error) error {
+	if errors.Is(err, store.ErrCanvasConflict) {
+		c.JSON(http.StatusConflict, map[string]string{"error": "saved_canvas_conflict"})
+		return nil
+	}
 	if errors.Is(err, store.ErrInvalidCanvas) {
 		return badRequest(c, "invalid canvas item")
 	}

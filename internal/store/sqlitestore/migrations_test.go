@@ -18,6 +18,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 	releasedFingerprints := map[int]string{
 		1: "8c5dc7392f4b5bdc77a1edb38c193789a24a1292defa9bf99b1effd96fbaea3d",
 		2: "e48dbb97a116c7dd69130b48d3dcc6eae8bc5e628ff27ca586e70f7000e1e0c4",
+		3: "c996914be5b56acc17bd448f3e8d498405ce9392d79248f14550fb1bb46829f1",
 	}
 	want, ok := releasedFingerprints[currentSchemaVersion]
 	if !ok {
@@ -102,7 +103,26 @@ func TestOpenMigratesVersionOneFileChangesTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := openMigrationTestDB(t, path)
-	if _, err := db.Exec(`DROP TABLE turn_file_changes; PRAGMA user_version = 1`); err != nil {
+	if _, err := db.Exec(`
+		DROP TABLE turn_file_changes;
+		DROP TABLE canvas_items;
+		DROP TABLE canvas_closed_items;
+		DROP TABLE canvas_saved_items;
+		CREATE TABLE canvas_items (
+			id TEXT PRIMARY KEY, canvas_id TEXT NOT NULL DEFAULT 'default', source_session_id TEXT NOT NULL DEFAULT '',
+			created_by_session_id TEXT NOT NULL DEFAULT '', updated_by_session_id TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT '',
+			title TEXT NOT NULL DEFAULT '', item_json TEXT NOT NULL, window_json TEXT NOT NULL DEFAULT '', visible INTEGER NOT NULL DEFAULT 1,
+			created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+		);
+		CREATE INDEX canvas_items_canvas_visible_updated ON canvas_items(canvas_id,visible,updated_at DESC);
+		CREATE TABLE canvas_closed_items (
+			id TEXT PRIMARY KEY, source_item_id TEXT NOT NULL UNIQUE, actor_session_id TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT '',
+			title TEXT NOT NULL DEFAULT '', item_json TEXT NOT NULL, window_json TEXT NOT NULL DEFAULT '', closed_at INTEGER NOT NULL,
+			created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+		);
+		CREATE INDEX canvas_closed_items_closed_at ON canvas_closed_items(closed_at DESC);
+		PRAGMA user_version = 1;
+	`); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
@@ -123,6 +143,79 @@ func TestOpenMigratesVersionOneFileChangesTable(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("turn_file_changes table count = %d", count)
+	}
+}
+
+func TestOpenMigratesLegacyCanvasDataWithoutLosingOrphans(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pudding.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateSession(context.Background(), &store.Session{ID: "sess_keep", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db := openMigrationTestDB(t, path)
+	if _, err := db.Exec(`
+		DROP TABLE canvas_items;
+		DROP TABLE canvas_closed_items;
+		DROP TABLE canvas_saved_items;
+		CREATE TABLE canvas_items (
+			id TEXT PRIMARY KEY, canvas_id TEXT NOT NULL DEFAULT 'default', source_session_id TEXT NOT NULL DEFAULT '',
+			created_by_session_id TEXT NOT NULL DEFAULT '', updated_by_session_id TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT '',
+			title TEXT NOT NULL DEFAULT '', item_json TEXT NOT NULL, window_json TEXT NOT NULL DEFAULT '', visible INTEGER NOT NULL DEFAULT 1,
+			created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+		);
+		CREATE INDEX canvas_items_canvas_visible_updated ON canvas_items(canvas_id,visible,updated_at DESC);
+		CREATE TABLE canvas_closed_items (
+			id TEXT PRIMARY KEY, source_item_id TEXT NOT NULL UNIQUE, actor_session_id TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT '',
+			title TEXT NOT NULL DEFAULT '', item_json TEXT NOT NULL, window_json TEXT NOT NULL DEFAULT '', closed_at INTEGER NOT NULL,
+			created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+		);
+		CREATE INDEX canvas_closed_items_closed_at ON canvas_closed_items(closed_at DESC);
+		INSERT INTO canvas_items(id,source_session_id,kind,title,item_json,created_at,updated_at) VALUES
+			('active_keep','sess_keep','markdown','Keep','{}',1,2),
+			('active_orphan','sess_deleted','markdown','Orphan','{}',3,4);
+		INSERT INTO canvas_closed_items(id,source_item_id,actor_session_id,kind,title,item_json,closed_at,created_at,updated_at) VALUES
+			('closed_keep','old_keep','sess_keep','markdown','Closed keep','{}',5,5,5),
+			('closed_orphan','old_orphan','sess_deleted','markdown','Closed orphan','{}',6,6,6);
+		PRAGMA user_version = 2;
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	active, err := reopened.ListCanvasItems(context.Background(), "sess_keep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 1 || active[0].ID != "active_keep" {
+		t.Fatalf("session canvas after migration = %+v", active)
+	}
+	closed, err := reopened.ListClosedCanvasItems(context.Background(), "sess_keep", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(closed) != 1 || closed[0].ID != "closed_keep" {
+		t.Fatalf("session closed canvas after migration = %+v", closed)
+	}
+	saved, err := reopened.ListSavedCanvasItems(context.Background(), "sess_keep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saved) != 2 || saved[0].ID != "legacy_closed_closed_orphan" || saved[1].ID != "active_orphan" {
+		t.Fatalf("orphan canvas after migration = %+v", saved)
 	}
 }
 

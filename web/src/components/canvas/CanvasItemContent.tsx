@@ -315,14 +315,12 @@ function CanvasContent({
   item,
   token,
   galleryActiveIndex,
-  isMaximized,
   onGalleryActiveIndexChange,
   onGalleryLayoutChange,
 }: {
   item: CanvasItem;
   token: string;
   galleryActiveIndex: number;
-  isMaximized: boolean;
   onGalleryActiveIndexChange: (activeIndex: number) => void;
   onGalleryLayoutChange: (layout: GalleryLayout) => void;
 }) {
@@ -355,7 +353,7 @@ function CanvasContent({
   }
   if (kind === "grid") {
     return (
-      <div className={cn(isMaximized ? "py-3" : "p-3")}>
+      <div className="px-3 pb-3">
         <CanvasGrid payload={payload} token={token} />
       </div>
     );

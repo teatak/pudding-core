@@ -4,6 +4,7 @@ import {
   listAppConnectionsResponse,
   listCanvasItemsResponse,
   listClosedCanvasItemsResponse,
+  listSavedCanvasItemsResponse,
   listAppsResponse,
   listSkillsResponse,
   compactResponse,
@@ -65,6 +66,7 @@ import {
   appMCPOverrideResponse,
   appMCPStatusResponse,
   canvasItem,
+  canvasSaveResult,
   closedCanvasItem,
   appSkillDetail,
   audioBindingRequest,
@@ -123,7 +125,9 @@ import {
   type BackgroundProcess,
   type BackgroundProcessLog,
   type CanvasItem,
+  type CanvasSaveResult,
   type ClosedCanvasItem,
+  type SavedCanvasItem,
   type ContentPart,
   type DailyUsageStat,
   type DesktopAboutSection,
@@ -1002,6 +1006,28 @@ export function patchCanvasItemWindow(
 
 export async function deleteCanvasItem(token: string, sessionID: string, itemID: string): Promise<void> {
   await request(token, `/sessions/${encodeURIComponent(sessionID)}/canvas/items/${encodeURIComponent(itemID)}`, z.null(), {
+    method: "DELETE",
+  });
+}
+
+export function listSavedCanvasItems(token: string, sessionID: string): Promise<{ items: SavedCanvasItem[] }> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/canvas/saved`, listSavedCanvasItemsResponse);
+}
+
+export function saveCanvasItem(token: string, sessionID: string, itemID: string): Promise<CanvasSaveResult> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/canvas/items/${encodeURIComponent(itemID)}/save`, canvasSaveResult, {
+    method: "POST",
+  });
+}
+
+export function openSavedCanvasItem(token: string, sessionID: string, savedItemID: string): Promise<CanvasItem> {
+  return request(token, `/sessions/${encodeURIComponent(sessionID)}/canvas/saved/${encodeURIComponent(savedItemID)}/open`, canvasItem, {
+    method: "POST",
+  });
+}
+
+export async function deleteSavedCanvasItem(token: string, sessionID: string, savedItemID: string): Promise<void> {
+  await request(token, `/sessions/${encodeURIComponent(sessionID)}/canvas/saved/${encodeURIComponent(savedItemID)}`, z.null(), {
     method: "DELETE",
   });
 }

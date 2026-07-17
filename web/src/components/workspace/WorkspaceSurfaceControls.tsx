@@ -1,14 +1,12 @@
-import { ChevronDown, Folders, GalleryVerticalEnd, Trash2, Undo2 } from "lucide-react";
+import { Folders, Trash2, Undo2 } from "lucide-react";
 
-import { AppPopoverContent as PopoverContent } from "@/components/AppPopover";
 import { CanvasKindIcon } from "@/components/canvas/CanvasKindIcon";
-import { Popover, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
-import type { ClosedCanvasItem } from "@/contracts/api";
+import type { ClosedCanvasItem, SavedCanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 
-export const workspaceTabClassName = "inline-flex h-(--workspace-toolbar-tab-h) items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground";
-export const workspaceTabActiveClassName = "bg-sidebar-accent text-foreground hover:bg-sidebar-accent";
+export const workspaceTabClassName = "inline-flex h-(--workspace-toolbar-tab-h) items-center gap-1.5 rounded-[7px] px-2 text-xs font-medium text-[var(--workspace-tab-foreground)] transition-[background-color,color,box-shadow] hover:bg-[var(--workspace-tab-hover-background)] hover:text-foreground hover:ring-1 hover:ring-inset hover:ring-[var(--workspace-border-subtle)]";
+export const workspaceTabActiveClassName = "bg-[var(--workspace-tab-active-background)] text-foreground ring-1 ring-inset ring-[var(--workspace-tab-border)] hover:bg-[var(--workspace-tab-active-background)] hover:ring-[var(--workspace-tab-border)]";
 
 export function ProjectSurfaceControl({ active, onActivate }: { active: boolean; onActivate: () => void }) {
   const { t } = useI18n();
@@ -28,90 +26,93 @@ export function ProjectSurfaceControl({ active, onActivate }: { active: boolean;
   );
 }
 
-export function CanvasSurfaceControl({ active, onActivate }: { active: boolean; onActivate: () => void }) {
-  const { t } = useI18n();
-  return (
-    <button
-      aria-pressed={active}
-      className={cn(workspaceTabClassName, "shrink-0", active && workspaceTabActiveClassName)}
-      title={t("canvas.title")}
-      type="button"
-      onClick={onActivate}
-    >
-      <CanvasKindIcon kind="widget" size="xs" />
-      <span>{t("canvas.title")}</span>
-    </button>
-  );
-}
-
-export function CanvasLibraryControl({
+export function CanvasLibraryMenuSections({
   closedItems,
-  open,
+  savedItems,
   onClearClosed,
-  onOpenChange,
+  onDismiss,
   onRemoveClosed,
+  onRemoveSaved,
+  onOpenSaved,
   onRestoreClosed,
 }: {
   closedItems: ClosedCanvasItem[];
-  open: boolean;
+  savedItems: SavedCanvasItem[];
   onClearClosed: () => void;
-  onOpenChange: (open: boolean) => void;
+  onDismiss: () => void;
   onRemoveClosed: (entry: ClosedCanvasItem) => void;
+  onRemoveSaved: (entry: SavedCanvasItem) => void;
+  onOpenSaved: (entry: SavedCanvasItem) => void;
   onRestoreClosed: (entry: ClosedCanvasItem) => void;
 }) {
   const { t } = useI18n();
+  if (savedItems.length === 0 && closedItems.length === 0) {
+    return null;
+  }
   return (
-    <div className="no-drag-region shrink-0 text-muted-foreground">
-      <Popover open={open} onOpenChange={onOpenChange}>
-        <PopoverTrigger asChild>
-          <button
-            aria-label={t("canvas.widgetLibrary")}
-            aria-expanded={open}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-transparent bg-muted/60 px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground data-[state=open]:bg-background data-[state=open]:text-foreground data-[state=open]:shadow-sm"
-            title={t("canvas.widgetLibrary")}
-            type="button"
-          >
-            <span className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] bg-violet-50 text-violet-700 dark:bg-violet-400/15 dark:text-violet-300">
-              <GalleryVerticalEnd className="h-3.5 w-3.5" />
-            </span>
-            <span>{t("canvas.widgetLibrary")}</span>
-            <ChevronDown className="h-3.5 w-3.5" />
-          </button>
-        </PopoverTrigger>
-        <PopoverContent align="end" className="max-h-[min(34rem,calc(100vh-4rem))] w-72 gap-0 overflow-hidden p-0" collisionPadding={8}>
-          <div className="border-b px-3 py-2.5">
-            <PopoverTitle className="text-sm">{t("canvas.widgetLibrary")}</PopoverTitle>
+    <div className="-mx-1 mt-1 border-t border-border px-1 pt-1">
+      {savedItems.length > 0 ? (
+        <div className="px-1 pb-1">
+          <div className="flex h-7 items-center justify-between px-2 text-[11px] font-medium text-muted-foreground">
+            <span>{t("canvas.savedWidgets")}</span>
+            <span className="tabular-nums text-muted-foreground/70">{savedItems.length}</span>
           </div>
-          <div className="p-2">
-            <div className="flex items-center justify-between px-2 py-1 text-xs font-medium text-muted-foreground">
-              <span>{t("canvas.recentClosed")}</span>
-              {closedItems.length > 0 ? (
-                <button className="h-7 shrink-0 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-accent hover:text-accent-foreground" type="button" onClick={onClearClosed}>
-                  {t("canvas.clearRecentClosed")}
-                </button>
-              ) : null}
-            </div>
-            {closedItems.length > 0 ? (
-              <div className="max-h-56 overflow-y-auto">
-                {closedItems.map((entry) => (
-                  <ClosedCanvasItemRow
-                    key={entry.id}
-                    entry={entry}
-                    onRemove={() => onRemoveClosed(entry)}
-                    onRestore={() => { onRestoreClosed(entry); onOpenChange(false); }}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="px-2 py-3 text-xs text-muted-foreground">{t("canvas.widgetLibraryEmpty")}</div>
-            )}
+          <div className="max-h-56 overflow-y-auto">
+            {savedItems.map((entry) => (
+              <SavedCanvasItemRow
+                key={entry.id}
+                entry={entry}
+                onOpen={() => {
+                  onOpenSaved(entry);
+                  onDismiss();
+                }}
+                onRemove={() => onRemoveSaved(entry)}
+              />
+            ))}
           </div>
-          <div className="border-t p-2">
-            <div className="px-2 py-1 text-xs font-medium text-muted-foreground">{t("canvas.savedWidgets")}</div>
-            <div className="px-2 py-3 text-xs text-muted-foreground">{t("canvas.savedWidgetsComingSoon")}</div>
+        </div>
+      ) : null}
+      {closedItems.length > 0 ? (
+        <div className={cn("px-1", savedItems.length > 0 && "border-t border-border pt-1")}>
+          <div className="flex h-7 items-center justify-between px-2 text-[11px] font-medium text-muted-foreground">
+            <span>{t("canvas.recentClosed")}</span>
+            <button className="h-6 shrink-0 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-accent-foreground" type="button" onClick={onClearClosed}>
+              {t("canvas.clearRecentClosed")}
+            </button>
           </div>
-        </PopoverContent>
-      </Popover>
+          <div className="max-h-56 overflow-y-auto">
+            {closedItems.map((entry) => (
+              <ClosedCanvasItemRow
+                key={entry.id}
+                entry={entry}
+                onRemove={() => onRemoveClosed(entry)}
+                onRestore={() => {
+                  onRestoreClosed(entry);
+                  onDismiss();
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SavedCanvasItemRow({ entry, onOpen, onRemove }: { entry: SavedCanvasItem; onOpen: () => void; onRemove: () => void }) {
+  const { t } = useI18n();
+  const title = entry.title || entry.kind;
+  return (
+    <div className="group/saved mx-0.5 flex h-8 min-w-0 items-center rounded-md hover:bg-accent focus-within:bg-accent">
+      <button className="flex h-full min-w-0 flex-1 items-center gap-2 px-2 text-sm focus-visible:outline-none" title={title} type="button" onClick={onOpen}>
+        <CanvasKindIcon kind={entry.kind} size="xs" />
+        <span className="min-w-0 flex-1 truncate text-left">{title}</span>
+      </button>
+      <span className="flex items-center gap-1 opacity-0 transition-opacity group-hover/saved:opacity-100 group-focus-within/saved:opacity-100">
+        <button aria-label={t("canvas.deleteSavedWidget")} className="mr-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-destructive hover:bg-destructive/10" type="button" onClick={onRemove}>
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </span>
     </div>
   );
 }
@@ -120,30 +121,20 @@ function ClosedCanvasItemRow({ entry, onRemove, onRestore }: { entry: ClosedCanv
   const { t } = useI18n();
   const title = entry.title || entry.kind;
   return (
-    <div
-      className="group/closed mx-1 flex h-9 min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
-      role="button"
-      tabIndex={0}
-      title={title}
-      onClick={onRestore}
-      onKeyDown={(event) => {
-        if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
-          event.preventDefault();
-          onRestore();
-        }
-      }}
-    >
-      <CanvasKindIcon kind={entry.kind} size="xs" />
-      <span className="min-w-0 flex-1 truncate text-left">{title}</span>
+    <div className="group/closed mx-0.5 flex h-8 min-w-0 items-center rounded-md hover:bg-accent focus-within:bg-accent">
+      <button className="flex h-full min-w-0 flex-1 items-center gap-2 px-2 text-sm focus-visible:outline-none" title={title} type="button" onClick={onRestore}>
+        <CanvasKindIcon kind={entry.kind} size="xs" />
+        <span className="min-w-0 flex-1 truncate text-left">{title}</span>
+      </button>
       <div className="relative flex h-6 w-12 shrink-0 items-center justify-end">
         <span className="absolute right-0 text-xs text-muted-foreground transition-opacity group-hover/closed:opacity-0 group-focus-within/closed:opacity-0">
           {formatClosedTime(entry.closedAt)}
         </span>
         <span className="absolute right-0 flex items-center gap-1 opacity-0 transition-opacity group-hover/closed:opacity-100 group-focus-within/closed:opacity-100">
-          <button aria-label={t("canvas.restore")} className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-background/80 hover:text-foreground" type="button" onClick={(event) => { event.stopPropagation(); onRestore(); }}>
+          <button aria-label={t("canvas.restore")} className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-background/80 hover:text-foreground" type="button" onClick={onRestore}>
             <Undo2 className="h-3.5 w-3.5" />
           </button>
-          <button aria-label={t("canvas.delete")} className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-destructive hover:bg-destructive/10" type="button" onClick={(event) => { event.stopPropagation(); onRemove(); }}>
+          <button aria-label={t("canvas.delete")} className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-destructive hover:bg-destructive/10" type="button" onClick={onRemove}>
             <Trash2 className="h-3.5 w-3.5" />
           </button>
         </span>

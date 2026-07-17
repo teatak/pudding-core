@@ -3,6 +3,7 @@ import { ChevronRight, Files } from "lucide-react";
 import type { TurnFileChange } from "@/api/client";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
+import { turnFileChangeFullPath, turnFileChangeLabel } from "@/lib/turnFileChanges";
 import { openTurnFileChanges } from "@/state/filePreviewStore";
 
 export function TurnFileChanges({ changes, sessionID, turnID }: {
@@ -31,14 +32,14 @@ export function TurnFileChanges({ changes, sessionID, turnID }: {
           <button
             key={change.id}
             className="group flex h-7 w-full min-w-0 items-center gap-2 rounded px-1.5 text-left transition-colors hover:bg-muted/60 hover:text-foreground"
-            title={`${change.rootPath}/${change.path}`}
+            title={turnFileChangeFullPath(change)}
             type="button"
             onClick={() => openTurnFileChanges(sessionID, turnID, changes, change.id)}
           >
             <span className={cn("w-3 shrink-0 text-center font-mono text-[10px] font-semibold", statusClass(change.kind))}>
               {statusLetter(change.kind)}
             </span>
-            <code className="min-w-0 flex-1 truncate font-mono text-[11px]">{change.path}</code>
+            <code className="min-w-0 flex-1 truncate font-mono text-[11px]">{turnFileChangeLabel(change, changes)}</code>
             {change.additions > 0 ? <span className="shrink-0 text-success">+{change.additions}</span> : null}
             {change.deletions > 0 ? <span className="shrink-0 text-destructive">−{change.deletions}</span> : null}
           </button>

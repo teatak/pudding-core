@@ -23,6 +23,7 @@ var (
 	ErrInvalidProject           = errors.New("store: invalid project")
 	ErrQueueBlocked             = errors.New("store: queued input is editing")
 	ErrInvalidCanvas            = errors.New("store: invalid canvas item")
+	ErrCanvasConflict           = errors.New("store: saved canvas item changed")
 	ErrInvalidBrowserState      = errors.New("store: invalid browser state")
 	ErrInvalidTerminal          = errors.New("store: invalid terminal")
 	ErrHistorySearchUnavailable = errors.New("store: history search unavailable")
@@ -1553,6 +1554,7 @@ const ClosedCanvasKeepLimit = 20
 
 type CanvasItem struct {
 	ID                 string          `json:"id"`
+	SessionID          string          `json:"sessionID"`
 	CanvasID           string          `json:"canvasID"`
 	SourceSessionID    string          `json:"sourceSessionID,omitempty"`
 	CreatedBySessionID string          `json:"createdBySessionID,omitempty"`
@@ -1561,20 +1563,25 @@ type CanvasItem struct {
 	Title              string          `json:"title,omitempty"`
 	Item               json.RawMessage `json:"item"`
 	Window             json.RawMessage `json:"window,omitempty"`
+	SourceSavedItemID  string          `json:"sourceSavedItemID,omitempty"`
+	BaseSavedRevision  int64           `json:"baseSavedRevision,omitempty"`
+	SavedDirty         bool            `json:"savedDirty,omitempty"`
 	Visible            bool            `json:"visible"`
 	CreatedAt          time.Time       `json:"createdAt"`
 	UpdatedAt          time.Time       `json:"updatedAt"`
 }
 
 type CanvasItemInput struct {
-	ID              string
-	CanvasID        string
-	ActorSessionID  string
-	SourceSessionID string
-	Kind            string
-	Title           string
-	Item            json.RawMessage
-	Window          json.RawMessage
+	ID                string
+	CanvasID          string
+	ActorSessionID    string
+	SourceSessionID   string
+	Kind              string
+	Title             string
+	Item              json.RawMessage
+	Window            json.RawMessage
+	SourceSavedItemID string
+	BaseSavedRevision int64
 }
 
 type CanvasItemWindowPatch struct {
@@ -1586,6 +1593,7 @@ type CanvasItemWindowPatch struct {
 
 type ClosedCanvasItem struct {
 	ID             string          `json:"id"`
+	SessionID      string          `json:"sessionID"`
 	SourceItemID   string          `json:"sourceItemID"`
 	ActorSessionID string          `json:"actorSessionID,omitempty"`
 	Kind           string          `json:"kind"`
@@ -1595,6 +1603,24 @@ type ClosedCanvasItem struct {
 	ClosedAt       time.Time       `json:"closedAt"`
 	CreatedAt      time.Time       `json:"createdAt"`
 	UpdatedAt      time.Time       `json:"updatedAt"`
+}
+
+type SavedCanvasItem struct {
+	ID              string          `json:"id"`
+	SourceSessionID string          `json:"sourceSessionID,omitempty"`
+	SourceItemID    string          `json:"sourceItemID,omitempty"`
+	Kind            string          `json:"kind"`
+	Title           string          `json:"title,omitempty"`
+	Item            json.RawMessage `json:"item"`
+	Window          json.RawMessage `json:"window,omitempty"`
+	Revision        int64           `json:"revision"`
+	CreatedAt       time.Time       `json:"createdAt"`
+	UpdatedAt       time.Time       `json:"updatedAt"`
+}
+
+type CanvasSaveResult struct {
+	Item      *CanvasItem      `json:"item"`
+	SavedItem *SavedCanvasItem `json:"savedItem"`
 }
 
 type ClosedCanvasItemInput struct {
@@ -1673,9 +1699,10 @@ func NormalizeCanvasItemInput(in *CanvasItemInput) error {
 	in.CanvasID = normalizeCanvasID(in.CanvasID)
 	in.ActorSessionID = strings.TrimSpace(in.ActorSessionID)
 	in.SourceSessionID = strings.TrimSpace(in.SourceSessionID)
+	in.SourceSavedItemID = strings.TrimSpace(in.SourceSavedItemID)
 	in.Kind = strings.TrimSpace(in.Kind)
 	in.Title = strings.TrimSpace(in.Title)
-	if in.ID == "" || in.ActorSessionID == "" || in.Kind == "" || len(in.Item) == 0 || !json.Valid(in.Item) {
+	if in.ID == "" || in.ActorSessionID == "" || in.Kind == "" || in.BaseSavedRevision < 0 || len(in.Item) == 0 || !json.Valid(in.Item) {
 		return ErrInvalidCanvas
 	}
 	if len(in.Window) > 0 && !json.Valid(in.Window) {
@@ -1832,6 +1859,10 @@ type Store interface {
 	PutCanvasItem(ctx context.Context, in CanvasItemInput) (*CanvasItem, error)
 	UpdateCanvasItemWindow(ctx context.Context, patch CanvasItemWindowPatch) (*CanvasItem, error)
 	DeleteCanvasItem(ctx context.Context, actorSessionID, itemID string) error
+	ListSavedCanvasItems(ctx context.Context, actorSessionID string) ([]*SavedCanvasItem, error)
+	SaveCanvasItem(ctx context.Context, actorSessionID, itemID, savedItemID string) (*CanvasSaveResult, error)
+	OpenSavedCanvasItem(ctx context.Context, actorSessionID, savedItemID, itemID string) (*CanvasItem, error)
+	DeleteSavedCanvasItem(ctx context.Context, actorSessionID, savedItemID string) error
 	ListClosedCanvasItems(ctx context.Context, actorSessionID string, limit int) ([]*ClosedCanvasItem, error)
 	PutClosedCanvasItem(ctx context.Context, in ClosedCanvasItemInput, keepLimit int) (*ClosedCanvasItem, error)
 	DeleteClosedCanvasItem(ctx context.Context, actorSessionID, id string) error

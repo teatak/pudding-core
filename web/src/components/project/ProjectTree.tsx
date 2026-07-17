@@ -72,7 +72,7 @@ export function ProjectTree({
 }) {
   const { t } = useI18n();
   return (
-    <div className="py-1">
+    <div>
         {loading ? (
           <ProjectTreeStatus><Spinner />{t("common.loading")}</ProjectTreeStatus>
         ) : error ? (
@@ -152,7 +152,7 @@ function ProjectDirectoryNode({
       <ProjectEntryContextMenu {...actions} isRoot={isRoot} target={target}>
         <button
           className={cn(
-            "flex h-6 w-full min-w-0 items-center gap-1 pr-2 text-left text-xs hover:bg-accent hover:text-accent-foreground dark:hover:bg-white/[0.05]",
+            "flex h-6 w-full min-w-0 items-center gap-1 pr-2 text-left text-xs hover:bg-[var(--workspace-tree-hover-background)] hover:text-accent-foreground",
             dropActive && "bg-primary/10 text-foreground ring-1 ring-inset ring-primary/40",
           )}
           style={{ paddingLeft: `${7 + depth * 13}px` }}
@@ -295,7 +295,7 @@ function ProjectFileNode({
     <button
       aria-current={selected ? "page" : undefined}
       className={cn(
-        "flex h-6 w-full min-w-0 select-none items-center gap-1.5 pr-2 text-left text-xs hover:bg-accent hover:text-accent-foreground aria-[current=page]:bg-accent aria-[current=page]:text-accent-foreground dark:hover:bg-white/[0.05] dark:aria-[current=page]:bg-white/[0.08]",
+        "flex h-6 w-full min-w-0 select-none items-center gap-1.5 pr-2 text-left text-xs hover:bg-[var(--workspace-tree-hover-background)] hover:text-accent-foreground aria-[current=page]:bg-[var(--workspace-tree-active-background)] aria-[current=page]:text-accent-foreground",
         disabled && "cursor-default text-muted-foreground/60 hover:bg-transparent",
         dropActive && "bg-primary/10 text-foreground ring-1 ring-inset ring-primary/40",
       )}

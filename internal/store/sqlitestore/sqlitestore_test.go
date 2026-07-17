@@ -172,7 +172,7 @@ func TestSessionLoadedAppIDsPersist(t *testing.T) {
 	}
 }
 
-func TestCanvasItemsAreGlobalWithSessionActor(t *testing.T) {
+func TestCanvasItemsAreSessionScoped(t *testing.T) {
 	st, path := openTestStore(t)
 	ctx := context.Background()
 	createTestSession(t, st, "sess_left")
@@ -197,20 +197,17 @@ func TestCanvasItemsAreGlobalWithSessionActor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(visible) != 1 || visible[0].ID != "canvas_1" {
-		t.Fatalf("right session should see global canvas item: %+v", visible)
+	if len(visible) != 0 {
+		t.Fatalf("right session should not see left canvas item: %+v", visible)
 	}
 
-	item, err = st.UpdateCanvasItemWindow(ctx, store.CanvasItemWindowPatch{
+	_, err = st.UpdateCanvasItemWindow(ctx, store.CanvasItemWindowPatch{
 		ActorSessionID: "sess_right",
 		ItemID:         "canvas_1",
 		Window:         []byte(`{"x":9,"y":8,"w":320,"h":240,"z":2}`),
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if item.SourceSessionID != "sess_left" || item.UpdatedBySessionID != "sess_right" {
-		t.Fatalf("source should stay fixed and actor should update: %+v", item)
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("right session update error = %v, want not found", err)
 	}
 
 	if err := st.DeleteSession(ctx, "sess_left"); err != nil {
@@ -220,8 +217,8 @@ func TestCanvasItemsAreGlobalWithSessionActor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(visible) != 1 || visible[0].SourceSessionID != "sess_left" {
-		t.Fatalf("global canvas item should survive source session delete: %+v", visible)
+	if len(visible) != 0 {
+		t.Fatalf("deleted session canvas should not survive: %+v", visible)
 	}
 
 	if err := st.Close(); err != nil {
@@ -236,8 +233,8 @@ func TestCanvasItemsAreGlobalWithSessionActor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(visible) != 1 || visible[0].UpdatedBySessionID != "sess_right" {
-		t.Fatalf("canvas item not persisted: %+v", visible)
+	if len(visible) != 0 {
+		t.Fatalf("deleted session canvas item persisted: %+v", visible)
 	}
 }
 

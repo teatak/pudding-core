@@ -11,7 +11,7 @@ import {
 import { queryKeys } from "@/api/queryKeys";
 import type { CanvasItem } from "@/contracts/api";
 import { apiURL } from "@/state/apiBase";
-import { setWorkspaceOpen } from "@/state/workspaceStore";
+import { requestCanvasReveal } from "@/state/canvasRevealStore";
 import { useBrowserMCP, type RuntimeAppDefinition, type ToolDefinition } from "@/mcp/browserMCP";
 import { createInputFlowTools } from "@/mcp/inputFlowTools";
 import { getRuntimeID, getRuntimeType } from "@/state/runtime";
@@ -64,7 +64,7 @@ export function useCanvasMCP(token: string) {
       {
         name: "canvas_item_list",
         description:
-          "List current global canvas widgets with lightweight summaries. Call this before creating or updating canvas widgets in multi-turn work. For details call canvas_doc_read(ref='canvas_items').",
+          "List canvas widgets in the current session with lightweight summaries. Call this before creating or updating canvas widgets in multi-turn work. For details call canvas_doc_read(ref='canvas_items').",
         capability: "chat",
         inputSchema: {
           type: "object",
@@ -84,7 +84,7 @@ export function useCanvasMCP(token: string) {
       {
         name: "canvas_item_inspect",
         description:
-          "Read one existing global canvas widget by id with its current content and source details. Use after canvas_item_list when the summary is not enough.",
+          "Read one existing canvas widget in the current session by id with its current content and source details. Use after canvas_item_list when the summary is not enough.",
         capability: "chat",
         inputSchema: {
           type: "object",
@@ -112,7 +112,7 @@ export function useCanvasMCP(token: string) {
       {
         name: "canvas_item_remove",
         description:
-          "Remove one global canvas widget by id. Call only when the user clearly asks to close or remove a widget.",
+          "Remove one canvas widget from the current session by id. Call only when the user clearly asks to close or remove a widget.",
         capability: "chat",
         inputSchema: {
           type: "object",
@@ -134,7 +134,7 @@ export function useCanvasMCP(token: string) {
       {
         name: "canvas_item_clear",
         description:
-          "Clear all global canvas widgets. Call only when the user clearly asks to clear the canvas, close everything, or start over.",
+          "Clear all canvas widgets in the current session. Call only when the user clearly asks to clear the canvas, close everything, or start over.",
         capability: "chat",
         inputSchema: {
           type: "object",
@@ -152,7 +152,7 @@ export function useCanvasMCP(token: string) {
       {
         name: "canvas_markdown",
         description:
-          "Create or update a markdown item on the shared canvas. For workflow details call canvas_doc_read(ref='canvas_markdown').",
+          "Create or update a markdown item in the current session. For workflow details call canvas_doc_read(ref='canvas_markdown').",
         capability: "chat",
         inputSchema: {
           type: "object",
@@ -182,7 +182,7 @@ export function useCanvasMCP(token: string) {
       {
         name: "canvas_table",
         description:
-          "Create or update a table item on the shared canvas. Prefer this for complex structured query results, lists, comparisons, inventories, schedules, and exportable rows. For schema details call canvas_doc_read(ref='canvas_table').",
+          "Create or update a table item in the current session. Prefer this for complex structured query results, lists, comparisons, inventories, schedules, and exportable rows. For schema details call canvas_doc_read(ref='canvas_table').",
         capability: "chat",
         inputSchema: {
           type: "object",
@@ -237,7 +237,7 @@ export function useCanvasMCP(token: string) {
       {
         name: "canvas_chart",
         description:
-          "Create or update a chart item on the shared canvas. Supports bar, line, area, pie, and donut charts. For schema details call canvas_doc_read(ref='canvas_chart').",
+          "Create or update a chart item in the current session. Supports bar, line, area, pie, and donut charts. For schema details call canvas_doc_read(ref='canvas_chart').",
         capability: "chat",
         inputSchema: {
           type: "object",
@@ -269,7 +269,7 @@ export function useCanvasMCP(token: string) {
       {
         name: "canvas_gallery",
         description:
-          "Create or update an image gallery item on the shared canvas. For schema details call canvas_doc_read(ref='canvas_gallery').",
+          "Create or update an image gallery item in the current session. For schema details call canvas_doc_read(ref='canvas_gallery').",
         capability: "chat",
         inputSchema: {
           type: "object",
@@ -310,7 +310,7 @@ export function useCanvasMCP(token: string) {
       {
         name: "canvas_timeline",
         description:
-          "Create or update a timeline item on the shared canvas. Use for ordered plans, schedules, event recaps, milestones, and processes. For schema details call canvas_doc_read(ref='canvas_timeline').",
+          "Create or update a timeline item in the current session. Use for ordered plans, schedules, event recaps, milestones, and processes. For schema details call canvas_doc_read(ref='canvas_timeline').",
         capability: "chat",
         inputSchema: {
           type: "object",
@@ -346,7 +346,7 @@ export function useCanvasMCP(token: string) {
       {
         name: "canvas_grid",
         description:
-          "Create or update one multi-block grid widget on the shared canvas. Prefer this when complex results need multiple views such as metrics plus table, chart plus notes, or nested detail sections. Supports markdown, metric, table, gallery, chart, timeline, and one-level nested grid blocks. For later partial updates use canvas_grid_patch. For schema details call canvas_doc_read(ref='canvas_grid').",
+          "Create or update one multi-block grid widget in the current session. Prefer this when complex results need multiple views such as metrics plus table, chart plus notes, or nested detail sections. Supports markdown, metric, table, gallery, chart, timeline, and one-level nested grid blocks. For later partial updates use canvas_grid_patch. For schema details call canvas_doc_read(ref='canvas_grid').",
         capability: "chat",
         inputSchema: {
           type: "object",
@@ -486,7 +486,7 @@ async function saveCanvasItem({
     ? await putCanvasItem(token, sessionID, id, body)
     : await createCanvasItem(token, sessionID, body);
   await queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(sessionID) });
-  setWorkspaceOpen(true);
+  requestCanvasReveal(sessionID, saved.id);
   return jsonToolResult({
     ok: true,
     id: saved.id,
@@ -550,7 +550,7 @@ async function saveGalleryItem({
     ? await putCanvasItem(token, sessionID, id, body)
     : await createCanvasItem(token, sessionID, body);
   await queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(sessionID) });
-  setWorkspaceOpen(true);
+  requestCanvasReveal(sessionID, saved.id);
   return jsonToolResult({
     ok: true,
     id: saved.id,
@@ -699,7 +699,7 @@ async function patchGridItem({
   };
   const saved = await putCanvasItem(token, sessionID, id, body);
   await queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(sessionID) });
-  setWorkspaceOpen(true);
+  requestCanvasReveal(sessionID, saved.id);
   return jsonToolResult({
     ok: true,
     id: saved.id,
@@ -721,7 +721,7 @@ const CANVAS_DOCS: Record<string, string> = {
   canvas_overview: [
     "# Canvas Tool Overview",
     "",
-    "canvas_* tools create or update real UI widgets on the shared canvas. Tool arguments must contain the real data to display; chat text is not copied into canvas automatically.",
+    "canvas_* tools create or update real UI widgets in the current session. Tool arguments must contain the real data to display; chat text is not copied into canvas automatically.",
     "",
     "Default behavior:",
     "",
@@ -742,7 +742,7 @@ const CANVAS_DOCS: Record<string, string> = {
   canvas_items: [
     "# Canvas Item Management",
     "",
-    "Use these tools to manage existing global canvas widgets.",
+    "Use these tools to manage existing canvas widgets in the current session.",
     "",
     "- canvas_item_list returns lightweight summaries only. Table summaries include row and column counts. Chart summaries include chart type, row count, and series count.",
     "- canvas_item_inspect returns full content for one id. Use it before patch-like updates when exact existing content matters.",

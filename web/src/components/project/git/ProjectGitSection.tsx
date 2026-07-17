@@ -154,7 +154,7 @@ export function ProjectGitSection({ dirtyRootIDs, repositories, sessionID, token
 
   return (
     <>
-      <div className="py-1">
+      <div>
         {repositories.map((repository) => {
           const status = repository.status;
           const repositoryPending = [
@@ -222,7 +222,7 @@ export function ProjectGitSection({ dirtyRootIDs, repositories, sessionID, token
             <div key={repository.root.id} className="pb-1">
               <ProjectGitRepositoryHeader disabled={repositoryPending} hasUnsavedChanges={dirtyRootIDs.has(repository.root.id)} repository={repository} sessionID={sessionID} token={token} onStatus={applyStatus} />
               <form
-                className="space-y-1.5 border-y px-2 py-2"
+                className="space-y-1.5 border-y border-[var(--workspace-border)] px-2 py-2"
                 onSubmit={(event) => {
                   event.preventDefault();
                   if (!status.clean) {

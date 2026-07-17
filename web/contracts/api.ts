@@ -204,6 +204,7 @@ export const saveProjectFileRequest = z.object({
 
 export const canvasItem = z.object({
   id: z.string(),
+  sessionID: z.string(),
   canvasID: z.string(),
   sourceSessionID: z.string().optional(),
   createdBySessionID: z.string().optional(),
@@ -212,6 +213,9 @@ export const canvasItem = z.object({
   title: z.string().optional(),
   item: z.unknown(),
   window: z.unknown().optional(),
+  sourceSavedItemID: z.string().optional(),
+  baseSavedRevision: z.number().int().optional(),
+  savedDirty: z.boolean().optional(),
   visible: z.boolean(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -224,6 +228,7 @@ export const listCanvasItemsResponse = z.object({
 
 export const closedCanvasItem = z.object({
   id: z.string(),
+  sessionID: z.string(),
   sourceItemID: z.string(),
   actorSessionID: z.string().optional(),
   kind: z.string(),
@@ -239,6 +244,30 @@ export type ClosedCanvasItem = z.infer<typeof closedCanvasItem>;
 export const listClosedCanvasItemsResponse = z.object({
   items: z.array(closedCanvasItem),
 });
+
+export const savedCanvasItem = z.object({
+  id: z.string(),
+  sourceSessionID: z.string().optional(),
+  sourceItemID: z.string().optional(),
+  kind: z.string(),
+  title: z.string().optional(),
+  item: z.unknown(),
+  window: z.unknown().optional(),
+  revision: z.number().int(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type SavedCanvasItem = z.infer<typeof savedCanvasItem>;
+
+export const listSavedCanvasItemsResponse = z.object({
+  items: z.array(savedCanvasItem),
+});
+
+export const canvasSaveResult = z.object({
+  item: canvasItem,
+  savedItem: savedCanvasItem,
+});
+export type CanvasSaveResult = z.infer<typeof canvasSaveResult>;
 
 export const putCanvasItemRequest = z.object({
   id: z.string().optional(),

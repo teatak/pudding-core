@@ -104,6 +104,70 @@ func TestTrackerPairsDuplicateRenamesDeterministically(t *testing.T) {
 	}
 }
 
+func TestTrackerTreatsRemovedRootAsDeletedFiles(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "main.go", "package main\n")
+
+	tracker := New()
+	if err := tracker.EnsureBaseline("turn_removed_root", []string{root}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+
+	changes, err := tracker.Finish("turn_removed_root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 || changes[0].Kind != store.FileChangeDeleted || changes[0].Path != "main.go" {
+		t.Fatalf("changes = %+v", changes)
+	}
+}
+
+func TestTrackerMarksBinaryAndLargeFilesWithoutContent(t *testing.T) {
+	root := t.TempDir()
+	binaryPath := filepath.Join(root, "image.bin")
+	largePath := filepath.Join(root, "large.txt")
+	if err := os.WriteFile(binaryPath, []byte{0, 1, 2}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(largePath, make([]byte, maxSnapshotContentBytes+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tracker := New()
+	if err := tracker.EnsureBaseline("turn_non_text", []string{root}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(binaryPath, []byte{0, 1, 3}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	large := make([]byte, maxSnapshotContentBytes+2)
+	large[len(large)-1] = 1
+	if err := os.WriteFile(largePath, large, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	changes, err := tracker.Finish("turn_non_text")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 2 {
+		t.Fatalf("changes = %+v", changes)
+	}
+	byPath := make(map[string]store.TurnFileChangeInput, len(changes))
+	for _, change := range changes {
+		byPath[change.Path] = change
+	}
+	if change := byPath["image.bin"]; !change.Binary || change.OldContent != "" || change.NewContent != "" {
+		t.Fatalf("binary change = %+v", change)
+	}
+	if change := byPath["large.txt"]; !change.TooLarge || change.OldContent != "" || change.NewContent != "" {
+		t.Fatalf("large change = %+v", change)
+	}
+}
+
 func writeTestFile(t *testing.T, root, relative, content string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(relative))

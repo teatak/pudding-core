@@ -23,7 +23,7 @@ export function ProjectMarkdownPreview({
   useScopedSelectAll(previewNode);
 
   return (
-    <div ref={setPreviewNode} className="relative min-h-full w-full bg-background dark:bg-[#171717]" data-select-all-scope="project-markdown">
+    <div ref={setPreviewNode} className="relative min-h-full w-full bg-[var(--workspace-file-editor-background)]" data-select-all-scope="project-markdown">
       <div className="mx-auto w-full max-w-4xl p-6">
         <MarkdownBody
           allowHtmlImages={false}

@@ -152,7 +152,6 @@ export function CanvasWindow({
             item={item}
             token={token}
             galleryActiveIndex={galleryActiveIndex}
-            isMaximized={isMaximized}
             onGalleryActiveIndexChange={onGalleryActiveIndexChange}
             onGalleryLayoutChange={onGalleryLayoutChange}
           />

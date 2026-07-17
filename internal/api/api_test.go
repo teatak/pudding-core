@@ -926,53 +926,106 @@ func TestPutAppConnectionPreservesLegacyBearerByType(t *testing.T) {
 	}
 }
 
-func TestCanvasItemsAPIUsesSessionActorForGlobalCanvas(t *testing.T) {
+func TestCanvasItemsAPIIsSessionScopedAndSavedWidgetsAreGlobal(t *testing.T) {
 	srv, ms := newTestServer(t)
-	if err := ms.CreateSession(context.Background(), &store.Session{ID: "sess_left", Provider: "mock", Model: "m"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := ms.CreateSession(context.Background(), &store.Session{ID: "sess_right", Provider: "mock", Model: "m"}); err != nil {
-		t.Fatal(err)
+	for _, id := range []string{"sess_left", "sess_right"} {
+		if err := ms.CreateSession(context.Background(), &store.Session{ID: id, Provider: "mock", Model: "m"}); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_left/canvas/items", map[string]any{
-		"id":     "canvas_api",
-		"kind":   "markdown",
-		"title":  "Shared",
-		"item":   map[string]any{"kind": "markdown", "content": "hello"},
-		"window": map[string]any{"x": 10, "y": 12, "w": 320, "h": 220, "z": 1},
+		"id": "canvas_api", "kind": "markdown", "title": "Left",
+		"item": map[string]any{"kind": "markdown", "content": "hello"},
 	})
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create status = %d", resp.StatusCode)
 	}
 	item := decodeJSON[store.CanvasItem](t, resp)
-	if item.SourceSessionID != "sess_left" || item.UpdatedBySessionID != "sess_left" {
+	resp.Body.Close()
+	if item.SessionID != "sess_left" || item.SourceSessionID != "sess_left" {
 		t.Fatalf("unexpected created item: %+v", item)
 	}
 
 	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_right/canvas/items", nil)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("list status = %d", resp.StatusCode)
-	}
 	list := decodeJSON[struct {
 		Items []store.CanvasItem `json:"items"`
 	}](t, resp)
-	if len(list.Items) != 1 || list.Items[0].ID != "canvas_api" {
-		t.Fatalf("right session should see shared item: %+v", list.Items)
+	resp.Body.Close()
+	if len(list.Items) != 0 {
+		t.Fatalf("right session should not see left item: %+v", list.Items)
 	}
 
-	resp = req(t, http.MethodPatch, srv.URL+"/sessions/sess_right/canvas/items/canvas_api", map[string]any{
-		"window": map[string]any{"x": 42, "y": 12, "w": 320, "h": 220, "z": 2},
-	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("patch status = %d", resp.StatusCode)
+	resp = req(t, http.MethodPatch, srv.URL+"/sessions/sess_right/canvas/items/canvas_api", map[string]any{"window": map[string]any{"z": 2}})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("cross-session patch status = %d", resp.StatusCode)
 	}
-	item = decodeJSON[store.CanvasItem](t, resp)
-	if item.SourceSessionID != "sess_left" || item.UpdatedBySessionID != "sess_right" {
-		t.Fatalf("patch should keep source and update actor: %+v", item)
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_left/canvas/items/canvas_api/save", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save status = %d", resp.StatusCode)
+	}
+	savedResult := decodeJSON[store.CanvasSaveResult](t, resp)
+	resp.Body.Close()
+	if savedResult.Item.SourceSavedItemID == "" || savedResult.Item.SavedDirty || savedResult.SavedItem.Revision != 1 {
+		t.Fatalf("unexpected save result: %+v", savedResult)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_right/canvas/saved", nil)
+	savedList := decodeJSON[struct {
+		Items []store.SavedCanvasItem `json:"items"`
+	}](t, resp)
+	resp.Body.Close()
+	if len(savedList.Items) != 1 || savedList.Items[0].ID != savedResult.SavedItem.ID {
+		t.Fatalf("saved widget should be global: %+v", savedList.Items)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_right/canvas/saved/"+savedResult.SavedItem.ID+"/open", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("open saved status = %d", resp.StatusCode)
+	}
+	rightItem := decodeJSON[store.CanvasItem](t, resp)
+	resp.Body.Close()
+	if rightItem.SessionID != "sess_right" || rightItem.SourceSavedItemID != savedResult.SavedItem.ID || rightItem.SavedDirty {
+		t.Fatalf("unexpected opened item: %+v", rightItem)
+	}
+
+	resp = req(t, http.MethodPut, srv.URL+"/sessions/sess_right/canvas/items/"+rightItem.ID, map[string]any{
+		"id": rightItem.ID, "kind": "markdown", "title": "Right edited",
+		"item": map[string]any{"kind": "markdown", "content": "changed"},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("edit opened status = %d", resp.StatusCode)
+	}
+	rightItem = decodeJSON[store.CanvasItem](t, resp)
+	resp.Body.Close()
+	if !rightItem.SavedDirty {
+		t.Fatalf("edited saved widget should be dirty: %+v", rightItem)
+	}
+
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_right/canvas/items/"+rightItem.ID+"/save", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save edited status = %d", resp.StatusCode)
+	}
+	savedResult = decodeJSON[store.CanvasSaveResult](t, resp)
+	resp.Body.Close()
+	if savedResult.SavedItem.Revision != 2 || savedResult.Item.SavedDirty {
+		t.Fatalf("unexpected updated saved result: %+v", savedResult)
+	}
+
+	resp = req(t, http.MethodPut, srv.URL+"/sessions/sess_left/canvas/items/canvas_api", map[string]any{
+		"id": "canvas_api", "kind": "markdown", "title": "Conflicting edit",
+		"item": map[string]any{"kind": "markdown", "content": "stale"},
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("edit stale item status = %d", resp.StatusCode)
+	}
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_left/canvas/items/canvas_api/save", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("stale save status = %d", resp.StatusCode)
 	}
 }
 

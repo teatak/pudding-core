@@ -427,9 +427,9 @@ export function ProjectBrowserSurface({
     || (renameMutation.isPending && renameMutation.variables?.targetSessionID === sessionID);
   const deletePending = deleteMutation.isPending && deleteMutation.variables?.targetSessionID === sessionID;
   return (
-    <div aria-hidden={!active} className={cn("absolute inset-0 z-20 min-h-0 overflow-hidden bg-[var(--workspace-background)] text-card-foreground dark:bg-[#1c1c1c]", !active && "pointer-events-none invisible opacity-0")}>
+    <div aria-hidden={!active} className={cn("absolute inset-0 z-20 min-h-0 overflow-hidden border-t border-[var(--workspace-border)] bg-[var(--workspace-panel-background)] text-card-foreground", !active && "pointer-events-none invisible opacity-0")}>
       <ResizablePanelGroup
-        className="h-full min-h-0 overflow-hidden border-t bg-card dark:bg-[#1c1c1c]"
+        className="h-full min-h-0 overflow-hidden bg-[var(--workspace-panel-background)]"
         defaultLayout={readPanelLayout(layoutStorageKeys.projectBrowserRatio, { tree: 28, viewer: 72 }, { minPercent: 15, maxPercent: 85 })}
         id="project-browser-layout"
         orientation="horizontal"

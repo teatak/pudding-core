@@ -108,17 +108,38 @@
     --workspace-toolbar-tab-h: 2rem;
     --workspace-toolbar-tab-padding: 3px;
     --workspace-toolbar-tab-icon: 18px;
+    --workspace-subtoolbar-h: 2rem;
     --rail-content-align-gap: 0px;
     --rail-radius: 8px;
     --rail-left-radius: var(--rail-radius);
-    --rail-item-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 30%);
+    --rail-item-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 42%);
     --chrome-icon-button-foreground: var(--rail-item-foreground);
     --rail-icon-button-foreground: var(--chrome-icon-button-foreground);
     --surface-subtle: color-mix(in oklch, var(--card), var(--muted) 32%);
     --chrome-edit-background: color-mix(in oklch, var(--background), var(--card) 76%);
     --message-user-background: color-mix(in oklch, var(--background), var(--muted) 56%);
     --rail-drop-target-background: color-mix(in oklch, var(--sidebar), var(--sidebar-accent) 42%);
-    --workspace-background: var(--sidebar);
+    --workspace-background: oklch(0.962 0.003 270);
+    --workspace-chrome-background: oklch(0.976 0.002 270);
+    --workspace-panel-background: oklch(0.995 0.001 270);
+    --workspace-tree-background: oklch(0.982 0.002 270);
+    --workspace-border: oklch(0.895 0.003 270);
+    --workspace-border-subtle: var(--workspace-border);
+    --workspace-resize-border: var(--workspace-border);
+    --workspace-segment-background: color-mix(in oklch, var(--workspace-panel-background) 65%, transparent);
+    --workspace-segment-border: oklch(0.895 0.003 270);
+    --workspace-tab-foreground: oklch(0.47 0.004 270);
+    --workspace-tab-hover-background: oklch(0.952 0.002 270);
+    --workspace-tab-active-background: oklch(0.925 0.003 270);
+    --workspace-tab-border: oklch(0.84 0.004 270);
+    --workspace-tab-indicator: oklch(0.56 0.004 270);
+    --workspace-file-editor-background: #ffffff;
+    --workspace-file-tabs-background: oklch(0.975 0.002 270);
+    --workspace-file-tab-active-background: var(--workspace-file-editor-background);
+    --workspace-file-tab-inactive-background: oklch(0.95 0.002 270);
+    --workspace-file-tab-hover-background: oklch(0.935 0.002 270);
+    --workspace-tree-hover-background: oklch(0.952 0.002 270);
+    --workspace-tree-active-background: oklch(0.925 0.003 270);
     --chat-title-max-w: min(42rem, 100%);
     --success: oklch(0.62 0.12 175);
     --warning: oklch(0.72 0.14 75);
@@ -128,6 +149,8 @@
     --destructive-hover: color-mix(in oklch, var(--destructive), black 8%);
     --dropdown-destructive: var(--destructive);
     --dropdown-destructive-hover: var(--destructive-hover);
+    --floating-surface: oklch(0.995 0.001 270);
+    --floating-hover: oklch(0.935 0.003 270);
     --confirm-destructive: var(--destructive);
     --confirm-destructive-hover: color-mix(in oklch, var(--destructive-hover), black 6%);
     --mascot-body-top: oklch(0.68 0.19 277);
@@ -202,6 +225,38 @@ html[data-workspace-resizing] * {
 
 html[data-workspace-resizing] .workspace-split-pane {
     transition: none !important;
+}
+
+.pudding-workspace-pane [data-slot="resizable-handle"] {
+    background-color: var(--workspace-resize-border);
+}
+
+.pudding-workspace-pane [data-slot="resizable-handle"].pudding-project-sidebar-handle {
+    background-color: transparent;
+}
+
+.pudding-workspace-pane [data-slot="resizable-handle"].pudding-project-sidebar-handle[aria-orientation="horizontal"] {
+    height: 0;
+}
+
+.pudding-workspace-pane [data-slot="resizable-handle"].pudding-project-sidebar-handle[aria-orientation="horizontal"]::after {
+    top: 50%;
+    height: 6px;
+    transform: translateY(-50%);
+}
+
+.pudding-workspace-pane [data-slot="resizable-handle"].pudding-project-sidebar-handle:is(:hover, [data-resize-handle-active]) {
+    background-color: color-mix(in oklch, var(--primary) 50%, transparent);
+}
+
+.pudding-project-file-tabs {
+    scrollbar-width: none;
+}
+
+.pudding-project-file-tabs::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
 }
 
 html[data-shell] input,
@@ -399,7 +454,28 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
     --sidebar-accent-foreground: oklch(0.95 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.56 0 0);
+    --rail-item-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 42%);
     --workspace-background: color-mix(in oklch, var(--sidebar), var(--background) 45%);
+    --workspace-chrome-background: color-mix(in oklch, var(--workspace-background), var(--background) 48%);
+    --workspace-panel-background: color-mix(in oklch, var(--background), var(--card) 14%);
+    --workspace-tree-background: var(--workspace-panel-background);
+    --workspace-border: oklch(1 0 0 / 7%);
+    --workspace-border-subtle: var(--workspace-border);
+    --workspace-resize-border: var(--workspace-border);
+    --workspace-segment-background: color-mix(in oklch, var(--background) 45%, transparent);
+    --workspace-segment-border: oklch(1 0 0 / 7.5%);
+    --workspace-tab-foreground: var(--muted-foreground);
+    --workspace-tab-hover-background: color-mix(in oklch, var(--accent) 45%, transparent);
+    --workspace-tab-active-background: color-mix(in oklch, var(--accent) 80%, transparent);
+    --workspace-tab-border: color-mix(in oklch, var(--border) 90%, transparent);
+    --workspace-tab-indicator: color-mix(in oklch, var(--foreground) 55%, transparent);
+    --workspace-file-editor-background: #171717;
+    --workspace-file-tabs-background: oklch(0.225 0 0);
+    --workspace-file-tab-active-background: var(--workspace-file-editor-background);
+    --workspace-file-tab-inactive-background: oklch(0.255 0 0);
+    --workspace-file-tab-hover-background: oklch(0.285 0 0);
+    --workspace-tree-hover-background: oklch(1 0 0 / 5%);
+    --workspace-tree-active-background: oklch(1 0 0 / 8%);
     --success: oklch(0.7 0.11 175);
     --warning: oklch(0.76 0.12 75);
     --overlay: oklch(0 0 0 / 22%);
@@ -408,7 +484,8 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
     --destructive-hover: color-mix(in oklch, var(--destructive), black 18%);
     --dropdown-destructive: var(--destructive);
     --dropdown-destructive-hover: var(--destructive-hover);
-    --menu-surface: oklch(0.295 0 0);
+    --floating-surface: oklch(0.25 0 0);
+    --floating-hover: oklch(0.33 0 0);
     --menu-outline: oklch(1 0 0 / 16%);
     --menu-shadow: 0 8px 20px oklch(0 0 0 / 22%), 0 1px 5px oklch(0 0 0 / 12%);
     --confirm-destructive: color-mix(in oklch, var(--destructive), black 22%);
@@ -477,6 +554,19 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
         0 16px 36px -8px oklch(0 0 0 / 48%);
 }
 
+:is(
+    [data-slot="dropdown-menu-content"],
+    [data-slot="dropdown-menu-sub-content"],
+    [data-slot="context-menu-content"],
+    [data-slot="context-menu-sub-content"],
+    [data-slot="select-content"],
+    [data-slot="popover-content"]
+) {
+    --popover: var(--floating-surface);
+    --accent: var(--floating-hover);
+    background-color: var(--floating-surface);
+}
+
 .dark :is(
     [data-slot="dropdown-menu-content"],
     [data-slot="dropdown-menu-sub-content"],
@@ -484,7 +574,6 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
     [data-slot="context-menu-sub-content"],
     [data-slot="select-content"]
 ) {
-    background-color: var(--menu-surface);
     box-shadow: 0 0 0 1px var(--menu-outline), var(--menu-shadow);
 }
 
@@ -584,6 +673,7 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
 }
 
 .pudding-session-rail [data-slot="sidebar-group-label"] {
+    color: var(--rail-item-foreground);
     font-size: 0.75rem;
     font-weight: 500;
     letter-spacing: 0;

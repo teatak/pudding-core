@@ -108,6 +108,10 @@ export function upsertTurnIntoPages(previous: TurnsInfiniteData | undefined, tur
   const pages = previous.pages.map((page, pageIndex) => {
     const existingIndex = page.turns.findIndex((item) => item.id === turn.id);
     if (existingIndex >= 0) {
+      const existing = page.turns[existingIndex];
+      if (turnUpdateIsStale(existing, turn)) {
+        return page;
+      }
       const turns = page.turns.slice();
       turns[existingIndex] = turn;
       return { ...page, turns };
@@ -124,6 +128,15 @@ export function upsertTurnIntoPages(previous: TurnsInfiniteData | undefined, tur
     return page;
   });
   return { ...previous, pages };
+}
+
+function turnUpdateIsStale(existing: ConversationTurn, incoming: ConversationTurn) {
+  if (existing.status !== "running" && incoming.status === "running") {
+    return true;
+  }
+  const existingUpdatedAt = Date.parse(existing.updatedAt);
+  const incomingUpdatedAt = Date.parse(incoming.updatedAt);
+  return Number.isFinite(existingUpdatedAt) && Number.isFinite(incomingUpdatedAt) && incomingUpdatedAt < existingUpdatedAt;
 }
 
 function sortTurnsByCreatedAt(turns: ConversationTurn[]) {

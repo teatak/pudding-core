@@ -12,7 +12,6 @@ import { watchElectronProjectFile } from "@/desktop/projectFileWatcher";
 import { languageFromPath } from "@/lib/fileLanguage";
 
 import { ProjectFileTabs } from "./ProjectFileTabs";
-import { ProjectFileTypeIcon } from "./ProjectFileTypeIcon";
 import type { ProjectEditorSelection } from "./ProjectEditor";
 import { ProjectGitDiffViewer } from "./git/ProjectGitDiffViewer";
 import { ProjectMarkdownPreview } from "./ProjectMarkdownPreview";
@@ -261,7 +260,7 @@ export function ProjectFileViewer({
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-card dark:bg-[#1c1c1c]">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--workspace-file-editor-background)]">
       <ProjectFileTabs
         active={selection}
         dirtyKeys={dirtyKeys}
@@ -276,8 +275,7 @@ export function ProjectFileViewer({
       ) : (
       <>
       {fileSelection ? (
-        <div className="flex h-9 shrink-0 items-center gap-2 bg-background px-3 dark:bg-[#171717]">
-          <ProjectFileTypeIcon path={file?.path || fileSelection.path} />
+        <div className="flex h-8 shrink-0 items-center gap-2 bg-[var(--workspace-file-editor-background)] px-2.5">
           <code className="min-w-0 flex-1 cursor-text select-text truncate font-mono text-xs" title={file?.path || fileSelection.path}>{file?.path || fileSelection.path}</code>
           {!isImage ? (
             <div className="flex shrink-0 items-center gap-1">
@@ -337,7 +335,7 @@ export function ProjectFileViewer({
         ) : null}
       </div>
       {file && !fileQuery.isError ? (
-        <div className="flex h-8 shrink-0 items-center gap-2 border-t px-3 text-[10px] text-muted-foreground">
+        <div className="flex h-8 shrink-0 items-center gap-2 border-t border-[var(--workspace-resize-border)] px-3 text-[10px] text-muted-foreground">
           <span>{dirty ? t("project.browserUnsaved") : t("project.browserSavedState")}</span>
           <span aria-hidden="true">·</span>
           <span>{formatBytes(new TextEncoder().encode(content).length)}</span>

@@ -71,7 +71,7 @@ function TextFilePreviewSurface({ active, preview }: { active: boolean; preview:
         !active && "pointer-events-none invisible opacity-0",
       )}
     >
-      <div className="flex h-10 shrink-0 items-center gap-2 border-y bg-card px-3">
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-[var(--workspace-border)] bg-[var(--workspace-chrome-background)] px-3">
         <FileCode2 className="size-4 shrink-0 text-muted-foreground" />
         <code className="min-w-0 flex-1 cursor-text select-text truncate font-mono text-xs" title={preview.path}>
           {preview.path}
@@ -92,7 +92,7 @@ function TextFilePreviewSurface({ active, preview }: { active: boolean; preview:
           {t("canvas.filePreviewTruncated")}
         </div>
       ) : null}
-      <div className="min-h-0 flex-1 overflow-auto bg-card/50">
+      <div className="min-h-0 flex-1 overflow-auto bg-[var(--workspace-panel-background)]">
         <div className="relative flex min-h-full min-w-max items-stretch">
           {focusLineIndex >= 0 ? (
             <div
@@ -116,7 +116,7 @@ function TextFilePreviewSurface({ active, preview }: { active: boolean; preview:
           )}
         </div>
       </div>
-      <div className="flex h-8 shrink-0 items-center gap-2 border-t bg-card px-3 text-[10px] text-muted-foreground">
+      <div className="flex h-7 shrink-0 items-center gap-2 border-t border-[var(--workspace-border)] bg-[var(--workspace-chrome-background)] px-3 text-[11px] text-muted-foreground">
         <span>{t("canvas.filePreviewSnapshot")}</span>
         <span aria-hidden="true">·</span>
         <span>{replace(t("canvas.filePreviewLines"), { count: String(lineCount) })}</span>

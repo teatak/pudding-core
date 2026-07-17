@@ -21,9 +21,9 @@ export function CanvasToolbar({
   onSelect: (item: CanvasItem) => void;
 }) {
   return (
-    <div className="flex h-10 shrink-0 items-center gap-2 bg-[var(--workspace-background)] px-3">
-      <div className="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div className="flex w-fit max-w-full min-w-0 items-center gap-0.5">
+    <div className="flex h-9 shrink-0 items-center gap-2 border-b border-[var(--workspace-border)] bg-[var(--workspace-chrome-background)] px-2.5">
+      <div className="h-full min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="flex h-full w-fit max-w-full min-w-0 items-center gap-0.5 px-px py-1">
           {items.map((item) => (
             <CanvasItemTab
               key={item.id}
@@ -69,7 +69,7 @@ function CanvasItemTab({
       </button>
       <button
         aria-label={t("canvas.delete")}
-        className="pointer-events-none absolute right-1 top-1/2 z-10 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded-full bg-transparent opacity-0 transition-colors hover:bg-accent focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 dark:hover:bg-[#474747]"
+        className="pointer-events-none absolute right-1 top-1/2 z-10 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded-md bg-transparent opacity-0 transition-colors hover:bg-accent focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100"
         type="button"
         onClick={(event) => {
           event.stopPropagation();

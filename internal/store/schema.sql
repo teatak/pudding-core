@@ -121,7 +121,8 @@ CREATE TABLE IF NOT EXISTS session_usage (
 );
 
 CREATE TABLE IF NOT EXISTS canvas_items (
-    id                    TEXT    PRIMARY KEY,
+    session_id            TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    id                    TEXT    NOT NULL,
     canvas_id             TEXT    NOT NULL DEFAULT 'default',
     source_session_id     TEXT    NOT NULL DEFAULT '',
     created_by_session_id TEXT    NOT NULL DEFAULT '',
@@ -130,18 +131,43 @@ CREATE TABLE IF NOT EXISTS canvas_items (
     title                 TEXT    NOT NULL DEFAULT '',
     item_json             TEXT    NOT NULL,
     window_json           TEXT    NOT NULL DEFAULT '',
+    source_saved_item_id  TEXT    NOT NULL DEFAULT '',
+    base_saved_revision   INTEGER NOT NULL DEFAULT 0,
+    saved_dirty           INTEGER NOT NULL DEFAULT 0,
     visible               INTEGER NOT NULL DEFAULT 1,
     created_at            INTEGER NOT NULL,
-    updated_at            INTEGER NOT NULL
+    updated_at            INTEGER NOT NULL,
+    PRIMARY KEY (session_id, id)
 );
 
 CREATE INDEX IF NOT EXISTS canvas_items_canvas_visible_updated
-    ON canvas_items(canvas_id, visible, updated_at DESC);
+    ON canvas_items(session_id, visible, updated_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS canvas_items_session_saved
+    ON canvas_items(session_id, source_saved_item_id)
+    WHERE source_saved_item_id <> '';
+
+CREATE TABLE IF NOT EXISTS canvas_saved_items (
+    id                TEXT    PRIMARY KEY,
+    source_session_id TEXT    NOT NULL DEFAULT '',
+    source_item_id    TEXT    NOT NULL DEFAULT '',
+    kind              TEXT    NOT NULL DEFAULT '',
+    title             TEXT    NOT NULL DEFAULT '',
+    item_json         TEXT    NOT NULL,
+    window_json       TEXT    NOT NULL DEFAULT '',
+    revision          INTEGER NOT NULL DEFAULT 1,
+    created_at        INTEGER NOT NULL,
+    updated_at        INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS canvas_saved_items_updated_at
+    ON canvas_saved_items(updated_at DESC);
 
 -- 最近关闭的小组件。后端只保留有限历史,避免前端存储积累大列表。
 CREATE TABLE IF NOT EXISTS canvas_closed_items (
-    id               TEXT    PRIMARY KEY,
-    source_item_id   TEXT    NOT NULL UNIQUE,
+    session_id       TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    id               TEXT    NOT NULL,
+    source_item_id   TEXT    NOT NULL,
     actor_session_id TEXT    NOT NULL DEFAULT '',
     kind             TEXT    NOT NULL DEFAULT '',
     title            TEXT    NOT NULL DEFAULT '',
@@ -149,11 +175,13 @@ CREATE TABLE IF NOT EXISTS canvas_closed_items (
     window_json      TEXT    NOT NULL DEFAULT '',
     closed_at        INTEGER NOT NULL,
     created_at       INTEGER NOT NULL,
-    updated_at       INTEGER NOT NULL
+    updated_at       INTEGER NOT NULL,
+    PRIMARY KEY (session_id, id),
+    UNIQUE (session_id, source_item_id)
 );
 
 CREATE INDEX IF NOT EXISTS canvas_closed_items_closed_at
-    ON canvas_closed_items(closed_at DESC);
+    ON canvas_closed_items(session_id, closed_at DESC);
 
 CREATE TABLE IF NOT EXISTS session_browser_tabs (
     session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

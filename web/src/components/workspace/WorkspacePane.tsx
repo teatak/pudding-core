@@ -4,14 +4,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
+  APIError,
   clearClosedCanvasItems,
   createClosedCanvasItem,
   deleteCanvasItem,
   deleteClosedCanvasItem,
+  deleteSavedCanvasItem,
   listClosedCanvasItems,
   listCanvasItems,
+  listSavedCanvasItems,
   getSession,
   putCanvasItem,
+  openSavedCanvasItem,
+  saveCanvasItem,
   type BrowserTab,
   type CanvasItemPayload,
   type Terminal,
@@ -24,9 +29,11 @@ import {
   type ElectronBrowserSurfaceTab,
 } from "@/browser/useElectronRequiredBrowserTabs";
 import type { GalleryLayout } from "@/components/canvas/CanvasItemContent";
-import { CanvasFreeformSurface } from "@/components/canvas/CanvasFreeformSurface";
+import {
+  CanvasItemActions,
+  CanvasItemSurface,
+} from "@/components/canvas/CanvasItemSurface";
 import { titleForCanvasItem } from "@/components/canvas/CanvasKindIcon";
-import { CanvasToolbar } from "@/components/canvas/CanvasToolbar";
 import {
   AppDropdownMenuContent as DropdownMenuContent,
   AppDropdownMenuItem as DropdownMenuItem,
@@ -36,11 +43,23 @@ import { asRecord, numberValue, stringValue } from "@/components/canvas/canvasPa
 import { Spinner } from "@/components/Spinner";
 import { ProjectBrowserSurface } from "@/components/project/ProjectBrowserSurface";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import type { CanvasItem, ClosedCanvasItem } from "@/contracts/api";
+import type { CanvasItem, ClosedCanvasItem, SavedCanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
+import { turnFileChangeFullPath, turnFileChangeLabel } from "@/lib/turnFileChanges";
 import { useVisibleBrowserReveal } from "@/state/browserRevealStore";
+import { consumeCanvasReveal, useVisibleCanvasReveal } from "@/state/canvasRevealStore";
 import {
   closeFilePreview,
   consumeFilePreviewReveal,
@@ -63,7 +82,7 @@ import {
 import { BrowserWorkspaceSurface } from "./BrowserWorkspaceSurface";
 import { WorkspaceEmpty } from "./WorkspaceEmpty";
 import { WorkspaceResourceTabs } from "./WorkspaceResourceTabs";
-import { CanvasLibraryControl, CanvasSurfaceControl, ProjectSurfaceControl } from "./WorkspaceSurfaceControls";
+import { CanvasLibraryMenuSections, ProjectSurfaceControl } from "./WorkspaceSurfaceControls";
 import { useWorkspaceBrowserSurface } from "./useWorkspaceBrowserSurface";
 import { useWorkspaceTerminals } from "./useWorkspaceTerminals";
 
@@ -83,13 +102,16 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
   const seenCanvasItemIDsRef = useRef<Set<string>>(new Set());
   const hasSeenCanvasItemsRef = useRef(false);
   const [activeCanvasItemIDs, setActiveCanvasItemIDs] = useState<Record<string, string>>({});
-  const [canvasLibraryOpen, setCanvasLibraryOpen] = useState(false);
+  const [canvasGalleryActiveIndices, setCanvasGalleryActiveIndices] = useState<Record<string, number>>({});
+  const [resourceMenuOpen, setResourceMenuOpen] = useState(false);
+  const [pendingSavedClose, setPendingSavedClose] = useState<CanvasItem>();
   const [retainedBrowserTabs, setRetainedBrowserTabs] = useState<Record<string, BrowserTab[]>>({});
   const [retainedTerminals, setRetainedTerminals] = useState<Record<string, Terminal[]>>({});
   const [retainedFilePreviews, setRetainedFilePreviews] = useState<Record<string, FilePreview>>({});
   const [projectUIContext, setProjectUIContext] = useState<UIContextPart>();
   const projectFileReveal = useVisibleProjectFileReveal(sessionID, secondarySessionID);
   const browserReveal = useVisibleBrowserReveal(sessionID, secondarySessionID);
+  const canvasReveal = useVisibleCanvasReveal(sessionID, secondarySessionID);
   const filePreviewReveal = useFilePreviewReveal(sessionID, secondarySessionID);
   const [workspaceSessionID, setWorkspaceSessionID] = useState(sessionID || secondarySessionID || "");
   useEffect(() => {
@@ -102,6 +124,11 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
       setWorkspaceSessionID(browserReveal.sessionID);
     }
   }, [browserReveal?.serial]);
+  useEffect(() => {
+    if (canvasReveal?.sessionID) {
+      setWorkspaceSessionID(canvasReveal.sessionID);
+    }
+  }, [canvasReveal?.serial]);
   useEffect(() => {
     if (filePreviewReveal?.sessionID) {
       setWorkspaceSessionID(filePreviewReveal.sessionID);
@@ -198,9 +225,16 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     queryFn: () => listClosedCanvasItems(token, actorSessionID),
     staleTime: 30_000,
   });
+  const savedItemsQuery = useQuery({
+    enabled,
+    queryKey: queryKeys.savedCanvasItems(),
+    queryFn: () => listSavedCanvasItems(token, actorSessionID),
+    staleTime: 30_000,
+  });
 
   const items = itemsQuery.data?.items ?? [];
   const closedItems = closedItemsQuery.data?.items ?? [];
+  const savedItems = savedItemsQuery.data?.items ?? [];
   const selectedCanvasItemID = activeCanvasItemIDs[actorSessionID];
   const activeCanvasItem = items.find((item) => item.id === selectedCanvasItemID) || topCanvasItem(items);
   const selectCanvasItem = (itemID: string) => {
@@ -331,6 +365,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     setRetainedTerminals({});
     setRetainedFilePreviews({});
     setActiveFilePreviewIDs({});
+    setCanvasGalleryActiveIndices({});
   }, [token]);
   const mountedBrowserTabs = useMemo(() => {
     const mounted: Record<string, ElectronBrowserSurfaceTab[]> = { ...retainedBrowserTabs };
@@ -375,15 +410,16 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
       return projectUIContext || { type: "ui_context", surface: "project" };
     }
     if (filePreviewActive && activeFilePreview) {
-      const selectedChange = activeFilePreview.fileChanges?.find((change) => change.id === activeFilePreview.selectedFileChangeID) || activeFilePreview.fileChanges?.[0];
+      const fileChanges = activeFilePreview.fileChanges || [];
+      const selectedChange = fileChanges.find((change) => change.id === activeFilePreview.selectedFileChangeID) || fileChanges[0];
       if (activeFilePreview.source === "turn-diff" && selectedChange) {
         return {
           type: "ui_context",
           surface: "file_preview",
           resource: "project_diff",
           id: selectedChange.id,
-          name: selectedChange.path,
-          path: selectedChange.path,
+          name: turnFileChangeLabel(selectedChange, fileChanges),
+          path: turnFileChangeFullPath(selectedChange),
           kind: selectedChange.kind,
         };
       }
@@ -480,6 +516,18 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     selectCanvasSurface();
   };
 
+  useEffect(() => {
+    if (!canvasReveal || canvasReveal.sessionID !== actorSessionID) {
+      return;
+    }
+    if (!items.some((item) => item.id === canvasReveal.itemID)) {
+      return;
+    }
+    selectCanvasItem(canvasReveal.itemID);
+    selectPersistentCanvasSurface();
+    consumeCanvasReveal(canvasReveal.serial);
+  }, [actorSessionID, canvasReveal, items]);
+
   const createBrowserSurface = () => {
     setActiveFilePreviewID(undefined);
     createNewBrowserTab();
@@ -558,6 +606,24 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     },
   });
 
+  const saveItemMutation = useMutation({
+    mutationFn: (item: CanvasItem) => saveCanvasItem(token, actorSessionID, item.id),
+    onSuccess: (result) => {
+      queryClient.setQueryData<{ items: CanvasItem[] }>(queryKeys.canvasItems(actorSessionID), (current) => ({
+        items: (current?.items || []).map((item) => item.id === result.item.id ? result.item : item),
+      }));
+      queryClient.setQueryData<{ items: SavedCanvasItem[] }>(queryKeys.savedCanvasItems(), (current) => ({
+        items: [result.savedItem, ...(current?.items || []).filter((item) => item.id !== result.savedItem.id)],
+      }));
+      toast.success(t("canvas.saveDone"));
+    },
+    onError: (error) => {
+      toast.error(error instanceof APIError && error.code === "saved_canvas_conflict"
+        ? t("canvas.saveConflict")
+        : t("canvas.saveFailed"));
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async (item: CanvasItem) => {
       await createClosedCanvasItem(token, actorSessionID, {
@@ -602,6 +668,56 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     },
   });
 
+  const closeSavedMutation = useMutation({
+    mutationFn: async ({ item, saveChanges }: { item: CanvasItem; saveChanges: boolean }) => {
+      if (saveChanges) {
+        await saveCanvasItem(token, actorSessionID, item.id);
+      }
+      await deleteCanvasItem(token, actorSessionID, item.id);
+    },
+    onMutate: async ({ item }) => {
+      const key = queryKeys.canvasItems(actorSessionID);
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<{ items: CanvasItem[] }>(key);
+      queryClient.setQueryData<{ items: CanvasItem[] }>(key, (current) => ({
+        items: (current?.items || []).filter((entry) => entry.id !== item.id),
+      }));
+      if (activeCanvasItem?.id === item.id) {
+        const next = topCanvasItem(items.filter((entry) => entry.id !== item.id));
+        setActiveCanvasItemIDs((current) => next
+          ? { ...current, [actorSessionID]: next.id }
+          : withoutKey(current, actorSessionID));
+      }
+      return { previous };
+    },
+    onError: (error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.canvasItems(actorSessionID), context.previous);
+      }
+      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.savedCanvasItems() });
+      toast.error(error instanceof APIError && error.code === "saved_canvas_conflict"
+        ? t("canvas.saveConflict")
+        : t("canvas.closeFailed"));
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.canvasItems(actorSessionID) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.savedCanvasItems() });
+    },
+  });
+
+  const requestCloseCanvasItem = (item: CanvasItem) => {
+    if (!item.sourceSavedItemID) {
+      deleteMutation.mutate(item);
+      return;
+    }
+    if (item.savedDirty) {
+      setPendingSavedClose(item);
+      return;
+    }
+    closeSavedMutation.mutate({ item, saveChanges: false });
+  };
+
   const restoreMutation = useMutation({
     mutationFn: async (entry: ClosedCanvasItem) => {
       const item = await putCanvasItem(token, actorSessionID, entry.sourceItemID, canvasPayloadFromClosedItem(entry));
@@ -609,6 +725,9 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
       return item;
     },
     onSuccess: (item) => {
+      queryClient.setQueryData<{ items: CanvasItem[] }>(queryKeys.canvasItems(actorSessionID), (current) => ({
+        items: [...(current?.items || []).filter((entry) => entry.id !== item.id), item],
+      }));
       selectCanvasItem(item.id);
       selectPersistentCanvasSurface();
       if (actorSessionID) {
@@ -647,6 +766,31 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     },
   });
 
+  const openSavedMutation = useMutation({
+    mutationFn: (entry: SavedCanvasItem) => openSavedCanvasItem(token, actorSessionID, entry.id),
+    onSuccess: (item) => {
+      queryClient.setQueryData<{ items: CanvasItem[] }>(queryKeys.canvasItems(actorSessionID), (current) => ({
+        items: [...(current?.items || []).filter((entry) => entry.id !== item.id), item],
+      }));
+      selectCanvasItem(item.id);
+      selectPersistentCanvasSurface();
+    },
+    onError: () => toast.error(t("canvas.openSavedFailed")),
+  });
+
+  const removeSavedMutation = useMutation({
+    mutationFn: (entry: SavedCanvasItem) => deleteSavedCanvasItem(token, actorSessionID, entry.id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.savedCanvasItems() });
+      void queryClient.invalidateQueries({
+        predicate: (query) => query.queryKey[0] === "session"
+          && query.queryKey[2] === "canvas"
+          && query.queryKey[3] === "items",
+      });
+    },
+    onError: () => toast.error(t("canvas.deleteSavedFailed")),
+  });
+
   useEffect(() => {
     if (itemsQuery.isLoading) return;
     if (items.length === 0) {
@@ -670,15 +814,49 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     }
   }, [activeCanvasItemIDs, actorSessionID, items, itemsQuery.isLoading]);
 
+  useEffect(() => {
+    if (itemsQuery.isLoading || itemsQuery.isFetching || activeSurface !== "canvas" || filePreviewActive || items.length > 0) return;
+    if (filePreviews.length > 0) {
+      setActiveFilePreviewID(filePreviews.at(-1)!.id);
+    } else if (terminals.length > 0) {
+      selectTerminal(activeTerminalID || terminals[0].id);
+    } else if (browserTabs.length > 0) {
+      selectBrowserTab(activeBrowserTabID || browserTabs[0].id);
+    } else if (hasProject) {
+      selectProjectSurface();
+    } else {
+      selectWorkspaceSurface();
+    }
+  }, [
+    activeBrowserTabID,
+    activeSurface,
+    activeTerminalID,
+    browserTabs,
+    filePreviewActive,
+    filePreviews,
+    hasProject,
+    items.length,
+    itemsQuery.isFetching,
+    itemsQuery.isLoading,
+    terminals,
+  ]);
+
   return (
-    <aside className="relative flex h-full shrink-0 flex-col bg-[var(--workspace-background)] text-sidebar-foreground">
-      <div className="relative z-30 flex h-(--toolbar-h) shrink-0 items-center gap-2 overflow-hidden pr-(--workspace-toolbar-pr) pl-(--workspace-toolbar-pl)">
+    <aside className="pudding-workspace-pane relative flex h-full shrink-0 flex-col bg-[var(--workspace-chrome-background)] text-sidebar-foreground">
+      <div className="relative z-30 flex h-(--toolbar-h) shrink-0 items-center gap-1.5 overflow-hidden pr-(--workspace-toolbar-pr) pl-(--workspace-toolbar-pl)">
         <WorkspaceResourceTabs
             activeBrowserTabID={activeBrowserTabID}
+            activeCanvasItemID={activeCanvasItem?.id}
             activeFilePreviewID={activeFilePreviewID}
             activeSurface={activeSurface}
             activeTerminalID={activeTerminalID}
             browserTabs={browserTabs}
+            canvasItems={items}
+            closingCanvasItemID={deleteMutation.isPending
+              ? deleteMutation.variables?.id
+              : closeSavedMutation.isPending
+                ? closeSavedMutation.variables?.item.id
+                : undefined}
             closingBrowserTabID={closingBrowserTabID}
             closingTerminalID={closingTerminalID}
             filePreviewActive={filePreviewActive}
@@ -688,18 +866,21 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
               label: preview.source === "turn-diff" ? t("turnFiles.tab") : filePreviewTitle(preview.path),
               openedAt: preview.openedAt,
               path: preview.source === "turn-diff"
-                ? preview.fileChanges?.find((change) => change.id === preview.selectedFileChangeID)?.path || t("turnFiles.tab")
+                ? (() => {
+                    const changes = preview.fileChanges || [];
+                    const change = changes.find((item) => item.id === preview.selectedFileChangeID) || changes[0];
+                    return change ? turnFileChangeLabel(change, changes) : t("turnFiles.tab");
+                  })()
                 : preview.path,
             }))}
-            leadingTabs={(
+            leadingTabs={hasProject ? (
               <>
-                {hasProject ? <ProjectSurfaceControl active={projectActive} onActivate={activateProjectSurface} /> : null}
-                <CanvasSurfaceControl
-                  active={activeSurface === "canvas" && !filePreviewActive}
-                  onActivate={selectPersistentCanvasSurface}
-                />
+                <ProjectSurfaceControl active={projectActive} onActivate={activateProjectSurface} />
+                {items.length + filePreviews.length + browserTabs.length + terminals.length > 0 ? (
+                  <span aria-hidden="true" className="mx-1 h-5 w-px shrink-0 bg-[var(--workspace-border)]" />
+                ) : null}
               </>
-            )}
+            ) : null}
             orderScope={actorSessionID || "workspace"}
             terminalTabs={terminals}
             onCloseBrowser={(tabID) => {
@@ -712,6 +893,10 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
                 selectFilePreview(activeFilePreviewID || filePreviews[0].id);
               }
             }}
+            onCloseCanvasItem={(itemID) => {
+              const item = items.find((entry) => entry.id === itemID);
+              if (item) requestCloseCanvasItem(item);
+            }}
             onCloseFilePreview={(previewID) => {
               const preview = filePreviews.find((entry) => entry.id === previewID);
               if (preview) {
@@ -723,11 +908,16 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
               setActiveFilePreviewID(undefined);
               selectBrowserTab(tabID);
             }}
+            onSelectCanvasItem={(itemID) => {
+              setActiveFilePreviewID(undefined);
+              selectCanvasItem(itemID);
+              selectCanvasSurface();
+            }}
             onSelectFilePreview={selectFilePreview}
             onSelectTerminal={selectTerminal}
         />
         {actorSessionID ? (
-          <DropdownMenu>
+          <DropdownMenu open={resourceMenuOpen} onOpenChange={setResourceMenuOpen}>
             <DropdownMenuTrigger asChild>
               <Button
                 aria-label={t("workspace.add")}
@@ -745,21 +935,41 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
                 )}
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-44 space-y-1">
+            <DropdownMenuContent align="start" className="w-64 space-y-0">
               <DropdownMenuItem
+                className="h-8 px-2.5"
                 onSelect={createBrowserSurface}
               >
                 <Compass />
                 {t("browser.create")}
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={createNewTerminal}>
+              <DropdownMenuItem className="h-8 px-2.5" onSelect={createNewTerminal}>
                 <SquareTerminal />
                 {t("terminal.create")}
               </DropdownMenuItem>
+              <CanvasLibraryMenuSections
+                closedItems={closedItems}
+                savedItems={savedItems}
+                onClearClosed={() => clearClosedMutation.mutate()}
+                onDismiss={() => setResourceMenuOpen(false)}
+                onRemoveClosed={(entry) => removeClosedMutation.mutate(entry)}
+                onRemoveSaved={(entry) => removeSavedMutation.mutate(entry)}
+                onOpenSaved={(entry) => openSavedMutation.mutate(entry)}
+                onRestoreClosed={restoreClosedItem}
+              />
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
         <div aria-hidden="true" className="pointer-events-none min-w-0 flex-1 self-stretch" />
+        {activeSurface === "canvas" && !filePreviewActive && activeCanvasItem ? (
+          <CanvasItemActions
+            item={activeCanvasItem}
+            saving={saveItemMutation.isPending && saveItemMutation.variables?.id === activeCanvasItem.id}
+            token={token}
+            onSave={() => saveItemMutation.mutate(activeCanvasItem)}
+            onGalleryLayoutChange={(layout) => galleryLayoutMutation.mutate({ item: activeCanvasItem, layout })}
+          />
+        ) : null}
         {secondarySessionID && sessionQuery.data?.title ? (
           <span
             className="no-drag-region max-w-32 shrink-0 truncate rounded-md bg-muted px-2 py-1 text-[11px] text-muted-foreground"
@@ -769,7 +979,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
           </span>
         ) : null}
       </div>
-      <div className="relative z-0 min-h-0 flex-1 overflow-hidden px-3 pb-3">
+      <div className="relative z-0 min-h-0 flex-1 overflow-hidden">
         <TerminalSizeProbe
           onDimensionsChange={(dimensions) => {
             terminalDimensionsRef.current = dimensions;
@@ -784,37 +994,27 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
             onCreateTerminal={createNewTerminal}
           />
         ) : null}
-        {activeSurface === "canvas" && !filePreviewActive ? (
-          <div className="absolute inset-0 z-10 flex min-h-0 flex-col overflow-hidden bg-[var(--workspace-background)]">
-            <CanvasToolbar
-              activeItemID={activeCanvasItem?.id}
-              items={items}
-              library={(
-                <CanvasLibraryControl
-                  closedItems={closedItems}
-                  open={canvasLibraryOpen}
-                  onClearClosed={() => clearClosedMutation.mutate()}
-                  onOpenChange={setCanvasLibraryOpen}
-                  onRemoveClosed={(entry) => removeClosedMutation.mutate(entry)}
-                  onRestoreClosed={restoreClosedItem}
-                />
-              )}
-              onClose={(item) => deleteMutation.mutate(item)}
-              onSelect={(item) => selectCanvasItem(item.id)}
-            />
-            <div className="flex min-h-0 flex-1 p-3">
-              <CanvasFreeformSurface
-                key={actorSessionID}
-                activeItemID={activeCanvasItem?.id}
-                items={items}
-                loading={itemsQuery.isLoading}
-                sessionID={actorSessionID}
-                token={token}
-                onActiveItemChange={selectCanvasItem}
-                onClose={(item) => deleteMutation.mutate(item)}
-                onGalleryLayoutChange={(item, layout) => galleryLayoutMutation.mutate({ item, layout })}
-              />
-            </div>
+        {items.map((item) => (
+          <CanvasItemSurface
+            key={`${actorSessionID}:${item.id}`}
+            active={activeSurface === "canvas" && !filePreviewActive && activeCanvasItem?.id === item.id}
+            activeIndex={canvasGalleryActiveIndices[canvasGalleryStateKey(actorSessionID, item.id)] || 0}
+            item={item}
+            token={token}
+            onActiveIndexChange={(activeIndex) => {
+              setCanvasGalleryActiveIndices((current) => ({
+                ...current,
+                [canvasGalleryStateKey(actorSessionID, item.id)]: activeIndex,
+              }));
+            }}
+            onGalleryLayoutChange={(layout) => {
+              galleryLayoutMutation.mutate({ item, layout });
+            }}
+          />
+        ))}
+        {activeSurface === "canvas" && !filePreviewActive && itemsQuery.isLoading && items.length === 0 ? (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--workspace-background)] text-muted-foreground">
+            <Spinner className="size-5" />
           </div>
         ) : null}
         {actorSessionID ? (
@@ -865,6 +1065,32 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
           ) : null,
         )}
       </div>
+      <AlertDialog open={Boolean(pendingSavedClose)} onOpenChange={(open) => !open && setPendingSavedClose(undefined)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("canvas.closeSavedTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("canvas.closeSavedDescription")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="outline"
+              onClick={() => {
+                if (pendingSavedClose) closeSavedMutation.mutate({ item: pendingSavedClose, saveChanges: false });
+              }}
+            >
+              {t("canvas.closeWithoutSaving")}
+            </AlertDialogAction>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingSavedClose) closeSavedMutation.mutate({ item: pendingSavedClose, saveChanges: true });
+              }}
+            >
+              {t("canvas.saveAndClose")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </aside>
   );
 }
@@ -903,6 +1129,10 @@ function canvasPayloadFromClosedItem(item: ClosedCanvasItem): CanvasItemPayload 
     item: item.item,
     window: item.window,
   };
+}
+
+function canvasGalleryStateKey(sessionID: string, itemID: string) {
+  return `${sessionID}\u0000${itemID}`;
 }
 
 function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {

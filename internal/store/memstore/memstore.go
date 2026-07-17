@@ -4,6 +4,7 @@
 package memstore
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"sort"
@@ -21,13 +22,14 @@ type Memstore struct {
 	sessions    map[string]*store.Session
 	projects    map[string]*store.Project
 	turns       map[string]*store.Turn
-	fileChanges map[string][]*store.TurnFileChange // turnID → path order
+	fileChanges map[string][]*store.TurnFileChange // turnID → root/path order
 	messages    map[string][]*store.Message        // sessionID → 时间升序
 	queued      map[string][]*store.QueuedInput
 	usage       map[usageKey]*store.UsageHourlyStat       // (UTC hour unix ms, model) → global stats
 	susage      map[string]*store.SessionUsageStat        // sessionID → session stats
-	canvas      map[string]*store.CanvasItem              // itemID → global canvas item
-	closed      map[string]*store.ClosedCanvasItem        // id → recently closed canvas item
+	canvas      map[string]*store.CanvasItem              // sessionID/itemID → session canvas item
+	closed      map[string]*store.ClosedCanvasItem        // sessionID/id → recently closed canvas item
+	savedCanvas map[string]*store.SavedCanvasItem         // id → globally saved canvas item
 	browser     map[string]map[string]*store.BrowserState // sessionID → tabID → browser state
 	events      map[string][]event.Event                  // sessionID → seq 升序
 	seq         map[string]int64
@@ -47,6 +49,7 @@ func New() *Memstore {
 		susage:      make(map[string]*store.SessionUsageStat),
 		canvas:      make(map[string]*store.CanvasItem),
 		closed:      make(map[string]*store.ClosedCanvasItem),
+		savedCanvas: make(map[string]*store.SavedCanvasItem),
 		browser:     make(map[string]map[string]*store.BrowserState),
 		events:      make(map[string][]event.Event),
 		seq:         make(map[string]int64),
@@ -293,6 +296,16 @@ func (m *Memstore) DeleteSession(_ context.Context, id string) error {
 	delete(m.browser, id)
 	delete(m.events, id)
 	delete(m.seq, id)
+	for key, item := range m.canvas {
+		if item.SessionID == id {
+			delete(m.canvas, key)
+		}
+	}
+	for key, item := range m.closed {
+		if item.SessionID == id {
+			delete(m.closed, key)
+		}
+	}
 	for tid, t := range m.turns {
 		if t.SessionID == id {
 			delete(m.turns, tid)
@@ -705,22 +718,42 @@ func (m *Memstore) FinishTurn(_ context.Context, in store.FinishTurnInput) (*sto
 		res.AssistantMessages = append(res.AssistantMessages, cloneMessage(msg))
 	}
 	for _, input := range in.FileChanges {
-		if strings.TrimSpace(input.RootPath) == "" || strings.TrimSpace(input.Path) == "" {
+		rootPath := strings.TrimSpace(input.RootPath)
+		path := strings.TrimSpace(input.Path)
+		if rootPath == "" || path == "" || !validTurnFileChangeKind(input.Kind) {
 			continue
 		}
 		m.fileChanges[turn.ID] = append(m.fileChanges[turn.ID], &store.TurnFileChange{
 			ID: store.NewID("change"), SessionID: turn.SessionID, TurnID: turn.ID,
-			RootPath: input.RootPath, Path: input.Path, OriginalPath: input.OriginalPath, Kind: input.Kind,
+			RootPath: rootPath, Path: path, OriginalPath: strings.TrimSpace(input.OriginalPath), Kind: input.Kind,
 			Additions: input.Additions, Deletions: input.Deletions, Binary: input.Binary, TooLarge: input.TooLarge,
 			OldSize: input.OldSize, NewSize: input.NewSize, OldContent: input.OldContent, NewContent: input.NewContent,
 			CreatedAt: now,
 		})
 	}
-	sort.Slice(m.fileChanges[turn.ID], func(i, j int) bool { return m.fileChanges[turn.ID][i].Path < m.fileChanges[turn.ID][j].Path })
+	sort.Slice(m.fileChanges[turn.ID], func(i, j int) bool {
+		left, right := m.fileChanges[turn.ID][i], m.fileChanges[turn.ID][j]
+		if left.RootPath != right.RootPath {
+			return left.RootPath < right.RootPath
+		}
+		if left.Path != right.Path {
+			return left.Path < right.Path
+		}
+		return left.ID < right.ID
+	})
 	m.appendEventLocked(turn.SessionID, ev)
 	m.sessions[turn.SessionID].LastActivityAt = now
 	res.FinalEvent = &ev
 	return res, nil
+}
+
+func validTurnFileChangeKind(kind store.FileChangeKind) bool {
+	switch kind {
+	case store.FileChangeAdded, store.FileChangeModified, store.FileChangeDeleted, store.FileChangeRenamed:
+		return true
+	default:
+		return false
+	}
 }
 
 func (m *Memstore) AppendTurnOutput(_ context.Context, in store.AppendTurnOutputInput) (*store.AppendTurnOutputResult, error) {
@@ -923,7 +956,7 @@ func (m *Memstore) ListCanvasItems(_ context.Context, actorSessionID string) ([]
 	}
 	out := make([]*store.CanvasItem, 0, len(m.canvas))
 	for _, item := range m.canvas {
-		if item.CanvasID == store.DefaultCanvasID && item.Visible {
+		if item.SessionID == actorSessionID && item.Visible {
 			out = append(out, cloneCanvasItem(item))
 		}
 	}
@@ -952,6 +985,7 @@ func (m *Memstore) PutCanvasItem(_ context.Context, in store.CanvasItemInput) (*
 	}
 	item := &store.CanvasItem{
 		ID:                 in.ID,
+		SessionID:          in.ActorSessionID,
 		CanvasID:           in.CanvasID,
 		SourceSessionID:    sourceSessionID,
 		CreatedBySessionID: in.ActorSessionID,
@@ -960,16 +994,23 @@ func (m *Memstore) PutCanvasItem(_ context.Context, in store.CanvasItemInput) (*
 		Title:              in.Title,
 		Item:               append([]byte(nil), in.Item...),
 		Window:             append([]byte(nil), in.Window...),
+		SourceSavedItemID:  in.SourceSavedItemID,
+		BaseSavedRevision:  in.BaseSavedRevision,
 		Visible:            true,
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}
-	if existing := m.canvas[in.ID]; existing != nil {
+	key := canvasMapKey(in.ActorSessionID, in.ID)
+	if existing := m.canvas[key]; existing != nil {
 		item.SourceSessionID = existing.SourceSessionID
 		item.CreatedBySessionID = existing.CreatedBySessionID
+		item.SourceSavedItemID = existing.SourceSavedItemID
+		item.BaseSavedRevision = existing.BaseSavedRevision
+		item.SavedDirty = existing.SavedDirty || (existing.SourceSavedItemID != "" && (existing.Kind != in.Kind || existing.Title != in.Title ||
+			!bytes.Equal(existing.Item, in.Item) || !bytes.Equal(existing.Window, in.Window)))
 		item.CreatedAt = existing.CreatedAt
 	}
-	m.canvas[in.ID] = item
+	m.canvas[key] = item
 	return cloneCanvasItem(item), nil
 }
 
@@ -982,12 +1023,15 @@ func (m *Memstore) UpdateCanvasItemWindow(_ context.Context, patch store.CanvasI
 	if _, ok := m.sessions[patch.ActorSessionID]; !ok {
 		return nil, store.ErrNotFound
 	}
-	item := m.canvas[patch.ItemID]
-	if item == nil || item.CanvasID != patch.CanvasID || !item.Visible {
+	item := m.canvas[canvasMapKey(patch.ActorSessionID, patch.ItemID)]
+	if item == nil || !item.Visible {
 		return nil, store.ErrNotFound
 	}
 	item.Window = append([]byte(nil), patch.Window...)
 	item.UpdatedBySessionID = patch.ActorSessionID
+	if item.SourceSavedItemID != "" {
+		item.SavedDirty = true
+	}
 	item.UpdatedAt = time.Now()
 	return cloneCanvasItem(item), nil
 }
@@ -998,10 +1042,130 @@ func (m *Memstore) DeleteCanvasItem(_ context.Context, actorSessionID, itemID st
 	if _, ok := m.sessions[actorSessionID]; !ok {
 		return store.ErrNotFound
 	}
-	if _, ok := m.canvas[itemID]; !ok {
+	key := canvasMapKey(actorSessionID, itemID)
+	if _, ok := m.canvas[key]; !ok {
 		return store.ErrNotFound
 	}
-	delete(m.canvas, itemID)
+	delete(m.canvas, key)
+	return nil
+}
+
+func (m *Memstore) ListSavedCanvasItems(_ context.Context, actorSessionID string) ([]*store.SavedCanvasItem, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[actorSessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	out := make([]*store.SavedCanvasItem, 0, len(m.savedCanvas))
+	for _, item := range m.savedCanvas {
+		out = append(out, cloneSavedCanvasItem(item))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+			return out[i].UpdatedAt.After(out[j].UpdatedAt)
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
+}
+
+func (m *Memstore) SaveCanvasItem(_ context.Context, actorSessionID, itemID, savedItemID string) (*store.CanvasSaveResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[actorSessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	item := m.canvas[canvasMapKey(actorSessionID, itemID)]
+	if item == nil {
+		return nil, store.ErrNotFound
+	}
+	now := time.Now()
+	targetID := item.SourceSavedItemID
+	var saved *store.SavedCanvasItem
+	if targetID == "" {
+		if strings.TrimSpace(savedItemID) == "" {
+			return nil, store.ErrInvalidCanvas
+		}
+		targetID = savedItemID
+		if m.savedCanvas[targetID] != nil {
+			return nil, store.ErrCanvasConflict
+		}
+		saved = &store.SavedCanvasItem{
+			ID: targetID, SourceSessionID: actorSessionID, SourceItemID: item.ID,
+			Kind: item.Kind, Title: item.Title, Item: append([]byte(nil), item.Item...), Window: append([]byte(nil), item.Window...),
+			Revision: 1, CreatedAt: now, UpdatedAt: now,
+		}
+		m.savedCanvas[targetID] = saved
+	} else {
+		saved = m.savedCanvas[targetID]
+		if saved == nil {
+			return nil, store.ErrNotFound
+		}
+		if item.SavedDirty {
+			if saved.Revision != item.BaseSavedRevision {
+				return nil, store.ErrCanvasConflict
+			}
+			saved.Kind = item.Kind
+			saved.Title = item.Title
+			saved.Item = append([]byte(nil), item.Item...)
+			saved.Window = append([]byte(nil), item.Window...)
+			saved.Revision++
+			saved.UpdatedAt = now
+		}
+	}
+	item.SourceSavedItemID = targetID
+	item.BaseSavedRevision = saved.Revision
+	item.SavedDirty = false
+	item.UpdatedAt = now
+	return &store.CanvasSaveResult{Item: cloneCanvasItem(item), SavedItem: cloneSavedCanvasItem(saved)}, nil
+}
+
+func (m *Memstore) OpenSavedCanvasItem(_ context.Context, actorSessionID, savedItemID, itemID string) (*store.CanvasItem, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[actorSessionID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	saved := m.savedCanvas[savedItemID]
+	if saved == nil {
+		return nil, store.ErrNotFound
+	}
+	for _, item := range m.canvas {
+		if item.SessionID == actorSessionID && item.SourceSavedItemID == savedItemID {
+			return cloneCanvasItem(item), nil
+		}
+	}
+	if strings.TrimSpace(itemID) == "" {
+		return nil, store.ErrInvalidCanvas
+	}
+	now := time.Now()
+	item := &store.CanvasItem{
+		ID: itemID, SessionID: actorSessionID, CanvasID: store.DefaultCanvasID,
+		SourceSessionID: actorSessionID, CreatedBySessionID: actorSessionID, UpdatedBySessionID: actorSessionID,
+		Kind: saved.Kind, Title: saved.Title, Item: append([]byte(nil), saved.Item...), Window: append([]byte(nil), saved.Window...),
+		SourceSavedItemID: saved.ID, BaseSavedRevision: saved.Revision, Visible: true, CreatedAt: now, UpdatedAt: now,
+	}
+	m.canvas[canvasMapKey(actorSessionID, itemID)] = item
+	return cloneCanvasItem(item), nil
+}
+
+func (m *Memstore) DeleteSavedCanvasItem(_ context.Context, actorSessionID, savedItemID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[actorSessionID]; !ok {
+		return store.ErrNotFound
+	}
+	if m.savedCanvas[savedItemID] == nil {
+		return store.ErrNotFound
+	}
+	delete(m.savedCanvas, savedItemID)
+	for _, item := range m.canvas {
+		if item.SourceSavedItemID == savedItemID {
+			item.SourceSavedItemID = ""
+			item.BaseSavedRevision = 0
+			item.SavedDirty = false
+		}
+	}
 	return nil
 }
 
@@ -1014,7 +1178,9 @@ func (m *Memstore) ListClosedCanvasItems(_ context.Context, actorSessionID strin
 	limit = normalizeClosedLimit(limit)
 	out := make([]*store.ClosedCanvasItem, 0, len(m.closed))
 	for _, item := range m.closed {
-		out = append(out, cloneClosedCanvasItem(item))
+		if item.SessionID == actorSessionID {
+			out = append(out, cloneClosedCanvasItem(item))
+		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if !out[i].ClosedAt.Equal(out[j].ClosedAt) {
@@ -1039,15 +1205,16 @@ func (m *Memstore) PutClosedCanvasItem(_ context.Context, in store.ClosedCanvasI
 	}
 	now := time.Now()
 	created := now
-	for id, existing := range m.closed {
-		if existing.SourceItemID == in.SourceItemID {
+	for key, existing := range m.closed {
+		if existing.SessionID == in.ActorSessionID && existing.SourceItemID == in.SourceItemID {
 			created = existing.CreatedAt
-			delete(m.closed, id)
+			delete(m.closed, key)
 			break
 		}
 	}
 	item := &store.ClosedCanvasItem{
 		ID:             in.ID,
+		SessionID:      in.ActorSessionID,
 		SourceItemID:   in.SourceItemID,
 		ActorSessionID: in.ActorSessionID,
 		Kind:           in.Kind,
@@ -1058,8 +1225,8 @@ func (m *Memstore) PutClosedCanvasItem(_ context.Context, in store.ClosedCanvasI
 		CreatedAt:      created,
 		UpdatedAt:      now,
 	}
-	m.closed[in.ID] = item
-	m.trimClosedCanvasItemsLocked(normalizeKeepLimit(keepLimit))
+	m.closed[canvasMapKey(in.ActorSessionID, in.ID)] = item
+	m.trimClosedCanvasItemsLocked(in.ActorSessionID, normalizeKeepLimit(keepLimit))
 	return cloneClosedCanvasItem(item), nil
 }
 
@@ -1069,10 +1236,11 @@ func (m *Memstore) DeleteClosedCanvasItem(_ context.Context, actorSessionID, id 
 	if _, ok := m.sessions[actorSessionID]; !ok {
 		return store.ErrNotFound
 	}
-	if _, ok := m.closed[id]; !ok {
+	key := canvasMapKey(actorSessionID, id)
+	if _, ok := m.closed[key]; !ok {
 		return store.ErrNotFound
 	}
-	delete(m.closed, id)
+	delete(m.closed, key)
 	return nil
 }
 
@@ -1082,7 +1250,11 @@ func (m *Memstore) ClearClosedCanvasItems(_ context.Context, actorSessionID stri
 	if _, ok := m.sessions[actorSessionID]; !ok {
 		return store.ErrNotFound
 	}
-	m.closed = make(map[string]*store.ClosedCanvasItem)
+	for key, item := range m.closed {
+		if item.SessionID == actorSessionID {
+			delete(m.closed, key)
+		}
+	}
 	return nil
 }
 
@@ -1190,13 +1362,15 @@ func (m *Memstore) ClearBrowserState(_ context.Context, sessionID string) error 
 	return nil
 }
 
-func (m *Memstore) trimClosedCanvasItemsLocked(limit int) {
-	if len(m.closed) <= limit {
-		return
-	}
+func (m *Memstore) trimClosedCanvasItemsLocked(sessionID string, limit int) {
 	out := make([]*store.ClosedCanvasItem, 0, len(m.closed))
 	for _, item := range m.closed {
-		out = append(out, item)
+		if item.SessionID == sessionID {
+			out = append(out, item)
+		}
+	}
+	if len(out) <= limit {
+		return
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if !out[i].ClosedAt.Equal(out[j].ClosedAt) {
@@ -1205,9 +1379,11 @@ func (m *Memstore) trimClosedCanvasItemsLocked(limit int) {
 		return out[i].CreatedAt.After(out[j].CreatedAt)
 	})
 	for _, item := range out[limit:] {
-		delete(m.closed, item.ID)
+		delete(m.closed, canvasMapKey(sessionID, item.ID))
 	}
 }
+
+func canvasMapKey(sessionID, itemID string) string { return sessionID + "\x00" + itemID }
 
 // appendEventLocked 追加事件并按保留窗口滚动清理;调用方必须已持锁。
 func (m *Memstore) appendEventLocked(sessionID string, ev event.Event) {
@@ -1740,6 +1916,16 @@ func cloneCanvasItem(item *store.CanvasItem) *store.CanvasItem {
 }
 
 func cloneClosedCanvasItem(item *store.ClosedCanvasItem) *store.ClosedCanvasItem {
+	if item == nil {
+		return nil
+	}
+	cp := *item
+	cp.Item = append([]byte(nil), item.Item...)
+	cp.Window = append([]byte(nil), item.Window...)
+	return &cp
+}
+
+func cloneSavedCanvasItem(item *store.SavedCanvasItem) *store.SavedCanvasItem {
 	if item == nil {
 		return nil
 	}

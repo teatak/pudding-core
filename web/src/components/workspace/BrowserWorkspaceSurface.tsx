@@ -26,11 +26,11 @@ export function BrowserWorkspaceSurface({
     <div
       aria-hidden={!active}
       className={cn(
-        "absolute inset-0 z-20 flex min-h-0 flex-col overflow-hidden bg-[var(--workspace-background)] text-card-foreground shadow-none",
+        "absolute inset-0 z-20 flex min-h-0 flex-col overflow-hidden border-t border-[var(--workspace-border)] bg-[var(--workspace-background)] text-card-foreground shadow-none",
         !active && "pointer-events-none invisible opacity-0",
       )}
     >
-      <div className="canvas-window-drag-handle flex h-10 shrink-0 cursor-default items-center gap-2 border-y bg-card px-3">
+      <div className="canvas-window-drag-handle flex h-9 shrink-0 cursor-default items-center gap-2 border-b border-[var(--workspace-border)] bg-[var(--workspace-chrome-background)] px-3">
         <BrowserToolbar key={`toolbar:${browserKey}`} activeTab={activeTab} sessionID={sessionID} token={token} />
       </div>
       <div className="relative min-h-0 flex-1 overflow-hidden bg-[var(--workspace-background)]">

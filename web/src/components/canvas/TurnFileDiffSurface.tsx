@@ -12,6 +12,7 @@ import { TextDiffViewer } from "@/components/diff/TextDiffViewer";
 import { Spinner } from "@/components/Spinner";
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useI18n } from "@/i18n";
+import { turnFileChangeFullPath, turnFileChangeLabel } from "@/lib/turnFileChanges";
 import { cn } from "@/lib/utils";
 import { selectTurnFileChange, type FilePreview } from "@/state/filePreviewStore";
 
@@ -35,14 +36,14 @@ export function TurnFileDiffSurface({ active, preview, token }: { active: boolea
         !active && "pointer-events-none invisible opacity-0",
       )}
     >
-      <div className="flex h-10 shrink-0 items-center gap-2 border-y bg-card px-3">
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-[var(--workspace-border)] bg-[var(--workspace-chrome-background)] px-3">
         <FileDiff className="size-4 shrink-0 text-muted-foreground" />
         {selected ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className="flex min-w-0 max-w-full flex-1 items-center gap-1.5 rounded px-1.5 py-1 text-left hover:bg-muted" type="button">
                 <ChangeStatus change={selected} />
-                <code className="min-w-0 flex-1 truncate font-mono text-xs" title={fullPath(selected)}>{selected.path}</code>
+                <code className="min-w-0 flex-1 truncate font-mono text-xs" title={turnFileChangeFullPath(selected)}>{turnFileChangeLabel(selected, changes)}</code>
                 <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
               </button>
             </DropdownMenuTrigger>
@@ -50,7 +51,7 @@ export function TurnFileDiffSurface({ active, preview, token }: { active: boolea
               {changes.map((change) => (
                 <DropdownMenuItem key={change.id} onSelect={() => selectTurnFileChange(preview.sessionID, preview.id, change.id)}>
                   <ChangeStatus change={change} />
-                  <code className="min-w-0 flex-1 truncate font-mono text-xs">{change.path}</code>
+                  <code className="min-w-0 flex-1 truncate font-mono text-xs">{turnFileChangeLabel(change, changes)}</code>
                   <ChangeStats change={change} />
                 </DropdownMenuItem>
               ))}
@@ -59,7 +60,7 @@ export function TurnFileDiffSurface({ active, preview, token }: { active: boolea
         ) : (
           <span className="text-xs text-muted-foreground">{t("turnFiles.empty")}</span>
         )}
-        <span className="shrink-0 text-[10px] text-muted-foreground">{changes.length}</span>
+        <span className="shrink-0 text-[11px] text-muted-foreground">{changes.length}</span>
       </div>
       <div className="min-h-0 flex-1 overflow-auto bg-background">
         {detailQuery.isLoading ? (
@@ -75,7 +76,7 @@ export function TurnFileDiffSurface({ active, preview, token }: { active: boolea
         ) : null}
       </div>
       {selected ? (
-        <div className="flex h-8 shrink-0 items-center gap-2 border-t bg-card px-3 text-[10px] text-muted-foreground">
+        <div className="flex h-7 shrink-0 items-center gap-2 border-t border-[var(--workspace-border)] bg-[var(--workspace-chrome-background)] px-3 text-[11px] text-muted-foreground">
           <span>{t(kindLabelKey(selected.kind))}</span>
           {selected.originalPath ? <><span aria-hidden="true">·</span><code className="truncate font-mono">{selected.originalPath} → {selected.path}</code></> : null}
           <span className="flex-1" />
@@ -101,10 +102,6 @@ function ChangeStats({ change }: { change: TurnFileChange }) {
 
 function DiffStatus({ children }: { children: ReactNode }) {
   return <div className="flex h-full min-h-64 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-muted-foreground">{children}</div>;
-}
-
-function fullPath(change: TurnFileChange) {
-  return `${change.rootPath.replace(/[/\\]+$/, "")}/${change.path}`;
 }
 
 function statusLetter(kind: TurnFileChange["kind"]) {

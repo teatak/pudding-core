@@ -22,7 +22,9 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { BrowserTab, Terminal } from "@/api/client";
 import { browserTabFaviconURL, browserTabTitle } from "@/browser/helpers";
 import { builtinAppIconClass } from "@/components/AppIdentity";
+import { CanvasKindIcon, titleForCanvasItem } from "@/components/canvas/CanvasKindIcon";
 import { workspaceTabActiveClassName, workspaceTabClassName } from "@/components/workspace/WorkspaceSurfaceControls";
+import type { CanvasItem } from "@/contracts/api";
 import type { WorkspaceSurface } from "@/components/workspace/types";
 import { Spinner } from "@/components/Spinner";
 import { useHorizontalScrollMask } from "@/hooks/useHorizontalScrollMask";
@@ -100,14 +102,18 @@ export type WorkspaceFilePreviewTab = {
 type SurfaceTab =
   | { kind: "browser"; id: string; sortAt: number; browser: BrowserTab }
   | { kind: "terminal"; id: string; sortAt: number; terminal: Terminal }
-  | { kind: "file"; id: string; sortAt: number; file: WorkspaceFilePreviewTab };
+  | { kind: "file"; id: string; sortAt: number; file: WorkspaceFilePreviewTab }
+  | { kind: "widget"; id: string; sortAt: number; widget: CanvasItem };
 
 export function WorkspaceResourceTabs({
   activeBrowserTabID,
+  activeCanvasItemID,
   activeFilePreviewID,
   activeSurface,
   activeTerminalID,
   browserTabs,
+  canvasItems,
+  closingCanvasItemID,
   closingBrowserTabID,
   closingTerminalID,
   filePreviewActive,
@@ -116,17 +122,22 @@ export function WorkspaceResourceTabs({
   orderScope,
   terminalTabs,
   onCloseBrowser,
+  onCloseCanvasItem,
   onCloseFilePreview,
   onCloseTerminal,
   onSelectBrowser,
+  onSelectCanvasItem,
   onSelectFilePreview,
   onSelectTerminal,
 }: {
   activeBrowserTabID?: string;
+  activeCanvasItemID?: string;
   activeFilePreviewID?: string;
   activeSurface: WorkspaceSurface;
   activeTerminalID?: string;
   browserTabs: BrowserTab[];
+  canvasItems: CanvasItem[];
+  closingCanvasItemID?: string;
   closingBrowserTabID?: string;
   closingTerminalID?: string;
   filePreviewActive: boolean;
@@ -135,9 +146,11 @@ export function WorkspaceResourceTabs({
   orderScope: string;
   terminalTabs: Terminal[];
   onCloseBrowser: (tabID: string) => void;
+  onCloseCanvasItem: (itemID: string) => void;
   onCloseFilePreview: (previewID: string) => void;
   onCloseTerminal: (terminalID: string) => void;
   onSelectBrowser: (tabID: string) => void;
+  onSelectCanvasItem: (itemID: string) => void;
   onSelectFilePreview: (previewID: string) => void;
   onSelectTerminal: (terminalID: string) => void;
 }) {
@@ -154,6 +167,7 @@ export function WorkspaceResourceTabs({
     ...browserTabs.map((browser) => ({ kind: "browser" as const, id: browser.id, sortAt: Date.parse(browser.createdAt), browser })),
     ...terminalTabs.map((terminal) => ({ kind: "terminal" as const, id: terminal.id, sortAt: Date.parse(terminal.createdAt), terminal })),
     ...filePreviewTabs.map((file) => ({ kind: "file" as const, id: file.id, sortAt: file.openedAt, file })),
+    ...canvasItems.map((widget) => ({ kind: "widget" as const, id: widget.id, sortAt: Date.parse(widget.createdAt), widget })),
   ].sort((left, right) => left.sortAt - right.sortAt || left.id.localeCompare(right.id));
   const createdTabIDs = createdTabs.map(surfaceTabID);
   const savedOrder = useWorkspaceTabOrder(orderScope);
@@ -168,6 +182,10 @@ export function WorkspaceResourceTabs({
   useEffect(() => {
     reconcileWorkspaceTabOrder(orderScope, createdTabIDs);
   }, [orderScope, orderSignature]);
+
+  if (createdTabs.length === 0 && !leadingTabs) {
+    return null;
+  }
 
   const handleDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) {
@@ -194,23 +212,27 @@ export function WorkspaceResourceTabs({
         style={scrollMask.style}
       >
         <SortableContext items={orderedIDs} strategy={horizontalListSortingStrategy}>
-          <div className="flex w-fit max-w-full min-w-0 items-center gap-0.5">
+          <div className="flex w-fit max-w-full min-w-0 items-center gap-0.5 px-px py-1">
             {leadingTabs}
             {tabs.map((tab) => (
               <SortableSurfaceTabButton
                 key={surfaceTabID(tab)}
                 activeBrowserTabID={activeBrowserTabID}
+                activeCanvasItemID={activeCanvasItemID}
                 activeFilePreviewID={activeFilePreviewID}
                 activeSurface={activeSurface}
                 activeTerminalID={activeTerminalID}
                 closingBrowserTabID={closingBrowserTabID}
+                closingCanvasItemID={closingCanvasItemID}
                 closingTerminalID={closingTerminalID}
                 filePreviewActive={filePreviewActive}
                 tab={tab}
                 onCloseBrowser={onCloseBrowser}
+                onCloseCanvasItem={onCloseCanvasItem}
                 onCloseFilePreview={onCloseFilePreview}
                 onCloseTerminal={onCloseTerminal}
                 onSelectBrowser={onSelectBrowser}
+                onSelectCanvasItem={onSelectCanvasItem}
                 onSelectFilePreview={onSelectFilePreview}
                 onSelectTerminal={onSelectTerminal}
               />
@@ -224,32 +246,40 @@ export function WorkspaceResourceTabs({
 
 function SortableSurfaceTabButton({
   activeBrowserTabID,
+  activeCanvasItemID,
   activeFilePreviewID,
   activeSurface,
   activeTerminalID,
   closingBrowserTabID,
+  closingCanvasItemID,
   closingTerminalID,
   filePreviewActive,
   tab,
   onCloseBrowser,
+  onCloseCanvasItem,
   onCloseFilePreview,
   onCloseTerminal,
   onSelectBrowser,
+  onSelectCanvasItem,
   onSelectFilePreview,
   onSelectTerminal,
 }: {
   activeBrowserTabID?: string;
+  activeCanvasItemID?: string;
   activeFilePreviewID?: string;
   activeSurface: WorkspaceSurface;
   activeTerminalID?: string;
   closingBrowserTabID?: string;
+  closingCanvasItemID?: string;
   closingTerminalID?: string;
   filePreviewActive: boolean;
   tab: SurfaceTab;
   onCloseBrowser: (tabID: string) => void;
+  onCloseCanvasItem: (itemID: string) => void;
   onCloseFilePreview: (previewID: string) => void;
   onCloseTerminal: (terminalID: string) => void;
   onSelectBrowser: (tabID: string) => void;
+  onSelectCanvasItem: (itemID: string) => void;
   onSelectFilePreview: (previewID: string) => void;
   onSelectTerminal: (terminalID: string) => void;
 }) {
@@ -257,18 +287,23 @@ function SortableSurfaceTabButton({
   const browser = tab.kind === "browser" ? tab.browser : undefined;
   const terminal = tab.kind === "terminal" ? tab.terminal : undefined;
   const file = tab.kind === "file" ? tab.file : undefined;
+  const widget = tab.kind === "widget" ? tab.widget : undefined;
   const label = browser
     ? browserTabTitle(browser, t("browser.newTab"), t("browser.newTab"))
     : terminal
       ? terminalTabTitle(terminal, t("terminal.newTab"))
-      : file?.label || t("terminal.newTab");
+      : widget
+        ? titleForCanvasItem(widget, t)
+        : file?.label || t("terminal.newTab");
   const selected =
     (tab.kind === "browser" && activeSurface === "browser" && tab.id === activeBrowserTabID) ||
     (tab.kind === "terminal" && activeSurface === "terminal" && tab.id === activeTerminalID) ||
-    (tab.kind === "file" && filePreviewActive && tab.id === activeFilePreviewID);
+    (tab.kind === "file" && filePreviewActive && tab.id === activeFilePreviewID) ||
+    (tab.kind === "widget" && activeSurface === "canvas" && !filePreviewActive && tab.id === activeCanvasItemID);
   const closePending =
     (tab.kind === "browser" && tab.id === closingBrowserTabID) ||
-    (tab.kind === "terminal" && tab.id === closingTerminalID);
+    (tab.kind === "terminal" && tab.id === closingTerminalID) ||
+    (tab.kind === "widget" && tab.id === closingCanvasItemID);
   const exited = terminal?.status === "exited";
   const { attributes, isDragging, listeners, setNodeRef, transform, transition } = useSortable({
     id: surfaceTabID(tab),
@@ -303,8 +338,10 @@ function SortableSurfaceTabButton({
           onSelectBrowser(tab.id);
         } else if (tab.kind === "terminal") {
           onSelectTerminal(tab.id);
-        } else {
+        } else if (tab.kind === "file") {
           onSelectFilePreview(tab.id);
+        } else {
+          onSelectCanvasItem(tab.id);
         }
       }}
     >
@@ -312,6 +349,8 @@ function SortableSurfaceTabButton({
         <BrowserTabIcon faviconURL={browserTabFaviconURL(browser)} />
       ) : terminal ? (
         <TerminalTabIcon exited={exited} />
+      ) : widget ? (
+        <CanvasKindIcon kind={widget.kind} size="xs" />
       ) : (
         <FilePreviewTabIcon kind={file?.kind || "file"} />
       )}
@@ -322,9 +361,11 @@ function SortableSurfaceTabButton({
             ? t("browser.release")
             : tab.kind === "terminal"
               ? t("terminal.close")
-              : t("canvas.filePreviewClose")
+              : tab.kind === "widget"
+                ? t("canvas.delete")
+                : t("canvas.filePreviewClose")
         }
-        className="pointer-events-none absolute right-1 top-1/2 z-10 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded-full bg-transparent opacity-0 transition-colors hover:bg-accent group-hover:pointer-events-auto group-hover:opacity-100 dark:hover:bg-[#474747] data-[pending=true]:pointer-events-auto data-[pending=true]:opacity-100"
+        className="pointer-events-none absolute right-1 top-1/2 z-10 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded-md bg-transparent opacity-0 transition-colors hover:bg-accent group-hover:pointer-events-auto group-hover:opacity-100 data-[pending=true]:pointer-events-auto data-[pending=true]:opacity-100"
         data-pending={closePending}
         role="button"
         tabIndex={-1}
@@ -335,8 +376,10 @@ function SortableSurfaceTabButton({
             onCloseBrowser(tab.id);
           } else if (tab.kind === "terminal") {
             onCloseTerminal(tab.id);
-          } else {
+          } else if (tab.kind === "file") {
             onCloseFilePreview(tab.id);
+          } else {
+            onCloseCanvasItem(tab.id);
           }
         }}
       >

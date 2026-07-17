@@ -1,4 +1,5 @@
 import { FileDiff, X } from "lucide-react";
+import { useEffect, useRef, useState, type UIEvent } from "react";
 
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
@@ -27,10 +28,37 @@ export function ProjectFileTabs({
 }) {
   const { t } = useI18n();
   const activeKey = active ? projectTabKey(active) : undefined;
+  const [scrolling, setScrolling] = useState(false);
+  const [scrollIndicator, setScrollIndicator] = useState({ left: 0, width: 0 });
+  const hideScrollTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => () => {
+    if (hideScrollTimerRef.current) clearTimeout(hideScrollTimerRef.current);
+  }, []);
+
+  if (tabs.length === 0) return null;
+
+  const handleScroll = (event: UIEvent<HTMLDivElement>) => {
+    const target = event.currentTarget;
+    const scrollRange = target.scrollWidth - target.clientWidth;
+    const indicatorWidth = scrollRange > 0
+      ? Math.max(28, target.clientWidth * (target.clientWidth / target.scrollWidth))
+      : 0;
+    const indicatorRange = Math.max(0, target.clientWidth - indicatorWidth);
+    const indicatorLeft = scrollRange > 0 ? (target.scrollLeft / scrollRange) * indicatorRange : 0;
+    setScrollIndicator({ left: indicatorLeft, width: indicatorWidth });
+    setScrolling(scrollRange > 0);
+    if (hideScrollTimerRef.current) clearTimeout(hideScrollTimerRef.current);
+    hideScrollTimerRef.current = setTimeout(() => setScrolling(false), 600);
+  };
 
   return (
-    <div className="flex h-10 shrink-0 items-stretch overflow-x-auto border-b bg-muted/20 dark:bg-[#1c1c1c]">
-      {tabs.map((tab, index) => {
+    <div className="relative h-(--workspace-subtoolbar-h) shrink-0 bg-[var(--workspace-file-tabs-background)]">
+      <div
+        className="pudding-project-file-tabs flex h-full items-stretch overflow-x-auto overscroll-x-contain"
+        onScroll={handleScroll}
+      >
+        {tabs.map((tab, index) => {
         const key = projectTabKey(tab);
         const selected = key === activeKey;
         const gitDiff = isProjectGitDiffTab(tab);
@@ -47,13 +75,13 @@ export function ProjectFileTabs({
           >
             <div
               className={cn(
-                "group flex h-full min-w-28 max-w-56 shrink-0 items-center border-r text-xs text-muted-foreground",
-                selected && "bg-card text-foreground dark:bg-[#242424]",
+                "group relative flex h-full min-w-28 max-w-56 shrink-0 items-center bg-[var(--workspace-file-tab-inactive-background)] text-xs text-[var(--workspace-tab-foreground)] transition-[background-color,color] hover:bg-[var(--workspace-file-tab-hover-background)] hover:text-foreground",
+                selected && "bg-[var(--workspace-file-tab-active-background)] text-foreground hover:bg-[var(--workspace-file-tab-active-background)]",
               )}
             >
               <button
                 aria-pressed={selected}
-                className="flex h-full min-w-0 flex-1 select-none items-center gap-1.5 pl-3 text-left"
+                className="flex h-full min-w-0 flex-1 select-none items-center gap-1.5 pl-2.5 text-left"
                 title={gitDiff ? `${tab.path} (${tab.staged ? t("project.gitStaged") : t("project.gitWorkingTree")})` : tab.path}
                 type="button"
                 onClick={() => onActivate(tab)}
@@ -66,7 +94,7 @@ export function ProjectFileTabs({
               <button
                 aria-label={`${t("project.browserCloseTab")} ${name}`}
                 className={cn(
-                  "mr-1 inline-flex size-6 shrink-0 items-center justify-center rounded-sm opacity-0 hover:bg-accent hover:text-accent-foreground group-hover:opacity-100 focus-visible:opacity-100",
+                  "mr-1 inline-flex size-5 shrink-0 items-center justify-center rounded-[4px] opacity-0 hover:bg-[var(--workspace-file-tab-hover-background)] hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100",
                   selected && "opacity-100",
                 )}
                 title={t("project.browserCloseTab")}
@@ -78,7 +106,16 @@ export function ProjectFileTabs({
             </div>
           </ProjectTabContextMenu>
         );
-      })}
+        })}
+      </div>
+      <span
+        aria-hidden="true"
+        className={cn(
+          "pointer-events-none absolute bottom-0 h-0.5 rounded-full bg-[var(--workspace-tab-border)] transition-opacity duration-150",
+          scrolling ? "opacity-100" : "opacity-0",
+        )}
+        style={{ left: scrollIndicator.left, width: scrollIndicator.width }}
+      />
     </div>
   );
 }

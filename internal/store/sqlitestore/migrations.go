@@ -14,7 +14,7 @@ import (
 
 const (
 	baselineSchemaVersion = 1
-	currentSchemaVersion  = 2
+	currentSchemaVersion  = 3
 )
 
 var (
@@ -51,6 +51,102 @@ var schemaMigrations = map[int]schemaMigration{
 		`)
 		return err
 	},
+	3: func(tx *sql.Tx) error {
+		_, err := tx.Exec(`
+			ALTER TABLE canvas_items RENAME TO canvas_items_v2;
+			ALTER TABLE canvas_closed_items RENAME TO canvas_closed_items_v2;
+			DROP INDEX canvas_items_canvas_visible_updated;
+			DROP INDEX canvas_closed_items_closed_at;
+
+			CREATE TABLE canvas_saved_items (
+				id TEXT PRIMARY KEY,
+				source_session_id TEXT NOT NULL DEFAULT '',
+				source_item_id TEXT NOT NULL DEFAULT '',
+				kind TEXT NOT NULL DEFAULT '',
+				title TEXT NOT NULL DEFAULT '',
+				item_json TEXT NOT NULL,
+				window_json TEXT NOT NULL DEFAULT '',
+				revision INTEGER NOT NULL DEFAULT 1,
+				created_at INTEGER NOT NULL,
+				updated_at INTEGER NOT NULL
+			);
+
+			INSERT INTO canvas_saved_items(
+				id,source_session_id,source_item_id,kind,title,item_json,window_json,revision,created_at,updated_at
+			)
+			SELECT id,source_session_id,id,kind,title,item_json,window_json,1,created_at,updated_at
+			FROM canvas_items_v2
+			WHERE source_session_id='' OR NOT EXISTS(SELECT 1 FROM sessions WHERE sessions.id=canvas_items_v2.source_session_id);
+
+			INSERT OR IGNORE INTO canvas_saved_items(
+				id,source_session_id,source_item_id,kind,title,item_json,window_json,revision,created_at,updated_at
+			)
+			SELECT 'legacy_closed_' || id,actor_session_id,source_item_id,kind,title,item_json,window_json,1,created_at,updated_at
+			FROM canvas_closed_items_v2
+			WHERE actor_session_id='' OR NOT EXISTS(SELECT 1 FROM sessions WHERE sessions.id=canvas_closed_items_v2.actor_session_id);
+
+			CREATE TABLE canvas_items (
+				session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+				id TEXT NOT NULL,
+				canvas_id TEXT NOT NULL DEFAULT 'default',
+				source_session_id TEXT NOT NULL DEFAULT '',
+				created_by_session_id TEXT NOT NULL DEFAULT '',
+				updated_by_session_id TEXT NOT NULL DEFAULT '',
+				kind TEXT NOT NULL DEFAULT '',
+				title TEXT NOT NULL DEFAULT '',
+				item_json TEXT NOT NULL,
+				window_json TEXT NOT NULL DEFAULT '',
+				source_saved_item_id TEXT NOT NULL DEFAULT '',
+				base_saved_revision INTEGER NOT NULL DEFAULT 0,
+				saved_dirty INTEGER NOT NULL DEFAULT 0,
+				visible INTEGER NOT NULL DEFAULT 1,
+				created_at INTEGER NOT NULL,
+				updated_at INTEGER NOT NULL,
+				PRIMARY KEY(session_id,id)
+			);
+
+			INSERT INTO canvas_items(
+				session_id,id,canvas_id,source_session_id,created_by_session_id,updated_by_session_id,
+				kind,title,item_json,window_json,visible,created_at,updated_at
+			)
+			SELECT source_session_id,id,canvas_id,source_session_id,created_by_session_id,updated_by_session_id,
+				kind,title,item_json,window_json,visible,created_at,updated_at
+			FROM canvas_items_v2
+			WHERE source_session_id<>'' AND EXISTS(SELECT 1 FROM sessions WHERE sessions.id=canvas_items_v2.source_session_id);
+
+			CREATE TABLE canvas_closed_items (
+				session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+				id TEXT NOT NULL,
+				source_item_id TEXT NOT NULL,
+				actor_session_id TEXT NOT NULL DEFAULT '',
+				kind TEXT NOT NULL DEFAULT '',
+				title TEXT NOT NULL DEFAULT '',
+				item_json TEXT NOT NULL,
+				window_json TEXT NOT NULL DEFAULT '',
+				closed_at INTEGER NOT NULL,
+				created_at INTEGER NOT NULL,
+				updated_at INTEGER NOT NULL,
+				PRIMARY KEY(session_id,id),
+				UNIQUE(session_id,source_item_id)
+			);
+
+			INSERT INTO canvas_closed_items(
+				session_id,id,source_item_id,actor_session_id,kind,title,item_json,window_json,closed_at,created_at,updated_at
+			)
+			SELECT actor_session_id,id,source_item_id,actor_session_id,kind,title,item_json,window_json,closed_at,created_at,updated_at
+			FROM canvas_closed_items_v2
+			WHERE actor_session_id<>'' AND EXISTS(SELECT 1 FROM sessions WHERE sessions.id=canvas_closed_items_v2.actor_session_id);
+
+			DROP TABLE canvas_items_v2;
+			DROP TABLE canvas_closed_items_v2;
+
+			CREATE INDEX canvas_items_canvas_visible_updated ON canvas_items(session_id,visible,updated_at DESC);
+			CREATE UNIQUE INDEX canvas_items_session_saved ON canvas_items(session_id,source_saved_item_id) WHERE source_saved_item_id<>'';
+			CREATE INDEX canvas_saved_items_updated_at ON canvas_saved_items(updated_at DESC);
+			CREATE INDEX canvas_closed_items_closed_at ON canvas_closed_items(session_id,closed_at DESC);
+		`)
+		return err
+	},
 }
 
 func prepareSchema(db *sql.DB, path string) error {
@@ -77,6 +173,11 @@ func prepareSchema(db *sql.DB, path string) error {
 					return err
 				}
 				version = currentSchemaVersion
+			} else if err := validateSchema(db, schemaV2Contract); err == nil {
+				if err := setSchemaVersion(db, 2); err != nil {
+					return err
+				}
+				version = 2
 			} else {
 				if err := validateSchema(db, schemaV1Contract); err != nil {
 					return fmt.Errorf("%w: unversioned database does not match the signed 0.1.1 baseline: %v", ErrUnsupportedSchema, err)
@@ -234,9 +335,18 @@ var schemaV1Contract = schemaContract{
 	},
 }
 
-var currentSchemaContract = extendSchemaContract(schemaV1Contract, map[string][]string{
+var schemaV2Contract = extendSchemaContract(schemaV1Contract, map[string][]string{
 	"turn_file_changes": {"id", "session_id", "turn_id", "root_path", "path", "original_path", "kind", "additions", "deletions", "binary", "too_large", "old_size", "new_size", "old_content", "new_content", "created_at"},
 }, "turn_file_changes_turn")
+
+var currentSchemaContract = func() schemaContract {
+	out := extendSchemaContract(schemaV2Contract, map[string][]string{
+		"canvas_saved_items": {"id", "source_session_id", "source_item_id", "kind", "title", "item_json", "window_json", "revision", "created_at", "updated_at"},
+	}, "canvas_items_session_saved", "canvas_saved_items_updated_at")
+	out.tables["canvas_items"] = append(out.tables["canvas_items"], "session_id", "source_saved_item_id", "base_saved_revision", "saved_dirty")
+	out.tables["canvas_closed_items"] = append(out.tables["canvas_closed_items"], "session_id")
+	return out
+}()
 
 func extendSchemaContract(base schemaContract, tables map[string][]string, indexes ...string) schemaContract {
 	out := schemaContract{tables: make(map[string][]string, len(base.tables)+len(tables))}

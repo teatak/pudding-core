@@ -530,7 +530,7 @@ export function SessionRail({
             align="start"
             alignOffset={popoverAlignOffset}
             className={cn(
-              "flex w-[260px] flex-col p-0",
+              "flex w-[260px] flex-col !bg-sidebar p-0 text-sidebar-foreground",
               isMobile
                 ? "h-[calc(100svh-var(--toolbar-h)-1rem)] max-h-[calc(100svh-var(--toolbar-h)-1rem)] w-[min(20rem,calc(100vw-1rem))]"
                 : "h-[min(48rem,calc(100vh-var(--toolbar-h)-1.5rem))] max-h-[calc(100vh-var(--toolbar-h)-1.5rem)]",
@@ -1763,7 +1763,7 @@ function SessionItems({
     return <SessionEmptyState />;
   }
   const canCollapse = sessions.length > sessionCollapseThreshold;
-  const cappedSessions = showAll || draggingSessionID || !canCollapse
+  const cappedSessions = showAll || !canCollapse
     ? sessions
     : sessions.slice(0, collapsedSessionDisplayLimit);
   const visibleSessions = cappedSessions.filter((session) => session.id !== draggingSessionID);
@@ -1804,7 +1804,7 @@ function SessionItems({
         </Fragment>
       ))}
       {dropIndex === visibleSessions.length ? <SessionDropIndicator active /> : null}
-      {hiddenSessionCount > 0 && !draggingSessionID ? (
+      {hiddenSessionCount > 0 ? (
         <SidebarMenuItem>
           <button
             aria-expanded={showAll}

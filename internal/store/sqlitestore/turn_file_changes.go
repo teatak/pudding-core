@@ -43,7 +43,7 @@ func validFileChangeKind(kind store.FileChangeKind) bool {
 }
 
 func turnFileChangesForTurnTx(ctx context.Context, tx *sql.Tx, sessionID, turnID string) ([]*store.TurnFileChange, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT `+turnFileChangeSummaryColumns+` FROM turn_file_changes WHERE session_id=? AND turn_id=? ORDER BY path ASC, id ASC`, sessionID, turnID)
+	rows, err := tx.QueryContext(ctx, `SELECT `+turnFileChangeSummaryColumns+` FROM turn_file_changes WHERE session_id=? AND turn_id=? ORDER BY root_path ASC, path ASC, id ASC`, sessionID, turnID)
 	if err != nil {
 		return nil, err
 	}
