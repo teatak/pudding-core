@@ -206,9 +206,13 @@ export function BrowserToolbar({
       return openBrowserURL(token, sessionID, { url });
     },
     onSuccess: (tab) => {
+      pendingSubmittedURLRef.current = "";
+      setURLDraft(browserDisplayURL(tab.url));
       void persistTab(tab, { refreshAfterPersist: !embeddedBrowser, syncBrowserTab: embeddedBrowser });
     },
     onError: (error) => {
+      pendingSubmittedURLRef.current = "";
+      setURLDraft(browserDisplayURL(activeTab?.url || targetURL));
       if (isBrowserNavigationAbortError(error)) {
         refreshBrowserQueries();
         return;
