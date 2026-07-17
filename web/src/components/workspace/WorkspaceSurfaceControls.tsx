@@ -50,10 +50,10 @@ export function CanvasLibraryMenuSections({
     return null;
   }
   return (
-    <div className="-mx-1 mt-1 border-t border-border px-1 pt-1">
+    <div className="-mx-1 mt-1 border-t border-border pt-1">
       {savedItems.length > 0 ? (
-        <div className="px-1 pb-1">
-          <div className="flex h-7 items-center justify-between px-2 text-[11px] font-medium text-muted-foreground">
+        <div className="pb-1">
+          <div className="flex h-7 items-center justify-between px-2.5 text-[11px] font-medium text-muted-foreground">
             <span>{t("canvas.savedWidgets")}</span>
             <span className="tabular-nums text-muted-foreground/70">{savedItems.length}</span>
           </div>
@@ -73,10 +73,10 @@ export function CanvasLibraryMenuSections({
         </div>
       ) : null}
       {closedItems.length > 0 ? (
-        <div className={cn("px-1", savedItems.length > 0 && "border-t border-border pt-1")}>
-          <div className="flex h-7 items-center justify-between px-2 text-[11px] font-medium text-muted-foreground">
+        <div className={cn(savedItems.length > 0 && "border-t border-border pt-1")}>
+          <div className="flex h-7 items-center px-2.5 text-[11px] font-medium text-muted-foreground">
             <span>{t("canvas.recentClosed")}</span>
-            <button className="h-6 shrink-0 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-accent-foreground" type="button" onClick={onClearClosed}>
+            <button className="ml-auto h-6 shrink-0 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-accent-foreground" type="button" onClick={onClearClosed}>
               {t("canvas.clearRecentClosed")}
             </button>
           </div>
@@ -103,13 +103,13 @@ function SavedCanvasItemRow({ entry, onOpen, onRemove }: { entry: SavedCanvasIte
   const { t } = useI18n();
   const title = entry.title || entry.kind;
   return (
-    <div className="group/saved mx-0.5 flex h-8 min-w-0 items-center rounded-md hover:bg-accent focus-within:bg-accent">
-      <button className="flex h-full min-w-0 flex-1 items-center gap-2 px-2 text-sm focus-visible:outline-none" title={title} type="button" onClick={onOpen}>
-        <CanvasKindIcon className="!bg-transparent" kind={entry.kind} size="xs" />
+    <div className="group/saved mx-1 flex h-8 min-w-0 items-center rounded-md pr-2.5 hover:bg-accent focus-within:bg-accent">
+      <button className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2.5 text-sm focus-visible:outline-none" title={title} type="button" onClick={onOpen}>
+        <CanvasKindIcon className="!h-4 !w-4 !bg-transparent [&>svg]:!h-4 [&>svg]:!w-4" kind={entry.kind} size="xs" />
         <span className="min-w-0 flex-1 truncate text-left">{title}</span>
       </button>
       <span className="flex items-center gap-1 opacity-0 transition-opacity group-hover/saved:opacity-100 group-focus-within/saved:opacity-100">
-        <button aria-label={t("canvas.deleteSavedWidget")} className="mr-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-destructive hover:bg-destructive/10" type="button" onClick={onRemove}>
+        <button aria-label={t("canvas.deleteSavedWidget")} className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-destructive hover:bg-destructive/10" type="button" onClick={onRemove}>
           <Trash2 className="h-3.5 w-3.5" />
         </button>
       </span>
@@ -121,16 +121,16 @@ function ClosedCanvasItemRow({ entry, onRemove, onRestore }: { entry: ClosedCanv
   const { t } = useI18n();
   const title = entry.title || entry.kind;
   return (
-    <div className="group/closed mx-0.5 flex h-8 min-w-0 items-center rounded-md hover:bg-accent focus-within:bg-accent">
-      <button className="flex h-full min-w-0 flex-1 items-center gap-2 px-2 text-sm focus-visible:outline-none" title={title} type="button" onClick={onRestore}>
-        <CanvasKindIcon className="!bg-transparent" kind={entry.kind} size="xs" />
+    <div className="group/closed mx-1 flex h-8 min-w-0 items-center rounded-md pr-2.5 hover:bg-accent focus-within:bg-accent">
+      <button className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2.5 text-sm focus-visible:outline-none" title={title} type="button" onClick={onRestore}>
+        <CanvasKindIcon className="!h-4 !w-4 !bg-transparent [&>svg]:!h-4 [&>svg]:!w-4" kind={entry.kind} size="xs" />
         <span className="min-w-0 flex-1 truncate text-left">{title}</span>
       </button>
       <div className="relative flex h-6 w-12 shrink-0 items-center justify-end">
-        <span className="absolute right-0 text-xs text-muted-foreground transition-opacity group-hover/closed:opacity-0 group-focus-within/closed:opacity-0">
+        <span className="absolute inset-y-0 right-0 flex items-center text-xs text-muted-foreground transition-opacity group-hover/closed:opacity-0 group-focus-within/closed:opacity-0">
           {formatClosedTime(entry.closedAt)}
         </span>
-        <span className="absolute right-0 flex items-center gap-1 opacity-0 transition-opacity group-hover/closed:opacity-100 group-focus-within/closed:opacity-100">
+        <span className="absolute inset-y-0 right-0 flex items-center gap-1 opacity-0 transition-opacity group-hover/closed:opacity-100 group-focus-within/closed:opacity-100">
           <button aria-label={t("canvas.restore")} className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-background/80 hover:text-foreground" type="button" onClick={onRestore}>
             <Undo2 className="h-3.5 w-3.5" />
           </button>

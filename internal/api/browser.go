@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -55,6 +57,53 @@ type browserStateResp struct {
 type browserTabsResp struct {
 	Tabs        []browser.TabSnapshot `json:"tabs"`
 	ProcessMode string                `json:"processMode,omitempty"`
+}
+
+type browserHistoryResp struct {
+	History []*store.BrowserHistoryEntry `json:"history"`
+}
+
+func (s *Server) listBrowserHistory(c *cart.Context) error {
+	if _, ok := s.browserStateSession(c); !ok {
+		return nil
+	}
+	limit := store.BrowserHistoryDefaultLimit
+	if raw := strings.TrimSpace(c.Request.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			return badRequest(c, "invalid history limit")
+		}
+		limit = parsed
+	}
+	entries, err := s.store.ListBrowserHistory(c.Request.Context(), c.Request.URL.Query().Get("q"), limit)
+	if err != nil {
+		return browserStoreError(c, s, err)
+	}
+	c.JSON(http.StatusOK, browserHistoryResp{History: entries})
+	return nil
+}
+
+func (s *Server) deleteBrowserHistory(c *cart.Context) error {
+	if _, ok := s.browserStateSession(c); !ok {
+		return nil
+	}
+	historyID, _ := c.Param("historyID")
+	if err := s.store.DeleteBrowserHistory(c.Request.Context(), historyID); err != nil {
+		return browserStoreError(c, s, err)
+	}
+	c.Response.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (s *Server) clearBrowserHistory(c *cart.Context) error {
+	if _, ok := s.browserStateSession(c); !ok {
+		return nil
+	}
+	if err := s.store.ClearBrowserHistory(c.Request.Context()); err != nil {
+		return browserStoreError(c, s, err)
+	}
+	c.Response.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 func (s *Server) getBrowserState(c *cart.Context) error {
@@ -294,7 +343,7 @@ func (s *Server) openBrowserTab(c *cart.Context) error {
 		return s.browserError(c, err)
 	}
 	s.allowBrowserTabInGate(sessionID, tab.ID)
-	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
+	if err := s.syncBrowserNavigation(c.Request.Context(), sessionID, tab); err != nil {
 		return browserStoreError(c, s, err)
 	}
 	c.JSON(http.StatusOK, tab)
@@ -334,7 +383,7 @@ func (s *Server) syncBrowserTab(c *cart.Context) error {
 		c.JSON(http.StatusOK, current)
 		return nil
 	}
-	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
+	if err := s.syncBrowserSnapshot(c.Request.Context(), sessionID, tab); err != nil {
 		return browserStoreError(c, s, err)
 	}
 	c.JSON(http.StatusOK, tab)
@@ -384,7 +433,7 @@ func (s *Server) openBrowserSession(c *cart.Context) error {
 		return s.browserError(c, err)
 	}
 	s.allowBrowserTabInGate(sessionID, tab.ID)
-	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
+	if err := s.syncBrowserNavigation(c.Request.Context(), sessionID, tab); err != nil {
 		return browserStoreError(c, s, err)
 	}
 	c.JSON(http.StatusOK, tab)
@@ -702,7 +751,7 @@ func (s *Server) backBrowserTab(c *cart.Context) error {
 	if err != nil {
 		return s.browserError(c, err)
 	}
-	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
+	if err := s.syncBrowserNavigation(c.Request.Context(), sessionID, tab); err != nil {
 		return browserStoreError(c, s, err)
 	}
 	c.JSON(http.StatusOK, tab)
@@ -722,7 +771,7 @@ func (s *Server) forwardBrowserTab(c *cart.Context) error {
 	if err != nil {
 		return s.browserError(c, err)
 	}
-	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
+	if err := s.syncBrowserNavigation(c.Request.Context(), sessionID, tab); err != nil {
 		return browserStoreError(c, s, err)
 	}
 	c.JSON(http.StatusOK, tab)
@@ -742,7 +791,7 @@ func (s *Server) reloadBrowserTab(c *cart.Context) error {
 	if err != nil {
 		return s.browserError(c, err)
 	}
-	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
+	if err := s.syncBrowserNavigation(c.Request.Context(), sessionID, tab); err != nil {
 		return browserStoreError(c, s, err)
 	}
 	c.JSON(http.StatusOK, tab)
@@ -946,6 +995,62 @@ func (s *Server) syncBrowserState(ctx context.Context, sessionID string, tab bro
 	return err
 }
 
+func (s *Server) syncBrowserNavigation(ctx context.Context, sessionID string, tab browser.TabSnapshot) error {
+	if err := s.syncBrowserState(ctx, sessionID, tab); err != nil {
+		return err
+	}
+	return s.recordBrowserHistory(ctx, tab)
+}
+
+func (s *Server) syncBrowserSnapshot(ctx context.Context, sessionID string, tab browser.TabSnapshot) error {
+	previous, err := s.store.GetBrowserTabState(ctx, sessionID, tab.ID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	if err := s.syncBrowserState(ctx, sessionID, tab); err != nil {
+		return err
+	}
+	in, ok := browserHistoryInputFromTab(tab)
+	if !ok {
+		return nil
+	}
+	if previous != nil && strings.TrimSpace(previous.URL) == in.URL {
+		return s.store.UpdateBrowserHistoryMetadata(ctx, in)
+	}
+	_, err = s.store.PutBrowserHistory(ctx, in)
+	return err
+}
+
+func (s *Server) recordBrowserHistory(ctx context.Context, tab browser.TabSnapshot) error {
+	in, ok := browserHistoryInputFromTab(tab)
+	if !ok {
+		return nil
+	}
+	_, err := s.store.PutBrowserHistory(ctx, in)
+	return err
+}
+
+func browserHistoryInputFromTab(tab browser.TabSnapshot) (store.BrowserHistoryInput, bool) {
+	rawURL := strings.TrimSpace(tab.URL)
+	if rawURL == "" || strings.EqualFold(rawURL, "about:blank") {
+		return store.BrowserHistoryInput{}, false
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return store.BrowserHistoryInput{}, false
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https", "file":
+	default:
+		return store.BrowserHistoryInput{}, false
+	}
+	return store.BrowserHistoryInput{
+		URL:        rawURL,
+		Title:      tab.Title,
+		FaviconURL: tab.FaviconURL,
+	}, true
+}
+
 func (s *Server) browserProcessMode(ctx context.Context, sessionID string) string {
 	if s.browser == nil {
 		return "headless"
@@ -1100,6 +1205,9 @@ func writeBrowserHTTPError(w http.ResponseWriter, err error) {
 func browserStoreError(c *cart.Context, s *Server, err error) error {
 	if errors.Is(err, store.ErrInvalidBrowserState) {
 		return badRequest(c, "invalid browser state")
+	}
+	if errors.Is(err, store.ErrInvalidBrowserHistory) {
+		return badRequest(c, "invalid browser history")
 	}
 	return s.fail(c, err)
 }

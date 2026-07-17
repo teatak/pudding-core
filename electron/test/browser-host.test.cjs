@@ -121,6 +121,23 @@ class FakeWebContents extends EventEmitter {
   }
 }
 
+class FakeBrowserWindow extends EventEmitter {
+  constructor(webContents) {
+    super();
+    this.webContents = webContents;
+    this.destroyed = false;
+  }
+
+  isDestroyed() {
+    return this.destroyed;
+  }
+
+  destroy() {
+    this.destroyed = true;
+    this.emit("closed");
+  }
+}
+
 test("waits for a renderer webview and navigates it through persistent CDP", async () => {
   const required = [];
   const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));
@@ -168,6 +185,153 @@ test("managed browser cancels Web Bluetooth device selection", async () => {
   assert.equal(prevented, true);
   assert.equal(selectedDevice, "");
   host.closeAll();
+});
+
+test("opens tab-like blank targets as managed browser tabs", async () => {
+  const required = [];
+  const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));
+  const opening = host.ensure({ sessionID: "session-window-tab", tabID: "tab-opener", url: "about:blank" });
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(44);
+  await host.registerWebContents(required[0], webContents);
+  await opening;
+  webContents.url = "https://example.com/source";
+
+  const result = webContents.windowOpenHandler({
+    url: "https://example.com/next",
+    frameName: "_blank",
+    features: "",
+    disposition: "foreground-tab",
+    referrer: { url: "https://example.com/source", policy: "strict-origin-when-cross-origin" },
+  });
+
+  assert.deepEqual(result, { action: "deny" });
+  const tabs = host.listTabs({ sessionID: "session-window-tab" }).tabs;
+  assert.equal(tabs.length, 2);
+  const nextTab = tabs.find((tab) => tab.tabID !== "tab-opener");
+  assert.equal(nextTab.url, "https://example.com/next");
+  assert.equal(nextTab.activate, true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(required.length, 2);
+  const nextContents = new FakeWebContents(47);
+  await host.registerWebContents(required[1], nextContents);
+  const navigation = nextContents.debugger.commands.find(({ method }) => method === "Page.navigate");
+  assert.deepEqual(navigation.params, {
+    url: "https://example.com/next",
+    referrer: "https://example.com/source",
+    referrerPolicy: "strictOriginWhenCrossOrigin",
+  });
+  host.closeAll();
+});
+
+test("keeps background link targets inactive", async () => {
+  const required = [];
+  const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));
+  const opening = host.ensure({ sessionID: "session-background-tab", tabID: "tab-opener", url: "about:blank" });
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(48);
+  await host.registerWebContents(required[0], webContents);
+  await opening;
+
+  assert.deepEqual(webContents.windowOpenHandler({
+    url: "https://example.com/background",
+    frameName: "_blank",
+    features: "",
+    disposition: "background-tab",
+  }), { action: "deny" });
+  const background = host.listTabs({ sessionID: "session-background-tab" }).tabs.find((tab) => tab.tabID !== "tab-opener");
+  assert.equal(background.activate, false);
+  host.closeAll();
+});
+
+test("allows real child windows when native WindowProxy semantics are required", async () => {
+  const required = [];
+  const created = [];
+  const blocked = [];
+  const host = new BrowserHost(
+    undefined,
+    undefined,
+    undefined,
+    (request) => required.push(request),
+    undefined,
+    undefined,
+    {
+      options: () => ({ backgroundColor: "#123456", webPreferences: { javascript: true, nodeIntegration: true } }),
+      created: (window, context) => created.push({ window, context }),
+      blockedNavigation: (context) => blocked.push(context),
+    },
+  );
+  const opening = host.ensure({ sessionID: "session-window-popup", tabID: "tab-opener", url: "about:blank" });
+  await new Promise((resolve) => setImmediate(resolve));
+  const openerContents = new FakeWebContents(45);
+  await host.registerWebContents(required[0], openerContents);
+  await opening;
+  openerContents.url = "https://example.com/source";
+
+  const result = openerContents.windowOpenHandler({
+    url: "https://example.com/popup",
+    frameName: "oauth-popup",
+    features: "width=480,height=640",
+    disposition: "new-window",
+  });
+  assert.equal(result.action, "allow");
+  assert.equal(result.outlivesOpener, false);
+  assert.equal(result.overrideBrowserWindowOptions.backgroundColor, "#123456");
+  assert.equal(result.overrideBrowserWindowOptions.webPreferences.partition, "persist:pudding-default");
+  assert.equal(result.overrideBrowserWindowOptions.webPreferences.contextIsolation, true);
+  assert.equal(result.overrideBrowserWindowOptions.webPreferences.nodeIntegration, false);
+  assert.equal(result.overrideBrowserWindowOptions.webPreferences.sandbox, true);
+  assert.equal(result.overrideBrowserWindowOptions.webPreferences.webviewTag, false);
+
+  const noOpenerResult = openerContents.windowOpenHandler({
+    url: "https://example.com/detached",
+    frameName: "_blank",
+    features: "noopener,noreferrer,width=480",
+    disposition: "new-window",
+  });
+  assert.equal(noOpenerResult.action, "allow");
+  assert.equal(noOpenerResult.outlivesOpener, true);
+  assert.equal(openerContents.windowOpenHandler({
+    url: "",
+    frameName: "",
+    features: "",
+    disposition: "foreground-tab",
+  }).action, "allow");
+  assert.equal(openerContents.windowOpenHandler({
+    url: "blob:https://example.com/7f3f05ba-25d6-4f6a-b35c-e53fb7ec87d1",
+    frameName: "blob-popup",
+    features: "width=480",
+    disposition: "new-window",
+  }).action, "allow");
+  assert.deepEqual(openerContents.windowOpenHandler({
+    url: "blob:https://evil.example/7f3f05ba-25d6-4f6a-b35c-e53fb7ec87d1",
+    frameName: "blob-popup",
+    features: "width=480",
+    disposition: "new-window",
+  }), { action: "deny" });
+
+  const popupContents = new FakeWebContents(46);
+  const popupWindow = new FakeBrowserWindow(popupContents);
+  openerContents.emit("did-create-window", popupWindow, { url: "https://example.com/popup" });
+  assert.equal(created.length, 1);
+  assert.equal(created[0].window, popupWindow);
+  assert.equal(created[0].context.sessionID, "session-window-popup");
+  assert.equal(typeof popupContents.windowOpenHandler, "function");
+  let blobPrevented = false;
+  popupContents.emit(
+    "will-navigate",
+    { preventDefault: () => { blobPrevented = true; } },
+    "blob:https://example.com/7f3f05ba-25d6-4f6a-b35c-e53fb7ec87d1",
+  );
+  assert.equal(blobPrevented, false);
+
+  let prevented = false;
+  popupContents.emit("will-navigate", { preventDefault: () => { prevented = true; } }, "javascript:alert(1)");
+  assert.equal(prevented, true);
+  assert.equal(blocked.length, 1);
+  assert.equal(blocked[0].url, "javascript:alert(1)");
+  host.closeAll();
+  assert.equal(popupWindow.isDestroyed(), true);
 });
 
 test("rejects a stale renderer registration", async () => {
@@ -232,7 +396,10 @@ test("rejects oversized full-page screenshots before capture", async () => {
 
 test("rejects navigation immediately when the webview reports a main-frame load failure", async () => {
   let required;
-  const host = new BrowserHost(undefined, undefined, undefined, (request) => {
+  let latestSnapshot;
+  const host = new BrowserHost((snapshot) => {
+    latestSnapshot = snapshot;
+  }, undefined, undefined, (request) => {
     required = request;
   });
   const opening = host.ensure({ sessionID: "session-fail", tabID: "tab-fail", url: "about:blank" });
@@ -246,6 +413,7 @@ test("rejects navigation immediately when the webview reports a main-frame load 
   await new Promise((resolve) => setImmediate(resolve));
   webContents.emit("did-fail-load", {}, -105, "ERR_NAME_NOT_RESOLVED", "https://bad.example/", true);
   await assert.rejects(navigation, /browser navigation failed: ERR_NAME_NOT_RESOLVED/);
+  assert.equal(latestSnapshot.loadError.code, "ERR_NAME_NOT_RESOLVED");
   host.closeAll();
 });
 

@@ -330,6 +330,21 @@ export const browserState = z.object({
 });
 export type BrowserState = z.infer<typeof browserState>;
 
+export const browserHistoryEntry = z.object({
+  id: z.string(),
+  url: z.string(),
+  title: z.string().optional(),
+  faviconURL: z.string().optional(),
+  visitedAt: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type BrowserHistoryEntry = z.infer<typeof browserHistoryEntry>;
+
+export const listBrowserHistoryResponse = z.object({
+  history: z.array(browserHistoryEntry),
+});
+
 // provider profile 的设置视图:apiKey 来自本地配置,编辑时可回显;apiKeySet 用于列表状态。
 export const providerProtocol = z.enum(["openai-compatible", "openai-responses", "google", "anthropic"]);
 

@@ -198,6 +198,21 @@ CREATE TABLE IF NOT EXISTS session_browser_tabs (
 CREATE INDEX IF NOT EXISTS session_browser_tabs_updated_at
     ON session_browser_tabs(session_id, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS browser_history (
+    id          TEXT NOT NULL,
+    url         TEXT NOT NULL,
+    title       TEXT NOT NULL DEFAULT '',
+    favicon_url TEXT NOT NULL DEFAULT '',
+    visited_at  INTEGER NOT NULL,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE (url)
+);
+
+CREATE INDEX IF NOT EXISTS browser_history_visited_at
+    ON browser_history(visited_at DESC);
+
 CREATE TABLE IF NOT EXISTS messages (
     id                TEXT PRIMARY KEY,
     session_id        TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

@@ -24,6 +24,7 @@ const packageMetadata = require("../package.json");
 const { BrowserBridgeServer } = require("./browser-bridge-server.cjs");
 const { BrowserHost } = require("./browser-host.cjs");
 const { configureManagedBrowserPermissions, managedBrowserPartition } = require("./browser-permissions.cjs");
+const { hardenManagedBrowserWebview } = require("./browser-webview-security.cjs");
 const { probePuddingDaemon } = require("./daemon-health.cjs");
 const { installConsoleFileLogging } = require("./file-logger.cjs");
 const { buildEditContextMenuTemplate } = require("./context-menu.cjs");
@@ -66,6 +67,7 @@ const macTrafficLightPosition = { x: 18, y: 18 };
 const defaultWindowBounds = { width: 1440, height: 920 };
 const minWindowBounds = { width: 1000, height: 680 };
 const browserWebviewFocusWaiters = new Map();
+let mainWindow = null;
 let themePreference = normalizeThemePreference(process.env.PUDDING_THEME || "system");
 nativeTheme.themeSource = themePreference;
 const browserHost = new BrowserHost(
@@ -85,6 +87,22 @@ const browserHost = new BrowserHost(
     broadcastToTrustedRenderers("pudding:browser:automation-end", event);
   },
   (request, target) => requestBrowserWebviewFocus(request, target),
+  {
+    options: () => ({ backgroundColor: themeBackgroundColor() }),
+    created: (window) => {
+      window.setBackgroundColor(themeBackgroundColor());
+      bindEditContextMenu(window.webContents, window);
+    },
+    blockedNavigation: ({ url, window }) => {
+      if (!handleOAuthReturnURL(url)) {
+        return false;
+      }
+      if (window && !window.isDestroyed()) {
+        window.close();
+      }
+      return true;
+    },
+  },
 );
 const browserBridgeServer = new BrowserBridgeServer(browserHost);
 const projectFileWatcher = new ProjectFileWatcher();
@@ -157,7 +175,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("second-instance", () => {
-  const window = BrowserWindow.getAllWindows()[0];
+  const window = getMainWindow();
   if (window && !window.isDestroyed()) {
     showMainWindow(window);
   }
@@ -167,7 +185,7 @@ function activateApplication() {
   if (!hasSingleInstanceLock) {
     return;
   }
-  const window = BrowserWindow.getAllWindows()[0];
+  const window = getMainWindow();
   if (window) {
     showMainWindow(window);
     return;
@@ -195,7 +213,8 @@ app.on("window-all-closed", () => {
 app.on("before-quit", (event) => {
   quitting = true;
   updateManager.stop();
-  for (const window of BrowserWindow.getAllWindows()) {
+  const window = getMainWindow();
+  if (window) {
     saveWindowState(window);
   }
   projectFileWatcher.closeAll();
@@ -241,14 +260,26 @@ function createMainWindow() {
       webviewTag: true,
     },
   });
+  mainWindow = window;
+  window.once("closed", () => {
+    if (mainWindow === window) {
+      mainWindow = null;
+    }
+  });
 
   bindEditContextMenu(window.webContents, window);
+  window.webContents.on("will-attach-webview", (event, webPreferences, params) => {
+    if (!hardenManagedBrowserWebview(event, webPreferences, params, managedBrowserPartition)) {
+      console.warn("[electron] blocked unmanaged browser webview attachment");
+    }
+  });
   window.webContents.on("did-attach-webview", (_event, guestContents) => {
+    guestContents.setWindowOpenHandler(() => ({ action: "deny" }));
     bindEditContextMenu(guestContents, window);
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    openAllowedExternalURL(url);
     return { action: "deny" };
   });
 
@@ -257,7 +288,7 @@ function createMainWindow() {
       return;
     }
     event.preventDefault();
-    void shell.openExternal(url);
+    openAllowedExternalURL(url);
   });
   window.webContents.on("did-finish-load", () => {
     if (isTrustedRendererURL(window.webContents.getURL())) {
@@ -323,7 +354,7 @@ function updateTrayMenu() {
       {
         label: nativeMenuText("openApp"),
         click: () => {
-          const target = BrowserWindow.getAllWindows()[0];
+          const target = getMainWindow();
           if (!target || target.isDestroyed()) {
             return;
           }
@@ -493,10 +524,9 @@ function updateMenuItem() {
 
 function setShellLocale(locale) {
   shellLocale = normalizeNativeLocale(locale);
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (!window.isDestroyed()) {
-      window.setTitle(nativeAppName());
-    }
+  const window = getMainWindow();
+  if (window) {
+    window.setTitle(nativeAppName());
   }
   appTray?.setToolTip(nativeAppName());
   updateApplicationMenu();
@@ -513,7 +543,7 @@ function nativeMenuText(key, values = {}) {
 }
 
 function sendDesktopMenuCommand(command) {
-  const window = BrowserWindow.getAllWindows()[0];
+  const window = getMainWindow();
   if (!window || window.isDestroyed()) {
     return;
   }
@@ -595,7 +625,7 @@ function showSimulatedUpdateResult() {
 }
 
 function showUpdateMessage(options, bringToFront) {
-  const window = BrowserWindow.getAllWindows()[0];
+  const window = getMainWindow();
   if (window && !window.isDestroyed() && (bringToFront || window.isVisible())) {
     if (bringToFront) {
       showMainWindow(window);
@@ -630,6 +660,10 @@ async function openLogsDirectory() {
   } catch (error) {
     console.warn("[electron] open logs directory failed", error);
   }
+}
+
+function getMainWindow() {
+  return mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
 }
 
 function showMainWindow(window) {
@@ -683,7 +717,7 @@ function flushPendingOAuthReturnURLs() {
 }
 
 function processOAuthReturn(payload) {
-  const window = BrowserWindow.getAllWindows()[0];
+  const window = getMainWindow();
   if (window) {
     showMainWindow(window);
   }
@@ -1217,7 +1251,8 @@ function resolveDaemonBinary() {
 async function prepareForUpdateInstall() {
   quitting = true;
   updateManager.stop();
-  for (const window of BrowserWindow.getAllWindows()) {
+  const window = getMainWindow();
+  if (window) {
     saveWindowState(window);
   }
   await stopDesktopResources();
@@ -1332,6 +1367,17 @@ function isAllowedExternalURL(rawURL) {
   } catch {
     return false;
   }
+}
+
+function openAllowedExternalURL(rawURL) {
+  const url = String(rawURL || "").trim();
+  if (!isAllowedExternalURL(url)) {
+    return false;
+  }
+  void shell.openExternal(url).catch((error) => {
+    console.warn("[electron] open external URL failed", error);
+  });
+  return true;
 }
 
 function normalizeUpdateFeedURL(rawURL) {

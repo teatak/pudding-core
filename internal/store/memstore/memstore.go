@@ -18,43 +18,45 @@ import (
 )
 
 type Memstore struct {
-	mu          sync.Mutex
-	sessions    map[string]*store.Session
-	projects    map[string]*store.Project
-	turns       map[string]*store.Turn
-	fileChanges map[string][]*store.TurnFileChange // turnID → root/path order
-	messages    map[string][]*store.Message        // sessionID → 时间升序
-	queued      map[string][]*store.QueuedInput
-	usage       map[usageKey]*store.UsageHourlyStat       // (UTC hour unix ms, model) → global stats
-	susage      map[string]*store.SessionUsageStat        // sessionID → session stats
-	canvas      map[string]*store.CanvasItem              // sessionID/itemID → session canvas item
-	closed      map[string]*store.ClosedCanvasItem        // sessionID/id → recently closed canvas item
-	savedCanvas map[string]*store.SavedCanvasItem         // id → globally saved canvas item
-	browser     map[string]map[string]*store.BrowserState // sessionID → tabID → browser state
-	events      map[string][]event.Event                  // sessionID → seq 升序
-	seq         map[string]int64
-	settings    map[string]string
-	profiles    map[string]*store.ProviderProfile
+	mu             sync.Mutex
+	sessions       map[string]*store.Session
+	projects       map[string]*store.Project
+	turns          map[string]*store.Turn
+	fileChanges    map[string][]*store.TurnFileChange // turnID → root/path order
+	messages       map[string][]*store.Message        // sessionID → 时间升序
+	queued         map[string][]*store.QueuedInput
+	usage          map[usageKey]*store.UsageHourlyStat       // (UTC hour unix ms, model) → global stats
+	susage         map[string]*store.SessionUsageStat        // sessionID → session stats
+	canvas         map[string]*store.CanvasItem              // sessionID/itemID → session canvas item
+	closed         map[string]*store.ClosedCanvasItem        // sessionID/id → recently closed canvas item
+	savedCanvas    map[string]*store.SavedCanvasItem         // id → globally saved canvas item
+	browser        map[string]map[string]*store.BrowserState // sessionID → tabID → browser state
+	browserHistory map[string]*store.BrowserHistoryEntry     // id → global browser history
+	events         map[string][]event.Event                  // sessionID → seq 升序
+	seq            map[string]int64
+	settings       map[string]string
+	profiles       map[string]*store.ProviderProfile
 }
 
 func New() *Memstore {
 	return &Memstore{
-		sessions:    make(map[string]*store.Session),
-		projects:    make(map[string]*store.Project),
-		turns:       make(map[string]*store.Turn),
-		fileChanges: make(map[string][]*store.TurnFileChange),
-		messages:    make(map[string][]*store.Message),
-		queued:      make(map[string][]*store.QueuedInput),
-		usage:       make(map[usageKey]*store.UsageHourlyStat),
-		susage:      make(map[string]*store.SessionUsageStat),
-		canvas:      make(map[string]*store.CanvasItem),
-		closed:      make(map[string]*store.ClosedCanvasItem),
-		savedCanvas: make(map[string]*store.SavedCanvasItem),
-		browser:     make(map[string]map[string]*store.BrowserState),
-		events:      make(map[string][]event.Event),
-		seq:         make(map[string]int64),
-		settings:    make(map[string]string),
-		profiles:    make(map[string]*store.ProviderProfile),
+		sessions:       make(map[string]*store.Session),
+		projects:       make(map[string]*store.Project),
+		turns:          make(map[string]*store.Turn),
+		fileChanges:    make(map[string][]*store.TurnFileChange),
+		messages:       make(map[string][]*store.Message),
+		queued:         make(map[string][]*store.QueuedInput),
+		usage:          make(map[usageKey]*store.UsageHourlyStat),
+		susage:         make(map[string]*store.SessionUsageStat),
+		canvas:         make(map[string]*store.CanvasItem),
+		closed:         make(map[string]*store.ClosedCanvasItem),
+		savedCanvas:    make(map[string]*store.SavedCanvasItem),
+		browser:        make(map[string]map[string]*store.BrowserState),
+		browserHistory: make(map[string]*store.BrowserHistoryEntry),
+		events:         make(map[string][]event.Event),
+		seq:            make(map[string]int64),
+		settings:       make(map[string]string),
+		profiles:       make(map[string]*store.ProviderProfile),
 	}
 }
 
@@ -1362,6 +1364,130 @@ func (m *Memstore) ClearBrowserState(_ context.Context, sessionID string) error 
 	return nil
 }
 
+func (m *Memstore) ListBrowserHistory(_ context.Context, query string, limit int) ([]*store.BrowserHistoryEntry, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	query = strings.ToLower(strings.TrimSpace(query))
+	limit = store.NormalizeBrowserHistoryLimit(limit)
+	out := make([]*store.BrowserHistoryEntry, 0, len(m.browserHistory))
+	for _, entry := range m.browserHistory {
+		if query != "" && !strings.Contains(strings.ToLower(entry.URL), query) && !strings.Contains(strings.ToLower(entry.Title), query) {
+			continue
+		}
+		out = append(out, cloneBrowserHistoryEntry(entry))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].VisitedAt.Equal(out[j].VisitedAt) {
+			return out[i].VisitedAt.After(out[j].VisitedAt)
+		}
+		return out[i].ID > out[j].ID
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (m *Memstore) PutBrowserHistory(_ context.Context, in store.BrowserHistoryInput) (*store.BrowserHistoryEntry, error) {
+	if err := store.NormalizeBrowserHistoryInput(&in); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now().UTC()
+	if m.browserHistory == nil {
+		m.browserHistory = make(map[string]*store.BrowserHistoryEntry)
+	}
+	entry := &store.BrowserHistoryEntry{
+		ID:         store.NewID("history"),
+		URL:        in.URL,
+		Title:      in.Title,
+		FaviconURL: in.FaviconURL,
+		VisitedAt:  in.VisitedAt,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	for _, existing := range m.browserHistory {
+		if existing.URL != in.URL {
+			continue
+		}
+		entry.ID = existing.ID
+		entry.CreatedAt = existing.CreatedAt
+		if entry.Title == "" {
+			entry.Title = existing.Title
+		}
+		if entry.FaviconURL == "" {
+			entry.FaviconURL = existing.FaviconURL
+		}
+		break
+	}
+	m.browserHistory[entry.ID] = entry
+	m.trimBrowserHistoryLocked()
+	return cloneBrowserHistoryEntry(entry), nil
+}
+
+func (m *Memstore) UpdateBrowserHistoryMetadata(_ context.Context, in store.BrowserHistoryInput) error {
+	if err := store.NormalizeBrowserHistoryInput(&in); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, entry := range m.browserHistory {
+		if entry.URL != in.URL {
+			continue
+		}
+		if in.Title != "" {
+			entry.Title = in.Title
+		}
+		if in.FaviconURL != "" {
+			entry.FaviconURL = in.FaviconURL
+		}
+		entry.UpdatedAt = time.Now().UTC()
+		break
+	}
+	return nil
+}
+
+func (m *Memstore) DeleteBrowserHistory(_ context.Context, historyID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	historyID = strings.TrimSpace(historyID)
+	if historyID == "" {
+		return store.ErrInvalidBrowserHistory
+	}
+	if _, ok := m.browserHistory[historyID]; !ok {
+		return store.ErrNotFound
+	}
+	delete(m.browserHistory, historyID)
+	return nil
+}
+
+func (m *Memstore) ClearBrowserHistory(_ context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.browserHistory = make(map[string]*store.BrowserHistoryEntry)
+	return nil
+}
+
+func (m *Memstore) trimBrowserHistoryLocked() {
+	if len(m.browserHistory) <= store.BrowserHistoryRetainLimit {
+		return
+	}
+	entries := make([]*store.BrowserHistoryEntry, 0, len(m.browserHistory))
+	for _, entry := range m.browserHistory {
+		entries = append(entries, entry)
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if !entries[i].VisitedAt.Equal(entries[j].VisitedAt) {
+			return entries[i].VisitedAt.After(entries[j].VisitedAt)
+		}
+		return entries[i].ID > entries[j].ID
+	})
+	for _, entry := range entries[store.BrowserHistoryRetainLimit:] {
+		delete(m.browserHistory, entry.ID)
+	}
+}
+
 func (m *Memstore) trimClosedCanvasItemsLocked(sessionID string, limit int) {
 	out := make([]*store.ClosedCanvasItem, 0, len(m.closed))
 	for _, item := range m.closed {
@@ -1940,6 +2066,14 @@ func cloneBrowserState(state *store.BrowserState) *store.BrowserState {
 		return nil
 	}
 	cp := *state
+	return &cp
+}
+
+func cloneBrowserHistoryEntry(entry *store.BrowserHistoryEntry) *store.BrowserHistoryEntry {
+	if entry == nil {
+		return nil
+	}
+	cp := *entry
 	return &cp
 }
 

@@ -1186,7 +1186,14 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
               <Textarea
                 data-composer-text-input="true"
                 className="block max-h-36 min-h-6 resize-none overflow-y-auto rounded-none border-0 bg-transparent p-0 text-base leading-6 shadow-none focus-visible:ring-0 md:text-sm dark:bg-transparent"
-                placeholder={t("composer.messagePlaceholder")}
+                placeholder={
+                  session.activeMode === "chat"
+                    ? t("composer.messagePlaceholder")
+                    : t("composer.modeMessagePlaceholder").replace(
+                        "{mode}",
+                        t(`mode.${session.activeMode}`),
+                      )
+                }
                 rows={1}
                 name={textField.name}
                 ref={setTextAreaRef}

@@ -19,6 +19,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 		1: "8c5dc7392f4b5bdc77a1edb38c193789a24a1292defa9bf99b1effd96fbaea3d",
 		2: "e48dbb97a116c7dd69130b48d3dcc6eae8bc5e628ff27ca586e70f7000e1e0c4",
 		3: "c996914be5b56acc17bd448f3e8d498405ce9392d79248f14550fb1bb46829f1",
+		4: "e38283316dd223f2f94183fcd94122e36e5d1ec39d5db578744846055391af59",
 	}
 	want, ok := releasedFingerprints[currentSchemaVersion]
 	if !ok {
@@ -43,6 +44,41 @@ func TestOpenCreatesVersionedSchema(t *testing.T) {
 	}
 	if version != currentSchemaVersion {
 		t.Fatalf("schema version = %d, want %d", version, currentSchemaVersion)
+	}
+}
+
+func TestOpenMigratesVersionThreeBrowserHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pudding.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db := openMigrationTestDB(t, path)
+	if _, err := db.Exec(`
+		DROP INDEX browser_history_visited_at;
+		DROP TABLE browser_history;
+		PRAGMA user_version = 3;
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	version, err := schemaVersion(reopened.db)
+	if err != nil || version != currentSchemaVersion {
+		t.Fatalf("schema version=%d err=%v", version, err)
+	}
+	entries, err := reopened.ListBrowserHistory(context.Background(), "", 20)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("browser history migration failed: entries=%+v err=%v", entries, err)
 	}
 }
 

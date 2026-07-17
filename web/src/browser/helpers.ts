@@ -1,4 +1,4 @@
-import type { BrowserState, BrowserTab } from "@/api/client";
+import type { BrowserHistoryEntry, BrowserState, BrowserTab } from "@/api/client";
 
 import type { BrowserCanvasPayload } from "./types";
 
@@ -95,6 +95,34 @@ export function browserDisplayURL(rawURL?: string): string {
   return browserURLIsBlank(url) ? "" : url;
 }
 
+export function browserCompactURL(rawURL: string): string {
+  try {
+    const url = new URL(rawURL);
+    const host = url.host.replace(/^www\./i, "");
+    const path = url.pathname === "/" ? "" : url.pathname;
+    return `${host}${path}${url.search}${url.hash}`;
+  } catch {
+    return rawURL.replace(/^https?:\/\/(?:www\.)?/i, "").replace(/\/$/, "");
+  }
+}
+
+export function uniqueBrowserHistoryBySite(entries: BrowserHistoryEntry[], limit = entries.length): BrowserHistoryEntry[] {
+  const seen = new Set<string>();
+  const unique: BrowserHistoryEntry[] = [];
+  for (const entry of entries) {
+    const key = browserHistorySiteKey(entry.url);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(entry);
+    if (unique.length >= limit) {
+      break;
+    }
+  }
+  return unique;
+}
+
 export function browserURLIsBlank(rawURL?: string): boolean {
   const url = (rawURL || "").trim().toLowerCase();
   return !url || url === "about:blank";
@@ -144,6 +172,18 @@ function browserTabIsNewerThan(tab: BrowserTab | undefined, timestamp?: string):
   const tabTime = browserTabTimestamp(tab);
   const compareTime = browserTimestamp(timestamp);
   return Number.isFinite(tabTime) && (!Number.isFinite(compareTime) || tabTime > compareTime);
+}
+
+function browserHistorySiteKey(rawURL: string): string {
+  try {
+    const url = new URL(rawURL);
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      return `web:${url.host.toLowerCase().replace(/^www\./, "")}`;
+    }
+    return `url:${url.toString()}`;
+  } catch {
+    return `url:${rawURL.trim().toLowerCase()}`;
+  }
 }
 
 function browserTabTimestamp(tab: BrowserTab): number {

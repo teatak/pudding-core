@@ -201,6 +201,8 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/audio/output").POST(s.bindAudioOutput)
 	app.Route("/sessions/:id/audio/asr-recordings").DELETE(s.clearASRRecordings)
 	app.Route("/sessions/:id/browser/state").GET(s.getBrowserState).DELETE(s.clearBrowserState)
+	app.Route("/sessions/:id/browser/history").GET(s.listBrowserHistory).DELETE(s.clearBrowserHistory)
+	app.Route("/sessions/:id/browser/history/:historyID").DELETE(s.deleteBrowserHistory)
 	app.Route("/sessions/:id/browser/close").POST(s.closeBrowserSession)
 	app.Route("/sessions/:id/browser/open").POST(s.openBrowserSession)
 	app.Route("/sessions/:id/browser/tabs").GET(s.listBrowserTabs).POST(s.createBrowserTab)

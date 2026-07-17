@@ -11,9 +11,10 @@ const screenshotMaxPixels = 32 * 1024 * 1024;
 const screenshotMaxBytes = 64 * 1024 * 1024;
 const maxTabsPerSession = 8;
 const maxTabsTotal = 16;
+const maxPopupWindowsTotal = 8;
 
 class BrowserHost {
-  constructor(onUpdate, onCursor, onAutomationStart, onWebviewRequired, onAutomationEnd, onWebviewFocusRequired) {
+  constructor(onUpdate, onCursor, onAutomationStart, onWebviewRequired, onAutomationEnd, onWebviewFocusRequired, windowHooks) {
     this.slots = new Map();
     this.inputQueue = Promise.resolve();
     this.onUpdate = typeof onUpdate === "function" ? onUpdate : () => {};
@@ -22,6 +23,11 @@ class BrowserHost {
     this.onWebviewRequired = typeof onWebviewRequired === "function" ? onWebviewRequired : () => {};
     this.onAutomationEnd = typeof onAutomationEnd === "function" ? onAutomationEnd : () => {};
     this.onWebviewFocusRequired = typeof onWebviewFocusRequired === "function" ? onWebviewFocusRequired : async () => false;
+    this.popupWindowOptions = typeof windowHooks?.options === "function" ? windowHooks.options : () => ({});
+    this.onPopupCreated = typeof windowHooks?.created === "function" ? windowHooks.created : () => {};
+    this.onBlockedWindowNavigation = typeof windowHooks?.blockedNavigation === "function" ? windowHooks.blockedNavigation : () => false;
+    this.boundPopupContents = new WeakSet();
+    this.popupWindows = new Set();
   }
 
   async ensure(request) {
@@ -291,6 +297,12 @@ class BrowserHost {
     for (const slot of Array.from(this.slots.values())) {
       this.destroySlot(slot);
     }
+    for (const window of this.popupWindows) {
+      if (!window.isDestroyed()) {
+        window.destroy();
+      }
+    }
+    this.popupWindows.clear();
   }
 
   destroySlot(slot) {
@@ -435,6 +447,8 @@ class BrowserHost {
       navigationWaiter: null,
       historyIndex: 0,
       historyEntries: [],
+      activateOnCreate: true,
+      pendingOpenNavigation: null,
     };
     slot.sendCDP = (method, params) => this.sendCDP(slot, method, params);
     this.slots.set(key, slot);
@@ -592,7 +606,7 @@ class BrowserHost {
     }
     markSlotNavigationIntent(slot, targetURL);
     await this.runNavigation(slot, async () => {
-      const result = await this.sendCDP(slot, "Page.navigate", { url: targetURL });
+      const result = await this.sendCDP(slot, "Page.navigate", takeNavigationParams(slot, targetURL));
       if (result?.errorText) {
         throw new Error(`browser navigation failed: ${result.errorText}`);
       }
@@ -661,22 +675,8 @@ class BrowserHost {
       event.preventDefault();
       callback("");
     });
-    webContents.setWindowOpenHandler(({ url }) => {
-      const targetURL = normalizeURL(url, slot.fileRoots);
-      if (!targetURL) {
-        return { action: "deny" };
-      }
-      const next = this.ensureSlot({
-        sessionID: slot.sessionID,
-        tabID: newTabID(),
-        url: targetURL,
-        _fileAuthorized: true,
-        fileRoots: slot.fileRoots,
-      });
-      markSlotNavigationIntent(next, targetURL);
-      this.noteUpdated(next);
-      return { action: "deny" };
-    });
+    webContents.setWindowOpenHandler((details) => this.handleWindowOpen(slot, details, webContents));
+    webContents.on("did-create-window", (window, details) => this.bindPopupWindow(slot, window, details, webContents));
     webContents.on("will-navigate", (event, url) => {
       if (slot.webContents !== webContents || normalizeURL(url, slot.fileRoots)) {
         return;
@@ -765,6 +765,95 @@ class BrowserHost {
         rejectNavigationWaiter(slot, new Error("browser tab destroyed"));
         if (!slot.disposed) this.onUpdate(lostSnapshot(slot));
       }
+    });
+  }
+
+  handleWindowOpen(slot, details = {}, openerContents = slot.webContents) {
+    const managedTargetURL = normalizeURL(details.url, slot.fileRoots);
+    const targetURL = managedTargetURL || normalizeWindowURL(details.url, slot.fileRoots, openerContents?.getURL?.());
+    if (!targetURL) {
+      return { action: "deny" };
+    }
+    if (managedTargetURL && !browserURLIsBlank(managedTargetURL) && windowOpenUsesManagedTab(details)) {
+      const next = this.ensureSlot({
+        sessionID: slot.sessionID,
+        tabID: newTabID(),
+        url: managedTargetURL,
+        _fileAuthorized: true,
+        fileRoots: slot.fileRoots,
+      });
+      next.activateOnCreate = String(details.disposition || "") !== "background-tab";
+      next.pendingOpenNavigation = windowOpenNavigation(details, managedTargetURL, slot.fileRoots);
+      markSlotNavigationIntent(next, managedTargetURL);
+      this.noteUpdated(next);
+      return { action: "deny" };
+    }
+    if (this.popupWindows.size >= maxPopupWindowsTotal) {
+      return { action: "deny" };
+    }
+    const applicationOptions = this.popupWindowOptions({
+      sessionID: slot.sessionID,
+      tabID: slot.tabID,
+      details,
+    }) || {};
+    return {
+      action: "allow",
+      outlivesOpener: windowOpenHasFeature(details, "noopener") || windowOpenHasFeature(details, "noreferrer"),
+      overrideBrowserWindowOptions: {
+        show: true,
+        autoHideMenuBar: true,
+        ...applicationOptions,
+        webPreferences: {
+          ...(applicationOptions.webPreferences || {}),
+          partition: "persist:pudding-default",
+          contextIsolation: true,
+          nodeIntegration: false,
+          nodeIntegrationInWorker: false,
+          nodeIntegrationInSubFrames: false,
+          sandbox: true,
+          webSecurity: true,
+          allowRunningInsecureContent: false,
+          webviewTag: false,
+        },
+      },
+    };
+  }
+
+  bindPopupWindow(slot, window, details = {}, openerContents = slot.webContents) {
+    const webContents = window?.webContents;
+    if (!webContents || webContents.isDestroyed() || this.boundPopupContents.has(webContents)) {
+      return;
+    }
+    this.boundPopupContents.add(webContents);
+    this.popupWindows.add(window);
+    window.once("closed", () => this.popupWindows.delete(window));
+    webContents.on("select-bluetooth-device", (event, _devices, callback) => {
+      event.preventDefault();
+      callback("");
+    });
+    webContents.setWindowOpenHandler((nextDetails) => this.handleWindowOpen(slot, nextDetails, webContents));
+    webContents.on("did-create-window", (childWindow, childDetails) => this.bindPopupWindow(slot, childWindow, childDetails, webContents));
+    const guardNavigation = (event, url) => {
+      if (
+        normalizeWindowURL(url, slot.fileRoots, webContents.getURL?.()) ||
+        normalizeWindowURL(url, slot.fileRoots, openerContents?.getURL?.())
+      ) {
+        return;
+      }
+      event.preventDefault();
+      this.onBlockedWindowNavigation({
+        sessionID: slot.sessionID,
+        tabID: slot.tabID,
+        url: String(url || ""),
+        window,
+      });
+    };
+    webContents.on("will-navigate", guardNavigation);
+    webContents.on("will-redirect", guardNavigation);
+    this.onPopupCreated(window, {
+      sessionID: slot.sessionID,
+      tabID: slot.tabID,
+      details,
     });
   }
 
@@ -1068,6 +1157,75 @@ function newTabID() {
   return `tab_${crypto.randomUUID().replaceAll("-", "")}`;
 }
 
+function windowOpenUsesManagedTab(details) {
+  const disposition = String(details?.disposition || "").toLowerCase();
+  if (disposition !== "foreground-tab" && disposition !== "background-tab") {
+    return false;
+  }
+  if (details?.postBody) {
+    return false;
+  }
+  const frameName = String(details?.frameName || "").trim().toLowerCase();
+  if (frameName && frameName !== "_blank") {
+    return false;
+  }
+  const features = String(details?.features || "").toLowerCase();
+  return !/(^|,)\s*(popup|width|height|left|top)\s*(=|,|$)/.test(features);
+}
+
+function windowOpenHasFeature(details, name) {
+  const expected = String(name || "").trim().toLowerCase();
+  for (const rawFeature of String(details?.features || "").split(",")) {
+    const [rawName, rawValue] = rawFeature.split("=", 2);
+    if (rawName.trim().toLowerCase() !== expected) {
+      continue;
+    }
+    const value = String(rawValue || "yes").trim().toLowerCase();
+    return value !== "no" && value !== "false" && value !== "0";
+  }
+  return false;
+}
+
+function windowOpenNavigation(details, targetURL, fileRoots) {
+  const rawReferrer = String(details?.referrer?.url || "").trim();
+  const referrer = normalizeURL(rawReferrer, fileRoots);
+  return {
+    targetURL,
+    referrer: referrer && !browserURLIsBlank(referrer) ? referrer : "",
+    referrerPolicy: cdpReferrerPolicy(details?.referrer?.policy),
+  };
+}
+
+function takeNavigationParams(slot, targetURL) {
+  const params = { url: targetURL };
+  const pending = slot.pendingOpenNavigation;
+  slot.pendingOpenNavigation = null;
+  if (!pending || !sameNormalizedURL(pending.targetURL, targetURL, slot.fileRoots)) {
+    return params;
+  }
+  if (pending.referrer) {
+    params.referrer = pending.referrer;
+  }
+  if (pending.referrerPolicy) {
+    params.referrerPolicy = pending.referrerPolicy;
+  }
+  return params;
+}
+
+function cdpReferrerPolicy(policy) {
+  const policies = {
+    "no-referrer": "noReferrer",
+    "no-referrer-when-downgrade": "noReferrerWhenDowngrade",
+    origin: "origin",
+    "origin-when-cross-origin": "originWhenCrossOrigin",
+    "same-origin": "sameOrigin",
+    "strict-origin": "strictOrigin",
+    "strict-origin-when-cross-origin": "strictOriginWhenCrossOrigin",
+    "unsafe-url": "unsafeUrl",
+  };
+  return policies[String(policy || "").trim().toLowerCase()] || "";
+}
+
 function normalizeClickMethod(method) {
   const value = String(method || "auto").trim().toLowerCase() || "auto";
   if (value === "auto" || value === "pointer") {
@@ -1107,6 +1265,26 @@ function normalizeURL(rawURL, fileRoots = []) {
     return "";
   }
   return "";
+}
+
+function normalizeWindowURL(rawURL, fileRoots = [], openerURL = "") {
+  if (!String(rawURL || "").trim()) {
+    return "about:blank";
+  }
+  const normalized = normalizeURL(rawURL, fileRoots);
+  if (normalized) {
+    return normalized;
+  }
+  try {
+    const target = new URL(String(rawURL || "").trim());
+    const opener = new URL(String(openerURL || "").trim());
+    if (target.protocol !== "blob:" || target.origin === "null" || target.origin !== opener.origin) {
+      return "";
+    }
+    return target.toString();
+  } catch {
+    return "";
+  }
 }
 
 function browserURLIsBlank(rawURL) {
@@ -1461,8 +1639,15 @@ function snapshot(slot) {
     profileID: "default",
     runtimeID: pending || destroyed ? "" : `webContents:${webContents.id}`,
     version: slot.version,
+    activate: slot.activateOnCreate !== false,
     createdAt: slot.createdAt,
     updatedAt: slot.updatedAt,
+    loadError: slot.navigationError
+      ? {
+          code: String(slot.navigationError.code || "ERR_FAILED"),
+          description: String(slot.navigationError.description || ""),
+        }
+      : undefined,
   };
 }
 

@@ -345,7 +345,7 @@ function CanvasContent({
   }
   if (kind === "grid") {
     return (
-      <div className="p-3">
+      <div className="px-3 pb-3">
         <CanvasGrid payload={payload} token={token} />
       </div>
     );

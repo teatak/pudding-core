@@ -26,14 +26,14 @@ export function BrowserWorkspaceSurface({
     <div
       aria-hidden={!active}
       className={cn(
-        "absolute inset-0 z-20 flex min-h-0 flex-col overflow-hidden border-t border-[var(--workspace-border)] bg-[var(--workspace-background)] text-card-foreground shadow-none",
+        "absolute inset-0 z-20 flex min-h-0 flex-col overflow-hidden border-t border-[var(--workspace-border)] bg-[var(--workspace-chrome-background)] text-card-foreground shadow-none",
         !active && "pointer-events-none invisible opacity-0",
       )}
     >
       <div className="canvas-window-drag-handle flex h-9 shrink-0 cursor-default items-center gap-2 border-b border-[var(--workspace-border)] bg-[var(--workspace-chrome-background)] px-3">
-        <BrowserToolbar key={`toolbar:${browserKey}`} activeTab={activeTab} sessionID={sessionID} token={token} />
+        <BrowserToolbar key={`toolbar:${browserKey}`} active={active} activeTab={activeTab} sessionID={sessionID} token={token} />
       </div>
-      <div className="relative min-h-0 flex-1 overflow-hidden bg-[var(--workspace-background)]">
+      <div className="relative min-h-0 flex-1 overflow-hidden bg-[var(--workspace-chrome-background)]">
         {tabs.map((tab) => (
           <div
             key={`widget:${sessionID}:${tab.id}`}
@@ -52,7 +52,7 @@ export function BrowserWorkspaceSurface({
 function BrowserLoading() {
   const { t } = useI18n();
   return (
-    <div className="absolute inset-0 flex items-center justify-center bg-[var(--workspace-background)] text-sm text-muted-foreground">
+    <div className="absolute inset-0 flex items-center justify-center bg-[var(--workspace-chrome-background)] text-sm text-muted-foreground">
       <Spinner className="mr-2 h-4 w-4" />
       {t("browser.loading")}
     </div>

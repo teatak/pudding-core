@@ -86,6 +86,7 @@ import {
   browserScreenshot,
   browserScreenshotRequest,
   browserState,
+  listBrowserHistoryResponse,
   browserSyncRequest,
   browserTab,
   browserTypeRequest,
@@ -121,6 +122,7 @@ import {
   type BrowserMCPSession,
   type BrowserScreenshot,
   type BrowserState,
+  type BrowserHistoryEntry,
   type BrowserTab,
   type BackgroundProcess,
   type BackgroundProcessLog,
@@ -815,6 +817,36 @@ export function openBrowserURL(
   });
 }
 
+export async function listBrowserHistory(
+  token: string,
+  sessionID: string,
+  query = "",
+  limit = 20,
+): Promise<{ history: BrowserHistoryEntry[] }> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (query.trim()) {
+    params.set("q", query.trim());
+  }
+  return request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/browser/history?${params.toString()}`,
+    listBrowserHistoryResponse,
+  );
+}
+
+export async function deleteBrowserHistoryEntry(token: string, sessionID: string, historyID: string): Promise<void> {
+  await request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/browser/history/${encodeURIComponent(historyID)}`,
+    z.null(),
+    { method: "DELETE" },
+  );
+}
+
+export async function clearBrowserHistory(token: string, sessionID: string): Promise<void> {
+  await request(token, `/sessions/${encodeURIComponent(sessionID)}/browser/history`, z.null(), { method: "DELETE" });
+}
+
 export function openBrowserTab(
   token: string,
   sessionID: string,
@@ -1431,5 +1463,5 @@ export async function deleteProvider(token: string, name: string): Promise<void>
   });
 }
 
-export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BackgroundProcess, BackgroundProcessLog, BuiltinTool, BrowserActionResult, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProjectReference, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, Terminal, TurnFileChange, WebToolsConfig };
+export type { AppConnection, AppDefinition, AppMCPEndpointStatus, AppMCPStatusResponse, AppMCPTool, AppSkillDetail, Attachment, AudioBindings, BackgroundProcess, BackgroundProcessLog, BuiltinTool, BrowserActionResult, BrowserHistoryEntry, BrowserMCPSession, BrowserObservation, BrowserScreenshot, BrowserState, BrowserTab, ContentPart, DailyUsageStat, DesktopAboutSection, LocalFolder, Message, PendingApproval, ConversationTurn, Project, ProjectReference, ProviderModel, ProviderProfile, QueuedInput, Session, SessionUsage, Skill, Terminal, TurnFileChange, WebToolsConfig };
 export { createProjectRequest, createProviderRequest, patchProjectRequest, patchProviderRequest };

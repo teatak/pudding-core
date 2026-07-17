@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import type { BrowserTab } from "@/api/client";
+import { syncBrowserTab, type BrowserTab } from "@/api/client";
 import {
   electronBrowserBridge,
   electronBrowserSnapshotToTab,
@@ -33,14 +33,48 @@ export function useElectronRequiredBrowserTabs(token: string) {
       }
       setTabsBySession((current) => upsertSessionTab(current, tab));
     });
+    const syncTimers = new Map<string, number>();
+    const pendingSnapshots = new Map<string, ElectronBrowserSnapshot>();
     const stopUpdated = bridge.onUpdated((snapshot) => {
       setTabsBySession((current) => updateRequiredTab(current, snapshot));
+      const key = `${snapshot.sessionID}:${snapshot.tabID}`;
+      window.clearTimeout(syncTimers.get(key));
+      if (snapshot.status === "lost") {
+        syncTimers.delete(key);
+        pendingSnapshots.delete(key);
+        return;
+      }
+      if (snapshot.status === "pending") {
+        pendingSnapshots.delete(key);
+        return;
+      }
+      pendingSnapshots.set(key, snapshot);
+      syncTimers.set(
+        key,
+        window.setTimeout(() => {
+          syncTimers.delete(key);
+          const latest = pendingSnapshots.get(key);
+          pendingSnapshots.delete(key);
+          if (!latest || !token || latest.loadError) {
+            return;
+          }
+          void syncBrowserTab(token, latest.sessionID, latest.tabID, {
+            targetID: latest.runtimeID,
+            url: latest.url,
+            title: latest.title,
+            faviconURL: latest.faviconURL,
+            canGoBack: latest.canGoBack,
+            canGoForward: latest.canGoForward,
+          }).catch(() => undefined);
+        }, 350),
+      );
     });
     return () => {
+      syncTimers.forEach((timer) => window.clearTimeout(timer));
       stopRequired();
       stopUpdated();
     };
-  }, []);
+  }, [token]);
 
   return tabsBySession;
 }

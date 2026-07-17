@@ -1,8 +1,8 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileX, MousePointer2, RefreshCw } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Compass, FileX, Globe2, MousePointer2, RefreshCw } from "lucide-react";
 import { createElement, useCallback, useEffect, useRef, useState, type CSSProperties, type HTMLAttributes } from "react";
 
-import { listBrowserTabs, type BrowserTab } from "@/api/client";
+import { listBrowserHistory, listBrowserTabs, type BrowserHistoryEntry, type BrowserTab } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import {
   cacheElectronBrowserSnapshot,
@@ -12,12 +12,15 @@ import {
 import type { ElectronBrowserSurfaceTab } from "@/browser/useElectronRequiredBrowserTabs";
 import {
   browserQueryStaleTimeMS,
+  browserCompactURL,
   browserTargetURL,
   browserTabTitle,
   browserURLIsBlank,
   preferredBrowserTab,
+  uniqueBrowserHistoryBySite,
 } from "@/browser/helpers";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/Spinner";
 import { useI18n } from "@/i18n";
 import type { BrowserCanvasPayload } from "./types";
 
@@ -107,6 +110,12 @@ export function ElectronWebviewBrowser({
   const tabID = activeTab?.id || payload?.tabID || "default";
   const targetURL = normalizeWebviewURL(browserTargetURL(activeTab, payload, payload?.updatedAt));
   const webviewRequestID = activeTabProp?.webviewRequestID || "";
+  const recentHistoryQuery = useQuery({
+    enabled: Boolean(token && ownerSessionID && browserURLIsBlank(targetURL)),
+    queryKey: queryKeys.browserHistoryRecent(8),
+    queryFn: () => listBrowserHistory(token, ownerSessionID, "", 64),
+    staleTime: 0,
+  });
   pendingTargetURLRef.current = targetURL;
   webviewRequestIDRef.current = webviewRequestID;
   tabCreatedAtRef.current = activeTab?.createdAt;
@@ -115,6 +124,25 @@ export function ElectronWebviewBrowser({
     loadErrorRef.current = error;
     setLoadError(error);
   }, []);
+
+  const openRecentMutation = useMutation({
+    mutationFn: async (url: string) => {
+      const bridge = electronBrowserBridge();
+      if (!bridge) {
+        throw new Error("browser bridge unavailable");
+      }
+      setNavigationLoading(true);
+      updateLoadError(null);
+      return bridge.loadURL({ sessionID: ownerSessionID, tabID, url });
+    },
+    onSuccess: (snapshot) => {
+      cacheElectronBrowserSnapshot(queryClient, snapshot, ownerSessionID);
+    },
+    onError: (error) => {
+      setNavigationLoading(false);
+      console.warn("[browser] recent history navigation failed", error);
+    },
+  });
 
   const setWebviewRef = useCallback((node: WebviewElement | null) => {
     webviewReadyCleanupRef.current?.();
@@ -428,20 +456,90 @@ export function ElectronWebviewBrowser({
   }
 
   return (
-    <div className="canvas-window-no-drag relative h-full min-h-0 overflow-hidden bg-[var(--workspace-background)]" aria-label={title} role="application">
+    <div className="canvas-window-no-drag relative h-full min-h-0 overflow-hidden bg-[var(--workspace-chrome-background)]" aria-label={title} role="application">
       {createElement("webview", {
         ref: setWebviewRef,
-        className: "h-full w-full bg-[var(--workspace-background)]",
+        className: "h-full w-full bg-[var(--workspace-chrome-background)]",
         src: "about:blank",
         partition: "persist:pudding-default",
         allowpopups: "true",
         webpreferences: "contextIsolation=yes,sandbox=yes",
       } satisfies WebviewProps)}
+      {browserURLIsBlank(targetURL) && !loadError ? (
+        <BrowserEmptyState
+          history={uniqueBrowserHistoryBySite(recentHistoryQuery.data?.history || [], 8)}
+          openingURL={openRecentMutation.isPending ? openRecentMutation.variables : undefined}
+          onOpen={(url) => openRecentMutation.mutate(url)}
+        />
+      ) : null}
       {navigationLoading && !loadError ? <BrowserNavigationLoading label={t("browser.loadingPage")} /> : null}
       {loadError ? <BrowserLoadErrorPage error={loadError} onReload={reloadAfterError} /> : null}
       {automationCursor ? <BrowserAutomationCursor cursor={automationCursor} /> : null}
     </div>
   );
+}
+
+function BrowserEmptyState({
+  history,
+  openingURL,
+  onOpen,
+}: {
+  history: BrowserHistoryEntry[];
+  openingURL?: string;
+  onOpen: (url: string) => void;
+}) {
+  const { t } = useI18n();
+
+  return (
+    <div className="absolute inset-0 z-[1] flex items-center justify-center bg-[var(--workspace-chrome-background)] px-8">
+      <div className="flex w-full max-w-xl -translate-y-[2vh] flex-col items-center text-center">
+        {history.length > 0 ? (
+          <div className="w-full">
+            <div className="grid grid-cols-2 gap-2">
+              {history.slice(0, 8).map((entry) => (
+                <Button
+                  key={entry.id}
+                  className="group h-14 min-w-0 justify-start gap-3 rounded-xl border border-[var(--workspace-border)] bg-background/20 px-3 font-normal text-muted-foreground shadow-sm hover:bg-background/40 hover:text-foreground"
+                  disabled={Boolean(openingURL)}
+                  title={`${entry.title || browserCompactURL(entry.url)} · ${browserCompactURL(entry.url)}`}
+                  type="button"
+                  variant="ghost"
+                  onClick={() => onOpen(entry.url)}
+                >
+                  <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-[var(--workspace-border)] bg-background/35 shadow-sm">
+                    {openingURL === entry.url ? <Spinner className="size-4" /> : <BrowserRecentFavicon entry={entry} />}
+                  </span>
+                  <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden text-left text-sm">
+                    <span className="min-w-0 truncate text-foreground/85">{entry.title || browserCompactURL(entry.url)}</span>
+                    <span aria-hidden="true" className="shrink-0 text-muted-foreground/40">·</span>
+                    <span className="max-w-[45%] shrink-0 truncate text-xs text-muted-foreground">{browserCompactURL(entry.url)}</span>
+                  </span>
+                </Button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="flex size-10 items-center justify-center rounded-xl border border-[var(--workspace-border)] bg-background/25 text-muted-foreground shadow-sm">
+              <Compass className="size-5" strokeWidth={1.6} />
+            </div>
+            <h2 className="mt-3 text-base font-medium text-foreground/85">{t("browser.emptyTitle")}</h2>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BrowserRecentFavicon({ entry }: { entry: BrowserHistoryEntry }) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => setFailed(false), [entry.faviconURL]);
+
+  if (!entry.faviconURL || failed) {
+    return <Globe2 className="size-4 text-muted-foreground" />;
+  }
+  return <img alt="" className="size-4 object-contain" draggable={false} src={entry.faviconURL} onError={() => setFailed(true)} />;
 }
 
 function captureComposerFocusSnapshot(): ComposerFocusSnapshot | null {

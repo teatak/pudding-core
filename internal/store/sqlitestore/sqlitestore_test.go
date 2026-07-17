@@ -353,6 +353,97 @@ func TestBrowserStatePersistsAndClears(t *testing.T) {
 	}
 }
 
+func TestBrowserHistoryIsGlobalSearchableAndDeletable(t *testing.T) {
+	st, path := openTestStore(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Add(-time.Hour)
+	first, err := st.PutBrowserHistory(ctx, store.BrowserHistoryInput{
+		URL:       "https://example.com/older",
+		Title:     "Example older",
+		VisitedAt: base,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := st.PutBrowserHistory(ctx, store.BrowserHistoryInput{
+		URL:        "https://pudding.local/docs",
+		Title:      "Pudding docs",
+		FaviconURL: "https://pudding.local/favicon.ico",
+		VisitedAt:  base.Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := st.PutBrowserHistory(ctx, store.BrowserHistoryInput{
+		URL:       first.URL,
+		Title:     "Updated example",
+		VisitedAt: base.Add(2 * time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != first.ID || updated.Title != "Updated example" {
+		t.Fatalf("same URL should update one history entry: %+v", updated)
+	}
+	entries, err := st.ListBrowserHistory(ctx, "", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 || entries[0].ID != first.ID || entries[1].ID != second.ID {
+		t.Fatalf("history should be globally ordered by latest visit: %+v", entries)
+	}
+	if err := st.UpdateBrowserHistoryMetadata(ctx, store.BrowserHistoryInput{
+		URL:        second.URL,
+		Title:      "Pudding documentation",
+		FaviconURL: second.FaviconURL,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	entries, err = st.ListBrowserHistory(ctx, "", 20)
+	if err != nil || len(entries) != 2 || entries[0].ID != first.ID || entries[1].VisitedAt != second.VisitedAt {
+		t.Fatalf("metadata updates must not change visit ordering: entries=%+v err=%v", entries, err)
+	}
+	filtered, err := st.ListBrowserHistory(ctx, "PUDDING", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 1 || filtered[0].ID != second.ID {
+		t.Fatalf("history search should match title or URL case-insensitively: %+v", filtered)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	entries, err = reopened.ListBrowserHistory(ctx, "", 20)
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("history should persist: entries=%+v err=%v", entries, err)
+	}
+	if err := reopened.DeleteBrowserHistory(ctx, second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.DeleteBrowserHistory(ctx, second.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleting missing history should return not found: %v", err)
+	}
+	if err := reopened.UpdateBrowserHistoryMetadata(ctx, store.BrowserHistoryInput{URL: second.URL, Title: "late title"}); err != nil {
+		t.Fatal(err)
+	}
+	entries, err = reopened.ListBrowserHistory(ctx, "", 20)
+	if err != nil || len(entries) != 1 || entries[0].ID != first.ID {
+		t.Fatalf("metadata updates must not recreate deleted history: entries=%+v err=%v", entries, err)
+	}
+	if err := reopened.ClearBrowserHistory(ctx); err != nil {
+		t.Fatal(err)
+	}
+	entries, err = reopened.ListBrowserHistory(ctx, "", 20)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("cleared history should be empty: entries=%+v err=%v", entries, err)
+	}
+}
+
 func TestRenameDoesNotAffectRecentOrdering(t *testing.T) {
 	st, _ := openTestStore(t)
 	createTestSession(t, st, "older")

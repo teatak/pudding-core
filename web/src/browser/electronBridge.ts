@@ -38,8 +38,13 @@ export type ElectronBrowserSnapshot = {
   profileID: string;
   runtimeID: string;
   version: number;
+  activate?: boolean;
   createdAt?: string;
   updatedAt?: string;
+  loadError?: {
+    code: string;
+    description: string;
+  };
 };
 
 export type ElectronBrowserCursorEvent = {

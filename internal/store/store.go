@@ -25,6 +25,7 @@ var (
 	ErrInvalidCanvas            = errors.New("store: invalid canvas item")
 	ErrCanvasConflict           = errors.New("store: saved canvas item changed")
 	ErrInvalidBrowserState      = errors.New("store: invalid browser state")
+	ErrInvalidBrowserHistory    = errors.New("store: invalid browser history")
 	ErrInvalidTerminal          = errors.New("store: invalid terminal")
 	ErrHistorySearchUnavailable = errors.New("store: history search unavailable")
 )
@@ -1654,6 +1655,29 @@ type BrowserStateInput struct {
 	Mode       string
 }
 
+const (
+	BrowserHistoryDefaultLimit = 20
+	BrowserHistoryMaxLimit     = 100
+	BrowserHistoryRetainLimit  = 1000
+)
+
+type BrowserHistoryEntry struct {
+	ID         string    `json:"id"`
+	URL        string    `json:"url"`
+	Title      string    `json:"title,omitempty"`
+	FaviconURL string    `json:"faviconURL,omitempty"`
+	VisitedAt  time.Time `json:"visitedAt"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+type BrowserHistoryInput struct {
+	URL        string
+	Title      string
+	FaviconURL string
+	VisitedAt  time.Time
+}
+
 type TerminalStatus string
 
 const (
@@ -1766,6 +1790,32 @@ func NormalizeBrowserStateInput(in *BrowserStateInput) error {
 	return nil
 }
 
+func NormalizeBrowserHistoryInput(in *BrowserHistoryInput) error {
+	if in == nil {
+		return ErrInvalidBrowserHistory
+	}
+	in.URL = strings.TrimSpace(in.URL)
+	in.Title = strings.TrimSpace(in.Title)
+	in.FaviconURL = strings.TrimSpace(in.FaviconURL)
+	if in.URL == "" {
+		return ErrInvalidBrowserHistory
+	}
+	if in.VisitedAt.IsZero() {
+		in.VisitedAt = time.Now().UTC()
+	}
+	return nil
+}
+
+func NormalizeBrowserHistoryLimit(limit int) int {
+	if limit <= 0 {
+		return BrowserHistoryDefaultLimit
+	}
+	if limit > BrowserHistoryMaxLimit {
+		return BrowserHistoryMaxLimit
+	}
+	return limit
+}
+
 func normalizeCanvasID(id string) string {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -1874,6 +1924,11 @@ type Store interface {
 	PutBrowserState(ctx context.Context, in BrowserStateInput) (*BrowserState, error)
 	DeleteBrowserState(ctx context.Context, sessionID, tabID string) error
 	ClearBrowserState(ctx context.Context, sessionID string) error
+	ListBrowserHistory(ctx context.Context, query string, limit int) ([]*BrowserHistoryEntry, error)
+	PutBrowserHistory(ctx context.Context, in BrowserHistoryInput) (*BrowserHistoryEntry, error)
+	UpdateBrowserHistoryMetadata(ctx context.Context, in BrowserHistoryInput) error
+	DeleteBrowserHistory(ctx context.Context, historyID string) error
+	ClearBrowserHistory(ctx context.Context) error
 
 	Close() error
 }

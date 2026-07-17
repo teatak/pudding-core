@@ -163,10 +163,15 @@ export function useWorkspaceBrowserSurface({ token, sessionID, enabled, hasTrans
         return;
       }
       if (isNewTab) {
-        rememberSelectedBrowserTab(sessionID, tab.id);
-        rememberSessionSurface(sessionID, "browser");
-        setActiveSurfaceState("browser");
+        if (snapshot.activate !== false) {
+          rememberSelectedBrowserTab(sessionID, tab.id);
+          rememberSessionSurface(sessionID, "browser");
+          setActiveSurfaceState("browser");
+        }
         void adoptBrowserTab(token, tab.sessionID, tab.id).catch(() => undefined);
+      }
+      if (snapshot.status === "pending" || snapshot.loadError) {
+        return;
       }
       const key = `${tab.sessionID}:${tab.id}`;
       window.clearTimeout(syncTimersRef.current[key]);

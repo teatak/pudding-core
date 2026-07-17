@@ -164,6 +164,17 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 
 `file://` 仅允许访问当前 session 所属 Project 根目录内已存在的 regular file。daemon 负责解析 symlink 和签发根目录授权,Electron 只接受带 bridge token 的授权,并在页面跳转、历史导航和新窗口时持续校验同一范围。session 切换 Project、Project 根目录更新或 Project 删除时,宿主立即清除旧授权;仍停留在 `file://` 的 tab 关闭,普通 HTTP(S) tab 保留。
 
+### 新窗口能力边界
+
+- 普通 `target="_blank"` 标签型打开进入同一 session 的常驻 `<webview>` tab。
+- 前台/后台标签遵循 Chromium `disposition`;后台标签创建后不抢占当前活动 tab。内部新标签首次 `Page.navigate` 透传 Chromium 提供的 referrer 与 referrer policy。
+- 需要原生 `WindowProxy` 的脚本弹窗使用可见 `BrowserWindow`,由 Chromium 保证 `window.opener`、`postMessage`、`focus` 和 `close` 语义。
+- 无参数 `window.open()` / `about:blank` 保留原生子窗口,支持同步 `document.write`;同源 `blob:` URL 允许进入原生子窗口,跨源 Blob 拒绝。
+- `noopener` / `noreferrer` 继续交给 Chromium 执行;显式断开 opener 的窗口可以独立存活。
+- 原生弹窗不属于 browser tool tab,不创建隐藏 `WebContentsView`,也不成为 CDP 自动化 fallback。
+- 弹窗强制 `sandbox`、`contextIsolation`、关闭 Node/WebView 权限,复用受管浏览器 partition,并沿用 URL、Project 文件范围和设备权限限制。
+- 主窗口外部打开只允许 `http:`、`https:` 和 `mailto:`;所有受管 `<webview>` 在 `will-attach-webview` 阶段校验 partition 与初始 `about:blank`,并覆盖不安全 webPreferences。
+
 ## 6. 实施阶段
 
 ### C0 基线与契约
@@ -306,6 +317,8 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 - viewport/full-page screenshot。
 - Canvas 显示/隐藏和 session 切换前后 `webContentsID` 保持一致。
 - renderer reload 后 pool 重建期间工具明确返回 not ready。
+- `target="_blank"` 内部 tab 与原生 `window.open` 弹窗分流。
+- `opener/postMessage/focus/close` 以及 `noopener/noreferrer` 原生语义。
 
 ### 回归测试
 
@@ -379,4 +392,4 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 - `npm run smoke:electron-browser`
 - `npm run build` (`web/`)
 
-自动 Electron dev smoke 覆盖 `file://`、多 tab、多 session 保活、back/forward、screenshot 和 Project grant 撤销。Google/Baidu 外网导航仅保留为发布前人工网络验收,不作为可重复测试的依赖。
+自动 Electron dev smoke 覆盖 `file://`、多 tab、多 session 保活、back/forward、`target=_blank` referrer、无参数 `window.open`、`about:blank` 写入、命名窗口复用、同源 `blob:`、`opener/postMessage/focus/close`、`noopener/noreferrer`、screenshot 和 Project grant 撤销。Google/Baidu 外网导航仅保留为发布前人工网络验收,不作为可重复测试的依赖。

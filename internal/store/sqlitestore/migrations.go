@@ -14,7 +14,7 @@ import (
 
 const (
 	baselineSchemaVersion = 1
-	currentSchemaVersion  = 3
+	currentSchemaVersion  = 4
 )
 
 var (
@@ -147,6 +147,24 @@ var schemaMigrations = map[int]schemaMigration{
 		`)
 		return err
 	},
+	4: func(tx *sql.Tx) error {
+		_, err := tx.Exec(`
+			CREATE TABLE IF NOT EXISTS browser_history (
+				id TEXT NOT NULL,
+				url TEXT NOT NULL,
+				title TEXT NOT NULL DEFAULT '',
+				favicon_url TEXT NOT NULL DEFAULT '',
+				visited_at INTEGER NOT NULL,
+				created_at INTEGER NOT NULL,
+				updated_at INTEGER NOT NULL,
+				PRIMARY KEY(id),
+				UNIQUE(url)
+			);
+			CREATE INDEX IF NOT EXISTS browser_history_visited_at
+				ON browser_history(visited_at DESC);
+		`)
+		return err
+	},
 }
 
 func prepareSchema(db *sql.DB, path string) error {
@@ -173,6 +191,11 @@ func prepareSchema(db *sql.DB, path string) error {
 					return err
 				}
 				version = currentSchemaVersion
+			} else if err := validateSchema(db, schemaV3Contract); err == nil {
+				if err := setSchemaVersion(db, 3); err != nil {
+					return err
+				}
+				version = 3
 			} else if err := validateSchema(db, schemaV2Contract); err == nil {
 				if err := setSchemaVersion(db, 2); err != nil {
 					return err
@@ -339,7 +362,7 @@ var schemaV2Contract = extendSchemaContract(schemaV1Contract, map[string][]strin
 	"turn_file_changes": {"id", "session_id", "turn_id", "root_path", "path", "original_path", "kind", "additions", "deletions", "binary", "too_large", "old_size", "new_size", "old_content", "new_content", "created_at"},
 }, "turn_file_changes_turn")
 
-var currentSchemaContract = func() schemaContract {
+var schemaV3Contract = func() schemaContract {
 	out := extendSchemaContract(schemaV2Contract, map[string][]string{
 		"canvas_saved_items": {"id", "source_session_id", "source_item_id", "kind", "title", "item_json", "window_json", "revision", "created_at", "updated_at"},
 	}, "canvas_items_session_saved", "canvas_saved_items_updated_at")
@@ -347,6 +370,10 @@ var currentSchemaContract = func() schemaContract {
 	out.tables["canvas_closed_items"] = append(out.tables["canvas_closed_items"], "session_id")
 	return out
 }()
+
+var currentSchemaContract = extendSchemaContract(schemaV3Contract, map[string][]string{
+	"browser_history": {"id", "url", "title", "favicon_url", "visited_at", "created_at", "updated_at"},
+}, "browser_history_visited_at")
 
 func extendSchemaContract(base schemaContract, tables map[string][]string, indexes ...string) schemaContract {
 	out := schemaContract{tables: make(map[string][]string, len(base.tables)+len(tables))}

@@ -217,6 +217,67 @@ func TestBrowserRoutesRequireExistingSession(t *testing.T) {
 	}
 }
 
+func TestBrowserHistoryIsGlobalAndDeletable(t *testing.T) {
+	srv, st, _ := newBrowserTestServer(t)
+	ctx := context.Background()
+	for _, id := range []string{"sess_history_a", "sess_history_b"} {
+		if err := st.CreateSession(ctx, &store.Session{ID: id, Provider: "mock", Model: "mock"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_history_a/browser/open", map[string]string{"url": "https://pudding.example/docs"})
+	opened := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusOK || opened.ID == "" {
+		t.Fatalf("open status=%d tab=%+v", resp.StatusCode, opened)
+	}
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_history_a/browser/tabs/"+opened.ID+"/sync", map[string]string{
+		"url": "https://pudding.example/docs", "title": "Pudding docs",
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("sync status=%d", resp.StatusCode)
+	}
+	resp = req(t, http.MethodDelete, srv.URL+"/sessions/sess_history_a", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete source session status=%d", resp.StatusCode)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_history_b/browser/history?q=pudding", nil)
+	listed := decodeJSON[browserHistoryResp](t, resp)
+	if resp.StatusCode != http.StatusOK || len(listed.History) != 1 || listed.History[0].Title != "Pudding docs" {
+		t.Fatalf("global history status=%d entries=%+v", resp.StatusCode, listed.History)
+	}
+
+	resp = req(t, http.MethodDelete, srv.URL+"/sessions/sess_history_b/browser/history/"+listed.History[0].ID, nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete history status=%d", resp.StatusCode)
+	}
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_history_b/browser/history", nil)
+	listed = decodeJSON[browserHistoryResp](t, resp)
+	if resp.StatusCode != http.StatusOK || len(listed.History) != 0 {
+		t.Fatalf("deleted global history status=%d entries=%+v", resp.StatusCode, listed.History)
+	}
+
+	if _, err := st.PutBrowserHistory(ctx, store.BrowserHistoryInput{URL: "https://one.example/"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutBrowserHistory(ctx, store.BrowserHistoryInput{URL: "https://two.example/"}); err != nil {
+		t.Fatal(err)
+	}
+	resp = req(t, http.MethodDelete, srv.URL+"/sessions/sess_history_b/browser/history", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("clear history status=%d", resp.StatusCode)
+	}
+	entries, err := st.ListBrowserHistory(ctx, "", 20)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("history should be cleared globally: entries=%+v err=%v", entries, err)
+	}
+}
+
 func TestBrowserStateAPITracksRecoverableSessionState(t *testing.T) {
 	srv, st, browserSvc := newBrowserTestServer(t)
 	ctx := context.Background()

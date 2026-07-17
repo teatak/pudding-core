@@ -28,7 +28,8 @@
         webview.dataset.browserKey = key;
         const state = { request, webview, ready: false };
         tabs.set(key, state);
-        webview.setAttribute("partition", "persist:pudding-browser-smoke");
+        webview.setAttribute("partition", "persist:pudding-default");
+        webview.setAttribute("allowpopups", "true");
         webview.setAttribute("src", "about:blank");
         webview.addEventListener("dom-ready", () => {
           state.ready = true;
