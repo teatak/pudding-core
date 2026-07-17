@@ -1081,11 +1081,11 @@ function RailPanel({
     <RailOverlayHoldContext.Provider value={setOverlayHold}>
       <SidebarProvider className="pudding-session-rail !contents">
         <Sidebar className="min-h-0 w-full flex-1 bg-transparent" collapsible="none">
-          <SidebarHeader className="px-2.5 py-2">
+          <SidebarHeader className="px-2 py-2">
             <SidebarMenu className="gap-0.5">
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  className="h-8 px-2.5 py-1"
+                  className="h-7 px-2 py-1"
                   isActive={draftActive && !draftProjectID}
                   onClick={onCreate}
                 >
@@ -1094,20 +1094,20 @@ function RailPanel({
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton className="h-8 px-2.5 py-1" disabled={createProjectPending} onClick={onCreateProject}>
+                <SidebarMenuButton className="h-7 px-2 py-1" disabled={createProjectPending} onClick={onCreateProject}>
                   {createProjectPending ? <Spinner /> : <FolderPlus />}
                   <span>{t("project.create")}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton className="h-8 px-2.5 py-1" onClick={onSearch}>
+                <SidebarMenuButton className="h-7 px-2 py-1" onClick={onSearch}>
                   <Search />
                   <span>{t("rail.search")}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  className="h-8 px-2.5 py-1"
+                  className="h-7 px-2 py-1"
                   isActive={appsActive}
                   onClick={() => {
                     void navigate({
@@ -1140,7 +1140,7 @@ function RailPanel({
                 {showPinnedGroup ? (
                   <Collapsible asChild open={!pinnedCollapsed}>
                     <SidebarGroup
-                      className="px-2.5 py-0"
+                      className="px-2 py-0"
                       data-session-drop-group="pinned"
                     >
                       <CollapsibleSessionGroupLabel
@@ -1188,7 +1188,7 @@ function RailPanel({
                     <SessionEmptyState />
                   ) : chatSessions.length > 0 || (isDraggingPinned && unpinnedSessions.length === 0) ? (
                     <Collapsible asChild open={!chatCollapsed}>
-                      <SidebarGroup className="px-2.5 py-0">
+                      <SidebarGroup className="px-2 py-0">
                         <CollapsibleSessionGroupLabel
                           collapsed={chatCollapsed}
                           icon="chat"
@@ -1224,7 +1224,7 @@ function RailPanel({
                     const projectCollapsed = collapsedGroups.has(`project:${group.key}`);
                     return (
                       <Collapsible key={group.key} asChild open={!projectCollapsed}>
-                        <SidebarGroup className="px-2.5 py-0">
+                        <SidebarGroup className="px-2 py-0">
                           <CollapsibleSessionGroupLabel
                             active={draftActive && draftProjectID === group.projectID}
                             actions={group.project ? <ProjectActionsMenu project={group.project} token={token} /> : undefined}
@@ -1444,7 +1444,7 @@ function CollapsibleSessionGroupLabel({
       title={title || label}
     >
       <button
-        className="group flex h-full min-w-0 flex-1 cursor-default items-center gap-2 rounded-md px-2.5 pr-1 text-left"
+        className="group flex h-full min-w-0 flex-1 cursor-default items-center gap-2 rounded-md px-2 pr-1 text-left"
         type="button"
         onClick={onToggle}
       >
@@ -2062,7 +2062,7 @@ function SessionItem({
           isActive
         >
           <div className="cursor-text">
-            <span aria-hidden="true" className="w-[18px] shrink-0" />
+            <span aria-hidden="true" className="w-4 shrink-0" />
             <Input
               ref={inputRef}
               aria-label={t("session.rename")}
@@ -2122,7 +2122,7 @@ function SessionItem({
             onPointerMove={handlePointerMove}
             onPointerUp={finishPointerDrag}
           >
-            <span aria-hidden="true" className="w-[18px] shrink-0" />
+            <span aria-hidden="true" className="w-4 shrink-0" />
             <span className="min-w-0 flex-1 truncate" title={session.title || undefined}>
               {title}
             </span>
@@ -2133,7 +2133,7 @@ function SessionItem({
         <>
           <SidebarMenuBadge
             className={cn(
-              "min-w-0 px-0 font-normal text-muted-foreground",
+              "min-w-0 px-0 font-normal text-muted-foreground peer-data-[size=default]/menu-button:top-1",
               actionsAlwaysVisible ? "right-8" : "right-2",
               !actionsAlwaysVisible &&
               !suppressInteractiveState &&

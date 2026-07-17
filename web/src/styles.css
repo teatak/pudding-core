@@ -151,7 +151,7 @@
     --dropdown-destructive: var(--destructive);
     --dropdown-destructive-hover: var(--destructive-hover);
     --floating-surface: oklch(0.995 0 0);
-    --floating-hover: oklch(0.935 0 0);
+    --floating-hover: oklch(0.925 0 0);
     --confirm-destructive: var(--destructive);
     --confirm-destructive-hover: color-mix(in oklch, var(--destructive-hover), black 6%);
     --mascot-body-top: oklch(0.68 0.19 277);
@@ -447,15 +447,15 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
     --chart-3: oklch(0.511 0.262 276.966);
     --chart-4: oklch(0.457 0.24 277.023);
     --chart-5: oklch(0.398 0.195 277.366);
-    --sidebar: oklch(0.225 0 0);
+    --sidebar: oklch(0.245 0 0);
     --sidebar-foreground: oklch(0.95 0 0);
     --sidebar-primary: oklch(0.585 0.233 277.117);
     --sidebar-primary-foreground: oklch(0.962 0.018 272.314);
-    --sidebar-accent: oklch(0.292 0 0);
+    --sidebar-accent: oklch(0.335 0 0);
     --sidebar-accent-foreground: oklch(0.95 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.56 0 0);
-    --rail-item-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 42%);
+    --rail-item-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 52%);
     --rail-section-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 6%);
     --workspace-background: color-mix(in oklch, var(--sidebar), var(--background) 45%);
     --workspace-chrome-background: color-mix(in oklch, var(--workspace-background), var(--background) 48%);
@@ -487,7 +487,7 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
     --dropdown-destructive: var(--destructive);
     --dropdown-destructive-hover: var(--destructive-hover);
     --floating-surface: oklch(0.25 0 0);
-    --floating-hover: oklch(0.33 0 0);
+    --floating-hover: oklch(0.335 0 0);
     --menu-outline: oklch(1 0 0 / 16%);
     --menu-shadow: 0 8px 20px oklch(0 0 0 / 22%), 0 1px 5px oklch(0 0 0 / 12%);
     --confirm-destructive: color-mix(in oklch, var(--destructive), black 22%);
