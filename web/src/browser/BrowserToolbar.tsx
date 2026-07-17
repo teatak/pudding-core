@@ -98,8 +98,8 @@ export function BrowserToolbar({
   const queryClient = useQueryClient();
   const payload = browserPayloadFromTab(activeTabProp);
   const [urlDraft, setURLDraft] = useState(browserDisplayURL(payload?.url));
+  const [pendingSubmittedURL, setPendingSubmittedURL] = useState("");
   const lastOpenAttemptRef = useRef<BrowserOpenAttempt | null>(null);
-  const pendingSubmittedURLRef = useRef("");
   const embeddedBrowser = hasElectronWebviewBrowser();
   const processModeFallback = embeddedBrowser ? "webview" : "headless";
   const tabsQuery = useQuery({
@@ -117,12 +117,14 @@ export function BrowserToolbar({
   };
 
   useLayoutEffect(() => {
-    if (pendingSubmittedURLRef.current && !sameToolbarURL(pendingSubmittedURLRef.current, targetURL)) {
+    if (pendingSubmittedURL && !sameToolbarURL(pendingSubmittedURL, targetURL)) {
       return;
     }
-    pendingSubmittedURLRef.current = "";
+    if (pendingSubmittedURL) {
+      setPendingSubmittedURL("");
+    }
     setURLDraft(browserDisplayURL(targetURL));
-  }, [targetURL]);
+  }, [pendingSubmittedURL, targetURL]);
 
   const persistTab = async (tab: BrowserTab, options: PersistTabOptions = {}) => {
     if (tab.sessionID !== sessionID) {
@@ -206,12 +208,12 @@ export function BrowserToolbar({
       return openBrowserURL(token, sessionID, { url });
     },
     onSuccess: (tab) => {
-      pendingSubmittedURLRef.current = "";
+      setPendingSubmittedURL("");
       setURLDraft(browserDisplayURL(tab.url));
       void persistTab(tab, { refreshAfterPersist: !embeddedBrowser, syncBrowserTab: embeddedBrowser });
     },
     onError: (error) => {
-      pendingSubmittedURLRef.current = "";
+      setPendingSubmittedURL("");
       setURLDraft(browserDisplayURL(activeTab?.url || targetURL));
       if (isBrowserNavigationAbortError(error)) {
         refreshBrowserQueries();
@@ -262,7 +264,7 @@ export function BrowserToolbar({
         event.preventDefault();
         if (urlDraft.trim()) {
           const url = browserAddressToURL(urlDraft);
-          pendingSubmittedURLRef.current = url;
+          setPendingSubmittedURL(url);
           setURLDraft(browserDisplayURL(url));
           openMutation.mutate(url);
         }
