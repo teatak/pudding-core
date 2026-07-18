@@ -855,7 +855,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
       selectTerminal(activeTerminalID || terminals[0].id);
     } else if (browserTabs.length > 0) {
       selectBrowserTab(activeBrowserTabID || browserTabs[0].id);
-    } else if (hasProject) {
+    } else if (projectTabVisible) {
       selectProjectSurface();
     } else {
       selectWorkspaceSurface();
@@ -867,10 +867,10 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     browserTabs,
     filePreviewActive,
     filePreviews,
-    hasProject,
     items.length,
     itemsQuery.isFetching,
     itemsQuery.isLoading,
+    projectTabVisible,
     terminals,
   ]);
 
