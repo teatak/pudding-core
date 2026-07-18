@@ -14,7 +14,7 @@ const maxTabsTotal = 16;
 const maxPopupWindowsTotal = 8;
 
 class BrowserHost {
-  constructor(onUpdate, onCursor, onAutomationStart, onWebviewRequired, onAutomationEnd, onWebviewFocusRequired, windowHooks) {
+  constructor(onUpdate, onCursor, onAutomationStart, onWebviewRequired, onAutomationEnd, windowHooks) {
     this.slots = new Map();
     this.inputQueue = Promise.resolve();
     this.onUpdate = typeof onUpdate === "function" ? onUpdate : () => {};
@@ -22,7 +22,6 @@ class BrowserHost {
     this.onAutomationStart = typeof onAutomationStart === "function" ? onAutomationStart : () => {};
     this.onWebviewRequired = typeof onWebviewRequired === "function" ? onWebviewRequired : () => {};
     this.onAutomationEnd = typeof onAutomationEnd === "function" ? onAutomationEnd : () => {};
-    this.onWebviewFocusRequired = typeof onWebviewFocusRequired === "function" ? onWebviewFocusRequired : async () => false;
     this.popupWindowOptions = typeof windowHooks?.options === "function" ? windowHooks.options : () => ({});
     this.resolveFavicon = typeof windowHooks?.resolveFavicon === "function" ? windowHooks.resolveFavicon : async () => "";
     this.onPopupCreated = typeof windowHooks?.created === "function" ? windowHooks.created : () => {};
@@ -159,8 +158,7 @@ class BrowserHost {
       this.runCommand(slot, async () => {
         this.noteAutomationStart(slot, "click");
         try {
-          const target = await evaluateJSON(slot, clickTargetScript(request, "pointer"));
-          await dispatchMouseClick(slot, target.x, target.y);
+          const target = await evaluateJSON(slot, clickTargetScript(request, "pointer"), { userGesture: true });
           this.noteUpdated(slot);
           this.noteCursor(slot, "click", target);
           return { tab: snapshot(slot), action: "click", result: target };
@@ -181,15 +179,10 @@ class BrowserHost {
         this.noteAutomationStart(slot, "type");
         try {
           const expectation = await evaluateJSON(slot, typePrepareScript(request));
-          const focused = await this.onWebviewFocusRequired({ sessionID: slot.sessionID, tabID: slot.tabID }, slot.webContents);
-          if (!focused) {
-            throw new Error("browser_webview_not_ready: focus confirmation failed");
-          }
-          await this.sendCDP(slot, "Page.bringToFront");
-          await dispatchKeyboardText(slot, String(request.text));
-          const typed = await evaluateJSON(slot, typeResultScript(request, "keyboard", expectation));
+          await evaluateJSON(slot, typeTargetInputScript(request));
+          const typed = await evaluateJSON(slot, typeResultScript(request, "target", expectation));
           if (!typed.matchesExpected) {
-            throw new Error("browser keyboard input did not produce the expected value");
+            throw new Error("browser input did not produce the expected value");
           }
           delete typed.matchesExpected;
           this.noteUpdated(slot);
@@ -212,13 +205,6 @@ class BrowserHost {
         this.noteAutomationStart(slot, "scroll");
         try {
           const target = await evaluateJSON(slot, scrollTargetScript(request));
-          await this.sendCDP(slot, "Input.dispatchMouseEvent", {
-            type: "mouseWheel",
-            x: target.x,
-            y: target.y,
-            deltaX: Number(request.deltaX) || 0,
-            deltaY: Number(request.deltaY) || 0,
-          });
           const result = await waitForScrollResult(slot, request, target);
           this.noteUpdated(slot);
           this.noteCursor(slot, "scroll", result);
@@ -948,12 +934,14 @@ class BrowserHost {
 
 }
 
-async function evaluateJSON(slot, script) {
-  const evaluated = await slot.sendCDP("Runtime.evaluate", {
+async function evaluateJSON(slot, script, options = {}) {
+  const params = {
     expression: script,
     returnByValue: true,
     awaitPromise: true,
-  });
+  };
+  if (options.userGesture) params.userGesture = true;
+  const evaluated = await slot.sendCDP("Runtime.evaluate", params);
   if (evaluated?.exceptionDetails) {
     throw new Error(evaluated.exceptionDetails.exception?.description || evaluated.exceptionDetails.text || "browser evaluation failed");
   }
@@ -1136,24 +1124,6 @@ function detachDebugger(slot) {
   }
   slot.cdpAttached = false;
   slot.cdpReady = null;
-}
-
-async function dispatchMouseClick(slot, x, y) {
-  const point = {
-    x: Math.max(0, Math.round(Number(x) || 0)),
-    y: Math.max(0, Math.round(Number(y) || 0)),
-  };
-  for (const event of [
-    { type: "mouseMoved", ...point, button: "none", buttons: 0, clickCount: 0, pointerType: "mouse" },
-    { type: "mousePressed", ...point, button: "left", buttons: 1, clickCount: 1, pointerType: "mouse" },
-    { type: "mouseReleased", ...point, button: "left", buttons: 0, clickCount: 1, pointerType: "mouse" },
-  ]) {
-    await slot.sendCDP("Input.dispatchMouseEvent", event);
-  }
-}
-
-async function dispatchKeyboardText(slot, text) {
-  await slot.sendCDP("Input.insertText", { text });
 }
 
 function cursorPoint(result) {
@@ -1530,6 +1500,11 @@ function clickTargetScript(input, method) {
   if (!Number.isFinite(cx) || !Number.isFinite(cy)) throw new Error("target coordinates not found");
   const hit = document.elementFromPoint(cx, cy);
   if (!hit || (hit !== el && !el.contains(hit))) throw new Error("target element is not hittable");
+  if (typeof el.click === "function") {
+    el.click();
+  } else {
+    el.dispatchEvent(new MouseEvent("click", {bubbles: true, cancelable: true, composed: true, clientX: cx, clientY: cy, view: window}));
+  }
   return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), text: (el.innerText || el.value || "").trim().slice(0, 160), x: cx, y: cy, cursorX: cx, cursorY: cy, method});
 })()`;
 }
@@ -1539,6 +1514,10 @@ function typePrepareScript(input) {
   const selector = ${JSON.stringify(String(input.selector || ""))};
   const text = ${JSON.stringify(String(input.text || ""))};
   const clear = ${JSON.stringify(Boolean(input.clear))};
+  const textInputTypes = new Set(["text", "search", "email", "tel", "url", "password", "number", "date", "datetime-local", "month", "time", "week"]);
+  const isTextInput = (node) => node instanceof HTMLTextAreaElement ||
+    (node instanceof HTMLInputElement && textInputTypes.has(String(node.type || "text").toLowerCase()));
+  const isEditable = (node) => isTextInput(node) || Boolean(node?.isContentEditable);
   const fingerprint = (value) => {
     let hash = 2166136261;
     for (let index = 0; index < value.length; index += 1) {
@@ -1549,16 +1528,16 @@ function typePrepareScript(input) {
   };
   let el = selector ? document.querySelector(selector) : document.activeElement;
   if (!el || el === document.body) throw new Error("target input not found");
-  if (!("value" in el) && !el.isContentEditable) throw new Error("target is not editable");
+  if (!isEditable(el)) throw new Error("target is not editable");
   if (el.disabled || el.readOnly || el.getAttribute("aria-disabled") === "true" || el.getAttribute("aria-readonly") === "true") {
     throw new Error("target is not editable");
   }
   el.scrollIntoView({behavior: "instant", block: "center", inline: "center"});
   el.focus();
   if (document.activeElement !== el) throw new Error("target input could not be focused");
-  const originalValue = "value" in el ? String(el.value || "") : String(el.textContent || "");
+  const originalValue = isTextInput(el) ? String(el.value || "") : String(el.textContent || "");
   const expectedValue = clear ? text : originalValue + text;
-  if ("value" in el) {
+  if (isTextInput(el)) {
     try {
       if (typeof el.setSelectionRange === "function") {
         const end = String(el.value || "").length;
@@ -1568,7 +1547,7 @@ function typePrepareScript(input) {
   } else {
     const range = document.createRange();
     range.selectNodeContents(el);
-    range.collapse(!clear);
+    if (!clear) range.collapse(false);
     const selection = window.getSelection();
     selection.removeAllRanges();
     selection.addRange(range);
@@ -1590,11 +1569,85 @@ function typePrepareScript(input) {
 })()`;
 }
 
+function typeTargetInputScript(input) {
+  return `(() => {
+  const selector = ${JSON.stringify(String(input.selector || ""))};
+  const text = ${JSON.stringify(String(input.text || ""))};
+  const clear = ${JSON.stringify(Boolean(input.clear))};
+  const textInputTypes = new Set(["text", "search", "email", "tel", "url", "password", "number", "date", "datetime-local", "month", "time", "week"]);
+  const isTextInput = (node) => node instanceof HTMLTextAreaElement ||
+    (node instanceof HTMLInputElement && textInputTypes.has(String(node.type || "text").toLowerCase()));
+  const isEditable = (node) => isTextInput(node) || Boolean(node?.isContentEditable);
+  const el = selector ? document.querySelector(selector) : document.activeElement;
+  if (!el || el === document.body) throw new Error("target input not found");
+  if (!isEditable(el)) throw new Error("target is not editable");
+  if (document.activeElement !== el) el.focus();
+  if (document.activeElement !== el) throw new Error("target input could not be focused");
+  const inputEvent = (type, cancelable) => {
+    let event;
+    try {
+      event = new InputEvent(type, {bubbles: true, cancelable, composed: true, inputType: "insertText", data: text});
+    } catch (_) {
+      event = new Event(type, {bubbles: true, cancelable, composed: true});
+    }
+    return event;
+  };
+  const accepted = el.dispatchEvent(inputEvent("beforeinput", true));
+  if (!accepted) return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), canceled: true});
+  const dispatchInput = () => el.dispatchEvent(inputEvent("input", false));
+  if (isTextInput(el)) {
+    const currentValue = String(el.value || "");
+    const nextValue = clear ? text : currentValue + text;
+    let proto = Object.getPrototypeOf(el);
+    let setter = null;
+    while (proto && !setter) {
+      setter = Object.getOwnPropertyDescriptor(proto, "value")?.set || null;
+      proto = Object.getPrototypeOf(proto);
+    }
+    if (!setter) throw new Error("target is not editable: native value setter missing");
+    setter.call(el, nextValue);
+    try {
+      if (typeof el.setSelectionRange === "function") el.setSelectionRange(nextValue.length, nextValue.length);
+    } catch (_) {}
+    dispatchInput();
+  } else if (el.isContentEditable) {
+    let inserted = false;
+    try {
+      inserted = document.execCommand("insertText", false, text);
+    } catch (_) {}
+    if (!inserted) {
+      const selection = window.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : document.createRange();
+      if (!selection?.rangeCount) {
+        range.selectNodeContents(el);
+        if (!clear) range.collapse(false);
+      }
+      if (clear) range.selectNodeContents(el);
+      range.deleteContents();
+      const node = document.createTextNode(text);
+      range.insertNode(node);
+      range.setStartAfter(node);
+      range.collapse(true);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      dispatchInput();
+    }
+  } else {
+    throw new Error("target is not editable");
+  }
+  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase()});
+})()`;
+}
+
 function typeResultScript(input, method, expectation) {
   return `(() => {
   const selector = ${JSON.stringify(String(input.selector || ""))};
   const expectedValueLength = ${JSON.stringify(Math.max(0, Math.round(Number(expectation?.expectedValueLength) || 0)))};
   const expectedValueHash = ${JSON.stringify(String(expectation?.expectedValueHash || ""))};
+  const textInputTypes = new Set(["text", "search", "email", "tel", "url", "password", "number", "date", "datetime-local", "month", "time", "week"]);
+  const isTextInput = (node) => node instanceof HTMLTextAreaElement ||
+    (node instanceof HTMLInputElement && textInputTypes.has(String(node.type || "text").toLowerCase()));
+  const isEditable = (node) => isTextInput(node) || Boolean(node?.isContentEditable);
   const fingerprint = (value) => {
     let hash = 2166136261;
     for (let index = 0; index < value.length; index += 1) {
@@ -1605,8 +1658,9 @@ function typeResultScript(input, method, expectation) {
   };
   const el = selector ? document.querySelector(selector) : document.activeElement;
   if (!el || el === document.body) throw new Error("target input not found after typing");
+  if (!isEditable(el)) throw new Error("target is not editable after typing");
   const rect = el.getBoundingClientRect();
-  const value = "value" in el ? String(el.value || "") : String(el.textContent || "");
+  const value = isTextInput(el) ? String(el.value || "") : String(el.textContent || "");
   const matchesExpected = value.length === expectedValueLength && fingerprint(value) === expectedValueHash;
   return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), textLength: ${JSON.stringify(Array.from(String(input.text || "")).length)}, valueLength: value.length, matchesExpected, cursorX: rect.left + rect.width / 2, cursorY: rect.top + Math.min(rect.height / 2, 18), method: ${JSON.stringify(method)}});
 })()`;
@@ -1615,6 +1669,8 @@ function typeResultScript(input, method, expectation) {
 function scrollTargetScript(input) {
   return `(() => {
   const selector = ${JSON.stringify(String(input.selector || ""))};
+  const deltaX = ${JSON.stringify(Number(input.deltaX) || 0)};
+  const deltaY = ${JSON.stringify(Number(input.deltaY) || 0)};
   const target = selector ? document.querySelector(selector) : window;
   if (!target) throw new Error("scroll target not found");
   let cursorX = window.innerWidth / 2;
@@ -1631,6 +1687,7 @@ function scrollTargetScript(input) {
   }
   const startX = target === window ? window.scrollX : target.scrollLeft;
   const startY = target === window ? window.scrollY : target.scrollTop;
+  target.scrollBy({left: deltaX, top: deltaY, behavior: "instant"});
   return JSON.stringify({ok: true, x: cursorX, y: cursorY, cursorX, cursorY, startX, startY});
 })()`;
 }
@@ -1647,7 +1704,7 @@ function scrollResultScript(input, target) {
     targetY: scrollTarget && scrollTarget !== window ? scrollTarget.scrollTop : window.scrollY,
     cursorX: ${JSON.stringify(target.x)},
     cursorY: ${JSON.stringify(target.y)},
-    method: "wheel"
+    method: "target"
   });
 })()`;
 }

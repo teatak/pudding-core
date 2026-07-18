@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -40,6 +41,10 @@ endpoints:
   github_rest:
     kind: rest
     url: https://api.github.com
+    url_config:
+      label: GitHub address
+      placeholder: https://github.example.com/api/v3
+      required: true
   github_mcp:
     kind: mcp
     transport: stdio
@@ -79,6 +84,9 @@ Use builtin_rest_request with github_rest.
 	def := defs[0]
 	if def.ID != "github" || def.Endpoints["github_rest"].Kind != EndpointKindREST {
 		t.Fatalf("unexpected definition: %+v", def)
+	}
+	if config := def.Endpoints["github_rest"].URLConfig; config == nil || config.Label != "GitHub address" || !config.Required {
+		t.Fatalf("endpoint URL config not loaded: %+v", config)
 	}
 	win := ResolveEndpointPlatformForGOOS(def.Endpoints["github_mcp"], "windows")
 	if win.Command != "cmd" || len(win.Args) != 4 || win.Args[0] != "/c" || win.Env["BASE_ENV"] != "windows" || win.Env["WINDOWS_ENV"] != "1" {
@@ -469,5 +477,55 @@ func TestInstallPackageRejectsResourceAmplification(t *testing.T) {
 	}
 	if _, err := packageFiles([]PackageFile{{Path: "ambiguous", Content: "text", ContentBase64: "dGV4dA=="}}); err == nil {
 		t.Fatal("package file with two content encodings should fail")
+	}
+}
+
+func TestValidateDefinitionAcceptsTokenExchangeConnectionFields(t *testing.T) {
+	def := &Definition{
+		ID:   "feishu",
+		Name: "Feishu",
+		Auth: &AuthConfig{Required: true, Methods: []AuthMethod{{
+			ID:   "feishu-app-credentials",
+			Type: AuthTypeTokenExchange,
+			TokenExchange: &TokenExchangeSpec{
+				URL:              "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+				BodyFields:       map[string]string{"app_id": "appId", "app_secret": "appSecret"},
+				AccessTokenField: "tenant_access_token",
+				ExpiresInField:   "expire",
+				TokenType:        "Bearer",
+			},
+		}}},
+		Connection: &ConnectionConfig{Fields: []ConnectionField{
+			{ID: "appId", Required: true},
+			{ID: "appSecret", Required: true, Secret: true},
+		}},
+		Endpoints: map[string]Endpoint{
+			"feishu_rest": {Kind: EndpointKindREST, URL: "https://open.feishu.cn/open-apis"},
+		},
+	}
+	if err := ValidateDefinition(def); err != nil {
+		t.Fatalf("token exchange definition should be valid: %v", err)
+	}
+}
+
+func TestValidateDefinitionRejectsUnknownTokenExchangeField(t *testing.T) {
+	def := &Definition{
+		ID:   "feishu",
+		Name: "Feishu",
+		Auth: &AuthConfig{Required: true, Methods: []AuthMethod{{
+			ID:   "feishu-app-credentials",
+			Type: AuthTypeTokenExchange,
+			TokenExchange: &TokenExchangeSpec{
+				URL:              "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+				BodyFields:       map[string]string{"app_secret": "missingSecret"},
+				AccessTokenField: "tenant_access_token",
+			},
+		}}},
+		Endpoints: map[string]Endpoint{
+			"feishu_rest": {Kind: EndpointKindREST, URL: "https://open.feishu.cn/open-apis"},
+		},
+	}
+	if err := ValidateDefinition(def); err == nil || !strings.Contains(err.Error(), "unknown connection field") {
+		t.Fatalf("expected unknown field error, got %v", err)
 	}
 }

@@ -1036,10 +1036,18 @@ export const appEndpointPlatformOverride = z.object({
   headers: z.record(z.string(), z.string()).optional(),
 });
 
+export const appEndpointURLConfig = z.object({
+  label: z.string(),
+  description: z.string().optional(),
+  placeholder: z.string().optional(),
+  required: z.boolean().optional(),
+});
+
 export const appEndpoint = z.object({
   kind: z.enum(["rest", "graphql", "mcp"]),
   transport: z.enum(["stdio", "streamable_http"]).optional(),
   url: z.string().optional(),
+  urlConfig: appEndpointURLConfig.optional(),
   command: z.string().optional(),
   args: z.array(z.string()).optional(),
   env: z.record(z.string(), z.string()).optional(),
@@ -1105,6 +1113,15 @@ export const appAuthMethod = z.object({
   default: z.boolean().optional(),
   prefix: z.string().optional(),
   header: z.string().optional(),
+  tokenExchange: z
+    .object({
+      url: z.string(),
+      bodyFields: z.record(z.string(), z.string()),
+      accessTokenField: z.string(),
+      expiresInField: z.string().optional(),
+      tokenType: z.string().optional(),
+    })
+    .optional(),
 });
 export const appAuthConfig = z.object({
   required: z.boolean().optional(),
@@ -1169,6 +1186,7 @@ export const appConnection = z.object({
   tokenSet: z.boolean(),
   header: z.string().optional(),
   fields: z.record(z.string(), z.string()).optional(),
+  endpointURLs: z.record(z.string(), z.string()).optional(),
   prefix: z.string().optional(),
   token: z.string().optional(),
   username: z.string().optional(),
@@ -1219,6 +1237,8 @@ export const startAppOAuthRequest = z.object({
   authMethodID: z.string().optional(),
   connectionID: z.string().optional(),
   connectionName: z.string().optional(),
+  fields: z.record(z.string(), z.string()).optional(),
+  endpointURLs: z.record(z.string(), z.string()).optional(),
 });
 export const startAppOAuthResponse = z.object({
   authorizationURL: z.string().url(),

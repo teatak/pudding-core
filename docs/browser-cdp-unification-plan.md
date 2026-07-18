@@ -34,7 +34,7 @@
 - viewport / full-page screenshot。
 - pointer click。
 - type / clear / shortcut。
-- wheel scroll。
+- scroll。
 - 页面 URL、title、history 与 navigation 状态读取。
 
 ### 2.2 保留 Electron API
@@ -123,12 +123,12 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 | reload | `Page.reload` | 当前主 frame reload committed |
 | observe | `Runtime.evaluate` | 返回当前 document 快照 |
 | screenshot | `Page.getLayoutMetrics` + `Page.captureScreenshot` | 返回有效 PNG |
-| click | `Runtime.evaluate` 定位 + `Input.dispatchMouseEvent` | mouseReleased 命令成功 |
-| type / clear | renderer 聚焦对应 `<webview>` + `Runtime.evaluate` 选择目标 + `Input.insertText` | 文字只进入目标 guest,且最终值指纹与预期完全一致 |
+| click | `Runtime.evaluate(userGesture=true)` 定位、命中检查并激活目标 | 目标 click handler 执行完成 |
+| type / clear | `Runtime.evaluate` 聚焦 guest 内目标,调用原生 value setter并派发 `beforeinput` / `input`;contenteditable 使用编辑命令 | 文字只进入目标 guest,且最终值指纹与预期完全一致 |
 | shortcut | `Input.dispatchKeyEvent` | 完整 keyDown/keyUp 序列成功 |
-| scroll | `Input.dispatchMouseEvent(type="mouseWheel")` | wheel 命令成功 |
+| scroll | `Runtime.evaluate` 在目标 renderer 调用 `scrollBy` | 目标滚动位置读取完成 |
 
-`Runtime.evaluate` 属于 CDP。允许它读取 DOM、聚焦元素和计算坐标,但不再通过它执行 `el.click()`、value setter 或 `scrollBy()` 等写操作。
+`Runtime.evaluate` 属于 CDP。click 和 type 有意在目标 guest 的 renderer 内完成写操作,因为 Electron 的 CDP Input 域会把键盘/点击焦点切到 guest,从而抢走 Composer。该路径是唯一主实现,不是 DOM fallback;失败后不会再执行第二种输入方式。`userGesture=true` 保留 `window.open()` 等激活能力,但合成事件的 `isTrusted` 仍为 false。
 
 ## 5. 错误与重试
 
@@ -246,27 +246,27 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 
 ### C5 Click、Type 与 Scroll
 
-- pointer click 只使用 `Input.dispatchMouseEvent`。
-- type / clear 使用 `Input.insertText`;clear 由目标元素选区决定替换范围。
+- pointer click 通过目标 CDP session 的 `Runtime.evaluate(userGesture=true)` 完成命中检查和目标激活,不切换宿主焦点。
+- type / clear 通过目标 CDP session 调用原生 value setter并派发 `beforeinput` / `input`;仅允许文本型 input、textarea 与 contenteditable。
 - 快捷键使用 `Input.dispatchKeyEvent`。
-- Electron 输入前必须由 renderer 确认对应 `<webview>` 已获得宿主焦点;不同 tab 的 Input 操作全局串行。
-- scroll 使用 `mouseWheel`。
-- 删除 `el.click()`、DOM value setter、`scrollBy()` 和 `sendInputEvent()` fallback。
+- 不聚焦外层 `<webview>`,不同 tab 的写操作仍全局串行。
+- scroll 通过目标 CDP session 的 `Runtime.evaluate` 执行,不依赖外层 webview 可见或聚焦。
+- 删除 `Input.insertText`、`Input.dispatchMouseEvent` 和 `sendInputEvent()` fallback。
 - 命令响应不确定时返回错误,不执行第二种实现。
 
 验收:
 
 - React 受控 input 正常更新。
-- Composer 已聚焦时,自动输入不会写入 Composer;完成后恢复其焦点与选区。
+- Composer 已聚焦时,click、type 与 scroll 均不改变 Composer 的焦点和内容。
 - 输入后按长度和哈希校验完整预期值,拒绝受控组件回滚造成的假成功。
 - CDP 响应失败时不会重复点击或重复输入。
-- selector scroll 与页面 scroll 均产生真实 wheel 行为。
+- selector scroll 与页面 scroll 在隐藏 webview 上均可完成且不抢宿主焦点。
 
 ### C6 Go 路径对齐
 
 - Go manager 与 Electron 使用相同 operation semantics。
 - 对齐 command sequence、timeout、结果字段和错误码。
-- scroll 改为 CDP wheel。
+- scroll 改为目标 renderer 内的 CDP 执行。
 - 删除 Go DOM 写操作 fallback。
 - 保留 session-scoped tab routing 和原子 `OpenNewTab`。
 
@@ -283,7 +283,7 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
   - `webview.capturePage` / `webContents.capturePage`
   - `sendInputEvent`
   - `webContents.loadURL/goBack/goForward/reload`
-  - `el.click()` / value setter / `scrollBy()`
+  - 外层 webview 聚焦与页面操作的 Electron fallback
 - 补 Electron dev smoke test。
 - 为常驻 webview 增加单 session 8、全局 16 的硬上限。
 - Project scope 变化时撤销旧 `file://` grant,并阻止历史记录回到旧文件。
@@ -313,7 +313,7 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 - 同一 tab 快速连续导航。
 - 两个 session 同时持有不同 tab。
 - React controlled input、textarea、contenteditable。
-- pointer click 与 wheel scroll。
+- target-scoped click 与 scroll。
 - viewport/full-page screenshot。
 - Canvas 显示/隐藏和 session 切换前后 `webContentsID` 保持一致。
 - renderer reload 后 pool 重建期间工具明确返回 not ready。
@@ -367,7 +367,7 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 | 页面长期请求导致等待不结束 | open/reload 超时 | 以主 frame commit 为成功条件,不等待 network idle |
 | CDP 命令成功但响应丢失 | 重复副作用 | 写操作不自动重试/fallback |
 | full-page screenshot 内容过大 | 内存和响应过大 | 尺寸/像素上限与结构化错误 |
-| React/富文本输入差异 | 输入状态未提交 | 真实 Input 域测试矩阵,保留明确失败而非 DOM fallback |
+| React/富文本输入差异 | 输入状态未提交 | 真实 renderer 输入测试矩阵,校验 `beforeinput` / `input` 和最终值,保留明确失败而非第二实现 |
 
 ## 10. 完成定义
 

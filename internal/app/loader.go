@@ -210,6 +210,15 @@ func normalizeAuthConfig(raw *AuthConfig) *AuthConfig {
 		method.Label = strings.TrimSpace(method.Label)
 		method.Prefix = strings.TrimSpace(method.Prefix)
 		method.Header = strings.TrimSpace(method.Header)
+		if method.TokenExchange != nil {
+			exchange := *method.TokenExchange
+			exchange.URL = strings.TrimSpace(exchange.URL)
+			exchange.AccessTokenField = strings.TrimSpace(exchange.AccessTokenField)
+			exchange.ExpiresInField = strings.TrimSpace(exchange.ExpiresInField)
+			exchange.TokenType = strings.TrimSpace(exchange.TokenType)
+			exchange.BodyFields = normalizeStringMap(exchange.BodyFields)
+			method.TokenExchange = &exchange
+		}
 		if method.ID == "" {
 			method.ID = method.Type
 		}
@@ -315,6 +324,21 @@ func ValidateDefinition(def *Definition) error {
 	if err := ValidateConnectionConfig(def.Connection); err != nil {
 		return err
 	}
+	if err := ValidateAuthConnectionFields(def.Auth, def.Connection); err != nil {
+		return err
+	}
+	if def.Auth != nil {
+		for _, method := range def.Auth.Methods {
+			if method.Type != AuthTypeTokenExchange {
+				continue
+			}
+			for name, endpoint := range def.Endpoints {
+				if endpoint.Kind == EndpointKindMCP {
+					return fmt.Errorf("auth method %q token exchange is not supported by MCP endpoint %q", method.ID, name)
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -400,6 +424,13 @@ func ValidateAuthConfig(auth *AuthConfig) error {
 				return fmt.Errorf("auth method %q cannot be none when auth is required", id)
 			}
 		case AuthTypeBearer, AuthTypeToken, AuthTypeBasic, AuthTypeHeader, AuthTypeOAuth2:
+			if method.TokenExchange != nil {
+				return fmt.Errorf("auth method %q token_exchange is only valid for type %q", id, AuthTypeTokenExchange)
+			}
+		case AuthTypeTokenExchange:
+			if err := ValidateTokenExchange(method.TokenExchange); err != nil {
+				return fmt.Errorf("auth method %q: %w", id, err)
+			}
 		default:
 			return fmt.Errorf("unsupported auth method type %q", method.Type)
 		}
@@ -417,6 +448,91 @@ func ValidateAuthConfig(auth *AuthConfig) error {
 		}
 	}
 	return nil
+}
+
+func ValidateTokenExchange(exchange *TokenExchangeSpec) error {
+	if exchange == nil {
+		return errors.New("token_exchange is required")
+	}
+	if err := validateEndpointURL(exchange.URL); err != nil {
+		return fmt.Errorf("invalid token exchange url: %w", err)
+	}
+	if len(exchange.BodyFields) == 0 {
+		return errors.New("token_exchange body_fields are required")
+	}
+	for bodyName, fieldID := range exchange.BodyFields {
+		if !connectionFieldIDPattern.MatchString(strings.TrimSpace(bodyName)) {
+			return fmt.Errorf("invalid token exchange body field %q", bodyName)
+		}
+		if !connectionFieldIDPattern.MatchString(strings.TrimSpace(fieldID)) {
+			return fmt.Errorf("invalid token exchange connection field %q", fieldID)
+		}
+	}
+	if !validTokenExchangeJSONPath(exchange.AccessTokenField) {
+		return fmt.Errorf("invalid access_token_field %q", exchange.AccessTokenField)
+	}
+	if exchange.ExpiresInField != "" && !validTokenExchangeJSONPath(exchange.ExpiresInField) {
+		return fmt.Errorf("invalid expires_in_field %q", exchange.ExpiresInField)
+	}
+	if exchange.TokenType != "" && strings.ContainsAny(exchange.TokenType, "\r\n \t") {
+		return errors.New("token_type must be a single HTTP auth scheme")
+	}
+	return nil
+}
+
+func ValidateAuthConnectionFields(auth *AuthConfig, connection *ConnectionConfig) error {
+	if auth == nil {
+		return nil
+	}
+	fields := map[string]struct{}{}
+	if connection != nil {
+		for _, field := range connection.Fields {
+			fields[strings.TrimSpace(field.ID)] = struct{}{}
+		}
+	}
+	for _, method := range auth.Methods {
+		if method.Type != AuthTypeTokenExchange || method.TokenExchange == nil {
+			continue
+		}
+		for _, fieldID := range method.TokenExchange.BodyFields {
+			fieldID = strings.TrimSpace(fieldID)
+			if _, ok := fields[fieldID]; !ok {
+				return fmt.Errorf("auth method %q references unknown connection field %q", method.ID, fieldID)
+			}
+		}
+	}
+	return nil
+}
+
+func validTokenExchangeJSONPath(value string) bool {
+	parts := strings.Split(strings.TrimSpace(value), ".")
+	if len(parts) == 0 {
+		return false
+	}
+	for _, part := range parts {
+		if !connectionFieldIDPattern.MatchString(part) {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key != "" && value != "" {
+			out[key] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func ValidateIcon(icon IconSpec) error {
@@ -438,7 +554,8 @@ func ValidateIcon(icon IconSpec) error {
 }
 
 func ValidateEndpoint(endpoint Endpoint) error {
-	switch strings.TrimSpace(endpoint.Kind) {
+	kind := strings.TrimSpace(endpoint.Kind)
+	switch kind {
 	case EndpointKindREST, EndpointKindGraphQL:
 		if err := validateEndpointURL(endpoint.URL); err != nil {
 			return err
@@ -449,6 +566,14 @@ func ValidateEndpoint(endpoint Endpoint) error {
 		}
 	default:
 		return fmt.Errorf("unsupported kind %q", endpoint.Kind)
+	}
+	if endpoint.URLConfig != nil {
+		if kind != EndpointKindREST && kind != EndpointKindGraphQL {
+			return errors.New("url_config is only supported by REST and GraphQL endpoints")
+		}
+		if strings.TrimSpace(endpoint.URLConfig.Label) == "" {
+			return errors.New("url_config label is required")
+		}
 	}
 	for platform, override := range endpoint.Platforms {
 		platform = strings.TrimSpace(platform)

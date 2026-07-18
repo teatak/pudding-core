@@ -218,13 +218,14 @@ export type AppConnectionPayload = {
   appID: string;
   name?: string;
   authMethodID?: string;
-  authType: "none" | "bearer" | "token" | "basic" | "header" | "oauth2";
+  authType: "none" | "bearer" | "token" | "basic" | "header" | "oauth2" | "token_exchange";
   token?: string;
   prefix?: string;
   header?: string;
   username?: string;
   password?: string;
   fields?: Record<string, string>;
+  endpointURLs?: Record<string, string>;
 };
 export type { AppMCPOverride, AppMCPOverrideResponse };
 export type {

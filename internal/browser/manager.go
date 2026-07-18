@@ -176,15 +176,6 @@ type ClickInput struct {
 	Method   string   `json:"method,omitempty"`
 }
 
-type clickTarget struct {
-	OK     bool    `json:"ok"`
-	Tag    string  `json:"tag"`
-	Text   string  `json:"text"`
-	X      float64 `json:"x"`
-	Y      float64 `json:"y"`
-	Method string  `json:"method"`
-}
-
 type scrollTarget struct {
 	OK     bool    `json:"ok"`
 	X      float64 `json:"x"`
@@ -984,21 +975,7 @@ func (m *Manager) Click(ctx context.Context, sessionID, tabID string, in ClickIn
 }
 
 func (m *Manager) pointerClick(ctx context.Context, proc *browserProcess, binding *tabBinding, in ClickInput, method string) (json.RawMessage, error) {
-	raw, err := proc.evaluateJSON(ctx, m.client, binding.targetID, clickTargetScript(in, method))
-	if err != nil {
-		return nil, err
-	}
-	var target clickTarget
-	if err := json.Unmarshal(raw, &target); err != nil {
-		return nil, err
-	}
-	if !target.OK {
-		return nil, errors.New("target element not found")
-	}
-	if err := proc.dispatchMouseClick(ctx, m.client, binding.targetID, target.X, target.Y); err != nil {
-		return nil, err
-	}
-	return raw, nil
+	return proc.evaluateJSONWithUserGesture(ctx, m.client, binding.targetID, clickTargetScript(in, method))
 }
 
 func (m *Manager) Type(ctx context.Context, sessionID, tabID string, in TypeInput) (ActionResult, error) {
@@ -1028,13 +1005,10 @@ func (m *Manager) Type(ctx context.Context, sessionID, tabID string, in TypeInpu
 	if err := json.Unmarshal(preparedRaw, &expectation); err != nil {
 		return ActionResult{}, err
 	}
-	if _, err := proc.cdpCall(ctx, m.client, binding.targetID, "Page.bringToFront", nil); err != nil {
-		return ActionResult{}, fmt.Errorf("browser target focus failed: %w", err)
+	if _, err := proc.evaluateJSON(ctx, m.client, binding.targetID, typeTargetInputScript(in)); err != nil {
+		return ActionResult{}, fmt.Errorf("browser target input failed: %w", err)
 	}
-	if err := proc.dispatchKeyboardText(ctx, m.client, binding.targetID, in.Text); err != nil {
-		return ActionResult{}, fmt.Errorf("browser keyboard input failed: %w", err)
-	}
-	raw, err := proc.evaluateJSON(ctx, m.client, binding.targetID, typeResultScript(in, "keyboard", expectation))
+	raw, err := proc.evaluateJSON(ctx, m.client, binding.targetID, typeResultScript(in, "target", expectation))
 	if err != nil {
 		return ActionResult{}, err
 	}
@@ -1045,7 +1019,7 @@ func (m *Manager) Type(ctx context.Context, sessionID, tabID string, in TypeInpu
 		return ActionResult{}, err
 	}
 	if !typed.MatchesExpected {
-		return ActionResult{}, errors.New("browser keyboard input did not produce the expected value")
+		return ActionResult{}, errors.New("browser input did not produce the expected value")
 	}
 	var typedResult map[string]any
 	if err := json.Unmarshal(raw, &typedResult); err != nil {
@@ -1092,9 +1066,6 @@ func (m *Manager) Scroll(ctx context.Context, sessionID, tabID string, in Scroll
 	}
 	if !target.OK {
 		return ActionResult{}, errors.New("scroll target not found")
-	}
-	if err := proc.dispatchMouseWheel(ctx, m.client, binding.targetID, target.X, target.Y, in.DeltaX, in.DeltaY); err != nil {
-		return ActionResult{}, err
 	}
 	raw, err := proc.waitForScrollResult(ctx, m.client, binding.targetID, in, target)
 	if err != nil {
@@ -2113,11 +2084,23 @@ func pageNavigateError(raw json.RawMessage) error {
 }
 
 func (p *browserProcess) evaluateJSON(ctx context.Context, client *http.Client, targetID, expression string) (json.RawMessage, error) {
-	raw, err := p.cdpCall(ctx, client, targetID, "Runtime.evaluate", map[string]any{
+	return p.evaluateJSONWithOptions(ctx, client, targetID, expression, false)
+}
+
+func (p *browserProcess) evaluateJSONWithUserGesture(ctx context.Context, client *http.Client, targetID, expression string) (json.RawMessage, error) {
+	return p.evaluateJSONWithOptions(ctx, client, targetID, expression, true)
+}
+
+func (p *browserProcess) evaluateJSONWithOptions(ctx context.Context, client *http.Client, targetID, expression string, userGesture bool) (json.RawMessage, error) {
+	params := map[string]any{
 		"expression":    expression,
 		"returnByValue": true,
 		"awaitPromise":  true,
-	})
+	}
+	if userGesture {
+		params["userGesture"] = true
+	}
+	raw, err := p.cdpCall(ctx, client, targetID, "Runtime.evaluate", params)
 	if err != nil {
 		return nil, err
 	}
@@ -2282,63 +2265,6 @@ func (p *browserProcess) closeCDPSessions() error {
 		session.close()
 	}
 	return nil
-}
-
-func (p *browserProcess) dispatchMouseClick(ctx context.Context, client *http.Client, targetID string, x, y float64) error {
-	events := []map[string]any{
-		{
-			"type":        "mouseMoved",
-			"x":           x,
-			"y":           y,
-			"button":      "none",
-			"buttons":     0,
-			"clickCount":  0,
-			"pointerType": "mouse",
-		},
-		{
-			"type":        "mousePressed",
-			"x":           x,
-			"y":           y,
-			"button":      "left",
-			"buttons":     1,
-			"clickCount":  1,
-			"pointerType": "mouse",
-		},
-		{
-			"type":        "mouseReleased",
-			"x":           x,
-			"y":           y,
-			"button":      "left",
-			"buttons":     0,
-			"clickCount":  1,
-			"pointerType": "mouse",
-		},
-	}
-	for _, event := range events {
-		if _, err := p.cdpCall(ctx, client, targetID, "Input.dispatchMouseEvent", event); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (p *browserProcess) dispatchKeyboardText(ctx context.Context, client *http.Client, targetID, text string) error {
-	_, err := p.cdpCall(ctx, client, targetID, "Input.insertText", map[string]any{"text": text})
-	return err
-}
-
-func (p *browserProcess) dispatchMouseWheel(ctx context.Context, client *http.Client, targetID string, x, y, deltaX, deltaY float64) error {
-	_, err := p.cdpCall(ctx, client, targetID, "Input.dispatchMouseEvent", map[string]any{
-		"type":        "mouseWheel",
-		"x":           x,
-		"y":           y,
-		"deltaX":      deltaX,
-		"deltaY":      deltaY,
-		"button":      "none",
-		"buttons":     0,
-		"pointerType": "mouse",
-	})
-	return err
 }
 
 func (p *browserProcess) waitForScrollResult(ctx context.Context, client *http.Client, targetID string, in ScrollInput, target scrollTarget) (json.RawMessage, error) {
@@ -2643,6 +2569,11 @@ func clickTargetScript(in ClickInput, method string) string {
 	  if (!Number.isFinite(cx) || !Number.isFinite(cy)) throw new Error("target coordinates not found");
 	  const hit = document.elementFromPoint(cx, cy);
 	  if (!hit || (hit !== el && !el.contains(hit))) throw new Error("target element is not hittable");
+  if (typeof el.click === "function") {
+    el.click();
+  } else {
+    el.dispatchEvent(new MouseEvent("click", {bubbles: true, cancelable: true, composed: true, clientX: cx, clientY: cy, view: window}));
+  }
   return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), text: (el.innerText || el.value || "").trim().slice(0, 160), x: cx, y: cy, cursorX: cx, cursorY: cy, method});
 })()`, selector, x, y, methodValue)
 }
@@ -2652,6 +2583,10 @@ func typePrepareScript(in TypeInput) string {
 		  const selector = %s;
 		  const text = %s;
 		  const clear = %t;
+		  const textInputTypes = new Set(["text", "search", "email", "tel", "url", "password", "number", "date", "datetime-local", "month", "time", "week"]);
+		  const isTextInput = (node) => node instanceof HTMLTextAreaElement ||
+		    (node instanceof HTMLInputElement && textInputTypes.has(String(node.type || "text").toLowerCase()));
+		  const isEditable = (node) => isTextInput(node) || Boolean(node?.isContentEditable);
 		  const fingerprint = (value) => {
 		    let hash = 2166136261;
 		    for (let index = 0; index < value.length; index += 1) {
@@ -2662,16 +2597,16 @@ func typePrepareScript(in TypeInput) string {
 		  };
 		  let el = selector ? document.querySelector(selector) : document.activeElement;
 		  if (!el || el === document.body) throw new Error("target input not found");
-		  if (!("value" in el) && !el.isContentEditable) throw new Error("target is not editable");
+		  if (!isEditable(el)) throw new Error("target is not editable");
 		  if (el.disabled || el.readOnly || el.getAttribute("aria-disabled") === "true" || el.getAttribute("aria-readonly") === "true") {
 		    throw new Error("target is not editable");
 		  }
 		  el.scrollIntoView({behavior: "instant", block: "center", inline: "center"});
 		  el.focus();
 		  if (document.activeElement !== el) throw new Error("target input could not be focused");
-		  const originalValue = "value" in el ? String(el.value || "") : String(el.textContent || "");
+		  const originalValue = isTextInput(el) ? String(el.value || "") : String(el.textContent || "");
 		  const expectedValue = clear ? text : originalValue + text;
-	  if ("value" in el) {
+	  if (isTextInput(el)) {
 	    try {
 	      if (typeof el.setSelectionRange === "function") {
 	        const end = String(el.value || "").length;
@@ -2681,7 +2616,7 @@ func typePrepareScript(in TypeInput) string {
 	  } else {
 	    const range = document.createRange();
 	    range.selectNodeContents(el);
-	    range.collapse(!clear);
+	    if (!clear) range.collapse(false);
 	    const selection = window.getSelection();
 	    selection.removeAllRanges();
 	    selection.addRange(range);
@@ -2696,11 +2631,85 @@ func typePrepareScript(in TypeInput) string {
 		})()`, jsString(in.Selector), jsString(in.Text), in.Clear)
 }
 
+func typeTargetInputScript(in TypeInput) string {
+	return fmt.Sprintf(`(() => {
+		  const selector = %s;
+		  const text = %s;
+		  const clear = %t;
+		  const textInputTypes = new Set(["text", "search", "email", "tel", "url", "password", "number", "date", "datetime-local", "month", "time", "week"]);
+		  const isTextInput = (node) => node instanceof HTMLTextAreaElement ||
+		    (node instanceof HTMLInputElement && textInputTypes.has(String(node.type || "text").toLowerCase()));
+		  const isEditable = (node) => isTextInput(node) || Boolean(node?.isContentEditable);
+		  const el = selector ? document.querySelector(selector) : document.activeElement;
+		  if (!el || el === document.body) throw new Error("target input not found");
+		  if (!isEditable(el)) throw new Error("target is not editable");
+		  if (document.activeElement !== el) el.focus();
+		  if (document.activeElement !== el) throw new Error("target input could not be focused");
+		  const inputEvent = (type, cancelable) => {
+		    let event;
+		    try {
+		      event = new InputEvent(type, {bubbles: true, cancelable, composed: true, inputType: "insertText", data: text});
+		    } catch (_) {
+		      event = new Event(type, {bubbles: true, cancelable, composed: true});
+		    }
+		    return event;
+		  };
+		  const accepted = el.dispatchEvent(inputEvent("beforeinput", true));
+		  if (!accepted) return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), canceled: true});
+		  const dispatchInput = () => el.dispatchEvent(inputEvent("input", false));
+		  if (isTextInput(el)) {
+		    const currentValue = String(el.value || "");
+		    const nextValue = clear ? text : currentValue + text;
+		    let proto = Object.getPrototypeOf(el);
+		    let setter = null;
+		    while (proto && !setter) {
+		      setter = Object.getOwnPropertyDescriptor(proto, "value")?.set || null;
+		      proto = Object.getPrototypeOf(proto);
+		    }
+		    if (!setter) throw new Error("target is not editable: native value setter missing");
+		    setter.call(el, nextValue);
+		    try {
+		      if (typeof el.setSelectionRange === "function") el.setSelectionRange(nextValue.length, nextValue.length);
+		    } catch (_) {}
+		    dispatchInput();
+		  } else if (el.isContentEditable) {
+		    let inserted = false;
+		    try {
+		      inserted = document.execCommand("insertText", false, text);
+		    } catch (_) {}
+		    if (!inserted) {
+		      const selection = window.getSelection();
+		      const range = selection?.rangeCount ? selection.getRangeAt(0) : document.createRange();
+		      if (!selection?.rangeCount) {
+		        range.selectNodeContents(el);
+		        if (!clear) range.collapse(false);
+		      }
+		      if (clear) range.selectNodeContents(el);
+		      range.deleteContents();
+		      const node = document.createTextNode(text);
+		      range.insertNode(node);
+		      range.setStartAfter(node);
+		      range.collapse(true);
+		      selection?.removeAllRanges();
+		      selection?.addRange(range);
+		      dispatchInput();
+		    }
+		  } else {
+		    throw new Error("target is not editable");
+		  }
+		  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase()});
+		})()`, jsString(in.Selector), jsString(in.Text), in.Clear)
+}
+
 func typeResultScript(in TypeInput, method string, expectation typeExpectation) string {
 	return fmt.Sprintf(`(() => {
 		  const selector = %s;
 		  const expectedValueLength = %d;
 		  const expectedValueHash = %s;
+		  const textInputTypes = new Set(["text", "search", "email", "tel", "url", "password", "number", "date", "datetime-local", "month", "time", "week"]);
+		  const isTextInput = (node) => node instanceof HTMLTextAreaElement ||
+		    (node instanceof HTMLInputElement && textInputTypes.has(String(node.type || "text").toLowerCase()));
+		  const isEditable = (node) => isTextInput(node) || Boolean(node?.isContentEditable);
 		  const fingerprint = (value) => {
 		    let hash = 2166136261;
 		    for (let index = 0; index < value.length; index += 1) {
@@ -2711,8 +2720,9 @@ func typeResultScript(in TypeInput, method string, expectation typeExpectation) 
 		  };
 		  const el = selector ? document.querySelector(selector) : document.activeElement;
 		  if (!el || el === document.body) throw new Error("target input not found after typing");
+		  if (!isEditable(el)) throw new Error("target is not editable after typing");
 		  const rect = el.getBoundingClientRect();
-		  const value = "value" in el ? String(el.value || "") : String(el.textContent || "");
+		  const value = isTextInput(el) ? String(el.value || "") : String(el.textContent || "");
 		  const matchesExpected = value.length === expectedValueLength && fingerprint(value) === expectedValueHash;
 		  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), textLength: %d, valueLength: value.length, matchesExpected, cursorX: rect.left + rect.width / 2, cursorY: rect.top + Math.min(rect.height / 2, 18), method: %s});
 		})()`, jsString(in.Selector), expectation.ExpectedValueLength, jsString(expectation.ExpectedValueHash), len([]rune(in.Text)), jsString(method))
@@ -2721,6 +2731,8 @@ func typeResultScript(in TypeInput, method string, expectation typeExpectation) 
 func scrollTargetScript(in ScrollInput) string {
 	return fmt.Sprintf(`(() => {
   const selector = %s;
+  const deltaX = %s;
+  const deltaY = %s;
   const target = selector ? document.querySelector(selector) : window;
   if (!target) throw new Error("scroll target not found");
   let cursorX = window.innerWidth / 2;
@@ -2737,8 +2749,9 @@ func scrollTargetScript(in ScrollInput) string {
   }
 	const startX = target === window ? window.scrollX : target.scrollLeft;
 	const startY = target === window ? window.scrollY : target.scrollTop;
+	target.scrollBy({left: deltaX, top: deltaY, behavior: "instant"});
 	return JSON.stringify({ok: true, x: cursorX, y: cursorY, startX, startY});
-})()`, jsString(in.Selector))
+})()`, jsString(in.Selector), strconv.FormatFloat(in.DeltaX, 'f', -1, 64), strconv.FormatFloat(in.DeltaY, 'f', -1, 64))
 }
 
 func scrollResultScript(in ScrollInput, target scrollTarget) string {
@@ -2753,7 +2766,7 @@ func scrollResultScript(in ScrollInput, target scrollTarget) string {
     targetY: target && target !== window ? target.scrollTop : window.scrollY,
     cursorX: %s,
     cursorY: %s,
-    method: "wheel"
+    method: "target"
   });
 })()`, jsString(in.Selector), strconv.FormatFloat(target.X, 'f', -1, 64), strconv.FormatFloat(target.Y, 'f', -1, 64))
 }

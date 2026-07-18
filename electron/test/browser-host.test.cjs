@@ -198,7 +198,6 @@ test("captures dynamically updated favicons and publishes the resolved local ima
     undefined,
     (request) => required.push(request),
     undefined,
-    undefined,
     {
       resolveFavicon: async (request) => {
         resolutions.push(request);
@@ -289,7 +288,6 @@ test("allows real child windows when native WindowProxy semantics are required",
     undefined,
     undefined,
     (request) => required.push(request),
-    undefined,
     undefined,
     {
       options: () => ({ backgroundColor: "#123456", webPreferences: { javascript: true, nodeIntegration: true } }),
@@ -472,18 +470,12 @@ test("rejects a second live webview for the same session tab", async () => {
 
 test("click type and scroll use only the expected CDP command sequences", async () => {
   let required;
-  const focusRequests = [];
   const host = new BrowserHost(
     undefined,
     undefined,
     undefined,
     (request) => {
       required = request;
-    },
-    undefined,
-    async (request) => {
-      focusRequests.push(request);
-      return true;
     },
   );
   const opening = host.ensure({ sessionID: "session-actions", tabID: "tab-actions", url: "about:blank" });
@@ -495,9 +487,10 @@ test("click type and scroll use only the expected CDP command sequences", async 
   webContents.debugger.evaluateValues = [
     '{"ok":true,"tag":"button","x":20,"y":30,"method":"pointer"}',
     '{"ok":true,"tag":"input","cursorX":20,"cursorY":30,"expectedValueLength":7,"expectedValueHash":"12345678"}',
-    '{"ok":true,"tag":"input","textLength":7,"valueLength":7,"matchesExpected":true,"cursorX":20,"cursorY":30,"method":"keyboard"}',
+    '{"ok":true,"tag":"input"}',
+    '{"ok":true,"tag":"input","textLength":7,"valueLength":7,"matchesExpected":true,"cursorX":20,"cursorY":30,"method":"target"}',
     '{"ok":true,"x":400,"y":300,"cursorX":400,"cursorY":300}',
-    '{"ok":true,"x":0,"y":600,"cursorX":400,"cursorY":300,"method":"wheel"}',
+    '{"ok":true,"x":0,"y":600,"cursorX":400,"cursorY":300,"method":"target"}',
   ];
 
   await host.click({ sessionID: "session-actions", tabID: "tab-actions", selector: "#save" });
@@ -507,28 +500,25 @@ test("click type and scroll use only the expected CDP command sequences", async 
   const methods = webContents.debugger.commands.map(({ method }) => method);
   assert.deepEqual(methods, [
     "Runtime.evaluate",
-    "Input.dispatchMouseEvent",
-    "Input.dispatchMouseEvent",
-    "Input.dispatchMouseEvent",
-    "Runtime.evaluate",
-    "Page.bringToFront",
-    "Input.insertText",
     "Runtime.evaluate",
     "Runtime.evaluate",
-    "Input.dispatchMouseEvent",
+    "Runtime.evaluate",
+    "Runtime.evaluate",
     "Runtime.evaluate",
   ]);
-  assert.deepEqual(focusRequests, [{ sessionID: "session-actions", tabID: "tab-actions" }]);
-  assert.equal(webContents.debugger.commands[2].params.type, "mousePressed");
-  assert.equal(webContents.debugger.commands[3].params.type, "mouseReleased");
-  assert.equal(webContents.debugger.commands[6].params.text, "Pudding");
-  assert.equal(webContents.debugger.commands[9].params.type, "mouseWheel");
+  assert.equal(webContents.debugger.commands[0].params.userGesture, true);
+  assert.match(webContents.debugger.commands[0].params.expression, /el\.click\(\)/);
+  assert.equal(webContents.debugger.commands[1].params.userGesture, undefined);
+  assert.match(webContents.debugger.commands[1].params.expression, /if \(!clear\) range\.collapse\(false\)/);
+  assert.match(webContents.debugger.commands[2].params.expression, /inputEvent\("beforeinput", true\)/);
+  assert.match(webContents.debugger.commands[2].params.expression, /setter\.call\(el, nextValue\)/);
+  assert.match(webContents.debugger.commands[4].params.expression, /target\.scrollBy/);
   assert.match(webContents.debugger.commands[0].params.expression, /elementFromPoint/);
   assert.match(webContents.debugger.commands[0].params.expression, /not hittable/);
   host.closeAll();
 });
 
-test("rejects keyboard input when a controlled value does not match the expected result", async () => {
+test("rejects controlled input when the resulting value does not match", async () => {
   let required;
   const completed = [];
   const host = new BrowserHost(
@@ -539,7 +529,6 @@ test("rejects keyboard input when a controlled value does not match the expected
       required = request;
     },
     (event) => completed.push(event),
-    async () => true,
   );
   const opening = host.ensure({ sessionID: "session-controlled", tabID: "tab-controlled", url: "about:blank" });
   await new Promise((resolve) => setImmediate(resolve));
@@ -548,7 +537,8 @@ test("rejects keyboard input when a controlled value does not match the expected
   await opening;
   webContents.debugger.evaluateValues = [
     '{"ok":true,"tag":"input","expectedValueLength":1,"expectedValueHash":"12345678"}',
-    '{"ok":true,"tag":"input","valueLength":1,"matchesExpected":false,"method":"keyboard"}',
+    '{"ok":true,"tag":"input"}',
+    '{"ok":true,"tag":"input","valueLength":1,"matchesExpected":false,"method":"target"}',
   ];
 
   await assert.rejects(
@@ -560,7 +550,7 @@ test("rejects keyboard input when a controlled value does not match the expected
   host.closeAll();
 });
 
-test("does not dispatch keyboard input when the renderer cannot focus the target webview", async () => {
+test("dispatches target-scoped click and input without bringing the renderer webview to front", async () => {
   let required;
   const host = new BrowserHost(
     undefined,
@@ -569,8 +559,6 @@ test("does not dispatch keyboard input when the renderer cannot focus the target
     (request) => {
       required = request;
     },
-    undefined,
-    async () => false,
   );
   const opening = host.ensure({ sessionID: "session-unfocused", tabID: "tab-unfocused", url: "about:blank" });
   await new Promise((resolve) => setImmediate(resolve));
@@ -579,14 +567,22 @@ test("does not dispatch keyboard input when the renderer cannot focus the target
   await opening;
   webContents.debugger.commands = [];
   webContents.debugger.evaluateValues = [
+    '{"ok":true,"tag":"button","x":20,"y":30,"method":"pointer"}',
     '{"ok":true,"tag":"input","expectedValueLength":1,"expectedValueHash":"12345678"}',
+    '{"ok":true,"tag":"input"}',
+    '{"ok":true,"tag":"input","valueLength":1,"matchesExpected":true,"method":"target"}',
   ];
 
-  await assert.rejects(
-    host.type({ sessionID: "session-unfocused", tabID: "tab-unfocused", selector: "#name", text: "P" }),
-    /browser_webview_not_ready/,
-  );
-  assert.deepEqual(webContents.debugger.commands.map(({ method }) => method), ["Runtime.evaluate"]);
+  await host.click({ sessionID: "session-unfocused", tabID: "tab-unfocused", selector: "#save" });
+  await host.type({ sessionID: "session-unfocused", tabID: "tab-unfocused", selector: "#name", text: "P" });
+  assert.deepEqual(webContents.debugger.commands.map(({ method }) => method), [
+    "Runtime.evaluate",
+    "Runtime.evaluate",
+    "Runtime.evaluate",
+    "Runtime.evaluate",
+  ]);
+  assert.equal(webContents.debugger.commands[0].params.userGesture, true);
+  assert.equal(webContents.debugger.commands.slice(1).some(({ params }) => params.userGesture), false);
   host.closeAll();
 });
 

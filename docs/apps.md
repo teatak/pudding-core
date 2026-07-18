@@ -117,6 +117,69 @@ Injection behavior:
   by the tool call.
 - Forbidden hop-by-hop headers such as `Host` and `Content-Length` are rejected.
 
+## Token Exchange Authentication
+
+Use `token_exchange` when an API requires connection credentials to be
+exchanged for a short-lived access token. The body maps request keys to
+`connection.fields` ids. Pudding performs the exchange at request time, caches
+the returned token until shortly before expiry, and sends it as endpoint auth.
+
+```yaml
+auth:
+  required: true
+  methods:
+    - id: app-credentials
+      type: token_exchange
+      token_exchange:
+        url: https://example.com/oauth/token
+        body_fields:
+          client_id: clientId
+          client_secret: clientSecret
+        access_token_field: access_token
+        expires_in_field: expires_in
+        token_type: Bearer
+connection:
+  fields:
+    - id: clientId
+      required: true
+    - id: clientSecret
+      required: true
+      secret: true
+```
+
+Token exchange currently applies to REST and GraphQL endpoints. Access token
+and expiry fields may use dotted JSON paths. Connection credentials and token
+responses are never exposed as model-callable arguments or tool output.
+
+## Connection Endpoint URLs
+
+REST and GraphQL endpoints may opt into a connection-specific base URL with
+`url_config`. Endpoints that do not declare `url_config` cannot be overridden
+and do not show an address field in the connection form.
+
+```yaml
+endpoints:
+  grafana_rest:
+    kind: rest
+    url: http://localhost:3000
+    url_config:
+      label: Grafana address
+      description: Root URL of the Grafana instance.
+      placeholder: https://grafana.example.com
+      required: true
+```
+
+The connection URL takes precedence over the endpoint URL declared in
+`app.yaml`. An optional URL config may be left empty to keep the App default;
+`required: true` requires every connection to provide an address. Overrides
+are keyed by endpoint name, so one connection can customize multiple declared
+REST or GraphQL endpoints and the same App can connect to different self-hosted
+instances.
+
+Only `http` and `https` URLs without userinfo, query parameters, or fragments
+are accepted. Authentication and connection field injection remain unchanged.
+MCP endpoints continue to use the App-level private MCP override configuration.
+
 ## Skill Guidance
 
 Core prompt assembly does not inline app-specific connection field rules. If an

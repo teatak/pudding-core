@@ -68,6 +68,7 @@ import {
   useFilePreviewReveal,
 } from "@/state/filePreviewStore";
 import { useVisibleProjectFileReveal } from "@/state/projectRevealStore";
+import { setProjectTabClosed, useProjectTabClosed } from "@/state/workspaceProjectTabStore";
 import {
   clearVisibleUIContext,
   setVisibleUIContext,
@@ -104,7 +105,6 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
   const [activeCanvasItemIDs, setActiveCanvasItemIDs] = useState<Record<string, string>>({});
   const [canvasGalleryActiveIndices, setCanvasGalleryActiveIndices] = useState<Record<string, number>>({});
   const [resourceMenuOpen, setResourceMenuOpen] = useState(false);
-  const [closedProjectTabs, setClosedProjectTabs] = useState<Record<string, true>>({});
   const [pendingSavedClose, setPendingSavedClose] = useState<CanvasItem>();
   const [retainedBrowserTabs, setRetainedBrowserTabs] = useState<Record<string, BrowserTab[]>>({});
   const [retainedTerminals, setRetainedTerminals] = useState<Record<string, Terminal[]>>({});
@@ -204,6 +204,16 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     });
   }, [allFilePreviews, secondarySessionID, sessionID]);
   const enabled = Boolean(token && actorSessionID);
+  const projectTabClosed = useProjectTabClosed(actorSessionID);
+
+  const sessionQuery = useQuery({
+    enabled,
+    queryKey: queryKeys.session(actorSessionID),
+    queryFn: () => getSession(token, actorSessionID),
+    staleTime: 10_000,
+  });
+  const hasProject = Boolean(sessionQuery.data?.projectID);
+  const projectTabVisible = hasProject && !projectTabClosed;
 
   useEffect(() => {
     if (!actorSessionID || canvasSessionStateRef.current === actorSessionID) {
@@ -262,6 +272,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     selectWorkspaceSurface,
   } = useWorkspaceBrowserSurface({
     enabled,
+    hasProjectSurface: projectTabVisible,
     hasTransientSurface: filePreviews.length > 0,
     itemsLength: items.length,
     itemsPending: itemsQuery.isLoading,
@@ -269,14 +280,6 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     token,
   });
   const terminalActive = activeSurface === "terminal";
-  const sessionQuery = useQuery({
-    enabled,
-    queryKey: queryKeys.session(actorSessionID),
-    queryFn: () => getSession(token, actorSessionID),
-    staleTime: 10_000,
-  });
-  const hasProject = Boolean(sessionQuery.data?.projectID);
-  const projectTabVisible = hasProject && !closedProjectTabs[actorSessionID];
   const projectActive = activeSurface === "project" && hasProject;
   const {
     activeTerminalID,
@@ -307,6 +310,8 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
       } else {
         if (items.length > 0) {
           selectCanvasSurface();
+        } else if (projectTabVisible) {
+          selectProjectSurface();
         } else {
           selectWorkspaceSurface();
         }
@@ -539,19 +544,14 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     if (!hasProject) {
       return;
     }
-    setClosedProjectTabs((current) => {
-      if (!current[actorSessionID]) return current;
-      const next = { ...current };
-      delete next[actorSessionID];
-      return next;
-    });
+    setProjectTabClosed(actorSessionID, false);
     setActiveFilePreviewID(undefined);
     selectProjectSurface();
   };
 
   const closeProjectSurface = () => {
     if (!actorSessionID) return;
-    setClosedProjectTabs((current) => current[actorSessionID] ? current : { ...current, [actorSessionID]: true });
+    setProjectTabClosed(actorSessionID, true);
     if (!projectActive) return;
     if (browserTabs.length > 0) {
       selectBrowserTab(activeBrowserTabID || browserTabs[0].id);
@@ -580,12 +580,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
 
   useEffect(() => {
     if (projectFileReveal?.sessionID === actorSessionID && hasProject) {
-      setClosedProjectTabs((current) => {
-        if (!current[actorSessionID]) return current;
-        const next = { ...current };
-        delete next[actorSessionID];
-        return next;
-      });
+      setProjectTabClosed(actorSessionID, false);
       selectProjectSurface();
     }
   }, [actorSessionID, hasProject, projectFileReveal?.serial, selectProjectSurface]);
@@ -612,7 +607,9 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
       selectBrowserTab(activeBrowserTabID || browserTabs[0].id);
     } else {
       setActiveFilePreviewID(undefined);
-      if (items.length === 0) {
+      if (items.length === 0 && projectTabVisible) {
+        selectProjectSurface();
+      } else if (items.length === 0) {
         selectWorkspaceSurface();
       }
     }

@@ -65,10 +65,6 @@ export type ElectronBrowserAutomationEvent = {
   createdAt?: string;
 };
 
-export type ElectronBrowserWebviewFocusRequest = Required<Pick<ElectronBrowserRequest, "sessionID" | "tabID">> & {
-  requestID: string;
-};
-
 export type ElectronBrowserBridge = {
   ensure: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
   resolveFavicon?: (request: { url: string; pageURL: string }) => Promise<string>;
@@ -84,8 +80,6 @@ export type ElectronBrowserBridge = {
   onCursor?: (listener: (event: ElectronBrowserCursorEvent) => void) => () => void;
   onAutomationStart?: (listener: (event: ElectronBrowserAutomationEvent) => void) => () => void;
   onAutomationEnd?: (listener: (event: ElectronBrowserAutomationEvent) => void) => () => void;
-  completeWebviewFocus?: (request: ElectronBrowserWebviewFocusRequest & { focused: boolean }) => Promise<boolean>;
-  onWebviewFocusRequired?: (listener: (request: ElectronBrowserWebviewFocusRequest) => void) => () => void;
   onWebviewRequired?: (listener: (request: ElectronWebviewRequiredEvent) => void) => () => void;
 };
 

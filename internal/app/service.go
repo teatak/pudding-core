@@ -741,12 +741,19 @@ func endpointBindingForConnection(def *Definition, endpointName string, endpoint
 	if def == nil || conn == nil {
 		return nil
 	}
+	resolvedEndpoint := ResolveEndpointPlatform(endpoint)
+	if endpointURL := strings.TrimSpace(conn.EndpointURLs[endpointName]); endpointURL != "" &&
+		(resolvedEndpoint.Kind == EndpointKindREST || resolvedEndpoint.Kind == EndpointKindGraphQL) {
+		resolvedEndpoint.URL = endpointURL
+	}
+	authMethod, _ := FindAuthMethod(def, conn.Auth.MethodID, conn.Auth.Type)
 	return &EndpointBinding{
 		AppID:               def.ID,
 		ConnectionID:        conn.ID,
 		EndpointName:        endpointName,
-		Endpoint:            ResolveEndpointPlatform(endpoint),
+		Endpoint:            resolvedEndpoint,
 		Auth:                CloneAuth(conn.Auth),
+		AuthMethod:          CloneAuthMethod(authMethod),
 		ConnectionFields:    cloneStringMap(conn.Fields),
 		ConnectionFieldDefs: connectionFieldDefs(def.Connection),
 	}

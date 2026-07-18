@@ -149,7 +149,7 @@ func TestSingletonLockPID(t *testing.T) {
 	}
 }
 
-func TestTypeUsesCDPInsertText(t *testing.T) {
+func TestTypeUsesTargetScopedCDPInput(t *testing.T) {
 	evaluateCount := 0
 	manager, calls := newCDPTestManager(t, func(request cdpTestRequest) cdpTestReply {
 		switch request.Method {
@@ -158,11 +158,7 @@ func TestTypeUsesCDPInsertText(t *testing.T) {
 			if evaluateCount == 1 {
 				return jsonValueReply(`{"ok":true,"tag":"input","expectedValueLength":1,"expectedValueHash":"12345678"}`)
 			}
-			return jsonValueReply(`{"ok":true,"tag":"input","textLength":1,"valueLength":1,"matchesExpected":true,"cursorX":10,"cursorY":10,"method":"keyboard"}`)
-		case "Input.insertText":
-			return cdpTestReply{}
-		case "Page.bringToFront":
-			return cdpTestReply{}
+			return jsonValueReply(`{"ok":true,"tag":"input","textLength":1,"valueLength":1,"matchesExpected":true,"cursorX":10,"cursorY":10,"method":"target"}`)
 		case "Page.getNavigationHistory":
 			return navigationHistoryReply()
 		default:
@@ -174,14 +170,14 @@ func TestTypeUsesCDPInsertText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Result["method"] != "keyboard" || result.Result["valueLength"] != float64(1) {
+	if result.Result["method"] != "target" || result.Result["valueLength"] != float64(1) {
 		t.Fatalf("unexpected type result: %+v", result.Result)
 	}
 	if _, ok := result.Result["matchesExpected"]; ok {
 		t.Fatalf("internal verification field leaked into result: %+v", result.Result)
 	}
 	gotCalls := calls()
-	if got := strings.Join(cdpTestMethods(gotCalls), ","); got != "Runtime.evaluate,Runtime.evaluate,Page.bringToFront,Input.insertText,Runtime.evaluate,Runtime.evaluate,Page.getNavigationHistory" {
+	if got := strings.Join(cdpTestMethods(gotCalls), ","); got != "Runtime.evaluate,Runtime.evaluate,Runtime.evaluate,Runtime.evaluate,Runtime.evaluate,Page.getNavigationHistory" {
 		t.Fatalf("unexpected CDP calls: %s", got)
 	}
 	proc := manager.processes[globalProcessKey]
@@ -197,30 +193,33 @@ func TestTypeUsesCDPInsertText(t *testing.T) {
 	if !connected || nextID != len(gotCalls) {
 		t.Fatalf("CDP session was not reused: connected=%v nextID=%d calls=%d", connected, nextID, len(gotCalls))
 	}
-	if gotCalls[3].Params["text"] != "P" {
-		t.Fatalf("unexpected inserted text: %+v", gotCalls[3].Params)
+	if expression, _ := gotCalls[2].Params["expression"].(string); !strings.Contains(expression, `inputEvent("beforeinput", true)`) || !strings.Contains(expression, `setter.call(el, nextValue)`) {
+		t.Fatalf("unexpected target input script: %+v", gotCalls[2].Params)
+	}
+	if expression, _ := gotCalls[1].Params["expression"].(string); !strings.Contains(expression, `if (!clear) range.collapse(false)`) {
+		t.Fatalf("unexpected contenteditable selection script: %+v", gotCalls[1].Params)
 	}
 }
 
-func TestTypeCDPFailureDoesNotFallBackToDOM(t *testing.T) {
+func TestTypeTargetInputFailureDoesNotFallBack(t *testing.T) {
 	manager, calls := newCDPTestManager(t, func(request cdpTestRequest) cdpTestReply {
 		switch request.Method {
 		case "Runtime.evaluate":
+			expression, _ := request.Params["expression"].(string)
+			if strings.Contains(expression, "setter.call(el, nextValue)") {
+				return cdpTestReply{ErrorMessage: "target input failed"}
+			}
 			return jsonValueReply(`{"ok":true,"tag":"input","expectedValueLength":7,"expectedValueHash":"12345678"}`)
-		case "Input.insertText":
-			return cdpTestReply{ErrorMessage: "keyboard text failed"}
-		case "Page.bringToFront":
-			return cdpTestReply{}
 		default:
 			t.Errorf("unexpected CDP method after input failure: %s", request.Method)
 			return cdpTestReply{}
 		}
 	})
 	_, err := manager.Type(context.Background(), "sess_type", "tab_type", TypeInput{Selector: "#name", Text: "Pudding", Clear: true})
-	if err == nil || !strings.Contains(err.Error(), "browser keyboard input failed") {
+	if err == nil || !strings.Contains(err.Error(), "browser target input failed") {
 		t.Fatalf("expected direct CDP input error, got %v", err)
 	}
-	if got := strings.Join(cdpTestMethods(calls()), ","); got != "Runtime.evaluate,Runtime.evaluate,Page.bringToFront,Input.insertText" {
+	if got := strings.Join(cdpTestMethods(calls()), ","); got != "Runtime.evaluate,Runtime.evaluate,Runtime.evaluate" {
 		t.Fatalf("unexpected CDP calls: %s", got)
 	}
 }
@@ -234,11 +233,7 @@ func TestTypeRejectsUnchangedControlledValue(t *testing.T) {
 			if evaluateCount == 1 {
 				return jsonValueReply(`{"ok":true,"tag":"input","expectedValueLength":1,"expectedValueHash":"12345678"}`)
 			}
-			return jsonValueReply(`{"ok":true,"tag":"input","valueLength":1,"matchesExpected":false,"method":"keyboard"}`)
-		case "Input.insertText":
-			return cdpTestReply{}
-		case "Page.bringToFront":
-			return cdpTestReply{}
+			return jsonValueReply(`{"ok":true,"tag":"input","valueLength":1,"matchesExpected":false,"method":"target"}`)
 		default:
 			t.Errorf("unexpected CDP method: %s", request.Method)
 			return cdpTestReply{}
@@ -252,27 +247,27 @@ func TestTypeRejectsUnchangedControlledValue(t *testing.T) {
 }
 
 func TestClickCDPFailureDoesNotFallBackToDOM(t *testing.T) {
-	mouseEventCount := 0
 	manager, calls := newCDPTestManager(t, func(request cdpTestRequest) cdpTestReply {
 		switch request.Method {
 		case "Runtime.evaluate":
-			return jsonValueReply(`{"ok":true,"tag":"button","text":"Save","x":20,"y":30,"method":"pointer"}`)
-		case "Input.dispatchMouseEvent":
-			mouseEventCount++
-			if mouseEventCount == 2 {
-				return cdpTestReply{ErrorMessage: "mouse press failed"}
+			expression, _ := request.Params["expression"].(string)
+			if strings.Contains(expression, "el.click()") {
+				if request.Params["userGesture"] != true {
+					t.Errorf("target click did not carry a CDP user gesture: %+v", request.Params)
+				}
+				return cdpTestReply{ErrorMessage: "target click failed"}
 			}
-			return cdpTestReply{}
+			return jsonValueReply(`{"url":"https://example.test/","readyState":"complete","timeOrigin":1}`)
 		default:
 			t.Errorf("unexpected CDP method after click failure: %s", request.Method)
 			return cdpTestReply{}
 		}
 	})
 	_, err := manager.Click(context.Background(), "sess_type", "tab_type", ClickInput{Selector: "#save"})
-	if err == nil || !strings.Contains(err.Error(), "mouse press failed") {
+	if err == nil || !strings.Contains(err.Error(), "target click failed") {
 		t.Fatalf("expected direct CDP click error, got %v", err)
 	}
-	if got := strings.Join(cdpTestMethods(calls()), ","); got != "Runtime.evaluate,Runtime.evaluate,Input.dispatchMouseEvent,Input.dispatchMouseEvent" {
+	if got := strings.Join(cdpTestMethods(calls()), ","); got != "Runtime.evaluate,Runtime.evaluate" {
 		t.Fatalf("unexpected CDP calls: %s", got)
 	}
 }
@@ -324,7 +319,7 @@ func TestNavigateAndWaitRejectsPageNavigateFailure(t *testing.T) {
 	}
 }
 
-func TestScrollUsesCDPMouseWheel(t *testing.T) {
+func TestScrollUsesTargetScopedCDP(t *testing.T) {
 	evaluateCount := 0
 	manager, calls := newCDPTestManager(t, func(request cdpTestRequest) cdpTestReply {
 		switch request.Method {
@@ -333,12 +328,7 @@ func TestScrollUsesCDPMouseWheel(t *testing.T) {
 			if evaluateCount == 1 {
 				return jsonValueReply(`{"ok":true,"x":400,"y":300}`)
 			}
-			return jsonValueReply(`{"ok":true,"x":0,"y":600,"targetX":0,"targetY":600,"cursorX":400,"cursorY":300,"method":"wheel"}`)
-		case "Input.dispatchMouseEvent":
-			if request.Params["type"] != "mouseWheel" || request.Params["deltaY"] != float64(600) {
-				t.Errorf("unexpected wheel event: %+v", request.Params)
-			}
-			return cdpTestReply{}
+			return jsonValueReply(`{"ok":true,"x":0,"y":600,"targetX":0,"targetY":600,"cursorX":400,"cursorY":300,"method":"target"}`)
 		case "Page.getNavigationHistory":
 			return navigationHistoryReply()
 		default:
@@ -350,11 +340,15 @@ func TestScrollUsesCDPMouseWheel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Result["method"] != "wheel" || result.Result["y"] != float64(600) {
+	if result.Result["method"] != "target" || result.Result["y"] != float64(600) {
 		t.Fatalf("unexpected scroll result: %+v", result.Result)
 	}
-	if got := strings.Join(cdpTestMethods(calls()), ","); got != "Runtime.evaluate,Runtime.evaluate,Input.dispatchMouseEvent,Runtime.evaluate,Runtime.evaluate,Page.getNavigationHistory" {
+	gotCalls := calls()
+	if got := strings.Join(cdpTestMethods(gotCalls), ","); got != "Runtime.evaluate,Runtime.evaluate,Runtime.evaluate,Runtime.evaluate,Page.getNavigationHistory" {
 		t.Fatalf("unexpected CDP calls: %s", got)
+	}
+	if expression, _ := gotCalls[1].Params["expression"].(string); !strings.Contains(expression, "target.scrollBy") {
+		t.Fatalf("unexpected target scroll script: %+v", gotCalls[1].Params)
 	}
 }
 

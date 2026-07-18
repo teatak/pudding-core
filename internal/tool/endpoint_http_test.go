@@ -64,6 +64,68 @@ func TestRESTRequestUsesGrantedEndpointAndInjectedAuth(t *testing.T) {
 	}
 }
 
+func TestRESTRequestExchangesAndCachesAppCredentialToken(t *testing.T) {
+	tokenCalls := 0
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/open-apis/auth/v3/tenant_access_token/internal":
+			tokenCalls++
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body["app_id"] != "cli_test" || body["app_secret"] != "secret" {
+				t.Fatalf("unexpected token body: %+v", body)
+			}
+			return jsonResponse(200, `{"code":0,"tenant_access_token":"tenant-token","expire":7200}`), nil
+		case "/open-apis/drive/v1/files":
+			if got := r.Header.Get("Authorization"); got != "Bearer tenant-token" {
+				t.Fatalf("unexpected authorization header %q", got)
+			}
+			return jsonResponse(200, `{"code":0,"data":{"files":[]}}`), nil
+		default:
+			t.Fatalf("unexpected target: %s", r.URL.String())
+			return nil, nil
+		}
+	})}
+	binding := &app.EndpointBinding{
+		AppID:        "feishu",
+		ConnectionID: "feishu-main",
+		EndpointName: "feishu_rest",
+		Endpoint:     app.Endpoint{Kind: app.EndpointKindREST, URL: "https://open.feishu.cn/open-apis"},
+		Auth:         app.Auth{MethodID: "feishu-app-credentials", Type: app.AuthTypeTokenExchange},
+		AuthMethod: app.AuthMethod{
+			ID:   "feishu-app-credentials",
+			Type: app.AuthTypeTokenExchange,
+			TokenExchange: &app.TokenExchangeSpec{
+				URL:              "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+				BodyFields:       map[string]string{"app_id": "appId", "app_secret": "appSecret"},
+				AccessTokenField: "tenant_access_token",
+				ExpiresInField:   "expire",
+				TokenType:        "Bearer",
+			},
+		},
+		ConnectionFields: map[string]string{"appId": "cli_test", "appSecret": "secret"},
+	}
+	runner := NewBuiltinRunner(
+		WithWebHTTPClient(client),
+		WithAppEndpoints(fakeEndpointSource{binding: binding}),
+	)
+	for range 2 {
+		res := runner.Call(context.Background(), Call{
+			SessionID: "sess_1",
+			Name:      RESTRequest,
+			Args:      json.RawMessage(`{"endpoint":"feishu_rest","method":"GET","path":"/drive/v1/files"}`),
+		})
+		if !res.Ok {
+			t.Fatalf("rest request should succeed: %+v", res)
+		}
+	}
+	if tokenCalls != 1 {
+		t.Fatalf("token endpoint calls = %d, want 1", tokenCalls)
+	}
+}
+
 func TestRESTRequestInjectsConnectionQueryFields(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		query := r.URL.Query()

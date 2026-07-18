@@ -90,6 +90,24 @@ Supported endpoint kinds are:
 - `mcp` with `transport: streamable_http` and an HTTP or HTTPS `url`.
 - `mcp` with `transport: stdio`, `command`, optional `args`, and optional `env`.
 
+REST and GraphQL addresses are fixed by default. Only declare `url_config` when
+the service is self-hosted or each connection must provide its own base URL:
+
+```yaml
+endpoints:
+  example_rest:
+    kind: rest
+    url: http://localhost:3000
+    url_config:
+      label: Service address
+      placeholder: https://service.example.com
+      required: true
+```
+
+Omit `url_config` for fixed official APIs. Use `required: true` when the default
+URL is only a development placeholder and every real connection needs an
+address; otherwise an empty value keeps the endpoint's default URL.
+
 The daemon starts stdio MCP endpoints on demand when the App is loaded. Keep the
 command and arguments portable where possible; use platform overrides when an
 executable path or invocation differs by operating system.

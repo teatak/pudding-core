@@ -98,6 +98,12 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { translate, useI18n } from "@/i18n";
 import { boolSetting, SETTINGS_KEYS } from "@/lib/appSettings";
+import {
+  compareAppVersions,
+  isPreviewRelease,
+  needsAppUpgrade,
+  selectAppInstallRelease,
+} from "@/lib/appVersions";
 import { onOAuthConnected, openExternalURL } from "@/lib/desktopBridge";
 import { shouldKeepDialogOpenForSelectDismiss } from "@/lib/layerGuards";
 import { cn } from "@/lib/utils";
@@ -177,6 +183,7 @@ type ConnectionForm = {
   authMethodID: string;
   authType: AuthType;
   fields: Record<string, string>;
+  endpointURLs: Record<string, string>;
   token: string;
   prefix: string;
   header: string;
@@ -193,7 +200,7 @@ type MCPConfigForm = {
 };
 type MCPAppConfigEditor = { app?: AppDefinition };
 
-const authTypes: AuthType[] = ["none", "bearer", "token", "basic", "header", "oauth2"];
+const authTypes: AuthType[] = ["none", "bearer", "token", "basic", "header", "oauth2", "token_exchange"];
 const OFFICIAL_APP_REGISTRY =
   import.meta.env.VITE_PUDDING_APP_REGISTRY_URL ||
   "https://teatak.github.io/pudding-hub/apps/registry.json";
@@ -236,7 +243,13 @@ export function AppsPane({ token }: { token: string }) {
     queryFn: () => listAppConnections(token),
   });
   const apps = useMemo(
-    () => [...(appsQuery.data?.apps || [])].sort((a, b) => appDisplayName(a, t).localeCompare(appDisplayName(b, t))),
+    () =>
+      [...(appsQuery.data?.apps || [])].sort((a, b) => {
+        if (a.source !== b.source) {
+          return a.source === "builtin" ? -1 : 1;
+        }
+        return appDisplayName(a, t).localeCompare(appDisplayName(b, t));
+      }),
     [appsQuery.data?.apps, t],
   );
   const allInstalledApps = useMemo(() => apps.filter((app) => app.source === "installed"), [apps]);
@@ -256,11 +269,14 @@ export function AppsPane({ token }: { token: string }) {
   const detailApp = apps.find((app) => app.id === detailAppID) || null;
   const detailCatalogForInstalled = detailApp ? catalogByLocalID.get(detailApp.id) : undefined;
   const detailCatalogApp = catalogApps.find((app) => app.id === detailCatalogID) || null;
+  const detailCatalogInstalled = detailCatalogApp
+    ? installedByID.get(appRegistryLocalID(detailCatalogApp))
+    : undefined;
   const detailCatalogReleases = detailCatalogApp ? appRegistryReleases(detailCatalogApp, showPreviewVersions) : [];
   const detailCatalogRelease =
     detailCatalogApp && detailCatalogReleases.length > 0
       ? detailCatalogReleases.find((release) => release.version === catalogReleaseByID[detailCatalogApp.id]) ||
-        appRegistryDefaultRelease(detailCatalogApp, showPreviewVersions)
+        appRegistryDefaultRelease(detailCatalogApp, showPreviewVersions, detailCatalogInstalled)
       : undefined;
   const catalogDetailQuery = useQuery({
     queryKey: queryKeys.appCatalogDetail(
@@ -290,6 +306,9 @@ export function AppsPane({ token }: { token: string }) {
     return onOAuthConnected(() => {
       toast.success(t("apps.oauthConnected"));
       void queryClient.invalidateQueries({ queryKey: queryKeys.appConnections() });
+      void queryClient.invalidateQueries({
+        predicate: (query) => query.queryKey[0] === "apps" && query.queryKey[2] === "mcp",
+      });
     });
   }, [queryClient, t]);
 
@@ -336,11 +355,14 @@ export function AppsPane({ token }: { token: string }) {
     onError: () => toast.error(t("apps.installFailed")),
   });
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => deleteAppConnection(token, id),
-    onSuccess: async () => {
+    mutationFn: (connection: AppConnection) => deleteAppConnection(token, connection.id),
+    onSuccess: async (_data, connection) => {
       toast.success(t("apps.connectionDeleted"));
       setDeleting(null);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.appConnections() });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.appConnections() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.appMCPStatus(connection.appID) }),
+      ]);
     },
     onError: () => toast.error(t("apps.connectionDeleteFailed")),
   });
@@ -462,7 +484,7 @@ export function AppsPane({ token }: { token: string }) {
               detailError={catalogDetailQuery.error}
               detailFailed={catalogDetailQuery.isError}
               detailLoading={catalogDetailQuery.isLoading}
-              installed={installedByID.get(appRegistryLocalID(detailCatalogApp))}
+              installed={detailCatalogInstalled}
               installing={
                 installMutation.isPending &&
                 installMutation.variables?.app.id === detailCatalogApp.id &&
@@ -531,8 +553,10 @@ export function AppsPane({ token }: { token: string }) {
                 ) : catalogApps.length > 0 ? (
                   <div className="grid gap-x-12 gap-y-7 md:grid-cols-2">
                     {catalogApps.map((app) => {
-                      const release = appRegistryDefaultRelease(app, false) || appRegistryDefaultRelease(app, showPreviewVersions);
                       const installed = installedByID.get(appRegistryLocalID(app));
+                      const release =
+                        appRegistryDefaultRelease(app, showPreviewVersions, installed) ||
+                        appRegistryDefaultRelease(app, false, installed);
                       if (!release) {
                         return null;
                       }
@@ -551,7 +575,7 @@ export function AppsPane({ token }: { token: string }) {
                           token={token}
                           onInstall={() => installMutation.mutate({ app, release })}
                           onSelect={() => {
-                            if (installed && installedMatchesRelease(installed, release)) {
+                            if (installed && !needsAppUpgrade(installed, release)) {
                               setDetailAppID(installed.id);
                             } else {
                               setDetailCatalogID(app.id);
@@ -620,7 +644,7 @@ export function AppsPane({ token }: { token: string }) {
               variant="destructive"
               onClick={() => {
                 if (deleting) {
-                  deleteMutation.mutate(deleting.id);
+                  deleteMutation.mutate(deleting);
                 }
               }}
             >
@@ -886,11 +910,30 @@ function packageFileText(file: AppPackageFile) {
 function parseYamlEndpoints(yaml: string): AppEndpoints {
   const endpoints: AppEndpoints = {};
   let current = "";
+  let inURLConfig = false;
   for (const line of yamlSectionLines(yaml, "endpoints")) {
     const endpointMatch = line.match(/^ {2}([\w-]+):\s*$/);
     if (endpointMatch) {
       current = endpointMatch[1];
+      inURLConfig = false;
       endpoints[current] = { kind: "rest" };
+      continue;
+    }
+    const urlConfigMatch = line.match(/^ {6}([\w-]+):\s*(.*)$/);
+    if (current && inURLConfig && urlConfigMatch) {
+      const key = urlConfigMatch[1];
+      const value = yamlScalar(urlConfigMatch[2]);
+      const config = endpoints[current].urlConfig || { label: "" };
+      if (key === "label") {
+        config.label = value;
+      } else if (key === "description") {
+        config.description = value;
+      } else if (key === "placeholder") {
+        config.placeholder = value;
+      } else if (key === "required") {
+        config.required = value === "true";
+      }
+      endpoints[current].urlConfig = config;
       continue;
     }
     const propMatch = line.match(/^ {4}([\w-]+):\s*(.*)$/);
@@ -899,7 +942,10 @@ function parseYamlEndpoints(yaml: string): AppEndpoints {
     }
     const key = propMatch[1];
     const value = yamlScalar(propMatch[2]);
-    if (key === "kind" && (value === "rest" || value === "graphql" || value === "mcp")) {
+    inURLConfig = key === "url_config";
+    if (inURLConfig) {
+      endpoints[current].urlConfig = { label: "" };
+    } else if (key === "kind" && (value === "rest" || value === "graphql" || value === "mcp")) {
       endpoints[current].kind = value;
     } else if (key === "transport" && (value === "stdio" || value === "streamable_http")) {
       endpoints[current].transport = value;
@@ -1000,8 +1046,12 @@ function appRegistryReleases(item: AppRegistryItem, includePreview: boolean): Ap
   return includePreview ? releases : releases.filter((release) => !isPreviewRelease(release));
 }
 
-function appRegistryDefaultRelease(item: AppRegistryItem, includePreview: boolean): AppRegistryRelease | undefined {
-  return appRegistryReleases(item, includePreview)[0];
+function appRegistryDefaultRelease(
+  item: AppRegistryItem,
+  includePreview: boolean,
+  installed?: AppDefinition,
+): AppRegistryRelease | undefined {
+  return selectAppInstallRelease(normalizedAppRegistryReleases(item), includePreview, installed);
 }
 
 function normalizedAppRegistryReleases(item: AppRegistryItem): AppRegistryRelease[] {
@@ -1037,20 +1087,7 @@ function normalizedAppRegistryRelease(value: AppRegistryRelease | undefined): Ap
 }
 
 function compareRegistryReleases(a: AppRegistryRelease, b: AppRegistryRelease) {
-  const aPreview = isPreviewRelease(a);
-  const bPreview = isPreviewRelease(b);
-  if (aPreview !== bPreview) {
-    return aPreview ? 1 : -1;
-  }
-  return b.version.localeCompare(a.version, undefined, { numeric: true });
-}
-
-function appHasPreviewRelease(item: AppRegistryItem) {
-  return normalizedAppRegistryReleases(item).some(isPreviewRelease);
-}
-
-function isPreviewRelease(release: AppRegistryRelease) {
-  return release.preview === true;
+  return compareAppVersions(b.version, a.version);
 }
 
 function appRegistryTitle(item: AppRegistryItem, locale: string) {
@@ -1082,25 +1119,6 @@ function localizedText(value: LocalizedText | undefined, locale: string) {
     return value;
   }
   return value[locale] || value["zh-CN"] || value.en || Object.values(value)[0] || "";
-}
-
-function installedMatchesRelease(installed: AppDefinition | undefined, release: AppRegistryRelease) {
-  if (!installed) {
-    return false;
-  }
-  if (release.version && installed.version !== release.version) {
-    return false;
-  }
-  const expectedSHA = release.package_sha256?.toLowerCase();
-  return !expectedSHA || installed.packageSHA256?.toLowerCase() === expectedSHA;
-}
-
-function needsAppUpgrade(installed: AppDefinition, release: AppRegistryRelease) {
-  const expectedSHA = release.package_sha256?.toLowerCase();
-  if (expectedSHA && installed.packageSHA256?.toLowerCase() !== expectedSHA) {
-    return true;
-  }
-  return Boolean(release.version && installed.version && release.version !== installed.version);
 }
 
 async function sha256Hex(text: string) {
@@ -1329,8 +1347,8 @@ function CatalogAppItem({
   const title = appRegistryTitle(app, locale);
   const description = appRegistryDescription(app, locale);
   const upgradeAvailable = installed ? needsAppUpgrade(installed, release) : false;
-  const alreadyInstalled = Boolean(installed) && installedMatchesRelease(installed, release);
-  const previewAvailable = showPreviewVersions && appHasPreviewRelease(app);
+  const installedCurrentOrNewer = Boolean(installed) && !upgradeAvailable;
+  const previewAvailable = showPreviewVersions && isPreviewRelease(release);
   const icon = mergeAppIconSpec(installed?.icon, app.icon);
   const iconSrc = installed ? appIconURL(token, installed) || appRegistryIconURL(app, OFFICIAL_APP_REGISTRY) : appRegistryIconURL(app, OFFICIAL_APP_REGISTRY);
 
@@ -1349,14 +1367,14 @@ function CatalogAppItem({
       </button>
       <Button
         className="h-8 shrink-0 rounded-full px-4"
-        disabled={installing || alreadyInstalled}
+        disabled={installing || installedCurrentOrNewer}
         size="xs"
         type="button"
         variant="outline"
         onClick={onInstall}
       >
         {installing ? <Spinner className="size-3.5" /> : upgradeAvailable ? <Download className="size-3.5" /> : null}
-        {alreadyInstalled ? t("apps.installedAction") : upgradeAvailable ? t("apps.upgrade") : t("apps.install")}
+        {installedCurrentOrNewer ? t("apps.installedAction") : upgradeAvailable ? t("apps.upgrade") : t("apps.install")}
       </Button>
     </section>
   );
@@ -1395,7 +1413,7 @@ function CatalogAppDetail({
   const title = appRegistryTitle(app, locale);
   const description = appRegistryDescription(app, locale);
   const upgradeAvailable = installed && selectedRelease ? needsAppUpgrade(installed, selectedRelease) : false;
-  const alreadyInstalled = Boolean(installed && selectedRelease && installedMatchesRelease(installed, selectedRelease));
+  const installedCurrentOrNewer = Boolean(installed && selectedRelease && !upgradeAvailable);
   const endpoints = Object.entries(detail?.endpoints || {}).sort(([a], [b]) => a.localeCompare(b));
   const skills = detail?.skills || [];
   return (
@@ -1434,12 +1452,12 @@ function CatalogAppDetail({
                 ) : null}
                 <Button
                   className="shrink-0"
-                  disabled={installing || alreadyInstalled || !selectedRelease}
+                  disabled={installing || installedCurrentOrNewer || !selectedRelease}
                   type="button"
                   onClick={onInstall}
                 >
                   {installing ? <Spinner className="size-4" /> : upgradeAvailable ? <Download className="size-4" /> : null}
-                  {alreadyInstalled ? t("apps.installedAction") : upgradeAvailable ? t("apps.upgrade") : t("apps.install")}
+                  {installedCurrentOrNewer ? t("apps.installedAction") : upgradeAvailable ? t("apps.upgrade") : t("apps.install")}
                 </Button>
               </div>
             </div>
@@ -2445,7 +2463,9 @@ function ConnectionDialog({
   const editingConnectionHeader = editing?.connection?.header || "";
   const editingAppName = editing?.app.name || "";
   const editingAppConnection = editing?.app.connection;
+  const editingAppEndpoints = editing?.app.endpoints;
   const connectionFields = useMemo(() => appConnectionFields(app), [app]);
+  const configurableEndpoints = useMemo(() => appConfigurableEndpoints(app), [app]);
   const [form, setForm] = useState<ConnectionForm>(emptyConnectionForm());
   const [secretVisible, setSecretVisible] = useState(false);
   const [secretLoading, setSecretLoading] = useState(false);
@@ -2470,12 +2490,16 @@ function ConnectionDialog({
         username: form.username,
         password: form.password,
         fields: form.fields,
+        endpointURLs: form.endpointURLs,
       });
     },
-    onSuccess: async () => {
+    onSuccess: async (saved) => {
       toast.success(t("apps.connectionSaved"));
       onOpenChange(false);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.appConnections() });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.appConnections() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.appMCPStatus(saved.appID) }),
+      ]);
     },
     onError: () => toast.error(t("apps.connectionSaveFailed")),
   });
@@ -2492,6 +2516,8 @@ function ConnectionDialog({
         authMethodID: selectedAuthMethod.id,
         connectionID: form.id.trim(),
         connectionName: form.name.trim(),
+        fields: form.fields,
+        endpointURLs: form.endpointURLs,
       });
       await openExternalURL(result.authorizationURL);
       return result;
@@ -2512,13 +2538,18 @@ function ConnectionDialog({
     const initialMethod =
       findAppAuthMethod(methods, editingConnectionAuthMethodID, editingConnectionAuthType) ||
       defaultAppAuthMethod(methods) ||
-      appConnectionOnlyAuthMethod({ auth: editingAppAuth, connection: editingAppConnection }, methods, appConnectionFields({ connection: editingAppConnection }));
+      appConnectionOnlyAuthMethod(
+        { auth: editingAppAuth, connection: editingAppConnection, endpoints: editingAppEndpoints },
+        methods,
+        appConnectionFields({ connection: editingAppConnection }),
+      );
     setForm({
       id: editingConnectionID || nextConnectionID(editingAppID, connections),
       name: editingConnectionName || nextConnectionName(editingAppName || editingAppID, editingAppID, connections),
       authMethodID: initialMethod?.id || "",
       authType: normalizeAuthType(initialMethod?.type || editingConnectionAuthType),
       fields: emptyConnectionFields(editingAppConnection),
+      endpointURLs: emptyConnectionEndpointURLs(editingAppEndpoints),
       token: "",
       prefix: initialMethod?.prefix || "",
       header: editingConnectionHeader || initialMethod?.header || "",
@@ -2547,6 +2578,7 @@ function ConnectionDialog({
           username: detail.username || "",
           password: detail.password || "",
           fields: emptyConnectionFields(editingAppConnection, detail.fields),
+          endpointURLs: emptyConnectionEndpointURLs(editingAppEndpoints, detail.endpointURLs),
         }));
       })
       .catch(() => {
@@ -2573,6 +2605,7 @@ function ConnectionDialog({
     editingConnectionID,
     editingConnectionName,
     editingAppConnection,
+    editingAppEndpoints,
     locale,
     token,
   ]);
@@ -2587,6 +2620,9 @@ function ConnectionDialog({
   const basicReady = form.authType !== "basic" || form.username.trim() !== "" || form.password !== "" || canReuseExistingSecret;
   const headerReady = form.authType !== "header" || form.header.trim() !== "";
   const fieldsReady = connectionFields.every((field) => !field.required || form.fields[field.id]?.trim());
+  const endpointURLsReady = configurableEndpoints.every(({ name, endpoint }) =>
+    isValidEndpointURL(form.endpointURLs[name], endpoint.urlConfig?.required === true),
+  );
   const canSave =
     Boolean(selectedAuthMethod) &&
     !isOAuth &&
@@ -2596,10 +2632,18 @@ function ConnectionDialog({
     basicReady &&
     headerReady &&
     fieldsReady &&
+    endpointURLsReady &&
     !saveMutation.isPending &&
     !secretLoading;
   const canStartOAuth =
-    Boolean(selectedAuthMethod) && isOAuth && form.id.trim() !== "" && form.name.trim() !== "" && !startOAuthMutation.isPending && !secretLoading;
+    Boolean(selectedAuthMethod) &&
+    isOAuth &&
+    form.id.trim() !== "" &&
+    form.name.trim() !== "" &&
+    fieldsReady &&
+    endpointURLsReady &&
+    !startOAuthMutation.isPending &&
+    !secretLoading;
 
   return (
     <Dialog open={Boolean(editing)} onOpenChange={saveMutation.isPending || startOAuthMutation.isPending ? undefined : onOpenChange}>
@@ -2626,6 +2670,21 @@ function ConnectionDialog({
             value={form.name}
             onChange={(value) => setForm((current) => ({ ...current, name: value }))}
           />
+          {configurableEndpoints.map(({ name, endpoint }) => (
+            <LabeledInput
+              key={name}
+              description={endpointURLFieldDescription(endpoint, t)}
+              label={`${endpoint.urlConfig?.label || name}${endpoint.urlConfig?.required ? " *" : ""}`}
+              placeholder={endpoint.urlConfig?.placeholder || endpoint.url}
+              value={form.endpointURLs[name] || ""}
+              onChange={(value) =>
+                setForm((current) => ({
+                  ...current,
+                  endpointURLs: { ...current.endpointURLs, [name]: value },
+                }))
+              }
+            />
+          ))}
           {authMethods.length > 0 ? (
             <div className="grid gap-1.5">
               <Label>{t("apps.authType")}</Label>
@@ -2840,6 +2899,7 @@ function emptyConnectionForm(): ConnectionForm {
   return {
     authMethodID: "",
     authType: "none",
+    endpointURLs: {},
     fields: {},
     header: "",
     id: "",
@@ -2853,6 +2913,52 @@ function emptyConnectionForm(): ConnectionForm {
 
 function appConnectionFields(app?: Pick<AppDefinition, "connection"> | null): AppConnectionField[] {
   return app?.connection?.fields || [];
+}
+
+function appConfigurableEndpoints(app?: Pick<AppDefinition, "endpoints"> | null) {
+  return Object.entries(app?.endpoints || {})
+    .filter(
+      ([, endpoint]) =>
+        (endpoint.kind === "rest" || endpoint.kind === "graphql") &&
+        Boolean(endpoint.url?.trim()) &&
+        Boolean(endpoint.urlConfig),
+    )
+    .map(([name, endpoint]) => ({ name, endpoint }));
+}
+
+function emptyConnectionEndpointURLs(
+  endpoints?: AppDefinition["endpoints"],
+  values?: Record<string, string>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const { name } of appConfigurableEndpoints({ endpoints })) {
+    out[name] = values?.[name] || "";
+  }
+  return out;
+}
+
+function isValidEndpointURL(value: string | undefined, required: boolean) {
+  const raw = value?.trim();
+  if (!raw) {
+    return !required;
+  }
+  try {
+    const parsed = new URL(raw);
+    return (parsed.protocol === "http:" || parsed.protocol === "https:") && Boolean(parsed.host) && !parsed.username && !parsed.password && !parsed.search && !parsed.hash;
+  } catch {
+    return false;
+  }
+}
+
+function endpointURLFieldDescription(
+  endpoint: AppEndpoints[string],
+  t: (key: string) => string,
+) {
+  const lines = [endpoint.urlConfig?.description?.trim()];
+  if (!endpoint.urlConfig?.required && endpoint.url) {
+    lines.push(`${t("apps.defaultEndpointURL")}: ${endpoint.url}`);
+  }
+  return lines.filter(Boolean).join("\n");
 }
 
 function connectionFieldDescription(field: AppConnectionField, t: (key: string) => string) {
@@ -2953,19 +3059,19 @@ function appAuthMethods(app?: Pick<AppDefinition, "auth"> | null): AppAuthMethod
 }
 
 function appConnectionOnlyAuthMethod(
-  app: Pick<AppDefinition, "auth" | "connection"> | null | undefined,
+  app: Pick<AppDefinition, "auth" | "connection" | "endpoints"> | null | undefined,
   methods: AppAuthMethod[],
   fields: AppConnectionField[],
 ): AppAuthMethod | undefined {
-  if (app?.auth?.required || methods.length > 0 || fields.length === 0) {
+  if (app?.auth?.required || methods.length > 0 || (fields.length === 0 && appConfigurableEndpoints(app).length === 0)) {
     return undefined;
   }
   return { id: "", type: "none" } as AppAuthMethod;
 }
 
-function appCanManageConnections(app?: Pick<AppDefinition, "auth" | "connection"> | null) {
+function appCanManageConnections(app?: Pick<AppDefinition, "auth" | "connection" | "endpoints"> | null) {
   const authMethods = appAuthMethods(app).filter((method) => normalizeAuthType(method.type) !== "none");
-  return authMethods.length > 0 || appConnectionFields(app).length > 0 || app?.auth?.required === true;
+  return authMethods.length > 0 || appConnectionFields(app).length > 0 || appConfigurableEndpoints(app).length > 0 || app?.auth?.required === true;
 }
 
 function groupMCPStatusByEndpoint(statuses: AppMCPEndpointStatus[]) {

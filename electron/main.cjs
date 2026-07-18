@@ -14,7 +14,6 @@ const {
 } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { spawn } = require("node:child_process");
-const crypto = require("node:crypto");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const os = require("node:os");
@@ -67,7 +66,6 @@ const oauthReturnScheme = normalizeURLScheme(process.env.PUDDING_OAUTH_RETURN_SC
 const macTrafficLightPosition = { x: 18, y: 18 };
 const defaultWindowBounds = { width: 1440, height: 920 };
 const minWindowBounds = { width: 1000, height: 680 };
-const browserWebviewFocusWaiters = new Map();
 const browserFaviconCache = new Map();
 let mainWindow = null;
 let themePreference = normalizeThemePreference(process.env.PUDDING_THEME || "system");
@@ -88,7 +86,6 @@ const browserHost = new BrowserHost(
   (event) => {
     broadcastToTrustedRenderers("pudding:browser:automation-end", event);
   },
-  (request, target) => requestBrowserWebviewFocus(request, target),
   {
     options: () => ({ backgroundColor: themeBackgroundColor() }),
     resolveFavicon: resolveCachedBrowserFavicon,
@@ -847,42 +844,6 @@ function broadcastToTrustedRenderers(channel, payload) {
   }
 }
 
-function requestBrowserWebviewFocus(request, target) {
-  if (!target || target.isDestroyed() || target.getType() !== "webview") {
-    return Promise.resolve(false);
-  }
-  const sender = target.hostWebContents;
-  if (!sender || sender.isDestroyed() || !isTrustedRendererURL(sender.getURL())) {
-    return Promise.resolve(false);
-  }
-  const requestID = `browser_focus_${crypto.randomUUID().replaceAll("-", "")}`;
-  return new Promise((resolve) => {
-    let settled = false;
-    let timer;
-    const complete = (focused) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      browserWebviewFocusWaiters.delete(requestID);
-      clearTimeout(timer);
-      resolve(Boolean(focused));
-    };
-    timer = setTimeout(() => complete(false), 1_500);
-    timer.unref?.();
-    browserWebviewFocusWaiters.set(requestID, { senderID: sender.id, complete });
-    try {
-      sender.send("pudding:browser:webview-focus-required", {
-        requestID,
-        sessionID: String(request?.sessionID || "").trim(),
-        tabID: String(request?.tabID || "").trim(),
-      });
-    } catch {
-      complete(false);
-    }
-  });
-}
-
 ipcMain.handle("pudding:theme:get", (event) => {
   assertTrustedSender(event);
   return themeState();
@@ -1033,17 +994,6 @@ ipcMain.handle("pudding:browser:webview-register", (event, request) => {
     throw new Error("browser webview target not found");
   }
   return browserHost.registerWebContents(untrustedBrowserRequest(request), target);
-});
-
-ipcMain.handle("pudding:browser:webview-focus-complete", (event, request) => {
-  assertTrustedSender(event);
-  const requestID = String(request?.requestID || "").trim();
-  const waiter = browserWebviewFocusWaiters.get(requestID);
-  if (!waiter || waiter.senderID !== event.sender.id) {
-    return false;
-  }
-  waiter.complete(Boolean(request?.focused));
-  return true;
 });
 
 ipcMain.handle("pudding:browser:load-url", (event, request) => {

@@ -21,12 +21,13 @@ const (
 )
 
 const (
-	AuthTypeNone   = "none"
-	AuthTypeBearer = "bearer"
-	AuthTypeToken  = "token"
-	AuthTypeBasic  = "basic"
-	AuthTypeHeader = "header"
-	AuthTypeOAuth2 = "oauth2"
+	AuthTypeNone          = "none"
+	AuthTypeBearer        = "bearer"
+	AuthTypeToken         = "token"
+	AuthTypeBasic         = "basic"
+	AuthTypeHeader        = "header"
+	AuthTypeOAuth2        = "oauth2"
+	AuthTypeTokenExchange = "token_exchange"
 )
 
 const (
@@ -79,13 +80,22 @@ type AuthConfig struct {
 }
 
 type AuthMethod struct {
-	ID       string `json:"id,omitempty" yaml:"id,omitempty"`
-	Type     string `json:"type" yaml:"type"`
-	Provider string `json:"provider,omitempty" yaml:"provider,omitempty"`
-	Label    string `json:"label,omitempty" yaml:"label,omitempty"`
-	Default  bool   `json:"default,omitempty" yaml:"default,omitempty"`
-	Prefix   string `json:"prefix,omitempty" yaml:"prefix,omitempty"`
-	Header   string `json:"header,omitempty" yaml:"header,omitempty"`
+	ID            string             `json:"id,omitempty" yaml:"id,omitempty"`
+	Type          string             `json:"type" yaml:"type"`
+	Provider      string             `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Label         string             `json:"label,omitempty" yaml:"label,omitempty"`
+	Default       bool               `json:"default,omitempty" yaml:"default,omitempty"`
+	Prefix        string             `json:"prefix,omitempty" yaml:"prefix,omitempty"`
+	Header        string             `json:"header,omitempty" yaml:"header,omitempty"`
+	TokenExchange *TokenExchangeSpec `json:"tokenExchange,omitempty" yaml:"token_exchange,omitempty"`
+}
+
+type TokenExchangeSpec struct {
+	URL              string            `json:"url" yaml:"url"`
+	BodyFields       map[string]string `json:"bodyFields" yaml:"body_fields"`
+	AccessTokenField string            `json:"accessTokenField" yaml:"access_token_field"`
+	ExpiresInField   string            `json:"expiresInField,omitempty" yaml:"expires_in_field,omitempty"`
+	TokenType        string            `json:"tokenType,omitempty" yaml:"token_type,omitempty"`
 }
 
 type ConnectionConfig struct {
@@ -112,12 +122,20 @@ type Endpoint struct {
 	Kind        string                              `json:"kind" yaml:"kind"`
 	Transport   string                              `json:"transport,omitempty" yaml:"transport,omitempty"`
 	URL         string                              `json:"url,omitempty" yaml:"url,omitempty"`
+	URLConfig   *EndpointURLConfig                  `json:"urlConfig,omitempty" yaml:"url_config,omitempty"`
 	Command     string                              `json:"command,omitempty" yaml:"command,omitempty"`
 	Args        []string                            `json:"args,omitempty" yaml:"args,omitempty"`
 	Env         map[string]string                   `json:"env,omitempty" yaml:"env,omitempty"`
 	Headers     map[string]string                   `json:"headers,omitempty" yaml:"headers,omitempty"`
 	Platforms   map[string]EndpointPlatformOverride `json:"platforms,omitempty" yaml:"platforms,omitempty"`
 	Description string                              `json:"description,omitempty" yaml:"description,omitempty"`
+}
+
+type EndpointURLConfig struct {
+	Label       string `json:"label" yaml:"label"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+	Placeholder string `json:"placeholder,omitempty" yaml:"placeholder,omitempty"`
+	Required    bool   `json:"required,omitempty" yaml:"required,omitempty"`
 }
 
 type EndpointPlatformOverride struct {
@@ -162,13 +180,14 @@ type SkillDetail struct {
 }
 
 type Connection struct {
-	ID        string            `json:"id" yaml:"-"`
-	Name      string            `json:"name,omitempty" yaml:"name,omitempty"`
-	AppID     string            `json:"appID" yaml:"app"`
-	Auth      Auth              `json:"-" yaml:"auth,omitempty"`
-	Fields    map[string]string `json:"-" yaml:"fields,omitempty"`
-	CreatedAt time.Time         `json:"createdAt,omitempty" yaml:"-"`
-	UpdatedAt time.Time         `json:"updatedAt,omitempty" yaml:"-"`
+	ID           string            `json:"id" yaml:"-"`
+	Name         string            `json:"name,omitempty" yaml:"name,omitempty"`
+	AppID        string            `json:"appID" yaml:"app"`
+	Auth         Auth              `json:"-" yaml:"auth,omitempty"`
+	Fields       map[string]string `json:"-" yaml:"fields,omitempty"`
+	EndpointURLs map[string]string `json:"-" yaml:"endpoint_urls,omitempty"`
+	CreatedAt    time.Time         `json:"createdAt,omitempty" yaml:"-"`
+	UpdatedAt    time.Time         `json:"updatedAt,omitempty" yaml:"-"`
 }
 
 type ConnectionView struct {
@@ -185,11 +204,12 @@ type ConnectionView struct {
 
 type ConnectionDetailView struct {
 	ConnectionView
-	Fields   map[string]string `json:"fields,omitempty"`
-	Token    string            `json:"token,omitempty"`
-	Prefix   string            `json:"prefix,omitempty"`
-	Username string            `json:"username,omitempty"`
-	Password string            `json:"password,omitempty"`
+	Fields       map[string]string `json:"fields,omitempty"`
+	EndpointURLs map[string]string `json:"endpointURLs,omitempty"`
+	Token        string            `json:"token,omitempty"`
+	Prefix       string            `json:"prefix,omitempty"`
+	Username     string            `json:"username,omitempty"`
+	Password     string            `json:"password,omitempty"`
 }
 
 type Auth struct {
@@ -213,6 +233,7 @@ type EndpointBinding struct {
 	EndpointName        string
 	Endpoint            Endpoint
 	Auth                Auth
+	AuthMethod          AuthMethod
 	ConnectionFields    map[string]string
 	ConnectionFieldDefs []ConnectionField
 }
@@ -245,6 +266,7 @@ func ViewConnectionDetail(c *Connection) ConnectionDetailView {
 	return ConnectionDetailView{
 		ConnectionView: ViewConnection(c),
 		Fields:         cloneStringMap(c.Fields),
+		EndpointURLs:   cloneStringMap(c.EndpointURLs),
 		Token:          c.Auth.Token,
 		Prefix:         c.Auth.Prefix,
 		Username:       c.Auth.Username,
@@ -288,7 +310,10 @@ func CloneDefinition(in *Definition) *Definition {
 	}
 	if in.Auth != nil {
 		auth := *in.Auth
-		auth.Methods = append([]AuthMethod(nil), in.Auth.Methods...)
+		auth.Methods = make([]AuthMethod, len(in.Auth.Methods))
+		for i, method := range in.Auth.Methods {
+			auth.Methods[i] = CloneAuthMethod(method)
+		}
 		out.Auth = &auth
 	}
 	if in.Connection != nil {
@@ -324,6 +349,10 @@ func ResolveDefinitionPlatform(in *Definition) *Definition {
 
 func CloneEndpoint(in Endpoint) Endpoint {
 	out := in
+	if in.URLConfig != nil {
+		urlConfig := *in.URLConfig
+		out.URLConfig = &urlConfig
+	}
 	out.Args = append([]string(nil), in.Args...)
 	out.Env = cloneStringMap(in.Env)
 	out.Headers = cloneStringMap(in.Headers)
@@ -332,6 +361,16 @@ func CloneEndpoint(in Endpoint) Endpoint {
 		for key, platform := range in.Platforms {
 			out.Platforms[key] = CloneEndpointPlatformOverride(platform)
 		}
+	}
+	return out
+}
+
+func CloneAuthMethod(in AuthMethod) AuthMethod {
+	out := in
+	if in.TokenExchange != nil {
+		exchange := *in.TokenExchange
+		exchange.BodyFields = cloneStringMap(in.TokenExchange.BodyFields)
+		out.TokenExchange = &exchange
 	}
 	return out
 }
@@ -435,6 +474,7 @@ func CloneConnection(in *Connection) *Connection {
 	out := *in
 	out.Auth = CloneAuth(in.Auth)
 	out.Fields = cloneStringMap(in.Fields)
+	out.EndpointURLs = cloneStringMap(in.EndpointURLs)
 	return &out
 }
 

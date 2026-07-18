@@ -447,7 +447,11 @@ func (r *BuiltinRunner) doGraphQLSchemaQuery(ctx context.Context, binding *app.E
 	if err != nil {
 		return nil, graphQLSchemaError(binding, "request_error", err.Error())
 	}
-	if err := applyEndpointAuth(req.Header, binding.Auth); err != nil {
+	resolvedAuth, err := r.resolveEndpointAuth(reqCtx, binding.AppID, binding.ConnectionID, binding.Auth, binding.AuthMethod, binding.ConnectionFields)
+	if err != nil {
+		return nil, graphQLSchemaError(binding, "token_exchange_failed", err.Error())
+	}
+	if err := applyEndpointAuth(req.Header, resolvedAuth); err != nil {
 		return nil, graphQLSchemaError(binding, "auth_config_error", err.Error())
 	}
 	if err := applyEndpointConnectionHeaders(req.Header, http.MethodPost, binding.ConnectionFields, binding.ConnectionFieldDefs); err != nil {

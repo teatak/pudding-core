@@ -54,19 +54,6 @@ async function run() {
       window.webContents.send("pudding-browser-smoke:webview-required", request);
     },
     undefined,
-    ({ sessionID, tabID }) => window.webContents.executeJavaScript(`(() => {
-      const target = document.querySelector(${JSON.stringify(`webview[data-browser-key="${sessionID}:${tabID}"]`)});
-      if (!target) return false;
-      for (let ancestor = target.parentElement; ancestor; ancestor = ancestor.parentElement) {
-        if (ancestor.inert) ancestor.inert = false;
-      }
-      if (getComputedStyle(target).visibility === "hidden") {
-        target.style.opacity = "0";
-        target.style.visibility = "visible";
-      }
-      target.focus();
-      return document.activeElement === target;
-    })()`),
     {
       resolveFavicon: ({ url, pageURL }) => resolveBrowserFavicon({
         url,
@@ -114,6 +101,7 @@ async function run() {
   assert.equal((await host.forward({ sessionID: webTab.sessionID, tabID: webTab.tabID })).url, `${pageBaseURL}/two`);
 
   await host.loadURL({ sessionID: webTab.sessionID, tabID: webTab.tabID, url: `${pageBaseURL}/form` });
+  currentCheck = "focus isolation";
   await window.webContents.executeJavaScript(`(() => {
     const composer = document.getElementById("host-composer");
     const tabs = document.getElementById("tabs");
@@ -124,6 +112,16 @@ async function run() {
     composer.focus();
     return document.activeElement === composer;
   })()`);
+  await host.click({ sessionID: webTab.sessionID, tabID: webTab.tabID, selector: "#target-button" });
+  await assert.rejects(
+    host.type({ sessionID: webTab.sessionID, tabID: webTab.tabID, selector: "#target-button", text: "must-not-apply", clear: true }),
+    /target is not editable/,
+  );
+  await host.scroll({ sessionID: webTab.sessionID, tabID: webTab.tabID, deltaY: 200 });
+  assert.deepEqual(
+    await window.webContents.executeJavaScript(`({activeElementID: document.activeElement?.id || "", composerValue: document.getElementById("host-composer").value})`),
+    { activeElementID: "host-composer", composerValue: "host-draft" },
+  );
   let typed;
   try {
     typed = await host.type({ sessionID: webTab.sessionID, tabID: webTab.tabID, selector: "#target", text: "webview-only", clear: true });
@@ -134,7 +132,36 @@ async function run() {
     throw error;
   }
   assert.equal(typed.result.valueLength, "webview-only".length);
-  assert.equal(await window.webContents.executeJavaScript(`document.getElementById("host-composer").value`), "host-draft");
+  currentCheck = "textarea input isolation";
+  const textareaTyped = await host.type({ sessionID: webTab.sessionID, tabID: webTab.tabID, selector: "#target-textarea", text: "textarea-value", clear: true });
+  currentCheck = "contenteditable input isolation";
+  let editorTyped;
+  try {
+    editorTyped = await host.type({ sessionID: webTab.sessionID, tabID: webTab.tabID, selector: "#target-editor", text: "editor-value", clear: true });
+  } catch (error) {
+    console.error(JSON.stringify(await host.observe({ sessionID: webTab.sessionID, tabID: webTab.tabID })));
+    throw error;
+  }
+  assert.equal(textareaTyped.result.valueLength, "textarea-value".length);
+  assert.equal(editorTyped.result.valueLength, "editor-value".length);
+  assert.match(
+    (await host.observe({ sessionID: webTab.sessionID, tabID: webTab.tabID })).text,
+    /Controlled:webview-only[\s\S]*beforeinput:1 input:1[\s\S]*Clicked:1/,
+  );
+  assert.deepEqual(
+    await window.webContents.executeJavaScript(`(() => ({
+      activeElementID: document.activeElement?.id || "",
+      composerValue: document.getElementById("host-composer").value,
+      tabsInert: document.getElementById("tabs").inert,
+      webviewVisibility: document.querySelector('webview[data-browser-key="smoke-session-a:smoke-web"]').style.visibility,
+    }))()`),
+    {
+      activeElementID: "host-composer",
+      composerValue: "host-draft",
+      tabsInert: true,
+      webviewVisibility: "hidden",
+    },
+  );
   await window.webContents.executeJavaScript(`(() => {
     const target = document.querySelector('webview[data-browser-key="smoke-session-a:smoke-web"]');
     document.getElementById("tabs").inert = false;
@@ -248,7 +275,45 @@ function startPageServer() {
       "/one": "<!doctype html><title>One</title><link rel=icon href=/favicon.png><main>Page one</main>",
       "/two": "<!doctype html><title>Two</title><main>Page two</main>",
       "/other": "<!doctype html><title>Other</title><main>Other session</main>",
-      "/form": "<!doctype html><title>Form</title><label>Target <input id=\"target\"></label>",
+      "/form": `<!doctype html><title>Form</title>
+        <label>Target <input id="target"></label>
+        <output id="target-state">Controlled:Waiting</output>
+        <output id="target-events">beforeinput:0 input:0</output>
+        <textarea id="target-textarea">old textarea</textarea>
+        <div id="target-editor" contenteditable="true">old editor</div>
+        <button id="target-button" value="button-value">Click target</button>
+        <output id="click-state">Clicked:0</output>
+        <div style="height:1200px"></div>
+        <script>
+          const target = document.getElementById('target');
+          const nativeValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+          let trackedValue = nativeValue.get.call(target);
+          let beforeInputCount = 0;
+          let inputCount = 0;
+          const updateEvents = () => document.getElementById('target-events').textContent = 'beforeinput:' + beforeInputCount + ' input:' + inputCount;
+          Object.defineProperty(target, 'value', {
+            configurable: true,
+            get() { return nativeValue.get.call(this); },
+            set(value) {
+              trackedValue = String(value);
+              nativeValue.set.call(this, value);
+            },
+          });
+          target.addEventListener('beforeinput', () => { beforeInputCount += 1; updateEvents(); });
+          target.addEventListener('input', () => {
+            inputCount += 1;
+            updateEvents();
+            const current = target.value;
+            if (current === trackedValue) return;
+            trackedValue = current;
+            document.getElementById('target-state').textContent = 'Controlled:' + current;
+          });
+          let clickCount = 0;
+          document.getElementById('target-button').addEventListener('click', () => {
+            clickCount += 1;
+            document.getElementById('click-state').textContent = 'Clicked:' + clickCount;
+          });
+        </script>`,
       "/popup-parent": `<!doctype html><title>Popup parent</title>
         <a id="open-managed-tab" href="/referrer-child" target="_blank">Open managed tab</a>
         <button id="open-blank" onclick="openBlankPopup()">Open blank</button>

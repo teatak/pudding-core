@@ -39,12 +39,21 @@ type UseWorkspaceBrowserSurfaceArgs = {
   token: string;
   sessionID: string;
   enabled: boolean;
+  hasProjectSurface?: boolean;
   hasTransientSurface?: boolean;
   itemsLength: number;
   itemsPending: boolean;
 };
 
-export function useWorkspaceBrowserSurface({ token, sessionID, enabled, hasTransientSurface = false, itemsLength, itemsPending }: UseWorkspaceBrowserSurfaceArgs) {
+export function useWorkspaceBrowserSurface({
+  token,
+  sessionID,
+  enabled,
+  hasProjectSurface = false,
+  hasTransientSurface = false,
+  itemsLength,
+  itemsPending,
+}: UseWorkspaceBrowserSurfaceArgs) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const currentSessionIDRef = useRef("");
@@ -401,7 +410,11 @@ export function useWorkspaceBrowserSurface({ token, sessionID, enabled, hasTrans
           : { hasState: false, sessionID: targetSessionID, processMode: previousTabs?.processMode || processModeFallback },
       );
       if (remaining.length === 0) {
-        const fallback = itemsLength > 0 || hasTransientSurface ? "canvas" : "workspace";
+        const fallback = itemsLength > 0 || hasTransientSurface
+          ? "canvas"
+          : hasProjectSurface
+            ? "project"
+            : "workspace";
         if (sessionSurfaceRef.current[targetSessionID] === "browser") {
           rememberSessionSurface(targetSessionID, fallback);
         }

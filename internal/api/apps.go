@@ -45,6 +45,7 @@ type putAppConnectionReq struct {
 	Username     string            `json:"username"`
 	Password     string            `json:"password"`
 	Fields       map[string]string `json:"fields"`
+	EndpointURLs map[string]string `json:"endpointURLs"`
 }
 
 type installAppReq struct {
@@ -489,6 +490,14 @@ func (s *Server) putAppConnection(c *cart.Context) error {
 	if err != nil {
 		return badRequest(c, err.Error())
 	}
+	endpointURLsInput := req.EndpointURLs
+	if endpointURLsInput == nil && existing != nil && existing.AppID == appID {
+		endpointURLsInput = existing.EndpointURLs
+	}
+	endpointURLs, err := app.NormalizeConnectionEndpointURLs(def, endpointURLsInput)
+	if err != nil {
+		return badRequest(c, err.Error())
+	}
 	prefix := strings.TrimSpace(req.Prefix)
 	if prefix == "" {
 		prefix = method.Prefix
@@ -498,10 +507,11 @@ func (s *Server) putAppConnection(c *cart.Context) error {
 		header = method.Header
 	}
 	conn := &app.Connection{
-		ID:     id,
-		Name:   strings.TrimSpace(req.Name),
-		AppID:  appID,
-		Fields: fields,
+		ID:           id,
+		Name:         strings.TrimSpace(req.Name),
+		AppID:        appID,
+		Fields:       fields,
+		EndpointURLs: endpointURLs,
 		Auth: app.Auth{
 			MethodID: method.ID,
 			Type:     method.Type,
@@ -653,6 +663,8 @@ func validateAppConnectionAuth(auth app.Auth) error {
 		if !app.IsAllowedRequestHeaderValue(auth.AccessToken) || strings.ContainsAny(strings.TrimSpace(auth.TokenType), "\r\n \t") {
 			return errors.New("oauth2 token contains an invalid header value")
 		}
+	case app.AuthTypeTokenExchange:
+		return nil
 	default:
 		return errors.New("auth type is not supported")
 	}

@@ -605,6 +605,23 @@ endpoints:
     kind: rest
     url: https://gmail.googleapis.com/gmail/v1
 `,
+		"gitlab": `
+id: gitlab
+name: GitLab
+auth:
+  required: true
+  methods:
+    - id: gitlab-token
+      type: bearer
+      label: Personal access token
+endpoints:
+  gitlab_rest:
+    kind: rest
+    url: https://gitlab.com/api/v4
+    url_config:
+      label: GitLab address
+      placeholder: https://gitlab.example.com/api/v4
+`,
 		"unicorn": `
 id: unicorn
 name: Unicorn
@@ -853,6 +870,127 @@ func TestPutAppConnectionStoresConnectionFields(t *testing.T) {
 	detail := decodeJSON[appsvc.ConnectionDetailView](t, resp)
 	if detail.Fields["hotelCode"] != "H001" {
 		t.Fatalf("connection fields not stored: %+v", detail.Fields)
+	}
+}
+
+func TestPutAppConnectionStoresConfigurableEndpointURLs(t *testing.T) {
+	srv, _, _ := newConfigTestServer(t)
+	resp := req(t, http.MethodPut, srv.URL+"/app-connections/gitlab-token", map[string]any{
+		"appID":        "gitlab",
+		"name":         "Self-managed GitLab",
+		"authMethodID": "gitlab-token",
+		"authType":     "bearer",
+		"token":        "glpat_test",
+		"endpointURLs": map[string]string{
+			"gitlab_rest": "https://gitlab.example.com/api/v4/",
+		},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/app-connections/gitlab-token", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("detail status = %d", resp.StatusCode)
+	}
+	detail := decodeJSON[appsvc.ConnectionDetailView](t, resp)
+	if detail.EndpointURLs["gitlab_rest"] != "https://gitlab.example.com/api/v4" {
+		t.Fatalf("connection endpoint URLs not stored: %+v", detail.EndpointURLs)
+	}
+}
+
+func TestPutAppConnectionRejectsInvalidEndpointURLs(t *testing.T) {
+	tests := []struct {
+		name         string
+		appID        string
+		authMethodID string
+		endpointURLs map[string]string
+	}{
+		{name: "unknown endpoint", appID: "gitlab", authMethodID: "gitlab-token", endpointURLs: map[string]string{"missing": "https://example.com"}},
+		{name: "mcp endpoint", appID: "local-config", endpointURLs: map[string]string{"local_mcp": "https://example.com/mcp"}},
+		{name: "fixed endpoint", appID: "github", authMethodID: "github-pat", endpointURLs: map[string]string{"github_rest": "https://github.example.com/api/v3"}},
+		{name: "invalid URL", appID: "gitlab", authMethodID: "gitlab-token", endpointURLs: map[string]string{"gitlab_rest": "file:///tmp/gitlab"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, _, _ := newConfigTestServer(t)
+			body := map[string]any{
+				"appID":        tt.appID,
+				"name":         "Test",
+				"authMethodID": tt.authMethodID,
+				"authType":     "bearer",
+				"token":        "test-token",
+				"endpointURLs": tt.endpointURLs,
+			}
+			if tt.name == "mcp endpoint" {
+				body = map[string]any{
+					"appID":        "local-config",
+					"name":         "Test",
+					"fields":       map[string]string{"apiKey": "secret"},
+					"endpointURLs": tt.endpointURLs,
+				}
+			}
+			resp := req(t, http.MethodPut, srv.URL+"/app-connections/test", body)
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", resp.StatusCode)
+			}
+		})
+	}
+}
+
+func TestPutAppConnectionPreservesEndpointURLsWhenOmitted(t *testing.T) {
+	srv, _, _ := newConfigTestServer(t)
+	resp := req(t, http.MethodPut, srv.URL+"/app-connections/gitlab-token", map[string]any{
+		"appID":        "gitlab",
+		"name":         "Self-managed GitLab",
+		"authMethodID": "gitlab-token",
+		"authType":     "bearer",
+		"token":        "glpat_test",
+		"endpointURLs": map[string]string{"gitlab_rest": "https://gitlab.example.com/api/v4"},
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create status = %d", resp.StatusCode)
+	}
+
+	resp = req(t, http.MethodPut, srv.URL+"/app-connections/gitlab-token", map[string]any{
+		"appID":        "gitlab",
+		"name":         "Renamed",
+		"authMethodID": "gitlab-token",
+		"authType":     "bearer",
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("update status = %d", resp.StatusCode)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/app-connections/gitlab-token", nil)
+	defer resp.Body.Close()
+	detail := decodeJSON[appsvc.ConnectionDetailView](t, resp)
+	if detail.EndpointURLs["gitlab_rest"] != "https://gitlab.example.com/api/v4" {
+		t.Fatalf("endpoint URL was cleared: %+v", detail.EndpointURLs)
+	}
+
+	resp = req(t, http.MethodPut, srv.URL+"/app-connections/gitlab-token", map[string]any{
+		"appID":        "gitlab",
+		"name":         "GitLab",
+		"authMethodID": "gitlab-token",
+		"authType":     "bearer",
+		"endpointURLs": map[string]string{},
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("clear status = %d", resp.StatusCode)
+	}
+
+	resp = req(t, http.MethodGet, srv.URL+"/app-connections/gitlab-token", nil)
+	defer resp.Body.Close()
+	detail = decodeJSON[appsvc.ConnectionDetailView](t, resp)
+	if len(detail.EndpointURLs) != 0 {
+		t.Fatalf("endpoint URLs not cleared: %+v", detail.EndpointURLs)
 	}
 }
 

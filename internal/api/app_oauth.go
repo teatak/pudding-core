@@ -40,15 +40,19 @@ type oauthStartState struct {
 	AuthMethodID   string
 	ConnectionID   string
 	ConnectionName string
+	Fields         map[string]string
+	EndpointURLs   map[string]string
 	RedirectURI    string
 	CreatedAt      time.Time
 }
 
 type startAppOAuthReq struct {
-	ConnectionID   string `json:"connectionID"`
-	AppID          string `json:"appID"`
-	AuthMethodID   string `json:"authMethodID"`
-	ConnectionName string `json:"connectionName"`
+	ConnectionID   string            `json:"connectionID"`
+	AppID          string            `json:"appID"`
+	AuthMethodID   string            `json:"authMethodID"`
+	ConnectionName string            `json:"connectionName"`
+	Fields         map[string]string `json:"fields"`
+	EndpointURLs   map[string]string `json:"endpointURLs"`
 }
 
 type startAppOAuthResp struct {
@@ -134,6 +138,7 @@ func (s *Server) startAppOAuth(c *cart.Context) error {
 	if strings.ContainsAny(connectionID, "/ ") {
 		return badRequest(c, "connection id must not contain '/' or spaces")
 	}
+	var existing *app.Connection
 	if connectionID != "" {
 		for _, conn := range connections {
 			if conn == nil || conn.ID != connectionID {
@@ -145,8 +150,25 @@ func (s *Server) startAppOAuth(c *cart.Context) error {
 			if name == "" {
 				name = conn.Name
 			}
+			existing = conn
 			break
 		}
+	}
+	fieldsInput := req.Fields
+	if fieldsInput == nil && existing != nil {
+		fieldsInput = existing.Fields
+	}
+	fields, err := normalizeAppConnectionFields(def.Connection, fieldsInput, existing)
+	if err != nil {
+		return badRequest(c, err.Error())
+	}
+	endpointURLsInput := req.EndpointURLs
+	if endpointURLsInput == nil && existing != nil {
+		endpointURLsInput = existing.EndpointURLs
+	}
+	endpointURLs, err := app.NormalizeConnectionEndpointURLs(def, endpointURLsInput)
+	if err != nil {
+		return badRequest(c, err.Error())
 	}
 	state, err := randomOAuthState()
 	if err != nil {
@@ -168,6 +190,8 @@ func (s *Server) startAppOAuth(c *cart.Context) error {
 		AuthMethodID:   method.ID,
 		ConnectionID:   connectionID,
 		ConnectionName: name,
+		Fields:         fields,
+		EndpointURLs:   endpointURLs,
 		RedirectURI:    redirectURI,
 		CreatedAt:      time.Now(),
 	})
@@ -222,10 +246,12 @@ func (s *Server) appOAuthCallback(c *cart.Context) error {
 		auth.ExpiresAt = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
 	}
 	conn := &app.Connection{
-		ID:    start.ConnectionID,
-		Name:  start.ConnectionName,
-		AppID: start.AppID,
-		Auth:  auth,
+		ID:           start.ConnectionID,
+		Name:         start.ConnectionName,
+		AppID:        start.AppID,
+		Fields:       start.Fields,
+		EndpointURLs: start.EndpointURLs,
+		Auth:         auth,
 	}
 	if err := cfg.PutAppConnection(c.Request.Context(), conn); err != nil {
 		return oauthHTML(c, http.StatusInternalServerError, "Authorization failed", err.Error())

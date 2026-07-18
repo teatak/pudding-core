@@ -458,7 +458,7 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
     --rail-item-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 52%);
     --rail-section-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 6%);
     --workspace-background: color-mix(in oklch, var(--sidebar), var(--background) 45%);
-    --workspace-chrome-background: color-mix(in oklch, var(--workspace-background), var(--background) 48%);
+    --workspace-chrome-background: var(--workspace-background);
     --workspace-panel-background: color-mix(in oklch, var(--background), var(--card) 14%);
     --workspace-tree-background: var(--workspace-panel-background);
     --workspace-border: oklch(1 0 0 / 7%);

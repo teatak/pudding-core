@@ -140,6 +140,8 @@ type BuiltinRunner struct {
 	weatherCache             map[string]weatherCacheEntry
 	graphqlSchemaMu          sync.Mutex
 	graphqlSchemas           map[string]*graphqlSchemaCache
+	appTokenMu               sync.Mutex
+	appTokens                map[string]endpointAuthTokenCacheEntry
 	patchMu                  sync.Mutex
 	patchProposals           map[string]*patchProposal
 	gitApprovalMu            sync.Mutex
@@ -157,6 +159,7 @@ func NewBuiltinRunner(opts ...BuiltinOption) *BuiltinRunner {
 		weatherEndpoint: weatherDefaultEndpoint,
 		weatherCache:    map[string]weatherCacheEntry{},
 		graphqlSchemas:  map[string]*graphqlSchemaCache{},
+		appTokens:       map[string]endpointAuthTokenCacheEntry{},
 		patchProposals:  map[string]*patchProposal{},
 		gitApprovals:    map[string]gitCommitApprovalSnapshot{},
 		commands:        commands,
@@ -613,8 +616,8 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        BrowserClick,
-			Description: "Click an element in a managed browser tab by CSS selector or viewport coordinates using CDP mouse events.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"CSS selector to click."},"x":{"type":"number","description":"Viewport X coordinate, used when selector is omitted."},"y":{"type":"number","description":"Viewport Y coordinate, used when selector is omitted."},"method":{"type":"string","enum":["auto","pointer"],"description":"Click implementation. Both values use real CDP mouse events; auto is the default."}},"additionalProperties":false}`),
+			Description: "Click an element in a managed browser tab by CSS selector or viewport coordinates using focus-preserving CDP target activation.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"CSS selector to click."},"x":{"type":"number","description":"Viewport X coordinate, used when selector is omitted."},"y":{"type":"number","description":"Viewport Y coordinate, used when selector is omitted."},"method":{"type":"string","enum":["auto","pointer"],"description":"Click implementation. Both values use focus-preserving target activation through CDP; auto is the default."}},"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
 		{

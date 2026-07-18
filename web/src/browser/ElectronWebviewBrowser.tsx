@@ -60,13 +60,6 @@ type BrowserAutomationCursorState = {
   y: number;
 };
 
-type ComposerFocusSnapshot = {
-  element: HTMLTextAreaElement;
-  selectionStart: number;
-  selectionEnd: number;
-  selectionDirection: "backward" | "forward" | "none";
-};
-
 export function ElectronWebviewBrowser({
   activeTab: activeTabProp,
   sessionID,
@@ -89,8 +82,6 @@ export function ElectronWebviewBrowser({
   const failedNavigationSeqRef = useRef(0);
   const loadErrorRef = useRef<WebviewLoadError | null>(null);
   const cursorEffectTimerRef = useRef<number | undefined>(undefined);
-  const composerFocusSnapshotRef = useRef<ComposerFocusSnapshot | null>(null);
-  const webviewFocusLeaseRef = useRef<(() => void) | null>(null);
   const [loadError, setLoadError] = useState<WebviewLoadError | null>(null);
   const [navigationLoading, setNavigationLoading] = useState(false);
   const [automationCursor, setAutomationCursor] = useState<BrowserAutomationCursorState | null>(null);
@@ -114,7 +105,7 @@ export function ElectronWebviewBrowser({
   const webviewRequestID = activeTabProp?.webviewRequestID || "";
   const recentHistoryQuery = useQuery({
     enabled: Boolean(token && ownerSessionID && browserURLIsBlank(targetURL)),
-    queryKey: queryKeys.browserHistoryRecent(8),
+    queryKey: queryKeys.browserHistoryRecent(16),
     queryFn: () => listBrowserHistory(token, ownerSessionID, "", 64),
     staleTime: 0,
   });
@@ -245,73 +236,6 @@ export function ElectronWebviewBrowser({
 
   useEffect(() => {
     const bridge = electronBrowserBridge();
-    if (!bridge?.onAutomationStart || !ownerSessionID || !tabID) {
-      return;
-    }
-    return bridge.onAutomationStart((event) => {
-      if (event.sessionID !== ownerSessionID || event.tabID !== tabID) {
-        return;
-      }
-      if (event.action !== "click" && event.action !== "type" && event.action !== "scroll") {
-        return;
-      }
-      const focusSnapshot = captureComposerFocusSnapshot();
-      composerFocusSnapshotRef.current = focusSnapshot;
-      if (event.action === "type" && focusSnapshot) {
-        focusSnapshot.element.blur();
-      }
-    });
-  }, [ownerSessionID, tabID]);
-
-  useEffect(() => {
-    const bridge = electronBrowserBridge();
-    if (!bridge?.onWebviewFocusRequired || !bridge.completeWebviewFocus || !ownerSessionID || !tabID) {
-      return;
-    }
-    const completeWebviewFocus = bridge.completeWebviewFocus;
-    return bridge.onWebviewFocusRequired((request) => {
-      if (request.sessionID !== ownerSessionID || request.tabID !== tabID) {
-        return;
-      }
-      const node = webviewRef.current;
-      let focused = false;
-      if (node?.isConnected) {
-        webviewFocusLeaseRef.current?.();
-        const releaseFocusLease = acquireWebviewFocusLease(node);
-        node.focus({ preventScroll: true });
-        focused = document.activeElement === node;
-        if (focused) {
-          webviewFocusLeaseRef.current = releaseFocusLease;
-        } else {
-          releaseFocusLease();
-          webviewFocusLeaseRef.current = null;
-        }
-      }
-      void completeWebviewFocus({ ...request, focused }).catch(() => undefined);
-    });
-  }, [ownerSessionID, tabID]);
-
-  useEffect(() => {
-    const bridge = electronBrowserBridge();
-    if (!bridge?.onAutomationEnd || !ownerSessionID || !tabID) {
-      return;
-    }
-    return bridge.onAutomationEnd((event) => {
-      if (event.sessionID !== ownerSessionID || event.tabID !== tabID) {
-        return;
-      }
-      webviewFocusLeaseRef.current?.();
-      webviewFocusLeaseRef.current = null;
-      const focusSnapshot = composerFocusSnapshotRef.current;
-      composerFocusSnapshotRef.current = null;
-      if (focusSnapshot) {
-        restoreComposerFocusSnapshot(focusSnapshot);
-      }
-    });
-  }, [ownerSessionID, tabID]);
-
-  useEffect(() => {
-    const bridge = electronBrowserBridge();
     if (!bridge?.onCursor || !ownerSessionID || !tabID) {
       return;
     }
@@ -343,8 +267,6 @@ export function ElectronWebviewBrowser({
   useEffect(() => {
     return () => {
       window.clearTimeout(cursorEffectTimerRef.current);
-      webviewFocusLeaseRef.current?.();
-      webviewFocusLeaseRef.current = null;
     };
   }, []);
 
@@ -469,7 +391,7 @@ export function ElectronWebviewBrowser({
       } satisfies WebviewProps)}
       {browserURLIsBlank(targetURL) && !loadError ? (
         <BrowserEmptyState
-          history={uniqueBrowserHistoryBySite(recentHistoryQuery.data?.history || [], 4)}
+          history={uniqueBrowserHistoryBySite(recentHistoryQuery.data?.history || [], 16)}
           openingURL={openRecentMutation.isPending ? openRecentMutation.variables : undefined}
           onOpen={(url) => openRecentMutation.mutate(url)}
         />
@@ -501,7 +423,7 @@ function BrowserEmptyState({
             <h2 className="text-base font-semibold text-foreground">{t("browser.emptyTitle")}</h2>
           </div>
           {history.length > 0 ? (
-            <ItemGroup className="mx-auto mt-6 flex max-w-2xl flex-row flex-wrap justify-center gap-4">
+            <ItemGroup className="mx-auto mt-6 flex max-w-[55rem] flex-row flex-wrap justify-center gap-4">
               {history.map((entry) => (
                 <Item
                   key={entry.id}
@@ -544,72 +466,6 @@ function BrowserRecentFavicon({ entry }: { entry: BrowserHistoryEntry }) {
       pageURL={entry.url}
     />
   );
-}
-
-function captureComposerFocusSnapshot(): ComposerFocusSnapshot | null {
-  const activeElement = document.activeElement;
-  if (!(activeElement instanceof HTMLTextAreaElement) || activeElement.dataset.composerTextInput !== "true") {
-    return null;
-  }
-  return {
-    element: activeElement,
-    selectionStart: activeElement.selectionStart,
-    selectionEnd: activeElement.selectionEnd,
-    selectionDirection: activeElement.selectionDirection || "none",
-  };
-}
-
-function acquireWebviewFocusLease(node: HTMLElement) {
-  const inertAncestors: Array<{ ariaHidden: string | null; element: HTMLElement }> = [];
-  for (let ancestor = node.parentElement; ancestor; ancestor = ancestor.parentElement) {
-    if (ancestor.inert) {
-      inertAncestors.push({ ariaHidden: ancestor.getAttribute("aria-hidden"), element: ancestor });
-      ancestor.inert = false;
-    }
-  }
-  const hidden = window.getComputedStyle(node).visibility === "hidden";
-  const previousStyle = hidden
-    ? { opacity: node.style.opacity, pointerEvents: node.style.pointerEvents, visibility: node.style.visibility }
-    : null;
-  if (previousStyle) {
-    node.style.opacity = "0";
-    node.style.pointerEvents = "none";
-    node.style.visibility = "visible";
-  }
-  return () => {
-    if (previousStyle) {
-      node.style.opacity = previousStyle.opacity;
-      node.style.pointerEvents = previousStyle.pointerEvents;
-      node.style.visibility = previousStyle.visibility;
-    }
-    for (const { ariaHidden, element } of inertAncestors) {
-      if (element.isConnected && element.getAttribute("aria-hidden") === ariaHidden) {
-        element.inert = true;
-      }
-    }
-  };
-}
-
-function restoreComposerFocusSnapshot(snapshot: ComposerFocusSnapshot) {
-  if (!snapshot.element.isConnected) {
-    return;
-  }
-  const activeElement = document.activeElement;
-  if (activeElement !== snapshot.element && activeElement instanceof HTMLElement && isEditableHostElement(activeElement)) {
-    return;
-  }
-  snapshot.element.focus({ preventScroll: true });
-  const textLength = snapshot.element.value.length;
-  snapshot.element.setSelectionRange(
-    Math.max(0, Math.min(snapshot.selectionStart, textLength)),
-    Math.max(0, Math.min(snapshot.selectionEnd, textLength)),
-    snapshot.selectionDirection,
-  );
-}
-
-function isEditableHostElement(element: HTMLElement) {
-  const tagName = element.tagName.toLowerCase();
-  return tagName === "input" || tagName === "textarea" || tagName === "select" || element.isContentEditable;
 }
 
 function BrowserAutomationCursor({ cursor }: { cursor: BrowserAutomationCursorState }) {

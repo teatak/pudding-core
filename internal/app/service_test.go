@@ -266,11 +266,12 @@ func TestResolveEndpointUsesOnlyConfiguredConnection(t *testing.T) {
 	homeDir := writeTestApp(t)
 	svc := NewService(homeDir, fakeConnectionStore{items: map[string]*Connection{
 		"github-main": {
-			ID:     "github-main",
-			Name:   "GitHub",
-			AppID:  "github",
-			Auth:   Auth{Type: "bearer", Token: "secret"},
-			Fields: map[string]string{"hotelCode": "H001"},
+			ID:           "github-main",
+			Name:         "GitHub",
+			AppID:        "github",
+			Auth:         Auth{Type: "bearer", Token: "secret"},
+			Fields:       map[string]string{"hotelCode": "H001"},
+			EndpointURLs: map[string]string{"github_rest": "https://github.example.com/api/v3"},
 		},
 	}})
 
@@ -283,6 +284,9 @@ func TestResolveEndpointUsesOnlyConfiguredConnection(t *testing.T) {
 	}
 	if binding.ConnectionFields["hotelCode"] != "H001" || len(binding.ConnectionFieldDefs) != 1 {
 		t.Fatalf("connection fields not resolved: %+v", binding)
+	}
+	if binding.Endpoint.URL != "https://github.example.com/api/v3" {
+		t.Fatalf("connection endpoint URL not resolved: %+v", binding.Endpoint)
 	}
 }
 
@@ -516,6 +520,8 @@ endpoints:
   github_rest:
     kind: rest
     url: https://api.github.com
+    url_config:
+      label: GitHub address
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}

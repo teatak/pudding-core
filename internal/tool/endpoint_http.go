@@ -3,6 +3,7 @@ package tool
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -80,11 +81,13 @@ func (r *BuiltinRunner) restRequest(ctx context.Context, call Call) Result {
 	payload := endpointRequestPayload{
 		EndpointName:        binding.EndpointName,
 		AppID:               binding.AppID,
+		ConnectionID:        binding.ConnectionID,
 		Method:              method,
 		URL:                 target.String(),
 		Body:                body,
 		ContentType:         contentType,
 		Auth:                binding.Auth,
+		AuthMethod:          binding.AuthMethod,
 		ConnectionFields:    binding.ConnectionFields,
 		ConnectionFieldDefs: binding.ConnectionFieldDefs,
 	}
@@ -116,11 +119,13 @@ func (r *BuiltinRunner) graphqlRequest(ctx context.Context, call Call) Result {
 	payload := endpointRequestPayload{
 		EndpointName:        binding.EndpointName,
 		AppID:               binding.AppID,
+		ConnectionID:        binding.ConnectionID,
 		Method:              http.MethodPost,
 		URL:                 binding.Endpoint.URL,
 		Body:                body,
 		ContentType:         "application/json",
 		Auth:                binding.Auth,
+		AuthMethod:          binding.AuthMethod,
 		ConnectionFields:    binding.ConnectionFields,
 		ConnectionFieldDefs: binding.ConnectionFieldDefs,
 		GraphQL:             true,
@@ -145,14 +150,22 @@ func (r *BuiltinRunner) resolveAppEndpoint(ctx context.Context, sessionID, endpo
 type endpointRequestPayload struct {
 	EndpointName        string
 	AppID               string
+	ConnectionID        string
 	Method              string
 	URL                 string
 	Body                []byte
 	ContentType         string
 	Auth                app.Auth
+	AuthMethod          app.AuthMethod
 	ConnectionFields    map[string]string
 	ConnectionFieldDefs []app.ConnectionField
 	GraphQL             bool
+}
+
+type endpointAuthTokenCacheEntry struct {
+	AccessToken string
+	TokenType   string
+	ExpiresAt   time.Time
 }
 
 func (r *BuiltinRunner) doEndpointRequest(ctx context.Context, out Result, payload endpointRequestPayload) Result {
@@ -166,7 +179,11 @@ func (r *BuiltinRunner) doEndpointRequest(ctx context.Context, out Result, paylo
 	if err != nil {
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "request_error", "error": err.Error()})
 	}
-	if err := applyEndpointAuth(req.Header, payload.Auth); err != nil {
+	resolvedAuth, err := r.resolveEndpointAuth(reqCtx, payload.AppID, payload.ConnectionID, payload.Auth, payload.AuthMethod, payload.ConnectionFields)
+	if err != nil {
+		return toolJSON(out, false, map[string]any{"ok": false, "reason": "token_exchange_failed", "error": err.Error()})
+	}
+	if err := applyEndpointAuth(req.Header, resolvedAuth); err != nil {
 		return toolJSON(out, false, map[string]any{"ok": false, "reason": "auth_config_error", "error": err.Error()})
 	}
 	if err := applyEndpointConnectionHeaders(req.Header, payload.Method, payload.ConnectionFields, payload.ConnectionFieldDefs); err != nil {
@@ -220,6 +237,157 @@ func (r *BuiltinRunner) doEndpointRequest(ctx context.Context, out Result, paylo
 	}
 	summaryKind, summaryCount := endpointSummary(response)
 	return withResultSummary(toolJSON(out, true, response), summaryKind, summaryCount)
+}
+
+func (r *BuiltinRunner) resolveEndpointAuth(
+	ctx context.Context,
+	appID string,
+	connectionID string,
+	auth app.Auth,
+	method app.AuthMethod,
+	connectionFields map[string]string,
+) (app.Auth, error) {
+	if strings.TrimSpace(auth.Type) != app.AuthTypeTokenExchange {
+		return auth, nil
+	}
+	exchange := method.TokenExchange
+	if exchange == nil {
+		return app.Auth{}, errors.New("token exchange configuration is missing")
+	}
+	body := make(map[string]string, len(exchange.BodyFields))
+	for bodyName, fieldID := range exchange.BodyFields {
+		value := strings.TrimSpace(connectionFields[fieldID])
+		if value == "" {
+			return app.Auth{}, fmt.Errorf("connection field %q is required for token exchange", fieldID)
+		}
+		body[bodyName] = value
+	}
+	cacheKey := endpointAuthTokenCacheKey(appID, connectionID, method, body)
+	if cached, ok := r.cachedEndpointAuthToken(cacheKey); ok {
+		return app.Auth{Type: app.AuthTypeOAuth2, AccessToken: cached.AccessToken, TokenType: cached.TokenType}, nil
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return app.Auth{}, fmt.Errorf("encode token exchange request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, exchange.URL, bytes.NewReader(payload))
+	if err != nil {
+		return app.Auth{}, fmt.Errorf("create token exchange request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	client := *r.webHTTPClient
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return app.Auth{}, fmt.Errorf("request token: %w", err)
+	}
+	defer resp.Body.Close()
+	data, _, err := readEndpointBody(resp.Body)
+	if err != nil {
+		return app.Auth{}, fmt.Errorf("read token response: %w", err)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return app.Auth{}, fmt.Errorf("token endpoint returned status %d", resp.StatusCode)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return app.Auth{}, errors.New("token endpoint returned invalid JSON")
+	}
+	accessToken, ok := tokenExchangeString(decoded, exchange.AccessTokenField)
+	if !ok || strings.TrimSpace(accessToken) == "" {
+		return app.Auth{}, fmt.Errorf("token response is missing %q", exchange.AccessTokenField)
+	}
+	if !app.IsAllowedRequestHeaderValue(accessToken) {
+		return app.Auth{}, errors.New("token response contains an invalid access token")
+	}
+	tokenType := strings.TrimSpace(exchange.TokenType)
+	if tokenType == "" {
+		tokenType = "Bearer"
+	}
+	expiresIn := 3600 * time.Second
+	if seconds, ok := tokenExchangeSeconds(decoded, exchange.ExpiresInField); ok && seconds > 0 {
+		expiresIn = time.Duration(seconds) * time.Second
+	}
+	entry := endpointAuthTokenCacheEntry{
+		AccessToken: accessToken,
+		TokenType:   tokenType,
+		ExpiresAt:   time.Now().Add(expiresIn),
+	}
+	r.appTokenMu.Lock()
+	r.appTokens[cacheKey] = entry
+	r.appTokenMu.Unlock()
+	return app.Auth{Type: app.AuthTypeOAuth2, AccessToken: accessToken, TokenType: tokenType}, nil
+}
+
+func (r *BuiltinRunner) cachedEndpointAuthToken(key string) (endpointAuthTokenCacheEntry, bool) {
+	r.appTokenMu.Lock()
+	defer r.appTokenMu.Unlock()
+	entry, ok := r.appTokens[key]
+	if !ok || !time.Now().Add(time.Minute).Before(entry.ExpiresAt) {
+		delete(r.appTokens, key)
+		return endpointAuthTokenCacheEntry{}, false
+	}
+	return entry, true
+}
+
+func endpointAuthTokenCacheKey(appID, connectionID string, method app.AuthMethod, body map[string]string) string {
+	encoded, _ := json.Marshal(struct {
+		AppID        string                 `json:"app"`
+		ConnectionID string                 `json:"connection"`
+		MethodID     string                 `json:"method"`
+		Exchange     *app.TokenExchangeSpec `json:"exchange"`
+		Body         map[string]string      `json:"body"`
+	}{appID, connectionID, method.ID, method.TokenExchange, body})
+	return fmt.Sprintf("%x", sha256.Sum256(encoded))
+}
+
+func tokenExchangeString(value map[string]any, field string) (string, bool) {
+	raw, ok := tokenExchangeValue(value, field)
+	if !ok {
+		return "", false
+	}
+	text, ok := raw.(string)
+	return text, ok
+}
+
+func tokenExchangeSeconds(value map[string]any, field string) (int64, bool) {
+	if strings.TrimSpace(field) == "" {
+		return 0, false
+	}
+	raw, ok := tokenExchangeValue(value, field)
+	if !ok {
+		return 0, false
+	}
+	switch item := raw.(type) {
+	case float64:
+		return int64(item), item > 0
+	case json.Number:
+		seconds, err := item.Int64()
+		return seconds, err == nil && seconds > 0
+	case string:
+		seconds, err := strconv.ParseInt(strings.TrimSpace(item), 10, 64)
+		return seconds, err == nil && seconds > 0
+	default:
+		return 0, false
+	}
+}
+
+func tokenExchangeValue(value map[string]any, field string) (any, bool) {
+	var current any = value
+	for _, part := range strings.Split(strings.TrimSpace(field), ".") {
+		object, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		current, ok = object[part]
+		if !ok {
+			return nil, false
+		}
+	}
+	return current, true
 }
 
 func endpointResolveError(kind string, err error) map[string]any {

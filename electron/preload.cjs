@@ -96,12 +96,6 @@ contextBridge.exposeInMainWorld("puddingElectronBrowser", {
     ipcRenderer.on("pudding:browser:automation-end", wrapped);
     return () => ipcRenderer.off("pudding:browser:automation-end", wrapped);
   },
-  completeWebviewFocus: (request) => ipcRenderer.invoke("pudding:browser:webview-focus-complete", request),
-  onWebviewFocusRequired: (listener) => {
-    const wrapped = (_event, request) => listener(request);
-    ipcRenderer.on("pudding:browser:webview-focus-required", wrapped);
-    return () => ipcRenderer.off("pudding:browser:webview-focus-required", wrapped);
-  },
   onWebviewRequired: (listener) => {
     const wrapped = (_event, request) => listener(request);
     ipcRenderer.on("pudding:browser:webview-required", wrapped);
