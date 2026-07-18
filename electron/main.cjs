@@ -22,6 +22,7 @@ const path = require("node:path");
 const packageMetadata = require("../package.json");
 
 const { BrowserBridgeServer } = require("./browser-bridge-server.cjs");
+const { resolveBrowserFavicon } = require("./browser-favicon.cjs");
 const { BrowserHost } = require("./browser-host.cjs");
 const { configureManagedBrowserPermissions, managedBrowserPartition } = require("./browser-permissions.cjs");
 const { hardenManagedBrowserWebview } = require("./browser-webview-security.cjs");
@@ -67,6 +68,7 @@ const macTrafficLightPosition = { x: 18, y: 18 };
 const defaultWindowBounds = { width: 1440, height: 920 };
 const minWindowBounds = { width: 1000, height: 680 };
 const browserWebviewFocusWaiters = new Map();
+const browserFaviconCache = new Map();
 let mainWindow = null;
 let themePreference = normalizeThemePreference(process.env.PUDDING_THEME || "system");
 nativeTheme.themeSource = themePreference;
@@ -89,6 +91,7 @@ const browserHost = new BrowserHost(
   (request, target) => requestBrowserWebviewFocus(request, target),
   {
     options: () => ({ backgroundColor: themeBackgroundColor() }),
+    resolveFavicon: resolveCachedBrowserFavicon,
     created: (window) => {
       window.setBackgroundColor(themeBackgroundColor());
       bindEditContextMenu(window.webContents, window);
@@ -1018,6 +1021,11 @@ ipcMain.handle("pudding:browser:ensure", (event, request) => {
   return browserHost.ensure(untrustedBrowserRequest(request));
 });
 
+ipcMain.handle("pudding:browser:resolve-favicon", (event, request) => {
+  assertTrustedSender(event);
+  return resolveCachedBrowserFavicon(request);
+});
+
 ipcMain.handle("pudding:browser:webview-register", (event, request) => {
   assertTrustedSender(event);
   const target = webContents.fromId(Number(request?.webContentsID));
@@ -1378,6 +1386,32 @@ function openAllowedExternalURL(rawURL) {
     console.warn("[electron] open external URL failed", error);
   });
   return true;
+}
+
+function resolveCachedBrowserFavicon(request = {}) {
+  const url = String(request.url || "").trim();
+  const pageURL = String(request.pageURL || "").trim();
+  const key = `${pageURL}\n${url}`;
+  const cached = browserFaviconCache.get(key);
+  if (cached) {
+    return cached;
+  }
+  const pending = resolveBrowserFavicon({
+    url,
+    pageURL,
+    fetch: (resource, init) => session.fromPartition(managedBrowserPartition).fetch(resource, init),
+    nativeImage,
+  }).then((resolvedURL) => {
+    if (!resolvedURL && browserFaviconCache.get(key) === pending) {
+      browserFaviconCache.delete(key);
+    }
+    return resolvedURL;
+  });
+  browserFaviconCache.set(key, pending);
+  if (browserFaviconCache.size > 128) {
+    browserFaviconCache.delete(browserFaviconCache.keys().next().value);
+  }
+  return pending;
 }
 
 function normalizeUpdateFeedURL(rawURL) {

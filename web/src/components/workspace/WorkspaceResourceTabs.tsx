@@ -17,9 +17,10 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Compass, FileCode2, FileDiff, SquareTerminal, X } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 
 import type { BrowserTab, Terminal } from "@/api/client";
+import { BrowserFavicon } from "@/browser/BrowserFavicon";
 import { browserTabFaviconURL, browserTabTitle } from "@/browser/helpers";
 import { builtinAppIconClass } from "@/components/AppIdentity";
 import { CanvasKindIcon, titleForCanvasItem } from "@/components/canvas/CanvasKindIcon";
@@ -37,31 +38,22 @@ import {
   useWorkspaceTabOrder,
 } from "@/state/workspaceTabOrderStore";
 
-function BrowserTabIcon({ faviconURL }: { faviconURL?: string }) {
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    setFailed(false);
-  }, [faviconURL]);
-
-  if (faviconURL && !failed) {
-    return (
-      <span aria-hidden="true" className="inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center overflow-hidden rounded-[5px]">
-        <img alt="" className="h-full w-full object-cover" draggable={false} src={faviconURL} onError={() => setFailed(true)} />
-      </span>
-    );
-  }
-
+function BrowserTabIcon({ faviconURL, pageURL }: { faviconURL?: string; pageURL: string }) {
   return (
     <span
       aria-hidden="true"
       className={cn(
-        "inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[5px]",
+        "inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center overflow-hidden rounded-[5px]",
         builtinAppIconClass("browser"),
         "!bg-transparent",
       )}
     >
-      <Compass className="h-3.5 w-3.5" />
+      <BrowserFavicon
+        className="h-full w-full object-cover"
+        fallback={<Compass className="h-3.5 w-3.5" />}
+        faviconURL={faviconURL}
+        pageURL={pageURL}
+      />
     </span>
   );
 }
@@ -348,7 +340,7 @@ function SortableSurfaceTabButton({
       }}
     >
       {browser ? (
-        <BrowserTabIcon faviconURL={browserTabFaviconURL(browser)} />
+        <BrowserTabIcon faviconURL={browserTabFaviconURL(browser)} pageURL={browser.url} />
       ) : terminal ? (
         <TerminalTabIcon exited={exited} />
       ) : widget ? (

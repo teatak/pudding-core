@@ -19,6 +19,7 @@ import {
   type BrowserTab,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { BrowserFavicon } from "@/browser/BrowserFavicon";
 import { allowElectronBrowserTab, hasElectronWebviewBrowser } from "@/browser/electronBridge";
 import {
   browserAddressToURL,
@@ -516,7 +517,7 @@ export function BrowserToolbar({
                       onSelect={() => selectHistoryEntry(entry)}
                     >
                       <div className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-sm text-muted-foreground">
-                        <HistoryFavicon url={entry.faviconURL} />
+                        <HistoryFavicon pageURL={entry.url} url={entry.faviconURL} />
                       </div>
                       <div className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden text-sm">
                         <span className="min-w-0 truncate">{entry.title || historyURLLabel(entry.url)}</span>
@@ -603,15 +604,15 @@ function historyURLLabel(rawURL: string) {
   }
 }
 
-function HistoryFavicon({ url }: { url?: string }) {
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => setFailed(false), [url]);
-
-  if (!url || failed) {
-    return <Globe2 className="size-4" />;
-  }
-  return <img alt="" className="size-4 object-contain" draggable={false} src={url} onError={() => setFailed(true)} />;
+function HistoryFavicon({ pageURL, url }: { pageURL: string; url?: string }) {
+  return (
+    <BrowserFavicon
+      className="size-4 object-contain"
+      fallback={<Globe2 className="size-4" />}
+      faviconURL={url}
+      pageURL={pageURL}
+    />
+  );
 }
 
 function browserPayloadFromTab(tab: BrowserTab | undefined): (BrowserCanvasPayload & { updatedAt?: string }) | null {

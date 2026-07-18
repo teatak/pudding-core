@@ -24,6 +24,7 @@ class BrowserHost {
     this.onAutomationEnd = typeof onAutomationEnd === "function" ? onAutomationEnd : () => {};
     this.onWebviewFocusRequired = typeof onWebviewFocusRequired === "function" ? onWebviewFocusRequired : async () => false;
     this.popupWindowOptions = typeof windowHooks?.options === "function" ? windowHooks.options : () => ({});
+    this.resolveFavicon = typeof windowHooks?.resolveFavicon === "function" ? windowHooks.resolveFavicon : async () => "";
     this.onPopupCreated = typeof windowHooks?.created === "function" ? windowHooks.created : () => {};
     this.onBlockedWindowNavigation = typeof windowHooks?.blockedNavigation === "function" ? windowHooks.blockedNavigation : () => false;
     this.boundPopupContents = new WeakSet();
@@ -368,6 +369,8 @@ class BrowserHost {
       committedURL: "",
       committedTitle: "",
       faviconURL: "",
+      faviconSourceURL: "",
+      faviconResolveID: 0,
       navigationError: loadError,
       cdpAttached: false,
       cdpReady: null,
@@ -433,6 +436,8 @@ class BrowserHost {
       committedURL: "",
       committedTitle: "",
       faviconURL: "",
+      faviconSourceURL: "",
+      faviconResolveID: 0,
       fileRoots,
       navigationError: null,
       webviewWaiters: new Set(),
@@ -589,7 +594,40 @@ class BrowserHost {
     }
     slot.committedTitle = String(metadata.title || "");
     slot.displayTitle = slot.committedTitle;
-    slot.faviconURL = normalizeURL(metadata.faviconURL, slot.fileRoots);
+    const faviconURL = normalizeURL(metadata.faviconURL, slot.fileRoots);
+    if (faviconURL) {
+      this.updateFavicon(slot, [faviconURL]);
+    } else if (!slot.faviconSourceURL) {
+      slot.faviconURL = "";
+    }
+  }
+
+  updateFavicon(slot, candidates) {
+    const sourceURL = (Array.isArray(candidates) ? candidates : [candidates])
+      .map((candidate) => normalizeURL(candidate, slot.fileRoots))
+      .find(Boolean) || "";
+    if (!sourceURL || (slot.faviconSourceURL === sourceURL && slot.faviconURL)) {
+      return false;
+    }
+    slot.faviconSourceURL = sourceURL;
+    slot.faviconURL = sourceURL;
+    const resolveID = ++slot.faviconResolveID;
+    const pageURL = normalizeURL(slot.committedURL, slot.fileRoots) || normalizeURL(slot.displayURL, slot.fileRoots);
+    void Promise.resolve(this.resolveFavicon({ url: sourceURL, pageURL })).then((resolvedURL) => {
+      const faviconURL = normalizeResolvedFavicon(resolvedURL);
+      if (
+        !faviconURL ||
+        this.slots.get(slot.key) !== slot ||
+        slot.disposed ||
+        slot.faviconResolveID !== resolveID ||
+        slot.faviconSourceURL !== sourceURL
+      ) {
+        return;
+      }
+      slot.faviconURL = faviconURL;
+      this.noteUpdated(slot);
+    }).catch(() => undefined);
+    return true;
   }
 
   scheduleMetadataRefresh(slot) {
@@ -693,6 +731,12 @@ class BrowserHost {
       }
       this.scheduleMetadataRefresh(slot);
     });
+    webContents.on("page-favicon-updated", (_event, favicons) => {
+      if (slot.webContents !== webContents || !this.updateFavicon(slot, favicons)) {
+        return;
+      }
+      this.noteUpdated(slot);
+    });
     webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (slot.webContents !== webContents || isMainFrame === false || isNavigationAbortCode(errorCode)) {
         return;
@@ -725,6 +769,9 @@ class BrowserHost {
           };
           slot.committedURL = nextURL;
           slot.committedTitle = "";
+          slot.faviconURL = "";
+          slot.faviconSourceURL = "";
+          slot.faviconResolveID += 1;
           slot.displayURL = nextURL;
           slot.displayTitle = "";
           slot.navigationError = null;
@@ -1285,6 +1332,17 @@ function normalizeWindowURL(rawURL, fileRoots = [], openerURL = "") {
   } catch {
     return "";
   }
+}
+
+function normalizeResolvedFavicon(rawURL) {
+  const value = String(rawURL || "").trim();
+  if (
+    value.length > 100 * 1024 ||
+    !/^data:image\/(?:avif|gif|jpeg|png|vnd\.microsoft\.icon|webp|x-icon);base64,[a-z0-9+/]+={0,2}$/i.test(value)
+  ) {
+    return "";
+  }
+  return value;
 }
 
 function browserURLIsBlank(rawURL) {

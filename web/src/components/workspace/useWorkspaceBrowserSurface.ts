@@ -184,6 +184,8 @@ export function useWorkspaceBrowserSurface({ token, sessionID, enabled, hasTrans
           faviconURL: tab.faviconURL,
           canGoBack: tab.canGoBack,
           canGoForward: tab.canGoForward,
+        }).then(() => {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.browserHistory() });
         }).catch(() => undefined);
       }, 250);
     });

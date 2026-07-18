@@ -4,8 +4,9 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
-const { app, BrowserWindow, ipcMain, webContents } = require("electron");
+const { app, BrowserWindow, ipcMain, nativeImage, session, webContents } = require("electron");
 
+const { resolveBrowserFavicon } = require("../browser-favicon.cjs");
 const { BrowserHost } = require("../browser-host.cjs");
 const { managedBrowserPartition } = require("../browser-permissions.cjs");
 const { hardenManagedBrowserWebview } = require("../browser-webview-security.cjs");
@@ -67,6 +68,12 @@ async function run() {
       return document.activeElement === target;
     })()`),
     {
+      resolveFavicon: ({ url, pageURL }) => resolveBrowserFavicon({
+        url,
+        pageURL,
+        fetch: (resource, init) => session.fromPartition(managedBrowserPartition).fetch(resource, init),
+        nativeImage,
+      }),
       created: (popupWindow) => {
         popupWindows.add(popupWindow);
         popupWindow.once("closed", () => popupWindows.delete(popupWindow));
@@ -95,6 +102,12 @@ async function run() {
   assert.match((await host.observe({ sessionID: fileTab.sessionID, tabID: fileTab.tabID })).text, /Project file ready/);
 
   const webTab = await host.ensure({ sessionID: "smoke-session-a", tabID: "smoke-web", url: `${pageBaseURL}/one` });
+  currentCheck = "favicon localization";
+  let localizedFaviconURL = "";
+  await waitUntil(() => {
+    localizedFaviconURL = host.listTabs({ sessionID: webTab.sessionID }).tabs.find((tab) => tab.tabID === webTab.tabID)?.faviconURL || "";
+    return localizedFaviconURL.startsWith("data:image/png;base64,");
+  });
   const runtimeID = webTab.runtimeID;
   await host.loadURL({ sessionID: webTab.sessionID, tabID: webTab.tabID, url: `${pageBaseURL}/two` });
   assert.equal((await host.back({ sessionID: webTab.sessionID, tabID: webTab.tabID })).url, `${pageBaseURL}/one`);
@@ -220,14 +233,19 @@ async function run() {
   assert.deepEqual(await host.revokeFileAccess({ sessionID: "smoke-session-a" }), { closedTabIDs: ["smoke-file"] });
   assert.equal(host.listTabs({ sessionID: "smoke-session-a" }).tabs.length, 2);
 
-  process.stdout.write(JSON.stringify({ ok: true, checks: ["file", "multi-tab", "multi-session", "history", "focus-isolation", "target-blank-referrer", "window-open-about-blank", "parent-child-window-proxy", "named-window-reuse", "blob-window", "window-open", "opener-post-message", "window-close-focus", "noopener-noreferrer", "screenshot", "revoke"] }) + "\n");
+  process.stdout.write(JSON.stringify({ ok: true, checks: ["file", "favicon", "multi-tab", "multi-session", "history", "focus-isolation", "target-blank-referrer", "window-open-about-blank", "parent-child-window-proxy", "named-window-reuse", "blob-window", "window-open", "opener-post-message", "window-close-focus", "noopener-noreferrer", "screenshot", "revoke"] }) + "\n");
   finish();
 }
 
 function startPageServer() {
   server = http.createServer((request, response) => {
+    if (request.url === "/favicon.png") {
+      response.writeHead(200, { "content-type": "image/png" });
+      response.end(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"));
+      return;
+    }
     const pages = {
-      "/one": "<!doctype html><title>One</title><main>Page one</main>",
+      "/one": "<!doctype html><title>One</title><link rel=icon href=/favicon.png><main>Page one</main>",
       "/two": "<!doctype html><title>Two</title><main>Page two</main>",
       "/other": "<!doctype html><title>Other</title><main>Other session</main>",
       "/form": "<!doctype html><title>Form</title><label>Target <input id=\"target\"></label>",

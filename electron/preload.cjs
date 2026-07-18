@@ -67,6 +67,7 @@ contextBridge.exposeInMainWorld("puddingElectronProjectFiles", {
 
 contextBridge.exposeInMainWorld("puddingElectronBrowser", {
   ensure: (request) => ipcRenderer.invoke("pudding:browser:ensure", request),
+  resolveFavicon: (request) => ipcRenderer.invoke("pudding:browser:resolve-favicon", request),
   registerWebview: (request) => ipcRenderer.invoke("pudding:browser:webview-register", request),
   loadURL: (request) => ipcRenderer.invoke("pudding:browser:load-url", request),
   back: (request) => ipcRenderer.invoke("pudding:browser:back", request),

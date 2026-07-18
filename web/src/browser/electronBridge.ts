@@ -71,6 +71,7 @@ export type ElectronBrowserWebviewFocusRequest = Required<Pick<ElectronBrowserRe
 
 export type ElectronBrowserBridge = {
   ensure: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
+  resolveFavicon?: (request: { url: string; pageURL: string }) => Promise<string>;
   registerWebview: (request: ElectronWebviewRegisterRequest) => Promise<ElectronBrowserSnapshot>;
   loadURL: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
   back: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;

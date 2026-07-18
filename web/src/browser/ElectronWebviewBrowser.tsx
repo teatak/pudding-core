@@ -4,6 +4,7 @@ import { createElement, useCallback, useEffect, useRef, useState, type CSSProper
 
 import { listBrowserHistory, listBrowserTabs, type BrowserHistoryEntry, type BrowserTab } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { BrowserFavicon } from "@/browser/BrowserFavicon";
 import {
   cacheElectronBrowserSnapshot,
   electronBrowserBridge,
@@ -20,6 +21,7 @@ import {
   uniqueBrowserHistoryBySite,
 } from "@/browser/helpers";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Spinner } from "@/components/Spinner";
 import { useI18n } from "@/i18n";
 import type { BrowserCanvasPayload } from "./types";
@@ -497,24 +499,30 @@ function BrowserEmptyState({
           <div className="w-full">
             <div className="grid grid-cols-2 gap-2">
               {history.slice(0, 8).map((entry) => (
-                <Button
+                <Card
                   key={entry.id}
-                  className="group h-14 min-w-0 justify-start gap-3 rounded-xl border border-[var(--workspace-border)] bg-background/20 px-3 font-normal text-muted-foreground shadow-sm hover:bg-background/40 hover:text-foreground"
-                  disabled={Boolean(openingURL)}
-                  title={`${entry.title || browserCompactURL(entry.url)} · ${browserCompactURL(entry.url)}`}
-                  type="button"
-                  variant="ghost"
-                  onClick={() => onOpen(entry.url)}
+                  className="min-w-0 gap-0 overflow-hidden bg-white py-0 shadow-sm transition-colors hover:bg-muted/30 dark:bg-muted/40 dark:hover:bg-muted/55"
+                  size="sm"
                 >
-                  <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-[var(--workspace-border)] bg-background/35 shadow-sm">
-                    {openingURL === entry.url ? <Spinner className="size-4" /> : <BrowserRecentFavicon entry={entry} />}
-                  </span>
-                  <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden text-left text-sm">
-                    <span className="min-w-0 truncate text-foreground/85">{entry.title || browserCompactURL(entry.url)}</span>
-                    <span aria-hidden="true" className="shrink-0 text-muted-foreground/40">·</span>
-                    <span className="max-w-[45%] shrink-0 truncate text-xs text-muted-foreground">{browserCompactURL(entry.url)}</span>
-                  </span>
-                </Button>
+                  <CardContent className="p-0">
+                    <button
+                      className="group flex h-14 w-full min-w-0 items-center gap-3 px-3 text-left font-normal text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:cursor-wait disabled:opacity-70"
+                      disabled={Boolean(openingURL)}
+                      title={`${entry.title || browserCompactURL(entry.url)} · ${browserCompactURL(entry.url)}`}
+                      type="button"
+                      onClick={() => onOpen(entry.url)}
+                    >
+                      <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-[var(--workspace-border)] bg-background/35 shadow-sm">
+                        {openingURL === entry.url ? <Spinner className="size-4" /> : <BrowserRecentFavicon entry={entry} />}
+                      </span>
+                      <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden text-sm">
+                        <span className="min-w-0 truncate text-foreground/85">{entry.title || browserCompactURL(entry.url)}</span>
+                        <span aria-hidden="true" className="shrink-0 text-muted-foreground/40">·</span>
+                        <span className="max-w-[45%] shrink-0 truncate text-xs text-muted-foreground">{browserCompactURL(entry.url)}</span>
+                      </span>
+                    </button>
+                  </CardContent>
+                </Card>
               ))}
             </div>
           </div>
@@ -532,14 +540,14 @@ function BrowserEmptyState({
 }
 
 function BrowserRecentFavicon({ entry }: { entry: BrowserHistoryEntry }) {
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => setFailed(false), [entry.faviconURL]);
-
-  if (!entry.faviconURL || failed) {
-    return <Globe2 className="size-4 text-muted-foreground" />;
-  }
-  return <img alt="" className="size-4 object-contain" draggable={false} src={entry.faviconURL} onError={() => setFailed(true)} />;
+  return (
+    <BrowserFavicon
+      className="size-4 object-contain"
+      fallback={<Globe2 className="size-4 text-muted-foreground" />}
+      faviconURL={entry.faviconURL}
+      pageURL={entry.url}
+    />
+  );
 }
 
 function captureComposerFocusSnapshot(): ComposerFocusSnapshot | null {

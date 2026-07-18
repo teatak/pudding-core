@@ -187,6 +187,42 @@ test("managed browser cancels Web Bluetooth device selection", async () => {
   host.closeAll();
 });
 
+test("captures dynamically updated favicons and publishes the resolved local image", async () => {
+  const required = [];
+  const snapshots = [];
+  const resolutions = [];
+  const resolved = "data:image/png;base64,cG5n";
+  const host = new BrowserHost(
+    (snapshot) => snapshots.push(snapshot),
+    undefined,
+    undefined,
+    (request) => required.push(request),
+    undefined,
+    undefined,
+    {
+      resolveFavicon: async (request) => {
+        resolutions.push(request);
+        return resolved;
+      },
+    },
+  );
+  const opening = host.ensure({ sessionID: "session-favicon", tabID: "tab-favicon", url: "https://discord.com/login" });
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(49);
+  await host.registerWebContents(required[0], webContents);
+  await opening;
+
+  webContents.emit("page-favicon-updated", {}, ["javascript:alert(1)", "https://discord.com/assets/favicon.ico"]);
+  assert.equal(snapshots.at(-1).faviconURL, "https://discord.com/assets/favicon.ico");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(resolutions, [{
+    url: "https://discord.com/assets/favicon.ico",
+    pageURL: "https://discord.com/login",
+  }]);
+  assert.equal(snapshots.at(-1).faviconURL, resolved);
+  host.closeAll();
+});
+
 test("opens tab-like blank targets as managed browser tabs", async () => {
   const required = [];
   const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));
