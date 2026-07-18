@@ -1,6 +1,8 @@
-import { Folders, Trash2, Undo2 } from "lucide-react";
+import { Trash2, Undo2 } from "lucide-react";
 
 import { CanvasKindIcon } from "@/components/canvas/CanvasKindIcon";
+import { Button } from "@/components/ui/button";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { ClosedCanvasItem, SavedCanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
@@ -8,26 +10,9 @@ import { cn } from "@/lib/utils";
 export const workspaceTabClassName = "inline-flex h-(--workspace-toolbar-tab-h) items-center gap-1.5 rounded-[7px] px-2 text-xs font-medium text-[var(--workspace-tab-foreground)] transition-colors hover:bg-[var(--workspace-tab-hover-background)] hover:text-foreground";
 export const workspaceTabActiveClassName = "bg-[var(--workspace-tab-active-background)] text-foreground hover:bg-[var(--workspace-tab-active-background)]";
 
-export function ProjectSurfaceControl({ active, onActivate }: { active: boolean; onActivate: () => void }) {
-  const { t } = useI18n();
-  return (
-    <button
-      aria-pressed={active}
-      className={cn(workspaceTabClassName, "shrink-0", active && workspaceTabActiveClassName)}
-      title={t("workspace.project")}
-      type="button"
-      onClick={onActivate}
-    >
-      <span className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] text-amber-700 dark:text-amber-300">
-        <Folders className="h-3.5 w-3.5" />
-      </span>
-      <span>{t("workspace.project")}</span>
-    </button>
-  );
-}
-
 export function CanvasLibraryMenuSections({
   closedItems,
+  layout = "menu",
   savedItems,
   onClearClosed,
   onDismiss,
@@ -37,6 +22,7 @@ export function CanvasLibraryMenuSections({
   onRestoreClosed,
 }: {
   closedItems: ClosedCanvasItem[];
+  layout?: "menu" | "start";
   savedItems: SavedCanvasItem[];
   onClearClosed: () => void;
   onDismiss: () => void;
@@ -49,6 +35,57 @@ export function CanvasLibraryMenuSections({
   if (savedItems.length === 0 && closedItems.length === 0) {
     return null;
   }
+  const startLayout = layout === "start";
+  const savedRows = savedItems.map((entry) => (
+    <SavedCanvasItemRow
+      key={entry.id}
+      entry={entry}
+      onOpen={() => {
+        onOpenSaved(entry);
+        onDismiss();
+      }}
+      onRemove={() => onRemoveSaved(entry)}
+    />
+  ));
+  const closedRows = closedItems.map((entry) => (
+    <ClosedCanvasItemRow
+      key={entry.id}
+      entry={entry}
+      onRemove={() => onRemoveClosed(entry)}
+      onRestore={() => {
+        onRestoreClosed(entry);
+        onDismiss();
+      }}
+    />
+  ));
+  if (startLayout) {
+    return (
+      <div className="mx-auto mt-6 grid max-w-sm min-w-0 grid-cols-1 gap-3 text-left">
+        {savedItems.length > 0 ? (
+          <Card className="min-w-0" size="sm">
+            <CardHeader>
+              <CardTitle className="text-[13px] font-medium text-muted-foreground">{t("canvas.savedWidgets")}</CardTitle>
+              <CardAction className="text-xs tabular-nums text-muted-foreground">{savedItems.length}</CardAction>
+            </CardHeader>
+            <CardContent className="max-h-56 overflow-y-auto px-0">{savedRows}</CardContent>
+          </Card>
+        ) : null}
+        {closedItems.length > 0 ? (
+          <Card className="min-w-0" size="sm">
+            <CardHeader>
+              <CardTitle className="text-[13px] font-medium text-muted-foreground">{t("canvas.recentClosed")}</CardTitle>
+              <CardAction>
+                <Button className="font-normal text-muted-foreground" size="xs" type="button" variant="ghost" onClick={onClearClosed}>
+                  {t("canvas.clearRecentClosed")}
+                </Button>
+              </CardAction>
+            </CardHeader>
+            <CardContent className="max-h-56 overflow-y-auto px-0">{closedRows}</CardContent>
+          </Card>
+        ) : null}
+      </div>
+    );
+  }
   return (
     <div className="-mx-1 mt-1 border-t border-border pt-1">
       {savedItems.length > 0 ? (
@@ -57,19 +94,7 @@ export function CanvasLibraryMenuSections({
             <span>{t("canvas.savedWidgets")}</span>
             <span className="tabular-nums text-muted-foreground/70">{savedItems.length}</span>
           </div>
-          <div className="max-h-56 overflow-y-auto">
-            {savedItems.map((entry) => (
-              <SavedCanvasItemRow
-                key={entry.id}
-                entry={entry}
-                onOpen={() => {
-                  onOpenSaved(entry);
-                  onDismiss();
-                }}
-                onRemove={() => onRemoveSaved(entry)}
-              />
-            ))}
-          </div>
+          <div className="max-h-56 overflow-y-auto">{savedRows}</div>
         </div>
       ) : null}
       {closedItems.length > 0 ? (
@@ -80,19 +105,7 @@ export function CanvasLibraryMenuSections({
               {t("canvas.clearRecentClosed")}
             </button>
           </div>
-          <div className="max-h-56 overflow-y-auto">
-            {closedItems.map((entry) => (
-              <ClosedCanvasItemRow
-                key={entry.id}
-                entry={entry}
-                onRemove={() => onRemoveClosed(entry)}
-                onRestore={() => {
-                  onRestoreClosed(entry);
-                  onDismiss();
-                }}
-              />
-            ))}
-          </div>
+          <div className="max-h-56 overflow-y-auto">{closedRows}</div>
         </div>
       ) : null}
     </div>

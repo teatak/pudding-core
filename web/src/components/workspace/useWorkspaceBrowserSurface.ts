@@ -336,7 +336,6 @@ export function useWorkspaceBrowserSurface({ token, sessionID, enabled, hasTrans
     if (!sessionID || createBrowserTabMutation.isPending) {
       return;
     }
-    setActiveSurface("browser");
     createBrowserTabMutation.mutate(sessionID);
   };
 

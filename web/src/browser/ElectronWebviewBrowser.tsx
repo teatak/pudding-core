@@ -21,7 +21,7 @@ import {
   uniqueBrowserHistoryBySite,
 } from "@/browser/helpers";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Item, ItemContent, ItemGroup, ItemHeader, ItemTitle } from "@/components/ui/item";
 import { Spinner } from "@/components/Spinner";
 import { useI18n } from "@/i18n";
 import type { BrowserCanvasPayload } from "./types";
@@ -469,7 +469,7 @@ export function ElectronWebviewBrowser({
       } satisfies WebviewProps)}
       {browserURLIsBlank(targetURL) && !loadError ? (
         <BrowserEmptyState
-          history={uniqueBrowserHistoryBySite(recentHistoryQuery.data?.history || [], 8)}
+          history={uniqueBrowserHistoryBySite(recentHistoryQuery.data?.history || [], 4)}
           openingURL={openRecentMutation.isPending ? openRecentMutation.variables : undefined}
           onOpen={(url) => openRecentMutation.mutate(url)}
         />
@@ -493,47 +493,43 @@ function BrowserEmptyState({
   const { t } = useI18n();
 
   return (
-    <div className="absolute inset-0 z-[1] flex items-center justify-center bg-[var(--workspace-chrome-background)] px-8">
-      <div className="flex w-full max-w-xl -translate-y-[2vh] flex-col items-center text-center">
-        {history.length > 0 ? (
-          <div className="w-full">
-            <div className="grid grid-cols-2 gap-2">
-              {history.slice(0, 8).map((entry) => (
-                <Card
-                  key={entry.id}
-                  className="min-w-0 gap-0 overflow-hidden bg-white py-0 shadow-sm transition-colors hover:bg-muted/30 dark:bg-muted/40 dark:hover:bg-muted/55"
-                  size="sm"
-                >
-                  <CardContent className="p-0">
-                    <button
-                      className="group flex h-14 w-full min-w-0 items-center gap-3 px-3 text-left font-normal text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:cursor-wait disabled:opacity-70"
-                      disabled={Boolean(openingURL)}
-                      title={`${entry.title || browserCompactURL(entry.url)} · ${browserCompactURL(entry.url)}`}
-                      type="button"
-                      onClick={() => onOpen(entry.url)}
-                    >
-                      <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-[var(--workspace-border)] bg-background/35 shadow-sm">
-                        {openingURL === entry.url ? <Spinner className="size-4" /> : <BrowserRecentFavicon entry={entry} />}
-                      </span>
-                      <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden text-sm">
-                        <span className="min-w-0 truncate text-foreground/85">{entry.title || browserCompactURL(entry.url)}</span>
-                        <span aria-hidden="true" className="shrink-0 text-muted-foreground/40">·</span>
-                        <span className="max-w-[45%] shrink-0 truncate text-xs text-muted-foreground">{browserCompactURL(entry.url)}</span>
-                      </span>
-                    </button>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+    <div className="absolute inset-0 z-[1] overflow-y-auto bg-[var(--workspace-chrome-background)]">
+      <div className="flex min-h-full items-center justify-center px-6 py-8">
+        <div className="w-full max-w-5xl text-center">
+          <div className="mx-auto max-w-sm">
+            <Compass className="mx-auto mb-4 size-8 text-muted-foreground" strokeWidth={1.6} />
+            <h2 className="text-base font-semibold text-foreground">{t("browser.emptyTitle")}</h2>
           </div>
-        ) : (
-          <>
-            <div className="flex size-10 items-center justify-center rounded-xl border border-[var(--workspace-border)] bg-background/25 text-muted-foreground shadow-sm">
-              <Compass className="size-5" strokeWidth={1.6} />
-            </div>
-            <h2 className="mt-3 text-base font-medium text-foreground/85">{t("browser.emptyTitle")}</h2>
-          </>
-        )}
+          {history.length > 0 ? (
+            <ItemGroup className="mx-auto mt-6 flex max-w-2xl flex-row flex-wrap justify-center gap-4">
+              {history.map((entry) => (
+                <Item
+                  key={entry.id}
+                  asChild
+                  className="w-24 min-w-0 flex-none flex-col flex-nowrap gap-2 px-2 py-2 text-center text-[13px] font-normal text-foreground/85 transition-none hover:bg-accent disabled:cursor-wait disabled:opacity-70"
+                >
+                  <button
+                    disabled={Boolean(openingURL)}
+                    title={`${entry.title || browserCompactURL(entry.url)} · ${browserCompactURL(entry.url)}`}
+                    type="button"
+                    onClick={() => onOpen(entry.url)}
+                  >
+                    <ItemHeader className="justify-center">
+                      <span className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted">
+                        {openingURL === entry.url ? <Spinner className="size-5" /> : <BrowserRecentFavicon entry={entry} />}
+                      </span>
+                    </ItemHeader>
+                    <ItemContent className="w-full flex-none gap-0">
+                      <ItemTitle className="block w-full truncate text-center text-[13px] font-normal">
+                        {entry.title || browserCompactURL(entry.url)}
+                      </ItemTitle>
+                    </ItemContent>
+                  </button>
+                </Item>
+              ))}
+            </ItemGroup>
+          ) : null}
+        </div>
       </div>
     </div>
   );
@@ -542,8 +538,8 @@ function BrowserEmptyState({
 function BrowserRecentFavicon({ entry }: { entry: BrowserHistoryEntry }) {
   return (
     <BrowserFavicon
-      className="size-4 object-contain"
-      fallback={<Globe2 className="size-4 text-muted-foreground" />}
+      className="size-6 object-contain"
+      fallback={<Globe2 className="size-6 text-muted-foreground" />}
       faviconURL={entry.faviconURL}
       pageURL={entry.url}
     />

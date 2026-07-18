@@ -120,10 +120,10 @@
     --chrome-edit-background: color-mix(in oklch, var(--background), var(--card) 76%);
     --message-user-background: color-mix(in oklch, var(--background), var(--muted) 56%);
     --rail-drop-target-background: color-mix(in oklch, var(--sidebar), var(--sidebar-accent) 42%);
-    --workspace-background: oklch(0.962 0 0);
-    --workspace-chrome-background: oklch(0.976 0 0);
-    --workspace-panel-background: oklch(0.995 0 0);
-    --workspace-tree-background: oklch(0.982 0 0);
+    --workspace-background: var(--background);
+    --workspace-chrome-background: var(--workspace-background);
+    --workspace-panel-background: var(--workspace-background);
+    --workspace-tree-background: var(--workspace-background);
     --workspace-border: oklch(0.895 0 0);
     --workspace-border-subtle: var(--workspace-border);
     --workspace-resize-border: var(--workspace-border);
@@ -135,7 +135,7 @@
     --workspace-tab-border: oklch(0.84 0 0);
     --workspace-tab-indicator: oklch(0.56 0 0);
     --workspace-file-editor-background: #ffffff;
-    --workspace-file-tabs-background: oklch(0.975 0 0);
+    --workspace-file-tabs-background: var(--workspace-background);
     --workspace-file-tab-active-background: var(--workspace-file-editor-background);
     --workspace-file-tab-inactive-background: oklch(0.95 0 0);
     --workspace-file-tab-hover-background: oklch(0.935 0 0);

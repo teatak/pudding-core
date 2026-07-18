@@ -16,8 +16,8 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Compass, FileCode2, FileDiff, SquareTerminal, X } from "lucide-react";
-import { useEffect, type ReactNode } from "react";
+import { Compass, FileCode2, FileDiff, Folders, SquareTerminal, X } from "lucide-react";
+import { useEffect } from "react";
 
 import type { BrowserTab, Terminal } from "@/api/client";
 import { BrowserFavicon } from "@/browser/BrowserFavicon";
@@ -94,6 +94,7 @@ export type WorkspaceFilePreviewTab = {
 };
 
 type SurfaceTab =
+  | { kind: "project"; id: "project"; sortAt: number }
   | { kind: "browser"; id: string; sortAt: number; browser: BrowserTab }
   | { kind: "terminal"; id: string; sortAt: number; terminal: Terminal }
   | { kind: "file"; id: string; sortAt: number; file: WorkspaceFilePreviewTab }
@@ -112,16 +113,18 @@ export function WorkspaceResourceTabs({
   closingTerminalID,
   filePreviewActive,
   filePreviewTabs,
-  leadingTabs,
   orderScope,
+  projectTabVisible,
   terminalTabs,
   onCloseBrowser,
   onCloseCanvasItem,
   onCloseFilePreview,
+  onCloseProject,
   onCloseTerminal,
   onSelectBrowser,
   onSelectCanvasItem,
   onSelectFilePreview,
+  onSelectProject,
   onSelectTerminal,
 }: {
   activeBrowserTabID?: string;
@@ -136,16 +139,18 @@ export function WorkspaceResourceTabs({
   closingTerminalID?: string;
   filePreviewActive: boolean;
   filePreviewTabs: WorkspaceFilePreviewTab[];
-  leadingTabs?: ReactNode;
   orderScope: string;
+  projectTabVisible: boolean;
   terminalTabs: Terminal[];
   onCloseBrowser: (tabID: string) => void;
   onCloseCanvasItem: (itemID: string) => void;
   onCloseFilePreview: (previewID: string) => void;
+  onCloseProject: () => void;
   onCloseTerminal: (terminalID: string) => void;
   onSelectBrowser: (tabID: string) => void;
   onSelectCanvasItem: (itemID: string) => void;
   onSelectFilePreview: (previewID: string) => void;
+  onSelectProject: () => void;
   onSelectTerminal: (terminalID: string) => void;
 }) {
   const scrollMask = useHorizontalScrollMask<HTMLDivElement>();
@@ -162,6 +167,7 @@ export function WorkspaceResourceTabs({
     ...terminalTabs.map((terminal) => ({ kind: "terminal" as const, id: terminal.id, sortAt: Date.parse(terminal.createdAt), terminal })),
     ...filePreviewTabs.map((file) => ({ kind: "file" as const, id: file.id, sortAt: file.openedAt, file })),
     ...canvasItems.map((widget) => ({ kind: "widget" as const, id: widget.id, sortAt: Date.parse(widget.createdAt), widget })),
+    ...(projectTabVisible ? [{ kind: "project" as const, id: "project" as const, sortAt: Number.MAX_SAFE_INTEGER }] : []),
   ].sort((left, right) => left.sortAt - right.sortAt || left.id.localeCompare(right.id));
   const createdTabIDs = createdTabs.map(surfaceTabID);
   const savedOrder = useWorkspaceTabOrder(orderScope);
@@ -177,7 +183,7 @@ export function WorkspaceResourceTabs({
     reconcileWorkspaceTabOrder(orderScope, createdTabIDs);
   }, [orderScope, orderSignature]);
 
-  if (createdTabs.length === 0 && !leadingTabs) {
+  if (createdTabs.length === 0) {
     return null;
   }
 
@@ -207,7 +213,6 @@ export function WorkspaceResourceTabs({
       >
         <SortableContext items={orderedIDs} strategy={horizontalListSortingStrategy}>
           <div className="flex w-fit max-w-full min-w-0 items-center gap-0.5 px-px py-1">
-            {leadingTabs}
             {tabs.map((tab) => (
               <SortableSurfaceTabButton
                 key={surfaceTabID(tab)}
@@ -224,10 +229,12 @@ export function WorkspaceResourceTabs({
                 onCloseBrowser={onCloseBrowser}
                 onCloseCanvasItem={onCloseCanvasItem}
                 onCloseFilePreview={onCloseFilePreview}
+                onCloseProject={onCloseProject}
                 onCloseTerminal={onCloseTerminal}
                 onSelectBrowser={onSelectBrowser}
                 onSelectCanvasItem={onSelectCanvasItem}
                 onSelectFilePreview={onSelectFilePreview}
+                onSelectProject={onSelectProject}
                 onSelectTerminal={onSelectTerminal}
               />
             ))}
@@ -252,10 +259,12 @@ function SortableSurfaceTabButton({
   onCloseBrowser,
   onCloseCanvasItem,
   onCloseFilePreview,
+  onCloseProject,
   onCloseTerminal,
   onSelectBrowser,
   onSelectCanvasItem,
   onSelectFilePreview,
+  onSelectProject,
   onSelectTerminal,
 }: {
   activeBrowserTabID?: string;
@@ -271,25 +280,31 @@ function SortableSurfaceTabButton({
   onCloseBrowser: (tabID: string) => void;
   onCloseCanvasItem: (itemID: string) => void;
   onCloseFilePreview: (previewID: string) => void;
+  onCloseProject: () => void;
   onCloseTerminal: (terminalID: string) => void;
   onSelectBrowser: (tabID: string) => void;
   onSelectCanvasItem: (itemID: string) => void;
   onSelectFilePreview: (previewID: string) => void;
+  onSelectProject: () => void;
   onSelectTerminal: (terminalID: string) => void;
 }) {
   const { t } = useI18n();
   const browser = tab.kind === "browser" ? tab.browser : undefined;
+  const project = tab.kind === "project";
   const terminal = tab.kind === "terminal" ? tab.terminal : undefined;
   const file = tab.kind === "file" ? tab.file : undefined;
   const widget = tab.kind === "widget" ? tab.widget : undefined;
-  const label = browser
-    ? browserTabTitle(browser, t("browser.newTab"), t("browser.newTab"))
-    : terminal
-      ? terminalTabTitle(terminal, t("terminal.newTab"))
-      : widget
-        ? titleForCanvasItem(widget, t)
-        : file?.label || t("terminal.newTab");
+  const label = project
+    ? t("workspace.project")
+    : browser
+      ? browserTabTitle(browser, t("browser.newTab"), t("browser.newTab"))
+      : terminal
+        ? terminalTabTitle(terminal, t("terminal.newTab"))
+        : widget
+          ? titleForCanvasItem(widget, t)
+          : file?.label || t("terminal.newTab");
   const selected =
+    (tab.kind === "project" && activeSurface === "project") ||
     (tab.kind === "browser" && activeSurface === "browser" && tab.id === activeBrowserTabID) ||
     (tab.kind === "terminal" && activeSurface === "terminal" && tab.id === activeTerminalID) ||
     (tab.kind === "file" && filePreviewActive && tab.id === activeFilePreviewID) ||
@@ -330,6 +345,8 @@ function SortableSurfaceTabButton({
       onClick={() => {
         if (tab.kind === "browser") {
           onSelectBrowser(tab.id);
+        } else if (tab.kind === "project") {
+          onSelectProject();
         } else if (tab.kind === "terminal") {
           onSelectTerminal(tab.id);
         } else if (tab.kind === "file") {
@@ -339,7 +356,11 @@ function SortableSurfaceTabButton({
         }
       }}
     >
-      {browser ? (
+      {project ? (
+        <span className="inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center text-amber-700 dark:text-amber-300">
+          <Folders className="h-3.5 w-3.5" />
+        </span>
+      ) : browser ? (
         <BrowserTabIcon faviconURL={browserTabFaviconURL(browser)} pageURL={browser.url} />
       ) : terminal ? (
         <TerminalTabIcon exited={exited} />
@@ -353,11 +374,13 @@ function SortableSurfaceTabButton({
         aria-label={
           tab.kind === "browser"
             ? t("browser.release")
-            : tab.kind === "terminal"
-              ? t("terminal.close")
-              : tab.kind === "widget"
-                ? t("canvas.delete")
-                : t("canvas.filePreviewClose")
+            : tab.kind === "project"
+              ? t("workspace.closeProject")
+              : tab.kind === "terminal"
+                ? t("terminal.close")
+                : tab.kind === "widget"
+                  ? t("canvas.delete")
+                  : t("canvas.filePreviewClose")
         }
         className="pointer-events-none absolute right-1 top-1/2 z-10 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded-md bg-transparent opacity-0 transition-colors hover:bg-accent group-hover:pointer-events-auto group-hover:opacity-100 data-[pending=true]:pointer-events-auto data-[pending=true]:opacity-100"
         data-pending={closePending}
@@ -368,6 +391,8 @@ function SortableSurfaceTabButton({
           event.stopPropagation();
           if (tab.kind === "browser") {
             onCloseBrowser(tab.id);
+          } else if (tab.kind === "project") {
+            onCloseProject();
           } else if (tab.kind === "terminal") {
             onCloseTerminal(tab.id);
           } else if (tab.kind === "file") {

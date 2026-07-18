@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Compass, Plus, SquareTerminal } from "lucide-react";
+import { Compass, Folders, Plus, SquareTerminal } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -82,7 +82,7 @@ import {
 import { BrowserWorkspaceSurface } from "./BrowserWorkspaceSurface";
 import { WorkspaceEmpty } from "./WorkspaceEmpty";
 import { WorkspaceResourceTabs } from "./WorkspaceResourceTabs";
-import { CanvasLibraryMenuSections, ProjectSurfaceControl } from "./WorkspaceSurfaceControls";
+import { CanvasLibraryMenuSections } from "./WorkspaceSurfaceControls";
 import { useWorkspaceBrowserSurface } from "./useWorkspaceBrowserSurface";
 import { useWorkspaceTerminals } from "./useWorkspaceTerminals";
 
@@ -104,6 +104,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
   const [activeCanvasItemIDs, setActiveCanvasItemIDs] = useState<Record<string, string>>({});
   const [canvasGalleryActiveIndices, setCanvasGalleryActiveIndices] = useState<Record<string, number>>({});
   const [resourceMenuOpen, setResourceMenuOpen] = useState(false);
+  const [closedProjectTabs, setClosedProjectTabs] = useState<Record<string, true>>({});
   const [pendingSavedClose, setPendingSavedClose] = useState<CanvasItem>();
   const [retainedBrowserTabs, setRetainedBrowserTabs] = useState<Record<string, BrowserTab[]>>({});
   const [retainedTerminals, setRetainedTerminals] = useState<Record<string, Terminal[]>>({});
@@ -275,6 +276,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     staleTime: 10_000,
   });
   const hasProject = Boolean(sessionQuery.data?.projectID);
+  const projectTabVisible = hasProject && !closedProjectTabs[actorSessionID];
   const projectActive = activeSurface === "project" && hasProject;
   const {
     activeTerminalID,
@@ -537,8 +539,33 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     if (!hasProject) {
       return;
     }
+    setClosedProjectTabs((current) => {
+      if (!current[actorSessionID]) return current;
+      const next = { ...current };
+      delete next[actorSessionID];
+      return next;
+    });
     setActiveFilePreviewID(undefined);
     selectProjectSurface();
+  };
+
+  const closeProjectSurface = () => {
+    if (!actorSessionID) return;
+    setClosedProjectTabs((current) => current[actorSessionID] ? current : { ...current, [actorSessionID]: true });
+    if (!projectActive) return;
+    if (browserTabs.length > 0) {
+      selectBrowserTab(activeBrowserTabID || browserTabs[0].id);
+    } else if (terminals.length > 0) {
+      selectTerminal(activeTerminalID || terminals[0].id);
+    } else if (filePreviews.length > 0) {
+      setActiveFilePreviewID(filePreviews.at(-1)!.id);
+      selectCanvasSurface();
+    } else if (items.length > 0) {
+      setActiveFilePreviewID(undefined);
+      selectCanvasSurface();
+    } else {
+      selectWorkspaceSurface();
+    }
   };
 
   useEffect(() => {
@@ -553,6 +580,12 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
 
   useEffect(() => {
     if (projectFileReveal?.sessionID === actorSessionID && hasProject) {
+      setClosedProjectTabs((current) => {
+        if (!current[actorSessionID]) return current;
+        const next = { ...current };
+        delete next[actorSessionID];
+        return next;
+      });
       selectProjectSurface();
     }
   }, [actorSessionID, hasProject, projectFileReveal?.serial, selectProjectSurface]);
@@ -873,15 +906,8 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
                   })()
                 : preview.path,
             }))}
-            leadingTabs={hasProject ? (
-              <>
-                <ProjectSurfaceControl active={projectActive} onActivate={activateProjectSurface} />
-                {items.length + filePreviews.length + browserTabs.length + terminals.length > 0 ? (
-                  <span aria-hidden="true" className="mx-1 h-5 w-px shrink-0 bg-[var(--workspace-border)]" />
-                ) : null}
-              </>
-            ) : null}
             orderScope={actorSessionID || "workspace"}
+            projectTabVisible={projectTabVisible}
             terminalTabs={terminals}
             onCloseBrowser={(tabID) => {
               const closingLastActiveBrowser =
@@ -903,6 +929,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
                 removeFilePreview(preview);
               }
             }}
+            onCloseProject={closeProjectSurface}
             onCloseTerminal={closeTerminal}
             onSelectBrowser={(tabID) => {
               setActiveFilePreviewID(undefined);
@@ -914,9 +941,10 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
               selectCanvasSurface();
             }}
             onSelectFilePreview={selectFilePreview}
+            onSelectProject={activateProjectSurface}
             onSelectTerminal={selectTerminal}
         />
-        {actorSessionID ? (
+        {actorSessionID && activeSurface !== "workspace" ? (
           <DropdownMenu open={resourceMenuOpen} onOpenChange={setResourceMenuOpen}>
             <DropdownMenuTrigger asChild>
               <Button
@@ -936,6 +964,12 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-64 space-y-0">
+              {hasProject && !projectTabVisible ? (
+                <DropdownMenuItem className="h-8 px-2.5" onSelect={activateProjectSurface}>
+                  <Folders />
+                  {t("workspace.project")}
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem
                 className="h-8 px-2.5"
                 onSelect={createBrowserSurface}
@@ -987,11 +1021,20 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
         />
         {activeSurface === "workspace" ? (
           <WorkspaceEmpty
+            closedItems={closedItems}
             disabled={!actorSessionID}
             creatingBrowser={creatingBrowserTab}
             creatingTerminal={creatingTerminal}
+            hasProject={hasProject}
+            savedItems={savedItems}
+            onClearClosed={() => clearClosedMutation.mutate()}
             onCreateBrowser={createBrowserSurface}
             onCreateTerminal={createNewTerminal}
+            onOpenProject={activateProjectSurface}
+            onRemoveClosed={(entry) => removeClosedMutation.mutate(entry)}
+            onRemoveSaved={(entry) => removeSavedMutation.mutate(entry)}
+            onOpenSaved={(entry) => openSavedMutation.mutate(entry)}
+            onRestoreClosed={restoreClosedItem}
           />
         ) : null}
         {items.map((item) => (
