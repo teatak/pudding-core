@@ -22,6 +22,9 @@ export const workspaceLayout = {
   minChatPx: chatLayout.minimumContentWidthPx + chatLayout.horizontalGutterPx,
   maxChatPx: 920,
   minWorkspacePx: 320,
+  drawerBreakpointPx:
+    chatLayout.minimumContentWidthPx + chatLayout.horizontalGutterPx + 320,
+  drawerWidthPx: 560,
   railAutoCollapsePx:
     chatLayout.minimumContentWidthPx + chatLayout.horizontalGutterPx + sessionRailLayout.expandedWidthPx,
 } as const;

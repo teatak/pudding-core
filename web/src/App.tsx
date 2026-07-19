@@ -83,6 +83,7 @@ function saveWorkspacePanelRatio(panelRatio: number) {
 
 function ElectronWorkspaceHost({
   active,
+  drawerMode,
   secondarySessionID,
   sessionID,
   token,
@@ -90,6 +91,7 @@ function ElectronWorkspaceHost({
   onResizeStart,
 }: {
   active: boolean;
+  drawerMode: boolean;
   secondarySessionID?: string;
   sessionID?: string;
   token: string;
@@ -102,7 +104,9 @@ function ElectronWorkspaceHost({
       aria-hidden={!active}
       inert={!active}
       className={cn(
-        "workspace-split-pane absolute inset-y-0 min-w-0 overflow-visible border-l border-border transition-[right] duration-200 ease-out",
+        "workspace-split-pane absolute inset-y-0 min-w-0 overflow-visible transition-[right] duration-200 ease-out",
+        "border-l border-border",
+        drawerMode && "z-50 shadow-[-8px_0_24px_-16px_rgb(0_0_0/0.28)]",
         workspaceResizing && "transition-none",
         !active && "pointer-events-none",
       )}
@@ -111,21 +115,23 @@ function ElectronWorkspaceHost({
         width: "var(--workspace-panel-width)",
       }}
     >
-      <div
-        aria-label={t("layout.resizeHint")}
-        aria-orientation="vertical"
-        className="group absolute inset-y-0 left-0 z-40 w-3 -translate-x-1/2 cursor-col-resize bg-transparent"
-        role="separator"
-        tabIndex={active ? 0 : -1}
-        onPointerDown={onResizeStart}
-      >
+      {!drawerMode ? (
         <div
-          className={cn(
-            "absolute top-1/2 left-1/2 h-8 w-[3px] -translate-x-[calc(50%+1px)] -translate-y-1/2 rounded-lg bg-muted-foreground/55 opacity-0 transition-opacity group-hover:opacity-100",
-            workspaceResizing && "opacity-100",
-          )}
-        />
-      </div>
+          aria-label={t("layout.resizeHint")}
+          aria-orientation="vertical"
+          className="group absolute inset-y-0 left-0 z-40 w-3 -translate-x-1/2 cursor-col-resize bg-transparent"
+          role="separator"
+          tabIndex={active ? 0 : -1}
+          onPointerDown={onResizeStart}
+        >
+          <div
+            className={cn(
+              "absolute top-1/2 left-1/2 h-8 w-[3px] -translate-x-[calc(50%+1px)] -translate-y-1/2 rounded-lg bg-muted-foreground/55 opacity-0 transition-opacity group-hover:opacity-100",
+              workspaceResizing && "opacity-100",
+            )}
+          />
+        </div>
+      ) : null}
       <WorkspacePane
         secondarySessionID={secondarySessionID}
         token={token}
@@ -147,6 +153,7 @@ export function App() {
   const [workspaceNode, setWorkspaceNode] = useState<HTMLDivElement | null>(null);
   const [workspaceRatio, setWorkspaceRatio] = useState(() => readSavedWorkspacePanelRatio());
   const [workspaceResizing, setWorkspaceResizing] = useState(false);
+  const [workspaceDrawerMode, setWorkspaceDrawerMode] = useState(false);
   const splitGroupRef = useGroupRef();
   const workspaceRatioRef = useRef(workspaceRatio);
   const previewTokenRef = useRef(token);
@@ -198,6 +205,22 @@ export function App() {
       observer.disconnect();
     };
   }, [leftWorkspaceNode]);
+
+  useLayoutEffect(() => {
+    if (!workspaceNode) {
+      setWorkspaceDrawerMode(false);
+      return;
+    }
+    const update = () => {
+      setWorkspaceDrawerMode(
+        workspaceNode.getBoundingClientRect().width < workspaceLayout.drawerBreakpointPx,
+      );
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(workspaceNode);
+    return () => observer.disconnect();
+  }, [workspaceNode]);
 
   useEffect(() => {
     workspaceRatioRef.current = workspaceRatio;
@@ -257,7 +280,7 @@ export function App() {
   }
 
   const startWorkspaceResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!effectiveWorkspaceOpen || event.button !== 0) {
+    if (!effectiveWorkspaceOpen || workspaceDrawerMode || event.button !== 0) {
       return;
     }
     event.preventDefault();
@@ -407,9 +430,18 @@ export function App() {
 
   const workspacePanelStyle = {
     "--workspace-panel-ratio": `${workspaceRatio}%`,
-    "--workspace-panel-max-width": `max(0px, calc(100% - ${workspaceLayout.minChatPx}px))`,
-    "--workspace-panel-min-width": `min(var(--workspace-panel-max-width), max(${workspaceLayout.minWorkspacePx}px, calc(100% - ${workspaceLayout.maxChatPx}px)))`,
-    "--workspace-panel-width": "clamp(var(--workspace-panel-min-width), var(--workspace-panel-ratio), var(--workspace-panel-max-width))",
+    "--workspace-toolbar-pl": workspaceDrawerMode
+      ? "max(0.75rem, calc(var(--traffic-inset) - (100vw - var(--workspace-panel-width)) + 0.75rem))"
+      : undefined,
+    "--workspace-panel-max-width": workspaceDrawerMode
+      ? `min(100%, ${workspaceLayout.drawerWidthPx}px)`
+      : `max(0px, calc(100% - ${workspaceLayout.minChatPx}px))`,
+    "--workspace-panel-min-width": workspaceDrawerMode
+      ? `min(100%, ${workspaceLayout.drawerWidthPx}px)`
+      : `min(var(--workspace-panel-max-width), max(${workspaceLayout.minWorkspacePx}px, calc(100% - ${workspaceLayout.maxChatPx}px)))`,
+    "--workspace-panel-width": workspaceDrawerMode
+      ? `min(100%, ${workspaceLayout.drawerWidthPx}px)`
+      : "clamp(var(--workspace-panel-min-width), var(--workspace-panel-ratio), var(--workspace-panel-max-width))",
   } as CSSProperties;
 
   const workspaceContent = electronWebviewBrowser ? (
@@ -419,12 +451,22 @@ export function App() {
           "workspace-split-pane absolute inset-y-0 left-0 h-full min-w-0 transition-[right] duration-200 ease-out",
           workspaceResizing && "transition-none",
         )}
-        style={{ right: effectiveWorkspaceOpen ? "var(--workspace-panel-width)" : 0 }}
+        style={{ right: effectiveWorkspaceOpen && !workspaceDrawerMode ? "var(--workspace-panel-width)" : 0 }}
       >
         {leftWorkspace}
       </div>
+      {effectiveWorkspaceOpen && workspaceDrawerMode ? (
+        <button
+          aria-label={t("workspace.toggle")}
+          className="no-drag-region absolute inset-y-0 left-0 z-40 bg-overlay"
+          style={{ right: "var(--workspace-panel-width)" }}
+          type="button"
+          onClick={() => setWorkspaceOpen(false)}
+        />
+      ) : null}
       <ElectronWorkspaceHost
         active={effectiveWorkspaceOpen}
+        drawerMode={workspaceDrawerMode}
         secondarySessionID={showSplit ? splitSessionID : undefined}
         sessionID={selectedSessionID}
         token={token}
@@ -447,14 +489,25 @@ export function App() {
             "workspace-split-pane absolute inset-y-0 left-0 min-w-0 transition-[right] duration-200 ease-out",
             workspaceResizing && "transition-none",
           )}
-          style={{ right: effectiveWorkspaceOpen ? "var(--workspace-panel-width)" : 0 }}
+          style={{ right: effectiveWorkspaceOpen && !workspaceDrawerMode ? "var(--workspace-panel-width)" : 0 }}
         >
           {leftWorkspace}
         </div>
+        {effectiveWorkspaceOpen && workspaceDrawerMode ? (
+          <button
+            aria-label={t("workspace.toggle")}
+            className="no-drag-region absolute inset-y-0 left-0 z-40 bg-overlay"
+            style={{ right: "var(--workspace-panel-width)" }}
+            type="button"
+            onClick={() => setWorkspaceOpen(false)}
+          />
+        ) : null}
         <div
           aria-hidden={!effectiveWorkspaceOpen}
           className={cn(
-            "workspace-split-pane absolute inset-y-0 min-w-0 overflow-visible border-l border-border transition-[right] duration-200 ease-out",
+            "workspace-split-pane absolute inset-y-0 min-w-0 overflow-visible transition-[right] duration-200 ease-out",
+            "border-l border-border",
+            workspaceDrawerMode && "z-50 shadow-[-8px_0_24px_-16px_rgb(0_0_0/0.28)]",
             workspaceResizing && "transition-none",
             !effectiveWorkspaceOpen && "pointer-events-none",
           )}
@@ -463,21 +516,23 @@ export function App() {
             width: "var(--workspace-panel-width)",
           }}
         >
-          <div
-            aria-label={t("layout.resizeHint")}
-            aria-orientation="vertical"
-            className="group absolute inset-y-0 left-0 z-40 w-3 -translate-x-1/2 cursor-col-resize bg-transparent"
-            role="separator"
-            tabIndex={effectiveWorkspaceOpen ? 0 : -1}
-            onPointerDown={startWorkspaceResize}
-          >
+          {!workspaceDrawerMode ? (
             <div
-              className={cn(
-                "absolute top-1/2 left-1/2 h-8 w-[3px] -translate-x-[calc(50%+1px)] -translate-y-1/2 rounded-lg bg-muted-foreground/55 opacity-0 transition-opacity group-hover:opacity-100",
-                workspaceResizing && "opacity-100",
-              )}
-            />
-          </div>
+              aria-label={t("layout.resizeHint")}
+              aria-orientation="vertical"
+              className="group absolute inset-y-0 left-0 z-40 w-3 -translate-x-1/2 cursor-col-resize bg-transparent"
+              role="separator"
+              tabIndex={effectiveWorkspaceOpen ? 0 : -1}
+              onPointerDown={startWorkspaceResize}
+            >
+              <div
+                className={cn(
+                  "absolute top-1/2 left-1/2 h-8 w-[3px] -translate-x-[calc(50%+1px)] -translate-y-1/2 rounded-lg bg-muted-foreground/55 opacity-0 transition-opacity group-hover:opacity-100",
+                  workspaceResizing && "opacity-100",
+                )}
+              />
+            </div>
+          ) : null}
           <WorkspacePane
             secondarySessionID={showSplit ? splitSessionID : undefined}
             token={token}
