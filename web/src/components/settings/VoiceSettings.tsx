@@ -63,6 +63,8 @@ type VoiceFormState = {
   ttsVoice: string;
 };
 
+type VoiceToggleKey = "asrEnabled" | "asrSaveAudio" | "asrUseITN" | "aecEnabled" | "nsEnabled" | "ttsEnabled";
+
 const VOICE_LANGUAGE_OPTIONS = ["zh", "en", "ja", "ko", "yue", "auto"];
 const VOICE_NS_LEVEL_OPTIONS = ["low", "moderate", "high", "very_high"];
 
@@ -70,6 +72,8 @@ export function VoiceSettings({ token }: { token: string }) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const [form, setForm] = useState<VoiceFormState>(defaultVoiceForm());
+  const [pendingSaveCount, setPendingSaveCount] = useState(0);
+  const [pendingToggleCounts, setPendingToggleCounts] = useState<Partial<Record<VoiceToggleKey, number>>>({});
   const [clearRecordingsOpen, setClearRecordingsOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const audioQuery = useQuery({
@@ -96,24 +100,22 @@ export function VoiceSettings({ token }: { token: string }) {
   const ttsReadOnlyRows = voiceSectionReadOnlyRows(aboutSections, "tts", ["backend"]);
 
   useEffect(() => {
-    if (savedConfig) {
+    if (savedConfig && pendingSaveCount === 0) {
       setForm(voiceFormFromConfig(savedConfig));
     }
-  }, [savedConfig]);
+  }, [pendingSaveCount, savedConfig]);
 
   const saveMutation = useMutation({
+    scope: { id: "voice-config" },
     mutationFn: (nextForm: VoiceFormState) => {
       if (!savedConfig) {
         throw new Error("audio config missing");
       }
       return putAudioConfig(token, audioConfigFromForm(savedConfig, nextForm));
     },
-    onSuccess: async (response) => {
+    onSuccess: (response) => {
       queryClient.setQueryData(queryKeys.audioConfig(), response);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.audioConfig() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.desktopAbout() }),
-      ]);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.desktopAbout() });
     },
     onError: () => {
       toast.error(t("settings.voice.saveFailed"));
@@ -178,23 +180,50 @@ export function VoiceSettings({ token }: { token: string }) {
     onError: () => toast.error(t("settings.voice.asrClearAudioFailed")),
   });
 
-  const saveVoiceForm = (nextForm: VoiceFormState) => {
+  const updatePendingToggleCount = (key: VoiceToggleKey, delta: number) => {
+    setPendingToggleCounts((current) => {
+      const count = Math.max(0, (current[key] || 0) + delta);
+      if (count > 0) {
+        return { ...current, [key]: count };
+      }
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  };
+
+  const saveVoiceForm = (nextForm: VoiceFormState, pendingToggle?: VoiceToggleKey) => {
     setForm(nextForm);
     if (!savedConfig) {
       return;
     }
-    saveMutation.mutate(nextForm);
+    setPendingSaveCount((count) => count + 1);
+    if (pendingToggle) {
+      updatePendingToggleCount(pendingToggle, 1);
+    }
+    saveMutation.mutate(nextForm, {
+      onSettled: () => {
+        setPendingSaveCount((count) => Math.max(0, count - 1));
+        if (pendingToggle) {
+          updatePendingToggleCount(pendingToggle, -1);
+        }
+      },
+    });
   };
   const saveVoicePatch = (patch: Partial<VoiceFormState>) => saveVoiceForm({ ...form, ...patch });
+  const saveVoiceToggle = (key: VoiceToggleKey, checked: boolean) => {
+    saveVoiceForm({ ...form, [key]: checked }, key);
+  };
   const saveCurrentVoiceForm = () => {
     if (!savedConfig) {
       return;
     }
-    saveMutation.mutate(form);
+    saveVoiceForm(form);
   };
-  const disabled = audioQuery.isLoading || saveMutation.isPending || resetMutation.isPending;
+  const saving = pendingSaveCount > 0;
+  const disabled = audioQuery.isLoading || resetMutation.isPending;
   const clearDisabled = disabled || clearRecordingsMutation.isPending;
-  const resetDisabled = disabled || clearRecordingsMutation.isPending;
+  const resetDisabled = disabled || saving || clearRecordingsMutation.isPending;
   const edge = savedConfig ? edgeTTSProfile(savedConfig) : {};
 
   return (
@@ -235,7 +264,8 @@ export function VoiceSettings({ token }: { token: string }) {
             disabled={disabled}
             id="pudding-voice-asr-enabled"
             label={t("settings.voice.asrEnabled")}
-            onChange={(next) => saveVoicePatch({ asrEnabled: next })}
+            pending={Boolean(pendingToggleCounts.asrEnabled)}
+            onChange={(next) => saveVoiceToggle("asrEnabled", next)}
           />
           <SettingsToggleRow
             checked={form.asrSaveAudio}
@@ -243,7 +273,8 @@ export function VoiceSettings({ token }: { token: string }) {
             disabled={disabled}
             id="pudding-voice-asr-save-audio"
             label={t("settings.voice.asrSaveAudio")}
-            onChange={(next) => saveVoicePatch({ asrSaveAudio: next })}
+            pending={Boolean(pendingToggleCounts.asrSaveAudio)}
+            onChange={(next) => saveVoiceToggle("asrSaveAudio", next)}
           />
           <SettingsActionRow description={t("settings.voice.asrClearAudioDesc")} label={t("settings.voice.asrClearAudio")}>
             <Button disabled={clearDisabled} size="sm" type="button" variant="outline" onClick={() => setClearRecordingsOpen(true)}>
@@ -257,7 +288,8 @@ export function VoiceSettings({ token }: { token: string }) {
             disabled={disabled}
             id="pudding-voice-asr-itn"
             label={t("settings.voice.asrUseITN")}
-            onChange={(next) => saveVoicePatch({ asrUseITN: next })}
+            pending={Boolean(pendingToggleCounts.asrUseITN)}
+            onChange={(next) => saveVoiceToggle("asrUseITN", next)}
           />
           <SettingsControlRow
             description={t("settings.voice.asrLanguageDesc")}
@@ -386,7 +418,8 @@ export function VoiceSettings({ token }: { token: string }) {
             disabled={disabled}
             id="pudding-voice-aec-enabled"
             label={t("settings.voice.aecEnabled")}
-            onChange={(next) => saveVoicePatch({ aecEnabled: next })}
+            pending={Boolean(pendingToggleCounts.aecEnabled)}
+            onChange={(next) => saveVoiceToggle("aecEnabled", next)}
           />
           <SettingsToggleRow
             checked={form.nsEnabled}
@@ -394,7 +427,8 @@ export function VoiceSettings({ token }: { token: string }) {
             disabled={disabled}
             id="pudding-voice-ns-enabled"
             label={t("settings.voice.nsEnabled")}
-            onChange={(next) => saveVoicePatch({ nsEnabled: next })}
+            pending={Boolean(pendingToggleCounts.nsEnabled)}
+            onChange={(next) => saveVoiceToggle("nsEnabled", next)}
           />
           <SettingsControlRow
             description={t("settings.voice.nsLevelDesc")}
@@ -434,7 +468,8 @@ export function VoiceSettings({ token }: { token: string }) {
             disabled={disabled}
             id="pudding-voice-tts-enabled"
             label={t("settings.voice.ttsEnabled")}
-            onChange={(next) => saveVoicePatch({ ttsEnabled: next })}
+            pending={Boolean(pendingToggleCounts.ttsEnabled)}
+            onChange={(next) => saveVoiceToggle("ttsEnabled", next)}
           />
           <SettingsControlRow
             description={t("settings.voice.ttsVoiceDesc")}
@@ -523,7 +558,7 @@ export function VoiceSettings({ token }: { token: string }) {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={resetMutation.isPending}>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
-              disabled={saveMutation.isPending || resetMutation.isPending}
+              disabled={saving || resetMutation.isPending}
               variant="destructive"
               onClick={(event) => {
                 event.preventDefault();

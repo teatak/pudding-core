@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { Spinner } from "@/components/Spinner";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
@@ -115,6 +116,7 @@ export function SettingsToggleRow({
   disabled,
   id,
   label,
+  pending = false,
   onChange,
 }: {
   checked: boolean;
@@ -122,6 +124,7 @@ export function SettingsToggleRow({
   disabled?: boolean;
   id: string;
   label: string;
+  pending?: boolean;
   onChange: (checked: boolean) => void;
 }) {
   const labelID = `${id}-label`;
@@ -136,14 +139,17 @@ export function SettingsToggleRow({
           {description}
         </span>
       </span>
-      <Switch
-        aria-describedby={descriptionID}
-        aria-labelledby={labelID}
-        checked={checked}
-        disabled={disabled}
-        id={id}
-        onCheckedChange={onChange}
-      />
+      <span className="flex shrink-0 items-center gap-2">
+        {pending ? <Spinner className="size-4 text-muted-foreground" /> : null}
+        <Switch
+          aria-describedby={descriptionID}
+          aria-labelledby={labelID}
+          checked={checked}
+          disabled={disabled || pending}
+          id={id}
+          onCheckedChange={onChange}
+        />
+      </span>
     </div>
   );
 }

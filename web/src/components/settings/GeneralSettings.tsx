@@ -53,6 +53,8 @@ export function GeneralSettings({
   const [showReasoning, setShowReasoning] = useState(true);
   const [showRawToolInfo, setShowRawToolInfo] = useState(true);
   const [showPreviewAppVersions, setShowPreviewAppVersions] = useState(false);
+  const [pendingSettingSaveCount, setPendingSettingSaveCount] = useState(0);
+  const [pendingSettingCounts, setPendingSettingCounts] = useState<Record<string, number>>({});
   const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
 
@@ -103,7 +105,7 @@ export function GeneralSettings({
   }, [savedPrompt, userPromptQuery.isSuccess]);
 
   useEffect(() => {
-    if (!settingsQuery.isSuccess) {
+    if (!settingsQuery.isSuccess || pendingSettingSaveCount > 0) {
       return;
     }
     setTailTurns(savedSettings[SETTINGS_KEYS.compactTailInputTurns]);
@@ -112,7 +114,7 @@ export function GeneralSettings({
     setShowReasoning(savedSettings[SETTINGS_KEYS.showReasoning] !== "false");
     setShowRawToolInfo(savedSettings[SETTINGS_KEYS.showRawToolInfo] !== "false");
     setShowPreviewAppVersions(savedSettings[SETTINGS_KEYS.showAppPreviewVersions] === "true");
-  }, [savedSettings, settingsQuery.isSuccess]);
+  }, [pendingSettingSaveCount, savedSettings, settingsQuery.isSuccess]);
 
   const promptMutation = useMutation({
     mutationFn: () => putUserPrompt(token, promptContent),
@@ -124,16 +126,16 @@ export function GeneralSettings({
   });
 
   const settingsMutation = useMutation({
+    scope: { id: "general-settings" },
     mutationFn: (settings: Record<string, string>) => putSettings(token, settings),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.settings() }),
-        queryClient.invalidateQueries({ queryKey: ["session"] }),
-      ]);
+    onSuccess: (_, settings) => {
+      queryClient.setQueryData<{ settings: Record<string, string> }>(queryKeys.settings(), (current) => ({
+        settings: { ...(current?.settings || {}), ...settings },
+      }));
     },
-    onError: () => {
+    onError: async () => {
       toast.error(t("settings.general.saveFailed"));
-      void queryClient.invalidateQueries({ queryKey: queryKeys.settings() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.settings() });
     },
   });
 
@@ -191,9 +193,36 @@ export function GeneralSettings({
     onError: () => toast.error(t("settings.general.resetDefaultsFailed")),
   });
 
+  const updatePendingSettingCounts = (keys: string[], delta: number) => {
+    setPendingSettingCounts((current) => {
+      const next = { ...current };
+      keys.forEach((key) => {
+        const count = Math.max(0, (next[key] || 0) + delta);
+        if (count > 0) {
+          next[key] = count;
+        } else {
+          delete next[key];
+        }
+      });
+      return next;
+    });
+  };
+
+  const saveSettingsPatch = (settings: Record<string, string>) => {
+    const keys = Object.keys(settings);
+    setPendingSettingSaveCount((count) => count + 1);
+    updatePendingSettingCounts(keys, 1);
+    settingsMutation.mutate(settings, {
+      onSettled: () => {
+        setPendingSettingSaveCount((count) => Math.max(0, count - 1));
+        updatePendingSettingCounts(keys, -1);
+      },
+    });
+  };
+
   const saveBooleanSetting = (key: string, next: boolean, setValue: (value: boolean) => void) => {
     setValue(next);
-    settingsMutation.mutate({ [key]: String(next) });
+    saveSettingsPatch({ [key]: String(next) });
   };
 
   const saveNumberSetting = (
@@ -218,12 +247,12 @@ export function GeneralSettings({
     const normalized = String(parsed);
     setValue(normalized);
     if (normalized !== savedSettings[key]) {
-      settingsMutation.mutate({ [key]: normalized });
+      saveSettingsPatch({ [key]: normalized });
     }
   };
 
   const promptDirty = promptEdited && promptContent !== savedPrompt;
-  const settingsDisabled = settingsQuery.isLoading || settingsMutation.isPending || resetMutation.isPending;
+  const settingsDisabled = settingsQuery.isLoading || resetMutation.isPending;
 
   useEffect(() => {
     onDirtyChange(promptDirty);
@@ -310,6 +339,7 @@ export function GeneralSettings({
             disabled={settingsDisabled}
             id="pudding-show-compact-summary"
             label={t("settings.general.showCompactSummary")}
+            pending={Boolean(pendingSettingCounts[SETTINGS_KEYS.showCompactSummary])}
             onChange={(next) => saveBooleanSetting(SETTINGS_KEYS.showCompactSummary, next, setShowCompactSummary)}
           />
           <SettingsToggleRow
@@ -318,6 +348,7 @@ export function GeneralSettings({
             disabled={settingsDisabled}
             id="pudding-show-reasoning"
             label={t("settings.general.showReasoning")}
+            pending={Boolean(pendingSettingCounts[SETTINGS_KEYS.showReasoning])}
             onChange={(next) => saveBooleanSetting(SETTINGS_KEYS.showReasoning, next, setShowReasoning)}
           />
           <SettingsToggleRow
@@ -326,6 +357,7 @@ export function GeneralSettings({
             disabled={settingsDisabled}
             id="pudding-show-raw-tool-info"
             label={t("settings.general.showRawToolInfo")}
+            pending={Boolean(pendingSettingCounts[SETTINGS_KEYS.showRawToolInfo])}
             onChange={(next) => saveBooleanSetting(SETTINGS_KEYS.showRawToolInfo, next, setShowRawToolInfo)}
           />
         </div>
@@ -342,11 +374,11 @@ export function GeneralSettings({
             disabled={
               !desktopUpdateState ||
               desktopUpdateState.status === "unavailable" ||
-              previewUpdateBusy ||
-              previewUpdatesMutation.isPending
+              previewUpdateBusy
             }
             id="pudding-receive-preview-updates"
             label={t("settings.general.receivePreviewUpdates")}
+            pending={previewUpdatesMutation.isPending}
             onChange={(next) => previewUpdatesMutation.mutate(next)}
           />
           <SettingsToggleRow
@@ -355,6 +387,7 @@ export function GeneralSettings({
             disabled={settingsDisabled}
             id="pudding-show-preview-app-versions"
             label={t("settings.general.showPreviewAppVersions")}
+            pending={Boolean(pendingSettingCounts[SETTINGS_KEYS.showAppPreviewVersions])}
             onChange={(next) =>
               saveBooleanSetting(SETTINGS_KEYS.showAppPreviewVersions, next, setShowPreviewAppVersions)
             }
@@ -368,7 +401,7 @@ export function GeneralSettings({
           label={t("settings.general.resetDefaults")}
         >
           <Button
-            disabled={settingsDisabled || previewUpdateBusy || previewUpdatesMutation.isPending}
+            disabled={settingsDisabled || settingsMutation.isPending || previewUpdateBusy || previewUpdatesMutation.isPending}
             size="sm"
             type="button"
             variant="outline"
