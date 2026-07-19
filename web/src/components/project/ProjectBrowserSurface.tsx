@@ -18,8 +18,9 @@ import { useI18n } from "@/i18n";
 import { revealDesktopPath } from "@/lib/desktopBridge";
 import { layoutStorageKeys } from "@/lib/layoutConstants";
 import { readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
+import { turnFileChangeFullPath, turnFileChangeLabel } from "@/lib/turnFileChanges";
 import { cn } from "@/lib/utils";
-import { openFilePreview } from "@/state/filePreviewStore";
+import { openFilePreview, type FilePreview } from "@/state/filePreviewStore";
 import { consumeProjectFileReveal, useProjectFileReveal } from "@/state/projectRevealStore";
 import { addProjectReferenceToSessionDraft } from "@/state/sessionDraftStore";
 import type { UIContextPart } from "@/state/uiContextStore";
@@ -47,14 +48,24 @@ type ResourceClipboard = { mode: "copy" | "cut"; sessionID: string; target: Proj
 
 export function ProjectBrowserSurface({
   active,
+  activeTurnDiffID,
   sessionID,
   token,
+  turnDiffTabs,
+  onActivateTurnDiff,
+  onCloseTurnDiffs,
+  onDeactivateTurnDiff,
   onOpenTerminal,
   onVisibleContextChange,
 }: {
   active: boolean;
+  activeTurnDiffID?: string;
   sessionID: string;
   token: string;
+  turnDiffTabs: FilePreview[];
+  onActivateTurnDiff: (previewID: string) => void;
+  onCloseTurnDiffs: (previewIDs: string[]) => void;
+  onDeactivateTurnDiff: () => void;
   onOpenTerminal: (cwd: string) => void;
   onVisibleContextChange?: (context?: UIContextPart) => void;
 }) {
@@ -83,6 +94,21 @@ export function ProjectBrowserSurface({
     staleTime: 10_000,
   });
   const roots = rootsQuery.data?.roots || [];
+  const activeTurnDiff = turnDiffTabs.find((preview) => preview.id === activeTurnDiffID);
+  const activeTurnChange = activeTurnDiff?.fileChanges?.find(
+    (change) => change.id === activeTurnDiff.selectedFileChangeID,
+  ) || activeTurnDiff?.fileChanges?.[0];
+  const activeTurnDiffSelection = useMemo(
+    () => activeTurnChange
+      ? resolveProjectFileReveal(roots, {
+          relativePath: activeTurnChange.path,
+          rootPath: activeTurnChange.rootPath,
+          serial: 0,
+          sessionID,
+        })
+      : undefined,
+    [activeTurnChange?.id, activeTurnChange?.path, activeTurnChange?.rootPath, roots, sessionID],
+  );
   const rootPaths = roots.map((root) => root.path);
   const gitQueries = useQueries({
     queries: roots.map((root) => ({
@@ -108,11 +134,22 @@ export function ProjectBrowserSurface({
       : []
   )));
   const selectedAbsolutePath = useMemo(() => {
-    if (!workspace.selected || isProjectGitDiffTab(workspace.selected)) return undefined;
+    if (activeTurnDiff || !workspace.selected || isProjectGitDiffTab(workspace.selected)) return undefined;
     const root = roots.find((candidate) => candidate.id === workspace.selected?.rootID);
     return root ? projectAbsolutePath(root.path, workspace.selected.path) : undefined;
-  }, [roots, workspace.selected]);
+  }, [activeTurnDiff, roots, workspace.selected]);
   const visibleContext = useMemo<UIContextPart>(() => {
+    if (activeTurnChange) {
+      return {
+        type: "ui_context",
+        surface: "project",
+        resource: "project_diff",
+        id: activeTurnChange.id,
+        name: turnFileChangeLabel(activeTurnChange, activeTurnDiff?.fileChanges || []),
+        path: turnFileChangeFullPath(activeTurnChange),
+        kind: activeTurnChange.kind,
+      };
+    }
     const selected = workspace.selected;
     if (!selected) {
       return { type: "ui_context", surface: "project" };
@@ -128,7 +165,7 @@ export function ProjectBrowserSurface({
       rootID: selected.rootID,
       kind: diff ? (selected.staged ? "staged" : "unstaged") : undefined,
     };
-  }, [workspace.selected]);
+  }, [activeTurnChange, activeTurnDiff?.fileChanges, workspace.selected]);
 
   useEffect(() => {
     onVisibleContextChange?.(active ? visibleContext : undefined);
@@ -136,6 +173,11 @@ export function ProjectBrowserSurface({
 
   useEffect(() => workspace.ensureRootExpanded(roots), [roots.length, sessionID]);
   useEffect(() => workspace.removeUnavailableRoots(roots), [roots.map((root) => root.id).join("\n"), sessionID]);
+  useEffect(() => {
+    if (activeTurnDiffSelection) {
+      workspace.reveal(activeTurnDiffSelection);
+    }
+  }, [activeTurnDiffSelection?.path, activeTurnDiffSelection?.rootID]);
   useEffect(() => {
     setNameRequest(undefined);
     setDeleteTarget(undefined);
@@ -161,6 +203,7 @@ export function ProjectBrowserSurface({
     }
     const selection = resolveProjectFileReveal(roots, fileReveal);
     if (selection) {
+      onDeactivateTurnDiff();
       workspace.openPreview(selection);
       setEditorReveal(fileReveal.line && fileReveal.line > 0 ? {
         column: fileReveal.column,
@@ -446,7 +489,7 @@ export function ProjectBrowserSurface({
                 gitStatuses={gitStatuses}
                 loading={rootsQuery.isLoading}
                 roots={roots}
-                selected={workspace.selected}
+                selected={activeTurnDiff ? activeTurnDiffSelection : workspace.selected}
                 sessionID={sessionID}
                 token={token}
                 onCopyAbsolutePath={copyAbsolutePath}
@@ -457,8 +500,14 @@ export function ProjectBrowserSurface({
                 onDelete={setDeleteTarget}
                 onDuplicate={duplicateEntry}
                 onMove={moveEntry}
-                onOpenPinned={workspace.openPinned}
-                onOpenPreview={workspace.openPreview}
+                onOpenPinned={(selection) => {
+                  onDeactivateTurnDiff();
+                  workspace.openPinned(selection);
+                }}
+                onOpenPreview={(selection) => {
+                  onDeactivateTurnDiff();
+                  workspace.openPreview(selection);
+                }}
                 onOpenTerminal={openEntryTerminal}
                 onPaste={pasteEntry}
                 onReference={referenceEntry}
@@ -473,7 +522,10 @@ export function ProjectBrowserSurface({
                 repositories={gitRepositories}
                 sessionID={sessionID}
                 token={token}
-                onOpenDiff={workspace.openGitDiff}
+                onOpenDiff={(selection, pinned) => {
+                  onDeactivateTurnDiff();
+                  workspace.openGitDiff(selection, pinned);
+                }}
               />
             )}
           />
@@ -482,17 +534,27 @@ export function ProjectBrowserSurface({
         <ResizablePanel id="viewer" className="min-w-0" minSize={280}>
           <ProjectFileViewer
             active={active}
+            activeTurnDiff={activeTurnDiff}
             absolutePath={selectedAbsolutePath}
             dirtyKeys={dirtyKeys}
             discardRequest={discardRequest}
             reveal={editorReveal}
-            selection={workspace.selected}
+            selection={activeTurnDiff ? undefined : workspace.selected}
             sessionID={sessionID}
             tabs={workspace.tabs}
+            turnDiffTabs={turnDiffTabs}
             token={token}
-            onActivate={workspace.activate}
+            onActivate={(selection) => {
+              onDeactivateTurnDiff();
+              workspace.activate(selection);
+            }}
+            onActivateTurnDiff={onActivateTurnDiff}
+            onCloseTurnDiffs={onCloseTurnDiffs}
             onDirtyChange={setDirty}
-            onOpenPreview={workspace.openPreview}
+            onOpenPreview={(selection) => {
+              onDeactivateTurnDiff();
+              workspace.openPreview(selection);
+            }}
             onPin={workspace.pinTab}
             onReference={referenceSelection}
             onRequestClose={requestClose}

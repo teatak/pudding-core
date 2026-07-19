@@ -89,8 +89,25 @@ function CanonicalAssistantOutput({
         <TurnParts disclosure={disclosure} displaySettings={displaySettings} parts={parts} sessionID={sessionID} token={token} turnID={turnID} />
         {assistant.messages.some((message) => message.interrupted) ? <InterruptedBadge /> : null}
       </div>
-      <MessageMeta createdAt={lastMessage.createdAt} duration={assistant.duration} model={assistant.model} text={text} />
     </div>
+  );
+}
+
+export function AssistantOutputMeta({ assistant }: { assistant: AssistantOutputVM }) {
+  if (assistant.kind !== "canonical" || assistant.messages.some(isCompactMessage)) {
+    return null;
+  }
+  const lastMessage = assistant.messages[assistant.messages.length - 1];
+  if (!lastMessage) {
+    return null;
+  }
+  return (
+    <MessageMeta
+      createdAt={lastMessage.createdAt}
+      duration={assistant.duration}
+      model={assistant.model}
+      text={assistantTextFromMessages(assistant.messages)}
+    />
   );
 }
 

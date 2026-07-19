@@ -5,11 +5,13 @@ import { toast } from "sonner";
 
 import { APIError, getProjectFile, projectResourceURL, saveProjectFile, type ProjectFile } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { TurnFileDiffSurface } from "@/components/canvas/TurnFileDiffSurface";
 import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
 import { watchElectronProjectFile } from "@/desktop/projectFileWatcher";
 import { languageFromPath } from "@/lib/fileLanguage";
+import type { FilePreview } from "@/state/filePreviewStore";
 
 import { ProjectFileTabs } from "./ProjectFileTabs";
 import type { ProjectEditorSelection } from "./ProjectEditor";
@@ -38,6 +40,7 @@ type SaveDraftRequest = {
 
 export function ProjectFileViewer({
   active,
+  activeTurnDiff,
   absolutePath,
   dirtyKeys,
   discardRequest,
@@ -45,8 +48,11 @@ export function ProjectFileViewer({
   selection,
   sessionID,
   tabs,
+  turnDiffTabs,
   token,
   onActivate,
+  onActivateTurnDiff,
+  onCloseTurnDiffs,
   onDirtyChange,
   onOpenPreview,
   onPin,
@@ -55,6 +61,7 @@ export function ProjectFileViewer({
   onReveal,
 }: {
   active: boolean;
+  activeTurnDiff?: FilePreview;
   absolutePath?: string;
   dirtyKeys: ReadonlySet<string>;
   discardRequest?: { id: number; keys: string[]; sessionID: string };
@@ -62,8 +69,11 @@ export function ProjectFileViewer({
   selection?: ProjectTab;
   sessionID: string;
   tabs: ProjectTab[];
+  turnDiffTabs: FilePreview[];
   token: string;
   onActivate: (selection: ProjectTab) => void;
+  onActivateTurnDiff: (previewID: string) => void;
+  onCloseTurnDiffs: (previewIDs: string[]) => void;
   onDirtyChange: (targetSessionID: string, selection: ProjectSelection, dirty: boolean) => void;
   onOpenPreview: (selection: ProjectSelection) => void;
   onPin: (selection: ProjectTab) => void;
@@ -263,14 +273,22 @@ export function ProjectFileViewer({
     <div className="flex h-full min-h-0 flex-col bg-[var(--workspace-file-editor-background)]">
       <ProjectFileTabs
         active={selection}
+        activeTurnDiffID={activeTurnDiff?.id}
         dirtyKeys={dirtyKeys}
         tabs={tabs}
+        turnDiffTabs={turnDiffTabs}
         onActivate={onActivate}
+        onActivateTurnDiff={onActivateTurnDiff}
+        onCloseTurnDiffs={onCloseTurnDiffs}
         onPin={onPin}
         onRequestClose={onRequestClose}
         onReveal={onReveal}
       />
-      {gitDiffSelection ? (
+      {activeTurnDiff ? (
+        <div className="relative min-h-0 flex-1">
+          <TurnFileDiffSurface active={active} preview={activeTurnDiff} token={token} />
+        </div>
+      ) : gitDiffSelection ? (
         <ProjectGitDiffViewer active={active} selection={gitDiffSelection} sessionID={sessionID} token={token} />
       ) : (
       <>

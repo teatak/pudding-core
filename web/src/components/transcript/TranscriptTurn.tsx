@@ -1,6 +1,6 @@
 import { memo } from "react";
 
-import { AssistantOutput, CompactPendingMarker } from "./AssistantOutput";
+import { AssistantOutput, AssistantOutputMeta, CompactPendingMarker } from "./AssistantOutput";
 import { TurnFileChanges } from "./TurnFileChanges";
 import type { TranscriptDisplaySettings, TranscriptTurnVM, TurnDisclosureState } from "./types";
 import { UserInput } from "./UserInput";
@@ -43,7 +43,7 @@ function TranscriptTurnView({
         </div>
       ) : null}
       {turn.assistant ? (
-        <div className="min-w-0" data-transcript-ai-anchor={anchorTurnID}>
+        <div className="group min-w-0" data-transcript-ai-anchor={anchorTurnID}>
           <AssistantOutput
             assistant={turn.assistant}
             disclosure={disclosure}
@@ -55,10 +55,11 @@ function TranscriptTurnView({
             onRevealComplete={onAssistantRevealComplete}
           />
           {turn.turnID && turn.fileChanges?.length ? (
-            <div className="mt-2">
+            <div className="mt-3">
               <TurnFileChanges changes={turn.fileChanges} sessionID={sessionID} turnID={turn.turnID} />
             </div>
           ) : null}
+          <AssistantOutputMeta assistant={turn.assistant} />
         </div>
       ) : null}
       {!turn.assistant && turn.turnID && turn.fileChanges?.length ? (

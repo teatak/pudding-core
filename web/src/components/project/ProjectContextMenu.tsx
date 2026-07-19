@@ -121,3 +121,27 @@ export function ProjectTabContextMenu({
     </ContextMenu>
   );
 }
+
+export function ProjectVirtualTabContextMenu({
+  children,
+  onClose,
+  onCloseOthers,
+  onCloseRight,
+}: {
+  children: ReactNode;
+  onClose: () => void;
+  onCloseOthers: () => void;
+  onCloseRight: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ProjectMenuContent>
+        <ProjectMenuItem onSelect={onClose}>{t("project.browserCloseTab")}</ProjectMenuItem>
+        <ProjectMenuItem onSelect={onCloseOthers}>{t("project.browserCloseOthers")}</ProjectMenuItem>
+        <ProjectMenuItem onSelect={onCloseRight}>{t("project.browserCloseRight")}</ProjectMenuItem>
+      </ProjectMenuContent>
+    </ContextMenu>
+  );
+}

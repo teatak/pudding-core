@@ -214,6 +214,16 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
   });
   const hasProject = Boolean(sessionQuery.data?.projectID);
   const projectTabVisible = hasProject && !projectTabClosed;
+  const projectTurnDiffPreviews = useMemo(
+    () => hasProject ? filePreviews.filter((preview) => preview.source === "turn-diff") : [],
+    [filePreviews, hasProject],
+  );
+  const surfaceFilePreviews = useMemo(
+    () => filePreviews.filter((preview) => (
+      preview.source !== "turn-diff" || (!sessionQuery.isLoading && !hasProject)
+    )),
+    [filePreviews, hasProject, sessionQuery.isLoading],
+  );
 
   useEffect(() => {
     if (!actorSessionID || canvasSessionStateRef.current === actorSessionID) {
@@ -273,7 +283,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
   } = useWorkspaceBrowserSurface({
     enabled,
     hasProjectSurface: projectTabVisible,
-    hasTransientSurface: filePreviews.length > 0,
+    hasTransientSurface: surfaceFilePreviews.length > 0,
     itemsLength: items.length,
     itemsPending: itemsQuery.isLoading,
     sessionID: actorSessionID,
@@ -304,8 +314,8 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     onDeactivate: () => {
       if (browserTabs.length > 0) {
         selectBrowserTab(activeBrowserTabID || browserTabs[0].id);
-      } else if (filePreviews.length > 0) {
-        setActiveFilePreviewID(filePreviews[0].id);
+      } else if (surfaceFilePreviews.length > 0) {
+        setActiveFilePreviewID(surfaceFilePreviews[0].id);
         selectCanvasSurface();
       } else {
         if (items.length > 0) {
@@ -407,7 +417,11 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     }));
   };
   const activeFilePreview = filePreviews.find((preview) => preview.id === activeFilePreviewID);
-  const filePreviewActive = Boolean(activeFilePreview && activeSurface === "canvas");
+  const filePreviewActive = Boolean(
+    activeFilePreview
+      && surfaceFilePreviews.some((preview) => preview.id === activeFilePreview.id)
+      && activeSurface === "canvas",
+  );
 
   const visibleUIContext = useMemo<UIContextPart | undefined>(() => {
     if (!actorSessionID) {
@@ -507,10 +521,19 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     if (!filePreviewReveal || filePreviewReveal.sessionID !== actorSessionID) {
       return;
     }
-    selectCanvasSurface();
+    const preview = filePreviews.find((entry) => entry.id === filePreviewReveal.previewID);
+    if (!preview || (preview.source === "turn-diff" && sessionQuery.isLoading)) {
+      return;
+    }
     setActiveFilePreviewID(filePreviewReveal.previewID);
+    if (preview.source === "turn-diff" && hasProject) {
+      setProjectTabClosed(actorSessionID, false);
+      selectProjectSurface();
+    } else {
+      selectCanvasSurface();
+    }
     consumeFilePreviewReveal(filePreviewReveal.serial);
-  }, [actorSessionID, filePreviewReveal, selectCanvasSurface]);
+  }, [actorSessionID, filePreviewReveal, filePreviews, hasProject, selectCanvasSurface, selectProjectSurface, sessionQuery.isLoading]);
 
   useEffect(() => {
     if (activeFilePreviewID && !filePreviews.some((preview) => preview.id === activeFilePreviewID)) {
@@ -545,7 +568,9 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
       return;
     }
     setProjectTabClosed(actorSessionID, false);
-    setActiveFilePreviewID(undefined);
+    if (activeFilePreview?.source !== "turn-diff") {
+      setActiveFilePreviewID(undefined);
+    }
     selectProjectSurface();
   };
 
@@ -557,8 +582,8 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
       selectBrowserTab(activeBrowserTabID || browserTabs[0].id);
     } else if (terminals.length > 0) {
       selectTerminal(activeTerminalID || terminals[0].id);
-    } else if (filePreviews.length > 0) {
-      setActiveFilePreviewID(filePreviews.at(-1)!.id);
+    } else if (surfaceFilePreviews.length > 0) {
+      setActiveFilePreviewID(surfaceFilePreviews.at(-1)!.id);
       selectCanvasSurface();
     } else if (items.length > 0) {
       setActiveFilePreviewID(undefined);
@@ -590,13 +615,36 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     setActiveFilePreviewID(previewID);
   };
 
+  const selectProjectTurnDiff = (previewID: string) => {
+    setProjectTabClosed(actorSessionID, false);
+    setActiveFilePreviewID(previewID);
+    selectProjectSurface();
+  };
+
+  const deactivateProjectTurnDiff = () => {
+    if (activeFilePreview?.source === "turn-diff") {
+      setActiveFilePreviewID(undefined);
+    }
+  };
+
+  const closeProjectTurnDiffs = (previewIDs: string[]) => {
+    const closing = new Set(previewIDs);
+    projectTurnDiffPreviews
+      .filter((preview) => closing.has(preview.id))
+      .forEach((preview) => closeFilePreview(preview.sessionID, preview.id));
+    if (activeFilePreviewID && closing.has(activeFilePreviewID)) {
+      const remaining = projectTurnDiffPreviews.filter((preview) => !closing.has(preview.id));
+      setActiveFilePreviewID(remaining.at(-1)?.id);
+    }
+  };
+
   const removeFilePreview = (preview: FilePreview) => {
     closeFilePreview(preview.sessionID, preview.id);
     if (activeFilePreviewID !== preview.id) {
       return;
     }
-    const closedIndex = filePreviews.findIndex((entry) => entry.id === preview.id);
-    const next = filePreviews[closedIndex + 1] || filePreviews[closedIndex - 1];
+    const closedIndex = surfaceFilePreviews.findIndex((entry) => entry.id === preview.id);
+    const next = surfaceFilePreviews[closedIndex + 1] || surfaceFilePreviews[closedIndex - 1];
     if (next) {
       setActiveFilePreviewID(next.id);
     } else if (terminals.length > 0) {
@@ -846,8 +894,8 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
 
   useEffect(() => {
     if (itemsQuery.isLoading || itemsQuery.isFetching || activeSurface !== "canvas" || filePreviewActive || items.length > 0) return;
-    if (filePreviews.length > 0) {
-      setActiveFilePreviewID(filePreviews.at(-1)!.id);
+    if (surfaceFilePreviews.length > 0) {
+      setActiveFilePreviewID(surfaceFilePreviews.at(-1)!.id);
     } else if (terminals.length > 0) {
       selectTerminal(activeTerminalID || terminals[0].id);
     } else if (browserTabs.length > 0) {
@@ -863,7 +911,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
     activeTerminalID,
     browserTabs,
     filePreviewActive,
-    filePreviews,
+    surfaceFilePreviews,
     items.length,
     itemsQuery.isFetching,
     itemsQuery.isLoading,
@@ -890,7 +938,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
             closingBrowserTabID={closingBrowserTabID}
             closingTerminalID={closingTerminalID}
             filePreviewActive={filePreviewActive}
-            filePreviewTabs={filePreviews.map((preview) => ({
+            filePreviewTabs={surfaceFilePreviews.map((preview) => ({
               id: preview.id,
               kind: preview.source === "turn-diff" ? "diff" : "file",
               label: preview.source === "turn-diff" ? t("turnFiles.tab") : filePreviewTitle(preview.path),
@@ -912,8 +960,11 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
               closeBrowserTab(tabID);
               if (closingLastActiveBrowser && terminals.length > 0) {
                 selectTerminal(activeTerminalID || terminals[0].id);
-              } else if (closingLastActiveBrowser && filePreviews.length > 0) {
-                selectFilePreview(activeFilePreviewID || filePreviews[0].id);
+              } else if (closingLastActiveBrowser && surfaceFilePreviews.length > 0) {
+                const fallbackPreviewID = surfaceFilePreviews.some((preview) => preview.id === activeFilePreviewID)
+                  ? activeFilePreviewID!
+                  : surfaceFilePreviews[0].id;
+                selectFilePreview(fallbackPreviewID);
               }
             }}
             onCloseCanvasItem={(itemID) => {
@@ -921,7 +972,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
               if (item) requestCloseCanvasItem(item);
             }}
             onCloseFilePreview={(previewID) => {
-              const preview = filePreviews.find((entry) => entry.id === previewID);
+              const preview = surfaceFilePreviews.find((entry) => entry.id === previewID);
               if (preview) {
                 removeFilePreview(preview);
               }
@@ -1060,13 +1111,20 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
         {actorSessionID ? (
           <ProjectBrowserSurface
             active={projectActive}
+            activeTurnDiffID={activeFilePreview?.source === "turn-diff" ? activeFilePreview.id : undefined}
             sessionID={actorSessionID}
             token={token}
+            turnDiffTabs={projectTurnDiffPreviews}
+            onActivateTurnDiff={selectProjectTurnDiff}
+            onCloseTurnDiffs={closeProjectTurnDiffs}
+            onDeactivateTurnDiff={deactivateProjectTurnDiff}
             onOpenTerminal={createNewTerminalAt}
             onVisibleContextChange={setProjectUIContext}
           />
         ) : null}
-        {mountedFilePreviews.map((preview) => (
+        {mountedFilePreviews.filter((preview) => !(
+          hasProject && preview.sessionID === actorSessionID && preview.source === "turn-diff"
+        )).map((preview) => (
           <FilePreviewSurface
             key={preview.id}
             active={filePreviewActive && preview.id === activeFilePreview?.id}
