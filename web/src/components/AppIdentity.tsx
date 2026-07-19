@@ -1,4 +1,4 @@
-import { Blocks, Compass, SquareTerminal } from "lucide-react";
+import { Globe, LayoutDashboard, Terminal } from "lucide-react";
 
 import { type AppDefinition } from "@/api/client";
 import { AppIcon, type AppIconSpec } from "@/components/AppIcon";
@@ -39,7 +39,7 @@ export function appDisplayDescription(app: AppDefinition, t: Translate) {
 }
 
 export function BuiltinAppIcon({ appID, size = "md" }: { appID: string; size?: IdentityIconSize }) {
-  const Icon = appID === "terminal" ? SquareTerminal : appID === "canvas" ? Blocks : Compass;
+  const Icon = appID === "terminal" ? Terminal : appID === "canvas" ? LayoutDashboard : Globe;
   return (
     <IdentityIcon
       aria-hidden="true"
@@ -47,19 +47,19 @@ export function BuiltinAppIcon({ appID, size = "md" }: { appID: string; size?: I
       data-light-background="true"
       size={size}
     >
-      <Icon className="size-[68%]" strokeWidth={2.15} />
+      <Icon className="size-[56%]" strokeWidth={2} />
     </IdentityIcon>
   );
 }
 
 export function builtinAppIconClass(appID: string) {
   if (appID === "terminal") {
-    return "bg-emerald-50 text-emerald-700 shadow-none dark:bg-emerald-400/15 dark:text-emerald-300";
+    return "bg-[#ECF9F3] text-[#11875D] shadow-none dark:bg-[#1FA979]/16 dark:text-[#71D8B2]";
   }
   if (appID === "canvas") {
-    return "bg-violet-50 text-violet-700 shadow-none dark:bg-violet-400/15 dark:text-violet-300";
+    return "bg-[#F4F0FF] text-[#6C4DE6] shadow-none dark:bg-[#7C5CFC]/16 dark:text-[#B7A6FF]";
   }
-  return "bg-blue-50 text-blue-700 shadow-none dark:bg-blue-400/15 dark:text-blue-300";
+  return "bg-[#EEF6FF] text-[#2672E8] shadow-none dark:bg-[#2672E8]/16 dark:text-[#7DB5FF]";
 }
 
 export function AppIdentityIcon({

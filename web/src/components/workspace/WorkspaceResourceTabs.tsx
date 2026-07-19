@@ -16,7 +16,7 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Compass, FileCode2, FileDiff, Folders, SquareTerminal, X } from "lucide-react";
+import { FileCode2, FileDiff, Folders, Globe, SquareTerminal, X } from "lucide-react";
 import { useEffect } from "react";
 
 import type { BrowserTab, Terminal } from "@/api/client";
@@ -50,7 +50,7 @@ function BrowserTabIcon({ faviconURL, pageURL }: { faviconURL?: string; pageURL:
     >
       <BrowserFavicon
         className="h-full w-full object-cover"
-        fallback={<Compass className="h-3.5 w-3.5" />}
+        fallback={<Globe className="h-3.5 w-3.5" />}
         faviconURL={faviconURL}
         pageURL={pageURL}
       />

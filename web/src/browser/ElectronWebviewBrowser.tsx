@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Compass, FileX, Globe2, MousePointer2, RefreshCw } from "lucide-react";
+import { FileX, Globe, MousePointer2, RefreshCw } from "lucide-react";
 import { createElement, useCallback, useEffect, useRef, useState, type CSSProperties, type HTMLAttributes } from "react";
 
 import { listBrowserHistory, listBrowserTabs, type BrowserHistoryEntry, type BrowserTab } from "@/api/client";
@@ -419,7 +419,7 @@ function BrowserEmptyState({
       <div className="flex min-h-full items-center justify-center px-6 py-8">
         <div className="w-full max-w-5xl text-center">
           <div className="mx-auto max-w-sm">
-            <Compass className="mx-auto mb-4 size-8 text-muted-foreground" strokeWidth={1.6} />
+            <Globe className="mx-auto mb-4 size-8 text-muted-foreground" strokeWidth={1.6} />
             <h2 className="text-base font-semibold text-foreground">{t("browser.emptyTitle")}</h2>
           </div>
           {history.length > 0 ? (
@@ -461,7 +461,7 @@ function BrowserRecentFavicon({ entry }: { entry: BrowserHistoryEntry }) {
   return (
     <BrowserFavicon
       className="size-6 object-contain"
-      fallback={<Globe2 className="size-6 text-muted-foreground" />}
+      fallback={<Globe className="size-6 text-muted-foreground" />}
       faviconURL={entry.faviconURL}
       pageURL={entry.url}
     />

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, CornerDownLeft, Globe2, History, RefreshCw, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, CornerDownLeft, Globe, History, RefreshCw, Trash2 } from "lucide-react";
 import { useDeferredValue, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -608,7 +608,7 @@ function HistoryFavicon({ pageURL, url }: { pageURL: string; url?: string }) {
   return (
     <BrowserFavicon
       className="size-4 object-contain"
-      fallback={<Globe2 className="size-4" />}
+      fallback={<Globe className="size-4" />}
       faviconURL={url}
       pageURL={pageURL}
     />

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Compass, Folders, Plus, SquareTerminal } from "lucide-react";
+import { Folders, Globe, Plus, SquareTerminal } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -971,7 +971,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
                 className="h-8 px-2.5"
                 onSelect={createBrowserSurface}
               >
-                <Compass />
+                <Globe />
                 {t("browser.create")}
               </DropdownMenuItem>
               <DropdownMenuItem className="h-8 px-2.5" onSelect={createNewTerminal}>

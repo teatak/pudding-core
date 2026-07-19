@@ -7,12 +7,12 @@ import {
   CircleAlert,
   CircleCheck,
   CircleDashed,
-  Compass,
   Download,
   Eye,
   EyeOff,
   FileJson2,
   FileSearch,
+  Globe,
   Keyboard,
   KeyRound,
   MousePointerClick,
@@ -529,7 +529,7 @@ export function AppsPane({ token }: { token: string }) {
                     {t("apps.mcpAppAdd")}
                   </Button>
                 </div>
-                <div className="flex min-w-0 flex-wrap gap-x-5 gap-y-4">
+                <div className="flex min-w-0 flex-wrap gap-x-1 gap-y-4">
                   {apps.map((app) => (
                     <ManagedAppTile
                       key={app.id}
@@ -551,7 +551,7 @@ export function AppsPane({ token }: { token: string }) {
                     {t("apps.loadFailed")}
                   </div>
                 ) : catalogApps.length > 0 ? (
-                  <div className="grid gap-x-12 gap-y-7 md:grid-cols-2">
+                  <div className="grid w-full grid-cols-[repeat(auto-fit,minmax(min(100%,20rem),1fr))] gap-x-8 gap-y-5">
                     {catalogApps.map((app) => {
                       const installed = installedByID.get(appRegistryLocalID(app));
                       const release =
@@ -1141,16 +1141,16 @@ function ManagedAppTile({
   const iconSrc = app.source === "installed" ? appIconURL(token, app) : undefined;
   return (
     <button
-      className="group grid w-20 justify-items-center gap-2 text-center"
+      className="group grid w-16 justify-items-center gap-1 text-center"
       type="button"
       onClick={onSelect}
     >
-      <span className="relative grid size-14 place-items-center transition-transform group-hover:scale-105">
-        <AppIdentityIcon app={app} iconSrc={iconSrc} size="2xl" />
+      <span className="relative grid size-9 place-items-center transition-transform group-hover:scale-105">
+        <AppIdentityIcon app={app} iconSrc={iconSrc} size="lg" />
         <span
           aria-hidden="true"
           className={cn(
-            "absolute -right-1 -bottom-1 size-3 rounded-full border-2 border-background",
+            "absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full border-2 border-background",
             app.enabled ? "bg-emerald-500" : "bg-muted-foreground/45",
           )}
         />
@@ -1353,12 +1353,12 @@ function CatalogAppItem({
   const iconSrc = installed ? appIconURL(token, installed) || appRegistryIconURL(app, OFFICIAL_APP_REGISTRY) : appRegistryIconURL(app, OFFICIAL_APP_REGISTRY);
 
   return (
-    <section className="flex min-w-0 items-center gap-4 rounded-xl px-3 py-2 transition-colors hover:bg-muted/35">
-      <button className="flex min-w-0 flex-1 items-center gap-4 text-left" type="button" onClick={onSelect}>
-        <AppIcon icon={icon} size="xl" src={iconSrc} />
+    <section className="flex min-w-0 items-center gap-4 rounded-xl px-3 py-2 transition-colors hover:bg-muted">
+      <button className="flex min-w-0 flex-1 items-center gap-4 overflow-hidden text-left" type="button" onClick={onSelect}>
+        <AppIcon icon={icon} size="lg" src={iconSrc} />
         <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <h3 className="truncate text-sm font-semibold">{title}</h3>
+          <div className="flex min-w-0 items-center gap-2 overflow-hidden">
+            <h3 className="min-w-0 truncate text-sm font-semibold">{title}</h3>
             {release.version ? <span className="shrink-0 text-xs text-muted-foreground">v{release.version}</span> : null}
             {previewAvailable ? <Badge variant="secondary">{t("apps.previewAvailable")}</Badge> : null}
           </div>
@@ -2156,7 +2156,7 @@ function appToolIcon(name: string, kind: AppToolItem["kind"]): LucideIcon {
     return icons[name];
   }
   if (name.startsWith("builtin_browser_")) {
-    return Compass;
+    return Globe;
   }
   if (name.startsWith("builtin_command_")) {
     return SquareTerminal;

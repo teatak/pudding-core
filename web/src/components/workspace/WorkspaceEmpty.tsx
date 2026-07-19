@@ -1,4 +1,4 @@
-import { Compass, Folders, PanelsTopLeft, SquareTerminal } from "lucide-react";
+import { Folders, Globe, PanelsTopLeft, SquareTerminal } from "lucide-react";
 
 import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
@@ -68,7 +68,7 @@ export function WorkspaceEmpty({
               variant="ghost"
               onClick={onCreateBrowser}
             >
-              {creatingBrowser ? <Spinner /> : <Compass />}
+              {creatingBrowser ? <Spinner /> : <Globe />}
               {t("browser.create")}
             </Button>
             <Button
