@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Package, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useMemo } from "react";
 import { toast } from "sonner";
 
@@ -13,16 +13,11 @@ import {
 import { queryKeys } from "@/api/queryKeys";
 import { AppIdentityIcon, appDisplayName } from "@/components/AppIdentity";
 import { AppIcon } from "@/components/AppIcon";
-import { AppPopoverContent as PopoverContent } from "@/components/AppPopover";
 import { Spinner } from "@/components/Spinner";
-import { Button } from "@/components/ui/button";
-import {
-  Popover,
-  PopoverHeader,
-  PopoverTitle,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import { useI18n } from "@/i18n";
+import { cn } from "@/lib/utils";
+
+const maxVisibleApps = 5;
 
 export function SessionAppsControl({ session, token }: { session: Session; token: string }) {
   const { t } = useI18n();
@@ -58,53 +53,65 @@ export function SessionAppsControl({ session, token }: { session: Session; token
     return null;
   }
 
+  const visibleAppIDs = loadedAppIDs.slice(0, maxVisibleApps);
+  const hiddenAppCount = Math.max(0, loadedAppIDs.length - visibleAppIDs.length);
+
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button
-          aria-label={t("apps.sessionLoadedCount").replace("{count}", String(loadedAppIDs.length))}
-          className="h-7 gap-1 px-2 text-muted-foreground"
-          size="sm"
-          variant="ghost"
-        >
-          <Package className="size-4" />
-          <span className="tabular-nums">{loadedAppIDs.length}</span>
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-56 gap-1.5" sideOffset={6}>
-        <PopoverHeader className="px-1 py-0.5">
-          <PopoverTitle>{t("apps.sessionLoadedTitle")}</PopoverTitle>
-        </PopoverHeader>
-        <div className="grid gap-0.5">
-          {loadedAppIDs.map((appID) => {
-            const app = appsByID.get(appID);
-            const pending = unloadMutation.isPending && unloadMutation.variables === appID;
-            return (
-              <div key={appID} className="flex min-w-0 items-center gap-2 rounded-md px-1 py-1 hover:bg-muted/70">
-                <SessionAppIcon app={app} token={token} />
-                <span className="min-w-0 flex-1 truncate text-sm">{app ? appDisplayName(app, t) : appID}</span>
-                <Button
-                  aria-label={t("apps.sessionUnload").replace("{name}", app ? appDisplayName(app, t) : appID)}
-                  disabled={unloadMutation.isPending}
-                  size="icon-xs"
-                  title={t("apps.sessionUnload").replace("{name}", app ? appDisplayName(app, t) : appID)}
-                  variant="ghost"
-                  onClick={() => unloadMutation.mutate(appID)}
-                >
-                  {pending ? <Spinner className="size-3" /> : <X className="size-3.5" />}
-                </Button>
-              </div>
-            );
-          })}
-        </div>
-      </PopoverContent>
-    </Popover>
+    <div
+      aria-label={t("apps.sessionLoadedCount").replace("{count}", String(loadedAppIDs.length))}
+      className="group/apps flex h-8 max-w-48 items-center overflow-visible px-1"
+      role="group"
+    >
+      {visibleAppIDs.map((appID, index) => {
+        const app = appsByID.get(appID);
+        const name = app ? appDisplayName(app, t) : appID;
+        const pending = unloadMutation.isPending && unloadMutation.variables === appID;
+        const closeLabel = t("apps.sessionUnload").replace("{name}", name);
+        return (
+          <button
+            key={appID}
+            aria-label={closeLabel}
+            className={cn(
+              "group/app relative -ml-2.5 inline-grid size-7 shrink-0 place-items-center rounded-full",
+              "transition-[margin,transform] duration-150 first:ml-0 group-hover/apps:ml-0.5 group-hover/apps:first:ml-0 group-focus-within/apps:ml-0.5 group-focus-within/apps:first:ml-0",
+              "hover:z-20 hover:scale-105 focus-visible:z-20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              pending && "z-20",
+            )}
+            disabled={pending}
+            style={{ zIndex: pending ? 20 : index + 1 }}
+            title={closeLabel}
+            type="button"
+            onClick={() => unloadMutation.mutate(appID)}
+          >
+            <SessionAppIcon app={app} token={token} />
+            <span
+              className={cn(
+                "pointer-events-none absolute top-0 right-0 grid size-3 place-items-center rounded-full bg-foreground text-background opacity-0 shadow-sm transition-opacity group-hover/app:opacity-100 group-focus-visible/app:opacity-100",
+                pending && "opacity-100",
+              )}
+            >
+              {pending ? <Spinner className="size-2" /> : <X className="size-2" strokeWidth={2.5} />}
+            </span>
+          </button>
+        );
+      })}
+      {hiddenAppCount > 0 ? (
+        <span className="-ml-2.5 inline-grid size-7 shrink-0 place-items-center rounded-full bg-muted text-[11px] font-medium tabular-nums text-muted-foreground transition-[margin] duration-150 group-hover/apps:ml-0.5 group-focus-within/apps:ml-0.5">
+          +{hiddenAppCount}
+        </span>
+      ) : null}
+    </div>
   );
 }
 
 function SessionAppIcon({ app, token }: { app: AppDefinition | undefined; token: string }) {
-  if (app) {
-    return <AppIdentityIcon app={app} iconSrc={appIconURL(token, app)} size="sm" />;
-  }
-  return <AppIcon className="size-7" size="sm" />;
+  return (
+    <span className="inline-grid size-6 place-items-center overflow-hidden rounded-full [&_[data-slot=identity-icon]]:!rounded-full">
+      {app ? (
+        <AppIdentityIcon app={app} iconSrc={appIconURL(token, app)} size="sm" />
+      ) : (
+        <AppIcon size="sm" />
+      )}
+    </span>
+  );
 }
