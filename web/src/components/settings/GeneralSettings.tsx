@@ -31,6 +31,9 @@ import { toast } from "sonner";
 
 import {
   SETTINGS_NARROW_CONTENT_CLASS,
+  SETTINGS_CARD_CLASS,
+  SETTINGS_GROUP_CLASS,
+  SETTINGS_SECTION_HEADING_CLASS,
   SettingsActionRow,
   SettingsNumberField,
   SettingsToggleRow,
@@ -261,10 +264,10 @@ export function GeneralSettings({
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
   return (
-    <div className={cn(SETTINGS_NARROW_CONTENT_CLASS, "gap-8")}>
+    <div className={cn(SETTINGS_NARROW_CONTENT_CLASS, "gap-6")}>
       <section className="grid gap-4">
         <div className="grid gap-2">
-          <h3 className="text-lg font-semibold tracking-tight">{t("settings.general.personalization")}</h3>
+          <h3 className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.general.personalization")}</h3>
           <p className="text-sm leading-6 text-muted-foreground">{t("settings.general.personalizationDesc")}</p>
         </div>
         {userPromptQuery.isError ? (
@@ -300,14 +303,14 @@ export function GeneralSettings({
 
       <section className="grid gap-4">
         <div className="grid gap-2">
-          <h3 className="text-lg font-semibold tracking-tight">{t("settings.general.context")}</h3>
+          <h3 className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.general.context")}</h3>
         </div>
         {settingsQuery.isError ? (
           <Alert variant="destructive">
             <AlertDescription>{t("settings.general.loadFailed")}</AlertDescription>
           </Alert>
         ) : null}
-        <div className="divide-y overflow-hidden rounded-xl border bg-card">
+        <div className={SETTINGS_GROUP_CLASS}>
           <SettingsNumberField
             description={t("settings.general.tailTurnsDesc")}
             disabled={settingsDisabled}
@@ -365,9 +368,9 @@ export function GeneralSettings({
 
       <section className="grid gap-4">
         <div className="grid gap-2">
-          <h3 className="text-lg font-semibold tracking-tight">{t("settings.general.developer")}</h3>
+          <h3 className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.general.developer")}</h3>
         </div>
-        <div className="divide-y overflow-hidden rounded-xl border bg-card">
+        <div className={SETTINGS_GROUP_CLASS}>
           <SettingsToggleRow
             checked={desktopUpdateState?.receivePreviewUpdates === true}
             description={t("settings.general.receivePreviewUpdatesDesc")}
@@ -395,7 +398,7 @@ export function GeneralSettings({
         </div>
       </section>
 
-      <div className="overflow-hidden rounded-xl border bg-card">
+      <div className={SETTINGS_CARD_CLASS}>
         <SettingsActionRow
           description={t("settings.general.resetDefaultsDesc")}
           label={t("settings.general.resetDefaults")}

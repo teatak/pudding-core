@@ -65,7 +65,7 @@ console.info("[electron] starting", {
 const oauthReturnScheme = normalizeURLScheme(process.env.PUDDING_OAUTH_RETURN_SCHEME || "pudding");
 const macTrafficLightPosition = { x: 18, y: 18 };
 const defaultWindowBounds = { width: 1440, height: 920 };
-const minWindowBounds = { width: 1000, height: 680 };
+const minWindowBounds = { width: 800, height: 680 };
 const browserFaviconCache = new Map();
 let mainWindow = null;
 let themePreference = normalizeThemePreference(process.env.PUDDING_THEME || "system");

@@ -5,9 +5,12 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
-export const SETTINGS_CONTENT_CLASS = "@container mx-auto grid min-w-0 w-full max-w-4xl gap-5";
-export const SETTINGS_NARROW_CONTENT_CLASS = "@container mx-auto grid min-w-0 w-full max-w-3xl gap-5";
+export const SETTINGS_CONTENT_CLASS = "@container mr-auto grid min-w-0 w-full max-w-4xl gap-5";
+export const SETTINGS_NARROW_CONTENT_CLASS = "@container mr-auto grid min-w-0 w-full max-w-[46rem] gap-5";
 export const SETTINGS_COMPACT_SELECT_CLASS = "w-36 max-w-full";
+export const SETTINGS_CARD_CLASS = "overflow-hidden rounded-lg border border-border/70 bg-muted/20";
+export const SETTINGS_GROUP_CLASS = `divide-y ${SETTINGS_CARD_CLASS}`;
+export const SETTINGS_SECTION_HEADING_CLASS = "text-[15px] font-semibold tracking-tight";
 
 export function SettingsControlRow({
   children,
@@ -165,8 +168,8 @@ export function SettingsPanel({
   title: ReactNode;
 }) {
   return (
-    <section className="overflow-hidden rounded-xl border bg-card">
-      <div className="pudding-settings-panel-header flex h-11 items-center justify-between gap-3 border-b px-4">
+    <section className={SETTINGS_CARD_CLASS}>
+      <div className="pudding-settings-panel-header flex h-10 items-center justify-between gap-3 border-b border-border/70 bg-muted/20 px-4">
         <h3 className="text-sm font-normal">{title}</h3>
         {action}
       </div>

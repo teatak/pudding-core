@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RotateCcw, Trash } from "lucide-react";
+import { ChevronRight, RotateCcw, Trash } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import {
@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -36,7 +37,10 @@ import { toast } from "sonner";
 
 import {
   SETTINGS_COMPACT_SELECT_CLASS,
+  SETTINGS_CARD_CLASS,
+  SETTINGS_GROUP_CLASS,
   SETTINGS_NARROW_CONTENT_CLASS,
+  SETTINGS_SECTION_HEADING_CLASS,
   SettingsActionRow,
   SettingsControlRow,
   SettingsNumberField,
@@ -76,6 +80,7 @@ export function VoiceSettings({ token }: { token: string }) {
   const [pendingToggleCounts, setPendingToggleCounts] = useState<Partial<Record<VoiceToggleKey, number>>>({});
   const [clearRecordingsOpen, setClearRecordingsOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
+  const [runtimeOpen, setRuntimeOpen] = useState(false);
   const audioQuery = useQuery({
     queryKey: queryKeys.audioConfig(),
     queryFn: () => getAudioConfig(token),
@@ -227,37 +232,41 @@ export function VoiceSettings({ token }: { token: string }) {
   const edge = savedConfig ? edgeTTSProfile(savedConfig) : {};
 
   return (
-    <div className={cn(SETTINGS_NARROW_CONTENT_CLASS, "gap-8")}>
-      <section className="grid gap-4">
-        <div className="grid gap-2">
-          <h3 className="text-lg font-semibold tracking-tight">{t("settings.voice.runtime")}</h3>
-          <p className="text-sm leading-6 text-muted-foreground">{t("settings.voice.restartRequired")}</p>
-        </div>
-        {audioQuery.isError ? (
-          <Alert variant="destructive">
-            <AlertDescription>{t("settings.voice.loadFailed")}</AlertDescription>
-          </Alert>
-        ) : null}
-        {audioQuery.isLoading ? (
-          <div className="grid gap-2 rounded-xl border bg-card p-4">
-            <Skeleton className="h-4 w-2/3" />
-            <Skeleton className="h-4 w-1/2" />
-            <Skeleton className="h-4 w-3/5" />
-          </div>
-        ) : (
-          <dl className="grid gap-2 rounded-xl border bg-card p-4 text-sm">
-            {runtimeReadOnlyRows.map((row) => (
-              <SettingsInfoRow key={row.id} label={row.label} value={row.value} />
-            ))}
-          </dl>
-        )}
-      </section>
+    <div className={cn(SETTINGS_NARROW_CONTENT_CLASS, "gap-6")}>
+      <Collapsible className={SETTINGS_CARD_CLASS} open={runtimeOpen} onOpenChange={setRuntimeOpen}>
+        <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left hover:bg-muted/35">
+          <span className="grid min-w-0 gap-0.5">
+            <span className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.voice.runtime")}</span>
+            <span className="text-xs leading-5 text-muted-foreground">{t("settings.voice.restartRequired")}</span>
+          </span>
+          <ChevronRight className={cn("size-4 shrink-0 text-muted-foreground transition-transform", runtimeOpen && "rotate-90")} />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="border-t border-border/70 p-4">
+          {audioQuery.isError ? (
+            <Alert variant="destructive">
+              <AlertDescription>{t("settings.voice.loadFailed")}</AlertDescription>
+            </Alert>
+          ) : audioQuery.isLoading ? (
+            <div className="grid gap-2">
+              <Skeleton className="h-4 w-2/3" />
+              <Skeleton className="h-4 w-1/2" />
+              <Skeleton className="h-4 w-3/5" />
+            </div>
+          ) : (
+            <dl className="grid gap-2 text-sm">
+              {runtimeReadOnlyRows.map((row) => (
+                <SettingsInfoRow key={row.id} label={row.label} value={row.value} />
+              ))}
+            </dl>
+          )}
+        </CollapsibleContent>
+      </Collapsible>
 
-      <section className="grid gap-4">
+      <section className="grid gap-3">
         <div className="grid gap-2">
-          <h3 className="text-lg font-semibold tracking-tight">{t("settings.voice.asr")}</h3>
+          <h3 className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.voice.asr")}</h3>
         </div>
-        <div className="divide-y overflow-hidden rounded-xl border bg-card">
+        <div className={SETTINGS_GROUP_CLASS}>
           <SettingsToggleRow
             checked={form.asrEnabled}
             description={t("settings.voice.asrEnabledDesc")}
@@ -329,11 +338,11 @@ export function VoiceSettings({ token }: { token: string }) {
         </div>
       </section>
 
-      <section className="grid gap-4">
+      <section className="grid gap-3">
         <div className="grid gap-2">
-          <h3 className="text-lg font-semibold tracking-tight">{t("settings.voice.vad")}</h3>
+          <h3 className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.voice.vad")}</h3>
         </div>
-        <div className="divide-y overflow-hidden rounded-xl border bg-card">
+        <div className={SETTINGS_GROUP_CLASS}>
           <SettingsNumberField
             description={t("settings.voice.vadPrerollDesc")}
             disabled={disabled}
@@ -407,11 +416,11 @@ export function VoiceSettings({ token }: { token: string }) {
         </div>
       </section>
 
-      <section className="grid gap-4">
+      <section className="grid gap-3">
         <div className="grid gap-2">
-          <h3 className="text-lg font-semibold tracking-tight">{t("settings.voice.dsp")}</h3>
+          <h3 className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.voice.dsp")}</h3>
         </div>
-        <div className="divide-y overflow-hidden rounded-xl border bg-card">
+        <div className={SETTINGS_GROUP_CLASS}>
           <SettingsToggleRow
             checked={form.aecEnabled}
             description={t("settings.voice.aecEnabledDesc")}
@@ -457,11 +466,11 @@ export function VoiceSettings({ token }: { token: string }) {
         </div>
       </section>
 
-      <section className="grid gap-4">
+      <section className="grid gap-3">
         <div className="grid gap-2">
-          <h3 className="text-lg font-semibold tracking-tight">{t("settings.voice.tts")}</h3>
+          <h3 className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.voice.tts")}</h3>
         </div>
-        <div className="divide-y overflow-hidden rounded-xl border bg-card">
+        <div className={SETTINGS_GROUP_CLASS}>
           <SettingsToggleRow
             checked={form.ttsEnabled}
             description={t("settings.voice.ttsEnabledDesc")}
@@ -507,7 +516,7 @@ export function VoiceSettings({ token }: { token: string }) {
           <SettingsReadOnlyRows rows={ttsReadOnlyRows} />
         </div>
       </section>
-      <div className="overflow-hidden rounded-xl border bg-card">
+      <div className={SETTINGS_CARD_CLASS}>
         <SettingsActionRow
           description={t("settings.voice.resetDefaultsDesc")}
           label={t("settings.voice.resetDefaults")}

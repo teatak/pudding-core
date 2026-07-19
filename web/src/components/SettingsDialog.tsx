@@ -138,7 +138,7 @@ export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProp
           </DialogTrigger>
         ) : null}
         <DialogContent
-          className="top-[calc(var(--toolbar-h)+(100svh-var(--toolbar-h))/2)] h-[min(900px,calc(100svh-var(--toolbar-h)-1.5rem))] w-[calc(100%-0.5rem)] max-w-[430px] overflow-hidden bg-background p-0 sm:w-[calc(100vw-2rem)] sm:max-w-[1180px] xl:max-w-[1240px]"
+          className="top-[calc(var(--toolbar-h)+(100svh-var(--toolbar-h))/2)] h-[min(760px,calc(100svh-var(--toolbar-h)-2rem))] w-[calc(100%-0.5rem)] max-w-[430px] overflow-hidden bg-background p-0 shadow-lg sm:w-[calc(100vw-2rem)] sm:max-w-[1040px] xl:max-w-[1040px]"
           onPointerDownOutside={(event) => {
             if (shouldKeepDialogOpenForSelectDismiss(event.target)) {
               event.preventDefault();
@@ -154,19 +154,19 @@ export function SettingsDialog({ token, showTrigger = true }: SettingsDialogProp
           <DialogDescription className="sr-only">{t("settings.description")}</DialogDescription>
           <SidebarProvider
             className="h-full !min-h-0 min-w-0 max-w-full items-start overflow-hidden"
-            style={{ "--sidebar-width": "14rem" } as CSSProperties}
+            style={{ "--sidebar-width": "12.5rem" } as CSSProperties}
           >
             <div className="hidden h-full shrink-0 lg:flex">
               <SettingsSidebar active={active} onActiveChange={changeActive} />
             </div>
             <main className="flex h-full min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-background">
               <SettingsTopNav active={active} onActiveChange={changeActive} />
-              <header className="flex h-14 shrink-0 items-center gap-2 transition-[width,height] ease-linear lg:h-16 group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
-                <div className="flex items-center gap-2 px-4">
-                  <h2 className="text-sm font-normal text-foreground">{t(activeSection.labelKey)}</h2>
+              <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border/70 bg-background/95">
+                <div className="flex items-center gap-2 px-4 sm:px-6">
+                  <h2 className="text-sm font-medium text-foreground">{t(activeSection.labelKey)}</h2>
                 </div>
               </header>
-              <div className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-3 pb-4 sm:px-4">
+              <div className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-3 pt-4 pb-5 sm:px-6 sm:pt-5 sm:pb-6">
                 {active === "usage" ? <UsageSettings token={token} /> : null}
                 {active === "dialogue" ? <GeneralSettings token={token} onDirtyChange={setActiveDirty} /> : null}
                 {active === "voice" ? <VoiceSettings token={token} /> : null}
