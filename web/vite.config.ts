@@ -31,6 +31,7 @@ export default defineConfig(({ mode }) => {
     server: {
       proxy: {
         "/sessions": daemon,
+        "/projects": daemon,
         "/settings": daemon,
         "/providers": daemon,
         "/apps": daemon,

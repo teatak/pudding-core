@@ -677,7 +677,7 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 	case FileStat:
 		return r.fileStat(call)
 	case FileSearch:
-		return r.fileSearch(call)
+		return r.fileSearch(ctx, call)
 	case FileSlice:
 		return r.fileSlice(call)
 	case FileWrite:

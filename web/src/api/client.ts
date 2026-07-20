@@ -34,6 +34,7 @@ import {
   projectGitPathsRequest,
   projectGitRootRequest,
   projectGitStatus,
+  projectSearchResponse,
   projectTreeResponse,
   createProjectEntryRequest,
   renameProjectEntryRequest,
@@ -149,6 +150,8 @@ import {
   type ProjectGitBranches,
   type ProjectGitStatus,
   type ProjectGitStatusFile,
+  type ProjectSearchMatch,
+  type ProjectSearchResponse,
   type ProjectReference,
   type ProjectTreeEntry,
   type ProjectTreeResponse,
@@ -237,6 +240,8 @@ export type {
   ProjectGitDiff,
   ProjectGitStatus,
   ProjectGitStatusFile,
+  ProjectSearchMatch,
+  ProjectSearchResponse,
   ProjectTreeEntry,
   ProjectTreeResponse,
 };
@@ -368,6 +373,21 @@ export function listProjectTree(
     token,
     `/sessions/${encodeURIComponent(sessionID)}/project/tree?${query.toString()}`,
     projectTreeResponse,
+  );
+}
+
+export function searchProjectFiles(
+  token: string,
+  sessionID: string,
+  query: string,
+  signal?: AbortSignal,
+): Promise<ProjectSearchResponse> {
+  const params = new URLSearchParams({ q: query, limit: "200" });
+  return request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/project/search?${params.toString()}`,
+    projectSearchResponse,
+    { signal },
   );
 }
 

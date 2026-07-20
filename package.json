@@ -10,7 +10,8 @@
     "smoke:electron-browser": "npm --prefix web run smoke:electron-browser"
   },
   "dependencies": {
-    "electron-updater": "^6.8.9"
+    "electron-updater": "^6.8.9",
+    "semver": "^7.7.4"
   },
   "devDependencies": {
     "electron-builder": "^26.15.3"

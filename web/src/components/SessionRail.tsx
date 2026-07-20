@@ -1231,7 +1231,6 @@ function RailPanel({
                             collapsed={projectCollapsed}
                             icon="project"
                             label={group.label}
-                            title={group.label}
                             actionLabel={t("session.create")}
                             onAction={group.projectID ? () => onCreateProjectSession(group.projectID!) : undefined}
                             onToggle={() => toggleGroupCollapsed(`project:${group.key}`)}
@@ -1420,7 +1419,6 @@ function CollapsibleSessionGroupLabel({
   label,
   actions,
   actionLabel,
-  title,
   onAction,
   onToggle,
 }: {
@@ -1430,7 +1428,6 @@ function CollapsibleSessionGroupLabel({
   label: string;
   actions?: ReactNode;
   actionLabel?: string;
-  title?: string;
   onAction?: () => void;
   onToggle: () => void;
 }) {
@@ -1441,7 +1438,6 @@ function CollapsibleSessionGroupLabel({
         "group/project-label h-7 min-h-7 gap-1 px-0 text-sm transition-colors hover:bg-sidebar-accent has-[[data-project-actions-open=true]]:bg-sidebar-accent has-[[data-project-actions-open=true]]:text-sidebar-accent-foreground",
         active && "bg-sidebar-accent text-sidebar-accent-foreground",
       )}
-      title={title || label}
     >
       <button
         className="group flex h-full min-w-0 flex-1 cursor-default items-center gap-2 rounded-md px-2 pr-1 text-left"

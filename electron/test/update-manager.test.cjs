@@ -8,8 +8,11 @@ class FakeUpdater extends EventEmitter {
   constructor() {
     super();
     this.checks = 0;
+    this.downloads = 0;
     this.installs = 0;
     this.feed = null;
+    this.checkResult = null;
+    this.downloadResult = [];
     this._channel = null;
     this.allowDowngrade = false;
   }
@@ -25,6 +28,12 @@ class FakeUpdater extends EventEmitter {
 
   async checkForUpdates() {
     this.checks += 1;
+    return this.checkResult;
+  }
+
+  async downloadUpdate() {
+    this.downloads += 1;
+    return this.downloadResult;
   }
 
   quitAndInstall() {
@@ -102,6 +111,107 @@ test("download completion exposes a restart state without a completion dialog", 
   assert.deepEqual(calls, ["stop-services"]);
   assert.equal(updater.installs, 1);
   assert.equal(states.at(-1).status, "installing");
+});
+
+test("a downloaded update is rechecked without downloading the same version again", async () => {
+  const updater = new FakeUpdater();
+  const manager = new UpdateManager({ updater, isPackaged: true });
+
+  updater.emit("update-available", { version: "1.2.0" });
+  updater.emit("update-downloaded", { version: "1.2.0" });
+  updater.checkResult = {
+    isUpdateAvailable: true,
+    updateInfo: { version: "1.2.0" },
+  };
+
+  assert.equal(await manager.check(false), true);
+  assert.equal(updater.checks, 1);
+  assert.equal(updater.downloads, 0);
+  assert.deepEqual(manager.getState(), {
+    status: "downloaded",
+    receivePreviewUpdates: false,
+    version: "1.2.0",
+    percent: 100,
+  });
+});
+
+test("a newer release replaces the pending downloaded update", async () => {
+  const updater = new FakeUpdater();
+  const states = [];
+  const manager = new UpdateManager({
+    updater,
+    isPackaged: true,
+    onStateChange: (state) => states.push(state),
+  });
+
+  updater.emit("update-available", { version: "1.2.0" });
+  updater.emit("update-downloaded", { version: "1.2.0" });
+  updater.checkResult = {
+    isUpdateAvailable: true,
+    updateInfo: { version: "1.3.0" },
+  };
+  updater.downloadUpdate = async () => {
+    updater.downloads += 1;
+    updater.emit("download-progress", { percent: 54 });
+    updater.emit("update-downloaded", { version: "1.3.0" });
+    return [];
+  };
+
+  assert.equal(await manager.check(false), true);
+  assert.equal(updater.downloads, 1);
+  assert.deepEqual(states.slice(-3).map((state) => [state.status, state.version, state.percent]), [
+    ["downloading", "1.3.0", 0],
+    ["downloading", "1.3.0", 54],
+    ["downloaded", "1.3.0", 100],
+  ]);
+});
+
+test("a failed pending-update refresh keeps the previously downloaded version", async () => {
+  const updater = new FakeUpdater();
+  const errors = [];
+  const manager = new UpdateManager({
+    updater,
+    isPackaged: true,
+    onError: (error) => errors.push(error.message),
+  });
+
+  updater.emit("update-available", { version: "1.2.0" });
+  updater.emit("update-downloaded", { version: "1.2.0" });
+  updater.checkForUpdates = async () => {
+    updater.checks += 1;
+    const error = new Error("offline");
+    updater.emit("error", error);
+    throw error;
+  };
+
+  assert.equal(await manager.check(false), false);
+  assert.deepEqual(errors, ["offline"]);
+  assert.equal(manager.getState().status, "downloaded");
+  assert.equal(manager.getState().version, "1.2.0");
+});
+
+test("install refreshes and installs the newest downloaded release", async () => {
+  const updater = new FakeUpdater();
+  const manager = new UpdateManager({ updater, isPackaged: true });
+
+  updater.emit("update-available", { version: "1.2.0" });
+  updater.emit("update-downloaded", { version: "1.2.0" });
+  updater.checkResult = {
+    isUpdateAvailable: true,
+    updateInfo: { version: "1.3.0" },
+  };
+  updater.downloadUpdate = async () => {
+    updater.downloads += 1;
+    updater.emit("update-downloaded", { version: "1.3.0" });
+    return [];
+  };
+
+  assert.equal(await manager.install(), true);
+  assert.equal(updater.checks, 1);
+  assert.equal(updater.downloads, 1);
+  assert.equal(updater.installs, 1);
+  assert.equal(manager.getState().version, "1.3.0");
+  assert.equal(manager.getState().status, "installing");
 });
 
 test("development builds explain why update checks are unavailable", async () => {

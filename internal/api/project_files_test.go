@@ -26,6 +26,15 @@ func TestProjectBrowserListsRootsAndReadsText(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, ".github", "workflows"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(root, ".claude"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".vite"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".git", "objects"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("SECRET=hidden\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +55,16 @@ func TestProjectBrowserListsRootsAndReadsText(t *testing.T) {
 	tree := decodeJSON[struct {
 		Entries []projectTreeEntry `json:"entries"`
 	}](t, req(t, http.MethodGet, srv.URL+"/sessions/sess_browser/project/tree?"+query.Encode(), nil))
-	if len(tree.Entries) != 2 || tree.Entries[0].Name != "docs" || tree.Entries[0].Type != "dir" || tree.Entries[1].Name != "README.md" {
+	wantNames := []string{".claude", ".github", ".vite", "docs", ".env", "README.md"}
+	if len(tree.Entries) != len(wantNames) {
+		t.Fatalf("unexpected tree: %+v", tree.Entries)
+	}
+	for index, want := range wantNames {
+		if tree.Entries[index].Name != want {
+			t.Fatalf("unexpected tree: %+v", tree.Entries)
+		}
+	}
+	if tree.Entries[0].Type != "dir" || tree.Entries[4].Type != "file" {
 		t.Fatalf("unexpected tree: %+v", tree.Entries)
 	}
 
@@ -54,6 +72,48 @@ func TestProjectBrowserListsRootsAndReadsText(t *testing.T) {
 	file := decodeJSON[projectFileView](t, req(t, http.MethodGet, srv.URL+"/sessions/sess_browser/project/file?"+query.Encode(), nil))
 	if file.RootID != roots.Roots[0].ID || file.Path != "README.md" || file.Content != "# Demo\n" || file.MIME != "text/markdown" {
 		t.Fatalf("unexpected file: %+v", file)
+	}
+}
+
+func TestProjectBrowserSearchReusesBuiltinTextSearch(t *testing.T) {
+	srv, st := newTestServer(t)
+	root := t.TempDir()
+	for _, dir := range []string{"src", ".claude", "node_modules/pkg"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for path, content := range map[string]string{
+		"src/main.go":               "package main\n// SearchNeedle\n",
+		".claude/instructions.md":   "searchneedle in hidden project config\n",
+		"node_modules/pkg/index.js": "searchneedle must stay ignored\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, path), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	createProjectSession(t, st, "proj_search", "sess_search", root)
+
+	query := url.Values{"q": {"searchneedle"}, "limit": {"20"}}
+	result := decodeJSON[struct {
+		CaseSensitive bool                     `json:"caseSensitive"`
+		FilesScanned  int                      `json:"filesScanned"`
+		Matches       []projectSearchMatchView `json:"matches"`
+	}](t, req(t, http.MethodGet, srv.URL+"/sessions/sess_search/project/search?"+query.Encode(), nil))
+	if result.CaseSensitive || result.FilesScanned != 2 || len(result.Matches) != 2 {
+		t.Fatalf("unexpected search result: %+v", result)
+	}
+	if result.Matches[0].Path != ".claude/instructions.md" || result.Matches[1].Path != "src/main.go" {
+		t.Fatalf("unexpected search matches: %+v", result.Matches)
+	}
+	if result.Matches[1].Line != 2 || result.Matches[1].Text != "// SearchNeedle" {
+		t.Fatalf("unexpected source match: %+v", result.Matches[1])
+	}
+
+	resp := req(t, http.MethodGet, srv.URL+"/sessions/sess_search/project/search", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("missing query status = %d", resp.StatusCode)
 	}
 }
 

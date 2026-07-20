@@ -162,7 +162,7 @@ export function SessionSearchDialog({
                     key={result.session.id}
                     aria-selected={active}
                     className={cn(
-                      "grid w-full grid-cols-[minmax(0,1fr)_auto] gap-x-3 rounded-lg px-3 text-left outline-none transition-colors",
+                      "grid w-full grid-cols-[minmax(0,1fr)_auto] gap-x-3 rounded-lg px-3 text-left outline-none",
                       secondary ? "min-h-16 items-start py-2.5" : "h-10 items-center py-0",
                       active ? "bg-accent text-accent-foreground" : "hover:bg-accent/60",
                     )}

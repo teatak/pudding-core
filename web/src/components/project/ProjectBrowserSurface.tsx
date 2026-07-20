@@ -1,4 +1,5 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -10,6 +11,7 @@ import {
   listProjectBrowserRoots,
   moveProjectEntry,
   renameProjectEntry,
+  type ProjectSearchMatch,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -32,6 +34,7 @@ import { ProjectGitSection } from "./git/ProjectGitSection";
 import { projectGitFileKey } from "./git/gitStatus";
 import type { ProjectGitRepositoryState } from "./git/types";
 import { ProjectSidebar } from "./ProjectSidebar";
+import { ProjectSearch } from "./ProjectSearch";
 import { ProjectTree } from "./ProjectTree";
 import { projectBrowserError } from "./projectErrors";
 import { projectAbsolutePath, projectParentPath, projectPathContains, projectSelectionKey, projectTabKey } from "./projectPaths";
@@ -83,6 +86,8 @@ export function ProjectBrowserSurface({
   const [editorReveal, setEditorReveal] = useState<ProjectEditorReveal>();
   const [resourceClipboard, setResourceClipboard] = useState<ResourceClipboard>();
   const [dragMoveRequest, setDragMoveRequest] = useState<{ destination: ProjectEntryTarget; source: ProjectEntryTarget }>();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchRevealSerial = useRef(0);
   const dirtyKeys = useMemo(() => new Set(dirtyBySession[sessionID] || []), [dirtyBySession, sessionID]);
   const dirtyRootIDs = useMemo(() => new Set(workspace.tabs.flatMap((tab) => (
     !isProjectGitDiffTab(tab) && dirtyKeys.has(projectSelectionKey(tab)) ? [tab.rootID] : []
@@ -184,6 +189,7 @@ export function ProjectBrowserSurface({
     setPendingCloseKeys([]);
     setResourceClipboard((current) => current?.sessionID === sessionID ? current : undefined);
     setDragMoveRequest(undefined);
+    setSearchOpen(false);
   }, [sessionID]);
   useEffect(() => {
     if (!active) return;
@@ -466,6 +472,18 @@ export function ProjectBrowserSurface({
     });
   };
 
+  const openSearchMatch = (match: ProjectSearchMatch) => {
+    const selection = { rootID: match.rootID, path: match.path };
+    onDeactivateTurnDiff();
+    workspace.openPreview(selection);
+    searchRevealSerial.current += 1;
+    setEditorReveal({
+      key: projectSelectionKey(selection),
+      line: match.line,
+      serial: searchRevealSerial.current,
+    });
+  };
+
   const namePending = (createMutation.isPending && createMutation.variables?.targetSessionID === sessionID)
     || (renameMutation.isPending && renameMutation.variables?.targetSessionID === sessionID);
   const deletePending = deleteMutation.isPending && deleteMutation.variables?.targetSessionID === sessionID;
@@ -480,8 +498,25 @@ export function ProjectBrowserSurface({
       >
         <ResizablePanel id="tree" className="min-w-0" minSize={180} maxSize="45%">
           <ProjectSidebar
+            filesAction={(
+              <button
+                aria-label={t(searchOpen ? "project.browserSearchClose" : "project.browserSearch")}
+                className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
+                title={t(searchOpen ? "project.browserSearchClose" : "project.browserSearch")}
+                type="button"
+                onClick={() => setSearchOpen((current) => !current)}
+              >
+                {searchOpen ? <X className="size-3.5" /> : <Search className="size-3.5" />}
+              </button>
+            )}
             files={(
-              <ProjectTree
+              searchOpen ? <ProjectSearch
+                roots={roots}
+                sessionID={sessionID}
+                token={token}
+                onClose={() => setSearchOpen(false)}
+                onOpen={openSearchMatch}
+              /> : <ProjectTree
                 active={active}
                 canPaste={resourceClipboard?.sessionID === sessionID}
                 error={rootsQuery.error}

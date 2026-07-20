@@ -7,6 +7,7 @@ import { WorkspacePane } from "@/components/workspace/WorkspacePane";
 import { hasElectronWebviewBrowser } from "@/browser/electronBridge";
 import { ChatPane } from "@/components/ChatPane";
 import { AppsPane } from "@/components/AppsPane";
+import { EditorTypographyProvider } from "@/components/EditorTypographyProvider";
 import { SessionRail } from "@/components/SessionRail";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { PairingGate, TokenGate } from "@/components/TokenGate";
@@ -549,16 +550,18 @@ export function App() {
     );
 
   return (
-    <TooltipProvider delayDuration={250}>
-      <div className="relative flex h-full overflow-hidden">
-        <div aria-hidden="true" className="drag-region absolute inset-x-0 top-0 z-20 h-(--toolbar-h)" />
-        <div className="relative h-full min-w-0 flex-1 bg-background">
-          {workspaceContent}
-          {workspaceToggle}
+    <EditorTypographyProvider token={token}>
+      <TooltipProvider delayDuration={250}>
+        <div className="relative flex h-full overflow-hidden">
+          <div aria-hidden="true" className="drag-region absolute inset-x-0 top-0 z-20 h-(--toolbar-h)" />
+          <div className="relative h-full min-w-0 flex-1 bg-background">
+            {workspaceContent}
+            {workspaceToggle}
+          </div>
         </div>
-      </div>
-      <SettingsDialog token={token} showTrigger={false} />
-      <AppToaster />
-    </TooltipProvider>
+        <SettingsDialog token={token} showTrigger={false} />
+        <AppToaster />
+      </TooltipProvider>
+    </EditorTypographyProvider>
   );
 }

@@ -5,6 +5,7 @@ export const queryKeys = {
   project: (projectID: string) => ["project", projectID] as const,
   projectBrowserRoots: (sessionID: string) => ["session", sessionID, "project", "roots"] as const,
   projectTree: (sessionID: string, rootID: string, path: string) => ["session", sessionID, "project", "tree", rootID, path] as const,
+  projectSearch: (sessionID: string, query: string) => ["session", sessionID, "project", "search", query] as const,
   projectFile: (sessionID: string, rootID: string, path: string) => ["session", sessionID, "project", "file", rootID, path] as const,
   projectGitStatus: (sessionID: string, rootID: string) => ["session", sessionID, "project", "git", "status", rootID] as const,
   projectGitBranches: (sessionID: string, rootID: string) => ["session", sessionID, "project", "git", "branches", rootID] as const,

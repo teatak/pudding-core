@@ -82,6 +82,28 @@ export const projectTreeResponse = z.object({
 });
 export type ProjectTreeResponse = z.infer<typeof projectTreeResponse>;
 
+export const projectSearchMatch = z.object({
+  rootID: z.string(),
+  path: z.string(),
+  line: z.number().int().positive(),
+  lineStart: z.number().int().positive(),
+  lineEnd: z.number().int().positive(),
+  text: z.string(),
+  excerpt: z.string(),
+  truncated: z.boolean(),
+});
+export type ProjectSearchMatch = z.infer<typeof projectSearchMatch>;
+
+export const projectSearchResponse = z.object({
+  query: z.string(),
+  matches: z.array(projectSearchMatch),
+  matchCount: z.number().int().nonnegative(),
+  filesScanned: z.number().int().nonnegative(),
+  resultsCapped: z.boolean(),
+  caseSensitive: z.boolean(),
+});
+export type ProjectSearchResponse = z.infer<typeof projectSearchResponse>;
+
 export const projectFile = z.object({
   rootID: z.string(),
   path: z.string(),

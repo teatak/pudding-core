@@ -12,8 +12,9 @@ const collapsedPanelPixels = 31;
 const minimumPanelPixels = 120;
 const maximumRememberedPercent = 85;
 
-export function ProjectSidebar({ files, git }: {
+export function ProjectSidebar({ files, filesAction, git }: {
   files: ReactNode;
+  filesAction?: ReactNode;
   git: ReactNode;
 }) {
   const { t } = useI18n();
@@ -47,6 +48,7 @@ export function ProjectSidebar({ files, git }: {
           }}
         >
           <ProjectSidebarSection
+            action={filesAction}
             collapsed={filesCollapsed}
             icon={<Folders />}
             label={t("project.browserFiles")}

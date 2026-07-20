@@ -8,8 +8,8 @@ import { cn } from "@/lib/utils";
 export const SETTINGS_CONTENT_CLASS = "@container mr-auto grid min-w-0 w-full max-w-4xl gap-5";
 export const SETTINGS_NARROW_CONTENT_CLASS = "@container mr-auto grid min-w-0 w-full max-w-[46rem] gap-5";
 export const SETTINGS_COMPACT_SELECT_CLASS = "w-36 max-w-full";
-export const SETTINGS_CARD_CLASS = "overflow-hidden rounded-lg border border-border/70 bg-muted/20";
-export const SETTINGS_GROUP_CLASS = `divide-y ${SETTINGS_CARD_CLASS}`;
+export const SETTINGS_CARD_CLASS = "overflow-hidden rounded-lg border border-border/70 bg-card";
+export const SETTINGS_GROUP_CLASS = `pudding-settings-group ${SETTINGS_CARD_CLASS}`;
 export const SETTINGS_SECTION_HEADING_CLASS = "text-[15px] font-semibold tracking-tight";
 
 export function SettingsControlRow({

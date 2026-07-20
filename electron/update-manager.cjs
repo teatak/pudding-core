@@ -1,3 +1,5 @@
+const semver = require("semver");
+
 const updateStatuses = Object.freeze({
   unavailable: "unavailable",
   idle: "idle",
@@ -44,6 +46,10 @@ class UpdateManager {
     this.started = false;
     this.interactiveCheck = false;
     this.interactiveDownload = false;
+    this.downloadedRefreshFallback = null;
+    this.downloadedRefreshInteractive = false;
+    this.downloadedRefreshPromise = null;
+    this.installPromise = null;
     this.state = {
       status: this.simulated ? updateStatuses.downloaded : this.enabled ? updateStatuses.idle : updateStatuses.unavailable,
       receivePreviewUpdates: this.receivePreviewUpdates,
@@ -80,6 +86,9 @@ class UpdateManager {
       }
     });
     this.updater.on("update-available", (info) => {
+      if (this.downloadedRefreshFallback) {
+        return;
+      }
       const interactive = this.takeInteractiveCheck();
       const version = cleanVersion(info?.version);
       this.interactiveDownload = interactive;
@@ -89,6 +98,9 @@ class UpdateManager {
       }
     });
     this.updater.on("update-not-available", () => {
+      if (this.downloadedRefreshFallback) {
+        return;
+      }
       const interactive = this.takeInteractiveCheck();
       this.setState({ status: updateStatuses.idle, version: "", percent: null });
       if (interactive) {
@@ -104,6 +116,7 @@ class UpdateManager {
     this.updater.on("update-downloaded", (info) => {
       this.interactiveCheck = false;
       this.interactiveDownload = false;
+      this.clearDownloadedRefreshContext();
       this.setState({
         status: updateStatuses.downloaded,
         version: cleanVersion(info?.version) || this.state.version,
@@ -194,10 +207,7 @@ class UpdateManager {
       return false;
     }
     if (this.state.status === updateStatuses.downloaded) {
-      if (interactive) {
-        await this.onInteractiveResult({ kind: "downloaded", version: this.state.version });
-      }
-      return true;
+      return this.refreshDownloadedUpdate(interactive);
     }
     if (
       this.state.status === updateStatuses.checking ||
@@ -224,9 +234,35 @@ class UpdateManager {
   }
 
   async install() {
+    if (this.installPromise) {
+      return this.installPromise;
+    }
+    const installPromise = this.installLatestDownloadedUpdate();
+    this.installPromise = installPromise;
+    try {
+      return await installPromise;
+    } finally {
+      if (this.installPromise === installPromise) {
+        this.installPromise = null;
+      }
+    }
+  }
+
+  async installLatestDownloadedUpdate() {
     if (!this.enabled || this.state.status !== updateStatuses.downloaded) {
       return false;
     }
+    if (!this.simulated) {
+      if (this.downloadedRefreshPromise) {
+        await this.downloadedRefreshPromise;
+      } else {
+        await this.refreshDownloadedUpdate(false);
+      }
+      if (this.state.status !== updateStatuses.downloaded) {
+        return false;
+      }
+    }
+
     const downloadedState = this.getState();
     this.setState({ status: updateStatuses.installing });
     if (this.simulated) {
@@ -248,8 +284,83 @@ class UpdateManager {
     }
   }
 
+  async refreshDownloadedUpdate(interactive = false) {
+    if (this.downloadedRefreshPromise) {
+      const refreshed = await this.downloadedRefreshPromise;
+      if (interactive) {
+        await this.reportCurrentUpdateState();
+      }
+      return refreshed;
+    }
+    if (!this.enabled || this.simulated || this.state.status !== updateStatuses.downloaded) {
+      return false;
+    }
+
+    const fallback = this.getState();
+    const previousAutoDownload = this.updater.autoDownload;
+    this.downloadedRefreshFallback = fallback;
+    this.downloadedRefreshInteractive = Boolean(interactive);
+    this.updater.autoDownload = false;
+
+    const refreshPromise = (async () => {
+      try {
+        const result = await this.updater.checkForUpdates();
+        const version = cleanVersion(result?.updateInfo?.version);
+        if (!result?.isUpdateAvailable || !isVersionGreater(version, fallback.version)) {
+          this.clearDownloadedRefreshContext();
+          if (interactive) {
+            await this.onInteractiveResult({ kind: "downloaded", version: fallback.version });
+          }
+          return true;
+        }
+
+        this.setState({ status: updateStatuses.downloading, version, percent: 0 });
+        if (interactive) {
+          await this.onInteractiveResult({ kind: "downloading", version });
+        }
+        await this.updater.downloadUpdate(result.cancellationToken);
+        return true;
+      } catch (error) {
+        if (this.downloadedRefreshFallback) {
+          this.handleError(error);
+        }
+        return false;
+      } finally {
+        this.updater.autoDownload = previousAutoDownload;
+      }
+    })();
+
+    this.downloadedRefreshPromise = refreshPromise;
+    try {
+      return await refreshPromise;
+    } finally {
+      if (this.downloadedRefreshPromise === refreshPromise) {
+        this.downloadedRefreshPromise = null;
+      }
+    }
+  }
+
+  async reportCurrentUpdateState() {
+    if (this.state.status === updateStatuses.downloaded) {
+      await this.onInteractiveResult({ kind: "downloaded", version: this.state.version });
+    } else {
+      await this.onInteractiveResult({ kind: this.state.status, version: this.state.version });
+    }
+  }
+
   handleError(error) {
     this.onError(error);
+    if (this.downloadedRefreshFallback) {
+      const fallback = this.downloadedRefreshFallback;
+      const interactive = this.downloadedRefreshInteractive;
+      this.clearDownloadedRefreshContext();
+      this.state = fallback;
+      this.onStateChange(this.getState());
+      if (interactive) {
+        void this.onInteractiveResult({ kind: "error", error: errorMessage(error) });
+      }
+      return;
+    }
     const installing = this.state.status === updateStatuses.installing;
     const interactive = this.takeInteractiveCheck() || this.takeInteractiveDownload();
     this.setState({ status: updateStatuses.idle, version: "", percent: null });
@@ -272,6 +383,11 @@ class UpdateManager {
     return interactive;
   }
 
+  clearDownloadedRefreshContext() {
+    this.downloadedRefreshFallback = null;
+    this.downloadedRefreshInteractive = false;
+  }
+
   setState(patch) {
     this.state = { ...this.state, ...patch };
     this.onStateChange(this.getState());
@@ -292,6 +408,15 @@ function clampPercent(value) {
 
 function errorMessage(error) {
   return String(error?.message || error || "update failed");
+}
+
+function isVersionGreater(candidate, current) {
+  const next = semver.valid(cleanVersion(candidate));
+  const previous = semver.valid(cleanVersion(current));
+  if (next && previous) {
+    return semver.gt(next, previous);
+  }
+  return Boolean(candidate && candidate !== current);
 }
 
 module.exports = { UpdateManager, updateStatuses };

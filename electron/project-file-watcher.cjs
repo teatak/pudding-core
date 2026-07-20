@@ -180,7 +180,7 @@ function ignoredProjectChange(rawName) {
   return String(rawName)
     .split(/[\\/]+/)
     .filter(Boolean)
-    .some((segment) => segment.startsWith(".") || ignoredProjectDirectoryNames.has(segment));
+    .some((segment) => ignoredProjectDirectoryNames.has(segment));
 }
 
 module.exports = { ProjectFileWatcher, projectFileChangedChannel };

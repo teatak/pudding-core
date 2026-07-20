@@ -2,6 +2,7 @@ package tool
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -197,7 +198,7 @@ func (r *BuiltinRunner) fileStat(call Call) Result {
 	return out
 }
 
-func (r *BuiltinRunner) fileSearch(call Call) Result {
+func (r *BuiltinRunner) fileSearch(ctx context.Context, call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	var args struct {
 		Scope         string   `json:"scope"`
@@ -213,90 +214,64 @@ func (r *BuiltinRunner) fileSearch(call Call) Result {
 	if err := decodeStructToolArgs(call.Args, &args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
-	args.Query = strings.TrimSpace(args.Query)
-	if args.Query == "" {
-		return toolJSONError(out, "query_required", "query must be a non-empty string")
-	}
-	mode := strings.ToLower(strings.TrimSpace(args.Mode))
-	if mode == "" {
-		mode = "literal"
-	}
-	if mode != "literal" && mode != "regex" {
-		return toolJSONError(out, "invalid_search_mode", "mode must be literal or regex")
-	}
 	caseSensitive := true
 	if args.CaseSensitive != nil {
 		caseSensitive = *args.CaseSensitive
-	}
-	if args.ContextLines < 0 || args.ContextLines > maxFileSearchContextLines {
-		return toolJSONError(out, "invalid_context_lines", "context_lines must be between 0 and 5")
-	}
-	matcher, err := newFileSearchMatcher(mode, args.Query, caseSensitive)
-	if err != nil {
-		return toolJSONError(out, "invalid_regex", err.Error())
-	}
-	if err := validateSearchGlobs(args.IncludeGlobs, args.ExcludeGlobs); err != nil {
-		return toolJSONError(out, "invalid_glob", err.Error())
-	}
-	maxResults := args.MaxResults
-	if maxResults <= 0 {
-		maxResults = defaultFileSearchMax
-	}
-	if maxResults > maxFileSearchMax {
-		maxResults = maxFileSearchMax
 	}
 	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, false, true, false)
 	if err != nil {
 		return filePathError(out, args.Scope, err)
 	}
-	searchBaseRoot := resolved.root
-	if evaluated, evaluateErr := filepath.EvalSymlinks(searchBaseRoot); evaluateErr == nil {
-		searchBaseRoot = evaluated
-	}
-	options := fileSearchOptions{
-		baseRoot:     searchBaseRoot,
-		matcher:      matcher,
-		includeGlobs: args.IncludeGlobs,
-		excludeGlobs: args.ExcludeGlobs,
-		contextLines: args.ContextLines,
-		skipHidden:   args.Scope == managedScopeSkill || args.Scope == managedScopeApp || args.Scope == managedScopeTemp,
-	}
-	matches, filesScanned, capped, err := searchTextFiles(resolved.target, options, maxResults)
+	result, err := SearchTextFiles(ctx, resolved.target, TextFileSearchOptions{
+		BaseRoot:      resolved.root,
+		CaseSensitive: caseSensitive,
+		ContextLines:  args.ContextLines,
+		ExcludeGlobs:  args.ExcludeGlobs,
+		IncludeGlobs:  args.IncludeGlobs,
+		MaxResults:    args.MaxResults,
+		Mode:          args.Mode,
+		Query:         args.Query,
+		SkipHidden:    args.Scope == managedScopeSkill || args.Scope == managedScopeApp || args.Scope == managedScopeTemp,
+	})
 	if err != nil {
+		var searchErr *TextFileSearchError
+		if errors.As(err, &searchErr) {
+			return toolJSONError(out, searchErr.Code, searchErr.Detail)
+		}
 		return toolJSONError(out, "search_failed", err.Error())
 	}
-	items := make([]map[string]any, 0, len(matches))
-	for _, match := range matches {
-		path := match.path
+	items := make([]map[string]any, 0, len(result.Matches))
+	for _, match := range result.Matches {
+		path := match.Path
 		if !resolved.project {
-			if rel, err := filepath.Rel(resolved.root, match.path); err == nil {
+			if rel, err := filepath.Rel(resolved.root, match.Path); err == nil {
 				path = filepath.ToSlash(rel)
 			}
 		}
 		items = append(items, map[string]any{
 			"path":      path,
-			"line":      match.line,
-			"lineStart": match.lineStart,
-			"lineEnd":   match.lineEnd,
-			"text":      match.text,
-			"excerpt":   match.excerpt,
-			"truncated": match.truncated,
+			"line":      match.Line,
+			"lineStart": match.LineStart,
+			"lineEnd":   match.LineEnd,
+			"text":      match.Text,
+			"excerpt":   match.Excerpt,
+			"truncated": match.Truncated,
 		})
 	}
 	out.Ok = true
 	out.Content = jsonString(resolved.payload(map[string]any{
 		"ok":            true,
 		"scope":         args.Scope,
-		"query":         args.Query,
+		"query":         result.Query,
 		"matches":       items,
 		"matchCount":    len(items),
-		"filesScanned":  filesScanned,
-		"resultsCapped": capped,
-		"caseSensitive": caseSensitive,
-		"searchType":    mode,
-		"contextLines":  args.ContextLines,
-		"includeGlobs":  args.IncludeGlobs,
-		"excludeGlobs":  args.ExcludeGlobs,
+		"filesScanned":  result.FilesScanned,
+		"resultsCapped": result.ResultsCapped,
+		"caseSensitive": result.CaseSensitive,
+		"searchType":    result.Mode,
+		"contextLines":  result.ContextLines,
+		"includeGlobs":  result.IncludeGlobs,
+		"excludeGlobs":  result.ExcludeGlobs,
 	}))
 	out.SummaryKind = SummaryReturnedItems
 	out.SummaryCount = len(items)
@@ -1040,6 +1015,51 @@ type fileSearchOptions struct {
 	skipHidden   bool
 }
 
+// TextFileSearchOptions configures the shared UTF-8 content search used by
+// both model tools and the project browser.
+type TextFileSearchOptions struct {
+	BaseRoot      string
+	CaseSensitive bool
+	ContextLines  int
+	ExcludeGlobs  []string
+	IncludeGlobs  []string
+	MaxResults    int
+	Mode          string
+	Query         string
+	SkipHidden    bool
+}
+
+type TextFileSearchMatch struct {
+	Path      string
+	Line      int
+	LineStart int
+	LineEnd   int
+	Text      string
+	Excerpt   string
+	Truncated bool
+}
+
+type TextFileSearchResult struct {
+	CaseSensitive bool
+	ContextLines  int
+	ExcludeGlobs  []string
+	FilesScanned  int
+	IncludeGlobs  []string
+	Matches       []TextFileSearchMatch
+	Mode          string
+	Query         string
+	ResultsCapped bool
+}
+
+type TextFileSearchError struct {
+	Code   string
+	Detail string
+}
+
+func (e *TextFileSearchError) Error() string {
+	return e.Detail
+}
+
 var fileSearchSkipDirs = map[string]struct{}{
 	".cache":        {},
 	".git":          {},
@@ -1161,7 +1181,79 @@ func validateSearchGlobs(groups ...[]string) error {
 	return nil
 }
 
-func searchTextFiles(root string, options fileSearchOptions, maxResults int) ([]fileSearchMatch, int, bool, error) {
+// SearchTextFiles performs the canonical bounded text search for authorized
+// file roots. Callers remain responsible for authorizing root before calling.
+func SearchTextFiles(ctx context.Context, root string, options TextFileSearchOptions) (TextFileSearchResult, error) {
+	options.Query = strings.TrimSpace(options.Query)
+	if options.Query == "" {
+		return TextFileSearchResult{}, &TextFileSearchError{Code: "query_required", Detail: "query must be a non-empty string"}
+	}
+	mode := strings.ToLower(strings.TrimSpace(options.Mode))
+	if mode == "" {
+		mode = "literal"
+	}
+	if mode != "literal" && mode != "regex" {
+		return TextFileSearchResult{}, &TextFileSearchError{Code: "invalid_search_mode", Detail: "mode must be literal or regex"}
+	}
+	if options.ContextLines < 0 || options.ContextLines > maxFileSearchContextLines {
+		return TextFileSearchResult{}, &TextFileSearchError{Code: "invalid_context_lines", Detail: "context_lines must be between 0 and 5"}
+	}
+	matcher, err := newFileSearchMatcher(mode, options.Query, options.CaseSensitive)
+	if err != nil {
+		return TextFileSearchResult{}, &TextFileSearchError{Code: "invalid_regex", Detail: err.Error()}
+	}
+	if err := validateSearchGlobs(options.IncludeGlobs, options.ExcludeGlobs); err != nil {
+		return TextFileSearchResult{}, &TextFileSearchError{Code: "invalid_glob", Detail: err.Error()}
+	}
+	maxResults := options.MaxResults
+	if maxResults <= 0 {
+		maxResults = defaultFileSearchMax
+	}
+	if maxResults > maxFileSearchMax {
+		maxResults = maxFileSearchMax
+	}
+	baseRoot := options.BaseRoot
+	if strings.TrimSpace(baseRoot) == "" {
+		baseRoot = root
+	}
+	if evaluated, evaluateErr := filepath.EvalSymlinks(baseRoot); evaluateErr == nil {
+		baseRoot = evaluated
+	}
+	matches, filesScanned, capped, err := searchTextFiles(ctx, root, fileSearchOptions{
+		baseRoot:     baseRoot,
+		matcher:      matcher,
+		includeGlobs: options.IncludeGlobs,
+		excludeGlobs: options.ExcludeGlobs,
+		contextLines: options.ContextLines,
+		skipHidden:   options.SkipHidden,
+	}, maxResults)
+	if err != nil {
+		return TextFileSearchResult{}, err
+	}
+	result := TextFileSearchResult{
+		CaseSensitive: options.CaseSensitive,
+		ContextLines:  options.ContextLines,
+		ExcludeGlobs:  options.ExcludeGlobs,
+		FilesScanned:  filesScanned,
+		IncludeGlobs:  options.IncludeGlobs,
+		Matches:       make([]TextFileSearchMatch, 0, len(matches)),
+		Mode:          mode,
+		Query:         options.Query,
+		ResultsCapped: capped,
+	}
+	for _, match := range matches {
+		result.Matches = append(result.Matches, TextFileSearchMatch{
+			Path: match.path, Line: match.line, LineStart: match.lineStart, LineEnd: match.lineEnd,
+			Text: match.text, Excerpt: match.excerpt, Truncated: match.truncated,
+		})
+	}
+	return result, nil
+}
+
+func searchTextFiles(ctx context.Context, root string, options fileSearchOptions, maxResults int) ([]fileSearchMatch, int, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, false, err
+	}
 	info, err := os.Lstat(root)
 	if err != nil {
 		return nil, 0, false, err
@@ -1180,6 +1272,9 @@ func searchTextFiles(root string, options fileSearchOptions, maxResults int) ([]
 	filesScanned := 0
 	capped := false
 	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if walkErr != nil {
 			return nil
 		}

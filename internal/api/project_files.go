@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -18,12 +19,15 @@ import (
 	"github.com/teatak/pudding-core/internal/projectfs"
 	"github.com/teatak/pudding-core/internal/projectpath"
 	"github.com/teatak/pudding-core/internal/store"
+	"github.com/teatak/pudding-core/internal/tool"
 )
 
 const (
 	projectTreeMaxEntries   = 1000
 	projectTextMaxBytes     = 2 << 20
 	projectResourceMaxBytes = 10 << 20
+	projectSearchDefaultMax = 200
+	projectSearchMax        = 500
 )
 
 type projectRootView struct {
@@ -51,6 +55,17 @@ type projectFileView struct {
 	Revision string `json:"revision"`
 }
 
+type projectSearchMatchView struct {
+	RootID    string `json:"rootID"`
+	Path      string `json:"path"`
+	Line      int    `json:"line"`
+	LineStart int    `json:"lineStart"`
+	LineEnd   int    `json:"lineEnd"`
+	Text      string `json:"text"`
+	Excerpt   string `json:"excerpt"`
+	Truncated bool   `json:"truncated"`
+}
+
 var projectTreeIgnoredDirs = map[string]struct{}{
 	".cache":        {},
 	".git":          {},
@@ -63,6 +78,71 @@ var projectTreeIgnoredDirs = map[string]struct{}{
 	"build":         {},
 	"dist":          {},
 	"node_modules":  {},
+}
+
+func (s *Server) searchProjectFiles(c *cart.Context) error {
+	_, roots, ok := s.sessionProject(c)
+	if !ok {
+		return nil
+	}
+	query := strings.TrimSpace(c.Request.URL.Query().Get("q"))
+	if query == "" {
+		return projectFileError(c, http.StatusBadRequest, "project_search_query_required")
+	}
+	limit := projectSearchDefaultMax
+	if raw := strings.TrimSpace(c.Request.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			return projectFileError(c, http.StatusBadRequest, "project_search_limit_invalid")
+		}
+		limit = min(parsed, projectSearchMax)
+	}
+	caseSensitive := query != strings.ToLower(query)
+	matches := make([]projectSearchMatchView, 0, min(limit, 64))
+	filesScanned := 0
+	resultsCapped := false
+	for _, root := range roots {
+		remaining := limit - len(matches)
+		if remaining <= 0 {
+			resultsCapped = true
+			break
+		}
+		result, err := tool.SearchTextFiles(c.Request.Context(), root.Path, tool.TextFileSearchOptions{
+			BaseRoot:      root.Path,
+			CaseSensitive: caseSensitive,
+			MaxResults:    remaining,
+			Mode:          "literal",
+			Query:         query,
+		})
+		if err != nil {
+			if c.Request.Context().Err() != nil {
+				return nil
+			}
+			return s.fail(c, err)
+		}
+		filesScanned += result.FilesScanned
+		resultsCapped = resultsCapped || result.ResultsCapped
+		for _, match := range result.Matches {
+			rel, err := filepath.Rel(root.Path, match.Path)
+			if err != nil {
+				continue
+			}
+			matches = append(matches, projectSearchMatchView{
+				RootID: root.ID, Path: filepath.ToSlash(rel), Line: match.Line,
+				LineStart: match.LineStart, LineEnd: match.LineEnd, Text: match.Text,
+				Excerpt: match.Excerpt, Truncated: match.Truncated,
+			})
+		}
+	}
+	c.JSON(http.StatusOK, map[string]any{
+		"query":         query,
+		"matches":       matches,
+		"matchCount":    len(matches),
+		"filesScanned":  filesScanned,
+		"resultsCapped": resultsCapped,
+		"caseSensitive": caseSensitive,
+	})
+	return nil
 }
 
 func (s *Server) listProjectTree(c *cart.Context) error {
@@ -106,9 +186,6 @@ func (s *Server) listProjectTree(c *cart.Context) error {
 	}
 	visibleEntries := entries[:0]
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".") {
-			continue
-		}
 		if entry.IsDir() {
 			if _, ignored := projectTreeIgnoredDirs[entry.Name()]; ignored {
 				continue

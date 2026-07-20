@@ -3,6 +3,7 @@ import "monaco-editor/esm/vs/editor/edcore.main.js";
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api.js";
 import { useEffect, useRef, useState } from "react";
 
+import { useEditorTypography } from "@/components/EditorTypographyProvider";
 import { useI18n } from "@/i18n";
 import { showDesktopEditorContextMenu, type DesktopEditorCommand } from "@/lib/desktopBridge";
 import { languageFromPath } from "@/lib/fileLanguage";
@@ -83,6 +84,7 @@ export function ProjectEditor({
 }) {
   const { t } = useI18n();
   const { resolved } = useTheme();
+  const typography = useEditorTypography();
   const dark = resolved === "dark";
   const containerRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -92,6 +94,7 @@ export function ProjectEditor({
   const onSaveRef = useRef(onSave);
   const onReferenceSelectionRef = useRef(onReferenceSelection);
   const revealRef = useRef(reveal);
+  const typographyRef = useRef(typography);
   const syncingRef = useRef(false);
   const valueRef = useRef(value);
   const [selectionAction, setSelectionAction] = useState<SelectionAction>();
@@ -100,6 +103,7 @@ export function ProjectEditor({
   onSaveRef.current = onSave;
   onReferenceSelectionRef.current = onReferenceSelection;
   revealRef.current = reveal;
+  typographyRef.current = typography;
   valueRef.current = value;
 
   useEffect(() => {
@@ -120,11 +124,11 @@ export function ProjectEditor({
         bracketPairColorization: { enabled: true },
         contextmenu: false, // Delegate right-clicks to Electron's native edit menu.
         folding: true,
-        fontFamily: "var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-        fontSize: 12,
+        fontFamily: typographyRef.current.fontFamily,
+        fontSize: typographyRef.current.fontSize,
         glyphMargin: false,
         hideCursorInOverviewRuler: true,
-        lineHeight: 20,
+        lineHeight: typographyRef.current.lineHeight,
         lineNumbersMinChars: 3,
         minimap: { enabled: false },
         occurrencesHighlight: "off",
@@ -165,6 +169,14 @@ export function ProjectEditor({
     if (!editorRef.current) return;
     monaco.editor.setTheme(dark ? darkTheme : lightTheme);
   }, [dark]);
+
+  useEffect(() => {
+    editorRef.current?.updateOptions({
+      fontFamily: typography.fontFamily,
+      fontSize: typography.fontSize,
+      lineHeight: typography.lineHeight,
+    });
+  }, [typography.fontFamily, typography.fontSize, typography.lineHeight]);
 
   useEffect(() => {
     const editor = editorRef.current;

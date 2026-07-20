@@ -232,6 +232,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/canvas/saved/:savedID").DELETE(s.deleteSavedCanvasItem)
 	app.Route("/sessions/:id/canvas/closed").GET(s.listClosedCanvasItems).POST(s.createClosedCanvasItem).DELETE(s.clearClosedCanvasItems)
 	app.Route("/sessions/:id/canvas/closed/:closedID").DELETE(s.deleteClosedCanvasItem)
+	app.Route("/sessions/:id/project/search").GET(s.searchProjectFiles)
 	app.Route("/sessions/:id/project/tree").GET(s.listProjectTree)
 	app.Route("/sessions/:id/project/file").GET(s.getProjectFile).PUT(s.putProjectFile)
 	app.Route("/sessions/:id/project/entries").POST(s.createProjectEntry).PATCH(s.renameProjectEntry).DELETE(s.deleteProjectEntry)

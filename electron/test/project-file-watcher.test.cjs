@@ -62,7 +62,7 @@ test("watches the parent directory and debounces changes for the selected file",
   service.closeAll();
 });
 
-test("watches project directories recursively and ignores hidden or generated paths", async () => {
+test("watches project directories recursively and only ignores configured generated paths", async () => {
   const watched = [];
   const service = new ProjectFileWatcher({
     debounceMs: 5,
@@ -93,6 +93,19 @@ test("watches project directories recursively and ignores hidden or generated pa
       changedPath: path.join(projectPath, "src/main.go"),
     },
   }]);
+
+  watched[0].listener("change", ".claude/settings.json");
+  await new Promise((resolve) => setTimeout(resolve, 15));
+
+  assert.deepEqual(sender.events[1], {
+    channel: projectFileChangedChannel,
+    payload: {
+      eventType: "change",
+      id: "project",
+      path: projectPath,
+      changedPath: path.join(projectPath, ".claude/settings.json"),
+    },
+  });
   service.closeAll();
 });
 

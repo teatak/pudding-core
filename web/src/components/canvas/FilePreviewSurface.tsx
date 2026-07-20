@@ -1,6 +1,7 @@
 import { Check, Copy, FileCode2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
+import { useEditorTypography } from "@/components/EditorTypographyProvider";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
 import { fileNameFromPath, languageFromPath } from "@/lib/fileLanguage";
@@ -18,6 +19,7 @@ export function FilePreviewSurface({ active, preview, token }: { active: boolean
 
 function TextFilePreviewSurface({ active, preview }: { active: boolean; preview: FilePreview }) {
   const { t } = useI18n();
+  const typography = useEditorTypography();
   const [copied, setCopied] = useState(false);
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const copiedTimerRef = useRef<number | null>(null);
@@ -30,6 +32,11 @@ function TextFilePreviewSurface({ active, preview }: { active: boolean; preview:
     [lineCount, preview.lineStart, preview.lineStep],
   );
   const focusLineIndex = preview.focusLine == null ? -1 : lineNumbers.indexOf(preview.focusLine);
+  const typographyVariables = {
+    "--editor-font-family": typography.fontFamily,
+    "--editor-font-size": `${typography.fontSize}px`,
+    "--editor-line-height": `${typography.resolvedLineHeight}px`,
+  } as CSSProperties;
 
   useEffect(() => {
     let cancelled = false;
@@ -92,27 +99,39 @@ function TextFilePreviewSurface({ active, preview }: { active: boolean; preview:
           {t("canvas.filePreviewTruncated")}
         </div>
       ) : null}
-      <div className="min-h-0 flex-1 overflow-auto bg-[var(--workspace-panel-background)]">
+      <div
+        className="min-h-0 flex-1 overflow-auto bg-[var(--workspace-panel-background)]"
+        style={typographyVariables}
+      >
         <div className="relative flex min-h-full min-w-max items-stretch">
           {focusLineIndex >= 0 ? (
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute inset-x-0 z-0 h-6 border-l-2 border-primary/60 bg-primary/[0.06]"
-              style={{ top: `${12 + focusLineIndex * 24}px` }}
+              className="pointer-events-none absolute inset-x-0 z-0 border-l-2 border-primary/60 bg-primary/[0.06]"
+              style={{
+                height: `${typography.resolvedLineHeight}px`,
+                top: `${12 + focusLineIndex * typography.resolvedLineHeight}px`,
+              }}
             />
           ) : null}
           <div
             aria-hidden="true"
-            className="sticky left-0 z-[1] m-0 shrink-0 border-r bg-muted/35 px-3 py-3 text-right font-mono text-[12px] leading-6 text-muted-foreground/60 select-none"
+            className="pudding-editor-typography sticky left-0 z-[1] m-0 shrink-0 border-r bg-muted/35 px-3 py-3 text-right text-muted-foreground/60 select-none"
           >
             {lineNumbers.map((line) => (
-              <div key={line} className={cn("h-6", line === preview.focusLine && "font-semibold text-primary")}>{line}</div>
+              <div
+                key={line}
+                className={cn(line === preview.focusLine && "font-semibold text-primary")}
+                style={{ height: `${typography.resolvedLineHeight}px` }}
+              >
+                {line}
+              </div>
             ))}
           </div>
           {highlighted ? (
             <div className="pudding-file-preview relative z-[1] min-w-max" dangerouslySetInnerHTML={{ __html: highlighted }} />
           ) : (
-            <pre className="relative z-[1] m-0 min-w-max px-4 py-3 font-mono text-[12px] leading-6 text-foreground/90">{content}</pre>
+            <pre className="pudding-editor-typography relative z-[1] m-0 min-w-max px-4 py-3 text-foreground/90">{content}</pre>
           )}
         </div>
       </div>

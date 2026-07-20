@@ -28,7 +28,10 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 		settings[SettingShowCompactSummary] != "true" ||
 		settings[SettingShowReasoning] != "true" ||
 		settings[SettingShowRawToolInfo] != "true" ||
-		settings[SettingShowAppPreviewVersions] != "false" {
+		settings[SettingShowAppPreviewVersions] != "false" ||
+		settings[SettingEditorFontFamily] != DefaultEditorFontFamily ||
+		settings[SettingEditorFontSize] != "12" ||
+		settings[SettingEditorLineHeight] != "20" {
 		t.Fatalf("unexpected settings: %+v", settings)
 	}
 
@@ -205,6 +208,9 @@ func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {
 		SettingShowReasoning:               "false",
 		SettingShowRawToolInfo:             "false",
 		SettingShowAppPreviewVersions:      "true",
+		SettingEditorFontFamily:            "JetBrains Mono, monospace",
+		SettingEditorFontSize:              "14",
+		SettingEditorLineHeight:            "0",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +223,10 @@ func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {
 		settings[SettingShowCompactSummary] != "false" ||
 		settings[SettingShowReasoning] != "false" ||
 		settings[SettingShowRawToolInfo] != "false" ||
-		settings[SettingShowAppPreviewVersions] != "true" {
+		settings[SettingShowAppPreviewVersions] != "true" ||
+		settings[SettingEditorFontFamily] != "JetBrains Mono, monospace" ||
+		settings[SettingEditorFontSize] != "14" ||
+		settings[SettingEditorLineHeight] != "0" {
 		t.Fatalf("unexpected settings: %+v", settings)
 	}
 	settingsPath := home + "/config/settings.yaml"
@@ -230,6 +239,9 @@ func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {
 		!strings.Contains(settingsYAML, "auto_threshold_percent: 70") ||
 		!strings.Contains(settingsYAML, "reasoning: false") ||
 		!strings.Contains(settingsYAML, "raw_tool_info: false") ||
+		!strings.Contains(settingsYAML, "font_family: JetBrains Mono, monospace") ||
+		!strings.Contains(settingsYAML, "font_size: 14") ||
+		!strings.Contains(settingsYAML, "line_height: 0") ||
 		!strings.Contains(settingsYAML, "show_preview_versions: true") {
 		t.Fatalf("expected settings in settings.yaml:\n%s", settingsYAML)
 	}
@@ -276,6 +288,33 @@ func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {
 	}
 }
 
+func TestManagerRejectsInvalidEditorSettings(t *testing.T) {
+	home := t.TempDir()
+	m := NewManager(home)
+	if err := m.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for key, value := range map[string]string{
+		SettingEditorFontFamily: "\n",
+		SettingEditorFontSize:   "9",
+		SettingEditorLineHeight: "11",
+	} {
+		if err := m.SetSettings(ctx, map[string]string{key: value}); err == nil {
+			t.Fatalf("SetSettings(%s=%q) succeeded", key, value)
+		}
+	}
+	settings, err := m.Settings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings[SettingEditorFontFamily] != DefaultEditorFontFamily ||
+		settings[SettingEditorFontSize] != "12" ||
+		settings[SettingEditorLineHeight] != "20" {
+		t.Fatalf("invalid updates changed editor settings: %+v", settings)
+	}
+}
+
 func TestManagerResetSettingsOnlyRewritesSettingsYAML(t *testing.T) {
 	home := t.TempDir()
 	m := NewManager(home)
@@ -290,6 +329,9 @@ func TestManagerResetSettingsOnlyRewritesSettingsYAML(t *testing.T) {
 		SettingShowReasoning:               "false",
 		SettingShowRawToolInfo:             "false",
 		SettingShowAppPreviewVersions:      "true",
+		SettingEditorFontFamily:            "Fira Code, monospace",
+		SettingEditorFontSize:              "16",
+		SettingEditorLineHeight:            "24",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +356,10 @@ func TestManagerResetSettingsOnlyRewritesSettingsYAML(t *testing.T) {
 		reset[SettingShowCompactSummary] != "true" ||
 		reset[SettingShowReasoning] != "true" ||
 		reset[SettingShowRawToolInfo] != "true" ||
-		reset[SettingShowAppPreviewVersions] != "false" {
+		reset[SettingShowAppPreviewVersions] != "false" ||
+		reset[SettingEditorFontFamily] != DefaultEditorFontFamily ||
+		reset[SettingEditorFontSize] != "12" ||
+		reset[SettingEditorLineHeight] != "20" {
 		t.Fatalf("unexpected reset settings: %+v", reset)
 	}
 	reloaded, err := m.Settings(ctx)

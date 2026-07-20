@@ -6,6 +6,8 @@ type MascotProps = {
   inputPitchBias?: number;
   mood?: MascotMood;
   headShakeSignal?: number;
+  ambientMotion?: boolean;
+  pointerTracking?: boolean;
   onPointerGaze?: () => void;
   showFaceDebugFrame?: boolean;
   showHeadDebugFrame?: boolean;
@@ -57,16 +59,6 @@ const SHADE_BASE_OPACITY = 0.03;
 const SHADE_TURN_OPACITY = 0.11;
 const HIGHLIGHT_SHIFT_X = 2;
 const HIGHLIGHT_SHIFT_Y = 1;
-const BLINK_DUR = "6s";
-const BLINK_KEY_TIMES = "0;0.3;0.38;0.6;0.64;0.7;0.84;0.87;0.89;0.91;0.94;1";
-const BLINK_HEIGHT_VALUES = "9;9;9;9;3.1;9;9;1.2;9;1.2;9;9";
-const BLINK_Y_VALUES = "65;65;65;65;68;65;65;68.9;65;68.9;65;65";
-const BLINK_GLINT_VALUES = "0.28;0.28;0.28;0.28;0.12;0.28;0.28;0;0.28;0;0.28;0.28";
-const MOUTH_BLINK_DUR = "7.2s";
-const MOUTH_BLINK_KEY_TIMES = "0;0.2;0.23;0.255;0.62;0.635;0.65;1";
-const MOUTH_BLINK_D_VALUES =
-  "M57 88.7 Q64 90.1 71 88.7;M57 88.7 Q64 90.1 71 88.7;M60 88.9 Q64 89.5 68 88.9;M57 88.7 Q64 90.1 71 88.7;M57 88.7 Q64 90.1 71 88.7;M58.5 88.8 Q64 90.3 69.5 88.8;M57 88.7 Q64 90.1 71 88.7;M57 88.7 Q64 90.1 71 88.7";
-const MOUTH_BLINK_WIDTH_VALUES = "3.5;3.5;3;3.5;3.5;3.3;3.5;3.5";
 const CLICK_ANIMATION_DURATION_MS = 2200;
 // Standard error gesture: face forward, lower the head slightly, then shake no.
 const HEAD_SHAKE_NO_DURATION_MS = 600;
@@ -95,9 +87,31 @@ const absoluteLayerStyle: CSSProperties = {
 const rootStyle: CSSProperties = {
   display: "inline-block",
   overflow: "visible",
+  position: "relative",
+};
+
+// Keep the animated SVG damage inside a small compositor surface. The extra
+// margin preserves the head tilt and arm motion without letting the mascot's
+// visible overflow invalidate unrelated hover surfaces across the app.
+const paintBoundsStyle: CSSProperties = {
+  contain: "layout style paint",
+  inset: "-25%",
+  isolation: "isolate",
+  overflow: "hidden",
+  pointerEvents: "none",
+  position: "absolute",
+  transform: "translateZ(0)",
+};
+
+const artViewportStyle: CSSProperties = {
+  height: "66.666667%",
+  left: "16.666667%",
+  overflow: "visible",
   perspective: `${HEAD_PERSPECTIVE_PX}px`,
   perspectiveOrigin: `50% ${HEAD_ORIGIN_Y_PERCENT}%`,
-  position: "relative",
+  position: "absolute",
+  top: "16.666667%",
+  width: "66.666667%",
 };
 
 const headGestureStyle: CSSProperties = {
@@ -105,7 +119,6 @@ const headGestureStyle: CSSProperties = {
   transform: "translateX(0px) rotateZ(0deg)",
   transformOrigin: `50% ${HEAD_ORIGIN_Y_PERCENT}%`,
   transformStyle: "preserve-3d",
-  willChange: "transform",
 };
 
 const headStyle: CSSProperties = {
@@ -113,7 +126,6 @@ const headStyle: CSSProperties = {
   transform: "translate(0px, 0px) rotateY(0deg) rotateX(0deg) rotateZ(0deg)",
   transformOrigin: `50% ${HEAD_ORIGIN_Y_PERCENT}%`,
   transformStyle: "preserve-3d",
-  willChange: "transform",
 };
 
 const faceLayerStyle: CSSProperties = {
@@ -121,8 +133,43 @@ const faceLayerStyle: CSSProperties = {
   transform: `translate3d(0px, 0px, ${FACE_Z_OFFSET_PX}px) rotateY(0deg) rotateX(0deg)`,
   transformOrigin: `${(FACE_CENTER_X / 128) * 100}% ${(FACE_CENTER_Y / 128) * 100}%`,
   transformStyle: "preserve-3d",
-  willChange: "transform",
   zIndex: 1,
+};
+
+const compositeLayerStyle: CSSProperties = {
+  ...absoluteLayerStyle,
+  pointerEvents: "none",
+};
+
+const shadowMotionStyle: CSSProperties = {
+  ...compositeLayerStyle,
+  transformOrigin: "50% 88.28125%",
+};
+
+const antennaMotionStyle: CSSProperties = {
+  ...compositeLayerStyle,
+  transformOrigin: "50% 26.5625%",
+};
+
+const faceMotionStyle: CSSProperties = {
+  ...compositeLayerStyle,
+  transformOrigin: `${(FACE_CENTER_X / 128) * 100}% ${(FACE_CENTER_Y / 128) * 100}%`,
+};
+
+const eyeMotionStyle: CSSProperties = {
+  ...compositeLayerStyle,
+  transformOrigin: "50% 54.296875%",
+};
+
+const mouthMotionStyle: CSSProperties = {
+  ...compositeLayerStyle,
+  transformOrigin: "50% 69.53125%",
+};
+
+type MascotMetrics = {
+  centerX: number;
+  centerY: number;
+  size: number;
 };
 
 export function Mascot({
@@ -131,19 +178,23 @@ export function Mascot({
   inputPitchBias = 0,
   mood = "idle",
   headShakeSignal = 0,
+  ambientMotion = true,
+  pointerTracking = true,
   onPointerGaze,
   showFaceDebugFrame = false,
   showHeadDebugFrame = false,
 }: MascotProps) {
+  const motionEnabled = ambientMotion || pointerTracking;
   const rootRef = useRef<HTMLSpanElement>(null);
   const headGestureRef = useRef<HTMLSpanElement>(null);
   const headRef = useRef<HTMLSpanElement>(null);
   const faceLayerRef = useRef<HTMLSpanElement>(null);
-  const faceRef = useRef<SVGGElement>(null);
-  const shadowRef = useRef<SVGEllipseElement>(null);
-  const highlightRef = useRef<SVGRectElement>(null);
-  const leftShadeRef = useRef<SVGPathElement>(null);
-  const rightShadeRef = useRef<SVGPathElement>(null);
+  const faceMotionRef = useRef<HTMLSpanElement>(null);
+  const shadowMotionRef = useRef<HTMLSpanElement>(null);
+  const highlightMotionRef = useRef<HTMLSpanElement>(null);
+  const leftShadeRef = useRef<HTMLSpanElement>(null);
+  const rightShadeRef = useRef<HTMLSpanElement>(null);
+  const metricsRef = useRef<MascotMetrics | null>(null);
   const currentXRef = useRef(0);
   const currentYRef = useRef(0);
   const targetXRef = useRef(0);
@@ -154,6 +205,7 @@ export function Mascot({
   const currentInputPitchBiasRef = useRef(gaze.type === "input" ? inputPitchBias : 0);
   const targetInputPitchBiasRef = useRef(gaze.type === "input" ? inputPitchBias : 0);
   const gazeLockedRef = useRef(gaze.type === "center" || mood === "error");
+  const gazeTypeRef = useRef(gaze.type);
   const onPointerGazeRef = useRef(onPointerGaze);
   const id = useId().replace(/:/g, "");
   const faceID = `mascot-face-${id}`;
@@ -165,35 +217,37 @@ export function Mascot({
     const pitchTurnY = clamp(turnY + currentInputPitchBiasRef.current, -1, 1);
     const head = headRef.current;
     const faceLayer = faceLayerRef.current;
-    const face = faceRef.current;
-    const shadow = shadowRef.current;
-    const highlight = highlightRef.current;
+    const faceMotion = faceMotionRef.current;
+    const shadowMotion = shadowMotionRef.current;
+    const highlightMotion = highlightMotionRef.current;
     const leftShade = leftShadeRef.current;
     const rightShade = rightShadeRef.current;
 
     if (head) {
-      head.style.transform = `translate(${turnX * HEAD_SHIFT_X_PERCENT}%, ${pitchTurnY * HEAD_SHIFT_Y_PERCENT}%) rotateY(${turnX * HEAD_YAW_MAX_DEG}deg) rotateX(${-pitchTurnY * HEAD_PITCH_MAX_DEG}deg) rotateZ(${turnX * pitchTurnY * HEAD_ROLL_MAX_DEG}deg)`;
+      head.style.transform = `translate3d(${turnX * HEAD_SHIFT_X_PERCENT}%, ${pitchTurnY * HEAD_SHIFT_Y_PERCENT}%, 0) rotateY(${turnX * HEAD_YAW_MAX_DEG}deg) rotateX(${-pitchTurnY * HEAD_PITCH_MAX_DEG}deg) rotateZ(${turnX * pitchTurnY * HEAD_ROLL_MAX_DEG}deg)`;
     }
     if (faceLayer) {
       faceLayer.style.transform = `translate3d(0px, 0px, ${FACE_Z_OFFSET_PX}px) rotateY(${turnX * FACE_EXTRA_YAW_DEG}deg) rotateX(${-pitchTurnY * FACE_EXTRA_PITCH_DEG}deg)`;
     }
-    if (face) {
-      face.setAttribute("transform", faceTransform(turnX, pitchTurnY));
+    if (faceMotion) {
+      const scaleX = 1 - Math.abs(turnX) * FACE_EXTRA_SQUEEZE_X;
+      const scaleY = 1 + pitchTurnY * FACE_EXTRA_SCALE_Y;
+      faceMotion.style.transform = `translate3d(${turnX * (FACE_SHIFT_X / 128) * 100}%, ${pitchTurnY * (FACE_SHIFT_Y / 128) * 100}%, 0) skewX(${-turnX * FACE_EXTRA_SKEW_DEG}deg) scale(${scaleX}, ${scaleY})`;
     }
-    if (shadow) {
-      shadow.setAttribute("cx", `${64 + turnX * SHADOW_SHIFT_X}`);
-      shadow.setAttribute("rx", `${34 - Math.abs(turnX) * SHADOW_SQUEEZE_X}`);
-      shadow.setAttribute("ry", `${7 + Math.max(pitchTurnY, 0) * SHADOW_SCALE_Y}`);
+    if (shadowMotion) {
+      const scaleX = 1 - (Math.abs(turnX) * SHADOW_SQUEEZE_X) / 34;
+      const scaleY = 1 + (Math.max(pitchTurnY, 0) * SHADOW_SCALE_Y) / 7;
+      shadowMotion.style.transform = `translate3d(${turnX * (SHADOW_SHIFT_X / 128) * 100}%, 0, 0) scale(${scaleX}, ${scaleY})`;
     }
-    if (highlight) {
-      highlight.setAttribute("transform", `translate(${turnX * HIGHLIGHT_SHIFT_X} ${pitchTurnY * HIGHLIGHT_SHIFT_Y})`);
-      highlight.setAttribute("opacity", `${1 - Math.max(pitchTurnY, 0) * 0.14}`);
+    if (highlightMotion) {
+      highlightMotion.style.transform = `translate3d(${turnX * (HIGHLIGHT_SHIFT_X / 128) * 100}%, ${pitchTurnY * (HIGHLIGHT_SHIFT_Y / 128) * 100}%, 0)`;
+      highlightMotion.style.opacity = `${1 - Math.max(pitchTurnY, 0) * 0.14}`;
     }
     if (leftShade) {
-      leftShade.setAttribute("opacity", `${SHADE_BASE_OPACITY + Math.max(-turnX, 0) * SHADE_TURN_OPACITY}`);
+      leftShade.style.opacity = `${SHADE_BASE_OPACITY + Math.max(-turnX, 0) * SHADE_TURN_OPACITY}`;
     }
     if (rightShade) {
-      rightShade.setAttribute("opacity", `${SHADE_BASE_OPACITY + Math.max(turnX, 0) * SHADE_TURN_OPACITY}`);
+      rightShade.style.opacity = `${SHADE_BASE_OPACITY + Math.max(turnX, 0) * SHADE_TURN_OPACITY}`;
     }
   };
 
@@ -245,25 +299,27 @@ export function Mascot({
     satRatio = SAT_RATIO,
     satMinPx = POINTER_SAT_MIN_PX,
   ) => {
-    const rect = rootRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    const metrics = metricsRef.current;
+    if (!metrics) return;
 
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    const dx = clientX - cx;
-    const dy = clientY - cy;
+    const dx = clientX - metrics.centerX;
+    const dy = clientY - metrics.centerY;
     const distance = Math.hypot(dx, dy);
     if (distance < 1) {
       setTarget(0, 0);
       return;
     }
 
-    const sat = Math.max(rect.width, rect.height, satMinPx) * satRatio;
+    const sat = Math.max(metrics.size, satMinPx) * satRatio;
     const k = Math.min(distance / sat, 1);
     setTarget((dx / distance) * k * EYE_MAX_X, (dy / distance) * k * EYE_MAX_Y);
   };
 
   useEffect(() => {
+    gazeTypeRef.current = gaze.type;
+    if (!motionEnabled) {
+      return;
+    }
     if (gaze.type === "input") {
       setTargetFromPoint(gaze.target.clientX, gaze.target.clientY, INPUT_SAT_RATIO, INPUT_SAT_MIN_PX);
       return;
@@ -271,12 +327,15 @@ export function Mascot({
     if (gaze.type === "center") {
       setTarget(0, 0);
     }
-  }, [gaze]);
+  }, [gaze, motionEnabled]);
 
   useEffect(() => {
+    if (!motionEnabled) {
+      return;
+    }
     targetInputPitchBiasRef.current = gaze.type === "input" ? inputPitchBias : 0;
     startTick();
-  }, [gaze.type, inputPitchBias]);
+  }, [gaze.type, inputPitchBias, motionEnabled]);
 
   useEffect(() => {
     onPointerGazeRef.current = onPointerGaze;
@@ -287,24 +346,46 @@ export function Mascot({
   }, [gaze.type, mood]);
 
   useLayoutEffect(() => {
+    const updateMetrics = () => {
+      const rect = rootRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      metricsRef.current = {
+        centerX: rect.left + rect.width / 2,
+        centerY: rect.top + rect.height / 2,
+        size: Math.max(rect.width, rect.height),
+      };
+    };
+
+    updateMetrics();
+    applyPose(0, 0);
+    if (!motionEnabled) {
+      return;
+    }
+    const resizeObserver = new ResizeObserver(updateMetrics);
+    if (rootRef.current) resizeObserver.observe(rootRef.current);
+    if (rootRef.current?.parentElement) resizeObserver.observe(rootRef.current.parentElement);
+    window.addEventListener("resize", updateMetrics, { passive: true });
+    window.addEventListener("scroll", updateMetrics, { capture: true, passive: true });
+
+    if (!pointerTracking) {
+      return () => {
+        resizeObserver.disconnect();
+        window.removeEventListener("resize", updateMetrics);
+        window.removeEventListener("scroll", updateMetrics, { capture: true });
+      };
+    }
     const onPointerMove = (event: PointerEvent) => {
       if (gazeLockedRef.current) {
         return;
       }
-      onPointerGazeRef.current?.();
-      setTargetFromPoint(event.clientX, event.clientY);
-    };
-    const onMouseMove = (event: MouseEvent) => {
-      if (gazeLockedRef.current) {
-        return;
+      if (gazeTypeRef.current !== "pointer") {
+        gazeTypeRef.current = "pointer";
+        onPointerGazeRef.current?.();
       }
-      onPointerGazeRef.current?.();
       setTargetFromPoint(event.clientX, event.clientY);
     };
 
-    applyPose(0, 0);
     window.addEventListener("pointermove", onPointerMove, { capture: true, passive: true });
-    window.addEventListener("mousemove", onMouseMove, { capture: true, passive: true });
     return () => {
       if (rafRef.current) {
         window.cancelAnimationFrame(rafRef.current);
@@ -315,9 +396,11 @@ export function Mascot({
         headShakeRafRef.current = 0;
       }
       window.removeEventListener("pointermove", onPointerMove, { capture: true });
-      window.removeEventListener("mousemove", onMouseMove, { capture: true });
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", updateMetrics);
+      window.removeEventListener("scroll", updateMetrics, { capture: true });
     };
-  }, []);
+  }, [motionEnabled, pointerTracking]);
 
   const animateLayer = (element: HTMLElement | null, keyframes: Keyframe[], options: KeyframeAnimationOptions) => {
     if (!element) return;
@@ -413,10 +496,10 @@ export function Mascot({
   };
 
   useEffect(() => {
-    if (headShakeSignal > 0) {
+    if (ambientMotion && headShakeSignal > 0) {
       playHeadShakeNo();
     }
-  }, [headShakeSignal]);
+  }, [ambientMotion, headShakeSignal]);
 
   return (
     <span
@@ -424,43 +507,25 @@ export function Mascot({
       aria-hidden="true"
       className={className}
       data-gaze={gaze.type}
+      data-ambient-motion={ambientMotion}
+      data-motion-enabled={motionEnabled}
+      data-pointer-tracking={pointerTracking}
       data-mood={mood}
       style={rootStyle}
-      onPointerDown={playClickAnimation}
+      onPointerDown={ambientMotion ? playClickAnimation : undefined}
     >
-      <svg data-slot="mascot-base" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-        <g data-slot="shadow">
-          <ellipse ref={shadowRef} cx="64" cy="113" fill="var(--mascot-shadow)" rx="34" ry="7" />
-        </g>
-      </svg>
+      <span data-slot="mascot-paint-bounds" style={paintBoundsStyle}>
+        <span data-slot="mascot-art-viewport" style={artViewportStyle}>
+          <span data-slot="shadow-motion" ref={shadowMotionRef} style={shadowMotionStyle}>
+            <svg data-slot="mascot-base" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+              <ellipse cx="64" cy="113" fill="var(--mascot-shadow)" rx="34" ry="7" />
+            </svg>
+          </span>
 
-      <span data-slot="head-gesture" ref={headGestureRef} style={headGestureStyle}>
-        <span data-slot="head" ref={headRef} style={headStyle}>
-          <svg data-slot="head-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-          <defs>
-            <linearGradient id={faceID} x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="var(--mascot-body-top)" />
-              <stop offset="55%" stopColor="var(--mascot-body-mid)" />
-              <stop offset="100%" stopColor="var(--mascot-body-bottom)" />
-            </linearGradient>
-            <linearGradient id={highlightID} x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="var(--mascot-highlight)" />
-              <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
-            </linearGradient>
-          </defs>
-
-          <g data-slot="arms">
-            <g data-slot="arm-left">
-              <animateTransform
-                attributeName="transform"
-                calcMode="spline"
-                dur="3.4s"
-                keySplines="0.42 0 0.58 1;0.42 0 0.58 1"
-                keyTimes="0;0.5;1"
-                repeatCount="indefinite"
-                type="translate"
-                values="0 0;0 -3;0 0"
-              />
+          <span data-slot="head-gesture" ref={headGestureRef} style={headGestureStyle}>
+            <span data-slot="head" ref={headRef} style={headStyle}>
+          <span data-slot="arm-left-motion" style={compositeLayerStyle}>
+            <svg data-slot="head-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
               <path
                 data-slot="arm-left-limb"
                 d="M30 85 C21 90 16 98 16 105"
@@ -476,19 +541,11 @@ export function Mascot({
                 fill="var(--mascot-limb)"
                 r="7"
               />
-            </g>
-            <g data-slot="arm-right">
-              <animateTransform
-                attributeName="transform"
-                begin="0.12s"
-                calcMode="spline"
-                dur="3.4s"
-                keySplines="0.42 0 0.58 1;0.42 0 0.58 1"
-                keyTimes="0;0.5;1"
-                repeatCount="indefinite"
-                type="translate"
-                values="0 0;0 -2.7;0 0"
-              />
+            </svg>
+          </span>
+
+          <span data-slot="arm-right-motion" style={compositeLayerStyle}>
+            <svg data-slot="head-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
               <path
                 data-slot="arm-right-limb"
                 d="M98 85 C107 90 112 98 112 105"
@@ -504,163 +561,165 @@ export function Mascot({
                 fill="var(--mascot-limb)"
                 r="7"
               />
-            </g>
-          </g>
+            </svg>
+          </span>
 
-          <g data-slot="antenna">
-            <animateTransform
-              attributeName="transform"
-              begin="0.18s"
-              calcMode="spline"
-              dur="3.6s"
-              keySplines="0.42 0 0.58 1;0.42 0 0.58 1"
-              keyTimes="0;0.5;1"
-              repeatCount="indefinite"
-              type="rotate"
-              values="-3 64 34;4 64 34;-3 64 34"
-            />
-            <path
-              d="M64 34 C65 28 63 23 60 18"
-              fill="none"
-              stroke="var(--mascot-antenna-stroke)"
-              strokeLinecap="round"
-              strokeWidth="4"
-            />
-            <circle
-              cx="59"
-              cy="16"
-              fill="var(--mascot-antenna)"
-              r="6"
-              stroke="var(--mascot-antenna-stroke)"
-              strokeWidth="2"
-            />
-          </g>
+          <span data-slot="antenna-motion" style={antennaMotionStyle}>
+            <span data-slot="antenna-glow" style={compositeLayerStyle}>
+              <svg data-slot="head-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+                <path
+                  d="M64 34 C65 28 63 23 60 18"
+                  fill="none"
+                  stroke="var(--mascot-antenna-stroke)"
+                  strokeLinecap="round"
+                  strokeWidth="4"
+                />
+                <circle
+                  cx="59"
+                  cy="16"
+                  fill="var(--mascot-antenna)"
+                  r="6"
+                  stroke="var(--mascot-antenna-stroke)"
+                  strokeWidth="2"
+                />
+              </svg>
+            </span>
+          </span>
 
-          <g data-slot="body">
+          <svg data-slot="body-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+            <defs>
+              <linearGradient id={faceID} x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor="var(--mascot-body-top)" />
+                <stop offset="55%" stopColor="var(--mascot-body-mid)" />
+                <stop offset="100%" stopColor="var(--mascot-body-bottom)" />
+              </linearGradient>
+            </defs>
             <rect fill={`url(#${faceID})`} height="76" rx="24" width="86" x="21" y="34" />
-            <rect ref={highlightRef} fill={`url(#${highlightID})`} height="34" rx="18" width="74" x="27" y="39" />
-            <path
-              ref={leftShadeRef}
-              d="M31 45 C26 51 24 59 24 70 V86 C24 98 35 108 48 110 C36 103 31 93 31 79 Z"
-              fill="var(--mascot-side-shade)"
-              opacity={SHADE_BASE_OPACITY}
-            />
-            <path
-              ref={rightShadeRef}
-              d="M97 45 C102 51 104 59 104 70 V86 C104 98 93 108 80 110 C92 103 97 93 97 79 Z"
-              fill="var(--mascot-side-shade)"
-              opacity={SHADE_BASE_OPACITY}
-            />
-          </g>
-
-          {showHeadDebugFrame ? (
-            <rect
-              data-slot="head-debug-frame"
-              fill="none"
-              height="76"
-              rx="24"
-              stroke="#00d5ff"
-              strokeDasharray="3 3"
-              strokeWidth="2"
-              vectorEffect="non-scaling-stroke"
-              width="86"
-              x="21"
-              y="34"
-            />
-          ) : null}
+            {showHeadDebugFrame ? (
+              <rect
+                data-slot="head-debug-frame"
+                fill="none"
+                height="76"
+                rx="24"
+                stroke="#00d5ff"
+                strokeDasharray="3 3"
+                strokeWidth="2"
+                vectorEffect="non-scaling-stroke"
+                width="86"
+                x="21"
+                y="34"
+              />
+            ) : null}
           </svg>
 
-          <span data-slot="face-layer" ref={faceLayerRef} style={faceLayerStyle}>
-            <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-            <g ref={faceRef} data-slot="face" transform="translate(0 0)">
-              {showFaceDebugFrame ? (
-                <rect
-                  data-slot="face-debug-frame"
-                  fill="none"
-                  height="38"
-                  rx="6"
-                  stroke="#ff7a00"
-                  strokeDasharray="3 3"
-                  strokeWidth="2"
-                  vectorEffect="non-scaling-stroke"
-                  width="52"
-                  x="38"
-                  y="58"
-                />
-              ) : null}
-              <g data-slot="eyes" fill="#ffffff">
-                <rect data-slot="eye-left" height="9" rx="3" width="15" x="43" y="65">
-                  <animate attributeName="height" dur={BLINK_DUR} keyTimes={BLINK_KEY_TIMES} repeatCount="indefinite" values={BLINK_HEIGHT_VALUES} />
-                  <animate attributeName="y" dur={BLINK_DUR} keyTimes={BLINK_KEY_TIMES} repeatCount="indefinite" values={BLINK_Y_VALUES} />
-                </rect>
-                <rect data-slot="eye-right" height="9" rx="3" width="15" x="70" y="65">
-                  <animate attributeName="height" dur={BLINK_DUR} keyTimes={BLINK_KEY_TIMES} repeatCount="indefinite" values={BLINK_HEIGHT_VALUES} />
-                  <animate attributeName="y" dur={BLINK_DUR} keyTimes={BLINK_KEY_TIMES} repeatCount="indefinite" values={BLINK_Y_VALUES} />
-                </rect>
-              </g>
-              <g data-slot="eye-glints" fill="#ffffff" opacity="0.28">
-                <animate attributeName="opacity" dur={BLINK_DUR} keyTimes={BLINK_KEY_TIMES} repeatCount="indefinite" values={BLINK_GLINT_VALUES} />
-                <rect height="1.4" rx="0.7" width="3.2" x="46" y="67" />
-                <rect height="1.4" rx="0.7" width="3.2" x="73" y="67" />
-              </g>
-              <g data-slot="eyes-error" fill="none" stroke="#ffffff" strokeLinecap="round" strokeWidth="4.1">
-                <path d="M47 66.9 L56 70.8 L47 74.7" />
-                <path d="M81 66.9 L72 70.8 L81 74.7" />
-              </g>
-              <path
-                data-slot="mouth"
-                d="M57 88.7 Q64 90.1 71 88.7"
-                fill="none"
-                stroke="#ffffff"
-                strokeLinecap="round"
-                strokeWidth="3.5"
-              >
-                <animate
-                  attributeName="d"
-                  begin="1.1s"
-                  dur={MOUTH_BLINK_DUR}
-                  keyTimes={MOUTH_BLINK_KEY_TIMES}
-                  repeatCount="indefinite"
-                  values={MOUTH_BLINK_D_VALUES}
-                />
-                <animate
-                  attributeName="stroke-width"
-                  begin="1.1s"
-                  dur={MOUTH_BLINK_DUR}
-                  keyTimes={MOUTH_BLINK_KEY_TIMES}
-                  repeatCount="indefinite"
-                  values={MOUTH_BLINK_WIDTH_VALUES}
-                />
-              </path>
-              <path
-                data-slot="mouth-error"
-                d="M58 89.1 Q64 88.1 70 89.1"
-                fill="none"
-                stroke="#ffffff"
-                strokeLinecap="round"
-                strokeWidth="3.2"
-              />
-            </g>
+          <span data-slot="highlight-motion" ref={highlightMotionRef} style={compositeLayerStyle}>
+            <svg data-slot="head-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+              <defs>
+                <linearGradient id={highlightID} x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stopColor="var(--mascot-highlight)" />
+                  <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              <rect fill={`url(#${highlightID})`} height="34" rx="18" width="74" x="27" y="39" />
             </svg>
+          </span>
+
+          <span data-slot="shade-left" ref={leftShadeRef} style={compositeLayerStyle}>
+            <svg data-slot="head-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+              <path
+                d="M31 45 C26 51 24 59 24 70 V86 C24 98 35 108 48 110 C36 103 31 93 31 79 Z"
+                fill="var(--mascot-side-shade)"
+              />
+            </svg>
+          </span>
+
+          <span data-slot="shade-right" ref={rightShadeRef} style={compositeLayerStyle}>
+            <svg data-slot="head-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+              <path
+                d="M97 45 C102 51 104 59 104 70 V86 C104 98 93 108 80 110 C92 103 97 93 97 79 Z"
+                fill="var(--mascot-side-shade)"
+              />
+            </svg>
+          </span>
+
+          <span data-slot="face-layer" ref={faceLayerRef} style={faceLayerStyle}>
+            <span data-slot="face-motion" ref={faceMotionRef} style={faceMotionStyle}>
+              {showFaceDebugFrame ? (
+                <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+                  <rect
+                    data-slot="face-debug-frame"
+                    fill="none"
+                    height="38"
+                    rx="6"
+                    stroke="#ff7a00"
+                    strokeDasharray="3 3"
+                    strokeWidth="2"
+                    vectorEffect="non-scaling-stroke"
+                    width="52"
+                    x="38"
+                    y="58"
+                  />
+                </svg>
+              ) : null}
+
+              <span data-slot="eyes" style={eyeMotionStyle}>
+                <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+                  <g fill="#ffffff">
+                    <rect height="9" rx="3" width="15" x="43" y="65" />
+                    <rect height="9" rx="3" width="15" x="70" y="65" />
+                  </g>
+                </svg>
+              </span>
+
+              <span data-slot="eye-glints" style={eyeMotionStyle}>
+                <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+                  <g fill="#ffffff">
+                    <rect height="1.4" rx="0.7" width="3.2" x="46" y="67" />
+                    <rect height="1.4" rx="0.7" width="3.2" x="73" y="67" />
+                  </g>
+                </svg>
+              </span>
+
+              <span data-slot="eyes-error" style={compositeLayerStyle}>
+                <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+                  <g fill="none" stroke="#ffffff" strokeLinecap="round" strokeWidth="4.1">
+                    <path d="M47 66.9 L56 70.8 L47 74.7" />
+                    <path d="M81 66.9 L72 70.8 L81 74.7" />
+                  </g>
+                </svg>
+              </span>
+
+              <span data-slot="mouth" style={mouthMotionStyle}>
+                <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+                  <path
+                    d="M57 88.7 Q64 90.1 71 88.7"
+                    fill="none"
+                    stroke="#ffffff"
+                    strokeLinecap="round"
+                    strokeWidth="3.5"
+                  />
+                </svg>
+              </span>
+
+              <span data-slot="mouth-error" style={compositeLayerStyle}>
+                <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
+                  <path
+                    d="M58 89.1 Q64 88.1 70 89.1"
+                    fill="none"
+                    stroke="#ffffff"
+                    strokeLinecap="round"
+                    strokeWidth="3.2"
+                  />
+                </svg>
+              </span>
+            </span>
+              </span>
+            </span>
           </span>
         </span>
       </span>
     </span>
   );
-}
-
-function faceTransform(turnX: number, turnY: number): string {
-  const scaleX = 1 - Math.abs(turnX) * FACE_EXTRA_SQUEEZE_X;
-  const scaleY = 1 + turnY * FACE_EXTRA_SCALE_Y;
-  const skewX = -turnX * FACE_EXTRA_SKEW_DEG;
-
-  return [
-    `translate(${turnX * FACE_SHIFT_X} ${turnY * FACE_SHIFT_Y})`,
-    `translate(${FACE_CENTER_X} ${FACE_CENTER_Y})`,
-    `skewX(${skewX})`,
-    `scale(${scaleX} ${scaleY})`,
-    `translate(${-FACE_CENTER_X} ${-FACE_CENTER_Y})`,
-  ].join(" ");
 }
 
 function headShakeNoXAt(progress: number): number {

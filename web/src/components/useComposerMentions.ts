@@ -101,7 +101,11 @@ export function useComposerMentions({
   const close = () => {
     setManualTrigger(null);
     setOpen(false);
-    userClosedRef.current = true;
+    // `close` is used when the textarea loses focus. That is not an explicit
+    // dismissal of the current mention, so it must not suppress the next `@`
+    // typed after focus returns. Escape still records an explicit dismissal
+    // in `onKeyDown` below.
+    userClosedRef.current = false;
   };
 
   const openManual = () => {

@@ -30,11 +30,17 @@ const (
 	SettingShowReasoning               = "show_reasoning"
 	SettingShowRawToolInfo             = "show_raw_tool_info"
 	SettingShowAppPreviewVersions      = "show_app_preview_versions"
+	SettingEditorFontFamily            = "editor_font_family"
+	SettingEditorFontSize              = "editor_font_size"
+	SettingEditorLineHeight            = "editor_line_height"
 )
 
 const (
 	DefaultCompactTailInputTurns       = 2
 	DefaultCompactAutoThresholdPercent = 80
+	DefaultEditorFontFamily            = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+	DefaultEditorFontSize              = 12
+	DefaultEditorLineHeight            = 20
 )
 
 var ErrInvalidSetting = errors.New("config: invalid setting")
@@ -234,6 +240,7 @@ type settingsYAML struct {
 	Version int                 `yaml:"version"`
 	Compact compactSettingsYAML `yaml:"compact,omitempty"`
 	Display displaySettingsYAML `yaml:"display,omitempty"`
+	Editor  editorSettingsYAML  `yaml:"editor,omitempty"`
 	Apps    appsSettingsYAML    `yaml:"apps,omitempty"`
 }
 
@@ -246,6 +253,12 @@ type displaySettingsYAML struct {
 	CompactSummary *bool `yaml:"compact_summary,omitempty"`
 	Reasoning      *bool `yaml:"reasoning,omitempty"`
 	RawToolInfo    *bool `yaml:"raw_tool_info,omitempty"`
+}
+
+type editorSettingsYAML struct {
+	FontFamily string `yaml:"font_family,omitempty"`
+	FontSize   int    `yaml:"font_size,omitempty"`
+	LineHeight *int   `yaml:"line_height,omitempty"`
 }
 
 type appsSettingsYAML struct {
@@ -321,6 +334,9 @@ func (s settingsYAML) asMap() map[string]string {
 		SettingShowReasoning:               formatBoolSetting(s.showReasoning()),
 		SettingShowRawToolInfo:             formatBoolSetting(s.showRawToolInfo()),
 		SettingShowAppPreviewVersions:      formatBoolSetting(s.showAppPreviewVersions()),
+		SettingEditorFontFamily:            s.editorFontFamily(),
+		SettingEditorFontSize:              strconv.Itoa(s.editorFontSize()),
+		SettingEditorLineHeight:            strconv.Itoa(s.editorLineHeight()),
 	}
 }
 
@@ -362,6 +378,24 @@ func (s *settingsYAML) set(key, raw string) error {
 			return err
 		}
 		s.Apps.ShowPreviewVersions = &v
+	case SettingEditorFontFamily:
+		v := strings.TrimSpace(raw)
+		if v == "" || len(v) > 256 || strings.ContainsAny(v, "\r\n\x00") {
+			return fmt.Errorf("%w: expected non-empty font family up to 256 bytes", ErrInvalidSetting)
+		}
+		s.Editor.FontFamily = v
+	case SettingEditorFontSize:
+		n, err := parseIntSetting(raw, 10, 24)
+		if err != nil {
+			return err
+		}
+		s.Editor.FontSize = n
+	case SettingEditorLineHeight:
+		n, err := parseIntSetting(raw, 0, 40)
+		if err != nil || (n > 0 && n < 12) {
+			return fmt.Errorf("%w: expected 0 or integer 12..40", ErrInvalidSetting)
+		}
+		s.Editor.LineHeight = &n
 	default:
 		return fmt.Errorf("%w %q", ErrInvalidSetting, key)
 	}
@@ -408,6 +442,27 @@ func (s settingsYAML) showAppPreviewVersions() bool {
 		return *s.Apps.ShowPreviewVersions
 	}
 	return false
+}
+
+func (s settingsYAML) editorFontFamily() string {
+	if value := strings.TrimSpace(s.Editor.FontFamily); value != "" {
+		return value
+	}
+	return DefaultEditorFontFamily
+}
+
+func (s settingsYAML) editorFontSize() int {
+	if s.Editor.FontSize >= 10 && s.Editor.FontSize <= 24 {
+		return s.Editor.FontSize
+	}
+	return DefaultEditorFontSize
+}
+
+func (s settingsYAML) editorLineHeight() int {
+	if s.Editor.LineHeight != nil {
+		return *s.Editor.LineHeight
+	}
+	return DefaultEditorLineHeight
 }
 
 func parseIntSetting(raw string, min, max int) (int, error) {

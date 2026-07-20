@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useI18n } from "@/i18n";
 import { SETTINGS_KEYS, settingsWithDefaults } from "@/lib/appSettings";
@@ -35,6 +36,7 @@ import {
   SETTINGS_GROUP_CLASS,
   SETTINGS_SECTION_HEADING_CLASS,
   SettingsActionRow,
+  SettingsControlRow,
   SettingsNumberField,
   SettingsToggleRow,
 } from "./shared";
@@ -56,6 +58,9 @@ export function GeneralSettings({
   const [showReasoning, setShowReasoning] = useState(true);
   const [showRawToolInfo, setShowRawToolInfo] = useState(true);
   const [showPreviewAppVersions, setShowPreviewAppVersions] = useState(false);
+  const [editorFontFamily, setEditorFontFamily] = useState("");
+  const [editorFontSize, setEditorFontSize] = useState("12");
+  const [editorLineHeight, setEditorLineHeight] = useState("20");
   const [pendingSettingSaveCount, setPendingSettingSaveCount] = useState(0);
   const [pendingSettingCounts, setPendingSettingCounts] = useState<Record<string, number>>({});
   const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
@@ -117,6 +122,9 @@ export function GeneralSettings({
     setShowReasoning(savedSettings[SETTINGS_KEYS.showReasoning] !== "false");
     setShowRawToolInfo(savedSettings[SETTINGS_KEYS.showRawToolInfo] !== "false");
     setShowPreviewAppVersions(savedSettings[SETTINGS_KEYS.showAppPreviewVersions] === "true");
+    setEditorFontFamily(savedSettings[SETTINGS_KEYS.editorFontFamily]);
+    setEditorFontSize(savedSettings[SETTINGS_KEYS.editorFontSize]);
+    setEditorLineHeight(savedSettings[SETTINGS_KEYS.editorLineHeight]);
   }, [pendingSettingSaveCount, savedSettings, settingsQuery.isSuccess]);
 
   const promptMutation = useMutation({
@@ -228,12 +236,27 @@ export function GeneralSettings({
     saveSettingsPatch({ [key]: String(next) });
   };
 
+  const saveTextSetting = (key: string, value: string, setValue: (value: string) => void) => {
+    const fallback = savedSettings[key];
+    const normalized = value.trim();
+    if (!normalized || normalized.length > 256 || /[\r\n\0]/.test(normalized)) {
+      setValue(fallback);
+      toast.error(t("settings.general.saveFailed"));
+      return;
+    }
+    setValue(normalized);
+    if (normalized !== fallback) {
+      saveSettingsPatch({ [key]: normalized });
+    }
+  };
+
   const saveNumberSetting = (
     key: string,
     value: string,
     setValue: (value: string) => void,
     min: number,
     max: number,
+    validate?: (value: number) => boolean,
   ) => {
     const fallback = savedSettings[key];
     const raw = value.trim();
@@ -242,7 +265,7 @@ export function GeneralSettings({
       return;
     }
     const parsed = Number(raw);
-    if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+    if (!Number.isInteger(parsed) || parsed < min || parsed > max || (validate && !validate(parsed))) {
       setValue(fallback);
       toast.error(t("settings.general.saveFailed"));
       return;
@@ -298,6 +321,67 @@ export function GeneralSettings({
               {t("common.save")}
             </Button>
           </div>
+        </div>
+      </section>
+
+      <section className="grid gap-4">
+        <div className="grid gap-2">
+          <h3 className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.general.editor")}</h3>
+        </div>
+        <div className={SETTINGS_GROUP_CLASS}>
+          <SettingsControlRow
+            description={t("settings.general.editorFontFamilyDesc")}
+            disabled={settingsDisabled}
+            id="pudding-editor-font-family"
+            label={t("settings.general.editorFontFamily")}
+          >
+            <Input
+              className="w-full font-mono text-xs sm:w-72"
+              disabled={settingsDisabled}
+              id="pudding-editor-font-family"
+              maxLength={256}
+              spellCheck={false}
+              value={editorFontFamily}
+              onBlur={() => saveTextSetting(SETTINGS_KEYS.editorFontFamily, editorFontFamily, setEditorFontFamily)}
+              onChange={(event) => setEditorFontFamily(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") event.currentTarget.blur();
+              }}
+            />
+          </SettingsControlRow>
+          <SettingsNumberField
+            description={t("settings.general.editorFontSizeDesc")}
+            disabled={settingsDisabled}
+            id="pudding-editor-font-size"
+            label={t("settings.general.editorFontSize")}
+            max={24}
+            min={10}
+            suffix="px"
+            value={editorFontSize}
+            onBlur={() => saveNumberSetting(SETTINGS_KEYS.editorFontSize, editorFontSize, setEditorFontSize, 10, 24)}
+            onChange={setEditorFontSize}
+          />
+          <SettingsNumberField
+            description={t("settings.general.editorLineHeightDesc")}
+            disabled={settingsDisabled}
+            id="pudding-editor-line-height"
+            label={t("settings.general.editorLineHeight")}
+            max={40}
+            min={0}
+            suffix="px"
+            value={editorLineHeight}
+            onBlur={() =>
+              saveNumberSetting(
+                SETTINGS_KEYS.editorLineHeight,
+                editorLineHeight,
+                setEditorLineHeight,
+                0,
+                40,
+                (value) => value === 0 || value >= 12,
+              )
+            }
+            onChange={setEditorLineHeight}
+          />
         </div>
       </section>
 
