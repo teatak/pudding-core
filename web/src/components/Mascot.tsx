@@ -52,6 +52,7 @@ const FACE_EXTRA_SCALE_Y = 0.025;
 const FACE_EXTRA_YAW_DEG = 4;
 const FACE_EXTRA_PITCH_DEG = 3;
 const FACE_Z_OFFSET_PX = 4;
+const EYE_DEPTH_SCALE = 0.08;
 const SHADOW_SHIFT_X = 0.7;
 const SHADOW_SQUEEZE_X = 0.45;
 const SHADOW_SCALE_Y = 0.2;
@@ -161,6 +162,11 @@ const eyeMotionStyle: CSSProperties = {
   transformOrigin: "50% 54.296875%",
 };
 
+const individualEyeStyle: CSSProperties = {
+  transformBox: "fill-box",
+  transformOrigin: "center",
+};
+
 const mouthMotionStyle: CSSProperties = {
   ...compositeLayerStyle,
   transformOrigin: "50% 69.53125%",
@@ -190,6 +196,10 @@ export function Mascot({
   const headRef = useRef<HTMLSpanElement>(null);
   const faceLayerRef = useRef<HTMLSpanElement>(null);
   const faceMotionRef = useRef<HTMLSpanElement>(null);
+  const screenLeftEyeRef = useRef<SVGGElement>(null);
+  const screenRightEyeRef = useRef<SVGGElement>(null);
+  const screenLeftGlintRef = useRef<SVGGElement>(null);
+  const screenRightGlintRef = useRef<SVGGElement>(null);
   const shadowMotionRef = useRef<HTMLSpanElement>(null);
   const highlightMotionRef = useRef<HTMLSpanElement>(null);
   const leftShadeRef = useRef<HTMLSpanElement>(null);
@@ -218,6 +228,10 @@ export function Mascot({
     const head = headRef.current;
     const faceLayer = faceLayerRef.current;
     const faceMotion = faceMotionRef.current;
+    const screenLeftEye = screenLeftEyeRef.current;
+    const screenRightEye = screenRightEyeRef.current;
+    const screenLeftGlint = screenLeftGlintRef.current;
+    const screenRightGlint = screenRightGlintRef.current;
     const shadowMotion = shadowMotionRef.current;
     const highlightMotion = highlightMotionRef.current;
     const leftShade = leftShadeRef.current;
@@ -234,6 +248,12 @@ export function Mascot({
       const scaleY = 1 + pitchTurnY * FACE_EXTRA_SCALE_Y;
       faceMotion.style.transform = `translate3d(${turnX * (FACE_SHIFT_X / 128) * 100}%, ${pitchTurnY * (FACE_SHIFT_Y / 128) * 100}%, 0) skewX(${-turnX * FACE_EXTRA_SKEW_DEG}deg) scale(${scaleX}, ${scaleY})`;
     }
+    const screenLeftEyeScale = 1 + turnX * EYE_DEPTH_SCALE;
+    const screenRightEyeScale = 1 - turnX * EYE_DEPTH_SCALE;
+    if (screenLeftEye) screenLeftEye.style.transform = `scale(${screenLeftEyeScale})`;
+    if (screenRightEye) screenRightEye.style.transform = `scale(${screenRightEyeScale})`;
+    if (screenLeftGlint) screenLeftGlint.style.transform = `scale(${screenLeftEyeScale})`;
+    if (screenRightGlint) screenRightGlint.style.transform = `scale(${screenRightEyeScale})`;
     if (shadowMotion) {
       const scaleX = 1 - (Math.abs(turnX) * SHADOW_SQUEEZE_X) / 34;
       const scaleY = 1 + (Math.max(pitchTurnY, 0) * SHADOW_SCALE_Y) / 7;
@@ -293,13 +313,28 @@ export function Mascot({
     startTick();
   };
 
+  const readMetrics = () => {
+    const rect = rootRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    const metrics = {
+      centerX: rect.left + rect.width / 2,
+      centerY: rect.top + rect.height / 2,
+      size: Math.max(rect.width, rect.height),
+    };
+    metricsRef.current = metrics;
+    return metrics;
+  };
+
   const setTargetFromPoint = (
     clientX: number,
     clientY: number,
     satRatio = SAT_RATIO,
     satMinPx = POINTER_SAT_MIN_PX,
   ) => {
-    const metrics = metricsRef.current;
+    // Layout panels can move the mascot without resizing it. Refresh its viewport
+    // position for every new target so sidebar and split-pane changes cannot leave
+    // the gaze calculation using a stale center point.
+    const metrics = readMetrics();
     if (!metrics) return;
 
     const dx = clientX - metrics.centerX;
@@ -347,13 +382,7 @@ export function Mascot({
 
   useLayoutEffect(() => {
     const updateMetrics = () => {
-      const rect = rootRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      metricsRef.current = {
-        centerX: rect.left + rect.width / 2,
-        centerY: rect.top + rect.height / 2,
-        size: Math.max(rect.width, rect.height),
-      };
+      readMetrics();
     };
 
     updateMetrics();
@@ -664,8 +693,10 @@ export function Mascot({
 
               <span data-slot="eyes" style={eyeMotionStyle}>
                 <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-                  <g fill="#ffffff">
+                  <g ref={screenLeftEyeRef} fill="#ffffff" style={individualEyeStyle}>
                     <rect height="9" rx="3" width="15" x="43" y="65" />
+                  </g>
+                  <g ref={screenRightEyeRef} fill="#ffffff" style={individualEyeStyle}>
                     <rect height="9" rx="3" width="15" x="70" y="65" />
                   </g>
                 </svg>
@@ -673,8 +704,10 @@ export function Mascot({
 
               <span data-slot="eye-glints" style={eyeMotionStyle}>
                 <svg data-slot="face-art" focusable="false" viewBox="0 0 128 128" style={absoluteLayerStyle}>
-                  <g fill="#ffffff">
+                  <g ref={screenLeftGlintRef} fill="#ffffff" style={individualEyeStyle}>
                     <rect height="1.4" rx="0.7" width="3.2" x="46" y="67" />
+                  </g>
+                  <g ref={screenRightGlintRef} fill="#ffffff" style={individualEyeStyle}>
                     <rect height="1.4" rx="0.7" width="3.2" x="73" y="67" />
                   </g>
                 </svg>

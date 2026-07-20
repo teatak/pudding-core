@@ -369,7 +369,7 @@ function RuntimeDownloadBody({ status, t, loading }: { status?: AudioRuntimeStat
       {status?.running ? (
         <div className="grid gap-2">
           <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-            <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${progress}%` }} />
+            <div className="h-full rounded-full bg-primary" style={{ width: `${progress}%` }} />
           </div>
           <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
             <span className="min-w-0 truncate">
@@ -579,7 +579,7 @@ function MicButtonContent({ active, icon, level }: { active: boolean; icon: Reac
       {profiles.map((profile, index) => (
         <span
           key={index}
-          className="w-0.5 rounded-full bg-primary-foreground transition-all duration-100 ease-out"
+          className="w-0.5 rounded-full bg-primary-foreground"
           style={{ height: `${5 + normalized * profile * 14}px` }}
         />
       ))}

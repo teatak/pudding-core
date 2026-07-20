@@ -90,7 +90,7 @@ export function ProjectFileTabs({
             >
               <div
                 className={cn(
-                  "group relative flex h-full min-w-28 max-w-56 shrink-0 items-center bg-[var(--workspace-file-tab-inactive-background)] text-xs text-[var(--workspace-tab-foreground)] transition-[background-color,color] hover:bg-[var(--workspace-file-tab-hover-background)] hover:text-foreground",
+                  "group relative flex h-full min-w-28 max-w-56 shrink-0 items-center bg-[var(--workspace-file-tab-inactive-background)] text-xs text-[var(--workspace-tab-foreground)] hover:bg-[var(--workspace-file-tab-hover-background)] hover:text-foreground",
                   selected && "bg-[var(--workspace-file-tab-active-background)] text-foreground hover:bg-[var(--workspace-file-tab-active-background)]",
                 )}
               >
@@ -137,7 +137,7 @@ export function ProjectFileTabs({
             >
               <div
                 className={cn(
-                  "group relative flex h-full min-w-28 max-w-56 shrink-0 items-center bg-[var(--workspace-file-tab-inactive-background)] text-xs text-[var(--workspace-tab-foreground)] transition-[background-color,color] hover:bg-[var(--workspace-file-tab-hover-background)] hover:text-foreground",
+                  "group relative flex h-full min-w-28 max-w-56 shrink-0 items-center bg-[var(--workspace-file-tab-inactive-background)] text-xs text-[var(--workspace-tab-foreground)] hover:bg-[var(--workspace-file-tab-hover-background)] hover:text-foreground",
                   selected && "bg-[var(--workspace-file-tab-active-background)] text-foreground hover:bg-[var(--workspace-file-tab-active-background)]",
                 )}
               >

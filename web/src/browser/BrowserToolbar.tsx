@@ -342,7 +342,7 @@ export function BrowserToolbar({
   const forwardDisabled = navigationDisabled || !activeTab?.canGoForward;
   const pendingNavigationAction = navigationMutation.isPending ? navigationMutation.variables : undefined;
   const navButtonClass =
-    "h-7 w-7 rounded-md text-muted-foreground [backface-visibility:hidden] [transform:translateZ(0)] [transition-duration:120ms] [transition-property:background-color,color] hover:text-foreground active:translate-y-0";
+    "h-7 w-7 rounded-md text-muted-foreground [backface-visibility:hidden] [transform:translateZ(0)] hover:text-foreground active:translate-y-0";
   const navIconClass = "h-3.5 w-3.5 [backface-visibility:hidden] [transform:translateZ(0)]";
 
   const navigateToAddress = (draft: string) => {
@@ -407,7 +407,7 @@ export function BrowserToolbar({
       </div>
       <Popover open={historyOpen && historyEntries.length > 0} onOpenChange={setHistoryOpen}>
         <PopoverAnchor asChild>
-          <div className="group relative flex h-8 min-w-0 flex-1 items-center rounded-md border border-transparent bg-transparent transition-[background-color,box-shadow] hover:bg-background/45 focus-within:bg-background/45 focus-within:shadow-[0_0_0_1px_hsl(var(--border)/0.7),0_0_0_3px_hsl(var(--ring)/0.12)]">
+          <div className="group relative flex h-8 min-w-0 flex-1 items-center rounded-md border border-transparent bg-transparent hover:bg-background/45 focus-within:bg-background/45 focus-within:shadow-[0_0_0_1px_hsl(var(--border)/0.7),0_0_0_3px_hsl(var(--ring)/0.12)]">
             <Input
               ref={addressInputRef}
               aria-autocomplete="list"

@@ -382,7 +382,7 @@ function SortableSurfaceTabButton({
                   ? t("canvas.delete")
                   : t("canvas.filePreviewClose")
         }
-        className="pointer-events-none absolute right-1 top-1/2 z-10 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded-md bg-transparent opacity-0 transition-colors hover:bg-accent group-hover:pointer-events-auto group-hover:opacity-100 data-[pending=true]:pointer-events-auto data-[pending=true]:opacity-100"
+        className="pointer-events-none absolute right-1 top-1/2 z-10 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded-md bg-transparent opacity-0 hover:bg-accent group-hover:pointer-events-auto group-hover:opacity-100 data-[pending=true]:pointer-events-auto data-[pending=true]:opacity-100"
         data-pending={closePending}
         role="button"
         tabIndex={-1}

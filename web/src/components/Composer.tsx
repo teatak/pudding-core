@@ -916,6 +916,10 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     });
   }, []);
   const setMascotPointerGaze = useCallback(() => {
+    if (mascotGazeRafRef.current) {
+      window.cancelAnimationFrame(mascotGazeRafRef.current);
+      mascotGazeRafRef.current = 0;
+    }
     setMascotGaze((current) => (current.type === "pointer" ? current : { type: "pointer" }));
   }, []);
   const setMascotInputGaze = useCallback((target: MascotGazePoint | null) => {

@@ -69,7 +69,7 @@ function CanvasItemTab({
       </button>
       <button
         aria-label={t("canvas.delete")}
-        className="pointer-events-none absolute right-1 top-1/2 z-10 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded-md bg-transparent opacity-0 transition-colors hover:bg-accent focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100"
+        className="pointer-events-none absolute right-1 top-1/2 z-10 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded-md bg-transparent opacity-0 hover:bg-accent focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100"
         type="button"
         onClick={(event) => {
           event.stopPropagation();

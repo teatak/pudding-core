@@ -60,7 +60,7 @@ export function MessageMeta({
       <Button
         aria-label={t("common.copy")}
         className={cn(
-          "size-6 bg-transparent transition-colors hover:bg-muted dark:hover:bg-muted/50 active:translate-y-0",
+          "size-6 bg-transparent hover:bg-muted dark:hover:bg-muted/50 active:translate-y-0",
           align === "start" && "-ml-1",
         )}
         size="icon-xs"

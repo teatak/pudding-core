@@ -1353,7 +1353,7 @@ function CatalogAppItem({
   const iconSrc = installed ? appIconURL(token, installed) || appRegistryIconURL(app, OFFICIAL_APP_REGISTRY) : appRegistryIconURL(app, OFFICIAL_APP_REGISTRY);
 
   return (
-    <section className="flex min-w-0 items-center gap-4 rounded-xl px-3 py-2 transition-colors hover:bg-muted">
+    <section className="flex min-w-0 items-center gap-4 rounded-xl px-3 py-2 hover:bg-muted">
       <button className="flex min-w-0 flex-1 items-center gap-4 overflow-hidden text-left" type="button" onClick={onSelect}>
         <AppIcon icon={icon} size="lg" src={iconSrc} />
         <div className="min-w-0 flex-1">
@@ -2104,7 +2104,7 @@ function AppToolsSection({ tools }: { tools: AppToolItem[] }) {
                   </div>
                   {mcpToolDescriptionNeedsDetails(tool.description) ? (
                     <details className="group min-w-0">
-                      <summary className="cursor-pointer text-xs text-muted-foreground transition-colors hover:text-foreground">
+                      <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
                         {t("apps.mcpFullDescription")}
                       </summary>
                       <div className="mt-1 max-h-40 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/35 p-2 text-[11px] leading-4 text-muted-foreground">
@@ -2116,7 +2116,7 @@ function AppToolsSection({ tools }: { tools: AppToolItem[] }) {
               ) : null}
               {tool.inputSchema ? (
                 <details className="group min-w-0">
-                  <summary className="cursor-pointer text-xs text-muted-foreground transition-colors hover:text-foreground">
+                  <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
                     {t("apps.mcpInputSchema")}
                   </summary>
                   <pre className="mt-1 max-h-44 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/35 p-2 text-[11px] leading-4 text-muted-foreground">
@@ -2882,7 +2882,7 @@ function LabeledSecretInput({
         />
         <button
           aria-label={visible ? t("apps.hideSecret") : t("apps.showSecret")}
-          className="absolute inset-y-0 right-1 my-auto flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-50"
+          className="absolute inset-y-0 right-1 my-auto flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-50"
           disabled={disabled}
           type="button"
           onClick={() => onVisibleChange(!visible)}

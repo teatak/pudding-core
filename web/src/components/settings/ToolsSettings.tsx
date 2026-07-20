@@ -159,7 +159,7 @@ export function ToolsSettings({
                 />
                 <button
                   aria-label={visible ? t("provider.hideAPIKey") : t("provider.showAPIKey")}
-                  className="absolute inset-y-0 right-1 my-auto flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+                  className="absolute inset-y-0 right-1 my-auto flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
                   type="button"
                   onClick={() => setVisible((value) => !value)}
                 >

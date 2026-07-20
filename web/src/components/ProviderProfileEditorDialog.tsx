@@ -436,7 +436,7 @@ export function ProviderProfileEditorDialog({
                   {showAPIKeyToggle ? (
                     <button
                       aria-label={apiKeyVisible ? t("provider.hideAPIKey") : t("provider.showAPIKey")}
-                      className="absolute inset-y-0 right-1 my-auto flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+                      className="absolute inset-y-0 right-1 my-auto flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
                       type="button"
                       onClick={() => setAPIKeyVisible((visible) => !visible)}
                     >
@@ -879,7 +879,7 @@ function CheckField({
   return (
     <label
       className={cn(
-        "flex h-9 min-w-0 items-center gap-2 rounded-md border px-3 text-sm transition-colors",
+        "flex h-9 min-w-0 items-center gap-2 rounded-md border px-3 text-sm",
         checked ? optionSelectedClass : optionIdleClass,
       )}
     >

@@ -1288,11 +1288,11 @@ const GalleryGridTile = memo(function GalleryGridTile({
     <button
       ref={innerRef}
       aria-label={image.caption || image.alt}
-      className="group relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-md border bg-card text-left shadow-sm transition-colors hover:border-muted-foreground/50"
+      className="group relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-md border bg-card text-left shadow-sm hover:border-muted-foreground/50"
       type="button"
       onClick={onClick}
     >
-      <CanvasImage alt={image.alt} className="block max-h-full max-w-full object-contain transition duration-150 group-hover:scale-[1.02]" src={image.src} />
+      <CanvasImage alt={image.alt} className="block max-h-full max-w-full object-contain transition-transform duration-150 group-hover:scale-[1.02]" src={image.src} />
       {image.caption ? (
         <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-background/75 px-1.5 py-1 text-[10px] text-foreground opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
           {image.caption}
@@ -1345,7 +1345,7 @@ function GalleryDetailThumbs({
               aria-current={active ? "true" : undefined}
               aria-label={image.caption || image.alt}
               className={cn(
-                "shrink-0 overflow-hidden rounded-md border bg-card p-0.5 shadow-sm transition focus-visible:ring-2 focus-visible:ring-primary/55 focus-visible:outline-none",
+                "shrink-0 overflow-hidden rounded-md border bg-card p-0.5 shadow-sm focus-visible:ring-2 focus-visible:ring-primary/55 focus-visible:outline-none",
                 vertical ? "h-11 w-11" : "h-11 w-16",
                 active
                   ? "border-primary shadow-[0_0_0_2px_hsl(var(--primary)/0.38)]"

@@ -152,6 +152,8 @@
     --dropdown-destructive-hover: var(--destructive-hover);
     --floating-surface: oklch(0.995 0 0);
     --floating-hover: oklch(0.925 0 0);
+    --menu-outline: oklch(0 0 0 / 7%);
+    --menu-shadow: 0 1px 3px oklch(0 0 0 / 8%), 0 10px 30px -8px oklch(0 0 0 / 18%);
     --confirm-destructive: var(--destructive);
     --confirm-destructive-hover: color-mix(in oklch, var(--destructive-hover), black 6%);
     --mascot-body-top: oklch(0.68 0.19 277);
@@ -285,6 +287,29 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
     --tw-translate-y: 0px;
     translate: none;
   }
+}
+
+/*
+ * Desktop interaction policy: hover/focus colors switch immediately.
+ * Keep upstream shadcn component sources unchanged while preventing their
+ * broad transition utilities from animating background, text, border, or icons.
+ */
+html[data-shell] :where(
+    .transition,
+    [class*="transition-all"],
+    [class*="transition-colors"],
+    [class*="transition-[background-color"],
+    [class*="transition-[color"],
+    [class*="[transition-property:background-color"]
+) {
+    transition: none !important;
+}
+
+html[data-shell] :where(
+    [class*=":transition-all"],
+    [class*=":transition-colors"]
+) * {
+    transition: none !important;
 }
 
 @property --composer-mic-angle {
@@ -488,8 +513,8 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
     --dropdown-destructive-hover: var(--destructive-hover);
     --floating-surface: oklch(0.25 0 0);
     --floating-hover: oklch(0.335 0 0);
-    --menu-outline: oklch(1 0 0 / 16%);
-    --menu-shadow: 0 8px 20px oklch(0 0 0 / 22%), 0 1px 5px oklch(0 0 0 / 12%);
+    --menu-outline: oklch(1 0 0 / 10%);
+    --menu-shadow: 0 1px 4px oklch(0 0 0 / 16%), 0 12px 30px -8px oklch(0 0 0 / 36%);
     --confirm-destructive: color-mix(in oklch, var(--destructive), black 22%);
     --confirm-destructive-hover: color-mix(in oklch, var(--destructive-hover), black 14%);
     --mascot-body-top: oklch(0.72 0.16 277);
@@ -543,17 +568,7 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
 }
 
 [data-app-floating-content] {
-    box-shadow:
-        0 0 0 1px oklch(0 0 0 / 14%),
-        0 2px 6px oklch(0 0 0 / 12%),
-        0 12px 28px -6px oklch(0 0 0 / 24%);
-}
-
-.dark [data-app-floating-content] {
-    box-shadow:
-        0 0 0 1px var(--menu-outline),
-        0 3px 8px oklch(0 0 0 / 24%),
-        0 16px 36px -8px oklch(0 0 0 / 48%);
+    box-shadow: 0 0 0 1px var(--menu-outline), var(--menu-shadow);
 }
 
 :is(
@@ -566,16 +581,8 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
 ) {
     --popover: var(--floating-surface);
     --accent: var(--floating-hover);
+    border-color: transparent;
     background-color: var(--floating-surface);
-}
-
-.dark :is(
-    [data-slot="dropdown-menu-content"],
-    [data-slot="dropdown-menu-sub-content"],
-    [data-slot="context-menu-content"],
-    [data-slot="context-menu-sub-content"],
-    [data-slot="select-content"]
-) {
     box-shadow: 0 0 0 1px var(--menu-outline), var(--menu-shadow);
 }
 
@@ -736,25 +743,42 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
     transition: none !important;
 }
 
-[data-slot="head-art"],
-[data-slot="body-art"],
-[data-slot="face-art"],
-[data-slot="head-art"] :is(rect, path, circle),
-[data-slot="body-art"] :is(rect, path, circle),
-[data-slot="face-art"] :is(rect, path, circle),
-[data-slot="mascot-base"] ellipse {
-    transition:
-        fill 260ms ease,
-        stroke 260ms ease,
-        filter 220ms ease;
+[data-slot="mascot-art"] {
+    pointer-events: none;
 }
 
-[data-slot="head-art"] stop,
-[data-slot="body-art"] stop,
-[data-slot="face-art"] stop {
-    transition:
-        stop-color 320ms ease,
-        stop-opacity 260ms ease;
+[data-slot="mascot-art"] g {
+    transform-box: view-box;
+}
+
+[data-slot="head-gesture"],
+[data-slot="head"] {
+    transform-origin: 50% 60.15625%;
+}
+
+[data-slot="shadow-motion"] {
+    transform-origin: 50% 88.28125%;
+}
+
+[data-slot="antenna-motion"] {
+    transform-origin: 50% 26.5625%;
+}
+
+[data-slot="face-motion"] {
+    transform-origin: 50% 60.15625%;
+}
+
+[data-slot="eye-look"] {
+    transform-origin: 50% 54.296875%;
+}
+
+[data-slot="eyes"],
+[data-slot="eye-glints"] {
+    transform-origin: 50% 54.296875%;
+}
+
+[data-slot="mouth"] {
+    transform-origin: 50% 69.53125%;
 }
 
 [data-slot="eyes"],
@@ -789,11 +813,6 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
 [data-mood="thinking"] [data-slot="antenna-glow"] {
     animation: pudding-mascot-thinking-glow 1.4s ease-in-out infinite;
     transform-origin: 46.09375% 12.5%;
-}
-
-[data-mood="thinking"] [data-slot="body-art"],
-[data-mood="thinking"] [data-slot="face-motion"] {
-    filter: drop-shadow(0 0 6px color-mix(in oklch, var(--primary), transparent 68%));
 }
 
 [data-ambient-motion="true"] [data-slot="arm-left-motion"] {
@@ -1089,7 +1108,7 @@ html[data-shell] [data-composer-selection-guard="true"] textarea {
 }
 
 .pudding-provider-preset-card {
-    @apply flex min-h-10 items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-left transition-colors hover:bg-accent;
+    @apply flex min-h-10 items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-left hover:bg-accent;
 }
 
 .pudding-provider-preset-surface-dark .pudding-provider-preset-card {

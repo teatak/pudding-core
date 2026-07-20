@@ -106,7 +106,7 @@ export function ChoiceMenu<T>({
       {items.map((item, index) => {
         const disabled = busy || item.disabled;
         const itemClassName = cn(
-          "min-w-0 rounded-md px-2.5 py-1.5 text-left transition disabled:opacity-50",
+          "min-w-0 rounded-md px-2.5 py-1.5 text-left transition-opacity disabled:opacity-50",
           !item.noActiveStyle && "hover:bg-muted",
           index === selectedIndex && !item.noActiveStyle && "bg-muted text-foreground",
           item.noActiveStyle && "px-0 py-0.5",

@@ -1176,7 +1176,7 @@ function RailPanel({
                 ) : null}
                 <div
                   className={cn(
-                    "flex flex-col gap-0.5 rounded-md transition-colors",
+                    "flex flex-col gap-0.5 rounded-md",
                     isDraggingPinned && "min-h-10",
                     isDraggingPinned &&
                     dragTarget?.group === "unpinned" &&
@@ -1435,7 +1435,7 @@ function CollapsibleSessionGroupLabel({
   return (
     <SidebarGroupLabel
       className={cn(
-        "group/project-label h-7 min-h-7 gap-1 px-0 text-sm transition-colors hover:bg-sidebar-accent has-[[data-project-actions-open=true]]:bg-sidebar-accent has-[[data-project-actions-open=true]]:text-sidebar-accent-foreground",
+        "group/project-label h-7 min-h-7 gap-1 px-0 text-sm hover:bg-sidebar-accent has-[[data-project-actions-open=true]]:bg-sidebar-accent has-[[data-project-actions-open=true]]:text-sidebar-accent-foreground",
         active && "bg-sidebar-accent text-sidebar-accent-foreground",
       )}
     >
@@ -1804,7 +1804,7 @@ function SessionItems({
         <SidebarMenuItem>
           <button
             aria-expanded={showAll}
-            className="flex h-7 w-full items-center rounded-md pr-2 pl-[34px] text-left text-xs text-sidebar-foreground/50 transition-colors hover:text-sidebar-foreground/80"
+            className="flex h-7 w-full items-center rounded-md pr-2 pl-[34px] text-left text-xs text-sidebar-foreground/50 hover:text-sidebar-foreground/80"
             type="button"
             onClick={() => setShowAll((current) => !current)}
           >
@@ -1835,7 +1835,7 @@ function SessionDropIndicator({ active }: { active: boolean }) {
     <li
       aria-hidden="true"
       className={cn(
-        "h-7 rounded-md ring-1 ring-inset transition-colors",
+        "h-7 rounded-md ring-1 ring-inset",
         active ? "pudding-session-drop-indicator-active ring-sidebar-ring/70" : "ring-sidebar-border/70",
       )}
     />

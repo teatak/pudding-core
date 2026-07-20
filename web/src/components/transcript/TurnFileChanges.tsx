@@ -25,15 +25,15 @@ export function TurnFileChanges({ changes, sessionID, turnID }: {
   return (
     <section className="min-w-0 overflow-hidden rounded-lg border bg-muted/10 text-xs text-muted-foreground shadow-sm">
       <button
-        className="group/change-header relative isolate flex min-h-11 w-full items-center gap-2.5 overflow-hidden bg-muted/35 px-3 py-2 text-left transition-[color] duration-150 ease-out hover:text-foreground"
+        className="group/change-header relative isolate flex min-h-11 w-full items-center gap-2.5 overflow-hidden bg-muted/35 px-3 py-2 text-left hover:text-foreground"
         type="button"
         onClick={() => openTurnFileChanges(sessionID, turnID, changes)}
       >
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 bg-muted/[46%] opacity-0 transition-opacity duration-150 ease-out group-hover/change-header:opacity-100"
+          className="pointer-events-none absolute inset-0 bg-muted/[46%] opacity-0 group-hover/change-header:opacity-100"
         />
-        <span className="relative z-[1] grid size-8 shrink-0 place-items-center text-foreground/70 transition-[color] duration-150 ease-out group-hover/change-header:text-foreground">
+        <span className="relative z-[1] grid size-8 shrink-0 place-items-center text-foreground/70 group-hover/change-header:text-foreground">
           <Files className="size-4" />
         </span>
         <span className="relative z-[1] min-w-0 flex-1">
@@ -51,13 +51,13 @@ export function TurnFileChanges({ changes, sessionID, turnID }: {
         {visible.map((change) => (
           <button
             key={change.id}
-            className="group/change-row relative isolate flex min-h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded px-2 text-left transition-[color] duration-150 ease-out hover:text-foreground"
+            className="group/change-row relative isolate flex min-h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded px-2 text-left hover:text-foreground"
             type="button"
             onClick={() => openTurnFileChanges(sessionID, turnID, changes, change.id)}
           >
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute inset-0 bg-muted/60 opacity-0 transition-opacity duration-150 ease-out group-hover/change-row:opacity-100"
+              className="pointer-events-none absolute inset-0 bg-muted/60 opacity-0 group-hover/change-row:opacity-100"
             />
             <span className={cn("relative z-[1] w-3 shrink-0 text-center font-mono text-[10px] font-semibold", statusClass(change.kind))}>
               {statusLetter(change.kind)}
@@ -70,13 +70,13 @@ export function TurnFileChanges({ changes, sessionID, turnID }: {
       </div>
       {collapsible ? (
         <button
-          className="group/change-footer relative isolate flex h-9 w-full items-center gap-1.5 overflow-hidden border-t bg-muted/20 px-3 text-left font-medium text-foreground/85 transition-[color] duration-150 ease-out hover:text-foreground"
+          className="group/change-footer relative isolate flex h-9 w-full items-center gap-1.5 overflow-hidden border-t bg-muted/20 px-3 text-left font-medium text-foreground/85 hover:text-foreground"
           type="button"
           onClick={() => setExpanded((current) => !current)}
         >
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 bg-muted/[38%] opacity-0 transition-opacity duration-150 ease-out group-hover/change-footer:opacity-100"
+            className="pointer-events-none absolute inset-0 bg-muted/[38%] opacity-0 group-hover/change-footer:opacity-100"
           />
           <span className="relative z-[1]">{expanded ? t("transcript.turnFilesCollapse") : t("transcript.turnFilesMore").replace("{count}", String(hiddenCount))}</span>
           <ChevronDown className={cn("relative z-[1] size-3.5 transition-transform", expanded && "rotate-180")} />

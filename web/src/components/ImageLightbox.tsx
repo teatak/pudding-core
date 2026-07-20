@@ -180,7 +180,7 @@ export function ImageLightbox({
                       }}
                       aria-label={image.name}
                       className={cn(
-                        "h-12 w-16 shrink-0 overflow-hidden rounded-md border bg-white/10 p-0.5 shadow-sm transition focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none",
+                        "h-12 w-16 shrink-0 overflow-hidden rounded-md border bg-white/10 p-0.5 shadow-sm focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none",
                         index === currentIndex
                           ? "border-white shadow-[0_0_0_2px_rgba(255,255,255,0.35)]"
                           : "border-white/20 opacity-70 hover:border-white/50 hover:opacity-100",

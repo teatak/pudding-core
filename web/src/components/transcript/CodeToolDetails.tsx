@@ -759,7 +759,7 @@ export function ToolHoverCopyButton({ className, text }: { className?: string; t
   return (
     <Button
       aria-label={copied ? t("common.copied") : t("common.copy")}
-      className={cn("size-6 bg-transparent opacity-0 transition hover:bg-muted hover:opacity-100 dark:hover:bg-muted/50", className)}
+      className={cn("size-6 bg-transparent opacity-0 transition-opacity hover:bg-muted hover:opacity-100 dark:hover:bg-muted/50", className)}
       size="icon-xs"
       type="button"
       variant="ghost"

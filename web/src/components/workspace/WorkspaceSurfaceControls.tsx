@@ -7,7 +7,7 @@ import type { ClosedCanvasItem, SavedCanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 
-export const workspaceTabClassName = "inline-flex h-(--workspace-toolbar-tab-h) items-center gap-1.5 rounded-[7px] px-2 text-xs font-medium text-[var(--workspace-tab-foreground)] transition-colors hover:bg-[var(--workspace-tab-hover-background)] hover:text-foreground";
+export const workspaceTabClassName = "inline-flex h-(--workspace-toolbar-tab-h) items-center gap-1.5 rounded-[7px] px-2 text-xs font-medium text-[var(--workspace-tab-foreground)] hover:bg-[var(--workspace-tab-hover-background)] hover:text-foreground";
 export const workspaceTabActiveClassName = "bg-[var(--workspace-tab-active-background)] text-foreground hover:bg-[var(--workspace-tab-active-background)]";
 
 export function CanvasLibraryMenuSections({

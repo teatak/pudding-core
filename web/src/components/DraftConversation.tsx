@@ -261,7 +261,7 @@ export function DraftConversation({ token, projectID }: { token: string; project
                 <>
                   {userMessage.subtitle ? " " : null}
                   <a
-                    className="text-foreground/75 underline decoration-border underline-offset-4 transition-colors hover:text-foreground"
+                    className="text-foreground/75 underline decoration-border underline-offset-4 hover:text-foreground"
                     href={userMessage.link.url}
                     rel="noreferrer noopener"
                     target="_blank"
@@ -315,7 +315,7 @@ export function DraftConversation({ token, projectID }: { token: string; project
                 return (
                   <button
                     key={item.id}
-                    className="rounded-full border border-input bg-background px-4 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    className="rounded-full border border-input bg-background px-4 py-1.5 text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground"
                     type="button"
                     onClick={() => setQuickSubmit({ id: Date.now() + index, text: item.prompt })}
                   >
