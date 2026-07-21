@@ -303,7 +303,16 @@ function createMainWindow() {
     saveWindowState(window);
     if (process.platform === "darwin" && !quitting) {
       event.preventDefault();
-      window.hide();
+      if (window.isFullScreen()) {
+        window.once("leave-full-screen", () => {
+          if (!window.isDestroyed()) {
+            window.hide();
+          }
+        });
+        window.setFullScreen(false);
+      } else {
+        window.hide();
+      }
       return;
     }
   });
