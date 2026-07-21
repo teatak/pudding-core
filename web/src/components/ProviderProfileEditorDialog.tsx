@@ -471,11 +471,6 @@ export function ProviderProfileEditorDialog({
                         </div>
                         <div
                           className="h-64 overflow-y-scroll overscroll-contain"
-                          onWheelCapture={(event) => {
-                            event.currentTarget.scrollTop += event.deltaY;
-                            event.preventDefault();
-                            event.stopPropagation();
-                          }}
                         >
                           <div className="grid p-1">
                             {candidatesLoading ? (

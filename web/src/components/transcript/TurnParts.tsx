@@ -1977,25 +1977,26 @@ function RawToolDataCard({ args, result, toolName }: { args: string; result: str
   const [open, setOpen] = useState(false);
   const copyText = rawToolCopyText(toolName, args, result, t);
   return (
-    <details
-      className="group/raw-data min-w-0 max-w-full overflow-hidden rounded-md border border-border/50 bg-muted/20 text-[11px] text-muted-foreground"
-      open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
-    >
-      <summary className="flex h-8 cursor-default list-none items-center gap-1 px-2 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden">
-        {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-        <span>{t("transcript.codeRawData")}</span>
-        <span className="min-w-0 flex-1" />
-        <ToolHoverCopyButton className="group-hover/raw-data:opacity-100" text={copyText} />
-      </summary>
-      {open ? (
-        <div className="min-w-0 max-w-full border-t border-border/50 p-2">
-          {toolName ? <ToolNameLine name={toolName} /> : null}
-          {args ? <ToolDetailBlock label={t("transcript.toolArgs")} text={args} /> : null}
-          {result ? <ToolDetailBlock label={t("transcript.toolResult")} text={result} /> : null}
-        </div>
-      ) : null}
-    </details>
+    <div className="group/raw-data relative min-w-0 max-w-full">
+      <details
+        className="min-w-0 max-w-full overflow-hidden rounded-md border border-border/50 bg-muted/20 text-[11px] text-muted-foreground"
+        open={open}
+        onToggle={(event) => setOpen(event.currentTarget.open)}
+      >
+        <summary className="flex h-8 cursor-default list-none items-center gap-1 px-2 pr-8 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden">
+          {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+          <span>{t("transcript.codeRawData")}</span>
+        </summary>
+        {open ? (
+          <div className="min-w-0 max-w-full border-t border-border/50 p-2">
+            {toolName ? <ToolNameLine name={toolName} /> : null}
+            {args ? <ToolDetailBlock label={t("transcript.toolArgs")} text={args} /> : null}
+            {result ? <ToolDetailBlock label={t("transcript.toolResult")} text={result} /> : null}
+          </div>
+        ) : null}
+      </details>
+      <ToolHoverCopyButton className="absolute right-1 top-1 group-hover/raw-data:opacity-100" text={copyText} />
+    </div>
   );
 }
 

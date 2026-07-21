@@ -500,6 +500,7 @@ export const TranscriptList = memo(function TranscriptList({
     const handleViewportResize = () => {
       if (autoStickRef.current || isAtLatestRef.current) {
         autoStickRef.current = true;
+        syncPinnedBottom();
         stickToLatestIfPinned(BOTTOM_STICK_STABILIZE_FRAMES);
         return;
       }
@@ -514,7 +515,7 @@ export const TranscriptList = memo(function TranscriptList({
       observer.disconnect();
       window.removeEventListener("resize", handleViewportResize);
     };
-  }, [holdViewportResizeAnchor, restoreResizeAnchorIfDetached, scrollElement, stickToLatestIfPinned]);
+  }, [holdViewportResizeAnchor, restoreResizeAnchorIfDetached, scrollElement, stickToLatestIfPinned, syncPinnedBottom]);
 
   useEffect(() => {
     const node = listElementRef.current;

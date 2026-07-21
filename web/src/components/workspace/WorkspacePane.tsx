@@ -69,6 +69,7 @@ import {
 } from "@/state/filePreviewStore";
 import { useVisibleProjectFileReveal } from "@/state/projectRevealStore";
 import { setProjectTabClosed, useProjectTabClosed } from "@/state/workspaceProjectTabStore";
+import { setWorkspaceOpen } from "@/state/workspaceStore";
 import {
   clearVisibleUIContext,
   setVisibleUIContext,
@@ -110,6 +111,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
   const [retainedTerminals, setRetainedTerminals] = useState<Record<string, Terminal[]>>({});
   const [retainedFilePreviews, setRetainedFilePreviews] = useState<Record<string, FilePreview>>({});
   const [projectUIContext, setProjectUIContext] = useState<UIContextPart>();
+  const hadResourcesRef = useRef(false);
   const projectFileReveal = useVisibleProjectFileReveal(sessionID, secondarySessionID);
   const browserReveal = useVisibleBrowserReveal(sessionID, secondarySessionID);
   const canvasReveal = useVisibleCanvasReveal(sessionID, secondarySessionID);
@@ -891,6 +893,18 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
       selectCanvasItem(items[0].id);
     }
   }, [activeCanvasItemIDs, actorSessionID, items, itemsQuery.isLoading]);
+
+  const totalResourceCount = items.length + browserTabs.length + terminals.length + surfaceFilePreviews.length + (projectTabVisible ? 1 : 0);
+  useEffect(() => {
+    if (totalResourceCount > 0) {
+      hadResourcesRef.current = true;
+      return;
+    }
+    if (hadResourcesRef.current) {
+      hadResourcesRef.current = false;
+      setWorkspaceOpen(false);
+    }
+  }, [totalResourceCount]);
 
   useEffect(() => {
     if (itemsQuery.isLoading || itemsQuery.isFetching || activeSurface !== "canvas" || filePreviewActive || items.length > 0) return;

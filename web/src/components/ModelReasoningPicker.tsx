@@ -290,7 +290,7 @@ function ProfileModels({
   }
 
   return (
-    <div className="grid max-h-56 gap-0.5 overflow-y-auto py-0.5">
+    <div className="grid gap-0.5 py-0.5">
       {models.map((model) => {
         const selected = isCurrentProfile && currentModel === model;
         const label = formatModelLabel(model);

@@ -1654,6 +1654,11 @@ function ProjectActionsMenu({ project, token }: { project: Project; token: strin
               maxLength={120}
               value={name}
               onChange={(event) => setName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                }
+              }}
             />
             <DialogFooter>
               <Button disabled={renameMutation.isPending} type="button" variant="outline" onClick={() => setRenameOpen(false)}>
@@ -2068,7 +2073,7 @@ function SessionItem({
               onBlur={saveEditing}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Enter") {
+                if (event.key === "Enter" && !event.nativeEvent.isComposing) {
                   event.preventDefault();
                   event.currentTarget.blur();
                 }

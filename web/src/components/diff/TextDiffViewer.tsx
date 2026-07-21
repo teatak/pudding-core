@@ -25,7 +25,7 @@ export function TextDiffViewer({ newValue, oldValue }: { newValue: string; oldVa
         newValue={newValue}
         splitView={false}
         compareMethod={DiffMethod.WORDS_WITH_SPACE}
-        showDiffOnly={false}
+        showDiffOnly={true}
         hideSummary
         useDarkTheme={resolved === "dark"}
         disableWorker

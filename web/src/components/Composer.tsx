@@ -61,7 +61,7 @@ import { ComposerAddButton } from "@/components/ComposerAddMenu";
 import { ComposerFloatingPanel } from "@/components/ComposerFloatingPanel";
 import { buildComposerMentionReferences } from "@/components/composerMentionData";
 import { ComposerMentionMenu } from "@/components/ComposerMentionMenu";
-import { useComposerMentions } from "@/components/useComposerMentions";
+import { ComposerTextArea, parseSlashSubmitCommand, type ComposerTextAreaHandle, type SlashCommand, type SlashSubmitCommand } from "@/components/ComposerTextArea";
 import { ContextUsageRing } from "@/components/ContextUsageRing";
 import { GitCommitDiffDialog, type GitCommitApproval } from "@/components/GitCommitDiffDialog";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
@@ -77,10 +77,8 @@ import { ModelReasoningPicker } from "@/components/ModelReasoningPicker";
 import { type ResolvedModelSelection } from "@/lib/modelSelection";
 import { reasoningEffortOptionsForSelection } from "@/components/ReasoningEffortChip";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useComposerSelectionGuard } from "@/hooks/useComposerSelectionGuard";
-import { useImeCompositionGuard } from "@/hooks/useImeCompositionGuard";
 import { useI18n } from "@/i18n";
 import { attachmentResourceURL } from "@/lib/attachmentURL";
 import { createPastedTextAttachmentFile, shouldAttachPastedText } from "@/lib/clipboardTextAttachment";
@@ -131,20 +129,6 @@ export type DroppedFilesBatch = DroppedLocalItems & {
 
 type ComposerApproval = Extract<AssistantOverlayPart, { type: "approval" }>;
 type ApprovalMenuAction = "approve-session" | "approve-turn" | "deny" | "review-git" | "review-patch";
-type SlashCommand = {
-  command: string;
-  description: string;
-  hasArgs: boolean;
-  icon: LucideIcon;
-  id: "clear" | "compact" | "rename" | "summary";
-  label: string;
-};
-type SlashSubmitCommand =
-  | { id: "clear" }
-  | { id: "compact"; hint: string }
-  | { id: "rename"; title: string }
-  | { id: "summary"; hint: string };
-
 type ComposerAttachment = SessionDraftAttachment;
 const emptyComposerAttachments: ComposerAttachment[] = [];
 const emptyLocalFolders: LocalFolderPath[] = [];
@@ -229,10 +213,11 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       fileInputRef.current.value = "";
     }
   }, [ensureSessionDraft, form, sessionID]);
-  // 空消息(含纯空白)不可发:禁用发送按钮 + Enter 不触发提交,从源头避免
-  // 弹出 zod min(1) 的校验错误。watch 让按钮态随输入实时更新。
-  const draftText = form.watch("text");
-  const trimmedDraftText = draftText.trim();
+  const [canSend, setCanSend] = useState(false);
+  const [mentionMenuOpen, setMentionMenuOpen] = useState(false);
+  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
+  const [draftSlashCommand, setDraftSlashCommand] = useState<SlashSubmitCommand | null>(null);
+  const textAreaHandleRef = useRef<ComposerTextAreaHandle | null>(null);
   const uploadedAttachments = attachments.flatMap((item) => (item.status === "uploaded" && item.attachment ? [item.attachment] : []));
   const hasPendingAttachments = attachments.some((item) => item.status === "uploading");
   const hasFailedAttachments = attachments.some((item) => item.status === "error");
@@ -254,8 +239,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     () => new Map(attachmentPreviewItems.map((item, index) => [item.id, index])),
     [attachmentPreviewItems],
   );
-  const draftSlashCommand = hasAttachments || hasLocalFolders || hasProjectReferences ? null : parseSlashSubmitCommand(trimmedDraftText);
-  const canSend = Boolean(trimmedDraftText || uploadedAttachments.length || hasLocalFolders || hasProjectReferences) && !hasPendingAttachments && !hasFailedAttachments;
   const textField = form.register("text");
   const slashCommands: SlashCommand[] = [
     {
@@ -291,12 +274,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       label: t("composer.commandSummary"),
     },
   ];
-  const slashQuery = slashCommandQuery(trimmedDraftText, slashCommands);
-  const visibleSlashCommands =
-    textFocused && slashQuery !== null
-      ? slashCommands.filter((command) => command.command.startsWith("/" + slashQuery))
-      : [];
-  const slashMenuOpen = visibleSlashCommands.length > 0;
   const appsQuery = useQuery({
     queryKey: queryKeys.apps(),
     queryFn: () => listApps(token),
@@ -313,40 +290,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     () => buildComposerMentionReferences({ apps: appsQuery.data?.apps ?? [], skills: skillsQuery.data?.skills ?? [], t, token }),
     [appsQuery.data?.apps, skillsQuery.data?.skills, t, token],
   );
-  const setComposerText = useCallback(
-    (nextText: string) => {
-      form.setValue("text", nextText, { shouldDirty: true });
-      setSessionDraftText(sessionID, nextText);
-      if (textAreaRef.current && textAreaRef.current.value !== nextText) {
-        textAreaRef.current.value = nextText;
-      }
-    },
-    [form, sessionID, setSessionDraftText],
-  );
-  const mentions = useComposerMentions({
-    references: mentionReferences,
-    text: draftText,
-    setText: setComposerText,
-    textAreaRef,
-    onAction: (actionID) => {
-      if (actionID === "files") {
-        pickAttachment();
-        return;
-      }
-      if (actionID === "folder") {
-        pickLocalFolder();
-        return;
-      }
-      if (actionID === "screenshot") {
-        captureScreenshot();
-        return;
-      }
-      if (actionID === "photo") {
-        capturePhoto();
-      }
-    },
-  });
-  const mentionMenuOpen = textFocused && mentions.open && !slashMenuOpen;
   const reasoningOptions = useMemo(() => reasoningEffortOptionsForSelection(resolvedModel), [resolvedModel]);
   const audioInputSupported = resolvedModel ? resolvedModel.modelConfig?.capabilities?.audio === true : undefined;
   const resolvedModelKey = resolvedModel ? `${resolvedModel.provider}:${resolvedModel.model}` : "";
@@ -376,14 +319,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     },
     [queryClient, resolvedModelKey, sessionID, token],
   );
-  useEffect(() => {
-    if (!slashMenuOpen) {
-      setSlashSelectedIndex(0);
-      return;
-    }
-    setSlashSelectedIndex((index) => Math.min(index, visibleSlashCommands.length - 1));
-  }, [slashMenuOpen, visibleSlashCommands.length]);
-
   useEffect(() => {
     if (reasoningEffort && !reasoningOptions.includes(reasoningEffort)) {
       setSessionReasoningEffort("");
@@ -596,10 +531,28 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       textAreaRef.current?.focus({ preventScroll: true });
     });
   }, [pickingAttachment]);
+  const handleAttachmentInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    setPickingAttachment(false);
+    addFiles(Array.from(event.target.files || []));
+    event.target.value = "";
+  };
+  const handleTextPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(event.clipboardData.files || []);
+    if (files.length > 0) {
+      event.preventDefault();
+      addFiles(files);
+      return;
+    }
+    const text = event.clipboardData.getData("text/plain");
+    if (!shouldAttachPastedText(text)) {
+      return;
+    }
+    event.preventDefault();
+    addFiles([createPastedTextAttachmentFile(text)], { origin: "temp", uploadSessionID: draftAttachmentSessionID });
+  };
   const openMentionMenuFromButton = useCallback(() => {
-    setTextFocused(true);
-    mentions.openManual();
-  }, [mentions]);
+    textAreaHandleRef.current?.openMentionMenu();
+  }, []);
   // Prefer this mascot feedback for composer-local validation and command errors.
   const showMascotError = useCallback(
     (message: string) => {
@@ -974,117 +927,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       setAttachmentPreviewIndex(null);
     }
   }, [attachmentPreviewIndex, attachmentPreviewItems.length]);
-  const ime = useImeCompositionGuard({ onCompositionEnd: scheduleMascotInputGaze });
-  const setTextAreaRef = (node: HTMLTextAreaElement | null) => {
-    textAreaRef.current = node;
-    textField.ref(node);
-  };
-  const handleTextBlur = (event: FocusEvent<HTMLTextAreaElement>) => {
-    textField.onBlur(event);
-    mentions.close();
-    setTextFocused(false);
-    setMascotInputGaze(null);
-  };
-  const handleTextFocus = () => {
-    setTextFocused(true);
-    if (textAreaRef.current) {
-      mentions.notifyCursor(textAreaRef.current.selectionStart);
-    }
-    scheduleMascotInputGaze();
-  };
-  const handleTextCursorUpdate = (event: { currentTarget: HTMLTextAreaElement }) => {
-    mentions.notifyCursor(event.currentTarget.selectionStart);
-    scheduleMascotInputGaze();
-  };
-  const handleTextChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
-    const previousText = form.getValues("text");
-    const nextText = event.target.value;
-    void textField.onChange(event);
-    setSessionDraftText(sessionID, nextText);
-    mentions.notifyChange(nextText, previousText, event.target.selectionStart);
-    if (mascotErrorMessage) {
-      clearMascotError();
-    }
-    setTextFocused(true);
-    scheduleMascotInputGaze();
-  };
-  const handleAttachmentInputChange = (event: ChangeEvent<HTMLInputElement>) => {
-    setPickingAttachment(false);
-    addFiles(Array.from(event.target.files || []));
-    event.target.value = "";
-  };
-  const handleTextPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = Array.from(event.clipboardData.files || []);
-    if (files.length > 0) {
-      event.preventDefault();
-      addFiles(files);
-      return;
-    }
-    const text = event.clipboardData.getData("text/plain");
-    if (!shouldAttachPastedText(text)) {
-      return;
-    }
-    event.preventDefault();
-    addFiles([createPastedTextAttachmentFile(text)], { origin: "temp", uploadSessionID: draftAttachmentSessionID });
-  };
-  const selectSlashCommand = (command: SlashCommand) => {
-    if (!command.hasArgs) {
-      runClearCommand();
-      return;
-    }
-    const nextText = command.command + " ";
-    form.setValue("text", nextText);
-    setSessionDraftText(sessionID, nextText);
-    window.requestAnimationFrame(() => {
-      textAreaRef.current?.focus();
-      scheduleMascotInputGaze();
-    });
-  };
-  const handleTextKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "@" && !event.metaKey && !event.ctrlKey && !event.altKey) {
-      mentions.notifyCursor(event.currentTarget.selectionStart + 1);
-    }
-    if (mentions.onKeyDown(event)) {
-      scheduleMascotInputGaze();
-      return;
-    }
-    if (slashMenuOpen) {
-      switch (event.key) {
-        case "ArrowDown":
-          event.preventDefault();
-          setSlashSelectedIndex((index) => (index + 1) % visibleSlashCommands.length);
-          return;
-        case "ArrowUp":
-          event.preventDefault();
-          setSlashSelectedIndex((index) => (index - 1 + visibleSlashCommands.length) % visibleSlashCommands.length);
-          return;
-        case "Enter":
-        case "Tab": {
-          event.preventDefault();
-          const command = visibleSlashCommands[slashSelectedIndex] ?? visibleSlashCommands[0];
-          if (command) {
-            selectSlashCommand(command);
-          }
-          return;
-        }
-        case "Escape":
-          event.preventDefault();
-          setTextFocused(false);
-          return;
-      }
-    }
-    if (event.key === "Enter" && !event.shiftKey) {
-      if (ime.isComposing(event)) {
-        scheduleMascotInputGaze();
-        return;
-      }
-      event.preventDefault();
-      if (sendEnabled) {
-        void form.handleSubmit(submitDraft)();
-      }
-    }
-    scheduleMascotInputGaze();
-  };
 
   useEffect(() => {
     return () => {
@@ -1119,22 +961,6 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
           <ComposerApprovalBar approval={pendingApproval} token={token} />
           {pendingInputFlow ? (
             <InputFlowPanel key={pendingInputFlow.id} request={pendingInputFlow} onSubmit={(submission) => inputFlowSubmitMutation.mutate(submission)} />
-          ) : null}
-          {mentionMenuOpen ? (
-            <ComposerMentionMenu
-              references={mentions.filtered}
-              query={mentions.query}
-              selectedIndex={mentions.activeIndex}
-              onHover={mentions.setActiveIndex}
-              onSelect={mentions.select}
-            />
-          ) : slashMenuOpen ? (
-            <SlashCommandMenu
-              commands={visibleSlashCommands}
-              selectedIndex={slashSelectedIndex}
-              onHover={setSlashSelectedIndex}
-              onSelect={selectSlashCommand}
-            />
           ) : null}
           <div
             className={cn(
@@ -1187,9 +1013,13 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
               </div>
             ) : null}
             <div className="px-4 pt-3.5 pb-2.5">
-              <Textarea
-                data-composer-text-input="true"
-                className="block max-h-36 min-h-6 resize-none overflow-y-auto rounded-none border-0 bg-transparent p-0 text-base leading-6 shadow-none focus-visible:ring-0 md:text-sm dark:bg-transparent"
+              <ComposerTextArea
+                ref={textAreaHandleRef}
+                control={form.control}
+                textField={textField}
+                textAreaRef={textAreaRef}
+                mentionReferences={mentionReferences}
+                slashCommands={slashCommands}
                 placeholder={
                   session.activeMode === "chat"
                     ? t("composer.messagePlaceholder")
@@ -1198,20 +1028,53 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
                         t(`mode.${session.activeMode}`),
                       )
                 }
-                rows={1}
-                name={textField.name}
-                ref={setTextAreaRef}
-                onBlur={handleTextBlur}
-                onChange={handleTextChange}
-                onCompositionEnd={ime.onCompositionEnd}
-                onCompositionStart={ime.onCompositionStart}
-                onClick={handleTextCursorUpdate}
-                onFocus={handleTextFocus}
-                onKeyDown={handleTextKeyDown}
-                onKeyUp={handleTextCursorUpdate}
-                onMouseUp={handleTextCursorUpdate}
+                hasAttachments={hasAttachments}
+                hasLocalFolders={hasLocalFolders}
+                hasProjectReferences={hasProjectReferences}
+                hasPendingAttachments={hasPendingAttachments}
+                hasFailedAttachments={hasFailedAttachments}
+                uploadedAttachmentsCount={uploadedAttachments.length}
+                formSetValue={form.setValue}
+                setSessionDraftText={setSessionDraftText}
+                sessionID={sessionID}
+                onCanSendChange={setCanSend}
+                onMentionMenuOpenChange={setMentionMenuOpen}
+                onSlashMenuOpenChange={setSlashMenuOpen}
+                onDraftSlashCommandChange={setDraftSlashCommand}
+                onAction={(actionID) => {
+                  if (actionID === "files") {
+                    pickAttachment();
+                    return;
+                  }
+                  if (actionID === "folder") {
+                    pickLocalFolder();
+                    return;
+                  }
+                  if (actionID === "screenshot") {
+                    captureScreenshot();
+                    return;
+                  }
+                  if (actionID === "photo") {
+                    capturePhoto();
+                  }
+                }}
+                onSlashCommandSelect={(command) => {
+                  if (!command.hasArgs) {
+                    runClearCommand();
+                    return;
+                  }
+                }}
+                onEnter={(info) => {
+                  const hasModel = Boolean(resolvedModel) || Boolean(info.draftSlashCommand && info.draftSlashCommand.id !== "summary");
+                  const pending = submitMutation.isPending || compactMutation.isPending || systemSubmitMutation.isPending || renameMutation.isPending;
+                  if (info.canSend && !info.mentionMenuOpen && !info.slashMenuOpen && !pending && hasModel) {
+                    void form.handleSubmit(submitDraft)();
+                  }
+                }}
                 onPaste={handleTextPaste}
-                onSelect={handleTextCursorUpdate}
+                onBlur={() => setMascotInputGaze(null)}
+                onClearMascotError={clearMascotError}
+                scheduleMascotInputGaze={scheduleMascotInputGaze}
               />
             </div>
             <div className="flex min-w-0 items-center gap-1 px-2 pb-2">
@@ -1543,100 +1406,6 @@ function AudioPreviewButton({ label, src }: { label: string; src: string }) {
   );
 }
 
-function SlashCommandMenu({
-  commands,
-  selectedIndex,
-  onHover,
-  onSelect,
-}: {
-  commands: SlashCommand[];
-  selectedIndex: number;
-  onHover: (index: number) => void;
-  onSelect: (command: SlashCommand) => void;
-}) {
-  const selectedRef = useRef<HTMLButtonElement | null>(null);
-  const listRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    scrollActiveSlashCommandIntoList(selectedRef.current, listRef.current);
-  }, [selectedIndex]);
-
-  return (
-    <div
-      ref={listRef}
-      className="pudding-composer-suggestion absolute bottom-[calc(100%-3px)] left-16 z-[5] max-h-64 w-[min(30rem,calc(100%-6rem))] overflow-y-auto rounded-t-lg border border-b-0 bg-popover/95 p-1 text-sm text-popover-foreground backdrop-blur"
-      role="listbox"
-    >
-      {commands.map((command, index) => (
-        <button
-          key={command.id}
-          ref={index === selectedIndex ? selectedRef : undefined}
-          aria-selected={index === selectedIndex}
-          aria-label={`${command.label} ${command.description}`}
-          className={cn(
-            "flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-[12px] hover:bg-muted",
-            index === selectedIndex && "bg-muted text-foreground",
-          )}
-          role="option"
-          type="button"
-          onMouseEnter={() => onHover(index)}
-          onMouseDown={(event) => {
-            event.preventDefault();
-            onSelect(command);
-          }}
-        >
-          <SlashCommandIcon command={command} />
-          <span className="shrink-0 font-medium">{command.label}</span>
-          <span className="ml-1 min-w-0 flex-1 truncate text-muted-foreground/65">{command.description}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function SlashCommandIcon({ command }: { command: SlashCommand }) {
-  const Icon = command.icon;
-  return (
-    <span className="grid size-5 shrink-0 place-items-center text-foreground/70">
-      <Icon className="size-4" strokeWidth={2.15} />
-    </span>
-  );
-}
-
-function scrollActiveSlashCommandIntoList(active: HTMLElement | null, list: HTMLElement | null) {
-  if (!active || !list) {
-    return;
-  }
-  const activeTop = active.offsetTop;
-  const activeBottom = activeTop + active.offsetHeight;
-  const visibleTop = list.scrollTop;
-  const visibleBottom = visibleTop + list.clientHeight;
-  if (activeTop < visibleTop) {
-    list.scrollTop = activeTop;
-  } else if (activeBottom > visibleBottom) {
-    list.scrollTop = activeBottom - list.clientHeight;
-  }
-}
-
-function parseSlashSubmitCommand(text: string): SlashSubmitCommand | null {
-  if (text === "/clear") {
-    return { id: "clear" };
-  }
-  const compactMatch = text.match(/^\/compact(?:\s+([\s\S]*))?$/);
-  if (compactMatch) {
-    return { id: "compact", hint: (compactMatch[1] || "").trim() };
-  }
-  const renameMatch = text.match(/^\/rename(?:\s+([\s\S]*))?$/);
-  if (renameMatch) {
-    return { id: "rename", title: (renameMatch[1] || "").trim() };
-  }
-  const summaryMatch = text.match(/^\/summary(?:\s+([\s\S]*))?$/);
-  if (summaryMatch) {
-    return { id: "summary", hint: (summaryMatch[1] || "").trim() };
-  }
-  return null;
-}
-
 function formatAttachmentSize(size: number) {
   if (size < 1024) {
     return `${size} B`;
@@ -1705,17 +1474,6 @@ function summaryPrompt(hint: string, t: (key: string) => string) {
     return t("composer.summaryPromptWithHint").replace("{hint}", hint);
   }
   return t("composer.summaryPrompt");
-}
-
-function slashCommandQuery(text: string, commands: SlashCommand[]): string | null {
-  if (!text.startsWith("/") || /\s/.test(text)) {
-    return null;
-  }
-  const query = text.slice(1);
-  if (commands.some((command) => command.command === text)) {
-    return null;
-  }
-  return query;
 }
 
 function compactErrorMessage(error: unknown, t: (key: string) => string) {
