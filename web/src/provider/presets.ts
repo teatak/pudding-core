@@ -69,7 +69,7 @@ function mimoCapabilities(id: string) {
   return id === "mimo-v2.5" ? { image: true, audio: true, tools: true } : { tools: true };
 }
 
-const QWEN_MODEL_IDS = ["qwen3.6-flash", "qwen3.7-max", "qwen3.6-plus", "qwen3-max"];
+const QWEN_MODEL_IDS = ["qwen3.6-flash", "qwen3.7-max", "qwen3.7-plus"];
 const QWEN_OPENAI_MODELS = QWEN_MODEL_IDS.map((id) =>
   model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE } }),
 );
@@ -77,7 +77,7 @@ const QWEN_ANTHROPIC_MODELS = QWEN_MODEL_IDS.map((id) =>
   model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE, max_tokens: 131_072 } }),
 );
 
-const MOONSHOT_MODEL_IDS = ["kimi-k2.6", "kimi-k2.5"];
+const MOONSHOT_MODEL_IDS = ["kimi-k3", "kimi-k2.6"];
 const MOONSHOT_OPENAI_MODELS = MOONSHOT_MODEL_IDS.map((id) =>
   model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE } }),
 );
@@ -85,7 +85,7 @@ const MOONSHOT_ANTHROPIC_MODELS = MOONSHOT_MODEL_IDS.map((id) =>
   model(id, { contextWindow: 1_000_000, capabilities: { tools: true }, anthropic: { temperature: DEFAULT_PRESET_TEMPERATURE, max_tokens: 131_072 } }),
 );
 
-const ZHIPU_MODEL_IDS = ["glm-5.1", "glm-5"];
+const ZHIPU_MODEL_IDS = ["glm-5.2", "glm-5.1"];
 const ZHIPU_OPENAI_MODELS = ZHIPU_MODEL_IDS.map((id) =>
   model(id, { contextWindow: 1_000_000, capabilities: { image: true, tools: true }, openai: { temperature: DEFAULT_PRESET_TEMPERATURE } }),
 );
