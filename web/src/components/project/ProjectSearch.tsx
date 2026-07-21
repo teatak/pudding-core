@@ -140,7 +140,14 @@ function HighlightedText({ caseSensitive, query, text }: { caseSensitive: boolea
     const index = source.indexOf(needle, start);
     if (index < 0) break;
     if (index > start) parts.push(text.slice(start, index));
-    parts.push(<mark className="rounded-sm bg-primary/20 text-foreground" key={`${index}:${parts.length}`}>{text.slice(index, index + query.length)}</mark>);
+    parts.push(
+      <mark
+        className="rounded-[2px] bg-amber-200/80 text-inherit dark:bg-amber-400/30"
+        key={`${index}:${parts.length}`}
+      >
+        {text.slice(index, index + query.length)}
+      </mark>,
+    );
     start = index + query.length;
   }
   if (start < text.length) parts.push(text.slice(start));

@@ -45,14 +45,14 @@ func TestBuildUsesCoreAndUserPrompt(t *testing.T) {
 		t.Fatalf("unexpected system prompt: %q", req.System)
 	}
 
-	if err := ms.SetSettings(ctx, map[string]string{"system_prompt": "你是布丁"}); err != nil {
+	if err := ms.SetSettings(ctx, map[string]string{"system_prompt": "你是 Pudding"}); err != nil {
 		t.Fatal(err)
 	}
 	req, err = b.Build(ctx, "s1", "m", string(store.ModeChat))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(req.System, "你是布丁") {
+	if strings.Contains(req.System, "你是 Pudding") {
 		t.Fatalf("settings system_prompt must not affect contextbuilder prompt: %q", req.System)
 	}
 	if len(req.Messages) != 1 || req.Messages[0].Text != "hi" {

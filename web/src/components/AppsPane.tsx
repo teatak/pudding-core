@@ -216,6 +216,7 @@ export function AppsPane({ token }: { token: string }) {
   const [detailAppID, setDetailAppID] = useState<string | null>(null);
   const [detailCatalogID, setDetailCatalogID] = useState<string | null>(null);
   const [catalogReleaseByID, setCatalogReleaseByID] = useState<Record<string, string>>({});
+  const [bulkUpgradeAppID, setBulkUpgradeAppID] = useState<string | null>(null);
   const settingsQuery = useQuery({
     queryKey: queryKeys.settings(),
     queryFn: () => getSettings(token),
@@ -264,6 +265,20 @@ export function AppsPane({ token }: { token: string }) {
   const catalogByLocalID = useMemo(
     () => new Map(catalogApps.map((app) => [appRegistryLocalID(app), app])),
     [catalogApps],
+  );
+  const upgradeTargets = useMemo<CatalogInstallTarget[]>(
+    () =>
+      catalogApps.flatMap((app) => {
+        const installed = installedByID.get(appRegistryLocalID(app));
+        if (!installed) {
+          return [];
+        }
+        const release =
+          appRegistryDefaultRelease(app, showPreviewVersions, installed) ||
+          appRegistryDefaultRelease(app, false, installed);
+        return release && needsAppUpgrade(installed, release) ? [{ app, release }] : [];
+      }),
+    [catalogApps, installedByID, showPreviewVersions],
   );
   const connections = useMemo(() => connectionsQuery.data?.connections || [], [connectionsQuery.data?.connections]);
   const detailApp = apps.find((app) => app.id === detailAppID) || null;
@@ -353,6 +368,53 @@ export function AppsPane({ token }: { token: string }) {
       ]);
     },
     onError: () => toast.error(t("apps.installFailed")),
+  });
+  const upgradeAllMutation = useMutation({
+    mutationFn: async (targets: CatalogInstallTarget[]) => {
+      const upgraded: AppDefinition[] = [];
+      let failed = 0;
+      for (const target of targets) {
+        setBulkUpgradeAppID(target.app.id);
+        try {
+          const packageJSON = await fetchAppPackage(target.app, OFFICIAL_APP_REGISTRY, target.release);
+          upgraded.push(
+            await installAppPackage(token, {
+              packageJSON,
+              packageSHA256: target.release.package_sha256,
+              sourceURL: OFFICIAL_APP_REGISTRY,
+            }),
+          );
+        } catch {
+          failed += 1;
+        }
+      }
+      return { failed, upgraded };
+    },
+    onSuccess: async ({ failed, upgraded }) => {
+      if (upgraded.length > 0) {
+        queryClient.setQueryData<{ apps: AppDefinition[] }>(queryKeys.apps(), (current) => {
+          const upgradedByID = new Map(upgraded.map((app) => [app.id, app]));
+          const existing = current?.apps || [];
+          return {
+            apps: [
+              ...existing.map((app) => upgradedByID.get(app.id) || app),
+              ...upgraded.filter((app) => !existing.some((item) => item.id === app.id)),
+            ].sort((a, b) => a.name.localeCompare(b.name)),
+          };
+        });
+      }
+      if (failed > 0) {
+        toast.error(t("apps.upgradeAllPartial"));
+      } else {
+        toast.success(t("apps.upgradeAllDone"));
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.apps() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.appCatalog() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.appConnections() }),
+      ]);
+    },
+    onSettled: () => setBulkUpgradeAppID(null),
   });
   const deleteMutation = useMutation({
     mutationFn: (connection: AppConnection) => deleteAppConnection(token, connection.id),
@@ -541,8 +603,22 @@ export function AppsPane({ token }: { token: string }) {
                 </div>
               </section>
               <section className="grid gap-4">
-                <div className="border-b pb-4">
+                <div className="flex items-center justify-between gap-4 border-b pb-4">
                   <h2 className="text-lg font-semibold tracking-normal">{t("apps.availableTitle")}</h2>
+                  {upgradeTargets.length > 0 ? (
+                    <Button
+                      className="shrink-0 rounded-full"
+                      disabled={upgradeAllMutation.isPending || installMutation.isPending}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                      onClick={() => upgradeAllMutation.mutate(upgradeTargets)}
+                    >
+                      {upgradeAllMutation.isPending ? <Spinner className="size-3.5" /> : <Download className="size-3.5" />}
+                      {t("apps.upgradeAll")}
+                      <span className="text-muted-foreground">{upgradeTargets.length}</span>
+                    </Button>
+                  ) : null}
                 </div>
                 {catalogQuery.isLoading ? (
                   <SectionSpinner />
@@ -566,10 +642,12 @@ export function AppsPane({ token }: { token: string }) {
                           app={app}
                           installed={installed}
                           installing={
-                            installMutation.isPending &&
-                            installMutation.variables?.app.id === app.id &&
-                            installMutation.variables.release.version === release.version
+                            (installMutation.isPending &&
+                              installMutation.variables?.app.id === app.id &&
+                              installMutation.variables.release.version === release.version) ||
+                            (upgradeAllMutation.isPending && bulkUpgradeAppID === app.id)
                           }
+                          installDisabled={upgradeAllMutation.isPending}
                           release={release}
                           showPreviewVersions={showPreviewVersions}
                           token={token}
@@ -1328,6 +1406,7 @@ function CatalogAppItem({
   app,
   installed,
   installing,
+  installDisabled,
   onInstall,
   onSelect,
   release,
@@ -1337,6 +1416,7 @@ function CatalogAppItem({
   app: AppRegistryItem;
   installed?: AppDefinition;
   installing: boolean;
+  installDisabled: boolean;
   onInstall: () => void;
   onSelect: () => void;
   release: AppRegistryRelease;
@@ -1355,7 +1435,12 @@ function CatalogAppItem({
   return (
     <section className="flex min-w-0 items-center gap-4 rounded-xl px-3 py-2 hover:bg-muted">
       <button className="flex min-w-0 flex-1 items-center gap-4 overflow-hidden text-left" type="button" onClick={onSelect}>
-        <AppIcon icon={icon} size="lg" src={iconSrc} />
+        <div className="relative shrink-0">
+          <AppIcon icon={icon} size="lg" src={iconSrc} />
+          {upgradeAvailable ? (
+            <span aria-hidden className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-background bg-destructive" />
+          ) : null}
+        </div>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2 overflow-hidden">
             <h3 className="min-w-0 truncate text-sm font-semibold">{title}</h3>
@@ -1367,7 +1452,7 @@ function CatalogAppItem({
       </button>
       <Button
         className="h-8 shrink-0 rounded-full px-4"
-        disabled={installing || installedCurrentOrNewer}
+        disabled={installDisabled || installing || installedCurrentOrNewer}
         size="xs"
         type="button"
         variant="outline"

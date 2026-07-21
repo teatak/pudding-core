@@ -1,6 +1,6 @@
 "CFBundleDisplayName" = "Pudding";
 "CFBundleName" = "Pudding";
-"NSCameraUsageDescription" = "布丁僅在你選擇拍照時使用相機。";
-"NSLocalNetworkUsageDescription" = "布丁使用區域網路，讓同一網路中的裝置連線到布丁。";
-"NSMicrophoneUsageDescription" = "布丁使用麥克風進行本機聽寫和語音輸入。";
-"NSScreenCaptureUsageDescription" = "布丁僅在你選擇擷取桌面畫面時使用螢幕錄製權限。";
+"NSCameraUsageDescription" = "Pudding 僅在你選擇拍照時使用相機。";
+"NSLocalNetworkUsageDescription" = "Pudding 使用區域網路，讓同一網路中的裝置連線到 Pudding。";
+"NSMicrophoneUsageDescription" = "Pudding 使用麥克風進行本機聽寫和語音輸入。";
+"NSScreenCaptureUsageDescription" = "Pudding 僅在你選擇擷取桌面畫面時使用螢幕錄製權限。";
