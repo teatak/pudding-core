@@ -35,7 +35,9 @@ async function main(argv, env) {
   const channel = inferReleaseChannelFromTag(tag);
   const token = resolveGitHubToken(env);
   const releases = await githubRequest("GET", `/repos/${repository}/releases?per_page=100`, token);
-  const matching = releases.filter((candidate) => candidate.tag_name === tag);
+  const matching = releases.filter(
+    (candidate) => candidate.tag_name === tag || isRecoverableDraft(candidate, tag),
+  );
   if (matching.length > 1) {
     throw new Error(`multiple drafts exist for ${tag}; consolidate them before continuing`);
   }
@@ -44,7 +46,7 @@ async function main(argv, env) {
     return;
   }
 
-  const release = matching[0];
+  let release = matching[0];
   if (!release) {
     throw new Error(`draft ${tag} is not ready; signing or notarization may still be running`);
   }
@@ -57,6 +59,7 @@ async function main(argv, env) {
   }
 
   const releaseBody = buildReleaseBody(readReleaseNotes(root, tag));
+  release = await repairDraftTag(release, tag, channel, release.target_commitish, releaseBody, token);
   validateDraftRelease(release, tag, channel, releaseBody);
   if (command === "status") {
     console.log(`Draft release is ready: ${tag} assets=${release.assets.length} ${release.html_url}`);
@@ -114,6 +117,8 @@ async function createDraftRelease(existingRelease, tag, channel, token, env) {
       `/repos/${repository}/releases/${release.id}`,
       token,
       {
+        tag_name: tag,
+        target_commitish: manifestCommit,
         name: tag,
         body: releaseBody,
         prerelease: channel === "preview",
@@ -138,8 +143,31 @@ async function createDraftRelease(existingRelease, tag, channel, token, env) {
   }
 
   release = await githubRequest("GET", `/repos/${repository}/releases/${release.id}`, token);
+  release = await repairDraftTag(release, tag, channel, manifestCommit, releaseBody, token);
   validateDraftRelease(release, tag, channel, releaseBody);
   console.log(`Draft release assets ready: ${tag} ${release.html_url}`);
+}
+
+function isRecoverableDraft(release, tag) {
+  return (
+    release?.draft === true &&
+    release.name === tag &&
+    String(release.tag_name || "").startsWith("untagged-")
+  );
+}
+
+async function repairDraftTag(release, tag, channel, targetCommitish, body, token) {
+  if (!isRecoverableDraft(release, tag)) {
+    return release;
+  }
+  return githubRequest("PATCH", `/repos/${repository}/releases/${release.id}`, token, {
+    tag_name: tag,
+    target_commitish: targetCommitish,
+    name: tag,
+    body,
+    draft: true,
+    prerelease: channel === "preview",
+  });
 }
 
 function createDraftMetadata(tag, channel, targetCommitish, body) {
@@ -323,5 +351,7 @@ module.exports = {
   createDraftMetadata,
   ensureVersionManifest,
   expectedAssetNames,
+  isRecoverableDraft,
+  repairDraftTag,
   validateDraftRelease,
 };

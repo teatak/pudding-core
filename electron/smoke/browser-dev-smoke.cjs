@@ -79,6 +79,9 @@ async function run() {
     void host.registerWebContents(payload?.request || {}, target).catch(finish);
   });
   await window.loadFile(path.join(__dirname, "browser-dev-smoke.html"));
+  app.focus({ steal: true });
+  window.focus();
+  await new Promise((resolve) => setTimeout(resolve, 100));
 
   const fileTab = await host.ensure({
     sessionID: "smoke-session-a",

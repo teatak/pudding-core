@@ -6,6 +6,8 @@ const {
   createDraftMetadata,
   ensureVersionManifest,
   expectedAssetNames,
+  isRecoverableDraft,
+  repairDraftTag,
   validateDraftRelease,
 } = require("../../scripts/release-draft.cjs");
 
@@ -72,6 +74,46 @@ test("creates drafts through non-interactive GitHub API metadata", () => {
     createDraftMetadata("v0.1.4-beta.1", "preview", "public-commit", releaseBody).prerelease,
     true,
   );
+});
+
+test("recognizes and repairs GitHub untagged draft placeholders", async (context) => {
+  const originalFetch = global.fetch;
+  const requests = [];
+  context.after(() => {
+    global.fetch = originalFetch;
+  });
+  const placeholder = {
+    ...draft(),
+    id: 42,
+    tag_name: "untagged-123456",
+    target_commitish: "manifest-commit",
+  };
+  assert.equal(isRecoverableDraft(placeholder, "v0.1.2"), true);
+  assert.equal(isRecoverableDraft({ ...placeholder, name: "v0.1.3" }, "v0.1.2"), false);
+
+  global.fetch = async (url, options) => {
+    requests.push({ url, options });
+    return mockResponse(200, draft());
+  };
+  const repaired = await repairDraftTag(
+    placeholder,
+    "v0.1.2",
+    "stable",
+    "manifest-commit",
+    releaseBody,
+    "token",
+  );
+  assert.equal(repaired.tag_name, "v0.1.2");
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].url, /\/repos\/teatak\/pudding\/releases\/42$/);
+  assert.deepEqual(JSON.parse(requests[0].options.body), {
+    tag_name: "v0.1.2",
+    target_commitish: "manifest-commit",
+    name: "v0.1.2",
+    body: releaseBody,
+    draft: true,
+    prerelease: false,
+  });
 });
 
 test("rejects incomplete or already published releases", () => {
