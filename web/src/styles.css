@@ -314,7 +314,7 @@ html[data-shell] :where(
 
 @property --composer-mic-angle {
     syntax: "<angle>";
-    inherits: false;
+    inherits: true;
     initial-value: 0deg;
 }
 
@@ -365,36 +365,18 @@ html[data-shell] :where(
 }
 
 .pudding-composer-shell.is-mic-active {
-    --conic-neutral-color: color-mix(in oklch, var(--border), transparent 42%);
-    --conic-violet-subtle: rgba(124, 92, 255, 0.56);
-    --conic-indigo-subtle: rgba(99, 102, 241, 0.42);
-    --conic-cyan-subtle: rgba(34, 211, 238, 0.32);
-    --conic-mint-subtle: rgba(52, 211, 153, 0.24);
-    --conic-warm-subtle: rgba(245, 158, 11, 0.14);
-    animation: composer-mic-rotate 10s linear infinite;
+    --conic-primary: color-mix(in srgb, var(--card) 12%, #6d4aff 88%);
+    --conic-secondary: color-mix(in srgb, var(--card) 16%, #60a5fa 84%);
+    --conic-tertiary: color-mix(in srgb, var(--card) 18%, #34d399 82%);
+    animation: composer-mic-rotate 8s linear infinite;
     border-color: transparent;
-    background:
-        linear-gradient(var(--card), var(--card)) padding-box,
-        conic-gradient(
-            from var(--composer-mic-angle) at 50% 50%,
-            var(--conic-neutral-color) 0deg,
-            var(--conic-violet-subtle) 40deg,
-            var(--conic-indigo-subtle) 80deg,
-            var(--conic-neutral-color) 120deg,
-            var(--conic-cyan-subtle) 160deg,
-            var(--conic-mint-subtle) 200deg,
-            var(--conic-neutral-color) 240deg,
-            var(--conic-warm-subtle) 280deg,
-            var(--conic-violet-subtle) 320deg,
-            var(--conic-neutral-color) 1turn
-        )
-        border-box;
+    background: var(--card);
     box-shadow:
         0 3px 3px -1.5px rgba(10, 13, 18, 0.04),
         0 8px 8px -4px rgba(10, 13, 18, 0.03),
         0 20px 24px -4px rgba(10, 13, 18, 0.08),
-        0 10px 28px -24px rgba(124, 92, 255, 0.5),
-        0 12px 30px -26px rgba(34, 211, 238, 0.28);
+        0 10px 28px -24px rgba(109, 74, 255, 0.42),
+        0 12px 30px -26px rgba(96, 165, 250, 0.28);
 }
 
 .pudding-composer-shell.is-mic-active:focus-within {
@@ -408,21 +390,51 @@ html[data-shell] :where(
     z-index: -1;
     border-radius: inherit;
     pointer-events: none;
-    opacity: 0.16;
+    opacity: 0.12;
     filter: blur(16px);
     background: conic-gradient(
         from var(--composer-mic-angle) at 50% 50%,
-        transparent 0deg,
-        rgba(124, 92, 255, 0.34) 40deg,
-        rgba(99, 102, 241, 0.28) 80deg,
-        transparent 120deg,
-        rgba(34, 211, 238, 0.22) 160deg,
-        rgba(52, 211, 153, 0.18) 200deg,
-        transparent 240deg,
-        rgba(245, 158, 11, 0.12) 280deg,
-        rgba(124, 92, 255, 0.22) 320deg,
-        transparent 1turn
+        rgba(109, 74, 255, 0.34) 0deg,
+        transparent 35deg,
+        transparent 85deg,
+        rgba(96, 165, 250, 0.28) 120deg,
+        transparent 155deg,
+        transparent 205deg,
+        rgba(52, 211, 153, 0.24) 240deg,
+        transparent 275deg,
+        transparent 325deg,
+        rgba(109, 74, 255, 0.34) 1turn
     );
+}
+
+.pudding-composer-shell.is-mic-active::after {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    z-index: 1;
+    border-radius: inherit;
+    padding: 1px;
+    pointer-events: none;
+    background: conic-gradient(
+        from var(--composer-mic-angle) at 50% 50%,
+        var(--conic-primary) 0deg,
+        transparent 35deg,
+        transparent 85deg,
+        var(--conic-secondary) 120deg,
+        transparent 155deg,
+        transparent 205deg,
+        var(--conic-tertiary) 240deg,
+        transparent 275deg,
+        transparent 325deg,
+        var(--conic-primary) 1turn
+    );
+    opacity: 0.8;
+    filter: brightness(1.05) saturate(1.05);
+    -webkit-mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
 }
 
 @media (prefers-reduced-motion: reduce) {
