@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Search } from "lucide-react";
+import { Briefcase, Code2, MessageSquareText, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import { searchSessionMessages, type Message, type Project, type Session } from "@/api/client";
@@ -171,18 +171,27 @@ export function SessionSearchDialog({
                     onClick={() => chooseResult(result)}
                     onMouseMove={() => setActiveIndex(index)}
                   >
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium">
-                        <HighlightedText
-                          text={result.session.title || t("session.untitled")}
-                          terms={highlightTerms}
-                        />
+                    <span className="flex min-w-0 items-start gap-2">
+                      <span
+                        aria-label={t(`mode.${result.session.activeMode}`)}
+                        className="mt-0.5 grid size-4 shrink-0 place-items-center text-muted-foreground"
+                        role="img"
+                      >
+                        <SessionModeIcon mode={result.session.activeMode} />
                       </span>
-                      {secondary ? (
-                        <span className="mt-1 block truncate text-sm text-muted-foreground">
-                          <HighlightedText text={secondary} terms={highlightTerms} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">
+                          <HighlightedText
+                            text={result.session.title || t("session.untitled")}
+                            terms={highlightTerms}
+                          />
                         </span>
-                      ) : null}
+                        {secondary ? (
+                          <span className="mt-1 block truncate text-sm text-muted-foreground">
+                            <HighlightedText text={secondary} terms={highlightTerms} />
+                          </span>
+                        ) : null}
+                      </span>
                     </span>
                     {result.project ? (
                       <span
@@ -211,6 +220,16 @@ export function SessionSearchDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+function SessionModeIcon({ mode }: { mode: Session["activeMode"] }) {
+  if (mode === "code") {
+    return <Code2 className="size-4" aria-hidden="true" />;
+  }
+  if (mode === "work") {
+    return <Briefcase className="size-4" aria-hidden="true" />;
+  }
+  return <MessageSquareText className="size-4" aria-hidden="true" />;
 }
 
 function buildSearchResults(

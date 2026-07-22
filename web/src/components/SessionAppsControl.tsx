@@ -68,31 +68,31 @@ export function SessionAppsControl({ session, token }: { session: Session; token
         const pending = unloadMutation.isPending && unloadMutation.variables === appID;
         const closeLabel = t("apps.sessionUnload").replace("{name}", name);
         return (
-          <button
+          <div
             key={appID}
-            aria-label={closeLabel}
             className={cn(
               "group/app relative -ml-2.5 inline-grid size-7 shrink-0 place-items-center rounded-full",
               "transition-[margin] duration-150 first:ml-0 group-hover/apps:ml-0.5 group-hover/apps:first:ml-0 group-focus-within/apps:ml-0.5 group-focus-within/apps:first:ml-0",
-              "hover:z-20 focus-visible:z-20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              "hover:z-20 focus-within:z-20",
               pending && "z-20",
             )}
-            disabled={pending}
             style={{ zIndex: pending ? 20 : index + 1 }}
-
-            type="button"
-            onClick={() => unloadMutation.mutate(appID)}
           >
             <SessionAppIcon app={app} token={token} />
-            <span
+            <button
+              aria-label={closeLabel}
               className={cn(
-                "pointer-events-none absolute top-0 right-0 grid size-3 place-items-center rounded-full bg-foreground text-background opacity-0 shadow-sm transition-opacity group-hover/app:opacity-100 group-focus-visible/app:opacity-100",
-                pending && "opacity-100",
+                "pointer-events-none absolute -top-0.5 -right-0.5 z-10 grid size-3 place-items-center rounded-full bg-foreground text-background opacity-0 shadow-sm",
+                "group-hover/app:pointer-events-auto group-hover/app:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:outline-none",
+                pending && "pointer-events-auto opacity-100",
               )}
+              disabled={pending}
+              type="button"
+              onClick={() => unloadMutation.mutate(appID)}
             >
-              {pending ? <Spinner className="size-2" /> : <X className="size-2" strokeWidth={2.5} />}
-            </span>
-          </button>
+              {pending ? <Spinner className="size-2.5" /> : <X className="size-2.5" strokeWidth={2.5} />}
+            </button>
+          </div>
         );
       })}
       {hiddenAppCount > 0 ? (
@@ -106,11 +106,11 @@ export function SessionAppsControl({ session, token }: { session: Session; token
 
 function SessionAppIcon({ app, token }: { app: AppDefinition | undefined; token: string }) {
   return (
-    <span className="inline-grid size-6 place-items-center overflow-hidden rounded-full [&_[data-slot=identity-icon]]:!rounded-full">
+    <span className="inline-grid size-7 place-items-center overflow-hidden rounded-full [&_[data-slot=identity-icon]]:!size-7 [&_[data-slot=identity-icon]]:!rounded-full">
       {app ? (
-        <AppIdentityIcon app={app} iconSrc={appIconURL(token, app)} size="sm" />
+        <AppIdentityIcon app={app} iconSrc={appIconURL(token, app)} size="md" />
       ) : (
-        <AppIcon size="sm" />
+        <AppIcon size="md" />
       )}
     </span>
   );
