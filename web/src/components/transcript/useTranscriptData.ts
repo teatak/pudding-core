@@ -27,6 +27,7 @@ export function useTranscriptData({
   const queryClient = useQueryClient();
   const markAssistantRevealed = useOverlayStore((state) => state.markAssistantRevealed);
   const reconcileMessages = useOverlayStore((state) => state.reconcileMessages);
+  const reconcileTurns = useOverlayStore((state) => state.reconcileTurns);
   const overlayPendingUsers = useOverlayStore((state) => state.pendingUsers[sessionID] || EMPTY_PENDING);
   const assistantOverlays = useOverlayStore(
     useShallow((state) => Object.values(state.assistants).filter((overlay) => overlay.sessionID === sessionID)),
@@ -93,7 +94,8 @@ export function useTranscriptData({
       return;
     }
     reconcileMessages(sessionID, messages);
-  }, [messages, reconcileMessages, sessionID, turnsQuery.isSuccess]);
+    reconcileTurns(sessionID, turns, sessionRunning);
+  }, [messages, reconcileMessages, reconcileTurns, sessionID, sessionRunning, turns, turnsQuery.isSuccess]);
 
   return {
     markAssistantRevealed,

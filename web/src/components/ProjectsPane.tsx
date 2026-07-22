@@ -9,10 +9,12 @@ import { PageHeader } from "@/components/PageHeader";
 import { ProjectActionsMenu } from "@/components/ProjectActionsMenu";
 import { Spinner } from "@/components/Spinner";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useI18n } from "@/i18n";
 import { pickDirectories } from "@/lib/desktopBridge";
+import { cn } from "@/lib/utils";
 
 type ProjectSort = "updated-desc" | "created-desc" | "name-asc" | "name-desc";
 
@@ -98,68 +100,6 @@ export function ProjectsPane({ token }: { token: string }) {
       />
       <div className="min-h-0 flex-1 overflow-auto">
         <div className="mx-auto grid w-full max-w-5xl gap-5 px-6 pt-4 pb-10">
-          {adding ? (
-            <section className="grid gap-4 rounded-xl border bg-card p-4">
-              <div>
-                <h2 className="font-medium">{t("project.add")}</h2>
-                <p className="mt-1 text-sm text-muted-foreground">{t("project.addDescription")}</p>
-              </div>
-              <label className="grid gap-1.5 text-sm">
-                <span>{t("project.name")}</span>
-                <Input
-                  autoFocus
-                  disabled={createMutation.isPending}
-                  maxLength={120}
-                  placeholder={t("project.namePlaceholder")}
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                />
-              </label>
-              <div className="grid gap-2">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm">{t("project.directories")}</span>
-                  <Button disabled={createMutation.isPending} size="sm" type="button" variant="outline" onClick={() => void chooseDirectories()}>
-                    <FolderPlus className="size-3.5" />
-                    {t("project.chooseFolders")}
-                  </Button>
-                </div>
-                {rootDirs.length > 0 ? (
-                  <div className="grid gap-1 rounded-lg border p-1">
-                    {rootDirs.map((path) => (
-                      <div key={path} className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted/70 focus-within:bg-muted/70">
-                        <FolderClosed className="size-4 shrink-0 text-muted-foreground" />
-                        <span className="min-w-0 flex-1 truncate text-sm" >{path}</span>
-                        <Button
-                          aria-label={t("project.removeDirectory").replace("{name}", basename(path))}
-                          disabled={createMutation.isPending}
-                          size="icon-xs"
-                          type="button"
-                          variant="ghost"
-                          onClick={() => setRootDirs((current) => current.filter((entry) => entry !== path))}
-                        >
-                          <X />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="rounded-lg border border-dashed px-4 py-5 text-center text-sm text-muted-foreground">
-                    {t("project.noDirectories")}
-                  </div>
-                )}
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button disabled={createMutation.isPending} type="button" variant="outline" onClick={closeAddForm}>
-                  {t("common.cancel")}
-                </Button>
-                <Button disabled={createMutation.isPending || !name.trim() || rootDirs.length === 0} type="button" onClick={submitProject}>
-                  {createMutation.isPending ? <Spinner /> : null}
-                  {t("project.add")}
-                </Button>
-              </div>
-            </section>
-          ) : null}
-
           <section className="grid gap-4">
             <div className="flex flex-wrap items-center gap-2 border-b pb-4">
               <div className="relative min-w-48 flex-1">
@@ -183,7 +123,7 @@ export function ProjectsPane({ token }: { token: string }) {
                   <SelectItem value="name-desc">{t("project.sortNameDesc")}</SelectItem>
                 </SelectContent>
               </Select>
-              <Button className="shrink-0" size="sm" type="button" onClick={() => setAdding((current) => !current)}>
+              <Button className="shrink-0" size="sm" type="button" onClick={() => setAdding(true)}>
                 <FolderPlus className="size-3.5" />
                 {t("project.add")}
               </Button>
@@ -212,14 +152,100 @@ export function ProjectsPane({ token }: { token: string }) {
           </section>
         </div>
       </div>
+      <Dialog
+        open={adding}
+        onOpenChange={(open) => {
+          if (open) {
+            setAdding(true);
+          } else if (!createMutation.isPending) {
+            closeAddForm();
+          }
+        }}
+      >
+        <DialogContent className="max-h-[min(680px,calc(100svh-2rem))] sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{t("project.add")}</DialogTitle>
+            <DialogDescription>{t("project.addDescription")}</DialogDescription>
+          </DialogHeader>
+          <form
+            className="contents"
+            onSubmit={(event) => {
+              event.preventDefault();
+              submitProject();
+            }}
+          >
+            <div className="grid min-h-0 gap-4 overflow-y-auto pr-1">
+              <label className="grid gap-1.5 text-sm">
+                <span>{t("project.name")}</span>
+                <Input
+                  autoFocus
+                  disabled={createMutation.isPending}
+                  maxLength={120}
+                  placeholder={t("project.namePlaceholder")}
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </label>
+              <div className="grid gap-2">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm">{t("project.directories")}</span>
+                  <Button disabled={createMutation.isPending} size="sm" type="button" variant="outline" onClick={() => void chooseDirectories()}>
+                    <FolderPlus className="size-3.5" />
+                    {t("project.chooseFolders")}
+                  </Button>
+                </div>
+                {rootDirs.length > 0 ? (
+                  <div className="grid gap-1 rounded-lg border p-1">
+                    {rootDirs.map((path) => (
+                      <div key={path} className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted/70 focus-within:bg-muted/70">
+                        <FolderClosed className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate text-sm">{path}</span>
+                        <Button
+                          aria-label={t("project.removeDirectory").replace("{name}", basename(path))}
+                          disabled={createMutation.isPending}
+                          size="icon-xs"
+                          type="button"
+                          variant="ghost"
+                          onClick={() => setRootDirs((current) => current.filter((entry) => entry !== path))}
+                        >
+                          <X />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed px-4 py-5 text-center text-sm text-muted-foreground">
+                    {t("project.noDirectories")}
+                  </div>
+                )}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button disabled={createMutation.isPending} type="button" variant="outline" onClick={closeAddForm}>
+                {t("common.cancel")}
+              </Button>
+              <Button disabled={createMutation.isPending || !name.trim() || rootDirs.length === 0} type="submit">
+                {createMutation.isPending ? <Spinner /> : null}
+                {t("project.add")}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }
 
 function ProjectRow({ locale, project, token }: { locale: string; project: Project; token: string }) {
   const { t } = useI18n();
+  const [actionsOverlayOpen, setActionsOverlayOpen] = useState(false);
   return (
-    <article className="group/project-label grid gap-3 rounded-xl border border-border/70 px-4 py-3 hover:bg-muted/30 focus-within:bg-muted/30">
+    <article
+      className={cn(
+        "group/project-label grid gap-3 rounded-xl border border-border/70 px-4 py-3 hover:bg-muted/30",
+        actionsOverlayOpen && "bg-muted/30",
+      )}
+    >
       <div className="flex min-w-0 items-start gap-3">
         <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
           <FolderClosed className="size-4.5" />
@@ -231,7 +257,12 @@ function ProjectRow({ locale, project, token }: { locale: string; project: Proje
             <span>{t("project.updatedAt").replace("{date}", formatProjectDate(project.updatedAt, locale))}</span>
           </div>
         </div>
-        <ProjectActionsMenu alwaysVisible project={project} token={token} />
+        <ProjectActionsMenu
+          alwaysVisible
+          project={project}
+          token={token}
+          onOverlayOpenChange={setActionsOverlayOpen}
+        />
       </div>
       <div className="grid gap-1 pl-12">
         {project.rootDirs.map((path) => (

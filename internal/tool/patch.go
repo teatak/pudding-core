@@ -29,7 +29,7 @@ const (
 	patchMaxPreparedItems = 128
 )
 
-type patchApplyArgs struct {
+type filePatchArgs struct {
 	Scope string         `json:"scope"`
 	Files []patchFileArg `json:"files"`
 }
@@ -116,10 +116,10 @@ func newPatchError(reason, detail string) error {
 	return &patchError{reason: reason, detail: detail}
 }
 
-func decodePatchApplyArgs(raw json.RawMessage) (patchApplyArgs, *patchArgumentError) {
+func decodeFilePatchArgs(raw json.RawMessage) (filePatchArgs, *patchArgumentError) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 {
-		return patchApplyArgs{}, &patchArgumentError{
+		return filePatchArgs{}, &patchArgumentError{
 			kind:   "missing_arguments",
 			detail: "patch arguments are empty",
 			hint:   "Pass one JSON object with scope and files fields.",
@@ -128,13 +128,13 @@ func decodePatchApplyArgs(raw json.RawMessage) (patchApplyArgs, *patchArgumentEr
 	if trimmed[0] != '{' {
 		var value any
 		if err := json.Unmarshal(trimmed, &value); err != nil {
-			return patchApplyArgs{}, patchJSONArgumentError(err)
+			return filePatchArgs{}, patchJSONArgumentError(err)
 		}
 		hint := "Pass one JSON object with scope and files fields."
 		if trimmed[0] == '"' {
 			hint = "Pass the object directly instead of a JSON-encoded string."
 		}
-		return patchApplyArgs{}, &patchArgumentError{
+		return filePatchArgs{}, &patchArgumentError{
 			kind:     "expected_object",
 			detail:   "patch arguments must be a JSON object",
 			hint:     hint,
@@ -144,11 +144,11 @@ func decodePatchApplyArgs(raw json.RawMessage) (patchApplyArgs, *patchArgumentEr
 
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(trimmed, &fields); err != nil {
-		return patchApplyArgs{}, patchJSONArgumentError(err)
+		return filePatchArgs{}, patchJSONArgumentError(err)
 	}
 	for _, field := range []string{"scope", "files"} {
 		if _, ok := fields[field]; !ok {
-			return patchApplyArgs{}, &patchArgumentError{
+			return filePatchArgs{}, &patchArgumentError{
 				kind:     "missing_field",
 				detail:   "required field is missing: " + field,
 				hint:     "Add the required " + field + " field and retry.",
@@ -158,9 +158,9 @@ func decodePatchApplyArgs(raw json.RawMessage) (patchApplyArgs, *patchArgumentEr
 		}
 	}
 
-	var args patchApplyArgs
+	var args filePatchArgs
 	if err := json.Unmarshal(trimmed, &args); err != nil {
-		return patchApplyArgs{}, patchJSONArgumentError(err)
+		return filePatchArgs{}, patchJSONArgumentError(err)
 	}
 	return args, nil
 }
@@ -238,7 +238,7 @@ func patchArgumentFailure(out Result, argumentErr *patchArgumentError) Result {
 	return out
 }
 
-func validatePatchApplyArgs(args patchApplyArgs) *patchArgumentError {
+func validateFilePatchArgs(args filePatchArgs) *patchArgumentError {
 	if len(args.Files) == 0 {
 		return &patchArgumentError{
 			kind:     "empty_files",
@@ -251,7 +251,7 @@ func validatePatchApplyArgs(args patchApplyArgs) *patchArgumentError {
 	return nil
 }
 
-func preparePatch(call Call, args patchApplyArgs) (*preparedPatch, error) {
+func preparePatch(call Call, args filePatchArgs) (*preparedPatch, error) {
 	if strings.TrimSpace(call.SessionID) == "" {
 		return nil, newPatchError("session_required", "session id is required for project patches")
 	}
@@ -443,13 +443,13 @@ func applyPatchEdits(content, filePath string, edits []patchEditArg) (string, er
 	return next, nil
 }
 
-func (r *BuiltinRunner) patchApply(call Call) Result {
+func (r *BuiltinRunner) filePatch(call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
-	args, argumentErr := decodePatchApplyArgs(call.Args)
+	args, argumentErr := decodeFilePatchArgs(call.Args)
 	if argumentErr != nil {
 		return patchArgumentFailure(out, argumentErr)
 	}
-	if argumentErr := validatePatchApplyArgs(args); argumentErr != nil {
+	if argumentErr := validateFilePatchArgs(args); argumentErr != nil {
 		return patchArgumentFailure(out, argumentErr)
 	}
 	if len(args.Files) > patchMaxFiles {
@@ -496,16 +496,16 @@ func (r *BuiltinRunner) ApprovalDetails(ctx context.Context, call Call) (map[str
 		return commandApprovalDetails(call)
 	case GitStage, GitUnstage, GitCommit:
 		return r.gitWriteApprovalDetails(ctx, call)
-	case PatchApply:
+	case FilePatch:
 		// Continue below and prepare the exact filesystem snapshot shown for approval.
 	default:
 		return nil, newPatchError("approval_details_unsupported", "approval details are not available for this tool")
 	}
-	args, argumentErr := decodePatchApplyArgs(call.Args)
+	args, argumentErr := decodeFilePatchArgs(call.Args)
 	if argumentErr != nil {
 		return nil, argumentErr
 	}
-	if argumentErr := validatePatchApplyArgs(args); argumentErr != nil {
+	if argumentErr := validateFilePatchArgs(args); argumentErr != nil {
 		return nil, argumentErr
 	}
 	patch, err := preparePatch(call, args)

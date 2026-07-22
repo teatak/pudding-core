@@ -1984,7 +1984,7 @@ func TestBuiltinToolsAPI(t *testing.T) {
 	}
 	got := decodeJSON[map[string][]map[string]any](t, resp)
 	tools := got["tools"]
-	if len(tools) < 15 {
+	if len(tools) < 12 {
 		t.Fatalf("unexpected builtin tools: %+v", got)
 	}
 	if tools[0]["id"] != tool.RequestCapability {
@@ -2008,7 +2008,6 @@ func TestBuiltinToolsAPI(t *testing.T) {
 	}
 	var commandRun map[string]any
 	var commandSession map[string]any
-	var patchApply map[string]any
 	var appLoad map[string]any
 	var skillRead map[string]any
 	for _, item := range tools {
@@ -2021,8 +2020,6 @@ func TestBuiltinToolsAPI(t *testing.T) {
 			commandRun = item
 		case tool.CommandSession:
 			commandSession = item
-		case tool.PatchApply:
-			patchApply = item
 		case tool.AppLoad:
 			appLoad = item
 		case tool.SkillRead:
@@ -2034,9 +2031,6 @@ func TestBuiltinToolsAPI(t *testing.T) {
 	}
 	if commandSession == nil || commandSession["capability"] != string(store.ModeCode) {
 		t.Fatalf("command session should be a Code Core tool: %+v", commandSession)
-	}
-	if patchApply == nil || patchApply["capability"] != string(store.ModeCode) {
-		t.Fatalf("patch apply should declare code capability: %+v", patchApply)
 	}
 	if appLoad == nil || appLoad["capability"] != string(store.ModeChat) {
 		t.Fatalf("app load should declare chat capability: %+v", appLoad)

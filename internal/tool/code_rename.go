@@ -128,14 +128,14 @@ func (r *BuiltinRunner) codeRename(ctx context.Context, call Call) Result {
 		return codeRenameFailure(out, err)
 	}
 
-	patchArgs, err := json.Marshal(patchApplyArgs{Scope: managedScopeProject, Files: files})
+	patchArgs, err := json.Marshal(filePatchArgs{Scope: managedScopeProject, Files: files})
 	if err != nil {
 		return toolJSONError(out, "rename_failed", err.Error())
 	}
 	patchCall := call
 	patchCall.Args = patchArgs
 	patchCall.ProjectDirs = patchProjectDirs
-	patch, err := preparePatch(patchCall, patchApplyArgs{Scope: managedScopeProject, Files: files})
+	patch, err := preparePatch(patchCall, filePatchArgs{Scope: managedScopeProject, Files: files})
 	if err != nil {
 		return patchFailure(out, err)
 	}

@@ -1,7 +1,9 @@
 import { create } from "zustand";
 
-import type { Attachment, ContentPart, Message } from "@/api/client";
+import type { Attachment, ContentPart, ConversationTurn, Message } from "@/api/client";
 import type { SessionEvent } from "@/contracts/events";
+
+import { activeTurnPlan, parseTurnPlan, TURN_PLAN_TOOL, type ActiveTurnPlan } from "./turnPlan";
 
 export type PendingUserMessage = {
   clientMessageID: string;
@@ -100,6 +102,7 @@ type OverlayState = {
   runningTurns: Record<string, string | undefined>;
   turnPhases: Record<string, TurnPhaseState | undefined>;
   lastEventSeqs: Record<string, number | undefined>;
+  activeTurnPlans: Record<string, ActiveTurnPlan | undefined>;
   addPendingUser: (message: PendingUserMessage) => void;
   startCompactRun: (sessionID: string) => void;
   finishCompactRun: (sessionID: string) => void;
@@ -112,6 +115,7 @@ type OverlayState = {
   applyEvent: (event: SessionEvent) => void;
   markAssistantRevealed: (turnID: string) => void;
   reconcileMessages: (sessionID: string, messages: Message[]) => void;
+  reconcileTurns: (sessionID: string, turns: ConversationTurn[], sessionRunning: boolean) => void;
   clearSession: (sessionID: string) => void;
 };
 
@@ -324,6 +328,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
   runningTurns: {},
   turnPhases: {},
   lastEventSeqs: {},
+  activeTurnPlans: {},
   addPendingUser: (message) =>
     set((state) => ({
       pendingUsers: upsertPendingUser(state.pendingUsers, message),
@@ -457,6 +462,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
               })
             : state.pendingUsers;
         return {
+          activeTurnPlans: { ...state.activeTurnPlans, [event.sessionID]: undefined },
           assistants: { ...assistants, [event.turnID]: { ...current, clientMessageID: event.clientMessageID } },
           lastEventSeqs: recordEventSeq(state.lastEventSeqs, event),
           pendingUsers,
@@ -529,7 +535,14 @@ export const useOverlayStore = create<OverlayState>((set) => ({
         });
         const nextTurnPhases =
           nextTurnPhase === currentPhase ? state.turnPhases : { ...state.turnPhases, [event.sessionID]: nextTurnPhase };
+        const updatedPlan =
+          event.name === TURN_PLAN_TOOL && event.phase === "ok" && event.ok
+            ? parseTurnPlan(event.content)
+            : undefined;
         return {
+          activeTurnPlans: updatedPlan
+            ? { ...state.activeTurnPlans, [event.sessionID]: { ...updatedPlan, turnID: event.turnID } }
+            : state.activeTurnPlans,
           assistants: {
             ...state.assistants,
             [event.turnID]: {
@@ -597,6 +610,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
         event.kind === "turn.completed" ? "completed" : event.kind === "turn.failed" ? "failed" : "cancelled";
       const current = overlayWithDefaults(state.assistants[event.turnID], event.turnID, event.sessionID);
       return {
+        activeTurnPlans: { ...state.activeTurnPlans, [event.sessionID]: undefined },
         assistants: {
           ...state.assistants,
           [event.turnID]: {
@@ -668,6 +682,15 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       }
       return { pendingUsers, assistants };
     }),
+  reconcileTurns: (sessionID, turns, sessionRunning) =>
+    set((state) => {
+      const nextPlan = sessionRunning ? activeTurnPlan(turns) : undefined;
+      const currentPlan = state.activeTurnPlans[sessionID];
+      if (sameActiveTurnPlan(currentPlan, nextPlan)) {
+        return state;
+      }
+      return { activeTurnPlans: { ...state.activeTurnPlans, [sessionID]: nextPlan } };
+    }),
   clearSession: (sessionID) =>
     set((state) => {
       const pendingUsers = { ...state.pendingUsers };
@@ -682,9 +705,23 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       delete completedSessions[sessionID];
       const lastEventSeqs = { ...state.lastEventSeqs };
       delete lastEventSeqs[sessionID];
+      const activeTurnPlans = { ...state.activeTurnPlans };
+      delete activeTurnPlans[sessionID];
       const assistants = Object.fromEntries(
         Object.entries(state.assistants).filter(([, overlay]) => overlay.sessionID !== sessionID),
       );
-      return { pendingUsers, runningTurns, turnPhases, compactRuns, completedSessions, lastEventSeqs, assistants };
+      return { pendingUsers, runningTurns, turnPhases, compactRuns, completedSessions, lastEventSeqs, activeTurnPlans, assistants };
     }),
 }));
+
+function sameActiveTurnPlan(previous: ActiveTurnPlan | undefined, next: ActiveTurnPlan | undefined) {
+  if (previous === next) {
+    return true;
+  }
+  if (!previous || !next || previous.turnID !== next.turnID || previous.currentStep !== next.currentStep || previous.totalSteps !== next.totalSteps) {
+    return false;
+  }
+  return previous.plan.every(
+    (step, index) => step.step === next.plan[index]?.step && step.status === next.plan[index]?.status,
+  );
+}

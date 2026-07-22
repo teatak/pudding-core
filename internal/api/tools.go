@@ -31,7 +31,7 @@ func (s *Server) listBuiltinTools(c *cart.Context) error {
 }
 
 func settingsBuiltinToolDefinitions() []provider.ToolDef {
-	defs := []provider.ToolDef{tool.RequestCapabilityDefinition(), tool.AppLoadDefinition()}
+	defs := []provider.ToolDef{tool.RequestCapabilityDefinition(), tool.AppLoadDefinition(), tool.AppUnloadDefinition(nil)}
 	for _, def := range tool.BuiltinDefinitions() {
 		if _, appTool := tool.BuiltinAppIDForTool(def.Name); appTool || tool.IsAppAPITool(def.Name) || def.AppID != "" {
 			continue

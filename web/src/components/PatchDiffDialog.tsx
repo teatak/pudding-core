@@ -76,7 +76,7 @@ export function PatchDiffDialog({
           </Button>
           <Button className="h-8 min-w-20 gap-1.5 px-3 leading-none [&_svg]:size-4" disabled={!approval?.diff || busy} type="button" onClick={onApply}>
             {applying ? <Spinner /> : <Check />}
-            {t("transcript.approvalPatchApply")}
+            {t("transcript.approvalFilePatch")}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -457,7 +457,7 @@ func commandSandboxModeForProject(project *store.Project) tool.CommandSandboxMod
 }
 
 func refineToolRisk(name string, risk tool.ToolRisk, details map[string]any) tool.ToolRisk {
-	if name == tool.PatchApply {
+	if name == tool.FilePatch {
 		if destructive, _ := details["destructive"].(bool); destructive {
 			risk.Class = tool.RiskClassDestructive
 			risk.LowRisk = false

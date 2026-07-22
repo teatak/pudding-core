@@ -47,7 +47,7 @@ builtin_code_rename(path, line, column, new_name)
   -> Turn file Diff
 ```
 
-`builtin_code_rename` 不允许 language server 直接写项目文件。它复用 `builtin_patch_apply`
+`builtin_code_rename` 不允许 language server 直接写项目文件。它复用 `builtin_file_patch`
 的路径校验、diff、漂移检测和事务应用逻辑,不要求模型再发起第二次工具调用。
 
 ## 4. 工具契约

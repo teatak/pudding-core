@@ -295,7 +295,7 @@ Git 不应只靠 command runner,因为 UI 和权限需要结构化信息。
 
 ## 7. Patch Review 设计
 
-现有 `builtin_file_patch` 适合小范围 exact replacement,但不适合作为长期 code UX。
+早期单文件 exact replacement 工具不适合作为长期 code UX。
 
 建议分两层:
 
@@ -321,7 +321,7 @@ agent read/search
 
 新增一个写入工具:
 
-- `builtin_patch_apply`:一次提交一个逻辑批次的多文件修改。
+- `builtin_file_patch`:一次提交一个逻辑批次的多文件修改。
 
 调用 payload:
 
@@ -536,7 +536,7 @@ agent read/search
 
 状态:已完成(2026-07-10)。
 
-- 已新增单次调用的 `builtin_patch_apply`。
+- 已新增单次调用的 `builtin_file_patch`。
 - 一次接受最多 16 个同 Project root 的 UTF-8 regular file 全文更新、局部 edits、
   创建或删除。
 - approval details 按 `(sessionID, callID)` 暂存精确 diff、参数 hash 与源文件 SHA-256;
@@ -603,16 +603,10 @@ agent read/search
 搜索结果仍限制最多 500 个命中;上下文只用于定位和预览,不替代
 `builtin_file_read` / `builtin_file_slice`。
 
-#### C7.2 Project Inspect
+#### C7.2 项目识别
 
-新增只读工具 `builtin_project_inspect`:
-
-- 输入为 `scope:"project"` 与可选的 Project 内目录 `path`。
-- 返回授权根、检查目录、Git root、语言、manifest、项目指令文件和建议验证命令。
-- 第一版只识别稳定的文件标记,例如 `go.mod`、`package.json`、`Cargo.toml`、
-  `pyproject.toml`、`AGENTS.md`、`CONTRIBUTING.md`。
-- `package.json` 只读取 scripts 名称并生成 command 建议,不执行脚本。
-- 扫描有固定深度、文件数和字节上限;结果按需生成,不写入 Project 或 SQLite。
+不再提供独立 Project Inspect 工具。agent 使用 CLI 与 Project Files App 按任务需要
+读取 manifest、Git 状态和目录结构,避免维护一套不完整的项目类型推断。
 
 Project 仍只承载 `rootDirs` 与 `approvalMode`;代码语言、脚本和指令文件可能随
 工作树变化,不能成为持久事实源。
@@ -622,15 +616,12 @@ Project 仍只承载 `rootDirs` 与 `approvalMode`;代码语言、脚本和指�
 - file search renderer 展示搜索模式、命中数和扫描文件数。
 - 每个命中可点击,在画布文件 tab 中打开该命中的上下文片段。
 - 预览使用真实起始行号并标记为局部快照;同一路径复用已有文件 tab。
-- `builtin_project_inspect` 使用结构化卡片展示语言、manifest、指令和建议命令;
-  主标题与字段补齐三语 i18n,不暴露 snake_case 工具名。
 
 验收:
 
 - agent 能用 regex + glob 在授权 Project 内搜索,不能越过 Project root。
 - 大仓库搜索有界,非法模式返回可恢复错误。
 - 用户点击搜索命中后,画布打开对应路径并从正确行号显示上下文。
-- agent 可一次读取项目类型、Git root、指令文件和候选验证命令。
 - Go 单测与 Web build 通过。
 
 ### C8: 编辑与验证闭环
@@ -646,7 +637,7 @@ Project 仍只承载 `rootDirs` 与 `approvalMode`;代码语言、脚本和指�
 
 #### C8.1 Patch V2 局部 edits
 
-`builtin_patch_apply.files[]` 支持三种互斥操作:
+`builtin_file_patch.files[]` 支持三种互斥操作:
 
 - `new_text`:创建文件或显式全文替换。
 - `delete:true`:删除已有文本文件。
@@ -710,7 +701,7 @@ Project 仍只承载 `rootDirs` 与 `approvalMode`;代码语言、脚本和指�
 
 ### C9: Project Instructions 与目录级作用域
 
-状态:已完成(2026-07-10)。
+状态:已完成,并于 2026-07-22 改为自动上下文注入。
 
 目标:
 
@@ -718,67 +709,42 @@ Project 仍只承载 `rootDirs` 与 `approvalMode`;代码语言、脚本和指�
 - 支持 root 指令与子目录指令叠加,避免只读取仓库根规则。
 - 保持“context 只来自 canonical messages”的架构约束。
 
-#### C9.1 Canonical 边界
+#### C9.1 上下文边界
 
-不由 engine 在 provider 请求前静默读取本地指令并注入 system prompt。新增只读工具
-`builtin_project_instructions`:
+Code turn 构建 provider 请求时,根据 session 的 `ProjectID` 读取 Project 根级
+`AGENTS.md`,作为 `project` prompt segment
+直接注入 system instruction。模型在决定读取和修改哪些文件之前已经获得根规则,
+无需先记得调用额外工具。
 
-```jsonc
-{
-  "scope": "project",
-  "paths": ["internal/tool/patch.go", "web/src/App.tsx"]
-}
-```
-
-工具调用与结果正常进入 canonical message parts。这样:
-
-- 指令内容可被用户查看和追溯。
-- compaction 能保留本轮已经采用的关键规则。
-- provider client 不保存额外的跨 turn 事实源。
-- 工作树中的指令发生变化后,下一次调用自然获得新内容。
+该内容每个 Code turn 重新读取,不写入 canonical messages、SQLite 或 provider client,
+也不成为跨 turn 事实源。Chat / Work 不注入 Project 指令。
 
 #### C9.2 发现与作用域
 
-第一版识别:
+自动识别 `AGENTS.md`;根文件直接注入,子目录文件保持目录树作用域。
 
-- `AGENTS.md`:目录树作用域。
-- `CLAUDE.md`:目录树作用域,作为兼容的 assistant instruction 文件。
-- `CONTRIBUTING.md`:位于目标祖先链时生效。
-
-对每个 target path:
-
-1. 解析其所属授权 Project root。
-2. 从 Project root 到目标文件父目录逐级查找指令文件。
-3. 按“更宽 -> 更具体”的顺序返回;更深目录的规则优先级更高。
-4. 多 target 调用对相同指令文件去重,并记录 `appliesTo`。
-
-目标文件尚未创建时,使用其最近存在父目录的祖先链。符号链接和越界路径继续使用
-Project resolver 的安全边界。
+只自动注入根级 `AGENTS.md`;`CONTRIBUTING.md` 与其他项目文档按任务需要正常读取。
+子目录规则需要具体目标路径才能判断作用域;agent 在进入子目录工作前检查更具体的指令文件,
+更深目录规则覆盖根规则。符号链接和越界路径继续使用 Project resolver 的安全边界。
 
 #### C9.3 有界输出
 
-- 单次最多 32 个 target path、64 个指令文件。
+- 单次最多 64 个根级指令文件。
 - 单文件最多返回 64 KiB,总内容最多 256 KiB。
-- 仅接受 UTF-8 regular file;二进制、符号链接和不可读文件返回结构化 warning。
+- 仅接受 UTF-8 regular file;二进制、符号链接和不可读文件不注入 prompt。
 - 超限文件返回截断标记,不静默忽略。
-- 结果包含 `path`、`scopePath`、`kind`、`content`、`chars`、`truncated`、
-  `appliesTo` 与 broad-to-specific `order`。
+- prompt segment 保留 Project root、相对路径、内容与截断提示。
 
 #### C9.4 Agent 与 UI
 
-- Project prompt 要求在首次修改陌生目录前读取适用指令。
-- target path 或目录发生变化时重新解析,不把旧目录规则错误套到新路径。
-- transcript 卡片展示 target 数、指令文件、作用域和截断状态;内容仍保留在
-  canonical result 与“原始数据”中。
-- 补齐图标、显示名与三语 i18n,不暴露 snake_case 工具名。
+- Code prompt 明确根规则已经自动加载,并要求进入子目录时检查更具体规则。
+- 不再暴露 Project Instructions 工具、transcript 卡片或对应 i18n。
 
 验收:
 
-- root 与 nested `AGENTS.md` 能按顺序共同作用于 nested target。
-- sibling target 不会收到其他子树的指令。
-- 多 target 能去重同一个 root 指令并正确标记 `appliesTo`。
-- missing target 使用最近存在父目录规则,越界 target 被拒绝。
-- 工具结果进入正常 tool loop,不新增 engine 隐式上下文源。
+- Code turn 在第一次模型请求前获得根级 Project 指令。
+- Chat / Work 不注入 Project 指令,子目录指令不会被错误地全局注入。
+- 指令读取有界,不可读、二进制和符号链接文件不会污染 prompt。
 - Go 单测、Web build 与 `git diff --check` 通过。
 
 ### C10: LSP 语言智能
@@ -824,7 +790,7 @@ Project resolver 的安全边界。
 
 首版只增加统一 `builtin_code_rename`,把 Go 与 TypeScript / JavaScript language
 server 返回的 `WorkspaceEdit` 全量验证并转换成同一原子 Patch 结构,然后直接走
-`builtin_patch_apply` 的路径校验、漂移检查与事务提交。Ask 模式先审批重命名操作,
+`builtin_file_patch` 的路径校验、漂移检查与事务提交。Ask 模式先审批重命名操作,
 完成后通过 Turn 文件 Diff 审阅实际改动。
 
 | 切片 | 内容 | 状态 |

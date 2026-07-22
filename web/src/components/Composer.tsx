@@ -54,6 +54,7 @@ import { buildComposerMentionReferences } from "@/components/composerMentionData
 import { ComposerMentionMenu } from "@/components/ComposerMentionMenu";
 import { ComposerTextArea, parseSlashSubmitCommand, type ComposerTextAreaHandle, type SlashCommand, type SlashSubmitCommand } from "@/components/ComposerTextArea";
 import { ComposerToolbar } from "@/components/ComposerToolbar";
+import { ComposerTurnProgress } from "@/components/ComposerTurnProgress";
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
 import { InputFlowPanel, type InputFlowSubmission } from "@/components/transcript/InputFlowToolPart";
 import { Mascot, type MascotGaze, type MascotGazePoint, type MascotMood } from "@/components/Mascot";
@@ -135,6 +136,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const overlayRunning = useOverlayStore((state) => Boolean(state.runningTurns[sessionID]));
   const turnPhase = useOverlayStore((state) => state.turnPhases[sessionID]);
   const pendingApproval = useOverlayStore((state) => selectPendingApproval(state.assistants, sessionID, state.runningTurns[sessionID]));
+  const activeTurnPlan = useOverlayStore((state) => state.activeTurnPlans[sessionID]);
   const pendingInputFlow = useInputFlowStore((state) => state.requests.find((request) => request.sessionID === sessionID));
   const running = overlayRunning || session.running;
   const projectID = session.projectID || "";
@@ -936,6 +938,9 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       </div>
       <ChatColumn>
         <div ref={selectionGuardRef} className="relative">
+          {running && activeTurnPlan && !pendingApproval && !pendingInputFlow ? (
+            <ComposerTurnProgress progress={activeTurnPlan} />
+          ) : null}
           <ComposerApprovalBar approval={pendingApproval} token={token} />
           {pendingInputFlow ? (
             <InputFlowPanel key={pendingInputFlow.id} request={pendingInputFlow} onSubmit={(submission) => inputFlowSubmitMutation.mutate(submission)} />

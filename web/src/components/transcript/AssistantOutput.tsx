@@ -127,16 +127,16 @@ function CompactMarker({ message, sessionID, showSummary, summaryText }: { messa
           .replace("{source}", String(sourceCount))
           .replace("{tail}", String(tailCount));
   return (
-    <div className="selectable-text my-1 rounded-lg border bg-muted/35 px-3 py-2 text-sm">
-      <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
+    <div className="selectable-text my-1 overflow-hidden rounded-lg border border-border/70 bg-background text-sm">
+      <div className="flex min-h-11 min-w-0 items-center gap-2 bg-muted/35 px-3 py-2 text-muted-foreground">
         <Archive className="size-3.5 shrink-0" />
         <span className="shrink-0 font-medium text-foreground">{t("transcript.compactMark")}</span>
         <span className="min-w-0 truncate text-xs">{statsText}</span>
       </div>
       {showSummary && summaryText.trim() ? (
-        <details className="mt-2 min-w-0 max-w-full overflow-hidden text-xs text-muted-foreground">
-          <summary className="cursor-pointer select-none" tabIndex={-1}>{t("transcript.compactSummary")}</summary>
-          <div className="mt-2 min-w-0 max-w-full border-t pt-2 text-foreground/80">
+        <details className="min-w-0 max-w-full overflow-hidden border-t border-border/70 bg-background px-3 py-1 text-xs text-muted-foreground">
+          <summary className="flex min-h-8 cursor-pointer items-center select-none" tabIndex={-1}>{t("transcript.compactSummary")}</summary>
+          <div className="mt-2 min-w-0 max-w-full border-t border-border/70 pt-2 text-foreground/80">
             <TurnParts parts={partsFromMessages([message])} sessionID={sessionID} token="" turnID={message.turnID} />
           </div>
         </details>
@@ -148,7 +148,7 @@ function CompactMarker({ message, sessionID, showSummary, summaryText }: { messa
 export function CompactPendingMarker() {
   const { t } = useI18n();
   return (
-    <div className="selectable-text my-1 rounded-lg border bg-muted/35 px-3 py-2 text-sm">
+    <div className="selectable-text my-1 flex min-h-11 items-center rounded-lg border border-border/70 bg-muted/35 px-3 py-2 text-sm">
       <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
         <Archive className="size-3.5 shrink-0" />
         <span className="shrink-0 font-medium leading-none text-foreground">{t("transcript.compactRunning")}</span>

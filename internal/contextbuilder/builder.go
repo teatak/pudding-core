@@ -36,6 +36,10 @@ type PromptSource interface {
 	Prompt(ctx context.Context, mode string) (prompt.Output, error)
 }
 
+type loadedAppsPromptSource interface {
+	PromptWithLoadedApps(ctx context.Context, mode string, loadedAppIDs []string) (prompt.Output, error)
+}
+
 func New(s store.Store, prompts PromptSource, opts ...Option) *Builder {
 	if prompts == nil {
 		prompts = staticPrompt{}
@@ -55,13 +59,31 @@ func (b *Builder) Build(ctx context.Context, sessionID, model string, mode strin
 		return provider.Request{}, err
 	}
 	msgs = EffectiveMessages(msgs)
-	system, err := b.prompts.Prompt(ctx, mode)
+	sess, err := b.store.GetSession(ctx, sessionID)
 	if err != nil {
 		return provider.Request{}, err
 	}
 	currentMode := store.NormalizeAgentMode(store.AgentMode(mode))
 	if currentMode == "" {
 		currentMode = store.ModeChat
+	}
+	var system prompt.Output
+	if source, ok := b.prompts.(loadedAppsPromptSource); ok {
+		system, err = source.PromptWithLoadedApps(ctx, mode, sess.LoadedAppIDs)
+	} else {
+		system, err = b.prompts.Prompt(ctx, mode)
+	}
+	if err != nil {
+		return provider.Request{}, err
+	}
+	if currentMode == store.ModeCode && strings.TrimSpace(sess.ProjectID) != "" {
+		project, err := b.store.GetProject(ctx, sess.ProjectID)
+		if err != nil {
+			return provider.Request{}, err
+		}
+		projectDirs := store.NormalizeProjectDirs(project.RootDirs)
+		system = appendProjectDirectories(system, projectDirs)
+		system = appendProjectInstructions(system, loadProjectRootInstructions(projectDirs))
 	}
 	var cfg provider.ModelConfig
 	if len(configs) > 0 {
@@ -122,6 +144,58 @@ func (b *Builder) Build(ctx context.Context, sessionID, model string, mode strin
 	}
 	flushAssistant()
 	return req, nil
+}
+
+func appendProjectDirectories(system prompt.Output, projectDirs []string) prompt.Output {
+	projectDirs = store.NormalizeProjectDirs(projectDirs)
+	if len(projectDirs) == 0 {
+		return system
+	}
+	var content strings.Builder
+	content.WriteString("## Project Directories\n\n")
+	content.WriteString("The current Project authorizes every directory below as a distinct root. Consider all roots when inspecting or changing the Project. When multiple roots are listed, use the absolute path to select the intended root; do not assume the first root is the whole Project.\n")
+	for index, projectDir := range projectDirs {
+		encoded, _ := json.Marshal(projectDir)
+		content.WriteString("\n")
+		content.WriteString(strconv.Itoa(index + 1))
+		content.WriteString(". ")
+		content.Write(encoded)
+	}
+	segment := prompt.Segment{ID: "project_directories", Layer: "project", Content: strings.TrimSpace(content.String())}
+	system.Segments = append(system.Segments, segment)
+	if existing := strings.TrimSpace(system.SystemInstruction); existing != "" {
+		system.SystemInstruction = existing + "\n\n" + segment.Content
+	} else {
+		system.SystemInstruction = segment.Content
+	}
+	return system
+}
+
+func appendProjectInstructions(system prompt.Output, instructions []projectInstructionContext) prompt.Output {
+	if len(instructions) == 0 {
+		return system
+	}
+	var content strings.Builder
+	content.WriteString("## Project Instructions\n\n")
+	content.WriteString("These root-level files were loaded from the authorized Project before this Code turn. Follow them for work in the corresponding root. More specific instruction files in child directories override them within their directory scope.\n")
+	for _, instruction := range instructions {
+		content.WriteString("\n### `")
+		content.WriteString(instruction.projectRoot)
+		content.WriteString("/" + instruction.path + "`\n\n")
+		content.WriteString(strings.TrimSpace(instruction.content))
+		if instruction.truncated {
+			content.WriteString("\n\n[Project instruction truncated by Pudding]")
+		}
+		content.WriteByte('\n')
+	}
+	segment := prompt.Segment{ID: "project_instructions", Layer: "project", Content: strings.TrimSpace(content.String())}
+	system.Segments = append(system.Segments, segment)
+	if existing := strings.TrimSpace(system.SystemInstruction); existing != "" {
+		system.SystemInstruction = existing + "\n\n" + segment.Content
+	} else {
+		system.SystemInstruction = segment.Content
+	}
+	return system
 }
 
 func isToolAttachmentMessage(msg *store.Message) bool {

@@ -43,6 +43,7 @@ type Input struct {
 	Skills          []skill.Skill
 	Apps            []*app.Definition
 	AppConnections  []*app.Connection
+	LoadedAppIDs    []string
 	RuntimeNow      time.Time
 }
 
@@ -79,6 +80,15 @@ type AppLister interface {
 }
 
 func (l *Loader) Prompt(ctx context.Context, mode string) (Output, error) {
+	return l.prompt(ctx, mode, nil)
+}
+
+// PromptWithLoadedApps assembles the prompt with session-owned App load state.
+func (l *Loader) PromptWithLoadedApps(ctx context.Context, mode string, loadedAppIDs []string) (Output, error) {
+	return l.prompt(ctx, mode, loadedAppIDs)
+}
+
+func (l *Loader) prompt(ctx context.Context, mode string, loadedAppIDs []string) (Output, error) {
 	user, err := LoadUserInstruction(l.home)
 	if err != nil {
 		return Output{}, err
@@ -110,7 +120,7 @@ func (l *Loader) Prompt(ctx context.Context, mode string) (Output, error) {
 			connections = loaded
 		}
 	}
-	return Assemble(Input{UserInstruction: user, Mode: mode, Home: l.home, Skills: skills, Apps: apps, AppConnections: connections, RuntimeNow: time.Now()}), nil
+	return Assemble(Input{UserInstruction: user, Mode: mode, Home: l.home, Skills: skills, Apps: apps, AppConnections: connections, LoadedAppIDs: loadedAppIDs, RuntimeNow: time.Now()}), nil
 }
 
 func Assemble(input Input) Output {
@@ -124,7 +134,7 @@ func Assemble(input Input) Output {
 	if seg := skillsSegment(input.Skills, input.Home); seg != nil {
 		segments = append(segments, *seg)
 	}
-	if seg := appsSegment(input.Apps, input.AppConnections); seg != nil {
+	if seg := appsSegment(input.Apps, input.AppConnections, input.LoadedAppIDs); seg != nil {
 		segments = append(segments, *seg)
 	}
 	if user := strings.TrimSpace(input.UserInstruction); user != "" {
@@ -155,7 +165,7 @@ func runtimeSegment(now time.Time) Segment {
 	return Segment{ID: "runtime_context", Layer: "runtime", Content: content}
 }
 
-func appsSegment(list []*app.Definition, connections []*app.Connection) *Segment {
+func appsSegment(list []*app.Definition, connections []*app.Connection, loadedAppIDs []string) *Segment {
 	enabled := make([]*app.Definition, 0, len(list))
 	for _, item := range list {
 		if item != nil && item.Enabled && strings.TrimSpace(item.ID) != "" {
@@ -166,10 +176,18 @@ func appsSegment(list []*app.Definition, connections []*app.Connection) *Segment
 		return nil
 	}
 	connectionCounts := appConnectionCounts(connections)
+	loaded := make(map[string]bool, len(loadedAppIDs))
+	for _, id := range loadedAppIDs {
+		if id = strings.TrimSpace(id); id != "" {
+			loaded[id] = true
+		}
+	}
 	var b strings.Builder
 	b.WriteString("## Available Apps\n\n")
 	b.WriteString("Enabled apps are listed here as a compact capability index. Their tools are not loaded by default.\n")
-	b.WriteString("When an app matches the user's request, first request its required capability if needed, then call `builtin_app_load(app_id=\"<app id>\")`. The call returns the App's default skill instructions when available and explicitly loads its tools for the session; the tools become available on the next model step. Pass `skill_id` only when a listed non-default App skill clearly matches better.\n")
+	b.WriteString("When an unloaded app matches the user's request, first request its required capability if needed, then call `builtin_app_load(app_id=\"<app id>\")`. The call returns the App's default skill instructions when available and explicitly loads its tools for the session; the tools become available on the next model step. Pass `skill_id` only when a listed non-default App skill clearly matches better.\n")
+	b.WriteString("Apps marked `loaded for this session` are already active. Do not call `builtin_app_load` again for their default skill; if the current mode is below the App's required capability, request that capability instead. Reload only when intentionally selecting a different `skill_id`.\n")
+	b.WriteString("After an App is no longer relevant to the current task, call `builtin_app_unload(app_id=\"<loaded app id>\")` to remove its tools from later model steps. This does not uninstall the App or delete its connections.\n")
 	b.WriteString("Apps and global skills use separate paths. Never use `builtin_skill_read` to load an App, including Browser or Canvas.\n")
 	b.WriteString("Do not load unrelated apps. Apps marked `not connected` cannot be loaded until a connection is added.\n\n")
 	for _, item := range enabled {
@@ -192,6 +210,9 @@ func appsSegment(list []*app.Definition, connections []*app.Connection) *Segment
 		if !appPromptUsable(item, connectionCounts) {
 			fmt.Fprintf(&b, "  - Status: not connected. Add a connection before using this app.\n")
 			continue
+		}
+		if loaded[id] {
+			fmt.Fprintf(&b, "  - Status: loaded for this session.\n")
 		}
 		skillID, skillDescription := defaultAppSkill(item)
 		if skillID != "" {

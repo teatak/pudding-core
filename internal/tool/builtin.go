@@ -24,8 +24,7 @@ const (
 	HistorySearch       = "builtin_history_search"
 	HistoryGetMessage   = "builtin_history_get_message"
 	SkillRead           = "builtin_skill_read"
-	ProjectInspect      = "builtin_project_inspect"
-	ProjectInstructions = "builtin_project_instructions"
+	PlanUpdate          = "builtin_plan_update"
 	CodeSymbols         = "builtin_code_symbols"
 	CodeDefinition      = "builtin_code_definition"
 	CodeReferences      = "builtin_code_references"
@@ -50,7 +49,6 @@ const (
 	GitStage            = "builtin_git_stage"
 	GitUnstage          = "builtin_git_unstage"
 	GitCommit           = "builtin_git_commit"
-	PatchApply          = "builtin_patch_apply"
 	SkillValidate       = "builtin_skill_validate"
 	AppSave             = "builtin_app_save"
 	RESTRequest         = "builtin_rest_request"
@@ -331,16 +329,10 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Capability:  store.ModeChat,
 		},
 		{
-			Name:        ProjectInspect,
-			Description: "Inspect one authorized project directory using a bounded read-only scan. Returns Git root, detected languages, manifests, project instruction files, and suggested verification commands without executing them.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Project inspection is limited to authorized project directories."},"path":{"type":"string","description":"Optional absolute or relative directory inside an authorized project root. Defaults to the first project root."}},"required":["scope"],"additionalProperties":false}`),
-			Capability:  store.ModeCode,
-		},
-		{
-			Name:        ProjectInstructions,
-			Description: "Read the project instruction files that apply to one or more authorized target paths. Resolves AGENTS.md, CLAUDE.md, and CONTRIBUTING.md from the project root toward each target directory, returning deduplicated content in broad-to-specific order.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Project instructions can be read only from authorized project directories."},"paths":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":32,"description":"Target files or directories whose applicable instructions are needed. Missing future file paths are allowed when their parent remains inside the project."}},"required":["scope","paths"],"additionalProperties":false}`),
-			Capability:  store.ModeCode,
+			Name:        PlanUpdate,
+			Description: "Create or replace the progress plan for a substantial multi-step turn. Call before starting long work, then call again only when a major step changes status. Keep exactly one step in_progress until every step is completed. Skip this tool for short or single-step work.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"plan":{"type":"array","minItems":2,"maxItems":12,"items":{"type":"object","properties":{"step":{"type":"string","minLength":1,"maxLength":200,"description":"Short task description shown beside the progress segments."},"status":{"type":"string","enum":["pending","in_progress","completed"]}},"required":["step","status"],"additionalProperties":false}}},"required":["plan"],"additionalProperties":false}`),
+			Capability:  store.ModeWork,
 		},
 		{
 			Name:        CodeSymbols,
@@ -374,8 +366,8 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        FileList,
-			Description: "List files in a Pudding-managed file area or an authorized project directory.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["app","skill","temp","project"],"description":"Target file area. Use app to inspect installed App package files, skill for global user Skills, and project for authorized local project directories."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized project directories. Use . to list the root."},"max_entries":{"type":"integer","description":"Optional maximum entries, 1-1000, default 200."}},"required":["scope","path"],"additionalProperties":false}`),
+			Description: "List files in a Pudding-managed file area or an authorized project directory. For a multi-root Project, path=. returns every authorized root so each directory is visible and can be selected explicitly.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["app","skill","temp","project"],"description":"Target file area. Use app to inspect installed App package files, skill for global user Skills, and project for authorized local project directories."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized project directories. Use . to list the root; when multiple Project roots are authorized, . lists those roots instead of silently selecting the first one."},"max_entries":{"type":"integer","description":"Optional maximum entries, 1-1000, default 200."}},"required":["scope","path"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
@@ -412,12 +404,6 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Name:        FileWrite,
 			Description: "Overwrite one text file in a writable Pudding-managed file area or authorized project directory.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill","temp","project"],"description":"Target writable file area. Use skill for global user Skills and project for authorized local project directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized project directories."},"content":{"type":"string","description":"New file content."}},"required":["scope","path","content"],"additionalProperties":false}`),
-			Capability:  store.ModeCode,
-		},
-		{
-			Name:        FilePatch,
-			Description: "Replace text in one file in a writable Pudding-managed file area or authorized project directory by exact string match.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill","temp","project"],"description":"Target writable file area. Use skill for global user Skills and project for authorized local project directories."},"path":{"type":"string","description":"Relative file path inside a managed area, or an absolute/relative path inside authorized project directories."},"old_string":{"type":"string","description":"Exact text to replace."},"new_string":{"type":"string","description":"Replacement text."},"replace_all":{"type":"boolean","description":"Replace all matches. Defaults false; without this, exactly one match is required."}},"required":["scope","path","old_string","new_string"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
@@ -487,7 +473,7 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Capability:  store.ModeCode,
 		},
 		{
-			Name:        PatchApply,
+			Name:        FilePatch,
 			Description: "Apply one atomic multi-file text patch directly to authorized project files. Prefer ordered exact-match edits for existing files; use new_text for creates or intentional full replacement, and delete=true for deletion. All files are validated before writing, and any failure leaves the worktree unchanged.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Patches can target only authorized project files."},"files":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","properties":{"path":{"type":"string","description":"Absolute or relative file path inside one authorized project root."},"new_text":{"type":"string","description":"Complete desired UTF-8 file content. Use for creating a file or an intentional full replacement."},"edits":{"type":"array","minItems":1,"maxItems":64,"items":{"type":"object","properties":{"old_text":{"type":"string","minLength":1,"description":"Exact existing text to replace in the current in-memory snapshot."},"new_text":{"type":"string","description":"Replacement UTF-8 text."},"replace_all":{"type":"boolean","description":"Replace every exact match. Defaults to false and requires old_text to be unique."}},"required":["old_text","new_text"],"additionalProperties":false},"description":"Ordered exact replacements for an existing file. Mutually exclusive with new_text and delete."},"delete":{"type":"boolean","description":"Set true to delete an existing regular text file. Mutually exclusive with new_text and edits."}},"required":["path"],"additionalProperties":false},"description":"All file changes. Every file must resolve inside the same project root."}},"required":["scope","files"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
@@ -634,10 +620,8 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.historyGetMessage(ctx, call)
 	case SkillRead:
 		return r.skillRead(ctx, call)
-	case ProjectInspect:
-		return r.projectInspect(ctx, call)
-	case ProjectInstructions:
-		return r.projectInstructions(call)
+	case PlanUpdate:
+		return planUpdate(call)
 	case CodeSymbols:
 		return r.codeSymbols(ctx, call)
 	case CodeDefinition:
@@ -662,8 +646,6 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.fileSlice(call)
 	case FileWrite:
 		return r.fileWrite(call)
-	case FilePatch:
-		return r.filePatch(call)
 	case FileDelete:
 		return r.fileDelete(call)
 	case FileMove:
@@ -686,8 +668,8 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.gitUnstage(ctx, call)
 	case GitCommit:
 		return r.gitCommit(ctx, call)
-	case PatchApply:
-		return r.patchApply(call)
+	case FilePatch:
+		return r.filePatch(call)
 	case SkillValidate:
 		return r.skillValidate(ctx, call)
 	case AppSave:

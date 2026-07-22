@@ -14,9 +14,12 @@ var chatCoreTools = map[string]bool{
 	AttachmentReadImage: true, WeatherGet: true,
 }
 
+var workCoreTools = map[string]bool{
+	PlanUpdate: true,
+}
+
 var codeCoreTools = map[string]bool{
-	ProjectInspect: true, ProjectInstructions: true,
-	CommandRun: true, CommandSession: true, FileRead: true, PatchApply: true,
+	CommandRun: true, CommandSession: true,
 }
 
 // CoreDefinitionsForMode returns the fixed, always-available tool surface.
@@ -52,6 +55,9 @@ func CoreDefinitionsForMode(mode store.AgentMode, defs []provider.ToolDef) []pro
 	}
 	appendNames(mapKeys(chatCoreTools))
 	appendNames(dynamicChatNames)
+	if mode == store.ModeWork || mode == store.ModeCode {
+		appendNames(mapKeys(workCoreTools))
+	}
 	if mode == store.ModeCode {
 		appendNames(mapKeys(codeCoreTools))
 	}
@@ -59,7 +65,7 @@ func CoreDefinitionsForMode(mode store.AgentMode, defs []provider.ToolDef) []pro
 }
 
 func IsCoreTool(name string) bool {
-	return name == RequestCapability || name == RequestUserInput || chatCoreTools[name] || codeCoreTools[name]
+	return name == RequestCapability || name == RequestUserInput || chatCoreTools[name] || workCoreTools[name] || codeCoreTools[name]
 }
 
 func mapKeys(values map[string]bool) []string {

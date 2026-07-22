@@ -20,8 +20,6 @@ import { requestProjectFileReveal } from "@/state/projectRevealStore";
 
 const commandToolName = "builtin_command_run";
 const backgroundProcessToolNames = new Set(["builtin_command_session"]);
-const projectInspectToolName = "builtin_project_inspect";
-const projectInstructionsToolName = "builtin_project_instructions";
 const languageCodeToolNames = new Set([
   "builtin_code_symbols",
   "builtin_code_definition",
@@ -37,13 +35,12 @@ const gitToolNames = new Set([
   "builtin_git_unstage",
   "builtin_git_commit",
 ]);
-const patchToolNames = new Set(["builtin_patch_apply"]);
+const patchToolNames = new Set(["builtin_file_patch"]);
 const fileToolNames = new Set([
   "builtin_file_copy",
   "builtin_file_delete",
   "builtin_file_list",
   "builtin_file_move",
-  "builtin_file_patch",
   "builtin_file_read",
   "builtin_file_search",
   "builtin_file_slice",
@@ -55,7 +52,7 @@ type Translator = (key: string) => string;
 type UnknownRecord = Record<string, unknown>;
 
 export function isCodeToolName(name: string) {
-  return name === commandToolName || backgroundProcessToolNames.has(name) || name === projectInspectToolName || name === projectInstructionsToolName || languageCodeToolNames.has(name) || gitToolNames.has(name) || patchToolNames.has(name) || fileToolNames.has(name);
+  return name === commandToolName || backgroundProcessToolNames.has(name) || languageCodeToolNames.has(name) || gitToolNames.has(name) || patchToolNames.has(name) || fileToolNames.has(name);
 }
 
 export function codeToolSummary(name: string, args: unknown, result: unknown, t: Translator) {
@@ -92,13 +89,6 @@ export function codeToolSummary(name: string, args: unknown, result: unknown, t:
   }
   if (backgroundProcessToolNames.has(name)) {
     return backgroundProcessSummary(input, output, t);
-  }
-  if (name === projectInspectToolName) {
-    const languages = readRecordArray(output, "languages").map((item) => readString(item, "name")).filter(Boolean);
-    return languages.length > 0 ? languages.slice(0, 4).join(" · ") : preferredPath(output) || preferredPath(input);
-  }
-  if (name === projectInstructionsToolName) {
-    return countSummary(output, "instructionCount", "transcript.codeInstructionFiles", t);
   }
   if (name === "builtin_code_symbols") {
     return countSummary(output, "resultCount", "transcript.codeSymbols", t);
@@ -184,10 +174,6 @@ export function CodeToolDetails({
     body = <CommandDetails callID={callID} input={input} liveStderr={liveStderr} liveStdout={liveStdout} output={output} sessionID={sessionID} t={t} />;
   } else if (backgroundProcessToolNames.has(name)) {
     body = <BackgroundProcessDetails input={input} output={output} t={t} />;
-  } else if (name === projectInspectToolName) {
-    body = <ProjectInspectDetails output={output} t={t} />;
-  } else if (name === projectInstructionsToolName) {
-    body = <ProjectInstructionsDetails output={output} t={t} />;
   } else if (languageCodeToolNames.has(name)) {
     body = <LanguageCodeDetails callID={callID} name={name} output={output} sessionID={sessionID} t={t} />;
   } else if (name === "builtin_git_status") {
@@ -405,153 +391,6 @@ function LanguageCodeLocationList({ callID, items, sessionID, symbols, t }: { ca
         );
       })}
     </div>
-  );
-}
-
-function ProjectInstructionsDetails({ output, t }: { output: UnknownRecord | null; t: Translator }) {
-  if (!output) {
-    return <EmptyLine>{t("transcript.codeWaitingResult")}</EmptyLine>;
-  }
-  if (output.ok === false) {
-    return <ErrorDetail output={output} t={t} />;
-  }
-  const targets = readRecordArray(output, "targets");
-  const instructions = readRecordArray(output, "instructions");
-  const warnings = readRecordArray(output, "warnings");
-  return (
-    <div className="space-y-2">
-      <MetricRow
-        metrics={[
-          metric(readNumber(output, "targetCount") ?? targets.length, t("transcript.codeTargetsLabel")),
-          metric(readNumber(output, "instructionCount") ?? instructions.length, t("transcript.codeInstructionFilesLabel")),
-          warnings.length > 0 ? metric(warnings.length, t("transcript.codeWarningsLabel"), "text-warning") : null,
-        ]}
-      />
-      {instructions.length > 0 ? <ProjectInstructionFileList instructions={instructions} t={t} /> : <EmptyLine>{t("transcript.codeNoProjectInstructions")}</EmptyLine>}
-      {warnings.length > 0 ? <ProjectInstructionWarningList warnings={warnings} /> : null}
-    </div>
-  );
-}
-
-function ProjectInstructionFileList({ instructions, t }: { instructions: UnknownRecord[]; t: Translator }) {
-  return (
-    <div className="max-h-72 overflow-auto border-t border-border/50 pt-1">
-      {instructions.slice(0, 64).map((instruction, index) => {
-        const appliesTo = readStringArray(instruction, "appliesTo") || [];
-        return (
-          <div key={`${readString(instruction, "projectRoot")}:${readString(instruction, "path")}:${index}`} className="grid min-h-8 grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-1.5 py-1 text-[11px]">
-            <span className="text-right font-mono text-muted-foreground/70">{readNumber(instruction, "order") ?? index + 1}</span>
-            <span className="min-w-0">
-              <code className="block truncate font-mono text-foreground/85">{readString(instruction, "path")}</code>
-              <span className="block truncate text-[10px] text-muted-foreground">
-                {replace(t("transcript.codeInstructionScope"), { scope: readString(instruction, "scopePath") || "." })}
-              </span>
-            </span>
-            <span className="shrink-0 text-right text-[10px] text-muted-foreground">
-              {readBoolean(instruction, "truncated") ? <span className="text-warning">{t("transcript.codeTruncated")}</span> : replace(t("transcript.codeAppliesTargets"), { count: String(appliesTo.length) })}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function ProjectInstructionWarningList({ warnings }: { warnings: UnknownRecord[] }) {
-  return (
-    <div className="border-t border-warning/30 pt-1 text-[10px] text-warning">
-      {warnings.slice(0, 20).map((warning, index) => (
-        <div key={`${readString(warning, "path")}:${index}`} className="break-words py-0.5">
-          <code className="font-mono">{readString(warning, "path")}</code>{readString(warning, "detail") ? ` · ${readString(warning, "detail")}` : ""}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ProjectInspectDetails({ output, t }: { output: UnknownRecord | null; t: Translator }) {
-  if (!output) {
-    return <EmptyLine>{t("transcript.codeWaitingResult")}</EmptyLine>;
-  }
-  if (output.ok === false) {
-    return <ErrorDetail output={output} t={t} />;
-  }
-  const languages = readRecordArray(output, "languages");
-  const manifests = readRecordArray(output, "manifests");
-  const instructions = readRecordArray(output, "instructions");
-  const commands = readRecordArray(output, "suggestedCommands");
-  const gitRoot = readString(output, "gitRoot");
-  return (
-    <div className="space-y-2">
-      <MetricRow
-        metrics={[
-          metric(languages.length, t("transcript.codeLanguagesLabel")),
-          metric(manifests.length, t("transcript.codeManifestsLabel")),
-          metric(instructions.length, t("transcript.codeInstructionsLabel")),
-        ]}
-      />
-      <FileResultMeta
-        values={[
-          replace(t("transcript.codeScannedFiles"), { count: String(readNumber(output, "filesScanned") ?? 0) }),
-          readBoolean(output, "scanCapped") ? t("transcript.codePartialResults") : "",
-        ]}
-      />
-      {gitRoot ? <ProjectInspectPath label={t("transcript.codeGitRoot")} path={gitRoot} /> : null}
-      {languages.length > 0 ? (
-        <ProjectInspectList
-          label={t("transcript.codeLanguages")}
-          items={languages.map((item) => `${readString(item, "name")} · ${readNumber(item, "fileCount") ?? 0}`)}
-        />
-      ) : null}
-      {manifests.length > 0 ? (
-        <ProjectInspectList label={t("transcript.codeManifests")} items={manifests.map((item) => readString(item, "path"))} mono />
-      ) : null}
-      {instructions.length > 0 ? (
-        <ProjectInspectList label={t("transcript.codeInstructions")} items={instructions.map((item) => readString(item, "path"))} mono />
-      ) : null}
-      {commands.length > 0 ? <ProjectCommandList commands={commands} t={t} /> : null}
-    </div>
-  );
-}
-
-function ProjectInspectPath({ label, path }: { label: string; path: string }) {
-  return (
-    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-2 text-[11px]">
-      <DetailLabel>{label}</DetailLabel>
-      <code className="truncate font-mono text-foreground/85" >{path}</code>
-    </div>
-  );
-}
-
-function ProjectInspectList({ items, label, mono = false }: { items: string[]; label: string; mono?: boolean }) {
-  return (
-    <section className="min-w-0 max-w-full border-t border-border/50 pt-2">
-      <DetailLabel>{label}</DetailLabel>
-      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-foreground/85">
-        {items.slice(0, 50).map((item, index) => (
-          <span key={`${item}:${index}`} className={cn("min-w-0 break-all", mono && "font-mono")}>{item}</span>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function ProjectCommandList({ commands, t }: { commands: UnknownRecord[]; t: Translator }) {
-  return (
-    <section className="border-t border-border/50 pt-2">
-      <DetailLabel>{t("transcript.codeSuggestedCommands")}</DetailLabel>
-      <div className="mt-1 max-h-52 overflow-auto">
-        {commands.slice(0, 50).map((command, index) => {
-          const suggestedCommand = readString(command, "command");
-          return (
-            <div key={`${readString(command, "cwd")}:${suggestedCommand}:${index}`} className="grid min-h-6 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-[11px]">
-              <code className="min-w-0 truncate font-mono text-foreground/85">$ {suggestedCommand}</code>
-              <span className="shrink-0 truncate text-muted-foreground">{readString(command, "cwd")}</span>
-            </div>
-          );
-        })}
-      </div>
-    </section>
   );
 }
 
@@ -1048,16 +887,6 @@ function FileDetails({
       </div>
     );
   }
-  if (name === "builtin_file_patch") {
-    return (
-      <FileResultMeta
-        values={[
-          replace(t("transcript.codeReplacementCount"), { count: formatNumber(readNumber(output, "replacements") ?? 0, locale) }),
-          t("transcript.codeUpdated"),
-        ]}
-      />
-    );
-  }
   if (name === "builtin_file_delete") {
     return <FileResultMeta values={[t("transcript.codeDeleted")]} />;
   }
@@ -1352,11 +1181,6 @@ function readNumber(record: UnknownRecord | null, key: string) {
 
 function readBoolean(record: UnknownRecord | null, key: string) {
   return record?.[key] === true;
-}
-
-function readStringArray(record: UnknownRecord | null, key: string) {
-  const value = record?.[key];
-  return Array.isArray(value) && value.every((item) => typeof item === "string") ? (value as string[]) : null;
 }
 
 function readRecordArray(record: UnknownRecord | null, key: string) {

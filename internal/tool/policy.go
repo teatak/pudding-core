@@ -66,8 +66,8 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string) (T
 	if name == GitStage || name == GitUnstage || name == GitCommit {
 		return classifyGitWriteCall(name, raw)
 	}
-	if name == PatchApply {
-		args, argumentErr := decodePatchApplyArgs(raw)
+	if name == FilePatch {
+		args, argumentErr := decodeFilePatchArgs(raw)
 		if argumentErr != nil || strings.TrimSpace(args.Scope) != managedScopeProject || len(args.Files) == 0 || len(args.Files) > patchMaxFiles {
 			return ToolRisk{}, false
 		}
@@ -84,7 +84,7 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string) (T
 		if destructive {
 			return ToolRisk{
 				Class:     RiskClassDestructive,
-				Operation: "patch_apply",
+				Operation: "file_patch",
 				Scope:     managedScopeProject,
 				Paths:     compactRiskPaths(paths...),
 				Summary:   "Apply a multi-file patch that deletes project files.",
@@ -92,7 +92,7 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string) (T
 		}
 		return ToolRisk{
 			Class:     RiskClassWrite,
-			Operation: "patch_apply",
+			Operation: "file_patch",
 			Scope:     managedScopeProject,
 			Paths:     compactRiskPaths(paths...),
 			Summary:   "Apply a multi-file patch to project files.",
@@ -119,9 +119,6 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string) (T
 	case FileWrite:
 		path := strings.TrimSpace(args.Path)
 		return ToolRisk{Class: RiskClassWrite, Operation: "write", Scope: args.Scope, Paths: compactRiskPaths(path), Summary: "Overwrite a project file.", LowRisk: true}, true
-	case FilePatch:
-		path := strings.TrimSpace(args.Path)
-		return ToolRisk{Class: RiskClassWrite, Operation: "patch", Scope: args.Scope, Paths: compactRiskPaths(path), Summary: "Modify a project file.", LowRisk: true}, true
 	case FileDelete:
 		path := strings.TrimSpace(args.Path)
 		summary := "Delete a project file."

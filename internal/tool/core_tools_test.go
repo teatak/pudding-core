@@ -51,23 +51,40 @@ func TestBuiltinAppDefinitionsListOwnedTools(t *testing.T) {
 
 func TestCoreDefinitionsUseSmallStableCodeSurface(t *testing.T) {
 	defs := BuiltinDefinitions()
+	for _, removed := range []string{"builtin_project_inspect", "builtin_project_instructions"} {
+		if HasDefinition(defs, removed) {
+			t.Fatalf("removed project helper still exposed as a tool: %s", removed)
+		}
+	}
 	first := CoreDefinitionsForMode(store.ModeCode, defs)
 	second := CoreDefinitionsForMode(store.ModeCode, defs)
 	if !reflect.DeepEqual(first, second) {
 		t.Fatal("core tool definitions are not stable")
 	}
-	for _, name := range []string{RequestCapability, ProjectInspect, ProjectInstructions, CommandRun, CommandSession, FileRead, PatchApply, WebSearch} {
+	for _, name := range []string{RequestCapability, PlanUpdate, CommandRun, CommandSession, WebSearch} {
 		if !HasDefinition(first, name) {
 			t.Fatalf("Code Core missing %s", name)
 		}
 	}
-	for _, name := range []string{FileList, GitStatus, CodeDiagnostics, CameraCapture, DesktopScreenshot, BrowserOpen, RESTRequest, SkillValidate, AppSave} {
+	for _, name := range []string{FileList, FileRead, FilePatch, GitStatus, CodeDiagnostics, CameraCapture, DesktopScreenshot, BrowserOpen, RESTRequest, SkillValidate, AppSave} {
 		if HasDefinition(first, name) {
 			t.Fatalf("App tool %s leaked into Code Core", name)
 		}
 	}
 	if len(first) > 16 {
 		t.Fatalf("Code Core tool count = %d, want <= 16", len(first))
+	}
+}
+
+func TestPlanUpdateIsAvailableOnlyInWorkAndCode(t *testing.T) {
+	defs := BuiltinDefinitions()
+	if HasDefinition(CoreDefinitionsForMode(store.ModeChat, defs), PlanUpdate) {
+		t.Fatal("plan update leaked into Chat Core")
+	}
+	for _, mode := range []store.AgentMode{store.ModeWork, store.ModeCode} {
+		if !HasDefinition(CoreDefinitionsForMode(mode, defs), PlanUpdate) {
+			t.Fatalf("plan update missing from %s Core", mode)
+		}
 	}
 }
 

@@ -360,7 +360,7 @@ func aggregate(calls []*callRecord, turnCalls map[turnKey][]*callRecord, report 
 }
 
 func currentRequiredModes() map[string]store.AgentMode {
-	modes := map[string]store.AgentMode{tool.RequestCapability: store.ModeChat, tool.AppLoad: store.ModeChat}
+	modes := map[string]store.AgentMode{tool.RequestCapability: store.ModeChat, tool.AppLoad: store.ModeChat, tool.AppUnload: store.ModeChat}
 	for _, definition := range tool.BuiltinDefinitions() {
 		mode := store.NormalizeAgentMode(definition.Capability)
 		if mode == "" {
@@ -396,7 +396,7 @@ func toolGroup(name string) string {
 	switch {
 	case strings.HasPrefix(name, "builtin_command_"):
 		return "command"
-	case name == tool.AppLoad:
+	case name == tool.AppLoad, name == tool.AppUnload:
 		return "app"
 	case name == tool.RequestCapability, strings.HasPrefix(name, "builtin_project_"):
 		return "project"
@@ -406,8 +406,6 @@ func toolGroup(name string) string {
 		return "file"
 	case strings.HasPrefix(name, "builtin_git_"):
 		return "git"
-	case strings.HasPrefix(name, "builtin_patch_"):
-		return "patch"
 	case strings.HasPrefix(name, "builtin_history_"):
 		return "history"
 	case strings.HasPrefix(name, "builtin_browser_"):

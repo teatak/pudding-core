@@ -109,7 +109,7 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 		appID, requiredMode string
 		toolCount           int
 	}{
-		{BuiltinProjectFilesID, "code", 9},
+		{BuiltinProjectFilesID, "code", 10},
 		{BuiltinSourceControlID, "code", 6},
 		{BuiltinCodeIntelID, "code", 5},
 		{BuiltinCaptureID, "chat", 2},

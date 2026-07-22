@@ -1,15 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
-import { Search } from "lucide-react";
+import { ChevronRight, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { searchProjectFiles, type ProjectBrowserRoot, type ProjectSearchMatch } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { Spinner } from "@/components/Spinner";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n";
+import { cn } from "@/lib/utils";
 
-import { ProjectFileTypeIcon } from "./ProjectFileTypeIcon";
+import { ProjectFileTypeIcon, ProjectFolderTypeIcon } from "./ProjectFileTypeIcon";
 import { projectBrowserError } from "./projectErrors";
+import { projectFileName, projectParentPath } from "./projectPaths";
 
 const searchDelayMs = 180;
 
@@ -51,6 +54,7 @@ export function ProjectSearch({
   });
   const settled = Boolean(normalizedQuery && normalizedQuery === debouncedQuery);
   const matches = settled ? searchQuery.data?.matches || [] : [];
+  const matchGroups = useMemo(() => groupMatchesByRoot(matches), [matches]);
   const searching = Boolean(normalizedQuery && (!settled || searchQuery.isFetching));
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -95,29 +99,22 @@ export function ProjectSearch({
           <>
             <div className="flex h-6 items-center gap-1.5 px-2 text-[11px] text-muted-foreground">
               {searching ? <Spinner className="size-3" /> : null}
-              <span>{t("project.browserSearchSummary").replace("{count}", String(matches.length))}</span>
+              <span>
+                {t("project.browserSearchTreeSummary")
+                  .replace("{files}", String(matchGroups.reduce((count, group) => count + group.files.length, 0)))
+                  .replace("{count}", String(matches.length))}
+              </span>
               {searchQuery.data?.resultsCapped ? <span>· {t("project.browserSearchCapped")}</span> : null}
             </div>
-            {matches.map((match, index) => (
-              <button
-                key={`${match.rootID}:${match.path}:${match.line}:${index}`}
-                className="block w-full min-w-0 border-t border-[var(--workspace-border-subtle)] px-2 py-1.5 text-left hover:bg-[var(--workspace-tree-hover-background)]"
-
-                type="button"
-                onClick={() => onOpen(match)}
-              >
-                <span className="flex min-w-0 items-center gap-1.5 text-xs">
-                  <ProjectFileTypeIcon path={match.path} />
-                  <span className="min-w-0 flex-1 truncate font-medium">{match.path}</span>
-                  <span className="shrink-0 font-mono text-[10px] text-muted-foreground">:{match.line}</span>
-                </span>
-                {roots.length > 1 ? (
-                  <span className="mt-0.5 block truncate pl-5 text-[10px] text-muted-foreground">{rootNames.get(match.rootID)}</span>
-                ) : null}
-                <span className="mt-1 block overflow-hidden pl-5 font-mono text-[11px] leading-4 text-muted-foreground">
-                  <HighlightedText caseSensitive={searchQuery.data?.caseSensitive || false} query={debouncedQuery} text={match.text} />
-                </span>
-              </button>
+            {matchGroups.map((rootGroup) => (
+              <SearchRootGroup
+                key={`${debouncedQuery}:${rootGroup.rootID}`}
+                caseSensitive={searchQuery.data?.caseSensitive || false}
+                group={rootGroup}
+                query={debouncedQuery}
+                rootName={rootNames.get(rootGroup.rootID) || rootGroup.rootID}
+                onOpen={onOpen}
+              />
             ))}
           </>
         )}
@@ -128,6 +125,139 @@ export function ProjectSearch({
 
 function ProjectSearchMessage({ children }: { children: ReactNode }) {
   return <div className="flex items-center gap-2 px-3 py-4 text-xs text-muted-foreground">{children}</div>;
+}
+
+type SearchFileGroup = { path: string; matches: ProjectSearchMatch[] };
+type SearchRootGroup = { rootID: string; files: SearchFileGroup[] };
+
+function SearchRootGroup({
+  caseSensitive,
+  group,
+  query,
+  rootName,
+  onOpen,
+}: {
+  caseSensitive: boolean;
+  group: SearchRootGroup;
+  query: string;
+  rootName: string;
+  onOpen: (match: ProjectSearchMatch) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const files = group.files.map((file) => (
+    <SearchFileGroup
+      key={file.path}
+      caseSensitive={caseSensitive}
+      file={file}
+      query={query}
+      onOpen={onOpen}
+    />
+  ));
+  const matchCount = group.files.reduce((count, file) => count + file.matches.length, 0);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <button
+          className="flex h-6 w-full min-w-0 items-center gap-1 pr-2 text-left text-xs hover:bg-[var(--workspace-tree-hover-background)] hover:text-accent-foreground"
+          style={{ paddingLeft: 7 }}
+          type="button"
+        >
+          <ChevronRight className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
+          <ProjectFolderTypeIcon name={rootName} open={open} />
+          <span className="min-w-0 flex-1 truncate">{rootName}</span>
+          <ResultCount count={matchCount} />
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>{files}</CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function SearchFileGroup({
+  caseSensitive,
+  file,
+  query,
+  onOpen,
+}: {
+  caseSensitive: boolean;
+  file: SearchFileGroup;
+  query: string;
+  onOpen: (match: ProjectSearchMatch) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const name = projectFileName(file.path);
+  const parent = projectParentPath(file.path);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <button
+          className="flex h-6 w-full min-w-0 items-center gap-1 pr-2 text-left text-xs hover:bg-[var(--workspace-tree-hover-background)] hover:text-accent-foreground"
+          style={{ paddingLeft: 20 }}
+          type="button"
+        >
+          <ChevronRight className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
+          <ProjectFileTypeIcon path={file.path} />
+          <span className="min-w-0 truncate font-medium">{name}</span>
+          {parent !== "." ? (
+            <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">{parent}</span>
+          ) : (
+            <span className="flex-1" />
+          )}
+          <ResultCount count={file.matches.length} />
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        {file.matches.map((match, index) => (
+          <button
+            key={`${match.line}:${match.lineStart}:${index}`}
+            className="flex h-6 w-full min-w-0 items-center gap-2 pr-2 text-left hover:bg-[var(--workspace-tree-hover-background)] hover:text-accent-foreground"
+            style={{ paddingLeft: 51 }}
+            type="button"
+            onClick={() => onOpen(match)}
+          >
+            <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
+              <HighlightedText caseSensitive={caseSensitive} query={query} text={match.text} />
+            </span>
+            <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">:{match.line}</span>
+          </button>
+        ))}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function ResultCount({ count }: { count: number }) {
+  return (
+    <span className="min-w-5 shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-center text-[10px] leading-none tabular-nums text-muted-foreground">
+      {count}
+    </span>
+  );
+}
+
+function groupMatchesByRoot(matches: ProjectSearchMatch[]) {
+  const groups: Array<{
+    rootID: string;
+    files: Array<{ path: string; matches: ProjectSearchMatch[] }>;
+    fileIndexByPath: Map<string, number>;
+  }> = [];
+  const indexByRoot = new Map<string, number>();
+  for (const match of matches) {
+    let rootIndex = indexByRoot.get(match.rootID);
+    if (rootIndex == null) {
+      rootIndex = groups.length;
+      indexByRoot.set(match.rootID, rootIndex);
+      groups.push({ rootID: match.rootID, files: [], fileIndexByPath: new Map() });
+    }
+    const rootGroup = groups[rootIndex];
+    let fileIndex = rootGroup.fileIndexByPath.get(match.path);
+    if (fileIndex == null) {
+      fileIndex = rootGroup.files.length;
+      rootGroup.fileIndexByPath.set(match.path, fileIndex);
+      rootGroup.files.push({ path: match.path, matches: [] });
+    }
+    rootGroup.files[fileIndex].matches.push(match);
+  }
+  return groups.map((group) => ({ rootID: group.rootID, files: group.files }));
 }
 
 function HighlightedText({ caseSensitive, query, text }: { caseSensitive: boolean; query: string; text: string }) {

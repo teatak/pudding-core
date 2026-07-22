@@ -33,9 +33,12 @@ installed App unchanged.
 2. Choose a lowercase kebab-case App id and a package version such as `0.1.0`.
 3. Ensure Code capability. The App Authoring App has already exposed
    `builtin_app_save` for this session.
-4. For an update, also load the `project-files` App and inspect visible package files
-   with `scope="app"`. Hidden connection and runtime override files are not
-   exposed.
+4. For an update, load Project Files only when it is listed in Available Apps,
+   then inspect visible package files with `scope="app"`. If it is absent,
+   explain that Project Files must be enabled before safely updating an existing
+   App; do not try to load the disabled App. Hidden connection and runtime
+   override files are not exposed. Creating a new App can continue with the
+   complete `builtin_app_save` payload.
 5. Build the complete package: `app.yaml`, an SVG icon, and at least one focused
    App Skill when endpoint-specific guidance is needed.
 6. Call `builtin_app_save` with `operation="create"` or `operation="update"`.

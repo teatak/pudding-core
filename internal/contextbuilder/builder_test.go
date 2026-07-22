@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/prompt"
 	"github.com/teatak/pudding-core/internal/provider"
@@ -18,6 +19,14 @@ import (
 	"github.com/teatak/pudding-core/internal/store/memstore"
 	"github.com/teatak/pudding-core/internal/tool"
 )
+
+type testAppLister struct {
+	definitions []*app.Definition
+}
+
+func (l *testAppLister) ListDefinitions(context.Context) ([]*app.Definition, error) {
+	return l.definitions, nil
+}
 
 func TestBuildUsesCoreAndUserPrompt(t *testing.T) {
 	ms := memstore.New()
@@ -57,6 +66,115 @@ func TestBuildUsesCoreAndUserPrompt(t *testing.T) {
 	}
 	if len(req.Messages) != 1 || req.Messages[0].Text != "hi" {
 		t.Fatalf("unexpected messages: %+v", req.Messages)
+	}
+}
+
+func TestBuildMarksSessionLoadedAppsInPrompt(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID:           "s1",
+		Provider:     "mock",
+		Model:        "mock",
+		LoadedAppIDs: []string{"github"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	apps := &testAppLister{definitions: []*app.Definition{{
+		ID:             "github",
+		Name:           "GitHub",
+		Enabled:        true,
+		RequiredMode:   "work",
+		DefaultSkillID: "github-issues",
+		Skills:         []app.SkillRef{{ID: "github-issues"}},
+	}}}
+	b := New(ms, prompt.NewLoaderWithApps(t.TempDir(), apps, nil))
+
+	req, err := b.Build(ctx, "s1", "m", string(store.ModeWork))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(req.System, "Status: loaded for this session") {
+		t.Fatalf("system prompt missing session App load state: %q", req.System)
+	}
+
+	loaded := []string{}
+	if _, err := ms.UpdateSession(ctx, "s1", store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
+		t.Fatal(err)
+	}
+	req, err = b.Build(ctx, "s1", "m", string(store.ModeWork))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(req.System, "Status: loaded for this session") {
+		t.Fatalf("system prompt retained stale App load state: %q", req.System)
+	}
+}
+
+func TestBuildInjectsRootProjectInstructionsForCodeMode(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("follow root guidance\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "nested"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "nested", "AGENTS.md"), []byte("nested guidance\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.CreateProject(ctx, &store.Project{ID: "p1", Name: "Project", RootDirs: []string{root}, ApprovalMode: store.ApprovalAuto}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock", ProjectID: "p1"}); err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := New(ms, nil).Build(ctx, "s1", "m", string(store.ModeCode))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(req.System, "## Project Instructions") || !strings.Contains(req.System, "follow root guidance") {
+		t.Fatalf("system prompt missing root project instructions:\n%s", req.System)
+	}
+	if !strings.Contains(req.System, "## Project Directories") || !strings.Contains(req.System, root) {
+		t.Fatalf("system prompt missing project directory:\n%s", req.System)
+	}
+	if strings.Contains(req.System, "nested guidance") {
+		t.Fatalf("system prompt should not guess nested instruction scope:\n%s", req.System)
+	}
+
+	req, err = New(ms, nil).Build(ctx, "s1", "m", string(store.ModeWork))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(req.System, "follow root guidance") || strings.Contains(req.System, "## Project Directories") {
+		t.Fatalf("work prompt unexpectedly contains Code project context:\n%s", req.System)
+	}
+}
+
+func TestBuildInjectsEveryProjectDirectoryWithoutInstructionFiles(t *testing.T) {
+	ms := memstore.New()
+	ctx := context.Background()
+	firstRoot := t.TempDir()
+	secondRoot := t.TempDir()
+	if err := ms.CreateProject(ctx, &store.Project{ID: "p1", Name: "Multi-root", RootDirs: []string{firstRoot, secondRoot}, ApprovalMode: store.ApprovalAuto}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock", ProjectID: "p1"}); err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := New(ms, nil).Build(ctx, "s1", "m", string(store.ModeCode))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(req.System, "## Project Directories") || !strings.Contains(req.System, firstRoot) || !strings.Contains(req.System, secondRoot) {
+		t.Fatalf("system prompt missing multi-root Project directories:\n%s", req.System)
+	}
+	if strings.Contains(req.System, "## Project Instructions") {
+		t.Fatalf("system prompt unexpectedly contains absent project instructions:\n%s", req.System)
 	}
 }
 

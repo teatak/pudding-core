@@ -13,7 +13,7 @@ import (
 	"github.com/teatak/pudding-core/internal/attachment"
 )
 
-func TestBuiltinFileSkillWriteReadPatch(t *testing.T) {
+func TestBuiltinFileSkillWriteRead(t *testing.T) {
 	home := t.TempDir()
 	runner := NewBuiltinRunner(WithHomeDir(home))
 
@@ -28,13 +28,6 @@ func TestBuiltinFileSkillWriteReadPatch(t *testing.T) {
 		t.Fatalf("file missing: %v", err)
 	}
 
-	patch := runner.Call(context.Background(), Call{
-		Name: FilePatch,
-		Args: json.RawMessage(`{"scope":"skill","path":"demo/SKILL.md","old_string":"world","new_string":"pudding"}`),
-	})
-	if !patch.Ok {
-		t.Fatalf("patch should succeed: %+v", patch)
-	}
 	read := runner.Call(context.Background(), Call{
 		Name: FileRead,
 		Args: json.RawMessage(`{"scope":"skill","path":"demo/SKILL.md"}`),
@@ -43,124 +36,8 @@ func TestBuiltinFileSkillWriteReadPatch(t *testing.T) {
 		t.Fatalf("read should succeed: %+v", read)
 	}
 	payload := decodeToolResult(t, read)
-	if payload["content"] != "hello\npudding\n" {
+	if payload["content"] != "hello\nworld\n" {
 		t.Fatalf("unexpected content: %+v", payload)
-	}
-}
-
-func TestBuiltinFilePatchNotFoundReturnsClosestMatch(t *testing.T) {
-	home := t.TempDir()
-	target := filepath.Join(home, "skills", "demo", "SKILL.md")
-	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	original := "header\n  const value = 1\nfooter\n"
-	if err := os.WriteFile(target, []byte(original), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	result := NewBuiltinRunner(WithHomeDir(home)).Call(context.Background(), Call{
-		Name: FilePatch,
-		Args: json.RawMessage(`{"scope":"skill","path":"demo/SKILL.md","old_string":"header\nconst value = 1\nfooter","new_string":"changed"}`),
-	})
-	if result.Ok {
-		t.Fatalf("inexact patch should fail: %+v", result)
-	}
-	payload := decodeToolResult(t, result)
-	if payload["reason"] != "old_string_not_found" {
-		t.Fatalf("unexpected failure: %+v", payload)
-	}
-	closest, ok := payload["closestMatch"].(map[string]any)
-	if !ok {
-		t.Fatalf("closest match missing: %+v", payload)
-	}
-	if closest["startLine"] != float64(1) || closest["endLine"] != float64(3) {
-		t.Fatalf("unexpected closest range: %+v", closest)
-	}
-	if closest["likelyDifference"] != "whitespace" || closest["content"] != strings.TrimSuffix(original, "\n") {
-		t.Fatalf("unexpected closest match: %+v", closest)
-	}
-	if data, err := os.ReadFile(target); err != nil || string(data) != original {
-		t.Fatalf("failed patch modified file: %q %v", data, err)
-	}
-}
-
-func TestBuiltinFilePatchNotFoundIdentifiesLineEndings(t *testing.T) {
-	home := t.TempDir()
-	target := filepath.Join(home, "skills", "demo", "SKILL.md")
-	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	original := "alpha\r\nbeta\r\n"
-	if err := os.WriteFile(target, []byte(original), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	result := NewBuiltinRunner(WithHomeDir(home)).Call(context.Background(), Call{
-		Name: FilePatch,
-		Args: json.RawMessage(`{"scope":"skill","path":"demo/SKILL.md","old_string":"alpha\nbeta\n","new_string":"changed\n"}`),
-	})
-	if result.Ok {
-		t.Fatalf("line-ending mismatch should fail: %+v", result)
-	}
-	payload := decodeToolResult(t, result)
-	closest, ok := payload["closestMatch"].(map[string]any)
-	if !ok || closest["likelyDifference"] != "line_endings" {
-		t.Fatalf("line-ending hint missing: %+v", payload)
-	}
-	if closest["startLine"] != float64(1) || closest["endLine"] != float64(2) {
-		t.Fatalf("unexpected closest range: %+v", closest)
-	}
-	if data, err := os.ReadFile(target); err != nil || string(data) != original {
-		t.Fatalf("failed patch modified file: %q %v", data, err)
-	}
-}
-
-func TestBuiltinFilePatchAmbiguousReturnsMatchCount(t *testing.T) {
-	home := t.TempDir()
-	target := filepath.Join(home, "skills", "demo", "SKILL.md")
-	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	original := "same\nmiddle\nsame\n"
-	if err := os.WriteFile(target, []byte(original), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	result := NewBuiltinRunner(WithHomeDir(home)).Call(context.Background(), Call{
-		Name: FilePatch,
-		Args: json.RawMessage(`{"scope":"skill","path":"demo/SKILL.md","old_string":"same","new_string":"changed"}`),
-	})
-	if result.Ok {
-		t.Fatalf("ambiguous patch should fail: %+v", result)
-	}
-	payload := decodeToolResult(t, result)
-	if payload["reason"] != "old_string_ambiguous" || payload["matches"] != float64(2) || payload["hint"] == "" {
-		t.Fatalf("ambiguous details missing: %+v", payload)
-	}
-	if data, err := os.ReadFile(target); err != nil || string(data) != original {
-		t.Fatalf("ambiguous patch modified file: %q %v", data, err)
-	}
-}
-
-func TestClosestFilePatchMatchUsesSurroundingContextForRepeatedAnchor(t *testing.T) {
-	content := "target line\nwrong context\nseparator\nheader\n  target line\nfooter\n"
-	closest, ok := closestFilePatchMatch(content, "header\ntarget line\nfooter")
-	if !ok {
-		t.Fatal("closest match missing")
-	}
-	if closest.StartLine != 4 || closest.EndLine != 6 {
-		t.Fatalf("wrong repeated-anchor match: %+v", closest)
-	}
-	if closest.LikelyDifference != "whitespace" || closest.Similarity != 100 {
-		t.Fatalf("unexpected repeated-anchor details: %+v", closest)
-	}
-}
-
-func TestClosestFilePatchMatchSkipsOversizedSource(t *testing.T) {
-	content := strings.Repeat("line\n", maxFilePatchHintSourceBytes/5+1)
-	if _, ok := closestFilePatchMatch(content, "missing line"); ok {
-		t.Fatal("oversized source should not run closest-match analysis")
 	}
 }
 
@@ -320,7 +197,7 @@ func TestBuiltinFileTempScopeHidesCodeScratch(t *testing.T) {
 	}
 }
 
-func TestBuiltinFileSkillPatchPreservesOtherFiles(t *testing.T) {
+func TestBuiltinFileSkillWritePreservesOtherFiles(t *testing.T) {
 	home := t.TempDir()
 	publishedDir := filepath.Join(home, "skills", "demo", "assets")
 	if err := os.MkdirAll(publishedDir, 0o700); err != nil {
@@ -334,11 +211,11 @@ func TestBuiltinFileSkillPatchPreservesOtherFiles(t *testing.T) {
 	}
 
 	res := NewBuiltinRunner(WithHomeDir(home)).Call(context.Background(), Call{
-		Name: FilePatch,
-		Args: json.RawMessage(`{"scope":"skill","path":"demo/SKILL.md","old_string":"old","new_string":"new"}`),
+		Name: FileWrite,
+		Args: json.RawMessage(`{"scope":"skill","path":"demo/SKILL.md","content":"new"}`),
 	})
 	if !res.Ok {
-		t.Fatalf("patch should succeed: %+v", res)
+		t.Fatalf("write should succeed: %+v", res)
 	}
 	data, err := os.ReadFile(filepath.Join(home, "skills", "demo", "SKILL.md"))
 	if err != nil || string(data) != "new" {
@@ -457,6 +334,33 @@ func TestBuiltinFileProjectScopeReadWrite(t *testing.T) {
 	}
 	if string(data) != "created" {
 		t.Fatalf("project write content = %q", data)
+	}
+}
+
+func TestBuiltinFileListReturnsEveryProjectRoot(t *testing.T) {
+	firstRoot := t.TempDir()
+	secondRoot := t.TempDir()
+	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
+
+	list := runner.Call(context.Background(), Call{
+		Name:        FileList,
+		Args:        json.RawMessage(`{"scope":"project","path":"."}`),
+		ProjectDirs: []string{firstRoot, secondRoot},
+	})
+	if !list.Ok {
+		t.Fatalf("multi-root project list should succeed: %+v", list)
+	}
+	payload := decodeToolResult(t, list)
+	if payload["rootCount"] != float64(2) || payload["path"] != "." {
+		t.Fatalf("unexpected multi-root metadata: %+v", payload)
+	}
+	entries := payload["entries"].([]any)
+	if len(entries) != 2 || entries[0].(map[string]any)["path"] != firstRoot || entries[1].(map[string]any)["path"] != secondRoot {
+		t.Fatalf("multi-root project entries missing: %+v", entries)
+	}
+	roots := payload["projectRoots"].([]any)
+	if len(roots) != 2 || roots[0] != firstRoot || roots[1] != secondRoot {
+		t.Fatalf("multi-root project roots missing: %+v", roots)
 	}
 }
 

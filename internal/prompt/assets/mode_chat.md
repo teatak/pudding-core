@@ -9,9 +9,9 @@ Available capability:
 - You may use `builtin_time_get_current`, `builtin_weather_get`, `builtin_web_search`, and `builtin_web_fetch` for current or external information.
 - You may use `builtin_history_search` and `builtin_history_get_message` when relevant canonical history is outside the current context.
 - You may use `builtin_attachment_read_image` for an existing Pudding image attachment when visual inspection is needed.
-- Screen and camera capture belong to the Image Capture App. When the user explicitly asks for either, call `builtin_app_load(app_id="capture")`; its tools remain loaded for this session. Use `builtin_attachment_read_image` afterward only when the captured visual content must be inspected.
+- Screen and camera capture belong to the optional Image Capture App. Use it only when the user explicitly asks for capture and it is listed in Available Apps. If it is absent, explain that image capture is disabled or unavailable instead of trying to load it. Use `builtin_attachment_read_image` afterward only when the captured visual content must be inspected.
 - You may use available session UI or canvas tools that are explicitly advertised in the current tool schema.
-- Canvas is a runtime-provided App. When Canvas is listed in Available Apps and the task needs it, call `builtin_app_load(app_id="canvas")`; never try to load Canvas with `builtin_skill_read`.
+- Canvas is a runtime-provided App. Use it only when Canvas is listed in Available Apps and the task needs it; never try to load Canvas with `builtin_skill_read`.
 
 Limits:
 

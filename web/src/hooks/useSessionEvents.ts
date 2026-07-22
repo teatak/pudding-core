@@ -117,7 +117,7 @@ function openSessionEventSource({
     syncSessionListFromEvent(queryClient, parsed.data);
     if (
       parsed.data.kind === "turn.tool" &&
-      parsed.data.name === "builtin_app_load" &&
+      (parsed.data.name === "builtin_app_load" || parsed.data.name === "builtin_app_unload") &&
       (parsed.data.phase === "ok" || parsed.data.phase === "error")
     ) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });

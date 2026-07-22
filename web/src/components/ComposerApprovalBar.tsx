@@ -339,7 +339,7 @@ function ApprovalMenuOption({
 
 function approvalToolActionLabel(operation: string, patchApproval: boolean, gitCommit: boolean, t: (key: string) => string) {
   if (patchApproval) {
-    return t("transcript.approvalPatchApply");
+    return t("transcript.approvalFilePatch");
   }
   if (gitCommit) {
     return t("transcript.approvalGitCommit");
@@ -527,11 +527,10 @@ function gitCommitFromPayload(payload: unknown): GitCommitApproval | null {
 function toolCallReason(operation: string, t: (key: string) => string) {
   switch (operation) {
     case "write":
-    case "patch":
     case "delete":
     case "move":
     case "copy":
-    case "patch_apply":
+    case "file_patch":
     case "git_stage":
     case "git_unstage":
     case "git_commit":

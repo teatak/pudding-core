@@ -48,7 +48,7 @@ func ToolDefAllowedForMode(mode store.AgentMode, def provider.ToolDef) bool {
 }
 
 func RequiredModeForName(name string) store.AgentMode {
-	if name == RequestCapability || name == AppLoad {
+	if name == RequestCapability || name == AppLoad || name == AppUnload {
 		return store.ModeChat
 	}
 	if strings.HasPrefix(name, appMCPToolPrefix) {
@@ -74,7 +74,7 @@ func NameAllowedForMode(mode store.AgentMode, name string) bool {
 	if !store.ValidAgentMode(mode) {
 		mode = store.ModeChat
 	}
-	if name == RequestCapability || name == AppLoad {
+	if name == RequestCapability || name == AppLoad || name == AppUnload {
 		return true
 	}
 	return store.AgentModeRank(mode) >= store.AgentModeRank(RequiredModeForName(name))

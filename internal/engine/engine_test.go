@@ -1279,16 +1279,17 @@ func TestSubmitRoutesFileReadImageToNextProviderRequest(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
 	client := &fileReadImageClient{}
-	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithAttachmentHome(home), WithTools(tool.NewBuiltinRunner(tool.WithHomeDir(home))))
+	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithAttachmentHome(home), WithTools(tool.NewBuiltinRunner(tool.WithHomeDir(home))), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
 	ctx := context.Background()
 	sid := "sess_image_tool"
 	if err := ms.CreateSession(ctx, &store.Session{
-		ID:         sid,
-		Title:      "image tool",
-		Provider:   "capture",
-		Model:      "vision-model",
-		ActiveMode: store.ModeCode,
-		ModeLease:  store.ModeLeaseSession,
+		ID:           sid,
+		Title:        "image tool",
+		Provider:     "capture",
+		Model:        "vision-model",
+		ActiveMode:   store.ModeCode,
+		ModeLease:    store.ModeLeaseSession,
+		LoadedAppIDs: []string{app.BuiltinProjectFilesID},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1432,16 +1433,17 @@ func TestSubmitDoesNotRouteFileReadImageWhenCapabilityUnknown(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
 	client := &fileReadImageClient{}
-	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithAttachmentHome(home), WithTools(tool.NewBuiltinRunner(tool.WithHomeDir(home))))
+	eng := New(ms, hub, mapResolver{"capture": client}, ms, WithAttachmentHome(home), WithTools(tool.NewBuiltinRunner(tool.WithHomeDir(home))), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
 	ctx := context.Background()
 	sid := "sess_image_tool_unknown"
 	if err := ms.CreateSession(ctx, &store.Session{
-		ID:         sid,
-		Title:      "image tool",
-		Provider:   "capture",
-		Model:      "tool-model",
-		ActiveMode: store.ModeCode,
-		ModeLease:  store.ModeLeaseSession,
+		ID:           sid,
+		Title:        "image tool",
+		Provider:     "capture",
+		Model:        "tool-model",
+		ActiveMode:   store.ModeCode,
+		ModeLease:    store.ModeLeaseSession,
+		LoadedAppIDs: []string{app.BuiltinProjectFilesID},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -2046,7 +2048,7 @@ func TestCapabilityApprovalUpgradesTurnTools(t *testing.T) {
 	if !hasToolDef(client.requests[0].Tools, tool.RequestCapability) || !hasToolDef(client.requests[0].Tools, tool.TimeGetCurrent) || !hasToolDef(client.requests[0].Tools, tool.WebSearch) || !hasToolDef(client.requests[0].Tools, tool.WebFetch) || hasToolDef(client.requests[0].Tools, tool.RESTRequest) || hasToolDef(client.requests[0].Tools, tool.FileRead) {
 		t.Fatalf("chat tools wrong: %+v", client.requests[0].Tools)
 	}
-	if !hasToolDef(client.requests[1].Tools, tool.RequestCapability) || !hasToolDef(client.requests[1].Tools, tool.AppLoad) || !hasToolDef(client.requests[1].Tools, tool.WebSearch) || !hasToolDef(client.requests[1].Tools, tool.WebFetch) || !hasToolDef(client.requests[1].Tools, tool.FileRead) || hasToolDef(client.requests[1].Tools, tool.RESTRequest) || hasToolDef(client.requests[1].Tools, tool.GraphQLRequest) {
+	if !hasToolDef(client.requests[1].Tools, tool.RequestCapability) || !hasToolDef(client.requests[1].Tools, tool.AppLoad) || !hasToolDef(client.requests[1].Tools, tool.WebSearch) || !hasToolDef(client.requests[1].Tools, tool.WebFetch) || hasToolDef(client.requests[1].Tools, tool.FileRead) || hasToolDef(client.requests[1].Tools, tool.RESTRequest) || hasToolDef(client.requests[1].Tools, tool.GraphQLRequest) {
 		t.Fatalf("code tools wrong: %+v", client.requests[1].Tools)
 	}
 	turn, err := ms.GetConversationTurn(ctx, sid, res.TurnID)
@@ -2120,7 +2122,7 @@ func TestProjectApprovalSessionScopeCreatesProject(t *testing.T) {
 	if got := project.RootDirs; len(got) != 1 || got[0] != dir {
 		t.Fatalf("project dirs not stored: %+v", got)
 	}
-	if len(client.requests) != 2 || !hasToolDef(client.requests[1].Tools, tool.FileRead) || !hasToolDef(client.requests[1].Tools, tool.CommandRun) || hasToolDef(client.requests[1].Tools, tool.FileList) {
+	if len(client.requests) != 2 || hasToolDef(client.requests[1].Tools, tool.FileRead) || !hasToolDef(client.requests[1].Tools, tool.CommandRun) || hasToolDef(client.requests[1].Tools, tool.FileList) {
 		t.Fatalf("default project tools wrong after approval: %+v", client.requests)
 	}
 }
@@ -2295,7 +2297,7 @@ func TestPatchApprovalCarriesDiffAndAppliesAfterApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &patchApprovalClient{}
-	eng := New(ms, hub, mapResolver{"patch": client}, ms, WithTools(tool.NewBuiltinRunner()))
+	eng := New(ms, hub, mapResolver{"patch": client}, ms, WithTools(tool.NewBuiltinRunner()), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
 	sid := "sess_patch_approval"
 	if err := ms.CreateSession(ctx, &store.Session{
 		ID: sid, Title: "patch", Provider: "patch", Model: "patch-model",
@@ -2329,11 +2331,11 @@ func TestPatchApprovalCarriesDiffAndAppliesAfterApproval(t *testing.T) {
 			t.Fatal("patch approval request not emitted")
 		}
 	}
-	if approval.ApprovalKind != ApprovalKindToolCall || approval.CallID != "call_patch_apply" {
+	if approval.ApprovalKind != ApprovalKindToolCall || approval.CallID != "call_file_patch" {
 		t.Fatalf("unexpected patch approval: %+v", approval)
 	}
 	payload := string(approval.Payload)
-	if !strings.Contains(payload, `"toolName":"builtin_patch_apply"`) || !strings.Contains(payload, `"diff":"`) || !strings.Contains(payload, `-old text`) || !strings.Contains(payload, `+new text`) || strings.Contains(payload, `"proposalID"`) {
+	if !strings.Contains(payload, `"toolName":"builtin_file_patch"`) || !strings.Contains(payload, `"diff":"`) || !strings.Contains(payload, `-old text`) || !strings.Contains(payload, `+new text`) || strings.Contains(payload, `"proposalID"`) {
 		t.Fatalf("patch approval payload is missing review data: %s", payload)
 	}
 	if data, err := os.ReadFile(target); err != nil || string(data) != "old text\n" {
@@ -2738,11 +2740,11 @@ func TestApprovedCommandBypassesSandboxForExactInvocation(t *testing.T) {
 
 func TestRefineToolRiskKeepsPatchDeletionProtected(t *testing.T) {
 	risk := tool.ToolRisk{Class: tool.RiskClassWrite, LowRisk: true}
-	regular := refineToolRisk(tool.PatchApply, risk, map[string]any{"destructive": false})
+	regular := refineToolRisk(tool.FilePatch, risk, map[string]any{"destructive": false})
 	if regular.Class != tool.RiskClassWrite || !regular.LowRisk {
 		t.Fatalf("regular patch should remain low-risk: %+v", regular)
 	}
-	destructive := refineToolRisk(tool.PatchApply, risk, map[string]any{"destructive": true})
+	destructive := refineToolRisk(tool.FilePatch, risk, map[string]any{"destructive": true})
 	if destructive.Class != tool.RiskClassDestructive || destructive.LowRisk {
 		t.Fatalf("patch deletion should require approval: %+v", destructive)
 	}
@@ -3851,11 +3853,14 @@ func (c *patchApprovalClient) Stream(_ context.Context, req provider.Request) (<
 	out := make(chan provider.Chunk, 4)
 	switch len(c.requests) {
 	case 1:
+		out <- appLoadChunk("call_project_files_app", app.BuiltinProjectFilesID)
+		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
+	case 2:
 		args, _ := json.Marshal(map[string]any{
 			"scope": "project",
 			"files": []map[string]any{{"path": "notes.txt", "new_text": "new text\n"}},
 		})
-		out <- provider.Chunk{Tool: &provider.ToolCallChunk{Index: 0, CallID: "call_patch_apply", Name: tool.PatchApply, ArgsDelta: string(args)}}
+		out <- provider.Chunk{Tool: &provider.ToolCallChunk{Index: 0, CallID: "call_file_patch", Name: tool.FilePatch, ArgsDelta: string(args)}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	default:
 		out <- provider.Chunk{Part: provider.PartText, Delta: "补丁已应用"}

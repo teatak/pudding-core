@@ -19,7 +19,6 @@ import {
   FileOutput,
   FilePenLine,
   FileSearch,
-  FolderSearch,
   GitBranch,
   GitCommitHorizontal,
   GitCompareArrows,
@@ -39,6 +38,7 @@ import {
   MoveRight,
   MoveVertical,
   PackageOpen,
+  PackageMinus,
   PackagePlus,
   PanelTop,
   Paperclip,
@@ -49,7 +49,6 @@ import {
   Search,
   ScanLine,
   ScanSearch,
-  ScrollText,
   Send,
   ShieldCheck,
   Square,
@@ -104,7 +103,6 @@ const processFileToolNames = new Set([
   "builtin_file_delete",
   "builtin_file_list",
   "builtin_file_move",
-  "builtin_file_patch",
   "builtin_file_read",
   "builtin_file_search",
   "builtin_file_slice",
@@ -129,7 +127,7 @@ export function TurnParts({
 }) {
   const showReasoningContent = displaySettings?.showReasoning ?? true;
   const showRawToolInfo = displaySettings?.showRawToolInfo ?? true;
-  const renderParts = compactProcessRuns(parts);
+  const renderParts = compactProcessRuns(parts.filter((part) => !isTurnPlanPart(part)));
   return (
     <>
       {renderParts.map((part, index) => {
@@ -148,6 +146,10 @@ export function TurnParts({
       })}
     </>
   );
+}
+
+function isTurnPlanPart(part: TurnPartVM) {
+  return part.type === "tool_use" && (part.name === "builtin_plan_update" || part.resultName === "builtin_plan_update");
 }
 
 function renderTranscriptPart({
@@ -289,6 +291,7 @@ function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIc
   const known: Record<string, LucideIcon> = {
     builtin_attachment_read_image: Image,
     builtin_app_load: PackageOpen,
+    builtin_app_unload: PackageMinus,
     builtin_app_save: PackagePlus,
     builtin_browser_back: ArrowLeft,
     builtin_browser_click: MousePointerClick,
@@ -314,7 +317,7 @@ function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIc
     builtin_file_delete: Trash2,
     builtin_file_list: ListTree,
     builtin_file_move: MoveRight,
-    builtin_file_patch: FilePenLine,
+    builtin_file_patch: FileCheck,
     builtin_file_read: BookOpenCheck,
     builtin_file_search: Search,
     builtin_file_slice: BookOpenCheck,
@@ -326,9 +329,6 @@ function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIc
     builtin_git_status: GitBranch,
     builtin_git_unstage: FileOutput,
     builtin_git_commit: GitCommitHorizontal,
-    builtin_patch_apply: FileCheck,
-    builtin_project_inspect: FolderSearch,
-    builtin_project_instructions: ScrollText,
     builtin_graphql_introspect: ScanSearch,
     builtin_graphql_request: Braces,
     builtin_graphql_search: Search,
@@ -343,6 +343,7 @@ function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIc
     builtin_web_search: Search,
     request_capability: ShieldCheck,
     builtin_request_user_input: MessageSquareMore,
+    builtin_plan_update: ListChecks,
   };
   return known[name] || Wrench;
 }
@@ -816,8 +817,6 @@ function fileToolOperation(name: string) {
       return "read";
     case "builtin_file_write":
       return "write";
-    case "builtin_file_patch":
-      return "update";
     case "builtin_file_copy":
       return "copy";
     case "builtin_file_move":
@@ -1704,6 +1703,7 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     builtin_history_get_message: t("transcript.toolHistoryGetMessage"),
     builtin_history_search: t("transcript.toolHistorySearch"),
     builtin_app_load: t("transcript.toolAppLoad"),
+    builtin_app_unload: t("transcript.toolAppUnload"),
     builtin_app_save: t("transcript.toolAppSave"),
     builtin_command_run: t("transcript.toolCommandRun"),
     builtin_command_session: t("transcript.toolCommandSession"),
@@ -1729,9 +1729,6 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     builtin_git_status: t("transcript.toolGitStatus"),
     builtin_git_unstage: t("transcript.toolGitUnstage"),
     builtin_git_commit: t("transcript.toolGitCommit"),
-    builtin_patch_apply: t("transcript.toolPatchApply"),
-    builtin_project_inspect: t("transcript.toolProjectInspect"),
-    builtin_project_instructions: t("transcript.toolProjectInstructions"),
     builtin_camera_capture: t("transcript.toolCameraCapture"),
     builtin_desktop_screenshot: t("transcript.toolDesktopScreenshot"),
     builtin_browser_click: t("transcript.toolBrowserClick"),
@@ -1753,6 +1750,7 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     builtin_web_fetch: t("transcript.toolWebFetch"),
     builtin_web_search: t("transcript.toolWebSearch"),
     builtin_request_user_input: t("transcript.toolRequestUserInput"),
+    builtin_plan_update: t("transcript.toolPlanUpdate"),
     canvas_chart: t("transcript.toolCanvasChart"),
     canvas_doc_read: t("transcript.toolCanvasDocRead"),
     canvas_gallery: t("transcript.toolCanvasGallery"),

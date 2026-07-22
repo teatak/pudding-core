@@ -21,7 +21,7 @@ type patchResultPayload struct {
 	Deletions   int             `json:"deletions"`
 }
 
-func TestPatchApplyArgumentErrorsAreSpecific(t *testing.T) {
+func TestFilePatchArgumentErrorsAreSpecific(t *testing.T) {
 	tests := []struct {
 		name      string
 		args      string
@@ -43,7 +43,7 @@ func TestPatchApplyArgumentErrorsAreSpecific(t *testing.T) {
 				SessionID:   "session_args",
 				TurnID:      "turn_args",
 				CallID:      "call_args",
-				Name:        PatchApply,
+				Name:        FilePatch,
 				Args:        json.RawMessage(test.args),
 				ProjectDirs: []string{t.TempDir()},
 			})
@@ -78,7 +78,7 @@ func TestPatchApprovalDetailsFailurePreservesArgumentRecoveryData(t *testing.T) 
 		SessionID:   "session_args",
 		TurnID:      "turn_args",
 		CallID:      "call_args",
-		Name:        PatchApply,
+		Name:        FilePatch,
 		Args:        json.RawMessage(`{"scope":"project","files":"large patch"}`),
 		ProjectDirs: []string{t.TempDir()},
 	}
@@ -92,7 +92,7 @@ func TestPatchApprovalDetailsFailurePreservesArgumentRecoveryData(t *testing.T) 
 	}
 }
 
-func TestPatchApplySizeLimitsRemainDistinctFromArgumentErrors(t *testing.T) {
+func TestFilePatchSizeLimitsRemainDistinctFromArgumentErrors(t *testing.T) {
 	root := t.TempDir()
 	runner := NewBuiltinRunner()
 
@@ -100,7 +100,7 @@ func TestPatchApplySizeLimitsRemainDistinctFromArgumentErrors(t *testing.T) {
 	for index := range tooManyFiles {
 		tooManyFiles[index] = map[string]any{"path": "file-" + strconv.Itoa(index) + ".txt", "new_text": "content\n"}
 	}
-	tooMany := patchTestCall(runner, "session_size", root, PatchApply, map[string]any{
+	tooMany := patchTestCall(runner, "session_size", root, FilePatch, map[string]any{
 		"scope": "project",
 		"files": tooManyFiles,
 	})
@@ -112,7 +112,7 @@ func TestPatchApplySizeLimitsRemainDistinctFromArgumentErrors(t *testing.T) {
 		t.Fatalf("unexpected file-count error: %+v", tooManyPayload)
 	}
 
-	tooLarge := patchTestCall(runner, "session_size", root, PatchApply, map[string]any{
+	tooLarge := patchTestCall(runner, "session_size", root, FilePatch, map[string]any{
 		"scope": "project",
 		"files": []map[string]any{{
 			"path":     "large.txt",
@@ -124,7 +124,7 @@ func TestPatchApplySizeLimitsRemainDistinctFromArgumentErrors(t *testing.T) {
 	}
 }
 
-func TestPatchApplyUsesApprovalSnapshotAndWritesAtomicBatch(t *testing.T) {
+func TestFilePatchUsesApprovalSnapshotAndWritesAtomicBatch(t *testing.T) {
 	root := t.TempDir()
 	writePatchTestFile(t, filepath.Join(root, "update.txt"), "old line\n")
 	writePatchTestFile(t, filepath.Join(root, "delete.txt"), "remove me\n")
@@ -137,7 +137,7 @@ func TestPatchApplyUsesApprovalSnapshotAndWritesAtomicBatch(t *testing.T) {
 			{"path": "delete.txt", "delete": true},
 		},
 	})
-	call := Call{SessionID: "session_a", TurnID: "turn_patch", CallID: "call_batch", Name: PatchApply, Args: args, ProjectDirs: []string{root}}
+	call := Call{SessionID: "session_a", TurnID: "turn_patch", CallID: "call_batch", Name: FilePatch, Args: args, ProjectDirs: []string{root}}
 	details, err := runner.ApprovalDetails(context.Background(), call)
 	if err != nil {
 		t.Fatal(err)
@@ -183,13 +183,13 @@ func TestPatchApplyUsesApprovalSnapshotAndWritesAtomicBatch(t *testing.T) {
 	assertNoPatchTempFiles(t, root)
 }
 
-func TestPatchApplySupportsOrderedEdits(t *testing.T) {
+func TestFilePatchSupportsOrderedEdits(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "main.go")
 	original := "package main\n\nfunc message() string {\n\treturn \"old\"\n}\n"
 	writePatchTestFile(t, path, original)
 	runner := NewBuiltinRunner()
-	applied := patchTestCall(runner, "session_a", root, PatchApply, map[string]any{
+	applied := patchTestCall(runner, "session_a", root, FilePatch, map[string]any{
 		"scope": "project",
 		"files": []map[string]any{{
 			"path": "main.go",
@@ -207,13 +207,13 @@ func TestPatchApplySupportsOrderedEdits(t *testing.T) {
 	}
 }
 
-func TestPatchApplyRejectsAmbiguousOrConflictingEdits(t *testing.T) {
+func TestFilePatchRejectsAmbiguousOrConflictingEdits(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "notes.txt")
 	writePatchTestFile(t, path, "same\nsame\n")
 	runner := NewBuiltinRunner()
 
-	ambiguous := patchTestCall(runner, "session_a", root, PatchApply, map[string]any{
+	ambiguous := patchTestCall(runner, "session_a", root, FilePatch, map[string]any{
 		"scope": "project",
 		"files": []map[string]any{{
 			"path":  "notes.txt",
@@ -224,7 +224,7 @@ func TestPatchApplyRejectsAmbiguousOrConflictingEdits(t *testing.T) {
 		t.Fatalf("ambiguous edit should fail: %+v", ambiguous)
 	}
 
-	conflicting := patchTestCall(runner, "session_a", root, PatchApply, map[string]any{
+	conflicting := patchTestCall(runner, "session_a", root, FilePatch, map[string]any{
 		"scope": "project",
 		"files": []map[string]any{{
 			"path": "notes.txt",
@@ -242,11 +242,11 @@ func TestPatchApplyRejectsAmbiguousOrConflictingEdits(t *testing.T) {
 	}
 }
 
-func TestPatchApplyRequiresOneFileOperation(t *testing.T) {
+func TestFilePatchRequiresOneFileOperation(t *testing.T) {
 	root := t.TempDir()
 	writePatchTestFile(t, filepath.Join(root, "notes.txt"), "old\n")
 	runner := NewBuiltinRunner()
-	result := patchTestCall(runner, "session_a", root, PatchApply, map[string]any{
+	result := patchTestCall(runner, "session_a", root, FilePatch, map[string]any{
 		"scope": "project",
 		"files": []map[string]any{{
 			"path":     "notes.txt",
@@ -259,7 +259,7 @@ func TestPatchApplyRequiresOneFileOperation(t *testing.T) {
 	}
 }
 
-func TestPatchApplyRejectsDriftWithoutPartialWrites(t *testing.T) {
+func TestFilePatchRejectsDriftWithoutPartialWrites(t *testing.T) {
 	root := t.TempDir()
 	first := filepath.Join(root, "first.txt")
 	second := filepath.Join(root, "second.txt")
@@ -273,7 +273,7 @@ func TestPatchApplyRejectsDriftWithoutPartialWrites(t *testing.T) {
 			{"path": "second.txt", "new_text": "second new\n"},
 		},
 	})
-	call := Call{SessionID: "session_a", TurnID: "turn_patch", CallID: "call_drift", Name: PatchApply, Args: args, ProjectDirs: []string{root}}
+	call := Call{SessionID: "session_a", TurnID: "turn_patch", CallID: "call_drift", Name: FilePatch, Args: args, ProjectDirs: []string{root}}
 	if _, err := runner.ApprovalDetails(context.Background(), call); err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestPatchApplyRejectsDriftWithoutPartialWrites(t *testing.T) {
 	assertNoPatchTempFiles(t, root)
 }
 
-func TestPatchApplyFailsClosedWithoutApprovalSnapshot(t *testing.T) {
+func TestFilePatchFailsClosedWithoutApprovalSnapshot(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "notes.txt")
 	writePatchTestFile(t, path, "old\n")
@@ -301,7 +301,7 @@ func TestPatchApplyFailsClosedWithoutApprovalSnapshot(t *testing.T) {
 		"scope": "project",
 		"files": []map[string]any{{"path": "notes.txt", "new_text": "approved\n"}},
 	})
-	call := Call{SessionID: "session_a", TurnID: "turn_patch", CallID: "call_missing", Name: PatchApply, Args: args, ProjectDirs: []string{root}}
+	call := Call{SessionID: "session_a", TurnID: "turn_patch", CallID: "call_missing", Name: FilePatch, Args: args, ProjectDirs: []string{root}}
 	if _, err := runner.ApprovalDetails(context.Background(), call); err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +319,7 @@ func TestPatchApplyFailsClosedWithoutApprovalSnapshot(t *testing.T) {
 	}
 }
 
-func TestPatchApplyRejectsChangedArgumentsAfterApproval(t *testing.T) {
+func TestFilePatchRejectsChangedArgumentsAfterApproval(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "notes.txt")
 	writePatchTestFile(t, path, "old\n")
@@ -328,7 +328,7 @@ func TestPatchApplyRejectsChangedArgumentsAfterApproval(t *testing.T) {
 		"scope": "project",
 		"files": []map[string]any{{"path": "notes.txt", "new_text": "approved\n"}},
 	})
-	call := Call{SessionID: "session_a", TurnID: "turn_patch", CallID: "call_changed", Name: PatchApply, Args: approvedArgs, ProjectDirs: []string{root}}
+	call := Call{SessionID: "session_a", TurnID: "turn_patch", CallID: "call_changed", Name: FilePatch, Args: approvedArgs, ProjectDirs: []string{root}}
 	if _, err := runner.ApprovalDetails(context.Background(), call); err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +346,7 @@ func TestPatchApplyRejectsChangedArgumentsAfterApproval(t *testing.T) {
 	}
 }
 
-func TestPatchApplyRejectsExpiredApprovalSnapshot(t *testing.T) {
+func TestFilePatchRejectsExpiredApprovalSnapshot(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "notes.txt")
 	writePatchTestFile(t, path, "old\n")
@@ -355,7 +355,7 @@ func TestPatchApplyRejectsExpiredApprovalSnapshot(t *testing.T) {
 		"scope": "project",
 		"files": []map[string]any{{"path": "notes.txt", "new_text": "new\n"}},
 	})
-	call := Call{SessionID: "session_a", TurnID: "turn_patch", CallID: "call_expired", Name: PatchApply, Args: args, ProjectDirs: []string{root}}
+	call := Call{SessionID: "session_a", TurnID: "turn_patch", CallID: "call_expired", Name: FilePatch, Args: args, ProjectDirs: []string{root}}
 	if _, err := runner.ApprovalDetails(context.Background(), call); err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +407,7 @@ func TestRollbackPatchItemsRestoresWorktree(t *testing.T) {
 	assertNoPatchTempFiles(t, root)
 }
 
-func TestPatchApplyRejectsCrossRootAndNoop(t *testing.T) {
+func TestFilePatchRejectsCrossRootAndNoop(t *testing.T) {
 	firstRoot := t.TempDir()
 	secondRoot := t.TempDir()
 	first := filepath.Join(firstRoot, "first.txt")
@@ -416,7 +416,7 @@ func TestPatchApplyRejectsCrossRootAndNoop(t *testing.T) {
 	writePatchTestFile(t, second, "old\n")
 	runner := NewBuiltinRunner()
 
-	noop := patchTestCallWithRoots(runner, "session_a", []string{firstRoot}, PatchApply, map[string]any{
+	noop := patchTestCallWithRoots(runner, "session_a", []string{firstRoot}, FilePatch, map[string]any{
 		"scope": "project",
 		"files": []map[string]any{{"path": "first.txt", "new_text": "same\n"}},
 	})
@@ -424,7 +424,7 @@ func TestPatchApplyRejectsCrossRootAndNoop(t *testing.T) {
 		t.Fatalf("no-op patch should fail: %+v", noop)
 	}
 
-	crossRoot := patchTestCallWithRoots(runner, "session_a", []string{firstRoot, secondRoot}, PatchApply, map[string]any{
+	crossRoot := patchTestCallWithRoots(runner, "session_a", []string{firstRoot, secondRoot}, FilePatch, map[string]any{
 		"scope": "project",
 		"files": []map[string]any{
 			{"path": first, "new_text": "first new\n"},

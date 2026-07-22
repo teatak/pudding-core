@@ -36,7 +36,7 @@ make tools-report RUNARGS="--days 30 --all"
 
 - `builtin_command_run`:28 calls,成功率 64.3%,重复率 82.1%。历史失败包含
   旧能力测试和仓库路径错误,不能直接视为真实 coding 失败率。
-- `builtin_file_read`:19 calls,成功率 84.2%。继续作为 Core,承担文件预览、
+- `builtin_file_read`:19 calls,成功率 84.2%。继续由 Project Files App 承担文件预览、
   图片和稳定的小文本读取。
 - `builtin_file_list`:12 calls,成功率 100%;CLI fixture 已覆盖等价只读路径。
 - `builtin_file_stat`:3 calls;`file_search`:0;`file_slice`:1 且失败。

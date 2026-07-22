@@ -14,7 +14,6 @@ func TestClassifyToolCallProjectFileWrites(t *testing.T) {
 		operation string
 	}{
 		{name: FileWrite, args: `{"scope":"project","path":"main.go","content":"x"}`, operation: "write"},
-		{name: FilePatch, args: `{"scope":"project","path":"main.go","old_string":"a","new_string":"b"}`, operation: "patch"},
 		{name: FileMove, args: `{"scope":"project","from_path":"old.go","to_path":"new.go"}`, operation: "move"},
 		{name: FileCopy, args: `{"scope":"project","from_path":"main.go","to_path":"copy.go"}`, operation: "copy"},
 	} {
@@ -91,16 +90,16 @@ func TestClassifyToolCallCodeReadRisk(t *testing.T) {
 	}
 }
 
-func TestClassifyToolCallPatchApplyRisk(t *testing.T) {
-	risk, ok := ClassifyToolCall(PatchApply, json.RawMessage(`{"scope":"project","files":[{"path":"main.go","edits":[{"old_text":"a","new_text":"b"}]}]}`))
-	if !ok || risk.Class != RiskClassWrite || risk.Operation != "patch_apply" || risk.Scope != "project" || !risk.LowRisk || len(risk.Paths) != 1 {
+func TestClassifyToolCallFilePatchRisk(t *testing.T) {
+	risk, ok := ClassifyToolCall(FilePatch, json.RawMessage(`{"scope":"project","files":[{"path":"main.go","edits":[{"old_text":"a","new_text":"b"}]}]}`))
+	if !ok || risk.Class != RiskClassWrite || risk.Operation != "file_patch" || risk.Scope != "project" || !risk.LowRisk || len(risk.Paths) != 1 {
 		t.Fatalf("unexpected patch apply risk: %+v ok=%v", risk, ok)
 	}
-	destructive, ok := ClassifyToolCall(PatchApply, json.RawMessage(`{"scope":"project","files":[{"path":"old.go","delete":true}]}`))
+	destructive, ok := ClassifyToolCall(FilePatch, json.RawMessage(`{"scope":"project","files":[{"path":"old.go","delete":true}]}`))
 	if !ok || destructive.Class != RiskClassDestructive || destructive.LowRisk {
 		t.Fatalf("delete patch must remain destructive: %+v ok=%v", destructive, ok)
 	}
-	if _, ok := ClassifyToolCall(PatchApply, json.RawMessage(`{"scope":"project","files":[]}`)); ok {
+	if _, ok := ClassifyToolCall(FilePatch, json.RawMessage(`{"scope":"project","files":[]}`)); ok {
 		t.Fatal("empty patch must not be classified")
 	}
 }

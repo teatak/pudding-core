@@ -322,7 +322,7 @@ last used time
   "scope": "project",
   "path": ".",
   "language": "go",
-  "query": "ProjectInspect",
+  "query": "loadProjectRootInstructions",
   "max_results": 100
 }
 ```
@@ -334,19 +334,19 @@ last used time
   "ok": true,
   "server": "gopls",
   "languageRoot": "/repo",
-  "query": "ProjectInspect",
+  "query": "loadProjectRootInstructions",
   "symbols": [
     {
-      "name": "projectInspect",
+      "name": "loadProjectRootInstructions",
       "kind": "function",
-      "containerName": "tool",
-      "path": "/repo/internal/tool/project_inspect.go",
-      "relativePath": "internal/tool/project_inspect.go",
+      "containerName": "contextbuilder",
+      "path": "/repo/internal/contextbuilder/project_instructions.go",
+      "relativePath": "internal/contextbuilder/project_instructions.go",
       "line": 54,
       "column": 1,
       "endLine": 102,
       "endColumn": 2,
-      "excerpt": "func (r *BuiltinRunner) projectInspect(...)"
+      "excerpt": "func loadProjectRootInstructions(...)"
     }
   ],
   "resultCount": 1,

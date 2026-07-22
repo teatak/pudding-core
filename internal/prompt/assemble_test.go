@@ -137,6 +137,33 @@ func TestAssembleIncludesAppsIndex(t *testing.T) {
 	}
 }
 
+func TestAssembleMarksLoadedApps(t *testing.T) {
+	out := Assemble(Input{
+		Mode:         "work",
+		LoadedAppIDs: []string{"github"},
+		Apps: []*app.Definition{{
+			ID:             "github",
+			Name:           "GitHub",
+			Enabled:        true,
+			RequiredMode:   "work",
+			DefaultSkillID: "github-issues",
+			Skills: []app.SkillRef{{
+				ID:          "github-issues",
+				Description: "Inspect GitHub issues.",
+			}},
+		}},
+	})
+	if !strings.Contains(out.SystemInstruction, "Status: loaded for this session") {
+		t.Fatalf("assembled prompt missing loaded App status:\n%s", out.SystemInstruction)
+	}
+	if !strings.Contains(out.SystemInstruction, "Do not call `builtin_app_load` again for their default skill") {
+		t.Fatalf("assembled prompt missing duplicate load guidance:\n%s", out.SystemInstruction)
+	}
+	if !strings.Contains(out.SystemInstruction, `builtin_app_unload(app_id="<loaded app id>")`) {
+		t.Fatalf("assembled prompt missing App unload guidance:\n%s", out.SystemInstruction)
+	}
+}
+
 func TestAssembleSummarizesUnconnectedApp(t *testing.T) {
 	out := Assemble(Input{
 		Mode: "work",
@@ -240,6 +267,9 @@ func TestAssembleOmitsAppsIndexWhenAllAppsAreDisabled(t *testing.T) {
 	if strings.Contains(out.SystemInstruction, "## Available Apps") || hasSegment(out.Segments, "apps_index") {
 		t.Fatalf("disabled Apps should not leave an empty prompt index:\n%s", out.SystemInstruction)
 	}
+	if strings.Contains(out.SystemInstruction, `builtin_app_load(app_id="browser")`) || strings.Contains(out.SystemInstruction, `builtin_app_load(app_id="capture")`) {
+		t.Fatalf("disabled built-in App left an executable load instruction:\n%s", out.SystemInstruction)
+	}
 }
 
 func TestAssembleModeLayersAndAllModesShowApps(t *testing.T) {
@@ -248,11 +278,11 @@ func TestAssembleModeLayersAndAllModesShowApps(t *testing.T) {
 	if !strings.Contains(chat.SystemInstruction, "## Available Apps") || !strings.Contains(chat.SystemInstruction, "requires Work") {
 		t.Fatalf("chat prompt must expose compact app capability metadata:\n%s", chat.SystemInstruction)
 	}
-	if !strings.Contains(chat.SystemInstruction, `builtin_app_load(app_id="canvas")`) {
-		t.Fatalf("chat prompt missing explicit Canvas load guidance:\n%s", chat.SystemInstruction)
+	if !strings.Contains(chat.SystemInstruction, "Canvas is a runtime-provided App") {
+		t.Fatalf("chat prompt missing conditional Canvas guidance:\n%s", chat.SystemInstruction)
 	}
 	work := Assemble(Input{Mode: "work", Apps: apps})
-	if !strings.Contains(work.SystemInstruction, "## Work Mode") || !strings.Contains(work.SystemInstruction, `builtin_app_load(app_id="browser")`) || !hasSegment(work.Segments, "mode_work") || !hasSegment(work.Segments, "apps_index") {
+	if !strings.Contains(work.SystemInstruction, "## Work Mode") || !strings.Contains(work.SystemInstruction, "only when it is listed in Available Apps") || !hasSegment(work.Segments, "mode_work") || !hasSegment(work.Segments, "apps_index") {
 		t.Fatalf("work prompt missing mode or apps segments: %+v", work.Segments)
 	}
 	code := Assemble(Input{Mode: "code", Apps: apps})

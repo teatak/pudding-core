@@ -1131,12 +1131,12 @@ func (e *Engine) toolDefinitions(ctx context.Context, sessionID string, mode sto
 	if err != nil {
 		return nil, err
 	}
-	loadedAppIDs := callableAppIDs(appStates, mode)
+	callableIDs := callableAppIDs(appStates, mode)
 	var defs []provider.ToolDef
 	if e.tools != nil {
 		var runnerDefs []provider.ToolDef
 		if scoped, ok := e.tools.(tool.AppScopedDefinitionRunner); ok {
-			runnerDefs, err = scoped.DefinitionsForApps(ctx, sessionID, loadedAppIDs)
+			runnerDefs, err = scoped.DefinitionsForApps(ctx, sessionID, callableIDs)
 		} else {
 			runnerDefs, err = e.tools.Definitions(ctx, sessionID)
 		}
@@ -1171,6 +1171,9 @@ func (e *Engine) toolDefinitions(ctx context.Context, sessionID string, mode sto
 	}
 	out := tool.CoreDefinitionsForMode(mode, coreDefs)
 	out = append(out, tool.AppLoadDefinition())
+	if loadedIDs := loadedSessionAppIDs(appStates); len(loadedIDs) > 0 {
+		out = append(out, tool.AppUnloadDefinition(loadedIDs))
+	}
 	sort.Slice(appDefs, func(i, j int) bool { return appDefs[i].Name < appDefs[j].Name })
 	out = append(out, appDefs...)
 	return out, nil
@@ -1180,6 +1183,17 @@ func callableAppIDs(states map[string]sessionAppState, mode store.AgentMode) []s
 	ids := make([]string, 0, len(states))
 	for id, state := range states {
 		if appDefinitionCallable(state, mode) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func loadedSessionAppIDs(states map[string]sessionAppState) []string {
+	ids := make([]string, 0, len(states))
+	for id, state := range states {
+		if state.loaded {
 			ids = append(ids, id)
 		}
 	}
@@ -1497,6 +1511,10 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			var changed bool
 			result, changed = e.loadApp(ctx, sessionID, call, nextMode)
 			toolsChanged = toolsChanged || changed
+		} else if call.Name == tool.AppUnload {
+			var changed bool
+			result, changed = e.unloadApp(ctx, sessionID, call)
+			toolsChanged = toolsChanged || changed
 		} else if appID, appTool := tool.BuiltinAppIDForTool(call.Name); appTool && e.apps != nil {
 			if !tool.NameAllowedForMode(nextMode, call.Name) {
 				result = toolNotAllowedResult(call, nextMode)
@@ -1728,6 +1746,52 @@ func (e *Engine) loadApp(ctx context.Context, sessionID string, call tool.Call, 
 	}, !alreadyLoaded
 }
 
+func (e *Engine) unloadApp(ctx context.Context, sessionID string, call tool.Call) (tool.Result, bool) {
+	if e.apps == nil {
+		return appLoadFailure(call, "app_service_unavailable", "App unloading is unavailable", nil), false
+	}
+	request, err := tool.DecodeAppUnloadRequest(call.Args)
+	if err != nil {
+		return appLoadFailure(call, "invalid_arguments", err.Error(), nil), false
+	}
+	sess, err := e.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return appLoadFailure(call, "app_state_unavailable", err.Error(), map[string]any{"appID": request.AppID}), false
+	}
+	loaded := make([]string, 0, len(sess.LoadedAppIDs))
+	newlyUnloaded := false
+	for _, loadedID := range sess.LoadedAppIDs {
+		if loadedID == request.AppID {
+			newlyUnloaded = true
+			continue
+		}
+		loaded = append(loaded, loadedID)
+	}
+	if newlyUnloaded {
+		if _, err := e.store.UpdateSession(ctx, sessionID, store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
+			return appLoadFailure(call, "app_state_unavailable", err.Error(), map[string]any{"appID": request.AppID}), false
+		}
+	}
+	payload := map[string]any{
+		"ok":               true,
+		"appID":            request.AppID,
+		"newlyUnloaded":    newlyUnloaded,
+		"alreadyUnloaded":  !newlyUnloaded,
+		"connectionsKept":  true,
+		"installationKept": true,
+		"message":          "the App is unloaded for this session; its installation and connections are unchanged",
+	}
+	content, _ := json.Marshal(payload)
+	return tool.Result{
+		CallID:       call.CallID,
+		Name:         call.Name,
+		Ok:           true,
+		Content:      string(content),
+		SummaryKind:  tool.SummaryReturnedFields,
+		SummaryCount: len(payload),
+	}, newlyUnloaded
+}
+
 func defaultAppSkillID(definition *app.Definition) string {
 	if definition == nil {
 		return ""
@@ -1861,7 +1925,7 @@ func (e *Engine) projectRootDirsForToolCall(ctx context.Context, sessionID, turn
 }
 
 func (e *Engine) toolNameKnown(ctx context.Context, sessionID, name string) (bool, error) {
-	if name == tool.RequestCapability || (name == tool.AppLoad && e.apps != nil) {
+	if name == tool.RequestCapability || ((name == tool.AppLoad || name == tool.AppUnload) && e.apps != nil) {
 		return true, nil
 	}
 	if e.tools == nil {

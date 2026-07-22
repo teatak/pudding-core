@@ -135,16 +135,15 @@ M2 后剩余主要缺口:
 | 当前能力 | 第一阶段 | 目标状态 | 原因 |
 | --- | --- | --- | --- |
 | `request_capability` | 保留 | Core | 授权与模式边界不可由 CLI 替代 |
-| `project_inspect` | 保留 | Core | 提供有界项目结构与验证建议 |
-| `project_instructions` | 保留 | Core | 保证 AGENTS/CLAUDE/CONTRIBUTING 作用域 |
-| `file_read` | 保留 | Core | 支持图片、附件和 Canvas 文件预览 |
+| `project_inspect` | 删除 | CLI / Project Files App | 按任务读取真实目录、manifest 与 Git 状态 |
+| `project_instructions` | 删除 | Code prompt | 根级 `AGENTS.md` 每轮自动注入,子目录规则按目标检查 |
+| `file_read` | 保留 | Project Files App | 支持图片、附件和文件预览，按需加载 |
 | `file_list/stat/search/slice` | 并行验证 | CLI 候选 | `rg/find/sed/tail/stat` 可覆盖 |
-| `file_write/patch` | 保留观察 | Lazy 或删除 | 文本修改优先原子多文件 Patch |
+| `file_write/patch` | 保留 | Project Files App | 普通覆盖与原子多文件 Patch 按需加载 |
 | `file_delete/move/copy` | 保留 | Project Files App | 文件管理风险与跨平台语义更适合结构化工具 |
 | `command_run` | 增强 | Core | 通用执行原语 |
 | `git_status/diff/log` | 并行验证 | CLI 候选 | Git CLI 输出稳定且模型熟悉 |
 | `git_stage/unstage/commit` | 保留 | Source Control App | 需要结构化审批和漂移检查 |
-| `patch_apply` | 保留 | Core | 审批前 diff、hash 漂移与多文件原子应用 |
 | `code_symbols/definition/references/diagnostics/rename` | 保留 | Code Intelligence App | 语义结果和 WorkspaceEdit 安全校验不可由通用 shell 等价替代 |
 | `skill_validate` | 保留 | Skill Authoring 内置 App | 直接创建或编辑 Skill 后执行校验，会话级按需加载 |
 | Browser | 保留 | Browser 内置 App | 非本地 CLI 能力 |
@@ -189,21 +188,20 @@ Browser、Canvas、Skill Authoring、App Authoring 以及安装 App 的 API/MCP 
 
 ### 6.3 默认 Code coding 工具集
 
-Code 默认 coding 工具为 8 个:
+Code 默认 coding 工具为 4 个:
 
 - `request_capability`
 - `builtin_app_load`
-- `builtin_project_inspect`
-- `builtin_project_instructions`
 - `builtin_command_run`
 - `builtin_command_session`
-- `builtin_file_read`
-- `builtin_patch_apply`
 
 其中 `request_capability` 已包含在 Chat Core 中。Code 继续继承 Chat 的 9 个基础工具,
-所以 daemon 默认合计 17 个；连接 Desktop runtime 后再增加
+所以 daemon 默认合计 12 个；连接 Desktop runtime 后再增加
 `builtin_request_user_input`。不会为了压低数字
 静默移除 Code 模式中的 Chat 能力。
+
+Project 根级指令在 Code turn 构建时自动注入 system context；项目识别由 CLI 与
+Project Files App 按任务需要完成,不再占用两个常驻工具 schema。
 
 系统 prompt 只放短 App 索引,不放未加载工具完整 schema。
 
@@ -347,7 +345,7 @@ Provider adapter 不需要新的协议;OpenAI、Anthropic、Google 继续消费�
 - prompt App 索引、transcript 与 i18n。
 - 先覆盖内置工具,再覆盖 Apps/MCP。
 
-验收:默认 Code coding 工具 8 个,常见任务新增 coding tools 不超过 15 个。
+验收:默认 Code coding 工具 4 个,常见任务通过 App 按需增加工具。
 
 ### M5:收尾,1-1.5 天
 
