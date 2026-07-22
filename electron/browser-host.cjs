@@ -156,14 +156,22 @@ class BrowserHost {
     normalizeClickMethod(request.method);
     return this.runInputCommand(() =>
       this.runCommand(slot, async () => {
-        this.noteAutomationStart(slot, "click");
+        let lifecycleStarted = false;
         try {
-          const target = await evaluateJSON(slot, clickTargetScript(request, "pointer"), { userGesture: true });
+          lifecycleStarted = true;
+          const prepared = await this.noteAutomationStart(slot, "click");
+          if (prepared === false) {
+            throw new Error("browser_webview_not_ready: click focus preparation failed");
+          }
+          const target = await evaluateJSON(slot, clickTargetScript(request, "pointer"));
+          await dispatchMouseClick(slot, target.x, target.y);
           this.noteUpdated(slot);
           this.noteCursor(slot, "click", target);
           return { tab: snapshot(slot), action: "click", result: target };
         } finally {
-          this.noteAutomationEnd(slot, "click");
+          if (lifecycleStarted) {
+            await this.noteAutomationEnd(slot, "click");
+          }
         }
       }),
     );
@@ -897,23 +905,23 @@ class BrowserHost {
   }
 
   noteAutomationStart(slot, action) {
-    this.onAutomationStart({
+    return this.onAutomationStart({
       sessionID: slot.sessionID,
       tabID: slot.tabID,
       action,
       version: slot.version,
       createdAt: new Date().toISOString(),
-    });
+    }, slot.webContents);
   }
 
   noteAutomationEnd(slot, action) {
-    this.onAutomationEnd({
+    return this.onAutomationEnd({
       sessionID: slot.sessionID,
       tabID: slot.tabID,
       action,
       version: slot.version,
       createdAt: new Date().toISOString(),
-    });
+    }, slot.webContents);
   }
 
   noteCursor(slot, action, result) {
@@ -1013,6 +1021,26 @@ async function captureScreenshot(slot, fullPage) {
   }
   const result = await slot.sendCDP("Page.captureScreenshot", params);
   return assertPNGData(result?.data, "Page.captureScreenshot");
+}
+
+async function dispatchMouseClick(slot, x, y) {
+  const pointX = Number(x);
+  const pointY = Number(y);
+  if (!Number.isFinite(pointX) || !Number.isFinite(pointY)) {
+    throw new Error("target coordinates not found");
+  }
+  for (const event of [
+    { type: "mouseMoved", button: "none", buttons: 0, clickCount: 0 },
+    { type: "mousePressed", button: "left", buttons: 1, clickCount: 1 },
+    { type: "mouseReleased", button: "left", buttons: 0, clickCount: 1 },
+  ]) {
+    await slot.sendCDP("Input.dispatchMouseEvent", {
+      ...event,
+      x: pointX,
+      y: pointY,
+      pointerType: "mouse",
+    });
+  }
 }
 
 function withTimeout(promise, ms, message) {
@@ -1500,11 +1528,8 @@ function clickTargetScript(input, method) {
   if (!Number.isFinite(cx) || !Number.isFinite(cy)) throw new Error("target coordinates not found");
   const hit = document.elementFromPoint(cx, cy);
   if (!hit || (hit !== el && !el.contains(hit))) throw new Error("target element is not hittable");
-  if (typeof el.click === "function") {
-    el.click();
-  } else {
-    el.dispatchEvent(new MouseEvent("click", {bubbles: true, cancelable: true, composed: true, clientX: cx, clientY: cy, view: window}));
-  }
+  const editableTarget = el.closest?.('input,textarea,[contenteditable]:not([contenteditable="false"])') || el;
+  globalThis[Symbol.for("pudding.browser.lastClickTarget")] = editableTarget;
   return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), text: (el.innerText || el.value || "").trim().slice(0, 160), x: cx, y: cy, cursorX: cx, cursorY: cy, method});
 })()`;
 }
@@ -1518,6 +1543,7 @@ function typePrepareScript(input) {
   const isTextInput = (node) => node instanceof HTMLTextAreaElement ||
     (node instanceof HTMLInputElement && textInputTypes.has(String(node.type || "text").toLowerCase()));
   const isEditable = (node) => isTextInput(node) || Boolean(node?.isContentEditable);
+  const editableText = (node) => String(node?.textContent || "").replace(/\uFEFF/g, "");
   const fingerprint = (value) => {
     let hash = 2166136261;
     for (let index = 0; index < value.length; index += 1) {
@@ -1526,7 +1552,10 @@ function typePrepareScript(input) {
     }
     return (hash >>> 0).toString(16).padStart(8, "0");
   };
-  let el = selector ? document.querySelector(selector) : document.activeElement;
+  const lastClickTargetKey = Symbol.for("pudding.browser.lastClickTarget");
+  const lastClickTarget = globalThis[lastClickTargetKey];
+  if (!selector) globalThis[lastClickTargetKey] = null;
+  let el = selector ? document.querySelector(selector) : (lastClickTarget?.isConnected ? lastClickTarget : document.activeElement);
   if (!el || el === document.body) throw new Error("target input not found");
   if (!isEditable(el)) throw new Error("target is not editable");
   if (el.disabled || el.readOnly || el.getAttribute("aria-disabled") === "true" || el.getAttribute("aria-readonly") === "true") {
@@ -1535,7 +1564,7 @@ function typePrepareScript(input) {
   el.scrollIntoView({behavior: "instant", block: "center", inline: "center"});
   el.focus();
   if (document.activeElement !== el) throw new Error("target input could not be focused");
-  const originalValue = isTextInput(el) ? String(el.value || "") : String(el.textContent || "");
+  const originalValue = isTextInput(el) ? String(el.value || "") : editableText(el);
   const expectedValue = clear ? text : originalValue + text;
   if (isTextInput(el)) {
     try {
@@ -1612,9 +1641,16 @@ function typeTargetInputScript(input) {
     dispatchInput();
   } else if (el.isContentEditable) {
     let inserted = false;
+    let sawInput = false;
+    const observeInput = () => { sawInput = true; };
+    el.addEventListener("input", observeInput, true);
     try {
       inserted = document.execCommand("insertText", false, text);
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      el.removeEventListener("input", observeInput, true);
+    }
+    if (inserted && !sawInput) dispatchInput();
     if (!inserted) {
       const selection = window.getSelection();
       const range = selection?.rangeCount ? selection.getRangeAt(0) : document.createRange();
@@ -1648,6 +1684,7 @@ function typeResultScript(input, method, expectation) {
   const isTextInput = (node) => node instanceof HTMLTextAreaElement ||
     (node instanceof HTMLInputElement && textInputTypes.has(String(node.type || "text").toLowerCase()));
   const isEditable = (node) => isTextInput(node) || Boolean(node?.isContentEditable);
+  const editableText = (node) => String(node?.textContent || "").replace(/\uFEFF/g, "");
   const fingerprint = (value) => {
     let hash = 2166136261;
     for (let index = 0; index < value.length; index += 1) {
@@ -1660,7 +1697,7 @@ function typeResultScript(input, method, expectation) {
   if (!el || el === document.body) throw new Error("target input not found after typing");
   if (!isEditable(el)) throw new Error("target is not editable after typing");
   const rect = el.getBoundingClientRect();
-  const value = isTextInput(el) ? String(el.value || "") : String(el.textContent || "");
+  const value = isTextInput(el) ? String(el.value || "") : editableText(el);
   const matchesExpected = value.length === expectedValueLength && fingerprint(value) === expectedValueHash;
   return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), textLength: ${JSON.stringify(Array.from(String(input.text || "")).length)}, valueLength: value.length, matchesExpected, cursorX: rect.left + rect.width / 2, cursorY: rect.top + Math.min(rect.height / 2, 18), method: ${JSON.stringify(method)}});
 })()`;

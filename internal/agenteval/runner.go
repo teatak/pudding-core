@@ -414,16 +414,12 @@ func collectTurnStats(result *Result, turn *store.ConversationTurn, verifyComman
 
 func commandLabel(raw json.RawMessage) string {
 	var args struct {
-		Argv   []string `json:"argv"`
-		Script string   `json:"script"`
+		Command string `json:"command"`
 	}
 	if json.Unmarshal(raw, &args) != nil {
 		return ""
 	}
-	if len(args.Argv) > 0 {
-		return strings.Join(args.Argv, " ")
-	}
-	return strings.TrimSpace(args.Script)
+	return strings.TrimSpace(args.Command)
 }
 
 func toolFailureDetail(part store.ContentPart, rawArgs json.RawMessage) ToolFailureDetail {
@@ -521,14 +517,13 @@ func truncateDiagnostic(value string, limit int) string {
 
 func commandArgsMatch(raw json.RawMessage, verify []string) bool {
 	var args struct {
-		Argv   []string `json:"argv"`
-		Script string   `json:"script"`
+		Command string `json:"command"`
 	}
 	if json.Unmarshal(raw, &args) != nil {
 		return false
 	}
 	want := strings.Join(verify, " ")
-	return strings.Join(args.Argv, " ") == want || strings.Contains(args.Script, want)
+	return strings.TrimSpace(args.Command) == want || strings.Contains(args.Command, want)
 }
 
 type commandResult struct {

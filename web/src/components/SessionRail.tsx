@@ -5,8 +5,8 @@ import {
   ChevronRight,
   Ellipsis,
   FolderClosed,
+  FolderCog,
   FolderOpen,
-  FolderPlus,
   MessageSquareText,
   Package,
   PanelLeft,
@@ -20,6 +20,7 @@ import {
 import {
   createContext,
   Fragment,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
   type ReactNode,
@@ -34,19 +35,16 @@ import { createPortal } from "react-dom";
 import { toast } from "sonner";
 
 import {
-  createProject,
-  deleteProject,
   deleteSession,
   getAudioBindings,
   listProjects,
   listSessions,
-  revealDesktopPath,
-  updateProject,
   updateSession,
 } from "@/api/client";
 import type { Project, Session } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { LanguageToggle } from "@/components/LanguageToggle";
+import { ProjectActionsMenu } from "@/components/ProjectActionsMenu";
 import { SessionSearchDialog } from "@/components/SessionSearchDialog";
 import { Spinner } from "@/components/Spinner";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -62,18 +60,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   AppDropdownMenuContent as DropdownMenuContent,
   AppDropdownMenuItem as DropdownMenuItem,
   AppDropdownMenuSeparator as DropdownMenuSeparator,
-  AppDropdownMenuSubContent as DropdownMenuSubContent,
-  AppDropdownMenuSubTrigger as DropdownMenuSubTrigger,
 } from "@/components/AppMenu";
 import { AppPopoverContent as PopoverContent } from "@/components/AppPopover";
 import {
   DropdownMenu,
-  DropdownMenuSub,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -106,7 +100,6 @@ import {
   onDesktopUpdateState,
 } from "@/lib/desktopBridge";
 import type { AppSearch } from "@/lib/route";
-import { pickDirectories } from "@/lib/desktopBridge";
 import { openSettingsDialog } from "@/lib/settingsDialog";
 import { formatRelative } from "@/lib/time";
 import { cn } from "@/lib/utils";
@@ -120,6 +113,35 @@ const collapsedSessionGroupsStorageKey = "pudding.sessionRail.collapsedGroups";
 const sessionCollapseThreshold = 6;
 const collapsedSessionDisplayLimit = 5;
 const RailOverlayHoldContext = createContext<((id: string, open: boolean) => void) | null>(null);
+
+function handleVerticalMenuNavigation(event: ReactKeyboardEvent<HTMLElement>, selector: string) {
+  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+    return;
+  }
+  const target = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>(selector) : null;
+  if (!target || !event.currentTarget.contains(target)) {
+    return;
+  }
+  const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(selector)).filter(
+    (item) => !item.matches(":disabled,[aria-disabled=true]"),
+  );
+  const currentIndex = items.indexOf(target);
+  if (currentIndex < 0 || items.length < 2) {
+    return;
+  }
+  event.preventDefault();
+  const nextIndex =
+    event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? items.length - 1
+        : event.key === "ArrowDown"
+          ? (currentIndex + 1) % items.length
+          : (currentIndex - 1 + items.length) % items.length;
+  const next = items[nextIndex];
+  next.focus({ preventScroll: true });
+  next.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
 
 function useRailOverlayHold(open: boolean) {
   const setOverlayHold = useContext(RailOverlayHoldContext);
@@ -217,6 +239,7 @@ export function SessionRail({
     enabled: Boolean(token && audioBindingsSessionID),
   });
   const appsActive = view === "apps";
+  const projectsActive = view === "projects";
   const activeSessionIDSet = new Set<string>(
     [selectedSessionID, ...activeSessionIDs].filter((sessionID): sessionID is string => Boolean(sessionID)),
   );
@@ -243,7 +266,43 @@ export function SessionRail({
 
   const renameMutation = useMutation({
     mutationFn: ({ id, title }: { id: string; title: string }) => updateSession(token, id, { title }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
+    onMutate: async ({ id, title }) => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: queryKeys.sessions() }),
+        queryClient.cancelQueries({ queryKey: queryKeys.session(id) }),
+      ]);
+      const previousSessions = queryClient.getQueryData<{ sessions: Session[] }>(queryKeys.sessions());
+      const previousSession = queryClient.getQueryData<Session>(queryKeys.session(id));
+      queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), (previous) => ({
+        sessions: (previous?.sessions || []).map((session) =>
+          session.id === id ? { ...session, title } : session,
+        ),
+      }));
+      queryClient.setQueryData<Session>(queryKeys.session(id), (previous) =>
+        previous ? { ...previous, title } : previous,
+      );
+      return { previousSession, previousSessions };
+    },
+    onError: (_error, { id }, context) => {
+      if (context?.previousSessions) {
+        queryClient.setQueryData(queryKeys.sessions(), context.previousSessions);
+      }
+      if (context?.previousSession) {
+        queryClient.setQueryData(queryKeys.session(id), context.previousSession);
+      }
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), (previous) => ({
+        sessions: (previous?.sessions || []).map((session) =>
+          session.id === updated.id ? updated : session,
+        ),
+      }));
+      queryClient.setQueryData(queryKeys.session(updated.id), updated);
+    },
+    onSettled: (_data, _error, { id }) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.session(id) });
+    },
   });
 
   const pinMutation = useMutation({
@@ -316,18 +375,6 @@ export function SessionRail({
     },
   });
 
-  const createProjectMutation = useMutation({
-    mutationFn: (rootDirs: string[]) => createProject(token, { rootDirs }),
-    onSuccess: (created) => {
-      queryClient.setQueryData<{ projects: Project[] }>(queryKeys.projects(), (previous) => ({
-        projects: [...(previous?.projects.filter((project) => project.id !== created.id) || []), created],
-      }));
-      openProjectDraft(created.id);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.projects() });
-    },
-    onError: () => toast.error(t("project.createFailed")),
-  });
-
   function collapse(next: boolean) {
     setRailCollapsed(next);
     hover.close();
@@ -375,31 +422,6 @@ export function SessionRail({
     }
   }
 
-  async function createNewProject() {
-    const rootDirs = Array.from(
-      new Set(
-        (await pickDirectories({
-          buttonLabel: t("project.createPickButton"),
-          message: t("project.createPickMessage"),
-          title: t("project.create"),
-        }))
-          .map((path) => path.trim())
-          .filter(Boolean),
-      ),
-    );
-    if (rootDirs.length === 0) {
-      return;
-    }
-    const existing = projects.find(
-      (project) => project.rootDirs.length === rootDirs.length && project.rootDirs.every((path, index) => path === rootDirs[index]),
-    );
-    if (existing) {
-      openProjectDraft(existing.id);
-      return;
-    }
-    createProjectMutation.mutate(rootDirs);
-  }
-
   function selectSession(id: string) {
     void navigate({
       to: "/",
@@ -428,9 +450,9 @@ export function SessionRail({
     return (
       <RailPanel
         appsActive={appsActive}
+        projectsActive={projectsActive}
         draftActive={draftActive}
         deletePending={deleteMutation.isPending}
-        createProjectPending={createProjectMutation.isPending}
         draftProjectID={draftProjectID}
         isError={sessionsQuery.isError}
         isLoading={sessionsQuery.isLoading}
@@ -440,10 +462,11 @@ export function SessionRail({
         token={token}
         onSearch={openSessionSearch}
         onCreate={openNewSession}
-        onCreateProject={() => void createNewProject()}
         onDelete={(id) => deleteMutation.mutate(id)}
         onCreateProjectSession={openProjectDraft}
-        onRename={(id, title) => renameMutation.mutate({ id, title })}
+        onRename={async (id, title) => {
+          await renameMutation.mutateAsync({ id, title });
+        }}
         onOverlayOpenChange={hover.setClosePaused}
         onOpenSplit={(id) => {
           // 当前主 pane 的会话不重复开分屏
@@ -792,21 +815,20 @@ type RailPanelProps = {
   projects: Project[];
   selectedSessionID: string | undefined;
   appsActive: boolean;
+  projectsActive: boolean;
   isLoading: boolean;
   isError: boolean;
   draftActive: boolean;
   draftProjectID?: string;
   deletePending: boolean;
-  createProjectPending: boolean;
   onCreate: () => void;
-  onCreateProject: () => void;
   onSearch: () => void;
   onCreateProjectSession: (projectID: string) => void;
   onSelect: (id: string) => void;
   onOpenSplit: (id: string) => void;
   onDelete: (id: string) => void;
   onPinChange: (id: string, pinned: boolean, pinnedOrder?: number) => void;
-  onRename: (id: string, title: string) => void;
+  onRename: (id: string, title: string) => Promise<void>;
   onOverlayOpenChange?: (open: boolean) => void;
   onRefetch: () => void;
 };
@@ -835,14 +857,13 @@ function RailPanel({
   projects,
   selectedSessionID,
   appsActive,
+  projectsActive,
   isLoading,
   isError,
   draftActive,
   draftProjectID,
   deletePending,
-  createProjectPending,
   onCreate,
-  onCreateProject,
   onSearch,
   onCreateProjectSession,
   onSelect,
@@ -1082,10 +1103,14 @@ function RailPanel({
       <SidebarProvider className="pudding-session-rail !contents">
         <Sidebar className="min-h-0 w-full flex-1 bg-transparent" collapsible="none">
           <SidebarHeader className="px-2 py-2">
-            <SidebarMenu className="gap-0.5">
+            <SidebarMenu
+              className="gap-0.5"
+              onKeyDown={(event) => handleVerticalMenuNavigation(event, "[data-rail-header-action]")}
+            >
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  className="h-7 px-2 py-1"
+                  className="h-8 px-2 py-1"
+                  data-rail-header-action
                   isActive={draftActive && !draftProjectID}
                   onClick={onCreate}
                 >
@@ -1094,20 +1119,38 @@ function RailPanel({
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton className="h-7 px-2 py-1" disabled={createProjectPending} onClick={onCreateProject}>
-                  {createProjectPending ? <Spinner /> : <FolderPlus />}
-                  <span>{t("project.create")}</span>
+                <SidebarMenuButton
+                  className="h-8 px-2 py-1"
+                  data-rail-header-action
+                  isActive={projectsActive}
+                  onClick={() => {
+                    void navigate({
+                      to: "/",
+                      search: (prev) => {
+                        const next = { ...(prev as AppSearch), view: "projects" as const };
+                        delete next.session;
+                        delete next.split;
+                        delete next.draft;
+                        delete next.project;
+                        return next;
+                      },
+                    });
+                  }}
+                >
+                  <FolderCog />
+                  <span>{t("project.manage")}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton className="h-7 px-2 py-1" onClick={onSearch}>
+                <SidebarMenuButton className="h-8 px-2 py-1" data-rail-header-action onClick={onSearch}>
                   <Search />
                   <span>{t("rail.search")}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  className="h-7 px-2 py-1"
+                  className="h-8 px-2 py-1"
+                  data-rail-header-action
                   isActive={appsActive}
                   onClick={() => {
                     void navigate({
@@ -1130,7 +1173,11 @@ function RailPanel({
             </SidebarMenu>
           </SidebarHeader>
           <div aria-hidden="true" className="mx-4 mb-2 h-px shrink-0 bg-sidebar-border/60" />
-          <SidebarContent ref={scrollContainerRef} className="gap-0.5 pt-0 pb-2 overscroll-contain">
+          <SidebarContent
+            ref={scrollContainerRef}
+            className="gap-0.5 pt-0 pb-2 overscroll-contain"
+            onKeyDown={(event) => handleVerticalMenuNavigation(event, "[data-rail-session-action]")}
+          >
             {isLoading ? (
               <SessionListSkeleton />
             ) : isError ? (
@@ -1227,7 +1274,7 @@ function RailPanel({
                         <SidebarGroup className="px-2 py-0">
                           <CollapsibleSessionGroupLabel
                             active={draftActive && draftProjectID === group.projectID}
-                            actions={group.project ? <ProjectActionsMenu project={group.project} token={token} /> : undefined}
+                            actions={group.project ? <RailProjectActionsMenu project={group.project} token={token} /> : undefined}
                             collapsed={projectCollapsed}
                             icon="project"
                             label={group.label}
@@ -1346,7 +1393,7 @@ function RailUpdateButton({ serverTurnRunning }: { serverTurnRunning: boolean })
       <Button
         className="mb-1 h-9 w-full justify-start gap-2 px-2 font-normal"
         disabled={installing}
-        title={state.version || undefined}
+
         variant="secondary"
         onClick={() => (hasActiveTurn ? setConfirmOpen(true) : restart())}
       >
@@ -1435,12 +1482,12 @@ function CollapsibleSessionGroupLabel({
   return (
     <SidebarGroupLabel
       className={cn(
-        "group/project-label h-7 min-h-7 gap-1 px-0 text-sm hover:bg-sidebar-accent has-[[data-project-actions-open=true]]:bg-sidebar-accent has-[[data-project-actions-open=true]]:text-sidebar-accent-foreground",
+        "group/project-label h-8 min-h-8 gap-1 px-0 text-sm hover:bg-sidebar-accent has-[:focus-visible]:bg-sidebar-accent has-[:focus-visible]:text-sidebar-accent-foreground has-[[data-project-actions-open=true]]:bg-sidebar-accent has-[[data-project-actions-open=true]]:text-sidebar-accent-foreground",
         active && "bg-sidebar-accent text-sidebar-accent-foreground",
       )}
     >
       <button
-        className="group flex h-full min-w-0 flex-1 cursor-default items-center gap-2 rounded-md px-2 pr-1 text-left"
+        className="group flex h-full min-w-0 flex-1 cursor-default items-center gap-2 rounded-md px-2 pr-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring"
         type="button"
         onClick={onToggle}
       >
@@ -1476,224 +1523,11 @@ function CollapsibleSessionGroupLabel({
   );
 }
 
-function ProjectActionsMenu({ project, token }: { project: Project; token: string }) {
-  const { t } = useI18n();
-  const navigate = useNavigate({ from: "/" });
-  const queryClient = useQueryClient();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [renameOpen, setRenameOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [name, setName] = useState(project.name);
-  const rootDir = project.rootDirs[0];
-  const isMac =
-    (typeof document !== "undefined" && document.documentElement.dataset.shell === "electron-mac") ||
-    (typeof navigator !== "undefined" && /Mac/i.test(navigator.platform));
-
-  useRailOverlayHold(menuOpen || renameOpen || deleteOpen);
-
-  const revealMutation = useMutation({
-    mutationFn: (path: string) => revealDesktopPath(token, path),
-    onError: () => toast.error(t("project.revealFailed")),
-  });
-  const renameMutation = useMutation({
-    mutationFn: (nextName: string) => updateProject(token, project.id, { name: nextName }),
-    onSuccess: (updated) => {
-      queryClient.setQueryData(queryKeys.project(updated.id), updated);
-      queryClient.setQueryData<{ projects: Project[] }>(queryKeys.projects(), (previous) =>
-        previous
-          ? { projects: previous.projects.map((entry) => (entry.id === updated.id ? updated : entry)) }
-          : { projects: [updated] },
-      );
-      setRenameOpen(false);
-    },
-    onError: () => toast.error(t("project.renameFailed")),
-  });
-  const deleteMutation = useMutation({
-    mutationFn: () => deleteProject(token, project.id),
-    onSuccess: async () => {
-      const previousSessions = queryClient.getQueryData<{ sessions: Session[] }>(queryKeys.sessions());
-      const attachedSessions = previousSessions?.sessions.filter((session) => session.projectID === project.id) || [];
-      queryClient.setQueryData<{ projects: Project[] }>(queryKeys.projects(), (previous) => ({
-        projects: previous?.projects.filter((entry) => entry.id !== project.id) || [],
-      }));
-      if (previousSessions) {
-        queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions(), {
-          sessions: previousSessions.sessions.map((session) =>
-            session.projectID === project.id ? { ...session, projectID: undefined } : session,
-          ),
-        });
-      }
-      for (const session of attachedSessions) {
-        queryClient.setQueryData<Session>(queryKeys.session(session.id), (previous) =>
-          previous ? { ...previous, projectID: undefined } : previous,
-        );
-      }
-      queryClient.removeQueries({ queryKey: queryKeys.project(project.id), exact: true });
-      setDeleteOpen(false);
-      await navigate({
-        to: "/",
-        search: (previous) => {
-          const next = { ...(previous as AppSearch) };
-          if (next.project === project.id) {
-            delete next.project;
-          }
-          return next;
-        },
-        replace: true,
-      });
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.projects() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
-      ]);
-    },
-    onError: () => toast.error(t("project.deleteFailed")),
-  });
-
-  const openRename = () => {
-    setName(project.name);
-    setRenameOpen(true);
-  };
-  const saveRename = () => {
-    const nextName = name.trim();
-    if (!nextName || nextName === project.name) {
-      setRenameOpen(false);
-      return;
-    }
-    renameMutation.mutate(nextName);
-  };
-  const copyPaths = (paths: string[]) => {
-    void navigator.clipboard.writeText(paths.join("\n")).then(
-      () => toast.success(t(paths.length > 1 ? "project.pathsCopied" : "project.pathCopied")),
-      () => toast.error(t("project.pathCopyFailed")),
-    );
-  };
-
-  return (
-    <>
-      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-        <DropdownMenuTrigger asChild>
-          <button
-            aria-label={t("project.actions")}
-            className="flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/60 opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover/project-label:opacity-100 data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground data-[state=open]:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
-            data-project-actions-open={menuOpen}
-            type="button"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <Ellipsis className="size-3.5" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-48 space-y-1">
-          {project.rootDirs.length > 1 ? (
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>
-                <FolderOpen />
-                {t("project.directories")}
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-64 max-w-[calc(100vw-2rem)]">
-                {project.rootDirs.map((path) => (
-                  <DropdownMenuItem
-                    key={path}
-                    disabled={!isMac || revealMutation.isPending}
-                    title={path}
-                    onSelect={() => revealMutation.mutate(path)}
-                  >
-                    <span className="min-w-0 truncate">{projectDirectoryLabel(path, project.rootDirs)}</span>
-                  </DropdownMenuItem>
-                ))}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => copyPaths(project.rootDirs)}>
-                  {t("project.copyAllPaths")}
-                </DropdownMenuItem>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          ) : (
-            <>
-              {isMac && rootDir ? (
-                <DropdownMenuItem disabled={revealMutation.isPending} onSelect={() => revealMutation.mutate(rootDir)}>
-                  {revealMutation.isPending ? <Spinner /> : null}
-                  {t("project.revealFinder")}
-                </DropdownMenuItem>
-              ) : null}
-              {rootDir ? (
-                <DropdownMenuItem title={rootDir} onSelect={() => copyPaths([rootDir])}>
-                  {t("project.copyPath")}
-                </DropdownMenuItem>
-              ) : null}
-            </>
-          )}
-          <DropdownMenuItem onSelect={openRename}>
-            {t("project.rename")}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            disabled={deleteMutation.isPending}
-            onSelect={() => setDeleteOpen(true)}
-          >
-            <Trash />
-            {t("project.delete")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
-        <DialogContent>
-          <form
-            className="contents"
-            onSubmit={(event) => {
-              event.preventDefault();
-              saveRename();
-            }}
-          >
-            <DialogHeader>
-              <DialogTitle>{t("project.renameTitle")}</DialogTitle>
-              <DialogDescription>{t("project.renameDescription")}</DialogDescription>
-            </DialogHeader>
-            <Input
-              autoFocus
-              aria-label={t("project.name")}
-              disabled={renameMutation.isPending}
-              maxLength={120}
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && event.nativeEvent.isComposing) {
-                  event.preventDefault();
-                }
-              }}
-            />
-            <DialogFooter>
-              <Button disabled={renameMutation.isPending} type="button" variant="outline" onClick={() => setRenameOpen(false)}>
-                {t("common.cancel")}
-              </Button>
-              <Button disabled={renameMutation.isPending || !name.trim()} type="submit">
-                {renameMutation.isPending ? <Spinner /> : null}
-                {t("common.save")}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-      <AlertDialog open={deleteOpen} onOpenChange={(open) => !deleteMutation.isPending && setDeleteOpen(open)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("project.deleteTitle").replace("{name}", project.name)}</AlertDialogTitle>
-            <AlertDialogDescription>{t("project.deleteDescription")}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleteMutation.isPending}>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={deleteMutation.isPending}
-              onClick={() => deleteMutation.mutate()}
-            >
-              {deleteMutation.isPending ? <Spinner /> : null}
-              {t("project.delete")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
-  );
+function RailProjectActionsMenu({ project, token }: { project: Project; token: string }) {
+  const [overlayOpen, setOverlayOpen] = useState(false);
+  useRailOverlayHold(overlayOpen);
+  return <ProjectActionsMenu project={project} surface="sidebar" token={token} onOverlayOpenChange={setOverlayOpen} />;
 }
-
 type SessionItemsProps = {
   sessions: Session[];
   selectedSessionID: string | undefined;
@@ -1706,7 +1540,7 @@ type SessionItemsProps = {
   onOpenSplit: (id: string) => void;
   onPinChange: (id: string, pinned: boolean, pinnedOrder?: number) => void;
   onDelete: (id: string) => void;
-  onRename: (id: string, title: string) => void;
+  onRename: (id: string, title: string) => Promise<void>;
   onPointerDragStart: (id: string, clientX: number, clientY: number) => void;
   onPointerDragMove: (clientX: number, clientY: number) => void;
   onPointerDragEnd: (id: string, clientX: number, clientY: number) => void;
@@ -1716,9 +1550,9 @@ type SessionItemsProps = {
 function SessionListSkeleton() {
   return (
     <div className="grid gap-0.5 p-2">
-      <Skeleton className="h-7 rounded-md" />
-      <Skeleton className="h-7 rounded-md" />
-      <Skeleton className="h-7 rounded-md" />
+      <Skeleton className="h-8 rounded-md" />
+      <Skeleton className="h-8 rounded-md" />
+      <Skeleton className="h-8 rounded-md" />
     </div>
   );
 }
@@ -1809,7 +1643,7 @@ function SessionItems({
         <SidebarMenuItem>
           <button
             aria-expanded={showAll}
-            className="flex h-7 w-full items-center rounded-md pr-2 pl-[34px] text-left text-xs text-sidebar-foreground/50 hover:text-sidebar-foreground/80"
+            className="flex h-8 w-full items-center rounded-md pr-2 pl-[34px] text-left text-xs text-sidebar-foreground/50 hover:text-sidebar-foreground/80"
             type="button"
             onClick={() => setShowAll((current) => !current)}
           >
@@ -1840,7 +1674,7 @@ function SessionDropIndicator({ active }: { active: boolean }) {
     <li
       aria-hidden="true"
       className={cn(
-        "h-7 rounded-md ring-1 ring-inset",
+        "h-8 rounded-md ring-1 ring-inset",
         active ? "pudding-session-drop-indicator-active ring-sidebar-ring/70" : "ring-sidebar-border/70",
       )}
     />
@@ -1858,7 +1692,7 @@ type SessionItemProps = {
   onOpenSplit: () => void;
   onPinChange: (pinned: boolean) => void;
   onDelete: () => void;
-  onRename: (title: string) => void;
+  onRename: (title: string) => Promise<void>;
   onPointerDragStart: (clientX: number, clientY: number) => void;
   onPointerDragMove: (clientX: number, clientY: number) => void;
   onPointerDragEnd: (clientX: number, clientY: number) => void;
@@ -1884,11 +1718,12 @@ function SessionItem({
 }: SessionItemProps) {
   const { t, locale } = useI18n();
   const actionsAlwaysVisible = !useHasHoverInput();
-  const title = session.title || t("session.untitled");
   const [actionsOpen, setActionsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(session.title);
+  const [pendingTitle, setPendingTitle] = useState<string | null>(null);
+  const title = pendingTitle || session.title || t("session.untitled");
   const inputRef = useRef<HTMLInputElement>(null);
   const editAfterMenuCloseRef = useRef(false);
   const pointerDragRef = useRef<{
@@ -1907,6 +1742,12 @@ function SessionItem({
       setDraft(session.title);
     }
   }, [editing, session.title]);
+
+  useEffect(() => {
+    if (pendingTitle !== null && session.title === pendingTitle) {
+      setPendingTitle(null);
+    }
+  }, [pendingTitle, session.title]);
 
   useEffect(() => {
     if (!editing) {
@@ -1937,7 +1778,8 @@ function SessionItem({
       return;
     }
     if (nextTitle !== session.title) {
-      onRename(nextTitle);
+      setPendingTitle(nextTitle);
+      void onRename(nextTitle).catch(() => setPendingTitle(null));
     }
     setEditing(false);
   }
@@ -2059,7 +1901,7 @@ function SessionItem({
       {editing ? (
         <SidebarMenuButton
           asChild
-          className="h-7 px-2 py-1"
+          className="h-8 px-2 py-1"
           isActive
         >
           <div className="cursor-text">
@@ -2089,7 +1931,7 @@ function SessionItem({
         <SidebarMenuButton
           asChild
           className={cn(
-            "h-7 px-2 py-1",
+            "h-8 px-2 py-1 focus-visible:bg-sidebar-accent focus-visible:text-sidebar-accent-foreground focus-visible:ring-inset",
             running
               ? "pr-24 data-active:font-normal group-has-data-[sidebar=menu-action]/menu-item:pr-24"
               : actionsAlwaysVisible
@@ -2097,11 +1939,12 @@ function SessionItem({
               : "pr-11 data-active:font-normal group-has-data-[sidebar=menu-action]/menu-item:pr-11",
             suppressInteractiveState
               ? "hover:bg-transparent hover:text-sidebar-foreground active:bg-transparent active:text-sidebar-foreground"
-              : "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground",
+              : "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground group-focus-within/menu-item:bg-sidebar-accent group-focus-within/menu-item:text-sidebar-accent-foreground",
           )}
           isActive={selected || actionsOpen}
         >
           <button
+            data-rail-session-action
             data-session-item-id={session.id}
             type="button"
             onClick={(event) => {
@@ -2124,7 +1967,7 @@ function SessionItem({
             onPointerUp={finishPointerDrag}
           >
             <span aria-hidden="true" className="w-4 shrink-0" />
-            <span className="min-w-0 flex-1 truncate" title={session.title || undefined}>
+            <span className="min-w-0 flex-1 truncate">
               {title}
             </span>
           </button>
@@ -2134,7 +1977,7 @@ function SessionItem({
         <>
           <SidebarMenuBadge
             className={cn(
-              "min-w-0 px-0 font-normal text-muted-foreground peer-data-[size=default]/menu-button:top-1",
+              "min-w-0 px-0 font-normal text-muted-foreground",
               actionsAlwaysVisible ? "right-8" : "right-2",
               !actionsAlwaysVisible &&
               !suppressInteractiveState &&
@@ -2166,7 +2009,7 @@ function SessionItem({
               <SidebarMenuAction
                 aria-label={t("session.actions")}
                 className={cn(
-                  "right-1.5 rounded-sm bg-transparent text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-0",
+                  "right-1.5 rounded-sm bg-transparent text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                   actionsAlwaysVisible && "opacity-100",
                   !actionsAlwaysVisible &&
                   suppressInteractiveState &&
@@ -2174,7 +2017,6 @@ function SessionItem({
                   actionsOpen && "opacity-100 md:opacity-100",
                 )}
                 showOnHover={!actionsAlwaysVisible}
-                tabIndex={-1}
               >
                 <Ellipsis className="size-3.5!" />
               </SidebarMenuAction>
@@ -2242,14 +2084,4 @@ function SessionItem({
 function basename(path: string) {
   const normalized = path.replace(/\/+$/, "");
   return normalized.split(/[\\/]/).filter(Boolean).pop() || path;
-}
-
-function projectDirectoryLabel(path: string, paths: string[]) {
-  const name = basename(path);
-  if (paths.filter((candidate) => basename(candidate) === name).length < 2) {
-    return name;
-  }
-  const normalized = path.replace(/[\\/]+$/, "");
-  const parts = normalized.split(/[\\/]/).filter(Boolean);
-  return parts.slice(-2).join("/") || path;
 }

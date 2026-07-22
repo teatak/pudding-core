@@ -20,7 +20,7 @@ export function AboutSettings({ token }: { token: string }) {
   const sections = (aboutQuery.data?.sections || []).filter((section) => !isVoiceAboutSection(section));
 
   return (
-    <div className={cn(SETTINGS_NARROW_CONTENT_CLASS, "gap-4 pt-2")}>
+    <div className={cn(SETTINGS_NARROW_CONTENT_CLASS, "gap-4")}>
       {aboutQuery.isError ? (
         <Alert variant="destructive">
           <AlertDescription>{t("settings.loadFailed")}</AlertDescription>
@@ -73,4 +73,3 @@ function AboutSettingsSkeleton() {
     </>
   );
 }
-

@@ -380,7 +380,7 @@ function HeaderSessionTitle({
             type="button"
             aria-label={t("session.rename")}
             className="col-start-1 row-start-1 inline-flex h-7 w-full min-w-0 cursor-default items-center rounded-md border border-transparent px-2 text-left font-normal leading-6 select-none hover:bg-muted focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
-            title={rawTitle || undefined}
+
             onDoubleClick={startEditing}
           >
             <span className="min-w-0 truncate">{displayTitle}</span>

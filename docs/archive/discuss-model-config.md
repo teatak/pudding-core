@@ -1,9 +1,11 @@
 # 讨论:model / profile 配置形状与 preset
 
-> 状态:讨论稿,征求评审。范围:provider profile 下 per-model 参数的存储形状、
-> 配置存放位置、preset 升级。结论会并入 docs/design-tools.md 并落一个前置切片 T0。
+> 状态:讨论已结束,本文作为历史决策记录保留。配置已落地为
+> `<home>/config/settings.yaml` + `<home>/config/profiles.yaml`,当前行为以代码和
+> [technology-decisions.md](../technology-decisions.md) 为准。
+> 原讨论范围:provider profile 下 per-model 参数的存储形状、配置存放位置和 preset 升级。
 > 背景文档:docs/technology-decisions.md 第 5 节(provider 路由)、
-> docs/design.md 第 4 节(模型选择器)、docs/design-tools.md(工具调用)。
+> docs/design.md 第 4 节(模型选择器)、docs/archive/design-tools.md(工具调用)。
 >
 > 2026-06-14 更新:已落地为 `<home>/config/settings.yaml` +
 > `<home>/config/profiles.yaml`;不再使用 SQLite `provider_profiles` 作为事实源,

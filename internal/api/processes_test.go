@@ -37,14 +37,15 @@ func TestBackgroundProcessAPIListsAndStopsSessionProcess(t *testing.T) {
 
 	root := t.TempDir()
 	args, _ := json.Marshal(map[string]any{
-		"scope": "project",
-		"argv":  []string{os.Args[0], "-test.run=^TestAPIBackgroundProcessHelper$"},
-		"env":   map[string]string{"PUDDING_API_BACKGROUND_HELPER": "1"},
+		"scope":      "project",
+		"command":    fmt.Sprintf("%q -test.run=^TestAPIBackgroundProcessHelper$", os.Args[0]),
+		"env":        map[string]string{"PUDDING_API_BACKGROUND_HELPER": "1"},
+		"background": true,
 	})
 	started := runner.Call(ctx, tool.Call{
 		SessionID:   "sess_process",
 		CallID:      "call_start",
-		Name:        tool.CommandStart,
+		Name:        tool.CommandRun,
 		Args:        args,
 		ProjectDirs: []string{root},
 	})

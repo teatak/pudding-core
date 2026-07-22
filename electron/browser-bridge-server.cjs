@@ -230,10 +230,12 @@ function classifyError(error) {
   ) {
     return { status: 422, code: "element_not_interactable", retryable: false, message };
   }
+  if (message.includes("did not produce the expected value")) {
+    return { status: 422, code: "input_value_mismatch", retryable: false, message };
+  }
   if (
     message.includes("not editable") ||
-    message.includes("could not be focused") ||
-    message.includes("did not produce the expected value")
+    message.includes("could not be focused")
   ) {
     return { status: 422, code: "element_not_editable", retryable: false, message };
   }

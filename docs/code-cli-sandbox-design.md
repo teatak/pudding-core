@@ -1,8 +1,7 @@
 # Code CLI 沙箱设计
 
 > 状态:macOS 第一版已完成(2026-07-13);Windows 沙箱适配后续单独实施。
-> 范围:仅覆盖 LLM 调用的 `builtin_command_run` 与
-> `builtin_command_start` 及其子进程。
+> 范围:仅覆盖 LLM 调用的 `builtin_command_run` 及其前台/后台子进程。
 
 ## 1. 目标
 
@@ -42,8 +41,8 @@ engine approval policy
   -> stdout / stderr / timeout / process-group cancellation
 ```
 
-`command_run` 与 `command_start` 必须使用同一个 `CommandRunner`,避免前台命令
-受限而后台命令绕过。Runner 只负责准备进程和执行元数据;输出流、超时、取消、
+`command_run` 的前台与后台路径必须使用同一个 `CommandRunner`,避免后台命令
+绕过沙箱。Runner 只负责准备进程和执行元数据;输出流、输入、超时、取消、
 后台保留与 session ownership 仍由现有 tool 层负责。
 
 desktop daemon 会在继承的 `PATH` 后补充 Homebrew 和常见用户工具链目录。沙箱与

@@ -14,6 +14,8 @@ func configureCommandProcess(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewProcessGroup}
 }
 
+func configureCommandPTY(_ *exec.Cmd) {}
+
 func terminateCommandProcess(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
 		return nil

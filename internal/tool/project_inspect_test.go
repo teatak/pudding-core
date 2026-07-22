@@ -61,7 +61,7 @@ func TestProjectInspectDetectsProjectShape(t *testing.T) {
 		t.Fatalf("missing detected languages: %+v", languages)
 	}
 	commands := payload["suggestedCommands"].([]any)
-	if !hasProjectInspectCommand(commands, []any{"go", "test", "./..."}) || !hasProjectInspectCommand(commands, []any{"pnpm", "run", "test"}) {
+	if !hasProjectInspectCommand(commands, "go test ./...") || !hasProjectInspectCommand(commands, "pnpm run test") {
 		t.Fatalf("missing suggested commands: %+v", commands)
 	}
 }
@@ -116,17 +116,9 @@ func hasProjectInspectItem(items []any, key, value string) bool {
 	return false
 }
 
-func hasProjectInspectCommand(items []any, argv []any) bool {
+func hasProjectInspectCommand(items []any, command string) bool {
 	for _, item := range items {
-		actual := item.(map[string]any)["argv"].([]any)
-		if len(actual) != len(argv) {
-			continue
-		}
-		matched := true
-		for index := range argv {
-			matched = matched && actual[index] == argv[index]
-		}
-		if matched {
+		if item.(map[string]any)["command"] == command {
 			return true
 		}
 	}

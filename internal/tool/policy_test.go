@@ -79,22 +79,29 @@ func TestClassifyToolCallCodeReadRisk(t *testing.T) {
 		{name: CodeDefinition, args: `{"scope":"project","path":"main.go","line":1,"column":1}`},
 		{name: CodeReferences, args: `{"scope":"project","path":"main.go","line":1,"column":1}`},
 		{name: CodeDiagnostics, args: `{"scope":"project","paths":["main.go"]}`},
-		{name: CodeRename, args: `{"scope":"project","path":"main.go","line":1,"column":1,"new_name":"renamed"}`},
 	} {
 		risk, ok := ClassifyToolCall(test.name, json.RawMessage(test.args))
 		if !ok || risk.Class != RiskClassRead || !risk.LowRisk || risk.Scope != managedScopeProject {
 			t.Fatalf("unexpected code read risk for %s: %+v ok=%v", test.name, risk, ok)
 		}
 	}
+	rename, ok := ClassifyToolCall(CodeRename, json.RawMessage(`{"scope":"project","path":"main.go","line":1,"column":1,"new_name":"renamed"}`))
+	if !ok || rename.Class != RiskClassWrite || !rename.LowRisk || rename.Operation != "code_rename" || len(rename.Paths) != 1 {
+		t.Fatalf("semantic rename must be classified as a project write: %+v ok=%v", rename, ok)
+	}
 }
 
 func TestClassifyToolCallPatchApplyRisk(t *testing.T) {
-	risk, ok := ClassifyToolCall(PatchApply, json.RawMessage(`{"proposal_id":"patch_123"}`))
-	if !ok || risk.Class != RiskClassWrite || risk.Operation != "patch_apply" || risk.Scope != "project" || !risk.LowRisk {
+	risk, ok := ClassifyToolCall(PatchApply, json.RawMessage(`{"scope":"project","files":[{"path":"main.go","edits":[{"old_text":"a","new_text":"b"}]}]}`))
+	if !ok || risk.Class != RiskClassWrite || risk.Operation != "patch_apply" || risk.Scope != "project" || !risk.LowRisk || len(risk.Paths) != 1 {
 		t.Fatalf("unexpected patch apply risk: %+v ok=%v", risk, ok)
 	}
-	if _, ok := ClassifyToolCall(PatchApply, json.RawMessage(`{"proposal_id":""}`)); ok {
-		t.Fatal("empty patch proposal id must not be classified")
+	destructive, ok := ClassifyToolCall(PatchApply, json.RawMessage(`{"scope":"project","files":[{"path":"old.go","delete":true}]}`))
+	if !ok || destructive.Class != RiskClassDestructive || destructive.LowRisk {
+		t.Fatalf("delete patch must remain destructive: %+v ok=%v", destructive, ok)
+	}
+	if _, ok := ClassifyToolCall(PatchApply, json.RawMessage(`{"scope":"project","files":[]}`)); ok {
+		t.Fatal("empty patch must not be classified")
 	}
 }
 
@@ -127,52 +134,53 @@ func TestClassifyToolCallCommandRisk(t *testing.T) {
 		operation string
 		lowRisk   bool
 	}{
-		{name: "test", args: `{"scope":"project","argv":["go","test","./..."]}`, class: RiskClassCommand, operation: "go", lowRisk: true},
-		{name: "search", args: `{"scope":"project","argv":["rg","TODO","internal"]}`, class: RiskClassCommand, operation: "rg", lowRisk: true},
-		{name: "mkdir", args: `{"scope":"project","argv":["mkdir","-p","internal/newpkg"]}`, class: RiskClassCommand, operation: "mkdir", lowRisk: true},
-		{name: "touch", args: `{"scope":"project","argv":["touch","internal/new.go"]}`, class: RiskClassCommand, operation: "touch", lowRisk: true},
-		{name: "copy", args: `{"scope":"project","argv":["cp","main.go","main_copy.go"]}`, class: RiskClassCommand, operation: "cp", lowRisk: true},
-		{name: "move", args: `{"scope":"project","argv":["mv","main_copy.go","main_moved.go"]}`, class: RiskClassCommand, operation: "mv", lowRisk: true},
-		{name: "slice", args: `{"scope":"project","argv":["sed","-n","1,80p","main.go"]}`, class: RiskClassCommand, operation: "sed", lowRisk: true},
-		{name: "find", args: `{"scope":"project","argv":["find",".","-name","*.go"]}`, class: RiskClassCommand, operation: "find", lowRisk: true},
-		{name: "find delete", args: `{"scope":"project","argv":["find",".","-delete"]}`, class: RiskClassCommand, operation: "find", lowRisk: false},
-		{name: "fd exec", args: `{"scope":"project","argv":["fd","--exec=rm","{}"]}`, class: RiskClassCommand, operation: "fd", lowRisk: false},
-		{name: "test with safe env", args: `{"scope":"project","argv":["go","test","./..."],"env":{"GOFLAGS":"-race"}}`, class: RiskClassCommand, operation: "go", lowRisk: true},
-		{name: "toolchain wrapper env", args: `{"scope":"project","argv":["go","test","./..."],"env":{"CC":"./scripts/compiler-wrapper"}}`, class: RiskClassCommand, operation: "go", lowRisk: false},
-		{name: "go toolexec env", args: `{"scope":"project","argv":["go","test","./..."],"env":{"GOFLAGS":"-toolexec=./scripts/wrapper"}}`, class: RiskClassCommand, operation: "go", lowRisk: false},
-		{name: "go env file override", args: `{"scope":"project","argv":["go","test","./..."],"env":{"GOENV":"./config/go-env"}}`, class: RiskClassCommand, operation: "go", lowRisk: false},
-		{name: "make eval environment", args: `{"scope":"project","argv":["make","test"],"env":{"MAKEFLAGS":"--eval=all:; ./scripts/run"}}`, class: RiskClassCommand, operation: "make", lowRisk: false},
-		{name: "risky env", args: `{"scope":"project","argv":["go","test","./..."],"env":{"PATH":"./bin"}}`, class: RiskClassCommand, operation: "go", lowRisk: false},
-		{name: "test outside project", args: `{"scope":"project","argv":["go","test","../other"]}`, class: RiskClassCommand, operation: "go", lowRisk: false},
-		{name: "unknown direct command", args: `{"scope":"project","argv":["my-project-tool","--check"]}`, class: RiskClassCommand, operation: "my-project-tool", lowRisk: true},
-		{name: "project interpreter", args: `{"scope":"project","argv":["python3","script.py"]}`, class: RiskClassCommand, operation: "python3", lowRisk: true},
-		{name: "inline interpreter", args: `{"scope":"project","argv":["python3","-c","print('ok')"]}`, class: RiskClassCommand, operation: "python3", lowRisk: false},
-		{name: "attached inline interpreter", args: `{"scope":"project","argv":["node","-econsole.log('ok')"]}`, class: RiskClassCommand, operation: "node", lowRisk: false},
-		{name: "inline node", args: `{"scope":"project","argv":["node","--eval=console.log('ok')"]}`, class: RiskClassCommand, operation: "node", lowRisk: false},
-		{name: "inline awk", args: `{"scope":"project","argv":["awk","BEGIN { system(\"rm -rf build\") }"]}`, class: RiskClassCommand, operation: "awk", lowRisk: false},
-		{name: "awk script file", args: `{"scope":"project","argv":["awk","-f","scripts/report.awk","data.txt"]}`, class: RiskClassCommand, operation: "awk", lowRisk: true},
-		{name: "go run", args: `{"scope":"project","argv":["go","run","./cmd/server"]}`, class: RiskClassCommand, operation: "go", lowRisk: true},
-		{name: "dev script", args: `{"scope":"project","argv":["npm","run","dev"]}`, class: RiskClassCommand, operation: "npm", lowRisk: true},
-		{name: "dev server wildcard host", args: `{"scope":"project","argv":["npm","run","dev","--","--host","0.0.0.0"]}`, class: RiskClassCommand, operation: "npm", lowRisk: false},
-		{name: "dev server wildcard host env", args: `{"scope":"project","argv":["npm","run","dev"],"env":{"HOST":"0.0.0.0"}}`, class: RiskClassCommand, operation: "npm", lowRisk: false},
-		{name: "literal wildcard search", args: `{"scope":"project","argv":["rg","*"]}`, class: RiskClassCommand, operation: "rg", lowRisk: true},
-		{name: "publish", args: `{"scope":"project","argv":["npm","publish"]}`, class: RiskClassCommand, operation: "npm", lowRisk: false},
-		{name: "git write", args: `{"scope":"project","argv":["git","add","main.go"]}`, class: RiskClassCommand, operation: "git", lowRisk: false},
-		{name: "git clone", args: `{"scope":"project","argv":["git","clone","https://example.com/repo.git","repo"]}`, class: RiskClassCommand, operation: "git", lowRisk: true},
-		{name: "git fetch", args: `{"scope":"project","argv":["git","fetch","origin"]}`, class: RiskClassCommand, operation: "git", lowRisk: true},
-		{name: "git pull", args: `{"scope":"project","argv":["git","pull","--ff-only"]}`, class: RiskClassCommand, operation: "git", lowRisk: true},
-		{name: "git pull strategy option", args: `{"scope":"project","argv":["git","pull","-Xours"]}`, class: RiskClassCommand, operation: "git", lowRisk: true},
-		{name: "git push", args: `{"scope":"project","argv":["git","push","origin","main"]}`, class: RiskClassCommand, operation: "git", lowRisk: false},
-		{name: "git clone config injection", args: `{"scope":"project","argv":["git","clone","-c","core.fsmonitor=!touch compromised","https://example.com/repo.git"]}`, class: RiskClassCommand, operation: "git", lowRisk: false},
-		{name: "git pull exec", args: `{"scope":"project","argv":["git","pull","--rebase","--exec=./scripts/run"]}`, class: RiskClassCommand, operation: "git", lowRisk: false},
-		{name: "git pull short exec", args: `{"scope":"project","argv":["git","pull","--rebase","-x","./scripts/run"]}`, class: RiskClassCommand, operation: "git", lowRisk: false},
-		{name: "local curl", args: `{"scope":"project","argv":["curl","http://127.0.0.1:3000/health"]}`, class: RiskClassCommand, operation: "curl", lowRisk: true},
-		{name: "local ipv6 curl", args: `{"scope":"project","argv":["curl","http://[::1]:3000/health"]}`, class: RiskClassCommand, operation: "curl", lowRisk: true},
-		{name: "external curl", args: `{"scope":"project","argv":["curl","https://example.com"]}`, class: RiskClassCommand, operation: "curl", lowRisk: false},
-		{name: "wrapper", args: `{"scope":"project","argv":["env","rm","-rf","."]}`, class: RiskClassCommand, operation: "env", lowRisk: false},
-		{name: "utility wrapper", args: `{"scope":"project","argv":["stdbuf","-oL","go","test","./..."]}`, class: RiskClassCommand, operation: "stdbuf", lowRisk: false},
-		{name: "shell", args: `{"scope":"project","script":"go test ./... | tee test.log"}`, class: RiskClassCommand, operation: "shell", lowRisk: false},
-		{name: "destructive", args: `{"scope":"project","argv":["rm","-rf","build"]}`, class: RiskClassDestructive, operation: "rm", lowRisk: false},
+		{name: "test", args: `{"scope":"project","command":"go test ./..."}`, class: RiskClassCommand, operation: "go", lowRisk: true},
+		{name: "search", args: `{"scope":"project","command":"rg TODO internal"}`, class: RiskClassCommand, operation: "rg", lowRisk: true},
+		{name: "mkdir", args: `{"scope":"project","command":"mkdir -p internal/newpkg"}`, class: RiskClassCommand, operation: "mkdir", lowRisk: true},
+		{name: "touch", args: `{"scope":"project","command":"touch internal/new.go"}`, class: RiskClassCommand, operation: "touch", lowRisk: true},
+		{name: "copy", args: `{"scope":"project","command":"cp main.go main_copy.go"}`, class: RiskClassCommand, operation: "cp", lowRisk: true},
+		{name: "move", args: `{"scope":"project","command":"mv main_copy.go main_moved.go"}`, class: RiskClassCommand, operation: "mv", lowRisk: true},
+		{name: "slice", args: `{"scope":"project","command":"sed -n '1,80p' main.go"}`, class: RiskClassCommand, operation: "sed", lowRisk: true},
+		{name: "find", args: `{"scope":"project","command":"find . -name '*.go'"}`, class: RiskClassCommand, operation: "find", lowRisk: true},
+		{name: "find delete", args: `{"scope":"project","command":"find . -delete"}`, class: RiskClassCommand, operation: "find", lowRisk: false},
+		{name: "fd exec", args: `{"scope":"project","command":"fd --exec=rm '{}'"}`, class: RiskClassCommand, operation: "fd", lowRisk: false},
+		{name: "test with safe env", args: `{"scope":"project","command":"go test ./...","env":{"GOFLAGS":"-race"}}`, class: RiskClassCommand, operation: "go", lowRisk: true},
+		{name: "toolchain wrapper env", args: `{"scope":"project","command":"go test ./...","env":{"CC":"./scripts/compiler-wrapper"}}`, class: RiskClassCommand, operation: "go", lowRisk: false},
+		{name: "go toolexec env", args: `{"scope":"project","command":"go test ./...","env":{"GOFLAGS":"-toolexec=./scripts/wrapper"}}`, class: RiskClassCommand, operation: "go", lowRisk: false},
+		{name: "go env file override", args: `{"scope":"project","command":"go test ./...","env":{"GOENV":"./config/go-env"}}`, class: RiskClassCommand, operation: "go", lowRisk: false},
+		{name: "make eval environment", args: `{"scope":"project","command":"make test","env":{"MAKEFLAGS":"--eval=all:; ./scripts/run"}}`, class: RiskClassCommand, operation: "make", lowRisk: false},
+		{name: "risky env", args: `{"scope":"project","command":"go test ./...","env":{"PATH":"./bin"}}`, class: RiskClassCommand, operation: "go", lowRisk: false},
+		{name: "test outside project", args: `{"scope":"project","command":"go test ../other"}`, class: RiskClassCommand, operation: "go", lowRisk: false},
+		{name: "unknown command", args: `{"scope":"project","command":"my-project-tool --check"}`, class: RiskClassCommand, operation: "my-project-tool", lowRisk: true},
+		{name: "project interpreter", args: `{"scope":"project","command":"python3 script.py"}`, class: RiskClassCommand, operation: "python3", lowRisk: true},
+		{name: "inline interpreter", args: `{"scope":"project","command":"python3 -c \"print('ok')\""}`, class: RiskClassCommand, operation: "python3", lowRisk: false},
+		{name: "attached inline interpreter", args: `{"scope":"project","command":"node \"-econsole.log('ok')\""}`, class: RiskClassCommand, operation: "node", lowRisk: false},
+		{name: "inline node", args: `{"scope":"project","command":"node \"--eval=console.log('ok')\""}`, class: RiskClassCommand, operation: "node", lowRisk: false},
+		{name: "inline awk", args: `{"scope":"project","command":"awk 'BEGIN { system(\"rm -rf build\") }'"}`, class: RiskClassCommand, operation: "awk", lowRisk: false},
+		{name: "awk script file", args: `{"scope":"project","command":"awk -f scripts/report.awk data.txt"}`, class: RiskClassCommand, operation: "awk", lowRisk: true},
+		{name: "go run", args: `{"scope":"project","command":"go run ./cmd/server"}`, class: RiskClassCommand, operation: "go", lowRisk: true},
+		{name: "dev script", args: `{"scope":"project","command":"npm run dev"}`, class: RiskClassCommand, operation: "npm", lowRisk: true},
+		{name: "dev server wildcard host", args: `{"scope":"project","command":"npm run dev -- --host 0.0.0.0"}`, class: RiskClassCommand, operation: "npm", lowRisk: false},
+		{name: "dev server wildcard host env", args: `{"scope":"project","command":"npm run dev","env":{"HOST":"0.0.0.0"}}`, class: RiskClassCommand, operation: "npm", lowRisk: false},
+		{name: "literal wildcard search", args: `{"scope":"project","command":"rg '*'"}`, class: RiskClassCommand, operation: "rg", lowRisk: true},
+		{name: "publish", args: `{"scope":"project","command":"npm publish"}`, class: RiskClassCommand, operation: "npm", lowRisk: false},
+		{name: "git write", args: `{"scope":"project","command":"git add main.go"}`, class: RiskClassCommand, operation: "git", lowRisk: false},
+		{name: "git clone", args: `{"scope":"project","command":"git clone https://example.com/repo.git repo"}`, class: RiskClassCommand, operation: "git", lowRisk: true},
+		{name: "git fetch", args: `{"scope":"project","command":"git fetch origin"}`, class: RiskClassCommand, operation: "git", lowRisk: true},
+		{name: "git pull", args: `{"scope":"project","command":"git pull --ff-only"}`, class: RiskClassCommand, operation: "git", lowRisk: true},
+		{name: "git pull strategy option", args: `{"scope":"project","command":"git pull -Xours"}`, class: RiskClassCommand, operation: "git", lowRisk: true},
+		{name: "git push", args: `{"scope":"project","command":"git push origin main"}`, class: RiskClassCommand, operation: "git", lowRisk: false},
+		{name: "git clone config injection", args: `{"scope":"project","command":"git clone -c 'core.fsmonitor=!touch compromised' https://example.com/repo.git"}`, class: RiskClassCommand, operation: "git", lowRisk: false},
+		{name: "git pull exec", args: `{"scope":"project","command":"git pull --rebase --exec=./scripts/run"}`, class: RiskClassCommand, operation: "git", lowRisk: false},
+		{name: "git pull short exec", args: `{"scope":"project","command":"git pull --rebase -x ./scripts/run"}`, class: RiskClassCommand, operation: "git", lowRisk: false},
+		{name: "local curl", args: `{"scope":"project","command":"curl http://127.0.0.1:3000/health"}`, class: RiskClassCommand, operation: "curl", lowRisk: true},
+		{name: "local ipv6 curl", args: `{"scope":"project","command":"curl 'http://[::1]:3000/health'"}`, class: RiskClassCommand, operation: "curl", lowRisk: true},
+		{name: "external curl", args: `{"scope":"project","command":"curl https://example.com"}`, class: RiskClassCommand, operation: "curl", lowRisk: false},
+		{name: "wrapper", args: `{"scope":"project","command":"env rm -rf ."}`, class: RiskClassCommand, operation: "env", lowRisk: false},
+		{name: "utility wrapper", args: `{"scope":"project","command":"stdbuf -oL go test ./..."}`, class: RiskClassCommand, operation: "stdbuf", lowRisk: false},
+		{name: "pipeline", args: `{"scope":"project","command":"go test ./... | tee test.log"}`, class: RiskClassCommand, operation: "shell", lowRisk: true},
+		{name: "dynamic expansion", args: `{"scope":"project","command":"printf '%s' \"$TOKEN\""}`, class: RiskClassCommand, operation: "printf", lowRisk: false},
+		{name: "destructive", args: `{"scope":"project","command":"rm -rf build"}`, class: RiskClassDestructive, operation: "rm", lowRisk: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -190,23 +198,26 @@ func TestClassifyToolCallCommandUsesAuthorizedProjectPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	inside := filepath.Join(root, "tutorials", "Day08_GORM")
-	risk, ok := ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","argv":["mkdir","-p","`+inside+`"]}`), []string{root})
+	raw, _ := json.Marshal(map[string]any{"scope": "project", "command": joinShellCommand([]string{"mkdir", "-p", inside})})
+	risk, ok := ClassifyToolCallForProject(CommandRun, raw, []string{root})
 	if !ok || !risk.LowRisk {
 		t.Fatalf("authorized absolute mkdir should be low risk: %+v ok=%v", risk, ok)
 	}
 
 	outside := filepath.Join(t.TempDir(), "Day08_GORM")
-	risk, ok = ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","argv":["mkdir","-p","`+outside+`"]}`), []string{root})
+	raw, _ = json.Marshal(map[string]any{"scope": "project", "command": joinShellCommand([]string{"mkdir", "-p", outside})})
+	risk, ok = ClassifyToolCallForProject(CommandRun, raw, []string{root})
 	if !ok || risk.LowRisk {
 		t.Fatalf("outside absolute mkdir must require approval: %+v ok=%v", risk, ok)
 	}
 
-	risk, ok = ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","argv":["git","-C","`+root+`","log","--oneline","-5"]}`), []string{root})
+	raw, _ = json.Marshal(map[string]any{"scope": "project", "command": joinShellCommand([]string{"git", "-C", root, "log", "--oneline", "-5"})})
+	risk, ok = ClassifyToolCallForProject(CommandRun, raw, []string{root})
 	if !ok || !risk.LowRisk {
 		t.Fatalf("read-only git with an authorized -C path should be low risk: %+v ok=%v", risk, ok)
 	}
 
-	risk, ok = ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","argv":["git","-c","core.fsmonitor=!touch compromised","status"]}`), []string{root})
+	risk, ok = ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","command":"git -c 'core.fsmonitor=!touch compromised' status"}`), []string{root})
 	if !ok || risk.LowRisk {
 		t.Fatalf("git config injection must require approval: %+v ok=%v", risk, ok)
 	}
@@ -216,9 +227,38 @@ func TestClassifyToolCallCommandUsesAuthorizedProjectPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	escape := filepath.Join(root, "escape", "nested")
-	risk, ok = ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","argv":["mkdir","-p","`+escape+`"]}`), []string{root})
+	raw, _ = json.Marshal(map[string]any{"scope": "project", "command": joinShellCommand([]string{"mkdir", "-p", escape})})
+	risk, ok = ClassifyToolCallForProject(CommandRun, raw, []string{root})
 	if !ok || risk.LowRisk {
 		t.Fatalf("mkdir through an escaping symlink must require approval: %+v ok=%v", risk, ok)
+	}
+}
+
+func TestClassifyToolCallCommandRedirectionBoundary(t *testing.T) {
+	root := t.TempDir()
+	inside := filepath.Join(root, "reports", "test.log")
+	insideRaw, _ := json.Marshal(map[string]any{
+		"scope":   "project",
+		"command": "go test ./... > " + quoteShellArg(inside),
+	})
+	insideRisk, ok := ClassifyToolCallForProject(CommandRun, insideRaw, []string{root})
+	if !ok || !insideRisk.LowRisk {
+		t.Fatalf("project-local output redirection should be low risk: %+v ok=%v", insideRisk, ok)
+	}
+
+	outside := filepath.Join(t.TempDir(), "test.log")
+	outsideRaw, _ := json.Marshal(map[string]any{
+		"scope":   "project",
+		"command": "go test ./... > " + quoteShellArg(outside),
+	})
+	outsideRisk, ok := ClassifyToolCallForProject(CommandRun, outsideRaw, []string{root})
+	if !ok || outsideRisk.LowRisk {
+		t.Fatalf("outside output redirection must require approval: %+v ok=%v", outsideRisk, ok)
+	}
+
+	dynamicRisk, ok := ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","command":"printf ok > \"$OUTPUT\""}`), []string{root})
+	if !ok || dynamicRisk.LowRisk {
+		t.Fatalf("dynamic output redirection must require approval: %+v ok=%v", dynamicRisk, ok)
 	}
 }
 
@@ -232,7 +272,7 @@ func TestClassifyToolCallCommandAcceptsCanonicalProjectRootAlias(t *testing.T) {
 	if err := os.Symlink(realRoot, aliasRoot); err != nil {
 		t.Fatal(err)
 	}
-	raw := json.RawMessage(`{"scope":"project","argv":["find","` + realRoot + `","-type","f","-name","*.go"]}`)
+	raw, _ := json.Marshal(map[string]any{"scope": "project", "command": joinShellCommand([]string{"find", realRoot, "-type", "f", "-name", "*.go"})})
 	risk, ok := ClassifyToolCallForProject(CommandRun, raw, []string{aliasRoot})
 	if !ok || !risk.LowRisk {
 		t.Fatalf("read-only find through canonical project alias should be low risk: %+v ok=%v", risk, ok)
@@ -240,7 +280,7 @@ func TestClassifyToolCallCommandAcceptsCanonicalProjectRootAlias(t *testing.T) {
 }
 
 func TestClassifyToolCallCommandExecutableBoundary(t *testing.T) {
-	risk, ok := ClassifyToolCall(CommandRun, json.RawMessage(`{"scope":"project","argv":["/tmp/go","test","./..."]}`))
+	risk, ok := ClassifyToolCall(CommandRun, json.RawMessage(`{"scope":"project","command":"/tmp/go test ./..."}`))
 	if !ok || risk.LowRisk {
 		t.Fatalf("external executable must require approval: %+v ok=%v", risk, ok)
 	}
@@ -253,12 +293,12 @@ func TestClassifyToolCallCommandExecutableBoundary(t *testing.T) {
 	if err := os.WriteFile(executable, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := json.Marshal(map[string]any{"scope": "project", "argv": []string{executable}})
+	raw, _ := json.Marshal(map[string]any{"scope": "project", "command": joinShellCommand([]string{executable})})
 	risk, ok = ClassifyToolCallForProject(CommandRun, raw, []string{root})
 	if !ok || !risk.LowRisk {
 		t.Fatalf("project executable should be auto-approved in the sandbox: %+v ok=%v", risk, ok)
 	}
-	risk, ok = ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","argv":["/bin/ls"]}`), []string{root})
+	risk, ok = ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","command":"/bin/ls"}`), []string{root})
 	if !ok || !risk.LowRisk {
 		t.Fatalf("system executable should be auto-approved in the sandbox: %+v ok=%v", risk, ok)
 	}
@@ -271,13 +311,13 @@ func TestClassifyToolCallBackgroundCommandUsesSameRiskRules(t *testing.T) {
 		class   RiskClass
 		lowRisk bool
 	}{
-		{name: "dev server", args: `{"scope":"project","argv":["npm","run","dev"]}`, class: RiskClassCommand, lowRisk: true},
-		{name: "unknown server", args: `{"scope":"project","argv":["my-server","--watch"]}`, class: RiskClassCommand, lowRisk: true},
-		{name: "shell", args: `{"scope":"project","script":"npm run dev"}`, class: RiskClassCommand, lowRisk: false},
-		{name: "destructive", args: `{"scope":"project","argv":["rm","-rf","build"]}`, class: RiskClassDestructive, lowRisk: false},
+		{name: "dev server", args: `{"scope":"project","command":"npm run dev","background":true}`, class: RiskClassCommand, lowRisk: true},
+		{name: "unknown server", args: `{"scope":"project","command":"my-server --watch","background":true}`, class: RiskClassCommand, lowRisk: true},
+		{name: "pipeline", args: `{"scope":"project","command":"npm run dev | tee dev.log","background":true}`, class: RiskClassCommand, lowRisk: true},
+		{name: "destructive", args: `{"scope":"project","command":"rm -rf build","background":true}`, class: RiskClassDestructive, lowRisk: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			risk, ok := ClassifyToolCall(CommandStart, json.RawMessage(test.args))
+			risk, ok := ClassifyToolCall(CommandRun, json.RawMessage(test.args))
 			if !ok || risk.Class != test.class || risk.LowRisk != test.lowRisk || risk.Operation != "process_start" {
 				t.Fatalf("unexpected background command risk: %+v ok=%v", risk, ok)
 			}
@@ -286,7 +326,7 @@ func TestClassifyToolCallBackgroundCommandUsesSameRiskRules(t *testing.T) {
 }
 
 func TestClassifyToolCallRejectsLegacyCommandScope(t *testing.T) {
-	if risk, ok := ClassifyToolCall(CommandRun, json.RawMessage(`{"scope":"workspace","argv":["go","test","./..."]}`)); ok {
+	if risk, ok := ClassifyToolCall(CommandRun, json.RawMessage(`{"scope":"workspace","command":"go test ./..."}`)); ok {
 		t.Fatalf("legacy command scope must be rejected: %+v", risk)
 	}
 }

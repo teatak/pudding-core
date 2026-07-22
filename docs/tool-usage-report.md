@@ -55,8 +55,8 @@ CLI 回退只识别明确的同领域命令:
 
 这个指标用于发现专用工具失败后的替代路径,不是所有命令调用的等价性证明。
 
-`builtin_command_run/start/poll/stop` 统一归入 `command` 组;
-`builtin_toolkit_load` 单列为 `toolkit` 组,便于观察 CLI 使用与按需扩展频率。
+`builtin_command_run/session` 统一归入 `command` 组;
+`builtin_app_load` 单列为 `app` 组,便于观察 CLI 使用与会话级能力扩展频率。
 
 ## 使用原则
 

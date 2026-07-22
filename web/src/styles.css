@@ -724,14 +724,6 @@ html[data-shell] :where(
     background-color: var(--message-user-background);
 }
 
-.pudding-conversation {
-    background-image: linear-gradient(
-        180deg,
-        color-mix(in oklch, var(--background), var(--card) 16%),
-        var(--background) 18rem
-    );
-}
-
 .pudding-transcript-viewport {
     font-size: 0.875rem;
     letter-spacing: -0.004em;
@@ -1487,7 +1479,7 @@ html[data-shell] :where(
 /* wrapper 负责圆角边框与横向滚动;table 本体保持 table 布局并 w-full,
    内容窄时行随容器通栏,内容宽时在 wrapper 内横滚 */
 .pudding-markdown .table-wrap {
-  @apply max-w-full overflow-x-auto rounded-lg border;
+  @apply max-w-full overflow-x-auto rounded-lg border border-border/70;
 }
 
 .pudding-markdown table {
@@ -1496,7 +1488,7 @@ html[data-shell] :where(
 
 .pudding-markdown th,
 .pudding-markdown td {
-  @apply border-b px-3 py-2 text-left align-top;
+  @apply border-b border-border/70 px-3 py-2 text-left align-top;
 }
 
 .pudding-markdown th {

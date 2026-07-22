@@ -116,10 +116,10 @@ function buildMentionSections(references: ComposerMentionReference[], t: (key: s
 }
 
 function MentionIcon({ reference }: { reference: ComposerMentionReference }) {
+  if (reference.appSource === "builtin" && reference.appID) {
+    return <BuiltinAppIcon appID={reference.appID} size="xs" />;
+  }
   if (reference.kind === "app") {
-    if (reference.id === "browser" || reference.id === "terminal" || reference.id === "canvas") {
-      return <BuiltinAppIcon appID={reference.id} size="xs" />;
-    }
     return <AppIcon icon={reference.appIcon} size="xs" src={reference.iconURL} />;
   }
   if (reference.iconURL && reference.appIcon) {

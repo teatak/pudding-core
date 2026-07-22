@@ -80,7 +80,7 @@ function TextFilePreviewSurface({ active, preview }: { active: boolean; preview:
     >
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-[var(--workspace-border)] bg-[var(--workspace-chrome-background)] px-3">
         <FileCode2 className="size-4 shrink-0 text-muted-foreground" />
-        <code className="min-w-0 flex-1 cursor-text select-text truncate font-mono text-xs" title={preview.path}>
+        <code className="min-w-0 flex-1 cursor-text select-text truncate font-mono text-xs" >
           {preview.path}
         </code>
         {language ? <span className="shrink-0 text-[10px] uppercase text-muted-foreground">{language}</span> : null}

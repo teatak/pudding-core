@@ -26,7 +26,6 @@ import (
 )
 
 const defaultMaxToolLoops = 16
-const maxToolkitLoads = 2
 const toolCallTimeout = 60 * time.Second
 const streamEventCoalesceInterval = 30 * time.Millisecond
 
@@ -448,12 +447,11 @@ func (e *Engine) SessionUsage(ctx context.Context, sessionID string) (*SessionUs
 	}
 	req.Config = resolved.config
 	if modelSupportsTools(resolved.config) {
-		defs, catalog, err := e.toolDefinitions(ctx, sessionID, mode, nil)
+		defs, err := e.toolDefinitions(ctx, sessionID, mode)
 		if err != nil {
 			return nil, err
 		}
 		req.Tools = defs
-		req.System = appendToolkitIndex(req.System, tool.ToolkitIndex(mode, catalog))
 	}
 	estimate := contextbuilder.EstimateRequest(req)
 	stat, err := e.store.SessionUsage(ctx, sessionID)
@@ -1025,8 +1023,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 	if currentMode == "" {
 		currentMode = store.ModeChat
 	}
-	toolkits := newTurnToolkitState()
-	baseReq, err := e.buildProviderRequest(ctx, sessionID, resolved, currentMode, toolkits)
+	baseReq, err := e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
 	if err != nil {
 		return store.TurnFailed, fmt.Sprintf("build context: %v", err), currentMode
 	}
@@ -1070,14 +1067,14 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 		if err := e.commitTurnParts(turnID, parts, true); err != nil {
 			return store.TurnFailed, fmt.Sprintf("append output: %v", err), currentMode
 		}
-		status, msg, nextMode, changed := e.executePendingTools(ctx, sessionID, turnID, currentMode, baseReq.Tools, toolkits, parts)
+		status, msg, nextMode, changed := e.executePendingTools(ctx, sessionID, turnID, currentMode, baseReq.Tools, parts)
 		if status != store.TurnRunning {
 			return status, msg, currentMode
 		}
 		if changed {
 			messages := baseReq.Messages
 			currentMode = nextMode
-			baseReq, err = e.buildProviderRequest(ctx, sessionID, resolved, currentMode, toolkits)
+			baseReq, err = e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
 			if err != nil {
 				return store.TurnFailed, fmt.Sprintf("build context: %v", err), currentMode
 			}
@@ -1102,46 +1099,37 @@ func (e *Engine) commitTurnParts(turnID string, parts *turnPartAccumulator, incl
 	return nil
 }
 
-func (e *Engine) buildProviderRequest(ctx context.Context, sessionID string, resolved *resolvedModel, mode store.AgentMode, toolkits *turnToolkitState) (provider.Request, error) {
+func (e *Engine) buildProviderRequest(ctx context.Context, sessionID string, resolved *resolvedModel, mode store.AgentMode) (provider.Request, error) {
 	req, err := e.builder.Build(ctx, sessionID, resolved.model, string(mode), resolved.config)
 	if err != nil {
 		return provider.Request{}, err
 	}
 	req.Config = resolved.config
 	if modelSupportsTools(resolved.config) {
-		var active map[string]bool
-		if toolkits != nil {
-			active = toolkits.active
-		}
-		defs, catalog, err := e.toolDefinitions(ctx, sessionID, mode, active)
+		defs, err := e.toolDefinitions(ctx, sessionID, mode)
 		if err != nil {
 			return provider.Request{}, err
 		}
 		req.Tools = defs
-		req.System = appendToolkitIndex(req.System, tool.ToolkitIndex(mode, catalog))
-		if toolkits != nil {
-			toolkits.catalog = catalog
-		}
 	}
 	return req, nil
 }
 
-func (e *Engine) toolDefinitions(ctx context.Context, sessionID string, mode store.AgentMode, active map[string]bool) ([]provider.ToolDef, []tool.ToolkitManifest, error) {
+func (e *Engine) toolDefinitions(ctx context.Context, sessionID string, mode store.AgentMode) ([]provider.ToolDef, error) {
 	if e.apps == nil {
 		var defs []provider.ToolDef
 		if e.tools != nil {
 			runnerDefs, err := e.tools.Definitions(ctx, sessionID)
 			if err != nil {
-				return nil, nil, fmt.Errorf("list tools: %w", err)
+				return nil, fmt.Errorf("list tools: %w", err)
 			}
 			defs = runnerDefs
 		}
-		catalog := tool.BuildToolkitCatalog(defs)
-		return tool.DefinitionsFromCatalog(mode, defs, catalog, active), catalog, nil
+		return tool.CoreDefinitionsForMode(mode, defs), nil
 	}
 	appStates, err := e.sessionAppStates(ctx, sessionID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	loadedAppIDs := callableAppIDs(appStates, mode)
 	var defs []provider.ToolDef
@@ -1153,11 +1141,11 @@ func (e *Engine) toolDefinitions(ctx context.Context, sessionID string, mode sto
 			runnerDefs, err = e.tools.Definitions(ctx, sessionID)
 		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("list tools: %w", err)
+			return nil, fmt.Errorf("list tools: %w", err)
 		}
 		defs = runnerDefs
 	}
-	toolkitDefs := make([]provider.ToolDef, 0, len(defs))
+	coreDefs := make([]provider.ToolDef, 0, len(defs))
 	appDefs := make([]provider.ToolDef, 0)
 	for _, def := range defs {
 		appID, appTool := tool.BuiltinAppIDForTool(def.Name)
@@ -1179,14 +1167,13 @@ func (e *Engine) toolDefinitions(ctx context.Context, sessionID string, mode sto
 			}
 			continue
 		}
-		toolkitDefs = append(toolkitDefs, def)
+		coreDefs = append(coreDefs, def)
 	}
-	catalog := tool.BuildToolkitCatalog(toolkitDefs)
-	out := tool.DefinitionsFromCatalog(mode, toolkitDefs, catalog, active)
+	out := tool.CoreDefinitionsForMode(mode, coreDefs)
 	out = append(out, tool.AppLoadDefinition())
 	sort.Slice(appDefs, func(i, j int) bool { return appDefs[i].Name < appDefs[j].Name })
 	out = append(out, appDefs...)
-	return out, catalog, nil
+	return out, nil
 }
 
 func callableAppIDs(states map[string]sessionAppState, mode store.AgentMode) []string {
@@ -1259,17 +1246,6 @@ func requiredAppMode(definition *app.Definition) store.AgentMode {
 		return store.ModeWork
 	}
 	return mode
-}
-
-func appendToolkitIndex(system, index string) string {
-	index = strings.TrimSpace(index)
-	if index == "" {
-		return system
-	}
-	if strings.TrimSpace(system) == "" {
-		return index
-	}
-	return strings.TrimRight(system, "\n") + "\n\n" + index
 }
 
 func modelSupportsTools(cfg provider.ModelConfig) bool {
@@ -1489,7 +1465,7 @@ func mergeStreamEvents(previous, next event.Event) (event.Event, bool) {
 	return event.Event{}, false
 }
 
-func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID string, currentMode store.AgentMode, allowedTools []provider.ToolDef, toolkits *turnToolkitState, parts *turnPartAccumulator) (store.TurnStatus, string, store.AgentMode, bool) {
+func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID string, currentMode store.AgentMode, allowedTools []provider.ToolDef, parts *turnPartAccumulator) (store.TurnStatus, string, store.AgentMode, bool) {
 	calls := parts.PendingToolCalls()
 	if len(calls) == 0 {
 		return store.TurnFailed, "provider finished with tool_calls but emitted no complete tool call", currentMode, false
@@ -1517,10 +1493,6 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 				nextMode = requestedMode
 				modeChanged = true
 			}
-		} else if call.Name == tool.ToolkitLoad {
-			var changed bool
-			result, changed = loadTurnToolkits(call, nextMode, toolkits)
-			toolsChanged = toolsChanged || changed
 		} else if call.Name == tool.AppLoad {
 			var changed bool
 			result, changed = e.loadApp(ctx, sessionID, call, nextMode)
@@ -1558,7 +1530,7 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 					if appID, appTool := tool.BuiltinAppIDForTool(call.Name); appTool && e.apps != nil {
 						result = e.appToolUnavailableResult(ctx, sessionID, call, appID)
 					} else {
-						result = toolNotLoadedResult(call, toolkits.catalog)
+						result = toolUnavailableResult(call)
 					}
 				} else {
 					result = toolNotAllowedResult(call, nextMode)
@@ -1639,7 +1611,7 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 			var approved bool
 			result, approved = e.requestToolCallApproval(ctx, sessionID, turnID, call, risk, project, approvalDetails)
 			if approved {
-				if call.Name == tool.CommandRun || call.Name == tool.CommandStart {
+				if call.Name == tool.CommandRun {
 					call.CommandSandbox = tool.CommandSandboxBypass
 				}
 				result = e.callTrackedTool(ctx, sessionID, turnID, mode, call)
@@ -1793,93 +1765,6 @@ func appLoadFailure(call tool.Call, reason, message string, extra map[string]any
 	}
 }
 
-type turnToolkitState struct {
-	active  map[string]bool
-	loads   int
-	catalog []tool.ToolkitManifest
-}
-
-func newTurnToolkitState() *turnToolkitState {
-	return &turnToolkitState{active: make(map[string]bool)}
-}
-
-func loadTurnToolkits(call tool.Call, mode store.AgentMode, state *turnToolkitState) (tool.Result, bool) {
-	if state == nil {
-		return toolkitLoadFailure(call, "toolkit_state_unavailable", "turn toolkit state is unavailable", nil), false
-	}
-	if state.loads >= maxToolkitLoads {
-		return toolkitLoadFailure(call, "toolkit_load_limit", "toolkits can be expanded at most twice per turn", map[string]any{"maxLoads": maxToolkitLoads}), false
-	}
-	request, err := tool.DecodeToolkitLoadRequest(call.Args)
-	if err != nil {
-		return toolkitLoadFailure(call, "invalid_arguments", err.Error(), nil), false
-	}
-	manifests := make([]tool.ToolkitManifest, 0, len(request.ToolkitIDs))
-	for _, id := range request.ToolkitIDs {
-		manifest, ok := tool.ToolkitByID(state.catalog, id)
-		if !ok {
-			return toolkitLoadFailure(call, "unknown_toolkit", "toolkit is not listed in Available Toolkits", map[string]any{"toolkitID": id}), false
-		}
-		if store.AgentModeRank(mode) < store.AgentModeRank(manifest.Capability) {
-			return toolkitLoadFailure(call, "capability_required", "toolkit requires a higher capability", map[string]any{
-				"toolkitID":    id,
-				"currentMode":  store.NormalizeAgentMode(mode),
-				"requiredMode": manifest.Capability,
-			}), false
-		}
-		manifests = append(manifests, manifest)
-	}
-	state.loads++
-	loaded := make([]string, 0, len(manifests))
-	alreadyActive := make([]string, 0, len(manifests))
-	tools := make([]string, 0)
-	for _, manifest := range manifests {
-		if manifest.Default || state.active[manifest.ID] {
-			alreadyActive = append(alreadyActive, manifest.ID)
-			continue
-		}
-		state.active[manifest.ID] = true
-		loaded = append(loaded, manifest.ID)
-		tools = append(tools, manifest.ToolNames...)
-	}
-	sort.Strings(loaded)
-	sort.Strings(alreadyActive)
-	sort.Strings(tools)
-	payload := map[string]any{
-		"ok":             true,
-		"loaded":         loaded,
-		"alreadyActive":  alreadyActive,
-		"activeToolkits": tool.ActiveToolkitIDs(state.active),
-		"tools":          tools,
-		"loadsRemaining": maxToolkitLoads - state.loads,
-	}
-	content, _ := json.Marshal(payload)
-	return tool.Result{
-		CallID:       call.CallID,
-		Name:         call.Name,
-		Ok:           true,
-		Content:      string(content),
-		SummaryKind:  tool.SummaryReturnedItems,
-		SummaryCount: len(tools),
-	}, len(loaded) > 0
-}
-
-func toolkitLoadFailure(call tool.Call, reason, message string, extra map[string]any) tool.Result {
-	payload := map[string]any{"ok": false, "reason": reason, "message": message}
-	for key, value := range extra {
-		payload[key] = value
-	}
-	content, _ := json.Marshal(payload)
-	return tool.Result{
-		CallID:       call.CallID,
-		Name:         call.Name,
-		Ok:           false,
-		Content:      string(content),
-		SummaryKind:  tool.SummaryReturnedFields,
-		SummaryCount: len(payload),
-	}
-}
-
 func (e *Engine) callTool(ctx context.Context, sessionID, turnID string, call tool.Call) tool.Result {
 	toolCtx, cancel, timed := toolContext(ctx, call.Name)
 	toolCtx = tool.WithProgressSink(toolCtx, func(progress tool.Progress) {
@@ -1917,7 +1802,7 @@ func (e *Engine) callTrackedTool(ctx context.Context, sessionID, turnID string, 
 }
 
 func toolContext(ctx context.Context, name string) (context.Context, context.CancelFunc, bool) {
-	if strings.HasPrefix(name, "ui_") || name == tool.CommandRun || name == tool.CommandPoll {
+	if name == tool.CommandRun || name == tool.CommandSession {
 		return ctx, func() {}, false
 	}
 	toolCtx, cancel := context.WithTimeout(ctx, toolCallTimeout)
@@ -1976,7 +1861,7 @@ func (e *Engine) projectRootDirsForToolCall(ctx context.Context, sessionID, turn
 }
 
 func (e *Engine) toolNameKnown(ctx context.Context, sessionID, name string) (bool, error) {
-	if name == tool.RequestCapability || name == tool.ToolkitLoad || (name == tool.AppLoad && e.apps != nil) {
+	if name == tool.RequestCapability || (name == tool.AppLoad && e.apps != nil) {
 		return true, nil
 	}
 	if e.tools == nil {
@@ -2093,19 +1978,16 @@ func appAPINotLoadedResult(call tool.Call) tool.Result {
 	}
 }
 
-func toolNotLoadedResult(call tool.Call, catalog []tool.ToolkitManifest) tool.Result {
+func toolUnavailableResult(call tool.Call) tool.Result {
 	payload := map[string]any{
 		"ok":      false,
-		"reason":  "tool_not_loaded",
+		"reason":  "tool_unavailable",
 		"tool":    call.Name,
-		"message": "tool is known but not loaded for this turn; call builtin_toolkit_load first",
-	}
-	if manifest, ok := tool.ToolkitForTool(catalog, call.Name); ok {
-		payload["toolkitID"] = manifest.ID
+		"message": "tool is known but is not available in the current request",
 	}
 	b, err := json.Marshal(payload)
 	if err != nil {
-		b = []byte(`{"ok":false,"reason":"tool_not_loaded"}`)
+		b = []byte(`{"ok":false,"reason":"tool_unavailable"}`)
 	}
 	return tool.Result{
 		CallID:       call.CallID,

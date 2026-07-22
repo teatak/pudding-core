@@ -461,7 +461,7 @@ func refineToolRisk(name string, risk tool.ToolRisk, details map[string]any) too
 		if destructive, _ := details["destructive"].(bool); destructive {
 			risk.Class = tool.RiskClassDestructive
 			risk.LowRisk = false
-			risk.Summary = "Apply a patch proposal that deletes project files."
+			risk.Summary = "Apply a multi-file patch that deletes project files."
 		}
 	}
 	return risk

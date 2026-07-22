@@ -40,12 +40,12 @@ session submit
 - 内置文件工具已覆盖 list/read/stat/search/slice/write/patch/delete/move/copy。
 - 前端已有 thought/tool/approval overlay,并能合并 `tool_use` + `tool_result`。
 
-立项时的主要缺口如下,现均已按后续章节落地;PTY 仍是明确非目标:
+立项时的主要缺口如下,现均已按后续章节落地:
 
 - 没有 command/PTY/process runner。
 - 没有 git 专用工具。
 - command/git/network 等高风险工具还未接入统一审批策略。
-- 没有 patch proposal / diff review / 局部接受能力。
+- 没有多文件原子 patch、审批前 diff 与 Turn Diff 审阅能力。
 - 工具卡片还没有针对 code/git/command 的专门展示与 i18n 命名。
 
 ## 2. 产品目标
@@ -210,8 +210,7 @@ REST 只在需要 UI 决策、审批、快照时补充,不新增无 session scop
   "input": {
     "scope": "project",
     "cwd": "relative/or/absolute/path inside authorized Project root",
-    "argv": ["go", "test", "./internal/tool"],
-    // 或使用 "script": "go test ./internal/tool";二者互斥
+    "command": "go test ./internal/tool",
     "env": {"KEY": "value"},
     "timeout_ms": 120000
   }
@@ -220,9 +219,9 @@ REST 只在需要 UI 决策、审批、快照时补充,不新增无 session scop
 
 约束:
 
-- `argv` 直接执行且是默认路径;`script` 由平台固定的非交互 shell 执行,
-  两者必须且只能提供一个。
-- 模型不能指定 shell executable 或启动参数;script 统一按高风险路径审批。
+- 只接受完整 `command` 字符串,由平台固定的非交互 shell 执行。
+- 模型不能指定 shell executable 或启动参数;Auto 用 shell AST 拆分静态命令段,
+  逐段执行风险判断,动态结构降级为审批。
 - `cwd` 必须解析到当前 Project 授权范围内。
 - 默认只继承 PATH、HOME、临时目录、locale 和常见 toolchain 路径变量;desktop
   daemon 会在 PATH 后补充 Homebrew 与常见用户工具链目录,runner 按合并值解析
@@ -240,7 +239,8 @@ REST 只在需要 UI 决策、审批、快照时补充,不新增无 session scop
 {
   "ok": true,
   "cwd": "...",
-  "argv": ["go", "test", "./internal/tool"],
+  "command": "go test ./internal/tool",
+  "shell": "sh",
   "exitCode": 0,
   "durationMs": 1234,
   "stdout": "...",
@@ -260,14 +260,11 @@ REST 只在需要 UI 决策、审批、快照时补充,不新增无 session scop
 - stdout/stderr
 - duration
 
-### 5.3 是否需要 PTY
+### 5.3 PTY 边界
 
-第一版不需要 PTY:
-
-- 测试、构建、lint 都可以用非交互 `exec.CommandContext`。
-- PTY 会带来交互输入、终端尺寸、转义序列、长期进程管理等复杂度。
-
-后续如果要做 interactive terminal,另起 `builtin_terminal_*` 或 WebSocket bridge。
+测试、构建、lint 默认继续使用非交互命令。只有显式设置 `background:true, tty:true`
+时才创建 agent-owned PTY,用于交互式 CLI 或 REPL;它与用户手动打开的桌面终端隔离。
+密码、sudo、完整 TUI 和远程 SSH 自动化不在当前范围内。
 
 ## 6. Git 工具设计
 
@@ -320,32 +317,28 @@ agent read/search
 
 因此 MVP 前必须给写工具加 approval。
 
-### 7.2 正式: patch proposal
+### 7.2 正式:单次原子 patch
 
-新增工具:
+新增一个写入工具:
 
-- `builtin_patch_propose`:生成 patch proposal,不落盘。
-- `builtin_patch_apply`:应用已批准 proposal。
+- `builtin_patch_apply`:一次提交一个逻辑批次的多文件修改。
 
-proposal payload:
+调用 payload:
 
 ```jsonc
 {
-  "proposalID": "patch_...",
-  "projectRoot": "...",
+  "scope": "project",
   "files": [
     {
       "path": "internal/foo.go",
-      "oldText": "...",
-      "newText": "...",
-      "unifiedDiff": "..."
+      "edits": [{"old_text": "...", "new_text": "..."}]
     }
   ]
 }
 ```
 
-proposal 可先存在 engine memory 或 temp artifact;正式再考虑 SQLite 表。
-用户局部接受/拒绝需要前端 diff UI 后再实现。
+工具在审批前准备精确 diff 和源文件 hash 快照,审批通过后消费同一快照并原子落盘。
+模型不需要保存或回传中间 patch id。完成后的产物统一进入 Turn 文件 Diff。
 
 ## 8. 前端设计
 
@@ -484,7 +477,7 @@ proposal 可先存在 engine memory 或 temp artifact;正式再考虑 SQLite 表
 状态:已完成(2026-07-10)。
 
 - 已新增 `builtin_command_run`。
-- 使用非 shell argv 与 Project cwd 约束。
+- 使用单一 command、固定 shell 与 Project cwd 约束。
 - 使用最小继承环境,支持显式 `env`。
 - 已实现 timeout、64 KiB 头尾截断、process tree cancel。
 - 已接入 ask/auto/full 审批与 command/destructive 风险分类。
@@ -523,7 +516,7 @@ proposal 可先存在 engine memory 或 temp artifact;正式再考虑 SQLite 表
 状态:已完成(2026-07-10)。
 
 - transcript 按 tool name + JSON content 选择 command、Git 或 file renderer。
-- command 展示 argv、cwd、exit code、duration、stdout/stderr 与截断状态。
+- command 展示完整命令、cwd、exit code、duration、stdout/stderr 与截断状态。
 - git status 展示分支、ahead/behind、分类计数与文件状态列表。
 - git diff 展示逐文件增删统计、staged 状态与可滚动 unified diff。
 - git log 展示 hash、subject、author 与提交时间。
@@ -539,26 +532,25 @@ proposal 可先存在 engine memory 或 temp artifact;正式再考虑 SQLite 表
 - 已完成:transcript 不暴露 snake_case 工具名作为主显示。
 - 已完成:command/git/file 结果可展开查看,并保留按需展开的原始数据。
 
-### C5: Patch Proposal
+### C5: Atomic Patch
 
 状态:已完成(2026-07-10)。
 
-- 已新增 `builtin_patch_propose` 与 `builtin_patch_apply`。
-- propose 接受最多 16 个同 Project root 的 UTF-8 regular file 全文更新、创建或
-  删除,只生成 unified diff,不写工作树。
-- proposal 是 session-scoped daemon memory,TTL 2 小时,最多保留 128 个。
-- proposal 记录源文件 SHA-256;approval details 和 apply 前均重新验证授权与漂移。
+- 已新增单次调用的 `builtin_patch_apply`。
+- 一次接受最多 16 个同 Project root 的 UTF-8 regular file 全文更新、局部 edits、
+  创建或删除。
+- approval details 按 `(sessionID, callID)` 暂存精确 diff、参数 hash 与源文件 SHA-256;
+  审批后消费同一快照,模型不参与第二次调用。
 - apply 预写同目录临时文件,再通过 backup + rename 应用;中途失败逆序回滚。
 - unified diff 超过 256 KiB 时拒绝生成,要求 agent 拆分,避免用户批准未展示内容。
 - `auto` 对已验证且不含文件删除的 Project 内 apply 自动放行;删除仍请求审批;
-  `ask` 请求审批;`full` 跳过普通审批。三档都继续执行 proposal/hash 校验。
-- approval payload 包含 proposalID、路径、文件统计和完整 diff。
-- composer 支持查看 diff、整包应用或拒绝;transcript 已补 propose/apply 结构化
-  卡片和三语显示名。
+  `ask` 请求审批;`full` 跳过普通审批。三档都继续执行路径/hash 校验。
+- approval payload 包含路径、文件统计和完整 diff。
+- composer 支持查看 diff、整包应用或拒绝;transcript 显示结构化结果和三语名称。
 
 验收:
 
-- 已完成:agent 可先提出 diff,工作树保持不变;`ask` 用户批准后落盘,
+- 已完成:`ask` 审批等待期间工作树保持不变,用户批准后落盘,
   `auto/full` 按策略自动落盘。
 - 已完成:文件在等待审批期间发生漂移时,apply 整包拒绝且不产生部分写入。
 
@@ -619,7 +611,7 @@ proposal 可先存在 engine memory 或 temp artifact;正式再考虑 SQLite 表
 - 返回授权根、检查目录、Git root、语言、manifest、项目指令文件和建议验证命令。
 - 第一版只识别稳定的文件标记,例如 `go.mod`、`package.json`、`Cargo.toml`、
   `pyproject.toml`、`AGENTS.md`、`CONTRIBUTING.md`。
-- `package.json` 只读取 scripts 名称并生成 argv 建议,不执行脚本。
+- `package.json` 只读取 scripts 名称并生成 command 建议,不执行脚本。
 - 扫描有固定深度、文件数和字节上限;结果按需生成,不写入 Project 或 SQLite。
 
 Project 仍只承载 `rootDirs` 与 `approvalMode`;代码语言、脚本和指令文件可能随
@@ -648,13 +640,13 @@ Project 仍只承载 `rootDirs` 与 `approvalMode`;代码语言、脚本和指�
 目标:
 
 - 降低修改大文件时传输完整 `new_text` 的 token 成本。
-- 继续复用补丁 proposal 的 diff 审批、漂移检测和多文件原子应用。
+- 继续复用补丁的 diff 审批、漂移检测和多文件原子应用。
 - 把测试、lint、build 的结果从原始终端文本提升为可定位的结构化诊断。
 - 不新增绕过 command 审批策略的自动执行路径。
 
 #### C8.1 Patch V2 局部 edits
 
-`builtin_patch_propose.files[]` 支持三种互斥操作:
+`builtin_patch_apply.files[]` 支持三种互斥操作:
 
 - `new_text`:创建文件或显式全文替换。
 - `delete:true`:删除已有文本文件。
@@ -674,7 +666,7 @@ Project 仍只承载 `rootDirs` 与 `approvalMode`;代码语言、脚本和指�
 
 - 每个文件最多 64 个 edits,按数组顺序应用到内存快照。
 - `old_text` 必须非空;默认只能唯一匹配,多处匹配必须显式 `replace_all`。
-- 任意 edit 不匹配或存在歧义时,整个 proposal 生成失败,工作树不变。
+- 任意 edit 不匹配或存在歧义时,整个 patch 失败,工作树不变。
 - 后端基于最终内存文本生成 unified diff;apply 流程继续使用原有 hash 校验、
   backup + rename 与失败回滚。
 - 修改已有文件时优先使用 edits;创建文件或确实需要全文替换时才使用
@@ -684,7 +676,7 @@ Project 仍只承载 `rootDirs` 与 `approvalMode`;代码语言、脚本和指�
 
 不新增 `builtin_project_verify`;继续使用 `builtin_command_run`:
 
-- 根据 argv 识别 `test | lint | build | check` 等验证类型。
+- 根据静态单命令 AST 识别 `test | lint | build | check` 等验证类型。
 - result 增加 `verificationKind`、`verificationStatus` 与 `diagnostics`。
 - 非验证命令保持普通 terminal result,不伪造“已验证”状态。
 - 非零退出码仍是命令正常完成,但验证状态为 `failed`。
@@ -710,7 +702,7 @@ Project 仍只承载 `rootDirs` 与 `approvalMode`;代码语言、脚本和指�
 验收:
 
 - agent 可以用局部 edits 提出多文件补丁,无需发送完整旧文件。
-- 任意 edit 冲突时 proposal 不产生,apply 的原子性与漂移保护不退化。
+- 任意 edit 冲突时整包失败,apply 的原子性与漂移保护不退化。
 - 常见 Go、TypeScript、ESLint 错误能转成结构化诊断。
 - 用户点击诊断能在画布定位对应文件行。
 - 普通命令不会被错误标记为验证通过。
@@ -831,13 +823,14 @@ Project resolver 的安全边界。
 详细设计见 [Pudding 安全语义重构设计](./code-refactor-design.md)。
 
 首版只增加统一 `builtin_code_rename`,把 Go 与 TypeScript / JavaScript language
-server 返回的 `WorkspaceEdit` 全量验证并转换成现有 Patch Proposal。工具不直接写盘;
-真正应用仍由 `builtin_patch_apply` 展示 diff、请求审批、校验漂移并事务提交。
+server 返回的 `WorkspaceEdit` 全量验证并转换成同一原子 Patch 结构,然后直接走
+`builtin_patch_apply` 的路径校验、漂移检查与事务提交。Ask 模式先审批重命名操作,
+完成后通过 Turn 文件 Diff 审阅实际改动。
 
 | 切片 | 内容 | 状态 |
 | --- | --- | --- |
 | C11.0 | 设计、工具与 WorkspaceEdit 安全契约 | 已完成 |
-| C11.1 | LSP rename、WorkspaceEdit 转换与 Patch Proposal 复用 | 已完成 |
+| C11.1 | LSP rename、WorkspaceEdit 转换与原子 Patch 复用 | 已完成 |
 | C11.2 | transcript、图标、三语 i18n 与 Project prompt | 已完成 |
 | C11.3 | fake/真实 server 集成与全量验证 | 已完成 |
 
@@ -847,7 +840,7 @@ server 返回的 `WorkspaceEdit` 全量验证并转换成现有 Patch Proposal�
 
 - `internal/tool` 单测:路径沙箱、command、git read/write、patch、policy。
 - `internal/engine` 单测:tool-call approval、cancel、turn 收尾事务。
-- `internal/store` 单测:如新增 proposal 表才补。
+- `internal/store` 单测:Turn 文件 Diff 与 turn 收尾事务。
 
 前端:
 
@@ -864,7 +857,6 @@ server 返回的 `WorkspaceEdit` 全量验证并转换成现有 Patch Proposal�
 - tool-call approval 的 session 级记忆是否落 SQLite,还是只在运行内存?
 - command runner 是否允许继承用户 shell PATH?
 - `npm install`、`go get` 等依赖下载是否应在 `auto` 中直接运行?
-- patch proposal 是否先用 temp artifact,还是直接建 SQLite 表?
 - Code Activity Panel 放 transcript 内,还是 canvas/right pane?
 
 建议答案:
@@ -873,5 +865,5 @@ server 返回的 `WorkspaceEdit` 全量验证并转换成现有 Patch Proposal�
 - PATH 可继承,但 env 白名单化。
 - 依赖下载和 Git 网络读取在 `auto` 中直接运行;push、发布、上传、登录及显式
   网络工具逐次审批。审批通过后文件沙箱不再二次阻止外部出站网络。
-- patch proposal 先 temp artifact,等 UI 稳定再落表。
+- 审批快照只做短期 daemon memory;完成后的事实源是 Turn 文件 Diff,不新增 patch 表。
 - 先 transcript renderer,再抽 Code Activity Panel。

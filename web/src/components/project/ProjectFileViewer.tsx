@@ -294,7 +294,7 @@ export function ProjectFileViewer({
       <>
       {fileSelection ? (
         <div className="flex h-8 shrink-0 items-center gap-2 bg-[var(--workspace-file-editor-background)] px-2.5">
-          <code className="min-w-0 flex-1 cursor-text select-text truncate font-mono text-xs" title={file?.path || fileSelection.path}>{file?.path || fileSelection.path}</code>
+          <code className="min-w-0 flex-1 cursor-text select-text truncate font-mono text-xs" >{file?.path || fileSelection.path}</code>
           {!isImage ? (
             <div className="flex shrink-0 items-center gap-1">
               {isMarkdown ? (
@@ -307,7 +307,7 @@ export function ProjectFileViewer({
                   </Button>
                 </>
               ) : null}
-              <Button aria-label={t("project.browserSave")} disabled={!dirty || saveMutation.isPending || externalConflict || fileQuery.isError} size="icon-sm" title={`${t("project.browserSave")} (⌘S)`} type="button" variant="ghost" onClick={() => save()}>
+              <Button aria-label={t("project.browserSave")} disabled={!dirty || saveMutation.isPending || externalConflict || fileQuery.isError} size="icon-sm"  type="button" variant="ghost" onClick={() => save()}>
                 {saveMutation.isPending ? <Spinner /> : <Save />}
               </Button>
             </div>

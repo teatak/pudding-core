@@ -9,6 +9,7 @@ import (
 	"github.com/teatak/cart/v3"
 	"github.com/teatak/pudding-core/internal/app"
 	"github.com/teatak/pudding-core/internal/store"
+	"github.com/teatak/pudding-core/internal/tool"
 )
 
 type appConnectionConfig interface {
@@ -80,8 +81,27 @@ func (s *Server) listApps(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
+	enrichBuiltinAppTools(apps)
 	c.JSON(http.StatusOK, map[string]any{"apps": apps})
 	return nil
+}
+
+func enrichBuiltinAppTools(definitions []*app.Definition) {
+	descriptions := make(map[string]string)
+	for _, definition := range tool.BuiltinDefinitions() {
+		descriptions[definition.Name] = definition.Description
+	}
+	for _, definition := range definitions {
+		if definition == nil || definition.Source != app.SourceBuiltin {
+			continue
+		}
+		for index := range definition.Tools {
+			if definition.Tools[index].Description != "" {
+				continue
+			}
+			definition.Tools[index].Description = descriptions[definition.Tools[index].Name]
+		}
+	}
 }
 
 func (s *Server) installApp(c *cart.Context) error {

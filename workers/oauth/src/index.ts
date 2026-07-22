@@ -1,8 +1,11 @@
-interface Env extends Record<string, string | undefined> {
+import { publicPage } from "./site"
+
+interface Env extends Record<string, unknown> {
   GITHUB_CLIENT_SECRET?: string
   GOOGLE_CLIENT_SECRET?: string
   ALLOWED_ORIGINS?: string
   OAUTH_PROVIDERS?: string
+  ASSETS?: Fetcher
 }
 
 type OAuthProvider = {
@@ -49,8 +52,6 @@ const jsonHeaders = {
   "Content-Type": "application/json; charset=utf-8",
 }
 
-const googleSiteVerification = "fyB0-L8lIT4f1VbiEdZKmxgvBNOTK1hcKM-CZATx4y0"
-
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
@@ -63,13 +64,22 @@ export default {
       })
     }
 
-    if (request.method === "GET") {
-      const page = publicPage(url.pathname)
-      if (page) return page
+    if (request.method === "GET" || request.method === "HEAD") {
+      if (isPublicAsset(url.pathname) && env.ASSETS) {
+        return env.ASSETS.fetch(request)
+      }
+
+      const page = publicPage(url)
+      if (page) {
+        if (url.hostname === "oauth.x-t.top") {
+          return Response.redirect(`https://x-t.top${url.pathname}${url.search}`, 308)
+        }
+        return request.method === "HEAD" ? withoutBody(page) : page
+      }
     }
 
     const provider = providerFromPath(url.pathname)
-    if (request.method === "POST" && provider) {
+    if (request.method === "POST" && provider && isOAuthHost(url.hostname)) {
       return exchangeOAuthCode(provider, request, env, corsHeaders)
     }
 
@@ -88,8 +98,10 @@ async function exchangeOAuthCode(
     return json({ ok: false, reason: "provider_not_configured" }, 404, corsHeaders)
   }
 
-  const clientID = provider.client_id || (provider.client_id_env ? env[provider.client_id_env] : "")
-  const clientSecret = env[provider.client_secret_env]
+  const clientID =
+    provider.client_id ||
+    (provider.client_id_env ? readEnvString(env, provider.client_id_env) : "")
+  const clientSecret = readEnvString(env, provider.client_secret_env)
   if (!clientID || !clientSecret) {
     return json({ ok: false, reason: "provider_secret_not_configured" }, 500, corsHeaders)
   }
@@ -146,7 +158,7 @@ async function exchangeOAuthCode(
 }
 
 function loadProviders(env: Env): Record<string, OAuthProvider> {
-  const configured = parseProviderJSON(env.OAUTH_PROVIDERS)
+  const configured = parseProviderJSON(readEnvString(env, "OAUTH_PROVIDERS"))
   return {
     ...defaultProviders,
     ...configured,
@@ -221,7 +233,7 @@ function isAllowedRedirectURI(
 
 function buildCORSHeaders(request: Request, env: Env): Record<string, string> {
   const origin = request.headers.get("Origin")
-  const allowedOrigins = parseCSV(env.ALLOWED_ORIGINS)
+  const allowedOrigins = parseCSV(readEnvString(env, "ALLOWED_ORIGINS"))
   const headers: Record<string, string> = {
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
@@ -246,6 +258,10 @@ function readString(value: unknown): string {
   return typeof value === "string" ? value.trim() : ""
 }
 
+function readEnvString(env: Env, key: string): string {
+  return readString(env[key])
+}
+
 function readStringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined
   return value.map(readString).filter(Boolean)
@@ -266,87 +282,24 @@ function isProviderID(value: string): boolean {
   return /^[a-z0-9][a-z0-9_-]*$/.test(value)
 }
 
-function publicPage(pathname: string): Response | null {
-  if (pathname === "/" || pathname === "") {
-    return htmlPage(
-      "Pudding OAuth",
-      "Pudding OAuth",
-      "Pudding OAuth securely completes authorization for Pudding Desktop connections.",
-    )
-  }
-  if (pathname === "/privacy") {
-    return htmlPage(
-      "Privacy Policy",
-      "Privacy Policy",
-      "Pudding OAuth only exchanges authorization codes for access tokens at the user's request. Tokens are returned to the local Pudding Desktop app and are not stored by this service.",
-    )
-  }
-  if (pathname === "/terms") {
-    return htmlPage(
-      "Terms of Service",
-      "Terms of Service",
-      "Use this service only to connect accounts you own or are authorized to access with Pudding Desktop.",
-    )
-  }
-  return null
+function isPublicAsset(pathname: string): boolean {
+  return pathname === "/logo.png" || pathname === "/og.png"
 }
 
-function htmlPage(title: string, heading: string, body: string): Response {
-  const html = `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="google-site-verification" content="${escapeHTML(googleSiteVerification)}">
-  <title>${escapeHTML(title)}</title>
-  <style>
-    body {
-      margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      color: #171717;
-      background: #fafafa;
-    }
-    main {
-      max-width: 680px;
-      margin: 0 auto;
-      padding: 72px 24px;
-      line-height: 1.6;
-    }
-    h1 {
-      margin: 0 0 16px;
-      font-size: 32px;
-      line-height: 1.2;
-    }
-    p {
-      margin: 0;
-      color: #525252;
-      font-size: 16px;
-    }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>${escapeHTML(heading)}</h1>
-    <p>${escapeHTML(body)}</p>
-  </main>
-</body>
-</html>`
-  return new Response(html, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "public, max-age=300",
-    },
+function isOAuthHost(hostname: string): boolean {
+  return (
+    hostname === "oauth.x-t.top" ||
+    hostname === "localhost" ||
+    hostname === "127.0.0.1"
+  )
+}
+
+function withoutBody(response: Response): Response {
+  return new Response(null, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
   })
-}
-
-function escapeHTML(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;")
 }
 
 function json(body: unknown, status: number, headers: Record<string, string>): Response {

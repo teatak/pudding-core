@@ -356,7 +356,7 @@ function ProjectGitRepositoryHeader({ disabled, hasUnsavedChanges, repository, s
   const { t } = useI18n();
   const status = repository.status;
   return (
-    <div className="flex h-8 min-w-0 items-center gap-1.5 px-2 text-xs" title={repository.root.path}>
+    <div className="flex h-8 min-w-0 items-center gap-1.5 px-2 text-xs" >
       <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
       <span className="min-w-0 flex-1 truncate font-medium">{repository.root.name}</span>
       {status?.available ? (
@@ -405,7 +405,7 @@ function ProjectGitChangeGroup({ files, group, label, pending, rootID, onDiscard
             className="size-6 opacity-0 group-hover/git-heading:opacity-100 focus-visible:opacity-100"
             disabled={pending}
             size="icon-xs"
-            title={t("project.gitDiscardAll")}
+
             type="button"
             variant="ghost"
             onClick={() => onDiscard({ files, rootID })}
@@ -418,7 +418,7 @@ function ProjectGitChangeGroup({ files, group, label, pending, rootID, onDiscard
           className="mr-1 size-6 opacity-0 group-hover/git-heading:opacity-100 focus-visible:opacity-100"
           disabled={pending}
           size="icon-xs"
-          title={staged ? t("project.gitUnstageAll") : t("project.gitStageAll")}
+
           type="button"
           variant="ghost"
           onClick={() => staged ? onUnstage(paths) : onStage(paths)}
@@ -440,7 +440,7 @@ function ProjectGitChangeGroup({ files, group, label, pending, rootID, onDiscard
               <div className="group/git-file flex h-7 min-w-0 items-center hover:bg-accent hover:text-accent-foreground">
                 <button
                   className="flex h-full min-w-0 flex-1 select-none items-center gap-1.5 pl-7 text-left text-xs"
-                  title={file.path}
+
                   type="button"
                   onClick={() => onOpenDiff(selection, false)}
                   onDoubleClick={() => onOpenDiff(selection, true)}
@@ -455,7 +455,7 @@ function ProjectGitChangeGroup({ files, group, label, pending, rootID, onDiscard
                     className="size-6"
                     disabled={pending}
                     size="icon-xs"
-                    title={staged ? t("project.gitUnstage") : t("project.gitStage")}
+
                     type="button"
                     variant="ghost"
                     onClick={() => staged ? onUnstage(projectGitMutationPaths([file])) : onStage(projectGitMutationPaths([file]))}
@@ -468,7 +468,7 @@ function ProjectGitChangeGroup({ files, group, label, pending, rootID, onDiscard
                       className="size-6"
                       disabled={pending}
                       size="icon-xs"
-                      title={t("project.gitDiscard")}
+
                       type="button"
                       variant="ghost"
                       onClick={() => onDiscard({ files: [file], rootID })}
@@ -529,7 +529,7 @@ function GitDiscardDialog({ pending, request, onCancel, onConfirm }: {
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div className="max-h-32 overflow-auto rounded-md bg-muted/50 px-2 py-1.5 font-mono text-[11px]">
-          {request?.files.map((file) => <div key={file.path} className="truncate" title={file.path}>{file.path}</div>)}
+          {request?.files.map((file) => <div key={file.path} className="truncate" >{file.path}</div>)}
         </div>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>{t("common.cancel")}</AlertDialogCancel>

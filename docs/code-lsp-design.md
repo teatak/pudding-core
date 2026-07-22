@@ -3,7 +3,7 @@
 > 状态:已完成(2026-07-10)。
 > 对应阶段:C10。  
 > 首版语言:Go、TypeScript / JavaScript。  
-> 目标:在不引入后端 focus、隐式上下文或完整 IDE 状态的前提下,为 Project mode
+> 目标:在不引入后端 focus、隐式上下文或完整 IDE 状态的前提下,为 Code mode
 > 提供结构化的符号、定义、引用和诊断能力。
 
 ## 1. 结论
@@ -818,12 +818,12 @@ C10 至此完成。
 
 ## 18. 后续方向
 
-C11 已按 Patch Proposal 路径落地 rename。继续评估:
+C11 已按原子 Patch 路径落地 rename。继续评估:
 
 - Windows/Linux language server 发布资源与启动器。
 - 是否用独立 Node runtime 替代 Electron `runAsNode` fuse 依赖。
 - hover / document symbols / call hierarchy。
-- code action proposal:只接受 WorkspaceEdit,转换为可审阅 diff。
+- code action:只接受 WorkspaceEdit,转换为可审阅并原子应用的 patch。
 - LSP progress live event。
 - Project 级 language server 显式配置。
 
@@ -832,9 +832,10 @@ rename 与后续 code action 必须走:
 ```text
 LSP WorkspaceEdit
   -> validate Project scope
-  -> Patch Proposal
-  -> user review / approval
+  -> prepare exact approval diff
+  -> user approval
   -> atomic apply
+  -> Turn file Diff
 ```
 
 禁止 language server 通过 `workspace/applyEdit` 直接修改工作树。

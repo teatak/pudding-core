@@ -1,7 +1,6 @@
 import {
   ArrowLeft,
   ArrowRight,
-  Blocks,
   BookOpen,
   BookOpenCheck,
   Braces,
@@ -16,7 +15,6 @@ import {
   Copy,
   Download,
   FileCheck,
-  FileDiff,
   FileInput,
   FileOutput,
   FilePenLine,
@@ -49,6 +47,7 @@ import {
   RefreshCw,
   RotateCw,
   Search,
+  ScanLine,
   ScanSearch,
   ScrollText,
   Send,
@@ -303,17 +302,14 @@ function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIc
     builtin_browser_status: PanelTop,
     builtin_browser_type: Keyboard,
     builtin_camera_capture: Camera,
-    builtin_command_poll: RefreshCw,
     builtin_command_run: SquareTerminal,
-    builtin_command_start: Play,
-    builtin_command_stop: Square,
-    builtin_toolkit_load: Blocks,
+    builtin_command_session: Keyboard,
     builtin_code_symbols: Braces,
     builtin_code_definition: LocateFixed,
     builtin_code_references: Waypoints,
     builtin_code_diagnostics: CircleAlert,
     builtin_code_rename: TextCursorInput,
-    builtin_desktop_screenshot: Camera,
+    builtin_desktop_screenshot: ScanLine,
     builtin_file_copy: Copy,
     builtin_file_delete: Trash2,
     builtin_file_list: ListTree,
@@ -331,7 +327,6 @@ function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIc
     builtin_git_unstage: FileOutput,
     builtin_git_commit: GitCommitHorizontal,
     builtin_patch_apply: FileCheck,
-    builtin_patch_propose: FileDiff,
     builtin_project_inspect: FolderSearch,
     builtin_project_instructions: ScrollText,
     builtin_graphql_introspect: ScanSearch,
@@ -347,7 +342,7 @@ function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIc
     builtin_web_fetch: Download,
     builtin_web_search: Search,
     request_capability: ShieldCheck,
-    collect_user_input: MessageSquareMore,
+    builtin_request_user_input: MessageSquareMore,
   };
   return known[name] || Wrench;
 }
@@ -694,6 +689,7 @@ function ThoughtPart({
       ) : null}
       <summary
         className="inline-grid h-6 cursor-default list-none grid-cols-[1rem_auto] items-center gap-1 pr-1 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden"
+        tabIndex={-1}
         onClick={handleThoughtSummaryClick}
         onKeyDown={handleThoughtSummaryKeyDown}
       >
@@ -739,6 +735,7 @@ function ProcessCompactPart({
     <details className="relative min-w-0 max-w-full overflow-hidden text-[13px] leading-[1.5] text-muted-foreground/70" open={open} onToggle={handleToggle}>
       <summary
         className="inline-grid h-6 cursor-default list-none grid-cols-[1rem_auto] items-center gap-1 pr-1 outline-none hover:text-muted-foreground [&::-webkit-details-marker]:hidden"
+        tabIndex={-1}
         onClick={handleSummaryClick}
         onKeyDown={handleSummaryKeyDown}
       >
@@ -937,7 +934,7 @@ function ToolUsePart({
   const toolName = part.name || part.resultName || "";
   const baseTitle = toolDisplayName(toolName, t("transcript.tool"), t);
   const codeTool = isCodeToolName(toolName);
-  const terminalTool = toolName === "builtin_command_run" || toolName === "builtin_command_start" || toolName === "builtin_command_poll" || toolName === "builtin_command_stop";
+  const terminalTool = toolName === "builtin_command_run" || toolName === "builtin_command_session";
   const showDetails = codeTool || showRawInfo;
   const active = part.active || part.phase === "streaming_args" || part.phase === "running";
   const elapsed = useElapsedDuration(active && part.phase === "running" ? part.phaseUpdatedAt : undefined, locale);
@@ -967,6 +964,7 @@ function ToolUsePart({
       {open ? <span aria-hidden="true" className="pointer-events-none absolute top-6 bottom-0 left-[6px] border-l border-border" /> : null}
       <summary
         className={cn("inline-grid h-6 cursor-default list-none grid-cols-[1rem_auto] items-center gap-1 pr-1 outline-none [&::-webkit-details-marker]:hidden", hoverClass)}
+        tabIndex={-1}
         onClick={handleSummaryClick}
         onKeyDown={handleSummaryKeyDown}
       >
@@ -1135,7 +1133,7 @@ export function MarkdownBody({
     pre({ children }) {
       const block = getCodeBlock(children);
       if (!block) {
-        return <pre>{children}</pre>;
+        return <pre tabIndex={-1}>{children}</pre>;
       }
       if (enableMermaid && block.lang?.trim().toLowerCase() === "mermaid") {
         return <MermaidBlock code={block.code} />;
@@ -1184,7 +1182,7 @@ export function MarkdownBody({
                 loading="lazy"
                 src={segment.image.src}
                 style={segment.image.style}
-                title={segment.image.title}
+
               />
             );
           }
@@ -1244,7 +1242,7 @@ function MermaidBlock({ code }: { code: string }) {
     return (
       <div className="mermaid-block mermaid-block-error">
         <div className="border-b px-3 py-2 text-xs text-destructive">{code.length > MAX_MERMAID_CHARS ? t("project.browserMermaidTooLarge") : t("project.browserMermaidFailed")}</div>
-        <pre><code>{code}</code></pre>
+        <pre tabIndex={-1}><code>{code}</code></pre>
       </div>
     );
   }
@@ -1285,7 +1283,7 @@ function MarkdownImageCard({ image, onOpen }: { image: ImageLightboxItem; onOpen
   return (
     <button
       className="my-2 block h-20 w-24 overflow-hidden rounded-md border border-border/70 bg-muted/40"
-      title={image.name}
+
       type="button"
       onClick={onOpen}
     >
@@ -1579,6 +1577,7 @@ function CodeBlock({
     };
   }, []);
   const highlighted = codeRenderer?.(code, lang);
+  const nonTabbableHighlighted = highlighted ? makeHighlightedCodeNonTabbable(highlighted) : null;
   return (
     <div className="code-block-wrap">
       <Button
@@ -1586,6 +1585,7 @@ function CodeBlock({
         className="code-copy-btn"
         data-copied={copied ? "1" : undefined}
         size="icon-xs"
+        tabIndex={-1}
         type="button"
         variant="ghost"
         onClick={() => {
@@ -1600,15 +1600,25 @@ function CodeBlock({
       >
         {copied ? <Check className="size-3 text-success" /> : <Copy className="size-3" />}
       </Button>
-      {highlighted ? (
-        <div dangerouslySetInnerHTML={{ __html: highlighted }} />
+      {nonTabbableHighlighted ? (
+        <div dangerouslySetInnerHTML={{ __html: nonTabbableHighlighted }} />
       ) : (
-        <pre data-lang={lang}>
+        <pre data-lang={lang} tabIndex={-1}>
           <code>{code}</code>
         </pre>
       )}
     </div>
   );
+}
+
+function makeHighlightedCodeNonTabbable(html: string) {
+  return html.replace(/<pre\b([^>]*)>/i, (_match, attributes: string) => {
+    const attributesWithoutTabIndex = attributes.replace(
+      /\s+tabindex=(?:"[^"]*"|'[^']*'|[^\s>]+)/i,
+      "",
+    );
+    return `<pre tabindex="-1"${attributesWithoutTabIndex}>`;
+  });
 }
 
 function formatToolArgs(value: unknown) {
@@ -1693,13 +1703,10 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     builtin_graphql_search: t("transcript.toolGraphQLSearch"),
     builtin_history_get_message: t("transcript.toolHistoryGetMessage"),
     builtin_history_search: t("transcript.toolHistorySearch"),
-    builtin_toolkit_load: t("transcript.toolToolkitLoad"),
     builtin_app_load: t("transcript.toolAppLoad"),
     builtin_app_save: t("transcript.toolAppSave"),
-    builtin_command_poll: t("transcript.toolCommandPoll"),
     builtin_command_run: t("transcript.toolCommandRun"),
-    builtin_command_start: t("transcript.toolCommandStart"),
-    builtin_command_stop: t("transcript.toolCommandStop"),
+    builtin_command_session: t("transcript.toolCommandSession"),
     builtin_code_symbols: t("transcript.toolCodeSymbols"),
     builtin_code_definition: t("transcript.toolCodeDefinition"),
     builtin_code_references: t("transcript.toolCodeReferences"),
@@ -1723,7 +1730,6 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     builtin_git_unstage: t("transcript.toolGitUnstage"),
     builtin_git_commit: t("transcript.toolGitCommit"),
     builtin_patch_apply: t("transcript.toolPatchApply"),
-    builtin_patch_propose: t("transcript.toolPatchPropose"),
     builtin_project_inspect: t("transcript.toolProjectInspect"),
     builtin_project_instructions: t("transcript.toolProjectInstructions"),
     builtin_camera_capture: t("transcript.toolCameraCapture"),
@@ -1746,7 +1752,7 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     builtin_weather_get: t("transcript.toolWeatherGet"),
     builtin_web_fetch: t("transcript.toolWebFetch"),
     builtin_web_search: t("transcript.toolWebSearch"),
-    collect_user_input: t("transcript.toolCollectUserInput"),
+    builtin_request_user_input: t("transcript.toolRequestUserInput"),
     canvas_chart: t("transcript.toolCanvasChart"),
     canvas_doc_read: t("transcript.toolCanvasDocRead"),
     canvas_gallery: t("transcript.toolCanvasGallery"),
@@ -1804,10 +1810,6 @@ function toolTitle(
   if (codeSummary) {
     return { label: baseTitle, summary: codeSummary };
   }
-  const toolkitSummary = toolkitLoadSummary(part, result, t);
-  if (toolkitSummary) {
-    return { label: baseTitle, summary: toolkitSummary };
-  }
   const summary = toolProtocolSummary(part, t);
   if (summary) {
     return { label: baseTitle, summary };
@@ -1819,33 +1821,12 @@ function toolTitle(
   return { label: baseTitle, summary: "" };
 }
 
-function toolkitLoadSummary(
-  part: Extract<TurnPartVM, { type: "tool_use" }>,
-  result: ReturnType<typeof formatToolResult>,
-  t: (key: string) => string,
-) {
-  if ((part.name || part.resultName) !== "builtin_toolkit_load") {
-    return "";
-  }
-  const value = result?.value;
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return "";
-  }
-  const record = value as Record<string, unknown>;
-  const loaded = Array.isArray(record.loaded) ? record.loaded.filter((item): item is string => typeof item === "string") : [];
-  if (loaded.length > 0) {
-    return t("transcript.toolkitLoaded").replace("{names}", loaded.join(", "));
-  }
-  const active = Array.isArray(record.alreadyActive) ? record.alreadyActive.filter((item): item is string => typeof item === "string") : [];
-  return active.length > 0 ? t("transcript.toolkitAlreadyActive") : "";
-}
-
 function inputFlowToolSummary(
   part: Extract<TurnPartVM, { type: "tool_use" }>,
   result: ReturnType<typeof formatToolResult>,
   t: (key: string) => string,
 ) {
-  if ((part.name || part.resultName) !== "collect_user_input") {
+  if ((part.name || part.resultName) !== "builtin_request_user_input") {
     return "";
   }
   const value = result?.value;
@@ -1983,7 +1964,7 @@ function RawToolDataCard({ args, result, toolName }: { args: string; result: str
         open={open}
         onToggle={(event) => setOpen(event.currentTarget.open)}
       >
-        <summary className="flex h-8 cursor-default list-none items-center gap-1 px-2 pr-8 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden">
+        <summary className="flex h-8 cursor-default list-none items-center gap-1 px-2 pr-8 outline-none hover:text-foreground [&::-webkit-details-marker]:hidden" tabIndex={-1}>
           {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
           <span>{t("transcript.codeRawData")}</span>
         </summary>

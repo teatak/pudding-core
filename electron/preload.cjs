@@ -96,6 +96,7 @@ contextBridge.exposeInMainWorld("puddingElectronBrowser", {
     ipcRenderer.on("pudding:browser:automation-end", wrapped);
     return () => ipcRenderer.off("pudding:browser:automation-end", wrapped);
   },
+  completeAutomationLifecycle: (request) => ipcRenderer.invoke("pudding:browser:automation-lifecycle-complete", request),
   onWebviewRequired: (listener) => {
     const wrapped = (_event, request) => listener(request);
     ipcRenderer.on("pudding:browser:webview-required", wrapped);

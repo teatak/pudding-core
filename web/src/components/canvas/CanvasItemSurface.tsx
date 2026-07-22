@@ -85,7 +85,7 @@ export function CanvasItemActions({
           aria-label={item?.sourceSavedItemID ? t("canvas.saveChanges") : t("canvas.saveWidget")}
           disabled={saving}
           size="icon-sm"
-          title={item?.sourceSavedItemID ? t("canvas.saveChanges") : t("canvas.saveWidget")}
+
           type="button"
           variant="ghost"
           onClick={onSave}

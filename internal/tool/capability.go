@@ -29,7 +29,7 @@ func RequestCapabilityDefinition() provider.ToolDef {
 }
 
 func DefinitionsForMode(mode store.AgentMode, defs []provider.ToolDef) []provider.ToolDef {
-	return DefinitionsForTurn(mode, defs, nil)
+	return CoreDefinitionsForMode(mode, defs)
 }
 
 func ToolDefAllowedForMode(mode store.AgentMode, def provider.ToolDef) bool {
@@ -48,13 +48,13 @@ func ToolDefAllowedForMode(mode store.AgentMode, def provider.ToolDef) bool {
 }
 
 func RequiredModeForName(name string) store.AgentMode {
-	if name == RequestCapability || name == ToolkitLoad || name == AppLoad {
+	if name == RequestCapability || name == AppLoad {
 		return store.ModeChat
 	}
 	if strings.HasPrefix(name, appMCPToolPrefix) {
 		return store.ModeWork
 	}
-	if strings.HasPrefix(name, "canvas_") || name == "collect_user_input" {
+	if strings.HasPrefix(name, "canvas_") || name == RequestUserInput {
 		return store.ModeChat
 	}
 	for _, def := range BuiltinDefinitions() {
@@ -74,7 +74,7 @@ func NameAllowedForMode(mode store.AgentMode, name string) bool {
 	if !store.ValidAgentMode(mode) {
 		mode = store.ModeChat
 	}
-	if name == RequestCapability || name == ToolkitLoad || name == AppLoad {
+	if name == RequestCapability || name == AppLoad {
 		return true
 	}
 	return store.AgentModeRank(mode) >= store.AgentModeRank(RequiredModeForName(name))

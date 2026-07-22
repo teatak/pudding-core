@@ -1,13 +1,13 @@
 import {
   Activity,
   AudioLines,
-  BookOpenText,
-  Globe2,
+  BookOpen,
   Info,
   MessageSquareText,
   Settings,
   SlidersHorizontal,
   Sparkles,
+  Wrench,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 
@@ -53,8 +53,8 @@ const SETTINGS_SECTIONS: Array<{
   { id: "dialogue", icon: SlidersHorizontal, labelKey: "settings.section.dialogue" },
   { id: "voice", icon: AudioLines, labelKey: "settings.section.voice" },
   { id: "model", icon: Sparkles, labelKey: "settings.section.model" },
-  { id: "skills", icon: BookOpenText, labelKey: "settings.section.skills" },
-  { id: "tools", icon: Globe2, labelKey: "settings.section.tools" },
+  { id: "skills", icon: BookOpen, labelKey: "settings.section.skills" },
+  { id: "tools", icon: Wrench, labelKey: "settings.section.tools" },
   { id: "about", icon: Info, labelKey: "settings.section.about" },
 ];
 

@@ -62,11 +62,7 @@ function TerminalTabIcon({ exited }: { exited: boolean }) {
   return (
     <span
       aria-hidden="true"
-      className={cn(
-        "inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[5px]",
-        builtinAppIconClass("terminal"),
-        "!bg-transparent",
-      )}
+      className="inline-flex h-(--workspace-toolbar-tab-icon) w-(--workspace-toolbar-tab-icon) shrink-0 items-center justify-center rounded-[5px] bg-transparent text-[#11875D] dark:text-[#71D8B2]"
       data-exited={exited}
     >
       <SquareTerminal className="h-3.5 w-3.5" />
@@ -340,7 +336,7 @@ function SortableSurfaceTabButton({
         transition,
         zIndex: isDragging ? 1 : undefined,
       }}
-      title={exited ? `${label} · ${t("terminal.exited")}` : file?.path || label}
+
       type="button"
       onClick={() => {
         if (tab.kind === "browser") {

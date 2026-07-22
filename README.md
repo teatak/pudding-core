@@ -1,6 +1,6 @@
 # Pudding
 
-Pudding is the source repository for the next Pudding daemon and desktop app.
+Pudding is the source repository for the Pudding daemon and Electron desktop app.
 
 This repo starts from a clean architecture:
 
@@ -11,8 +11,8 @@ This repo starts from a clean architecture:
 - daemon-owned hardware resources
 - session-owned transports and context
 
-Initial design notes live in [docs/technology-decisions.md](docs/technology-decisions.md).
-Phase 1 development plan lives in [docs/phase-1-plan.md](docs/phase-1-plan.md).
+The documentation index and status guide live in [docs/README.md](docs/README.md).
+Current architecture decisions live in [docs/technology-decisions.md](docs/technology-decisions.md).
 App package and connection field notes live in [docs/apps.md](docs/apps.md).
 Local tool-usage reporting is documented in [docs/tool-usage-report.md](docs/tool-usage-report.md).
 Desktop versioning, packaging, publishing, and update recovery are documented in [docs/releasing.md](docs/releasing.md).

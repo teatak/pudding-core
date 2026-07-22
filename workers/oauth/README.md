@@ -1,6 +1,16 @@
-# Pudding OAuth Worker
+# Pudding Website and OAuth Worker
 
-Minimal Cloudflare Worker for exchanging OAuth authorization codes for access tokens.
+Cloudflare Worker for the public Pudding website and OAuth authorization-code exchange.
+
+Public pages:
+
+```text
+GET /
+GET /privacy
+GET /terms
+GET /support
+GET /data-deletion
+```
 
 The desktop app should:
 
@@ -91,17 +101,26 @@ npx wrangler secret put ALLOWED_ORIGINS
 
 Use comma-separated origins. The desktop daemon does not need CORS.
 
-## Custom Domain
+## Custom Domains
 
-This Worker is bound to:
+This Worker is bound to the public website and the OAuth API domains:
 
 ```text
+https://x-t.top
 https://oauth.x-t.top
 ```
+
+Public website requests use `x-t.top`. Public `GET` requests on
+`oauth.x-t.top` redirect to the website; token exchange endpoints remain on
+`oauth.x-t.top`.
 
 `wrangler.toml`:
 
 ```toml
+[[routes]]
+pattern = "x-t.top"
+custom_domain = true
+
 [[routes]]
 pattern = "oauth.x-t.top"
 custom_domain = true

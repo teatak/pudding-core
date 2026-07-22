@@ -7,6 +7,7 @@ import { WorkspacePane } from "@/components/workspace/WorkspacePane";
 import { hasElectronWebviewBrowser } from "@/browser/electronBridge";
 import { ChatPane } from "@/components/ChatPane";
 import { AppsPane } from "@/components/AppsPane";
+import { ProjectsPane } from "@/components/ProjectsPane";
 import { EditorTypographyProvider } from "@/components/EditorTypographyProvider";
 import { SessionRail } from "@/components/SessionRail";
 import { SettingsDialog } from "@/components/SettingsDialog";
@@ -162,11 +163,13 @@ export function App() {
   // 上下分屏(docs/design.md 2.2):pane 三件套整体复用,路由是唯一事实源;
   // split 与主 pane 相同的会话不重复渲染
   const appsActive = view === "apps";
-  const showSplit = !appsActive && Boolean(splitSessionID && splitSessionID !== selectedSessionID);
-  const draftActive = !appsActive && draft === "1" && !selectedSessionID;
-  const canUseWorkspace = !appsActive && Boolean(selectedSessionID);
+  const projectsActive = view === "projects";
+  const standaloneViewActive = appsActive || projectsActive;
+  const showSplit = !standaloneViewActive && Boolean(splitSessionID && splitSessionID !== selectedSessionID);
+  const draftActive = !standaloneViewActive && draft === "1" && !selectedSessionID;
+  const canUseWorkspace = !standaloneViewActive && Boolean(selectedSessionID);
   const effectiveWorkspaceOpen = canUseWorkspace && workspaceOpen;
-  const activeSessionIDs = (appsActive ? [] : [selectedSessionID, showSplit ? splitSessionID : undefined]).filter(
+  const activeSessionIDs = (standaloneViewActive ? [] : [selectedSessionID, showSplit ? splitSessionID : undefined]).filter(
     (sessionID): sessionID is string => Boolean(sessionID),
   );
 
@@ -415,14 +418,14 @@ export function App() {
     </div>
   ) : null;
 
-  const mainPane = appsActive ? <AppsPane token={token} /> : chatArea;
+  const mainPane = appsActive ? <AppsPane token={token} /> : projectsActive ? <ProjectsPane token={token} /> : chatArea;
 
   const leftWorkspace = (
     <div ref={setLeftWorkspaceNode} className="relative flex h-full min-w-0 bg-background">
       <SessionRail
         activeSessionIDs={activeSessionIDs}
         draftActive={draftActive}
-        selectedSessionID={appsActive ? undefined : selectedSessionID}
+        selectedSessionID={standaloneViewActive ? undefined : selectedSessionID}
         token={token}
       />
       <div className="relative h-full min-w-0 flex-1 bg-background">{mainPane}</div>

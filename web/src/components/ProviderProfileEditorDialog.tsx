@@ -718,7 +718,7 @@ function IconAction({
       className={className}
       disabled={disabled}
       size="icon-sm"
-      title={label}
+
       type="button"
       variant="ghost"
       onClick={(event) => {

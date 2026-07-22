@@ -23,7 +23,7 @@ export function TurnFileChanges({ changes, sessionID, turnID }: {
     .replace("{count}", String(changes.length));
 
   return (
-    <section className="min-w-0 overflow-hidden rounded-lg border bg-muted/10 text-xs text-muted-foreground shadow-sm">
+    <section className="min-w-0 overflow-hidden rounded-lg border border-border/70 bg-background text-xs text-muted-foreground shadow-none">
       <button
         className="group/change-header relative isolate flex min-h-11 w-full items-center gap-2.5 overflow-hidden bg-muted/35 px-3 py-2 text-left hover:text-foreground"
         type="button"
@@ -47,7 +47,7 @@ export function TurnFileChanges({ changes, sessionID, turnID }: {
         </span>
         <ChevronRight className="relative z-[1] size-3.5 shrink-0 opacity-60" />
       </button>
-      <div className="border-t px-1 py-1">
+      <div className="border-t border-border/70 bg-background px-1 py-1">
         {visible.map((change) => (
           <button
             key={change.id}
@@ -70,7 +70,7 @@ export function TurnFileChanges({ changes, sessionID, turnID }: {
       </div>
       {collapsible ? (
         <button
-          className="group/change-footer relative isolate flex h-9 w-full items-center gap-1.5 overflow-hidden border-t bg-muted/20 px-3 text-left font-medium text-foreground/85 hover:text-foreground"
+          className="group/change-footer relative isolate flex h-9 w-full items-center gap-1.5 overflow-hidden border-t border-border/70 bg-muted/20 px-3 text-left font-medium text-foreground/85 hover:text-foreground"
           type="button"
           onClick={() => setExpanded((current) => !current)}
         >

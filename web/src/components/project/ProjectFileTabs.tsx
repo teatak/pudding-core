@@ -97,7 +97,7 @@ export function ProjectFileTabs({
                 <button
                   aria-pressed={selected}
                   className="flex h-full min-w-0 flex-1 select-none items-center gap-1.5 pl-2.5 text-left"
-                  title={gitDiff ? `${tab.path} (${tab.staged ? t("project.gitStaged") : t("project.gitWorkingTree")})` : tab.path}
+
                   type="button"
                   onClick={() => onActivate(tab)}
                   onDoubleClick={() => onPin(tab)}
@@ -112,7 +112,7 @@ export function ProjectFileTabs({
                     "mr-1 inline-flex size-5 shrink-0 items-center justify-center rounded-[4px] opacity-0 hover:bg-[var(--workspace-file-tab-hover-background)] hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100",
                     selected && "opacity-100",
                   )}
-                  title={t("project.browserCloseTab")}
+
                   type="button"
                   onClick={() => onRequestClose([key])}
                 >
@@ -144,7 +144,7 @@ export function ProjectFileTabs({
                 <button
                   aria-pressed={selected}
                   className="flex h-full min-w-0 flex-1 select-none items-center gap-1.5 pl-2.5 text-left"
-                  title={label}
+
                   type="button"
                   onClick={() => onActivateTurnDiff(preview.id)}
                 >
@@ -157,7 +157,7 @@ export function ProjectFileTabs({
                     "mr-1 inline-flex size-5 shrink-0 items-center justify-center rounded-[4px] opacity-0 hover:bg-[var(--workspace-file-tab-hover-background)] hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100",
                     selected && "opacity-100",
                   )}
-                  title={t("project.browserCloseTab")}
+
                   type="button"
                   onClick={() => onCloseTurnDiffs([preview.id])}
                 >

@@ -20,7 +20,7 @@ import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-import { SETTINGS_CONTENT_CLASS, SettingsPanel } from "./shared";
+import { SETTINGS_NARROW_CONTENT_CLASS, SettingsPanel } from "./shared";
 
 export function ToolsSettings({
   token,
@@ -79,6 +79,18 @@ export function ToolsSettings({
   const configured = Boolean(tavily?.apiKeySet);
   const loadingTools = toolsQuery.isLoading;
   const saving = mutation.isPending;
+  const runtimeBuiltinTools = useMemo(
+    () =>
+      uniqueBrowserTools(
+        browserMCPQuery.data?.sessions || [],
+        (name, appID) => !appID && name === "builtin_request_user_input",
+      ),
+    [browserMCPQuery.data?.sessions],
+  );
+  const builtinTools = useMemo(
+    () => mergeTools(builtinToolsQuery.data?.tools || [], runtimeBuiltinTools),
+    [builtinToolsQuery.data?.tools, runtimeBuiltinTools],
+  );
 
   useEffect(() => {
     onDirtyChange(dirty);
@@ -87,18 +99,12 @@ export function ToolsSettings({
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
   return (
-    <div className={SETTINGS_CONTENT_CLASS}>
+    <div className={SETTINGS_NARROW_CONTENT_CLASS}>
       <BuiltinToolsPanel
-        loading={builtinToolsQuery.isFetching}
+        loading={builtinToolsQuery.isFetching || browserMCPQuery.isLoading}
         error={builtinToolsQuery.isError}
-        tools={builtinToolsQuery.data?.tools || []}
+        tools={builtinTools}
         onRetry={() => void builtinToolsQuery.refetch()}
-      />
-      <BrowserMCPToolsPanel
-        error={browserMCPQuery.isError}
-        loading={browserMCPQuery.isLoading}
-        sessions={browserMCPQuery.data?.sessions || []}
-        onRetry={() => void browserMCPQuery.refetch()}
       />
       <SettingsPanel
         action={
@@ -193,20 +199,20 @@ function BuiltinToolsPanel({
   error: boolean;
   loading: boolean;
   onRetry: () => void;
-  tools: BuiltinTool[];
+  tools: ToolInfo[];
 }) {
   const { t } = useI18n();
 
   return (
     <Accordion className="overflow-hidden rounded-xl border bg-card" collapsible type="single">
       <AccordionItem className="border-b-0" value="builtin-tools">
-        <AccordionTrigger className="h-11 items-center rounded-none border-0 px-4 py-0 text-sm font-normal hover:no-underline focus-visible:ring-0">
+        <AccordionTrigger className="h-11 items-center rounded-none border-0 px-3 py-0 text-sm font-normal hover:no-underline focus-visible:ring-0">
           <span>{`${t("settings.tools.builtin.title")} (${tools.length})`}</span>
           {loading ? <Spinner className="mr-2 size-4 text-muted-foreground" /> : null}
         </AccordionTrigger>
         <AccordionContent className="p-0">
           {error ? (
-            <div className="border-t p-4">
+            <div className="border-t p-3">
               <Alert variant="destructive">
                 <AlertDescription className="grid gap-2">
                   <span>{t("settings.tools.builtin.loadFailed")}</span>
@@ -225,10 +231,10 @@ function BuiltinToolsPanel({
   );
 }
 
-function ToolList({ tools }: { tools: BuiltinTool[] }) {
+function ToolList({ tools }: { tools: ToolInfo[] }) {
   const { t } = useI18n();
   if (tools.length === 0) {
-    return <div className="border-t px-4 py-3 text-sm text-muted-foreground">{t("settings.tools.builtin.empty")}</div>;
+    return <div className="border-t px-3 py-3 text-sm text-muted-foreground">{t("settings.tools.builtin.empty")}</div>;
   }
   return (
     <div className="divide-y divide-border/70 border-t">
@@ -244,94 +250,6 @@ type ToolInfo = {
   description?: string;
   capability?: "chat" | "work" | "code";
 };
-
-function BrowserMCPToolsPanel({
-  error,
-  loading,
-  onRetry,
-  sessions,
-}: {
-  error: boolean;
-  loading: boolean;
-  onRetry: () => void;
-  sessions: BrowserMCPSession[];
-}) {
-  const uiTools = useMemo(
-    () => uniqueBrowserTools(sessions, (name, appID) => !appID && name === "collect_user_input"),
-    [sessions],
-  );
-  const connected = sessions.length > 0;
-
-  return (
-    <BrowserMCPToolGroup
-      connected={connected && uiTools.length > 0}
-      error={error}
-      group="ui"
-      loading={loading}
-      tools={uiTools}
-      onRetry={onRetry}
-    />
-  );
-}
-
-function BrowserMCPToolGroup({
-  connected,
-  error,
-  group,
-  loading,
-  onRetry,
-  tools,
-}: {
-  connected: boolean;
-  error: boolean;
-  group: "ui";
-  loading: boolean;
-  onRetry: () => void;
-  tools: ToolInfo[];
-}) {
-  const { t } = useI18n();
-  return (
-    <Accordion className="overflow-hidden rounded-xl border bg-card" collapsible type="single">
-      <AccordionItem className="border-b-0" value={`${group}-tools`}>
-        <AccordionTrigger className="h-11 items-center rounded-none border-0 px-4 py-0 text-sm font-normal hover:no-underline focus-visible:ring-0">
-          <span className="flex min-w-0 items-center gap-2">
-            <span>{`${t(`settings.tools.${group}.title`)} (${tools.length})`}</span>
-            <span
-              aria-hidden="true"
-              className={cn("size-2 rounded-full", connected ? "bg-success" : "bg-muted-foreground/50")}
-            />
-          </span>
-          {loading ? <Spinner className="mr-2 size-4 text-muted-foreground" /> : null}
-        </AccordionTrigger>
-        <AccordionContent className="p-0">
-          {error ? (
-            <div className="border-t p-4">
-              <Alert variant="destructive">
-                <AlertDescription className="grid gap-2">
-                  <span>{t(`settings.tools.${group}.loadFailed`)}</span>
-                  <Button size="sm" type="button" variant="outline" onClick={onRetry}>
-                    {t("common.refresh")}
-                  </Button>
-                </AlertDescription>
-              </Alert>
-            </div>
-          ) : tools.length === 0 ? (
-            <div className="grid gap-1 border-t px-4 py-3 text-sm text-muted-foreground">
-              <span>{t(`settings.tools.${group}.empty`)}</span>
-              <span className="text-xs">{t(`settings.tools.${group}.desc`)}</span>
-            </div>
-          ) : (
-            <div className="divide-y divide-border/70 border-t">
-              {tools.map((tool) => (
-                <ToolInfoRow key={tool.id} tool={tool} />
-              ))}
-            </div>
-          )}
-        </AccordionContent>
-      </AccordionItem>
-    </Accordion>
-  );
-}
 
 function uniqueBrowserTools(
   sessions: BrowserMCPSession[],
@@ -355,11 +273,19 @@ function uniqueBrowserTools(
   return tools;
 }
 
+function mergeTools(staticTools: BuiltinTool[], runtimeTools: ToolInfo[]): ToolInfo[] {
+  const merged = new Map<string, ToolInfo>();
+  for (const tool of [...staticTools, ...runtimeTools]) {
+    merged.set(tool.id, tool);
+  }
+  return Array.from(merged.values());
+}
+
 function ToolInfoRow({ tool }: { tool: ToolInfo }) {
   const { t } = useI18n();
   const capabilityLabel = tool.capability ? t(`mode.${tool.capability}`) : "";
   return (
-    <div className="grid gap-1 px-4 py-3">
+    <div className="grid gap-1 px-3 py-3">
       <div className="flex min-w-0 items-center gap-2">
         <div className="min-w-0 break-all text-xs text-foreground">{tool.id}</div>
         {capabilityLabel ? (

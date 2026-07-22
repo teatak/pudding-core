@@ -19,8 +19,7 @@ import (
 
 type commandPayload struct {
 	OK                 bool                `json:"ok"`
-	Argv               []string            `json:"argv"`
-	Script             string              `json:"script"`
+	Command            string              `json:"command"`
 	Shell              string              `json:"shell"`
 	CWD                string              `json:"cwd"`
 	ExitCode           int                 `json:"exitCode"`
@@ -47,9 +46,9 @@ func TestCommandRunUsesProjectCWDAndCapturesOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	res := commandTestCall(context.Background(), root, map[string]any{
-		"scope": "project",
-		"argv":  commandHelperArgs("report"),
-		"cwd":   "nested",
+		"scope":   "project",
+		"command": commandHelperCommand("report"),
+		"cwd":     "nested",
 	})
 	payload := decodeCommandPayload(t, res)
 	if !res.Ok || !payload.OK || payload.ExitCode != 0 {
@@ -67,31 +66,32 @@ func TestCommandRunUsesProjectCWDAndCapturesOutput(t *testing.T) {
 	}
 }
 
-func TestCommandRunExecutesFixedShellScript(t *testing.T) {
+func TestCommandRunExecutesShellPipeline(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix shell syntax")
 	}
 	res := commandTestCall(context.Background(), t.TempDir(), map[string]any{
-		"scope":  "project",
-		"script": `printf "shell-out" | tr 'a-z' 'A-Z'; printf "shell-err" >&2`,
+		"scope":   "project",
+		"command": `printf "shell-out" | tr 'a-z' 'A-Z'; printf "shell-err" >&2`,
 	})
 	payload := decodeCommandPayload(t, res)
 	if !res.Ok || !payload.OK || payload.ExitCode != 0 || payload.Shell != "sh" || payload.Stdout != "SHELL-OUT" || payload.Stderr != "shell-err" {
 		t.Fatalf("fixed shell script failed: result=%+v payload=%+v", res, payload)
 	}
-	if payload.Script == "" || len(payload.Argv) != 0 || payload.VerificationKind != "" {
-		t.Fatalf("script result must preserve script without direct-command verification: %+v", payload)
+	if payload.Command == "" || payload.VerificationKind != "" {
+		t.Fatalf("command result must preserve the shell command: %+v", payload)
 	}
 }
 
-func TestCommandRunRequiresExactlyOneCommandInput(t *testing.T) {
+func TestCommandRunRequiresCommandInput(t *testing.T) {
 	root := t.TempDir()
 	for _, args := range []map[string]any{
 		{"scope": "project"},
-		{"scope": "project", "argv": commandHelperArgs("report"), "script": "printf duplicate"},
+		{"scope": "project", "argv": commandHelperArgs("report")},
+		{"scope": "project", "script": "printf legacy"},
 	} {
 		res := commandTestCall(context.Background(), root, args)
-		if res.Ok || !strings.Contains(res.Content, "exactly one of argv or script is required") {
+		if res.Ok || !strings.Contains(res.Content, "command is required") {
 			t.Fatalf("invalid command input must be rejected: args=%+v result=%+v", args, res)
 		}
 	}
@@ -106,8 +106,8 @@ func TestCommandRunStreamsStdoutAndStderr(t *testing.T) {
 		mu.Unlock()
 	})
 	res := commandTestCall(ctx, t.TempDir(), map[string]any{
-		"scope": "project",
-		"argv":  commandHelperArgs("report"),
+		"scope":   "project",
+		"command": commandHelperCommand("report"),
 	})
 	if !res.Ok {
 		t.Fatalf("command failed: %+v", res)
@@ -132,9 +132,9 @@ func TestCommandRunRejectsCWDOutsideProject(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
 	res := commandTestCall(context.Background(), root, map[string]any{
-		"scope": "project",
-		"argv":  commandHelperArgs("report"),
-		"cwd":   outside,
+		"scope":   "project",
+		"command": commandHelperCommand("report"),
+		"cwd":     outside,
 	})
 	if res.Ok || !strings.Contains(res.Content, `"reason":"path_not_authorized"`) {
 		t.Fatalf("outside cwd must be rejected: %+v", res)
@@ -143,8 +143,8 @@ func TestCommandRunRejectsCWDOutsideProject(t *testing.T) {
 
 func TestCommandRunReturnsExitCode(t *testing.T) {
 	res := commandTestCall(context.Background(), t.TempDir(), map[string]any{
-		"scope": "project",
-		"argv":  commandHelperArgs("exit", "7"),
+		"scope":   "project",
+		"command": commandHelperCommand("exit", "7"),
 	})
 	payload := decodeCommandPayload(t, res)
 	if !res.Ok || !payload.OK || payload.ExitCode != 7 || payload.Reason != "non_zero_exit" || !strings.Contains(payload.Stderr, "exit 7") {
@@ -155,9 +155,9 @@ func TestCommandRunReturnsExitCode(t *testing.T) {
 func TestCommandRunUsesMinimalEnvironment(t *testing.T) {
 	t.Setenv("PUDDING_COMMAND_SECRET", "do-not-inherit")
 	res := commandTestCall(context.Background(), t.TempDir(), map[string]any{
-		"scope": "project",
-		"argv":  commandHelperArgs("report-env"),
-		"env":   map[string]string{"PUDDING_VISIBLE": "visible"},
+		"scope":   "project",
+		"command": commandHelperCommand("report-env"),
+		"env":     map[string]string{"PUDDING_VISIBLE": "visible"},
 	})
 	payload := decodeCommandPayload(t, res)
 	if !res.Ok || payload.Stdout != "visible|" {
@@ -175,7 +175,7 @@ func TestCommandRunExecutesGoTest(t *testing.T) {
 	}
 	res := commandTestCall(context.Background(), root, map[string]any{
 		"scope":      "project",
-		"argv":       []string{"go", "test", "./..."},
+		"command":    "go test ./...",
 		"timeout_ms": 30000,
 	})
 	payload := decodeCommandPayload(t, res)
@@ -193,7 +193,7 @@ func TestCommandRunParsesFailedGoDiagnostics(t *testing.T) {
 	writeCommandTestFile(t, root, "broken.go", "package commanddiagnostic\n\nfunc broken() { missingSymbol() }\n")
 	res := commandTestCall(context.Background(), root, map[string]any{
 		"scope":      "project",
-		"argv":       []string{"go", "test", "./..."},
+		"command":    "go test ./...",
 		"timeout_ms": 30000,
 	})
 	payload := decodeCommandPayload(t, res)
@@ -225,8 +225,8 @@ func TestParseCommandDiagnosticsSupportsTypeScriptAndESLint(t *testing.T) {
 
 func TestCommandRunTruncatesStdoutAndStderr(t *testing.T) {
 	res := commandTestCall(context.Background(), t.TempDir(), map[string]any{
-		"scope": "project",
-		"argv":  commandHelperArgs("flood", strconv.Itoa(commandOutputLimitBytes*2)),
+		"scope":   "project",
+		"command": commandHelperCommand("flood", strconv.Itoa(commandOutputLimitBytes*2)),
 	})
 	payload := decodeCommandPayload(t, res)
 	if !res.Ok || !payload.StdoutTruncated || !payload.StderrTruncated {
@@ -245,7 +245,7 @@ func TestCommandRunTimeoutKillsProcessTree(t *testing.T) {
 	marker := filepath.Join(root, "child-finished")
 	res := commandTestCall(context.Background(), root, map[string]any{
 		"scope":      "project",
-		"argv":       commandHelperArgs("spawn-child", marker),
+		"command":    commandHelperCommand("spawn-child", marker),
 		"timeout_ms": 150,
 	})
 	payload := decodeCommandPayload(t, res)
@@ -264,8 +264,8 @@ func TestCommandRunStopsOnContextCancel(t *testing.T) {
 	root := t.TempDir()
 	go func() {
 		done <- commandTestCall(ctx, root, map[string]any{
-			"scope": "project",
-			"argv":  commandHelperArgs("sleep", "5000"),
+			"scope":   "project",
+			"command": commandHelperCommand("sleep", "5000"),
 		})
 	}()
 	time.Sleep(100 * time.Millisecond)
@@ -319,6 +319,13 @@ func TestCommandHelperProcess(t *testing.T) {
 		fmt.Fprintln(os.Stderr, "warning")
 		time.Sleep(500 * time.Millisecond)
 		fmt.Fprintln(os.Stdout, "done")
+	case "stdin-line":
+		var value string
+		if _, err := fmt.Fscanln(os.Stdin, &value); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		fmt.Fprintln(os.Stdout, "received:"+value)
 	case "http-server":
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
@@ -368,6 +375,10 @@ func writeCommandTestFile(t *testing.T, root, name, content string) {
 func commandHelperArgs(mode string, args ...string) []string {
 	executable, _ := os.Executable()
 	return append([]string{executable, "-test.run=^TestCommandHelperProcess$", "--", mode}, args...)
+}
+
+func commandHelperCommand(mode string, args ...string) string {
+	return joinShellCommand(commandHelperArgs(mode, args...))
 }
 
 func decodeCommandPayload(t *testing.T, res Result) commandPayload {

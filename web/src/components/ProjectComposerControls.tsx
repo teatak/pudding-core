@@ -67,7 +67,7 @@ export function ProjectComposerControls({
       {showProjectName ? (
         <span
           className="pudding-composer-project-name flex h-7 min-w-0 max-w-36 shrink items-center gap-1.5 rounded-full bg-muted/60 px-2 text-xs font-normal text-foreground"
-          title={projectName}
+
         >
           {projectQuery.isLoading ? (
             <Spinner className="size-3" />
@@ -112,7 +112,7 @@ function ProjectApprovalControl({
           className="pudding-composer-approval-control h-8 max-w-32 gap-1.5 rounded-full px-2 text-[13px] font-normal"
           disabled={!project || busy}
           size="sm"
-          title={`${t("composer.projectApproval")}: ${t(`composer.projectApproval.${value}`)}`}
+
           type="button"
           variant="ghost"
         >

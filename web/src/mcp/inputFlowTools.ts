@@ -4,7 +4,7 @@ import { showInputFlow } from "@/state/inputFlowStore";
 export function createInputFlowTools(): ToolDefinition[] {
   return [
     {
-      name: "collect_user_input",
+      name: "builtin_request_user_input",
       description:
         "Show an interactive UI that collects structured non-secret information from the user. Use this instead of asking the user to type answers in chat whenever the answers can be represented as choices, multiple choices, short text, phone, number, date, confirmation, or several form fields. Never use this tool for passwords, tokens, API keys, private keys, or other credentials because submitted values become part of the conversation. Use the dedicated App connection or settings flow for credentials. Use type='form' with steps for ordinary questions. Use type='repeat' only when the user may add multiple records with the same fields, such as several room types and quantities. If choices depend on live data, fetch them first and pass the actual options to this tool. This tool returns immediately after showing the UI; the completed answers arrive later as a new user message. Do not continue work that depends on those answers in the current turn.",
       capability: "chat",

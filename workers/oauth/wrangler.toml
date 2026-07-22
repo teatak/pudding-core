@@ -2,6 +2,15 @@ name = "pudding-oauth"
 main = "src/index.ts"
 compatibility_date = "2026-07-01"
 
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+
+[[routes]]
+pattern = "x-t.top"
+custom_domain = true
+
 [[routes]]
 pattern = "oauth.x-t.top"
 custom_domain = true

@@ -4,14 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
 
+	"github.com/creack/pty"
 	"github.com/teatak/pudding-core/internal/store"
 )
 
@@ -25,6 +28,10 @@ const (
 	backgroundProcessPollWaitMax     = 10 * time.Minute
 	backgroundProcessRetentionTTL    = 30 * time.Minute
 	backgroundProcessStopWait        = 2 * time.Second
+	backgroundProcessInputMax        = 64 << 10
+	backgroundProcessInputTimeout    = 5 * time.Second
+	backgroundProcessTTYColumns      = 100
+	backgroundProcessTTYRows         = 30
 )
 
 var ErrBackgroundProcessNotFound = errors.New("background process not found")
@@ -36,8 +43,7 @@ type BackgroundProcessSnapshot struct {
 	Status        string     `json:"status"`
 	Running       bool       `json:"running"`
 	CWD           string     `json:"cwd"`
-	Argv          []string   `json:"argv,omitempty"`
-	Script        string     `json:"script,omitempty"`
+	Command       string     `json:"command"`
 	Shell         string     `json:"shell,omitempty"`
 	ExitCode      *int       `json:"exitCode,omitempty"`
 	StartedAt     time.Time  `json:"startedAt"`
@@ -47,6 +53,7 @@ type BackgroundProcessSnapshot struct {
 	Sandboxed     bool       `json:"sandboxed"`
 	SandboxKind   string     `json:"sandboxKind,omitempty"`
 	SandboxDenied bool       `json:"sandboxDenied,omitempty"`
+	TTY           bool       `json:"tty,omitempty"`
 }
 
 type BackgroundProcessOutputChunk struct {
@@ -78,23 +85,13 @@ const (
 	BackgroundProcessRemoved  = "removed"
 )
 
-type commandStartArgs struct {
-	Scope  string            `json:"scope"`
-	Argv   []string          `json:"argv,omitempty"`
-	Script string            `json:"script,omitempty"`
-	CWD    string            `json:"cwd,omitempty"`
-	Env    map[string]string `json:"env,omitempty"`
-}
-
-type commandPollArgs struct {
+type commandSessionArgs struct {
+	Action    string `json:"action"`
 	ProcessID string `json:"process_id"`
 	Offset    int64  `json:"offset,omitempty"`
 	MaxBytes  int    `json:"max_bytes,omitempty"`
 	WaitMS    int    `json:"wait_ms,omitempty"`
-}
-
-type commandStopArgs struct {
-	ProcessID string `json:"process_id"`
+	Data      string `json:"data,omitempty"`
 }
 
 type backgroundProcessManager struct {
@@ -115,13 +112,16 @@ type backgroundProcess struct {
 	turnID      string
 	callID      string
 	cwd         string
-	argv        []string
-	script      string
+	command     string
 	shell       string
 	cmd         *exec.Cmd
 	done        chan struct{}
 	sandboxed   bool
 	sandboxKind string
+	tty         bool
+	stdin       io.WriteCloser
+	pty         io.ReadWriteCloser
+	inputMu     sync.Mutex
 
 	mu                   sync.Mutex
 	running              bool
@@ -170,12 +170,8 @@ func newBackgroundProcessManager(retentionTTL time.Duration, runners ...commandR
 	}
 }
 
-func (r *BuiltinRunner) commandStart(call Call) Result {
+func (r *BuiltinRunner) commandStart(call Call, args commandRunArgs) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
-	args, err := decodeCommandStartArgs(call.Args)
-	if err != nil {
-		return toolJSONError(out, "invalid_arguments", err.Error())
-	}
 	if strings.TrimSpace(call.SessionID) == "" {
 		return toolJSONError(out, "session_required", "background processes require a session")
 	}
@@ -199,9 +195,9 @@ func (r *BuiltinRunner) commandStart(call Call) Result {
 	if err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
-	commandArgs := commandRunArgs{Scope: args.Scope, Argv: args.Argv, Script: args.Script, CWD: args.CWD, Env: args.Env}
+	commandArgs := commandRunArgs{Scope: args.Scope, Command: args.Command, CWD: args.CWD, Env: args.Env}
 	executable, invocationArgs, shell := commandInvocation(commandArgs)
-	process, err := r.processes.Start(call.SessionID, call.TurnID, call.CallID, resolvedCWD, call.ProjectDirs, call.CommandSandbox, env, executable, invocationArgs, args.Argv, args.Script, shell)
+	process, err := r.processes.Start(call.SessionID, call.TurnID, call.CallID, resolvedCWD, call.ProjectDirs, call.CommandSandbox, env, executable, invocationArgs, args.Command, shell, args.TTY)
 	if err != nil {
 		return backgroundProcessError(out, err)
 	}
@@ -212,9 +208,9 @@ func (r *BuiltinRunner) commandStart(call Call) Result {
 	return out
 }
 
-func (r *BuiltinRunner) commandPoll(ctx context.Context, call Call) Result {
+func (r *BuiltinRunner) commandSession(ctx context.Context, call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
-	args, err := decodeCommandPollArgs(call.Args)
+	args, err := decodeCommandSessionArgs(call.Args)
 	if err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
@@ -222,59 +218,66 @@ func (r *BuiltinRunner) commandPoll(ctx context.Context, call Call) Result {
 	if process == nil {
 		return toolJSONError(out, "process_not_found", "background process was not found for this session")
 	}
-	process.waitForPoll(ctx, time.Duration(args.WaitMS)*time.Millisecond)
-	payload := process.pollPayload(args.Offset, args.MaxBytes)
-	out = toolJSON(out, true, payload)
-	out.SummaryKind = SummaryReturnedItems
-	if chunks, ok := payload["output"].([]backgroundProcessOutputChunk); ok {
-		out.SummaryCount = len(chunks)
+	var payload map[string]any
+	switch args.Action {
+	case "poll":
+		process.waitForPoll(ctx, time.Duration(args.WaitMS)*time.Millisecond)
+		payload = process.pollPayload(args.Offset, args.MaxBytes)
+		out.SummaryKind = SummaryReturnedItems
+		if chunks, ok := payload["output"].([]backgroundProcessOutputChunk); ok {
+			out.SummaryCount = len(chunks)
+		}
+	case "write":
+		written, writeErr := process.writeInput(ctx, args.Data)
+		if writeErr != nil {
+			return toolJSONError(out, "input_failed", writeErr.Error())
+		}
+		payload = process.statePayload()
+		payload["bytesWritten"] = written
+		out.SummaryKind = SummaryReturnedFields
+		out.SummaryCount = len(payload)
+	case "stop":
+		if stopErr := process.stop("stopped"); stopErr != nil {
+			return toolJSONError(out, "stop_failed", stopErr.Error())
+		}
+		payload = process.statePayload()
+		out.SummaryKind = SummaryReturnedFields
+		out.SummaryCount = len(payload)
 	}
+	out = toolJSON(out, true, payload)
 	return out
 }
 
-func (r *BuiltinRunner) commandStop(call Call) Result {
-	out := Result{CallID: call.CallID, Name: call.Name}
-	args, err := decodeCommandStopArgs(call.Args)
-	if err != nil {
-		return toolJSONError(out, "invalid_arguments", err.Error())
-	}
-	process := r.processes.Get(call.SessionID, args.ProcessID)
-	if process == nil {
-		return toolJSONError(out, "process_not_found", "background process was not found for this session")
-	}
-	if err := process.stop("stopped"); err != nil {
-		return toolJSONError(out, "stop_failed", err.Error())
-	}
-	payload := process.statePayload()
-	out = toolJSON(out, true, payload)
-	out.SummaryKind = SummaryReturnedFields
-	out.SummaryCount = len(payload)
-	return out
-}
-
-func decodeCommandStartArgs(raw json.RawMessage) (commandStartArgs, error) {
-	var args commandStartArgs
+func decodeCommandSessionArgs(raw json.RawMessage) (commandSessionArgs, error) {
+	var args commandSessionArgs
 	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil {
-		return args, errors.New("background command arguments must be a JSON object")
+		return args, errors.New("command session arguments must be a JSON object")
 	}
-	args.Scope = strings.TrimSpace(args.Scope)
-	if args.Scope != managedScopeProject {
-		return args, errors.New("background command scope must be project")
-	}
-	if err := validateCommandInput(commandRunArgs{Argv: args.Argv, Script: args.Script}); err != nil {
-		return args, err
-	}
-	return args, nil
-}
-
-func decodeCommandPollArgs(raw json.RawMessage) (commandPollArgs, error) {
-	var args commandPollArgs
-	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil {
-		return args, errors.New("process poll arguments must be a JSON object")
-	}
+	args.Action = strings.TrimSpace(args.Action)
 	args.ProcessID = strings.TrimSpace(args.ProcessID)
+	if args.Action != "poll" && args.Action != "write" && args.Action != "stop" {
+		return args, errors.New("action must be poll, write, or stop")
+	}
 	if args.ProcessID == "" {
 		return args, errors.New("process_id is required")
+	}
+	if args.Action == "write" {
+		if args.Data == "" {
+			return args, errors.New("data is required for write")
+		}
+		if len(args.Data) > backgroundProcessInputMax {
+			return args, errors.New("data must not exceed 65536 bytes")
+		}
+		if args.Offset != 0 || args.MaxBytes != 0 || args.WaitMS != 0 {
+			return args, errors.New("offset, max_bytes, and wait_ms are available only for poll")
+		}
+		return args, nil
+	}
+	if args.Action == "stop" {
+		if args.Data != "" || args.Offset != 0 || args.MaxBytes != 0 || args.WaitMS != 0 {
+			return args, errors.New("stop accepts only action and process_id")
+		}
+		return args, nil
 	}
 	if args.Offset < 0 {
 		return args, errors.New("offset must be non-negative")
@@ -291,19 +294,10 @@ func decodeCommandPollArgs(raw json.RawMessage) (commandPollArgs, error) {
 	return args, nil
 }
 
-func decodeCommandStopArgs(raw json.RawMessage) (commandStopArgs, error) {
-	var args commandStopArgs
-	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil {
-		return args, errors.New("process stop arguments must be a JSON object")
+func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, projectDirs []string, sandboxMode CommandSandboxMode, env []string, executable string, invocationArgs []string, command, shell string, tty bool) (*backgroundProcess, error) {
+	if tty && runtime.GOOS == "windows" {
+		return nil, errors.New("interactive command sessions are unavailable on Windows")
 	}
-	args.ProcessID = strings.TrimSpace(args.ProcessID)
-	if args.ProcessID == "" {
-		return args, errors.New("process_id is required")
-	}
-	return args, nil
-}
-
-func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, projectDirs []string, sandboxMode CommandSandboxMode, env []string, executable string, invocationArgs, argv []string, script, shell string) (*backgroundProcess, error) {
 	execution, err := m.commands.Prepare(commandSpec{
 		Executable:  executable,
 		Args:        invocationArgs,
@@ -323,30 +317,40 @@ func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, 
 		turnID:      strings.TrimSpace(turnID),
 		callID:      strings.TrimSpace(callID),
 		cwd:         cwd,
-		argv:        append([]string(nil), argv...),
-		script:      script,
+		command:     command,
 		shell:       shell,
 		cmd:         cmd,
 		done:        make(chan struct{}),
 		sandboxed:   execution.Sandboxed,
 		sandboxKind: execution.SandboxKind,
+		tty:         tty,
 		running:     true,
 		startedAt:   time.Now(),
 	}
-	cmd.Stdout = backgroundProcessWriter{process: process, stream: ProgressStdout}
-	cmd.Stderr = backgroundProcessWriter{process: process, stream: ProgressStderr}
+	if !tty {
+		stdin, stdinErr := cmd.StdinPipe()
+		if stdinErr != nil {
+			return nil, stdinErr
+		}
+		process.stdin = stdin
+		cmd.Stdout = backgroundProcessWriter{process: process, stream: ProgressStdout}
+		cmd.Stderr = backgroundProcessWriter{process: process, stream: ProgressStderr}
+	}
 
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
+		process.closeInput()
 		return nil, errors.New("background process manager is closed")
 	}
 	if m.runningBySession[sessionID] >= backgroundProcessPerSessionLimit {
 		m.mu.Unlock()
+		process.closeInput()
 		return nil, errors.New("background process limit reached for this session")
 	}
 	if m.runningTotal >= backgroundProcessGlobalLimit {
 		m.mu.Unlock()
+		process.closeInput()
 		return nil, errors.New("global background process limit reached")
 	}
 	evicted := m.evictFinishedLocked()
@@ -354,10 +358,22 @@ func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, 
 	m.processes[process.id] = process
 	m.runningBySession[sessionID]++
 	m.runningTotal++
-	if err := cmd.Start(); err != nil {
+	if tty {
+		configureCommandPTY(cmd)
+		ptmx, startErr := pty.StartWithSize(cmd, &pty.Winsize{Cols: backgroundProcessTTYColumns, Rows: backgroundProcessTTYRows})
+		if startErr == nil {
+			process.stdin = ptmx
+			process.pty = ptmx
+		}
+		err = startErr
+	} else {
+		err = cmd.Start()
+	}
+	if err != nil {
 		delete(m.processes, process.id)
 		m.releaseCountLocked(process)
 		m.mu.Unlock()
+		process.closeInput()
 		for _, finished := range evicted {
 			finished.cancelExpiry()
 			m.emit(finished.sessionID, BackgroundProcessRemoved, finished.snapshot())
@@ -370,6 +386,9 @@ func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, 
 		m.emit(finished.sessionID, BackgroundProcessRemoved, finished.snapshot())
 	}
 	m.emit(sessionID, BackgroundProcessStarted, process.snapshot())
+	if tty {
+		go process.readPTYOutput()
+	}
 	go process.wait()
 	return process, nil
 }
@@ -563,6 +582,7 @@ func (m *backgroundProcessManager) emit(sessionID, phase string, process Backgro
 
 func (p *backgroundProcess) wait() {
 	waitErr := p.cmd.Wait()
+	p.closeInput()
 	exitCode := -1
 	if p.cmd.ProcessState != nil {
 		exitCode = p.cmd.ProcessState.ExitCode()
@@ -596,6 +616,63 @@ func (p *backgroundProcess) wait() {
 		phase = BackgroundProcessStopped
 	}
 	p.manager.emit(p.sessionID, phase, p.snapshot())
+}
+
+func (p *backgroundProcess) readPTYOutput() {
+	buffer := make([]byte, 32<<10)
+	writer := backgroundProcessWriter{process: p, stream: ProgressStdout}
+	for {
+		p.inputMu.Lock()
+		reader := p.pty
+		p.inputMu.Unlock()
+		if reader == nil {
+			return
+		}
+		n, err := reader.Read(buffer)
+		if n > 0 {
+			_, _ = writer.Write(buffer[:n])
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+func (p *backgroundProcess) writeInput(ctx context.Context, data string) (int, error) {
+	if len(data) > backgroundProcessInputMax {
+		return 0, errors.New("data must not exceed 65536 bytes")
+	}
+	p.inputMu.Lock()
+	defer p.inputMu.Unlock()
+	p.mu.Lock()
+	running := p.running
+	p.mu.Unlock()
+	if !running {
+		return 0, errors.New("command session is not running")
+	}
+	if p.stdin == nil {
+		return 0, errors.New("command session input is closed")
+	}
+	deadline := time.Now().Add(backgroundProcessInputTimeout)
+	if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(deadline) {
+		deadline = contextDeadline
+	}
+	if writer, ok := p.stdin.(interface{ SetWriteDeadline(time.Time) error }); ok {
+		_ = writer.SetWriteDeadline(deadline)
+		defer writer.SetWriteDeadline(time.Time{})
+	}
+	return io.WriteString(p.stdin, data)
+}
+
+func (p *backgroundProcess) closeInput() {
+	p.inputMu.Lock()
+	stdin := p.stdin
+	p.stdin = nil
+	p.pty = nil
+	p.inputMu.Unlock()
+	if stdin != nil {
+		_ = stdin.Close()
+	}
 }
 
 func (p *backgroundProcess) stop(reason string) error {
@@ -711,12 +788,9 @@ func (p *backgroundProcess) statePayloadLocked() map[string]any {
 	if p.callID != "" {
 		payload["callID"] = p.callID
 	}
-	if len(p.argv) > 0 {
-		payload["argv"] = p.argv
-	} else {
-		payload["script"] = p.script
-		payload["shell"] = p.shell
-	}
+	payload["command"] = p.command
+	payload["shell"] = p.shell
+	payload["tty"] = p.tty
 	if p.exitCode != nil {
 		payload["exitCode"] = *p.exitCode
 	}
@@ -746,8 +820,7 @@ func (p *backgroundProcess) snapshotLocked() BackgroundProcessSnapshot {
 		Status:        p.statusLocked(),
 		Running:       p.running,
 		CWD:           p.cwd,
-		Argv:          append([]string(nil), p.argv...),
-		Script:        p.script,
+		Command:       p.command,
 		Shell:         p.shell,
 		StartedAt:     p.startedAt,
 		Reason:        p.reason,
@@ -755,6 +828,7 @@ func (p *backgroundProcess) snapshotLocked() BackgroundProcessSnapshot {
 		Sandboxed:     p.sandboxed,
 		SandboxKind:   p.sandboxKind,
 		SandboxDenied: p.sandboxDenied,
+		TTY:           p.tty,
 	}
 	if p.exitCode != nil {
 		exitCode := *p.exitCode
@@ -922,8 +996,21 @@ func backgroundProcessError(out Result, err error) Result {
 }
 
 func (r *BuiltinRunner) CloseSession(sessionID string) {
-	if r != nil && r.processes != nil {
-		r.processes.CloseSession(strings.TrimSpace(sessionID))
+	if r == nil {
+		return
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if r.processes != nil {
+		r.processes.CloseSession(sessionID)
+	}
+	if sessionID != "" {
+		r.patchMu.Lock()
+		for key, prepared := range r.preparedPatches {
+			if prepared.SessionID == sessionID {
+				delete(r.preparedPatches, key)
+			}
+		}
+		r.patchMu.Unlock()
 	}
 }
 
@@ -960,16 +1047,4 @@ func (r *BuiltinRunner) Close() error {
 		return nil
 	}
 	return r.processes.Close()
-}
-
-func commandStartApprovalDetails(call Call) (map[string]any, error) {
-	args, err := decodeCommandStartArgs(call.Args)
-	if err != nil {
-		return nil, err
-	}
-	raw, err := json.Marshal(commandRunArgs{Scope: args.Scope, Argv: args.Argv, Script: args.Script, CWD: args.CWD, Env: args.Env})
-	if err != nil {
-		return nil, err
-	}
-	return commandApprovalDetails(Call{Args: raw})
 }

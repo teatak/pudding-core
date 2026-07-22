@@ -500,19 +500,33 @@ test("click type and scroll use only the expected CDP command sequences", async 
   const methods = webContents.debugger.commands.map(({ method }) => method);
   assert.deepEqual(methods, [
     "Runtime.evaluate",
+    "Input.dispatchMouseEvent",
+    "Input.dispatchMouseEvent",
+    "Input.dispatchMouseEvent",
     "Runtime.evaluate",
     "Runtime.evaluate",
     "Runtime.evaluate",
     "Runtime.evaluate",
     "Runtime.evaluate",
   ]);
-  assert.equal(webContents.debugger.commands[0].params.userGesture, true);
-  assert.match(webContents.debugger.commands[0].params.expression, /el\.click\(\)/);
-  assert.equal(webContents.debugger.commands[1].params.userGesture, undefined);
-  assert.match(webContents.debugger.commands[1].params.expression, /if \(!clear\) range\.collapse\(false\)/);
-  assert.match(webContents.debugger.commands[2].params.expression, /inputEvent\("beforeinput", true\)/);
-  assert.match(webContents.debugger.commands[2].params.expression, /setter\.call\(el, nextValue\)/);
-  assert.match(webContents.debugger.commands[4].params.expression, /target\.scrollBy/);
+  assert.equal(webContents.debugger.commands[0].params.userGesture, undefined);
+  assert.doesNotMatch(webContents.debugger.commands[0].params.expression, /el\.click\(\)|focusTarget\.focus/);
+  assert.match(webContents.debugger.commands[0].params.expression, /pudding\.browser\.lastClickTarget/);
+  assert.deepEqual(webContents.debugger.commands.slice(1, 4).map(({ params }) => params.type), [
+    "mouseMoved",
+    "mousePressed",
+    "mouseReleased",
+  ]);
+  assert.deepEqual(webContents.debugger.commands.slice(1, 4).map(({ params }) => params.button), ["none", "left", "left"]);
+  assert.ok(webContents.debugger.commands.slice(1, 4).every(({ params }) => params.x === 20 && params.y === 30));
+  assert.match(webContents.debugger.commands[4].params.expression, /replace\(\/\uFEFF\/g, ""\)/);
+  assert.match(webContents.debugger.commands[4].params.expression, /lastClickTarget\?\.isConnected/);
+  assert.match(webContents.debugger.commands[4].params.expression, /if \(!clear\) range\.collapse\(false\)/);
+  assert.match(webContents.debugger.commands[5].params.expression, /inputEvent\("beforeinput", true\)/);
+  assert.match(webContents.debugger.commands[5].params.expression, /setter\.call\(el, nextValue\)/);
+  assert.match(webContents.debugger.commands[5].params.expression, /if \(inserted && !sawInput\) dispatchInput\(\)/);
+  assert.match(webContents.debugger.commands[6].params.expression, /replace\(\/\uFEFF\/g, ""\)/);
+  assert.match(webContents.debugger.commands[7].params.expression, /target\.scrollBy/);
   assert.match(webContents.debugger.commands[0].params.expression, /elementFromPoint/);
   assert.match(webContents.debugger.commands[0].params.expression, /not hittable/);
   host.closeAll();
@@ -550,7 +564,7 @@ test("rejects controlled input when the resulting value does not match", async (
   host.closeAll();
 });
 
-test("dispatches target-scoped click and input without bringing the renderer webview to front", async () => {
+test("dispatches a real pointer click and target-scoped input", async () => {
   let required;
   const host = new BrowserHost(
     undefined,
@@ -577,12 +591,49 @@ test("dispatches target-scoped click and input without bringing the renderer web
   await host.type({ sessionID: "session-unfocused", tabID: "tab-unfocused", selector: "#name", text: "P" });
   assert.deepEqual(webContents.debugger.commands.map(({ method }) => method), [
     "Runtime.evaluate",
+    "Input.dispatchMouseEvent",
+    "Input.dispatchMouseEvent",
+    "Input.dispatchMouseEvent",
     "Runtime.evaluate",
     "Runtime.evaluate",
     "Runtime.evaluate",
   ]);
-  assert.equal(webContents.debugger.commands[0].params.userGesture, true);
-  assert.equal(webContents.debugger.commands.slice(1).some(({ params }) => params.userGesture), false);
+  assert.equal(webContents.debugger.commands[0].params.userGesture, undefined);
+  assert.deepEqual(webContents.debugger.commands.slice(1, 4).map(({ params }) => params.type), [
+    "mouseMoved",
+    "mousePressed",
+    "mouseReleased",
+  ]);
+  assert.equal(webContents.debugger.commands.slice(4).some(({ params }) => params.userGesture), false);
+  host.closeAll();
+});
+
+test("does not dispatch a click when renderer focus preparation fails", async () => {
+  let required;
+  const completed = [];
+  const host = new BrowserHost(
+    undefined,
+    undefined,
+    () => false,
+    (request) => {
+      required = request;
+    },
+    (event) => completed.push(event),
+  );
+  const opening = host.ensure({ sessionID: "session-focus-failed", tabID: "tab-focus-failed", url: "about:blank" });
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(55);
+  await host.registerWebContents(required, webContents);
+  await opening;
+  webContents.debugger.commands = [];
+
+  await assert.rejects(
+    host.click({ sessionID: "session-focus-failed", tabID: "tab-focus-failed", selector: "#save" }),
+    /browser_webview_not_ready: click focus preparation failed/,
+  );
+  assert.deepEqual(webContents.debugger.commands, []);
+  assert.equal(completed.length, 1);
+  assert.equal(completed[0].action, "click");
   host.closeAll();
 });
 

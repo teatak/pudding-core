@@ -11,12 +11,8 @@ import (
 	"github.com/teatak/pudding-core/internal/lsp"
 )
 
-func TestCodeRenameCreatesPatchProposalWithoutWriting(t *testing.T) {
+func TestCodeRenameAppliesAllReferencesAtomically(t *testing.T) {
 	root, source := codeTestProject(t)
-	original, err := os.ReadFile(source)
-	if err != nil {
-		t.Fatal(err)
-	}
 	service := &fakeCodeLanguageService{request: func(method string, params, result any) error {
 		switch method {
 		case "textDocument/prepareRename":
@@ -63,28 +59,11 @@ func TestCodeRenameCreatesPatchProposalWithoutWriting(t *testing.T) {
 		t.Fatalf("rename failed: %s", result.Content)
 	}
 	payload := decodeToolResult(t, result)
-	if payload["status"] != "proposed" || payload["operation"] != "rename" || payload["oldName"] != "Target" || payload["newName"] != "RenamedTarget" {
+	if payload["status"] != "applied" || payload["operation"] != "rename" || payload["oldName"] != "Target" || payload["newName"] != "RenamedTarget" {
 		t.Fatalf("unexpected rename payload: %+v", payload)
 	}
 	if payload["editCount"] != float64(2) || payload["fileCount"] != float64(1) {
 		t.Fatalf("unexpected rename counts: %+v", payload)
-	}
-	if got, err := os.ReadFile(source); err != nil || string(got) != string(original) {
-		t.Fatalf("rename proposal changed source before apply: %q err=%v", got, err)
-	}
-
-	proposalID, _ := payload["proposalID"].(string)
-	applyArgs, _ := json.Marshal(map[string]string{"proposal_id": proposalID})
-	applied := runner.Call(context.Background(), Call{
-		SessionID:   "session_rename",
-		TurnID:      "turn_rename",
-		CallID:      "call_apply",
-		Name:        PatchApply,
-		Args:        applyArgs,
-		ProjectDirs: []string{root},
-	})
-	if !applied.Ok {
-		t.Fatalf("apply failed: %s", applied.Content)
 	}
 	got, err := os.ReadFile(source)
 	if err != nil {
@@ -122,7 +101,7 @@ func TestCodeRenameAcceptsDocumentChanges(t *testing.T) {
 		Args:        json.RawMessage(`{"scope":"project","path":"main.go","line":3,"column":6,"new_name":"Renamed"}`),
 		ProjectDirs: []string{root},
 	})
-	if !result.Ok || !strings.Contains(result.Content, `"proposalID"`) {
+	if !result.Ok || !strings.Contains(result.Content, `"status":"applied"`) {
 		t.Fatalf("documentChanges rename failed: %+v", result)
 	}
 }

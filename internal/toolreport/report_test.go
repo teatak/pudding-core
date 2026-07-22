@@ -99,7 +99,7 @@ func TestGenerateCanIncludeUnusedBuiltinTools(t *testing.T) {
 	if rename.Calls != 0 || rename.RequiredMode != store.ModeCode || rename.EligibleTurns != 2 || !near(rename.TurnCoverageRate, 0) {
 		t.Fatalf("unexpected unused rename stat: %+v", rename)
 	}
-	process := findToolStat(t, report, tool.CommandStart)
+	process := findToolStat(t, report, tool.CommandSession)
 	if process.Group != "command" || process.RequiredMode != store.ModeCode {
 		t.Fatalf("unexpected background command stat: %+v", process)
 	}
@@ -131,7 +131,7 @@ func seedToolReportDB(t *testing.T, path string, now time.Time) {
 
 	index := 0
 	insertToolCall(t, db, "session_1", "turn_project_1", &index, "search_1", tool.FileSearch, map[string]any{"scope": "project", "query": "needle"}, false, "failed")
-	insertToolCall(t, db, "session_1", "turn_project_1", &index, "command_1", tool.CommandRun, map[string]any{"scope": "project", "argv": []string{"rg", "needle"}}, true, "match")
+	insertToolCall(t, db, "session_1", "turn_project_1", &index, "command_1", tool.CommandRun, map[string]any{"scope": "project", "command": "rg needle"}, true, "match")
 	index = 0
 	insertToolCall(t, db, "session_1", "turn_project_2", &index, "search_2", tool.FileSearch, map[string]any{"scope": "project", "query": "first"}, true, strings.Repeat("x", 100))
 	insertToolCall(t, db, "session_1", "turn_project_2", &index, "search_3", tool.FileSearch, map[string]any{"scope": "project", "query": "second"}, true, strings.Repeat("y", 2000))

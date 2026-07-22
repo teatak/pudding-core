@@ -44,7 +44,7 @@ export function UsageSettings({ token }: { token: string }) {
   const hasUsage = summary.requestCount > 0 || summary.totalTokens > 0;
 
   return (
-    <div className={cn(SETTINGS_CONTENT_CLASS, "gap-6 pt-2")}>
+    <div className={cn(SETTINGS_CONTENT_CLASS, "gap-6")}>
       <section className="grid min-w-0 gap-5">
         {usageQuery.isError ? (
           <Alert variant="destructive">
@@ -441,7 +441,10 @@ function ratio(value: number, total: number) {
 }
 
 function formatNumber(value: number, locale: string, maximumFractionDigits = 0) {
-  return new Intl.NumberFormat(locale, { maximumFractionDigits }).format(value);
+  return new Intl.NumberFormat(locale, {
+    maximumFractionDigits,
+    useGrouping: !locale.startsWith("zh"),
+  }).format(value);
 }
 
 function formatPercentage(value: number, locale: string) {
@@ -458,11 +461,7 @@ function formatDays(value: number, locale: string, t: Translate) {
 
 function formatUsageTokens(value: number, locale: string) {
   const abs = Math.abs(value);
-  const units = [
-    { divisor: 1_000_000_000, suffix: "B" },
-    { divisor: 1_000_000, suffix: "M" },
-    { divisor: 1_000, suffix: "K" },
-  ];
+  const units = usageTokenUnits(locale);
   let unitIndex = units.findIndex((unit) => abs >= unit.divisor);
   if (unitIndex < 0) {
     return formatNumber(value, locale);
@@ -473,11 +472,29 @@ function formatUsageTokens(value: number, locale: string) {
     const scaledAbs = Math.abs(scaled);
     const maximumFractionDigits = scaledAbs >= 100 ? 0 : scaledAbs >= 10 ? 1 : 2;
     const rounded = Number(scaled.toFixed(maximumFractionDigits));
-    if (Math.abs(rounded) >= 1_000 && unitIndex > 0) {
+    const promotionThreshold = unitIndex > 0
+      ? units[unitIndex - 1].divisor / unit.divisor
+      : Number.POSITIVE_INFINITY;
+    if (Math.abs(rounded) >= promotionThreshold) {
       unitIndex -= 1;
       continue;
     }
     return `${formatNumber(scaled, locale, maximumFractionDigits)}${unit.suffix}`;
   }
   return formatNumber(value, locale);
+}
+
+function usageTokenUnits(locale: string) {
+  if (locale.startsWith("zh")) {
+    const traditional = locale === "zh-TW";
+    return [
+      { divisor: 100_000_000, suffix: traditional ? "億" : "亿" },
+      { divisor: 10_000, suffix: traditional ? "萬" : "万" },
+    ];
+  }
+  return [
+    { divisor: 1_000_000_000, suffix: "B" },
+    { divisor: 1_000_000, suffix: "M" },
+    { divisor: 1_000, suffix: "K" },
+  ];
 }

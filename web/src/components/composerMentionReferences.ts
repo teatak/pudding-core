@@ -19,6 +19,8 @@ export type ComposerMentionReference = {
   description: string;
   insertText: string;
   actionID?: ComposerMentionActionID;
+  appID?: string;
+  appSource?: "builtin" | "installed";
   appIcon?: ComposerMentionAppIcon;
   iconURL?: string;
   keepOpen?: boolean;

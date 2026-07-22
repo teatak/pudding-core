@@ -221,7 +221,7 @@ export function ProjectEditor({
           aria-label={t("project.browserReferenceSelection")}
           className="absolute z-30 inline-flex h-8 items-center rounded-md border border-border bg-popover px-3 text-xs font-medium text-popover-foreground shadow-lg shadow-black/20 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none dark:shadow-black/50"
           style={{ left: selectionAction.x, top: selectionAction.y }}
-          title={t("project.browserReferenceSelection")}
+
           type="button"
           onClick={() => {
             onReferenceSelectionRef.current?.(selectionAction.range);

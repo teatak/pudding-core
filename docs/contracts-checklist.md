@@ -95,28 +95,25 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | --- | --- | --- | --- |
 | `builtin_app_load` | `chat` | `{app_id, skill_id?}` | `{ok, appID, skillID, content, newlyLoaded, alreadyLoaded}`;显式加载 App，失败不修改 session |
 | `builtin_app_save` | `code` | `{operation:create|update,app_id,version,files[]}` | 完整文本包经隔离校验后替换已安装 App；失败保留旧版本；不接受凭据 |
-| `builtin_toolkit_load` | `chat` | `{toolkit_ids:string[1..4]}` | `{ok, loaded, alreadyActive, activeToolkits, tools, loadsRemaining}`;turn-scoped,每 turn 最多扩展 2 次 |
-| `builtin_command_run` | `code` | `{scope:"project", argv:string[] \| script:string, cwd?, env?, timeout_ms?}`(argv/script 互斥) | `{ok, argv? \| script+shell, cwd, exitCode, stdout, stderr, stdoutTruncated, stderrTruncated, timedOut, cancelled, durationMs, sandboxed, sandboxKind?, sandboxDenied?, reason?, error?}` |
-| `builtin_command_start` | `code` | `{scope:"project", argv:string[] \| script:string, cwd?, env?}`(argv/script 互斥) | `{ok, processID, status, running, argv? \| script+shell, cwd, startedAt, sandboxed, sandboxKind?, sandboxDenied?}` |
-| `builtin_command_poll` | `code` | `{process_id, offset?, max_bytes?, wait_ms?}` | `{ok, processID, status, running, exitCode?, output:[{offset,stream,content}], oldestOffset, nextOffset, tailOffset, truncated, hasMore, sandboxed, sandboxKind?, sandboxDenied?}` |
-| `builtin_command_stop` | `code` | `{process_id}` | `{ok, processID, status, running:false, exitCode?, reason?, finishedAt?, sandboxed, sandboxKind?, sandboxDenied?}` |
+| `builtin_command_run` | `code` | `{scope:"project", command:string, cwd?, env?, timeout_ms?, background?, tty?}` | 前台返回 `{ok, command, shell, cwd, exitCode, stdout, stderr, ...}`;`background:true` 返回 `{ok, processID, status, running, command, tty, ...}` |
+| `builtin_command_session` | `code` | `{action:"poll"|"write"|"stop", process_id, offset?, max_bytes?, wait_ms?, data?}` | poll 返回有界输出与 offset;write 返回 `bytesWritten`;stop 返回终态 |
 | `builtin_git_status` | `code` | `{scope:"project", cwd?}` | `{ok, cwd, repoRoot, head, branch, upstream, detached, ahead, behind, clean, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |
 | `builtin_git_diff` | `code` | `{scope:"project", cwd?, staged?}` | `{ok, cwd, repoRoot, staged, diff, truncated, files, fileCount, additions, deletions}` |
 | `builtin_git_log` | `code` | `{scope:"project", cwd?, limit?}` | `{ok, cwd, repoRoot, commits, count}` |
 | `builtin_git_stage` | `code` | `{scope:"project", cwd?, paths:string[]}` | `{ok, status:"staged", cwd, repoRoot, paths, pathCount, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |
 | `builtin_git_unstage` | `code` | `{scope:"project", cwd?, paths:string[]}` | `{ok, status:"unstaged", cwd, repoRoot, paths, pathCount, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |
 | `builtin_git_commit` | `code` | `{scope:"project", cwd?, message}` | `{ok, status:"committed", cwd, repoRoot, commit, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |
-| `builtin_patch_propose` | `code` | `{scope:"project", files:[{path, new_text?, delete?}]}` | `{ok, status:"proposed", proposalID, projectRoot, files, fileCount, additions, deletions, diff, expiresAt}` |
-| `builtin_patch_apply` | `code` | `{proposal_id}` | `{ok, status:"applied", proposalID, projectRoot, files, fileCount, additions, deletions, warnings}` |
+| `builtin_patch_apply` | `code` | `{scope:"project", files:[{path, new_text?, edits?, delete?}]}` | `{ok, status:"applied", projectRoot, files, fileCount, additions, deletions, warnings}`;一次调用校验并原子应用整个批次 |
 
-`builtin_command_run` 的 argv 直接执行;script 由固定平台 shell 执行,模型不能指定
-shell executable。cwd 必须位于当前 Project/turn grant 授权目录中;默认 timeout
-为 60 秒,最大 10 分钟;stdout/stderr 各保留最多 64 KiB 头尾内容。script 一律
-`LowRisk=false`;命令审批由 Project 的 `ask | auto | full` 决定。`auto` 使用负面风险
-规则:未知的直接 argv 不会仅因命令名未知而审批;删除、Git 外部写入、发布、凭证、
-显式网络工具、提权/系统操作、越界路径、wrapper、inline code 与 script 仍请求审批。常规
-Git `clone/fetch/pull` 与依赖下载自动允许。安全的
-自定义环境和后台命令沿用同一套 argv 风险判断,不额外强制审批。
+`builtin_command_run` 接受完整 `command`,由固定平台 shell 执行,模型不能指定 shell
+executable。cwd 必须位于当前 Project/turn grant 授权目录中;前台默认 timeout 为 60 秒,
+最大 10 分钟;stdout/stderr 各保留最多 64 KiB 头尾内容。后台命令没有运行时上限,
+通过 `builtin_command_session` 读取、输入或停止;`tty:true` 仅用于需要终端的交互命令。
+命令审批由 Project 的 `ask | auto | full` 决定。`auto` 用 shell AST 拆分静态命令段并
+逐段应用负面风险规则:未知命令名不会仅因未知而审批;删除、Git 外部写入、发布、凭证、
+显式网络工具、提权/系统操作、越界路径、wrapper、inline code 和动态 shell 结构仍请求
+审批。常规 Git `clone/fetch/pull` 与依赖下载自动允许。安全的自定义环境和后台命令沿用
+同一套风险判断,不额外强制审批。
 
 命令环境的 `PATH` 在 desktop daemon 原有值后补充 Homebrew 与常见用户工具链目录;
 direct/sandbox runner 均必须按这份合并后的 `PATH` 解析可执行文件,不能依赖 Electron
@@ -135,8 +132,9 @@ Code 不要求预先绑定 Project。没有 Project 或 turn grant 时,engine �
 懒创建 `<home>/temp/code/<sessionID>` 作为唯一项目作用域;它不创建 Project 记录,
 并在删除 session 时清理。
 
-后台进程归属 session,每 session 最多 4 个、全局最多 32 个;无 stdin/PTY。
-stdout/stderr 共用 1 MiB 有界 ring buffer,通过 offset 增量读取。运行中的进程不因
+后台进程归属 session,每 session 最多 4 个、全局最多 32 个。普通进程支持串行 stdin,
+交互进程可显式分配 PTY;单次输入最多 64 KiB。stdout/stderr 共用 1 MiB 有界 ring
+buffer,通过 offset 增量读取。运行中的进程不因
 无 poll 过期;结束结果保留 30 分钟。显式 stop、session 删除与 daemon shutdown
 会终止整个子进程组。后台进程保留启动时的 Project roots 和沙箱模式快照;后续
 能力、审批模式或 Project 变更不限制或终止已启动进程。
@@ -155,12 +153,12 @@ transcript 对 command、Git、file tool result 使用结构化 renderer。折�
 i18n 显示名和结构化摘要,不得把内部 snake_case tool name 作为主显示。原始 args /
 result 只在“原始数据”二级 disclosure 展开后渲染。
 
-`builtin_patch_propose` 每个 file 必须且只能提供完整 `new_text` 或
-`delete:true`;第一版只支持同一 Project root 内的 UTF-8 regular file,单次最多
-16 个文件。proposal 为 session-scoped daemon memory,TTL 2 小时。生成 proposal
-不写文件;`builtin_patch_apply` 审批 payload 必须携带完整 unified diff。审批前和
-apply 前均校验源文件 hash;任一文件漂移则整包拒绝。apply 先准备同目录临时文件,
-再通过 backup + rename 提交,失败时逆序回滚。
+`builtin_patch_apply` 每个 file 必须且只能提供 `new_text`、`edits` 或
+`delete:true` 中的一种;只支持同一 Project root 内的 UTF-8 regular file,单次最多
+16 个文件。审批前根据本次 tool call 生成完整 unified diff 和源文件 hash 快照,
+审批通过后消费同一快照;模型无需再次提交 patch id。任一文件漂移则整包拒绝。
+apply 先准备同目录临时文件,再通过 backup + rename 提交,失败时逆序回滚。修改完成后
+由 Turn 文件 Diff 记录本轮产物,供 transcript 与项目浏览器统一审阅。
 
 ## settings 约定键
 

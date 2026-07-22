@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"mime"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,6 +45,122 @@ func TestBuiltinFileSkillWriteReadPatch(t *testing.T) {
 	payload := decodeToolResult(t, read)
 	if payload["content"] != "hello\npudding\n" {
 		t.Fatalf("unexpected content: %+v", payload)
+	}
+}
+
+func TestBuiltinFilePatchNotFoundReturnsClosestMatch(t *testing.T) {
+	home := t.TempDir()
+	target := filepath.Join(home, "skills", "demo", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	original := "header\n  const value = 1\nfooter\n"
+	if err := os.WriteFile(target, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result := NewBuiltinRunner(WithHomeDir(home)).Call(context.Background(), Call{
+		Name: FilePatch,
+		Args: json.RawMessage(`{"scope":"skill","path":"demo/SKILL.md","old_string":"header\nconst value = 1\nfooter","new_string":"changed"}`),
+	})
+	if result.Ok {
+		t.Fatalf("inexact patch should fail: %+v", result)
+	}
+	payload := decodeToolResult(t, result)
+	if payload["reason"] != "old_string_not_found" {
+		t.Fatalf("unexpected failure: %+v", payload)
+	}
+	closest, ok := payload["closestMatch"].(map[string]any)
+	if !ok {
+		t.Fatalf("closest match missing: %+v", payload)
+	}
+	if closest["startLine"] != float64(1) || closest["endLine"] != float64(3) {
+		t.Fatalf("unexpected closest range: %+v", closest)
+	}
+	if closest["likelyDifference"] != "whitespace" || closest["content"] != strings.TrimSuffix(original, "\n") {
+		t.Fatalf("unexpected closest match: %+v", closest)
+	}
+	if data, err := os.ReadFile(target); err != nil || string(data) != original {
+		t.Fatalf("failed patch modified file: %q %v", data, err)
+	}
+}
+
+func TestBuiltinFilePatchNotFoundIdentifiesLineEndings(t *testing.T) {
+	home := t.TempDir()
+	target := filepath.Join(home, "skills", "demo", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	original := "alpha\r\nbeta\r\n"
+	if err := os.WriteFile(target, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result := NewBuiltinRunner(WithHomeDir(home)).Call(context.Background(), Call{
+		Name: FilePatch,
+		Args: json.RawMessage(`{"scope":"skill","path":"demo/SKILL.md","old_string":"alpha\nbeta\n","new_string":"changed\n"}`),
+	})
+	if result.Ok {
+		t.Fatalf("line-ending mismatch should fail: %+v", result)
+	}
+	payload := decodeToolResult(t, result)
+	closest, ok := payload["closestMatch"].(map[string]any)
+	if !ok || closest["likelyDifference"] != "line_endings" {
+		t.Fatalf("line-ending hint missing: %+v", payload)
+	}
+	if closest["startLine"] != float64(1) || closest["endLine"] != float64(2) {
+		t.Fatalf("unexpected closest range: %+v", closest)
+	}
+	if data, err := os.ReadFile(target); err != nil || string(data) != original {
+		t.Fatalf("failed patch modified file: %q %v", data, err)
+	}
+}
+
+func TestBuiltinFilePatchAmbiguousReturnsMatchCount(t *testing.T) {
+	home := t.TempDir()
+	target := filepath.Join(home, "skills", "demo", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	original := "same\nmiddle\nsame\n"
+	if err := os.WriteFile(target, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result := NewBuiltinRunner(WithHomeDir(home)).Call(context.Background(), Call{
+		Name: FilePatch,
+		Args: json.RawMessage(`{"scope":"skill","path":"demo/SKILL.md","old_string":"same","new_string":"changed"}`),
+	})
+	if result.Ok {
+		t.Fatalf("ambiguous patch should fail: %+v", result)
+	}
+	payload := decodeToolResult(t, result)
+	if payload["reason"] != "old_string_ambiguous" || payload["matches"] != float64(2) || payload["hint"] == "" {
+		t.Fatalf("ambiguous details missing: %+v", payload)
+	}
+	if data, err := os.ReadFile(target); err != nil || string(data) != original {
+		t.Fatalf("ambiguous patch modified file: %q %v", data, err)
+	}
+}
+
+func TestClosestFilePatchMatchUsesSurroundingContextForRepeatedAnchor(t *testing.T) {
+	content := "target line\nwrong context\nseparator\nheader\n  target line\nfooter\n"
+	closest, ok := closestFilePatchMatch(content, "header\ntarget line\nfooter")
+	if !ok {
+		t.Fatal("closest match missing")
+	}
+	if closest.StartLine != 4 || closest.EndLine != 6 {
+		t.Fatalf("wrong repeated-anchor match: %+v", closest)
+	}
+	if closest.LikelyDifference != "whitespace" || closest.Similarity != 100 {
+		t.Fatalf("unexpected repeated-anchor details: %+v", closest)
+	}
+}
+
+func TestClosestFilePatchMatchSkipsOversizedSource(t *testing.T) {
+	content := strings.Repeat("line\n", maxFilePatchHintSourceBytes/5+1)
+	if _, ok := closestFilePatchMatch(content, "missing line"); ok {
+		t.Fatal("oversized source should not run closest-match analysis")
 	}
 }
 
@@ -162,17 +279,17 @@ func TestBuiltinFileRejectsSymlinkedManagedRoot(t *testing.T) {
 	}
 }
 
-func TestBuiltinFileRejectsWritesToBuiltinSkillID(t *testing.T) {
+func TestBuiltinFileAllowsAppSkillIDInGlobalScope(t *testing.T) {
 	homeDir := t.TempDir()
 	result := NewBuiltinRunner(WithHomeDir(homeDir)).Call(context.Background(), Call{
 		Name: FileWrite,
 		Args: json.RawMessage(`{"scope":"skill","path":"skill-creator/SKILL.md","content":"shadow"}`),
 	})
-	if result.Ok {
-		t.Fatalf("write to builtin Skill id should fail: %+v", result)
+	if !result.Ok {
+		t.Fatalf("App Skill id should not reserve global Skill writes: %+v", result)
 	}
-	if _, err := os.Stat(filepath.Join(homeDir, "skills", "skill-creator")); !os.IsNotExist(err) {
-		t.Fatalf("shadow builtin Skill directory was created: %v", err)
+	if _, err := os.Stat(filepath.Join(homeDir, "skills", "skill-creator", "SKILL.md")); err != nil {
+		t.Fatalf("global Skill file was not created: %v", err)
 	}
 }
 
@@ -634,6 +751,47 @@ func TestBuiltinFileReadAllowsUTF8RuneAcrossProbeBoundary(t *testing.T) {
 	payload := decodeToolResult(t, res)
 	if payload["content"] != content {
 		t.Fatalf("unexpected boundary content: %+v", payload)
+	}
+}
+
+func TestBuiltinFileReadTreatsTypeScriptAsTextDespiteSystemMIME(t *testing.T) {
+	if err := mime.AddExtensionType(".ts", "video/mp2t"); err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	tempDir := filepath.Join(home, "temp")
+	if err := os.MkdirAll(tempDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	content := "export const value: string = \"pudding\"\n"
+	if err := os.WriteFile(filepath.Join(tempDir, "example.ts"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "binary.ts"), []byte{'T', 'S', 0, 1}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewBuiltinRunner(WithHomeDir(home))
+
+	textResult := runner.Call(context.Background(), Call{
+		Name: FileRead,
+		Args: json.RawMessage(`{"scope":"temp","path":"example.ts"}`),
+	})
+	if !textResult.Ok {
+		t.Fatalf("TypeScript text should be readable: %+v", textResult)
+	}
+	if payload := decodeToolResult(t, textResult); payload["content"] != content {
+		t.Fatalf("unexpected TypeScript content: %+v", payload)
+	}
+
+	binaryResult := runner.Call(context.Background(), Call{
+		Name: FileRead,
+		Args: json.RawMessage(`{"scope":"temp","path":"binary.ts"}`),
+	})
+	if binaryResult.Ok {
+		t.Fatalf("binary data with a TypeScript extension should fail: %+v", binaryResult)
+	}
+	if payload := decodeToolResult(t, binaryResult); payload["reason"] != "binary_file" {
+		t.Fatalf("unexpected binary TypeScript result: %+v", payload)
 	}
 }
 

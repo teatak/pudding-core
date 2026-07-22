@@ -193,11 +193,17 @@ func TestTypeUsesTargetScopedCDPInput(t *testing.T) {
 	if !connected || nextID != len(gotCalls) {
 		t.Fatalf("CDP session was not reused: connected=%v nextID=%d calls=%d", connected, nextID, len(gotCalls))
 	}
-	if expression, _ := gotCalls[2].Params["expression"].(string); !strings.Contains(expression, `inputEvent("beforeinput", true)`) || !strings.Contains(expression, `setter.call(el, nextValue)`) {
+	if expression, _ := gotCalls[2].Params["expression"].(string); !strings.Contains(expression, `inputEvent("beforeinput", true)`) || !strings.Contains(expression, `setter.call(el, nextValue)`) || !strings.Contains(expression, `if (inserted && !sawInput) dispatchInput()`) {
 		t.Fatalf("unexpected target input script: %+v", gotCalls[2].Params)
 	}
 	if expression, _ := gotCalls[1].Params["expression"].(string); !strings.Contains(expression, `if (!clear) range.collapse(false)`) {
 		t.Fatalf("unexpected contenteditable selection script: %+v", gotCalls[1].Params)
+	}
+	if expression, _ := gotCalls[1].Params["expression"].(string); !strings.Contains(expression, `replace(/\uFEFF/g, "")`) {
+		t.Fatalf("contenteditable expectation did not normalize Slate placeholders: %+v", gotCalls[1].Params)
+	}
+	if expression, _ := gotCalls[3].Params["expression"].(string); !strings.Contains(expression, `replace(/\uFEFF/g, "")`) {
+		t.Fatalf("contenteditable result did not normalize Slate placeholders: %+v", gotCalls[3].Params)
 	}
 }
 
@@ -251,23 +257,31 @@ func TestClickCDPFailureDoesNotFallBackToDOM(t *testing.T) {
 		switch request.Method {
 		case "Runtime.evaluate":
 			expression, _ := request.Params["expression"].(string)
-			if strings.Contains(expression, "el.click()") {
-				if request.Params["userGesture"] != true {
-					t.Errorf("target click did not carry a CDP user gesture: %+v", request.Params)
+			if strings.Contains(expression, "elementFromPoint") {
+				if strings.Contains(expression, "el.click()") || strings.Contains(expression, "focusTarget.focus") {
+					t.Errorf("click target resolution dispatched a synthetic click: %+v", request.Params)
 				}
-				return cdpTestReply{ErrorMessage: "target click failed"}
+				if _, ok := request.Params["userGesture"]; ok {
+					t.Errorf("click target resolution unexpectedly carried a user gesture: %+v", request.Params)
+				}
+				return jsonValueReply(`{"ok":true,"tag":"button","x":20,"y":30,"method":"pointer"}`)
 			}
 			return jsonValueReply(`{"url":"https://example.test/","readyState":"complete","timeOrigin":1}`)
+		case "Input.dispatchMouseEvent":
+			if request.Params["type"] == "mousePressed" {
+				return cdpTestReply{ErrorMessage: "pointer click failed"}
+			}
+			return cdpTestReply{}
 		default:
 			t.Errorf("unexpected CDP method after click failure: %s", request.Method)
 			return cdpTestReply{}
 		}
 	})
 	_, err := manager.Click(context.Background(), "sess_type", "tab_type", ClickInput{Selector: "#save"})
-	if err == nil || !strings.Contains(err.Error(), "target click failed") {
+	if err == nil || !strings.Contains(err.Error(), "pointer click failed") {
 		t.Fatalf("expected direct CDP click error, got %v", err)
 	}
-	if got := strings.Join(cdpTestMethods(calls()), ","); got != "Runtime.evaluate,Runtime.evaluate" {
+	if got := strings.Join(cdpTestMethods(calls()), ","); got != "Runtime.evaluate,Runtime.evaluate,Input.dispatchMouseEvent,Input.dispatchMouseEvent" {
 		t.Fatalf("unexpected CDP calls: %s", got)
 	}
 }

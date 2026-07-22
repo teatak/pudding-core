@@ -115,7 +115,7 @@ function SavedCanvasItemRow({ entry, onOpen, onRemove }: { entry: SavedCanvasIte
   const title = entry.title || entry.kind;
   return (
     <div className="group/saved mx-1 flex h-8 min-w-0 items-center rounded-md pr-2 hover:bg-accent focus-within:bg-accent">
-      <button className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-sm focus-visible:outline-none" title={title} type="button" onClick={onOpen}>
+      <button className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-sm focus-visible:outline-none"  type="button" onClick={onOpen}>
         <CanvasKindIcon className="!h-4 !w-4 !bg-transparent [&>svg]:!h-4 [&>svg]:!w-4" kind={entry.kind} size="xs" />
         <span className="min-w-0 flex-1 truncate text-left">{title}</span>
       </button>
@@ -133,7 +133,7 @@ function ClosedCanvasItemRow({ entry, onRemove, onRestore }: { entry: ClosedCanv
   const title = entry.title || entry.kind;
   return (
     <div className="group/closed mx-1 flex h-8 min-w-0 items-center rounded-md pr-2 hover:bg-accent focus-within:bg-accent">
-      <button className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-sm focus-visible:outline-none" title={title} type="button" onClick={onRestore}>
+      <button className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-sm focus-visible:outline-none"  type="button" onClick={onRestore}>
         <CanvasKindIcon className="!h-4 !w-4 !bg-transparent [&>svg]:!h-4 [&>svg]:!w-4" kind={entry.kind} size="xs" />
         <span className="min-w-0 flex-1 truncate text-left">{title}</span>
       </button>

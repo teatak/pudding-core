@@ -67,6 +67,7 @@ const macTrafficLightPosition = { x: 18, y: 18 };
 const defaultWindowBounds = { width: 1440, height: 920 };
 const minWindowBounds = { width: 560, height: 680 };
 const browserFaviconCache = new Map();
+const browserAutomationLifecycleWaiters = new Map();
 let mainWindow = null;
 let themePreference = normalizeThemePreference(process.env.PUDDING_THEME || "system");
 nativeTheme.themeSource = themePreference;
@@ -77,15 +78,11 @@ const browserHost = new BrowserHost(
   (cursor) => {
     broadcastToTrustedRenderers("pudding:browser:cursor", cursor);
   },
-  (event) => {
-    broadcastToTrustedRenderers("pudding:browser:automation-start", event);
-  },
+  (event, target) => requestBrowserAutomationLifecycle("start", event, target),
   (request) => {
     broadcastToTrustedRenderers("pudding:browser:webview-required", request);
   },
-  (event) => {
-    broadcastToTrustedRenderers("pudding:browser:automation-end", event);
-  },
+  (event, target) => requestBrowserAutomationLifecycle("end", event, target),
   {
     options: () => ({ backgroundColor: themeBackgroundColor() }),
     resolveFavicon: resolveCachedBrowserFavicon,
@@ -853,6 +850,42 @@ function broadcastToTrustedRenderers(channel, payload) {
   }
 }
 
+function requestBrowserAutomationLifecycle(phase, event, target) {
+  const channel = `pudding:browser:automation-${phase}`;
+  if (event?.action !== "click") {
+    broadcastToTrustedRenderers(channel, event);
+    return undefined;
+  }
+  const sender = target?.hostWebContents;
+  if (!sender || sender.isDestroyed() || !isTrustedRendererURL(sender.getURL())) {
+    if (phase === "end") {
+      broadcastToTrustedRenderers(channel, event);
+    }
+    return false;
+  }
+  const requestID = `browser_automation_${crypto.randomUUID().replaceAll("-", "")}`;
+  return new Promise((resolve) => {
+    let settled = false;
+    const complete = (ok) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      browserAutomationLifecycleWaiters.delete(requestID);
+      resolve(Boolean(ok));
+    };
+    const timer = setTimeout(() => complete(false), 500);
+    timer.unref?.();
+    browserAutomationLifecycleWaiters.set(requestID, { complete, senderID: sender.id });
+    try {
+      sender.send(channel, { ...event, requestID });
+    } catch {
+      complete(false);
+    }
+  });
+}
+
 ipcMain.handle("pudding:theme:get", (event) => {
   assertTrustedSender(event);
   return themeState();
@@ -1003,6 +1036,17 @@ ipcMain.handle("pudding:browser:webview-register", (event, request) => {
     throw new Error("browser webview target not found");
   }
   return browserHost.registerWebContents(untrustedBrowserRequest(request), target);
+});
+
+ipcMain.handle("pudding:browser:automation-lifecycle-complete", (event, request) => {
+  assertTrustedSender(event);
+  const requestID = String(request?.requestID || "").trim();
+  const waiter = browserAutomationLifecycleWaiters.get(requestID);
+  if (!waiter || waiter.senderID !== event.sender.id) {
+    return false;
+  }
+  waiter.complete(Boolean(request?.ok));
+  return true;
 });
 
 ipcMain.handle("pudding:browser:load-url", (event, request) => {

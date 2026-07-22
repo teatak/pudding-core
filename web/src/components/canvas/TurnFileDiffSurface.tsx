@@ -43,7 +43,7 @@ export function TurnFileDiffSurface({ active, preview, token }: { active: boolea
             <DropdownMenuTrigger asChild>
               <button className="flex min-w-0 max-w-full flex-1 items-center gap-1.5 rounded px-1.5 py-1 text-left hover:bg-muted" type="button">
                 <ChangeStatus change={selected} />
-                <code className="min-w-0 flex-1 truncate font-mono text-xs" title={turnFileChangeFullPath(selected)}>{turnFileChangeLabel(selected, changes)}</code>
+                <code className="min-w-0 flex-1 truncate font-mono text-xs" >{turnFileChangeLabel(selected, changes)}</code>
                 <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
               </button>
             </DropdownMenuTrigger>

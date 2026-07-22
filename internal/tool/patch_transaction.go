@@ -10,24 +10,24 @@ import (
 )
 
 type patchApplyItem struct {
-	file       patchProposalFile
+	file       preparedPatchFile
 	tempPath   string
 	backupPath string
 	installed  bool
 }
 
-func applyPatchProposal(projectDirs []string, proposal *patchProposal) ([]string, error) {
-	if err := validatePatchProposalState(projectDirs, proposal); err != nil {
+func applyPreparedPatch(projectDirs []string, patch *preparedPatch) ([]string, error) {
+	if err := validatePreparedPatchState(projectDirs, patch); err != nil {
 		return nil, err
 	}
-	items := make([]patchApplyItem, len(proposal.Files))
+	items := make([]patchApplyItem, len(patch.Files))
 	createdDirs := make(map[string]bool)
-	for i, file := range proposal.Files {
+	for i, file := range patch.Files {
 		items[i].file = file
 		if file.Delete {
 			continue
 		}
-		if err := ensurePatchParent(filepath.Dir(file.Target), proposal.ProjectRoot, createdDirs); err != nil {
+		if err := ensurePatchParent(filepath.Dir(file.Target), patch.ProjectRoot, createdDirs); err != nil {
 			cleanupPatchStaging(items, createdDirs)
 			return nil, newPatchError("stage_failed", err.Error())
 		}
@@ -60,7 +60,7 @@ func applyPatchProposal(projectDirs []string, proposal *patchProposal) ([]string
 
 	for i := range items {
 		item := &items[i]
-		if err := validatePatchFileState(projectDirs, proposal.ProjectRoot, item.file); err != nil {
+		if err := validatePatchFileState(projectDirs, patch.ProjectRoot, item.file); err != nil {
 			rollbackErr := rollbackPatchItems(items, createdDirs)
 			return nil, patchApplyError(err, rollbackErr)
 		}
@@ -82,7 +82,7 @@ func applyPatchProposal(projectDirs []string, proposal *patchProposal) ([]string
 		if !item.file.Existed {
 			if _, err := os.Lstat(item.file.Target); err == nil || !errors.Is(err, os.ErrNotExist) {
 				rollbackErr := rollbackPatchItems(items, createdDirs)
-				return nil, patchApplyError(newPatchError("proposal_stale", "new file path appeared after proposal creation: "+item.file.Path), rollbackErr)
+				return nil, patchApplyError(newPatchError("patch_stale", "new file path appeared after patch validation: "+item.file.Path), rollbackErr)
 			}
 		}
 		if err := os.Rename(item.tempPath, item.file.Target); err != nil {
@@ -107,19 +107,19 @@ func applyPatchProposal(projectDirs []string, proposal *patchProposal) ([]string
 	return warnings, nil
 }
 
-func validatePatchProposalState(projectDirs []string, proposal *patchProposal) error {
-	if proposal == nil || len(proposal.Files) == 0 {
-		return newPatchError("proposal_not_found", "patch proposal is empty or unavailable")
+func validatePreparedPatchState(projectDirs []string, patch *preparedPatch) error {
+	if patch == nil || len(patch.Files) == 0 {
+		return newPatchError("patch_empty", "prepared patch is empty or unavailable")
 	}
-	for _, file := range proposal.Files {
-		if err := validatePatchFileState(projectDirs, proposal.ProjectRoot, file); err != nil {
+	for _, file := range patch.Files {
+		if err := validatePatchFileState(projectDirs, patch.ProjectRoot, file); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validatePatchFileState(projectDirs []string, projectRoot string, file patchProposalFile) error {
+func validatePatchFileState(projectDirs []string, projectRoot string, file preparedPatchFile) error {
 	authorizedRoot, err := patchAuthorizedRoot(projectDirs, projectRoot)
 	if err != nil {
 		return err
@@ -146,26 +146,26 @@ func validatePatchFileState(projectDirs []string, projectRoot string, file patch
 		if statErr != nil {
 			return newPatchError("stat_failed", statErr.Error())
 		}
-		return newPatchError("proposal_stale", "file was created after proposal generation: "+file.Path)
+		return newPatchError("patch_stale", "file was created after patch validation: "+file.Path)
 	}
 	if statErr != nil {
 		if errors.Is(statErr, os.ErrNotExist) {
-			return newPatchError("proposal_stale", "file was removed after proposal generation: "+file.Path)
+			return newPatchError("patch_stale", "file was removed after patch validation: "+file.Path)
 		}
 		return newPatchError("stat_failed", statErr.Error())
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return newPatchError("proposal_stale", "file type changed after proposal generation: "+file.Path)
+		return newPatchError("patch_stale", "file type changed after patch validation: "+file.Path)
 	}
 	if info.Size() > patchMaxFileBytes {
-		return newPatchError("proposal_stale", "file grew beyond the patch size limit: "+file.Path)
+		return newPatchError("patch_stale", "file grew beyond the patch size limit: "+file.Path)
 	}
 	data, err := os.ReadFile(file.Target)
 	if err != nil {
 		return newPatchError("read_failed", err.Error())
 	}
 	if patchContentHash(data) != file.OldHash {
-		return newPatchError("proposal_stale", "file changed after proposal generation: "+file.Path)
+		return newPatchError("patch_stale", "file changed after patch validation: "+file.Path)
 	}
 	return nil
 }
@@ -274,9 +274,9 @@ func patchApplyError(applyErr, rollbackErr error) error {
 	if rollbackErr != nil {
 		return newPatchError("rollback_failed", fmt.Sprintf("apply failed: %v; rollback failed: %v", applyErr, rollbackErr))
 	}
-	var proposalErr *patchError
-	if errors.As(applyErr, &proposalErr) {
-		return proposalErr
+	var patchErr *patchError
+	if errors.As(applyErr, &patchErr) {
+		return patchErr
 	}
 	return newPatchError("apply_failed", applyErr.Error())
 }

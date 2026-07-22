@@ -214,7 +214,7 @@ func (f *fixture) compare(ctx context.Context, name, domain, dedicatedName strin
 		item.Detail = "dedicated tool: " + err.Error()
 		return item
 	}
-	cli, err := f.call(ctx, tool.CommandRun, map[string]any{"scope": "project", "argv": argv})
+	cli, err := f.call(ctx, tool.CommandRun, map[string]any{"scope": "project", "command": strings.Join(argv, " ")})
 	item.DedicatedResultBytes = len(dedicated.result.Content)
 	if err != nil {
 		item.Detail = "CLI: " + err.Error()

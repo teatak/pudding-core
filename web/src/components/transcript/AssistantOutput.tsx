@@ -135,7 +135,7 @@ function CompactMarker({ message, sessionID, showSummary, summaryText }: { messa
       </div>
       {showSummary && summaryText.trim() ? (
         <details className="mt-2 min-w-0 max-w-full overflow-hidden text-xs text-muted-foreground">
-          <summary className="cursor-pointer select-none">{t("transcript.compactSummary")}</summary>
+          <summary className="cursor-pointer select-none" tabIndex={-1}>{t("transcript.compactSummary")}</summary>
           <div className="mt-2 min-w-0 max-w-full border-t pt-2 text-foreground/80">
             <TurnParts parts={partsFromMessages([message])} sessionID={sessionID} token="" turnID={message.turnID} />
           </div>

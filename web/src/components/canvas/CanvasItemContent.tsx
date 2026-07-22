@@ -207,7 +207,7 @@ export function GalleryLayoutControls({
           aria-pressed={layout === option}
           className="text-muted-foreground hover:text-foreground aria-pressed:bg-muted aria-pressed:text-foreground aria-pressed:shadow-none dark:aria-pressed:bg-input/50"
           size="icon-sm"
-          title={label}
+
           type="button"
           variant="outline"
           onClick={(event) => {
@@ -812,7 +812,7 @@ function CanvasTable({ payload }: { payload: Record<string, unknown> | undefined
               <th
                 key={column.key}
                 className="border-b border-border bg-card px-2.5 py-1.5 text-left font-semibold text-muted-foreground whitespace-nowrap"
-                title={column.label}
+
               >
                 {column.label}
               </th>
@@ -1698,13 +1698,13 @@ function TableCell({ row, column, fallbackIndex }: { row: unknown; column: Colum
       <span
         className={`inline-block rounded px-1.5 py-0.5 text-[11px] font-medium ${semanticColor ? BADGE_COLOR_CLASS[semanticColor] : "bg-muted text-muted-foreground"}`}
         style={style}
-        title={formatted.title ?? formatted.text}
+
       >
         {formatted.text}
       </span>
     );
   }
-  return <span title={formatted.title ?? formatted.text}>{formatted.text}</span>;
+  return <span >{formatted.text}</span>;
 }
 
 function rawCellValue(row: unknown, column: Column, fallbackIndex: number): unknown {

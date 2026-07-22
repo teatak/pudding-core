@@ -1,5 +1,6 @@
 # Transcript 滚动与历史加载实施计划
 
+> 状态:已完成并归档。本文保留滚动状态机和历史分页的设计过程,不再作为当前待办列表。
 > 目标:传统消息流,不做 sticky 用户气泡。先修好底部跟随,再做上滑历史加载。  
 > 关键约束:支持上下分屏,滚动状态必须是 pane-local,数据与 SSE 必须是 session-scoped。
 
@@ -7,7 +8,7 @@
 
 - P0:bottom mode + 分屏 SSE 边界已实现,desktop resize / streaming 场景已按当前策略手测稳定。
 - P2:上滑历史分页 + prepend anchor 已实现,长会话 resize 锚点策略已按当前方案收口。
-- 下一步回到 P1:thought/tool parts 基础协议与渲染。
+- 原计划中的 P1 thought/tool parts 已由当前 transcript 实现覆盖。
 
 ## 1. 当前状态
 

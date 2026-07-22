@@ -97,8 +97,8 @@ func TestCommandResultsExposeSandboxMetadata(t *testing.T) {
 	root := t.TempDir()
 
 	raw, _ := json.Marshal(map[string]any{
-		"scope": "project",
-		"argv":  commandHelperArgs("sandbox-denied"),
+		"scope":   "project",
+		"command": commandHelperCommand("sandbox-denied"),
 	})
 	foreground := runner.Call(context.Background(), Call{
 		CallID:      "call_sandbox_metadata",
@@ -111,21 +111,24 @@ func TestCommandResultsExposeSandboxMetadata(t *testing.T) {
 		t.Fatalf("foreground sandbox metadata missing: %+v", payload)
 	}
 
-	background := backgroundToolCall(runner, "sess_sandbox_metadata", root, CommandStart, map[string]any{
-		"scope": "project",
-		"argv":  commandHelperArgs("sleep", "100"),
+	background := backgroundToolCall(runner, "sess_sandbox_metadata", root, CommandRun, map[string]any{
+		"scope":      "project",
+		"command":    commandHelperCommand("sleep", "100"),
+		"background": true,
 	})
 	started := decodeBackgroundProcessPayload(t, background)
 	if !started.Sandboxed || started.SandboxKind != "test-sandbox" {
 		t.Fatalf("background sandbox metadata missing: %+v", started)
 	}
 
-	deniedBackground := backgroundToolCall(runner, "sess_sandbox_metadata", root, CommandStart, map[string]any{
-		"scope": "project",
-		"argv":  commandHelperArgs("sandbox-denied"),
+	deniedBackground := backgroundToolCall(runner, "sess_sandbox_metadata", root, CommandRun, map[string]any{
+		"scope":      "project",
+		"command":    commandHelperCommand("sandbox-denied"),
+		"background": true,
 	})
 	deniedStarted := decodeBackgroundProcessPayload(t, deniedBackground)
-	deniedPoll := backgroundToolCall(runner, "sess_sandbox_metadata", root, CommandPoll, map[string]any{
+	deniedPoll := backgroundToolCall(runner, "sess_sandbox_metadata", root, CommandSession, map[string]any{
+		"action":     "poll",
 		"process_id": deniedStarted.ProcessID,
 		"wait_ms":    1000,
 	})
@@ -149,8 +152,8 @@ func TestForegroundAndBackgroundCommandsShareRunner(t *testing.T) {
 	root := t.TempDir()
 
 	raw, _ := json.Marshal(map[string]any{
-		"scope": "project",
-		"argv":  commandHelperArgs("report"),
+		"scope":   "project",
+		"command": commandHelperCommand("report"),
 	})
 	foreground := runner.Call(context.Background(), Call{
 		CallID:      "call_foreground_runner",
@@ -162,9 +165,10 @@ func TestForegroundAndBackgroundCommandsShareRunner(t *testing.T) {
 		t.Fatalf("foreground command failed: %+v", foreground)
 	}
 
-	background := backgroundToolCall(runner, "sess_runner", root, CommandStart, map[string]any{
-		"scope": "project",
-		"argv":  commandHelperArgs("report"),
+	background := backgroundToolCall(runner, "sess_runner", root, CommandRun, map[string]any{
+		"scope":      "project",
+		"command":    commandHelperCommand("report"),
+		"background": true,
 	})
 	if !background.Ok {
 		t.Fatalf("background command failed: %+v", background)

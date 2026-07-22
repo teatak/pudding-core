@@ -28,7 +28,7 @@ Global user skills live here:
 
 When the user explicitly asks to create or update a Skill, write it directly to this directory. There is no draft, submit, or publish step. A user Skill becomes discoverable as soon as it is valid.
 
-Builtin skills are bundled in the binary and appear as `builtin/<name>` in the UI. Do not edit or overwrite builtin skills.
+This authoring guide belongs to the built-in Skill Authoring App. Do not edit or overwrite it.
 
 At runtime Pudding injects only the skills index (`name`, `description`, path/source metadata) into the system prompt. The full `SKILL.md` body is loaded on demand with `builtin_skill_read(skill_id="<name>")` when the user's intent matches the description.
 
@@ -36,7 +36,7 @@ At runtime Pudding injects only the skills index (`name`, `description`, path/so
 
 1. Align on intent: confirm what problem the skill solves and what the user would normally say that should trigger it.
 2. Choose a name: use lowercase kebab-case with letters, numbers, and hyphens only.
-3. Ensure Code capability, then load `code.files-write` and `code.skill`; load `code.files-read` when inspection is needed.
+3. Ensure Code capability, then load the `project-files` App when structured inspection or direct file management is needed. The Skill Authoring App has already exposed the validation tool for this session.
 4. Inspect the existing Skill under `scope="skill"` when updating one.
 5. Write `SKILL.md` with YAML frontmatter plus concise operational instructions.
 6. Add `assets/icon.svg` by default unless the user explicitly says not to.
@@ -50,9 +50,9 @@ At runtime Pudding injects only the skills index (`name`, `description`, path/so
 - Use `builtin_file_write` with `scope="skill"` to create files.
 - Use `builtin_file_patch` with `scope="skill"` for precise updates that preserve unrelated files.
 - Use `builtin_file_delete`, `builtin_file_move`, and `builtin_file_copy` with `scope="skill"` only when the requested change requires them.
-- Load the `code.skill` toolkit and use `builtin_skill_validate(skill_id="<name>")` after writing.
+- Use `builtin_skill_validate(skill_id="<name>")` after writing.
 
-Do not delete an entire Skill or unrelated assets unless the user explicitly asks. Builtin Skills are outside the writable `skill` scope.
+Do not delete an entire Skill or unrelated assets unless the user explicitly asks. The App's bundled authoring Skill is outside the writable `skill` scope.
 
 ## Minimal SKILL.md Template
 

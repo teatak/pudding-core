@@ -156,7 +156,7 @@ function ProjectDirectoryNode({
             dropActive && "bg-primary/10 text-foreground ring-1 ring-inset ring-primary/40",
           )}
           style={{ paddingLeft: `${7 + depth * 13}px` }}
-          title={isRoot ? root.path : path}
+
           draggable
           type="button"
           onClick={() => onToggle(root.id, path)}
@@ -302,7 +302,7 @@ function ProjectFileNode({
       disabled={disabled}
       draggable={!disabled}
       style={{ paddingLeft: `${25 + depth * 13}px` }}
-      title={entry.path}
+
       type="button"
       onClick={onOpenPreview}
       onDoubleClick={onOpenPinned}

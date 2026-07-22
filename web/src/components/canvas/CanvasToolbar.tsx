@@ -61,7 +61,7 @@ function CanvasItemTab({
         "group relative flex w-36 min-w-24 max-w-none shrink pr-6 pl-2",
         active && workspaceTabActiveClassName,
       )}
-      title={title}
+
     >
       <button className="flex h-full min-w-0 flex-1 items-center gap-1.5" type="button" onClick={onSelect}>
         <CanvasKindIcon className="!bg-transparent" kind={item.kind} size="xs" />

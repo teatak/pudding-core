@@ -12,7 +12,7 @@
 
 - CDP:`Page`、`Runtime`、`Input`。
 - Electron:`webContents.loadURL()`、`goBack()`、`reload()`、`capturePage()`、`sendInputEvent()`。
-- 页面 DOM:`el.click()`、value setter、`scrollBy()`。
+- 页面 DOM:value setter、`scrollBy()`。
 - renderer `<webview>`:`loadURL()`、`capturePage()`。
 
 混合路径带来以下问题:
@@ -123,12 +123,12 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 | reload | `Page.reload` | 当前主 frame reload committed |
 | observe | `Runtime.evaluate` | 返回当前 document 快照 |
 | screenshot | `Page.getLayoutMetrics` + `Page.captureScreenshot` | 返回有效 PNG |
-| click | `Runtime.evaluate(userGesture=true)` 定位、命中检查并激活目标 | 目标 click handler 执行完成 |
+| click | `Runtime.evaluate` 定位与命中检查,`Input.dispatchMouseEvent` 依次发送 moved/pressed/released | 真实 click handler 执行完成 |
 | type / clear | `Runtime.evaluate` 聚焦 guest 内目标,调用原生 value setter并派发 `beforeinput` / `input`;contenteditable 使用编辑命令 | 文字只进入目标 guest,且最终值指纹与预期完全一致 |
 | shortcut | `Input.dispatchKeyEvent` | 完整 keyDown/keyUp 序列成功 |
 | scroll | `Runtime.evaluate` 在目标 renderer 调用 `scrollBy` | 目标滚动位置读取完成 |
 
-`Runtime.evaluate` 属于 CDP。click 和 type 有意在目标 guest 的 renderer 内完成写操作,因为 Electron 的 CDP Input 域会把键盘/点击焦点切到 guest,从而抢走 Composer。该路径是唯一主实现,不是 DOM fallback;失败后不会再执行第二种输入方式。`userGesture=true` 保留 `window.open()` 等激活能力,但合成事件的 `isTrusted` 仍为 false。
+click 使用 CDP Input 域产生 `isTrusted=true` 的真实指针事件;定位脚本不触发 DOM click。真实点击会短暂把焦点切到 guest,因此 Electron renderer 在点击前保存宿主活动控件与选区,点击结束后立即恢复。renderer 必须确认 WebView 已连接、ready 且实际成为 `document.activeElement`;握手超时或聚焦失败时 click 直接返回 `browser_webview_not_ready`,不会把未送达页面的事件报告为成功。宿主正在进行 IME composition 时同样拒绝本次 click,避免破坏组合输入。type 和 scroll 继续在目标 guest renderer 内完成。各动作都只有一条主实现,失败后不会执行第二种输入方式。
 
 ## 5. 错误与重试
 
@@ -156,6 +156,7 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 - `element_not_found`
 - `element_not_interactable`
 - `element_not_editable`
+- `input_value_mismatch`
 - `screenshot_failed`
 - `file_url_not_allowed`
 - `browser_tab_limit_reached`
@@ -246,21 +247,21 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 
 ### C5 Click、Type 与 Scroll
 
-- pointer click 通过目标 CDP session 的 `Runtime.evaluate(userGesture=true)` 完成命中检查和目标激活,不切换宿主焦点。
+- pointer click 先通过目标 CDP session 的 `Runtime.evaluate` 完成定位和命中检查,再发送 `Input.dispatchMouseEvent` 的 moved/pressed/released 序列。
 - type / clear 通过目标 CDP session 调用原生 value setter并派发 `beforeinput` / `input`;仅允许文本型 input、textarea 与 contenteditable。
 - 快捷键使用 `Input.dispatchKeyEvent`。
 - 不聚焦外层 `<webview>`,不同 tab 的写操作仍全局串行。
 - scroll 通过目标 CDP session 的 `Runtime.evaluate` 执行,不依赖外层 webview 可见或聚焦。
-- 删除 `Input.insertText`、`Input.dispatchMouseEvent` 和 `sendInputEvent()` fallback。
+- 删除 `Input.insertText` 和 `sendInputEvent()` fallback;`Input.dispatchMouseEvent` 是 click 的唯一主实现。
 - 命令响应不确定时返回错误,不执行第二种实现。
 
 验收:
 
 - React 受控 input 正常更新。
-- Composer 已聚焦时,click、type 与 scroll 均不改变 Composer 的焦点和内容。
+- 宿主 Composer、地址栏或其他控件已聚焦时,click 结束后恢复原焦点与可用选区;click、type 与 scroll 均不改变宿主输入内容。
 - 输入后按长度和哈希校验完整预期值,拒绝受控组件回滚造成的假成功。
 - CDP 响应失败时不会重复点击或重复输入。
-- selector scroll 与页面 scroll 在隐藏 webview 上均可完成且不抢宿主焦点。
+- selector scroll 与页面 scroll 在隐藏 webview 上均可完成且不抢宿主焦点;click 的短暂焦点切换由生命周期握手恢复。
 
 ### C6 Go 路径对齐
 
@@ -313,7 +314,7 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 - 同一 tab 快速连续导航。
 - 两个 session 同时持有不同 tab。
 - React controlled input、textarea、contenteditable。
-- target-scoped click 与 scroll。
+- trusted pointer click 与 target-scoped scroll。
 - viewport/full-page screenshot。
 - Canvas 显示/隐藏和 session 切换前后 `webContentsID` 保持一致。
 - renderer reload 后 pool 重建期间工具明确返回 not ready。
@@ -392,4 +393,6 @@ BrowserHost 等待 webview 注册应有明确超时。renderer 未启动、刷�
 - `npm run smoke:electron-browser`
 - `npm run build` (`web/`)
 
-自动 Electron dev smoke 覆盖 `file://`、多 tab、多 session 保活、back/forward、`target=_blank` referrer、无参数 `window.open`、`about:blank` 写入、命名窗口复用、同源 `blob:`、`opener/postMessage/focus/close`、`noopener/noreferrer`、screenshot 和 Project grant 撤销。Google/Baidu 外网导航仅保留为发布前人工网络验收,不作为可重复测试的依赖。
+自动 Electron dev smoke 覆盖 `file://`、多 tab、多 session 保活、back/forward、普通输入框、React 风格受控输入框、textarea、`contenteditable`、真实点击到无 selector 输入的目标交接、关闭侧栏后的宿主焦点/选区恢复、后台 session 输入隔离、`target=_blank` referrer、无参数 `window.open`、`about:blank` 写入、命名窗口复用、同源 `blob:`、`opener/postMessage/focus/close`、`noopener/noreferrer`、screenshot 和 Project grant 撤销。
+
+Discord 等依赖登录态和线上页面结构的场景保留为开发版人工验收:进入频道后让 LLM 点击消息编辑器,再以无 selector 的 `builtin_browser_type` 输入唯一文本但不发送;确认文本进入编辑器,宿主地址栏或 Composer 的原焦点与选区恢复,关闭侧栏或后台 session 下也能完成同样操作。Google/Baidu 外网导航同样只作为发布前人工网络验收,不作为可重复测试的依赖。iframe 和 Shadow DOM 不在当前验收范围内。

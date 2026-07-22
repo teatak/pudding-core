@@ -20,31 +20,27 @@ const (
 	commandLiveOutputLimit  = 1 << 20
 	commandLiveFlushBytes   = 8 << 10
 	commandLiveFlushDelay   = 75 * time.Millisecond
-	commandMaxArgs          = 128
-	commandMaxScriptBytes   = 64 << 10
+	commandMaxBytes         = 64 << 10
 )
 
 type commandRunArgs struct {
-	Scope     string            `json:"scope"`
-	Argv      []string          `json:"argv,omitempty"`
-	Script    string            `json:"script,omitempty"`
-	CWD       string            `json:"cwd,omitempty"`
-	Env       map[string]string `json:"env,omitempty"`
-	TimeoutMS int               `json:"timeout_ms,omitempty"`
+	Scope      string            `json:"scope"`
+	Command    string            `json:"command"`
+	CWD        string            `json:"cwd,omitempty"`
+	Env        map[string]string `json:"env,omitempty"`
+	TimeoutMS  int               `json:"timeout_ms,omitempty"`
+	Background bool              `json:"background,omitempty"`
+	TTY        bool              `json:"tty,omitempty"`
 }
 
 func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
-	var args commandRunArgs
-	if len(call.Args) == 0 || json.Unmarshal(call.Args, &args) != nil {
-		return toolJSONError(out, "invalid_arguments", "command arguments must be a JSON object")
-	}
-	args.Scope = strings.TrimSpace(args.Scope)
-	if args.Scope != managedScopeProject {
-		return toolJSONError(out, "invalid_scope", "command scope must be project")
-	}
-	if err := validateCommandInput(args); err != nil {
+	args, err := decodeCommandRunArgs(call.Args)
+	if err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
+	}
+	if args.Background {
+		return r.commandStart(call, args)
 	}
 
 	cwd := strings.TrimSpace(args.CWD)
@@ -138,32 +134,39 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 	return commandResult(out, args, shell, resolvedCWD, call.ProjectDirs, execution, exitCode, stdout, stderr, timedOut, cancelled, time.Since(startedAt), reason, waitErr)
 }
 
+func decodeCommandRunArgs(raw json.RawMessage) (commandRunArgs, error) {
+	var args commandRunArgs
+	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil {
+		return args, errors.New("command arguments must be a JSON object")
+	}
+	args.Scope = strings.TrimSpace(args.Scope)
+	if args.Scope != managedScopeProject {
+		return args, errors.New("command scope must be project")
+	}
+	if err := validateCommandInput(args); err != nil {
+		return args, err
+	}
+	return args, nil
+}
+
 func commandInvocation(args commandRunArgs) (string, []string, string) {
-	if args.Script == "" {
-		return args.Argv[0], args.Argv[1:], ""
-	}
 	if runtime.GOOS == "windows" {
-		return "powershell.exe", []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", args.Script}, "powershell"
+		return "powershell.exe", []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", args.Command}, "powershell"
 	}
-	return "/bin/sh", []string{"-lc", args.Script}, "sh"
+	return "/bin/sh", []string{"-lc", args.Command}, "sh"
 }
 
 func commandApprovalDetails(call Call) (map[string]any, error) {
-	var args commandRunArgs
-	if len(call.Args) == 0 || json.Unmarshal(call.Args, &args) != nil {
-		return nil, errors.New("command arguments must be a JSON object")
-	}
-	if strings.TrimSpace(args.Scope) != managedScopeProject {
-		return nil, errors.New("command scope must be project")
-	}
-	if err := validateCommandInput(args); err != nil {
+	args, err := decodeCommandRunArgs(call.Args)
+	if err != nil {
 		return nil, err
 	}
-	details := map[string]any{}
-	if len(args.Argv) > 0 {
-		details["argv"] = args.Argv
-	} else {
-		details["script"] = args.Script
+	details := map[string]any{"command": args.Command}
+	if args.Background {
+		details["background"] = true
+	}
+	if args.TTY {
+		details["tty"] = true
 	}
 	if cwd := strings.TrimSpace(args.CWD); cwd != "" {
 		details["cwd"] = cwd
@@ -244,38 +247,28 @@ func validCommandEnvKey(key string) bool {
 	return true
 }
 
-func validateCommandArgv(argv []string) error {
-	if len(argv) == 0 {
-		return errors.New("argv must contain an executable")
-	}
-	if len(argv) > commandMaxArgs {
-		return errors.New("argv has too many entries")
-	}
-	for i, arg := range argv {
-		if strings.ContainsRune(arg, 0) {
-			return errors.New("argv must not contain NUL bytes")
-		}
-		if i == 0 && strings.TrimSpace(arg) == "" {
-			return errors.New("argv executable must not be empty")
-		}
-	}
-	return nil
-}
-
 func validateCommandInput(args commandRunArgs) error {
-	hasArgv := len(args.Argv) > 0
-	hasScript := strings.TrimSpace(args.Script) != ""
-	if hasArgv == hasScript {
-		return errors.New("exactly one of argv or script is required")
+	if strings.TrimSpace(args.Command) == "" {
+		return errors.New("command is required")
 	}
-	if hasArgv {
-		return validateCommandArgv(args.Argv)
+	if strings.ContainsRune(args.Command, 0) {
+		return errors.New("command must not contain NUL bytes")
 	}
-	if strings.ContainsRune(args.Script, 0) {
-		return errors.New("script must not contain NUL bytes")
+	if len(args.Command) > commandMaxBytes {
+		return errors.New("command is too large")
 	}
-	if len(args.Script) > commandMaxScriptBytes {
-		return errors.New("script is too large")
+	analysis, err := analyzeShellCommand(args.Command)
+	if err != nil {
+		return err
+	}
+	if analysis.Background {
+		return errors.New("shell background operators are not supported; set background=true instead")
+	}
+	if args.TTY && !args.Background {
+		return errors.New("tty requires background=true")
+	}
+	if args.Background && args.TimeoutMS != 0 {
+		return errors.New("timeout_ms is unavailable for background commands; stop the command session explicitly")
 	}
 	return nil
 }
@@ -315,22 +308,15 @@ func commandResult(out Result, args commandRunArgs, shell, cwd string, projectDi
 	if execution != nil && execution.Sandboxed {
 		payload["sandboxDenied"] = commandSandboxDenied(stdoutText+"\n"+stderrText, runErr)
 	}
-	if len(args.Argv) > 0 {
-		payload["argv"] = args.Argv
-	} else {
-		payload["script"] = args.Script
-		payload["shell"] = shell
-	}
+	payload["command"] = args.Command
+	payload["shell"] = shell
 	if reason != "" {
 		payload["reason"] = reason
 	}
 	if runErr != nil && reason != "non_zero_exit" {
 		payload["error"] = runErr.Error()
 	}
-	verificationKind := ""
-	if len(args.Argv) > 0 {
-		verificationKind = commandVerificationKind(args.Argv)
-	}
+	verificationKind := commandVerificationKind(commandVerificationArgv(args.Command))
 	if verificationKind != "" {
 		verificationStatus := commandVerificationStatus(verificationKind, exitCode, timedOut, cancelled, reason)
 		diagnostics := parseCommandDiagnostics(stdoutText, stderrText, cwd, projectDirs, verificationStatus != "passed")

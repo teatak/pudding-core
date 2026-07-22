@@ -19,6 +19,7 @@ let server;
 let host;
 let failed = false;
 let currentCheck = "startup";
+let simulateWorkspaceOpenOnAutomationEnd = false;
 const popupWindows = new Set();
 const pendingPopupWaiters = [];
 
@@ -49,11 +50,11 @@ async function run() {
   host = new BrowserHost(
     undefined,
     undefined,
-    undefined,
+    (event) => event.action === "click" ? prepareSmokeAutomationClick(event) : undefined,
     (request) => {
       window.webContents.send("pudding-browser-smoke:webview-required", request);
     },
-    undefined,
+    (event) => event.action === "click" ? finishSmokeAutomationClick() : undefined,
     {
       resolveFavicon: ({ url, pageURL }) => resolveBrowserFavicon({
         url,
@@ -107,9 +108,14 @@ async function run() {
     const tabs = document.getElementById("tabs");
     const target = document.querySelector('webview[data-browser-key="smoke-session-a:smoke-web"]');
     tabs.inert = true;
-    target.style.visibility = "hidden";
+    tabs.setAttribute("aria-hidden", "true");
+    tabs.style.position = "absolute";
+    tabs.style.right = "-832px";
+    tabs.style.width = "800px";
+    document.body.style.overflow = "hidden";
     composer.value = "host-draft";
     composer.focus();
+    composer.setSelectionRange(2, 7, "backward");
     return document.activeElement === composer;
   })()`);
   await host.click({ sessionID: webTab.sessionID, tabID: webTab.tabID, selector: "#target-button" });
@@ -119,12 +125,70 @@ async function run() {
   );
   await host.scroll({ sessionID: webTab.sessionID, tabID: webTab.tabID, deltaY: 200 });
   assert.deepEqual(
-    await window.webContents.executeJavaScript(`({activeElementID: document.activeElement?.id || "", composerValue: document.getElementById("host-composer").value})`),
-    { activeElementID: "host-composer", composerValue: "host-draft" },
+    await window.webContents.executeJavaScript(`(() => {
+      const composer = document.getElementById("host-composer");
+      return {
+        activeElementID: document.activeElement?.id || "",
+        composerValue: composer.value,
+        selectionStart: composer.selectionStart,
+        selectionEnd: composer.selectionEnd,
+        selectionDirection: composer.selectionDirection,
+      };
+    })()`),
+    {
+      activeElementID: "host-composer",
+      composerValue: "host-draft",
+      selectionStart: 2,
+      selectionEnd: 7,
+      selectionDirection: "backward",
+    },
   );
+  await window.webContents.executeJavaScript(`(() => {
+    const address = document.getElementById("host-address");
+    address.focus();
+    address.setSelectionRange(8, 20, "forward");
+  })()`);
+  await host.click({ sessionID: webTab.sessionID, tabID: webTab.tabID, selector: "#target-button" });
+  assert.deepEqual(
+    await window.webContents.executeJavaScript(`(() => {
+      const address = document.getElementById("host-address");
+      return {
+        activeElementID: document.activeElement?.id || "",
+        selectionStart: address.selectionStart,
+        selectionEnd: address.selectionEnd,
+        selectionDirection: address.selectionDirection,
+      };
+    })()`),
+    { activeElementID: "host-address", selectionStart: 8, selectionEnd: 20, selectionDirection: "forward" },
+  );
+  simulateWorkspaceOpenOnAutomationEnd = true;
+  await host.click({ sessionID: webTab.sessionID, tabID: webTab.tabID, selector: "#target-button" });
+  simulateWorkspaceOpenOnAutomationEnd = false;
+  assert.deepEqual(
+    await window.webContents.executeJavaScript(`(() => {
+      const tabs = document.getElementById("tabs");
+      return {ariaHidden: tabs.getAttribute("aria-hidden"), inert: tabs.inert, right: tabs.style.right};
+    })()`),
+    { ariaHidden: "false", inert: false, right: "0px" },
+  );
+  await window.webContents.executeJavaScript(`(() => {
+    const composer = document.getElementById("host-composer");
+    const tabs = document.getElementById("tabs");
+    tabs.inert = true;
+    tabs.setAttribute("aria-hidden", "true");
+    tabs.style.right = "-832px";
+    composer.focus();
+    composer.setSelectionRange(2, 7, "backward");
+  })()`);
+  currentCheck = "plain input click handoff";
+  await host.click({ sessionID: webTab.sessionID, tabID: webTab.tabID, selector: "#plain-target" });
+  const plainTyped = await host.type({ sessionID: webTab.sessionID, tabID: webTab.tabID, text: "plain-value", clear: true });
+  assert.equal(plainTyped.result.valueLength, "plain-value".length);
+  currentCheck = "controlled input click handoff";
+  await host.click({ sessionID: webTab.sessionID, tabID: webTab.tabID, selector: "#target" });
   let typed;
   try {
-    typed = await host.type({ sessionID: webTab.sessionID, tabID: webTab.tabID, selector: "#target", text: "webview-only", clear: true });
+    typed = await host.type({ sessionID: webTab.sessionID, tabID: webTab.tabID, text: "webview-only", clear: true });
   } catch (error) {
     const observation = await host.observe({ sessionID: webTab.sessionID, tabID: webTab.tabID });
     const hostDraft = await window.webContents.executeJavaScript(`document.getElementById("host-composer").value`);
@@ -133,38 +197,56 @@ async function run() {
   }
   assert.equal(typed.result.valueLength, "webview-only".length);
   currentCheck = "textarea input isolation";
-  const textareaTyped = await host.type({ sessionID: webTab.sessionID, tabID: webTab.tabID, selector: "#target-textarea", text: "textarea-value", clear: true });
+  await host.click({ sessionID: webTab.sessionID, tabID: webTab.tabID, selector: "#target-textarea" });
+  const textareaTyped = await host.type({ sessionID: webTab.sessionID, tabID: webTab.tabID, text: "textarea-value", clear: true });
   currentCheck = "contenteditable input isolation";
   let editorTyped;
   try {
-    editorTyped = await host.type({ sessionID: webTab.sessionID, tabID: webTab.tabID, selector: "#target-editor", text: "editor-value", clear: true });
+    await window.webContents.executeJavaScript(`(() => {
+      const tabs = document.getElementById("tabs");
+      tabs.style.opacity = "0";
+      tabs.style.visibility = "hidden";
+    })()`);
+    await host.click({ sessionID: webTab.sessionID, tabID: webTab.tabID, selector: "#target-editor" });
+    editorTyped = await host.type({ sessionID: webTab.sessionID, tabID: webTab.tabID, text: "editor-value" });
   } catch (error) {
     console.error(JSON.stringify(await host.observe({ sessionID: webTab.sessionID, tabID: webTab.tabID })));
     throw error;
   }
   assert.equal(textareaTyped.result.valueLength, "textarea-value".length);
   assert.equal(editorTyped.result.valueLength, "editor-value".length);
-  assert.match(
-    (await host.observe({ sessionID: webTab.sessionID, tabID: webTab.tabID })).text,
-    /Controlled:webview-only[\s\S]*beforeinput:1 input:1[\s\S]*Clicked:1/,
-  );
+  const formText = (await host.observe({ sessionID: webTab.sessionID, tabID: webTab.tabID })).text;
+  assert.match(formText, /Plain:plain-value[\s\S]*plain-beforeinput:1 plain-input:1/);
+  assert.match(formText, /Controlled:webview-only[\s\S]*beforeinput:1 input:1[\s\S]*Clicked:3[\s\S]*Trusted:true/);
+  assert.match(formText, /Editor:editor-value/);
   assert.deepEqual(
     await window.webContents.executeJavaScript(`(() => ({
       activeElementID: document.activeElement?.id || "",
       composerValue: document.getElementById("host-composer").value,
       tabsInert: document.getElementById("tabs").inert,
-      webviewVisibility: document.querySelector('webview[data-browser-key="smoke-session-a:smoke-web"]').style.visibility,
+      tabsOpacity: document.getElementById("tabs").style.opacity,
+      tabsRight: document.getElementById("tabs").style.right,
+      tabsVisibility: document.getElementById("tabs").style.visibility,
     }))()`),
     {
       activeElementID: "host-composer",
       composerValue: "host-draft",
       tabsInert: true,
-      webviewVisibility: "hidden",
+      tabsOpacity: "0",
+      tabsRight: "-832px",
+      tabsVisibility: "hidden",
     },
   );
   await window.webContents.executeJavaScript(`(() => {
     const target = document.querySelector('webview[data-browser-key="smoke-session-a:smoke-web"]');
-    document.getElementById("tabs").inert = false;
+    const tabs = document.getElementById("tabs");
+    tabs.inert = false;
+    tabs.removeAttribute("aria-hidden");
+    tabs.style.opacity = "";
+    tabs.style.position = "";
+    tabs.style.right = "";
+    tabs.style.visibility = "";
+    tabs.style.width = "";
     target.style.opacity = "";
     target.style.visibility = "";
   })()`);
@@ -172,8 +254,53 @@ async function run() {
   const otherTab = await host.ensure({ sessionID: "smoke-session-b", tabID: "smoke-other", url: `${pageBaseURL}/other` });
   assert.equal(host.listTabs({ sessionID: "smoke-session-a" }).tabs.length, 2);
   assert.equal(host.listTabs({ sessionID: "smoke-session-b" }).tabs.length, 1);
-  assert.equal((await host.ensure({ sessionID: webTab.sessionID, tabID: webTab.tabID, url: `${pageBaseURL}/two` })).runtimeID, runtimeID);
+  assert.equal((await host.ensure({ sessionID: webTab.sessionID, tabID: webTab.tabID, url: `${pageBaseURL}/form` })).runtimeID, runtimeID);
   assert.match((await host.observe({ sessionID: otherTab.sessionID, tabID: otherTab.tabID })).text, /Other session/);
+  currentCheck = "background session input";
+  await host.loadURL({ sessionID: otherTab.sessionID, tabID: otherTab.tabID, url: `${pageBaseURL}/form` });
+  await window.webContents.executeJavaScript(`(() => {
+    const composer = document.getElementById("host-composer");
+    const tabs = document.getElementById("tabs");
+    tabs.inert = true;
+    tabs.setAttribute("aria-hidden", "true");
+    tabs.style.position = "absolute";
+    tabs.style.right = "-832px";
+    tabs.style.width = "800px";
+    composer.focus();
+    composer.setSelectionRange(1, 4, "forward");
+  })()`);
+  await host.click({ sessionID: otherTab.sessionID, tabID: otherTab.tabID, selector: "#target" });
+  const backgroundTyped = await host.type({ sessionID: otherTab.sessionID, tabID: otherTab.tabID, text: "background-value", clear: true });
+  assert.equal(backgroundTyped.result.valueLength, "background-value".length);
+  assert.match((await host.observe({ sessionID: otherTab.sessionID, tabID: otherTab.tabID })).text, /Controlled:background-value[\s\S]*beforeinput:1 input:1/);
+  assert.match((await host.observe({ sessionID: webTab.sessionID, tabID: webTab.tabID })).text, /Controlled:webview-only/);
+  assert.deepEqual(
+    await window.webContents.executeJavaScript(`(() => {
+      const composer = document.getElementById("host-composer");
+      return {
+        activeElementID: document.activeElement?.id || "",
+        composerValue: composer.value,
+        selectionStart: composer.selectionStart,
+        selectionEnd: composer.selectionEnd,
+        selectionDirection: composer.selectionDirection,
+      };
+    })()`),
+    {
+      activeElementID: "host-composer",
+      composerValue: "host-draft",
+      selectionStart: 1,
+      selectionEnd: 4,
+      selectionDirection: "forward",
+    },
+  );
+  await window.webContents.executeJavaScript(`(() => {
+    const tabs = document.getElementById("tabs");
+    tabs.inert = false;
+    tabs.removeAttribute("aria-hidden");
+    tabs.style.position = "";
+    tabs.style.right = "";
+    tabs.style.width = "";
+  })()`);
 
   await host.loadURL({ sessionID: webTab.sessionID, tabID: webTab.tabID, url: `${pageBaseURL}/popup-parent` });
   currentCheck = "target blank referrer";
@@ -260,8 +387,80 @@ async function run() {
   assert.deepEqual(await host.revokeFileAccess({ sessionID: "smoke-session-a" }), { closedTabIDs: ["smoke-file"] });
   assert.equal(host.listTabs({ sessionID: "smoke-session-a" }).tabs.length, 2);
 
-  process.stdout.write(JSON.stringify({ ok: true, checks: ["file", "favicon", "multi-tab", "multi-session", "history", "focus-isolation", "target-blank-referrer", "window-open-about-blank", "parent-child-window-proxy", "named-window-reuse", "blob-window", "window-open", "opener-post-message", "window-close-focus", "noopener-noreferrer", "screenshot", "revoke"] }) + "\n");
+  process.stdout.write(JSON.stringify({ ok: true, checks: ["file", "favicon", "multi-tab", "multi-session", "history", "focus-isolation", "input-components", "background-input", "target-blank-referrer", "window-open-about-blank", "parent-child-window-proxy", "named-window-reuse", "blob-window", "window-open", "opener-post-message", "window-close-focus", "noopener-noreferrer", "screenshot", "revoke"] }) + "\n");
   finish();
+}
+
+function prepareSmokeAutomationClick(event) {
+  const browserKey = JSON.stringify(`${event.sessionID}:${event.tabID}`);
+  return window.webContents.executeJavaScript(`(() => {
+    const element = document.activeElement;
+    const textControl = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement;
+    globalThis.__puddingSmokeHostFocus = element instanceof HTMLElement && element !== document.body
+      ? {
+          element,
+          textSelection: textControl && typeof element.selectionStart === "number"
+            ? {start: element.selectionStart, end: element.selectionEnd, direction: element.selectionDirection || "none"}
+            : null,
+        }
+      : null;
+    const target = document.querySelector('webview[data-browser-key=' + JSON.stringify(${browserKey}) + ']');
+    const inertAncestors = [];
+    for (let ancestor = target?.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      if (ancestor.inert) {
+        inertAncestors.push({ariaHidden: ancestor.getAttribute("aria-hidden"), element: ancestor});
+        ancestor.inert = false;
+      }
+    }
+    const hidden = target && getComputedStyle(target).visibility === "hidden";
+    const previousStyle = hidden
+      ? {opacity: target.style.opacity, pointerEvents: target.style.pointerEvents, visibility: target.style.visibility}
+      : null;
+    if (previousStyle) {
+      target.style.opacity = "0";
+      target.style.pointerEvents = "none";
+      target.style.visibility = "visible";
+    }
+    target?.focus({preventScroll: true});
+    globalThis.__puddingSmokeWebviewFocusLease = {inertAncestors, previousStyle, target};
+    return Boolean(target && document.activeElement === target);
+  })()`);
+}
+
+async function finishSmokeAutomationClick() {
+  if (simulateWorkspaceOpenOnAutomationEnd) {
+    await window.webContents.executeJavaScript(`(() => {
+      const tabs = document.getElementById("tabs");
+      tabs.inert = false;
+      tabs.setAttribute("aria-hidden", "false");
+      tabs.style.right = "0px";
+    })()`);
+  }
+  return window.webContents.executeJavaScript(`(() => {
+    const lease = globalThis.__puddingSmokeWebviewFocusLease;
+    globalThis.__puddingSmokeWebviewFocusLease = null;
+    if (lease?.target?.isConnected && lease.previousStyle) {
+      if (lease.target.style.opacity === "0") lease.target.style.opacity = lease.previousStyle.opacity;
+      if (lease.target.style.pointerEvents === "none") lease.target.style.pointerEvents = lease.previousStyle.pointerEvents;
+      if (lease.target.style.visibility === "visible") lease.target.style.visibility = lease.previousStyle.visibility;
+    }
+    for (const {ariaHidden, element} of lease?.inertAncestors || []) {
+      if (element.isConnected && !element.inert && element.getAttribute("aria-hidden") === ariaHidden) element.inert = true;
+    }
+    const snapshot = globalThis.__puddingSmokeHostFocus;
+    globalThis.__puddingSmokeHostFocus = null;
+    if (!snapshot?.element?.isConnected) return false;
+    snapshot.element.focus({preventScroll: true});
+    if (snapshot.textSelection && typeof snapshot.element.setSelectionRange === "function") {
+      const length = snapshot.element.value.length;
+      snapshot.element.setSelectionRange(
+        Math.max(0, Math.min(snapshot.textSelection.start, length)),
+        Math.max(0, Math.min(snapshot.textSelection.end, length)),
+        snapshot.textSelection.direction,
+      );
+    }
+    return document.activeElement === snapshot.element;
+  })()`);
 }
 
 function startPageServer() {
@@ -276,15 +475,30 @@ function startPageServer() {
       "/two": "<!doctype html><title>Two</title><main>Page two</main>",
       "/other": "<!doctype html><title>Other</title><main>Other session</main>",
       "/form": `<!doctype html><title>Form</title>
+        <label>Plain <input id="plain-target"></label>
+        <output id="plain-state">Plain:Waiting</output>
+        <output id="plain-events">plain-beforeinput:0 plain-input:0</output>
         <label>Target <input id="target"></label>
         <output id="target-state">Controlled:Waiting</output>
         <output id="target-events">beforeinput:0 input:0</output>
         <textarea id="target-textarea">old textarea</textarea>
-        <div id="target-editor" contenteditable="true">old editor</div>
+        <div id="target-editor" contenteditable="true"><span data-slate-zero-width="z">&#xfeff;<br></span></div>
+        <output id="target-editor-state">Editor:Waiting</output>
         <button id="target-button" value="button-value">Click target</button>
         <output id="click-state">Clicked:0</output>
+        <output id="click-trust">Trusted:false</output>
         <div style="height:1200px"></div>
         <script>
+          const plainTarget = document.getElementById('plain-target');
+          let plainBeforeInputCount = 0;
+          let plainInputCount = 0;
+          const updatePlainEvents = () => document.getElementById('plain-events').textContent = 'plain-beforeinput:' + plainBeforeInputCount + ' plain-input:' + plainInputCount;
+          plainTarget.addEventListener('beforeinput', () => { plainBeforeInputCount += 1; updatePlainEvents(); });
+          plainTarget.addEventListener('input', () => {
+            plainInputCount += 1;
+            updatePlainEvents();
+            document.getElementById('plain-state').textContent = 'Plain:' + plainTarget.value;
+          });
           const target = document.getElementById('target');
           const nativeValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
           let trackedValue = nativeValue.get.call(target);
@@ -308,10 +522,30 @@ function startPageServer() {
             trackedValue = current;
             document.getElementById('target-state').textContent = 'Controlled:' + current;
           });
+          const editor = document.getElementById('target-editor');
+          const nativeExecCommand = document.execCommand.bind(document);
+          document.execCommand = (command, showUI, value) => {
+            if (command !== 'insertText' || document.activeElement !== editor) return nativeExecCommand(command, showUI, value);
+            const selection = window.getSelection();
+            if (!selection?.rangeCount) return false;
+            const range = selection.getRangeAt(0);
+            range.deleteContents();
+            const node = document.createTextNode(String(value));
+            range.insertNode(node);
+            range.setStartAfter(node);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+            return true;
+          };
+          editor.addEventListener('input', () => {
+            document.getElementById('target-editor-state').textContent = 'Editor:' + editor.textContent.replace(/\uFEFF/g, '');
+          });
           let clickCount = 0;
-          document.getElementById('target-button').addEventListener('click', () => {
+          document.getElementById('target-button').addEventListener('click', (event) => {
             clickCount += 1;
             document.getElementById('click-state').textContent = 'Clicked:' + clickCount;
+            document.getElementById('click-trust').textContent = 'Trusted:' + event.isTrusted;
           });
         </script>`,
       "/popup-parent": `<!doctype html><title>Popup parent</title>

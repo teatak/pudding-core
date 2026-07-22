@@ -142,7 +142,7 @@ func TestBrowserMCPRunnerRoutesToolsToExplicitRuntime(t *testing.T) {
 func TestBrowserToolArgsInjectsSessionForUITools(t *testing.T) {
 	args, err := browserToolArgs(Call{
 		SessionID: "sess_b",
-		Name:      "collect_user_input",
+		Name:      RequestUserInput,
 		Args:      json.RawMessage(`{"title":"New order"}`),
 	})
 	if err != nil {

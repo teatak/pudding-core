@@ -2,33 +2,57 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tansta
 import {
   ArrowLeft,
   ArrowRight,
+  BadgeCheck,
+  Braces,
   Camera,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   CircleAlert,
   CircleCheck,
   CircleDashed,
+  Copy,
   Download,
   Eye,
   EyeOff,
+  FileCog,
+  FileDiff,
+  FilePenLine,
   FileJson2,
   FileSearch,
+  FileText,
+  FileX,
+  FolderInput,
+  GitBranch,
+  GitCommitHorizontal,
+  GitCompareArrows,
   Globe,
+  History,
   Keyboard,
   KeyRound,
+  ListMinus,
+  ListPlus,
+  ListTree,
+  MoveVertical,
   MousePointerClick,
   Package,
+  PackageCheck,
   PanelsTopLeft,
   Pencil,
   Plus,
   RotateCw,
   Route,
+  ScanLine,
+  SearchCode,
   Settings2,
+  Share2,
   SquareTerminal,
   Trash,
   Wrench,
+  X,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
@@ -1732,7 +1756,7 @@ function EndpointTarget({ endpoint }: { endpoint: AppEndpoints[string] }) {
     return null;
   }
   return (
-    <div className="truncate text-xs text-muted-foreground" title={target}>
+    <div className="truncate text-xs text-muted-foreground" >
       {target}
     </div>
   );
@@ -2124,18 +2148,6 @@ function formatMCPInputSchema(schema: unknown) {
   }
 }
 
-function mcpToolDescriptionSummary(description: string) {
-  const text = description.replace(/\s+/g, " ").trim();
-  if (text.length <= 260) {
-    return text;
-  }
-  return `${text.slice(0, 257).trimEnd()}...`;
-}
-
-function mcpToolDescriptionNeedsDetails(description: string) {
-  return description.replace(/\s+/g, " ").trim().length > 260 || description.includes("\n");
-}
-
 function collectAppTools(app: AppDefinition, statuses: AppMCPEndpointStatus[]): AppToolItem[] {
   const tools: AppToolItem[] = (app.tools || []).map((tool) => ({
     key: `static:${tool.name}`,
@@ -2178,27 +2190,13 @@ function AppToolsSection({ tools }: { tools: AppToolItem[] }) {
             <div className="grid min-w-0 flex-1 gap-1">
               <div className="flex min-w-0 items-center gap-2">
                 <span className="truncate text-sm font-medium">{tool.title || appToolDisplayName(tool.name, t)}</span>
-                <Badge className="shrink-0" variant="outline">
-                  {tool.kind === "builtin" ? t("apps.builtinBadge") : tool.kind.toUpperCase()}
-                </Badge>
+                {tool.kind === "builtin" ? null : (
+                  <Badge className="shrink-0" variant="outline">
+                    {tool.kind.toUpperCase()}
+                  </Badge>
+                )}
               </div>
-              {tool.description ? (
-                <>
-                  <div className="line-clamp-2 text-xs leading-5 text-muted-foreground">
-                    {mcpToolDescriptionSummary(tool.description)}
-                  </div>
-                  {mcpToolDescriptionNeedsDetails(tool.description) ? (
-                    <details className="group min-w-0">
-                      <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-                        {t("apps.mcpFullDescription")}
-                      </summary>
-                      <div className="mt-1 max-h-40 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/35 p-2 text-[11px] leading-4 text-muted-foreground">
-                        {tool.description}
-                      </div>
-                    </details>
-                  ) : null}
-                </>
-              ) : null}
+              {tool.description ? <AppToolDescription description={tool.description} /> : null}
               {tool.inputSchema ? (
                 <details className="group min-w-0">
                   <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
@@ -2217,6 +2215,50 @@ function AppToolsSection({ tools }: { tools: AppToolItem[] }) {
   );
 }
 
+function AppToolDescription({ description }: { description: string }) {
+  const { t } = useI18n();
+  const descriptionRef = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+
+  useLayoutEffect(() => {
+    const element = descriptionRef.current;
+    if (!element || expanded) {
+      return;
+    }
+    const measure = () => setOverflowing(element.scrollHeight > element.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [description, expanded]);
+
+  return (
+    <div className="min-w-0">
+      <div
+        ref={descriptionRef}
+        className={cn(
+          "max-w-full whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground",
+          !expanded && "line-clamp-2",
+        )}
+      >
+        {description}
+      </div>
+      {overflowing ? (
+        <button
+          aria-expanded={expanded}
+          className="mt-0.5 inline-flex cursor-pointer items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground"
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+          {expanded ? t("apps.mcpCollapseDescription") : t("apps.mcpExpandDescription")}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function AppToolGlyph({ kind, name }: { kind: AppToolItem["kind"]; name: string }) {
   const Icon = appToolIcon(name, kind);
   return (
@@ -2230,12 +2272,39 @@ function appToolIcon(name: string, kind: AppToolItem["kind"]): LucideIcon {
   const icons: Record<string, LucideIcon> = {
     builtin_browser_back: ArrowLeft,
     builtin_browser_click: MousePointerClick,
+    builtin_browser_close: X,
     builtin_browser_forward: ArrowRight,
     builtin_browser_observe: FileSearch,
+    builtin_browser_open: Globe,
     builtin_browser_reload: RotateCw,
     builtin_browser_screenshot: Camera,
-    builtin_browser_scroll: MousePointerClick,
+    builtin_browser_scroll: MoveVertical,
+    builtin_browser_status: PanelsTopLeft,
     builtin_browser_type: Keyboard,
+    builtin_camera_capture: Camera,
+    builtin_code_definition: SearchCode,
+    builtin_code_diagnostics: CircleAlert,
+    builtin_code_references: Share2,
+    builtin_code_rename: Pencil,
+    builtin_code_symbols: Braces,
+    builtin_desktop_screenshot: ScanLine,
+    builtin_file_copy: Copy,
+    builtin_file_delete: FileX,
+    builtin_file_list: ListTree,
+    builtin_file_move: FolderInput,
+    builtin_file_patch: FileDiff,
+    builtin_file_search: FileSearch,
+    builtin_file_slice: FileText,
+    builtin_file_stat: FileCog,
+    builtin_file_write: FilePenLine,
+    builtin_git_commit: GitCommitHorizontal,
+    builtin_git_diff: GitCompareArrows,
+    builtin_git_log: History,
+    builtin_git_stage: ListPlus,
+    builtin_git_status: GitBranch,
+    builtin_git_unstage: ListMinus,
+    builtin_app_save: PackageCheck,
+    builtin_skill_validate: BadgeCheck,
   };
   if (icons[name]) {
     return icons[name];
@@ -2265,9 +2334,31 @@ function appToolDisplayName(name: string, t: I18nTranslate) {
     builtin_browser_click: t("transcript.toolBrowserClick"),
     builtin_browser_type: t("transcript.toolBrowserType"),
     builtin_browser_scroll: t("transcript.toolBrowserScroll"),
-    builtin_command_start: t("transcript.toolCommandStart"),
-    builtin_command_poll: t("transcript.toolCommandPoll"),
-    builtin_command_stop: t("transcript.toolCommandStop"),
+    builtin_camera_capture: t("transcript.toolCameraCapture"),
+    builtin_desktop_screenshot: t("transcript.toolDesktopScreenshot"),
+    builtin_command_session: t("transcript.toolCommandSession"),
+    builtin_app_save: t("transcript.toolAppSave"),
+    builtin_skill_validate: t("transcript.toolSkillValidate"),
+    builtin_code_symbols: t("transcript.toolCodeSymbols"),
+    builtin_code_definition: t("transcript.toolCodeDefinition"),
+    builtin_code_references: t("transcript.toolCodeReferences"),
+    builtin_code_diagnostics: t("transcript.toolCodeDiagnostics"),
+    builtin_code_rename: t("transcript.toolCodeRename"),
+    builtin_file_list: t("transcript.toolFileList"),
+    builtin_file_stat: t("transcript.toolFileStat"),
+    builtin_file_search: t("transcript.toolFileSearch"),
+    builtin_file_slice: t("transcript.toolFileSlice"),
+    builtin_file_write: t("transcript.toolFileWrite"),
+    builtin_file_patch: t("transcript.toolFilePatch"),
+    builtin_file_delete: t("transcript.toolFileDelete"),
+    builtin_file_move: t("transcript.toolFileMove"),
+    builtin_file_copy: t("transcript.toolFileCopy"),
+    builtin_git_status: t("transcript.toolGitStatus"),
+    builtin_git_diff: t("transcript.toolGitDiff"),
+    builtin_git_log: t("transcript.toolGitLog"),
+    builtin_git_stage: t("transcript.toolGitStage"),
+    builtin_git_unstage: t("transcript.toolGitUnstage"),
+    builtin_git_commit: t("transcript.toolGitCommit"),
     builtin_rest_request: t("apps.tool.restRequest"),
     builtin_graphql_request: t("apps.tool.graphqlRequest"),
     builtin_graphql_introspect: t("apps.tool.graphqlIntrospect"),

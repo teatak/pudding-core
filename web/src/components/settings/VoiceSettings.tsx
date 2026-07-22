@@ -234,14 +234,14 @@ export function VoiceSettings({ token }: { token: string }) {
   return (
     <div className={cn(SETTINGS_NARROW_CONTENT_CLASS, "gap-6")}>
       <Collapsible className={SETTINGS_CARD_CLASS} open={runtimeOpen} onOpenChange={setRuntimeOpen}>
-        <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left hover:bg-muted/35">
+        <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 px-3 py-3 text-left hover:bg-muted/35">
           <span className="grid min-w-0 gap-0.5">
             <span className={SETTINGS_SECTION_HEADING_CLASS}>{t("settings.voice.runtime")}</span>
             <span className="text-xs leading-5 text-muted-foreground">{t("settings.voice.restartRequired")}</span>
           </span>
           <ChevronRight className={cn("size-4 shrink-0 text-muted-foreground transition-transform", runtimeOpen && "rotate-90")} />
         </CollapsibleTrigger>
-        <CollapsibleContent className="border-t border-border/70 p-4">
+        <CollapsibleContent className="border-t border-border/70 p-3">
           {audioQuery.isError ? (
             <Alert variant="destructive">
               <AlertDescription>{t("settings.voice.loadFailed")}</AlertDescription>

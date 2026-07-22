@@ -30,7 +30,7 @@ export function ProjectGitDiffViewer({ active, selection, sessionID, token }: {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-9 shrink-0 items-center gap-2 border-b px-3">
         <FileDiff className="size-4 shrink-0 text-muted-foreground" />
-        <code className="min-w-0 flex-1 cursor-text select-text truncate font-mono text-xs" title={selection.path}>{selection.path}</code>
+        <code className="min-w-0 flex-1 cursor-text select-text truncate font-mono text-xs" >{selection.path}</code>
         <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
           {selection.staged ? t("project.gitStaged") : t("project.gitWorkingTree")}
         </span>

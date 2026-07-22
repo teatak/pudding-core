@@ -362,7 +362,7 @@ export const ComposerTextArea = forwardRef<ComposerTextAreaHandle, ComposerTextA
         return;
       }
       event.preventDefault();
-      
+
       const currentText = event.currentTarget.value.trim();
       const currentCanSend = Boolean(currentText || uploadedAttachmentsCount || hasLocalFolders || hasProjectReferences) && !hasPendingAttachments && !hasFailedAttachments;
       const currentSlashCommand = hasAttachments || hasLocalFolders || hasProjectReferences ? null : parseSlashSubmitCommand(currentText);

@@ -925,8 +925,7 @@ export const backgroundProcess = z.object({
   status: z.string(),
   running: z.boolean(),
   cwd: z.string(),
-  argv: z.array(z.string()).optional(),
-  script: z.string().optional(),
+  command: z.string(),
   shell: z.string().optional(),
   exitCode: z.number().optional(),
   startedAt: z.string(),
@@ -936,6 +935,7 @@ export const backgroundProcess = z.object({
   sandboxed: z.boolean(),
   sandboxKind: z.string().optional(),
   sandboxDenied: z.boolean().optional(),
+  tty: z.boolean().optional(),
 });
 export type BackgroundProcess = z.infer<typeof backgroundProcess>;
 

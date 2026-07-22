@@ -721,97 +721,6 @@ func TestEngineReleasesToolResources(t *testing.T) {
 	}
 }
 
-func TestToolkitLoadRebuildsToolsAndResetsNextTurn(t *testing.T) {
-	ms := memstore.New()
-	hub := event.NewHub()
-	client := &toolkitLoopClient{}
-	runner := &recordingToolRunner{
-		defs:   tool.BuiltinDefinitions(),
-		result: tool.Result{Ok: true, Content: `{"ok":true,"clean":true,"fileCount":0}`},
-	}
-	eng := New(ms, hub, mapResolver{"toolkit": client}, ms, WithAttachmentHome(t.TempDir()), WithTools(runner))
-	ctx := context.Background()
-	sid := "sess_toolkit"
-	if err := ms.CreateSession(ctx, &store.Session{
-		ID: sid, Title: "toolkit", Provider: "toolkit", Model: "toolkit-model",
-		ActiveMode: store.ModeCode, ModeLease: store.ModeLeaseSession,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
-		DisplayName: "toolkit", Protocol: "openai-compatible",
-		Models: []store.ProviderModel{{
-			ID: "toolkit-model", Capabilities: &store.ModelCaps{Tools: true}, Limits: &store.ModelLimits{MaxToolLoops: 4},
-		}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c_toolkit_1", Text: "查看 Git 状态"}); err != nil {
-		t.Fatal(err)
-	}
-	waitTurnDone(t, ms, sid)
-	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c_toolkit_2", Text: "下一轮"}); err != nil {
-		t.Fatal(err)
-	}
-	waitTurnDone(t, ms, sid)
-
-	if len(client.requests) != 4 {
-		t.Fatalf("provider requests = %d, want 4", len(client.requests))
-	}
-	if hasToolDef(client.requests[0].Tools, tool.GitStatus) || !hasToolDef(client.requests[0].Tools, tool.ToolkitLoad) || !strings.Contains(client.requests[0].System, "code.git-read") {
-		t.Fatalf("initial toolkit request wrong: tools=%v system=%s", client.requests[0].Tools, client.requests[0].System)
-	}
-	if !hasToolDef(client.requests[1].Tools, tool.GitStatus) || hasToolDef(client.requests[1].Tools, tool.GitCommit) {
-		t.Fatalf("loaded toolkit request wrong: %+v", client.requests[1].Tools)
-	}
-	if !hasToolDef(client.requests[2].Tools, tool.GitStatus) {
-		t.Fatal("loaded toolkit did not remain active within the turn")
-	}
-	if hasToolDef(client.requests[3].Tools, tool.GitStatus) {
-		t.Fatal("toolkit leaked into the next turn")
-	}
-	if len(runner.calls) != 1 || runner.calls[0].Name != tool.GitStatus {
-		t.Fatalf("loaded tool was not called exactly once: %+v", runner.calls)
-	}
-	msgs, err := ms.ListMessages(ctx, sid, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	seenLoadResult := false
-	for _, message := range msgs {
-		for _, part := range message.Parts {
-			if part.Type == store.ContentPartToolResult && part.Name == tool.ToolkitLoad && part.Ok {
-				seenLoadResult = strings.Contains(part.Content, `"loaded":["code.git-read"]`)
-			}
-		}
-	}
-	if !seenLoadResult {
-		t.Fatal("toolkit load result was not canonicalized")
-	}
-}
-
-func TestToolkitLoadEnforcesCapabilityAndPerTurnLimit(t *testing.T) {
-	catalog := tool.BuildToolkitCatalog(tool.BuiltinDefinitions())
-	state := newTurnToolkitState()
-	state.catalog = catalog
-	call := func(id, toolkitID string, mode store.AgentMode) (tool.Result, bool) {
-		args, _ := json.Marshal(map[string]any{"toolkit_ids": []string{toolkitID}})
-		return loadTurnToolkits(tool.Call{CallID: id, Name: tool.ToolkitLoad, Args: args}, mode, state)
-	}
-	if result, changed := call("work_code", "code.lsp", store.ModeWork); result.Ok || changed || !strings.Contains(result.Content, `"reason":"capability_required"`) {
-		t.Fatalf("Work loaded Code toolkit: %+v", result)
-	}
-	if result, changed := call("load_1", "code.git-read", store.ModeCode); !result.Ok || !changed {
-		t.Fatalf("first toolkit load failed: %+v", result)
-	}
-	if result, changed := call("load_2", "code.lsp", store.ModeCode); !result.Ok || !changed {
-		t.Fatalf("second toolkit load failed: %+v", result)
-	}
-	if result, changed := call("load_3", "code.skill", store.ModeCode); result.Ok || changed || !strings.Contains(result.Content, `"reason":"toolkit_load_limit"`) {
-		t.Fatalf("third toolkit load was not rejected: %+v", result)
-	}
-}
-
 func TestExplicitAppLoadLoadsToolsForSession(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
@@ -870,7 +779,7 @@ func TestExplicitAppLoadLoadsToolsForSession(t *testing.T) {
 	if len(client.requests) != 4 || !hasToolDef(client.requests[3].Tools, tool.BrowserOpen) {
 		t.Fatalf("loaded app did not persist across turns: %+v", client.requests)
 	}
-	chatDefs, _, err := eng.toolDefinitions(ctx, sid, store.ModeChat, nil)
+	chatDefs, err := eng.toolDefinitions(ctx, sid, store.ModeChat)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -878,7 +787,7 @@ func TestExplicitAppLoadLoadsToolsForSession(t *testing.T) {
 		t.Fatal("mode downgrade must hide loaded browser tools")
 	}
 	apps.defs[0].Enabled = false
-	workDefs, _, err := eng.toolDefinitions(ctx, sid, store.ModeWork, nil)
+	workDefs, err := eng.toolDefinitions(ctx, sid, store.ModeWork)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -996,53 +905,110 @@ func TestAppLoadAllowsToolOnlyAppWithoutSkill(t *testing.T) {
 	}
 }
 
-func TestTerminalAppToolsRequireLoadedCodeMode(t *testing.T) {
+func TestCommandToolsAreCodeCore(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
 	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions()}
 	apps := &mutableAppSource{defs: app.BuiltinDefinitions()}
 	eng := New(ms, hub, registry.Static(mock.New()), ms, WithTools(runner), WithApps(apps))
 	ctx := context.Background()
-	sid := "sess_terminal_app"
+	sid := "sess_command_core"
 	if err := ms.CreateSession(ctx, &store.Session{
 		ID: sid, Provider: "mock", Model: "mock-model",
 		ActiveMode: store.ModeCode, ModeLease: store.ModeLeaseSession,
-		LoadedAppIDs: []string{app.BuiltinTerminalID},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	codeDefs, _, err := eng.toolDefinitions(ctx, sid, store.ModeCode, nil)
+	codeDefs, err := eng.toolDefinitions(ctx, sid, store.ModeCode)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{tool.CommandRun, tool.CommandStart, tool.CommandPoll, tool.CommandStop} {
+	for _, name := range []string{tool.CommandRun, tool.CommandSession} {
 		if !hasToolDef(codeDefs, name) {
-			t.Fatalf("loaded Terminal missing %s", name)
+			t.Fatalf("Code Core missing %s", name)
 		}
 	}
-	workDefs, _, err := eng.toolDefinitions(ctx, sid, store.ModeWork, nil)
+	if hasToolDef(codeDefs, tool.SkillValidate) || hasToolDef(codeDefs, tool.AppSave) {
+		t.Fatal("unloaded authoring App exposed its tools")
+	}
+	loadedAuthoringApps := []string{app.BuiltinSkillAuthoringID, app.BuiltinAppAuthoringID}
+	if _, err := ms.UpdateSession(ctx, sid, store.SessionUpdate{LoadedAppIDs: &loadedAuthoringApps}); err != nil {
+		t.Fatal(err)
+	}
+	codeDefs, err = eng.toolDefinitions(ctx, sid, store.ModeCode)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hasToolDef(workDefs, tool.CommandStart) || hasToolDef(workDefs, tool.CommandPoll) || hasToolDef(workDefs, tool.CommandStop) {
-		t.Fatal("mode downgrade exposed Terminal tools")
+	if !hasToolDef(codeDefs, tool.SkillValidate) || !hasToolDef(codeDefs, tool.AppSave) {
+		t.Fatalf("loaded authoring Apps missing tools: %+v", codeDefs)
 	}
-
-	loaded := []string{}
-	if _, err := ms.UpdateSession(ctx, sid, store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
-		t.Fatal(err)
-	}
-	codeDefs, _, err = eng.toolDefinitions(ctx, sid, store.ModeCode, nil)
+	workDefs, err := eng.toolDefinitions(ctx, sid, store.ModeWork)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasToolDef(codeDefs, tool.CommandRun) || hasToolDef(codeDefs, tool.CommandStart) {
-		t.Fatalf("Code Core and Terminal boundary is wrong: %+v", codeDefs)
+	if hasToolDef(workDefs, tool.CommandRun) || hasToolDef(workDefs, tool.CommandSession) || hasToolDef(workDefs, tool.SkillValidate) || hasToolDef(workDefs, tool.AppSave) {
+		t.Fatal("mode downgrade exposed Code tools")
 	}
 }
 
-func TestInstalledAppToolsBypassToolkitOnlyWhenLoaded(t *testing.T) {
+func TestOptionalBuiltinAppToolsRequireSessionLoadAndMode(t *testing.T) {
+	ms := memstore.New()
+	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions()}
+	eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms,
+		WithTools(runner), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
+	ctx := context.Background()
+	sid := "sess_optional_builtin_apps"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Provider: "mock", Model: "mock-model"}); err != nil {
+		t.Fatal(err)
+	}
+
+	codeDefs, err := eng.toolDefinitions(ctx, sid, store.ModeCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{tool.FileList, tool.GitStatus, tool.CodeDiagnostics, tool.CameraCapture, tool.DesktopScreenshot} {
+		if hasToolDef(codeDefs, name) {
+			t.Fatalf("unloaded built-in App exposed %s", name)
+		}
+	}
+
+	loaded := []string{
+		app.BuiltinProjectFilesID,
+		app.BuiltinSourceControlID,
+		app.BuiltinCodeIntelID,
+		app.BuiltinCaptureID,
+	}
+	if _, err := ms.UpdateSession(ctx, sid, store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
+		t.Fatal(err)
+	}
+	codeDefs, err = eng.toolDefinitions(ctx, sid, store.ModeCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{tool.FileList, tool.GitStatus, tool.CodeDiagnostics, tool.CameraCapture, tool.DesktopScreenshot} {
+		if !hasToolDef(codeDefs, name) {
+			t.Fatalf("loaded built-in App missing %s", name)
+		}
+	}
+
+	chatDefs, err := eng.toolDefinitions(ctx, sid, store.ModeChat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{tool.CameraCapture, tool.DesktopScreenshot} {
+		if !hasToolDef(chatDefs, name) {
+			t.Fatalf("loaded Image Capture App missing Chat tool %s", name)
+		}
+	}
+	for _, name := range []string{tool.FileList, tool.GitStatus, tool.CodeDiagnostics} {
+		if hasToolDef(chatDefs, name) {
+			t.Fatalf("Chat mode exposed Code App tool %s", name)
+		}
+	}
+}
+
+func TestInstalledAppToolsAreExposedOnlyWhenLoaded(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
 	defs := append(tool.BuiltinDefinitions(), provider.ToolDef{
@@ -1065,7 +1031,7 @@ func TestInstalledAppToolsBypassToolkitOnlyWhenLoaded(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	loadedDefs, catalog, err := eng.toolDefinitions(ctx, sid, store.ModeWork, nil)
+	loadedDefs, err := eng.toolDefinitions(ctx, sid, store.ModeWork)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1075,17 +1041,11 @@ func TestInstalledAppToolsBypassToolkitOnlyWhenLoaded(t *testing.T) {
 	if len(runner.definitionAppIDs) == 0 || !sameStrings(runner.definitionAppIDs[len(runner.definitionAppIDs)-1], []string{"github"}) {
 		t.Fatalf("scoped definitions received app ids: %+v", runner.definitionAppIDs)
 	}
-	for _, manifest := range catalog {
-		if manifest.ID == "work.api" || strings.HasPrefix(manifest.ID, "app.") {
-			t.Fatalf("legacy App toolkit remained: %+v", manifest)
-		}
-	}
-
 	loaded := []string{}
 	if _, err := ms.UpdateSession(ctx, sid, store.SessionUpdate{LoadedAppIDs: &loaded}); err != nil {
 		t.Fatal(err)
 	}
-	unloadedDefs, _, err := eng.toolDefinitions(ctx, sid, store.ModeWork, nil)
+	unloadedDefs, err := eng.toolDefinitions(ctx, sid, store.ModeWork)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2030,7 +1990,7 @@ func TestCapabilityApprovalUpgradesTurnTools(t *testing.T) {
 	hub := event.NewHub()
 	client := &capabilityClient{}
 	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions()}
-	eng := New(ms, hub, mapResolver{"cap": client}, ms, WithTools(runner))
+	eng := New(ms, hub, mapResolver{"cap": client}, ms, WithTools(runner), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
 	ctx := context.Background()
 	sid := "sess_capability"
 	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "cap", Provider: "cap", Model: "cap-model"}); err != nil {
@@ -2086,7 +2046,7 @@ func TestCapabilityApprovalUpgradesTurnTools(t *testing.T) {
 	if !hasToolDef(client.requests[0].Tools, tool.RequestCapability) || !hasToolDef(client.requests[0].Tools, tool.TimeGetCurrent) || !hasToolDef(client.requests[0].Tools, tool.WebSearch) || !hasToolDef(client.requests[0].Tools, tool.WebFetch) || hasToolDef(client.requests[0].Tools, tool.RESTRequest) || hasToolDef(client.requests[0].Tools, tool.FileRead) {
 		t.Fatalf("chat tools wrong: %+v", client.requests[0].Tools)
 	}
-	if !hasToolDef(client.requests[1].Tools, tool.RequestCapability) || !hasToolDef(client.requests[1].Tools, tool.ToolkitLoad) || !hasToolDef(client.requests[1].Tools, tool.WebSearch) || !hasToolDef(client.requests[1].Tools, tool.WebFetch) || !hasToolDef(client.requests[1].Tools, tool.FileRead) || hasToolDef(client.requests[1].Tools, tool.RESTRequest) || hasToolDef(client.requests[1].Tools, tool.GraphQLRequest) {
+	if !hasToolDef(client.requests[1].Tools, tool.RequestCapability) || !hasToolDef(client.requests[1].Tools, tool.AppLoad) || !hasToolDef(client.requests[1].Tools, tool.WebSearch) || !hasToolDef(client.requests[1].Tools, tool.WebFetch) || !hasToolDef(client.requests[1].Tools, tool.FileRead) || hasToolDef(client.requests[1].Tools, tool.RESTRequest) || hasToolDef(client.requests[1].Tools, tool.GraphQLRequest) {
 		t.Fatalf("code tools wrong: %+v", client.requests[1].Tools)
 	}
 	turn, err := ms.GetConversationTurn(ctx, sid, res.TurnID)
@@ -2104,7 +2064,7 @@ func TestProjectApprovalSessionScopeCreatesProject(t *testing.T) {
 	dir := t.TempDir()
 	client := &projectCapabilityClient{}
 	runner := &recordingToolRunner{defs: tool.BuiltinDefinitions()}
-	eng := New(ms, hub, mapResolver{"project": client}, ms, WithTools(runner))
+	eng := New(ms, hub, mapResolver{"project": client}, ms, WithTools(runner), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
 	ctx := context.Background()
 	sid := "sess_project"
 	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "project", Provider: "project", Model: "project-model"}); err != nil {
@@ -2174,7 +2134,7 @@ func TestProjectApprovalTurnScopeGrantsDirsWithoutPersisting(t *testing.T) {
 		defs:   tool.BuiltinDefinitions(),
 		result: tool.Result{Ok: true, Content: `{"ok":true}`},
 	}
-	eng := New(ms, hub, mapResolver{"project": client}, ms, WithTools(runner))
+	eng := New(ms, hub, mapResolver{"project": client}, ms, WithTools(runner), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
 	ctx := context.Background()
 	sid := "sess_project_turn_dirs"
 	if err := ms.CreateSession(ctx, &store.Session{ID: sid, Title: "project", Provider: "project", Model: "project-model"}); err != nil {
@@ -2253,7 +2213,7 @@ func TestProjectAskApprovalRequiresFileWriteApproval(t *testing.T) {
 		defs:   tool.BuiltinDefinitions(),
 		result: tool.Result{Ok: true, Content: `{"ok":true}`},
 	}
-	eng := New(ms, hub, mapResolver{"project": client}, ms, WithTools(runner))
+	eng := New(ms, hub, mapResolver{"project": client}, ms, WithTools(runner), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
 	ctx := context.Background()
 	sid := "sess_project_file_write_approval"
 	if err := ms.CreateSession(ctx, &store.Session{
@@ -2316,7 +2276,7 @@ func TestProjectAskApprovalRequiresFileWriteApproval(t *testing.T) {
 	}
 }
 
-func TestPatchProposalApprovalCarriesDiffAndAppliesAfterApproval(t *testing.T) {
+func TestPatchApprovalCarriesDiffAndAppliesAfterApproval(t *testing.T) {
 	ctx := context.Background()
 	ms := memstore.New()
 	hub := event.NewHub()
@@ -2373,7 +2333,7 @@ func TestPatchProposalApprovalCarriesDiffAndAppliesAfterApproval(t *testing.T) {
 		t.Fatalf("unexpected patch approval: %+v", approval)
 	}
 	payload := string(approval.Payload)
-	if !strings.Contains(payload, `"toolName":"builtin_patch_apply"`) || !strings.Contains(payload, `"proposalID":"patch_`) || !strings.Contains(payload, `"diff":"`) || !strings.Contains(payload, `-old text`) || !strings.Contains(payload, `+new text`) {
+	if !strings.Contains(payload, `"toolName":"builtin_patch_apply"`) || !strings.Contains(payload, `"diff":"`) || !strings.Contains(payload, `-old text`) || !strings.Contains(payload, `+new text`) || strings.Contains(payload, `"proposalID"`) {
 		t.Fatalf("patch approval payload is missing review data: %s", payload)
 	}
 	if data, err := os.ReadFile(target); err != nil || string(data) != "old text\n" {
@@ -2414,7 +2374,7 @@ func TestGitCommitApprovalCarriesStagedDiffAndCommitsAfterApproval(t *testing.T)
 		t.Fatal(err)
 	}
 	client := &gitCommitApprovalClient{}
-	eng := New(ms, hub, mapResolver{"git": client}, ms, WithTools(tool.NewBuiltinRunner()))
+	eng := New(ms, hub, mapResolver{"git": client}, ms, WithTools(tool.NewBuiltinRunner()), WithApps(&mutableAppSource{defs: app.BuiltinDefinitions()}))
 	sid := "sess_git_commit"
 	if err := ms.CreateSession(ctx, &store.Session{
 		ID: sid, Title: "git", Provider: "git", Model: "git-model",
@@ -2541,7 +2501,7 @@ func TestCommandSandboxModeFollowsProjectApprovalMode(t *testing.T) {
 }
 
 func TestLongRunningCommandToolsUseOwnTimeout(t *testing.T) {
-	for _, name := range []string{tool.CommandRun, tool.CommandPoll} {
+	for _, name := range []string{tool.CommandRun, tool.CommandSession} {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel, timed := toolContext(context.Background(), name)
 			defer cancel()
@@ -2596,7 +2556,7 @@ func TestExecuteAllowedCommandPropagatesProjectSandboxMode(t *testing.T) {
 			}
 			runner := &approvalDetailsRecordingToolRunner{recordingToolRunner: calls}
 			eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms, WithTools(runner))
-			raw := json.RawMessage(`{"scope":"project","argv":["go","version"]}`)
+			raw := json.RawMessage(`{"scope":"project","command":"go version"}`)
 			result := eng.executeAllowedTool(ctx, sessionID, "turn_sandbox", store.ModeCode, tool.Call{CallID: "call_sandbox", Name: tool.CommandRun, Args: raw})
 			if !result.Ok || len(calls.calls) != 1 {
 				t.Fatalf("command was not executed once: result=%+v calls=%d", result, len(calls.calls))
@@ -2628,7 +2588,7 @@ func TestExecuteAllowedCodeToolUsesSessionScratchWithoutProject(t *testing.T) {
 	}
 	runner := &approvalDetailsRecordingToolRunner{recordingToolRunner: calls}
 	eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms, WithAttachmentHome(homeDir), WithTools(runner))
-	raw := json.RawMessage(`{"scope":"project","argv":["go","version"]}`)
+	raw := json.RawMessage(`{"scope":"project","command":"go version"}`)
 	result := eng.executeAllowedTool(ctx, sessionID, "turn_scratch", store.ModeCode, tool.Call{CallID: "call_scratch", Name: tool.CommandRun, Args: raw})
 	if !result.Ok || len(calls.calls) != 1 {
 		t.Fatalf("scratch command was not executed once: result=%+v calls=%d", result, len(calls.calls))
@@ -2740,7 +2700,7 @@ func TestApprovedCommandBypassesSandboxForExactInvocation(t *testing.T) {
 
 	done := make(chan tool.Result, 1)
 	go func() {
-		raw := json.RawMessage(`{"scope":"project","argv":["brew","install","mysql-client"]}`)
+		raw := json.RawMessage(`{"scope":"project","command":"brew install mysql-client"}`)
 		done <- eng.executeAllowedTool(ctx, sessionID, "turn_brew", store.ModeCode, tool.Call{CallID: "call_brew", Name: tool.CommandRun, Args: raw})
 	}()
 
@@ -2771,7 +2731,7 @@ func TestApprovedCommandBypassesSandboxForExactInvocation(t *testing.T) {
 	if call.CommandSandbox != tool.CommandSandboxBypass {
 		t.Fatalf("approved command sandbox = %q, want bypass", call.CommandSandbox)
 	}
-	if string(call.Args) != `{"scope":"project","argv":["brew","install","mysql-client"]}` {
+	if string(call.Args) != `{"scope":"project","command":"brew install mysql-client"}` {
 		t.Fatalf("approved command invocation changed: %s", call.Args)
 	}
 }
@@ -3384,10 +3344,6 @@ type browserToolLoopClient struct {
 	requests []provider.Request
 }
 
-type toolkitLoopClient struct {
-	requests []provider.Request
-}
-
 type appLoadClient struct {
 	requests     []provider.Request
 	forceBrowser bool
@@ -3489,31 +3445,6 @@ func (c *crossAppAPIClient) Stream(_ context.Context, req provider.Request) (<-c
 	return out, nil
 }
 
-func (c *toolkitLoopClient) Name() string { return "toolkit-loop" }
-
-func (c *toolkitLoopClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
-	c.requests = append(c.requests, req)
-	out := make(chan provider.Chunk, 3)
-	switch len(c.requests) {
-	case 1:
-		out <- toolkitLoadChunk("call_toolkit_git_read", "code.git-read")
-		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
-	case 2:
-		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
-			Index: 0, CallID: "call_git_status", Name: tool.GitStatus, ArgsDelta: `{"scope":"project"}`,
-		}}
-		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
-	case 3:
-		out <- provider.Chunk{Part: provider.PartText, Delta: "Git 已检查"}
-		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
-	default:
-		out <- provider.Chunk{Part: provider.PartText, Delta: "新一轮"}
-		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
-	}
-	close(out)
-	return out, nil
-}
-
 func (c *browserToolLoopClient) Name() string { return "browser-tool-loop" }
 
 func (c *browserToolLoopClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
@@ -3541,10 +3472,10 @@ func (c *browserToolLoopClient) Stream(_ context.Context, req provider.Request) 
 	return out, nil
 }
 
-func toolkitLoadChunk(callID string, toolkitIDs ...string) provider.Chunk {
-	args, _ := json.Marshal(map[string]any{"toolkit_ids": toolkitIDs})
+func appLoadChunk(callID, appID string) provider.Chunk {
+	args, _ := json.Marshal(map[string]any{"app_id": appID})
 	return provider.Chunk{Tool: &provider.ToolCallChunk{
-		Index: 0, CallID: callID, Name: tool.ToolkitLoad, ArgsDelta: string(args),
+		Index: 0, CallID: callID, Name: tool.AppLoad, ArgsDelta: string(args),
 	}}
 }
 
@@ -3840,7 +3771,7 @@ func (c *projectDirGrantClient) Stream(_ context.Context, req provider.Request) 
 		}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	case 2:
-		out <- toolkitLoadChunk("call_files_read_toolkit", "code.files-read")
+		out <- appLoadChunk("call_project_files_app", app.BuiltinProjectFilesID)
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	case 3:
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
@@ -3877,7 +3808,7 @@ func (c *gitCommitApprovalClient) Stream(_ context.Context, req provider.Request
 	out := make(chan provider.Chunk, 4)
 	switch len(c.requests) {
 	case 1:
-		out <- toolkitLoadChunk("call_git_write_toolkit", "code.git-write")
+		out <- appLoadChunk("call_source_control_app", app.BuiltinSourceControlID)
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	case 2:
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{
@@ -3924,15 +3855,6 @@ func (c *patchApprovalClient) Stream(_ context.Context, req provider.Request) (<
 			"scope": "project",
 			"files": []map[string]any{{"path": "notes.txt", "new_text": "new text\n"}},
 		})
-		out <- provider.Chunk{Tool: &provider.ToolCallChunk{Index: 0, CallID: "call_patch_propose", Name: tool.PatchPropose, ArgsDelta: string(args)}}
-		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
-	case 2:
-		proposalID := patchProposalIDFromRequest(req)
-		if proposalID == "" {
-			close(out)
-			return out, nil
-		}
-		args, _ := json.Marshal(map[string]any{"proposal_id": proposalID})
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{Index: 0, CallID: "call_patch_apply", Name: tool.PatchApply, ArgsDelta: string(args)}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	default:
@@ -3943,24 +3865,6 @@ func (c *patchApprovalClient) Stream(_ context.Context, req provider.Request) (<
 	return out, nil
 }
 
-func patchProposalIDFromRequest(req provider.Request) string {
-	for i := len(req.Messages) - 1; i >= 0; i-- {
-		for j := len(req.Messages[i].Parts) - 1; j >= 0; j-- {
-			part := req.Messages[i].Parts[j]
-			if part.Type != provider.PartToolResult || part.Name != tool.PatchPropose {
-				continue
-			}
-			var payload struct {
-				ProposalID string `json:"proposalID"`
-			}
-			if json.Unmarshal([]byte(part.Content), &payload) == nil {
-				return payload.ProposalID
-			}
-		}
-	}
-	return ""
-}
-
 func (c *fileWriteApprovalClient) Name() string { return "file-write-approval" }
 
 func (c *fileWriteApprovalClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
@@ -3968,7 +3872,7 @@ func (c *fileWriteApprovalClient) Stream(_ context.Context, req provider.Request
 	out := make(chan provider.Chunk, 4)
 	switch len(c.requests) {
 	case 1:
-		out <- toolkitLoadChunk("call_files_write_toolkit", "code.files-write")
+		out <- appLoadChunk("call_project_files_app", app.BuiltinProjectFilesID)
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	case 2:
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{

@@ -19,11 +19,12 @@ compact Available Apps prompt and are loaded on demand with
 
 ## LLM Authoring
 
-App creation follows the same on-demand pattern as Skill creation:
+App creation is provided by the built-in App Authoring App:
 
-1. Read the builtin `app-creator` Skill when the user explicitly asks to create
-   or update an App.
-2. Enter Code mode and load the `code.app` Toolkit.
+1. Enter Code mode and call `builtin_app_load(app_id="app-authoring")` when the
+   user explicitly asks to create or update an App.
+2. The load returns the bundled `app-creator` Skill and exposes
+   `builtin_app_save` for the session.
 3. For updates, inspect visible package files through the read-only `app` file
    scope. Hidden connection and MCP override files are never exposed there.
 4. Call `builtin_app_save` with a complete UTF-8 package and either `create` or

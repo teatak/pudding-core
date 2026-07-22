@@ -43,16 +43,13 @@ const (
 	FileMove            = "builtin_file_move"
 	FileCopy            = "builtin_file_copy"
 	CommandRun          = "builtin_command_run"
-	CommandStart        = "builtin_command_start"
-	CommandPoll         = "builtin_command_poll"
-	CommandStop         = "builtin_command_stop"
+	CommandSession      = "builtin_command_session"
 	GitStatus           = "builtin_git_status"
 	GitDiff             = "builtin_git_diff"
 	GitLog              = "builtin_git_log"
 	GitStage            = "builtin_git_stage"
 	GitUnstage          = "builtin_git_unstage"
 	GitCommit           = "builtin_git_commit"
-	PatchPropose        = "builtin_patch_propose"
 	PatchApply          = "builtin_patch_apply"
 	SkillValidate       = "builtin_skill_validate"
 	AppSave             = "builtin_app_save"
@@ -74,6 +71,7 @@ const (
 	BrowserClick        = "builtin_browser_click"
 	BrowserType         = "builtin_browser_type"
 	BrowserScroll       = "builtin_browser_scroll"
+	RequestUserInput    = "builtin_request_user_input"
 )
 
 type WebConfigSource interface {
@@ -143,7 +141,7 @@ type BuiltinRunner struct {
 	appTokenMu               sync.Mutex
 	appTokens                map[string]endpointAuthTokenCacheEntry
 	patchMu                  sync.Mutex
-	patchProposals           map[string]*patchProposal
+	preparedPatches          map[string]*preparedPatch
 	gitApprovalMu            sync.Mutex
 	gitApprovals             map[string]gitCommitApprovalSnapshot
 	commands                 commandRunner
@@ -160,7 +158,7 @@ func NewBuiltinRunner(opts ...BuiltinOption) *BuiltinRunner {
 		weatherCache:    map[string]weatherCacheEntry{},
 		graphqlSchemas:  map[string]*graphqlSchemaCache{},
 		appTokens:       map[string]endpointAuthTokenCacheEntry{},
-		patchProposals:  map[string]*patchProposal{},
+		preparedPatches: map[string]*preparedPatch{},
 		gitApprovals:    map[string]gitCommitApprovalSnapshot{},
 		commands:        commands,
 		processes:       newBackgroundProcessManager(backgroundProcessRetentionTTL, commands),
@@ -370,7 +368,7 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        CodeRename,
-			Description: "Prepare a semantic symbol rename through the language server and return a reviewable Patch Proposal without changing project files. Apply the returned proposal separately with builtin_patch_apply.",
+			Description: "Rename one project symbol through the language server and atomically apply all resulting reference edits. The operation fails without partial writes when any target is invalid or changes during application.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"path":{"type":"string","description":"Authorized source file containing the symbol."},"language":{"type":"string","enum":["go","typescript"],"description":"Optional language override. Use typescript for TypeScript and JavaScript."},"line":{"type":"integer","minimum":1,"description":"1-based line."},"column":{"type":"integer","minimum":1,"description":"1-based Unicode character column."},"new_name":{"type":"string","minLength":1,"maxLength":256,"description":"New symbol name. Language-specific validity is checked by the language server."}},"required":["scope","path","line","column","new_name"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
@@ -442,26 +440,14 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        CommandRun,
-			Description: "Run one local command in an authorized project directory. Pass either argv for direct execution or script for fixed-shell pipelines, redirects, and compound commands; never pass both. In Auto, direct argv runs inside the project sandbox unless it matches an explicit risk rule such as destructive, external, publishing, credential, privilege, Git-write, or inline-code behavior. Unknown command names are not risky by themselves. Returns exit code, bounded output, duration, timeout, cancellation, and sandbox metadata; recognized verification commands also return project-scoped diagnostics.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Commands can run only with project access."},"argv":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":128,"description":"Executable followed by arguments for direct execution. Mutually exclusive with script."},"script":{"type":"string","minLength":1,"maxLength":65536,"description":"A fixed-shell script for pipelines, redirects, variable expansion, or compound commands. Mutually exclusive with argv and always treated as risky."},"cwd":{"type":"string","description":"Absolute or relative directory inside authorized project roots. Defaults to the first project root."},"env":{"type":"object","additionalProperties":{"type":"string"},"description":"Optional environment values for this command. Pudding otherwise inherits only a minimal safe environment."},"timeout_ms":{"type":"integer","minimum":100,"maximum":600000,"description":"Optional timeout in milliseconds. Defaults to 60000; maximum 600000."}},"required":["scope"],"additionalProperties":false}`),
+			Description: "Run one fixed-shell command in an authorized project directory. The command may use pipelines, redirects, and simple compound expressions. Foreground commands return bounded output and verification diagnostics. Set background=true for a persistent session and receive a process_id; set tty=true as well only for an interactive CLI or REPL. Background sessions have no runtime deadline and must be managed with builtin_command_session. In Auto, Pudding parses each static command segment and uses the project sandbox unless an explicit risk rule applies.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Commands can run only with project access."},"command":{"type":"string","minLength":1,"maxLength":65536,"description":"Complete command line executed by Pudding's fixed shell."},"cwd":{"type":"string","description":"Absolute or relative directory inside authorized project roots. Defaults to the first project root."},"env":{"type":"object","additionalProperties":{"type":"string"},"description":"Optional environment values for this command. Pudding otherwise inherits only a minimal safe environment."},"timeout_ms":{"type":"integer","minimum":100,"maximum":600000,"description":"Foreground timeout in milliseconds. Defaults to 60000; unavailable when background=true."},"background":{"type":"boolean","description":"Keep the command running as a session-owned process and return process_id. Defaults false."},"tty":{"type":"boolean","description":"Allocate a PTY for an interactive CLI. Requires background=true and is unavailable on Windows."}},"required":["scope","command"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
-			Name:        CommandStart,
-			Description: "Start one non-interactive background process in an authorized project directory. Pass exactly one of argv or script. Direct argv uses the same Auto risk rules and project sandbox as foreground commands; merely being long-running or unknown does not require approval. Returns a session-owned process_id; use builtin_command_poll to read bounded output and builtin_command_stop when finished.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Background processes can start only with project access."},"argv":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":128,"description":"Executable followed by arguments for direct execution. Mutually exclusive with script."},"script":{"type":"string","minLength":1,"maxLength":65536,"description":"A fixed-shell script. Mutually exclusive with argv."},"cwd":{"type":"string","description":"Absolute or relative directory inside authorized project roots. Defaults to the first project root."},"env":{"type":"object","additionalProperties":{"type":"string"},"description":"Optional environment values. Pudding otherwise inherits only a minimal safe environment."}},"required":["scope"],"additionalProperties":false}`),
-			Capability:  store.ModeCode,
-		},
-		{
-			Name:        CommandPoll,
-			Description: "Poll one session-owned background process. Pass the previous next_offset to continue reading its ordered stdout/stderr ring buffer. Optionally wait up to 10 minutes for the process to exit; output is buffered during the wait. Returns process status, output chunks, the next offset, truncation, and whether more buffered output remains.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by builtin_command_start."},"offset":{"type":"integer","minimum":0,"description":"Output offset returned as nextOffset by the previous poll. Defaults to the oldest retained output."},"max_bytes":{"type":"integer","minimum":1024,"maximum":262144,"description":"Maximum output bytes returned by this poll. Defaults to 65536."},"wait_ms":{"type":"integer","minimum":0,"maximum":600000,"description":"Optional time to wait for process exit before returning the latest status and buffered output. Defaults to 0 for an immediate poll; maximum 600000 (10 minutes)."}},"required":["process_id"],"additionalProperties":false}`),
-			Capability:  store.ModeCode,
-		},
-		{
-			Name:        CommandStop,
-			Description: "Stop one session-owned background process and its child process group. This operation is idempotent for a process that already exited.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by builtin_command_start."}},"required":["process_id"],"additionalProperties":false}`),
+			Name:        CommandSession,
+			Description: "Manage one session-owned process returned by builtin_command_run with background=true. Use action=poll to read bounded ordered output, action=write to send exact stdin bytes (include a newline when needed), or action=stop to terminate the process group. Input is serialized and limited to 65536 bytes per call. PTY sessions support terminal control characters; ordinary background sessions receive pipe input.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"action":{"type":"string","enum":["poll","write","stop"]},"process_id":{"type":"string","description":"Process id returned by builtin_command_run."},"offset":{"type":"integer","minimum":0,"description":"For poll, continue from the previous nextOffset. Defaults to the oldest retained output."},"max_bytes":{"type":"integer","minimum":1024,"maximum":262144,"description":"For poll, maximum returned output bytes. Defaults to 65536."},"wait_ms":{"type":"integer","minimum":0,"maximum":600000,"description":"For poll, optionally wait for process exit, up to 600000 ms."},"data":{"type":"string","maxLength":65536,"description":"For write, exact input bytes as text. Include \\n to submit a line or \\u0003 to send Ctrl-C to a PTY."}},"required":["action","process_id"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
@@ -501,15 +487,9 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Capability:  store.ModeCode,
 		},
 		{
-			Name:        PatchPropose,
-			Description: "Prepare a reviewable multi-file text patch without changing project files. Prefer ordered exact-match edits for existing files; use new_text for creates or intentional full replacement, and delete=true for deletion. The proposal records current file hashes and returns a unified diff for approval.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Patch proposals can target only authorized project files."},"files":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","properties":{"path":{"type":"string","description":"Absolute or relative file path inside one authorized project root."},"new_text":{"type":"string","description":"Complete desired UTF-8 file content. Use for creating a file or an intentional full replacement."},"edits":{"type":"array","minItems":1,"maxItems":64,"items":{"type":"object","properties":{"old_text":{"type":"string","minLength":1,"description":"Exact existing text to replace in the current in-memory snapshot."},"new_text":{"type":"string","description":"Replacement UTF-8 text."},"replace_all":{"type":"boolean","description":"Replace every exact match. Defaults to false and requires old_text to be unique."}},"required":["old_text","new_text"],"additionalProperties":false},"description":"Ordered exact replacements for an existing file. Mutually exclusive with new_text and delete."},"delete":{"type":"boolean","description":"Set true to delete an existing regular text file. Mutually exclusive with new_text and edits."}},"required":["path"],"additionalProperties":false},"description":"All proposed file changes. Every file must resolve inside the same project root."}},"required":["scope","files"],"additionalProperties":false}`),
-			Capability:  store.ModeCode,
-		},
-		{
 			Name:        PatchApply,
-			Description: "Apply one previously generated patch proposal after its unified diff is approved. The apply fails without changing files if any source file has drifted since proposal creation.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"proposal_id":{"type":"string","description":"Proposal id returned by builtin_patch_propose."}},"required":["proposal_id"],"additionalProperties":false}`),
+			Description: "Apply one atomic multi-file text patch directly to authorized project files. Prefer ordered exact-match edits for existing files; use new_text for creates or intentional full replacement, and delete=true for deletion. All files are validated before writing, and any failure leaves the worktree unchanged.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Patches can target only authorized project files."},"files":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","properties":{"path":{"type":"string","description":"Absolute or relative file path inside one authorized project root."},"new_text":{"type":"string","description":"Complete desired UTF-8 file content. Use for creating a file or an intentional full replacement."},"edits":{"type":"array","minItems":1,"maxItems":64,"items":{"type":"object","properties":{"old_text":{"type":"string","minLength":1,"description":"Exact existing text to replace in the current in-memory snapshot."},"new_text":{"type":"string","description":"Replacement UTF-8 text."},"replace_all":{"type":"boolean","description":"Replace every exact match. Defaults to false and requires old_text to be unique."}},"required":["old_text","new_text"],"additionalProperties":false},"description":"Ordered exact replacements for an existing file. Mutually exclusive with new_text and delete."},"delete":{"type":"boolean","description":"Set true to delete an existing regular text file. Mutually exclusive with new_text and edits."}},"required":["path"],"additionalProperties":false},"description":"All file changes. Every file must resolve inside the same project root."}},"required":["scope","files"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
@@ -558,7 +538,7 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Name:        CameraCapture,
 			Description: "Take one photo from the local camera and return a displayable attachment URL. The photo bytes are not routed to the model; call builtin_attachment_read_image only if the image content must be inspected.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
-			Capability:  store.ModeWork,
+			Capability:  store.ModeChat,
 		},
 		{
 			Name:        DesktopScreenshot,
@@ -622,8 +602,8 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        BrowserType,
-			Description: "Type text into an editable element in a managed browser tab.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"CSS selector for the input. If omitted, uses the active element."},"text":{"type":"string","description":"Text to type."},"clear":{"type":"boolean","description":"Replace existing value before typing."}},"required":["text"],"additionalProperties":false}`),
+			Description: "Type text into an input, textarea, or contenteditable element in a managed browser tab.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"CSS selector for an editable element. If omitted, uses the active element focused by a prior click."},"text":{"type":"string","description":"Text to type."},"clear":{"type":"boolean","description":"Replace existing text before typing."}},"required":["text"],"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
 		{
@@ -692,12 +672,8 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.fileCopy(call)
 	case CommandRun:
 		return r.commandRun(ctx, call)
-	case CommandStart:
-		return r.commandStart(call)
-	case CommandPoll:
-		return r.commandPoll(ctx, call)
-	case CommandStop:
-		return r.commandStop(call)
+	case CommandSession:
+		return r.commandSession(ctx, call)
 	case GitStatus:
 		return r.gitStatus(ctx, call)
 	case GitDiff:
@@ -710,8 +686,6 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.gitUnstage(ctx, call)
 	case GitCommit:
 		return r.gitCommit(ctx, call)
-	case PatchPropose:
-		return r.patchPropose(call)
 	case PatchApply:
 		return r.patchApply(call)
 	case SkillValidate:

@@ -126,23 +126,6 @@ func assertRealCodeRename(t *testing.T, ctx context.Context, runner *BuiltinRunn
 	if payload["operation"] != "rename" || payload["newName"] != newName {
 		t.Fatalf("unexpected real rename payload: %+v", payload)
 	}
-	afterProposal, err := os.ReadFile(target)
-	if err != nil || string(afterProposal) != string(before) {
-		t.Fatalf("real rename changed source before apply: err=%v", err)
-	}
-	proposalID, _ := payload["proposalID"].(string)
-	applyArgs, _ := json.Marshal(map[string]string{"proposal_id": proposalID})
-	applied := runner.Call(ctx, Call{
-		SessionID:   "session_integration",
-		TurnID:      "turn_integration",
-		CallID:      "call_apply",
-		Name:        PatchApply,
-		Args:        applyArgs,
-		ProjectDirs: []string{root},
-	})
-	if !applied.Ok {
-		t.Fatalf("real %s rename apply failed: %s", filepath.Ext(path), applied.Content)
-	}
 	afterApply, err := os.ReadFile(target)
 	if err != nil {
 		t.Fatal(err)

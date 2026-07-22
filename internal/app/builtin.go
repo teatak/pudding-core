@@ -3,8 +3,13 @@ package app
 import "strings"
 
 const (
-	BuiltinBrowserID  = "browser"
-	BuiltinTerminalID = "terminal"
+	BuiltinBrowserID        = "browser"
+	BuiltinSkillAuthoringID = "skill-authoring"
+	BuiltinAppAuthoringID   = "app-authoring"
+	BuiltinProjectFilesID   = "project-files"
+	BuiltinSourceControlID  = "source-control"
+	BuiltinCodeIntelID      = "code-intelligence"
+	BuiltinCaptureID        = "capture"
 )
 
 const (
@@ -19,13 +24,34 @@ const (
 	toolBrowserClick      = "builtin_browser_click"
 	toolBrowserType       = "builtin_browser_type"
 	toolBrowserScroll     = "builtin_browser_scroll"
-	toolCommandStart      = "builtin_command_start"
-	toolCommandPoll       = "builtin_command_poll"
-	toolCommandStop       = "builtin_command_stop"
 	toolRESTRequest       = "builtin_rest_request"
 	toolGraphQLRequest    = "builtin_graphql_request"
 	toolGraphQLIntrospect = "builtin_graphql_introspect"
 	toolGraphQLSearch     = "builtin_graphql_search"
+	toolSkillValidate     = "builtin_skill_validate"
+	toolAppSave           = "builtin_app_save"
+	toolFileList          = "builtin_file_list"
+	toolFileStat          = "builtin_file_stat"
+	toolFileSearch        = "builtin_file_search"
+	toolFileSlice         = "builtin_file_slice"
+	toolFileWrite         = "builtin_file_write"
+	toolFilePatch         = "builtin_file_patch"
+	toolFileDelete        = "builtin_file_delete"
+	toolFileMove          = "builtin_file_move"
+	toolFileCopy          = "builtin_file_copy"
+	toolGitStatus         = "builtin_git_status"
+	toolGitDiff           = "builtin_git_diff"
+	toolGitLog            = "builtin_git_log"
+	toolGitStage          = "builtin_git_stage"
+	toolGitUnstage        = "builtin_git_unstage"
+	toolGitCommit         = "builtin_git_commit"
+	toolCodeSymbols       = "builtin_code_symbols"
+	toolCodeDefinition    = "builtin_code_definition"
+	toolCodeReferences    = "builtin_code_references"
+	toolCodeDiagnostics   = "builtin_code_diagnostics"
+	toolCodeRename        = "builtin_code_rename"
+	toolCameraCapture     = "builtin_camera_capture"
+	toolDesktopScreenshot = "builtin_desktop_screenshot"
 )
 
 type builtinDefinition struct {
@@ -86,40 +112,136 @@ Use Pudding's built-in browser for webpages that require navigation or interacti
 	{
 		definition: &Definition{
 			Kind:           KindApp,
-			ID:             BuiltinTerminalID,
-			Name:           "Terminal",
-			Description:    "Run and manage interactive terminals and background processes.",
+			ID:             BuiltinSkillAuthoringID,
+			Name:           "Skill Authoring",
+			Description:    "Create, update, and validate reusable global Skills.",
 			Source:         SourceBuiltin,
 			Enabled:        true,
 			CanUninstall:   false,
 			RequiredMode:   "code",
-			DefaultSkillID: BuiltinTerminalID,
-			Tools: []ToolRef{
-				{Name: toolCommandStart},
-				{Name: toolCommandPoll},
-				{Name: toolCommandStop},
-			},
+			DefaultSkillID: "skill-creator",
+			Tools:          []ToolRef{{Name: toolSkillValidate}},
 			Skills: []SkillRef{{
-				ID:          BuiltinTerminalID,
-				Name:        "Terminal",
-				Description: "Manage long-running commands, output, and process lifecycle.",
-				Path:        "skills/terminal/SKILL.md",
+				ID:          "skill-creator",
+				Name:        "Skill Creator",
+				Description: "Create or update reusable global Skills.",
+				Path:        "skills/skill-creator/SKILL.md",
 			}},
 		},
 		skills: map[string]SkillDetail{
-			BuiltinTerminalID: {
-				ID:          BuiltinTerminalID,
-				Name:        "Terminal",
-				Description: "Manage long-running commands, output, and process lifecycle.",
-				Path:        "skills/terminal/SKILL.md",
-				Content: `# Terminal
-
-Use Terminal for interactive or long-running commands and background services.
-
-- Use the ordinary command tool for bounded builds, tests, and one-shot commands.
-- Start a background process only when the command must outlive one tool call.
-- Poll output with offsets and stop processes explicitly when the task no longer needs them.
-`,
+			"skill-creator": {
+				ID:          "skill-creator",
+				Name:        "Skill Creator",
+				Description: "Create or update reusable global Skills.",
+				Path:        "skills/skill-creator/SKILL.md",
+				Content:     builtinSkillAuthoringInstructions,
+			},
+		},
+	},
+	{
+		definition: &Definition{
+			Kind:           KindApp,
+			ID:             BuiltinAppAuthoringID,
+			Name:           "App Authoring",
+			Description:    "Create or update validated local Pudding App packages.",
+			Source:         SourceBuiltin,
+			Enabled:        true,
+			CanUninstall:   false,
+			RequiredMode:   "code",
+			DefaultSkillID: "app-creator",
+			Tools:          []ToolRef{{Name: toolAppSave}},
+			Skills: []SkillRef{{
+				ID:          "app-creator",
+				Name:        "App Creator",
+				Description: "Create or update a local Pudding App package.",
+				Path:        "skills/app-creator/SKILL.md",
+			}},
+		},
+		skills: map[string]SkillDetail{
+			"app-creator": {
+				ID:          "app-creator",
+				Name:        "App Creator",
+				Description: "Create or update a local Pudding App package.",
+				Path:        "skills/app-creator/SKILL.md",
+				Content:     builtinAppAuthoringInstructions,
+			},
+		},
+	},
+	{
+		definition: &Definition{
+			Kind:         KindApp,
+			ID:           BuiltinProjectFilesID,
+			Name:         "Project Files",
+			Description:  "Inspect and manage project files with structured file operations.",
+			Source:       SourceBuiltin,
+			Enabled:      true,
+			CanUninstall: false,
+			RequiredMode: "code",
+			Tools: []ToolRef{
+				{Name: toolFileList},
+				{Name: toolFileStat},
+				{Name: toolFileSearch},
+				{Name: toolFileSlice},
+				{Name: toolFileWrite},
+				{Name: toolFilePatch},
+				{Name: toolFileDelete},
+				{Name: toolFileMove},
+				{Name: toolFileCopy},
+			},
+		},
+	},
+	{
+		definition: &Definition{
+			Kind:         KindApp,
+			ID:           BuiltinSourceControlID,
+			Name:         "Source Control",
+			Description:  "Inspect Git state and perform guarded staging and commit operations.",
+			Source:       SourceBuiltin,
+			Enabled:      true,
+			CanUninstall: false,
+			RequiredMode: "code",
+			Tools: []ToolRef{
+				{Name: toolGitStatus},
+				{Name: toolGitDiff},
+				{Name: toolGitLog},
+				{Name: toolGitStage},
+				{Name: toolGitUnstage},
+				{Name: toolGitCommit},
+			},
+		},
+	},
+	{
+		definition: &Definition{
+			Kind:         KindApp,
+			ID:           BuiltinCodeIntelID,
+			Name:         "Code Intelligence",
+			Description:  "Use language servers for symbols, references, diagnostics, and rename.",
+			Source:       SourceBuiltin,
+			Enabled:      true,
+			CanUninstall: false,
+			RequiredMode: "code",
+			Tools: []ToolRef{
+				{Name: toolCodeSymbols},
+				{Name: toolCodeDefinition},
+				{Name: toolCodeReferences},
+				{Name: toolCodeDiagnostics},
+				{Name: toolCodeRename},
+			},
+		},
+	},
+	{
+		definition: &Definition{
+			Kind:         KindApp,
+			ID:           BuiltinCaptureID,
+			Name:         "Image Capture",
+			Description:  "Capture images from the local screen or camera when explicitly requested.",
+			Source:       SourceBuiltin,
+			Enabled:      true,
+			CanUninstall: false,
+			RequiredMode: "chat",
+			Tools: []ToolRef{
+				{Name: toolDesktopScreenshot},
+				{Name: toolCameraCapture},
 			},
 		},
 	},

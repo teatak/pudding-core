@@ -37,11 +37,11 @@ type projectInstruction struct {
 }
 
 type projectSuggestedCommand struct {
-	Kind   string   `json:"kind"`
-	Name   string   `json:"name"`
-	Argv   []string `json:"argv"`
-	CWD    string   `json:"cwd"`
-	Source string   `json:"source"`
+	Kind    string `json:"kind"`
+	Name    string `json:"name"`
+	Command string `json:"command"`
+	CWD     string `json:"cwd"`
+	Source  string `json:"source"`
 }
 
 type projectInspectSnapshot struct {
@@ -260,7 +260,7 @@ func suggestedProjectCommands(projectRoot string, manifests []projectManifest) [
 	commands := make([]projectSuggestedCommand, 0)
 	seen := make(map[string]bool)
 	add := func(command projectSuggestedCommand) {
-		key := command.CWD + "\x00" + strings.Join(command.Argv, "\x00")
+		key := command.CWD + "\x00" + command.Command
 		if !seen[key] {
 			seen[key] = true
 			commands = append(commands, command)
@@ -274,20 +274,20 @@ func suggestedProjectCommands(projectRoot string, manifests []projectManifest) [
 		sourcePath := filepath.Join(projectRoot, filepath.FromSlash(manifest.Path))
 		switch manifest.Kind {
 		case "go_module", "go_workspace":
-			add(projectSuggestedCommand{Kind: "test", Name: "Go test", Argv: []string{"go", "test", "./..."}, CWD: cwd, Source: manifest.Path})
-			add(projectSuggestedCommand{Kind: "lint", Name: "Go vet", Argv: []string{"go", "vet", "./..."}, CWD: cwd, Source: manifest.Path})
+			add(projectSuggestedCommand{Kind: "test", Name: "Go test", Command: "go test ./...", CWD: cwd, Source: manifest.Path})
+			add(projectSuggestedCommand{Kind: "lint", Name: "Go vet", Command: "go vet ./...", CWD: cwd, Source: manifest.Path})
 		case "cargo_package":
-			add(projectSuggestedCommand{Kind: "test", Name: "Cargo test", Argv: []string{"cargo", "test"}, CWD: cwd, Source: manifest.Path})
-			add(projectSuggestedCommand{Kind: "check", Name: "Cargo check", Argv: []string{"cargo", "check"}, CWD: cwd, Source: manifest.Path})
+			add(projectSuggestedCommand{Kind: "test", Name: "Cargo test", Command: "cargo test", CWD: cwd, Source: manifest.Path})
+			add(projectSuggestedCommand{Kind: "check", Name: "Cargo check", Command: "cargo check", CWD: cwd, Source: manifest.Path})
 		case "node_package":
 			for _, command := range packageJSONCommands(sourcePath, cwd, manifest.Path) {
 				add(command)
 			}
 		case "maven_project":
-			add(projectSuggestedCommand{Kind: "test", Name: "Maven test", Argv: []string{"mvn", "test"}, CWD: cwd, Source: manifest.Path})
+			add(projectSuggestedCommand{Kind: "test", Name: "Maven test", Command: "mvn test", CWD: cwd, Source: manifest.Path})
 		case "gradle_project":
 			if _, err := os.Stat(filepath.Join(filepath.Dir(sourcePath), "gradlew")); err == nil {
-				add(projectSuggestedCommand{Kind: "test", Name: "Gradle test", Argv: []string{"./gradlew", "test"}, CWD: cwd, Source: manifest.Path})
+				add(projectSuggestedCommand{Kind: "test", Name: "Gradle test", Command: "./gradlew test", CWD: cwd, Source: manifest.Path})
 			}
 		}
 	}
@@ -326,11 +326,11 @@ func packageJSONCommands(path, cwd, source string) []projectSuggestedCommand {
 			continue
 		}
 		commands = append(commands, projectSuggestedCommand{
-			Kind:   packageScriptKind(script),
-			Name:   script,
-			Argv:   []string{manager, "run", script},
-			CWD:    cwd,
-			Source: source,
+			Kind:    packageScriptKind(script),
+			Name:    script,
+			Command: joinShellCommand([]string{manager, "run", script}),
+			CWD:     cwd,
+			Source:  source,
 		})
 	}
 	return commands

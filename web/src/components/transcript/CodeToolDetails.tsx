@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 import { requestProjectFileReveal } from "@/state/projectRevealStore";
 
 const commandToolName = "builtin_command_run";
-const backgroundProcessToolNames = new Set(["builtin_command_start", "builtin_command_poll", "builtin_command_stop"]);
+const backgroundProcessToolNames = new Set(["builtin_command_session"]);
 const projectInspectToolName = "builtin_project_inspect";
 const projectInstructionsToolName = "builtin_project_instructions";
 const languageCodeToolNames = new Set([
@@ -37,7 +37,7 @@ const gitToolNames = new Set([
   "builtin_git_unstage",
   "builtin_git_commit",
 ]);
-const patchToolNames = new Set(["builtin_patch_propose", "builtin_patch_apply"]);
+const patchToolNames = new Set(["builtin_patch_apply"]);
 const fileToolNames = new Set([
   "builtin_file_copy",
   "builtin_file_delete",
@@ -65,6 +65,9 @@ export function codeToolSummary(name: string, args: unknown, result: unknown, t:
   const input = toRecord(args);
   const output = toRecord(result);
   if (name === commandToolName) {
+    if (readString(output, "processID")) {
+      return backgroundProcessSummary(input, output, t);
+    }
     if (readBoolean(output, "sandboxDenied")) {
       return t("transcript.codeSandboxDenied");
     }
@@ -85,21 +88,10 @@ export function codeToolSummary(name: string, args: unknown, result: unknown, t:
       const exit = replace(t("transcript.codeExitCode"), { code: String(exitCode) });
       return duration != null ? `${exit} · ${formatDuration(duration)}` : exit;
     }
-    const argv = readStringArray(output, "argv") || readStringArray(input, "argv");
-    return argv ? compactText(formatArgv(argv), 100) : "";
+    return compactText(readString(output, "command") || readString(input, "command"), 100);
   }
   if (backgroundProcessToolNames.has(name)) {
-    if (readBoolean(output, "sandboxDenied")) {
-      return t("transcript.codeSandboxDenied");
-    }
-    const status = readString(output, "status");
-    const processID = readString(output, "processID");
-    if (status) {
-      return [processStatusLabel(status, t), processID ? compactText(processID, 24) : ""].filter(Boolean).join(" · ");
-    }
-    const script = readString(input, "script");
-    const argv = readStringArray(input, "argv");
-    return compactText(script || (argv ? formatArgv(argv) : ""), 100);
+    return backgroundProcessSummary(input, output, t);
   }
   if (name === projectInspectToolName) {
     const languages = readRecordArray(output, "languages").map((item) => readString(item, "name")).filter(Boolean);
@@ -186,7 +178,9 @@ export function CodeToolDetails({
   const input = toRecord(args);
   const output = toRecord(result);
   let body: ReactNode;
-  if (name === commandToolName) {
+  if (name === commandToolName && readString(output, "processID")) {
+    body = <BackgroundProcessDetails input={input} output={output} t={t} />;
+  } else if (name === commandToolName) {
     body = <CommandDetails callID={callID} input={input} liveStderr={liveStderr} liveStdout={liveStdout} output={output} sessionID={sessionID} t={t} />;
   } else if (backgroundProcessToolNames.has(name)) {
     body = <BackgroundProcessDetails input={input} output={output} t={t} />;
@@ -212,6 +206,18 @@ export function CodeToolDetails({
   return <div className="min-w-0 max-w-full overflow-hidden">{body}</div>;
 }
 
+function backgroundProcessSummary(input: UnknownRecord | null, output: UnknownRecord | null, t: Translator) {
+  if (readBoolean(output, "sandboxDenied")) {
+    return t("transcript.codeSandboxDenied");
+  }
+  const status = readString(output, "status");
+  const processID = readString(output, "processID") || readString(input, "process_id");
+  if (status) {
+    return [processStatusLabel(status, t), processID ? compactText(processID, 24) : ""].filter(Boolean).join(" · ");
+  }
+  return compactText(readString(input, "command"), 100);
+}
+
 function BackgroundProcessDetails({ input, output, t }: { input: UnknownRecord | null; output: UnknownRecord | null; t: Translator }) {
   if (!output) {
     return <EmptyLine>{t("transcript.codeWaitingResult")}</EmptyLine>;
@@ -219,9 +225,7 @@ function BackgroundProcessDetails({ input, output, t }: { input: UnknownRecord |
   if (output.ok === false) {
     return <ErrorDetail output={output} t={t} />;
   }
-  const argv = readStringArray(output, "argv") || readStringArray(input, "argv") || [];
-  const script = readString(output, "script") || readString(input, "script");
-  const command = script || formatArgv(argv);
+  const command = readString(output, "command") || readString(input, "command");
   const chunks = readRecordArray(output, "output");
   const outputText = chunks.map((chunk) => readString(chunk, "content")).join("");
   const status = readString(output, "status") || "running";
@@ -514,7 +518,7 @@ function ProjectInspectPath({ label, path }: { label: string; path: string }) {
   return (
     <div className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-2 text-[11px]">
       <DetailLabel>{label}</DetailLabel>
-      <code className="truncate font-mono text-foreground/85" title={path}>{path}</code>
+      <code className="truncate font-mono text-foreground/85" >{path}</code>
     </div>
   );
 }
@@ -538,10 +542,10 @@ function ProjectCommandList({ commands, t }: { commands: UnknownRecord[]; t: Tra
       <DetailLabel>{t("transcript.codeSuggestedCommands")}</DetailLabel>
       <div className="mt-1 max-h-52 overflow-auto">
         {commands.slice(0, 50).map((command, index) => {
-          const argv = readStringArray(command, "argv") || [];
+          const suggestedCommand = readString(command, "command");
           return (
-            <div key={`${readString(command, "cwd")}:${formatArgv(argv)}:${index}`} className="grid min-h-6 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-[11px]">
-              <code className="min-w-0 truncate font-mono text-foreground/85">$ {formatArgv(argv)}</code>
+            <div key={`${readString(command, "cwd")}:${suggestedCommand}:${index}`} className="grid min-h-6 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-[11px]">
+              <code className="min-w-0 truncate font-mono text-foreground/85">$ {suggestedCommand}</code>
               <span className="shrink-0 truncate text-muted-foreground">{readString(command, "cwd")}</span>
             </div>
           );
@@ -595,8 +599,7 @@ function PatchFileList({ files, t }: { files: UnknownRecord[]; t: Translator }) 
 }
 
 function CommandDetails({ callID, input, liveStderr = "", liveStdout = "", output, sessionID, t }: { callID?: string; input: UnknownRecord | null; liveStderr?: string; liveStdout?: string; output: UnknownRecord | null; sessionID?: string; t: Translator }) {
-  const argv = readStringArray(output, "argv") || readStringArray(input, "argv") || [];
-  const script = readString(output, "script") || readString(input, "script");
+  const command = readString(output, "command") || readString(input, "command");
   const cwd = readString(output, "cwd") || readString(input, "cwd");
   const stdout = output ? readString(output, "stdout") : liveStdout;
   const stderr = output ? readString(output, "stderr") : liveStderr;
@@ -629,7 +632,6 @@ function CommandDetails({ callID, input, liveStderr = "", liveStdout = "", outpu
             : toolFailed
               ? t("transcript.toolFailed")
               : t("transcript.codeRunning");
-  const command = script || formatArgv(argv);
   const outputRef = useRef<HTMLPreElement | null>(null);
   useEffect(() => {
     if (outputRef.current && !output) {
@@ -761,6 +763,7 @@ export function ToolHoverCopyButton({ className, text }: { className?: string; t
       aria-label={copied ? t("common.copied") : t("common.copy")}
       className={cn("size-6 bg-transparent opacity-0 transition-opacity hover:bg-muted hover:opacity-100 dark:hover:bg-muted/50", className)}
       size="icon-xs"
+      tabIndex={-1}
       type="button"
       variant="ghost"
       onClick={(event) => {
@@ -1363,10 +1366,6 @@ function readRecordArray(record: UnknownRecord | null, key: string) {
 
 function preferredPath(record: UnknownRecord | null) {
   return readString(record, "relativePath") || readString(record, "path");
-}
-
-function formatArgv(argv: string[]) {
-  return argv.map((arg) => (/^[A-Za-z0-9_./:=@%+,\-]+$/.test(arg) ? arg : JSON.stringify(arg))).join(" ");
 }
 
 function formatDuration(milliseconds: number) {

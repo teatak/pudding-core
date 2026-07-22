@@ -25,15 +25,17 @@ type backgroundProcessPayload struct {
 	Sandboxed     bool                           `json:"sandboxed"`
 	SandboxKind   string                         `json:"sandboxKind"`
 	SandboxDenied bool                           `json:"sandboxDenied"`
+	TTY           bool                           `json:"tty"`
+	BytesWritten  int                            `json:"bytesWritten"`
 }
 
 func TestBackgroundProcessStartPollStop(t *testing.T) {
 	runner := NewBuiltinRunner()
 	t.Cleanup(func() { _ = runner.Close() })
 	root := t.TempDir()
-	start := backgroundToolCall(runner, "sess_background", root, CommandStart, map[string]any{
-		"scope": "project",
-		"argv":  commandHelperArgs("background-stream"),
+	start := backgroundToolCall(runner, "sess_background", root, CommandRun, map[string]any{
+		"scope":   "project",
+		"command": commandHelperCommand("background-stream"),
 	})
 	started := decodeBackgroundProcessPayload(t, start)
 	if !start.Ok || !started.OK || started.ProcessID == "" || !started.Running || started.Status != "running" {
@@ -43,7 +45,8 @@ func TestBackgroundProcessStartPollStop(t *testing.T) {
 	var polled backgroundProcessPayload
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		result := backgroundToolCall(runner, "sess_background", root, CommandPoll, map[string]any{
+		result := backgroundToolCall(runner, "sess_background", root, CommandSession, map[string]any{
+			"action":     "poll",
 			"process_id": started.ProcessID,
 			"offset":     polled.NextOffset,
 		})
@@ -59,19 +62,47 @@ func TestBackgroundProcessStartPollStop(t *testing.T) {
 		t.Fatalf("missing background output: chunks=%+v", polled.Output)
 	}
 
-	isolation := backgroundToolCall(runner, "sess_other", root, CommandPoll, map[string]any{"process_id": started.ProcessID})
+	isolation := backgroundToolCall(runner, "sess_other", root, CommandSession, map[string]any{"action": "poll", "process_id": started.ProcessID})
 	if isolation.Ok || !strings.Contains(isolation.Content, `"reason":"process_not_found"`) {
 		t.Fatalf("process must be isolated by session: %+v", isolation)
 	}
 
-	stoppedResult := backgroundToolCall(runner, "sess_background", root, CommandStop, map[string]any{"process_id": started.ProcessID})
+	stoppedResult := backgroundToolCall(runner, "sess_background", root, CommandSession, map[string]any{"action": "stop", "process_id": started.ProcessID})
 	stopped := decodeBackgroundProcessPayload(t, stoppedResult)
 	if !stoppedResult.Ok || stopped.Running || stopped.Status != "stopped" || stopped.ExitCode == nil {
 		t.Fatalf("background process did not stop: %+v", stopped)
 	}
-	secondStop := backgroundToolCall(runner, "sess_background", root, CommandStop, map[string]any{"process_id": started.ProcessID})
+	secondStop := backgroundToolCall(runner, "sess_background", root, CommandSession, map[string]any{"action": "stop", "process_id": started.ProcessID})
 	if !secondStop.Ok {
 		t.Fatalf("stopping an exited process must be idempotent: %+v", secondStop)
+	}
+}
+
+func TestBackgroundProcessPipeAcceptsInput(t *testing.T) {
+	runner := NewBuiltinRunner()
+	t.Cleanup(func() { _ = runner.Close() })
+	root := t.TempDir()
+	start := backgroundToolCall(runner, "sess_input", root, CommandRun, map[string]any{
+		"scope":   "project",
+		"command": commandHelperCommand("stdin-line"),
+	})
+	started := decodeBackgroundProcessPayload(t, start)
+	write := backgroundToolCall(runner, "sess_input", root, CommandSession, map[string]any{
+		"action":     "write",
+		"process_id": started.ProcessID,
+		"data":       "hello-pipe\n",
+	})
+	written := decodeBackgroundProcessPayload(t, write)
+	if !write.Ok || written.BytesWritten != len("hello-pipe\n") {
+		t.Fatalf("write pipe input: result=%+v payload=%+v", write, written)
+	}
+	poll := decodeBackgroundProcessPayload(t, backgroundToolCall(runner, "sess_input", root, CommandSession, map[string]any{
+		"action":     "poll",
+		"process_id": started.ProcessID,
+		"wait_ms":    2000,
+	}))
+	if poll.Running || !strings.Contains(backgroundOutputText(poll.Output), "received:hello-pipe") {
+		t.Fatalf("pipe input was not observed: %+v", poll)
 	}
 }
 
@@ -79,26 +110,27 @@ func TestBackgroundProcessKeepsLaunchAuthorizationSnapshot(t *testing.T) {
 	runner := NewBuiltinRunner()
 	t.Cleanup(func() { _ = runner.Close() })
 	root := t.TempDir()
-	start := backgroundToolCall(runner, "sess_snapshot", root, CommandStart, map[string]any{
-		"scope": "project",
-		"argv":  commandHelperArgs("sleep", "5000"),
+	start := backgroundToolCall(runner, "sess_snapshot", root, CommandRun, map[string]any{
+		"scope":   "project",
+		"command": commandHelperCommand("sleep", "5000"),
 	})
 	started := decodeBackgroundProcessPayload(t, start)
-	raw, _ := json.Marshal(map[string]any{"process_id": started.ProcessID})
+	pollRaw, _ := json.Marshal(map[string]any{"action": "poll", "process_id": started.ProcessID})
 	poll := runner.Call(context.Background(), Call{
 		SessionID: "sess_snapshot",
 		CallID:    "call_poll_without_project",
-		Name:      CommandPoll,
-		Args:      raw,
+		Name:      CommandSession,
+		Args:      pollRaw,
 	})
 	if !poll.Ok {
 		t.Fatalf("an approved process must remain accessible after project context changes: %+v", poll)
 	}
+	stopRaw, _ := json.Marshal(map[string]any{"action": "stop", "process_id": started.ProcessID})
 	stop := runner.Call(context.Background(), Call{
 		SessionID: "sess_snapshot",
 		CallID:    "call_stop_without_project",
-		Name:      CommandStop,
-		Args:      raw,
+		Name:      CommandSession,
+		Args:      stopRaw,
 	})
 	if !stop.Ok {
 		t.Fatalf("stop approved process without current project context: %+v", stop)
@@ -109,13 +141,14 @@ func TestBackgroundProcessPollWaitsForExit(t *testing.T) {
 	runner := NewBuiltinRunner()
 	t.Cleanup(func() { _ = runner.Close() })
 	root := t.TempDir()
-	start := backgroundToolCall(runner, "sess_wait_exit", root, CommandStart, map[string]any{
-		"scope": "project",
-		"argv":  commandHelperArgs("sleep", "80"),
+	start := backgroundToolCall(runner, "sess_wait_exit", root, CommandRun, map[string]any{
+		"scope":   "project",
+		"command": commandHelperCommand("sleep", "80"),
 	})
 	started := decodeBackgroundProcessPayload(t, start)
 	begin := time.Now()
-	poll := backgroundToolCall(runner, "sess_wait_exit", root, CommandPoll, map[string]any{
+	poll := backgroundToolCall(runner, "sess_wait_exit", root, CommandSession, map[string]any{
+		"action":     "poll",
 		"process_id": started.ProcessID,
 		"wait_ms":    5000,
 	})
@@ -133,13 +166,14 @@ func TestBackgroundProcessPollWaitTimeoutAndCancellation(t *testing.T) {
 	runner := NewBuiltinRunner()
 	t.Cleanup(func() { _ = runner.Close() })
 	root := t.TempDir()
-	start := backgroundToolCall(runner, "sess_wait_timeout", root, CommandStart, map[string]any{
-		"scope": "project",
-		"argv":  commandHelperArgs("sleep", "1000"),
+	start := backgroundToolCall(runner, "sess_wait_timeout", root, CommandRun, map[string]any{
+		"scope":   "project",
+		"command": commandHelperCommand("sleep", "1000"),
 	})
 	started := decodeBackgroundProcessPayload(t, start)
 	begin := time.Now()
-	timed := backgroundToolCall(runner, "sess_wait_timeout", root, CommandPoll, map[string]any{
+	timed := backgroundToolCall(runner, "sess_wait_timeout", root, CommandSession, map[string]any{
+		"action":     "poll",
 		"process_id": started.ProcessID,
 		"wait_ms":    50,
 	})
@@ -150,14 +184,14 @@ func TestBackgroundProcessPollWaitTimeoutAndCancellation(t *testing.T) {
 		t.Fatalf("timed poll should return a running process: result=%+v payload=%+v", timed, payload)
 	}
 
-	raw, _ := json.Marshal(map[string]any{"process_id": started.ProcessID, "wait_ms": 1000})
+	raw, _ := json.Marshal(map[string]any{"action": "poll", "process_id": started.ProcessID, "wait_ms": 1000})
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(40*time.Millisecond, cancel)
 	begin = time.Now()
 	cancelled := runner.Call(ctx, Call{
 		SessionID: "sess_wait_timeout",
 		CallID:    "call_poll_cancelled",
-		Name:      CommandPoll,
+		Name:      CommandSession,
 		Args:      raw,
 	})
 	if elapsed := time.Since(begin); elapsed > 500*time.Millisecond {
@@ -169,7 +203,7 @@ func TestBackgroundProcessPollWaitTimeoutAndCancellation(t *testing.T) {
 }
 
 func TestBackgroundProcessPollRejectsExcessiveWait(t *testing.T) {
-	_, err := decodeCommandPollArgs(json.RawMessage(`{"process_id":"proc_test","wait_ms":600001}`))
+	_, err := decodeCommandSessionArgs(json.RawMessage(`{"action":"poll","process_id":"proc_test","wait_ms":600001}`))
 	if err == nil || !strings.Contains(err.Error(), "wait_ms must be between 0 and 600000") {
 		t.Fatalf("expected wait_ms validation error, got %v", err)
 	}
@@ -182,19 +216,19 @@ func TestBackgroundProcessPublishesLifecycleEventsWithSource(t *testing.T) {
 	}))
 	t.Cleanup(func() { _ = runner.Close() })
 	root := t.TempDir()
-	start := backgroundToolCall(runner, "sess_events", root, CommandStart, map[string]any{
-		"scope": "project",
-		"argv":  commandHelperArgs("sleep", "5000"),
+	start := backgroundToolCall(runner, "sess_events", root, CommandRun, map[string]any{
+		"scope":   "project",
+		"command": commandHelperCommand("sleep", "5000"),
 	})
 	started := decodeBackgroundProcessPayload(t, start)
 	startEvent := awaitBackgroundProcessEvent(t, events)
 	if startEvent.Phase != BackgroundProcessStarted || startEvent.SessionID != "sess_events" {
 		t.Fatalf("unexpected start event: %+v", startEvent)
 	}
-	if startEvent.Process.ProcessID != started.ProcessID || startEvent.Process.TurnID != "turn_background" || startEvent.Process.CallID != "call_builtin_command_start" {
+	if startEvent.Process.ProcessID != started.ProcessID || startEvent.Process.TurnID != "turn_background" || startEvent.Process.CallID != "call_builtin_command_run" {
 		t.Fatalf("background process source metadata is incomplete: %+v", startEvent.Process)
 	}
-	if stop := backgroundToolCall(runner, "sess_events", root, CommandStop, map[string]any{"process_id": started.ProcessID}); !stop.Ok {
+	if stop := backgroundToolCall(runner, "sess_events", root, CommandSession, map[string]any{"action": "stop", "process_id": started.ProcessID}); !stop.Ok {
 		t.Fatalf("stop process: %+v", stop)
 	}
 	stopEvent := awaitBackgroundProcessEvent(t, events)
@@ -208,17 +242,17 @@ func TestBackgroundProcessEnforcesPerSessionLimit(t *testing.T) {
 	t.Cleanup(func() { _ = runner.Close() })
 	root := t.TempDir()
 	for i := 0; i < backgroundProcessPerSessionLimit; i++ {
-		result := backgroundToolCall(runner, "sess_limit", root, CommandStart, map[string]any{
-			"scope": "project",
-			"argv":  commandHelperArgs("sleep", "5000"),
+		result := backgroundToolCall(runner, "sess_limit", root, CommandRun, map[string]any{
+			"scope":   "project",
+			"command": commandHelperCommand("sleep", "5000"),
 		})
 		if !result.Ok {
 			t.Fatalf("start %d failed: %+v", i, result)
 		}
 	}
-	overflow := backgroundToolCall(runner, "sess_limit", root, CommandStart, map[string]any{
-		"scope": "project",
-		"argv":  commandHelperArgs("sleep", "5000"),
+	overflow := backgroundToolCall(runner, "sess_limit", root, CommandRun, map[string]any{
+		"scope":   "project",
+		"command": commandHelperCommand("sleep", "5000"),
 	})
 	if overflow.Ok || !strings.Contains(overflow.Content, `"reason":"session_process_limit"`) {
 		t.Fatalf("session process limit was not enforced: %+v", overflow)
@@ -233,16 +267,17 @@ func TestBackgroundProcessRunsAndStopsLocalServer(t *testing.T) {
 	runner := NewBuiltinRunner()
 	t.Cleanup(func() { _ = runner.Close() })
 	root := t.TempDir()
-	start := backgroundToolCall(runner, "sess_server", root, CommandStart, map[string]any{
-		"scope": "project",
-		"argv":  commandHelperArgs("http-server"),
+	start := backgroundToolCall(runner, "sess_server", root, CommandRun, map[string]any{
+		"scope":   "project",
+		"command": commandHelperCommand("http-server"),
 	})
 	started := decodeBackgroundProcessPayload(t, start)
 	var nextOffset int64
 	address := ""
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) && address == "" {
-		poll := decodeBackgroundProcessPayload(t, backgroundToolCall(runner, "sess_server", root, CommandPoll, map[string]any{
+		poll := decodeBackgroundProcessPayload(t, backgroundToolCall(runner, "sess_server", root, CommandSession, map[string]any{
+			"action":     "poll",
 			"process_id": started.ProcessID,
 			"offset":     nextOffset,
 		}))
@@ -269,7 +304,7 @@ func TestBackgroundProcessRunsAndStopsLocalServer(t *testing.T) {
 	if response.StatusCode != http.StatusOK || string(body) != "ok" {
 		t.Fatalf("unexpected background server response: status=%d body=%q", response.StatusCode, body)
 	}
-	stop := backgroundToolCall(runner, "sess_server", root, CommandStop, map[string]any{"process_id": started.ProcessID})
+	stop := backgroundToolCall(runner, "sess_server", root, CommandSession, map[string]any{"action": "stop", "process_id": started.ProcessID})
 	if !stop.Ok {
 		t.Fatalf("stop server: %+v", stop)
 	}
@@ -284,9 +319,9 @@ func TestBackgroundProcessRunningSurvivesRetentionTTL(t *testing.T) {
 	runner.processes = newBackgroundProcessManager(100 * time.Millisecond)
 	t.Cleanup(func() { _ = runner.Close() })
 	root := t.TempDir()
-	start := backgroundToolCall(runner, "sess_ttl", root, CommandStart, map[string]any{
-		"scope": "project",
-		"argv":  commandHelperArgs("sleep", "5000"),
+	start := backgroundToolCall(runner, "sess_ttl", root, CommandRun, map[string]any{
+		"scope":   "project",
+		"command": commandHelperCommand("sleep", "5000"),
 	})
 	payload := decodeBackgroundProcessPayload(t, start)
 	time.Sleep(250 * time.Millisecond)
@@ -300,7 +335,7 @@ func TestBackgroundProcessRunningSurvivesRetentionTTL(t *testing.T) {
 	if !running {
 		t.Fatal("running process was stopped by finished-result retention")
 	}
-	if stop := backgroundToolCall(runner, "sess_ttl", root, CommandStop, map[string]any{"process_id": payload.ProcessID}); !stop.Ok {
+	if stop := backgroundToolCall(runner, "sess_ttl", root, CommandSession, map[string]any{"action": "stop", "process_id": payload.ProcessID}); !stop.Ok {
 		t.Fatalf("stop process: %+v", stop)
 	}
 }
@@ -313,9 +348,9 @@ func TestBackgroundProcessFinishedResultExpiresAfterRetention(t *testing.T) {
 	runner.processes.events = func(processEvent BackgroundProcessEvent) { events <- processEvent }
 	t.Cleanup(func() { _ = runner.Close() })
 	root := t.TempDir()
-	start := backgroundToolCall(runner, "sess_retention", root, CommandStart, map[string]any{
-		"scope": "project",
-		"argv":  commandHelperArgs("report"),
+	start := backgroundToolCall(runner, "sess_retention", root, CommandRun, map[string]any{
+		"scope":   "project",
+		"command": commandHelperCommand("report"),
 	})
 	payload := decodeBackgroundProcessPayload(t, start)
 	deadline := time.Now().Add(2 * time.Second)
@@ -366,7 +401,7 @@ func TestBackgroundProcessDetectsSplitSandboxDenial(t *testing.T) {
 }
 
 func TestBackgroundProcessStartUsesForegroundRiskRules(t *testing.T) {
-	risk, ok := ClassifyToolCall(CommandStart, json.RawMessage(`{"scope":"project","argv":["go","test","./..."]}`))
+	risk, ok := ClassifyToolCall(CommandRun, json.RawMessage(`{"scope":"project","command":"go test ./...","background":true}`))
 	if !ok || risk.Class != RiskClassCommand || risk.Operation != "process_start" || !risk.LowRisk {
 		t.Fatalf("background start risk is wrong: %+v ok=%v", risk, ok)
 	}
@@ -376,13 +411,13 @@ func TestBackgroundProcessApprovalShowsCommandWithoutEnvironmentValues(t *testin
 	runner := NewBuiltinRunner()
 	t.Cleanup(func() { _ = runner.Close() })
 	details, err := runner.ApprovalDetails(context.Background(), Call{
-		Name: CommandStart,
-		Args: json.RawMessage(`{"scope":"project","script":"npm run dev","cwd":"web","env":{"PORT":"5173"}}`),
+		Name: CommandRun,
+		Args: json.RawMessage(`{"scope":"project","command":"npm run dev","cwd":"web","env":{"PORT":"5173"},"background":true}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if details["script"] != "npm run dev" || details["cwd"] != "web" {
+	if details["command"] != "npm run dev" || details["cwd"] != "web" {
 		t.Fatalf("approval command details are incomplete: %+v", details)
 	}
 	keys, ok := details["envKeys"].([]string)
@@ -395,6 +430,9 @@ func TestBackgroundProcessApprovalShowsCommandWithoutEnvironmentValues(t *testin
 }
 
 func backgroundToolCall(runner *BuiltinRunner, sessionID, root, name string, args map[string]any) Result {
+	if name == CommandRun {
+		args["background"] = true
+	}
 	raw, _ := json.Marshal(args)
 	return runner.Call(context.Background(), Call{
 		SessionID:   sessionID,

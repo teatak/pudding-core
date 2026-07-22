@@ -58,6 +58,8 @@ function appToMentionReference(app: AppDefinition, token: string): ComposerMenti
     label: app.name || app.id,
     description: app.description || app.name,
     insertText: `@app/${app.id}`,
+    appID: app.id,
+    appSource: app.source,
     appIcon: app.icon,
     iconURL: appIconURL(token, app),
   };
@@ -73,6 +75,8 @@ function appSkillMentionReferences(app: AppDefinition, token: string): ComposerM
       label: `${app.name || app.id} · ${skill.name || id}`,
       description: skill.description || `${app.name} · ${skill.path}`,
       insertText: `@skill/${app.id}/${id}`,
+      appID: app.id,
+      appSource: app.source,
       appIcon: app.icon,
       iconURL,
     };

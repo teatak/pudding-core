@@ -176,6 +176,12 @@ type ClickInput struct {
 	Method   string   `json:"method,omitempty"`
 }
 
+type clickTarget struct {
+	OK bool    `json:"ok"`
+	X  float64 `json:"x"`
+	Y  float64 `json:"y"`
+}
+
 type scrollTarget struct {
 	OK     bool    `json:"ok"`
 	X      float64 `json:"x"`
@@ -975,7 +981,21 @@ func (m *Manager) Click(ctx context.Context, sessionID, tabID string, in ClickIn
 }
 
 func (m *Manager) pointerClick(ctx context.Context, proc *browserProcess, binding *tabBinding, in ClickInput, method string) (json.RawMessage, error) {
-	return proc.evaluateJSONWithUserGesture(ctx, m.client, binding.targetID, clickTargetScript(in, method))
+	raw, err := proc.evaluateJSON(ctx, m.client, binding.targetID, clickTargetScript(in, method))
+	if err != nil {
+		return nil, err
+	}
+	var target clickTarget
+	if err := json.Unmarshal(raw, &target); err != nil {
+		return nil, err
+	}
+	if !target.OK {
+		return nil, errors.New("target element not found")
+	}
+	if err := proc.dispatchMouseClick(ctx, m.client, binding.targetID, target.X, target.Y); err != nil {
+		return nil, err
+	}
+	return raw, nil
 }
 
 func (m *Manager) Type(ctx context.Context, sessionID, tabID string, in TypeInput) (ActionResult, error) {
@@ -2084,21 +2104,10 @@ func pageNavigateError(raw json.RawMessage) error {
 }
 
 func (p *browserProcess) evaluateJSON(ctx context.Context, client *http.Client, targetID, expression string) (json.RawMessage, error) {
-	return p.evaluateJSONWithOptions(ctx, client, targetID, expression, false)
-}
-
-func (p *browserProcess) evaluateJSONWithUserGesture(ctx context.Context, client *http.Client, targetID, expression string) (json.RawMessage, error) {
-	return p.evaluateJSONWithOptions(ctx, client, targetID, expression, true)
-}
-
-func (p *browserProcess) evaluateJSONWithOptions(ctx context.Context, client *http.Client, targetID, expression string, userGesture bool) (json.RawMessage, error) {
 	params := map[string]any{
 		"expression":    expression,
 		"returnByValue": true,
 		"awaitPromise":  true,
-	}
-	if userGesture {
-		params["userGesture"] = true
 	}
 	raw, err := p.cdpCall(ctx, client, targetID, "Runtime.evaluate", params)
 	if err != nil {
@@ -2134,6 +2143,44 @@ func (p *browserProcess) evaluateJSONWithOptions(ctx context.Context, client *ht
 		return response.Result.Value, nil
 	}
 	return nil, errors.New("runtime evaluation returned no value")
+}
+
+func (p *browserProcess) dispatchMouseClick(ctx context.Context, client *http.Client, targetID string, x, y float64) error {
+	events := []map[string]any{
+		{
+			"type":        "mouseMoved",
+			"x":           x,
+			"y":           y,
+			"button":      "none",
+			"buttons":     0,
+			"clickCount":  0,
+			"pointerType": "mouse",
+		},
+		{
+			"type":        "mousePressed",
+			"x":           x,
+			"y":           y,
+			"button":      "left",
+			"buttons":     1,
+			"clickCount":  1,
+			"pointerType": "mouse",
+		},
+		{
+			"type":        "mouseReleased",
+			"x":           x,
+			"y":           y,
+			"button":      "left",
+			"buttons":     0,
+			"clickCount":  1,
+			"pointerType": "mouse",
+		},
+	}
+	for _, event := range events {
+		if _, err := p.cdpCall(ctx, client, targetID, "Input.dispatchMouseEvent", event); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *browserProcess) cdpCall(ctx context.Context, client *http.Client, targetID, method string, params any) (json.RawMessage, error) {
@@ -2569,13 +2616,10 @@ func clickTargetScript(in ClickInput, method string) string {
 	  if (!Number.isFinite(cx) || !Number.isFinite(cy)) throw new Error("target coordinates not found");
 	  const hit = document.elementFromPoint(cx, cy);
 	  if (!hit || (hit !== el && !el.contains(hit))) throw new Error("target element is not hittable");
-  if (typeof el.click === "function") {
-    el.click();
-  } else {
-    el.dispatchEvent(new MouseEvent("click", {bubbles: true, cancelable: true, composed: true, clientX: cx, clientY: cy, view: window}));
-  }
-  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), text: (el.innerText || el.value || "").trim().slice(0, 160), x: cx, y: cy, cursorX: cx, cursorY: cy, method});
-})()`, selector, x, y, methodValue)
+	  const editableTarget = el.closest?.('input,textarea,[contenteditable]:not([contenteditable="false"])') || el;
+	  globalThis[Symbol.for("pudding.browser.lastClickTarget")] = editableTarget;
+	  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), text: (el.innerText || el.value || "").trim().slice(0, 160), x: cx, y: cy, cursorX: cx, cursorY: cy, method});
+	})()`, selector, x, y, methodValue)
 }
 
 func typePrepareScript(in TypeInput) string {
@@ -2587,6 +2631,7 @@ func typePrepareScript(in TypeInput) string {
 		  const isTextInput = (node) => node instanceof HTMLTextAreaElement ||
 		    (node instanceof HTMLInputElement && textInputTypes.has(String(node.type || "text").toLowerCase()));
 		  const isEditable = (node) => isTextInput(node) || Boolean(node?.isContentEditable);
+		  const editableText = (node) => String(node?.textContent || "").replace(/\uFEFF/g, "");
 		  const fingerprint = (value) => {
 		    let hash = 2166136261;
 		    for (let index = 0; index < value.length; index += 1) {
@@ -2595,7 +2640,10 @@ func typePrepareScript(in TypeInput) string {
 		    }
 		    return (hash >>> 0).toString(16).padStart(8, "0");
 		  };
-		  let el = selector ? document.querySelector(selector) : document.activeElement;
+		  const lastClickTargetKey = Symbol.for("pudding.browser.lastClickTarget");
+		  const lastClickTarget = globalThis[lastClickTargetKey];
+		  if (!selector) globalThis[lastClickTargetKey] = null;
+		  let el = selector ? document.querySelector(selector) : (lastClickTarget?.isConnected ? lastClickTarget : document.activeElement);
 		  if (!el || el === document.body) throw new Error("target input not found");
 		  if (!isEditable(el)) throw new Error("target is not editable");
 		  if (el.disabled || el.readOnly || el.getAttribute("aria-disabled") === "true" || el.getAttribute("aria-readonly") === "true") {
@@ -2604,7 +2652,7 @@ func typePrepareScript(in TypeInput) string {
 		  el.scrollIntoView({behavior: "instant", block: "center", inline: "center"});
 		  el.focus();
 		  if (document.activeElement !== el) throw new Error("target input could not be focused");
-		  const originalValue = isTextInput(el) ? String(el.value || "") : String(el.textContent || "");
+		  const originalValue = isTextInput(el) ? String(el.value || "") : editableText(el);
 		  const expectedValue = clear ? text : originalValue + text;
 	  if (isTextInput(el)) {
 	    try {
@@ -2674,9 +2722,16 @@ func typeTargetInputScript(in TypeInput) string {
 		    dispatchInput();
 		  } else if (el.isContentEditable) {
 		    let inserted = false;
+		    let sawInput = false;
+		    const observeInput = () => { sawInput = true; };
+		    el.addEventListener("input", observeInput, true);
 		    try {
 		      inserted = document.execCommand("insertText", false, text);
-		    } catch (_) {}
+		    } catch (_) {
+		    } finally {
+		      el.removeEventListener("input", observeInput, true);
+		    }
+		    if (inserted && !sawInput) dispatchInput();
 		    if (!inserted) {
 		      const selection = window.getSelection();
 		      const range = selection?.rangeCount ? selection.getRangeAt(0) : document.createRange();
@@ -2710,6 +2765,7 @@ func typeResultScript(in TypeInput, method string, expectation typeExpectation) 
 		  const isTextInput = (node) => node instanceof HTMLTextAreaElement ||
 		    (node instanceof HTMLInputElement && textInputTypes.has(String(node.type || "text").toLowerCase()));
 		  const isEditable = (node) => isTextInput(node) || Boolean(node?.isContentEditable);
+		  const editableText = (node) => String(node?.textContent || "").replace(/\uFEFF/g, "");
 		  const fingerprint = (value) => {
 		    let hash = 2166136261;
 		    for (let index = 0; index < value.length; index += 1) {
@@ -2722,7 +2778,7 @@ func typeResultScript(in TypeInput, method string, expectation typeExpectation) 
 		  if (!el || el === document.body) throw new Error("target input not found after typing");
 		  if (!isEditable(el)) throw new Error("target is not editable after typing");
 		  const rect = el.getBoundingClientRect();
-		  const value = isTextInput(el) ? String(el.value || "") : String(el.textContent || "");
+		  const value = isTextInput(el) ? String(el.value || "") : editableText(el);
 		  const matchesExpected = value.length === expectedValueLength && fingerprint(value) === expectedValueHash;
 		  return JSON.stringify({ok: true, tag: el.tagName.toLowerCase(), textLength: %d, valueLength: value.length, matchesExpected, cursorX: rect.left + rect.width / 2, cursorY: rect.top + Math.min(rect.height / 2, 18), method: %s});
 		})()`, jsString(in.Selector), expectation.ExpectedValueLength, jsString(expectation.ExpectedValueHash), len([]rune(in.Text)), jsString(method))

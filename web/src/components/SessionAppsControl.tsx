@@ -73,13 +73,13 @@ export function SessionAppsControl({ session, token }: { session: Session; token
             aria-label={closeLabel}
             className={cn(
               "group/app relative -ml-2.5 inline-grid size-7 shrink-0 place-items-center rounded-full",
-              "transition-[margin,transform] duration-150 first:ml-0 group-hover/apps:ml-0.5 group-hover/apps:first:ml-0 group-focus-within/apps:ml-0.5 group-focus-within/apps:first:ml-0",
-              "hover:z-20 hover:scale-105 focus-visible:z-20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              "transition-[margin] duration-150 first:ml-0 group-hover/apps:ml-0.5 group-hover/apps:first:ml-0 group-focus-within/apps:ml-0.5 group-focus-within/apps:first:ml-0",
+              "hover:z-20 focus-visible:z-20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               pending && "z-20",
             )}
             disabled={pending}
             style={{ zIndex: pending ? 20 : index + 1 }}
-            title={closeLabel}
+
             type="button"
             onClick={() => unloadMutation.mutate(appID)}
           >

@@ -42,7 +42,7 @@ const indexRoute = createRoute({
     draft: z.string().optional(),
     project: z.string().optional(),
     split: z.string().optional(), // 上下分屏的第二个会话(docs/design.md 2.2)
-    view: z.enum(["apps"]).optional(),
+    view: z.enum(["apps", "projects"]).optional(),
   }),
 });
 

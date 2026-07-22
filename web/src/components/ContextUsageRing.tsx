@@ -120,7 +120,7 @@ function UsagePanel({
               aria-label={`${t("usage.autoCompactThreshold")} ${formatTokens(usage.autoCompactThresholdTokens)}`}
               className="absolute inset-y-[-2px] w-px bg-foreground/45"
               style={{ left: `${compactPercent}%` }}
-              title={`${t("usage.autoCompactThreshold")} ${formatTokens(usage.autoCompactThresholdTokens)}`}
+
             />
           ) : null}
         </div>

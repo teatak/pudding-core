@@ -1,6 +1,6 @@
 # 技术选型决策
 
-> 状态:初始方向。  
+> 状态:当前架构决策记录。具体字段和行为仍以 `AGENTS.md`、代码与测试为准。
 > 目标:为新的 `pudding-core` 定技术边界,避免从旧项目继承单会话 runtime 形状。
 
 ## 1. 产品定位
@@ -266,15 +266,14 @@ DELETE /providers/{name}
 - 不存在默认 profile 或 profile 默认模型;新建 draft 只使用前端本地的"上次选用模型"。
 - (已完成)单 provider 阶段的 `provider.openai.*` 与全局 `model.default`
   过渡键已随 registry 收口删除,registry 不再有任何隐式回落。
-- LLM 工具实现继续编译进 daemon;provider 每轮收到的 schema 由固定 Toolkit
-  Catalog 选择,不是动态加载二进制。
-- `builtin_toolkit_load` 只扩展当前 turn 的 active set,同一 turn 单调增加、最多
-  扩展 2 次,turn 结束后重置;不写 SQLite 或 session。
-- Toolkit load 不授予 capability 或审批权限。隐藏但已知的工具返回
-  `tool_not_loaded`,越级 toolkit 返回 `capability_required`,实际工具调用仍走
-  Project path 与 `ask | auto | full`。
-- ToolDef 固定按 Toolkit id 与 tool name 排序。加入 `code.app` 后默认 Code 为
-  17/40 个非 App schema,当前 schema JSON 为 14082/32585 B,比全量减少 56.8%。
+- LLM 工具实现继续编译进 daemon；provider 每轮只收到固定 Core 与当前会话已加载
+  App 的 schema，不是动态加载二进制。
+- `builtin_app_load` 将启用的 App 记入 session，后续 turn 自动复用；模式降级仅隐藏
+  工具，不清除加载状态。
+- App load 不授予 capability、Project 目录或审批权限；实际工具调用仍走 Project
+  path 与 `ask | auto | full`。
+- Core ToolDef 按 tool name 固定排序；动态 UI 工具直接属于 `chat.core`，其余可选
+  工具必须属于内置、安装或 runtime-provided App。
 
 ## 6. 存储
 
@@ -497,9 +496,10 @@ home 内容(第一阶段):
 - SSE 断线重连后 transcript 不丢事件、不重复渲染。
 - 同一 clientMessageID 重复 submit 不产生重复 message / 重复 turn。
 
-## 13. 暂缓事项
+## 13. 第一阶段暂缓事项(历史)
 
-暂缓:
+以下项目在第一阶段曾暂缓,其中多项已经在后续阶段实现。当前状态统一见
+[文档索引](README.md),本节只保留当时的范围记录:
 
 - audio runtime
 - KWS / VAD / AEC
@@ -522,4 +522,4 @@ home 内容(第一阶段):
 - 同一 session 并发 turn:**不允许**,streaming 中再 submit 返回 409;
   排队放开未排期。
 
-仍开放:见 docs/progress.md 队列与 docs/design-tools.md 待决项。
+当前开放事项见 [文档索引](README.md) 中的“仍在收尾”。

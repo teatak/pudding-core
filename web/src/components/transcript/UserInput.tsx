@@ -365,7 +365,7 @@ function ProjectReferenceCard({
   return (
     <div
       className="inline-flex h-8 max-w-full items-center gap-1.5 rounded-md border border-border/70 bg-background/70 px-2 text-xs leading-5 whitespace-nowrap"
-      title={reference.path}
+
     >
       <Icon className="size-3 shrink-0 text-muted-foreground" strokeWidth={1.8} />
       <span className="min-w-0 truncate whitespace-nowrap">{reference.name}</span>
@@ -380,7 +380,7 @@ function LocalFolderCard({ label, name, path, onReveal }: { label: string; name:
   return (
     <button
       className="inline-flex h-8 max-w-full items-center gap-1.5 rounded-md border border-border/70 bg-background/70 px-2 text-xs leading-5 whitespace-nowrap hover:bg-muted"
-      title={path}
+
       type="button"
       onClick={onReveal}
     >
@@ -398,7 +398,7 @@ function AudioAttachmentCard({ attachment, token }: { attachment: UserAttachment
   return (
     <div
       className="inline-flex h-16 min-w-44 max-w-full items-center gap-2 rounded-lg border border-border/70 bg-card px-2.5 text-sm shadow-sm"
-      title={`${attachment.name} ${attachment.size ? formatAttachmentSize(attachment.size) : ""}`}
+
     >
       <button
         aria-label={attachment.name}
@@ -503,7 +503,7 @@ function ImageAttachmentButton({ image, onOpen }: { image: ImageLightboxItem; on
   return (
     <button
       className="block h-20 w-24 overflow-hidden rounded-md border border-border/70 bg-muted/40"
-      title={`${image.name} ${image.size ? formatAttachmentSize(image.size) : ""}`}
+
       type="button"
       onClick={onOpen}
     >

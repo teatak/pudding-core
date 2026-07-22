@@ -1320,6 +1320,7 @@ function DraftComposer({
               className="sr-only"
               accept="image/*,audio/*,text/*,application/pdf,.txt,.md,.csv,.json,.xml,.yaml,.yml"
               multiple
+              tabIndex={-1}
               type="file"
               onChange={handleAttachmentInputChange}
             />
@@ -1487,7 +1488,7 @@ function DraftLocalFolderChip({
   return (
     <div
       className="relative inline-flex h-10 max-w-full items-center gap-1.5 rounded-lg border border-border/70 bg-card pr-7 pl-2.5 text-sm whitespace-nowrap shadow-sm"
-      title={folder.path}
+
     >
       <button className="inline-flex min-w-0 items-center gap-1.5 text-left whitespace-nowrap" type="button" onClick={onReveal}>
         <FolderOpen className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.8} />
@@ -1574,7 +1575,7 @@ function DraftAttachmentChip({
         item.attachment?.sourcePath && "cursor-pointer",
         item.status === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-border/70 text-muted-foreground",
       )}
-      title={`${item.name} ${formatAttachmentSize(item.size)}`}
+
       onClick={() => {
         if (item.attachment?.sourcePath) {
           onRevealSource(item.attachment.sourcePath);

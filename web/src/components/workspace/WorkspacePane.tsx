@@ -1014,7 +1014,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
                 className="no-drag-region h-(--workspace-toolbar-tab-h) w-(--workspace-toolbar-tab-h) shrink-0 rounded-md text-muted-foreground"
                 disabled={creatingBrowserTab || creatingTerminal}
                 size="icon-sm"
-                title={t("workspace.add")}
+
                 type="button"
                 variant="ghost"
               >
@@ -1069,7 +1069,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
         {secondarySessionID && sessionQuery.data?.title ? (
           <span
             className="no-drag-region max-w-32 shrink-0 truncate rounded-md bg-muted px-2 py-1 text-[11px] text-muted-foreground"
-            title={sessionQuery.data.title}
+
           >
             {sessionQuery.data.title}
           </span>

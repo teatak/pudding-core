@@ -1,6 +1,9 @@
 # Tool Migration Status
 
-> Last checked: 2026-07-04. Old project is `pudding-core-old`; it is reference only.
+> Status: archived snapshot from 2026-07-04. Mode names, tool ownership, and
+> inventory below predate Chat / Work / Code and session-loaded Apps. Do not use
+> this file as the current tool registry; use code, tests, and
+> [builtin-apps-design.md](../builtin-apps-design.md).
 
 ## Scope
 
@@ -83,7 +86,7 @@ Notes:
 | `builtin_files_tail` | Folded into `builtin_file_slice` | Use `origin=end`; reverse order supported. |
 | `builtin_files_slice` | Migrated as `builtin_file_slice` | Supports start/end and tail-style reads. |
 | `builtin_skill_validate` | Migrated | Validates a directly written global user Skill by `skill_id`. |
-| `builtin_app_save` | Added | Saves a complete App package through the lazy `code.app` Toolkit. |
+| `builtin_app_save` | Added | Saves a complete App package through the session-loaded App Authoring built-in App. |
 | `builtin_skill_status` | Not migrated | Consider later for Settings/skill authoring UX; not required for basic skill creation. |
 | `builtin_tool_doc_read` | Not migrated | Current tool schemas are inline; add only if builtin tool docs grow again. |
 | `builtin_speaker_get_current` | Not migrated | Depends on voice/speaker identity subsystem. |

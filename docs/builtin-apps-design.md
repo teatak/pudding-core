@@ -11,17 +11,23 @@ Pudding 使用统一的 **App** 概念承载需要说明、工具、界面和运
 - App 的详细说明按需读取，不常驻系统提示词。
 - App 工具只在 App 已加载、已启用且当前模式足够时进入 provider 的 `tools`。
 - 内置与安装 App 都可以临时关闭；内置 App 不可卸载。
-- 不保留 App Toolkit 与新 App 加载机制的双轨兼容代码。
+- 不保留旧的 turn 级可选工具加载机制与 App 加载机制的双轨兼容代码。
 
 首批内置 App:
 
 | App | 最低模式 | 边界 |
 | --- | --- | --- |
 | Browser | Work | 浏览器标签页、页面状态和页面交互工具 |
-| Terminal | Code | 交互终端、后台进程、日志和进程控制 |
 | Canvas | Chat | 由已连接 Desktop 动态提供的画布组件与可视化工具 |
+| Project Files | Code | 结构化文件浏览、检索与写操作 |
+| Source Control | Code | Git 状态、差异、暂存与提交操作 |
+| Code Intelligence | Code | 语言服务的符号、引用、诊断与重命名操作 |
+| Image Capture | Chat | 用户明确要求时从本地屏幕或相机采集图像 |
+| Skill Authoring | Code | Skill 校验与创作说明 |
+| App Authoring | Code | App 校验、保存与创作说明 |
 
-普通一次性命令 `builtin_command_run` 仍属于 Code Core，不依赖 Terminal App。
+`builtin_command_run` 与 `builtin_command_session` 都属于 Code Core。前者执行一次性命令
+或启动后台会话,后者负责读取、输入和停止,不再通过 Terminal App 动态加载。
 
 ## 概念
 
@@ -32,7 +38,7 @@ Pudding 使用统一的 **App** 概念承载需要说明、工具、界面和运
 - 不出现在模型可见的 App 索引中。
 - 不向 provider 提供工具 schema。
 - 拒绝新的 App 工具调用。
-- 不强制终止已经启动的浏览器标签页、终端或后台进程。
+- 不强制终止已经启动的浏览器标签页或画布资源。
 
 重新启用后可以继续使用既有资源。
 
@@ -63,7 +69,7 @@ App 定义仍使用两种产品来源:
 - `builtin`: 由代码中的 registry 提供，不允许卸载。
 - `installed`: 来自 `<home>/apps/<id>`，允许卸载。
 
-`builtin` 可以由 daemon 常驻提供，也可以由 Desktop、React Native 等客户端运行时动态注册。动态内置 App 额外带 `runtime`，断开后从该运行时的 App 列表和模型上下文撤下。安装包不能声明或冒充内置 runtime。
+`builtin` 可以由 daemon 常驻提供，也可以由 Electron Desktop 客户端运行时动态注册。动态内置 App 额外带 `runtime`，断开后从该运行时的 App 列表和模型上下文撤下。安装包不能声明或冒充内置 runtime。
 
 ### Runtime-provided App
 
@@ -78,7 +84,7 @@ Canvas 属于 Runtime-provided App。工具实现、UI 状态和渲染继续归�
 HTTP 请求通过 `X-Pudding-Runtime-ID` 显式声明来源。daemon 仅把该身份放进本次请求或 turn 的 context，用它解析 App 索引、工具 schema 和工具调用目标；不保存全局 current runtime，也不根据“最后连接窗口”猜测目标。
 
 ```text
-Desktop / React Native
+Electron Desktop
   ├─ App manifest + Skill
   ├─ tool definitions + handlers
   └─ local UI state
@@ -87,7 +93,7 @@ daemon
   └─ ephemeral registry and turn-scoped call routing
 ```
 
-同一协议可供未来 React Native UI App 使用。没有来源 runtime 的语音或后台 turn 不获得任何客户端 UI 工具。
+协议本身不依赖 Canvas 的具体 UI 实现,但当前产品只注册 Electron Desktop runtime。没有来源 runtime 的语音或后台 turn 不获得任何客户端 UI 工具。
 
 ## App 定义
 
@@ -108,7 +114,9 @@ daemon
 }
 ```
 
-模型可调用的 App 必须有 `defaultSkillID`，并且该 Skill 必须存在。常驻内置 App 由 daemon registry 提供；动态内置 App 由对应客户端 runtime 提供；安装 App 继续从本地包读取。
+带使用说明的 App 必须让 `defaultSkillID` 指向已存在的 Skill。纯工具 App 可以没有默认
+Skill，加载结果会明确返回 `instructionsLoaded: false`。常驻内置 App 由 daemon registry
+提供；动态内置 App 由对应客户端 runtime 提供；安装 App 继续从本地包读取。
 
 `tools` 是管理界面的只读能力清单。内置 App 显式声明工具；安装 App 的 REST / GraphQL 工具由 endpoint 推导，MCP 工具由运行时探测补充。该字段不改变实际工具路由和权限判定。
 
@@ -167,13 +175,13 @@ SQLite schema v1 已随正式签名的 `0.1.1` 固化。后续调整 `loadedAppI
 
 Apps 页面按以下区域展示:
 
-1. 内置: Browser、Terminal 等，提供启用开关，不显示卸载。
+1. 内置: Browser、Canvas、Skill Authoring、App Authoring 等，提供启用开关，不显示卸载。
 2. 已安装: 用户安装 App，可临时关闭、管理连接和卸载。
 3. App Hub: 可安装内容。
 
 内置与已安装列表使用同一套横排图标入口，只展示启用状态；开关操作放在详情页。详情页独立展示 Tools；没有 endpoint 时不显示 Endpoints 区块。
 
-App-owned tools 只在 Apps 详情中展示，不进入“设置 → 内置工具”；后者仅列出 Core 与 Toolkit 管理的工具。
+App-owned tools 只在 Apps 详情中展示，不进入“设置 → 内置工具”；后者仅列出 Core 工具。
 
 `loadedAppIDs` 不作为用户设置展示。画布、浏览器标签和终端窗口继续使用现有 UI，只改变能力归属与加载入口。
 
@@ -183,12 +191,15 @@ App-owned tools 只在 Apps 详情中展示，不进入“设置 → 内置工�
 2. 已增加 session `loadedAppIDs`、全模式 App 索引和 schema 路由。
 3. Browser 已完成端到端路径。
 4. Apps 页面已支持内置 App。
-5. Terminal 与后台进程已迁移。
+5. 后台进程已并入 Code Core,Terminal 内置 App 已删除。
 6. 安装 App 的 MCP/API 工具已迁移到同一加载路径。
-7. App 专用 Toolkit 路径已删除。
+7. 旧的可选工具加载路径已删除。
 8. Canvas 已迁移为 Desktop 动态注册的 Runtime-provided App。
+9. `skill-creator` 与 `app-creator` 已归入对应 Authoring App；校验与保存工具随
+   App 会话级加载。
+10. `builtin_request_user_input` 已并入默认 `chat.core`。
 
-Code 专用的 Git、LSP、文件等低频 Toolkit 暂时保留。
+11. Git、LSP、结构化文件和图像采集能力已迁移为 Source Control、Code Intelligence、Project Files 和 Image Capture 内置 App。
 
 ## 验收
 

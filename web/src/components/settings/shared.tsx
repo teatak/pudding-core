@@ -5,8 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
-export const SETTINGS_CONTENT_CLASS = "@container mr-auto grid min-w-0 w-full max-w-4xl gap-5";
-export const SETTINGS_NARROW_CONTENT_CLASS = "@container mr-auto grid min-w-0 w-full max-w-[46rem] gap-5";
+export const SETTINGS_CONTENT_CLASS = "@container mx-auto grid min-w-0 w-full max-w-4xl gap-5";
+export const SETTINGS_NARROW_CONTENT_CLASS = "@container mx-auto grid min-w-0 w-full max-w-[46rem] gap-5";
 export const SETTINGS_COMPACT_SELECT_CLASS = "w-36 max-w-full";
 export const SETTINGS_CARD_CLASS = "overflow-hidden rounded-lg border border-border/70 bg-card";
 export const SETTINGS_GROUP_CLASS = `pudding-settings-group ${SETTINGS_CARD_CLASS}`;
@@ -169,11 +169,11 @@ export function SettingsPanel({
 }) {
   return (
     <section className={SETTINGS_CARD_CLASS}>
-      <div className="pudding-settings-panel-header flex h-10 items-center justify-between gap-3 border-b border-border/70 bg-muted/20 px-4">
+      <div className="pudding-settings-panel-header flex h-10 items-center justify-between gap-3 border-b border-border/70 bg-muted/20 px-3">
         <h3 className="text-sm font-normal">{title}</h3>
         {action}
       </div>
-      {children ? <div className="grid gap-3 p-4">{children}</div> : null}
+      {children ? <div className="grid gap-3 p-3">{children}</div> : null}
     </section>
   );
 }
@@ -189,7 +189,7 @@ export function SettingsSection({
 }) {
   return (
     <section className="grid min-w-0 gap-3">
-      <div className="flex min-h-8 items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-3">
         <h3 className="text-sm font-normal">{title}</h3>
         {action}
       </div>

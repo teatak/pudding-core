@@ -1,7 +1,9 @@
 # 工具调用 / MCP 契约设计 v1
 
-> 状态:草案,T1 provider 协议扩展已落地。范围:工具调用全链路(provider 流 → engine 循环 →
-> canonical 落库 → 事件协议 → 前端任务流)与 MCP 接入。
+> 状态:历史草案,已归档。工具循环、canonical parts、MCP App 和动态 App 加载均已落地,
+> 当前契约以 [contracts-checklist.md](../contracts-checklist.md)、
+> [apps.md](../apps.md)、[builtin-apps-design.md](../builtin-apps-design.md) 和代码为准。
+> 本文保留用于追溯早期工具调用全链路设计。
 > 纪律延续:provider 只产模型流(AGENTS.md 硬约束 17),工具执行、turn
 > 生命周期、落库全部归 engine;context 只来自 canonical messages(硬约束 8)。
 

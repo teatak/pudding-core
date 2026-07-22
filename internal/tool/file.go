@@ -48,6 +48,12 @@ const (
 	maxFileSearchGlobs            = 32
 	maxFileSearchGlobChars        = 256
 	maxFileSearchFiles            = 20000
+	maxFilePatchHintLines         = 12
+	maxFilePatchHintChars         = 2400
+	maxFilePatchSimilarityRunes   = 256
+	maxFilePatchSimilarityLines   = 40
+	maxFilePatchExactCandidates   = 64
+	maxFilePatchHintSourceBytes   = 1 << 20
 )
 
 type resolvedFilePath struct {
@@ -538,10 +544,21 @@ func (r *BuiltinRunner) filePatch(call Call) Result {
 	content := string(data)
 	matches := strings.Count(content, args.OldString)
 	if matches == 0 {
-		return toolJSONError(out, "old_string_not_found", "old_string was not found")
+		return filePatchNotFoundError(out, resolved, args.Scope, content, args.OldString)
 	}
 	if matches > 1 && !args.ReplaceAll {
-		return toolJSONError(out, "old_string_ambiguous", "old_string matched more than once")
+		payload := resolved.payload(map[string]any{
+			"ok":      false,
+			"scope":   args.Scope,
+			"reason":  "old_string_ambiguous",
+			"detail":  "old_string matched more than once",
+			"matches": matches,
+			"hint":    "Add more surrounding context to old_string so it identifies exactly one location. The file was not modified.",
+		})
+		out.Content = jsonString(payload)
+		out.SummaryKind = SummaryReturnedFields
+		out.SummaryCount = len(payload)
+		return out
 	}
 	replaceN := 1
 	if args.ReplaceAll {
@@ -560,6 +577,213 @@ func (r *BuiltinRunner) filePatch(call Call) Result {
 	out.SummaryKind = SummaryChangedLines
 	out.SummaryCount = changed
 	return out
+}
+
+type filePatchClosestMatch struct {
+	StartLine        int    `json:"startLine"`
+	EndLine          int    `json:"endLine"`
+	Content          string `json:"content"`
+	Similarity       int    `json:"similarity"`
+	LikelyDifference string `json:"likelyDifference"`
+	Truncated        bool   `json:"truncated,omitempty"`
+}
+
+func filePatchNotFoundError(out Result, resolved resolvedFilePath, scope, content, oldString string) Result {
+	payload := resolved.payload(map[string]any{
+		"ok":     false,
+		"scope":  scope,
+		"reason": "old_string_not_found",
+		"detail": "old_string was not found",
+		"hint":   "Re-read the indicated lines and retry with the exact current text. The file was not modified.",
+	})
+	if closest, ok := closestFilePatchMatch(content, oldString); ok {
+		payload["closestMatch"] = closest
+	}
+	out.Content = jsonString(payload)
+	out.SummaryKind = SummaryReturnedFields
+	out.SummaryCount = len(payload)
+	return out
+}
+
+func closestFilePatchMatch(content, oldString string) (filePatchClosestMatch, bool) {
+	if content == "" || oldString == "" || len(content) > maxFilePatchHintSourceBytes {
+		return filePatchClosestMatch{}, false
+	}
+	normalizedContent := normalizeFilePatchNewlines(content)
+	normalizedOld := normalizeFilePatchNewlines(oldString)
+	contentLines := strings.Split(normalizedContent, "\n")
+	oldLines := filePatchDisplayLines(normalizedOld)
+	if len(oldLines) == 0 {
+		return filePatchClosestMatch{}, false
+	}
+
+	if index := strings.Index(normalizedContent, normalizedOld); index >= 0 {
+		start := strings.Count(normalizedContent[:index], "\n")
+		return buildFilePatchClosestMatch(contentLines, oldLines, start, 100, "line_endings"), true
+	}
+
+	anchorIndex := 0
+	for index := 1; index < len(oldLines); index++ {
+		if utf8.RuneCountInString(strings.TrimSpace(oldLines[index])) > utf8.RuneCountInString(strings.TrimSpace(oldLines[anchorIndex])) {
+			anchorIndex = index
+		}
+	}
+	anchor := oldLines[anchorIndex]
+	bestFuzzyLine := 0
+	bestFuzzyLineScore := -1
+	bestExactStart := -1
+	bestExactSimilarity := -1
+	exactCandidates := 0
+	lastSkippedExactLine := -1
+	considerExactCandidate := func(line int) {
+		candidateStart := filePatchWindowStart(len(contentLines), line, anchorIndex)
+		candidateSimilarity := filePatchWindowSimilarity(contentLines, oldLines, candidateStart, anchorIndex)
+		if candidateSimilarity > bestExactSimilarity {
+			bestExactStart = candidateStart
+			bestExactSimilarity = candidateSimilarity
+		}
+	}
+	for index, line := range contentLines {
+		score := filePatchLineSimilarity(anchor, line)
+		if score == 100 {
+			if exactCandidates < maxFilePatchExactCandidates-1 {
+				considerExactCandidate(index)
+			} else {
+				lastSkippedExactLine = index
+			}
+			exactCandidates++
+			continue
+		}
+		if score > bestFuzzyLineScore {
+			bestFuzzyLine = index
+			bestFuzzyLineScore = score
+		}
+	}
+	if lastSkippedExactLine >= 0 {
+		considerExactCandidate(lastSkippedExactLine)
+	}
+	start := bestExactStart
+	similarity := bestExactSimilarity
+	if start < 0 {
+		start = filePatchWindowStart(len(contentLines), bestFuzzyLine, anchorIndex)
+		similarity = filePatchWindowSimilarity(contentLines, oldLines, start, anchorIndex)
+	}
+	if similarity < 20 {
+		return filePatchClosestMatch{}, false
+	}
+	difference := "content_changed"
+	lineCount := min(len(oldLines), len(contentLines)-start)
+	candidate := strings.Join(contentLines[start:start+lineCount], "\n")
+	if normalizeFilePatchWhitespace(candidate) == normalizeFilePatchWhitespace(normalizedOld) {
+		difference = "whitespace"
+	}
+	return buildFilePatchClosestMatch(contentLines, oldLines, start, similarity, difference), true
+}
+
+func filePatchWindowStart(contentLineCount, anchorLine, anchorIndex int) int {
+	start := anchorLine - anchorIndex
+	if start < 0 {
+		return 0
+	}
+	if start >= contentLineCount {
+		return contentLineCount - 1
+	}
+	return start
+}
+
+func buildFilePatchClosestMatch(contentLines, oldLines []string, start, similarity int, difference string) filePatchClosestMatch {
+	lineCount := min(len(oldLines), len(contentLines)-start)
+	if lineCount < 1 {
+		lineCount = 1
+	}
+	snippetLineCount := min(lineCount, maxFilePatchHintLines)
+	snippet := strings.Join(contentLines[start:start+snippetLineCount], "\n")
+	truncated := snippetLineCount < lineCount
+	if short, wasTruncated := truncateSearchLine(snippet, maxFilePatchHintChars); wasTruncated {
+		snippet = short
+		truncated = true
+	}
+	return filePatchClosestMatch{
+		StartLine:        start + 1,
+		EndLine:          start + lineCount,
+		Content:          snippet,
+		Similarity:       similarity,
+		LikelyDifference: difference,
+		Truncated:        truncated,
+	}
+}
+
+func filePatchWindowSimilarity(contentLines, oldLines []string, start, anchorIndex int) int {
+	if start < 0 || start >= len(contentLines) || len(oldLines) == 0 {
+		return 0
+	}
+	from := max(0, anchorIndex-maxFilePatchSimilarityLines/2)
+	to := min(len(oldLines), from+maxFilePatchSimilarityLines)
+	if to-from < maxFilePatchSimilarityLines && from > 0 {
+		from = max(0, to-maxFilePatchSimilarityLines)
+	}
+	total := 0
+	compared := 0
+	for index := from; index < to; index++ {
+		contentIndex := start + index
+		if contentIndex >= len(contentLines) {
+			break
+		}
+		total += filePatchLineSimilarity(oldLines[index], contentLines[contentIndex])
+		compared++
+	}
+	if compared == 0 {
+		return 0
+	}
+	return total / compared
+}
+
+func filePatchLineSimilarity(left, right string) int {
+	left = strings.TrimSpace(left)
+	right = strings.TrimSpace(right)
+	if left == right {
+		return 100
+	}
+	leftRunes := []rune(left)
+	rightRunes := []rune(right)
+	if len(leftRunes) > maxFilePatchSimilarityRunes {
+		leftRunes = leftRunes[:maxFilePatchSimilarityRunes]
+	}
+	if len(rightRunes) > maxFilePatchSimilarityRunes {
+		rightRunes = rightRunes[:maxFilePatchSimilarityRunes]
+	}
+	if len(leftRunes) < 2 || len(rightRunes) < 2 {
+		return 0
+	}
+	leftPairs := make(map[string]int, len(leftRunes)-1)
+	for index := 0; index < len(leftRunes)-1; index++ {
+		leftPairs[string(leftRunes[index:index+2])]++
+	}
+	matches := 0
+	for index := 0; index < len(rightRunes)-1; index++ {
+		pair := string(rightRunes[index : index+2])
+		if leftPairs[pair] > 0 {
+			leftPairs[pair]--
+			matches++
+		}
+	}
+	return 2 * matches * 100 / (len(leftRunes) + len(rightRunes) - 2)
+}
+
+func normalizeFilePatchNewlines(value string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(value, "\r\n", "\n"), "\r", "\n")
+}
+
+func normalizeFilePatchWhitespace(value string) string {
+	return strings.Join(strings.Fields(value), " ")
+}
+
+func filePatchDisplayLines(value string) []string {
+	lines := strings.Split(value, "\n")
+	if len(lines) > 1 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
 }
 
 func (r *BuiltinRunner) fileDelete(call Call) Result {
@@ -1573,6 +1797,9 @@ func probeBinaryFile(path string) (bool, string, error) {
 	if !validUTF8ProbeSample(buf[:n]) || strings.Contains(string(buf[:n]), "\x00") {
 		return true, mt, nil
 	}
+	if isKnownTextExt(path) {
+		return false, mt, nil
+	}
 	main := strings.ToLower(strings.TrimSpace(strings.Split(mt, ";")[0]))
 	switch {
 	case strings.HasPrefix(main, "text/"),
@@ -1633,6 +1860,15 @@ func isReadableImageMIME(mimeType string) bool {
 func isKnownBinaryExt(path string) bool {
 	_, ok := binaryFileExts[strings.ToLower(filepath.Ext(path))]
 	return ok
+}
+
+func isKnownTextExt(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".cts", ".mts", ".ts", ".tsx":
+		return true
+	default:
+		return false
+	}
 }
 
 func decodeStructToolArgs(raw json.RawMessage, into any) error {

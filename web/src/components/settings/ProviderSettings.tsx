@@ -178,7 +178,7 @@ export function ProviderSettings({
                             "size-2 shrink-0 rounded-full",
                             profile.apiKeySet ? "bg-success" : "bg-warning",
                           )}
-                          title={profile.apiKeySet ? t("provider.keySet") : t("provider.keyMissing")}
+
                         />
                       </ItemTitle>
                       <ItemDescription className="truncate text-xs">

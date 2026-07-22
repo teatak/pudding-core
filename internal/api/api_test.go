@@ -1407,19 +1407,10 @@ func TestSkillsAPI(t *testing.T) {
 		t.Fatalf("want 200, got %d", resp.StatusCode)
 	}
 	got := decodeJSON[map[string][]map[string]any](t, resp)
-	var foundSkillCreator, foundAppCreator, foundUser bool
+	var foundUser bool
 	for _, item := range got["skills"] {
-		if item["id"] == "skill-creator" {
-			if item["scope"] != "global" || item["source"] != "builtin" || item["system"] != true || item["iconPath"] != "builtin/skill-creator/assets/icon.svg" {
-				t.Fatalf("unexpected skill-creator view: %+v", item)
-			}
-			foundSkillCreator = true
-		}
-		if item["id"] == "app-creator" {
-			if item["scope"] != "global" || item["source"] != "builtin" || item["system"] != true || item["iconPath"] != "builtin/app-creator/assets/icon.svg" {
-				t.Fatalf("unexpected app-creator view: %+v", item)
-			}
-			foundAppCreator = true
+		if item["id"] == "skill-creator" || item["id"] == "app-creator" {
+			t.Fatalf("App-owned Skill leaked through global Skills API: %+v", item)
 		}
 		if item["id"] == "test-skill" {
 			if item["scope"] != "global" || item["source"] != "user" || item["system"] != false || item["iconPath"] != "test-skill/assets/icon.svg" {
@@ -1428,8 +1419,8 @@ func TestSkillsAPI(t *testing.T) {
 			foundUser = true
 		}
 	}
-	if !foundSkillCreator || !foundAppCreator || !foundUser {
-		t.Fatalf("expected builtin and user skills, got: %+v", got)
+	if !foundUser {
+		t.Fatalf("expected user skill, got: %+v", got)
 	}
 }
 
@@ -1801,6 +1792,18 @@ func TestBuiltinAppEnablementAPI(t *testing.T) {
 	}
 }
 
+func TestBuiltinAppToolsHaveDescriptions(t *testing.T) {
+	definitions := appsvc.BuiltinDefinitions()
+	enrichBuiltinAppTools(definitions)
+	for _, definition := range definitions {
+		for _, appTool := range definition.Tools {
+			if appTool.Description == "" {
+				t.Errorf("built-in app %q tool %q has no description", definition.ID, appTool.Name)
+			}
+		}
+	}
+}
+
 func TestDeleteAppRemovesConnections(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
@@ -2003,61 +2006,43 @@ func TestBuiltinToolsAPI(t *testing.T) {
 	if webSearch == nil || webSearch["capability"] != string(store.ModeChat) {
 		t.Fatalf("web search should declare chat capability: %+v", webSearch)
 	}
-	var fileWrite map[string]any
 	var commandRun map[string]any
-	var gitStatus map[string]any
-	var gitCommit map[string]any
-	var patchPropose map[string]any
+	var commandSession map[string]any
+	var patchApply map[string]any
 	var appLoad map[string]any
 	var skillRead map[string]any
-	var skillValidate map[string]any
 	for _, item := range tools {
 		id, _ := item["id"].(string)
 		if _, appTool := tool.BuiltinAppIDForTool(id); appTool || tool.IsAppAPITool(id) {
 			t.Fatalf("App-owned tool must not appear in settings: %+v", item)
 		}
 		switch id {
-		case tool.FileWrite:
-			fileWrite = item
 		case tool.CommandRun:
 			commandRun = item
-		case tool.GitStatus:
-			gitStatus = item
-		case tool.GitCommit:
-			gitCommit = item
-		case tool.PatchPropose:
-			patchPropose = item
+		case tool.CommandSession:
+			commandSession = item
+		case tool.PatchApply:
+			patchApply = item
 		case tool.AppLoad:
 			appLoad = item
 		case tool.SkillRead:
 			skillRead = item
-		case tool.SkillValidate:
-			skillValidate = item
 		}
-	}
-	if fileWrite == nil || fileWrite["capability"] != string(store.ModeCode) {
-		t.Fatalf("file write should declare code capability: %+v", fileWrite)
 	}
 	if commandRun == nil || commandRun["capability"] != string(store.ModeCode) {
 		t.Fatalf("command run should declare code capability: %+v", commandRun)
 	}
-	if gitStatus == nil || gitStatus["capability"] != string(store.ModeCode) {
-		t.Fatalf("git status should declare code capability: %+v", gitStatus)
+	if commandSession == nil || commandSession["capability"] != string(store.ModeCode) {
+		t.Fatalf("command session should be a Code Core tool: %+v", commandSession)
 	}
-	if gitCommit == nil || gitCommit["capability"] != string(store.ModeCode) {
-		t.Fatalf("git commit should declare code capability: %+v", gitCommit)
-	}
-	if patchPropose == nil || patchPropose["capability"] != string(store.ModeCode) {
-		t.Fatalf("patch propose should declare code capability: %+v", patchPropose)
+	if patchApply == nil || patchApply["capability"] != string(store.ModeCode) {
+		t.Fatalf("patch apply should declare code capability: %+v", patchApply)
 	}
 	if appLoad == nil || appLoad["capability"] != string(store.ModeChat) {
 		t.Fatalf("app load should declare chat capability: %+v", appLoad)
 	}
 	if skillRead == nil || skillRead["capability"] != string(store.ModeChat) {
 		t.Fatalf("skill read should declare chat capability: %+v", skillRead)
-	}
-	if skillValidate == nil || skillValidate["capability"] != string(store.ModeCode) {
-		t.Fatalf("skill validate should declare code capability: %+v", skillValidate)
 	}
 }
 

@@ -60,6 +60,16 @@ type BrowserAutomationCursorState = {
   y: number;
 };
 
+type HostFocusSnapshot = {
+  element: HTMLElement;
+  contentSelection?: Range;
+  textSelection?: {
+    start: number;
+    end: number;
+    direction: "backward" | "forward" | "none";
+  };
+};
+
 export function ElectronWebviewBrowser({
   activeTab: activeTabProp,
   sessionID,
@@ -82,6 +92,9 @@ export function ElectronWebviewBrowser({
   const failedNavigationSeqRef = useRef(0);
   const loadErrorRef = useRef<WebviewLoadError | null>(null);
   const cursorEffectTimerRef = useRef<number | undefined>(undefined);
+  const hostFocusSnapshotRef = useRef<HostFocusSnapshot | null>(null);
+  const hostCompositionActiveRef = useRef(false);
+  const webviewFocusLeaseRef = useRef<(() => void) | null>(null);
   const [loadError, setLoadError] = useState<WebviewLoadError | null>(null);
   const [navigationLoading, setNavigationLoading] = useState(false);
   const [automationCursor, setAutomationCursor] = useState<BrowserAutomationCursorState | null>(null);
@@ -112,6 +125,25 @@ export function ElectronWebviewBrowser({
   pendingTargetURLRef.current = targetURL;
   webviewRequestIDRef.current = webviewRequestID;
   tabCreatedAtRef.current = activeTab?.createdAt;
+
+  const releaseAutomationFocus = useCallback(() => {
+    const releaseLease = webviewFocusLeaseRef.current;
+    webviewFocusLeaseRef.current = null;
+    try {
+      releaseLease?.();
+    } catch {
+      // Focus restoration below must still run if a stale DOM node rejects lease cleanup.
+    }
+    const snapshot = hostFocusSnapshotRef.current;
+    hostFocusSnapshotRef.current = null;
+    if (snapshot) {
+      try {
+        restoreHostFocusSnapshot(snapshot);
+      } catch {
+        // The focused control may have changed type or detached during automation.
+      }
+    }
+  }, []);
 
   const updateLoadError = useCallback((error: WebviewLoadError | null) => {
     loadErrorRef.current = error;
@@ -235,6 +267,71 @@ export function ElectronWebviewBrowser({
   }, [ownerSessionID, queryClient, tabID, updateLoadError]);
 
   useEffect(() => {
+    const handleCompositionStart = () => {
+      hostCompositionActiveRef.current = true;
+    };
+    const handleCompositionEnd = () => {
+      hostCompositionActiveRef.current = false;
+    };
+    document.addEventListener("compositionstart", handleCompositionStart, true);
+    document.addEventListener("compositionend", handleCompositionEnd, true);
+    return () => {
+      document.removeEventListener("compositionstart", handleCompositionStart, true);
+      document.removeEventListener("compositionend", handleCompositionEnd, true);
+    };
+  }, []);
+
+  useEffect(() => {
+    const bridge = electronBrowserBridge();
+    if (!bridge?.onAutomationStart || !ownerSessionID || !tabID) {
+      return;
+    }
+    return bridge.onAutomationStart((event) => {
+      if (event.sessionID !== ownerSessionID || event.tabID !== tabID || event.action !== "click") {
+        return;
+      }
+      releaseAutomationFocus();
+      let ready = false;
+      let focused = false;
+      const node = webviewRef.current;
+      try {
+        if (!hostCompositionActiveRef.current && node?.isConnected && webviewReadyRef.current) {
+          hostFocusSnapshotRef.current = captureHostFocusSnapshot();
+          webviewFocusLeaseRef.current = acquireWebviewFocusLease(node);
+          node.focus({ preventScroll: true });
+          ready = true;
+          focused = document.activeElement === node;
+        }
+      } catch {
+        ready = false;
+        focused = false;
+      }
+      if (!ready || !focused) {
+        releaseAutomationFocus();
+      }
+      if (event.requestID && bridge.completeAutomationLifecycle) {
+        void bridge.completeAutomationLifecycle({ requestID: event.requestID, ok: ready && focused }).catch(() => undefined);
+      }
+    });
+  }, [ownerSessionID, releaseAutomationFocus, tabID]);
+
+  useEffect(() => {
+    const bridge = electronBrowserBridge();
+    if (!bridge?.onAutomationEnd || !ownerSessionID || !tabID) {
+      return;
+    }
+    return bridge.onAutomationEnd((event) => {
+      if (event.sessionID !== ownerSessionID || event.tabID !== tabID || event.action !== "click") {
+        return;
+      }
+      releaseAutomationFocus();
+      if (event.requestID && bridge.completeAutomationLifecycle) {
+        void bridge.completeAutomationLifecycle({ requestID: event.requestID, ok: true }).catch(() => undefined);
+      }
+    });
+  }, [ownerSessionID, releaseAutomationFocus, tabID]);
+
+  useEffect(() => {
     const bridge = electronBrowserBridge();
     if (!bridge?.onCursor || !ownerSessionID || !tabID) {
       return;
@@ -267,8 +364,9 @@ export function ElectronWebviewBrowser({
   useEffect(() => {
     return () => {
       window.clearTimeout(cursorEffectTimerRef.current);
+      releaseAutomationFocus();
     };
-  }, []);
+  }, [ownerSessionID, releaseAutomationFocus, tabID]);
 
   useEffect(() => {
     window.clearTimeout(cursorEffectTimerRef.current);
@@ -403,6 +501,97 @@ export function ElectronWebviewBrowser({
   );
 }
 
+function captureHostFocusSnapshot(): HostFocusSnapshot | null {
+  const element = document.activeElement;
+  if (
+    !(element instanceof HTMLElement) ||
+    element === document.body ||
+    element === document.documentElement ||
+    element.tagName.toLowerCase() === "webview"
+  ) {
+    return null;
+  }
+  const snapshot: HostFocusSnapshot = { element };
+  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+    if (typeof element.selectionStart === "number" && typeof element.selectionEnd === "number") {
+      snapshot.textSelection = {
+        start: element.selectionStart,
+        end: element.selectionEnd,
+        direction: element.selectionDirection || "none",
+      };
+    }
+  } else if (element.isContentEditable) {
+    const selection = window.getSelection();
+    if (selection?.rangeCount && element.contains(selection.anchorNode)) {
+      snapshot.contentSelection = selection.getRangeAt(0).cloneRange();
+    }
+  }
+  return snapshot;
+}
+
+function restoreHostFocusSnapshot(snapshot: HostFocusSnapshot) {
+  if (!snapshot.element.isConnected) {
+    return;
+  }
+  const activeElement = document.activeElement;
+  if (activeElement !== snapshot.element && activeElement instanceof HTMLElement && isEditableHostElement(activeElement)) {
+    return;
+  }
+  snapshot.element.focus({ preventScroll: true });
+  if (snapshot.textSelection && (snapshot.element instanceof HTMLInputElement || snapshot.element instanceof HTMLTextAreaElement)) {
+    const textLength = snapshot.element.value.length;
+    snapshot.element.setSelectionRange(
+      Math.max(0, Math.min(snapshot.textSelection.start, textLength)),
+      Math.max(0, Math.min(snapshot.textSelection.end, textLength)),
+      snapshot.textSelection.direction,
+    );
+  } else if (snapshot.contentSelection?.commonAncestorContainer.isConnected) {
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(snapshot.contentSelection);
+  }
+}
+
+function acquireWebviewFocusLease(node: HTMLElement) {
+  const inertAncestors: Array<{ ariaHidden: string | null; element: HTMLElement }> = [];
+  for (let ancestor = node.parentElement; ancestor; ancestor = ancestor.parentElement) {
+    if (ancestor.inert) {
+      inertAncestors.push({ ariaHidden: ancestor.getAttribute("aria-hidden"), element: ancestor });
+      ancestor.inert = false;
+    }
+  }
+  const hidden = window.getComputedStyle(node).visibility === "hidden";
+  const previousStyle = hidden
+    ? {
+        opacity: node.style.opacity,
+        pointerEvents: node.style.pointerEvents,
+        visibility: node.style.visibility,
+      }
+    : null;
+  if (previousStyle) {
+    node.style.opacity = "0";
+    node.style.pointerEvents = "none";
+    node.style.visibility = "visible";
+  }
+  return () => {
+    if (node.isConnected && previousStyle) {
+      if (node.style.opacity === "0") node.style.opacity = previousStyle.opacity;
+      if (node.style.pointerEvents === "none") node.style.pointerEvents = previousStyle.pointerEvents;
+      if (node.style.visibility === "visible") node.style.visibility = previousStyle.visibility;
+    }
+    for (const { ariaHidden, element } of inertAncestors) {
+      if (element.isConnected && !element.inert && element.getAttribute("aria-hidden") === ariaHidden) {
+        element.inert = true;
+      }
+    }
+  };
+}
+
+function isEditableHostElement(element: HTMLElement) {
+  const tagName = element.tagName.toLowerCase();
+  return tagName === "input" || tagName === "textarea" || tagName === "select" || element.isContentEditable;
+}
+
 function BrowserEmptyState({
   history,
   openingURL,
@@ -432,7 +621,7 @@ function BrowserEmptyState({
                 >
                   <button
                     disabled={Boolean(openingURL)}
-                    title={`${entry.title || browserCompactURL(entry.url)} · ${browserCompactURL(entry.url)}`}
+
                     type="button"
                     onClick={() => onOpen(entry.url)}
                   >

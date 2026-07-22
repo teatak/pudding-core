@@ -64,7 +64,7 @@ func newCodeRenameError(reason, detail string) error {
 func (r *BuiltinRunner) codeRename(ctx context.Context, call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	if strings.TrimSpace(call.SessionID) == "" {
-		return toolJSONError(out, "session_required", "session id is required for rename proposals")
+		return toolJSONError(out, "session_required", "session id is required for semantic rename")
 	}
 	var args codeRenameArgs
 	if len(call.Args) == 0 || json.Unmarshal(call.Args, &args) != nil {
@@ -119,29 +119,33 @@ func (r *BuiltinRunner) codeRename(ctx context.Context, call Call) Result {
 	if err != nil {
 		return codeRenameFailure(out, err)
 	}
-	proposalProjectDirs, err := resolvedCodeProjectDirs(call.ProjectDirs)
+	patchProjectDirs, err := resolvedCodeProjectDirs(call.ProjectDirs)
 	if err != nil {
 		return codeRenameFailure(out, err)
 	}
-	files, editCount, err := buildCodeRenamePatchFiles(proposalProjectDirs, target, state.PositionEncoding, edits)
+	files, editCount, err := buildCodeRenamePatchFiles(patchProjectDirs, target, state.PositionEncoding, edits)
 	if err != nil {
 		return codeRenameFailure(out, err)
 	}
 
-	proposalArgs, err := json.Marshal(patchProposeArgs{Scope: managedScopeProject, Files: files})
+	patchArgs, err := json.Marshal(patchApplyArgs{Scope: managedScopeProject, Files: files})
 	if err != nil {
 		return toolJSONError(out, "rename_failed", err.Error())
 	}
-	proposalCall := call
-	proposalCall.Args = proposalArgs
-	proposalCall.ProjectDirs = proposalProjectDirs
-	proposal := r.patchPropose(proposalCall)
-	if !proposal.Ok {
-		return proposal
+	patchCall := call
+	patchCall.Args = patchArgs
+	patchCall.ProjectDirs = patchProjectDirs
+	patch, err := preparePatch(patchCall, patchApplyArgs{Scope: managedScopeProject, Files: files})
+	if err != nil {
+		return patchFailure(out, err)
+	}
+	applied := applyPreparedPatchResult(out, patchProjectDirs, patch)
+	if !applied.Ok {
+		return applied
 	}
 	var payload map[string]any
-	if err := json.Unmarshal([]byte(proposal.Content), &payload); err != nil {
-		return toolJSONError(out, "rename_failed", "rename proposal result could not be encoded")
+	if err := json.Unmarshal([]byte(applied.Content), &payload); err != nil {
+		return toolJSONError(out, "rename_failed", "rename result could not be encoded")
 	}
 	payload["operation"] = "rename"
 	payload["newName"] = args.NewName
@@ -156,8 +160,8 @@ func (r *BuiltinRunner) codeRename(ctx context.Context, call Call) Result {
 	if err != nil {
 		return toolJSONError(out, "rename_failed", err.Error())
 	}
-	proposal.Content = string(encoded)
-	return proposal
+	applied.Content = string(encoded)
+	return applied
 }
 
 func resolvedCodeProjectDirs(projectDirs []string) ([]string, error) {
@@ -294,7 +298,7 @@ func parseCodeRenameWorkspaceEdit(raw json.RawMessage) (map[string][]codeRenameT
 	return edits, nil
 }
 
-func buildCodeRenamePatchFiles(projectDirs []string, target resolvedCodeTarget, encoding string, edits map[string][]codeRenameTextEdit) ([]patchProposeFileArg, int, error) {
+func buildCodeRenamePatchFiles(projectDirs []string, target resolvedCodeTarget, encoding string, edits map[string][]codeRenameTextEdit) ([]patchFileArg, int, error) {
 	targetProjectRoot, _, _, err := resolveProjectPath(projectDirs, target.path, false, false)
 	if err != nil {
 		return nil, 0, newCodeRenameError("rename_outside_project", err.Error())
@@ -312,7 +316,7 @@ func buildCodeRenamePatchFiles(projectDirs []string, target resolvedCodeTarget, 
 		URIs = append(URIs, uri)
 	}
 	sort.Strings(URIs)
-	files := make([]patchProposeFileArg, 0, len(URIs))
+	files := make([]patchFileArg, 0, len(URIs))
 	seenTargets := make(map[string]bool, len(URIs))
 	totalBytes := 0
 	editCount := 0
@@ -368,7 +372,7 @@ func buildCodeRenamePatchFiles(projectDirs []string, target resolvedCodeTarget, 
 			return nil, 0, newCodeRenameError("rename_too_large", "rename source and destination text exceeds 2 MiB")
 		}
 		newText := next
-		files = append(files, patchProposeFileArg{Path: resolvedPath, NewText: &newText})
+		files = append(files, patchFileArg{Path: resolvedPath, NewText: &newText})
 	}
 	if len(files) == 0 {
 		return nil, 0, newCodeRenameError("rename_no_changes", "the language server returned no effective rename edits")

@@ -8,23 +8,15 @@ import (
 	"testing"
 )
 
-func TestLoadBuiltinSkillsIncludesCreators(t *testing.T) {
+func TestAppOwnedBuiltinSkillsAreExcludedFromGlobalCatalog(t *testing.T) {
 	skills, err := LoadBuiltinSkills()
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := map[string]bool{}
 	for _, item := range skills {
-		if item.ID != "skill-creator" && item.ID != "app-creator" {
-			continue
+		if item.ID == "skill-creator" || item.ID == "app-creator" {
+			t.Fatalf("App-owned Skill leaked into global catalog: %+v", item)
 		}
-		if item.Scope != ScopeGlobal || item.Source != SourceBuiltin || !item.System || item.Description == "" || item.IconPath != "builtin/"+item.ID+"/assets/icon.svg" {
-			t.Fatalf("unexpected creator metadata: %+v", item)
-		}
-		found[item.ID] = true
-	}
-	if !found["skill-creator"] || !found["app-creator"] {
-		t.Fatalf("creator Skills not found: %+v", skills)
 	}
 }
 
@@ -103,7 +95,7 @@ func TestServiceRejectsSymlinkedUserSkillsRoot(t *testing.T) {
 	}
 }
 
-func TestServiceDoesNotDeleteBuiltinSkillID(t *testing.T) {
+func TestAppSkillIDDoesNotReserveGlobalSkillNamespace(t *testing.T) {
 	home := t.TempDir()
 	dir := filepath.Join(home, "skills", "skill-creator")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -113,11 +105,11 @@ func TestServiceDoesNotDeleteBuiltinSkillID(t *testing.T) {
 	if err := os.WriteFile(marker, []byte("hidden duplicate"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := NewService(home).DeleteSkill(context.Background(), "skill-creator"); !errors.Is(err, ErrBuiltin) {
-		t.Fatalf("delete builtin id error = %v, want %v", err, ErrBuiltin)
+	if err := NewService(home).DeleteSkill(context.Background(), "skill-creator"); err != nil {
+		t.Fatalf("delete global Skill sharing an App Skill id: %v", err)
 	}
-	if _, err := os.Stat(marker); err != nil {
-		t.Fatalf("hidden duplicate was removed: %v", err)
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("global Skill was not removed: %v", err)
 	}
 }
 
@@ -138,12 +130,8 @@ func TestServiceReadsSkillDocument(t *testing.T) {
 	if doc.ID != "daily-review" || doc.Source != SourceUser || doc.Content != body {
 		t.Fatalf("unexpected user skill doc: %+v", doc)
 	}
-	doc, err = NewService(home).ReadSkill(context.Background(), "skill-creator")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if doc.ID != "skill-creator" || doc.Source != SourceBuiltin || doc.Content == "" {
-		t.Fatalf("unexpected builtin skill doc: %+v", doc)
+	if _, err = NewService(home).ReadSkill(context.Background(), "skill-creator"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("App-owned Skill should not be globally readable: %v", err)
 	}
 }
 
@@ -163,12 +151,8 @@ func TestServiceReadsSkillAssets(t *testing.T) {
 	if string(data) != "<svg/>" || contentType != "image/svg+xml" {
 		t.Fatalf("unexpected asset: %q %s", data, contentType)
 	}
-	data, contentType, err = NewService(home).ReadAsset(context.Background(), "builtin/skill-creator/assets/icon.svg")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(data) == 0 || contentType != "image/svg+xml" {
-		t.Fatalf("unexpected builtin asset: len=%d type=%s", len(data), contentType)
+	if _, _, err = NewService(home).ReadAsset(context.Background(), "builtin/skill-creator/assets/icon.svg"); !errors.Is(err, ErrInvalidAsset) {
+		t.Fatalf("App-owned Skill asset should not be globally readable: %v", err)
 	}
 }
 

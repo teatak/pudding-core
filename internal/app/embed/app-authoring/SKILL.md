@@ -31,8 +31,9 @@ installed App unchanged.
 
 1. Confirm what service the App represents and which user requests should use it.
 2. Choose a lowercase kebab-case App id and a package version such as `0.1.0`.
-3. Ensure Code capability and load `code.app`.
-4. For an update, also load `code.files-read` and inspect visible package files
+3. Ensure Code capability. The App Authoring App has already exposed
+   `builtin_app_save` for this session.
+4. For an update, also load the `project-files` App and inspect visible package files
    with `scope="app"`. Hidden connection and runtime override files are not
    exposed.
 5. Build the complete package: `app.yaml`, an SVG icon, and at least one focused

@@ -307,7 +307,6 @@ func runPrompt(args []string) error {
 	if !store.ValidAgentMode(mode) {
 		mode = store.ModeChat
 	}
-	toolkitIndex := tool.ToolkitIndex(mode, tool.BuildToolkitCatalog(tool.BuiltinDefinitions()))
 	if *flagSegments {
 		for i, seg := range out.Segments {
 			if i > 0 {
@@ -315,15 +314,8 @@ func runPrompt(args []string) error {
 			}
 			fmt.Printf("===== %s (%s) =====\n%s\n", seg.ID, seg.Layer, seg.Content)
 		}
-		if toolkitIndex != "" {
-			fmt.Printf("\n===== toolkits (runtime) =====\n%s\n", toolkitIndex)
-		}
 	} else {
-		system := out.SystemInstruction
-		if toolkitIndex != "" {
-			system = strings.TrimRight(system, "\n") + "\n\n" + toolkitIndex
-		}
-		fmt.Printf("===== system prompt =====\n%s\n", system)
+		fmt.Printf("===== system prompt =====\n%s\n", out.SystemInstruction)
 	}
 	if *flagTools {
 		printPromptTools(store.AgentMode(*flagMode))

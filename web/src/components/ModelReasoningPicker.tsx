@@ -160,7 +160,7 @@ export function ModelReasoningPicker({
             className,
           )}
           size="sm"
-          title={visibleModel ? `${label} (${visibleModel})` : undefined}
+
           variant="ghost"
         >
           {visibleModel ? (
@@ -201,7 +201,7 @@ export function ModelReasoningPicker({
         ) : null}
         <DropdownMenuLabel>{t("session.model")}</DropdownMenuLabel>
         <DropdownMenuSub>
-          <DropdownMenuSubTrigger className="h-8 min-w-0" title={visibleModel ? `${label} (${visibleModel})` : undefined}>
+          <DropdownMenuSubTrigger className="h-8 min-w-0" >
             <span className="min-w-0 flex-1 truncate">{label}</span>
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent alignOffset={-164} className="w-56 max-w-[calc(100vw-2rem)] p-2">
@@ -221,7 +221,7 @@ export function ModelReasoningPicker({
                           "min-w-0 items-center rounded-md px-2.5 py-1.5 text-sm font-normal text-muted-foreground hover:bg-accent hover:text-foreground hover:no-underline [&_[data-slot=accordion-trigger-icon]]:ml-2 [&_[data-slot=accordion-trigger-icon]]:text-muted-foreground/70",
                           profileSelected && "text-foreground",
                         )}
-                        title={profile.displayName || profile.id}
+
                       >
                         <span className="flex min-w-0 flex-1 items-center gap-2">
                           <RoundBrandIcon name={providerBrandKey(profile)} />
@@ -301,7 +301,7 @@ function ProfileModels({
               "flex w-full min-w-0 items-center gap-2 overflow-hidden rounded-md py-1.5 pr-2.5 pl-5 text-left text-[13px] hover:bg-accent",
               selected && "bg-accent",
             )}
-            title={`${label} (${model})`}
+
             type="button"
             onClick={() => onPick(model)}
           >

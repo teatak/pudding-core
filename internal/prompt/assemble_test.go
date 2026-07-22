@@ -42,18 +42,18 @@ func TestAssembleIncludesSkillsIndex(t *testing.T) {
 		Home: home,
 		Skills: []skill.Skill{
 			{
-				ID:          "skill-creator",
-				Description: "Create or update Pudding skills.",
+				ID:          "daily-review",
+				Description: "Review daily notes.",
 				Source:      skill.SourceUser,
-				Path:        "skill-creator/SKILL.md",
+				Path:        "daily-review/SKILL.md",
 			},
 		},
 	})
-	realPath := filepath.Join(home, "skills", "skill-creator", "SKILL.md")
+	realPath := filepath.Join(home, "skills", "daily-review", "SKILL.md")
 	if !strings.Contains(out.SystemInstruction, "## Available Skills") {
 		t.Fatalf("assembled prompt missing skills index:\n%s", out.SystemInstruction)
 	}
-	if !strings.Contains(out.SystemInstruction, "`skill-creator`") || !strings.Contains(out.SystemInstruction, "Create or update Pudding skills.") {
+	if !strings.Contains(out.SystemInstruction, "`daily-review`") || !strings.Contains(out.SystemInstruction, "Review daily notes.") {
 		t.Fatalf("assembled prompt missing skill metadata:\n%s", out.SystemInstruction)
 	}
 	if !strings.Contains(out.SystemInstruction, realPath) {
@@ -62,7 +62,7 @@ func TestAssembleIncludesSkillsIndex(t *testing.T) {
 	if !strings.Contains(out.SystemInstruction, "builtin_skill_read") {
 		t.Fatalf("assembled prompt missing skill read instruction:\n%s", out.SystemInstruction)
 	}
-	if strings.Contains(out.SystemInstruction, "# Skill Creator") {
+	if strings.Contains(out.SystemInstruction, "# Daily Review") {
 		t.Fatalf("assembled prompt should not inline SKILL.md body:\n%s", out.SystemInstruction)
 	}
 }
@@ -72,10 +72,10 @@ func TestAssembleDoesNotShowPseudoPathForBuiltinSkill(t *testing.T) {
 		Mode: "chat",
 		Skills: []skill.Skill{
 			{
-				ID:          "skill-creator",
-				Description: "Create or update Pudding skills.",
+				ID:          "system-guide",
+				Description: "Follow a bundled system workflow.",
 				Source:      skill.SourceBuiltin,
-				Path:        "builtin/skill-creator/SKILL.md",
+				Path:        "builtin/system-guide/SKILL.md",
 			},
 		},
 	})
@@ -123,8 +123,8 @@ func TestAssembleIncludesAppsIndex(t *testing.T) {
 	if !strings.Contains(out.SystemInstruction, `builtin_app_load(app_id="<app id>")`) {
 		t.Fatalf("assembled prompt missing explicit app load instruction:\n%s", out.SystemInstruction)
 	}
-	if !strings.Contains(out.SystemInstruction, "Never use `builtin_toolkit_load` or `builtin_skill_read` to load an App") {
-		t.Fatalf("assembled prompt missing App/Toolkit loading boundary:\n%s", out.SystemInstruction)
+	if !strings.Contains(out.SystemInstruction, "Never use `builtin_skill_read` to load an App") {
+		t.Fatalf("assembled prompt missing App loading boundary:\n%s", out.SystemInstruction)
 	}
 	if !strings.Contains(out.SystemInstruction, "Default skill `github-issues`") {
 		t.Fatalf("assembled prompt missing default app skill:\n%s", out.SystemInstruction)
@@ -256,8 +256,17 @@ func TestAssembleModeLayersAndAllModesShowApps(t *testing.T) {
 		t.Fatalf("work prompt missing mode or apps segments: %+v", work.Segments)
 	}
 	code := Assemble(Input{Mode: "code", Apps: apps})
-	if !strings.Contains(code.SystemInstruction, "## Code Mode") || !strings.Contains(code.SystemInstruction, `builtin_app_load(app_id="terminal")`) || !hasSegment(code.Segments, "mode_code") || !hasSegment(code.Segments, "apps_index") {
+	if !strings.Contains(code.SystemInstruction, "## Code Mode") || !strings.Contains(code.SystemInstruction, "builtin_command_session") || !hasSegment(code.Segments, "mode_code") || !hasSegment(code.Segments, "apps_index") {
 		t.Fatalf("code prompt missing mode or apps segments: %+v", code.Segments)
+	}
+	if strings.Contains(code.SystemInstruction, `builtin_app_load(app_id="terminal")`) {
+		t.Fatalf("code prompt still treats terminal as an App:\n%s", code.SystemInstruction)
+	}
+	if !strings.Contains(code.SystemInstruction, "Treat verification as part of the implementation") ||
+		!strings.Contains(code.SystemInstruction, "go test ./...") ||
+		!strings.Contains(code.SystemInstruction, "typecheck") ||
+		!strings.Contains(code.SystemInstruction, "remaining risk") {
+		t.Fatalf("code mode prompt missing compile and verification guidance")
 	}
 }
 
@@ -270,17 +279,19 @@ func hasSegment(segments []Segment, id string) bool {
 	return false
 }
 
-func TestLoaderIncludesBuiltinSkillsIndex(t *testing.T) {
+func TestLoaderListsAuthoringCapabilitiesAsApps(t *testing.T) {
 	home := t.TempDir()
 	out, err := NewLoader(home).Prompt(context.Background(), "chat")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.SystemInstruction, "## Available Skills") || !strings.Contains(out.SystemInstruction, "`skill-creator`") {
-		t.Fatalf("loader prompt missing builtin skill index:\n%s", out.SystemInstruction)
+	if strings.Contains(out.SystemInstruction, "## Available Skills") || strings.Contains(out.SystemInstruction, "`skill-creator`") && !strings.Contains(out.SystemInstruction, "Default skill `skill-creator`") {
+		t.Fatalf("loader prompt exposed authoring Skills globally:\n%s", out.SystemInstruction)
 	}
-	if strings.Contains(out.SystemInstruction, "# Skill Creator") {
-		t.Fatalf("loader prompt should not inline builtin skill body:\n%s", out.SystemInstruction)
+	for _, appID := range []string{"skill-authoring", "app-authoring"} {
+		if !strings.Contains(out.SystemInstruction, "App `"+appID+"`") {
+			t.Fatalf("loader prompt missing authoring App %s:\n%s", appID, out.SystemInstruction)
+		}
 	}
 }
 

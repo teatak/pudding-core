@@ -156,8 +156,8 @@ function BackgroundProcessRow({
             className={cn("size-1.5 shrink-0 rounded-full", process.sandboxDenied ? "bg-amber-500" : process.running ? "bg-emerald-500" : "bg-muted-foreground/40")}
           />
           <div className="min-w-0 flex-1">
-            <div className="truncate font-mono text-xs" title={command}>{command}</div>
-            <div className="truncate text-[10px] leading-4 text-muted-foreground" title={process.cwd}>
+            <div className="truncate font-mono text-xs" >{command}</div>
+            <div className="truncate text-[10px] leading-4 text-muted-foreground" >
               {status} · {process.cwd}
             </div>
           </div>
@@ -214,12 +214,5 @@ function processStatus(process: BackgroundProcess, t: (key: string) => string) {
 }
 
 function processCommand(process: BackgroundProcess) {
-  if (process.script) {
-    return process.script;
-  }
-  return (process.argv ?? []).map(formatCommandArg).join(" ") || process.processID;
-}
-
-function formatCommandArg(value: string) {
-  return /\s/.test(value) ? JSON.stringify(value) : value;
+  return process.command || process.processID;
 }

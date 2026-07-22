@@ -502,7 +502,7 @@ export function ProjectBrowserSurface({
               <button
                 aria-label={t(searchOpen ? "project.browserSearchClose" : "project.browserSearch")}
                 className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
-                title={t(searchOpen ? "project.browserSearchClose" : "project.browserSearch")}
+
                 type="button"
                 onClick={() => setSearchOpen((current) => !current)}
               >

@@ -64,6 +64,7 @@ export function MessageMeta({
           align === "start" && "-ml-1",
         )}
         size="icon-xs"
+        tabIndex={-1}
         type="button"
         variant="ghost"
         onClick={() => {
@@ -106,7 +107,7 @@ function ModelPill({ model }: { model: TurnModelVM }) {
   return (
     <span
       className="inline-flex h-5 min-w-0 max-w-48 items-center text-[11px] leading-none text-muted-foreground/60"
-      title={model.model}
+
     >
       <span className="truncate">{label}</span>
     </span>

@@ -360,7 +360,7 @@ func aggregate(calls []*callRecord, turnCalls map[turnKey][]*callRecord, report 
 }
 
 func currentRequiredModes() map[string]store.AgentMode {
-	modes := map[string]store.AgentMode{tool.RequestCapability: store.ModeChat, tool.ToolkitLoad: store.ModeChat, tool.AppLoad: store.ModeChat}
+	modes := map[string]store.AgentMode{tool.RequestCapability: store.ModeChat, tool.AppLoad: store.ModeChat}
 	for _, definition := range tool.BuiltinDefinitions() {
 		mode := store.NormalizeAgentMode(definition.Capability)
 		if mode == "" {
@@ -396,8 +396,6 @@ func toolGroup(name string) string {
 	switch {
 	case strings.HasPrefix(name, "builtin_command_"):
 		return "command"
-	case name == tool.ToolkitLoad:
-		return "toolkit"
 	case name == tool.AppLoad:
 		return "app"
 	case name == tool.RequestCapability, strings.HasPrefix(name, "builtin_project_"):
@@ -422,8 +420,8 @@ func toolGroup(name string) string {
 		return "skill"
 	case strings.HasPrefix(name, "builtin_attachment_"):
 		return "attachment"
-	case strings.HasPrefix(name, "ui_"):
-		return "ui"
+	case name == tool.RequestUserInput:
+		return "interaction"
 	default:
 		return "other"
 	}
@@ -444,12 +442,16 @@ func toolDomain(name string) string {
 
 func commandDomain(raw json.RawMessage) string {
 	var args struct {
-		Argv []string `json:"argv"`
+		Command string `json:"command"`
 	}
-	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil || len(args.Argv) == 0 {
+	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil {
 		return ""
 	}
-	executable := strings.ToLower(filepath.Base(strings.TrimSpace(args.Argv[0])))
+	fields := strings.Fields(args.Command)
+	if len(fields) == 0 {
+		return ""
+	}
+	executable := strings.ToLower(filepath.Base(strings.Trim(fields[0], "'\"")))
 	executable = strings.TrimSuffix(executable, ".exe")
 	switch executable {
 	case "git":

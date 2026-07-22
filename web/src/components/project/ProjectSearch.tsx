@@ -102,7 +102,7 @@ export function ProjectSearch({
               <button
                 key={`${match.rootID}:${match.path}:${match.line}:${index}`}
                 className="block w-full min-w-0 border-t border-[var(--workspace-border-subtle)] px-2 py-1.5 text-left hover:bg-[var(--workspace-tree-hover-background)]"
-                title={`${match.path}:${match.line}`}
+
                 type="button"
                 onClick={() => onOpen(match)}
               >

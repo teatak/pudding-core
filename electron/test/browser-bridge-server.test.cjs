@@ -51,6 +51,12 @@ test("classifies page element failures separately from missing tabs", () => {
     retryable: false,
     message: "target is not editable: native value setter missing",
   });
+  assert.deepEqual(classifyError(new Error("browser input did not produce the expected value")), {
+    status: 422,
+    code: "input_value_mismatch",
+    retryable: false,
+    message: "browser input did not produce the expected value",
+  });
 });
 
 test("classifies transient CDP and webview failures as retryable", () => {

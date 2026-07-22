@@ -9,29 +9,17 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
-func TestDefinitionsForTurnUsesCumulativeCapabilityLevels(t *testing.T) {
+func TestToolDefAllowedForModeUsesCumulativeCapabilityLevels(t *testing.T) {
 	defs := []provider.ToolDef{
 		{Name: "chat_tool", Capability: store.ModeChat},
 		{Name: "work_tool", Capability: store.ModeWork},
 		{Name: "code_tool", Capability: store.ModeCode},
 	}
-	tests := []struct {
-		mode store.AgentMode
-		want []string
-	}{
-		{mode: store.ModeChat, want: []string{RequestCapability, ToolkitLoad, "chat_tool"}},
-		{mode: store.ModeWork, want: []string{RequestCapability, ToolkitLoad, "chat_tool", "work_tool"}},
-		{mode: store.ModeCode, want: []string{RequestCapability, ToolkitLoad, "chat_tool", "code_tool", "work_tool"}},
-	}
-	active := map[string]bool{"external.chat": true, "external.work": true, "external.code": true}
-	for _, test := range tests {
-		got := DefinitionsForTurn(test.mode, defs, active)
-		if len(got) != len(test.want) {
-			t.Fatalf("mode %q definitions = %+v, want %+v", test.mode, got, test.want)
-		}
-		for index, want := range test.want {
-			if got[index].Name != want {
-				t.Fatalf("mode %q definition %d = %q, want %q", test.mode, index, got[index].Name, want)
+	for modeIndex, mode := range []store.AgentMode{store.ModeChat, store.ModeWork, store.ModeCode} {
+		for definitionIndex, def := range defs {
+			want := definitionIndex <= modeIndex
+			if got := ToolDefAllowedForMode(mode, def); got != want {
+				t.Fatalf("mode %q allows %q = %v, want %v", mode, def.Name, got, want)
 			}
 		}
 	}
@@ -68,7 +56,7 @@ func TestRequiredModeForDynamicMCPTools(t *testing.T) {
 		{name: "app_mcp__github__list_issues", want: store.ModeWork},
 		{name: AppLoad, want: store.ModeChat},
 		{name: "canvas_create", want: store.ModeChat},
-		{name: "collect_user_input", want: store.ModeChat},
+		{name: RequestUserInput, want: store.ModeChat},
 		{name: "unknown_dynamic_tool", want: store.ModeCode},
 	}
 	for _, test := range tests {

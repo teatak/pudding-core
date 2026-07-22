@@ -50,21 +50,24 @@ make tools-report RUNARGS="--days 30 --all"
 | command run | Core | 保留默认,CLI-first |
 | file read | Core | 保留默认 |
 | patch propose/apply | Core | 保留默认 |
-| file list/stat/search/slice | `code.files-read` | 默认隐藏,CLI 失败时加载 |
-| file write/patch/delete/move/copy | `code.files-write` | 默认隐藏 |
-| Git status/diff/log | `code.git-read` | 默认隐藏,CLI 失败时加载 |
-| Git stage/unstage/commit | `code.git-write` | 默认隐藏,保留结构化审批 |
-| LSP tools | `code.lsp` | 默认隐藏,语义任务时加载 |
-| background process | Terminal App | 默认隐藏,dev server 等任务时加载 |
-| skill validate | `code.skill` | 默认隐藏 |
-| App save | `code.app` | 默认隐藏 |
+| file list/stat/search/slice | Project Files App | 默认隐藏,CLI 失败时加载 |
+| file write/patch/delete/move/copy | Project Files App | 默认隐藏 |
+| Git status/diff/log | Source Control App | 默认隐藏,CLI 失败时加载 |
+| Git stage/unstage/commit | Source Control App | 默认隐藏,保留结构化审批 |
+| LSP tools | Code Intelligence App | 默认隐藏,语义任务时加载 |
+| background process | Core | 与 command run 配套,Code 模式默认可用 |
+| skill validate | Skill Authoring 内置 App | 会话级按需加载 |
+| App save | App Authoring 内置 App | 会话级按需加载 |
 
 ## 5. M5 删除结论
 
 M5 不删除现有专用工具实现。确定性 Eval 支持把文件与 Git 只读能力改为 CLI-first,
 但 30 天数据中 Git read 与 LSP 均为 0 次,尚不足以证明删除后没有回归。它们已转入
-lazy toolkit,默认不占工具 schema;后续积累至少 10 个真实模型固定任务后再重新评估。
+会话级内置 App,默认不占工具 schema;后续积累至少 10 个真实模型固定任务后再重新评估。
 
-可执行文件缺失必须返回正常 CLI 结果并通过 lazy toolkit fallback 恢复,不能成为
-turn 级错误。加入 `code.app` 后,当前默认 Code 暴露 17/40 个非 App schema,
-JSON 从 32585 B 降至 14082 B,减少 56.8%。
+可执行文件缺失必须返回正常 CLI 结果并通过对应 App fallback 恢复,不能成为
+turn 级错误。`builtin_command_session` 作为 `builtin_command_run` 的必要配套能力常驻
+Code Core。可选工具迁入内置 App 后，daemon 默认 Code 暴露 17 个 schema
+（16 个 Core 加 `builtin_app_load`）；连接 Desktop runtime 后再增加
+`builtin_request_user_input`。全部内置能力若同时暴露为 55 个 schema，
+JSON 从约 42057 B 降至约 14938 B，减少 64.5%；其余低频工具继续按需加载。

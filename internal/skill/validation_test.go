@@ -80,16 +80,20 @@ func TestServiceValidateSkillRejectsSymlinkedSkillFile(t *testing.T) {
 	}
 }
 
-func TestServiceValidateSkillRejectsBuiltinID(t *testing.T) {
+func TestAppSkillIDDoesNotBlockGlobalSkillValidation(t *testing.T) {
 	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(home, "skills"), 0o700); err != nil {
+	dir := filepath.Join(home, "skills", "skill-creator")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, SkillFileName), []byte("---\nname: skill-creator\ndescription: A user-owned global Skill with an id also used inside an App.\n---\n# User Skill\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	validation, err := NewService(home).ValidateSkill(context.Background(), "skill-creator")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if validation.OK || len(validation.Errors) == 0 {
-		t.Fatalf("builtin id should be rejected: %+v", validation)
+	if !validation.OK || len(validation.Errors) != 0 {
+		t.Fatalf("App Skill id should not reserve the global namespace: %+v", validation)
 	}
 }

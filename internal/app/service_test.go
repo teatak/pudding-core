@@ -80,14 +80,44 @@ func TestBuiltinAppsMergeEnablementAndSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(defs) != 2 || defs[0].ID != BuiltinBrowserID || defs[1].ID != BuiltinTerminalID {
+	if len(defs) != 7 {
 		t.Fatalf("unexpected builtin definitions: %+v", defs)
 	}
-	if defs[0].Source != SourceBuiltin || !defs[0].Enabled || defs[0].CanUninstall || defs[0].RequiredMode != "work" || defs[0].DefaultSkillID != BuiltinBrowserID {
-		t.Fatalf("unexpected browser definition: %+v", defs[0])
+	browser := definitionByID(defs, BuiltinBrowserID)
+	if browser == nil || browser.Source != SourceBuiltin || !browser.Enabled || browser.CanUninstall || browser.RequiredMode != "work" || browser.DefaultSkillID != BuiltinBrowserID {
+		t.Fatalf("unexpected browser definition: %+v", browser)
 	}
-	if len(defs[0].Tools) != 11 || defs[0].Tools[0].Name != toolBrowserStatus || len(defs[1].Tools) != 3 {
-		t.Fatalf("unexpected builtin tools: browser=%+v terminal=%+v", defs[0].Tools, defs[1].Tools)
+	if len(browser.Tools) != 11 || browser.Tools[0].Name != toolBrowserStatus {
+		t.Fatalf("unexpected builtin tools: browser=%+v", browser.Tools)
+	}
+	for _, tc := range []struct {
+		appID, skillID, toolName string
+	}{
+		{BuiltinSkillAuthoringID, "skill-creator", toolSkillValidate},
+		{BuiltinAppAuthoringID, "app-creator", toolAppSave},
+	} {
+		def := definitionByID(defs, tc.appID)
+		if def == nil || def.RequiredMode != "code" || def.DefaultSkillID != tc.skillID || len(def.Tools) != 1 || def.Tools[0].Name != tc.toolName {
+			t.Fatalf("unexpected authoring app %s: %+v", tc.appID, def)
+		}
+		detail, err := svc.ReadSkill(context.Background(), tc.appID, tc.skillID)
+		if err != nil || detail.Content == "" {
+			t.Fatalf("read authoring skill %s: detail=%+v err=%v", tc.skillID, detail, err)
+		}
+	}
+	for _, tc := range []struct {
+		appID, requiredMode string
+		toolCount           int
+	}{
+		{BuiltinProjectFilesID, "code", 9},
+		{BuiltinSourceControlID, "code", 6},
+		{BuiltinCodeIntelID, "code", 5},
+		{BuiltinCaptureID, "chat", 2},
+	} {
+		def := definitionByID(defs, tc.appID)
+		if def == nil || def.RequiredMode != tc.requiredMode || def.DefaultSkillID != "" || len(def.Skills) != 0 || len(def.Tools) != tc.toolCount {
+			t.Fatalf("unexpected tool-only builtin app %s: %+v", tc.appID, def)
+		}
 	}
 
 	updated, err := svc.SetEnabled(context.Background(), BuiltinBrowserID, false)
@@ -123,7 +153,7 @@ func TestRuntimeAppIsScopedToOriginRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(defs) != 2 {
+	if len(defs) != 7 {
 		t.Fatalf("runtime app leaked without runtime identity: %+v", defs)
 	}
 
@@ -132,7 +162,8 @@ func TestRuntimeAppIsScopedToOriginRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(defs) != 3 || defs[2].ID != "canvas" || defs[2].Source != SourceBuiltin || defs[2].Runtime != "desktop" || defs[2].CanUninstall {
+	canvas := definitionByID(defs, "canvas")
+	if len(defs) != 8 || canvas == nil || canvas.Source != SourceBuiltin || canvas.Runtime != "desktop" || canvas.CanUninstall {
 		t.Fatalf("unexpected runtime app definition: %+v", defs)
 	}
 	if _, err := svc.SetEnabled(ctx, "canvas", false); err != nil {
@@ -148,6 +179,15 @@ func TestRuntimeAppIsScopedToOriginRuntime(t *testing.T) {
 	if err != nil || detail.Content != "# Canvas" {
 		t.Fatalf("unexpected runtime skill: detail=%+v err=%v", detail, err)
 	}
+}
+
+func definitionByID(defs []*Definition, id string) *Definition {
+	for _, def := range defs {
+		if def != nil && def.ID == id {
+			return def
+		}
+	}
+	return nil
 }
 
 func TestDecorateInstalledDefinitionInfersAPITools(t *testing.T) {
@@ -191,7 +231,11 @@ func TestInstalledAppCanBeTemporarilyDisabled(t *testing.T) {
 }
 
 func TestInstallPackageRejectsReservedAppIDs(t *testing.T) {
-	for _, appID := range []string{BuiltinBrowserID, BuiltinTerminalID, RuntimeCanvasID} {
+	for _, appID := range []string{
+		BuiltinBrowserID, BuiltinSkillAuthoringID, BuiltinAppAuthoringID,
+		BuiltinProjectFilesID, BuiltinSourceControlID, BuiltinCodeIntelID, BuiltinCaptureID,
+		RuntimeCanvasID,
+	} {
 		t.Run(appID, func(t *testing.T) {
 			packageJSON := []byte(`{"kind":"pudding.app.package","schema_version":1,"app":{"id":"` + appID + `"}}`)
 			if _, err := InstallPackage(t.TempDir(), packageJSON, "", ""); !errors.Is(err, ErrBuiltinApp) {

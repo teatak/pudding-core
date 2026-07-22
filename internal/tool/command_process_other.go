@@ -6,6 +6,8 @@ import "os/exec"
 
 func configureCommandProcess(_ *exec.Cmd) {}
 
+func configureCommandPTY(_ *exec.Cmd) {}
+
 func terminateCommandProcess(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
 		return nil

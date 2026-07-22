@@ -24,8 +24,8 @@ chat < work < code
 
 | 模式 | 定位 | 能力 |
 | --- | --- | --- |
-| Chat | 查询与观察 | 对话、历史、附件、Skills、Web Search/Fetch、Weather、Desktop Screenshot、Canvas/UI |
-| Work | 操作外部系统 | Chat + 完整 Browser、Apps/MCP、REST/GraphQL、Camera |
+| Chat | 查询与观察 | 对话、历史、附件、Skills、Web Search/Fetch、Weather、Image Capture、Canvas/UI |
+| Work | 操作外部系统 | Chat + 完整 Browser、Apps/MCP、REST/GraphQL |
 | Code | 操作本地项目 | Work + Project、File、Command、Git、LSP、Patch、Skill 创作与校验 |
 
 Browser 是不可拆分的能力包。以下工具必须全部属于 Work:
@@ -34,7 +34,8 @@ Browser 是不可拆分的能力包。以下工具必须全部属于 Work:
 - back / forward / reload / close
 - click / type / scroll
 
-`DesktopScreenshot` 属于 Chat;`BrowserScreenshot` 跟随 Browser 整组属于 Work。
+`DesktopScreenshot` 与 `CameraCapture` 跟随 Image Capture App 属于 Chat;
+`BrowserScreenshot` 跟随 Browser 整组属于 Work。
 
 ## 3. 工具归属
 
@@ -50,7 +51,7 @@ Browser 是不可拆分的能力包。以下工具必须全部属于 Work:
 - `builtin_skill_read`
 - `builtin_attachment_read_image`
 - `builtin_weather_get`
-- `builtin_desktop_screenshot`
+- 加载 Image Capture App 后的 `builtin_desktop_screenshot` 与 `builtin_camera_capture`
 - 当前 Runtime 提供且已通过 `builtin_app_load` 加载的 UI App 工具
 
 ### 3.2 Work
@@ -59,7 +60,6 @@ Browser 是不可拆分的能力包。以下工具必须全部属于 Work:
 - `builtin_graphql_request`
 - `builtin_graphql_introspect`
 - `builtin_graphql_search`
-- `builtin_camera_capture`
 - 全部 `builtin_browser_*`
 - 已安装 App 的 MCP 工具
 
@@ -139,7 +139,7 @@ FTS 初始化只管理派生索引，不承担 canonical schema 升级。
 ## 8. 验收标准
 
 - Store、API 与前端只接受 `chat | work | code`。
-- Chat 中没有 Browser、Apps/MCP、REST/GraphQL 或 Camera。
+- Chat 中没有 Browser、Work 级 Apps/MCP 或 REST/GraphQL；可以按需加载 Chat 级 Image Capture 与 Canvas App。
 - Work 中完整 Browser 工具组可用。
 - Code 中所有 Project 工具可用,且必须显式携带 Project scope/sessionID。
 - Project 创建会话默认 Code,普通会话默认 Chat。

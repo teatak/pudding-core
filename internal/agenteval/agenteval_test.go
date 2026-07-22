@@ -81,7 +81,7 @@ func TestScoringHelpers(t *testing.T) {
 	if !claimsVerificationPassed("All tests passed") || claimsVerificationPassed("Tests were not run") {
 		t.Fatal("verification claim detection mismatch")
 	}
-	if !commandArgsMatch([]byte(`{"scope":"project","argv":["go","test","./..."]}`), []string{"go", "test", "./..."}) {
+	if !commandArgsMatch([]byte(`{"scope":"project","command":"go test ./..."}`), []string{"go", "test", "./..."}) {
 		t.Fatal("verification command should match")
 	}
 	failure := toolFailureDetail(

@@ -60,9 +60,6 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string) (T
 	if name == CommandRun {
 		return classifyCommandCall(raw, projectDirs)
 	}
-	if name == CommandStart {
-		return classifyCommandStartCall(raw, projectDirs)
-	}
 	if name == GitStatus || name == GitDiff || name == GitLog {
 		return classifyGitReadCall(name, raw)
 	}
@@ -70,15 +67,35 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string) (T
 		return classifyGitWriteCall(name, raw)
 	}
 	if name == PatchApply {
-		var args patchApplyArgs
-		if len(raw) == 0 || json.Unmarshal(raw, &args) != nil || strings.TrimSpace(args.ProposalID) == "" {
+		args, argumentErr := decodePatchApplyArgs(raw)
+		if argumentErr != nil || strings.TrimSpace(args.Scope) != managedScopeProject || len(args.Files) == 0 || len(args.Files) > patchMaxFiles {
 			return ToolRisk{}, false
+		}
+		paths := make([]string, 0, len(args.Files))
+		destructive := false
+		for _, file := range args.Files {
+			path := strings.TrimSpace(file.Path)
+			if path == "" {
+				return ToolRisk{}, false
+			}
+			paths = append(paths, path)
+			destructive = destructive || file.Delete
+		}
+		if destructive {
+			return ToolRisk{
+				Class:     RiskClassDestructive,
+				Operation: "patch_apply",
+				Scope:     managedScopeProject,
+				Paths:     compactRiskPaths(paths...),
+				Summary:   "Apply a multi-file patch that deletes project files.",
+			}, true
 		}
 		return ToolRisk{
 			Class:     RiskClassWrite,
 			Operation: "patch_apply",
 			Scope:     managedScopeProject,
-			Summary:   "Apply a reviewed patch proposal to project files.",
+			Paths:     compactRiskPaths(paths...),
+			Summary:   "Apply a multi-file patch to project files.",
 			LowRisk:   true,
 		}, true
 	}
@@ -125,33 +142,6 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string) (T
 	}
 }
 
-func classifyCommandStartCall(raw json.RawMessage, projectDirs []string) (ToolRisk, bool) {
-	args, err := decodeCommandStartArgs(raw)
-	if err != nil {
-		return ToolRisk{}, false
-	}
-	command := commandRunArgs{Scope: args.Scope, Argv: args.Argv, Script: args.Script, CWD: args.CWD, Env: args.Env}
-	risk, ok := classifyCommandCall(mustMarshalCommandRisk(command), projectDirs)
-	if !ok {
-		return ToolRisk{}, false
-	}
-	if risk.Class != RiskClassDestructive {
-		risk.Class = RiskClassCommand
-	}
-	risk.Operation = "process_start"
-	if args.Script != "" {
-		risk.Summary = "Start background project shell script: " + compactScript(args.Script)
-	} else {
-		risk.Summary = "Start background project command: " + compactCommand(args.Argv)
-	}
-	return risk, true
-}
-
-func mustMarshalCommandRisk(args commandRunArgs) json.RawMessage {
-	raw, _ := json.Marshal(args)
-	return raw
-}
-
 func classifyCodeReadCall(name string, raw json.RawMessage) (ToolRisk, bool) {
 	var args struct {
 		Scope string   `json:"scope"`
@@ -165,16 +155,22 @@ func classifyCodeReadCall(name string, raw json.RawMessage) (ToolRisk, bool) {
 	if path := strings.TrimSpace(args.Path); path != "" {
 		paths = append(paths, path)
 	}
-	summary := "Read semantic code information from the project language server."
 	if name == CodeRename {
-		summary = "Prepare a semantic rename proposal without changing project files."
+		return ToolRisk{
+			Class:     RiskClassWrite,
+			Operation: "code_rename",
+			Scope:     managedScopeProject,
+			Paths:     compactRiskPaths(paths...),
+			Summary:   "Rename a project symbol and update its references.",
+			LowRisk:   true,
+		}, true
 	}
 	return ToolRisk{
 		Class:     RiskClassRead,
 		Operation: strings.TrimPrefix(name, "builtin_"),
 		Scope:     managedScopeProject,
 		Paths:     compactRiskPaths(paths...),
-		Summary:   summary,
+		Summary:   "Read semantic code information from the project language server.",
 		LowRisk:   true,
 	}, true
 }
@@ -239,51 +235,102 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, b
 	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil || strings.TrimSpace(args.Scope) != managedScopeProject || validateCommandInput(args) != nil {
 		return ToolRisk{}, false
 	}
-	if args.Script != "" {
-		summary := "Run project shell script: " + compactScript(args.Script)
-		if len(args.Env) > 0 {
-			summary = "Run project shell script with custom environment: " + compactScript(args.Script)
-		}
-		return ToolRisk{
-			Class:     RiskClassCommand,
-			Operation: "shell",
-			Scope:     managedScopeProject,
-			Paths:     compactRiskPaths(args.CWD),
-			Summary:   summary,
-			LowRisk:   false,
-		}, true
+	analysis, err := analyzeShellCommand(args.Command)
+	if err != nil {
+		return ToolRisk{}, false
 	}
-	operation := commandOperation(args.Argv[0])
-	lowRisk := commandExecutableAllowedForAuto(args.Argv[0], args.CWD, projectDirs) &&
-		!commandRequiresApproval(args.Argv) &&
-		!commandArgsEscapeProject(args.Argv[1:], args.CWD, projectDirs)
-	if lowRisk && isProjectFilesystemCommand(operation) {
-		lowRisk = commandFilesystemArgsInsideProject(args.Argv[1:], args.CWD, projectDirs)
+	operation := "shell"
+	if len(analysis.Commands) == 1 {
+		operation = commandOperation(analysis.Commands[0][0])
 	}
+	lowRisk := !analysis.Dynamic && len(analysis.Commands) > 0
 	risk := ToolRisk{
 		Class:     RiskClassCommand,
 		Operation: operation,
 		Scope:     managedScopeProject,
 		Paths:     compactRiskPaths(args.CWD),
-		Summary:   "Run project command: " + compactCommand(args.Argv),
+		Summary:   "Run project command: " + compactShellCommand(args.Command),
 		LowRisk:   lowRisk,
 	}
+	for _, argv := range analysis.Commands {
+		commandOperation := commandOperation(argv[0])
+		commandLowRisk := commandExecutableAllowedForAuto(argv[0], args.CWD, projectDirs) &&
+			!commandRequiresApproval(argv) &&
+			!commandArgsEscapeProject(argv[1:], args.CWD, projectDirs)
+		if commandLowRisk && isProjectFilesystemCommand(commandOperation) {
+			commandLowRisk = commandFilesystemArgsInsideProject(argv[1:], args.CWD, projectDirs)
+		}
+		risk.LowRisk = risk.LowRisk && commandLowRisk
+		if isDestructiveCommand(commandOperation) {
+			risk.Class = RiskClassDestructive
+			risk.LowRisk = false
+		}
+	}
+	if !commandRedirectionsInsideProject(analysis.Redirections, args.CWD, projectDirs) {
+		risk.LowRisk = false
+	}
 	if len(args.Env) > 0 {
-		risk.Summary = "Run project command with custom environment: " + compactCommand(args.Argv)
+		risk.Summary = "Run project command with custom environment: " + compactShellCommand(args.Command)
 		if commandEnvironmentRequiresApproval(args.Env) {
 			risk.LowRisk = false
 		}
 	}
-	if isDestructiveCommand(operation) {
-		risk.Class = RiskClassDestructive
-		risk.LowRisk = false
-		risk.Summary = "Run destructive project command: " + compactCommand(args.Argv)
+	if args.Background {
+		risk.Operation = "process_start"
+		risk.Summary = "Start background project command: " + compactShellCommand(args.Command)
+		if args.TTY {
+			risk.Summary = "Start interactive project command: " + compactShellCommand(args.Command)
+		}
+	}
+	if risk.Class == RiskClassDestructive {
+		risk.Summary = "Run destructive project command: " + compactShellCommand(args.Command)
 	}
 	return risk, true
 }
 
-func compactScript(script string) string {
-	return compactCommand([]string{strings.Join(strings.Fields(script), " ")})
+func compactShellCommand(command string) string {
+	return compactCommand([]string{strings.Join(strings.Fields(command), " ")})
+}
+
+func commandRedirectionsInsideProject(redirections []shellRedirection, cwd string, projectDirs []string) bool {
+	roots := normalizeProjectDirs(projectDirs)
+	resolvedCWD := ""
+	if len(roots) > 0 {
+		_, resolved, _, err := resolveProjectPath(roots, cwd, true, false)
+		if err != nil {
+			return false
+		}
+		resolvedCWD = resolved
+	}
+	for _, redirection := range redirections {
+		path := strings.TrimSpace(redirection.Path)
+		if isSafeDeviceRedirection(path) {
+			continue
+		}
+		if path == "" {
+			return false
+		}
+		if len(roots) == 0 {
+			cleaned := filepath.Clean(path)
+			if filepath.IsAbs(path) || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+				return false
+			}
+			continue
+		}
+		if !commandPathInsideProject(path, resolvedCWD, roots) {
+			return false
+		}
+	}
+	return true
+}
+
+func isSafeDeviceRedirection(path string) bool {
+	switch filepath.Clean(strings.TrimSpace(path)) {
+	case "/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr":
+		return true
+	default:
+		return false
+	}
 }
 
 func commandArgsEscapeProject(args []string, cwd string, projectDirs []string) bool {

@@ -6,7 +6,7 @@ export type AppSearch = {
   draft?: string;
   project?: string;
   split?: string;
-  view?: "apps";
+  view?: "apps" | "projects";
 };
 
 const lastRouteStorageKey = "pudding.lastRoute.v1";
@@ -59,8 +59,8 @@ function normalizeAppRoute(value: unknown): AppSearch | null {
     return null;
   }
   const route = value as Record<string, unknown>;
-  if (route.view === "apps") {
-    return { view: "apps" };
+  if (route.view === "apps" || route.view === "projects") {
+    return { view: route.view };
   }
   const session = routeValue(route.session);
   if (session) {
