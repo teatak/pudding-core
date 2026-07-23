@@ -15,12 +15,14 @@ const CONTENT_STICK_STABILIZE_FRAMES = 2;
 const VIEWPORT_ANCHOR_MAX_TOP_RATIO = 0.7;
 const VIEWPORT_ANCHOR_MIN_TOP_RATIO = 0.3;
 const VIEWPORT_ANCHOR_TARGET_RATIO = 0.5;
+const POINTER_SCROLL_SETTLE_MS = 800;
 
 type HistoryLoadState = "idle" | "loading" | "settling";
 type DisclosureOpenState = { openedAtLatest: boolean; userScrollSeq: number };
 type ResizeAnchor = { anchorID: string; top: number; topRatio: number };
 type HistoryAnchor = { top: number; turnID: string };
 type CapturedAnchor<T> = T & { element: HTMLElement };
+type PointerGesture = { pointerID: number; startY: number };
 
 export const TranscriptList = memo(function TranscriptList({
   disclosure,
@@ -70,6 +72,8 @@ export const TranscriptList = memo(function TranscriptList({
   const pendingHistoryAnchorRef = useRef<HistoryAnchor | null>(null);
   const pendingHistoryAnchorSessionRef = useRef("");
   const pendingHistoryAnchorClearTimerRef = useRef<number | null>(null);
+  const pointerGestureRef = useRef<PointerGesture | null>(null);
+  const pointerScrollIntentUntilRef = useRef(0);
   const previousFirstTurnKeyRef = useRef<string | null>(null);
   const resizeAnchorRef = useRef<ResizeAnchor | null>(null);
   const viewportResizeSettleTimerRef = useRef<number | null>(null);
@@ -427,15 +431,27 @@ export const TranscriptList = memo(function TranscriptList({
       const nearTop = nextScrollTop < HISTORY_LOAD_SCROLL_TOP_PX;
       const bottomDistance = distanceFromBottom(node);
       const isProgrammaticScroll = performance.now() < programmaticScrollIgnoreUntilRef.current;
+      const hasPointerScrollIntent = performance.now() < pointerScrollIntentUntilRef.current;
       lastScrollTopRef.current = nextScrollTop;
 
-      // A growing composer shrinks this flex viewport. Chromium may emit the
-      // resulting scroll event before ResizeObserver, which otherwise looks
-      // like an upward user scroll and incorrectly detaches a pinned transcript.
-      if (viewportHeightChanged && (autoStickRef.current || isAtLatestRef.current)) {
-        autoStickRef.current = true;
-        syncPinnedBottom();
-        stickToLatestIfPinned(BOTTOM_STICK_STABILIZE_FRAMES);
+      if (!isProgrammaticScroll && hasPointerScrollIntent && movingUp) {
+        releaseViewportResizeAnchor();
+        userScrollSeqRef.current += 1;
+        disableAutoStick();
+        historyLoader.request();
+      }
+
+      // autoStick is user intent, not a geometric guess. IME preedit, composer
+      // field-sizing, content collapse, and Chromium caret correction can all
+      // move scrollTop without a user scroll gesture. Preserve the intent and
+      // repair the geometry instead of treating every upward scroll as detach.
+      if (autoStickRef.current) {
+        if (viewportHeightChanged || bottomDistance > ANCHOR_RESTORE_EPSILON_PX) {
+          syncPinnedBottom();
+        } else {
+          releaseViewportResizeAnchor();
+          setLatestState(true);
+        }
         historyLoader.check();
         return;
       }
@@ -449,20 +465,13 @@ export const TranscriptList = memo(function TranscriptList({
       if (!autoStickRef.current && !isProgrammaticScroll && (movingUp || movingDown)) {
         userScrollSeqRef.current += 1;
       }
-      // Content can shrink while pinned (for example when completed thought/tool rows
-      // collapse into a process summary). Chromium then clamps scrollTop downward and
-      // emits a scroll event that looks like an upward user scroll. Preserve the pinned
-      // state before interpreting direction; real wheel/key upward intent disables it
-      // before this scroll event arrives.
-      if (bottomDistance <= SCROLL_END_THRESHOLD_PX && (movingDown || autoStickRef.current)) {
+      // Once the user has detached, only a deliberate downward scroll that reaches
+      // the end re-enables auto-stick.
+      if (bottomDistance <= SCROLL_END_THRESHOLD_PX && movingDown) {
         releaseViewportResizeAnchor();
         autoStickRef.current = true;
         setLatestState(true);
       } else {
-        if (!isProgrammaticScroll && movingUp) {
-          historyLoader.request();
-          disableAutoStick();
-        }
         if ((movingUp || nearTop) && bottomDistance > SCROLL_END_THRESHOLD_PX) {
           setLatestState(false);
         }
@@ -493,9 +502,47 @@ export const TranscriptList = memo(function TranscriptList({
         userScrollSeqRef.current += 1;
       }
     };
+    const beginPointerScroll = () => {
+      pointerScrollIntentUntilRef.current = Number.POSITIVE_INFINITY;
+      cancelScheduledStick();
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) {
+        return;
+      }
+      pointerGestureRef.current = { pointerID: event.pointerId, startY: event.clientY };
+      if (pointerHitsVerticalScrollbar(event, node)) {
+        beginPointerScroll();
+      }
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      const gesture = pointerGestureRef.current;
+      if (
+        !gesture ||
+        gesture.pointerID !== event.pointerId ||
+        Math.abs(event.clientY - gesture.startY) < 3
+      ) {
+        return;
+      }
+      beginPointerScroll();
+    };
+    const finishPointerScroll = () => {
+      pointerGestureRef.current = null;
+      if (pointerScrollIntentUntilRef.current === Number.POSITIVE_INFINITY) {
+        pointerScrollIntentUntilRef.current = performance.now() + POINTER_SCROLL_SETTLE_MS;
+      }
+    };
+    const cancelPointerScroll = () => {
+      pointerGestureRef.current = null;
+      pointerScrollIntentUntilRef.current = 0;
+    };
     node.addEventListener("scroll", onScroll, { passive: true });
     node.addEventListener("wheel", onWheel, { passive: true });
+    node.addEventListener("pointerdown", onPointerDown, { passive: true });
     window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("pointermove", onPointerMove, { passive: true });
+    window.addEventListener("pointerup", finishPointerScroll, { passive: true });
+    window.addEventListener("pointercancel", cancelPointerScroll, { passive: true });
     if (distanceFromBottom(node) <= SCROLL_END_THRESHOLD_PX) {
       autoStickRef.current = true;
       setLatestState(true);
@@ -503,9 +550,14 @@ export const TranscriptList = memo(function TranscriptList({
     return () => {
       node.removeEventListener("scroll", onScroll);
       node.removeEventListener("wheel", onWheel);
+      node.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", finishPointerScroll);
+      window.removeEventListener("pointercancel", cancelPointerScroll);
     };
   }, [
+    cancelScheduledStick,
     disableAutoStick,
     historyLoader.check,
     historyLoader.request,
@@ -513,7 +565,6 @@ export const TranscriptList = memo(function TranscriptList({
     releaseViewportResizeAnchor,
     scrollElement,
     setLatestState,
-    stickToLatestIfPinned,
     syncPinnedBottom,
   ]);
 
@@ -522,10 +573,8 @@ export const TranscriptList = memo(function TranscriptList({
       if (scrollElement) {
         lastClientHeightRef.current = scrollElement.clientHeight;
       }
-      if (autoStickRef.current || isAtLatestRef.current) {
-        autoStickRef.current = true;
+      if (autoStickRef.current) {
         syncPinnedBottom();
-        stickToLatestIfPinned(BOTTOM_STICK_STABILIZE_FRAMES);
         return;
       }
       restoreResizeAnchorIfDetached(holdViewportResizeAnchor());
@@ -539,7 +588,12 @@ export const TranscriptList = memo(function TranscriptList({
       observer.disconnect();
       window.removeEventListener("resize", handleViewportResize);
     };
-  }, [holdViewportResizeAnchor, restoreResizeAnchorIfDetached, scrollElement, stickToLatestIfPinned, syncPinnedBottom]);
+  }, [
+    holdViewportResizeAnchor,
+    restoreResizeAnchorIfDetached,
+    scrollElement,
+    syncPinnedBottom,
+  ]);
 
   useEffect(() => {
     const node = listElementRef.current;
@@ -857,6 +911,16 @@ function findResizeAnchorElement(node: HTMLElement, anchor: ResizeAnchor) {
     return null;
   }
   return node.querySelector<HTMLElement>(`[data-transcript-ai-anchor="${CSS.escape(anchor.anchorID)}"]`);
+}
+
+function pointerHitsVerticalScrollbar(event: PointerEvent, node: HTMLElement) {
+  if (node.scrollHeight <= node.clientHeight) {
+    return false;
+  }
+  const rect = node.getBoundingClientRect();
+  const scrollbarWidth = Math.max(0, node.offsetWidth - node.clientWidth);
+  const hitWidth = Math.max(12, scrollbarWidth);
+  return event.clientX >= rect.right - hitWidth && event.clientX <= rect.right;
 }
 
 function isEditableTarget(target: EventTarget | null) {

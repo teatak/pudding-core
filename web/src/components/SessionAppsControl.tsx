@@ -90,7 +90,7 @@ export function SessionAppsControl({ session, token }: { session: Session; token
               type="button"
               onClick={() => unloadMutation.mutate(appID)}
             >
-              {pending ? <Spinner className="size-2.5" /> : <X className="size-2.5" strokeWidth={2.5} />}
+              {pending ? <Spinner className="size-2.5" /> : <X className="size-2" strokeWidth={2.5} />}
             </button>
           </div>
         );
