@@ -135,10 +135,10 @@
     --workspace-tab-border: oklch(0.84 0 0);
     --workspace-tab-indicator: oklch(0.56 0 0);
     --workspace-file-editor-background: #ffffff;
-    --workspace-file-tabs-background: var(--workspace-background);
+    --workspace-file-tabs-background: oklch(0.96 0 0);
     --workspace-file-tab-active-background: var(--workspace-file-editor-background);
-    --workspace-file-tab-inactive-background: oklch(0.95 0 0);
-    --workspace-file-tab-hover-background: oklch(0.935 0 0);
+    --workspace-file-tab-inactive-background: oklch(0.93 0 0);
+    --workspace-file-tab-hover-background: oklch(0.91 0 0);
     --workspace-tree-hover-background: oklch(0.952 0 0);
     --workspace-tree-active-background: oklch(0.925 0 0);
     --chat-title-max-w: min(42rem, 100%);

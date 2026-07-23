@@ -59,6 +59,7 @@ export const TranscriptList = memo(function TranscriptList({
   const disclosureOpenStateRef = useRef(new Map<string, DisclosureOpenState>());
   const initialScrollSessionRef = useRef("");
   const isAtLatestRef = useRef(true);
+  const lastClientHeightRef = useRef(0);
   const lastScrollTopRef = useRef(0);
   const latestSentinelRef = useRef<HTMLDivElement | null>(null);
   const listElementRef = useRef<HTMLDivElement | null>(null);
@@ -369,6 +370,7 @@ export const TranscriptList = memo(function TranscriptList({
       return;
     }
     lastScrollTopRef.current = scrollElement.scrollTop;
+    lastClientHeightRef.current = scrollElement.clientHeight;
     syncViewportScrollbar(distanceFromBottom(scrollElement) <= SCROLL_END_THRESHOLD_PX);
   }, [scrollElement, syncViewportScrollbar]);
 
@@ -414,12 +416,29 @@ export const TranscriptList = memo(function TranscriptList({
     const onScroll = () => {
       const previousScrollTop = lastScrollTopRef.current;
       const nextScrollTop = node.scrollTop;
+      const previousClientHeight = lastClientHeightRef.current;
+      const nextClientHeight = node.clientHeight;
+      const viewportHeightChanged =
+        previousClientHeight > 0 &&
+        Math.abs(nextClientHeight - previousClientHeight) > ANCHOR_RESTORE_EPSILON_PX;
+      lastClientHeightRef.current = nextClientHeight;
       const movingUp = nextScrollTop < previousScrollTop - 1;
       const movingDown = nextScrollTop > previousScrollTop + 1;
       const nearTop = nextScrollTop < HISTORY_LOAD_SCROLL_TOP_PX;
       const bottomDistance = distanceFromBottom(node);
       const isProgrammaticScroll = performance.now() < programmaticScrollIgnoreUntilRef.current;
       lastScrollTopRef.current = nextScrollTop;
+
+      // A growing composer shrinks this flex viewport. Chromium may emit the
+      // resulting scroll event before ResizeObserver, which otherwise looks
+      // like an upward user scroll and incorrectly detaches a pinned transcript.
+      if (viewportHeightChanged && (autoStickRef.current || isAtLatestRef.current)) {
+        autoStickRef.current = true;
+        syncPinnedBottom();
+        stickToLatestIfPinned(BOTTOM_STICK_STABILIZE_FRAMES);
+        historyLoader.check();
+        return;
+      }
 
       if (!isProgrammaticScroll) {
         refreshPendingHistoryAnchor();
@@ -494,10 +513,15 @@ export const TranscriptList = memo(function TranscriptList({
     releaseViewportResizeAnchor,
     scrollElement,
     setLatestState,
+    stickToLatestIfPinned,
+    syncPinnedBottom,
   ]);
 
   useEffect(() => {
     const handleViewportResize = () => {
+      if (scrollElement) {
+        lastClientHeightRef.current = scrollElement.clientHeight;
+      }
       if (autoStickRef.current || isAtLatestRef.current) {
         autoStickRef.current = true;
         syncPinnedBottom();
