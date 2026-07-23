@@ -1,3 +1,4 @@
+import { Check, Copy } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useEffect, useRef, useState } from "react";
 import Vditor from "vditor";
@@ -17,6 +18,50 @@ type SelectionAction = {
   x: number;
   y: number;
 };
+
+type CodeCopyAction = {
+  code: string;
+  key: string;
+  x: number;
+  y: number;
+};
+
+const CODE_BLOCK_LANGUAGE_HINTS = [
+  "plaintext",
+  "bash",
+  "shell",
+  "go",
+  "javascript",
+  "typescript",
+  "jsx",
+  "tsx",
+  "json",
+  "yaml",
+  "html",
+  "css",
+  "sql",
+  "python",
+  "java",
+  "c",
+  "cpp",
+  "csharp",
+  "rust",
+  "swift",
+  "kotlin",
+  "php",
+  "ruby",
+  "dockerfile",
+  "diff",
+  "markdown",
+  "toml",
+  "ini",
+  "xml",
+  "mermaid",
+  "plantuml",
+  "flowchart",
+  "graphviz",
+  "math",
+];
 
 export function ProjectMarkdownEditor({
   path,
@@ -44,7 +89,10 @@ export function ProjectMarkdownEditor({
   const onReferenceSelectionRef = useRef(onReferenceSelection);
   const revealRef = useRef(reveal);
   const syncingRef = useRef(false);
+  const copiedResetTimerRef = useRef<number | undefined>(undefined);
   const [selectionAction, setSelectionAction] = useState<SelectionAction>();
+  const [codeCopyActions, setCodeCopyActions] = useState<CodeCopyAction[]>([]);
+  const [copiedCodeKey, setCopiedCodeKey] = useState<string>();
 
   onChangeRef.current = onChange;
   onSaveRef.current = onSave;
@@ -57,6 +105,15 @@ export function ProjectMarkdownEditor({
 
     let disposed = false;
     let tableObserver: MutationObserver | undefined;
+    let editorResizeObserver: ResizeObserver | undefined;
+    let codeCopyLayoutFrame = 0;
+    const scheduleCodeCopyLayout = (editor: Vditor) => {
+      window.cancelAnimationFrame(codeCopyLayoutFrame);
+      codeCopyLayoutFrame = window.requestAnimationFrame(() => {
+        if (disposed) return;
+        setCodeCopyActions(resolveCodeCopyActions(editor, containerRef.current));
+      });
+    };
     const dark = document.documentElement.classList.contains("dark");
     const editor = new Vditor(host, {
       _lutePath: luteURL,
@@ -68,13 +125,15 @@ export function ProjectMarkdownEditor({
       mode: "ir",
       placeholder: t("project.browserMarkdownEditor"),
       preview: {
-        hljs: { enable: false },
+        hljs: {
+          enable: false,
+          langs: CODE_BLOCK_LANGUAGE_HINTS,
+        },
         markdown: {
           codeBlockPreview: false,
           mathBlockPreview: false,
           sanitize: true,
         },
-        maxWidth: 896,
         mode: "editor",
         theme: {
           current: "",
@@ -92,16 +151,29 @@ export function ProjectMarkdownEditor({
         vditorRef.current = editor;
         const editorRoot = editor.vditor.ir?.element;
         if (editorRoot) {
-          tableObserver = new MutationObserver(() => scheduleTableLayout(editor));
-          tableObserver.observe(editorRoot, { childList: true, subtree: true });
+          tableObserver = new MutationObserver(() => {
+            scheduleTableLayout(editor);
+            scheduleCodeCopyLayout(editor);
+          });
+          tableObserver.observe(editorRoot, {
+            characterData: true,
+            childList: true,
+            subtree: true,
+          });
+        }
+        if (containerRef.current) {
+          editorResizeObserver = new ResizeObserver(() => scheduleCodeCopyLayout(editor));
+          editorResizeObserver.observe(containerRef.current);
         }
         scheduleTableLayout(editor);
+        scheduleCodeCopyLayout(editor);
         revealEditorPosition(editor, revealRef.current);
       },
       input: (markdown) => {
         valueRef.current = markdown;
         setSelectionAction(undefined);
         scheduleTableLayout(editor);
+        scheduleCodeCopyLayout(editor);
         if (!syncingRef.current) onChangeRef.current(markdown);
       },
     });
@@ -109,6 +181,8 @@ export function ProjectMarkdownEditor({
     return () => {
       disposed = true;
       tableObserver?.disconnect();
+      editorResizeObserver?.disconnect();
+      window.cancelAnimationFrame(codeCopyLayoutFrame);
       if (vditorRef.current === editor) vditorRef.current = null;
       editor.destroy();
     };
@@ -134,6 +208,14 @@ export function ProjectMarkdownEditor({
     if (editor) revealEditorPosition(editor, reveal);
   }, [reveal?.serial]);
 
+  useEffect(() => {
+    return () => {
+      if (copiedResetTimerRef.current) {
+        window.clearTimeout(copiedResetTimerRef.current);
+      }
+    };
+  }, []);
+
   const updateSelectionAction = () => {
     requestAnimationFrame(() => {
       setSelectionAction(
@@ -158,12 +240,48 @@ export function ProjectMarkdownEditor({
       }}
       onKeyUpCapture={updateSelectionAction}
       onMouseUpCapture={(event) => {
-        if ((event.target as HTMLElement).closest("[data-project-selection-action]")) return;
+        if (
+          (event.target as HTMLElement).closest(
+            "[data-project-selection-action], [data-vditor-code-copy]",
+          )
+        ) {
+          return;
+        }
         updateSelectionAction();
       }}
       onScrollCapture={() => setSelectionAction(undefined)}
     >
       <div ref={hostRef} className="pudding-vditor-host min-h-full" />
+      {codeCopyActions.map((action) => {
+        const copied = copiedCodeKey === action.key;
+        return (
+          <button
+            key={action.key}
+            aria-label={t(copied ? "common.copied" : "common.copy")}
+            className="absolute z-20 inline-flex size-6 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground shadow-sm hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+            data-vditor-code-copy=""
+            style={{ left: action.x, top: action.y }}
+            tabIndex={-1}
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              void navigator.clipboard.writeText(action.code).then(() => {
+                setCopiedCodeKey(action.key);
+                if (copiedResetTimerRef.current) {
+                  window.clearTimeout(copiedResetTimerRef.current);
+                }
+                copiedResetTimerRef.current = window.setTimeout(
+                  () => setCopiedCodeKey(undefined),
+                  1500,
+                );
+              });
+            }}
+            onMouseDown={(event) => event.preventDefault()}
+          >
+            {copied ? <Check className="size-3 text-success" /> : <Copy className="size-3" />}
+          </button>
+        );
+      })}
       {selectionAction ? (
         <button
           aria-label={t("project.browserReferenceSelection")}
@@ -182,6 +300,37 @@ export function ProjectMarkdownEditor({
       ) : null}
     </div>
   );
+}
+
+function resolveCodeCopyActions(
+  editor: Vditor,
+  container: HTMLDivElement | null,
+): CodeCopyAction[] {
+  const editorRoot = editor.vditor.ir?.element;
+  if (!editorRoot || !container) return [];
+
+  const containerRect = container.getBoundingClientRect();
+  const buttonSize = 24;
+  const inset = 8;
+  return Array.from(
+    editorRoot.querySelectorAll<HTMLElement>(
+      '[data-type="code-block"].vditor-ir__node > pre.vditor-ir__marker--pre > code',
+    ),
+  ).map((codeElement, index) => {
+    const rect = codeElement.getBoundingClientRect();
+    return {
+      code: (codeElement.textContent || "").replace(/\n$/, ""),
+      key: String(index),
+      x: Math.max(
+        container.scrollLeft + inset,
+        Math.min(
+          rect.right - containerRect.left + container.scrollLeft - buttonSize - inset,
+          container.scrollLeft + container.clientWidth - buttonSize - inset,
+        ),
+      ),
+      y: rect.top - containerRect.top + container.scrollTop + inset,
+    };
+  });
 }
 
 function resolveSelectionAction(

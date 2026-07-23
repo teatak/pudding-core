@@ -258,6 +258,7 @@ function ProjectRow({ locale, project, token }: { locale: string; project: Proje
           </div>
         </div>
         <ProjectActionsMenu
+          allowDirectoryEditing
           alwaysVisible
           project={project}
           token={token}

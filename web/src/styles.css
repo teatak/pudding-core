@@ -1529,7 +1529,7 @@ html[data-shell] :where(
 .pudding-vditor-host .vditor-ir > .vditor-reset {
   min-height: 100%;
   background: var(--workspace-file-editor-background) !important;
-  padding-inline: max(20px, calc((100% - 896px) / 2)) !important;
+  padding-inline: 20px !important;
   color: var(--foreground);
   font-family: var(--font-sans);
   font-size: 15px;
@@ -1561,12 +1561,164 @@ html[data-shell] :where(
   font-size: 1rem;
 }
 
+.pudding-vditor-host
+  .vditor-ir
+  .vditor-reset
+  code:not(.hljs):not(.highlight-chroma) {
+  margin: 0;
+  border-radius: 0.25rem;
+  background: var(--muted);
+  background-image: none;
+  padding: 0.125rem 0.25rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-size: 0.85em;
+}
+
+.pudding-vditor-host
+  .vditor-ir
+  .vditor-reset
+  [data-type="code-block"] {
+  max-width: 100%;
+  margin: 0.75rem 0;
+  background: transparent;
+}
+
+.pudding-vditor-host
+  .vditor-ir
+  .vditor-reset
+  [data-type="code-block"]:not(.vditor-ir__node--expand)::before,
+.pudding-vditor-host
+  .vditor-ir
+  .vditor-reset
+  [data-type="code-block"]:not(.vditor-ir__node--expand)::after {
+  display: none;
+  content: none;
+}
+
+.pudding-vditor-host
+  .vditor-ir
+  .vditor-reset
+  [data-type="code-block"]
+  :is(pre, .vditor-ir__marker--pre) {
+  max-width: 100%;
+  margin: 0;
+  overflow: auto;
+  border-radius: 0;
+  background: transparent !important;
+  background-image: none !important;
+  padding: 0;
+}
+
+.pudding-vditor-host
+  .vditor-ir
+  .vditor-reset
+  [data-type="code-block"].vditor-ir__node
+  > pre.vditor-ir__marker--pre
+  > code {
+  box-sizing: border-box;
+  display: block;
+  max-width: 100%;
+  margin: 0;
+  overflow: auto;
+  border-radius: 0.5rem;
+  background-color: color-mix(
+    in oklch,
+    var(--muted),
+    var(--background) 18%
+  ) !important;
+  background-image: none !important;
+  padding: 0.875rem 2.75rem 0.875rem 1rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-size: 0.875rem;
+  line-height: 1.65;
+  white-space: pre;
+}
+
+.dark
+  .pudding-vditor-host
+  .vditor-ir
+  .vditor-reset
+  [data-type="code-block"].vditor-ir__node
+  > pre.vditor-ir__marker--pre
+  > code {
+  background-color: color-mix(
+    in oklch,
+    var(--card),
+    var(--background) 34%
+  ) !important;
+}
+
+.pudding-vditor-host
+  .vditor-ir
+  .vditor-reset
+  [data-type="yaml-front-matter"].vditor-ir__node {
+  max-width: 100%;
+  margin: 0.75rem 0;
+  background: transparent;
+}
+
+.pudding-vditor-host
+  .vditor-ir
+  .vditor-reset
+  [data-type="yaml-front-matter"].vditor-ir__node
+  > pre.vditor-ir__marker--pre {
+  max-width: 100%;
+  margin: 0;
+  overflow: auto;
+  border-radius: 0;
+  background: transparent !important;
+  background-image: none !important;
+  padding: 0;
+}
+
+.pudding-vditor-host
+  .vditor-ir
+  .vditor-reset
+  [data-type="yaml-front-matter"].vditor-ir__node
+  > pre.vditor-ir__marker--pre
+  > code {
+  box-sizing: border-box;
+  display: block;
+  max-width: 100%;
+  margin: 0;
+  overflow: auto;
+  border-radius: 0.5rem;
+  background-color: color-mix(
+    in oklch,
+    var(--muted),
+    var(--background) 18%
+  ) !important;
+  background-image: none !important;
+  padding: 0.875rem 1rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-size: 0.875rem;
+  line-height: 1.65;
+  white-space: pre;
+}
+
+.dark
+  .pudding-vditor-host
+  .vditor-ir
+  .vditor-reset
+  [data-type="yaml-front-matter"].vditor-ir__node
+  > pre.vditor-ir__marker--pre
+  > code {
+  background-color: color-mix(
+    in oklch,
+    var(--card),
+    var(--background) 34%
+  ) !important;
+}
+
 .pudding-vditor-host .vditor-ir .vditor-reset > table {
   box-sizing: border-box;
   display: grid;
   grid-template-columns: repeat(
     var(--pudding-vditor-table-columns, 1),
-    minmax(max-content, auto)
+    minmax(8rem, auto)
   );
   width: 100%;
   max-width: 100%;
@@ -1593,12 +1745,22 @@ html[data-shell] :where(
 
 .pudding-vditor-host .vditor-ir .vditor-reset > table th,
 .pudding-vditor-host .vditor-ir .vditor-reset > table td {
+  min-width: 0;
   padding: 0.5rem 0.75rem;
   border: 0;
   border-bottom: 1px solid color-mix(in oklch, var(--border), transparent 30%);
   background: transparent;
+  overflow-wrap: anywhere;
   text-align: left;
   vertical-align: top;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.pudding-vditor-host .vditor-ir .vditor-reset > table :is(th, td) code {
+  overflow-wrap: anywhere;
+  white-space: break-spaces;
+  word-break: break-word;
 }
 
 .pudding-vditor-host .vditor-ir .vditor-reset > table th {
@@ -1839,7 +2001,7 @@ html[data-shell] :where(
 }
 
 .pudding-markdown .code-copy-btn {
-  @apply absolute top-2 right-2 z-10 size-5 rounded-md text-muted-foreground opacity-0 transition-opacity hover:opacity-100 focus-visible:opacity-100;
+  @apply absolute top-2 right-2 z-10 size-5 rounded-md border border-border/70 bg-background text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground hover:opacity-100 focus-visible:opacity-100;
 }
 
 .pudding-markdown .code-block-wrap:hover .code-copy-btn,

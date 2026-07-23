@@ -106,14 +106,14 @@ function ElectronWorkspaceHost({
       aria-hidden={!active}
       inert={!active}
       className={cn(
-        "workspace-split-pane absolute inset-y-0 min-w-0 overflow-visible transition-[right] duration-200 ease-out",
+        "workspace-split-pane absolute inset-y-0 right-0 min-w-0 overflow-visible transition-transform duration-200 ease-out",
         "border-l border-border",
         drawerMode && "z-50 shadow-[-8px_0_24px_-16px_rgb(0_0_0/0.28)]",
         workspaceResizing && "transition-none",
         !active && "pointer-events-none",
       )}
       style={{
-        right: active ? 0 : "calc(0px - var(--workspace-panel-width) - 32px)",
+        transform: active ? "translateX(0)" : "translateX(calc(100% + 32px))",
         width: "var(--workspace-panel-width)",
       }}
     >
@@ -509,14 +509,14 @@ export function App() {
         <div
           aria-hidden={!effectiveWorkspaceOpen}
           className={cn(
-            "workspace-split-pane absolute inset-y-0 min-w-0 overflow-visible transition-[right] duration-200 ease-out",
+            "workspace-split-pane absolute inset-y-0 right-0 min-w-0 overflow-visible transition-transform duration-200 ease-out",
             "border-l border-border",
             workspaceDrawerMode && "z-50 shadow-[-8px_0_24px_-16px_rgb(0_0_0/0.28)]",
             workspaceResizing && "transition-none",
             !effectiveWorkspaceOpen && "pointer-events-none",
           )}
           style={{
-            right: effectiveWorkspaceOpen ? 0 : "calc(0px - var(--workspace-panel-width) - 32px)",
+            transform: effectiveWorkspaceOpen ? "translateX(0)" : "translateX(calc(100% + 32px))",
             width: "var(--workspace-panel-width)",
           }}
         >
