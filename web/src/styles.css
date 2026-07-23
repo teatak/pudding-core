@@ -1250,6 +1250,205 @@ html[data-shell] :where(
   line-height: 1.65;
 }
 
+.pudding-markdown-live-editor .cm-editor {
+  height: 100%;
+  background: var(--workspace-file-editor-background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  -webkit-app-region: no-drag;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.pudding-markdown-live-editor .cm-editor.cm-focused {
+  outline: none;
+}
+
+.pudding-markdown-live-editor .cm-scroller {
+  overflow: auto;
+  font-family: inherit;
+}
+
+.pudding-markdown-live-editor .cm-content {
+  width: min(100%, 56rem);
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 24px 24px 80px;
+  caret-color: var(--foreground);
+  line-height: 1.65;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.pudding-markdown-live-editor .cm-line {
+  padding: 1px 0;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.pudding-markdown-live-editor .cm-selectionBackground,
+.pudding-markdown-live-editor .cm-content ::selection {
+  background: color-mix(in oklch, var(--ring), transparent 58%) !important;
+}
+
+.pudding-markdown-live-editor .cm-cursor {
+  border-left-color: var(--foreground);
+}
+
+.pudding-markdown-live-editor .cm-live-heading {
+  padding-top: 0.18em;
+  padding-bottom: 0.06em;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.018em;
+}
+
+.pudding-markdown-live-editor .cm-live-frontmatter-summary {
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: color-mix(in oklch, var(--muted), transparent 45%);
+  padding: 0.55rem 0.75rem;
+  color: var(--muted-foreground);
+  font-size: 0.88rem;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.pudding-markdown-live-editor .cm-live-frontmatter-summary-line {
+  padding: 0;
+  font-size: 0;
+  line-height: 0;
+}
+
+.pudding-markdown-live-editor .cm-live-frontmatter-hidden-line {
+  height: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  font-size: 0;
+  line-height: 0;
+}
+
+.pudding-markdown-live-editor .cm-live-frontmatter-summary:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.pudding-markdown-live-editor .cm-live-frontmatter {
+  background: color-mix(in oklch, var(--muted), transparent 58%);
+  padding-right: 0.75rem;
+  padding-left: 0.75rem;
+  color: var(--muted-foreground);
+  font-family: var(--editor-font-family, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-size: 0.88rem;
+}
+
+.pudding-markdown-live-editor .cm-live-heading * {
+  text-decoration: none !important;
+}
+
+.pudding-markdown-live-editor .cm-live-h1 {
+  font-size: 1.5rem;
+}
+
+.pudding-markdown-live-editor .cm-live-h2 {
+  font-size: 1.25rem;
+}
+
+.pudding-markdown-live-editor .cm-live-h3 {
+  font-size: 1.08rem;
+}
+
+.pudding-markdown-live-editor :where(.cm-live-h4, .cm-live-h5, .cm-live-h6) {
+  font-size: 1rem;
+}
+
+.pudding-markdown-live-editor .cm-live-strong {
+  font-weight: 700;
+}
+
+.pudding-markdown-live-editor .cm-live-emphasis {
+  font-style: italic;
+}
+
+.pudding-markdown-live-editor .cm-live-strikethrough {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.pudding-markdown-live-editor .cm-live-inline-code {
+  border-radius: 5px;
+  background: var(--muted);
+  padding: 0.08em 0.32em;
+  font-family: var(--editor-font-family, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-size: 0.88em;
+}
+
+.pudding-markdown-live-editor .cm-live-link {
+  color: var(--markdown-link);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklch, var(--markdown-link), transparent 24%);
+  text-underline-offset: 3px;
+}
+
+.pudding-markdown-live-editor .cm-live-blockquote {
+  border-left: 2px solid var(--border);
+  padding-left: 0.9rem;
+  color: var(--muted-foreground);
+}
+
+.pudding-markdown-live-editor .cm-live-code-block {
+  background: color-mix(in oklch, var(--muted), transparent 18%);
+  padding-right: 0.75rem;
+  padding-left: 0.75rem;
+  font-family: var(--editor-font-family, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-size: 0.9em;
+}
+
+.pudding-markdown-live-editor .cm-live-list-mark {
+  display: inline-block;
+  min-width: 1.1em;
+  color: var(--muted-foreground);
+  font-weight: 600;
+  text-align: center;
+}
+
+.pudding-markdown-live-editor .cm-live-list-item {
+  padding-left: 0.25rem;
+}
+
+.pudding-markdown-live-editor .cm-live-empty-line {
+  line-height: 0.72;
+}
+
+.pudding-markdown-live-editor .cm-live-task-marker {
+  display: inline-block;
+  min-width: 1.3em;
+  color: var(--muted-foreground);
+}
+
+.pudding-markdown-live-editor .cm-live-image-label {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--muted);
+  padding: 0.08em 0.45em;
+  color: var(--muted-foreground);
+  font-size: 0.9em;
+}
+
+.pudding-markdown-live-editor .cm-live-horizontal-rule {
+  display: inline-block;
+  width: 100%;
+  border-top: 1px solid var(--border);
+  vertical-align: middle;
+}
+
 .pudding-markdown > * {
   min-width: 0;
   max-width: 100%;

@@ -96,6 +96,7 @@ export function ProjectEditor({
   const revealRef = useRef(reveal);
   const typographyRef = useRef(typography);
   const syncingRef = useRef(false);
+  const mouseSelectingRef = useRef(false);
   const valueRef = useRef(value);
   const [selectionAction, setSelectionAction] = useState<SelectionAction>();
   darkRef.current = dark;
@@ -148,7 +149,25 @@ export function ProjectEditor({
         editor.onDidChangeModelContent(() => {
           if (!syncingRef.current) onChangeRef.current(editor?.getValue() || "");
         }),
-        editor.onDidChangeCursorSelection(() => updateSelectionAction(editor, containerRef.current, setSelectionAction)),
+        editor.onMouseDown((event) => {
+          if (!event.event.leftButton) return;
+          mouseSelectingRef.current = true;
+          setSelectionAction(undefined);
+        }),
+        editor.onMouseUp(() => {
+          if (!mouseSelectingRef.current) return;
+          mouseSelectingRef.current = false;
+          requestAnimationFrame(() => {
+            if (editorRef.current === editor) {
+              updateSelectionAction(editor, containerRef.current, setSelectionAction);
+            }
+          });
+        }),
+        editor.onDidChangeCursorSelection(() => {
+          if (!mouseSelectingRef.current) {
+            updateSelectionAction(editor, containerRef.current, setSelectionAction);
+          }
+        }),
         editor.onDidScrollChange(() => updateSelectionAction(editor, containerRef.current, setSelectionAction)),
         editor.onDidLayoutChange(() => updateSelectionAction(editor, containerRef.current, setSelectionAction)),
       );

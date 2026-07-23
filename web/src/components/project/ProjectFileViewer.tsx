@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, BookOpen, FileCode2, Folders, Save } from "lucide-react";
+import { AlertTriangle, FileCode2, FilePenLine, Folders, Save } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
@@ -16,13 +16,15 @@ import type { FilePreview } from "@/state/filePreviewStore";
 import { ProjectFileTabs } from "./ProjectFileTabs";
 import type { ProjectEditorSelection } from "./ProjectEditor";
 import { ProjectGitDiffViewer } from "./git/ProjectGitDiffViewer";
-import { ProjectMarkdownPreview } from "./ProjectMarkdownPreview";
 import { projectBrowserError } from "./projectErrors";
 import { projectSelectionKey } from "./projectPaths";
 import type { ProjectEditorReveal } from "./projectReveal";
 import { isProjectGitDiffTab, type ProjectSelection, type ProjectTab } from "./types";
 
 const ProjectEditor = lazy(() => import("./ProjectEditor").then((module) => ({ default: module.ProjectEditor })));
+const ProjectMarkdownEditor = lazy(() => import("./ProjectMarkdownEditor").then((module) => ({ default: module.ProjectMarkdownEditor })));
+
+type MarkdownViewMode = "live" | "source";
 
 type FileDraft = {
   baseContent: string;
@@ -91,7 +93,7 @@ export function ProjectFileViewer({
     draftsRef.current = next;
     setDrafts(next);
   };
-  const [previewMode, setPreviewMode] = useState<Record<string, boolean>>({});
+  const [markdownModes, setMarkdownModes] = useState<Record<string, MarkdownViewMode>>({});
   const [imageRevision, setImageRevision] = useState(0);
   const gitDiffSelection = selection && isProjectGitDiffTab(selection) ? selection : undefined;
   const fileSelection = selection && !isProjectGitDiffTab(selection) ? selection : undefined;
@@ -116,7 +118,7 @@ export function ProjectFileViewer({
   const dirty = Boolean(draft && draft.content !== draft.baseContent);
   const externalConflict = Boolean(draft?.externalRevision);
   const isMarkdown = file?.mime === "text/markdown" || /\.(?:md|markdown)$/i.test(file?.name || "");
-  const showPreview = Boolean(isMarkdown && draftKey && previewMode[draftKey] !== false);
+  const markdownMode = isMarkdown && draftKey ? markdownModes[draftKey] ?? "live" : "source";
   const imageURL = useMemo(() => {
     if (!isImage || !fileSelection) return "";
     const url = projectResourceURL(token, sessionID, fileSelection.rootID, fileSelection.path);
@@ -127,7 +129,7 @@ export function ProjectFileViewer({
     if (!reveal || reveal.key !== selectionKey || !draftKey) {
       return;
     }
-    setPreviewMode((current) => ({ ...current, [draftKey]: false }));
+    setMarkdownModes((current) => ({ ...current, [draftKey]: "live" }));
   }, [draftKey, reveal?.serial, selectionKey]);
 
   useEffect(() => {
@@ -299,10 +301,10 @@ export function ProjectFileViewer({
             <div className="flex shrink-0 items-center gap-1">
               {isMarkdown ? (
                 <>
-                  <Button aria-label={t("project.browserPreview")} aria-pressed={showPreview} className="text-muted-foreground hover:bg-muted/60 hover:text-foreground aria-pressed:bg-muted aria-pressed:text-foreground" size="icon-sm" type="button" variant="ghost" onClick={() => setPreviewMode((current) => ({ ...current, [draftKey]: true }))}>
-                    <BookOpen />
+                  <Button aria-label={t("project.browserMarkdownEditor")} aria-pressed={markdownMode === "live"} className="text-muted-foreground hover:bg-muted/60 hover:text-foreground aria-pressed:bg-muted aria-pressed:text-foreground" size="icon-sm" type="button" variant="ghost" onClick={() => setMarkdownModes((current) => ({ ...current, [draftKey]: "live" }))}>
+                    <FilePenLine />
                   </Button>
-                  <Button aria-label={t("project.browserSource")} aria-pressed={!showPreview} className="text-muted-foreground hover:bg-muted/60 hover:text-foreground aria-pressed:bg-muted aria-pressed:text-foreground" size="icon-sm" type="button" variant="ghost" onClick={() => setPreviewMode((current) => ({ ...current, [draftKey]: false }))}>
+                  <Button aria-label={t("project.browserSource")} aria-pressed={markdownMode === "source"} className="text-muted-foreground hover:bg-muted/60 hover:text-foreground aria-pressed:bg-muted aria-pressed:text-foreground" size="icon-sm" type="button" variant="ghost" onClick={() => setMarkdownModes((current) => ({ ...current, [draftKey]: "source" }))}>
                     <FileCode2 />
                   </Button>
                 </>
@@ -331,13 +333,18 @@ export function ProjectFileViewer({
           <ProjectViewerStatus>{projectBrowserError(fileQuery.error, t)}</ProjectViewerStatus>
         ) : fileQuery.isLoading && !file ? (
           <ProjectViewerStatus icon={<Spinner className="size-6" />}>{t("common.loading")}</ProjectViewerStatus>
-        ) : previewFile && showPreview ? (
-          <ProjectMarkdownPreview
-            file={previewFile}
-            sessionID={sessionID}
-            token={token}
-            onOpenPreview={onOpenPreview}
-          />
+        ) : previewFile && isMarkdown && markdownMode === "live" ? (
+          <Suspense fallback={<ProjectViewerStatus icon={<Spinner className="size-6" />}>{t("common.loading")}</ProjectViewerStatus>}>
+            <ProjectMarkdownEditor
+              key={draftKey}
+              path={previewFile.path}
+              reveal={reveal?.key === selectionKey ? reveal : undefined}
+              value={content}
+              onChange={changeContent}
+              onSave={() => save()}
+              onReferenceSelection={(range) => fileSelection && onReference(fileSelection, range)}
+            />
+          </Suspense>
         ) : previewFile ? (
           <Suspense fallback={<ProjectViewerStatus icon={<Spinner className="size-6" />}>{t("common.loading")}</ProjectViewerStatus>}>
             <ProjectEditor
