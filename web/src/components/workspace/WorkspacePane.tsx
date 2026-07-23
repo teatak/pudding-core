@@ -112,6 +112,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
   const [retainedFilePreviews, setRetainedFilePreviews] = useState<Record<string, FilePreview>>({});
   const [projectUIContext, setProjectUIContext] = useState<UIContextPart>();
   const hadResourcesRef = useRef(false);
+  const resourceSessionIDRef = useRef("");
   const projectFileReveal = useVisibleProjectFileReveal(sessionID, secondarySessionID);
   const browserReveal = useVisibleBrowserReveal(sessionID, secondarySessionID);
   const canvasReveal = useVisibleCanvasReveal(sessionID, secondarySessionID);
@@ -896,6 +897,11 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
 
   const totalResourceCount = items.length + browserTabs.length + terminals.length + surfaceFilePreviews.length + (projectTabVisible ? 1 : 0);
   useEffect(() => {
+    if (resourceSessionIDRef.current !== actorSessionID) {
+      resourceSessionIDRef.current = actorSessionID;
+      hadResourcesRef.current = totalResourceCount > 0;
+      return;
+    }
     if (totalResourceCount > 0) {
       hadResourcesRef.current = true;
       return;
@@ -904,7 +910,7 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
       hadResourcesRef.current = false;
       setWorkspaceOpen(false);
     }
-  }, [totalResourceCount]);
+  }, [actorSessionID, totalResourceCount]);
 
   useEffect(() => {
     if (itemsQuery.isLoading || itemsQuery.isFetching || activeSurface !== "canvas" || filePreviewActive || items.length > 0) return;

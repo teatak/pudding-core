@@ -63,7 +63,6 @@ export function ProjectActionsMenu({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [name, setName] = useState(project.name);
   const [directoryPaths, setDirectoryPaths] = useState(project.rootDirs);
-  const rootDir = project.rootDirs[0];
   const overlayOpen = menuOpen || renameOpen || directoriesOpen || deleteOpen;
   const isMac =
     (typeof document !== "undefined" && document.documentElement.dataset.shell === "electron-mac") ||
@@ -223,43 +222,47 @@ export function ProjectActionsMenu({
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48 space-y-1">
-          {project.rootDirs.length > 1 ? (
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>
-                <FolderOpen />
-                {t("project.directories")}
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-64 max-w-[calc(100vw-2rem)]">
-                {project.rootDirs.map((path) => (
-                  <DropdownMenuItem
-                    key={path}
-                    disabled={!isMac || revealMutation.isPending}
-
-                    onSelect={() => revealMutation.mutate(path)}
-                  >
-                    <span className="min-w-0 truncate">{projectDirectoryLabel(path, project.rootDirs)}</span>
-                  </DropdownMenuItem>
-                ))}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => copyPaths(project.rootDirs)}>
-                  {t("project.copyAllPaths")}
-                </DropdownMenuItem>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          ) : (
+          {project.rootDirs.length === 1 ? (
             <>
-              {isMac && rootDir ? (
-                <DropdownMenuItem disabled={revealMutation.isPending} onSelect={() => revealMutation.mutate(rootDir)}>
+              {isMac ? (
+                <DropdownMenuItem
+                  disabled={revealMutation.isPending}
+                  onSelect={() => revealMutation.mutate(project.rootDirs[0])}
+                >
                   {revealMutation.isPending ? <Spinner /> : null}
                   {t("project.revealFinder")}
                 </DropdownMenuItem>
               ) : null}
-              {rootDir ? (
-                <DropdownMenuItem  onSelect={() => copyPaths([rootDir])}>
-                  {t("project.copyPath")}
-                </DropdownMenuItem>
-              ) : null}
+              <DropdownMenuItem onSelect={() => copyPaths([project.rootDirs[0]])}>
+                {t("project.copyPath")}
+              </DropdownMenuItem>
             </>
+          ) : (
+            project.rootDirs.map((path) => (
+              <DropdownMenuSub key={path}>
+                <DropdownMenuSubTrigger>
+                  <span className="min-w-0 truncate">
+                    {projectDirectoryLabel(path, project.rootDirs)}
+                  </span>
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="w-48 max-w-[calc(100vw-2rem)]">
+                  {isMac ? (
+                    <DropdownMenuItem
+                      disabled={revealMutation.isPending}
+                      onSelect={() => revealMutation.mutate(path)}
+                    >
+                      {revealMutation.isPending ? <Spinner /> : null}
+                      {t("project.revealFinder")}
+                    </DropdownMenuItem>
+                  ) : null}
+                  <DropdownMenuItem
+                    onSelect={() => copyPaths([path])}
+                  >
+                    {t("project.copyPath")}
+                  </DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            ))
           )}
           {allowDirectoryEditing ? (
             <DropdownMenuItem onSelect={openDirectories}>

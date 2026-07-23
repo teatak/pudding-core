@@ -92,6 +92,7 @@ export function ProjectMarkdownEditor({
   const copiedResetTimerRef = useRef<number | undefined>(undefined);
   const [selectionAction, setSelectionAction] = useState<SelectionAction>();
   const [codeCopyActions, setCodeCopyActions] = useState<CodeCopyAction[]>([]);
+  const [hoveredCodeKey, setHoveredCodeKey] = useState<string>();
   const [copiedCodeKey, setCopiedCodeKey] = useState<string>();
 
   onChangeRef.current = onChange;
@@ -249,6 +250,32 @@ export function ProjectMarkdownEditor({
         }
         updateSelectionAction();
       }}
+      onPointerMoveCapture={(event) => {
+        const target = event.target as HTMLElement;
+        const copyButton = target.closest<HTMLElement>("[data-vditor-code-copy]");
+        if (copyButton) {
+          setHoveredCodeKey(copyButton.dataset.codeKey);
+          return;
+        }
+        const codeBlock = target.closest<HTMLElement>(
+          '[data-type="code-block"].vditor-ir__node',
+        );
+        const editorRoot = vditorRef.current?.vditor.ir?.element;
+        if (!codeBlock || !editorRoot) {
+          setHoveredCodeKey(undefined);
+          return;
+        }
+        const codeElements = Array.from(
+          editorRoot.querySelectorAll<HTMLElement>(
+            '[data-type="code-block"].vditor-ir__node > pre.vditor-ir__marker--pre > code',
+          ),
+        );
+        const index = codeElements.findIndex((element) =>
+          codeBlock.contains(element),
+        );
+        setHoveredCodeKey(index >= 0 ? String(index) : undefined);
+      }}
+      onPointerLeave={() => setHoveredCodeKey(undefined)}
       onScrollCapture={() => setSelectionAction(undefined)}
     >
       <div ref={hostRef} className="pudding-vditor-host min-h-full" />
@@ -258,7 +285,11 @@ export function ProjectMarkdownEditor({
           <button
             key={action.key}
             aria-label={t(copied ? "common.copied" : "common.copy")}
-            className="absolute z-20 inline-flex size-6 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground shadow-sm hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+            className="absolute z-20 inline-flex size-5 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground hover:opacity-100 data-[visible=1]:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+            data-code-key={action.key}
+            data-visible={
+              copied || hoveredCodeKey === action.key ? "1" : undefined
+            }
             data-vditor-code-copy=""
             style={{ left: action.x, top: action.y }}
             tabIndex={-1}
@@ -310,7 +341,7 @@ function resolveCodeCopyActions(
   if (!editorRoot || !container) return [];
 
   const containerRect = container.getBoundingClientRect();
-  const buttonSize = 24;
+  const buttonSize = 20;
   const inset = 8;
   return Array.from(
     editorRoot.querySelectorAll<HTMLElement>(

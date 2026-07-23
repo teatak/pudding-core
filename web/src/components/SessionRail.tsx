@@ -1526,7 +1526,15 @@ function CollapsibleSessionGroupLabel({
 function RailProjectActionsMenu({ project, token }: { project: Project; token: string }) {
   const [overlayOpen, setOverlayOpen] = useState(false);
   useRailOverlayHold(overlayOpen);
-  return <ProjectActionsMenu project={project} surface="sidebar" token={token} onOverlayOpenChange={setOverlayOpen} />;
+  return (
+    <ProjectActionsMenu
+      allowDirectoryEditing
+      project={project}
+      surface="sidebar"
+      token={token}
+      onOverlayOpenChange={setOverlayOpen}
+    />
+  );
 }
 type SessionItemsProps = {
   sessions: Session[];

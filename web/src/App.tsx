@@ -113,7 +113,7 @@ function ElectronWorkspaceHost({
         !active && "pointer-events-none",
       )}
       style={{
-        transform: active ? "translateX(0)" : "translateX(calc(100% + 32px))",
+        transform: active ? "none" : "translateX(calc(100% + 32px))",
         width: "var(--workspace-panel-width)",
       }}
     >
@@ -516,7 +516,7 @@ export function App() {
             !effectiveWorkspaceOpen && "pointer-events-none",
           )}
           style={{
-            transform: effectiveWorkspaceOpen ? "translateX(0)" : "translateX(calc(100% + 32px))",
+            transform: effectiveWorkspaceOpen ? "none" : "translateX(calc(100% + 32px))",
             width: "var(--workspace-panel-width)",
           }}
         >
