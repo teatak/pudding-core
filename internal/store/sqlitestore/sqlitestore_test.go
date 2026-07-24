@@ -1135,6 +1135,160 @@ func TestAppendTurnOutputBeforeFinish(t *testing.T) {
 	}
 }
 
+func TestAppendTurnSteerPersistsUserMessageAndEvent(t *testing.T) {
+	st, _ := openTestStore(t)
+	createTestSession(t, st, "sess_1")
+	beginTestTurn(t, st, "sess_1", "turn_1", "msg_1", "client_1")
+	if _, err := st.AppendTurnOutput(context.Background(), store.AppendTurnOutputInput{
+		TurnID: "turn_1",
+		Parts:  store.TextPart("first"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := st.AppendTurnSteer(context.Background(), store.AppendTurnSteerInput{
+		SessionID:       "sess_1",
+		TurnID:          "turn_1",
+		UserMessageID:   "msg_steer",
+		ClientMessageID: "client_steer",
+		UserText:        "change direction",
+		UserParts:       store.TextPart("change direction"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Duplicate || res.UserMessage == nil || res.Event == nil || res.Event.Kind != event.InputSteered {
+		t.Fatalf("unexpected steer result: %+v", res)
+	}
+	duplicate, err := st.AppendTurnSteer(context.Background(), store.AppendTurnSteerInput{
+		SessionID:       "sess_1",
+		TurnID:          "turn_1",
+		UserMessageID:   "msg_other",
+		ClientMessageID: "client_steer",
+		UserText:        "ignored",
+		UserParts:       store.TextPart("ignored"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !duplicate.Duplicate || duplicate.Event != nil || duplicate.UserMessage.ID != "msg_steer" {
+		t.Fatalf("steer retry should be idempotent: %+v", duplicate)
+	}
+	if err := st.ApplyTurnSteers(context.Background(), store.ApplyTurnSteersInput{
+		TurnID:     "turn_1",
+		MessageIDs: []string{"msg_steer"},
+		Events:     []*event.Event{res.Event},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if res.Event.Seq == 0 {
+		t.Fatal("steer event should receive its seq at the safe sampling boundary")
+	}
+	msgs, err := st.ListMessages(context.Background(), "sess_1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := messageLabels(msgs), []string{"user:hello", "assistant:first", "user:change direction"}; !sameStrings(got, want) {
+		t.Fatalf("steer message order: got %v want %v", got, want)
+	}
+	events, err := st.EventsAfter(context.Background(), "sess_1", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 || events[1].Kind != event.InputSteered || events[1].UserMessageID != "msg_steer" {
+		t.Fatalf("unexpected steer events: %+v", events)
+	}
+}
+
+func TestSteerQueuedInputPromotesIntoRunningTurnAtomically(t *testing.T) {
+	st, _ := openTestStore(t)
+	createTestSession(t, st, "sess_1")
+	beginTestTurn(t, st, "sess_1", "turn_1", "msg_1", "client_1")
+	if _, err := st.AppendTurnOutput(context.Background(), store.AppendTurnOutputInput{
+		TurnID: "turn_1",
+		Parts:  store.TextPart("first"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.QueueInput(context.Background(), store.QueueInputInput{
+		SessionID:       "sess_1",
+		ClientMessageID: "client_queued",
+		Text:            "guide from queue",
+		Parts:           store.TextPart("guide from queue"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := st.SteerQueuedInput(context.Background(), store.SteerQueuedInputInput{
+		SessionID:       "sess_1",
+		TurnID:          "turn_missing",
+		ClientMessageID: "client_queued",
+		UserMessageID:   "msg_wrong",
+	}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("wrong turn should fail without consuming queue: %v", err)
+	}
+	queued, err := st.ListQueuedInputs(context.Background(), "sess_1")
+	if err != nil || len(queued) != 1 {
+		t.Fatalf("queued input should remain after failed steer: %+v err=%v", queued, err)
+	}
+
+	res, err := st.SteerQueuedInput(context.Background(), store.SteerQueuedInputInput{
+		SessionID:       "sess_1",
+		TurnID:          "turn_1",
+		ClientMessageID: "client_queued",
+		UserMessageID:   "msg_queued_steer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Duplicate || res.Input.Status != store.QueuedInputPromoted || res.Input.TurnID != "turn_1" {
+		t.Fatalf("unexpected queued steer result: %+v", res)
+	}
+	if res.UpdatedEvent == nil || res.UpdatedEvent.Kind != event.InputUpdated || res.UpdatedEvent.Status != string(store.QueuedInputPromoted) {
+		t.Fatalf("missing promoted event: %+v", res.UpdatedEvent)
+	}
+	if res.SteeredEvent == nil || res.SteeredEvent.Kind != event.InputSteered {
+		t.Fatalf("missing steered event: %+v", res.SteeredEvent)
+	}
+	queued, err = st.ListQueuedInputs(context.Background(), "sess_1")
+	if err != nil || len(queued) != 0 {
+		t.Fatalf("promoted input should leave queue: %+v err=%v", queued, err)
+	}
+	if _, err := st.QueueInput(context.Background(), store.QueueInputInput{
+		SessionID:       "sess_1",
+		ClientMessageID: "client_after",
+		Text:            "later queue update",
+		Parts:           store.TextPart("later queue update"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ApplyTurnSteers(context.Background(), store.ApplyTurnSteersInput{
+		TurnID:     "turn_1",
+		MessageIDs: []string{"msg_queued_steer"},
+		Events:     []*event.Event{res.SteeredEvent},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	msgs, err := st.ListMessages(context.Background(), "sess_1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := messageLabels(msgs), []string{"user:hello", "assistant:first", "user:guide from queue"}; !sameStrings(got, want) {
+		t.Fatalf("queued steer must stay in original turn: got %v want %v", got, want)
+	}
+	events, err := st.EventsAfter(context.Background(), "sess_1", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) < 2 || events[len(events)-1].Kind != event.InputSteered {
+		t.Fatalf("steered event must be sequenced at the apply boundary: %+v", events)
+	}
+	for i := 1; i < len(events); i++ {
+		if events[i].Seq <= events[i-1].Seq {
+			t.Fatalf("event sequence must stay monotonic: %+v", events)
+		}
+	}
+}
+
 func TestTurnModelConfigPersists(t *testing.T) {
 	st, path := openTestStore(t)
 	createTestSession(t, st, "sess_1")
@@ -1285,6 +1439,35 @@ func TestUsageHourlyStatsRecordAndQuery(t *testing.T) {
 	}
 	if len(stats) != 2 || stats[0].Model != "" || stats[0].RequestCount != 3 || stats[0].TotalTokens() != 156 || stats[1].Model != "model-b" || stats[1].TotalTokens() != 7 {
 		t.Fatalf("queried stats wrong: %+v", stats)
+	}
+}
+
+func TestUsageCalibrationRecordAndQuery(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+
+	first, err := st.RecordUsageCalibration(ctx, "profile-a", "model-a", 100, 130)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.SampleCount != 1 || first.InputRatioEWMA != 1.3 || first.LastEstimatedInputTokens != 100 || first.LastActualInputTokens != 130 {
+		t.Fatalf("first calibration = %+v", first)
+	}
+
+	second, err := st.RecordUsageCalibration(ctx, "profile-a", "model-a", 100, 110)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.SampleCount != 2 || second.InputRatioEWMA != 1.25 || second.LastEstimatedInputTokens != 100 || second.LastActualInputTokens != 110 {
+		t.Fatalf("second calibration = %+v", second)
+	}
+
+	other, err := st.UsageCalibration(ctx, "profile-a", "model-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other.SampleCount != 0 || other.InputRatioEWMA != 1 {
+		t.Fatalf("missing calibration = %+v", other)
 	}
 }
 

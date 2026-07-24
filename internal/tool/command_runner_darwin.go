@@ -107,10 +107,27 @@ func (r *macOSCommandRunner) prepareStateRoot(projectRoots []string) (string, er
 		sandboxRoot,
 		stateRoot,
 		filepath.Join(stateRoot, "cache"),
+		filepath.Join(stateRoot, "cache", "corepack"),
+		filepath.Join(stateRoot, "cache", "python-bytecode"),
+		filepath.Join(stateRoot, "config"),
+		filepath.Join(stateRoot, "node"),
+		filepath.Join(stateRoot, "node", "npm-prefix"),
+		filepath.Join(stateRoot, "node", "npm-prefix", "bin"),
+		filepath.Join(stateRoot, "node", "pnpm-home"),
+		filepath.Join(stateRoot, "node", "yarn-global"),
+		filepath.Join(stateRoot, "python"),
 		filepath.Join(stateRoot, "tmp"),
 	} {
 		if err := ensureSandboxStateDir(dir); err != nil {
 			return "", fmt.Errorf("prepare command sandbox state: %w", err)
+		}
+	}
+	for _, file := range []string{
+		filepath.Join(stateRoot, "config", "npm-user.conf"),
+		filepath.Join(stateRoot, "config", "npm-global.conf"),
+	} {
+		if err := ensureSandboxStateFile(file); err != nil {
+			return "", fmt.Errorf("prepare command sandbox config: %w", err)
 		}
 	}
 	resolved, err := filepath.EvalSymlinks(stateRoot)
@@ -135,6 +152,24 @@ func ensureSandboxStateDir(path string) error {
 		return errors.New("sandbox state path must be a directory, not a symlink")
 	}
 	return nil
+}
+
+func ensureSandboxStateFile(path string) error {
+	info, err := os.Lstat(path)
+	if err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return errors.New("sandbox state path must be a regular file, not a symlink")
+		}
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	return file.Close()
 }
 
 func sandboxCanonicalRoots(roots []string) ([]string, error) {
@@ -348,6 +383,9 @@ func sandboxEnvironment(env []string, stateRoot string) []string {
 	tmpDir := filepath.Join(stateRoot, "tmp")
 	cacheDir := filepath.Join(stateRoot, "cache")
 	goPath := filepath.Join(stateRoot, "go")
+	nodeDir := filepath.Join(stateRoot, "node")
+	npmPrefix := filepath.Join(nodeDir, "npm-prefix")
+	pnpmHome := filepath.Join(nodeDir, "pnpm-home")
 	out = sandboxSetEnv(out, "TMPDIR", tmpDir+string(filepath.Separator))
 	out = sandboxSetEnv(out, "TMP", tmpDir)
 	out = sandboxSetEnv(out, "TEMP", tmpDir)
@@ -356,13 +394,58 @@ func sandboxEnvironment(env []string, stateRoot string) []string {
 	out = sandboxSetEnv(out, "GOMODCACHE", filepath.Join(goPath, "pkg", "mod"))
 	out = sandboxSetEnv(out, "GOCACHE", filepath.Join(cacheDir, "go-build"))
 	out = sandboxSetEnv(out, "NPM_CONFIG_CACHE", filepath.Join(cacheDir, "npm"))
+	out = sandboxSetEnv(out, "NPM_CONFIG_PREFIX", npmPrefix)
+	out = sandboxSetEnv(out, "NPM_CONFIG_USERCONFIG", filepath.Join(stateRoot, "config", "npm-user.conf"))
+	out = sandboxSetEnv(out, "NPM_CONFIG_GLOBALCONFIG", filepath.Join(stateRoot, "config", "npm-global.conf"))
 	out = sandboxSetEnv(out, "npm_config_store_dir", filepath.Join(cacheDir, "pnpm-store"))
+	out = sandboxSetEnv(out, "PNPM_HOME", pnpmHome)
+	out = sandboxSetEnv(out, "COREPACK_HOME", filepath.Join(cacheDir, "corepack"))
 	out = sandboxSetEnv(out, "YARN_CACHE_FOLDER", filepath.Join(cacheDir, "yarn"))
+	out = sandboxSetEnv(out, "YARN_GLOBAL_FOLDER", filepath.Join(nodeDir, "yarn-global"))
+	out = sandboxSetEnv(out, "NODE_REPL_HISTORY", filepath.Join(nodeDir, "repl_history"))
+	out = sandboxSetEnv(out, "NODE_PATH", filepath.Join(npmPrefix, "lib", "node_modules"))
+	out = sandboxPrependPath(out, filepath.Join(npmPrefix, "bin"), pnpmHome)
 	out = sandboxSetEnv(out, "PIP_CACHE_DIR", filepath.Join(cacheDir, "pip"))
 	out = sandboxSetEnv(out, "UV_CACHE_DIR", filepath.Join(cacheDir, "uv"))
+	out = sandboxSetEnv(out, "PYTHONUSERBASE", filepath.Join(stateRoot, "python"))
+	out = sandboxSetEnv(out, "PYTHONPYCACHEPREFIX", filepath.Join(cacheDir, "python-bytecode"))
+	if certificateBundle := sandboxCertificateBundle(); certificateBundle != "" {
+		out = sandboxSetEnvDefault(out, "SSL_CERT_FILE", certificateBundle)
+		out = sandboxSetEnvDefault(out, "REQUESTS_CA_BUNDLE", certificateBundle)
+		out = sandboxSetEnvDefault(out, "CURL_CA_BUNDLE", certificateBundle)
+		out = sandboxSetEnvDefault(out, "PIP_CERT", certificateBundle)
+	}
 	out = sandboxSetEnv(out, "GIT_CONFIG_GLOBAL", "/dev/null")
 	out = sandboxSetEnv(out, "GIT_CONFIG_NOSYSTEM", "1")
 	return out
+}
+
+func sandboxCertificateBundle() string {
+	for _, candidate := range []string{
+		"/private/etc/ssl/cert.pem",
+		"/etc/ssl/cert.pem",
+		"/opt/homebrew/etc/ca-certificates/cert.pem",
+		"/opt/homebrew/etc/openssl@3/cert.pem",
+		"/usr/local/etc/openssl@3/cert.pem",
+	} {
+		info, err := os.Stat(candidate)
+		if err == nil && info.Mode().IsRegular() {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func sandboxPrependPath(env []string, paths ...string) []string {
+	current := filepath.SplitList(sandboxEnvValue(env, "PATH"))
+	return sandboxSetEnv(env, "PATH", strings.Join(append(paths, current...), string(os.PathListSeparator)))
+}
+
+func sandboxSetEnvDefault(env []string, key, value string) []string {
+	if sandboxEnvValue(env, key) != "" {
+		return env
+	}
+	return sandboxSetEnv(env, key, value)
 }
 
 func sandboxSetEnv(env []string, key, value string) []string {

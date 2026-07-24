@@ -1308,6 +1308,21 @@ type PromoteQueuedInputResult struct {
 	StartedEvent *event.Event
 }
 
+type SteerQueuedInputInput struct {
+	SessionID       string
+	TurnID          string
+	ClientMessageID string
+	UserMessageID   string
+}
+
+type SteerQueuedInputResult struct {
+	Duplicate    bool
+	Input        *QueuedInput
+	UserMessage  *Message
+	UpdatedEvent *event.Event
+	SteeredEvent *event.Event
+}
+
 type ConversationTurn struct {
 	ID              string            `json:"id"`
 	SessionID       string            `json:"sessionID"`
@@ -1452,12 +1467,36 @@ type TurnFileChange struct {
 }
 
 type AppendTurnOutputInput struct {
-	TurnID string
-	Parts  []ContentPart
+	TurnID      string
+	Parts       []ContentPart
+	Interrupted bool
 }
 
 type AppendTurnOutputResult struct {
 	Messages []*Message
+}
+
+type AppendTurnSteerInput struct {
+	SessionID       string
+	TurnID          string
+	UserMessageID   string
+	ClientMessageID string
+	UserText        string
+	UserParts       []ContentPart
+}
+
+type AppendTurnSteerResult struct {
+	Duplicate   bool
+	UserMessage *Message
+	Event       *event.Event
+}
+
+type ApplyTurnSteersInput struct {
+	TurnID     string
+	MessageIDs []string
+	// Events 与 MessageIDs 一一对应，在消息移动到安全采样边界时才分配
+	// seq 并落库，避免尚未发布的事件提前占用 SSE 序号。
+	Events []*event.Event
 }
 
 type AppendCompactSummaryInput struct {
@@ -1510,6 +1549,38 @@ type UsageHourlyStat struct {
 
 func (s UsageHourlyStat) TotalTokens() int {
 	return s.InputUncachedTokens + s.InputCachedTokens + s.CacheCreationTokens + s.OutputContentTokens + s.OutputReasoningTokens
+}
+
+type UsageCalibrationStat struct {
+	Provider                 string    `json:"provider"`
+	Model                    string    `json:"model"`
+	SampleCount              int       `json:"sampleCount"`
+	InputRatioEWMA           float64   `json:"inputRatioEWMA"`
+	LastEstimatedInputTokens int       `json:"lastEstimatedInputTokens"`
+	LastActualInputTokens    int       `json:"lastActualInputTokens"`
+	UpdatedAt                time.Time `json:"updatedAt"`
+}
+
+// NextUsageCalibrationRatio updates the provider/model input-token correction
+// factor from one request whose raw estimate and provider-reported usage refer
+// to the exact same payload. Outliers are bounded so one malformed usage report
+// cannot permanently poison future estimates.
+func NextUsageCalibrationRatio(current float64, sampleCount, estimatedInputTokens, actualInputTokens int) float64 {
+	if estimatedInputTokens <= 0 || actualInputTokens <= 0 {
+		return current
+	}
+	sample := float64(actualInputTokens) / float64(estimatedInputTokens)
+	if sample < 0.5 {
+		sample = 0.5
+	}
+	if sample > 2 {
+		sample = 2
+	}
+	if sampleCount <= 0 || current <= 0 {
+		return sample
+	}
+	const alpha = 0.25
+	return current*(1-alpha) + sample*alpha
 }
 
 type SessionUsageStat struct {
@@ -1855,10 +1926,20 @@ type Store interface {
 	HasQueuedInputs(ctx context.Context, sessionID string) (bool, error)
 	UpdateQueuedInput(ctx context.Context, in UpdateQueuedInputInput) (*UpdateQueuedInputResult, error)
 	PromoteNextQueuedInput(ctx context.Context, in PromoteQueuedInputInput) (*PromoteQueuedInputResult, error)
+	// SteerQueuedInput 把一条仍在排队的输入原子地提升为当前 running turn
+	// 的引导消息，并持久化队列更新；input.steered 由 ApplyTurnSteers
+	// 在安全采样边界落库。
+	SteerQueuedInput(ctx context.Context, in SteerQueuedInputInput) (*SteerQueuedInputResult, error)
 	QueuedSessions(ctx context.Context) ([]string, error)
 	// AppendTurnOutput 在 turn 仍 running 时追加已经完整的 assistant/tool
 	// output message;token delta 不走这里。
 	AppendTurnOutput(ctx context.Context, in AppendTurnOutputInput) (*AppendTurnOutputResult, error)
+	// AppendTurnSteer 在指定 turn 仍 running 时追加用户引导。
+	// input.steered 在 ApplyTurnSteers 的安全采样边界落库。
+	AppendTurnSteer(ctx context.Context, in AppendTurnSteerInput) (*AppendTurnSteerResult, error)
+	// ApplyTurnSteers 把流式期间已接收的引导移动到当前完整输出之后，
+	// 并在同一事务中持久化对应的 input.steered 事件。
+	ApplyTurnSteers(ctx context.Context, in ApplyTurnSteersInput) error
 	// AppendCompactSummary 追加一条 completed summary turn,作为后续上下文压缩边界。
 	AppendCompactSummary(ctx context.Context, in AppendCompactSummaryInput) (*AppendCompactSummaryResult, error)
 	// FinishTurn:更新 turn 状态 + 落 assistant message(如有)+ 落 final 事件。
@@ -1867,6 +1948,10 @@ type Store interface {
 	RecordUsage(ctx context.Context, in UsageRecordInput) (*UsageHourlyStat, error)
 	// UsageHourlyStats 返回 [from, to) 的全局小时统计;to 为零值表示无上界。
 	UsageHourlyStats(ctx context.Context, from, to time.Time) ([]*UsageHourlyStat, error)
+	// RecordUsageCalibration 用同一 provider request 的原始预估与实测输入
+	// 更新 provider profile + model 级别的 EWMA 校准系数。
+	RecordUsageCalibration(ctx context.Context, provider, model string, estimatedInputTokens, actualInputTokens int) (*UsageCalibrationStat, error)
+	UsageCalibration(ctx context.Context, provider, model string) (*UsageCalibrationStat, error)
 	// RecordSessionUsage 把一次 provider request 用量写入 session 统计。
 	RecordSessionUsage(ctx context.Context, sessionID string, in UsageRecordInput) (*SessionUsageStat, error)
 	// SessionUsage 返回 session 最近一次与累计 token 用量;无用量时返回零统计。

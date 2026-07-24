@@ -280,7 +280,7 @@ func SplitRecentInputTail(msgs []*store.Message, recentInputTurns int) ([]*store
 }
 
 func IsInputTurnBoundary(msg *store.Message) bool {
-	if msg == nil || msg.TurnID == "" {
+	if msg == nil || msg.TurnID == "" || msg.TurnIndex != 0 {
 		return false
 	}
 	return msg.Role == store.RoleUser || msg.Role == store.RoleSystem

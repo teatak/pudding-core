@@ -692,6 +692,107 @@ func (s *Store) UpdateQueuedInput(ctx context.Context, in store.UpdateQueuedInpu
 	return out, err
 }
 
+func (s *Store) SteerQueuedInput(ctx context.Context, in store.SteerQueuedInputInput) (*store.SteerQueuedInputResult, error) {
+	var out *store.SteerQueuedInputResult
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		turn, err := getTurnTx(ctx, tx, in.TurnID)
+		if err != nil {
+			return err
+		}
+		if turn.SessionID != in.SessionID || turn.Status != store.TurnRunning {
+			return store.ErrNotFound
+		}
+		input, err := getQueuedInputTx(ctx, tx, in.SessionID, in.ClientMessageID)
+		if err != nil {
+			return err
+		}
+		existing, err := getUserMessageByClientMessageIDTx(ctx, tx, in.SessionID, in.ClientMessageID)
+		if err == nil {
+			if existing.TurnID != in.TurnID {
+				return store.ErrNotFound
+			}
+			out = &store.SteerQueuedInputResult{
+				Duplicate:   true,
+				Input:       input,
+				UserMessage: existing,
+			}
+			return nil
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		if input.Status == store.QueuedInputEditing {
+			return store.ErrQueueBlocked
+		}
+		if input.Status != store.QueuedInputQueued {
+			return store.ErrNotFound
+		}
+
+		maxIndex, _, err := turnOutputStatsTx(ctx, tx, turn.SessionID, turn.ID)
+		if err != nil {
+			return err
+		}
+		now := time.Now()
+		parts := store.UserInputParts(input.Text, input.Parts)
+		message := &store.Message{
+			ID:              in.UserMessageID,
+			SessionID:       in.SessionID,
+			TurnID:          in.TurnID,
+			Role:            store.RoleUser,
+			Kind:            store.MessageKindText,
+			Text:            store.TextFromParts(parts),
+			Parts:           parts,
+			TurnIndex:       maxIndex + 1,
+			ClientMessageID: input.ClientMessageID,
+			CreatedAt:       now,
+		}
+		if err := insertMessageTx(ctx, tx, message); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE queued_inputs SET status=?, turn_id=?, updated_at=? WHERE session_id=? AND client_message_id=?`,
+			store.QueuedInputPromoted, in.TurnID, unixMS(now), in.SessionID, in.ClientMessageID,
+		); err != nil {
+			return err
+		}
+		input.Status = store.QueuedInputPromoted
+		input.TurnID = in.TurnID
+		input.UpdatedAt = now
+		updatedEvent := event.Event{
+			SessionID:       in.SessionID,
+			Kind:            event.InputUpdated,
+			ClientMessageID: input.ClientMessageID,
+			Text:            input.Text,
+			Status:          string(input.Status),
+		}
+		if err := insertEventTx(ctx, tx, &updatedEvent); err != nil {
+			return err
+		}
+		steeredEvent := event.Event{
+			SessionID:       in.SessionID,
+			Kind:            event.InputSteered,
+			TurnID:          in.TurnID,
+			ClientMessageID: input.ClientMessageID,
+			UserMessageID:   message.ID,
+			Text:            message.Text,
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE turns SET updated_at=? WHERE id=?`, unixMS(now), turn.ID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(now), turn.SessionID); err != nil {
+			return err
+		}
+		out = &store.SteerQueuedInputResult{
+			Input:        input,
+			UserMessage:  message,
+			UpdatedEvent: &updatedEvent,
+			SteeredEvent: &steeredEvent,
+		}
+		return nil
+	})
+	return out, err
+}
+
 func (s *Store) PromoteNextQueuedInput(ctx context.Context, in store.PromoteQueuedInputInput) (*store.PromoteQueuedInputResult, error) {
 	var out *store.PromoteQueuedInputResult
 	err := s.tx(ctx, func(tx *sql.Tx) error {
@@ -859,7 +960,7 @@ func (s *Store) FinishTurn(ctx context.Context, in store.FinishTurnInput) (*stor
 			return err
 		}
 		segments := store.FinishAssistantOutputSegments(in)
-		if maxIndex > 0 && len(in.AssistantParts) == 0 {
+		if firstOutputID != "" && len(in.AssistantParts) == 0 {
 			segments = nil
 		}
 		messages, err := appendTurnOutputSegmentsTx(ctx, tx, turn, maxIndex, segments, in.Interrupted, now)
@@ -914,7 +1015,7 @@ func (s *Store) AppendTurnOutput(ctx context.Context, in store.AppendTurnOutputI
 		if err != nil {
 			return err
 		}
-		messages, err := appendTurnOutputSegmentsTx(ctx, tx, turn, maxIndex, segments, false, now)
+		messages, err := appendTurnOutputSegmentsTx(ctx, tx, turn, maxIndex, segments, in.Interrupted, now)
 		if err != nil {
 			return err
 		}
@@ -928,6 +1029,128 @@ func (s *Store) AppendTurnOutput(ctx context.Context, in store.AppendTurnOutputI
 		return nil
 	})
 	return out, err
+}
+
+func (s *Store) AppendTurnSteer(ctx context.Context, in store.AppendTurnSteerInput) (*store.AppendTurnSteerResult, error) {
+	var out *store.AppendTurnSteerResult
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		turn, err := getTurnTx(ctx, tx, in.TurnID)
+		if err != nil {
+			return err
+		}
+		if turn.SessionID != in.SessionID || turn.Status != store.TurnRunning {
+			return store.ErrNotFound
+		}
+		existing, err := getUserMessageByClientMessageIDTx(ctx, tx, in.SessionID, in.ClientMessageID)
+		if err == nil {
+			if existing.TurnID != in.TurnID {
+				return store.ErrNotFound
+			}
+			out = &store.AppendTurnSteerResult{Duplicate: true, UserMessage: existing}
+			return nil
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		maxIndex, _, err := turnOutputStatsTx(ctx, tx, turn.SessionID, turn.ID)
+		if err != nil {
+			return err
+		}
+		now := time.Now()
+		parts := store.UserInputParts(in.UserText, in.UserParts)
+		message := &store.Message{
+			ID:              in.UserMessageID,
+			SessionID:       in.SessionID,
+			TurnID:          in.TurnID,
+			Role:            store.RoleUser,
+			Kind:            store.MessageKindText,
+			Text:            store.TextFromParts(parts),
+			Parts:           parts,
+			TurnIndex:       maxIndex + 1,
+			ClientMessageID: in.ClientMessageID,
+			CreatedAt:       now,
+		}
+		if err := insertMessageTx(ctx, tx, message); err != nil {
+			return err
+		}
+		ev := event.Event{
+			SessionID:       in.SessionID,
+			Kind:            event.InputSteered,
+			TurnID:          in.TurnID,
+			ClientMessageID: in.ClientMessageID,
+			UserMessageID:   in.UserMessageID,
+			Text:            message.Text,
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE turns SET updated_at=? WHERE id=?`, unixMS(now), turn.ID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_activity_at=? WHERE id=?`, unixMS(now), turn.SessionID); err != nil {
+			return err
+		}
+		out = &store.AppendTurnSteerResult{UserMessage: message, Event: &ev}
+		return nil
+	})
+	return out, err
+}
+
+func (s *Store) ApplyTurnSteers(ctx context.Context, in store.ApplyTurnSteersInput) error {
+	if len(in.MessageIDs) == 0 {
+		return nil
+	}
+	if len(in.Events) != len(in.MessageIDs) {
+		return store.ErrNotFound
+	}
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		turn, err := getTurnTx(ctx, tx, in.TurnID)
+		if err != nil {
+			return err
+		}
+		if turn.Status != store.TurnRunning {
+			return store.ErrNotFound
+		}
+		for _, ev := range in.Events {
+			if ev == nil || ev.Kind != event.InputSteered || ev.SessionID != turn.SessionID || ev.TurnID != turn.ID {
+				return store.ErrNotFound
+			}
+		}
+		maxIndex, _, err := turnOutputStatsTx(ctx, tx, turn.SessionID, turn.ID)
+		if err != nil {
+			return err
+		}
+		now := unixMS(time.Now())
+		var maxCreated int64
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COALESCE(MAX(created_at),0) FROM messages WHERE session_id=? AND turn_id=?`,
+			turn.SessionID, turn.ID,
+		).Scan(&maxCreated); err != nil {
+			return err
+		}
+		if now <= maxCreated {
+			now = maxCreated + 1
+		}
+		for i, messageID := range in.MessageIDs {
+			result, err := tx.ExecContext(ctx,
+				`UPDATE messages SET turn_index=?, created_at=? WHERE id=? AND session_id=? AND turn_id=? AND role=?`,
+				maxIndex+i+1, now, messageID, turn.SessionID, turn.ID, store.RoleUser,
+			)
+			if err != nil {
+				return err
+			}
+			affected, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if affected != 1 {
+				return store.ErrNotFound
+			}
+		}
+		for _, ev := range in.Events {
+			if err := insertEventTx(ctx, tx, ev); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (s *Store) AppendCompactSummary(ctx context.Context, in store.AppendCompactSummaryInput) (*store.AppendCompactSummaryResult, error) {
@@ -1096,6 +1319,63 @@ func (s *Store) usageHourlyStat(ctx context.Context, hour time.Time, model strin
 		WHERE hour_start_at=? AND model=?`,
 		unixMS(hour.UTC().Truncate(time.Hour)), model,
 	))
+}
+
+func (s *Store) RecordUsageCalibration(ctx context.Context, providerName, model string, estimatedInputTokens, actualInputTokens int) (*store.UsageCalibrationStat, error) {
+	providerName = strings.TrimSpace(providerName)
+	model = strings.TrimSpace(model)
+	if providerName == "" || model == "" || estimatedInputTokens <= 0 || actualInputTokens <= 0 {
+		return s.UsageCalibration(ctx, providerName, model)
+	}
+	now := time.Now()
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		var sampleCount int
+		var currentRatio float64
+		err := tx.QueryRowContext(ctx,
+			`SELECT sample_count,input_ratio_ewma FROM usage_calibrations WHERE provider=? AND model=?`,
+			providerName, model,
+		).Scan(&sampleCount, &currentRatio)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		nextRatio := store.NextUsageCalibrationRatio(currentRatio, sampleCount, estimatedInputTokens, actualInputTokens)
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO usage_calibrations(
+				provider,model,sample_count,input_ratio_ewma,
+				last_estimated_input_tokens,last_actual_input_tokens,updated_at
+			) VALUES(?,?,?,?,?,?,?)
+			ON CONFLICT(provider,model) DO UPDATE SET
+				sample_count=usage_calibrations.sample_count+1,
+				input_ratio_ewma=excluded.input_ratio_ewma,
+				last_estimated_input_tokens=excluded.last_estimated_input_tokens,
+				last_actual_input_tokens=excluded.last_actual_input_tokens,
+				updated_at=excluded.updated_at`,
+			providerName, model, sampleCount+1, nextRatio,
+			estimatedInputTokens, actualInputTokens, unixMS(now),
+		)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.UsageCalibration(ctx, providerName, model)
+}
+
+func (s *Store) UsageCalibration(ctx context.Context, providerName, model string) (*store.UsageCalibrationStat, error) {
+	providerName = strings.TrimSpace(providerName)
+	model = strings.TrimSpace(model)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stat, err := scanUsageCalibrationStat(s.db.QueryRowContext(ctx,
+		`SELECT provider,model,sample_count,input_ratio_ewma,
+			last_estimated_input_tokens,last_actual_input_tokens,updated_at
+		FROM usage_calibrations WHERE provider=? AND model=?`,
+		providerName, model,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return &store.UsageCalibrationStat{Provider: providerName, Model: model, InputRatioEWMA: 1}, nil
+	}
+	return stat, err
 }
 
 func (s *Store) RecordSessionUsage(ctx context.Context, sessionID string, in store.UsageRecordInput) (*store.SessionUsageStat, error) {
@@ -2142,6 +2422,25 @@ func scanUsageHourlyStat(row messageScanner) (*store.UsageHourlyStat, error) {
 	return &stat, nil
 }
 
+func scanUsageCalibrationStat(row messageScanner) (*store.UsageCalibrationStat, error) {
+	var stat store.UsageCalibrationStat
+	var updated int64
+	err := row.Scan(
+		&stat.Provider,
+		&stat.Model,
+		&stat.SampleCount,
+		&stat.InputRatioEWMA,
+		&stat.LastEstimatedInputTokens,
+		&stat.LastActualInputTokens,
+		&updated,
+	)
+	if err != nil {
+		return nil, err
+	}
+	stat.UpdatedAt = timeFromMS(updated)
+	return &stat, nil
+}
+
 func sessionUsageTx(ctx context.Context, tx *sql.Tx, sessionID string) (*store.SessionUsageStat, error) {
 	return scanSessionUsageStat(tx.QueryRowContext(ctx,
 		`SELECT session_id,request_count,
@@ -2199,8 +2498,10 @@ func turnOutputStatsTx(ctx context.Context, tx *sql.Tx, sessionID, turnID string
 	}
 	var firstID string
 	err = tx.QueryRowContext(ctx,
-		`SELECT id FROM messages WHERE session_id=? AND turn_id=? AND turn_index>0 ORDER BY turn_index ASC LIMIT 1`,
-		sessionID, turnID,
+		`SELECT id FROM messages
+		 WHERE session_id=? AND turn_id=? AND turn_index>0 AND role NOT IN (?,?)
+		 ORDER BY turn_index ASC LIMIT 1`,
+		sessionID, turnID, store.RoleUser, store.RoleSystem,
 	).Scan(&firstID)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = nil

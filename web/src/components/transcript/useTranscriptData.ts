@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
 
-import { listQueuedInputs, updateQueuedInput, type QueuedInput } from "@/api/client";
+import { listQueuedInputs, steerQueuedInput, updateQueuedInput, type QueuedInput } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
 import { useI18n } from "@/i18n";
 import { type PendingUserMessage, useOverlayStore } from "@/state/overlayStore";
@@ -25,6 +25,7 @@ export function useTranscriptData({
 }) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
+  const addPendingUser = useOverlayStore((state) => state.addPendingUser);
   const markAssistantRevealed = useOverlayStore((state) => state.markAssistantRevealed);
   const reconcileMessages = useOverlayStore((state) => state.reconcileMessages);
   const reconcileTurns = useOverlayStore((state) => state.reconcileTurns);
@@ -78,6 +79,40 @@ export function useTranscriptData({
     [updateQueuedMutation],
   );
 
+  const steerQueuedMutation = useMutation({
+    mutationFn: ({ clientMessageID, turnID }: { clientMessageID: string; input?: PendingUserMessage; turnID: string }) =>
+      steerQueuedInput(token, sessionID, clientMessageID, turnID),
+    onSuccess: (_result, { clientMessageID, input, turnID }) => {
+      if (!input) {
+        return;
+      }
+      addPendingUser({
+        clientMessageID,
+        createdAt: input.createdAt,
+        parts: input.parts,
+        sessionID,
+        status: "steering",
+        text: input.text,
+        turnID,
+      });
+    },
+    onError: () => toast.error(t("transcript.guideQueuedFailed")),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.queuedInputs(sessionID) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.turns(sessionID) });
+    },
+  });
+
+  const steerQueued = useCallback(
+    (clientMessageID: string, turnID: string) =>
+      steerQueuedMutation.mutateAsync({
+        clientMessageID,
+        input: pendingUsers.find((input) => input.clientMessageID === clientMessageID),
+        turnID,
+      }),
+    [pendingUsers, steerQueuedMutation],
+  );
+
   const transcript = useTranscriptViewModel({
     assistantOverlays,
     compactRun,
@@ -105,18 +140,19 @@ export function useTranscriptData({
     pendingUsers,
     transcript,
     turnsQuery,
+    steerQueued,
     updateQueued,
   };
 }
 
 function mergePendingUsers(queuedInputs: QueuedInput[], overlayPending: PendingUserMessage[]) {
   const out: PendingUserMessage[] = [];
-  const seen = new Set<string>();
+  const indexByClientID = new Map<string, number>();
   for (const input of queuedInputs) {
     if (input.status !== "queued" && input.status !== "editing") {
       continue;
     }
-    seen.add(input.clientMessageID);
+    indexByClientID.set(input.clientMessageID, out.length);
     out.push({
       clientMessageID: input.clientMessageID,
       parts: input.parts,
@@ -127,9 +163,16 @@ function mergePendingUsers(queuedInputs: QueuedInput[], overlayPending: PendingU
     });
   }
   for (const pending of overlayPending) {
-    if (seen.has(pending.clientMessageID)) {
+    const existingIndex = indexByClientID.get(pending.clientMessageID);
+    if (existingIndex !== undefined) {
+      // mutation 成功后 queued query 仍可能短暂保留旧快照；steering
+      // overlay 必须优先，否则气泡会先退回“稍后发送”再跳入当前 turn。
+      if (pending.status === "steering") {
+        out[existingIndex] = pending;
+      }
       continue;
     }
+    indexByClientID.set(pending.clientMessageID, out.length);
     out.push(pending);
   }
   return out;

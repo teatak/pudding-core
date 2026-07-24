@@ -86,6 +86,16 @@ export const inputUpdatedEvent = z.object({
   status: z.enum(["queued", "editing", "cancelled", "promoted"]),
 });
 
+export const inputSteeredEvent = z.object({
+  kind: z.literal("input.steered"),
+  seq: z.number().int().positive(),
+  sessionID: z.string(),
+  turnID: z.string(),
+  clientMessageID: z.string(),
+  userMessageID: z.string(),
+  text: z.string(),
+});
+
 export const audioBindingsEvent = z.object({
   kind: z.literal("audio.bindings"),
   sessionID: z.string(),
@@ -175,6 +185,7 @@ export const sessionEvent = z.discriminatedUnion("kind", [
   turnCancelledEvent,
   inputQueuedEvent,
   inputUpdatedEvent,
+  inputSteeredEvent,
   audioBindingsEvent,
   audioInputLevelEvent,
   approvalRequestedEvent,

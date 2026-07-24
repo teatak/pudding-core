@@ -641,6 +641,22 @@ export const submitResponse = z.object({
   clientMessageID: z.string().optional(),
 });
 
+export const steerRequest = z.object({
+  clientMessageID: z.string().min(1),
+  text: z.string().optional().default(""),
+  parts: z.array(contentPart).min(1),
+});
+
+export const steerResponse = z.object({
+  duplicate: z.boolean().optional(),
+  turnID: z.string(),
+  userMessageID: z.string(),
+});
+
+export const steerQueuedInputRequest = z.object({
+  turnID: z.string().min(1),
+});
+
 export const compactResponse = z.object({
   turnID: z.string(),
   summaryMessageID: z.string(),
@@ -671,6 +687,9 @@ export const sessionUsage = z.object({
   sessionID: z.string(),
   contextWindow: z.number(),
   contextEstimatedTokens: z.number(),
+  contextRawEstimatedTokens: z.number(),
+  inputCalibrationFactor: z.number(),
+  inputCalibrationSamples: z.number(),
   messageEstimatedTokens: z.number(),
   promptOverheadEstimatedTokens: z.number(),
   systemPromptEstimatedTokens: z.number(),

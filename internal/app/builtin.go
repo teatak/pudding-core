@@ -32,6 +32,7 @@ const (
 	toolAppSave           = "builtin_app_save"
 	toolFileList          = "builtin_file_list"
 	toolFileRead          = "builtin_file_read"
+	toolAttachmentExport  = "builtin_attachment_export"
 	toolFileStat          = "builtin_file_stat"
 	toolFileSearch        = "builtin_file_search"
 	toolFileSlice         = "builtin_file_slice"
@@ -181,6 +182,7 @@ Use Pudding's built-in browser for webpages that require navigation or interacti
 			Tools: []ToolRef{
 				{Name: toolFileList},
 				{Name: toolFileRead},
+				{Name: toolAttachmentExport},
 				{Name: toolFileStat},
 				{Name: toolFileSearch},
 				{Name: toolFileSlice},

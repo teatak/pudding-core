@@ -33,7 +33,7 @@ func TestBuiltinCameraCaptureRoutesAttachment(t *testing.T) {
 		t.Fatalf("camera capture must be display-only, got context attachments: %+v", res.ContextAttachments)
 	}
 	payload := decodeToolResult(t, res)
-	if payload["attachmentKey"] == "" || payload["url"] == "" {
+	if payload["attachmentKey"] == "" || payload["url"] == "" || payload["exportTool"] != AttachmentExport || payload["exportHint"] == "" {
 		t.Fatalf("missing attachment metadata: %+v", payload)
 	}
 	path, ok, err := attachment.NewService(home).Path("sess_camera", res.Attachments[0].AttachmentKey)

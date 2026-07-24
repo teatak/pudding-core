@@ -4,6 +4,7 @@ package tool
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -337,14 +338,141 @@ func TestMacOSCommandSandboxEnvironmentIsolatesGitConfig(t *testing.T) {
 		"GOMODCACHE":           filepath.Join(stateRoot, "go", "pkg", "mod"),
 		"GOCACHE":              filepath.Join(stateRoot, "cache", "go-build"),
 		"NPM_CONFIG_CACHE":     filepath.Join(stateRoot, "cache", "npm"),
+		"NPM_CONFIG_PREFIX":    filepath.Join(stateRoot, "node", "npm-prefix"),
 		"npm_config_store_dir": filepath.Join(stateRoot, "cache", "pnpm-store"),
+		"PNPM_HOME":            filepath.Join(stateRoot, "node", "pnpm-home"),
+		"COREPACK_HOME":        filepath.Join(stateRoot, "cache", "corepack"),
 		"YARN_CACHE_FOLDER":    filepath.Join(stateRoot, "cache", "yarn"),
+		"YARN_GLOBAL_FOLDER":   filepath.Join(stateRoot, "node", "yarn-global"),
+		"NODE_REPL_HISTORY":    filepath.Join(stateRoot, "node", "repl_history"),
+		"NODE_PATH":            filepath.Join(stateRoot, "node", "npm-prefix", "lib", "node_modules"),
 		"PIP_CACHE_DIR":        filepath.Join(stateRoot, "cache", "pip"),
 		"UV_CACHE_DIR":         filepath.Join(stateRoot, "cache", "uv"),
+		"PYTHONUSERBASE":       filepath.Join(stateRoot, "python"),
+		"PYTHONPYCACHEPREFIX":  filepath.Join(stateRoot, "cache", "python-bytecode"),
 	}
 	for key, want := range wantPaths {
 		if got := sandboxEnvValue(env, key); got != want {
 			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
+	}
+	for _, key := range []string{"NPM_CONFIG_USERCONFIG", "NPM_CONFIG_GLOBALCONFIG"} {
+		if got := sandboxEnvValue(env, key); !pathInsideRoot(got, stateRoot) {
+			t.Fatalf("%s escaped state root: %q", key, got)
+		}
+	}
+	if certificateBundle := sandboxCertificateBundle(); certificateBundle != "" {
+		for _, key := range []string{"SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "PIP_CERT"} {
+			if got := sandboxEnvValue(env, key); got != certificateBundle {
+				t.Fatalf("%s = %q, want %q", key, got, certificateBundle)
+			}
+		}
+	}
+	pathDirs := filepath.SplitList(sandboxEnvValue(env, "PATH"))
+	for index, want := range []string{
+		filepath.Join(stateRoot, "node", "npm-prefix", "bin"),
+		filepath.Join(stateRoot, "node", "pnpm-home"),
+	} {
+		if len(pathDirs) <= index || pathDirs[index] != want {
+			t.Fatalf("PATH[%d] = %q, want %q", index, pathDirs[index], want)
+		}
+	}
+}
+
+func TestMacOSCommandSandboxPreservesExplicitCertificateBundle(t *testing.T) {
+	stateRoot := t.TempDir()
+	projectBundle := filepath.Join(t.TempDir(), "ca.pem")
+	env := sandboxEnvironment([]string{"SSL_CERT_FILE=" + projectBundle}, stateRoot)
+	if got := sandboxEnvValue(env, "SSL_CERT_FILE"); got != projectBundle {
+		t.Fatalf("SSL_CERT_FILE = %q, want explicit %q", got, projectBundle)
+	}
+}
+
+func TestMacOSCommandSandboxUsesPrivateTemporaryAndPythonState(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	runner := newPlatformCommandRunner(home)
+	result := runMacOSSandboxTestCommand(t, runner, commandSpec{
+		Executable:  "/bin/sh",
+		Args:        []string{"-lc", `printf script > "$TMPDIR/example.py" && test -f "$TMPDIR/example.py" && mkdir -p "$PYTHONUSERBASE/demo" && printf package > "$PYTHONUSERBASE/demo/data.txt"`},
+		CWD:         project,
+		Env:         mustCommandEnvironment(t),
+		ProjectDirs: []string{project},
+	})
+	if result.exitCode != 0 {
+		t.Fatalf("private command state failed: err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
+	}
+	if _, err := exec.LookPath("python3"); err != nil {
+		return
+	}
+	pythonResult := runMacOSSandboxTestCommand(t, runner, commandSpec{
+		Executable:  "python3",
+		Args:        []string{"-c", "import os, site; open(os.environ['SSL_CERT_FILE'], 'rb').read(1); print(site.USER_BASE)"},
+		CWD:         project,
+		Env:         mustCommandEnvironment(t),
+		ProjectDirs: []string{project},
+	})
+	resolvedHome, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pythonResult.exitCode != 0 || !pathInsideRoot(strings.TrimSpace(pythonResult.stdout), resolvedHome) {
+		t.Fatalf("Python user base was not isolated: err=%v stdout=%q stderr=%q", pythonResult.err, pythonResult.stdout, pythonResult.stderr)
+	}
+}
+
+func TestMacOSCommandSandboxUsesPrivateNodeState(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node is not installed")
+	}
+	home := t.TempDir()
+	project := t.TempDir()
+	result := runMacOSSandboxTestCommand(t, newPlatformCommandRunner(home), commandSpec{
+		Executable: "node",
+		Args: []string{"-e", `
+			const fs = require("fs");
+			fs.writeFileSync(process.env.NODE_REPL_HISTORY, "history");
+			console.log(JSON.stringify({
+				prefix: process.env.NPM_CONFIG_PREFIX,
+				pnpm: process.env.PNPM_HOME,
+				corepack: process.env.COREPACK_HOME,
+				history: process.env.NODE_REPL_HISTORY,
+				nodePath: process.env.NODE_PATH
+			}));
+		`},
+		CWD:         project,
+		Env:         mustCommandEnvironment(t),
+		ProjectDirs: []string{project},
+	})
+	if result.exitCode != 0 {
+		t.Fatalf("Node state isolation failed: err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
+	}
+	var paths map[string]string
+	if err := json.Unmarshal([]byte(strings.TrimSpace(result.stdout)), &paths); err != nil {
+		t.Fatalf("decode Node environment: %v: %q", err, result.stdout)
+	}
+	resolvedHome, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, path := range paths {
+		if !pathInsideRoot(path, resolvedHome) {
+			t.Fatalf("%s escaped isolated Node state: %q", key, path)
+		}
+	}
+	if _, err := os.Stat(paths["history"]); err != nil {
+		t.Fatalf("Node REPL history was not writable: %v", err)
+	}
+	if _, err := exec.LookPath("npm"); err == nil {
+		npmResult := runMacOSSandboxTestCommand(t, newPlatformCommandRunner(home), commandSpec{
+			Executable:  "npm",
+			Args:        []string{"config", "get", "prefix"},
+			CWD:         project,
+			Env:         mustCommandEnvironment(t),
+			ProjectDirs: []string{project},
+		})
+		if npmResult.exitCode != 0 || strings.TrimSpace(npmResult.stdout) != paths["prefix"] {
+			t.Fatalf("npm prefix was not isolated: err=%v stdout=%q stderr=%q", npmResult.err, npmResult.stdout, npmResult.stderr)
 		}
 	}
 }

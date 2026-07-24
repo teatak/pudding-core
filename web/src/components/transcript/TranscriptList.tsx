@@ -35,6 +35,7 @@ export const TranscriptList = memo(function TranscriptList({
   onLoadHistory,
   onQueuedCancel,
   onQueuedEditStart,
+  onQueuedSteer,
   onQueuedSave,
   scrollElement,
   sessionID,
@@ -51,6 +52,7 @@ export const TranscriptList = memo(function TranscriptList({
   onLoadHistory: () => Promise<unknown> | void;
   onQueuedCancel?: (clientMessageID: string) => Promise<unknown>;
   onQueuedEditStart?: (clientMessageID: string) => Promise<unknown>;
+  onQueuedSteer?: (clientMessageID: string) => Promise<unknown>;
   onQueuedSave?: (clientMessageID: string, text: string) => Promise<unknown>;
   scrollElement: HTMLDivElement | null;
   sessionID: string;
@@ -644,6 +646,7 @@ export const TranscriptList = memo(function TranscriptList({
           onAssistantRevealComplete={onAssistantRevealComplete}
           onQueuedCancel={onQueuedCancel}
           onQueuedEditStart={onQueuedEditStart}
+          onQueuedSteer={onQueuedSteer}
           onQueuedSave={onQueuedSave}
           token={token}
           turn={turn}

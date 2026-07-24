@@ -128,6 +128,9 @@ function openSessionEventSource({
     if ((parsed.data.kind === "turn.started" || isTurnTerminalEvent(parsed.data)) && syncMessages) {
       syncTurn(queryClient, token, sessionID, parsed.data.turnID);
     }
+    if (parsed.data.kind === "input.steered" && syncMessages) {
+      syncTurn(queryClient, token, sessionID, parsed.data.turnID);
+    }
     if (syncMessages && (isInputEvent(parsed.data) || parsed.data.kind === "turn.started")) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.queuedInputs(sessionID) });
     }
@@ -141,6 +144,7 @@ function openSessionEventSource({
   source.addEventListener("turn.cancelled", handleMessage);
   source.addEventListener("input.queued", handleMessage);
   source.addEventListener("input.updated", handleMessage);
+  source.addEventListener("input.steered", handleMessage);
   source.addEventListener("audio.bindings", handleMessage);
   source.addEventListener("audio.input_level", handleMessage);
   source.addEventListener("approval.requested", handleMessage);
@@ -454,7 +458,7 @@ function syncSessionListFromEvent(queryClient: QueryClient, event: SessionEvent)
     patchSessionInList(queryClient, event.sessionID, { lastActivityAt: new Date().toISOString(), running: false });
     return;
   }
-  if (event.kind === "input.queued") {
+  if (event.kind === "input.queued" || event.kind === "input.steered") {
     patchSessionInList(queryClient, event.sessionID, { lastActivityAt: new Date().toISOString() });
     return;
   }

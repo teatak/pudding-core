@@ -47,7 +47,9 @@ export function ComposerApprovalBar({ approval, token }: { approval?: ComposerAp
   const toolCallApproval = toolCallFromPayload(current.payload);
   const patchApproval = patchApprovalFromPayload(current.payload);
   const gitCommitApproval = gitCommitFromPayload(current.payload);
-  const approvalReason = isToolCallApproval ? toolCallReason(toolCallApproval.operation, t) || current.reason : current.reason;
+  const approvalReason = isToolCallApproval
+    ? toolCallReason(toolCallApproval.operation, toolCallApproval.sandboxBypass, t) || current.reason
+    : current.reason;
 
   async function approve(scope: "turn" | "session") {
     if (pending) {
@@ -433,7 +435,7 @@ function suggestedProjectDirName(payload: unknown) {
 
 function toolCallFromPayload(payload: unknown) {
   if (!payload || typeof payload !== "object") {
-    return { command: "", operation: "", paths: [] as string[] };
+    return { command: "", operation: "", paths: [] as string[], sandboxBypass: false };
   }
   const data = payload as Record<string, unknown>;
   const operation = typeof data.operation === "string" ? data.operation.trim() : "";
@@ -441,7 +443,7 @@ function toolCallFromPayload(payload: unknown) {
   const paths = Array.isArray(data.paths)
     ? data.paths.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean)
     : [];
-  return { command, operation, paths: dedupeStrings(paths) };
+  return { command, operation, paths: dedupeStrings(paths), sandboxBypass: data.sandboxBypass === true };
 }
 
 function patchApprovalFromPayload(payload: unknown): PatchApproval | null {
@@ -524,7 +526,12 @@ function gitCommitFromPayload(payload: unknown): GitCommitApproval | null {
   };
 }
 
-function toolCallReason(operation: string, t: (key: string) => string) {
+function toolCallReason(operation: string, sandboxBypass: boolean, t: (key: string) => string) {
+  if (sandboxBypass) {
+    return operation === "process_start"
+      ? t("transcript.approvalToolCall.process_startFullAccess")
+      : t("transcript.approvalToolCall.commandFullAccess");
+  }
   switch (operation) {
     case "write":
     case "delete":

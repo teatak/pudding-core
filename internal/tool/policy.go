@@ -18,12 +18,13 @@ const (
 )
 
 type ToolRisk struct {
-	Class     RiskClass `json:"class"`
-	Operation string    `json:"operation"`
-	Scope     string    `json:"scope"`
-	Paths     []string  `json:"paths,omitempty"`
-	Summary   string    `json:"summary"`
-	LowRisk   bool      `json:"lowRisk,omitempty"`
+	Class         RiskClass `json:"class"`
+	Operation     string    `json:"operation"`
+	Scope         string    `json:"scope"`
+	Paths         []string  `json:"paths,omitempty"`
+	Summary       string    `json:"summary"`
+	LowRisk       bool      `json:"lowRisk,omitempty"`
+	SandboxBypass bool      `json:"sandboxBypass,omitempty"`
 }
 
 func ClassifyToolCall(name string, raw json.RawMessage) (ToolRisk, bool) {
@@ -100,12 +101,13 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string) (T
 		}, true
 	}
 	var args struct {
-		Scope     string `json:"scope"`
-		Path      string `json:"path"`
-		FromPath  string `json:"from_path"`
-		ToPath    string `json:"to_path"`
-		Recursive bool   `json:"recursive"`
-		Overwrite bool   `json:"overwrite"`
+		Scope         string `json:"scope"`
+		Path          string `json:"path"`
+		AttachmentKey string `json:"attachmentKey"`
+		FromPath      string `json:"from_path"`
+		ToPath        string `json:"to_path"`
+		Recursive     bool   `json:"recursive"`
+		Overwrite     bool   `json:"overwrite"`
 	}
 	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil {
 		return ToolRisk{}, false
@@ -116,6 +118,16 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string) (T
 	}
 	args.Scope = managedScopeProject
 	switch name {
+	case AttachmentExport:
+		path := strings.TrimSpace(args.Path)
+		if path == "" || strings.TrimSpace(args.AttachmentKey) == "" {
+			return ToolRisk{}, false
+		}
+		summary := "Export a session attachment to a project file."
+		if args.Overwrite {
+			summary = "Export a session attachment and overwrite the destination project file."
+		}
+		return ToolRisk{Class: RiskClassWrite, Operation: "attachment_export", Scope: args.Scope, Paths: compactRiskPaths(path), Summary: summary, LowRisk: true}, true
 	case FileWrite:
 		path := strings.TrimSpace(args.Path)
 		return ToolRisk{Class: RiskClassWrite, Operation: "write", Scope: args.Scope, Paths: compactRiskPaths(path), Summary: "Overwrite a project file.", LowRisk: true}, true
@@ -251,13 +263,16 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, b
 	}
 	for _, argv := range analysis.Commands {
 		commandOperation := commandOperation(argv[0])
-		commandLowRisk := commandExecutableAllowedForAuto(argv[0], args.CWD, projectDirs) &&
+		executableAllowed := commandExecutableAllowedForAuto(argv[0], args.CWD, projectDirs)
+		argsEscapeProject := commandPathArgsEscapeProject(argv, args.CWD, projectDirs)
+		commandLowRisk := executableAllowed &&
 			!commandRequiresApproval(argv) &&
-			!commandArgsEscapeProject(argv[1:], args.CWD, projectDirs)
-		if commandLowRisk && isProjectFilesystemCommand(commandOperation) {
-			commandLowRisk = commandFilesystemArgsInsideProject(argv[1:], args.CWD, projectDirs)
-		}
+			!argsEscapeProject
 		risk.LowRisk = risk.LowRisk && commandLowRisk
+		risk.SandboxBypass = risk.SandboxBypass ||
+			!executableAllowed ||
+			argsEscapeProject ||
+			commandNeedsHostAccess(argv)
 		if isDestructiveCommand(commandOperation) {
 			risk.Class = RiskClassDestructive
 			risk.LowRisk = false
@@ -265,11 +280,15 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string) (ToolRisk, b
 	}
 	if !commandRedirectionsInsideProject(analysis.Redirections, args.CWD, projectDirs) {
 		risk.LowRisk = false
+		risk.SandboxBypass = true
 	}
 	if len(args.Env) > 0 {
 		risk.Summary = "Run project command with custom environment: " + compactShellCommand(args.Command)
 		if commandEnvironmentRequiresApproval(args.Env) {
 			risk.LowRisk = false
+		}
+		if commandEnvironmentNeedsHostAccess(args.Env, args.CWD, projectDirs) {
+			risk.SandboxBypass = true
 		}
 	}
 	if args.Background {
@@ -330,19 +349,29 @@ func isSafeDeviceRedirection(path string) bool {
 	}
 }
 
-func commandArgsEscapeProject(args []string, cwd string, projectDirs []string) bool {
+func commandPathArgsEscapeProject(argv []string, cwd string, projectDirs []string) bool {
+	if len(argv) == 0 {
+		return false
+	}
+	return commandPathsEscapeProject(commandPathArgs(argv), cwd, projectDirs)
+}
+
+func commandPathsEscapeProject(paths []string, cwd string, projectDirs []string) bool {
 	roots := normalizeProjectDirs(projectDirs)
 	resolvedCWD := ""
 	if len(roots) > 0 {
 		_, resolvedCWD, _, _ = resolveProjectPath(roots, cwd, true, false)
 	}
-	for _, arg := range args {
-		candidate := strings.TrimSpace(arg)
+	for _, path := range paths {
+		candidate := strings.TrimSpace(path)
 		if index := strings.IndexByte(candidate, '='); index >= 0 {
 			candidate = candidate[index+1:]
 		}
 		candidate = strings.Trim(candidate, "\"'")
 		if candidate == "" {
+			continue
+		}
+		if sandboxManagedPath(candidate) {
 			continue
 		}
 		cleaned := filepath.Clean(candidate)
@@ -355,35 +384,149 @@ func commandArgsEscapeProject(args []string, cwd string, projectDirs []string) b
 	return false
 }
 
-func commandFilesystemArgsInsideProject(args []string, cwd string, projectDirs []string) bool {
-	roots := normalizeProjectDirs(projectDirs)
-	if len(roots) == 0 {
-		return !commandArgsEscapeProject(args, cwd, nil)
+func commandPathArgs(argv []string) []string {
+	if len(argv) < 2 {
+		return nil
 	}
-	_, resolvedCWD, _, err := resolveProjectPath(roots, cwd, true, false)
-	if err != nil {
-		return false
-	}
-	for _, arg := range args {
-		candidate := strings.Trim(strings.TrimSpace(arg), "\"'")
-		if candidate == "" || candidate == "--" {
-			continue
-		}
-		if strings.HasPrefix(candidate, "-") {
-			if index := strings.IndexByte(candidate, '='); index >= 0 {
-				candidate = strings.Trim(candidate[index+1:], "\"'")
-			} else {
-				if strings.ContainsAny(candidate, `/\\`) {
-					return false
-				}
-				continue
+	operation := commandOperation(argv[0])
+	args := argv[1:]
+	switch operation {
+	case "mkdir", "touch", "cp", "mv", "rm", "rmdir", "unlink", "shred", "truncate",
+		"cat", "ls", "stat", "wc", "du", "file", "readlink", "realpath":
+		return commandNonOptionArgs(args, 0)
+	case "chmod", "chown", "chgrp":
+		return commandNonOptionArgs(args, 1)
+	case "dd":
+		var paths []string
+		for _, arg := range args {
+			if strings.HasPrefix(arg, "if=") || strings.HasPrefix(arg, "of=") {
+				paths = append(paths, arg)
 			}
 		}
-		if candidate != "" && !commandPathInsideProject(candidate, resolvedCWD, roots) {
-			return false
+		return paths
+	case "find":
+		var paths []string
+		for _, arg := range args {
+			arg = strings.TrimSpace(arg)
+			if arg == "" {
+				continue
+			}
+			if strings.HasPrefix(arg, "-") || arg == "!" || arg == "(" {
+				break
+			}
+			paths = append(paths, arg)
 		}
+		return paths
+	case "python", "python3", "py":
+		return commandScriptPath(args, "-c", "-m")
+	case "node":
+		return commandScriptPath(args, "-e", "--eval", "-p", "--print")
+	case "deno":
+		if commandSubcommand(args) == "eval" {
+			return nil
+		}
+		return commandScriptPath(args, "-e", "--eval")
+	case "ruby", "perl", "php", "lua", "luajit", "julia", "elixir", "swift", "r", "rscript":
+		return commandScriptPath(args, "-e", "-r", "--eval")
+	case "sh", "bash", "zsh", "dash", "ksh", "fish":
+		return commandScriptPath(args, "-c", "-lc")
+	case "git":
+		var paths []string
+		for index := 0; index < len(args); index++ {
+			arg := strings.TrimSpace(args[index])
+			switch {
+			case arg == "-C" && index+1 < len(args):
+				index++
+				paths = append(paths, args[index])
+			case strings.HasPrefix(arg, "--git-dir="), strings.HasPrefix(arg, "--work-tree="):
+				paths = append(paths, arg)
+			}
+		}
+		return paths
+	case "go":
+		subcommand := commandSubcommand(args)
+		switch subcommand {
+		case "build", "clean", "generate", "install", "list", "run", "test", "vet":
+			for index, arg := range args {
+				if strings.EqualFold(strings.TrimSpace(arg), subcommand) {
+					return commandGoPathArgs(args[index+1:])
+				}
+			}
+		}
+		return nil
+	default:
+		return nil
 	}
-	return true
+}
+
+func commandNonOptionArgs(args []string, skip int) []string {
+	paths := make([]string, 0, len(args))
+	optionsEnded := false
+	for _, arg := range args {
+		arg = strings.TrimSpace(arg)
+		if arg == "" {
+			continue
+		}
+		if !optionsEnded && arg == "--" {
+			optionsEnded = true
+			continue
+		}
+		if !optionsEnded && strings.HasPrefix(arg, "-") {
+			continue
+		}
+		if skip > 0 {
+			skip--
+			continue
+		}
+		paths = append(paths, arg)
+	}
+	return paths
+}
+
+func commandGoPathArgs(args []string) []string {
+	var paths []string
+	for index := 0; index < len(args); index++ {
+		arg := strings.TrimSpace(args[index])
+		if arg == "" {
+			continue
+		}
+		if arg == "--" {
+			return append(paths, args[index+1:]...)
+		}
+		if strings.HasPrefix(arg, "-") {
+			if !strings.Contains(arg, "=") && !containsAnyArg([]string{arg},
+				"-a", "-asan", "-cover", "-failfast", "-json", "-msan", "-n",
+				"-race", "-short", "-v", "-work", "-x") {
+				index++
+			}
+			continue
+		}
+		paths = append(paths, arg)
+	}
+	return paths
+}
+
+func commandScriptPath(args []string, inlineOptions ...string) []string {
+	for index := 0; index < len(args); index++ {
+		arg := strings.TrimSpace(args[index])
+		if arg == "" {
+			continue
+		}
+		if containsAnyArg([]string{arg}, inlineOptions...) || containsAttachedShortOption([]string{arg}, inlineOptions...) {
+			return nil
+		}
+		if arg == "--" {
+			if index+1 < len(args) {
+				return []string{args[index+1]}
+			}
+			return nil
+		}
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		return []string{arg}
+	}
+	return nil
 }
 
 func commandPathInsideProject(rawPath, resolvedCWD string, projectDirs []string) bool {
@@ -437,12 +580,39 @@ func commandRequiresApproval(argv []string) bool {
 		return commandSubcommand(args) == "upload"
 	case "curl", "wget":
 		return !commandUsesOnlyLoopbackURLs(args)
-	case "sh", "bash", "zsh", "dash", "ksh", "fish", "python", "python3", "py", "node", "deno", "ruby", "perl", "php",
-		"lua", "luajit", "julia", "elixir", "swift", "r", "rscript", "awk", "gawk", "mawk", "nawk", "powershell", "pwsh", "cmd":
+	case "sh", "bash", "zsh", "dash", "ksh", "fish", "awk", "gawk", "mawk", "nawk", "powershell", "pwsh", "cmd":
 		return commandUsesInlineCode(operation, args)
 	default:
 		return false
 	}
+}
+
+func commandNeedsHostAccess(argv []string) bool {
+	if len(argv) == 0 {
+		return false
+	}
+	operation := commandOperation(argv[0])
+	args := argv[1:]
+	switch operation {
+	case "sudo", "doas", "su", "launchctl", "systemsetup", "networksetup", "scutil", "csrutil", "nvram",
+		"mount", "umount", "hdiutil", "diskutil", "mkfs", "security", "ssh-add", "gpg", "pass",
+		"open", "osascript", "pbcopy", "pbpaste", "ssh", "scp", "sftp", "ftp",
+		"gh", "glab", "docker", "podman", "kubectl", "helm", "terraform", "tofu", "ansible", "ansible-playbook",
+		"brew", "port":
+		return true
+	case "git":
+		switch commandSubcommand(args) {
+		case "push", "credential", "credential-cache", "credential-store":
+			return true
+		}
+	case "npm", "pnpm", "yarn", "bun", "cargo":
+		return commandHasPublishingArgument(args)
+	case "gem":
+		return commandSubcommand(args) == "push"
+	case "twine":
+		return commandSubcommand(args) == "upload"
+	}
+	return false
 }
 
 func commandExecutableAllowedForAuto(executable, cwd string, projectDirs []string) bool {
@@ -514,6 +684,37 @@ func commandEnvironmentRequiresApproval(env map[string]string) bool {
 		}
 		switch key {
 		case "PAGER", "MANPAGER", "LESSOPEN", "EDITOR", "VISUAL":
+			return true
+		}
+	}
+	return false
+}
+
+func commandEnvironmentNeedsHostAccess(env map[string]string, cwd string, projectDirs []string) bool {
+	for key, value := range env {
+		key = strings.ToUpper(strings.TrimSpace(key))
+		var candidates []string
+		switch key {
+		case "PATH":
+			candidates = filepath.SplitList(value)
+		case "HOME", "SSH_AUTH_SOCK", "BASH_ENV", "ENV", "ZDOTDIR", "PYTHONPATH",
+			"PYTHONSTARTUP", "PYTHONHOME", "PIP_CONFIG_FILE", "VIRTUAL_ENV",
+			"GOENV", "GOROOT", "JAVA_HOME", "CLASSPATH", "CARGO_HOME", "RUSTUP_HOME",
+			"CC", "CXX", "CPP", "LD", "AR", "RANLIB", "STRIP", "OBJCOPY", "OBJDUMP",
+			"NM", "PKG_CONFIG", "RUSTC", "RUSTDOC", "RUSTC_WRAPPER",
+			"RUSTC_WORKSPACE_WRAPPER", "CARGO_BUILD_RUSTC_WRAPPER",
+			"CMAKE_TOOLCHAIN_FILE", "CMAKE_PROJECT_INCLUDE", "CMAKE_PROJECT_INCLUDE_BEFORE",
+			"NPM_CONFIG_SCRIPT_SHELL", "NPM_CONFIG_USERCONFIG", "YARN_RC_FILENAME",
+			"NODE_OPTIONS", "RUBYOPT", "PERL5OPT",
+			"RUBYLIB", "GEM_HOME", "GEM_PATH", "BUNDLE_GEMFILE", "PERL5LIB",
+			"LUA_PATH", "LUA_CPATH", "PHPRC", "PHP_INI_SCAN_DIR":
+			candidates = filepath.SplitList(value)
+		default:
+			if strings.HasPrefix(key, "DYLD_") || strings.HasPrefix(key, "LD_") || strings.HasPrefix(key, "GIT_") {
+				candidates = filepath.SplitList(value)
+			}
+		}
+		if commandPathsEscapeProject(candidates, cwd, projectDirs) {
 			return true
 		}
 	}
@@ -613,6 +814,39 @@ func commandUsesInlineCode(operation string, args []string) bool {
 	}
 }
 
+func sandboxManagedPath(path string) bool {
+	path = strings.Trim(strings.TrimSpace(path), "\"'")
+	for _, variable := range []string{
+		"$TMPDIR",
+		"$TMP",
+		"$TEMP",
+		"$XDG_CACHE_HOME",
+		"$GOCACHE",
+		"$GOMODCACHE",
+		"$GOPATH",
+		"$NPM_CONFIG_CACHE",
+		"$NPM_CONFIG_PREFIX",
+		"$NPM_CONFIG_USERCONFIG",
+		"$NPM_CONFIG_GLOBALCONFIG",
+		"$PNPM_HOME",
+		"$COREPACK_HOME",
+		"$NODE_REPL_HISTORY",
+		"$NODE_PATH",
+		"$npm_config_store_dir",
+		"$YARN_CACHE_FOLDER",
+		"$YARN_GLOBAL_FOLDER",
+		"$PIP_CACHE_DIR",
+		"$UV_CACHE_DIR",
+		"$PYTHONUSERBASE",
+		"$PYTHONPYCACHEPREFIX",
+	} {
+		if path == variable || strings.HasPrefix(path, variable+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 func containsAttachedShortOption(args []string, options ...string) bool {
 	for _, arg := range args {
 		arg = strings.ToLower(strings.TrimSpace(arg))
@@ -662,15 +896,6 @@ func commandUsesOnlyLoopbackURLs(args []string) bool {
 func isBareCommand(executable string) bool {
 	executable = strings.TrimSpace(executable)
 	return executable != "" && executable == filepath.Base(executable) && !strings.ContainsAny(executable, `/\\`)
-}
-
-func isProjectFilesystemCommand(operation string) bool {
-	switch operation {
-	case "mkdir", "touch", "cp", "mv":
-		return true
-	default:
-		return false
-	}
 }
 
 func isLowRiskGitCommand(args []string) bool {

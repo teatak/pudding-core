@@ -78,6 +78,8 @@ func (r *BuiltinRunner) desktopScreenshot(ctx context.Context, call Call) Result
 		"ok":          true,
 		"attachments": items,
 		"count":       len(stored),
+		"exportTool":  AttachmentExport,
+		"exportHint":  attachmentExportToolHint,
 	})
 	out.SummaryKind = SummaryReturnedItems
 	out.SummaryCount = len(stored)

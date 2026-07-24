@@ -18,6 +18,7 @@ var builtinAppTools = map[string]string{
 	AppSave:           app.BuiltinAppAuthoringID,
 	FileList:          app.BuiltinProjectFilesID,
 	FileRead:          app.BuiltinProjectFilesID,
+	AttachmentExport:  app.BuiltinProjectFilesID,
 	FileStat:          app.BuiltinProjectFilesID,
 	FileSearch:        app.BuiltinProjectFilesID,
 	FileSlice:         app.BuiltinProjectFilesID,

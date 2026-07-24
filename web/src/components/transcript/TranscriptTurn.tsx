@@ -1,8 +1,11 @@
+import { CornerDownRight } from "lucide-react";
 import { memo } from "react";
+
+import { useI18n } from "@/i18n";
 
 import { AssistantOutput, AssistantOutputMeta, CompactPendingMarker } from "./AssistantOutput";
 import { TurnFileChanges } from "./TurnFileChanges";
-import type { TranscriptDisplaySettings, TranscriptTurnVM, TurnDisclosureState } from "./types";
+import type { AssistantOutputVM, TranscriptDisplaySettings, TranscriptTurnVM, TurnDisclosureState, UserInputVM } from "./types";
 import { UserInput } from "./UserInput";
 
 function TranscriptTurnView({
@@ -12,6 +15,7 @@ function TranscriptTurnView({
   onAssistantRevealComplete,
   onQueuedCancel,
   onQueuedEditStart,
+  onQueuedSteer,
   onQueuedSave,
   sessionID,
   token,
@@ -23,12 +27,17 @@ function TranscriptTurnView({
   onAssistantRevealComplete?: (turnID: string) => void;
   onQueuedCancel?: (clientMessageID: string) => Promise<unknown>;
   onQueuedEditStart?: (clientMessageID: string) => Promise<unknown>;
+  onQueuedSteer?: (clientMessageID: string) => Promise<unknown>;
   onQueuedSave?: (clientMessageID: string, text: string) => Promise<unknown>;
   sessionID: string;
   token: string;
   turn: TranscriptTurnVM;
 }) {
-  const anchorTurnID = turn.turnID || turn.key;
+  const { t } = useI18n();
+  const anchorTurnID = turn.anchorID || turn.turnID || turn.key;
+  const assistantTurnID = turn.turnID || turn.key;
+  const sequenceAssistants = turn.sequence?.filter((item) => item.kind === "assistant").map((item) => item.assistant) || [];
+  const metaAssistant = sequenceAssistants.at(-1) || turn.assistant;
   return (
     <div className="grid min-w-0 gap-3" data-transcript-turn-id={anchorTurnID}>
       {turn.user ? (
@@ -38,6 +47,7 @@ function TranscriptTurnView({
             user={turn.user}
             onQueuedCancel={onQueuedCancel}
             onQueuedEditStart={onQueuedEditStart}
+            onQueuedSteer={onQueuedSteer}
             onQueuedSave={onQueuedSave}
           />
         </div>
@@ -50,21 +60,42 @@ function TranscriptTurnView({
             displaySettings={displaySettings}
             sessionID={sessionID}
             token={token}
-            turnID={anchorTurnID}
+            turnID={assistantTurnID}
             onContentGrow={onAssistantContentGrow}
             onRevealComplete={onAssistantRevealComplete}
           />
-          {turn.turnID && turn.fileChanges?.length ? (
-            <div className="mt-3">
-              <TurnFileChanges changes={turn.fileChanges} sessionID={sessionID} turnID={turn.turnID} />
-            </div>
-          ) : null}
-          <AssistantOutputMeta assistant={turn.assistant} />
         </div>
       ) : null}
-      {!turn.assistant && turn.turnID && turn.fileChanges?.length ? (
+      {turn.sequence?.map((item) =>
+        item.kind === "guide" ? (
+          <TurnGuide
+            key={item.key}
+            attachmentLabel={t("transcript.guidedAttachments").replace(
+              "{count}",
+              String(item.user.attachments?.length || 0),
+            )}
+            label={t("transcript.guided")}
+            user={item.user}
+          />
+        ) : (
+          <div key={item.key} className="group min-w-0" data-transcript-ai-anchor={anchorTurnID}>
+            <AssistantOutput
+              assistant={item.assistant}
+              disclosure={disclosure}
+              displaySettings={displaySettings}
+              sessionID={sessionID}
+              token={token}
+              turnID={assistantTurnID}
+              onContentGrow={onAssistantContentGrow}
+              onRevealComplete={onAssistantRevealComplete}
+            />
+          </div>
+        ),
+      )}
+      {turn.turnID && turn.fileChanges?.length ? (
         <TurnFileChanges changes={turn.fileChanges} sessionID={sessionID} turnID={turn.turnID} />
       ) : null}
+      {metaAssistant ? <AssistantOutputMeta assistant={metaAssistant} /> : null}
       {turn.compact ? (
         <div className="min-w-0" data-transcript-ai-anchor={anchorTurnID}>
           <CompactPendingMarker />
@@ -74,10 +105,31 @@ function TranscriptTurnView({
   );
 }
 
+function TurnGuide({ attachmentLabel, label, user }: { attachmentLabel: string; label: string; user: UserInputVM }) {
+  const attachmentCount = user.attachments?.length || 0;
+  const text = user.text.trim();
+  return (
+    <div className="ml-auto flex max-w-[min(82%,42rem)] min-w-0 items-start gap-2 border-r-2 border-primary/35 pr-3 text-sm text-muted-foreground">
+      <div className="min-w-0 text-right">
+        <div className="text-xs font-medium text-muted-foreground/80">{label}</div>
+        {text ? <div className="selectable-text line-clamp-3 break-words text-foreground/85">{text}</div> : null}
+        {attachmentCount > 0 ? <div className="text-xs">{attachmentLabel}</div> : null}
+      </div>
+      <CornerDownRight className="mt-0.5 size-4 shrink-0 text-primary/70" />
+    </div>
+  );
+}
+
 export const TranscriptTurn = memo(TranscriptTurnView, (previous, next) => {
   return (
     previous.disclosure === next.disclosure &&
     previous.displaySettings === next.displaySettings &&
+    previous.onAssistantContentGrow === next.onAssistantContentGrow &&
+    previous.onAssistantRevealComplete === next.onAssistantRevealComplete &&
+    previous.onQueuedCancel === next.onQueuedCancel &&
+    previous.onQueuedEditStart === next.onQueuedEditStart &&
+    previous.onQueuedSteer === next.onQueuedSteer &&
+    previous.onQueuedSave === next.onQueuedSave &&
     previous.sessionID === next.sessionID &&
     previous.token === next.token &&
     transcriptTurnEqual(previous.turn, next.turn)
@@ -87,14 +139,38 @@ export const TranscriptTurn = memo(TranscriptTurnView, (previous, next) => {
 function transcriptTurnEqual(previous: TranscriptTurnVM, next: TranscriptTurnVM) {
   return (
     previous.key === next.key &&
+    previous.anchorID === next.anchorID &&
     previous.kind === next.kind &&
     previous.turnID === next.turnID &&
     previous.clientMessageID === next.clientMessageID &&
     previous.fileChanges === next.fileChanges &&
     compactEqual(previous.compact, next.compact) &&
     userEqual(previous.user, next.user) &&
-    assistantEqual(previous.assistant, next.assistant)
+    assistantEqual(previous.assistant, next.assistant) &&
+    sequenceEqual(previous.sequence, next.sequence)
   );
+}
+
+function sequenceEqual(previous: TranscriptTurnVM["sequence"], next: TranscriptTurnVM["sequence"]) {
+  if (previous === next) {
+    return true;
+  }
+  if (!previous || !next || previous.length !== next.length) {
+    return false;
+  }
+  return previous.every((item, index) => {
+    const other = next[index];
+    if (!other || item.key !== other.key || item.kind !== other.kind) {
+      return false;
+    }
+    if (item.kind === "guide" && other.kind === "guide") {
+      return userEqual(item.user, other.user);
+    }
+    if (item.kind === "assistant" && other.kind === "assistant") {
+      return assistantEqual(item.assistant, other.assistant);
+    }
+    return false;
+  });
 }
 
 function compactEqual(previous: TranscriptTurnVM["compact"], next: TranscriptTurnVM["compact"]) {

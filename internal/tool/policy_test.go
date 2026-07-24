@@ -16,6 +16,7 @@ func TestClassifyToolCallProjectFileWrites(t *testing.T) {
 		{name: FileWrite, args: `{"scope":"project","path":"main.go","content":"x"}`, operation: "write"},
 		{name: FileMove, args: `{"scope":"project","from_path":"old.go","to_path":"new.go"}`, operation: "move"},
 		{name: FileCopy, args: `{"scope":"project","from_path":"main.go","to_path":"copy.go"}`, operation: "copy"},
+		{name: AttachmentExport, args: `{"scope":"project","attachmentKey":"sessions/s1/blobs/capture.png","path":"assets/capture.png"}`, operation: "attachment_export"},
 	} {
 		risk, ok := ClassifyToolCall(test.name, json.RawMessage(test.args))
 		if !ok || risk.Class != RiskClassWrite || risk.Operation != test.operation || !risk.LowRisk {
@@ -152,9 +153,9 @@ func TestClassifyToolCallCommandRisk(t *testing.T) {
 		{name: "test outside project", args: `{"scope":"project","command":"go test ../other"}`, class: RiskClassCommand, operation: "go", lowRisk: false},
 		{name: "unknown command", args: `{"scope":"project","command":"my-project-tool --check"}`, class: RiskClassCommand, operation: "my-project-tool", lowRisk: true},
 		{name: "project interpreter", args: `{"scope":"project","command":"python3 script.py"}`, class: RiskClassCommand, operation: "python3", lowRisk: true},
-		{name: "inline interpreter", args: `{"scope":"project","command":"python3 -c \"print('ok')\""}`, class: RiskClassCommand, operation: "python3", lowRisk: false},
-		{name: "attached inline interpreter", args: `{"scope":"project","command":"node \"-econsole.log('ok')\""}`, class: RiskClassCommand, operation: "node", lowRisk: false},
-		{name: "inline node", args: `{"scope":"project","command":"node \"--eval=console.log('ok')\""}`, class: RiskClassCommand, operation: "node", lowRisk: false},
+		{name: "inline interpreter", args: `{"scope":"project","command":"python3 -c \"print('ok')\""}`, class: RiskClassCommand, operation: "python3", lowRisk: true},
+		{name: "attached inline interpreter", args: `{"scope":"project","command":"node \"-econsole.log('ok')\""}`, class: RiskClassCommand, operation: "node", lowRisk: true},
+		{name: "inline node", args: `{"scope":"project","command":"node \"--eval=console.log('ok')\""}`, class: RiskClassCommand, operation: "node", lowRisk: true},
 		{name: "inline awk", args: `{"scope":"project","command":"awk 'BEGIN { system(\"rm -rf build\") }'"}`, class: RiskClassCommand, operation: "awk", lowRisk: false},
 		{name: "awk script file", args: `{"scope":"project","command":"awk -f scripts/report.awk data.txt"}`, class: RiskClassCommand, operation: "awk", lowRisk: true},
 		{name: "go run", args: `{"scope":"project","command":"go run ./cmd/server"}`, class: RiskClassCommand, operation: "go", lowRisk: true},
@@ -258,6 +259,59 @@ func TestClassifyToolCallCommandRedirectionBoundary(t *testing.T) {
 	dynamicRisk, ok := ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","command":"printf ok > \"$OUTPUT\""}`), []string{root})
 	if !ok || dynamicRisk.LowRisk {
 		t.Fatalf("dynamic output redirection must require approval: %+v ok=%v", dynamicRisk, ok)
+	}
+
+	tempRisk, ok := ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","command":"cat > \"$TMPDIR/report.py\""}`), []string{root})
+	if !ok || !tempRisk.LowRisk || tempRisk.SandboxBypass {
+		t.Fatalf("sandbox-managed temporary output should remain low risk: %+v ok=%v", tempRisk, ok)
+	}
+
+	tempScriptRisk, ok := ClassifyToolCallForProject(CommandRun, json.RawMessage(`{"scope":"project","command":"python3 \"$TMPDIR/report.py\""}`), []string{root})
+	if !ok || !tempScriptRisk.LowRisk || tempScriptRisk.SandboxBypass {
+		t.Fatalf("sandbox-managed temporary script should remain low risk: %+v ok=%v", tempScriptRisk, ok)
+	}
+}
+
+func TestClassifyToolCallCommandSeparatesApprovalFromSandboxBypass(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "report.txt")
+	outsideScript := filepath.Join(t.TempDir(), "report.py")
+	tests := []struct {
+		name    string
+		command string
+		bypass  bool
+	}{
+		{name: "destructive project command", command: "rm -rf build"},
+		{name: "inline Python", command: `python3 -c "print('ok')"`},
+		{name: "external curl", command: "curl https://example.com"},
+		{name: "host package manager", command: "brew install mysql-client", bypass: true},
+		{name: "Git push credentials", command: "git push origin main", bypass: true},
+		{name: "outside output", command: "printf ok > " + quoteShellArg(outside), bypass: true},
+		{name: "outside read", command: "cat " + quoteShellArg(outside), bypass: true},
+		{name: "outside script", command: "python3 " + quoteShellArg(outsideScript), bypass: true},
+		{name: "outside destructive path", command: "rm -rf " + quoteShellArg(outside), bypass: true},
+		{name: "outside PATH", command: "my-tool --check", bypass: true},
+		{name: "absolute regex is not a path", command: `sed -n '/Users/p' README.md`},
+		{name: "absolute search pattern is not a path", command: `rg '/Users' .`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			args := map[string]any{"scope": "project", "command": test.command}
+			if test.name == "outside PATH" {
+				args["env"] = map[string]string{"PATH": filepath.Dir(outside)}
+			}
+			raw, _ := json.Marshal(args)
+			risk, ok := ClassifyToolCallForProject(CommandRun, raw, []string{root})
+			if !ok || risk.SandboxBypass != test.bypass {
+				t.Fatalf("sandbox bypass = %v, want %v: %+v", risk.SandboxBypass, test.bypass, risk)
+			}
+		})
+	}
+
+	wildcardRaw := json.RawMessage(`{"scope":"project","command":"npm run dev","env":{"HOST":"0.0.0.0"}}`)
+	wildcardRisk, ok := ClassifyToolCallForProject(CommandRun, wildcardRaw, []string{root})
+	if !ok || wildcardRisk.LowRisk || wildcardRisk.SandboxBypass {
+		t.Fatalf("wildcard bind must require approval without full filesystem access: %+v ok=%v", wildcardRisk, ok)
 	}
 }
 

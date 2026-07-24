@@ -50,8 +50,10 @@ func (r *BuiltinRunner) cameraCapture(ctx context.Context, call Call) Result {
 		"size":          len(photo.Data),
 		"attachmentKey": stored.AttachmentKey,
 		"url":           stored.URL,
+		"exportTool":    AttachmentExport,
+		"exportHint":    attachmentExportToolHint,
 	})
 	out.SummaryKind = SummaryReturnedFields
-	out.SummaryCount = 5
+	out.SummaryCount = 7
 	return out
 }

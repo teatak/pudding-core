@@ -33,6 +33,7 @@ const (
 	FileList            = "builtin_file_list"
 	FileRead            = "builtin_file_read"
 	AttachmentReadImage = "builtin_attachment_read_image"
+	AttachmentExport    = "builtin_attachment_export"
 	FileStat            = "builtin_file_stat"
 	FileSearch          = "builtin_file_search"
 	FileSlice           = "builtin_file_slice"
@@ -383,6 +384,12 @@ func BuiltinDefinitions() []provider.ToolDef {
 			Capability:  store.ModeChat,
 		},
 		{
+			Name:        AttachmentExport,
+			Description: "Export one session attachment, such as a browser screenshot, desktop screenshot, or camera photo, to an authorized project file. Use the exact attachmentKey returned by the capture tool; never guess the attachment's internal filesystem path.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"attachmentKey":{"type":"string","description":"Exact attachmentKey returned by a capture or upload tool."},"path":{"type":"string","description":"Destination file path inside an authorized project root. Relative paths use the first authorized project root."},"overwrite":{"type":"boolean","description":"Replace an existing destination file. Defaults false."}},"required":["scope","attachmentKey","path"],"additionalProperties":false}`),
+			Capability:  store.ModeCode,
+		},
+		{
 			Name:        FileStat,
 			Description: "Return metadata for one file or directory: exists, type, size, mtime, and MIME when available.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["app","skill","temp","project"],"description":"Target file area. The app scope is read-only and excludes connection data and hidden runtime overrides."},"path":{"type":"string","description":"Relative path inside a managed area, or an absolute/relative path inside authorized project directories."}},"required":["scope","path"],"additionalProperties":false}`),
@@ -426,7 +433,7 @@ func BuiltinDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        CommandRun,
-			Description: "Run one fixed-shell command in an authorized project directory. The command may use pipelines, redirects, and simple compound expressions. Foreground commands return bounded output and verification diagnostics. Set background=true for a persistent session and receive a process_id; set tty=true as well only for an interactive CLI or REPL. Background sessions have no runtime deadline and must be managed with builtin_command_session. In Auto, Pudding parses each static command segment and uses the project sandbox unless an explicit risk rule applies.",
+			Description: "Run one fixed-shell command in an authorized project directory. The command may use pipelines, redirects, heredocs, and simple compound expressions. Use $TMPDIR instead of the shared /tmp directory for temporary files. Python packages needed only by sandboxed commands can be installed with python3 -m pip install --user; Pudding redirects that user base into isolated project state and supplies the system CA bundle. Do not disable TLS verification with --trusted-host. Foreground commands return bounded output and verification diagnostics. Set background=true for a persistent session and receive a process_id; set tty=true as well only for an interactive CLI or REPL. Background sessions have no runtime deadline and must be managed with builtin_command_session. In Auto, Pudding parses each command and keeps approved risk operations inside the project sandbox unless the invocation explicitly needs host access.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"],"description":"Commands can run only with project access."},"command":{"type":"string","minLength":1,"maxLength":65536,"description":"Complete command line executed by Pudding's fixed shell."},"cwd":{"type":"string","description":"Absolute or relative directory inside authorized project roots. Defaults to the first project root."},"env":{"type":"object","additionalProperties":{"type":"string"},"description":"Optional environment values for this command. Pudding otherwise inherits only a minimal safe environment."},"timeout_ms":{"type":"integer","minimum":100,"maximum":600000,"description":"Foreground timeout in milliseconds. Defaults to 60000; unavailable when background=true."},"background":{"type":"boolean","description":"Keep the command running as a session-owned process and return process_id. Defaults false."},"tty":{"type":"boolean","description":"Allocate a PTY for an interactive CLI. Requires background=true and is unavailable on Windows."}},"required":["scope","command"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
@@ -638,6 +645,8 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.fileRead(call)
 	case AttachmentReadImage:
 		return r.attachmentReadImage(call)
+	case AttachmentExport:
+		return r.attachmentExport(call)
 	case FileStat:
 		return r.fileStat(call)
 	case FileSearch:

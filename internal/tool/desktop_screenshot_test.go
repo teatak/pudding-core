@@ -58,7 +58,7 @@ func TestBuiltinDesktopScreenshotRoutesAttachments(t *testing.T) {
 		}
 	}
 	payload := decodeToolResult(t, res)
-	if payload["count"] != float64(2) {
+	if payload["count"] != float64(2) || payload["exportTool"] != AttachmentExport || payload["exportHint"] == "" {
 		t.Fatalf("unexpected payload: %+v", payload)
 	}
 }

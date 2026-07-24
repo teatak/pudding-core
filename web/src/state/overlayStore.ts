@@ -8,10 +8,11 @@ import { activeTurnPlan, parseTurnPlan, TURN_PLAN_TOOL, type ActiveTurnPlan } fr
 export type PendingUserMessage = {
   clientMessageID: string;
   sessionID: string;
-  status?: "submitting" | "queued" | "editing";
+  status?: "submitting" | "queued" | "editing" | "steering" | "steered";
   text: string;
   parts?: ContentPart[];
   createdAt: string;
+  turnID?: string;
 };
 
 export type CompactRun = {
@@ -180,11 +181,26 @@ function upsertPendingUser(
   pendingUsers: Record<string, PendingUserMessage[]>,
   message: PendingUserMessage,
 ): Record<string, PendingUserMessage[]> {
+  const existing = (pendingUsers[message.sessionID] || []).find(
+    (item) => item.clientMessageID === message.clientMessageID,
+  );
+  const next = existing
+    ? {
+        ...existing,
+        ...message,
+        createdAt: existing.createdAt,
+        parts: message.parts ?? existing.parts,
+        status:
+          existing.status === "steered" && message.status === "steering"
+            ? existing.status
+            : message.status,
+      }
+    : message;
   return {
     ...pendingUsers,
     [message.sessionID]: [
       ...(pendingUsers[message.sessionID] || []).filter((item) => item.clientMessageID !== message.clientMessageID),
-      message,
+      next,
     ],
   };
 }
@@ -422,6 +438,15 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       if (event.kind === "input.queued" || event.kind === "input.updated") {
         const lastEventSeqs = recordEventSeq(state.lastEventSeqs, event);
         if (event.status === "cancelled" || event.status === "promoted") {
+          const current = (state.pendingUsers[event.sessionID] || []).find(
+            (item) => item.clientMessageID === event.clientMessageID,
+          );
+          if (
+            event.status === "promoted" &&
+            (current?.status === "steering" || current?.status === "steered")
+          ) {
+            return { lastEventSeqs };
+          }
           return {
             lastEventSeqs,
             pendingUsers: {
@@ -441,6 +466,33 @@ export const useOverlayStore = create<OverlayState>((set) => ({
             status: event.status,
             text: event.text,
           }),
+        };
+      }
+      if (event.kind === "input.steered") {
+        return {
+          assistants: {
+            ...state.assistants,
+            [event.turnID]: emptyAssistantOverlay(event.turnID, event.sessionID),
+          },
+          lastEventSeqs: recordEventSeq(state.lastEventSeqs, event),
+          pendingUsers: upsertPendingUser(state.pendingUsers, {
+            clientMessageID: event.clientMessageID,
+            createdAt: new Date().toISOString(),
+            sessionID: event.sessionID,
+            status: "steered",
+            text: event.text,
+            turnID: event.turnID,
+          }),
+          runningTurns: { ...state.runningTurns, [event.sessionID]: event.turnID },
+          turnPhases: {
+            ...state.turnPhases,
+            [event.sessionID]: makePhase({
+              clientMessageID: event.clientMessageID,
+              phase: "awaiting_model",
+              sessionID: event.sessionID,
+              turnID: event.turnID,
+            }),
+          },
         };
       }
       if (event.kind === "turn.started") {
@@ -661,7 +713,10 @@ export const useOverlayStore = create<OverlayState>((set) => ({
       const canonicalClientIDs = new Set(messages.map((message) => message.clientMessageID).filter(Boolean));
       const canonicalMessageIDs = new Set(messages.map((message) => message.id));
       const currentPending = state.pendingUsers[sessionID] || [];
-      const nextPending = currentPending.filter((message) => !canonicalClientIDs.has(message.clientMessageID));
+      const nextPending = currentPending.filter(
+        (message) =>
+          message.status === "steering" || !canonicalClientIDs.has(message.clientMessageID),
+      );
       const pendingUsers = {
         ...state.pendingUsers,
         [sessionID]: nextPending,
@@ -686,10 +741,17 @@ export const useOverlayStore = create<OverlayState>((set) => ({
     set((state) => {
       const nextPlan = sessionRunning ? activeTurnPlan(turns) : undefined;
       const currentPlan = state.activeTurnPlans[sessionID];
-      if (sameActiveTurnPlan(currentPlan, nextPlan)) {
+      const runningTurnID = sessionRunning
+        ? [...turns].reverse().find((turn) => turn.status === "running")?.id
+        : undefined;
+      const currentRunningTurnID = state.runningTurns[sessionID];
+      if (sameActiveTurnPlan(currentPlan, nextPlan) && currentRunningTurnID === runningTurnID) {
         return state;
       }
-      return { activeTurnPlans: { ...state.activeTurnPlans, [sessionID]: nextPlan } };
+      return {
+        activeTurnPlans: { ...state.activeTurnPlans, [sessionID]: nextPlan },
+        runningTurns: { ...state.runningTurns, [sessionID]: runningTurnID },
+      };
     }),
   clearSession: (sessionID) =>
     set((state) => {

@@ -179,6 +179,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id").GET(s.getSession).PATCH(s.patchSession).DELETE(s.deleteSession)
 	app.Route("/sessions/:id/apps/:appID").DELETE(s.unloadSessionApp)
 	app.Route("/sessions/:id/submit").POST(s.submit)
+	app.Route("/sessions/:id/turns/:turnID/steer").POST(s.steerTurn)
 	app.Route("/sessions/:id/cancel").POST(s.cancel)
 	app.Route("/sessions/:id/compact").POST(s.compactSession)
 	app.Route("/sessions/:id/approvals").GET(s.listApprovals)
@@ -224,6 +225,7 @@ func (s *Server) Handler(token string, static http.Handler, options ...HandlerOp
 	app.Route("/sessions/:id/terminals/:terminalID").GET(s.getTerminal).DELETE(s.deleteTerminal)
 	app.Route("/sessions/:id/queued-inputs").GET(s.listQueuedInputs)
 	app.Route("/sessions/:id/queued-inputs/:clientMessageID").PATCH(s.patchQueuedInput)
+	app.Route("/sessions/:id/queued-inputs/:clientMessageID/steer").POST(s.steerQueuedInput)
 	app.Route("/sessions/:id/canvas/items").GET(s.listCanvasItems).POST(s.createCanvasItem)
 	app.Route("/sessions/:id/canvas/items/:itemID").PUT(s.putCanvasItem).PATCH(s.patchCanvasItem).DELETE(s.deleteCanvasItem)
 	app.Route("/sessions/:id/canvas/items/:itemID/save").POST(s.saveCanvasItem)
@@ -754,6 +756,50 @@ func (s *Server) submit(c *cart.Context) error {
 	return nil
 }
 
+func (s *Server) steerTurn(c *cart.Context) error {
+	id, _ := c.Param("id")
+	turnID, _ := c.Param("turnID")
+	var req submitReq
+	if err := decode(c, &req); err != nil {
+		return badRequest(c, "invalid json body")
+	}
+	parts := store.UserInputParts(req.Text, req.Parts)
+	attachments, err := s.normalizeSubmitAttachments(id, store.AttachmentsFromParts(parts))
+	if errors.Is(err, errAttachmentHomeUnavailable) {
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "attachment_home_unavailable"})
+		return nil
+	}
+	if errors.Is(err, errInvalidAttachment) {
+		return badRequest(c, "invalid attachments")
+	}
+	if err != nil {
+		return s.fail(c, err)
+	}
+	parts = store.UserInputPartsWithAttachments(req.Text, parts, attachments)
+	res, err := s.engine.Steer(c.Request.Context(), engine.SteerInput{
+		SessionID:       id,
+		TurnID:          turnID,
+		ClientMessageID: req.ClientMessageID,
+		Text:            req.Text,
+		Parts:           parts,
+	})
+	switch {
+	case errors.Is(err, engine.ErrEmptyInput):
+		return badRequest(c, "parts and clientMessageID are required")
+	case errors.Is(err, engine.ErrTurnNotActive):
+		c.JSON(http.StatusConflict, map[string]string{"error": "turn_not_active"})
+		return nil
+	case err != nil:
+		return s.fail(c, err)
+	}
+	if res.Duplicate {
+		c.JSON(http.StatusOK, res)
+		return nil
+	}
+	c.JSON(http.StatusAccepted, res)
+	return nil
+}
+
 func (s *Server) listQueuedInputs(c *cart.Context) error {
 	id, _ := c.Param("id")
 	inputs, err := s.store.ListQueuedInputs(c.Request.Context(), id)
@@ -813,6 +859,42 @@ func (s *Server) patchQueuedInput(c *cart.Context) error {
 		s.engine.TryDrainQueued(id)
 	}
 	c.JSON(http.StatusOK, res.Input)
+	return nil
+}
+
+type steerQueuedInputReq struct {
+	TurnID string `json:"turnID"`
+}
+
+func (s *Server) steerQueuedInput(c *cart.Context) error {
+	id, _ := c.Param("id")
+	clientMessageID, _ := c.Param("clientMessageID")
+	var req steerQueuedInputReq
+	if err := decode(c, &req); err != nil {
+		return badRequest(c, "invalid json body")
+	}
+	req.TurnID = strings.TrimSpace(req.TurnID)
+	if req.TurnID == "" {
+		return badRequest(c, "turnID is required")
+	}
+	res, err := s.engine.SteerQueuedInput(c.Request.Context(), id, req.TurnID, clientMessageID)
+	switch {
+	case errors.Is(err, engine.ErrEmptyInput):
+		return badRequest(c, "turnID and clientMessageID are required")
+	case errors.Is(err, engine.ErrTurnNotActive):
+		c.JSON(http.StatusConflict, map[string]string{"error": "turn_not_active"})
+		return nil
+	case errors.Is(err, store.ErrQueueBlocked):
+		c.JSON(http.StatusConflict, map[string]string{"error": "queued_input_editing"})
+		return nil
+	case err != nil:
+		return s.fail(c, err)
+	}
+	if res.Duplicate {
+		c.JSON(http.StatusOK, res)
+		return nil
+	}
+	c.JSON(http.StatusAccepted, res)
 	return nil
 }
 

@@ -126,6 +126,18 @@ function UsagePanel({
         </div>
         <div className="space-y-0.5">
           <CollapsibleUsageGroup label={t("usage.nextEstimate")} value={estimatedTokens}>
+            {usage.inputCalibrationSamples > 0 ? (
+              <>
+                <UsageRow label={t("usage.rawEstimate")} value={usage.contextRawEstimatedTokens} muted indent />
+                <UsageRow
+                  formattedValue={`${usage.inputCalibrationFactor.toFixed(2)}×`}
+                  label={t("usage.calibrationFactor")}
+                  value={usage.inputCalibrationFactor}
+                  muted
+                  indent
+                />
+              </>
+            ) : null}
             <UsageRow label={t("usage.conversationHistory")} value={usage.messageEstimatedTokens} muted indent />
             <UsageRow label={t("usage.systemPrompt")} value={usage.systemPromptEstimatedTokens} muted indent />
             <UsageRow label={t("usage.toolsSchema")} value={usage.toolsSchemaEstimatedTokens} muted indent />
@@ -234,6 +246,7 @@ function CollapsibleUsageGroup({
 }
 
 function UsageRow({
+  formattedValue,
   icon,
   indent = false,
   label,
@@ -243,6 +256,7 @@ function UsageRow({
   subtle = false,
   value,
 }: {
+  formattedValue?: string;
   icon?: ReactNode;
   indent?: boolean;
   label: string;
@@ -259,7 +273,7 @@ function UsageRow({
         <span className="truncate">{label}</span>
       </div>
       <div className={cn("text-right font-medium tabular-nums", muted ? "text-muted-foreground" : subtle ? "text-foreground/70" : "text-foreground/90")}>
-        {raw ? formatNumber(value) : formatTokens(value)}
+        {formattedValue ?? (raw ? formatNumber(value) : formatTokens(value))}
       </div>
     </div>
   );

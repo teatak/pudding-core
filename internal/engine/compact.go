@@ -167,7 +167,11 @@ func (e *Engine) autoCompactDue(ctx context.Context, sessionID string) (bool, er
 	if err != nil {
 		return false, err
 	}
-	return usage.AutoCompactThresholdTokens > 0 && usage.ContextEstimatedTokens >= usage.AutoCompactThresholdTokens, nil
+	effectiveTokens := usage.ContextEstimatedTokens
+	if usage.LastPromptTokens > effectiveTokens {
+		effectiveTokens = usage.LastPromptTokens
+	}
+	return usage.AutoCompactThresholdTokens > 0 && effectiveTokens >= usage.AutoCompactThresholdTokens, nil
 }
 
 func (e *Engine) compactTailInputTurns(ctx context.Context) int {
@@ -213,6 +217,7 @@ func (e *Engine) generateCompactSummary(ctx context.Context, sessionID string, r
 			Parts: []provider.Part{{Type: provider.PartText, Text: user}},
 		}},
 	}
+	estimatedInputTokens := contextbuilder.EstimateRequest(req).Total()
 	ch, err := client.Stream(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("provider: %w", err)
@@ -227,14 +232,14 @@ func (e *Engine) generateCompactSummary(ctx context.Context, sessionID string, r
 		case chunk, ok := <-ch:
 			if !ok {
 				if usageSeen {
-					e.recordUsage(ctx, sessionID, resolved.model, usage, 1)
+					e.recordUsage(ctx, sessionID, resolved.providerName, resolved.model, estimatedInputTokens, usage, 1)
 				}
 				return "", errors.New("provider stream ended without terminal chunk")
 			}
 			switch {
 			case chunk.Err != nil:
 				if usageSeen {
-					e.recordUsage(ctx, sessionID, resolved.model, usage, 1)
+					e.recordUsage(ctx, sessionID, resolved.providerName, resolved.model, estimatedInputTokens, usage, 1)
 				}
 				return "", chunk.Err
 			case chunk.Usage != nil:
@@ -242,9 +247,9 @@ func (e *Engine) generateCompactSummary(ctx context.Context, sessionID string, r
 				usageSeen = true
 			case chunk.Done:
 				if usageSeen {
-					e.recordUsage(ctx, sessionID, resolved.model, usage, 1)
+					e.recordUsage(ctx, sessionID, resolved.providerName, resolved.model, estimatedInputTokens, usage, 1)
 				} else {
-					e.recordUsage(ctx, sessionID, resolved.model, provider.UsageInfo{}, 1)
+					e.recordUsage(ctx, sessionID, resolved.providerName, resolved.model, estimatedInputTokens, provider.UsageInfo{}, 1)
 				}
 				return strings.TrimSpace(out.String()), nil
 			case chunk.Delta != "":

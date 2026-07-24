@@ -138,9 +138,11 @@ func (r *BuiltinRunner) browserScreenshot(ctx context.Context, call Call) Result
 		"capturedAt":    result.CapturedAt,
 		"attachmentKey": stored.AttachmentKey,
 		"url":           stored.URL,
+		"exportTool":    AttachmentExport,
+		"exportHint":    attachmentExportToolHint,
 	})
 	out.SummaryKind = SummaryReturnedFields
-	out.SummaryCount = 7
+	out.SummaryCount = 9
 	return out
 }
 

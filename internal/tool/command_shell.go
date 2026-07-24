@@ -53,7 +53,11 @@ func analyzeShellCommand(command string) (shellCommandAnalysis, error) {
 			} else if redirect.Path != "" {
 				analysis.Redirections = append(analysis.Redirections, redirect)
 			}
-		case *syntax.ParamExp, *syntax.CmdSubst, *syntax.ArithmExp, *syntax.ProcSubst,
+		case *syntax.ParamExp:
+			if _, ok := staticSandboxParameter(node); !ok {
+				analysis.Dynamic = true
+			}
+		case *syntax.CmdSubst, *syntax.ArithmExp, *syntax.ProcSubst,
 			*syntax.ExtGlob, *syntax.BraceExp, *syntax.IfClause, *syntax.WhileClause,
 			*syntax.ForClause, *syntax.CaseClause, *syntax.Block, *syntax.Subshell,
 			*syntax.FuncDecl, *syntax.ArithmCmd, *syntax.TestClause, *syntax.DeclClause,
@@ -99,17 +103,44 @@ func staticShellWord(word *syntax.Word) (string, bool) {
 				return "", false
 			}
 			for _, quotedPart := range part.Parts {
-				literal, ok := quotedPart.(*syntax.Lit)
-				if !ok {
+				switch quotedPart := quotedPart.(type) {
+				case *syntax.Lit:
+					value.WriteString(quotedPart.Value)
+				case *syntax.ParamExp:
+					parameter, ok := staticSandboxParameter(quotedPart)
+					if !ok {
+						return "", false
+					}
+					value.WriteString(parameter)
+				default:
 					return "", false
 				}
-				value.WriteString(literal.Value)
 			}
+		case *syntax.ParamExp:
+			parameter, ok := staticSandboxParameter(part)
+			if !ok {
+				return "", false
+			}
+			value.WriteString(parameter)
 		default:
 			return "", false
 		}
 	}
 	return value.String(), true
+}
+
+func staticSandboxParameter(parameter *syntax.ParamExp) (string, bool) {
+	if parameter == nil || parameter.Param == nil ||
+		parameter.Flags != nil || parameter.Excl || parameter.Length || parameter.Width || parameter.IsSet ||
+		parameter.NestedParam != nil || parameter.Index != nil || len(parameter.Modifiers) > 0 ||
+		parameter.Slice != nil || parameter.Repl != nil || parameter.Names != 0 || parameter.Exp != nil {
+		return "", false
+	}
+	name := parameter.Param.Value
+	if !sandboxManagedPath("$" + name) {
+		return "", false
+	}
+	return "$" + name, true
 }
 
 func staticShellRedirection(redirect *syntax.Redirect) (shellRedirection, bool) {

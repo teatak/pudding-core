@@ -981,6 +981,29 @@ func TestSplitRecentInputTailTreatsSystemAsInputBoundary(t *testing.T) {
 	}
 }
 
+func TestSplitRecentInputTailDoesNotTreatSteerAsNewTurn(t *testing.T) {
+	msgs := []*store.Message{
+		{ID: "m_user_old", TurnID: "t_old", TurnIndex: 0, Role: store.RoleUser},
+		{ID: "m_assistant_old", TurnID: "t_old", TurnIndex: 1, Role: store.RoleAssistant},
+		{ID: "m_user_current", TurnID: "t_current", TurnIndex: 0, Role: store.RoleUser},
+		{ID: "m_assistant_segment", TurnID: "t_current", TurnIndex: 1, Role: store.RoleAssistant},
+		{ID: "m_steer", TurnID: "t_current", TurnIndex: 2, Role: store.RoleUser},
+		{ID: "m_assistant_current", TurnID: "t_current", TurnIndex: 3, Role: store.RoleAssistant},
+	}
+
+	cold, tail := SplitRecentInputTail(msgs, 1)
+	gotCold := testMessageIDs(cold)
+	gotTail := testMessageIDs(tail)
+	wantCold := []string{"m_user_old", "m_assistant_old"}
+	wantTail := []string{"m_user_current", "m_assistant_segment", "m_steer", "m_assistant_current"}
+	if strings.Join(gotCold, "|") != strings.Join(wantCold, "|") {
+		t.Fatalf("unexpected cold messages: got %v want %v", gotCold, wantCold)
+	}
+	if strings.Join(gotTail, "|") != strings.Join(wantTail, "|") {
+		t.Fatalf("unexpected tail messages: got %v want %v", gotTail, wantTail)
+	}
+}
+
 func testMessageIDs(msgs []*store.Message) []string {
 	ids := make([]string, 0, len(msgs))
 	for _, msg := range msgs {

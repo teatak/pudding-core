@@ -1,4 +1,4 @@
-import { Captions, Check, FileText, FolderOpen, Mic, Pause, Play, Pencil, Trash2, X } from "lucide-react";
+import { Captions, Check, CornerDownLeft, FileText, FolderOpen, Mic, Pause, Play, Pencil, Trash2, X } from "lucide-react";
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { ImageLightbox, type ImageLightboxItem } from "@/components/ImageLightbox";
@@ -19,12 +19,14 @@ import { uiContextFromContentParts, type UserInputVM } from "./types";
 export const UserInput = memo(function UserInput({
   onQueuedCancel,
   onQueuedEditStart,
+  onQueuedSteer,
   onQueuedSave,
   token,
   user,
 }: {
   onQueuedCancel?: (clientMessageID: string) => Promise<unknown>;
   onQueuedEditStart?: (clientMessageID: string) => Promise<unknown>;
+  onQueuedSteer?: (clientMessageID: string) => Promise<unknown>;
   onQueuedSave?: (clientMessageID: string, text: string) => Promise<unknown>;
   token: string;
   user: UserInputVM;
@@ -64,6 +66,7 @@ export const UserInput = memo(function UserInput({
   const rawInput = isRawVoiceClientMessageID(clientMessageID) || voiceAudioAttachment?.origin === VOICE_AUDIO_ORIGIN;
   const asrInput = isASRClientMessageID(clientMessageID) || rawInput;
   const canEditQueued = canManageQueued && !rawInput && !formResult;
+  const canSteerQueued = Boolean(clientMessageID && user.pending && user.status === "queued" && onQueuedSteer);
 
   useEffect(() => {
     if (!editing) {
@@ -132,6 +135,18 @@ export const UserInput = memo(function UserInput({
     }
   }
 
+  async function steerQueued() {
+    if (!clientMessageID || !onQueuedSteer) {
+      return;
+    }
+    setSaving(true);
+    try {
+      await onQueuedSteer(clientMessageID);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function revealLocalPath(path: string) {
     if (!path.trim()) {
       return;
@@ -144,6 +159,11 @@ export const UserInput = memo(function UserInput({
       {voiceAudioAttachment ? <VoiceAudioPlaybackButton attachment={voiceAudioAttachment} token={token} /> : null}
       {canManageQueued ? (
         <>
+          {canSteerQueued ? (
+            <MetaIconButton label={t("transcript.guideQueued")} disabled={saving} onClick={steerQueued}>
+              {saving ? <Spinner /> : <CornerDownLeft />}
+            </MetaIconButton>
+          ) : null}
           {canEditQueued ? (
             <MetaIconButton label={t("transcript.editQueued")} disabled={saving} onClick={startEdit}>
               <Pencil />

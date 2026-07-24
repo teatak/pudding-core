@@ -29,6 +29,7 @@ export function TranscriptView({
   onLoadHistory,
   onQueuedCancel,
   onQueuedEditStart,
+  onQueuedSteer,
   onQueuedSave,
   sessionID,
   showJumpLatest,
@@ -53,6 +54,7 @@ export function TranscriptView({
   onLoadHistory: () => Promise<unknown> | void;
   onQueuedCancel?: (clientMessageID: string) => Promise<unknown>;
   onQueuedEditStart?: (clientMessageID: string) => Promise<unknown>;
+  onQueuedSteer?: (clientMessageID: string) => Promise<unknown>;
   onQueuedSave?: (clientMessageID: string, text: string) => Promise<unknown>;
   sessionID: string;
   showJumpLatest: boolean;
@@ -104,6 +106,7 @@ export function TranscriptView({
             onLoadHistory={onLoadHistory}
             onQueuedCancel={onQueuedCancel}
             onQueuedEditStart={onQueuedEditStart}
+            onQueuedSteer={onQueuedSteer}
             onQueuedSave={onQueuedSave}
             scrollElement={viewportNode}
             sessionID={sessionID}

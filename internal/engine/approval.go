@@ -360,12 +360,13 @@ func capabilityApprovalPayload(req tool.CapabilityRequest, publicTargetMode stri
 
 func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID string, call tool.Call, risk tool.ToolRisk, project *store.Project, details map[string]any) (tool.Result, bool) {
 	payload := map[string]any{
-		"toolName":  call.Name,
-		"riskClass": string(risk.Class),
-		"operation": risk.Operation,
-		"scope":     risk.Scope,
-		"paths":     risk.Paths,
-		"lowRisk":   risk.LowRisk,
+		"toolName":      call.Name,
+		"riskClass":     string(risk.Class),
+		"operation":     risk.Operation,
+		"scope":         risk.Scope,
+		"paths":         risk.Paths,
+		"lowRisk":       risk.LowRisk,
+		"sandboxBypass": risk.SandboxBypass,
 	}
 	for key, value := range details {
 		payload[key] = value

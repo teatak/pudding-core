@@ -14,7 +14,7 @@ import (
 
 const (
 	baselineSchemaVersion = 1
-	currentSchemaVersion  = 4
+	currentSchemaVersion  = 5
 )
 
 var (
@@ -165,6 +165,21 @@ var schemaMigrations = map[int]schemaMigration{
 		`)
 		return err
 	},
+	5: func(tx *sql.Tx) error {
+		_, err := tx.Exec(`
+			CREATE TABLE IF NOT EXISTS usage_calibrations (
+				provider TEXT NOT NULL,
+				model TEXT NOT NULL,
+				sample_count INTEGER NOT NULL DEFAULT 0,
+				input_ratio_ewma REAL NOT NULL DEFAULT 1,
+				last_estimated_input_tokens INTEGER NOT NULL DEFAULT 0,
+				last_actual_input_tokens INTEGER NOT NULL DEFAULT 0,
+				updated_at INTEGER NOT NULL,
+				PRIMARY KEY(provider,model)
+			);
+		`)
+		return err
+	},
 }
 
 func prepareSchema(db *sql.DB, path string) error {
@@ -191,6 +206,11 @@ func prepareSchema(db *sql.DB, path string) error {
 					return err
 				}
 				version = currentSchemaVersion
+			} else if err := validateSchema(db, schemaV4Contract); err == nil {
+				if err := setSchemaVersion(db, 4); err != nil {
+					return err
+				}
+				version = 4
 			} else if err := validateSchema(db, schemaV3Contract); err == nil {
 				if err := setSchemaVersion(db, 3); err != nil {
 					return err
@@ -371,9 +391,13 @@ var schemaV3Contract = func() schemaContract {
 	return out
 }()
 
-var currentSchemaContract = extendSchemaContract(schemaV3Contract, map[string][]string{
+var schemaV4Contract = extendSchemaContract(schemaV3Contract, map[string][]string{
 	"browser_history": {"id", "url", "title", "favicon_url", "visited_at", "created_at", "updated_at"},
 }, "browser_history_visited_at")
+
+var currentSchemaContract = extendSchemaContract(schemaV4Contract, map[string][]string{
+	"usage_calibrations": {"provider", "model", "sample_count", "input_ratio_ewma", "last_estimated_input_tokens", "last_actual_input_tokens", "updated_at"},
+})
 
 func extendSchemaContract(base schemaContract, tables map[string][]string, indexes ...string) schemaContract {
 	out := schemaContract{tables: make(map[string][]string, len(base.tables)+len(tables))}

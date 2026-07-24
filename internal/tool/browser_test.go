@@ -41,7 +41,7 @@ func TestBuiltinBrowserScreenshotRoutesAttachment(t *testing.T) {
 		t.Fatalf("browser screenshot should route a context attachment: %+v", res.ContextAttachments)
 	}
 	payload := decodeToolResult(t, res)
-	if payload["attachmentKey"] == "" || payload["url"] == "" {
+	if payload["attachmentKey"] == "" || payload["url"] == "" || payload["exportTool"] != AttachmentExport || payload["exportHint"] == "" {
 		t.Fatalf("missing attachment metadata: %+v", payload)
 	}
 	path, ok, err := attachment.NewService(home).Path("sess_browser", res.Attachments[0].AttachmentKey)

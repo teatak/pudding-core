@@ -32,6 +32,7 @@ import {
   getTurn,
   listApps,
   listSkills,
+  steerTurn,
   submitMessage,
   updateSession,
   uploadAttachment,
@@ -109,6 +110,7 @@ export type DroppedFilesBatch = DroppedLocalItems & {
 };
 
 type ComposerAttachment = SessionDraftAttachment;
+type RunningDeliveryMode = "steer" | "queue";
 const emptyComposerAttachments: ComposerAttachment[] = [];
 const emptyLocalFolders: LocalFolderPath[] = [];
 const emptyPartOrder: DraftPartOrderItem[] = [];
@@ -133,7 +135,8 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   // (后端 turns 表派生)。中途刷新走 SSE tail 不回放 turn.started,若此时
   // provider 暂无 delta,overlay 不知道有 turn 在跑——session.running 兜底,
   // 保证停止按钮不丢(cancel 按 sessionID 取消,无需 turnID)。
-  const overlayRunning = useOverlayStore((state) => Boolean(state.runningTurns[sessionID]));
+  const runningTurnID = useOverlayStore((state) => state.runningTurns[sessionID]);
+  const overlayRunning = Boolean(runningTurnID);
   const turnPhase = useOverlayStore((state) => state.turnPhases[sessionID]);
   const pendingApproval = useOverlayStore((state) => selectPendingApproval(state.assistants, sessionID, state.runningTurns[sessionID]));
   const activeTurnPlan = useOverlayStore((state) => state.activeTurnPlans[sessionID]);
@@ -152,6 +155,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const [mascotErrorMessage, setMascotErrorMessage] = useState<string | null>(null);
   const [mascotErrorSignal, setMascotErrorSignal] = useState(0);
   const [textFocused, setTextFocused] = useState(false);
+  const [runningDeliveryMode, setRunningDeliveryMode] = useState<RunningDeliveryMode>("queue");
   const [attachmentPreviewIndex, setAttachmentPreviewIndex] = useState<number | null>(null);
   const [capturingPhoto, setCapturingPhoto] = useState(false);
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
@@ -567,6 +571,24 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       if (session.provider !== provider || session.model !== model) {
         await updateSession(token, sessionID, { provider, model });
       }
+      if (runningTurnID && runningDeliveryMode === "steer") {
+        const result = await steerTurn(token, sessionID, runningTurnID, {
+          clientMessageID,
+          text: value.text,
+          parts: value.parts,
+        });
+        addPendingUser({
+          sessionID,
+          clientMessageID,
+          status: "steering",
+          text: value.text,
+          parts: value.parts,
+          createdAt: new Date().toISOString(),
+          turnID: runningTurnID,
+        });
+        clearSubmittingTurn(sessionID, clientMessageID);
+        return result;
+      }
       const result = await submitMessage(token, sessionID, {
         clientMessageID,
         text: value.text,
@@ -922,6 +944,9 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   useEffect(() => {
     setMascotGaze({ type: "pointer" });
   }, [sessionID]);
+  useEffect(() => {
+    setRunningDeliveryMode("queue");
+  }, [runningTurnID, sessionID]);
 
   return (
     <>
@@ -1052,6 +1077,8 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
               session={session}
               showSendButton={showSendButton}
               showStopButton={showStopButton}
+              runningDeliveryMode={runningDeliveryMode}
+              steering={Boolean(runningTurnID)}
               stopEnabled={stopEnabled}
               submitPending={
                 submitMutation.isPending ||
@@ -1070,6 +1097,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
               onModelPickerClose={focusTextarea}
               onReasoningChange={setSessionReasoningEffort}
               onResolvedModelChange={handleResolvedModelChange}
+              onRunningDeliveryModeChange={setRunningDeliveryMode}
               onUIContextEnabledChange={setUIContextEnabled}
             />
           </div>

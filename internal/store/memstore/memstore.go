@@ -25,7 +25,8 @@ type Memstore struct {
 	fileChanges    map[string][]*store.TurnFileChange // turnID → root/path order
 	messages       map[string][]*store.Message        // sessionID → 时间升序
 	queued         map[string][]*store.QueuedInput
-	usage          map[usageKey]*store.UsageHourlyStat       // (UTC hour unix ms, model) → global stats
+	usage          map[usageKey]*store.UsageHourlyStat // (UTC hour unix ms, model) → global stats
+	ucalibration   map[usageCalibrationKey]*store.UsageCalibrationStat
 	susage         map[string]*store.SessionUsageStat        // sessionID → session stats
 	canvas         map[string]*store.CanvasItem              // sessionID/itemID → session canvas item
 	closed         map[string]*store.ClosedCanvasItem        // sessionID/id → recently closed canvas item
@@ -47,6 +48,7 @@ func New() *Memstore {
 		messages:       make(map[string][]*store.Message),
 		queued:         make(map[string][]*store.QueuedInput),
 		usage:          make(map[usageKey]*store.UsageHourlyStat),
+		ucalibration:   make(map[usageCalibrationKey]*store.UsageCalibrationStat),
 		susage:         make(map[string]*store.SessionUsageStat),
 		canvas:         make(map[string]*store.CanvasItem),
 		closed:         make(map[string]*store.ClosedCanvasItem),
@@ -572,6 +574,84 @@ func (m *Memstore) UpdateQueuedInput(_ context.Context, in store.UpdateQueuedInp
 	return &store.UpdateQueuedInputResult{Input: cloneQueuedInput(input), Event: &ec}, nil
 }
 
+func (m *Memstore) SteerQueuedInput(_ context.Context, in store.SteerQueuedInputInput) (*store.SteerQueuedInputResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	turn, ok := m.turns[in.TurnID]
+	if !ok || turn.SessionID != in.SessionID || turn.Status != store.TurnRunning {
+		return nil, store.ErrNotFound
+	}
+	input := m.findQueuedInput(in.SessionID, in.ClientMessageID)
+	if input == nil {
+		return nil, store.ErrNotFound
+	}
+	for _, message := range m.messages[in.SessionID] {
+		if message.Role != store.RoleUser || message.ClientMessageID != in.ClientMessageID {
+			continue
+		}
+		if message.TurnID != in.TurnID {
+			return nil, store.ErrNotFound
+		}
+		return &store.SteerQueuedInputResult{
+			Duplicate:   true,
+			Input:       cloneQueuedInput(input),
+			UserMessage: cloneMessage(message),
+		}, nil
+	}
+	if input.Status == store.QueuedInputEditing {
+		return nil, store.ErrQueueBlocked
+	}
+	if input.Status != store.QueuedInputQueued {
+		return nil, store.ErrNotFound
+	}
+
+	now := time.Now()
+	maxIndex, _ := m.turnOutputStatsLocked(in.SessionID, in.TurnID)
+	message := &store.Message{
+		ID:              in.UserMessageID,
+		SessionID:       in.SessionID,
+		TurnID:          in.TurnID,
+		Role:            store.RoleUser,
+		Kind:            store.MessageKindText,
+		Text:            store.TextFromParts(input.Parts),
+		Parts:           store.UserInputParts(input.Text, input.Parts),
+		TurnIndex:       maxIndex + 1,
+		ClientMessageID: input.ClientMessageID,
+		CreatedAt:       now,
+	}
+	input.Status = store.QueuedInputPromoted
+	input.TurnID = in.TurnID
+	input.UpdatedAt = now
+	updatedEvent := event.Event{
+		Seq:             m.nextSeq(in.SessionID),
+		SessionID:       in.SessionID,
+		Kind:            event.InputUpdated,
+		ClientMessageID: input.ClientMessageID,
+		Text:            input.Text,
+		Status:          string(input.Status),
+	}
+	steeredEvent := event.Event{
+		SessionID:       in.SessionID,
+		Kind:            event.InputSteered,
+		TurnID:          in.TurnID,
+		ClientMessageID: input.ClientMessageID,
+		UserMessageID:   message.ID,
+		Text:            message.Text,
+	}
+	m.messages[in.SessionID] = append(m.messages[in.SessionID], message)
+	turn.UpdatedAt = now
+	m.sessions[in.SessionID].LastActivityAt = now
+	m.appendEventLocked(in.SessionID, updatedEvent)
+	updatedCopy := updatedEvent
+	steeredCopy := steeredEvent
+	return &store.SteerQueuedInputResult{
+		Input:        cloneQueuedInput(input),
+		UserMessage:  cloneMessage(message),
+		UpdatedEvent: &updatedCopy,
+		SteeredEvent: &steeredCopy,
+	}, nil
+}
+
 func (m *Memstore) PromoteNextQueuedInput(_ context.Context, in store.PromoteQueuedInputInput) (*store.PromoteQueuedInputResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -703,7 +783,7 @@ func (m *Memstore) FinishTurn(_ context.Context, in store.FinishTurnInput) (*sto
 	}
 	maxIndex, firstOutputID := m.turnOutputStatsLocked(turn.SessionID, turn.ID)
 	segments := store.FinishAssistantOutputSegments(in)
-	if maxIndex > 0 && len(in.AssistantParts) == 0 {
+	if firstOutputID != "" && len(in.AssistantParts) == 0 {
 		segments = nil
 	}
 	messages := m.appendTurnOutputSegmentsLocked(turn, maxIndex, segments, in.Interrupted, now)
@@ -771,7 +851,7 @@ func (m *Memstore) AppendTurnOutput(_ context.Context, in store.AppendTurnOutput
 	}
 	now := time.Now()
 	maxIndex, _ := m.turnOutputStatsLocked(turn.SessionID, turn.ID)
-	messages := m.appendTurnOutputSegmentsLocked(turn, maxIndex, segments, false, now)
+	messages := m.appendTurnOutputSegmentsLocked(turn, maxIndex, segments, in.Interrupted, now)
 	turn.UpdatedAt = now
 	m.sessions[turn.SessionID].LastActivityAt = now
 	out := make([]*store.Message, 0, len(messages))
@@ -779,6 +859,112 @@ func (m *Memstore) AppendTurnOutput(_ context.Context, in store.AppendTurnOutput
 		out = append(out, cloneMessage(msg))
 	}
 	return &store.AppendTurnOutputResult{Messages: out}, nil
+}
+
+func (m *Memstore) AppendTurnSteer(_ context.Context, in store.AppendTurnSteerInput) (*store.AppendTurnSteerResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	turn, ok := m.turns[in.TurnID]
+	if !ok || turn.SessionID != in.SessionID || turn.Status != store.TurnRunning {
+		return nil, store.ErrNotFound
+	}
+	for _, message := range m.messages[in.SessionID] {
+		if message.Role != store.RoleUser || message.ClientMessageID != in.ClientMessageID {
+			continue
+		}
+		if message.TurnID != in.TurnID {
+			return nil, store.ErrNotFound
+		}
+		return &store.AppendTurnSteerResult{
+			Duplicate:   true,
+			UserMessage: cloneMessage(message),
+		}, nil
+	}
+	now := time.Now()
+	maxIndex, _ := m.turnOutputStatsLocked(in.SessionID, in.TurnID)
+	parts := store.UserInputParts(in.UserText, in.UserParts)
+	message := &store.Message{
+		ID:              in.UserMessageID,
+		SessionID:       in.SessionID,
+		TurnID:          in.TurnID,
+		Role:            store.RoleUser,
+		Kind:            store.MessageKindText,
+		Text:            store.TextFromParts(parts),
+		Parts:           parts,
+		TurnIndex:       maxIndex + 1,
+		ClientMessageID: in.ClientMessageID,
+		CreatedAt:       now,
+	}
+	ev := event.Event{
+		SessionID:       in.SessionID,
+		Kind:            event.InputSteered,
+		TurnID:          in.TurnID,
+		ClientMessageID: in.ClientMessageID,
+		UserMessageID:   in.UserMessageID,
+		Text:            message.Text,
+	}
+	m.messages[in.SessionID] = append(m.messages[in.SessionID], message)
+	turn.UpdatedAt = now
+	m.sessions[in.SessionID].LastActivityAt = now
+	eventCopy := ev
+	return &store.AppendTurnSteerResult{
+		UserMessage: cloneMessage(message),
+		Event:       &eventCopy,
+	}, nil
+}
+
+func (m *Memstore) ApplyTurnSteers(_ context.Context, in store.ApplyTurnSteersInput) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(in.MessageIDs) != len(in.Events) {
+		return store.ErrNotFound
+	}
+	turn, ok := m.turns[in.TurnID]
+	if !ok || turn.Status != store.TurnRunning {
+		return store.ErrNotFound
+	}
+	for _, ev := range in.Events {
+		if ev == nil || ev.Kind != event.InputSteered || ev.SessionID != turn.SessionID || ev.TurnID != turn.ID {
+			return store.ErrNotFound
+		}
+	}
+	maxIndex, _ := m.turnOutputStatsLocked(turn.SessionID, turn.ID)
+	now := time.Now()
+	for _, message := range m.messages[turn.SessionID] {
+		if message.TurnID == turn.ID && !message.CreatedAt.Before(now) {
+			now = message.CreatedAt.Add(time.Nanosecond)
+		}
+	}
+	for i, messageID := range in.MessageIDs {
+		found := false
+		for _, message := range m.messages[turn.SessionID] {
+			if message.ID != messageID || message.TurnID != turn.ID || message.Role != store.RoleUser {
+				continue
+			}
+			message.TurnIndex = maxIndex + i + 1
+			message.CreatedAt = now
+			found = true
+			break
+		}
+		if !found {
+			return store.ErrNotFound
+		}
+	}
+	sort.SliceStable(m.messages[turn.SessionID], func(i, j int) bool {
+		left, right := m.messages[turn.SessionID][i], m.messages[turn.SessionID][j]
+		if left.CreatedAt.Equal(right.CreatedAt) {
+			if left.TurnID == right.TurnID && left.TurnIndex != right.TurnIndex {
+				return left.TurnIndex < right.TurnIndex
+			}
+			return false
+		}
+		return left.CreatedAt.Before(right.CreatedAt)
+	})
+	for _, ev := range in.Events {
+		ev.Seq = m.nextSeq(turn.SessionID)
+		m.appendEventLocked(turn.SessionID, *ev)
+	}
+	return nil
 }
 
 func (m *Memstore) AppendCompactSummary(_ context.Context, in store.AppendCompactSummaryInput) (*store.AppendCompactSummaryResult, error) {
@@ -899,6 +1085,45 @@ func (m *Memstore) UsageHourlyStats(_ context.Context, from, to time.Time) ([]*s
 		out = append(out, cloneUsageHourlyStat(m.usage[key]))
 	}
 	return out, nil
+}
+
+func (m *Memstore) RecordUsageCalibration(_ context.Context, providerName, model string, estimatedInputTokens, actualInputTokens int) (*store.UsageCalibrationStat, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	providerName = strings.TrimSpace(providerName)
+	model = strings.TrimSpace(model)
+	key := usageCalibrationKey{provider: providerName, model: model}
+	stat := m.ucalibration[key]
+	if stat == nil {
+		stat = &store.UsageCalibrationStat{Provider: providerName, Model: model, InputRatioEWMA: 1}
+		m.ucalibration[key] = stat
+	}
+	if estimatedInputTokens <= 0 || actualInputTokens <= 0 || providerName == "" || model == "" {
+		return cloneUsageCalibrationStat(stat), nil
+	}
+	stat.InputRatioEWMA = store.NextUsageCalibrationRatio(
+		stat.InputRatioEWMA,
+		stat.SampleCount,
+		estimatedInputTokens,
+		actualInputTokens,
+	)
+	stat.SampleCount++
+	stat.LastEstimatedInputTokens = estimatedInputTokens
+	stat.LastActualInputTokens = actualInputTokens
+	stat.UpdatedAt = time.Now()
+	return cloneUsageCalibrationStat(stat), nil
+}
+
+func (m *Memstore) UsageCalibration(_ context.Context, providerName, model string) (*store.UsageCalibrationStat, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	providerName = strings.TrimSpace(providerName)
+	model = strings.TrimSpace(model)
+	stat := m.ucalibration[usageCalibrationKey{provider: providerName, model: model}]
+	if stat == nil {
+		return &store.UsageCalibrationStat{Provider: providerName, Model: model, InputRatioEWMA: 1}, nil
+	}
+	return cloneUsageCalibrationStat(stat), nil
 }
 
 func (m *Memstore) RecordSessionUsage(_ context.Context, sessionID string, in store.UsageRecordInput) (*store.SessionUsageStat, error) {
@@ -1824,6 +2049,9 @@ func (m *Memstore) turnOutputStatsLocked(sessionID, turnID string) (int, string)
 		if msg.TurnIndex > maxIndex {
 			maxIndex = msg.TurnIndex
 		}
+		if msg.Role == store.RoleUser || msg.Role == store.RoleSystem {
+			continue
+		}
 		if firstID == "" || msg.TurnIndex < firstIndex {
 			firstIndex = msg.TurnIndex
 			firstID = msg.ID
@@ -2021,6 +2249,19 @@ func cloneUsageHourlyStat(stat *store.UsageHourlyStat) *store.UsageHourlyStat {
 type usageKey struct {
 	hourMS int64
 	model  string
+}
+
+type usageCalibrationKey struct {
+	provider string
+	model    string
+}
+
+func cloneUsageCalibrationStat(stat *store.UsageCalibrationStat) *store.UsageCalibrationStat {
+	if stat == nil {
+		return nil
+	}
+	cp := *stat
+	return &cp
 }
 
 func cloneSessionUsageStat(stat *store.SessionUsageStat) *store.SessionUsageStat {

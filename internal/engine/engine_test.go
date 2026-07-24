@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -229,6 +230,105 @@ func TestSubmitHappyPath(t *testing.T) {
 	}
 }
 
+func TestSteerContinuesCurrentTurnWithCanonicalUserInput(t *testing.T) {
+	ctx := context.Background()
+	ms := memstore.New()
+	hub := event.NewHub()
+	client := &steerClient{
+		firstStarted: make(chan struct{}),
+		releaseFirst: make(chan struct{}),
+	}
+	eng := New(ms, hub, registry.Static(client), ms)
+	sess := &store.Session{ID: "sess_steer", Title: "Steer", Provider: "capture", Model: "model"}
+	if err := ms.CreateSession(ctx, sess); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		ID:          "capture",
+		DisplayName: "capture",
+		Protocol:    "openai-compatible",
+		BaseURL:     "http://127.0.0.1:11434/v1",
+		Models:      []store.ProviderModel{{ID: "model"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	submit, err := eng.Submit(ctx, SubmitInput{
+		SessionID:       sess.ID,
+		ClientMessageID: "client_initial",
+		Text:            "initial",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-client.firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first provider request did not start")
+	}
+	if _, err := eng.Steer(ctx, SteerInput{
+		SessionID:       sess.ID,
+		TurnID:          submit.TurnID,
+		ClientMessageID: "client_steer",
+		Text:            "change direction",
+		Parts:           store.TextPart("change direction"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Steer(ctx, SteerInput{
+		SessionID:       sess.ID,
+		TurnID:          "turn_wrong",
+		ClientMessageID: "client_wrong",
+		Text:            "wrong",
+		Parts:           store.TextPart("wrong"),
+	}); !errors.Is(err, ErrTurnNotActive) {
+		t.Fatalf("wrong expected turn should fail, got %v", err)
+	}
+	close(client.releaseFirst)
+	waitTurnDone(t, ms, sess.ID)
+
+	requests := client.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("provider requests=%d want 2", len(requests))
+	}
+	second := requests[1].Messages
+	if len(second) != 3 ||
+		second[0].Role != provider.RoleUser || second[0].Text != "initial" ||
+		second[1].Role != provider.RoleAssistant || second[1].Text != "first answer" ||
+		second[2].Role != provider.RoleUser || second[2].Text != "change direction" {
+		t.Fatalf("steered request order is wrong: %+v", second)
+	}
+	page, err := ms.ListTurnsPage(ctx, sess.ID, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Turns) != 1 {
+		t.Fatalf("steer must not create another turn: %+v", page.Turns)
+	}
+	if got, want := canonicalMessageLabels(page.Turns[0].Messages), []string{
+		"user:initial",
+		"assistant:first answer",
+		"user:change direction",
+		"assistant:final answer",
+	}; !sameStrings(got, want) {
+		t.Fatalf("canonical steer order: got %v want %v", got, want)
+	}
+	queued, err := ms.ListQueuedInputs(ctx, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queued) != 0 {
+		t.Fatalf("steer must not enter delayed queue: %+v", queued)
+	}
+	events, err := ms.EventsAfter(ctx, sess.ID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed := events[len(events)-1]
+	if completed.Kind != event.TurnCompleted || completed.AssistantMessageID != page.Turns[0].Messages[1].ID {
+		t.Fatalf("completed event must reference first assistant output: %+v", completed)
+	}
+}
+
 func TestSystemSubmitDoesNotCreateUserMessage(t *testing.T) {
 	ms := memstore.New()
 	hub := event.NewHub()
@@ -325,6 +425,36 @@ func TestUsageChunkRecordsHourlyStats(t *testing.T) {
 	}
 	if sessionUsage.RequestCount != 1 || sessionUsage.LastPromptTokens != 60 || sessionUsage.LastOutputTokens != 90 || sessionUsage.CumulativeTotalTokens != 150 {
 		t.Fatalf("session usage wrong: %+v", sessionUsage)
+	}
+}
+
+func TestRecordUsageCalibratesMatchingProviderRequest(t *testing.T) {
+	eng, ms, _, sid := newTestEngine(t)
+	eng.recordUsage(context.Background(), sid, "mock", "mock-model", 100, provider.UsageInfo{
+		InputUncachedTokens: 130,
+	}, 1)
+
+	calibration, err := ms.UsageCalibration(context.Background(), "mock", "mock-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calibration.SampleCount != 1 || calibration.InputRatioEWMA != 1.3 ||
+		calibration.LastEstimatedInputTokens != 100 || calibration.LastActualInputTokens != 130 {
+		t.Fatalf("calibration wrong: %+v", calibration)
+	}
+
+	usage, err := eng.SessionUsage(context.Background(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.InputCalibrationSamples != 1 || usage.InputCalibrationFactor != 1.3 {
+		t.Fatalf("calibration missing from session usage: %+v", usage)
+	}
+	if usage.ContextEstimatedTokens <= usage.ContextRawEstimatedTokens {
+		t.Fatalf("calibrated estimate %d must exceed raw estimate %d", usage.ContextEstimatedTokens, usage.ContextRawEstimatedTokens)
+	}
+	if usage.ContextEstimatedTokens != usage.MessageEstimatedTokens+usage.SystemPromptEstimatedTokens+usage.ToolsSchemaEstimatedTokens {
+		t.Fatalf("calibrated estimate components do not add up: %+v", usage)
 	}
 }
 
@@ -524,6 +654,47 @@ func TestAutoCompactRunsAfterCompletedTurn(t *testing.T) {
 	meta, _ := store.CompactMetadataFromMessage(summary)
 	if meta.SourceTurnCount != 2 || meta.TailTurnCount != 2 {
 		t.Fatalf("unexpected compact metadata: %+v", meta)
+	}
+}
+
+func TestAutoCompactDueUsesLastMeasuredPromptWhenEstimateIsLower(t *testing.T) {
+	eng, ms, _, sid := newTestEngine(t)
+	ctx := context.Background()
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		ID:          "mock",
+		DisplayName: "mock",
+		Protocol:    "openai-compatible",
+		Models: []store.ProviderModel{{
+			ID:            "mock-model",
+			ContextWindow: 100_000,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.SetSettings(ctx, map[string]string{
+		config.SettingCompactAutoThresholdPercent: "80",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ms.RecordSessionUsage(ctx, sid, store.UsageRecordInput{
+		InputUncachedTokens: 90_000,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	usage, err := eng.SessionUsage(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.ContextEstimatedTokens >= usage.AutoCompactThresholdTokens {
+		t.Fatalf("test requires estimate below threshold: %+v", usage)
+	}
+	due, err := eng.autoCompactDue(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !due {
+		t.Fatalf("last measured prompt %d should cross threshold %d", usage.LastPromptTokens, usage.AutoCompactThresholdTokens)
 	}
 }
 
@@ -2678,7 +2849,7 @@ func TestFinishFailedTurnPersistsTrackedFileChanges(t *testing.T) {
 	}
 }
 
-func TestApprovedCommandBypassesSandboxForExactInvocation(t *testing.T) {
+func TestApprovedHostAccessCommandBypassesSandboxForExactInvocation(t *testing.T) {
 	ctx := context.Background()
 	ms := memstore.New()
 	hub := event.NewHub()
@@ -2735,6 +2906,59 @@ func TestApprovedCommandBypassesSandboxForExactInvocation(t *testing.T) {
 	}
 	if string(call.Args) != `{"scope":"project","command":"brew install mysql-client"}` {
 		t.Fatalf("approved command invocation changed: %s", call.Args)
+	}
+}
+
+func TestApprovedDestructiveCommandRemainsSandboxed(t *testing.T) {
+	ctx := context.Background()
+	ms := memstore.New()
+	hub := event.NewHub()
+	root := t.TempDir()
+	project := &store.Project{ID: "proj_rm", RootDirs: []string{root}, ApprovalMode: store.ApprovalAuto}
+	if err := ms.CreateProject(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	sessionID := "sess_rm"
+	if err := ms.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock", ActiveMode: store.ModeCode, ProjectID: project.ID}); err != nil {
+		t.Fatal(err)
+	}
+	calls := &recordingToolRunner{
+		defs:   tool.BuiltinDefinitions(),
+		result: tool.Result{Ok: true, Content: `{"ok":true}`},
+	}
+	runner := &approvalDetailsRecordingToolRunner{recordingToolRunner: calls}
+	eng := New(ms, hub, registry.Static(mock.New()), ms, WithTools(runner))
+	sub, unsub := hub.Subscribe(sessionID)
+	defer unsub()
+
+	done := make(chan tool.Result, 1)
+	go func() {
+		raw := json.RawMessage(`{"scope":"project","command":"rm -rf build"}`)
+		done <- eng.executeAllowedTool(ctx, sessionID, "turn_rm", store.ModeCode, tool.Call{CallID: "call_rm", Name: tool.CommandRun, Args: raw})
+	}()
+
+	var approval event.Event
+	select {
+	case approval = <-sub:
+	case <-time.After(time.Second):
+		t.Fatal("destructive command approval request not emitted")
+	}
+	if !strings.Contains(string(approval.Payload), `"sandboxBypass":false`) {
+		t.Fatalf("approval payload must describe sandboxed execution: %s", approval.Payload)
+	}
+	if err := eng.ApproveApproval(ctx, sessionID, approval.ApprovalID, ApprovalScopeTurn, nil); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case result := <-done:
+		if !result.Ok {
+			t.Fatalf("approved command failed: %+v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("approved command did not resume")
+	}
+	if len(calls.calls) != 1 || calls.calls[0].CommandSandbox != tool.CommandSandboxEnforce {
+		t.Fatalf("destructive project command escaped sandbox: %+v", calls.calls)
 	}
 }
 
@@ -2878,6 +3102,71 @@ func TestSubmitQueuesWhileRunning(t *testing.T) {
 	}
 }
 
+func TestSteerQueuedInputKeepsMessageInRunningTurn(t *testing.T) {
+	eng, ms, hub, sid := newTestEngine(t, mock.WithScript([]string{"slow"}), mock.WithDelay(2*time.Second))
+	live, unsubscribe := hub.Subscribe(sid)
+	defer unsubscribe()
+	ctx := context.Background()
+	first, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c2", Text: "guide"})
+	if err != nil || !queued.Queued {
+		t.Fatalf("second input should queue: %+v err=%v", queued, err)
+	}
+	steered, err := eng.SteerQueuedInput(ctx, sid, first.TurnID, "c2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if steered.TurnID != first.TurnID || steered.UserMessageID == "" {
+		t.Fatalf("unexpected steer result: %+v", steered)
+	}
+	inputs, err := ms.ListQueuedInputs(ctx, sid)
+	if err != nil || len(inputs) != 0 {
+		t.Fatalf("steered input should leave queue: %+v err=%v", inputs, err)
+	}
+	turn, err := ms.GetConversationTurn(ctx, sid, first.TurnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turn.Messages) != 2 || turn.Messages[0].ClientMessageID != "c1" || turn.Messages[1].ClientMessageID != "c2" {
+		t.Fatalf("guide should belong to original turn: %+v", turn.Messages)
+	}
+	if err := eng.Cancel(sid); err != nil {
+		t.Fatal(err)
+	}
+	eng.Wait()
+	var persistent []event.Event
+	for {
+		select {
+		case ev := <-live:
+			if ev.Seq > 0 {
+				persistent = append(persistent, ev)
+			}
+		default:
+			for i := 1; i < len(persistent); i++ {
+				if persistent[i].Seq <= persistent[i-1].Seq {
+					t.Fatalf("live lifecycle events must stay monotonic: %+v", persistent)
+				}
+			}
+			var updatedIndex, steeredIndex = -1, -1
+			for i, ev := range persistent {
+				if ev.Kind == event.InputUpdated && ev.ClientMessageID == "c2" {
+					updatedIndex = i
+				}
+				if ev.Kind == event.InputSteered && ev.ClientMessageID == "c2" {
+					steeredIndex = i
+				}
+			}
+			if updatedIndex < 0 || steeredIndex <= updatedIndex {
+				t.Fatalf("queued update must publish before applied steer: %+v", persistent)
+			}
+			return
+		}
+	}
+}
+
 func TestQueuedEditingBlocksDrain(t *testing.T) {
 	eng, ms, _, sid := newTestEngine(t, mock.WithDelay(20*time.Millisecond))
 	ctx := context.Background()
@@ -2943,10 +3232,20 @@ func TestCancelKeepsPartial(t *testing.T) {
 	eng, ms, _, sid := newTestEngine(t,
 		mock.WithScript([]string{"part", "ial", " never", " ends"}),
 		mock.WithDelay(30*time.Millisecond))
-	if _, err := eng.Submit(context.Background(), SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "go"}); err != nil {
+	submit, err := eng.Submit(context.Background(), SubmitInput{SessionID: sid, ClientMessageID: "c1", Text: "go"})
+	if err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(80 * time.Millisecond) // 让前几个 delta 流出
+	if _, err := eng.Steer(context.Background(), SteerInput{
+		SessionID:       sid,
+		TurnID:          submit.TurnID,
+		ClientMessageID: "c_steer_cancel",
+		Text:            "change before cancel",
+		Parts:           store.TextPart("change before cancel"),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := eng.Cancel(sid); err != nil {
 		t.Fatal(err)
 	}
@@ -2958,8 +3257,11 @@ func TestCancelKeepsPartial(t *testing.T) {
 		t.Fatalf("want turn.cancelled, got %+v", last)
 	}
 	msgs, _ := ms.ListMessages(context.Background(), sid, 0)
-	if len(msgs) != 2 || !msgs[1].Interrupted || msgs[1].Text == "" {
+	if len(msgs) != 3 || !msgs[1].Interrupted || msgs[1].Text == "" {
 		t.Fatalf("partial output must be kept as interrupted message: %+v", msgs)
+	}
+	if msgs[2].Role != store.RoleUser || msgs[2].Text != "change before cancel" {
+		t.Fatalf("accepted steer must remain after partial output: %+v", msgs)
 	}
 	if last.AssistantMessageID != msgs[1].ID || !last.Interrupted {
 		t.Fatalf("cancelled event must reference partial message: %+v", last)
@@ -3257,6 +3559,46 @@ func (c *captureClient) Stream(_ context.Context, req provider.Request) (<-chan 
 	out <- provider.Chunk{Done: true}
 	close(out)
 	return out, nil
+}
+
+type steerClient struct {
+	mu           sync.Mutex
+	requests     []provider.Request
+	firstStarted chan struct{}
+	releaseFirst chan struct{}
+}
+
+func (c *steerClient) Name() string { return "steer" }
+
+func (c *steerClient) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	c.mu.Lock()
+	c.requests = append(c.requests, req)
+	requestIndex := len(c.requests)
+	c.mu.Unlock()
+	out := make(chan provider.Chunk, 2)
+	go func() {
+		defer close(out)
+		if requestIndex == 1 {
+			close(c.firstStarted)
+			select {
+			case <-c.releaseFirst:
+			case <-ctx.Done():
+				out <- provider.Chunk{Err: ctx.Err()}
+				return
+			}
+			out <- provider.Chunk{Part: provider.PartText, Delta: "first answer"}
+		} else {
+			out <- provider.Chunk{Part: provider.PartText, Delta: "final answer"}
+		}
+		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
+	}()
+	return out, nil
+}
+
+func (c *steerClient) Requests() []provider.Request {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]provider.Request(nil), c.requests...)
 }
 
 type toolLoopClient struct {
@@ -3974,6 +4316,14 @@ func sameStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func canonicalMessageLabels(messages []*store.Message) []string {
+	out := make([]string, 0, len(messages))
+	for _, message := range messages {
+		out = append(out, string(message.Role)+":"+message.Text)
+	}
+	return out
 }
 
 func messageLabelsByID(messages []*store.Message, ids []string) []string {

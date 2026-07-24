@@ -7,6 +7,7 @@ import { TranscriptView } from "@/components/transcript/TranscriptView";
 import type { TranscriptTurnVM } from "@/components/transcript/types";
 import { useTranscriptData } from "@/components/transcript/useTranscriptData";
 import { transcriptDisplaySettings } from "@/lib/appSettings";
+import { useOverlayStore } from "@/state/overlayStore";
 
 type TranscriptProps = {
   token: string;
@@ -20,7 +21,8 @@ export function Transcript({ token, sessionID, sessionRunning = false, submitErr
   const [isAtLatest, setIsAtLatest] = useState(true);
   const [jumpLatestSignal, setJumpLatestSignal] = useState(0);
   const [newMessageCount, setNewMessageCount] = useState(0);
-  const { hasMoreHistory, isLoadingHistory, loadHistory, markAssistantRevealed, transcript, turnsQuery, updateQueued } =
+  const runningTurnID = useOverlayStore((state) => state.runningTurns[sessionID]);
+  const { hasMoreHistory, isLoadingHistory, loadHistory, markAssistantRevealed, steerQueued, transcript, turnsQuery, updateQueued } =
     useTranscriptData({
       sessionID,
       sessionRunning,
@@ -52,6 +54,15 @@ export function Transcript({ token, sessionID, sessionRunning = false, submitErr
   const saveQueued = useCallback(
     (clientMessageID: string, text: string) => updateQueued(clientMessageID, { status: "queued", text }),
     [updateQueued],
+  );
+  const guideQueued = useCallback(
+    (clientMessageID: string) => {
+      if (!runningTurnID) {
+        return Promise.reject(new Error("turn_not_active"));
+      }
+      return steerQueued(clientMessageID, runningTurnID);
+    },
+    [runningTurnID, steerQueued],
   );
   const disclosure = useMemo(
     () => ({
@@ -127,6 +138,7 @@ export function Transcript({ token, sessionID, sessionRunning = false, submitErr
       onLoadHistory={loadHistory}
       onQueuedCancel={cancelQueued}
       onQueuedEditStart={startQueuedEdit}
+      onQueuedSteer={runningTurnID ? guideQueued : undefined}
       onQueuedSave={saveQueued}
     />
   );
@@ -159,10 +171,17 @@ function appendedMessageCount(previous: TranscriptTurnVM[], next: TranscriptTurn
 }
 
 function messageUnitCount(turn: TranscriptTurnVM) {
+  const sequenceUnits =
+    turn.sequence?.reduce(
+      (count, item) =>
+        count + (item.kind === "guide" || hasAssistantMessageContent(item.assistant) ? 1 : 0),
+      0,
+    ) || 0;
   return (
     (turn.user ? 1 : 0) +
     (turn.compact ? 1 : 0) +
-    (turn.assistant && hasAssistantMessageContent(turn.assistant) ? 1 : 0)
+    (turn.assistant && hasAssistantMessageContent(turn.assistant) ? 1 : 0) +
+    sequenceUnits
   );
 }
 

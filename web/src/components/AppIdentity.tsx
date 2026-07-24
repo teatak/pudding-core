@@ -1,4 +1,4 @@
-import { BookOpen, FolderTree, GitFork, Globe, PackagePlus, PanelsTopLeft, ScanLine, SearchCode } from "lucide-react";
+import { BookOpen, Folders, GitFork, Globe, PackagePlus, PanelsTopLeft, ScanLine, SearchCode } from "lucide-react";
 
 import { type AppDefinition } from "@/api/client";
 import { AppIcon, type AppIconSpec } from "@/components/AppIcon";
@@ -86,7 +86,7 @@ function builtinAppIcon(appID: string) {
   if (appID === "canvas") return PanelsTopLeft;
   if (appID === "skill-authoring") return BookOpen;
   if (appID === "app-authoring") return PackagePlus;
-  if (appID === "project-files") return FolderTree;
+  if (appID === "project-files") return Folders;
   if (appID === "source-control") return GitFork;
   if (appID === "code-intelligence") return SearchCode;
   if (appID === "capture") return ScanLine;

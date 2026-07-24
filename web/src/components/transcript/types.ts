@@ -10,7 +10,7 @@ export type UserInputVM = {
   createdAt?: string;
   interrupted?: boolean;
   pending?: boolean;
-  status?: "submitting" | "queued" | "editing";
+  status?: "submitting" | "queued" | "editing" | "steering";
   text: string;
   attachments?: Attachment[];
   localFolders?: LocalFolder[];
@@ -36,7 +36,20 @@ export type AssistantOutputVM =
       phase: TurnPhaseState;
     };
 
+export type TranscriptTurnSequenceItem =
+  | {
+      assistant: AssistantOutputVM;
+      key: string;
+      kind: "assistant";
+    }
+  | {
+      key: string;
+      kind: "guide";
+      user: UserInputVM;
+    };
+
 export type TranscriptTurnVM = {
+  anchorID?: string;
   assistant?: AssistantOutputVM;
   clientMessageID?: string;
   compact?: CompactRun;
@@ -45,6 +58,7 @@ export type TranscriptTurnVM = {
   turnID?: string;
   user?: UserInputVM;
   fileChanges?: TurnFileChange[];
+  sequence?: TranscriptTurnSequenceItem[];
 };
 
 export type TurnModelVM = {

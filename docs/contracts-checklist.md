@@ -9,6 +9,7 @@
 | kind | seq | 落库 | 专属字段 |
 | --- | --- | --- | --- |
 | `turn.started` | ✓ | ✓ | `clientMessageID`, `userMessageID`, `text` |
+| `input.steered` | ✓ | ✓ | `turnID`, `clientMessageID`, `userMessageID`, `text`;输入已被当前 turn 接收并将在下一采样边界生效 |
 | `turn.delta` | — | — | `part(text/thought)`, `delta` |
 | `turn.tool` | — | — | `callID`, `name`, `phase`, `argsDelta?`, `stream?`, `content?`, `ok?`, `summaryKind?`, `summaryCount?`, `attachments?`;`phase=output` 的 stdout/stderr 只进前端 overlay,最终以 message.parts 兜底 |
 | `turn.completed` | ✓ | ✓ | `assistantMessageID` |
@@ -57,6 +58,8 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | `PATCH /sessions/{id}` | `{title?, provider?, model?, projectID?, activeMode?, modeLease?}` | Session | 404 |
 | `DELETE /sessions/{id}` | — | 204 | 404 |
 | `POST /sessions/{id}/submit` | `{clientMessageID, text}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_running` |
+| `POST /sessions/{id}/turns/{turnID}/steer` | `{clientMessageID, text?, parts[]}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_not_active` |
+| `POST /sessions/{id}/queued-inputs/{clientMessageID}/steer` | `{turnID}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_not_active` / `queued_input_editing` |
 | `POST /sessions/{id}/cancel` | — | 202 `{status}` | 404 / 409 `no_running_turn` |
 | `GET /sessions/{id}/audio/bindings` | — | `{bindings: {inputOwner, inputMode, outputOwner, inputLevel}}` | 404 / 503 |
 | `POST /sessions/{id}/audio/input` | `{enabled, mode?: "transcribe" \| "raw"}` | 200 `{ok, bindings}` | 400 / 404 / 409 / 503 |
@@ -89,6 +92,12 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 
 鉴权:`Authorization: Bearer <token>` 或 `?token=`(EventSource 用),401 统一 `{"error":"unauthorized"}`。
 
+`steer` 只接受 URL 中仍在运行的精确 `turnID`,不会在竞态下静默创建下一 turn 或进入
+延迟队列。引导输入作为同一 turn 的 canonical user message 持久化,在当前完整输出后的
+安全采样边界加入 provider context。普通 `submit` 在已有 running turn 时仍进入
+`queued_inputs`,供 Composer 的“稍后发送”使用。队列消息可原子提升为当前 turn 的引导输入;
+提升失败时消息继续留在队列中。
+
 ## LLM Tool 契约
 
 | tool | capability | args | result |
@@ -111,7 +120,7 @@ executable。cwd 必须位于当前 Project/turn grant 授权目录中;前台默
 通过 `builtin_command_session` 读取、输入或停止;`tty:true` 仅用于需要终端的交互命令。
 命令审批由 Project 的 `ask | auto | full` 决定。`auto` 用 shell AST 拆分静态命令段并
 逐段应用负面风险规则:未知命令名不会仅因未知而审批;删除、Git 外部写入、发布、凭证、
-显式网络工具、提权/系统操作、越界路径、wrapper、inline code 和动态 shell 结构仍请求
+显式网络工具、提权/系统操作、越界路径、wrapper 和动态 shell 结构仍请求
 审批。常规 Git `clone/fetch/pull` 与依赖下载自动允许。安全的自定义环境和后台命令沿用
 同一套风险判断,不额外强制审批。
 

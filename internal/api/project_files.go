@@ -25,7 +25,7 @@ import (
 const (
 	projectTreeMaxEntries   = 1000
 	projectTextMaxBytes     = 2 << 20
-	projectResourceMaxBytes = 10 << 20
+	projectResourceMaxBytes = 25 << 20
 	projectSearchDefaultMax = 200
 	projectSearchMax        = 500
 )
@@ -307,17 +307,22 @@ func (s *Server) getProjectResource(c *cart.Context) error {
 		return s.fail(c, err)
 	}
 	contentType := projectMIME(target, header[:n])
-	if !strings.HasPrefix(contentType, "image/") {
-		return projectFileError(c, http.StatusUnsupportedMediaType, "project_resource_not_image")
+	if !projectPreviewResourceAllowed(contentType) {
+		return projectFileError(c, http.StatusUnsupportedMediaType, "project_resource_not_previewable")
 	}
 	c.Header("Cache-Control", "private, max-age=60")
 	c.Header("Content-Type", contentType)
+	c.Header("Content-Disposition", "inline")
 	c.Header("X-Content-Type-Options", "nosniff")
 	if contentType == "image/svg+xml" {
 		c.Header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
 	}
 	http.ServeContent(c.Response, c.Request, filepath.Base(target), info.ModTime(), file)
 	return nil
+}
+
+func projectPreviewResourceAllowed(contentType string) bool {
+	return strings.HasPrefix(contentType, "image/") || contentType == "application/pdf"
 }
 
 func (s *Server) sessionProject(c *cart.Context) (*store.Project, []projectRootView, bool) {

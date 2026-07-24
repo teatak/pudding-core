@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, FileCode2, FilePenLine, Folders, Save } from "lucide-react";
+import { AlertTriangle, Eye, FileCode2, FilePenLine, Folders, Save } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
@@ -18,13 +18,15 @@ import type { ProjectEditorSelection } from "./ProjectEditor";
 import { ProjectGitDiffViewer } from "./git/ProjectGitDiffViewer";
 import { projectBrowserError } from "./projectErrors";
 import { projectSelectionKey } from "./projectPaths";
+import { isProjectPDFPath, projectDocumentPreviewKind } from "./projectPreviewKinds";
 import type { ProjectEditorReveal } from "./projectReveal";
 import { isProjectGitDiffTab, type ProjectSelection, type ProjectTab } from "./types";
 
 const ProjectEditor = lazy(() => import("./ProjectEditor").then((module) => ({ default: module.ProjectEditor })));
+const ProjectDocumentPreview = lazy(() => import("./ProjectDocumentPreview").then((module) => ({ default: module.ProjectDocumentPreview })));
 const ProjectMarkdownEditor = lazy(() => import("./ProjectMarkdownEditor").then((module) => ({ default: module.ProjectMarkdownEditor })));
 
-type MarkdownViewMode = "live" | "source";
+type FileViewMode = "preview" | "source";
 
 type FileDraft = {
   baseContent: string;
@@ -93,15 +95,19 @@ export function ProjectFileViewer({
     draftsRef.current = next;
     setDrafts(next);
   };
-  const [markdownModes, setMarkdownModes] = useState<Record<string, MarkdownViewMode>>({});
-  const [imageRevision, setImageRevision] = useState(0);
+  const [fileViewModes, setFileViewModes] = useState<Record<string, FileViewMode>>({});
+  const [documentExpandedPaths, setDocumentExpandedPaths] = useState<Record<string, string[]>>({});
+  const [resourceRevision, setResourceRevision] = useState(0);
   const gitDiffSelection = selection && isProjectGitDiffTab(selection) ? selection : undefined;
   const fileSelection = selection && !isProjectGitDiffTab(selection) ? selection : undefined;
   const selectionKey = fileSelection ? projectSelectionKey(fileSelection) : "";
   const draftKey = selectionKey ? `${sessionID}:${selectionKey}` : "";
   const isImage = Boolean(fileSelection && isProjectImagePath(fileSelection.path));
+  const isPDF = Boolean(fileSelection && isProjectPDFPath(fileSelection.path));
+  const isResourcePreview = isImage || isPDF;
+  const documentPreviewKind = fileSelection ? projectDocumentPreviewKind(fileSelection.path) : undefined;
   const fileQuery = useQuery({
-    enabled: active && Boolean(fileSelection) && !isImage,
+    enabled: active && Boolean(fileSelection) && !isResourcePreview,
     queryKey: fileSelection
       ? queryKeys.projectFile(sessionID, fileSelection.rootID, fileSelection.path)
       : ["session", sessionID, "project", "file", "none"],
@@ -118,31 +124,36 @@ export function ProjectFileViewer({
   const dirty = Boolean(draft && draft.content !== draft.baseContent);
   const externalConflict = Boolean(draft?.externalRevision);
   const isMarkdown = file?.mime === "text/markdown" || /\.(?:md|markdown)$/i.test(file?.name || "");
-  const markdownMode = isMarkdown && draftKey ? markdownModes[draftKey] ?? "live" : "source";
-  const imageURL = useMemo(() => {
-    if (!isImage || !fileSelection) return "";
+  const supportsViewMode = isMarkdown || Boolean(documentPreviewKind);
+  const fileViewMode = supportsViewMode && draftKey ? fileViewModes[draftKey] ?? "preview" : "source";
+  const expandedDocumentPaths = useMemo(
+    () => new Set(documentExpandedPaths[draftKey] ?? ["$"]),
+    [documentExpandedPaths, draftKey],
+  );
+  const resourceURL = useMemo(() => {
+    if (!isResourcePreview || !fileSelection) return "";
     const url = projectResourceURL(token, sessionID, fileSelection.rootID, fileSelection.path);
-    return `${url}${url.includes("?") ? "&" : "?"}v=${imageRevision}`;
-  }, [fileSelection?.path, fileSelection?.rootID, imageRevision, isImage, sessionID, token]);
+    return `${url}${url.includes("?") ? "&" : "?"}v=${resourceRevision}`;
+  }, [fileSelection?.path, fileSelection?.rootID, isResourcePreview, resourceRevision, sessionID, token]);
 
   useEffect(() => {
     if (!reveal || reveal.key !== selectionKey || !draftKey) {
       return;
     }
-    setMarkdownModes((current) => ({ ...current, [draftKey]: "live" }));
-  }, [draftKey, reveal?.serial, selectionKey]);
+    setFileViewModes((current) => ({ ...current, [draftKey]: documentPreviewKind ? "source" : "preview" }));
+  }, [documentPreviewKind, draftKey, reveal?.serial, selectionKey]);
 
   useEffect(() => {
     if (!active || !absolutePath || !fileSelection) {
       return;
     }
     const refetch = () => {
-      if (isImage) setImageRevision((current) => current + 1);
+      if (isResourcePreview) setResourceRevision((current) => current + 1);
       else void fileQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ["session", sessionID, "project", "git"] });
     };
     return watchElectronProjectFile(absolutePath, refetch, refetch);
-  }, [absolutePath, active, draftKey, isImage]);
+  }, [absolutePath, active, draftKey, isResourcePreview]);
 
   useEffect(() => {
     if (!discardRequest) return;
@@ -297,14 +308,14 @@ export function ProjectFileViewer({
       {fileSelection ? (
         <div className="flex h-8 shrink-0 items-center gap-2 bg-[var(--workspace-file-editor-background)] px-2.5">
           <code className="min-w-0 flex-1 cursor-text select-text truncate font-mono text-xs" >{file?.path || fileSelection.path}</code>
-          {!isImage ? (
+          {!isResourcePreview ? (
             <div className="flex shrink-0 items-center gap-1">
-              {isMarkdown ? (
+              {supportsViewMode ? (
                 <>
-                  <Button aria-label={t("project.browserMarkdownEditor")} aria-pressed={markdownMode === "live"} className="text-muted-foreground hover:bg-muted/60 hover:text-foreground aria-pressed:bg-muted aria-pressed:text-foreground" size="icon-sm" type="button" variant="ghost" onClick={() => setMarkdownModes((current) => ({ ...current, [draftKey]: "live" }))}>
-                    <FilePenLine />
+                  <Button aria-label={isMarkdown ? t("project.browserMarkdownEditor") : t("project.browserPreview")} aria-pressed={fileViewMode === "preview"} className="text-muted-foreground hover:bg-muted/60 hover:text-foreground aria-pressed:bg-muted aria-pressed:text-foreground" size="icon-sm" type="button" variant="ghost" onClick={() => setFileViewModes((current) => ({ ...current, [draftKey]: "preview" }))}>
+                    {isMarkdown ? <FilePenLine /> : <Eye />}
                   </Button>
-                  <Button aria-label={t("project.browserSource")} aria-pressed={markdownMode === "source"} className="text-muted-foreground hover:bg-muted/60 hover:text-foreground aria-pressed:bg-muted aria-pressed:text-foreground" size="icon-sm" type="button" variant="ghost" onClick={() => setMarkdownModes((current) => ({ ...current, [draftKey]: "source" }))}>
+                  <Button aria-label={t("project.browserSource")} aria-pressed={fileViewMode === "source"} className="text-muted-foreground hover:bg-muted/60 hover:text-foreground aria-pressed:bg-muted aria-pressed:text-foreground" size="icon-sm" type="button" variant="ghost" onClick={() => setFileViewModes((current) => ({ ...current, [draftKey]: "source" }))}>
                     <FileCode2 />
                   </Button>
                 </>
@@ -328,12 +339,14 @@ export function ProjectFileViewer({
         {!fileSelection ? (
           <ProjectViewerStatus icon={<Folders className="size-8" />}>{t("project.browserSelectFile")}</ProjectViewerStatus>
         ) : isImage ? (
-          <ProjectImagePreview key={imageURL} alt={fileSelection.path} src={imageURL} />
+          <ProjectImagePreview key={resourceURL} alt={fileSelection.path} src={resourceURL} />
+        ) : isPDF ? (
+          <ProjectPDFPreview key={resourceURL} src={resourceURL} title={fileSelection.path} />
         ) : fileQuery.isError ? (
           <ProjectViewerStatus>{projectBrowserError(fileQuery.error, t)}</ProjectViewerStatus>
         ) : fileQuery.isLoading && !file ? (
           <ProjectViewerStatus icon={<Spinner className="size-6" />}>{t("common.loading")}</ProjectViewerStatus>
-        ) : previewFile && isMarkdown && markdownMode === "live" ? (
+        ) : previewFile && isMarkdown && fileViewMode === "preview" ? (
           <Suspense fallback={<ProjectViewerStatus icon={<Spinner className="size-6" />}>{t("common.loading")}</ProjectViewerStatus>}>
             <ProjectMarkdownEditor
               key={draftKey}
@@ -343,6 +356,24 @@ export function ProjectFileViewer({
               onChange={changeContent}
               onSave={() => save()}
               onReferenceSelection={(range) => fileSelection && onReference(fileSelection, range)}
+            />
+          </Suspense>
+        ) : previewFile && documentPreviewKind && fileViewMode === "preview" ? (
+          <Suspense fallback={<ProjectViewerStatus icon={<Spinner className="size-6" />}>{t("common.loading")}</ProjectViewerStatus>}>
+            <ProjectDocumentPreview
+              key={draftKey}
+              expandedPaths={expandedDocumentPaths}
+              kind={documentPreviewKind}
+              path={previewFile.path}
+              value={content}
+              onExpandedPathChange={(path, expanded) => {
+                setDocumentExpandedPaths((current) => {
+                  const next = new Set(current[draftKey] ?? ["$"]);
+                  if (expanded) next.add(path);
+                  else next.delete(path);
+                  return { ...current, [draftKey]: Array.from(next) };
+                });
+              }}
             />
           </Suspense>
         ) : previewFile ? (
@@ -386,6 +417,10 @@ function ProjectImagePreview({ alt, src }: { alt: string; src: string }) {
       <img alt={alt} className="max-h-full max-w-full object-contain" src={src} onError={() => setFailed(true)} />
     </div>
   );
+}
+
+function ProjectPDFPreview({ src, title }: { src: string; title: string }) {
+  return <iframe className="h-full min-h-0 w-full border-0 bg-[var(--workspace-file-editor-background)]" src={src} title={title} />;
 }
 
 function isProjectImagePath(path: string) {

@@ -3165,10 +3165,16 @@ func TestGetSessionUsage(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := st.RecordUsageCalibration(context.Background(), "mock", "m1", 100, 130); err != nil {
+		t.Fatal(err)
+	}
 
 	got := decodeJSON[engine.SessionUsageInfo](t, req(t, http.MethodGet, srv.URL+"/sessions/"+sess.ID+"/usage", nil))
 	if got.SessionID != sess.ID || got.RequestCount != 1 || got.LastPromptTokens != 60 || got.LastOutputTokens != 90 || got.CumulativeTotalTokens != 150 {
 		t.Fatalf("unexpected session usage: %+v", got)
+	}
+	if got.InputCalibrationSamples != 1 || got.InputCalibrationFactor != 1.3 || got.ContextEstimatedTokens <= got.ContextRawEstimatedTokens {
+		t.Fatalf("unexpected calibrated estimate: %+v", got)
 	}
 }
 
@@ -3286,6 +3292,87 @@ func TestDeleteSessionCancelsRunningTurn(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Fatal("delete did not cancel the running turn; goroutine still streaming")
 	}
+}
+
+func TestSteerTurnRequiresExactRunningTurn(t *testing.T) {
+	ctx := context.Background()
+	ms := memstore.New()
+	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{
+		ID:          "mock",
+		DisplayName: "mock",
+		Protocol:    "openai-compatible",
+		BaseURL:     "http://127.0.0.1:11434/v1",
+		Models:      []store.ProviderModel{{ID: "m"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.CreateSession(ctx, &store.Session{
+		ID: "sess_steer", Title: "Steer", Provider: "mock", Model: "m",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hub := event.NewHub()
+	eng := engine.New(ms, hub,
+		registry.Static(mock.New(mock.WithScript([]string{"slow"}), mock.WithDelay(2*time.Second))), ms)
+	handler := New(eng, ms, ms, hub).Handler(testToken, nil)
+
+	submitBody := strings.NewReader(`{"clientMessageID":"client_initial","text":"initial"}`)
+	submitRequest := httptest.NewRequest(http.MethodPost, "/sessions/sess_steer/submit", submitBody)
+	submitRequest.Header.Set("Authorization", "Bearer "+testToken)
+	submitRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(submitRecorder, submitRequest)
+	if submitRecorder.Code != http.StatusAccepted {
+		t.Fatalf("submit status=%d body=%s", submitRecorder.Code, submitRecorder.Body.String())
+	}
+	var submitted engine.SubmitResult
+	if err := json.Unmarshal(submitRecorder.Body.Bytes(), &submitted); err != nil {
+		t.Fatal(err)
+	}
+
+	queueBody := strings.NewReader(`{"clientMessageID":"client_queued","text":"queued guide"}`)
+	queueRequest := httptest.NewRequest(http.MethodPost, "/sessions/sess_steer/submit", queueBody)
+	queueRequest.Header.Set("Authorization", "Bearer "+testToken)
+	queueRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(queueRecorder, queueRequest)
+	if queueRecorder.Code != http.StatusAccepted || !strings.Contains(queueRecorder.Body.String(), `"queued":true`) {
+		t.Fatalf("queue status=%d body=%s", queueRecorder.Code, queueRecorder.Body.String())
+	}
+	queuedSteerBody := strings.NewReader(`{"turnID":"` + submitted.TurnID + `"}`)
+	queuedSteerRequest := httptest.NewRequest(http.MethodPost,
+		"/sessions/sess_steer/queued-inputs/client_queued/steer", queuedSteerBody)
+	queuedSteerRequest.Header.Set("Authorization", "Bearer "+testToken)
+	queuedSteerRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(queuedSteerRecorder, queuedSteerRequest)
+	if queuedSteerRecorder.Code != http.StatusAccepted {
+		t.Fatalf("queued steer status=%d body=%s", queuedSteerRecorder.Code, queuedSteerRecorder.Body.String())
+	}
+	queuedInputs, err := ms.ListQueuedInputs(ctx, "sess_steer")
+	if err != nil || len(queuedInputs) != 0 {
+		t.Fatalf("queued steer should consume queue: %+v err=%v", queuedInputs, err)
+	}
+
+	steerBody := strings.NewReader(`{"clientMessageID":"client_steer","text":"change","parts":[{"type":"text","text":"change"}]}`)
+	steerRequest := httptest.NewRequest(http.MethodPost,
+		"/sessions/sess_steer/turns/"+submitted.TurnID+"/steer", steerBody)
+	steerRequest.Header.Set("Authorization", "Bearer "+testToken)
+	steerRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(steerRecorder, steerRequest)
+	if steerRecorder.Code != http.StatusAccepted {
+		t.Fatalf("steer status=%d body=%s", steerRecorder.Code, steerRecorder.Body.String())
+	}
+
+	wrongBody := strings.NewReader(`{"clientMessageID":"client_wrong","text":"wrong","parts":[{"type":"text","text":"wrong"}]}`)
+	wrongRequest := httptest.NewRequest(http.MethodPost,
+		"/sessions/sess_steer/turns/turn_wrong/steer", wrongBody)
+	wrongRequest.Header.Set("Authorization", "Bearer "+testToken)
+	wrongRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(wrongRecorder, wrongRequest)
+	if wrongRecorder.Code != http.StatusConflict || !strings.Contains(wrongRecorder.Body.String(), "turn_not_active") {
+		t.Fatalf("wrong turn status=%d body=%s", wrongRecorder.Code, wrongRecorder.Body.String())
+	}
+
+	_ = eng.Cancel("sess_steer")
+	eng.Wait()
 }
 
 func TestDeleteSessionRemovesCodeScratch(t *testing.T) {

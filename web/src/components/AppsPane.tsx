@@ -2271,6 +2271,7 @@ function AppToolGlyph({ kind, name }: { kind: AppToolItem["kind"]; name: string 
 
 function appToolIcon(name: string, kind: AppToolItem["kind"]): LucideIcon {
   const icons: Record<string, LucideIcon> = {
+    builtin_attachment_export: Download,
     builtin_browser_back: ArrowLeft,
     builtin_browser_click: MousePointerClick,
     builtin_browser_close: X,
@@ -2354,6 +2355,7 @@ function appToolDisplayName(name: string, t: I18nTranslate) {
     builtin_file_write: t("transcript.toolFileWrite"),
     builtin_file_patch: t("transcript.toolFilePatch"),
     builtin_file_read: t("transcript.toolFileRead"),
+    builtin_attachment_export: t("transcript.toolAttachmentExport"),
     builtin_file_delete: t("transcript.toolFileDelete"),
     builtin_file_move: t("transcript.toolFileMove"),
     builtin_file_copy: t("transcript.toolFileCopy"),

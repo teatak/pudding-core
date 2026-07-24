@@ -185,11 +185,15 @@ func TestProjectBrowserRejectsEscapingSymlinkAndBinaryText(t *testing.T) {
 	}
 }
 
-func TestProjectBrowserServesOnlyImageResources(t *testing.T) {
+func TestProjectBrowserServesPreviewResources(t *testing.T) {
 	srv, st := newTestServer(t)
 	root := t.TempDir()
 	imageBytes := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}
+	pdfBytes := []byte("%PDF-1.7\n")
 	if err := os.WriteFile(filepath.Join(root, "pixel.png"), imageBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "guide.pdf"), pdfBytes, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "note.txt"), []byte("note"), 0o600); err != nil {
@@ -209,6 +213,16 @@ func TestProjectBrowserServesOnlyImageResources(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "image/png" || string(data) != string(imageBytes) {
 		t.Fatalf("unexpected image response: status=%d contentType=%q data=%x", resp.StatusCode, resp.Header.Get("Content-Type"), data)
+	}
+
+	resp = req(t, http.MethodGet, resourceBase+"guide.pdf", nil)
+	data, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "application/pdf" || resp.Header.Get("Content-Disposition") != "inline" || string(data) != string(pdfBytes) {
+		t.Fatalf("unexpected pdf response: status=%d contentType=%q disposition=%q data=%q", resp.StatusCode, resp.Header.Get("Content-Type"), resp.Header.Get("Content-Disposition"), data)
 	}
 
 	resp = req(t, http.MethodGet, resourceBase+"note.txt", nil)

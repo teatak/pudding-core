@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -34,6 +35,8 @@ var (
 	ErrTurnRunning = store.ErrTurnRunning
 	// ErrNoRunningTurn:cancel 时没有进行中的 turn,API 映射 409。
 	ErrNoRunningTurn = errors.New("engine: no running turn")
+	// ErrTurnNotActive:引导的 expected turn 已经结束或不是当前 turn。
+	ErrTurnNotActive = errors.New("engine: turn is not active")
 	ErrEmptyInput    = errors.New("engine: empty text or clientMessageID")
 	// ErrNoModel:会话未解析出可用 provider/model,且当前没有可 fallback 的配置。
 	// API 映射 400 "no_model"。
@@ -99,13 +102,60 @@ type Engine struct {
 	auxCancel context.CancelFunc
 
 	mu                sync.Mutex
-	running           map[string]context.CancelFunc // sessionID → 当前 turn 的 cancel
+	running           map[string]*activeTurn // sessionID → 当前 turn
 	approvals         map[string]*pendingApproval
 	turnProjectAccess map[string]ProjectAccessGrant // turnID → 本轮临时目录授权
 	queuedRuntimeIDs  map[string]string             // queued input → originating UI runtime
 	wg                sync.WaitGroup
 	compactMu         sync.Mutex
 	toolCloseOnce     sync.Once
+}
+
+type activeTurn struct {
+	turnID string
+	cancel context.CancelFunc
+
+	mu              sync.Mutex
+	acceptingSteers bool
+	pendingSteers   []pendingSteer
+}
+
+type pendingSteer struct {
+	messageID string
+	event     *event.Event
+}
+
+func newActiveTurn(turnID string, cancel context.CancelFunc) *activeTurn {
+	return &activeTurn{turnID: turnID, cancel: cancel, acceptingSteers: true}
+}
+
+func (t *activeTurn) consumeSteers() []pendingSteer {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.pendingSteers) == 0 {
+		return nil
+	}
+	out := append([]pendingSteer(nil), t.pendingSteers...)
+	t.pendingSteers = nil
+	return out
+}
+
+func (t *activeTurn) consumeSteersOrSeal() []pendingSteer {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.pendingSteers) > 0 {
+		out := append([]pendingSteer(nil), t.pendingSteers...)
+		t.pendingSteers = nil
+		return out
+	}
+	t.acceptingSteers = false
+	return nil
+}
+
+func (t *activeTurn) stopAcceptingSteers() {
+	t.mu.Lock()
+	t.acceptingSteers = false
+	t.mu.Unlock()
 }
 
 type Option func(*Engine)
@@ -153,7 +203,7 @@ func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opt
 		builder:           contextbuilder.New(s, nil),
 		auxCtx:            auxCtx,
 		auxCancel:         auxCancel,
-		running:           make(map[string]context.CancelFunc),
+		running:           make(map[string]*activeTurn),
 		approvals:         make(map[string]*pendingApproval),
 		turnProjectAccess: make(map[string]ProjectAccessGrant),
 		queuedRuntimeIDs:  make(map[string]string),
@@ -240,10 +290,27 @@ type SubmitResult struct {
 	ClientMessageID string `json:"clientMessageID,omitempty"`
 }
 
+type SteerInput struct {
+	SessionID       string
+	TurnID          string
+	ClientMessageID string
+	Text            string
+	Parts           []store.ContentPart
+}
+
+type SteerResult struct {
+	Duplicate     bool   `json:"duplicate,omitempty"`
+	TurnID        string `json:"turnID"`
+	UserMessageID string `json:"userMessageID"`
+}
+
 type SessionUsageInfo struct {
 	SessionID                       string    `json:"sessionID"`
 	ContextWindow                   int       `json:"contextWindow"`
 	ContextEstimatedTokens          int       `json:"contextEstimatedTokens"`
+	ContextRawEstimatedTokens       int       `json:"contextRawEstimatedTokens"`
+	InputCalibrationFactor          float64   `json:"inputCalibrationFactor"`
+	InputCalibrationSamples         int       `json:"inputCalibrationSamples"`
 	MessageEstimatedTokens          int       `json:"messageEstimatedTokens"`
 	PromptOverheadEstimatedTokens   int       `json:"promptOverheadEstimatedTokens"`
 	SystemPromptEstimatedTokens     int       `json:"systemPromptEstimatedTokens"`
@@ -372,8 +439,9 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	// 客户端可能落在注册之前,错拿 no_running_turn。turn 生命周期长于 HTTP
 	// 请求,不继承请求 ctx;取消只走 Cancel()。
 	turnCtx, cancel := context.WithCancel(app.WithRuntimeID(context.Background(), app.RuntimeIDFromContext(ctx)))
+	active := newActiveTurn(res.Turn.ID, cancel)
 	e.mu.Lock()
-	e.running[in.SessionID] = cancel
+	e.running[in.SessionID] = active
 	e.mu.Unlock()
 
 	e.hub.Publish(*res.StartedEvent)
@@ -385,7 +453,7 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	}
 
 	e.wg.Add(1)
-	go e.runTurn(turnCtx, in.SessionID, res.Turn.ID, resolved, client)
+	go e.runTurn(turnCtx, in.SessionID, res.Turn.ID, resolved, client, active)
 
 	return &SubmitResult{TurnID: res.Turn.ID, UserMessageID: res.UserMessage.ID}, nil
 }
@@ -419,14 +487,15 @@ func (e *Engine) submitSystem(ctx context.Context, in SubmitInput, resolved *res
 		return &SubmitResult{Duplicate: true, TurnID: res.Turn.ID}, nil
 	}
 	turnCtx, cancel := context.WithCancel(app.WithRuntimeID(context.Background(), app.RuntimeIDFromContext(ctx)))
+	active := newActiveTurn(res.Turn.ID, cancel)
 	e.mu.Lock()
-	e.running[in.SessionID] = cancel
+	e.running[in.SessionID] = active
 	e.mu.Unlock()
 
 	e.hub.Publish(*res.StartedEvent)
 
 	e.wg.Add(1)
-	go e.runTurn(turnCtx, in.SessionID, res.Turn.ID, resolved, client)
+	go e.runTurn(turnCtx, in.SessionID, res.Turn.ID, resolved, client, active)
 
 	return &SubmitResult{TurnID: res.Turn.ID}, nil
 }
@@ -458,6 +527,18 @@ func (e *Engine) SessionUsage(ctx context.Context, sessionID string) (*SessionUs
 	if err != nil {
 		return nil, err
 	}
+	calibration, err := e.store.UsageCalibration(ctx, resolved.providerName, resolved.model)
+	if err != nil {
+		return nil, err
+	}
+	calibrationFactor := calibration.InputRatioEWMA
+	if calibrationFactor <= 0 {
+		calibrationFactor = 1
+	}
+	messageEstimatedTokens := calibratedTokenEstimate(estimate.MessageTokens, calibrationFactor)
+	systemPromptEstimatedTokens := calibratedTokenEstimate(estimate.SystemTokens, calibrationFactor)
+	toolsSchemaEstimatedTokens := calibratedTokenEstimate(estimate.ToolsTokens, calibrationFactor)
+	contextEstimatedTokens := messageEstimatedTokens + systemPromptEstimatedTokens + toolsSchemaEstimatedTokens
 	contextWindow := resolved.config.ContextWindow
 	threshold := 0
 	if contextWindow > 0 {
@@ -469,11 +550,14 @@ func (e *Engine) SessionUsage(ctx context.Context, sessionID string) (*SessionUs
 	return &SessionUsageInfo{
 		SessionID:                       sessionID,
 		ContextWindow:                   contextWindow,
-		ContextEstimatedTokens:          estimate.Total(),
-		MessageEstimatedTokens:          estimate.MessageTokens,
-		PromptOverheadEstimatedTokens:   estimate.SystemTokens + estimate.ToolsTokens,
-		SystemPromptEstimatedTokens:     estimate.SystemTokens,
-		ToolsSchemaEstimatedTokens:      estimate.ToolsTokens,
+		ContextEstimatedTokens:          contextEstimatedTokens,
+		ContextRawEstimatedTokens:       estimate.Total(),
+		InputCalibrationFactor:          calibrationFactor,
+		InputCalibrationSamples:         calibration.SampleCount,
+		MessageEstimatedTokens:          messageEstimatedTokens,
+		PromptOverheadEstimatedTokens:   systemPromptEstimatedTokens + toolsSchemaEstimatedTokens,
+		SystemPromptEstimatedTokens:     systemPromptEstimatedTokens,
+		ToolsSchemaEstimatedTokens:      toolsSchemaEstimatedTokens,
 		AutoCompactThresholdTokens:      threshold,
 		RequestCount:                    stat.RequestCount,
 		LastPromptTokens:                stat.LastInputTokens(),
@@ -493,6 +577,16 @@ func (e *Engine) SessionUsage(ctx context.Context, sessionID string) (*SessionUs
 		CumulativeTotalTokens:           stat.CumulativeTotalTokens(),
 		UpdatedAt:                       stat.UpdatedAt,
 	}, nil
+}
+
+func calibratedTokenEstimate(raw int, factor float64) int {
+	if raw <= 0 {
+		return 0
+	}
+	if factor <= 0 {
+		factor = 1
+	}
+	return int(math.Ceil(float64(raw) * factor))
 }
 
 func (e *Engine) queueSubmit(ctx context.Context, in SubmitInput, resolved *resolvedModel) (*SubmitResult, error) {
@@ -893,27 +987,156 @@ func (e *Engine) Recover(ctx context.Context) error {
 // Cancel 中断 session 当前 turn;收尾(落库 + final 事件)由 runTurn 完成。
 func (e *Engine) Cancel(sessionID string) error {
 	e.mu.Lock()
-	cancel, ok := e.running[sessionID]
+	active, ok := e.running[sessionID]
 	e.mu.Unlock()
 	if !ok {
 		return ErrNoRunningTurn
 	}
-	cancel()
+	active.stopAcceptingSteers()
+	active.cancel()
 	return nil
+}
+
+func (e *Engine) Steer(ctx context.Context, in SteerInput) (*SteerResult, error) {
+	in.SessionID = strings.TrimSpace(in.SessionID)
+	in.TurnID = strings.TrimSpace(in.TurnID)
+	in.ClientMessageID = strings.TrimSpace(in.ClientMessageID)
+	in.Parts = store.UserInputParts(in.Text, in.Parts)
+	if in.SessionID == "" || in.TurnID == "" || in.ClientMessageID == "" || len(in.Parts) == 0 {
+		return nil, ErrEmptyInput
+	}
+	e.mu.Lock()
+	active := e.running[in.SessionID]
+	e.mu.Unlock()
+	if active == nil || active.turnID != in.TurnID {
+		return nil, ErrTurnNotActive
+	}
+
+	active.mu.Lock()
+	if !active.acceptingSteers {
+		active.mu.Unlock()
+		return nil, ErrTurnNotActive
+	}
+	res, err := e.store.AppendTurnSteer(ctx, store.AppendTurnSteerInput{
+		SessionID:       in.SessionID,
+		TurnID:          in.TurnID,
+		UserMessageID:   store.NewID("msg"),
+		ClientMessageID: in.ClientMessageID,
+		UserText:        in.Text,
+		UserParts:       in.Parts,
+	})
+	if errors.Is(err, store.ErrNotFound) {
+		active.mu.Unlock()
+		return nil, ErrTurnNotActive
+	}
+	if err != nil {
+		active.mu.Unlock()
+		return nil, err
+	}
+	if !res.Duplicate {
+		active.pendingSteers = append(active.pendingSteers, pendingSteer{
+			messageID: res.UserMessage.ID,
+			event:     res.Event,
+		})
+	}
+	active.mu.Unlock()
+
+	return &SteerResult{
+		Duplicate:     res.Duplicate,
+		TurnID:        in.TurnID,
+		UserMessageID: res.UserMessage.ID,
+	}, nil
+}
+
+func (e *Engine) SteerQueuedInput(ctx context.Context, sessionID, turnID, clientMessageID string) (*SteerResult, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	turnID = strings.TrimSpace(turnID)
+	clientMessageID = strings.TrimSpace(clientMessageID)
+	if sessionID == "" || turnID == "" || clientMessageID == "" {
+		return nil, ErrEmptyInput
+	}
+	e.mu.Lock()
+	active := e.running[sessionID]
+	e.mu.Unlock()
+	if active == nil || active.turnID != turnID {
+		return nil, ErrTurnNotActive
+	}
+
+	active.mu.Lock()
+	if !active.acceptingSteers {
+		active.mu.Unlock()
+		return nil, ErrTurnNotActive
+	}
+	res, err := e.store.SteerQueuedInput(ctx, store.SteerQueuedInputInput{
+		SessionID:       sessionID,
+		TurnID:          turnID,
+		ClientMessageID: clientMessageID,
+		UserMessageID:   store.NewID("msg"),
+	})
+	if errors.Is(err, store.ErrNotFound) {
+		active.mu.Unlock()
+		return nil, ErrTurnNotActive
+	}
+	if err != nil {
+		active.mu.Unlock()
+		return nil, err
+	}
+	if !res.Duplicate {
+		active.pendingSteers = append(active.pendingSteers, pendingSteer{
+			messageID: res.UserMessage.ID,
+			event:     res.SteeredEvent,
+		})
+	}
+	if res.UpdatedEvent != nil {
+		// 保持实时发布与持久化 seq 同序；解锁后 runTurn 可能立刻在
+		// 安全边界发布 input.steered。
+		e.hub.Publish(*res.UpdatedEvent)
+	}
+	active.mu.Unlock()
+
+	e.takeQueuedRuntime(sessionID, clientMessageID)
+	return &SteerResult{
+		Duplicate:     res.Duplicate,
+		TurnID:        turnID,
+		UserMessageID: res.UserMessage.ID,
+	}, nil
 }
 
 // Wait 等待所有进行中的 turn 收尾,服务优雅退出。
 func (e *Engine) Wait() { e.wg.Wait() }
 
-func (e *Engine) runTurn(ctx context.Context, sessionID, turnID string, resolved *resolvedModel, client provider.Client) {
+func (e *Engine) runTurn(ctx context.Context, sessionID, turnID string, resolved *resolvedModel, client provider.Client, active *activeTurn) {
 	defer e.wg.Done()
 
 	var parts turnPartAccumulator
-	status, errMsg, mode := e.streamTurn(ctx, sessionID, turnID, resolved, client, &parts)
-	e.finishTurn(sessionID, turnID, mode, status, errMsg, parts.UncommittedParts())
+	status, errMsg, mode := e.streamTurn(ctx, sessionID, turnID, resolved, client, &parts, active)
+	active.stopAcceptingSteers()
+	interruptedOutputCommitted := false
+	if steers := active.consumeSteers(); len(steers) > 0 {
+		interruptedOutputCommitted = status != store.TurnCompleted && len(parts.UncommittedParts()) > 0
+		if err := e.commitTurnPartsWithStatus(turnID, &parts, true, interruptedOutputCommitted); err != nil {
+			status = store.TurnFailed
+			errMsg = fmt.Sprintf("append output before steer: %v", err)
+		} else if err := e.applyTurnSteers(turnID, steers); err != nil {
+			status = store.TurnFailed
+			errMsg = fmt.Sprintf("apply steer before finish: %v", err)
+		}
+	}
+	e.finishTurnWithInterrupted(sessionID, turnID, mode, status, errMsg, parts.UncommittedParts(), interruptedOutputCommitted)
 }
 
 func (e *Engine) finishTurn(sessionID, turnID string, mode store.AgentMode, status store.TurnStatus, errMsg string, assistantParts []store.ContentPart) {
+	e.finishTurnWithInterrupted(sessionID, turnID, mode, status, errMsg, assistantParts, false)
+}
+
+func (e *Engine) finishTurnWithInterrupted(
+	sessionID, turnID string,
+	mode store.AgentMode,
+	status store.TurnStatus,
+	errMsg string,
+	assistantParts []store.ContentPart,
+	interruptedOutputCommitted bool,
+) {
 	in := store.FinishTurnInput{TurnID: turnID, Status: status, Mode: mode, Error: errMsg}
 	if e.turnFiles != nil {
 		changes, err := e.turnFiles.Finish(turnID)
@@ -926,7 +1149,7 @@ func (e *Engine) finishTurn(sessionID, turnID string, mode store.AgentMode, stat
 	if len(assistantParts) > 0 {
 		in.AssistantParts = assistantParts
 	}
-	if status != store.TurnCompleted && len(assistantParts) > 0 {
+	if status != store.TurnCompleted && (len(assistantParts) > 0 || interruptedOutputCommitted) {
 		// 半截输出保留为 canonical message 并标记 interrupted
 		// (docs/technology-decisions.md 第 14 节的当前倾向)。
 		in.Interrupted = true
@@ -954,7 +1177,9 @@ func (e *Engine) finishTurn(sessionID, turnID string, mode store.AgentMode, stat
 
 func (e *Engine) clearRunning(sessionID, turnID string) {
 	e.mu.Lock()
-	delete(e.running, sessionID)
+	if active := e.running[sessionID]; active != nil && active.turnID == turnID {
+		delete(e.running, sessionID)
+	}
 	delete(e.turnProjectAccess, turnID)
 	e.mu.Unlock()
 }
@@ -981,8 +1206,9 @@ func (e *Engine) TryDrainQueued(sessionID string) {
 	}
 	runtimeID := e.takeQueuedRuntime(sessionID, res.Input.ClientMessageID)
 	turnCtx, cancel := context.WithCancel(app.WithRuntimeID(context.Background(), runtimeID))
+	active := newActiveTurn(res.Turn.ID, cancel)
 	e.mu.Lock()
-	e.running[sessionID] = cancel
+	e.running[sessionID] = active
 	e.mu.Unlock()
 	e.hub.Publish(*res.StartedEvent)
 
@@ -1014,10 +1240,10 @@ func (e *Engine) TryDrainQueued(sessionID string) {
 		}
 	}
 	e.wg.Add(1)
-	go e.runTurn(turnCtx, sessionID, res.Turn.ID, resolved, client)
+	go e.runTurn(turnCtx, sessionID, res.Turn.ID, resolved, client, active)
 }
 
-func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resolved *resolvedModel, client provider.Client, parts *turnPartAccumulator) (store.TurnStatus, string, store.AgentMode) {
+func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resolved *resolvedModel, client provider.Client, parts *turnPartAccumulator, active *activeTurn) (store.TurnStatus, string, store.AgentMode) {
 	currentMode := resolved.mode
 	currentMode = store.NormalizeAgentMode(currentMode)
 	if currentMode == "" {
@@ -1036,17 +1262,39 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 	for {
 		req := baseReq
 		req.Messages = requestMessagesWithTurnParts(baseReq.Messages, parts.Parts(), sessionID, e.attachmentHome, resolved.config)
+		estimatedInputTokens := contextbuilder.EstimateRequest(req).Total()
 		ch, err := client.Stream(ctx, req)
 		if err != nil {
 			return store.TurnFailed, fmt.Sprintf("provider: %v", err), currentMode
 		}
-		finish, status, errMsg, assistantOutput := e.consumeStream(ctx, sessionID, turnID, resolved.model, ch, parts)
+		finish, status, errMsg, assistantOutput := e.consumeStream(
+			ctx,
+			sessionID,
+			turnID,
+			resolved.providerName,
+			resolved.model,
+			estimatedInputTokens,
+			ch,
+			parts,
+		)
 		if status != store.TurnRunning {
 			return status, errMsg, currentMode
 		}
 		if finish == "" || finish == provider.FinishStop {
 			if err := e.commitTurnParts(turnID, parts, true); err != nil {
 				return store.TurnFailed, fmt.Sprintf("append output: %v", err), currentMode
+			}
+			if steers := active.consumeSteersOrSeal(); len(steers) > 0 {
+				if err := e.applyTurnSteers(turnID, steers); err != nil {
+					return store.TurnFailed, fmt.Sprintf("apply steer: %v", err), currentMode
+				}
+				parts.Reset()
+				baseReq, err = e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
+				if err != nil {
+					return store.TurnFailed, fmt.Sprintf("build context: %v", err), currentMode
+				}
+				consecutiveToolOnlyLoops = 0
+				continue
 			}
 			return store.TurnCompleted, "", currentMode
 		}
@@ -1072,8 +1320,25 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 			return status, msg, currentMode
 		}
 		if changed {
-			messages := baseReq.Messages
 			currentMode = nextMode
+		}
+		if steers := active.consumeSteers(); len(steers) > 0 {
+			if err := e.commitTurnParts(turnID, parts, true); err != nil {
+				return store.TurnFailed, fmt.Sprintf("append output: %v", err), currentMode
+			}
+			if err := e.applyTurnSteers(turnID, steers); err != nil {
+				return store.TurnFailed, fmt.Sprintf("apply steer: %v", err), currentMode
+			}
+			parts.Reset()
+			baseReq, err = e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
+			if err != nil {
+				return store.TurnFailed, fmt.Sprintf("build context: %v", err), currentMode
+			}
+			consecutiveToolOnlyLoops = 0
+			continue
+		}
+		if changed {
+			messages := baseReq.Messages
 			baseReq, err = e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
 			if err != nil {
 				return store.TurnFailed, fmt.Sprintf("build context: %v", err), currentMode
@@ -1083,7 +1348,33 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 	}
 }
 
+func (e *Engine) applyTurnSteers(turnID string, steers []pendingSteer) error {
+	messageIDs := make([]string, 0, len(steers))
+	events := make([]*event.Event, 0, len(steers))
+	for _, steer := range steers {
+		messageIDs = append(messageIDs, steer.messageID)
+		events = append(events, steer.event)
+	}
+	if err := e.store.ApplyTurnSteers(context.Background(), store.ApplyTurnSteersInput{
+		TurnID:     turnID,
+		MessageIDs: messageIDs,
+		Events:     events,
+	}); err != nil {
+		return err
+	}
+	for _, steer := range steers {
+		if steer.event != nil {
+			e.hub.Publish(*steer.event)
+		}
+	}
+	return nil
+}
+
 func (e *Engine) commitTurnParts(turnID string, parts *turnPartAccumulator, includeLast bool) error {
+	return e.commitTurnPartsWithStatus(turnID, parts, includeLast, false)
+}
+
+func (e *Engine) commitTurnPartsWithStatus(turnID string, parts *turnPartAccumulator, includeLast, interrupted bool) error {
 	upto := len(parts.parts)
 	if !includeLast && upto > parts.committedParts {
 		upto--
@@ -1092,7 +1383,11 @@ func (e *Engine) commitTurnParts(turnID string, parts *turnPartAccumulator, incl
 		return nil
 	}
 	commitParts := parts.PartsRange(parts.committedParts, upto)
-	if _, err := e.store.AppendTurnOutput(context.Background(), store.AppendTurnOutputInput{TurnID: turnID, Parts: commitParts}); err != nil {
+	if _, err := e.store.AppendTurnOutput(context.Background(), store.AppendTurnOutputInput{
+		TurnID:      turnID,
+		Parts:       commitParts,
+		Interrupted: interrupted,
+	}); err != nil {
 		return err
 	}
 	parts.committedParts = upto
@@ -1266,7 +1561,13 @@ func modelSupportsTools(cfg provider.ModelConfig) bool {
 	return cfg.Capabilities == nil || cfg.Capabilities.Tools
 }
 
-func (e *Engine) consumeStream(ctx context.Context, sessionID, turnID, model string, ch <-chan provider.Chunk, parts *turnPartAccumulator) (provider.FinishReason, store.TurnStatus, string, bool) {
+func (e *Engine) consumeStream(
+	ctx context.Context,
+	sessionID, turnID, providerName, model string,
+	estimatedInputTokens int,
+	ch <-chan provider.Chunk,
+	parts *turnPartAccumulator,
+) (provider.FinishReason, store.TurnStatus, string, bool) {
 	coalescer := newStreamEventCoalescer(e.hub)
 	defer coalescer.Flush()
 	var usage provider.UsageInfo
@@ -1287,7 +1588,7 @@ func (e *Engine) consumeStream(ctx context.Context, sessionID, turnID, model str
 					return "", store.TurnCancelled, "", assistantOutput
 				}
 				if usageSeen {
-					e.recordUsage(ctx, sessionID, model, usage, 1)
+					e.recordUsage(ctx, sessionID, providerName, model, estimatedInputTokens, usage, 1)
 				}
 				return "", store.TurnFailed, "provider stream ended without terminal chunk", assistantOutput
 			}
@@ -1297,7 +1598,7 @@ func (e *Engine) consumeStream(ctx context.Context, sessionID, turnID, model str
 					return "", store.TurnCancelled, "", assistantOutput
 				}
 				if usageSeen {
-					e.recordUsage(ctx, sessionID, model, usage, 1)
+					e.recordUsage(ctx, sessionID, providerName, model, estimatedInputTokens, usage, 1)
 				}
 				return "", store.TurnFailed, chunk.Err.Error(), assistantOutput
 			case chunk.Usage != nil:
@@ -1305,9 +1606,9 @@ func (e *Engine) consumeStream(ctx context.Context, sessionID, turnID, model str
 				usageSeen = true
 			case chunk.Done:
 				if usageSeen {
-					e.recordUsage(ctx, sessionID, model, usage, 1)
+					e.recordUsage(ctx, sessionID, providerName, model, estimatedInputTokens, usage, 1)
 				} else {
-					e.recordUsage(ctx, sessionID, model, provider.UsageInfo{}, 1)
+					e.recordUsage(ctx, sessionID, providerName, model, estimatedInputTokens, provider.UsageInfo{}, 1)
 				}
 				return chunk.Finish, store.TurnRunning, "", assistantOutput
 			case chunk.Tool != nil:
@@ -1367,7 +1668,13 @@ func mergeUsageInfo(dst *provider.UsageInfo, src provider.UsageInfo) {
 	}
 }
 
-func (e *Engine) recordUsage(ctx context.Context, sessionID, model string, usage provider.UsageInfo, requestCount int) {
+func (e *Engine) recordUsage(
+	ctx context.Context,
+	sessionID, providerName, model string,
+	estimatedInputTokens int,
+	usage provider.UsageInfo,
+	requestCount int,
+) {
 	if usage.Empty() && requestCount <= 0 {
 		return
 	}
@@ -1386,6 +1693,12 @@ func (e *Engine) recordUsage(ctx context.Context, sessionID, model string, usage
 	}
 	if _, err := e.store.RecordSessionUsage(ctx, sessionID, in); err != nil {
 		slog.Warn("engine: record session usage failed", "sessionID", sessionID, "err", err)
+	}
+	actualInputTokens := usage.InputUncachedTokens + usage.InputCachedTokens + usage.CacheCreationTokens
+	if estimatedInputTokens > 0 && actualInputTokens > 0 {
+		if _, err := e.store.RecordUsageCalibration(ctx, providerName, model, estimatedInputTokens, actualInputTokens); err != nil {
+			slog.Warn("engine: record usage calibration failed", "provider", providerName, "model", model, "err", err)
+		}
 	}
 }
 
@@ -1629,7 +1942,7 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 			var approved bool
 			result, approved = e.requestToolCallApproval(ctx, sessionID, turnID, call, risk, project, approvalDetails)
 			if approved {
-				if call.Name == tool.CommandRun {
+				if call.Name == tool.CommandRun && risk.SandboxBypass {
 					call.CommandSandbox = tool.CommandSandboxBypass
 				}
 				result = e.callTrackedTool(ctx, sessionID, turnID, mode, call)
@@ -2112,6 +2425,14 @@ type turnPartAccumulator struct {
 	toolPartByKey  map[string]int
 	toolKeyByIndex map[int]string
 	toolArgs       map[string]*strings.Builder
+}
+
+func (a *turnPartAccumulator) Reset() {
+	a.parts = nil
+	a.committedParts = 0
+	a.toolPartByKey = nil
+	a.toolKeyByIndex = nil
+	a.toolArgs = nil
 }
 
 func (a *turnPartAccumulator) AppendDelta(part provider.PartType, delta string) {

@@ -16,6 +16,7 @@ const (
 	TurnCancelled     Kind = "turn.cancelled"
 	InputQueued       Kind = "input.queued"
 	InputUpdated      Kind = "input.updated"
+	InputSteered      Kind = "input.steered"
 	AudioBindings     Kind = "audio.bindings"
 	AudioInputLevel   Kind = "audio.input_level"
 	ApprovalRequested Kind = "approval.requested"
@@ -41,6 +42,7 @@ const (
 //	turn.cancelled seq, turnID              (有部分输出时附 assistantMessageID + interrupted)
 //	input.queued   seq, clientMessageID, text, status
 //	input.updated  seq, clientMessageID, text, status
+//	input.steered  seq, turnID, clientMessageID, userMessageID, text
 //	audio.bindings inputOwner, inputMode, outputOwner, inputLevel
 //	audio.input_level inputLevel
 //	approval.requested turnID, callID, approvalID, approvalKind, title, reason, risk, payload

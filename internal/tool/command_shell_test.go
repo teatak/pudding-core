@@ -35,6 +35,20 @@ func TestAnalyzeShellCommandMarksDynamicStructures(t *testing.T) {
 	}
 }
 
+func TestAnalyzeShellCommandAcceptsSandboxManagedPaths(t *testing.T) {
+	analysis, err := analyzeShellCommand(`cat > "$TMPDIR/report.py" && python3 "${TMPDIR}/report.py"`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCommands := [][]string{{"cat"}, {"python3", "$TMPDIR/report.py"}}
+	if !reflect.DeepEqual(analysis.Commands, wantCommands) || analysis.Dynamic {
+		t.Fatalf("unexpected managed path analysis: %+v", analysis)
+	}
+	if len(analysis.Redirections) != 1 || analysis.Redirections[0].Path != "$TMPDIR/report.py" {
+		t.Fatalf("unexpected managed path redirect: %+v", analysis.Redirections)
+	}
+}
+
 func TestAnalyzeShellCommandRejectsMalformedAndBackgroundCommands(t *testing.T) {
 	if _, err := analyzeShellCommand(`printf "unterminated`); err == nil {
 		t.Fatal("malformed shell command must fail")

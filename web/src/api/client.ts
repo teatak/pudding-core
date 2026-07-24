@@ -54,6 +54,9 @@ import {
   attachment,
   submitRequest,
   submitResponse,
+  steerRequest,
+  steerQueuedInputRequest,
+  steerResponse,
   conversationTurn,
   turnFileChange,
   dailyUsageResponse,
@@ -1141,6 +1144,40 @@ export function submitMessage(
     method: "POST",
     body: JSON.stringify(submitRequest.parse(body)),
   });
+}
+
+export function steerTurn(
+  token: string,
+  sessionID: string,
+  turnID: string,
+  body: SubmitPayload,
+): Promise<z.infer<typeof steerResponse>> {
+  return request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/turns/${encodeURIComponent(turnID)}/steer`,
+    steerResponse,
+    {
+      method: "POST",
+      body: JSON.stringify(steerRequest.parse(body)),
+    },
+  );
+}
+
+export function steerQueuedInput(
+  token: string,
+  sessionID: string,
+  clientMessageID: string,
+  turnID: string,
+): Promise<z.infer<typeof steerResponse>> {
+  return request(
+    token,
+    `/sessions/${encodeURIComponent(sessionID)}/queued-inputs/${encodeURIComponent(clientMessageID)}/steer`,
+    steerResponse,
+    {
+      method: "POST",
+      body: JSON.stringify(steerQueuedInputRequest.parse({ turnID })),
+    },
+  );
 }
 
 export async function uploadAttachment(token: string, sessionID: string, file: File, options?: { origin?: "temp"; sourcePath?: string }): Promise<Attachment> {

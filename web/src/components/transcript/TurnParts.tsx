@@ -289,6 +289,7 @@ function toolPartIcon(part: Extract<TurnPartVM, { type: "tool_use" }>): LucideIc
     return Plug;
   }
   const known: Record<string, LucideIcon> = {
+    builtin_attachment_export: FileOutput,
     builtin_attachment_read_image: Image,
     builtin_app_load: PackageOpen,
     builtin_app_unload: PackageMinus,
@@ -1718,6 +1719,7 @@ function toolDisplayName(name: string | undefined, fallback: string, t: (key: st
     builtin_file_move: t("transcript.toolFileMove"),
     builtin_file_patch: t("transcript.toolFilePatch"),
     builtin_file_read: t("transcript.toolFileRead"),
+    builtin_attachment_export: t("transcript.toolAttachmentExport"),
     builtin_attachment_read_image: t("transcript.toolAttachmentReadImage"),
     builtin_file_search: t("transcript.toolFileSearch"),
     builtin_file_slice: t("transcript.toolFileSlice"),
