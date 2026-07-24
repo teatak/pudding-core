@@ -43,6 +43,7 @@ import {
   type Session,
 } from "@/api/client";
 import { queryKeys } from "@/api/queryKeys";
+import { readElectronBrowserSelection } from "@/browser/electronBridge";
 import { ChatColumn } from "@/components/ChatColumn";
 import { ComposerApprovalBar, selectPendingApproval } from "@/components/ComposerApprovalBar";
 import {
@@ -83,6 +84,7 @@ import { useInputFlowStore } from "@/state/inputFlowStore";
 import { useSessionDraftStore, type SessionDraftAttachment } from "@/state/sessionDraftStore";
 import {
   setUIContextEnabled,
+  type UIContextPart,
   useUIContextEnabled,
   useVisibleUIContext,
 } from "@/state/uiContextStore";
@@ -115,6 +117,14 @@ const emptyComposerAttachments: ComposerAttachment[] = [];
 const emptyLocalFolders: LocalFolderPath[] = [];
 const emptyPartOrder: DraftPartOrderItem[] = [];
 const emptyProjectReferences: ProjectReference[] = [];
+
+async function captureBrowserSelection(sessionID: string, context: UIContextPart) {
+  if (context.surface !== "browser" || context.resource !== "browser_tab" || !context.id) {
+    return context;
+  }
+  const selectionText = await readElectronBrowserSelection(sessionID, context.id);
+  return selectionText ? { ...context, selectionText } : context;
+}
 
 export function Composer({ droppedFiles, token, session, onSubmitError }: ComposerProps) {
   const sessionID = session.id;
@@ -173,6 +183,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
   const mascotErrorTimerRef = useRef<number | null>(null);
   const mascotGazeRafRef = useRef(0);
+  const submitPreparationRef = useRef(false);
   const form = useForm<z.infer<typeof composerSchema>>({
     resolver: zodResolver(composerSchema),
     defaultValues: { text: "" },
@@ -628,6 +639,9 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       });
       showMascotError(failure.message);
     },
+    onSettled: () => {
+      submitPreparationRef.current = false;
+    },
   });
   const inputFlowSubmitMutation = useMutation({
     mutationFn: async (submission: InputFlowSubmission) => {
@@ -784,7 +798,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     });
   }, [clearMascotError, navigate, onSubmitError, resetSessionDraft]);
 
-  const submitDraftWithMode = (
+  const submitDraftWithMode = async (
     value: z.infer<typeof composerSchema>,
     deliveryMode?: RunningDeliveryMode,
   ) => {
@@ -799,6 +813,7 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
       compactMutation.isPending ||
       systemSubmitMutation.isPending ||
       renameMutation.isPending ||
+      submitPreparationRef.current ||
       hasPendingAttachments ||
       hasFailedAttachments
     ) {
@@ -835,21 +850,33 @@ export function Composer({ droppedFiles, token, session, onSubmitError }: Compos
     }
     clearMascotError();
     onSubmitError?.(null);
-    if (!running) {
-      startSubmittingTurn(sessionID, draftIDRef.current);
+    submitPreparationRef.current = true;
+    try {
+      const capturedUIContext = draftUIContext
+        ? await captureBrowserSelection(sessionID, draftUIContext)
+        : undefined;
+      if (submitMutation.isPending || compactMutation.isPending || systemSubmitMutation.isPending || renameMutation.isPending) {
+        submitPreparationRef.current = false;
+        return;
+      }
+      if (!running) {
+        startSubmittingTurn(sessionID, draftIDRef.current);
+      }
+      const inputParts = buildDraftSubmitParts(
+        text,
+        attachmentItemsToSubmit,
+        localFoldersToSubmit,
+        partOrder,
+        projectReferencesToSubmit,
+      );
+      submitMutation.mutate({
+        deliveryMode,
+        text,
+        parts: capturedUIContext ? [...inputParts, capturedUIContext] : inputParts,
+      });
+    } catch {
+      submitPreparationRef.current = false;
     }
-    const inputParts = buildDraftSubmitParts(
-      text,
-      attachmentItemsToSubmit,
-      localFoldersToSubmit,
-      partOrder,
-      projectReferencesToSubmit,
-    );
-    submitMutation.mutate({
-      deliveryMode,
-      text,
-      parts: draftUIContext ? [...inputParts, draftUIContext] : inputParts,
-    });
   };
   const submitDraft = (value: z.infer<typeof composerSchema>) => submitDraftWithMode(value);
 

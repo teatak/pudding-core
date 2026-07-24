@@ -492,6 +492,7 @@ export const contentPart = z.discriminatedUnion("type", [
     url: z.string().optional(),
     kind: z.string().optional(),
     rootID: z.string().optional(),
+    selectionText: z.string().max(16 * 1024).optional(),
   }),
   z.object({
     type: z.literal("tool_use"),

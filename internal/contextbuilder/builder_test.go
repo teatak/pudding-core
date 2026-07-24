@@ -301,12 +301,14 @@ func TestBuildIncludesNeutralUIContext(t *testing.T) {
 		UserParts: []store.ContentPart{
 			{Type: store.ContentPartText, Text: "分析一下"},
 			{
-				Type:         store.ContentPartUIContext,
-				Surface:      "canvas",
-				Resource:     "canvas_item",
-				CallID:       "item_1",
-				Name:         "2026 World Cup",
-				ResourceKind: "grid",
+				Type:          store.ContentPartUIContext,
+				Surface:       "browser",
+				Resource:      "browser_tab",
+				CallID:        "tab_1",
+				Name:          "Example",
+				URL:           "https://example.com/",
+				SelectionText: "selected browser text",
+				ResourceKind:  "webview",
 			},
 		},
 	}); err != nil {
@@ -316,7 +318,7 @@ func TestBuildIncludesNeutralUIContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(req.Messages) != 1 || !strings.Contains(req.Messages[0].Text, `<ui-context>{"surface":"canvas","resource":"canvas_item","id":"item_1","name":"2026 World Cup","kind":"grid"}</ui-context>`) {
+	if len(req.Messages) != 1 || !strings.Contains(req.Messages[0].Text, `<ui-context>{"surface":"browser","resource":"browser_tab","id":"tab_1","name":"Example","url":"https://example.com/","selectionText":"selected browser text","kind":"webview"}</ui-context>`) {
 		t.Fatalf("ui context missing from provider input: %+v", req.Messages)
 	}
 	if strings.Contains(req.Messages[0].Text, "unrelated") || strings.Contains(req.Messages[0].Text, "目标") {

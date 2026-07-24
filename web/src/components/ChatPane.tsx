@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronDown, Trash, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Ellipsis, Trash, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import {
   deleteSession,
@@ -49,13 +49,28 @@ type ChatPaneProps = {
   sessionID: string | undefined;
   draftActive?: boolean;
   draftProjectID?: string;
+  compact?: boolean;
+  headerActions?: ReactNode;
+  headerDragHandle?: boolean;
+  reserveTopLeftInset?: boolean;
   reserveTopRightAction?: boolean;
   // primary = 主 pane(承担会话自动跳转、rail 触发器让位);
   // split = 分屏 pane(会话失效时自动收屏,header 带关闭钮)
   role: "primary" | "split";
 };
 
-export function ChatPane({ token, sessionID, draftActive = false, draftProjectID, reserveTopRightAction = false, role }: ChatPaneProps) {
+export function ChatPane({
+  token,
+  sessionID,
+  compact = false,
+  draftActive = false,
+  draftProjectID,
+  headerActions,
+  headerDragHandle = false,
+  reserveTopLeftInset = true,
+  reserveTopRightAction = false,
+  role,
+}: ChatPaneProps) {
   const navigate = useNavigate({ from: "/" });
   const queryClient = useQueryClient();
   const { t } = useI18n();
@@ -130,10 +145,15 @@ export function ChatPane({ token, sessionID, draftActive = false, draftProjectID
       ? ""
       : t("session.noSelected");
   const headerStyle = {
-    ...(isPrimary && railCollapsed
+    ...(isPrimary && railCollapsed && reserveTopLeftInset
       ? { paddingLeft: "calc(var(--traffic-inset) + var(--rail-toggle-left) + var(--toolbar-icon-button-size) + var(--rail-title-gap))" }
       : {}),
-    ...(reserveTopRightAction ? { paddingRight: "calc(13px + 2.75rem)" } : {}),
+    ...(reserveTopRightAction
+      ? {
+          paddingRight:
+            "calc(var(--toolbar-edge-inset) + var(--toolbar-icon-button-size) + 0.5rem)",
+        }
+      : {}),
   };
 
   useEffect(() => {
@@ -192,7 +212,10 @@ export function ChatPane({ token, sessionID, draftActive = false, draftProjectID
   return (
     <section className="relative flex h-full min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden">
       <header
-        className="flex h-(--toolbar-h) min-w-0 shrink-0 items-center justify-between gap-3 overflow-hidden px-6"
+        className={cn(
+          "pudding-chat-pane-header flex h-(--toolbar-h) min-w-0 shrink-0 items-center justify-between gap-3 overflow-hidden px-(--toolbar-edge-inset)",
+          headerDragHandle && "pudding-agent-console-drag-handle cursor-grab active:cursor-grabbing",
+        )}
         // 折叠态给悬浮触发器让位;壳模式下触发器随红绿灯右移,让位同步加宽
         style={Object.keys(headerStyle).length ? headerStyle : undefined}
       >
@@ -217,6 +240,7 @@ export function ChatPane({ token, sessionID, draftActive = false, draftProjectID
         </div>
         <div className="no-drag-region relative z-30 flex shrink-0 items-center gap-2">
           {selectedSession ? <SessionAppsControl session={selectedSession} token={token} /> : null}
+          {isPrimary ? headerActions : null}
           {!isPrimary ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -242,15 +266,21 @@ export function ChatPane({ token, sessionID, draftActive = false, draftProjectID
           ) : null}
         </div>
       </header>
-      {showDraft ? (
-        <DraftConversation token={token} projectID={draftProjectID} />
-      ) : selectedSession ? (
-        <Conversation token={token} session={selectedSession} />
-      ) : sessionsPending ? (
-        <LoadingState />
-      ) : (
-        <DraftConversation token={token} projectID={draftProjectID} />
-      )}
+      <div
+        aria-hidden={compact || undefined}
+        className="flex min-h-0 flex-1 flex-col"
+        inert={compact || undefined}
+      >
+        {showDraft ? (
+          <DraftConversation token={token} projectID={draftProjectID} />
+        ) : selectedSession ? (
+          <Conversation token={token} session={selectedSession} />
+        ) : sessionsPending ? (
+          <LoadingState />
+        ) : (
+          <DraftConversation token={token} projectID={draftProjectID} />
+        )}
+      </div>
     </section>
   );
 }
@@ -406,7 +436,7 @@ function HeaderSessionTitle({
                 tabIndex={-1}
                 variant="ghost"
               >
-                <ChevronDown className="size-4" />
+                <Ellipsis className="size-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent

@@ -90,7 +90,10 @@
     --sidebar-foreground: oklch(0.18 0 0);
     --sidebar-primary: oklch(0.205 0 0);
     --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.925 0 0);
+    --sidebar-hover-background: oklch(0.94 0 0);
+    --sidebar-active-background: var(--sidebar-hover-background);
+    --sidebar-active-border: oklch(0.76 0 0);
+    --sidebar-accent: var(--sidebar-hover-background);
     --sidebar-accent-foreground: oklch(0.2 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
@@ -98,11 +101,12 @@
        全屏时红绿灯隐藏、让位归零。 */
     --traffic-inset: 0px;
     --toolbar-h: 54px;
+    --toolbar-edge-inset: 0.75rem;
     --rail-toggle-left: 11px;
     --rail-title-gap: 6px;
-    --workspace-toggle-right: 13px;
-    --workspace-toolbar-pl: 0.75rem;
-    --workspace-toolbar-pr: 47px;
+    --workspace-toggle-right: var(--toolbar-edge-inset);
+    --workspace-toolbar-pl: var(--toolbar-edge-inset);
+    --workspace-toolbar-pr: var(--toolbar-edge-inset);
     --toolbar-icon-button-size: 2rem;
     --toolbar-icon-size: 1rem;
     --workspace-toolbar-tab-h: 2rem;
@@ -120,6 +124,10 @@
     --chrome-edit-background: color-mix(in oklch, var(--background), var(--card) 76%);
     --message-user-background: color-mix(in oklch, var(--background), var(--muted) 56%);
     --rail-drop-target-background: color-mix(in oklch, var(--sidebar), var(--sidebar-accent) 42%);
+    --control-hover-background: oklch(0.945 0 0);
+    --control-active-background: oklch(0.905 0 0);
+    --control-selected-background: oklch(0.89 0 0);
+    --control-selected-border: oklch(0.76 0 0);
     --workspace-background: var(--background);
     --workspace-chrome-background: var(--workspace-background);
     --workspace-panel-background: var(--workspace-background);
@@ -139,8 +147,12 @@
     --workspace-file-tab-active-background: var(--workspace-file-editor-background);
     --workspace-file-tab-inactive-background: oklch(0.93 0 0);
     --workspace-file-tab-hover-background: oklch(0.91 0 0);
-    --workspace-tree-hover-background: oklch(0.952 0 0);
-    --workspace-tree-active-background: oklch(0.925 0 0);
+    --workspace-tree-hover-background: oklch(0.945 0 0);
+    --workspace-tree-active-background: var(--workspace-tree-hover-background);
+    --agent-console-background: oklch(0.995 0 0);
+    --agent-console-chrome-background: oklch(0.978 0 0);
+    --agent-console-border: oklch(0.79 0 0);
+    --agent-console-shadow: 0 1px 2px oklch(0 0 0 / 8%), 0 18px 48px -14px oklch(0 0 0 / 24%);
     --chat-title-max-w: min(42rem, 100%);
     --success: oklch(0.62 0.12 175);
     --warning: oklch(0.72 0.14 75);
@@ -151,7 +163,10 @@
     --dropdown-destructive: var(--destructive);
     --dropdown-destructive-hover: var(--destructive-hover);
     --floating-surface: oklch(0.995 0 0);
-    --floating-hover: oklch(0.925 0 0);
+    --floating-hover: var(--sidebar-hover-background);
+    --floating-active: var(--floating-hover);
+    --floating-selected: var(--floating-hover);
+    --menu-item-gap: 0.25rem;
     --menu-outline: oklch(0 0 0 / 7%);
     --menu-shadow: 0 1px 3px oklch(0 0 0 / 8%), 0 10px 30px -8px oklch(0 0 0 / 18%);
     --confirm-destructive: var(--destructive);
@@ -181,9 +196,9 @@ html[data-shell="electron-mac"] {
     --traffic-inset: 72px;
     --toolbar-h: 50px;
     --rail-toggle-left: 11px;
-    --workspace-toggle-right: 13px;
-    --workspace-toolbar-pl: 0.75rem;
-    --workspace-toolbar-pr: 47px;
+    --workspace-toggle-right: var(--toolbar-edge-inset);
+    --workspace-toolbar-pl: var(--toolbar-edge-inset);
+    --workspace-toolbar-pr: var(--toolbar-edge-inset);
     --toolbar-icon-button-size: 1.75rem;
     --toolbar-icon-size: 0.95rem;
     --workspace-toolbar-tab-h: 1.75rem;
@@ -219,6 +234,16 @@ html[data-shell] .no-drag-region {
     cursor: default;
     user-select: none;
     -webkit-user-select: none;
+}
+
+html[data-shell] .pudding-agent-console-drag-handle {
+    -webkit-app-region: no-drag;
+    cursor: grab;
+}
+
+html[data-shell] .pudding-agent-console[data-dragging="true"] .pudding-agent-console-drag-handle,
+html[data-shell] .pudding-agent-console-drag-shield {
+    cursor: grabbing !important;
 }
 
 html[data-workspace-resizing],
@@ -488,12 +513,19 @@ html[data-shell] :where(
     --sidebar-foreground: oklch(0.95 0 0);
     --sidebar-primary: oklch(0.922 0 0);
     --sidebar-primary-foreground: oklch(0.205 0 0);
-    --sidebar-accent: oklch(0.335 0 0);
+    --sidebar-hover-background: oklch(0.305 0 0);
+    --sidebar-active-background: var(--sidebar-hover-background);
+    --sidebar-active-border: oklch(0.5 0 0);
+    --sidebar-accent: var(--sidebar-hover-background);
     --sidebar-accent-foreground: oklch(0.95 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.56 0 0);
     --rail-item-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 52%);
     --rail-section-foreground: color-mix(in oklch, var(--muted-foreground), var(--foreground) 6%);
+    --control-hover-background: oklch(0.3 0 0);
+    --control-active-background: oklch(0.35 0 0);
+    --control-selected-background: oklch(0.37 0 0);
+    --control-selected-border: oklch(0.5 0 0);
     --workspace-background: color-mix(in oklch, var(--sidebar), var(--background) 45%);
     --workspace-chrome-background: var(--workspace-background);
     --workspace-panel-background: color-mix(in oklch, var(--background), var(--card) 14%);
@@ -513,8 +545,12 @@ html[data-shell] :where(
     --workspace-file-tab-active-background: var(--workspace-file-editor-background);
     --workspace-file-tab-inactive-background: oklch(0.255 0 0);
     --workspace-file-tab-hover-background: oklch(0.285 0 0);
-    --workspace-tree-hover-background: oklch(1 0 0 / 5%);
-    --workspace-tree-active-background: oklch(1 0 0 / 8%);
+    --workspace-tree-hover-background: oklch(0.285 0 0);
+    --workspace-tree-active-background: var(--workspace-tree-hover-background);
+    --agent-console-background: oklch(0.225 0 0);
+    --agent-console-chrome-background: oklch(0.255 0 0);
+    --agent-console-border: oklch(0.46 0 0);
+    --agent-console-shadow: 0 1px 3px oklch(0 0 0 / 28%), 0 20px 52px -14px oklch(0 0 0 / 62%);
     --success: oklch(0.7 0.11 175);
     --warning: oklch(0.76 0.12 75);
     --overlay: oklch(0 0 0 / 22%);
@@ -524,7 +560,9 @@ html[data-shell] :where(
     --dropdown-destructive: var(--destructive);
     --dropdown-destructive-hover: var(--destructive-hover);
     --floating-surface: oklch(0.25 0 0);
-    --floating-hover: oklch(0.335 0 0);
+    --floating-hover: var(--sidebar-hover-background);
+    --floating-active: var(--floating-hover);
+    --floating-selected: var(--floating-hover);
     --menu-outline: oklch(1 0 0 / 10%);
     --menu-shadow: 0 1px 4px oklch(0 0 0 / 16%), 0 12px 30px -8px oklch(0 0 0 / 36%);
     --confirm-destructive: color-mix(in oklch, var(--destructive), black 22%);
@@ -565,6 +603,83 @@ html[data-shell] :where(
 
 [data-slot="button"][data-variant="secondary"]:hover:not(:disabled) {
     background-color: var(--secondary-hover);
+}
+
+[data-slot="button"][data-variant="ghost"]:hover:not(:disabled),
+[data-slot="button"][data-variant="outline"]:hover:not(:disabled) {
+    background-color: var(--control-hover-background);
+}
+
+[data-slot="button"][data-variant="ghost"][aria-pressed="true"]:not(:disabled),
+[data-slot="button"][data-variant="ghost"][aria-expanded="true"]:not(:disabled),
+[data-slot="button"][data-variant="outline"][aria-pressed="true"]:not(:disabled),
+[data-slot="button"][data-variant="outline"][aria-expanded="true"]:not(:disabled) {
+    background-color: var(--control-selected-background);
+    box-shadow: inset 0 0 0 1px var(--control-selected-border);
+}
+
+[data-slot="button"][data-variant="ghost"]:active:not(:disabled),
+[data-slot="button"][data-variant="outline"]:active:not(:disabled),
+[data-slot="button"][data-variant="secondary"]:active:not(:disabled) {
+    background-color: var(--control-active-background);
+}
+
+[data-slot="sidebar-menu-button"]:hover:not(:disabled) {
+    background-color: var(--sidebar-hover-background);
+}
+
+[data-slot="sidebar-menu-button"][data-active="true"] {
+    background-color: var(--sidebar-active-background);
+    box-shadow: none;
+}
+
+[data-slot="sidebar-menu-button"]:active:not(:disabled) {
+    background-color: var(--sidebar-active-background);
+}
+
+[data-slot="sidebar-group-label"]:hover {
+    background-color: var(--sidebar-hover-background);
+}
+
+[data-slot="sidebar-group-label"][data-active="true"] {
+    background-color: var(--sidebar-active-background);
+    box-shadow: none;
+    color: var(--sidebar-accent-foreground);
+}
+
+.pudding-agent-console {
+    background-color: var(--agent-console-background);
+}
+
+.pudding-agent-console[data-mode="floating"],
+.pudding-agent-console[data-mode="collapsed"] {
+    border-color: var(--agent-console-border);
+    box-shadow: var(--agent-console-shadow);
+}
+
+.pudding-agent-console[data-dragging="true"] {
+    backface-visibility: hidden;
+    box-shadow: 0 5px 18px -10px oklch(0 0 0 / 38%);
+    transition: none !important;
+    will-change: transform;
+}
+
+.pudding-agent-console-drag-shield {
+    position: fixed;
+    z-index: 9999;
+    inset: 0;
+    cursor: grabbing;
+    background: transparent;
+}
+
+.pudding-agent-console[data-mode="dock-left"],
+.pudding-agent-console[data-mode="dock-right"] {
+    border-color: var(--workspace-border);
+}
+
+.pudding-agent-console[data-mode="floating"] .pudding-chat-pane-header {
+    border-bottom: 1px solid var(--workspace-border);
+    background-color: var(--agent-console-chrome-background);
 }
 
 .pudding-composer-suggestion {
@@ -609,6 +724,50 @@ html[data-shell] :where(
     font-size: 13px;
     line-height: 20px;
     font-weight: 400;
+}
+
+[data-slot="dropdown-menu-item"]:active,
+[data-slot="dropdown-menu-checkbox-item"]:active,
+[data-slot="dropdown-menu-radio-item"]:active,
+[data-slot="dropdown-menu-sub-trigger"]:active,
+[data-slot="context-menu-item"]:active,
+[data-slot="context-menu-checkbox-item"]:active,
+[data-slot="context-menu-radio-item"]:active,
+[data-slot="context-menu-sub-trigger"]:active {
+    background-color: var(--floating-active);
+}
+
+[data-slot="dropdown-menu-checkbox-item"][data-state="checked"],
+[data-slot="dropdown-menu-radio-item"][data-state="checked"],
+[data-slot="context-menu-checkbox-item"][data-state="checked"],
+[data-slot="context-menu-radio-item"][data-state="checked"] {
+    background-color: var(--floating-selected);
+}
+
+:is(
+    [data-slot="dropdown-menu-item"],
+    [data-slot="dropdown-menu-checkbox-item"],
+    [data-slot="dropdown-menu-radio-item"],
+    [data-slot="dropdown-menu-sub-trigger"],
+    [data-slot="context-menu-item"],
+    [data-slot="context-menu-checkbox-item"],
+    [data-slot="context-menu-radio-item"],
+    [data-slot="context-menu-sub-trigger"],
+    [data-slot="select-item"],
+    [data-slot="command-item"]
+) + :is(
+    [data-slot="dropdown-menu-item"],
+    [data-slot="dropdown-menu-checkbox-item"],
+    [data-slot="dropdown-menu-radio-item"],
+    [data-slot="dropdown-menu-sub-trigger"],
+    [data-slot="context-menu-item"],
+    [data-slot="context-menu-checkbox-item"],
+    [data-slot="context-menu-radio-item"],
+    [data-slot="context-menu-sub-trigger"],
+    [data-slot="select-item"],
+    [data-slot="command-item"]
+) {
+    margin-top: var(--menu-item-gap);
 }
 
 [data-slot="dropdown-menu-item"] svg:not([class*="size-"]),
@@ -674,6 +833,19 @@ html[data-shell] :where(
     color: var(--rail-icon-button-foreground);
 }
 
+.pudding-agent-console:is([data-mode="dock-left"], [data-mode="dock-right"]) {
+    width: clamp(
+        min(380px, 50%),
+        var(--agent-console-dock-width),
+        min(640px, calc(100% - min(320px, 50%)))
+    ) !important;
+}
+
+.pudding-agent-console:is([data-mode="full"], [data-mode="dock-left"], [data-mode="dock-right"]) {
+    transform: none !important;
+    z-index: auto !important;
+}
+
 .pudding-session-rail [data-slot="sidebar-header"],
 .pudding-session-rail [data-slot="sidebar-content"] {
     color: var(--rail-item-foreground);
@@ -690,8 +862,10 @@ html[data-shell] :where(
 }
 
 .pudding-session-rail [data-slot="sidebar-menu-button"][data-active="true"] {
+    background-color: var(--sidebar-hover-background);
     color: var(--foreground);
     font-weight: 500;
+    box-shadow: none;
 }
 
 .pudding-session-rail [data-slot="sidebar-group-label"] {

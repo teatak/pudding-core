@@ -515,7 +515,7 @@ export function AppsPane({ token }: { token: string }) {
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.apps() }),
   });
   return (
-    <main className="flex h-full min-w-0 flex-col overflow-hidden bg-background">
+    <main className="flex h-full w-full min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <PageHeader
         icon={
           detailApp || detailCatalogApp ? (

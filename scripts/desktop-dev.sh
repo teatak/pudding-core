@@ -19,10 +19,22 @@ stop_old_daemon() {
 }
 
 ensure_vite() {
-  listening "$VITE_PORT" && return 0
+  local pid vite_cwd
+  pid=$(lsof -t -nP -iTCP:"$VITE_PORT" -sTCP:LISTEN 2>/dev/null | head -1)
+  if [ -n "$pid" ]; then
+    vite_cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)
+    if [ "$vite_cwd" = "$PWD/web" ]; then
+      return 0
+    fi
+    echo ">> stopping Vite from another checkout on :$VITE_PORT (pid $pid)"
+    kill "$pid" 2>/dev/null
+    wait_free "$VITE_PORT" || { kill -9 "$pid" 2>/dev/null; wait_free "$VITE_PORT"; }
+  fi
   echo ">> starting Vite on :$VITE_PORT"
   nohup npm --prefix web run dev -- --port "$VITE_PORT" --strictPort >/tmp/pudding-vite.log 2>&1 &
-  for _ in $(seq 1 60); do listening "$VITE_PORT" && break; sleep 0.25; done
+  for _ in $(seq 1 60); do listening "$VITE_PORT" && return 0; sleep 0.25; done
+  echo "Vite failed to start; see /tmp/pudding-vite.log" >&2
+  return 1
 }
 
 echo ">> building puddingd"
@@ -33,7 +45,7 @@ if [ "$(uname -s)" = "Darwin" ]; then
   codesign --force --sign - --identifier com.teatak.pudding.dev.daemon bin/puddingd || exit 1
 fi
 
-ensure_vite
+ensure_vite || exit 1
 stop_old_daemon
 
 echo ">> launching desktop shell (Vite :$VITE_PORT, daemon :$DEV_PORT)"

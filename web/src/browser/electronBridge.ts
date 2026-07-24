@@ -47,6 +47,10 @@ export type ElectronBrowserSnapshot = {
   };
 };
 
+export type ElectronBrowserSelection = {
+  selectionText: string;
+};
+
 export type ElectronBrowserCursorEvent = {
   sessionID: string;
   tabID: string;
@@ -74,6 +78,7 @@ export type ElectronBrowserBridge = {
   back: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
   forward: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
   reload: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
+  readSelection?: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSelection>;
   listTabs: (request: ElectronBrowserRequest) => Promise<{ tabs: ElectronBrowserSnapshot[]; processMode: "webview" }>;
   closeTab: (request: ElectronBrowserRequest) => Promise<ElectronBrowserSnapshot>;
   closeSession: (request: ElectronBrowserRequest) => Promise<void>;
@@ -97,6 +102,27 @@ export function hasElectronWebviewBrowser() {
 
 export function electronBrowserBridge() {
   return typeof window === "undefined" ? undefined : window.puddingElectronBrowser;
+}
+
+export async function readElectronBrowserSelection(sessionID: string, tabID: string) {
+  const bridge = electronBrowserBridge();
+  if (!bridge?.readSelection) {
+    return "";
+  }
+  let timeoutID = 0;
+  try {
+    const result = await Promise.race([
+      bridge.readSelection({ sessionID, tabID }),
+      new Promise<ElectronBrowserSelection>((resolve) => {
+        timeoutID = window.setTimeout(() => resolve({ selectionText: "" }), 500);
+      }),
+    ]);
+    return String(result.selectionText || "").trim().slice(0, 16 * 1024);
+  } catch {
+    return "";
+  } finally {
+    window.clearTimeout(timeoutID);
+  }
 }
 
 export function electronBrowserSnapshotToTab(snapshot: ElectronBrowserSnapshot): BrowserTab {

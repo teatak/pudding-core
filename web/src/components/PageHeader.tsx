@@ -21,7 +21,7 @@ export function PageHeader({
 
   return (
     <header
-      className={cn("pointer-events-none relative z-30 flex h-(--toolbar-h) shrink-0 items-center justify-between gap-3 px-6", className)}
+      className={cn("pointer-events-none relative z-30 flex h-(--toolbar-h) shrink-0 items-center justify-between gap-3 px-(--toolbar-edge-inset)", className)}
       style={headerStyle}
     >
       <div className="flex min-w-0 items-center gap-1">

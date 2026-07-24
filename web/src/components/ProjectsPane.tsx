@@ -93,7 +93,7 @@ export function ProjectsPane({ token }: { token: string }) {
   }
 
   return (
-    <main className="flex h-full min-w-0 flex-col overflow-hidden bg-background">
+    <main className="flex h-full w-full min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <PageHeader
         icon={<FolderCog className="size-4" />}
         title={t("project.manage")}

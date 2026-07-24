@@ -1069,6 +1069,11 @@ ipcMain.handle("pudding:browser:reload", (event, request) => {
   return browserHost.reload(request || {});
 });
 
+ipcMain.handle("pudding:browser:read-selection", (event, request) => {
+  assertTrustedSender(event);
+  return browserHost.readSelection(request || {});
+});
+
 ipcMain.handle("pudding:browser:list-tabs", (event, request) => {
   assertTrustedSender(event);
   return browserHost.listTabs(request || {});

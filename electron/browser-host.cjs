@@ -9,6 +9,7 @@ const navigationTimeoutMS = 15_000;
 const screenshotMaxDimension = 16_384;
 const screenshotMaxPixels = 32 * 1024 * 1024;
 const screenshotMaxBytes = 64 * 1024 * 1024;
+const selectionMaxCharacters = 16 * 1024;
 const maxTabsPerSession = 8;
 const maxTabsTotal = 16;
 const maxPopupWindowsTotal = 8;
@@ -125,6 +126,14 @@ class BrowserHost {
       textChars: Math.max(0, Math.round(Number(result.textChars) || 0)),
       truncated: Boolean(result.truncated),
       elements: Array.isArray(result.elements) ? result.elements : [],
+    };
+  }
+
+  async readSelection(request) {
+    const slot = this.requireLiveSlot(request);
+    const result = await this.runCommand(slot, () => evaluateJSON(slot, selectionScript()));
+    return {
+      selectionText: String(result.selectionText || "").trim().slice(0, selectionMaxCharacters),
     };
   }
 
@@ -1475,6 +1484,27 @@ function observeScript(maxText, maxElements) {
     truncated: fullText.length > text.length,
     elements
   });
+})()`;
+}
+
+function selectionScript() {
+  return `(() => {
+  const selection = typeof window.getSelection === "function" ? window.getSelection() : null;
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+    return JSON.stringify({selectionText: ""});
+  }
+  const selectionElement = (node) => {
+    if (!node) return null;
+    return node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+  };
+  const editableSelector = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]';
+  const anchorElement = selectionElement(selection.anchorNode);
+  const focusElement = selectionElement(selection.focusNode);
+  if (anchorElement?.closest?.(editableSelector) || focusElement?.closest?.(editableSelector)) {
+    return JSON.stringify({selectionText: ""});
+  }
+  const selectionText = String(selection.toString() || "").trim().slice(0, ${selectionMaxCharacters});
+  return JSON.stringify({selectionText});
 })()`;
 }
 

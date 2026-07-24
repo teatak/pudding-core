@@ -104,7 +104,7 @@ import { openSettingsDialog } from "@/lib/settingsDialog";
 import { formatRelative } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { isTurnPhaseActive, useOverlayStore } from "@/state/overlayStore";
-import { setRailCollapsed, useRailCollapsed, useRailForcedCollapsed } from "@/state/railStore";
+import { setRailCollapsed, useRailCollapsed } from "@/state/railStore";
 
 const popoverAlignNudgePx = 3;
 const dragAutoScrollEdgePx = 44;
@@ -179,7 +179,6 @@ export function SessionRail({
   const runningTurns = useOverlayStore((state) => state.runningTurns);
   const turnPhases = useOverlayStore((state) => state.turnPhases);
   const collapsed = useRailCollapsed();
-  const forcedCollapsed = useRailForcedCollapsed();
   const isMobile = useIsMobile();
   const hover = useHoverPopover();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -500,7 +499,7 @@ export function SessionRail({
   const popoverAlignOffset = collapsed ? -(readTrafficInsetPx() + popoverAlignNudgePx) : 0;
   const railButton = (
     <div
-      className="pudding-rail-toggle no-drag-region absolute top-0 left-(--rail-toggle-left) z-40 flex items-center"
+      className="pudding-rail-toggle no-drag-region absolute top-0 left-(--rail-toggle-left) z-[70] flex items-center"
       style={{
         height: "var(--toolbar-h)",
         marginLeft: "var(--traffic-inset)",
@@ -522,11 +521,6 @@ export function SessionRail({
                   }
                   if (!collapsed) {
                     collapse(true);
-                    return;
-                  }
-                  // 窄屏强制折叠时展开不可用,点击退化为开合 popover
-                  if (forcedCollapsed) {
-                    hover.toggle();
                     return;
                   }
                   collapse(false);
@@ -1481,9 +1475,10 @@ function CollapsibleSessionGroupLabel({
   const Icon = icon === "pinned" ? Pin : icon === "chat" ? MessageSquareText : collapsed ? FolderClosed : FolderOpen;
   return (
     <SidebarGroupLabel
+      data-active={active}
       className={cn(
         "group/project-label h-8 min-h-8 gap-1 px-0 text-sm hover:bg-sidebar-accent has-[:focus-visible]:bg-sidebar-accent has-[:focus-visible]:text-sidebar-accent-foreground has-[[data-project-actions-open=true]]:bg-sidebar-accent has-[[data-project-actions-open=true]]:text-sidebar-accent-foreground",
-        active && "bg-sidebar-accent text-sidebar-accent-foreground",
+        active && "text-sidebar-accent-foreground",
       )}
     >
       <button

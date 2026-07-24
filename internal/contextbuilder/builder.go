@@ -414,27 +414,29 @@ func (b *Builder) providerParts(sessionID string, parts []store.ContentPart, mod
 
 func uiContextProviderText(part store.ContentPart) string {
 	type payload struct {
-		Surface  string `json:"surface"`
-		Resource string `json:"resource,omitempty"`
-		ID       string `json:"id,omitempty"`
-		Name     string `json:"name,omitempty"`
-		Path     string `json:"path,omitempty"`
-		URL      string `json:"url,omitempty"`
-		Kind     string `json:"kind,omitempty"`
-		RootID   string `json:"rootID,omitempty"`
+		Surface       string `json:"surface"`
+		Resource      string `json:"resource,omitempty"`
+		ID            string `json:"id,omitempty"`
+		Name          string `json:"name,omitempty"`
+		Path          string `json:"path,omitempty"`
+		URL           string `json:"url,omitempty"`
+		SelectionText string `json:"selectionText,omitempty"`
+		Kind          string `json:"kind,omitempty"`
+		RootID        string `json:"rootID,omitempty"`
 	}
 	if strings.TrimSpace(part.Surface) == "" {
 		return ""
 	}
 	raw, err := json.Marshal(payload{
-		Surface:  part.Surface,
-		Resource: part.Resource,
-		ID:       part.CallID,
-		Name:     part.Name,
-		Path:     part.Path,
-		URL:      part.URL,
-		Kind:     part.ResourceKind,
-		RootID:   part.RootID,
+		Surface:       part.Surface,
+		Resource:      part.Resource,
+		ID:            part.CallID,
+		Name:          part.Name,
+		Path:          part.Path,
+		URL:           part.URL,
+		SelectionText: part.SelectionText,
+		Kind:          part.ResourceKind,
+		RootID:        part.RootID,
 	})
 	if err != nil {
 		return ""

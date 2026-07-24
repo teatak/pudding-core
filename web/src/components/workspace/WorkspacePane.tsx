@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Folders, Globe, Plus, SquareTerminal } from "lucide-react";
+import { Folders, Globe, PanelRightClose, Plus, SquareTerminal } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -54,6 +54,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { CanvasItem, ClosedCanvasItem, SavedCanvasItem } from "@/contracts/api";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
@@ -941,7 +942,28 @@ export function WorkspacePane({ token, sessionID, secondarySessionID }: Workspac
 
   return (
     <aside className="pudding-workspace-pane relative flex h-full shrink-0 flex-col bg-[var(--workspace-chrome-background)] text-sidebar-foreground">
-      <div className="relative z-30 flex h-(--toolbar-h) shrink-0 items-center gap-1.5 overflow-hidden pr-(--workspace-toolbar-pr) pl-(--workspace-toolbar-pl)">
+      <div className="pudding-workspace-toggle no-drag-region pointer-events-auto absolute top-0 right-(--workspace-toggle-right) z-[100] flex h-(--toolbar-h) items-center">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              aria-label={t("workspace.close")}
+              aria-pressed="true"
+              className="no-drag-region pointer-events-auto"
+              size="icon-sm"
+              tabIndex={-1}
+              type="button"
+              variant="ghost"
+              onClick={() => setWorkspaceOpen(false)}
+            >
+              <PanelRightClose />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent align="end" side="bottom">
+            {t("workspace.close")}
+          </TooltipContent>
+        </Tooltip>
+      </div>
+      <div className="relative z-30 flex h-(--toolbar-h) shrink-0 items-center gap-1.5 overflow-hidden pr-[calc(var(--workspace-toggle-right)+var(--toolbar-icon-button-size)+0.375rem)] pl-(--workspace-toolbar-pl)">
         <WorkspaceResourceTabs
             activeBrowserTabID={activeBrowserTabID}
             activeCanvasItemID={activeCanvasItem?.id}

@@ -187,6 +187,25 @@ test("managed browser cancels Web Bluetooth device selection", async () => {
   host.closeAll();
 });
 
+test("reads the current non-editable browser text selection", async () => {
+  const required = [];
+  const host = new BrowserHost(undefined, undefined, undefined, (request) => required.push(request));
+  const request = { sessionID: "session-selection", tabID: "tab-selection" };
+  const opening = host.ensure(request);
+  await new Promise((resolve) => setImmediate(resolve));
+  const webContents = new FakeWebContents(62);
+  await host.registerWebContents(required[0], webContents);
+  await opening;
+
+  webContents.debugger.evaluateValues = [JSON.stringify({ selectionText: "selected browser text" })];
+  assert.deepEqual(await host.readSelection(request), { selectionText: "selected browser text" });
+  const evaluation = webContents.debugger.commands.filter(({ method }) => method === "Runtime.evaluate").at(-1);
+  assert.match(evaluation.params.expression, /window\.getSelection/);
+  assert.match(evaluation.params.expression, /contenteditable/);
+
+  host.closeAll();
+});
+
 test("captures dynamically updated favicons and publishes the resolved local image", async () => {
   const required = [];
   const snapshots = [];

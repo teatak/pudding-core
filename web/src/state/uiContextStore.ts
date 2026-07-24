@@ -35,6 +35,7 @@ export function uiContextKey(context: UIContextPart) {
     context.url,
     context.kind,
     context.rootID,
+    context.selectionText,
   ].join("\u0000");
 }
 

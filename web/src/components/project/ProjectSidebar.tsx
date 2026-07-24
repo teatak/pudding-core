@@ -1,5 +1,5 @@
 import { ChevronDown, Folders, GitBranch } from "lucide-react";
-import { useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { usePanelRef } from "react-resizable-panels";
 
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -9,8 +9,6 @@ import { readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
 import { cn } from "@/lib/utils";
 
 const collapsedPanelPixels = 31;
-const minimumPanelPixels = 120;
-const maximumRememberedPercent = 85;
 
 export function ProjectSidebar({ files, filesAction, git }: {
   files: ReactNode;
@@ -20,8 +18,6 @@ export function ProjectSidebar({ files, filesAction, git }: {
   const { t } = useI18n();
   const filesRef = usePanelRef();
   const gitRef = usePanelRef();
-  const filesExpandedSize = useRef(62);
-  const gitExpandedSize = useRef(38);
   const [filesCollapsed, setFilesCollapsed] = useState(false);
   const [gitCollapsed, setGitCollapsed] = useState(false);
 
@@ -40,11 +36,8 @@ export function ProjectSidebar({ files, filesAction, git }: {
           collapsible
           minSize="120px"
           panelRef={filesRef}
-          onResize={({ asPercentage, inPixels }) => {
+          onResize={({ inPixels }) => {
             setFilesCollapsed(inPixels <= collapsedPanelPixels + 1);
-            if (inPixels > collapsedPanelPixels + 1 && asPercentage <= maximumRememberedPercent) {
-              filesExpandedSize.current = asPercentage;
-            }
           }}
         >
           <ProjectSidebarSection
@@ -53,7 +46,7 @@ export function ProjectSidebar({ files, filesAction, git }: {
             icon={<Folders />}
             label={t("project.browserFiles")}
             topBorder={false}
-            onToggle={() => togglePanel(filesRef.current, gitRef.current, filesCollapsed, filesExpandedSize.current)}
+            onToggle={() => togglePanel(filesRef.current, filesCollapsed)}
           >
             {files}
           </ProjectSidebarSection>
@@ -66,14 +59,11 @@ export function ProjectSidebar({ files, filesAction, git }: {
           collapsible
           minSize="120px"
           panelRef={gitRef}
-          onResize={({ asPercentage, inPixels }) => {
+          onResize={({ inPixels }) => {
             setGitCollapsed(inPixels <= collapsedPanelPixels + 1);
-            if (inPixels > collapsedPanelPixels + 1 && asPercentage <= maximumRememberedPercent) {
-              gitExpandedSize.current = asPercentage;
-            }
           }}
         >
-          <ProjectSidebarSection collapsed={gitCollapsed} icon={<GitBranch />} label={t("project.git")} onToggle={() => togglePanel(gitRef.current, filesRef.current, gitCollapsed, gitExpandedSize.current)}>
+          <ProjectSidebarSection collapsed={gitCollapsed} icon={<GitBranch />} label={t("project.git")} onToggle={() => togglePanel(gitRef.current, gitCollapsed)}>
             {git}
           </ProjectSidebarSection>
         </ResizablePanel>
@@ -110,18 +100,12 @@ function ProjectSidebarSection({ action, children, collapsed, icon, label, topBo
 
 function togglePanel(
   panel: ReturnType<typeof usePanelRef>["current"],
-  sibling: ReturnType<typeof usePanelRef>["current"],
   collapsed: boolean,
-  expandedSize: number,
 ) {
   if (!panel) return;
-  if (!collapsed) {
-    panel.collapse();
+  if (collapsed) {
+    panel.expand();
     return;
   }
-  const totalPixels = panel.getSize().inPixels + (sibling?.getSize().inPixels || 0);
-  const maximumPercent = totalPixels > minimumPanelPixels * 2
-    ? ((totalPixels - minimumPanelPixels) / totalPixels) * 100
-    : 50;
-  panel.resize(`${Math.min(expandedSize, maximumPercent)}%`);
+  panel.collapse();
 }

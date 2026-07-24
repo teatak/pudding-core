@@ -444,6 +444,7 @@ type ContentPart struct {
 	AudioTranscript     string          `json:"audioTranscript,omitempty"`
 	Surface             string          `json:"surface,omitempty"`
 	Resource            string          `json:"resource,omitempty"`
+	SelectionText       string          `json:"selectionText,omitempty"`
 	ResourceKind        string          `json:"kind,omitempty"`
 	RootID              string          `json:"rootID,omitempty"`
 	StartLine           int             `json:"startLine,omitempty"`
@@ -1012,7 +1013,7 @@ func NormalizeContentParts(parts []ContentPart) []ContentPart {
 			part.Type = ContentPartText
 		}
 		if part.Type != ContentPartUIContext {
-			part.Surface, part.Resource = "", ""
+			part.Surface, part.Resource, part.SelectionText = "", "", ""
 		}
 		if part.Type != ContentPartUIContext && part.Type != ContentPartProjectRef {
 			part.ResourceKind, part.RootID = "", ""
@@ -1135,6 +1136,9 @@ func NormalizeContentParts(parts []ContentPart) []ContentPart {
 			default:
 				continue
 			}
+			if part.Surface != "browser" {
+				part.SelectionText = ""
+			}
 			part.Resource = strings.TrimSpace(part.Resource)
 			switch part.Resource {
 			case "", "project_file", "project_diff", "canvas_item", "browser_tab", "terminal", "file":
@@ -1145,6 +1149,10 @@ func NormalizeContentParts(parts []ContentPart) []ContentPart {
 			part.Name = strings.TrimSpace(part.Name)
 			part.Path = strings.TrimSpace(part.Path)
 			part.URL = strings.TrimSpace(part.URL)
+			part.SelectionText = strings.TrimSpace(part.SelectionText)
+			if selection := []rune(part.SelectionText); len(selection) > 16*1024 {
+				part.SelectionText = string(selection[:16*1024])
+			}
 			part.ResourceKind = strings.TrimSpace(part.ResourceKind)
 			part.RootID = strings.TrimSpace(part.RootID)
 			part.Text, part.Args, part.Content = "", nil, ""

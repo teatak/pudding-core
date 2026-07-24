@@ -252,7 +252,8 @@ function partsEqual(previous: NonNullable<TranscriptTurnVM["user"]>["parts"], ne
         part.path === other.path &&
         part.url === other.url &&
         part.kind === other.kind &&
-        part.rootID === other.rootID
+        part.rootID === other.rootID &&
+        part.selectionText === other.selectionText
       );
     }
     return true;

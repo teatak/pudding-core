@@ -1,22 +1,30 @@
 import { useSearch } from "@tanstack/react-router";
-import { PanelRight } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { PanelRightOpen } from "lucide-react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
+import { Rnd } from "react-rnd";
 import { useGroupRef } from "react-resizable-panels";
 
-import { WorkspacePane } from "@/components/workspace/WorkspacePane";
-import { hasElectronWebviewBrowser } from "@/browser/electronBridge";
-import { ChatPane } from "@/components/ChatPane";
+import { claimMobilePairing } from "@/api/client";
+import { AgentConsoleLayoutControl } from "@/components/AgentConsoleLayoutControl";
 import { AppsPane } from "@/components/AppsPane";
-import { ProjectsPane } from "@/components/ProjectsPane";
+import { AppToaster } from "@/components/AppToaster";
+import { ChatPane } from "@/components/ChatPane";
 import { EditorTypographyProvider } from "@/components/EditorTypographyProvider";
+import { ProjectsPane } from "@/components/ProjectsPane";
 import { SessionRail } from "@/components/SessionRail";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { PairingGate, TokenGate } from "@/components/TokenGate";
-import { claimMobilePairing } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { AppToaster } from "@/components/AppToaster";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { WorkspacePane } from "@/components/workspace/WorkspacePane";
 import { WorkspaceResizableHandle } from "@/components/WorkspaceResizableHandle";
 import { useVisibleSessionEvents } from "@/hooks/useSessionEvents";
 import { useI18n } from "@/i18n";
@@ -24,17 +32,39 @@ import {
   layoutStorageKeys,
   resizeTargetMinimumSize,
   splitLayout,
-  workspaceLayout,
 } from "@/lib/layoutConstants";
-import { readOptionalPanelLayout, readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
+import { readPanelLayout, savePanelLayout } from "@/lib/panelLayout";
 import { saveLastAppRoute } from "@/lib/route";
 import { cn } from "@/lib/utils";
 import { useCanvasMCP } from "@/mcp/canvasTools";
-import { setWorkspaceOpen, useWorkspaceOpen } from "@/state/workspaceStore";
+import { useAgentConsoleMode, type AgentConsoleMode } from "@/state/agentConsoleStore";
 import { clearFilePreviews } from "@/state/filePreviewStore";
-import { setRailLayoutForcedCollapsed } from "@/state/railStore";
+import { useRailCollapsed } from "@/state/railStore";
 import { clearPendingPairingCode, pendingPairingCode } from "@/state/token";
 import { setToken, useToken } from "@/state/tokenStore";
+import { setWorkspaceOpen, useWorkspaceOpen } from "@/state/workspaceStore";
+
+type StageSize = {
+  width: number;
+  height: number;
+};
+
+type FloatingFrame = StageSize & {
+  x: number;
+  y: number;
+};
+
+type ConsoleDisplayMode = "full" | AgentConsoleMode;
+
+const floatingInset = 16;
+const floatingDefaultWidth = 560;
+const floatingDefaultHeight = 560;
+const consoleMinimumWidth = 380;
+const consoleMinimumHeight = 320;
+const workspaceMinimumWidth = 320;
+const dockMaximumWidth = 640;
+const dockRatioStorageKey = "pudding.agentConsoleDockRatio";
+const dockRatioFallback = 0.4;
 
 function readSavedSplitLayout() {
   return readPanelLayout(layoutStorageKeys.splitRatio, splitLayout.fallback, {
@@ -43,125 +73,56 @@ function readSavedSplitLayout() {
   });
 }
 
-function readSavedWorkspaceLayout() {
-  return readPanelLayout(layoutStorageKeys.workspaceRatio, workspaceLayout.fallback, {
-    minPercent: workspaceLayout.minPercent,
-    maxPercent: workspaceLayout.maxPercent,
-  });
-}
-
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-function clampWorkspacePanelRatio(workspaceWidth: number, panelRatio: number) {
-  if (workspaceWidth <= 0) {
-    return clamp(panelRatio, workspaceLayout.minPercent, workspaceLayout.maxPercent);
-  }
-  const maxPanel = Math.max(0, workspaceWidth - workspaceLayout.minChatPx);
-  const minPanel = Math.min(
-    maxPanel,
-    Math.max(workspaceLayout.minWorkspacePx, workspaceWidth - workspaceLayout.maxChatPx),
-  );
-  const panelWidth = clamp((workspaceWidth * panelRatio) / 100, minPanel, maxPanel);
-  return clamp((panelWidth / workspaceWidth) * 100, workspaceLayout.minPercent, workspaceLayout.maxPercent);
+function finiteOr(value: number, fallback: number) {
+  return Number.isFinite(value) ? value : fallback;
 }
 
-function readSavedWorkspacePanelRatio() {
-  const saved = readOptionalPanelLayout(layoutStorageKeys.workspaceRatio);
-  if (saved?.workspace === undefined && saved?.canvas !== undefined) {
-    const chat = saved.chat || Math.max(1, 100 - saved.canvas);
-    return (saved.canvas / (chat + saved.canvas)) * 100;
-  }
-  return readSavedWorkspaceLayout().workspace;
+function readDockRatio() {
+  const saved = Number.parseFloat(localStorage.getItem(dockRatioStorageKey) || "");
+  return Number.isFinite(saved) ? clamp(saved, 0.2, 0.8) : dockRatioFallback;
 }
 
-function saveWorkspacePanelRatio(panelRatio: number) {
-  savePanelLayout(layoutStorageKeys.workspaceRatio, {
-    chat: 100 - panelRatio,
-    workspace: panelRatio,
-  });
-}
-
-function ElectronWorkspaceHost({
-  active,
-  drawerMode,
-  secondarySessionID,
-  sessionID,
-  token,
-  workspaceResizing,
-  onResizeStart,
-}: {
-  active: boolean;
-  drawerMode: boolean;
-  secondarySessionID?: string;
-  sessionID?: string;
-  token: string;
-  workspaceResizing: boolean;
-  onResizeStart: (event: ReactPointerEvent<HTMLDivElement>) => void;
-}) {
-  const { t } = useI18n();
-  return (
-    <div
-      aria-hidden={!active}
-      inert={!active}
-      className={cn(
-        "workspace-split-pane absolute inset-y-0 right-0 min-w-0 overflow-visible transition-transform duration-200 ease-out",
-        "border-l border-border",
-        drawerMode && "z-50 shadow-[-8px_0_24px_-16px_rgb(0_0_0/0.28)]",
-        workspaceResizing && "transition-none",
-        !active && "pointer-events-none",
-      )}
-      style={{
-        transform: active ? "none" : "translateX(calc(100% + 32px))",
-        width: "var(--workspace-panel-width)",
-      }}
-    >
-      {!drawerMode ? (
-        <div
-          aria-label={t("layout.resizeHint")}
-          aria-orientation="vertical"
-          className="group absolute inset-y-0 left-0 z-40 w-3 -translate-x-1/2 cursor-col-resize bg-transparent"
-          role="separator"
-          tabIndex={active ? 0 : -1}
-          onPointerDown={onResizeStart}
-        >
-          <div
-            className={cn(
-              "absolute top-1/2 left-1/2 h-8 w-[3px] -translate-x-[calc(50%+1px)] -translate-y-1/2 rounded-lg bg-muted-foreground/55 opacity-0 transition-opacity group-hover:opacity-100",
-              workspaceResizing && "opacity-100",
-            )}
-          />
-        </div>
-      ) : null}
-      <WorkspacePane
-        secondarySessionID={secondarySessionID}
-        token={token}
-        sessionID={sessionID}
-      />
-    </div>
-  );
+function readToolbarHeightPx() {
+  return Number.parseFloat(
+    getComputedStyle(document.documentElement).getPropertyValue("--toolbar-h"),
+  ) || 54;
 }
 
 export function App() {
   const token = useToken();
-  const { session: selectedSessionID, draft, project: draftProjectID, split: splitSessionID, view } = useSearch({ from: "/" });
+  const {
+    session: selectedSessionID,
+    draft,
+    project: draftProjectID,
+    split: splitSessionID,
+    view,
+  } = useSearch({ from: "/" });
   const { t } = useI18n();
-  const electronWebviewBrowser = hasElectronWebviewBrowser();
   const workspaceOpen = useWorkspaceOpen();
+  const agentConsoleMode = useAgentConsoleMode();
+  const railCollapsed = useRailCollapsed();
   const [pairingCode] = useState(() => pendingPairingCode());
   const [pairingFailed, setPairingFailed] = useState(false);
-  const [leftWorkspaceNode, setLeftWorkspaceNode] = useState<HTMLDivElement | null>(null);
-  const [workspaceNode, setWorkspaceNode] = useState<HTMLDivElement | null>(null);
-  const [workspaceRatio, setWorkspaceRatio] = useState(() => readSavedWorkspacePanelRatio());
-  const [workspaceResizing, setWorkspaceResizing] = useState(false);
-  const [workspaceDrawerMode, setWorkspaceDrawerMode] = useState(false);
+  const [stageNode, setStageNode] = useState<HTMLDivElement | null>(null);
+  const [stageSize, setStageSize] = useState<StageSize>({ width: 0, height: 0 });
+  const [consoleInteracting, setConsoleInteracting] = useState(false);
+  const [dockRatio, setDockRatio] = useState(readDockRatio);
+  const [floatingFrame, setFloatingFrame] = useState<FloatingFrame>({
+    x: -1,
+    y: floatingInset,
+    width: floatingDefaultWidth,
+    height: floatingDefaultHeight,
+  });
   const splitGroupRef = useGroupRef();
-  const workspaceRatioRef = useRef(workspaceRatio);
+  const dockRatioRef = useRef(dockRatio);
+  const dockResizeCleanupRef = useRef<(() => void) | null>(null);
+  const floatingDragCleanupRef = useRef<(() => void) | null>(null);
   const previewTokenRef = useRef(token);
-  const workspaceResizeCleanupRef = useRef<(() => void) | null>(null);
-  // 上下分屏(docs/design.md 2.2):pane 三件套整体复用,路由是唯一事实源;
-  // split 与主 pane 相同的会话不重复渲染
+
   const appsActive = view === "apps";
   const projectsActive = view === "projects";
   const standaloneViewActive = appsActive || projectsActive;
@@ -169,9 +130,12 @@ export function App() {
   const draftActive = !standaloneViewActive && draft === "1" && !selectedSessionID;
   const canUseWorkspace = !standaloneViewActive && Boolean(selectedSessionID);
   const effectiveWorkspaceOpen = canUseWorkspace && workspaceOpen;
-  const activeSessionIDs = (standaloneViewActive ? [] : [selectedSessionID, showSplit ? splitSessionID : undefined]).filter(
-    (sessionID): sessionID is string => Boolean(sessionID),
-  );
+  const consoleDisplayMode: ConsoleDisplayMode = effectiveWorkspaceOpen ? agentConsoleMode : "full";
+  const activeSessionIDs = (
+    standaloneViewActive
+      ? []
+      : [selectedSessionID, showSplit ? splitSessionID : undefined]
+  ).filter((sessionID): sessionID is string => Boolean(sessionID));
 
   useEffect(() => {
     saveLastAppRoute({
@@ -183,10 +147,10 @@ export function App() {
     });
   }, [draft, draftProjectID, selectedSessionID, splitSessionID, view]);
 
-  // SSE 是 session-scoped,不是 pane-scoped。visible sessions 在 App 层统一去重订阅,
-  // ChatPane 只负责 pane-local UI/滚动状态。
+  // SSE 是 session-scoped,不是 pane-scoped。visible sessions 在 App 层统一去重订阅。
   useVisibleSessionEvents(activeSessionIDs, token);
   useCanvasMCP(token);
+
   useEffect(() => {
     if (previewTokenRef.current && previewTokenRef.current !== token) {
       clearFilePreviews();
@@ -195,52 +159,42 @@ export function App() {
   }, [token]);
 
   useLayoutEffect(() => {
-    if (!leftWorkspaceNode) {
-      setRailLayoutForcedCollapsed(false);
+    if (!stageNode || (consoleDisplayMode !== "floating" && consoleDisplayMode !== "collapsed")) {
       return;
     }
     const update = () => {
-      setRailLayoutForcedCollapsed(leftWorkspaceNode.getBoundingClientRect().width < workspaceLayout.railAutoCollapsePx);
+      const rect = stageNode.getBoundingClientRect();
+      setStageSize({
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      });
     };
     update();
     const observer = new ResizeObserver(update);
-    observer.observe(leftWorkspaceNode);
-    return () => {
-      observer.disconnect();
-    };
-  }, [leftWorkspaceNode]);
-
-  useLayoutEffect(() => {
-    if (!workspaceNode) {
-      setWorkspaceDrawerMode(false);
-      return;
-    }
-    const update = () => {
-      setWorkspaceDrawerMode(
-        workspaceNode.getBoundingClientRect().width < workspaceLayout.drawerBreakpointPx,
-      );
-    };
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(workspaceNode);
+    observer.observe(stageNode);
     return () => observer.disconnect();
-  }, [workspaceNode]);
+  }, [consoleDisplayMode, stageNode]);
 
   useEffect(() => {
-    workspaceRatioRef.current = workspaceRatio;
-  }, [workspaceRatio]);
+    dockRatioRef.current = dockRatio;
+  }, [dockRatio]);
+
+  useEffect(
+    () => () => {
+      dockResizeCleanupRef.current?.();
+      floatingDragCleanupRef.current?.();
+    },
+    [],
+  );
 
   useEffect(() => {
-    return () => {
-      workspaceResizeCleanupRef.current?.();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (token) {
-      return;
+    if (consoleDisplayMode !== "floating") {
+      floatingDragCleanupRef.current?.();
     }
-    if (!pairingCode) {
+  }, [consoleDisplayMode]);
+
+  useEffect(() => {
+    if (token || !pairingCode) {
       return;
     }
     let cancelled = false;
@@ -268,13 +222,12 @@ export function App() {
     if (!group) {
       return;
     }
-    const showSplit = Boolean(splitSessionID && splitSessionID !== selectedSessionID);
     if (!showSplit) {
       group.setLayout(splitLayout.closed);
       return;
     }
     group.setLayout(readSavedSplitLayout());
-  }, [selectedSessionID, splitGroupRef, splitSessionID]);
+  }, [showSplit, splitGroupRef]);
 
   if (!token) {
     if (pairingCode) {
@@ -283,69 +236,208 @@ export function App() {
     return <TokenGate />;
   }
 
-  const startWorkspaceResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!effectiveWorkspaceOpen || workspaceDrawerMode || event.button !== 0) {
+  const commitDockRatio = (next: number) => {
+    const normalized = clamp(next, 0.2, 0.8);
+    dockRatioRef.current = normalized;
+    setDockRatio(normalized);
+    localStorage.setItem(dockRatioStorageKey, String(normalized));
+  };
+
+  const startDockResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (
+      event.button !== 0 ||
+      !stageNode ||
+      (consoleDisplayMode !== "dock-left" && consoleDisplayMode !== "dock-right")
+    ) {
       return;
     }
     event.preventDefault();
-    const resizeNode = workspaceNode;
-    if (!resizeNode) {
-      return;
-    }
-    const workspaceRect = resizeNode.getBoundingClientRect();
-    if (!workspaceRect || workspaceRect.width <= 0) {
-      return;
-    }
-    workspaceResizeCleanupRef.current?.();
-    const workspaceWidth = Math.round(workspaceRect.width);
+    const pointerID = event.pointerId;
+    const stageRect = stageNode.getBoundingClientRect();
     const previousCursor = document.body.style.cursor;
     const previousUserSelect = document.body.style.userSelect;
-    const previousWorkspaceResizeAttr = document.documentElement.getAttribute("data-workspace-resizing");
-    setWorkspaceResizing(true);
+    const resizeFromRight = consoleDisplayMode === "dock-right";
+
+    dockResizeCleanupRef.current?.();
+    setConsoleInteracting(true);
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
-    document.documentElement.setAttribute("data-workspace-resizing", "true");
 
-    let cleaned = false;
+    const update = (clientX: number) => {
+      const rawWidth = resizeFromRight ? stageRect.right - clientX : clientX - stageRect.left;
+      const consoleMin = Math.min(consoleMinimumWidth, stageRect.width / 2);
+      const workspaceMin = Math.min(workspaceMinimumWidth, stageRect.width / 2);
+      const consoleMax = Math.max(
+        consoleMin,
+        Math.min(dockMaximumWidth, stageRect.width - workspaceMin),
+      );
+      const width = clamp(rawWidth, consoleMin, consoleMax);
+      const nextRatio = stageRect.width > 0 ? width / stageRect.width : dockRatioFallback;
+      dockRatioRef.current = nextRatio;
+      stageNode.style.setProperty("--agent-console-dock-width", `${width}px`);
+    };
     const cleanup = () => {
-      if (cleaned) {
-        return;
-      }
-      cleaned = true;
-      document.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("pointercancel", handlePointerUp);
-      window.removeEventListener("blur", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerCancel);
       document.body.style.cursor = previousCursor;
       document.body.style.userSelect = previousUserSelect;
-      if (previousWorkspaceResizeAttr === null) {
-        document.documentElement.removeAttribute("data-workspace-resizing");
-      } else {
-        document.documentElement.setAttribute("data-workspace-resizing", previousWorkspaceResizeAttr);
-      }
-      setWorkspaceResizing(false);
-      setWorkspaceRatio(workspaceRatioRef.current);
-      saveWorkspacePanelRatio(workspaceRatioRef.current);
-      if (workspaceResizeCleanupRef.current === cleanup) {
-        workspaceResizeCleanupRef.current = null;
-      }
+      setConsoleInteracting(false);
+      dockResizeCleanupRef.current = null;
     };
     const handlePointerMove = (moveEvent: PointerEvent) => {
-      const nextWorkspaceRatio = ((workspaceRect.right - moveEvent.clientX) / workspaceWidth) * 100;
-      const next = clampWorkspacePanelRatio(workspaceWidth, nextWorkspaceRatio);
-      workspaceRatioRef.current = next;
-      resizeNode.style.setProperty("--workspace-panel-ratio", `${next}%`);
+      if (moveEvent.pointerId === pointerID) {
+        moveEvent.preventDefault();
+        update(moveEvent.clientX);
+      }
     };
-    const handlePointerUp = () => {
+    const handlePointerUp = (upEvent: PointerEvent) => {
+      if (upEvent.pointerId !== pointerID) {
+        return;
+      }
+      update(upEvent.clientX);
+      const nextRatio = dockRatioRef.current;
       cleanup();
+      commitDockRatio(nextRatio);
+    };
+    const handlePointerCancel = (cancelEvent: PointerEvent) => {
+      if (cancelEvent.pointerId === pointerID) {
+        cleanup();
+      }
     };
 
-    document.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointermove", handlePointerMove, { passive: false });
     window.addEventListener("pointerup", handlePointerUp);
-    window.addEventListener("pointercancel", handlePointerUp);
-    window.addEventListener("blur", handlePointerUp);
-    workspaceResizeCleanupRef.current = cleanup;
+    window.addEventListener("pointercancel", handlePointerCancel);
+    dockResizeCleanupRef.current = cleanup;
   };
+
+  const clampFloatingPosition = (
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ) => {
+    const stageRect = stageNode?.getBoundingClientRect();
+    const stageWidth = stageRect?.width || floatingDefaultWidth + floatingInset * 2;
+    const stageHeight = stageRect?.height || floatingDefaultHeight + floatingInset * 2;
+    const minimumX = stageWidth - width >= floatingInset * 2 ? floatingInset : 0;
+    const minimumY = Math.min(
+      readToolbarHeightPx() + floatingInset,
+      Math.max(0, stageHeight - floatingInset - 1),
+    );
+    return {
+      x: clamp(
+        x,
+        minimumX,
+        Math.max(minimumX, stageWidth - width - minimumX),
+      ),
+      y: clamp(
+        y,
+        minimumY,
+        Math.max(minimumY, stageHeight - height - floatingInset),
+      ),
+    };
+  };
+
+  const startFloatingDrag = (consoleNode: HTMLElement) => {
+    floatingDragCleanupRef.current?.();
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    const dragShield = document.createElement("div");
+    dragShield.className = "pudding-agent-console-drag-shield no-drag-region";
+    dragShield.setAttribute("aria-hidden", "true");
+    document.body.appendChild(dragShield);
+    document.body.style.cursor = "grabbing";
+    document.body.style.userSelect = "none";
+    consoleNode.dataset.dragging = "true";
+    const cleanup = () => {
+      dragShield.remove();
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      delete consoleNode.dataset.dragging;
+      floatingDragCleanupRef.current = null;
+    };
+
+    floatingDragCleanupRef.current = cleanup;
+  };
+
+  const resolvedStageWidth = stageSize.width || floatingDefaultWidth + floatingInset * 2;
+  const resolvedStageHeight = stageSize.height || floatingDefaultHeight + floatingInset * 2;
+  const preferredFloatingTopInset = readToolbarHeightPx() + floatingInset;
+  const floatingTopInset = Math.min(
+    preferredFloatingTopInset,
+    Math.max(0, resolvedStageHeight - floatingInset - 1),
+  );
+  const maximumFloatingWidth = Math.max(1, resolvedStageWidth - floatingInset * 2);
+  const maximumFloatingHeight = Math.max(
+    1,
+    resolvedStageHeight - floatingTopInset - floatingInset,
+  );
+  const minimumFloatingWidth = Math.min(consoleMinimumWidth, maximumFloatingWidth);
+  const minimumFloatingHeight = Math.min(consoleMinimumHeight, maximumFloatingHeight);
+  const floatingWidth = clamp(
+    finiteOr(floatingFrame.width, floatingDefaultWidth),
+    minimumFloatingWidth,
+    maximumFloatingWidth,
+  );
+  const floatingHeight = clamp(
+    finiteOr(floatingFrame.height, floatingDefaultHeight),
+    minimumFloatingHeight,
+    maximumFloatingHeight,
+  );
+  const floatingXInset = resolvedStageWidth - floatingWidth >= floatingInset * 2 ? floatingInset : 0;
+  const requestedFloatingX = finiteOr(
+    floatingFrame.x,
+    resolvedStageWidth - floatingWidth - floatingXInset,
+  );
+  const floatingX = clamp(
+    requestedFloatingX < 0
+      ? resolvedStageWidth - floatingWidth - floatingXInset
+      : requestedFloatingX,
+    floatingXInset,
+    Math.max(floatingXInset, resolvedStageWidth - floatingWidth - floatingXInset),
+  );
+  const floatingY = clamp(
+    finiteOr(floatingFrame.y, floatingTopInset),
+    floatingTopInset,
+    Math.max(floatingTopInset, resolvedStageHeight - floatingHeight - floatingInset),
+  );
+  const collapsedWidth = Math.min(720, Math.max(1, resolvedStageWidth - floatingInset * 2));
+  const collapsedPosition = {
+    x: Math.max(0, Math.round((resolvedStageWidth - collapsedWidth) / 2)),
+    y: Math.max(0, resolvedStageHeight - 54 - floatingInset),
+  };
+  const docked =
+    consoleDisplayMode === "dock-left" || consoleDisplayMode === "dock-right";
+  const consolePosition =
+    consoleDisplayMode === "floating"
+      ? { x: floatingX, y: floatingY }
+      : consoleDisplayMode === "collapsed"
+        ? collapsedPosition
+        : { x: 0, y: 0 };
+  const consoleSize =
+    consoleDisplayMode === "floating"
+      ? { width: floatingWidth, height: floatingHeight }
+      : consoleDisplayMode === "collapsed"
+        ? { width: collapsedWidth, height: 54 }
+        : { width: "100%", height: "100%" };
+
+  const consoleAtTrafficLights = consoleDisplayMode === "floating" && floatingX < 120 && floatingY < 54;
+  const consoleNeedsLeftInset =
+    consoleDisplayMode === "full" || consoleDisplayMode === "dock-left" || consoleAtTrafficLights;
+  const workspaceStartsAtStageLeft = consoleDisplayMode !== "dock-left";
+  const workspaceToolbarPadding =
+    railCollapsed && workspaceStartsAtStageLeft
+      ? "calc(var(--traffic-inset) + var(--rail-toggle-left) + var(--toolbar-icon-button-size) + var(--rail-title-gap))"
+      : "0.75rem";
+  const workspaceSurfaceStyle = {
+    "--workspace-toolbar-pl": workspaceToolbarPadding,
+    order: consoleDisplayMode === "dock-left" ? 2 : 0,
+  } as CSSProperties;
+  const stageStyle = {
+    "--agent-console-dock-width": `${dockRatio * 100}%`,
+  } as CSSProperties;
 
   const chatArea = (
     <main className="flex h-full min-w-0 flex-col overflow-hidden bg-background">
@@ -362,18 +454,18 @@ export function App() {
           }
         }}
       >
-        <ResizablePanel
-          id="primary"
-          className="min-h-0"
-          minSize={splitLayout.minPanePx}
-        >
+        <ResizablePanel id="primary" className="min-h-0" minSize={splitLayout.minPanePx}>
           <ChatPane
-            reserveTopRightAction={canUseWorkspace && !effectiveWorkspaceOpen}
-            token={token}
-            sessionID={selectedSessionID}
+            compact={consoleDisplayMode === "collapsed"}
             draftActive={draftActive}
             draftProjectID={draftActive ? draftProjectID : undefined}
+            headerActions={effectiveWorkspaceOpen ? <AgentConsoleLayoutControl /> : undefined}
+            headerDragHandle={consoleDisplayMode === "floating"}
+            reserveTopLeftInset={consoleNeedsLeftInset}
+            reserveTopRightAction={canUseWorkspace && !effectiveWorkspaceOpen}
             role="primary"
+            sessionID={selectedSessionID}
+            token={token}
           />
         </ResizablePanel>
         <WorkspaceResizableHandle
@@ -394,172 +486,185 @@ export function App() {
     </main>
   );
 
-  const workspaceToggle = canUseWorkspace ? (
+  const workspaceToggleLabel = t("workspace.open");
+  const workspaceToggle = canUseWorkspace && !effectiveWorkspaceOpen ? (
     <div className="pudding-workspace-toggle no-drag-region pointer-events-auto absolute top-0 right-(--workspace-toggle-right) z-[100] flex h-(--toolbar-h) items-center">
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
-            aria-label={t("workspace.toggle")}
-            aria-pressed={effectiveWorkspaceOpen}
-            className="no-drag-region pointer-events-auto aria-pressed:bg-muted aria-pressed:text-foreground dark:aria-pressed:bg-muted/50"
+            aria-label={workspaceToggleLabel}
+            className="no-drag-region pointer-events-auto"
             size="icon-sm"
             tabIndex={-1}
             type="button"
             variant="ghost"
-            onClick={() => setWorkspaceOpen(!workspaceOpen)}
+            onClick={() => setWorkspaceOpen(true)}
           >
-            <PanelRight />
+            <PanelRightOpen />
           </Button>
         </TooltipTrigger>
         <TooltipContent align="end" side="bottom">
-          {t("workspace.toggle")}
+          {workspaceToggleLabel}
         </TooltipContent>
       </Tooltip>
     </div>
   ) : null;
 
-  const mainPane = appsActive ? <AppsPane token={token} /> : projectsActive ? <ProjectsPane token={token} /> : chatArea;
+  const standalonePane = appsActive
+    ? <AppsPane token={token} />
+    : projectsActive
+      ? <ProjectsPane token={token} />
+      : null;
 
-  const leftWorkspace = (
-    <div ref={setLeftWorkspaceNode} className="relative flex h-full min-w-0 bg-background">
-      <SessionRail
-        activeSessionIDs={activeSessionIDs}
-        draftActive={draftActive}
-        selectedSessionID={standaloneViewActive ? undefined : selectedSessionID}
-        token={token}
-      />
-      <div className="relative h-full min-w-0 flex-1 bg-background">{mainPane}</div>
-    </div>
-  );
-
-  const workspacePanelStyle = {
-    "--workspace-panel-ratio": `${workspaceRatio}%`,
-    "--workspace-toolbar-pl": workspaceDrawerMode
-      ? "max(0.75rem, calc(var(--traffic-inset) - (100vw - var(--workspace-panel-width)) + 0.75rem))"
-      : undefined,
-    "--workspace-panel-max-width": workspaceDrawerMode
-      ? `min(100%, ${workspaceLayout.drawerWidthPx}px)`
-      : `max(0px, calc(100% - ${workspaceLayout.minChatPx}px))`,
-    "--workspace-panel-min-width": workspaceDrawerMode
-      ? `min(100%, ${workspaceLayout.drawerWidthPx}px)`
-      : `min(var(--workspace-panel-max-width), max(${workspaceLayout.minWorkspacePx}px, calc(100% - ${workspaceLayout.maxChatPx}px)))`,
-    "--workspace-panel-width": workspaceDrawerMode
-      ? `min(100%, ${workspaceLayout.drawerWidthPx}px)`
-      : "clamp(var(--workspace-panel-min-width), var(--workspace-panel-ratio), var(--workspace-panel-max-width))",
-  } as CSSProperties;
-
-  const workspaceContent = electronWebviewBrowser ? (
-    <div ref={setWorkspaceNode} className="relative h-full min-w-0 overflow-hidden bg-background" style={workspacePanelStyle}>
-      <div
-        className={cn(
-          "workspace-split-pane absolute inset-y-0 left-0 h-full min-w-0 transition-[right] duration-200 ease-out",
-          workspaceResizing && "transition-none",
-        )}
-        style={{ right: effectiveWorkspaceOpen && !workspaceDrawerMode ? "var(--workspace-panel-width)" : 0 }}
-      >
-        {leftWorkspace}
-      </div>
-      {effectiveWorkspaceOpen && workspaceDrawerMode ? (
-        <button
-          aria-label={t("workspace.toggle")}
-          className="no-drag-region absolute inset-y-0 left-0 z-40 bg-overlay"
-          style={{ right: "var(--workspace-panel-width)" }}
-          type="button"
-          onClick={() => setWorkspaceOpen(false)}
-        />
-      ) : null}
-      <ElectronWorkspaceHost
-        active={effectiveWorkspaceOpen}
-        drawerMode={workspaceDrawerMode}
+  const workspaceSurface = (
+    <div
+      key="workspace"
+      className="pudding-workspace-stage h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
+      style={workspaceSurfaceStyle}
+    >
+      <WorkspacePane
         secondarySessionID={showSplit ? splitSessionID : undefined}
         sessionID={selectedSessionID}
         token={token}
-        workspaceResizing={workspaceResizing}
-        onResizeStart={startWorkspaceResize}
       />
-      {workspaceResizing ? (
-        <div
-          aria-hidden="true"
-          className="no-drag-region fixed inset-0 z-[1000] cursor-col-resize touch-none select-none bg-transparent"
-        />
-      ) : null}
     </div>
-  ) : !canUseWorkspace ? (
-      leftWorkspace
-    ) : (
-      <div ref={setWorkspaceNode} className="relative h-full min-w-0 overflow-hidden bg-background" style={workspacePanelStyle}>
+  );
+  const sessionStage = (
+    <>
+      <Rnd
+        key="agent-console-native-drag"
+        bounds={consoleDisplayMode === "floating" ? "parent" : undefined}
+        cancel=".no-drag-region,button,input,textarea,select,a,[role='button']"
+        className={cn(
+          "pudding-agent-console flex min-h-0 min-w-0 overflow-hidden",
+          consoleDisplayMode === "floating" && "rounded-xl border",
+          consoleDisplayMode === "collapsed" && "rounded-xl border",
+        )}
+        data-mode={consoleDisplayMode}
+        disableDragging={consoleDisplayMode !== "floating"}
+        dragHandleClassName="pudding-agent-console-drag-handle"
+        enableResizing={consoleDisplayMode === "floating"}
+        maxHeight={consoleDisplayMode === "floating" ? maximumFloatingHeight : undefined}
+        maxWidth={consoleDisplayMode === "floating" ? maximumFloatingWidth : undefined}
+        minHeight={consoleDisplayMode === "floating" ? minimumFloatingHeight : 0}
+        minWidth={consoleDisplayMode === "floating" ? minimumFloatingWidth : 0}
+        position={consolePosition}
+        size={consoleSize}
+        style={{
+          flexShrink: 0,
+          order: consoleDisplayMode === "dock-right" ? 2 : 0,
+          position:
+            consoleDisplayMode === "floating" || consoleDisplayMode === "collapsed"
+              ? "absolute"
+              : "relative",
+          zIndex:
+            consoleDisplayMode === "floating" || consoleDisplayMode === "collapsed" ? 40 : "auto",
+          transition:
+            consoleInteracting || docked
+              ? "none"
+              : "transform 180ms ease-out, width 180ms ease-out, height 180ms ease-out, border-radius 180ms ease-out",
+        }}
+        onDragStart={(_event, data) => {
+          setConsoleInteracting(true);
+          startFloatingDrag(data.node);
+        }}
+        onDragStop={(_event, data) => {
+          const nextPosition = clampFloatingPosition(
+            data.x,
+            data.y,
+            data.node.offsetWidth,
+            data.node.offsetHeight,
+          );
+          floatingDragCleanupRef.current?.();
+          setConsoleInteracting(false);
+          setFloatingFrame((current) => ({
+            ...current,
+            ...nextPosition,
+          }));
+        }}
+        onResizeStart={() => setConsoleInteracting(true)}
+        onResizeStop={(_event, _direction, ref, _delta, position) => {
+          const nextPosition = clampFloatingPosition(
+            position.x,
+            position.y,
+            ref.offsetWidth,
+            ref.offsetHeight,
+          );
+          setConsoleInteracting(false);
+          setFloatingFrame({
+            x: finiteOr(nextPosition.x, floatingX),
+            y: finiteOr(nextPosition.y, floatingY),
+            width: finiteOr(ref.offsetWidth, floatingWidth),
+            height: finiteOr(ref.offsetHeight, floatingHeight),
+          });
+        }}
+      >
+        {chatArea}
+      </Rnd>
+      {docked ? (
         <div
-          className={cn(
-            "workspace-split-pane absolute inset-y-0 left-0 min-w-0 transition-[right] duration-200 ease-out",
-            workspaceResizing && "transition-none",
-          )}
-          style={{ right: effectiveWorkspaceOpen && !workspaceDrawerMode ? "var(--workspace-panel-width)" : 0 }}
-        >
-          {leftWorkspace}
-        </div>
-        {effectiveWorkspaceOpen && workspaceDrawerMode ? (
-          <button
-            aria-label={t("workspace.toggle")}
-            className="no-drag-region absolute inset-y-0 left-0 z-40 bg-overlay"
-            style={{ right: "var(--workspace-panel-width)" }}
-            type="button"
-            onClick={() => setWorkspaceOpen(false)}
-          />
-        ) : null}
-        <div
-          aria-hidden={!effectiveWorkspaceOpen}
-          className={cn(
-            "workspace-split-pane absolute inset-y-0 right-0 min-w-0 overflow-visible transition-transform duration-200 ease-out",
-            "border-l border-border",
-            workspaceDrawerMode && "z-50 shadow-[-8px_0_24px_-16px_rgb(0_0_0/0.28)]",
-            workspaceResizing && "transition-none",
-            !effectiveWorkspaceOpen && "pointer-events-none",
-          )}
-          style={{
-            transform: effectiveWorkspaceOpen ? "none" : "translateX(calc(100% + 32px))",
-            width: "var(--workspace-panel-width)",
+          key="dock-resize-handle"
+          aria-label={t("layout.resizeHint")}
+          aria-orientation="vertical"
+          aria-valuemax={80}
+          aria-valuemin={20}
+          aria-valuenow={Math.round(dockRatio * 100)}
+          className="group no-drag-region relative z-50 order-1 flex h-full w-px shrink-0 cursor-col-resize touch-none items-center justify-center outline-none before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-border focus-visible:before:bg-muted-foreground/80"
+          role="separator"
+          tabIndex={0}
+          onKeyDown={(event) => {
+            const increaseKey =
+              consoleDisplayMode === "dock-left" ? "ArrowRight" : "ArrowLeft";
+            const decreaseKey =
+              consoleDisplayMode === "dock-left" ? "ArrowLeft" : "ArrowRight";
+            if (event.key !== increaseKey && event.key !== decreaseKey) {
+              return;
+            }
+            event.preventDefault();
+            commitDockRatio(dockRatio + (event.key === increaseKey ? 0.02 : -0.02));
           }}
+          onPointerDown={startDockResize}
         >
-          {!workspaceDrawerMode ? (
-            <div
-              aria-label={t("layout.resizeHint")}
-              aria-orientation="vertical"
-              className="group absolute inset-y-0 left-0 z-40 w-3 -translate-x-1/2 cursor-col-resize bg-transparent"
-              role="separator"
-              tabIndex={effectiveWorkspaceOpen ? 0 : -1}
-              onPointerDown={startWorkspaceResize}
-            >
-              <div
-                className={cn(
-                  "absolute top-1/2 left-1/2 h-8 w-[3px] -translate-x-[calc(50%+1px)] -translate-y-1/2 rounded-lg bg-muted-foreground/55 opacity-0 transition-opacity group-hover:opacity-100",
-                  workspaceResizing && "opacity-100",
-                )}
-              />
-            </div>
-          ) : null}
-          <WorkspacePane
-            secondarySessionID={showSplit ? splitSessionID : undefined}
-            token={token}
-            sessionID={selectedSessionID}
-          />
-        </div>
-        {workspaceResizing ? (
           <div
             aria-hidden="true"
-            className="no-drag-region fixed inset-0 z-[1000] cursor-col-resize touch-none select-none bg-transparent"
+            className="absolute inset-y-0 left-1/2 z-20 w-3 -translate-x-1/2 cursor-col-resize touch-none"
           />
-        ) : null}
-      </div>
-    );
+          <div
+            aria-hidden="true"
+            className={cn(
+              "pointer-events-none relative z-10 h-8 w-[3px] shrink-0 rounded-full bg-muted-foreground/70 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100",
+              consoleInteracting && "opacity-100",
+            )}
+          />
+        </div>
+      ) : null}
+      {effectiveWorkspaceOpen ? workspaceSurface : null}
+    </>
+  );
 
   return (
     <EditorTypographyProvider token={token}>
       <TooltipProvider delayDuration={250}>
         <div className="relative flex h-full overflow-hidden">
           <div aria-hidden="true" className="drag-region absolute inset-x-0 top-0 z-20 h-(--toolbar-h)" />
-          <div className="relative h-full min-w-0 flex-1 bg-background">
-            {workspaceContent}
-            {workspaceToggle}
+          <div className="relative flex h-full min-w-0 flex-1 bg-background">
+            <SessionRail
+              activeSessionIDs={activeSessionIDs}
+              draftActive={draftActive}
+              selectedSessionID={standaloneViewActive ? undefined : selectedSessionID}
+              token={token}
+            />
+            <div
+              ref={setStageNode}
+              className={cn(
+                "relative h-full min-w-0 flex-1 overflow-hidden bg-background",
+                (consoleDisplayMode === "full" || docked) && "flex",
+              )}
+              style={stageStyle}
+            >
+              {standalonePane || sessionStage}
+              {workspaceToggle}
+            </div>
           </div>
         </div>
         <SettingsDialog token={token} showTrigger={false} />

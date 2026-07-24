@@ -40,7 +40,7 @@ export function UIContextControl({
             className={cn(
               "size-4",
               enabled &&
-                "[&_path:first-child]:fill-primary [&_path:first-child]:stroke-primary dark:[&_path:first-child]:fill-indigo-400 dark:[&_path:first-child]:stroke-indigo-400",
+                "[&_path:first-child]:fill-indigo-600 [&_path:first-child]:stroke-indigo-600 dark:[&_path:first-child]:fill-indigo-400 dark:[&_path:first-child]:stroke-indigo-400",
             )}
           />
         </Button>
@@ -52,7 +52,11 @@ export function UIContextControl({
 
 export function uiContextLabel(context: UIContextPart, t: (key: string) => string) {
   const detail = context.name || fileName(context.path) || context.url;
-  return [surfaceLabel(context.surface, t), detail].filter(Boolean).join(" · ");
+  const selection = context.selectionText?.trim();
+  const selectionLabel = selection
+    ? t("uiContext.selection").replace("{count}", String(selection.length))
+    : "";
+  return [surfaceLabel(context.surface, t), detail, selectionLabel].filter(Boolean).join(" · ");
 }
 
 function surfaceLabel(surface: UIContextPart["surface"], t: (key: string) => string) {

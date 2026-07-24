@@ -147,6 +147,18 @@ func TestNormalizeContentPartsRejectsUnknownUIContextSurface(t *testing.T) {
 	}
 }
 
+func TestNormalizeContentPartsCapsUIContextSelection(t *testing.T) {
+	parts := NormalizeContentParts([]ContentPart{{
+		Type:          ContentPartUIContext,
+		Surface:       "browser",
+		Resource:      "browser_tab",
+		SelectionText: "  " + strings.Repeat("选", 16*1024+1) + "  ",
+	}})
+	if len(parts) != 1 || len([]rune(parts[0].SelectionText)) != 16*1024 {
+		t.Fatalf("browser selection should be trimmed and capped: %+v", parts)
+	}
+}
+
 func TestNormalizeAgentModeRejectsLegacyWorkspace(t *testing.T) {
 	if mode := NormalizeAgentMode(AgentMode("workspace")); mode != "" {
 		t.Fatalf("legacy workspace mode must be rejected, got %q", mode)

@@ -73,6 +73,7 @@ contextBridge.exposeInMainWorld("puddingElectronBrowser", {
   back: (request) => ipcRenderer.invoke("pudding:browser:back", request),
   forward: (request) => ipcRenderer.invoke("pudding:browser:forward", request),
   reload: (request) => ipcRenderer.invoke("pudding:browser:reload", request),
+  readSelection: (request) => ipcRenderer.invoke("pudding:browser:read-selection", request),
   listTabs: (request) => ipcRenderer.invoke("pudding:browser:list-tabs", request),
   closeTab: (request) => ipcRenderer.invoke("pudding:browser:close-tab", request),
   closeSession: (request) => ipcRenderer.invoke("pudding:browser:close-session", request),

@@ -8,12 +8,14 @@ import { defineConfig, loadEnv, type Plugin } from "vite";
 import packageMetadata from "../package.json";
 
 const nodeRequire = createRequire(import.meta.url);
+const dependencyRoot = fs.realpathSync(path.resolve(__dirname, "node_modules"));
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const daemon = env.PUDDING_DAEMON_URL || "http://127.0.0.1:9679";
 
   return {
+    cacheDir: path.resolve(__dirname, ".vite-cache"),
     define: {
       __PUDDING_APP_VERSION__: JSON.stringify(packageMetadata.version),
       "process.env.DRAGGABLE_DEBUG": "false",
@@ -29,6 +31,9 @@ export default defineConfig(({ mode }) => {
       include: ["recharts"],
     },
     server: {
+      fs: {
+        allow: [__dirname, dependencyRoot],
+      },
       proxy: {
         "/sessions": daemon,
         "/projects": daemon,
